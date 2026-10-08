@@ -289,8 +289,6 @@
           (s2 (lambda ((f (subr pure (string string) bool)))
                 (v-bool (f (as-str (arg xs 0)) (as-str (arg xs 1)))))))
       (case n (("remainder") (int2 xs (lambda (a b) (remainder a b))))
-              ;; What a quote builds (TODO §51), as it is.
-              (("%quote") (arg xs 0))
               (("zero?") (v-bool (zero? (as-int (arg xs 0)))))
               (("max") (int2 xs (lambda (a b) (max a b))))
               (("min") (int2 xs (lambda (a b) (min a b))))
@@ -522,10 +520,47 @@
       (v-blob (x bytes) (tagcase b (v-blob (y ybytes) (eq? x y)) (else o #f)))
       (else o #f))))
 
+;; Quoted data interned (TODO §51), as the heap interns them
+;; (`Heap::intern_datum`): a pair found by its interned parts, a string by
+;; its characters; so a quote is one value each time, and equal quotes one.
+(define ev-interned (ref vals @v) (new nil))
+;; Whether `a`, interned, is what `b`, its parts interned, is.
+(define ev-same-datum? (subr (read @v) (val val) bool)
+  (lambda (a b)
+    (tagcase a
+      (v-pair (p)
+        (tagcase b
+          (v-pair (q) (and (ev-eq? (bloblet-ref p 0) (bloblet-ref q 0))
+                           (ev-eq? (bloblet-ref p 1) (bloblet-ref q 1))))
+          (else o #f)))
+      (v-str (x) (tagcase b (v-str (y) (string=? x y)) (else o #f)))
+      (else o #f))))
+;; The interned value of `is` that `c` is, or none.
+(define ev-interned-as (subr (maxeff (read @v) (alloc @v) spin) (vals val) vals)
+  (lambda (is c)
+    (cond ((null? is) nil)
+          ((ev-same-datum? (car is) c) (cons (car is) nil))
+          (else (ev-interned-as (cdr is) c)))))
+;; `c` interned: the value equal to it, or it, interned from now on.
+(define ev-intern-as (subr (maxeff stores spin) (val) val)
+  (lambda (c)
+    (let ((found (ev-interned-as (get ev-interned) c)))
+      (if (null? found) (begin (set ev-interned (cons c (get ev-interned))) c) (car found)))))
+(define* ev-intern (subr (maxeff stores spin) (val) val)
+  (lambda (v)
+    (tagcase v
+      (v-pair (p)
+        (let ((a (ev-intern (bloblet-ref p 0))) (d (ev-intern (bloblet-ref p 1))))
+          (ev-intern-as
+           (if (and (ev-eq? a (bloblet-ref p 0)) (ev-eq? d (bloblet-ref p 1))) v (v-cons a d)))))
+      (v-str (x) (ev-intern-as v))
+      (else o v))))
+
 (define-rec
   (apply-prim (subr (maxeff (read @globals) evals spin) (string vals) val)
     (lambda (n xs)
       (case n
+        (("%quote") (ev-intern (arg xs 0)))
         (("+") (int2 xs (lambda (a b) (+ a b))))
         (("-") (int2 xs (lambda (a b) (- a b))))
         (("*") (int2 xs (lambda (a b) (* a b))))
@@ -888,80 +923,11 @@
       (lambda (r) r))))
 
 (define length-pairs (subr (maxeff (read @globals) (read @v) spin) (vfields) int)
-  (lambda (xs) (if (null? xs) 0 (+ 1 (length-pairs (cdr xs))))))
-
-;;; --------------------------------------------------------------- showing
-;;; As Scheme's writer shows what the lowered program computes.
-
-;; How Scheme writes a bloblet of `n` fields and `m` bytes.
-(define show-bloblet (subr (read @globals) (int int) string)
-  (lambda (n m) (k-cat5 "#<bloblet " (int->string n) " fields " (int->string m) " bytes>")))
-
-;; A value as Scheme would write it. A list may be cyclic (built with
-;; `set-cdr!`), and values have no identity to compare here, so the walk
-;; has fuel: past it, `…`. The car of a pair gets half what is left, so a
-;; cycle through cars and cdrs alike stays bounded too.
-(define-rec
-  (show-val (subr (maxeff (read @globals) (read @v) spin) (val) string)
-    (lambda (v) (show-val-in v 10000)))
-  (show-val-in (subr (maxeff (read @globals) (read @v) spin) (val int) string)
-    (lambda (v fuel)
-      (tagcase v
-        (v-int (n) (int->string n))
-        (v-bool (b) (if b "#t" "#f"))
-        (v-str (s) (string-append "\"" (string-append s "\"")))
-        (v-char (c) (string-append "#\\" (char->string c)))
-        (v-f64 (x) (f64->string x))
-        (v-f32 (x) (f32->string x))
-        (v-sym (s) (symbol->string s))
-        (v-unit () "#u")
-        (v-nil () "()")
-        (v-pair (p) (if (<= fuel 0) "…" (k-cat3 "(" (show-items p fuel) ")")))
-        (v-ref (r) "#<box>")
-        (v-icell (c) "#<bloblet 3 fields 0 bytes>")
-        (v-array (a) (show-bloblet (+ 1 (array-length a)) 0))
-        (v-blob (fs bs) (show-bloblet (+ 1 (array-length fs)) (array-length bs)))
-        (v-product (fs) (k-cat3 "#<product of " (int->string (length-pairs fs)) ">"))
-        (v-sum (t x) (k-cat3 "#<sum " (symbol->string t) ">"))
-        (v-clo (ps body e) "#<procedure>")
-        (v-vsubr (g) "#<procedure>")
-        (v-prim (n) "#<procedure>")
-        (v-tag (t) "#<prompt-tag>")
-        (v-cont (k) "#<continuation>")
-        (v-esc (k) "#<continuation>")
-        (v-key (k) "#<mark-key>"))))
-  ;; A list's elements, space-separated, and a dotted tail.
-  (show-items (subr (maxeff (read @globals) (read @v) spin) (vpair int) string)
-    (lambda (p fuel)
-      (let ((head (show-val-in (bloblet-ref p 0) (quotient fuel 2))) (tail (bloblet-ref p 1)))
-        (tagcase tail
-          (v-nil () head)
-          (v-pair (q)
-            (if (<= fuel 1)
-                (string-append head " …")
-                (k-cat3 head " " (show-items q (- fuel 1)))))
-          (else x (k-cat3 head " . " (show-val-in tail (- fuel 1)))))))))
-
-;; A whole program begins with no globals, and no names kept.
-(define ev-begin! (subr stores (k-reshape-list k-with-list) unit)
-  (lambda (rs ws) (begin (set genv nil) (set ev-keep nil) (set ev-reshapes rs) (set ev-withs ws))))
-;; The entry point for a program the checker written in FX-26 checked: what
-;; it runs (`checked-tops`, under redefinition), run; its value shown, or
-;; its error. A whole program, as each is.
-(define run-checked (subr (maxeff evals (read @t) spin) ((listof k-run acyclic)) string)
-  (lambda (runs)
-    (tagcase (begin (ev-begin! (get k-reshapes) (get k-with-vals)) (eval-runs runs))
-      (ev-ok (v) (show-val v))
-      (ev-err (m) (string-append "!! " m)))))
-
-;; The entry point: a program's trees, run; its value shown, or its error.
-(define run-program (subr (maxeff evals spin) ((listof top acyclic)) string)
-  (lambda (tops)
-    (tagcase (begin (ev-begin! nil nil) (eval-program tops))
-      (ev-ok (v) (show-val v))
-      (ev-err (m) (string-append "!! " m)))))))
+  (lambda (xs) (if (null? xs) 0 (+ 1 (length-pairs (cdr xs))))))))
 
 (define-effect runs (select evaluator-module runs))
+(define-effect stores (select evaluator-module stores))
+(define-effect evals (select evaluator-module evals))
 (define-type val (select evaluator-module val))
 (define-type env (select evaluator-module env))
 (define-type vals (select evaluator-module vals))
@@ -975,4 +941,10 @@
 (define bind (with evaluator-module bind))
 (define apply1 (with evaluator-module apply1))
 (define eval (with evaluator-module eval))
-(define run-checked (with evaluator-module run-checked))
+(define-type vpair (select evaluator-module vpair))
+(define length-pairs (with evaluator-module length-pairs))
+(define ev-keep (with evaluator-module ev-keep))
+(define ev-reshapes (with evaluator-module ev-reshapes))
+(define ev-withs (with evaluator-module ev-withs))
+(define eval-runs (with evaluator-module eval-runs))
+(define eval-program (with evaluator-module eval-program))

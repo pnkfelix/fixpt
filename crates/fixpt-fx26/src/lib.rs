@@ -39,6 +39,9 @@ pub const EVALUATOR_NAMES: &str = include_str!("evaluator-names.fx");
 /// The evaluator written in FX-26, which runs the parser's trees.
 pub const EVALUATOR: &str = include_str!("evaluator.fx");
 
+/// Its values shown, and its entry points. After [`EVALUATOR`].
+pub const EVALUATOR_RUN: &str = include_str!("evaluator-run.fx");
+
 /// The compiler from FX-26 to cellular words, written in FX-26.
 pub const COMPILER: &str = include_str!("compile.fx");
 
@@ -139,7 +142,7 @@ pub fn front_end() -> String {
 
 /// The front end's files, by name, in the order [`front_end`] joins them;
 /// [`bootstrap_program`] puts `bootstrap.fx` after them.
-pub const FRONT_END_FILES: [(&str, &str); 57] = [
+pub const FRONT_END_FILES: [(&str, &str); 58] = [
     ("eager-reader.fx", EAGER_READER),
     ("parser.fx", PARSER),
     ("parser-exps.fx", PARSER_EXPS),
@@ -180,6 +183,7 @@ pub const FRONT_END_FILES: [(&str, &str); 57] = [
     CHECKER_FILES[32],
     ("evaluator-names.fx", EVALUATOR_NAMES),
     ("evaluator.fx", EVALUATOR),
+    ("evaluator-run.fx", EVALUATOR_RUN),
     ("layout.fx", LAYOUT),
     ("standard.fx", STANDARD_OPS),
     ("compile.fx", COMPILER),

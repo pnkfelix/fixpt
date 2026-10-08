@@ -1506,10 +1506,10 @@ infer the precise category of the lattice (`docs/research/shapes.md`):
   (`docs/fx26.md`, "Datums"). Quoted data are interned, a strong
   hash-consing table in the heap (the user's): made once at compile time
   where all literals, one object for equal quotes and inlined copies, a
-  quasiquote's constant parts too, `eq?` alike on every machine but the
-  FX-26 evaluator, which has values of its own. Register code folds `car`
-  and `cdr` of a quote made at compile time, as of a constant list. Left:
-  the evaluator's quotes; a splice before a dotted tail; a quoted
+  quasiquote's constant parts too, `eq?` alike on every machine and the
+  FX-26 evaluator (a table of its own, `ev-intern`). Register code folds
+  `car` and `cdr` of a quote made at compile time, as of a constant list.
+  Left: a splice before a dotted tail; a quoted
   bytevector; a weak table, should programs intern data that die (only
   quotes are interned now); and the lattice's categories, above.
 
