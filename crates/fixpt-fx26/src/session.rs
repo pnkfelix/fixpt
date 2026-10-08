@@ -392,7 +392,7 @@ pub enum Strategy {
     /// Lowered to annotated Scheme and run on the session's engine.
     #[default]
     Lower,
-    /// Run by the evaluator written in FX-26 (`evaluator.fx`).
+    /// Run by the evaluator written in FX-26 (`eval-core.fx`).
     Evaluate,
     /// Compiled to a cellular word by the compiler written in FX-26
     /// (`compile.fx`) and run on the cellular machine.

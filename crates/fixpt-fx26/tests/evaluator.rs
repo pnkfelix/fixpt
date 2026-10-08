@@ -1,6 +1,6 @@
-//! The evaluator written in FX-26 (`src/evaluator.fx`), reading and parsing
-//! with the reader and the parser written in FX-26, against the same
-//! programs lowered to Scheme (`PLAN.md` §11, step 9b).
+//! The evaluator written in FX-26 (`src/eval-values.fx`, `eval-prims.fx`,
+//! `eval-core.fx`), reading and parsing with the reader and the parser
+//! written in FX-26, against the same programs lowered to Scheme (`PLAN.md` §11, step 9b).
 
 mod common;
 

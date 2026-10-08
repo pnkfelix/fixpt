@@ -34,34 +34,14 @@ pub const PARSER_TOP: &str = include_str!("parser-top.fx");
 /// as the driver read them. After [`PARSER`], before [`PARSER_TOP`].
 pub const PARSER_EXPS: &str = include_str!("parser-exps.fx");
 
-/// The evaluator's primitives, by name. Before [`EVALUATOR`].
-pub const EVALUATOR_NAMES: &str = include_str!("evaluator-names.fx");
-
-/// The evaluator written in FX-26, which runs the parser's trees.
-pub const EVALUATOR: &str = include_str!("evaluator.fx");
-
-/// Its values shown, and its entry points. After [`EVALUATOR`].
-pub const EVALUATOR_RUN: &str = include_str!("evaluator-run.fx");
-
-/// The evaluator rewritten (2026-10-08), still in FX-26, as a metacircular
-/// evaluator: its values, a union of the program's own where FX-26 has
-/// their shape;
+/// The evaluator written in FX-26, which runs the parser's trees: a
+/// metacircular evaluator (rewritten 2026-10-08). Its values, a union of the
+/// program's own where FX-26 has their shape;
 /// its primitives, in a table by symbol; and the evaluator proper, with its
 /// entry points.
 pub const EVAL_VALUES: &str = include_str!("eval-values.fx");
 pub const EVAL_PRIMS: &str = include_str!("eval-prims.fx");
 pub const EVAL_CORE: &str = include_str!("eval-core.fx");
-
-/// Which evaluator the front end has: the rewritten one, or (false) the
-/// one it replaces, kept until the new one has been accepted.
-pub const NEW_EVALUATOR: bool = true;
-
-/// The evaluator's files, in order: as [`NEW_EVALUATOR`] says.
-pub const EVALUATOR_FILES: [(&str, &str); 3] = if NEW_EVALUATOR {
-    [("eval-values.fx", EVAL_VALUES), ("eval-prims.fx", EVAL_PRIMS), ("eval-core.fx", EVAL_CORE)]
-} else {
-    [("evaluator-names.fx", EVALUATOR_NAMES), ("evaluator.fx", EVALUATOR), ("evaluator-run.fx", EVALUATOR_RUN)]
-};
 
 /// The compiler from FX-26 to cellular words, written in FX-26.
 pub const COMPILER: &str = include_str!("compile.fx");
@@ -222,9 +202,9 @@ pub const FRONT_END_FILES: [(&str, &str); 55] = [
     CHECKER_FILES[30],
     CHECKER_FILES[31],
     CHECKER_FILES[32],
-    EVALUATOR_FILES[0],
-    EVALUATOR_FILES[1],
-    EVALUATOR_FILES[2],
+    ("eval-values.fx", EVAL_VALUES),
+    ("eval-prims.fx", EVAL_PRIMS),
+    ("eval-core.fx", EVAL_CORE),
     ("layout.fx", LAYOUT),
     ("standard.fx", STANDARD_OPS),
     ("compile.fx", COMPILER),

@@ -27,6 +27,20 @@ are in the last section, "Log: the glance's details", and in
   loading the one before at its own, made by the front end's `reader.fx`;
   licensed by their type (`parametric_licence`), not by `private-regions`,
   which is gone (`DONE.md` §64: its types kept their names).
+- **The evaluator written in FX-26, rewritten** (the user's, 2026-10-08):
+  still in FX-26, as a metacircular evaluator (`eval-values.fx`,
+  `eval-prims.fx`, `eval-core.fx`): its values the program's own where
+  FX-26 has their shape (a union, `other` a datatype for the rest), closures the host's
+  procedures, primitives in a table by symbol. Accepted by the user and
+  the old files retired (2026-10-08). Every test program gives what the old one gave, and
+  the benchmarks it timed out on now finish, properly tail-recursive
+  (fib 3×, lists 18× faster). A feedback loop on the base library: it
+  found four shapes without a predicate (added), instantiation from the
+  expected type before the arguments (`TODO.md` §66), and a front-end
+  error placed in the user's file (§67). Decided with it: `subr` types
+  name their parameters (§65), so latent propositions and GADT guards
+  share one syntax (`docs/research/gadts.md`, "GADTs and latent
+  propositions").
 - **FX-26's type system** (2026-09-27; `docs/fx26.md`): places and regions,
   `letfreeze`; `acyclic` data (named `finite` until 2026-09-28,
   `docs/research/acyclic-regions.md`); `spin` with size-change
@@ -93,21 +107,6 @@ are in the last section, "Log: the glance's details", and in
   concurrency as region scoping). Each has open questions for the user.
 
 **In progress**
-- **The evaluator written in FX-26, rewritten** (the user's, 2026-10-08):
-  still in FX-26, as a metacircular evaluator (`eval-values.fx`,
-  `eval-prims.fx`, `eval-core.fx`): its values the program's own where FX-26 has their
-  shape (a union, `other` a datatype for the rest), closures the host's
-  procedures, primitives in a table by symbol. Flipped in by
-  `lib.rs`'s `NEW_EVALUATOR`; the old files stay, to undo, until the
-  user accepts it. Every test program gives what the old one gave, and
-  the benchmarks it timed out on now finish, properly tail-recursive
-  (fib 3×, lists 18× faster). A feedback loop on the base library: it
-  found four shapes without a predicate (added), instantiation from the
-  expected type before the arguments (`TODO.md` §66), and a front-end
-  error placed in the user's file (§67). Decided with it: `subr` types
-  name their parameters (§65), so latent propositions and GADT guards
-  share one syntax (`docs/research/gadts.md`, "GADTs and latent
-  propositions").
 - **The collector** (the user's, 2026-09-29;
   `docs/research/generational-gc.md`): done, all four. Stack maps (each
   native frame's header word, a mask of its live slots); a card-marking
