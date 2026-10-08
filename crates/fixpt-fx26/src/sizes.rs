@@ -261,43 +261,56 @@ impl Checker {
             return none;
         }
         let Exp::App { fun, args } = self.arena.exp_at(test) else { return none };
-        let Some(op) = self.standard_ref(*fun) else { return none };
-        let ge = |lin: Size| vec![SizeFact { lin, eq: false }];
-        match (self.interner.name(op), &args[..]) {
-            ("not", [x]) => {
-                let (t, e) = self.test_facts(*x);
-                (e, t)
-            }
-            ("null?", [a]) => {
-                let Exp::Var(v) = self.arena.exp_at(*a) else { return none };
-                let Some(t) = self.lookup(*v) else { return none };
-                match self.arena.get(self.arena.resolve(t)) {
-                    Ty::NList { size: n @ Size::Lin { .. }, .. } => (vec![SizeFact { lin: n.clone(), eq: true }], ge(n.plus(-1))),
-                    _ => none,
-                }
-            }
-            (op @ ("<" | "<=" | ">" | ">=" | "="), [a, b]) => {
-                let (Some(x @ Size::Lin { .. }), Some(y @ Size::Lin { .. })) = (self.nat_size(*a), self.nat_size(*b)) else { return none };
-                // `a < b` is `b - a - 1 ≥ 0`; `a ≤ b`, `b - a ≥ 0`.
-                let lt = |x: &Size, y: &Size| ge(y.add_scaled(x, -1).plus(-1));
-                let le = |x: &Size, y: &Size| ge(y.add_scaled(x, -1));
-                match op {
-                    "<" => (lt(&x, &y), le(&y, &x)),
-                    "<=" => (le(&x, &y), lt(&y, &x)),
-                    ">" => (lt(&y, &x), le(&x, &y)),
-                    ">=" => (le(&y, &x), lt(&x, &y)),
-                    _ => {
-                        let no = match (x.as_lit(), y.as_lit()) {
-                            (_, Some(0)) => ge(x.plus(-1)),
-                            (Some(0), _) => ge(y.plus(-1)),
-                            _ => vec![],
-                        };
-                        (vec![SizeFact { lin: x.add_scaled(&y, -1), eq: true }], no)
+        if let (Some(op), [x]) = (self.standard_ref(*fun), &args[..])
+            && self.interner.name(op) == "not"
+        {
+            let (t, e) = self.test_facts(*x);
+            return (e, t);
+        }
+        // What the callee's type says it proves of sizes (`Prop::Rel`), as
+        // the facts each relation is.
+        let Some((then, els, args)) = self.latent_props(test) else { return none };
+        (self.rel_facts(&then, &args), self.rel_facts(&els, &args))
+    }
+
+    /// The size facts relations `props` are, of `args`: `a < b` is `b - a -
+    /// 1 ≥ 0`; `a ≤ b`, `b - a ≥ 0`; `a = b`, `a - b = 0`; `a ≠ b`, of a
+    /// natural and 0, the other's `- 1 ≥ 0`, and of others nothing. A
+    /// relation of a size not known (not a natural's, not a `nlist`'s)
+    /// says nothing.
+    fn rel_facts(&self, props: &[crate::ast::Prop], args: &[ExpId]) -> Vec<SizeFact> {
+        use crate::ast::{Prop, Rel, Term};
+        let term = |t: &Term| -> Option<Size> {
+            let s = match t {
+                Term::Param(i) => self.nat_size(*args.get(*i)?)?,
+                Term::Lit(k) => Size::lit(*k),
+                Term::Length(i) => {
+                    let Exp::Var(v) = self.arena.exp_at(*args.get(*i)?) else { return None };
+                    match self.arena.get(self.arena.resolve(self.lookup(*v)?)) {
+                        Ty::NList { size, .. } => size.clone(),
+                        _ => return None,
                     }
                 }
+            };
+            matches!(s, Size::Lin { .. }).then_some(s)
+        };
+        let ge = |lin: Size| SizeFact { lin, eq: false };
+        let mut out = Vec::new();
+        for p in props {
+            let Prop::Rel { op, a, b } = p else { continue };
+            let (Some(x), Some(y)) = (term(a), term(b)) else { continue };
+            match op {
+                Rel::Lt => out.push(ge(y.add_scaled(&x, -1).plus(-1))),
+                Rel::Le => out.push(ge(y.add_scaled(&x, -1))),
+                Rel::Eq => out.push(SizeFact { lin: x.add_scaled(&y, -1), eq: true }),
+                Rel::Ne => match (x.as_lit(), y.as_lit()) {
+                    (_, Some(0)) => out.push(ge(x.plus(-1))),
+                    (Some(0), _) => out.push(ge(y.plus(-1))),
+                    _ => {}
+                },
             }
-            _ => none,
         }
+        out
     }
 
     /// `(+ a b)` and `(- a b)` of naturals: a natural of the sum, and of the

@@ -243,13 +243,41 @@ impl Effect {
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 pub struct TyId(pub u32);
 
-/// A proposition about a procedure's argument: parameter `param`'s value
-/// is of shape `shape` (`check::SHAPES`'s number), or, `negated`, is not.
+/// A proposition about a procedure's arguments (`Ty::Proving`), each named
+/// by its parameter's number from 0.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Prop {
-    pub param: usize,
-    pub shape: usize,
-    pub negated: bool,
+pub enum Prop {
+    /// `(shape i S)`: argument `i` is of shape `S` (`check::SHAPES`'s
+    /// number), or, `negated`, `(not (shape i S))`, is not.
+    Shape { param: usize, shape: usize, negated: bool },
+    /// `(acyclic i)`: argument `i`, a variable, is acyclic, which
+    /// `certify-acyclic` of it may then say.
+    Acyclic(usize),
+    /// `(nat i)`: argument `i`, a variable, is a natural (`certify-nat`).
+    Nat(usize),
+    /// `(length i j)`: argument `i`, a variable, is a list of argument `j`'s
+    /// length (`certify-length`).
+    Length(usize, usize),
+    /// `(< a b)`, `(<= a b)`, `(= a b)`, `(not (= a b))`: of sizes, the
+    /// facts the checkers solve with (`crate::sizes`).
+    Rel { op: Rel, a: Term, b: Term },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Rel {
+    Lt,
+    Le,
+    Eq,
+    Ne,
+}
+
+/// A size in a proposition: `i`, argument `i` as a natural; `(length i)`,
+/// the length of argument `i`, a `nlist`; `(lit k)`, the natural `k`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Term {
+    Param(usize),
+    Length(usize),
+    Lit(i64),
 }
 
 #[derive(Clone, Debug)]

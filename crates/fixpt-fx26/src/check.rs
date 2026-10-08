@@ -781,7 +781,7 @@ impl Checker {
 
     /// If `test` is a call of a procedure whose type's result is `(bool
     /// …)`, what it proves where true and where false, and its arguments.
-    fn latent_props(&self, test: ExpId) -> Option<(Vec<crate::ast::Prop>, Vec<crate::ast::Prop>, Vec<ExpId>)> {
+    pub(crate) fn latent_props(&self, test: ExpId) -> Option<(Vec<crate::ast::Prop>, Vec<crate::ast::Prop>, Vec<ExpId>)> {
         let Exp::App { fun, args } = self.arena.exp_at(test) else { return None };
         let mut f = *fun;
         while let Exp::Proj { body, .. } | Exp::The { exp: body, .. } = self.arena.exp_at(f) {
@@ -804,7 +804,8 @@ impl Checker {
     fn props_narrow(&mut self, props: &[crate::ast::Prop], args: &[ExpId]) -> Vec<(Sym, usize, TyId)> {
         let mut out: Vec<(Sym, usize, TyId)> = Vec::new();
         for p in props {
-            let Some(&a) = args.get(p.param) else { continue };
+            let crate::ast::Prop::Shape { param, shape, negated } = *p else { continue };
+            let Some(&a) = args.get(param) else { continue };
             let Exp::Var(v) = *self.arena.exp_at(a) else { continue };
             let Some(i) = self.env.iter().rposition(|(n, _)| *n == v) else { continue };
             let k = out.iter().position(|(w, j, _)| *w == v && *j == i);
@@ -812,8 +813,8 @@ impl Checker {
                 Some(k) => out[k].2,
                 None => self.arena.resolve(self.lookup(v).unwrap_or(self.env[i].1)),
             };
-            let (yes, no) = self.narrowed_by(t, 1u32 << p.shape);
-            let Some(t) = (if p.negated { no } else { yes }) else { continue };
+            let (yes, no) = self.narrowed_by(t, 1u32 << shape);
+            let Some(t) = (if negated { no } else { yes }) else { continue };
             match k {
                 Some(k) => out[k].2 = t,
                 None => out.push((v, i, t)),
@@ -1966,43 +1967,46 @@ impl Checker {
         }
     }
 
-    /// If `test` is `(acyclic? v)`, the variable, as the binding it is.
+    /// What `test` certifies where it holds, as its callee's type says
+    /// (`(acyclic i)`, `(nat i)`, `(length i j)`; `acyclic?`, `nat?`,
+    /// `length-is?`): the first such proposition of the kind `pick` takes.
+    fn certified_by<T>(&self, test: ExpId, pick: impl Fn(&Self, &crate::ast::Prop, &[ExpId]) -> Option<T>) -> Option<T> {
+        let (then, _, args) = self.latent_props(test)?;
+        then.iter().find_map(|p| pick(self, p, &args))
+    }
+
+    /// Argument `i` of `args`, a variable, as the binding it is.
+    fn arg_var(&self, args: &[ExpId], i: usize) -> Option<(Sym, usize)> {
+        match self.arena.exp_at(*args.get(i)?) {
+            Exp::Var(v) => Some((*v, self.env.iter().rposition(|(n, _)| n == v)?)),
+            _ => None,
+        }
+    }
+
+    /// If `test` certifies a variable acyclic (`acyclic?`), it, as the
+    /// binding it is.
     pub(crate) fn acyclic_test(&self, test: ExpId) -> Option<(Sym, usize)> {
-        self.certifying_test(test, "acyclic?")
+        self.certified_by(test, |c, p, args| match p {
+            crate::ast::Prop::Acyclic(i) => c.arg_var(args, *i),
+            _ => None,
+        })
     }
 
-    /// If `test` is `(nat? v)`, the variable, as the binding it is.
+    /// If `test` certifies a variable a natural (`nat?`), it.
     pub(crate) fn nat_test(&self, test: ExpId) -> Option<(Sym, usize)> {
-        self.certifying_test(test, "nat?")
-    }
-
-    /// If `test` is `(op v)`, `op` standard, the variable, as the binding
-    /// it is.
-    fn certifying_test(&self, test: ExpId, name: &str) -> Option<(Sym, usize)> {
-        let Exp::App { fun, args } = self.arena.exp_at(test) else { return None };
-        let mut f = *fun;
-        while let Exp::Proj { body, .. } | Exp::The { exp: body, .. } = self.arena.exp_at(f) {
-            f = *body;
-        }
-        let op = self.standard_ref(f)?;
-        match &args[..] {
-            [a] if self.interner.name(op) == name => match self.arena.exp_at(*a) {
-                Exp::Var(v) => Some((*v, self.env.iter().rposition(|(n, _)| n == v)?)),
-                _ => None,
-            },
+        self.certified_by(test, |c, p, args| match p {
+            crate::ast::Prop::Nat(i) => c.arg_var(args, *i),
             _ => None,
-        }
+        })
     }
 
-    /// If `test` is `(length-is? v k)`, the variable, as the binding it is,
-    /// and the length, as a size.
+    /// If `test` certifies a variable's length (`length-is?`), the
+    /// variable, as the binding it is, and the length, as a size.
     pub(crate) fn length_test(&self, test: ExpId) -> Option<(Sym, usize, Size)> {
-        let Exp::App { fun, args } = self.arena.exp_at(test) else { return None };
-        let op = self.standard_ref(*fun)?;
-        match &args[..] {
-            [a, n] if self.interner.name(op) == "length-is?" => self.length_arg(*a, *n),
+        self.certified_by(test, |c, p, args| match p {
+            crate::ast::Prop::Length(i, j) => c.length_arg(*args.get(*i)?, *args.get(*j)?),
             _ => None,
-        }
+        })
     }
 
     /// `v` and `k` of `(length-is? v k)` or `(certify-length v k)`: the

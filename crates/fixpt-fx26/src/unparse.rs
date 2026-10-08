@@ -6,8 +6,31 @@ use crate::check::Checker;
 impl Checker {
     /// A proposition as written: `(shape 0 int)`, `(not (shape 0 int))`.
     pub(crate) fn show_prop(&self, p: &crate::ast::Prop) -> String {
-        let shape = format!("(shape {} {})", p.param, crate::check::SHAPES[p.shape].0);
-        if p.negated { format!("(not {shape})") } else { shape }
+        use crate::ast::{Prop, Rel, Term};
+        let term = |t: &Term| match t {
+            Term::Param(i) => i.to_string(),
+            Term::Length(i) => format!("(length {i})"),
+            Term::Lit(k) => format!("(lit {k})"),
+        };
+        match p {
+            Prop::Shape { param, shape, negated } => {
+                let shape = format!("(shape {param} {})", crate::check::SHAPES[*shape].0);
+                if *negated { format!("(not {shape})") } else { shape }
+            }
+            Prop::Acyclic(i) => format!("(acyclic {i})"),
+            Prop::Nat(i) => format!("(nat {i})"),
+            Prop::Length(i, j) => format!("(length {i} {j})"),
+            Prop::Rel { op, a, b } => {
+                let (name, not) = match op {
+                    Rel::Lt => ("<", false),
+                    Rel::Le => ("<=", false),
+                    Rel::Eq => ("=", false),
+                    Rel::Ne => ("=", true),
+                };
+                let r = format!("({name} {} {})", term(a), term(b));
+                if not { format!("(not {r})") } else { r }
+            }
+        }
     }
 
     pub fn show_region(&self, r: Region) -> String {

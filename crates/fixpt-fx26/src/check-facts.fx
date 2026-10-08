@@ -31,10 +31,10 @@
                     (else none))))
           (x-app (f args a b)
             (let ((op (k-std-op f)))
-              (cond ((string=? op "") none)
-                    ((and (string=? op "not") (k-sc-one-arg? args))
-                     (let ((fs (k-test-facts (car args)))) (k-branch-facts-of (cdr fs) (car fs))))
-                    (else (k-std-test-facts op args)))))
+              (if (and (string=? op "not") (k-sc-one-arg? args))
+                  (let ((fs (k-test-facts (car args)))) (k-branch-facts-of (cdr fs) (car fs)))
+                  ;; What the callee's type says it proves of sizes.
+                  (k-latent-facts p))))
           (else y none)))))
   ;; `fs`, in order, onto `acc`, newest first: as the Rust checker's
   ;; `size_facts.extend`.

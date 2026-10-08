@@ -1654,7 +1654,11 @@ Begun (2026-10-07), the shapes: a procedure's result may be `(bool (then P
 each proposition `(shape i S)` or `(not (shape i S))`; the shape
 predicates' standard types say what they prove, and both checkers narrow
 from the callee's type, not a table of names; a call's own type is
-`bool`. Left: the size facts (`<`, `=`, `null?` of a `nlist`) and the
-certifications (`length-is?`, `acyclic?`, `nat?`) as propositions too;
-checking a `lambda` against such a type (until then refused, its body a
-`bool`); paths, below.
+`bool`. Then (2026-10-08) the size facts and certifications too: `(<
+a b)`, `(<= a b)`, `(= a b)`, `(not (= a b))` of terms (an argument as a
+natural, `(length i)`, `(lit k)`), and `(acyclic i)`, `(nat i)`, `(length
+i j)`; `<`, `=`, `null?`, `acyclic?`, `nat?`, `length-is?` say theirs in
+their types, and both checkers read every test's facts from its callee's
+type, none from its name (`sizes/latent-alias.fx`: aliases at their types
+do as they do). Left: checking a `lambda` against such a type (until then
+refused, its body a `bool`); paths, below.

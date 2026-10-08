@@ -1688,8 +1688,11 @@ impl Checker {
         items[1..].iter().map(|p| self.parse_prop(p, n)).collect()
     }
 
+    /// A proposition (`crate::ast::Prop`), of a procedure of `n`
+    /// parameters.
     fn parse_prop(&mut self, p: &Syntax, n: usize) -> R<crate::ast::Prop> {
-        let usage = "a proposition, `(shape parameter shape)` or `(not (shape parameter shape))`";
+        use crate::ast::{Prop, Rel};
+        let usage = "a proposition: `(shape i shape)`, `(acyclic i)`, `(nat i)`, `(length i j)`, `(< a b)`, `(<= a b)`, `(= a b)`, or `(not …)` of a shape or an `=`";
         let parts = self.items(p, usage)?.to_vec();
         let head = |c: &Self, x: &Syntax| x.as_symbol().map(|h| c.name(h).to_string());
         let (negated, form) = match &parts[..] {
@@ -1697,20 +1700,62 @@ impl Checker {
             _ => (false, p.clone()),
         };
         let parts = self.items(&form, usage)?.to_vec();
-        let [h, i, k] = &parts[..] else {
-            return Err(FxError::at(form.span, usage));
-        };
-        if head(self, h).as_deref() != Some("shape") {
-            return Err(FxError::at(form.span, usage));
+        let name = parts.first().and_then(|h| head(self, h)).unwrap_or_default();
+        match (name.as_str(), &parts[1..], negated) {
+            ("shape", [i, k], _) => {
+                let param = self.prop_param(i, n)?;
+                let Some(shape) = head(self, k).and_then(|k| crate::check::SHAPES.iter().position(|(s, _)| *s == k)) else {
+                    let shapes: Vec<&str> = crate::check::SHAPES.iter().map(|(s, _)| *s).collect();
+                    return Err(FxError::at(k.span, format!("a shape, one of {}", shapes.join(", "))));
+                };
+                Ok(Prop::Shape { param, shape, negated })
+            }
+            ("acyclic", [i], false) => Ok(Prop::Acyclic(self.prop_param(i, n)?)),
+            ("nat", [i], false) => Ok(Prop::Nat(self.prop_param(i, n)?)),
+            ("length", [i, j], false) => {
+                let i = self.prop_param(i, n)?;
+                Ok(Prop::Length(i, self.prop_param(j, n)?))
+            }
+            (r @ ("<" | "<=" | "="), [x, y], not) if !not || r == "=" => {
+                let a = self.prop_term(x, n)?;
+                let b = self.prop_term(y, n)?;
+                let op = match (r, not) {
+                    ("<", _) => Rel::Lt,
+                    ("<=", _) => Rel::Le,
+                    (_, false) => Rel::Eq,
+                    _ => Rel::Ne,
+                };
+                Ok(Prop::Rel { op, a, b })
+            }
+            _ => Err(FxError::at(form.span, usage)),
         }
-        let Some(param) = self.literal_int(i).filter(|i| *i >= 0 && (*i as usize) < n) else {
-            return Err(FxError::at(i.span, format!("a parameter's number, from 0 to {}", n as i64 - 1)));
-        };
-        let Some(shape) = head(self, k).and_then(|k| crate::check::SHAPES.iter().position(|(s, _)| *s == k)) else {
-            let shapes: Vec<&str> = crate::check::SHAPES.iter().map(|(s, _)| *s).collect();
-            return Err(FxError::at(k.span, format!("a shape, one of {}", shapes.join(", "))));
-        };
-        Ok(crate::ast::Prop { param: param as usize, shape, negated })
+    }
+
+    /// A parameter's number, from 0, of a procedure of `n`.
+    fn prop_param(&self, i: &Syntax, n: usize) -> R<usize> {
+        match self.literal_int(i).filter(|i| *i >= 0 && (*i as usize) < n) {
+            Some(k) => Ok(k as usize),
+            None => Err(FxError::at(i.span, format!("a parameter's number, from 0 to {}", n as i64 - 1))),
+        }
+    }
+
+    /// A size in a proposition: a parameter's number, `(length i)` or
+    /// `(lit k)`.
+    fn prop_term(&mut self, x: &Syntax, n: usize) -> R<crate::ast::Term> {
+        use crate::ast::Term;
+        if self.literal_int(x).is_some() {
+            return Ok(Term::Param(self.prop_param(x, n)?));
+        }
+        let usage = "a size: a parameter's number, `(length i)`, or `(lit k)`";
+        let parts = self.items(x, usage)?.to_vec();
+        match &parts[..] {
+            [h, i] if h.as_symbol().is_some_and(|h| self.name(h) == "length") => Ok(Term::Length(self.prop_param(i, n)?)),
+            [h, k] if h.as_symbol().is_some_and(|h| self.name(h) == "lit") => match self.literal_int(k).filter(|k| *k >= 0) {
+                Some(k) => Ok(Term::Lit(k)),
+                None => Err(FxError::at(k.span, "a natural")),
+            },
+            _ => Err(FxError::at(x.span, usage)),
+        }
     }
 
     /// A name for an expansion's own variable that `forms` never mention:

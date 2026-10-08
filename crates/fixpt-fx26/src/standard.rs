@@ -54,7 +54,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("no-pair", "(poly ((r region) (t1 type) (t2 type)) (union nil (pairof t1 t2 r)))"),
     // The shape predicates (`check::SHAPES`): of any value, whether it has
     // the shape, which narrows a union (`docs/research/logical-types.md`).
-    ("null?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 nil)) (else (not (shape 0 nil))))))"),
+    ("null?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 nil) (= (length 0) (lit 0))) (else (not (shape 0 nil)) (<= (lit 1) (length 0))))))"),
     ("pair?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 pair)) (else (not (shape 0 pair))))))"),
     ("int?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 int)) (else (not (shape 0 int))))))"),
     ("char?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 char)) (else (not (shape 0 char))))))"),
@@ -67,7 +67,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("-", "(subr pure (int int) int)"),
     // A finite list's length, as a natural of its size.
     ("length", "(poly ((t type) (n size)) (subr pure ((nlist t n)) (nat n)))"),
-    ("=", "(subr pure (int int) bool)"),
+    ("=", "(subr pure (int int) (bool (then (= 0 1)) (else (not (= 0 1)))))"),
     (
         "cwcc",
         "(poly ((r region)) (poly ((t type)) (poly ((e effect))
@@ -75,10 +75,10 @@ pub const ENTRIES: &[(&str, &str)] = &[
                  ((subr e ((subr (goto r) (t) void)) t))
                  t))))",
     ),
-    ("<", "(subr pure (int int) bool)"),
-    (">", "(subr pure (int int) bool)"),
-    ("<=", "(subr pure (int int) bool)"),
-    (">=", "(subr pure (int int) bool)"),
+    ("<", "(subr pure (int int) (bool (then (< 0 1)) (else (<= 1 0))))"),
+    (">", "(subr pure (int int) (bool (then (< 1 0)) (else (<= 0 1))))"),
+    ("<=", "(subr pure (int int) (bool (then (<= 0 1)) (else (< 1 0))))"),
+    (">=", "(subr pure (int int) (bool (then (<= 1 0)) (else (< 0 1))))"),
     ("*", "(subr pure (int int) int)"),
     ("modulo", "(subr pure (int int) int)"),
     ("quotient", "(subr pure (int int) int)"),
@@ -310,17 +310,17 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // where it was `const` (`docs/research/confirmation.md`, CF0).
     // Each walks data at a place, so reads it: pure at the heap, where
     // reading frozen data is, and naming the place otherwise (F13).
-    ("acyclic?", "(poly ((p place) (t data p)) (subr (read (const p)) (t) bool))"),
+    ("acyclic?", "(poly ((p place) (t data p)) (subr (read (const p)) (t) (bool (then (acyclic 0)) (else))))"),
     ("certify-acyclic", "(poly ((p place) (t data p)) (subr pure (t) t))"),
     // `(confirm-nat e (n body) else)` is these two: whether an integer is no
     // less than 0, and, where `nat?` has just said so of a variable, its
     // value as a `nat`.
-    ("nat?", "(subr pure (int) bool)"),
+    ("nat?", "(subr pure (int) (bool (then (nat 0)) (else)))"),
     ("certify-nat", "(subr pure (int) nat)"),
     // `(confirm-length e n (x body) else)` is these two: whether a frozen
     // list is proper and has `n` elements; and, of a variable just found
     // so, its value as a `(nlist T n)` (`docs/research/sizes.md`).
-    ("length-is?", "(poly ((p place) (l data p)) (subr (read (const p)) (l int) bool))"),
+    ("length-is?", "(poly ((p place) (l data p)) (subr (read (const p)) (l int) (bool (then (length 0 1)) (else))))"),
     ("certify-length", "(poly ((p place) (l data p)) (subr pure (l int) l))"),
     ("datum-pair?", "(subr pure (datum) bool)"),
     ("datum-null?", "(subr pure (datum) bool)"),

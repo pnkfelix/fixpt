@@ -61,9 +61,16 @@
 (define-type k-vsub (listof (productof (1 k-eff) (2 int) (3 int)) acyclic))
 
 (define-type k-ids (listof int acyclic))
-;; Propositions about a procedure's arguments (`ty-proving`): parameter `1`'s
-;; value is of shape `2` (`check-unions.fx`), or, `3`, is not.
-(define-type k-props (listof (productof (1 int) (2 int) (3 bool)) acyclic))
+;; Propositions about a procedure's arguments (`ty-proving`), each by its
+;; parameter's number from 0: of a shape (`check-unions.fx`'s), or, the
+;; flag, not; certifications, acyclic, a natural, of a length; a relation
+;; of sizes, 0 `<`, 1 `<=`, 2 `=`, 3 not `=`, of terms: argument `i` as a
+;; natural, the length of its `nlist`, or a natural (`sizes.rs`).
+(define-datatype k-term (tm-param int) (tm-length int) (tm-lit int))
+(define-datatype k-prop
+  (pr-shape int int bool) (pr-acyclic int) (pr-nat int) (pr-length int int)
+  (pr-rel int k-term k-term))
+(define-type k-props (listof k-prop acyclic))
 ;; A binder: a description variable and its kind, 0 region, 1 effect, 2 type.
 (define-type k-binders (listof (productof (1 int) (2 int)) acyclic))
 (define-type k-parts (listof (productof (1 symbol) (2 int)) acyclic))
@@ -559,7 +566,17 @@
 (define-type k-eff (select check-types-module k-eff))
 (define-type k-vsub (select check-types-module k-vsub))
 (define-type k-ids (select check-types-module k-ids))
+(define-type k-term (select check-types-module k-term))
+(define-type k-prop (select check-types-module k-prop))
 (define-type k-props (select check-types-module k-props))
+(define tm-param (with check-types-module tm-param))
+(define tm-length (with check-types-module tm-length))
+(define tm-lit (with check-types-module tm-lit))
+(define pr-shape (with check-types-module pr-shape))
+(define pr-acyclic (with check-types-module pr-acyclic))
+(define pr-nat (with check-types-module pr-nat))
+(define pr-length (with check-types-module pr-length))
+(define pr-rel (with check-types-module pr-rel))
 (define-type k-binders (select check-types-module k-binders))
 (define-type k-parts (select check-types-module k-parts))
 (define-type k-names (select check-types-module k-names))

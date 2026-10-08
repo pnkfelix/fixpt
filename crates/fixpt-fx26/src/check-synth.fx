@@ -90,24 +90,13 @@
           ((and (k-nat-ty? tc) (k-nat-ty? td)) (k-ty-new (ty-nat (sz-finite))))
           (else
            (k-fail (k-cat4 "the branches are a " (k-show-ty tc) " and a " (k-show-ty td)) a b)))))
-;; If `p` is `(name v)`, `name` standard, the variable, as the binding it is
-;; (none or one).
-(define k-certifying-test (subr (maxeff kreads (alloc @t) spin) (kx string) k-named)
-  (lambda (p name)
-    (tagcase p
-      (x-app (f args a b)
-        (if (and (string=? (k-std-op (k-under f)) name) (k-sc-one-arg? args))
-            (tagcase (car args)
-              (x-var (v va vb) (the k-named (cons (cons v (k-binding-depth v)) nil)))
-              (else y nil))
-            nil))
-      (else y nil))))
-;; If `p` is `(acyclic? v)`, the variable, as the binding it is (none or one).
+;; If `p` certifies a variable acyclic (`acyclic?`, `(acyclic i)`), it, as
+;; the binding it is (none or one).
 (define k-acyclic-test (subr (maxeff kreads (alloc @t) spin) (kx) k-named)
-  (lambda (p) (k-certifying-test p "acyclic?")))
-;; If `p` is `(nat? v)`, the variable, as the binding it is (none or one).
+  (lambda (p) (k-latent-cert p 0)))
+;; If `p` certifies a variable a natural (`nat?`, `(nat i)`), it.
 (define k-nat-test (subr (maxeff kreads (alloc @t) spin) (kx) k-named)
-  (lambda (p) (k-certifying-test p "nat?")))
+  (lambda (p) (k-latent-cert p 1)))
 ;; What is certified so far: variables acyclic, of lengths, and natural.
 (define-type k-certs (productof (1 k-named) (2 k-cert-lens) (3 k-named)))
 (define k-certs-now (subr kreads () k-certs)
@@ -159,38 +148,31 @@
   (lambda (props args out)
     (if (null? props)
         out
-        (let* ((p (car props)) (v (k-arg-var args (extract p 1))))
+        (let* ((p (car props))
+               (i (tagcase p (pr-shape (i k f) i) (else y -1)))
+               (v (if (< i 0) (the k-named nil) (k-arg-var args i))))
           (if (null? v)
               (k-props-narrow (cdr props) args out)
               (let* ((n (car (car v))) (d (cdr (car v))) (had (k-narrows-of out n d))
                      (t (if (>= had 0) had (k-lookup n))))
                 (if (< t 0)
                     (k-props-narrow (cdr props) args out)
-                    (let* ((split (k-narrowed-by (k-resolve t) (extract p 2)))
-                           (to (if (extract p 3) (extract split 2) (extract split 1))))
+                    (let* ((shape (tagcase p (pr-shape (i k f) k) (else y 0)))
+                           (negated (tagcase p (pr-shape (i k f) f) (else y #f)))
+                           (split (k-narrowed-by (k-resolve t) shape))
+                           (to (if negated (extract split 2) (extract split 1))))
                       (k-props-narrow (cdr props) args
                                       (if (< to 0) out (k-narrows-put out n d to)))))))))))
 ;; A test: what its callee's type says it proves (`ty-proving`), of those of
 ;; its arguments that are variables, where it holds and where not.
 (define k-latent-narrowing (subr (maxeff kstate spin) (kx) k-narrowing)
   (lambda (p)
-    (let ((none (the k-narrowing (cons nil nil))))
-      (tagcase p
-        (x-app (f args a b)
-          (let* ((g (k-under f)) (op (k-std-op g))
-                 (t (if (string=? op "")
-                        (tagcase g (x-var (s sa sb) (k-lookup s)) (else y -1))
-                        (k-std-type (string->symbol op)))))
-            (if (< t 0)
-                none
-                (tagcase (k-get (extract (k-binders-of t) 2))
-                  (ty-subr (e ps r cv)
-                    (tagcase (k-get r)
-                      (ty-proving (th el)
-                        (cons (k-props-narrow th args nil) (k-props-narrow el args nil)))
-                      (else y none)))
-                  (else y none)))))
-        (else y none)))))
+    (let ((l (k-latent-props p)))
+      (if (null? l)
+          (the k-narrowing (cons nil nil))
+          (let ((x (car l)))
+            (cons (k-props-narrow (extract x 1) (extract x 3) nil)
+                  (k-props-narrow (extract x 2) (extract x 3) nil)))))))
 (define k-narrowings (subr (maxeff kstate spin) (kx) k-narrowing)
   (lambda (p)
     (let ((none (the k-narrowing (cons nil nil))))

@@ -589,15 +589,31 @@
       ((12) "sum") (else "product"))))
 ;; `(which P …)`, each `(shape i shape)` or `(not (shape i shape))`.
 (define-effect kshows (maxeff (read @globals) (read @t) (alloc @t) spin))
+;; A proposition, and a size in one, as written.
+(define k-show-term (subr kshows (k-term) string)
+  (lambda (t)
+    (tagcase t
+      (tm-param (i) (int->string i))
+      (tm-length (i) (k-cat3 "(length " (int->string i) ")"))
+      (tm-lit (k) (k-cat3 "(lit " (int->string k) ")")))))
+(define k-show-prop (subr kshows (k-prop) string)
+  (lambda (p)
+    (tagcase p
+      (pr-shape (i k f)
+        (let ((shape (k-cat5 "(shape " (int->string i) " " (k-shape-name k) ")")))
+          (if f (k-cat3 "(not " shape ")") shape)))
+      (pr-acyclic (i) (k-cat3 "(acyclic " (int->string i) ")"))
+      (pr-nat (i) (k-cat3 "(nat " (int->string i) ")"))
+      (pr-length (i j) (k-cat5 "(length " (int->string i) " " (int->string j) ")"))
+      (pr-rel (o a b)
+        (let* ((name (case o ((0) "<") ((1) "<=") (else "=")))
+               (r (k-cat5 (k-cat3 "(" name " ") (k-show-term a) " " (k-show-term b) ")")))
+          (if (= o 3) (k-cat3 "(not " r ")") r))))))
 (define k-show-props-each (subr kshows (k-props) string)
   (lambda (ps)
     (if (null? ps)
         ""
-        (let* ((p (car ps))
-               (n (int->string (extract p 1)))
-               (shape (k-cat5 "(shape " n " " (k-shape-name (extract p 2)) ")"))
-               (one (if (extract p 3) (k-cat3 "(not " shape ")") shape)))
-          (k-cat3 " " one (k-show-props-each (cdr ps)))))))
+        (k-cat3 " " (k-show-prop (car ps)) (k-show-props-each (cdr ps))))))
 (define k-show-props (subr kshows (string k-props) string)
   (lambda (which ps) (k-cat4 "(" which (k-show-props-each ps) ")")))
 (define-rec

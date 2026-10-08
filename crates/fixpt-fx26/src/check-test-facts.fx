@@ -39,35 +39,117 @@
         (let ((t (k-lookup v)))
           (if (< t 0) nil (k-nat-ty-size t))))
       (else y nil))))
-;; `xs : (nlist T n)` shows `n = 0` when null, and `n - 1 ≥ 0` when not.
-(define k-null-facts (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (kx) k-branch-facts)
-  (lambda (x)
-    (let ((none (k-branch-facts-of nil nil))
-          (vt (tagcase x (x-var (v va vb) (k-lookup v)) (else y -1))))
-      (if (< vt 0)
-          none
-          (tagcase (k-get vt)
-            (ty-nlist (e z r)
-              (tagcase z
-                (sz-lin (k ts) (k-branch-facts-of (k-eq-fact z) (k-ge-fact (k-size-plus z -1))))
-                (else w none)))
-            (else w none))))))
-;; What a comparison `(op a b)` of naturals shows, when both have sizes.
-(define k-compare-facts (subr (maxeff kreads (alloc @t) spin) (string kx kx) k-branch-facts)
-  (lambda (op a b)
-    (let ((xs (k-nat-size a)) (ys (k-nat-size b)) (none (k-branch-facts-of nil nil)))
-      (if (or (null? xs) (null? ys) (k-size-any? (car xs)) (k-size-any? (car ys)))
-          none
-          (let ((x (car xs)) (y (car ys)))
-            (case op (("<") (k-branch-facts-of (k-lt-fact x y) (k-le-fact y x)))
-                     (("<=") (k-branch-facts-of (k-le-fact x y) (k-lt-fact y x)))
-                     ((">") (k-branch-facts-of (k-lt-fact y x) (k-le-fact x y)))
-                     ((">=") (k-branch-facts-of (k-le-fact y x) (k-lt-fact x y)))
-                     (else
-                      (let ((no (cond ((= (k-size-as-lit y) 0) (k-ge-fact (k-size-plus x -1)))
-                                      ((= (k-size-as-lit x) 0) (k-ge-fact (k-size-plus y -1)))
-                                      (else (the k-fact-list nil)))))
-                        (k-branch-facts-of (k-eq-fact (k-size-add-scaled x y -1)) no)))))))))
+;; If `p` is a call of a procedure whose type's result is `(bool (then …)
+;; (else …))`, what it proves where true and where false, and its arguments
+;; (none or one): the Rust checker's `latent_props`.
+(define-type k-latent (listof (productof (1 k-props) (2 k-props) (3 kxs)) acyclic))
+(define k-latent-props (subr (maxeff kmakes spin) (kx) k-latent)
+  (lambda (p)
+    (tagcase p
+      (x-app (f args a b)
+        (let* ((g (k-under f)) (op (k-std-op g))
+               (t (if (string=? op "")
+                      (tagcase g (x-var (s sa sb) (k-lookup s)) (else y -1))
+                      (k-std-type (string->symbol op)))))
+          (if (< t 0)
+              nil
+              (tagcase (k-get (extract (k-binders-of t) 2))
+                (ty-subr (e ps r cv)
+                  (tagcase (k-get r)
+                    (ty-proving (th el)
+                      (the k-latent (cons (product (1 th) (2 el) (3 args)) nil)))
+                    (else y nil)))
+                (else y nil)))))
+      (else y nil))))
+;; Argument `i` of `args` (none or one).
+(define k-arg-at (subr (read @globals) (kxs int) kxs)
+  (lambda (args i)
+    (cond ((null? args) nil)
+          ((= i 0) (the kxs (cons (car args) nil)))
+          (else (k-arg-at (cdr args) (- i 1))))))
+;; The type of argument `i` of `args`, if a variable, or -1.
+(define k-arg-type (subr (maxeff kreads spin) (kxs int) int)
+  (lambda (args i)
+    (let ((x (k-arg-at args i)))
+      (if (null? x) -1 (tagcase (car x) (x-var (v va vb) (k-lookup v)) (else y -1))))))
+;; A term's size, of `args`, if known and not just `finite` (none or one):
+;; an argument's as a natural, its `nlist`'s length, a natural.
+(define k-term-size (subr (maxeff kreads (alloc @t) spin) (k-term kxs) k-maybe-size)
+  (lambda (t args)
+    (let ((z (tagcase t
+               (tm-lit (k) (k-one-size (k-size-lit k)))
+               (tm-param (i)
+                 (let ((x (k-arg-at args i)))
+                   (if (null? x) (the k-maybe-size nil) (k-nat-size (car x)))))
+               (tm-length (i)
+                 (let ((vt (k-arg-type args i)))
+                   (if (< vt 0)
+                       (the k-maybe-size nil)
+                       (tagcase (k-get (k-resolve vt))
+                         (ty-nlist (e z r) (k-one-size z))
+                         (else y (the k-maybe-size nil)))))))))
+      (if (or (null? z) (k-size-any? (car z))) nil z))))
+(define k-facts-then (subr (read @globals) (k-fact-list k-fact-list) k-fact-list)
+  (lambda (xs ys) (if (null? xs) ys (the k-fact-list (cons (car xs) (k-facts-then (cdr xs) ys))))))
+;; The fact relation `o` of sizes `xs` and `ys` is, if both are known:
+;; `x < y`, `x ≤ y`, `x = y`, or `x ≠ y` of a natural and 0.
+(define k-rel-fact
+  (subr (maxeff kreads (alloc @t) spin) (int k-maybe-size k-maybe-size) k-fact-list)
+  (lambda (o xs ys)
+    (if (or (null? xs) (null? ys))
+        nil
+        (let ((x (car xs)) (y (car ys)))
+          (case o
+            ((0) (k-lt-fact x y))
+            ((1) (k-le-fact x y))
+            ((2) (k-eq-fact (k-size-add-scaled x y -1)))
+            (else (cond ((= (k-size-as-lit y) 0) (k-ge-fact (k-size-plus x -1)))
+                        ((= (k-size-as-lit x) 0) (k-ge-fact (k-size-plus y -1)))
+                        (else nil))))))))
+;; The size facts relations `props` are, of `args` (`sizes.rs`'s `rel_facts`).
+(define k-rel-facts (subr (maxeff kreads (alloc @t) spin) (k-props kxs) k-fact-list)
+  (lambda (props args)
+    (if (null? props)
+        nil
+        (let ((here (tagcase (car props)
+                      (pr-rel (o a b) (k-rel-fact o (k-term-size a args) (k-term-size b args)))
+                      (else y (the k-fact-list nil)))))
+          (k-facts-then here (k-rel-facts (cdr props) args))))))
+;; What `p` shows of sizes where it holds and where not, as its callee's
+;; type says.
+(define k-latent-facts (subr (maxeff kmakes spin) (kx) k-branch-facts)
+  (lambda (p)
+    (let ((l (k-latent-props p)))
+      (if (null? l)
+          (k-branch-facts-of nil nil)
+          (let* ((x (car l)) (args (extract x 3)))
+            (k-branch-facts-of (k-rel-facts (extract x 1) args)
+                               (k-rel-facts (extract x 2) args)))))))
+;; Argument `i` of `args`, if a variable, as the binding it is (none or one).
+(define k-arg-binding (subr (maxeff kreads (alloc @t) spin) (kxs int) k-named)
+  (lambda (args i)
+    (let ((x (k-arg-at args i)))
+      (if (null? x)
+          nil
+          (tagcase (car x)
+            (x-var (v va vb) (the k-named (cons (cons v (k-binding-depth v)) nil)))
+            (else y nil))))))
+(define k-cert-in (subr (maxeff kreads (alloc @t) spin) (k-props int kxs) k-named)
+  (lambda (ps which args)
+    (if (null? ps)
+        nil
+        (let* ((i (tagcase (car ps)
+                    (pr-acyclic (i) (if (= which 0) i -1))
+                    (pr-nat (i) (if (= which 1) i -1))
+                    (else y -1)))
+               (v (if (< i 0) (the k-named nil) (k-arg-binding args i))))
+          (if (null? v) (k-cert-in (cdr ps) which args) v)))))
+;; What `p` certifies where it holds, as its callee's type says: the first
+;; `(acyclic i)` (`which` 0) or `(nat i)` (1) of its, as the binding it is.
+(define k-latent-cert (subr (maxeff kmakes spin) (kx int) k-named)
+  (lambda (p which)
+    (let ((l (k-latent-props p)))
+      (if (null? l) nil (k-cert-in (extract (car l) 1) which (extract (car l) 3))))))
 (define-type k-cert-lens (listof k-cert-len acyclic))
 ;; `v` and `k` of `(length-is? v k)` or `(certify-length v k)`: the
 ;; variable, its binding, and the length, a natural literal or a variable
@@ -93,15 +175,25 @@
   (lambda (cs c)
     (and (not (null? cs))
          (or (k-cert-len=? (car cs) c) (k-cert-len-has? (cdr cs) c)))))
-;; If `p` is `(length-is? v k)`, the variable, its binding, and the length.
-(define k-length-test (subr (maxeff kreads (alloc @t) spin) (kx) k-cert-lens)
+(define k-length-in (subr (maxeff kreads (alloc @t) spin) (k-props kxs) k-cert-lens)
+  (lambda (ps args)
+    (if (null? ps)
+        nil
+        (let ((found (tagcase (car ps)
+                       (pr-length (i j)
+                         (let ((a (k-arg-at args i)) (n (k-arg-at args j)))
+                           (if (or (null? a) (null? n))
+                               (the k-cert-lens nil)
+                               (k-length-arg (car a) (car n)))))
+                       (else y (the k-cert-lens nil)))))
+          (if (null? found) (k-length-in (cdr ps) args) found)))))
+;; What `p` certifies of a length where it holds, as its callee's type
+;; says (`(length i j)`, `length-is?`): the variable, its binding, and the
+;; length (none or one).
+(define k-length-test (subr (maxeff kmakes spin) (kx) k-cert-lens)
   (lambda (p)
-    (tagcase p
-      (x-app (f args a b)
-        (if (and (string=? (k-std-op f) "length-is?") (k-sc-two? args))
-            (k-length-arg (car args) (car (cdr args)))
-            nil))
-      (else y nil))))
+    (let ((l (k-latent-props p)))
+      (if (null? l) nil (k-length-in (extract (car l) 1) (extract (car l) 3))))))
 ;; Whether operation `n` may give a natural of a size by itself: `+`, `-` or a length.
 (define k-sizing-op? (subr (read @globals) (string) bool)
   (lambda (n)
@@ -133,18 +225,7 @@
           (cond ((string=? op "+") (k-one-size (k-size-add-scaled a b 1)))
                 ((and (not (k-size-any? a)) (k-size-nonneg? (k-size-add-scaled a b -1)))
                  (k-one-size (k-size-add-scaled a b -1)))
-                (else nil))))))
-;; Whether `n` is a comparison: `<`, `<=`, `>`, `>=` or `=`.
-(define k-comparison? (subr (read @globals) (string) bool)
-  (lambda (n) (or (k-op-either? n "<" "<=") (k-op-either? n ">" ">=") (string=? n "="))))
-;; What a test `(name args …)`, `name` standard, shows about sizes.
-(define k-std-test-facts (subr (maxeff kreads (alloc @t) spin) (string kxs) k-branch-facts)
-  (lambda (name args)
-    (let ((none (k-branch-facts-of nil nil)))
-      (cond ((string=? name "null?") (if (k-sc-one-arg? args) (k-null-facts (car args)) none))
-            ((and (k-comparison? name) (k-sc-two? args))
-             (k-compare-facts name (car args) (car (cdr args))))
-            (else none)))))))
+                (else nil))))))))
 
 (define-type k-fact-list (select check-test-facts-module k-fact-list))
 (define-type k-branch-facts (select check-test-facts-module k-branch-facts))
@@ -158,4 +239,6 @@
 (define k-natural-by-itself? (with check-test-facts-module k-natural-by-itself?))
 (define k-operand-size (with check-test-facts-module k-operand-size))
 (define k-nat-arith-size (with check-test-facts-module k-nat-arith-size))
-(define k-std-test-facts (with check-test-facts-module k-std-test-facts))
+(define k-latent-props (with check-test-facts-module k-latent-props))
+(define k-latent-facts (with check-test-facts-module k-latent-facts))
+(define k-latent-cert (with check-test-facts-module k-latent-cert))
