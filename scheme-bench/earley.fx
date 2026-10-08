@@ -23,7 +23,7 @@
 ;;; The derivation trees and the rules' names, lists of symbols, numbers
 ;;; and trees, are `datum`s; a token's user information becomes a datum
 ;;; once, when the token is transformed (`comp-tok`), and a name `#f`,
-;;; for a configuration not at the start of a rule, is `(datum-bool #f)`.
+;;; for a configuration not at the start of a rule, is `#f`.
 ;;; The lists of trees, and every other list, are FX-26 lists. The
 ;;; grammar, `((s (a) (s s)))`, is built in the file; its non-terminals
 ;;; are symbols, and `equal?` of them `symbol=?`. The parser's internal
@@ -233,7 +233,7 @@
 ;; `append` of two lists, as data.
 (define* datum-append (subr spin (datum datum) datum)
   (lambda (xs ys)
-    (if (datum-null? xs) ys (datum-cons (datum-car xs) (datum-append (datum-cdr xs) ys)))))
+    (if (null? xs) ys (cons (car xs) (datum-append (cdr xs) ys)))))
 
 (define* non-terminals (subr ear (grammar) ntv) ; return vector of non-terminals in grammar
   (lambda (grammar)
@@ -310,9 +310,9 @@
                      (if (>= i 0)
                          (begin
                            (array-set! steps i (- i nb-nts))
-                           (array-set! names i (datum-cons (datum-symbol (symbol->string (array-ref nts i)))
-                                                           (datum-cons (datum-int 0)
-                                                                       (datum-list (the (listof datum @heap) nil)))))
+                           (array-set! names i (cons (string->symbol (symbol->string (array-ref nts i)))
+                                                     (cons 0
+                                                           nil)))
                            (array-set! enders i (cons i nil))
                            (nt-loop (- i 1)))
                          #u)))
@@ -326,9 +326,9 @@
                                         (if (not (null? rules))
                                             (let ((rule (car rules)))
                                               (begin
-                                                (array-set! names conf (datum-cons (datum-symbol (symbol->string head))
-                                                                                   (datum-cons (datum-int rule-num)
-                                                                                               (datum-list (the (listof datum @heap) nil)))))
+                                                (array-set! names conf (cons (string->symbol (symbol->string head))
+                                                                             (cons rule-num
+                                                                                   nil)))
                                                 (add-conf conf head nts starters)
                                                 (letrec ((loop (subr ear (symbols int) unit)
                                                            (lambda (l conf)
@@ -361,14 +361,14 @@
                        (if (>= i 0)
                            (loop (cdr l1) (cons i l2))
                            (loop (cdr l1) l2)))
-                     (cons (datum-symbol (symbol->string (car tok))) (the ints (reverse l2)))))))
+                     (cons (string->symbol (symbol->string (car tok))) (the ints (reverse l2)))))))
       (loop (cdr tok) nil))))
 
 (define* input->tokens (subr ear (symbols lexer ntv) toks)
   (lambda (input lexer nts)
     (let ((l (map (lambda (tok) (comp-tok tok nts)) (lexer input))))
       (if (null? l)
-          (the toks (make-array 0 (cons (datum-bool #f) nil)))
+          (the toks (make-array 0 (cons #f nil)))
           (list->vector l (car l))))))
 
 (define* make-states (subr ear (int int) states)
@@ -686,11 +686,11 @@
   (lambda (conf i j enders steps names toks states nb-nts)
     (let ((name (array-ref names conf)))
 
-      (if (not (datum-bool? name)) ; `conf' is at the start of a rule (either special or not)
+      (if (not (bool? name)) ; `conf' is at the start of a rule (either special or not)
           (if (< conf nb-nts)
-              (cons (datum-cons name (datum-cons (car (array-ref toks i)) (datum-list (the (listof datum @heap) nil))))
+              (cons (cons name (cons (car (array-ref toks i)) nil))
                     nil)
-              (cons (datum-cons name (datum-list (the (listof datum @heap) nil)))
+              (cons (cons name nil)
                     nil))
 
           (let ((prev (- conf 1)))
@@ -716,7 +716,7 @@
                                                           (letrec ((loop3 (subr ear (trees trees) trees)
                                                                      (lambda (l3 l2)
                                                                        (if (not (null? l3))
-                                                                           (let ((ender-tree (datum-cons (car l3) (datum-list (the (listof datum @heap) nil)))))
+                                                                           (let ((ender-tree (the datum (cons (car l3) nil))))
                                                                              (letrec ((loop4 (subr ear (trees trees) trees)
                                                                                         (lambda (l4 l2)
                                                                                           (if (not (null? l4))
@@ -818,7 +818,7 @@
            (enders (the classes (make-array nb-nts nil)))      ; enders for every non-term
            (predictors (the classes (make-array nb-nts nil)))  ; predictors for every non-term
            (steps (the iarr (make-array nb-confs 0)))      ; what to do in a given conf
-           (names (the names (make-array nb-confs (datum-bool #f))))) ; name of rules
+           (names (the names (make-array nb-confs #f)))) ; name of rules
 
       ; Now, for each non-terminal, compute the starters, enders and predictors and
       ; the names and steps tables.

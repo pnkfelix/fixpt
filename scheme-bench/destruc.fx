@@ -100,17 +100,17 @@
 (define* items->datum (subr (maxeff (read @heap) spin) (items) datum)
   (lambda (l)
     (if (null? l)
-        (datum-list (the (listof datum @heap) nil))
-        (datum-cons (typecase (car l)
-                      (nil e (datum-list (the (listof datum @heap) nil)))
-                      (else x (datum-int x)))
-                    (items->datum (cdr l))))))
+        nil
+        (cons (typecase (car l)
+                (nil e nil)
+                (else x x))
+              (items->datum (cdr l))))))
 
 (define* result->datum (subr (maxeff (read @heap) spin) (rows) datum)
   (lambda (l)
     (if (null? l)
-        (datum-list (the (listof datum @heap) nil))
-        (datum-cons (items->datum (car l)) (result->datum (cdr l))))))
+        nil
+        (cons (items->datum (car l)) (result->datum (cdr l))))))
 
 ;; The inputs, where no compiler can fold them (Larceny's `hide`): globals,
 ;; which a later definition may replace.

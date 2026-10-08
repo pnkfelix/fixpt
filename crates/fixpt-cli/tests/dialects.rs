@@ -320,7 +320,7 @@ fn fx26_checks_compiles_and_evaluates_a_file_or_text() {
 #[test]
 fn car_of_nil_traps_on_every_machine() {
     for (m, text) in on_every_machine("(define xs (listof int @heap) nil)\n(car xs)\n") {
-        assert!(text.contains("pair-car") || text.contains("car or cdr of nil") || text.contains("expected a pair"), "{m:?}: {text}");
+        assert!(text.contains("pair-car") || text.contains("car or cdr of a non-pair") || text.contains("expected a pair"), "{m:?}: {text}");
     }
 }
 

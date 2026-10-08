@@ -472,12 +472,12 @@ ints (`datum-model.fx`):
 (define datum=? (subr pure (datum datum) bool)
   (letrec ((eq (subr pure (datum datum) bool)
              (lambda (x y)
-               (cond ((datum-pair? x)
-                      (and (datum-pair? y)
-                           (eq (datum-car x) (datum-car y))
-                           (eq (datum-cdr x) (datum-cdr y))))
+               (cond ((pair? x)
+                      (and (pair? y)
+                           (eq (car x) (car y))
+                           (eq (cdr x) (cdr y))))
                      ((datum-int? x)
-                      (and (datum-int? y) (= (datum-int-value x) (datum-int-value y))))
+                      (and (datum-int? y) (= x y)))
                      …))))
     eq))
 (datum=? (tree->datum t1) (tree->datum (node (leaf 1) (node (leaf 2) (leaf 4)))))   ; #f
@@ -606,8 +606,8 @@ recursing through the former is a descent that size-change accepts
 
 | former                                                   | `equal`, `hash`, `compare`             | `->datum`                        | reads                                    | descent                                                    |
 | -------------------------------------------------------- | -------------------------------------- | -------------------------------- | ---------------------------------------- | ---------------------------------------------------------- |
-| `int`, `nat`, `char`, `bool`, `string`, `symbol`, `unit` | a base operation (§6.5 lists the gaps) | `datum-int`, …                   | none                                     | n/a                                                        |
-| `datum`                                                  | `datum=?` (missing)                    | itself                           | none                                     | `datum-car`/`-cdr` are parts                               |
+| `int`, `nat`, `char`, `bool`, `string`, `symbol`, `unit` | a base operation (§6.5 lists the gaps) | itself (a datum's member)        | none                                     | n/a                                                        |
+| `datum`                                                  | `datum=?` (missing)                    | itself                           | none                                     | `car`/`cdr` are parts                                      |
 | `(productof (l T) …)`                                    | field by field, in label order         | a list of `(l v)` (Q4)           | none (immutable)                         | yes: `extract`                                             |
 | `(sumof (tag T) …)`                                      | tags first, then the value             | `(tag v …)`                      | none (immutable)                         | yes: `tagcase`                                             |
 | `(listof T acyclic)`, `(nlist T s)`                      | element-wise                           | a list                           | none                                     | yes                                                        |
@@ -677,9 +677,10 @@ F=? : (poly ((t type) (r region) (e effect))
 
 Here `reads` and `spin?` are computed from the graph as in §3.1. The
 same holds for `hash` (result `int`), `compare` (result `int`) and
-`->datum` (result `datum`). Making a datum is `pure` (`standard.rs`:
-`datum-cons : (subr pure (datum datum) datum)`), so `->datum` allocates
-nothing a type sees.
+`->datum` (result `datum`). Making a datum allocates at `acyclic`, which
+is pure to make data at (`docs/fx26.md`, "Datums": `datum` is a union
+since 2026-10-08, made with `cons`), so `->datum` allocates nothing a
+type sees.
 
 `map` and `copy` produce data, so they need a result region. Each gets
 another binder, `(s region)` or `(p place)`, and the effect `(alloc s)`,

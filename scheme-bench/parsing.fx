@@ -18,8 +18,8 @@
 ;;;   nboyer.sch) into a string before timing begins; here that string is
 ;;;   in this file, `input-string` below, exactly the file's text. The
 ;;;   timed work, parsing the string 2500 times, is the same.
-;;; - The data the parser builds are FX-26 `datum`s: `datum-cons` for
-;;;   `cons`, `datum-symbol` for `string->symbol`, and so on. The symbols the
+;;; - The data the parser builds are FX-26 `datum`s, made with `cons` and
+;;;   `string->symbol` as Scheme's are (a union since 2026-10-08). The symbols the
 ;;;   action procedures return (`'quote` ...) are global data, made once, as
 ;;;   Scheme's constants are.
 ;;; - The mutable local variables are refs. The token buffer
@@ -60,12 +60,12 @@
 (define k-expected syms (list 'backquote 'boolean 'character 'comma 'id 'lparen
                               'number 'quote 'splicing 'string 'vecstart))
 
-(define datum-nil datum (datum-list (the (listof datum @heap) nil)))
-(define sym-quasiquote datum (datum-symbol "quasiquote"))
-(define sym-quote datum (datum-symbol "quote"))
-(define sym-unquote-splicing datum (datum-symbol "unquote-splicing"))
-(define sym-unquote datum (datum-symbol "unquote"))
-(define sym-eof datum (datum-symbol "eof"))
+(define datum-nil datum nil)
+(define sym-quasiquote datum 'quasiquote)
+(define sym-quote datum 'quote)
+(define sym-unquote-splicing datum 'unquote-splicing)
+(define sym-unquote datum 'unquote)
+(define sym-eof datum 'eof)
 
 (define no-chars (arrayof char @heap) (make-array 0 #\space))
 (define* error (subr (read @heap) (string) unit)
@@ -516,7 +516,7 @@
           (cond
             ((one-of? t k-datum-start)
              (let ((ast1 (parse-datum)))
-               (let ((ast2 (parse-list3))) (datum-cons ast1 ast2))))
+               (let ((ast2 (parse-list3))) (cons ast1 ast2))))
             ((symbol=? t 'rparen) (begin (consume-token!) (emptyList)))
             (else
              (parse-error
@@ -556,7 +556,7 @@
           (cond
             ((one-of? t k-abbrev)
              (let ((ast1 (parse-abbrev-prefix)))
-               (let ((ast2 (parse-datum))) (datum-cons ast1 (datum-cons ast2 datum-nil)))))
+               (let ((ast2 (parse-datum))) (cons ast1 (cons ast2 datum-nil)))))
             (else
              (parse-error
                '<abbreviation>
@@ -596,7 +596,7 @@
           (cond
             ((one-of? t k-datum-start)
              (let ((ast1 (parse-datum)))
-               (let ((ast2 (parse-data))) (datum-cons ast1 ast2))))
+               (let ((ast2 (parse-data))) (cons ast1 ast2))))
             ((one-of? t k-rparen-period) (emptyList))
             (else
              (parse-error
@@ -749,34 +749,34 @@
 
     (makeBool (subr pe () datum)
       (lambda ()
-        (datum-bool (string=? (get tokenValue) "#t"))))
+        (string=? (get tokenValue) "#t")))
 
     (makeChar (subr pe () datum)
       (lambda ()
-        (datum-char (string-ref (get tokenValue) 0))))
+        (string-ref (get tokenValue) 0)))
 
     (makeNum (subr pe () datum)
       (lambda ()
-        (datum-int (parse-nat (get tokenValue) 10))))
+        (parse-nat (get tokenValue) 10)))
 
     (makeString (subr pe () datum)
       (lambda ()
         ; Must strip off outer double quotes.
         ; Ought to process escape characters also, but we won't.
-        (datum-string (substring (get tokenValue) 1 (- (string-length (get tokenValue)) 1)))))
+        (substring (get tokenValue) 1 (- (string-length (get tokenValue)) 1))))
 
     (makeSym (subr pe () datum)
       (lambda ()
-        (datum-symbol (get tokenValue))))
+        (string->symbol (get tokenValue))))
 
     ; Like append, but allows the last argument to be a non-list.
 
     (pseudoAppend (subr pe (datum datum) datum)
       (lambda (vals terminus)
-        (if (datum-null? vals)
+        (if (null? vals)
             terminus
-            (datum-cons (datum-car vals)
-                        (pseudoAppend (datum-cdr vals) terminus)))))
+            (cons (car vals)
+                  (pseudoAppend (cdr vals) terminus)))))
 
     (symBackquote (subr pe () datum) (lambda () sym-quasiquote))
     (symQuote (subr pe () datum) (lambda () sym-quote))
@@ -806,7 +806,7 @@
 
     (do-loop (subr pe (datum datum) datum)
       (lambda (x y)
-        (if (and (datum-symbol? x) (string=? (datum-symbol-name x) "eof"))
+        (if (and (symbol? x) (string=? (symbol->string x) "eof"))
             y
             (do-loop (parse-datum) x)))))
 

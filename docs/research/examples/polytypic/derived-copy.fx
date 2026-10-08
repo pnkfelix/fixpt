@@ -11,13 +11,13 @@
                  (node (l r) (tagcase y (node (l2 r2) (and (eq l l2) (eq r r2))) (else _ #f)))))))
     eq))
 (define tree->datum (subr pure (tree) datum)
-  (let ((end (datum-list (the (listof datum @l) nil))))     ; the empty list
+  (let ((end nil))     ; the empty list
     (letrec ((show (subr pure (tree) datum)
                (lambda (x)
                  (tagcase x
-                   (leaf (n) (datum-cons (datum-symbol "leaf") (datum-cons (datum-int n) end)))
-                   (node (l r) (datum-cons (datum-symbol "node")
-                                           (datum-cons (show l) (datum-cons (show r) end))))))))
+                   (leaf (n) (cons 'leaf (cons n end)))
+                   (node (l r) (cons 'node
+                                     (cons (show l) (cons (show r) end))))))))
       show)))
 ;; A family: the parameter's operation is an argument (the one place a
 ;; dictionary appears), the walk itself is still a copy per family.

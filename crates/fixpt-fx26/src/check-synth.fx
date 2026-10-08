@@ -37,6 +37,28 @@
       (if (and apply? (and (= (k-length params) 2) (k-acyclic-list? (car (cdr params)))))
           (set k-extracts (cons (product (1 (k-start x)) (2 (k-end x)) (3 -500)) (get k-extracts)))
           #u))))
+;; `car` or `cdr` of a union with a pair member (a `datum`, say) takes that
+;; member apart: every machine's `car` checks its argument is a pair, and
+;; traps if not, as it does on `nil` (TODO §51).
+(define k-partial-pair-arg
+  (subr (maxeff checks spin) (kx (arrayof int @t) k-ids k-binders k-solved) unit)
+  (lambda (f types ps kinds solved)
+    (let* ((op (k-std-op f)) (t (if (> (array-length types) 0) (array-ref types 0) -1)))
+      (if (and (or (string=? op "car") (string=? op "cdr")) (>= t 0))
+          (tagcase (k-get (k-resolve t))
+            (ty-union (ms)
+              (let ((m (k-union-pair-member ms)))
+                (if (>= m 0)
+                    (begin (k-unify (car ps) m kinds solved (k-new-trail)) (array-set! types 0 m))
+                    #u)))
+            (else y #u))
+          #u))))
+;; A union's member that is a pair, of members `ms`; or -1.
+(define k-union-pair-member (subr (maxeff kreads spin) (k-ids) int)
+  (lambda (ms)
+    (cond ((null? ms) -1)
+          ((tagcase (k-get (k-resolve (car ms))) (ty-pair (x d r nl) #t) (else y #f)) (car ms))
+          (else (k-union-pair-member (cdr ms))))))
 ;; Types, and the effect of all.
 (define-type k-types-eff (productof (1 k-ids) (2 k-eff)))
 ;; What a call's arguments were found to be before they are checked: types (or -1), effects.
@@ -594,6 +616,7 @@
 ))
 
 (define k-note-apply-shares (with check-synth-module k-note-apply-shares))
+(define k-partial-pair-arg (with check-synth-module k-partial-pair-arg))
 (define k-note-frozen-define (with check-synth-module k-note-frozen-define))
 (define-type k-done (select check-synth-module k-done))
 (define k-te-masked (with check-synth-module k-te-masked))

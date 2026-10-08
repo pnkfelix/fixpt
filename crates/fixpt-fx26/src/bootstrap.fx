@@ -21,7 +21,7 @@
 (define b-read (subr b-reading (string) (listof syns acyclic))
   (lambda (text)
     (let ((st (b-feed (eager-start-fx26) text 0)))
-      (if (string=? (datum-symbol-name (eager-status st)) "complete")
+      (if (string=? (symbol->string (eager-status st)) "complete")
           (cons (eager-state-syntax st) nil)
           nil))))
 

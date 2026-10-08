@@ -9,7 +9,7 @@
 //!
 //! Three measures, each well-founded:
 //! - **parts**: a component of a sum or product, the `car` or `cdr` of a
-//!   pair at an `acyclic` region, the `datum-car` or `datum-cdr` of a datum.
+//!   pair at an `acyclic` region (a datum's, through its union).
 //!   Each was made before what holds it, and none can be changed, so no
 //!   cycle runs through them;
 //! - **down**: an integer less by a literal, where a test has bounded the
@@ -529,14 +529,6 @@ impl Walk<'_> {
                             Ty::NList { elem, .. } => Some(Tracked::Part { param, strict: true, ty: Some(if op == "car" { *elem } else { ty }) }),
                             _ => None,
                         }
-                    })
-                    .collect(),
-                (Some("datum-car" | "datum-cdr"), [x]) => self
-                    .tracked(*x)
-                    .into_iter()
-                    .filter_map(|k| match k {
-                        Tracked::Part { param, ty, .. } => Some(Tracked::Part { param, strict: true, ty }),
-                        Tracked::Int { .. } => None,
                     })
                     .collect(),
                 (Some(op @ ("+" | "-")), [a, b]) => {

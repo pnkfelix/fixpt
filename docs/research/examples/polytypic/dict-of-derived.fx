@@ -7,7 +7,7 @@
 (define-type (eqd (t type) (e effect))
   (productof (eq (subr e (t t) bool)) (show (subr e (t) datum))))
 (define int-d (eqd int pure)
-  (product (eq (lambda (x y) (= x y))) (show (lambda (x) (datum-int x)))))
+  (product (eq (lambda (x y) (= x y))) (show (lambda (x) x))))
 (define list-d
   (poly ((t type) (e effect)) (subr pure ((eqd t e)) (eqd (listof t acyclic) e)))
   (lambda (d)
@@ -23,8 +23,8 @@
      (show (lambda (xs)
              (letrec ((go (subr e ((listof t acyclic)) datum)
                         (lambda (xs)
-                          (if (null? xs) (datum-list (the (listof datum @l) nil))
-                              (datum-cons ((extract d show) (car xs)) (go (cdr xs)))))))
+                          (if (null? xs) nil
+                              (cons ((extract d show) (car xs)) (go (cdr xs)))))))
                (go xs)))))))
 (define member
   (poly ((t type) (e effect)) (subr e ((eqd t e) t (listof t acyclic)) bool))

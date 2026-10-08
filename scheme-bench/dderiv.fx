@@ -8,8 +8,10 @@
 ;;;            (* (* b x) (+ (/ 0 b) (/ 1 x)))
 ;;;            0)
 ;;;
-;;; The expressions are FX-26 `datum`s, Scheme's own data, built and taken
-;;; apart by the `datum-` operations; `eq?` on symbols is `symbol=?`.
+;;; The expressions are FX-26 `datum`s, Scheme's own data, a union: built
+;;; with `cons` and taken apart with `pair?`, `car` and `cdr` as Scheme's are
+;;; (until 2026-10-08 by `datum-` operations, 3.38 s native, now 1.65);
+;;; `eq?` on symbols is `symbol=?`.
 ;;; Scheme's `map` over the operands is written out, once for `dderiv` and
 ;;; once for the lambda of the `*` case. The input is built in the file.
 ;;; Larceny checks the result with `equal?` against its input file; here
@@ -27,15 +29,15 @@
 ;;; Returns the wrong answer for quotients.
 ;;; Fortunately these aren't used in the benchmark.
 
-(define* sym (subr pure (string) datum) (lambda (s) (datum-symbol s)))
+(define* sym (subr pure (string) datum) (lambda (s) (string->symbol s)))
 (define* is? (subr pure (datum symbol) bool)
-  (lambda (a s) (and (datum-symbol? a) (symbol=? (datum->symbol a) s))))
+  (lambda (a s) (and (symbol? a) (symbol=? a s))))
 (define* list2 (subr pure (datum datum) datum)
-  (lambda (a b) (datum-cons a (datum-cons b (datum-list (the (listof datum @heap) nil))))))
+  (lambda (a b) (cons a (cons b nil))))
 (define* list3 (subr pure (datum datum datum) datum)
-  (lambda (a b c) (datum-cons a (list2 b c))))
+  (lambda (a b c) (cons a (list2 b c))))
 (define* list4 (subr pure (datum datum datum datum) datum)
-  (lambda (a b c d) (datum-cons a (list3 b c d))))
+  (lambda (a b c d) (cons a (list3 b c d))))
 
 ;; The quoted symbols, made once as Scheme's quoted constants are.
 (define plus-sym datum (sym "+"))
@@ -104,55 +106,56 @@
 
 (define* dderiv (subr derives (datum) datum)
   (lambda (a)
-    (if (not (datum-pair? a))
-        (if (is? a 'x) (datum-int 1) (datum-int 0))
-        (let ((f (get (datum->symbol (datum-car a)) 'dderiv no-method)))
-          (f a)))))
+    (if (not (pair? a))
+        (if (is? a 'x) 1 0)
+        (typecase (car a)
+          (symbol h ((get h 'dderiv no-method) a))
+          (else e (no-method a))))))
 
 ;; (map dderiv l)
 (define* map-dderiv (subr derives (datum) datum)
   (lambda (l)
-    (if (datum-null? l)
+    (if (null? l)
         l
-        (datum-cons (dderiv (datum-car l)) (map-dderiv (datum-cdr l))))))
+        (cons (dderiv (car l)) (map-dderiv (cdr l))))))
 
 ;; (map (lambda (a) (list '/ (dderiv a) a)) l)
 (define* map-quotient (subr derives (datum) datum)
   (lambda (l)
-    (if (datum-null? l)
+    (if (null? l)
         l
-        (datum-cons (list3 quotient-sym (dderiv (datum-car l)) (datum-car l))
-                    (map-quotient (datum-cdr l))))))
+        (cons (list3 quotient-sym (dderiv (car l)) (car l))
+              (map-quotient (cdr l))))))
 
 (define* my+dderiv method
   (lambda (a)
-    (datum-cons plus-sym
-                (map-dderiv (datum-cdr a)))))
+    (cons plus-sym
+          (map-dderiv (cdr a)))))
 
 (define* my-dderiv method
   (lambda (a)
-    (datum-cons minus-sym
-                (map-dderiv (datum-cdr a)))))
+    (cons minus-sym
+          (map-dderiv (cdr a)))))
 
 (define* *dderiv method
   (lambda (a)
     (list3 times-sym
            a
-           (datum-cons plus-sym
-                       (map-quotient (datum-cdr a))))))
+           (cons plus-sym
+                 (map-quotient (cdr a))))))
 
 (define* /dderiv method
   (lambda (a)
     (list3 minus-sym
            (list3 quotient-sym
-                  (dderiv (datum-car (datum-cdr a)))
-                  (datum-car (datum-cdr (datum-cdr a))))
+                  (dderiv (car (cdr a)))
+                  (car (cdr (cdr a))))
            (list3 quotient-sym
-                  (datum-car (datum-cdr a))
+                  (car (cdr a))
                   (list4 times-sym
-                         (datum-car (datum-cdr (datum-cdr a)))
-                         (datum-car (datum-cdr (datum-cdr a)))
-                         (dderiv (datum-car (datum-cdr (datum-cdr a)))))))))
+                         (car (cdr (cdr a)))
+                         (car (cdr (cdr a)))
+                         (dderiv (car (cdr (cdr a)))))))))
 
 (put '+ 'dderiv my+dderiv)
 (put '- 'dderiv my-dderiv)
@@ -164,13 +167,13 @@
 ;; (+ (* 3 x x) (* a x x) (* b x) 5)
 (define input1 datum
   (let ((x (sym "x")) (*s (sym "*")))
-    (datum-cons (sym "+")
-                (list4 (list4 *s (datum-int 3) x x)
-                       (list4 *s (sym "a") x x)
-                       (list3 *s (sym "b") x)
-                       (datum-int 5)))))
+    (cons (sym "+")
+          (list4 (list4 *s 3 x x)
+                 (list4 *s (sym "a") x x)
+                 (list3 *s (sym "b") x)
+                 5))))
 (define iterations int 10000000)
 
 (define* run (subr derives (int datum) datum)
   (lambda (i result) (if (= i 0) result (run (- i 1) (dderiv input1)))))
-(run iterations (datum-int 0))
+(run iterations 0)

@@ -567,7 +567,7 @@ impl Checker {
         let (mut ft, fe) = synthesised?;
         let mut done: Vec<Synthesised> = vec![None; args.len()];
         if matches!(self.arena.get(ft), Ty::Poly { .. }) {
-            let (inst, cached) = self.instantiate(ft, args, expected, span)?;
+            let (inst, cached) = self.instantiate(e, ft, args, expected, span)?;
             self.no_knot(inst, span)?;
             ft = inst;
             done = cached;
@@ -824,6 +824,7 @@ impl Checker {
     /// and, for each argument already synthesised, its type and effect.
     fn instantiate(
         &mut self,
+        e: ExpId,
         ft: TyId,
         args: &[ExpId],
         expected: Option<TyId>,
@@ -871,6 +872,7 @@ impl Checker {
             self.unify(params[i], t, &mut u, &mut HashSet::new());
             done[i] = Some((t, eff));
         }
+        self.partial_pair_argument(e, &params, &mut done, &mut u);
         // A shape conflict is the error to report, before any binder is
         // found unsolved (`DONE.md` §20): the result against what the
         // context expects, which `unify` only uses as a hint, then each
@@ -1073,6 +1075,22 @@ impl Checker {
                 _ => t,
             })
             .collect()
+    }
+
+    /// `car` or `cdr` of a union with a pair member (a `datum`, say) takes
+    /// that member apart: every machine's `car` checks its argument is a
+    /// pair, and traps if not, as it does on `nil` (TODO §51).
+    fn partial_pair_argument(&mut self, e: ExpId, params: &[TyId], done: &mut [Synthesised], u: &mut Unknowns) {
+        let car = |c: &Self| matches!(c.facts.standard_operator.get(&e), Some(s) if matches!(c.interner.name(*s), "car" | "cdr"));
+        if !car(self) {
+            return;
+        }
+        let Some(Some((t, eff))) = done.first().cloned() else { return };
+        let Ty::Union(ms) = self.arena.get(self.arena.resolve(t)).clone() else { return };
+        if let Some(&m) = ms.iter().find(|m| matches!(self.arena.get(self.arena.resolve(**m)), Ty::Pair(..))) {
+            self.unify(params[0], m, u, &mut HashSet::new());
+            done[0] = Some((m, eff));
+        }
     }
 
     /// `t`, or, if a list of any elements (`nil`), the type `nil`.

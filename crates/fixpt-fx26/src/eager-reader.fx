@@ -211,43 +211,42 @@
 (define marking (poly ((t type)) (subr reading (datum (subr reading () t)) t))
   (lambda (what body) (with-mark eager-key what body)))
 
-(define no-data datum (datum-list (the data nil)))
-;; A datum list of two, three or four, built with `datum-cons`, as data from
-;; the start: a list made with `cons` would be copied to make it a datum.
+(define no-data datum nil)
+;; A datum list of two, three or four.
 (define datum-list2 (subr (read @globals) (datum datum) datum)
-  (lambda (a b) (datum-cons a (datum-cons b no-data))))
+  (lambda (a b) (cons a (cons b no-data))))
 (define datum-list3 (subr (read @globals) (datum datum datum) datum)
-  (lambda (a b c) (datum-cons a (datum-list2 b c))))
+  (lambda (a b c) (cons a (datum-list2 b c))))
 (define datum-list4 (subr (read @globals) (datum datum datum datum) datum)
-  (lambda (a b c d) (datum-cons a (datum-list3 b c d))))
+  (lambda (a b c d) (cons a (datum-list3 b c d))))
 (define entry (subr (read @globals) (datum int) datum)
-  (lambda (name start) (datum-list2 name (datum-int start))))
+  (lambda (name start) (datum-list2 name start)))
 (define top-entry (subr (read @globals) () datum)
-  (lambda () (datum-cons (datum-symbol "top") no-data)))
+  (lambda () (cons 'top no-data)))
 (define abbrev-entry (subr (read @globals) (int string) datum)
-  (lambda (start name) (datum-list3 (datum-symbol "abbrev") (datum-int start) (datum-symbol name))))
+  (lambda (start name) (datum-list3 'abbrev start (string->symbol name))))
 ;; A list's mark: its items so far, newest first, as a datum the reader
 ;; builds a pair at a time as it reads them, not copied at each.
 (define list-entry (subr (read @globals) (datum int char datum) datum)
   (lambda (name start close items)
-    (datum-list4 name (datum-int start) (datum-char close) items)))
+    (datum-list4 name start close items)))
 ;; `items`, newest first, in order, onto `done`.
 (define datum-reverse-onto (subr (read @globals) (datum datum) datum)
   (lambda (items done)
-    (if (datum-null? items)
+    (if (null? items)
         done
-        (datum-reverse-onto (datum-cdr items) (datum-cons (datum-car items) done)))))
+        (datum-reverse-onto (cdr items) (cons (car items) done)))))
 ;; The marks' names, interned once.
-(define m-comment datum (datum-symbol "comment"))
-(define m-block-comment datum (datum-symbol "block-comment"))
-(define m-string datum (datum-symbol "string"))
-(define m-char datum (datum-symbol "char"))
-(define m-atom datum (datum-symbol "atom"))
-(define m-symbol datum (datum-symbol "symbol"))
-(define m-datum-comment datum (datum-symbol "datum-comment"))
-(define m-hash datum (datum-symbol "hash"))
-(define m-list datum (datum-symbol "list"))
-(define m-dotted datum (datum-symbol "dotted"))
+(define m-comment datum 'comment)
+(define m-block-comment datum 'block-comment)
+(define m-string datum 'string)
+(define m-char datum 'char)
+(define m-atom datum 'atom)
+(define m-symbol datum 'symbol)
+(define m-datum-comment datum 'datum-comment)
+(define m-hash datum 'hash)
+(define m-list datum 'list)
+(define m-dotted datum 'dotted)
 
 ;;; -------------------------------------------------------------- strings
 
@@ -303,7 +302,7 @@
             (begin (set ahead-text "") (set ahead-at 0) (set ahead-origin -1) after))))))
 
 (define eager-state-kind (subr inspects (state) datum)
-  (lambda (st) (if (state-need? st) (datum-symbol "need") (datum-symbol "error"))))
+  (lambda (st) (if (state-need? st) 'need 'error)))
 (define eager-state-position (subr inspects (state) int) (lambda (st) (state-position st)))
 (define eager-state-message (subr inspects (state) string) (lambda (st) (state-message st)))
 ;; The complete top-level data read so far, in order.
@@ -327,9 +326,13 @@
         (marks-of (car (state-ks st)) eager-key)
         nil)))
 
-(define entry-name (subr pure (datum) string) (lambda (e) (datum-symbol-name (datum-car e))))
+(define entry-name (subr pure (datum) string)
+  (lambda (e)
+    (typecase (car e)
+      (symbol s (symbol->string s))
+      (else x (error "an entry is named by a symbol")))))
 (define entry-ref (subr (read @globals) (datum int) datum)
-  (lambda (e i) (if (= i 0) (datum-car e) (entry-ref (datum-cdr e) (- i 1)))))
+  (lambda (e i) (if (= i 0) (car e) (entry-ref (cdr e) (- i 1)))))
 
 (define settled? (subr (maxeff (read @globals) (read @c) spin) (context) bool)
   (lambda (ctx)
@@ -338,39 +341,41 @@
              (settled? (cdr ctx))))))
 
 ;; `complete`, `incomplete` or `error`.
-(define eager-status (subr asks (state) datum)
+(define eager-status (subr asks (state) symbol)
   (lambda (st)
-    (cond ((not (state-need? st)) (datum-symbol "error"))
-          ((settled? (the context (eager-context st))) (datum-symbol "complete"))
-          (else (datum-symbol "incomplete")))))
+    (cond ((not (state-need? st)) 'error)
+          ((settled? (the context (eager-context st))) 'complete)
+          (else 'incomplete))))
 
 ;; `help` and `?`: what a `,help` hole may say.
 (define help-name? (subr (read @globals) (string) bool) (lambda (n) (either? n "help" "?")))
 (define hole? (subr (read @globals) (datum) bool)
   (lambda (d)
-    (and (datum-pair? d)
-         (datum-symbol? (datum-car d))
-         (string=? (datum-symbol-name (datum-car d)) "unquote")
-         (datum-pair? (datum-cdr d))
-         (datum-symbol? (datum-car (datum-cdr d)))
-         (help-name? (datum-symbol-name (datum-car (datum-cdr d))))
-         (datum-null? (datum-cdr (datum-cdr d))))))
+    (and (pair? d)
+         (symbol? (car d))
+         (string=? (symbol->string (car d)) "unquote")
+         (pair? (cdr d))
+         (symbol? (car (cdr d)))
+         (help-name? (symbol->string (car (cdr d))))
+         (null? (cdr (cdr d))))))
 
 (define closing (subr in-context (context closers) datum)
   (lambda (ctx acc)
     (if (null? ctx)
-        (datum-bool #f)
+        #f
         (let ((n (entry-name (car ctx))))
-          (cond ((string=? n "top") (datum-string (list->string (the closers (reverse acc)))))
+          (cond ((string=? n "top") (list->string (the closers (reverse acc))))
                 ((either? n "list" "dotted")
-                 (closing (cdr ctx) (cons (datum-char-value (entry-ref (car ctx) 2)) acc)))
+                 (typecase (entry-ref (car ctx) 2)
+                   (char c (closing (cdr ctx) (cons c acc)))
+                   (else x #f)))
                 ((string=? n "hash") (closing (cdr ctx) acc))
-                (else (datum-bool #f)))))))
+                (else #f))))))
 
 ;; Whether the newest item a list's mark `e` holds is a `,help` hole.
 (define ends-in-hole? (subr (read @globals) (datum) bool)
   (lambda (e)
-    (let ((items (entry-ref e 3))) (and (datum-pair? items) (hole? (datum-car items))))))
+    (let ((items (entry-ref e 3))) (and (pair? items) (hole? (car items))))))
 
 ;; If the newest thing read in the innermost open list is a `,help` hole,
 ;; the characters that would close every open list; otherwise #f.
@@ -379,7 +384,7 @@
     (let ((ctx (the context (eager-context st))))
       (if (and (not (null? ctx)) (string=? (entry-name (car ctx)) "list") (ends-in-hole? (car ctx)))
           (closing ctx nil)
-          (datum-bool #f)))))
+          #f))))
 
 (define line-comment (subr reading (cursor) cursor)
   (lambda (cur)
@@ -435,7 +440,7 @@
                    (run (subr reading (char int chars) result)
                      (lambda (c pos acc)
                        (case c ((#\")
-                                (cons (atom (datum-string (acc->string acc)) start (+ pos 1))
+                                (cons (atom (acc->string acc) start (+ pos 1))
                                       (make-cursor nil (+ pos 1) data nil)))
                                ((#\\) (escape (next-at pos data) acc))
                                (else (run (next-char (+ pos 1) data) (+ pos 1) (cons c acc))))))
@@ -475,8 +480,8 @@
 ;; A proper list of exact integers in 0..=255.
 (define bytes? (subr (read @globals) (datum) bool)
   (lambda (d)
-    (or (datum-null? d)
-        (and (datum-pair? d) (datum-byte? (datum-car d)) (bytes? (datum-cdr d))))))
+    (or (null? d)
+        (and (pair? d) (datum-byte? (car d)) (bytes? (cdr d))))))
 
 ;; The characters up to the next delimiter.
 (define read-word (subr reading (cursor) word)
@@ -514,15 +519,15 @@
       (lambda ()
         (let* ((first (cur-char cur)) (w (read-word (advance cur))) (rest (car w)) (cur (cdr w)))
           (if (string=? rest "")
-              (atom-at (datum-char first) start cur)
+              (atom-at first start cur)
               (let* ((name (string-append (char-string first) rest))
                      (lower (string-downcase name))
                      (named (char-name lower)))
-                (cond ((>= named 0) (atom-at (datum-char (integer->char named)) start cur))
+                (cond ((>= named 0) (atom-at (integer->char named) start cur))
                       ((and (char=? (string-ref lower 0) #\x) (> (string-length lower) 1))
                        (let ((n (parse-nat (substring lower 1 (string-length lower)) 16)))
                          (if (>= n 0)
-                             (atom-at (datum-char (integer->char n)) start cur)
+                             (atom-at (integer->char n) start cur)
                              (char-name-fail cur start "bad" name))))
                       (else (char-name-fail cur start "unknown" name))))))))))
 
@@ -568,7 +573,7 @@
         (fail cur (str3 "unexpected `" (char-string c) "`"))
         (let ((n (as-number text escaped)))
           (if (null? n)
-              (atom-at (datum-symbol text) (extract in start) cur)
+              (atom-at (string->symbol text) (extract in start) cur)
               (atom-at (car n) (extract in start) cur))))))
 
 (define-rec
@@ -657,14 +662,14 @@
   (lambda (cur start)
     (let* ((w (read-word cur)) (word (car w)))
       (if (string=? word "%fx")
-          (atom-at (datum-symbol "#%fx") start (cdr w))
+          (atom-at (string->symbol "#%fx") start (cdr w))
           (unknown-hash (cdr w) start word)))))
 ;; `#t`, `#true`, `#f` or `#false`, `cur` at the letter.
 (define read-bool (subr reading (cursor int) result)
   (lambda (cur start)
     (let* ((w (read-word cur)) (word (car w)) (lower (string-downcase word)))
-      (cond ((either? lower "t" "true") (atom-at (datum-bool #t) start (cdr w)))
-            ((either? lower "f" "false") (atom-at (datum-bool #f) start (cdr w)))
+      (cond ((either? lower "t" "true") (atom-at #t start (cdr w)))
+            ((either? lower "f" "false") (atom-at #f start (cdr w)))
             (else (unknown-hash (cdr w) start word))))))
 
 ;;; -------------------------------------------------------------- atmosphere
@@ -713,8 +718,8 @@
       (marking (abbrev-entry start name)
         (lambda ()
           (let ((r (read-datum (skip-atmosphere cur))))
-            (cons (lst (the syns (list (atom (datum-symbol name) start (+ start 1)) (car r)))
-                       (datum-list2 (datum-symbol name) (syn->datum (car r)))
+            (cons (lst (the syns (list (atom (string->symbol name) start (+ start 1)) (car r)))
+                       (datum-list2 (string->symbol name) (syn->datum (car r)))
                        start
                        (cur-pos (cdr r)))
                   (cdr r)))))))
@@ -739,7 +744,7 @@
                (more (subr reading (result data datum syns) result)
                  (lambda (r items items-d syns)
                    (let ((d (syn->datum (car r))))
-                     (loop (cdr r) (cons d items) (datum-cons d items-d) (cons (car r) syns)))))
+                     (loop (cdr r) (cons d items) (cons d items-d) (cons (car r) syns)))))
                ;; After a `.`: the tail of a dotted list, or an atom that
                ;; starts with one.
                (dot (subr reading (cursor data datum syns) result)
@@ -790,7 +795,7 @@
       (let* ((w (read-word cur)) (word (car w)) (cur (cdr w)))
         (cond ((and (string-ci=? word "u") (fx26?))
                ;; FX-26's unit value, beside `#u8(`.
-               (atom-at (datum-symbol "#u") start cur))
+               (atom-at (string->symbol "#u") start cur))
               ((not (string-ci=? word "u8")) (unknown-hash cur start word))
               ((not (char=? (cur-char cur) #\()) (fail cur "expected `(` after `#u8`"))
               (else
@@ -833,7 +838,7 @@
 (define read-text (subr (maxeff reading asks (read @s) (alloc @s)) (string) (listof syns acyclic))
   (lambda (text)
     (let ((st (eager-feed (eager-feed-string (eager-start-fx26) text) (integer->char 10))))
-      (if (string=? (datum-symbol-name (eager-status st)) "complete")
+      (if (string=? (symbol->string (eager-status st)) "complete")
           (list (eager-state-syntax st))
           nil))))))
 

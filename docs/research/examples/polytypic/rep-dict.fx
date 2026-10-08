@@ -5,10 +5,10 @@
 (define-type (rep (t type))
   (productof (eq (subr walk (t t) bool)) (show (subr walk (t) datum)) (size (subr walk (t) int))))
 (define rep-int (rep int)
-  (product (eq (lambda (x y) (= x y))) (show (lambda (x) (datum-int x))) (size (lambda (x) 1))))
+  (product (eq (lambda (x y) (= x y))) (show (lambda (x) x)) (size (lambda (x) 1))))
 ;; (a b) as a datum list.
 (define d2 (subr pure (datum datum) datum)
-  (lambda (a b) (datum-cons a (datum-cons b (datum-list (the (listof datum @l) nil))))))
+  (lambda (a b) (cons a (cons b nil))))
 (define rep-pair
   (poly ((a type) (b type)) (subr pure ((rep a) (rep b)) (rep (productof (1 a) (2 b)))))
   (lambda (ra rb)
@@ -32,7 +32,7 @@
   (poly ((a type)) (subr pure (symbol (rep a)) (rep a)))
   (lambda (name ra)
     (product (eq (extract ra eq))
-             (show (lambda (x) (d2 (datum-symbol (symbol->string name)) ((extract ra show) x))))
+             (show (lambda (x) (d2 (string->symbol (symbol->string name)) ((extract ra show) x))))
              (size (extract ra size)))))
 ;; A user type enters through a conversion into the generic view: the
 ;; `from` half of an embedding-projection pair (Cheney and Hinze).

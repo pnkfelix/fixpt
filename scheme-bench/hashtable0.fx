@@ -62,7 +62,7 @@
 
 ;; A fixnum key: its value is its identity.
 (define* fixnum-key (subr pure (int) key)
-  (lambda (n) (cons n (datum-int n))))
+  (lambda (n) (cons n n)))
 
 (define* same-key? (subr pure (key key) bool)
   (lambda (a b) (= (car a) (car b))))
@@ -140,23 +140,23 @@
 (define* report-failure! (subr tables (int) unit)
   (lambda (n) (set failures (cons n (get failures)))))
 
-(define datum-nil datum (datum-list (the (listof datum @heap) nil)))
-(define sym-a datum (datum-symbol "a"))
-(define sym-b datum (datum-symbol "b"))
-(define sym-c datum (datum-symbol "c"))
-(define sym-d datum (datum-symbol "d"))
-(define sym-e datum (datum-symbol "e"))
+(define datum-nil datum nil)
+(define sym-a datum 'a)
+(define sym-b datum 'b)
+(define sym-c datum 'c)
+(define sym-d datum 'd)
+(define sym-e datum 'e)
 
 ;; (eq? s v), s a symbol
 (define* eq-symbol? (subr pure (datum datum) bool)
-  (lambda (s v) (and (datum-symbol? v) (symbol=? (datum->symbol s) (datum->symbol v)))))
+  (lambda (s v) (and (symbol? s) (symbol? v) (symbol=? s v))))
 
 ;; (eq? not-found v)
 (define* not-found? (subr pure (datum) bool)
   (lambda (v)
-    (and (datum-pair? v)
-         (datum-symbol? (datum-car v))
-         (symbol=? (datum->symbol (datum-car v)) 'not-found))))
+    (and (pair? v)
+         (symbol? (car v))
+         (symbol=? (car v) 'not-found))))
 
 ; The parameter n2 is the number of items to be added to the table
 ; during the stress phase.
@@ -168,18 +168,18 @@
                       (report-failure! n)
                       #u))))
       (let ((t (maker))
-            (not-found (datum-list (the (listof datum @heap) (cons (datum-symbol "not-found") nil))))
-            (x1 (make-key (datum-string "abc")))                       ; (string #\a #\b #\c)
-            (sym1 (make-key (datum-symbol "sym1")))
-            (vec1 (make-key (datum-list->vector (datum-list (the (listof datum @heap) (cons (datum-symbol "vec1") nil))))))
-            (pair1 (make-key (datum-list (the (listof datum @heap) (cons (datum-int -1) nil)))))
+            (not-found (the datum (cons 'not-found nil)))
+            (x1 (make-key "abc"))                       ; (string #\a #\b #\c)
+            (sym1 (make-key 'sym1))
+            (vec1 (make-key (datum-list->vector (the datum (cons 'vec1 nil)))))
+            (pair1 (make-key (the datum (cons -1 nil))))
             (n2-key (fixnum-key n2))
             (n1 1000)             ; population added in first phase
            ;(n2 10000)            ; population added in second phase
             (n3 1000))            ; population added in third phase
 
         (let ((hash-table-get (lambda ((t table) (key key))
-                                (hash-table-ref/default t key (datum-bool #f))))
+                                (hash-table-ref/default t key #f)))
               ;; (do ((i 0 (+ i 1))) ((= i n)) (hash-table-set! t (list i) i))
               (add (lambda ((t table) (n int))
                      (letrec ((loop (subr (maxeff tables (read (globals hash-table-set! bucket-of bucket-find same-key? table-grow
@@ -188,7 +188,7 @@
                                 (lambda (i)
                                   (if (= i n)
                                       #u
-                                      (begin (hash-table-set! t (make-key (datum-cons (datum-int i) datum-nil)) (datum-int i))
+                                      (begin (hash-table-set! t (make-key (cons i datum-nil)) i)
                                              (loop (+ i 1)))))))
                        (loop 0)))))
           (begin
@@ -224,7 +224,7 @@
                              #u
                              (begin
                                (test 14 (eq-symbol? sym-e (hash-table-get t pair1)))
-                               (hash-table-set! t (make-key (datum-cons (datum-int i) datum-nil)) (datum-int i))
+                               (hash-table-set! t (make-key (cons i datum-nil)) i)
                                (loop (+ i 1)))))))
               (loop 0))
             (test 15 (eq-symbol? sym-a (hash-table-get t x1)))

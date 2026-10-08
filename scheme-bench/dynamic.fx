@@ -2224,16 +2224,16 @@
 (define* val->datum (subr (maxeff (read @heap) (alloc @heap) spin) (val) datum)
   (lambda (x)
     (tagcase x
-      (vnull () (datum-list (the (listof datum @heap) nil)))
-      (vbool (b) (datum-bool b))
-      (vchar (c) (datum-char c))
-      (vint (n) (datum-int n))
-      (vstr (s) (datum-string s))
-      (vsym (s) (datum-symbol (symbol->string s)))
-      (vpair (p) (datum-cons (val->datum (car p)) (val->datum (cdr p))))
-      (vvec (v) (datum-symbol "#<vector>"))
-      (vproc (f) (datum-symbol "#<procedure>"))
-      (veof () (datum-symbol "#<eof>")))))
+      (vnull () nil)
+      (vbool (b) b)
+      (vchar (c) c)
+      (vint (n) n)
+      (vstr (s) s)
+      (vsym (s) (string->symbol (symbol->string s)))
+      (vpair (p) (cons (val->datum (car p)) (val->datum (cdr p))))
+      (vvec (v) (string->symbol "#<vector>"))
+      (vproc (f) (string->symbol "#<procedure>"))
+      (veof () (string->symbol "#<eof>")))))
 
 ;; Larceny's input file, inputs/dynamic.data, verbatim; `read-datum` reads it.
 (define input-text string ";;; DYNAMIC -- Obtained from Andrew Wright.

@@ -168,7 +168,10 @@
 
 (define* make-node (subr cf (datum (listof edge @heap)) node)   ; User's constructor
   (lambda (name blue-edges)
-    (let ((name (if (datum-symbol? name) (datum-symbol-name name) (datum-string-value name))))
+    (let ((name (typecase name
+                  (symbol s (symbol->string s))
+                  (string s s)
+                  (else e (begin (error "make-node: a name is a symbol or a string") "")))))
       (make-internal-node name nil nil blue-edges))))
 
 ; Selectors
@@ -179,10 +182,10 @@
 ;; (Here, before the edge getters and setters, which test for them: an
 ;; FX-26 definition sees only those before it.)
 
-(define none-node node (make-node (datum-symbol "none") nil))
+(define none-node node (make-node 'none nil))
 (define* none-node? (subr (read @heap) (node) bool) (lambda (node) (eq? node none-node)))
 
-(define any-node node (make-node (datum-symbol "any") nil))
+(define any-node node (make-node 'any nil))
 (define* any-node? (subr (read @heap) (node) bool) (lambda (node) (eq? node any-node)))
 
 ;; `make-edge-getter`, and each getter it makes, which ANY and NONE
@@ -553,7 +556,7 @@
               ((conforms? node2 node1) node1)
               (else
                (let ((result
-                      (make-node (datum-string (string-append "(" (string-append (name node1) (string-append " ^ " (string-append (name node2) ")")))))
+                      (make-node (string-append "(" (string-append (name node1) (string-append " ^ " (string-append (name node2) ")"))))
                                  nil)))
                  (begin
                    (add-graph-nodes! graph result)
@@ -577,7 +580,7 @@
               ((conforms? node2 node1) node2)
               (else
                (let ((result
-                      (make-node (datum-string (string-append "(" (string-append (name node1) (string-append " v " (string-append (name node2) ")")))))
+                      (make-node (string-append "(" (string-append (name node1) (string-append " v " (string-append (name node2) ")"))))
                                  nil)))
                  (begin
                    (add-graph-nodes! graph result)
@@ -650,20 +653,20 @@
 ;; The inputs, where no compiler can fold them (Larceny's `hide`): globals,
 ;; which a later definition may replace. `(a b "c" "d")`:
 (define input1 datum
-  (datum-cons (datum-symbol "a")
-              (datum-cons (datum-symbol "b")
-                          (datum-cons (datum-string "c")
-                                      (datum-cons (datum-string "d")
-                                                  (datum-list (the (listof datum @heap) nil)))))))
+  (cons 'a
+        (cons 'b
+              (cons "c"
+                    (cons "d"
+                          nil)))))
 (define iterations int 500)
 
 ;; `(apply test input1)`
 (define* apply-test (subr (maxeff cf (read (globals test))) (datum) (listof string @heap))
   (lambda (l)
-    (test (datum-car l)
-          (datum-car (datum-cdr l))
-          (datum-car (datum-cdr (datum-cdr l)))
-          (datum-car (datum-cdr (datum-cdr (datum-cdr l)))))))
+    (test (car l)
+          (car (cdr l))
+          (car (cdr (cdr l)))
+          (car (cdr (cdr (cdr l)))))))
 
 (define* run (subr (maxeff cf (read (globals apply-test input1))) (int (listof string @heap)) (listof string @heap))
   (lambda (i result) (if (= i 0) result (run (- i 1) (apply-test input1)))))

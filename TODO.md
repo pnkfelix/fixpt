@@ -1493,7 +1493,13 @@ infer the precise category of the lattice (`docs/research/shapes.md`):
   `bytevector?` new tests; `car`/`cdr` of a union's pair member count as
   parts for termination. So a quoted list's type can be `datum` with no
   new type. A cyclic counterpart (datum labels) would be the same union at
-  `const`. The `datum-` operations remain (retiring them next).
+  `const`. The `datum-` constructors, predicates and accessors are
+  retired (2026-10-08): `car`/`cdr` of a union with a pair member are
+  checked as of a pair that may be `nil`; the identity casts
+  (`datum-int-value` and kin, unchecked at run time) became tests or
+  `typecase`s. Natively: `deriv` 2.69 → 0.92 s, `dderiv` 3.38 → 1.65,
+  `earley` 3.77 → 3.34, `peval` 7.18 → 6.77, answers the same; `parsing`
+  8.1 → 8.3 (same allocation and collections: to look into).
 
 ## 52. Deep recursion in native code: what is left (the user's, 2026-10-07)
 
@@ -1657,3 +1663,17 @@ do as they do). Left: checking a `lambda` against such a type (until then
 refused, its body a `bool`). Paths done too (2026-10-08, below).
 Checking a `lambda` against such a type waits on a concrete motivation, a
 program that needs its own predicate to narrow (the user's, 2026-10-08).
+
+## 58. `sum` cannot be a keyword (the user's, 2026-10-08)
+
+`(sum tag expression)`, the injection into an anonymous sum, takes the
+name `sum` from every program: writing the `datum` union's test program, a
+`(define* sum …)` was read as a malformed injection (`(sum tag
+expression)`), in both parsers (`parse.rs`, `parser-exps.fx`). A program's
+own definition should win, as a local binding does for an ordinary name.
+Likely through modules (§34, §37): the core forms as a module's names,
+imported by default and shadowed or qualified (`(with #%fx sum)`, as
+standard references already are, §46). The same holds for the other
+forms written as names a program would want (`product`, `extract`,
+`new`, `get`, `set`, …): a survey of which are keywords, which are
+standard bindings, and which could move from the first to the second.

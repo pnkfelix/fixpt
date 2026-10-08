@@ -786,15 +786,15 @@
 
 ;; The result as a datum, to print as Larceny does.
 (define* row->datum (subr M (row) datum)
-  (lambda (r) (if (null? r) (datum-list (the (listof datum @heap) nil)) (datum-cons (datum-int (car r)) (row->datum (cdr r))))))
+  (lambda (r) (if (null? r) nil (cons (car r) (row->datum (cdr r))))))
 (define* mat->datum (subr M (mat) datum)
-  (lambda (m) (if (null? m) (datum-list (the (listof datum @heap) nil)) (datum-cons (row->datum (car m)) (mat->datum (cdr m))))))
+  (lambda (m) (if (null? m) nil (cons (row->datum (car m)) (mat->datum (cdr m))))))
 (define* entries->datum (subr M ((listof entry @heap)) datum)
   (lambda (es)
     (if (null? es)
-        (datum-list (the (listof datum @heap) nil))
-        (datum-cons (tagcase (car es) (a-mat (m) (mat->datum m)) (ellipsis (s) (datum-string s)))
-                    (entries->datum (cdr es))))))
+        nil
+        (cons (tagcase (car es) (a-mat (m) (mat->datum m)) (ellipsis (s) s))
+              (entries->datum (cdr es))))))
 
 ;; The inputs, where no compiler can fold them (Larceny's `hide`): globals,
 ;; which a later definition may replace.

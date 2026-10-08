@@ -126,18 +126,18 @@
   (lambda (message a b) (abort-current-continuation parse-tag (p-err message a b))))
 
 (define syn-symbol? (subr pure (syn) bool)
-  (lambda (s) (tagcase s (atom (d a b) (datum-symbol? d)) (else x #f))))
+  (lambda (s) (tagcase s (atom (d a b) (symbol? d)) (else x #f))))
 (define syn-name (subr pure (syn) string)
   (lambda (s)
     (tagcase s
-      (atom (d a b) (if (datum-symbol? d) (datum-symbol-name d) ""))
+      (atom (d a b) (if (symbol? d) (symbol->string d) ""))
       (else x ""))))
 ;; A form's head as a symbol, to compare with the keywords: any that is
 ;; not a name is taken as `()`, which is none of them.
 (define syn-head (subr pure (syn) symbol)
   (lambda (s)
     (tagcase s
-      (atom (d a b) (if (datum-symbol? d) (datum->symbol d) '|()|))
+      (atom (d a b) (if (symbol? d) d '|()|))
       (else x '|()|))))
 (define syn-symbol (subr parses (syn) symbol)
   (lambda (s) (if (syn-symbol? s) (syn-head s) (pfail "a name" s))))
@@ -155,7 +155,7 @@
       (lst (items d a b) items)
       (else x (pfail (string-append what ": expected a list") s)))))
 (define syn-int (subr pure (syn) int)
-  (lambda (s) (tagcase s (atom (d a b) (if (datum-int? d) (datum-int-value d) -1)) (else x -1))))
+  (lambda (s) (tagcase s (atom (d a b) (if (datum-int? d) d -1)) (else x -1))))
 
 (define len (subr (maxeff (read @globals) (read @s)) (syns-a) int)
   (lambda (xs) (if (null? xs) 0 (+ 1 (len (cdr xs))))))
@@ -181,11 +181,11 @@
   (lambda (items n shape a b) (if (< (len items) n) (pfail-at shape a b) #u)))
 
 (define mk-symbol (subr (read @globals) (string int int) syn)
-  (lambda (n a b) (atom (datum-symbol n) a b)))
+  (lambda (n a b) (atom (string->symbol n) a b)))
 (define syn-datums (subr (maxeff (read @globals) (read @s)) (syns-a) (listof datum acyclic))
   (lambda (xs) (if (null? xs) nil (cons (syn->datum (car xs)) (syn-datums (cdr xs))))))
 (define mk-list (subr (maxeff (read @globals) (read @s)) (syns-a int int) syn)
-  (lambda (items a b) (lst items (datum-list (syn-datums items)) a b)))
+  (lambda (items a b) (lst items (syn-datums items) a b)))
 ;; A parameter: `name`, or `(name type)`.
 (define parse-param (subr parses (syn) (productof (1 symbol) (2 syns-a)))
   (lambda (p)
@@ -340,10 +340,10 @@
 
 ;; Whether `s` is a string literal; and the string it is.
 (define syn-string? (subr pure (syn) bool)
-  (lambda (s) (tagcase s (atom (d a b) (datum-string? d)) (else x #f))))
+  (lambda (s) (tagcase s (atom (d a b) (string? d)) (else x #f))))
 (define syn-string (subr pure (syn) string)
   (lambda (s)
-    (tagcase s (atom (d a b) (if (datum-string? d) (datum-string-value d) "")) (else x ""))))
+    (tagcase s (atom (d a b) (if (string? d) d "")) (else x ""))))
 ;; `t` alone in a list.
 (define one-syn (subr (read @globals) (syn) syns-a) (lambda (t) (cons t nil)))
 ;; A module's item, of one name.
@@ -396,7 +396,7 @@
 (define datatype? (subr (maxeff (read @globals) (read @s)) (syn) bool)
   (lambda (s) (form-of? s 'define-datatype)))
 
-(define mk-int (subr (read @globals) (int int int) syn) (lambda (i a b) (atom (datum-int i) a b)))
+(define mk-int (subr (read @globals) (int int int) syn) (lambda (i a b) (atom i a b)))
 ;; `(keyword item …)`; `(subr pure (member …) result)`; and `(poly (binder
 ;; …) body)`: each spanning `a`..`b`.
 (define mk-form (subr (maxeff (read @globals) (read @s)) (string syns-a int int) syn)

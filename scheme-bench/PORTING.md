@@ -47,8 +47,9 @@ say what and why in the header:
 
 - **Heterogeneous data** (symbolic expressions, trees of symbols and
   numbers): a `define-datatype` whose variants are the kinds of datum the
-  benchmark uses, or FX-26's `datum` type and its operations
-  (`datum-cons`, `datum-symbol?`, …). Quoted input data becomes a
+  benchmark uses, or FX-26's `datum` type, a union taken apart as
+  Scheme's data are (`pair?`, `car`, `symbol?`, `typecase`) and made with
+  `cons`, `list` and quoted symbols. Quoted input data becomes a
   constructor expression (or a small builder), in the file.
 - **Vectors**: `(arrayof T @heap)`, `make-array`, `array-ref`,
   `array-set!`, `array-length`.

@@ -31,7 +31,9 @@ are in the last section, "Log: the glance's details", and in
   disjoint run-time shapes narrowed by shape predicates and `typecase`
   and `false` below `bool` (2026-10-07, Q7's stages 1 to 3); what a test
   proves in its type, `(bool (then …) (else …))`; `nil` of the type
-  `nil` where nothing says which list (2026-10-08, `DONE.md` §48). Globals are a region; redefinition follows one
+  `nil` where nothing says which list (2026-10-08, `DONE.md` §48);
+  `datum` a union taken apart as Scheme's data are, its `datum-`
+  accessors retired (2026-10-08, `TODO.md` §51). Globals are a region; redefinition follows one
   rule at the REPL and in files, in both checkers; the REPL is
   incremental.
 - **Higher kinds** (2026-10-04; `docs/fx26.md`, "Higher kinds";

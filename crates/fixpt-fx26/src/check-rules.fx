@@ -318,7 +318,7 @@
                             (2 (the (arrayof k-eff @t) (make-array n nil)))))
              (ft (tagcase (k-get (extract rf 1))
                    (ty-poly (bs body)
-                     (let ((inst (k-instantiate (extract rf 1) args expected a b done)))
+                     (let ((inst (k-instantiate (extract rf 1) args expected a b done f)))
                        (begin (k-no-knot inst a b) inst)))
                    (else y (extract rf 1))))
              (callee (k-dependent-callee (k-as-subr ft) args a b))
@@ -376,8 +376,8 @@
       (let ((r (k-rewriting (lambda () (k-te p (k-check arg p))) (k-start arg) (k-end arg)
                             (lambda (m want got) (k-argument-error i got want)))))
         (extract r 2))))
-  (k-instantiate (subr (maxeff checks spin) (int kxs int int int k-done) int)
-    (lambda (ft args expected a b done)
+  (k-instantiate (subr (maxeff checks spin) (int kxs int int int k-done kx) int)
+    (lambda (ft args expected a b done f)
       (let* ((bo (k-binders-of ft)) (kinds (extract bo 1)) (inner (extract bo 2))
              (callee (k-callee-of inner (k-length args))))
         (if (null? callee)
@@ -389,6 +389,7 @@
                   (begin
                     (if (>= expected 0) (k-unify result expected kinds solved (k-new-trail)) #u)
                     (k-inst-asked args params 0 kinds solved done)
+                    (k-partial-pair-arg f (extract done 1) params kinds solved)
                     ;; A shape conflict is the error to report, before any
                     ;; binder is found unsolved (`DONE.md` §20).
                     (k-result-shape expected result kinds solved a b)

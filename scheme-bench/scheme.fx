@@ -1611,17 +1611,17 @@
 (define* obj->datum (subr (maxeff (read @heap) (alloc @heap) spin) (obj) datum)
   (lambda (x)
     (tagcase x
-      (onull () (datum-list (the (listof datum @heap) nil)))
-      (obool (b) (datum-bool b))
-      (oint (n) (datum-int n))
-      (ochar (c) (datum-char c))
-      (ostr (s) (datum-string s))
-      (osym (s) (datum-symbol (symbol->string s)))
-      (opair (p) (datum-cons (obj->datum (car p)) (obj->datum (cdr p))))
+      (onull () nil)
+      (obool (b) b)
+      (oint (n) n)
+      (ochar (c) c)
+      (ostr (s) s)
+      (osym (s) (string->symbol (symbol->string s)))
+      (opair (p) (cons (obj->datum (car p)) (obj->datum (cdr p))))
       (ovec (v) (letrec ((elts (subr (maxeff (read @heap) (alloc @heap) spin (read @globals)) (int (listof datum @heap)) (listof datum @heap))
                                (lambda (i acc) (if (< i 0) acc (elts (- i 1) (cons (obj->datum (array-ref v i)) acc))))))
                   (datum-list->vector (datum-list (elts (- (array-length v) 1) nil)))))
-      (oproc (p) (datum-symbol "#<procedure>")))))
+      (oproc (p) (string->symbol "#<procedure>")))))
 
 ;; Larceny's input, as its `(read)` sees it.
 (define input-text string "

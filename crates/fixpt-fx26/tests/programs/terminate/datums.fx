@@ -2,6 +2,6 @@
 ;;; smaller.
 (define size (subr pure (datum) int)
   (letrec ((size (subr pure (datum) int)
-             (lambda (d) (if (datum-pair? d) (+ (size (datum-car d)) (size (datum-cdr d))) 1))))
+             (lambda (d) (if (pair? d) (+ (size (car d)) (size (cdr d))) 1))))
     size))
-(size (datum-cons (datum-int 1) (datum-cons (datum-int 2) (datum-int 3))))
+(size (cons 1 (cons 2 3)))

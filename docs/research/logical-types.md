@@ -413,7 +413,9 @@ Notes on the pitfalls:
   a sum, its `else` seeing the other tags *and* the other shapes.
 - **Datum predicates**: if `datum` becomes a union (stage 3), `datum-int?`
   and the rest are the shape predicates above and `datum-int-value` is
-  the identity after narrowing.
+  the identity after narrowing. (Done 2026-10-08, `TODO.md` §51: the
+  predicates and accessors are gone, `datum-int?`, the fixnum test, narrows
+  to `int`.)
 
 ### 6.3 Termination, lemmas, confirmation
 
@@ -681,7 +683,9 @@ are read from its name any more, only from its type.
 8. **`datum` as a union (L3)**: its operations would become `car`,
    `cdr` and narrowing, and `datum-car` of a non-pair, a checked error
    today, would be a type error. Is changing `datum`'s operations in the
-   front end acceptable?
+   front end acceptable? (Done 2026-10-08, the user's go-ahead. `car` of a
+   union with a pair member stays a checked error, as `car` of a pair
+   that may be `nil` is: Scheme ports take apart data they never test.)
 
 ## Sources
 

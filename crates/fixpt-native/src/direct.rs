@@ -202,7 +202,7 @@ pub fn stack_stats() -> StackStats {
 }
 
 /// The traps this code raises, by code.
-const TRAPS: [&str; 6] = ["", "out of fuel", "stack overflow", "a primitive failed", "car or cdr of nil", "division by zero"];
+const TRAPS: [&str; 6] = ["", "out of fuel", "stack overflow", "a primitive failed", "car or cdr of a non-pair", "division by zero"];
 const OUT_OF_FUEL: u32 = 1;
 const STACK_OVERFLOW: u32 = 2;
 const PRIM_FAILED: u32 = 3;

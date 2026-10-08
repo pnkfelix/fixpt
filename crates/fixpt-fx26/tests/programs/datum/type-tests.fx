@@ -9,28 +9,28 @@
 (define* kinds (subr pure (datum) int)
   (lambda (d)
     (+ (bit (datum-int? d) 1)
-       (+ (bit (datum-char? d) 2)
-          (+ (bit (datum-bool? d) 4) (+ (bit (datum-string? d) 8) (bit (datum-symbol? d) 16)))))))
+       (+ (bit (char? d) 2)
+          (+ (bit (bool? d) 4) (+ (bit (string? d) 8) (bit (symbol? d) 16)))))))
 (define* all (subr spin (datum int) int)
   (lambda (ds acc)
-    (if (datum-null? ds) acc (all (datum-cdr ds) (+ (* acc 32) (kinds (datum-car ds)))))))
-(define none datum (datum-list (the (listof datum @l) nil)))
+    (if (null? ds) acc (all (cdr ds) (+ (* acc 32) (kinds (car ds)))))))
+(define none datum nil)
 (define* some (subr spin () datum)
   (lambda ()
-    (datum-cons (datum-int 7)
-     (datum-cons (datum-char #\a)
-      (datum-cons (datum-bool #t)
-       (datum-cons (datum-bool #f)
-        (datum-cons (datum-string "abc")
-         (datum-cons (datum-string (doubled "x" 17))
-          (datum-cons (datum-symbol "abc")
-           (datum-cons (datum-cons (datum-int 1) none)
-            (datum-cons none
-             (datum-cons (datum-list->vector (datum-cons (datum-int 1) none))
+    (cons 7
+     (cons #\a
+      (cons #t
+       (cons #f
+        (cons "abc"
+         (cons (doubled "x" 17)
+          (cons 'abc
+           (cons (cons 1 none)
+            (cons none
+             (cons (datum-list->vector (cons 1 none))
               none))))))))))))
 (define same-hash (subr pure () bool)
   (lambda ()
     (let ((abc (symbol-name-hash 'abc)))
-      (and (= abc (symbol-name-hash (datum->symbol (datum-symbol "abc"))))
+      (and (= abc (symbol-name-hash 'abc))
            (not (= abc (symbol-name-hash 'abd)))))))
 (if (same-hash) (all (some) 0) -1)

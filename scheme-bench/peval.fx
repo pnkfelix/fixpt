@@ -929,13 +929,13 @@
 (define* sx->datum (subr (maxeff (read @heap) spin) (sx) datum)
   (lambda (x)
     (tagcase x
-      (sy s (datum-symbol (symbol->string s)))
-      (nm n (datum-int n))
-      (bl b (datum-bool b))
-      (nl u (datum-list (the (listof datum @heap) nil)))
-      (pr p (datum-cons (sx->datum (car p)) (sx->datum (cdr p))))
-      (nc u (datum-symbol "not-constant"))
-      (probe u (datum-symbol "probe")))))
+      (sy s (string->symbol (symbol->string s)))
+      (nm n n)
+      (bl b b)
+      (nl u nil)
+      (pr p (cons (sx->datum (car p)) (sx->datum (cdr p))))
+      (nc u 'not-constant)
+      (probe u 'probe))))
 
 ;; The inputs, where no compiler can fold them (Larceny's `hide'): globals,
 ;; which a later definition may replace.
