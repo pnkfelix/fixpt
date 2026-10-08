@@ -44,7 +44,9 @@
   (lambda (items early f made)
     (cond ((null? items) made)
           ((and (= (extract (car items) 1) 2) (k-has-name? early (car (extract (car items) 2))))
-           (k-mod-early (cdr items) early f (f (car items) made)))
+           (let ((m (f (car items) made)))
+             (begin (k-note-fixed (car (extract (car items) 2)))
+                    (k-mod-early (cdr items) early f m))))
           (else (k-mod-early (cdr items) early f made)))))
 ;; Of parts `ps`, each a module, and its values' names (`k-mod-hazards`).
 (define k-parts-modules (subr (maxeff kreads (alloc @t) spin) (k-parts) k-hazard-list)

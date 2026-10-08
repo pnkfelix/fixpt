@@ -2709,11 +2709,13 @@ The reader and the parser became module files of their regions, made by
 | words     |  79.68 |  79.94 |
 | fx read   | 139.93 | 158.05 |
 | fx parse  |  33.30 |  33.80 |
-| fx check  |   1032 |   6391 |
+| fx check  |   1032 |   1056 |
 | fx words  | 275.32 | 231.70 |
 | fx arm64  | 591.31 | 652.10 |
 
-`fx read` now reads the module files too. `fx check` is the cost of
-showing the instances' types, a megabyte each (`TODO.md` §64): 7,246 ms
-before two of the checker's lookups became tables. A session starts in
-0.18 s, from 0.15 s.
+`fx read` now reads the module files too. `fx check` was 7,246 ms at
+first: the instances' types, shown, were a megabyte each, their types
+written out where names had been; 6,391 ms once two of the checker's
+lookups became tables; then 1,056 ms once a module's early items' `select`s
+were linked as a global module's are, and the names came back (`DONE.md`
+§64). A session starts in 0.18 s, from 0.15 s.

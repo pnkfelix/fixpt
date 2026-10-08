@@ -307,6 +307,11 @@ pub struct Checker {
     /// Where in `env` the globals are: the bindings top-level definitions
     /// made.
     pub(crate) global_slots: HashSet<usize>,
+    /// The `env` slots of a module's items checked before the rest
+    /// (`crate::modorder::early_modules`): bound once for all of the module,
+    /// so that a `select` of one is linked to what it names, as a global's
+    /// is (`link_global_select`).
+    pub(crate) fixed_slots: HashSet<usize>,
 }
 
 /// What checking proved about expressions, keyed by expression. Lowering
@@ -523,6 +528,7 @@ impl Checker {
             outdated: Vec::new(),
             globals_effects: true,
             global_slots: HashSet::new(),
+            fixed_slots: HashSet::new(),
         };
         // FX-87's variadic procedure type, `(vsubr E T R)`: the first
         // generative type, in both checkers, whose insides nothing sees
@@ -3345,6 +3351,7 @@ impl Checker {
         self.env.truncate(n);
         self.known.retain(|(_, i)| *i < n);
         self.global_slots.retain(|i| *i < n);
+        self.fixed_slots.retain(|i| *i < n);
     }
 
     /// Run `f` with `bound` in scope.

@@ -50,6 +50,10 @@
 ;; `k-globals-effects` says so, as the language will once every program
 ;; says what it reads (off until then).
 (define k-global k-flags (new (make-table symbol-hash symbol=?)))
+;; Each binding's flag: a module's item checked before the rest
+;; (`k-early-modules`), bound once for all of the module, so that a `select`
+;; of it is linked as a global's is (`k-link-global-select`).
+(define k-fixed k-flags (new (make-table symbol-hash symbol=?)))
 (define k-globals-effects (ref bool @t) (new #t))
 ;; The latent effect of the lambda checked last: for `define*`, what the
 ;; globals its lambda reads are.
@@ -169,6 +173,7 @@
       (table-set! (get k-env) s (cons t (table-ref (get k-env) s nil)))
       (k-push-flag k-known s)
       (k-push-flag k-global s)
+      (k-push-flag k-fixed s)
       (set k-trail (cons s (get k-trail)))
       (set k-depth (+ (get k-depth) 1)))))
 (define k-mark (subr (maxeff (read @globals) (read @t)) () int) (lambda () (get k-depth)))
@@ -181,6 +186,7 @@
             (table-set! (get k-env) s (cdr (table-ref (get k-env) s nil)))
             (table-set! (get k-known) s (cdr (table-ref (get k-known) s nil)))
             (table-set! (get k-global) s (cdr (table-ref (get k-global) s nil)))
+            (table-set! (get k-fixed) s (cdr (table-ref (get k-fixed) s nil)))
             (set k-trail (cdr (get k-trail)))
             (set k-depth (- (get k-depth) 1))
             (k-unbind-to m))))))
@@ -205,6 +211,10 @@
 ;; Whether the binding `n` names is a global's.
 (define k-global? (subr (maxeff (read @globals) (read @t) spin) (symbol) bool)
   (lambda (n) (let ((st (table-ref (get k-global) n nil))) (and (not (null? st)) (car st)))))
+(define k-note-fixed (subr (maxeff kstate spin) (symbol) unit)
+  (lambda (n) (table-set! (get k-fixed) n (k-set-nth-true (table-ref (get k-fixed) n nil) 0))))
+(define k-fixed? (subr (maxeff (read @globals) (read @t) spin) (symbol) bool)
+  (lambda (n) (let ((st (table-ref (get k-fixed) n nil))) (and (not (null? st)) (car st)))))
 
 ;; Description names in scope, innermost first.
 (define-type k-scope (listof (pairof symbol k-ds @t) acyclic))
@@ -396,6 +406,9 @@
 (define k-known? (with check-env-module k-known?))
 (define k-bind-global (with check-env-module k-bind-global))
 (define k-global? (with check-env-module k-global?))
+(define k-fixed (with check-env-module k-fixed))
+(define k-note-fixed (with check-env-module k-note-fixed))
+(define k-fixed? (with check-env-module k-fixed?))
 (define-type k-scope (select check-env-module k-scope))
 (define k-dscope (with check-env-module k-dscope))
 (define k-lookup-desc (with check-env-module k-lookup-desc))

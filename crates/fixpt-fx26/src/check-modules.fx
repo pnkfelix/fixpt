@@ -509,7 +509,7 @@
 ;; `select` it is; nor a local module's, which may differ by scope.
 (define k-link-global-select (subr (maxeff kstate spin) (symbol int int) unit)
   (lambda (m node to)
-    (if (and (k-global? m)
+    (if (and (or (k-global? m) (k-fixed? m))
              (tagcase (k-get to)
                (ty-lam (bs d) #f)
                (ty-var (v) (= (k-dvar-kind v) 2))

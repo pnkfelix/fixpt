@@ -130,3 +130,19 @@ fn the_rust_compiler_runs_modules_as_lowered() {
     assert!(ran >= 5, "only {ran} ran");
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
+
+/// A type selected from a module's item checked first (a module made in it)
+/// is linked to what it names, as a global module's is: the types that
+/// mention it are not copied, and so show by their names.
+#[test]
+fn selects_of_a_module_made_inside_keep_names() {
+    let mut c = fixpt_fx26::Checker::new();
+    c.base_dir = Some(std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs/module-files")));
+    c.check_program("(define m ((proj (load-module \"names-outer.fx\") @q)))\n0").expect("checks");
+    let m = c.interner.intern("m");
+    let t = c.type_of_name(m).expect("defined");
+    let shown = c.show_ty(t);
+    for part in ["(desc t (sumof (td (productof (1 e)))", "(val ev (subr pure (s) e))", "(val td (subr pure (e) t))"] {
+        assert!(shown.contains(part), "{part} in {shown}");
+    }
+}

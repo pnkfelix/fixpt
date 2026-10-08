@@ -870,3 +870,37 @@ in one branch joins to the other branch's list type.
   - Tests: `tests/bidirectional.rs`
     (`nil_is_of_the_type_nil_where_nothing_says_which_list`, and
     `a_type_nothing_determines_is_an_error` now with `(car nil)`).
+
+## 64. The reader's module types, shown, are megabytes (2026-10-08)
+
+Since the reader and the parser are module files made by `reader.fx`, the
+front end's top level holds their instances: `make-reader`,
+`parser-top-module`, `parser-exps-module`, `parser-module`. Each one's type,
+as both checkers show it for the form's line, is about 1 MB (290 KB,
+540 KB, 946 KB, 948 KB), for two reasons. Each module holds the one below
+as a value, so each type holds the one below's whole type; the
+`parser-top` one holds `parser-exps`'s, and `parser`'s and the reader's
+again. And types the parser defines show written out (`(mu %4 (sumof
+(e-var …` inside `top`), not by name, though a small module's datatypes
+keep their names; perhaps because they mention `syn` through a `select`, and
+so are not noted closed (`k-closed-named`) and are copied by substitution.
+The checker written in FX-26 builds those strings by appending, so its
+check of the front end went from 1.0 s to 6.4 s (`fixpt bench --front-end`,
+"fx check"), most of it there (sampled: `Heap::string_points_into`); the
+Rust checker is barely slower (614 to 646 ms). Neither user programs nor
+session start are affected (0.15 to 0.18 s).
+
+**Done (2026-10-08).** Why the names were lost: a `select` of a global
+module is linked to what it names (`link_global_select`,
+`k-link-global-select`), so types through it are shared and keep their
+names; a `select` of a module's item was resolved by copying instead, at
+each resolution, so `exp` in `top`, in each constructor's signature and in
+its own description were all copies, and only one could be named. Now an
+item checked before the rest of its module (`early_modules`), bound once
+for all of it, is linked as a global is (`fixed_slots`, `k-fixed`). The
+largest type shown is 104 KB, from 948 KB; the checker written in FX-26
+checks the front end in 1,056 ms (1,032 before the move). Before that, on
+the way: substitution's and `k-finitize`'s memos became hash tables, not
+lists (quadratic on a large type), and naming a type while showing it
+uses a tree made once per type shown (`k-atree`). Not done, not needed
+now: an upper file holding only the instance just below.

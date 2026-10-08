@@ -85,6 +85,7 @@ impl Checker {
             let (t, ie) = self.synth(init)?;
             eff = eff.union(&ie);
             let bound = self.name_nat(name, t);
+            self.fixed_slots.insert(self.env.len());
             self.env.push((name, bound));
             typed.push((i, name, t));
         }
@@ -389,9 +390,11 @@ impl Checker {
     /// from now on, linked to `to`, so that whatever leads to it is not
     /// rebuilt, and is shared, and shown by its name. Not a family, which is
     /// read as the `select` it is; nor a local module's, which may differ by
-    /// scope. As the FX-26 checker's `k-link-global-select`.
+    /// scope, but for a module's item checked first (`fixed_slots`), bound
+    /// once for all of the module it is in. As the FX-26 checker's
+    /// `k-link-global-select`.
     fn link_global_select(&mut self, m: Sym, node: TyId, to: TyId) {
-        if self.env.iter().rposition(|(x, _)| *x == m).is_some_and(|i| self.global_slots.contains(&i))
+        if self.env.iter().rposition(|(x, _)| *x == m).is_some_and(|i| self.global_slots.contains(&i) || self.fixed_slots.contains(&i))
             && !matches!(self.arena.get(to), Ty::Lam { .. })
             && !matches!(self.arena.get(to), Ty::Var(v) if self.arena.dvar_kind(*v) != Kind::Type)
         {
