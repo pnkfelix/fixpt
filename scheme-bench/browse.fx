@@ -16,15 +16,15 @@
 ;;; input file writes |837| |177| ….
 ;;;
 ;;; The patterns and the data are lists of symbols and of such lists: an
-;;; `item` is a `define-datatype` of a symbol or a list of items, and the
-;;; lists stay mutable lists, since `init` makes the list of patterns
-;;; circular and `randomize` and `append-to-tail!` splice lists in place.
-;;; `eq?` of two items (`item-eq?`) is `eq?` of their symbols or of their
-;;; lists: an item, a sum, is immutable, and FX-26's `eq?` says nothing of
-;;; two unequal sums, but the pairs within are mutable, so `eq?` of them
-;;; is exact, as Scheme's is. A `*` variable's binding, a list, is kept in
-;;; the association list as an item, `(lst l)`, so that both kinds of
-;;; binding are one type (`item-list` takes the list back out).
+;;; `item` is a symbol or a list of items, `(union symbol (listof item
+;;; @heap))`, as in Larceny, `typecase` telling them apart (2026-10-07;
+;;; until then a `define-datatype`, a sum made per item); the lists stay
+;;; mutable lists, since `init` makes the list of patterns circular and
+;;; `randomize` and `append-to-tail!` splice lists in place. `eq?` of two
+;;; items (`item-eq?`) is `eq?` of their symbols or of their lists, the
+;;; pairs mutable, so `eq?` of them exact, as Scheme's is. A `*` variable's
+;;; binding, a list, is kept in the association list as an item, so that
+;;; both kinds of binding are one type (`item-list` takes the list back out).
 ;;; `my-match` returns `'()` in one case where it otherwise returns a
 ;;; boolean; only its truth is ever used,
 ;;; and `'()` is true, so here it returns `#t` there. Its `symbol->string`
@@ -38,7 +38,7 @@
 ;;; original's, at two types. `assq` is written out. The inputs are built
 ;;; in the file.
 
-(define-datatype item (sym symbol) (lst (listof item @heap)))
+(define-type item (union symbol (listof item @heap)))
 (define-type items (listof item @heap))
 ;; A unit's properties: `pattern` to a list of data, and made-up names
 ;; to `#f` (`nil`).
@@ -104,12 +104,12 @@
 
 ;; `tree-copy`, of items, and of the list of patterns.
 (define-rec
-  (tree-copy-item (subr (maxeff (read @heap) (alloc @heap) spin (read (globals tree-copy-item tree-copy-items lst))) (item) item)
+  (tree-copy-item (subr (maxeff (read @heap) (alloc @heap) spin (read (globals tree-copy-item tree-copy-items))) (item) item)
     (lambda (x)
-      (tagcase x
-        (sym (s) x)
-        (lst (l) (lst (tree-copy-items l))))))
-  (tree-copy-items (subr (maxeff (read @heap) (alloc @heap) spin (read (globals tree-copy-item tree-copy-items lst))) (items) items)
+      (typecase x
+        (symbol s x)
+        (else l (tree-copy-items l)))))
+  (tree-copy-items (subr (maxeff (read @heap) (alloc @heap) spin (read (globals tree-copy-item tree-copy-items))) (items) items)
     (lambda (x)
       (if (null? x)
           x
@@ -199,12 +199,12 @@
 ;; mutable pairs, so that `eq?` of them is exact.
 (define* item-eq? (subr pure (item item) bool)
   (lambda (x y)
-    (tagcase x
-      (sym (s) (tagcase y (sym (t) (eq? s t)) (lst (l) #f)))
-      (lst (l) (tagcase y (sym (t) #f) (lst (m) (eq? l m)))))))
+    (typecase x
+      (symbol s (typecase y (symbol t (eq? s t)) (else m #f)))
+      (else l (typecase y (symbol t #f) (else m (eq? l m)))))))
 
 (define* is? (subr pure (item symbol) bool)
-  (lambda (x s) (tagcase x (sym (t) (eq? t s)) (lst (l) #f))))
+  (lambda (x s) (typecase x (symbol t (eq? t s)) (else l #f))))
 
 (define-type alist (listof (pairof symbol item @heap) @heap))
 
@@ -217,10 +217,10 @@
 
 ;; A `*` variable's binding, as a list.
 (define* item-list (subr pure (item) items)
-  (lambda (x) (tagcase x (lst (l) l) (sym (s) (the items nil)))))
+  (lambda (x) (typecase x (symbol s (the items nil)) (else l l))))
 (define-effect matches
   (maxeff (read @heap) (write @heap) (alloc @heap) spin
-          (read (globals my-match item-eq? is? assq append-to-tail! sym lst))))
+          (read (globals my-match item-eq? is? assq append-to-tail!))))
 
 (define* my-match (subr matches (items items alist) bool)
   (lambda (pat dat alist)
@@ -236,8 +236,8 @@
                (my-match (cdr pat) (cdr dat) alist)
                (my-match pat (cdr dat) alist)))
           (else
-           (tagcase (car pat)
-             (sym (s)
+           (typecase (car pat)
+             (symbol s
                (cond ((char=? (string-ref (symbol->string s) 0)
                               #\?)
                       (let ((val (assq s alist)))
@@ -264,30 +264,30 @@
                                                     (my-match (cdr pat)
                                                               d
                                                               (cons
-                                                               (cons s (lst l))
+                                                               (cons s l)
                                                                alist)))
                                                 (if (null? e) #f #t)
                                                 (loop (append-to-tail!
                                                        l
                                                        (cons (if (null? d)
-                                                                 (lst nil)
+                                                                 nil
                                                                  (car d))
                                                              nil))
                                                       (cdr e)
                                                       (if (null? d) nil (cdr d)))))))
-                                 (loop nil (cons (lst nil) dat) dat))))))
+                                 (loop nil (cons nil dat) dat))))))
 
                      ;; fix suggested by Manuel Serrano
                      ;; (cond did not have an else clause);
                      ;; this changes the run time quite a bit
 
                      (else #f)))
-             (lst (l)
+             (else l
                (and
                 (not (null? l))         ; (pair? (car pat))
-                (tagcase (car dat) (sym (t) #f) (lst (m) (not (null? m)))) ; (pair? (car dat))
+                (typecase (car dat) (symbol t #f) (else m (not (null? m)))) ; (pair? (car dat))
                 (my-match l
-                          (tagcase (car dat) (sym (t) nil) (lst (m) m))
+                          (typecase (car dat) (symbol t nil) (else m m))
                           alist)
                 (my-match (cdr pat)
                           (cdr dat) alist))))))))
@@ -295,9 +295,9 @@
 (define database (listof symbol @heap)
   (randomize
    (init 100 10 4
-         (list (list (sym 'a) (sym 'a) (sym 'a) (sym 'b) (sym 'b) (sym 'b) (sym 'b) (sym 'a) (sym 'a) (sym 'a) (sym 'a) (sym 'a) (sym 'b) (sym 'b) (sym 'a) (sym 'a) (sym 'a))
-               (list (sym 'a) (sym 'a) (sym 'b) (sym 'b) (sym 'b) (sym 'b) (sym 'a) (sym 'a) (lst (list (sym 'a) (sym 'a))) (lst (list (sym 'b) (sym 'b))))
-               (list (sym 'a) (sym 'a) (sym 'a) (sym 'b) (lst (list (sym 'b) (sym 'a))) (sym 'b) (sym 'a) (sym 'b) (sym 'a))))))
+         (list (list 'a 'a 'a 'b 'b 'b 'b 'a 'a 'a 'a 'a 'b 'b 'a 'a 'a)
+               (list 'a 'a 'b 'b 'b 'b 'a 'a (list 'a 'a) (list 'b 'b))
+               (list 'a 'a 'a 'b (list 'b 'a) 'b 'a 'b 'a)))))
 
 (define* investigate (subr (maxeff matches (read (globals get-property lookup properties))) ((listof symbol @heap) value) unit)
   (lambda (units pats)
@@ -335,9 +335,9 @@
 ;; The inputs, where no compiler can fold them (Larceny's `hide`): globals,
 ;; which a later definition may replace.
 (define input1 value
-  (list (list (sym '*a) (sym '?b) (sym '*b) (sym '?b) (sym 'a) (sym '*a) (sym 'a) (sym '*b) (sym '*a))
-        (list (sym '*a) (sym '*b) (sym '*b) (sym '*a) (lst (cons (sym '*a) (the items nil))) (lst (cons (sym '*b) (the items nil))))
-        (list (sym '?) (sym '?) (sym '*) (lst (list (sym 'b) (sym 'a))) (sym '*) (sym '?) (sym '?))))
+  (list (list '*a '?b '*b '?b 'a '*a 'a '*b '*a)
+        (list '*a '*b '*b '*a (cons '*a (the items nil)) (cons '*b (the items nil)))
+        (list '? '? '* (list 'b 'a) '* '? '?)))
 (define iterations int 2000)
 
 (define* run (subr (maxeff matches (read (globals browse investigate get-property lookup properties database input1)))

@@ -6,15 +6,14 @@
 ;;;          (1 1 1 1 2) (1 1 1 1 2) (1 1 1 1 2)
 ;;;          (1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 2 2 2 2 2 3)).
 ;;;
-;;; The inner lists hold '() or integers, so their elements are an `item`:
-;;; `none`, one shared value standing for '(), or `(num i)`, which
-;;; allocates where Larceny's fixnum does not. The `do` loops
+;;; The inner lists hold '() or integers, so their elements are an `item`,
+;;; `(union nil int)`, as Larceny's are (2026-10-07; until then a datatype,
+;;; `(num i)` allocating where Larceny's fixnum does not). The `do` loops
 ;;; are local `letrec` loops. `length` wants a list the checker knows is
 ;;; finite, and these are written, so it is `list-length`, written here.
 ;;; The result is shown as a datum, by `result->datum`, after the benchmark.
 
-(define-datatype item (null-item) (num int))
-(define none item (null-item))
+(define-type item (union nil int))
 
 (define-type items (listof item @heap))
 (define-type rows (listof items @heap))
@@ -36,7 +35,7 @@
           (loop x (cdr x))))))
 
 (define-effect effs (maxeff (read @heap) (write @heap) (alloc @heap) spin
-                          (read (globals none num list-length append-to-tail!))))
+                          (read (globals list-length append-to-tail!))))
 
 (define* destructive (subr (maxeff (read @heap) (write @heap) (alloc @heap) spin) (int int) rows)
   (lambda (n m)
@@ -59,11 +58,11 @@
                    (if (null? l)
                        #u
                        (begin
-                         (if (null? (car l)) (set-car! l (cons none nil)) #u)
+                         (if (null? (car l)) (set-car! l (cons nil nil)) #u)
                          (append-to-tail! (car l) (make-m m nil))
                          (grow (cdr l))))))
-               (make-m (subr (maxeff (alloc @heap) spin (read (globals none))) (int items) items)
-                 (lambda (j a) (if (= j 0) a (make-m (- j 1) (cons none a)))))
+               (make-m (subr (maxeff (alloc @heap) spin) (int items) items)
+                 (lambda (j a) (if (= j 0) a (make-m (- j 1) (cons nil a)))))
                ;; the else arm's loop over l1 and l2
                (halve (subr effs (rows rows int) unit)
                  (lambda (l1 l2 i)
@@ -79,14 +78,14 @@
                                            (else
                                             (cut n (car l1) i)))))
                          (halve (cdr l1) (cdr l2) i)))))
-               (skip (subr (maxeff (read @heap) (write @heap) spin (read (globals num))) (int items int) items)
+               (skip (subr (maxeff (read @heap) (write @heap) spin) (int items int) items)
                  (lambda (j a i)
                    (if (= j 0)
                        a
                        (begin
-                         (set-car! a (num i))
+                         (set-car! a i)
                          (skip (- j 1) (cdr a) i)))))
-               (cut (subr (maxeff (read @heap) (write @heap) spin (read (globals num))) (int items int) items)
+               (cut (subr (maxeff (read @heap) (write @heap) spin) (int items int) items)
                  (lambda (j a i)
                    (if (= j 1)
                        (let ((x (cdr a)))
@@ -94,7 +93,7 @@
                            (set-cdr! a nil)
                            x))
                        (begin
-                         (set-car! a (num i))
+                         (set-car! a i)
                          (cut (- j 1) (cdr a) i))))))
         (outer n)))))
 
@@ -102,9 +101,9 @@
   (lambda (l)
     (if (null? l)
         (datum-list (the (listof datum @heap) nil))
-        (datum-cons (tagcase (car l)
-                      (null-item () (datum-list (the (listof datum @heap) nil)))
-                      (num (x) (datum-int x)))
+        (datum-cons (typecase (car l)
+                      (nil e (datum-list (the (listof datum @heap) nil)))
+                      (else x (datum-int x)))
                     (items->datum (cdr l))))))
 
 (define* result->datum (subr (maxeff (read @heap) spin) (rows) datum)

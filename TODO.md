@@ -1658,3 +1658,18 @@ from the callee's type, not a table of names; a call's own type is
 certifications (`length-is?`, `acyclic?`, `nat?`) as propositions too;
 checking a `lambda` against such a type (until then refused, its body a
 `bool`); paths, below.
+
+## 57. Mutable bloblets made in line, natively (found 2026-10-07)
+
+`make-bloblet` is `%make-bloblet`, a call-out from native code with a frame
+around it, where `cons` and frozen bloblets (`%make-frozen`) are made in
+line from the free space. Found converting `scheme-bench/gcbench.fx`'s
+node to what Larceny's is, one record of four mutable fields, its
+children `(union int node)`, 0 when empty: back to back with the port's
+three pairs per node, 3.0 s against 1.3 natively, 1.9 against 1.15 in
+register code, though the bloblet is one object and fewer words. The port
+keeps its pairs until mutable bloblets are made in line (both native
+tiers), then is converted and measured again (the conversion: `node` a
+`(bloblet (fields (union int node) (union int node) int int) @heap)`,
+`(make-bloblet 0 l r 0 0)`, and `populate` storing the children it then
+fills).

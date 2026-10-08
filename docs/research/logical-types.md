@@ -615,8 +615,16 @@ the pair; `typecase` is sugar over them, `else` required. Shapes are bit
 masks in both checkers (the FX-26 one's since `int` has bit operations,
 `DONE.md` §55). The shape tests are in line natively (`DONE.md` §56), and
 `lseq` is converted: 2.0 s with its union against 4.0 s with its sum
-(`--calling-convention native`). Not yet: the other ports (`destruc`,
-`browse`, `gcbench`, `earley`); predicates for `f64`, `f32`, `ref`, sums and products (their shapes
+(`--calling-convention native`). The other ports L1 named (2026-10-07,
+back to back, natively and in register code): `destruc`'s elements are
+`(union nil int)`, as Larceny's, 22.4 → 8.1 s and 8.6 → 7.8 s, no `(num i)`
+allocated per element; `browse`'s `item` is `(union symbol (listof item
+@heap))`, level (about 11 s and 8.9 s); `gcbench`'s node as Larceny's one
+record, a bloblet with children `(union int node)`, is slower, 1.3 → 3.0 s,
+because `make-bloblet` calls out natively (`TODO.md` §57), so it keeps its
+pairs; `earley` keeps its sentinels by design, since its configuration
+sets' slots 1 to 4 always hold ints, which an `(arrayof (union false
+int))` would have to test at every read where Scheme tests none. Not yet: predicates for `f64`, `f32`, `ref`, sums and products (their shapes
 are disjoint, but nothing tests for them); a `lambda` checked against a
 type proving something, size and certification propositions, and paths
 (`TODO.md` §54).

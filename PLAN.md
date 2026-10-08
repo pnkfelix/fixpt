@@ -285,8 +285,9 @@ Q6 flat arrays (done); Q7 `consof` and disjoint unions (stages 1 and 2
 done 2026-10-07: `pairof` non-`nil`, `(union T …)` of disjoint shapes,
 shape predicates, `typecase`; bit operations on `int`, `DONE.md` §55;
 latent propositions begun, §54, and stage 3's `false`, all done
-2026-10-07; inline shape tests natively, `DONE.md` §56, and `lseq` converted; then
-the other ports); Q8 generic operations
+2026-10-07; inline shape tests natively, `DONE.md` §56; `lseq`, `destruc` and
+`browse` converted, `gcbench` waiting on §57, `earley` kept by design);
+Q8 generic operations
 by dictionary; Q9 separate compilation; Q10 async; Q11 language
 friction; Q13 what `okasaki.fx` found (2026-10-05, below Q11); Q14
 Emacs, Q15 debugging and Q16 the collector's spaces (2026-10-05, below
@@ -2331,7 +2332,8 @@ unions of members with
 disjoint run-time shapes, `(union T …)`, introduced only by subsumption
 and eliminated by narrowing a variable (`typecase`, shape predicates;
 done 2026-10-07, `logical-types.md`, "L1, as built"; shape tests in line
-natively, `DONE.md` §56, `lseq` converted, the other ports next);
+natively, `DONE.md` §56; `lseq`, `destruc`, `browse` converted, as
+`logical-types.md` records, `gcbench` waiting on `TODO.md` §57);
 intersections of procedure types (`overload`) later. Its open questions
 are the user's.
 

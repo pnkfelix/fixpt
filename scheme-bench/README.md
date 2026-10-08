@@ -28,7 +28,7 @@ lowered): `pi` now takes 0.6 s in all.
 | ------------ | ------------------------------------------------ | -------- | -------------------------------------------------------------------------------------- |
 | `ack`        | 32765                                            | 6.1      |                                                                                        |
 | `array1`     | 1000000                                          | 25.7     |                                                                                        |
-| `browse`     | (837 177 1090 617 661 749 628 56 826 408 1035 4… | 10.0     | `item` datatype; `eq?` of their symbols or (mutable) lists (2026-09-30)                |
+| `browse`     | (837 177 1090 617 661 749 628 56 826 408 1035 4… | 10.0     | `item` a union of symbol and list (2026-10-07); `eq?` of symbols or lists              |
 | `bv2string`  | 0                                                | 19.8     | UTF-8 codecs written in the file; bytevectors are byte bloblets                        |
 | `chudnovsky` | (3141592653589793238462643383279502884197169399… | 3.0      | its one float made exact; integer square root, `expt` in the file                      |
 | `conform`    | ("(((b v d) ^ a) v c)" "(c ^ d)" "(b v (a ^ d))… | 3.5      | nodes, edges, graphs are bloblets; `eq?` of nodes (2026-09-30)                         |
@@ -36,7 +36,7 @@ lowered): `pi` now takes 0.6 s in all.
 | `ctak`       | 9                                                | 119.0    | `cwcc`                                                                                 |
 | `dderiv`     | (+ (* (* 3 x x) (+ (/ 0 3) (/ 1 x) (/ 1 x))) (*… | 11.9     | small hash table in the file                                                           |
 | `deriv`      | (+ (* (* 3 x x) (+ (/ 0 3) (/ 1 x) (/ 1 x))) (*… | 10.7     | expressions are `datum`s                                                               |
-| `destruc`    | ((1 1 2) (1 1 1) (1 1 1 2) (1 1 1 1) (1 1 1 1 2… | 31.3     | elements a datatype (`nil` or int)                                                     |
+| `destruc`    | ((1 1 2) (1 1 1) (1 1 1 2) (1 1 1 1) (1 1 1 1 2… | 31.3     | elements `(union nil int)`, as Larceny's (2026-10-07; a datatype until then)           |
 | `diviter`    | 500                                              | 4.5      |                                                                                        |
 | `divrec`     | 500                                              | 8.1      |                                                                                        |
 | `dynamic`    | ((218 . 455) (6 . 1892) (2204 . 446))            | 18.6     | `val` datatype; type variables `eq?` on mutable pairs; input read in-file (2026-09-30) |
