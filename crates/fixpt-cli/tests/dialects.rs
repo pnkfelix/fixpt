@@ -365,6 +365,18 @@ fn union_shapes_on_every_machine() {
     }
 }
 
+/// The bits of `int`s alike on every machine, bignums too
+/// (`programs/bitwise.fx`).
+#[test]
+fn bitwise_on_every_machine() {
+    for (m, text) in on_every_machine(include_str!("programs/bitwise.fx")) {
+        assert!(
+            text.contains("(8 14 6 -6 48 -5 1180591620717411303424 1180591620717411303424 255 -18446744073709551617) : "),
+            "{m:?}: {text}"
+        );
+    }
+}
+
 /// `program` run by `fixpt eval` on every machine, all at once (each
 /// loads the front end): each machine's options and what it printed, none
 /// killed by a signal.

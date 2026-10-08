@@ -17,9 +17,10 @@
                   "first-mark current-marks marks-of cwcc %vlambda apply list ")))
 ;; What the ports wrote themselves, as `ev-std-prim` does them.
 (define std-primitive-names string
-  (k-cat3 " remainder zero? max min bool=? char<? char<=? char>? char>=? char-upcase "
+  (k-cat4 " remainder zero? max min bool=? char<? char<=? char>? char>=? char-upcase "
           "string<? string<=? string>? string>=? error string-hash symbol-name-hash "
-          "pair? int? char? bool? string? symbol? procedure? array? "))
+          "pair? int? char? bool? string? symbol? procedure? array? "
+          "bitwise-and bitwise-ior bitwise-xor bitwise-not arithmetic-shift "))
 ;; `f64`'s, as `ev-f64-prim` does them.
 (define f64-primitive-names string
   (k-cat4 " f64+ f64- f64* f64/ f64-min f64-max f64-atan2 f64-expt f64< f64<= f64> f64>= f64= "

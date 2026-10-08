@@ -1649,19 +1649,6 @@ explicit latent propositions in the predicates' standard types, a coherent
 type-signature model for the analysis; checking a `lambda` against such a
 type can wait.
 
-## 55. Bitwise operations in FX-26 (the user's, 2026-10-07)
-
-FX-26 has none: no `and`, `or`, `xor`, shifts on `int` (nor on the
-fixed widths, `i32` …, where they are most wanted). The FX-26 checker's
-union shapes (`check-unions.fx`) are lists of shape numbers for want of
-them, where `check.rs` has a bit mask.
-- Standard operations in both checkers, the evaluator, both compilers and
-  native code: `int-and`, `int-or`, `int-xor`, `int-not`, shifts
-  (arithmetic right, left), and per-width ones as the fixed-width names go
-  (`u32-and` …, `docs/fx26.md`, "Fixed widths").
-- Then the shapes as masks in `check-unions.fx`.
-- Right after Q7's stage 2.
-
 ## 56. Shape predicates inline (Q7's stage 2, measured 2026-10-07)
 
 Of the shape predicates only `null?` compiles inline (`eq` with `nil`);
@@ -1676,6 +1663,9 @@ element. So the port stays a sum until:
 - a word operation testing a shape (tag, and for a bloblet its kind) in
   each machine: the cellular machine, native words, `direct.rs`, register
   code; and both compilers emitting it for the shape predicates;
+- the same for `int`'s bit operations (`DONE.md` §55), call-outs from
+  native code for now: the fixnum case of `and`, `ior`, `xor` and `not` is
+  an instruction or two on tagged fixnums;
 - then `lseq` converted (the conversion is in this item's history: the
   types `(union nil (pairof int tail @heap))` and `(union lseq gen)`,
   `nil` for `no-pair`, `typecase` with `(else rest rest)`), and measured.

@@ -31,6 +31,9 @@ fn small_programs() {
     // What the ports wrote themselves (PLAN.md Q11).
     assert_eq!(both("(list (remainder -7 2) (max 3 (min 9 4)) (if (zero? 0) 1 0))"), "(-1 4 1)");
     assert_eq!(both("(if (and (bool=? #t #t) (char<? #\\a #\\b) (string>=? \"b\" \"a\")) 1 0)"), "1");
+    // Shape predicates and bits (TODO.md §55).
+    assert_eq!(both("(list (bitwise-and 12 10) (bitwise-ior 12 10) (bitwise-xor 12 10) (bitwise-not 5) (arithmetic-shift -17 -2))"), "(8 14 6 -6 -5)");
+    assert_eq!(both("(let ((f (the (subr pure ((union int string)) int) (lambda (x) (if (int? x) x (string-length x)))))) (+ (f 3) (f \"ab\")))"), "5");
 }
 
 #[test]

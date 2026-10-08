@@ -307,6 +307,11 @@
               (("symbol-name-hash") (v-int (symbol-name-hash (as-sym (arg xs 0)))))
               (("pair?" "int?" "char?" "bool?" "string?" "symbol?" "procedure?" "array?")
                (v-bool (ev-shape? n (arg xs 0))))
+              (("bitwise-and") (int2 xs (lambda (a b) (bitwise-and a b))))
+              (("bitwise-ior") (int2 xs (lambda (a b) (bitwise-ior a b))))
+              (("bitwise-xor") (int2 xs (lambda (a b) (bitwise-xor a b))))
+              (("bitwise-not") (v-int (bitwise-not (as-int (arg xs 0)))))
+              (("arithmetic-shift") (int2 xs (lambda (a b) (arithmetic-shift a b))))
               (else (efail (string-append "not in the evaluator yet: " n)))))))
 ;; Flat arrays: here, arrays of their values; a layout, its number.
 (define* ev-flat-prim (subr (maxeff evals spin) (string vals) val)

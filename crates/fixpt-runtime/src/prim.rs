@@ -518,6 +518,52 @@ fn fixed_op(rt: &mut Runtime, a: &[Value], op: &str, w: Width) -> Outcome<Value>
     Ok(exact_out(rt, w.wrap(r)))
 }
 
+/// FX-26's bitwise operations on `int`s (SRFI 151's): two's complement,
+/// of any size; `shift` left by a positive count, right (floor) by a
+/// negative one.
+fn bitwise(rt: &mut Runtime, a: &[Value], op: &str) -> Outcome<Value> {
+    // Fixnums, the common case, without a big integer.
+    if a.iter().all(|v| v.is_fixnum()) {
+        let x = a[0].as_fixnum() as i128;
+        let r = match op {
+            "and" => x & a[1].as_fixnum() as i128,
+            "ior" => x | a[1].as_fixnum() as i128,
+            "xor" => x ^ a[1].as_fixnum() as i128,
+            "not" => !x,
+            _ => match a[1].as_fixnum() {
+                k if k <= -127 => x >> 127,
+                k if k < 0 => x >> -k,
+                k if k <= 64 => x << k,
+                _ => return bitwise_big(rt, a, op),
+            },
+        };
+        return Ok(exact_out(rt, r));
+    }
+    bitwise_big(rt, a, op)
+}
+
+fn bitwise_big(rt: &mut Runtime, a: &[Value], op: &str) -> Outcome<Value> {
+    let Some(x) = exact_bigint(rt, a[0]) else { return rt.type_error("an exact integer", a[0]) };
+    let r = if op == "not" {
+        !x
+    } else if op == "shift" {
+        let k = int(rt, a[1])?;
+        if k > 1 << 24 && x != num_bigint::BigInt::from(0) {
+            return rt.fail("arithmetic-shift: the count is too large", &[a[0], a[1]]);
+        }
+        if k >= 0 { x << k as usize } else { x >> (k.unsigned_abs().min(1 << 32)) as usize }
+    } else {
+        let Some(y) = exact_bigint(rt, a[1]) else { return rt.type_error("an exact integer", a[1]) };
+        match op {
+            "and" => x & y,
+            "ior" => x | y,
+            "xor" => x ^ y,
+            _ => unreachable!("a bitwise operation"),
+        }
+    };
+    Ok(crate::num::N::big(r).store(&mut rt.heap))
+}
+
 /// Any exact integer, as a big integer.
 fn exact_bigint(rt: &Runtime, v: Value) -> Option<num_bigint::BigInt> {
     if v.is_fixnum() {
@@ -1347,6 +1393,11 @@ prims! {
     "%fx26-u32*", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "mul", Width::U32));
     "%fx26-u32-quotient", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "quot", Width::U32));
     "%fx26-u32-remainder", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "rem", Width::U32));
+    "%fx26-bitwise-and", 2, Some(2), simple!(|rt, a| bitwise(rt, a, "and"));
+    "%fx26-bitwise-ior", 2, Some(2), simple!(|rt, a| bitwise(rt, a, "ior"));
+    "%fx26-bitwise-xor", 2, Some(2), simple!(|rt, a| bitwise(rt, a, "xor"));
+    "%fx26-bitwise-not", 1, Some(1), simple!(|rt, a| bitwise(rt, a, "not"));
+    "%fx26-arithmetic-shift", 2, Some(2), simple!(|rt, a| bitwise(rt, a, "shift"));
     "%fx26-u32-and", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "and", Width::U32));
     "%fx26-u32-or", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "or", Width::U32));
     "%fx26-u32-xor", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "xor", Width::U32));

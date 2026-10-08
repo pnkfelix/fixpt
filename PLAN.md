@@ -282,8 +282,9 @@ one pure `eq?`, `eqtable`; `equal` and `dynamic` ported, four ports'
 workarounds retired);
 Q6 flat arrays (done); Q7 `consof` and disjoint unions (stages 1 and 2
 done 2026-10-07: `pairof` non-`nil`, `(union T …)` of disjoint shapes,
-shape predicates, `typecase`; then bit operations, §55, latent
-propositions, §54, inline shape tests, §56, and stage 3's `false`); Q8 generic operations
+shape predicates, `typecase`; bit operations on `int`, `DONE.md` §55;
+then latent propositions, §54, inline shape tests, §56, and stage 3's
+`false`); Q8 generic operations
 by dictionary; Q9 separate compilation; Q10 async; Q11 language
 friction; Q13 what `okasaki.fx` found (2026-10-05, below Q11); Q14
 Emacs, Q15 debugging and Q16 the collector's spaces (2026-10-05, below

@@ -748,3 +748,20 @@ Set aside: a bloblet header in each frame, stored by its entry (the
 first design, in `TODO.md` §53 as it was): one store more a call, for
 nothing that the run-as-one-object does not give. It would matter if a
 single frame had to be an object alone, which nothing needs yet.
+
+## 55. Bitwise operations on `int` (the user's, 2026-10-07)
+
+The fixed widths had theirs (`i32-and`, `u64-shl` and kin); `int` had
+none, so the FX-26 checker's union shapes were lists where `check.rs` has
+a mask. Now SRFI 151's names, in both checkers, the lowering, the
+evaluator and every machine: `bitwise-and`, `bitwise-ior`, `bitwise-xor`,
+`(subr pure (int int) int)`; `bitwise-not`, `(subr pure (int) int)`;
+`arithmetic-shift`, left by a positive count and right, rounding down, by
+a negative one. Two's complement, of any size: runtime primitives
+(`%fx26-bitwise-and` …), fixnums without a big integer, bignums with one;
+a left shift past 2^24 bits of a non-zero integer fails. The FX-26
+checker's shapes are masks since (`check-unions.fx`). Tests:
+`bitwise_on_every_machine` (six machines, bignums and a negative shift),
+and the evaluator against the lowering (`tests/evaluator.rs`). Natively
+they are call-outs: `TODO.md` §56 has their fixnum fast path.
+

@@ -9,8 +9,8 @@
 (define check-unions-module (module
 ;; The shapes, by number in `check.rs`'s `SHAPES` order: 0 int, 1 f64,
 ;; 2 f32, 3 char, 4 bool, 5 nil, 6 pair, 7 string, 8 symbol, 9 procedure,
-;; 10 bloblet, 11 box, 12 sum, 13 product. A type's shapes are a list of
-;; them, `(-1)` if they are not known.
+;; 10 bloblet, 11 box, 12 sum, 13 product. A type's shapes are a mask, bit
+;; `k` shape `k`'s, or -1 if they are not known.
 (define k-shape-count int 14)
 (define k-shape-nil int 5)
 (define k-shape-pair int 6)
@@ -29,8 +29,11 @@
       ;; `unit` is the symbol `#u` at run time.
       (("symbol" "unit") 8)
       (else -1))))
-(define k-shape-one (subr (alloc @t) (int) k-ids)
-  (lambda (k) (the k-ids (cons k nil))))
+;; Shape `k`'s bit, or -1 for none known.
+(define k-shape-bit (subr pure (int) int)
+  (lambda (k) (if (< k 0) -1 (arithmetic-shift 1 k))))
+(define k-one-id (subr (alloc @t) (int) k-ids)
+  (lambda (m) (the k-ids (cons m nil))))
 (define k-ids-append (subr (maxeff (read @globals) (alloc @t)) (k-ids k-ids) k-ids)
   (lambda (xs ys) (if (null? xs) ys (the k-ids (cons (car xs) (k-ids-append (cdr xs) ys))))))
 (define-rec
@@ -39,55 +42,52 @@
   ;; abstract or generative type, `datum`: no union may have a member of
   ;; one. `seen`, the unions met on the way down: one met again is its own
   ;; member, whose shape is not known.
-  (k-run-shape-in (subr (maxeff kreads (alloc @t) spin) (int k-ids) k-ids)
+  (k-run-shape-in (subr (maxeff kreads (alloc @t) spin) (int k-ids) int)
     (lambda (t0 seen)
       (let ((t (k-resolve t0)))
       (tagcase (k-get t)
-        (ty-base (s) (k-shape-one (k-base-shape s)))
-        (ty-nat (z) (k-shape-one 0))
-        (ty-nil () (k-shape-one 5))
-        (ty-pair (a b r nl) (if nl (the k-ids (cons 6 (k-shape-one 5))) (k-shape-one 6)))
-        (ty-nlist (e z r) (the k-ids (cons 6 (k-shape-one 5))))
-        (ty-subr (e ps r cv) (k-shape-one 9))
-        (ty-comp (a h e r) (k-shape-one 9))
+        (ty-base (s) (k-shape-bit (k-base-shape s)))
+        (ty-nat (z) 1)
+        (ty-nil () 32)
+        (ty-pair (a b r nl) (if nl 96 64))
+        (ty-nlist (e z r) 96)
+        (ty-subr (e ps r cv) 512)
+        (ty-comp (a h e r) 512)
         ;; An array is a bloblet as `(bloblet …)` is, of the same kind.
-        (ty-array (a r) (k-shape-one 10))
-        (ty-bloblet (fs z r) (k-shape-one 10))
-        (ty-ref (a r) (k-shape-one 11))
-        (ty-sum (ps) (k-shape-one 12))
-        (ty-product (ps) (k-shape-one 13))
+        (ty-array (a r) 1024)
+        (ty-bloblet (fs z r) 1024)
+        (ty-ref (a r) 2048)
+        (ty-sum (ps) 4096)
+        (ty-product (ps) 8192)
         (ty-union (ms)
-          (if (k-has-id? seen t) (k-shape-one -1) (k-run-shapes ms (the k-ids (cons t seen)))))
-        (ty-void () nil)
-        (else y (k-shape-one -1))))))
-  (k-run-shapes (subr (maxeff kreads (alloc @t) spin) (k-ids k-ids) k-ids)
+          (if (k-has-id? seen t) -1 (k-run-shapes ms (the k-ids (cons t seen)))))
+        (ty-void () 0)
+        (else y -1)))))
+  (k-run-shapes (subr (maxeff kreads (alloc @t) spin) (k-ids k-ids) int)
     (lambda (ms seen)
       (if (null? ms)
-          nil
+          0
           (let ((s (k-run-shape-in (car ms) seen)) (rest (k-run-shapes (cdr ms) seen)))
-            (if (or (k-has-id? s -1) (k-has-id? rest -1))
-                (k-shape-one -1)
-                (k-ids-append s rest)))))))
+            (if (or (< s 0) (< rest 0)) -1 (bitwise-ior s rest)))))))
 ;; The same, from the top.
-(define k-run-shape (subr (maxeff kreads (alloc @t) spin) (int) k-ids)
+(define k-run-shape (subr (maxeff kreads (alloc @t) spin) (int) int)
   (lambda (t) (k-run-shape-in t nil)))
 (define k-shape-known? (subr (maxeff kreads (alloc @t) spin) (int) bool)
-  (lambda (t) (not (k-has-id? (k-run-shape t) -1))))
-;; Whether two lists of shapes share one.
-(define k-shapes-meet? (subr (maxeff kreads spin) (k-ids k-ids) bool)
-  (lambda (s u) (and (not (null? s)) (or (k-has-id? u (car s)) (k-shapes-meet? (cdr s) u)))))
-(define k-shapes-within? (subr (maxeff kreads spin) (k-ids k-ids) bool)
-  (lambda (s u) (or (null? s) (and (k-has-id? u (car s)) (k-shapes-within? (cdr s) u)))))
+  (lambda (t) (>= (k-run-shape t) 0)))
+;; Whether two masks share a shape; whether all of `s`'s are `u`'s.
+(define k-shapes-meet? (subr pure (int int) bool)
+  (lambda (s u) (not (= (bitwise-and s u) 0))))
+(define k-shapes-within? (subr pure (int int) bool)
+  (lambda (s u) (= (bitwise-and s u) s)))
 ;; Whether `t` and `u` have known shapes, none of them shared.
 (define k-shapes-miss? (subr (maxeff kreads (alloc @t) spin) (int int) bool)
   (lambda (t u)
     (let ((s (k-run-shape t)) (v (k-run-shape u)))
-      (not (or (k-has-id? s -1) (k-has-id? v -1) (k-shapes-meet? s v))))))
+      (and (>= s 0) (>= v 0) (not (k-shapes-meet? s v))))))
 ;; Whether `t` and `u` have the same known shapes.
 (define k-same-shape? (subr (maxeff kreads (alloc @t) spin) (int int) bool)
   (lambda (t u)
-    (let ((s (k-run-shape t)) (v (k-run-shape u)))
-      (and (not (k-has-id? s -1)) (k-shapes-within? s v) (k-shapes-within? v s)))))
+    (let ((s (k-run-shape t))) (and (>= s 0) (= s (k-run-shape u))))))
 
 ;; The first of `ys` with `x`'s shapes, known, or -1.
 (define k-same-shape-in (subr (maxeff kreads (alloc @t) spin) (int k-ids) int)
@@ -96,7 +96,7 @@
           ((k-same-shape? (car ys) x) (car ys))
           (else (k-same-shape-in x (cdr ys))))))
 
-(define k-holding-in (subr (maxeff kreads (alloc @t) spin) (k-ids k-ids) int)
+(define k-holding-in (subr (maxeff kreads (alloc @t) spin) (int k-ids) int)
   (lambda (s ys)
     (cond ((null? ys) -1)
           ((k-shapes-within? s (k-run-shape (car ys))) (car ys))
@@ -105,7 +105,7 @@
 (define k-member-holding (subr (maxeff kreads (alloc @t) spin) (int k-ids) int)
   (lambda (x ys)
     (let ((s (k-run-shape x)))
-      (if (or (null? s) (k-has-id? s -1)) -1 (k-holding-in s ys)))))
+      (if (<= s 0) -1 (k-holding-in s ys)))))
 
 ;; `ms`, resolved, a union among them its members.
 (define k-union-flat (subr (maxeff kreads (alloc @t) spin) (k-ids) k-ids)
@@ -229,16 +229,16 @@
     (tagcase (k-get m)
       (ty-pair (a b r nl)
         (if (and nl (or (= k 5) (= k 6)))
-            (the k-ids (cons (k-ty-new (ty-nil)) (k-shape-one (k-ty-new (ty-pair a b r #f)))))
-            (k-shape-one m)))
-      (else y (k-shape-one m)))))
+            (the k-ids (cons (k-ty-new (ty-nil)) (k-one-id (k-ty-new (ty-pair a b r #f)))))
+            (k-one-id m)))
+      (else y (k-one-id m)))))
 (define-type k-sides (pairof k-ids k-ids @t))
 ;; Members `ps` to the side where shape `k` is found, or not, or both.
 (define k-sort-parts (subr (maxeff kstate spin) (k-ids int k-sides) k-sides)
   (lambda (ps k acc)
     (if (null? ps)
         acc
-        (let* ((p (car ps)) (s (k-run-shape p)) (mask (k-shape-one k))
+        (let* ((p (car ps)) (s (k-run-shape p)) (mask (k-shape-bit k))
                (in (k-shapes-within? s mask)) (out (not (k-shapes-meet? s mask)))
                (inside (if out (car acc) (the k-ids (cons p (car acc)))))
                (outside (if in (cdr acc) (the k-ids (cons p (cdr acc))))))

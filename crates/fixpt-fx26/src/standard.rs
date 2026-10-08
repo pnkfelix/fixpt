@@ -260,6 +260,14 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("string->list", "(poly ((r region)) (subr (alloc r) (string) (listof char r)))"),
     // What the benchmark ports wrote for themselves (PLAN.md Q11).
     ("remainder", "(subr pure (int int) int)"),
+    // Bits of an `int`, two's complement, a bignum's too (SRFI 151's
+    // names): `arithmetic-shift` left by a positive count, right (floor)
+    // by a negative one.
+    ("bitwise-and", "(subr pure (int int) int)"),
+    ("bitwise-ior", "(subr pure (int int) int)"),
+    ("bitwise-xor", "(subr pure (int int) int)"),
+    ("bitwise-not", "(subr pure (int) int)"),
+    ("arithmetic-shift", "(subr pure (int int) int)"),
     ("zero?", "(subr pure (int) bool)"),
     ("max", "(subr pure (int int) int)"),
     ("min", "(subr pure (int int) int)"),
