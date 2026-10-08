@@ -383,7 +383,11 @@ bloblet-form ::= "(" "make-bloblet" expression expression* ")"           ; bytes
   form or a bare expression is refused. It sees only the standard
   environment. A relative path is from the program's directory (the
   current one at the REPL); an error in the file is said at the
-  `load-module`, with where in the file.
+  `load-module`, with where in the file. A file whose first form is
+  `(module-parameters ((name kind) …))` is a file of parameters:
+  `(load-module "file")` is then `(plambda ((name kind) …) (lambda ()
+  (module item …)))`, the binders seen in its items as well as the
+  standard environment.
 
 Derived forms, as the parser expands them:
 

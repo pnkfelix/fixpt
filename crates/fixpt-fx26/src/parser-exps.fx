@@ -86,14 +86,34 @@
     (tagcase t
       (t-exp (x) (tagcase x (e-module (items a b) items) (else y nil)))
       (else y nil))))
-;; A module's item that says it was read from a file: its base, and path.
-(define loaded-mark (subr (read @globals) (int string) mod-item)
-  (lambda (base path) (mod-item-of base (string->symbol path) (the syns-a nil) nil)))
+;; A module's item that says it was read from a file: its base, its path,
+;; and its parameters' binders (`loaded-params`), which it sees.
+(define loaded-mark (subr parses (int string syns-a) mod-item)
+  (lambda (base path ps)
+    (let ((bs (if (null? ps) (the syns-a nil) (syn-items (car ps) "`((name kind) …)`"))))
+      (mod-item-of base (string->symbol path) bs nil))))
 ;; A module's item that says reading its file failed, and why: refused where
 ;; the module is checked, as the Rust checker refuses it where it parses
 ;; the form.
 (define loaded-error (subr (read @globals) (string) mod-items)
   (lambda (m) (cons (mod-item-of -1 (string->symbol m) (the syns-a nil) nil) nil)))
+
+;; A module's file's parameters, if its first form is `(module-parameters
+;; ((name kind) …))`, in a list of one; none if not.
+(define loaded-params (subr parses (syns-a) syns-a)
+  (lambda (forms)
+    (if (and (not (null? forms)) (form-of? (car forms) 'module-parameters))
+        (let ((items (syn-items (car forms) "`(module-parameters ((name kind) …))`")))
+          (begin (arity items 2 "`(module-parameters ((name kind) …))`"
+                        (syn-start (car forms)) (syn-end (car forms)))
+                 (the syns-a (cons (nth items 1) nil))))
+        nil)))
+;; Module `m` read from a file of parameters `ps` (`loaded-params`), at
+;; `a`..`b`: a `plambda` over them of a `lambda` of none making it, so that
+;; whoever loads it gives them, and each call makes one. `m`, if none.
+(define* loaded-made (subr pure (syns-a exp int int) exp)
+  (lambda (ps m a b)
+    (if (null? ps) m (e-plambda (car ps) (e-lambda (the param-list nil) m a b) a b))))
 
 ;;; ------------------------------------------------------------ expressions
 ;; Whether `s` mentions the name `n` anywhere, quoted or not.
@@ -455,7 +475,7 @@
         ((load-module)
          (begin (arity items 2 "`(load-module \"file\")`" a b)
                 (if (syn-string? (nth items 1))
-                    (e-module (parse-loaded (syn-string (nth items 1)) a b) a b)
+                    (parse-loaded (syn-string (nth items 1)) a b)
                     (pfail (string-append "`(load-module \"file\")`: "
                                           "the file's name, as a string")
                            (nth items 1)))))
@@ -834,28 +854,32 @@
                                                "`(define-rec (name type expression) …)`")))
                  (product (1 3) (2 (rec-names bs)) (3 (rec-types bs)) (4 (rec-inits bs)))))
               (else (pfail module-usage f))))))
-  ;; `(load-module "path")`, at `a`..`b`: the module's items, after its mark;
-  ;; or why it could not be read.
-  (parse-loaded (subr (maxeff parses spin) (string int int) mod-items)
+  ;; `(load-module "path")`, at `a`..`b`: the module, its items after its
+  ;; mark (`loaded-made` of it, for a file of parameters); or why it could
+  ;; not be read.
+  (parse-loaded (subr (maxeff parses spin) (string int int) exp)
     (lambda (path a b)
       (let ((f (loaded-at (get loaded) a)))
         (cond
-          ((null? f) (loaded-error (str3 "cannot read `" path "`: it was not read")))
-          ((= (extract (car f) 2) 0) (loaded-error (extract (car f) 3)))
+          ((null? f) (e-module (loaded-error (str3 "cannot read `" path "`: it was not read")) a b))
+          ((= (extract (car f) 2) 0) (e-module (loaded-error (extract (car f) 3)) a b))
           (else
            (let* ((base (extract (car f) 2))
                   (forms (syns-moved (extract (car f) 5) base))
-                  ;; The items, as a form's, out of the prompt that catches
-                  ;; what is wrong in them.
-                  (made (lambda () (t-exp (e-module (parse-module-items forms) a b))))
+                  ;; Its parameters and items, as a form's, out of the
+                  ;; prompt that catches what is wrong in them.
+                  (made (lambda ()
+                          (let* ((ps (loaded-params forms))
+                                 (items (parse-module-items (if (null? ps) forms (cdr forms))))
+                                 (m (e-module (cons (loaded-mark base path ps) items) a b)))
+                            (t-exp (loaded-made ps m a b)))))
                   (r (prompt parse-tag (p-ok (cons (made) nil)) (lambda (r) r))))
              (tagcase r
                (p-err (m x y)
                  (if (>= x base)
-                     (loaded-error (in-loaded (get loaded) base m x))
+                     (e-module (loaded-error (in-loaded (get loaded) base m x)) a b)
                      (pfail-at m x y)))
-               (p-ok (ts)
-                 (cons (loaded-mark base path) (module-items-of (car ts))))))))))))
+               (p-ok (ts) (tagcase (car ts) (t-exp (x) x) (else y (e-module nil a b))))))))))))
 ;; A `define-rec`'s bindings, as a `letrec`'s are.
 (define parse-rec-bindings (subr (maxeff parses spin) (syns-a) letrec-list)
   (lambda (bs)

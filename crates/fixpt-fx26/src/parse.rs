@@ -2198,15 +2198,49 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         let outer = self.hidden.replace(((0, 0), (standard, depth)));
         // Its own `load-module`s are from its directory.
         let outer_dir = std::mem::replace(&mut self.base_dir, at.parent().map(|d| d.to_path_buf()));
-        let r = self.parse_module_in(&forms);
+        let lives = self.lifetimes.len();
+        let r = self.module_parameters(&forms).and_then(|(params, rest)| Ok((params, self.parse_module_in(rest)?)));
         self.base_dir = outer_dir;
         self.dscope.truncate(depth);
+        self.lifetimes.truncate(lives);
         self.hidden = outer;
-        let items = r.map_err(|e| at_file(e, self))?;
+        let (params, items) = r.map_err(|e| at_file(e, self))?;
         self.defined_twice(span, &items)?;
         let e = self.arena.exp(span, Exp::Module(items));
         self.loaded.insert(e, (path.to_string(), text.clone(), file));
-        Ok(e)
+        // A file of parameters, `(module-parameters ((name kind) …))` first:
+        // a `plambda` over them of a `lambda` of none making the module, so
+        // that whoever loads it gives them, and each call makes one.
+        Ok(match params {
+            None => e,
+            Some(binders) => {
+                let made = self.arena.exp(span, Exp::Lambda { params: Vec::new(), body: e });
+                self.arena.exp(span, Exp::PLambda { binders, body: made })
+            }
+        })
+    }
+
+    /// A module's file's parameters, if its first form is
+    /// `(module-parameters ((name kind) …))`, bound for the rest of it as a
+    /// `plambda`'s are; and its other forms.
+    fn module_parameters<'f>(&mut self, forms: &'f [Syntax]) -> R<(Option<Vec<(DVar, Kind)>>, &'f [Syntax])> {
+        let Some((first, rest)) = forms.split_first() else { return Ok((None, forms)) };
+        let Some(items) = first.as_proper_list() else { return Ok((None, forms)) };
+        if !items.first().and_then(|h| h.as_symbol()).is_some_and(|h| self.name(h) == "module-parameters") {
+            return Ok((None, forms));
+        }
+        let [_, binders] = items else {
+            return Err(FxError::at(first.span, "`(module-parameters ((name kind) …))`"));
+        };
+        let lives = self.lifetimes.len();
+        let binders = self.parse_binders(binders)?;
+        for (v, k) in &binders {
+            if matches!(k, Kind::Region | Kind::Place) {
+                self.arena.set_outer(*v, self.lifetimes[..lives].to_vec());
+                self.lifetimes.push(*v);
+            }
+        }
+        Ok((Some(binders), rest))
     }
 
     /// An error in a module's file, said at the `load-module` that reads it,

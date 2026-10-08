@@ -93,6 +93,14 @@
                   ((not (null? vtwice)) vtwice)
                   (else (k-defined-twice (cdr items) (k-names-onto ts seen)
                                          (k-names-onto vs vseen)))))))))
+;; How many of `xs` there are.
+(define k-syns-count (subr (read @globals) (k-syns) int)
+  (lambda (xs) (if (null? xs) 0 (+ 1 (k-syns-count (cdr xs))))))
+;; The newest `n` of scope `s` onto `onto`: a module's file's parameters,
+;; bound by the `plambda` around it, which it sees.
+(define k-scope-newest (subr (maxeff (read @globals) (alloc @t)) (int k-scope k-scope) k-scope)
+  (lambda (n s onto)
+    (if (or (<= n 0) (null? s)) onto (cons (car s) (k-scope-newest (- n 1) (cdr s) onto)))))
 ;; Reading expressions (`check-resolve.fx`'s walk) and modules' items, one
 ;; recursive group: a module is an expression, and its items hold them.
 (define-rec
@@ -305,7 +313,8 @@
                                 (k-note-closed-filled filled))))
                (get got)))))
   ;; `(module item …)`: each item read in the scope of the descriptions
-  ;; before it; read from a file, of the standard ones only.
+  ;; before it; read from a file, of the standard ones only, and its
+  ;; parameters (`(module-parameters …)`), the `plambda` around it binds.
   (k-resolve-module-items (subr (maxeff checks spin) (mod-items int int) kx)
     (lambda (items a b)
       (let ((k (k-items-kind items)) (saved (get k-dscope)))
@@ -316,8 +325,9 @@
                                   " is defined twice in this module")
                    a b))
           ((> k 3)
-           (let ((got (the (ref k-items @t) (new nil))))
-             (begin (set k-dscope (get k-std-dscope))
+           (let ((got (the (ref k-items @t) (new nil)))
+                 (ps (k-syns-count (extract (car items) 3))))
+             (begin (set k-dscope (k-scope-newest ps saved (get k-std-dscope)))
                     (k-in-loaded (lambda () (set got (k-resolve-items-ahead items))) k a b)
                     (set k-dscope saved)
                     (x-module (get got) a b))))
