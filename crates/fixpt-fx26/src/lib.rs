@@ -241,6 +241,25 @@ pub fn front_end_location(at: usize) -> String {
     format!("byte {at}, past the front end")
 }
 
+/// The file an error in the front end itself is in: no file of the
+/// user's, so that a driver shows its message, which says where in the
+/// front end (`front_end_location`), and not a place in the program it was
+/// given (`TODO.md` §67).
+pub const FRONT_END_FILE: fixpt_read::FileId = fixpt_read::FileId(u32::MAX);
+
+/// `e`, found checking the front end, its span in [`front_end`]'s text: in
+/// [`FRONT_END_FILE`], its message placed in the front end's own files.
+pub fn front_end_error(e: FxError) -> FxError {
+    let at = front_end_location(e.span.start as usize);
+    front_end_failure(format!("the front end, {at}: {}", e.message))
+}
+
+/// A failure of the front end's with no place in it (loading it, its
+/// licence), in [`FRONT_END_FILE`].
+pub fn front_end_failure(message: String) -> FxError {
+    FxError::at(fixpt_read::Span::new(FRONT_END_FILE, 0, 0), message)
+}
+
 /// A driver for the front end, in FX-26: a text read, parsed, checked and
 /// compiled by the front end. See [`bootstrap_program`].
 pub const BOOTSTRAP: &str = include_str!("bootstrap.fx");

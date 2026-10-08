@@ -781,3 +781,17 @@ fn probe_phases_as_register_code() {
         }
     });
 }
+
+/// An error found checking the front end says where in its files, and is
+/// in no file of the user's, so that a driver does not place it in the
+/// program it was given (`TODO.md` §67).
+#[test]
+fn an_error_in_the_front_end_is_placed_in_its_files() {
+    let before: usize =
+        fixpt_fx26::FRONT_END_FILES.iter().take_while(|(n, _)| *n != "eval-core.fx").map(|(_, t)| t.len() + 1).sum();
+    let at = before as u32;
+    let e = fixpt_fx26::FxError::at(fixpt_read::Span::new(fixpt_read::FileId(0), at, at + 1), "bad");
+    let e = fixpt_fx26::front_end_error(e);
+    assert_eq!(e.span.file, fixpt_fx26::FRONT_END_FILE);
+    assert_eq!(e.message, "the front end, eval-core.fx:1:1: bad");
+}

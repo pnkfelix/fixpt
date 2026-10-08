@@ -33,6 +33,10 @@ fn parse_origin(arg: &str) -> Option<(String, usize, usize)> {
 }
 
 fn located(name: &str, text: &str, e: &fixpt_fx26::FxError) -> String {
+    // An error in the front end itself says where in it, not in `text`.
+    if e.span.file == fixpt_fx26::FRONT_END_FILE {
+        return e.message.clone();
+    }
     let (line, col) = line_col(text, e.span.start as usize);
     format!("{name}:{line}:{col}: {}", e.message)
 }

@@ -1811,14 +1811,3 @@ effects as variables too (an effect has the same lattice shape). First
 measure what it costs the front end's check, and collect the places where
 the front end writes `the` or `proj` only to steer instantiation, which
 this would remove.
-
-## 67. A front-end error reported at the user program's position (2026-10-08)
-
-While the rewritten evaluator was being written, an error in the front end
-(`eval-core.fx`, a recursive `define*` without `spin`) was reported as
-`crates/fixpt-fx26/tests/programs/unions/more-shapes.fx:21:1`, the program
-being run, not the front-end file and line. `--fx26-run evaluate` checks the
-front end and the program together; the front end's spans should name its
-own files (as the cellular span keys have since 5b46108). Reproduce by
-breaking a front-end file, then make the error name it.
-

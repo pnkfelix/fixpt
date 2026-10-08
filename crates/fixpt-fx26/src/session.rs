@@ -869,7 +869,7 @@ impl Fx26Session {
     /// is licensed code, and a text ends.
     pub fn read_with_own_reader(&mut self, text: &str) -> R<Vec<Syntax>> {
         if !self.scheme.is_bound(&format!("{READER_PREFIX}eager-start-fx26")) {
-            load_eager_reader(&mut self.scheme).map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), e))?;
+            load_eager_reader(&mut self.scheme).map_err(crate::front_end_failure)?;
         }
         self.scheme.engine.set_step_limit(None);
         let forms = crate::syn::read_with_fx26_reader(&mut self.scheme, &mut self.checker.interner, FileId(0), text);
@@ -881,7 +881,7 @@ impl Fx26Session {
     /// loading them the first time: each form's tree, as text.
     pub fn parse_with_own_parser(&mut self, text: &str) -> R<Vec<String>> {
         if !self.scheme.is_bound(&format!("{READER_PREFIX}parse-program")) {
-            load_eager_reader(&mut self.scheme).map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), e))?;
+            load_eager_reader(&mut self.scheme).map_err(crate::front_end_failure)?;
         }
         self.scheme.engine.set_step_limit(None);
         let r = crate::syn::parse_with_fx26_parser(&mut self.scheme, FileId(0), text);
@@ -989,7 +989,7 @@ impl Fx26Session {
     /// `front_end_run_word`, which the caller installs: a machine that
     /// runs register code). The reader stays lowered, and loaded as ever.
     fn front_end_as_register_code(&mut self) -> R<()> {
-        let fail = |m: String| FxError::at(Span::new(FileId(0), 0, 0), m);
+        let fail = crate::front_end_failure;
         let fields: Vec<String> = Self::FRONT_ENTRIES.iter().enumerate().map(|(i, n)| format!("({} {n})", i + 1)).collect();
         let text = format!("{}\n(product {})\n", crate::front_end(), fields.join(" "));
         // Checked and compiled once for this executable and this front end,
@@ -1002,12 +1002,13 @@ impl Fx26Session {
         let mut checked = None;
         if cached.is_none() {
             let mut c = Checker::new();
-            let forms = c.read_in(FileId(0), &text)?;
-            let done = c.declare_ahead(&forms)?;
+            // An error here is the front end's, said so, where in its files.
+            let forms = c.read_in(FileId(0), &text).map_err(crate::front_end_error)?;
+            let done = c.declare_ahead(&forms).map_err(crate::front_end_error)?;
             let mut tops = Vec::new();
             for (f, done) in forms.iter().zip(done) {
                 if !done {
-                    tops.extend(c.top_all(f)?);
+                    tops.extend(c.top_all(f).map_err(crate::front_end_error)?);
                 }
             }
             checked = Some((c, tops));
@@ -1065,7 +1066,7 @@ impl Fx26Session {
     /// The pieces written in FX-26, loaded if they are not yet, and told the
     /// program's convention.
     fn own_pieces(&mut self) -> R<()> {
-        let fail = |m: String| FxError::at(Span::new(FileId(0), 0, 0), m);
+        let fail = crate::front_end_failure;
         // A `load-module`'s path is from where the Rust checker's is.
         crate::syn::set_load_base(self.checker.base_dir.clone());
         if self.front_end_compiled {

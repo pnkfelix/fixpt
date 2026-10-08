@@ -904,3 +904,24 @@ the way: substitution's and `k-finitize`'s memos became hash tables, not
 lists (quadratic on a large type), and naming a type while showing it
 uses a tree made once per type shown (`k-atree`). Not done, not needed
 now: an upper file holding only the instance just below.
+
+## 67. A front-end error reported at the user program's position (2026-10-08)
+
+While the rewritten evaluator was being written, an error in the front end
+(`eval-core.fx`, a recursive `define*` without `spin`) was reported as
+`crates/fixpt-fx26/tests/programs/unions/more-shapes.fx:21:1`, the program
+being run, not the front-end file and line. `--fx26-run evaluate` checks the
+front end and the program together; the front end's spans should name its
+own files (as the cellular span keys have since 5b46108). Reproduce by
+breaking a front-end file, then make the error name it.
+
+**Done (2026-10-08).** The register-code path (`front_end_as_register_code`,
+which `--fx26-run evaluate` and `cellular` take) checked the joined front
+end with `?`, so its spans, offsets into that text in `FileId(0)`, were
+shown by the CLI's `located` against the user's file. Now an error checking
+the front end is `front_end_error`'s: its message placed by
+`front_end_location` (`the front end, eval-core.fx:434:39: …`), its span in
+`FRONT_END_FILE`, no file of the user's, which `located` shows as the
+message alone; loading failures there are `front_end_failure`'s, likewise.
+Test: `bootstrap.rs`, `an_error_in_the_front_end_is_placed_in_its_files`.
+
