@@ -99,23 +99,39 @@ pub const WEAK_DEAD: Value = Value::fixnum(-1);
 /// Before `from` is reused, while its forwarding pointers are there.
 fn update_weak(mem: &[u64], base: usize, weak: &mut [Value], from: usize, minor: bool) {
     for w in weak.iter_mut() {
-        if !w.is_ref() {
-            continue;
+        *w = weak_moved(mem, base, *w, from, minor);
+    }
+}
+
+/// What weak reference `w` is after the collection: where its object went,
+/// [`WEAK_DEAD`] if it was not copied, or `w` itself if it is not a
+/// reference or its object did not move.
+fn weak_moved(mem: &[u64], base: usize, w: Value, from: usize, minor: bool) -> Value {
+    if !w.is_ref() {
+        return w;
+    }
+    let i = w.index() - base;
+    let moving = young::is_young(i) || (!minor && (from..from + MAX_SEMI_WORDS).contains(&i));
+    if !moving {
+        return w;
+    }
+    if w.is_pair() {
+        let first = Value(mem[i]);
+        if first.is_forward() { Value::pair(first.index() + base) } else { WEAK_DEAD }
+    } else {
+        match find_main(mem, i) {
+            Err(new_main) => Value::bloblet(new_main + 1 + read_head(mem, new_main).fields + base),
+            Ok(_) => WEAK_DEAD,
         }
-        let i = w.index() - base;
-        let moving = young::is_young(i) || (!minor && (from..from + MAX_SEMI_WORDS).contains(&i));
-        if !moving {
-            continue;
-        }
-        *w = if w.is_pair() {
-            let first = Value(mem[i]);
-            if first.is_forward() { Value::pair(first.index() + base) } else { WEAK_DEAD }
-        } else {
-            match find_main(mem, i) {
-                Err(new_main) => Value::bloblet(new_main + 1 + read_head(mem, new_main).fields + base),
-                Ok(_) => WEAK_DEAD,
-            }
-        };
+    }
+}
+
+/// After a collection: each weak pair's car (`weak_pairs`, by main header,
+/// found by the scan) moved on with its referent, or cleared to
+/// [`WEAK_DEAD`].
+fn update_weak_pairs(mem: &mut [u64], base: usize, weak_pairs: &[usize], from: usize, minor: bool) {
+    for &main in weak_pairs {
+        mem[main + 1] = weak_moved(mem, base, Value(mem[main + 1]), from, minor).raw();
     }
 }
 
@@ -1459,6 +1475,37 @@ impl Heap {
         self.serial
     }
 
+    /// A weak pair: `car` held weakly (no collection keeps it alive for the
+    /// pair's sake; one that finds it dead clears it to [`WEAK_DEAD`]),
+    /// `cdr` as a pair holds it. A bloblet of kind `weak-pair`
+    /// (`layout::KINDS`), so that an image keeps it.
+    pub fn make_weak_pair(&mut self, car: Value, cdr: Value) -> Value {
+        let p = self.make_bloblet(layout::kind("weak-pair"), 2, 0, false);
+        self.set_bloblet_slot(p, 2, car);
+        self.set_bloblet_slot(p, 1, cdr);
+        p
+    }
+
+    /// Whether `v` is a weak pair.
+    pub fn is_weak_pair(&self, v: Value) -> bool {
+        v.is_bloblet() && self.bloblet_head(v).kind == layout::kind("weak-pair")
+    }
+
+    /// A weak pair's car, if its referent is alive (or it is not a
+    /// reference).
+    pub fn weak_car(&self, p: Value) -> Option<Value> {
+        let v = self.bloblet_slot(p, 2);
+        (v != WEAK_DEAD).then_some(v)
+    }
+
+    pub fn weak_cdr(&self, p: Value) -> Value {
+        self.bloblet_slot(p, 1)
+    }
+
+    pub fn set_weak_cdr(&mut self, p: Value, v: Value) {
+        self.set_bloblet_slot(p, 1, v);
+    }
+
     /// A weak reference to `v`, a pair or bloblet: its number, for
     /// [`weak_get`](Heap::weak_get). It does not keep `v` alive.
     pub fn weak_add(&mut self, v: Value) -> usize {
@@ -1511,6 +1558,7 @@ impl Heap {
             marked: HashSet::new(),
             code_marks: HashSet::new(),
             code_gray: Vec::new(),
+            weak_pairs: Vec::new(),
             regions: &mut self.regions,
             minor: false,
             crossing: &mut self.crossing,
@@ -1607,6 +1655,7 @@ impl Heap {
             }
         }
         update_weak(mem, self.base, &mut self.weak, from, false);
+        update_weak_pairs(mem, self.base, &c.weak_pairs, from, false);
         let Copier { free, new, marked, code_marks, .. } = c;
         self.sweep_code(&code_marks);
         // Ended reaps' chunks no reference was found into may be reused;
@@ -1744,7 +1793,15 @@ impl Heap {
             // the suffix. It never asks what kind of object this is.
             let main = at + is_extension(w) as usize;
             let head = read_head(mem, main);
-            for i in 0..head.fields {
+            // A weak pair's car is not traced: noted, to be moved on or
+            // cleared once everything live is copied.
+            let first = if head.kind == layout::kind("weak-pair") {
+                c.weak_pairs.push(main);
+                1
+            } else {
+                0
+            };
+            for i in first..head.fields {
                 let v = Value(mem[main + 1 + i]);
                 if v.is_ref() {
                     mem[main + 1 + i] = Self::copy_out(mem, c, v).raw();
@@ -2059,6 +2116,9 @@ struct Copier<'r> {
     /// yet scanned.
     code_marks: HashSet<usize>,
     code_gray: Vec<usize>,
+    /// The weak pairs scanned, by main header: their cars, untraced, to be
+    /// moved on or cleared at the end (`update_weak_pairs`).
+    weak_pairs: Vec<usize>,
     regions: &'r mut regions::Regions,
     /// Whether this is a minor collection, which copies the nursery's
     /// objects to the end of the old space and nothing else.

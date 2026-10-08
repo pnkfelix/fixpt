@@ -11,6 +11,7 @@
 //! word written (`Heap::set_slot`, and each machine's own stores).
 
 use super::{Copier, Heap, MAX_SEMI_WORDS, MEM_WORDS, NURSERY_BASE, NURSERY_MAX, read_head};
+use crate::layout;
 use crate::value::{Value, is_extension, is_header};
 use std::collections::{HashMap, HashSet};
 
@@ -130,6 +131,7 @@ impl Heap {
             marked: HashSet::new(),
             code_marks: HashSet::new(),
             code_gray: Vec::new(),
+            weak_pairs: Vec::new(),
             regions: &mut self.regions,
             minor: true,
             crossing: &mut self.crossing,
@@ -195,7 +197,12 @@ impl Heap {
                 let (fields, n) = if is_header(w) {
                     let main = at + is_extension(w) as usize;
                     let head = read_head(mem, main);
-                    (main + 1..main + 1 + head.fields, head.size())
+                    // A weak pair's car is not traced (`scan_one`).
+                    let weak = head.kind == layout::kind("weak-pair");
+                    if weak {
+                        c.weak_pairs.push(main);
+                    }
+                    (main + 1 + weak as usize..main + 1 + head.fields, head.size())
                 } else {
                     (at..at + 2, 2)
                 };
@@ -214,6 +221,7 @@ impl Heap {
             scan += Self::scan_one(mem, old_top + scan, &mut c);
         }
         super::update_weak(mem, self.base, &mut self.weak, NURSERY_BASE, true);
+        super::update_weak_pairs(mem, self.base, &c.weak_pairs, NURSERY_BASE, true);
         let free = c.free;
         self.top = old_top + free;
         assert!(self.top - self.active <= MAX_SEMI_WORDS, "the old space is full");

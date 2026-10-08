@@ -68,6 +68,7 @@
 (define kind-native-closure int 41)
 (define kind-flat-array int 42)
 (define kind-eqtable int 43)
+(define kind-weak-pair int 44)
 (define kind-extension int 255)
 
 ;;; A closure's fields, and an environment frame's, by negative offset.
@@ -261,6 +262,7 @@
 (define kind-native-closure (with layout-module kind-native-closure))
 (define kind-flat-array (with layout-module kind-flat-array))
 (define kind-eqtable (with layout-module kind-eqtable))
+(define kind-weak-pair (with layout-module kind-weak-pair))
 (define kind-extension (with layout-module kind-extension))
 (define closure-code (with layout-module closure-code))
 (define closure-extra0 (with layout-module closure-extra0))

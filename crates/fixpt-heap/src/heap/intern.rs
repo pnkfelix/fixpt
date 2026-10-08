@@ -9,15 +9,15 @@
 //!
 //! The table is in the heap, so that an image keeps it (`dump-heap`): the
 //! global of a symbol of its own, a vector `[stamp, count, buckets]`;
-//! `buckets` a vector of chains, an entry a vector `[object, next]`, `next`
-//! another entry or `#f`. A pair's hash is of its parts' addresses, which a
-//! collection moves, so the table is stamped with the heap's count of
-//! collections when it was last hashed, and an intern that finds the count
-//! moved relinks every entry first, as an `eqtable` does
-//! (`fixpt_runtime::eqtable`). Allocation never collects outside a
-//! safepoint, so nothing moves during an intern. The entries are held
-//! strongly: what is interned is what programs quote, which their code
-//! holds anyway, so a weak table would free little.
+//! `buckets` a vector of chains, an entry a weak pair (`make_weak_pair`) of
+//! the object and the next entry (or `#f`). Weak: what only the table holds,
+//! a quote in code since redefined, say, is collected, and its entry dropped
+//! (`docs/research/weak-references.md`). A pair's hash is of its parts'
+//! addresses, which a collection moves, so the table is stamped with the
+//! heap's count of collections when it was last hashed, and an intern that
+//! finds the count moved relinks every entry still alive first, as an
+//! `eqtable` does (`fixpt_runtime::eqtable`). Allocation never collects
+//! outside a safepoint, so nothing moves during an intern.
 
 use super::Heap;
 use crate::value::{ObjType, Value};
@@ -25,8 +25,6 @@ use crate::value::{ObjType, Value};
 const STAMP: usize = 0;
 const COUNT: usize = 1;
 const BUCKETS: usize = 2;
-const OBJECT: usize = 0;
-const NEXT: usize = 1;
 
 /// The global the table is in.
 const TABLE: &str = "%fx26-interned-data";
@@ -64,18 +62,18 @@ impl Heap {
         let h = self.datum_hash(candidate);
         let buckets = self.obj_ref(t, BUCKETS);
         let n = self.obj_len(buckets);
-        let mut e = self.obj_ref(buckets, (h % n as u64) as usize);
+        let b = (h % n as u64) as usize;
+        let mut e = self.obj_ref(buckets, b);
         while !e.is_false() {
-            let o = self.obj_ref(e, OBJECT);
-            if self.datum_same(o, candidate) {
+            if let Some(o) = self.weak_car(e)
+                && self.datum_same(o, candidate)
+            {
                 return o;
             }
-            e = self.obj_ref(e, NEXT);
+            e = self.weak_cdr(e);
         }
-        let entry = self.make_vector(2, Value::FALSE);
-        self.obj_set(entry, OBJECT, candidate);
-        self.obj_set(entry, NEXT, self.obj_ref(buckets, (h % n as u64) as usize));
-        self.obj_set(buckets, (h % n as u64) as usize, entry);
+        let entry = self.make_weak_pair(candidate, self.obj_ref(buckets, b));
+        self.obj_set(buckets, b, entry);
         let count = self.obj_ref(t, COUNT).as_fixnum() + 1;
         self.obj_set(t, COUNT, Value::fixnum(count));
         if count as usize > 2 * n {
@@ -106,26 +104,35 @@ impl Heap {
         t
     }
 
-    /// Every entry of table `t` linked into `n` new buckets by its hash now,
-    /// and the table stamped.
+    /// Every entry of table `t` still alive linked into `n` new buckets by
+    /// its hash now, the dead dropped, and the table stamped and counted.
     fn interned_relink(&mut self, t: Value, n: usize) {
         let old = self.obj_ref(t, BUCKETS);
         let mut entries = Vec::new();
         for i in 0..self.obj_len(old) {
             let mut e = self.obj_ref(old, i);
             while !e.is_false() {
-                entries.push(e);
-                e = self.obj_ref(e, NEXT);
+                if let Some(o) = self.weak_car(e) {
+                    entries.push((e, o));
+                }
+                e = self.weak_cdr(e);
             }
         }
         let buckets = self.make_vector(n, Value::FALSE);
-        for e in entries {
-            let b = (self.datum_hash(self.obj_ref(e, OBJECT)) % n as u64) as usize;
-            self.obj_set(e, NEXT, self.obj_ref(buckets, b));
+        for &(e, o) in &entries {
+            let b = (self.datum_hash(o) % n as u64) as usize;
+            self.set_weak_cdr(e, self.obj_ref(buckets, b));
             self.obj_set(buckets, b, e);
         }
         self.obj_set(t, BUCKETS, buckets);
+        self.obj_set(t, COUNT, Value::fixnum(entries.len() as i64));
         self.obj_set(t, STAMP, Value::fixnum(self.collections() as i64));
+    }
+
+    /// How many data are interned and alive now: for tests and reports.
+    pub fn interned_count(&mut self) -> usize {
+        let t = self.interned_table();
+        self.obj_ref(t, COUNT).as_fixnum() as usize
     }
 
     /// An interned object's hash: of a pair's parts' addresses, a string's

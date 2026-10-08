@@ -1503,15 +1503,15 @@ infer the precise category of the lattice (`docs/research/shapes.md`):
   8.1 → 8.3 (same allocation and collections: to look into).
 - **Progress (2026-10-08).** `quote` of any datum and `quasiquote`, with
   `unquote` and `unquote-splicing` and R7RS depth, in both parsers
-  (`docs/fx26.md`, "Datums"). Quoted data are interned, a strong
-  hash-consing table in the heap (the user's): made once at compile time
+  (`docs/fx26.md`, "Datums"). Quoted data are interned, a weak
+  hash-consing table in the heap (the user's; its entries weak pairs since
+  2026-10-08, `docs/research/weak-references.md`): made once at compile time
   where all literals, one object for equal quotes and inlined copies, a
   quasiquote's constant parts too, `eq?` alike on every machine and the
   FX-26 evaluator (a table of its own, `ev-intern`). Register code folds
   `car` and `cdr` of a quote made at compile time, as of a constant list.
   Left: a splice before a dotted tail; a quoted
-  bytevector; a weak table, should programs intern data that die (only
-  quotes are interned now); and the lattice's categories, above.
+  bytevector; and the lattice's categories, above.
 
 ## 52. Deep recursion in native code: what is left (the user's, 2026-10-07)
 
@@ -1689,3 +1689,25 @@ standard references already are, §46). The same holds for the other
 forms written as names a program would want (`product`, `extract`,
 `new`, `get`, `set`, …): a survey of which are keywords, which are
 standard bindings, and which could move from the first to the second.
+
+## 59. Weak tables: ephemerons, and an eqtable that holds keys weakly (the user's, 2026-10-08)
+
+Weak pairs are in both collectors (`docs/research/weak-references.md` §3),
+and the intern table is made of them. A table keyed by identity whose keys
+are held weakly needs more: its value may refer to its key (a property
+table, a memo table of a pure function, such as the derived equality and
+hash of `polytypic.md`), and with weak pairs that value keeps its own key,
+and so its entry, alive. That is what ephemerons are for (Hayes, OOPSLA
+1997):
+- An `ephemeron` kind beside `weak-pair`: key and value traced only once
+  the key is reached otherwise, by a fixpoint in both collectors (a queue
+  of ephemerons met, rescanned until only unreached keys remain; Chez's
+  collector keeps them pending per segment instead), then both cleared.
+- A weak-key `eqtable` (`fixpt_runtime::eqtable`) of ephemeron entries,
+  pruned at its rehash after a collection as the intern table is.
+- Its type and effect: invisible as long as a program cannot tell an entry
+  went (a cache of a pure function); a lookup that can tell is an
+  observation of the collector, and carries an effect.
+- Then, if wanted: guardians (or argument-only cleanups, as Go's
+  `AddCleanup`) for what no region owns, the poll an effect; and regions
+  that own resources (custodians) with the async work (`async.md` §5).

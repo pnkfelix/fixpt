@@ -164,6 +164,11 @@ pub const KINDS: &[Kind] = &[
     // A table keyed by identity (`eqtable`, `fixpt_runtime::eqtable`): its
     // stamp, count and buckets in fields 1 to 3.
     Kind { name: "eqtable", code: 43, traced: true },
+    // A weak pair (`Heap::make_weak_pair`): field 2, its car, is not traced,
+    // and a collection that finds its referent dead clears it to
+    // `heap::WEAK_DEAD`; field 1, its cdr, is an ordinary field. The car is
+    // the first field a scan meets (`main + 1`).
+    Kind { name: "weak-pair", code: 44, traced: true },
 ];
 
 /// A flat array's element layouts: what `(flatlayout T)` is at run time.
