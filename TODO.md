@@ -1385,7 +1385,8 @@ compilers' stack and register code, and the FX-26 evaluator give the
 standard operation (`programs/run/standard-refs.fx`, every machine). The
 audit of name-keyed rules found F15 and F16 (`soundness-findings.md`).
 **Left:** a polymorphic value through `#%fx` is not instantiated where a
-type is expected (§48 would settle `nil`'s).
+type is expected, nor is `(with #%fx nil)` of the type `nil` where nothing
+says which list, as `nil` is (`DONE.md` §48).
 
 **Prior art (the user's pointer):** Clinger, "Rapid Case Dispatch in
 Scheme", Scheme Workshop 2006 (`docs/research/papers/case-dispatch/`,
@@ -1432,32 +1433,6 @@ so the operations can be first class again:
 - Meanwhile, every new rule that finds a standard operation by name must
   either only add facts (an alias then loses precision, never gains) or
   join the second-class list; the audit in F15's note is the template.
-
-## 48. `nil` of a type of its own (the user's, 2026-10-07)
-
-`nil` is `(poly ((r region) (t type)) (listof t r))`, and a polymorphic
-value is instantiated only where a type is expected of it; elsewhere a
-program `proj`s it, or wraps it in `the`, at every use that the checker
-cannot solve (an argument given before the one that fixes `t`, a `let`
-of it, a branch of an `if` checked first). Instead: a singleton type, say
-`null`, not polymorphic, of `nil` alone, a subtype of every `(listof T R)`
-(and of `(pairof T1 T2 R)`'s "or none" while that is the absent pair, Q7
-making `pairof` non-nil). Subtyping then does what instantiation does now,
-everywhere a list is expected, and a `let` of `nil` or an `if` with `nil`
-in one branch joins to the other branch's list type.
-- Joins: `(if c nil xs)` is `xs`'s type; `(if c nil nil)` is `null`.
-- Inference: a parameter whose argument is `nil` alone stays `null`, not a
-  list; the checkers may widen at the binder's use.
-- Both checkers; the lowering and the compilers need nothing (the value is
-  the same); `(with #%fx nil)` stops needing instantiation (§46).
-- Ties to Q7 (unions of atoms): `null` is the one-value atom type that
-  unions like `(union symbol null)` would be built from.
-- Q7's first stage (2026-10-07) made `pairof` non-`nil` and spells "a
-  pair, or none" `(union nil (pairof …))`, `nil` written as a type only
-  there so far. Its second stage (2026-10-07) made `nil` a type of its own,
-  in unions and where a pair that may be `nil` is expected whose tail is
-  no list (instantiation gives the type `nil` there); the value `nil` is
-  still polymorphic everywhere else, so the joins and `let`s above remain.
 
 ## 49. `sexp-edit indent`: re-indent as fx26-mode does (the user's, 2026-10-07)
 
@@ -1672,3 +1647,5 @@ their types, and both checkers read every test's facts from its callee's
 type, none from its name (`sizes/latent-alias.fx`: aliases at their types
 do as they do). Left: checking a `lambda` against such a type (until then
 refused, its body a `bool`). Paths done too (2026-10-08, below).
+Checking a `lambda` against such a type waits on a concrete motivation, a
+program that needs its own predicate to narrow (the user's, 2026-10-08).

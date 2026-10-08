@@ -1,6 +1,6 @@
 # `fixpt` — a Rust Scheme engine with FX-87 and FX-91 front ends
 
-## At a glance (kept current; last updated 2026-10-07)
+## At a glance (kept current; last updated 2026-10-08)
 
 Where things stand. Below it is the plan as it grew, oldest first (the
 contents are at the end of this section); the details behind this summary
@@ -30,7 +30,8 @@ are in the last section, "Log: the glance's details", and in
   its dispatch is `TODO.md` §46); `pairof` never `nil`, unions of
   disjoint run-time shapes narrowed by shape predicates and `typecase`
   and `false` below `bool` (2026-10-07, Q7's stages 1 to 3); what a test
-  proves in its type, `(bool (then …) (else …))`. Globals are a region; redefinition follows one
+  proves in its type, `(bool (then …) (else …))`; `nil` of the type
+  `nil` where nothing says which list (2026-10-08, `DONE.md` §48). Globals are a region; redefinition follows one
   rule at the REPL and in files, in both checkers; the REPL is
   incremental.
 - **Higher kinds** (2026-10-04; `docs/fx26.md`, "Higher kinds";

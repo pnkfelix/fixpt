@@ -93,8 +93,24 @@ fn a_projection_is_inferred_from_what_is_expected() {
 
 #[test]
 fn a_type_nothing_determines_is_an_error() {
-    let err = rejects("(null? nil)");
+    let err = rejects("(car nil)");
     assert!(err.contains("not yet known here") || err.contains("cannot be inferred"), "{err}");
+}
+
+/// `nil`, where nothing else says which list, is of the type `nil`
+/// (`TODO.md` §48), and an `if` or `tagcase` with `nil` in one branch is what
+/// the others are.
+#[test]
+fn nil_is_of_the_type_nil_where_nothing_says_which_list() {
+    assert_eq!(check("(null? nil)"), "bool ! pure");
+    assert_eq!(check("(let ((xs nil)) (null? xs))"), "bool ! pure");
+    assert_eq!(check("(cons 1 nil)"), "(pairof int nil @r.1) ! (alloc @r.1)");
+    assert_eq!(check("(cdr (cons 1 nil))"), "nil ! pure");
+    let xs = "(define xs (listof int @heap) (list 1 2)) (define c bool #t)";
+    assert_eq!(check(&format!("{xs} (if c nil xs)")), "(listof int @heap) ! (read (globals c xs))");
+    assert_eq!(check(&format!("{xs} (if c xs nil)")), "(listof int @heap) ! (read (globals c xs))");
+    assert_eq!(check(&format!("{xs} (if c nil nil)")), "nil ! (read (globals c))");
+    assert_eq!(check(&format!("{xs} (cond ((= 1 2) nil) (else xs))")), "(listof int @heap) ! (read (globals xs))");
 }
 
 /// The effect binder of a higher-order operator is the latent effect of the

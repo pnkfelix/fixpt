@@ -438,7 +438,8 @@
                                   (known (if (k-mentions-unknown-type? res kinds solved) -1 res))
                                   (r (k-synth-lambda-as arg (extract (car c) 2) known)))
                              (k-arg-unified (car params) kinds solved done i r)))))
-                    ((k-mentions-unknown-type? p kinds solved) (k-fail-not-known arg i p))
+                    ((k-mentions-unknown-type? p kinds solved)
+                     (k-nil-told arg i p (car params) kinds solved done))
                     ;; A variable of a polymorphic type: instantiated at the
                     ;; parameter, and what it turns out to be solves more
                     ;; (`(apply list xs)`: `apply`'s effect).
@@ -976,18 +977,6 @@
       (if (string=? (k-std-op body) "")
           #u
           (set k-extracts (cons (product (1 a) (2 b) (3 -502)) (get k-extracts))))))
-  ;; The parts of `ps`, from position `i`, that `free` names, and their
-  ;; positions: what a `with` binds.
-  (k-with-used (subr (maxeff kreads (alloc @t)) (k-parts k-names int)
-                     (productof (1 k-parts) (2 k-ids)))
-    (lambda (ps free i)
-      (if (null? ps)
-          (product (1 (the k-parts nil)) (2 (the k-ids nil)))
-          (let ((rest (k-with-used (cdr ps) free (+ i 1))))
-            (if (k-has-name? free (extract (car ps) 1))
-                (product (1 (the k-parts (cons (car ps) (extract rest 1))))
-                         (2 (the k-ids (cons i (extract rest 2)))))
-                rest)))))
   (k-module-rule (subr (maxeff checks spin) (kx) k-te)
     (lambda (x)
       (tagcase x

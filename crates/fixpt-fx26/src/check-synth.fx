@@ -81,8 +81,14 @@
   (lambda (bs ds inner a b)
     (let ((inst (k-subst-checked bs (k-proj-map bs ds a b) inner a b)))
       (begin (k-no-knot inst a b) inst))))
+;; `t`, or, if a list of any elements (`nil`), the type `nil`.
+(define k-nil-if-any (subr (maxeff kstate spin) (int) int)
+  (lambda (t) (if (k-list-of-any? t) (k-ty-new (ty-nil)) t)))
+;; `ts`, each `nil` the type `nil`: what other arms are, as in an `if`.
+(define k-nils-if-any (subr (maxeff kstate spin) (k-ids) k-ids)
+  (lambda (ts) (if (null? ts) nil (cons (k-nil-if-any (car ts)) (k-nils-if-any (cdr ts))))))
 ;; An `if`'s type, its branches a `tc` and a `td`: the greater; an error if neither is.
-(define k-join-branches (subr (maxeff checks spin) (int int int int) int)
+(define k-join-known (subr (maxeff checks spin) (int int int int) int)
   (lambda (tc td a b)
     (cond ((k-subtype tc td) td)
           ((k-subtype td tc) tc)
@@ -90,6 +96,10 @@
           ((and (k-nat-ty? tc) (k-nat-ty? td)) (k-ty-new (ty-nat (sz-finite))))
           (else
            (k-fail (k-cat4 "the branches are a " (k-show-ty tc) " and a " (k-show-ty td)) a b)))))
+;; The same, `nil`, beside another branch, what that is if `nil` is one
+;; (`TODO.md` §48); beside `nil`, the type `nil`.
+(define k-join-branches (subr (maxeff checks spin) (int int int int) int)
+  (lambda (tc td a b) (k-join-known (k-nil-if-any tc) (k-nil-if-any td) a b)))
 ;; If `p` certifies a variable acyclic (`acyclic?`, `(acyclic i)`), it, as
 ;; the binding it is (none or one).
 (define k-acyclic-test (subr (maxeff kreads (alloc @t) spin) (kx) k-named)
@@ -442,6 +452,35 @@
               (the (listof k-te @t) (cons (k-poly-instance s t p a b) nil))
               (the (listof k-te @t) nil))))
       (else y (the (listof k-te @t) nil)))))
+;; `nil` (a variable of a list of any elements), argument `i`, where its
+;; parameter `q`, `p` so far, is not yet known: the type `nil` (`TODO.md`
+;; §48), heard last, after what the context expects and every other
+;; argument; anything else, the error.
+(define k-nil-told (subr (maxeff checks spin) (kx int int int k-binders k-solved k-done) unit)
+  (lambda (arg i p q kinds solved done)
+    (tagcase arg
+      (x-var (s a b)
+        (let ((t (k-lookup s)))
+          (if (and (>= t 0) (k-list-of-any? t))
+              (let ((nil-ty (k-ty-new (ty-nil))))
+                (begin
+                  (k-unify q nil-ty kinds solved (k-new-trail))
+                  (if (k-mentions-unknown-type? q kinds solved) (k-fail-not-known arg i p) #u)
+                  (k-arg-found done i nil-ty (k-naming-effect s t))))
+              (k-fail-not-known arg i p))))
+      (else y (k-fail-not-known arg i p)))))
+;; The parts of `ps`, from position `i`, that `free` names, and their
+;; positions: what a `with` binds.
+(define k-with-used (subr (maxeff kreads (alloc @t)) (k-parts k-names int)
+                   (productof (1 k-parts) (2 k-ids)))
+  (lambda (ps free i)
+    (if (null? ps)
+        (product (1 (the k-parts nil)) (2 (the k-ids nil)))
+        (let ((rest (k-with-used (cdr ps) free (+ i 1))))
+          (if (k-has-name? free (extract (car ps) 1))
+              (product (1 (the k-parts (cons (car ps) (extract rest 1))))
+                       (2 (the k-ids (cons i (extract rest 2)))))
+              rest)))))
 ;; Whether `et` is a `(nat z)` that natural literal `k` is one of.
 (define k-literal-within? (subr kreads (k-ty int) bool)
   (lambda (et k) (tagcase et (ty-nat (z) (k-size-le? (k-size-lit k) z)) (else w #f))))
@@ -456,7 +495,7 @@
   (lambda (x types expected)
     (if (>= expected 0)
         expected
-        (let ((found (k-upper-bound types types)))
+        (let* ((ts (k-nils-if-any types)) (found (k-upper-bound ts ts)))
           (if (< found 0)
               (let ((shown (k-join (k-show-list types k-printing-none) ", ")))
                 (k-fail-at (string-append "the arms are " shown) x))
@@ -538,6 +577,8 @@
 (define k-arg-unified (with check-synth-module k-arg-unified))
 (define k-thunk-lambda? (with check-synth-module k-thunk-lambda?))
 (define k-poly-var-at (with check-synth-module k-poly-var-at))
+(define k-nil-told (with check-synth-module k-nil-told))
+(define k-with-used (with check-synth-module k-with-used))
 (define k-as-expected (with check-synth-module k-as-expected))
 (define k-literal-within? (with check-synth-module k-literal-within?))
 (define k-may-be-empty? (with check-synth-module k-may-be-empty?))

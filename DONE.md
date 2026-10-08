@@ -812,3 +812,48 @@ Test: `mutable_bloblets_made_and_written_in_line` (`tests/direct.rs`,
 `programs/native/bloblet-tree.fx`), a tree built, its leaves replaced by
 younger nodes, summed, collecting every 7 allocations too.
 
+## 48. `nil` of a type of its own (the user's, 2026-10-07)
+
+`nil` is `(poly ((r region) (t type)) (listof t r))`, and a polymorphic
+value is instantiated only where a type is expected of it; elsewhere a
+program `proj`s it, or wraps it in `the`, at every use that the checker
+cannot solve (an argument given before the one that fixes `t`, a `let`
+of it, a branch of an `if` checked first). Instead: a singleton type, say
+`null`, not polymorphic, of `nil` alone, a subtype of every `(listof T R)`
+(and of `(pairof T1 T2 R)`'s "or none" while that is the absent pair, Q7
+making `pairof` non-nil). Subtyping then does what instantiation does now,
+everywhere a list is expected, and a `let` of `nil` or an `if` with `nil`
+in one branch joins to the other branch's list type.
+- Joins: `(if c nil xs)` is `xs`'s type; `(if c nil nil)` is `null`.
+- Inference: a parameter whose argument is `nil` alone stays `null`, not a
+  list; the checkers may widen at the binder's use.
+- Both checkers; the lowering and the compilers need nothing (the value is
+  the same); `(with #%fx nil)` stops needing instantiation (§46).
+- Ties to Q7 (unions of atoms): `null` is the one-value atom type that
+  unions like `(union symbol null)` would be built from.
+- Q7's first stage (2026-10-07) made `pairof` non-`nil` and spells "a
+  pair, or none" `(union nil (pairof …))`, `nil` written as a type only
+  there so far. Its second stage (2026-10-07) made `nil` a type of its own,
+  in unions and where a pair that may be `nil` is expected whose tail is
+  no list (instantiation gives the type `nil` there); the value `nil` is
+  still polymorphic everywhere else, so the joins and `let`s above remain.
+- **Done (2026-10-08).** Both checkers. The value `nil` keeps its `poly`
+  type, so instantiation where a type is expected is as before; where
+  nothing says which list, it is of the type `nil`:
+  - an argument whose parameter neither the expected result nor any other
+    argument has solved, heard after all of them (`infer.rs`, the told
+    arguments; `k-nil-told`): `(null? nil)` is a `bool`, `(cons 1 nil)` a
+    `(pairof int nil R)`, `(cdr (cons 1 nil))` a `nil`. If the type `nil`
+    still leaves the parameter unknown, the error is as before: `(car nil)`;
+  - an `if`'s branches and a `tagcase`'s arms (`cond`, `case`, `typecase`
+    through them), each `nil` the type `nil` before the join
+    (`nil_if_any`, `k-nil-if-any`): `(if c nil xs)` is `xs`'s type, `(if c
+    nil nil)` a `nil`;
+  - a `let` of `nil` stays polymorphic; each use of it is one of these.
+  - Not done: `(cons 1 nil)` is no list without a `the` (a
+    `(pairof int nil R)`'s tail is invariant, so it is not a `(listof int
+    R)`; widening at the binder's use is the open option above), and
+    `(with #%fx nil)` (§46).
+  - Tests: `tests/bidirectional.rs`
+    (`nil_is_of_the_type_nil_where_nothing_says_which_list`, and
+    `a_type_nothing_determines_is_an_error` now with `(car nil)`).

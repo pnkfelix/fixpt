@@ -985,5 +985,6 @@
 (define k-cannot-take-apart (with check-infer-module k-cannot-take-apart))
 (define k-zip-fields (with check-infer-module k-zip-fields))
 (define k-beyond (with check-infer-module k-beyond))
+(define k-list-of-any? (with check-infer-module k-list-of-any?))
 (define k-reaches-only? (with check-infer-module k-reaches-only?))
 (define-type k-solved (select check-infer-module k-solved))

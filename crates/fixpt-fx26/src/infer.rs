@@ -924,6 +924,19 @@ impl Checker {
                 let (t, eff) = self.synth_lambda_as(*a, Some(&ps), res)?;
                 self.unify(params[i], t, &mut u, &mut HashSet::new());
                 done[i] = Some((t, eff));
+            } else if self.mentions_unknown_type(p, &u)
+                && let Exp::Var(s) = *self.arena.exp_at(*a)
+                && let Some(t) = self.lookup(s).filter(|t| self.list_of_any(*t))
+            {
+                // `nil` where nothing yet says which list: the type `nil`
+                // (`TODO.md` §48), heard last, after what the context
+                // expects and every other argument.
+                let nil = self.arena.ty(Ty::Nil);
+                self.unify(params[i], nil, &mut u, &mut HashSet::new());
+                if self.mentions_unknown_type(params[i], &u) {
+                    return Err(not_known(self, p));
+                }
+                done[i] = Some((nil, self.naming_effect(s, t)));
             } else if self.mentions_unknown_type(p, &u) {
                 return Err(not_known(self, p));
             } else if let Exp::Var(s) = *self.arena.exp_at(*a)
@@ -1019,6 +1032,11 @@ impl Checker {
             }
             _ => false,
         }
+    }
+
+    /// `t`, or, if a list of any elements (`nil`), the type `nil`.
+    pub(crate) fn nil_if_any(&mut self, t: TyId) -> TyId {
+        if self.list_of_any(t) { self.arena.ty(Ty::Nil) } else { t }
     }
 
     /// Give each region binder nothing has solved a fresh region of its own;
