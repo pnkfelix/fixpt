@@ -497,12 +497,16 @@
 (define k-solved-instance (subr (maxeff checks spin) (k-binders k-solved int int int int) int)
   (lambda (kinds solved a b ft inner)
     (k-drop-bounds solved (k-subst-checked kinds (k-finish kinds solved a b ft) inner a b))))
-;; Whether `param` mentions a type binder only the expected type has bounded:
-;; one open once those binders' solutions are set aside.
-(define k-mentions-upper-only? (subr (maxeff kstate spin) (int k-binders k-solved) bool)
+;; Whether `param` mentions a type binder whose bounds have not met: one
+;; open once those binders' solutions are set aside.
+(define k-mentions-unsettled? (subr (maxeff kstate spin) (int k-binders k-solved) bool)
   (lambda (param kinds solved)
-    (let ((without (the k-solved (new (k-map-but-upper-only solved (get solved))))))
+    (let ((without (the k-solved (new (k-map-unsettled solved (get solved) #f)))))
       (k-mentions-unknown-type? param kinds without))))
+;; `param` with each binder whose bounds have not met at its upper bound,
+;; where it has one.
+(define k-at-most (subr (maxeff kstate spin) (int k-solved) int)
+  (lambda (param solved) (k-subst param (k-map-unsettled solved (get solved) #t))))
 ;; Whether `x` is a variable of a type not polymorphic.
 (define k-mono-var? (subr (maxeff kreads spin) (kx) bool)
   (lambda (x)
@@ -513,27 +517,33 @@
       (else y #f))))
 ;; Argument `i`, `arg`, of parameter type `param`, `p` as solved so far:
 ;; checked against `p`, its type and effect noted. Where `param` mentions a
-;; type binder only the expected type has bounded, what the argument is
-;; bounds it from below too (the Rust checker's `bounded_argument`): a
-;; variable says its own type, a call checked against `p` its own result
-;; there, and anything else, checked against `p`, is a `p`. `check` and
-;; `synth`, the rules'.
+;; type binder whose bounds have not met, what the argument is bounds it
+;; too, rather than being told (the Rust checker's `bounded_argument`): a
+;; variable says its own type; a call, checked against the binders' upper
+;; bounds where they have them (else what they are so far), its own result
+;; there; anything else, checked so, is what it was checked against.
+;; `check` and `synth`, the rules'.
 (define k-bounded-arg
   (subr (maxeff checks spin)
         (kx int int k-binders k-solved k-done int (subr (maxeff checks spin) (kx int) k-eff)
             (subr (maxeff checks spin) (kx) k-te))
         unit)
   (lambda (arg param p kinds solved done i check synth)
-    (cond ((not (k-mentions-upper-only? param kinds solved)) (k-arg-found done i p (check arg p)))
+    (cond ((not (k-mentions-unsettled? param kinds solved))
+           (k-arg-found done i p (check arg p)))
+          ;; A variable's type is its own; a call, told what it is, is told
+          ;; its regions too.
           ((k-mono-var? arg) (k-arg-unified param kinds solved done i (synth arg)))
           (else
-           (begin
-             (set k-checked-call (product (1 -1) (2 -1) (3 -1)))
-             (let* ((e (check arg p)) (c (get k-checked-call))
-                    (t (if (and (= (extract c 1) (k-start arg)) (= (extract c 2) (k-end arg)))
-                           (extract c 3)
-                           p)))
-               (begin (k-unify param t kinds solved (k-new-trail)) (k-arg-found done i t e))))))))
+           (let ((q (k-at-most param solved)))
+             (begin
+               (set k-checked-call (product (1 -1) (2 -1) (3 -1)))
+               (let* ((e (check arg q)) (c (get k-checked-call))
+                      (t (if (and (= (extract c 1) (k-start arg)) (= (extract c 2) (k-end arg)))
+                             (extract c 3)
+                             q)))
+                 (begin (k-unify param t kinds solved (k-new-trail))
+                        (k-arg-found done i t e)))))))))
 ;; Variable `s`, of polymorphic type `t`, at `a`..`b`: `t` instantiated at
 ;; `p`, and the effect of naming `s`.
 (define k-poly-instance (subr (maxeff checks spin) (symbol int int int int) k-te)

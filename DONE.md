@@ -947,3 +947,62 @@ the Rust, native and register machines, the lowering, `--fx26-run
 cellular` and the evaluator; it and `sizes/fixed-width-literals.fx` (8)
 are in `evaluator.rs`'s `test_programs`.
 
+## 66. Local type inference: bounds from both sides (the user's, 2026-10-08)
+
+Found by the evaluator's rewrite: `(array-ref bs i)`, `bs` an `(arrayof int
+@v)`, checked where a `val` (a union with `int` in it) is expected, is
+refused. The expected result fixes `t := val` before the argument is seen,
+where synthesizing `t = int` from the argument and then subsuming `int ≤ val`
+would succeed (`eval-prims.fx` writes `(the int …)` for now). The user's
+idea: let each side contribute bounds, a lower bound from the arguments and
+an upper one from the expected type, narrowing until they meet, then check
+that a solution exists. That is Pierce and Turner's local type inference
+(TOPLAS 2000; from memory): gather `S ≤ t ≤ T` for each variable from the
+arguments and the expected result, then pick the least solution where `t`
+is covariant in the result, the greatest where contravariant, and refuse
+when it is invariant and the bounds differ. Here `(arrayof t)` is invariant,
+so the argument gives `int ≤ t ≤ int`, the result `t ≤ val`, and `t = int`
+solves both. Dolan's biunification (MLsub, POPL 2017; from memory) is the
+same flow of bounds, made principal. Both checkers, agreeing; regions and
+effects as variables too (an effect has the same lattice shape). First
+measure what it costs the front end's check, and collect the places where
+the front end writes `the` or `proj` only to steer instantiation, which
+this would remove.
+
+**Stage 1 done (2026-10-08): bounds in both checkers.** A type binder keeps
+a lower bound (the arguments, joined), an upper one (the expected result,
+met) and an exact one (inside a pair, array, reference, i-cell or mark key:
+invariant); a binder fixed, or whose bounds have met, tells the arguments
+still to be checked what they are, as the expected type did, and one
+bounded only from above lets an argument say what it is first (a variable
+its type, a call its own result checked against the bound). Polarity flips
+in a subroutine's parameters. `infer.rs`, `Bounds`; `check-bounds.fx`.
+Tests: `bidirectional/bounds.fx` (42), `unions/bounds-apart.fx` (refused). Four
+refused programs changed their messages, in both checkers alike
+(`regions/knot-through-two-regions.fx` is refused by its list's element
+type now, before the knot rule, since the pair's contents fix it). Cost:
+none measured, the same front-end text checked by both checkers in
+2.45–2.50 s before and after. Then refined (the user's: a binder is known
+only once its bounds narrow to a point): one with a lower bound alone is no
+more known than one with an upper bound alone, so an argument whose
+parameter mentions either bounds it rather than being told (a variable its
+type; a call, checked against the upper bounds where there are some, else
+what is known so far, so that it is still told its regions, its own
+result).
+
+**Done (2026-10-08), stage 2: the annotations it makes unneeded.** Tried,
+one at a time and on both the checker before and the one after, each
+`(the T (f …))` whose `T` names no region and each operator `(proj f …)`
+naming none, in the front end, the test programs, the benchmark ports and
+the research examples. What bounds made unneeded, and was taken out: two,
+both in the evaluator, `(the int (array-ref bs …))` (`eval-prims.fx`) and
+`((proj eq? val) a b)` (`eval-values.fx`). Already redundant before, and
+left as written (perhaps documentation, perhaps not; the user's to
+decide): 12 `the`s in the front end (10 in `eager-reader.fx`, one each in
+`check-holds.fx` and `eval-prims.fx`), and 17 `the`s and 63 operator
+`proj`s in the programs (most in `mllang-bench/fx/mlton/DLXSimulator.fx`,
+`(proj ia-nth u32)` and kin). Not removable, as they name a region or a
+place (`acyclic`) under an alias, which bounds do not choose: those in
+`check-print.fx`, `check-subtype.fx`, `check-terminate.fx` and `native.fx`
+(`reverse`'s result region there is fixed by nothing else).
+

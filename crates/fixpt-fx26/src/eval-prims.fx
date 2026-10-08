@@ -383,7 +383,7 @@
              ((bloblet-ref) (array-ref fs i))
              ((bloblet-set!) (begin (array-set! fs i (ev-arg xs 1)) the-unit))
              ((bloblet-freeze) (ev-arg xs 0))
-             ((bloblet-byte) (the int (array-ref bs (as-int (ev-arg xs 1)))))
+             ((bloblet-byte) (array-ref bs (as-int (ev-arg xs 1))))
              ((bloblet-set-byte!)
               (begin (array-set! bs (as-int (ev-arg xs 1)) (as-int (ev-arg xs 2))) the-unit))
              (else (array-length bs))))

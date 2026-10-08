@@ -53,7 +53,9 @@ are in the last section, "Log: the glance's details", and in
   proves in its type, `(bool (then …) (else …))`; `nil` of the type
   `nil` where nothing says which list (2026-10-08, `DONE.md` §48);
   `datum` a union taken apart as Scheme's data are, its `datum-`
-  accessors retired (2026-10-08, `TODO.md` §51). Globals are a region; redefinition follows one
+  accessors retired (2026-10-08, `TODO.md` §51); local type inference by
+  bounds from both sides, a binder known once its bounds meet (2026-10-08,
+  `DONE.md` §66). Globals are a region; redefinition follows one
   rule at the REPL and in files, in both checkers; the REPL is
   incremental.
 - **Higher kinds** (2026-10-04; `docs/fx26.md`, "Higher kinds";

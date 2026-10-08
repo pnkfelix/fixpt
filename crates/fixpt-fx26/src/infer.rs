@@ -60,10 +60,11 @@ impl Unknowns {
         self.kinds.iter().any(|(u, _)| *u == v)
     }
 
-    /// Whether type binder `v` is bounded only from above, by what the
-    /// context expects: no argument has said what it is.
-    fn upper_only(&self, v: DVar) -> bool {
-        self.bounds.get(&v).is_some_and(|b| b.exact.is_none() && b.lower.is_none() && b.upper.is_some())
+    /// Whether type binder `v` has bounds that have not yet met: neither
+    /// fixed, nor at least and at most the same type. What it is so far is
+    /// then no answer to tell an argument (`Checker::unsettled`).
+    fn bounded(&self, v: DVar) -> Option<&Bounds> {
+        self.bounds.get(&v).filter(|b| b.exact.is_none())
     }
 }
 
@@ -1453,31 +1454,58 @@ impl Checker {
         false
     }
 
-    /// Whether `t` mentions a type binder only the expected type has
-    /// bounded, from above.
-    fn mentions_upper_only(&self, t: TyId, u: &Unknowns) -> bool {
-        let mut seen = HashSet::new();
-        self.walk_vars(t, &mut seen, &mut |v| u.upper_only(v))
+    /// The type binders whose bounds have not met, of those `u` has bounds
+    /// for: neither fixed, nor at least and at most one type.
+    fn unsettled(&mut self, u: &Unknowns) -> HashSet<DVar> {
+        let mut out = HashSet::new();
+        for (v, b) in &u.bounds {
+            if u.bounded(*v).is_none() {
+                continue;
+            }
+            let met = match (b.lower, b.upper) {
+                (Some(l), Some(h)) => self.subtype(h, l),
+                _ => false,
+            };
+            if !met {
+                out.insert(*v);
+            }
+        }
+        out
     }
 
     /// Argument `a`, of parameter type `param`, which is `p` as solved so
     /// far: checked against `p`, its type and effect. Where `param` mentions
-    /// a type binder only the expected type has bounded, what the argument
-    /// is bounds it from below too (`TODO.md` §66): a variable says its own
-    /// type, a call checked against `p` its own result there, and anything
-    /// else, checked against `p`, is a `p`.
+    /// a type binder whose bounds have not met, what the argument is bounds
+    /// it too, rather than being told (`TODO.md` §66): a variable says its
+    /// own type; a call, checked against the binders' upper bounds where
+    /// they have them (else what they are so far), its own result there;
+    /// anything else, checked so, is what it was checked against.
     fn bounded_argument(&mut self, a: ExpId, param: TyId, p: TyId, u: &mut Unknowns) -> R<(TyId, Effect)> {
-        if !self.mentions_upper_only(param, u) {
+        let open = self.unsettled(u);
+        let mut seen = HashSet::new();
+        if !self.walk_vars(param, &mut seen, &mut |v| open.contains(&v)) {
             let eff = self.check(a, p)?;
             return Ok((p, eff));
         }
-        if let Exp::Var(s) = *self.arena.exp_at(a)
-            && self.lookup(s).is_some_and(|t| !matches!(self.arena.get(t), Ty::Poly { .. }))
-        {
+        // A variable's type is its own; a call, told what it is, is told
+        // its regions too (`(cons 1 2)` where a key at `@heap` is wanted).
+        let by_itself = match *self.arena.exp_at(a) {
+            Exp::Var(s) => self.lookup(s).is_some_and(|t| !matches!(self.arena.get(t), Ty::Poly { .. })),
+            _ => false,
+        };
+        if by_itself {
             let (t, eff) = self.synth(a)?;
             self.unify(param, t, u, &mut HashSet::new());
             return Ok((t, eff));
         }
+        // Checked against the upper bounds, where there are some.
+        let mut at_most = u.solved.clone();
+        for v in &open {
+            if let Some(h) = u.bounds[v].upper {
+                at_most.insert(*v, D::Type(h));
+            }
+        }
+        let p = self.subst(param, &at_most);
         self.checked_call = None;
         let eff = self.check(a, p)?;
         let t = match self.checked_call.take() {

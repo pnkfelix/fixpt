@@ -53,20 +53,32 @@
                (lambda (bs) (cond ((null? bs) k-no-bound) ((= (car (car bs)) v) (cdr (car bs)))
                                   (else (go (cdr bs)))))))
       (go (get m)))))
-;; Whether type binder `v` of `solved` is bounded only from above: no
-;; argument has said what it is.
-(define* k-upper-only? (subr (maxeff (read @t) (alloc @t) spin) ((ref k-map @t) int) bool)
+;; The bounds `solved` keeps for type binder `v`, if they have not met:
+;; neither fixed, nor at least and at most one type (the Rust checker's
+;; `unsettled`); in a list of one, or none.
+(define-type k-maybe-bound (listof k-bound @t))
+(define* k-unsettled (subr (maxeff kstate spin) ((ref k-map @t) int) k-maybe-bound)
   (lambda (solved v)
     (let ((m (k-bounds-of solved)))
-      (and (not (null? m))
-           (let ((b (k-bound-get (car m) v)))
-             (and (< (extract b 1) 0) (>= (extract b 2) 0) (< (extract b 3) 0)))))))
-;; `solved`'s solutions, but those of binders bounded only from above.
-(define* k-map-but-upper-only (subr (maxeff (read @t) (alloc @t) spin) ((ref k-map @t) k-map) k-map)
-  (lambda (solved m)
-    (cond ((null? m) m)
-          ((k-upper-only? solved (car (car m))) (k-map-but-upper-only solved (cdr m)))
-          (else (the k-map (cons (car m) (k-map-but-upper-only solved (cdr m))))))))
+      (if (null? m)
+          nil
+          (let* ((b (k-bound-get (car m) v)) (lo (extract b 1)) (up (extract b 2)))
+            (if (or (>= (extract b 3) 0) (and (< lo 0) (< up 0))
+                    (and (>= lo 0) (>= up 0) (k-subtype up lo)))
+                nil
+                (the k-maybe-bound (cons b nil))))))))
+;; `solved`'s solutions, but none of binders whose bounds have not met; or,
+;; if `uppers`, those of them that have an upper bound at it.
+(define* k-map-unsettled (subr (maxeff kstate spin) ((ref k-map @t) k-map bool) k-map)
+  (lambda (solved m uppers)
+    (if (null? m)
+        m
+        (let ((b (k-unsettled solved (car (car m))))
+              (rest (k-map-unsettled solved (cdr m) uppers)))
+          (cond ((null? b) (the k-map (cons (car m) rest)))
+                ((not uppers) rest)
+                ((< (extract (car b) 2) 0) (the k-map (cons (car m) rest)))
+                (else (the k-map (cons (cons (car (car m)) (dt (extract (car b) 2))) rest))))))))
 
 ;; `k-unify`'s flags, set for `f`: in something invariant; matching what is
 ;; expected (from above); in a subroutine's parameters (the other way).
@@ -131,5 +143,5 @@
 (define k-flipped (with check-bounds-module k-flipped))
 (define k-new-bounded-solved (with check-bounds-module k-new-bounded-solved))
 (define k-drop-bounds (with check-bounds-module k-drop-bounds))
-(define k-map-but-upper-only (with check-bounds-module k-map-but-upper-only))
+(define k-map-unsettled (with check-bounds-module k-map-unsettled))
 (define k-bound-solution (with check-bounds-module k-bound-solution))

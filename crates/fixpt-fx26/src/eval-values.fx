@@ -172,7 +172,7 @@
     (typecase a
       (procedure f #f) (f64 x #f) (f32 x #f)
       (sum o (typecase b (sum p (ev-other-eq? o p)) (else #f)))
-      (else ((proj eq? val) a b)))))
+      (else (eq? a b)))))
 
 ;; Quoted data interned (TODO §51), as the heap interns them
 ;; (`Heap::intern_datum`): a pair found by its interned parts, a string by
