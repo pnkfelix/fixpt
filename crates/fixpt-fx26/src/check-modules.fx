@@ -301,7 +301,8 @@
                (set k-ahead-filled outer-filled)
                (tagcase r
                  (k-err (m a b) (k-fail m a b))
-                 (else y (k-ground-filled (k-filled-reversed filled nil))))
+                 (else y (begin (k-ground-filled (k-filled-reversed filled nil))
+                                (k-note-closed-filled filled))))
                (get got)))))
   ;; `(module item …)`: each item read in the scope of the descriptions
   ;; before it; read from a file, of the standard ones only.

@@ -132,6 +132,19 @@ fn a_message_names_datum() {
     assert!(err.ends_with("a int is expected here, and this is a datum"), "{err}");
 }
 
+/// A datatype keeps its name through an instantiation (`cons`'s): data
+/// that mentions no variable is left itself by substitution
+/// (`closed_named`), declared ahead or not.
+#[test]
+fn a_message_names_a_datatype_through_instantiation() {
+    let p = "(define-datatype tree (leaf int) (node tree tree))
+             (define* f (subr pure (int) int) (lambda (x) x))
+             (define l (listof tree @heap) (list (leaf 1)))
+             (f (cons (leaf 2) l))";
+    let err = rejects(p);
+    assert!(err.contains("this is a (pairof tree (listof tree @heap) r)"), "{err}");
+}
+
 /// The effect binder of a higher-order operator is the latent effect of the
 /// subroutine passed to it.
 #[test]

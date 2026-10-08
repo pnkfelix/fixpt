@@ -878,6 +878,7 @@ impl Checker {
         let done = r?;
         for (slot, span) in filled {
             self.grounded(slot, span)?;
+            self.note_closed(slot);
         }
         Ok(done)
     }

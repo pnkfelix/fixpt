@@ -107,10 +107,57 @@
     (cond ((null? ms) -1)
           ((= (car (car ms)) t) (cdr (car ms)))
           (else (k-memo-find (cdr ms) t)))))
+;; Each type a `define-type` named that mentions no variable
+;; (`k-closed-in?`): substitution leaves it itself, so that it keeps its name
+;; in what is shown. As the Rust checker's `closed_named`.
+(define k-closed-named (ref k-ids @t) (new nil))
+;; Whether `t` is data that mentions no variable: built of base types, `nil`,
+;; `false`, unions, sums, products, pairs, references and arrays, at regions
+;; that are constants, as far as it goes (`seen`, a cycle met again). As the
+;; Rust checker's `closed_data`.
+(define k-closed-region? (subr pure (k-region) bool)
+  (lambda (r) (tagcase r (r-var (v) #f) (r-frozen (p f) (< p 0)) (else y #t))))
+(define k-closed-in? (subr (maxeff kreads (alloc @t) spin) (int k-ids) bool)
+  (lambda (t0 seen)
+    (let ((t (k-resolve t0)))
+      (or (k-has-id? seen t)
+          (let ((s (the k-ids (cons t seen))))
+            (tagcase (k-get t)
+              (ty-base (n) #t) (ty-void () #t) (ty-nil () #t) (ty-false () #t)
+              (ty-union (ms) (k-all-closed? ms s))
+              (ty-sum (ps) (k-parts-closed? ps s))
+              (ty-product (ps) (k-parts-closed? ps s))
+              (ty-pair (a d r nl) (and (k-closed-region? r) (k-closed-in? a s) (k-closed-in? d s)))
+              (ty-ref (a r) (and (k-closed-region? r) (k-closed-in? a s)))
+              (ty-array (a r) (and (k-closed-region? r) (k-closed-in? a s)))
+              (else y #f)))))))
+(define k-all-closed? (subr (maxeff kreads (alloc @t) spin) (k-ids k-ids) bool)
+  (lambda (ts seen)
+    (or (null? ts) (and (k-closed-in? (car ts) seen) (k-all-closed? (cdr ts) seen)))))
+(define k-parts-closed? (subr (maxeff kreads (alloc @t) spin) (k-parts k-ids) bool)
+  (lambda (ps seen)
+    (or (null? ps)
+        (and (k-closed-in? (extract (car ps) 2) seen) (k-parts-closed? (cdr ps) seen)))))
+;; Each slot of `fs`, declared ahead and filled, noted if it is closed.
+(define k-note-closed-filled
+  (subr (maxeff kstate spin) ((listof (productof (1 int) (2 int) (3 int)) acyclic)) unit)
+  (lambda (fs)
+    (if (null? fs)
+        #u
+        (begin (k-note-closed (extract (car fs) 1)) (k-note-closed-filled (cdr fs))))))
+;; `slot`, a type a `define-type` named, noted if it is closed.
+(define k-note-closed (subr (maxeff kstate spin) (int) int)
+  (lambda (slot)
+    (begin
+      (if (k-closed-in? slot nil)
+          (set k-closed-named (cons (k-resolve slot) (get k-closed-named)))
+          #u)
+      slot)))
 (define k-subst-memo (subr (maxeff kstate spin) (int k-map (ref k-pairs @t)) int)
   (lambda (t m memo)
     (let* ((t (k-resolve t))
-           (kept (and (>= (get k-subst-keep) 0) (= (k-keep-at t) (get k-subst-keep))))
+           (kept (or (and (>= (get k-subst-keep) 0) (= (k-keep-at t) (get k-subst-keep)))
+                     (k-has-id? (get k-closed-named) t)))
            (done (if kept t (k-memo-find (get memo) t))))
       (if (>= done 0)
           done
@@ -262,6 +309,9 @@
 (define k-subst-memo (with check-subst-module k-subst-memo))
 (define k-subst-descs (with check-subst-module k-subst-descs))
 (define k-subst (with check-subst-module k-subst))
+(define k-closed-named (with check-subst-module k-closed-named))
+(define k-note-closed (with check-subst-module k-note-closed))
+(define k-note-closed-filled (with check-subst-module k-note-closed-filled))
 (define k-binder-desc (with check-subst-module k-binder-desc))
 (define k-apply-fun (with check-subst-module k-apply-fun))
 (define k-subst-desc (with check-subst-module k-subst-desc))

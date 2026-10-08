@@ -138,10 +138,10 @@ pub struct Checker {
     char_: TyId,
     f64_: TyId,
     symbol: TyId,
-    /// The standard `datum` (`DATUM`), once defined: it mentions no
-    /// variable, so substitution leaves it itself, and it keeps its name
-    /// in what is shown.
-    datum: Option<TyId>,
+    /// Each type a `define-type` (or `define-datatype`) named that mentions
+    /// no variable (`closed_data`): substitution leaves it itself, so that it
+    /// keeps its name in what is shown. `datum` is one.
+    pub(crate) closed_named: HashSet<TyId>,
     /// How deep in abbreviation expansions parsing is, to stop one that
     /// mentions itself.
     pub(crate) expanding: u32,
@@ -462,7 +462,7 @@ impl Checker {
             char_,
             f64_,
             symbol,
-            datum: None,
+            closed_named: HashSet::new(),
             expanding: 0,
             knots: Vec::new(),
             holes: None,
@@ -524,8 +524,7 @@ impl Checker {
         // bindings, whose types name it.
         let forms = c.read(DATUM).expect("reads");
         let datum = c.interner.intern("datum");
-        let d = c.define_type(datum, &forms[0], forms[0].span).unwrap_or_else(|e| panic!("`DATUM` is wrong: {e}"));
-        c.datum = Some(c.arena.resolve(d));
+        c.define_type(datum, &forms[0], forms[0].span).unwrap_or_else(|e| panic!("`DATUM` is wrong: {e}"));
         for (name, ty) in crate::standard::ENTRIES {
             c.bind(name, ty).unwrap_or_else(|e| panic!("the standard type of `{name}` is wrong: {e}"));
         }
@@ -2987,6 +2986,27 @@ impl Checker {
     /// `t` with each binder in `map` replaced — what `proj` does. Recursive
     /// types are copied as cycles: each node is given its slot before its
     /// children are built.
+    /// Whether `t` is data that mentions no variable: built of base types,
+    /// `nil`, `false`, unions, sums, products, pairs, references and arrays,
+    /// at regions that are constants, as far as it goes (`seen`, a cycle
+    /// met again). What substitution can change, it is not; anything else,
+    /// a procedure say, counted not closed. As `k-closed-in?`.
+    pub(crate) fn closed_data(&self, t: TyId, seen: &mut HashSet<TyId>) -> bool {
+        let t = self.arena.resolve(t);
+        if !seen.insert(t) {
+            return true;
+        }
+        let region = |r: &Region| !matches!(r, Region::Var(_) | Region::Frozen(Some(_), _));
+        match self.arena.get(t).clone() {
+            Ty::Base(_) | Ty::Void | Ty::Nil | Ty::False => true,
+            Ty::Union(ms) => ms.iter().all(|m| self.closed_data(*m, seen)),
+            Ty::Sum(ps) | Ty::Product(ps) => ps.iter().all(|(_, p)| self.closed_data(*p, seen)),
+            Ty::Pair(a, b, r, _) => region(&r) && self.closed_data(a, seen) && self.closed_data(b, seen),
+            Ty::Ref(a, r) | Ty::Array(a, r) => region(&r) && self.closed_data(a, seen),
+            _ => false,
+        }
+    }
+
     pub fn subst(&mut self, t: TyId, map: &HashMap<DVar, D>) -> TyId {
         // A substitution of its own (a `dlambda` reduced inside another)
         // keeps nothing of another's.
@@ -3023,7 +3043,7 @@ impl Checker {
         if let Some(&n) = memo.get(&t) {
             return n;
         }
-        if self.datum == Some(t) {
+        if self.closed_named.contains(&t) {
             return t;
         }
         let ty = self.arena.get(t).clone();

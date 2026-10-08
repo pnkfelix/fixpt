@@ -1020,7 +1020,19 @@ impl Checker {
         if r.is_err() {
             self.dscope.truncate(depth);
         }
+        if r.is_ok() {
+            self.note_closed(slot);
+        }
         r.map(|()| slot)
+    }
+
+    /// `slot`, a type a `define-type` named, noted if it is data that
+    /// mentions no variable: it keeps its name (`closed_named`). Once its
+    /// knot is tied, or every slot declared ahead filled.
+    pub(crate) fn note_closed(&mut self, slot: TyId) {
+        if self.closed_data(slot, &mut std::collections::HashSet::new()) {
+            self.closed_named.insert(self.arena.resolve(slot));
+        }
     }
 
     /// Whether `s` is written as an effect: `pure`, `spin`, a name bound
@@ -2279,6 +2291,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         let r = self.parse_module_items(forms).and_then(|out| {
             for (slot, span) in std::mem::take(&mut self.ahead_filled) {
                 self.grounded(slot, span)?;
+                self.note_closed(slot);
             }
             Ok(out)
         });

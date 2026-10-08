@@ -440,7 +440,8 @@
         (k-declare-each forms)
         (set k-ahead-names nil)
         (let ((filled (get k-ahead-filled)))
-          (begin (set k-ahead-filled nil) (k-ground-filled (k-filled-reversed filled nil))))))))
+          (begin (set k-ahead-filled nil) (k-ground-filled (k-filled-reversed filled nil))
+                 (k-note-closed-filled filled)))))))
 (define k-line (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (int k-eff) string)
   (lambda (t e) (k-cat3 (k-show-ty t) " ! " (k-show-effect e))))
 ;; The line for a definition of `name`, of type `t` and effect `e`.

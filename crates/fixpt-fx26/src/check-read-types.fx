@@ -398,7 +398,7 @@
             (begin
               (k-push-desc name (ds-rec slot))
               (let ((t (k-parse-type def)))
-                (begin (k-set-link slot t) (k-grounded slot a b) slot))))))))
+                (begin (k-set-link slot t) (k-grounded slot a b) (k-note-closed slot)))))))))
 ;; Name or `dlambda` `s`, a description function.
 (define k-fun-d (subr (maxeff checks spin) (syn) k-desc)
   (lambda (s) (df (k-parse-fun s -1))))

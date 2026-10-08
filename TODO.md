@@ -1711,3 +1711,29 @@ and so its entry, alive. That is what ephemerons are for (Hayes, OOPSLA
 - Then, if wanted: guardians (or argument-only cleanups, as Go's
   `AddCleanup`) for what no region owns, the poll an effect; and regions
   that own resources (custodians) with the async work (`async.md` §5).
+
+## 60. Type-family applications kept, unfolded on demand (the user's, 2026-10-08)
+
+A family (`(define-type (stack (t type)) …)`, a `define-datatype` with
+parameters) is expanded by substitution where it is used ("Type
+abbreviations with parameters", `docs/fx26.md`), so a message shows
+`(stack int)` written out, and a datatype of one shows its expansion at
+every use; closed types keep their names (`closed_named`, 2026-10-08), an
+instance of a family cannot. The user's suggestion: do not beta-reduce the
+application and force the substitution; keep `(stack int)` as an
+application with its arguments (an environment for the body's
+parameters), and unfold it only where an operation needs its structure.
+Then substitution maps over the arguments and shares the rest, and the
+printer shows the application as written, families that are not regular
+(a recursive use at other arguments) included, since nothing needs to
+unfold them whole.
+- Precedent: OCaml keeps an abbreviation as `Tconstr` and expands it
+  lazily (`Ctype.expand_head`), with a cache of expansions; FX-26 itself
+  keeps generative types as `Ty::Named` and description functions as
+  `Ty::App`.
+- Each structural operation (subtyping, unification, shape, narrowing,
+  `closed_data`) unfolds one level on demand, under the trails it has; an
+  application against the same family's application compares arguments
+  first (by variance), and unfolds only if that does not decide.
+- Both checkers; the printing then needs no matching of a type against the
+  families. Ties to the non-regular work (`docs/research/nonregular-*.md`).
