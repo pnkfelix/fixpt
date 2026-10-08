@@ -14,20 +14,15 @@
 ;; its types and procedures inside, what other files use re-exported after.
 (define tables
   (module
-    (define-type (bucket (k type) (v type) (r region)) (listof (pairof k v r) acyclic))
-    (define-type (bucket-array (k type) (v type) (r region)) (arrayof (bucket k v r) r))
-    ;; A key's entry, or none: `nil`.
-    (define-type (entry (k type) (v type) (r region)) (union nil (pairof k v r)))
-    ;; A key's hash, and whether two keys are the same.
-    (define-type (key-hash (k type)) (subr pure (k) int))
-    (define-type (key-same (k type)) (subr pure (k k) bool))
-    (define-type (table (k type) (v type) (r region))
-      (bloblet (fields (key-hash k) (key-same k) (bucket-array k v r) int) r))
-
-    ;; Rehashing: moving the entries of an `a` into new buckets, as `b` says,
-    ;; reading, writing and consing in the table's region.
-    (define-type (rehashing (k type) (v type) (r region) (a type) (b type))
-      (subr (maxeff (read @globals) (read r) (write r) (alloc r)) ((table k v r) a b) unit))
+    ;; Its types (`table-types.fx`).
+    (define table-types (load-module "fx26:table-types.fx"))
+    (define-type bucket (select table-types bucket))
+    (define-type bucket-array (select table-types bucket-array))
+    (define-type entry (select table-types entry))
+    (define-type key-hash (select table-types key-hash))
+    (define-type key-same (select table-types key-same))
+    (define-type table (select table-types table))
+    (define-type rehashing (select table-types rehashing))
 
     ;; Whether `n` names the empty list: `nil`, or `no-pair`, the same value at
     ;; any pair type (`standard.rs`).

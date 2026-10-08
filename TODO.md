@@ -1809,4 +1809,8 @@ Phase 1, the types out, one module at a time; phase 2, the conversion.
 - Phase 1: `parser-types.fx` (2026-10-08), the parser's effects, `exp`,
   `top`, `presult`, the trees' lists and the loaded files' types, loading
   the reader's types (not the reader) for `syn`.
+- Phase 1: `table-types.fx` (2026-10-08), the tables' type families,
+  which the `tables` module loads. It found the FX printer showing a
+  family in a nested module's type by its own name, `(desc bucket bucket)`,
+  where the Rust one shows its `dlambda`: fixed (`k-show-comp`).
 

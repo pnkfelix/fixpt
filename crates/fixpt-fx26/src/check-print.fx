@@ -799,17 +799,21 @@
   ;; as the effect. A description shows what it is, not its own name `n` (a
   ;; value's, `||`, no name): a `define-type` alias of it, `(select m n)`, is
   ;; named `n` too.
+  ;; A family too (`(dlambda …)`), as the Rust checker shows one.
   (k-show-comp (subr kbuilds (int k-printing symbol) string)
     (lambda (t p n)
       (tagcase (k-get t)
-        (ty-lam (bs body) (if (null? bs) (k-show-desc body p) (k-show-on t p)))
-        (else y
-          (let* ((r (k-resolve t))
-                 (named (k-part-named (extract p 2) r))
-                 (name (if (null? named) (k-abbrev-by (extract p 3) r) named)))
-            (if (or (null? name) (string=? (car name) (symbol->string n)))
-                (k-show-body r p)
-                (car name))))))))
+        (ty-lam (bs body)
+          (if (null? bs) (k-show-desc body p) (k-show-comp-named t p n)))
+        (else y (k-show-comp-named t p n)))))
+  (k-show-comp-named (subr kbuilds (int k-printing symbol) string)
+    (lambda (t p n)
+      (let* ((r (k-resolve t))
+             (named (k-part-named (extract p 2) r))
+             (name (if (null? named) (k-abbrev-by (extract p 3) r) named)))
+        (if (or (null? name) (string=? (car name) (symbol->string n)))
+            (k-show-body r p)
+            (car name))))))
 
 ;; Whether type `t` is variable `v`.
 (define k-type-is-var? (subr (maxeff kreads spin) (int int) bool)

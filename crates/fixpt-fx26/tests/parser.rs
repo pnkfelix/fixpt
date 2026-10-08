@@ -24,8 +24,32 @@ fn rust_trees(text: &str) -> Vec<String> {
     out
 }
 
+/// `tree` without the FX-26 parser's marks of where a loaded file's
+/// positions start, `[k·10⁹ (path) () ()] `: its file ids, which the Rust
+/// parser keeps in spans instead (`parser.fx`, `load-base`).
+fn without_file_marks(tree: &str) -> String {
+    let mut out = String::new();
+    let mut rest = tree;
+    while let Some(i) = rest.find('[') {
+        out.push_str(&rest[..i]);
+        let tail = &rest[i..];
+        let digits: String = tail[1..].chars().take_while(|c| c.is_ascii_digit()).collect();
+        let mark = digits.parse::<u64>().is_ok_and(|n| n >= 1_000_000_000 && n % 1_000_000_000 == 0);
+        match tail.find("] ").filter(|_| mark).or_else(|| tail.find(']').filter(|_| mark)) {
+            Some(end) => rest = tail[end + 1..].trim_start_matches(' '),
+            None => {
+                out.push('[');
+                rest = &tail[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 fn same_trees(s: &mut Fx26Session, text: &str) {
     let ours = s.parse_with_own_parser(text).unwrap_or_else(|e| panic!("the FX-26 parser: {e}"));
+    let ours: Vec<String> = ours.iter().map(|t| without_file_marks(t)).collect();
     let rust = rust_trees(text);
     assert_eq!(ours.len(), rust.len(), "different numbers of forms");
     for (a, b) in ours.iter().zip(&rust) {
