@@ -52,7 +52,7 @@ lowered): `pi` now takes 0.6 s in all.
 | `lattice`    | 120549                                           | 5.6      |                                                                                        |
 | `list`       | ((x0 x1 x2 x3 x4 x5 x6 x7))                      | 2.5      | `eq?` on lists compared elementwise                                                    |
 | `listsort`   | #t                                               | 8.1      | Larceny's `sort!!`                                                                     |
-| `lseq`       | (135 324 351)                                    | 14.2     | `cwcc`                                                                                 |
+| `lseq`       | (135 324 351)                                    | 14.2     | `cwcc`; its tail a union, `typecase` on `procedure?` (2026-10-07)                      |
 | `matrix`     | (((1 1 1 1 1) (1 1 1 1 -1) (1 1 1 -1 1) (1 1 -1… | 9.5      |                                                                                        |
 | `maze`       | (#\space #\space #\space #\_ #\space #\space #\… | 1.8      | `eq?` on sets and cells, as the original (2026-09-30)                                  |
 | `mazefun`    | ((_ * _ _ _ _ _ _ _ _ _) (_ * * * * * * * _ * *… | 5.0      |                                                                                        |

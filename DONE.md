@@ -763,5 +763,29 @@ a left shift past 2^24 bits of a non-zero integer fails. The FX-26
 checker's shapes are masks since (`check-unions.fx`). Tests:
 `bitwise_on_every_machine` (six machines, bignums and a negative shift),
 and the evaluator against the lowering (`tests/evaluator.rs`). Natively
-they are call-outs: `TODO.md` §56 has their fixnum fast path.
+they were call-outs; their fixnum fast path is `DONE.md` §56's.
+
+## 56. Shape predicates in line, natively (Q7's stage 2, 2026-10-07)
+
+Of the shape predicates only `null?` was in line (`eq` with `nil`); the
+rest were primitive calls, call-outs from native code, so `lseq` with its
+tail a union took 6.6 s against its sum's 4.0 s. Now both native tiers do
+them in line, by the value's tag and, for a bloblet, its header's kind
+(the word before the suffix, or as far back as the trailer there says;
+fields and no trailer, or a large header, still call out): `pair?`,
+`exact-integer?` (a fixnum, or a bignum's kind), `char?`, `boolean?`,
+`symbol?`, `string?`, `%fx26-array?` (a plain bloblet), `%fx26-procedure?`
+(any machine's closure, primitive or continuation); `direct.rs`'s
+`shape_fast` under the native convention, register code's `shape_test` at
+`prim1`. `int`'s `bitwise-and`, `-ior`, `-xor` and `-not` of fixnums are
+in line too (`arithmetic-shift` still calls out). The cells' machines
+call out for every primitive, these as the rest.
+
+Back to back with the build before, 10M tests in a loop: `procedure?`
+0.32 → 0.17 s natively; a loop of `bitwise-xor` and `bitwise-and` 0.54 →
+0.18 s natively, 0.47 → 0.19 s in register code. `lseq` with the union,
+6.4 → 2.0 s natively and 6.6 → 3.0 s in register code, where the sum's is
+4.0 and 3.0: `scheme-bench/lseq.fx` is converted. Tests: the every-machine
+union program's harder cases (a primitive and a continuation as
+procedures, a bignum, an array with a large header).
 

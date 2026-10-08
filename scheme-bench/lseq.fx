@@ -14,9 +14,10 @@
 ;;; a pair whose cdr, until `lseq-cdr` realizes it, is the generator. What
 ;;; differs, and why:
 ;;; - An lseq's cdr is a list or a procedure, which `procedure?` tells
-;;;   apart; FX-26 has no untagged union, so here it is a sum, `(seq
-;;;   rest)` or `(gen g)`. Realizing an element makes a sum as well as its
-;;;   pair (the new pair shares its predecessor's `(gen g)`).
+;;;   apart: a union, `(union lseq gen)`, which `typecase` takes apart
+;;;   (2026-10-07; until then a sum, `(seq rest)` or `(gen g)`, one made as
+;;;   well as each pair realized: 4.0 s natively, the union 2.0 s once
+;;;   `procedure?` was in line, `TODO.md` §56).
 ;;; - The end of a generator, Scheme's eof object, is a fixnum none of
 ;;;   these generators yields: the least one. A generator is then a
 ;;;   procedure of no arguments returning an int, as in Larceny, where the
@@ -31,8 +32,8 @@
 (define-type ints (listof int @heap))
 ;; An lseq: nil, or a pair whose cdr is the rest, realized, or the
 ;; generator of the rest.
-(define-type lseq (union nil (pairof int (sumof (seq lseq) (gen gen)) @heap)))
-(define-type tail (sumof (seq lseq) (gen gen)))
+(define-type lseq (union nil (pairof int tail @heap)))
+(define-type tail (union lseq gen))
 
 (define eof int (- -1152921504606846975 1))   ; the least fixnum
 (define greatest-fixnum int 1152921504606846975)
@@ -76,8 +77,8 @@
       ;; otherwise, return an improper list with one value and the generator
       ;; in the tail, which is how we represent unrealized lseqs
       (if (eof-object? value)
-          no-pair
-          (cons value (sum gen gen))))))
+          nil
+          (cons value gen)))))
 
 ;;; Car on lseqs is the same as on lists
 (define* lseq-car (subr (read @heap) (lseq) int) (lambda (lseq) (car lseq)))
@@ -87,21 +88,21 @@
   (lambda (lseq)
     ;; We assume lseq is a pair, because it is an error if it isn't
     ;; If it's a procedure, we assume it's a generator and invoke it
-    (tagcase (cdr lseq)
-      (gen g
+    (typecase (cdr lseq)
+      (procedure g
         (let ((obj (g)))
           (cond
             ;; If the generator is exhausted, replace it with () and return ()
             ((eof-object? obj)
-             (begin (set-cdr! lseq (sum seq (the lseq no-pair)))
-                    no-pair))
+             (begin (set-cdr! lseq nil)
+                    nil))
             ;; Otherwise, make a new pair of the value and the generator
             ;; and patch it in to the cdr
-            (else (let ((result (the lseq (cons obj (cdr lseq)))))
-                    (begin (set-cdr! lseq (sum seq result))
+            (else (let ((result (the lseq (cons obj g))))
+                    (begin (set-cdr! lseq result)
                            result))))))
       ;; If there is no procedure, return the ordinary cdr
-      (seq s s))))
+      (else rest rest))))
 
 (define-effect lseqs (maxeff (read @heap) (write @heap) (alloc @heap) spin (goto @k)
                              (read (globals make-range-generator generator->lseq lseq-car lseq-cdr eof-object? eof))))

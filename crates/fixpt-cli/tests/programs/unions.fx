@@ -29,3 +29,13 @@
 (define-type maybe-int (union false int))
 (define next (subr pure (maybe-int) int) (lambda (x) (typecase x (bool b 0) (else n (+ n 1)))))
 (list (next #f) (next 41))
+;; The native fast paths' harder cases (`TODO.md` §56): a primitive and a
+;; continuation are procedures; a bignum is an int; an array big enough for
+;; a large header is an array, by the call-out.
+(define-type w2 (union int (subr pure (char) char) (arrayof int @heap)))
+(define kind (subr pure (w2) int)
+  (lambda (x) (cond ((int? x) 1) ((procedure? x) 2) ((array? x) 3) (else 0))))
+(list (kind char-upcase) (kind 100000000000000000000000) (kind (make-array 100000 0))
+      (kind (make-array 2 0)) (kind 5)
+      (cwcc (lambda ((k (subr (goto @k) (int) void)))
+              (if (procedure? (the (union int (subr (goto @k) (int) void)) k)) 7 8))))

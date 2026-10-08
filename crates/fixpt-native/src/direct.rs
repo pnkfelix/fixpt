@@ -2120,6 +2120,31 @@ impl Compiling<'_> {
                     {
                         flat_set(&mut a, slow, done, raw_store);
                     }
+                    // `int`'s bit operations of fixnums (`TODO.md` §56): of
+                    // two, `and`, `ior` and `xor` are one; `not` of one, its
+                    // tag's bits cleared. A bignum calls out.
+                    if let Callout::Prim { p, n } = c
+                        && let op @ ("%fx26-bitwise-and" | "%fx26-bitwise-ior" | "%fx26-bitwise-xor" | "%fx26-bitwise-not") =
+                            fixpt_runtime::PRIMITIVES[p].name
+                    {
+                        if n == 2 {
+                            a.e(orr(X13, 1, 2));
+                            a.e(tst_low(X13, 3));
+                        } else {
+                            a.e(tst_low(1, 3));
+                        }
+                        a.to(slow, Fix::If(Cond::Ne));
+                        match op {
+                            "%fx26-bitwise-and" => a.e(and(RESULT, 1, 2)),
+                            "%fx26-bitwise-ior" => a.e(orr(RESULT, 1, 2)),
+                            "%fx26-bitwise-xor" => a.e(eor(RESULT, 1, 2)),
+                            _ => {
+                                a.e(sub(RESULT, XZR, 1));
+                                a.e(sub_imm(RESULT, RESULT, 8));
+                            }
+                        }
+                        a.to(done, Fix::B);
+                    }
                     if let Callout::Cons = c {
                         a.e(ldr(X13, ST, st_off(offset_of!(DState, top))));
                         a.e(ldr(X14, X13, 0));
@@ -2949,6 +2974,99 @@ fn wrap32(a: &mut Asm, signed: bool) {
     }
 }
 
+/// A shape predicate's fast path (`docs/research/logical-types.md`, L1;
+/// `TODO.md` §56), on `RESULT` into `RESULT`: by the value's tag, and for a
+/// bloblet by its header's kind, found as the word before the suffix or as
+/// far back as the trailer there says; anything else (fields and no
+/// trailer, a large header) to `slow`. False if `name` is none. Uses X13
+/// to X16.
+fn shape_fast(a: &mut Asm, name: &str, slow: Label) -> bool {
+    use fixpt_heap::layout::kind;
+    use fixpt_heap::value::{TAG_BLOBLET, TAG_HEADER, TAG_PAIR, TAG_TRAILER};
+    let x = RESULT;
+    let flag = |a: &mut Asm, c: Cond| {
+        a.es(&mov_imm64(X15, Value::TRUE.raw()));
+        a.es(&mov_imm64(X16, Value::FALSE.raw()));
+        a.e(csel(RESULT, X15, X16, c));
+    };
+    let kinds: &[u8] = match name {
+        "null?" => {
+            a.es(&mov_imm64(X13, Value::NULL.raw()));
+            a.e(cmp(x, X13));
+            flag(a, Cond::Eq);
+            return true;
+        }
+        "pair?" => {
+            a.e(and_low(X13, x, 3));
+            a.e(cmp_imm(X13, TAG_PAIR as u32));
+            flag(a, Cond::Eq);
+            return true;
+        }
+        "char?" => {
+            a.e(and_low(X13, x, 8));
+            a.e(cmp_imm(X13, (Value::char('\0').raw() & 0xFF) as u32));
+            flag(a, Cond::Eq);
+            return true;
+        }
+        "boolean?" => {
+            a.es(&mov_imm64(X15, Value::FALSE.raw()));
+            a.es(&mov_imm64(X16, Value::TRUE.raw()));
+            a.e(cmp(x, X15));
+            a.e(csel(X13, X16, X15, Cond::Eq));
+            a.e(cmp(x, X16));
+            a.e(csel(RESULT, X16, X13, Cond::Eq));
+            return true;
+        }
+        "exact-integer?" => &[kind("bignum")],
+        "symbol?" => &[kind("symbol")],
+        "string?" => &[kind("string")],
+        "%fx26-array?" => &[kind("bloblet")],
+        "%fx26-procedure?" => &[
+            kind("closure"),
+            kind("primitive"),
+            kind("continuation"),
+            kind("cellular-closure"),
+            kind("native-closure"),
+            kind("cellular-continuation"),
+        ],
+        _ => return false,
+    };
+    let (yes, no, have, end) = (a.label(), a.label(), a.label(), a.label());
+    // A fixnum is an exact integer.
+    if name == "exact-integer?" {
+        a.e(tst_low(x, 3));
+        a.to(yes, Fix::If(Cond::Eq));
+    }
+    a.e(and_low(X13, x, 3));
+    a.e(cmp_imm(X13, TAG_BLOBLET as u32));
+    a.to(no, Fix::If(Cond::Ne));
+    a.e(ldur(X16, x, field_off(1)));
+    a.e(and_low(X13, X16, 3));
+    a.e(cmp_imm(X13, TAG_HEADER as u32));
+    a.to(have, Fix::If(Cond::Eq));
+    a.e(cmp_imm(X13, TAG_TRAILER as u32));
+    a.to(slow, Fix::If(Cond::Ne));
+    a.e(sub_imm(X16, X16, TAG_TRAILER as u32));
+    a.e(sub(X14, x, X16));
+    a.e(ldur(X16, X14, field_off(1)));
+    a.bind(have);
+    let k = fixpt_heap::layout::H_KIND;
+    a.e(ubfx(X13, X16, k.lo, k.width));
+    a.e(cmp_imm(X13, fixpt_heap::layout::KIND_EXTENSION as u32));
+    a.to(slow, Fix::If(Cond::Eq));
+    for &c in kinds {
+        a.e(cmp_imm(X13, c as u32));
+        a.to(yes, Fix::If(Cond::Eq));
+    }
+    a.bind(no);
+    a.es(&mov_imm64(RESULT, Value::FALSE.raw()));
+    a.to(end, Fix::B);
+    a.bind(yes);
+    a.es(&mov_imm64(RESULT, Value::TRUE.raw()));
+    a.bind(end);
+    true
+}
+
 /// The fast path of primitive `name`, one that never collects and no
 /// operation of `i64` or `u64` (those are `raw_fast`'s), on `RESULT` and
 /// `y`, into `RESULT`, going to `slow` for what it leaves to the primitive
@@ -2957,6 +3075,9 @@ fn wrap32(a: &mut Asm, signed: bool) {
 /// the fixnums' then wrapped. Uses X13 to X16.
 fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
     let x = RESULT;
+    if shape_fast(a, name, slow) {
+        return true;
+    }
     let fixnum = |a: &mut Asm, r: Reg| {
         a.e(tst_low(r, 3));
         a.to(slow, Fix::If(Cond::Ne));

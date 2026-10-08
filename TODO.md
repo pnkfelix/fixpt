@@ -1658,24 +1658,3 @@ from the callee's type, not a table of names; a call's own type is
 certifications (`length-is?`, `acyclic?`, `nat?`) as propositions too;
 checking a `lambda` against such a type (until then refused, its body a
 `bool`); paths, below.
-
-## 56. Shape predicates inline (Q7's stage 2, measured 2026-10-07)
-
-Of the shape predicates only `null?` compiles inline (`eq` with `nil`);
-`pair?`, `int?`, `procedure?` and the rest are primitive calls, call-outs
-from native code. Natively, 10M tests in a loop: `null?` 0.17 s, `pair?`
-0.30 s, `procedure?` 0.31 s, `int?` 0.33 s. `scheme-bench/lseq.fx` with
-its tail a union, `(union lseq gen)` taken apart by `typecase` on
-`procedure?` (as Larceny's `procedure?` does), takes 6.6 s against the
-sum's 4.0 s (back to back, `--calling-convention native`), over 89M
-`lseq-cdr` calls: 29 ns more each, though the union makes no sum per
-element. So the port stays a sum until:
-- a word operation testing a shape (tag, and for a bloblet its kind) in
-  each machine: the cellular machine, native words, `direct.rs`, register
-  code; and both compilers emitting it for the shape predicates;
-- the same for `int`'s bit operations (`DONE.md` §55), call-outs from
-  native code for now: the fixnum case of `and`, `ior`, `xor` and `not` is
-  an instruction or two on tagged fixnums;
-- then `lseq` converted (the conversion is in this item's history: the
-  types `(union nil (pairof int tail @heap))` and `(union lseq gen)`,
-  `nil` for `no-pair`, `typecase` with `(else rest rest)`), and measured.

@@ -361,7 +361,7 @@ fn fixed_width_integers_on_every_machine() {
 fn union_shapes_on_every_machine() {
     for (m, text) in on_every_machine(include_str!("programs/unions.fx")) {
         let values: Vec<&str> = text.lines().filter(|l| l.starts_with('(')).map(|l| l.split(" : ").next().unwrap_or("")).collect();
-        assert_eq!(values, ["(1 2 1 2 3 9 500 -1 7)", "(2 50 -1 7)", "(0 0 0 1 0 1 1 0)", "(0 42)"], "{m:?}: {text}");
+        assert_eq!(values, ["(1 2 1 2 3 9 500 -1 7)", "(2 50 -1 7)", "(0 0 0 1 0 1 1 0)", "(0 42)", "(2 1 3 3 1 7)"], "{m:?}: {text}");
     }
 }
 

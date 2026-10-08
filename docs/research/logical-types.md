@@ -613,9 +613,10 @@ type, not its name; a call's own type is `bool`), splitting
 a union by its members' shapes, a pair that may be `nil` into `nil` and
 the pair; `typecase` is sugar over them, `else` required. Shapes are bit
 masks in both checkers (the FX-26 one's since `int` has bit operations,
-`DONE.md` §55). Not yet: the ports converted, since only `null?` is
-inline natively and `lseq` with a union takes 6.6 s against its sum's 4.0 s (`TODO.md`
-§56); predicates for `f64`, `f32`, `ref`, sums and products (their shapes
+`DONE.md` §55). The shape tests are in line natively (`DONE.md` §56), and
+`lseq` is converted: 2.0 s with its union against 4.0 s with its sum
+(`--calling-convention native`). Not yet: the other ports (`destruc`,
+`browse`, `gcbench`, `earley`); predicates for `f64`, `f32`, `ref`, sums and products (their shapes
 are disjoint, but nothing tests for them); a `lambda` checked against a
 type proving something, size and certification propositions, and paths
 (`TODO.md` §54).

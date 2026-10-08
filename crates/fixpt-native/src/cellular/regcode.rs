@@ -215,6 +215,88 @@ impl Asm {
     /// `what` on `REG1`…`REGn` (`count` of them) into `RESULT`, without
     /// calling out; to `slow` when it cannot be done so. `word` is the
     /// pool field of a closure's word, for `closure`.
+    /// Shape predicate `name` of `src` into `RESULT` (`TODO.md` §56): by
+    /// the value's tag, and for a bloblet by its header's kind, the word
+    /// before the suffix or as far back as the trailer there says; to `slow`
+    /// for anything else (fields and no trailer, a large header). False if
+    /// `name` is none. Uses X11 and X13 to X16.
+    fn shape_test(&mut self, src: Reg, name: &str, slow: Label) -> bool {
+        use fixpt_heap::layout::kind;
+        use fixpt_heap::value::{TAG_BLOBLET, TAG_HEADER, TAG_PAIR, TAG_TRAILER};
+        let codes: Vec<u32> = match name {
+            "pair?" | "char?" | "null?" => {
+                if name == "pair?" {
+                    self.e(and_low(X13, src, 3));
+                    self.e(cmp_imm(X13, TAG_PAIR as u32));
+                } else if name == "char?" {
+                    self.e(and_low(X13, src, 8));
+                    self.e(cmp_imm(X13, (Value::char('\0').raw() & 0xFF) as u32));
+                } else {
+                    self.value(X13, Value::NULL);
+                    self.e(cmp(src, X13));
+                }
+                self.value(X15, Value::TRUE);
+                self.value(X16, Value::FALSE);
+                self.e(csel(RESULT, X15, X16, Cond::Eq));
+                return true;
+            }
+            "boolean?" => {
+                self.value(X15, Value::FALSE);
+                self.value(X16, Value::TRUE);
+                self.e(cmp(src, X15));
+                self.e(csel(X13, X16, X15, Cond::Eq));
+                self.e(cmp(src, X16));
+                self.e(csel(RESULT, X16, X13, Cond::Eq));
+                return true;
+            }
+            "symbol?" => vec![kind("symbol")],
+            "string?" => vec![kind("string")],
+            "exact-integer?" => vec![kind("bignum")],
+            "%fx26-array?" => vec![kind("bloblet")],
+            "%fx26-procedure?" => ["closure", "primitive", "continuation", "cellular-closure", "native-closure", "cellular-continuation"]
+                .iter()
+                .map(|n| kind(n))
+                .collect(),
+            _ => return false,
+        }
+        .into_iter()
+        .map(u32::from)
+        .collect();
+        let (yes, no, have, end) = (self.label(), self.label(), self.label(), self.label());
+        if name == "exact-integer?" {
+            self.e(tst_low(src, 3));
+            self.b_cond(Cond::Eq, yes);
+        }
+        self.e(and_low(X13, src, 3));
+        self.e(cmp_imm(X13, TAG_BLOBLET as u32));
+        self.b_cond(Cond::Ne, no);
+        self.e(ldur(X16, src, field_off(1)));
+        self.e(and_low(X13, X16, 3));
+        self.e(cmp_imm(X13, TAG_HEADER as u32));
+        self.b_cond(Cond::Eq, have);
+        self.e(cmp_imm(X13, TAG_TRAILER as u32));
+        self.b_cond(Cond::Ne, slow);
+        self.e(sub_imm(X16, X16, TAG_TRAILER as u32));
+        self.e(sub(X11, src, X16));
+        self.e(ldur(X16, X11, field_off(1)));
+        self.bind(have);
+        let k = fixpt_heap::layout::H_KIND;
+        self.e(ubfx(X13, X16, k.lo, k.width));
+        self.e(cmp_imm(X13, fixpt_heap::layout::KIND_EXTENSION as u32));
+        self.b_cond(Cond::Eq, slow);
+        for c in codes {
+            self.e(cmp_imm(X13, c));
+            self.b_cond(Cond::Eq, yes);
+        }
+        self.bind(no);
+        self.value(RESULT, Value::FALSE);
+        self.b(end);
+        self.bind(yes);
+        self.value(RESULT, Value::TRUE);
+        self.bind(end);
+        true
+    }
+
     fn inline_op(&mut self, what: &str, count: usize, word: usize, fields: usize, slow: Label) {
         use fixpt_heap::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD};
         use fixpt_heap::value::make_header;
@@ -372,9 +454,54 @@ impl Asm {
             // header is the word before the suffix when there are no
             // fields, or as far back as the trailer there says. Anything
             // else (a large object's extension, no trailer) calls out.
-            "symbol?" | "string?" => {
-                let code = if what == "symbol?" { fixpt_heap::ObjType::Symbol } else { fixpt_heap::ObjType::String } as u32;
-                let (no, have, end) = (self.label(), self.label(), self.label());
+            // `int`'s bit operations of fixnums (`TODO.md` §56); a bignum
+            // calls out.
+            "bit-and" | "bit-ior" | "bit-xor" => {
+                self.e(orr(X13, 1, 2));
+                self.e(tst_low(X13, 3));
+                self.b_cond(Cond::Ne, slow);
+                self.e(match what {
+                    "bit-and" => and(RESULT, 1, 2),
+                    "bit-ior" => orr(RESULT, 1, 2),
+                    _ => eor(RESULT, 1, 2),
+                });
+            }
+            "bit-not" => {
+                self.e(tst_low(1, 3));
+                self.b_cond(Cond::Ne, slow);
+                self.e(sub(RESULT, XZR, 1));
+                self.e(sub_imm(RESULT, RESULT, 8));
+            }
+            "pair?" => {
+                self.e(and_low(X13, 1, 3));
+                self.e(cmp_imm(X13, fixpt_heap::value::TAG_PAIR as u32));
+                self.value(X15, Value::TRUE);
+                self.value(X16, Value::FALSE);
+                self.e(csel(RESULT, X15, X16, Cond::Eq));
+            }
+            // The same of the shapes of FX-26's unions (`TODO.md` §56): an
+            // exact integer, a fixnum or a bignum; a plain bloblet, an
+            // array; a procedure, of any machine's.
+            "symbol?" | "string?" | "exact-integer?" | "array?" | "procedure?" => {
+                use fixpt_heap::layout::kind;
+                let codes: Vec<u32> = match what {
+                    "symbol?" => vec![kind("symbol")],
+                    "string?" => vec![kind("string")],
+                    "exact-integer?" => vec![kind("bignum")],
+                    "array?" => vec![kind("bloblet")],
+                    _ => ["closure", "primitive", "continuation", "cellular-closure", "native-closure", "cellular-continuation"]
+                        .iter()
+                        .map(|n| kind(n))
+                        .collect(),
+                }
+                .into_iter()
+                .map(u32::from)
+                .collect();
+                let (no, have, end, yes) = (self.label(), self.label(), self.label(), self.label());
+                if what == "exact-integer?" {
+                    self.e(tst_low(1, 3));
+                    self.b_cond(Cond::Eq, yes);
+                }
                 self.e(and_low(X13, 1, 3));
                 self.e(cmp_imm(X13, TAG_BLOBLET as u32));
                 self.b_cond(Cond::Ne, no);
@@ -392,13 +519,15 @@ impl Asm {
                 self.e(ubfx(X13, X16, k.lo, k.width));
                 self.e(cmp_imm(X13, fixpt_heap::layout::KIND_EXTENSION as u32));
                 self.b_cond(Cond::Eq, slow);
-                self.e(cmp_imm(X13, code));
-                self.value(X15, Value::TRUE);
-                self.value(X16, Value::FALSE);
-                self.e(csel(RESULT, X15, X16, Cond::Eq));
-                self.b(end);
+                for c in codes {
+                    self.e(cmp_imm(X13, c));
+                    self.b_cond(Cond::Eq, yes);
+                }
                 self.bind(no);
                 self.value(RESULT, Value::FALSE);
+                self.b(end);
+                self.bind(yes);
+                self.value(RESULT, Value::TRUE);
                 self.bind(end);
             }
             // `char-numeric?` of an ASCII character: `0` to `9`. Past
@@ -747,7 +876,17 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
                     }
                     _ => X13,
                 };
-                a.pure_call(p, y);
+                // A shape predicate in line (`TODO.md` §56); the call for
+                // what it leaves.
+                let (slow, done) = (a.label(), a.label());
+                if name == "prim1" && a.shape_test(RESULT, fixpt_runtime::PRIMITIVES[p].name, slow) {
+                    a.b(done);
+                    a.bind(slow);
+                    a.pure_call(p, y);
+                    a.bind(done);
+                } else {
+                    a.pure_call(p, y);
+                }
             }
             "field" => {
                 a.field_of(RESULT, RESULT, k(o(0)));
@@ -791,6 +930,14 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
                     ("prim", 1) if prim_named(k(o(0)), "boolean?") => Some("boolean?"),
                     ("prim", 1) if prim_named(k(o(0)), "symbol?") => Some("symbol?"),
                     ("prim", 1) if prim_named(k(o(0)), "string?") => Some("string?"),
+                    ("prim", 1) if prim_named(k(o(0)), "pair?") => Some("pair?"),
+                    ("prim", 2) if prim_named(k(o(0)), "%fx26-bitwise-and") => Some("bit-and"),
+                    ("prim", 2) if prim_named(k(o(0)), "%fx26-bitwise-ior") => Some("bit-ior"),
+                    ("prim", 2) if prim_named(k(o(0)), "%fx26-bitwise-xor") => Some("bit-xor"),
+                    ("prim", 1) if prim_named(k(o(0)), "%fx26-bitwise-not") => Some("bit-not"),
+                    ("prim", 1) if prim_named(k(o(0)), "exact-integer?") => Some("exact-integer?"),
+                    ("prim", 1) if prim_named(k(o(0)), "%fx26-array?") => Some("array?"),
+                    ("prim", 1) if prim_named(k(o(0)), "%fx26-procedure?") => Some("procedure?"),
                     ("prim", 2) if prim_named(k(o(0)), "%fx26-char-in?") => Some("char-in"),
                     ("prim", 2) if prim_named(k(o(0)), "string=?") => Some("string="),
                     ("prim", 2) if prim_named(k(o(0)), "modulo") => Some("modulo"),
