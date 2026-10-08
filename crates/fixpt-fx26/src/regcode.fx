@@ -489,23 +489,10 @@
 
 ;;; ------------------------------------------------------ standard names
 
-;; Whether runtime primitive `name` is one of the fixed-width integers', `f64`'s or `f32`'s
-;; operations (`%fx26-u32*`, `%fx26-int->i64`, `%fx26-f64+`).
-(define r-fixed-width-op? (subr pure (string) bool)
-  (lambda (name)
-    (let ((starts (lambda ((s string)) (= (string-search name s 0) 0))))
-      (or (or (starts "%fx26-i32") (starts "%fx26-u32"))
-          (or (or (starts "%fx26-i64") (starts "%fx26-u64"))
-              (or (or (starts "%fx26-f64") (starts "%fx26-f32")) (starts "%fx26-int->")))))))
 ;; Whether runtime primitive `name` never collects (`fixpt_runtime::never_collects`): FX-26's
 ;; `*`, `quotient` and `modulo`, the fixed-width integers' and floats' operations, and a flat
 ;; array's element and length, and an eqtable's operations of one or two, which register code
 ;; calls with its values in registers.
-;; Whether `name` is an eqtable's operation of one or two arguments.
-(define r-eqtable-quick? (subr pure (string) bool)
-  (lambda (name)
-    (or (string=? name "%fx26-eqtable-has?")
-        (or (string=? name "%fx26-eqtable-count") (string=? name "%fx26-eqtable-delete!")))))
 (define r-never-collects? (subr (read (globals r-eqtable-quick? r-fixed-width-op?)) (string) bool)
   (lambda (name)
     (case name
@@ -702,6 +689,11 @@
             (cond
               ((not (null? decided)) decided)
               ((string=? name "") nil)
+              ;; A quoted datum (TODO §51), made once where it is all
+              ;; literals, as the stack code makes it.
+              ((and (string=? name "%quote") (= (c-count-exps args) 1))
+               (let ((k (c-quote-now (car args))))
+                 (if (null? k) nil (r-known-as (rc-data (car k))))))
               (else
                 (let ((vs (r-knowns env args nil)))
                   (if (or (null? vs) (not (= (c-length-consts (car vs)) (c-count-exps args))))

@@ -60,6 +60,7 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("bool?", "boolean?", true),
     ("string?", "string?", true),
     ("f64?", "%fx26-datum-f64?", false),
+    ("%quote", "%fx26-intern-datum", false),
     ("vector?", "vector?", true),
     ("bytevector?", "bytevector?", true),
     ("symbol?", "symbol?", true),
@@ -333,6 +334,7 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("wcell-nil", "%fx26-nil-cell", false),
     ("wcell-sum", "%fx26-sum-cell", false),
     ("wcell-pair", "%fx26-pair-cell", false),
+    ("wcell-interned", "%fx26-intern-datum", false),
     ("wcell-closure", "%fx26-closure-cell", false),
     ("close-over-word!", "%fx26-close-over-word!", false),
     ("wcell-product", "%fx26-product-cell", false),
@@ -521,6 +523,33 @@ impl Lowerer<'_> {
         format!("(letrec* ({}) (%fx26-product {}))", bs.join(" "), fields.join(" "))
     }
 
+    /// The datum a quote builds (`%quote`'s argument, the rewrite's), written
+    /// as Scheme data, where it is made of integers, booleans, characters,
+    /// symbols, `nil` and `cons`: what the compilers make once
+    /// (`quoted_value`, `c-quoted-cell`).
+    fn quoted_text(&self, e: ExpId) -> Option<String> {
+        let named = |x: ExpId, n: &str| match self.c.arena.exp_at(x) {
+            Exp::Var(s) => self.c.interner.name(*s) == n,
+            Exp::With { module, body } if self.c.is_fx_module(*module) => {
+                matches!(self.c.arena.exp_at(*body), Exp::Var(s) if self.c.interner.name(*s) == n)
+            }
+            _ => false,
+        };
+        match self.c.arena.exp_at(e).clone() {
+            Exp::Int(n) => Some(n.to_string()),
+            Exp::Bool(b) => Some((if b { "#t" } else { "#f" }).into()),
+            Exp::Char(c) if c.is_ascii_alphanumeric() => Some(format!("#\\{c}")),
+            Exp::Char(c) => Some(format!("#\\x{:x}", c as u32)),
+            Exp::Symbol(s) => Some(fixpt_read::escape_symbol(self.c.interner.name(s)).to_string()),
+            Exp::The { exp, .. } => self.quoted_text(exp),
+            _ if named(e, "nil") => Some("()".into()),
+            Exp::App { fun, args } if args.len() == 2 && named(fun, "cons") => {
+                Some(format!("({} . {})", self.quoted_text(args[0])?, self.quoted_text(args[1])?))
+            }
+            _ => None,
+        }
+    }
+
     fn body(&mut self, bound: &[Sym], e: ExpId) -> String {
         let depth = self.locals.len();
         self.locals.extend_from_slice(bound);
@@ -544,6 +573,16 @@ impl Lowerer<'_> {
                 let names: Vec<Sym> = params.iter().map(|(n, _)| *n).collect();
                 let ps: Vec<String> = names.iter().map(|n| self.local(*n)).collect();
                 format!("(lambda ({}) {})", ps.join(" "), self.body(&names, body))
+            }
+            // A quoted datum (TODO §51), made of literals and symbols: a
+            // Scheme constant, interned as each compiler interns it
+            // (`quoted_value`).
+            Exp::App { fun, args }
+                if args.len() == 1
+                    && self.c.standard_ref(fun).is_some_and(|s| self.c.interner.name(s) == "%quote")
+                    && let Some(text) = self.quoted_text(args[0]) =>
+            {
+                format!("(%fx26-intern-datum '{text})")
             }
             Exp::App { fun, args } => {
                 let mut parts = vec![self.go(fun)];

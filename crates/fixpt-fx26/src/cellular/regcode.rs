@@ -2280,6 +2280,11 @@ impl Compiler<'_> {
                     return Some(v);
                 }
                 let name = self.r_standard_name(env, fun)?;
+                // A quoted datum (TODO §51), made once where it is all
+                // literals, as the stack code makes it.
+                if name == "%quote" && args.len() == 1 {
+                    return self.quote_now(args[0]);
+                }
                 let vs: Vec<Value> = args.iter().map(|a| self.r_const(env, *a)).collect::<O<_>>()?;
                 let small = |v: &Value| v.is_fixnum() && v.as_fixnum().abs() < 1 << 30;
                 let int2 = || (vs.len() == 2 && vs.iter().all(small)).then(|| (vs[0].as_fixnum(), vs[1].as_fixnum()));

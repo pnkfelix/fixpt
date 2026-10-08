@@ -28,6 +28,7 @@ use crate::value::{
 use std::collections::{HashMap, HashSet};
 
 mod code;
+mod intern;
 mod regions;
 mod young;
 pub use regions::REGION_SLOTS;

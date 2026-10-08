@@ -1585,6 +1585,12 @@ impl<'a> Compiler<'a> {
                 // The checker typed the callee a subroutine: a typed call.
                 self.op1(code, if tail { "ttailcall" } else { "tcall" }, Value::fixnum(n as i64));
             }
+            // A quoted datum (TODO §51): made once, here, where it is all
+            // literals; else built as written.
+            Some(s) if s == "%quote" && args.len() == 1 && let Some(v) = self.quote_now(args[0]) => {
+                self.lit(code, v);
+                self.done(code, tail);
+            }
             // In tail position, the mark replaces this frame's: a loop that
             // marks each iteration runs in constant space.
             Some(s) if tail && s == "with-mark" => {
@@ -2102,6 +2108,50 @@ impl<'a> Compiler<'a> {
     fn const_list(&mut self, x: ExpId) -> Option<Value> {
         let v = self.const_value(x, &[], 0)?;
         (v.is_pair() || v == Value::NULL).then_some(v)
+    }
+
+    /// `(%quote arg)`'s datum, made now and interned (`Heap::intern_datum`),
+    /// where it is all literals: the one object equal to it, at every copy
+    /// of the quote and every quote of it.
+    fn quote_now(&mut self, arg: ExpId) -> Option<Value> {
+        let v = self.quoted_value(arg)?;
+        Some(self.heap.intern_datum(v))
+    }
+
+    /// The datum a quote builds (`%quote`'s argument, which only the quote
+    /// rewrite makes: `Checker::quoted`), made now, as constant data, where
+    /// it is made of literals and symbols: `cons` and `nil` here are the
+    /// standard ones, by how the rewrite wrote them. A string, a float or a
+    /// vector in it, not yet: built as written. As `c-quoted-cell`.
+    fn quoted_value(&mut self, x: ExpId) -> Option<Value> {
+        if let Some(v) = self.literal_of(x) {
+            return Some(v);
+        }
+        match self.exp_at(x).clone() {
+            Exp::Symbol(s) => {
+                let name = self.c.interner.name(s).to_string();
+                Some(self.heap.intern(&name))
+            }
+            Exp::The { exp: body, .. } => self.quoted_value(body),
+            Exp::Var(n) if self.name(n) == "nil" => Some(Value::NULL),
+            Exp::With { module, body } if self.c.is_fx_module(module) => match *self.exp_at(body) {
+                Exp::Var(n) if self.name(n) == "nil" => Some(Value::NULL),
+                _ => None,
+            },
+            Exp::App { fun, args } if args.len() == 2 => {
+                let cons = match *self.exp_at(fun) {
+                    Exp::Var(f) => self.name(f) == "cons",
+                    Exp::With { module, body } if self.c.is_fx_module(module) => matches!(*self.exp_at(body), Exp::Var(f) if self.name(f) == "cons"),
+                    _ => false,
+                };
+                if !cons {
+                    return None;
+                }
+                let (a, d) = (self.quoted_value(args[0])?, self.quoted_value(args[1])?);
+                Some(self.heap.cons(a, d))
+            }
+            _ => None,
+        }
     }
 
     /// What `x` is, as constant data, where its names are `env`'s values:

@@ -2575,6 +2575,15 @@ impl Checker {
             Datum::List { .. } | Datum::Vector(_) | Datum::Bytevector(_) if !matches!(self.unquoted(x, depth), Some(_)) => {
                 let the = self.named(x.span, "the");
                 let datum = self.named(x.span, "datum");
+                // A quote's, not a quasiquote's, marked (`%quote`), at its
+                // opening parenthesis, a place of its own: everything in it
+                // the rewrite's, made once where it is all literals.
+                let built = if depth.is_none() {
+                    let at = fixpt_read::Span { end: x.span.start + 1, ..x.span };
+                    self.call(at, "%quote", vec![built])
+                } else {
+                    built
+                };
                 Syntax::list(x.span, vec![the, datum, built])
             }
             _ => built,
@@ -2629,10 +2638,51 @@ impl Checker {
         if depth == Some(1) { self.unquote_of(x, "unquote") } else { None }
     }
 
+    /// Whether no `unquote` or `unquote-splicing` at depth 1 is in `x`,
+    /// quasiquoted at `depth`: then it is a constant.
+    fn unquote_free(&self, x: &Syntax, depth: Option<u32>) -> bool {
+        if self.unquoted(x, depth).is_some() {
+            return false;
+        }
+        match &x.datum {
+            Datum::List { items, tail } => {
+                let inner = self.quasi_inner(items, depth);
+                items.iter().enumerate().all(|(i, item)| self.item_free(item, if i == 0 { depth } else { inner }))
+                    && tail.as_deref().is_none_or(|t| self.unquote_free(t, depth))
+            }
+            Datum::Vector(items) => items.iter().all(|item| self.item_free(item, depth)),
+            _ => true,
+        }
+    }
+
+    /// Whether list item `x`, at `depth`, is neither spliced nor reached by
+    /// an `unquote`.
+    fn item_free(&self, x: &Syntax, depth: Option<u32>) -> bool {
+        !(depth == Some(1) && self.unquote_of(x, "unquote-splicing").is_some()) && self.unquote_free(x, depth)
+    }
+
+    /// The depth a list's items after its head are at: a nested
+    /// `quasiquote` deepens; an `unquote` (or `unquote-splicing`) not at
+    /// depth 1 shallows.
+    fn quasi_inner(&self, items: &[Syntax], depth: Option<u32>) -> Option<u32> {
+        let head = items.first().and_then(|h| h.as_symbol()).map(|h| self.name(h));
+        match (depth, head) {
+            (Some(d), Some("quasiquote")) if items.len() == 2 => Some(d + 1),
+            (Some(d), Some("unquote" | "unquote-splicing")) if items.len() == 2 && d > 1 => Some(d - 1),
+            _ => depth,
+        }
+    }
+
     fn quoted_in(&mut self, x: &Syntax, depth: Option<u32>) -> Syntax {
         let span = x.span;
         if let Some(e) = self.unquoted(x, depth) {
             return e.clone();
+        }
+        // Under a quasiquote, a list or vector no unquote reaches is a
+        // constant: a quote, made once (`%quote` at its opening).
+        if depth.is_some() && matches!(x.datum, Datum::List { .. } | Datum::Vector(_)) && self.unquote_free(x, depth) {
+            let built = self.quoted_in(x, None);
+            return self.call(fixpt_read::Span { end: span.start + 1, ..span }, "%quote", vec![built]);
         }
         match &x.datum {
             Datum::Symbol(s) => match self.name(*s) {
@@ -2646,22 +2696,31 @@ impl Checker {
             Datum::Nil => self.named(span, "nil"),
             Datum::Bool(_) | Datum::Number(_) | Datum::Char(_) | Datum::Str(_) => x.clone(),
             Datum::List { items, tail } => {
-                // A nested `quasiquote` deepens; an `unquote` (or
-                // `unquote-splicing`) not at depth 1 shallows.
-                let head = items.first().and_then(|h| h.as_symbol()).map(|h| self.name(h).to_string());
-                let inner = match (depth, head.as_deref()) {
-                    (Some(d), Some("quasiquote")) if items.len() == 2 => Some(d + 1),
-                    (Some(d), Some("unquote" | "unquote-splicing")) if items.len() == 2 && d > 1 => Some(d - 1),
-                    _ => depth,
-                };
+                let inner = self.quasi_inner(items, depth);
+                // Under a quasiquote, the items after the last that an
+                // unquote reaches, with the tail, are a constant: one quote
+                // (`k` the first of them), made once.
+                let mut k = items.len();
+                if depth.is_some() && tail.as_deref().is_none_or(|t| self.unquote_free(t, depth)) {
+                    while k > 1 && self.item_free(&items[k - 1], inner) {
+                        k -= 1;
+                    }
+                }
                 // Each `with` made here at a place of its own (the FX-26
                 // checker keys facts by place): `nil` at the closing
-                // parenthesis, each `cons` at its item.
-                let mut acc = match tail {
-                    Some(t) => self.quoted_in(t, depth),
-                    None => self.standard_named(fixpt_read::Span { start: span.end.saturating_sub(1), ..span }, "nil"),
+                // parenthesis, each `cons` at its item, a constant suffix's
+                // `%quote` from its first item to the end.
+                let mut acc = if k < items.len() {
+                    let rest = Syntax::new(span, Datum::List { items: items[k..].to_vec(), tail: tail.clone() });
+                    let built = self.quoted_in(&rest, None);
+                    self.call(fixpt_read::Span { start: items[k].span.start, ..span }, "%quote", vec![built])
+                } else {
+                    match tail {
+                        Some(t) => self.quoted_in(t, depth),
+                        None => self.standard_named(fixpt_read::Span { start: span.end.saturating_sub(1), ..span }, "nil"),
+                    }
                 };
-                for (i, item) in items.iter().enumerate().rev() {
+                for (i, item) in items[..k].iter().enumerate().rev() {
                     let d = if i == 0 { depth } else { inner };
                     if d == Some(1)
                         && let Some(e) = self.unquote_of(item, "unquote-splicing")

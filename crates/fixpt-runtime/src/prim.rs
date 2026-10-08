@@ -1366,6 +1366,9 @@ prims! {
         crate::eqtable::delete(&mut rt.heap, a[0], a[1]);
         Ok(Value::UNIT)
     });
+    // A quoted datum made the one object equal to it (`Heap::intern_datum`,
+    // `TODO.md` §51).
+    "%fx26-intern-datum", 1, Some(1), simple!(|rt, a| Ok(rt.heap.intern_datum(a[0])));
     // Whether a datum is an `f64`, and it as one (the reader's atoms).
     "%fx26-datum-f64?", 1, Some(1), simple!(|rt, a| Ok(Value::boolean(rt.heap.obj_type(a[0]) == Some(ObjType::Flonum))));
     // The fixed-width integers, `i32`, `u32`, `i64`, `u64` (PLAN.md, Q2 b):

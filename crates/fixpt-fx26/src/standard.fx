@@ -107,6 +107,7 @@
       ((6)
        (case n
          (("length") "length")
+         (("%quote") "%fx26-intern-datum")
          (("array?") "%fx26-array?")
          (("modulo") "modulo")
          (("i32-or") "%fx26-i32-or")
@@ -323,6 +324,7 @@
          (("symbol->string") "symbol->string")
          (("array-identity") "%fx26-address-identity")
          (("icell-identity") "%fx26-address-identity")
+         (("wcell-interned") "%fx26-intern-datum")
          (("wglobal-writes") "%fx26-global-writes")
          (else "")))
       ((15)

@@ -289,6 +289,8 @@
           (s2 (lambda ((f (subr pure (string string) bool)))
                 (v-bool (f (as-str (arg xs 0)) (as-str (arg xs 1)))))))
       (case n (("remainder") (int2 xs (lambda (a b) (remainder a b))))
+              ;; What a quote builds (TODO §51), as it is.
+              (("%quote") (arg xs 0))
               (("zero?") (v-bool (zero? (as-int (arg xs 0)))))
               (("max") (int2 xs (lambda (a b) (max a b))))
               (("min") (int2 xs (lambda (a b) (min a b))))

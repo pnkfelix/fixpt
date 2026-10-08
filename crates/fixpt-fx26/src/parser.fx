@@ -494,7 +494,12 @@
     (let ((built (quoted-in x depth)) (a (syn-start x)) (b (syn-end x)))
       (if (and (tagcase x (atom (d c e) #f) (lst (items d c e) (not (null? items))) (else y #t))
                (null? (unquoted x depth)))
-          (mk-form "the" (list (mk-symbol "datum" a b) built) a b)
+          ;; A quote's, not a quasiquote's, marked (`%quote`), at its
+          ;; opening parenthesis, a place of its own: everything in it the
+          ;; rewrite's, made once where it is all literals.
+          (mk-form "the" (list (mk-symbol "datum" a b)
+                               (if (< depth 0) (fx-call "%quote" (list built) a (+ a 1)) built))
+                   a b)
           built))))
 ;; `(with #%fx name)`: the standard `name`, whatever a program binds it to.
 (define fx-named (subr parses (string int int) syn)
@@ -511,47 +516,98 @@
       (else y nil))))
 (define unquoted (subr parses (syn int) syns-a)
   (lambda (x depth) (if (= depth 1) (unquote-of x "unquote") nil)))
+;; The depth a list's items after its head are at: a nested `quasiquote`
+;; deepens, an `unquote` (or `unquote-splicing`) not at depth 1 shallows.
+(define quasi-inner (subr parses (syns-a int) int)
+  (lambda (items depth)
+    (let ((head (if (null? items) "" (syn-name (car items)))) (two (= (len items) 2)))
+      (cond ((< depth 0) depth)
+            ((and two (string=? head "quasiquote")) (+ depth 1))
+            ((and two (> depth 1)
+                  (or (string=? head "unquote") (string=? head "unquote-splicing")))
+             (- depth 1))
+            (else depth)))))
+;; Whether no `unquote` or `unquote-splicing` at depth 1 is in `x`,
+;; quasiquoted at `depth`: then it is a constant. As `Checker::unquote_free`.
+(define unquote-free? (subr parses (syn int) bool)
+  (lambda (x depth)
+    (and (null? (unquoted x depth))
+         (tagcase x
+           (lst (items d a b) (items-free? items depth (quasi-inner items depth)))
+           (dotted (items tail d a b)
+             (and (items-free? items depth (quasi-inner items depth)) (unquote-free? tail depth)))
+           (vec (items d a b) (items-free? items depth depth))
+           (else y #t)))))
+;; Whether each of `items`, the first at `depth` and the rest at `inner`, is
+;; neither spliced nor reached by an `unquote`.
+(define items-free? (subr parses (syns-a int int) bool)
+  (lambda (items depth inner)
+    (or (null? items)
+        (and (null? (if (= depth 1) (unquote-of (car items) "unquote-splicing") nil))
+             (unquote-free? (car items) depth)
+             (items-free? (cdr items) inner inner)))))
 (define quoted-in (subr parses (syn int) syn)
   (lambda (x depth)
-    (let ((u (unquoted x depth)) (a (syn-start x)) (b (syn-end x)))
+    (let* ((u (unquoted x depth)) (a (syn-start x)) (b (syn-end x))
+           ;; Under a quasiquote, a list or vector no unquote reaches is a
+           ;; constant: a quote, made once (`%quote` at its opening).
+           (mark? (and (null? u) (>= depth 1)
+                       (tagcase x (atom (d c e) #f) (lst (items d c e) (not (null? items)))
+                         (else y #t))
+                       (unquote-free? x depth)))
+           (dq (if mark? -1 depth)))
       (if (not (null? u))
           (car u)
-          (tagcase x
-            (atom (d c e)
-              (cond ((not (symbol? d))
-                     (if (bytevector? d) (pfail "a bytevector cannot be quoted yet" x) x))
-                    ((or (symbol=? d sym-true) (symbol=? d sym-false)) x)
-                    (else (mk-form "quote" (list x) a b))))
-            ;; Each `with` made here at a place of its own (facts are kept
-            ;; by place): `nil` at the closing parenthesis, each `cons` at
-            ;; its item.
-            (lst (items d c e)
-              (if (null? items)
-                  (mk-symbol "nil" a b)
-                  (quoted-items items (fx-named "nil" (- b 1) b) depth a b)))
-            (dotted (items tail d c e) (quoted-items items (quoted-in tail depth) depth a b))
-            (vec (items d c e)
-              (fx-call "datum-list->vector"
-                       (list (quoted-items items (fx-named "nil" (- b 1) b) depth a b))
-                       a (+ a 2))))))))
-;; A list of `items`, then `end`, built: a nested `quasiquote` deepens, an
-;; `unquote` not at depth 1 shallows.
-(define quoted-items (subr parses (syns-a syn int int int) syn)
-  (lambda (items end depth a b)
-    (let* ((head (if (null? items) "" (syn-name (car items))))
-           (two (= (len items) 2))
-           (inner (cond ((< depth 0) depth)
-                        ((and two (string=? head "quasiquote")) (+ depth 1))
-                        ((and two (> depth 1)
-                              (or (string=? head "unquote") (string=? head "unquote-splicing")))
-                         (- depth 1))
-                        (else depth))))
-      (quoted-onto items end depth inner a b))))
-(define quoted-onto (subr parses (syns-a syn int int int int) syn)
-  (lambda (items end depth inner a b)
+          (let ((built
+                 (tagcase x
+                   (atom (d c e)
+                     (cond ((not (symbol? d))
+                            (if (bytevector? d) (pfail "a bytevector cannot be quoted yet" x) x))
+                           ((or (symbol=? d sym-true) (symbol=? d sym-false)) x)
+                           (else (mk-form "quote" (list x) a b))))
+                   ;; Each `with` made here at a place of its own (facts are
+                   ;; kept by place): `nil` at the closing parenthesis, each
+                   ;; `cons` at its item, a constant suffix's `%quote` from
+                   ;; its first item to the end.
+                   (lst (items d c e)
+                     (if (null? items)
+                         (mk-symbol "nil" a b)
+                         (quoted-items items #f (car items) dq a b)))
+                   (dotted (items tail d c e) (quoted-items items #t tail dq a b))
+                   (vec (items d c e)
+                     (if (null? items)
+                         (fx-call "datum-list->vector" (list (fx-named "nil" (- b 1) b)) a (+ a 2))
+                         (fx-call "datum-list->vector"
+                                  (list (quoted-items items #f (car items) dq a b)) a (+ a 2)))))))
+            (if mark? (fx-call "%quote" (list built) a (+ a 1)) built))))))
+;; A list of `items`, then, if `dotted?`, `tail` (else `nil`), built.
+(define quoted-items (subr parses (syns-a bool syn int int int) syn)
+  (lambda (items dotted? tail depth a b)
+    (let ((inner (quasi-inner items depth)))
+      (quoted-onto items dotted? tail depth
+                   (and (>= depth 1) (or (not dotted?) (unquote-free? tail depth)))
+                   depth inner #t a b))))
+;; `items`, then, if `dotted?`, `tail` (else `nil`), quoted, not
+;; quasiquoted.
+(define quoted-plain (subr parses (syns-a bool syn int int) syn)
+  (lambda (items dotted? tail a b)
     (if (null? items)
-        end
-        (let ((rest (quoted-onto (cdr items) end inner inner a b))
+        (if dotted? (quoted-in tail -1) (fx-named "nil" (- b 1) b))
+        (fx-call "cons"
+                 (list (quoted-in (car items) -1) (quoted-plain (cdr items) dotted? tail a b))
+                 (syn-start (car items)) (syn-end (car items))))))
+;; `items` onto the list's end, the first at `depth` and the rest at
+;; `inner`: under a quasiquote (`free-tail?` its tail no unquote reaches),
+;; the items after the first that no unquote reaches, with the tail, one
+;; quote. As `Checker::quoted_in`.
+(define quoted-onto (subr parses (syns-a bool syn int bool int int bool int int) syn)
+  (lambda (items dotted? tail ldepth free-tail? depth inner first? a b)
+    (cond
+      ((null? items) (if dotted? (quoted-in tail ldepth) (fx-named "nil" (- b 1) b)))
+      ((and free-tail? (not first?) (items-free? items inner inner))
+       (fx-call "%quote" (list (quoted-plain items dotted? tail a b)) (syn-start (car items)) b))
+      (else
+        (let ((rest (quoted-onto (cdr items) dotted? tail ldepth free-tail? inner inner #f a b))
               (spliced (if (= depth 1) (unquote-of (car items) "unquote-splicing") nil))
               (ia (syn-start (car items))) (ib (syn-end (car items))))
           (if (null? spliced)
@@ -560,8 +616,7 @@
                                        (mk-symbol "acyclic" a b))
                                  a b)))
                 (fx-call "append" (list (car spliced) (mk-form "the" (list ty rest) a b))
-                         ia ib)))))))
-
+                         ia ib))))))))
 
 ))
 

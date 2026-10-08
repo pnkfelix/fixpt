@@ -61,6 +61,10 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("bool?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 bool)) (else (not (shape 0 bool))))))"),
     ("string?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 string)) (else (not (shape 0 string))))))"),
     ("f64?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 f64)) (else (not (shape 0 f64))))))"),
+    // What a quote builds, marked so (TODO §51): it interned, the one
+    // object equal to it (`Heap::intern_datum`); which each compiler makes
+    // once, as constant data, where it is all literals.
+    ("%quote", "(poly ((t type)) (subr pure (t) t))"),
     ("vector?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 vector)) (else (not (shape 0 vector))))))"),
     ("bytevector?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 bytevector)) (else (not (shape 0 bytevector))))))"),
     ("symbol?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 symbol)) (else (not (shape 0 symbol))))))"),
@@ -392,6 +396,8 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // A pair of constants, made while compiling: a constant list's
     // (`TODO.md` §44).
     ("wcell-pair", "(subr pure (wcell wcell) wcell)"),
+    // A constant datum, interned (`Heap::intern_datum`): a quote's.
+    ("wcell-interned", "(subr pure (wcell) wcell)"),
     // A lambda-lifted procedure's closure, over nothing, its word to come;
     // and its word, once compiled.
     ("wcell-closure", "(subr pure () wcell)"),

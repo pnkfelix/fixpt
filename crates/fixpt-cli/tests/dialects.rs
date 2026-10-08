@@ -365,6 +365,16 @@ fn union_shapes_on_every_machine() {
     }
 }
 
+/// Quoted data interned alike on every machine (`programs/quote-identity.fx`):
+/// a quote is one object, as an equal quote and a quasiquote's constant
+/// part are; a quasiquote with an unquote is made anew each time.
+#[test]
+fn quotes_interned_on_every_machine() {
+    for (m, text) in on_every_machine(include_str!("programs/quote-identity.fx")) {
+        assert!(text.contains("(#t #t #t #t #f) : "), "{m:?}: {text}");
+    }
+}
+
 /// The bits of `int`s alike on every machine, bignums too
 /// (`programs/bitwise.fx`).
 #[test]

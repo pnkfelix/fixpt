@@ -387,6 +387,47 @@
       (e-with (m body a b) (c-fx-name m body))
       (else y ""))))
 
+;; Whether `f` names the standard `name`, as the quote rewrite writes it:
+;; plainly, or through `#%fx`.
+(define c-quote-names? (subr (read @globals) (exp string) bool)
+  (lambda (f name)
+    (tagcase f
+      (e-var (n a b) (string=? (symbol->string n) name))
+      (e-with (m body a b) (string=? (c-fx-name m body) name))
+      (else y #f))))
+;; The datum a quote builds (`%quote`'s argument, which only the quote
+;; rewrite makes: `quoted` in `parser.fx`), as a constant's cell, made
+;; once, where it is made of literals and symbols: `cons` and `nil` here
+;; are the standard ones, by how the rewrite wrote them. A string, a float
+;; or a vector in it, not yet: built as written. As the Rust compiler's
+;; `quoted_value`. None, or one.
+(define c-quoted-cell
+  (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (exp) (listof wcell @k))
+  (lambda (x)
+    (tagcase x
+      (e-int (n a b) (cons (wcell-int n) nil))
+      (e-bool (v a b) (cons (wcell-bool v) nil))
+      (e-char (v a b) (cons (wcell-char v) nil))
+      (e-sym (s a b) (cons (wcell-symbol s) nil))
+      (e-the (d body a b) (c-quoted-cell body))
+      (e-var (n a b) (if (string=? (symbol->string n) "nil") (cons (wcell-nil) nil) nil))
+      (e-with (m body a b) (if (string=? (c-fx-name m body) "nil") (cons (wcell-nil) nil) nil))
+      (e-app (f args a b)
+        (if (and (c-quote-names? f "cons") (= (c-count-exps args) 2))
+            (let ((h (c-quoted-cell (car args))) (t (c-quoted-cell (car (cdr args)))))
+              (if (or (null? h) (null? t)) nil (cons (wcell-pair (car h) (car t)) nil)))
+            nil))
+      (else y nil))))
+
+;; `(%quote arg)`'s datum, made now and interned (`wcell-interned`), where
+;; it is all literals: the one object equal to it, at every copy of the
+;; quote and every quote of it. As the Rust compiler's `quote_now`.
+(define c-quote-now
+  (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (exp) (listof wcell @k))
+  (lambda (arg)
+    (let ((made (c-quoted-cell arg)))
+      (if (null? made) nil (cons (wcell-interned (car made)) nil)))))
+
 ;; The module in slot `depth`'s fields at positions `at`, pushed.
 (define c-reshape-fields (subr (maxeff compiles spin) (k-ids int code) unit)
   (lambda (at depth c)
@@ -783,6 +824,11 @@
                  (begin (c-exp f e (+ depth n) c #f)
                         ;; The checker typed the callee a subroutine: a typed call.
                         (c-typed-call c n tail))))
+              ;; A quoted datum (TODO §51): made once, here, where it is all
+              ;; literals; else built as written.
+              ((and (string=? standard "%quote") (= (c-count-exps args) 1)
+                    (not (null? (c-quote-now (car args)))))
+               (begin (c-lit c (car (c-quote-now (car args)))) (c-done c tail)))
               ;; In tail position, the mark replaces this frame's: a loop
               ;; that marks each iteration runs in constant space.
               ((and tail (string=? standard "with-mark"))
@@ -885,6 +931,8 @@
 (define-type c-region (select compile-exps-module c-region))
 (define c-made-word (with compile-exps-module c-made-word))
 (define c-exp (with compile-exps-module c-exp))
+(define c-quoted-cell (with compile-exps-module c-quoted-cell))
+(define c-quote-now (with compile-exps-module c-quote-now))
 (define c-lift (with compile-exps-module c-lift))
 (define c-lambda (with compile-exps-module c-lambda))
 (define c-lambda-word (with compile-exps-module c-lambda-word))
