@@ -84,4 +84,7 @@
             (val k-show-size
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (k-size) string))
             (val k-region-show (subr (maxeff (read @globals) (read @t)) (k-region) string))
-            (val k-coef-of (subr (read @globals) (k-terms int) int))))
+            (val k-coef-of (subr (read @globals) (k-terms int) int))
+            (val k-kind-word
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int) string))
+            (val k-size-var (subr (read @globals) (int) k-size))))

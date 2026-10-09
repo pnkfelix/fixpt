@@ -135,4 +135,6 @@
    (val k-param-map (ref k-params-given @t))
    (val k-param-in
         (subr (maxeff (read @globals) (read @t)) (k-params-given int symbol int) int))
-   (val k-known? (subr (maxeff (read @globals) (read @t) spin) (symbol) bool))))
+   (val k-known? (subr (maxeff (read @globals) (read @t) spin) (symbol) bool))
+   (val k-globals-effects (ref bool @t))
+   (val k-global? (subr (maxeff (read @globals) (read @t) spin) (symbol) bool))))

@@ -47,6 +47,8 @@
 ;; The types it names, from the files that define them.
 (define-type k-region (select check-types-types k-region))
 (define-type k-size (select check-types-types k-size))
+;; The types it names, from the files that define them.
+(define-type kx (select check-types-types kx))
 (define-type check-subtype-sig
   (moduleof (val k-subtype
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
@@ -60,4 +62,14 @@
             (val k-nlist-tail
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (int k-size k-region)
-                       int))))
+                       int))
+            (val k-reshape-at
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (kx int int)
+                       bool))))
