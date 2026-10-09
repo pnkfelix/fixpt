@@ -21,10 +21,16 @@
 ;;; mark keys.
 ;;;
 ;;; Not yet: bloblets' frozen flags.
-;;; Made by the conductor (`conductor.fx`), of the checker's types module.
+;;; A file of one expression (`load-input`, `TODO.md` §68): what makes the
+;;; module, which the conductor (`conductor.fx`) applies to the checker's
+;;; types module.
 
 ;; Its types, and the signatures of what it is given (`eval-types.fx`).
-(define eval-types (load-module "fx26:eval-types.fx"))
+(let* ((eval-types (load-module "fx26:eval-types.fx"))
+       (check-types-types (load-module "fx26:check-types-types.fx")))
+  ;; What it is given: the checker's types module (`check-types.fx`).
+  (lambda ((check-types (select check-types-types check-types-sig)))
+    (module
 (define-effect stores (select eval-types stores))
 (define-effect runs (select eval-types runs))
 (define-effect evals (select eval-types evals))
@@ -46,13 +52,6 @@
 (define o-esc (with eval-types o-esc))
 (define o-key (with eval-types o-key))
 (define ev-err (with eval-types ev-err))
-;; What it is given: the checker's types module (`check-types.fx`).
-(define check-types-types (load-module "fx26:check-types-types.fx"))
-(define-type check-types-sig (select check-types-types check-types-sig))
-
-(define make
-  (lambda ((check-types check-types-sig))
-    (module
 ;; What it uses of the modules it is given.
 (define k-cat3 (with check-types k-cat3))
 (define k-cat5 (with check-types k-cat5))

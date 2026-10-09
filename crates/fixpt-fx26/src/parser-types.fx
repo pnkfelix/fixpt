@@ -10,9 +10,9 @@
 (define-type syn (select reader-types syn))
 
 ;; What a parse may do: read what was read and build a tree
-;; (`tree-builds`), and give up.
+;; (`tree-builds`), keep what the files it loads define, and give up.
 (define-effect tree-builds (maxeff (read @globals) (read rs) (alloc rs)))
-(define-effect parses (maxeff tree-builds (goto rp)))
+(define-effect parses (maxeff tree-builds (write rs) (goto rp)))
 
 (define-type syns-a (listof syn acyclic))
 (define-type names (listof symbol acyclic))
@@ -95,10 +95,11 @@
 
 (define-datatype presult (p-ok (listof top acyclic)) (p-err string int int))
 
-;; What the driver read for each `load-module`, by where the form starts:
-;; the file's base (0 if it could not be read or read), its path, why not
-;; (`cannot read …`, or where in it reading failed), its forms, and its
-;; text.
+;; What the driver read for each `load-module` or `load-input`, by where
+;; the form starts: the file's base (0 if it could not be read or read),
+;; its path, why not (`cannot read …`, or where in it reading failed), its
+;; forms, its text, and the path from the program's directory, which
+;; names it among the loads that are one (`TODO.md` §68).
 (define-type loaded-file
-  (productof (1 int) (2 int) (3 string) (4 string) (5 syns-a) (6 string)))
+  (productof (1 int) (2 int) (3 string) (4 string) (5 syns-a) (6 string) (7 string)))
 (define-type loaded-files (listof loaded-file acyclic))

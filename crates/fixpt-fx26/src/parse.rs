@@ -1451,15 +1451,17 @@ impl Checker {
             }
             "module" => self.parse_module(span, &items[1..]),
             // `(load-module "file")`: the file's forms, a module's items,
-            // seeing only the standard environment (M7).
-            "load-module" => {
+            // seeing only the standard environment (M7). `(load-input
+            // "file")`: the file's one expression, Sheldon's `input`.
+            loader @ ("load-module" | "load-input") => {
+                let input = loader == "load-input";
                 let [_, path] = &items[..] else {
-                    return Err(FxError::at(span, "`(load-module \"file\")`"));
+                    return Err(FxError::at(span, format!("`({loader} \"file\")`")));
                 };
                 let Datum::Str(path) = &path.datum else {
-                    return Err(FxError::at(path.span, "`(load-module \"file\")`: the file's name, as a string"));
+                    return Err(FxError::at(path.span, format!("`({loader} \"file\")`: the file's name, as a string")));
                 };
-                self.parse_load_module(span, path)
+                self.parse_load(span, path, input)
             }
             "with" => {
                 let [_, m, body @ ..] = &items[..] else {
@@ -2171,14 +2173,72 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         Ok(self.arena.ty(Ty::Module { abs, descs, vals }))
     }
 
-    /// `(load-module "path")`: the file read, its forms a module's items,
-    /// parsed seeing only the standard description names; recorded, so
-    /// that checking it sees only the standard values too.
-    fn parse_load_module(&mut self, span: fixpt_read::Span, path: &str) -> R<ExpId> {
+    /// `(load-module "path")` or, `input`, `(load-input "path")`: every
+    /// load of a path is one value, made once (`TODO.md` §68). The first
+    /// defines a hidden global, `%shared:path`, as the file loaded (checked
+    /// so, alone, its definition running before the form that loads it,
+    /// `hoisted`); every load is that global. Making it must be pure: a
+    /// file's state is made by applying what it makes, so that two loads
+    /// that are one cannot be told apart.
+    fn parse_load(&mut self, span: fixpt_read::Span, path: &str, input: bool) -> R<ExpId> {
         let at = match &self.base_dir {
-            Some(d) if std::path::Path::new(path).is_relative() => d.join(path),
+            Some(d) if std::path::Path::new(path).is_relative() && crate::built_in_module(path).is_none() => d.join(path),
             _ => std::path::PathBuf::from(path),
         };
+        let key = format!("{}{}", if input { "input:" } else { "" }, at.display());
+        if self.sharing_now.contains(&key) {
+            return self.parse_load_file(span, path, &at, input);
+        }
+        let name = match self.shared_loads.get(&key) {
+            Some(n) => *n,
+            None => {
+                let name = self.interner.intern(&format!("%shared:{key}"));
+                let sym = |c: &mut Self, s: &str| Syntax::symbol(span, c.interner.intern(s));
+                let load = Syntax::list(
+                    span,
+                    vec![sym(self, if input { "load-input" } else { "load-module" }), Syntax::new(span, Datum::Str(path.to_string()))],
+                );
+                let form = Syntax::list(span, vec![sym(self, "define"), Syntax::symbol(span, name), load]);
+                self.sharing_now.insert(key.clone());
+                let made = self.top_defining(&form);
+                self.sharing_now.remove(&key);
+                let made = made?;
+                for (top, _) in &made.run {
+                    // Pure but for reading globals: the hidden globals of the
+                    // files it loads, which never change.
+                    if let crate::top::Top::Define { effect, .. } = top
+                        && !effect.0.iter().all(|a| matches!(a, crate::ast::Atom::Read(r) if r.is_globals()))
+                    {
+                        return Err(FxError::at(
+                            span,
+                            format!(
+                                "a loaded file is one value for all its loads, made once, so making it must be pure, and this one has {}: make its state in a `lambda` it gives, which each caller applies",
+                                self.show_effect(effect)
+                            ),
+                        ));
+                    }
+                }
+                self.hoisted.extend(made.hoisted);
+                self.hoisted.extend(made.run);
+                self.shared_loads.insert(key, name);
+                self.shared_globals.insert(name);
+                name
+            }
+        };
+        let var = self.arena.exp(span, Exp::Var(name));
+        if !input {
+            return Ok(var);
+        }
+        // A `load-input`'s value: its module's one item, `input`.
+        let item = self.interner.intern("input");
+        let body = self.arena.exp(span, Exp::Var(item));
+        Ok(self.arena.exp(span, Exp::With { module: name, body }))
+    }
+
+    /// The file at `at`, `path` as written, read and parsed: its forms a
+    /// module's items; or, `input`, its one form an expression, the one
+    /// item, `input`, of the module made.
+    fn parse_load_file(&mut self, span: fixpt_read::Span, path: &str, at: &std::path::Path, input: bool) -> R<ExpId> {
         let text = match crate::built_in_module(path) {
             Some(t) => t.to_string(),
             None => std::fs::read_to_string(&at).map_err(|e| FxError::at(span, format!("cannot read `{path}`: {e}")))?,
@@ -2195,7 +2255,20 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         // Its own `load-module`s are from its directory.
         let outer_dir = std::mem::replace(&mut self.base_dir, at.parent().map(|d| d.to_path_buf()));
         let lives = self.lifetimes.len();
-        let r = self.module_parameters(&forms).and_then(|(params, rest)| Ok((params, self.parse_module_in(rest)?)));
+        let r = if input {
+            match &forms[..] {
+                [one] => {
+                    let item = Syntax::list(
+                        one.span,
+                        vec![Syntax::symbol(span, self.interner.intern("define")), Syntax::symbol(span, self.interner.intern("input")), one.clone()],
+                    );
+                    self.parse_module_in(&[item]).map(|items| (None, items))
+                }
+                _ => Err(FxError::at(span, "a `load-input` file is one expression")),
+            }
+        } else {
+            self.module_parameters(&forms).and_then(|(params, rest)| Ok((params, self.parse_module_in(rest)?)))
+        };
         self.base_dir = outer_dir;
         self.dscope.truncate(depth);
         self.lifetimes.truncate(lives);

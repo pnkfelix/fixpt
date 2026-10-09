@@ -1864,4 +1864,18 @@ Phase 1, the types out, one module at a time; phase 2, the conversion.
   again, and compiled again (`check-types-types.fx` 12 times, nesting the
   parser's and the reader's): next, one check and one compiled body per
   stateless file, shared by its loads.
+- Decided with the user (2026-10-08), and done: **`load-input`** and
+  **shared loads**. `(load-input "f")` is a file of one expression, its
+  value (Sheldon's `input`); `load-module` stays. Every load of a path is
+  one value, made once: the first defines a hidden global, `%shared:` and
+  the path from the program's directory (`input:` before it for a
+  `load-input`), before the form that loads it, and each load is that
+  global, which loaded files may see (`parse_load`; `parse-loaded`,
+  `parse-tops`). So making it must be pure, but for reading globals:
+  state is made by applying a `lambda` the file gives. Supersedes "two
+  loads, two modules" (b98e670) for values; abstract types are still
+  named by their variable. The driver reads each path once
+  (`supply_loaded_in`). The evaluator's three files are now `load-input`
+  files, a `let*` of the types files they use around the `lambda` that
+  makes the module, and `make` is gone. Cost: 241 M words (from 297).
 

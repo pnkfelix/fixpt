@@ -81,7 +81,7 @@
 (define p-ok (with parser-types p-ok))
 (define p-err (with parser-types p-err))
 
-(define parse-tag (prompt-tag presult presult (maxeff tree-builds spin) rp)
+(define parse-tag (prompt-tag presult presult (maxeff tree-builds (write rs) spin) rp)
   (make-continuation-prompt-tag))
 
 ;;; -------------------------------------------------------- looking at syn
@@ -604,6 +604,24 @@
 ;; The positions of one file and the next apart.
 (define load-base int 1000000000)
 
+;; Every load of a path is one value, made once (`TODO.md` §68): the first
+;; defines a hidden global, `%shared:` and its key (`loaded-key`), as the
+;; file loaded, before the form that loads it; every load is that global.
+;; The keys loaded, and the definitions not yet placed before their form.
+(define shared-keys (ref (listof string acyclic) rs) (new nil))
+(define shared-pending (ref top-list rs) (new nil))
+;; A program's parse begins with none.
+(define shared-reset! (subr (maxeff (read @globals) (write rs)) () unit)
+  (lambda () (begin (set shared-keys nil) (set shared-pending nil))))
+;; The definitions not yet placed, in order, now placed: none left.
+(define shared-taken (subr (maxeff (read @globals) (read rs) (write rs)) () top-list)
+  (lambda ()
+    (letrec ((onto (subr (read @globals) (top-list top-list) top-list)
+                (lambda (xs ys) (if (null? xs) ys (onto (cdr xs) (cons (car xs) ys))))))
+      (let ((ts (get shared-pending))) (begin (set shared-pending nil) (onto ts nil))))))
+(define shared-key? (subr (read @globals) (string (listof string acyclic)) bool)
+  (lambda (k ks) (and (not (null? ks)) (or (string=? k (car ks)) (shared-key? k (cdr ks))))))
+
 ;; What was read for the `load-module` starting at `a`, in a list of one.
 (define loaded-at (subr (maxeff (read @globals) (read rs)) (loaded-files int) loaded-files)
   (lambda (fs a)
@@ -672,6 +690,15 @@
 (define loaded-error (subr (read @globals) (string) mod-items)
   (lambda (m) (cons (mod-item-of -1 (string->symbol m) (the syns-a nil) nil) nil)))
 
+;; A `load-input` file's forms, loaded at `a`..`b`: its one expression,
+;; as the module item `(define input expression)`; refused if not one.
+(define input-items (subr parses (syns-a int int) syns-a)
+  (lambda (forms a b)
+    (if (and (not (null? forms)) (null? (cdr forms)))
+        (let* ((one (car forms))
+               (item (the syns-a (list (mk-symbol "define" a b) (mk-symbol "input" a b) one))))
+          (the syns-a (cons (mk-list item (syn-start one) (syn-end one)) nil)))
+        (pfail-at "a `load-input` file is one expression" a b))))
 ;; A module's file's parameters, if its first form is `(module-parameters
 ;; ((name kind) …))`, in a list of one; none if not.
 (define loaded-params (subr parses (syns-a) syns-a)

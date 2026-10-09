@@ -267,6 +267,19 @@ pub struct Checker {
     /// bindings, and the description names, past the standard ones and
     /// before it, which it may not see.
     pub(crate) hidden: Option<((usize, usize), (usize, usize))>,
+    /// Each file loaded, by its path (`input:` before a `load-input`'s),
+    /// and the hidden global its one value is (`%shared:…`): every load of
+    /// a path is that value (`TODO.md` §68), made once, purely.
+    pub(crate) shared_loads: HashMap<String, Sym>,
+    /// The paths being made into their hidden globals now: loaded there,
+    /// not referred to.
+    pub(crate) sharing_now: HashSet<String>,
+    /// Those globals: seen from a loaded file, which sees no other.
+    pub(crate) shared_globals: HashSet<Sym>,
+    /// The hidden globals' definitions made since the form being checked
+    /// began, to run before it (`top_defining`; a driver calling `top`
+    /// takes them).
+    pub hoisted: Vec<(crate::top::Top, Syntax)>,
     /// Modules read from files: each one's path and text, and the file id
     /// its spans have.
     pub(crate) loaded: HashMap<ExpId, (String, String, fixpt_read::FileId)>,
@@ -529,6 +542,10 @@ impl Checker {
             operator_at: None,
             standard_dscope: 0,
             hidden: None,
+            shared_loads: HashMap::new(),
+            sharing_now: HashSet::new(),
+            shared_globals: HashSet::new(),
+            hoisted: Vec::new(),
             loaded: HashMap::new(),
             files_read: 0,
             base_dir: None,
@@ -685,7 +702,9 @@ impl Checker {
     /// is a global broken by a redefinition (`broken`).
     pub(crate) fn lookup(&self, s: Sym) -> Option<TyId> {
         let hidden = self.hidden.map(|(e, _)| e);
-        let i = (0..self.env.len()).rev().find(|i| self.env[*i].0 == s && !hidden.is_some_and(|(a, b)| (a..b).contains(i)))?;
+        // A shared load's hidden global is seen everywhere, loaded files too.
+        let seen = |i: usize| !hidden.is_some_and(|(a, b)| (a..b).contains(&i)) || self.shared_globals.contains(&s);
+        let i = (0..self.env.len()).rev().find(|i| self.env[*i].0 == s && seen(*i))?;
         if self.broken.get(&s).is_some_and(|(b, _)| *b == i) {
             return None;
         }

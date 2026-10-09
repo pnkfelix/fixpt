@@ -109,6 +109,14 @@ are in the last section, "Log: the glance's details", and in
   concurrency as region scoping). Each has open questions for the user.
 
 **In progress**
+- **The front end as modules linked by a conductor** (the user's,
+  2026-10-08, `TODO.md` §68): types and signatures in `X-types.fx` files
+  (phase 1, the checker's and the parser's done); the evaluator converted
+  (phase 2's pilot), its files `load-input` files that `conductor.fx`
+  applies to the modules they use. Every load of a path is one value,
+  made once and purely, so a types file is checked and compiled once:
+  241 M words to compile the front end, from 297 (215 before §68). Next:
+  the other files, from the last backwards.
 - **The collector** (the user's, 2026-09-29;
   `docs/research/generational-gc.md`): done, all four. Stack maps (each
   native frame's header word, a mask of its live slots); a card-marking
@@ -365,12 +373,14 @@ copy of the code per type.
 - Not yet, and not ruled out (the user's, 2026-10-08): Sheldon's rule
   that two `(input "f")`s, textually identical, are one module, their
   abstract types the same (LFP '90 §2.1.3, under "the illusion that the
-  file system is immutable"). Each `load-module` stays its own module,
-  its types named by the variable it is bound to; sharing is loading
-  once and passing the module on, in an outermost namespace (a REPL or a
-  driver module). The user's reading: the rule served a system with no
-  namespace outside its modules that still had to reason about shared
-  module state (`docs/research/first-class-modules.md`, M7).
+  file system is immutable"). A module's abstract types stay named by
+  the variable it is bound to. The user's reading: the rule served a
+  system with no namespace outside its modules that still had to reason
+  about shared module state (`docs/research/first-class-modules.md`, M7).
+  Superseded for values (the user's, 2026-10-08, `TODO.md` §68): every
+  load of a path is one value, made once, so making it must be pure; a
+  file's state is made by applying a `lambda` it gives. "Two loads, two
+  modules" (b98e670) holds no more.
 
 **Unknown**
 - Whether code free of `spin` always ends: T5 is conjectured, and false

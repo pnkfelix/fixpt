@@ -100,14 +100,22 @@
     (cond ((null? ns) t)
           ((and (symbol=? (extract (car ns) 1) s) (= (extract (car ns) 2) d)) (extract (car ns) 3))
           (else (k-narrowed-of (cdr ns) s d t)))))
+;; Whether `name` is the hidden global every load of a file is
+;; (`parse-loaded`; `TODO.md` §68).
+(define k-shared-name? (subr (read @globals) (symbol) bool)
+  (lambda (name)
+    (let ((n (symbol->string name)))
+      (and (>= (string-length n) 8) (string=? (substring n 0 8) "%shared:")))))
 ;; What `s` is where it is used: its innermost binding, as a test may have
 ;; narrowed it; none, if that is broken. While a module read from a file is
-;; checked, a binding made before it began only if it is a standard one.
+;; checked, a binding made before it began only if it is a standard one, or
+;; the hidden global of a file loaded (`k-shared-name?`).
 (define k-lookup (subr (maxeff (read @globals) (read @t) spin) (symbol) int)
   (lambda (s)
     (let ((st (table-ref (get k-env) s nil)) (mark (get k-hide-mark)))
       (cond ((or (null? st) (not (null? (k-broken-why s)))) -1)
-            ((or (< mark 0) (> (k-bound-since (get k-trail) s (- (get k-depth) mark)) 0))
+            ((or (< mark 0) (> (k-bound-since (get k-trail) s (- (get k-depth) mark)) 0)
+                 (k-shared-name? s))
              (k-narrowed-of (get k-narrowed) s (k-length st) (car st)))
             (else (k-std-type s))))))
 ;; The same, broken or not.
@@ -355,6 +363,7 @@
 (define k-broken (with check-env-module k-broken))
 (define k-name-depth (with check-env-module k-name-depth))
 (define k-hide-mark (with check-env-module k-hide-mark))
+(define k-shared-name? (with check-env-module k-shared-name?))
 (define k-std-dscope (with check-env-module k-std-dscope))
 (define k-lookup (with check-env-module k-lookup))
 (define k-lookup-raw (with check-env-module k-lookup-raw))

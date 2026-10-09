@@ -19,6 +19,10 @@ fn rust_trees(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     for f in &forms2 {
         let top = c2.top(f).unwrap_or_else(|e| panic!("checks: {e}"));
+        // The hidden globals of the files it loads first, defined before it.
+        for (t, h) in std::mem::take(&mut c2.hoisted) {
+            out.push(show_top(&c2, &chars, &t, h.span));
+        }
         out.push(show_top(&c2, &chars, &top, f.span));
     }
     out

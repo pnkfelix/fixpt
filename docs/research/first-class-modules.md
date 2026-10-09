@@ -220,6 +220,16 @@ meet in one place, which M7 builds and Q9 later caches:
   module, to hold it. The user's reading of Sheldon's rule: it served a
   system with no namespace outside its modules that still had to reason
   about shared module state.
+- **Every load of a path is one value** (the user's, 2026-10-08,
+  `TODO.md` §68), superseding the item above for values, not for types.
+  The first load defines a hidden global, `%shared:path`, as the file
+  loaded, before the form that loads it; every load is that global, so a
+  file is checked and compiled once however many load it. Making it must
+  be pure, but for reading globals, so that one load and two cannot be
+  told apart: state is made by applying a `lambda` the file gives. `a..t`
+  and `b..t` stay apart, each named by its variable, so Sheldon's rule is
+  still not taken. `(load-input "f")` is Sheldon's `input`: a file of one
+  expression, its value.
 
 ## Open questions
 

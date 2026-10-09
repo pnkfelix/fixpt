@@ -128,6 +128,11 @@
 (define loaded-error (with parser-module loaded-error))
 (define loaded-params (with parser-module loaded-params))
 (define loaded-made (with parser-module loaded-made))
+(define-type loaded-file (select parser-module loaded-file))
+(define shared-keys (with parser-module shared-keys))
+(define shared-pending (with parser-module shared-pending))
+(define shared-key? (with parser-module shared-key?))
+(define input-items (with parser-module input-items))
 ;;; ------------------------------------------------------------ expressions
 ;; Whether `s` mentions the name `n` anywhere, quoted or not.
 (define syn-mentions? (subr spin (symbol syn) bool)
@@ -487,13 +492,14 @@
          (begin (arity items 4 "`(prompt tag body handler)`" a b)
                 (e-prompt (parse-nth items 1) (parse-nth items 2) (parse-nth items 3) a b)))
         ((module) (e-module (parse-module-items (cdr items)) a b))
-        ((load-module)
-         (begin (arity items 2 "`(load-module \"file\")`" a b)
-                (if (syn-string? (nth items 1))
-                    (parse-loaded (syn-string (nth items 1)) a b)
-                    (pfail (string-append "`(load-module \"file\")`: "
-                                          "the file's name, as a string")
-                           (nth items 1)))))
+        ((load-module load-input)
+         (let* ((input? (eq? head 'load-input))
+                (usage (str3 "`(" (if input? "load-input" "load-module") " \"file\")`")))
+           (begin (arity items 2 usage a b)
+                  (if (syn-string? (nth items 1))
+                      (parse-loaded (syn-string (nth items 1)) input? a b)
+                      (pfail (string-append usage ": the file's name, as a string")
+                             (nth items 1))))))
         ((with)
          (begin (at-least items 2 "`(with module body …)`" a b)
                 (if (syn-symbol? (nth items 1))
@@ -869,32 +875,54 @@
                                                "`(define-rec (name type expression) …)`")))
                  (product (1 3) (2 (rec-names bs)) (3 (rec-types bs)) (4 (rec-inits bs)))))
               (else (pfail module-usage f))))))
-  ;; `(load-module "path")`, at `a`..`b`: the module, its items after its
-  ;; mark (`loaded-made` of it, for a file of parameters); or why it could
-  ;; not be read.
-  (parse-loaded (subr (maxeff parses spin) (string int int) exp)
-    (lambda (path a b)
+  ;; `(load-module "path")` or, `input?`, `(load-input "path")`, at `a`..`b`:
+  ;; the hidden global every load of its path is (`TODO.md` §68), the
+  ;; first defining it, as the file loaded (`parse-load-file`), before the
+  ;; form that loads it (`shared-pending`); a `load-input`'s, its one item.
+  (parse-loaded (subr (maxeff parses spin) (string bool int int) exp)
+    (lambda (path input? a b)
       (let ((f (loaded-at (get loaded) a)))
-        (cond
-          ((null? f) (e-module (loaded-error (str3 "cannot read `" path "`: it was not read")) a b))
-          ((= (extract (car f) 2) 0) (e-module (loaded-error (extract (car f) 3)) a b))
-          (else
-           (let* ((base (extract (car f) 2))
-                  (forms (syns-moved (extract (car f) 5) base))
-                  ;; Its parameters and items, as a form's, out of the
-                  ;; prompt that catches what is wrong in them.
-                  (made (lambda ()
-                          (let* ((ps (loaded-params forms))
-                                 (items (parse-module-items (if (null? ps) forms (cdr forms))))
-                                 (m (e-module (cons (loaded-mark base path ps) items) a b)))
-                            (t-exp (loaded-made ps m a b)))))
-                  (r (prompt parse-tag (p-ok (cons (made) nil)) (lambda (r) r))))
-             (tagcase r
-               (p-err (m x y)
-                 (if (>= x base)
-                     (e-module (loaded-error (in-loaded (get loaded) base m x)) a b)
-                     (pfail-at m x y)))
-               (p-ok (ts) (tagcase (car ts) (t-exp (x) x) (else y (e-module nil a b))))))))))))
+        (if (null? f)
+            (e-module (loaded-error (str3 "cannot read `" path "`: it was not read")) a b)
+            (let* ((key (string-append (if input? "input:" "") (extract (car f) 7)))
+                   (name (string->symbol (string-append "%shared:" key))))
+              (begin
+                (if (shared-key? key (get shared-keys))
+                    #u
+                    (let ((x (parse-load-file (car f) path input? a b)))
+                      (begin (set shared-keys (cons key (get shared-keys)))
+                             (set shared-pending
+                                  (cons (t-define name (the syns-a nil) x a b)
+                                        (get shared-pending))))))
+                (if input? (e-with name (e-var 'input a b) a b) (e-var name a b))))))))
+  ;; File `f`, loaded at `a`..`b` as `path`: the module, its items after its
+  ;; mark (`loaded-made` of it, for a file of parameters; for a
+  ;; `load-input`, `input?`, its one form, the item `input`); or why it
+  ;; could not be read.
+  (parse-load-file (subr (maxeff parses spin) (loaded-file string bool int int) exp)
+    (lambda (f path input? a b)
+      (if (= (extract f 2) 0)
+          (e-module (loaded-error (extract f 3)) a b)
+          (let* ((base (extract f 2))
+                 (forms (syns-moved (extract f 5) base))
+                 ;; Its parameters and items, as a form's, out of the
+                 ;; prompt that catches what is wrong in them.
+                 (made (lambda ()
+                         (if input?
+                             (t-exp (e-module (cons (loaded-mark base path nil)
+                                                    (parse-module-items (input-items forms a b)))
+                                              a b))
+                             (let* ((ps (loaded-params forms))
+                                    (items (parse-module-items (if (null? ps) forms (cdr forms))))
+                                    (m (e-module (cons (loaded-mark base path ps) items) a b)))
+                               (t-exp (loaded-made ps m a b))))))
+                 (r (prompt parse-tag (p-ok (cons (made) nil)) (lambda (r) r))))
+            (tagcase r
+              (p-err (m x y)
+                (if (>= x base)
+                    (e-module (loaded-error (in-loaded (get loaded) base m x)) a b)
+                    (pfail-at m x y)))
+              (p-ok (ts) (tagcase (car ts) (t-exp (x) x) (else y (e-module nil a b))))))))))
 ;; A `define-rec`'s bindings, as a `letrec`'s are.
 (define parse-rec-bindings (subr (maxeff parses spin) (syns-a) letrec-list)
   (lambda (bs)

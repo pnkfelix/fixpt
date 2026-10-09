@@ -8,11 +8,25 @@
 ;;; shadows the first, and code before it keeps the first, as the lowering
 ;;; to Scheme does (`lower::Globals`). Descriptions are not needed to run a
 ;;; program, so they are passed over.
-;;; Made by the conductor (`conductor.fx`), of the evaluator's values and
-;;; primitives, and the checker's environment and resolution.
+;;; A file of one expression (`load-input`, `TODO.md` §68): what makes the
+;;; module, which the conductor (`conductor.fx`) applies to the evaluator's
+;;; values and primitives, and the checker's environment and resolution.
 
 ;; Its types, and the signatures of what it is given (`eval-types.fx`).
-(define eval-types (load-module "fx26:eval-types.fx"))
+(let* ((eval-types (load-module "fx26:eval-types.fx"))
+       ;; The types of the trees it runs, and of what the checker says of them.
+       (parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
+       (check-env-types (load-module "fx26:check-env-types.fx"))
+       (check-resolve-types (load-module "fx26:check-resolve-types.fx"))
+       (check-types-types (load-module "fx26:check-types-types.fx"))
+       (check-subst-types (load-module "fx26:check-subst-types.fx")))
+  ;; What it is given: the evaluator's values and primitives, and the
+  ;; checker's environment (`check-env.fx`) and resolution (`check-resolve.fx`).
+  (lambda ((values (select eval-types eval-values-sig))
+           (prims (select eval-types eval-prims-sig))
+           (env (select check-env-types check-env-sig))
+           (resolve (select check-resolve-types check-resolve-sig)))
+    (module
 (define-effect stores (select eval-types stores))
 (define-effect runs (select eval-types runs))
 (define-effect evals (select eval-types evals))
@@ -29,37 +43,20 @@
 (define o-sum (with eval-types o-sum))
 (define ev-ok (with eval-types ev-ok))
 (define ev-err (with eval-types ev-err))
-;; What it is given: the evaluator's values and primitives, and the
-;; checker's environment (`check-env.fx`) and resolution (`check-resolve.fx`).
-(define-type eval-values-sig (select eval-types eval-values-sig))
-(define-type eval-prims-sig (select eval-types eval-prims-sig))
-;; The types of the trees it runs, and of what the checker says of them.
-(define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
 (define-type exp (select parser-types exp))
 (define-type exp-list (select parser-types exp-list))
 (define-type mod-items (select parser-types mod-items))
 (define-type names (select parser-types names))
 (define-type top (select parser-types top))
-(define check-env-types (load-module "fx26:check-env-types.fx"))
 (define-type k-reshape-list (select check-env-types k-reshape-list))
 (define-type k-with-list (select check-env-types k-with-list))
-(define-type check-env-sig (select check-env-types check-env-sig))
-(define check-resolve-types (load-module "fx26:check-resolve-types.fx"))
 (define-type exp-arms (select check-resolve-types exp-arms))
 (define-type exp-let-bs (select check-resolve-types exp-let-bs))
 (define-type exp-letrec-bs (select check-resolve-types exp-letrec-bs))
 (define-type k-run (select check-resolve-types k-run))
-(define-type check-resolve-sig (select check-resolve-types check-resolve-sig))
-(define check-types-types (load-module "fx26:check-types-types.fx"))
 (define-type k-ids (select check-types-types k-ids))
 (define-type k-names (select check-types-types k-names))
-(define check-subst-types (load-module "fx26:check-subst-types.fx"))
 (define-type exp-params (select check-subst-types exp-params))
-
-(define make
-  (lambda ((values eval-values-sig) (prims eval-prims-sig)
-           (env check-env-sig) (resolve check-resolve-sig))
-    (module
 ;; What it uses of the modules it is given.
 (define apply-val (with values apply-val))
 (define apply1 (with values apply1))

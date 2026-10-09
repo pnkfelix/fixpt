@@ -19,7 +19,8 @@ pub fn check_with_rust_checker(c: &mut Checker, text: &str) -> Checked26 {
         if done {
             continue;
         }
-        for (top, _) in c.top_defining(f)?.run {
+        let done = c.top_defining(f)?;
+        for (top, _) in done.hoisted.into_iter().chain(done.run) {
             match top {
                 Top::Define { name, ty, effect, .. } => {
                     out.push(format!("define {} : {} ! {}", c.interner.name(name), c.show_ty(ty), c.show_effect(&effect)))

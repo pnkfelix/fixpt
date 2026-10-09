@@ -640,14 +640,15 @@ const LOAD_BASE_STEP: i64 = 1_000_000_000;
 
 /// Each `(load-module "path")` in `forms`, in order: where it starts, and
 /// the path.
-fn load_modules_in(forms: &[Syntax], interner: &Interner, out: &mut Vec<(u32, String)>) {
+fn load_modules_in(forms: &[Syntax], interner: &Interner, out: &mut Vec<(u32, String, bool)>) {
     for f in forms {
         let Some(items) = f.as_proper_list() else { continue };
         if let [head, path] = items
-            && head.as_symbol().is_some_and(|h| interner.name(h) == "load-module")
+            && let Some(h) = head.as_symbol()
+            && matches!(interner.name(h), "load-module" | "load-input")
             && let Datum::Str(p) = &path.datum
         {
-            out.push((f.span.start, p.to_string()));
+            out.push((f.span.start, p.to_string(), interner.name(h) == "load-input"));
         }
         load_modules_in(items, interner, out);
     }
@@ -674,7 +675,8 @@ pub fn loaded_files(scheme: &mut Session, file: FileId, text: &str) -> R<fixpt_s
     let base_dir = LOAD_BASE.with(|b| b.borrow().clone());
     let mut list = scheme.make(|_| Value::NULL);
     let mut read = 0;
-    supply_loaded_in(scheme, file, text, 0, base_dir, &mut read, &mut list)?;
+    let mut seen = HashMap::new();
+    supply_loaded_in(scheme, file, text, 0, base_dir, &mut read, &mut seen, &mut list)?;
     Ok(list)
 }
 
@@ -689,6 +691,7 @@ fn supply_loaded_in(
     base: i64,
     dir: Option<std::path::PathBuf>,
     read: &mut u32,
+    seen: &mut HashMap<String, Read>,
     list: &mut fixpt_scheme::Handle,
 ) -> R<()> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
@@ -700,11 +703,35 @@ fn supply_loaded_in(
     load_modules_in(&forms, &interner, &mut loads);
     let offsets = byte_offsets(text);
     let char_at = |byte: u32| offsets.partition_point(|&o| o < byte as usize) as i64;
-    for (start, path) in loads {
+    for (start, path, input) in loads {
         let at = match &dir {
-            Some(d) if std::path::Path::new(&path).is_relative() => d.join(&path),
+            Some(d) if std::path::Path::new(&path).is_relative() && crate::built_in_module(&path).is_none() => d.join(&path),
             _ => std::path::PathBuf::from(&path),
         };
+        // Every load of a path is one (`TODO.md` §68): the file read once,
+        // as the Rust checker reads it, and named by `key` for the parser.
+        let key = at.display().to_string();
+        let string = |sc: &mut Session, t: &str| sc.make(|m| m.heap().string_from_chars(&t.chars().collect::<Vec<_>>()));
+        let entry = |sc: &mut Session, list: &mut fixpt_scheme::Handle, r: &Read| -> R<()> {
+            let fields = [
+                sc.make(|_| Value::fixnum(37)),
+                sc.make(|_| Value::fixnum(base + char_at(start))),
+                sc.make(|_| Value::fixnum(r.base)),
+                string(sc, &r.why),
+                string(sc, &path),
+                r.syns,
+                string(sc, &r.text),
+                string(sc, &key),
+            ];
+            let one = sc.call_global("%make-frozen", &fields).map_err(|e| fail(e.to_string()))?;
+            *list = sc.call_global("cons", &[one, *list]).map_err(|e| fail(e.to_string()))?;
+            Ok(())
+        };
+        let shared = if input { format!("input:{key}") } else { key.clone() };
+        if let Some(r) = seen.get(&shared) {
+            entry(scheme, list, r)?;
+            continue;
+        }
         // A module file built in (`fx26:…`) is its text, not a file's.
         let contents = |at: &std::path::Path| match crate::built_in_module(&path) {
             Some(t) => Ok(t.to_string()),
@@ -725,24 +752,25 @@ fn supply_loaded_in(
                 }
             },
         };
-        let string = |sc: &mut Session, t: &str| sc.make(|m| m.heap().string_from_chars(&t.chars().collect::<Vec<_>>()));
-        let fields = [
-            scheme.make(|_| Value::fixnum(37)),
-            scheme.make(|_| Value::fixnum(base + char_at(start))),
-            scheme.make(|_| Value::fixnum(file_base)),
-            string(scheme, &why),
-            string(scheme, &path),
-            syns,
-            string(scheme, &ftext),
-        ];
-        let one = scheme.call_global("%make-frozen", &fields).map_err(|e| fail(e.to_string()))?;
-        *list = scheme.call_global("cons", &[one, *list]).map_err(|e| fail(e.to_string()))?;
+        let r = Read { base: file_base, why, syns, text: ftext };
+        entry(scheme, list, &r)?;
+        let ftext = r.text.clone();
+        seen.insert(shared, r);
         // The files it loads, from its directory, at its positions.
         if file_base > 0 {
-            supply_loaded_in(scheme, FileId(1000 + *read), &ftext, file_base, at.parent().map(|d| d.to_path_buf()), read, list)?;
+            supply_loaded_in(scheme, FileId(1000 + *read), &ftext, file_base, at.parent().map(|d| d.to_path_buf()), read, seen, list)?;
         }
     }
     Ok(())
+}
+
+/// A file read for a load: its base, why not (if its base is 0), its forms
+/// and its text.
+struct Read {
+    base: i64,
+    why: String,
+    syns: fixpt_scheme::Handle,
+    text: String,
 }
 
 /// The byte offset of each character, and of the end.

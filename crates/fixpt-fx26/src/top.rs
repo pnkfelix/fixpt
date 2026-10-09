@@ -70,6 +70,9 @@ pub struct Defining {
     /// defined again. With each, whether it assigns the globals its names
     /// have (a redefinition every use can take) rather than making new ones.
     pub run: Vec<(Top, Syntax)>,
+    /// What runs before all that: the hidden globals of the files the form
+    /// loads for the first time (`parse_load`), each defined.
+    pub hoisted: Vec<(Top, Syntax)>,
     /// The earlier definitions that no longer check, and why: broken, a use
     /// of one an error, until they are defined again.
     pub broken: Vec<(Vec<Sym>, String)>,
@@ -96,11 +99,16 @@ impl Checker {
         let olds: Vec<(Sym, TyId)> = names.iter().filter_map(|n| Some((*n, self.global_type(*n)?))).collect();
         let users = if olds.is_empty() || self.defer_reruns { Vec::new() } else { self.users_of(&names) };
         let direct = if olds.is_empty() || !self.defer_reruns { Vec::new() } else { self.direct_users_of(&names) };
-        let mut top = self.top(form)?;
+        let before = std::mem::take(&mut self.hoisted);
+        let top = self.top(form);
+        // The hidden globals of the files it loads first, for the first time
+        // (`parse_load`).
+        let hoisted = std::mem::replace(&mut self.hoisted, before);
+        let mut top = top?;
         let assigns = !olds.is_empty() && self.fits_old(&top, &olds);
         set_assigns(&mut top, assigns);
         self.record(form, &top);
-        let mut done = Defining { run: vec![(top, form.clone())], broken: Vec::new() };
+        let mut done = Defining { run: vec![(top, form.clone())], hoisted, broken: Vec::new() };
         if olds.is_empty() || assigns {
             return Ok(done);
         }
@@ -136,7 +144,8 @@ impl Checker {
     /// Every top-level form `form` runs under redefinition, in order
     /// (`top_defining`): itself, and the definitions it runs again.
     pub fn top_all(&mut self, form: &Syntax) -> R<Vec<Top>> {
-        Ok(self.top_defining(form)?.run.into_iter().map(|(t, _)| t).collect())
+        let done = self.top_defining(form)?;
+        Ok(done.hoisted.into_iter().chain(done.run).map(|(t, _)| t).collect())
     }
 
     /// What `top_defining` would do with `form`, with nothing changed: for
@@ -144,9 +153,11 @@ impl Checker {
     /// definitions goes ahead.
     pub fn try_defining(&mut self, form: &Syntax) -> R<Defining> {
         let (mark, broken, defs, outdated) = (self.mark(), self.broken.clone(), self.defs.clone(), self.outdated.clone());
+        let shared = (self.shared_loads.clone(), self.shared_globals.clone());
         let r = self.top_defining(form);
         self.rollback(mark);
         (self.broken, self.defs, self.outdated) = (broken, defs, outdated);
+        (self.shared_loads, self.shared_globals) = shared;
         r
     }
 

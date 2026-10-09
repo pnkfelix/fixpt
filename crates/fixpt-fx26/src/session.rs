@@ -132,8 +132,16 @@ pub enum Consider {
 /// Check and lower one top-level form, keeping what it defines, alone: not
 /// under redefinition (`compile_form_defining` is).
 pub fn compile_form(checker: &mut Checker, globals: &mut Globals, form: &Syntax) -> R<(Top, String)> {
-    let top = checker.top(form)?;
-    let code = lower_top(checker, globals, &top);
+    let before = std::mem::take(&mut checker.hoisted);
+    let top = checker.top(form);
+    // The hidden globals of the files it loads first, defined before it.
+    let hoisted = std::mem::replace(&mut checker.hoisted, before);
+    let top = top?;
+    let mut code: String = hoisted.iter().map(|(t, _)| lower_top(checker, globals, t)).collect::<Vec<_>>().join("\n");
+    if !code.is_empty() {
+        code.push('\n');
+    }
+    code.push_str(&lower_top(checker, globals, &top));
     Ok((top, code))
 }
 
@@ -142,7 +150,7 @@ pub fn compile_form(checker: &mut Checker, globals: &mut Globals, form: &Syntax)
 /// order, and what it broke.
 pub fn compile_form_defining(checker: &mut Checker, globals: &mut Globals, form: &Syntax) -> R<(crate::top::Defining, Vec<String>)> {
     let done = checker.top_defining(form)?;
-    let code = done.run.iter().map(|(top, _)| lower_top(checker, globals, top)).collect();
+    let code = done.hoisted.iter().chain(&done.run).map(|(top, _)| lower_top(checker, globals, top)).collect();
     Ok((done, code))
 }
 
@@ -665,6 +673,16 @@ impl Fx26Session {
         let done = self.checker.top_defining(form)?;
         let reran: Vec<Sym> = done.run[1..].iter().flat_map(|(_, f)| self.checker.defined_names(f)).collect();
         let mut notes = String::new();
+        // The hidden globals of the files it loads first, quietly.
+        let mut first = String::new();
+        for (top, f) in done.hoisted {
+            let mut o = self.run_checked(top, &f, false)?;
+            if o.value.is_err() {
+                o.printed.insert_str(0, &first);
+                return Ok(o);
+            }
+            first.push_str(&o.printed);
+        }
         let mut out = None;
         for (i, (top, f)) in done.run.into_iter().enumerate() {
             let o = self.run_checked(top, &f, i > 0)?;
@@ -675,6 +693,7 @@ impl Fx26Session {
             }
         }
         let mut out = out.expect("the form itself runs first");
+        out.printed.insert_str(0, &first);
         match &out.top {
             Top::Define { assigns: true, .. } | Top::DefineRec { assigns: true, .. } => {
                 out.printed.push_str(&format!("; {} redefined: every use sees the new one\n", shown(&self.checker, &names)));

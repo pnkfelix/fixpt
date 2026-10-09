@@ -83,8 +83,11 @@ impl Checker {
             Exp::App { fun, args } if args.is_empty() => self.written_module(*fun, early),
             Exp::Lambda { params, body } if params.is_empty() => self.written_module(*body, early),
             Exp::Proj { body, .. } | Exp::PLambda { body, .. } => self.written_module(*body, early),
-            Exp::Var(x) => early.contains(x),
-            Exp::With { module, body } => early.contains(module) && matches!(self.arena.exp_at(*body), Exp::Var(_)),
+            // An earlier such item; a shared load (`parse_load`).
+            Exp::Var(x) => early.contains(x) || self.shared_globals.contains(x),
+            Exp::With { module, body } => {
+                (early.contains(module) || self.shared_globals.contains(module)) && matches!(self.arena.exp_at(*body), Exp::Var(_))
+            }
             _ => false,
         }
     }

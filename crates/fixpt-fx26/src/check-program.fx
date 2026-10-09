@@ -669,13 +669,32 @@
            (proved (if (null? lemma) #u (k-note-lemma (car lemma) name t x)))
            (after (if (k-lambda? x) #u (k-bind-named-global name tf))))
       (cons (k-define-line name tf e) nil))))
-;; `(define name init)`, of no type written: its line.
+;; Whether effect `e` only reads globals.
+(define k-reads-globals-only? (subr (read @globals) (k-eff) bool)
+  (lambda (e)
+    (or (null? e)
+        (and (tagcase (car e)
+               (a-read (r) (tagcase r (r-global (g) #t) (r-globals () #t) (else y #f)))
+               (else y #f))
+             (k-reads-globals-only? (cdr e))))))
+;; The error that making a loaded file has effect `e`.
+(define k-shared-impure (subr (maxeff (read @globals) (read @t)) (k-eff) string)
+  (lambda (e)
+    (k-cat3 (string-append "a loaded file is one value for all its loads, made once, "
+                           "so making it must be pure, and this one has ")
+            (k-show-effect e)
+            ": make its state in a `lambda` it gives, which each caller applies")))
+;; `(define name init)`, of no type written: its line. A loaded file's, made
+;; once for all its loads, must be pure but for reading globals.
 (define k-define-untyped (subr (maxeff checks spin) (symbol exp) k-out)
   (lambda (name init)
     (let* ((x (k-resolve-exp init))
            (u (set k-last-uses (k-free-into x nil nil)))
            (r (k-synth x)))
-      (begin (k-bind-named-global name (extract r 1))
+      (begin (if (and (k-shared-name? name) (not (k-reads-globals-only? (extract r 2))))
+                 (k-fail (k-shared-impure (extract r 2)) (k-start x) (k-end x))
+                 #u)
+             (k-bind-named-global name (extract r 1))
              (if (k-lambda? x) (k-note-known name 0) #u)
              (cons (k-define-line name (extract r 1) (extract r 2)) nil)))))
 ;; One top-level form's lines: what each definition and expression is.

@@ -1,11 +1,20 @@
 ;;; The FX-26 evaluator's primitives: each standard name the evaluator has,
 ;;; a procedure of the list of its arguments, in a table by its symbol.
 ;;; After `eval-values.fx`; `eval-core.fx` looks names up here.
-;;; Made by the conductor (`conductor.fx`), of the evaluator's values, the
-;;; tables and the checker's types module.
+;;; A file of one expression (`load-input`, `TODO.md` §68): what makes the
+;;; module, which the conductor (`conductor.fx`) applies to the evaluator's
+;;; values, the tables and the checker's types module.
 
 ;; Its types, and the signatures of what it is given (`eval-types.fx`).
-(define eval-types (load-module "fx26:eval-types.fx"))
+(let* ((eval-types (load-module "fx26:eval-types.fx"))
+       (table-types (load-module "fx26:table-types.fx"))
+       (check-types-types (load-module "fx26:check-types-types.fx")))
+  ;; What it is given: the evaluator's values, the tables (`table.fx`) and
+  ;; the checker's types module.
+  (lambda ((values (select eval-types eval-values-sig))
+           (tables (select table-types tables-sig))
+           (check-types (select check-types-types check-types-sig)))
+    (module
 (define-effect stores (select eval-types stores))
 (define-effect evals (select eval-types evals))
 (define-type val (select eval-types val))
@@ -21,18 +30,7 @@
 (define o-cont (with eval-types o-cont))
 (define o-esc (with eval-types o-esc))
 (define o-key (with eval-types o-key))
-;; What it is given: the evaluator's values, the tables (`table.fx`) and the
-;; checker's types module.
-(define-type eval-values-sig (select eval-types eval-values-sig))
-(define table-types (load-module "fx26:table-types.fx"))
 (define-type table (select table-types table))
-(define-type tables-sig (select table-types tables-sig))
-(define check-types-types (load-module "fx26:check-types-types.fx"))
-(define-type check-types-sig (select check-types-types check-types-sig))
-
-(define make
-  (lambda ((values eval-values-sig) (tables tables-sig) (check-types check-types-sig))
-    (module
 ;; What it uses of the modules it is given.
 (define apply-val (with values apply-val))
 (define apply1 (with values apply1))

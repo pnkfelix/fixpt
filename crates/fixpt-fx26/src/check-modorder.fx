@@ -123,7 +123,8 @@
 
 ;; Whether `x` is a module as written: a `module` (or a `load-module`'s),
 ;; under any `plambda`, `proj`, `lambda` of no parameters or call of none;
-;; an earlier such item, of `early`; or a value of one, `(with m y)`. As
+;; an earlier such item, of `early`, or a file loaded (`k-shared-name?`); or
+;; a value of one, `(with m y)`. As
 ;; the Rust checker's `written_module`.
 (define k-written-module? (subr (maxeff kreads spin) (kx k-names) bool)
   (lambda (x early)
@@ -133,9 +134,10 @@
       (x-lambda (ps body a b) (and (null? ps) (k-written-module? body early)))
       (x-proj (body ds a b) (k-written-module? body early))
       (x-plambda (bs body a b) (k-written-module? body early))
-      (x-var (n a b) (k-has-name? early n))
+      (x-var (n a b) (or (k-has-name? early n) (k-shared-name? n)))
       (x-with (m body a b)
-        (and (k-has-name? early m) (tagcase body (x-var (n c d) #t) (else y #f))))
+        (and (or (k-has-name? early m) (k-shared-name? m))
+             (tagcase body (x-var (n c d) #t) (else y #f))))
       (else y #f))))
 ;; The names the module (its places `ps`) defines that a module as written
 ;; `x` names: of `(with m y)`, `m` only, `y` being `m`'s.

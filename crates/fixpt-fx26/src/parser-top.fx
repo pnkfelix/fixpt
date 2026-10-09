@@ -44,6 +44,8 @@
 (define t-define-generative (with parser-module t-define-generative))
 (define t-exp (with parser-module t-exp))
 (define p-ok (with parser-module p-ok))
+(define shared-taken (with parser-module shared-taken))
+(define shared-reset! (with parser-module shared-reset!))
 (define parse-exp (with parser-exps-module parse-exp))
 (define parse-rec-bindings (with parser-exps-module parse-rec-bindings))
 (define parse-define (with parser-exps-module parse-define))
@@ -141,12 +143,15 @@
   (lambda (xs)
     (if (null? xs)
         nil
-        (let* ((made (parse-made (car xs))) (rest (parse-tops (cdr xs))))
-          (append-tops made rest)))))
+        ;; Before each form, the hidden globals of the files it loads first
+        ;; (`parse-loaded`).
+        (let* ((made (parse-made (car xs))) (before (shared-taken)) (rest (parse-tops (cdr xs))))
+          (append-tops before (append-tops made rest))))))
 
 ;; The entry point: a program's forms, as read, to trees or an error. The
 ;; prompt catches every failure, but its tag is a global whose type names
 ;; `rp`, so the control effect stays in the type, as the reader's on `re` do;
 ;; `rp` is one of the regions this module is given, so that is still licensed.
 (define parse-program (subr (maxeff (read @globals) parses spin) (syns-a) presult)
-  (lambda (forms) (prompt parse-tag (p-ok (parse-tops forms)) (lambda (r) r))))
+  (lambda (forms)
+    (begin (shared-reset!) (prompt parse-tag (p-ok (parse-tops forms)) (lambda (r) r)))))
