@@ -9,7 +9,12 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; The checker, letrec: a group's types found and checked.
+  (let* (;; The checker, what tests prove: facts in the type of a test.
+         (check-test-facts
+          ((load-input "fx26:check-test-facts.fx")
+           check-infer-module check-types-module check-env-module check-terminate-module
+           check-print-module check-calls-module))
+         ;; The checker, letrec: a group's types found and checked.
          (check-letrec
           ((load-input "fx26:check-letrec.fx")
            check-types-module check-expect-module check-effects-module check-print-module
@@ -17,11 +22,11 @@
          ;; The checker, facts: what the compiler is told.
          (check-facts
           ((load-input "fx26:check-facts.fx")
-           check-env-module check-test-facts-module check-infer-module check-calls-module))
+           check-env-module check-test-facts check-infer-module check-calls-module))
          ;; The checker, synthesis: calls, their arguments and type binders.
          (check-synth
           ((load-input "fx26:check-synth.fx")
-           check-types-module check-test-facts-module check-resolve-module check-env-module
+           check-types-module check-test-facts check-resolve-module check-env-module
            check-infer-module check-facts check-print-module check-bounds-module
            check-expect-module check-errors-module check-effects-module check-mask-module
            check-unions-module check-terminate-module check-holds-module check-subtype-module
@@ -44,7 +49,7 @@
            check-types-module check-infer-module check-synth check-errors-module
            check-resolve-module check-env-module check-expect-module check-letrec
            check-dependent-module check-module-rules check-read-descs-module
-           check-proving-module check-test-facts-module check-close-module check-print-module
+           check-proving-module check-test-facts check-close-module check-print-module
            check-terminate-module check-modorder check-unions-module check-modules-module
            check-effects-module check-data-module check-read-module check-mask-module
            check-calls-module check-bounds-module check-holds-module check-subtype-module

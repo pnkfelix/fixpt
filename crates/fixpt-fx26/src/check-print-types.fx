@@ -74,4 +74,7 @@
             (val k-show-list
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
                        (k-ids k-printing)
-                       k-strings))))
+                       k-strings))
+            (val k-size-as-lit (subr pure (k-size) int))
+            (val k-size=? (subr (read @globals) (k-size k-size) bool))
+            (val k-size-add-scaled (subr (read @globals) (k-size k-size int) k-size))))
