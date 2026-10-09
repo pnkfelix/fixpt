@@ -866,6 +866,7 @@
            (defer (get k-defer-reruns))
            (users (if (or (null? olds) defer) (the k-def-list nil) (k-users-of ns)))
            (reset (set k-last-uses nil))
+           (kept (if (get k-show-lines) (k-keep-atree!) #u))
            (lines (k-top-lines form))
            (knot (k-no-reaching-itself form ns (not (null? olds))))
            (assigns (and (not (null? olds)) (k-fits-old? olds)))

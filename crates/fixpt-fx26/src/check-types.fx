@@ -280,8 +280,15 @@
       (ty-link (to) (if (null? to) id (k-resolve (car to))))
       (else x id))))
 (define k-get (subr (maxeff kreads spin) (int) k-ty) (lambda (id) (k-raw (k-resolve id))))
+;; How many links have been made from the types below `k-links-below`, those
+;; of the tree of names kept (`k-atree-now`): what one of them resolves to
+;; changes only with one. A type made after it is in no tree kept.
+(define k-links (ref int @t) (new 0))
+(define k-links-below (ref int @t) (new 0))
 (define k-set-link (subr kstate (int int) unit)
-  (lambda (slot to) (array-set! (get k-tys) slot (ty-link (cons to nil)))))
+  (lambda (slot to)
+    (begin (if (< slot (get k-links-below)) (set k-links (+ (get k-links) 1)) #u)
+           (array-set! (get k-tys) slot (ty-link (cons to nil))))))
 (define k-slot (subr (maxeff kstate spin) () int) (lambda () (k-ty-new (ty-link nil))))
 
 ;; Which types a walk has seen: a type is seen in walk `e` when its mark
@@ -544,6 +551,8 @@
 (define k-resolve (with check-types-module k-resolve))
 (define k-get (with check-types-module k-get))
 (define k-set-link (with check-types-module k-set-link))
+(define k-links (with check-types-module k-links))
+(define k-links-below (with check-types-module k-links-below))
 (define k-slot (with check-types-module k-slot))
 (define k-new-epoch (with check-types-module k-new-epoch))
 (define k-visit? (with check-types-module k-visit?))

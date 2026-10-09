@@ -1886,7 +1886,16 @@ Phase 1, the types out, one module at a time; phase 2, the conversion.
   shown) are large. No compile reads the lines, so only a driver that
   does makes them (`check-lines!`; `fixpt check`, the REPL, the agreement
   tests): compiling the front end is 170.5 M words, the FX check about
-  1.0 s, from 215.7 and 1.15 s before §68. Left, if `fixpt check` on the
-  front end matters: not showing hidden definitions, and a printer that
-  builds a type's text once rather than by appending (`k-show-ty`).
+  1.0 s, from 215.7 and 1.15 s before §68.
+- The printer, for the drivers that read lines (the user's, 2026-10-08:
+  "build text at most once"): `k-show-ty` puts a type's pieces on a list
+  and joins them once (`k-pieces-string`), where each node appended its
+  children's text again; a cycle's `(mu %d …)` is known from the depths
+  met again below, not by searching the text shown (`k-mentions-token?`,
+  gone); and the tree of the scope's `define-type` names is kept across
+  lines while the scope and what its types resolve to stay
+  (`k-atree-now`; `k-links` counts the links made from the types a kept
+  tree may hold), where it was made again for each line. With lines on
+  (`FIXPT_BENCH_LINES=1 fixpt bench --front-end`): 237.6 M words to 189.1
+  and the FX check 1265 ms to 1120; printing costs 18.6 M words, from 67.
 

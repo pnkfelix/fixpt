@@ -45,7 +45,8 @@ their bootstrap), once (about 10 s, most of it the lowered reader):
               has none, and for the front end)
   fx read     the reader written in FX-26 (lowered, as the REPL runs it)
   fx parse    the parser written in FX-26
-  fx check    the checker written in FX-26
+  fx check    the checker written in FX-26, making no line for each form
+              (`FIXPT_BENCH_LINES` set: making them, as `fixpt check` does)
   fx words    the compiler written in FX-26, register code included
   fx arm64    every word's cells to arm64, by `native.fx`
   fx M words  millions of words the `fx` phases allocated
@@ -530,8 +531,10 @@ fn compile_row(fx: &mut Fx26Session, name: &str, text: &str, runs: usize, native
         let (fx_parse, tops) = fx_phase(sc, r("fx parse"), |sc| fixpt_fx26::syn::parse_syns(sc, file, text, syns).map_err(msg))?;
         let standard = fixpt_fx26::syn::read_standard(sc).map_err(msg)?;
         let reader = |n: &str| format!("{}{n}", fixpt_fx26::session::READER_PREFIX);
-        // A compile reads the facts, not each form's line.
-        fixpt_fx26::syn::lines(sc, false).map_err(|e| e.to_string())?;
+        // A compile reads the facts, not each form's line; with
+        // `FIXPT_BENCH_LINES` set, the lines too, as `fixpt check` makes them.
+        let lines = std::env::var_os("FIXPT_BENCH_LINES").is_some();
+        fixpt_fx26::syn::lines(sc, lines).map_err(|e| e.to_string())?;
         let (fx_check, ()) = fx_phase(sc, r("fx check"), |sc| {
             let r = sc.call_global(&reader("check-program"), &[standard, tops]).map_err(|e| e.to_string())?;
             let tag = sc.view(|v| v.get(r).field(2).and_then(|t| t.symbol_name()).unwrap_or_default());
