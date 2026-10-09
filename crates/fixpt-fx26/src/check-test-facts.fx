@@ -10,6 +10,7 @@
        (check-infer-types (load-module "fx26:check-infer-types.fx"))
        (check-env-types (load-module "fx26:check-env-types.fx"))
        (check-terminate-types (load-module "fx26:check-terminate-types.fx"))
+       (check-sc-graphs-types (load-module "fx26:check-sc-graphs-types.fx"))
        (check-print-types (load-module "fx26:check-print-types.fx"))
        (check-calls-types (load-module "fx26:check-calls-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
@@ -18,7 +19,8 @@
            (check-env (select check-env-types check-env-sig))
            (check-terminate (select check-terminate-types check-terminate-sig))
            (check-print (select check-print-types check-print-sig))
-           (check-calls (select check-calls-types check-calls-sig)))
+           (check-calls (select check-calls-types check-calls-sig))
+           (check-sc-graphs (select check-sc-graphs-types check-sc-graphs-sig)))
     (module
 (define-type k-fact-list (select check-test-facts-types k-fact-list))
 (define-type k-branch-facts (select check-test-facts-types k-branch-facts))
@@ -58,7 +60,7 @@
 (define k-std-type (with check-types k-std-type))
 (define k-int (with check-env k-int))
 (define k-lookup (with check-env k-lookup))
-(define k-op-either? (with check-terminate k-op-either?))
+(define k-op-either? (with check-sc-graphs k-op-either?))
 (define k-size-add-scaled (with check-print k-size-add-scaled))
 (define k-size-as-lit (with check-print k-size-as-lit))
 (define k-size-lit (with check-print k-size-lit))

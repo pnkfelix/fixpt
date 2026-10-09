@@ -25,6 +25,7 @@
        (check-close-types (load-module "fx26:check-close-types.fx"))
        (check-print-types (load-module "fx26:check-print-types.fx"))
        (check-terminate-types (load-module "fx26:check-terminate-types.fx"))
+       (check-sc-graphs-types (load-module "fx26:check-sc-graphs-types.fx"))
        (check-unions-types (load-module "fx26:check-unions-types.fx"))
        (check-modules-types (load-module "fx26:check-modules-types.fx"))
        (check-effects-types (load-module "fx26:check-effects-types.fx"))
@@ -63,7 +64,8 @@
            (check-bounds (select check-bounds-types check-bounds-sig))
            (check-holds (select check-holds-types check-holds-sig))
            (check-subtype (select check-subtype-types check-subtype-sig))
-           (check-subst (select check-subst-types check-subst-sig)))
+           (check-subst (select check-subst-types check-subst-sig))
+           (check-sc-graphs (select check-sc-graphs-types check-sc-graphs-sig)))
     (module
 
 ;; The types it uses of the files before it.
@@ -327,8 +329,8 @@
 (define k-size-plus (with check-print k-size-plus))
 (define k-declaring (with check-terminate k-declaring))
 (define k-fail-not-lambda (with check-terminate k-fail-not-lambda))
-(define k-op-either? (with check-terminate k-op-either?))
-(define k-sc-two? (with check-terminate k-sc-two?))
+(define k-op-either? (with check-sc-graphs k-op-either?))
+(define k-sc-two? (with check-sc-graphs k-sc-two?))
 (define k-std? (with check-terminate k-std?))
 (define k-early-modules (with check-modorder k-early-modules))
 (define k-lambda-item? (with check-modorder k-lambda-item?))

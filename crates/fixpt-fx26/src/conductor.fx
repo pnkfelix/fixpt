@@ -13,7 +13,7 @@
          (check-test-facts
           ((load-input "fx26:check-test-facts.fx")
            check-infer-module check-types-module check-env-module check-terminate-module
-           check-print-module check-calls-module))
+           check-print-module check-calls-module check-sc-graphs-module))
          ;; The checker, letrec: a group's types found and checked.
          (check-letrec
           ((load-input "fx26:check-letrec.fx")
@@ -53,14 +53,14 @@
            check-terminate-module check-modorder check-unions-module check-modules-module
            check-effects-module check-data-module check-read-module check-mask-module
            check-calls-module check-bounds-module check-holds-module check-subtype-module
-           check-subst-module))
+           check-subst-module check-sc-graphs-module))
          ;; The checker, its proofs: lemmas proved.
          (check-proofs
           ((load-input "fx26:check-proofs.fx")
            check-types-module check-resolve-module check-env-module check-calls-module
            check-generative-module check-read-descs-module check-errors-module check-read-module
            check-subtype-module check-modules-module check-infer-module check-terminate-module
-           check-print-module tables parser-module))
+           check-print-module tables parser-module check-sc-graphs-module))
          ;; The checker, its programs: forms checked in order, under redefinition.
          (check-program
           ((load-input "fx26:check-program.fx")

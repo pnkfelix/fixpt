@@ -59,9 +59,6 @@
                                (write @t))
                        (symbol kx)
                        void))
-            (val k-sc-one? (subr (read @t) (kxs) bool))
-            (val k-op-either? (subr pure (string string string) bool))
-            (val k-sc-two? (subr (maxeff (read @globals) (read @t)) (kxs) bool))
             (val k-std? (subr (maxeff (read @globals) (read @t) spin) (symbol) bool))
             (val k-declaring
                  (subr (maxeff (alloc @t)
