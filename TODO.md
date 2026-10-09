@@ -2035,3 +2035,17 @@ side by side, as a `module`'s own definitions already are, an included
 name one more member of that set. If `extend` is ever n-ary,
 `(extend m1 m2 m3)` should be a left fold (the later wins), not "all at
 once", which would blur the two back together.
+
+## 70. Short names for the modules a file binds, after §68 phase 2 (the user's, 2026-10-09)
+
+Once every file is made by the conductor, a pass that alpha-renames the
+modules each file binds locally to succinct abbreviations: the types
+files its `let*` loads (`check-types-types`) and the modules its
+`lambda` is given (`check-subtype`, typed `check-subtype-sig`), wherever
+they are named in the file (`(select check-types-types k-map)`,
+`(with check-subtype k-subtype)`). Today each is its file's full name,
+which makes the import blocks long and wide. Mechanical, a commit for the
+pass; the conductor's own names are untouched (they are its bindings, not
+the file's). To decide with it: one abbreviation per module for every
+file (so `ct` means the same everywhere), and how it sits with §69,
+which may remove many of these names outright, so perhaps after §69.
