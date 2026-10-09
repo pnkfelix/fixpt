@@ -4,13 +4,27 @@
 ;;; `compile-lift.fx`; `compile-exps.fx` uses it (split from that file,
 ;;; `TODO.md` §68).
 
+;; Its types, those it uses of the files before it, and the signatures of
+;; what it is given.
 ;; Its types (`compile-exps-types.fx`, its file's after it), loaded before the
 ;; module so that they are not among its values; the module names what it
 ;; uses of them.
-(define compile-exps-types (load-module "fx26:compile-exps-types.fx"))
-;; A module (`TODO.md` §34: the front end into modules, a file at a time);
-;; what other files use re-exported after it.
-(define compile-state-module (module
+(let* ((compile-exps-types (load-module "fx26:compile-exps-types.fx"))
+       (compile-types (load-module "fx26:compile-types.fx"))
+       (parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
+       (reader-types ((proj (load-module "fx26:eager-reader-types.fx") @s @e @m @c)))
+       (check-types-types (load-module "fx26:check-types-types.fx"))
+       (compile-lift-types (load-module "fx26:compile-lift-types.fx"))
+       (layout-types (load-module "fx26:layout-types.fx"))
+       (check-resolve-types (load-module "fx26:check-resolve-types.fx"))
+       (check-program-types (load-module "fx26:check-program-types.fx")))
+  ;; What it is given: the modules of the files before it that it uses.
+  (lambda ((compile (select compile-types compile-sig))
+           (compile-lift (select compile-lift-types compile-lift-sig))
+           (layout (select layout-types layout-sig))
+           (check-resolve (select check-resolve-types check-resolve-sig))
+           (check-program (select check-program-types check-program-sig)))
+    (module
 (define-type c-inlinables (select compile-exps-types c-inlinables))
 (define-type c-mvals (select compile-exps-types c-mvals))
 (define-type c-mslots (select compile-exps-types c-mslots))
@@ -20,6 +34,83 @@
 (define-type c-spec (select compile-exps-types c-spec))
 (define-type c-copy-twin (select compile-exps-types c-copy-twin))
 (define-type c-twin (select compile-exps-types c-twin))
+;; The types it uses of the files before it.
+(define at-free (with compile-types at-free))
+(define at-global (with compile-types at-global))
+(define at-lifted (with compile-types at-lifted))
+(define at-loop (with compile-types at-loop))
+(define at-pending (with compile-types at-pending))
+(define at-slot (with compile-types at-slot))
+(define-effect c-builds (select compile-types c-builds))
+(define-effect c-emits (select compile-types c-emits))
+(define-type c-params (select compile-types c-params))
+(define-type c-this (select compile-types c-this))
+(define-effect c-walks (select compile-types c-walks))
+(define-type cenv (select compile-types cenv))
+(define-type code (select compile-types code))
+(define-effect compiles (select compile-types compiles))
+(define-type exps (select compile-types exps))
+(define-type items (select compile-types items))
+(define-type loc (select compile-types loc))
+(define-type patches (select compile-types patches))
+(define-type syms (select compile-types syms))
+(define e-app (with parser-types e-app))
+(define e-bool (with parser-types e-bool))
+(define e-char (with parser-types e-char))
+(define e-int (with parser-types e-int))
+(define e-lambda (with parser-types e-lambda))
+(define e-plambda (with parser-types e-plambda))
+(define e-rlambda (with parser-types e-rlambda))
+(define e-sym (with parser-types e-sym))
+(define e-the (with parser-types e-the))
+(define e-var (with parser-types e-var))
+(define e-with (with parser-types e-with))
+(define-type exp (select parser-types exp))
+(define-type mod-items (select parser-types mod-items))
+(define-type names (select parser-types names))
+(define-type word (select reader-types word))
+(define-type k-ids (select check-types-types k-ids))
+;; What it uses of the modules it is given.
+(define c-bind-params (with compile c-bind-params))
+(define c-converter (with compile c-converter))
+(define c-count-exps (with compile c-count-exps))
+(define c-extend (with compile c-extend))
+(define c-fail (with compile c-fail))
+(define c-field (with compile c-field))
+(define c-field-set (with compile c-field-set))
+(define c-find (with compile c-find))
+(define c-free (with compile c-free))
+(define c-genv-now (with compile c-genv-now))
+(define c-global? (with compile c-global?))
+(define c-has-param? (with compile c-has-param?))
+(define c-lambda-of (with compile c-lambda-of))
+(define c-lit (with compile c-lit))
+(define c-load (with compile c-load))
+(define c-loops-only (with compile c-loops-only))
+(define c-member? (with compile c-member?))
+(define c-op (with compile c-op))
+(define c-op1 (with compile c-op1))
+(define c-place-name (with compile c-place-name))
+(define c-registers (with compile c-registers))
+(define c-this-added (with compile c-this-added))
+(define c-this-loc (with compile c-this-loc))
+(define c-this-loc? (with compile c-this-loc?))
+(define c-this-name (with compile c-this-name))
+(define c-this-params (with compile c-this-params))
+(define c-this-start (with compile c-this-start))
+(define c-where (with compile c-where))
+(define c-lambda-captured (with compile-lift c-lambda-captured))
+(define c-lifted-entries (with compile-lift c-lifted-entries))
+(define cellular-closure-free0 (with layout cellular-closure-free0))
+(define routine-drop (with layout routine-drop))
+(define routine-free (with layout routine-free))
+(define routine-slot (with layout routine-slot))
+(define routine-slot! (with layout routine-slot!))
+(define routine-tcall (with layout routine-tcall))
+(define routine-ttailcall (with layout routine-ttailcall))
+(define exp-end (with check-resolve exp-end))
+(define exp-start (with check-resolve exp-start))
+(define k-syms=? (with check-program k-syms=?))
 
 ;; Each captured name's value, as the closure will hold it, free value `j`
 ;; on; a sibling not made yet is a placeholder, and one of the patches.
@@ -193,7 +284,6 @@
                 #u)
             (c-give-waiting (cdr ws) d c))))))
 
-
 ;; The words of the lambdas the body being compiled makes, as its stack
 ;; code made them; and those of the body whose register code is being made,
 ;; which uses them rather than making each again (and each of theirs, twice
@@ -206,8 +296,6 @@
 ;; code's): where register code compiles a body other than the lambda's
 ;; own, a join point's, it finds the words made in it here.
 (define c-form-made (ref (listof c-made @k) @k) (new nil))
-
-
 
 ;; A lambda's own name, unless a parameter of the same name hides it.
 (define c-own-of (subr c-builds (c-params syms) syms)
@@ -307,7 +395,6 @@
       (if (null? named)
           (string-append base (string-append "@" (c-place-name (exp-start body))))
           (car named)))))
-
 
 ;; While a copy's register code is made: which (one, or none).
 (define c-spec-now (ref (listof c-spec @k) @k) (new nil))
@@ -421,50 +508,4 @@
         e
         (begin (c-load c l) (c-field c (+ (car ps) 2))
                (let ((inner (c-extend (car ns) (at-slot (+ depth k)) e)))
-                 (c-with-fields (cdr ns) (cdr ps) l inner depth (+ k 1) c))))))))
-
-(define c-bind-name (with compile-state-module c-bind-name))
-(define c-collecting (with compile-state-module c-collecting))
-(define c-copy-twin (with compile-state-module c-copy-twin))
-(define c-defining (with compile-state-module c-defining))
-(define c-drops (with compile-state-module c-drops))
-(define c-form-made (with compile-state-module c-form-made))
-(define c-fx-name (with compile-state-module c-fx-name))
-(define c-give-waiting (with compile-state-module c-give-waiting))
-(define c-last-word (with compile-state-module c-last-word))
-(define c-loop-stores (with compile-state-module c-loop-stores))
-(define c-made-now (with compile-state-module c-made-now))
-(define c-made-reuse (with compile-state-module c-made-reuse))
-(define c-made-word (with compile-state-module c-made-word))
-(define c-module-members (with compile-state-module c-module-members))
-(define c-module-own (with compile-state-module c-module-own))
-(define c-module-slots (with compile-state-module c-module-slots))
-(define c-module-values (with compile-state-module c-module-values))
-(define c-names-any? (with compile-state-module c-names-any?))
-(define c-note-member! (with compile-state-module c-note-member!))
-(define c-own-now (with compile-state-module c-own-now))
-(define c-own-of (with compile-state-module c-own-of))
-(define c-own-scope (with compile-state-module c-own-scope))
-(define c-prev-word (with compile-state-module c-prev-word))
-(define c-push-all (with compile-state-module c-push-all))
-(define c-quote-now (with compile-state-module c-quote-now))
-(define c-quoted-cell (with compile-state-module c-quoted-cell))
-(define c-r-plan-ctx (with compile-state-module c-r-plan-ctx))
-(define c-register-twin! (with compile-state-module c-register-twin!))
-(define c-reshape-fields (with compile-state-module c-reshape-fields))
-(define c-scope-name (with compile-state-module c-scope-name))
-(define c-self-call? (with compile-state-module c-self-call?))
-(define c-slots-load (with compile-state-module c-slots-load))
-(define c-spec-now (with compile-state-module c-spec-now))
-(define c-standard-name (with compile-state-module c-standard-name))
-(define c-take (with compile-state-module c-take))
-(define c-this-enter! (with compile-state-module c-this-enter!))
-(define c-this-of (with compile-state-module c-this-of))
-(define c-this-saved (with compile-state-module c-this-saved))
-(define c-twins (with compile-state-module c-twins))
-(define c-typed-call (with compile-state-module c-typed-call))
-(define c-waits-onto (with compile-state-module c-waits-onto))
-(define c-with-fields (with compile-state-module c-with-fields))
-(define c-word-base (with compile-state-module c-word-base))
-(define c-word-name (with compile-state-module c-word-name))
-(define c-word-symbol (with compile-state-module c-word-symbol))
+                 (c-with-fields (cdr ns) (cdr ps) l inner depth (+ k 1) c)))))))))

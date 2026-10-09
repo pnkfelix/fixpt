@@ -338,4 +338,13 @@
                                spin)
                        ((listof patches @k) int int code)
                        unit))
-            (val c-count-letrec (subr (read @globals) (c-recs) int))))
+            (val c-count-letrec (subr (read @globals) (c-recs) int))
+            (val c-converter (subr (read @globals) (string symbol) symbol))
+            (val c-field-set
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                       (code int)
+                       unit))
+            (val c-this-name (ref symbol @k))
+            (val c-this-loc (ref loc @k))
+            (val c-has-param?
+                 (subr (maxeff (alloc @k) (read @globals) (read @k)) (c-params symbol) bool))))

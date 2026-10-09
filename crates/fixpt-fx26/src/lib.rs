@@ -151,6 +151,9 @@ pub const COMPILE_STATE_TYPES: &str = include_str!("compile-state-types.fx");
 /// `compile-exps.fx`: a `load-input` file, which the conductor applies (`TODO.md` §68).
 pub const COMPILE_EXPS: &str = include_str!("compile-exps.fx");
 
+/// `compile-state.fx`: a `load-input` file, which the conductor applies (`TODO.md` §68).
+pub const COMPILE_STATE: &str = include_str!("compile-state.fx");
+
 /// Hash tables' types: a module file of no state (`TODO.md` §68).
 pub const TABLE_TYPES: &str = include_str!("table-types.fx");
 
@@ -195,9 +198,8 @@ pub const COMPILER: &str = include_str!("compile.fx");
 /// Its other parts, in order: lambda lifting and the standard operations;
 /// expressions; the middle phase's plan of a form. Then the register
 /// compiler ([`REGCODE`]), and after it [`COMPILER_DRIVER`].
-pub const COMPILER_PARTS: [(&str, &str); 2] = [
+pub const COMPILER_PARTS: [(&str, &str); 1] = [
     ("compile-lift.fx", include_str!("compile-lift.fx")),
-    ("compile-state.fx", include_str!("compile-state.fx")),
 ];
 
 /// The compiler's last parts written as top-level files, after the register
@@ -292,7 +294,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 57] = [
+pub const FRONT_END_MODULES: [(&str, &str); 58] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("table-types.fx", TABLE_TYPES),
     ("compile-programs-types.fx", COMPILE_PROGRAMS_TYPES),
@@ -350,6 +352,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 57] = [
     ("compile-plan.fx", COMPILE_PLAN),
     ("compile-state-types.fx", COMPILE_STATE_TYPES),
     ("compile-exps.fx", COMPILE_EXPS),
+    ("compile-state.fx", COMPILE_STATE),
 ];
 
 /// A `load-module` path naming a module file built in, in
@@ -366,7 +369,7 @@ pub fn built_in_module(path: &str) -> Option<&'static str> {
 /// The front end's files, by name, in the order [`front_end`] joins them;
 /// [`bootstrap_program`] puts `bootstrap.fx` after them. The module files
 /// built in, [`FRONT_END_MODULES`], are loaded by the first.
-pub const FRONT_END_FILES: [(&str, &str); 42] = [
+pub const FRONT_END_FILES: [(&str, &str); 41] = [
     ("reader.fx", READER),
     ("table.fx", TABLE),
     CHECKER_FILES[0],
@@ -407,7 +410,6 @@ pub const FRONT_END_FILES: [(&str, &str); 42] = [
     ("standard.fx", STANDARD_OPS),
     ("compile.fx", COMPILER),
     COMPILER_PARTS[0],
-    COMPILER_PARTS[1],
     ("conductor.fx", CONDUCTOR),
 ];
 
