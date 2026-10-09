@@ -148,10 +148,11 @@ pub const COMPILER_PARTS: [(&str, &str); 3] = [
 ];
 
 /// The compiler's last parts, after the register compiler, which they call
-/// (`docs/research/compiler-middle-phase.md`, step 4): the twin phase; and
-/// inlining and programs, the loop over a program's forms.
-pub const COMPILER_DRIVER: [(&str, &str); 2] = [
+/// (`docs/research/compiler-middle-phase.md`, step 4): the twin phase;
+/// inlining; and programs, the loop over a program's forms.
+pub const COMPILER_DRIVER: [(&str, &str); 3] = [
     ("compile-twins.fx", include_str!("compile-twins.fx")),
+    ("compile-inline.fx", include_str!("compile-inline.fx")),
     ("compile-programs.fx", include_str!("compile-programs.fx")),
 ];
 
@@ -300,7 +301,7 @@ pub fn built_in_module(path: &str) -> Option<&'static str> {
 /// The front end's files, by name, in the order [`front_end`] joins them;
 /// [`bootstrap_program`] puts `bootstrap.fx` after them. The module files
 /// built in, [`FRONT_END_MODULES`], are loaded by the first.
-pub const FRONT_END_FILES: [(&str, &str); 51] = [
+pub const FRONT_END_FILES: [(&str, &str); 52] = [
     ("reader.fx", READER),
     ("table.fx", TABLE),
     CHECKER_FILES[0],
@@ -351,6 +352,7 @@ pub const FRONT_END_FILES: [(&str, &str); 51] = [
     REGCODE_PARTS[4],
     COMPILER_DRIVER[0],
     COMPILER_DRIVER[1],
+    COMPILER_DRIVER[2],
     ("conductor.fx", CONDUCTOR),
 ];
 
