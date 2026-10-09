@@ -5,9 +5,10 @@
 
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
-(define check-holds-module (module
-;; Its types (`check-holds-types.fx`), and the names it uses of them.
+;; Its types (`check-holds-types.fx`), loaded before the module so that they are not
+;; among its values; the module names what it uses of them.
 (define check-holds-types (load-module "fx26:check-holds-types.fx"))
+(define check-holds-module (module
 (define-type k-kept (select check-holds-types k-kept))
 (define-type k-knot (select check-holds-types k-knot))
 (define-type k-kept-seen (select check-holds-types k-kept-seen))

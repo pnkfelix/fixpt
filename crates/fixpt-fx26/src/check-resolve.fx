@@ -8,9 +8,10 @@
 
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
-(define check-resolve-module (module
-;; Its types (`check-resolve-types.fx`), and the names it uses of them.
+;; Its types (`check-resolve-types.fx`), loaded before the module so that they are not
+;; among its values; the module names what it uses of them.
 (define check-resolve-types (load-module "fx26:check-resolve-types.fx"))
+(define check-resolve-module (module
 (define-type k-typed-params (select check-resolve-types k-typed-params))
 (define-type k-letrec-bs (select check-resolve-types k-letrec-bs))
 (define-type k-let-bs (select check-resolve-types k-let-bs))

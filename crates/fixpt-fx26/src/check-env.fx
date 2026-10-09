@@ -5,9 +5,10 @@
 
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
-(define check-env-module (module
-;; Its types (`check-env-types.fx`), and the names it uses of them.
+;; Its types (`check-env-types.fx`), loaded before the module so that they are not
+;; among its values; the module names what it uses of them.
 (define check-env-types (load-module "fx26:check-env-types.fx"))
+(define check-env-module (module
 (define-type k-bindings (select check-env-types k-bindings))
 (define-type k-stack (select check-env-types k-stack))
 (define-type k-flags (select check-env-types k-flags))

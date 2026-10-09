@@ -5,9 +5,10 @@
 
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
-(define check-subst-module (module
-;; Its types (`check-subst-types.fx`), and the names it uses of them.
+;; Its types (`check-subst-types.fx`), loaded before the module so that they are not
+;; among its values; the module names what it uses of them.
 (define check-subst-types (load-module "fx26:check-subst-types.fx"))
+(define check-subst-module (module
 (define-type k-pairs (select check-subst-types k-pairs))
 (define-type exp-params (select check-subst-types exp-params))
 (define-effect kmakes (select check-subst-types kmakes))

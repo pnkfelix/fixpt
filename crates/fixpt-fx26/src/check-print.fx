@@ -7,9 +7,10 @@
 
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
-(define check-print-module (module
-;; Its types (`check-print-types.fx`), and the names it uses of them.
+;; Its types (`check-print-types.fx`), loaded before the module so that they are not
+;; among its values; the module names what it uses of them.
 (define check-print-types (load-module "fx26:check-print-types.fx"))
+(define check-print-module (module
 (define-type k-atree (select check-print-types k-atree))
 (define a-leaf (with check-print-types a-leaf))
 (define a-node (with check-print-types a-node))

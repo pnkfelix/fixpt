@@ -12,10 +12,11 @@
 ;;;   (the (table symbol int @r) (make-table symbol-hash symbol=?))
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time),
 ;; its types and procedures inside, what other files use re-exported after.
+;; Its types (`table-types.fx`), loaded before the module so that they are
+;; not among its values; the module names what it uses of them.
+(define table-types (load-module "fx26:table-types.fx"))
 (define tables
   (module
-    ;; Its types (`table-types.fx`).
-    (define table-types (load-module "fx26:table-types.fx"))
     (define-type bucket (select table-types bucket))
     (define-type bucket-array (select table-types bucket-array))
     (define-type entry (select table-types entry))

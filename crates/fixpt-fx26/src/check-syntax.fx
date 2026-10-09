@@ -6,9 +6,10 @@
 
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
-(define check-syntax-module (module
-;; Its types (`check-syntax-types.fx`), and the names it uses of them.
+;; Its types (`check-syntax-types.fx`), loaded before the module so that they are not
+;; among its values; the module names what it uses of them.
 (define check-syntax-types (load-module "fx26:check-syntax-types.fx"))
+(define check-syntax-module (module
 (define-type k-slots (select check-syntax-types k-slots))
 (define-type k-family-knot (select check-syntax-types k-family-knot))
 (define-type k-ahead-slots (select check-syntax-types k-ahead-slots))

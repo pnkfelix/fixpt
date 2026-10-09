@@ -1851,4 +1851,17 @@ Phase 1, the types out, one module at a time; phase 2, the conversion.
     is not known code, so a call of one may `spin` where its own module's
     would not. Later, perhaps: an import of a known procedure from a
     module as written is known.
+- Cost (2026-10-08, `fixpt bench --front-end`, fx M words, the
+  deterministic measure; times swing with the machine's load): 215 before
+  §68, 257 after the types files, 322 after the evaluator. Most of it
+  printing: the FX checker shows each top-level form's type, building the
+  string by appending (about 40 words a character), and module types had
+  grown, holding their types modules as values and the evaluator's
+  intermediate modules being bound at top level (2.1 MB shown). Now each
+  types file is loaded just before its module, not inside it, and the
+  conductor makes its modules in one `let*`, naming only what Rust calls:
+  1.3 MB shown, 297 M words. Left: every load of a types file is checked
+  again, and compiled again (`check-types-types.fx` 12 times, nesting the
+  parser's and the reader's): next, one check and one compiled body per
+  stateless file, shared by its loads.
 

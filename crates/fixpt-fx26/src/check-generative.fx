@@ -6,9 +6,10 @@
 
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
-(define check-generative-module (module
-;; Its types (`check-generative-types.fx`), and the names it uses of them.
+;; Its types (`check-generative-types.fx`), loaded before the module so that they are not
+;; among its values; the module names what it uses of them.
 (define check-generative-types (load-module "fx26:check-generative-types.fx"))
+(define check-generative-module (module
 (define-type k-seen-pol (select check-generative-types k-seen-pol))
 (define-type k-pols-found (select check-generative-types k-pols-found))
 

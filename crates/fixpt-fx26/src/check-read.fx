@@ -8,9 +8,10 @@
 
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
-(define check-read-module (module
-;; Its types (`check-read-types.fx`), and the names it uses of them.
+;; Its types (`check-read-types.fx`), loaded before the module so that they are not
+;; among its values; the module names what it uses of them.
 (define check-read-types (load-module "fx26:check-read-types.fx"))
+(define check-read-module (module
 (define-type k-syns (select check-read-types k-syns))
 (define-type k-arrow-syns (select check-read-types k-arrow-syns))
 (define-type k-params (select check-read-types k-params))

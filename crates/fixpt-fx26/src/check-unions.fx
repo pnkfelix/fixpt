@@ -6,9 +6,10 @@
 
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
-(define check-unions-module (module
-;; Its types (`check-unions-types.fx`), and the names it uses of them.
+;; Its types (`check-unions-types.fx`), loaded before the module so that they are not
+;; among its values; the module names what it uses of them.
 (define check-unions-types (load-module "fx26:check-unions-types.fx"))
+(define check-unions-module (module
 (define-type k-pending (select check-unions-types k-pending))
 (define-type k-sides (select check-unions-types k-sides))
 (define-type k-split (select check-unions-types k-split))
