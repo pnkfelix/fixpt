@@ -49,6 +49,8 @@
 (define-type k-eff (select check-types-types k-eff))
 ;; The types it names, from the files that define them.
 (define-type k-conv (select check-types-types k-conv))
+;; The types it names, from the files that define them.
+(define-type k-map (select check-types-types k-map))
 (define-type check-print-sig
   (moduleof (val k-globals-atom? (subr (read @globals) (k-atom) bool))
             (val k-show-effect (subr (maxeff (read @globals) (read @t)) (k-eff) string))
@@ -61,4 +63,15 @@
             (val k-conv=? (subr (read @globals) (k-conv k-conv) bool))
             (val k-size-plus (subr (read @globals) (k-size int) k-size))
             (val k-size-nonneg? (subr (maxeff (read @globals) (read @t)) (k-size) bool))
-            (val k-dvar-string (subr (maxeff (read @globals) (read @t)) (int) string))))
+            (val k-dvar-string (subr (maxeff (read @globals) (read @t)) (int) string))
+            (val k-conv-default (ref k-conv @t))
+            (val k-size-lit (subr (read @globals) (int) k-size))
+            (val k-map-find (subr (maxeff (read @globals) (read @t)) (k-map int) k-map))
+            (val k-size-facts (ref (listof k-size-fact acyclic) @t))
+            (val k-size-eq? (subr (maxeff (read @globals) (read @t)) (k-size k-size) bool))
+            (val k-size-le? (subr (maxeff (read @globals) (read @t)) (k-size k-size) bool))
+            (val k-printing-none k-printing)
+            (val k-show-list
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
+                       (k-ids k-printing)
+                       k-strings))))

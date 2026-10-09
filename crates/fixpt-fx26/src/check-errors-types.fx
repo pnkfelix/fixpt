@@ -146,4 +146,6 @@
             (val k-handler-gives
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
                        (int int string)
-                       string))))
+                       string))
+            (val k-handler-wants
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int int) string))))

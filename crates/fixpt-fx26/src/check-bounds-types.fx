@@ -27,4 +27,19 @@
 ;; What its clients use of it (`check-rules.fx`).
 (define-type check-bounds-sig
   (moduleof (val k-new-bounded-solved
-                 (subr (maxeff (alloc @t) (read @t) (write @t)) () (ref k-map @t)))))
+                 (subr (maxeff (alloc @t) (read @t) (write @t)) () (ref k-map @t)))
+            (val k-drop-bounds
+                 (subr (maxeff (read @t) (write @t) spin) ((ref k-map @t) int) int))
+            (val k-map-unsettled
+                 (subr (maxeff (alloc @t)
+                               (read (globals dt k-subtype))
+                               (read @globals)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       ((ref k-map @t) k-map bool)
+                       k-map))
+            (val k-from-above
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (k-unifying)
+                       unit))))

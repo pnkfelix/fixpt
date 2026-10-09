@@ -72,4 +72,5 @@
                                (write @t)
                                spin)
                        (k-thunk int int symbol int)
-                       k-te))))
+                       k-te))
+            (val k-nat-ty? (subr (maxeff (read @globals) (read @t) spin) (int) bool))))

@@ -19,4 +19,8 @@
 ;; What its clients use of it (`check-rules.fx`).
 (define-type check-unions-sig
   (moduleof (val k-false-expected?
-                 (subr (maxeff (read @globals) (read @t) spin) (int) bool))))
+                 (subr (maxeff (read @globals) (read @t) spin) (int) bool))
+            (val k-narrowed-by
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (int int)
+                       k-split))))

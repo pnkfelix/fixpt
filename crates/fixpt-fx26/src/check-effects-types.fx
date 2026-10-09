@@ -19,4 +19,5 @@
             (val k-union
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
                        (k-eff k-eff)
-                       k-eff))))
+                       k-eff))
+            (val k-region=? (subr (maxeff (read @globals) spin) (k-region k-region) bool))))

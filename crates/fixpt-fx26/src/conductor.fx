@@ -9,7 +9,15 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; The checker, a module's order: its items as a letrec*, used only once made.
+  (let* (;; The checker, synthesis: calls, their arguments and type binders.
+         (check-synth
+          ((load-input "fx26:check-synth.fx")
+           check-types-module check-test-facts-module check-resolve-module check-env-module
+           check-infer-module test-facts check-print-module check-bounds-module
+           check-expect-module check-errors-module check-effects-module check-mask-module
+           check-unions-module check-terminate-module check-holds-module check-subtype-module
+           check-calls-module check-subst-module))
+         ;; The checker, a module's order: its items as a letrec*, used only once made.
          (check-modorder
           ((load-input "fx26:check-modorder.fx")
            check-types-module check-resolve-module check-errors-module check-env-module
@@ -24,7 +32,7 @@
          ;; The checker, its rules: the one recursive group over expressions.
          (check-rules
           ((load-input "fx26:check-rules.fx")
-           check-types-module check-infer-module check-synth-module check-errors-module
+           check-types-module check-infer-module check-synth check-errors-module
            check-resolve-module check-env-module check-expect-module check-letrec-module
            check-dependent-module check-module-rules check-read-descs-module
            check-proving-module check-test-facts-module check-close-module check-print-module
@@ -47,7 +55,7 @@
            check-read-descs-module check-resolve-module check-errors-module
            check-terminate-module check-print-module check-letrec-module check-read-module
            check-expect-module check-modules-module check-modorder check-subst-module
-           check-synth-module check-module-rules check-subtype-module parser-module))
+           check-synth check-module-rules check-subtype-module parser-module))
          ;; The object layout, generated from the heap's table.
          (layout (load-module "fx26:layout.fx"))
          ;; The standard operations, generated from the lowering's table.

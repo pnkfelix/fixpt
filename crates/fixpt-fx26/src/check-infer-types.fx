@@ -30,6 +30,10 @@
 (define-type k-ty (select check-types-types k-ty))
 (define-type kx (select check-types-types kx))
 (define-type kxs (select check-types-types kxs))
+;; The types it names, from the files that define them.
+(define-type k-named (select check-types-types k-named))
+(define check-subtype-types (load-module "fx26:check-subtype-types.fx"))
+(define-type k-trail (select check-subtype-types k-trail))
 (define-type check-infer-sig
   (moduleof (val k-same-labels?
                  (subr (maxeff (read @globals) (read @t)) (k-let-bs k-parts) bool))
@@ -130,4 +134,56 @@
             (val k-reaches-only?
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (kx kx k-region)
-                       bool))))
+                       bool))
+            (val k-fin-region (subr (read @globals) (k-region) k-region))
+            (val k-binding-depth
+                 (subr (maxeff (read @globals) (read @t) spin) (symbol) int))
+            (val k-certified-has?
+                 (subr (maxeff (read @globals) (read @t)) (k-named symbol int) bool))
+            (val k-sc-one-arg? (subr (read @t) (kxs) bool))
+            (val k-check-bounds
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (k-binders k-map int int)
+                       unit))
+            (val k-check-finite-sizes
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (k-binders k-map int int int)
+                       unit))
+            (val k-finish
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (k-binders k-solved int int int)
+                       k-map))
+            (val k-unify
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (int int k-binders k-solved k-trail)
+                       unit))
+            (val k-list-of-any?
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (int)
+                       bool))
+            (val k-upper-bound
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (k-ids k-ids)
+                       int))
+            (val k-part-names
+                 (subr (maxeff (alloc @t) (read @globals) (read @t))
+                       (k-parts)
+                       (listof string acyclic)))))

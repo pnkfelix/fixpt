@@ -21,6 +21,10 @@
 (define-type k-saying (select check-subtype-types k-saying))
 (define-type k-te (select check-types-types k-te))
 (define-type k-typed-params (select check-resolve-types k-typed-params))
+;; The types it names, from the files that define them.
+(define-type k-binders (select check-types-types k-binders))
+(define-type k-descs (select check-types-types k-descs))
+(define-type k-map (select check-types-types k-map))
 (define-type check-expect-sig
   (moduleof (val k-lambda? (subr (read @globals) (kx) bool))
             (val k-rewriting
@@ -97,4 +101,14 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t)) (k-bindings) k-ids))
             (val k-some-untyped?
                  (subr (maxeff (read @globals) (read @t)) (k-typed-params) bool))
-            (val k-needs-telling? (subr (maxeff (read @globals) (read @t)) (kx) bool))))
+            (val k-needs-telling? (subr (maxeff (read @globals) (read @t)) (kx) bool))
+            (val k-proj-map
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (k-binders k-descs int int)
+                       k-map))))

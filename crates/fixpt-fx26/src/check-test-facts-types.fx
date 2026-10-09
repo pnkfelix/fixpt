@@ -26,6 +26,8 @@
 ;; What its clients use of it (`check-rules.fx`).
 ;; The types it names, from the files that define them.
 (define-type kx (select check-types-types kx))
+;; The types it names, from the files that define them.
+(define-type k-named (select check-types-types k-named))
 (define-type check-test-facts-sig
   (moduleof (val k-size-any? (subr pure (k-size) bool))
             (val k-length-arg
@@ -41,4 +43,11 @@
             (val k-nat-arith-size
                  (subr (maxeff (read @globals) (read @t))
                        (string k-maybe-size k-maybe-size)
-                       k-maybe-size))))
+                       k-maybe-size))
+            (val k-latent-props
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (kx) k-latent))
+            (val k-arg-at (subr (read @globals) (kxs int) kxs))
+            (val k-latent-cert
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (kx int) k-named))
+            (val k-length-test
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (kx) k-cert-lens))))

@@ -293,4 +293,12 @@
    (val k-written (ref k-ids @t))
    (val k-std-type (subr (maxeff (read @globals) (read @t)) (symbol) int))
    (val k-std-binding? (subr (maxeff (read @globals) (read @t)) (symbol int) bool))
-   (val k-closure-depth (ref int @t))))
+   (val k-closure-depth (ref int @t))
+   (val k-set-link
+        (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t)) (int int) unit))
+   (val k-slot (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) () int))
+   (val k-narrowed (ref k-narrows @t))
+   (val k-narrows (ref int @t))
+   (val k-binder-has? (subr (maxeff (read @globals) (read @t)) (k-binders int) bool))
+   (val k-path-narrowed (ref k-path-facts @t))
+   (val k-dvar-name (subr (maxeff (read @globals) (read @t)) (int) symbol))))
