@@ -4,6 +4,9 @@
 
 ;; The types these use, from the files that define them.
 (define check-types-types (load-module "fx26:check-types-types.fx"))
+(define-type k-strings (select check-types-types k-strings))
+(define check-env-types (load-module "fx26:check-env-types.fx"))
+(define-type k-scope (select check-env-types k-scope))
 (define-type k-ids (select check-types-types k-ids))
 (define-type k-parts (select check-types-types k-parts))
 (define-type k-size (select check-types-types k-size))
@@ -29,3 +32,11 @@
 (define-type k-printing (productof (1 k-ids) (2 k-parts) (3 k-atrees)))
 ;; `(which P …)`, each `(shape i shape)` or `(not (shape i shape))`.
 (define-effect kshows (maxeff (read @globals) (read @t) (alloc @t) spin))
+
+;; What a type is shown as so far: its pieces, the last first, joined
+;; once, at the end (`k-pieces-string`), so that each character is written
+;; once, not again at each node above it, as appending did; the depths of
+;; the nodes met again below (`%d`), each to be written `(mu %d …)`; and how
+;; many pieces there are.
+(define-type k-shown (productof (1 k-strings) (2 k-ids) (3 int)))
+(define-type k-atree-of-scope (productof (1 k-scope) (2 int) (3 k-atree)))

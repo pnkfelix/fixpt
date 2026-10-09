@@ -7,14 +7,16 @@
 ;;; constrains is `pure`; a region binder nothing constrains is a fresh
 ;;; region.
 
+;; Its types (`check-infer-types.fx`), loaded before the module so that they are
+;; not among its values; the module names what it uses of them.
+(define check-infer-types (load-module "fx26:check-infer-types.fx"))
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define check-infer-module (module
-(define-type k-solved (ref k-map @t))
-;; Binders, and the type under them.
-(define-type k-bound-body (productof (1 k-binders) (2 int)))
-;; A count of such occurrences, and of parameters sized by `v` alone.
-(define-type k-counts (productof (1 int) (2 int)))
+(define-type k-solved (select check-infer-types k-solved))
+(define-type k-bound-body (select check-infer-types k-bound-body))
+(define-type k-counts (select check-infer-types k-counts))
+
 (define k-append-binders (subr kmakes (k-binders k-binders) k-binders)
   (lambda (xs ys) (if (null? xs) ys (cons (car xs) (k-append-binders (cdr xs) ys)))))
 (define k-binders-from (subr (maxeff kmakes spin) (int k-binders) k-bound-body)

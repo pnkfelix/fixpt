@@ -2,12 +2,18 @@
 ;;; `if` on a comparison, a `null?` or a length (`sizes.rs`).
 ;;; Part of the checker, `check-types.fx` first (PLAN.md §11, step 10).
 
+;; Its types (`check-test-facts-types.fx`), loaded before the module so that they are
+;; not among its values; the module names what it uses of them.
+(define check-test-facts-types (load-module "fx26:check-test-facts-types.fx"))
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define check-test-facts-module (module
-;; What a test shows when it holds, and when not.
-(define-type k-fact-list (listof k-size-fact acyclic))
-(define-type k-branch-facts (pairof k-fact-list k-fact-list acyclic))
+(define-type k-fact-list (select check-test-facts-types k-fact-list))
+(define-type k-branch-facts (select check-test-facts-types k-branch-facts))
+(define-type k-maybe-size (select check-test-facts-types k-maybe-size))
+(define-type k-latent (select check-test-facts-types k-latent))
+(define-type k-cert-lens (select check-test-facts-types k-cert-lens))
+
 (define k-branch-facts-of (subr pure (k-fact-list k-fact-list) k-branch-facts)
   (lambda (yes no) (the k-branch-facts (cons yes no))))
 ;; The fact `lin ≥ 0`, or `lin = 0`, alone.
@@ -20,8 +26,6 @@
   (lambda (x y) (k-ge-fact (k-size-plus (k-size-add-scaled y x -1) -1))))
 (define k-le-fact (subr (read @globals) (k-size k-size) k-fact-list)
   (lambda (x y) (k-ge-fact (k-size-add-scaled y x -1))))
-;; A size, or none: none or one.
-(define-type k-maybe-size (listof k-size acyclic))
 ;; Whether `z` is no size in particular: a plain `nat`'s.
 (define k-size-any? (subr pure (k-size) bool)
   (lambda (z) (tagcase z (sz-finite () #t) (else w #f))))
@@ -39,10 +43,6 @@
         (let ((t (k-lookup v)))
           (if (< t 0) nil (k-nat-ty-size t))))
       (else y nil))))
-;; If `p` is a call of a procedure whose type's result is `(bool (then …)
-;; (else …))`, what it proves where true and where false, and its arguments
-;; (none or one): the Rust checker's `latent_props`.
-(define-type k-latent (listof (productof (1 k-props) (2 k-props) (3 kxs)) acyclic))
 (define k-latent-props (subr (maxeff kmakes spin) (kx) k-latent)
   (lambda (p)
     (tagcase p
@@ -150,7 +150,6 @@
   (lambda (p which)
     (let ((l (k-latent-props p)))
       (if (null? l) nil (k-cert-in (extract (car l) 1) which (extract (car l) 3))))))
-(define-type k-cert-lens (listof k-cert-len acyclic))
 ;; `v` and `k` of `(length-is? v k)` or `(certify-length v k)`: the
 ;; variable, its binding, and the length, a natural literal or a variable
 ;; of type `(nat s)` (none or one).

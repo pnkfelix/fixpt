@@ -634,12 +634,8 @@
         (k-cat3 " " (k-show-prop (car ps)) (k-show-props-each (cdr ps))))))
 (define k-show-props (subr kshows (string k-props) string)
   (lambda (which ps) (k-cat4 "(" which (k-show-props-each ps) ")")))
-;; What a type is shown as so far: its pieces, the last first, joined
-;; once, at the end (`k-pieces-string`), so that each character is written
-;; once, not again at each node above it, as appending did; the depths of
-;; the nodes met again below (`%d`), each to be written `(mu %d …)`; and how
-;; many pieces there are.
-(define-type k-shown (productof (1 k-strings) (2 k-ids) (3 int)))
+;; What a type is shown as so far (`check-print-types.fx`).
+(define-type k-shown (select check-print-types k-shown))
 (define k-shown-none k-shown (product (1 (the k-strings nil)) (2 (the k-ids nil)) (3 0)))
 ;; `st`, then `s`.
 (define k-put (subr (read @globals) (string k-shown) k-shown)
@@ -861,7 +857,7 @@
 ;; it was made of and how many links had been made (`k-links`): made once
 ;; for the top level, whose types are declared ahead, while what they
 ;; resolve to stays, not again for each line shown (`k-keep-atree!`).
-(define-type k-atree-of-scope (productof (1 k-scope) (2 int) (3 k-atree)))
+(define-type k-atree-of-scope (select check-print-types k-atree-of-scope))
 (define k-atree-kept (ref (listof k-atree-of-scope acyclic) @t) (new nil))
 ;; Whether `kept` is the tree of the scope now.
 (define k-atree-current? (subr kreads ((listof k-atree-of-scope acyclic)) bool)

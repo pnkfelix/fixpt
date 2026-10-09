@@ -6,14 +6,22 @@
 
 ;;; ------------------------------------------------------------ module
 
+;; Its types (`check-module-rules-types.fx`), loaded before the module so that they are
+;; not among its values; the module names what it uses of them.
+(define check-module-rules-types (load-module "fx26:check-module-rules-types.fx"))
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define check-module-rules-module (module
+(define-type k-say (select check-module-rules-types k-say))
+(define-type k-made (select check-module-rules-types k-made))
+(define-type k-mod-bound (select check-module-rules-types k-mod-bound))
+(define-type k-ends (select check-module-rules-types k-ends))
+(define-type k-eff-ty (select check-module-rules-types k-eff-ty))
+(define-type k-mod-checked (select check-module-rules-types k-mod-checked))
+
 ;; `n`'s innermost binding, now of type `t`.
 (define k-rebind-top (subr (maxeff kstate spin) (symbol int) unit)
   (lambda (n t) (table-set! (get k-env) n (cons t (cdr (table-ref (get k-env) n nil))))))
-;; What an error's message `m` is made into.
-(define-type k-say (subr (maxeff checks spin) (string) string))
 ;; `f`'s value, or, if it fails, the error `say` makes of its message.
 (define k-saying (subr (maxeff (read @globals) checks spin) (k-thunk k-say) k-te)
   (lambda (f say)
@@ -30,9 +38,6 @@
     (k-cat5 (k-cat3 "`define*` found `" (symbol->string name) "` to be a ") (k-show-ty tf)
             ": " m "")))
 
-;; What a module's items make, its abstract types, descriptions and values
-;; (each newest first), and the effect of making them.
-(define-type k-made (productof (1 k-parts) (2 k-parts) (3 k-parts) (4 k-eff)))
 (define k-made-of (subr (alloc @t) (k-parts k-parts k-parts k-eff) k-made)
   (lambda (abs ds vs e) (product (1 abs) (2 ds) (3 vs) (4 e))))
 ;; Each of `items` that `early` names (`k-early-modules`), made by `f`, in
@@ -59,8 +64,6 @@
               (the k-hazard-list (cons (product (1 (extract (car ps) 1)) (2 (k-comp-names vs)))
                                        rest)))
             (else y rest))))))
-;; The bindings of lambdas `ls`, and the types written, resolved.
-(define-type k-mod-bound (productof (1 k-letrec-bs) (2 k-ids)))
 ;; Lambda `l`'s type `t`, resolved: a `define*`'s the type it is checked at
 ;; first, reading any global, or an error at its lambda if not a `subr`.
 (define k-mod-first-type (subr (maxeff checks spin) (k-mlam int) int)
@@ -94,9 +97,6 @@
           (begin (k-bind n (if (extract (car ls) 5) t (k-name-nat n t)))
                  (k-note-known n 0)
                  (k-mod-bind (cdr bs) (cdr ls)))))))
-;; Why each group found so far may not end ("" if it ends), by its first
-;; member's name.
-(define-type k-ends (listof (productof (1 symbol) (2 string)) acyclic))
 (define k-ends-of (subr (read @globals) (k-ends symbol) k-ends)
   (lambda (ws n)
     (cond ((null? ws) nil)
@@ -118,14 +118,6 @@
     (cond ((null? group) nil)
           ((symbol=? (extract (car group) 1) n) (k-other-member (cdr group) n))
           (else group))))
-;; An effect, and a type.
-(define-type k-eff-ty (productof (1 k-eff) (2 int)))
-;; The effect of checking each lambda of `bs` against its type, in the
-;; scope of every item, with its recursive group (of `gs`, `k-mod-groups`)
-;; checked to end, as a `define-rec`'s members are; `ws` why the groups so
-;; far may not, `ds` the types written; and the bindings, a `define*`'s at
-;; the type found.
-(define-type k-mod-checked (productof (1 k-eff) (2 k-letrec-bs)))
 ;; The type `bs` gives `n`.
 (define k-bs-type (subr (read @globals) (k-letrec-bs symbol) int)
   (lambda (bs n)

@@ -3,27 +3,23 @@
 
 ;;; ------------------------------------------------------------ programs
 
+;; Its types (`check-program-types.fx`), loaded before the module so that they are
+;; not among its values; the module names what it uses of them.
+(define check-program-types (load-module "fx26:check-program-types.fx"))
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define check-program-module (module
-(define-type k-out (listof string acyclic))
+(define-type k-out (select check-program-types k-out))
+(define-type k-pos (select check-program-types k-pos))
+(define-type k-proving (select check-program-types k-proving))
+(define-type k-case-arm (select check-program-types k-case-arm))
+(define-type k-tops (select check-program-types k-tops))
+(define-type k-rec-forms (select check-program-types k-rec-forms))
+(define-type k-run-list (select check-program-types k-run-list))
+(define-type k-def-list (select check-program-types k-def-list))
+(define-type k-olds (select check-program-types k-olds))
 
-;; A place in what a proof was given: a variable and the labels extracted.
-(define-type k-pos (pairof symbol (listof symbol acyclic) @t))
-;; What checking a proof relies on: its own name, the names of its
-;; hypotheses, and what it proves, in words.
-(define-type k-proving (productof (1 symbol) (2 k-names) (3 string)))
-;; An arm of a `tagcase`: its tag, whether it takes the fields apart, the
-;; names it binds, and its body.
-(define-type k-case-arm (productof (1 symbol) (2 bool) (3 k-names) (4 kx)))
-;; The top-level forms of a program.
-(define-type k-tops (listof top acyclic))
-;; A `define-rec`'s bindings: names, written types, and lambdas.
-(define-type k-rec-forms (listof (productof (1 symbol) (2 syn) (3 exp)) acyclic))
-(define-type k-run-list (listof k-run acyclic))
-(define-type k-def-list (listof k-def acyclic))
-;; The names of `ns` that are globals already, with their types.
-(define-type k-olds (listof (pairof symbol int acyclic) acyclic))
+
 ;; `n`, of type `t`, bound as a standard binding.
 (define k-bind-std (subr (maxeff kstate spin) (symbol int) unit)
   (lambda (n t)

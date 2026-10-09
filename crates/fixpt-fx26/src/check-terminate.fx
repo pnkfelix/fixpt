@@ -12,24 +12,27 @@
 ;;; `acyclic` region, datums), and integers counting down to a bound below or
 ;;; up to one above. A member named but not called escapes, and fails.
 
+;; Its types (`check-terminate-types.fx`), loaded before the module so that they are
+;; not among its values; the module names what it uses of them.
+(define check-terminate-types (load-module "fx26:check-terminate-types.fx"))
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define check-terminate-module (module
-;; What is known of a value, relative to a parameter of the member walked:
-;; the parameter, or (strictly) a part of it, of a type; or the integer
-;; parameter plus an offset.
-(define-datatype k-tr (tr-part int bool int) (tr-int int int))
-(define-type k-trs (listof k-tr acyclic))
-(define-type k-tscope (listof (pairof symbol k-trs @t) acyclic))
-;; Bounds that tests have put on parameters: 0 below, 1 above.
-(define-type k-guards (listof (pairof int int @t) acyclic))
-;; A size-change graph: edges between slots (parameter × 3 + measure: 0
-;; parts, 1 down, 2 up), strict or not, in order and each pair once.
-(define-type k-edge (productof (1 int) (2 int) (3 bool)))
-(define-type k-graph (listof k-edge acyclic))
-;; A call: its caller, its callee, and its graph.
-(define-type k-call (productof (1 int) (2 int) (3 k-graph)))
-(define-type k-calls (listof k-call acyclic))
+(define-type k-tr (select check-terminate-types k-tr))
+(define tr-part (with check-terminate-types tr-part))
+(define tr-int (with check-terminate-types tr-int))
+(define-type k-trs (select check-terminate-types k-trs))
+(define-type k-tscope (select check-terminate-types k-tscope))
+(define-type k-guards (select check-terminate-types k-guards))
+(define-type k-edge (select check-terminate-types k-edge))
+(define-type k-graph (select check-terminate-types k-graph))
+(define-type k-call (select check-terminate-types k-call))
+(define-type k-calls (select check-terminate-types k-calls))
+(define-type k-passed (select check-terminate-types k-passed))
+(define-type k-texts (select check-terminate-types k-texts))
+(define-type k-whys (select check-terminate-types k-whys))
+(define-type k-thunk (select check-terminate-types k-thunk))
+
 (define k-sc-members (ref k-names @t) (new nil))
 (define k-sc-current (ref int @t) (new 0))
 (define k-sc-calls (ref k-calls @t) (new nil))
@@ -39,9 +42,6 @@
 (define k-sc-hints (ref (listof string acyclic) @t) (new nil))
 ;; Whether the closure of the calls grew past `k-sc-most`.
 (define k-sc-too-many (ref bool @t) (new #f))
-;; For each call: caller, callee, and each argument as the caller's
-;; parameter passed unchanged, or -1.
-(define-type k-passed (listof (productof (1 int) (2 int) (3 k-ids)) acyclic))
 (define k-sc-passed (ref k-passed @t) (new nil))
 ;; (member . parameter): passed unchanged by every call in the group, so the
 ;; same for the whole recursion, and a bound as a literal is.
@@ -767,8 +767,6 @@
   (lambda (i) (symbol->string (k-nth (get k-sc-members) i))))
 (define k-sc-strict-any? (subr (read @globals) (k-graph) bool)
   (lambda (g) (and (not (null? g)) (or (extract (car g) 3) (k-sc-strict-any? (cdr g))))))
-;; Texts: a hint for each call, lines, names shown.
-(define-type k-texts (listof string acyclic))
 (define k-sc-has-string? (subr (read @globals) (k-texts string) bool)
   (lambda (xs s) (and (not (null? xs)) (or (string=? (car xs) s) (k-sc-has-string? (cdr xs) s)))))
 ;; The call `c`, in words.
@@ -854,8 +852,6 @@
         (let ((w (product (1 (extract (car g) 1)) (2 (extract (car g) 2)) (3 why))))
           (begin (set k-spin-why (cons w (get k-spin-why)))
                  (k-note-why (cdr g) why))))))
-;; Why each definition, by name and declared type, may not end.
-(define-type k-whys (listof (productof (1 symbol) (2 int) (3 string)) acyclic))
 (define k-why-of (subr kreads (k-whys symbol int) string)
   (lambda (ws n t)
     (cond ((null? ws) "")
@@ -868,8 +864,6 @@
   (lambda (hay needle i)
     (and (<= (+ i (string-length needle)) (string-length hay))
          (or (k-text-at? hay needle i) (k-text-has? hay needle (+ i 1))))))
-;; A computation of a type and an effect, which may fail.
-(define-type k-thunk (subr (maxeff checks spin) () k-te))
 ;; Error `m` where `n`, declared `t`, is defined: saying so, and, if about `spin`, why.
 (define k-declared-error (subr (maxeff kreads (alloc @t) spin) (string symbol int) string)
   (lambda (m n t)

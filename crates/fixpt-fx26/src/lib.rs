@@ -157,6 +157,42 @@ pub const COMPILE_STATE: &str = include_str!("compile-state.fx");
 /// `compile-lift.fx`: a `load-input` file, which the conductor applies (`TODO.md` §68).
 pub const COMPILE_LIFT: &str = include_str!("compile-lift.fx");
 
+/// The types of `check-modules.fx`: a module file of no state (`TODO.md` §68).
+pub const CHECK_MODULES_TYPES: &str = include_str!("check-modules-types.fx");
+
+/// The types of `check-subtype.fx`: a module file of no state (`TODO.md` §68).
+pub const CHECK_SUBTYPE_TYPES: &str = include_str!("check-subtype-types.fx");
+
+/// The types of `check-calls.fx`: a module file of no state (`TODO.md` §68).
+pub const CHECK_CALLS_TYPES: &str = include_str!("check-calls-types.fx");
+
+/// The types of `check-dependent.fx`: a module file of no state (`TODO.md` §68).
+pub const CHECK_DEPENDENT_TYPES: &str = include_str!("check-dependent-types.fx");
+
+/// The types of `check-bounds.fx`: a module file of no state (`TODO.md` §68).
+pub const CHECK_BOUNDS_TYPES: &str = include_str!("check-bounds-types.fx");
+
+/// The types of `check-infer.fx`: a module file of no state (`TODO.md` §68).
+pub const CHECK_INFER_TYPES: &str = include_str!("check-infer-types.fx");
+
+/// The types of `check-terminate.fx`: a module file of no state (`TODO.md` §68).
+pub const CHECK_TERMINATE_TYPES: &str = include_str!("check-terminate-types.fx");
+
+/// The types of `check-test-facts.fx`: a module file of no state (`TODO.md` §68).
+pub const CHECK_TEST_FACTS_TYPES: &str = include_str!("check-test-facts-types.fx");
+
+/// The types of `check-letrec.fx`: a module file of no state (`TODO.md` §68).
+pub const CHECK_LETREC_TYPES: &str = include_str!("check-letrec-types.fx");
+
+/// The types of `check-synth.fx`: a module file of no state (`TODO.md` §68).
+pub const CHECK_SYNTH_TYPES: &str = include_str!("check-synth-types.fx");
+
+/// The types of `check-modorder.fx`: a module file of no state (`TODO.md` §68).
+pub const CHECK_MODORDER_TYPES: &str = include_str!("check-modorder-types.fx");
+
+/// The types of `check-module-rules.fx`: a module file of no state (`TODO.md` §68).
+pub const CHECK_MODULE_RULES_TYPES: &str = include_str!("check-module-rules-types.fx");
+
 /// Hash tables' types: a module file of no state (`TODO.md` §68).
 pub const TABLE_TYPES: &str = include_str!("table-types.fx");
 
@@ -296,9 +332,21 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 62] = [
+pub const FRONT_END_MODULES: [(&str, &str); 74] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("table-types.fx", TABLE_TYPES),
+    ("check-module-rules-types.fx", CHECK_MODULE_RULES_TYPES),
+    ("check-modorder-types.fx", CHECK_MODORDER_TYPES),
+    ("check-synth-types.fx", CHECK_SYNTH_TYPES),
+    ("check-letrec-types.fx", CHECK_LETREC_TYPES),
+    ("check-test-facts-types.fx", CHECK_TEST_FACTS_TYPES),
+    ("check-terminate-types.fx", CHECK_TERMINATE_TYPES),
+    ("check-infer-types.fx", CHECK_INFER_TYPES),
+    ("check-bounds-types.fx", CHECK_BOUNDS_TYPES),
+    ("check-dependent-types.fx", CHECK_DEPENDENT_TYPES),
+    ("check-calls-types.fx", CHECK_CALLS_TYPES),
+    ("check-subtype-types.fx", CHECK_SUBTYPE_TYPES),
+    ("check-modules-types.fx", CHECK_MODULES_TYPES),
     ("compile-programs-types.fx", COMPILE_PROGRAMS_TYPES),
     ("regcode-entry-types.fx", REGCODE_ENTRY_TYPES),
     ("regcode-modules-types.fx", REGCODE_MODULES_TYPES),

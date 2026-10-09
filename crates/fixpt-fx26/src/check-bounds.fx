@@ -8,15 +8,19 @@
 ;;; the lower bound, else the upper. After `check-subtype.fx`, before
 ;;; `check-infer.fx`, whose `k-unify-var` keeps them.
 
+;; Its types (`check-bounds-types.fx`), loaded before the module so that they are
+;; not among its values; the module names what it uses of them.
+(define check-bounds-types (load-module "fx26:check-bounds-types.fx"))
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define check-bounds-module (module
-;; At least `1`, at most `2`, exactly `3`: types, -1 where nothing has said.
-(define-type k-bound (productof (1 int) (2 int) (3 int)))
-(define-type k-bound-map (ref (listof (pairof int k-bound @t) @t) @t))
-;; Each instantiation's solution so far, and its binders' bounds, innermost
-;; first. An instantiation that fails leaves its entry, found by no one.
-(define-type k-bound-entry (pairof (ref k-map @t) k-bound-map @t))
+(define-type k-bound (select check-bounds-types k-bound))
+(define-type k-bound-map (select check-bounds-types k-bound-map))
+(define-type k-bound-entry (select check-bounds-types k-bound-entry))
+(define-type k-maybe-bounds (select check-bounds-types k-maybe-bounds))
+(define-type k-maybe-bound (select check-bounds-types k-maybe-bound))
+(define-type k-unifying (select check-bounds-types k-unifying))
+
 (define k-bounds-stack (ref (listof k-bound-entry @t) @t) (new nil))
 ;; Whether `k-unify` bounds from above: matching what is expected of a call's
 ;; result, flipped inside a subroutine's parameters (Rust `unify_upper`).
@@ -37,8 +41,6 @@
           x
           (begin (set k-bounds-stack (cdr st))
                  (if (eq? (car (car st)) solved) x (k-drop-bounds solved x)))))))
-;; The bounds kept for `solved`, in a list of one; none if none are.
-(define-type k-maybe-bounds (listof k-bound-map @t))
 (define* k-bounds-in (subr (maxeff (read @t) (alloc @t) spin)
                            ((ref k-map @t) (listof k-bound-entry @t)) k-maybe-bounds)
   (lambda (solved st)
@@ -53,10 +55,6 @@
                (lambda (bs) (cond ((null? bs) k-no-bound) ((= (car (car bs)) v) (cdr (car bs)))
                                   (else (go (cdr bs)))))))
       (go (get m)))))
-;; The bounds `solved` keeps for type binder `v`, if they have not met:
-;; neither fixed, nor at least and at most one type (the Rust checker's
-;; `unsettled`); in a list of one, or none.
-(define-type k-maybe-bound (listof k-bound @t))
 (define* k-unsettled (subr (maxeff kstate spin) ((ref k-map @t) int) k-maybe-bound)
   (lambda (solved v)
     (let ((m (k-bounds-of solved)))
@@ -80,9 +78,6 @@
                 ((< (extract (car b) 2) 0) (the k-map (cons (car m) rest)))
                 (else (the k-map (cons (cons (car (car m)) (dt (extract (car b) 2))) rest))))))))
 
-;; `k-unify`'s flags, set for `f`: in something invariant; matching what is
-;; expected (from above); in a subroutine's parameters (the other way).
-(define-type k-unifying (subr (maxeff kstate spin) () unit))
 (define* k-exactly (subr (maxeff kstate spin) (k-unifying) unit)
   (lambda (f)
     (let ((outer (get k-unify-exact)))

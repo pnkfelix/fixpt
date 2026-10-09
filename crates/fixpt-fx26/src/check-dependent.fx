@@ -9,9 +9,16 @@
 ;;; it to select from (`first-class-modules.md`, M5): in its type, `(select
 ;;; $k t)`, the `k`th parameter's type `t`.
 
+;; Its types (`check-dependent-types.fx`), loaded before the module so that they are
+;; not among its values; the module names what it uses of them.
+(define check-dependent-types (load-module "fx26:check-dependent-types.fx"))
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define check-dependent-module (module
+(define-type k-given-back (select check-dependent-types k-given-back))
+(define-type k-dependent (select check-dependent-types k-dependent))
+(define-type k-callables (select check-dependent-types k-callables))
+
 ;; `t` with each `(select $k n)` what `given` says it is.
 (define k-instantiate-params (subr (maxeff kstate spin) (int k-params-given) int)
   (lambda (t given)
@@ -20,9 +27,6 @@
         (let ((outer (get k-param-map)))
           (begin (set k-param-map given)
                  (let ((r (k-subst t nil))) (begin (set k-param-map outer) r)))))))
-;; A module-typed binding's abstract types, from parameter `j`: each as named
-;; for the binding, onto `given`; and as `(select $j t)`, onto `back`.
-(define-type k-given-back (productof (1 k-params-given) (2 k-map)))
 (define k-abs-given (subr (maxeff kstate spin) (int k-parts k-params-given k-map) k-given-back)
   (lambda (j abs given back)
     (if (null? abs)
@@ -32,9 +36,6 @@
                (bk (the (pairof int k-desc @t) (cons w (dt (k-ty-new (ty-param j a)))))))
           (k-abs-given j (cdr abs) (the k-params-given (cons g given))
                        (the k-map (cons bk back)))))))
-;; What a `lambda`'s parameters were bound to: their types for the
-;; procedure's type; and what each earlier one gives its `(select $k t)`s.
-(define-type k-dependent (productof (1 k-bindings) (2 k-params-given) (3 k-map)))
 ;; Parameters `typed`, from the `j`th, bound in order, at `a`..`b`: a
 ;; parameter's type may name a module in scope, or an earlier parameter.
 ;; What it names of an earlier one is, in the procedure's type, `(select $k
@@ -130,9 +131,6 @@
                              t))))
                (rest (k-args-given (cdr found) args a b)))
           (cons (product (1 k) (2 x) (3 to)) rest)))))
-;; A dependent procedure's callee, `c` (none or one), for a call with `args`
-;; at `a`..`b`: its types given the modules its arguments name.
-(define-type k-callables (listof k-callable acyclic))
 (define k-instantiate-all (subr (maxeff kstate spin) (k-ids k-params-given) k-ids)
   (lambda (ts given)
     (if (null? ts)

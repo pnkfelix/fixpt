@@ -3,9 +3,16 @@
 ;;; for a definition. The Rust checker's `letrec_with` and `letrec_found`,
 ;;; rule for rule.
 
+;; Its types (`check-letrec-types.fx`), loaded before the module so that they are
+;; not among its values; the module names what it uses of them.
+(define check-letrec-types (load-module "fx26:check-letrec-types.fx"))
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define check-letrec-module (module
+(define-type k-checker (select check-letrec-types k-checker))
+(define-type k-group-checker (select check-letrec-types k-group-checker))
+(define-type k-idss (select check-letrec-types k-idss))
+
 ;; Note of the recursive group `bs` whether it needs `spin`, and why: `why`, "" if not.
 (define k-note-ending (subr (maxeff kstate spin) (k-letrec-bs string) unit)
   (lambda (bs why)
@@ -28,10 +35,6 @@
           ((k-globals-atom? (car e)) (the k-eff (cons (car e) (k-globals-of (cdr e)))))
           (else (k-globals-of (cdr e))))))
 
-;; What checks one expression against a type, and a group's procedures at
-;; their types: `k-check` and `k-check-letrec`, given by `check-synth.fx`.
-(define-type k-checker (subr (maxeff checks spin) (kx int) k-eff))
-(define-type k-group-checker (subr (maxeff checks spin) (k-letrec-bs) k-eff))
 
 ;; Whether `ts` and `us` have the same latent effects, pairwise.
 (define k-same-latents? (subr (maxeff kstate spin) (k-ids k-ids) bool)
@@ -70,9 +73,6 @@
           (the k-ids (cons found (k-letrec-reads (cdr bs) (cdr decl) check)))))))
 ;; What the last round found.
 (define k-found-types (ref k-ids @t) (new nil))
-;; One round: the group at types `ts`, and what each was found to read; or
-;; none, if a procedure does not check even so.
-(define-type k-idss (listof k-ids acyclic))
 (define* k-letrec-round (subr (maxeff checks spin) (k-letrec-bs k-ids k-checker) k-idss)
   (lambda (bs ts check)
     (let* ((saved (k-mark)) (rsaved (get k-recursive)) (group (k-retyped bs ts))

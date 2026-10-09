@@ -1955,6 +1955,15 @@ Phase 1, the types out, one module at a time; phase 2, the conversion.
   `compile-state.fx`, `compile-lift.fx`, `compile.fx`, `standard.fx`
   (generated: a plain module file the conductor loads), `layout.fx` (the
   same). That ends the back end.
+- Phase 1 for the rest of the checker (2026-10-09): the types of
+  `check-modules`, `check-subtype`, `check-calls`, `check-dependent`,
+  `check-bounds`, `check-infer`, `check-terminate`, `check-test-facts`,
+  `check-letrec`, `check-synth`, `check-modorder`, `check-module-rules` and
+  `check-program` in `X-types.fx` files, and the printer's two newest in
+  `check-print-types.fx`. Then the checker's files, from the last
+  backwards; `check-rules.fx`, the checker's one recursive group, gets a
+  size debt entry for its imports alone, as `regcode-core.fx` (the user's,
+  2026-10-09).
 - The FX checker's cost of converted files (2026-10-09): checking the
   front end had grown from about 1.0 s to 1.46 s over phase 2. Profiled
   (`probe_profile_check`, 4.8 G cells to 7.2 G), three walks along lists

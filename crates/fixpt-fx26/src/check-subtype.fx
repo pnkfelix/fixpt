@@ -5,9 +5,26 @@
 ;;; `a ≤ b`. Recursive types are compared coinductively: a pair already
 ;;; being compared is assumed to hold.
 
+;; Its types (`check-subtype-types.fx`), loaded before the module so that they are
+;; not among its values; the module names what it uses of them.
+(define check-subtype-types (load-module "fx26:check-subtype-types.fx"))
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define check-subtype-module (module
+(define-type k-trail (select check-subtype-types k-trail))
+(define-type k-benv (select check-subtype-types k-benv))
+(define-type k-benvs (select check-subtype-types k-benvs))
+(define-type k-assumed (select check-subtype-types k-assumed))
+(define-type k-strail (select check-subtype-types k-strail))
+(define-type k-label-entry (select check-subtype-types k-label-entry))
+(define-type k-label-list (select check-subtype-types k-label-list))
+(define-type k-labels (select check-subtype-types k-labels))
+(define-type k-instances (select check-subtype-types k-instances))
+(define-type k-sub-rule (select check-subtype-types k-sub-rule))
+(define-type k-checking (select check-subtype-types k-checking))
+(define-type k-saying (select check-subtype-types k-saying))
+(define-type k-effs (select check-subtype-types k-effs))
+
 ;; Base `x` below base `y`: the same, or an `i32` or `u32`, the fixnum it
 ;; stands for, below `int`. As the Rust checker's rule.
 (define k-base-below? (subr (read @globals) (symbol symbol) bool)
@@ -15,34 +32,8 @@
     (or (symbol=? x y)
         (and (string=? (symbol->string y) "int")
              (or (string=? (symbol->string x) "i32") (string=? (symbol->string x) "u32"))))))
-(define-type k-trail (ref k-pairs @t))
-;; A subtype question's binder environment, for one side: each `poly`
-;; binder in scope, by the name its pair of binders was given, so bodies are
-;; compared as they are, not substituted, and a cycle through a `poly` comes
-;; back to a pair, and an environment, already on the trail.
-(define-type k-benv k-pairs)
-;; Both sides' environments.
-(define-type k-benvs (pairof k-benv k-benv @t))
-;; What one subtype question remembers: the pairs assumed (FX-87's trail),
-;; each with the environments it was asked under; and the names given to
-;; pairs of `poly` binders, by the pair of nodes and the position.
-(define-type k-assumed (listof (productof (1 int) (2 int) (3 k-benv) (4 k-benv)) acyclic))
-(define-type k-strail (ref k-assumed @t))
-(define-type k-label-entry (productof (1 int) (2 int) (3 int) (4 int)))
-(define-type k-label-list (listof k-label-entry acyclic))
-(define-type k-labels (ref k-label-list @t))
-;; Each lemma that fits a pair of types: its hypotheses, instantiated.
-(define-type k-instances (listof k-hyps acyclic))
 
-;; Modules' types compared, by `check-module-rules.fx`, which sets this.
-(define-type k-sub-rule
-  (subr (maxeff kstate spin) (int int k-ty k-ty k-benv k-benv k-strail k-labels) bool))
-;; A computation checked, and what makes a message of W and G.
-(define-type k-checking (subr (maxeff checks spin) () k-te))
-(define-type k-saying (subr (maxeff checks spin) (string string string) string))
 
-;; The latent effect of `t`, a `subr` under any `poly`s, in a list; or none.
-(define-type k-effs (listof k-eff acyclic))
 (define k-bool=? (subr pure (bool bool) bool) (lambda (x y) (if x y (not y))))
 (define k-part-find (subr kreads (k-parts symbol) int)
   (lambda (ps l)

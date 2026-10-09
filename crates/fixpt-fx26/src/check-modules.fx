@@ -17,12 +17,16 @@
 ;; Kind `s`, or -1 where `k-parse-kind` would refuse it: for a reader that
 ;; gives its own message instead (`moduleof`'s `abs`).
 
+;; Its types (`check-modules-types.fx`), loaded before the module so that they are
+;; not among its values; the module names what it uses of them.
+(define check-modules-types (load-module "fx26:check-modules-types.fx"))
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define check-modules-module (module
-;; A `define-rec`'s types and expressions, each type read before its
-;; expression, as the Rust parser reads them.
-(define-type k-rec-read (productof (1 k-ids) (2 kxs)))
+(define-type k-rec-read (select check-modules-types k-rec-read))
+(define-type k-thunk-unit (select check-modules-types k-thunk-unit))
+(define-type k-renamed (select check-modules-types k-renamed))
+
 ;; A module item as `x-module` has it.
 (define k-item-of (subr (maxeff (read @globals) (alloc @t)) (int names int k-ids kxs) k-item)
   (lambda (k ns v ts xs) (product (1 k) (2 (k-copy-names ns)) (3 v) (4 ts) (5 xs))))
@@ -44,9 +48,6 @@
                    (not (string=? (k-list-head (car ts)) "dlambda")))
               (the k-names (cons (car (extract it 2)) rest))
               rest)))))
-;; Run `f`; an error it makes in the file read at `base` (`load-module`)
-;; said at `a`..`b`, with where in the file, as the Rust checker says it.
-(define-type k-thunk-unit (subr (maxeff checks spin) () unit))
 (define k-in-loaded (subr (maxeff checks spin) (k-thunk-unit int int int) unit)
   (lambda (f base a b)
     (let ((r (prompt k-tag (begin (f) (k-done (k-te 0 nil))) (lambda (r) r))))
@@ -415,9 +416,6 @@
 ;; Whether `v` was made for a module's abstract type as it was bound.
 (define k-module-var? (subr kreads (int) bool)
   (lambda (v) (k-has-id? (get k-module-vars) v)))
-;; Abstract types `abs` renamed for a binding, each `prefix` and its name:
-;; the new ones, and what each old one becomes.
-(define-type k-renamed (productof (1 k-parts) (2 k-map)))
 (define k-rename-abs (subr (maxeff kstate spin) (string k-parts) k-renamed)
   (lambda (prefix abs)
     (if (null? abs)

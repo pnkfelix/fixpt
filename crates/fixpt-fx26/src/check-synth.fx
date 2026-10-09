@@ -1,9 +1,25 @@
 ;;; The checker, in FX-26: the rules, each expression's type and effect.
 ;;; Part of the checker, `check-types.fx` first (PLAN.md §11, step 10).
 
+;; Its types (`check-synth-types.fx`), loaded before the module so that they are
+;; not among its values; the module names what it uses of them.
+(define check-synth-types (load-module "fx26:check-synth-types.fx"))
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define check-synth-module (module
+(define-type k-types-eff (select check-synth-types k-types-eff))
+(define-type k-done (select check-synth-types k-done))
+(define-type k-certs (select check-synth-types k-certs))
+(define-type k-nar (select check-synth-types k-nar))
+(define-type k-nars (select check-synth-types k-nars))
+(define-type k-narrowing (select check-synth-types k-narrowing))
+(define-type k-path (select check-synth-types k-path))
+(define-type k-paths (select check-synth-types k-paths))
+(define-type k-reached (select check-synth-types k-reached))
+(define-type k-tested (select check-synth-types k-tested))
+(define-type k-call-checked (select check-synth-types k-call-checked))
+(define-type k-maybe-ty (select check-synth-types k-maybe-ty))
+
 ;; The error that a `tagcase`, `x`, has no arm for the variants `rest`.
 (define k-fail-no-arm (subr (maxeff checks spin) (k-parts kx) void)
   (lambda (rest x)
@@ -59,10 +75,6 @@
     (cond ((null? ms) -1)
           ((tagcase (k-get (k-resolve (car ms))) (ty-pair (x d r nl) #t) (else y #f)) (car ms))
           (else (k-union-pair-member (cdr ms))))))
-;; Types, and the effect of all.
-(define-type k-types-eff (productof (1 k-ids) (2 k-eff)))
-;; What a call's arguments were found to be before they are checked: types (or -1), effects.
-(define-type k-done (productof (1 (arrayof int @t)) (2 (arrayof k-eff @t))))
 ;; Type `t` and effect `e` of `x`, or `r`, both, with what `x` masks masked.
 (define k-te-masked (subr (maxeff kstate spin) (kx int k-eff) k-te)
   (lambda (x t e) (k-te t (k-mask x e t))))
@@ -146,8 +158,6 @@
 ;; If `p` certifies a variable a natural (`nat?`, `(nat i)`), it.
 (define k-nat-test (subr (maxeff kreads (alloc @t) spin) (kx) k-named)
   (lambda (p) (k-latent-cert p 1)))
-;; What is certified so far: variables acyclic, of lengths, and natural.
-(define-type k-certs (productof (1 k-named) (2 k-cert-lens) (3 k-named)))
 (define k-certs-now (subr kreads () k-certs)
   (lambda ()
     (product (1 (get k-certified)) (2 (get k-certified-lengths)) (3 (get k-certified-nats)))))
@@ -159,15 +169,6 @@
         (if (null? cert) #u (set k-certified (cons (car cert) (get k-certified))))
         (if (null? lens) #u (set k-certified-lengths (cons (car lens) (get k-certified-lengths))))
         (if (null? nats) #u (set k-certified-nats (cons (car nats) (get k-certified-nats))))))))
-;; What `p` narrows where it holds (`car`) and where not (`cdr`): the Rust
-;; checker's `narrowings`. Each narrowing (`check.rs`'s `Narrowed`): a
-;; variable, its binding's depth, the steps of a path from it (none for the
-;; variable), the regions they read through, and the type there. Through
-;; `not`, and through `and` and `or` (`(if a b #f)`, `(if a #t b)`) as
-;; `k-test-facts` goes.
-(define-type k-nar (productof (1 symbol) (2 int) (3 k-steps) (4 k-regions) (5 int)))
-(define-type k-nars (listof k-nar acyclic))
-(define-type k-narrowing (pairof k-nars k-nars acyclic))
 (define k-nars-append (subr (read @globals) (k-nars k-nars) k-nars)
   (lambda (xs ys)
     (if (null? xs) ys (the k-nars (cons (car xs) (k-nars-append (cdr xs) ys))))))
@@ -187,10 +188,6 @@
     (if (null? xs)
         (the k-steps (cons s nil))
         (the k-steps (cons (car xs) (k-steps-snoc (cdr xs) s))))))
-;; `x` as a path from a variable: the variable, its binding's depth, and
-;; the steps, `car`s, `cdr`s and products' fields (none or one).
-(define-type k-path (productof (1 symbol) (2 int) (3 k-steps)))
-(define-type k-paths (listof k-path acyclic))
 (define k-path-step (subr (maxeff (read @globals) (alloc @t)) (k-paths k-step) k-paths)
   (lambda (ps s)
     (if (null? ps)
@@ -220,8 +217,6 @@
           (else (k-path-fact-in (cdr fs) v d steps depth)))))
 (define k-path-fact-ty (subr (maxeff kreads spin) (symbol int k-steps) int)
   (lambda (v d steps) (k-path-fact-in (get k-path-narrowed) v d steps (get k-closure-depth))))
-;; A type and the regions read to reach it (none or one).
-(define-type k-reached (listof (productof (1 int) (2 k-regions)) acyclic))
 (define k-reached-of (subr (alloc @t) (int k-regions) k-reached)
   (lambda (t rs) (the k-reached (cons (product (1 t) (2 rs)) nil))))
 ;; The path from `v` at `d`, `done` taken and `rest` to go, at type `t`
@@ -423,12 +418,6 @@
   (lambda (e)
     (let ((fs (get k-path-narrowed)))
       (if (k-all-dead? fs) #u (set k-path-narrowed (k-kill-each fs e (get k-closure-depth)))))))
-;; What checking an `if`'s branches puts back as it goes: what was certified, the size
-;; facts, and what was narrowed, before; what its test shows when it holds, and when not;
-;; what it narrows so; and how many paths' facts there were.
-(define-type k-tested
-  (productof (1 k-certs) (2 k-fact-list) (3 k-branch-facts) (4 k-narrows) (5 k-narrowing)
-             (6 int)))
 ;; Before the branch where `p` holds: what it certifies, and the facts it shows, in force.
 (define k-enter-then (subr (maxeff kstate spin) (kx) k-tested)
   (lambda (p)
@@ -476,11 +465,6 @@
   (lambda (p kinds solved done i r)
     (begin (k-unify p (extract r 1) kinds solved (k-new-trail))
            (k-arg-found done i (extract r 1) (extract r 2)))))
-;;; Bounds (`TODO.md` §66): an argument a type binder bounded only from
-;;; above (`check-bounds.fx`) is checked against says what it is.
-;; The last call checked against a type: where it is, and its own type there
-;; (the Rust checker's `checked_call`).
-(define-type k-call-checked (productof (1 int) (2 int) (3 int)))
 (define k-checked-call (ref k-call-checked @t) (new (product (1 -1) (2 -1) (3 -1))))
 ;; Call `x`, found `r`, as `expected`: its effect, and its type noted.
 (define k-as-expected-call (subr (maxeff checks spin) (kx k-te int) k-eff)
@@ -657,8 +641,6 @@
     (tagcase (k-get t)
       (ty-place (r) r)
       (else y (k-fail-ty "a region is expected here, and this is a " t a b)))))
-;; A type, or none: none or one.
-(define-type k-maybe-ty (listof k-ty acyclic))
 ;; What a `make-bloblet` of `fields`, checked against `expected` (≥ 0), is told: that type, if a
 ;; bloblet not frozen, of as many fields, at the region `given` (if any).
 (define k-bloblet-want (subr (maxeff kreads (alloc @t) spin) (int kxs k-regions) k-maybe-ty)

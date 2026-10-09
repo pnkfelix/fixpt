@@ -4,15 +4,14 @@
 
 ;;; ------------------------------------------------------------ calls that may not end
 
+;; Its types (`check-calls-types.fx`), loaded before the module so that they are
+;; not among its values; the module names what it uses of them.
+(define check-calls-types (load-module "fx26:check-calls-types.fx"))
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define check-calls-module (module
-;; Whether a procedure of type `t` could be given itself: a cycle in `t`
-;; runs through a parameter of a procedure (or the argument of a
-;; continuation). A type that is merely recursive, as a list is, does not let
-;; anything loop. `path`: the nodes on the way down, newest first, each with
-;; whether it was reached through a parameter.
-(define-type k-cpath (listof (pairof int bool @t) acyclic))
+(define-type k-cpath (select check-calls-types k-cpath))
+
 (define k-on-path? (subr kreads (k-cpath int) bool)
   (lambda (path t) (and (not (null? path)) (or (= (car (car path)) t) (k-on-path? (cdr path) t)))))
 ;; Whether a node newer than `t` on the path was reached through a parameter.

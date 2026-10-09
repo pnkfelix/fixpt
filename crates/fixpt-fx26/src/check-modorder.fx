@@ -8,17 +8,22 @@
 ;;; refused, naming the chain; nothing is reordered. The Rust checker's
 ;;; `modorder.rs`, step for step; `check-module-rules.fx` uses it.
 
+;; Its types (`check-modorder-types.fx`), loaded before the module so that they are
+;; not among its values; the module names what it uses of them.
+(define check-modorder-types (load-module "fx26:check-modorder-types.fx"))
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define check-modorder-module (module
-;; Reading the checker's tables and making lists.
-(define-effect kallocs (maxeff (read @globals) (alloc @t)))
-;; A module's typed lambda: its name, written type, value, the item it is
-;; written in, whether that is a `define-rec`, and whether a `define*`.
-(define-type k-mlam (productof (1 symbol) (2 int) (3 kx) (4 int) (5 bool) (6 bool)))
-(define-type k-mlams (listof k-mlam acyclic))
-;; A name a module defines, and the item defining it.
-(define-type k-places (listof (productof (1 symbol) (2 int)) acyclic))
+(define-effect kallocs (select check-modorder-types kallocs))
+(define-type k-mlam (select check-modorder-types k-mlam))
+(define-type k-mlams (select check-modorder-types k-mlams))
+(define-type k-places (select check-modorder-types k-places))
+(define-type k-reached (select check-modorder-types k-reached))
+(define-type k-hz (select check-modorder-types k-hz))
+(define-type k-edges (select check-modorder-types k-edges))
+(define-type k-scc-ints (select check-modorder-types k-scc-ints))
+(define-type k-groups (select check-modorder-types k-groups))
+
 
 ;; Whether item `it` is a definition of a lambda with a written type.
 (define k-lambda-item? (subr (read @globals) (k-item) bool)
@@ -168,11 +173,6 @@
 (define k-early-modules (subr (maxeff kmakes spin) (k-items) k-names)
   (lambda (items) (reverse (k-early-from items (k-mod-places items) nil))))
 
-;;; ------------------------------------------------------------ hazards
-
-;; What has been reached: each name, the one it was reached from, and
-;; whether it was.
-(define-type k-reached (listof (productof (1 symbol) (2 symbol) (3 bool)) acyclic))
 (define k-reached-has? (subr (read @globals) (k-reached symbol) bool)
   (lambda (rs n) (and (not (null? rs)) (or (symbol=? (extract (car rs) 1) n)
                                            (k-reached-has? (cdr rs) n)))))
@@ -219,9 +219,6 @@
     (cond ((null? ns) nil)
           ((k-reached-has? rs (car ns)) (k-not-reached (cdr ns) rs))
           (else (the k-names (cons (car ns) (k-not-reached (cdr ns) rs)))))))
-;; The module (its places and typed lambdas) and the item being checked:
-;; its position, name and value.
-(define-type k-hz (productof (1 k-places) (2 k-mlams) (3 int) (4 symbol) (5 kx)))
 ;; Breadth first from `todo` (names reached, in order), every name reached
 ;; in `rs`: an error at the value of `h`'s item at the first reached not
 ;; made before it.
@@ -304,8 +301,6 @@
           ((k-has-name? names (extract (car ls) 1))
            (the k-names (cons (extract (car ls) 1) (k-mlam-names-among (cdr ls) names))))
           (else (k-mlam-names-among (cdr ls) names)))))
-;; Each lambda's name, and the lambdas its value names.
-(define-type k-edges (listof (productof (1 symbol) (2 k-names)) acyclic))
 (define k-mod-edges (subr kmakes (k-mlams k-mlams) k-edges)
   (lambda (ls all)
     (if (null? ls)
@@ -313,12 +308,6 @@
         (the k-edges (cons (product (1 (extract (car ls) 1))
                                     (2 (k-mlam-names-among all (k-free-vars (extract (car ls) 3)))))
                            (k-mod-edges (cdr ls) all))))))
-;; The lambdas' strongly connected components (Tarjan's): each lambda's
-;; place in the walk, its low link, and its component, by name; the walk's
-;; stack, and the counts of places and of components. A lambda walked and
-;; not yet in a component is on the stack. Linear in the lambdas and their
-;; edges, where reaching from each lambda in turn was cubic, with lists.
-(define-type k-scc-ints (table symbol int @t))
 (define k-scc-edges (ref (table symbol k-names @t) @t) (new (make-table symbol-hash symbol=?)))
 (define k-scc-index (ref k-scc-ints @t) (new (make-table symbol-hash symbol=?)))
 (define k-scc-low (ref k-scc-ints @t) (new (make-table symbol-hash symbol=?)))
@@ -409,8 +398,6 @@
                           (the k-letrec-bs (cons (car bs) (members (cdr bs)))))
                          (else (members (cdr bs)))))))
         (if (k-scc-cyclic? a bs) (members bs) (the k-letrec-bs nil))))))
-;; Each of `ls`'s recursive group (`k-mod-group`), in order.
-(define-type k-groups (listof k-letrec-bs acyclic))
 (define k-groups-of (subr (maxeff kreads (alloc @t)) (k-letrec-bs k-letrec-bs) k-groups)
   (lambda (ls all)
     (if (null? ls)
