@@ -296,7 +296,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 60] = [
+pub const FRONT_END_MODULES: [(&str, &str); 61] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("table-types.fx", TABLE_TYPES),
     ("compile-programs-types.fx", COMPILE_PROGRAMS_TYPES),
@@ -357,6 +357,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 60] = [
     ("compile-state.fx", COMPILE_STATE),
     ("compile-lift.fx", COMPILE_LIFT),
     ("compile.fx", COMPILER),
+    ("standard.fx", STANDARD_OPS),
 ];
 
 /// A `load-module` path naming a module file built in, in
@@ -373,7 +374,7 @@ pub fn built_in_module(path: &str) -> Option<&'static str> {
 /// The front end's files, by name, in the order [`front_end`] joins them;
 /// [`bootstrap_program`] puts `bootstrap.fx` after them. The module files
 /// built in, [`FRONT_END_MODULES`], are loaded by the first.
-pub const FRONT_END_FILES: [(&str, &str); 39] = [
+pub const FRONT_END_FILES: [(&str, &str); 38] = [
     ("reader.fx", READER),
     ("table.fx", TABLE),
     CHECKER_FILES[0],
@@ -411,7 +412,6 @@ pub const FRONT_END_FILES: [(&str, &str); 39] = [
     CHECKER_FILES[32],
     CHECKER_FILES[33],
     ("layout.fx", LAYOUT),
-    ("standard.fx", STANDARD_OPS),
     ("conductor.fx", CONDUCTOR),
 ];
 

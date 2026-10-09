@@ -9,7 +9,9 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; The compiler: its state, words, places and the code it emits.
+  (let* (;; The standard operations, generated from the lowering's table.
+         (standard (load-module "fx26:standard.fx"))
+         ;; The compiler: its state, words, places and the code it emits.
          (compile
           ((load-input "fx26:compile.fx")
            layout-module check-resolve-module check-env-module tables parser-module))
@@ -17,7 +19,7 @@
          (compile-lift
           ((load-input "fx26:compile-lift.fx")
            compile layout-module check-resolve-module check-program-module tables
-           standard-module))
+           standard))
          ;; The compiler, its state: words being made, members, twins, quotations.
          (compile-state
           ((load-input "fx26:compile-state.fx")
@@ -37,7 +39,7 @@
          (regcode
           ((load-input "fx26:regcode.fx")
            compile compile-exps compile-lift compile-plan
-           check-resolve-module tables layout-module standard-module compile-state))
+           check-resolve-module tables layout-module standard compile-state))
          ;; Register code, its expressions.
          (regcode-exps
           ((load-input "fx26:regcode-exps.fx")
