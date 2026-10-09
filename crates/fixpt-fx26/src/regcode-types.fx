@@ -152,6 +152,8 @@
 (define check-resolve-types (load-module "fx26:check-resolve-types.fx"))
 (define-type exp-letrec-bs (select check-resolve-types exp-letrec-bs))
 (define-type exps (select compile-types exps))
+;; The types it names, from the files that define them.
+(define-type syms (select compile-types syms))
 (define-type regcode-sig
   (moduleof (val r-const-globals (ref r-const-list @k))
             (val r-const-lists (ref r-const-list-table @k))
@@ -284,4 +286,20 @@
                        (rgen symbol renv)
                        unit))
             (val r-nth-int
-                 (subr (maxeff (read @globals) (read @k) spin) ((listof int @k) int) int))))
+                 (subr (maxeff (read @globals) (read @k) spin) ((listof int @k) int) int))
+            (val r-small? (subr pure (int) bool))
+            (val r-const-small
+                 (subr (maxeff (alloc @k) (read @globals)) (rconst) (listof int @k)))
+            (val r-name-args
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (syms rargs)
+                       rargs))
+            (val r-reg-moves
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (syms renv int)
+                       rmoves))
+            (val r-test-desc
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (renv exp)
+                       (listof rtest @k)))
+            (val r-same-exp? (subr (read (globals exp-end exp-start)) (exp exp) bool))))

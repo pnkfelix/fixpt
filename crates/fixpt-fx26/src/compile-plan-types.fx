@@ -46,6 +46,8 @@
 (define-type c-inlinables (select compile-exps-types c-inlinables))
 ;; The types it names, from the files that define them.
 (define-type exps (select compile-types exps))
+;; The types it names, from the files that define them.
+(define-type c-spec-copies (select compile-types c-spec-copies))
 (define-type compile-plan-sig
   (moduleof (val c-inline-limit int)
             (val c-inlines (ref c-inlinables @k))
@@ -104,4 +106,8 @@
             (val c-plan-child
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
                        (int symbol int)
-                       int))))
+                       int))
+            (val c-spec-copy-find
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (c-spec-copies tword syms int)
+                       c-spec-copies))))

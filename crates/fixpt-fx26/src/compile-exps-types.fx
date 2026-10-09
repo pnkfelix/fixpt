@@ -59,6 +59,10 @@
 (define-type code (select compile-types code))
 (define-type mod-items (select parser-types mod-items))
 (define-type patches (select compile-types patches))
+;; The types it names, from the files that define them.
+(define-type c-lift (select compile-types c-lift))
+(define-type c-lifting (select compile-types c-lifting))
+(define-type c-recs (select compile-types c-recs))
 (define-type compile-exps-sig
   (moduleof (val c-defining (ref (listof symbol @k) @k))
             (val c-word-name (ref (listof string @k) @k))
@@ -104,4 +108,15 @@
             (val c-made-word
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
                        (c-params exp cenv syms)
-                       (listof c-closing @k)))))
+                       (listof c-closing @k)))
+            (val c-fx-name (subr (read @globals) (symbol exp) string))
+            (val c-lift
+                 (subr (maxeff (alloc @k)
+                               (goto @y)
+                               (read @globals)
+                               (read @k)
+                               (read @t)
+                               (write @k)
+                               spin)
+                       (c-recs exp int int cenv bool)
+                       c-lifting))))

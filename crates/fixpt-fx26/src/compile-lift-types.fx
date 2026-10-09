@@ -43,4 +43,10 @@
             (val c-bind-lifted
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
                        (c-recs (listof int @k) cenv)
-                       cenv))))
+                       cenv))
+            (val c-span-key (subr pure (int int) int))
+            (val c-lift-added (subr (maxeff (read @globals) (read @k)) (int) syms))
+            (val c-lambda-captured
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (c-params exp cenv)
+                       syms))))

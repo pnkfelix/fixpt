@@ -210,4 +210,21 @@
             (val c-loops-only
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
                        (exp symbol int bool)
-                       bool))))
+                       bool))
+            (val c-lifts
+                 (ref (bloblet (fields (subr pure (int) int)
+                                       (subr pure (int int) bool)
+                                       (arrayof (listof (pairof int c-lift @k) acyclic) @k)
+                                       int)
+                               @k)
+                      @k))
+            (val c-spec-made
+                 (ref (bloblet (fields (subr pure (int) int)
+                                       (subr pure (int int) bool)
+                                       (arrayof (listof (pairof int c-spec-copies @k)
+                                                        acyclic)
+                                                @k)
+                                       int)
+                               @k)
+                      @k))
+            (val c-member? (subr (maxeff (read @globals) (read @k)) (syms symbol) bool))))

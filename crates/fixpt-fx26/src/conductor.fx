@@ -9,7 +9,12 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; Register code for modules: their products, and with.
+  (let* (;; Register code, its helpers.
+         (regcode-helpers
+          ((load-input "fx26:regcode-helpers.fx")
+           regcode-module compile-module compile-exps-module compile-plan-module
+           compile-lift-module check-resolve-module regcode-exps-module layout-module tables))
+         ;; Register code for modules: their products, and with.
          (regcode-modules
           ((load-input "fx26:regcode-modules.fx")
            regcode-module compile-module layout-module regcode-exps-module))
@@ -17,13 +22,13 @@
          (regcode-core
           ((load-input "fx26:regcode-core.fx")
            regcode-module compile-module compile-lift-module compile-exps-module
-           compile-plan-module regcode-exps-module layout-module regcode-helpers-module
+           compile-plan-module regcode-exps-module layout-module regcode-helpers
            regcode-modules))
          ;; Register code, its entry: a lambda as register code, or why none.
          (regcode-entry
           ((load-input "fx26:regcode-entry.fx")
            compile-module compile-exps-module compile-plan-module regcode-module
-           check-resolve-module regcode-exps-module regcode-core regcode-helpers-module
+           check-resolve-module regcode-exps-module regcode-core regcode-helpers
            layout-module))
          ;; The twins: register code beside each word.
          (compile-twins
@@ -45,7 +50,7 @@
           ((load-input "fx26:compile-programs.fx")
            compile-module compile-exps-module compile-plan-module compile-twins
            regcode-exps-module compile-inline regcode-module check-resolve-module tables
-           regcode-helpers-module layout-module))
+           regcode-helpers layout-module))
          ;; The assembler, of the encoders and the generated layouts.
          (native
           ((load-input "fx26:native.fx")

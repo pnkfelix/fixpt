@@ -70,4 +70,5 @@
             (val rop-return int)
             (val rop-invokeself int)
             (val rop-prim2imm int)
-            (val rop-lexical int)))
+            (val rop-lexical int)
+            (val rop-op2imm int)))
