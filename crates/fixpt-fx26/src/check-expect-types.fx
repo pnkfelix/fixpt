@@ -126,4 +126,5 @@
             (val k-bind-letrec
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (k-letrec-bs)
-                       unit))))
+                       unit))
+            (val k-letrec-not-lambda (subr (read @globals) (symbol) string))))

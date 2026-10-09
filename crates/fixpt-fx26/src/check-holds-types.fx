@@ -30,4 +30,6 @@
                                (write @t)
                                spin)
                        (int int int)
-                       unit))))
+                       unit))
+            (val k-id-hash (subr pure (int) int))
+            (val k-id=? (subr pure (int int) bool))))
