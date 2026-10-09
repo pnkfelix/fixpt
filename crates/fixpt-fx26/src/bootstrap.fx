@@ -18,6 +18,9 @@
 ;; What compiling may do, of the compiler's types (`compile-types.fx`).
 (define compile-types (load-module "fx26:compile-types.fx"))
 (define-effect compiles (select compile-types compiles))
+;; What checking may do, of the checker's types (`check-types-types.fx`).
+(define check-types-types (load-module "fx26:check-types-types.fx"))
+(define-effect checks (select check-types-types checks))
 (define-effect b-stages (maxeff parses checks compiles (comefrom @p) (comefrom @z) (comefrom @y)))
 
 ;; Every form of `text`, as the reader reads it, or none if it cannot.
