@@ -347,4 +347,20 @@
             (val c-this-name (ref symbol @k))
             (val c-this-loc (ref loc @k))
             (val c-has-param?
-                 (subr (maxeff (alloc @k) (read @globals) (read @k)) (c-params symbol) bool))))
+                 (subr (maxeff (alloc @k) (read @globals) (read @k)) (c-params symbol) bool))
+            (val c-lifted? (subr pure (loc) bool))
+            (val c-standard-words (ref (listof c-standard-word @k) @k))
+            (val c-adjoin
+                 (subr (maxeff (alloc @k) (read @globals) (read @k)) (syms symbol) syms))
+            (val c-bind-letrec
+                 (subr (maxeff (alloc @k) (read @globals) (read @k)) (c-recs syms) syms))
+            (val c-rec-exps
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin) (c-recs) exps))
+            (val c-calls-only-all
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (exps symbol int bool)
+                       bool))
+            (val c-called-only
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (exp symbol int)
+                       bool))))
