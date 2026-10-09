@@ -2024,3 +2024,13 @@ twice in a `module` is already an error (`k-defined-twice`): several
 `include`s and the module's own definitions all in one bucket, order
 free. The name `include` is R7RS's for textual inclusion, which FX-26
 does not have.
+
+The two would nest differently: `(extend mA mB)` puts `mB` under `mA`'s
+form, while `(module (include m1) (include m2) ...)` puts everything at
+one level. That is the meaning showing in the shape, not an
+inconsistency: `extend` is ordered (which side wins matters), so binary
+and nested, the later and deeper winning; `include`s are unordered, so
+side by side, as a `module`'s own definitions already are, an included
+name one more member of that set. If `extend` is ever n-ary,
+`(extend m1 m2 m3)` should be a left fold (the later wins), not "all at
+once", which would blur the two back together.
