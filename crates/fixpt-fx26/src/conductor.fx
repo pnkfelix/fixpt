@@ -9,12 +9,16 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; Register code, its helpers.
+  (let* (;; Register code, its places: registers, frame slots, environments.
+         (regcode-places
+          ((load-input "fx26:regcode-places.fx")
+           regcode-module compile-module layout-module regcode-exps-module))
+         ;; Register code, its helpers.
          (regcode-helpers
           ((load-input "fx26:regcode-helpers.fx")
            regcode-module compile-module compile-exps-module compile-plan-module
            compile-lift-module check-resolve-module regcode-exps-module layout-module tables
-           regcode-places-module))
+           regcode-places))
          ;; Register code for modules: their products, and with.
          (regcode-modules
           ((load-input "fx26:regcode-modules.fx")
@@ -24,7 +28,7 @@
           ((load-input "fx26:regcode-core.fx")
            regcode-module compile-module compile-lift-module compile-exps-module
            compile-plan-module regcode-exps-module layout-module regcode-helpers
-           regcode-modules regcode-places-module))
+           regcode-modules regcode-places))
          ;; Register code, its entry: a lambda as register code, or why none.
          (regcode-entry
           ((load-input "fx26:regcode-entry.fx")

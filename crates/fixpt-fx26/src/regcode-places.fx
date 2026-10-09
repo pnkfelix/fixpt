@@ -3,17 +3,95 @@
 ;;; and the places of a `letrec`'s lambdas. After `regcode-exps.fx` (split
 ;;; from that file, `TODO.md` §68).
 
+;; Its types, those it uses of the files before it, and the signatures of
+;; what it is given.
 ;; Its types (`regcode-exps-types.fx`, its file's before it), loaded before
 ;; the module so that they are not among its values; the module names what
 ;; it uses of them.
-(define regcode-exps-types (load-module "fx26:regcode-exps-types.fx"))
-;; A module (`TODO.md` §34: the front end into modules, a file at a time);
-;; what other files use re-exported after it.
-(define regcode-places-module (module
+(let* ((regcode-exps-types (load-module "fx26:regcode-exps-types.fx"))
+       (regcode-types (load-module "fx26:regcode-types.fx"))
+       (compile-types (load-module "fx26:compile-types.fx"))
+       (parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
+       (check-resolve-types (load-module "fx26:check-resolve-types.fx"))
+       (check-subst-types (load-module "fx26:check-subst-types.fx"))
+       (layout-types (load-module "fx26:layout-types.fx")))
+  ;; What it is given: the modules of the files before it that it uses.
+  (lambda ((regcode (select regcode-types regcode-sig))
+           (compile (select compile-types compile-sig))
+           (layout (select layout-types layout-sig))
+           (regcode-exps (select regcode-exps-types regcode-exps-sig)))
+    (module
 (define-type rscope (select regcode-exps-types rscope))
 (define-type rarg-patches (select regcode-exps-types rarg-patches))
 (define-type rplace (select regcode-exps-types rplace))
 (define-type rplaces (select regcode-exps-types rplaces))
+;; The types it uses of the files before it.
+(define a-e (with regcode-types a-e))
+(define a-lexical (with regcode-types a-lexical))
+(define a-slot (with regcode-types a-slot))
+(define a-v (with regcode-types a-v))
+(define-type bools (select regcode-types bools))
+(define-type rarg (select regcode-types rarg))
+(define-type rargs (select regcode-types rargs))
+(define-effect rbuilds (select regcode-types rbuilds))
+(define-effect rcompiles (select regcode-types rcompiles))
+(define-type renv (select regcode-types renv))
+(define-type rgen (select regcode-types rgen))
+(define rl-const (with regcode-types rl-const))
+(define rl-free (with regcode-types rl-free))
+(define rl-join (with regcode-types rl-join))
+(define rl-loop (with regcode-types rl-loop))
+(define rl-pending (with regcode-types rl-pending))
+(define rl-reg (with regcode-types rl-reg))
+(define rl-slot (with regcode-types rl-slot))
+(define-type rloc (select regcode-types rloc))
+(define-type rthis (select regcode-types rthis))
+(define at-loop (with compile-types at-loop))
+(define at-pending (with compile-types at-pending))
+(define-type cenv (select compile-types cenv))
+(define-effect compiles (select compile-types compiles))
+(define-type exps (select compile-types exps))
+(define-type patches (select compile-types patches))
+(define-type syms (select compile-types syms))
+(define e-lambda (with parser-types e-lambda))
+(define-type exp (select parser-types exp))
+(define-type names (select parser-types names))
+(define-type exp-let-bs (select check-resolve-types exp-let-bs))
+(define-type exp-letrec-bs (select check-resolve-types exp-letrec-bs))
+(define-type exp-params (select check-subst-types exp-params))
+;; What it uses of the modules it is given.
+(define r-bind (with regcode r-bind))
+(define r-const-cell (with regcode r-const-cell))
+(define r-decline (with regcode r-decline))
+(define r-local (with regcode r-local))
+(define r-new-label (with regcode r-new-label))
+(define r-nth-int (with regcode r-nth-int))
+(define r-opn (with regcode r-opn))
+(define r-opnn (with regcode r-opnn))
+(define r-this-added (with regcode r-this-added))
+(define r-where (with regcode r-where))
+(define c-count-exps (with compile c-count-exps))
+(define c-count-params (with compile c-count-params))
+(define c-lambda-of (with compile c-lambda-of))
+(define c-loops-only (with compile c-loops-only))
+(define cellular-closure-free0 (with layout cellular-closure-free0))
+(define rop-field (with layout rop-field))
+(define rop-load (with layout rop-load))
+(define rop-movereg (with layout rop-movereg))
+(define rop-reg (with layout rop-reg))
+(define rop-setfield (with layout rop-setfield))
+(define rop-stack (with layout rop-stack))
+(define r-budget (with regcode-exps r-budget))
+(define r-collects (with regcode-exps r-collects))
+(define r-const-into (with regcode-exps r-const-into))
+(define r-half-regs (with regcode-exps r-half-regs))
+(define r-keep (with regcode-exps r-keep))
+(define r-lexical-into (with regcode-exps r-lexical-into))
+(define r-local-loop (with regcode-exps r-local-loop))
+(define r-local-params (with regcode-exps r-local-params))
+(define r-param-places (with regcode-exps r-param-places))
+(define r-repeat (with regcode-exps r-repeat))
+(define r-slot-move (with regcode-exps r-slot-move))
 
 ;; Each of `inits`' flags, onto `after`: set where nothing after it calls;
 ;; and whether nothing from the first init on calls.
@@ -66,7 +144,6 @@
 
 (define r-bind-all (subr rcompiles (renv renv) renv)
   (lambda (bound env) (if (null? bound) env (r-bind-all (cdr bound) (cons (car bound) env)))))
-
 
 ;; Each value the lambda's closure captured, from the parameter's value at
 ;; `at`, field `j` on, kept, in order, onto `env` and `te`.
@@ -156,7 +233,6 @@
                   (begin (r-const-into g (r-const-cell c) k) (r-free-regs g (cdr fv) env k)))
                 (else y (begin (r-decline) (the patches nil)))))))))
 
-
 ;; Whether a join point's parameters `ps` are kept in registers: where its
 ;; body makes no call (or in a leaf), so many as leave half of them.
 (define r-join-in-regs? (subr rcompiles (rgen exp-params exp cenv) bool)
@@ -236,23 +312,4 @@
         (r-letrec-env (cdr bs) (cdr at) (r-bind (extract (car bs) 1) (rl-slot (car at)) env)))))
 
 (define r-letrec-te (subr rcompiles (exp-letrec-bs cenv) cenv)
-  (lambda (bs te) (if (null? bs) te (r-letrec-te (cdr bs) (r-local te (extract (car bs) 1))))))))
-
-(define r-in-regs (with regcode-places-module r-in-regs))
-(define r-place-value (with regcode-places-module r-place-value))
-(define r-get (with regcode-places-module r-get))
-(define r-reverse-env (with regcode-places-module r-reverse-env))
-(define r-members (with regcode-places-module r-members))
-(define r-local-all (with regcode-places-module r-local-all))
-(define r-bind-all (with regcode-places-module r-bind-all))
-(define r-spec-free (with regcode-places-module r-spec-free))
-(define r-loop-move (with regcode-places-module r-loop-move))
-(define r-field-args (with regcode-places-module r-field-args))
-(define r-sibling-env (with regcode-places-module r-sibling-env))
-(define r-append-arg (with regcode-places-module r-append-arg))
-(define r-free-args (with regcode-places-module r-free-args))
-(define r-free-regs (with regcode-places-module r-free-regs))
-(define r-join-places (with regcode-places-module r-join-places))
-(define r-letrec-te-j (with regcode-places-module r-letrec-te-j))
-(define r-letrec-patch (with regcode-places-module r-letrec-patch))
-(define r-letrec-env-j (with regcode-places-module r-letrec-env-j))
+  (lambda (bs te) (if (null? bs) te (r-letrec-te (cdr bs) (r-local te (extract (car bs) 1)))))))))

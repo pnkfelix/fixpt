@@ -130,6 +130,9 @@ pub const REGCODE_HELPERS: &str = include_str!("regcode-helpers.fx");
 /// `regcode-places-types.fx`: types and signatures, a module file of no state (`TODO.md` §68).
 pub const REGCODE_PLACES_TYPES: &str = include_str!("regcode-places-types.fx");
 
+/// `regcode-places.fx`: a `load-input` file, which the conductor applies (`TODO.md` §68).
+pub const REGCODE_PLACES: &str = include_str!("regcode-places.fx");
+
 /// Hash tables' types: a module file of no state (`TODO.md` §68).
 pub const TABLE_TYPES: &str = include_str!("table-types.fx");
 
@@ -194,9 +197,8 @@ pub const REGCODE: &str = include_str!("regcode.fx");
 /// Register code's other parts, in order: expressions; the helpers of the
 /// expressions' compiler proper; modules' helpers; it, one recursive group
 /// (modules and a leaf's tail calls in it); and the entry.
-pub const REGCODE_PARTS: [(&str, &str); 2] = [
+pub const REGCODE_PARTS: [(&str, &str); 1] = [
     ("regcode-exps.fx", include_str!("regcode-exps.fx")),
-    ("regcode-places.fx", include_str!("regcode-places.fx")),
 ];
 
 /// The standard operations the compiler written in FX-26 runs as runtime
@@ -274,7 +276,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 49] = [
+pub const FRONT_END_MODULES: [(&str, &str); 50] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("table-types.fx", TABLE_TYPES),
     ("compile-programs-types.fx", COMPILE_PROGRAMS_TYPES),
@@ -324,6 +326,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 49] = [
     ("regcode-modules.fx", REGCODE_MODULES),
     ("regcode-helpers.fx", REGCODE_HELPERS),
     ("regcode-places-types.fx", REGCODE_PLACES_TYPES),
+    ("regcode-places.fx", REGCODE_PLACES),
 ];
 
 /// A `load-module` path naming a module file built in, in
@@ -340,7 +343,7 @@ pub fn built_in_module(path: &str) -> Option<&'static str> {
 /// The front end's files, by name, in the order [`front_end`] joins them;
 /// [`bootstrap_program`] puts `bootstrap.fx` after them. The module files
 /// built in, [`FRONT_END_MODULES`], are loaded by the first.
-pub const FRONT_END_FILES: [(&str, &str); 46] = [
+pub const FRONT_END_FILES: [(&str, &str); 45] = [
     ("reader.fx", READER),
     ("table.fx", TABLE),
     CHECKER_FILES[0],
@@ -385,7 +388,6 @@ pub const FRONT_END_FILES: [(&str, &str); 46] = [
     COMPILER_PARTS[2],
     ("regcode.fx", REGCODE),
     REGCODE_PARTS[0],
-    REGCODE_PARTS[1],
     ("conductor.fx", CONDUCTOR),
 ];
 

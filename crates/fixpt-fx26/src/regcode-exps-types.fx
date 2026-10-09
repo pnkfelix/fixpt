@@ -217,4 +217,18 @@
             (val r-inline-of
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
                        (int int renv exp int)
-                       (listof rinline @k)))))
+                       (listof rinline @k)))
+            (val r-slot-move
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                       (rgen int int)
+                       unit))
+            (val r-repeat
+                 (subr (maxeff (alloc @k) (read @globals) spin) (bool int bools) bools))
+            (val r-half-regs int)
+            (val r-budget
+                 (subr (maxeff (alloc @k) (read @globals) (read @k)) (bools int) bools))
+            (val r-local-loop (subr (maxeff (alloc @k) (read @globals)) (cenv symbol) cenv))
+            (val r-param-places
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k) spin)
+                       (rgen exp-params bool)
+                       rlocs))))
