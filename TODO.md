@@ -1904,4 +1904,14 @@ Phase 1, the types out, one module at a time; phase 2, the conversion.
   one still says, in its effect, that it reads it. `fixpt check` on the
   front end shows 1.17 MB, from 1.9; with lines on, 182.5 M words and
   the FX check 1070 ms.
+- Phase 2, the back end (the user's order, 2026-10-09: the native
+  assembler and what it uses; then register code; then the compiler,
+  `standard.fx` and `layout.fx`; then the checker, backwards; a commit a
+  file). `native.fx` (2026-10-09): a `load-input` file whose module has
+  state (the assembler's arrays), made by the conductor of `arm64-module`,
+  `layout-module` and `native-layout-module`, each typed by a signature of
+  the names it uses (`arm64-sig`, `layout-sig`, `native-layout-sig`, made
+  from their printed types); its own types in `native-types.fx`, with
+  `native-sig`. The two layouts are generated, so their signatures are in
+  files beside them, written by hand. 171.8 M words, from 171.0.
 

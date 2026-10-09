@@ -14,10 +14,15 @@
          (eval-prims ((load-input "fx26:eval-prims.fx") eval-values tables check-types-module))
          (eval-core
           ((load-input "fx26:eval-core.fx")
-           eval-values eval-prims check-env-module check-resolve-module)))
-    ;; What Rust calls of them (`syn.rs`, `session.rs`).
+           eval-values eval-prims check-env-module check-resolve-module))
+         ;; The assembler, of the encoders and the generated layouts.
+         (native
+          ((load-input "fx26:native.fx") arm64-module layout-module native-layout-module)))
+    ;; What Rust and `bootstrap.fx` call of them (`syn.rs`, `session.rs`).
     (product (run-checked (with eval-core run-checked))
-             (run-program (with eval-core run-program)))))
+             (run-program (with eval-core run-program))
+             (native-assemble (with native native-assemble)))))
 
 (define run-checked (extract front-end-entries run-checked))
 (define run-program (extract front-end-entries run-program))
+(define native-assemble (extract front-end-entries native-assemble))

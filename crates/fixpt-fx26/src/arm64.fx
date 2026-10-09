@@ -17,13 +17,15 @@
 
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
+;; Its types (`arm64-types.fx`), loaded before the module so that they are
+;; not among its values; the module names what it uses of them.
+(define arm64-types (load-module "fx26:arm64-types.fx"))
 (define arm64-module (module
-;; What the encoders do: read the encoders, and count down.
-(define-effect encodes (maxeff (read @globals) spin))
-;; The encoders of two, three and four operands.
-(define-type arm-op2 (subr encodes (int int) int))
-(define-type arm-op3 (subr encodes (int int int) int))
-(define-type arm-op4 (subr encodes (int int int int) int))
+(define-effect encodes (select arm64-types encodes))
+(define-type arm-op2 (select arm64-types arm-op2))
+(define-type arm-op3 (select arm64-types arm-op3))
+(define-type arm-op4 (select arm64-types arm-op4))
+(define-type arm-code (select arm64-types arm-code))
 
 ;; `acc` times 2 to the `n`.
 (define arm-times-pow2 (subr encodes (int int) int)
@@ -155,7 +157,6 @@
 (define arm-movk arm-op3 (lambda (d imm16 hw) (arm-mov16 #xF2800000 d imm16 hw)))
 ;; Any non-negative 64-bit constant below 2^60 (a fixnum's range): `movz`,
 ;; then a `movk` for each other nonzero 16 bits, low to high.
-(define-type arm-code (listof int @k))
 (define arm-mov-imm64 (subr (maxeff (read @globals) (alloc @k) spin) (int int) arm-code)
   (lambda (d v)
     (letrec ((ks (subr (maxeff (read @globals) (alloc @k) spin) (int int) arm-code)

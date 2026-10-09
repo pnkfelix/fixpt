@@ -54,6 +54,19 @@ pub const CHECK_GENERATIVE_TYPES: &str = include_str!("check-generative-types.fx
 /// The types of `check-resolve.fx`: a module file of no state (`TODO.md` §68).
 pub const CHECK_RESOLVE_TYPES: &str = include_str!("check-resolve-types.fx");
 
+/// The types of `arm64.fx`: a module file of no state (`TODO.md` §68).
+pub const ARM64_TYPES: &str = include_str!("arm64-types.fx");
+
+/// The types of `native.fx`: a module file of no state (`TODO.md` §68).
+pub const NATIVE_TYPES: &str = include_str!("native-types.fx");
+
+/// The signature of `layout.fx` as its clients use it (`TODO.md` §68).
+pub const LAYOUT_TYPES: &str = include_str!("layout-types.fx");
+
+/// The signature of `native-layout.fx` as its clients use it (`TODO.md`
+/// §68).
+pub const NATIVE_LAYOUT_TYPES: &str = include_str!("native-layout-types.fx");
+
 /// Hash tables' types: a module file of no state (`TODO.md` §68).
 pub const TABLE_TYPES: &str = include_str!("table-types.fx");
 
@@ -139,7 +152,8 @@ pub const ARM64: &str = include_str!("arm64.fx");
 pub const NATIVE_LAYOUT: &str = include_str!("native-layout.fx");
 
 /// Words compiled to machine code, in FX-26: the hand-encoded machine's
-/// `assemble_word`, over [`ARM64`].
+/// `assemble_word`, over [`ARM64`]. A `load-input` file, applied by the
+/// conductor.
 pub const NATIVE: &str = include_str!("native.fx");
 
 /// The checker written in FX-26, over the parser's trees, in files of its
@@ -199,9 +213,13 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 21] = [
+pub const FRONT_END_MODULES: [(&str, &str); 26] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("table-types.fx", TABLE_TYPES),
+    ("native-types.fx", NATIVE_TYPES),
+    ("arm64-types.fx", ARM64_TYPES),
+    ("layout-types.fx", LAYOUT_TYPES),
+    ("native-layout-types.fx", NATIVE_LAYOUT_TYPES),
     ("check-resolve-types.fx", CHECK_RESOLVE_TYPES),
     ("check-generative-types.fx", CHECK_GENERATIVE_TYPES),
     ("check-subst-types.fx", CHECK_SUBST_TYPES),
@@ -221,6 +239,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 21] = [
     ("eval-values.fx", EVAL_VALUES),
     ("eval-prims.fx", EVAL_PRIMS),
     ("eval-core.fx", EVAL_CORE),
+    ("native.fx", NATIVE),
 ];
 
 /// A `load-module` path naming a module file built in, in
@@ -237,7 +256,7 @@ pub fn built_in_module(path: &str) -> Option<&'static str> {
 /// The front end's files, by name, in the order [`front_end`] joins them;
 /// [`bootstrap_program`] puts `bootstrap.fx` after them. The module files
 /// built in, [`FRONT_END_MODULES`], are loaded by the first.
-pub const FRONT_END_FILES: [(&str, &str); 54] = [
+pub const FRONT_END_FILES: [(&str, &str); 53] = [
     ("reader.fx", READER),
     ("table.fx", TABLE),
     CHECKER_FILES[0],
@@ -290,7 +309,6 @@ pub const FRONT_END_FILES: [(&str, &str); 54] = [
     COMPILER_DRIVER[1],
     ("arm64.fx", ARM64),
     ("native-layout.fx", NATIVE_LAYOUT),
-    ("native.fx", NATIVE),
     ("conductor.fx", CONDUCTOR),
 ];
 
