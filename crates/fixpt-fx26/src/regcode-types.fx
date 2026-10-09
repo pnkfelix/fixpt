@@ -143,3 +143,25 @@
 (define-type rleaf (productof (moves rmoves) (late rlate)))
 ;; A test's description: its comparison's name, and its operands.
 (define-type rtest (pairof string rlocs @k))
+
+;;; ------------------------------------------------------------ signatures
+
+;; What its clients use of it (`compile-programs.fx`).
+(define-type regcode-sig
+  (moduleof (val r-const-globals (ref r-const-list @k))
+            (val r-const-lists (ref r-const-list-table @k))
+            (val r-module-consts (ref (listof r-module-const @k) @k))
+            (val r-const-in
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (r-const-list wglobal)
+                       rconsts))
+            (val r-member-const
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (wglobal symbol)
+                       rconsts))
+            (val r-rev-consts
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (rconsts rconsts)
+                       rconsts))
+            (val c-length-consts
+                 (subr (maxeff (read @globals) (read @k) spin) (rconsts) int))))

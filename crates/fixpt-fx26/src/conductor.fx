@@ -15,6 +15,12 @@
          (eval-core
           ((load-input "fx26:eval-core.fx")
            eval-values eval-prims check-env-module check-resolve-module))
+         ;; The compiler's loop over a program's forms.
+         (compile-programs
+          ((load-input "fx26:compile-programs.fx")
+           compile-module compile-exps-module compile-plan-module compile-twins-module
+           regcode-exps-module compile-inline-module regcode-module check-resolve-module tables
+           regcode-helpers-module layout-module))
          ;; The assembler, of the encoders and the generated layouts.
          (native
           ((load-input "fx26:native.fx")
@@ -22,8 +28,20 @@
     ;; What Rust and `bootstrap.fx` call of them (`syn.rs`, `session.rs`).
     (product (run-checked (with eval-core run-checked))
              (run-program (with eval-core run-program))
-             (native-assemble (with native native-assemble)))))
+             (native-assemble (with native native-assemble))
+             (compile-forget-globals! (with compile-programs compile-forget-globals!))
+             (compile-keep-global! (with compile-programs compile-keep-global!))
+             (compile-new-global (with compile-programs compile-new-global))
+             (compile-global-cell (with compile-programs compile-global-cell))
+             (compile-checked (with compile-programs compile-checked))
+             (compile-program (with compile-programs compile-program)))))
 
 (define run-checked (extract front-end-entries run-checked))
 (define run-program (extract front-end-entries run-program))
 (define native-assemble (extract front-end-entries native-assemble))
+(define compile-forget-globals! (extract front-end-entries compile-forget-globals!))
+(define compile-keep-global! (extract front-end-entries compile-keep-global!))
+(define compile-new-global (extract front-end-entries compile-new-global))
+(define compile-global-cell (extract front-end-entries compile-global-cell))
+(define compile-checked (extract front-end-entries compile-checked))
+(define compile-program (extract front-end-entries compile-program))

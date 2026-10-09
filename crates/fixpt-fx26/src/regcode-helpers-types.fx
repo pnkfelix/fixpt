@@ -33,3 +33,9 @@
 ;; What `r-operands` makes of its second operand: an immediate, or the
 ;; register it is in, in a list.
 (define-type roperands (productof (1 wcells) (2 (listof int @k))))
+
+;;; ------------------------------------------------------------ signatures
+
+;; What its clients use of it (`compile-programs.fx`).
+(define-type regcode-helpers-sig
+  (moduleof (val r-const-list? (subr pure (rconst) bool))))

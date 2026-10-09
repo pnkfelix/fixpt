@@ -51,3 +51,39 @@
 (define-type c-twin
   (productof (1 tword) (2 c-params) (3 exp) (4 cenv) (5 (listof c-this @k))
              (6 (listof symbol @k)) (7 (listof c-made @k)) (8 (listof c-copy-twin @k))))
+
+;;; ------------------------------------------------------------ signatures
+
+;; What its clients use of it (`compile-programs.fx`).
+;; The types it names, from the files that define them.
+(define-type code (select compile-types code))
+(define-type mod-items (select parser-types mod-items))
+(define-type patches (select compile-types patches))
+(define-type compile-exps-sig
+  (moduleof (val c-defining (ref (listof symbol @k) @k))
+            (val c-word-name (ref (listof string @k) @k))
+            (val c-module-members (ref (listof c-inlinables @k) @k))
+            (val c-module-values
+                 (subr (maxeff (alloc @k) (read @globals)) (mod-items) c-mvals))
+            (val c-made-now (ref (listof c-made @k) @k))
+            (val c-made-reuse (ref (listof c-made @k) @k))
+            (val c-exp
+                 (subr (maxeff (alloc @k)
+                               (goto @y)
+                               (read @globals)
+                               (read @k)
+                               (read @t)
+                               (write @k)
+                               spin)
+                       (exp cenv int code bool)
+                       unit))
+            (val c-lambda
+                 (subr (maxeff (alloc @k)
+                               (goto @y)
+                               (read @globals)
+                               (read @k)
+                               (read @t)
+                               (write @k)
+                               spin)
+                       (c-params exp cenv int code syms c-region)
+                       patches))))

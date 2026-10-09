@@ -112,3 +112,68 @@
 ;; no one sees the knot tied. A name used only in calls of itself that are
 ;; loops is not captured at all.
 (define-type patches (listof (pairof int int @k) @k))
+
+;;; ------------------------------------------------------------ signatures
+
+;; What its clients use of it (`compile-programs.fx`).
+;; The types it names, from the files that define them.
+(define-type k-facts (select check-env-types k-facts))
+(define-type compile-sig
+  (moduleof (val c-frozen-define-at
+                 (subr (maxeff (read @globals) (read @k)) (int int) bool))
+            (val c-tag
+                 (prompt-tag cresult
+                             cresult
+                             (maxeff (alloc @k)
+                                     (read @globals)
+                                     (read @k)
+                                     (read @t)
+                                     (write @k)
+                                     spin)
+                             @y))
+            (val c-op
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                       (code int)
+                       unit))
+            (val c-op1
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                       (code int wcell)
+                       unit))
+            (val c-lit
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                       (code wcell)
+                       unit))
+            (val c-assemble
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k) spin)
+                       (code symbol)
+                       tword))
+            (val c-this-params (ref int @k))
+            (val c-genv-index
+                 (ref (bloblet (fields (subr pure (symbol) int)
+                                       (subr pure (symbol symbol) bool)
+                                       (arrayof (listof (pairof symbol c-globals-made @k)
+                                                        acyclic)
+                                                @k)
+                                       int)
+                               @k)
+                      @k))
+            (val c-genv-count (ref int @k))
+            (val c-genv (ref int @k))
+            (val c-global-find
+                 (subr (maxeff (alloc @k) (read @globals) (read @k)) (symbol int) c-found))
+            (val c-genv-push!
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                       (symbol int wglobal)
+                       unit))
+            (val c-where
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (cenv symbol)
+                       c-found))
+            (val c-set-facts!
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) (read @t) (write @k))
+                       (k-facts)
+                       unit))
+            (val c-lambda-of
+                 (subr (maxeff (alloc @k) (read @globals)) (exp) (listof exp @k)))
+            (val c-mentions?
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin) (exp symbol) bool))))

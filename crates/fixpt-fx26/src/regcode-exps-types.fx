@@ -50,3 +50,18 @@
 (define-type rplace (pairof rlocs int @k))
 ;; Each binding's place, in a list; none for one that is no join point.
 (define-type rplaces (listof (listof rplace @k) @k))
+
+;;; ------------------------------------------------------------ signatures
+
+;; What its clients use of it (`compile-programs.fx`).
+(define-type regcode-exps-sig
+  (moduleof (val c-writes (ref c-write-table @k))
+            (val c-form-writes (ref c-globals @k))
+            (val c-wrote!
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k) spin)
+                       (wglobal)
+                       unit))
+            (val r-inline-named
+                 (subr (maxeff (alloc @k) (read @globals) (read @k))
+                       ((listof c-inline acyclic) symbol int int)
+                       (listof c-inline acyclic)))))

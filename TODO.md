@@ -1933,4 +1933,13 @@ Phase 1, the types out, one module at a time; phase 2, the conversion.
   `compile-programs`, each in `X-types.fx`, loaded before its module
   (`compile-twins`, `regcode-core`, `layout` and `standard` have none).
   172.7 M words, from 171.1.
+- `compile-programs.fx` (2026-10-09), after its inlining was split out as
+  `compile-inline.fx` (by extraction, to stay under 1000 lines with its
+  imports): a `load-input` file whose module has state, given eleven
+  modules, each typed by a signature of the names it uses, kept in the
+  module's types file and grown as clients convert (`mksig.py`): types,
+  effects and constructors come from the types files, values from the
+  modules; a name both a type and a value is imported as both. The
+  conductor names its six entry points for Rust and `bootstrap.fx`.
+  173.4 M words, from 172.7.
 

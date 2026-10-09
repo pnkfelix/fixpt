@@ -38,3 +38,47 @@
 ;; the procedure, the lambda, the procedure's global, the names the
 ;; lambda's closure captures, the globals it sees, and the copy's context.
 (define-type c-copy-at (productof (1 c-special) (2 exp) (3 wglobal) (4 syms) (5 int) (6 int)))
+
+;;; ------------------------------------------------------------ signatures
+
+;; What its clients use of it (`compile-programs.fx`).
+;; The types it names, from the files that define them.
+(define-type c-inlinables (select compile-exps-types c-inlinables))
+(define-type compile-plan-sig
+  (moduleof (val c-inline-limit int)
+            (val c-inlines (ref c-inlinables @k))
+            (val c-inlines-of
+                 (subr (maxeff (read @globals) (read @k)) (symbol) c-inlinables))
+            (val c-note-inline!
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                       (c-inline)
+                       unit))
+            (val c-forget-inline!
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                       (symbol)
+                       unit))
+            (val c-unrolls
+                 (ref (bloblet (fields (subr pure (symbol) int)
+                                       (subr pure (symbol symbol) bool)
+                                       (arrayof (listof (pairof symbol c-inlinables @k)
+                                                        acyclic)
+                                                @k)
+                                       int)
+                               @k)
+                      @k))
+            (val c-specials (ref c-specializables @k))
+            (val c-drop-special
+                 (subr (maxeff (alloc @k) (read @globals) (read @k))
+                       (c-specializables symbol)
+                       c-specializables))
+            (val c-inline-room (subr (maxeff (read @globals) spin) (exp int) int))
+            (val c-plan-top
+                 (subr (maxeff (alloc @k)
+                               (goto @y)
+                               (read @globals)
+                               (read @k)
+                               (read @t)
+                               (write @k)
+                               spin)
+                       (exp)
+                       unit))))
