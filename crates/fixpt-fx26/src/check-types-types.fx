@@ -337,4 +337,6 @@
    (val k-arrow-vars (ref (listof (pairof int int @t) acyclic) @t))
    (val k-bounds (ref k-bounded @t))
    (val k-outers (ref k-nesting @t))
-   (val k-gens (ref (listof k-gen acyclic) @t))))
+   (val k-gens (ref (listof k-gen acyclic) @t))
+   (val k-arrow-parts
+        (subr (maxeff (read @globals) (read @t)) (int) (listof k-arrow-kind acyclic)))))

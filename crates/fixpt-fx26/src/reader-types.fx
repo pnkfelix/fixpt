@@ -21,4 +21,5 @@
             (val in-loaded
                  (subr (maxeff (read @globals) (read @s) spin)
                        (loaded-files int string int)
-                       string))))
+                       string))
+            (val syn-head (subr pure (syn) symbol))))

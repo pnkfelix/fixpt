@@ -29,4 +29,14 @@
             (val k-same-shape-in
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int k-ids) int))
             (val k-member-holding
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int k-ids) int))))
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int k-ids) int))
+            (val k-union-of
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (k-ids int int)
+                       int))))

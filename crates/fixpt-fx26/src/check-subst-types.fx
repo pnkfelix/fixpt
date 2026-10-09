@@ -55,4 +55,12 @@
             (val k-binder-desc
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (int int)
+                       k-desc))
+            (val k-note-closed
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (int)
+                       int))
+            (val k-apply-fun
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (int k-descs)
                        k-desc))))
