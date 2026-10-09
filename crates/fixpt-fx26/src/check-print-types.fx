@@ -91,4 +91,6 @@
             (val k-tail-size (subr (maxeff (read @globals) (read @t)) (k-size) k-size))
             (val k-kind-text
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int) string))
-            (val k-place? (subr (maxeff (read @globals) (read @t)) (k-region) bool))))
+            (val k-place? (subr (maxeff (read @globals) (read @t)) (k-region) bool))
+            (val k-type-is-var?
+                 (subr (maxeff (read @globals) (read @t) spin) (int int) bool))))

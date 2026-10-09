@@ -90,4 +90,14 @@
             (val k-effect-desc
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (k-eff)
+                       int))
+            (val k-parse-kind
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (syn)
                        int))))

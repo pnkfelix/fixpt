@@ -9,7 +9,12 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; Resolving the trees' descriptions.
+  (let* (;; Define-generative, read.
+         (check-generative
+          ((load-input "fx26:check-generative.fx")
+           check-types-module check-holds-module check-env-module check-print-module
+           check-read-module check-read-descs-module parser-module))
+         ;; Resolving the trees' descriptions.
          (check-resolve
           ((load-input "fx26:check-resolve.fx")
            check-types-module check-subst-module check-effects-module check-env-module
@@ -153,7 +158,7 @@
          (check-proofs
           ((load-input "fx26:check-proofs.fx")
            check-types-module check-resolve check-env-module check-calls
-           check-generative-module check-read-descs-module check-errors check-read-module
+           check-generative check-read-descs-module check-errors check-read-module
            check-subtype check-modules check-infer check-terminate
            check-print-module tables parser-module check-sc-graphs check-sub-env
            check-modules-read))
@@ -161,7 +166,7 @@
          (check-program
           ((load-input "fx26:check-program.fx")
            check-types-module check-syntax-module check-effects-module check-env-module
-           check-proofs check-rules check-generative-module
+           check-proofs check-rules check-generative
            check-read-descs-module check-resolve check-errors
            check-terminate check-print-module check-letrec check-read-module
            check-expect check-modules check-modorder check-subst-module
