@@ -3,9 +3,52 @@
 ;;; file's own, and printing follows it. After `check-types.fx`; part of
 ;;; the checker, `check-types.fx` first.
 
-;; A module (`TODO.md` §34: the front end into modules, a file at a time);
-;; what other files use re-exported after it.
-(define check-effects-module (module
+;; Its types, those it uses of the files before it, and the signatures of
+;; what it is given.
+(let* ((check-types-types (load-module "fx26:check-types-types.fx")))
+  ;; What it is given: the modules of the files before it that it uses.
+  (lambda ((check-types (select check-types-types check-types-sig)))
+    (module
+
+;; The types it uses of the files before it.
+(define a-alloc (with check-types-types a-alloc))
+(define a-app (with check-types-types a-app))
+(define a-await (with check-types-types a-await))
+(define a-comefrom (with check-types-types a-comefrom))
+(define a-goto (with check-types-types a-goto))
+(define a-read (with check-types-types a-read))
+(define a-spin (with check-types-types a-spin))
+(define a-var (with check-types-types a-var))
+(define a-write (with check-types-types a-write))
+(define cv-cellular (with check-types-types cv-cellular))
+(define cv-fx (with check-types-types cv-fx))
+(define cv-native (with check-types-types cv-native))
+(define cv-var (with check-types-types cv-var))
+(define dc (with check-types-types dc))
+(define de (with check-types-types de))
+(define dr (with check-types-types dr))
+(define dz (with check-types-types dz))
+(define-type k-atom (select check-types-types k-atom))
+(define-type k-conv (select check-types-types k-conv))
+(define-type k-desc (select check-types-types k-desc))
+(define-type k-descs (select check-types-types k-descs))
+(define-type k-eff (select check-types-types k-eff))
+(define-type k-region (select check-types-types k-region))
+(define-type k-size (select check-types-types k-size))
+(define-type k-terms (select check-types-types k-terms))
+(define-effect kreads (select check-types-types kreads))
+(define r-const (with check-types-types r-const))
+(define r-fresh (with check-types-types r-fresh))
+(define r-frozen (with check-types-types r-frozen))
+(define r-global (with check-types-types r-global))
+(define r-globals (with check-types-types r-globals))
+(define r-heap (with check-types-types r-heap))
+(define r-var (with check-types-types r-var))
+(define sz-finite (with check-types-types sz-finite))
+(define sz-lin (with check-types-types sz-lin))
+;; What it uses of the modules it is given.
+(define k-int-cmp (with check-types k-int-cmp))
+
 ;; Booleans in order, false first.
 (define k-bool-cmp (subr (read @globals) (bool bool) int)
   (lambda (f g) (k-int-cmp (if f 1 0) (if g 1 0))))
@@ -254,19 +297,5 @@
 (define k-one (subr (alloc @t) (k-atom) k-eff) (lambda (a) (cons a nil)))
 (define k-allocates? (subr (maxeff (read @globals) (read @t)) (k-eff) bool)
   (lambda (e) (cond ((null? e) #f) ((= (k-atom-rank (car e)) 2) #t) (else (k-allocates? (cdr e))))))
-))
-
-(define k-region=? (with check-effects-module k-region=?))
-(define k-atom-rank (with check-effects-module k-atom-rank))
-(define k-atom-region (with check-effects-module k-atom-region))
-(define k-has-region? (with check-effects-module k-has-region?))
-(define k-atom-var (with check-effects-module k-atom-var))
-(define k-conv-code (with check-effects-module k-conv-code))
-(define k-atom-with (with check-effects-module k-atom-with))
-(define k-insert (with check-effects-module k-insert))
-(define k-union (with check-effects-module k-union))
-(define k-contains? (with check-effects-module k-contains?))
-(define k-covered? (with check-effects-module k-covered?))
-(define k-within? (with check-effects-module k-within?))
-(define k-eff=? (with check-effects-module k-eff=?))
-(define k-one (with check-effects-module k-one))
+;; The module, the lambda given its modules, and the loads, closed.
+)))

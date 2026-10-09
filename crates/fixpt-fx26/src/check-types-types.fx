@@ -350,4 +350,5 @@
    (val k-desc-regions (subr (maxeff (alloc @t) (read @globals)) (k-descs) k-regions))
    (val k-pending-unions (ref k-pendings @t))
    (val k-links-below (ref int @t))
-   (val k-place-var? (subr (maxeff (read @globals) (read @t)) (int) bool))))
+   (val k-place-var? (subr (maxeff (read @globals) (read @t)) (int) bool))
+   (val k-int-cmp (subr pure (int int) int))))

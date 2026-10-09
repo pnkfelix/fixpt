@@ -9,12 +9,14 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; Its environment.
+  (let* (;; Effects.
+         (check-effects ((load-input "fx26:check-effects.fx") check-types-module))
+         ;; Its environment.
          (check-env ((load-input "fx26:check-env.fx") check-types-module tables))
          ;; The pieces of types and effects as shown.
          (check-print-parts
           ((load-input "fx26:check-print-parts.fx")
-           check-types-module check-effects-module check-env))
+           check-types-module check-effects check-env))
          ;; Types and effects shown as the Rust checker shows them.
          (check-print
           ((load-input "fx26:check-print.fx")
@@ -26,23 +28,23 @@
          ;; What a type holds.
          (check-holds
           ((load-input "fx26:check-holds.fx")
-           check-types-module check-effects-module check-env check-print tables
+           check-types-module check-effects check-env check-print tables
            check-print-parts))
          ;; Syntax read.
          (check-read
           ((load-input "fx26:check-read.fx")
-           check-types-module check-effects-module check-print check-env
+           check-types-module check-effects check-print check-env
            parser-module check-print-parts))
          ;; What reading descriptions from their syntax needs.
          (check-syntax
           ((load-input "fx26:check-syntax.fx")
            check-types-module check-read check-unions check-print
-           check-effects-module check-env check-holds parser-module
+           check-effects check-env check-holds parser-module
            check-print-parts))
          ;; Substitution.
          (check-subst
           ((load-input "fx26:check-subst.fx")
-           check-types-module check-effects-module check-holds check-read
+           check-types-module check-effects check-holds check-read
            check-print check-env tables parser-module check-print-parts))
          ;; What a test proves.
          (check-proving
@@ -53,14 +55,14 @@
          (check-read-helpers
           ((load-input "fx26:check-read-helpers.fx")
            check-types-module check-read check-env check-subst
-           check-print check-syntax check-effects-module parser-module
+           check-print check-syntax check-effects parser-module
            check-print-parts))
          ;; Reading types, one knot.
          (check-read-descs
           ((load-input "fx26:check-read-descs.fx")
            check-types-module check-read-helpers check-syntax check-read
            check-subst check-env check-print check-holds
-           check-proving check-effects-module check-unions parser-module check-print-parts))
+           check-proving check-effects check-unions parser-module check-print-parts))
          ;; Define-generative, read.
          (check-generative
           ((load-input "fx26:check-generative.fx")
@@ -69,13 +71,13 @@
          ;; Resolving the trees' descriptions.
          (check-resolve
           ((load-input "fx26:check-resolve.fx")
-           check-types-module check-subst check-effects-module check-env
+           check-types-module check-subst check-effects check-env
            check-read check-syntax check-print check-read-descs
            tables check-print-parts))
          ;; Masking an expression's effect.
          (check-mask
           ((load-input "fx26:check-mask.fx")
-           check-types-module check-resolve check-effects-module check-env
+           check-types-module check-resolve check-effects check-env
            check-print check-read check-print-parts))
          ;; Higher kinds.
          (check-kinds
@@ -100,19 +102,19 @@
          ;; The subtype test's memory.
          (check-sub-env
           ((load-input "fx26:check-sub-env.fx")
-           check-types-module check-print check-effects-module tables parser-module
+           check-types-module check-print check-effects tables parser-module
            check-print-parts))
          ;; The subtype test.
          (check-subtype
           ((load-input "fx26:check-subtype.fx")
            check-types-module check-resolve check-sub-env check-env
-           check-print check-effects-module check-proving check-subst
+           check-print check-effects check-proving check-subst
            check-modules check-print-parts))
          ;; The checker, expected types: checking against what is wanted.
          (check-expect
           ((load-input "fx26:check-expect.fx")
            check-types-module check-env check-subtype check-print
-           check-kinds check-resolve check-effects-module check-modules check-print-parts))
+           check-kinds check-resolve check-effects check-modules check-print-parts))
          ;; The checker, calls: which may reach their own caller.
          (check-calls
           ((load-input "fx26:check-calls.fx")
@@ -126,7 +128,7 @@
          ;; The checker, data: what the data kind admits.
          (check-data
           ((load-input "fx26:check-data.fx")
-           check-types-module check-print check-expect check-effects-module
+           check-types-module check-print check-expect check-effects
            check-subst check-print-parts))
          ;; The checker, bounds on type binders.
          (check-bounds
@@ -136,12 +138,12 @@
          (check-binders
           ((load-input "fx26:check-binders.fx")
            check-types-module check-data check-print check-env
-           check-subst check-resolve check-expect check-effects-module
+           check-subst check-resolve check-expect check-effects
            check-modules tables check-print-parts))
          ;; The checker, instantiation and tagcase.
          (check-infer
           ((load-input "fx26:check-infer.fx")
-           check-types-module check-resolve check-effects-module check-binders
+           check-types-module check-resolve check-effects check-binders
            check-env check-bounds check-print check-data
            check-read-descs check-kinds check-unions check-subtype
            check-holds check-expect check-subst check-sub-env
@@ -149,7 +151,7 @@
          ;; The checker, closing: what a definition leaves solved.
          (check-close
           ((load-input "fx26:check-close.fx")
-           check-types-module check-effects-module check-holds check-env
+           check-types-module check-effects check-holds check-env
            check-resolve check-mask check-calls check-print
            check-subst check-print-parts))
          ;; The checker, size-change graphs of calls.
@@ -170,7 +172,7 @@
          ;; The checker, letrec: a group's types found and checked.
          (check-letrec
           ((load-input "fx26:check-letrec.fx")
-           check-types-module check-expect check-effects-module check-print
+           check-types-module check-expect check-effects check-print
            check-env check-terminate check-print-parts))
          ;; The checker, facts: what the compiler is told.
          (check-facts
@@ -182,7 +184,7 @@
           ((load-input "fx26:check-synth.fx")
            check-types-module check-test-facts check-resolve check-env
            check-infer check-facts check-print check-bounds
-           check-expect check-errors check-effects-module check-mask
+           check-expect check-errors check-effects check-mask
            check-unions check-terminate check-holds check-subtype
            check-calls check-subst check-binders check-sub-env check-print-parts))
          ;; The checker, a module's order: its items as a letrec*, used only once made.
@@ -195,7 +197,7 @@
           ((load-input "fx26:check-module-rules.fx")
            check-types-module check-env check-print check-errors
            check-modules check-read check-modorder check-expect
-           check-effects-module check-subtype check-read-descs
+           check-effects check-subtype check-read-descs
            check-terminate check-letrec tables check-read-helpers check-print-parts))
          ;; The checker, its rules: the one recursive group over expressions.
          (check-rules
@@ -205,7 +207,7 @@
            check-dependent check-module-rules check-read-descs
            check-proving check-test-facts check-close check-print
            check-terminate check-modorder check-unions check-modules
-           check-effects-module check-data check-read check-mask
+           check-effects check-data check-read check-mask
            check-calls check-bounds check-holds check-subtype
            check-subst check-sc-graphs check-binders check-sub-env
            check-modules-read check-read-helpers check-print-parts))
@@ -220,7 +222,7 @@
          ;; The checker, its programs: forms checked in order, under redefinition.
          (check-program
           ((load-input "fx26:check-program.fx")
-           check-types-module check-syntax check-effects-module check-env
+           check-types-module check-syntax check-effects check-env
            check-proofs check-rules check-generative
            check-read-descs check-resolve check-errors
            check-terminate check-print check-letrec check-read
