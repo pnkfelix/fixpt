@@ -2067,3 +2067,13 @@ pass; the conductor's own names are untouched (they are its bindings, not
 the file's). To decide with it: one abbreviation per module for every
 file (so `ct` means the same everywhere), and how it sits with §69,
 which may remove many of these names outright, so perhaps after §69.
+
+## 71. A load cycle is an error, not a hang
+
+Found 2026-10-09 (§68 phase 2, `check-resolve.fx`): two types files that
+loaded each other through a third (`check-types-types.fx` →
+`check-modorder-types.fx` → `check-types-types.fx`) made the Rust
+checker's `parse_load` recurse through `parse_module_in` without end, past
+300 s with nothing said. Each load should know the paths open above it
+and refuse one already open, naming the cycle; in both parsers, agreeing,
+with a test program of two files that load each other.
