@@ -547,55 +547,19 @@ fn commented(out: &mut String, def: &str, comment: &str) {
     out.push_str(&format!("{line}\n{def}\n"));
 }
 
+/// The object layout as FX-26 definitions: `src/layout.fx` in `fixpt-fx26`,
+/// a module file, which the conductor loads (`TODO.md` §68).
 pub fn fx26_module() -> String {
-    fx26_as_module("layout-module", &fx26_definitions())
+    fx26_definitions()
 }
 
-/// A generated FX-26 file's text, its definitions made a module's (`TODO.md`
-/// §34: every front-end file a module): its opening `;;;` comment kept
-/// above, the rest wrapped in `(define module (module …))`, and each name
-/// it defines re-exported after it, for the files that use them. Used by
-/// every generator of a front-end file (this one's, the native machine's,
-/// the lowering's), so that regenerating keeps them modules.
-pub fn fx26_as_module(module: &str, text: &str) -> String {
-    let mut lines = text.lines().peekable();
-    let mut out = String::new();
-    while let Some(l) = lines.peek() {
-        if l.starts_with(";;;") || l.is_empty() {
-            out.push_str(l);
-            out.push('\n');
-            lines.next();
-        } else {
-            break;
-        }
-    }
-    let body: Vec<&str> = lines.collect();
-    let body = body.join("\n");
-    let body = body.trim_end();
-    out.push_str(";; A module (`TODO.md` §34: the front end into modules, a file at a time);\n");
-    out.push_str(";; what other files use re-exported after it.\n");
-    out.push_str(&format!("(define {module} (module\n"));
-    out.push_str(body);
-    // On the last line, unless that is a comment, which would hide it.
-    let last = body.rsplit('\n').next().unwrap_or("");
-    out.push_str(if last.contains(';') { "\n))\n\n" } else { "))\n\n" });
-    for l in body.lines() {
-        if let Some(rest) = l.strip_prefix("(define ") {
-            let name: String = rest.chars().take_while(|c| !c.is_whitespace() && *c != ')' && *c != '(').collect();
-            out.push_str(&format!("(define {name} (with {module} {name}))\n"));
-        }
-    }
-    out
-}
-
-/// The object layout's definitions, before [`fx26_as_module`] makes them a
-/// module's.
+/// The object layout's definitions.
 fn fx26_definitions() -> String {
     let mut out = String::new();
     out.push_str(";;; The object layout, generated from `crates/fixpt-heap/src/layout.rs`.\n");
     out.push_str(";;; Do not edit: change the table there and regenerate, with\n");
     out.push_str(";;;   FIXPT_BLESS=1 cargo test -p fixpt-fx26 --test layout\n");
-    out.push_str(";;; See `docs/object-model.md`.\n\n");
+    out.push_str(";;; See `docs/object-model.md`. A module file, which the conductor loads.\n\n");
     out.push_str(";;; Tags: the low three bits of every word.\n");
     for t in TAGS {
         commented(&mut out, &format!("(define tag-{} int {})", t.name, t.bits), t.meaning);

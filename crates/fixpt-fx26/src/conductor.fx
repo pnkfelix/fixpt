@@ -9,27 +9,29 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; The standard operations, generated from the lowering's table.
+  (let* (;; The object layout, generated from the heap's table.
+         (layout (load-module "fx26:layout.fx"))
+         ;; The standard operations, generated from the lowering's table.
          (standard (load-module "fx26:standard.fx"))
          ;; The compiler: its state, words, places and the code it emits.
          (compile
           ((load-input "fx26:compile.fx")
-           layout-module check-resolve-module check-env-module tables parser-module))
+           layout check-resolve-module check-env-module tables parser-module))
          ;; The compiler, lambda lifting and the standard operations.
          (compile-lift
           ((load-input "fx26:compile-lift.fx")
-           compile layout-module check-resolve-module check-program-module tables
+           compile layout check-resolve-module check-program-module tables
            standard))
          ;; The compiler, its state: words being made, members, twins, quotations.
          (compile-state
           ((load-input "fx26:compile-state.fx")
-           compile compile-lift layout-module check-resolve-module
+           compile compile-lift layout check-resolve-module
            check-program-module))
          ;; The compiler, its expressions: the recursive group over trees.
          (compile-exps
           ((load-input "fx26:compile-exps.fx")
            compile compile-lift compile-state check-resolve-module
-           check-types-module layout-module tables))
+           check-types-module layout tables))
          ;; The compiler, its plan of a form: what to inline, specialize and unroll.
          (compile-plan
           ((load-input "fx26:compile-plan.fx")
@@ -39,38 +41,38 @@
          (regcode
           ((load-input "fx26:regcode.fx")
            compile compile-exps compile-lift compile-plan
-           check-resolve-module tables layout-module standard compile-state))
+           check-resolve-module tables layout standard compile-state))
          ;; Register code, its expressions.
          (regcode-exps
           ((load-input "fx26:regcode-exps.fx")
            regcode compile compile-exps compile-lift
-           compile-plan check-resolve-module tables layout-module compile-state))
+           compile-plan check-resolve-module tables layout compile-state))
          ;; Register code, its places: registers, frame slots, environments.
          (regcode-places
           ((load-input "fx26:regcode-places.fx")
-           regcode compile layout-module regcode-exps))
+           regcode compile layout regcode-exps))
          ;; Register code, its helpers.
          (regcode-helpers
           ((load-input "fx26:regcode-helpers.fx")
            regcode compile compile-exps compile-plan
-           compile-lift check-resolve-module regcode-exps layout-module tables
+           compile-lift check-resolve-module regcode-exps layout tables
            regcode-places compile-state))
          ;; Register code for modules: their products, and with.
          (regcode-modules
           ((load-input "fx26:regcode-modules.fx")
-           regcode compile layout-module regcode-exps))
+           regcode compile layout regcode-exps))
          ;; Register code, its core: the one recursive group over expressions.
          (regcode-core
           ((load-input "fx26:regcode-core.fx")
            regcode compile compile-lift compile-exps
-           compile-plan regcode-exps layout-module regcode-helpers
+           compile-plan regcode-exps layout regcode-helpers
            regcode-modules regcode-places compile-state))
          ;; Register code, its entry: a lambda as register code, or why none.
          (regcode-entry
           ((load-input "fx26:regcode-entry.fx")
            compile compile-exps compile-plan regcode
            check-resolve-module regcode-exps regcode-core regcode-helpers
-           layout-module compile-state))
+           layout compile-state))
          ;; The twins: register code beside each word.
          (compile-twins
           ((load-input "fx26:compile-twins.fx")
@@ -91,11 +93,11 @@
           ((load-input "fx26:compile-programs.fx")
            compile compile-exps compile-plan compile-twins
            regcode-exps compile-inline regcode check-resolve-module tables
-           regcode-helpers layout-module compile-state))
+           regcode-helpers layout compile-state))
          ;; The assembler, of the encoders and the generated layouts.
          (native
           ((load-input "fx26:native.fx")
-           (load-input "fx26:arm64.fx") layout-module (load-module "fx26:native-layout.fx"))))
+           (load-input "fx26:arm64.fx") layout (load-module "fx26:native-layout.fx"))))
     ;; What Rust and `bootstrap.fx` call of them (`syn.rs`, `session.rs`).
     (product (run-checked (with eval-core run-checked))
              (run-program (with eval-core run-program))

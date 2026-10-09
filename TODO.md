@@ -1953,7 +1953,8 @@ Phase 1, the types out, one module at a time; phase 2, the conversion.
   moved into it first), `compile-plan.fx`, `compile-exps.fx` (its state
   split out first as `compile-state.fx`, to stay under 1000 lines),
   `compile-state.fx`, `compile-lift.fx`, `compile.fx`, `standard.fx`
-  (generated: a plain module file the conductor loads).
+  (generated: a plain module file the conductor loads), `layout.fx` (the
+  same). That ends the back end.
 - The FX checker's cost of converted files (2026-10-09): checking the
   front end had grown from about 1.0 s to 1.46 s over phase 2. Profiled
   (`probe_profile_check`, 4.8 G cells to 7.2 G), three walks along lists
