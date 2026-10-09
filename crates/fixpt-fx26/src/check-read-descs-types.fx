@@ -73,17 +73,6 @@
                                spin)
                        (syn int)
                        int))
-            (val k-binders-as-descs
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
-                       (k-binders)
-                       k-descs))
-            (val k-parts-reversed
-                 (subr (maxeff (alloc @t) (read @globals)) (k-parts k-parts) k-parts))
-            (val k-part-onto (subr (alloc @t) (symbol int k-parts) k-parts))
-            (val k-desc-kids (subr (maxeff (alloc @t) (read @globals)) (k-descs) k-ids))
-            (val k-ids-then (subr (maxeff (alloc @t) (read @globals)) (k-ids int) k-ids))
-            (val k-ty-kids
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int) k-ids))
             (val k-selects-in
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (int)
@@ -98,10 +87,6 @@
                                spin)
                        (k-syns)
                        k-ids))
-            (val k-lam
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
-                       (k-binders k-desc)
-                       int))
             (val k-parse-d
                  (subr (maxeff (alloc @t)
                                (goto @z)

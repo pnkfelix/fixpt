@@ -23,6 +23,7 @@
        (check-letrec-types (load-module "fx26:check-letrec-types.fx"))
        (check-dependent-types (load-module "fx26:check-dependent-types.fx"))
        (check-read-descs-types (load-module "fx26:check-read-descs-types.fx"))
+       (check-read-helpers-types (load-module "fx26:check-read-helpers-types.fx"))
        (check-proving-types (load-module "fx26:check-proving-types.fx"))
        (check-close-types (load-module "fx26:check-close-types.fx"))
        (check-print-types (load-module "fx26:check-print-types.fx"))
@@ -71,7 +72,8 @@
            (check-sc-graphs (select check-sc-graphs-types check-sc-graphs-sig))
            (check-binders (select check-binders-types check-binders-sig))
            (check-sub-env (select check-sub-env-types check-sub-env-sig))
-           (check-modules-read (select check-modules-read-types check-modules-read-sig)))
+           (check-modules-read (select check-modules-read-types check-modules-read-sig))
+           (check-read-helpers (select check-read-helpers-types check-read-helpers-sig)))
     (module
 
 ;; The types it uses of the files before it.
@@ -315,9 +317,9 @@
 (define k-saying (with check-module-rules k-saying))
 (define k-star-mistake (with check-module-rules k-star-mistake))
 (define k-vals-known (with check-module-rules k-vals-known))
-(define k-binders-as-descs (with check-read-descs k-binders-as-descs))
-(define k-part-onto (with check-read-descs k-part-onto))
-(define k-parts-reversed (with check-read-descs k-parts-reversed))
+(define k-binders-as-descs (with check-read-helpers k-binders-as-descs))
+(define k-part-onto (with check-read-helpers k-part-onto))
+(define k-parts-reversed (with check-read-helpers k-parts-reversed))
 (define k-call-te (with check-proving k-call-te))
 (define k-cert-len-has? (with check-test-facts k-cert-len-has?))
 (define k-length-arg (with check-test-facts k-length-arg))

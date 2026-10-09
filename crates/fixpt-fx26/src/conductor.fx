@@ -28,7 +28,8 @@
          ;; Higher kinds.
          (check-kinds
           ((load-input "fx26:check-kinds.fx")
-           check-types-module check-read-descs-module check-holds-module check-print-module))
+           check-types-module check-read-descs-module check-holds-module check-print-module
+           check-read-helpers-module))
          ;; What its errors say, and where.
          (check-errors
           ((load-input "fx26:check-errors.fx")
@@ -43,7 +44,7 @@
           ((load-input "fx26:check-modules.fx")
            check-types-module check-env-module check-kinds check-print-module
            check-read-module check-holds-module check-subst-module check-read-descs-module
-           parser-module))
+           parser-module check-read-helpers-module))
          ;; The subtype test's memory.
          (check-sub-env
           ((load-input "fx26:check-sub-env.fx")
@@ -68,7 +69,7 @@
          (check-dependent
           ((load-input "fx26:check-dependent.fx")
            check-types-module check-env-module check-modules check-read-descs-module
-           check-expect check-holds-module check-subst-module))
+           check-expect check-holds-module check-subst-module check-read-helpers-module))
          ;; The checker, data: what the data kind admits.
          (check-data
           ((load-input "fx26:check-data.fx")
@@ -90,7 +91,8 @@
            check-types-module check-resolve check-effects-module check-binders
            check-env-module check-bounds check-print-module check-data
            check-read-descs-module check-kinds check-unions-module check-subtype
-           check-holds-module check-expect check-subst-module check-sub-env))
+           check-holds-module check-expect check-subst-module check-sub-env
+           check-read-helpers-module))
          ;; The checker, closing: what a definition leaves solved.
          (check-close
           ((load-input "fx26:check-close.fx")
@@ -141,7 +143,7 @@
            check-types-module check-env-module check-print-module check-errors
            check-modules check-read-module check-modorder check-expect
            check-effects-module check-subtype check-read-descs-module
-           check-terminate check-letrec tables))
+           check-terminate check-letrec tables check-read-helpers-module))
          ;; The checker, its rules: the one recursive group over expressions.
          (check-rules
           ((load-input "fx26:check-rules.fx")
@@ -153,7 +155,7 @@
            check-effects-module check-data check-read-module check-mask
            check-calls check-bounds check-holds-module check-subtype
            check-subst-module check-sc-graphs check-binders check-sub-env
-           check-modules-read))
+           check-modules-read check-read-helpers-module))
          ;; The checker, its proofs: lemmas proved.
          (check-proofs
           ((load-input "fx26:check-proofs.fx")

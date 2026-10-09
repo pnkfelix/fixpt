@@ -23,6 +23,7 @@
        (check-expect-types (load-module "fx26:check-expect-types.fx"))
        (check-effects-types (load-module "fx26:check-effects-types.fx"))
        (check-read-descs-types (load-module "fx26:check-read-descs-types.fx"))
+       (check-read-helpers-types (load-module "fx26:check-read-helpers-types.fx"))
        (check-letrec-types (load-module "fx26:check-letrec-types.fx"))
        (table-types (load-module "fx26:table-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
@@ -39,7 +40,8 @@
            (check-read-descs (select check-read-descs-types check-read-descs-sig))
            (check-terminate (select check-terminate-types check-terminate-sig))
            (check-letrec (select check-letrec-types check-letrec-sig))
-           (tables (select table-types tables-sig)))
+           (tables (select table-types tables-sig))
+           (check-read-helpers (select check-read-helpers-types check-read-helpers-sig)))
     (module
 (define-type k-say (select check-module-rules-types k-say))
 (define-type k-made (select check-module-rules-types k-made))
@@ -95,7 +97,7 @@
 (define k-name-nat (with check-expect k-name-nat))
 (define k-one (with check-effects k-one))
 (define k-part-of (with check-subtype k-part-of))
-(define k-part-onto (with check-read-descs k-part-onto))
+(define k-part-onto (with check-read-helpers k-part-onto))
 (define k-termination (with check-terminate k-termination))
 (define k-with-latent (with check-letrec k-with-latent))
 (define table-ref (with tables table-ref))

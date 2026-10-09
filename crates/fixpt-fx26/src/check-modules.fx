@@ -28,6 +28,7 @@
        (check-kinds-types (load-module "fx26:check-kinds-types.fx"))
        (check-print-types (load-module "fx26:check-print-types.fx"))
        (check-read-descs-types (load-module "fx26:check-read-descs-types.fx"))
+       (check-read-helpers-types (load-module "fx26:check-read-helpers-types.fx"))
        (reader-types (load-module "fx26:reader-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-types (select check-types-types check-types-sig))
@@ -38,7 +39,8 @@
            (check-holds (select check-holds-types check-holds-sig))
            (check-subst (select check-subst-types check-subst-sig))
            (check-read-descs (select check-read-descs-types check-read-descs-sig))
-           (parser (select reader-types parser-sig)))
+           (parser (select reader-types parser-sig))
+           (check-read-helpers (select check-read-helpers-types check-read-helpers-sig)))
     (module
 (define-type k-rec-read (select check-modules-types k-rec-read))
 (define-type k-thunk-unit (select check-modules-types k-thunk-unit))
@@ -120,7 +122,7 @@
 (define k-subst (with check-subst k-subst))
 (define k-subst-memo (with check-subst k-subst-memo))
 (define k-selects-in (with check-read-descs k-selects-in))
-(define k-ty-kids (with check-read-descs k-ty-kids))
+(define k-ty-kids (with check-read-helpers k-ty-kids))
 (define syn-end (with parser syn-end))
 (define syn-start (with parser syn-start))
 

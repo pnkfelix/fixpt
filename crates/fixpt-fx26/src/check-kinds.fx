@@ -14,13 +14,15 @@
 ;; what it is given.
 (let* ((check-types-types (load-module "fx26:check-types-types.fx"))
        (check-read-descs-types (load-module "fx26:check-read-descs-types.fx"))
+       (check-read-helpers-types (load-module "fx26:check-read-helpers-types.fx"))
        (check-holds-types (load-module "fx26:check-holds-types.fx"))
        (check-print-types (load-module "fx26:check-print-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-types (select check-types-types check-types-sig))
            (check-read-descs (select check-read-descs-types check-read-descs-sig))
            (check-holds (select check-holds-types check-holds-sig))
-           (check-print (select check-print-types check-print-sig)))
+           (check-print (select check-print-types check-print-sig))
+           (check-read-helpers (select check-read-helpers-types check-read-helpers-sig)))
     (module
 
 ;; The types it uses of the files before it.
@@ -42,8 +44,8 @@
 (define k-gen-of (with check-types k-gen-of))
 (define k-new-dvar-of (with check-types k-new-dvar-of))
 (define k-ty-new (with check-types k-ty-new))
-(define k-binders-as-descs (with check-read-descs k-binders-as-descs))
-(define k-lam (with check-read-descs k-lam))
+(define k-binders-as-descs (with check-read-helpers k-binders-as-descs))
+(define k-lam (with check-read-helpers k-lam))
 (define k-fun-kind (with check-holds k-fun-kind))
 (define k-place? (with check-print k-place?))
 

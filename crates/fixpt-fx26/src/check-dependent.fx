@@ -18,6 +18,7 @@
        (parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
        (check-modules-types (load-module "fx26:check-modules-types.fx"))
        (check-read-descs-types (load-module "fx26:check-read-descs-types.fx"))
+       (check-read-helpers-types (load-module "fx26:check-read-helpers-types.fx"))
        (check-expect-types (load-module "fx26:check-expect-types.fx"))
        (check-subst-types (load-module "fx26:check-subst-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
@@ -27,7 +28,8 @@
            (check-read-descs (select check-read-descs-types check-read-descs-sig))
            (check-expect (select check-expect-types check-expect-sig))
            (check-holds (select check-holds-types check-holds-sig))
-           (check-subst (select check-subst-types check-subst-sig)))
+           (check-subst (select check-subst-types check-subst-sig))
+           (check-read-helpers (select check-read-helpers-types check-read-helpers-sig)))
     (module
 (define-type k-given-back (select check-dependent-types k-given-back))
 (define-type k-dependent (select check-dependent-types k-dependent))
@@ -67,8 +69,8 @@
 (define k-binding-names (with check-modules k-binding-names))
 (define k-check-apps-each (with check-modules k-check-apps-each))
 (define k-resolve-outside (with check-modules k-resolve-outside))
-(define k-ids-then (with check-read-descs k-ids-then))
-(define k-ty-kids (with check-read-descs k-ty-kids))
+(define k-ids-then (with check-read-helpers k-ids-then))
+(define k-ty-kids (with check-read-helpers k-ty-kids))
 (define k-name-nat (with check-expect k-name-nat))
 (define k-new-seen (with check-holds k-new-seen))
 (define k-seen? (with check-holds k-seen?))
