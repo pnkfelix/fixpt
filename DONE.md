@@ -1006,3 +1006,233 @@ place (`acyclic`) under an alias, which bounds do not choose: those in
 `check-print.fx`, `check-subtype.fx`, `check-terminate.fx` and `native.fx`
 (`reverse`'s result region there is fixed by nothing else).
 
+## 68. The front end as modules linked by a conductor (the user's, 2026-10-08)
+
+The front end is 57 files joined into one program, each a `(define
+X-module (module …))` followed by a wall of top-level re-exports (1,733
+names), which later files use as globals. Instead: `conductor.fx` makes
+each module once and passes it the modules it depends on; a module names
+what it uses of them, at its top, `(define name (with dep name))`.
+
+Decided with the user (2026-10-08):
+1. **Types in files of their own.** A module's datatypes, type aliases and
+   effects move into `X-types.fx`, a module file of no state (of the
+   module's regions, if it has some). The module loads it, and so may any
+   client: loads of a stateless file are interchangeable, FX-26's types
+   being structural. Only stateful modules are made once and passed.
+2. **Signatures beside them.** A module's interface as its clients use it,
+   `(define-type X-sig (moduleof …))`, lives in its types file; width
+   subtyping (M4) lets it list only what the clients use. Several such
+   files, not one.
+3. **A converted module** is a module file defining `make`, a `lambda`
+   over its dependencies, each typed by a signature; the conductor applies
+   it. Converted from the last file backwards, so that each one's clients
+   are converted before it, and its wall goes; only the names Rust calls
+   stay at top level, re-exported by the conductor.
+
+Phase 1, the types out, one module at a time; phase 2, the conversion.
+
+- Phase 1: `eager-reader-types.fx` (2026-10-08), the reader's effects,
+  aliases and `syn`, which `eager-reader.fx` loads at its regions.
+- Phase 1: `parser-types.fx` (2026-10-08), the parser's effects, `exp`,
+  `top`, `presult`, the trees' lists and the loaded files' types, loading
+  the reader's types (not the reader) for `syn`.
+- Phase 1: `table-types.fx` (2026-10-08), the tables' type families,
+  which the `tables` module loads. It found the FX printer showing a
+  family in a nested module's type by its own name, `(desc bucket bucket)`,
+  where the Rust one shows its `dlambda`: fixed (`k-show-comp`).
+- Phase 1: `check-types-types.fx` (2026-10-08), the checker's 45 core
+  types and effects (`k-ty`, `kstate`, `checks` ...), moved by a script
+  that takes a module's type items out and imports what they use from the
+  types files before it.
+- Phase 1: the types of `check-env`, `check-print`, `check-unions`,
+  `check-holds`, `check-read`, `check-syntax`, `check-subst`,
+  `check-generative` and `check-resolve` (2026-10-08), each in
+  `X-types.fx` (`check-effects`, `check-proving` and `check-read-descs`
+  have none). `check-read-types.fx`, which read descriptions, is renamed
+  `check-read-descs.fx`, so every types file is `X-types.fx`.
+- For phase 2 (2026-10-08): in a module, `(define x (with m x))` of a
+  module `m` in scope but not one of its items (a `lambda`'s parameter,
+  what a converted file is given) was refused as `x` using itself: the
+  order check knew a `with`'s names only for early items. Now a module
+  in scope binds its values' names there too, in both checkers
+  (`hazard_items`; `k-outer-mods`). Test: `modules/linked.fx`, a module
+  made of one it is given, typed by a signature from a file of them.
+- Phase 2, the pilot (2026-10-08): the evaluator. `eval-types.fx` holds
+  its types and the signatures of its own two modules as the others use
+  them; `eval-values.fx`, `eval-prims.fx` and `eval-core.fx` are module
+  files, each `make` over what it uses, typed by signatures beside the
+  types of the modules given (`check-types-sig`, `tables-sig`,
+  `check-env-sig`, `check-resolve-sig`); `conductor.fx`, last of the front
+  end, makes them in order, passing the top-level modules of the files
+  not converted yet, and names `run-checked` and `run-program` for Rust.
+  What it found:
+  - `evals` now says `spin`: what the evaluator is given is a module of
+    procedures over `val`, which a procedure may be given itself in, so a
+    call of an imported one is not known to end (`may_spin`, a recursive
+    type through a parameter). Honest for an evaluator; the checker's own
+    types have no procedures in them, so its modules will not feel it.
+  - A `proj` given an effect re-exported by `select`, `(proj f evals)`,
+    did not resolve it, in either checker: fixed (`check.rs`, `Proj`;
+    `check-expect.fx`, `k-select-fun`).
+  - A constructor imported from a types file, `(with eval-types o-unit)`,
+    is not known code, so a call of one may `spin` where its own module's
+    would not. Later, perhaps: an import of a known procedure from a
+    module as written is known.
+- Cost (2026-10-08, `fixpt bench --front-end`, fx M words, the
+  deterministic measure; times swing with the machine's load): 215 before
+  §68, 257 after the types files, 322 after the evaluator. Most of it
+  printing: the FX checker shows each top-level form's type, building the
+  string by appending (about 40 words a character), and module types had
+  grown, holding their types modules as values and the evaluator's
+  intermediate modules being bound at top level (2.1 MB shown). Now each
+  types file is loaded just before its module, not inside it, and the
+  conductor makes its modules in one `let*`, naming only what Rust calls:
+  1.3 MB shown, 297 M words. Left: every load of a types file is checked
+  again, and compiled again (`check-types-types.fx` 12 times, nesting the
+  parser's and the reader's): next, one check and one compiled body per
+  stateless file, shared by its loads.
+- Decided with the user (2026-10-08), and done: **`load-input`** and
+  **shared loads**. `(load-input "f")` is a file of one expression, its
+  value (Sheldon's `input`); `load-module` stays. Every load of a path is
+  one value, made once: the first defines a hidden global, `%shared:` and
+  the path from the program's directory (`input:` before it for a
+  `load-input`), before the form that loads it, and each load is that
+  global, which loaded files may see (`parse_load`; `parse-loaded`,
+  `parse-tops`). So making it must be pure, but for reading globals:
+  state is made by applying a `lambda` the file gives. Supersedes "two
+  loads, two modules" (b98e670) for values; abstract types are still
+  named by their variable. The driver reads each path once
+  (`supply_loaded_in`). The evaluator's three files are now `load-input`
+  files, a `let*` of the types files they use around the `lambda` that
+  makes the module, and `make` is gone. Cost: 241 M words (from 297).
+- Where the rest went (2026-10-08, measured back to back against the
+  commit before §68): with the FX checker's lines off, 168.3 M words
+  then and 170.5 now, the check 985 ms then and 1035 now. The whole
+  regression was printing: 47 M words before §68, 71 M after, as module
+  types and the hidden `%shared:` definitions (0.72 MB of the 1.9 MB
+  shown) are large. No compile reads the lines, so only a driver that
+  does makes them (`check-lines!`; `fixpt check`, the REPL, the agreement
+  tests): compiling the front end is 170.5 M words, the FX check about
+  1.0 s, from 215.7 and 1.15 s before §68.
+- The printer, for the drivers that read lines (the user's, 2026-10-08:
+  "build text at most once"): `k-show-ty` puts a type's pieces on a list
+  and joins them once (`k-pieces-string`), where each node appended its
+  children's text again; a cycle's `(mu %d …)` is known from the depths
+  met again below, not by searching the text shown (`k-mentions-token?`,
+  gone); and the tree of the scope's `define-type` names is kept across
+  lines while the scope and what its types resolve to stay
+  (`k-atree-now`; `k-links` counts the links made from the types a kept
+  tree may hold), where it was made again for each line. With lines on
+  (`FIXPT_BENCH_LINES=1 fixpt bench --front-end`): 237.6 M words to 189.1
+  and the FX check 1265 ms to 1120; printing costs 18.6 M words, from 67.
+- The hidden definitions of loaded files (`%shared:…`) have no line in
+  either checker (2026-10-09): the program does not name them, and their
+  types are as large as the modules they hold. A definition that loads
+  one still says, in its effect, that it reads it. `fixpt check` on the
+  front end shows 1.17 MB, from 1.9; with lines on, 182.5 M words and
+  the FX check 1070 ms.
+- Phase 2, the back end (the user's order, 2026-10-09: the native
+  assembler and what it uses; then register code; then the compiler,
+  `standard.fx` and `layout.fx`; then the checker, backwards; a commit a
+  file). `native.fx` (2026-10-09): a `load-input` file whose module has
+  state (the assembler's arrays), made by the conductor of `arm64-module`,
+  `layout-module` and `native-layout-module`, each typed by a signature of
+  the names it uses (`arm64-sig`, `layout-sig`, `native-layout-sig`, made
+  from their printed types); its own types in `native-types.fx`, with
+  `native-sig`. The two layouts are generated, so their signatures are in
+  files beside them, written by hand. 171.8 M words, from 171.0.
+- `native-layout.fx` (2026-10-09): no state and nothing given, so a plain
+  module file, its items only, which the conductor loads; its generator
+  (`fixpt_native::cellular::fx26_module`) writes it so, not wrapped in a
+  module re-exported.
+- `arm64.fx` (2026-10-09): no state and nothing given, but types of its
+  own, so a `load-input` file whose value is the module, its types file
+  loaded around it, `(let ((arm64-types …)) (module …))`; the conductor
+  loads it for `native.fx`. `tests/arm64.rs`, which called the encoders as
+  the front end's globals, compiles a program loading the file and naming
+  them. It found the compilers disagreeing on a load passed where a
+  narrower module is expected, the FX-26 compiler finding what a place is
+  narrowed to by the place, shared by a load's hidden definition and its
+  use: each now has a place of its own (`0c08e72`).
+- Phase 1 for register code and the compiler (2026-10-09): the types of
+  `compile`, `compile-lift`, `compile-exps`, `compile-plan`, `regcode`,
+  `regcode-exps`, `regcode-helpers`, `regcode-modules`, `regcode-entry` and
+  `compile-programs`, each in `X-types.fx`, loaded before its module
+  (`compile-twins`, `regcode-core`, `layout` and `standard` have none).
+  172.7 M words, from 171.1.
+- `compile-programs.fx` (2026-10-09), after its inlining was split out as
+  `compile-inline.fx` (by extraction, to stay under 1000 lines with its
+  imports): a `load-input` file whose module has state, given eleven
+  modules, each typed by a signature of the names it uses, kept in the
+  module's types file and grown as clients convert (`mksig.py`): types,
+  effects and constructors come from the types files, values from the
+  modules; a name both a type and a value is imported as both. The
+  conductor names its six entry points for Rust and `bootstrap.fx`.
+  173.4 M words, from 172.7.
+- Converted since, a commit each, as above (the tools: `to_input3.py`,
+  `mksig.py`, `lib_move.py`, `conductor_add.py`, `conductor_export.py` in
+  the session's scratch space): `compile-inline.fx`, `compile-twins.fx`,
+  `regcode-entry.fx`, `regcode-core.fx` (its size debt raised by its
+  imports alone, 1125 to 1415 lines: the user's, 2026-10-09),
+  `regcode-modules.fx`, `regcode-helpers.fx`, `regcode-places.fx` (split
+  from `regcode-exps.fx` to stay under 1000 lines), `regcode-exps.fx`,
+  `regcode.fx` (two definitions of `compile-lift.fx` outside its module
+  moved into it first), `compile-plan.fx`, `compile-exps.fx` (its state
+  split out first as `compile-state.fx`, to stay under 1000 lines),
+  `compile-state.fx`, `compile-lift.fx`, `compile.fx`, `standard.fx`
+  (generated: a plain module file the conductor loads), `layout.fx` (the
+  same). That ends the back end.
+- Phase 1 for the rest of the checker (2026-10-09): the types of
+  `check-modules`, `check-subtype`, `check-calls`, `check-dependent`,
+  `check-bounds`, `check-infer`, `check-terminate`, `check-test-facts`,
+  `check-letrec`, `check-synth`, `check-modorder`, `check-module-rules` and
+  `check-program` in `X-types.fx` files, and the printer's two newest in
+  `check-print-types.fx`. Then the checker's files, from the last
+  backwards; `check-rules.fx`, the checker's one recursive group, gets a
+  size debt entry for its imports alone, as `regcode-core.fx` (the user's,
+  2026-10-09).
+- Checker converted (a commit each): `check-program.fx` (its proofs
+  split out first as `check-proofs.fx`; the parser's procedures it uses,
+  which `reader.fx` names at top level, from `parser-module`, typed by
+  `parser-sig` in `reader-types.fx`), `check-proofs.fx`,
+  `check-rules.fx` (its size debt: 1346 lines, its imports),
+  `check-module-rules.fx`, `check-modorder.fx`, `check-synth.fx`,
+  `check-facts.fx`, `check-letrec.fx`, `check-test-facts.fx`,
+  `check-terminate.fx`, `check-sc-graphs.fx`, `check-close.fx`,
+  `check-infer.fx`, `check-binders.fx`, `check-bounds.fx`,
+  `check-data.fx`, `check-dependent.fx`, `check-calls.fx`,
+  `check-expect.fx`, `check-subtype.fx`, `check-sub-env.fx`,
+  `check-modules.fx`, `check-modules-read.fx`, `check-errors.fx`,
+  `check-kinds.fx`, `check-mask.fx`, `check-resolve.fx`,
+  `check-generative.fx`, `check-read-descs.fx`, `check-read-helpers.fx`,
+  `check-proving.fx`, `check-subst.fx`, `check-syntax.fx`,
+  `check-read.fx`, `check-holds.fx`, `check-unions.fx`,
+  `check-print.fx`, `check-print-parts.fx`, `check-env.fx`,
+  `check-effects.fx`, `check-types.fx`.
+- The FX checker's cost of converted files (2026-10-09): checking the
+  front end had grown from about 1.0 s to 1.46 s over phase 2. Profiled
+  (`probe_profile_check`, 4.8 G cells to 7.2 G), three walks along lists
+  that converted files make long: a name's lookup inside a loaded file
+  walked the bindings made since it began (`k-bound-since`, now each
+  binding's depth kept, `k-depths`); a `with`'s names were found along a
+  list of every `with` (now by where it starts too, `k-with-index`); and a
+  subtype question looked along its trail of every pair compared (now
+  counted by pair, `k-strail-count`, the trail looked along only where a
+  pair is counted). 1.46 s to 1.20 s. Left: `k-has-id?` (9%), and the
+  Rust checker, whose time grew too (630 to 800 ms).
+- Phase 2 finished (2026-10-09): the checker, the tables and the reader.
+  `table.fx` is a module file of no state the conductor loads;
+  `reader.fx` stays at top level, as Rust finds the reader's entry points,
+  `make-reader` and the parser's results' constructors there by name, but
+  names only what Rust, `bootstrap.fx` and the conductor use (84
+  re-exports gone). The front end joined is `reader.fx` and
+  `conductor.fx`; every other file is built in, loaded by the conductor or
+  by the files it makes. Splits on the way, by extraction, to stay under
+  1000 lines with the imports: `check-sub-env.fx`, `check-modules-read.fx`,
+  `check-read-helpers.fx` (the 43 leaves of `check-read-descs.fx`'s knot,
+  moved to its front first) and `check-print-parts.fx`; `check-rules.fx`'s
+  debt 1358 lines, its imports alone. Found on the way: a load cycle hangs
+  the Rust checker (`TODO.md` §71). Compiling the front end: 207.6 M
+  words, from 171.0 at the start of phase 2; what that costs, and what
+  §69 and §70 win back, is the profiling pass left in `TODO.md` §68.

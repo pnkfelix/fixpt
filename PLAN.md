@@ -1,6 +1,6 @@
 # `fixpt` — a Rust Scheme engine with FX-87 and FX-91 front ends
 
-## At a glance (kept current; last updated 2026-10-08)
+## At a glance (kept current; last updated 2026-10-09)
 
 Where things stand. Below it is the plan as it grew, oldest first (the
 contents are at the end of this section); the details behind this summary
@@ -86,6 +86,14 @@ are in the last section, "Log: the glance's details", and in
   trap, foreign call and closure call-out per machine. Of every test
   program's forms, as the REPL runs them, 117 expressions run as machine
   code; the three declined call `stay-cellular` by design.
+- **The front end as modules linked by a conductor** (the user's,
+  2026-10-08 to 10-09; `DONE.md` §68): each file's types and signatures in
+  an `X-types.fx`; each file a `load-input` file, a `lambda` over the
+  modules it uses, typed by their signatures, which `conductor.fx` applies
+  once, naming at top level only what Rust calls. Every load of a path is
+  one value, made once and purely. The front end joined is now `reader.fx`
+  (the reader's top-level face, which Rust names) and `conductor.fx`.
+  Compiling it: 207.6 M words (171.0 when phase 2 began; 215 before §68).
 - **Tools**: `fixpt check|compile|eval INPUT` (both checkers, both
   compilers); `sexp-edit`, `edit` included; the phase probe
   (`probe_phases_as_register_code`), with collections and allocation by
@@ -109,15 +117,6 @@ are in the last section, "Log: the glance's details", and in
   concurrency as region scoping). Each has open questions for the user.
 
 **In progress**
-- **The front end as modules linked by a conductor** (the user's,
-  2026-10-08, `TODO.md` §68): types and signatures in `X-types.fx` files
-  (phase 1, the checker's and the parser's done); the evaluator converted
-  (phase 2's pilot), its files `load-input` files that `conductor.fx`
-  applies to the modules they use. Every load of a path is one value,
-  made once and purely, so a types file is checked and compiled once;
-  the FX checker shows types only for a driver that reads them: 170 M
-  words to compile the front end, from 297 (215 before §68). Next:
-  the other files, from the last backwards.
 - **The collector** (the user's, 2026-09-29;
   `docs/research/generational-gc.md`): done, all four. Stack maps (each
   native frame's header word, a mask of its live slots); a card-marking
@@ -187,6 +186,12 @@ a checked program to go wrong comes before everything else, performance
 included. Searching for unknown bugs, and proofs of soundness or
 correctness (S5), do not currently outweigh performance: they are
 weighed with the other items, not ahead of them.
+- **After the conductor** (2026-10-09): `TODO.md` §69, combining modules,
+  high priority (the user's): FX-91's `(extend e0 e1)`, an `include` item
+  in which a name given twice is an error, and `hide` to keep helpers out
+  of a module's type; then §68's profiling pass on both checkers (their
+  time and the words rose through phase 2); §70, short names for the
+  modules a file binds; §71, a load cycle refused, not a hang.
 - S1. Done (2026-09-30): **the `acyclic?` gap**, F13: shown a
   use-after-free on every path, and fixed in both checkers with data at a
   place, `(t data p)` (`docs/research/shapes.md`, the framing: regions,
