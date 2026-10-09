@@ -37,5 +37,13 @@
 ;;; ------------------------------------------------------------ signatures
 
 ;; What its clients use of it (`compile-programs.fx`).
+;; The types it names, from the files that define them.
+(define-type rgen (select regcode-types rgen))
 (define-type regcode-helpers-sig
-  (moduleof (val r-const-list? (subr pure (rconst) bool))))
+  (moduleof (val r-const-list? (subr pure (rconst) bool))
+            (val r-op2imm
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                       (rgen int wcell)
+                       unit))
+            (val r-negate
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k)) (rgen) unit))))

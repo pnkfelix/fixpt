@@ -98,4 +98,5 @@
                                (write @k)
                                spin)
                        ((listof c-copy-at @k))
-                       unit))))
+                       unit))
+            (val c-room (subr (maxeff (read @globals) spin) (exp int bool) int))))

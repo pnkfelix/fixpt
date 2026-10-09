@@ -54,6 +54,11 @@
 ;;; ------------------------------------------------------------ signatures
 
 ;; What its clients use of it (`compile-programs.fx`).
+;; The types it names, from the files that define them.
+(define-type r-const-list (select regcode-types r-const-list))
+(define-type rgen (select regcode-types rgen))
+(define-type rthis (select regcode-types rthis))
+(define-type wcells (select regcode-types wcells))
 (define-type regcode-exps-sig
   (moduleof (val c-writes (ref c-write-table @k))
             (val c-form-writes (ref c-globals @k))
@@ -64,4 +69,48 @@
             (val r-inline-named
                  (subr (maxeff (alloc @k) (read @globals) (read @k))
                        ((listof c-inline acyclic) symbol int int)
-                       (listof c-inline acyclic)))))
+                       (listof c-inline acyclic)))
+            (val r-spec-at (ref rlocs @k))
+            (val r-spec-start (ref int @k))
+            (val r-keep-in-slot
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k)) (rgen) int))
+            (val r-own-now (ref (listof rown @k) @k))
+            (val r-assuming (ref bool @k))
+            (val r-tail-calls-leave (ref bool @k))
+            (val r-looped (ref bool @k))
+            (val r-assumed (ref r-assumptions @k))
+            (val r-own-name (ref (listof rown-name @k) @k))
+            (val r-cells-length
+                 (subr (maxeff (read @globals) (read @k) spin) (wcells int) int))
+            (val r-rev-cells
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (wcells wcells)
+                       wcells))
+            (val r-rev-assumptions
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (r-assumptions r-assumptions)
+                       r-assumptions))
+            (val r-assumptions-length
+                 (subr (maxeff (read @globals) (read @k) spin) (r-assumptions int) int))
+            (val r-guard-cells
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (r-assumptions int int wcells)
+                       wcells))
+            (val r-consts-named
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (exp cenv)
+                       r-const-list))
+            (val r-consts-assumed
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (r-const-list r-assumptions)
+                       r-assumptions))
+            (val r-collects
+                 (subr (maxeff (alloc @k)
+                               (goto @y)
+                               (read @globals)
+                               (read @k)
+                               (read @t)
+                               (write @k)
+                               spin)
+                       (exp cenv rthis bool)
+                       bool))))

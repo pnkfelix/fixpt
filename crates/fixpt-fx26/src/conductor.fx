@@ -9,11 +9,17 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; The twins: register code beside each word.
+  (let* (;; Register code, its entry: a lambda as register code, or why none.
+         (regcode-entry
+          ((load-input "fx26:regcode-entry.fx")
+           compile-module compile-exps-module compile-plan-module regcode-module
+           check-resolve-module regcode-exps-module regcode-core-module regcode-helpers-module
+           layout-module))
+         ;; The twins: register code beside each word.
          (compile-twins
           ((load-input "fx26:compile-twins.fx")
            compile-module compile-exps-module compile-plan-module compile-lift-module
-           regcode-entry-module))
+           regcode-entry))
          ;; Inlining: what the compiler knows of small global procedures.
          (compile-inline
           ((load-input "fx26:compile-inline.fx")
@@ -44,7 +50,8 @@
              (compile-global-cell (with compile-programs compile-global-cell))
              (compile-checked (with compile-programs compile-checked))
              (compile-program (with compile-programs compile-program))
-             (compile-note-inline! (with compile-inline compile-note-inline!)))))
+             (compile-note-inline! (with compile-inline compile-note-inline!))
+             (compile-registers! (with regcode-entry compile-registers!)))))
 
 (define run-checked (extract front-end-entries run-checked))
 (define run-program (extract front-end-entries run-program))
@@ -56,3 +63,4 @@
 (define compile-checked (extract front-end-entries compile-checked))
 (define compile-program (extract front-end-entries compile-program))
 (define compile-note-inline! (extract front-end-entries compile-note-inline!))
+(define compile-registers! (extract front-end-entries compile-registers!))

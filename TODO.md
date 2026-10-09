@@ -1944,5 +1944,6 @@ Phase 1, the types out, one module at a time; phase 2, the conversion.
   173.4 M words, from 172.7.
 - Converted since, a commit each, as above (the tools: `to_input3.py`,
   `mksig.py`, `lib_move.py`, `conductor_add.py`, `conductor_export.py` in
-  the session's scratch space): `compile-inline.fx`, `compile-twins.fx`.
+  the session's scratch space): `compile-inline.fx`, `compile-twins.fx`,
+  `regcode-entry.fx`.
 

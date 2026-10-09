@@ -185,4 +185,5 @@
                  (subr (maxeff (read (globals c-genv c-genv-count)) (read @k)) () int))
             (val c-count-exps (subr (read @globals) (exps) int))
             (val c-count-params (subr (read @globals) (c-params) int))
-            (val c-registers (ref bool @k))))
+            (val c-registers (ref bool @k))
+            (val c-summary-at (subr (maxeff (read @globals) (read @k)) (int int) int))))

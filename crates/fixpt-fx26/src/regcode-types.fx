@@ -164,4 +164,36 @@
                        (rconsts rconsts)
                        rconsts))
             (val c-length-consts
-                 (subr (maxeff (read @globals) (read @k) spin) (rconsts) int))))
+                 (subr (maxeff (read @globals) (read @k) spin) (rconsts) int))
+            (val r-consts-now (ref r-const-list @k))
+            (val r-declined (ref bool @k))
+            (val r-decline (subr (maxeff (read @globals) (write @k)) () unit))
+            (val r-emit (subr (maxeff (alloc @k) (read @k) (write @k)) (rgen ritem) unit))
+            (val r-op0
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                       (rgen int)
+                       unit))
+            (val r-opn
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                       (rgen int int)
+                       unit))
+            (val r-opnn
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                       (rgen int int int)
+                       unit))
+            (val r-slot (subr (maxeff (read @k) (write @k)) (rgen) int))
+            (val r-done
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                       (rgen bool)
+                       unit))
+            (val r-assemble
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k) spin)
+                       (rgen)
+                       wcells))
+            (val r-where
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (renv symbol)
+                       rlocs))
+            (val r-bind (subr (maxeff (alloc @k) (read @globals)) (symbol rloc renv) renv))
+            (val r-standard
+                 (subr (maxeff (alloc @k) (read @globals) (read @k)) (string int) rstd))))
