@@ -1914,4 +1914,8 @@ Phase 1, the types out, one module at a time; phase 2, the conversion.
   from their printed types); its own types in `native-types.fx`, with
   `native-sig`. The two layouts are generated, so their signatures are in
   files beside them, written by hand. 171.8 M words, from 171.0.
+- `native-layout.fx` (2026-10-09): no state and nothing given, so a plain
+  module file, its items only, which the conductor loads; its generator
+  (`fixpt_native::cellular::fx26_module`) writes it so, not wrapped in a
+  module re-exported.
 

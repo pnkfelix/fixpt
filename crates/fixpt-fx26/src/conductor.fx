@@ -17,7 +17,8 @@
            eval-values eval-prims check-env-module check-resolve-module))
          ;; The assembler, of the encoders and the generated layouts.
          (native
-          ((load-input "fx26:native.fx") arm64-module layout-module native-layout-module)))
+          ((load-input "fx26:native.fx")
+           arm64-module layout-module (load-module "fx26:native-layout.fx"))))
     ;; What Rust and `bootstrap.fx` call of them (`syn.rs`, `session.rs`).
     (product (run-checked (with eval-core run-checked))
              (run-program (with eval-core run-program))

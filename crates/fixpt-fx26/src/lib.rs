@@ -148,7 +148,8 @@ pub const STANDARD_OPS: &str = include_str!("standard.fx");
 pub const ARM64: &str = include_str!("arm64.fx");
 
 /// What the compiler to machine code written in FX-26 knows of the
-/// hand-encoded machine, generated from it.
+/// hand-encoded machine, generated from it: a module file, which the
+/// conductor loads.
 pub const NATIVE_LAYOUT: &str = include_str!("native-layout.fx");
 
 /// Words compiled to machine code, in FX-26: the hand-encoded machine's
@@ -213,7 +214,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 26] = [
+pub const FRONT_END_MODULES: [(&str, &str); 27] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("table-types.fx", TABLE_TYPES),
     ("native-types.fx", NATIVE_TYPES),
@@ -239,6 +240,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 26] = [
     ("eval-values.fx", EVAL_VALUES),
     ("eval-prims.fx", EVAL_PRIMS),
     ("eval-core.fx", EVAL_CORE),
+    ("native-layout.fx", NATIVE_LAYOUT),
     ("native.fx", NATIVE),
 ];
 
@@ -256,7 +258,7 @@ pub fn built_in_module(path: &str) -> Option<&'static str> {
 /// The front end's files, by name, in the order [`front_end`] joins them;
 /// [`bootstrap_program`] puts `bootstrap.fx` after them. The module files
 /// built in, [`FRONT_END_MODULES`], are loaded by the first.
-pub const FRONT_END_FILES: [(&str, &str); 53] = [
+pub const FRONT_END_FILES: [(&str, &str); 52] = [
     ("reader.fx", READER),
     ("table.fx", TABLE),
     CHECKER_FILES[0],
@@ -308,7 +310,6 @@ pub const FRONT_END_FILES: [(&str, &str); 53] = [
     COMPILER_DRIVER[0],
     COMPILER_DRIVER[1],
     ("arm64.fx", ARM64),
-    ("native-layout.fx", NATIVE_LAYOUT),
     ("conductor.fx", CONDUCTOR),
 ];
 

@@ -1,6 +1,6 @@
-;;; The signature of `native-layout.fx`, its `native-layout-module`, as its
-;;; clients use it (`TODO.md` §68): a module file of no state. That file is
-;;; generated; this one is not.
+;;; The signature of `native-layout.fx`, a module file the conductor loads,
+;;; as its clients use it (`TODO.md` §68): a module file of no state. That
+;;; file is generated; this one is not.
 
 ;; What `native.fx` uses of the machine's registers, state and traps.
 (define-type native-layout-sig
