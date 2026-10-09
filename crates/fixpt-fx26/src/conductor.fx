@@ -9,7 +9,12 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; Higher kinds.
+  (let* (;; Masking an expression's effect.
+         (check-mask
+          ((load-input "fx26:check-mask.fx")
+           check-types-module check-resolve-module check-effects-module check-env-module
+           check-print-module check-read-module))
+         ;; Higher kinds.
          (check-kinds
           ((load-input "fx26:check-kinds.fx")
            check-types-module check-read-descs-module check-holds-module check-print-module))
@@ -79,7 +84,7 @@
          (check-close
           ((load-input "fx26:check-close.fx")
            check-types-module check-effects-module check-holds-module check-env-module
-           check-resolve-module check-mask-module check-calls check-print-module
+           check-resolve-module check-mask check-calls check-print-module
            check-subst-module))
          ;; The checker, size-change graphs of calls.
          (check-sc-graphs
@@ -111,7 +116,7 @@
           ((load-input "fx26:check-synth.fx")
            check-types-module check-test-facts check-resolve-module check-env-module
            check-infer check-facts check-print-module check-bounds
-           check-expect check-errors check-effects-module check-mask-module
+           check-expect check-errors check-effects-module check-mask
            check-unions-module check-terminate check-holds-module check-subtype
            check-calls check-subst-module check-binders check-sub-env))
          ;; The checker, a module's order: its items as a letrec*, used only once made.
@@ -134,7 +139,7 @@
            check-dependent check-module-rules check-read-descs-module
            check-proving-module check-test-facts check-close check-print-module
            check-terminate check-modorder check-unions-module check-modules
-           check-effects-module check-data check-read-module check-mask-module
+           check-effects-module check-data check-read-module check-mask
            check-calls check-bounds check-holds-module check-subtype
            check-subst-module check-sc-graphs check-binders check-sub-env
            check-modules-read))

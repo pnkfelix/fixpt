@@ -149,4 +149,14 @@
    (val k-freeze-into (subr (read (globals r-frozen)) (k-region) k-region))
    (val k-place-lives (subr (maxeff (alloc @t) (read @globals) (read @t)) (k-region) k-ids))
    (val k-names-onto
-        (subr (maxeff (alloc @t) (read @globals) (read @t)) (k-names k-names) k-names))))
+        (subr (maxeff (alloc @t) (read @globals) (read @t)) (k-names k-names) k-names))
+   (val k-add-region
+        (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
+              (k-regions k-region)
+              k-regions))
+   (val k-param-names
+        (subr (maxeff (alloc @t) (read @globals) (read @t))
+              (k-typed-params k-names)
+              k-names))
+   (val k-letrec-names
+        (subr (maxeff (alloc @t) (read @globals) (read @t)) (k-letrec-bs k-names) k-names))))
