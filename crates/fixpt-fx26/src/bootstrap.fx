@@ -15,6 +15,9 @@
 ;; Reading a text to its forms, in `@c`; and the stages after, parsing,
 ;; checking and compiling, their failures caught.
 (define-effect b-reading (maxeff reads (read @c) (alloc @c) spin))
+;; What compiling may do, of the compiler's types (`compile-types.fx`).
+(define compile-types (load-module "fx26:compile-types.fx"))
+(define-effect compiles (select compile-types compiles))
 (define-effect b-stages (maxeff parses checks compiles (comefrom @p) (comefrom @z) (comefrom @y)))
 
 ;; Every form of `text`, as the reader reads it, or none if it cannot.

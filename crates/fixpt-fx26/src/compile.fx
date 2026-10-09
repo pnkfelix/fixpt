@@ -22,12 +22,23 @@
 ;;; checker written in FX-26 records it (`checked-extracts`), and a program
 ;;; is compiled with what its check found.
 
-;; Its types (`compile-types.fx`), loaded before the module so that they are
-;; not among its values; the module names what it uses of them.
-(define compile-types (load-module "fx26:compile-types.fx"))
-;; A module (`TODO.md` §34: the front end into modules, a file at a time);
-;; what other files use re-exported after it.
-(define compile-module (module
+;; Its types, those it uses of the files before it, and the signatures of
+;; what it is given.
+(let* ((compile-types (load-module "fx26:compile-types.fx"))
+       (parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
+       (check-env-types (load-module "fx26:check-env-types.fx"))
+       (check-types-types (load-module "fx26:check-types-types.fx"))
+       (table-types (load-module "fx26:table-types.fx"))
+       (layout-types (load-module "fx26:layout-types.fx"))
+       (check-resolve-types (load-module "fx26:check-resolve-types.fx")))
+  ;; What it is given: the modules of the files before it that it uses.
+  (lambda ((layout (select layout-types layout-sig))
+           (check-resolve (select check-resolve-types check-resolve-sig))
+           (check-env (select check-env-types check-env-sig))
+           (tables (select table-types tables-sig))
+           ;; The parser's module, for where loaded files' places begin.
+           (parser (moduleof (val load-base int))))
+    (module
 (define-effect c-builds (select compile-types c-builds))
 (define-effect c-walks (select compile-types c-walks))
 (define-effect c-emits (select compile-types c-emits))
@@ -72,10 +83,60 @@
 (define-type c-spec-copy (select compile-types c-spec-copy))
 (define-type c-spec-copies (select compile-types c-spec-copies))
 (define-type patches (select compile-types patches))
-
-
-
-
+;; The types it uses of the files before it.
+(define e-app (with parser-types e-app))
+(define e-begin (with parser-types e-begin))
+(define e-bloblet (with parser-types e-bloblet))
+(define e-convention (with parser-types e-convention))
+(define e-extract (with parser-types e-extract))
+(define e-if (with parser-types e-if))
+(define e-lambda (with parser-types e-lambda))
+(define e-let (with parser-types e-let))
+(define e-letrec (with parser-types e-letrec))
+(define e-letregion (with parser-types e-letregion))
+(define e-module (with parser-types e-module))
+(define e-plambda (with parser-types e-plambda))
+(define e-product (with parser-types e-product))
+(define e-proj (with parser-types e-proj))
+(define e-prompt (with parser-types e-prompt))
+(define e-rlambda (with parser-types e-rlambda))
+(define e-sum (with parser-types e-sum))
+(define e-tagcase (with parser-types e-tagcase))
+(define e-the (with parser-types e-the))
+(define e-var (with parser-types e-var))
+(define e-with (with parser-types e-with))
+(define-type exp (select parser-types exp))
+(define-type mod-items (select parser-types mod-items))
+(define-type names (select parser-types names))
+(define-type syn (select parser-types syn))
+(define-type k-facts (select check-env-types k-facts))
+(define-type k-reshape-list (select check-env-types k-reshape-list))
+(define-type k-with-list (select check-env-types k-with-list))
+(define-type k-ids (select check-types-types k-ids))
+(define-type table (select table-types table))
+;; What it uses of the modules it is given.
+(define load-base (with parser load-base))
+(define cellular-closure-free0 (with layout cellular-closure-free0))
+(define routine-branch (with layout routine-branch))
+(define routine-drop (with layout routine-drop))
+(define routine-field (with layout routine-field))
+(define routine-field-set (with layout routine-field-set))
+(define routine-free (with layout routine-free))
+(define routine-global (with layout routine-global))
+(define routine-lit (with layout routine-lit))
+(define routine-prim (with layout routine-prim))
+(define routine-return (with layout routine-return))
+(define routine-slot (with layout routine-slot))
+(define routine-slot! (with layout routine-slot!))
+(define routine-zbranch (with layout routine-zbranch))
+(define exp-end (with check-resolve exp-end))
+(define exp-start (with check-resolve exp-start))
+(define k-reshapes (with check-env k-reshapes))
+(define k-with-vals (with check-env k-with-vals))
+(define make-table (with tables make-table))
+(define symbol-hash (with tables symbol-hash))
+(define table-ref (with tables table-ref))
+(define table-set! (with tables table-set!))
 
 ;; Whether `name` is an equality of the same word, as `eq` does it: of characters, symbols or
 ;; globals, `bool=?`, or `eq?`, identity. (`=`, of ints, which may be bignums, is `int-eq`'s.)
@@ -84,14 +145,8 @@
     (or (string=? n "char=?") (string=? n "symbol=?") (string=? n "wglobal=?")
         (string=? n "eq?") (string=? n "bool=?"))))
 
-
-
-
-
 ;; The checker's facts for the program being compiled.
 (define c-facts (ref k-facts @k) (new nil))
-
-
 
 ;; The same, by where each `extract` starts (two cannot start at one place):
 ;; where it ends, and its field. A table, so that a program's facts are not
@@ -101,8 +156,6 @@
 (define c-int=? (subr pure (int int) bool) (lambda (a b) (= a b)))
 
 (define c-fact-table (ref c-spans @k) (new (make-table c-int-hash c-int=?)))
-
-
 
 ;; The procedures lambda-lifted, by index; and, by where each `letrec` is
 ;; (`c-span-key`), its members' (none if it is not lifted), so that its
@@ -115,7 +168,6 @@
 
 ;; The parameters a lifting added to the lambda about to be compiled.
 (define c-lifting-added (ref int @k) (new 0))
-
 
 (define c-summary-table (ref (table int c-ends @k) @k) (new (make-table c-int-hash c-int=?)))
 
@@ -229,10 +281,6 @@
 (define c-converter (subr (read @globals) (string symbol) symbol)
   (lambda (prefix n) (string->symbol (string-append prefix (symbol->string n)))))
 
-
-
-
-
 (define c-tag (prompt-tag cresult cresult (maxeff c-emits (read @t) spin) @y)
   (make-continuation-prompt-tag))
 
@@ -287,7 +335,6 @@
 (define c-size (subr pure (item) int)
   (lambda (i) (tagcase i (i-cell (x) 1) (i-label (n) 0) (i-branch (n) 2) (i-zbranch (n) 2))))
 
-
 ;; Where each label is, in cells; and how many cells there are.
 (define c-place (subr (maxeff (read @globals) (read @k) (write @k) spin) (items c-places int) int)
   (lambda (xs at pos)
@@ -322,9 +369,6 @@
            (end (c-place (c-reverse (get c) nil) at 0)))
       (make-word name (c-cells (get c) at end nil)))))
 
-
-
-
 ;; `e` with `n` bound at `l`, innermost.
 (define c-extend (subr (alloc @k) (symbol loc cenv) cenv)
   (lambda (n l e) (cons (cons n l) e)))
@@ -353,7 +397,6 @@
 ;; passes them on as they are.
 (define c-this-added (ref int @k) (new 0))
 
-
 ;; Whether each lambda also gets register code (PLAN.md 13h′), as its word's
 ;; twin, made after its form's words (`compile-twins.fx`).
 (define c-registers (ref bool @k) (new #f))
@@ -369,7 +412,6 @@
       ;; be in its body.
       (at-global (g) (tagcase l (at-global (h) #t) (else y #f)))
       (else y #f))))
-
 
 (define c-genv-index (ref (table symbol c-globals-made @k) @k)
   (new (make-table symbol-hash symbol=?)))
@@ -418,8 +460,6 @@
       (at-pending (i) (c-fail "a letrec sibling not made yet is only captured"))
       (at-loop (z) (c-fail "a loop is only ever called, in tail position"))
       (at-lifted (k) (c-fail "a lifted procedure is only called")))))
-
-
 
 (define c-join-memo (ref (table int c-join-answer @k) @k) (new (make-table c-int-hash c-int=?)))
 (define c-standard-words (ref (listof c-standard-word @k) @k) (new nil))
@@ -607,7 +647,6 @@
 
 (define c-count-let (subr (read @globals) (c-binds) int)
   (lambda (bs) (if (null? bs) 0 (+ 1 (c-count-let (cdr bs))))))
-
 
 (define c-letrec-slots (subr (maxeff (read @globals) (alloc @k)) (c-recs cenv int) cenv)
   (lambda (bs e d)
@@ -814,125 +853,4 @@
                       (c-loops-only lbody name n #t)
                       (c-loops-only body name n #t)
                       (c-unmentioned? bs name i 0))))
-             (else y #f))))))))
-
-(define-effect c-builds (select compile-module c-builds))
-(define-effect c-walks (select compile-module c-walks))
-(define-effect c-emits (select compile-module c-emits))
-(define-effect compiles (select compile-module compiles))
-(define std-eq-name? (with compile-module std-eq-name?))
-(define-type c-params (select compile-module c-params))
-(define-type c-binds (select compile-module c-binds))
-(define-type c-recs (select compile-module c-recs))
-(define-type c-cases (select compile-module c-cases))
-(define-type exps (select compile-module exps))
-(define-type c-lift (select compile-module c-lift))
-(define-type c-lifting (select compile-module c-lifting))
-(define c-lifts (with compile-module c-lifts))
-(define c-lift-count (with compile-module c-lift-count))
-(define c-lifted (with compile-module c-lifted))
-(define c-lifting-added (with compile-module c-lifting-added))
-(define c-conversion-at (with compile-module c-conversion-at))
-(define c-apply-shares-at (with compile-module c-apply-shares-at))
-(define c-frozen-define-at (with compile-module c-frozen-define-at))
-(define c-plain-table (with compile-module c-plain-table))
-(define c-plain-fx-at (with compile-module c-plain-fx-at))
-(define c-field-at (with compile-module c-field-at))
-(define c-with-at (with compile-module c-with-at))
-(define c-with-places-at (with compile-module c-with-places-at))
-(define c-reshape-at (with compile-module c-reshape-at))
-(define c-changed? (with compile-module c-changed?))
-(define c-place-name (with compile-module c-place-name))
-(define c-converter (with compile-module c-converter))
-(define-type item (select compile-module item))
-(define-type items (select compile-module items))
-(define-type code (select compile-module code))
-(define-type cresult (select compile-module cresult))
-(define c-tag (with compile-module c-tag))
-(define c-fail (with compile-module c-fail))
-(define c-fresh (with compile-module c-fresh))
-(define c-emit (with compile-module c-emit))
-(define c-op (with compile-module c-op))
-(define c-op1 (with compile-module c-op1))
-(define c-lit (with compile-module c-lit))
-(define c-int (with compile-module c-int))
-(define c-field (with compile-module c-field))
-(define c-field-set (with compile-module c-field-set))
-(define c-prim (with compile-module c-prim))
-(define c-unit-after (with compile-module c-unit-after))
-(define c-assemble (with compile-module c-assemble))
-(define-type loc (select compile-module loc))
-(define-type cenv (select compile-module cenv))
-(define-type c-found (select compile-module c-found))
-(define c-extend (with compile-module c-extend))
-(define c-loop? (with compile-module c-loop?))
-(define c-global? (with compile-module c-global?))
-(define c-lifted? (with compile-module c-lifted?))
-(define c-this-name (with compile-module c-this-name))
-(define c-this-loc (with compile-module c-this-loc))
-(define c-this-params (with compile-module c-this-params))
-(define c-this-start (with compile-module c-this-start))
-(define c-this-added (with compile-module c-this-added))
-(define-type c-this (select compile-module c-this))
-(define c-registers (with compile-module c-registers))
-(define c-this-loc? (with compile-module c-this-loc?))
-(define-type c-globals-made (select compile-module c-globals-made))
-(define c-genv-index (with compile-module c-genv-index))
-(define c-genv-count (with compile-module c-genv-count))
-(define c-genv (with compile-module c-genv))
-(define c-genv-now (with compile-module c-genv-now))
-(define c-global-find (with compile-module c-global-find))
-(define c-genv-push! (with compile-module c-genv-push!))
-(define c-find (with compile-module c-find))
-(define c-where (with compile-module c-where))
-(define c-load (with compile-module c-load))
-(define-type syms (select compile-module syms))
-(define-type c-join-answer (select compile-module c-join-answer))
-(define c-join-memo (with compile-module c-join-memo))
-(define-type c-spec-copy (select compile-module c-spec-copy))
-(define-type c-spec-copies (select compile-module c-spec-copies))
-(define c-spec-made (with compile-module c-spec-made))
-(define-type c-standard-word (select compile-module c-standard-word))
-(define c-standard-words (with compile-module c-standard-words))
-(define c-summary-at (with compile-module c-summary-at))
-(define c-set-facts! (with compile-module c-set-facts!))
-(define c-member? (with compile-module c-member?))
-(define c-adjoin (with compile-module c-adjoin))
-(define c-bind-params (with compile-module c-bind-params))
-(define c-bind-letrec (with compile-module c-bind-letrec))
-(define c-bound-exps (with compile-module c-bound-exps))
-(define c-rec-exps (with compile-module c-rec-exps))
-(define c-free (with compile-module c-free))
-(define c-done (with compile-module c-done))
-(define c-unbind (with compile-module c-unbind))
-(define c-count-let (with compile-module c-count-let))
-(define-type patches (select compile-module patches))
-(define c-letrec-slots (with compile-module c-letrec-slots))
-(define c-letrec-patch (with compile-module c-letrec-patch))
-(define c-lambda-of (with compile-module c-lambda-of))
-(define c-count-exps (with compile-module c-count-exps))
-(define c-count-params (with compile-module c-count-params))
-(define c-has-param? (with compile-module c-has-param?))
-(define c-applied-let (with compile-module c-applied-let))
-(define c-mentions? (with compile-module c-mentions?))
-(define c-calls-only-all (with compile-module c-calls-only-all))
-(define c-loops-only (with compile-module c-loops-only))
-(define c-called-only (with compile-module c-called-only))
-(define c-letrec-own (with compile-module c-letrec-own))
-(define c-count-letrec (with compile-module c-count-letrec))
-(define c-length (with compile-module c-length))
-(define c-join-ok? (with compile-module c-join-ok?))
-(define i-cell (with compile-module i-cell))
-(define i-label (with compile-module i-label))
-(define i-branch (with compile-module i-branch))
-(define i-zbranch (with compile-module i-zbranch))
-(define c-ok (with compile-module c-ok))
-(define c-err (with compile-module c-err))
-(define at-slot (with compile-module at-slot))
-(define at-free (with compile-module at-free))
-(define at-global (with compile-module at-global))
-(define at-pending (with compile-module at-pending))
-(define at-loop (with compile-module at-loop))
-(define at-lifted (with compile-module at-lifted))
-(define c-int-hash (with compile-module c-int-hash))
-(define c-int=? (with compile-module c-int=?))
+             (else y #f)))))))))
