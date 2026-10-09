@@ -9,7 +9,11 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; What a type holds.
+  (let* (;; Unions.
+         (check-unions
+          ((load-input "fx26:check-unions.fx")
+           check-types-module check-print-module check-env-module))
+         ;; What a type holds.
          (check-holds
           ((load-input "fx26:check-holds.fx")
            check-types-module check-effects-module check-env-module check-print-module tables))
@@ -21,7 +25,7 @@
          ;; What reading descriptions from their syntax needs.
          (check-syntax
           ((load-input "fx26:check-syntax.fx")
-           check-types-module check-read check-unions-module check-print-module
+           check-types-module check-read check-unions check-print-module
            check-effects-module check-env-module check-holds parser-module))
          ;; Substitution.
          (check-subst
@@ -43,7 +47,7 @@
           ((load-input "fx26:check-read-descs.fx")
            check-types-module check-read-helpers check-syntax check-read
            check-subst check-env-module check-print-module check-holds
-           check-proving check-effects-module check-unions-module parser-module))
+           check-proving check-effects-module check-unions parser-module))
          ;; Define-generative, read.
          (check-generative
           ((load-input "fx26:check-generative.fx")
@@ -125,7 +129,7 @@
           ((load-input "fx26:check-infer.fx")
            check-types-module check-resolve check-effects-module check-binders
            check-env-module check-bounds check-print-module check-data
-           check-read-descs check-kinds check-unions-module check-subtype
+           check-read-descs check-kinds check-unions check-subtype
            check-holds check-expect check-subst check-sub-env
            check-read-helpers))
          ;; The checker, closing: what a definition leaves solved.
@@ -165,7 +169,7 @@
            check-types-module check-test-facts check-resolve check-env-module
            check-infer check-facts check-print-module check-bounds
            check-expect check-errors check-effects-module check-mask
-           check-unions-module check-terminate check-holds check-subtype
+           check-unions check-terminate check-holds check-subtype
            check-calls check-subst check-binders check-sub-env))
          ;; The checker, a module's order: its items as a letrec*, used only once made.
          (check-modorder
@@ -186,7 +190,7 @@
            check-resolve check-env-module check-expect check-letrec
            check-dependent check-module-rules check-read-descs
            check-proving check-test-facts check-close check-print-module
-           check-terminate check-modorder check-unions-module check-modules
+           check-terminate check-modorder check-unions check-modules
            check-effects-module check-data check-read check-mask
            check-calls check-bounds check-holds check-subtype
            check-subst check-sc-graphs check-binders check-sub-env

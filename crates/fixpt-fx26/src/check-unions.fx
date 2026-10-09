@@ -4,15 +4,56 @@
 ;;; After `check-print.fx`, which shows a member in an error; part of the
 ;;; checker, `check-types.fx` first.
 
-;; A module (`TODO.md` §34: the front end into modules, a file at a time);
-;; what other files use re-exported after it.
+;; Its types, those it uses of the files before it, and the signatures of
+;; what it is given.
 ;; Its types (`check-unions-types.fx`), loaded before the module so that they are not
 ;; among its values; the module names what it uses of them.
-(define check-unions-types (load-module "fx26:check-unions-types.fx"))
-(define check-unions-module (module
+(let* ((check-unions-types (load-module "fx26:check-unions-types.fx"))
+       (check-types-types (load-module "fx26:check-types-types.fx"))
+       (check-print-types (load-module "fx26:check-print-types.fx"))
+       (check-env-types (load-module "fx26:check-env-types.fx")))
+  ;; What it is given: the modules of the files before it that it uses.
+  (lambda ((check-types (select check-types-types check-types-sig))
+           (check-print (select check-print-types check-print-sig))
+           (check-env (select check-env-types check-env-sig)))
+    (module
 (define-type k-pending (select check-unions-types k-pending))
 (define-type k-sides (select check-unions-types k-sides))
 (define-type k-split (select check-unions-types k-split))
+;; The types it uses of the files before it.
+(define-effect checks (select check-types-types checks))
+(define-type k-ids (select check-types-types k-ids))
+(define-type k-pendings (select check-types-types k-pendings))
+(define-effect kreads (select check-types-types kreads))
+(define-effect kstate (select check-types-types kstate))
+(define ty-array (with check-types-types ty-array))
+(define ty-base (with check-types-types ty-base))
+(define ty-bloblet (with check-types-types ty-bloblet))
+(define ty-comp (with check-types-types ty-comp))
+(define ty-false (with check-types-types ty-false))
+(define ty-link (with check-types-types ty-link))
+(define ty-nat (with check-types-types ty-nat))
+(define ty-nil (with check-types-types ty-nil))
+(define ty-nlist (with check-types-types ty-nlist))
+(define ty-pair (with check-types-types ty-pair))
+(define ty-product (with check-types-types ty-product))
+(define ty-proving (with check-types-types ty-proving))
+(define ty-ref (with check-types-types ty-ref))
+(define ty-subr (with check-types-types ty-subr))
+(define ty-sum (with check-types-types ty-sum))
+(define ty-union (with check-types-types ty-union))
+(define ty-void (with check-types-types ty-void))
+;; What it uses of the modules it is given.
+(define k-cat3 (with check-types k-cat3))
+(define k-cat5 (with check-types k-cat5))
+(define k-fail (with check-types k-fail))
+(define k-get (with check-types k-get))
+(define k-has-id? (with check-types k-has-id?))
+(define k-pending-unions (with check-types k-pending-unions))
+(define k-resolve (with check-types k-resolve))
+(define k-ty-new (with check-types k-ty-new))
+(define k-show-ty (with check-print k-show-ty))
+(define k-void (with check-env k-void))
 
 ;; The shapes, by number in `check.rs`'s `SHAPES` order: 0 int, 1 f64,
 ;; 2 f32, 3 char, 4 bool, 5 nil, 6 pair, 7 string, 8 symbol, 9 procedure,
@@ -286,20 +327,4 @@
           (let ((parts (k-split-members ms k)))
             (product (1 (k-union-build (k-union-merged (car parts))))
                      (2 (k-union-build (k-union-merged (cdr parts)))))))
-        (else y none)))))
-))
-
-(define k-shape-count (with check-unions-module k-shape-count))
-(define k-shape-nil (with check-unions-module k-shape-nil))
-(define k-shape-pair (with check-unions-module k-shape-pair))
-(define k-shape-predicate (with check-unions-module k-shape-predicate))
-(define k-run-shape (with check-unions-module k-run-shape))
-(define k-same-shape? (with check-unions-module k-same-shape?))
-(define k-shapes-miss? (with check-unions-module k-shapes-miss?))
-(define k-same-shape-in (with check-unions-module k-same-shape-in))
-(define k-member-holding (with check-unions-module k-member-holding))
-(define k-union-of (with check-unions-module k-union-of))
-(define k-false-expected? (with check-unions-module k-false-expected?))
-(define k-check-pending-unions (with check-unions-module k-check-pending-unions))
-(define-type k-split (select check-unions-module k-split))
-(define k-narrowed-by (with check-unions-module k-narrowed-by))
+        (else y none))))))))

@@ -347,4 +347,5 @@
               (subr (maxeff (read @globals) (read @t) (write @t) spin)
                     ((arrayof t @t) (arrayof t @t) int)
                     unit)))
-   (val k-desc-regions (subr (maxeff (alloc @t) (read @globals)) (k-descs) k-regions))))
+   (val k-desc-regions (subr (maxeff (alloc @t) (read @globals)) (k-descs) k-regions))
+   (val k-pending-unions (ref k-pendings @t))))
