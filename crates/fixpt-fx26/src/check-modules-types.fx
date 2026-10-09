@@ -137,4 +137,8 @@
                        (int k-names int int)
                        int))
             (val k-binding-names
-                 (subr (maxeff (alloc @t) (read @globals) (read @t)) (k-bindings) k-names))))
+                 (subr (maxeff (alloc @t) (read @globals) (read @t)) (k-bindings) k-names))
+            (val k-subst-each
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (k-parts k-map)
+                       k-parts))))

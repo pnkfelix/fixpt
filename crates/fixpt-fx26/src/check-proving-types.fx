@@ -7,5 +7,10 @@
 ;; The types it names, from the files that define them.
 (define check-types-types (load-module "fx26:check-types-types.fx"))
 (define-type k-te (select check-types-types k-te))
+;; The types it names, from the files that define them.
+(define-type k-props (select check-types-types k-props))
 (define-type check-proving-sig
-  (moduleof (val k-call-te (subr (maxeff (read @globals) (read @t) spin) (k-te) k-te))))
+  (moduleof (val k-call-te (subr (maxeff (read @globals) (read @t) spin) (k-te) k-te))
+            (val k-props-within?
+                 (subr (maxeff (read @globals) spin) (k-props k-props) bool))
+            (val k-props=? (subr (maxeff (read @globals) spin) (k-props k-props) bool))))

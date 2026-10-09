@@ -9,10 +9,16 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; The checker, expected types: checking against what is wanted.
+  (let* (;; The subtype test.
+         (check-subtype
+          ((load-input "fx26:check-subtype.fx")
+           check-types-module check-resolve-module check-sub-env-module check-env-module
+           check-print-module check-effects-module check-proving-module check-subst-module
+           check-modules-module))
+         ;; The checker, expected types: checking against what is wanted.
          (check-expect
           ((load-input "fx26:check-expect.fx")
-           check-types-module check-env-module check-subtype-module check-print-module
+           check-types-module check-env-module check-subtype check-print-module
            check-kinds-module check-resolve-module check-effects-module check-modules-module))
          ;; The checker, calls: which may reach their own caller.
          (check-calls
@@ -32,7 +38,7 @@
          ;; The checker, bounds on type binders.
          (check-bounds
           ((load-input "fx26:check-bounds.fx")
-           check-types-module check-subtype-module))
+           check-types-module check-subtype))
          ;; The checker, a poly's binders solved, defaulted and bounded.
          (check-binders
           ((load-input "fx26:check-binders.fx")
@@ -44,7 +50,7 @@
           ((load-input "fx26:check-infer.fx")
            check-types-module check-resolve-module check-effects-module check-binders
            check-env-module check-bounds check-print-module check-data
-           check-read-descs-module check-kinds-module check-unions-module check-subtype-module
+           check-read-descs-module check-kinds-module check-unions-module check-subtype
            check-holds-module check-expect check-subst-module check-sub-env-module))
          ;; The checker, closing: what a definition leaves solved.
          (check-close
@@ -83,7 +89,7 @@
            check-types-module check-test-facts check-resolve-module check-env-module
            check-infer check-facts check-print-module check-bounds
            check-expect check-errors-module check-effects-module check-mask-module
-           check-unions-module check-terminate check-holds-module check-subtype-module
+           check-unions-module check-terminate check-holds-module check-subtype
            check-calls check-subst-module check-binders check-sub-env-module))
          ;; The checker, a module's order: its items as a letrec*, used only once made.
          (check-modorder
@@ -95,7 +101,7 @@
           ((load-input "fx26:check-module-rules.fx")
            check-types-module check-env-module check-print-module check-errors-module
            check-modules-module check-read-module check-modorder check-expect
-           check-effects-module check-subtype-module check-read-descs-module
+           check-effects-module check-subtype check-read-descs-module
            check-terminate check-letrec tables))
          ;; The checker, its rules: the one recursive group over expressions.
          (check-rules
@@ -106,14 +112,14 @@
            check-proving-module check-test-facts check-close check-print-module
            check-terminate check-modorder check-unions-module check-modules-module
            check-effects-module check-data check-read-module check-mask-module
-           check-calls check-bounds check-holds-module check-subtype-module
+           check-calls check-bounds check-holds-module check-subtype
            check-subst-module check-sc-graphs check-binders check-sub-env-module))
          ;; The checker, its proofs: lemmas proved.
          (check-proofs
           ((load-input "fx26:check-proofs.fx")
            check-types-module check-resolve-module check-env-module check-calls
            check-generative-module check-read-descs-module check-errors-module check-read-module
-           check-subtype-module check-modules-module check-infer check-terminate
+           check-subtype check-modules-module check-infer check-terminate
            check-print-module tables parser-module check-sc-graphs check-sub-env-module))
          ;; The checker, its programs: forms checked in order, under redefinition.
          (check-program
@@ -123,7 +129,7 @@
            check-read-descs-module check-resolve-module check-errors-module
            check-terminate check-print-module check-letrec check-read-module
            check-expect check-modules-module check-modorder check-subst-module
-           check-synth check-module-rules check-subtype-module parser-module))
+           check-synth check-module-rules check-subtype parser-module))
          ;; The object layout, generated from the heap's table.
          (layout (load-module "fx26:layout.fx"))
          ;; The standard operations, generated from the lowering's table.

@@ -298,6 +298,9 @@ pub const CHECK_EXPECT: &str = include_str!("check-expect.fx");
 /// `check-sub-env-types.fx`: types and signatures, a module file of no state (`TODO.md` §68).
 pub const CHECK_SUB_ENV_TYPES: &str = include_str!("check-sub-env-types.fx");
 
+/// `check-subtype.fx`: a `load-input` file, which the conductor applies (`TODO.md` §68).
+pub const CHECK_SUBTYPE: &str = include_str!("check-subtype.fx");
+
 /// Hash tables' types: a module file of no state (`TODO.md` §68).
 pub const TABLE_TYPES: &str = include_str!("table-types.fx");
 
@@ -385,7 +388,7 @@ pub const NATIVE: &str = include_str!("native.fx");
 /// descriptions, resolving them, errors, modules' descriptions, subtyping,
 /// instantiation, termination and what tests say of sizes, the rules,
 /// modules' rules, and programs.
-pub const CHECKER_FILES: [(&str, &str); 19] = [
+pub const CHECKER_FILES: [(&str, &str); 18] = [
     ("check-types.fx", include_str!("check-types.fx")),
     ("check-effects.fx", include_str!("check-effects.fx")),
     ("check-env.fx", include_str!("check-env.fx")),
@@ -404,7 +407,6 @@ pub const CHECKER_FILES: [(&str, &str); 19] = [
     ("check-errors.fx", include_str!("check-errors.fx")),
     ("check-modules.fx", include_str!("check-modules.fx")),
     ("check-sub-env.fx", include_str!("check-sub-env.fx")),
-    ("check-subtype.fx", include_str!("check-subtype.fx")),
 ];
 
 /// The reader, the parser, the tables, the checker, the evaluator and the
@@ -422,7 +424,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 109] = [
+pub const FRONT_END_MODULES: [(&str, &str); 110] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("table-types.fx", TABLE_TYPES),
     ("check-module-rules-types.fx", CHECK_MODULE_RULES_TYPES),
@@ -532,6 +534,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 109] = [
     ("check-calls.fx", CHECK_CALLS),
     ("check-expect.fx", CHECK_EXPECT),
     ("check-sub-env-types.fx", CHECK_SUB_ENV_TYPES),
+    ("check-subtype.fx", CHECK_SUBTYPE),
 ];
 
 /// A `load-module` path naming a module file built in, in
@@ -548,7 +551,7 @@ pub fn built_in_module(path: &str) -> Option<&'static str> {
 /// The front end's files, by name, in the order [`front_end`] joins them;
 /// [`bootstrap_program`] puts `bootstrap.fx` after them. The module files
 /// built in, [`FRONT_END_MODULES`], are loaded by the first.
-pub const FRONT_END_FILES: [(&str, &str); 22] = [
+pub const FRONT_END_FILES: [(&str, &str); 21] = [
     ("reader.fx", READER),
     ("table.fx", TABLE),
     CHECKER_FILES[0],
@@ -569,7 +572,6 @@ pub const FRONT_END_FILES: [(&str, &str); 22] = [
     CHECKER_FILES[15],
     CHECKER_FILES[16],
     CHECKER_FILES[17],
-    CHECKER_FILES[18],
     ("conductor.fx", CONDUCTOR),
 ];
 

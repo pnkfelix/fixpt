@@ -58,6 +58,9 @@
 ;; The types it names, from the files that define them.
 (define check-subst-types (load-module "fx26:check-subst-types.fx"))
 (define-type k-pairs (select check-subst-types k-pairs))
+;; The types it names, from the files that define them.
+(define-type k-hyps (select check-types-types k-hyps))
+(define-type k-lemma (select check-types-types k-lemma))
 (define-type check-resolve-sig
   (moduleof
    (val exp-start (subr pure (exp) int))
@@ -101,4 +104,13 @@
    (val k-pair-seen? (subr (maxeff (read @globals) (read @t)) (k-pairs int int) bool))
    (val k-same-kinds? (subr (maxeff (read @globals) (read @t)) (k-binders k-binders) bool))
    (val k-let-names
-        (subr (maxeff (alloc @t) (read @globals) (read @t)) (k-let-bs k-names) k-names))))
+        (subr (maxeff (alloc @t) (read @globals) (read @t)) (k-let-bs k-names) k-names))
+   (val k-lemma-may-apply?
+        (subr (maxeff (read @globals) (read @t) spin)
+              ((listof k-lemma acyclic) int int)
+              bool))
+   (val k-all-bound? (subr (maxeff (read @globals) (read @t)) (k-binders k-map) bool))
+   (val k-subst-hyps
+        (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+              (k-hyps k-map)
+              k-hyps))))
