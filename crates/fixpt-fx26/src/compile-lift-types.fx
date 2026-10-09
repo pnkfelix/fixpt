@@ -21,3 +21,19 @@
 ;; The standard operations' words of the form being compiled whose twins
 ;; are to be made, last first (step 4): each word, operation and arity.
 (define-type c-standard-twin (productof (1 tword) (2 string) (3 int)))
+
+;;; ------------------------------------------------------------ signatures
+
+;; What its clients use of it (`compile-twins.fx`).
+;; The types it names, from the files that define them.
+(define-type c-params (select compile-types c-params))
+(define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
+(define-type exp (select parser-types exp))
+(define-type compile-lift-sig
+  (moduleof (val c-twin-depth (ref int @k))
+            (val c-r-in-plan (ref bool @k))
+            (val c-planned-fv
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (c-params exp)
+                       (listof syms @k)))
+            (val c-standard-twins (ref (listof c-standard-twin @k) @k))))

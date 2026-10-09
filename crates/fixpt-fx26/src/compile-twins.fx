@@ -8,9 +8,44 @@
 ;;; register compiler, which the stack compiler no longer calls; before the
 ;;; program loop (`compile-programs.fx`), which calls this.
 
-;; A module (`TODO.md` §34: the front end into modules, a file at a time);
-;; what other files use re-exported after it.
-(define compile-twins-module (module
+;; Its types, those it uses of the files before it, and the signatures of
+;; what it is given.
+(let* ((compile-types (load-module "fx26:compile-types.fx"))
+       (compile-exps-types (load-module "fx26:compile-exps-types.fx"))
+       (compile-lift-types (load-module "fx26:compile-lift-types.fx"))
+       (compile-plan-types (load-module "fx26:compile-plan-types.fx"))
+       (regcode-entry-types (load-module "fx26:regcode-entry-types.fx")))
+  ;; What it is given: the modules of the files before it that it uses.
+  (lambda ((compile (select compile-types compile-sig))
+           (compile-exps (select compile-exps-types compile-exps-sig))
+           (compile-plan (select compile-plan-types compile-plan-sig))
+           (compile-lift (select compile-lift-types compile-lift-sig))
+           (regcode-entry (select regcode-entry-types regcode-entry-sig)))
+    (module
+
+;; The types it uses of the files before it.
+(define-effect c-emits (select compile-types c-emits))
+(define-effect compiles (select compile-types compiles))
+(define-type c-spec (select compile-exps-types c-spec))
+(define-type c-twin (select compile-exps-types c-twin))
+(define-type c-standard-twin (select compile-lift-types c-standard-twin))
+;; What it uses of the modules it is given.
+(define c-genv (with compile c-genv))
+(define c-registers (with compile c-registers))
+(define c-made-reuse (with compile-exps c-made-reuse))
+(define c-own-now (with compile-exps c-own-now))
+(define c-r-plan-ctx (with compile-exps c-r-plan-ctx))
+(define c-spec-now (with compile-exps c-spec-now))
+(define c-twins (with compile-exps c-twins))
+(define c-make-copies (with compile-plan c-make-copies))
+(define c-plan-copy-order (with compile-plan c-plan-copy-order))
+(define c-planned-fv (with compile-lift c-planned-fv))
+(define c-r-in-plan (with compile-lift c-r-in-plan))
+(define c-standard-twins (with compile-lift c-standard-twins))
+(define c-twin-depth (with compile-lift c-twin-depth))
+(define r-register-code (with regcode-entry r-register-code))
+(define r-standard-word (with regcode-entry r-standard-word))
+
 ;; `cells` as word `w`'s register twin, unless there are none.
 (define c-twin! (subr c-emits (tword (listof wcell @k)) unit)
   (lambda (w cells) (if (null? cells) #u (begin (set-register-twin w cells) #u))))
@@ -67,7 +102,4 @@
       (if (get c-registers) (c-make-copies (get c-plan-copy-order)) #u)
       (let ((ts (get c-twins)) (ss (get c-standard-twins)))
         (begin (set c-twins nil) (set c-standard-twins nil)
-               (c-make-twins ts) (c-make-standard-twins ss))))))
-))
-
-(define c-form-twins (with compile-twins-module c-form-twins))
+               (c-make-twins ts) (c-make-standard-twins ss)))))))))

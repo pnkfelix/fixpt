@@ -109,6 +109,9 @@ pub const COMPILE_PROGRAMS: &str = include_str!("compile-programs.fx");
 /// `compile-inline.fx`: a `load-input` file, which the conductor applies (`TODO.md` §68).
 pub const COMPILE_INLINE: &str = include_str!("compile-inline.fx");
 
+/// `compile-twins.fx`: a `load-input` file, which the conductor applies (`TODO.md` §68).
+pub const COMPILE_TWINS: &str = include_str!("compile-twins.fx");
+
 /// Hash tables' types: a module file of no state (`TODO.md` §68).
 pub const TABLE_TYPES: &str = include_str!("table-types.fx");
 
@@ -159,12 +162,11 @@ pub const COMPILER_PARTS: [(&str, &str); 3] = [
     ("compile-plan.fx", include_str!("compile-plan.fx")),
 ];
 
-/// The compiler's last parts, after the register compiler, which they call
-/// (`docs/research/compiler-middle-phase.md`, step 4): the twin phase; and
-/// inlining. After them, programs, the loop over a program's forms: a
-/// `load-input` file, [`COMPILE_PROGRAMS`], which the conductor applies.
-pub const COMPILER_DRIVER: [(&str, &str); 1] = [
-    ("compile-twins.fx", include_str!("compile-twins.fx")),
+/// The compiler's last parts written as top-level files, after the register
+/// compiler, which they call (`docs/research/compiler-middle-phase.md`,
+/// step 4): none now. The twin phase, inlining and programs are
+/// `load-input` files the conductor applies (`TODO.md` §68).
+pub const COMPILER_DRIVER: [(&str, &str); 0] = [
 ];
 
 /// The register compiler written in FX-26 (PLAN.md 13h′ (e)): register code
@@ -257,7 +259,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 42] = [
+pub const FRONT_END_MODULES: [(&str, &str); 43] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("table-types.fx", TABLE_TYPES),
     ("compile-programs-types.fx", COMPILE_PROGRAMS_TYPES),
@@ -300,6 +302,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 42] = [
     ("compile-inline-types.fx", COMPILE_INLINE_TYPES),
     ("compile-programs.fx", COMPILE_PROGRAMS),
     ("compile-inline.fx", COMPILE_INLINE),
+    ("compile-twins.fx", COMPILE_TWINS),
 ];
 
 /// A `load-module` path naming a module file built in, in
@@ -316,7 +319,7 @@ pub fn built_in_module(path: &str) -> Option<&'static str> {
 /// The front end's files, by name, in the order [`front_end`] joins them;
 /// [`bootstrap_program`] puts `bootstrap.fx` after them. The module files
 /// built in, [`FRONT_END_MODULES`], are loaded by the first.
-pub const FRONT_END_FILES: [(&str, &str); 50] = [
+pub const FRONT_END_FILES: [(&str, &str); 49] = [
     ("reader.fx", READER),
     ("table.fx", TABLE),
     CHECKER_FILES[0],
@@ -365,7 +368,6 @@ pub const FRONT_END_FILES: [(&str, &str); 50] = [
     REGCODE_PARTS[2],
     REGCODE_PARTS[3],
     REGCODE_PARTS[4],
-    COMPILER_DRIVER[0],
     ("conductor.fx", CONDUCTOR),
 ];
 

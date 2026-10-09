@@ -87,4 +87,15 @@
             (val c-unrolls-of
                  (subr (maxeff (read @globals) (read @k)) (symbol) c-inlinables))
             (val c-special-limit int)
-            (val c-nth (subr (read @globals) (exps int) exp))))
+            (val c-nth (subr (read @globals) (exps int) exp))
+            (val c-plan-copy-order (ref (listof c-copy-at @k) @k))
+            (val c-make-copies
+                 (subr (maxeff (alloc @k)
+                               (goto @y)
+                               (read @globals)
+                               (read @k)
+                               (read @t)
+                               (write @k)
+                               spin)
+                       ((listof c-copy-at @k))
+                       unit))))

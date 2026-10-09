@@ -9,7 +9,12 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; Inlining: what the compiler knows of small global procedures.
+  (let* (;; The twins: register code beside each word.
+         (compile-twins
+          ((load-input "fx26:compile-twins.fx")
+           compile-module compile-exps-module compile-plan-module compile-lift-module
+           regcode-entry-module))
+         ;; Inlining: what the compiler knows of small global procedures.
          (compile-inline
           ((load-input "fx26:compile-inline.fx")
            compile-module compile-plan-module compile-exps-module tables))
@@ -22,7 +27,7 @@
          ;; The compiler's loop over a program's forms.
          (compile-programs
           ((load-input "fx26:compile-programs.fx")
-           compile-module compile-exps-module compile-plan-module compile-twins-module
+           compile-module compile-exps-module compile-plan-module compile-twins
            regcode-exps-module compile-inline regcode-module check-resolve-module tables
            regcode-helpers-module layout-module))
          ;; The assembler, of the encoders and the generated layouts.
