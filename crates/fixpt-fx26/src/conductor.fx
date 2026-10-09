@@ -29,7 +29,7 @@
          (check-test-facts
           ((load-input "fx26:check-test-facts.fx")
            check-infer-module check-types-module check-env-module check-terminate
-           check-print-module check-calls-module check-sc-graphs))
+           check-print-module check-calls-module check-sc-graphs check-binders-module))
          ;; The checker, letrec: a group's types found and checked.
          (check-letrec
           ((load-input "fx26:check-letrec.fx")
@@ -38,7 +38,8 @@
          ;; The checker, facts: what the compiler is told.
          (check-facts
           ((load-input "fx26:check-facts.fx")
-           check-env-module check-test-facts check-infer-module check-calls-module))
+           check-env-module check-test-facts check-infer-module check-calls-module
+           check-binders-module))
          ;; The checker, synthesis: calls, their arguments and type binders.
          (check-synth
           ((load-input "fx26:check-synth.fx")
@@ -46,7 +47,7 @@
            check-infer-module check-facts check-print-module check-bounds-module
            check-expect-module check-errors-module check-effects-module check-mask-module
            check-unions-module check-terminate check-holds-module check-subtype-module
-           check-calls-module check-subst-module))
+           check-calls-module check-subst-module check-binders-module))
          ;; The checker, a module's order: its items as a letrec*, used only once made.
          (check-modorder
           ((load-input "fx26:check-modorder.fx")
@@ -69,7 +70,7 @@
            check-terminate check-modorder check-unions-module check-modules-module
            check-effects-module check-data-module check-read-module check-mask-module
            check-calls-module check-bounds-module check-holds-module check-subtype-module
-           check-subst-module check-sc-graphs))
+           check-subst-module check-sc-graphs check-binders-module))
          ;; The checker, its proofs: lemmas proved.
          (check-proofs
           ((load-input "fx26:check-proofs.fx")

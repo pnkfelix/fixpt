@@ -8,6 +8,7 @@
        (check-types-types (load-module "fx26:check-types-types.fx"))
        (check-subst-types (load-module "fx26:check-subst-types.fx"))
        (check-infer-types (load-module "fx26:check-infer-types.fx"))
+       (check-binders-types (load-module "fx26:check-binders-types.fx"))
        (check-env-types (load-module "fx26:check-env-types.fx"))
        (check-terminate-types (load-module "fx26:check-terminate-types.fx"))
        (check-sc-graphs-types (load-module "fx26:check-sc-graphs-types.fx"))
@@ -20,7 +21,8 @@
            (check-terminate (select check-terminate-types check-terminate-sig))
            (check-print (select check-print-types check-print-sig))
            (check-calls (select check-calls-types check-calls-sig))
-           (check-sc-graphs (select check-sc-graphs-types check-sc-graphs-sig)))
+           (check-sc-graphs (select check-sc-graphs-types check-sc-graphs-sig))
+           (check-binders (select check-binders-types check-binders-sig)))
     (module
 (define-type k-fact-list (select check-test-facts-types k-fact-list))
 (define-type k-branch-facts (select check-test-facts-types k-branch-facts))
@@ -53,8 +55,8 @@
 (define x-var (with check-types-types x-var))
 (define-effect kmakes (select check-subst-types kmakes))
 ;; What it uses of the modules it is given.
-(define k-binders-of (with check-infer k-binders-of))
-(define k-binding-depth (with check-infer k-binding-depth))
+(define k-binders-of (with check-binders k-binders-of))
+(define k-binding-depth (with check-binders k-binding-depth))
 (define k-get (with check-types k-get))
 (define k-resolve (with check-types k-resolve))
 (define k-std-type (with check-types k-std-type))

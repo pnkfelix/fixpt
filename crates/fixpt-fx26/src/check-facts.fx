@@ -7,12 +7,14 @@
        (check-types-types (load-module "fx26:check-types-types.fx"))
        (check-env-types (load-module "fx26:check-env-types.fx"))
        (check-infer-types (load-module "fx26:check-infer-types.fx"))
+       (check-binders-types (load-module "fx26:check-binders-types.fx"))
        (check-calls-types (load-module "fx26:check-calls-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-env (select check-env-types check-env-sig))
            (check-test-facts (select check-test-facts-types check-test-facts-sig))
            (check-infer (select check-infer-types check-infer-sig))
-           (check-calls (select check-calls-types check-calls-sig)))
+           (check-calls (select check-calls-types check-calls-sig))
+           (check-binders (select check-binders-types check-binders-sig)))
     (module
 
 ;; The types it uses of the files before it.
@@ -27,7 +29,7 @@
 (define k-bool (with check-env k-bool))
 (define k-branch-facts-of (with check-test-facts k-branch-facts-of))
 (define k-latent-facts (with check-test-facts k-latent-facts))
-(define k-sc-one-arg? (with check-infer k-sc-one-arg?))
+(define k-sc-one-arg? (with check-binders k-sc-one-arg?))
 (define k-std-op (with check-calls k-std-op))
 
   ;; Whether `x` is the literal boolean `v`.

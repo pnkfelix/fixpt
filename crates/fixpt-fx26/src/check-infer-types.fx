@@ -37,32 +37,6 @@
 (define-type check-infer-sig
   (moduleof (val k-same-labels?
                  (subr (maxeff (read @globals) (read @t)) (k-let-bs k-parts) bool))
-            (val k-binders-of
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
-                       (int)
-                       k-bound-body))
-            (val k-default-regions
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t))
-                       (k-binders k-solved)
-                       unit))
-            (val k-finitized
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
-                       (int)
-                       int))
-            (val k-named-since
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
-                       (k-ids k-ids k-ids)
-                       k-ids))
-            (val k-forget-nats
-                 (subr (maxeff (alloc @t)
-                               (goto @z)
-                               (read @globals)
-                               (read @s)
-                               (read @t)
-                               (write @t)
-                               spin)
-                       (k-ids int int int)
-                       int))
             (val k-inst-shapes
                  (subr (maxeff (alloc @t)
                                (goto @z)
@@ -135,22 +109,6 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (kx kx k-region)
                        bool))
-            (val k-fin-region (subr (read @globals) (k-region) k-region))
-            (val k-binding-depth
-                 (subr (maxeff (read @globals) (read @t) spin) (symbol) int))
-            (val k-certified-has?
-                 (subr (maxeff (read @globals) (read @t)) (k-named symbol int) bool))
-            (val k-sc-one-arg? (subr (read @t) (kxs) bool))
-            (val k-check-bounds
-                 (subr (maxeff (alloc @t)
-                               (goto @z)
-                               (read @globals)
-                               (read @s)
-                               (read @t)
-                               (write @t)
-                               spin)
-                       (k-binders k-map int int)
-                       unit))
             (val k-check-finite-sizes
                  (subr (maxeff (alloc @t)
                                (goto @z)
