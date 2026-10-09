@@ -32,6 +32,9 @@
 ;; The types it names, from the files that define them.
 (define-type k-ids (select check-types-types k-ids))
 (define-type k-region (select check-types-types k-region))
+;; The types it names, from the files that define them.
+(define-type k-atom (select check-types-types k-atom))
+(define-type k-regions (select check-types-types k-regions))
 (define-type check-read-sig
   (moduleof (val k-sfail
                  (subr (maxeff (alloc @t)
@@ -169,4 +172,19 @@
                                (write @t)
                                spin)
                        (syn k-syns)
-                       (listof k-eff acyclic)))))
+                       (listof k-eff acyclic)))
+            (val k-globals-region
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (syn)
+                       (listof k-regions acyclic)))
+            (val k-atoms-on
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
+                       (bool k-regions)
+                       k-eff))
+            (val k-atom-of (subr (read @globals) (string k-region) k-atom))))

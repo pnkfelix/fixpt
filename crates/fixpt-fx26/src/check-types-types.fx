@@ -339,4 +339,6 @@
    (val k-outers (ref k-nesting @t))
    (val k-gens (ref (listof k-gen acyclic) @t))
    (val k-arrow-parts
-        (subr (maxeff (read @globals) (read @t)) (int) (listof k-arrow-kind acyclic)))))
+        (subr (maxeff (read @globals) (read @t)) (int) (listof k-arrow-kind acyclic)))
+   (val k-raw (subr (maxeff (read @globals) (read @t)) (int) k-ty))
+   (val k-desc-types (subr (maxeff (alloc @t) (read @globals)) (k-descs) k-ids))))

@@ -9,7 +9,12 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; Substitution.
+  (let* (;; What reading descriptions from their syntax needs.
+         (check-syntax
+          ((load-input "fx26:check-syntax.fx")
+           check-types-module check-read-module check-unions-module check-print-module
+           check-effects-module check-env-module check-holds-module parser-module))
+         ;; Substitution.
          (check-subst
           ((load-input "fx26:check-subst.fx")
            check-types-module check-effects-module check-holds-module check-read-module
@@ -17,17 +22,17 @@
          ;; What a test proves.
          (check-proving
           ((load-input "fx26:check-proving.fx")
-           check-types-module check-env-module check-read-module check-syntax-module
+           check-types-module check-env-module check-read-module check-syntax
            parser-module))
          ;; What reading types uses that reads none of them.
          (check-read-helpers
           ((load-input "fx26:check-read-helpers.fx")
            check-types-module check-read-module check-env-module check-subst
-           check-print-module check-syntax-module check-effects-module parser-module))
+           check-print-module check-syntax check-effects-module parser-module))
          ;; Reading types, one knot.
          (check-read-descs
           ((load-input "fx26:check-read-descs.fx")
-           check-types-module check-read-helpers check-syntax-module check-read-module
+           check-types-module check-read-helpers check-syntax check-read-module
            check-subst check-env-module check-print-module check-holds-module
            check-proving check-effects-module check-unions-module parser-module))
          ;; Define-generative, read.
@@ -39,7 +44,7 @@
          (check-resolve
           ((load-input "fx26:check-resolve.fx")
            check-types-module check-subst check-effects-module check-env-module
-           check-read-module check-syntax-module check-print-module check-read-descs
+           check-read-module check-syntax check-print-module check-read-descs
            tables))
          ;; Masking an expression's effect.
          (check-mask
@@ -58,7 +63,7 @@
          ;; Modules' descriptions read.
          (check-modules-read
           ((load-input "fx26:check-modules-read.fx")
-           check-types-module check-resolve check-syntax-module check-read-module
+           check-types-module check-resolve check-syntax check-read-module
            check-env-module check-read-descs check-subst parser-module))
          ;; First-class modules' descriptions.
          (check-modules
@@ -188,7 +193,7 @@
          ;; The checker, its programs: forms checked in order, under redefinition.
          (check-program
           ((load-input "fx26:check-program.fx")
-           check-types-module check-syntax-module check-effects-module check-env-module
+           check-types-module check-syntax check-effects-module check-env-module
            check-proofs check-rules check-generative
            check-read-descs check-resolve check-errors
            check-terminate check-print-module check-letrec check-read-module
