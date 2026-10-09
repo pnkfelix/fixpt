@@ -9,6 +9,8 @@
 (define-type k-atom (select check-types-types k-atom))
 (define-type k-eff (select check-types-types k-eff))
 (define-type k-region (select check-types-types k-region))
+;; The types it names, from the files that define them.
+(define-type k-conv (select check-types-types k-conv))
 (define-type check-effects-sig
   (moduleof (val k-atom-region (subr (read @globals) (k-atom) k-region))
             (val k-one (subr (alloc @t) (k-atom) k-eff))
@@ -31,4 +33,5 @@
                  (subr (maxeff (read @globals) (read @t) spin) (k-eff k-eff) bool))
             (val k-has-region? (subr (read @globals) (k-atom) bool))
             (val k-atom-with (subr (read @globals) (k-atom k-region) k-atom))
-            (val k-atom-var (subr pure (k-atom) int))))
+            (val k-atom-var (subr pure (k-atom) int))
+            (val k-conv-code (subr pure (k-conv) int))))
