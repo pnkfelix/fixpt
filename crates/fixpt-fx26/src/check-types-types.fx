@@ -341,4 +341,9 @@
    (val k-arrow-parts
         (subr (maxeff (read @globals) (read @t)) (int) (listof k-arrow-kind acyclic)))
    (val k-raw (subr (maxeff (read @globals) (read @t)) (int) k-ty))
-   (val k-desc-types (subr (maxeff (alloc @t) (read @globals)) (k-descs) k-ids))))
+   (val k-desc-types (subr (maxeff (alloc @t) (read @globals)) (k-descs) k-ids))
+   (val k-copy-array
+        (poly ((t type))
+              (subr (maxeff (read @globals) (read @t) (write @t) spin)
+                    ((arrayof t @t) (arrayof t @t) int)
+                    unit)))))
