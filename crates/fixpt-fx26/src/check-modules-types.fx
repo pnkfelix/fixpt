@@ -40,17 +40,7 @@
 (define check-holds-types (load-module "fx26:check-holds-types.fx"))
 (define-type k-seen (select check-holds-types k-seen))
 (define-type check-modules-sig
-  (moduleof (val k-resolve-exp
-                 (subr (maxeff (alloc @t)
-                               (goto @z)
-                               (read @globals)
-                               (read @s)
-                               (read @t)
-                               (write @t)
-                               spin)
-                       (exp)
-                       kx))
-            (val k-name-module
+  (moduleof (val k-name-module
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (symbol int)
                        int))
@@ -68,20 +58,6 @@
                                spin)
                        (int syn)
                        int))
-            (val k-push-binders
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t))
-                       (k-binders)
-                       unit))
-            (val k-in-loaded
-                 (subr (maxeff (alloc @t)
-                               (goto @z)
-                               (read @globals)
-                               (read @s)
-                               (read @t)
-                               (write @t)
-                               spin)
-                       (k-thunk-unit int int int)
-                       unit))
             (val k-resolve-selects
                  (subr (maxeff (alloc @t)
                                (goto @z)

@@ -117,14 +117,16 @@
            check-terminate check-modorder check-unions-module check-modules-module
            check-effects-module check-data check-read-module check-mask-module
            check-calls check-bounds check-holds-module check-subtype
-           check-subst-module check-sc-graphs check-binders check-sub-env))
+           check-subst-module check-sc-graphs check-binders check-sub-env
+           check-modules-read-module))
          ;; The checker, its proofs: lemmas proved.
          (check-proofs
           ((load-input "fx26:check-proofs.fx")
            check-types-module check-resolve-module check-env-module check-calls
            check-generative-module check-read-descs-module check-errors-module check-read-module
            check-subtype check-modules-module check-infer check-terminate
-           check-print-module tables parser-module check-sc-graphs check-sub-env))
+           check-print-module tables parser-module check-sc-graphs check-sub-env
+           check-modules-read-module))
          ;; The checker, its programs: forms checked in order, under redefinition.
          (check-program
           ((load-input "fx26:check-program.fx")
@@ -133,7 +135,7 @@
            check-read-descs-module check-resolve-module check-errors-module
            check-terminate check-print-module check-letrec check-read-module
            check-expect check-modules-module check-modorder check-subst-module
-           check-synth check-module-rules check-subtype parser-module))
+           check-synth check-module-rules check-subtype parser-module check-modules-read-module))
          ;; The object layout, generated from the heap's table.
          (layout (load-module "fx26:layout.fx"))
          ;; The standard operations, generated from the lowering's table.

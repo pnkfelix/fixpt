@@ -30,6 +30,7 @@
        (check-sc-graphs-types (load-module "fx26:check-sc-graphs-types.fx"))
        (check-unions-types (load-module "fx26:check-unions-types.fx"))
        (check-modules-types (load-module "fx26:check-modules-types.fx"))
+       (check-modules-read-types (load-module "fx26:check-modules-read-types.fx"))
        (check-effects-types (load-module "fx26:check-effects-types.fx"))
        (check-data-types (load-module "fx26:check-data-types.fx"))
        (check-read-types (load-module "fx26:check-read-types.fx"))
@@ -69,7 +70,8 @@
            (check-subst (select check-subst-types check-subst-sig))
            (check-sc-graphs (select check-sc-graphs-types check-sc-graphs-sig))
            (check-binders (select check-binders-types check-binders-sig))
-           (check-sub-env (select check-sub-env-types check-sub-env-sig)))
+           (check-sub-env (select check-sub-env-types check-sub-env-sig))
+           (check-modules-read (select check-modules-read-types check-modules-read-sig)))
     (module
 
 ;; The types it uses of the files before it.
@@ -345,7 +347,7 @@
 (define k-mod-recs-lambdas (with check-modorder k-mod-recs-lambdas))
 (define k-mod-star-lambdas (with check-modorder k-mod-star-lambdas))
 (define k-false-expected? (with check-unions k-false-expected?))
-(define k-in-loaded (with check-modules k-in-loaded))
+(define k-in-loaded (with check-modules-read k-in-loaded))
 (define k-letrec-selected (with check-modules k-letrec-selected))
 (define k-resolve-selects (with check-modules k-resolve-selects))
 (define k-insert (with check-effects k-insert))
