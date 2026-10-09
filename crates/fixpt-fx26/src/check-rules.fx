@@ -27,6 +27,7 @@
        (check-proving-types (load-module "fx26:check-proving-types.fx"))
        (check-close-types (load-module "fx26:check-close-types.fx"))
        (check-print-types (load-module "fx26:check-print-types.fx"))
+       (check-print-parts-types (load-module "fx26:check-print-parts-types.fx"))
        (check-terminate-types (load-module "fx26:check-terminate-types.fx"))
        (check-sc-graphs-types (load-module "fx26:check-sc-graphs-types.fx"))
        (check-unions-types (load-module "fx26:check-unions-types.fx"))
@@ -73,7 +74,8 @@
            (check-binders (select check-binders-types check-binders-sig))
            (check-sub-env (select check-sub-env-types check-sub-env-sig))
            (check-modules-read (select check-modules-read-types check-modules-read-sig))
-           (check-read-helpers (select check-read-helpers-types check-read-helpers-sig)))
+           (check-read-helpers (select check-read-helpers-types check-read-helpers-sig))
+           (check-print-parts (select check-print-parts-types check-print-parts-sig)))
     (module
 
 ;; The types it uses of the files before it.
@@ -331,10 +333,10 @@
 (define k-frozen (with check-close k-frozen))
 (define k-frozen-result (with check-close k-frozen-result))
 (define k-note-effect (with check-close k-note-effect))
-(define k-conv=? (with check-print k-conv=?))
+(define k-conv=? (with check-print-parts k-conv=?))
 (define k-show-ty (with check-print k-show-ty))
-(define k-size-nonneg? (with check-print k-size-nonneg?))
-(define k-size-plus (with check-print k-size-plus))
+(define k-size-nonneg? (with check-print-parts k-size-nonneg?))
+(define k-size-plus (with check-print-parts k-size-plus))
 (define k-declaring (with check-terminate k-declaring))
 (define k-fail-not-lambda (with check-terminate k-fail-not-lambda))
 (define k-op-either? (with check-sc-graphs k-op-either?))

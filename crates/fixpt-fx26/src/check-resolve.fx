@@ -21,6 +21,7 @@
        (check-read-types (load-module "fx26:check-read-types.fx"))
        (check-syntax-types (load-module "fx26:check-syntax-types.fx"))
        (check-print-types (load-module "fx26:check-print-types.fx"))
+       (check-print-parts-types (load-module "fx26:check-print-parts-types.fx"))
        (check-read-descs-types (load-module "fx26:check-read-descs-types.fx"))
        (table-types (load-module "fx26:table-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
@@ -32,7 +33,8 @@
            (check-syntax (select check-syntax-types check-syntax-sig))
            (check-print (select check-print-types check-print-sig))
            (check-read-descs (select check-read-descs-types check-read-descs-sig))
-           (tables (select table-types tables-sig)))
+           (tables (select table-types tables-sig))
+           (check-print-parts (select check-print-parts-types check-print-parts-sig)))
     (module
 (define-type k-typed-params (select check-resolve-types k-typed-params))
 (define-type k-letrec-bs (select check-resolve-types k-letrec-bs))
@@ -250,8 +252,8 @@
 (define k-effect-selects (with check-read k-effect-selects))
 (define k-items (with check-read k-items))
 (define k-knots (with check-syntax k-knots))
-(define k-map-find (with check-print k-map-find))
-(define k-size-facts (with check-print k-size-facts))
+(define k-map-find (with check-print-parts k-map-find))
+(define k-size-facts (with check-print-parts k-size-facts))
 (define k-parse-d (with check-read-descs k-parse-d))
 (define k-parse-type (with check-read-descs k-parse-type))
 (define make-table (with tables make-table))

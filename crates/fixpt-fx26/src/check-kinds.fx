@@ -16,13 +16,15 @@
        (check-read-descs-types (load-module "fx26:check-read-descs-types.fx"))
        (check-read-helpers-types (load-module "fx26:check-read-helpers-types.fx"))
        (check-holds-types (load-module "fx26:check-holds-types.fx"))
-       (check-print-types (load-module "fx26:check-print-types.fx")))
+       (check-print-types (load-module "fx26:check-print-types.fx"))
+       (check-print-parts-types (load-module "fx26:check-print-parts-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-types (select check-types-types check-types-sig))
            (check-read-descs (select check-read-descs-types check-read-descs-sig))
            (check-holds (select check-holds-types check-holds-sig))
            (check-print (select check-print-types check-print-sig))
-           (check-read-helpers (select check-read-helpers-types check-read-helpers-sig)))
+           (check-read-helpers (select check-read-helpers-types check-read-helpers-sig))
+           (check-print-parts (select check-print-parts-types check-print-parts-sig)))
     (module
 
 ;; The types it uses of the files before it.
@@ -47,7 +49,7 @@
 (define k-binders-as-descs (with check-read-helpers k-binders-as-descs))
 (define k-lam (with check-read-helpers k-lam))
 (define k-fun-kind (with check-holds k-fun-kind))
-(define k-place? (with check-print k-place?))
+(define k-place? (with check-print-parts k-place?))
 
 ;; Whether description `d` is of kind `k`, as a binder of that kind takes; a
 ;; function whose kind is not known yet, a `select`, is let through.

@@ -7,11 +7,13 @@
 ;; what it is given.
 (let* ((check-types-types (load-module "fx26:check-types-types.fx"))
        (check-resolve-types (load-module "fx26:check-resolve-types.fx"))
-       (check-print-types (load-module "fx26:check-print-types.fx")))
+       (check-print-types (load-module "fx26:check-print-types.fx"))
+       (check-print-parts-types (load-module "fx26:check-print-parts-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-types (select check-types-types check-types-sig))
            (check-resolve (select check-resolve-types check-resolve-sig))
-           (check-print (select check-print-types check-print-sig)))
+           (check-print (select check-print-types check-print-sig))
+           (check-print-parts (select check-print-parts-types check-print-parts-sig)))
     (module
 
 ;; The types it uses of the files before it.
@@ -30,7 +32,7 @@
 (define k-quote (with check-types k-quote))
 (define k-end (with check-resolve k-end))
 (define k-start (with check-resolve k-start))
-(define k-show-effect (with check-print k-show-effect))
+(define k-show-effect (with check-print-parts k-show-effect))
 (define k-show-ty (with check-print k-show-ty))
 
 ;; The error `m` at expression `x`.

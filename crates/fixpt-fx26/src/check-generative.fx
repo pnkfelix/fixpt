@@ -16,6 +16,7 @@
        (check-holds-types (load-module "fx26:check-holds-types.fx"))
        (check-env-types (load-module "fx26:check-env-types.fx"))
        (check-print-types (load-module "fx26:check-print-types.fx"))
+       (check-print-parts-types (load-module "fx26:check-print-parts-types.fx"))
        (check-read-descs-types (load-module "fx26:check-read-descs-types.fx"))
        (reader-types (load-module "fx26:reader-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
@@ -25,7 +26,8 @@
            (check-print (select check-print-types check-print-sig))
            (check-read (select check-read-types check-read-sig))
            (check-read-descs (select check-read-descs-types check-read-descs-sig))
-           (parser (select reader-types parser-sig)))
+           (parser (select reader-types parser-sig))
+           (check-print-parts (select check-print-parts-types check-print-parts-sig)))
     (module
 (define-type k-seen-pol (select check-generative-types k-seen-pol))
 (define-type k-pols-found (select check-generative-types k-pols-found))
@@ -99,7 +101,7 @@
 (define k-regions-name? (with check-holds k-regions-name?))
 (define k-dscope (with check-env k-dscope))
 (define k-push-desc (with check-env k-push-desc))
-(define k-dvar-string (with check-print k-dvar-string))
+(define k-dvar-string (with check-print-parts k-dvar-string))
 (define k-type-is-var? (with check-print k-type-is-var?))
 (define k-items (with check-read k-items))
 (define k-name-of (with check-read k-name-of))

@@ -14,7 +14,8 @@
        (check-resolve-types (load-module "fx26:check-resolve-types.fx"))
        (check-mask-types (load-module "fx26:check-mask-types.fx"))
        (check-calls-types (load-module "fx26:check-calls-types.fx"))
-       (check-print-types (load-module "fx26:check-print-types.fx")))
+       (check-print-types (load-module "fx26:check-print-types.fx"))
+       (check-print-parts-types (load-module "fx26:check-print-parts-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-types (select check-types-types check-types-sig))
            (check-effects (select check-effects-types check-effects-sig))
@@ -24,7 +25,8 @@
            (check-mask (select check-mask-types check-mask-sig))
            (check-calls (select check-calls-types check-calls-sig))
            (check-print (select check-print-types check-print-sig))
-           (check-subst (select check-subst-types check-subst-sig)))
+           (check-subst (select check-subst-types check-subst-sig))
+           (check-print-parts (select check-print-parts-types check-print-parts-sig)))
     (module
 
 ;; The types it uses of the files before it.
@@ -93,7 +95,7 @@
 (define k-frozen-atom? (with check-mask k-frozen-atom?))
 (define k-mask (with check-mask k-mask))
 (define k-has-comefrom? (with check-calls k-has-comefrom?))
-(define k-show-effect (with check-print k-show-effect))
+(define k-show-effect (with check-print-parts k-show-effect))
 (define k-show-ty (with check-print k-show-ty))
 (define k-subst (with check-subst k-subst))
 

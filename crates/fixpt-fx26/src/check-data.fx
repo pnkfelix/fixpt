@@ -8,6 +8,7 @@
 ;; what it is given.
 (let* ((check-types-types (load-module "fx26:check-types-types.fx"))
        (check-print-types (load-module "fx26:check-print-types.fx"))
+       (check-print-parts-types (load-module "fx26:check-print-parts-types.fx"))
        (check-expect-types (load-module "fx26:check-expect-types.fx"))
        (check-effects-types (load-module "fx26:check-effects-types.fx"))
        (check-subst-types (load-module "fx26:check-subst-types.fx")))
@@ -16,7 +17,8 @@
            (check-print (select check-print-types check-print-sig))
            (check-expect (select check-expect-types check-expect-sig))
            (check-effects (select check-effects-types check-effects-sig))
-           (check-subst (select check-subst-types check-subst-sig)))
+           (check-subst (select check-subst-types check-subst-sig))
+           (check-print-parts (select check-print-parts-types check-print-parts-sig)))
     (module
 
 ;; The types it uses of the files before it.
@@ -57,8 +59,8 @@
 (define k-new-epoch (with check-types k-new-epoch))
 (define k-resolve (with check-types k-resolve))
 (define k-visit? (with check-types k-visit?))
-(define k-map-find (with check-print k-map-find))
-(define k-region-show (with check-print k-region-show))
+(define k-map-find (with check-print-parts k-map-find))
+(define k-region-show (with check-print-parts k-region-show))
 (define k-show-ty (with check-print k-show-ty))
 (define k-quote-dvar (with check-expect k-quote-dvar))
 (define k-region=? (with check-effects k-region=?))

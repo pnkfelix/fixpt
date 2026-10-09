@@ -17,6 +17,7 @@
        (check-read-helpers-types (load-module "fx26:check-read-helpers-types.fx"))
        (check-subst-types (load-module "fx26:check-subst-types.fx"))
        (check-print-types (load-module "fx26:check-print-types.fx"))
+       (check-print-parts-types (load-module "fx26:check-print-parts-types.fx"))
        (check-proving-types (load-module "fx26:check-proving-types.fx"))
        (check-effects-types (load-module "fx26:check-effects-types.fx"))
        (check-unions-types (load-module "fx26:check-unions-types.fx"))
@@ -33,7 +34,8 @@
            (check-proving (select check-proving-types check-proving-sig))
            (check-effects (select check-effects-types check-effects-sig))
            (check-unions (select check-unions-types check-unions-sig))
-           (parser (select reader-types parser-sig)))
+           (parser (select reader-types parser-sig))
+           (check-print-parts (select check-print-parts-types check-print-parts-sig)))
     (module
 
 ;; The types it uses of the files before it.
@@ -209,10 +211,10 @@
 (define k-push-desc (with check-env k-push-desc))
 (define k-select-map (with check-env k-select-map))
 (define k-void (with check-env k-void))
-(define k-conv-default (with check-print k-conv-default))
-(define k-kind-text (with check-print k-kind-text))
+(define k-conv-default (with check-print-parts k-conv-default))
+(define k-kind-text (with check-print-parts k-kind-text))
 (define k-show-ty (with check-print k-show-ty))
-(define k-size-var (with check-print k-size-var))
+(define k-size-var (with check-print-parts k-size-var))
 (define k-fun-kind (with check-holds k-fun-kind))
 (define k-new-seen (with check-holds k-new-seen))
 (define k-no-knot (with check-holds k-no-knot))

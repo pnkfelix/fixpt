@@ -13,6 +13,7 @@
        (check-subst-types (load-module "fx26:check-subst-types.fx"))
        (table-types (load-module "fx26:table-types.fx"))
        (check-print-types (load-module "fx26:check-print-types.fx"))
+       (check-print-parts-types (load-module "fx26:check-print-parts-types.fx"))
        (check-effects-types (load-module "fx26:check-effects-types.fx"))
        (reader-types (load-module "fx26:reader-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
@@ -20,7 +21,8 @@
            (check-print (select check-print-types check-print-sig))
            (check-effects (select check-effects-types check-effects-sig))
            (tables (select table-types tables-sig))
-           (parser (select reader-types parser-sig)))
+           (parser (select reader-types parser-sig))
+           (check-print-parts (select check-print-parts-types check-print-parts-sig)))
     (module
 (define-type k-benv (select check-subtype-types k-benv))
 (define-type k-assumed (select check-subtype-types k-assumed))
@@ -59,7 +61,7 @@
 ;; What it uses of the modules it is given.
 (define k-get (with check-types k-get))
 (define k-length (with check-types k-length))
-(define k-conv=? (with check-print k-conv=?))
+(define k-conv=? (with check-print-parts k-conv=?))
 (define k-region=? (with check-effects k-region=?))
 (define make-table (with tables make-table))
 (define table-ref (with tables table-ref))

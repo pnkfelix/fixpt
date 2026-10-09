@@ -12,6 +12,7 @@
        (check-expect-types (load-module "fx26:check-expect-types.fx"))
        (check-effects-types (load-module "fx26:check-effects-types.fx"))
        (check-print-types (load-module "fx26:check-print-types.fx"))
+       (check-print-parts-types (load-module "fx26:check-print-parts-types.fx"))
        (check-env-types (load-module "fx26:check-env-types.fx"))
        (check-terminate-types (load-module "fx26:check-terminate-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
@@ -20,7 +21,8 @@
            (check-effects (select check-effects-types check-effects-sig))
            (check-print (select check-print-types check-print-sig))
            (check-env (select check-env-types check-env-sig))
-           (check-terminate (select check-terminate-types check-terminate-sig)))
+           (check-terminate (select check-terminate-types check-terminate-sig))
+           (check-print-parts (select check-print-parts-types check-print-parts-sig)))
     (module
 (define-type k-checker (select check-letrec-types k-checker))
 (define-type k-group-checker (select check-letrec-types k-group-checker))
@@ -55,7 +57,7 @@
 (define k-eff=? (with check-effects k-eff=?))
 (define k-one (with check-effects k-one))
 (define k-union (with check-effects k-union))
-(define k-globals-atom? (with check-print k-globals-atom?))
+(define k-globals-atom? (with check-print-parts k-globals-atom?))
 (define k-last-latent (with check-env k-last-latent))
 (define k-mark (with check-env k-mark))
 (define k-unbind-to (with check-env k-unbind-to))

@@ -17,6 +17,7 @@
        (check-effects-types (load-module "fx26:check-effects-types.fx"))
        (check-env-types (load-module "fx26:check-env-types.fx"))
        (check-print-types (load-module "fx26:check-print-types.fx"))
+       (check-print-parts-types (load-module "fx26:check-print-parts-types.fx"))
        (check-read-types (load-module "fx26:check-read-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-types (select check-types-types check-types-sig))
@@ -24,7 +25,8 @@
            (check-effects (select check-effects-types check-effects-sig))
            (check-env (select check-env-types check-env-sig))
            (check-print (select check-print-types check-print-sig))
-           (check-read (select check-read-types check-read-sig)))
+           (check-read (select check-read-types check-read-sig))
+           (check-print-parts (select check-print-parts-types check-print-parts-sig)))
     (module
 
 ;; The types it uses of the files before it.
@@ -88,7 +90,7 @@
 (define k-fx-module? (with check-env k-fx-module?))
 (define k-lookup (with check-env k-lookup))
 (define k-with-names (with check-env k-with-names))
-(define k-globals-atom? (with check-print k-globals-atom?))
+(define k-globals-atom? (with check-print-parts k-globals-atom?))
 (define k-items (with check-read k-items))
 
 ;; Whether an atom is on `const`, the frozen region.
