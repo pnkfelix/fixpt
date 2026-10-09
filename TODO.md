@@ -1996,3 +1996,17 @@ Phase 1, the types out, one module at a time; phase 2, the conversion.
   the like (`regcode.fx`, `compile-programs.fx`): checked, as they say more
   than is done, but naming what is no longer a global.
 
+## 69. `(extend e0 e1)`, FX-91's, after §68 phase 2 (the user's, 2026-10-09: high priority)
+
+FX-91 combines modules with `(extend e0 e1)` (report §2.3.5, p. 15; see
+`docs/research/separate-compilation.md`). Wanted to cut the toil and
+redundancy of the import blocks §68 writes, but not in the middle of that
+refactoring: after phase 2, then a mechanical pass over the converted
+files. Measured (2026-10-09, 39 files converted): 3,449 import lines.
+Every converted file names *all* of its own types file (263 lines in 23
+files), which `extend` would remove outright; the rest are partial (a file
+names 40 to 60 of `check-types-types.fx`'s 148, and only what it uses of
+each module it is given), where including everything also makes those
+names the module's own. To decide: `extend` as FX-91 has it, or also an
+item that opens a module within another without exporting it, as `with`
+does for an expression.
