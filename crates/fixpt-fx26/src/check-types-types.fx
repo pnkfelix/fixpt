@@ -346,4 +346,5 @@
         (poly ((t type))
               (subr (maxeff (read @globals) (read @t) (write @t) spin)
                     ((arrayof t @t) (arrayof t @t) int)
-                    unit)))))
+                    unit)))
+   (val k-desc-regions (subr (maxeff (alloc @t) (read @globals)) (k-descs) k-regions))))

@@ -30,4 +30,5 @@
             (val k-within?
                  (subr (maxeff (read @globals) (read @t) spin) (k-eff k-eff) bool))
             (val k-has-region? (subr (read @globals) (k-atom) bool))
-            (val k-atom-with (subr (read @globals) (k-atom k-region) k-atom))))
+            (val k-atom-with (subr (read @globals) (k-atom k-region) k-atom))
+            (val k-atom-var (subr pure (k-atom) int))))

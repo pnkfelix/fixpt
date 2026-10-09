@@ -1979,7 +1979,7 @@ Phase 1, the types out, one module at a time; phase 2, the conversion.
   `check-kinds.fx`, `check-mask.fx`, `check-resolve.fx`,
   `check-generative.fx`, `check-read-descs.fx`, `check-read-helpers.fx`,
   `check-proving.fx`, `check-subst.fx`, `check-syntax.fx`,
-  `check-read.fx`.
+  `check-read.fx`, `check-holds.fx`.
 - The FX checker's cost of converted files (2026-10-09): checking the
   front end had grown from about 1.0 s to 1.46 s over phase 2. Profiled
   (`probe_profile_check`, 4.8 G cells to 7.2 G), three walks along lists

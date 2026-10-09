@@ -9,7 +9,11 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; Syntax read.
+  (let* (;; What a type holds.
+         (check-holds
+          ((load-input "fx26:check-holds.fx")
+           check-types-module check-effects-module check-env-module check-print-module tables))
+         ;; Syntax read.
          (check-read
           ((load-input "fx26:check-read.fx")
            check-types-module check-effects-module check-print-module check-env-module
@@ -18,11 +22,11 @@
          (check-syntax
           ((load-input "fx26:check-syntax.fx")
            check-types-module check-read check-unions-module check-print-module
-           check-effects-module check-env-module check-holds-module parser-module))
+           check-effects-module check-env-module check-holds parser-module))
          ;; Substitution.
          (check-subst
           ((load-input "fx26:check-subst.fx")
-           check-types-module check-effects-module check-holds-module check-read
+           check-types-module check-effects-module check-holds check-read
            check-print-module check-env-module tables parser-module))
          ;; What a test proves.
          (check-proving
@@ -38,12 +42,12 @@
          (check-read-descs
           ((load-input "fx26:check-read-descs.fx")
            check-types-module check-read-helpers check-syntax check-read
-           check-subst check-env-module check-print-module check-holds-module
+           check-subst check-env-module check-print-module check-holds
            check-proving check-effects-module check-unions-module parser-module))
          ;; Define-generative, read.
          (check-generative
           ((load-input "fx26:check-generative.fx")
-           check-types-module check-holds-module check-env-module check-print-module
+           check-types-module check-holds check-env-module check-print-module
            check-read check-read-descs parser-module))
          ;; Resolving the trees' descriptions.
          (check-resolve
@@ -59,7 +63,7 @@
          ;; Higher kinds.
          (check-kinds
           ((load-input "fx26:check-kinds.fx")
-           check-types-module check-read-descs check-holds-module check-print-module
+           check-types-module check-read-descs check-holds check-print-module
            check-read-helpers))
          ;; What its errors say, and where.
          (check-errors
@@ -74,7 +78,7 @@
          (check-modules
           ((load-input "fx26:check-modules.fx")
            check-types-module check-env-module check-kinds check-print-module
-           check-read check-holds-module check-subst check-read-descs
+           check-read check-holds check-subst check-read-descs
            parser-module check-read-helpers))
          ;; The subtype test's memory.
          (check-sub-env
@@ -94,13 +98,13 @@
          ;; The checker, calls: which may reach their own caller.
          (check-calls
           ((load-input "fx26:check-calls.fx")
-           check-types-module check-resolve check-holds-module check-env-module
+           check-types-module check-resolve check-holds check-env-module
            check-expect))
          ;; The checker, dependent subroutines: parameters selected from.
          (check-dependent
           ((load-input "fx26:check-dependent.fx")
            check-types-module check-env-module check-modules check-read-descs
-           check-expect check-holds-module check-subst check-read-helpers))
+           check-expect check-holds check-subst check-read-helpers))
          ;; The checker, data: what the data kind admits.
          (check-data
           ((load-input "fx26:check-data.fx")
@@ -122,12 +126,12 @@
            check-types-module check-resolve check-effects-module check-binders
            check-env-module check-bounds check-print-module check-data
            check-read-descs check-kinds check-unions-module check-subtype
-           check-holds-module check-expect check-subst check-sub-env
+           check-holds check-expect check-subst check-sub-env
            check-read-helpers))
          ;; The checker, closing: what a definition leaves solved.
          (check-close
           ((load-input "fx26:check-close.fx")
-           check-types-module check-effects-module check-holds-module check-env-module
+           check-types-module check-effects-module check-holds check-env-module
            check-resolve check-mask check-calls check-print-module
            check-subst))
          ;; The checker, size-change graphs of calls.
@@ -138,7 +142,7 @@
          ;; The checker, termination: the graphs closed under composition.
          (check-terminate
           ((load-input "fx26:check-terminate.fx")
-           check-types-module check-resolve check-holds-module check-env-module
+           check-types-module check-resolve check-holds check-env-module
            check-expect check-sc-graphs check-print-module tables))
          ;; The checker, what tests prove: facts in the type of a test.
          (check-test-facts
@@ -161,7 +165,7 @@
            check-types-module check-test-facts check-resolve check-env-module
            check-infer check-facts check-print-module check-bounds
            check-expect check-errors check-effects-module check-mask
-           check-unions-module check-terminate check-holds-module check-subtype
+           check-unions-module check-terminate check-holds check-subtype
            check-calls check-subst check-binders check-sub-env))
          ;; The checker, a module's order: its items as a letrec*, used only once made.
          (check-modorder
@@ -184,7 +188,7 @@
            check-proving check-test-facts check-close check-print-module
            check-terminate check-modorder check-unions-module check-modules
            check-effects-module check-data check-read check-mask
-           check-calls check-bounds check-holds-module check-subtype
+           check-calls check-bounds check-holds check-subtype
            check-subst check-sc-graphs check-binders check-sub-env
            check-modules-read check-read-helpers))
          ;; The checker, its proofs: lemmas proved.
