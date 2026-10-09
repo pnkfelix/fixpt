@@ -1948,5 +1948,11 @@ Phase 1, the types out, one module at a time; phase 2, the conversion.
   `regcode-entry.fx`, `regcode-core.fx` (its size debt raised by its
   imports alone, 1125 to 1415 lines: the user's, 2026-10-09),
   `regcode-modules.fx`, `regcode-helpers.fx`, `regcode-places.fx` (split
-  from `regcode-exps.fx` to stay under 1000 lines), `regcode-exps.fx`.
+  from `regcode-exps.fx` to stay under 1000 lines), `regcode-exps.fx`,
+  `regcode.fx` (two definitions of `compile-lift.fx` outside its module
+  moved into it first).
+- Left for a pass once all are converted: effects written naming globals
+  that are now a module's imports, `(read (globals exp-end exp-start))` and
+  the like (`regcode.fx`, `compile-programs.fx`): checked, as they say more
+  than is done, but naming what is no longer a global.
 

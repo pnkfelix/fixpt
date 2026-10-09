@@ -250,4 +250,14 @@
             (val c-join-ok?
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
                        (c-recs exp int)
-                       bool))))
+                       bool))
+            (val std-eq-name? (subr pure (string) bool))
+            (val c-lifted
+                 (ref (bloblet (fields (subr pure (int) int)
+                                       (subr pure (int int) bool)
+                                       (arrayof (listof (pairof int c-lifting @k) acyclic)
+                                                @k)
+                                       int)
+                               @k)
+                      @k))
+            (val c-this-loc? (subr (read @globals) (loc loc) bool))))

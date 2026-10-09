@@ -55,4 +55,6 @@
             (val c-standard-word-of
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
                        (string)
-                       (listof tword @k)))))
+                       (listof tword @k)))
+            (val r-fixed-width-op? (subr pure (string) bool))
+            (val r-eqtable-quick? (subr pure (string) bool))))

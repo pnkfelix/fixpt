@@ -9,35 +9,40 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; Register code, its expressions.
+  (let* (;; Register code: its state, the constants known, and the twins made.
+         (regcode
+          ((load-input "fx26:regcode.fx")
+           compile-module compile-exps-module compile-lift-module compile-plan-module
+           check-resolve-module tables layout-module standard-module))
+         ;; Register code, its expressions.
          (regcode-exps
           ((load-input "fx26:regcode-exps.fx")
-           regcode-module compile-module compile-exps-module compile-lift-module
+           regcode compile-module compile-exps-module compile-lift-module
            compile-plan-module check-resolve-module tables layout-module))
          ;; Register code, its places: registers, frame slots, environments.
          (regcode-places
           ((load-input "fx26:regcode-places.fx")
-           regcode-module compile-module layout-module regcode-exps))
+           regcode compile-module layout-module regcode-exps))
          ;; Register code, its helpers.
          (regcode-helpers
           ((load-input "fx26:regcode-helpers.fx")
-           regcode-module compile-module compile-exps-module compile-plan-module
+           regcode compile-module compile-exps-module compile-plan-module
            compile-lift-module check-resolve-module regcode-exps layout-module tables
            regcode-places))
          ;; Register code for modules: their products, and with.
          (regcode-modules
           ((load-input "fx26:regcode-modules.fx")
-           regcode-module compile-module layout-module regcode-exps))
+           regcode compile-module layout-module regcode-exps))
          ;; Register code, its core: the one recursive group over expressions.
          (regcode-core
           ((load-input "fx26:regcode-core.fx")
-           regcode-module compile-module compile-lift-module compile-exps-module
+           regcode compile-module compile-lift-module compile-exps-module
            compile-plan-module regcode-exps layout-module regcode-helpers
            regcode-modules regcode-places))
          ;; Register code, its entry: a lambda as register code, or why none.
          (regcode-entry
           ((load-input "fx26:regcode-entry.fx")
-           compile-module compile-exps-module compile-plan-module regcode-module
+           compile-module compile-exps-module compile-plan-module regcode
            check-resolve-module regcode-exps regcode-core regcode-helpers
            layout-module))
          ;; The twins: register code beside each word.
@@ -59,7 +64,7 @@
          (compile-programs
           ((load-input "fx26:compile-programs.fx")
            compile-module compile-exps-module compile-plan-module compile-twins
-           regcode-exps compile-inline regcode-module check-resolve-module tables
+           regcode-exps compile-inline regcode check-resolve-module tables
            regcode-helpers layout-module))
          ;; The assembler, of the encoders and the generated layouts.
          (native

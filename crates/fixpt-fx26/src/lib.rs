@@ -136,6 +136,9 @@ pub const REGCODE_PLACES: &str = include_str!("regcode-places.fx");
 /// `regcode-exps.fx`: a `load-input` file, which the conductor applies (`TODO.md` §68).
 pub const REGCODE_EXPS: &str = include_str!("regcode-exps.fx");
 
+/// `standard-types.fx`: types and signatures, a module file of no state (`TODO.md` §68).
+pub const STANDARD_TYPES: &str = include_str!("standard-types.fx");
+
 /// Hash tables' types: a module file of no state (`TODO.md` §68).
 pub const TABLE_TYPES: &str = include_str!("table-types.fx");
 
@@ -278,7 +281,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 51] = [
+pub const FRONT_END_MODULES: [(&str, &str); 53] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("table-types.fx", TABLE_TYPES),
     ("compile-programs-types.fx", COMPILE_PROGRAMS_TYPES),
@@ -330,6 +333,8 @@ pub const FRONT_END_MODULES: [(&str, &str); 51] = [
     ("regcode-places-types.fx", REGCODE_PLACES_TYPES),
     ("regcode-places.fx", REGCODE_PLACES),
     ("regcode-exps.fx", REGCODE_EXPS),
+    ("standard-types.fx", STANDARD_TYPES),
+    ("regcode.fx", REGCODE),
 ];
 
 /// A `load-module` path naming a module file built in, in
@@ -346,7 +351,7 @@ pub fn built_in_module(path: &str) -> Option<&'static str> {
 /// The front end's files, by name, in the order [`front_end`] joins them;
 /// [`bootstrap_program`] puts `bootstrap.fx` after them. The module files
 /// built in, [`FRONT_END_MODULES`], are loaded by the first.
-pub const FRONT_END_FILES: [(&str, &str); 44] = [
+pub const FRONT_END_FILES: [(&str, &str); 43] = [
     ("reader.fx", READER),
     ("table.fx", TABLE),
     CHECKER_FILES[0],
@@ -389,7 +394,6 @@ pub const FRONT_END_FILES: [(&str, &str); 44] = [
     COMPILER_PARTS[0],
     COMPILER_PARTS[1],
     COMPILER_PARTS[2],
-    ("regcode.fx", REGCODE),
     ("conductor.fx", CONDUCTOR),
 ];
 

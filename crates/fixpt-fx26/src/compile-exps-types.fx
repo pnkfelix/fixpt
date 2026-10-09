@@ -119,4 +119,8 @@
                                (write @k)
                                spin)
                        (c-recs exp int int cenv bool)
-                       c-lifting))))
+                       c-lifting))
+            (val c-quote-now
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (exp)
+                       (listof wcell @k)))))

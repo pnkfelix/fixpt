@@ -513,7 +513,21 @@
         (begin (c-op1 c routine-slot (wcell-int (+ sum-slot 1)))
                (c-field c (+ j 2))
                (c-members (cdr ns) (c-extend (car ns) (at-slot slot) e)
-                          sum-slot (+ slot 1) (+ j 1) c)))))))
+                          sum-slot (+ slot 1) (+ j 1) c)))))
+;; Kinds of runtime primitive, for register code (`r-never-collects?`).
+;; Whether runtime primitive `name` is one of the fixed-width integers', `f64`'s or `f32`'s
+;; operations (`%fx26-u32*`, `%fx26-int->i64`, `%fx26-f64+`).
+(define r-fixed-width-op? (subr pure (string) bool)
+  (lambda (name)
+    (let ((starts (lambda ((s string)) (= (string-search name s 0) 0))))
+      (or (or (starts "%fx26-i32") (starts "%fx26-u32"))
+          (or (or (starts "%fx26-i64") (starts "%fx26-u64"))
+              (or (or (starts "%fx26-f64") (starts "%fx26-f32")) (starts "%fx26-int->")))))))
+;; Whether `name` is an eqtable's operation of one or two arguments.
+(define r-eqtable-quick? (subr pure (string) bool)
+  (lambda (name)
+    (or (string=? name "%fx26-eqtable-has?")
+        (or (string=? name "%fx26-eqtable-count") (string=? name "%fx26-eqtable-delete!")))))))
 
 (define c-span-key (with compile-lift-module c-span-key))
 (define-type c-standard-twin (select compile-lift-module c-standard-twin))
@@ -546,18 +560,5 @@
 (define c-planned-fv (with compile-lift-module c-planned-fv))
 (define c-planned-lift (with compile-lift-module c-planned-lift))
 (define c-r-in-plan (with compile-lift-module c-r-in-plan))
-
-;; Kinds of runtime primitive, for register code (`r-never-collects?`).
-;; Whether runtime primitive `name` is one of the fixed-width integers', `f64`'s or `f32`'s
-;; operations (`%fx26-u32*`, `%fx26-int->i64`, `%fx26-f64+`).
-(define r-fixed-width-op? (subr pure (string) bool)
-  (lambda (name)
-    (let ((starts (lambda ((s string)) (= (string-search name s 0) 0))))
-      (or (or (starts "%fx26-i32") (starts "%fx26-u32"))
-          (or (or (starts "%fx26-i64") (starts "%fx26-u64"))
-              (or (or (starts "%fx26-f64") (starts "%fx26-f32")) (starts "%fx26-int->")))))))
-;; Whether `name` is an eqtable's operation of one or two arguments.
-(define r-eqtable-quick? (subr pure (string) bool)
-  (lambda (name)
-    (or (string=? name "%fx26-eqtable-has?")
-        (or (string=? name "%fx26-eqtable-count") (string=? name "%fx26-eqtable-delete!")))))
+(define r-fixed-width-op? (with compile-lift-module r-fixed-width-op?))
+(define r-eqtable-quick? (with compile-lift-module r-eqtable-quick?))
