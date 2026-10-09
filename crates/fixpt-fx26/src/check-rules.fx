@@ -14,6 +14,7 @@
        (check-env-types (load-module "fx26:check-env-types.fx"))
        (check-module-rules-types (load-module "fx26:check-module-rules-types.fx"))
        (check-subtype-types (load-module "fx26:check-subtype-types.fx"))
+       (check-sub-env-types (load-module "fx26:check-sub-env-types.fx"))
        (check-test-facts-types (load-module "fx26:check-test-facts-types.fx"))
        (check-modorder-types (load-module "fx26:check-modorder-types.fx"))
        (eager-reader-types ((proj (load-module "fx26:eager-reader-types.fx") @s @e @m @c)))
@@ -67,7 +68,8 @@
            (check-subtype (select check-subtype-types check-subtype-sig))
            (check-subst (select check-subst-types check-subst-sig))
            (check-sc-graphs (select check-sc-graphs-types check-sc-graphs-sig))
-           (check-binders (select check-binders-types check-binders-sig)))
+           (check-binders (select check-binders-types check-binders-sig))
+           (check-sub-env (select check-sub-env-types check-sub-env-sig)))
     (module
 
 ;; The types it uses of the files before it.
@@ -357,7 +359,7 @@
 (define k-under (with check-calls k-under))
 (define k-new-bounded-solved (with check-bounds k-new-bounded-solved))
 (define k-no-knot (with check-holds k-no-knot))
-(define k-part-find (with check-subtype k-part-find))
+(define k-part-find (with check-sub-env k-part-find))
 (define k-part-index (with check-subtype k-part-index))
 (define k-part-of (with check-subtype k-part-of))
 (define k-subtype (with check-subtype k-subtype))

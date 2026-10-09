@@ -29,4 +29,4 @@ crates/fixpt-fx26/src/regcode-core.fx 1419 0
 # alone, 998 to 1346, and by two lines for each module it is given since
 # (split from one it was given), the code unchanged (the user's,
 # 2026-10-09, `TODO.md` §68).
-crates/fixpt-fx26/src/check-rules.fx 1350 0
+crates/fixpt-fx26/src/check-rules.fx 1352 0
