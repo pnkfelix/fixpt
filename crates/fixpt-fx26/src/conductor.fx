@@ -9,7 +9,12 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; The checker, dependent subroutines: parameters selected from.
+  (let* (;; The checker, calls: which may reach their own caller.
+         (check-calls
+          ((load-input "fx26:check-calls.fx")
+           check-types-module check-resolve-module check-holds-module check-env-module
+           check-expect-module))
+         ;; The checker, dependent subroutines: parameters selected from.
          (check-dependent
           ((load-input "fx26:check-dependent.fx")
            check-types-module check-env-module check-modules-module check-read-descs-module
@@ -40,13 +45,13 @@
          (check-close
           ((load-input "fx26:check-close.fx")
            check-types-module check-effects-module check-holds-module check-env-module
-           check-resolve-module check-mask-module check-calls-module check-print-module
+           check-resolve-module check-mask-module check-calls check-print-module
            check-subst-module))
          ;; The checker, size-change graphs of calls.
          (check-sc-graphs
           ((load-input "fx26:check-sc-graphs.fx")
            check-resolve-module check-env-module check-types-module check-read-module
-           check-calls-module))
+           check-calls))
          ;; The checker, termination: the graphs closed under composition.
          (check-terminate
           ((load-input "fx26:check-terminate.fx")
@@ -56,7 +61,7 @@
          (check-test-facts
           ((load-input "fx26:check-test-facts.fx")
            check-infer check-types-module check-env-module check-terminate
-           check-print-module check-calls-module check-sc-graphs check-binders))
+           check-print-module check-calls check-sc-graphs check-binders))
          ;; The checker, letrec: a group's types found and checked.
          (check-letrec
           ((load-input "fx26:check-letrec.fx")
@@ -65,7 +70,7 @@
          ;; The checker, facts: what the compiler is told.
          (check-facts
           ((load-input "fx26:check-facts.fx")
-           check-env-module check-test-facts check-infer check-calls-module
+           check-env-module check-test-facts check-infer check-calls
            check-binders))
          ;; The checker, synthesis: calls, their arguments and type binders.
          (check-synth
@@ -74,7 +79,7 @@
            check-infer check-facts check-print-module check-bounds
            check-expect-module check-errors-module check-effects-module check-mask-module
            check-unions-module check-terminate check-holds-module check-subtype-module
-           check-calls-module check-subst-module check-binders))
+           check-calls check-subst-module check-binders))
          ;; The checker, a module's order: its items as a letrec*, used only once made.
          (check-modorder
           ((load-input "fx26:check-modorder.fx")
@@ -96,12 +101,12 @@
            check-proving-module check-test-facts check-close check-print-module
            check-terminate check-modorder check-unions-module check-modules-module
            check-effects-module check-data check-read-module check-mask-module
-           check-calls-module check-bounds check-holds-module check-subtype-module
+           check-calls check-bounds check-holds-module check-subtype-module
            check-subst-module check-sc-graphs check-binders))
          ;; The checker, its proofs: lemmas proved.
          (check-proofs
           ((load-input "fx26:check-proofs.fx")
-           check-types-module check-resolve-module check-env-module check-calls-module
+           check-types-module check-resolve-module check-env-module check-calls
            check-generative-module check-read-descs-module check-errors-module check-read-module
            check-subtype-module check-modules-module check-infer check-terminate
            check-print-module tables parser-module check-sc-graphs))

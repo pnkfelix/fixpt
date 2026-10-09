@@ -99,4 +99,6 @@
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (int) k-regions))
    (val k-ty-rank (subr (maxeff (read @globals) (read @t) spin) (int) int))
    (val k-pair-seen? (subr (maxeff (read @globals) (read @t)) (k-pairs int int) bool))
-   (val k-same-kinds? (subr (maxeff (read @globals) (read @t)) (k-binders k-binders) bool))))
+   (val k-same-kinds? (subr (maxeff (read @globals) (read @t)) (k-binders k-binders) bool))
+   (val k-let-names
+        (subr (maxeff (alloc @t) (read @globals) (read @t)) (k-let-bs k-names) k-names))))
