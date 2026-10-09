@@ -20,6 +20,9 @@
 ;;; ------------------------------------------------------------ signatures
 
 ;; What its clients use of it (`check-rules.fx`).
+;; The types it names, from the files that define them.
+(define-type k-descs (select check-types-types k-descs))
+(define-type k-ids (select check-types-types k-ids))
 (define-type check-holds-sig
   (moduleof (val k-no-knot
                  (subr (maxeff (alloc @t)
@@ -32,4 +35,6 @@
                        (int int int)
                        unit))
             (val k-id-hash (subr pure (int) int))
-            (val k-id=? (subr pure (int int) bool))))
+            (val k-id=? (subr pure (int int) bool))
+            (val k-ds-types
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (k-descs) k-ids))))

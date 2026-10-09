@@ -21,4 +21,5 @@
                        (k-eff k-eff)
                        k-eff))
             (val k-region=? (subr (maxeff (read @globals) spin) (k-region k-region) bool))
-            (val k-eff=? (subr (maxeff (read @globals) (read @t) spin) (k-eff k-eff) bool))))
+            (val k-eff=? (subr (maxeff (read @globals) (read @t) spin) (k-eff k-eff) bool))
+            (val k-atom-rank (subr pure (k-atom) int))))

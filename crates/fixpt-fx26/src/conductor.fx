@@ -9,7 +9,13 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; The checker, size-change graphs of calls.
+  (let* (;; The checker, closing: what a definition leaves solved.
+         (check-close
+          ((load-input "fx26:check-close.fx")
+           check-types-module check-effects-module check-holds-module check-env-module
+           check-resolve-module check-mask-module check-calls-module check-print-module
+           check-subst-module))
+         ;; The checker, size-change graphs of calls.
          (check-sc-graphs
           ((load-input "fx26:check-sc-graphs.fx")
            check-resolve-module check-env-module check-types-module check-read-module
@@ -59,7 +65,7 @@
            check-types-module check-infer-module check-synth check-errors-module
            check-resolve-module check-env-module check-expect-module check-letrec
            check-dependent-module check-module-rules check-read-descs-module
-           check-proving-module check-test-facts check-close-module check-print-module
+           check-proving-module check-test-facts check-close check-print-module
            check-terminate check-modorder check-unions-module check-modules-module
            check-effects-module check-data-module check-read-module check-mask-module
            check-calls-module check-bounds-module check-holds-module check-subtype-module

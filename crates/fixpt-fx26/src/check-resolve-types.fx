@@ -91,4 +91,6 @@
               (k-binders k-binders)
               k-map))
    (val k-items-bound
-        (subr (maxeff (alloc @t) (read @globals) (read @t)) (k-items k-names) k-names))))
+        (subr (maxeff (alloc @t) (read @globals) (read @t)) (k-items k-names) k-names))
+   (val k-regions-in
+        (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (int) k-regions))))
