@@ -320,4 +320,10 @@
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t)) (symbol int) int))
    (val k-arrow-result (subr (maxeff (read @globals) (read @t)) (int) int))
    (val k-arrow-params (subr (maxeff (read @globals) (read @t)) (int) k-ids))
-   (val k-abstract-funs (ref k-ids @t))))
+   (val k-abstract-funs (ref k-ids @t))
+   (val k-arrow
+        (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (k-ids int) int))
+   (val k-binder-kinds (subr (read @globals) (k-binders) k-ids))
+   (val k-lifetimes (ref k-ids @t))
+   (val k-set-outer
+        (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t)) (int k-ids) unit))))

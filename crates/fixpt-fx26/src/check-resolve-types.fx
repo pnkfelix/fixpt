@@ -61,6 +61,9 @@
 ;; The types it names, from the files that define them.
 (define-type k-hyps (select check-types-types k-hyps))
 (define-type k-lemma (select check-types-types k-lemma))
+;; The types it names, from the files that define them.
+(define-type exp-params (select check-subst-types exp-params))
+(define-type syns-a (select parser-types syns-a))
 (define-type check-resolve-sig
   (moduleof
    (val exp-start (subr pure (exp) int))
@@ -113,4 +116,37 @@
    (val k-subst-hyps
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
               (k-hyps k-map)
-              k-hyps))))
+              k-hyps))
+   (val k-resolve-params
+        (subr (maxeff (alloc @t)
+                      (goto @z)
+                      (read @globals)
+                      (read @s)
+                      (read @t)
+                      (write @t)
+                      spin)
+              (exp-params)
+              k-typed-params))
+   (val k-resolve-descs
+        (subr (maxeff (alloc @t)
+                      (goto @z)
+                      (read @globals)
+                      (read @s)
+                      (read @t)
+                      (write @t)
+                      spin)
+              (syns-a)
+              k-descs))
+   (val k-copy-names (subr (maxeff (alloc @t) (read @globals)) (names) k-names))
+   (val k-order-binders
+        (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t))
+              (k-binders k-ids)
+              unit))
+   (val k-resolve-place
+        (subr (maxeff (alloc @t) (goto @z) (read @globals) (read @s) (read @t) (write @t))
+              (symbol int int)
+              k-region))
+   (val k-freeze-into (subr (read (globals r-frozen)) (k-region) k-region))
+   (val k-place-lives (subr (maxeff (alloc @t) (read @globals) (read @t)) (k-region) k-ids))
+   (val k-names-onto
+        (subr (maxeff (alloc @t) (read @globals) (read @t)) (k-names k-names) k-names))))

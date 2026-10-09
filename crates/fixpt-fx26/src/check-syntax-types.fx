@@ -29,6 +29,8 @@
 (define-type k-names (select check-types-types k-names))
 (define check-read-types (load-module "fx26:check-read-types.fx"))
 (define-type k-syns (select check-read-types k-syns))
+;; The types it names, from the files that define them.
+(define-type k-conv (select check-types-types k-conv))
 (define-type check-syntax-sig
   (moduleof (val k-define-family
                  (subr (maxeff (alloc @t)
@@ -64,4 +66,14 @@
                                (write @t)
                                spin)
                        (k-filled)
-                       unit))))
+                       unit))
+            (val k-parse-conv
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (syn)
+                       k-conv))))

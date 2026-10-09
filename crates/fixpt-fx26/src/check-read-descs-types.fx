@@ -18,6 +18,9 @@
 ;; The types it names, from the files that define them.
 (define check-env-types (load-module "fx26:check-env-types.fx"))
 (define-type k-selects (select check-env-types k-selects))
+;; The types it names, from the files that define them.
+(define check-read-types (load-module "fx26:check-read-types.fx"))
+(define-type k-syns (select check-read-types k-syns))
 (define-type check-read-descs-sig
   (moduleof (val k-parse-effect
                  (subr (maxeff (alloc @t)
@@ -82,4 +85,14 @@
             (val k-selects-in
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (int)
-                       k-selects))))
+                       k-selects))
+            (val k-parse-types
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (k-syns)
+                       k-ids))))
