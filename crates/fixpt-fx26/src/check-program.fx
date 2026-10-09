@@ -693,7 +693,8 @@
             (k-show-effect e)
             ": make its state in a `lambda` it gives, which each caller applies")))
 ;; `(define name init)`, of no type written: its line. A loaded file's, made
-;; once for all its loads, must be pure but for reading globals.
+;; once for all its loads, must be pure but for reading globals, and has
+;; none.
 (define k-define-untyped (subr (maxeff checks spin) (symbol exp) k-out)
   (lambda (name init)
     (let* ((x (k-resolve-exp init))
@@ -704,7 +705,11 @@
                  #u)
              (k-bind-named-global name (extract r 1))
              (if (k-lambda? x) (k-note-known name 0) #u)
-             (cons (k-define-line name (extract r 1) (extract r 2)) nil)))))
+             ;; No line for a file's hidden global, which the program does
+             ;; not name.
+             (if (k-shared-name? name)
+                 nil
+                 (cons (k-define-line name (extract r 1) (extract r 2)) nil))))))
 ;; One top-level form's lines: what each definition and expression is.
 (define k-top-lines (subr (maxeff checks spin) (top) k-out)
   (lambda (form)

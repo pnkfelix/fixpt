@@ -1898,4 +1898,10 @@ Phase 1, the types out, one module at a time; phase 2, the conversion.
   tree may hold), where it was made again for each line. With lines on
   (`FIXPT_BENCH_LINES=1 fixpt bench --front-end`): 237.6 M words to 189.1
   and the FX check 1265 ms to 1120; printing costs 18.6 M words, from 67.
+- The hidden definitions of loaded files (`%shared:…`) have no line in
+  either checker (2026-10-09): the program does not name them, and their
+  types are as large as the modules they hold. A definition that loads
+  one still says, in its effect, that it reads it. `fixpt check` on the
+  front end shows 1.17 MB, from 1.9; with lines on, 182.5 M words and
+  the FX check 1070 ms.
 
