@@ -23,6 +23,16 @@
 (define-type k-size (select check-types-types k-size))
 (define-type k-size-fact (select check-print-types k-size-fact))
 (define-type k-terms (select check-types-types k-terms))
+;; The types it names, from the files that define them.
+(define-type k-atree (select check-print-types k-atree))
+(define-type k-atrees (select check-print-types k-atrees))
+(define-type k-binders (select check-types-types k-binders))
+(define-type k-ids (select check-types-types k-ids))
+(define-type k-parts (select check-types-types k-parts))
+(define-type k-props (select check-types-types k-props))
+(define check-env-types (load-module "fx26:check-env-types.fx"))
+(define-type k-scope (select check-env-types k-scope))
+(define-type k-strings (select check-types-types k-strings))
 (define-type check-print-parts-sig
   (moduleof (val k-dvar-string (subr (maxeff (read @globals) (read @t)) (int) string))
             (val k-region-show (subr (maxeff (read @globals) (read @t)) (k-region) string))
@@ -52,4 +62,32 @@
                  (subr (maxeff (read @globals) (read @t)) (k-size k-map) k-size))
             (val k-show-size
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (k-size) string))
-            (val k-printing-none k-printing)))
+            (val k-printing-none k-printing)
+            (val k-conv-show (subr (maxeff (read @globals) (read @t)) (k-conv) string))
+            (val k-atree-of
+                 (subr (maxeff (read @globals) (read @t) spin)
+                       (k-scope int k-atree)
+                       k-atree))
+            (val k-abbrev-by
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
+                       (k-atrees int)
+                       k-strings))
+            (val k-show-binders
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
+                       (k-binders)
+                       k-strings))
+            (val k-depth-of (subr (maxeff (read @globals) (read @t)) (k-ids int) int))
+            (val k-nlist-end (subr (maxeff (read @globals) (read @t)) (k-region) string))
+            (val k-conv-prefix (subr (maxeff (read @globals) (read @t)) (k-conv) string))
+            (val k-show-abs
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (k-parts) string))
+            (val k-printing-named
+                 (subr (maxeff (alloc @t) (read @globals)) (k-printing k-parts) k-printing))
+            (val k-part-named
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
+                       (k-parts int)
+                       k-strings))
+            (val k-show-props
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
+                       (string k-props)
+                       string))))
