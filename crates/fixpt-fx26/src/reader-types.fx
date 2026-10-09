@@ -11,4 +11,6 @@
 (define-type parser-sig
   (moduleof (val syn-symbol? (subr pure (syn) bool))
             (val syn-name (subr pure (syn) string))
-            (val drop (subr (maxeff (read @globals) (read @s)) (syns-a int) syns-a))))
+            (val drop (subr (maxeff (read @globals) (read @s)) (syns-a int) syns-a))
+            (val syn-start (subr pure (syn) int))
+            (val syn-end (subr pure (syn) int))))

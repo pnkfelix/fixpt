@@ -137,4 +137,7 @@
         (subr (maxeff (read @globals) (read @t)) (k-params-given int symbol int) int))
    (val k-known? (subr (maxeff (read @globals) (read @t) spin) (symbol) bool))
    (val k-globals-effects (ref bool @t))
-   (val k-global? (subr (maxeff (read @globals) (read @t) spin) (symbol) bool))))
+   (val k-global? (subr (maxeff (read @globals) (read @t) spin) (symbol) bool))
+   (val k-fixed? (subr (maxeff (read @globals) (read @t) spin) (symbol) bool))
+   (val k-module-vars (ref k-ids @t))
+   (val k-select-map (ref k-selects @t))))

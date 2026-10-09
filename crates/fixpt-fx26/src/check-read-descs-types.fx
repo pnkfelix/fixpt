@@ -15,6 +15,9 @@
 (define-type k-parts (select check-types-types k-parts))
 ;; The types it names, from the files that define them.
 (define-type k-ids (select check-types-types k-ids))
+;; The types it names, from the files that define them.
+(define check-env-types (load-module "fx26:check-env-types.fx"))
+(define-type k-selects (select check-env-types k-selects))
 (define-type check-read-descs-sig
   (moduleof (val k-parse-effect
                  (subr (maxeff (alloc @t)
@@ -75,4 +78,8 @@
             (val k-desc-kids (subr (maxeff (alloc @t) (read @globals)) (k-descs) k-ids))
             (val k-ids-then (subr (maxeff (alloc @t) (read @globals)) (k-ids int) k-ids))
             (val k-ty-kids
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int) k-ids))))
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int) k-ids))
+            (val k-selects-in
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (int)
+                       k-selects))))

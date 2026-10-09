@@ -9,7 +9,13 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; The subtype test's memory.
+  (let* (;; First-class modules' descriptions.
+         (check-modules
+          ((load-input "fx26:check-modules.fx")
+           check-types-module check-env-module check-kinds-module check-print-module
+           check-read-module check-holds-module check-subst-module check-read-descs-module
+           parser-module))
+         ;; The subtype test's memory.
          (check-sub-env
           ((load-input "fx26:check-sub-env.fx")
            check-types-module check-print-module check-effects-module tables parser-module))
@@ -18,12 +24,12 @@
           ((load-input "fx26:check-subtype.fx")
            check-types-module check-resolve-module check-sub-env check-env-module
            check-print-module check-effects-module check-proving-module check-subst-module
-           check-modules-module))
+           check-modules))
          ;; The checker, expected types: checking against what is wanted.
          (check-expect
           ((load-input "fx26:check-expect.fx")
            check-types-module check-env-module check-subtype check-print-module
-           check-kinds-module check-resolve-module check-effects-module check-modules-module))
+           check-kinds-module check-resolve-module check-effects-module check-modules))
          ;; The checker, calls: which may reach their own caller.
          (check-calls
           ((load-input "fx26:check-calls.fx")
@@ -32,7 +38,7 @@
          ;; The checker, dependent subroutines: parameters selected from.
          (check-dependent
           ((load-input "fx26:check-dependent.fx")
-           check-types-module check-env-module check-modules-module check-read-descs-module
+           check-types-module check-env-module check-modules check-read-descs-module
            check-expect check-holds-module check-subst-module))
          ;; The checker, data: what the data kind admits.
          (check-data
@@ -48,7 +54,7 @@
           ((load-input "fx26:check-binders.fx")
            check-types-module check-data check-print-module check-env-module
            check-subst-module check-resolve-module check-expect check-effects-module
-           check-modules-module tables))
+           check-modules tables))
          ;; The checker, instantiation and tagcase.
          (check-infer
           ((load-input "fx26:check-infer.fx")
@@ -104,7 +110,7 @@
          (check-module-rules
           ((load-input "fx26:check-module-rules.fx")
            check-types-module check-env-module check-print-module check-errors-module
-           check-modules-module check-read-module check-modorder check-expect
+           check-modules check-read-module check-modorder check-expect
            check-effects-module check-subtype check-read-descs-module
            check-terminate check-letrec tables))
          ;; The checker, its rules: the one recursive group over expressions.
@@ -114,7 +120,7 @@
            check-resolve-module check-env-module check-expect check-letrec
            check-dependent check-module-rules check-read-descs-module
            check-proving-module check-test-facts check-close check-print-module
-           check-terminate check-modorder check-unions-module check-modules-module
+           check-terminate check-modorder check-unions-module check-modules
            check-effects-module check-data check-read-module check-mask-module
            check-calls check-bounds check-holds-module check-subtype
            check-subst-module check-sc-graphs check-binders check-sub-env
@@ -124,7 +130,7 @@
           ((load-input "fx26:check-proofs.fx")
            check-types-module check-resolve-module check-env-module check-calls
            check-generative-module check-read-descs-module check-errors-module check-read-module
-           check-subtype check-modules-module check-infer check-terminate
+           check-subtype check-modules check-infer check-terminate
            check-print-module tables parser-module check-sc-graphs check-sub-env
            check-modules-read-module))
          ;; The checker, its programs: forms checked in order, under redefinition.
@@ -134,7 +140,7 @@
            check-proofs check-rules check-generative-module
            check-read-descs-module check-resolve-module check-errors-module
            check-terminate check-print-module check-letrec check-read-module
-           check-expect check-modules-module check-modorder check-subst-module
+           check-expect check-modules check-modorder check-subst-module
            check-synth check-module-rules check-subtype parser-module check-modules-read-module))
          ;; The object layout, generated from the heap's table.
          (layout (load-module "fx26:layout.fx"))

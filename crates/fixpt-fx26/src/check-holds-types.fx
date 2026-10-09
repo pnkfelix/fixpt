@@ -42,4 +42,8 @@
             (val k-seen?
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t))
                        (k-seen int)
-                       bool))))
+                       bool))
+            (val k-fun-kind
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (int)
+                       int))))

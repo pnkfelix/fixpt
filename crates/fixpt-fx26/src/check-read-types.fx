@@ -53,4 +53,14 @@
                                (read @t)
                                (write @t))
                        (syn string)
-                       symbol))))
+                       symbol))
+            (val k-effect-selects (ref k-effect-sels @t))
+            (val k-subst-keep (ref int @t))
+            (val k-keep-at
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (int)
+                       int))
+            (val k-keep-set!
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (int int)
+                       unit))))

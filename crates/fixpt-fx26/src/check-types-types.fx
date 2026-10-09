@@ -317,4 +317,7 @@
    (val k-find-sub (subr (maxeff (read @globals) spin) (string string int) int))
    (val k-arrow-kind? (subr pure (int) bool))
    (val k-new-dvar-of
-        (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t)) (symbol int) int))))
+        (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t)) (symbol int) int))
+   (val k-arrow-result (subr (maxeff (read @globals) (read @t)) (int) int))
+   (val k-arrow-params (subr (maxeff (read @globals) (read @t)) (int) k-ids))
+   (val k-abstract-funs (ref k-ids @t))))

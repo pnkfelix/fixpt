@@ -88,4 +88,6 @@
             (val k-kind-word
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int) string))
             (val k-size-var (subr (read @globals) (int) k-size))
-            (val k-tail-size (subr (maxeff (read @globals) (read @t)) (k-size) k-size))))
+            (val k-tail-size (subr (maxeff (read @globals) (read @t)) (k-size) k-size))
+            (val k-kind-text
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int) string))))

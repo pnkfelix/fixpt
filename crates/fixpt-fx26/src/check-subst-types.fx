@@ -39,4 +39,8 @@
             (val k-subst-region
                  (subr (maxeff (read @globals) (read @t)) (k-region k-map) k-region))
             (val k-new-smemo
-                 (subr (maxeff (alloc @t) (read (globals make-table))) () k-smemo))))
+                 (subr (maxeff (alloc @t) (read (globals make-table))) () k-smemo))
+            (val k-subst-memo
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (int k-map k-smemo)
+                       int))))
