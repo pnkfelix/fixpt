@@ -9,21 +9,26 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; The checker, bounds on type binders.
+  (let* (;; The checker, data: what the data kind admits.
+         (check-data
+          ((load-input "fx26:check-data.fx")
+           check-types-module check-print-module check-expect-module check-effects-module
+           check-subst-module))
+         ;; The checker, bounds on type binders.
          (check-bounds
           ((load-input "fx26:check-bounds.fx")
            check-types-module check-subtype-module))
          ;; The checker, a poly's binders solved, defaulted and bounded.
          (check-binders
           ((load-input "fx26:check-binders.fx")
-           check-types-module check-data-module check-print-module check-env-module
+           check-types-module check-data check-print-module check-env-module
            check-subst-module check-resolve-module check-expect-module check-effects-module
            check-modules-module tables))
          ;; The checker, instantiation and tagcase.
          (check-infer
           ((load-input "fx26:check-infer.fx")
            check-types-module check-resolve-module check-effects-module check-binders
-           check-env-module check-bounds check-print-module check-data-module
+           check-env-module check-bounds check-print-module check-data
            check-read-descs-module check-kinds-module check-unions-module check-subtype-module
            check-holds-module check-expect-module check-subst-module))
          ;; The checker, closing: what a definition leaves solved.
@@ -85,7 +90,7 @@
            check-dependent-module check-module-rules check-read-descs-module
            check-proving-module check-test-facts check-close check-print-module
            check-terminate check-modorder check-unions-module check-modules-module
-           check-effects-module check-data-module check-read-module check-mask-module
+           check-effects-module check-data check-read-module check-mask-module
            check-calls-module check-bounds check-holds-module check-subtype-module
            check-subst-module check-sc-graphs check-binders))
          ;; The checker, its proofs: lemmas proved.

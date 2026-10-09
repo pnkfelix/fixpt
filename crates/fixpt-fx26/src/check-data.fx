@@ -4,9 +4,66 @@
 ;;; only (`docs/research/shapes.md`; `soundness-findings.md`, F13). The
 ;;; Rust checker's `is_data`, `is_data_at` and `data_places`, rule for rule.
 
-;; A module (`TODO.md` §34: the front end into modules, a file at a time);
-;; what other files use re-exported after it.
-(define check-data-module (module
+;; Its types, those it uses of the files before it, and the signatures of
+;; what it is given.
+(let* ((check-types-types (load-module "fx26:check-types-types.fx"))
+       (check-print-types (load-module "fx26:check-print-types.fx"))
+       (check-expect-types (load-module "fx26:check-expect-types.fx"))
+       (check-effects-types (load-module "fx26:check-effects-types.fx"))
+       (check-subst-types (load-module "fx26:check-subst-types.fx")))
+  ;; What it is given: the modules of the files before it that it uses.
+  (lambda ((check-types (select check-types-types check-types-sig))
+           (check-print (select check-print-types check-print-sig))
+           (check-expect (select check-expect-types check-expect-sig))
+           (check-effects (select check-effects-types check-effects-sig))
+           (check-subst (select check-subst-types check-subst-sig)))
+    (module
+
+;; The types it uses of the files before it.
+(define-effect checks (select check-types-types checks))
+(define dr (with check-types-types dr))
+(define dt (with check-types-types dt))
+(define-type k-binders (select check-types-types k-binders))
+(define-type k-desc (select check-types-types k-desc))
+(define-type k-ids (select check-types-types k-ids))
+(define-type k-map (select check-types-types k-map))
+(define-type k-parts (select check-types-types k-parts))
+(define-type k-region (select check-types-types k-region))
+(define-type k-regions (select check-types-types k-regions))
+(define-effect kreads (select check-types-types kreads))
+(define-effect kstate (select check-types-types kstate))
+(define r-frozen (with check-types-types r-frozen))
+(define r-heap (with check-types-types r-heap))
+(define r-var (with check-types-types r-var))
+(define ty-base (with check-types-types ty-base))
+(define ty-bloblet (with check-types-types ty-bloblet))
+(define ty-nat (with check-types-types ty-nat))
+(define ty-nil (with check-types-types ty-nil))
+(define ty-nlist (with check-types-types ty-nlist))
+(define ty-pair (with check-types-types ty-pair))
+(define ty-product (with check-types-types ty-product))
+(define ty-sum (with check-types-types ty-sum))
+(define ty-union (with check-types-types ty-union))
+(define ty-var (with check-types-types ty-var))
+(define ty-void (with check-types-types ty-void))
+;; What it uses of the modules it is given.
+(define k-bound-of (with check-types k-bound-of))
+(define k-cat3 (with check-types k-cat3))
+(define k-cat4 (with check-types k-cat4))
+(define k-cat5 (with check-types k-cat5))
+(define k-data-var? (with check-types k-data-var?))
+(define k-fail (with check-types k-fail))
+(define k-get (with check-types k-get))
+(define k-new-epoch (with check-types k-new-epoch))
+(define k-resolve (with check-types k-resolve))
+(define k-visit? (with check-types k-visit?))
+(define k-map-find (with check-print k-map-find))
+(define k-region-show (with check-print k-region-show))
+(define k-show-ty (with check-print k-show-ty))
+(define k-quote-dvar (with check-expect k-quote-dvar))
+(define k-region=? (with check-effects k-region=?))
+(define k-subst-region (with check-subst k-subst-region))
+
 ;; Whether `r` is frozen data's region.
 (define k-frozen-region? (subr pure (k-region) bool)
   (lambda (r) (tagcase r (r-frozen (p f) #t) (else y #f))))
@@ -159,8 +216,4 @@
              (k-fail (k-cat5 (k-quote-dvar v) " is bound as data at " (k-region-show place)
                              ", and a " (k-cat3 (k-show-ty t) " is data in another place" ""))
                      a b))
-            (else #u)))))))
-
-(define k-is-data? (with check-data-module k-is-data?))
-(define k-data-places-solved (with check-data-module k-data-places-solved))
-(define k-check-data (with check-data-module k-check-data))
+            (else #u))))))))

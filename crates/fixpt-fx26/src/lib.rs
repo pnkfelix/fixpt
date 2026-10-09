@@ -283,6 +283,9 @@ pub const CHECK_BINDERS: &str = include_str!("check-binders.fx");
 /// `check-bounds.fx`: a `load-input` file, which the conductor applies (`TODO.md` §68).
 pub const CHECK_BOUNDS: &str = include_str!("check-bounds.fx");
 
+/// `check-data.fx`: a `load-input` file, which the conductor applies (`TODO.md` §68).
+pub const CHECK_DATA: &str = include_str!("check-data.fx");
+
 /// Hash tables' types: a module file of no state (`TODO.md` §68).
 pub const TABLE_TYPES: &str = include_str!("table-types.fx");
 
@@ -370,7 +373,7 @@ pub const NATIVE: &str = include_str!("native.fx");
 /// descriptions, resolving them, errors, modules' descriptions, subtyping,
 /// instantiation, termination and what tests say of sizes, the rules,
 /// modules' rules, and programs.
-pub const CHECKER_FILES: [(&str, &str); 22] = [
+pub const CHECKER_FILES: [(&str, &str); 21] = [
     ("check-types.fx", include_str!("check-types.fx")),
     ("check-effects.fx", include_str!("check-effects.fx")),
     ("check-env.fx", include_str!("check-env.fx")),
@@ -392,7 +395,6 @@ pub const CHECKER_FILES: [(&str, &str); 22] = [
     ("check-expect.fx", include_str!("check-expect.fx")),
     ("check-calls.fx", include_str!("check-calls.fx")),
     ("check-dependent.fx", include_str!("check-dependent.fx")),
-    ("check-data.fx", include_str!("check-data.fx")),
 ];
 
 /// The reader, the parser, the tables, the checker, the evaluator and the
@@ -410,7 +412,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 104] = [
+pub const FRONT_END_MODULES: [(&str, &str); 105] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("table-types.fx", TABLE_TYPES),
     ("check-module-rules-types.fx", CHECK_MODULE_RULES_TYPES),
@@ -515,6 +517,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 104] = [
     ("check-infer.fx", CHECK_INFER),
     ("check-binders.fx", CHECK_BINDERS),
     ("check-bounds.fx", CHECK_BOUNDS),
+    ("check-data.fx", CHECK_DATA),
 ];
 
 /// A `load-module` path naming a module file built in, in
@@ -531,7 +534,7 @@ pub fn built_in_module(path: &str) -> Option<&'static str> {
 /// The front end's files, by name, in the order [`front_end`] joins them;
 /// [`bootstrap_program`] puts `bootstrap.fx` after them. The module files
 /// built in, [`FRONT_END_MODULES`], are loaded by the first.
-pub const FRONT_END_FILES: [(&str, &str); 25] = [
+pub const FRONT_END_FILES: [(&str, &str); 24] = [
     ("reader.fx", READER),
     ("table.fx", TABLE),
     CHECKER_FILES[0],
@@ -555,7 +558,6 @@ pub const FRONT_END_FILES: [(&str, &str); 25] = [
     CHECKER_FILES[18],
     CHECKER_FILES[19],
     CHECKER_FILES[20],
-    CHECKER_FILES[21],
     ("conductor.fx", CONDUCTOR),
 ];
 

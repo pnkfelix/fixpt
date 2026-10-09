@@ -312,4 +312,5 @@
    (val k-unify-exact (ref bool @t))
    (val k-dvar-kind (subr (maxeff (read @globals) (read @t)) (int) int))
    (val k-bound-of (subr (maxeff (alloc @t) (read @globals) (read @t)) (int) k-regions))
-   (val k-outer-of (subr (maxeff (read @globals) (read @t)) (int) k-ids))))
+   (val k-outer-of (subr (maxeff (read @globals) (read @t)) (int) k-ids))
+   (val k-data-var? (subr (maxeff (read @globals) (read @t)) (int) bool))))
