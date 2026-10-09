@@ -167,4 +167,6 @@
    (val k-void int)
    (val k-find (subr (maxeff (read @globals) (read @t)) (k-bindings symbol) int))
    (val k-ids-but-last (subr (maxeff (alloc @t) (read @globals) spin) (k-ids) k-ids))
-   (val k-ids-last (subr (maxeff (read @globals) spin) (k-ids) int))))
+   (val k-ids-last (subr (maxeff (read @globals) spin) (k-ids) int))
+   (val k-select-of (subr (maxeff (read @globals) (read @t)) (symbol symbol int) int))
+   (val k-param-sel-of (subr (maxeff (read @globals) (read @t)) (int symbol int) int))))

@@ -29,4 +29,5 @@
                  (subr (maxeff (read @globals) (read @t) spin) (k-eff k-atom) bool))
             (val k-within?
                  (subr (maxeff (read @globals) (read @t) spin) (k-eff k-eff) bool))
-            (val k-has-region? (subr (read @globals) (k-atom) bool))))
+            (val k-has-region? (subr (read @globals) (k-atom) bool))
+            (val k-atom-with (subr (read @globals) (k-atom k-region) k-atom))))

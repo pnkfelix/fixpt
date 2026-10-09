@@ -93,4 +93,6 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int) string))
             (val k-place? (subr (maxeff (read @globals) (read @t)) (k-region) bool))
             (val k-type-is-var?
-                 (subr (maxeff (read @globals) (read @t) spin) (int int) bool))))
+                 (subr (maxeff (read @globals) (read @t) spin) (int int) bool))
+            (val k-subst-size
+                 (subr (maxeff (read @globals) (read @t)) (k-size k-map) k-size))))

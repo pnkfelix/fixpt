@@ -23,4 +23,5 @@
                        (loaded-files int string int)
                        string))
             (val syn-head (subr pure (syn) symbol))
-            (val syn-int (subr pure (syn) int))))
+            (val syn-int (subr pure (syn) int))
+            (val keep (subr (maxeff (read @globals) (read @s)) (syns-a) syns-a))))
