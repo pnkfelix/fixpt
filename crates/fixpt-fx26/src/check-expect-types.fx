@@ -25,6 +25,9 @@
 (define-type k-binders (select check-types-types k-binders))
 (define-type k-descs (select check-types-types k-descs))
 (define-type k-map (select check-types-types k-map))
+;; The types it names, from the files that define them.
+(define-type k-effs (select check-subtype-types k-effs))
+(define-type k-letrec-bs (select check-resolve-types k-letrec-bs))
 (define-type check-expect-sig
   (moduleof (val k-lambda? (subr (read @globals) (kx) bool))
             (val k-rewriting
@@ -111,4 +114,16 @@
                                (write @t)
                                spin)
                        (k-binders k-descs int int)
-                       k-map))))
+                       k-map))
+            (val k-latent-of
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (int)
+                       k-effs))
+            (val k-note-letrec
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (k-letrec-bs bool)
+                       unit))
+            (val k-bind-letrec
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (k-letrec-bs)
+                       unit))))

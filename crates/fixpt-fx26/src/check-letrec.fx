@@ -3,15 +3,65 @@
 ;;; for a definition. The Rust checker's `letrec_with` and `letrec_found`,
 ;;; rule for rule.
 
-;; Its types (`check-letrec-types.fx`), loaded before the module so that they are
-;; not among its values; the module names what it uses of them.
-(define check-letrec-types (load-module "fx26:check-letrec-types.fx"))
-;; A module (`TODO.md` §34: the front end into modules, a file at a time);
-;; what other files use re-exported after it.
-(define check-letrec-module (module
+;; Its types, those it uses of the files before it, and the signatures of
+;; what it is given.
+(let* ((check-letrec-types (load-module "fx26:check-letrec-types.fx"))
+       (check-types-types (load-module "fx26:check-types-types.fx"))
+       (check-synth-types (load-module "fx26:check-synth-types.fx"))
+       (check-resolve-types (load-module "fx26:check-resolve-types.fx"))
+       (check-expect-types (load-module "fx26:check-expect-types.fx"))
+       (check-effects-types (load-module "fx26:check-effects-types.fx"))
+       (check-print-types (load-module "fx26:check-print-types.fx"))
+       (check-env-types (load-module "fx26:check-env-types.fx"))
+       (check-terminate-types (load-module "fx26:check-terminate-types.fx")))
+  ;; What it is given: the modules of the files before it that it uses.
+  (lambda ((check-types (select check-types-types check-types-sig))
+           (check-expect (select check-expect-types check-expect-sig))
+           (check-effects (select check-effects-types check-effects-sig))
+           (check-print (select check-print-types check-print-sig))
+           (check-env (select check-env-types check-env-sig))
+           (check-terminate (select check-terminate-types check-terminate-sig)))
+    (module
 (define-type k-checker (select check-letrec-types k-checker))
 (define-type k-group-checker (select check-letrec-types k-group-checker))
 (define-type k-idss (select check-letrec-types k-idss))
+;; The types it uses of the files before it.
+(define a-read (with check-types-types a-read))
+(define-effect checks (select check-types-types checks))
+(define k-done (with check-types-types k-done))
+(define-type k-eff (select check-types-types k-eff))
+(define k-err (with check-types-types k-err))
+(define-type k-ids (select check-types-types k-ids))
+(define-type k-named (select check-types-types k-named))
+(define-type k-te (select check-types-types k-te))
+(define-effect kstate (select check-types-types kstate))
+(define r-globals (with check-types-types r-globals))
+(define ty-poly (with check-types-types ty-poly))
+(define ty-subr (with check-types-types ty-subr))
+(define-type k-done (select check-synth-types k-done))
+(define-type k-letrec-bs (select check-resolve-types k-letrec-bs))
+;; What it uses of the modules it is given.
+(define k-fail (with check-types k-fail))
+(define k-get (with check-types k-get))
+(define k-recursive (with check-types k-recursive))
+(define k-resolve (with check-types k-resolve))
+(define k-tag (with check-types k-tag))
+(define k-te (with check-types k-te))
+(define k-ty-new (with check-types k-ty-new))
+(define k-bind-letrec (with check-expect k-bind-letrec))
+(define k-lambda? (with check-expect k-lambda?))
+(define k-latent-of (with check-expect k-latent-of))
+(define k-note-letrec (with check-expect k-note-letrec))
+(define k-eff=? (with check-effects k-eff=?))
+(define k-one (with check-effects k-one))
+(define k-union (with check-effects k-union))
+(define k-globals-atom? (with check-print k-globals-atom?))
+(define k-last-latent (with check-env k-last-latent))
+(define k-mark (with check-env k-mark))
+(define k-unbind-to (with check-env k-unbind-to))
+(define k-letrec-lambdas (with check-terminate k-letrec-lambdas))
+(define k-note-why (with check-terminate k-note-why))
+(define k-termination (with check-terminate k-termination))
 
 ;; Note of the recursive group `bs` whether it needs `spin`, and why: `why`, "" if not.
 (define k-note-ending (subr (maxeff kstate spin) (k-letrec-bs string) unit)
@@ -34,7 +84,6 @@
     (cond ((null? e) nil)
           ((k-globals-atom? (car e)) (the k-eff (cons (car e) (k-globals-of (cdr e)))))
           (else (k-globals-of (cdr e))))))
-
 
 ;; Whether `ts` and `us` have the same latent effects, pairwise.
 (define k-same-latents? (subr (maxeff kstate spin) (k-ids k-ids) bool)
@@ -124,10 +173,4 @@
                   (if (null? found)
                       (k-fail m a b)
                       (begin (k-bind-group (car found)) (check-group (car found))))))))
-        (else y (k-fail "k-ok inside" 0 0))))))))
-
-(define k-note-ending (with check-letrec-module k-note-ending))
-(define k-with-latent (with check-letrec-module k-with-latent))
-(define k-globals-of (with check-letrec-module k-globals-of))
-(define k-bind-group (with check-letrec-module k-bind-group))
-(define k-letrec-checked (with check-letrec-module k-letrec-checked))
+        (else y (k-fail "k-ok inside" 0 0)))))))))
