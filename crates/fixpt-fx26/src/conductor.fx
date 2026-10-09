@@ -9,11 +9,16 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; The checker, rules of modules: their items checked as a letrec*.
+  (let* (;; The checker, a module's order: its items as a letrec*, used only once made.
+         (check-modorder
+          ((load-input "fx26:check-modorder.fx")
+           check-types-module check-resolve-module check-errors-module check-env-module
+           check-read-module check-expect-module tables))
+         ;; The checker, rules of modules: their items checked as a letrec*.
          (check-module-rules
           ((load-input "fx26:check-module-rules.fx")
            check-types-module check-env-module check-print-module check-errors-module
-           check-modules-module check-read-module check-modorder-module check-expect-module
+           check-modules-module check-read-module check-modorder check-expect-module
            check-effects-module check-subtype-module check-read-descs-module
            check-terminate-module check-letrec-module tables))
          ;; The checker, its rules: the one recursive group over expressions.
@@ -23,7 +28,7 @@
            check-resolve-module check-env-module check-expect-module check-letrec-module
            check-dependent-module check-module-rules check-read-descs-module
            check-proving-module check-test-facts-module check-close-module check-print-module
-           check-terminate-module check-modorder-module check-unions-module check-modules-module
+           check-terminate-module check-modorder check-unions-module check-modules-module
            check-effects-module check-data-module check-read-module check-mask-module
            check-calls-module check-bounds-module check-holds-module check-subtype-module
            check-subst-module))
@@ -41,7 +46,7 @@
            check-proofs check-rules check-generative-module
            check-read-descs-module check-resolve-module check-errors-module
            check-terminate-module check-print-module check-letrec-module check-read-module
-           check-expect-module check-modules-module check-modorder-module check-subst-module
+           check-expect-module check-modules-module check-modorder check-subst-module
            check-synth-module check-module-rules check-subtype-module parser-module))
          ;; The object layout, generated from the heap's table.
          (layout (load-module "fx26:layout.fx"))

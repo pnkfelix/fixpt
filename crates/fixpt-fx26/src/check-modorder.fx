@@ -8,12 +8,27 @@
 ;;; refused, naming the chain; nothing is reordered. The Rust checker's
 ;;; `modorder.rs`, step for step; `check-module-rules.fx` uses it.
 
-;; Its types (`check-modorder-types.fx`), loaded before the module so that they are
-;; not among its values; the module names what it uses of them.
-(define check-modorder-types (load-module "fx26:check-modorder-types.fx"))
-;; A module (`TODO.md` §34: the front end into modules, a file at a time);
-;; what other files use re-exported after it.
-(define check-modorder-module (module
+;; Its types, those it uses of the files before it, and the signatures of
+;; what it is given.
+(let* ((check-modorder-types (load-module "fx26:check-modorder-types.fx"))
+       (check-types-types (load-module "fx26:check-types-types.fx"))
+       (check-resolve-types (load-module "fx26:check-resolve-types.fx"))
+       (check-env-types (load-module "fx26:check-env-types.fx"))
+       (check-subst-types (load-module "fx26:check-subst-types.fx"))
+       (table-types (load-module "fx26:table-types.fx"))
+       (parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
+       (check-errors-types (load-module "fx26:check-errors-types.fx"))
+       (check-read-types (load-module "fx26:check-read-types.fx"))
+       (check-expect-types (load-module "fx26:check-expect-types.fx")))
+  ;; What it is given: the modules of the files before it that it uses.
+  (lambda ((check-types (select check-types-types check-types-sig))
+           (check-resolve (select check-resolve-types check-resolve-sig))
+           (check-errors (select check-errors-types check-errors-sig))
+           (check-env (select check-env-types check-env-sig))
+           (check-read (select check-read-types check-read-sig))
+           (check-expect (select check-expect-types check-expect-sig))
+           (tables (select table-types tables-sig)))
+    (module
 (define-effect kallocs (select check-modorder-types kallocs))
 (define-type k-mlam (select check-modorder-types k-mlam))
 (define-type k-mlams (select check-modorder-types k-mlams))
@@ -23,7 +38,49 @@
 (define-type k-edges (select check-modorder-types k-edges))
 (define-type k-scc-ints (select check-modorder-types k-scc-ints))
 (define-type k-groups (select check-modorder-types k-groups))
-
+;; The types it uses of the files before it.
+(define-effect checks (select check-types-types checks))
+(define-type k-ids (select check-types-types k-ids))
+(define-type k-item (select check-types-types k-item))
+(define-type k-names (select check-types-types k-names))
+(define-type k-parts (select check-types-types k-parts))
+(define-effect kreads (select check-types-types kreads))
+(define-effect kstate (select check-types-types kstate))
+(define-type kx (select check-types-types kx))
+(define-type kxs (select check-types-types kxs))
+(define ty-module (with check-types-types ty-module))
+(define x-app (with check-types-types x-app))
+(define x-lambda (with check-types-types x-lambda))
+(define x-module (with check-types-types x-module))
+(define x-plambda (with check-types-types x-plambda))
+(define x-proj (with check-types-types x-proj))
+(define x-var (with check-types-types x-var))
+(define x-with (with check-types-types x-with))
+(define-type k-items (select check-types-types k-items))
+(define-type k-letrec-bs (select check-resolve-types k-letrec-bs))
+(define-type k-hazard-list (select check-env-types k-hazard-list))
+(define-effect kmakes (select check-subst-types kmakes))
+(define-type table (select table-types table))
+(define-type names (select parser-types names))
+;; What it uses of the modules it is given.
+(define k-cat3 (with check-types k-cat3))
+(define k-cat4 (with check-types k-cat4))
+(define k-get (with check-types k-get))
+(define k-has-name? (with check-types k-has-name?))
+(define k-quote (with check-types k-quote))
+(define k-resolve (with check-types k-resolve))
+(define k-conversion-name (with check-resolve k-conversion-name))
+(define k-free-vars (with check-resolve k-free-vars))
+(define k-fail-at (with check-errors k-fail-at))
+(define k-hazard-mods (with check-env k-hazard-mods))
+(define k-lookup (with check-env k-lookup))
+(define k-shared-name? (with check-env k-shared-name?))
+(define k-items (with check-read k-items))
+(define k-lambda? (with check-expect k-lambda?))
+(define make-table (with tables make-table))
+(define symbol-hash (with tables symbol-hash))
+(define table-ref (with tables table-ref))
+(define table-set! (with tables table-set!))
 
 ;; Whether item `it` is a definition of a lambda with a written type.
 (define k-lambda-item? (subr (read @globals) (k-item) bool)
@@ -405,18 +462,4 @@
         (the k-groups (cons (k-mod-group (extract (car ls) 1) all) (k-groups-of (cdr ls) all))))))
 ;; The same, of the lambdas' edges `es`.
 (define k-mod-groups (subr (maxeff kstate spin) (k-edges k-letrec-bs k-letrec-bs) k-groups)
-  (lambda (es ls all) (begin (k-scc-start es) (k-scc-walk es) (k-groups-of ls all))))))
-
-(define-type k-mlam (select check-modorder-module k-mlam))
-(define-type k-mlams (select check-modorder-module k-mlams))
-(define-type k-places (select check-modorder-module k-places))
-(define k-lambda-item? (with check-modorder-module k-lambda-item?))
-(define k-mod-lambdas (with check-modorder-module k-mod-lambdas))
-(define k-mod-recs-lambdas (with check-modorder-module k-mod-recs-lambdas))
-(define k-mod-star-lambdas (with check-modorder-module k-mod-star-lambdas))
-(define k-place-of (with check-modorder-module k-place-of))
-(define k-mod-hazards (with check-modorder-module k-mod-hazards))
-(define k-early-modules (with check-modorder-module k-early-modules))
-(define k-mod-edges (with check-modorder-module k-mod-edges))
-(define-type k-groups (select check-modorder-module k-groups))
-(define k-mod-groups (with check-modorder-module k-mod-groups))
+  (lambda (es ls all) (begin (k-scc-start es) (k-scc-walk es) (k-groups-of ls all)))))))
