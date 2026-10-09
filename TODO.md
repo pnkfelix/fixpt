@@ -1975,7 +1975,8 @@ Phase 1, the types out, one module at a time; phase 2, the conversion.
   `check-infer.fx`, `check-binders.fx`, `check-bounds.fx`,
   `check-data.fx`, `check-dependent.fx`, `check-calls.fx`,
   `check-expect.fx`, `check-subtype.fx`, `check-sub-env.fx`,
-  `check-modules.fx`, `check-modules-read.fx`, `check-errors.fx`.
+  `check-modules.fx`, `check-modules-read.fx`, `check-errors.fx`,
+  `check-kinds.fx`.
 - The FX checker's cost of converted files (2026-10-09): checking the
   front end had grown from about 1.0 s to 1.46 s over phase 2. Profiled
   (`probe_profile_check`, 4.8 G cells to 7.2 G), three walks along lists

@@ -9,7 +9,11 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; What its errors say, and where.
+  (let* (;; Higher kinds.
+         (check-kinds
+          ((load-input "fx26:check-kinds.fx")
+           check-types-module check-read-descs-module check-holds-module check-print-module))
+         ;; What its errors say, and where.
          (check-errors
           ((load-input "fx26:check-errors.fx")
            check-types-module check-resolve-module check-print-module))
@@ -21,7 +25,7 @@
          ;; First-class modules' descriptions.
          (check-modules
           ((load-input "fx26:check-modules.fx")
-           check-types-module check-env-module check-kinds-module check-print-module
+           check-types-module check-env-module check-kinds check-print-module
            check-read-module check-holds-module check-subst-module check-read-descs-module
            parser-module))
          ;; The subtype test's memory.
@@ -38,7 +42,7 @@
          (check-expect
           ((load-input "fx26:check-expect.fx")
            check-types-module check-env-module check-subtype check-print-module
-           check-kinds-module check-resolve-module check-effects-module check-modules))
+           check-kinds check-resolve-module check-effects-module check-modules))
          ;; The checker, calls: which may reach their own caller.
          (check-calls
           ((load-input "fx26:check-calls.fx")
@@ -69,7 +73,7 @@
           ((load-input "fx26:check-infer.fx")
            check-types-module check-resolve-module check-effects-module check-binders
            check-env-module check-bounds check-print-module check-data
-           check-read-descs-module check-kinds-module check-unions-module check-subtype
+           check-read-descs-module check-kinds check-unions-module check-subtype
            check-holds-module check-expect check-subst-module check-sub-env))
          ;; The checker, closing: what a definition leaves solved.
          (check-close

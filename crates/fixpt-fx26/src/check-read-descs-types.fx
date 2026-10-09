@@ -21,6 +21,8 @@
 ;; The types it names, from the files that define them.
 (define check-read-types (load-module "fx26:check-read-types.fx"))
 (define-type k-syns (select check-read-types k-syns))
+;; The types it names, from the files that define them.
+(define-type k-desc (select check-types-types k-desc))
 (define-type check-read-descs-sig
   (moduleof (val k-parse-effect
                  (subr (maxeff (alloc @t)
@@ -95,4 +97,8 @@
                                (write @t)
                                spin)
                        (k-syns)
-                       k-ids))))
+                       k-ids))
+            (val k-lam
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (k-binders k-desc)
+                       int))))

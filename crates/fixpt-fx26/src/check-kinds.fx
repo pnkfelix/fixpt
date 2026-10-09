@@ -10,9 +10,43 @@
 
 ;;; ------------------------------------------------------------ description functions
 
-;; A module (`TODO.md` §34: the front end into modules, a file at a time);
-;; what other files use re-exported after it.
-(define check-kinds-module (module
+;; Its types, those it uses of the files before it, and the signatures of
+;; what it is given.
+(let* ((check-types-types (load-module "fx26:check-types-types.fx"))
+       (check-read-descs-types (load-module "fx26:check-read-descs-types.fx"))
+       (check-holds-types (load-module "fx26:check-holds-types.fx"))
+       (check-print-types (load-module "fx26:check-print-types.fx")))
+  ;; What it is given: the modules of the files before it that it uses.
+  (lambda ((check-types (select check-types-types check-types-sig))
+           (check-read-descs (select check-read-descs-types check-read-descs-sig))
+           (check-holds (select check-holds-types check-holds-sig))
+           (check-print (select check-print-types check-print-sig)))
+    (module
+
+;; The types it uses of the files before it.
+(define dc (with check-types-types dc))
+(define de (with check-types-types de))
+(define df (with check-types-types df))
+(define dr (with check-types-types dr))
+(define dt (with check-types-types dt))
+(define dz (with check-types-types dz))
+(define-type k-binders (select check-types-types k-binders))
+(define-type k-desc (select check-types-types k-desc))
+(define-effect kstate (select check-types-types kstate))
+(define ty-named (with check-types-types ty-named))
+;; What it uses of the modules it is given.
+(define k-arrow (with check-types k-arrow))
+(define k-arrow-kind? (with check-types k-arrow-kind?))
+(define k-binder-kinds (with check-types k-binder-kinds))
+(define k-dvar-name (with check-types k-dvar-name))
+(define k-gen-of (with check-types k-gen-of))
+(define k-new-dvar-of (with check-types k-new-dvar-of))
+(define k-ty-new (with check-types k-ty-new))
+(define k-binders-as-descs (with check-read-descs k-binders-as-descs))
+(define k-lam (with check-read-descs k-lam))
+(define k-fun-kind (with check-holds k-fun-kind))
+(define k-place? (with check-print k-place?))
+
 ;; Whether description `d` is of kind `k`, as a binder of that kind takes; a
 ;; function whose kind is not known yet, a `select`, is let through.
 (define k-desc-of-kind? (subr (maxeff kstate spin) (k-desc int) bool)
@@ -24,7 +58,6 @@
       (dz (z) (= k 5))
       (dc (c) (= k 6))
       (df (f) (and (k-arrow-kind? k) (let ((g (k-fun-kind f))) (or (< g 0) (= g k))))))))
-
 
 ;; Binders `ps` made again: fresh variables of the same names and kinds.
 (define k-fresh-binders (subr (maxeff kstate spin) (k-binders) k-binders)
@@ -44,7 +77,4 @@
           -1
           (let* ((fresh (k-fresh-binders ps))
                  (body (k-ty-new (ty-named g (k-binders-as-descs fresh)))))
-            (k-lam fresh (dt body)))))))))
-
-(define k-desc-of-kind? (with check-kinds-module k-desc-of-kind?))
-(define k-generative-fun (with check-kinds-module k-generative-fun))
+            (k-lam fresh (dt body))))))))))
