@@ -29,6 +29,8 @@
 (define-type k-scope (select check-env-types k-scope))
 (define-type kx (select check-types-types kx))
 (define-type syn (select parser-types syn))
+;; The types it names, from the files that define them.
+(define-type k-binders (select check-types-types k-binders))
 (define-type check-modules-sig
   (moduleof (val k-resolve-exp
                  (subr (maxeff (alloc @t)
@@ -57,4 +59,8 @@
                                (write @t)
                                spin)
                        (int syn)
-                       int))))
+                       int))
+            (val k-push-binders
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t))
+                       (k-binders)
+                       unit))))

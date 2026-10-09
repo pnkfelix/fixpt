@@ -217,6 +217,9 @@ pub const CHECK_RULES_TYPES: &str = include_str!("check-rules-types.fx");
 /// `reader-types.fx`: types and signatures, a module file of no state (`TODO.md` §68).
 pub const READER_TYPES: &str = include_str!("reader-types.fx");
 
+/// `check-proofs.fx`: a `load-input` file, which the conductor applies (`TODO.md` §68).
+pub const CHECK_PROOFS: &str = include_str!("check-proofs.fx");
+
 /// Hash tables' types: a module file of no state (`TODO.md` §68).
 pub const TABLE_TYPES: &str = include_str!("table-types.fx");
 
@@ -304,7 +307,7 @@ pub const NATIVE: &str = include_str!("native.fx");
 /// descriptions, resolving them, errors, modules' descriptions, subtyping,
 /// instantiation, termination and what tests say of sizes, the rules,
 /// modules' rules, and programs.
-pub const CHECKER_FILES: [(&str, &str); 34] = [
+pub const CHECKER_FILES: [(&str, &str); 33] = [
     ("check-types.fx", include_str!("check-types.fx")),
     ("check-effects.fx", include_str!("check-effects.fx")),
     ("check-env.fx", include_str!("check-env.fx")),
@@ -338,7 +341,6 @@ pub const CHECKER_FILES: [(&str, &str); 34] = [
     ("check-modorder.fx", include_str!("check-modorder.fx")),
     ("check-module-rules.fx", include_str!("check-module-rules.fx")),
     ("check-rules.fx", include_str!("check-rules.fx")),
-    ("check-proofs.fx", include_str!("check-proofs.fx")),
 ];
 
 /// The reader, the parser, the tables, the checker, the evaluator and the
@@ -356,7 +358,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 82] = [
+pub const FRONT_END_MODULES: [(&str, &str); 83] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("table-types.fx", TABLE_TYPES),
     ("check-module-rules-types.fx", CHECK_MODULE_RULES_TYPES),
@@ -439,6 +441,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 82] = [
     ("check-errors-types.fx", CHECK_ERRORS_TYPES),
     ("check-effects-types.fx", CHECK_EFFECTS_TYPES),
     ("check-program.fx", CHECK_PROGRAM),
+    ("check-proofs.fx", CHECK_PROOFS),
 ];
 
 /// A `load-module` path naming a module file built in, in
@@ -455,7 +458,7 @@ pub fn built_in_module(path: &str) -> Option<&'static str> {
 /// The front end's files, by name, in the order [`front_end`] joins them;
 /// [`bootstrap_program`] puts `bootstrap.fx` after them. The module files
 /// built in, [`FRONT_END_MODULES`], are loaded by the first.
-pub const FRONT_END_FILES: [(&str, &str); 37] = [
+pub const FRONT_END_FILES: [(&str, &str); 36] = [
     ("reader.fx", READER),
     ("table.fx", TABLE),
     CHECKER_FILES[0],
@@ -491,7 +494,6 @@ pub const FRONT_END_FILES: [(&str, &str); 37] = [
     CHECKER_FILES[30],
     CHECKER_FILES[31],
     CHECKER_FILES[32],
-    CHECKER_FILES[33],
     ("conductor.fx", CONDUCTOR),
 ];
 

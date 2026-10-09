@@ -9,11 +9,18 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; The checker, its programs: forms checked in order, under redefinition.
+  (let* (;; The checker, its proofs: lemmas proved.
+         (check-proofs
+          ((load-input "fx26:check-proofs.fx")
+           check-types-module check-resolve-module check-env-module check-calls-module
+           check-generative-module check-read-descs-module check-errors-module check-read-module
+           check-subtype-module check-modules-module check-infer-module check-terminate-module
+           check-print-module tables parser-module))
+         ;; The checker, its programs: forms checked in order, under redefinition.
          (check-program
           ((load-input "fx26:check-program.fx")
            check-types-module check-syntax-module check-effects-module check-env-module
-           check-proofs-module check-rules-module check-generative-module
+           check-proofs check-rules-module check-generative-module
            check-read-descs-module check-resolve-module check-errors-module
            check-terminate-module check-print-module check-letrec-module check-read-module
            check-expect-module check-modules-module check-modorder-module check-subst-module
@@ -30,12 +37,12 @@
          (compile-lift
           ((load-input "fx26:compile-lift.fx")
            compile layout check-resolve-module check-program tables
-           standard check-proofs-module))
+           standard check-proofs))
          ;; The compiler, its state: words being made, members, twins, quotations.
          (compile-state
           ((load-input "fx26:compile-state.fx")
            compile compile-lift layout check-resolve-module
-           check-program check-proofs-module))
+           check-program check-proofs))
          ;; The compiler, its expressions: the recursive group over trees.
          (compile-exps
           ((load-input "fx26:compile-exps.fx")
@@ -45,7 +52,7 @@
          (compile-plan
           ((load-input "fx26:compile-plan.fx")
            compile compile-lift compile-exps check-resolve-module
-           check-program tables compile-state check-proofs-module))
+           check-program tables compile-state check-proofs))
          ;; Register code: its state, the constants known, and the twins made.
          (regcode
           ((load-input "fx26:regcode.fx")

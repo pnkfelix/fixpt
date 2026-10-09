@@ -47,6 +47,8 @@
 ;; evaluator's.
 ;; The types it names, from the files that define them.
 (define-type k-region (select check-types-types k-region))
+;; The types it names, from the files that define them.
+(define-type k-descs (select check-types-types k-descs))
 (define-type check-resolve-sig
   (moduleof
    (val exp-start (subr pure (exp) int))
@@ -59,4 +61,8 @@
    (val k-reset
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) () unit))
    (val k-free-into
-        (subr (maxeff (alloc @t) (read @globals) (read @t)) (kx k-names k-names) k-names))))
+        (subr (maxeff (alloc @t) (read @globals) (read @t)) (kx k-names k-names) k-names))
+   (val k-unfold
+        (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+              (int k-descs)
+              int))))

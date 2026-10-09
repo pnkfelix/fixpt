@@ -42,8 +42,11 @@
 ;;; ------------------------------------------------------------ signatures
 
 ;; What its clients use of it (`check-program.fx`).
+;; The types it names, from the files that define them.
+(define-type k-parts (select check-types-types k-parts))
 (define-type check-subtype-sig
   (moduleof (val k-subtype
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (int int)
-                       bool))))
+                       bool))
+            (val k-part-find (subr (maxeff (read @globals) (read @t)) (k-parts symbol) int))))

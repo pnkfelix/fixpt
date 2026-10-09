@@ -39,6 +39,8 @@
 (define check-resolve-types (load-module "fx26:check-resolve-types.fx"))
 (define-type k-letrec-bs (select check-resolve-types k-letrec-bs))
 (define-type kx (select check-types-types kx))
+;; The types it names, from the files that define them.
+(define-type kxs (select check-types-types kxs))
 (define-type check-terminate-sig
   (moduleof (val k-termination
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
@@ -56,4 +58,5 @@
                                (read @t)
                                (write @t))
                        (symbol kx)
-                       void))))
+                       void))
+            (val k-sc-one? (subr (read @t) (kxs) bool))))

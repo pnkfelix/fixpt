@@ -11,3 +11,14 @@
 (define-type k-bound-body (productof (1 k-binders) (2 int)))
 ;; A count of such occurrences, and of parameters sized by `v` alone.
 (define-type k-counts (productof (1 int) (2 int)))
+
+;;; ------------------------------------------------------------ signatures
+
+;; What its clients use of it (`check-proofs.fx`).
+;; The types it names, from the files that define them.
+(define check-resolve-types (load-module "fx26:check-resolve-types.fx"))
+(define-type k-let-bs (select check-resolve-types k-let-bs))
+(define-type k-parts (select check-types-types k-parts))
+(define-type check-infer-sig
+  (moduleof (val k-same-labels?
+                 (subr (maxeff (read @globals) (read @t)) (k-let-bs k-parts) bool))))

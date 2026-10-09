@@ -7,3 +7,14 @@
 ;; anything loop. `path`: the nodes on the way down, newest first, each with
 ;; whether it was reached through a parameter.
 (define-type k-cpath (listof (pairof int bool @t) acyclic))
+
+;;; ------------------------------------------------------------ signatures
+
+;; What its clients use of it (`check-proofs.fx`).
+;; The types it names, from the files that define them.
+(define check-types-types (load-module "fx26:check-types-types.fx"))
+(define-type kx (select check-types-types kx))
+(define-type check-calls-sig
+  (moduleof (val k-under (subr (read @globals) (kx) kx))
+            (val k-callee-name
+                 (subr (maxeff (alloc @t) (read @globals)) (kx) (listof symbol acyclic)))))

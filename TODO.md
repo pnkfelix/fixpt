@@ -1967,7 +1967,7 @@ Phase 1, the types out, one module at a time; phase 2, the conversion.
 - Checker converted (a commit each): `check-program.fx` (its proofs split
   out first as `check-proofs.fx`; the parser's procedures it uses, which
   `reader.fx` names at top level, from `parser-module`, typed by
-  `parser-sig` in `reader-types.fx`).
+  `parser-sig` in `reader-types.fx`), `check-proofs.fx`.
 - The FX checker's cost of converted files (2026-10-09): checking the
   front end had grown from about 1.0 s to 1.46 s over phase 2. Profiled
   (`probe_profile_check`, 4.8 G cells to 7.2 G), three walks along lists
