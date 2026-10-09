@@ -53,6 +53,8 @@
 (define-type k-binders (select check-types-types k-binders))
 (define-type k-map (select check-types-types k-map))
 (define-type k-vsub (select check-types-types k-vsub))
+;; The types it names, from the files that define them.
+(define-type k-items (select check-types-types k-items))
 (define-type check-resolve-sig
   (moduleof
    (val exp-start (subr pure (exp) int))
@@ -87,4 +89,6 @@
    (val k-rename
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
               (k-binders k-binders)
-              k-map))))
+              k-map))
+   (val k-items-bound
+        (subr (maxeff (alloc @t) (read @globals) (read @t)) (k-items k-names) k-names))))

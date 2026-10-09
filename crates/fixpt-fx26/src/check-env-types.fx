@@ -129,4 +129,5 @@
              @t))
    (val k-note-fixed
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (symbol) unit))
-   (val k-hazard-mods (ref k-hazard-list @t))))
+   (val k-hazard-mods (ref k-hazard-list @t))
+   (val k-with-names (subr (maxeff (read @globals) (read @t)) (int int) k-names))))
