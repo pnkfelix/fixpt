@@ -45,7 +45,18 @@
 
 ;; What clients use of `check-resolve.fx`'s module (`TODO.md` §68): the
 ;; evaluator's.
+;; The types it names, from the files that define them.
+(define-type k-region (select check-types-types k-region))
 (define-type check-resolve-sig
   (moduleof
    (val exp-start (subr pure (exp) int))
-   (val exp-end (subr pure (exp) int))))
+   (val exp-end (subr pure (exp) int))
+   (val k-has-region-in?
+        (subr (maxeff (read @globals) (read @t) spin) (k-regions k-region) bool))
+   (val k-defs (ref (listof k-def acyclic) @t))
+   (val k-last-uses (ref k-names @t))
+   (val k-runs (ref (listof k-run acyclic) @t))
+   (val k-reset
+        (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) () unit))
+   (val k-free-into
+        (subr (maxeff (alloc @t) (read @globals) (read @t)) (kx k-names k-names) k-names))))

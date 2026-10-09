@@ -20,3 +20,48 @@
 ;; all are.
 (define-type k-ahead-slots (listof (pairof symbol int @t) acyclic))
 (define-type k-filled (listof (productof (1 int) (2 int) (3 int)) acyclic))
+
+;;; ------------------------------------------------------------ signatures
+
+;; What its clients use of it (`check-program.fx`).
+;; The types it names, from the files that define them.
+(define check-types-types (load-module "fx26:check-types-types.fx"))
+(define-type k-names (select check-types-types k-names))
+(define check-read-types (load-module "fx26:check-read-types.fx"))
+(define-type k-syns (select check-read-types k-syns))
+(define-type check-syntax-sig
+  (moduleof (val k-define-family
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (symbol k-syns syn)
+                       unit))
+            (val k-list-head (subr (maxeff (read @globals) (read @s)) (syn) string))
+            (val k-ahead-names (ref k-ahead-slots @t))
+            (val k-ahead-filled (ref k-filled @t))
+            (val k-ahead-declare
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read (globals ds-rec k-push-desc k-slot))
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (k-names k-names)
+                       unit))
+            (val k-filled-reversed (subr (read @globals) (k-filled k-filled) k-filled))
+            (val k-ground-filled
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (k-filled)
+                       unit))))

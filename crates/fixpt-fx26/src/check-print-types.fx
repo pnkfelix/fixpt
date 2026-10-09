@@ -40,3 +40,19 @@
 ;; many pieces there are.
 (define-type k-shown (productof (1 k-strings) (2 k-ids) (3 int)))
 (define-type k-atree-of-scope (productof (1 k-scope) (2 int) (3 k-atree)))
+
+;;; ------------------------------------------------------------ signatures
+
+;; What its clients use of it (`check-program.fx`).
+;; The types it names, from the files that define them.
+(define-type k-atom (select check-types-types k-atom))
+(define-type k-eff (select check-types-types k-eff))
+(define-type check-print-sig
+  (moduleof (val k-globals-atom? (subr (read @globals) (k-atom) bool))
+            (val k-show-effect (subr (maxeff (read @globals) (read @t)) (k-eff) string))
+            (val k-keep-atree!
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       ()
+                       unit))
+            (val k-show-ty
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int) string))))

@@ -38,3 +38,12 @@
 (define-type k-saying (subr (maxeff checks spin) (string string string) string))
 ;; The latent effect of `t`, a `subr` under any `poly`s, in a list; or none.
 (define-type k-effs (listof k-eff acyclic))
+
+;;; ------------------------------------------------------------ signatures
+
+;; What its clients use of it (`check-program.fx`).
+(define-type check-subtype-sig
+  (moduleof (val k-subtype
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (int int)
+                       bool))))

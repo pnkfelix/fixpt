@@ -247,4 +247,27 @@
   (moduleof
    (val k-cat3 (subr pure (string string string) string))
    (val k-cat5 (subr (read @globals) (string string string string string) string))
-   (val k-length (poly ((t type)) (subr (read @globals) ((listof t acyclic)) int)))))
+   (val k-length (poly ((t type)) (subr (read @globals) ((listof t acyclic)) int)))
+   (val k-tag
+        (prompt-tag k-result
+                    k-result
+                    (maxeff (alloc @t) (read @globals) (read @s) (read @t) (write @t) spin)
+                    @z))
+   (val k-fail
+        (subr (maxeff (alloc @t) (goto @z) (read @globals) (read @s) (read @t) (write @t))
+              (string int int)
+              void))
+   (val k-cat4 (subr (read @globals) (string string string string) string))
+   (val k-quote (subr (read @globals) (string) string))
+   (val k-join
+        (subr (maxeff (read @globals) (read @t)) ((listof string acyclic) string) string))
+   (val k-has-name? (subr (maxeff (read @globals) (read @t)) (k-names symbol) bool))
+   (val k-resolve (subr (maxeff (read @globals) (read @t) spin) (int) int))
+   (val k-get (subr (maxeff (read @globals) (read @t) spin) (int) k-ty))
+   (val k-recursive (ref k-named @t))
+   (val k-ngens (ref int @t))
+   (val k-transparent (ref k-ids @t))
+   (val k-inside (ref (listof (pairof symbol int @t) acyclic) @t))
+   (val k-conversions (ref k-named @t))
+   (val k-lemmas (ref (listof k-lemma acyclic) @t))
+   (val k-pending-lemma (ref (listof k-lemma acyclic) @t))))

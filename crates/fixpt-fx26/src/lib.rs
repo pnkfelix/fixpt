@@ -196,6 +196,27 @@ pub const CHECK_MODULE_RULES_TYPES: &str = include_str!("check-module-rules-type
 /// `check-proofs-types.fx`: types and signatures, a module file of no state (`TODO.md` §68).
 pub const CHECK_PROOFS_TYPES: &str = include_str!("check-proofs-types.fx");
 
+/// `check-program.fx`: a `load-input` file, which the conductor applies (`TODO.md` §68).
+pub const CHECK_PROGRAM: &str = include_str!("check-program.fx");
+
+/// `check-effects-types.fx`: types and signatures, a module file of no state (`TODO.md` §68).
+pub const CHECK_EFFECTS_TYPES: &str = include_str!("check-effects-types.fx");
+
+/// `check-errors-types.fx`: types and signatures, a module file of no state (`TODO.md` §68).
+pub const CHECK_ERRORS_TYPES: &str = include_str!("check-errors-types.fx");
+
+/// `check-expect-types.fx`: types and signatures, a module file of no state (`TODO.md` §68).
+pub const CHECK_EXPECT_TYPES: &str = include_str!("check-expect-types.fx");
+
+/// `check-read-descs-types.fx`: types and signatures, a module file of no state (`TODO.md` §68).
+pub const CHECK_READ_DESCS_TYPES: &str = include_str!("check-read-descs-types.fx");
+
+/// `check-rules-types.fx`: types and signatures, a module file of no state (`TODO.md` §68).
+pub const CHECK_RULES_TYPES: &str = include_str!("check-rules-types.fx");
+
+/// `reader-types.fx`: types and signatures, a module file of no state (`TODO.md` §68).
+pub const READER_TYPES: &str = include_str!("reader-types.fx");
+
 /// Hash tables' types: a module file of no state (`TODO.md` §68).
 pub const TABLE_TYPES: &str = include_str!("table-types.fx");
 
@@ -283,7 +304,7 @@ pub const NATIVE: &str = include_str!("native.fx");
 /// descriptions, resolving them, errors, modules' descriptions, subtyping,
 /// instantiation, termination and what tests say of sizes, the rules,
 /// modules' rules, and programs.
-pub const CHECKER_FILES: [(&str, &str); 35] = [
+pub const CHECKER_FILES: [(&str, &str); 34] = [
     ("check-types.fx", include_str!("check-types.fx")),
     ("check-effects.fx", include_str!("check-effects.fx")),
     ("check-env.fx", include_str!("check-env.fx")),
@@ -318,7 +339,6 @@ pub const CHECKER_FILES: [(&str, &str); 35] = [
     ("check-module-rules.fx", include_str!("check-module-rules.fx")),
     ("check-rules.fx", include_str!("check-rules.fx")),
     ("check-proofs.fx", include_str!("check-proofs.fx")),
-    ("check-program.fx", include_str!("check-program.fx")),
 ];
 
 /// The reader, the parser, the tables, the checker, the evaluator and the
@@ -336,7 +356,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 75] = [
+pub const FRONT_END_MODULES: [(&str, &str); 82] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("table-types.fx", TABLE_TYPES),
     ("check-module-rules-types.fx", CHECK_MODULE_RULES_TYPES),
@@ -412,6 +432,13 @@ pub const FRONT_END_MODULES: [(&str, &str); 75] = [
     ("standard.fx", STANDARD_OPS),
     ("layout.fx", LAYOUT),
     ("check-proofs-types.fx", CHECK_PROOFS_TYPES),
+    ("reader-types.fx", READER_TYPES),
+    ("check-rules-types.fx", CHECK_RULES_TYPES),
+    ("check-read-descs-types.fx", CHECK_READ_DESCS_TYPES),
+    ("check-expect-types.fx", CHECK_EXPECT_TYPES),
+    ("check-errors-types.fx", CHECK_ERRORS_TYPES),
+    ("check-effects-types.fx", CHECK_EFFECTS_TYPES),
+    ("check-program.fx", CHECK_PROGRAM),
 ];
 
 /// A `load-module` path naming a module file built in, in
@@ -428,7 +455,7 @@ pub fn built_in_module(path: &str) -> Option<&'static str> {
 /// The front end's files, by name, in the order [`front_end`] joins them;
 /// [`bootstrap_program`] puts `bootstrap.fx` after them. The module files
 /// built in, [`FRONT_END_MODULES`], are loaded by the first.
-pub const FRONT_END_FILES: [(&str, &str); 38] = [
+pub const FRONT_END_FILES: [(&str, &str); 37] = [
     ("reader.fx", READER),
     ("table.fx", TABLE),
     CHECKER_FILES[0],
@@ -465,7 +492,6 @@ pub const FRONT_END_FILES: [(&str, &str); 38] = [
     CHECKER_FILES[31],
     CHECKER_FILES[32],
     CHECKER_FILES[33],
-    CHECKER_FILES[34],
     ("conductor.fx", CONDUCTOR),
 ];
 

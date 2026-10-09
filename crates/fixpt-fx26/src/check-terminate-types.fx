@@ -31,3 +31,29 @@
 (define-type k-whys (listof (productof (1 symbol) (2 int) (3 string)) acyclic))
 ;; A computation of a type and an effect, which may fail.
 (define-type k-thunk (subr (maxeff checks spin) () k-te))
+
+;;; ------------------------------------------------------------ signatures
+
+;; What its clients use of it (`check-program.fx`).
+;; The types it names, from the files that define them.
+(define check-resolve-types (load-module "fx26:check-resolve-types.fx"))
+(define-type k-letrec-bs (select check-resolve-types k-letrec-bs))
+(define-type kx (select check-types-types kx))
+(define-type check-terminate-sig
+  (moduleof (val k-termination
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (k-letrec-bs)
+                       string))
+            (val k-note-why
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t))
+                       (k-letrec-bs string)
+                       unit))
+            (val k-fail-not-lambda
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t))
+                       (symbol kx)
+                       void))))

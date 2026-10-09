@@ -36,3 +36,10 @@
 (define-type k-scc-ints (table symbol int @t))
 ;; Each of `ls`'s recursive group (`k-mod-group`), in order.
 (define-type k-groups (listof k-letrec-bs acyclic))
+
+;;; ------------------------------------------------------------ signatures
+
+;; What its clients use of it (`check-program.fx`).
+(define-type check-modorder-sig
+  (moduleof (val k-names-onto
+                 (subr (maxeff (alloc @t) (read @globals)) (k-names k-names) k-names))))

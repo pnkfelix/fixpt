@@ -28,3 +28,12 @@
 ;; far may not, `ds` the types written; and the bindings, a `define*`'s at
 ;; the type found.
 (define-type k-mod-checked (productof (1 k-eff) (2 k-letrec-bs)))
+
+;;; ------------------------------------------------------------ signatures
+
+;; What its clients use of it (`check-program.fx`).
+(define-type check-module-rules-sig
+  (moduleof (val k-rebind-top
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (symbol int)
+                       unit))))

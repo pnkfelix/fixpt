@@ -9,7 +9,16 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; The object layout, generated from the heap's table.
+  (let* (;; The checker, its programs: forms checked in order, under redefinition.
+         (check-program
+          ((load-input "fx26:check-program.fx")
+           check-types-module check-syntax-module check-effects-module check-env-module
+           check-proofs-module check-rules-module check-generative-module
+           check-read-descs-module check-resolve-module check-errors-module
+           check-terminate-module check-print-module check-letrec-module check-read-module
+           check-expect-module check-modules-module check-modorder-module check-subst-module
+           check-synth-module check-module-rules-module check-subtype-module parser-module))
+         ;; The object layout, generated from the heap's table.
          (layout (load-module "fx26:layout.fx"))
          ;; The standard operations, generated from the lowering's table.
          (standard (load-module "fx26:standard.fx"))
@@ -20,13 +29,13 @@
          ;; The compiler, lambda lifting and the standard operations.
          (compile-lift
           ((load-input "fx26:compile-lift.fx")
-           compile layout check-resolve-module check-program-module tables
+           compile layout check-resolve-module check-program tables
            standard check-proofs-module))
          ;; The compiler, its state: words being made, members, twins, quotations.
          (compile-state
           ((load-input "fx26:compile-state.fx")
            compile compile-lift layout check-resolve-module
-           check-program-module check-proofs-module))
+           check-program check-proofs-module))
          ;; The compiler, its expressions: the recursive group over trees.
          (compile-exps
           ((load-input "fx26:compile-exps.fx")
@@ -36,7 +45,7 @@
          (compile-plan
           ((load-input "fx26:compile-plan.fx")
            compile compile-lift compile-exps check-resolve-module
-           check-program-module tables compile-state check-proofs-module))
+           check-program tables compile-state check-proofs-module))
          ;; Register code: its state, the constants known, and the twins made.
          (regcode
           ((load-input "fx26:regcode.fx")
@@ -109,7 +118,12 @@
              (compile-checked (with compile-programs compile-checked))
              (compile-program (with compile-programs compile-program))
              (compile-note-inline! (with compile-inline compile-note-inline!))
-             (compile-registers! (with regcode-entry compile-registers!)))))
+             (compile-registers! (with regcode-entry compile-registers!))
+             (check-defer-reruns! (with check-program check-defer-reruns!))
+             (check-lines! (with check-program check-lines!))
+             (check-more (with check-program check-more))
+             (check-program (with check-program check-program))
+             (checked-tops (with check-program checked-tops)))))
 
 (define run-checked (extract front-end-entries run-checked))
 (define run-program (extract front-end-entries run-program))
@@ -122,3 +136,8 @@
 (define compile-program (extract front-end-entries compile-program))
 (define compile-note-inline! (extract front-end-entries compile-note-inline!))
 (define compile-registers! (extract front-end-entries compile-registers!))
+(define check-defer-reruns! (extract front-end-entries check-defer-reruns!))
+(define check-lines! (extract front-end-entries check-lines!))
+(define check-more (extract front-end-entries check-more))
+(define check-program (extract front-end-entries check-program))
+(define checked-tops (extract front-end-entries checked-tops))

@@ -17,3 +17,14 @@
 ;; One round: the group at types `ts`, and what each was found to read; or
 ;; none, if a procedure does not check even so.
 (define-type k-idss (listof k-ids acyclic))
+
+;;; ------------------------------------------------------------ signatures
+
+;; What its clients use of it (`check-program.fx`).
+(define-type check-letrec-sig
+  (moduleof (val k-with-latent
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (int k-eff)
+                       int))
+            (val k-globals-of
+                 (subr (maxeff (alloc @t) (read @globals) (read @t)) (k-eff) k-eff))))

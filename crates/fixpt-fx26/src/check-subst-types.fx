@@ -19,3 +19,12 @@
 ;; What a substitution has made of each type it met: a table, by the type,
 ;; since a module's type may be large (the reader's and the parser's are).
 (define-type k-smemo (table int int @t))
+
+;;; ------------------------------------------------------------ signatures
+
+;; What its clients use of it (`check-program.fx`).
+(define-type check-subst-sig
+  (moduleof (val k-note-closed-filled
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       ((listof (productof (1 int) (2 int) (3 int)) acyclic))
+                       unit))))

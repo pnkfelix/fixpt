@@ -19,3 +19,38 @@
 ;; each, which `k-resolve-selects` replaces by module `m`'s effect `e`
 ;; (`check-modules.fx`), as the Rust checker's `effect_selects`.
 (define-type k-effect-sels (listof (productof (1 symbol) (2 symbol) (3 int)) acyclic))
+
+;;; ------------------------------------------------------------ signatures
+
+;; What its clients use of it (`check-program.fx`).
+;; The types it names, from the files that define them.
+(define check-types-types (load-module "fx26:check-types-types.fx"))
+(define-type k-items (select check-types-types k-items))
+(define-type check-read-sig
+  (moduleof (val k-sfail
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t))
+                       (string syn)
+                       void))
+            (val k-items
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t))
+                       (syn string)
+                       k-syns))
+            (val k-name-of
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t))
+                       (syn string)
+                       symbol))))

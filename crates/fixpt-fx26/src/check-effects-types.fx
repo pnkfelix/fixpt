@@ -1,0 +1,14 @@
+;;; The signature of `check-effects.fx`, its `check-effects-module`,
+;;; as its clients use it (`TODO.md` §68): a module file of no state.
+
+;;; ------------------------------------------------------------ signatures
+
+;; What its clients use of it (`check-program.fx`).
+;; The types it names, from the files that define them.
+(define check-types-types (load-module "fx26:check-types-types.fx"))
+(define-type k-atom (select check-types-types k-atom))
+(define-type k-eff (select check-types-types k-eff))
+(define-type k-region (select check-types-types k-region))
+(define-type check-effects-sig
+  (moduleof (val k-atom-region (subr (read @globals) (k-atom) k-region))
+            (val k-one (subr (alloc @t) (k-atom) k-eff))))

@@ -67,8 +67,33 @@
 
 ;; What clients use of `check-env.fx`'s module (`TODO.md` §68): the
 ;; evaluator's.
+;; The types it names, from the files that define them.
+(define-type k-eff (select check-types-types k-eff))
 (define-type check-env-sig
   (moduleof
    (val k-fx-module? (subr pure (symbol) bool))
    (val k-reshapes (ref k-reshape-list @t))
-   (val k-with-vals (ref k-with-list @t))))
+   (val k-with-vals (ref k-with-list @t))
+   (val k-last-latent (ref k-eff @t))
+   (val k-broken (ref (listof k-break acyclic) @t))
+   (val k-name-depth (subr (maxeff (read @globals) (read @t) spin) (symbol) int))
+   (val k-std-dscope (ref k-scope @t))
+   (val k-shared-name? (subr (read @globals) (symbol) bool))
+   (val k-lookup-raw (subr (maxeff (read @globals) (read @t) spin) (symbol) int))
+   (val k-mark (subr (maxeff (read @globals) (read @t)) () int))
+   (val k-unbind-to
+        (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (int) unit))
+   (val k-note-known
+        (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+              (symbol int)
+              unit))
+   (val k-bind-global
+        (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+              (symbol int)
+              unit))
+   (val k-dscope (ref k-scope @t))
+   (val k-push-desc
+        (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t)) (symbol k-ds) unit))
+   (val k-extracts (ref k-facts @t))
+   (val k-effect-notes (ref k-facts @t))
+   (val k-forget-withs (subr (maxeff (alloc @t) (read @globals) (write @t)) () unit))))

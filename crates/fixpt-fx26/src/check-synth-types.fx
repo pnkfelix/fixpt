@@ -49,3 +49,20 @@
 (define-type k-call-checked (productof (1 int) (2 int) (3 int)))
 ;; A type, or none: none or one.
 (define-type k-maybe-ty (listof k-ty acyclic))
+
+;;; ------------------------------------------------------------ signatures
+
+;; What its clients use of it (`check-program.fx`).
+;; The types it names, from the files that define them.
+(define-type kx (select check-types-types kx))
+(define-type check-synth-sig
+  (moduleof (val k-note-frozen-define
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (int kx)
+                       unit))))
