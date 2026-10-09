@@ -119,4 +119,13 @@
    (val k-fresh-region
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t)) (string) k-region))
    (val k-note-with
-        (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t)) (k-with-noted) unit))))
+        (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t)) (k-with-noted) unit))
+   (val k-env
+        (ref (bloblet (fields (subr pure (symbol) int)
+                              (subr pure (symbol symbol) bool)
+                              (arrayof (listof (pairof symbol k-stack @t) acyclic) @t)
+                              int)
+                      @t)
+             @t))
+   (val k-note-fixed
+        (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (symbol) unit))))

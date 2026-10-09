@@ -96,4 +96,8 @@
                                (write @t)
                                spin)
                        (k-letrec-bs int int)
-                       k-letrec-bs))))
+                       k-letrec-bs))
+            (val k-first-mentioned
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (int k-ids)
+                       int))))

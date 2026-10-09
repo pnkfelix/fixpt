@@ -60,4 +60,5 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int) string))
             (val k-conv=? (subr (read @globals) (k-conv k-conv) bool))
             (val k-size-plus (subr (read @globals) (k-size int) k-size))
-            (val k-size-nonneg? (subr (maxeff (read @globals) (read @t)) (k-size) bool))))
+            (val k-size-nonneg? (subr (maxeff (read @globals) (read @t)) (k-size) bool))
+            (val k-dvar-string (subr (maxeff (read @globals) (read @t)) (int) string))))
