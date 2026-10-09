@@ -49,4 +49,10 @@
             (val c-lambda-captured
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
                        (c-params exp cenv)
-                       syms))))
+                       syms))
+            (val c-has-standard-value?
+                 (subr (read (globals standard-primitive std-eq-name?)) (string) bool))
+            (val c-standard-word-of
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (string)
+                       (listof tword @k)))))

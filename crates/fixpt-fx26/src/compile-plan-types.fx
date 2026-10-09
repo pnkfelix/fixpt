@@ -110,4 +110,9 @@
             (val c-spec-copy-find
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
                        (c-spec-copies tword syms int)
-                       c-spec-copies))))
+                       c-spec-copies))
+            (val c-sees? (subr pure (int int) bool))
+            (val c-planned-call
+                 (subr (maxeff (alloc @k) (read @globals) (read @k))
+                       (int int)
+                       (listof c-called @k)))))

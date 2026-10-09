@@ -227,4 +227,27 @@
                                        int)
                                @k)
                       @k))
-            (val c-member? (subr (maxeff (read @globals) (read @k)) (syms symbol) bool))))
+            (val c-member? (subr (maxeff (read @globals) (read @k)) (syms symbol) bool))
+            (val c-changed? (subr (maxeff (read @globals) (read @k)) (exp) bool))
+            (val c-loop? (subr pure (loc) bool))
+            (val c-find
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (cenv symbol)
+                       c-found))
+            (val c-join-memo
+                 (ref (bloblet (fields (subr pure (int) int)
+                                       (subr pure (int int) bool)
+                                       (arrayof (listof (pairof int c-join-answer @k)
+                                                        acyclic)
+                                                @k)
+                                       int)
+                               @k)
+                      @k))
+            (val c-free
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (exp syms syms)
+                       syms))
+            (val c-join-ok?
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (c-recs exp int)
+                       bool))))

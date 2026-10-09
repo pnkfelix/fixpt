@@ -303,4 +303,10 @@
                        (renv exp)
                        (listof rtest @k)))
             (val r-same-exp? (subr (read (globals exp-end exp-start)) (exp exp) bool))
-            (val r-this-added (subr (read @k) (rgen) int))))
+            (val r-this-added (subr (read @k) (rgen) int))
+            (val r-var-global
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (renv exp)
+                       (listof wglobal @k)))
+            (val r-this-name? (subr (read @k) (rthis symbol int) bool))
+            (val r-operator (subr (maxeff (read @globals) (read @k) spin) (exp) exp))))
