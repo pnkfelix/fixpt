@@ -2010,3 +2010,16 @@ each module it is given), where including everything also makes those
 names the module's own. To decide: `extend` as FX-91 has it, or also an
 item that opens a module within another without exporting it, as `with`
 does for an expression.
+
+Addendum (the user's, 2026-10-09): perhaps also a variant in which a
+name both give is a static error rather than `e1`'s: everything thrown
+into one bucket, with no regard for order, where shadowing would only
+hide a mistake. If there is more than one module combinator, perhaps
+none should take the bare keyword `extend` (`module-extend` and
+`module-disj-union` were floated, though wordy). One shape to weigh: keep
+`extend` for FX-91's right-biased form, and make the disjoint one an item,
+`(include e)` inside `module` (OCaml's `include`), since a name defined
+twice in a `module` is already an error (`k-defined-twice`): several
+`include`s and the module's own definitions all in one bucket, order
+free. The name `include` is R7RS's for textual inclusion, which FX-26
+does not have.
