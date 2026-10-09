@@ -44,6 +44,9 @@
 ;; What its clients use of it (`check-program.fx`).
 ;; The types it names, from the files that define them.
 (define-type k-parts (select check-types-types k-parts))
+;; The types it names, from the files that define them.
+(define-type k-region (select check-types-types k-region))
+(define-type k-size (select check-types-types k-size))
 (define-type check-subtype-sig
   (moduleof (val k-subtype
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
@@ -53,4 +56,8 @@
             (val k-part-index
                  (subr (maxeff (read @globals) (read @t)) (k-parts symbol int) int))
             (val k-part-of
-                 (subr (maxeff (read @globals) (read @t) spin) (k-parts symbol) int))))
+                 (subr (maxeff (read @globals) (read @t) spin) (k-parts symbol) int))
+            (val k-nlist-tail
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (int k-size k-region)
+                       int))))

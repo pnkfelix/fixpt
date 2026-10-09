@@ -42,4 +42,26 @@
             (val k-from-above
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (k-unifying)
-                       unit))))
+                       unit))
+            (val k-exactly
+                 (subr (maxeff (alloc @t)
+                               (read (globals k-unify-exact))
+                               (read @globals)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (k-unifying)
+                       unit))
+            (val k-flipped
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (k-unifying)
+                       unit))
+            (val k-bound-solution
+                 (subr (maxeff (alloc @t)
+                               (read (globals k-subtype k-unify-exact))
+                               (read @globals)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       ((ref k-map @t) int int int)
+                       int))))

@@ -308,4 +308,6 @@
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (int int) bool))
    (val k-gen-of (subr (maxeff (read @globals) (read @t)) (int) k-gen))
    (val k-gen-param? (subr (maxeff (read @globals) (read @t)) (int) bool))
-   (val k-gen-region? (subr (maxeff (read @globals) (read @t)) (k-region) bool))))
+   (val k-gen-region? (subr (maxeff (read @globals) (read @t)) (k-region) bool))
+   (val k-unify-exact (ref bool @t))
+   (val k-dvar-kind (subr (maxeff (read @globals) (read @t)) (int) int))))

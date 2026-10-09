@@ -13,6 +13,8 @@
 (define-type k-binders (select check-types-types k-binders))
 (define-type k-descs (select check-types-types k-descs))
 (define-type k-parts (select check-types-types k-parts))
+;; The types it names, from the files that define them.
+(define-type k-ids (select check-types-types k-ids))
 (define-type check-read-descs-sig
   (moduleof (val k-parse-effect
                  (subr (maxeff (alloc @t)
@@ -69,4 +71,5 @@
                        k-descs))
             (val k-parts-reversed
                  (subr (maxeff (alloc @t) (read @globals)) (k-parts k-parts) k-parts))
-            (val k-part-onto (subr (alloc @t) (symbol int k-parts) k-parts))))
+            (val k-part-onto (subr (alloc @t) (symbol int k-parts) k-parts))
+            (val k-desc-kids (subr (maxeff (alloc @t) (read @globals)) (k-descs) k-ids))))

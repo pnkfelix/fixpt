@@ -23,4 +23,10 @@
             (val k-narrowed-by
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (int int)
-                       k-split))))
+                       k-split))
+            (val k-shapes-miss?
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int int) bool))
+            (val k-same-shape-in
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int k-ids) int))
+            (val k-member-holding
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int k-ids) int))))

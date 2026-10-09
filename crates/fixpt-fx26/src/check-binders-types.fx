@@ -16,6 +16,9 @@
 (define-type k-region (select check-types-types k-region))
 (define-type k-solved (select check-infer-types k-solved))
 (define-type kxs (select check-types-types kxs))
+;; The types it names, from the files that define them.
+(define-type k-desc (select check-types-types k-desc))
+(define-type k-terms (select check-types-types k-terms))
 (define-type check-binders-sig
   (moduleof (val k-binders-of
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
@@ -58,4 +61,16 @@
                                (write @t)
                                spin)
                        (k-ids int int int)
-                       int))))
+                       int))
+            (val k-unknown? (subr (maxeff (read @globals) (read @t)) (k-binders int) bool))
+            (val k-open?
+                 (subr (maxeff (read @globals) (read @t)) (k-binders k-solved int) bool))
+            (val k-solve
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t))
+                       (k-solved int k-desc)
+                       unit))
+            (val k-one-var? (subr pure (k-terms) bool))
+            (val k-finite-size-ok?
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (int int)
+                       bool))))

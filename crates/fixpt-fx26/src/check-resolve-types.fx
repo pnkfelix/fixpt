@@ -55,6 +55,9 @@
 (define-type k-vsub (select check-types-types k-vsub))
 ;; The types it names, from the files that define them.
 (define-type k-items (select check-types-types k-items))
+;; The types it names, from the files that define them.
+(define check-subst-types (load-module "fx26:check-subst-types.fx"))
+(define-type k-pairs (select check-subst-types k-pairs))
 (define-type check-resolve-sig
   (moduleof
    (val exp-start (subr pure (exp) int))
@@ -93,4 +96,7 @@
    (val k-items-bound
         (subr (maxeff (alloc @t) (read @globals) (read @t)) (k-items k-names) k-names))
    (val k-regions-in
-        (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (int) k-regions))))
+        (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (int) k-regions))
+   (val k-ty-rank (subr (maxeff (read @globals) (read @t) spin) (int) int))
+   (val k-pair-seen? (subr (maxeff (read @globals) (read @t)) (k-pairs int int) bool))
+   (val k-same-kinds? (subr (maxeff (read @globals) (read @t)) (k-binders k-binders) bool))))

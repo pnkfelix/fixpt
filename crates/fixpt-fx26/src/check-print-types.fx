@@ -77,4 +77,6 @@
                        k-strings))
             (val k-size-as-lit (subr pure (k-size) int))
             (val k-size=? (subr (read @globals) (k-size k-size) bool))
-            (val k-size-add-scaled (subr (read @globals) (k-size k-size int) k-size))))
+            (val k-size-add-scaled (subr (read @globals) (k-size k-size int) k-size))
+            (val k-show-size
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (k-size) string))))
