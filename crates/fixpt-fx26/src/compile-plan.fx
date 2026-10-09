@@ -10,9 +10,21 @@
 ;;; only register code compiles are not in it (step 3). After
 ;;; `compile-exps.fx`.
 
+;; Its types (`compile-plan-types.fx`), loaded before the module so that they are
+;; not among its values; the module names what it uses of them.
+(define compile-plan-types (load-module "fx26:compile-plan-types.fx"))
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define compile-plan-module (module
+(define-type c-special (select compile-plan-types c-special))
+(define-type c-specializables (select compile-plan-types c-specializables))
+(define-type c-spec-call (select compile-plan-types c-spec-call))
+(define-type c-spec-calls (select compile-plan-types c-spec-calls))
+(define-type c-called (select compile-plan-types c-called))
+(define-type c-calls-at (select compile-plan-types c-calls-at))
+(define-type c-inlined-at (select compile-plan-types c-inlined-at))
+(define-type c-copy-at (select compile-plan-types c-copy-at))
+
 ;;; ------------------------------------------- what calls may become
 ;;; The globals a call may be inlined as, or specialized as, as the program
 ;;; loop (`compile-programs.fx`) notes them; the plan reads them (step 3),
@@ -63,16 +75,7 @@
 ;; (`c-inline-room`).
 (define c-special-limit int 60)
 
-;; A global procedure whose parameter (6) is only called, with (7)
-;; arguments, or passed as itself to a call of the procedure: a call with a
-;; lambda there may run a copy of the procedure made for that lambda, the
-;; lambda's body inlined where the parameter is called (`regcode.fx`'s
-;; `r-specialize`). Its name, word, parameters, body and globals, as for
-;; `c-inline`.
-(define-type c-special
-  (productof (1 symbol) (2 tword) (3 c-params) (4 exp) (5 int) (6 int) (7 int)))
 
-(define-type c-specializables (listof c-special acyclic))
 
 (define c-specials (ref c-specializables @k) (new nil))
 
@@ -143,29 +146,12 @@
 (define c-inline-room (subr (maxeff (read @globals) spin) (exp int) int)
   (lambda (x n) (c-room x n #f)))
 
-;; A call of a global, as planned (step 3): the small procedure it may be
-;; inlined as, and the procedure it may be specialized as with the lambda
-;; argument, each in a list of none or one; by where the call is.
-(define-type c-spec-call (productof (1 c-special) (2 exp)))
-(define-type c-spec-calls (listof c-spec-call @k))
-(define-type c-called (productof (1 (listof c-inline acyclic)) (2 c-spec-calls)))
-;; The plan's contexts (3b): the form's own, 0; and each body its calls
-;; inline, numbered, planned as register code compiles it there. Each one's
-;; calls, by where they are; and the bodies they inline, by name and arity:
-;; what an inlined body decides depending on the callee and the path to it,
-;; not on the call.
-(define-type c-calls-at (table int c-called @k))
-(define-type c-inlined-at (listof (productof (1 symbol) (2 int) (3 int)) @k))
 (define c-plan-calls (ref (table int c-calls-at @k) @k) (new (make-table c-int-hash c-int=?)))
 (define c-plan-inlined (ref (table int c-inlined-at @k) @k) (new (make-table c-int-hash c-int=?)))
 ;; The copies its calls make, by the procedure's name and where the
 ;; lambda's body is: each one's context, planned as `r-specialize` compiles
 ;; it; the next, the lambda's body in it, as `r-spec-lambda` inlines it.
 (define c-plan-copies (ref (table int c-inlined-at @k) @k) (new (make-table c-int-hash c-int=?)))
-;; The form's copies, last first, each with what it is made for (step 4):
-;; the procedure, the lambda, the procedure's global, the names the
-;; lambda's closure captures, the globals it sees, and the copy's context.
-(define-type c-copy-at (productof (1 c-special) (2 exp) (3 wglobal) (4 syms) (5 int) (6 int)))
 (define c-plan-copy-order (ref (listof c-copy-at @k) @k) (new nil))
 (define c-plan-contexts (ref int @k) (new 1))
 (define c-no-calls (ref c-calls-at @k) (new (make-table c-int-hash c-int=?)))

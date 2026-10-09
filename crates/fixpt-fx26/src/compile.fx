@@ -22,19 +22,60 @@
 ;;; checker written in FX-26 records it (`checked-extracts`), and a program
 ;;; is compiled with what its check found.
 
+;; Its types (`compile-types.fx`), loaded before the module so that they are
+;; not among its values; the module names what it uses of them.
+(define compile-types (load-module "fx26:compile-types.fx"))
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define compile-module (module
-;; What looking at the trees and the compiler's state may do: build lists
-;; on @k (and, walking the trees, spin); and adding to code.
-(define-effect c-builds (maxeff (read @globals) (read @k) (alloc @k)))
+(define-effect c-builds (select compile-types c-builds))
+(define-effect c-walks (select compile-types c-walks))
+(define-effect c-emits (select compile-types c-emits))
+(define-effect compiles (select compile-types compiles))
+(define-type c-params (select compile-types c-params))
+(define-type c-binds (select compile-types c-binds))
+(define-type c-recs (select compile-types c-recs))
+(define-type c-cases (select compile-types c-cases))
+(define-type exps (select compile-types exps))
+(define-type c-span (select compile-types c-span))
+(define-type c-spans (select compile-types c-spans))
+(define-type c-lift (select compile-types c-lift))
+(define-type c-lifting (select compile-types c-lifting))
+(define-type c-ends (select compile-types c-ends))
+(define-type c-with-table (select compile-types c-with-table))
+(define-type c-with-names (select compile-types c-with-names))
+(define-type item (select compile-types item))
+(define i-cell (with compile-types i-cell))
+(define i-label (with compile-types i-label))
+(define i-branch (with compile-types i-branch))
+(define i-zbranch (with compile-types i-zbranch))
+(define-type items (select compile-types items))
+(define-type code (select compile-types code))
+(define-type cresult (select compile-types cresult))
+(define c-ok (with compile-types c-ok))
+(define c-err (with compile-types c-err))
+(define-type c-places (select compile-types c-places))
+(define-type loc (select compile-types loc))
+(define at-slot (with compile-types at-slot))
+(define at-free (with compile-types at-free))
+(define at-global (with compile-types at-global))
+(define at-pending (with compile-types at-pending))
+(define at-loop (with compile-types at-loop))
+(define at-lifted (with compile-types at-lifted))
+(define-type cenv (select compile-types cenv))
+(define-type c-found (select compile-types c-found))
+(define-type c-this (select compile-types c-this))
+(define-type c-globals-made (select compile-types c-globals-made))
+(define-type syms (select compile-types syms))
+(define-type c-join-answer (select compile-types c-join-answer))
+(define-type c-standard-word (select compile-types c-standard-word))
+(define-type c-spec-copy (select compile-types c-spec-copy))
+(define-type c-spec-copies (select compile-types c-spec-copies))
+(define-type patches (select compile-types patches))
 
-(define-effect c-walks (maxeff c-builds spin))
 
-(define-effect c-emits (maxeff (read @globals) (read @k) (write @k) (alloc @k)))
 
-;; What compiling may do: read the trees, build code on @k, and give up.
-(define-effect compiles (maxeff c-emits (read @t) (goto @y)))
+
 
 ;; Whether `name` is an equality of the same word, as `eq` does it: of characters, symbols or
 ;; globals, `bool=?`, or `eq?`, identity. (`=`, of ints, which may be bignums, is `int-eq`'s.)
@@ -42,27 +83,15 @@
   (lambda (n)
     (or (string=? n "char=?") (string=? n "symbol=?") (string=? n "wglobal=?")
         (string=? n "eq?") (string=? n "bool=?"))))
-;; The parser's lists: a lambda's parameters, a `let`'s bindings (and a
-;; product's fields, and a `tagcase`'s else), a `letrec`'s, a `tagcase`'s
-;; arms, and expressions.
-(define-type c-params (listof (productof (1 symbol) (2 syns-a)) acyclic))
 
-(define-type c-binds (listof (productof (1 symbol) (2 exp)) acyclic))
 
-(define-type c-recs (listof (productof (1 symbol) (2 syn) (3 exp)) acyclic))
 
-(define-type c-cases (listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) acyclic))
 
-(define-type exps (listof exp acyclic))
 
 ;; The checker's facts for the program being compiled.
 (define c-facts (ref k-facts @k) (new nil))
 
-;; A span of the program, by where it starts: where it ends, and what is
-;; noted of it.
-(define-type c-span (pairof int int @k))
 
-(define-type c-spans (table int c-span @k))
 
 ;; The same, by where each `extract` starts (two cannot start at one place):
 ;; where it ends, and its field. A table, so that a program's facts are not
@@ -73,14 +102,7 @@
 
 (define c-fact-table (ref c-spans @k) (new (make-table c-int-hash c-int=?)))
 
-;; A `letrec`-bound procedure lambda-lifted, as Twobit's pass 2 lifts
-;; (`pass2p2.sch`): its closure, over nothing, made while compiling; the
-;; names it would have captured, each passed as an argument before its own.
-(define-type c-lift (productof (1 wcell) (2 (listof symbol acyclic))))
 
-;; Whether a `letrec` is lifted: its members' indices in `c-lifts`, in a
-;; list of one; none if not.
-(define-type c-lifting (listof (listof int @k) @k))
 
 ;; The procedures lambda-lifted, by index; and, by where each `letrec` is
 ;; (`c-span-key`), its members' (none if it is not lifted), so that its
@@ -94,9 +116,6 @@
 ;; The parameters a lifting added to the lambda about to be compiled.
 (define c-lifting-added (ref int @k) (new 0))
 
-;; Each expression's effect summary, by where it starts: where it ends, and
-;; the summary, for each span starting there.
-(define-type c-ends (listof c-span acyclic))
 
 (define c-summary-table (ref (table int c-ends @k) @k) (new (make-table c-int-hash c-int=?)))
 
@@ -143,9 +162,6 @@
 ;; And each module reshaped (`k-reshapes`), as `c-set-facts!` took them.
 (define c-reshapes (ref k-reshape-list @k) (new nil))
 (define c-withs (ref k-with-list @k) (new nil))
-;; The same, by where each starts: a program's `with`s are many (a file's
-;; re-exports), and each is asked for once (`TODO.md` §43).
-(define-type c-with-table (table int k-with-list @k))
 (define c-with-index (ref c-with-table @k) (new (make-table c-int-hash c-int=?)))
 (define c-index-withs! (subr c-emits (k-with-list) unit)
   (lambda (ws)
@@ -156,7 +172,6 @@
                  (table-set! (get c-with-index) a
                              (the k-with-list
                                (cons (car ws) (table-ref (get c-with-index) a nil)))))))))
-(define-type c-with-names (listof syms @k))
 (define c-with-in
   (subr (maxeff (read @globals) (read @k) (alloc @k)) (k-with-list int int) c-with-names)
   (lambda (ws a b)
@@ -214,20 +229,9 @@
 (define c-converter (subr (read @globals) (string symbol) symbol)
   (lambda (prefix n) (string->symbol (string-append prefix (symbol->string n)))))
 
-;;; ----------------------------------------------------------------- code
 
-(define-datatype item
-  (i-cell wcell)
-  (i-label int)
-  (i-branch int)
-  (i-zbranch int))
 
-(define-type items (listof item @k))
 
-;; The code for one word so far, newest first.
-(define-type code (ref items @k))
-
-(define-datatype cresult (c-ok tword) (c-err string))
 
 (define c-tag (prompt-tag cresult cresult (maxeff c-emits (read @t) spin) @y)
   (make-continuation-prompt-tag))
@@ -283,8 +287,6 @@
 (define c-size (subr pure (item) int)
   (lambda (i) (tagcase i (i-cell (x) 1) (i-label (n) 0) (i-branch (n) 2) (i-zbranch (n) 2))))
 
-;; Where each label is, in cells, by label.
-(define-type c-places (arrayof int @k))
 
 ;; Where each label is, in cells; and how many cells there are.
 (define c-place (subr (maxeff (read @globals) (read @k) (write @k) spin) (items c-places int) int)
@@ -320,28 +322,8 @@
            (end (c-place (c-reverse (get c) nil) at 0)))
       (make-word name (c-cells (get c) at end nil)))))
 
-;;; ------------------------------------------------------------ variables
 
-(define-datatype loc
-  (at-slot int)
-  (at-free int)
-  (at-global wglobal)
-  ;; A `letrec` sibling not made yet, to be in this slot: a closure that
-  ;; captures it holds a placeholder, patched once every sibling is made.
-  (at-pending int)
-  ;; A `letrec`-bound procedure, in its own body, where it is only called
-  ;; in tail position: each call is a jump back to its start. (The int is
-  ;; unused.)
-  (at-loop int)
-  ;; A `letrec`-bound procedure lambda-lifted (`c-lift`), by its index in
-  ;; `c-lifts`: only called, by a closure over nothing made once, with the
-  ;; names it would have captured passed first.
-  (at-lifted int))
 
-(define-type cenv (listof (pairof symbol loc @k) @k))
-
-;; Where a name was found, in a list of one; none if it was not.
-(define-type c-found (listof loc @k))
 
 ;; `e` with `n` bound at `l`, innermost.
 (define c-extend (subr (alloc @k) (symbol loc cenv) cenv)
@@ -371,9 +353,6 @@
 ;; passes them on as they are.
 (define c-this-added (ref int @k) (new 0))
 
-;; What register code knows of the procedure being compiled, when it is one
-;; that knows itself: its name, where the name is, and its arity.
-(define-type c-this (productof (1 symbol) (2 loc) (3 int) (4 int)))
 
 ;; Whether each lambda also gets register code (PLAN.md 13h′), as its word's
 ;; twin, made after its form's words (`compile-twins.fx`).
@@ -391,12 +370,6 @@
       (at-global (g) (tagcase l (at-global (h) #t) (else y #f)))
       (else y #f))))
 
-;; The global environment as compiling has reached it: by name, a table of
-;; each name's globals, newest first, each with its place in the order they
-;; were made (`c-genv-count` so far). A body compiled where it was written
-;; sees only the globals made before (an inlined body, a copy specialized at
-;; a lambda): `c-genv`, the count of them; -1 when every global is seen.
-(define-type c-globals-made (listof (pairof int loc @k) acyclic))
 
 (define c-genv-index (ref (table symbol c-globals-made @k) @k)
   (new (make-table symbol-hash symbol=?)))
@@ -446,29 +419,10 @@
       (at-loop (z) (c-fail "a loop is only ever called, in tail position"))
       (at-lifted (k) (c-fail "a lifted procedure is only called")))))
 
-;;; ------------------------------------------------------------- free names
-;;; The names a lambda's body uses that it does not bind: what its closure
-;;; must carry, once globals and standard names are set aside.
 
-(define-type syms (listof symbol acyclic))
-
-;; Each `letrec` in tail position asked about: which bindings are join points
-;; (`regcode.fx`'s `r-join-flags`), by where its body starts: where the body
-;; ends, the names bound, and the answer. Asked of the same `letrec` many
-;; times over (each time what encloses it is asked whether it calls), and
-;; the answer is the same each time.
-(define-type c-join-answer (productof (1 int) (2 syms) (3 (listof bool acyclic))))
 
 (define c-join-memo (ref (table int c-join-answer @k) @k) (new (make-table c-int-hash c-int=?)))
-;; Each standard operation's word as a value, made once (step 4): the
-;; stack code's, which register code uses too.
-(define-type c-standard-word (productof (1 string) (2 tword)))
 (define c-standard-words (ref (listof c-standard-word @k) @k) (new nil))
-;; The specialized copies made (`c-make-copy`), by the lambda's span
-;; (`c-span-key`): each the procedure's word, what the lambda captures, the
-;; globals it sees, and the copy's word and what that captures.
-(define-type c-spec-copy (productof (1 tword) (2 syms) (3 int) (4 tword) (5 syms)))
-(define-type c-spec-copies (listof c-spec-copy @k))
 (define c-spec-made (ref (table int c-spec-copies @k) @k) (new (make-table c-int-hash c-int=?)))
 
 ;; `es` with span end `b`'s summary at least `s`.
@@ -654,12 +608,6 @@
 (define c-count-let (subr (read @globals) (c-binds) int)
   (lambda (bs) (if (null? bs) 0 (+ 1 (c-count-let (cdr bs))))))
 
-;; `letrec`: every binding is a lambda (the checker says so). Each closure
-;; is made in its slot, with a placeholder for a sibling not made yet; then
-;; each placeholder is patched with its sibling. Nothing runs in between, so
-;; no one sees the knot tied. A name used only in calls of itself that are
-;; loops is not captured at all.
-(define-type patches (listof (pairof int int @k) @k))
 
 (define c-letrec-slots (subr (maxeff (read @globals) (alloc @k)) (c-recs cenv int) cenv)
   (lambda (bs e d)

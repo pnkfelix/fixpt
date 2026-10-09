@@ -16,66 +16,92 @@
 ;;; The twin phase calls it (`compile-twins.fx`), after a form's words; it
 ;;; calls no stack compiler.
 
+;; Its types (`regcode-types.fx`), loaded before the module so that they are
+;; not among its values; the module names what it uses of them.
+(define regcode-types (load-module "fx26:regcode-types.fx"))
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define regcode-module (module
-;; What register code's own helpers do: read the globals and what is being
-;; made (`rreads`); and walk it, maybe at length (`rscans`), making more of
-;; it (`rbuilds`); or emit an instruction, which writes it (`emits`).
-(define-effect rreads (maxeff (read @globals) (read @k)))
-(define-effect rscans (maxeff rreads spin))
-(define-effect rbuilds (maxeff rreads (alloc @k) spin))
-(define-effect emits (maxeff rreads (write @k) (alloc @k)))
-;; And what the compiler proper does (`compiles`), at length.
-(define-effect rcompiles (maxeff compiles spin))
+(define-effect rreads (select regcode-types rreads))
+(define-effect rscans (select regcode-types rscans))
+(define-effect rbuilds (select regcode-types rbuilds))
+(define-effect emits (select regcode-types emits))
+(define-effect rcompiles (select regcode-types rcompiles))
+(define-type bools (select regcode-types bools))
+(define-type wcells (select regcode-types wcells))
+(define-type rints (select regcode-types rints))
+(define-type rthis (select regcode-types rthis))
+(define-type ritem (select regcode-types ritem))
+(define r-cell (with regcode-types r-cell))
+(define r-label (with regcode-types r-label))
+(define r-branch (with regcode-types r-branch))
+(define r-brancht (with regcode-types r-brancht))
+(define r-frame (with regcode-types r-frame))
+(define r-guard-to (with regcode-types r-guard-to))
+(define-type ritems (select regcode-types ritems))
+(define-type rconst (select regcode-types rconst))
+(define rc-int (with regcode-types rc-int))
+(define rc-bool (with regcode-types rc-bool))
+(define rc-char (with regcode-types rc-char))
+(define rc-nil (with regcode-types rc-nil))
+(define rc-data (with regcode-types rc-data))
+(define rc-sym (with regcode-types rc-sym))
+(define rc-pair (with regcode-types rc-pair))
+(define-type rconsts (select regcode-types rconsts))
+(define-type r-const-global (select regcode-types r-const-global))
+(define-type r-const-list (select regcode-types r-const-list))
+(define-type r-const-list-table (select regcode-types r-const-list-table))
+(define-type r-member-const (select regcode-types r-member-const))
+(define-type r-module-const (select regcode-types r-module-const))
+(define-type r-members-at (select regcode-types r-members-at))
+(define-type rloc (select regcode-types rloc))
+(define rl-reg (with regcode-types rl-reg))
+(define rl-slot (with regcode-types rl-slot))
+(define rl-free (with regcode-types rl-free))
+(define rl-global (with regcode-types rl-global))
+(define rl-loop (with regcode-types rl-loop))
+(define rl-pending (with regcode-types rl-pending))
+(define rl-const (with regcode-types rl-const))
+(define rl-join (with regcode-types rl-join))
+(define rl-lifted (with regcode-types rl-lifted))
+(define rl-test (with regcode-types rl-test))
+(define-type rlocs (select regcode-types rlocs))
+(define-type renv (select regcode-types renv))
+(define-type rarg (select regcode-types rarg))
+(define a-e (with regcode-types a-e))
+(define a-v (with regcode-types a-v))
+(define a-thunk (with regcode-types a-thunk))
+(define a-slot (with regcode-types a-slot))
+(define a-lexical (with regcode-types a-lexical))
+(define a-name (with regcode-types a-name))
+(define a-as-is (with regcode-types a-as-is))
+(define-type rargs (select regcode-types rargs))
+(define-type rstd (select regcode-types rstd))
+(define s-op2 (with regcode-types s-op2))
+(define s-op1 (with regcode-types s-op1))
+(define s-op2imm (with regcode-types s-op2imm))
+(define s-field (with regcode-types s-field))
+(define s-prim (with regcode-types s-prim))
+(define s-pure (with regcode-types s-pure))
+(define s-cellular (with regcode-types s-cellular))
+(define s-identity (with regcode-types s-identity))
+(define s-set (with regcode-types s-set))
+(define s-special (with regcode-types s-special))
+(define s-apply (with regcode-types s-apply))
+(define s-list (with regcode-types s-list))
+(define s-none (with regcode-types s-none))
+(define-type rgen (select regcode-types rgen))
+(define-type rmove (select regcode-types rmove))
+(define-type rmoves (select regcode-types rmoves))
+(define-type rlate (select regcode-types rlate))
+(define-type rleaf (select regcode-types rleaf))
+(define-type rtest (select regcode-types rtest))
 
-;; Lists register code makes and walks.
-(define-type bools (listof bool acyclic))
-(define-type wcells (listof wcell @k))
-(define-type rints (listof int @k))
-;; What a procedure that knows itself knows (`c-this`), in a list of one.
-(define-type rthis (listof c-this @k))
 
-;;; ---------------------------------------------------------------- items
 
-(define-datatype ritem
-  (r-cell wcell)
-  (r-label int)
-  ;; `branch` (#f) or `branchf` (#t) to a label.
-  (r-branch bool int)
-  ;; `brancht` to a label.
-  (r-brancht int)
-  ;; The frame's size, known when the body is done.
-  (r-frame)
-  ;; `global-guard g w` to a label: unless global cell `g` holds a closure
-  ;; made from word `w`.
-  (r-guard-to wcell wcell int))
-(define-type ritems (listof ritem @k))
 
-;; Where a variable is, to register code.
-;; A constant that needs no allocation when it runs, as register code may
-;; know one: a sum or product of constants is made while compiling, once.
-(define-datatype rconst
-  (rc-int int) (rc-bool bool) (rc-char char) (rc-nil) (rc-data wcell)
-  ;; A symbol, and a pair of constants: the parts of a constant list
-  ;; (`TODO.md` §44), made where a cell needs it.
-  (rc-sym symbol) (rc-pair rconst rconst))
-(define-type rconsts (listof rconst @k))
-;; The globals defined as constants (`TODO.md` §42), each cell and value,
-;; newest first; each module's literal members, by the module's global; and,
-;; while a fast version is compiled, the constants it folds, each behind a
-;; `global-guard` (`r-fast-code`). As the Rust compiler's `const_globals`,
-;; `module_consts` and `consts_now`.
-(define-type r-const-global (pairof wglobal rconst @k))
-(define-type r-const-list (listof r-const-global @k))
 (define r-const-globals (ref r-const-list @k) (new nil))
-;; The globals defined as constant lists (`c-const-list`), apart from the
-;; rest, by their names: what `r-unrolled` asks of a call's arguments,
-;; without going through every constant.
-(define-type r-const-list-table (table symbol r-const-list @k))
 (define r-const-lists (ref r-const-list-table @k) (new (make-table symbol-hash symbol=?)))
-(define-type r-member-const (pairof symbol rconst @k))
-(define-type r-module-const (pairof wglobal (listof r-member-const @k) @k))
 (define r-module-consts (ref (listof r-module-const @k) @k) (new nil))
 (define r-consts-now (ref r-const-list @k) (new nil))
 ;; Global `g`'s constant in `cs`, in a list; none if it has none.
@@ -84,9 +110,6 @@
     (cond ((null? cs) nil)
           ((wglobal=? (car (car cs)) g) (the rconsts (cons (cdr (car cs)) nil)))
           (else (r-const-in (cdr cs) g)))))
-;; The literal members of the module global `g` holds, in a list; none if it
-;; has none noted.
-(define-type r-members-at (listof (listof r-member-const @k) @k))
 (define r-module-consts-of (subr rbuilds ((listof r-module-const @k) wglobal) r-members-at)
   (lambda (ms g)
     (cond ((null? ms) nil)
@@ -105,76 +128,9 @@
     (let ((cs (r-module-consts-of (get r-module-consts) g)))
       (if (null? cs) nil (r-member-in (car cs) f)))))
 
-(define-datatype rloc
-  (rl-reg int)
-  (rl-slot int)
-  (rl-free int)
-  (rl-global wglobal)
-  (rl-loop)
-  ;; A `letrec` sibling not made yet, to be in this frame slot.
-  (rl-pending int)
-  ;; A constant, bound to the name (`r-known`): no place at all.
-  (rl-const rconst)
-  ;; A `letrec`-bound procedure only called in tail position, a join point
-  ;; (`c-join-ok?`): where its parameters are, and its label.
-  (rl-join (listof rloc @k) int)
-  ;; A lambda-lifted procedure (`at-lifted`): only called.
-  (rl-lifted int)
-  ;; No name's place: a test an `if` around decided, true or false
-  ;; (`r-knowing`): its comparison's name and operands, each a place or a
-  ;; constant, as they were there.
-  (rl-test string (listof rloc @k) bool))
-(define-type rlocs (listof rloc @k))
-(define-type renv (listof (pairof symbol rloc @k) @k))
 
-;; An operand of a call-out: an expression, a constant, a procedure of no
-;; arguments whose body is an expression (a `prompt`'s), a frame slot's
-;; value, or a free value of the closure running.
-(define-datatype rarg
-  (a-e exp)
-  (a-v wcell)
-  (a-thunk exp)
-  (a-slot int)
-  (a-lexical int)
-  ;; A variable's value, wherever it is: a lifted procedure's added
-  ;; argument.
-  (a-name symbol)
-  ;; An expression's value, not converted as the checker said it is (the
-  ;; conversion's own operand).
-  (a-as-is exp))
-(define-type rargs (listof rarg @k))
 
-;; A standard operation, as register code does it.
-(define-datatype rstd
-  ;; `op2 r`, operands in order, or swapped; then `not`, if asked.
-  (s-op2 int bool bool)
-  (s-op1 int)
-  (s-op2imm int wcell)
-  (s-field int)
-  ;; A call-out: a runtime primitive, or a cellular routine.
-  (s-prim int)
-  ;; A runtime primitive of one or two operands that never collects: in
-  ;; line, as `prim1`, `prim2` or `prim2imm`, its operands as `op2`'s.
-  (s-pure int)
-  (s-cellular int)
-  ;; Its argument itself (`%fx26-identity`).
-  (s-identity)
-  ;; A reference written: `setfield 2`, then unit.
-  (s-set)
-  ;; Arrays, the tag and key makers: several instructions.
-  (s-special string)
-  ;; `(apply f xs)`: a call, of `f`'s procedure of one list (`r-apply`).
-  (s-apply)
-  ;; `(list x …)`: the pairs made in line (`r-list`).
-  (s-list)
-  (s-none))
 
-;; What is being made: the items, newest first; whether a leaf; the next
-;; register and frame slot, and the most slots used; the labels; and, for a
-;; procedure that knows itself, what it knows and its start's label.
-(define-type rgen
-  (productof (items (ref ritems @k)) (leaf bool) (nreg (ref int @k)) (nslot (ref int @k))
-             (mslot (ref int @k)) (labels (ref int @k)) (this rthis) (start int)))
 
 ;; Whether the register code being made has been declined.
 (define r-declined (ref bool @k) (new #f))
@@ -378,9 +334,6 @@
 (define r-name-args (subr rbuilds (syms rargs) rargs)
   (lambda (names rest)
     (if (null? names) rest (the rargs (cons (a-name (car names)) (r-name-args (cdr names) rest))))))
-;;; Register moves: (source, destination), source 0 being RESULT.
-(define-type rmove (pairof int int @k))
-(define-type rmoves (listof rmove @k))
 ;; Whether a move of `ms` but the `k`th reads register `d`.
 (define r-read-by-other? (subr rscans (rmoves int int int) bool)
   (lambda (ms d k i)
@@ -439,11 +392,6 @@
                 (rl-reg (r) (if (= r (+ j 1)) rest (cons (the rmove (cons r (+ j 1))) rest)))
                 (else y rest)))))))
 
-;; A leaf's tail call's arguments, as `r-leaf-args` sorts them: the moves
-;; of those in registers, or made into one, to REG1…REGn; and the simple
-;; ones, each with its register, made after the moves.
-(define-type rlate (listof (pairof int exp @k) @k))
-(define-type rleaf (productof (moves rmoves) (late rlate)))
 ;; A leaf's tail call's arguments, sorted.
 (define r-rleaf (subr (read @globals) (rmoves rlate) rleaf)
   (lambda (ms late) (product (moves ms) (late late))))
@@ -761,8 +709,6 @@
             (if (null? c) nil (r-known-fields env (cdr fs) (cons (car c) acc))))))))
 
 
-;; A test's description: its comparison's name, and its operands.
-(define-type rtest (pairof string rlocs @k))
 ;; Whether a test an `if` decided is in scope in `env`.
 (define r-tests-in? (subr rscans (renv) bool)
   (lambda (env)

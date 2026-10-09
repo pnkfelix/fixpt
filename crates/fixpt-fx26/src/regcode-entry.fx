@@ -1,9 +1,15 @@
 ;;; Register code, in FX-26: specialized procedures' temporaries, and the
 ;;; entry. After `regcode-core.fx`.
 
+;; Its types (`regcode-entry-types.fx`), loaded before the module so that they are
+;; not among its values; the module names what it uses of them.
+(define regcode-entry-types (load-module "fx26:regcode-entry-types.fx"))
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define regcode-entry-module (module
+(define-type rowner (select regcode-entry-types rowner))
+(define-type rgens (select regcode-entry-types rgens))
+
 ;; Each argument into a frame slot of its own, in order: the slots.
 (define r-spec-temps (subr rcompiles (rgen exps renv cenv) rints)
   (lambda (g args env te)
@@ -53,10 +59,6 @@
                 (r-store-rest g s (< (+ i 1) n)))
             (r-store-params g (+ i 1) n))))))
 
-;; A top-level definition's name and word, in a list (`c-own-now`).
-(define-type rowner (listof (productof (1 symbol) (2 tword)) @k))
-;; What was made, in a list; none if declined.
-(define-type rgens (listof rgen @k))
 ;; The name of the definition `own` (in a list), and `n`, its procedure's
 ;; arity, in a list.
 (define r-own-name-of (subr (maxeff rreads (alloc @k)) (rowner int) (listof rown-name @k))

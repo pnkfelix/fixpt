@@ -1927,4 +1927,10 @@ Phase 1, the types out, one module at a time; phase 2, the conversion.
   narrower module is expected, the FX-26 compiler finding what a place is
   narrowed to by the place, shared by a load's hidden definition and its
   use: each now has a place of its own (`0c08e72`).
+- Phase 1 for register code and the compiler (2026-10-09): the types of
+  `compile`, `compile-lift`, `compile-exps`, `compile-plan`, `regcode`,
+  `regcode-exps`, `regcode-helpers`, `regcode-modules`, `regcode-entry` and
+  `compile-programs`, each in `X-types.fx`, loaded before its module
+  (`compile-twins`, `regcode-core`, `layout` and `standard` have none).
+  172.7 M words, from 171.1.
 

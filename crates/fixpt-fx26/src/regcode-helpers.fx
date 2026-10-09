@@ -3,22 +3,23 @@
 
 ;;; ------------------------------------------- helpers of the compiler proper
 
+;; Its types (`regcode-helpers-types.fx`), loaded before the module so that they are
+;; not among its values; the module names what it uses of them.
+(define regcode-helpers-types (load-module "fx26:regcode-helpers-types.fx"))
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define regcode-helpers-module (module
-;; An expression, or none: a call's procedure (`r-args`), a closure's
-;; region (`r-lambda`).
-(define-type maybe-exp (listof exp @k))
-;; A call unrolled over a constant list (`r-unrolled`, as the Rust
-;; compiler's `r_unroll`, `TODO.md` §44): its procedure's expression, each
-;; argument that is a global holding a constant list, with it (one that is
-;; a constant here `r-known` finds), and the globals to guard. `r-inline`
-;; compiles it, reading these (`r-known-arg`,
-;; `r-guards-for`); newest first, as a call's arguments may hold others.
-(define-type r-unroll-known (listof (pairof exp rconst @k) @k))
-(define-type r-wglobals (listof wglobal @k))
-(define-type r-unroll-found (productof (1 r-unroll-known) (2 r-wglobals) (3 bool)))
-(define-type r-unroll-hook (productof (1 exp) (2 r-unroll-known) (3 r-wglobals)))
+(define-type maybe-exp (select regcode-helpers-types maybe-exp))
+(define-type r-unroll-known (select regcode-helpers-types r-unroll-known))
+(define-type r-wglobals (select regcode-helpers-types r-wglobals))
+(define-type r-unroll-found (select regcode-helpers-types r-unroll-found))
+(define-type r-unroll-hook (select regcode-helpers-types r-unroll-hook))
+(define-type r-unroll-globals (select regcode-helpers-types r-unroll-globals))
+(define-type rsplit (select regcode-helpers-types rsplit))
+(define-type rsplits (select regcode-helpers-types rsplits))
+(define-type rmade (select regcode-helpers-types rmade))
+(define-type roperands (select regcode-helpers-types roperands))
+
 (define r-unroll-hooks (ref (listof r-unroll-hook @k) @k) (new nil))
 ;; The procedure `f` names, if one of `c-unrolls`, with its global, called
 ;; on `args` with at least one constant list (a constant, or a global that
@@ -79,8 +80,6 @@
                 (else (product (1 (the r-unroll-known (cons (cons a (car c)) (extract rest 1))))
                                (2 (the r-wglobals (cons (car (car g)) (extract rest 2))))
                                (3 #t))))))))
-;; The global `a` names and its constant, if it is one.
-(define-type r-unroll-globals (listof (pairof wglobal rconst @k) @k))
 (define r-unroll-global (subr rbuilds (renv exp) r-unroll-globals)
   (lambda (env a)
     (tagcase a
@@ -160,9 +159,6 @@
   (lambda (env t v)
     (let ((d (r-test-desc env t)))
       (if (null? d) env (r-bind '%if (rl-test (car (car d)) (cdr (car d)) v) env)))))
-;; An expression split as `core + k` (`r-split`), and such a split, if any.
-(define-type rsplit (productof (1 (listof exp @k)) (2 int)))
-(define-type rsplits (listof rsplit @k))
 (define-rec
   ;; `x` as `core + k`: `core` the one operand of a chain of `+`, and of `-`
   ;; of constants, that is not a constant (none if all are), and `k` the
@@ -297,8 +293,6 @@
                (6 (c-count-params (extract sp 3)))
                (7 (extract sp 7)) (8 lps) (9 lbody)
                (10 (c-lambda-captured lps lbody te)) (11 (c-genv-now))))))
-;; A lambda's word, and the names it captures.
-(define-type rmade (productof (1 tword) (2 syms)))
 ;; The copy `spec` of `sp`'s procedure, for lambda body `lbody`, in a
 ;; list: made once, with the form's words, for the procedure, the lambda,
 ;; what it captures and the globals it sees (`c-make-copy`); none if none
@@ -331,9 +325,6 @@
              (let ((c (r-collects (extract sp 9) (r-spec-scope sp) (the rthis nil) tail)))
                (begin (set c-genv outer-genv) c)))))))
 
-;; What `r-operands` makes of its second operand: an immediate, or the
-;; register it is in, in a list.
-(define-type roperands (productof (1 wcells) (2 (listof int @k))))
 (define r-imm-operand (subr (alloc @k) (wcells) roperands)
   (lambda (v) (product (1 v) (2 (the (listof int @k) nil)))))
 (define r-reg-operand (subr (alloc @k) (int) roperands)

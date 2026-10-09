@@ -3,9 +3,19 @@
 
 ;;; ------------------------------------------------------------- inlining
 
+;; Its types (`compile-programs-types.fx`), loaded before the module so that they are
+;; not among its values; the module names what it uses of them.
+(define compile-programs-types (load-module "fx26:compile-programs-types.fx"))
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define compile-programs-module (module
+(define-type c-kept-globals (select compile-programs-types c-kept-globals))
+(define-effect c-lists (select compile-programs-types c-lists))
+(define-type c-const-env (select compile-programs-types c-const-env))
+(define-type c-mconsts (select compile-programs-types c-mconsts))
+(define-type c-members (select compile-programs-types c-members))
+(define-type c-module-list (select compile-programs-types c-module-list))
+
 ;; Two arities found: the same one, or -2 if they differ or either failed;
 ;; -1 is none found yet.
 (define c-arity-merge (subr pure (int int) int)
@@ -330,10 +340,6 @@
                       (else y #u)))))
             (else y #u))))))
 
-;; Globals kept for their names' next definitions: a redefinition of a type
-;; the old one's users can take, for which the REPL asks
-;; (`compile-keep-global!`).
-(define-type c-kept-globals (listof (pairof symbol wglobal acyclic) acyclic))
 
 (define c-reuse (ref c-kept-globals @k) (new nil))
 ;; For a driver: a whole program from here, which sees none of the globals
@@ -436,10 +442,6 @@
             (at-global (g) (cons g nil))
             (else y nil))))))
 
-;;; ------------------------------------------------------------- programs
-
-;; What these walk and build (`TODO.md` §42): lists in `@k`, so `spin`.
-(define-effect c-lists (maxeff (read @globals) (read @k) (alloc @k) spin))
 ;; A literal, under ascriptions, in a list: what a module's member may be
 ;; to be folded (`TODO.md` §42).
 (define c-literal-of (subr c-lists (exp) rconsts)
@@ -495,7 +497,6 @@
       (if (and (not (null? v)) (tagcase (car v) (rc-pair (a d) #t) (rc-nil () #t) (else y #f)))
           v
           nil))))
-(define-type c-const-env (listof (pairof symbol rconst @k) @k))
 (define c-const-in (subr c-lists (c-const-env symbol) rconsts)
   (lambda (e n)
     (cond ((null? e) nil)
@@ -573,9 +574,6 @@
         nil
         (the c-const-env
           (cons (cons (extract (car ps) 1) (car vs)) (c-const-bind (cdr ps) (cdr vs)))))))
-;; Each module's literal members, and one module's.
-(define-type c-mconsts (listof r-module-const @k))
-(define-type c-members (listof r-member-const @k))
 ;; `cs` without global `g`'s.
 (define c-consts-without (subr c-lists (r-const-list wglobal) r-const-list)
   (lambda (cs g)
@@ -677,9 +675,6 @@
            (set c-defining (the (listof symbol @k) nil))
            (c-record-inline n ps body))))
 
-;; Each top-level module's members noted (`c-module-members`), by its
-;; global, as the Rust compiler's `modules` (`TODO.md` §38).
-(define-type c-module-list (listof (productof (1 symbol) (2 c-inlinables)) acyclic))
 (define c-modules (ref c-module-list @k) (new nil))
 (define c-modules-without (subr c-builds (c-module-list symbol) c-module-list)
   (lambda (ms m)

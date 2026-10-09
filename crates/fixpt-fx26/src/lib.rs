@@ -67,6 +67,36 @@ pub const LAYOUT_TYPES: &str = include_str!("layout-types.fx");
 /// §68).
 pub const NATIVE_LAYOUT_TYPES: &str = include_str!("native-layout-types.fx");
 
+/// The types of `compile.fx`: a module file of no state (`TODO.md` §68).
+pub const COMPILE_TYPES: &str = include_str!("compile-types.fx");
+
+/// The types of `compile-lift.fx`: a module file of no state (`TODO.md` §68).
+pub const COMPILE_LIFT_TYPES: &str = include_str!("compile-lift-types.fx");
+
+/// The types of `compile-exps.fx`: a module file of no state (`TODO.md` §68).
+pub const COMPILE_EXPS_TYPES: &str = include_str!("compile-exps-types.fx");
+
+/// The types of `compile-plan.fx`: a module file of no state (`TODO.md` §68).
+pub const COMPILE_PLAN_TYPES: &str = include_str!("compile-plan-types.fx");
+
+/// The types of `regcode.fx`: a module file of no state (`TODO.md` §68).
+pub const REGCODE_TYPES: &str = include_str!("regcode-types.fx");
+
+/// The types of `regcode-exps.fx`: a module file of no state (`TODO.md` §68).
+pub const REGCODE_EXPS_TYPES: &str = include_str!("regcode-exps-types.fx");
+
+/// The types of `regcode-helpers.fx`: a module file of no state (`TODO.md` §68).
+pub const REGCODE_HELPERS_TYPES: &str = include_str!("regcode-helpers-types.fx");
+
+/// The types of `regcode-modules.fx`: a module file of no state (`TODO.md` §68).
+pub const REGCODE_MODULES_TYPES: &str = include_str!("regcode-modules-types.fx");
+
+/// The types of `regcode-entry.fx`: a module file of no state (`TODO.md` §68).
+pub const REGCODE_ENTRY_TYPES: &str = include_str!("regcode-entry-types.fx");
+
+/// The types of `compile-programs.fx`: a module file of no state (`TODO.md` §68).
+pub const COMPILE_PROGRAMS_TYPES: &str = include_str!("compile-programs-types.fx");
+
 /// Hash tables' types: a module file of no state (`TODO.md` §68).
 pub const TABLE_TYPES: &str = include_str!("table-types.fx");
 
@@ -215,9 +245,19 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 28] = [
+pub const FRONT_END_MODULES: [(&str, &str); 38] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("table-types.fx", TABLE_TYPES),
+    ("compile-programs-types.fx", COMPILE_PROGRAMS_TYPES),
+    ("regcode-entry-types.fx", REGCODE_ENTRY_TYPES),
+    ("regcode-modules-types.fx", REGCODE_MODULES_TYPES),
+    ("regcode-helpers-types.fx", REGCODE_HELPERS_TYPES),
+    ("regcode-exps-types.fx", REGCODE_EXPS_TYPES),
+    ("regcode-types.fx", REGCODE_TYPES),
+    ("compile-plan-types.fx", COMPILE_PLAN_TYPES),
+    ("compile-exps-types.fx", COMPILE_EXPS_TYPES),
+    ("compile-lift-types.fx", COMPILE_LIFT_TYPES),
+    ("compile-types.fx", COMPILE_TYPES),
     ("native-types.fx", NATIVE_TYPES),
     ("arm64-types.fx", ARM64_TYPES),
     ("layout-types.fx", LAYOUT_TYPES),

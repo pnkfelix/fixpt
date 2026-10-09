@@ -6,9 +6,25 @@
 ;;; value pushed is slot `depth`. In tail position, code ends the word: with
 ;;; a `tailcall`, or with `return` after the value.
 
+;; Its types (`compile-exps-types.fx`), loaded before the module so that they are
+;; not among its values; the module names what it uses of them.
+(define compile-exps-types (load-module "fx26:compile-exps-types.fx"))
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define compile-exps-module (module
+(define-type c-inline (select compile-exps-types c-inline))
+(define-type c-inlinables (select compile-exps-types c-inlinables))
+(define-type c-mval (select compile-exps-types c-mval))
+(define-type c-mvals (select compile-exps-types c-mvals))
+(define-type c-mslots (select compile-exps-types c-mslots))
+(define-type c-waits (select compile-exps-types c-waits))
+(define-type c-made (select compile-exps-types c-made))
+(define-type c-closing (select compile-exps-types c-closing))
+(define-type c-region (select compile-exps-types c-region))
+(define-type c-spec (select compile-exps-types c-spec))
+(define-type c-copy-twin (select compile-exps-types c-copy-twin))
+(define-type c-twin (select compile-exps-types c-twin))
+
 ;; Each captured name's value, as the closure will hold it, free value `j`
 ;; on; a sibling not made yet is a placeholder, and one of the patches.
 (define c-push-all (subr (maxeff compiles spin) (syms cenv int int code) patches)
@@ -69,12 +85,6 @@
 
 (define c-prev-word (ref (listof tword @k) @k) (new nil))
 
-;; A small global procedure a call in register code may inline, guarded
-;; (`regcode.fx`'s `r-inline`): its name, word, parameters and body, and
-;; the globals as its body saw them.
-(define-type c-inline
-  (productof (1 symbol) (2 tword) (3 c-params) (4 exp) (5 int)))
-(define-type c-inlinables (listof c-inline acyclic))
 ;; A top-level `(define m (module …))`'s members that are lambdas naming no
 ;; other member, each as a `c-inline`, to be inlined, if small, where a
 ;; re-export `(define f (with m f))` is called (`TODO.md` §38), as the Rust
@@ -117,11 +127,6 @@
       (e-plambda (d body a b) (c-checked-lambda? body))
       (e-the (d body a b) (c-checked-lambda? body))
       (else y #f))))
-;; A value a module's item makes: its name, its expression, the item's kind
-;; (0 an abstract type's conversion, 2 a definition, 3 a `define-rec`'s
-;; member), and whether it is a typed lambda.
-(define-type c-mval (productof (1 symbol) (2 exp) (3 int) (4 bool)))
-(define-type c-mvals (listof c-mval @k))
 (define c-mv-onto (subr (alloc @k) (symbol exp int bool c-mvals) c-mvals)
   (lambda (n x k l rest) (cons (product (1 n) (2 x) (3 k) (4 l)) rest)))
 (define c-mvals-group (subr (maxeff (read @globals) (alloc @k)) (names exps c-mvals) c-mvals)
@@ -142,8 +147,6 @@
                      (c-mv-onto (car ns) (car xs) 2 l rest)))
                   ((3) (c-mvals-group ns xs rest))
                   (else rest))))))
-;; Each value's name, and its slot, from `d`.
-(define-type c-mslots (listof (pairof symbol int @k) @k))
 (define c-module-slots (subr c-walks (c-mvals int) c-mslots)
   (lambda (vs d)
     (if (null? vs)
@@ -172,9 +175,6 @@
                (loops (and (symbol=? m n) (c-loops-only body n nps #t))))
           (c-module-own n (c-extend m (if loops (at-loop 0) (at-pending (cdr (car later)))) e)
                         (cdr later) body nps)))))
-;; Closures to finish: the closure's slot, its free value, and the slot it
-;; waits for.
-(define-type c-waits (listof (productof (1 int) (2 int) (3 int)) @k))
 ;; `ws` and, after them, the patches `ps` of the closure in slot `d`.
 (define c-waits-onto (subr c-walks (c-waits int patches) c-waits)
   (lambda (ws d ps)
@@ -197,10 +197,6 @@
                 #u)
             (c-give-waiting (cdr ws) d c))))))
 
-;; A lambda's word, made by the stack code of the body it is in: where its
-;; body starts and ends, its parameters, its own name, the word, and the
-;; names it captures.
-(define-type c-made (productof (1 int) (2 int) (3 syms) (4 syms) (5 tword) (6 syms)))
 
 ;; The words of the lambdas the body being compiled makes, as its stack
 ;; code made them; and those of the body whose register code is being made,
@@ -215,11 +211,7 @@
 ;; own, a join point's, it finds the words made in it here.
 (define c-form-made (ref (listof c-made @k) @k) (new nil))
 
-;; A lambda's word, and the names its closure captures, in order.
-(define-type c-closing (productof (1 tword) (2 syms)))
 
-;; An `rlambda`'s region, in a list; none for a plain lambda.
-(define-type c-region (listof exp @k))
 
 ;; A lambda's own name, unless a parameter of the same name hides it.
 (define c-own-of (subr c-builds (c-params syms) syms)
@@ -321,29 +313,12 @@
           (car named)))))
 
 
-;; A procedure being specialized at a lambda: its global's name, cell and
-;; word; the parameter's place and name; how many parameters; the lambda's
-;; arity, parameters and body, the names its closure captures in order, and
-;; the globals it sees.
-(define-type c-spec
-  (productof (1 symbol) (2 wglobal) (3 tword) (4 int) (5 symbol) (6 int) (7 int)
-             (8 c-params) (9 exp) (10 syms) (11 int)))
 ;; While a copy's register code is made: which (one, or none).
 (define c-spec-now (ref (listof c-spec @k) @k) (new nil))
 ;; While register code is made: the plan's contexts it is in (3b), innermost
 ;; first (-1 where the plan has none).
 (define c-r-plan-ctx (ref (listof int @k) @k) (new nil))
 
-;; A specialized copy's twin's context: what it is specialized at, its
-;; plan's context, and the globals its procedure saw.
-(define-type c-copy-twin (productof (1 c-spec) (2 int) (3 int)))
-;; A lambda's word whose register code, its twin, is made once its form's
-;; words all are (step 4), with what its stack code knew and made: the
-;; word, parameters, body, scope, the procedure it is, the definition it
-;; is (if one), the words of the lambdas in it, and, a copy's, its context.
-(define-type c-twin
-  (productof (1 tword) (2 c-params) (3 exp) (4 cenv) (5 (listof c-this @k))
-             (6 (listof symbol @k)) (7 (listof c-made @k)) (8 (listof c-copy-twin @k))))
 ;; The form's, last first.
 (define c-twins (ref (listof c-twin @k) @k) (new nil))
 ;; Twin `t` as a copy's, in context `ctx`, specialized as `spec` says, in

@@ -4,14 +4,19 @@
 ;;; ------------------------------------------------------ lambda lifting
 ;;; As the Rust compiler's `lift`, `lift_plan` and `called_only`.
 
+;; Its types (`compile-lift-types.fx`), loaded before the module so that they are
+;; not among its values; the module names what it uses of them.
+(define compile-lift-types (load-module "fx26:compile-lift-types.fx"))
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define compile-lift-module (module
-;; While a `letrec` is planned to be lifted, by member: the names each
-;; takes, and the siblings each calls.
-(define-type c-added (arrayof syms @k))
+(define-type c-added (select compile-lift-types c-added))
+(define-type c-calls (select compile-lift-types c-calls))
+(define-type c-planned (select compile-lift-types c-planned))
+(define-type c-planneds (select compile-lift-types c-planneds))
+(define-type c-standard-twin (select compile-lift-types c-standard-twin))
 
-(define-type c-calls (arrayof (listof int @k) @k))
+
 
 ;; A `letrec`'s key in `c-lifted`: where it starts and ends.
 (define c-span-key (subr pure (int int) int) (lambda (a b) (+ (* a 4194304) b)))
@@ -43,15 +48,6 @@
           ((c-lifted? (cdr (car e))) (the cenv (cons (car e) (c-lifted-entries (cdr e)))))
           (else (c-lifted-entries (cdr e))))))
 
-;;; ------------------------------------------- the middle phase's plan
-;;; Before a top-level form is compiled, `compile-plan.fx` decides each
-;;; lambda's captured names and each `letrec`'s lifting
-;;; (`docs/research/compiler-middle-phase.md`, step 2), as the Rust
-;;; compiler's `cellular/procs.rs`; the stack code reads them here.
-
-;; A lambda as planned: its parameters' names, and the names it captures.
-(define-type c-planned (productof (1 syms) (2 syms)))
-(define-type c-planneds (listof c-planned @k))
 ;; The form's lambdas, by where their bodies are (`c-span-key`), each with
 ;; its parameters' names (a `define-datatype`'s constructors share their
 ;; form's place); its `letrec`s' liftings, by where they are: none if not
@@ -434,9 +430,6 @@
 (define* c-has-standard-value? (subr pure (string) bool)
   (lambda (n) (or (string=? n "list") (>= (c-arity n) 0))))
 
-;; The standard operations' words of the form being compiled whose twins
-;; are to be made, last first (step 4): each word, operation and arity.
-(define-type c-standard-twin (productof (1 tword) (2 string) (3 int)))
 (define c-standard-twins (ref (listof c-standard-twin @k) @k) (new nil))
 ;; Word `w`, with register code as standard operation `op` of `n` arguments
 ;; has it as a value, for the native compiler to start from: made with its

@@ -2,11 +2,14 @@
 ;;; stage M3); the module code itself is in `regcode-core.fx`'s group, which
 ;;; it recurs with. After `regcode-helpers.fx`.
 
+;; Its types (`regcode-modules-types.fx`), loaded before the module so that they are
+;; not among its values; the module names what it uses of them.
+(define regcode-modules-types (load-module "fx26:regcode-modules-types.fx"))
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define regcode-modules-module (module
-;; Where names are, to register code and to the cellular compiler.
-(define-type r-scopes (pairof renv cenv @k))
+(define-type r-scopes (select regcode-modules-types r-scopes))
+
 
 ;; `vals`, newest first, onto `acc` the oldest first: as operands.
 (define r-slots-oldest (subr rbuilds (rints rargs) rargs)

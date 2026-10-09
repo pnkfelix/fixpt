@@ -3,9 +3,25 @@
 
 ;;; ---------------------------------------------------------- expressions
 
+;; Its types (`regcode-exps-types.fx`), loaded before the module so that they are
+;; not among its values; the module names what it uses of them.
+(define regcode-exps-types (load-module "fx26:regcode-exps-types.fx"))
 ;; A module (`TODO.md` §34: the front end into modules, a file at a time);
 ;; what other files use re-exported after it.
 (define regcode-exps-module (module
+(define-type rspecial (select regcode-exps-types rspecial))
+(define-type rown (select regcode-exps-types rown))
+(define-type r-assumptions (select regcode-exps-types r-assumptions))
+(define-type c-write (select regcode-exps-types c-write))
+(define-type c-globals (select regcode-exps-types c-globals))
+(define-type c-write-table (select regcode-exps-types c-write-table))
+(define-type rown-name (select regcode-exps-types rown-name))
+(define-type rinline (select regcode-exps-types rinline))
+(define-type rscope (select regcode-exps-types rscope))
+(define-type rarg-patches (select regcode-exps-types rarg-patches))
+(define-type rplace (select regcode-exps-types rplace))
+(define-type rplaces (select regcode-exps-types rplaces))
+
 ;; In a procedure specialized at a lambda (`c-spec-now`): where the
 ;; parameter the lambda is, in a list, and the label at the body's start.
 (define r-spec-at (ref rlocs @k) (new nil))
@@ -63,8 +79,6 @@
 ;; Whether `body` is small enough to inline (`c-inline-limit`).
 (define r-inlinable? (subr (maxeff (read @globals) spin) (exp) bool)
   (lambda (body) (>= (c-inline-room body c-inline-limit) 0)))
-;; A specialized call: which of `c-specials`, its global, and the lambda.
-(define-type rspecial (productof (1 c-special) (2 wglobal) (3 exp)))
 ;; `sp`, its global `cell`, and the lambda argument, in a list, when the
 ;; argument at its parameter is a lambda small enough to inline, taking as
 ;; many arguments as it is called with.
@@ -158,9 +172,6 @@
 ;; `fs` without its first `n`.
 (define r-drop-bools (subr rreads (bools int) bools)
   (lambda (fs n) (if (= n 0) fs (r-drop-bools (cdr fs) (- n 1)))))
-;; In a top-level definition's procedure: its name, its word, its arity, and
-;; the label at the body's start (`r-self-guarded`), in a list.
-(define-type rown (productof (1 symbol) (2 tword) (3 int) (4 int)))
 (define r-own-now (ref (listof rown @k) @k) (new nil))
 ;; The global `f` names, in a list, when it is the procedure's own, called
 ;; with its arity, and not from an inlined body, whose names may be an
@@ -271,12 +282,6 @@
     (if (null? joins)
         nil
         (let ((s (if (car joins) -1 (r-slot g)))) (cons s (r-letrec-slots-j g (cdr joins)))))))
-;; While a body's fast version is compiled (`r-register-code`): whether, and
-;; the globals it assumes hold what they held (a procedure inlined,
-;; specialized or called by itself; a constant folded; a module whose member
-;; is folded, `TODO.md` §42), newest first, each once: what its guards test,
-;; that each has not been written since.
-(define-type r-assumptions (listof wglobal acyclic))
 (define r-assuming (ref bool @k) (new #f))
 ;; While deciding whether a body is a leaf: whether a plain call in tail
 ;; position, its arguments collecting nothing, counts as no call
@@ -286,13 +291,6 @@
 ;; being compiled's fast version.
 (define r-looped (ref bool @k) (new #f))
 (define r-assumed (ref r-assumptions @k) (new nil))
-;; How many times each global this program writes has been written once the
-;; `global!`s emitted so far have run, by its name, newest first; and the
-;; globals the form being compiled writes. As the Rust compiler's `writes`
-;; and `form_writes`.
-(define-type c-write (pairof wglobal int @k))
-(define-type c-globals (listof wglobal @k))
-(define-type c-write-table (table symbol (listof c-write @k) @k))
 (define c-writes (ref c-write-table @k) (new (make-table symbol-hash symbol=?)))
 (define c-writes-of (subr rreads (wglobal) (listof c-write @k))
   (lambda (g) (table-ref (get c-writes) (wglobal-name g) (the (listof c-write @k) nil))))
@@ -336,9 +334,6 @@
                    (set r-assumed (the r-assumptions (cons cell (get r-assumed)))))
                #t)
         #f)))
-;; The top-level definition whose body is being compiled: its name and
-;; arity, in a list.
-(define-type rown-name (pairof symbol int @k))
 (define r-own-name (ref (listof rown-name @k) @k) (new nil))
 (define r-own-is? (subr rreads (symbol int) bool)
   (lambda (name n)
@@ -446,8 +441,6 @@
 ;; closure made.
 (define r-standard-value? (subr rcompiles (cenv symbol) bool)
   (lambda (e n) (and (null? (c-where e n)) (c-has-standard-value? (symbol->string n)))))
-;; An inlined call: which of `c-inlines`, and its global.
-(define-type rinline (pairof c-inline wglobal @k))
 ;; Which of `c-inlines`, and its global, when `f` names one of them, taking
 ;; `k` arguments, whose body is not being inlined already.
 (define r-inlined (subr rbuilds (renv exp int) (listof rinline @k))
@@ -726,9 +719,6 @@
 (define r-bind-all (subr rcompiles (renv renv) renv)
   (lambda (bound env) (if (null? bound) env (r-bind-all (cdr bound) (cons (car bound) env)))))
 
-;; Where a body finds its names: in register code, and to the cellular
-;; compiler.
-(define-type rscope (productof (1 renv) (2 cenv)))
 
 ;; Each value the lambda's closure captured, from the parameter's value at
 ;; `at`, field `j` on, kept, in order, onto `env` and `te`.
@@ -776,8 +766,6 @@
 (define r-append-arg (subr rcompiles (rargs rarg) rargs)
   (lambda (xs x) (if (null? xs) (cons x nil) (cons (car xs) (r-append-arg (cdr xs) x)))))
 
-;; A call-out's operands, and the patches for the siblings among them.
-(define-type rarg-patches (productof (1 rargs) (2 patches)))
 ;; `rest`, operand `x` first.
 (define r-arg-onto (subr rbuilds (rarg rarg-patches) rarg-patches)
   (lambda (x rest) (product (1 (the rargs (cons x (extract rest 1)))) (2 (extract rest 2)))))
@@ -820,10 +808,6 @@
                   (begin (r-const-into g (r-const-cell c) k) (r-free-regs g (cdr fv) env k)))
                 (else y (begin (r-decline) (the patches nil)))))))))
 
-;; A join point's place: its parameters' places and its label.
-(define-type rplace (pairof rlocs int @k))
-;; Each binding's place, in a list; none for one that is no join point.
-(define-type rplaces (listof (listof rplace @k) @k))
 
 ;; Whether a join point's parameters `ps` are kept in registers: where its
 ;; body makes no call (or in a leaf), so many as leave half of them.
