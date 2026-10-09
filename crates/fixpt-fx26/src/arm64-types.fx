@@ -1,4 +1,4 @@
-;;; The types of `arm64.fx`, its `arm64-module`, and its signature as its
+;;; The types of `arm64.fx`, and the signature of its module as its
 ;;; clients use it: a module file of no state, which it loads, and so may
 ;;; its clients (`TODO.md` §68).
 

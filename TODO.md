@@ -1918,4 +1918,13 @@ Phase 1, the types out, one module at a time; phase 2, the conversion.
   module file, its items only, which the conductor loads; its generator
   (`fixpt_native::cellular::fx26_module`) writes it so, not wrapped in a
   module re-exported.
+- `arm64.fx` (2026-10-09): no state and nothing given, but types of its
+  own, so a `load-input` file whose value is the module, its types file
+  loaded around it, `(let ((arm64-types …)) (module …))`; the conductor
+  loads it for `native.fx`. `tests/arm64.rs`, which called the encoders as
+  the front end's globals, compiles a program loading the file and naming
+  them. It found the compilers disagreeing on a load passed where a
+  narrower module is expected, the FX-26 compiler finding what a place is
+  narrowed to by the place, shared by a load's hidden definition and its
+  use: each now has a place of its own (`0c08e72`).
 

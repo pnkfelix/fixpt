@@ -4,13 +4,26 @@
 //! Where the Rust encoder refuses an operand, the FX-26 one gives -1.
 
 use fixpt_engine::Backend;
-use fixpt_fx26::session::{Fx26Session, READER_PREFIX, load_eager_reader};
 use fixpt_heap::Value;
 use fixpt_native::arm64 as a;
 
 /// What the Rust encoder gives, or `None` where it refuses.
 fn oracle(f: impl FnOnce() -> u32 + std::panic::UnwindSafe) -> Option<i64> {
     std::panic::catch_unwind(f).ok().map(|w| w as i64)
+}
+
+/// The encoders: `fx26:arm64.fx` loaded by a program that names each of its
+/// definitions at top level, as `fx:name`, compiled into a Scheme session.
+fn encoders() -> fixpt_scheme::Session {
+    let names = fixpt_fx26::ARM64.lines().filter_map(|l| l.strip_prefix("(define ")?.split([' ', ')']).next());
+    let mut program = String::from("(define arm64 (load-input \"fx26:arm64.fx\"))\n");
+    for n in names {
+        program.push_str(&format!("(define {n} (with arm64 {n}))\n"));
+    }
+    let compiled = fixpt_fx26::session::compile_program(&program).expect("checks");
+    let mut s = fixpt_scheme::Session::with_backend(Backend::Bytecode);
+    compiled.load_into(&mut s).expect("loads");
+    s
 }
 
 const REGS: [u32; 7] = [0, 1, 9, 13, 19, 28, 31];
@@ -28,8 +41,7 @@ const CONDS: [a::Cond; 12] = [
 #[test]
 fn every_instruction_as_the_rust_encoder_makes_it() {
     std::panic::set_hook(Box::new(|_| {}));
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-    load_eager_reader(&mut s.scheme).expect("loads");
+    let mut s = encoders();
     let mut cases: Vec<(String, Vec<i64>, Option<i64>)> = Vec::new();
     let mut add = |name: &str, args: Vec<i64>, want: Option<i64>| cases.push((name.to_string(), args, want));
     for t in REGS {
@@ -106,9 +118,9 @@ fn every_instruction_as_the_rust_encoder_makes_it() {
     let _ = std::panic::take_hook();
     let mut wrong = Vec::new();
     for (name, args, want) in &cases {
-        let got = s.scheme.scope(|sc| {
+        let got = s.scope(|sc| {
             let args: Vec<_> = args.iter().map(|x| sc.make(|_| Value::fixnum(*x))).collect();
-            let r = sc.call_global(&format!("{READER_PREFIX}{name}"), &args).expect("runs");
+            let r = sc.call_global(&format!("fx:{name}"), &args).expect("runs");
             sc.view(|v| v.get(r).fixnum().expect("an int"))
         });
         if got != want.unwrap_or(-1) {
@@ -116,8 +128,8 @@ fn every_instruction_as_the_rust_encoder_makes_it() {
         }
     }
     assert!(wrong.is_empty(), "{} of {} disagree:\n{}", wrong.len(), cases.len(), wrong.join("\n"));
-    let ret = s.scheme.scope(|sc| {
-        let r = sc.global(&format!("{READER_PREFIX}arm-ret")).expect("bound");
+    let ret = s.scope(|sc| {
+        let r = sc.global(&"fx:arm-ret").expect("bound");
         sc.view(|v| v.get(r).fixnum())
     });
     assert_eq!(ret, Some(a::ret() as i64));
@@ -127,13 +139,12 @@ fn every_instruction_as_the_rust_encoder_makes_it() {
 /// And a constant of any size, as `mov_imm64` loads it.
 #[test]
 fn constants_as_the_rust_encoder_loads_them() {
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-    load_eager_reader(&mut s.scheme).expect("loads");
+    let mut s = encoders();
     for v in [0u64, 1, 0xffff, 0x1_0000, 0x1234_5678, 0x0f00_0000_0000_0001, (1 << 59) - 1] {
         let want: Vec<i64> = a::mov_imm64(13, v).into_iter().map(|w| w as i64).collect();
-        let got: Vec<i64> = s.scheme.scope(|sc| {
+        let got: Vec<i64> = s.scope(|sc| {
             let (d, x) = (sc.make(|_| Value::fixnum(13)), sc.make(|_| Value::fixnum(v as i64)));
-            let r = sc.call_global(&format!("{READER_PREFIX}arm-mov-imm64"), &[d, x]).expect("runs");
+            let r = sc.call_global(&"fx:arm-mov-imm64", &[d, x]).expect("runs");
             sc.view(|w| w.get(r).list().expect("a list").iter().map(|x| x.fixnum().expect("an int")).collect())
         });
         assert_eq!(got, want, "{v:#x}");

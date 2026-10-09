@@ -15,12 +15,12 @@
 ;; Conditions: eq 0, ne 1, hs 2, lo 3, vs 6, vc 7, hi 8, ls 9, ge 10,
 ;; lt 11, gt 12, le 13.
 
-;; A module (`TODO.md` §34: the front end into modules, a file at a time);
-;; what other files use re-exported after it.
-;; Its types (`arm64-types.fx`), loaded before the module so that they are
-;; not among its values; the module names what it uses of them.
-(define arm64-types (load-module "fx26:arm64-types.fx"))
-(define arm64-module (module
+;; A file of one expression (`load-input`, `TODO.md` §68): the module, of no
+;; state and given nothing, which the conductor gives `native.fx`. Its types
+;; (`arm64-types.fx`) are loaded around it, so that they are not among its
+;; values; the module names what it uses of them.
+(let ((arm64-types (load-module "fx26:arm64-types.fx")))
+  (module
 (define-effect encodes (select arm64-types encodes))
 (define-type arm-op2 (select arm64-types arm-op2))
 (define-type arm-op3 (select arm64-types arm-op3))
@@ -182,47 +182,3 @@
 (define arm-br (subr encodes (int) int) (lambda (n) (arm-sum #xD61F0000 (arm-reg-at n 5))))
 (define arm-blr (subr encodes (int) int) (lambda (n) (arm-sum #xD63F0000 (arm-reg-at n 5))))
 (define arm-ret int #xD65F03C0)))
-
-(define arm-ldr-post (with arm64-module arm-ldr-post))
-(define arm-ldr-pre (with arm64-module arm-ldr-pre))
-(define arm-str-post (with arm64-module arm-str-post))
-(define arm-str-pre (with arm64-module arm-str-pre))
-(define arm-ldur (with arm64-module arm-ldur))
-(define arm-stur (with arm64-module arm-stur))
-(define arm-ldr (with arm64-module arm-ldr))
-(define arm-str (with arm64-module arm-str))
-(define arm-ldr-lit (with arm64-module arm-ldr-lit))
-(define arm-ldr-reg (with arm64-module arm-ldr-reg))
-(define arm-stp-pre (with arm64-module arm-stp-pre))
-(define arm-ldp-post (with arm64-module arm-ldp-post))
-(define arm-stp (with arm64-module arm-stp))
-(define arm-ldp (with arm64-module arm-ldp))
-(define arm-add-imm (with arm64-module arm-add-imm))
-(define arm-sub-imm (with arm64-module arm-sub-imm))
-(define arm-subs-imm (with arm64-module arm-subs-imm))
-(define arm-cmp-imm (with arm64-module arm-cmp-imm))
-(define arm-add (with arm64-module arm-add))
-(define arm-sub (with arm64-module arm-sub))
-(define arm-adds (with arm64-module arm-adds))
-(define arm-subs (with arm64-module arm-subs))
-(define arm-orr (with arm64-module arm-orr))
-(define arm-cmp (with arm64-module arm-cmp))
-(define arm-mov (with arm64-module arm-mov))
-(define arm-and-low (with arm64-module arm-and-low))
-(define arm-tst-low (with arm64-module arm-tst-low))
-(define arm-ubfx (with arm64-module arm-ubfx))
-(define arm-asr-imm (with arm64-module arm-asr-imm))
-(define arm-lsr-imm (with arm64-module arm-lsr-imm))
-(define arm-strb (with arm64-module arm-strb))
-(define arm-csel (with arm64-module arm-csel))
-(define arm-movz (with arm64-module arm-movz))
-(define arm-movk (with arm64-module arm-movk))
-(define arm-mov-imm64 (with arm64-module arm-mov-imm64))
-(define arm-b (with arm64-module arm-b))
-(define arm-bl (with arm64-module arm-bl))
-(define arm-b-cond (with arm64-module arm-b-cond))
-(define arm-cbz (with arm64-module arm-cbz))
-(define arm-cbnz (with arm64-module arm-cbnz))
-(define arm-br (with arm64-module arm-br))
-(define arm-blr (with arm64-module arm-blr))
-(define arm-ret (with arm64-module arm-ret))
