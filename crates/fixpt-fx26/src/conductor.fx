@@ -13,7 +13,8 @@
          (regcode-helpers
           ((load-input "fx26:regcode-helpers.fx")
            regcode-module compile-module compile-exps-module compile-plan-module
-           compile-lift-module check-resolve-module regcode-exps-module layout-module tables))
+           compile-lift-module check-resolve-module regcode-exps-module layout-module tables
+           regcode-places-module))
          ;; Register code for modules: their products, and with.
          (regcode-modules
           ((load-input "fx26:regcode-modules.fx")
@@ -23,7 +24,7 @@
           ((load-input "fx26:regcode-core.fx")
            regcode-module compile-module compile-lift-module compile-exps-module
            compile-plan-module regcode-exps-module layout-module regcode-helpers
-           regcode-modules))
+           regcode-modules regcode-places-module))
          ;; Register code, its entry: a lambda as register code, or why none.
          (regcode-entry
           ((load-input "fx26:regcode-entry.fx")
