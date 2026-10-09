@@ -34,4 +34,6 @@
           (subr (maxeff (read @globals) (read r)) ((table k v r) k v) v))))
    (val table-set!
         (poly ((r region)) (poly ((k type) (v type))
-          (subr (maxeff (read @globals) (read r) (write r) (alloc r)) ((table k v r) k v) unit))))))
+          (subr (maxeff (read @globals) (read r) (write r) (alloc r)) ((table k v r) k v) unit))))
+   (val table-count
+        (poly ((r region)) (poly ((k type) (v type)) (subr (read r) ((table k v r)) int))))))

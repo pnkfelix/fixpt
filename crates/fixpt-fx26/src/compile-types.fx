@@ -176,4 +176,12 @@
             (val c-lambda-of
                  (subr (maxeff (alloc @k) (read @globals)) (exp) (listof exp @k)))
             (val c-mentions?
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin) (exp symbol) bool))))
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin) (exp symbol) bool))
+            (val c-plain-table (ref c-spans @k))
+            (val c-plain-fx-at (subr (maxeff (read @globals) (read @k)) (int int) bool))
+            (val c-field-at
+                 (subr (maxeff (alloc @k) (read @globals) (read @k)) (int int) int))
+            (val c-genv-now
+                 (subr (maxeff (read (globals c-genv c-genv-count)) (read @k)) () int))
+            (val c-count-exps (subr (read @globals) (exps) int))
+            (val c-count-params (subr (read @globals) (c-params) int))))

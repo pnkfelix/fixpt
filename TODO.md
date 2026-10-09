@@ -1942,4 +1942,7 @@ Phase 1, the types out, one module at a time; phase 2, the conversion.
   modules; a name both a type and a value is imported as both. The
   conductor names its six entry points for Rust and `bootstrap.fx`.
   173.4 M words, from 172.7.
+- Converted since, a commit each, as above (the tools: `to_input3.py`,
+  `mksig.py`, `lib_move.py`, `conductor_add.py`, `conductor_export.py` in
+  the session's scratch space): `compile-inline.fx`.
 

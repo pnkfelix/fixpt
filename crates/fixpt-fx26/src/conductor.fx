@@ -9,7 +9,11 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; The evaluator.
+  (let* (;; Inlining: what the compiler knows of small global procedures.
+         (compile-inline
+          ((load-input "fx26:compile-inline.fx")
+           compile-module compile-plan-module compile-exps-module tables))
+         ;; The evaluator.
          (eval-values ((load-input "fx26:eval-values.fx") check-types-module))
          (eval-prims ((load-input "fx26:eval-prims.fx") eval-values tables check-types-module))
          (eval-core
@@ -19,7 +23,7 @@
          (compile-programs
           ((load-input "fx26:compile-programs.fx")
            compile-module compile-exps-module compile-plan-module compile-twins-module
-           regcode-exps-module compile-inline-module regcode-module check-resolve-module tables
+           regcode-exps-module compile-inline regcode-module check-resolve-module tables
            regcode-helpers-module layout-module))
          ;; The assembler, of the encoders and the generated layouts.
          (native
@@ -34,7 +38,8 @@
              (compile-new-global (with compile-programs compile-new-global))
              (compile-global-cell (with compile-programs compile-global-cell))
              (compile-checked (with compile-programs compile-checked))
-             (compile-program (with compile-programs compile-program)))))
+             (compile-program (with compile-programs compile-program))
+             (compile-note-inline! (with compile-inline compile-note-inline!)))))
 
 (define run-checked (extract front-end-entries run-checked))
 (define run-program (extract front-end-entries run-program))
@@ -45,3 +50,4 @@
 (define compile-global-cell (extract front-end-entries compile-global-cell))
 (define compile-checked (extract front-end-entries compile-checked))
 (define compile-program (extract front-end-entries compile-program))
+(define compile-note-inline! (extract front-end-entries compile-note-inline!))

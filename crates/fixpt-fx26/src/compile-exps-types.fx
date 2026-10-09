@@ -86,4 +86,6 @@
                                (write @k)
                                spin)
                        (c-params exp cenv int code syms c-region)
-                       patches))))
+                       patches))
+            (val c-last-word (ref (listof tword @k) @k))
+            (val c-prev-word (ref (listof tword @k) @k))))

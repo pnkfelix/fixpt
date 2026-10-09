@@ -44,6 +44,8 @@
 ;; What its clients use of it (`compile-programs.fx`).
 ;; The types it names, from the files that define them.
 (define-type c-inlinables (select compile-exps-types c-inlinables))
+;; The types it names, from the files that define them.
+(define-type exps (select compile-types exps))
 (define-type compile-plan-sig
   (moduleof (val c-inline-limit int)
             (val c-inlines (ref c-inlinables @k))
@@ -81,4 +83,8 @@
                                (write @k)
                                spin)
                        (exp)
-                       unit))))
+                       unit))
+            (val c-unrolls-of
+                 (subr (maxeff (read @globals) (read @k)) (symbol) c-inlinables))
+            (val c-special-limit int)
+            (val c-nth (subr (read @globals) (exps int) exp))))
