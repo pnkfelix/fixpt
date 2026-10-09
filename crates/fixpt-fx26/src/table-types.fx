@@ -36,4 +36,15 @@
         (poly ((r region)) (poly ((k type) (v type))
           (subr (maxeff (read @globals) (read r) (write r) (alloc r)) ((table k v r) k v) unit))))
    (val table-count
-        (poly ((r region)) (poly ((k type) (v type)) (subr (read r) ((table k v r)) int))))))
+        (poly ((r region)) (poly ((k type) (v type)) (subr (read r) ((table k v r)) int))))
+   (val table-has?
+        (poly ((r region))
+              (poly ((k type) (v type))
+                    (subr (maxeff (read @globals) (read r))
+                          ((bloblet (fields (subr pure (k) int)
+                                            (subr pure (k k) bool)
+                                            (arrayof (listof (pairof k v r) acyclic) r)
+                                            int)
+                                    r)
+                           k)
+                          bool))))))

@@ -260,4 +260,20 @@
                                        int)
                                @k)
                       @k))
-            (val c-this-loc? (subr (read @globals) (loc loc) bool))))
+            (val c-this-loc? (subr (read @globals) (loc loc) bool))
+            (val c-int-hash (subr pure (int) int))
+            (val c-int=? (subr pure (int int) bool))
+            (val c-lift-count (ref int @k))
+            (val c-place-name (subr (read @globals) (int) string))
+            (val c-extend (subr (alloc @k) (symbol loc cenv) cenv))
+            (val c-global? (subr pure (loc) bool))
+            (val c-bind-params
+                 (subr (maxeff (alloc @k) (read @globals) (read @k)) (c-params syms) syms))
+            (val c-bound-exps
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin) (c-binds) exps))
+            (val c-letrec-slots
+                 (subr (maxeff (alloc @k) (read @globals)) (c-recs cenv int) cenv))
+            (val c-letrec-own
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (c-recs cenv int int int exp int)
+                       cenv))))

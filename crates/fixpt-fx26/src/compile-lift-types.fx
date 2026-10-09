@@ -57,4 +57,44 @@
                        (string)
                        (listof tword @k)))
             (val r-fixed-width-op? (subr pure (string) bool))
-            (val r-eqtable-quick? (subr pure (string) bool))))
+            (val r-eqtable-quick? (subr pure (string) bool))
+            (val c-lifted-at
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin) (exp cenv) int))
+            (val c-lifted-entries
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin) (cenv) cenv))
+            (val c-plan-procs
+                 (ref (bloblet (fields (subr pure (int) int)
+                                       (subr pure (int int) bool)
+                                       (arrayof (listof (pairof int c-planneds @k) acyclic)
+                                                @k)
+                                       int)
+                               @k)
+                      @k))
+            (val c-plan-lifts
+                 (ref (bloblet (fields (subr pure (int) int)
+                                       (subr pure (int int) bool)
+                                       (arrayof (listof (pairof int (listof c-added @k) @k)
+                                                        acyclic)
+                                                @k)
+                                       int)
+                               @k)
+                      @k))
+            (val c-planning (ref bool @k))
+            (val c-lift-plan
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k) spin)
+                       (c-recs exp cenv bool)
+                       (listof c-added @k)))
+            (val c-added-params
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (syms c-params)
+                       c-params))
+            (val c-lift-closures
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k) spin)
+                       (c-recs c-added int)
+                       (listof int @k)))
+            (val c-param-env
+                 (subr (maxeff (alloc @k) (read @globals)) (c-params int cenv) cenv))
+            (val c-inner-env
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (syms cenv cenv int)
+                       cenv))))

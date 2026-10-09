@@ -123,4 +123,35 @@
             (val c-quote-now
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
                        (exp)
-                       (listof wcell @k)))))
+                       (listof wcell @k)))
+            (val c-module-slots
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (c-mvals int)
+                       c-mslots))
+            (val c-module-own
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (symbol cenv c-mslots exp int)
+                       cenv))
+            (val c-form-made (ref (listof c-made @k) @k))
+            (val c-own-of
+                 (subr (maxeff (alloc @k) (read @globals) (read @k)) (c-params syms) syms))
+            (val c-own-scope
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (syms syms cenv)
+                       cenv))
+            (val c-copy-twin
+                 (subr (maxeff (alloc @k) (read @globals) (read @k))
+                       (c-twin c-spec int int)
+                       c-twin))
+            (val c-standard-name
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin) (exp cenv) string))
+            (val c-lambda-word
+                 (subr (maxeff (alloc @k)
+                               (goto @y)
+                               (read @globals)
+                               (read @k)
+                               (read @t)
+                               (write @k)
+                               spin)
+                       (c-params exp cenv syms)
+                       c-closing))))
