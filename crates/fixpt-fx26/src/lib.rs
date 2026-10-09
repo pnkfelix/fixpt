@@ -478,9 +478,10 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 134] = [
+pub const FRONT_END_MODULES: [(&str, &str); 135] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("table-types.fx", TABLE_TYPES),
+    ("table.fx", TABLE),
     ("check-module-rules-types.fx", CHECK_MODULE_RULES_TYPES),
     ("check-modorder-types.fx", CHECK_MODORDER_TYPES),
     ("check-synth-types.fx", CHECK_SYNTH_TYPES),
@@ -629,9 +630,8 @@ pub fn built_in_module(path: &str) -> Option<&'static str> {
 /// The front end's files, by name, in the order [`front_end`] joins them;
 /// [`bootstrap_program`] puts `bootstrap.fx` after them. The module files
 /// built in, [`FRONT_END_MODULES`], are loaded by the first.
-pub const FRONT_END_FILES: [(&str, &str); 3] = [
+pub const FRONT_END_FILES: [(&str, &str); 2] = [
     ("reader.fx", READER),
-    ("table.fx", TABLE),
     ("conductor.fx", CONDUCTOR),
 ];
 

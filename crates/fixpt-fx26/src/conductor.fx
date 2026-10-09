@@ -9,7 +9,9 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; The checker's first file.
+  (let* (;; Hash tables, a module file of no state.
+         (tables (load-module "fx26:table.fx"))
+         ;; The checker's first file.
          (check-types ((load-input "fx26:check-types.fx") tables))
          ;; Effects.
          (check-effects ((load-input "fx26:check-effects.fx") check-types))
