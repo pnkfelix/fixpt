@@ -9,10 +9,14 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; The subtype test.
+  (let* (;; The subtype test's memory.
+         (check-sub-env
+          ((load-input "fx26:check-sub-env.fx")
+           check-types-module check-print-module check-effects-module tables parser-module))
+         ;; The subtype test.
          (check-subtype
           ((load-input "fx26:check-subtype.fx")
-           check-types-module check-resolve-module check-sub-env-module check-env-module
+           check-types-module check-resolve-module check-sub-env check-env-module
            check-print-module check-effects-module check-proving-module check-subst-module
            check-modules-module))
          ;; The checker, expected types: checking against what is wanted.
@@ -51,7 +55,7 @@
            check-types-module check-resolve-module check-effects-module check-binders
            check-env-module check-bounds check-print-module check-data
            check-read-descs-module check-kinds-module check-unions-module check-subtype
-           check-holds-module check-expect check-subst-module check-sub-env-module))
+           check-holds-module check-expect check-subst-module check-sub-env))
          ;; The checker, closing: what a definition leaves solved.
          (check-close
           ((load-input "fx26:check-close.fx")
@@ -90,7 +94,7 @@
            check-infer check-facts check-print-module check-bounds
            check-expect check-errors-module check-effects-module check-mask-module
            check-unions-module check-terminate check-holds-module check-subtype
-           check-calls check-subst-module check-binders check-sub-env-module))
+           check-calls check-subst-module check-binders check-sub-env))
          ;; The checker, a module's order: its items as a letrec*, used only once made.
          (check-modorder
           ((load-input "fx26:check-modorder.fx")
@@ -113,14 +117,14 @@
            check-terminate check-modorder check-unions-module check-modules-module
            check-effects-module check-data check-read-module check-mask-module
            check-calls check-bounds check-holds-module check-subtype
-           check-subst-module check-sc-graphs check-binders check-sub-env-module))
+           check-subst-module check-sc-graphs check-binders check-sub-env))
          ;; The checker, its proofs: lemmas proved.
          (check-proofs
           ((load-input "fx26:check-proofs.fx")
            check-types-module check-resolve-module check-env-module check-calls
            check-generative-module check-read-descs-module check-errors-module check-read-module
            check-subtype check-modules-module check-infer check-terminate
-           check-print-module tables parser-module check-sc-graphs check-sub-env-module))
+           check-print-module tables parser-module check-sc-graphs check-sub-env))
          ;; The checker, its programs: forms checked in order, under redefinition.
          (check-program
           ((load-input "fx26:check-program.fx")

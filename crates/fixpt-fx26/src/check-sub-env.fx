@@ -3,19 +3,68 @@
 ;;; on each side, and conventions, regions and effects by them; the trail of
 ;;; questions open, counted by pair; and the labels of pairs of binders.
 
+;; Its types, those it uses of the files before it, and the signatures of
+;; what it is given.
 ;; Its types (`check-subtype-types.fx`, its file's after it), loaded before the
 ;; module so that they are not among its values; the module names what it
 ;; uses of them.
-(define check-subtype-types (load-module "fx26:check-subtype-types.fx"))
-;; A module (`TODO.md` §34: the front end into modules, a file at a time);
-;; what other files use re-exported after it.
-(define check-sub-env-module (module
+(let* ((check-subtype-types (load-module "fx26:check-subtype-types.fx"))
+       (check-types-types (load-module "fx26:check-types-types.fx"))
+       (check-subst-types (load-module "fx26:check-subst-types.fx"))
+       (table-types (load-module "fx26:table-types.fx"))
+       (check-print-types (load-module "fx26:check-print-types.fx"))
+       (check-effects-types (load-module "fx26:check-effects-types.fx"))
+       (reader-types (load-module "fx26:reader-types.fx")))
+  ;; What it is given: the modules of the files before it that it uses.
+  (lambda ((check-types (select check-types-types check-types-sig))
+           (check-print (select check-print-types check-print-sig))
+           (check-effects (select check-effects-types check-effects-sig))
+           (tables (select table-types tables-sig))
+           (parser (select reader-types parser-sig)))
+    (module
 (define-type k-benv (select check-subtype-types k-benv))
 (define-type k-assumed (select check-subtype-types k-assumed))
 (define-type k-strail (select check-subtype-types k-strail))
 (define-type k-label-entry (select check-subtype-types k-label-entry))
 (define-type k-label-list (select check-subtype-types k-label-list))
 (define-type k-labels (select check-subtype-types k-labels))
+;; The types it uses of the files before it.
+(define a-alloc (with check-types-types a-alloc))
+(define a-app (with check-types-types a-app))
+(define a-await (with check-types-types a-await))
+(define a-comefrom (with check-types-types a-comefrom))
+(define a-goto (with check-types-types a-goto))
+(define a-read (with check-types-types a-read))
+(define a-spin (with check-types-types a-spin))
+(define a-var (with check-types-types a-var))
+(define a-write (with check-types-types a-write))
+(define cv-fx (with check-types-types cv-fx))
+(define cv-var (with check-types-types cv-var))
+(define dc (with check-types-types dc))
+(define de (with check-types-types de))
+(define dr (with check-types-types dr))
+(define-type k-conv (select check-types-types k-conv))
+(define-type k-descs (select check-types-types k-descs))
+(define-type k-eff (select check-types-types k-eff))
+(define-type k-parts (select check-types-types k-parts))
+(define-type k-region (select check-types-types k-region))
+(define-effect kreads (select check-types-types kreads))
+(define-effect kstate (select check-types-types kstate))
+(define r-frozen (with check-types-types r-frozen))
+(define r-var (with check-types-types r-var))
+(define ty-param (with check-types-types ty-param))
+(define ty-select (with check-types-types ty-select))
+(define-effect kmakes (select check-subst-types kmakes))
+(define-type table (select table-types table))
+;; What it uses of the modules it is given.
+(define k-get (with check-types k-get))
+(define k-length (with check-types k-length))
+(define k-conv=? (with check-print k-conv=?))
+(define k-region=? (with check-effects k-region=?))
+(define make-table (with tables make-table))
+(define table-ref (with tables table-ref))
+(define table-set! (with tables table-set!))
+(define drop (with parser drop))
 
 ;; Base `x` below base `y`: the same, or an `i32` or `u32`, the fixnum it
 ;; stands for, below `int`. As the Rust checker's rule.
@@ -24,7 +73,6 @@
     (or (symbol=? x y)
         (and (string=? (symbol->string y) "int")
              (or (string=? (symbol->string x) "i32") (string=? (symbol->string x) "u32"))))))
-
 
 (define k-bool=? (subr pure (bool bool) bool) (lambda (x y) (if x y (not y))))
 (define k-part-find (subr kreads (k-parts symbol) int)
@@ -186,23 +234,4 @@
         (if (< found 0)
             found
             (let ((l (- -1000 (k-length (get labels)))))
-              (begin (set labels (cons (product (1 a) (2 b) (3 i) (4 l)) (get labels))) l)))))))))
-
-(define k-base-below? (with check-sub-env-module k-base-below?))
-(define k-benv-effect (with check-sub-env-module k-benv-effect))
-(define k-benv-frozen-le? (with check-sub-env-module k-benv-frozen-le?))
-(define k-benv-region=? (with check-sub-env-module k-benv-region=?))
-(define k-benv-set (with check-sub-env-module k-benv-set))
-(define k-benv-var=? (with check-sub-env-module k-benv-var=?))
-(define k-bool=? (with check-sub-env-module k-bool=?))
-(define k-conv-same? (with check-sub-env-module k-conv-same?))
-(define k-conv-sub? (with check-sub-env-module k-conv-sub?))
-(define k-label (with check-sub-env-module k-label))
-(define k-label-of? (with check-sub-env-module k-label-of?))
-(define k-param-is? (with check-sub-env-module k-param-is?))
-(define k-part-find (with check-sub-env-module k-part-find))
-(define k-restore (with check-sub-env-module k-restore))
-(define k-select-is? (with check-sub-env-module k-select-is?))
-(define k-strail-drop (with check-sub-env-module k-strail-drop))
-(define k-strail-has? (with check-sub-env-module k-strail-has?))
-(define k-strail-push (with check-sub-env-module k-strail-push))
+              (begin (set labels (cons (product (1 a) (2 b) (3 i) (4 l)) (get labels))) l))))))))))
