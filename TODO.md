@@ -1983,6 +1983,11 @@ Phase 1, the types out, one module at a time; phase 2, the conversion.
   counted by pair, `k-strail-count`, the trail looked along only where a
   pair is counted). 1.46 s to 1.20 s. Left: `k-has-id?` (9%), and the
   Rust checker, whose time grew too (630 to 800 ms).
+- Also for that pass: both checkers' time on the front end rises with each
+  checker file converted (Rust 0.63 s before §68, 1.11 s at
+  `check-binders.fx`; FX 1.20 s after the three walks fixed, 1.37 s):
+  profile each once the files stop moving (a sample mixes the FX phases
+  in; the FX profile probe is exact).
 - Left for a pass once all are converted: effects written naming globals
   that are now a module's imports, `(read (globals exp-end exp-start))` and
   the like (`regcode.fx`, `compile-programs.fx`): checked, as they say more
