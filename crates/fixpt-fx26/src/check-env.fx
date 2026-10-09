@@ -49,6 +49,10 @@
 (define k-env (ref (table symbol k-stack @t) @t) (new (make-table symbol-hash symbol=?)))
 (define k-trail (ref k-names @t) (new nil))
 (define k-depth (ref int @t) (new 0))
+;; Each name's bindings, innermost first: the depth each was made at, so
+;; that whether one is newer than a mark is one look (`k-lookup`), not a
+;; walk back along the trail.
+(define k-depths (ref (table symbol k-stack @t) @t) (new (make-table symbol-hash symbol=?)))
 (define k-known k-flags (new (make-table symbol-hash symbol=?)))
 ;; Whether each binding in `k-env` is a global: one a top-level definition
 ;; made. Naming one reads it, `(read (globals g))`, when
@@ -88,12 +92,10 @@
 ;; ones; -1 otherwise. And the standard description names.
 (define k-hide-mark (ref int @t) (new -1))
 (define k-std-dscope (ref k-scope @t) (new nil))
-;; How many of the newest `n` names bound, `ns`, are `s`.
-(define k-bound-since (subr (maxeff (read @globals) (read @t) spin) (k-names symbol int) int)
-  (lambda (ns s n)
-    (cond ((or (null? ns) (<= n 0)) 0)
-          ((symbol=? (car ns) s) (+ 1 (k-bound-since (cdr ns) s (- n 1))))
-          (else (k-bound-since (cdr ns) s (- n 1))))))
+;; Whether the innermost binding of `s` was made at depth `mark` or after.
+(define k-bound-since? (subr (maxeff (read @globals) (read @t) spin) (symbol int) bool)
+  (lambda (s mark)
+    (let ((ds (table-ref (get k-depths) s nil))) (and (not (null? ds)) (>= (car ds) mark)))))
 ;; The type a test narrowed binding `d` of `s` to (the innermost), or `t`.
 (define k-narrowed-of (subr (read @globals) (k-narrows symbol int int) int)
   (lambda (ns s d t)
@@ -114,7 +116,7 @@
   (lambda (s)
     (let ((st (table-ref (get k-env) s nil)) (mark (get k-hide-mark)))
       (cond ((or (null? st) (not (null? (k-broken-why s)))) -1)
-            ((or (< mark 0) (> (k-bound-since (get k-trail) s (- (get k-depth) mark)) 0)
+            ((or (< mark 0) (k-bound-since? s mark)
                  (k-shared-name? s))
              (k-narrowed-of (get k-narrowed) s (k-length st) (car st)))
             (else (k-std-type s))))))
@@ -171,10 +173,16 @@
 (define k-push-flag (subr (maxeff kstate spin) (k-flags symbol) unit)
   (lambda (flags s)
     (table-set! (get flags) s (the (listof bool acyclic) (cons #f (table-ref (get flags) s nil))))))
+;; The depth of a new innermost binding of `s`, the next.
+(define k-push-depth (subr kstate (symbol) unit)
+  (lambda (s)
+    (let ((ds (table-ref (get k-depths) s nil)))
+      (table-set! (get k-depths) s (the k-stack (cons (get k-depth) ds))))))
 (define k-bind (subr (maxeff kstate spin) (symbol int) unit)
   (lambda (s t)
     (begin
       (table-set! (get k-env) s (cons t (table-ref (get k-env) s nil)))
+      (k-push-depth s)
       (k-push-flag k-known s)
       (k-push-flag k-global s)
       (k-push-flag k-fixed s)
@@ -188,6 +196,7 @@
         (let ((s (car (get k-trail))))
           (begin
             (table-set! (get k-env) s (cdr (table-ref (get k-env) s nil)))
+            (table-set! (get k-depths) s (cdr (table-ref (get k-depths) s nil)))
             (table-set! (get k-known) s (cdr (table-ref (get k-known) s nil)))
             (table-set! (get k-global) s (cdr (table-ref (get k-global) s nil)))
             (table-set! (get k-fixed) s (cdr (table-ref (get k-fixed) s nil)))
@@ -290,13 +299,30 @@
   (lambda (e) (cond ((null? e) 0) ((k-reads-only? e) 1) ((k-disrupts? e) 3) (else 2))))
 
 (define k-with-vals (ref k-with-list @t) (new nil))
+;; The same, by where each starts: a converted file's imports are `with`s,
+;; hundreds of them, and each is looked up (`k-with-names`).
+(define k-with-index (ref (table int k-with-list @t) @t)
+  (new (make-table (lambda ((n int)) n) (lambda ((m int) (n int)) (= m n)))))
 (define k-with-names-in (subr (maxeff (read @globals) (read @t)) (k-with-list int int) k-names)
   (lambda (ws a b)
     (cond ((null? ws) nil)
           ((and (= (extract (car ws) 1) a) (= (extract (car ws) 2) b)) (extract (car ws) 3))
           (else (k-with-names-in (cdr ws) a b)))))
 (define k-with-names (subr (maxeff (read @globals) (read @t)) (int int) k-names)
-  (lambda (a b) (k-with-names-in (get k-with-vals) a b)))
+  (lambda (a b) (k-with-names-in (table-ref (get k-with-index) a nil) a b)))
+;; Note `with` `w`, in the list and by where it starts.
+(define k-note-with (subr kstate (k-with-noted) unit)
+  (lambda (w)
+    (let ((a (extract w 1)))
+      (begin (set k-with-vals (the k-with-list (cons w (get k-with-vals))))
+             (table-set! (get k-with-index) a
+                         (the k-with-list (cons w (table-ref (get k-with-index) a nil))))))))
+;; Forget the `with`s noted.
+(define k-forget-withs (subr (maxeff (read @globals) (write @t) (alloc @t)) () unit)
+  (lambda ()
+    (begin (set k-with-vals nil)
+           (set k-with-index
+                (make-table (lambda ((n int)) n) (lambda ((m int) (n int)) (= m n)))))))
 (define k-hazard-mods (ref k-hazard-list @t) (new nil))
 (define k-hazard-names-in (subr (read @globals) (k-hazard-list symbol) k-names)
   (lambda (hs m)
@@ -309,8 +335,12 @@
   (lambda (rs) (set k-reshapes rs)))
 ;; For a driver: what `with`s another checker saw, as `k-with-vals` keeps
 ;; them, for a compiler given that checker's facts.
-(define checked-withs! (subr (maxeff (read @globals) (write @t)) (k-with-list) unit)
-  (lambda (ws) (set k-with-vals ws)))
+(define checked-withs! (subr (maxeff kstate spin) (k-with-list) unit)
+  (lambda (ws)
+    (letrec ((each (subr kstate (k-with-list) unit)
+                     (lambda (ws)
+                       (if (null? ws) #u (begin (k-note-with (car ws)) (each (cdr ws)))))))
+      (begin (k-forget-withs) (each (the k-with-list (reverse ws)))))))
 ;; The type variables made for modules' abstract types as each module was
 ;; bound (`k-name-module`): not forgotten, but kept from leaving.
 (define k-module-vars (ref k-ids @t) (new nil))
@@ -403,6 +433,9 @@
 (define-type k-with-list (select check-env-module k-with-list))
 (define k-with-vals (with check-env-module k-with-vals))
 (define k-with-names (with check-env-module k-with-names))
+(define k-note-with (with check-env-module k-note-with))
+(define k-forget-withs (with check-env-module k-forget-withs))
+(define k-depths (with check-env-module k-depths))
 (define-type k-hazard-list (select check-env-module k-hazard-list))
 (define k-hazard-mods (with check-env-module k-hazard-mods))
 (define k-hazard-names-in (with check-env-module k-hazard-names-in))

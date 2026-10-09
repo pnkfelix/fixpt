@@ -1952,6 +1952,17 @@ Phase 1, the types out, one module at a time; phase 2, the conversion.
   `regcode.fx` (two definitions of `compile-lift.fx` outside its module
   moved into it first), `compile-plan.fx`, `compile-exps.fx` (its state
   split out first as `compile-state.fx`, to stay under 1000 lines).
+- The FX checker's cost of converted files (2026-10-09): checking the
+  front end had grown from about 1.0 s to 1.46 s over phase 2. Profiled
+  (`probe_profile_check`, 4.8 G cells to 7.2 G), three walks along lists
+  that converted files make long: a name's lookup inside a loaded file
+  walked the bindings made since it began (`k-bound-since`, now each
+  binding's depth kept, `k-depths`); a `with`'s names were found along a
+  list of every `with` (now by where it starts too, `k-with-index`); and a
+  subtype question looked along its trail of every pair compared (now
+  counted by pair, `k-strail-count`, the trail looked along only where a
+  pair is counted). 1.46 s to 1.20 s. Left: `k-has-id?` (9%), and the
+  Rust checker, whose time grew too (630 to 800 ms).
 - Left for a pass once all are converted: effects written naming globals
   that are now a module's imports, `(read (globals exp-end exp-start))` and
   the like (`regcode.fx`, `compile-programs.fx`): checked, as they say more

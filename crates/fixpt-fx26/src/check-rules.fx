@@ -945,10 +945,9 @@
             (tagcase (k-get mt)
               (ty-module (abs ds vs)
                 (let* ((used (k-with-used vs (k-free-vars body) 0))
-                       (noted (set k-with-vals
-                                   (cons (product (1 a) (2 b) (3 (k-comp-names (extract used 1)))
-                                                  (4 (extract used 2)))
-                                         (get k-with-vals))))
+                       (noted (k-note-with
+                                (product (1 a) (2 b) (3 (k-comp-names (extract used 1)))
+                                         (4 (extract used 2)))))
                        (naming (k-naming-effect m mt))
                        (saved (k-mark))
                        (bound (k-bind-parts (extract used 1)))

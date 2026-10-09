@@ -218,6 +218,7 @@
       (set k-known (make-table symbol-hash symbol=?))
       (set k-global (make-table symbol-hash symbol=?))
       (set k-recursive nil) (set k-std nil) (set k-env (make-table symbol-hash symbol=?))
+      (set k-depths (make-table symbol-hash symbol=?))
       (set k-std-table (make-table symbol-hash symbol=?))
       (set k-trail nil) (set k-depth 0))))
 ;; Forget the lemmas, and the facts learned of data and sizes.
@@ -239,7 +240,7 @@
       (set k-gens nil) (set k-ngens 0) (set k-transparent nil) (set k-inside nil)
       (set k-conversions nil) (k-reset-facts)
       (set k-broken nil) (set k-defs nil) (set k-runs nil) (set k-last-uses nil)
-      (set k-with-vals nil) (set k-module-vars nil) (set k-select-map nil) (set k-reshapes nil)
+      (k-forget-withs) (set k-module-vars nil) (set k-select-map nil) (set k-reshapes nil)
       (set k-hide-mark -1) (set k-param-map nil) (set k-effect-selects nil)
       (set k-operator (product (1 '||) (2 -1) (3 -1)))
       (k-basic "int") (k-basic "bool") (k-basic "string") (k-basic "unit") (k-basic "char")

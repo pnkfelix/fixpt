@@ -150,16 +150,44 @@
                       (else y (car ds))))
                  (rest (k-benv-eargs env (cdr ds))))
             (the k-descs (cons d rest)))))))
-(define k-strail-has? (subr kreads (k-assumed int int k-benv k-benv) bool)
+;; How many entries of the trails of the questions open name each pair of
+;; nodes (by `k-strail-key`, which two pairs may share): a pair named by
+;; none is not assumed, known at once, where looking along the trail grew
+;; with every pair a question compared (a module against its signature).
+(define k-strail-count (ref (table int int @t) @t)
+  (new (make-table (lambda ((n int)) n) (lambda ((m int) (n int)) (= m n)))))
+(define k-strail-key (subr pure (int int) int) (lambda (a b) (+ (* a 65599) b)))
+(define k-strail-bump (subr kstate (int int int) unit)
+  (lambda (a b d)
+    (let ((k (k-strail-key a b)))
+      (table-set! (get k-strail-count) k (+ d (table-ref (get k-strail-count) k 0))))))
+;; `a ≤ b` assumed, in `ea` and `eb`.
+(define k-strail-push (subr kstate (k-strail int int k-benv k-benv) unit)
+  (lambda (trail a b ea eb)
+    (begin (k-strail-bump a b 1)
+           (set trail (cons (product (1 a) (2 b) (3 ea) (4 eb)) (get trail))))))
+;; The entries of `ps` newer than `st` no longer counted.
+(define k-strail-drop (subr (maxeff kstate spin) (k-assumed k-assumed) unit)
+  (lambda (ps st)
+    (if (or (null? ps) (eq? ps st))
+        #u
+        (begin (k-strail-bump (extract (car ps) 1) (extract (car ps) 2) -1)
+               (k-strail-drop (cdr ps) st)))))
+(define k-strail-in? (subr kreads (k-assumed int int k-benv k-benv) bool)
   (lambda (ps a b ea eb)
     (and (not (null? ps))
          (or (let ((p (car ps)))
                (and (= (extract p 1) a) (= (extract p 2) b)
                     (k-benv=? (extract p 3) ea) (k-benv=? (extract p 4) eb)))
-             (k-strail-has? (cdr ps) a b ea eb)))))
+             (k-strail-in? (cdr ps) a b ea eb)))))
+(define k-strail-has? (subr kreads (k-assumed int int k-benv k-benv) bool)
+  (lambda (ps a b ea eb)
+    (and (> (table-ref (get k-strail-count) (k-strail-key a b) 0) 0)
+         (k-strail-in? ps a b ea eb))))
 ;; Put a subtype question's memory back as it was: trail `st`, labels `sl`.
-(define k-restore (subr kstate (k-strail k-labels k-assumed k-label-list) unit)
-  (lambda (trail labels st sl) (begin (set trail st) (set labels sl))))
+(define k-restore (subr (maxeff kstate spin) (k-strail k-labels k-assumed k-label-list) unit)
+  (lambda (trail labels st sl)
+    (begin (k-strail-drop (get trail) st) (set trail st) (set labels sl))))
 ;; Whether label entry `x` is for the binders at position `i` of nodes `a`
 ;; and `b`.
 (define k-label-of? (subr pure (k-label-entry int int int) bool)
@@ -261,7 +289,7 @@
                   (or (k-sub-rules a b ea eb trail labels)
                       (begin
                         (k-restore trail labels st sl)
-                        (set trail (cons (product (1 ra) (2 rb) (3 ea) (4 eb)) (get trail)))
+                        (k-strail-push trail ra rb ea eb)
                         (let ((ls (the (listof k-lemma acyclic) (reverse (get k-lemmas)))))
                           (k-sub-by-lemmas (k-lemma-instances ls ra rb) ea eb trail labels))))))))))
   (k-sub-by-lemmas (subr (maxeff kstate spin) (k-instances k-benv k-benv k-strail k-labels) bool)
@@ -277,10 +305,12 @@
           (and (k-sub (car (car hs)) (cdr (car hs)) ea eb trail labels)
                (k-sub-hyps (cdr hs) ea eb trail labels)))))
   ;; `a ≤ b`, a question of its own.
+  ;; Its trail's entries no longer counted once it is answered.
   (k-subtype (subr (maxeff kstate spin) (int int) bool)
     (lambda (a b)
-      (k-sub a b (the k-benv nil) (the k-benv nil)
-             (the k-strail (new nil)) (the k-labels (new nil)))))
+      (let* ((trail (the k-strail (new nil)))
+             (r (k-sub a b (the k-benv nil) (the k-benv nil) trail (the k-labels (new nil)))))
+        (begin (k-strail-drop (get trail) nil) r))))
   (k-same-ty? (subr (maxeff kstate spin) (int int) bool)
     (lambda (x y) (and (k-subtype x y) (k-subtype y x))))
   ;; Each lemma of `ls` that fits `a` and `b`: its hypotheses, instantiated.
@@ -418,7 +448,7 @@
           ((k-strail-has? (get trail) a b ea eb) #t)
           (else
            (begin
-             (set trail (cons (product (1 a) (2 b) (3 ea) (4 eb)) (get trail)))
+             (k-strail-push trail a b ea eb)
              (k-sub-opened a b ea eb trail labels)))))))
   ;; `a ≤ b`, assumed: a generative type open here is its representation,
   ;; unless both are the same one or `a` is `void`.

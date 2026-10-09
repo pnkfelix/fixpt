@@ -907,7 +907,7 @@
     (prompt k-tag
       (begin (set k-extracts nil)
              (set k-effect-notes nil)
-             (set k-with-vals nil)
+             (k-forget-withs)
              (set k-reshapes nil)
              (set k-runs nil)
              (k-ahead forms)
