@@ -76,4 +76,5 @@
                                (write @t)
                                spin)
                        (syn)
-                       k-conv))))
+                       k-conv))
+            (val k-knots (ref (listof k-family-knot acyclic) @t))))

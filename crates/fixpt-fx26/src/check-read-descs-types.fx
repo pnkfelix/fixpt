@@ -101,4 +101,14 @@
             (val k-lam
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (k-binders k-desc)
-                       int))))
+                       int))
+            (val k-parse-d
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (syn)
+                       k-desc))))
