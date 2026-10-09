@@ -1,9 +1,35 @@
 ;;; What a test shows about sizes, when it holds and when not: the Rust
 ;;; checker's `test_facts`, rule for rule.
 
-;; A module (`TODO.md` §34: the front end into modules, a file at a time);
-;; what `check-synth.fx` uses re-exported after it.
-(define test-facts (module
+;; Its types, those it uses of the files before it, and the signatures of
+;; what it is given.
+(let* ((check-test-facts-types (load-module "fx26:check-test-facts-types.fx"))
+       (check-types-types (load-module "fx26:check-types-types.fx"))
+       (check-env-types (load-module "fx26:check-env-types.fx"))
+       (check-infer-types (load-module "fx26:check-infer-types.fx"))
+       (check-calls-types (load-module "fx26:check-calls-types.fx")))
+  ;; What it is given: the modules of the files before it that it uses.
+  (lambda ((check-env (select check-env-types check-env-sig))
+           (check-test-facts (select check-test-facts-types check-test-facts-sig))
+           (check-infer (select check-infer-types check-infer-sig))
+           (check-calls (select check-calls-types check-calls-sig)))
+    (module
+
+;; The types it uses of the files before it.
+(define-type k-branch-facts (select check-test-facts-types k-branch-facts))
+(define-type k-fact-list (select check-test-facts-types k-fact-list))
+(define-effect kreads (select check-types-types kreads))
+(define-type kx (select check-types-types kx))
+(define x-app (with check-types-types x-app))
+(define x-const (with check-types-types x-const))
+(define x-if (with check-types-types x-if))
+;; What it uses of the modules it is given.
+(define k-bool (with check-env k-bool))
+(define k-branch-facts-of (with check-test-facts k-branch-facts-of))
+(define k-latent-facts (with check-test-facts k-latent-facts))
+(define k-sc-one-arg? (with check-infer k-sc-one-arg?))
+(define k-std-op (with check-calls k-std-op))
+
   ;; Whether `x` is the literal boolean `v`.
   (define k-bool-lit? (subr (read @globals) (kx bool) bool)
     (lambda (x v) (tagcase x (x-const (t n a b) (and (= t k-bool) (= n (if v 1 0)))) (else y #f))))
@@ -40,8 +66,4 @@
   ;; `size_facts.extend`.
   (define k-with-facts (subr (read @globals) (k-fact-list k-fact-list) k-fact-list)
     (lambda (fs acc)
-      (if (null? fs) acc (k-with-facts (cdr fs) (the k-fact-list (cons (car fs) acc))))))))
-
-(define k-test-facts (with test-facts k-test-facts))
-(define k-bool-lit? (with test-facts k-bool-lit?))
-(define k-with-facts (with test-facts k-with-facts))
+      (if (null? fs) acc (k-with-facts (cdr fs) (the k-fact-list (cons (car fs) acc)))))))))

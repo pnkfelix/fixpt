@@ -9,11 +9,15 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; The checker, synthesis: calls, their arguments and type binders.
+  (let* (;; The checker, facts: what the compiler is told.
+         (check-facts
+          ((load-input "fx26:check-facts.fx")
+           check-env-module check-test-facts-module check-infer-module check-calls-module))
+         ;; The checker, synthesis: calls, their arguments and type binders.
          (check-synth
           ((load-input "fx26:check-synth.fx")
            check-types-module check-test-facts-module check-resolve-module check-env-module
-           check-infer-module test-facts check-print-module check-bounds-module
+           check-infer-module check-facts check-print-module check-bounds-module
            check-expect-module check-errors-module check-effects-module check-mask-module
            check-unions-module check-terminate-module check-holds-module check-subtype-module
            check-calls-module check-subst-module))

@@ -50,4 +50,9 @@
             (val k-latent-cert
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (kx int) k-named))
             (val k-length-test
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (kx) k-cert-lens))))
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (kx) k-cert-lens))
+            (val k-branch-facts-of (subr pure (k-fact-list k-fact-list) k-branch-facts))
+            (val k-latent-facts
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
+                       (kx)
+                       k-branch-facts))))

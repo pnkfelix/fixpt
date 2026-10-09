@@ -1969,7 +1969,8 @@ Phase 1, the types out, one module at a time; phase 2, the conversion.
   which `reader.fx` names at top level, from `parser-module`, typed by
   `parser-sig` in `reader-types.fx`), `check-proofs.fx`,
   `check-rules.fx` (its size debt: 1346 lines, its imports),
-  `check-module-rules.fx`, `check-modorder.fx`, `check-synth.fx`.
+  `check-module-rules.fx`, `check-modorder.fx`, `check-synth.fx`,
+  `check-facts.fx`.
 - The FX checker's cost of converted files (2026-10-09): checking the
   front end had grown from about 1.0 s to 1.46 s over phase 2. Profiled
   (`probe_profile_check`, 4.8 G cells to 7.2 G), three walks along lists
