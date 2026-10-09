@@ -14,6 +14,7 @@
        (layout-types (load-module "fx26:layout-types.fx"))
        (check-resolve-types (load-module "fx26:check-resolve-types.fx"))
        (check-program-types (load-module "fx26:check-program-types.fx"))
+       (check-proofs-types (load-module "fx26:check-proofs-types.fx"))
        (standard-types (load-module "fx26:standard-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((compile (select compile-types compile-sig))
@@ -21,7 +22,8 @@
            (check-resolve (select check-resolve-types check-resolve-sig))
            (check-program (select check-program-types check-program-sig))
            (tables (select table-types tables-sig))
-           (standard (select standard-types standard-sig)))
+           (standard (select standard-types standard-sig))
+           (check-proofs (select check-proofs-types check-proofs-sig)))
     (module
 (define-type c-added (select compile-lift-types c-added))
 (define-type c-calls (select compile-lift-types c-calls))
@@ -117,7 +119,7 @@
 (define routine-withmark (with layout routine-withmark))
 (define exp-end (with check-resolve exp-end))
 (define exp-start (with check-resolve exp-start))
-(define k-syms=? (with check-program k-syms=?))
+(define k-syms=? (with check-proofs k-syms=?))
 (define make-table (with tables make-table))
 (define table-has? (with tables table-has?))
 (define table-ref (with tables table-ref))

@@ -20,7 +20,8 @@
        (parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
        (table-types (load-module "fx26:table-types.fx"))
        (check-resolve-types (load-module "fx26:check-resolve-types.fx"))
-       (check-program-types (load-module "fx26:check-program-types.fx")))
+       (check-program-types (load-module "fx26:check-program-types.fx"))
+       (check-proofs-types (load-module "fx26:check-proofs-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((compile (select compile-types compile-sig))
            (compile-lift (select compile-lift-types compile-lift-sig))
@@ -28,7 +29,8 @@
            (check-resolve (select check-resolve-types check-resolve-sig))
            (check-program (select check-program-types check-program-sig))
            (tables (select table-types tables-sig))
-           (compile-state (select compile-state-types compile-state-sig)))
+           (compile-state (select compile-state-types compile-state-sig))
+           (check-proofs (select check-proofs-types check-proofs-sig)))
     (module
 (define-type c-special (select compile-plan-types c-special))
 (define-type c-specializables (select compile-plan-types c-specializables))
@@ -142,7 +144,7 @@
 (define c-word-name (with compile-state c-word-name))
 (define exp-end (with check-resolve exp-end))
 (define exp-start (with check-resolve exp-start))
-(define k-syms=? (with check-program k-syms=?))
+(define k-syms=? (with check-proofs k-syms=?))
 (define make-table (with tables make-table))
 (define symbol-hash (with tables symbol-hash))
 (define table-has? (with tables table-has?))

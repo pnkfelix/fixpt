@@ -21,12 +21,12 @@
          (compile-lift
           ((load-input "fx26:compile-lift.fx")
            compile layout check-resolve-module check-program-module tables
-           standard))
+           standard check-proofs-module))
          ;; The compiler, its state: words being made, members, twins, quotations.
          (compile-state
           ((load-input "fx26:compile-state.fx")
            compile compile-lift layout check-resolve-module
-           check-program-module))
+           check-program-module check-proofs-module))
          ;; The compiler, its expressions: the recursive group over trees.
          (compile-exps
           ((load-input "fx26:compile-exps.fx")
@@ -36,7 +36,7 @@
          (compile-plan
           ((load-input "fx26:compile-plan.fx")
            compile compile-lift compile-exps check-resolve-module
-           check-program-module tables compile-state))
+           check-program-module tables compile-state check-proofs-module))
          ;; Register code: its state, the constants known, and the twins made.
          (regcode
           ((load-input "fx26:regcode.fx")

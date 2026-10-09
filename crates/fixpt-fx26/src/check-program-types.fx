@@ -34,7 +34,4 @@
 
 ;; What its clients use of it (`compile-plan.fx`).
 (define-type check-program-sig
-  (moduleof (val k-syms=?
-                 (subr (read @globals)
-                       ((listof symbol acyclic) (listof symbol acyclic))
-                       bool))))
+  (moduleof ))
