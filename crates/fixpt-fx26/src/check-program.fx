@@ -694,14 +694,14 @@
             ": make its state in a `lambda` it gives, which each caller applies")))
 ;; `(define name init)`, of no type written: its line. A loaded file's, made
 ;; once for all its loads, must be pure but for reading globals, and has
-;; none.
-(define k-define-untyped (subr (maxeff checks spin) (symbol exp) k-out)
-  (lambda (name init)
+;; none; the definition is at `a`..`b`, the form that loads it.
+(define k-define-untyped (subr (maxeff checks spin) (symbol exp int int) k-out)
+  (lambda (name init a b)
     (let* ((x (k-resolve-exp init))
            (u (set k-last-uses (k-free-into x nil nil)))
            (r (k-synth x)))
       (begin (if (and (k-shared-name? name) (not (k-reads-globals-only? (extract r 2))))
-                 (k-fail (k-shared-impure (extract r 2)) (k-start x) (k-end x))
+                 (k-fail (k-shared-impure (extract r 2)) a b)
                  #u)
              (k-bind-named-global name (extract r 1))
              (if (k-lambda? x) (k-note-known name 0) #u)
@@ -716,7 +716,7 @@
     (the k-out (tagcase form
                  (t-define (name ty init a b)
                    (if (null? ty)
-                       (k-define-untyped name init)
+                       (k-define-untyped name init a b)
                        (k-define-typed name (car ty) (cdr ty) init)))
                  (t-define-rec (bs a b) (k-define-rec bs))
                  (t-exp (e)

@@ -1461,7 +1461,7 @@ impl Checker {
                 let Datum::Str(path) = &path.datum else {
                     return Err(FxError::at(path.span, format!("`({loader} \"file\")`: the file's name, as a string")));
                 };
-                self.parse_load(span, path, input)
+                self.parse_load(span, items[0].span, path, input)
             }
             "with" => {
                 let [_, m, body @ ..] = &items[..] else {
@@ -2180,7 +2180,11 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     /// `hoisted`); every load is that global. Making it must be pure: a
     /// file's state is made by applying what it makes, so that two loads
     /// that are one cannot be told apart.
-    fn parse_load(&mut self, span: fixpt_read::Span, path: &str, input: bool) -> R<ExpId> {
+    ///
+    /// Each expression made here has a place of its own, as the compilers'
+    /// facts are found by place: the use the form's, the file's module the
+    /// whole file, and a `load-input`'s `input` its keyword, `head`.
+    fn parse_load(&mut self, span: fixpt_read::Span, head: fixpt_read::Span, path: &str, input: bool) -> R<ExpId> {
         let at = match &self.base_dir {
             Some(d) if std::path::Path::new(path).is_relative() && crate::built_in_module(path).is_none() => d.join(path),
             _ => std::path::PathBuf::from(path),
@@ -2231,7 +2235,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         }
         // A `load-input`'s value: its module's one item, `input`.
         let item = self.interner.intern("input");
-        let body = self.arena.exp(span, Exp::Var(item));
+        let body = self.arena.exp(head, Exp::Var(item));
         Ok(self.arena.exp(span, Exp::With { module: name, body }))
     }
 
@@ -2275,7 +2279,9 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         self.hidden = outer;
         let (params, items) = r.map_err(|e| at_file(e, self))?;
         self.defined_twice(span, &items)?;
-        let e = self.arena.exp(span, Exp::Module(items));
+        // At the whole file: no other expression is there.
+        let whole = fixpt_read::Span::new(file, 0, text.len() as u32);
+        let e = self.arena.exp(whole, Exp::Module(items));
         self.loaded.insert(e, (path.to_string(), text.clone(), file));
         // A file of parameters, `(module-parameters ((name kind) …))` first:
         // a `plambda` over them of a `lambda` of none making the module, so
@@ -2283,8 +2289,8 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         Ok(match params {
             None => e,
             Some(binders) => {
-                let made = self.arena.exp(span, Exp::Lambda { params: Vec::new(), body: e });
-                self.arena.exp(span, Exp::PLambda { binders, body: made })
+                let made = self.arena.exp(whole, Exp::Lambda { params: Vec::new(), body: e });
+                self.arena.exp(whole, Exp::PLambda { binders, body: made })
             }
         })
     }

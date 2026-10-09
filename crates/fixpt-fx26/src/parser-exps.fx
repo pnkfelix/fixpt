@@ -497,7 +497,7 @@
                 (usage (str3 "`(" (if input? "load-input" "load-module") " \"file\")`")))
            (begin (arity items 2 usage a b)
                   (if (syn-string? (nth items 1))
-                      (parse-loaded (syn-string (nth items 1)) input? a b)
+                      (parse-loaded (syn-string (nth items 1)) input? (car items) a b)
                       (pfail (string-append usage ": the file's name, as a string")
                              (nth items 1))))))
         ((with)
@@ -879,8 +879,11 @@
   ;; the hidden global every load of its path is (`TODO.md` §68), the
   ;; first defining it, as the file loaded (`parse-load-file`), before the
   ;; form that loads it (`shared-pending`); a `load-input`'s, its one item.
-  (parse-loaded (subr (maxeff parses spin) (string bool int int) exp)
-    (lambda (path input? a b)
+  ;; Each expression made has a place of its own, as the compilers' facts
+  ;; are found by place: the use the form's, the file's module the whole
+  ;; file, and a `load-input`'s `input` its keyword, `head`.
+  (parse-loaded (subr (maxeff parses spin) (string bool syn int int) exp)
+    (lambda (path input? head a b)
       (let ((f (loaded-at (get loaded) a)))
         (if (null? f)
             (e-module (loaded-error (str3 "cannot read `" path "`: it was not read")) a b)
@@ -894,7 +897,9 @@
                              (set shared-pending
                                   (cons (t-define name (the syns-a nil) x a b)
                                         (get shared-pending))))))
-                (if input? (e-with name (e-var 'input a b) a b) (e-var name a b))))))))
+                (if input?
+                    (e-with name (e-var 'input (syn-start head) (syn-end head)) a b)
+                    (e-var name a b))))))))
   ;; File `f`, loaded at `a`..`b` as `path`: the module, its items after its
   ;; mark (`loaded-made` of it, for a file of parameters; for a
   ;; `load-input`, `input?`, its one form, the item `input`); or why it
@@ -905,17 +910,19 @@
           (e-module (loaded-error (extract f 3)) a b)
           (let* ((base (extract f 2))
                  (forms (syns-moved (extract f 5) base))
+                 ;; The whole file, where no other expression is.
+                 (end (+ base (string-length (extract f 6))))
                  ;; Its parameters and items, as a form's, out of the
                  ;; prompt that catches what is wrong in them.
                  (made (lambda ()
                          (if input?
                              (t-exp (e-module (cons (loaded-mark base path nil)
                                                     (parse-module-items (input-items forms a b)))
-                                              a b))
+                                              base end))
                              (let* ((ps (loaded-params forms))
                                     (items (parse-module-items (if (null? ps) forms (cdr forms))))
-                                    (m (e-module (cons (loaded-mark base path ps) items) a b)))
-                               (t-exp (loaded-made ps m a b))))))
+                                    (m (e-module (cons (loaded-mark base path ps) items) base end)))
+                               (t-exp (loaded-made ps m base end))))))
                  (r (prompt parse-tag (p-ok (cons (made) nil)) (lambda (r) r))))
             (tagcase r
               (p-err (m x y)

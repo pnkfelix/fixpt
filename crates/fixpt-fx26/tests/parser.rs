@@ -51,10 +51,34 @@ fn without_file_marks(tree: &str) -> String {
     out
 }
 
+/// `tree` with each place in a loaded file, `k·10⁹ + i`, as `i`: the Rust
+/// parser's spans keep the file apart, and show the place in it alone.
+fn within_files(tree: &str) -> String {
+    let mut out = String::new();
+    let mut digits = String::new();
+    let flush = |digits: &mut String, out: &mut String| {
+        match digits.parse::<u64>() {
+            Ok(n) if n >= 1_000_000_000 => out.push_str(&(n % 1_000_000_000).to_string()),
+            _ => out.push_str(digits),
+        }
+        digits.clear();
+    };
+    for c in tree.chars() {
+        if c.is_ascii_digit() {
+            digits.push(c);
+        } else {
+            flush(&mut digits, &mut out);
+            out.push(c);
+        }
+    }
+    flush(&mut digits, &mut out);
+    out
+}
+
 fn same_trees(s: &mut Fx26Session, text: &str) {
     let ours = s.parse_with_own_parser(text).unwrap_or_else(|e| panic!("the FX-26 parser: {e}"));
-    let ours: Vec<String> = ours.iter().map(|t| without_file_marks(t)).collect();
-    let rust = rust_trees(text);
+    let ours: Vec<String> = ours.iter().map(|t| within_files(&without_file_marks(t))).collect();
+    let rust: Vec<String> = rust_trees(text).iter().map(|t| within_files(t)).collect();
     assert_eq!(ours.len(), rust.len(), "different numbers of forms");
     for (a, b) in ours.iter().zip(&rust) {
         assert_eq!(a, b, "the parsers disagree");
