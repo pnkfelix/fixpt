@@ -9,7 +9,11 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; Modules' descriptions read.
+  (let* (;; What its errors say, and where.
+         (check-errors
+          ((load-input "fx26:check-errors.fx")
+           check-types-module check-resolve-module check-print-module))
+         ;; Modules' descriptions read.
          (check-modules-read
           ((load-input "fx26:check-modules-read.fx")
            check-types-module check-resolve-module check-syntax-module check-read-module
@@ -103,25 +107,25 @@
           ((load-input "fx26:check-synth.fx")
            check-types-module check-test-facts check-resolve-module check-env-module
            check-infer check-facts check-print-module check-bounds
-           check-expect check-errors-module check-effects-module check-mask-module
+           check-expect check-errors check-effects-module check-mask-module
            check-unions-module check-terminate check-holds-module check-subtype
            check-calls check-subst-module check-binders check-sub-env))
          ;; The checker, a module's order: its items as a letrec*, used only once made.
          (check-modorder
           ((load-input "fx26:check-modorder.fx")
-           check-types-module check-resolve-module check-errors-module check-env-module
+           check-types-module check-resolve-module check-errors check-env-module
            check-read-module check-expect tables))
          ;; The checker, rules of modules: their items checked as a letrec*.
          (check-module-rules
           ((load-input "fx26:check-module-rules.fx")
-           check-types-module check-env-module check-print-module check-errors-module
+           check-types-module check-env-module check-print-module check-errors
            check-modules check-read-module check-modorder check-expect
            check-effects-module check-subtype check-read-descs-module
            check-terminate check-letrec tables))
          ;; The checker, its rules: the one recursive group over expressions.
          (check-rules
           ((load-input "fx26:check-rules.fx")
-           check-types-module check-infer check-synth check-errors-module
+           check-types-module check-infer check-synth check-errors
            check-resolve-module check-env-module check-expect check-letrec
            check-dependent check-module-rules check-read-descs-module
            check-proving-module check-test-facts check-close check-print-module
@@ -134,7 +138,7 @@
          (check-proofs
           ((load-input "fx26:check-proofs.fx")
            check-types-module check-resolve-module check-env-module check-calls
-           check-generative-module check-read-descs-module check-errors-module check-read-module
+           check-generative-module check-read-descs-module check-errors check-read-module
            check-subtype check-modules check-infer check-terminate
            check-print-module tables parser-module check-sc-graphs check-sub-env
            check-modules-read))
@@ -143,7 +147,7 @@
           ((load-input "fx26:check-program.fx")
            check-types-module check-syntax-module check-effects-module check-env-module
            check-proofs check-rules check-generative-module
-           check-read-descs-module check-resolve-module check-errors-module
+           check-read-descs-module check-resolve-module check-errors
            check-terminate check-print-module check-letrec check-read-module
            check-expect check-modules check-modorder check-subst-module
            check-synth check-module-rules check-subtype parser-module check-modules-read))

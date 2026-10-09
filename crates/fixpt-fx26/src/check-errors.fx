@@ -3,9 +3,36 @@
 
 ;;; ------------------------------------------------------------ errors
 
-;; A module (`TODO.md` §34: the front end into modules, a file at a time);
-;; what other files use re-exported after it.
-(define check-errors-module (module
+;; Its types, those it uses of the files before it, and the signatures of
+;; what it is given.
+(let* ((check-types-types (load-module "fx26:check-types-types.fx"))
+       (check-resolve-types (load-module "fx26:check-resolve-types.fx"))
+       (check-print-types (load-module "fx26:check-print-types.fx")))
+  ;; What it is given: the modules of the files before it that it uses.
+  (lambda ((check-types (select check-types-types check-types-sig))
+           (check-resolve (select check-resolve-types check-resolve-sig))
+           (check-print (select check-print-types check-print-sig)))
+    (module
+
+;; The types it uses of the files before it.
+(define-effect checks (select check-types-types checks))
+(define-type k-binders (select check-types-types k-binders))
+(define-type k-desc (select check-types-types k-desc))
+(define-type k-eff (select check-types-types k-eff))
+(define-effect kreads (select check-types-types kreads))
+(define-type kx (select check-types-types kx))
+;; What it uses of the modules it is given.
+(define k-cat3 (with check-types k-cat3))
+(define k-cat4 (with check-types k-cat4))
+(define k-cat5 (with check-types k-cat5))
+(define k-fail (with check-types k-fail))
+(define k-length (with check-types k-length))
+(define k-quote (with check-types k-quote))
+(define k-end (with check-resolve k-end))
+(define k-start (with check-resolve k-start))
+(define k-show-effect (with check-print k-show-effect))
+(define k-show-ty (with check-print k-show-ty))
+
 ;; The error `m` at expression `x`.
 (define k-fail-at (subr checks (string kx) void) (lambda (m x) (k-fail m (k-start x) (k-end x))))
 ;; The error `what` followed by type `t`, at `a`..`b`, or at expression `x`.
@@ -74,23 +101,4 @@
     (k-cat4 "the handler must take a " (k-show-ty payload) " to a " (k-show-ty answer))))
 (define k-handler-gives (subr (maxeff kreads (alloc @t) spin) (int int string) string)
   (lambda (payload answer got)
-    (k-cat4 (k-handler-wants payload answer) ", and this gives a " got "")))))
-
-(define k-fail-at (with check-errors-module k-fail-at))
-(define k-fail-ty (with check-errors-module k-fail-ty))
-(define k-fail-ty-at (with check-errors-module k-fail-ty-at))
-(define k-fail-effect (with check-errors-module k-fail-effect))
-(define k-fail-impure-plambda (with check-errors-module k-fail-impure-plambda))
-(define k-fail-no-part (with check-errors-module k-fail-no-part))
-(define k-fail-arity (with check-errors-module k-fail-arity))
-(define k-fail-arg-count (with check-errors-module k-fail-arg-count))
-(define k-argument-error (with check-errors-module k-argument-error))
-(define k-fail-not-known (with check-errors-module k-fail-not-known))
-(define k-fail-not-frozen (with check-errors-module k-fail-not-frozen))
-(define k-fail-not-data (with check-errors-module k-fail-not-data))
-(define k-fail-frozen (with check-errors-module k-fail-frozen))
-(define k-fail-beyond (with check-errors-module k-fail-beyond))
-(define k-proj-count-error (with check-errors-module k-proj-count-error))
-(define k-prompt-body-error (with check-errors-module k-prompt-body-error))
-(define k-handler-wants (with check-errors-module k-handler-wants))
-(define k-handler-gives (with check-errors-module k-handler-gives))
+    (k-cat4 (k-handler-wants payload answer) ", and this gives a " got ""))))))
