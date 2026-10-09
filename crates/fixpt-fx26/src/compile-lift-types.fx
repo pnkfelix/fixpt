@@ -29,6 +29,9 @@
 (define-type c-params (select compile-types c-params))
 (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
 (define-type exp (select parser-types exp))
+;; The types it names, from the files that define them.
+(define-type c-recs (select compile-types c-recs))
+(define-type cenv (select compile-types cenv))
 (define-type compile-lift-sig
   (moduleof (val c-twin-depth (ref int @k))
             (val c-r-in-plan (ref bool @k))
@@ -36,4 +39,8 @@
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
                        (c-params exp)
                        (listof syms @k)))
-            (val c-standard-twins (ref (listof c-standard-twin @k) @k))))
+            (val c-standard-twins (ref (listof c-standard-twin @k) @k))
+            (val c-bind-lifted
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (c-recs (listof int @k) cenv)
+                       cenv))))

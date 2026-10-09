@@ -92,4 +92,16 @@
             (val c-own-now (ref (listof (productof (1 symbol) (2 tword)) @k) @k))
             (val c-spec-now (ref (listof c-spec @k) @k))
             (val c-r-plan-ctx (ref (listof int @k) @k))
-            (val c-twins (ref (listof c-twin @k) @k))))
+            (val c-twins (ref (listof c-twin @k) @k))
+            (val c-names-any?
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (exp c-mslots)
+                       bool))
+            (val c-waits-onto
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (c-waits int patches)
+                       c-waits))
+            (val c-made-word
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (c-params exp cenv syms)
+                       (listof c-closing @k)))))

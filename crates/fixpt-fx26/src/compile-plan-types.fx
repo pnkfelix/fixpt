@@ -99,4 +99,9 @@
                                spin)
                        ((listof c-copy-at @k))
                        unit))
-            (val c-room (subr (maxeff (read @globals) spin) (exp int bool) int))))
+            (val c-room (subr (maxeff (read @globals) spin) (exp int bool) int))
+            (val c-inlining (ref syms @k))
+            (val c-plan-child
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (int symbol int)
+                       int))))

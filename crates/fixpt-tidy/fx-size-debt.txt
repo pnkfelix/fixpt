@@ -20,4 +20,6 @@ exempt crates/fixpt-fx26/tests/programs/terminate/deep-self-application.fx
 # The register compiler's one recursive group, modules and a leaf's tail
 # calls folded in to remove the hooks between files (the user's,
 # 2026-10-06, `TODO.md` §41): over the limit for now, to be revisited.
-crates/fixpt-fx26/src/regcode-core.fx 1125 0
+# Raised by its imports alone when the conductor came to make it, 1125 to
+# 1415, the code unchanged (the user's, 2026-10-09, `TODO.md` §68).
+crates/fixpt-fx26/src/regcode-core.fx 1415 0

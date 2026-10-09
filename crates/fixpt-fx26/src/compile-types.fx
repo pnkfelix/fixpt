@@ -118,6 +118,9 @@
 ;; What its clients use of it (`compile-programs.fx`).
 ;; The types it names, from the files that define them.
 (define-type k-facts (select check-env-types k-facts))
+;; The types it names, from the files that define them.
+(define check-types-types (load-module "fx26:check-types-types.fx"))
+(define-type k-ids (select check-types-types k-ids))
 (define-type compile-sig
   (moduleof (val c-frozen-define-at
                  (subr (maxeff (read @globals) (read @k)) (int int) bool))
@@ -186,4 +189,21 @@
             (val c-count-exps (subr (read @globals) (exps) int))
             (val c-count-params (subr (read @globals) (c-params) int))
             (val c-registers (ref bool @k))
-            (val c-summary-at (subr (maxeff (read @globals) (read @k)) (int int) int))))
+            (val c-summary-at (subr (maxeff (read @globals) (read @k)) (int int) int))
+            (val c-conversion-at (subr (maxeff (read @globals) (read @k)) (exp) int))
+            (val c-apply-shares-at (subr (maxeff (read @globals) (read @k)) (int int) bool))
+            (val c-with-at
+                 (subr (maxeff (alloc @k) (read @globals) (read @k)) (int int) c-with-names))
+            (val c-with-places-at
+                 (subr (maxeff (alloc @k) (read @globals) (read @k))
+                       (int int)
+                       (listof k-ids @k)))
+            (val c-reshape-at
+                 (subr (maxeff (alloc @k) (read @globals) (read @k))
+                       (exp)
+                       (listof k-ids @k)))
+            (val c-applied-let
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (exp exps)
+                       (listof (productof (1 c-binds) (2 exp)) @k)))
+            (val c-length (subr (maxeff (read @globals) (read @k) spin) (syms) int))))
