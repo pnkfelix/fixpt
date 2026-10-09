@@ -4,9 +4,60 @@
 ;;; `check-subst.fx`, before the types' reader, which reads with it; part of
 ;;; the checker, `check-types.fx` first.
 
-;; A module (`TODO.md` §34: the front end into modules, a file at a time);
-;; what other files use re-exported after it.
-(define check-proving-module (module
+;; Its types, those it uses of the files before it, and the signatures of
+;; what it is given.
+(let* ((eager-reader-types ((proj (load-module "fx26:eager-reader-types.fx") @s @e @m @c)))
+       (parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
+       (check-types-types (load-module "fx26:check-types-types.fx"))
+       (check-read-types (load-module "fx26:check-read-types.fx"))
+       (check-env-types (load-module "fx26:check-env-types.fx"))
+       (check-syntax-types (load-module "fx26:check-syntax-types.fx"))
+       (reader-types (load-module "fx26:reader-types.fx")))
+  ;; What it is given: the modules of the files before it that it uses.
+  (lambda ((check-types (select check-types-types check-types-sig))
+           (check-env (select check-env-types check-env-sig))
+           (check-read (select check-read-types check-read-sig))
+           (check-syntax (select check-syntax-types check-syntax-sig))
+           (parser (select reader-types parser-sig)))
+    (module
+
+;; The types it uses of the files before it.
+(define atom (with eager-reader-types atom))
+(define-type syn (select parser-types syn))
+(define-effect checks (select check-types-types checks))
+(define-type k-names (select check-types-types k-names))
+(define-type k-prop (select check-types-types k-prop))
+(define-type k-props (select check-types-types k-props))
+(define-type k-te (select check-types-types k-te))
+(define-type k-term (select check-types-types k-term))
+(define-effect kreads (select check-types-types kreads))
+(define pr-acyclic (with check-types-types pr-acyclic))
+(define pr-length (with check-types-types pr-length))
+(define pr-nat (with check-types-types pr-nat))
+(define pr-rel (with check-types-types pr-rel))
+(define pr-shape (with check-types-types pr-shape))
+(define tm-length (with check-types-types tm-length))
+(define tm-lit (with check-types-types tm-lit))
+(define tm-param (with check-types-types tm-param))
+(define ty-proving (with check-types-types ty-proving))
+(define-type k-items (select check-types-types k-items))
+(define-type k-syns (select check-read-types k-syns))
+;; What it uses of the modules it is given.
+(define k-cat3 (with check-types k-cat3))
+(define k-get (with check-types k-get))
+(define k-length (with check-types k-length))
+(define k-nth (with check-types k-nth))
+(define k-te (with check-types k-te))
+(define k-ty-new (with check-types k-ty-new))
+(define k-bool (with check-env k-bool))
+(define k-items (with check-read k-items))
+(define k-sfail (with check-read k-sfail))
+(define k-list-head (with check-syntax k-list-head))
+(define k-shape (with check-syntax k-shape))
+(define syn-int (with parser syn-int))
+(define syn-name (with parser syn-name))
+(define syn-symbol? (with parser syn-symbol?))
+
 ;; Shape `n`'s number (`check-unions.fx`), or -1.
 (define k-shape-named (subr (read @globals) (string) int)
   (lambda (n)
@@ -138,10 +189,5 @@
 (define k-call-te (subr (maxeff kreads spin) (k-te) k-te)
   (lambda (te)
     (tagcase (k-get (extract te 1)) (ty-proving (t e) (k-te k-bool (extract te 2))) (else y te))))
-))
-
-(define k-parse-proving (with check-proving-module k-parse-proving))
-(define k-call-te (with check-proving-module k-call-te))
-(define k-names-snoc (with check-proving-module k-names-snoc))
-(define k-props-within? (with check-proving-module k-props-within?))
-(define k-props=? (with check-proving-module k-props=?))
+;; The module, the lambda given its modules, and the loads, closed.
+)))
