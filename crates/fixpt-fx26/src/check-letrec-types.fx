@@ -21,10 +21,55 @@
 ;;; ------------------------------------------------------------ signatures
 
 ;; What its clients use of it (`check-program.fx`).
+;; The types it names, from the files that define them.
+(define check-synth-types (load-module "fx26:check-synth-types.fx"))
+(define-type k-done (select check-synth-types k-done))
+(define-type k-named (select check-types-types k-named))
+(define-type k-te (select check-types-types k-te))
 (define-type check-letrec-sig
   (moduleof (val k-with-latent
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (int k-eff)
                        int))
             (val k-globals-of
-                 (subr (maxeff (alloc @t) (read @globals) (read @t)) (k-eff) k-eff))))
+                 (subr (maxeff (alloc @t) (read @globals) (read @t)) (k-eff) k-eff))
+            (val k-note-ending
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (k-letrec-bs string)
+                       unit))
+            (val k-bind-group
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read (globals k-bind-letrec k-letrec-lambdas k-termination))
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (k-letrec-bs)
+                       unit))
+            (val k-letrec-checked
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read
+                                (globals a-read
+                                         k-bind-letrec
+                                         k-done
+                                         k-fail
+                                         k-last-latent
+                                         k-letrec-lambdas
+                                         k-mark
+                                         k-one
+                                         k-recursive
+                                         k-tag
+                                         k-te
+                                         k-termination
+                                         k-unbind-to
+                                         r-globals))
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (k-letrec-bs int k-named k-checker k-group-checker)
+                       k-eff))))

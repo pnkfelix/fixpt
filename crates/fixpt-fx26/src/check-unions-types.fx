@@ -13,3 +13,10 @@
 ;; `pair?` does. Nothing else is narrowed (a list found `nil` stays a list,
 ;; which is what `cons` onto it wants).
 (define-type k-split (productof (1 int) (2 int)))
+
+;;; ------------------------------------------------------------ signatures
+
+;; What its clients use of it (`check-rules.fx`).
+(define-type check-unions-sig
+  (moduleof (val k-false-expected?
+                 (subr (maxeff (read @globals) (read @t) spin) (int) bool))))

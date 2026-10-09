@@ -9,6 +9,10 @@
 (define-type k-eff (select check-types-types k-eff))
 (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
 (define-type syn (select parser-types syn))
+;; The types it names, from the files that define them.
+(define-type k-binders (select check-types-types k-binders))
+(define-type k-descs (select check-types-types k-descs))
+(define-type k-parts (select check-types-types k-parts))
 (define-type check-read-descs-sig
   (moduleof (val k-parse-effect
                  (subr (maxeff (alloc @t)
@@ -58,4 +62,11 @@
                                (write @t)
                                spin)
                        (syn int)
-                       int))))
+                       int))
+            (val k-binders-as-descs
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (k-binders)
+                       k-descs))
+            (val k-parts-reversed
+                 (subr (maxeff (alloc @t) (read @globals)) (k-parts k-parts) k-parts))
+            (val k-part-onto (subr (alloc @t) (symbol int k-parts) k-parts))))

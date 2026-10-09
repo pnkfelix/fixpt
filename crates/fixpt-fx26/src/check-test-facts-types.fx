@@ -20,3 +20,25 @@
 ;; (none or one): the Rust checker's `latent_props`.
 (define-type k-latent (listof (productof (1 k-props) (2 k-props) (3 kxs)) acyclic))
 (define-type k-cert-lens (listof k-cert-len acyclic))
+
+;;; ------------------------------------------------------------ signatures
+
+;; What its clients use of it (`check-rules.fx`).
+;; The types it names, from the files that define them.
+(define-type kx (select check-types-types kx))
+(define-type check-test-facts-sig
+  (moduleof (val k-size-any? (subr pure (k-size) bool))
+            (val k-length-arg
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
+                       (kx kx)
+                       k-cert-lens))
+            (val k-cert-len-has?
+                 (subr (maxeff (read @globals) (read @t)) (k-cert-lens k-cert-len) bool))
+            (val k-natural-by-itself?
+                 (subr (maxeff (read @globals) (read @t) spin) (kx) bool))
+            (val k-operand-size
+                 (subr (maxeff (read @globals) (read @t) spin) (kx int) k-maybe-size))
+            (val k-nat-arith-size
+                 (subr (maxeff (read @globals) (read @t))
+                       (string k-maybe-size k-maybe-size)
+                       k-maybe-size))))

@@ -14,7 +14,14 @@
 ;; The types it names, from the files that define them.
 (define check-types-types (load-module "fx26:check-types-types.fx"))
 (define-type kx (select check-types-types kx))
+;; The types it names, from the files that define them.
+(define-type kxs (select check-types-types kxs))
 (define-type check-calls-sig
   (moduleof (val k-under (subr (read @globals) (kx) kx))
             (val k-callee-name
-                 (subr (maxeff (alloc @t) (read @globals)) (kx) (listof symbol acyclic)))))
+                 (subr (maxeff (alloc @t) (read @globals)) (kx) (listof symbol acyclic)))
+            (val k-std-op (subr (maxeff (read @globals) (read @t) spin) (kx) string))
+            (val k-may-spin?
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (kx int kxs)
+                       bool))))

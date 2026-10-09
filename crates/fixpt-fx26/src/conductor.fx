@@ -9,7 +9,18 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; The checker, its proofs: lemmas proved.
+  (let* (;; The checker, its rules: the one recursive group over expressions.
+         (check-rules
+          ((load-input "fx26:check-rules.fx")
+           check-types-module check-infer-module check-synth-module check-errors-module
+           check-resolve-module check-env-module check-expect-module check-letrec-module
+           check-dependent-module check-module-rules-module check-read-descs-module
+           check-proving-module check-test-facts-module check-close-module check-print-module
+           check-terminate-module check-modorder-module check-unions-module check-modules-module
+           check-effects-module check-data-module check-read-module check-mask-module
+           check-calls-module check-bounds-module check-holds-module check-subtype-module
+           check-subst-module))
+         ;; The checker, its proofs: lemmas proved.
          (check-proofs
           ((load-input "fx26:check-proofs.fx")
            check-types-module check-resolve-module check-env-module check-calls-module
@@ -20,7 +31,7 @@
          (check-program
           ((load-input "fx26:check-program.fx")
            check-types-module check-syntax-module check-effects-module check-env-module
-           check-proofs check-rules-module check-generative-module
+           check-proofs check-rules check-generative-module
            check-read-descs-module check-resolve-module check-errors-module
            check-terminate-module check-print-module check-letrec-module check-read-module
            check-expect-module check-modules-module check-modorder-module check-subst-module

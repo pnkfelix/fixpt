@@ -11,4 +11,12 @@
 (define-type k-region (select check-types-types k-region))
 (define-type check-effects-sig
   (moduleof (val k-atom-region (subr (read @globals) (k-atom) k-region))
-            (val k-one (subr (alloc @t) (k-atom) k-eff))))
+            (val k-one (subr (alloc @t) (k-atom) k-eff))
+            (val k-insert
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
+                       (k-atom k-eff)
+                       k-eff))
+            (val k-union
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
+                       (k-eff k-eff)
+                       k-eff))))

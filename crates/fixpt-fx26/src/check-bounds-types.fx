@@ -21,3 +21,10 @@
 ;; `k-unify`'s flags, set for `f`: in something invariant; matching what is
 ;; expected (from above); in a subroutine's parameters (the other way).
 (define-type k-unifying (subr (maxeff kstate spin) () unit))
+
+;;; ------------------------------------------------------------ signatures
+
+;; What its clients use of it (`check-rules.fx`).
+(define-type check-bounds-sig
+  (moduleof (val k-new-bounded-solved
+                 (subr (maxeff (alloc @t) (read @t) (write @t)) () (ref k-map @t)))))

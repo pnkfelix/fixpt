@@ -31,6 +31,9 @@
 (define-type syn (select parser-types syn))
 ;; The types it names, from the files that define them.
 (define-type k-binders (select check-types-types k-binders))
+;; The types it names, from the files that define them.
+(define check-resolve-types (load-module "fx26:check-resolve-types.fx"))
+(define-type k-letrec-bs (select check-resolve-types k-letrec-bs))
 (define-type check-modules-sig
   (moduleof (val k-resolve-exp
                  (subr (maxeff (alloc @t)
@@ -63,4 +66,34 @@
             (val k-push-binders
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t))
                        (k-binders)
-                       unit))))
+                       unit))
+            (val k-in-loaded
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (k-thunk-unit int int int)
+                       unit))
+            (val k-resolve-selects
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (int int int)
+                       int))
+            (val k-letrec-selected
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (k-letrec-bs int int)
+                       k-letrec-bs))))

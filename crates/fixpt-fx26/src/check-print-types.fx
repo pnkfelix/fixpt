@@ -47,6 +47,8 @@
 ;; The types it names, from the files that define them.
 (define-type k-atom (select check-types-types k-atom))
 (define-type k-eff (select check-types-types k-eff))
+;; The types it names, from the files that define them.
+(define-type k-conv (select check-types-types k-conv))
 (define-type check-print-sig
   (moduleof (val k-globals-atom? (subr (read @globals) (k-atom) bool))
             (val k-show-effect (subr (maxeff (read @globals) (read @t)) (k-eff) string))
@@ -55,4 +57,7 @@
                        ()
                        unit))
             (val k-show-ty
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int) string))))
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int) string))
+            (val k-conv=? (subr (read @globals) (k-conv k-conv) bool))
+            (val k-size-plus (subr (read @globals) (k-size int) k-size))
+            (val k-size-nonneg? (subr (maxeff (read @globals) (read @t)) (k-size) bool))))

@@ -49,6 +49,10 @@
 (define-type k-region (select check-types-types k-region))
 ;; The types it names, from the files that define them.
 (define-type k-descs (select check-types-types k-descs))
+;; The types it names, from the files that define them.
+(define-type k-binders (select check-types-types k-binders))
+(define-type k-map (select check-types-types k-map))
+(define-type k-vsub (select check-types-types k-vsub))
 (define-type check-resolve-sig
   (moduleof
    (val exp-start (subr pure (exp) int))
@@ -65,4 +69,22 @@
    (val k-unfold
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
               (int k-descs)
-              int))))
+              int))
+   (val k-start (subr pure (kx) int))
+   (val k-end (subr pure (kx) int))
+   (val k-as-subr
+        (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
+              (int)
+              (listof k-callable acyclic)))
+   (val k-vsubr-parts
+        (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int) k-vsub))
+   (val k-callee-of
+        (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
+              (int int)
+              (listof k-callable acyclic)))
+   (val k-conversion-name (subr (read @globals) (string symbol) symbol))
+   (val k-free-vars (subr (maxeff (alloc @t) (read @globals) (read @t)) (kx) k-names))
+   (val k-rename
+        (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+              (k-binders k-binders)
+              k-map))))

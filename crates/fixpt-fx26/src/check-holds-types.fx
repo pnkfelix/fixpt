@@ -16,3 +16,18 @@
 (define-type k-kseen (table int k-kept-seen @t))
 ;; The types a walk has met: whether `t` is one, and if not, it is now.
 (define-type k-seen (table int bool @t))
+
+;;; ------------------------------------------------------------ signatures
+
+;; What its clients use of it (`check-rules.fx`).
+(define-type check-holds-sig
+  (moduleof (val k-no-knot
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (int int int)
+                       unit))))

@@ -69,6 +69,9 @@
 ;; evaluator's.
 ;; The types it names, from the files that define them.
 (define-type k-eff (select check-types-types k-eff))
+;; The types it names, from the files that define them.
+(define-type k-region (select check-types-types k-region))
+(define-type kx (select check-types-types kx))
 (define-type check-env-sig
   (moduleof
    (val k-fx-module? (subr pure (symbol) bool))
@@ -101,4 +104,19 @@
    (val k-bind
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
               (symbol int)
-              unit))))
+              unit))
+   (val k-int int)
+   (val k-bool int)
+   (val k-unit int)
+   (val k-hide-mark (ref int @t))
+   (val k-unbound (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (symbol) string))
+   (val k-operator (ref k-op-mark @t))
+   (val k-second-class? (subr pure (symbol) bool))
+   (val k-operator? (subr (maxeff (read @globals) (read @t)) (symbol int int) bool))
+   (val k-named-only (subr pure (symbol) string))
+   (val k-fx-name (subr pure (kx) symbol))
+   (val k-operator-mark (subr spin (kx) k-op-mark))
+   (val k-fresh-region
+        (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t)) (string) k-region))
+   (val k-note-with
+        (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t)) (k-with-noted) unit))))

@@ -40,6 +40,51 @@
 ;;; ------------------------------------------------------------ signatures
 
 ;; What its clients use of it (`check-program.fx`).
+;; The types it names, from the files that define them.
+(define check-env-types (load-module "fx26:check-env-types.fx"))
+(define-type k-hazard-list (select check-env-types k-hazard-list))
+(define-type k-item (select check-types-types k-item))
+(define-type k-items (select check-types-types k-items))
 (define-type check-modorder-sig
   (moduleof (val k-names-onto
-                 (subr (maxeff (alloc @t) (read @globals)) (k-names k-names) k-names))))
+                 (subr (maxeff (alloc @t) (read @globals)) (k-names k-names) k-names))
+            (val k-lambda-item? (subr (read @globals) (k-item) bool))
+            (val k-mod-lambdas (subr (maxeff (alloc @t) (read @globals)) (k-items) k-mlams))
+            (val k-mod-recs-lambdas
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t))
+                       (k-mlams)
+                       unit))
+            (val k-mod-star-lambdas
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t))
+                       (k-items)
+                       unit))
+            (val k-early-modules
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (k-items) k-names))
+            (val k-mod-hazards
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (k-items k-mlams k-hazard-list)
+                       unit))
+            (val k-mod-edges
+                 (subr (maxeff (alloc @t) (read @globals) (read @t))
+                       (k-mlams k-mlams)
+                       k-edges))
+            (val k-mod-groups
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (k-edges k-letrec-bs k-letrec-bs)
+                       k-groups))))

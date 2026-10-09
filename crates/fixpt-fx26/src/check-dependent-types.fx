@@ -19,3 +19,38 @@
 ;; A dependent procedure's callee, `c` (none or one), for a call with `args`
 ;; at `a`..`b`: its types given the modules its arguments name.
 (define-type k-callables (listof k-callable acyclic))
+
+;;; ------------------------------------------------------------ signatures
+
+;; What its clients use of it (`check-rules.fx`).
+;; The types it names, from the files that define them.
+(define-type kxs (select check-types-types kxs))
+(define-type check-dependent-sig
+  (moduleof (val k-instantiate-params
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (int k-params-given)
+                       int))
+            (val k-bind-params
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (k-bindings int int)
+                       k-dependent))
+            (val k-result-back
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (int k-map)
+                       int))
+            (val k-dependent-callee
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (k-callables kxs int int)
+                       k-callables))))

@@ -24,3 +24,8 @@ exempt crates/fixpt-fx26/tests/programs/terminate/deep-self-application.fx
 # 1415, and by two lines for each module it is given since (split from one
 # it was given), the code unchanged (the user's, 2026-10-09, `TODO.md` §68).
 crates/fixpt-fx26/src/regcode-core.fx 1419 0
+# The checker's one recursive group, every rule (58 members): within the
+# limit until the conductor came to make it, then over by its imports
+# alone, 998 to 1346, the code unchanged (the user's, 2026-10-09, `TODO.md`
+# §68).
+crates/fixpt-fx26/src/check-rules.fx 1346 0
