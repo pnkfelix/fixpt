@@ -8,18 +8,28 @@
 ;;; the lower bound, else the upper. After `check-subtype.fx`, before
 ;;; `check-infer.fx`, whose `k-unify-var` keeps them.
 
-;; Its types (`check-bounds-types.fx`), loaded before the module so that they are
-;; not among its values; the module names what it uses of them.
-(define check-bounds-types (load-module "fx26:check-bounds-types.fx"))
-;; A module (`TODO.md` §34: the front end into modules, a file at a time);
-;; what other files use re-exported after it.
-(define check-bounds-module (module
+;; Its types, those it uses of the files before it, and the signatures of
+;; what it is given.
+(let* ((check-bounds-types (load-module "fx26:check-bounds-types.fx"))
+       (check-types-types (load-module "fx26:check-types-types.fx"))
+       (check-subtype-types (load-module "fx26:check-subtype-types.fx")))
+  ;; What it is given: the modules of the files before it that it uses.
+  (lambda ((check-types (select check-types-types check-types-sig))
+           (check-subtype (select check-subtype-types check-subtype-sig)))
+    (module
 (define-type k-bound (select check-bounds-types k-bound))
 (define-type k-bound-map (select check-bounds-types k-bound-map))
 (define-type k-bound-entry (select check-bounds-types k-bound-entry))
 (define-type k-maybe-bounds (select check-bounds-types k-maybe-bounds))
 (define-type k-maybe-bound (select check-bounds-types k-maybe-bound))
 (define-type k-unifying (select check-bounds-types k-unifying))
+;; The types it uses of the files before it.
+(define dt (with check-types-types dt))
+(define-type k-map (select check-types-types k-map))
+(define-effect kstate (select check-types-types kstate))
+;; What it uses of the modules it is given.
+(define k-unify-exact (with check-types k-unify-exact))
+(define k-subtype (with check-subtype k-subtype))
 
 (define k-bounds-stack (ref (listof k-bound-entry @t) @t) (new nil))
 ;; Whether `k-unify` bounds from above: matching what is expected of a call's
@@ -130,13 +140,4 @@
             (begin (k-bound-set! (car m) v b)
                    (cond ((>= (extract b 3) 0) (extract b 3))
                          ((>= (extract b 1) 0) (extract b 1))
-                         (else (extract b 2)))))))))))
-
-(define-type k-unifying (select check-bounds-module k-unifying))
-(define k-exactly (with check-bounds-module k-exactly))
-(define k-from-above (with check-bounds-module k-from-above))
-(define k-flipped (with check-bounds-module k-flipped))
-(define k-new-bounded-solved (with check-bounds-module k-new-bounded-solved))
-(define k-drop-bounds (with check-bounds-module k-drop-bounds))
-(define k-map-unsettled (with check-bounds-module k-map-unsettled))
-(define k-bound-solution (with check-bounds-module k-bound-solution))
+                         (else (extract b 2))))))))))))
