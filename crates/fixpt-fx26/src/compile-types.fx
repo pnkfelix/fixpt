@@ -206,4 +206,8 @@
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
                        (exp exps)
                        (listof (productof (1 c-binds) (2 exp)) @k)))
-            (val c-length (subr (maxeff (read @globals) (read @k) spin) (syms) int))))
+            (val c-length (subr (maxeff (read @globals) (read @k) spin) (syms) int))
+            (val c-loops-only
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
+                       (exp symbol int bool)
+                       bool))))

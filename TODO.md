@@ -1946,5 +1946,6 @@ Phase 1, the types out, one module at a time; phase 2, the conversion.
   `mksig.py`, `lib_move.py`, `conductor_add.py`, `conductor_export.py` in
   the session's scratch space): `compile-inline.fx`, `compile-twins.fx`,
   `regcode-entry.fx`, `regcode-core.fx` (its size debt raised by its
-  imports alone, 1125 to 1415 lines: the user's, 2026-10-09).
+  imports alone, 1125 to 1415 lines: the user's, 2026-10-09),
+  `regcode-modules.fx`.
 

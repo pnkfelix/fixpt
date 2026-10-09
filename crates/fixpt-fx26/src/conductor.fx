@@ -9,12 +9,16 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; Register code, its core: the one recursive group over expressions.
+  (let* (;; Register code for modules: their products, and with.
+         (regcode-modules
+          ((load-input "fx26:regcode-modules.fx")
+           regcode-module compile-module layout-module regcode-exps-module))
+         ;; Register code, its core: the one recursive group over expressions.
          (regcode-core
           ((load-input "fx26:regcode-core.fx")
            regcode-module compile-module compile-lift-module compile-exps-module
            compile-plan-module regcode-exps-module layout-module regcode-helpers-module
-           regcode-modules-module))
+           regcode-modules))
          ;; Register code, its entry: a lambda as register code, or why none.
          (regcode-entry
           ((load-input "fx26:regcode-entry.fx")

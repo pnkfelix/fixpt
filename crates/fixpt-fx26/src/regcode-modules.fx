@@ -2,14 +2,72 @@
 ;;; stage M3); the module code itself is in `regcode-core.fx`'s group, which
 ;;; it recurs with. After `regcode-helpers.fx`.
 
-;; Its types (`regcode-modules-types.fx`), loaded before the module so that they are
-;; not among its values; the module names what it uses of them.
-(define regcode-modules-types (load-module "fx26:regcode-modules-types.fx"))
-;; A module (`TODO.md` §34: the front end into modules, a file at a time);
-;; what other files use re-exported after it.
-(define regcode-modules-module (module
+;; Its types, those it uses of the files before it, and the signatures of
+;; what it is given.
+(let* ((regcode-modules-types (load-module "fx26:regcode-modules-types.fx"))
+       (regcode-types (load-module "fx26:regcode-types.fx"))
+       (compile-types (load-module "fx26:compile-types.fx"))
+       (compile-exps-types (load-module "fx26:compile-exps-types.fx"))
+       (parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
+       (check-types-types (load-module "fx26:check-types-types.fx"))
+       (layout-types (load-module "fx26:layout-types.fx"))
+       (regcode-exps-types (load-module "fx26:regcode-exps-types.fx")))
+  ;; What it is given: the modules of the files before it that it uses.
+  (lambda ((regcode (select regcode-types regcode-sig))
+           (compile (select compile-types compile-sig))
+           (layout (select layout-types layout-sig))
+           (regcode-exps (select regcode-exps-types regcode-exps-sig)))
+    (module
 (define-type r-scopes (select regcode-modules-types r-scopes))
-
+;; The types it uses of the files before it.
+(define a-slot (with regcode-types a-slot))
+(define-effect emits (select regcode-types emits))
+(define-type r-member-const (select regcode-types r-member-const))
+(define-type rargs (select regcode-types rargs))
+(define-effect rbuilds (select regcode-types rbuilds))
+(define-effect rcompiles (select regcode-types rcompiles))
+(define-type rconsts (select regcode-types rconsts))
+(define-type renv (select regcode-types renv))
+(define-type rgen (select regcode-types rgen))
+(define-type rints (select regcode-types rints))
+(define rl-const (with regcode-types rl-const))
+(define rl-free (with regcode-types rl-free))
+(define rl-global (with regcode-types rl-global))
+(define rl-loop (with regcode-types rl-loop))
+(define rl-pending (with regcode-types rl-pending))
+(define rl-reg (with regcode-types rl-reg))
+(define rl-slot (with regcode-types rl-slot))
+(define at-loop (with compile-types at-loop))
+(define at-pending (with compile-types at-pending))
+(define-type cenv (select compile-types cenv))
+(define-type syms (select compile-types syms))
+(define-type c-mslots (select compile-exps-types c-mslots))
+(define-type c-mvals (select compile-exps-types c-mvals))
+(define-type c-waits (select compile-exps-types c-waits))
+(define-type exp (select parser-types exp))
+(define-type k-ids (select check-types-types k-ids))
+;; What it uses of the modules it is given.
+(define r-bind (with regcode r-bind))
+(define r-decline (with regcode r-decline))
+(define r-local (with regcode r-local))
+(define r-member-const (with regcode r-member-const))
+(define r-op1 (with regcode r-op1))
+(define r-opn (with regcode r-opn))
+(define r-opnn (with regcode r-opnn))
+(define r-slot (with regcode r-slot))
+(define r-where (with regcode r-where))
+(define c-loops-only (with compile c-loops-only))
+(define cellular-closure-free0 (with layout cellular-closure-free0))
+(define rop-field (with layout rop-field))
+(define rop-global (with layout rop-global))
+(define rop-lexical (with layout rop-lexical))
+(define rop-load (with layout rop-load))
+(define rop-reg (with layout rop-reg))
+(define rop-setfield (with layout rop-setfield))
+(define rop-stack (with layout rop-stack))
+(define r-assume (with regcode-exps r-assume))
+(define r-keep (with regcode-exps r-keep))
+(define r-keep-in-slot (with regcode-exps r-keep-in-slot))
 
 ;; `vals`, newest first, onto `acc` the oldest first: as operands.
 (define r-slots-oldest (subr rbuilds (rints rargs) rargs)
@@ -101,13 +159,4 @@
         args
         (begin (r-opn g rop-stack m) (r-opn g rop-field (+ (car at) 2))
                (let ((s (r-keep-in-slot g)))
-                 (r-reshape-fields g m (cdr at) (the rargs (cons (a-slot s) args))))))))))
-
-(define-type r-scopes (select regcode-modules-module r-scopes))
-(define r-slots-oldest (with regcode-modules-module r-slots-oldest))
-(define r-module-slots (with regcode-modules-module r-module-slots))
-(define r-module-own (with regcode-modules-module r-module-own))
-(define r-give-waiting (with regcode-modules-module r-give-waiting))
-(define r-with-fields (with regcode-modules-module r-with-fields))
-(define r-args-reversed (with regcode-modules-module r-args-reversed))
-(define r-reshape-fields (with regcode-modules-module r-reshape-fields))
+                 (r-reshape-fields g m (cdr at) (the rargs (cons (a-slot s) args)))))))))))

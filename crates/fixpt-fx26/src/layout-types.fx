@@ -69,4 +69,5 @@
             (val rop-tailinvoke int)
             (val rop-return int)
             (val rop-invokeself int)
-            (val rop-prim2imm int)))
+            (val rop-prim2imm int)
+            (val rop-lexical int)))
