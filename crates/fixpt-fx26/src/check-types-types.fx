@@ -246,4 +246,5 @@
 (define-type check-types-sig
   (moduleof
    (val k-cat3 (subr pure (string string string) string))
-   (val k-cat5 (subr (read @globals) (string string string string string) string))))
+   (val k-cat5 (subr (read @globals) (string string string string string) string))
+   (val k-length (poly ((t type)) (subr (read @globals) ((listof t acyclic)) int)))))

@@ -83,4 +83,5 @@
             (val rop-pop int)
             (val rop-branch int)
             (val rop-branchf int)
-            (val rop-brancht int)))
+            (val rop-brancht int)
+            (val routine-closure int)))
