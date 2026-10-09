@@ -12,6 +12,7 @@
 ;; what it is given.
 (let* ((compile-types (load-module "fx26:compile-types.fx"))
        (compile-exps-types (load-module "fx26:compile-exps-types.fx"))
+       (compile-state-types (load-module "fx26:compile-state-types.fx"))
        (compile-lift-types (load-module "fx26:compile-lift-types.fx"))
        (compile-plan-types (load-module "fx26:compile-plan-types.fx"))
        (regcode-entry-types (load-module "fx26:regcode-entry-types.fx")))
@@ -20,7 +21,8 @@
            (compile-exps (select compile-exps-types compile-exps-sig))
            (compile-plan (select compile-plan-types compile-plan-sig))
            (compile-lift (select compile-lift-types compile-lift-sig))
-           (regcode-entry (select regcode-entry-types regcode-entry-sig)))
+           (regcode-entry (select regcode-entry-types regcode-entry-sig))
+           (compile-state (select compile-state-types compile-state-sig)))
     (module
 
 ;; The types it uses of the files before it.
@@ -32,11 +34,11 @@
 ;; What it uses of the modules it is given.
 (define c-genv (with compile c-genv))
 (define c-registers (with compile c-registers))
-(define c-made-reuse (with compile-exps c-made-reuse))
-(define c-own-now (with compile-exps c-own-now))
-(define c-r-plan-ctx (with compile-exps c-r-plan-ctx))
-(define c-spec-now (with compile-exps c-spec-now))
-(define c-twins (with compile-exps c-twins))
+(define c-made-reuse (with compile-state c-made-reuse))
+(define c-own-now (with compile-state c-own-now))
+(define c-r-plan-ctx (with compile-state c-r-plan-ctx))
+(define c-spec-now (with compile-state c-spec-now))
+(define c-twins (with compile-state c-twins))
 (define c-make-copies (with compile-plan c-make-copies))
 (define c-plan-copy-order (with compile-plan c-plan-copy-order))
 (define c-planned-fv (with compile-lift c-planned-fv))

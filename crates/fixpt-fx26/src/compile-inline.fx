@@ -10,13 +10,15 @@
 (let* ((compile-types (load-module "fx26:compile-types.fx"))
        (compile-plan-types (load-module "fx26:compile-plan-types.fx"))
        (compile-exps-types (load-module "fx26:compile-exps-types.fx"))
+       (compile-state-types (load-module "fx26:compile-state-types.fx"))
        (parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
        (table-types (load-module "fx26:table-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((compile (select compile-types compile-sig))
            (compile-plan (select compile-plan-types compile-plan-sig))
            (compile-exps (select compile-exps-types compile-exps-sig))
-           (tables (select table-types tables-sig)))
+           (tables (select table-types tables-sig))
+           (compile-state (select compile-state-types compile-state-sig)))
     (module
 
 ;; The types it uses of the files before it.
@@ -80,8 +82,8 @@
 (define c-specials (with compile-plan c-specials))
 (define c-unrolls (with compile-plan c-unrolls))
 (define c-unrolls-of (with compile-plan c-unrolls-of))
-(define c-last-word (with compile-exps c-last-word))
-(define c-prev-word (with compile-exps c-prev-word))
+(define c-last-word (with compile-state c-last-word))
+(define c-prev-word (with compile-state c-prev-word))
 (define table-count (with tables table-count))
 (define table-set! (with tables table-set!))
 

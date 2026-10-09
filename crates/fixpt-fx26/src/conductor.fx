@@ -13,17 +13,17 @@
          (compile-plan
           ((load-input "fx26:compile-plan.fx")
            compile-module compile-lift-module compile-exps-module check-resolve-module
-           check-program-module tables))
+           check-program-module tables compile-state-module))
          ;; Register code: its state, the constants known, and the twins made.
          (regcode
           ((load-input "fx26:regcode.fx")
            compile-module compile-exps-module compile-lift-module compile-plan
-           check-resolve-module tables layout-module standard-module))
+           check-resolve-module tables layout-module standard-module compile-state-module))
          ;; Register code, its expressions.
          (regcode-exps
           ((load-input "fx26:regcode-exps.fx")
            regcode compile-module compile-exps-module compile-lift-module
-           compile-plan check-resolve-module tables layout-module))
+           compile-plan check-resolve-module tables layout-module compile-state-module))
          ;; Register code, its places: registers, frame slots, environments.
          (regcode-places
           ((load-input "fx26:regcode-places.fx")
@@ -33,7 +33,7 @@
           ((load-input "fx26:regcode-helpers.fx")
            regcode compile-module compile-exps-module compile-plan
            compile-lift-module check-resolve-module regcode-exps layout-module tables
-           regcode-places))
+           regcode-places compile-state-module))
          ;; Register code for modules: their products, and with.
          (regcode-modules
           ((load-input "fx26:regcode-modules.fx")
@@ -43,22 +43,22 @@
           ((load-input "fx26:regcode-core.fx")
            regcode compile-module compile-lift-module compile-exps-module
            compile-plan regcode-exps layout-module regcode-helpers
-           regcode-modules regcode-places))
+           regcode-modules regcode-places compile-state-module))
          ;; Register code, its entry: a lambda as register code, or why none.
          (regcode-entry
           ((load-input "fx26:regcode-entry.fx")
            compile-module compile-exps-module compile-plan regcode
            check-resolve-module regcode-exps regcode-core regcode-helpers
-           layout-module))
+           layout-module compile-state-module))
          ;; The twins: register code beside each word.
          (compile-twins
           ((load-input "fx26:compile-twins.fx")
            compile-module compile-exps-module compile-plan compile-lift-module
-           regcode-entry))
+           regcode-entry compile-state-module))
          ;; Inlining: what the compiler knows of small global procedures.
          (compile-inline
           ((load-input "fx26:compile-inline.fx")
-           compile-module compile-plan compile-exps-module tables))
+           compile-module compile-plan compile-exps-module tables compile-state-module))
          ;; The evaluator.
          (eval-values ((load-input "fx26:eval-values.fx") check-types-module))
          (eval-prims ((load-input "fx26:eval-prims.fx") eval-values tables check-types-module))
@@ -70,7 +70,7 @@
           ((load-input "fx26:compile-programs.fx")
            compile-module compile-exps-module compile-plan compile-twins
            regcode-exps compile-inline regcode check-resolve-module tables
-           regcode-helpers layout-module))
+           regcode-helpers layout-module compile-state-module))
          ;; The assembler, of the encoders and the generated layouts.
          (native
           ((load-input "fx26:native.fx")

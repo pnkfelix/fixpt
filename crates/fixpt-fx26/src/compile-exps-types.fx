@@ -64,14 +64,7 @@
 (define-type c-lifting (select compile-types c-lifting))
 (define-type c-recs (select compile-types c-recs))
 (define-type compile-exps-sig
-  (moduleof (val c-defining (ref (listof symbol @k) @k))
-            (val c-word-name (ref (listof string @k) @k))
-            (val c-module-members (ref (listof c-inlinables @k) @k))
-            (val c-module-values
-                 (subr (maxeff (alloc @k) (read @globals)) (mod-items) c-mvals))
-            (val c-made-now (ref (listof c-made @k) @k))
-            (val c-made-reuse (ref (listof c-made @k) @k))
-            (val c-exp
+  (moduleof (val c-exp
                  (subr (maxeff (alloc @k)
                                (goto @y)
                                (read @globals)
@@ -91,25 +84,6 @@
                                spin)
                        (c-params exp cenv int code syms c-region)
                        patches))
-            (val c-last-word (ref (listof tword @k) @k))
-            (val c-prev-word (ref (listof tword @k) @k))
-            (val c-own-now (ref (listof (productof (1 symbol) (2 tword)) @k) @k))
-            (val c-spec-now (ref (listof c-spec @k) @k))
-            (val c-r-plan-ctx (ref (listof int @k) @k))
-            (val c-twins (ref (listof c-twin @k) @k))
-            (val c-names-any?
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
-                       (exp c-mslots)
-                       bool))
-            (val c-waits-onto
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
-                       (c-waits int patches)
-                       c-waits))
-            (val c-made-word
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
-                       (c-params exp cenv syms)
-                       (listof c-closing @k)))
-            (val c-fx-name (subr (read @globals) (symbol exp) string))
             (val c-lift
                  (subr (maxeff (alloc @k)
                                (goto @y)
@@ -120,31 +94,6 @@
                                spin)
                        (c-recs exp int int cenv bool)
                        c-lifting))
-            (val c-quote-now
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
-                       (exp)
-                       (listof wcell @k)))
-            (val c-module-slots
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
-                       (c-mvals int)
-                       c-mslots))
-            (val c-module-own
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
-                       (symbol cenv c-mslots exp int)
-                       cenv))
-            (val c-form-made (ref (listof c-made @k) @k))
-            (val c-own-of
-                 (subr (maxeff (alloc @k) (read @globals) (read @k)) (c-params syms) syms))
-            (val c-own-scope
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
-                       (syms syms cenv)
-                       cenv))
-            (val c-copy-twin
-                 (subr (maxeff (alloc @k) (read @globals) (read @k))
-                       (c-twin c-spec int int)
-                       c-twin))
-            (val c-standard-name
-                 (subr (maxeff (alloc @k) (read @globals) (read @k) spin) (exp cenv) string))
             (val c-lambda-word
                  (subr (maxeff (alloc @k)
                                (goto @y)

@@ -21,6 +21,6 @@ exempt crates/fixpt-fx26/tests/programs/terminate/deep-self-application.fx
 # calls folded in to remove the hooks between files (the user's,
 # 2026-10-06, `TODO.md` §41): over the limit for now, to be revisited.
 # Raised by its imports alone when the conductor came to make it, 1125 to
-# 1415, then 1417 for another module it is given, the code unchanged (the
-# user's, 2026-10-09, `TODO.md` §68).
-crates/fixpt-fx26/src/regcode-core.fx 1417 0
+# 1415, and by two lines for each module it is given since (split from one
+# it was given), the code unchanged (the user's, 2026-10-09, `TODO.md` §68).
+crates/fixpt-fx26/src/regcode-core.fx 1419 0
