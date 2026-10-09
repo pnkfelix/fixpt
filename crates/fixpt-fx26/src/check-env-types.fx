@@ -131,4 +131,7 @@
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (symbol) unit))
    (val k-hazard-mods (ref k-hazard-list @t))
    (val k-with-names (subr (maxeff (read @globals) (read @t)) (int int) k-names))
-   (val k-summary (subr (read @globals) (k-eff) int))))
+   (val k-summary (subr (read @globals) (k-eff) int))
+   (val k-param-map (ref k-params-given @t))
+   (val k-param-in
+        (subr (maxeff (read @globals) (read @t)) (k-params-given int symbol int) int))))

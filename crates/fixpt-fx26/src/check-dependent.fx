@@ -9,15 +9,70 @@
 ;;; it to select from (`first-class-modules.md`, M5): in its type, `(select
 ;;; $k t)`, the `k`th parameter's type `t`.
 
-;; Its types (`check-dependent-types.fx`), loaded before the module so that they are
-;; not among its values; the module names what it uses of them.
-(define check-dependent-types (load-module "fx26:check-dependent-types.fx"))
-;; A module (`TODO.md` §34: the front end into modules, a file at a time);
-;; what other files use re-exported after it.
-(define check-dependent-module (module
+;; Its types, those it uses of the files before it, and the signatures of
+;; what it is given.
+(let* ((check-dependent-types (load-module "fx26:check-dependent-types.fx"))
+       (check-types-types (load-module "fx26:check-types-types.fx"))
+       (check-env-types (load-module "fx26:check-env-types.fx"))
+       (check-holds-types (load-module "fx26:check-holds-types.fx"))
+       (parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
+       (check-modules-types (load-module "fx26:check-modules-types.fx"))
+       (check-read-descs-types (load-module "fx26:check-read-descs-types.fx"))
+       (check-expect-types (load-module "fx26:check-expect-types.fx"))
+       (check-subst-types (load-module "fx26:check-subst-types.fx")))
+  ;; What it is given: the modules of the files before it that it uses.
+  (lambda ((check-types (select check-types-types check-types-sig))
+           (check-env (select check-env-types check-env-sig))
+           (check-modules (select check-modules-types check-modules-sig))
+           (check-read-descs (select check-read-descs-types check-read-descs-sig))
+           (check-expect (select check-expect-types check-expect-sig))
+           (check-holds (select check-holds-types check-holds-sig))
+           (check-subst (select check-subst-types check-subst-sig)))
+    (module
 (define-type k-given-back (select check-dependent-types k-given-back))
 (define-type k-dependent (select check-dependent-types k-dependent))
 (define-type k-callables (select check-dependent-types k-callables))
+;; The types it uses of the files before it.
+(define-effect checks (select check-types-types checks))
+(define dt (with check-types-types dt))
+(define-type k-desc (select check-types-types k-desc))
+(define-type k-ids (select check-types-types k-ids))
+(define-type k-map (select check-types-types k-map))
+(define-type k-names (select check-types-types k-names))
+(define-type k-parts (select check-types-types k-parts))
+(define-effect kreads (select check-types-types kreads))
+(define-effect kstate (select check-types-types kstate))
+(define-type kxs (select check-types-types kxs))
+(define ty-module (with check-types-types ty-module))
+(define ty-param (with check-types-types ty-param))
+(define ty-var (with check-types-types ty-var))
+(define x-var (with check-types-types x-var))
+(define-type k-bindings (select check-env-types k-bindings))
+(define-type k-params-given (select check-env-types k-params-given))
+(define-type k-seen (select check-holds-types k-seen))
+(define-type names (select parser-types names))
+;; What it uses of the modules it is given.
+(define k-cat3 (with check-types k-cat3))
+(define k-cat5 (with check-types k-cat5))
+(define k-fail (with check-types k-fail))
+(define k-get (with check-types k-get))
+(define k-length (with check-types k-length))
+(define k-nth (with check-types k-nth))
+(define k-resolve (with check-types k-resolve))
+(define k-ty-new (with check-types k-ty-new))
+(define k-bind (with check-env k-bind))
+(define k-lookup (with check-env k-lookup))
+(define k-param-in (with check-env k-param-in))
+(define k-param-map (with check-env k-param-map))
+(define k-binding-names (with check-modules k-binding-names))
+(define k-check-apps-each (with check-modules k-check-apps-each))
+(define k-resolve-outside (with check-modules k-resolve-outside))
+(define k-ids-then (with check-read-descs k-ids-then))
+(define k-ty-kids (with check-read-descs k-ty-kids))
+(define k-name-nat (with check-expect k-name-nat))
+(define k-new-seen (with check-holds k-new-seen))
+(define k-seen? (with check-holds k-seen?))
+(define k-subst (with check-subst k-subst))
 
 ;; `t` with each `(select $k n)` what `given` says it is.
 (define k-instantiate-params (subr (maxeff kstate spin) (int k-params-given) int)
@@ -64,7 +119,6 @@
 ;; A lambda's result type `t`, as the procedure's type says it.
 (define k-result-back (subr (maxeff kstate spin) (int k-map) int)
   (lambda (t back) (if (null? back) t (k-subst t back))))
-
 
 (define k-abs-types (subr (maxeff kstate spin) (k-parts k-parts) k-parts)
   (lambda (abs ds)
@@ -151,9 +205,4 @@
                      (ps2 (k-instantiate-all ps given))
                      (r2 (k-instantiate-params r given)))
                 (begin (k-check-apps-each (k-ids-then ps2 r2) (k-new-seen) a b)
-                       (cons (product (1 (extract (car c) 1)) (2 ps2) (3 r2)) nil))))))))))
-
-(define k-instantiate-params (with check-dependent-module k-instantiate-params))
-(define k-bind-params (with check-dependent-module k-bind-params))
-(define k-result-back (with check-dependent-module k-result-back))
-(define k-dependent-callee (with check-dependent-module k-dependent-callee))
+                       (cons (product (1 (extract (car c) 1)) (2 ps2) (3 r2)) nil)))))))))))

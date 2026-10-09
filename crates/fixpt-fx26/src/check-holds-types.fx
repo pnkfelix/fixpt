@@ -37,4 +37,9 @@
             (val k-id-hash (subr pure (int) int))
             (val k-id=? (subr pure (int int) bool))
             (val k-ds-types
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (k-descs) k-ids))))
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (k-descs) k-ids))
+            (val k-new-seen (subr (maxeff (alloc @t) (read @globals)) () k-seen))
+            (val k-seen?
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t))
+                       (k-seen int)
+                       bool))))

@@ -9,7 +9,12 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; The checker, data: what the data kind admits.
+  (let* (;; The checker, dependent subroutines: parameters selected from.
+         (check-dependent
+          ((load-input "fx26:check-dependent.fx")
+           check-types-module check-env-module check-modules-module check-read-descs-module
+           check-expect-module check-holds-module check-subst-module))
+         ;; The checker, data: what the data kind admits.
          (check-data
           ((load-input "fx26:check-data.fx")
            check-types-module check-print-module check-expect-module check-effects-module
@@ -87,7 +92,7 @@
           ((load-input "fx26:check-rules.fx")
            check-types-module check-infer check-synth check-errors-module
            check-resolve-module check-env-module check-expect-module check-letrec
-           check-dependent-module check-module-rules check-read-descs-module
+           check-dependent check-module-rules check-read-descs-module
            check-proving-module check-test-facts check-close check-print-module
            check-terminate check-modorder check-unions-module check-modules-module
            check-effects-module check-data check-read-module check-mask-module

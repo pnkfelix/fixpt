@@ -34,6 +34,11 @@
 ;; The types it names, from the files that define them.
 (define check-resolve-types (load-module "fx26:check-resolve-types.fx"))
 (define-type k-letrec-bs (select check-resolve-types k-letrec-bs))
+;; The types it names, from the files that define them.
+(define-type k-bindings (select check-env-types k-bindings))
+(define-type k-names (select check-types-types k-names))
+(define check-holds-types (load-module "fx26:check-holds-types.fx"))
+(define-type k-seen (select check-holds-types k-seen))
 (define-type check-modules-sig
   (moduleof (val k-resolve-exp
                  (subr (maxeff (alloc @t)
@@ -110,4 +115,26 @@
                                (write @t)
                                spin)
                        (int k-ids int int)
-                       k-ids))))
+                       k-ids))
+            (val k-check-apps-each
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (k-ids k-seen int int)
+                       unit))
+            (val k-resolve-outside
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (int k-names int int)
+                       int))
+            (val k-binding-names
+                 (subr (maxeff (alloc @t) (read @globals) (read @t)) (k-bindings) k-names))))
