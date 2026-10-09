@@ -114,8 +114,9 @@ are in the last section, "Log: the glance's details", and in
   (phase 1, the checker's and the parser's done); the evaluator converted
   (phase 2's pilot), its files `load-input` files that `conductor.fx`
   applies to the modules they use. Every load of a path is one value,
-  made once and purely, so a types file is checked and compiled once:
-  241 M words to compile the front end, from 297 (215 before §68). Next:
+  made once and purely, so a types file is checked and compiled once;
+  the FX checker shows types only for a driver that reads them: 170 M
+  words to compile the front end, from 297 (215 before §68). Next:
   the other files, from the last backwards.
 - **The collector** (the user's, 2026-09-29;
   `docs/research/generational-gc.md`): done, all four. Stack maps (each

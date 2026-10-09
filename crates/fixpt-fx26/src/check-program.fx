@@ -419,11 +419,19 @@
         (let ((filled (get k-ahead-filled)))
           (begin (set k-ahead-filled nil) (k-ground-filled (k-filled-reversed filled nil))
                  (k-note-closed-filled filled)))))))
+;; Whether a form's lines are made: only for a driver that reads them
+;; (`fixpt check`, the REPL, the agreement tests). Showing the types of
+;; modules is most of the cost of checking a front end of them, which the
+;; compile paths never read (`check-lines!`).
+(define k-show-lines (ref bool @t) (new #t))
+;; The line for a form of type `t` and effect `e`; empty, if none are made.
 (define k-line (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (int k-eff) string)
-  (lambda (t e) (k-cat3 (k-show-ty t) " ! " (k-show-effect e))))
+  (lambda (t e)
+    (if (get k-show-lines) (k-cat3 (k-show-ty t) " ! " (k-show-effect e)) "")))
 ;; The line for a definition of `name`, of type `t` and effect `e`.
 (define k-define-line (subr (maxeff kreads (alloc @t) spin) (symbol int k-eff) string)
-  (lambda (name t e) (k-cat4 "define " (symbol->string name) " : " (k-line t e))))
+  (lambda (name t e)
+    (if (get k-show-lines) (k-cat4 "define " (symbol->string name) " : " (k-line t e)) "")))
 (define k-push-lines (subr (maxeff kreads (alloc @t)) (k-out k-out) k-out)
   (lambda (lines out) (if (null? lines) out (k-push-lines (cdr lines) (cons (car lines) out)))))
 ;; Bind `n`, at top level, to a value of type `t`: a global, a module's
@@ -844,6 +852,9 @@
 ;; (`,rerun-outdated`), as the Rust checker's `defer_reruns`.
 (define k-defer-reruns (ref bool @t) (new #f))
 ;; For a driver: whether re-runs wait.
+;; For a driver: whether a form's lines are made (`k-show-lines`).
+(define check-lines! (subr (maxeff (read @globals) (write @t)) (bool) unit)
+  (lambda (on) (set k-show-lines on)))
 (define check-defer-reruns! (subr (maxeff (read @globals) (write @t)) (bool) unit)
   (lambda (on) (set k-defer-reruns on)))
 ;; A top-level form, checked under redefinition: its lines, and those of
@@ -903,6 +914,7 @@
 (define checked-tops (with check-program-module checked-tops))
 (define k-record (with check-program-module k-record))
 (define check-defer-reruns! (with check-program-module check-defer-reruns!))
+(define check-lines! (with check-program-module check-lines!))
 (define k-defining (with check-program-module k-defining))
 (define check-program (with check-program-module check-program))
 (define check-more (with check-program-module check-more))

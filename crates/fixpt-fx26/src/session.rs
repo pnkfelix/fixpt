@@ -993,9 +993,9 @@ impl Fx26Session {
 
     /// The front end's entry points the Rust side calls by name
     /// (`READER_PREFIX`), each rebound by [`Self::front_end_as_register_code`].
-    pub const FRONT_ENTRIES: [&'static str; 24] = [
+    pub const FRONT_ENTRIES: [&'static str; 25] = [
         "read-text", "check-program", "check-more", "checked-tops", "checked-extracts", "checked-effects", "check-conv-native!", "checked-withs!", "checked-reshapes!",
-        "check-globals-effects!", "check-defer-reruns!", "parse-program", "loaded-files!", "run-checked", "compile-program", "compile-checked", "compile-registers!",
+        "check-globals-effects!", "check-defer-reruns!", "check-lines!", "parse-program", "loaded-files!", "run-checked", "compile-program", "compile-checked", "compile-registers!",
         "compile-global-cell", "compile-new-global", "compile-keep-global!", "compile-note-inline!", "native-assemble",
         "arm-ret", "arm-mov-imm64",
     ];

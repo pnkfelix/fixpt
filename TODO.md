@@ -1878,4 +1878,15 @@ Phase 1, the types out, one module at a time; phase 2, the conversion.
   (`supply_loaded_in`). The evaluator's three files are now `load-input`
   files, a `let*` of the types files they use around the `lambda` that
   makes the module, and `make` is gone. Cost: 241 M words (from 297).
+- Where the rest went (2026-10-08, measured back to back against the
+  commit before §68): with the FX checker's lines off, 168.3 M words
+  then and 170.5 now, the check 985 ms then and 1035 now. The whole
+  regression was printing: 47 M words before §68, 71 M after, as module
+  types and the hidden `%shared:` definitions (0.72 MB of the 1.9 MB
+  shown) are large. No compile reads the lines, so only a driver that
+  does makes them (`check-lines!`; `fixpt check`, the REPL, the agreement
+  tests): compiling the front end is 170.5 M words, the FX check about
+  1.0 s, from 215.7 and 1.15 s before §68. Left, if `fixpt check` on the
+  front end matters: not showing hidden definitions, and a printer that
+  builds a type's text once rather than by appending (`k-show-ty`).
 

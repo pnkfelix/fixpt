@@ -32,7 +32,7 @@
     (let ((std (b-read standard)) (prog (b-read program)))
       (if (or (null? std) (null? prog))
           (b-fail "the reader could not read the text")
-          (tagcase (parse-program (car prog))
+          (tagcase (begin (check-lines! #f) (parse-program (car prog)))
             (p-err (m a b) (b-fail (string-append "parse: " m)))
             (p-ok (tops)
               (tagcase (check-program (car std) tops)

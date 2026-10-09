@@ -315,10 +315,19 @@ pub fn check_only(scheme: &mut Session, standard: Option<Handle>, file: FileId, 
 /// environment `standard`; or, without it, more forms after those checked
 /// before.
 fn check_in(s: &mut Session, standard: Option<Handle>, tops: Handle) -> Result<Handle, fixpt_scheme::SessionError> {
+    // What these callers keep is the facts, not the lines (`check-lines!`).
+    lines(s, false)?;
     match standard {
         Some(std) => s.call_global(&format!("{READER_PREFIX}check-program"), &[std, tops]),
         None => s.call_global(&format!("{READER_PREFIX}check-more"), &[tops]),
     }
+}
+
+/// Whether the checker written in FX-26 makes each form's line, `define
+/// name : type ! effect`: only for a caller that reads them.
+pub fn lines(s: &mut Session, on: bool) -> Result<(), fixpt_scheme::SessionError> {
+    let v = s.make(|_| Value::boolean(on));
+    s.call_global(&format!("{READER_PREFIX}check-lines!"), &[v]).map(|_| ())
 }
 
 /// What the checker written in FX-26 made of a program: for each definition
@@ -342,6 +351,7 @@ pub fn check_with_fx26_checker(scheme: &mut Session, standard: Handle, file: Fil
     scheme.scope(|s| {
         let tops = parse_to_trees(s, file, text)?;
         phase("program parsed");
+        lines(s, true).map_err(|e| fail(e.to_string()))?;
         let result = s.call_global(&format!("{READER_PREFIX}check-program"), &[standard, tops]).map_err(|e| fail(e.to_string()))?;
         phase("checked");
         let offsets = byte_offsets(text);

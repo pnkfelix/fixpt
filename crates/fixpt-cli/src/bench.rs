@@ -530,6 +530,8 @@ fn compile_row(fx: &mut Fx26Session, name: &str, text: &str, runs: usize, native
         let (fx_parse, tops) = fx_phase(sc, r("fx parse"), |sc| fixpt_fx26::syn::parse_syns(sc, file, text, syns).map_err(msg))?;
         let standard = fixpt_fx26::syn::read_standard(sc).map_err(msg)?;
         let reader = |n: &str| format!("{}{n}", fixpt_fx26::session::READER_PREFIX);
+        // A compile reads the facts, not each form's line.
+        fixpt_fx26::syn::lines(sc, false).map_err(|e| e.to_string())?;
         let (fx_check, ()) = fx_phase(sc, r("fx check"), |sc| {
             let r = sc.call_global(&reader("check-program"), &[standard, tops]).map_err(|e| e.to_string())?;
             let tag = sc.view(|v| v.get(r).field(2).and_then(|t| t.symbol_name()).unwrap_or_default());
