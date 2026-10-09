@@ -51,6 +51,9 @@
 (define-type k-conv (select check-types-types k-conv))
 ;; The types it names, from the files that define them.
 (define-type k-map (select check-types-types k-map))
+;; The types it names, from the files that define them.
+(define-type k-region (select check-types-types k-region))
+(define-type k-terms (select check-types-types k-terms))
 (define-type check-print-sig
   (moduleof (val k-globals-atom? (subr (read @globals) (k-atom) bool))
             (val k-show-effect (subr (maxeff (read @globals) (read @t)) (k-eff) string))
@@ -79,4 +82,6 @@
             (val k-size=? (subr (read @globals) (k-size k-size) bool))
             (val k-size-add-scaled (subr (read @globals) (k-size k-size int) k-size))
             (val k-show-size
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (k-size) string))))
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (k-size) string))
+            (val k-region-show (subr (maxeff (read @globals) (read @t)) (k-region) string))
+            (val k-coef-of (subr (read @globals) (k-terms int) int))))

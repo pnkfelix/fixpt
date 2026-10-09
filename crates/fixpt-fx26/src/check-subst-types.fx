@@ -25,6 +25,8 @@
 ;; What its clients use of it (`check-program.fx`).
 ;; The types it names, from the files that define them.
 (define-type k-map (select check-types-types k-map))
+;; The types it names, from the files that define them.
+(define-type k-region (select check-types-types k-region))
 (define-type check-subst-sig
   (moduleof (val k-note-closed-filled
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
@@ -33,4 +35,8 @@
             (val k-subst
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (int k-map)
-                       int))))
+                       int))
+            (val k-subst-region
+                 (subr (maxeff (read @globals) (read @t)) (k-region k-map) k-region))
+            (val k-new-smemo
+                 (subr (maxeff (alloc @t) (read (globals make-table))) () k-smemo))))

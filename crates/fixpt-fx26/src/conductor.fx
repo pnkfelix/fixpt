@@ -9,10 +9,16 @@
 ;;; top level has its whole type shown, and the types of modules are large.
 
 (define front-end-entries
-  (let* (;; The checker, instantiation and tagcase.
+  (let* (;; The checker, a poly's binders solved, defaulted and bounded.
+         (check-binders
+          ((load-input "fx26:check-binders.fx")
+           check-types-module check-data-module check-print-module check-env-module
+           check-subst-module check-resolve-module check-expect-module check-effects-module
+           check-modules-module tables))
+         ;; The checker, instantiation and tagcase.
          (check-infer
           ((load-input "fx26:check-infer.fx")
-           check-types-module check-resolve-module check-effects-module check-binders-module
+           check-types-module check-resolve-module check-effects-module check-binders
            check-env-module check-bounds-module check-print-module check-data-module
            check-read-descs-module check-kinds-module check-unions-module check-subtype-module
            check-holds-module check-expect-module check-subst-module))
@@ -36,7 +42,7 @@
          (check-test-facts
           ((load-input "fx26:check-test-facts.fx")
            check-infer check-types-module check-env-module check-terminate
-           check-print-module check-calls-module check-sc-graphs check-binders-module))
+           check-print-module check-calls-module check-sc-graphs check-binders))
          ;; The checker, letrec: a group's types found and checked.
          (check-letrec
           ((load-input "fx26:check-letrec.fx")
@@ -46,7 +52,7 @@
          (check-facts
           ((load-input "fx26:check-facts.fx")
            check-env-module check-test-facts check-infer check-calls-module
-           check-binders-module))
+           check-binders))
          ;; The checker, synthesis: calls, their arguments and type binders.
          (check-synth
           ((load-input "fx26:check-synth.fx")
@@ -54,7 +60,7 @@
            check-infer check-facts check-print-module check-bounds-module
            check-expect-module check-errors-module check-effects-module check-mask-module
            check-unions-module check-terminate check-holds-module check-subtype-module
-           check-calls-module check-subst-module check-binders-module))
+           check-calls-module check-subst-module check-binders))
          ;; The checker, a module's order: its items as a letrec*, used only once made.
          (check-modorder
           ((load-input "fx26:check-modorder.fx")
@@ -77,7 +83,7 @@
            check-terminate check-modorder check-unions-module check-modules-module
            check-effects-module check-data-module check-read-module check-mask-module
            check-calls-module check-bounds-module check-holds-module check-subtype-module
-           check-subst-module check-sc-graphs check-binders-module))
+           check-subst-module check-sc-graphs check-binders))
          ;; The checker, its proofs: lemmas proved.
          (check-proofs
           ((load-input "fx26:check-proofs.fx")

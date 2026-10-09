@@ -100,4 +100,14 @@
             (val k-first-mentioned
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (int k-ids)
-                       int))))
+                       int))
+            (val k-unescaped
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (int k-ids int int)
+                       k-ids))))
