@@ -2036,6 +2036,24 @@ name one more member of that set. If `extend` is ever n-ary,
 `(extend m1 m2 m3)` should be a left fold (the later wins), not "all at
 once", which would blur the two back together.
 
+`(hide item ...)` (the user's, 2026-10-09): its items' bindings are seen
+by the module's body but are not in the module's type, so helpers do not
+pollute its signature. Today the only ways are a `let` around the whole
+`module` (bindings before it, not items: no recursion with the module's
+own, no `define-type`) or ascribing the module to a `moduleof` written
+out in full (M4's width subtyping); both checkers agree on each
+(2026-10-09). `hide` is one form for visibility, apart from where a
+binding comes from, so it composes: `(hide (define helper ...))`,
+`(hide (define-type t ...))`, and `(hide (include m))` for using a module
+without re-exporting it (no separate `open`). Its meaning in what exists:
+the module's type without the hidden names, the ascription done for you.
+To decide with it: a hidden type in an exported one. An abbreviation is
+expanded; a generative type (`define-datatype`, `define-generative`), or
+one hidden by `(hide (include m))`, either becomes abstract in the
+module's type (the existential reading `moduleof` already has; leaning
+this way, so `hide` stays ascription) or is refused as escaping, as
+OCaml does.
+
 ## 70. Short names for the modules a file binds, after §68 phase 2 (the user's, 2026-10-09)
 
 Once every file is made by the conductor, a pass that alpha-renames the
