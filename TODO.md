@@ -1795,7 +1795,14 @@ The conversion is done (`DONE.md` §68). Left from it:
   `7989f6f`: 5.37 G cells to 1.04 G, from 0.80 G; 646 ms to 301, from 252).
   Left: every phase but one now grows no faster than its input (`fx
   check` +23%, `fx words` +19%, `fx arm64` +21%, `fx read` +27%); `fx
-  parse` is 2.2x (11.5 ms to 25.5), not yet looked at. In the FX compiler,
+  parse` is 2x (11.3 ms to 23.6): its search for each load's file among
+  all 850 is gone (`2980a06`), and what is left is moving each loaded
+  file's syntax to its base, once a file (`syn-moved`, 12.5 M of its 42.7
+  M cells), which grows with the text loaded, now nearly all of the front
+  end. Reading each file at its base would end it: `read-text` given an
+  offset, in the eager reader (licensed: its effects stay on its own
+  regions) and in each driver that reads loaded files (`syn.rs`
+  `read_to_syns`, `bootstrap.fx`). In the FX compiler,
   `c-find` (90 M cells to 181 M) and `c-member?` (38 M to 116 M) walk
   lists of names that the imports lengthen; in the FX checker,
   `k-has-name?` (160 M to 317 M). §69 and §70 shorten the imports; these
