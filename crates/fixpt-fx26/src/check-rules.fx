@@ -252,6 +252,7 @@
 (define k-handler-gives (with check-errors k-handler-gives))
 (define k-proj-count-error (with check-errors k-proj-count-error))
 (define k-prompt-body-error (with check-errors k-prompt-body-error))
+(define k-with-not-module (with check-errors k-with-not-module))
 (define k-as-subr (with check-resolve k-as-subr))
 (define k-callee-of (with check-resolve k-callee-of))
 (define k-conversion-name (with check-resolve k-conversion-name))
@@ -1319,9 +1320,7 @@
                        (r (k-synth body))
                        (unbound (k-unbind-to saved)))
                   (k-te-masked x (extract r 1) (k-union naming (extract r 2)))))
-              (else y
-                (let ((what (k-show-ty mt)))
-                  (k-fail (k-cat4 "`with` opens a module, and `" shown "` is a " what) a b)))))))))
+              (else y (k-fail (k-with-not-module shown (k-show-ty mt)) a b))))))))
   ;; `(with #%fx n)`: the standard `n`'s type, whatever binds `n` since.
   (k-synth-fx (subr (maxeff checks spin) (kx int kx int int) k-te)
     (lambda (x mt body a b)

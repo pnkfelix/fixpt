@@ -94,6 +94,13 @@
   (lambda (bs ds)
     (k-cat5 "this `poly` binds " (int->string (k-length bs)) " description(s); `proj` gave "
             (int->string (k-length ds)) "")))
+;; What `(with m …)` is told of an `m` that is a `what`, not a module; of
+;; `extend`'s `(with %extend-0 e1)` (`parser-exps.fx`), as `extend`'s.
+(define k-with-not-module (subr (read @globals) (string string) string)
+  (lambda (shown what)
+    (if (string=? shown "%extend-0")
+        (k-cat3 "`extend` extends a module by a module, and its first is a " what "")
+        (k-cat4 "`with` opens a module, and `" shown "` is a " what))))
 ;; What a prompt's body is, a `got`, where the tag's prompts deliver a `want`.
 (define k-prompt-body-error (subr (read @globals) (string string) string)
   (lambda (want got) (k-cat4 "the tag's prompts deliver a " want ", and this body is a " got)))

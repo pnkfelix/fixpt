@@ -1464,13 +1464,18 @@ impl Checker {
             "module" => self.parse_module(span, &items[1..]),
             // `(extend e0 e1)` (FX-91's, `TODO.md` §69): a module of the two,
             // `%extend-0` and `%extend-1`, whose values the checker makes it
-            // of, `e1`'s where both have a name (`Checker::extended`).
+            // of, `e1`'s where both have a name (`Checker::extended`). `e1`
+            // sees `e0`'s bindings, `(with %extend-0 e1)`, as FX-91's.
             "extend" => {
                 let [_, e0, e1] = &items[..] else {
                     return Err(FxError::at(span, "`(extend module module)`"));
                 };
                 let (e0, e1) = (self.parse_exp(e0)?, self.parse_exp(e1)?);
                 let names = [self.interner.intern("%extend-0"), self.interner.intern("%extend-1")];
+                // At no expression's place, the module's start with no
+                // width: facts are kept by place, and these are its own.
+                let at = fixpt_read::Span::new(span.file, span.start, span.start);
+                let e1 = self.arena.exp(at, Exp::With { module: names[0], body: e1 });
                 let items = vec![
                     ModItem::Val { name: names[0], ty: None, init: e0, infer: false },
                     ModItem::Val { name: names[1], ty: None, init: e1, infer: false },

@@ -1831,6 +1831,11 @@ The conversion is done (`DONE.md` §68). Left from it:
 from by path (a reshape, as a module given where fewer values are wanted
 is). Left:
 
+- `extend`'s `e1` sees `e0`'s values (`(with %extend-0 e1)`, FX-91
+  §2.3.5) but not yet its types and effects: FX-26's `with` opens a
+  module's values only, where FX-91's (§2.3.19) substitutes its
+  descriptions too, and its abstract types as `(select e0 t)`. Wanted: a
+  `with` that does, which `extend` then has.
 - `include` and `extend` of a module whose type has abstract types.
   The direction (the user's and Claude's, 2026-10-09): an abstract type of
   a module included *by name*, `(include m)`, is in the module's type
@@ -1894,3 +1899,16 @@ One level deep they agree (every `modules/load-*.fx`). Wanted: both say
 each file on the way, at the program's load, as Rust does for a reading
 error; a test program two loads deep. `modules/load-cycle.fx` is a file
 loading itself, one level deep, until this is done.
+
+## 74. A list one element short, said of its length (the user's, 2026-10-10)
+
+`(the (nlist int 4) (cons 1 (cons 2 (cons 3 nil))))` is told, at the
+`nil`, `a (nlist int 1) is expected here, and this is a (listof int
+acyclic)`: the size wanted is pushed through each `cons`, and `nil`, read
+as a list, is shown as one. Wanted (the user's): an error about `nil`'s
+reading as `(nlist T 0)`, the list being one element short; better still,
+said at the `the` of the list's length, 3 where 4 are wanted. The user's
+thought: `nil` as `(listof T acyclic) & (nlist T 0)`; the singleton type
+`nil` (`check.rs:2874`) is already below both, so what is wanted is the
+message choosing the `nlist` reading. One too long is told likewise, at a
+`cons` against `(nlist int 0)`. For later.

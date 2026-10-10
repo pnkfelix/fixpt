@@ -143,6 +143,7 @@
             (val k-proj-count-error
                  (subr (read @globals) (k-binders (listof k-desc acyclic)) string))
             (val k-prompt-body-error (subr (read @globals) (string string) string))
+            (val k-with-not-module (subr (read @globals) (string string) string))
             (val k-handler-gives
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
                        (int int string)

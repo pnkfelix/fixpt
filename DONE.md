@@ -1291,6 +1291,16 @@ in what it abbreviates already. Tests: `modules/hide.fx` (a datatype, a
 `define-rec` and an `include` hidden), `hide-include.fx`, `hide-unseen.fx`,
 `hide-escape.fx`.
 
+`extend`'s `e1` sees `e0`'s values (2026-10-10), as FX-91 §2.3.5 says
+("The expression e1 has access to the bindings of e0"): the hidden
+`%extend-1` is `(with %extend-0 e1)`, so `e0` is made once and `e1`'s own
+shadow its names inside `e1`; `e0`'s values keep their own, an `e1` name
+of theirs taking their place only outside. The `with` is at no
+expression's place (the `extend`'s start, of no width), since the FX-26
+checker keeps facts by place; an `e0` not a module is still said of
+`extend`. Types and effects of `e0` in `e1`: `TODO.md` §69. Test:
+`modules/extend-sees.fx`.
+
 ## 71. A load cycle is an error, not a hang (2026-10-10)
 
 Found 2026-10-09 (`TODO.md` §68 phase 2): two types files loading each

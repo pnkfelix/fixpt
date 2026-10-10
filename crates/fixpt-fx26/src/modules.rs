@@ -471,7 +471,12 @@ impl Checker {
             return Err(FxError::at(span, format!("`{}` is not bound", self.interner.name(m))));
         };
         let Ty::Module { vals, .. } = self.arena.get(self.arena.resolve(mt)).clone() else {
-            return Err(FxError::at(span, format!("`with` opens a module, and `{}` is a {}", self.interner.name(m), self.show_ty(mt))));
+            let msg = match self.interner.name(m) {
+                // `extend`'s `(with %extend-0 e1)` (`parse.rs`).
+                "%extend-0" => format!("`extend` extends a module by a module, and its first is a {}", self.show_ty(mt)),
+                m => format!("`with` opens a module, and `{m}` is a {}", self.show_ty(mt)),
+            };
+            return Err(FxError::at(span, msg));
         };
         let free = self.free_vars(body);
         let used: Vec<(usize, (Sym, TyId))> = vals.iter().copied().enumerate().filter(|(_, (n, _))| free.contains(n)).collect();
