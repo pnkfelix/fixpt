@@ -128,6 +128,7 @@
 (define k-abs-usage (with check-read-helpers k-abs-usage))
 (define k-all-unnamed? (with check-read-helpers k-all-unnamed?))
 (define k-arity-fail (with check-read-helpers k-arity-fail))
+(define k-type-form? (with check-read-helpers k-type-form?))
 (define k-binders-as-scope (with check-read-helpers k-binders-as-scope))
 (define k-component-names (with check-read-helpers k-component-names))
 (define k-ctor-eta (with check-read-helpers k-ctor-eta))
@@ -203,6 +204,8 @@
 (define k-subst (with check-subst k-subst))
 (define k-base (with check-env k-base))
 (define k-dscope (with check-env k-dscope))
+(define k-with-apps (with check-env k-with-apps))
+(define k-with-fallbacks (with check-env k-with-fallbacks))
 (define k-with-selected (with check-env k-with-selected))
 (define k-withs-over (with check-env k-withs-over))
 (define k-expanding (with check-env k-expanding))
@@ -393,23 +396,46 @@
         (k-type-named s)
         (let* ((items (k-items s "a type"))
                (hd (if (null? items) '|()| (syn-head (car items))))
-               (abbrev (if (symbol=? hd '|()|)
-                           (the (listof k-ds acyclic) nil)
-                           (k-lookup-desc hd)))
-               (alias (k-select-alias abbrev)))
-          (cond ((and (not (null? abbrev)) (k-ds-applied? (car abbrev)))
-                 (tagcase (car abbrev)
-                   (ds-abbrev (ps body) (k-expand-abbrev s hd ps body (cdr items)))
-                   (ds-gen (g) (k-apply-gen s g (cdr items)))
-                   ;; A description function applied (`check-kinds.fx`).
-                   (ds-var (v k) (k-parse-app s (k-ty-new (ty-var v)) (cdr items)))
-                   (ds-fun (f) (k-parse-app s f (cdr items)))
-                   (else x (k-sfail "an abbreviation" s))))
-                ((>= alias 0) (k-parse-app s alias (cdr items)))
-                ;; `((dlambda …) d …)` and `((select m f) d …)`.
-                ((and (not (null? items)) (tagcase (car items) (lst (xs d a b) #t) (else x #f)))
-                 (k-parse-app s (k-parse-fun (car items) -1) (cdr items)))
-                (else (k-parse-type-form s items hd)))))))
+               ;; In `with` bodies, `(f d …)` is the modules' `f` first.
+               (withs (if (or (symbol=? hd '|()|) (k-type-form? hd)) nil (k-withs-over hd))))
+          (cond ((null? withs) (k-parse-type-list s items hd))
+                ((null? (k-lookup-desc hd)) (k-with-applied withs hd (cdr items) -1))
+                (else (k-with-applied withs hd (cdr items) (k-parse-type-list s items hd))))))))
+;; Type `s`, `(hd …)`, of `items`, as the description scope says.
+(define k-parse-type-list (subr (maxeff checks spin) (syn k-syns symbol) int)
+  (lambda (s items hd)
+    (let* ((abbrev (if (symbol=? hd '|()|)
+                       (the (listof k-ds acyclic) nil)
+                       (k-lookup-desc hd)))
+           (alias (k-select-alias abbrev)))
+      (cond ((and (not (null? abbrev)) (k-ds-applied? (car abbrev)))
+             (tagcase (car abbrev)
+               (ds-abbrev (ps body) (k-expand-abbrev s hd ps body (cdr items)))
+               (ds-gen (g) (k-apply-gen s g (cdr items)))
+               ;; A description function applied (`check-kinds.fx`).
+               (ds-var (v k) (k-parse-app s (k-ty-new (ty-var v)) (cdr items)))
+               (ds-fun (f) (k-parse-app s f (cdr items)))
+               (else x (k-sfail "an abbreviation" s))))
+            ((>= alias 0) (k-parse-app s alias (cdr items)))
+            ;; `((dlambda …) d …)` and `((select m f) d …)`.
+            ((and (not (null? items)) (tagcase (car items) (lst (xs d a b) #t) (else x #f)))
+             (k-parse-app s (k-parse-fun (car items) -1) (cdr items)))
+            (else (k-parse-type-form s items hd))))))
+;; `(f d …)`, its descriptions `args`, read in the bodies of `with`s of
+;; modules `withs` (innermost first): `((select m f) d …)` of the innermost,
+;; which, where `m` does not give `f`, is the next's, and so on out to
+;; `outer`, what it means here otherwise, or -1. As `parse.rs`'s
+;; `with_applied`.
+(define k-with-applied (subr (maxeff checks spin) (k-names symbol k-syns int) int)
+  (lambda (withs f args outer)
+    (if (null? withs)
+        outer
+        (let* ((t (k-with-applied (cdr withs) f args outer))
+               (fun (k-ty-new (ty-select (car withs) f)))
+               (app (k-ty-new (ty-app fun (k-parse-ds args)))))
+          (begin (set k-with-fallbacks (cons (product (1 fun) (2 t)) (get k-with-fallbacks)))
+                 (set k-with-apps (cons (product (1 fun) (2 app)) (get k-with-apps)))
+                 app)))))
 ;; `(subr effect (param …) result)`, or with a convention first, `(subr
 ;; (conv C) effect (param …) result)`; left out, it is the program's.
 (define k-parse-subr (subr (maxeff checks spin) (syn k-syns) int)

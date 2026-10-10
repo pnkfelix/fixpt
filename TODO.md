@@ -1831,9 +1831,6 @@ The conversion is done (`DONE.md` §68). Left from it:
 from by path (a reshape, as a module given where fewer values are wanted
 is). Left:
 
-- A `with`'s module's description *functions* applied, `(f int)` in a
-  `with` body for `m`'s `f`: not shadowed yet, as names alone are
-  (`DONE.md` §69); the head of an application is read as before.
 - `include` and `extend` of a module with abstract types that is not a
   name: refused now (`DONE.md` §69 has the named ones, aliases). For the
   two that are literal text, an inline `(module …)` and a `(load-module

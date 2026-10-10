@@ -338,16 +338,26 @@
                (node (k-ty-new (ty-select (car withs) sym))))
           (begin (set k-with-fallbacks (cons (product (1 node) (2 t)) (get k-with-fallbacks)))
                  node)))))
+;; Of those, each applied, `(f d …)`: its `select` node and the application,
+;; which is what falls back (`k-with-applied`).
+(define k-with-apps (ref k-fallbacks @t) (new nil))
+;; The entry of `fs` for node `node`, or `none`.
+(define k-fallback-in (subr kreads (k-fallbacks int int) int)
+  (lambda (fs node none)
+    (letrec ((find (subr kreads (k-fallbacks) int)
+                (lambda (fs)
+                  (cond ((null? fs) none)
+                        ((= (extract (car fs) 1) node) (extract (car fs) 2))
+                        (else (find (cdr fs)))))))
+      (find fs))))
 ;; What `select` node `node`, a `with`'s, falls back to (`k-with-selected`):
 ;; a type, or -1 if nothing; -2 if it is not a `with`'s.
 (define k-with-fallback (subr kreads (int) int)
-  (lambda (node)
-    (letrec ((find (subr kreads (k-fallbacks) int)
-                (lambda (fs)
-                  (cond ((null? fs) -2)
-                        ((= (extract (car fs) 1) node) (extract (car fs) 2))
-                        (else (find (cdr fs)))))))
-      (find (get k-with-fallbacks)))))
+  (lambda (node) (k-fallback-in (get k-with-fallbacks) node -2)))
+;; The application whose `select` node, a `with`'s, is `node`, or -1
+;; (`k-with-applied`).
+(define k-with-app-of (subr kreads (int) int)
+  (lambda (node) (k-fallback-in (get k-with-apps) node -1)))
 
 ;; How many fresh regions have been made, for naming the next.
 (define k-fresh (ref int @t) (new 0))

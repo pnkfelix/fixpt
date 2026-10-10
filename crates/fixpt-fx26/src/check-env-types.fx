@@ -183,4 +183,6 @@
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
               (k-names symbol int)
               int))
-   (val k-with-fallback (subr (maxeff (read @globals) (read @t)) (int) int))))
+   (val k-with-fallback (subr (maxeff (read @globals) (read @t)) (int) int))
+   (val k-with-apps (ref k-fallbacks @t))
+   (val k-with-app-of (subr (maxeff (read @globals) (read @t)) (int) int))))

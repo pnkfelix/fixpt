@@ -106,6 +106,24 @@ impl Checker {
         t.expect("a `with`")
     }
 
+    /// `(f d …)`, `s`, read in the bodies of `with`s of modules `withs`
+    /// (innermost first): `((select m f) d …)` of the innermost, which,
+    /// where `m` does not give `f`, is the next's, and so on out to what
+    /// `s` means here otherwise, `outer`; as `with_selected` for a name.
+    fn with_applied(&mut self, s: &Syntax, withs: &[Sym], f: Sym, outer: Option<TyId>) -> R<TyId> {
+        let args = &self.items(s, "a type")?.to_vec()[1..];
+        let mut t = outer;
+        for m in withs.iter().rev() {
+            let fun = self.arena.ty(Ty::Select(*m, f));
+            let ds = args.iter().map(|a| self.parse_d(a)).collect::<R<Vec<_>>>()?;
+            let app = self.arena.ty(Ty::App { fun, args: ds });
+            self.arena.with_fallback.insert(fun, t);
+            self.arena.with_applied.insert(fun, app);
+            t = Some(app);
+        }
+        Ok(t.expect("a `with`"))
+    }
+
     /// What `read` reads, in the body of a `(with m …)`: `m`'s type names
     /// shadowing those before (`withs_over`); `#%fx`'s are the standard's.
     fn with_types_of<T>(&mut self, m: Sym, read: impl FnOnce(&mut Self) -> R<T>) -> R<T> {
@@ -432,6 +450,15 @@ impl Checker {
                 return Ok(self.with_selected(&withs, sym, outer));
             }
             return self.type_name_read(s, sym);
+        }
+        // `(f d …)` in `with` bodies: the modules' `f` first, as names alone.
+        let head = s.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol());
+        if let Some(head) = head.filter(|h| !TYPE_FORMS.contains(&self.name(*h))) {
+            let withs = self.withs_over(head);
+            if !withs.is_empty() {
+                let outer = if self.lookup_desc(head).is_some() { Some(self.parse_type_list(s)?) } else { None };
+                return self.with_applied(s, &withs, head, outer);
+            }
         }
         self.parse_type_list(s)
     }

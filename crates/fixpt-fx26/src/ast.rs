@@ -669,6 +669,9 @@ pub struct Arena {
     /// (`(with m …)`'s, shadowing): what the name meant outside, if
     /// anything, should `m` not give it.
     pub with_fallback: std::collections::HashMap<TyId, Option<TyId>>,
+    /// Of those, each that is applied, `(f d …)`: the application, which
+    /// is what falls back.
+    pub with_applied: std::collections::HashMap<TyId, TyId>,
 }
 
 /// The id of the last of `len` entries of a table of `what`: ids are 32
@@ -832,6 +835,7 @@ impl Arena {
     pub fn reset(&mut self, mark: ArenaMark) {
         self.tys.truncate(mark.tys);
         self.with_fallback.retain(|t, _| (t.0 as usize) < mark.tys);
+        self.with_applied.retain(|t, _| (t.0 as usize) < mark.tys);
         self.exps.truncate(mark.exps);
         self.dvar_names.truncate(mark.dvars);
         self.dvar_places.truncate(mark.dvars);

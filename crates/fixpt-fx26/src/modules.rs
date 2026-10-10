@@ -574,6 +574,17 @@ impl Checker {
                 (None, Some((_, d))) => *d,
                 // A name read in a `with` body that `m` does not give: what
                 // it is outside the `with` (`Parser::with_selected`).
+                // Applied, `(f d …)`: the application is what it is outside.
+                (None, None) if self.arena.with_applied.contains_key(&node) => {
+                    let app = self.arena.with_applied[&node];
+                    let Some(outer) = self.arena.with_fallback[&node] else {
+                        let shown = self.interner.name(n);
+                        return Err(FxError::at(span, format!("`{shown}` is not a description function, nor one a module opened by `with` gives")));
+                    };
+                    let to = self.resolve_selects(outer, span)?;
+                    self.arena.set_link(app, to);
+                    continue;
+                }
                 (None, None) if self.arena.with_fallback.contains_key(&node) => match self.arena.with_fallback[&node] {
                     Some(outer) => self.resolve_selects(outer, span)?,
                     None => return Err(FxError::at(span, format!("`{}` is not a type, nor one a module opened by `with` gives", self.interner.name(n)))),

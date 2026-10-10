@@ -105,6 +105,7 @@
 (define k-global? (with check-env k-global?))
 (define k-lookup (with check-env k-lookup))
 (define k-module-vars (with check-env k-module-vars))
+(define k-with-app-of (with check-env k-with-app-of))
 (define k-with-fallback (with check-env k-with-fallback))
 (define k-select-map (with check-env k-select-map))
 (define k-desc-of-kind? (with check-kinds k-desc-of-kind?))
@@ -295,13 +296,22 @@
           (else (k-comp-find (cdr ps) n)))))
 ;; What `(select m n)` is, `m` a module bound to a type of abstract types
 ;; `abs` and descriptions `ds`: its abstract type `n`, or its description;
-;; an error at `a`..`b` if it has neither.
+;; an error at `a`..`b` if it has neither. -3 if it is a `with`'s applied,
+;; `(n d …)`, that `m` does not give: the application is linked to what it
+;; is outside (`k-with-applied`), and the `select` is not resolved.
 (define k-select-component
   (subr (maxeff checks spin) (symbol symbol k-parts k-parts int int int) int)
   (lambda (m n abs ds node a b)
-    (let ((v (k-comp-find abs n)) (d (k-comp-find ds n)) (outer (k-with-fallback node)))
+    (let ((v (k-comp-find abs n)) (d (k-comp-find ds n)) (outer (k-with-fallback node))
+          (app (k-with-app-of node)))
       (cond ((>= v 0) (k-ty-new (ty-var v)))
             ((>= d 0) d)
+            ((and (>= app 0) (>= outer 0))
+             (begin (k-set-link app (k-resolve-selects outer a b)) -3))
+            ((>= app 0)
+             (k-fail (k-cat3 (k-quote (symbol->string n)) " is not a description function,"
+                             " nor one a module opened by `with` gives")
+                     a b))
             ;; A name read in a `with` body that `m` does not give: what it
             ;; is outside the `with` (`k-with-selected`).
             ((>= outer 0) (k-resolve-selects outer a b))
@@ -376,9 +386,9 @@
                          (else y (k-fail (k-cat4 (k-select-prefix m n) "` is a " (k-show-ty mt)
                                                  ", not a module")
                                          a b)))))
-               (linked (k-link-global-select m (extract (car found) 3) to))
+               (linked (if (= to -3) #u (k-link-global-select m (extract (car found) 3) to)))
                (rest (k-selection (cdr found) a b)))
-          (cons (product (1 m) (2 n) (3 to)) rest)))))
+          (if (= to -3) rest (cons (product (1 m) (2 n) (3 to)) rest))))))
 ;;; ------------------------------------------------------------ effects selected
 
 ;; The entry of `ss` for variable `v`, or none.

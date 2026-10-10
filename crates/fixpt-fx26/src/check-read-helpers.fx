@@ -134,6 +134,9 @@
   (list 'arrayof 'bloblet 'composable 'dletrec 'icell 'listof 'mark-key 'moduleof 'mu 'nat 'nlist
         'pairof 'place 'poly 'productof 'prompt-tag 'proves 'ref 'select 'subr 'sumof 'bool
         'union))
+;; Whether `hd` heads a type form: not a name a `with` shadows.
+(define k-type-form? (subr (maxeff (read @globals) (read @t)) (symbol) bool)
+  (lambda (hd) (k-has-name? k-type-forms hd)))
 (define k-keywords k-names
   (list 'lambda 'plambda 'proj 'if 'letrec 'let 'begin 'define 'define* 'define-type
         'define-generative 'subr 'poly 'ref 'pairof 'dletrec 'void 'pure 'maxeff 'read 'write

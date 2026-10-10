@@ -1332,6 +1332,15 @@ outside any from looking. Tests: `modules/with-shadows.fx`,
 `with-falls-back.fx`, `with-type-missing.fx`, `with-effect-missing.fx`,
 `extend-sees-types.fx`.
 
+Then a description function applied, `(f d …)` in a `with` body
+(2026-10-10): `((select m f) d …)`, its descriptions read by their shape,
+and where `m` does not give `f`, the *application* linked to what `(f d
+…)` is outside (`with_applied`, `k-with-applied`; `with_applied` in the
+arena, `k-with-apps`), not the `select`, so that `(f int)` and `(f bool)`
+in one type each fall back to their own. Type forms are not shadowed.
+Choices: `CLAUDES_CHOICES.md`. Tests: `modules/with-shadows-applied.fx`,
+`with-applied-missing.fx`.
+
 ## 71. A load cycle is an error, not a hang (2026-10-10)
 
 Found 2026-10-09 (`TODO.md` §68 phase 2): two types files loading each
