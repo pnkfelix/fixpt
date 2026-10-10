@@ -909,7 +909,7 @@
       (if (= (extract f 2) 0)
           (e-module (loaded-error (extract f 3)) a b)
           (let* ((base (extract f 2))
-                 (forms (syns-moved (extract f 5) base))
+                 (forms (extract f 5))
                  ;; The whole file, where no other expression is.
                  (end (+ base (string-length (extract f 6))))
                  ;; Its parameters and items, as a form's, out of the

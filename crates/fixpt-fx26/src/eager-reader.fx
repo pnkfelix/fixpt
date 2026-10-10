@@ -785,22 +785,30 @@
       (loop cur))))
 
 ;; A reader with nothing read yet, for Scheme or for FX-26.
-(define start-reading (subr reading (bool) state)
-  (lambda (fx26)
+;; Reading from position `at`: 0 for a program, or a loaded file's base,
+;; so that its positions are already its own (`read-text-at`).
+(define start-reading-at (subr reading (bool int) state)
+  (lambda (fx26 at)
     (eager-run
      (lambda ()
        (with-mark dialect-key fx26
-         (lambda () (read-top (make-cursor (cons (next-char 0 nil) nil) 0 nil nil))))))))
+         (lambda () (read-top (make-cursor (cons (next-char at nil) nil) at nil nil))))))))
+(define start-reading (subr reading (bool) state) (lambda (fx26) (start-reading-at fx26 0)))
 (define eager-start (subr reading () state) (lambda () (start-reading #f)))
 (define eager-start-fx26 (subr reading () state) (lambda () (start-reading #t)))
 
 ;; For a driver: every form of `text`, as the reader reads it with a newline
 ;; after, or nothing if it does not read to the end (the driver says where,
 ;; from a reader that places errors). All of it in here, so that the front
-;; end run as register code reads as register code (`read_to_syns`).
-(define read-text (subr (maxeff reading asks (read rs) (alloc rs)) (string) (listof syns acyclic))
-  (lambda (text)
-    (let ((st (eager-feed (eager-feed-string (eager-start-fx26) text) (integer->char 10))))
+;; end run as register code reads as register code (`read_to_syns`). Its
+;; positions from `at`: a loaded file's base, its positions its own.
+(define read-text-at
+  (subr (maxeff reading asks (read rs) (alloc rs)) (string int) (listof syns acyclic))
+  (lambda (text at)
+    (let ((st (eager-feed (eager-feed-string (start-reading-at #t at) text) (integer->char 10))))
       (if (string=? (symbol->string (eager-status st)) "complete")
           (list (eager-state-syntax st))
           nil))))
+;; The same, from position 0.
+(define read-text (subr (maxeff reading asks (read rs) (alloc rs)) (string) (listof syns acyclic))
+  (lambda (text) (read-text-at text 0)))

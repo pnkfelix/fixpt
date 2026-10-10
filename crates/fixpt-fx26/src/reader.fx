@@ -58,6 +58,7 @@
 (define eager-start (with eager-reader-module eager-start))
 (define eager-start-fx26 (with eager-reader-module eager-start-fx26))
 (define read-text (with eager-reader-module read-text))
+(define read-text-at (with eager-reader-module read-text-at))
 (define atom (with eager-reader-module atom))
 (define lst (with eager-reader-module lst))
 (define dotted (with eager-reader-module dotted))

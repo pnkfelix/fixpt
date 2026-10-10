@@ -382,6 +382,12 @@ pub fn read_standard(scheme: &mut Session) -> R<Handle> {
 /// What the FX-26 reader reads from `text`: a list of `syn`s, as a handle
 /// in the caller's scope.
 pub fn read_to_syns(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
+    read_to_syns_at(scheme, file, text, 0)
+}
+
+/// [`read_to_syns`], its positions counted from `at`: a loaded file's
+/// base, so that the parser takes its syntax as read, not moved there.
+pub fn read_to_syns_at(scheme: &mut Session, file: FileId, text: &str, at: i64) -> R<Handle> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     // The whole text read inside FX-26 (`read-text`), not fed from here a
     // character at a time: so that with the front end run as register code
@@ -392,7 +398,8 @@ pub fn read_to_syns(scheme: &mut Session, file: FileId, text: &str) -> R<Handle>
     let s = scheme.make(|m| m.heap().make_string(text));
     let limit = scheme.engine.step_limit();
     scheme.engine.set_step_limit(None);
-    let read = scheme.call_global(&format!("{READER_PREFIX}read-text"), &[s]);
+    let at = scheme.make(|_| fixpt_heap::Value::fixnum(at));
+    let read = scheme.call_global(&format!("{READER_PREFIX}read-text-at"), &[s, at]);
     scheme.engine.set_step_limit(limit);
     let read = read.map_err(|e| fail(e.to_string()))?;
     // Its forms, the list's one element, or `#f` for none.
@@ -749,7 +756,7 @@ fn supply_loaded_in(
         };
         let (file_base, why, syns, ftext) = match contents(&at) {
             Err(e) => (0, format!("cannot read `{path}`: {e}"), scheme.make(|_| Value::NULL), String::new()),
-            Ok(ftext) => match read_to_syns(scheme, FileId(1001 + *read), &ftext) {
+            Ok(ftext) => match read_to_syns_at(scheme, FileId(1001 + *read), &ftext, LOAD_BASE_STEP * (*read as i64 + 1)) {
                 Err(e) => {
                     let before = &ftext[..(e.span.start as usize).min(ftext.len())];
                     let line = before.matches('\n').count() + 1;
