@@ -1824,29 +1824,24 @@ The conversion is done (`DONE.md` §68). Left from it:
   module as written is known, in both checkers, agreeing; then count the
   front end's `spin`s before and after.
 
-## 69. Combining modules: `include` and `hide`, then the front end's imports (the user's, 2026-10-09: high priority)
+## 69. Combining modules: what is left (the user's, 2026-10-09: high priority)
 
-`(extend e0 e1)` and `(include m)` are done (`DONE.md` §69), made one
-way, which `hide` shares: a module of hidden items its values are taken
+`(extend e0 e1)`, `(include m)` and `(hide item …)` are done (`DONE.md`
+§69), all made one way: a module of hidden items its values are taken
 from by path (a reshape, as a module given where fewer values are wanted
 is). Left:
 
 - `include`'s types in scope inside the module, and `include` and
-  `extend` of a module whose type has abstract types (`DONE.md` §69).
-- `(hide item …)`, items seen by the module's body but not in its type,
-  so helpers do not pollute its signature; it composes: `(hide (define
-  helper …))`, `(hide (define-type t …))`, `(hide (include m))` for using a
-  module without re-exporting it (no separate `open`). Its meaning in what
-  exists: the module's type without the hidden names, the ascription done
-  for you, a reshape at the module. A hidden type in an exported one is
-  refused, for now (the user's, 2026-10-09: the safe, forward-compatible
-  choice while the feature is tried; an abstract one, the existential
-  reading, could come later).
-- Then the pass these were wanted for: the import blocks §68 wrote, 3,449
+  `extend` of a module whose type has abstract types.
+- A hidden abstract type in an exported one: refused for now (the
+  user's, 2026-10-09); abstract in the module's type, the existential
+  reading, could come later.
+- The pass these were wanted for: the import blocks §68 wrote, 3,449
   lines (2026-10-09, 39 files converted then), every converted file
   naming all of its own types file (263 lines in 23 files), the rest
   naming 40 to 60 of `check-types-types.fx`'s 148 and what it uses of each
-  module it is given. `(hide (include m))` says each in a line.
+  module it is given. `(hide (include m))` says each in a line, once its
+  types are in scope too.
 
 If `extend` is ever n-ary, `(extend m1 m2 m3)` should be a left fold (the
 later wins), not "all at once", which would blur it and `include` together:

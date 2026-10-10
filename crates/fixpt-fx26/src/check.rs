@@ -144,7 +144,7 @@ pub struct Checker {
     pub(crate) int: TyId,
     pub(crate) bool_: TyId,
     string: TyId,
-    unit: TyId,
+    pub(crate) unit: TyId,
     char_: TyId,
     f64_: TyId,
     symbol: TyId,

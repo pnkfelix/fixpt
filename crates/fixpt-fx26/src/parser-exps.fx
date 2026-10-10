@@ -53,6 +53,9 @@
 (define mod-item-of (with parser-module mod-item-of))
 (define with-includes (with parser-module with-includes))
 (define any-include? (with parser-module any-include?))
+(define hide-forms (with parser-module hide-forms))
+(define hide-form? (with parser-module hide-form?))
+(define hidden-marks (with parser-module hidden-marks))
 (define item-in-includes (with parser-module item-in-includes))
 (define datatype? (with parser-module datatype?))
 (define expand-datatype (with parser-module expand-datatype))
@@ -833,17 +836,21 @@
   ;; A `module`'s items, in order.
   ;; A module's forms, its `define-datatype`s expanded.
   (parse-module-items (subr (maxeff parses spin) (syns-a) mod-items)
-    (lambda (fs) (with-includes (parse-module-items-in fs (any-include? fs)))))
-  ;; The same, each item's values in `(with %include …)` if `inc?`.
-  (parse-module-items-in (subr (maxeff parses spin) (syns-a bool) mod-items)
-    (lambda (fs inc?)
+    (lambda (fs) (with-includes (parse-module-items-in fs (any-include? fs) #f))))
+  ;; The same, each item's values in `(with %include …)` if `inc?`, each
+  ;; hidden if `hid?` (`hidden-marks`).
+  (parse-module-items-in (subr (maxeff parses spin) (syns-a bool bool) mod-items)
+    (lambda (fs inc? hid?)
       (cond ((null? fs) nil)
+            ((hide-form? (car fs))
+             (append (parse-module-items-in (hide-forms (car fs)) inc? #t)
+                     (parse-module-items-in (cdr fs) inc? hid?)))
             ((datatype? (car fs))
-             (parse-module-items-in (append (expand-datatype (car fs)) (cdr fs)) inc?))
+             (parse-module-items-in (append (expand-datatype (car fs)) (cdr fs)) inc? hid?))
             (else (let* ((item (parse-module-item (car fs)))
                          (item (if inc? (item-in-includes item (car fs)) item))
-                         (rest (parse-module-items-in (cdr fs) inc?)))
-                    (cons item rest))))))
+                         (rest (parse-module-items-in (cdr fs) inc? hid?)))
+                    (if hid? (hidden-marks item (car fs) rest) (cons item rest)))))))
   ;; `(define-generative t T)`, `(define-type d T)`, `(define x e)`, `(define
   ;; x T e)` or `(define-rec (f T e) …)`.
   (parse-module-item (subr (maxeff parses spin) (syn) mod-item)

@@ -106,7 +106,9 @@
 (define table-set! (with tables table-set!))
 (define k-ty-new (with check-types k-ty-new))
 (define k-nth (with check-types k-nth))
+(define k-length (with check-types k-length))
 (define k-reshapes (with check-env k-reshapes))
+(define k-unit (with check-env k-unit))
 
 ;; `n`'s innermost binding, now of type `t`.
 (define k-rebind-top (subr (maxeff kstate spin) (symbol int) unit)
@@ -334,9 +336,15 @@
                 (lambda (its)
                   (or (null? its)
                       (let ((s (symbol->string (car (extract (car its) 2)))))
-                        (and (= (extract (car its) 1) 2) (>= (string-length s) 9)
-                             (string=? (substring s 0 9) "%include-") (all (cdr its))))))))
+                        (and (= (extract (car its) 1) 2)
+                             (or (k-prefix? "%include-" s) (k-prefix? "%hinclude-" s))
+                             (all (cdr its))))))))
       (and (not (null? items)) (all items)))))
+;; Whether `s` begins with `p`.
+(define k-prefix? (subr (read @globals) (string string) bool)
+  (lambda (p s)
+    (and (>= (string-length s) (string-length p))
+         (string=? (substring s 0 (string-length p)) p))))
 (define k-twice (subr checks (symbol int int) void)
   (lambda (n a b) (k-fail (k-cat3 "`" (symbol->string n) "` is defined twice in this module") a b)))
 ;; Module type `t`, an `include`'s: with no abstract types, or an error.
@@ -353,8 +361,9 @@
 (define k-inc-descs (subr (maxeff checks spin) (k-parts k-incs k-parts int int) k-incs)
   (lambda (ds acc own a b)
     (cond ((null? ds) acc)
-          ((or (>= (k-ext-index (extract acc 1) (extract (car ds) 1) 0) 0)
-               (>= (k-ext-index own (extract (car ds) 1) 0) 0))
+          ((and (not (k-prefix? "%hidden:" (symbol->string (extract (car ds) 1))))
+                (or (>= (k-ext-index (extract acc 1) (extract (car ds) 1) 0) 0)
+                    (>= (k-ext-index own (extract (car ds) 1) 0) 0)))
            (k-twice (extract (car ds) 1) a b))
           (else (k-inc-descs (cdr ds) (product (1 (cons (car ds) (extract acc 1)))
                                                (2 (extract acc 2)) (3 (extract acc 3)))
@@ -380,11 +389,26 @@
         acc
         (tagcase (k-get (k-inc-module (extract (car from) 2) a b))
           (ty-module (ab ds vs)
-            (k-inc-all (cdr from) (+ k 1) at
-                       (k-inc-vals vs (if (< at 0) k at) 0 (k-inc-descs ds acc own-ds a b)
-                                   own-vs a b)
-                       own-ds own-vs a b))
+            (let ((r (k-inc-vals vs (if (< at 0) k at) 0 (k-inc-descs ds acc own-ds a b)
+                                 own-vs a b)))
+              (k-inc-all (cdr from) (+ k 1) at
+                         ;; A hidden `include`'s (`%hinclude-k`): each name marked
+                         ;; hidden, for the module's type to leave out (`k-hiding`).
+                         (if (k-prefix? "%hinclude-" (symbol->string (extract (car from) 1)))
+                             (product (1 (k-hidden-marks vs (k-hidden-marks ds (extract r 1))))
+                                      (2 (extract r 2)) (3 (extract r 3)))
+                             r)
+                         own-ds own-vs a b)))
           (else z acc)))))
+;; A `%hidden:name` type for each of `ps`, onto `acc` (newest first).
+(define k-hidden-marks (subr (maxeff (read @globals) (alloc @t)) (k-parts k-parts) k-parts)
+  (lambda (ps acc)
+    (if (null? ps)
+        acc
+        (k-hidden-marks (cdr ps)
+                        (cons (product (1 (k-hidden-name (extract (car ps) 1))) (2 k-unit)) acc)))))
+(define k-hidden-name (subr (read @globals) (symbol) symbol)
+  (lambda (n) (string->symbol (string-append "%hidden:" (symbol->string n)))))
 ;; The positions of a module's own values `own`, past `%include`'s, at `k`.
 (define k-own-at (subr (maxeff (read @globals) (alloc @t)) (k-parts int int) k-ids)
   (lambda (own k i)
@@ -413,6 +437,91 @@
         (k-ty-new (ty-module abs (append (reverse (extract r 1)) ds)
                              (append (reverse (extract r 2)) own)))))))
 
+;;; ------------------------------------------------------------ hide
+
+;; The names `(hide item …)` hid (`TODO.md` §69): each a `%hidden:name`
+;; type marks, in order.
+(define k-hidden-in (subr (maxeff (read @globals) (alloc @t)) (k-parts) k-names)
+  (lambda (ds)
+    (cond ((null? ds) nil)
+          ((k-prefix? "%hidden:" (symbol->string (extract (car ds) 1)))
+           (cons (string->symbol (substring (symbol->string (extract (car ds) 1)) 8
+                                            (string-length (symbol->string (extract (car ds) 1)))))
+                 (k-hidden-in (cdr ds))))
+          (else (k-hidden-in (cdr ds))))))
+(define k-shown? (subr (read @globals) (k-names symbol) bool)
+  (lambda (hs n) (or (null? hs) (and (not (symbol=? (car hs) n)) (k-shown? (cdr hs) n)))))
+;; `ps` but those hidden, and the markers.
+(define k-parts-shown (subr (maxeff (read @globals) (alloc @t)) (k-parts k-names) k-parts)
+  (lambda (ps hs)
+    (cond ((null? ps) nil)
+          ((or (not (k-shown? hs (extract (car ps) 1)))
+               (k-prefix? "%hidden:" (symbol->string (extract (car ps) 1))))
+           (k-parts-shown (cdr ps) hs))
+          (else (the k-parts (cons (car ps) (k-parts-shown (cdr ps) hs)))))))
+;; The positions `at` of the values of `vs` shown.
+(define k-at-shown (subr (maxeff (read @globals) (alloc @t)) (k-parts k-ids k-names) k-ids)
+  (lambda (vs at hs)
+    (cond ((null? vs) nil)
+          ((k-shown? hs (extract (car vs) 1)) (cons (car at) (k-at-shown (cdr vs) (cdr at) hs)))
+          (else (k-at-shown (cdr vs) (cdr at) hs)))))
+;; `0`, … `n - 1` onto `acc`, from `n - 1` down.
+(define k-upto (subr (maxeff (read @globals) (alloc @t)) (int k-ids) k-ids)
+  (lambda (n acc) (if (<= n 0) acc (k-upto (- n 1) (cons (- n 1) acc)))))
+;; Whether `at` is `0`, … in order, all `n` of them.
+(define k-identity? (subr (read @globals) (k-ids int int) bool)
+  (lambda (at i n) (if (null? at) (= i n) (and (= (car at) i) (k-identity? (cdr at) (+ i 1) n)))))
+;; The first of `ps`, the parts shown, whose type mentions one of `gone`,
+;; the abstract types hidden: refused (the user's, 2026-10-09).
+(define k-hidden-escape (subr (maxeff checks spin) (k-parts k-parts int int) unit)
+  (lambda (ps gone a b)
+    (if (null? ps)
+        #u
+        (let ((v (k-first-mentioned (extract (car ps) 2) (k-part-ids gone))))
+          (if (< v 0)
+              (k-hidden-escape (cdr ps) gone a b)
+              (k-fail (k-cat5 "`" (symbol->string (extract (car ps) 1)) "`'s type mentions `"
+                              (symbol->string (k-part-named gone v))
+                              "`, which is hidden in this module")
+                      a b))))))
+(define k-part-ids (subr (maxeff (read @globals) (alloc @t)) (k-parts) k-ids)
+  (lambda (ps) (if (null? ps) nil (cons (extract (car ps) 2) (k-part-ids (cdr ps))))))
+(define k-part-named (subr (read @globals) (k-parts int) symbol)
+  (lambda (ps v)
+    (cond ((null? ps) '?) ((= (extract (car ps) 2) v) (extract (car ps) 1))
+          (else (k-part-named (cdr ps) v)))))
+;; The abstract types of `abs` hidden (`gone?`) or not.
+(define k-abs-split (subr (maxeff (read @globals) (alloc @t)) (k-parts k-names bool) k-parts)
+  (lambda (abs hs gone?)
+    (cond ((null? abs) nil)
+          ((eq? gone? (k-shown? hs (extract (car abs) 1))) (k-abs-split (cdr abs) hs gone?))
+          (else (the k-parts (cons (car abs) (k-abs-split (cdr abs) hs gone?)))))))
+;; Module type `t`, at `a`..`b`, without what `(hide item …)` hid: each name
+;; a `%hidden:name` type marks, the markers too; made of the values left
+;; by position (a reshape, on any it has). As Rust's `Checker::hiding`.
+(define k-hiding (subr (maxeff checks spin) (int int int) int)
+  (lambda (t a b)
+    (tagcase (k-get t)
+      (ty-module (abs ds vs)
+        (let ((hs (k-hidden-in ds)))
+          (if (null? hs)
+              t
+              (let* ((rs (get k-reshapes))
+                     (mine (and (not (null? rs)) (= (extract (car rs) 1) a)
+                                (= (extract (car rs) 2) b)))
+                     (at (if mine (extract (car rs) 3) (k-upto (k-length vs) nil)))
+                     (out (k-parts-shown vs hs))
+                     (shown (k-parts-shown ds hs))
+                     (gone (k-abs-split abs hs #t))
+                     (checked (k-hidden-escape (append out shown) gone a b))
+                     (path (k-at-shown vs at hs)))
+                (begin
+                  (if (k-identity? path 0 (k-length vs))
+                      #u
+                      (set k-reshapes (cons (product (1 a) (2 b) (3 path)) (if mine (cdr rs) rs))))
+                  (k-ty-new (ty-module (k-abs-split abs hs #f) shown out)))))))
+      (else z t))))
+
 ;; A module's type, at `a`..`b`, of its abstract types, descriptions and
 ;; values: an `extend`'s, of the two it holds (`k-extended`); an
 ;; `include`s', of the modules included; a module's that includes some, of
@@ -422,8 +531,9 @@
     (let ((k (k-ext-index vs '%include 0)))
       (cond ((k-extend-items? items) (k-extended vs a b))
             ((k-bucket-items? items) (k-included vs nil nil nil -1 a b))
-            ((>= k 0) (k-included (list (k-nth vs k)) abs ds (k-parts-but vs k 0) k a b))
-            (else (k-ty-new (ty-module abs ds vs)))))))
+            ((>= k 0)
+             (k-hiding (k-included (list (k-nth vs k)) abs ds (k-parts-but vs k 0) k a b) a b))
+            (else (k-hiding (k-ty-new (ty-module abs ds vs)) a b))))))
 
 ;;; ------------------------------------------------------------ with
 

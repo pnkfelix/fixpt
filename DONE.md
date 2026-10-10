@@ -1273,3 +1273,20 @@ or the evaluator. Not yet: an `include`'s types in scope inside the
 module, and a module whose type has abstract types. `include` is a module
 item's keyword now. Tests: `modules/include.fx`, `include-twice.fx`,
 `include-own-twice.fx`, `include-not-module.fx`, `include-abstract.fx`.
+
+`(hide item …)` (2026-10-09), an item: items the module's own see but not
+in its type, so helpers do not crowd its signature; `(hide (include m))`
+uses a module without giving its values on. Both parsers read a `hide`'s
+items as the module's own (its `define-datatype`s expanded), and mark each
+name one defines by a type of its own, `%hidden:name` (a type, so that no
+compiler or the evaluator makes a value of it); a hidden `include` is
+`%hinclude-k` in the bucket, whose names the checker marks. Both checkers
+(`Checker::hiding`, `k-hiding`) leave the names marked, and the marks, out
+of the module's type, and make the module of the values left by position:
+the ascription done for you, a reshape. A hidden abstract type in a type
+shown is refused, for now (the user's, 2026-10-09: the safe,
+forward-compatible choice while the feature is tried), as `` `v`'s type
+mentions `t`, which is hidden in this module ``; a hidden `define-type` is
+in what it abbreviates already. Tests: `modules/hide.fx` (a datatype, a
+`define-rec` and an `include` hidden), `hide-include.fx`, `hide-unseen.fx`,
+`hide-escape.fx`.

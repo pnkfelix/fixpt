@@ -61,15 +61,61 @@ impl Checker {
         if self.is_extend(items) {
             return self.extended(e, span, &vals);
         }
-        let hidden = |c: &Self, n: Sym, pre: &str| c.interner.name(n).starts_with(pre);
-        if !items.is_empty() && items.iter().all(|it| matches!(it, ModItem::Val { name, .. } if hidden(self, *name, "%include-"))) {
+        let bucket = |c: &Self, n: Sym| {
+            let n = c.interner.name(n);
+            n.starts_with("%include-") || n.starts_with("%hinclude-")
+        };
+        if !items.is_empty() && items.iter().all(|it| matches!(it, ModItem::Val { name, .. } if bucket(self, *name))) {
             return self.included(e, span, Vec::new(), Vec::new(), Vec::new(), &vals, None);
         }
-        if let Some(k) = vals.iter().position(|(n, _)| self.interner.name(*n) == "%include") {
+        let t = if let Some(k) = vals.iter().position(|(n, _)| self.interner.name(*n) == "%include") {
             let own: Vec<(Sym, TyId)> = vals.iter().enumerate().filter(|(i, _)| *i != k).map(|(_, v)| *v).collect();
-            return self.included(e, span, abs, descs, own, &vals[k..=k], Some(k));
+            self.included(e, span, abs, descs, own, &vals[k..=k], Some(k))?
+        } else {
+            self.arena.ty(Ty::Module { abs, descs, vals })
+        };
+        self.hiding(e, span, t)
+    }
+
+    /// Module type `t` without what `(hide item …)` hid (`TODO.md` §69):
+    /// each name a `%hidden:name` type marks (the parser's, or `included`'s
+    /// for a hidden `include`), the markers too. A hidden abstract type an
+    /// exported type mentions is refused, for now (the user's, 2026-10-09);
+    /// a hidden abbreviation is in what it abbreviates already. Made of
+    /// the values left by position (a reshape, on any it has).
+    fn hiding(&mut self, e: ExpId, span: Span, t: TyId) -> R<TyId> {
+        let Ty::Module { abs, descs, vals } = self.arena.get(t).clone() else {
+            return Ok(t);
+        };
+        let hidden: Vec<String> =
+            descs.iter().filter_map(|(n, _)| self.interner.name(*n).strip_prefix("%hidden:").map(str::to_string)).collect();
+        if hidden.is_empty() {
+            return Ok(t);
         }
-        Ok(self.arena.ty(Ty::Module { abs, descs, vals }))
+        let shown = |c: &Self, n: Sym| !hidden.iter().any(|h| h == c.interner.name(n));
+        let (kept_abs, gone): (Vec<(Sym, DVar)>, Vec<(Sym, DVar)>) = abs.into_iter().partition(|(n, _)| shown(self, *n));
+        let descs: Vec<(Sym, TyId)> =
+            descs.into_iter().filter(|(n, _)| !self.interner.name(*n).starts_with("%hidden:") && shown(self, *n)).collect();
+        let at: Vec<usize> = self.facts.reshaped.get(&e).cloned().unwrap_or_else(|| (0..vals.len()).collect());
+        let (mut out, mut path) = (Vec::new(), Vec::new());
+        for (v, p) in vals.iter().zip(at) {
+            if shown(self, v.0) {
+                out.push(*v);
+                path.push(p);
+            }
+        }
+        for (n, t) in out.iter().chain(&descs) {
+            if let Some((h, _)) = gone.iter().find(|(_, v)| self.mentions_var(*t, *v)) {
+                return Err(FxError::at(
+                    span,
+                    format!("`{}`'s type mentions `{}`, which is hidden in this module", self.interner.name(*n), self.interner.name(*h)),
+                ));
+            }
+        }
+        if path.iter().enumerate().any(|(i, p)| i != *p) || path.len() != vals.len() {
+            self.facts.reshaped.insert(e, path);
+        }
+        Ok(self.arena.ty(Ty::Module { abs: kept_abs, descs, vals: out }))
     }
 
     /// The modules `from` included (`TODO.md` §69), their values and types
@@ -81,14 +127,21 @@ impl Checker {
     fn included(&mut self, e: ExpId, span: Span, abs: Vec<(Sym, DVar)>, mut descs: Vec<(Sym, TyId)>, own: Vec<(Sym, TyId)>, from: &[(Sym, TyId)], at: Option<usize>) -> R<TyId> {
         let (mut out, mut path): (Vec<(Sym, TyId)>, Vec<usize>) = (Vec::new(), Vec::new());
         let mut own_descs = std::mem::take(&mut descs);
-        for (k, (_, t)) in from.iter().enumerate() {
+        for (k, (name, t)) in from.iter().enumerate() {
             let (ds, vs) = match self.arena.get(self.arena.resolve(*t)).clone() {
                 Ty::Module { abs, descs, vals } if abs.is_empty() => (descs, vals),
                 Ty::Module { .. } => return Err(FxError::at(span, "`include` of a module with abstract types is not supported yet")),
                 _ => return Err(FxError::at(span, format!("`include` includes a module, and this is a {}", self.show_ty(*t)))),
             };
+            // A hidden `include`'s (`%hinclude-k`): each name marked hidden,
+            // for the module's type to leave out (`hiding`).
+            let marks: Vec<Sym> = if self.interner.name(*name).starts_with("%hinclude-") {
+                ds.iter().chain(&vs).map(|(n, _)| *n).collect()
+            } else {
+                Vec::new()
+            };
             for d in ds {
-                if descs.iter().chain(&own_descs).any(|(n, _)| *n == d.0) {
+                if !self.interner.name(d.0).starts_with("%hidden:") && descs.iter().chain(&own_descs).any(|(n, _)| *n == d.0) {
                     return Err(FxError::at(span, format!("`{}` is defined twice in this module", self.interner.name(d.0))));
                 }
                 descs.push(d);
@@ -99,6 +152,10 @@ impl Checker {
                 }
                 out.push(v);
                 path.push(reshape_path(at.unwrap_or(k), j));
+            }
+            for n in marks {
+                let name = self.interner.intern(&format!("%hidden:{}", self.interner.name(n)));
+                descs.push((name, self.unit));
             }
         }
         descs.append(&mut own_descs);

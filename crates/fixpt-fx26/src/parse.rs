@@ -2427,9 +2427,24 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         let mut out = Vec::new();
         // Each `(include m)`, and where each item's values are written (a
         // `define-rec`'s, each binding's), for `with_includes`.
-        let (mut includes, mut spans): (Vec<(fixpt_read::Span, ExpId)>, Vec<Vec<fixpt_read::Span>>) = (Vec::new(), Vec::new());
-        for f in forms {
+        let (mut includes, mut spans): (Vec<(fixpt_read::Span, ExpId, bool)>, Vec<Vec<fixpt_read::Span>>) = (Vec::new(), Vec::new());
+        // The forms to read, the first last, each hidden or not (`(hide
+        // item …)`, `TODO.md` §69).
+        let mut work: Vec<(Syntax, bool)> = forms.iter().rev().map(|f| (f.clone(), false)).collect();
+        while let Some((f, hidden)) = work.pop() {
+            let f = &f;
             let parts = self.items(f, "a module's definition")?.to_vec();
+            // `(hide item …)`: its items, their `define-datatype`s expanded,
+            // each hidden.
+            if self.head(&parts) == Some("hide") {
+                let mut inner = Vec::new();
+                for item in &parts[1..] {
+                    self.expand_datatype(item.clone(), &mut inner)?;
+                }
+                work.extend(inner.into_iter().rev().map(|item| (item, true)));
+                continue;
+            }
+            let before = out.len();
             let name_of = |p: &Self, s: &Syntax| s.as_symbol().ok_or_else(|| FxError::at(s.span, "a name")).map(|n| (n, p.name(n).to_string()));
             match (self.head(&parts), &parts[..]) {
                 (Some("define-generative"), [_, n, rep]) => {
@@ -2519,7 +2534,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                 }
                 // `(include m)` (`TODO.md` §69): `m`'s values the module's own.
                 (Some("include"), [_, m]) => {
-                    includes.push((f.span, self.parse_exp(m)?));
+                    includes.push((f.span, self.parse_exp(m)?, hidden));
                     continue;
                 }
                 (Some("define-rec"), [_, bs @ ..]) => {
@@ -2539,11 +2554,29 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                 _ => {
                     return Err(FxError::at(
                         f.span,
-                        "a module holds `(define-generative t T)`, `(define-type d T)`, `(define-effect e E)`, `(define x [T] e)`, `(define* f T e)`, `(define-rec (f T e) …)` and `(include m)`",
+                        "a module holds `(define-generative t T)`, `(define-type d T)`, `(define-effect e E)`, `(define x [T] e)`, `(define* f T e)`, `(define-rec (f T e) …)`, `(include m)` and `(hide item …)`",
                     ));
                 }
             }
             spans.resize(out.len(), vec![f.span]);
+            // Each name a hidden item defines, marked by a type of its own,
+            // `%hidden:name`: a type, so that no compiler makes a value of
+            // it. The checkers leave them out of the module's type.
+            if hidden {
+                let mut names = Vec::new();
+                for item in &out[before..] {
+                    match item {
+                        ModItem::Abs { name, up, down, .. } => names.extend([*name, *up, *down]),
+                        ModItem::Desc { name, .. } | ModItem::Val { name, .. } => names.push(*name),
+                        ModItem::Rec(bs) => names.extend(bs.iter().map(|(n, _, _)| *n)),
+                    }
+                }
+                for n in names {
+                    let name = self.interner.intern(&format!("%hidden:{}", self.name(n)));
+                    out.push(ModItem::Desc { name, ty: self.unit });
+                }
+                spans.resize(out.len(), vec![f.span]);
+            }
         }
         if !includes.is_empty() {
             self.with_includes(&mut out, &spans, includes);
@@ -2558,13 +2591,18 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     /// lambda's body, so that it stays a lambda), its place the item's, as
     /// the compilers find facts by place. The checkers make the module's
     /// type of its own values and those (`Checker::included`).
-    fn with_includes(&mut self, out: &mut Vec<ModItem>, spans: &[Vec<fixpt_read::Span>], includes: Vec<(fixpt_read::Span, ExpId)>) {
+    fn with_includes(&mut self, out: &mut Vec<ModItem>, spans: &[Vec<fixpt_read::Span>], includes: Vec<(fixpt_read::Span, ExpId, bool)>) {
         let inc = self.interner.intern("%include");
         let first = includes[0].0;
+        // A hidden one's, `%hinclude-k`: its values in scope, not in the
+        // module's type.
         let bucket = includes
             .into_iter()
             .enumerate()
-            .map(|(k, (_, m))| ModItem::Val { name: self.interner.intern(&format!("%include-{k}")), ty: None, init: m, infer: false })
+            .map(|(k, (_, m, hidden))| {
+                let name = self.interner.intern(&format!("%{}include-{k}", if hidden { "h" } else { "" }));
+                ModItem::Val { name, ty: None, init: m, infer: false }
+            })
             .collect();
         let bucket = self.arena.exp(first, Exp::Module(bucket));
         for (item, at) in out.iter_mut().zip(spans) {

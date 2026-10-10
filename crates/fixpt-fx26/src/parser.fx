@@ -354,8 +354,47 @@
     (tagcase f
       (lst (xs d a b) (and (not (null? xs)) (symbol=? (syn-head (car xs)) 'include)))
       (else y #f))))
-(define any-include? (subr (maxeff (read @globals) (read rs)) (syns-a) bool)
-  (lambda (fs) (and (not (null? fs)) (or (include-form? (car fs)) (any-include? (cdr fs))))))
+(define any-include? (subr (maxeff (read @globals) (read rs) spin) (syns-a) bool)
+  (lambda (fs)
+    (and (not (null? fs))
+         (or (include-form? (car fs)) (any-include? (hide-forms (car fs)))
+             (any-include? (cdr fs))))))
+;; `(hide item …)` (`TODO.md` §69): its items, each hidden; none if `f` is
+;; not one.
+(define hide-forms (subr (maxeff (read @globals) (read rs)) (syn) syns-a)
+  (lambda (f)
+    (tagcase f
+      (lst (xs d a b) (if (and (not (null? xs)) (symbol=? (syn-head (car xs)) 'hide)) (cdr xs) nil))
+      (else y nil))))
+(define hide-form? (subr (maxeff (read @globals) (read rs)) (syn) bool)
+  (lambda (f)
+    (tagcase f
+      (lst (xs d a b) (and (not (null? xs)) (symbol=? (syn-head (car xs)) 'hide)))
+      (else y #f))))
+;; Each name hidden item `it` (read from `f`) defines, marked by a type of
+;; its own, `%hidden:name`, onto `rest`: a type, so that no compiler makes
+;; a value of it; the checkers leave them out of the module's type. A
+;; hidden `include` is `%hinclude`. As `parse.rs`.
+(define hidden-marks (subr (maxeff tree-builds spin) (mod-item syn mod-items) mod-items)
+  (lambda (it f rest)
+    (let* ((k (extract it 1)) (ns (extract it 2))
+           (ns (if (= k 0)
+                   (let ((t (symbol->string (car ns))))
+                     (the names (list (car ns) (string->symbol (string-append "up-" t))
+                                      (string->symbol (string-append "down-" t)))))
+                   ns)))
+      (if (= k 9)
+          (cons (product (1 9) (2 (the names (list '%hinclude))) (3 (extract it 3))
+                         (4 (extract it 4)))
+                rest)
+          (cons it (hidden-marks-of ns (syn-start f) (syn-end f) rest))))))
+(define hidden-marks-of (subr (maxeff tree-builds spin) (names int int mod-items) mod-items)
+  (lambda (ns a b rest)
+    (if (null? ns)
+        rest
+        (cons (mod-item-of 1 (string->symbol (string-append "%hidden:" (symbol->string (car ns))))
+                           (one-syn (mk-symbol "unit" a b)) nil)
+              (hidden-marks-of (cdr ns) a b rest)))))
 ;; `x` in `(with %include …)` at `a`..`b`: a lambda's body, under any
 ;; `plambda`, `the` or region lambda.
 (define in-includes (subr (maxeff tree-builds spin) (exp int int) exp)
@@ -387,10 +426,15 @@
   (lambda (items k)
     (cond ((null? items) nil)
           ((= (extract (car items) 1) 9)
-           (cons (mod-item-of 2 (string->symbol (string-append "%include-" (int->string k))) nil
+           (cons (mod-item-of 2 (include-name (car (extract (car items) 2)) k) nil
                               (extract (car items) 4))
                  (include-items (cdr items) (+ k 1))))
           (else (include-items (cdr items) k)))))
+;; The `k`th included module's item's name: `%hinclude-k` if hidden.
+(define include-name (subr (read @globals) (symbol int) symbol)
+  (lambda (n k)
+    (string->symbol
+     (string-append (if (symbol=? n '%hinclude) "%hinclude-" "%include-") (int->string k)))))
 ;; `items` but their includes; and the first include's form.
 (define own-items (subr (maxeff tree-builds spin) (mod-items) mod-items)
   (lambda (items)
@@ -421,7 +465,7 @@
 (define module-usage string
   (string-append "a module holds `(define-generative t T)`, `(define-type d T)`, "
                  (string-append "`(define-effect e E)`, `(define x [T] e)`, `(define* f T e)`, "
-                                "`(define-rec (f T e) …)` and `(include m)`")))
+                                "`(define-rec (f T e) …)`, `(include m)` and `(hide item …)`")))
 ;; A `define-rec`'s names, types and expressions, each in order.
 (define rec-names (subr (read @globals) (letrec-list) names)
   (lambda (bs) (if (null? bs) nil (cons (extract (car bs) 1) (rec-names (cdr bs))))))
