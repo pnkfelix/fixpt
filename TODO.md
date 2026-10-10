@@ -2007,6 +2007,21 @@ header; nothing uses a static field count. So:
   8(F+1) bytes before the suffix, so compiled code could read the length,
   frozen flags and kind in line, without the trailer or a backward scan.
   The suffix's layout likewise: `F` exact, or `(at-least F)`, a prefix.
+- **Is the exact form needed?** (the user's question, 2026-10-10.) Not for
+  speed: nothing uses a static field count today. But exactness does a
+  soundness job now: every bloblet type lists every field, so it mentions
+  every region its fields reach, and `letrena`/`letreap`'s escape check
+  (`close_region`: the regions a value's type mentions) and masking rely
+  on that. A lower bound forgets its hidden fields' regions: a bloblet in
+  `@heap` with a hidden `(ref int r)` field, viewed as `(at-least (fields
+  int))`, would escape `(letrena r …)` and dangle. (Products have no width
+  subtyping either, likely for this.) So a lower bound must say what it
+  hides: proposed, it names the regions its hidden fields may reach,
+  `(at-least (fields T …) (regions r …))`, and widening is allowed only
+  where every forgotten field's regions are among them (a coarser rule,
+  "hidden fields reach only regions outliving the bloblet's", needs
+  outlives facts FX-26 does not generally have). To check too: whether
+  the `data`/`acyclic` shape analyses (`check.rs`) need every field seen.
 
 **`(blobref F R)` or `(ref F R)`?** (the user's, 2026-10-10: open to a
 type of its own, since a suffix ref is "a pretty special snowflake".)
