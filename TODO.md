@@ -1836,20 +1836,15 @@ is). Left:
   module's values only, where FX-91's (§2.3.19) substitutes its
   descriptions too, and its abstract types as `(select e0 t)`. Wanted: a
   `with` that does, which `extend` then has.
-- `include` and `extend` of a module whose type has abstract types.
-  The direction (the user's and Claude's, 2026-10-09): an abstract type of
-  a module included *by name*, `(include m)`, is in the module's type
-  `(select m t)`, an alias of the original, so that the two's values
-  stay interchangeable (ML's `include`); the module then cannot leave
-  `m`'s scope, as for `m..t` already. A module included that is not a
-  name (`(include (load-module "f"))`, a call, an inline `module`) has
-  no path to alias: refused, or bound to a name first. `extend` likewise.
-  For the two that are literal text, an inline `(module …)` and a
-  `(load-module "f")`, its items could be spliced in instead, the types
-  then the module's own (the user's, 2026-10-09; OCaml's `include struct
-  … end`); every other is a value made when the program runs. To read
-  first: what Sheldon's thesis says of combining first-class modules with
-  abstract types, before deciding.
+- `include` and `extend` of a module with abstract types that is not a
+  name: refused now (`DONE.md` §69 has the named ones, aliases). For the
+  two that are literal text, an inline `(module …)` and a `(load-module
+  "f")`, its items could be spliced in, the types then the module's own
+  (the user's, 2026-10-09; OCaml's `include struct … end`); every other is
+  a value made when the program runs. `(extend m (module
+  (define-generative u …) …))`, an `e1` with abstract types of its own,
+  is the common case refused: FX-91 makes them the result's own `abs`.
+  Sheldon's thesis and FX-91 on this: `docs/research/sheldon-combining-modules.md`.
 - A hidden abstract type in an exported one: refused for now (the
   user's, 2026-10-09); abstract in the module's type, the existential
   reading, could come later.

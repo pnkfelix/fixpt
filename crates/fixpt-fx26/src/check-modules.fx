@@ -229,12 +229,13 @@
           (cons (product (1 (extract (car ps) 1)) (2 t)) rest)))))
 ;; A module's type, bound to `name`: its abstract types renamed for this
 ;; binding, each `name..t`, kept until the binding's scope ends. Any other
-;; type as it is.
+;; type as it is; and a hidden item's (`%extend-0`, …), the module's own
+;; making, whose module keeps the names it has (`TODO.md` §69).
 (define k-name-module (subr (maxeff kstate spin) (symbol int) int)
   (lambda (name t)
     (tagcase (k-get (k-resolve t))
       (ty-module (abs ds vs)
-        (if (null? abs)
+        (if (or (null? abs) (string=? (substring (symbol->string name) 0 1) "%"))
             t
             (let* ((r (k-rename-abs (string-append (symbol->string name) "..") abs))
                    (ds2 (k-subst-each ds (extract r 2)))

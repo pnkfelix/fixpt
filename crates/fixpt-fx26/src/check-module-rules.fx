@@ -67,6 +67,7 @@
 (define-effect kstate (select check-types-types kstate))
 (define r-globals (with check-types-types r-globals))
 (define ty-module (with check-types-types ty-module))
+(define ty-var (with check-types-types ty-var))
 (define k-done (with check-types-types k-done))
 (define-type k-items (select check-types-types k-items))
 (define-type k-hazard-list (select check-env-types k-hazard-list))
@@ -93,6 +94,7 @@
 (define k-show-ty (with check-print k-show-ty))
 (define k-fail-at (with check-errors k-fail-at))
 (define k-first-mentioned (with check-modules k-first-mentioned))
+(define k-module-var? (with check-modules k-module-var?))
 (define k-resolve-selects (with check-modules k-resolve-selects))
 (define k-items (with check-read k-items))
 (define k-lambda-item? (with check-modorder k-lambda-item?))
@@ -258,17 +260,15 @@
 ;; `reshape_path`): a path, from 2^40 on.
 (define k-reshape-path (subr pure (int int) int)
   (lambda (k j) (+ 1099511627776 (+ (* k 1048576) j))))
-;; One side of an `extend`, of type `t`: a module with no abstract types of
-;; its own, or an error.
+;; One side of an `extend`, of type `t`: a module, a bound one's abstract
+;; types its descriptions (as `k-inc-module`'s), or an error.
 (define k-extend-side (subr (maxeff checks spin) (int string int int) int)
   (lambda (t which a b)
     (tagcase (k-get t)
       (ty-module (abs ds vs)
-        (if (null? abs)
-            t
-            (k-fail (k-cat3 "`extend` of a module with abstract types"
-                            " of its own is not supported" " yet")
-                    a b)))
+        (if (k-all-module-vars? abs)
+            (k-ty-new (ty-module nil (append (k-abs-aliases abs) ds) vs))
+            (k-fail "`extend` takes a module with abstract types by its name" a b)))
       (else z (k-fail (k-cat5 "`extend` extends a module by a module, and its " which " is a "
                               (k-show-ty t) "")
                       a b)))))
@@ -345,16 +345,30 @@
   (lambda (p s)
     (and (>= (string-length s) (string-length p))
          (string=? (substring s 0 (string-length p)) p))))
+;; Whether each of abstract types `abs` is a bound module's.
+(define k-all-module-vars? (subr kreads (k-parts) bool)
+  (lambda (abs)
+    (or (null? abs)
+        (and (k-module-var? (extract (car abs) 2)) (k-all-module-vars? (cdr abs))))))
+;; Abstract types `abs`, each a description of its variable.
+(define k-abs-aliases (subr (maxeff kstate spin) (k-parts) k-parts)
+  (lambda (abs)
+    (if (null? abs)
+        nil
+        (let ((t (k-ty-new (ty-var (extract (car abs) 2)))))
+          (cons (product (1 (extract (car abs) 1)) (2 t)) (k-abs-aliases (cdr abs)))))))
 (define k-twice (subr checks (symbol int int) void)
   (lambda (n a b) (k-fail (k-cat3 "`" (symbol->string n) "` is defined twice in this module") a b)))
-;; Module type `t`, an `include`'s: with no abstract types, or an error.
+;; Module type `t`, an `include`'s: a bound module's abstract types (its
+;; `m..t`, `k-rename-abs`'s) its descriptions, aliases, so that its values
+;; and `m`'s stay one another's (`TODO.md` §69); any other an error.
 (define k-inc-module (subr (maxeff checks spin) (int int int) int)
   (lambda (t a b)
     (tagcase (k-get t)
       (ty-module (abs ds vs)
-        (if (null? abs)
-            t
-            (k-fail "`include` of a module with abstract types is not supported yet" a b)))
+        (if (k-all-module-vars? abs)
+            (k-ty-new (ty-module nil (append (k-abs-aliases abs) ds) vs))
+            (k-fail "`include` takes a module with abstract types by its name" a b)))
       (else z (k-fail (k-cat3 "`include` includes a module, and this is a " (k-show-ty t) "")
                       a b)))))
 ;; `ds` onto `acc`'s types, none named there or in `own`.

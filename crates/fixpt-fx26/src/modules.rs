@@ -129,8 +129,17 @@ impl Checker {
         let mut own_descs = std::mem::take(&mut descs);
         for (k, (name, t)) in from.iter().enumerate() {
             let (ds, vs) = match self.arena.get(self.arena.resolve(*t)).clone() {
-                Ty::Module { abs, descs, vals } if abs.is_empty() => (descs, vals),
-                Ty::Module { .. } => return Err(FxError::at(span, "`include` of a module with abstract types is not supported yet")),
+                // A bound module's abstract types (`name_module`'s `m..t`),
+                // the module's descriptions of them: aliases, so that its
+                // values and `m`'s stay one another's (`TODO.md` §69).
+                Ty::Module { abs, descs, vals } if abs.iter().all(|(_, v)| self.is_module_var(*v)) => {
+                    let mut ds: Vec<(Sym, TyId)> = abs.iter().map(|(a, v)| (*a, self.arena.ty(Ty::Var(*v)))).collect();
+                    ds.extend(descs);
+                    (ds, vals)
+                }
+                Ty::Module { .. } => {
+                    return Err(FxError::at(span, "`include` takes a module with abstract types by its name"));
+                }
                 _ => return Err(FxError::at(span, format!("`include` includes a module, and this is a {}", self.show_ty(*t)))),
             };
             // A hidden `include`'s (`%hinclude-k`): each name marked hidden,
@@ -180,15 +189,22 @@ impl Checker {
     /// `(extend e0 e1)`, its values `vals` the two modules: one of the values
     /// of both, `e1`'s where both have a name, `e0`'s in its order first and
     /// then `e1`'s others; its types likewise. Made of theirs, by path
-    /// (`reshape_path`). A module with abstract types of its own is not
-    /// extended, yet (`TODO.md` §69). As the FX-26 checker's `k-extended`.
+    /// (`reshape_path`). A bound module's abstract types (`m..t`) are its
+    /// descriptions, aliases; any other's refused (`TODO.md` §69). As the
+    /// FX-26 checker's `k-extended`.
     fn extended(&mut self, e: ExpId, span: Span, vals: &[(Sym, TyId)]) -> R<TyId> {
         let mut sides = Vec::new();
         for (i, (_, t)) in vals.iter().enumerate() {
             match self.arena.get(self.arena.resolve(*t)).clone() {
-                Ty::Module { abs, descs, vals } if abs.is_empty() => sides.push((descs, vals)),
+                // A bound module's abstract types, its descriptions of them,
+                // as `included`'s.
+                Ty::Module { abs, descs, vals } if abs.iter().all(|(_, v)| self.is_module_var(*v)) => {
+                    let mut ds: Vec<(Sym, TyId)> = abs.iter().map(|(a, v)| (*a, self.arena.ty(Ty::Var(*v)))).collect();
+                    ds.extend(descs);
+                    sides.push((ds, vals));
+                }
                 Ty::Module { .. } => {
-                    return Err(FxError::at(span, "`extend` of a module with abstract types of its own is not supported yet"));
+                    return Err(FxError::at(span, "`extend` takes a module with abstract types by its name"));
                 }
                 _ => {
                     let which = if i == 0 { "first" } else { "second" };
@@ -493,7 +509,9 @@ impl Checker {
     /// other type as it is.
     pub(crate) fn name_module(&mut self, name: Sym, t: TyId) -> TyId {
         let Ty::Module { abs, descs, vals } = self.arena.get(self.arena.resolve(t)).clone() else { return t };
-        if abs.is_empty() {
+        // A hidden item's (`%extend-0`, …), the module's own making, keeps
+        // the names its module has (`TODO.md` §69).
+        if abs.is_empty() || self.interner.name(name).starts_with('%') {
             return t;
         }
         let n = self.interner.name(name).to_string();

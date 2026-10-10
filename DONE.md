@@ -1301,6 +1301,21 @@ checker keeps facts by place; an `e0` not a module is still said of
 `extend`. Types and effects of `e0` in `e1`: `TODO.md` §69. Test:
 `modules/extend-sees.fx`.
 
+Abstract types in `include` and `extend` by name (2026-10-10): a module
+bound to a name `m` has its abstract types as `m..t`, the variables its
+binding made (`name_module`); `included` and `extended` (`k-inc-module`,
+`k-extend-side`) give each as a description of that variable, an alias,
+not an abstract type of the result's own. So the values of `(include m)`
+and of `m` are one another's both ways, and an `extend` whose `e1` has a
+`t` of its own captures none of `e0`'s values' types (FX-91's rule does:
+`docs/research/sheldon-combining-modules.md` §5). The module cannot leave
+`m`'s scope, as `m..t` cannot. A hidden item (`%extend-0`, …) keeps the
+names its module has, so `extend`'s `(with %extend-0 e1)` sees `m..t`. A
+module not bound to a name: `` `include` takes a module with abstract types
+by its name ``, likewise `extend`. Tests: `modules/include-abstract-alias.fx`,
+`include-abstract-escape.fx`, `include-abstract.fx`,
+`extend-abstract-alias.fx`, `extend-abstract.fx`.
+
 ## 71. A load cycle is an error, not a hang (2026-10-10)
 
 Found 2026-10-09 (`TODO.md` §68 phase 2): two types files loading each
