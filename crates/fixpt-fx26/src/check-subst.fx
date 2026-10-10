@@ -215,8 +215,12 @@
           (else (k-memo-find (cdr ms) t)))))
 ;; Each type a `define-type` named that mentions no variable
 ;; (`k-closed-in?`): substitution leaves it itself, so that it keeps its name
-;; in what is shown. As the Rust checker's `closed_named`.
-(define k-closed-named (ref k-ids @t) (new nil))
+;; in what is shown. As the Rust checker's `closed_named`, a set: a type's
+;; id kept (1), as substitution asks of every type it meets.
+(define k-closed-named (ref k-smemo @t) (new (k-new-smemo)))
+;; None noted yet, for a new program.
+(define* k-forget-closed-named (subr (maxeff (alloc @t) (write @t)) () unit)
+  (lambda () (set k-closed-named (k-new-smemo))))
 ;; Whether `t` is data that mentions no variable: built of base types, `nil`,
 ;; `false`, unions, sums, products, pairs, references and arrays, at regions
 ;; that are constants, as far as it goes (`seen`, a cycle met again). As the
@@ -256,14 +260,14 @@
   (lambda (slot)
     (begin
       (if (k-closed-in? slot nil)
-          (set k-closed-named (cons (k-resolve slot) (get k-closed-named)))
+          (table-set! (get k-closed-named) (k-resolve slot) 1)
           #u)
       slot)))
 (define k-subst-memo (subr (maxeff kstate spin) (int k-map k-smemo) int)
   (lambda (t m memo)
     (let* ((t (k-resolve t))
            (kept (or (and (>= (get k-subst-keep) 0) (= (k-keep-at t) (get k-subst-keep)))
-                     (k-has-id? (get k-closed-named) t)))
+                     (>= (table-ref (get k-closed-named) t -1) 0)))
            (done (if kept t (table-ref memo t -1))))
       (if (>= done 0)
           done

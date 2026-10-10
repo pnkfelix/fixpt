@@ -51,7 +51,8 @@
                        int))
             (val k-gen-map
                  (subr (maxeff (alloc @t) (read @globals)) (k-binders k-descs) k-map))
-            (val k-closed-named (ref k-ids @t))
+            (val k-forget-closed-named
+                 (subr (maxeff (alloc @t) (write @t) (read @globals)) () unit))
             (val k-binder-desc
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (int int)
