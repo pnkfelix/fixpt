@@ -1,4 +1,4 @@
-;; ! a (moduleof (abs susp type) … is expected here, and this is a (moduleof … f' …
+;; ! `f` and `f'` are different variables, each named `f`
 ;; The user's okasaki.fx: `the` of a type `poly` over its own `f`, around a
 ;; module of the `plambda`'s `f`. Two `f`s, primed apart; the modules' own
 ;; `susp`s are bound by each `moduleof`, and not. Written so it checks, it
