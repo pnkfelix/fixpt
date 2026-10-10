@@ -1793,6 +1793,20 @@ The conversion is done (`DONE.md` §68). Left from it:
   `(read (globals exp-end exp-start))` and the like (`regcode.fx`,
   `compile-programs.fx`): checked, as they say more than is done, but
   naming what is no longer a global.
+- The size debts phase 2 raised by imports alone: `check-rules.fx` 1358
+  lines (from 998 before it was made by the conductor), `regcode-core.fx`
+  1419 (from 1125); each split moved into `check-rules.fx` raised it two
+  lines more. After §69 and §70 shrink the import blocks, set each entry
+  to its new size, or split the file if it is still over 1000
+  (`crates/fixpt-tidy/fx-size-debt.txt`).
+- A constructor imported from a types file, `(with X-types ctor)`, is not
+  known code to either checker, so a call of it may `spin` where its own
+  module's call would not (found in the pilot, 2026-10-08). Phase 2 put
+  such imports in nearly every file, so more of the front end's effects
+  say `spin` than need to, which hides from the compilers what the types
+  prove. Wanted: an import of a known procedure or constructor from a
+  module as written is known, in both checkers, agreeing; then count the
+  front end's `spin`s before and after.
 
 ## 69. `(extend e0 e1)`, FX-91's, after §68 phase 2 (the user's, 2026-10-09: high priority)
 
@@ -1863,6 +1877,8 @@ pass; the conductor's own names are untouched (they are its bindings, not
 the file's). To decide with it: one abbreviation per module for every
 file (so `ct` means the same everywhere), and how it sits with §69,
 which may remove many of these names outright, so perhaps after §69.
+The tools that know which name comes from which file and module are in
+`scripts/conductor/` (`deps.py`, `registry2.py`; see its README).
 
 ## 71. A load cycle is an error, not a hang
 
@@ -1873,3 +1889,9 @@ checker's `parse_load` recurse through `parse_module_in` without end, past
 300 s with nothing said. Each load should know the paths open above it
 and refuse one already open, naming the cycle; in both parsers, agreeing,
 with a test program of two files that load each other.
+
+Also a check in the suite, before any checker runs: the built-in module
+files (`FRONT_END_MODULES`) load no cycle, found from their text. The
+cycle of 2026-10-09 was made by a tool (the signature generator took the
+value name in `(val k-trail …)` for a use of the type `k-trail`, and
+loaded its types file), and only a 300 s hang said so.
