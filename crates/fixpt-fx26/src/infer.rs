@@ -323,10 +323,8 @@ impl Checker {
             self.facts.reshaped.insert(e, at);
             return Ok(());
         }
-        Err(FxError::at(
-            self.arena.span_of(e),
-            format!("a {} is expected here, and this is a {}{}", self.show_ty(want), self.show_ty(got), self.effect_delta(got, want)),
-        ))
+        let (texts, hint) = self.show_apart(|c| vec![c.show_ty(want), c.show_ty(got), c.effect_delta(got, want)]);
+        Err(FxError::at(self.arena.span_of(e), format!("a {} is expected here, and this is a {}{}{hint}", texts[0], texts[1], texts[2])))
     }
 
     /// The convention `want` asks of `got`, where a procedure differs from

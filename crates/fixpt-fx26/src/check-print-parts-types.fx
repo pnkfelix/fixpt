@@ -39,6 +39,9 @@
             (val k-globals-atom? (subr (read @globals) (k-atom) bool))
             (val k-show-effect (subr (maxeff (read @globals) (read @t)) (k-eff) string))
             (val k-conv-default (ref k-conv @t))
+            (val k-show-marks (ref bool @t))
+            (val k-show-apart
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (k-strings) k-strings))
             (val k-conv=? (subr (read @globals) (k-conv k-conv) bool))
             (val k-kind-text
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int) string))

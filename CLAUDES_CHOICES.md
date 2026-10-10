@@ -109,3 +109,31 @@ list after `abs` was names, and what was not a name was passed over.
    would need a second lookup for no better advice.
 3. **A head that is no name** (`(5 int)`, `()`) still says "expected a
    type".
+
+## Two variables of one name, told apart in a mismatch (2026-10-10)
+
+The user's okasaki.fx met "a (moduleof …) is expected here, and this is a
+(moduleof …)", the two alike: `(the sig e)` inside `(plambda ((f effect))
+…)`, `sig` a `poly` over its own `f`.
+
+1. **Primes.** The first free variable of a name, in the order the
+   message is read, keeps it; the next is `a'`, then `a''`. A prime
+   cannot be in a name (the reader reads it as `quote`), so it is never
+   mistaken for one. Rejected: `a.1`, which looks like the fresh regions'
+   `@r.1`, real names of their own.
+2. **A line saying so**: "`a` and `a'` are different variables, each
+   named `a`", after the effect's delta, so the first line still stands
+   alone and what rewrites it (`expected_and_found`, `k-rewriting`)
+   keeps the line.
+3. **Bound ones left alone.** A `poly`'s and a `dlambda`'s binders, and a
+   `moduleof`'s abstract types, are printed where they are bound; two
+   types each binding `a` are not a clash.
+4. **Where.** Only the "a W is expected here, and this is a G" message
+   (`Checker::expect`, `k-expect`), where the two types meet. Other
+   messages show one type, or name variables by themselves.
+5. **How, in two checkers alike.** Each printer prints a variable as a
+   mark (`\u{1}`, how, its number, `\u{1}`) while the flag is on, and the
+   marks are named after, from the text: the two printers build strings
+   in different orders (Rust's `subr` prints its parameters before its
+   effect), so naming as printed could disagree. The FX printer only
+   reads the flag, so no printer's effect changed.

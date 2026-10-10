@@ -250,6 +250,9 @@ pub struct Checker {
     /// While a `moduleof` is shown: its descriptions' names, each naming
     /// what it describes in the components after it (`unparse`).
     pub(crate) print_names: std::cell::RefCell<Vec<(Sym, TyId)>>,
+    /// Whether two types are being shown apart ([`Checker::show_apart`]):
+    /// each description variable printed as a mark, named after.
+    pub(crate) show_marks: std::cell::Cell<bool>,
     /// While a type's `select`s are resolved: its nodes that lead to none,
     /// each kept as itself rather than rebuilt (`resolve_selects`), so that
     /// what the type shares with others, a named type, it still shares.
@@ -579,6 +582,7 @@ impl Checker {
             effect_selects: Vec::new(),
             with_effect_fallback: HashMap::new(),
             print_names: std::cell::RefCell::new(Vec::new()),
+            show_marks: std::cell::Cell::new(false),
             subst_keep: None,
             select_map: HashMap::new(),
             param_map: HashMap::new(),

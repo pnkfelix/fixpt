@@ -106,9 +106,23 @@
 (define k-dscope (with check-env k-dscope))
 (define k-globals-region? (with check-env k-globals-region?))
 
-;; A description variable's name.
+;; Whether two types are being shown apart (`k-show-apart`): each
+;; description variable printed as a mark, named after.
+(define k-show-marks (ref bool @t) (new #f))
+;; What brackets a variable's mark.
+(define k-mark string (char->string (integer->char 1)))
+;; Variable `v`'s name; or, while two types are shown apart, a mark for it,
+;; named after: `f` where it is free, `b` where it is bound, `h` where it is
+;; bound and not printed (a `moduleof`'s abstract type, shown by its
+;; component's name).
+(define k-dvar-text (subr kreads (int string) string)
+  (lambda (v how)
+    (cond ((get k-show-marks) (k-cat4 k-mark how (int->string v) k-mark))
+          ((string=? how "h") "")
+          (else (symbol->string (k-dvar-name v))))))
+;; A description variable's name, free where it is printed.
 (define k-dvar-string (subr kreads (int) string)
-  (lambda (v) (symbol->string (k-dvar-name v))))
+  (lambda (v) (k-dvar-text v "f")))
 ;; `(const p)` or `(acyclic p)`, frozen into place `p`; or, for the heap
 ;; (-1), `const` or `acyclic`.
 (define k-frozen-show (subr kreads (int bool) string)
@@ -365,7 +379,7 @@
 ;; Binder `v` of kind `kind`: `(name kind)`, or `(name region bound)`.
 (define k-binder-show (subr kbuilds (int int) string)
   (lambda (v kind)
-    (let* ((b (k-bound-of v)) (named (k-cat3 (k-dvar-string v) " " (k-kind-text kind))))
+    (let* ((b (k-bound-of v)) (named (k-cat3 (k-dvar-text v "b") " " (k-kind-text kind))))
       (if (null? b) (k-cat3 "(" named ")") (k-cat5 "(" named " " (k-region-show (car b)) ")")))))
 (define k-show-binders (subr kbuilds (k-binders) k-strings)
   (lambda (bs)
@@ -658,7 +672,11 @@
 
 ;; Abstract type `n`, variable `v`: ` (abs n kind)`.
 (define k-show-abs-one (subr kbuilds (symbol int) string)
-  (lambda (n v) (k-cat5 " (abs " (symbol->string n) " " (k-kind-text (k-dvar-kind v)) ")")))
+  (lambda (n v)
+    ;; `v` is bound here, as a `poly`'s binders are.
+    (let ((bound (k-dvar-text v "h")))
+      (k-cat5 " (abs " (symbol->string n) bound " "
+              (k-cat3 (k-kind-text (k-dvar-kind v)) ")" "")))))
 ;; A module type's abstract types: ` (abs t type)` each.
 (define k-show-abs (subr kbuilds (k-parts) string)
   (lambda (ps)
@@ -718,4 +736,116 @@
         ""
         (k-cat3 " " (k-show-prop (car ps)) (k-show-props-each (cdr ps))))))
 (define k-show-props (subr kshows (string k-props) string)
-  (lambda (which ps) (k-cat4 "(" which (k-show-props-each ps) ")"))))))
+  (lambda (which ps) (k-cat4 "(" which (k-show-props-each ps) ")")))
+;; Marks, as `k-show-apart` reads them: how each is printed, and its
+;; variable; and the names given some.
+(define-type k-marks (listof (pairof string int @t) acyclic))
+(define-type k-primes (listof (pairof int string @t) acyclic))
+;; The number written in `s` from `i` to `j`, after `n`.
+(define k-digits (subr (maxeff (read @globals) spin) (string int int int) int)
+  (lambda (s i j n)
+    (if (>= i j)
+        n
+        (k-digits s (+ i 1) j (+ (* n 10) (- (char->integer (string-ref s i)) 48))))))
+;; The marks in `s` from `i`, in order.
+(define k-marks-in (subr (maxeff (read @globals) (alloc @t) spin) (string int) k-marks)
+  (lambda (s i)
+    (let ((a (string-search s k-mark i)))
+      (if (< a 0)
+          nil
+          (let ((b (string-search s k-mark (+ a 1))))
+            (cons (cons (substring s (+ a 1) (+ a 2)) (k-digits s (+ a 2) b 0))
+                  (k-marks-in s (+ b 1))))))))
+;; The marks in each of `ss`, in order.
+(define k-marks-all (subr (maxeff (read @globals) (alloc @t) spin) (k-strings) k-marks)
+  (lambda (ss) (if (null? ss) nil (append (k-marks-in (car ss) 0) (k-marks-all (cdr ss))))))
+(define k-id-in? (subr (maxeff (read @globals) spin) (int k-ids) bool)
+  (lambda (v vs) (and (not (null? vs)) (or (= (car vs) v) (k-id-in? v (cdr vs))))))
+;; Whether `v` is printed bound among `ms`.
+(define k-mark-bound? (subr (maxeff kreads spin) (int k-marks) bool)
+  (lambda (v ms)
+    (and (not (null? ms))
+         (or (and (= (cdr (car ms)) v) (not (string=? (car (car ms)) "f")))
+             (k-mark-bound? v (cdr ms))))))
+;; The variables of `ms` from `rest` on that are free, each once, in the
+;; order they are read, after `acc` (reversed).
+(define k-free-marks (subr (maxeff kreads (alloc @t) spin) (k-marks k-marks k-ids) k-ids)
+  (lambda (rest ms acc)
+    (if (null? rest)
+        (reverse acc)
+        (let ((v (cdr (car rest))))
+          (k-free-marks (cdr rest) ms
+                        (if (or (k-id-in? v acc) (k-mark-bound? v ms)) acc (cons v acc)))))))
+;; Those of `vs` named `n`.
+(define k-named-like (subr (maxeff kreads (alloc @t) spin) (k-ids symbol) k-ids)
+  (lambda (vs n)
+    (cond ((null? vs) nil)
+          ((symbol=? (k-dvar-name (car vs)) n) (cons (car vs) (k-named-like (cdr vs) n)))
+          (else (k-named-like (cdr vs) n)))))
+;; `n` primed `k` times.
+(define k-primed (subr (maxeff (read @globals) spin) (string int) string)
+  (lambda (n k) (if (= k 0) n (k-primed (string-append n "'") (- k 1)))))
+;; `vs`, named `n` primed 0, 1, … times from `k`, onto `acc`.
+(define k-primes-of (subr (maxeff (read @globals) (alloc @t) spin) (k-ids string int k-primes)
+                          k-primes)
+  (lambda (vs n k acc)
+    (if (null? vs)
+        acc
+        (k-primes-of (cdr vs) n (+ k 1) (cons (cons (car vs) (k-primed n k)) acc)))))
+(define k-prime-of (subr (maxeff kreads spin) (int k-primes) string)
+  (lambda (v ps) (cond ((null? ps) "") ((= (car (car ps)) v) (cdr (car ps)))
+                       (else (k-prime-of v (cdr ps))))))
+(define k-primed? (subr (maxeff kreads spin) (int k-primes) bool)
+  (lambda (v ps) (and (not (null? ps)) (or (= (car (car ps)) v) (k-primed? v (cdr ps))))))
+;; "`a`, `a'` and `a''`": names `k` to `n`-1 of `x`, quoted, after `acc`.
+(define k-primes-said (subr (maxeff (read @globals) spin) (string int int string) string)
+  (lambda (x k n acc)
+    (let ((q (k-cat3 "`" (k-primed x k) "`")))
+      (cond ((= k n) acc)
+            ((= k 0) (k-primes-said x 1 n q))
+            ((= k (- n 1)) (k-primes-said x (+ k 1) n (k-cat3 acc " and " q)))
+            (else (k-primes-said x (+ k 1) n (k-cat3 acc ", " q)))))))
+;; The names `free` from `rest` on are given where two share a name,
+;; after `ps`, and the lines that say so, after `hint`.
+(define k-prime-all (subr (maxeff kreads (alloc @t) spin) (k-ids k-ids k-primes string)
+                          (pairof k-primes string @t))
+  (lambda (rest free ps hint)
+    (if (null? rest)
+        (cons ps hint)
+        (let* ((v (car rest)) (n (k-dvar-name v)) (same (k-named-like free n))
+               (x (symbol->string n)) (count (k-length same)))
+          (if (or (k-primed? v ps) (< count 2))
+              (k-prime-all (cdr rest) free ps hint)
+              (k-prime-all (cdr rest) free (k-primes-of same x 0 ps)
+                           (string-append hint
+                                          (k-cat5 (char->string (integer->char 10)) "  "
+                                                  (k-primes-said x 0 count "")
+                                                  " are different variables, each named "
+                                                  (k-cat3 "`" x "`")))))))))
+;; `s` from `i`, each mark named as `ps` says or by its variable's name;
+;; an `h` mark by nothing.
+(define k-named-marks (subr (maxeff kreads (alloc @t) spin) (string int k-primes) string)
+  (lambda (s i ps)
+    (let ((a (string-search s k-mark i)))
+      (if (< a 0)
+          (substring s i (string-length s))
+          (let* ((b (string-search s k-mark (+ a 1)))
+                 (how (substring s (+ a 1) (+ a 2)))
+                 (v (k-digits s (+ a 2) b 0))
+                 (name (cond ((string=? how "h") "")
+                             ((k-primed? v ps) (k-prime-of v ps))
+                             (else (symbol->string (k-dvar-name v))))))
+            (k-cat3 (substring s i a) name (k-named-marks s (+ b 1) ps)))))))
+(define k-named-each (subr (maxeff kreads (alloc @t) spin) (k-strings k-primes) k-strings)
+  (lambda (ss ps)
+    (if (null? ss) nil (cons (k-named-marks (car ss) 0 ps) (k-named-each (cdr ss) ps)))))
+;; `ss`, printed with `k-show-marks` on, with two free variables of one name
+;; told apart: the first, in the order they are read, keeps its name, the
+;; next is primed, `a'`, and so on; then a line for each such name saying
+;; so, all in one string, or "" (`Checker::show_apart`).
+(define k-show-apart (subr (maxeff kreads (alloc @t) spin) (k-strings) k-strings)
+  (lambda (ss)
+    (let* ((ms (k-marks-all ss)) (free (k-free-marks ms ms nil))
+           (named (k-prime-all free free nil "")))
+      (append (k-named-each ss (car named)) (list (cdr named))))))
+)))

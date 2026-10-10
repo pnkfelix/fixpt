@@ -106,6 +106,8 @@
 (define k-conv=? (with check-print-parts k-conv=?))
 (define k-kind-word (with check-print-parts k-kind-word))
 (define k-show-effect (with check-print-parts k-show-effect))
+(define k-show-marks (with check-print-parts k-show-marks))
+(define k-show-apart (with check-print-parts k-show-apart))
 (define k-show-ty (with check-print k-show-ty))
 (define k-size-var (with check-print-parts k-size-var))
 (define k-desc-of-kind? (with check-kinds k-desc-of-kind?))
@@ -217,10 +219,17 @@
         (let ((c (k-conversion got want)))
           (cond ((not (null? c)) (k-convert-at x got (car c)))
                 ((k-reshape-at x got want) #u)
-                (else
-                 (k-fail (string-append (k-expected-here (k-show-ty want) (k-show-ty got))
-                                        (k-effect-delta got want))
-                         (k-start x) (k-end x))))))))
+                (else (k-fail (k-expected-apart got want) (k-start x) (k-end x))))))))
+;; "a W is expected here, and this is a G", and the effect's delta, with two
+;; variables of one name told apart (`k-show-apart`).
+(define k-expected-apart (subr (maxeff checks spin) (int int) string)
+  (lambda (got want)
+    (let* ((on (set k-show-marks #t))
+           (w (k-show-ty want)) (g (k-show-ty got)) (d (k-effect-delta got want))
+           (off (set k-show-marks #f))
+           (ss (k-show-apart (list w g d))))
+      (k-cat3 (k-expected-here (car ss) (car (cdr ss))) (car (cdr (cdr ss)))
+              (car (cdr (cdr (cdr ss))))))))
 ;; Bind each, the first first.
 (define k-bind-all (subr (maxeff kstate spin) (k-bindings) unit)
   (lambda (bs)
