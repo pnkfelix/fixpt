@@ -720,6 +720,8 @@ fn probe_phases_as_register_code() {
         run(sc, registers, &[on]);
         let probed = std::env::var("FIXPT_PROBE_FILE").ok().map(|f| std::fs::read_to_string(f).expect("the probe file reads"));
         let program = probed.as_deref().unwrap_or(&text);
+        // The files the program loads, read for the parser, which cannot.
+        supply_loaded(sc, pieces, program);
         let (tx, st) = (sc.make(|m| m.heap().make_string(program)), sc.make(|m| m.heap().make_string(&standard)));
         let mut t = std::time::Instant::now();
         let mut gcs = (0, 0, 0, 0);
