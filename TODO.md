@@ -1911,3 +1911,21 @@ files (`FRONT_END_MODULES`) load no cycle, found from their text. The
 cycle of 2026-10-09 was made by a tool (the signature generator took the
 value name in `(val k-trail …)` for a use of the type `k-trail`, and
 loaded its types file), and only a 300 s hang said so.
+
+## 72. Say which name a module item captures (2026-10-09)
+
+A module's items scope over all its items (`letrec*`), so an item can
+capture a name the module's own code means from outside it:
+
+    (define entries
+      (let ((checker (module (define checker …) (define lines …))))
+        (module (define lines (with checker lines))
+                (define checker (with checker checker)))))
+
+Both checkers refuse it rightly, but say `` `lines` uses `lines`, before
+it is made ``: what `(with checker lines)` reaches through the captured
+name, not the name. Found in the conductor (TODO.md §68), where the entry
+`check-program` captured the module of that name. Wanted: when a name an
+item uses is one of the module's items and also bound outside it, the
+message says so (`` `checker` here is the module's own item, made after
+`lines`, not the `checker` bound outside it ``), in both checkers, agreeing.
