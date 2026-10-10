@@ -126,6 +126,8 @@
 (define k-ty-new (with check-types k-ty-new))
 (define k-abs-bound (with check-read-helpers k-abs-bound))
 (define k-abs-usage (with check-read-helpers k-abs-usage))
+(define k-abs-ctor-usage (with check-read-helpers k-abs-ctor-usage))
+(define k-abs-ctor-params (with check-read-helpers k-abs-ctor-params))
 (define k-all-unnamed? (with check-read-helpers k-all-unnamed?))
 (define k-arity-fail (with check-read-helpers k-arity-fail))
 (define k-type-form? (with check-read-helpers k-type-form?))
@@ -879,6 +881,17 @@
         nil
         (let* ((k (k-try-kind (car xs))) (rest (k-try-kinds (cdr xs))))
           (the k-ids (cons k rest))))))
+;; An `abs`'s kind, `what`; or, `(abs (f (name kind) …) type)`, `(=> (kind
+;; …) type)`.
+(define k-abs-kind (subr (maxeff checks spin) (syn syn) int)
+  (lambda (name what)
+    (let ((ps (k-abs-ctor-params name)))
+      (if (null? ps)
+          (k-try-kind what)
+          (let ((ks (k-try-kinds ps)))
+            (if (or (k-has-id? ks -1) (not (= (k-try-kind what) 2)))
+                (k-sfail k-abs-ctor-usage name)
+                (k-arrow ks 2)))))))
 ;; A `moduleof`'s description `what` of `name`, in scope in what follows it:
 ;; `(desc e E)`, an effect, as a module's `define-effect` gives; a description
 ;; function; or a type.
@@ -910,7 +923,7 @@
                (what (k-nth parts 2)))
           (case head
             (("abs")
-             (let ((k (k-try-kind what)))
+             (let ((k (k-abs-kind (k-nth parts 1) what)))
                (if (or (= k 2) (and (k-arrow-kind? k) (= (k-arrow-result k) 2)))
                    (k-moduleof-comps (cdr cs) (k-abs-bound names k abs) ds vs seen vseen)
                    (k-sfail k-abs-usage what))))

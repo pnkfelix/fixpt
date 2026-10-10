@@ -42,6 +42,7 @@
             (val k-dlambda-empty string)
             (val k-moduleof-usage string)
             (val k-abs-usage string)
+            (val k-abs-ctor-usage string)
             (val k-type-form? (subr (maxeff (read @globals) (read @t)) (symbol) bool))
             (val k-no-name symbol)
             (val k-fresh-named
@@ -116,6 +117,16 @@
                                spin)
                        (string k-params)
                        int))
+            (val k-abs-ctor-params
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (syn)
+                       k-syns))
             (val k-component-names
                  (subr (maxeff (alloc @t)
                                (goto @z)

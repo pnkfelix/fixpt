@@ -128,6 +128,7 @@
 (define k-moduleof-usage string "`(moduleof (abs t type) … (desc d type) … (val x type) …)`")
 (define k-abs-usage string
   "an abstract component is a `type`, or a type constructor `(=> (kind …) type)`, for now")
+(define k-abs-ctor-usage string "an abstract type constructor is `(abs (f (name kind) …) type)`")
 ;; The heads of the type forms a type is read from, and every keyword: no
 ;; parameter's name.
 (define k-type-forms k-names
@@ -289,6 +290,32 @@
     (cond ((null? xs) nil)
           ((syn-symbol? (car xs)) (cons (syn-head (car xs)) (k-syn-symbols (cdr xs))))
           (else (k-syn-symbols (cdr xs))))))
+;; Whether every one of `xs` is a name.
+(define k-all-symbols? (subr (read @s) (k-syns) bool)
+  (lambda (xs) (or (null? xs) (and (syn-symbol? (car xs)) (k-all-symbols? (cdr xs))))))
+;; `(abs (f (name kind) …) type)`'s parameters' kinds, unread, from `ps`; `name`
+;; is said wrong if they are not.
+(define k-ctor-param-kinds (subr (maxeff checks spin) (k-syns syn) k-syns)
+  (lambda (ps name)
+    (if (null? ps)
+        nil
+        (tagcase (car ps)
+          (lst (items d a b)
+            (if (and (= (k-length items) 2) (syn-symbol? (car items)))
+                (cons (car (cdr items)) (k-ctor-param-kinds (cdr ps) name))
+                (k-sfail k-abs-ctor-usage name)))
+          (else x (k-sfail k-abs-ctor-usage name))))))
+;; `(abs (f (name kind) …) type)`'s parameters' kinds, unread: `(abs f (=>
+;; (kind …) type))`, as `define-generative` writes its parameters. None for
+;; a name, or a list of names.
+(define k-abs-ctor-params (subr (maxeff checks spin) (syn) k-syns)
+  (lambda (name)
+    (tagcase name
+      (lst (items d a b)
+        (cond ((k-all-symbols? items) nil)
+              ((syn-symbol? (car items)) (k-ctor-param-kinds (cdr items) name))
+              (else (k-sfail k-abs-ctor-usage name))))
+      (else x nil))))
 ;; A component's names: its name; or, an `abs`'s, the names in a list.
 (define k-component-names (subr (maxeff checks spin) (syn string) k-names)
   (lambda (name head)
@@ -296,7 +323,10 @@
         (the k-names (cons (syn-head name) nil))
         (tagcase name
           (lst (items d a b)
-            (if (string=? head "abs") (k-syn-symbols items) (k-sfail "a component's name" name)))
+            (cond ((not (string=? head "abs")) (k-sfail "a component's name" name))
+                  ((k-all-symbols? items) (k-syn-symbols items))
+                  ;; One constructor, its parameters' kinds given.
+                  (else (begin (k-abs-ctor-params name) (cons (syn-head (car items)) nil)))))
           (else x (k-sfail "a component's name" name))))))
 ;; `seen` and `names`, each named once in component `c`.
 (define k-names-once (subr (maxeff checks spin) (k-names k-names syn) k-names)

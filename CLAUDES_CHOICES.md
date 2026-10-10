@@ -70,3 +70,30 @@ your choice"). Newest last; each says what was chosen, over what, and why.
 7. **The old refusal tests** (`include-abstract.fx`, `extend-abstract.fx`)
    now run; I rewrote them as programs giving answers rather than keep
    tests for an error that no longer exists.
+
+## `(abs (f (a type)) type)`, an abstract constructor by its parameters (2026-10-10)
+
+The user's `okasaki.fx` wrote this, and it was read as `(abs f type)`: a
+list after `abs` was names, and what was not a name was passed over.
+
+1. **Accepted, not only refused.** `(abs (f (a kind) …) type)` is `(abs f
+   (=> (kind …) type))`, as `define-generative` writes its parameters; it
+   is what one reaches for first. Refusing it alone would have been the
+   smaller change.
+2. **Telling the two lists apart.** A list of names only is several
+   abstract types, as before; a name then `(name kind)`s is a
+   constructor; anything else (a name among parameters, a parameter
+   first, a `(name kind)` of three) is refused: "an abstract type
+   constructor is `(abs (f (name kind) …) type)`". `(abs (f) type)` stays
+   one abstract type `f`.
+3. **The result is `type`.** As `(abs f (=> … type))` must give a type;
+   `(abs (f (a type)) (=> (type) type))` (curried) is refused rather than
+   read as `(=> (type) (=> (type) type))`.
+4. **No variance marks.** `define-generative`'s `(a type +)` is not taken:
+   what a description function is given counts as invariant
+   (`docs/fx26.md`, Higher kinds), so a mark would say nothing.
+5. **Parameter names are not checked** for repeats: they name nothing, as
+   in `(=> (type type) type)`.
+6. **When it is checked.** The list's shape with the names (before "appears
+   twice"), the kinds with the component, in both checkers, so they fail
+   alike.

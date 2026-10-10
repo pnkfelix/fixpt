@@ -56,6 +56,9 @@ pub enum FamilyArg {
 }
 
 /// The heads of the type forms `parse_type_node` reads.
+/// What `(abs (f (name kind) …) type)` is, when it is not.
+const ABS_CTOR_USAGE: &str = "an abstract type constructor is `(abs (f (name kind) …) type)`";
+
 const TYPE_FORMS: &[&str] = &[
     "arrayof", "bloblet", "composable", "dletrec", "icell", "listof", "mark-key", "moduleof", "mu", "nat", "nlist", "pairof", "place",
     "poly", "productof", "prompt-tag", "proves", "ref", "select", "subr", "sumof", "bool", "union",
@@ -2262,6 +2265,22 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         r
     }
 
+    /// `(abs (f (a kind) …) type)`'s name and its parameters' kinds, unread:
+    /// `(abs f (=> (kind …) type))`, as `define-generative` writes its
+    /// parameters.
+    fn abs_ctor(&mut self, name: &Syntax, ns: &[Syntax]) -> R<(Sym, Vec<Syntax>)> {
+        let err = || FxError::at(name.span, ABS_CTOR_USAGE);
+        let Some(f) = ns[0].as_symbol() else { return Err(err()) };
+        let mut ks = Vec::new();
+        for p in &ns[1..] {
+            match p.as_proper_list() {
+                Some([n, k]) if n.as_symbol().is_some() => ks.push(k.clone()),
+                _ => return Err(err()),
+            }
+        }
+        Ok((f, ks))
+    }
+
     fn parse_moduleof_in(&mut self, span: fixpt_read::Span, comps: &[Syntax]) -> R<TyId> {
         let usage = "`(moduleof (abs t type) … (desc d type) … (val x type) …)`";
         let (mut abs, mut descs, mut vals): (Vec<(Sym, DVar)>, Vec<(Sym, TyId)>, Vec<(Sym, TyId)>) = (Vec::new(), Vec::new(), Vec::new());
@@ -2273,9 +2292,19 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
             let [head, name, what] = &parts[..] else {
                 return Err(FxError::at(c.span, usage));
             };
+            // `(abs (t …) type)` names several; `(abs (f (a kind) …) type)`
+            // is one constructor, its parameters' kinds given.
+            let mut ctor: Option<Vec<Syntax>> = None;
             let names: Vec<Sym> = match (name.as_symbol(), name.as_proper_list()) {
                 (Some(n), _) => vec![n],
-                (None, Some(ns)) if self.head(&parts) == Some("abs") => ns.iter().filter_map(|n| n.as_symbol()).collect(),
+                (None, Some(ns)) if self.head(&parts) == Some("abs") && ns.iter().all(|n| n.as_symbol().is_some()) => {
+                    ns.iter().filter_map(|n| n.as_symbol()).collect()
+                }
+                (None, Some(ns)) if self.head(&parts) == Some("abs") => {
+                    let (f, ks) = self.abs_ctor(name, ns)?;
+                    ctor = Some(ks);
+                    vec![f]
+                }
                 _ => return Err(FxError::at(name.span, "a component's name")),
             };
             let seen = if self.head(&parts) == Some("val") { &mut vseen } else { &mut seen };
@@ -2289,7 +2318,16 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                 Some("abs") => {
                     // A type, or a type constructor: a description function
                     // to a type (`crate::kinds`).
+                    let ks = match ctor.take() {
+                        Some(ks) if what.as_symbol().map(|k| self.name(k)) == Some("type") => {
+                            let ks = ks.iter().map(|k| self.parse_kind(k)).collect::<R<Vec<_>>>();
+                            Some(ks.map_err(|_| FxError::at(name.span, ABS_CTOR_USAGE))?)
+                        }
+                        Some(_) => return Err(FxError::at(name.span, ABS_CTOR_USAGE)),
+                        None => None,
+                    };
                     let kind = match what.as_symbol().map(|k| self.name(k)) {
+                        _ if ks.is_some() => self.arena.arrow(ks.unwrap_or_default(), Kind::Type),
                         Some("type") => Kind::Type,
                         _ => match self.parse_kind(what) {
                             Ok(k) if self.arena.arrow_parts(k).is_some_and(|(_, r)| r == Kind::Type) => k,
