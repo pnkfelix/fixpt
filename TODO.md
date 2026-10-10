@@ -2022,6 +2022,24 @@ header; nothing uses a static field count. So:
   "hidden fields reach only regions outliving the bloblet's", needs
   outlives facts FX-26 does not generally have). To check too: whether
   the `data`/`acyclic` shape analyses (`check.rs`) need every field seen.
+- **Plan (the user's, 2026-10-10): today's syntax *is* the lower bound**;
+  an exact form waits for a need. Checked against `check.rs`'s walks of
+  a bloblet's fields: the region-only ones (`regions_walk`, the escape
+  check and masking; `storage_regions`; `data_places`; `writes_in`) stay
+  sound if forgotten fields reach no other region; but `data_walk` (a
+  frozen bloblet is data only if every field is) and `knot_in` (recursion
+  tied through the store, for termination) need more, and a lower-bound
+  type cannot say whether anything is hidden, so they would have to
+  assume the worst of every bloblet, changing existing verdicts. So
+  widening checks what it forgets, against one fixed rule that keeps a
+  type's hidden fields invisible to every analysis: a field may be
+  forgotten only if (1) it reaches no region but the bloblet's own
+  (whether `@heap` may be left out: see `storage_regions`), (2) it is data
+  where the bloblet is frozen, and (3) it holds no procedure, directly or
+  through storage. Every analysis then keeps reading the listed fields
+  alone, existing programs keep their verdicts, and the common widenings
+  (fields of numbers, flat data, same-region structure) pass. An exact
+  form, or a way past the rule (a hidden-region list), when needed.
 
 **`(blobref F R)` or `(ref F R)`?** (the user's, 2026-10-10: open to a
 type of its own, since a suffix ref is "a pretty special snowflake".)
