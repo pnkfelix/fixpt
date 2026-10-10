@@ -129,6 +129,12 @@
 (define k-abs-usage string
   "an abstract component is a `type`, or a type constructor `(=> (kind …) type)`, for now")
 (define k-abs-ctor-usage string "an abstract type constructor is `(abs (f (name kind) …) type)`")
+;; What a list headed `hd` is not, read as a type: `hd` applied, if a name.
+(define k-not-type-list (subr (read @globals) (symbol) string)
+  (lambda (hd)
+    (if (symbol=? hd '|()|)
+        "expected a type"
+        (string-append (k-quote (symbol->string hd)) " is not a description function"))))
 ;; The heads of the type forms a type is read from, and every keyword: no
 ;; parameter's name.
 (define k-type-forms k-names

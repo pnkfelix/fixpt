@@ -762,7 +762,12 @@ impl Checker {
                 let r = self.parse_region(r)?;
                 Ok(self.arena.ty(Ty::MarkKey(t, r)))
             }
-            _ => Err(FxError::at(s.span, "expected a type")),
+            // A name applied that is no description function: unbound, a
+            // typo, or a type.
+            _ => match items.first().and_then(|h| h.as_symbol()) {
+                Some(h) => Err(FxError::at(s.span, format!("`{}` is not a description function", self.name(h)))),
+                None => Err(FxError::at(s.span, "expected a type")),
+            },
         }
     }
 

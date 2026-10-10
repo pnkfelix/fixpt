@@ -128,6 +128,7 @@
 (define k-abs-usage (with check-read-helpers k-abs-usage))
 (define k-abs-ctor-usage (with check-read-helpers k-abs-ctor-usage))
 (define k-abs-ctor-params (with check-read-helpers k-abs-ctor-params))
+(define k-not-type-list (with check-read-helpers k-not-type-list))
 (define k-all-unnamed? (with check-read-helpers k-all-unnamed?))
 (define k-arity-fail (with check-read-helpers k-arity-fail))
 (define k-type-form? (with check-read-helpers k-type-form?))
@@ -553,7 +554,7 @@
              (k-ty-new (ty-markkey t r)))))
         (else
          (cond ((k-module-type-head? hd) (k-read-module-type s items hd))
-               (else (k-sfail "expected a type" s))))))))
+               (else (k-sfail (k-not-type-list hd) s))))))))
 ;; `(dletrec ((name type) …) type)`: each name gets a forwarding slot
 ;; before any body is read, so the bodies can refer to it and each other.
 (define k-parse-dletrec (subr (maxeff checks spin) (syn k-syns) int)

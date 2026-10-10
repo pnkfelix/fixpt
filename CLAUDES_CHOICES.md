@@ -97,3 +97,15 @@ list after `abs` was names, and what was not a name was passed over.
 6. **When it is checked.** The list's shape with the names (before "appears
    twice"), the kinds with the component, in both checkers, so they fail
    alike.
+
+## A name applied in a type that is none, said by name (2026-10-10)
+
+1. **Wording.** `(queueuof a)` is refused with "`queueuof` is not a
+   description function", in the words of `docs/fx26.md` and of `with`'s
+   "`f` is not a description function, nor one …". Rejected: "is not a
+   type constructor", plainer but a second name for one thing.
+2. **One message for unbound and bound.** `(int int)` says the same: `int`
+   is bound, as a type, and is no function either; telling the two apart
+   would need a second lookup for no better advice.
+3. **A head that is no name** (`(5 int)`, `()`) still says "expected a
+   type".
