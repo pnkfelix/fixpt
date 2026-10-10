@@ -1959,9 +1959,14 @@ pointers held in tagged fields, named from flat data, with the suffix
 still holding none (the collector traces fields only, a store goes
 through the field and its barrier, and the flat data stays
 position-independent when the owner moves). Open:
-- the ref's type must say the owner's field types for such a component to
-  be checked (`(field T)`: a byte naming a field that holds a `T`), e.g.
-  `(blobref (fields T …) F R)`, not `F` alone;
+- the connection need not be in `F` (the user's, 2026-10-10): the index
+  is a plain byte, and code makes the connection explicitly, through a
+  primitive from a blobref to its owning bloblet (the runtime's
+  `%suffix-ref-owner`). Open is that primitive's result type: (a) the
+  blobref's type carries the owner's, `(blobref O F R)`, so field accesses
+  are checked statically; (b) a bloblet of no known fields, checked at run
+  time or cast; (c) none: code that needs the fields keeps the typed
+  bloblet it made the refs from;
 - an index's width: a byte (255 fields), or by the layout;
 - who establishes and keeps "field k holds a T", and aliasing (two bytes
   naming one field);
@@ -1974,8 +1979,8 @@ Leaning to a type of its own: its parameter is of another kind (`flat`,
 not `type`); it has projections a box has not (a field, an element) and
 reads only at scalars; writing through it marks no card and stores no
 pointer; and `ref`'s rules (variance, `new`, `get`'s type) would each
-need a case by kind. Field indices settle it further: the type must carry
-the owner's field types, which `ref` cannot. To decide with the user.
+need a case by kind; and if the owner's type rides along (`(blobref O F
+R)`, above), `ref` cannot carry it. To decide with the user.
 
 **Native code.** Compiled code reaches suffix refs only through the
 runtime today. Once the language types them: read and write in line, the
