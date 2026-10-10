@@ -287,6 +287,10 @@ pub struct Checker {
     /// wrote it, the outermost first: a load of one of them is a cycle
     /// (`TODO.md` §71).
     pub(crate) loading: Vec<(String, String)>,
+    /// How many modules being read have `include`s (`TODO.md` §69): in
+    /// one, a type name nothing else defines is the modules included's,
+    /// `(select %include t)`, found when they are typed.
+    pub(crate) include_scope: usize,
     /// Those globals: seen from a loaded file, which sees no other.
     pub(crate) shared_globals: HashSet<Sym>,
     /// The hidden globals' definitions made since the form being checked
@@ -578,6 +582,7 @@ impl Checker {
             shared_loads: HashMap::new(),
             sharing_now: HashSet::new(),
             loading: Vec::new(),
+            include_scope: 0,
             shared_globals: HashSet::new(),
             hoisted: Vec::new(),
             loaded: HashMap::new(),

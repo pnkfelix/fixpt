@@ -347,6 +347,12 @@ impl Checker {
                     Err(self.not_applied(s, sym, k))
                 }
                 _ if self.holes.is_some_and(|h| h.exp == sym) => Err(FxError::at(s.span, "expected a type")),
+                // In a module with `include`s, the modules included's, found
+                // when they are typed (`TODO.md` §69).
+                _ if self.include_scope > 0 => {
+                    let inc = self.interner.intern("%include");
+                    Ok(self.arena.ty(Ty::Select(inc, sym)))
+                }
                 _ => Err(FxError::at(s.span, format!("`{}` is not a type", self.name(sym)))),
             };
         }
@@ -2440,7 +2446,40 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         let (mut includes, mut spans): (Vec<(fixpt_read::Span, ExpId, bool)>, Vec<Vec<fixpt_read::Span>>) = (Vec::new(), Vec::new());
         // The forms to read, the first last, each hidden or not (`(hide
         // item …)`, `TODO.md` §69).
-        let mut work: Vec<(Syntax, bool)> = forms.iter().rev().map(|f| (f.clone(), false)).collect();
+        let work: Vec<(Syntax, bool)> = forms.iter().rev().map(|f| (f.clone(), false)).collect();
+        // A module with `include`s, in a `hide` or not: their types are in
+        // scope in its items (`include_scope`).
+        let includes_here = forms.iter().any(|f| self.includes_in(f));
+        self.include_scope += usize::from(includes_here);
+        let r = self.module_items_from(work, &mut out, &mut includes, &mut spans);
+        self.include_scope -= usize::from(includes_here);
+        r?;
+        if !includes.is_empty() {
+            self.with_includes(&mut out, &spans, includes);
+        }
+        Ok(out)
+    }
+
+    /// Whether form `f` is an `(include m)`, or a `hide` holding one.
+    fn includes_in(&self, f: &Syntax) -> bool {
+        let items = f.as_proper_list().unwrap_or(&[]);
+        match self.head(items) {
+            Some("include") => true,
+            Some("hide") => items[1..].iter().any(|g| self.includes_in(g)),
+            _ => false,
+        }
+    }
+
+    /// `parse_module_items`' work: the forms of `work`, the first last, read
+    /// into `out`, `includes` and `spans`.
+    #[allow(clippy::type_complexity)]
+    fn module_items_from(
+        &mut self,
+        mut work: Vec<(Syntax, bool)>,
+        out: &mut Vec<ModItem>,
+        includes: &mut Vec<(fixpt_read::Span, ExpId, bool)>,
+        spans: &mut Vec<Vec<fixpt_read::Span>>,
+    ) -> R<()> {
         while let Some((f, hidden)) = work.pop() {
             let f = &f;
             let parts = self.items(f, "a module's definition")?.to_vec();
@@ -2588,10 +2627,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                 spans.resize(out.len(), vec![f.span]);
             }
         }
-        if !includes.is_empty() {
-            self.with_includes(&mut out, &spans, includes);
-        }
-        Ok(out)
+        Ok(())
     }
 
     /// A module's `(include m)`s (`TODO.md` §69): one hidden item first,

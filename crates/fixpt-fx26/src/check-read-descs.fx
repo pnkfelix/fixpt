@@ -336,6 +336,15 @@
                         (else (de (k-parse-effect (car args))))))
                (rest (k-gen-args (cdr ps) (cdr args))))
           (cons d rest)))))
+;; A type name nothing defines: in a module with `include`s (marked by
+;; `k-include-mark`), the modules included's, found when they are typed (`TODO.md`
+;; §69), as `parse.rs`; else what `no` says.
+(define k-type-unknown
+  (subr (maxeff checks spin) (symbol syn (subr (maxeff checks spin) () string)) int)
+  (lambda (sym s no)
+    (if (not (null? (k-lookup-desc '%include-scope)))
+        (k-ty-new (ty-select '%include sym))
+        (k-sfail (no) s))))
 ;; The type a name stands for.
 (define k-type-named (subr (maxeff checks spin) (syn) int)
   (lambda (s)
@@ -351,7 +360,7 @@
              (let ((d (k-lookup-desc sym))
                    (no (lambda () (string-append (k-quote n) " is not a type"))))
                (if (null? d)
-                   (k-sfail (no) s)
+                   (k-type-unknown sym s no)
                    (tagcase (car d)
                      (ds-var (v k)
                        (cond ((k-type-kind? k) (k-ty-new (ty-var v)))

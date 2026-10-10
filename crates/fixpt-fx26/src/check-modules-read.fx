@@ -249,6 +249,15 @@
 (define k-scope-newest (subr (maxeff (read @globals) (alloc @t)) (int k-scope k-scope) k-scope)
   (lambda (n s onto)
     (if (or (<= n 0) (null? s)) onto (cons (car s) (k-scope-newest (- n 1) (cdr s) onto)))))
+;; In a module with `include`s (its first item `%include`), a mark in the
+;; description scope, `%include-scope`, so that a type name nothing else
+;; defines is the modules included's (`k-type-unknown`, `TODO.md` §69); gone
+;; with the module's scope.
+(define k-include-mark (subr kstate (mod-items) unit)
+  (lambda (items)
+    (if (and (not (null? items)) (symbol=? (car (extract (car items) 2)) '%include))
+        (k-push-desc '%include-scope (ds-var -1 0))
+        #u)))
 ;; Reading expressions (`check-resolve.fx`'s walk) and modules' items, one
 ;; recursive group: a module is an expression, and its items hold them.
 (define-rec
@@ -476,9 +485,11 @@
            (let ((got (the (ref k-items @t) (new nil)))
                  (ps (k-syns-count (extract (car items) 3))))
              (begin (set k-dscope (k-scope-newest ps saved (get k-std-dscope)))
-                    (k-in-loaded (lambda () (set got (k-resolve-items-ahead items))) k a b)
+                    (k-in-loaded (lambda () (begin (k-include-mark items)
+                                                   (set got (k-resolve-items-ahead items))))
+                                 k a b)
                     (set k-dscope saved)
                     (x-module (get got) a b))))
           (else
-           (let ((xs (k-resolve-items-ahead items)))
+           (let ((xs (begin (k-include-mark items) (k-resolve-items-ahead items))))
              (begin (set k-dscope saved) (x-module xs a b))))))))))))

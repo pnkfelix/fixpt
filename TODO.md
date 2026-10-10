@@ -1831,8 +1831,22 @@ The conversion is done (`DONE.md` §68). Left from it:
 from by path (a reshape, as a module given where fewer values are wanted
 is). Left:
 
-- `include`'s types in scope inside the module, and `include` and
-  `extend` of a module whose type has abstract types.
+- `include` and `extend` of a module whose type has abstract types.
+  The direction (the user's and Claude's, 2026-10-09): an abstract type of
+  a module included *by name*, `(include m)`, is in the module's type
+  `(select m t)`, an alias of the original, so that the two's values
+  stay interchangeable (ML's `include`); the module then cannot leave
+  `m`'s scope, as for `m..t` already. A module included that is not a
+  name (`(include (load-module "f"))`, a call, an inline `module`) has
+  no path to alias: refused, or bound to a name first. `extend` likewise.
+  For the two that are literal text, an inline `(module …)` and a
+  `(load-module "f")`, its items could be spliced in instead, the types
+  then the module's own (the user's, 2026-10-09; OCaml's `include struct
+  … end`); every other is a value made when the program runs. To read
+  first: what Sheldon's thesis says of combining first-class modules with
+  abstract types, before deciding.
+  Effects (`define-effect`) of a module included are not in scope inside
+  yet, as types now are.
 - A hidden abstract type in an exported one: refused for now (the
   user's, 2026-10-09); abstract in the module's type, the existential
   reading, could come later.

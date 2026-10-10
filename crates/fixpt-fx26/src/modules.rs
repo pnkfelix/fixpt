@@ -532,7 +532,15 @@ impl Checker {
         let mut sel = HashMap::new();
         for (m, n, node) in found {
             let shown = |c: &Checker| format!("`(select {} {})`", c.interner.name(m), c.interner.name(n));
+            // A type name in a module with `include`s that nothing else
+            // defines (`include_scope`): said of the name, not of the
+            // hidden `%include`.
+            let included = self.interner.name(m) == "%include";
+            let not_included = |c: &Checker| format!("`{}` is not a type, nor one a module included gives", c.interner.name(n));
             let Some(mt) = self.lookup(m) else {
+                if included {
+                    return Err(FxError::at(span, not_included(self)));
+                }
                 return Err(FxError::at(span, format!("{}: `{}` is not bound here", shown(self), self.interner.name(m))));
             };
             let Ty::Module { abs, descs, .. } = self.arena.get(self.arena.resolve(mt)).clone() else {
@@ -541,6 +549,7 @@ impl Checker {
             let to = match (abs.iter().find(|(a, _)| *a == n), descs.iter().find(|(d, _)| *d == n)) {
                 (Some((_, v)), _) => self.arena.ty(Ty::Var(*v)),
                 (None, Some((_, d))) => *d,
+                (None, None) if included => return Err(FxError::at(span, not_included(self))),
                 (None, None) => {
                     return Err(FxError::at(span, format!("{}: `{}` has no type `{}`", shown(self), self.interner.name(m), self.interner.name(n))));
                 }

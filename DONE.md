@@ -1327,3 +1327,18 @@ module's items, the hidden `%include` is not named: `` an `include` uses
 `k`, which the module defines: an included module is made before its
 items ``. Tests: `modules/capture.fx`, `capture-self.fx`,
 `include-uses-own.fx`.
+
+An `include`'s types in scope inside the module (2026-10-09): in a module
+with `include`s, a type name nothing else defines is the modules
+included's, `(select %include t)`, found when they are typed; the hidden
+`%include` is an early item, checked before the module's typed lambdas,
+so the select is resolved where a written one would be. The Rust parser
+counts the modules being read that have `include`s (`include_scope`); the
+FX-26 checker, which reads a module's types as it resolves it, marks such
+a module's description scope (`k-include-mark`, `%include-scope`), gone
+with it, and `k-type-unknown` reads the mark. A name the modules included
+do not give either: `` `t` is not a type, nor one a module included gives
+`` (not `%include`, in both checkers' `select` errors). Hidden or not
+(`(hide (include m))`), the same; a type shown says what a hidden one
+abbreviates. Tests: `modules/include-types.fx`, `hide-include-types.fx`,
+`include-type-missing.fx`.

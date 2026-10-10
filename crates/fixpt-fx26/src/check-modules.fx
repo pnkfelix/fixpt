@@ -268,6 +268,12 @@
 
 ;; Each `(select m n)` node in `t`, onto `out` (newest first); the
 ;; nodes walked, `seen`.
+;; A type name in a module with `include`s that nothing else defines
+;; (`k-type-unknown`): said of the name, not of the hidden `%include`. As
+;; the Rust checker's.
+(define k-not-included (subr (read @globals) (symbol) string)
+  (lambda (n)
+    (string-append (k-quote (symbol->string n)) " is not a type, nor one a module included gives")))
 ;; `(select m n)`, as an error shows it.
 (define k-select-shown (subr (read @globals) (symbol symbol) string)
   (lambda (m n) (k-cat5 "`(select " (symbol->string m) " " (symbol->string n) ")`")))
@@ -285,6 +291,7 @@
     (let ((v (k-comp-find abs n)) (d (k-comp-find ds n)))
       (cond ((>= v 0) (k-ty-new (ty-var v)))
             ((>= d 0) d)
+            ((symbol=? m '%include) (k-fail (k-not-included n) a b))
             (else (k-fail (k-cat5 (k-select-shown m n) ": `" (symbol->string m) "` has no type `"
                                   (string-append (symbol->string n) "`"))
                           a b))))))
@@ -342,7 +349,9 @@
         (let* ((m (extract (car found) 1)) (n (extract (car found) 2))
                (mt (k-lookup m))
                (to (if (< mt 0)
-                       (k-fail (string-append (k-select-prefix m n) "` is not bound here") a b)
+                       (if (symbol=? m '%include)
+                           (k-fail (k-not-included n) a b)
+                           (k-fail (string-append (k-select-prefix m n) "` is not bound here") a b))
                        (tagcase (k-get mt)
                          (ty-module (abs ds vs) (k-select-component m n abs ds a b))
                          (else y (k-fail (k-cat4 (k-select-prefix m n) "` is a " (k-show-ty mt)
