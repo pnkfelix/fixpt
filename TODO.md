@@ -2013,5 +2013,20 @@ fails loudly rather than corrupting refs.
 - The existing gc-stress, verifier and image round-trip suites, run with a
   workload that makes suffix refs (`--features gc-stress` on
   `fixpt-scheme`, not `fixpt-heap`).
-- Frozen-suffix writes through a suffix ref must … (the user's message
-  was cut off here; to be completed by the user.)
+- Frozen-suffix writes through a suffix ref must fail.
+
+**Docs.**
+- Update the tag table and the invariants in `docs/object-model.md`, and
+  `value.rs`'s header comment.
+- Note in `docs/research/floats.md` (Q7) that tag `010` is now taken, so
+  self-tagged floats would need another encoding. (Checked 2026-10-10: its
+  Spur-style "self-tagged, one tag (`010`)" option names `010` as the last
+  free tag, and its table says "`010` is not traced", which this makes
+  untrue.)
+
+**Out of scope.**
+- Language-level types for refs (FX-26 `refof` over flat data).
+- Refs into fields or pairs.
+- The direct-address variant with owner hints.
+- Segment tables.
+- Any boxed fallback for large owners.
