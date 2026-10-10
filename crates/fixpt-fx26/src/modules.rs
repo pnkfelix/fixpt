@@ -10,7 +10,7 @@
 //! mention its abstract types (`forget_nats`, which also forgets sizes).
 
 use crate::ast::{Atom, D, DVar, Effect, ExpId, Kind, ModItem, Ty, TyId};
-use crate::check::Checker;
+use crate::check::{Checker, reshape_path};
 use crate::error::{FxError, R};
 use fixpt_read::{Span, Sym};
 use std::collections::{HashMap, HashSet};
@@ -45,12 +45,67 @@ impl Checker {
                     return Err(FxError::at(span, format!("`{}`'s type mentions `{shown}`, which is not known outside the module", self.interner.name(*n))));
                 }
             }
+            if self.is_extend(items) {
+                return self.extended(e, span, &vals).map(|t| (t, eff));
+            }
             Ok((self.arena.ty(Ty::Module { abs, descs, vals }), eff))
         });
         self.skolems.truncate(named);
         let (t, eff) = r?;
         let eff = self.mask(e, &eff, t);
         Ok((t, eff))
+    }
+
+    /// Whether a module is an `(extend e0 e1)`, as the parser makes one.
+    fn is_extend(&self, items: &[ModItem]) -> bool {
+        matches!(items, [ModItem::Val { name: a, .. }, ModItem::Val { name: b, .. }]
+                 if self.interner.name(*a) == "%extend-0" && self.interner.name(*b) == "%extend-1")
+    }
+
+    /// `(extend e0 e1)`, its values `vals` the two modules: one of the values
+    /// of both, `e1`'s where both have a name, `e0`'s in its order first and
+    /// then `e1`'s others; its types likewise. Made of theirs, by path
+    /// (`reshape_path`). A module with abstract types of its own is not
+    /// extended, yet (`TODO.md` §69). As the FX-26 checker's `k-extended`.
+    fn extended(&mut self, e: ExpId, span: Span, vals: &[(Sym, TyId)]) -> R<TyId> {
+        let mut sides = Vec::new();
+        for (i, (_, t)) in vals.iter().enumerate() {
+            match self.arena.get(self.arena.resolve(*t)).clone() {
+                Ty::Module { abs, descs, vals } if abs.is_empty() => sides.push((descs, vals)),
+                Ty::Module { .. } => {
+                    return Err(FxError::at(span, "`extend` of a module with abstract types of its own is not supported yet"));
+                }
+                _ => {
+                    let which = if i == 0 { "first" } else { "second" };
+                    return Err(FxError::at(span, format!("`extend` extends a module by a module, and its {which} is a {}", self.show_ty(*t))));
+                }
+            }
+        }
+        let (d1, v1) = sides.pop().expect("two");
+        let (d0, v0) = sides.pop().expect("two");
+        let mut descs: Vec<(Sym, TyId)> = d0.iter().map(|(n, t)| *d1.iter().find(|(m, _)| m == n).unwrap_or(&(*n, *t))).collect();
+        descs.extend(d1.iter().filter(|(n, _)| !d0.iter().any(|(m, _)| m == n)).copied());
+        let (mut out, mut at) = (Vec::new(), Vec::new());
+        for (j, (n, t)) in v0.iter().enumerate() {
+            match v1.iter().position(|(m, _)| m == n) {
+                Some(k) => {
+                    out.push(v1[k]);
+                    at.push(reshape_path(1, k));
+                }
+                None => {
+                    out.push((*n, *t));
+                    at.push(reshape_path(0, j));
+                }
+            }
+        }
+        for (k, (n, t)) in v1.iter().enumerate() {
+            if !v0.iter().any(|(m, _)| m == n) {
+                out.push((*n, *t));
+                at.push(reshape_path(1, k));
+            }
+        }
+        self.facts.reshaped.insert(e, at);
+        Ok(self.arena.ty(Ty::Module { abs: Vec::new(), descs, vals: out }))
     }
 
     /// A module's items, as `letrec*`'s (`crate::modorder`): its typed

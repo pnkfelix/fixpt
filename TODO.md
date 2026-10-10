@@ -1824,61 +1824,39 @@ The conversion is done (`DONE.md` §68). Left from it:
   module as written is known, in both checkers, agreeing; then count the
   front end's `spin`s before and after.
 
-## 69. `(extend e0 e1)`, FX-91's, after §68 phase 2 (the user's, 2026-10-09: high priority)
+## 69. Combining modules: `include` and `hide`, then the front end's imports (the user's, 2026-10-09: high priority)
 
-FX-91 combines modules with `(extend e0 e1)` (report §2.3.5, p. 15; see
-`docs/research/separate-compilation.md`). Wanted to cut the toil and
-redundancy of the import blocks §68 writes, but not in the middle of that
-refactoring: after phase 2, then a mechanical pass over the converted
-files. Measured (2026-10-09, 39 files converted): 3,449 import lines.
-Every converted file names *all* of its own types file (263 lines in 23
-files), which `extend` would remove outright; the rest are partial (a file
-names 40 to 60 of `check-types-types.fx`'s 148, and only what it uses of
-each module it is given), where including everything also makes those
-names the module's own. To decide: `extend` as FX-91 has it, or also an
-item that opens a module within another without exporting it, as `with`
-does for an expression.
+`(extend e0 e1)` is done (`DONE.md` §69): it and these share one way of
+being made, a module of hidden items its values are taken from by path
+(a reshape, as a module given where fewer values are wanted is). Left:
 
-Addendum (the user's, 2026-10-09): perhaps also a variant in which a
-name both give is a static error rather than `e1`'s: everything thrown
-into one bucket, with no regard for order, where shadowing would only
-hide a mistake. If there is more than one module combinator, perhaps
-none should take the bare keyword `extend` (`module-extend` and
-`module-disj-union` were floated, though wordy). One shape to weigh: keep
-`extend` for FX-91's right-biased form, and make the disjoint one an item,
-`(include e)` inside `module` (OCaml's `include`), since a name defined
-twice in a `module` is already an error (`k-defined-twice`): several
-`include`s and the module's own definitions all in one bucket, order
-free. The name `include` is R7RS's for textual inclusion, which FX-26
-does not have.
+- `(include e)`, an item: `e`'s values the module's own, in one bucket
+  with its definitions and other `include`s, a name given twice an error
+  (as `k-defined-twice` already says of a module's own). Decided in
+  making `extend`, and to be said so: `e` is made before the module's
+  items and does not see them, so the bucket stays free of order; its
+  values are in scope in the module, its types are in the module's type
+  but not in scope inside, yet; a module whose type has abstract types is
+  not included, yet, as it is not extended.
+- `(hide item …)`, items seen by the module's body but not in its type,
+  so helpers do not pollute its signature; it composes: `(hide (define
+  helper …))`, `(hide (define-type t …))`, `(hide (include m))` for using a
+  module without re-exporting it (no separate `open`). Its meaning in what
+  exists: the module's type without the hidden names, the ascription done
+  for you, a reshape at the module. A hidden type in an exported one is
+  refused, for now (the user's, 2026-10-09: the safe, forward-compatible
+  choice while the feature is tried; an abstract one, the existential
+  reading, could come later).
+- Then the pass these were wanted for: the import blocks §68 wrote, 3,449
+  lines (2026-10-09, 39 files converted then), every converted file
+  naming all of its own types file (263 lines in 23 files), the rest
+  naming 40 to 60 of `check-types-types.fx`'s 148 and what it uses of each
+  module it is given. `(hide (include m))` says each in a line.
 
-The two would nest differently: `(extend mA mB)` puts `mB` under `mA`'s
-form, while `(module (include m1) (include m2) ...)` puts everything at
-one level. That is the meaning showing in the shape, not an
-inconsistency: `extend` is ordered (which side wins matters), so binary
-and nested, the later and deeper winning; `include`s are unordered, so
-side by side, as a `module`'s own definitions already are, an included
-name one more member of that set. If `extend` is ever n-ary,
-`(extend m1 m2 m3)` should be a left fold (the later wins), not "all at
-once", which would blur the two back together.
-
-`(hide item ...)` (the user's, 2026-10-09): its items' bindings are seen
-by the module's body but are not in the module's type, so helpers do not
-pollute its signature. Today the only ways are a `let` around the whole
-`module` (bindings before it, not items: no recursion with the module's
-own, no `define-type`) or ascribing the module to a `moduleof` written
-out in full (M4's width subtyping); both checkers agree on each
-(2026-10-09). `hide` is one form for visibility, apart from where a
-binding comes from, so it composes: `(hide (define helper ...))`,
-`(hide (define-type t ...))`, and `(hide (include m))` for using a module
-without re-exporting it (no separate `open`). Its meaning in what exists:
-the module's type without the hidden names, the ascription done for you.
-To decide with it: a hidden type in an exported one. An abbreviation is
-expanded; a generative type (`define-datatype`, `define-generative`), or
-one hidden by `(hide (include m))`, either becomes abstract in the
-module's type (the existential reading `moduleof` already has; leaning
-this way, so `hide` stays ascription) or is refused as escaping, as
-OCaml does.
+If `extend` is ever n-ary, `(extend m1 m2 m3)` should be a left fold (the
+later wins), not "all at once", which would blur it and `include` together:
+`extend` is ordered, binary and nested, the later and deeper winning;
+`include`s are unordered, side by side, as a module's own definitions are.
 
 ## 70. Short names for the modules a file binds, after §68 phase 2 (the user's, 2026-10-09)
 

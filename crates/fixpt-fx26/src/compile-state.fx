@@ -488,12 +488,20 @@
     (let ((made (c-quoted-cell arg)))
       (if (null? made) nil (cons (wcell-interned (car made)) nil)))))
 
+;; Field `p` of the module pushed: from 2^40 on, a path (`k-reshape-path`),
+;; value `j` of the module that is its value `k`.
+(define c-reshape-field (subr (maxeff compiles spin) (code int) unit)
+  (lambda (c p)
+    (if (< p 1099511627776)
+        (c-field c (+ p 2))
+        (let ((q (- p 1099511627776)))
+          (begin (c-field c (+ (quotient q 1048576) 2)) (c-field c (+ (remainder q 1048576) 2)))))))
 ;; The module in slot `depth`'s fields at positions `at`, pushed.
 (define c-reshape-fields (subr (maxeff compiles spin) (k-ids int code) unit)
   (lambda (at depth c)
     (if (null? at)
         #u
-        (begin (c-op1 c routine-slot (wcell-int depth)) (c-field c (+ (car at) 2))
+        (begin (c-op1 c routine-slot (wcell-int depth)) (c-reshape-field c (car at))
                (c-reshape-fields (cdr at) depth c)))))
 ;; Each slot of `ss`, newest first, pushed, the oldest first: how many.
 (define c-slots-load (subr (maxeff c-emits spin) ((listof int @k) code) int)

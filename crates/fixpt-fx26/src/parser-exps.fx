@@ -491,6 +491,14 @@
          (begin (arity items 4 "`(prompt tag body handler)`" a b)
                 (e-prompt (parse-nth items 1) (parse-nth items 2) (parse-nth items 3) a b)))
         ((module) (e-module (parse-module-items (cdr items)) a b))
+        ;; `(extend e0 e1)` (`TODO.md` §69): a module of the two, made of
+        ;; their values by the checker (`k-extended`), as `parse.rs`.
+        ((extend)
+         (begin (arity items 3 "`(extend module module)`" a b)
+                (e-module (the mod-items
+                            (list (mod-item-of 2 '%extend-0 nil (list (parse-nth items 1)))
+                                  (mod-item-of 2 '%extend-1 nil (list (parse-nth items 2)))))
+                          a b)))
         ((load-module load-input)
          (let* ((input? (eq? head 'load-input))
                 (usage (str3 "`(" (if input? "load-input" "load-module") " \"file\")`")))

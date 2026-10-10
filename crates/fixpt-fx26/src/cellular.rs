@@ -628,7 +628,12 @@ impl<'a> Compiler<'a> {
             self.int(code, 37);
             for i in &at {
                 self.op1(code, "slot", Value::fixnum(depth as i64));
-                self.field(code, *i as i64 + 2);
+                // A path: a value of the module that is one of its values.
+                let (k, j) = crate::check::reshape_step(*i);
+                self.field(code, k as i64 + 2);
+                if let Some(j) = j {
+                    self.field(code, j as i64 + 2);
+                }
             }
             self.prim(code, "%make-frozen", 1 + at.len())?;
             self.unbind(code, depth, 1, false);

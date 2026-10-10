@@ -142,6 +142,7 @@
 (define k-strail-push (with check-sub-env k-strail-push))
 (define k-bool (with check-env k-bool))
 (define k-reshapes (with check-env k-reshapes))
+(define-type k-reshape-list (select check-env-types k-reshape-list))
 (define k-conv=? (with check-print-parts k-conv=?))
 (define k-map-find (with check-print-parts k-map-find))
 (define k-size-as-lit (with check-print-parts k-size-as-lit))
@@ -851,6 +852,21 @@
                     (if (k-subtype t want) at nil)))))
           (else z nil)))
       (else z nil))))
+;; The positions `at` of a module made already of another's (`rs`'s first,
+;; if it is `x`'s, an `extend`'s): theirs, the two at once; and the rest of
+;; `rs`. As Rust's `Checker::expect`.
+(define k-reshape-onto
+  (subr (maxeff kreads (alloc @t) spin) (kx k-ids k-reshape-list) k-reshape-list)
+  (lambda (x at rs)
+    (if (and (not (null? rs)) (= (extract (car rs) 1) (k-start x))
+             (= (extract (car rs) 2) (k-end x)))
+        (cons (product (1 (k-start x)) (2 (k-end x))
+                       (3 (k-vals-picked (extract (car rs) 3) at)))
+              (cdr rs))
+        (cons (product (1 (k-start x)) (2 (k-end x)) (3 at)) rs))))
+(define k-vals-picked (subr (maxeff kreads (alloc @t) spin) (k-ids k-ids) k-ids)
+  (lambda (inner at)
+    (if (null? at) nil (cons (k-nth inner (car at)) (k-vals-picked inner (cdr at))))))
 ;; Where `x`, of type `got`, is wanted as a `want`: reshaped, if it may be,
 ;; and noted so (`k-reshapes`).
 (define k-reshape-at (subr (maxeff checks spin) (kx int int) bool)
@@ -858,6 +874,5 @@
     (let ((at (k-reshape got want)))
       (if (null? at)
           #f
-          (begin (set k-reshapes (cons (product (1 (k-start x)) (2 (k-end x)) (3 (car at)))
-                                       (get k-reshapes)))
+          (begin (set k-reshapes (k-reshape-onto x (car at) (get k-reshapes)))
                  #t))))))))

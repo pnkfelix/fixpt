@@ -305,6 +305,7 @@
 (define k-instantiate-params (with check-dependent k-instantiate-params))
 (define k-result-back (with check-dependent k-result-back))
 (define k-bind-parts (with check-module-rules k-bind-parts))
+(define k-module-type (with check-module-rules k-module-type))
 (define k-comp-names (with check-module-rules k-comp-names))
 (define k-ends-with (with check-module-rules k-ends-with))
 (define k-group-end (with check-module-rules k-group-end))
@@ -1283,7 +1284,7 @@
              (known (k-vals-known vs (k-named-since named (get k-skolems) nil) a b))
              (popped (set k-skolems named))
              (abs (k-parts-reversed (extract made 1) nil))
-             (t (k-ty-new (ty-module abs (k-parts-reversed (extract made 2) nil) vs))))
+             (t (k-module-type items abs (k-parts-reversed (extract made 2) nil) vs a b)))
         (k-te-masked x t (k-union (extract made 4) le)))))
   ;; The same; a module read from a file (`load-module`, M7) seeing only the
   ;; standard environment, what is wrong in it said where it is read.

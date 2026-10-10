@@ -104,6 +104,9 @@
 (define k-with-latent (with check-letrec k-with-latent))
 (define table-ref (with tables table-ref))
 (define table-set! (with tables table-set!))
+(define k-ty-new (with check-types k-ty-new))
+(define k-nth (with check-types k-nth))
+(define k-reshapes (with check-env k-reshapes))
 
 ;; `n`'s innermost binding, now of type `t`.
 (define k-rebind-top (subr (maxeff kstate spin) (symbol int) unit)
@@ -238,6 +241,91 @@
               (k-fail (k-cat5 "`" (symbol->string (extract (car vs) 1)) "`'s type mentions `"
                               (k-dvar-string v) "`, which is not known outside the module")
                       a b))))))
+
+;;; ------------------------------------------------------------ extend
+
+;; Whether a module is an `(extend e0 e1)` as the parser makes it (`TODO.md`
+;; §69): of just `%extend-0` and `%extend-1`.
+(define k-extend-item? (subr (read @globals) (k-item symbol) bool)
+  (lambda (it n) (and (= (extract it 1) 2) (symbol=? (car (extract it 2)) n))))
+(define k-extend-items? (subr (read @globals) (k-items) bool)
+  (lambda (items)
+    (and (not (null? items)) (not (null? (cdr items))) (null? (cdr (cdr items)))
+         (k-extend-item? (car items) '%extend-0) (k-extend-item? (car (cdr items)) '%extend-1))))
+;; Value `j` of the module that is value `k`, as a reshape's position (Rust
+;; `reshape_path`): a path, from 2^40 on.
+(define k-reshape-path (subr pure (int int) int)
+  (lambda (k j) (+ 1099511627776 (+ (* k 1048576) j))))
+;; One side of an `extend`, of type `t`: a module with no abstract types of
+;; its own, or an error.
+(define k-extend-side (subr (maxeff checks spin) (int string int int) int)
+  (lambda (t which a b)
+    (tagcase (k-get t)
+      (ty-module (abs ds vs)
+        (if (null? abs)
+            t
+            (k-fail (k-cat3 "`extend` of a module with abstract types"
+                            " of its own is not supported" " yet")
+                    a b)))
+      (else z (k-fail (k-cat5 "`extend` extends a module by a module, and its " which " is a "
+                              (k-show-ty t) "")
+                      a b)))))
+;; Where the part named `n` is in `ps`, from `i`; -1 if none is.
+(define k-ext-index (subr (read @globals) (k-parts symbol int) int)
+  (lambda (ps n i)
+    (cond ((null? ps) -1)
+          ((symbol=? (extract (car ps) 1) n) i)
+          (else (k-ext-index (cdr ps) n (+ i 1))))))
+;; Each of `p0`, or `p1`'s of its name if `p1` has one; then `p1`'s others.
+(define k-ext-firsts (subr (maxeff (read @globals) (alloc @t)) (k-parts k-parts) k-parts)
+  (lambda (p0 p1)
+    (if (null? p0)
+        nil
+        (let ((k (k-ext-index p1 (extract (car p0) 1) 0)))
+          (the k-parts (cons (if (< k 0) (car p0) (k-nth p1 k)) (k-ext-firsts (cdr p0) p1)))))))
+(define k-ext-rest (subr (maxeff (read @globals) (alloc @t)) (k-parts k-parts) k-parts)
+  (lambda (p1 p0)
+    (cond ((null? p1) nil)
+          ((>= (k-ext-index p0 (extract (car p1) 1) 0) 0) (k-ext-rest (cdr p1) p0))
+          (else (the k-parts (cons (car p1) (k-ext-rest (cdr p1) p0)))))))
+;; The same, as paths: `p0`'s from value 0, `p1`'s from value 1; `j`, `k`
+;; where each is.
+(define k-ext-firsts-at (subr (maxeff (read @globals) (alloc @t)) (k-parts k-parts int) k-ids)
+  (lambda (p0 p1 j)
+    (if (null? p0)
+        nil
+        (let ((k (k-ext-index p1 (extract (car p0) 1) 0)))
+          (cons (if (< k 0) (k-reshape-path 0 j) (k-reshape-path 1 k))
+                (k-ext-firsts-at (cdr p0) p1 (+ j 1)))))))
+(define k-ext-rest-at (subr (maxeff (read @globals) (alloc @t)) (k-parts k-parts int) k-ids)
+  (lambda (p1 p0 k)
+    (cond ((null? p1) nil)
+          ((>= (k-ext-index p0 (extract (car p1) 1) 0) 0) (k-ext-rest-at (cdr p1) p0 (+ k 1)))
+          (else (cons (k-reshape-path 1 k) (k-ext-rest-at (cdr p1) p0 (+ k 1)))))))
+;; `(extend e0 e1)` at `a`..`b`, its values `vs` the two modules: one of the
+;; values of both, `e1`'s where both have a name, `e0`'s in its order first
+;; and then `e1`'s others; its types likewise. Made of theirs, by path
+;; (`k-reshape-path`, noted in `k-reshapes`). As Rust's `Checker::extended`.
+(define k-extended (subr (maxeff checks spin) (k-parts int int) int)
+  (lambda (vs a b)
+    (let ((t0 (k-extend-side (extract (car vs) 2) "first" a b))
+          (t1 (k-extend-side (extract (car (cdr vs)) 2) "second" a b)))
+      (tagcase (k-get t0)
+        (ty-module (a0 d0 v0)
+          (tagcase (k-get t1)
+            (ty-module (a1 d1 v1)
+              (let ((at (append (k-ext-firsts-at v0 v1 0) (k-ext-rest-at v1 v0 0))))
+                (begin (set k-reshapes (cons (product (1 a) (2 b) (3 at)) (get k-reshapes)))
+                       (k-ty-new (ty-module nil (append (k-ext-firsts d0 d1) (k-ext-rest d1 d0))
+                                            (append (k-ext-firsts v0 v1) (k-ext-rest v1 v0)))))))
+            (else z t1)))
+        (else z t0)))))
+
+;; A module's type, at `a`..`b`, of its abstract types, descriptions and
+;; values: an `extend`'s, of the two it holds (`k-extended`).
+(define k-module-type (subr (maxeff checks spin) (k-items k-parts k-parts k-parts int int) int)
+  (lambda (items abs ds vs a b)
+    (if (k-extend-items? items) (k-extended vs a b) (k-ty-new (ty-module abs ds vs)))))
 
 ;;; ------------------------------------------------------------ with
 

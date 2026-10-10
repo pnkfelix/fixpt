@@ -746,7 +746,12 @@ impl Compiler<'_> {
             let mut args = vec![Arg::V(Value::fixnum(37))];
             for i in &at {
                 g.op("stack", &[Gen::n(m)]);
-                g.op("field", &[Value::fixnum(*i as i64 + 2)]);
+                // A path: a value of the module that is one of its values.
+                let (k, j) = crate::check::reshape_step(*i);
+                g.op("field", &[Value::fixnum(k as i64 + 2)]);
+                if let Some(j) = j {
+                    g.op("field", &[Value::fixnum(j as i64 + 2)]);
+                }
                 let s = g.slot();
                 g.op("setstk", &[Gen::n(s)]);
                 args.push(Arg::Slot(s));

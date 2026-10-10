@@ -390,7 +390,25 @@ pub struct NodeFacts {
     /// Modules given where a type with fewer values, or the same in
     /// another order, is wanted: for each value the wanted type has, its
     /// position in the module given. Made into a module of that layout.
+    /// A position may be a path (`reshape_path`): value `j` of the module
+    /// that is value `k` of the one given, as `(extend e0 e1)` takes its
+    /// values from the two it holds (`TODO.md` §69).
     pub reshaped: HashMap<ExpId, Vec<usize>>,
+}
+
+/// Where a reshape's path positions begin (`NodeFacts::reshaped`): a
+/// position at least this is a path, value `j` of value `k`.
+pub const RESHAPE_PATH: usize = 1 << 40;
+
+/// Value `j` of the module that is value `k`, as a reshape's position.
+pub fn reshape_path(k: usize, j: usize) -> usize {
+    RESHAPE_PATH + (k << 20) + j
+}
+
+/// A reshape's position: `(k, Some(j))` for a path, `(k, None)` for value
+/// `k` itself.
+pub fn reshape_step(p: usize) -> (usize, Option<usize>) {
+    if p >= RESHAPE_PATH { ((p - RESHAPE_PATH) >> 20, Some((p - RESHAPE_PATH) & 0xfffff)) } else { (p, None) }
 }
 
 impl NodeFacts {

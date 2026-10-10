@@ -1450,6 +1450,21 @@ impl Checker {
                 self.parse_bloblet(span, &name, &items[1..])
             }
             "module" => self.parse_module(span, &items[1..]),
+            // `(extend e0 e1)` (FX-91's, `TODO.md` §69): a module of the two,
+            // `%extend-0` and `%extend-1`, whose values the checker makes it
+            // of, `e1`'s where both have a name (`Checker::extended`).
+            "extend" => {
+                let [_, e0, e1] = &items[..] else {
+                    return Err(FxError::at(span, "`(extend module module)`"));
+                };
+                let (e0, e1) = (self.parse_exp(e0)?, self.parse_exp(e1)?);
+                let names = [self.interner.intern("%extend-0"), self.interner.intern("%extend-1")];
+                let items = vec![
+                    ModItem::Val { name: names[0], ty: None, init: e0, infer: false },
+                    ModItem::Val { name: names[1], ty: None, init: e1, infer: false },
+                ];
+                Ok(self.arena.exp(span, Exp::Module(items)))
+            }
             // `(load-module "file")`: the file's forms, a module's items,
             // seeing only the standard environment (M7). `(load-input
             // "file")`: the file's one expression, Sheldon's `input`.

@@ -83,7 +83,7 @@
 (define* cell (subr (alloc @v) (val) vcell) (lambda (v) (new v)))
 
 ;; `e` with `n` bound to a new cell holding `v`.
-(define* extend (subr (alloc @v) (symbol val env) env)
+(define* bind1 (subr (alloc @v) (symbol val env) env)
   (lambda (n v e) (cons (cons n (cell v)) e)))
 
 (define* lookup (subr (maxeff evals spin) (env symbol) val)
@@ -121,7 +121,7 @@
                (lambda (ns fs e)
                  (cond ((and (null? ns) (null? fs)) e)
                        ((or (null? ns) (null? fs)) (efail "the wrong number of fields"))
-                       (else (go (cdr ns) (cdr fs) (extend (car ns) (cdr (car fs)) e)))))))
+                       (else (go (cdr ns) (cdr fs) (bind1 (car ns) (cdr (car fs)) e)))))))
       (go ns (as-fields p "a product") e))))
 
 (define* nth-field (subr (maxeff evals spin) (vfields int) (pairof symbol val @v))
@@ -157,8 +157,17 @@
           (else (ev-with-in (cdr ws) a b)))))
 
 ;; The fields of `fs` at positions `ks`, in order.
+;; Field `p` of `fs`: from 2^40 on, a path (`k-reshape-path`), value `j` of
+;; the module that is value `k`.
+(define* pick-field (subr (maxeff evals spin) (vfields int) (pairof symbol val @v))
+  (lambda (fs p)
+    (if (< p 1099511627776)
+        (nth-field fs p)
+        (let ((q (- p 1099511627776)))
+          (nth-field (as-fields (cdr (nth-field fs (quotient q 1048576))) "a module")
+                     (remainder q 1048576))))))
 (define* pick-fields (subr (maxeff evals spin) (vfields k-ids) vfields)
-  (lambda (fs ks) (if (null? ks) nil (cons (nth-field fs (car ks)) (pick-fields fs (cdr ks))))))
+  (lambda (fs ks) (if (null? ks) nil (cons (pick-field fs (car ks)) (pick-fields fs (cdr ks))))))
 
 ;; Module `v` as `at` (in a list of one) reshapes it: its values at those
 ;; positions; as it is, if none.
@@ -174,7 +183,7 @@
   (lambda (m e)
     (letrec ((go (subr (maxeff (read @v) (alloc @v) spin) (vfields env) env)
                (lambda (fs e)
-                 (if (null? fs) e (go (cdr fs) (extend (car (car fs)) (cdr (car fs)) e))))))
+                 (if (null? fs) e (go (cdr fs) (bind1 (car (car fs)) (cdr (car fs)) e))))))
       (go (as-fields m "a module") e))))
 
 ;; Module `m`'s values at positions `ps`, bound in `e` by names `ns`.
@@ -186,7 +195,7 @@
                    (if (or (null? ns) (null? ps))
                        e
                        (let ((v (cdr (nth-field fs (car ps)))))
-                         (go (cdr ns) (cdr ps) (extend (car ns) v e)))))))
+                         (go (cdr ns) (cdr ps) (bind1 (car ns) v e)))))))
         (go ns ps e)))))
 
 ;; An abstract type `n`'s conversions' names.
@@ -208,7 +217,7 @@
 
 ;; Each of `ns` bound in `e`, holding #u.
 (define* open-names (subr (maxeff (alloc @v) spin) (names env) env)
-  (lambda (ns e) (if (null? ns) e (open-names (cdr ns) (extend (car ns) the-unit e)))))
+  (lambda (ns e) (if (null? ns) e (open-names (cdr ns) (bind1 (car ns) the-unit e)))))
 
 ;; The values of `ns`, in `e`, onto `vs`, newest first.
 (define* rec-values (subr (maxeff evals spin) (names env vfields) vfields)
@@ -227,7 +236,7 @@
                          (if (or (= k 2) (= k 3)) (rec-values (extract (car items) 2) e vs) vs))))))
 
 (define* open-letrec (subr (maxeff (alloc @v) spin) (exp-letrec-bs env) env)
-  (lambda (bs e) (if (null? bs) e (open-letrec (cdr bs) (extend (extract (car bs) 1) the-unit e)))))
+  (lambda (bs e) (if (null? bs) e (open-letrec (cdr bs) (bind1 (extract (car bs) 1) the-unit e)))))
 
 (define-rec
   (eval-all (subr (maxeff evals spin) ((listof exp acyclic) env) vals)
@@ -270,7 +279,7 @@
         ;; Regions and places are erased: a `letrena`'s or `letreap`'s
         ;; allocation is the heap's, and its name, the place as a value, is
         ;; unit.
-        (e-letregion (k r i body a b) (eval body (extend r the-unit e)))
+        (e-letregion (k r i body a b) (eval body (bind1 r the-unit e)))
         (e-rlambda (r l a b) (eval l e))
         (e-proj (body ds a b) (eval body e))
         (e-the (d body a b) (eval body e))
@@ -331,7 +340,7 @@
       (if (null? bs)
           e
           (let ((v (eval (extract (car bs) 2) outer)))
-            (eval-let (cdr bs) outer (extend (extract (car bs) 1) v e))))))
+            (eval-let (cdr bs) outer (bind1 (extract (car bs) 1) v e))))))
   ;; Every name first, holding #u; then each value, in the scope of all.
   (eval-letrec (subr (maxeff evals spin) (exp-letrec-bs exp env) val)
     (lambda (bs body e)
@@ -361,12 +370,12 @@
                        (cond ((null? as)
                               (if (null? els)
                                   (efail "no arm for this value")
-                                  (eval (extract (car els) 2) (extend (extract (car els) 1) s e))))
+                                  (eval (extract (car els) 2) (bind1 (extract (car els) 1) s e))))
                              ((symbol=? (extract (car as) 1) tag)
                               (eval (extract (car as) 4)
                                     (if (extract (car as) 2)
                                         (bind-fields (extract (car as) 3) v e)
-                                        (extend (car (extract (car as) 3)) v e))))
+                                        (bind1 (car (extract (car as) 3)) v e))))
                              (else (try (cdr as)))))))
             (try arms)))
         (else y (efail-expected "a sum"))))))

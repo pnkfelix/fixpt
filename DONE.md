@@ -1236,3 +1236,24 @@ Phase 1, the types out, one module at a time; phase 2, the conversion.
   the Rust checker (`TODO.md` §71). Compiling the front end: 207.6 M
   words, from 171.0 at the start of phase 2; what that costs, and what
   §69 and §70 win back, is the profiling pass left in `TODO.md` §68.
+
+## 69. `(extend e0 e1)`, FX-91's (the user's, 2026-10-09)
+
+FX-91 combines modules with `(extend e0 e1)` (report §2.3.5, p. 15): a
+module of the values and types of both, `e1`'s where both have a name;
+here `e0`'s in its order, then `e1`'s others. Both parsers make it a
+module of two hidden items, `%extend-0` and `%extend-1`, the two modules;
+both checkers (`Checker::extended`, `k-extended`) give it the type of the
+one and note it made of their values by path, value `j` of the module
+that is value `k` (`reshape_path`, `k-reshape-path`: a reshape's position
+from 2^40 on). A module given where fewer values are wanted was already
+made into one of that type (a reshape), so every compiler and the
+evaluator had the rest: each follows a path where it took a position
+(`cellular.rs`, `regcode.rs`, `lower.rs`; `compile-state.fx`,
+`regcode-modules.fx`, `eval-core.fx`). An `extend` itself given where
+fewer values are wanted is made so at once, the two reshapes composed.
+A module whose type has abstract types is not extended, yet (any such,
+a global bound to one included): what the two's abstract types become in
+the one is to decide. `extend` is a keyword now, as `module` is; the
+evaluator's procedure of that name is `bind1`. Tests:
+`modules/extend.fx`, `extend-not-module.fx`, `extend-abstract.fx`.

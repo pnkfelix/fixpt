@@ -28,5 +28,6 @@ crates/fixpt-fx26/src/regcode-core.fx 1419 0
 # limit until the conductor came to make it, then over by its imports
 # alone, 998 to 1346, and by two lines for each module it is given since
 # (split from one it was given), the code unchanged (the user's,
-# 2026-10-09, `TODO.md` §68).
-crates/fixpt-fx26/src/check-rules.fx 1358 0
+# 2026-10-09, `TODO.md` §68); and by one for `k-module-type`'s import
+# (`extend`, `TODO.md` §69), its code in `check-module-rules.fx`.
+crates/fixpt-fx26/src/check-rules.fx 1359 0

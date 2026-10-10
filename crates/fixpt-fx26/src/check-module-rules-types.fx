@@ -127,4 +127,6 @@
             (val k-bind-parts
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (k-parts)
-                       unit))))
+                       unit))
+            (val k-module-type
+                 (subr (maxeff checks spin) (k-items k-parts k-parts k-parts int int) int))))

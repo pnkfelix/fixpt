@@ -726,7 +726,14 @@ impl Lowerer<'_> {
         // A module reshaped: a product of the values the type wanted has.
         let code = match self.c.facts.reshaped.get(&e) {
             Some(at) => {
-                let fields: Vec<String> = at.iter().map(|i| format!("(%bloblet-ref fx:%reshaped {})", i + 2)).collect();
+                let fields: Vec<String> = at
+                    .iter()
+                    .map(|i| match crate::check::reshape_step(*i) {
+                        (k, None) => format!("(%bloblet-ref fx:%reshaped {})", k + 2),
+                        // A path: a value of the module that is one of its values.
+                        (k, Some(j)) => format!("(%bloblet-ref (%bloblet-ref fx:%reshaped {}) {})", k + 2, j + 2),
+                    })
+                    .collect();
                 format!("(let ((fx:%reshaped {code})) (%fx26-product {}))", fields.join(" "))
             }
             None => code,
