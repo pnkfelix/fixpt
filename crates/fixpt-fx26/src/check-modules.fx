@@ -15,8 +15,6 @@
 
 ;; Its types, those it uses of the files before it, and the signatures of
 ;; what it is given.
-;; Kind `s`, or -1 where `k-parse-kind` would refuse it: for a reader that
-;; gives its own message instead (`moduleof`'s `abs`).
 (let* ((check-modules-types (load-module "fx26:check-modules-types.fx"))
        (check-types-types (load-module "fx26:check-types-types.fx"))
        (check-env-types (load-module "fx26:check-env-types.fx"))

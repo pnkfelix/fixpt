@@ -796,6 +796,8 @@
                          (tagcase (k-apply-fun f (k-parse-descs-at (cdr items) ps))
                            (de (e) (the (listof k-eff acyclic) (cons e nil)))
                            (else y (k-not-giving f "an effect" s))))))))))))
+;; Kind `s`, or -1 where `k-parse-kind` would refuse it: for a reader that
+;; gives its own message instead (`moduleof`'s `abs`).
 (define k-try-kind (subr (maxeff kstate (read @s) spin) (syn) int)
   (lambda (s)
     (let ((n (if (syn-symbol? s) (syn-name s) "")))
