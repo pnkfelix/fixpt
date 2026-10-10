@@ -1973,6 +1973,29 @@ position-independent when the owner moves). Open:
 - a frozen suffix with fields not frozen: layout fixed, pointers mutable,
   which the flags already allow.
 
+**Bloblet types by width: an interface for a family** (the user's,
+2026-10-10). If a blobref's type carries its owner's bloblet type, it must
+respect subtyping: one type covering a family of bloblets with more fields
+and a longer suffix. Today `(bloblet (fields T …) R)` declares each
+field's type, the suffix has none (bytes), and subtyping demands the same
+number of fields (`check.rs`, mutable fields invariant, frozen covariant).
+Width subtyping looks sound by the layout: a program's field `i` is the
+object model's `i + 2`, counted *from the suffix* outward, so a bloblet
+with more fields (further out, as `bloblet_extend` adds them) keeps every
+field's offset, and a longer suffix every byte's. Checked 2026-10-10:
+compiled code reaches a field by that offset alone (`cellular.rs`'s
+`self.field(code, i + 2)`, `lower.rs`'s `%bloblet-ref b (i+2)`), and the
+rest (freezing, bytes, length) through runtime primitives that read the
+header; nothing uses a static field count. So:
+- `(bloblet (fields T₀ … Tₙ Tₙ₊₁ …) R) ≤ (bloblet (fields T₀ … Tₙ) R)`,
+  each shared field as today (invariant, or covariant if frozen). Every
+  bloblet type then reads "at least these fields": the interface needs no
+  form of its own, unless something comes to need an exact count (an
+  inline header read by a static F), which could be marked then.
+- With a suffix layout in the type, `(bloblet (fields …) F R)`, likewise
+  by prefix: `F₁ ≤ F₂` where `F₂`'s layout is a prefix of `F₁`'s.
+- Kept: freezing is still a change of type, never a subtype.
+
 **`(blobref F R)` or `(ref F R)`?** (the user's, 2026-10-10: open to a
 type of its own, since a suffix ref is "a pretty special snowflake".)
 Leaning to a type of its own: its parameter is of another kind (`flat`,
