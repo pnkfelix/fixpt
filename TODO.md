@@ -2024,8 +2024,27 @@ fails loudly rather than corrupting refs.
   free tag, and its table says "`010` is not traced", which this makes
   untrue.)
 
-**Out of scope.**
-- Language-level types for refs (FX-26 `refof` over flat data).
+**The language side, after the runtime** (the user's, 2026-10-10). Suffix
+refs are what FX-26's flat data will be reached by:
+- **`flat` is a kind of its own**, not a subkind of `type`. Its members
+  today are the six scalars `flatlayout` has (`f64`, `f32`, `i32`, `u32`,
+  `i64`, `u64`); to come, `productof`, `sumof` and `arrayof` as flat
+  constructors, of kind `flat → flat`, at least conceptually.
+- **A flat instance is not a value.** A composite need not fit a word, so
+  no `t : type` can be instantiated with one, and it is not atomic: it is
+  reached at most indirectly, through `(ref F R)`, `F : flat`, which is
+  first class and is a suffix ref. Projection (a field of a flat product,
+  an element of a flat array) is a suffix ref at a further offset.
+- **Only word-sized scalars come out as values**: reading `(ref f64 R)`
+  gives an `f64`, as FX-26 has it today; that is the only place a flat
+  thing becomes a value one can manipulate (the user's reading (a): a
+  stored flat element is not a value; `f64` results stay first class).
+- Open: how `get`/`set` know a scalar's width (the owner's layout, as a
+  flat array keeps it in field 2, or the type, statically); layout of
+  flat sums (a tag word, alignment); `new` of a flat ref (a one-element
+  flat array, a ref at offset 0).
+
+**Out of scope of the runtime step.**
 - Refs into fields or pairs.
 - The direct-address variant with owner hints.
 - Segment tables.
