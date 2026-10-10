@@ -137,3 +137,34 @@ The user's okasaki.fx met "a (moduleof …) is expected here, and this is a
    in different orders (Rust's `subr` prints its parameters before its
    effect), so naming as printed could disagree. The FX printer only
    reads the flag, so no printer's effect changed.
+
+## Suffix refs, the runtime (TODO.md §77, 2026-10-10)
+
+1. **The owner is an index from the heap's start, not what a tag-`100`
+   word holds.** The spec said both "exactly what a tag-100 value holds"
+   and "a word index that fits 34 bits"; a tag-`100` word holds the
+   address over 8 (`Heap::ix` subtracts the heap's base), ~44 bits. The
+   index fits, matches the spec's address formula (base + 8 × owner +
+   offset), and needs no relocation in an image.
+2. **One conversion in `copy_out`, not a case at every site.** A suffix
+   ref is forwarded as its owner's bloblet pointer and rebuilt; every
+   root and field reaches the collector through `copy_out`, so roots, the
+   scan, minor collections, cards, arenas, reaps and the code area follow.
+   `Value::index()` is left meaning a pair's or bloblet's address; sites
+   that read an index after `is_ref` (the barrier, the remembered-set
+   check, weak references, images, the verifier) were each given a case.
+3. **Writes only into a program's own bloblets and flat arrays**, as
+   `%bloblet-set-byte!` allows only plain bloblets: otherwise a ref into a
+   string, a bignum or code would write where nothing else may. Reads from
+   any bloblet.
+4. **Reads and writes at any alignment**, byte by byte in the runtime; the
+   in-line native path, when it comes, can require alignment by type.
+5. **Weak references to suffix refs work** (follow or die with the owner)
+   rather than being refused: it cost four lines in `weak_moved`.
+6. **A read must fit**: offset + width ≤ B, beyond the spec's offset < B
+   for making one.
+7. **Native code untouched.** Its write barrier marks the card whatever is
+   stored; nothing compiled dereferences a suffix ref until the language
+   types them, so the in-line `ubfx`/`lsr #37` path waits (TODO.md §77).
+8. **Names** `%suffix-ref…`, after `%bloblet-…`: runtime-level, a `%`
+   prefix, not yet FX-26 names.

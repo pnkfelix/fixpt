@@ -1926,103 +1926,11 @@ written in FX-26, no Rust at all (the user's). Open: what `(+ 1 1/2)`
 means without a union; literals `1/2` in the reader; native speed of the
 `int` path once a tower is there (it must not pay for the rest).
 
-## 77. Suffix refs: packed interior pointers into bloblet suffixes, tag `010` (the user's, 2026-10-10)
+## 77. Suffix refs: what is left (the user's, 2026-10-10)
 
-**Read first:** `docs/object-model.md` (bloblet layout, the six
-invariants, the tag table), `crates/fixpt-heap/src/value.rs`, `layout.rs`,
-`heap.rs` (reservation constants, Cheney copy, minor and generational
-collections, `verify_range`, images), and the notes on locatives and
-derived pointers (`docs/object-model.md`, "Tag `010` is kept free";
-PLAN.md's Pauseless note, "derived pointers are owner plus offset").
-**Before editing, report a short plan** listing every place that must
-learn about the new tag.
-
-**Settles `010`.** `docs/object-model.md` keeps `010` free for one of two
-uses: a header pointer, or a locative to a *field*. This uses it for a
-third, a pointer into a *suffix*, so a field locative would need another
-encoding later; say so in that doc when this lands. (Checked 2026-10-10:
-`TAG_UNUSED = 0b010` in `value.rs`, printed `#<retired-tag …>`; a `010`
-word is a verification error today.)
-
-**Encoding** (a "suffix ref"):
-
-| bits   | holds                                                                     |
-| ------ | ------------------------------------------------------------------------- |
-| 2..0   | `010`, `TAG_SUFFIX_REF`, replacing `TAG_UNUSED`                           |
-| 36..3  | owner: the word index of its suffix start, as a tag-`100` value holds     |
-| 63..37 | offset: unsigned byte offset into the owner's suffix (27 bits, < 128 MiB) |
-
-Target address = heap base + owner×8 + offset. A ref keeps its whole
-owner alive. A word index fits 34 bits (`MEM_WORDS` ≈ 2^33.2): add a
-compile-time assertion that `MEM_WORDS < 2^34`, so growing the reservation
-fails loudly rather than corrupting refs.
-
-**Semantics and invariants.**
-- Made only for an offset within the owner's suffix, 0 ≤ offset < B
-  bytes; making one is checked, and an offset out of range or an owner of
-  128 MiB or more is a runtime error (no fallback representation here).
-- Into binary suffixes only: never fields, pairs, headers or trailers.
-- A write through one respects the owner's suffix-frozen flag, as other
-  suffix writes do; reads need no check.
-- `eq?` is a word compare (owner and offset are canonical).
-- Flat data holds no pointers, so writing bytes through a ref marks no
-  card; the ref itself, stored into a field, is a pointer like any other,
-  through the existing write barrier.
-- The collector stays kind-agnostic: it never inspects types or a
-  suffix's contents.
-
-**Collector.**
-- Tag `010` is a reference everywhere tag `100` is:
-  - roots, and the Cheney scan of fields;
-  - minor collections (is-young tests on the owner index), and the
-    generational path;
-  - card and crossing-map logic;
-  - arenas, reaps and the nursery;
-  - the code area's mark phase.
-- Forwarding: forward the owner exactly as a tag-`100` pointer (the
-  trailer fast path too), then rebuild the ref from the owner's new index
-  and the same offset.
-- `010` stays distinct from `111` (forwarding), and never appears as a
-  header.
-
-**Everything else that handles values.**
-- `value.rs`: a checked constructor, `owner()`/`offset()`, `is_ref()`,
-  Debug/Display, and the tag table test against `layout.rs`.
-- The heap verifier: every `010` word names a live bloblet whose suffix
-  covers the offset; any other `010` word is a verification error.
-- Heap images: suffix refs are position-independent like other indices;
-  confirm the round trip.
-- Printers, eqtables and hashing, weak tables, the debugger and the
-  REPL's inspection: anything that switches on tags gets a case, or a
-  deliberate error where a suffix ref can never reach it.
-- Runtime primitives (names following existing conventions):
-  - make a suffix ref from a bloblet and an offset;
-  - project one (add a byte offset, checked again);
-  - read and write u8, u32, u64 and f64 through one;
-  - get its owner and its offset.
-- Native code (`fixpt-native`): if dereferencing is reachable from
-  compiled code in this task, emit `ubfx` for the owner, `lsr #37` for the
-  offset, add heap base + owner<<3, then load or store at [base, offset].
-  Otherwise leave native support for a follow-up and say so.
-
-**Tests.**
-- Unit tests of the encoding's edges: offset 0, B−1, out of range, the
-  largest owner.
-- A GC test holding suffix refs in roots, in fields and in the nursery
-  across minor and full collections, checking the bytes they read after.
-- The existing gc-stress, verifier and image round-trip suites, run with a
-  workload that makes suffix refs (`--features gc-stress` on
-  `fixpt-scheme`, not `fixpt-heap`).
-- Frozen-suffix writes through a suffix ref must fail.
-
-**Docs.**
-- Update the tag table and the invariants in `docs/object-model.md`, and
-  `value.rs`'s header comment.
-- Note in `docs/research/floats.md` (Q7) that tag `010` is now taken, so
-  self-tagged floats would need another encoding. (Checked 2026-10-10: its
-  Spur-style "self-tagged, one tag (`010`)" option names `010` as the last
-  free tag, and its table says "`010` is not traced", which this makes
-  untrue.)
+The runtime is done (`DONE.md` §77): tag `010`, made, projected, read and
+written through the runtime's `%suffix-ref…` primitives, followed by
+every collection, the verifier, images and graph copies. Left:
 
 **The language side, after the runtime** (the user's, 2026-10-10). Suffix
 refs are what FX-26's flat data will be reached by:
@@ -2044,8 +1952,19 @@ refs are what FX-26's flat data will be reached by:
   flat sums (a tag word, alignment); `new` of a flat ref (a one-element
   flat array, a ref at offset 0).
 
-**Out of scope of the runtime step.**
-- Refs into fields or pairs.
-- The direct-address variant with owner hints.
-- Segment tables.
-- Any boxed fallback for large owners.
+**`(blobref F R)` or `(ref F R)`?** (the user's, 2026-10-10: open to a
+type of its own, since a suffix ref is "a pretty special snowflake".)
+Leaning to a type of its own: its parameter is of another kind (`flat`,
+not `type`); it has projections a box has not (a field, an element) and
+reads only at scalars; writing through it marks no card and stores no
+pointer; and `ref`'s rules (variance, `new`, `get`'s type) would each
+need a case by kind. To decide with the user.
+
+**Native code.** Compiled code reaches suffix refs only through the
+runtime today. Once the language types them: read and write in line, the
+owner by `ubfx` (bits 3..37), the offset by `lsr #37`, at heap base +
+owner<<3 + offset.
+
+**Not planned:** refs into fields or pairs (a locative would need another
+encoding), the direct-address variant with owner hints, segment tables, a
+boxed fallback for owners of 128 MiB or more.

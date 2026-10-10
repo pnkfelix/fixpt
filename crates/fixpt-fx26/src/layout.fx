@@ -6,8 +6,8 @@
 ;;; Tags: the low three bits of every word.
 (define tag-fixnum int 0)  ; 61-bit signed integer; also what a zeroed word is
 (define tag-pair int 1)  ; index of a two-word car/cdr cell, which has no header
-;; retired: pointed at an object's header, before every object was a bloblet
-(define tag-unused int 2)
+;; a pointer into a bloblet's binary suffix: owner in bits 3..37, byte offset in 37..64
+(define tag-suffix-ref int 2)
 (define tag-immediate int 3)  ; #f, #t, (), unit, eof, characters, …
 (define tag-bloblet int 4)  ; index of the start of a bloblet's suffix
 (define tag-trailer int 5)  ; the last field of a bloblet that has one; runtime-reserved payload

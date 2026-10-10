@@ -59,6 +59,8 @@ impl Heap {
             if !v.is_ref() {
                 return;
             }
+            // A suffix ref reaches its owner.
+            let v = self.object_of(v);
             let n = counts.entry(v.raw()).or_insert(0);
             *n += 1;
             if *n == 1 {
@@ -111,6 +113,7 @@ impl Heap {
             if !v.is_ref() {
                 return;
             }
+            let v = self.object_of(v);
             match seen.get_mut(&v.raw()) {
                 None => {
                     seen.insert(v.raw(), Referrers::Few(vec![by]));
@@ -182,6 +185,7 @@ impl Heap {
         });
         let extra = extra_roots.iter().enumerate().flat_map(|(s, vs)| vs.iter().enumerate().map(move |(i, v)| (format!("extra root {s}.{i}"), *v)));
         for (how, v) in starts.chain(extra) {
+            let v = self.object_of(v);
             if v.is_ref() && !from.contains_key(&v.raw()) {
                 from.insert(v.raw(), (None, how));
                 todo.push_back(v);
@@ -200,6 +204,7 @@ impl Heap {
                 return Some(chain);
             }
             let mut edge = |how: String, w: Value| {
+                let w = self.object_of(w);
                 if w.is_ref() && !from.contains_key(&w.raw()) {
                     from.insert(w.raw(), (Some(v.raw()), how));
                     todo.push_back(w);

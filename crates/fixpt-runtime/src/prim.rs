@@ -632,6 +632,35 @@ fn plain_bloblet(rt: &mut Runtime, v: Value) -> Outcome<Value> {
     }
 }
 
+fn suffix_ref(rt: &mut Runtime, v: Value) -> Outcome<Value> {
+    if v.is_suffix_ref() { Ok(v) } else { rt.type_error("a suffix ref", v) }
+}
+
+/// The `width` bytes suffix ref `r` points at.
+fn suffix_read(rt: &mut Runtime, r: Value, width: usize) -> Outcome<u64> {
+    let r = suffix_ref(rt, r)?;
+    match rt.heap.suffix_ref_read(r, width) {
+        Ok(bits) => Ok(bits),
+        Err(e) => rt.fail(&format!("suffix ref: {e}"), &[r]),
+    }
+}
+
+/// The `width` bytes suffix ref `r` points at := `bits`: only into a
+/// bloblet the program may change (its own, or a flat array), as
+/// `%bloblet-set-byte!`, and not a frozen suffix.
+fn suffix_write(rt: &mut Runtime, r: Value, width: usize, bits: u64) -> Outcome<Value> {
+    let r = suffix_ref(rt, r)?;
+    let o = rt.heap.suffix_ref_owner(r);
+    let kind = rt.heap.bloblet_kind(o);
+    if kind != PLAIN_BLOBLET && kind != fixpt_heap::layout::kind("flat-array") {
+        return rt.type_error("a suffix ref into a bloblet the program may change", r);
+    }
+    match rt.heap.suffix_ref_write(r, width, bits) {
+        Ok(()) => Ok(Value::UNSPECIFIED),
+        Err(e) => rt.fail(&format!("suffix ref: {e}"), &[r]),
+    }
+}
+
 fn index(rt: &mut Runtime, v: Value, len: usize, what: &str) -> Outcome<usize> {
     let i = int(rt, v)?;
     if i < 0 || i as usize >= len {
@@ -1940,6 +1969,71 @@ prims! {
         let b = bloblet(rt, a[0])?;
         let h = rt.heap.bloblet_head(b);
         Ok(rt.heap.cons(Value::boolean(h.fields_frozen), Value::boolean(h.suffix_frozen)))
+    });
+
+    // Suffix refs (`docs/object-model.md`, tag `010`): a pointer to a byte
+    // of a bloblet's suffix, made checked, read and written by width.
+    "%suffix-ref", 2, Some(2), simple!(|rt, a| {
+        let b = bloblet(rt, a[0])?;
+        let i = int(rt, a[1])?;
+        match usize::try_from(i).ok().map(|i| rt.heap.suffix_ref(b, i)) {
+            Some(Ok(r)) => Ok(r),
+            Some(Err(e)) => rt.fail(&format!("suffix ref: {e}"), &[a[0], a[1]]),
+            None => rt.fail("suffix ref: a negative offset", &[a[0], a[1]]),
+        }
+    });
+    "%suffix-ref?", 1, Some(1), simple!(|_rt, a| Ok(Value::boolean(a[0].is_suffix_ref())));
+    "%suffix-ref+", 2, Some(2), simple!(|rt, a| {
+        let r = suffix_ref(rt, a[0])?;
+        let d = int(rt, a[1])?;
+        if (r.offset() as i64) + d < 0 {
+            return rt.fail("suffix ref: before the start of the suffix", &[a[0], a[1]]);
+        }
+        match rt.heap.suffix_ref_add(r, d) {
+            Ok(r) => Ok(r),
+            Err(e) => rt.fail(&format!("suffix ref: {e}"), &[a[0], a[1]]),
+        }
+    });
+    "%suffix-ref-owner", 1, Some(1), simple!(|rt, a| {
+        let r = suffix_ref(rt, a[0])?;
+        Ok(rt.heap.suffix_ref_owner(r))
+    });
+    "%suffix-ref-offset", 1, Some(1), simple!(|rt, a| {
+        let r = suffix_ref(rt, a[0])?;
+        Ok(Value::fixnum(r.offset() as i64))
+    });
+    "%suffix-ref-u8", 1, Some(1), simple!(|rt, a| {
+        let bits = suffix_read(rt, a[0], 1)?;
+        Ok(Value::fixnum(bits as i64))
+    });
+    "%suffix-ref-u32", 1, Some(1), simple!(|rt, a| {
+        let bits = suffix_read(rt, a[0], 4)?;
+        Ok(Value::fixnum(bits as i64))
+    });
+    "%suffix-ref-u64", 1, Some(1), simple!(|rt, a| {
+        let bits = suffix_read(rt, a[0], 8)?;
+        Ok(exact_out(rt, bits as i128))
+    });
+    "%suffix-ref-f64", 1, Some(1), simple!(|rt, a| {
+        let bits = suffix_read(rt, a[0], 8)?;
+        Ok(rt.heap.make_flonum(f64::from_bits(bits)))
+    });
+    "%suffix-ref-u8-set!", 2, Some(2), simple!(|rt, a| {
+        let x = int(rt, a[1])?;
+        let Ok(b) = u8::try_from(x) else { return rt.fail("suffix ref: not a byte", &[a[1]]) };
+        suffix_write(rt, a[0], 1, b as u64)
+    });
+    "%suffix-ref-u32-set!", 2, Some(2), simple!(|rt, a| {
+        let bits = fixed_in(rt, a[1], Width::U32)? as u64;
+        suffix_write(rt, a[0], 4, bits)
+    });
+    "%suffix-ref-u64-set!", 2, Some(2), simple!(|rt, a| {
+        let bits = fixed_in(rt, a[1], Width::U64)? as u64;
+        suffix_write(rt, a[0], 8, bits)
+    });
+    "%suffix-ref-f64-set!", 2, Some(2), simple!(|rt, a| {
+        let bits = f64_in(rt, a[1])?.to_bits();
+        suffix_write(rt, a[0], 8, bits)
     });
 
     "%make-box", 1, Some(1), simple!(|rt, a| {

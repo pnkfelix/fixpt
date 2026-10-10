@@ -165,3 +165,31 @@ fn a_dumped_compiled_heap_still_runs() {
         .expect("runs");
     assert_eq!(display_value(&rt.heap, r), "(2 4 6)");
 }
+
+/// Suffix refs (tag `010`) cross an image: their owners are word indices,
+/// not addresses, so they need no relocation, and they read the same bytes.
+#[test]
+fn suffix_refs_cross_an_image() {
+    let mut session = Session::new();
+    session
+        .eval_str(
+            "<setup>",
+            "(define b (%make-bloblet 16)) \
+             (%suffix-ref-u64-set! (%suffix-ref b 8) 123456789) \
+             (define r (%suffix-ref b 8)) \
+             (define rs (list r (%suffix-ref b 0)))",
+        )
+        .expect("setup runs");
+    session.collect();
+    session.verify().expect("sound before dumping");
+    let bytes = session.image();
+    let heap = image::load(&bytes).expect("image loads");
+    heap.verify().expect("sound after loading");
+    let rt = Runtime::from_heap(heap);
+    let r = global(&rt, "r");
+    assert!(r.is_suffix_ref());
+    assert_eq!(rt.heap.suffix_ref_read(r, 8), Ok(123456789));
+    assert_eq!(rt.heap.suffix_ref_owner(r), global(&rt, "b"));
+    let rs = global(&rt, "rs");
+    assert_eq!(rt.heap.car(rs), r, "one ref, one word");
+}

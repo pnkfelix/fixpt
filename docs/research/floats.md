@@ -685,7 +685,11 @@ bytes an element).
 6. **Order.** S0 then S1 and S2 unblock and speed up the most. Should S3
    wait for measurements of `fibfp`-like code?
 7. **Tag `010`.** Keep it reserved for locatives, or give it to
-   self-tagged floats later?
+   self-tagged floats later? *Settled otherwise (2026-10-10, `TODO.md`
+   §77):* `010` is now a suffix ref, a pointer into a bloblet's suffix
+   (`docs/object-model.md`, "Tags, before and after"). Self-tagged floats
+   would need another encoding, and where this note says `010` is free or
+   "not traced", it no longer is.
 
 ## Sources
 

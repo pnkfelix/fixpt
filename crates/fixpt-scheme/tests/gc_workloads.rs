@@ -276,3 +276,22 @@ fn destructive_sorting_of_survived_data() {
         assert_eq!(got, format!("({count} #t)"), "{backend:?} sorted wrongly");
     }
 }
+
+// ------------------------------------------------------------ suffix refs
+
+/// Suffix refs (tag `010`, `docs/object-model.md`) held across churn, in a
+/// long-lived vector, a list, and locals live across allocation: each reads
+/// its owner's bytes after every collection, and a write through one is read
+/// through another.
+const SUFFIX_REFS: &str = include_str!("programs/gc/suffix-refs.scm");
+
+#[test]
+fn suffix_refs_read_their_bytes_after_the_churn() {
+    for backend in [Backend::Ast, Backend::Bytecode] {
+        let mut s = session(backend);
+        eval(&mut s, &format!("(define refs-n {})", small(12, 300)));
+        let got = eval(&mut s, SUFFIX_REFS);
+        assert_eq!(got, "(#t #t 3000000000)", "{backend:?}");
+        s.verify().expect("sound after the churn");
+    }
+}

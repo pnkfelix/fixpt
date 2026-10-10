@@ -1,0 +1,35 @@
+;; Suffix refs (tag 010) held across churn: in a long-lived vector, in a
+;; list, and in locals live across allocation; each owner a bloblet whose
+;; bytes say where they are. `refs-n` is defined by the test.
+(define (owner seed n)
+  (let ((b (%make-bloblet n)))
+    (let fill ((i 0))
+      (if (< i n)
+          (begin (%suffix-ref-u8-set! (%suffix-ref b i) (modulo (+ seed i) 256))
+                 (fill (+ i 1)))))
+    b))
+(define (ok? r seed)
+  (= (%suffix-ref-u8 r) (modulo (+ seed (%suffix-ref-offset r)) 256)))
+(define (churn n) (if (> n 0) (begin (make-vector 8 n) (churn (- n 1)))))
+(define keep (make-vector refs-n #f))
+(let loop ((i 0))
+  (if (< i refs-n)
+      (let* ((b (owner i 24)) (r (%suffix-ref b (modulo i 24))))
+        (churn 20)
+        (vector-set! keep i (cons i (%suffix-ref+ r 0)))
+        (loop (+ i 1)))))
+(define listed
+  (let loop ((i 0) (acc '()))
+    (if (= i refs-n) acc
+        (let ((r (%suffix-ref (owner (* 3 i) 16) 15)))
+          (churn 10)
+          (loop (+ i 1) (cons (cons (* 3 i) r) acc))))))
+(churn 2000)
+(define (all-ok? pairs)
+  (or (null? pairs) (and (ok? (cdr (car pairs)) (car (car pairs))) (all-ok? (cdr pairs)))))
+;; Written through a ref after the churn, and read back through another.
+(define w (cdr (vector-ref keep 0)))
+(%suffix-ref-u32-set! (%suffix-ref (%suffix-ref-owner w) 4) 3000000000)
+(churn 500)
+(list (all-ok? (vector->list keep)) (all-ok? listed)
+      (%suffix-ref-u32 (%suffix-ref (%suffix-ref-owner (cdr (vector-ref keep 0))) 4)))

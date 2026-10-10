@@ -8,13 +8,22 @@
 //! ```text
 //! tag 000  fixnum       value = (w as i64) >> 3          (61-bit signed)
 //! tag 001  pair         (w & !7) = address of a 2-word car/cdr cell
-//! tag 010  object       (w & !7) = address of a header word
+//! tag 010  suffix ref   bits 3..37 owner, 37..64 byte offset (below)
 //! tag 011  immediate    subtag in bits 3..8, payload in bits 8..64
 //! tag 100  bloblet      (w & !7) = address of the start of a bloblet's suffix
 //! tag 101  trailer      a bloblet's last field, if it has one; never traced
 //! tag 110  header       never a Value; marks an object header word (see below)
 //! tag 111  forwarding   GC-internal; never observable outside a collection
 //! ```
+//!
+//! A *suffix ref* (tag `010`) points into a bloblet's binary suffix: bits
+//! 3..37 hold its owner, the word index of the owner's suffix start counted
+//! from where the heap's memory starts (`Heap::ix`, not an address, so that
+//! it fits 34 bits: `MEM_WORDS < 2^34`); bits 37..64 a byte offset into the
+//! suffix, below the suffix's length and so below 2^27 (128 MiB). It keeps
+//! its whole owner alive; the collector forwards the owner and keeps the
+//! offset. Owner and offset are canonical, so `eq?` is a word compare.
+//! Only binary suffixes are pointed into, never fields, pairs or headers.
 //!
 //! Tag `110` is deliberately not producible by any constructor here. That is
 //! what makes a linear scan of to-space unambiguous: at any object boundary the
@@ -31,10 +40,10 @@ use core::fmt;
 pub const TAG_MASK: u64 = 0b111;
 pub const TAG_FIXNUM: u64 = 0b000;
 pub const TAG_PAIR: u64 = 0b001;
-/// Retired: it pointed at an object's header, before every object was a
-/// bloblet pointed at its suffix. Nothing produces it; a word with it is a
-/// verification error.
-pub const TAG_UNUSED: u64 = 0b010;
+/// A suffix ref: a pointer to a byte of a bloblet's binary suffix (the
+/// module's comment). Once a pointer to an object's header, before every
+/// object was a bloblet pointed at its suffix.
+pub const TAG_SUFFIX_REF: u64 = 0b010;
 pub const TAG_IMMEDIATE: u64 = 0b011;
 pub const TAG_BLOBLET: u64 = 0b100;
 pub const TAG_TRAILER: u64 = 0b101;
@@ -45,6 +54,13 @@ pub const TAG_FORWARD: u64 = 0b111;
 pub const FIXNUM_BITS: u32 = 61;
 pub const FIXNUM_MAX: i64 = (1 << (FIXNUM_BITS - 1)) - 1;
 pub const FIXNUM_MIN: i64 = -(1 << (FIXNUM_BITS - 1));
+
+/// A suffix ref's owner: bits 3..37, a word index below 2^34.
+pub const SUFFIX_OWNER_BITS: u32 = 34;
+/// A suffix ref's offset: bits 37..64, a byte offset below 2^27.
+pub const SUFFIX_OFFSET_SHIFT: u32 = 3 + SUFFIX_OWNER_BITS;
+pub const SUFFIX_OFFSET_LIMIT: usize = 1 << (64 - SUFFIX_OFFSET_SHIFT);
+const SUFFIX_OWNER_MASK: u64 = (1 << SUFFIX_OWNER_BITS) - 1;
 
 // Immediate subtags, bits 3..8.
 const IMM_FALSE: u64 = 0;
@@ -128,7 +144,32 @@ impl Value {
     /// True for anything the collector must trace.
     #[inline]
     pub const fn is_ref(self) -> bool {
-        matches!(self.tag(), TAG_PAIR | TAG_BLOBLET)
+        matches!(self.tag(), TAG_PAIR | TAG_BLOBLET | TAG_SUFFIX_REF)
+    }
+
+    /// A suffix ref to byte `offset` of the suffix whose start is word
+    /// `owner` of the heap (`Heap::ix`); `None` if either does not fit. That
+    /// the suffix has such a byte is the heap's to check (`Heap::suffix_ref`).
+    #[inline]
+    pub const fn suffix_ref(owner: usize, offset: usize) -> Option<Value> {
+        if owner as u64 > SUFFIX_OWNER_MASK || offset >= SUFFIX_OFFSET_LIMIT {
+            return None;
+        }
+        Some(Value(((offset as u64) << SUFFIX_OFFSET_SHIFT) | ((owner as u64) << 3) | TAG_SUFFIX_REF))
+    }
+    #[inline]
+    pub const fn is_suffix_ref(self) -> bool {
+        self.tag() == TAG_SUFFIX_REF
+    }
+    /// A suffix ref's owner: the word index of its suffix's start.
+    #[inline]
+    pub const fn owner(self) -> usize {
+        ((self.0 >> 3) & SUFFIX_OWNER_MASK) as usize
+    }
+    /// A suffix ref's byte offset into its owner's suffix.
+    #[inline]
+    pub const fn offset(self) -> usize {
+        (self.0 >> SUFFIX_OFFSET_SHIFT) as usize
     }
 
     // ------------------------------------------------------------- immediates
@@ -242,7 +283,7 @@ impl fmt::Debug for Value {
         match self.tag() {
             TAG_FIXNUM => write!(f, "{}", self.as_fixnum()),
             TAG_PAIR => write!(f, "#<pair @{}>", self.index()),
-            TAG_UNUSED => write!(f, "#<retired-tag {:#x}>", self.0),
+            TAG_SUFFIX_REF => write!(f, "#<suffix-ref @{}+{}>", self.owner(), self.offset()),
             TAG_BLOBLET => write!(f, "#<bloblet @{}>", self.index()),
             TAG_TRAILER => write!(f, "#<trailer {:#x}>", self.0 >> 3),
             TAG_IMMEDIATE => match self.subtag() {
@@ -431,6 +472,27 @@ mod tests {
         }
     }
 
+    /// A suffix ref's fields at their edges: offset 0 and the largest,
+    /// the largest owner, and what does not fit.
+    #[test]
+    fn suffix_refs_encode_their_edges() {
+        let max_owner = (1usize << SUFFIX_OWNER_BITS) - 1;
+        let max_offset = SUFFIX_OFFSET_LIMIT - 1;
+        for (owner, offset) in [(0, 0), (1, 0), (12345, 7), (max_owner, 0), (0, max_offset), (max_owner, max_offset)] {
+            let r = Value::suffix_ref(owner, offset).expect("fits");
+            assert!(r.is_suffix_ref() && r.is_ref() && !r.is_bloblet() && !r.is_pair(), "{r:?}");
+            assert_eq!((r.owner(), r.offset()), (owner, offset));
+            assert_ne!(r.tag(), TAG_FORWARD);
+            assert_ne!(r.tag(), TAG_HEADER);
+        }
+        assert_eq!(Value::suffix_ref(max_owner + 1, 0), None);
+        assert_eq!(Value::suffix_ref(0, SUFFIX_OFFSET_LIMIT), None);
+        // Canonical: one owner and offset, one word.
+        assert_eq!(Value::suffix_ref(9, 3), Value::suffix_ref(9, 3));
+        assert_ne!(Value::suffix_ref(9, 3), Value::suffix_ref(9, 4));
+        assert_ne!(Value::suffix_ref(9, 3), Value::suffix_ref(10, 3));
+    }
+
     #[test]
     fn scheme_truthiness_is_only_false() {
         assert!(Value::FALSE.is_false());
@@ -487,7 +549,7 @@ mod tests {
         for (name, bits) in [
             ("fixnum", TAG_FIXNUM),
             ("pair", TAG_PAIR),
-            ("unused", TAG_UNUSED),
+            ("suffix-ref", TAG_SUFFIX_REF),
             ("immediate", TAG_IMMEDIATE),
             ("bloblet", TAG_BLOBLET),
             ("trailer", TAG_TRAILER),

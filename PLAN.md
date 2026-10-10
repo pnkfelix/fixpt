@@ -195,6 +195,9 @@ weighed with the other items, not ahead of them.
   loads deep is placed (§72's messages done, `DONE.md` §72). Asked for
   (2026-10-10), for §22's FX-26 library: §75, `string->int` and
   `string->number`; §76, Scheme's numeric tower, perhaps by functors.
+  §77, suffix refs (tag `010`, interior pointers into bloblet suffixes):
+  the runtime done (`DONE.md` §77); next, the `flat` kind reached through
+  them, and whether its type is `ref` or a `blobref` of its own.
 - S1. Done (2026-09-30): **the `acyclic?` gap**, F13: shown a
   use-after-free on every path, and fixed in both checkers with data at a
   place, `(t data p)` (`docs/research/shapes.md`, the framing: regions,

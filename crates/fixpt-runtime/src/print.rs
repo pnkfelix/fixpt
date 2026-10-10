@@ -257,6 +257,13 @@ fn put(
                 out.push_str(&format!("#<{kind} {} fields {} bytes>", h.fields, h.bytes));
             }
         }
+        // A suffix ref: its owner's kind and the byte it points at; the
+        // owner's address is no business of a program's.
+        None if v.is_suffix_ref() => {
+            let o = heap.suffix_ref_owner(v);
+            let kind = fixpt_heap::layout::KINDS.iter().find(|k| k.code == heap.bloblet_kind(o)).map_or("bloblet", |k| k.name);
+            out.push_str(&format!("#<suffix-ref {kind} +{}>", v.offset()));
+        }
         None => out.push_str("#<unknown>"),
     }
 }

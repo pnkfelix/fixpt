@@ -110,6 +110,11 @@ fn weak_moved(mem: &[u64], base: usize, w: Value, from: usize, minor: bool) -> V
     if !w.is_ref() {
         return w;
     }
+    // A suffix ref: as its owner, with its offset kept.
+    if w.is_suffix_ref() {
+        let o = weak_moved(mem, base, Value::bloblet(w.owner() + base), from, minor);
+        return if o == WEAK_DEAD { o } else { rebuilt(base, w, o) };
+    }
     let i = w.index() - base;
     let moving = young::is_young(i) || (!minor && (from..from + MAX_SEMI_WORDS).contains(&i));
     if !moving {
@@ -124,6 +129,12 @@ fn weak_moved(mem: &[u64], base: usize, w: Value, from: usize, minor: bool) -> V
             Ok(_) => WEAK_DEAD,
         }
     }
+}
+
+/// Suffix ref `r`, its owner now bloblet `owner`: the same offset into it.
+#[inline]
+fn rebuilt(base: usize, r: Value, owner: Value) -> Value {
+    Value::suffix_ref(owner.index() - base, r.offset()).expect("an owner stays within the heap")
 }
 
 /// After a collection: each weak pair's car (`weak_pairs`, by main header,
@@ -165,6 +176,9 @@ pub enum BlobletError {
     /// Only a value may be stored in a field: never a trailer, header or
     /// forwarding word.
     NotAValue,
+    /// A suffix ref is made only into a suffix shorter than 2^27 bytes
+    /// (`value::SUFFIX_OFFSET_LIMIT`).
+    SuffixTooLarge(usize),
 }
 
 impl std::fmt::Display for BlobletError {
@@ -176,6 +190,9 @@ impl std::fmt::Display for BlobletError {
             BlobletError::SuffixFrozen => f.write_str("the bloblet's suffix is frozen"),
             BlobletError::NoSuchByte(i) => write!(f, "the bloblet's suffix has no byte {i}"),
             BlobletError::NotAValue => f.write_str("only a value can be stored in a field"),
+            BlobletError::SuffixTooLarge(b) => {
+                write!(f, "a suffix of {b} bytes is too large to point into (a suffix ref's offset is below 2^27)")
+            }
         }
     }
 }
@@ -208,6 +225,9 @@ const NATIVE_STACK_BASE: usize = NURSERY_BASE + NURSERY_MAX - NATIVE_STACK_WORDS
 const CODE_WORDS: usize = 1 << 27;
 /// The whole of the heap's memory, in words.
 const MEM_WORDS: usize = CODE_BASE + CODE_WORDS;
+// A suffix ref holds its owner's word index in 34 bits (`value.rs`): a
+// larger reservation would corrupt them, so it fails to build instead.
+const _: () = assert!(MEM_WORDS < 1 << crate::value::SUFFIX_OWNER_BITS);
 /// How many words the nursery takes before a safepoint collects it: 8 MB.
 /// Measured on the front end's self-compile (`docs/performance.md`); from
 /// 1M words up the times were about the same.
@@ -418,7 +438,7 @@ impl Heap {
     #[inline]
     pub fn set_slot(&mut self, rel: usize, v: Value) {
         self.set_word(rel, v.raw());
-        if self.generational && v.is_ref() && young::is_young(v.index() - self.base) && rel < 2 * MAX_SEMI_WORDS {
+        if self.generational && v.is_ref() && young::is_young(self.ref_ix(v)) && rel < 2 * MAX_SEMI_WORDS {
             self.mark_card(rel);
         }
     }
@@ -436,6 +456,12 @@ impl Heap {
     #[inline(always)]
     pub(crate) fn ix(&self, v: Value) -> usize {
         v.index() - self.base
+    }
+    /// Reference `v`'s word in the heap: a pair's cell, a bloblet's suffix
+    /// start, or a suffix ref's owner's.
+    #[inline]
+    pub(crate) fn ref_ix(&self, v: Value) -> usize {
+        if v.is_suffix_ref() { v.owner() } else { self.ix(v) }
     }
     /// A pair, or a bloblet's pointer, at word `i` of `mem`: its address.
     #[inline(always)]
@@ -1150,6 +1176,77 @@ impl Heap {
         Ok(())
     }
 
+    // -------------------------------------------------------------- suffix refs
+
+    /// A suffix ref to byte `offset` of bloblet `owner`'s suffix
+    /// (`value.rs`): refused if the suffix has no such byte, or is too large
+    /// to point into.
+    pub fn suffix_ref(&self, owner: Value, offset: usize) -> Result<Value, BlobletError> {
+        debug_assert!(owner.is_bloblet(), "{owner:?} is not a bloblet");
+        let bytes = self.bloblet_head(owner).bytes;
+        if bytes >= crate::value::SUFFIX_OFFSET_LIMIT {
+            return Err(BlobletError::SuffixTooLarge(bytes));
+        }
+        if offset >= bytes {
+            return Err(BlobletError::NoSuchByte(offset));
+        }
+        Ok(Value::suffix_ref(self.ix(owner), offset).expect("in range, checked"))
+    }
+    /// The object reference `v` keeps alive: a suffix ref's owner, or `v`.
+    #[inline]
+    pub fn object_of(&self, v: Value) -> Value {
+        if v.is_suffix_ref() { self.suffix_ref_owner(v) } else { v }
+    }
+    /// Suffix ref `r`'s owner, a bloblet.
+    #[inline]
+    pub fn suffix_ref_owner(&self, r: Value) -> Value {
+        debug_assert!(r.is_suffix_ref(), "{r:?} is not a suffix ref");
+        Value::bloblet(r.owner() + self.base)
+    }
+    /// Suffix ref `r` moved `delta` bytes along its owner's suffix: checked
+    /// again, as one made there would be.
+    pub fn suffix_ref_add(&self, r: Value, delta: i64) -> Result<Value, BlobletError> {
+        let at = r.offset() as i64 + delta;
+        if at < 0 {
+            return Err(BlobletError::NoSuchByte(0));
+        }
+        self.suffix_ref(self.suffix_ref_owner(r), at as usize)
+    }
+    /// The `width` bytes at suffix ref `r` (1, 2, 4 or 8), little-endian,
+    /// zero-extended; refused if they run past the suffix. Any alignment.
+    pub fn suffix_ref_read(&self, r: Value, width: usize) -> Result<u64, BlobletError> {
+        let (o, at) = (self.suffix_ref_owner(r), r.offset());
+        if at + width > self.bloblet_head(o).bytes {
+            return Err(BlobletError::NoSuchByte(at + width - 1));
+        }
+        let base = self.ix(o);
+        Ok((0..width).fold(0u64, |acc, k| {
+            let i = at + k;
+            acc | (((self.word(base + i / 8) >> ((i % 8) * 8)) & 0xff) << (8 * k))
+        }))
+    }
+    /// The `width` bytes at suffix ref `r` := `bits`' low ones; refused if
+    /// they run past the suffix, or the suffix is frozen. Bytes are no
+    /// pointers: no card is marked.
+    pub fn suffix_ref_write(&mut self, r: Value, width: usize, bits: u64) -> Result<(), BlobletError> {
+        let (o, at) = (self.suffix_ref_owner(r), r.offset());
+        let head = self.bloblet_head(o);
+        if at + width > head.bytes {
+            return Err(BlobletError::NoSuchByte(at + width - 1));
+        }
+        if head.suffix_frozen {
+            return Err(BlobletError::SuffixFrozen);
+        }
+        let base = self.ix(o);
+        for k in 0..width {
+            let i = at + k;
+            let (wi, shift) = (base + i / 8, (i % 8) * 8);
+            let w = (self.word(wi) & !(0xffu64 << shift)) | (((bits >> (8 * k)) & 0xff) << shift);
+            self.set_word(wi, w);
+        }
+        Ok(())
+    }
+
     /// The 32-bit word `i` of the suffix: an instruction, for code. One load,
     /// with no look at the header outside debug builds.
     #[inline]
@@ -1224,6 +1321,11 @@ impl Heap {
             if !v.is_ref() {
                 continue;
             }
+            // A suffix ref is its owner's copy, at the same offset.
+            if v.is_suffix_ref() {
+                todo.push(Value::bloblet(v.owner() + from.base));
+                continue;
+            }
             let Entry::Vacant(slot) = made.entry(v.raw()) else { continue };
             if v.is_pair() {
                 slot.insert(self.cons(Value::NULL, Value::NULL));
@@ -1245,7 +1347,12 @@ impl Heap {
                 todo.push(from.slot(from.ix(v) - k));
             }
         }
-        let map = |x: Value| if x.is_ref() { made[&x.raw()] } else { x };
+        let (base, from_base) = (self.base, from.base);
+        let map = |x: Value| match x {
+            x if x.is_suffix_ref() => rebuilt(base, x, made[&Value::bloblet(x.owner() + from_base).raw()]),
+            x if x.is_ref() => made[&x.raw()],
+            x => x,
+        };
         for v in order {
             let copy = made[&v.raw()];
             if v.is_pair() {
@@ -1828,6 +1935,18 @@ impl Heap {
     /// went, whichever kind of pointer found it.
     #[inline(always)]
     fn copy_out(mem: &mut [u64], c: &mut Copier, v: Value) -> Value {
+        // A suffix ref: its owner forwarded as any bloblet pointer, and the
+        // ref rebuilt over the owner's new place, its offset kept.
+        if v.is_suffix_ref() {
+            let o = Self::copy_out_object(mem, c, Value::bloblet(v.owner() + c.base));
+            return rebuilt(c.base, v, o);
+        }
+        Self::copy_out_object(mem, c, v)
+    }
+
+    /// [`copy_out`](Self::copy_out) of a pair or a bloblet pointer.
+    #[inline(always)]
+    fn copy_out_object(mem: &mut [u64], c: &mut Copier, v: Value) -> Value {
         let i = v.index() - c.base;
         let young = young::is_young(i);
         // A minor collection copies the nursery's objects, and only them.
@@ -1921,7 +2040,15 @@ impl Heap {
         let old = self.top - self.active;
         let shift = ((self.base + self.active) as u64) << 3;
         let young_shift = ((self.base + NURSERY_BASE) as u64 - old as u64) << 3;
+        // A suffix ref's owner counts from where the heap's memory starts,
+        // not an address: moved as the words are, by their index.
+        let rebase_owner = |r: Value| {
+            let o = r.owner();
+            let o = if young::is_young(o) { o - NURSERY_BASE + old } else { o - self.active };
+            Value::suffix_ref(o, r.offset()).expect("an image is smaller than the heap")
+        };
         let rebase = |v: Value| match v.is_ref() {
+            true if v.is_suffix_ref() => rebase_owner(v),
             true if young::is_young(v.index() - self.base) => Value(v.raw() - young_shift),
             true => Value(v.raw() - shift),
             false => v,
@@ -1965,7 +2092,9 @@ impl Heap {
         // An image's references count from word 0: here they are
         // addresses, of where it is loaded.
         let shift = (heap.base as u64) << 3;
-        let relocate = |v: Value| if v.is_ref() { Value(v.raw() + shift) } else { v };
+        // A suffix ref's owner is an index already, of a heap loaded at word
+        // 0: left as it is.
+        let relocate = |v: Value| if v.is_ref() && !v.is_suffix_ref() { Value(v.raw() + shift) } else { v };
         heap.mem.words_mut()[..words.len()].copy_from_slice(words);
         map_refs(&mut heap.mem.words_mut()[..words.len()], relocate);
         heap.top = words.len();
@@ -2054,8 +2183,18 @@ impl Heap {
                 "forwarding pointer survived a collection, at word {at}"
             ));
         }
-        if v.tag() == crate::value::TAG_UNUSED {
-            return Err(format!("a word with the retired tag 010, at word {at}"));
+        // A suffix ref names a live bloblet whose suffix covers its offset.
+        if v.is_suffix_ref() {
+            let o = Value::bloblet(v.owner() + self.base);
+            self.check_ref(o, at).map_err(|e| format!("the owner of suffix ref {v:?}: {e}"))?;
+            if Self::in_region_area(v.owner()) {
+                return Ok(());
+            }
+            let bytes = self.bloblet_head(o).bytes;
+            if v.offset() >= bytes {
+                return Err(format!("suffix ref {v:?} at word {at} is past its owner's {bytes} bytes"));
+            }
+            return Ok(());
         }
         // A region's objects are checked as its chunks are walked; and a
         // reference to one ended may linger, unused, in what is dead.

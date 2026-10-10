@@ -256,7 +256,7 @@ impl Heap {
             };
             for f in fields {
                 let v = self.slot(f);
-                if v.is_ref() && is_young(self.ix(v)) && byte(&self.cards, f >> CARD_SHIFT) == 0 {
+                if v.is_ref() && is_young(self.ref_ix(v)) && byte(&self.cards, f >> CARD_SHIFT) == 0 {
                     return Err(format!("word {f} holds a young {v:?}, and its card is clean"));
                 }
             }

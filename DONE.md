@@ -1418,3 +1418,37 @@ included's, `(select %include e)`, as for types: the Rust parser's
 on the `%include-scope` mark. Not given either: `` `e` is not an effect,
 nor one a module included gives ``. Tests: `modules/include-effects.fx`,
 `include-effect-missing.fx`.
+
+## 77. Suffix refs: interior pointers into bloblet suffixes, tag `010` (the user's, 2026-10-10)
+
+The runtime (`docs/object-model.md`, invariant 5 and "Tags, before and
+after"). A suffix ref is tag `010`, its owner in bits 3..37 and a byte
+offset in bits 37..64; the owner is the word index of the suffix's start
+counted from where the heap's memory starts (`Heap::ix`), not the address
+a tag-`100` word holds, which is ~44 bits wide: so it fits 34 bits (a
+compile-time assertion, `MEM_WORDS < 2^34`) and needs no relocation in an
+image. Made checked (`Heap::suffix_ref`: an offset in the suffix, a
+suffix below 2^27 bytes, else `NoSuchByte`/`SuffixTooLarge`), projected
+(`suffix_ref_add`), read and written by width (`suffix_ref_read`,
+`suffix_ref_write`, which refuses a frozen suffix and marks no card).
+`is_ref` includes it; the collector forwards the owner as a bloblet pointer
+and rebuilds the ref (`copy_out`), so roots, the Cheney scan, minor
+collections and the card scan, arenas, reaps and the code area need no
+more; the barrier and the remembered-set check test the owner
+(`ref_ix`); weak references follow or die with the owner; images rebase
+the owner as an index; `copy_graph_from` copies the owner once; `sro`
+counts the owner; the verifier checks a live owner whose suffix covers the
+offset. Runtime primitives: `%suffix-ref`, `%suffix-ref?`, `%suffix-ref+`,
+`%suffix-ref-owner`, `%suffix-ref-offset`, `%suffix-ref-u8`/`-u32`/`-u64`/
+`-f64` and each `-set!` (writes only into a program's own bloblets and flat
+arrays); printed `#<suffix-ref KIND +OFFSET>`. Compiled code's write
+barrier marks a card whatever is stored, so it needed nothing; compiled
+code does not dereference one yet. Tests: `fixpt-heap`'s
+`tests/suffix_refs.rs` (edges, frozen writes, minor and major collections
+with refs in roots, old fields and the nursery, owners' fields kept, arenas
+and reaps, weak references, images, graph copies, the verifier), `value.rs`'s
+`suffix_refs_encode_their_edges`, `fixpt-scheme`'s
+`suffix_refs_read_their_bytes_after_the_churn` and `suffix_refs_cross_an_image`
+(also under `gc-stress` with `FIXPT_VERIFY_BARRIER=1`). Docs:
+`docs/object-model.md`, `value.rs`'s header, `docs/research/floats.md` Q7.
+

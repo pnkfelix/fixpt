@@ -73,6 +73,14 @@ What the system must maintain, and what the collector relies on:
    sound. From a bloblet pointer, step back over tagged words until one has tag
    `110`: that is the bloblet's own header, and nothing earlier can be mistaken
    for it.
+5. **A suffix ref (tag `010`) names a byte of a live bloblet's suffix**
+   (2026-10-10, `TODO.md` §77): its owner, the word index of the suffix's
+   start, and an offset below *B*. It keeps the whole owner alive, and the
+   collector forwards it as the owner's bloblet pointer, then rebuilds it
+   with the same offset. Suffix refs point only into binary suffixes, never
+   into fields, pairs, headers or trailers; and since a suffix holds no
+   pointers, bytes written through one mark no card (a suffix ref stored
+   into a field is a pointer like any other, through the write barrier).
 
 ### The fast path: the trailer
 
@@ -361,6 +369,9 @@ So, with a trailer, finding a bloblet's header costs O(1) on every reference.
 Without one, it costs O(*F*) once per bloblet per collection, and O(1) after
 that.
 
+**A suffix ref** (tag `010`) is copied as its owner's bloblet pointer,
+then rebuilt over the owner's new place with the same offset.
+
 **Scanning to-space** (Cheney) meets a header, traces the *F* fields (tagged
 values; tags that are not pointers, the trailer's among them, are skipped),
 and skips ⌈B/8⌉ words of suffix. The collector never needs to know what kind
@@ -489,28 +500,48 @@ Almost nothing will ever be large.
 
 | tag   | before M12                | during migration                   | now (M12 A5, done)      |
 | ----- | ------------------------- | ---------------------------------- | ----------------------- |
-| `010` | object (points at header) | old-style object                   | **reserved**, see below |
+| `010` | object (points at header) | old-style object                   | suffix ref, see below   |
 | `100` | reserved                  | bloblet pointer (points at suffix) | bloblet pointer         |
 | `101` | reserved                  | trailer                            | trailer                 |
 
-**Tag `010` is kept free, not reused.** Two uses are worth keeping open,
-and the invariants make both sound for the collector:
-- **A pointer to the header**, as `010` was. It would spare objects
-  indexed from the front the trailer read. Measured, that gain is nil
-  today: with the trailer read inline, the engines benchmark is at its
-  pre-M12 numbers (`docs/performance.md`).
-- **A pointer to a field: a locative**, as in T and on the Lisp Machines, a
-  first-class pointer to one cell inside an object. The backward scan
-  works from *any* field, not only from the suffix: scanning back over
-  tagged words reaches the object's own header. So the collector can
-  forward such a pointer by keeping its offset from the header. For
-  FX-26, a `(ref T R)` could then point straight at a record's field, with
-  no box allocated, under the same region discipline as any reference.
-  (Growing an object in place by moving its header backward is the other
-  use a field pointer would serve. It needs free space *before* the object,
-  and bump allocation leaves free space after, so it is the least likely.)
+**Tag `010` is a suffix ref** (2026-10-10, `TODO.md` §77): a pointer to a
+byte of a bloblet's binary suffix, the representation FX-26's flat data
+will be reached by (`(ref F R)` for `F` of the kind `flat`).
 
-A word with tag `010` is a verification error until one of these is chosen.
+```text
+bits  2..0   010
+bits 36..3   owner: the word index of its suffix's start, counted from
+             where the heap's memory starts (Heap::ix), not an address
+bits 63..37  offset: a byte offset into the suffix, below B (so < 2^27)
+```
+
+Its address is the heap's base + 8 × owner + offset. The owner is an index,
+not the address a tag-`100` word holds, so that it fits 34 bits (the heap
+asserts `MEM_WORDS < 2^34` at compile time) and so that it needs no
+relocation in an image. Making one is checked: an offset past the suffix,
+or an owner whose suffix is 128 MiB or more, is refused, with no fallback
+representation. Writing through one respects the suffix-frozen flag; reads
+need no check. Owner and offset are canonical, so `eq?` is a word compare.
+The collector, never looking at kinds, treats `010` as a reference
+wherever it treats `100` as one: roots, the Cheney scan, minor collections
+(young by the owner), the card scan, arenas and reaps, the code area's
+mark, weak references (a ref follows or dies with its owner), images and
+graph copies. The verifier checks each `010` word names a live bloblet whose
+suffix covers its offset. The runtime's primitives: `%suffix-ref`,
+`%suffix-ref+`, `%suffix-ref-owner`, `%suffix-ref-offset`, and reads and
+writes by width (`%suffix-ref-u8`, `-u32`, `-u64`, `-f64`, each with a
+`-set!`), writes only into a program's own bloblets and flat arrays.
+Compiled code reaches them through the runtime; reading in line (`ubfx` the
+owner, `lsr #37` the offset) waits for the language to type them.
+
+This took the tag from the two uses it was kept for:
+- **A pointer to the header**, as `010` was. Measured, its gain was nil
+  (`docs/performance.md`).
+- **A pointer to a field: a locative**, as in T and on the Lisp Machines.
+  The backward scan works from any field, so the collector could forward
+  one by its offset from the header; it now needs another encoding.
+
+And from self-tagged floats (`docs/research/floats.md`, Q7).
 
 ## What becomes a bloblet
 

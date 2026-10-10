@@ -26,7 +26,7 @@ pub const TAG_MASK: u64 = (1 << TAG_BITS) - 1;
 pub const TAGS: &[Tag] = &[
     Tag { name: "fixnum", bits: 0b000, meaning: "61-bit signed integer; also what a zeroed word is" },
     Tag { name: "pair", bits: 0b001, meaning: "index of a two-word car/cdr cell, which has no header" },
-    Tag { name: "unused", bits: 0b010, meaning: "retired: pointed at an object's header, before every object was a bloblet" },
+    Tag { name: "suffix-ref", bits: 0b010, meaning: "a pointer into a bloblet's binary suffix: owner in bits 3..37, byte offset in 37..64" },
     Tag { name: "immediate", bits: 0b011, meaning: "#f, #t, (), unit, eof, characters, …" },
     Tag { name: "bloblet", bits: 0b100, meaning: "index of the start of a bloblet's suffix" },
     Tag { name: "trailer", bits: 0b101, meaning: "the last field of a bloblet that has one; runtime-reserved payload" },
