@@ -211,8 +211,22 @@
 ;; Each `with` the checker saw (its `k-with-vals`, as `c-set-facts!` took
 ;; them): where it starts and ends, and its module's values' names, in
 ;; order.
-;; And each module reshaped (`k-reshapes`), as `c-set-facts!` took them.
-(define c-reshapes (ref k-reshape-list @k) (new nil))
+;; And each module reshaped (`k-reshapes`), as `c-set-facts!` took them, by
+;; where it starts: a module given through a signature is reshaped, so
+;; there are many, and every expression is asked after (`c-changed?`).
+(define c-reshape-index (ref (table int k-reshape-list @k) @k)
+  (new (make-table c-int-hash c-int=?)))
+(define c-index-reshapes! (subr c-emits (k-reshape-list) unit)
+  (lambda (rs)
+    (if (null? rs)
+        #u
+        (let ((a (extract (car rs) 1)))
+          (begin (c-index-reshapes! (cdr rs))
+                 (table-set! (get c-reshape-index) a
+                             (the k-reshape-list
+                               (cons (car rs) (table-ref (get c-reshape-index) a nil)))))))))
+(define c-reshapes-from (subr (maxeff (read @globals) (read @k)) (int) k-reshape-list)
+  (lambda (a) (table-ref (get c-reshape-index) a nil)))
 (define c-withs (ref k-with-list @k) (new nil))
 (define c-with-index (ref c-with-table @k) (new (make-table c-int-hash c-int=?)))
 (define c-index-withs! (subr c-emits (k-with-list) unit)
@@ -256,18 +270,21 @@
            (the (listof k-ids @k) (cons (extract (car rs) 3) nil)))
           (else (c-reshape-in (cdr rs) a b)))))
 (define c-reshape-at (subr (maxeff (read @globals) (read @k) (alloc @k)) (exp) (listof k-ids @k))
-  (lambda (x) (c-reshape-in (get c-reshapes) (exp-start x) (exp-end x))))
+  (lambda (x) (c-reshape-in (c-reshapes-from (exp-start x)) (exp-start x) (exp-end x))))
 ;; Whether one of `rs` reshapes the module from `a` to `b`.
 (define c-reshaped-in? (subr (maxeff (read @globals) (read @k)) (k-reshape-list int int) bool)
   (lambda (rs a b)
     (and (not (null? rs))
          (or (and (= (extract (car rs) 1) a) (= (extract (car rs) 2) b))
              (c-reshaped-in? (cdr rs) a b)))))
+;; Whether the module `x` is reshaped.
+(define c-reshaped-at? (subr (maxeff (read @globals) (read @k)) (exp) bool)
+  (lambda (x) (c-reshaped-in? (c-reshapes-from (exp-start x)) (exp-start x) (exp-end x))))
 ;; Whether `x`'s value is changed as it is given: converted to a
 ;; convention, or a module reshaped.
 (define c-changed? (subr (maxeff (read @globals) (read @k)) (exp) bool)
   (lambda (x)
-    (or (>= (c-conversion-at x) 0) (c-reshaped-in? (get c-reshapes) (exp-start x) (exp-end x)))))
+    (or (>= (c-conversion-at x) 0) (c-reshaped-at? x))))
 ;; Where an expression starting at `at` is, as a word's name says it: the
 ;; position; or, in a module's file (`load-module`, M7), `file:position`,
 ;; the file numbered as the Rust checker numbers them.
@@ -524,7 +541,8 @@
       (set c-withs (get k-with-vals))
       (set c-with-index (make-table c-int-hash c-int=?))
       (c-index-withs! (get k-with-vals))
-      (set c-reshapes (get k-reshapes))
+      (set c-reshape-index (make-table c-int-hash c-int=?))
+      (c-index-reshapes! (get k-reshapes))
       (c-fill-facts fs))))
 
 (define c-member? (subr (maxeff (read @globals) (read @k)) (syms symbol) bool)
