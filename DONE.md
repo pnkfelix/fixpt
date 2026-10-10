@@ -1342,3 +1342,11 @@ do not give either: `` `t` is not a type, nor one a module included gives
 (`(hide (include m))`), the same; a type shown says what a hidden one
 abbreviates. Tests: `modules/include-types.fx`, `hide-include-types.fx`,
 `include-type-missing.fx`.
+
+An `include`'s effects in scope inside the module (2026-10-09): an effect
+name nothing else defines, in a module with `include`s, is the modules
+included's, `(select %include e)`, as for types: the Rust parser's
+`parse_effect` on `include_scope`, the FX-26 checker's `k-effect-unknown`
+on the `%include-scope` mark. Not given either: `` `e` is not an effect,
+nor one a module included gives ``. Tests: `modules/include-effects.fx`,
+`include-effect-missing.fx`.

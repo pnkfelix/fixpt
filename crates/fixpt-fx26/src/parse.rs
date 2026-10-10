@@ -254,6 +254,12 @@ impl Checker {
             return match self.lookup_desc(sym) {
                 Some(DScope::Var(v, Kind::Effect)) => Ok(Effect::atom(Atom::Var(v))),
                 Some(DScope::Eff(e)) => Ok(e),
+                // In a module with `include`s, the modules included's, as a
+                // type's (`include_scope`).
+                _ if self.include_scope > 0 => {
+                    let inc = self.interner.intern("%include");
+                    Ok(Effect::atom(Atom::Var(self.effect_select(inc, sym))))
+                }
                 _ => Err(FxError::at(s.span, format!("`{}` is not an effect", self.name(sym)))),
             };
         }

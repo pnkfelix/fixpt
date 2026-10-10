@@ -670,7 +670,14 @@ impl Checker {
     /// error at `span`.
     fn selected_effect(&mut self, m: Sym, e: Sym, span: Span) -> R<Effect> {
         let shown = |c: &Checker| format!("`(select {} {})`", c.interner.name(m), c.interner.name(e));
+        // An effect name in a module with `include`s that nothing else
+        // defines (`include_scope`): said of the name.
+        let not_included = |c: &Checker| format!("`{}` is not an effect, nor one a module included gives", c.interner.name(e));
+        let included = self.interner.name(m) == "%include";
         let Some(mt) = self.lookup(m) else {
+            if included {
+                return Err(FxError::at(span, not_included(self)));
+            }
             return Err(FxError::at(span, format!("{}: `{}` is not bound here", shown(self), self.interner.name(m))));
         };
         let Ty::Module { descs, .. } = self.arena.get(self.arena.resolve(mt)).clone() else {
@@ -678,6 +685,7 @@ impl Checker {
         };
         match descs.iter().find(|(d, _)| *d == e).and_then(|(_, d)| self.desc_effect(*d)) {
             Some(x) => Ok(x),
+            None if included => Err(FxError::at(span, not_included(self))),
             None => Err(FxError::at(span, format!("{}: `{}` has no effect `{}`", shown(self), self.interner.name(m), self.interner.name(e)))),
         }
     }

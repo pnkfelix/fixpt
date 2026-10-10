@@ -311,6 +311,14 @@
 (define k-parse-binders (subr (maxeff checks spin) (syn) k-binders)
   (lambda (s) (k-binders-each (k-items s "binders"))))
 
+;; An effect name nothing defines: in a module with `include`s, the modules
+;; included's, as `k-type-unknown` for types; else what `no` says.
+(define k-effect-unknown
+  (subr (maxeff checks spin) (symbol syn (subr (maxeff checks spin) () string)) k-eff)
+  (lambda (sym s no)
+    (if (not (null? (k-lookup-desc '%include-scope)))
+        (k-one (a-var (k-effect-select '%include sym)))
+        (k-sfail (no) s))))
 ;; The effect a name stands for.
 (define k-effect-named (subr (maxeff checks spin) (syn) k-eff)
   (lambda (s)
@@ -321,7 +329,7 @@
                (let ((d (k-lookup-desc (string->symbol n)))
                      (no (lambda () (string-append (k-quote n) " is not an effect"))))
                  (if (null? d)
-                     (k-sfail (no) s)
+                     (k-effect-unknown (string->symbol n) s no)
                      (tagcase (car d)
                        (ds-var (v k) (if (= k 1) (k-one (a-var v)) (k-sfail (no) s)))
                        (ds-eff (e) e)

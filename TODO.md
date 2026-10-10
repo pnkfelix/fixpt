@@ -1845,8 +1845,6 @@ is). Left:
   … end`); every other is a value made when the program runs. To read
   first: what Sheldon's thesis says of combining first-class modules with
   abstract types, before deciding.
-  Effects (`define-effect`) of a module included are not in scope inside
-  yet, as types now are.
 - A hidden abstract type in an exported one: refused for now (the
   user's, 2026-10-09); abstract in the module's type, the existential
   reading, could come later.
