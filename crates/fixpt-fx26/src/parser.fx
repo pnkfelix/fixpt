@@ -735,9 +735,28 @@
 ;; The keys loaded, and the definitions not yet placed before their form.
 (define shared-keys (ref (listof string acyclic) rs) (new nil))
 (define shared-pending (ref top-list rs) (new nil))
+;; The files being read now, by key, each with its path as its load wrote
+;; it, the innermost first: a load of one of them is a cycle (`TODO.md`
+;; §71).
+(define loading-keys (ref (listof (pairof string string rs) acyclic) rs) (new nil))
 ;; A program's parse begins with none.
 (define shared-reset! (subr (maxeff (read @globals) (write rs)) () unit)
-  (lambda () (begin (set shared-keys nil) (set shared-pending nil))))
+  (lambda () (begin (set shared-keys nil) (set shared-pending nil) (set loading-keys nil))))
+;; The files being read, as `loading-keys` keeps them.
+(define-type loading-list (listof (pairof string string rs) acyclic))
+;; The chain from the load of `key` on, onto `acc`, as `parse.rs` says it:
+;; `a` loads `b` …; "" if `key` is not being read.
+(define load-chain (subr (maxeff (read @globals) (read rs)) (loading-list string string) string)
+  (lambda (ks key acc)
+    (cond ((null? ks) "")
+          ((string=? (car (car ks)) key)
+           (string-append "a load cycle: `" (string-append (cdr (car ks)) acc)))
+          (else (load-chain (cdr ks) key
+                            (string-append "` loads `" (string-append (cdr (car ks)) acc)))))))
+;; If `key` is being read, the cycle a load of it at `path` makes; else "".
+(define load-cycle (subr (maxeff (read @globals) (read rs)) (string string) string)
+  (lambda (key path)
+    (load-chain (get loading-keys) key (string-append "` loads `" (string-append path "`")))))
 ;; The definitions not yet placed, in order, now placed: none left.
 (define shared-taken (subr (maxeff (read @globals) (read rs) (write rs)) () top-list)
   (lambda ()
@@ -791,6 +810,17 @@
           (let ((path (extract (car f) 4)) (text (extract (car f) 6)))
             (string-append (str3 "in `" path "`, ")
                            (str3 (text-place text (- at base)) ": " m)))))))
+
+;; The same, the file named `path`, as the load being read wrote it: a
+;; file read once may be loaded under more than one path (`TODO.md` §71).
+(define in-loaded-as
+  (subr (maxeff (read @globals) (read rs) spin) (loaded-files int string string int) string)
+  (lambda (fs base path m at)
+    (let ((f (loaded-based fs base)))
+      (if (or (null? f) (< at base) (>= at (+ base load-base)))
+          m
+          (string-append (str3 "in `" path "`, ")
+                         (str3 (text-place (extract (car f) 6) (- at base)) ": " m))))))
 
 ;; The items of a form that is a module.
 (define module-items-of (subr pure (top) mod-items)

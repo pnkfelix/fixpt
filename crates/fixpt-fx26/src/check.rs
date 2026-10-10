@@ -283,6 +283,10 @@ pub struct Checker {
     /// The paths being made into their hidden globals now: loaded there,
     /// not referred to.
     pub(crate) sharing_now: HashSet<String>,
+    /// The files being read now, by key, each with its path as its load
+    /// wrote it, the outermost first: a load of one of them is a cycle
+    /// (`TODO.md` §71).
+    pub(crate) loading: Vec<(String, String)>,
     /// Those globals: seen from a loaded file, which sees no other.
     pub(crate) shared_globals: HashSet<Sym>,
     /// The hidden globals' definitions made since the form being checked
@@ -573,6 +577,7 @@ impl Checker {
             hidden: None,
             shared_loads: HashMap::new(),
             sharing_now: HashSet::new(),
+            loading: Vec::new(),
             shared_globals: HashSet::new(),
             hoisted: Vec::new(),
             loaded: HashMap::new(),

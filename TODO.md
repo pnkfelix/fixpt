@@ -1864,22 +1864,6 @@ which may remove many of these names outright, so perhaps after §69.
 The tools that know which name comes from which file and module are in
 `scripts/conductor/` (`deps.py`, `registry2.py`; see its README).
 
-## 71. A load cycle is an error, not a hang
-
-Found 2026-10-09 (§68 phase 2, `check-resolve.fx`): two types files that
-loaded each other through a third (`check-types-types.fx` →
-`check-modorder-types.fx` → `check-types-types.fx`) made the Rust
-checker's `parse_load` recurse through `parse_module_in` without end, past
-300 s with nothing said. Each load should know the paths open above it
-and refuse one already open, naming the cycle; in both parsers, agreeing,
-with a test program of two files that load each other.
-
-Also a check in the suite, before any checker runs: the built-in module
-files (`FRONT_END_MODULES`) load no cycle, found from their text. The
-cycle of 2026-10-09 was made by a tool (the signature generator took the
-value name in `(val k-trail …)` for a use of the type `k-trail`, and
-loaded its types file), and only a 300 s hang said so.
-
 ## 72. Say which name a module item captures (2026-10-09)
 
 A module's items scope over all its items (`letrec*`), so an item can
@@ -1903,3 +1887,22 @@ module's own items is refused rightly, but as `` `%include` uses `k`,
 defined after it `` (2026-10-09, `TODO.md` §69), naming the hidden item
 that holds the modules included; it should say `` an `include` uses `k`,
 which the module defines: an included module is made before its items ``.
+
+## 73. An error two loads deep, placed alike by both checkers (2026-10-10)
+
+Found making a load cycle an error (`DONE.md` §71): where a file loaded
+by a file loaded by the program is wrong, the checkers say the same thing
+but place it differently. With `deep.fx` loading `deep-a.fx` loading
+`deep-b.fx`:
+
+- a type error in `deep-b.fx`: Rust `deep.fx:1:1: in `deep-b.fx`, 1:15:
+  …`, the FX-26 checker `deep.fx:3:1: in `deep-b.fx`, 1:15: …` (a line
+  `deep.fx` does not have);
+- `deep-b.fx` loading a file that is not there: Rust `deep.fx:1:11: in
+  `deep-a.fx`, 1:11: in `deep-b.fx`, 1:11: cannot read …`, the FX-26
+  checker `deep.fx:3:1: cannot read …`.
+
+One level deep they agree (every `modules/load-*.fx`). Wanted: both say
+each file on the way, at the program's load, as Rust does for a reading
+error; a test program two loads deep. `modules/load-cycle.fx` is a file
+loading itself, one level deep, until this is done.

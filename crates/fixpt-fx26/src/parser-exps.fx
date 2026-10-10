@@ -137,6 +137,9 @@
 (define shared-keys (with parser-module shared-keys))
 (define shared-pending (with parser-module shared-pending))
 (define shared-key? (with parser-module shared-key?))
+(define load-cycle (with parser-module load-cycle))
+(define in-loaded-as (with parser-module in-loaded-as))
+(define loading-keys (with parser-module loading-keys))
 (define input-items (with parser-module input-items))
 ;;; ------------------------------------------------------------ expressions
 ;; Whether `s` mentions the name `n` anywhere, quoted or not.
@@ -914,15 +917,19 @@
         (if (null? f)
             (e-module (loaded-error (str3 "cannot read `" path "`: it was not read")) a b)
             (let* ((key (string-append (if input? "input:" "") (extract (car f) 7)))
-                   (name (string->symbol (string-append "%shared:" key))))
+                   (name (string->symbol (string-append "%shared:" key)))
+                   (cycle (load-cycle key path)))
               (begin
-                (if (shared-key? key (get shared-keys))
-                    #u
-                    (let ((x (parse-load-file (car f) path input? a b)))
-                      (begin (set shared-keys (cons key (get shared-keys)))
-                             (set shared-pending
-                                  (cons (t-define name (the syns-a nil) x a b)
-                                        (get shared-pending))))))
+                (cond ((not (string=? cycle "")) (pfail-at cycle a b))
+                      ((shared-key? key (get shared-keys)) #u)
+                      (else
+                       (let* ((pushed (set loading-keys (cons (cons key path) (get loading-keys))))
+                              (x (parse-load-file (car f) path input? a b)))
+                         (begin (set loading-keys (cdr (get loading-keys)))
+                                (set shared-keys (cons key (get shared-keys)))
+                                (set shared-pending
+                                     (cons (t-define name (the syns-a nil) x a b)
+                                           (get shared-pending)))))))
                 (if input?
                     (e-with name (e-var 'input (syn-start head) (syn-end head)) a b)
                     (e-var name a b))))))))
@@ -953,7 +960,7 @@
             (tagcase r
               (p-err (m x y)
                 (if (>= x base)
-                    (e-module (loaded-error (in-loaded (get loaded) base m x)) a b)
+                    (e-module (loaded-error (in-loaded-as (get loaded) base path m x)) a b)
                     (pfail-at m x y)))
               (p-ok (ts) (tagcase (car ts) (t-exp (x) x) (else y (e-module nil a b))))))))))
 ;; A `define-rec`'s bindings, as a `letrec`'s are.

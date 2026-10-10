@@ -204,3 +204,56 @@ fn a_tree_as_text() {
     );
     assert_eq!(ours, rust_trees(text));
 }
+
+/// The module files built in load no cycle (`TODO.md` §71): found from
+/// their text, before any checker runs, since a cycle made by a tool once
+/// showed only as a parser recursing without end. Each file's
+/// `(load-module "fx26:…")` and `(load-input "fx26:…")` are its edges.
+#[test]
+fn the_built_in_files_load_no_cycle() {
+    let files: std::collections::HashMap<&str, &str> =
+        fixpt_fx26::FRONT_END_MODULES.iter().chain(fixpt_fx26::FRONT_END_FILES.iter()).copied().collect();
+    let loads = |text: &str| -> Vec<String> {
+        let mut out = Vec::new();
+        for head in ["(load-module \"fx26:", "(load-input \"fx26:"] {
+            let mut rest = text;
+            while let Some(i) = rest.find(head) {
+                rest = &rest[i + head.len()..];
+                if let Some(j) = rest.find('"') {
+                    out.push(rest[..j].to_string());
+                }
+            }
+        }
+        out
+    };
+    // Depth first, each file's state: 1 being visited, 2 done.
+    fn visit(n: &str, files: &std::collections::HashMap<&str, &str>, loads: &dyn Fn(&str) -> Vec<String>, state: &mut std::collections::HashMap<String, u8>, path: &mut Vec<String>) -> Option<Vec<String>> {
+        match state.get(n) {
+            Some(1) => {
+                let i = path.iter().position(|p| p == n).unwrap_or(0);
+                let mut chain = path[i..].to_vec();
+                chain.push(n.to_string());
+                return Some(chain);
+            }
+            Some(_) => return None,
+            None => {}
+        }
+        state.insert(n.to_string(), 1);
+        path.push(n.to_string());
+        for m in loads(files.get(n).copied().unwrap_or("")) {
+            if let Some(c) = visit(&m, files, loads, state, path) {
+                return Some(c);
+            }
+        }
+        path.pop();
+        state.insert(n.to_string(), 2);
+        None
+    }
+    let mut state = std::collections::HashMap::new();
+    let mut names: Vec<&str> = files.keys().copied().collect();
+    names.sort();
+    for n in names {
+        let cycle = visit(n, &files, &loads, &mut state, &mut Vec::new());
+        assert!(cycle.is_none(), "the built-in files load in a cycle: {}", cycle.unwrap().join(" loads "));
+    }
+}

@@ -1290,3 +1290,22 @@ mentions `t`, which is hidden in this module ``; a hidden `define-type` is
 in what it abbreviates already. Tests: `modules/hide.fx` (a datatype, a
 `define-rec` and an `include` hidden), `hide-include.fx`, `hide-unseen.fx`,
 `hide-escape.fx`.
+
+## 71. A load cycle is an error, not a hang (2026-10-10)
+
+Found 2026-10-09 (`TODO.md` §68 phase 2): two types files loading each
+other through a third made the Rust checker's `parse_load` recurse without
+end, past 300 s with nothing said; the FX-26 parser did the same (a stack
+overflow). Each parser now keeps the files being read, each with its path
+as its load wrote it (`Checker::loading`, `loading-keys`), and refuses a
+load of one of them before reading anything, naming the chain: `` a load
+cycle: `a.fx` loads `b.fx` loads `a.fx` ``. In Rust the check comes before
+`sharing_now`, through which a shared load's own definition reads its
+file; it had let a cycle through as well. A file read once and loaded under
+two paths is named, in an error inside it, by the path the load being read
+wrote (`in-loaded-as`), as Rust names it. And a check in the suite, before
+any checker runs, that the module files built in load no cycle, from their
+text (`tests/parser.rs`, `the_built_in_files_load_no_cycle`; shown to
+catch the cycle of 2026-10-09 when it is put back). Test:
+`modules/load-cycle.fx`, a file that loads itself. Two files deep, the
+checkers place errors differently, a cycle or not: `TODO.md` §73.

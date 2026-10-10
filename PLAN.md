@@ -1,6 +1,6 @@
 # `fixpt` — a Rust Scheme engine with FX-87 and FX-91 front ends
 
-## At a glance (kept current; last updated 2026-10-09)
+## At a glance (kept current; last updated 2026-10-10)
 
 Where things stand. Below it is the plan as it grew, oldest first (the
 contents are at the end of this section); the details behind this summary
@@ -186,12 +186,13 @@ a checked program to go wrong comes before everything else, performance
 included. Searching for unknown bugs, and proofs of soundness or
 correctness (S5), do not currently outweigh performance: they are
 weighed with the other items, not ahead of them.
-- **After the conductor** (2026-10-09): `TODO.md` §69, combining modules,
-  high priority (the user's): FX-91's `(extend e0 e1)`, an `include` item
-  in which a name given twice is an error, and `hide` to keep helpers out
-  of a module's type; then §68's profiling pass on both checkers (their
-  time and the words rose through phase 2); §70, short names for the
-  modules a file binds; §71, a load cycle refused, not a hang.
+- **After the conductor** (2026-10-09, updated 2026-10-10): done, §69's
+  `(extend e0 e1)`, `(include m)` and `(hide item …)`, §68's profiling
+  pass (`DONE.md` §68, §69), and §71, a load cycle an error. Next:
+  `TODO.md` §69's rest, an `include`'s types in scope inside, then the
+  pass over the front end's 3,449 import lines with `(hide (include m))`;
+  §70, short names for the modules a file binds; §72 and §73, messages
+  and where an error two loads deep is placed.
 - S1. Done (2026-09-30): **the `acyclic?` gap**, F13: shown a
   use-after-free on every path, and fixed in both checkers with data at a
   place, `(t data p)` (`docs/research/shapes.md`, the framing: regions,

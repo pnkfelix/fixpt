@@ -2205,8 +2205,18 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
             _ => std::path::PathBuf::from(path),
         };
         let key = format!("{}{}", if input { "input:" } else { "" }, at.display());
+        // A file loading one that is being read, itself or one that loads
+        // it: a cycle, refused, the chain named (`TODO.md` §71). As the
+        // FX-26 parser's `parse-loaded`.
+        if let Some(i) = self.loading.iter().position(|(k, _)| *k == key) {
+            let chain: Vec<String> = self.loading[i..].iter().map(|(_, p)| format!("`{p}`")).chain([format!("`{path}`")]).collect();
+            return Err(FxError::at(span, format!("a load cycle: {}", chain.join(" loads "))));
+        }
         if self.sharing_now.contains(&key) {
-            return self.parse_load_file(span, path, &at, input);
+            self.loading.push((key, path.to_string()));
+            let r = self.parse_load_file(span, path, &at, input);
+            self.loading.pop();
+            return r;
         }
         let name = match self.shared_loads.get(&key) {
             Some(n) => *n,
