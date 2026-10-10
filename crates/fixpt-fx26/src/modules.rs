@@ -550,7 +550,7 @@ impl Checker {
         // Each effect selected, what its module says it is.
         let mut given: HashMap<DVar, D> = HashMap::new();
         for (v, (m, n)) in effects {
-            given.insert(v, D::Effect(self.selected_effect(m, n, span)?));
+            given.insert(v, D::Effect(self.effect_selected(v, m, n, span)?));
         }
         let mut sel = HashMap::new();
         for (m, n, node) in found {
@@ -572,6 +572,12 @@ impl Checker {
             let to = match (abs.iter().find(|(a, _)| *a == n), descs.iter().find(|(d, _)| *d == n)) {
                 (Some((_, v)), _) => self.arena.ty(Ty::Var(*v)),
                 (None, Some((_, d))) => *d,
+                // A name read in a `with` body that `m` does not give: what
+                // it is outside the `with` (`Parser::with_selected`).
+                (None, None) if self.arena.with_fallback.contains_key(&node) => match self.arena.with_fallback[&node] {
+                    Some(outer) => self.resolve_selects(outer, span)?,
+                    None => return Err(FxError::at(span, format!("`{}` is not a type, nor one a module opened by `with` gives", self.interner.name(n)))),
+                },
                 (None, None) if included => return Err(FxError::at(span, not_included(self))),
                 (None, None) => {
                     return Err(FxError::at(span, format!("{}: `{}` has no type `{}`", shown(self), self.interner.name(m), self.interner.name(n))));
@@ -680,13 +686,44 @@ impl Checker {
     /// The variable `(select m e)` read as an effect stands for, one for
     /// each, named as written.
     pub(crate) fn effect_select(&mut self, m: Sym, e: Sym) -> DVar {
-        if let Some((_, v)) = self.effect_selects.iter().find(|(k, _)| *k == (m, e)) {
+        if let Some((_, v)) = self.effect_selects.iter().find(|(k, v)| *k == (m, e) && !self.with_effect_fallback.contains_key(v)) {
             return *v;
         }
         let shown = format!("(select {} {})", self.interner.name(m), self.interner.name(e));
         let v = self.arena.dvar_of(self.interner.intern(&shown), Kind::Effect);
         self.effect_selects.push(((m, e), v));
         v
+    }
+
+    /// What effect variable `v`, for `(select m e)`, is: `m`'s effect `e`;
+    /// for a `with` body's name that `m` does not give, what it is outside
+    /// the `with` (`Parser::with_effect_selected`), itself resolved.
+    fn effect_selected(&mut self, v: DVar, m: Sym, e: Sym, span: Span) -> R<Effect> {
+        let Some(outer) = self.with_effect_fallback.get(&v).cloned() else {
+            return self.selected_effect(m, e, span);
+        };
+        let given = self.lookup(m).and_then(|mt| match self.arena.get(self.arena.resolve(mt)).clone() {
+            Ty::Module { descs, .. } => descs.iter().find(|(d, _)| *d == e).and_then(|(_, d)| self.desc_effect(*d)),
+            _ => None,
+        });
+        match (given, outer) {
+            (Some(x), _) => Ok(x),
+            (None, Some(outer)) => {
+                let mut out = Effect::pure();
+                for a in outer.0 {
+                    let w = match a {
+                        Atom::Var(w) => self.effect_selects.iter().find(|(_, x)| *x == w).map(|(k, _)| (w, *k)),
+                        _ => None,
+                    };
+                    out = match w {
+                        Some((w, (m, n))) => out.union(&self.effect_selected(w, m, n, span)?),
+                        None => out.union(&Effect::atom(a)),
+                    };
+                }
+                Ok(out)
+            }
+            (None, None) => Err(FxError::at(span, format!("`{}` is not an effect, nor one a module opened by `with` gives", self.interner.name(e)))),
+        }
     }
 
     /// Module `m`'s effect `e`, as its type says, `m` bound here; or an

@@ -242,6 +242,11 @@ pub struct Checker {
     /// one for each, which `resolve_selects` replaces by module `m`'s
     /// effect `e` (`crate::modules`).
     pub(crate) effect_selects: Vec<((Sym, Sym), DVar)>,
+    /// Each effect variable an effect name in a `with` body was read as
+    /// (`Parser::with_effect_selected`), not shared as `effect_selects`'
+    /// others are: what the name meant outside, if anything, should the
+    /// module not give it.
+    pub(crate) with_effect_fallback: HashMap<DVar, Option<Effect>>,
     /// While a `moduleof` is shown: its descriptions' names, each naming
     /// what it describes in the components after it (`unparse`).
     pub(crate) print_names: std::cell::RefCell<Vec<(Sym, TyId)>>,
@@ -291,6 +296,9 @@ pub struct Checker {
     /// one, a type name nothing else defines is the modules included's,
     /// `(select %include t)`, found when they are typed.
     pub(crate) include_scope: usize,
+    /// How many `with` bodies are being read (`Parser::with_types_of`):
+    /// where none is, no type name is looked for among `with`s' modules.
+    pub(crate) with_depth: usize,
     /// Those globals: seen from a loaded file, which sees no other.
     pub(crate) shared_globals: HashSet<Sym>,
     /// The hidden globals' definitions made since the form being checked
@@ -569,6 +577,7 @@ impl Checker {
             module_vars: HashSet::new(),
             abstract_funs: HashSet::new(),
             effect_selects: Vec::new(),
+            with_effect_fallback: HashMap::new(),
             print_names: std::cell::RefCell::new(Vec::new()),
             subst_keep: None,
             select_map: HashMap::new(),
@@ -583,6 +592,7 @@ impl Checker {
             sharing_now: HashSet::new(),
             loading: Vec::new(),
             include_scope: 0,
+            with_depth: 0,
             shared_globals: HashSet::new(),
             hoisted: Vec::new(),
             loaded: HashMap::new(),

@@ -1831,11 +1831,9 @@ The conversion is done (`DONE.md` §68). Left from it:
 from by path (a reshape, as a module given where fewer values are wanted
 is). Left:
 
-- `extend`'s `e1` sees `e0`'s values (`(with %extend-0 e1)`, FX-91
-  §2.3.5) but not yet its types and effects: FX-26's `with` opens a
-  module's values only, where FX-91's (§2.3.19) substitutes its
-  descriptions too, and its abstract types as `(select e0 t)`. Wanted: a
-  `with` that does, which `extend` then has.
+- A `with`'s module's description *functions* applied, `(f int)` in a
+  `with` body for `m`'s `f`: not shadowed yet, as names alone are
+  (`DONE.md` §69); the head of an application is read as before.
 - `include` and `extend` of a module with abstract types that is not a
   name: refused now (`DONE.md` §69 has the named ones, aliases). For the
   two that are literal text, an inline `(module …)` and a `(load-module

@@ -19,6 +19,9 @@
 ;; each, which `k-resolve-selects` replaces by module `m`'s effect `e`
 ;; (`check-modules.fx`), as the Rust checker's `effect_selects`.
 (define-type k-effect-sels (listof (productof (1 symbol) (2 symbol) (3 int)) acyclic))
+;; `with`'s effect variables, whether each falls back, and to what
+;; (`k-with-effect-falls`).
+(define-type k-effect-falls (listof (productof (1 int) (2 bool) (3 k-eff)) acyclic))
 
 ;;; ------------------------------------------------------------ signatures
 
@@ -64,6 +67,14 @@
                        (syn string)
                        symbol))
             (val k-effect-selects (ref k-effect-sels @t))
+            (val k-with-effect-falls (ref k-effect-falls @t))
+            (val k-one (subr (alloc @t) (k-atom) k-eff))
+            (val k-with-effect-fall
+                 (subr (maxeff (read @globals) (read @t)) (int) k-effect-falls))
+            (val k-union
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
+                       (k-eff k-eff)
+                       k-eff))
             (val k-subst-keep (ref int @t))
             (val k-keep-at
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)

@@ -28,6 +28,7 @@
 (define-type k-hazard-list (select check-env-types k-hazard-list))
 (define-type k-reshaped (select check-env-types k-reshaped))
 (define-type k-reshape-list (select check-env-types k-reshape-list))
+(define-type k-fallbacks (select check-env-types k-fallbacks))
 (define-type k-selected (select check-env-types k-selected))
 (define-type k-selects (select check-env-types k-selects))
 (define-type k-param-given (select check-env-types k-param-given))
@@ -53,6 +54,8 @@
 (define r-global (with check-types-types r-global))
 (define r-globals (with check-types-types r-globals))
 (define ty-base (with check-types-types ty-base))
+(define ty-select (with check-types-types ty-select))
+(define ds-var (with check-types-types ds-var))
 (define x-proj (with check-types-types x-proj))
 (define x-the (with check-types-types x-the))
 (define x-var (with check-types-types x-var))
@@ -285,6 +288,66 @@
   (lambda (s) (k-find-desc (get k-dscope) s)))
 (define k-push-desc (subr kstate (symbol k-ds) unit)
   (lambda (n d) (set k-dscope (cons (cons n d) (get k-dscope)))))
+
+;; How many `with` bodies are being read (`k-with-mark`): where none is, no
+;; type name is looked for among `with`s' modules.
+(define k-with-depth (ref int @t) (new 0))
+;; In a `(with m …)` body, a mark in the description scope, `%with:m`, so
+;; that a type name bound before it is `m`'s, if `m` gives it: `with`
+;; shadows (FX-91 §2.3.19). `#%fx`'s are the standard's.
+(define k-with-mark (subr kstate (symbol) unit)
+  (lambda (m)
+    (if (k-fx-module? m)
+        #u
+        (begin (set k-with-depth (+ (get k-with-depth) 1))
+               (k-push-desc (string->symbol (string-append "%with:" (symbol->string m)))
+                            (ds-var -1 0))))))
+;; The end of a `with` body that `k-with-mark` marked (its scope restored by
+;; the caller).
+(define k-with-unmark (subr kstate (symbol) unit)
+  (lambda (m)
+    (if (k-fx-module? m) #u (set k-with-depth (- (get k-with-depth) 1)))))
+;; The modules of the `with`s whose bodies `s` is read in since it was last
+;; bound, innermost first: each shadows what `s` was before it. As
+;; `parse.rs`'s `withs_over`.
+(define k-withs-over (subr (maxeff kreads (alloc @t)) (symbol) k-names)
+  (lambda (s)
+    (letrec ((walk (subr (maxeff kreads (alloc @t)) (k-scope) k-names)
+                (lambda (ds)
+                  (if (null? ds)
+                      nil
+                      (let ((n (symbol->string (car (car ds)))))
+                        (cond ((symbol=? (car (car ds)) s) nil)
+                              ((and (> (string-length n) 6) (string=? (substring n 0 6) "%with:"))
+                               (cons (string->symbol (substring n 6 (string-length n)))
+                                     (walk (cdr ds))))
+                              (else (walk (cdr ds)))))))))
+      (if (= (get k-with-depth) 0) nil (walk (get k-dscope))))))
+;; Each `select` node a type name in a `with` body was read as, and what the
+;; name meant outside, should the module not give it: a type, or -1.
+(define k-with-fallbacks (ref k-fallbacks @t) (new nil))
+;; Type name `sym`, read in the bodies of `with`s of modules `withs`
+;; (innermost first): `(select m sym)` of the innermost, which, where `m`
+;; does not give it, is the next's, and so on out to `outer`, what `sym`
+;; means here otherwise, or -1. As `parse.rs`'s `with_selected`.
+(define k-with-selected (subr (maxeff kstate spin) (k-names symbol int) int)
+  (lambda (withs sym outer)
+    (if (null? withs)
+        outer
+        (let* ((t (k-with-selected (cdr withs) sym outer))
+               (node (k-ty-new (ty-select (car withs) sym))))
+          (begin (set k-with-fallbacks (cons (product (1 node) (2 t)) (get k-with-fallbacks)))
+                 node)))))
+;; What `select` node `node`, a `with`'s, falls back to (`k-with-selected`):
+;; a type, or -1 if nothing; -2 if it is not a `with`'s.
+(define k-with-fallback (subr kreads (int) int)
+  (lambda (node)
+    (letrec ((find (subr kreads (k-fallbacks) int)
+                (lambda (fs)
+                  (cond ((null? fs) -2)
+                        ((= (extract (car fs) 1) node) (extract (car fs) 2))
+                        (else (find (cdr fs)))))))
+      (find (get k-with-fallbacks)))))
 
 ;; How many fresh regions have been made, for naming the next.
 (define k-fresh (ref int @t) (new 0))

@@ -1316,6 +1316,22 @@ by its name ``, likewise `extend`. Tests: `modules/include-abstract-alias.fx`,
 `include-abstract-escape.fx`, `include-abstract.fx`,
 `extend-abstract-alias.fx`, `extend-abstract.fx`.
 
+`with` shadows (2026-10-10; the user's: "`with` should absolutely shadow
+bindings"), as FX-91 §2.3.19's: in `(with m …)`, a type or effect name
+`m` gives is `m`'s, whatever it is outside, so `extend`'s `e1`, `(with
+%extend-0 e1)`, sees `e0`'s types and effects too. The names are read
+before `m`'s type is known, in both checkers: a `with` body's start is a
+mark in the description scope (`DScope::With`, `%with:m`), and a name read
+past one, bound before it, is `(select m n)` with what it was outside to
+fall back to (`with_selected`, `k-with-selected`; an effect name, a
+variable of its own, `with_effect_selected`), settled where `select`s are
+resolved (`resolve_selects`, `effect_selected`; `k-select-component`,
+`k-effect-selected`). Neither: `` `n` is not a type, nor one a module
+opened by `with` gives ``. A count of `with` bodies being read keeps names
+outside any from looking. Tests: `modules/with-shadows.fx`,
+`with-falls-back.fx`, `with-type-missing.fx`, `with-effect-missing.fx`,
+`extend-sees-types.fx`.
+
 ## 71. A load cycle is an error, not a hang (2026-10-10)
 
 Found 2026-10-09 (`TODO.md` §68 phase 2): two types files loading each

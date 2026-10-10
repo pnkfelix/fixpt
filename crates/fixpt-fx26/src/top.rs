@@ -997,7 +997,7 @@ impl Checker {
                     ("generative", format!("{head} = {}", self.show_ty(family.rep)))
                 }
                 DScope::Fun(t) => ("function", format!("{n} = {}", self.show_ty(*t))),
-                DScope::Var(..) | DScope::Region(_) | DScope::SizeVal(_) | DScope::ConvVal(_) => continue,
+                DScope::Var(..) | DScope::Region(_) | DScope::SizeVal(_) | DScope::ConvVal(_) | DScope::With(_) => continue,
             };
             out.push((*name, entry.0, entry.1));
         }

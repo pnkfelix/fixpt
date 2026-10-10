@@ -31,6 +31,7 @@
 (define-type k-arrow-syns (select check-read-types k-arrow-syns))
 (define-type k-params (select check-read-types k-params))
 (define-type k-effect-sels (select check-read-types k-effect-sels))
+(define-type k-effect-falls (select check-read-types k-effect-falls))
 ;; The types it uses of the files before it.
 (define a-alloc (with check-types-types a-alloc))
 (define a-await (with check-types-types a-await))
@@ -48,6 +49,7 @@
 (define-type k-atom (select check-types-types k-atom))
 (define-type k-binders (select check-types-types k-binders))
 (define-type k-eff (select check-types-types k-eff))
+(define-type k-names (select check-types-types k-names))
 (define-type k-ids (select check-types-types k-ids))
 (define-type k-region (select check-types-types k-region))
 (define-type k-regions (select check-types-types k-regions))
@@ -80,6 +82,8 @@
 (define k-tys (with check-types k-tys))
 (define k-insert (with check-effects k-insert))
 (define k-one (with check-effects k-one))
+(define k-union (with check-effects k-union))
+(define k-withs-over (with check-env k-withs-over))
 (define k-kind-text (with check-print-parts k-kind-text))
 (define k-place? (with check-print-parts k-place?))
 (define k-region-show (with check-print-parts k-region-show))
@@ -319,21 +323,64 @@
     (if (not (null? (k-lookup-desc '%include-scope)))
         (k-one (a-var (k-effect-select '%include sym)))
         (k-sfail (no) s))))
-;; The effect a name stands for.
+;; The effect a name stands for: in `with` bodies, the modules' first
+;; (`k-with-effect-selected`).
 (define k-effect-named (subr (maxeff checks spin) (syn) k-eff)
   (lambda (s)
-    (let ((n (syn-name s)))
+    (let* ((n (syn-name s)) (sym (string->symbol n)))
       (case n (("pure") nil)
               (("spin") (k-one (a-spin)))
               (else
-               (let ((d (k-lookup-desc (string->symbol n)))
-                     (no (lambda () (string-append (k-quote n) " is not an effect"))))
-                 (if (null? d)
-                     (k-effect-unknown (string->symbol n) s no)
-                     (tagcase (car d)
-                       (ds-var (v k) (if (= k 1) (k-one (a-var v)) (k-sfail (no) s)))
-                       (ds-eff (e) e)
-                       (else x (k-sfail (no) s))))))))))
+               (let ((withs (k-withs-over sym)))
+                 (if (null? withs)
+                     (k-effect-name-read s n)
+                     (let ((has (or (not (null? (k-lookup-desc sym)))
+                                    (not (null? (k-lookup-desc '%include-scope))))))
+                       (k-with-effect-selected
+                         withs sym has (if has (k-effect-name-read s n) nil))))))))))
+;; Effect name `n`, written `s`, as the description scope and `include`s say.
+(define k-effect-name-read (subr (maxeff checks spin) (syn string) k-eff)
+  (lambda (s n)
+    (let ((d (k-lookup-desc (string->symbol n)))
+          (no (lambda () (string-append (k-quote n) " is not an effect"))))
+      (if (null? d)
+          (k-effect-unknown (string->symbol n) s no)
+          (tagcase (car d)
+            (ds-var (v k) (if (= k 1) (k-one (a-var v)) (k-sfail (no) s)))
+            (ds-eff (e) e)
+            (else x (k-sfail (no) s)))))))
+;; Each effect variable an effect name in a `with` body was read as, not
+;; shared as `k-effect-selects`' others are; whether the name meant
+;; anything outside, and what, should the module not give it.
+(define k-with-effect-falls (ref k-effect-falls @t) (new nil))
+;; The entry for `v` in `k-with-effect-falls`, or none.
+(define k-with-effect-fall (subr kreads (int) k-effect-falls)
+  (lambda (v)
+    (letrec ((find (subr kreads (k-effect-falls) k-effect-falls)
+                (lambda (fs)
+                  (cond ((null? fs) nil)
+                        ((= (extract (car fs) 1) v) fs)
+                        (else (find (cdr fs)))))))
+      (find (get k-with-effect-falls)))))
+;; Effect name `sym`, read in the bodies of `with`s of modules `withs`
+;; (innermost first): a variable for `(select m sym)` of each, each falling
+;; back to the next, out to `outer` if `has`. As `parse.rs`'s
+;; `with_effect_selected`.
+(define k-with-effect-selected (subr (maxeff kstate spin) (k-names symbol bool k-eff) k-eff)
+  (lambda (withs sym has outer)
+    (if (null? withs)
+        outer
+        (let* ((inner (k-with-effect-selected (cdr withs) sym has outer))
+               (falls (or has (not (null? (cdr withs)))))
+               (m (car withs))
+               (v (k-new-dvar-of (string->symbol (k-cat5 "(select " (symbol->string m) " "
+                                                         (symbol->string sym) ")"))
+                                 1)))
+          (begin
+            (set k-effect-selects (cons (product (1 m) (2 sym) (3 v)) (get k-effect-selects)))
+            (set k-with-effect-falls
+                 (cons (product (1 v) (2 falls) (3 inner)) (get k-with-effect-falls)))
+            (k-one (a-var v)))))))
 ;; Whether `h` heads an atom of effect on a region: `(read r)` and so on.
 (define k-atom-head? (subr pure (string) bool)
   (lambda (h)
@@ -350,12 +397,15 @@
                (else (a-comefrom r)))))
 
 (define k-effect-selects (ref k-effect-sels @t) (new nil))
-;; The entry for `(select m e)` in `ss`, or none.
+;; The entry for `(select m e)` in `ss`, or none; not a `with`'s
+;; (`k-with-effect-selected`), which is not shared.
 (define k-effect-sel-find (subr (maxeff (read @globals) (read @t)) (k-effect-sels symbol symbol)
                                 k-effect-sels)
   (lambda (ss m e)
     (cond ((null? ss) nil)
-          ((and (symbol=? (extract (car ss) 1) m) (symbol=? (extract (car ss) 2) e)) ss)
+          ((and (symbol=? (extract (car ss) 1) m) (symbol=? (extract (car ss) 2) e)
+                (null? (k-with-effect-fall (extract (car ss) 3))))
+           ss)
           (else (k-effect-sel-find (cdr ss) m e)))))
 ;; The variable `(select m e)` read as an effect stands for, named as written.
 (define k-effect-select (subr (maxeff kstate spin) (symbol symbol) int)

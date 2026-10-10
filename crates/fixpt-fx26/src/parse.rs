@@ -39,6 +39,9 @@ pub enum DScope {
     /// A name for a description function: `define-type` of a `dlambda`,
     /// or a type family's parameter of an arrow kind given one.
     Fun(TyId),
+    /// A `(with m …)` body's start, under the name `%with`: a type name
+    /// bound before it is `m`'s, if `m` gives it (`with_selected`).
+    With(Sym),
 }
 
 /// A description given a type family, as a key for its knot.
@@ -66,6 +69,57 @@ impl Checker {
     /// The region `@name` stands for: the constant of that name.
     pub(crate) fn region_constant(&self, sym: Sym) -> Region {
         Region::Const(sym)
+    }
+
+    /// The modules of the `with`s whose bodies `s` is read in since it was
+    /// last bound, innermost first: each shadows what `s` was before it.
+    fn withs_over(&self, s: Sym) -> Vec<Sym> {
+        let hidden = self.hidden.map(|(_, d)| d);
+        let mut out = Vec::new();
+        if self.with_depth == 0 {
+            return out;
+        }
+        for i in (0..self.dscope.len()).rev() {
+            if hidden.is_some_and(|(a, b)| (a..b).contains(&i)) {
+                continue;
+            }
+            match &self.dscope[i] {
+                (n, _) if *n == s => break,
+                (_, DScope::With(m)) => out.push(*m),
+                _ => {}
+            }
+        }
+        out
+    }
+
+    /// Type name `sym`, read in the bodies of `with`s of modules `withs`
+    /// (innermost first): `(select m sym)` of the innermost, which, where
+    /// `m` does not give it, is the next's, and so on out to what `sym`
+    /// means here otherwise, `outer` (FX-91 §2.3.19: `with` shadows).
+    fn with_selected(&mut self, withs: &[Sym], sym: Sym, outer: Option<TyId>) -> TyId {
+        let mut t = outer;
+        for m in withs.iter().rev() {
+            let node = self.arena.ty(Ty::Select(*m, sym));
+            self.arena.with_fallback.insert(node, t);
+            t = Some(node);
+        }
+        t.expect("a `with`")
+    }
+
+    /// What `read` reads, in the body of a `(with m …)`: `m`'s type names
+    /// shadowing those before (`withs_over`); `#%fx`'s are the standard's.
+    fn with_types_of<T>(&mut self, m: Sym, read: impl FnOnce(&mut Self) -> R<T>) -> R<T> {
+        if self.name(m) == "#%fx" {
+            return read(self);
+        }
+        let depth = self.dscope.len();
+        let mark = self.interner.intern("%with");
+        self.dscope.push((mark, DScope::With(m)));
+        self.with_depth += 1;
+        let r = read(self);
+        self.with_depth -= 1;
+        self.dscope.truncate(depth);
+        r
     }
 
     pub(crate) fn lookup_desc(&self, s: Sym) -> Option<DScope> {
@@ -251,18 +305,47 @@ impl Checker {
             if self.name(sym) == "spin" {
                 return Ok(Effect::atom(Atom::Spin));
             }
-            return match self.lookup_desc(sym) {
-                Some(DScope::Var(v, Kind::Effect)) => Ok(Effect::atom(Atom::Var(v))),
-                Some(DScope::Eff(e)) => Ok(e),
-                // In a module with `include`s, the modules included's, as a
-                // type's (`include_scope`).
-                _ if self.include_scope > 0 => {
-                    let inc = self.interner.intern("%include");
-                    Ok(Effect::atom(Atom::Var(self.effect_select(inc, sym))))
-                }
-                _ => Err(FxError::at(s.span, format!("`{}` is not an effect", self.name(sym)))),
-            };
+            let withs = self.withs_over(sym);
+            if !withs.is_empty() {
+                let outer = if self.lookup_desc(sym).is_some() || self.include_scope > 0 { Some(self.effect_name_read(s, sym)?) } else { None };
+                return Ok(self.with_effect_selected(&withs, sym, outer));
+            }
+            return self.effect_name_read(s, sym);
         }
+        self.parse_effect_list(s)
+    }
+
+    /// Effect name `sym`, as `with_selected` makes a type name: an effect
+    /// variable for `(select m sym)` of each `with`'s module `m`, not shared
+    /// (`effect_select`'s are), each falling back to the next, out to `outer`.
+    fn with_effect_selected(&mut self, withs: &[Sym], sym: Sym, outer: Option<Effect>) -> Effect {
+        let mut e = outer;
+        for m in withs.iter().rev() {
+            let shown = format!("(select {} {})", self.name(*m), self.name(sym));
+            let v = self.arena.dvar_of(self.interner.intern(&shown), Kind::Effect);
+            self.effect_selects.push(((*m, sym), v));
+            self.with_effect_fallback.insert(v, e);
+            e = Some(Effect::atom(Atom::Var(v)));
+        }
+        e.expect("a `with`")
+    }
+
+    /// Effect name `sym`, as the description scope and `include`s say.
+    fn effect_name_read(&mut self, s: &Syntax, sym: Sym) -> R<Effect> {
+        match self.lookup_desc(sym) {
+            Some(DScope::Var(v, Kind::Effect)) => Ok(Effect::atom(Atom::Var(v))),
+            Some(DScope::Eff(e)) => Ok(e),
+            // In a module with `include`s, the modules included's, as a
+            // type's (`include_scope`).
+            _ if self.include_scope > 0 => {
+                let inc = self.interner.intern("%include");
+                Ok(Effect::atom(Atom::Var(self.effect_select(inc, sym))))
+            }
+            _ => Err(FxError::at(s.span, format!("`{}` is not an effect", self.name(sym)))),
+        }
+    }
+
+    fn parse_effect_list(&mut self, s: &Syntax) -> R<Effect> {
         let items = self.items(s, "an effect")?.to_vec();
         // `(select m e)`: module `m`'s effect `e`, found where the type it
         // is in is checked, as a type's `select` is (`resolve_selects`).
@@ -343,25 +426,39 @@ impl Checker {
             if let Some(&t) = self.base.get(&sym) {
                 return Ok(t);
             }
-            return match self.lookup_desc(sym) {
-                Some(DScope::Var(v, Kind::Type | Kind::Data)) => Ok(self.arena.ty(Ty::Var(v))),
-                Some(DScope::Rec(t)) => Ok(t),
-                Some(DScope::Generative(g)) => self.apply_generative(s, g, &[]),
-                Some(DScope::Var(_, k @ Kind::Arrow(_))) => Err(self.not_applied(s, sym, k)),
-                Some(DScope::Fun(f)) => {
-                    let k = self.fun_kind(f).unwrap_or(Kind::Type);
-                    Err(self.not_applied(s, sym, k))
-                }
-                _ if self.holes.is_some_and(|h| h.exp == sym) => Err(FxError::at(s.span, "expected a type")),
-                // In a module with `include`s, the modules included's, found
-                // when they are typed (`TODO.md` §69).
-                _ if self.include_scope > 0 => {
-                    let inc = self.interner.intern("%include");
-                    Ok(self.arena.ty(Ty::Select(inc, sym)))
-                }
-                _ => Err(FxError::at(s.span, format!("`{}` is not a type", self.name(sym)))),
-            };
+            let withs = self.withs_over(sym);
+            if !withs.is_empty() {
+                let outer = if self.lookup_desc(sym).is_some() || self.include_scope > 0 { Some(self.type_name_read(s, sym)?) } else { None };
+                return Ok(self.with_selected(&withs, sym, outer));
+            }
+            return self.type_name_read(s, sym);
         }
+        self.parse_type_list(s)
+    }
+
+    /// Type name `sym`, as the description scope and `include`s say.
+    fn type_name_read(&mut self, s: &Syntax, sym: Sym) -> R<TyId> {
+        match self.lookup_desc(sym) {
+            Some(DScope::Var(v, Kind::Type | Kind::Data)) => Ok(self.arena.ty(Ty::Var(v))),
+            Some(DScope::Rec(t)) => Ok(t),
+            Some(DScope::Generative(g)) => self.apply_generative(s, g, &[]),
+            Some(DScope::Var(_, k @ Kind::Arrow(_))) => Err(self.not_applied(s, sym, k)),
+            Some(DScope::Fun(f)) => {
+                let k = self.fun_kind(f).unwrap_or(Kind::Type);
+                Err(self.not_applied(s, sym, k))
+            }
+            _ if self.holes.is_some_and(|h| h.exp == sym) => Err(FxError::at(s.span, "expected a type")),
+            // In a module with `include`s, the modules included's, found
+            // when they are typed (`TODO.md` §69).
+            _ if self.include_scope > 0 => {
+                let inc = self.interner.intern("%include");
+                Ok(self.arena.ty(Ty::Select(inc, sym)))
+            }
+            _ => Err(FxError::at(s.span, format!("`{}` is not a type", self.name(sym)))),
+        }
+    }
+
+    fn parse_type_list(&mut self, s: &Syntax) -> R<TyId> {
         let items = self.items(s, "a type")?.to_vec();
         if let Some(head) = items.first().and_then(|h| h.as_symbol()) {
             match self.lookup_desc(head) {
@@ -1470,8 +1567,9 @@ impl Checker {
                 let [_, e0, e1] = &items[..] else {
                     return Err(FxError::at(span, "`(extend module module)`"));
                 };
-                let (e0, e1) = (self.parse_exp(e0)?, self.parse_exp(e1)?);
                 let names = [self.interner.intern("%extend-0"), self.interner.intern("%extend-1")];
+                let e0 = self.parse_exp(e0)?;
+                let e1 = self.with_types_of(names[0], |p| p.parse_exp(e1))?;
                 // At no expression's place, the module's start with no
                 // width: facts are kept by place, and these are its own.
                 let at = fixpt_read::Span::new(span.file, span.start, span.start);
@@ -1500,7 +1598,7 @@ impl Checker {
                     return Err(FxError::at(span, "`(with module body …)`"));
                 };
                 let module = m.as_symbol().ok_or_else(|| FxError::at(m.span, "`with` opens a module named by a variable"))?;
-                let body = self.parse_body(span, body)?;
+                let body = self.with_types_of(module, |p| p.parse_body(span, body))?;
                 Ok(self.arena.exp(span, Exp::With { module, body }))
             }
             "product" => {

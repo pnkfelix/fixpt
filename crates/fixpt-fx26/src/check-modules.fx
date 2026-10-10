@@ -105,6 +105,7 @@
 (define k-global? (with check-env k-global?))
 (define k-lookup (with check-env k-lookup))
 (define k-module-vars (with check-env k-module-vars))
+(define k-with-fallback (with check-env k-with-fallback))
 (define k-select-map (with check-env k-select-map))
 (define k-desc-of-kind? (with check-kinds k-desc-of-kind?))
 (define k-dvar-string (with check-print-parts k-dvar-string))
@@ -112,6 +113,9 @@
 (define k-map-find (with check-print-parts k-map-find))
 (define k-show-ty (with check-print k-show-ty))
 (define k-effect-selects (with check-read k-effect-selects))
+(define k-with-effect-fall (with check-read k-with-effect-fall))
+(define k-union (with check-read k-union))
+(define k-one (with check-read k-one))
 (define k-keep-at (with check-read k-keep-at))
 (define k-keep-set! (with check-read k-keep-set!))
 (define k-subst-keep (with check-read k-subst-keep))
@@ -292,11 +296,19 @@
 ;; What `(select m n)` is, `m` a module bound to a type of abstract types
 ;; `abs` and descriptions `ds`: its abstract type `n`, or its description;
 ;; an error at `a`..`b` if it has neither.
-(define k-select-component (subr (maxeff checks spin) (symbol symbol k-parts k-parts int int) int)
-  (lambda (m n abs ds a b)
-    (let ((v (k-comp-find abs n)) (d (k-comp-find ds n)))
+(define k-select-component
+  (subr (maxeff checks spin) (symbol symbol k-parts k-parts int int int) int)
+  (lambda (m n abs ds node a b)
+    (let ((v (k-comp-find abs n)) (d (k-comp-find ds n)) (outer (k-with-fallback node)))
       (cond ((>= v 0) (k-ty-new (ty-var v)))
             ((>= d 0) d)
+            ;; A name read in a `with` body that `m` does not give: what it
+            ;; is outside the `with` (`k-with-selected`).
+            ((>= outer 0) (k-resolve-selects outer a b))
+            ((= outer -1)
+             (k-fail (string-append (k-quote (symbol->string n))
+                                    " is not a type, nor one a module opened by `with` gives")
+                     a b))
             ((symbol=? m '%include) (k-fail (k-not-included n) a b))
             (else (k-fail (k-cat5 (k-select-shown m n) ": `" (symbol->string m) "` has no type `"
                                   (string-append (symbol->string n) "`"))
@@ -359,7 +371,8 @@
                            (k-fail (k-not-included n) a b)
                            (k-fail (string-append (k-select-prefix m n) "` is not bound here") a b))
                        (tagcase (k-get mt)
-                         (ty-module (abs ds vs) (k-select-component m n abs ds a b))
+                         (ty-module (abs ds vs)
+                           (k-select-component m n abs ds (extract (car found) 3) a b))
                          (else y (k-fail (k-cat4 (k-select-prefix m n) "` is a " (k-show-ty mt)
                                                  ", not a module")
                                          a b)))))
@@ -462,12 +475,49 @@
                                            ", not a module")
                                    a b)
                            (the k-eff nil))))))))
+;; What effect variable `v`, for `(select m e)`, is: `m`'s effect `e`; for a
+;; `with` body's name that `m` does not give, what it is outside the `with`
+;; (`k-with-effect-selected`), itself resolved. As Rust's `effect_selected`.
+(define k-effect-selected (subr (maxeff checks spin) (int symbol symbol int int) k-eff)
+  (lambda (v m e a b)
+    (let ((fall (k-with-effect-fall v)))
+      (if (null? fall)
+          (k-selected-effect m e a b)
+          (let* ((mt (k-lookup m))
+                 (given (if (< mt 0)
+                            (the (listof k-eff acyclic) nil)
+                            (tagcase (k-get mt)
+                              (ty-module (abs ds vs)
+                                (let ((d (k-comp-find ds e)))
+                                  (if (< d 0) (the (listof k-eff acyclic) nil) (k-desc-effect d))))
+                              (else y (the (listof k-eff acyclic) nil))))))
+            (cond ((not (null? given)) (car given))
+                  ((extract (car fall) 2) (k-effect-resolved (extract (car fall) 3) a b))
+                  (else (begin (k-fail (k-cat3 (k-quote (symbol->string e)) " is not an effect, "
+                                               "nor one a module opened by `with` gives")
+                                       a b)
+                               (the k-eff nil)))))))))
+;; Effect `x` with each variable for a `select` in it resolved
+;; (`k-effect-selected`).
+(define k-effect-resolved (subr (maxeff checks spin) (k-eff int int) k-eff)
+  (lambda (x a b)
+    (if (null? x)
+        nil
+        (let ((rest (k-effect-resolved (cdr x) a b)))
+          (tagcase (car x)
+            (a-var (w)
+              (let ((sel (k-effect-sel-var (get k-effect-selects) w)))
+                (if (null? sel)
+                    (k-union (k-one (car x)) rest)
+                    (k-union (k-effect-selected w (extract (car sel) 1) (extract (car sel) 2) a b)
+                             rest))))
+            (else y (k-union (k-one (car x)) rest)))))))
 ;; What each effect selected stands for, as a substitution.
 (define k-effects-given (subr (maxeff checks spin) (k-effect-sels int int) k-map)
   (lambda (ss a b)
     (if (null? ss)
         nil
-        (let* ((x (car ss)) (e (k-selected-effect (extract x 1) (extract x 2) a b))
+        (let* ((x (car ss)) (e (k-effect-selected (extract x 3) (extract x 1) (extract x 2) a b))
                (rest (k-effects-given (cdr ss) a b)))
           (the k-map (cons (cons (extract x 3) (de e)) rest))))))
 ;; Whether `e` names a variable `given` replaces.

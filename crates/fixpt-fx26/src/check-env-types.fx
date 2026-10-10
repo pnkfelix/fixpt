@@ -54,6 +54,8 @@
 ;; has, its position in the module given. Made into a module of that layout.
 (define-type k-reshaped (productof (1 int) (2 int) (3 k-ids)))
 (define-type k-reshape-list (listof k-reshaped acyclic))
+;; `with`'s `select` nodes and what each falls back to (`k-with-fallbacks`).
+(define-type k-fallbacks (listof (productof (1 int) (2 int)) acyclic))
 ;; While a type's `select`s are resolved (`k-resolve-selects`): what each
 ;; is, `(m t)` and the type; none otherwise.
 (define-type k-selected (productof (1 symbol) (2 symbol) (3 int)))
@@ -170,4 +172,15 @@
    (val k-ids-last (subr (maxeff (read @globals) spin) (k-ids) int))
    (val k-select-of (subr (maxeff (read @globals) (read @t)) (symbol symbol int) int))
    (val k-param-sel-of (subr (maxeff (read @globals) (read @t)) (int symbol int) int))
-   (val k-globals-region? (subr pure (k-region) bool))))
+   (val k-globals-region? (subr pure (k-region) bool))
+   (val k-with-depth (ref int @t))
+   (val k-with-mark (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t)) (symbol) unit))
+   (val k-with-unmark
+        (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t)) (symbol) unit))
+   (val k-withs-over (subr (maxeff (alloc @t) (read @globals) (read @t)) (symbol) k-names))
+   (val k-with-fallbacks (ref k-fallbacks @t))
+   (val k-with-selected
+        (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+              (k-names symbol int)
+              int))
+   (val k-with-fallback (subr (maxeff (read @globals) (read @t)) (int) int))))
