@@ -1895,3 +1895,33 @@ thought: `nil` as `(listof T acyclic) & (nlist T 0)`; the singleton type
 `nil` (`check.rs:2874`) is already below both, so what is wanted is the
 message choosing the `nlist` reading. One too long is told likewise, at a
 `cons` against `(nlist int 0)`. For later.
+
+## 75. `string->int` and `string->number` (the user's, 2026-10-10)
+
+There is `int->string` and `f64->string`, and no way back: a program
+reading a number from text parses its digits by hand (`k-digits`, in
+`check-print-parts.fx`, which reads the variable numbers out of a
+message's marks, did, 2026-10-10). Wanted: `string->int` (an `int`, a
+bignum past 60 bits, as `int` is) and `string->number` as Scheme's, with
+Scheme's answer to text that is no number (`#f`: here a union, `(union
+int false)`, or a `sumof`). What `number` is depends on §76; until then
+`string->int`, and `string->f64` beside it, are what can be typed. A
+candidate for §22's library written in FX-26, no Rust at all (the
+user's): digits to an `int` is a loop over `string-ref` and `*`/`+`.
+
+## 76. Scheme's numeric tower, perhaps by module functors (the user's, 2026-10-10)
+
+FX-26's numbers are `int` (a bignum past 61 bits), the fixed widths
+(`u32`, `i64` …, each with its own operations, `u32+`), and `f64`; there
+is no `number`, and no rationals or complex numbers. Look into adapting
+Scheme's tower (R7RS §6.2: integer ⊂ rational ⊂ real ⊂ complex, exact and
+inexact), and how it fits a language whose operations are named per type:
+a `number` type that is a union and operations that dispatch on it; or a
+signature of arithmetic (`(moduleof (abs n type) (val + …) …)`) with one
+module per kind of number, and functors over it building the next (the
+rationals from any integers, the complex from any reals), generic code
+taking the module, as dictionaries are passed today rather than code
+copied per type. Rationals and the tower are candidates for §22's library
+written in FX-26, no Rust at all (the user's). Open: what `(+ 1 1/2)`
+means without a union; literals `1/2` in the reader; native speed of the
+`int` path once a tower is there (it must not pay for the rest).
