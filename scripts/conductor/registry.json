@@ -1,0 +1,2192 @@
+{
+"own-data": {
+"file": "eager-reader-types.fx",
+"var": "eager-reader-types",
+"load": "((proj (load-module \"fx26:eager-reader-types.fx\") @s @e @m @c))",
+"kind": "effect"
+},
+"marks": {
+"file": "eager-reader-types.fx",
+"var": "eager-reader-types",
+"load": "((proj (load-module \"fx26:eager-reader-types.fx\") @s @e @m @c))",
+"kind": "effect"
+},
+"parsing": {
+"file": "eager-reader-types.fx",
+"var": "eager-reader-types",
+"load": "((proj (load-module \"fx26:eager-reader-types.fx\") @s @e @m @c))",
+"kind": "effect"
+},
+"reads": {
+"file": "eager-reader-types.fx",
+"var": "eager-reader-types",
+"load": "((proj (load-module \"fx26:eager-reader-types.fx\") @s @e @m @c))",
+"kind": "effect"
+},
+"inspects": {
+"file": "eager-reader-types.fx",
+"var": "eager-reader-types",
+"load": "((proj (load-module \"fx26:eager-reader-types.fx\") @s @e @m @c))",
+"kind": "effect"
+},
+"reading": {
+"file": "eager-reader-types.fx",
+"var": "eager-reader-types",
+"load": "((proj (load-module \"fx26:eager-reader-types.fx\") @s @e @m @c))",
+"kind": "effect"
+},
+"chars": {
+"file": "eager-reader-types.fx",
+"var": "eager-reader-types",
+"load": "((proj (load-module \"fx26:eager-reader-types.fx\") @s @e @m @c))",
+"kind": "type"
+},
+"data": {
+"file": "eager-reader-types.fx",
+"var": "eager-reader-types",
+"load": "((proj (load-module \"fx26:eager-reader-types.fx\") @s @e @m @c))",
+"kind": "type"
+},
+"syn": {
+"file": "parser-types.fx",
+"var": "parser-types",
+"load": "((proj (load-module \"fx26:parser-types.fx\") @s @e @m @c @p))",
+"kind": "type"
+},
+"syns": {
+"file": "eager-reader-types.fx",
+"var": "eager-reader-types",
+"load": "((proj (load-module \"fx26:eager-reader-types.fx\") @s @e @m @c))",
+"kind": "type"
+},
+"state-rest": {
+"file": "eager-reader-types.fx",
+"var": "eager-reader-types",
+"load": "((proj (load-module \"fx26:eager-reader-types.fx\") @s @e @m @c))",
+"kind": "type"
+},
+"state": {
+"file": "eager-reader-types.fx",
+"var": "eager-reader-types",
+"load": "((proj (load-module \"fx26:eager-reader-types.fx\") @s @e @m @c))",
+"kind": "type"
+},
+"cont": {
+"file": "eager-reader-types.fx",
+"var": "eager-reader-types",
+"load": "((proj (load-module \"fx26:eager-reader-types.fx\") @s @e @m @c))",
+"kind": "type"
+},
+"cursor": {
+"file": "eager-reader-types.fx",
+"var": "eager-reader-types",
+"load": "((proj (load-module \"fx26:eager-reader-types.fx\") @s @e @m @c))",
+"kind": "type"
+},
+"cursors": {
+"file": "eager-reader-types.fx",
+"var": "eager-reader-types",
+"load": "((proj (load-module \"fx26:eager-reader-types.fx\") @s @e @m @c))",
+"kind": "type"
+},
+"result": {
+"file": "eager-reader-types.fx",
+"var": "eager-reader-types",
+"load": "((proj (load-module \"fx26:eager-reader-types.fx\") @s @e @m @c))",
+"kind": "type"
+},
+"word": {
+"file": "eager-reader-types.fx",
+"var": "eager-reader-types",
+"load": "((proj (load-module \"fx26:eager-reader-types.fx\") @s @e @m @c))",
+"kind": "type"
+},
+"context": {
+"file": "eager-reader-types.fx",
+"var": "eager-reader-types",
+"load": "((proj (load-module \"fx26:eager-reader-types.fx\") @s @e @m @c))",
+"kind": "type"
+},
+"closers": {
+"file": "eager-reader-types.fx",
+"var": "eager-reader-types",
+"load": "((proj (load-module \"fx26:eager-reader-types.fx\") @s @e @m @c))",
+"kind": "type"
+},
+"in-context": {
+"file": "eager-reader-types.fx",
+"var": "eager-reader-types",
+"load": "((proj (load-module \"fx26:eager-reader-types.fx\") @s @e @m @c))",
+"kind": "effect"
+},
+"asks": {
+"file": "eager-reader-types.fx",
+"var": "eager-reader-types",
+"load": "((proj (load-module \"fx26:eager-reader-types.fx\") @s @e @m @c))",
+"kind": "effect"
+},
+"atom-in": {
+"file": "eager-reader-types.fx",
+"var": "eager-reader-types",
+"load": "((proj (load-module \"fx26:eager-reader-types.fx\") @s @e @m @c))",
+"kind": "type"
+},
+"tree-builds": {
+"file": "parser-types.fx",
+"var": "parser-types",
+"load": "((proj (load-module \"fx26:parser-types.fx\") @s @e @m @c @p))",
+"kind": "effect"
+},
+"parses": {
+"file": "parser-types.fx",
+"var": "parser-types",
+"load": "((proj (load-module \"fx26:parser-types.fx\") @s @e @m @c @p))",
+"kind": "effect"
+},
+"syns-a": {
+"file": "parser-types.fx",
+"var": "parser-types",
+"load": "((proj (load-module \"fx26:parser-types.fx\") @s @e @m @c @p))",
+"kind": "type"
+},
+"names": {
+"file": "parser-types.fx",
+"var": "parser-types",
+"load": "((proj (load-module \"fx26:parser-types.fx\") @s @e @m @c @p))",
+"kind": "type"
+},
+"exp": {
+"file": "parser-types.fx",
+"var": "parser-types",
+"load": "((proj (load-module \"fx26:parser-types.fx\") @s @e @m @c @p))",
+"kind": "type"
+},
+"top": {
+"file": "parser-types.fx",
+"var": "parser-types",
+"load": "((proj (load-module \"fx26:parser-types.fx\") @s @e @m @c @p))",
+"kind": "type"
+},
+"exp-list": {
+"file": "parser-types.fx",
+"var": "parser-types",
+"load": "((proj (load-module \"fx26:parser-types.fx\") @s @e @m @c @p))",
+"kind": "type"
+},
+"param-list": {
+"file": "parser-types.fx",
+"var": "parser-types",
+"load": "((proj (load-module \"fx26:parser-types.fx\") @s @e @m @c @p))",
+"kind": "type"
+},
+"letrec-list": {
+"file": "parser-types.fx",
+"var": "parser-types",
+"load": "((proj (load-module \"fx26:parser-types.fx\") @s @e @m @c @p))",
+"kind": "type"
+},
+"let-list": {
+"file": "parser-types.fx",
+"var": "parser-types",
+"load": "((proj (load-module \"fx26:parser-types.fx\") @s @e @m @c @p))",
+"kind": "type"
+},
+"arm-list": {
+"file": "parser-types.fx",
+"var": "parser-types",
+"load": "((proj (load-module \"fx26:parser-types.fx\") @s @e @m @c @p))",
+"kind": "type"
+},
+"top-list": {
+"file": "parser-types.fx",
+"var": "parser-types",
+"load": "((proj (load-module \"fx26:parser-types.fx\") @s @e @m @c @p))",
+"kind": "type"
+},
+"mod-item": {
+"file": "parser-types.fx",
+"var": "parser-types",
+"load": "((proj (load-module \"fx26:parser-types.fx\") @s @e @m @c @p))",
+"kind": "type"
+},
+"mod-items": {
+"file": "parser-types.fx",
+"var": "parser-types",
+"load": "((proj (load-module \"fx26:parser-types.fx\") @s @e @m @c @p))",
+"kind": "type"
+},
+"presult": {
+"file": "parser-types.fx",
+"var": "parser-types",
+"load": "((proj (load-module \"fx26:parser-types.fx\") @s @e @m @c @p))",
+"kind": "type"
+},
+"loaded-file": {
+"file": "parser-types.fx",
+"var": "parser-types",
+"load": "((proj (load-module \"fx26:parser-types.fx\") @s @e @m @c @p))",
+"kind": "type"
+},
+"loaded-files": {
+"file": "parser-types.fx",
+"var": "parser-types",
+"load": "((proj (load-module \"fx26:parser-types.fx\") @s @e @m @c @p))",
+"kind": "type"
+},
+"bucket": {
+"file": "table-types.fx",
+"var": "table-types",
+"load": "(load-module \"fx26:table-types.fx\")",
+"kind": "type"
+},
+"bucket-array": {
+"file": "table-types.fx",
+"var": "table-types",
+"load": "(load-module \"fx26:table-types.fx\")",
+"kind": "type"
+},
+"entry": {
+"file": "table-types.fx",
+"var": "table-types",
+"load": "(load-module \"fx26:table-types.fx\")",
+"kind": "type"
+},
+"key-hash": {
+"file": "table-types.fx",
+"var": "table-types",
+"load": "(load-module \"fx26:table-types.fx\")",
+"kind": "type"
+},
+"key-same": {
+"file": "table-types.fx",
+"var": "table-types",
+"load": "(load-module \"fx26:table-types.fx\")",
+"kind": "type"
+},
+"table": {
+"file": "table-types.fx",
+"var": "table-types",
+"load": "(load-module \"fx26:table-types.fx\")",
+"kind": "type"
+},
+"rehashing": {
+"file": "table-types.fx",
+"var": "table-types",
+"load": "(load-module \"fx26:table-types.fx\")",
+"kind": "type"
+},
+"kstate": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "effect"
+},
+"checks": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "effect"
+},
+"kreads": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "effect"
+},
+"kbuilds": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "effect"
+},
+"k-region": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-atom": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-eff": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-vsub": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-ids": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-term": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-prop": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-props": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-binders": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-parts": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-names": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-strings": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-conv": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-terms": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-size": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-desc": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-descs": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-ty": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-map": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-ds": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"kx": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"kxs": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-item": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-items": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-te": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-result": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-narrows": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-pendings": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-cert-len": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-arrow-kind": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-bounded": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-nesting": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-named": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-gen": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-hyps": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-lemma": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-regions": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-step": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-steps": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-path-fact": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-path-facts": {
+"file": "check-types-types.fx",
+"var": "check-types-types",
+"load": "(load-module \"fx26:check-types-types.fx\")",
+"kind": "type"
+},
+"k-bindings": {
+"file": "check-env-types.fx",
+"var": "check-env-types",
+"load": "(load-module \"fx26:check-env-types.fx\")",
+"kind": "type"
+},
+"k-stack": {
+"file": "check-env-types.fx",
+"var": "check-env-types",
+"load": "(load-module \"fx26:check-env-types.fx\")",
+"kind": "type"
+},
+"k-flags": {
+"file": "check-env-types.fx",
+"var": "check-env-types",
+"load": "(load-module \"fx26:check-env-types.fx\")",
+"kind": "type"
+},
+"k-break": {
+"file": "check-env-types.fx",
+"var": "check-env-types",
+"load": "(load-module \"fx26:check-env-types.fx\")",
+"kind": "type"
+},
+"k-op-mark": {
+"file": "check-env-types.fx",
+"var": "check-env-types",
+"load": "(load-module \"fx26:check-env-types.fx\")",
+"kind": "type"
+},
+"k-scope": {
+"file": "check-env-types.fx",
+"var": "check-env-types",
+"load": "(load-module \"fx26:check-env-types.fx\")",
+"kind": "type"
+},
+"k-fact": {
+"file": "check-env-types.fx",
+"var": "check-env-types",
+"load": "(load-module \"fx26:check-env-types.fx\")",
+"kind": "type"
+},
+"k-facts": {
+"file": "check-env-types.fx",
+"var": "check-env-types",
+"load": "(load-module \"fx26:check-env-types.fx\")",
+"kind": "type"
+},
+"k-with-noted": {
+"file": "check-env-types.fx",
+"var": "check-env-types",
+"load": "(load-module \"fx26:check-env-types.fx\")",
+"kind": "type"
+},
+"k-with-list": {
+"file": "check-env-types.fx",
+"var": "check-env-types",
+"load": "(load-module \"fx26:check-env-types.fx\")",
+"kind": "type"
+},
+"k-hazard-list": {
+"file": "check-env-types.fx",
+"var": "check-env-types",
+"load": "(load-module \"fx26:check-env-types.fx\")",
+"kind": "type"
+},
+"k-reshaped": {
+"file": "check-env-types.fx",
+"var": "check-env-types",
+"load": "(load-module \"fx26:check-env-types.fx\")",
+"kind": "type"
+},
+"k-reshape-list": {
+"file": "check-env-types.fx",
+"var": "check-env-types",
+"load": "(load-module \"fx26:check-env-types.fx\")",
+"kind": "type"
+},
+"k-selected": {
+"file": "check-env-types.fx",
+"var": "check-env-types",
+"load": "(load-module \"fx26:check-env-types.fx\")",
+"kind": "type"
+},
+"k-selects": {
+"file": "check-env-types.fx",
+"var": "check-env-types",
+"load": "(load-module \"fx26:check-env-types.fx\")",
+"kind": "type"
+},
+"k-param-given": {
+"file": "check-env-types.fx",
+"var": "check-env-types",
+"load": "(load-module \"fx26:check-env-types.fx\")",
+"kind": "type"
+},
+"k-params-given": {
+"file": "check-env-types.fx",
+"var": "check-env-types",
+"load": "(load-module \"fx26:check-env-types.fx\")",
+"kind": "type"
+},
+"k-atree": {
+"file": "check-print-types.fx",
+"var": "check-print-types",
+"load": "(load-module \"fx26:check-print-types.fx\")",
+"kind": "type"
+},
+"k-atrees": {
+"file": "check-print-types.fx",
+"var": "check-print-types",
+"load": "(load-module \"fx26:check-print-types.fx\")",
+"kind": "type"
+},
+"k-named-at": {
+"file": "check-print-types.fx",
+"var": "check-print-types",
+"load": "(load-module \"fx26:check-print-types.fx\")",
+"kind": "type"
+},
+"k-size-fact": {
+"file": "check-print-types.fx",
+"var": "check-print-types",
+"load": "(load-module \"fx26:check-print-types.fx\")",
+"kind": "type"
+},
+"k-lins": {
+"file": "check-print-types.fx",
+"var": "check-print-types",
+"load": "(load-module \"fx26:check-print-types.fx\")",
+"kind": "type"
+},
+"k-printing": {
+"file": "check-print-types.fx",
+"var": "check-print-types",
+"load": "(load-module \"fx26:check-print-types.fx\")",
+"kind": "type"
+},
+"kshows": {
+"file": "check-print-types.fx",
+"var": "check-print-types",
+"load": "(load-module \"fx26:check-print-types.fx\")",
+"kind": "effect"
+},
+"k-pending": {
+"file": "check-unions-types.fx",
+"var": "check-unions-types",
+"load": "(load-module \"fx26:check-unions-types.fx\")",
+"kind": "type"
+},
+"k-sides": {
+"file": "check-unions-types.fx",
+"var": "check-unions-types",
+"load": "(load-module \"fx26:check-unions-types.fx\")",
+"kind": "type"
+},
+"k-split": {
+"file": "check-unions-types.fx",
+"var": "check-unions-types",
+"load": "(load-module \"fx26:check-unions-types.fx\")",
+"kind": "type"
+},
+"k-kept": {
+"file": "check-holds-types.fx",
+"var": "check-holds-types",
+"load": "(load-module \"fx26:check-holds-types.fx\")",
+"kind": "type"
+},
+"k-knot": {
+"file": "check-holds-types.fx",
+"var": "check-holds-types",
+"load": "(load-module \"fx26:check-holds-types.fx\")",
+"kind": "type"
+},
+"k-kept-seen": {
+"file": "check-holds-types.fx",
+"var": "check-holds-types",
+"load": "(load-module \"fx26:check-holds-types.fx\")",
+"kind": "type"
+},
+"k-kseen": {
+"file": "check-holds-types.fx",
+"var": "check-holds-types",
+"load": "(load-module \"fx26:check-holds-types.fx\")",
+"kind": "type"
+},
+"k-seen": {
+"file": "check-holds-types.fx",
+"var": "check-holds-types",
+"load": "(load-module \"fx26:check-holds-types.fx\")",
+"kind": "type"
+},
+"k-syns": {
+"file": "check-read-types.fx",
+"var": "check-read-types",
+"load": "(load-module \"fx26:check-read-types.fx\")",
+"kind": "type"
+},
+"k-arrow-syns": {
+"file": "check-read-types.fx",
+"var": "check-read-types",
+"load": "(load-module \"fx26:check-read-types.fx\")",
+"kind": "type"
+},
+"k-params": {
+"file": "check-read-types.fx",
+"var": "check-read-types",
+"load": "(load-module \"fx26:check-read-types.fx\")",
+"kind": "type"
+},
+"k-effect-sels": {
+"file": "check-read-types.fx",
+"var": "check-read-types",
+"load": "(load-module \"fx26:check-read-types.fx\")",
+"kind": "type"
+},
+"k-slots": {
+"file": "check-syntax-types.fx",
+"var": "check-syntax-types",
+"load": "(load-module \"fx26:check-syntax-types.fx\")",
+"kind": "type"
+},
+"k-family-knot": {
+"file": "check-syntax-types.fx",
+"var": "check-syntax-types",
+"load": "(load-module \"fx26:check-syntax-types.fx\")",
+"kind": "type"
+},
+"k-ahead-slots": {
+"file": "check-syntax-types.fx",
+"var": "check-syntax-types",
+"load": "(load-module \"fx26:check-syntax-types.fx\")",
+"kind": "type"
+},
+"k-filled": {
+"file": "check-syntax-types.fx",
+"var": "check-syntax-types",
+"load": "(load-module \"fx26:check-syntax-types.fx\")",
+"kind": "type"
+},
+"k-pairs": {
+"file": "check-subst-types.fx",
+"var": "check-subst-types",
+"load": "(load-module \"fx26:check-subst-types.fx\")",
+"kind": "type"
+},
+"exp-params": {
+"file": "check-subst-types.fx",
+"var": "check-subst-types",
+"load": "(load-module \"fx26:check-subst-types.fx\")",
+"kind": "type"
+},
+"kmakes": {
+"file": "check-subst-types.fx",
+"var": "check-subst-types",
+"load": "(load-module \"fx26:check-subst-types.fx\")",
+"kind": "effect"
+},
+"k-smemo": {
+"file": "check-subst-types.fx",
+"var": "check-subst-types",
+"load": "(load-module \"fx26:check-subst-types.fx\")",
+"kind": "type"
+},
+"k-seen-pol": {
+"file": "check-generative-types.fx",
+"var": "check-generative-types",
+"load": "(load-module \"fx26:check-generative-types.fx\")",
+"kind": "type"
+},
+"k-pols-found": {
+"file": "check-generative-types.fx",
+"var": "check-generative-types",
+"load": "(load-module \"fx26:check-generative-types.fx\")",
+"kind": "type"
+},
+"k-typed-params": {
+"file": "check-resolve-types.fx",
+"var": "check-resolve-types",
+"load": "(load-module \"fx26:check-resolve-types.fx\")",
+"kind": "type"
+},
+"k-letrec-bs": {
+"file": "check-resolve-types.fx",
+"var": "check-resolve-types",
+"load": "(load-module \"fx26:check-resolve-types.fx\")",
+"kind": "type"
+},
+"k-let-bs": {
+"file": "check-resolve-types.fx",
+"var": "check-resolve-types",
+"load": "(load-module \"fx26:check-resolve-types.fx\")",
+"kind": "type"
+},
+"k-arms": {
+"file": "check-resolve-types.fx",
+"var": "check-resolve-types",
+"load": "(load-module \"fx26:check-resolve-types.fx\")",
+"kind": "type"
+},
+"exp-letrec-bs": {
+"file": "check-resolve-types.fx",
+"var": "check-resolve-types",
+"load": "(load-module \"fx26:check-resolve-types.fx\")",
+"kind": "type"
+},
+"exp-let-bs": {
+"file": "check-resolve-types.fx",
+"var": "check-resolve-types",
+"load": "(load-module \"fx26:check-resolve-types.fx\")",
+"kind": "type"
+},
+"exp-arms": {
+"file": "check-resolve-types.fx",
+"var": "check-resolve-types",
+"load": "(load-module \"fx26:check-resolve-types.fx\")",
+"kind": "type"
+},
+"k-callable": {
+"file": "check-resolve-types.fx",
+"var": "check-resolve-types",
+"load": "(load-module \"fx26:check-resolve-types.fx\")",
+"kind": "type"
+},
+"k-region-lists": {
+"file": "check-resolve-types.fx",
+"var": "check-resolve-types",
+"load": "(load-module \"fx26:check-resolve-types.fx\")",
+"kind": "type"
+},
+"k-def": {
+"file": "check-resolve-types.fx",
+"var": "check-resolve-types",
+"load": "(load-module \"fx26:check-resolve-types.fx\")",
+"kind": "type"
+},
+"k-run": {
+"file": "check-resolve-types.fx",
+"var": "check-resolve-types",
+"load": "(load-module \"fx26:check-resolve-types.fx\")",
+"kind": "type"
+},
+"encodes": {
+"file": "arm64-types.fx",
+"var": "arm64-types",
+"load": "(load-module \"fx26:arm64-types.fx\")",
+"kind": "effect"
+},
+"arm-op2": {
+"file": "arm64-types.fx",
+"var": "arm64-types",
+"load": "(load-module \"fx26:arm64-types.fx\")",
+"kind": "type"
+},
+"arm-op3": {
+"file": "arm64-types.fx",
+"var": "arm64-types",
+"load": "(load-module \"fx26:arm64-types.fx\")",
+"kind": "type"
+},
+"arm-op4": {
+"file": "arm64-types.fx",
+"var": "arm64-types",
+"load": "(load-module \"fx26:arm64-types.fx\")",
+"kind": "type"
+},
+"arm-code": {
+"file": "arm64-types.fx",
+"var": "arm64-types",
+"load": "(load-module \"fx26:arm64-types.fx\")",
+"kind": "type"
+},
+"assembles": {
+"file": "native-types.fx",
+"var": "native-types",
+"load": "(load-module \"fx26:native-types.fx\")",
+"kind": "effect"
+},
+"n-writes": {
+"file": "native-types.fx",
+"var": "native-types",
+"load": "(load-module \"fx26:native-types.fx\")",
+"kind": "effect"
+},
+"n-lists": {
+"file": "native-types.fx",
+"var": "native-types",
+"load": "(load-module \"fx26:native-types.fx\")",
+"kind": "effect"
+},
+"n-ints": {
+"file": "native-types.fx",
+"var": "native-types",
+"load": "(load-module \"fx26:native-types.fx\")",
+"kind": "type"
+},
+"n-bools": {
+"file": "native-types.fx",
+"var": "native-types",
+"load": "(load-module \"fx26:native-types.fx\")",
+"kind": "type"
+},
+"n-instrs": {
+"file": "native-types.fx",
+"var": "native-types",
+"load": "(load-module \"fx26:native-types.fx\")",
+"kind": "type"
+},
+"n-assembled": {
+"file": "native-types.fx",
+"var": "native-types",
+"load": "(load-module \"fx26:native-types.fx\")",
+"kind": "type"
+},
+"n-fix": {
+"file": "native-types.fx",
+"var": "native-types",
+"load": "(load-module \"fx26:native-types.fx\")",
+"kind": "type"
+},
+"n-stub-list": {
+"file": "native-types.fx",
+"var": "native-types",
+"load": "(load-module \"fx26:native-types.fx\")",
+"kind": "type"
+},
+"c-builds": {
+"file": "compile-types.fx",
+"var": "compile-types",
+"load": "(load-module \"fx26:compile-types.fx\")",
+"kind": "effect"
+},
+"c-walks": {
+"file": "compile-types.fx",
+"var": "compile-types",
+"load": "(load-module \"fx26:compile-types.fx\")",
+"kind": "effect"
+},
+"c-emits": {
+"file": "compile-types.fx",
+"var": "compile-types",
+"load": "(load-module \"fx26:compile-types.fx\")",
+"kind": "effect"
+},
+"compiles": {
+"file": "compile-types.fx",
+"var": "compile-types",
+"load": "(load-module \"fx26:compile-types.fx\")",
+"kind": "effect"
+},
+"c-params": {
+"file": "compile-types.fx",
+"var": "compile-types",
+"load": "(load-module \"fx26:compile-types.fx\")",
+"kind": "type"
+},
+"c-binds": {
+"file": "compile-types.fx",
+"var": "compile-types",
+"load": "(load-module \"fx26:compile-types.fx\")",
+"kind": "type"
+},
+"c-recs": {
+"file": "compile-types.fx",
+"var": "compile-types",
+"load": "(load-module \"fx26:compile-types.fx\")",
+"kind": "type"
+},
+"c-cases": {
+"file": "compile-types.fx",
+"var": "compile-types",
+"load": "(load-module \"fx26:compile-types.fx\")",
+"kind": "type"
+},
+"exps": {
+"file": "compile-types.fx",
+"var": "compile-types",
+"load": "(load-module \"fx26:compile-types.fx\")",
+"kind": "type"
+},
+"c-span": {
+"file": "compile-types.fx",
+"var": "compile-types",
+"load": "(load-module \"fx26:compile-types.fx\")",
+"kind": "type"
+},
+"c-spans": {
+"file": "compile-types.fx",
+"var": "compile-types",
+"load": "(load-module \"fx26:compile-types.fx\")",
+"kind": "type"
+},
+"c-lift": {
+"file": "compile-types.fx",
+"var": "compile-types",
+"load": "(load-module \"fx26:compile-types.fx\")",
+"kind": "type"
+},
+"c-lifting": {
+"file": "compile-types.fx",
+"var": "compile-types",
+"load": "(load-module \"fx26:compile-types.fx\")",
+"kind": "type"
+},
+"c-ends": {
+"file": "compile-types.fx",
+"var": "compile-types",
+"load": "(load-module \"fx26:compile-types.fx\")",
+"kind": "type"
+},
+"c-with-table": {
+"file": "compile-types.fx",
+"var": "compile-types",
+"load": "(load-module \"fx26:compile-types.fx\")",
+"kind": "type"
+},
+"c-with-names": {
+"file": "compile-types.fx",
+"var": "compile-types",
+"load": "(load-module \"fx26:compile-types.fx\")",
+"kind": "type"
+},
+"item": {
+"file": "compile-types.fx",
+"var": "compile-types",
+"load": "(load-module \"fx26:compile-types.fx\")",
+"kind": "type"
+},
+"items": {
+"file": "compile-types.fx",
+"var": "compile-types",
+"load": "(load-module \"fx26:compile-types.fx\")",
+"kind": "type"
+},
+"code": {
+"file": "compile-types.fx",
+"var": "compile-types",
+"load": "(load-module \"fx26:compile-types.fx\")",
+"kind": "type"
+},
+"cresult": {
+"file": "compile-types.fx",
+"var": "compile-types",
+"load": "(load-module \"fx26:compile-types.fx\")",
+"kind": "type"
+},
+"c-places": {
+"file": "compile-types.fx",
+"var": "compile-types",
+"load": "(load-module \"fx26:compile-types.fx\")",
+"kind": "type"
+},
+"loc": {
+"file": "compile-types.fx",
+"var": "compile-types",
+"load": "(load-module \"fx26:compile-types.fx\")",
+"kind": "type"
+},
+"cenv": {
+"file": "compile-types.fx",
+"var": "compile-types",
+"load": "(load-module \"fx26:compile-types.fx\")",
+"kind": "type"
+},
+"c-found": {
+"file": "compile-types.fx",
+"var": "compile-types",
+"load": "(load-module \"fx26:compile-types.fx\")",
+"kind": "type"
+},
+"c-this": {
+"file": "compile-types.fx",
+"var": "compile-types",
+"load": "(load-module \"fx26:compile-types.fx\")",
+"kind": "type"
+},
+"c-globals-made": {
+"file": "compile-types.fx",
+"var": "compile-types",
+"load": "(load-module \"fx26:compile-types.fx\")",
+"kind": "type"
+},
+"syms": {
+"file": "compile-types.fx",
+"var": "compile-types",
+"load": "(load-module \"fx26:compile-types.fx\")",
+"kind": "type"
+},
+"c-join-answer": {
+"file": "compile-types.fx",
+"var": "compile-types",
+"load": "(load-module \"fx26:compile-types.fx\")",
+"kind": "type"
+},
+"c-standard-word": {
+"file": "compile-types.fx",
+"var": "compile-types",
+"load": "(load-module \"fx26:compile-types.fx\")",
+"kind": "type"
+},
+"c-spec-copy": {
+"file": "compile-types.fx",
+"var": "compile-types",
+"load": "(load-module \"fx26:compile-types.fx\")",
+"kind": "type"
+},
+"c-spec-copies": {
+"file": "compile-types.fx",
+"var": "compile-types",
+"load": "(load-module \"fx26:compile-types.fx\")",
+"kind": "type"
+},
+"patches": {
+"file": "compile-types.fx",
+"var": "compile-types",
+"load": "(load-module \"fx26:compile-types.fx\")",
+"kind": "type"
+},
+"c-added": {
+"file": "compile-lift-types.fx",
+"var": "compile-lift-types",
+"load": "(load-module \"fx26:compile-lift-types.fx\")",
+"kind": "type"
+},
+"c-calls": {
+"file": "compile-lift-types.fx",
+"var": "compile-lift-types",
+"load": "(load-module \"fx26:compile-lift-types.fx\")",
+"kind": "type"
+},
+"c-planned": {
+"file": "compile-lift-types.fx",
+"var": "compile-lift-types",
+"load": "(load-module \"fx26:compile-lift-types.fx\")",
+"kind": "type"
+},
+"c-planneds": {
+"file": "compile-lift-types.fx",
+"var": "compile-lift-types",
+"load": "(load-module \"fx26:compile-lift-types.fx\")",
+"kind": "type"
+},
+"c-standard-twin": {
+"file": "compile-lift-types.fx",
+"var": "compile-lift-types",
+"load": "(load-module \"fx26:compile-lift-types.fx\")",
+"kind": "type"
+},
+"c-inline": {
+"file": "compile-exps-types.fx",
+"var": "compile-exps-types",
+"load": "(load-module \"fx26:compile-exps-types.fx\")",
+"kind": "type"
+},
+"c-inlinables": {
+"file": "compile-exps-types.fx",
+"var": "compile-exps-types",
+"load": "(load-module \"fx26:compile-exps-types.fx\")",
+"kind": "type"
+},
+"c-mval": {
+"file": "compile-exps-types.fx",
+"var": "compile-exps-types",
+"load": "(load-module \"fx26:compile-exps-types.fx\")",
+"kind": "type"
+},
+"c-mvals": {
+"file": "compile-exps-types.fx",
+"var": "compile-exps-types",
+"load": "(load-module \"fx26:compile-exps-types.fx\")",
+"kind": "type"
+},
+"c-mslots": {
+"file": "compile-exps-types.fx",
+"var": "compile-exps-types",
+"load": "(load-module \"fx26:compile-exps-types.fx\")",
+"kind": "type"
+},
+"c-waits": {
+"file": "compile-exps-types.fx",
+"var": "compile-exps-types",
+"load": "(load-module \"fx26:compile-exps-types.fx\")",
+"kind": "type"
+},
+"c-made": {
+"file": "compile-exps-types.fx",
+"var": "compile-exps-types",
+"load": "(load-module \"fx26:compile-exps-types.fx\")",
+"kind": "type"
+},
+"c-closing": {
+"file": "compile-exps-types.fx",
+"var": "compile-exps-types",
+"load": "(load-module \"fx26:compile-exps-types.fx\")",
+"kind": "type"
+},
+"c-region": {
+"file": "compile-exps-types.fx",
+"var": "compile-exps-types",
+"load": "(load-module \"fx26:compile-exps-types.fx\")",
+"kind": "type"
+},
+"c-spec": {
+"file": "compile-exps-types.fx",
+"var": "compile-exps-types",
+"load": "(load-module \"fx26:compile-exps-types.fx\")",
+"kind": "type"
+},
+"c-copy-twin": {
+"file": "compile-exps-types.fx",
+"var": "compile-exps-types",
+"load": "(load-module \"fx26:compile-exps-types.fx\")",
+"kind": "type"
+},
+"c-twin": {
+"file": "compile-exps-types.fx",
+"var": "compile-exps-types",
+"load": "(load-module \"fx26:compile-exps-types.fx\")",
+"kind": "type"
+},
+"c-special": {
+"file": "compile-plan-types.fx",
+"var": "compile-plan-types",
+"load": "(load-module \"fx26:compile-plan-types.fx\")",
+"kind": "type"
+},
+"c-specializables": {
+"file": "compile-plan-types.fx",
+"var": "compile-plan-types",
+"load": "(load-module \"fx26:compile-plan-types.fx\")",
+"kind": "type"
+},
+"c-spec-call": {
+"file": "compile-plan-types.fx",
+"var": "compile-plan-types",
+"load": "(load-module \"fx26:compile-plan-types.fx\")",
+"kind": "type"
+},
+"c-spec-calls": {
+"file": "compile-plan-types.fx",
+"var": "compile-plan-types",
+"load": "(load-module \"fx26:compile-plan-types.fx\")",
+"kind": "type"
+},
+"c-called": {
+"file": "compile-plan-types.fx",
+"var": "compile-plan-types",
+"load": "(load-module \"fx26:compile-plan-types.fx\")",
+"kind": "type"
+},
+"c-calls-at": {
+"file": "compile-plan-types.fx",
+"var": "compile-plan-types",
+"load": "(load-module \"fx26:compile-plan-types.fx\")",
+"kind": "type"
+},
+"c-inlined-at": {
+"file": "compile-plan-types.fx",
+"var": "compile-plan-types",
+"load": "(load-module \"fx26:compile-plan-types.fx\")",
+"kind": "type"
+},
+"c-copy-at": {
+"file": "compile-plan-types.fx",
+"var": "compile-plan-types",
+"load": "(load-module \"fx26:compile-plan-types.fx\")",
+"kind": "type"
+},
+"rreads": {
+"file": "regcode-types.fx",
+"var": "regcode-types",
+"load": "(load-module \"fx26:regcode-types.fx\")",
+"kind": "effect"
+},
+"rscans": {
+"file": "regcode-types.fx",
+"var": "regcode-types",
+"load": "(load-module \"fx26:regcode-types.fx\")",
+"kind": "effect"
+},
+"rbuilds": {
+"file": "regcode-types.fx",
+"var": "regcode-types",
+"load": "(load-module \"fx26:regcode-types.fx\")",
+"kind": "effect"
+},
+"emits": {
+"file": "regcode-types.fx",
+"var": "regcode-types",
+"load": "(load-module \"fx26:regcode-types.fx\")",
+"kind": "effect"
+},
+"rcompiles": {
+"file": "regcode-types.fx",
+"var": "regcode-types",
+"load": "(load-module \"fx26:regcode-types.fx\")",
+"kind": "effect"
+},
+"bools": {
+"file": "regcode-types.fx",
+"var": "regcode-types",
+"load": "(load-module \"fx26:regcode-types.fx\")",
+"kind": "type"
+},
+"wcells": {
+"file": "regcode-types.fx",
+"var": "regcode-types",
+"load": "(load-module \"fx26:regcode-types.fx\")",
+"kind": "type"
+},
+"rints": {
+"file": "regcode-types.fx",
+"var": "regcode-types",
+"load": "(load-module \"fx26:regcode-types.fx\")",
+"kind": "type"
+},
+"rthis": {
+"file": "regcode-types.fx",
+"var": "regcode-types",
+"load": "(load-module \"fx26:regcode-types.fx\")",
+"kind": "type"
+},
+"ritem": {
+"file": "regcode-types.fx",
+"var": "regcode-types",
+"load": "(load-module \"fx26:regcode-types.fx\")",
+"kind": "type"
+},
+"ritems": {
+"file": "regcode-types.fx",
+"var": "regcode-types",
+"load": "(load-module \"fx26:regcode-types.fx\")",
+"kind": "type"
+},
+"rconst": {
+"file": "regcode-types.fx",
+"var": "regcode-types",
+"load": "(load-module \"fx26:regcode-types.fx\")",
+"kind": "type"
+},
+"rconsts": {
+"file": "regcode-types.fx",
+"var": "regcode-types",
+"load": "(load-module \"fx26:regcode-types.fx\")",
+"kind": "type"
+},
+"r-const-global": {
+"file": "regcode-types.fx",
+"var": "regcode-types",
+"load": "(load-module \"fx26:regcode-types.fx\")",
+"kind": "type"
+},
+"r-const-list": {
+"file": "regcode-types.fx",
+"var": "regcode-types",
+"load": "(load-module \"fx26:regcode-types.fx\")",
+"kind": "type"
+},
+"r-const-list-table": {
+"file": "regcode-types.fx",
+"var": "regcode-types",
+"load": "(load-module \"fx26:regcode-types.fx\")",
+"kind": "type"
+},
+"r-member-const": {
+"file": "regcode-types.fx",
+"var": "regcode-types",
+"load": "(load-module \"fx26:regcode-types.fx\")",
+"kind": "type"
+},
+"r-module-const": {
+"file": "regcode-types.fx",
+"var": "regcode-types",
+"load": "(load-module \"fx26:regcode-types.fx\")",
+"kind": "type"
+},
+"r-members-at": {
+"file": "regcode-types.fx",
+"var": "regcode-types",
+"load": "(load-module \"fx26:regcode-types.fx\")",
+"kind": "type"
+},
+"rloc": {
+"file": "regcode-types.fx",
+"var": "regcode-types",
+"load": "(load-module \"fx26:regcode-types.fx\")",
+"kind": "type"
+},
+"rlocs": {
+"file": "regcode-types.fx",
+"var": "regcode-types",
+"load": "(load-module \"fx26:regcode-types.fx\")",
+"kind": "type"
+},
+"renv": {
+"file": "regcode-types.fx",
+"var": "regcode-types",
+"load": "(load-module \"fx26:regcode-types.fx\")",
+"kind": "type"
+},
+"rarg": {
+"file": "regcode-types.fx",
+"var": "regcode-types",
+"load": "(load-module \"fx26:regcode-types.fx\")",
+"kind": "type"
+},
+"rargs": {
+"file": "regcode-types.fx",
+"var": "regcode-types",
+"load": "(load-module \"fx26:regcode-types.fx\")",
+"kind": "type"
+},
+"rstd": {
+"file": "regcode-types.fx",
+"var": "regcode-types",
+"load": "(load-module \"fx26:regcode-types.fx\")",
+"kind": "type"
+},
+"rgen": {
+"file": "regcode-types.fx",
+"var": "regcode-types",
+"load": "(load-module \"fx26:regcode-types.fx\")",
+"kind": "type"
+},
+"rmove": {
+"file": "regcode-types.fx",
+"var": "regcode-types",
+"load": "(load-module \"fx26:regcode-types.fx\")",
+"kind": "type"
+},
+"rmoves": {
+"file": "regcode-types.fx",
+"var": "regcode-types",
+"load": "(load-module \"fx26:regcode-types.fx\")",
+"kind": "type"
+},
+"rlate": {
+"file": "regcode-types.fx",
+"var": "regcode-types",
+"load": "(load-module \"fx26:regcode-types.fx\")",
+"kind": "type"
+},
+"rleaf": {
+"file": "regcode-types.fx",
+"var": "regcode-types",
+"load": "(load-module \"fx26:regcode-types.fx\")",
+"kind": "type"
+},
+"rtest": {
+"file": "regcode-types.fx",
+"var": "regcode-types",
+"load": "(load-module \"fx26:regcode-types.fx\")",
+"kind": "type"
+},
+"rspecial": {
+"file": "regcode-exps-types.fx",
+"var": "regcode-exps-types",
+"load": "(load-module \"fx26:regcode-exps-types.fx\")",
+"kind": "type"
+},
+"rown": {
+"file": "regcode-exps-types.fx",
+"var": "regcode-exps-types",
+"load": "(load-module \"fx26:regcode-exps-types.fx\")",
+"kind": "type"
+},
+"r-assumptions": {
+"file": "regcode-exps-types.fx",
+"var": "regcode-exps-types",
+"load": "(load-module \"fx26:regcode-exps-types.fx\")",
+"kind": "type"
+},
+"c-write": {
+"file": "regcode-exps-types.fx",
+"var": "regcode-exps-types",
+"load": "(load-module \"fx26:regcode-exps-types.fx\")",
+"kind": "type"
+},
+"c-globals": {
+"file": "regcode-exps-types.fx",
+"var": "regcode-exps-types",
+"load": "(load-module \"fx26:regcode-exps-types.fx\")",
+"kind": "type"
+},
+"c-write-table": {
+"file": "regcode-exps-types.fx",
+"var": "regcode-exps-types",
+"load": "(load-module \"fx26:regcode-exps-types.fx\")",
+"kind": "type"
+},
+"rown-name": {
+"file": "regcode-exps-types.fx",
+"var": "regcode-exps-types",
+"load": "(load-module \"fx26:regcode-exps-types.fx\")",
+"kind": "type"
+},
+"rinline": {
+"file": "regcode-exps-types.fx",
+"var": "regcode-exps-types",
+"load": "(load-module \"fx26:regcode-exps-types.fx\")",
+"kind": "type"
+},
+"rscope": {
+"file": "regcode-exps-types.fx",
+"var": "regcode-exps-types",
+"load": "(load-module \"fx26:regcode-exps-types.fx\")",
+"kind": "type"
+},
+"rarg-patches": {
+"file": "regcode-exps-types.fx",
+"var": "regcode-exps-types",
+"load": "(load-module \"fx26:regcode-exps-types.fx\")",
+"kind": "type"
+},
+"rplace": {
+"file": "regcode-exps-types.fx",
+"var": "regcode-exps-types",
+"load": "(load-module \"fx26:regcode-exps-types.fx\")",
+"kind": "type"
+},
+"rplaces": {
+"file": "regcode-exps-types.fx",
+"var": "regcode-exps-types",
+"load": "(load-module \"fx26:regcode-exps-types.fx\")",
+"kind": "type"
+},
+"maybe-exp": {
+"file": "regcode-helpers-types.fx",
+"var": "regcode-helpers-types",
+"load": "(load-module \"fx26:regcode-helpers-types.fx\")",
+"kind": "type"
+},
+"r-unroll-known": {
+"file": "regcode-helpers-types.fx",
+"var": "regcode-helpers-types",
+"load": "(load-module \"fx26:regcode-helpers-types.fx\")",
+"kind": "type"
+},
+"r-wglobals": {
+"file": "regcode-helpers-types.fx",
+"var": "regcode-helpers-types",
+"load": "(load-module \"fx26:regcode-helpers-types.fx\")",
+"kind": "type"
+},
+"r-unroll-found": {
+"file": "regcode-helpers-types.fx",
+"var": "regcode-helpers-types",
+"load": "(load-module \"fx26:regcode-helpers-types.fx\")",
+"kind": "type"
+},
+"r-unroll-hook": {
+"file": "regcode-helpers-types.fx",
+"var": "regcode-helpers-types",
+"load": "(load-module \"fx26:regcode-helpers-types.fx\")",
+"kind": "type"
+},
+"r-unroll-globals": {
+"file": "regcode-helpers-types.fx",
+"var": "regcode-helpers-types",
+"load": "(load-module \"fx26:regcode-helpers-types.fx\")",
+"kind": "type"
+},
+"rsplit": {
+"file": "regcode-helpers-types.fx",
+"var": "regcode-helpers-types",
+"load": "(load-module \"fx26:regcode-helpers-types.fx\")",
+"kind": "type"
+},
+"rsplits": {
+"file": "regcode-helpers-types.fx",
+"var": "regcode-helpers-types",
+"load": "(load-module \"fx26:regcode-helpers-types.fx\")",
+"kind": "type"
+},
+"rmade": {
+"file": "regcode-helpers-types.fx",
+"var": "regcode-helpers-types",
+"load": "(load-module \"fx26:regcode-helpers-types.fx\")",
+"kind": "type"
+},
+"roperands": {
+"file": "regcode-helpers-types.fx",
+"var": "regcode-helpers-types",
+"load": "(load-module \"fx26:regcode-helpers-types.fx\")",
+"kind": "type"
+},
+"r-scopes": {
+"file": "regcode-modules-types.fx",
+"var": "regcode-modules-types",
+"load": "(load-module \"fx26:regcode-modules-types.fx\")",
+"kind": "type"
+},
+"rowner": {
+"file": "regcode-entry-types.fx",
+"var": "regcode-entry-types",
+"load": "(load-module \"fx26:regcode-entry-types.fx\")",
+"kind": "type"
+},
+"rgens": {
+"file": "regcode-entry-types.fx",
+"var": "regcode-entry-types",
+"load": "(load-module \"fx26:regcode-entry-types.fx\")",
+"kind": "type"
+},
+"c-kept-globals": {
+"file": "compile-programs-types.fx",
+"var": "compile-programs-types",
+"load": "(load-module \"fx26:compile-programs-types.fx\")",
+"kind": "type"
+},
+"c-lists": {
+"file": "compile-programs-types.fx",
+"var": "compile-programs-types",
+"load": "(load-module \"fx26:compile-programs-types.fx\")",
+"kind": "effect"
+},
+"c-const-env": {
+"file": "compile-programs-types.fx",
+"var": "compile-programs-types",
+"load": "(load-module \"fx26:compile-programs-types.fx\")",
+"kind": "type"
+},
+"c-mconsts": {
+"file": "compile-programs-types.fx",
+"var": "compile-programs-types",
+"load": "(load-module \"fx26:compile-programs-types.fx\")",
+"kind": "type"
+},
+"c-members": {
+"file": "compile-programs-types.fx",
+"var": "compile-programs-types",
+"load": "(load-module \"fx26:compile-programs-types.fx\")",
+"kind": "type"
+},
+"c-module-list": {
+"file": "compile-programs-types.fx",
+"var": "compile-programs-types",
+"load": "(load-module \"fx26:compile-programs-types.fx\")",
+"kind": "type"
+},
+"k-rec-read": {
+"file": "check-modules-types.fx",
+"var": "check-modules-types",
+"load": "(load-module \"fx26:check-modules-types.fx\")",
+"kind": "type"
+},
+"k-thunk-unit": {
+"file": "check-modules-types.fx",
+"var": "check-modules-types",
+"load": "(load-module \"fx26:check-modules-types.fx\")",
+"kind": "type"
+},
+"k-renamed": {
+"file": "check-modules-types.fx",
+"var": "check-modules-types",
+"load": "(load-module \"fx26:check-modules-types.fx\")",
+"kind": "type"
+},
+"k-trail": {
+"file": "check-subtype-types.fx",
+"var": "check-subtype-types",
+"load": "(load-module \"fx26:check-subtype-types.fx\")",
+"kind": "type"
+},
+"k-benv": {
+"file": "check-subtype-types.fx",
+"var": "check-subtype-types",
+"load": "(load-module \"fx26:check-subtype-types.fx\")",
+"kind": "type"
+},
+"k-benvs": {
+"file": "check-subtype-types.fx",
+"var": "check-subtype-types",
+"load": "(load-module \"fx26:check-subtype-types.fx\")",
+"kind": "type"
+},
+"k-assumed": {
+"file": "check-subtype-types.fx",
+"var": "check-subtype-types",
+"load": "(load-module \"fx26:check-subtype-types.fx\")",
+"kind": "type"
+},
+"k-strail": {
+"file": "check-subtype-types.fx",
+"var": "check-subtype-types",
+"load": "(load-module \"fx26:check-subtype-types.fx\")",
+"kind": "type"
+},
+"k-label-entry": {
+"file": "check-subtype-types.fx",
+"var": "check-subtype-types",
+"load": "(load-module \"fx26:check-subtype-types.fx\")",
+"kind": "type"
+},
+"k-label-list": {
+"file": "check-subtype-types.fx",
+"var": "check-subtype-types",
+"load": "(load-module \"fx26:check-subtype-types.fx\")",
+"kind": "type"
+},
+"k-labels": {
+"file": "check-subtype-types.fx",
+"var": "check-subtype-types",
+"load": "(load-module \"fx26:check-subtype-types.fx\")",
+"kind": "type"
+},
+"k-instances": {
+"file": "check-subtype-types.fx",
+"var": "check-subtype-types",
+"load": "(load-module \"fx26:check-subtype-types.fx\")",
+"kind": "type"
+},
+"k-sub-rule": {
+"file": "check-subtype-types.fx",
+"var": "check-subtype-types",
+"load": "(load-module \"fx26:check-subtype-types.fx\")",
+"kind": "type"
+},
+"k-checking": {
+"file": "check-subtype-types.fx",
+"var": "check-subtype-types",
+"load": "(load-module \"fx26:check-subtype-types.fx\")",
+"kind": "type"
+},
+"k-saying": {
+"file": "check-subtype-types.fx",
+"var": "check-subtype-types",
+"load": "(load-module \"fx26:check-subtype-types.fx\")",
+"kind": "type"
+},
+"k-effs": {
+"file": "check-subtype-types.fx",
+"var": "check-subtype-types",
+"load": "(load-module \"fx26:check-subtype-types.fx\")",
+"kind": "type"
+},
+"k-cpath": {
+"file": "check-calls-types.fx",
+"var": "check-calls-types",
+"load": "(load-module \"fx26:check-calls-types.fx\")",
+"kind": "type"
+},
+"k-given-back": {
+"file": "check-dependent-types.fx",
+"var": "check-dependent-types",
+"load": "(load-module \"fx26:check-dependent-types.fx\")",
+"kind": "type"
+},
+"k-dependent": {
+"file": "check-dependent-types.fx",
+"var": "check-dependent-types",
+"load": "(load-module \"fx26:check-dependent-types.fx\")",
+"kind": "type"
+},
+"k-callables": {
+"file": "check-dependent-types.fx",
+"var": "check-dependent-types",
+"load": "(load-module \"fx26:check-dependent-types.fx\")",
+"kind": "type"
+},
+"k-bound": {
+"file": "check-bounds-types.fx",
+"var": "check-bounds-types",
+"load": "(load-module \"fx26:check-bounds-types.fx\")",
+"kind": "type"
+},
+"k-bound-map": {
+"file": "check-bounds-types.fx",
+"var": "check-bounds-types",
+"load": "(load-module \"fx26:check-bounds-types.fx\")",
+"kind": "type"
+},
+"k-bound-entry": {
+"file": "check-bounds-types.fx",
+"var": "check-bounds-types",
+"load": "(load-module \"fx26:check-bounds-types.fx\")",
+"kind": "type"
+},
+"k-maybe-bounds": {
+"file": "check-bounds-types.fx",
+"var": "check-bounds-types",
+"load": "(load-module \"fx26:check-bounds-types.fx\")",
+"kind": "type"
+},
+"k-maybe-bound": {
+"file": "check-bounds-types.fx",
+"var": "check-bounds-types",
+"load": "(load-module \"fx26:check-bounds-types.fx\")",
+"kind": "type"
+},
+"k-unifying": {
+"file": "check-bounds-types.fx",
+"var": "check-bounds-types",
+"load": "(load-module \"fx26:check-bounds-types.fx\")",
+"kind": "type"
+},
+"k-solved": {
+"file": "check-infer-types.fx",
+"var": "check-infer-types",
+"load": "(load-module \"fx26:check-infer-types.fx\")",
+"kind": "type"
+},
+"k-bound-body": {
+"file": "check-infer-types.fx",
+"var": "check-infer-types",
+"load": "(load-module \"fx26:check-infer-types.fx\")",
+"kind": "type"
+},
+"k-counts": {
+"file": "check-infer-types.fx",
+"var": "check-infer-types",
+"load": "(load-module \"fx26:check-infer-types.fx\")",
+"kind": "type"
+},
+"k-tr": {
+"file": "check-terminate-types.fx",
+"var": "check-terminate-types",
+"load": "(load-module \"fx26:check-terminate-types.fx\")",
+"kind": "type"
+},
+"k-trs": {
+"file": "check-terminate-types.fx",
+"var": "check-terminate-types",
+"load": "(load-module \"fx26:check-terminate-types.fx\")",
+"kind": "type"
+},
+"k-tscope": {
+"file": "check-terminate-types.fx",
+"var": "check-terminate-types",
+"load": "(load-module \"fx26:check-terminate-types.fx\")",
+"kind": "type"
+},
+"k-guards": {
+"file": "check-terminate-types.fx",
+"var": "check-terminate-types",
+"load": "(load-module \"fx26:check-terminate-types.fx\")",
+"kind": "type"
+},
+"k-edge": {
+"file": "check-terminate-types.fx",
+"var": "check-terminate-types",
+"load": "(load-module \"fx26:check-terminate-types.fx\")",
+"kind": "type"
+},
+"k-graph": {
+"file": "check-terminate-types.fx",
+"var": "check-terminate-types",
+"load": "(load-module \"fx26:check-terminate-types.fx\")",
+"kind": "type"
+},
+"k-call": {
+"file": "check-terminate-types.fx",
+"var": "check-terminate-types",
+"load": "(load-module \"fx26:check-terminate-types.fx\")",
+"kind": "type"
+},
+"k-calls": {
+"file": "check-terminate-types.fx",
+"var": "check-terminate-types",
+"load": "(load-module \"fx26:check-terminate-types.fx\")",
+"kind": "type"
+},
+"k-passed": {
+"file": "check-terminate-types.fx",
+"var": "check-terminate-types",
+"load": "(load-module \"fx26:check-terminate-types.fx\")",
+"kind": "type"
+},
+"k-texts": {
+"file": "check-terminate-types.fx",
+"var": "check-terminate-types",
+"load": "(load-module \"fx26:check-terminate-types.fx\")",
+"kind": "type"
+},
+"k-whys": {
+"file": "check-terminate-types.fx",
+"var": "check-terminate-types",
+"load": "(load-module \"fx26:check-terminate-types.fx\")",
+"kind": "type"
+},
+"k-thunk": {
+"file": "check-terminate-types.fx",
+"var": "check-terminate-types",
+"load": "(load-module \"fx26:check-terminate-types.fx\")",
+"kind": "type"
+},
+"k-fact-list": {
+"file": "check-test-facts-types.fx",
+"var": "check-test-facts-types",
+"load": "(load-module \"fx26:check-test-facts-types.fx\")",
+"kind": "type"
+},
+"k-branch-facts": {
+"file": "check-test-facts-types.fx",
+"var": "check-test-facts-types",
+"load": "(load-module \"fx26:check-test-facts-types.fx\")",
+"kind": "type"
+},
+"k-maybe-size": {
+"file": "check-test-facts-types.fx",
+"var": "check-test-facts-types",
+"load": "(load-module \"fx26:check-test-facts-types.fx\")",
+"kind": "type"
+},
+"k-latent": {
+"file": "check-test-facts-types.fx",
+"var": "check-test-facts-types",
+"load": "(load-module \"fx26:check-test-facts-types.fx\")",
+"kind": "type"
+},
+"k-cert-lens": {
+"file": "check-test-facts-types.fx",
+"var": "check-test-facts-types",
+"load": "(load-module \"fx26:check-test-facts-types.fx\")",
+"kind": "type"
+},
+"k-checker": {
+"file": "check-letrec-types.fx",
+"var": "check-letrec-types",
+"load": "(load-module \"fx26:check-letrec-types.fx\")",
+"kind": "type"
+},
+"k-group-checker": {
+"file": "check-letrec-types.fx",
+"var": "check-letrec-types",
+"load": "(load-module \"fx26:check-letrec-types.fx\")",
+"kind": "type"
+},
+"k-idss": {
+"file": "check-letrec-types.fx",
+"var": "check-letrec-types",
+"load": "(load-module \"fx26:check-letrec-types.fx\")",
+"kind": "type"
+},
+"k-types-eff": {
+"file": "check-synth-types.fx",
+"var": "check-synth-types",
+"load": "(load-module \"fx26:check-synth-types.fx\")",
+"kind": "type"
+},
+"k-done": {
+"file": "check-synth-types.fx",
+"var": "check-synth-types",
+"load": "(load-module \"fx26:check-synth-types.fx\")",
+"kind": "type"
+},
+"k-certs": {
+"file": "check-synth-types.fx",
+"var": "check-synth-types",
+"load": "(load-module \"fx26:check-synth-types.fx\")",
+"kind": "type"
+},
+"k-nar": {
+"file": "check-synth-types.fx",
+"var": "check-synth-types",
+"load": "(load-module \"fx26:check-synth-types.fx\")",
+"kind": "type"
+},
+"k-nars": {
+"file": "check-synth-types.fx",
+"var": "check-synth-types",
+"load": "(load-module \"fx26:check-synth-types.fx\")",
+"kind": "type"
+},
+"k-narrowing": {
+"file": "check-synth-types.fx",
+"var": "check-synth-types",
+"load": "(load-module \"fx26:check-synth-types.fx\")",
+"kind": "type"
+},
+"k-path": {
+"file": "check-synth-types.fx",
+"var": "check-synth-types",
+"load": "(load-module \"fx26:check-synth-types.fx\")",
+"kind": "type"
+},
+"k-paths": {
+"file": "check-synth-types.fx",
+"var": "check-synth-types",
+"load": "(load-module \"fx26:check-synth-types.fx\")",
+"kind": "type"
+},
+"k-reached": {
+"file": "check-modorder-types.fx",
+"var": "check-modorder-types",
+"load": "(load-module \"fx26:check-modorder-types.fx\")",
+"kind": "type"
+},
+"k-tested": {
+"file": "check-synth-types.fx",
+"var": "check-synth-types",
+"load": "(load-module \"fx26:check-synth-types.fx\")",
+"kind": "type"
+},
+"k-call-checked": {
+"file": "check-synth-types.fx",
+"var": "check-synth-types",
+"load": "(load-module \"fx26:check-synth-types.fx\")",
+"kind": "type"
+},
+"k-maybe-ty": {
+"file": "check-synth-types.fx",
+"var": "check-synth-types",
+"load": "(load-module \"fx26:check-synth-types.fx\")",
+"kind": "type"
+},
+"kallocs": {
+"file": "check-modorder-types.fx",
+"var": "check-modorder-types",
+"load": "(load-module \"fx26:check-modorder-types.fx\")",
+"kind": "effect"
+},
+"k-mlam": {
+"file": "check-modorder-types.fx",
+"var": "check-modorder-types",
+"load": "(load-module \"fx26:check-modorder-types.fx\")",
+"kind": "type"
+},
+"k-mlams": {
+"file": "check-modorder-types.fx",
+"var": "check-modorder-types",
+"load": "(load-module \"fx26:check-modorder-types.fx\")",
+"kind": "type"
+},
+"k-places": {
+"file": "check-modorder-types.fx",
+"var": "check-modorder-types",
+"load": "(load-module \"fx26:check-modorder-types.fx\")",
+"kind": "type"
+},
+"k-hz": {
+"file": "check-modorder-types.fx",
+"var": "check-modorder-types",
+"load": "(load-module \"fx26:check-modorder-types.fx\")",
+"kind": "type"
+},
+"k-edges": {
+"file": "check-modorder-types.fx",
+"var": "check-modorder-types",
+"load": "(load-module \"fx26:check-modorder-types.fx\")",
+"kind": "type"
+},
+"k-scc-ints": {
+"file": "check-modorder-types.fx",
+"var": "check-modorder-types",
+"load": "(load-module \"fx26:check-modorder-types.fx\")",
+"kind": "type"
+},
+"k-groups": {
+"file": "check-modorder-types.fx",
+"var": "check-modorder-types",
+"load": "(load-module \"fx26:check-modorder-types.fx\")",
+"kind": "type"
+},
+"k-say": {
+"file": "check-module-rules-types.fx",
+"var": "check-module-rules-types",
+"load": "(load-module \"fx26:check-module-rules-types.fx\")",
+"kind": "type"
+},
+"k-made": {
+"file": "check-module-rules-types.fx",
+"var": "check-module-rules-types",
+"load": "(load-module \"fx26:check-module-rules-types.fx\")",
+"kind": "type"
+},
+"k-mod-bound": {
+"file": "check-module-rules-types.fx",
+"var": "check-module-rules-types",
+"load": "(load-module \"fx26:check-module-rules-types.fx\")",
+"kind": "type"
+},
+"k-ends": {
+"file": "check-module-rules-types.fx",
+"var": "check-module-rules-types",
+"load": "(load-module \"fx26:check-module-rules-types.fx\")",
+"kind": "type"
+},
+"k-eff-ty": {
+"file": "check-module-rules-types.fx",
+"var": "check-module-rules-types",
+"load": "(load-module \"fx26:check-module-rules-types.fx\")",
+"kind": "type"
+},
+"k-mod-checked": {
+"file": "check-module-rules-types.fx",
+"var": "check-module-rules-types",
+"load": "(load-module \"fx26:check-module-rules-types.fx\")",
+"kind": "type"
+},
+"k-out": {
+"file": "check-program-types.fx",
+"var": "check-program-types",
+"load": "(load-module \"fx26:check-program-types.fx\")",
+"kind": "type"
+},
+"k-pos": {
+"file": "check-program-types.fx",
+"var": "check-program-types",
+"load": "(load-module \"fx26:check-program-types.fx\")",
+"kind": "type"
+},
+"k-proving": {
+"file": "check-program-types.fx",
+"var": "check-program-types",
+"load": "(load-module \"fx26:check-program-types.fx\")",
+"kind": "type"
+},
+"k-case-arm": {
+"file": "check-program-types.fx",
+"var": "check-program-types",
+"load": "(load-module \"fx26:check-program-types.fx\")",
+"kind": "type"
+},
+"k-tops": {
+"file": "check-program-types.fx",
+"var": "check-program-types",
+"load": "(load-module \"fx26:check-program-types.fx\")",
+"kind": "type"
+},
+"k-rec-forms": {
+"file": "check-program-types.fx",
+"var": "check-program-types",
+"load": "(load-module \"fx26:check-program-types.fx\")",
+"kind": "type"
+},
+"k-run-list": {
+"file": "check-program-types.fx",
+"var": "check-program-types",
+"load": "(load-module \"fx26:check-program-types.fx\")",
+"kind": "type"
+},
+"k-def-list": {
+"file": "check-program-types.fx",
+"var": "check-program-types",
+"load": "(load-module \"fx26:check-program-types.fx\")",
+"kind": "type"
+},
+"k-olds": {
+"file": "check-program-types.fx",
+"var": "check-program-types",
+"load": "(load-module \"fx26:check-program-types.fx\")",
+"kind": "type"
+}
+}

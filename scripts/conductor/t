@@ -1,0 +1,6 @@
+#!/usr/bin/perl
+# t SECONDS COMMAND...: run COMMAND, killing it after SECONDS.
+my $s = shift; my $pid = fork();
+if ($pid == 0) { setpgrp(0, 0); exec @ARGV or die "exec: $!"; }
+local $SIG{ALRM} = sub { kill 'KILL', -$pid; print STDERR "t: killed after ${s}s\n"; exit 124; };
+alarm $s; waitpid($pid, 0); alarm 0; exit($? >> 8);

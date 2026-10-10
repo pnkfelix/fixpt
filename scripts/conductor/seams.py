@@ -1,0 +1,44 @@
+"""seams.py FILE MODULE: where a module's top items can be cut in two, every
+item before using nothing defined after; the line, the lines after, and how
+many names before the items after use."""
+import sys, re
+import paths
+SRC = paths.SRC
+f, mod = sys.argv[1], sys.argv[2]
+s = open(SRC + f).read()
+def sexp_end(t, i):
+    d = 0; instr = False
+    while True:
+        c = t[i]
+        if instr:
+            if c == '\\': i += 1
+            elif c == '"': instr = False
+        elif c == '"': instr = True
+        elif c == ';': i = t.index('\n', i); continue
+        elif t.startswith('#\\', i): i += 3; continue
+        elif c == '(': d += 1
+        elif c == ')':
+            d -= 1
+            if d == 0: return i + 1
+        i += 1
+st = re.search(r'\(define %s\s+\(module' % mod, s).start(); mo = s.index('(module', st) + 7; en = sexp_end(s, st)
+items = []; i = mo
+while True:
+    while s[i] in ' \n\t': i += 1
+    if s[i] == ';': i = s.index('\n', i); continue
+    if s[i] == ')': break
+    j = sexp_end(s, i); items.append((i, j)); i = j
+TOK = re.compile(r"[A-Za-z0-9!$%&*/:<=>?^_~+.@|-]+")
+def strip(t): return re.sub(r'"(\\.|[^"\\])*"', '""', re.sub(r';[^\n]*', '', t))
+def defs(t):
+    t = strip(t); out = set(re.findall(r'^\((?:define\*?|define-type|define-effect|define-datatype) \(?([^\s()]+)', t))
+    if t.startswith('(define-rec'): out |= set(re.findall(r'\n  \(([^\s()]+) \(subr', t))
+    return out
+D = [defs(s[a:b]) for a, b in items]; U = [set(TOK.findall(strip(s[a:b]))) for a, b in items]
+line = lambda p: s[:p].count('\n') + 1
+endl = line(en)
+for k in range(1, len(items)):
+    after = set().union(*D[k:])
+    if not (set().union(*U[:k]) & after):
+        before = set().union(*D[:k])
+        print('item', k, 'line', line(items[k][0]), 'lines after', endl - line(items[k][0]), 'uses before', len(set().union(*U[k:]) & before))
