@@ -127,30 +127,33 @@ impl Checker {
     fn included(&mut self, e: ExpId, span: Span, abs: Vec<(Sym, DVar)>, mut descs: Vec<(Sym, TyId)>, own: Vec<(Sym, TyId)>, from: &[(Sym, TyId)], at: Option<usize>) -> R<TyId> {
         let (mut out, mut path): (Vec<(Sym, TyId)>, Vec<usize>) = (Vec::new(), Vec::new());
         let mut own_descs = std::mem::take(&mut descs);
+        let (mut fresh, mut map) = (Vec::new(), HashMap::new());
         for (k, (name, t)) in from.iter().enumerate() {
-            let (ds, vs) = match self.arena.get(self.arena.resolve(*t)).clone() {
-                // A bound module's abstract types (`name_module`'s `m..t`),
-                // the module's descriptions of them: aliases, so that its
-                // values and `m`'s stay one another's (`TODO.md` §69).
-                Ty::Module { abs, descs, vals } if abs.iter().all(|(_, v)| self.is_module_var(*v)) => {
-                    let mut ds: Vec<(Sym, TyId)> = abs.iter().map(|(a, v)| (*a, self.arena.ty(Ty::Var(*v)))).collect();
+            let (ds, vs, taken) = match self.arena.get(self.arena.resolve(*t)).clone() {
+                Ty::Module { abs: a, descs, vals } => {
+                    let (mut ds, own_abs) = self.abs_taken(&a, &mut map);
+                    let taken: Vec<Sym> = own_abs.iter().map(|(n, _)| *n).collect();
+                    for (n, _) in &own_abs {
+                        if abs.iter().chain(&fresh).any(|(m, _)| m == n) || descs.iter().chain(&own_descs).any(|(m, _)| m == n) {
+                            return Err(FxError::at(span, format!("`{}` is defined twice in this module", self.interner.name(*n))));
+                        }
+                    }
+                    fresh.extend(own_abs);
                     ds.extend(descs);
-                    (ds, vals)
-                }
-                Ty::Module { .. } => {
-                    return Err(FxError::at(span, "`include` takes a module with abstract types by its name"));
+                    (ds, vals, taken)
                 }
                 _ => return Err(FxError::at(span, format!("`include` includes a module, and this is a {}", self.show_ty(*t)))),
             };
             // A hidden `include`'s (`%hinclude-k`): each name marked hidden,
             // for the module's type to leave out (`hiding`).
             let marks: Vec<Sym> = if self.interner.name(*name).starts_with("%hinclude-") {
-                ds.iter().chain(&vs).map(|(n, _)| *n).collect()
+                taken.into_iter().chain(ds.iter().chain(&vs).map(|(n, _)| *n)).collect()
             } else {
                 Vec::new()
             };
             for d in ds {
-                if !self.interner.name(d.0).starts_with("%hidden:") && descs.iter().chain(&own_descs).any(|(n, _)| *n == d.0) {
+                let twice = descs.iter().chain(&own_descs).any(|(n, _)| *n == d.0) || abs.iter().chain(&fresh).any(|(n, _)| *n == d.0);
+                if !self.interner.name(d.0).starts_with("%hidden:") && twice {
                     return Err(FxError::at(span, format!("`{}` is defined twice in this module", self.interner.name(d.0))));
                 }
                 descs.push(d);
@@ -177,7 +180,39 @@ impl Checker {
             }
         }
         self.facts.reshaped.insert(e, path);
-        Ok(self.arena.ty(Ty::Module { abs, descs, vals: out }))
+        let descs = descs.iter().map(|(d, x)| (*d, self.subst(*x, &map))).collect();
+        let vals = out.iter().map(|(x, y)| (*x, self.subst(*y, &map))).collect();
+        fresh.extend(abs);
+        Ok(self.arena.ty(Ty::Module { abs: fresh, descs, vals }))
+    }
+
+    /// A module's abstract types `abs`, taken into another (`include`,
+    /// `extend`; `TODO.md` §69): a bound module's (`name_module`'s `m..t`)
+    /// as descriptions, aliases, so that its values and `m`'s stay one
+    /// another's; any other's, a module made where it is taken, the new
+    /// module's own, each a fresh variable (`map` from the old), as the
+    /// module's own `define-generative`s are: two calls of one functor
+    /// share a type, and their types are not one another's.
+    pub(crate) fn abs_taken(&mut self, abs: &[(Sym, DVar)], map: &mut HashMap<DVar, D>) -> (Vec<(Sym, TyId)>, Vec<(Sym, DVar)>) {
+        let (mut aliases, mut own) = (Vec::new(), Vec::new());
+        for (a, v) in abs {
+            if self.is_module_var(*v) {
+                aliases.push((*a, self.arena.ty(Ty::Var(*v))));
+                continue;
+            }
+            let kind = self.arena.dvar_kind(*v);
+            let w = self.arena.dvar_of(*a, kind);
+            let d = match kind {
+                Kind::Type => D::Type(self.arena.ty(Ty::Var(w))),
+                _ => {
+                    self.abstract_funs.insert(w);
+                    D::Fun(self.arena.ty(Ty::Var(w)))
+                }
+            };
+            map.insert(*v, d);
+            own.push((*a, w));
+        }
+        (aliases, own)
     }
 
     /// Whether a module is an `(extend e0 e1)`, as the parser makes one.
@@ -190,21 +225,19 @@ impl Checker {
     /// of both, `e1`'s where both have a name, `e0`'s in its order first and
     /// then `e1`'s others; its types likewise. Made of theirs, by path
     /// (`reshape_path`). A bound module's abstract types (`m..t`) are its
-    /// descriptions, aliases; any other's refused (`TODO.md` §69). As the
-    /// FX-26 checker's `k-extended`.
+    /// descriptions, aliases; any other's the new module's own, fresh
+    /// (`abs_taken`; FX-91's, for `e1`'s), and one of `e0`'s that `e1`
+    /// replaces is refused if what is kept mentions it (`TODO.md` §69). As
+    /// the FX-26 checker's `k-extended`.
     fn extended(&mut self, e: ExpId, span: Span, vals: &[(Sym, TyId)]) -> R<TyId> {
         let mut sides = Vec::new();
+        let mut map = HashMap::new();
         for (i, (_, t)) in vals.iter().enumerate() {
             match self.arena.get(self.arena.resolve(*t)).clone() {
-                // A bound module's abstract types, its descriptions of them,
-                // as `included`'s.
-                Ty::Module { abs, descs, vals } if abs.iter().all(|(_, v)| self.is_module_var(*v)) => {
-                    let mut ds: Vec<(Sym, TyId)> = abs.iter().map(|(a, v)| (*a, self.arena.ty(Ty::Var(*v)))).collect();
+                Ty::Module { abs, descs, vals } => {
+                    let (mut ds, own) = self.abs_taken(&abs, &mut map);
                     ds.extend(descs);
-                    sides.push((ds, vals));
-                }
-                Ty::Module { .. } => {
-                    return Err(FxError::at(span, "`extend` takes a module with abstract types by its name"));
+                    sides.push((own, ds, vals));
                 }
                 _ => {
                     let which = if i == 0 { "first" } else { "second" };
@@ -212,8 +245,12 @@ impl Checker {
                 }
             }
         }
-        let (d1, v1) = sides.pop().expect("two");
-        let (d0, v0) = sides.pop().expect("two");
+        let (a1, d1, v1) = sides.pop().expect("two");
+        let (a0, d0, v0) = sides.pop().expect("two");
+        // `e1`'s names, abstract or not, replace `e0`'s.
+        let in1 = |n: &Sym| a1.iter().any(|(m, _)| m == n) || d1.iter().any(|(m, _)| m == n);
+        let (kept, gone): (Vec<(Sym, DVar)>, Vec<(Sym, DVar)>) = a0.into_iter().partition(|(n, _)| !in1(n));
+        let d0: Vec<(Sym, TyId)> = d0.into_iter().filter(|(n, _)| !a1.iter().any(|(m, _)| m == n)).collect();
         let mut descs: Vec<(Sym, TyId)> = d0.iter().map(|(n, t)| *d1.iter().find(|(m, _)| m == n).unwrap_or(&(*n, *t))).collect();
         descs.extend(d1.iter().filter(|(n, _)| !d0.iter().any(|(m, _)| m == n)).copied());
         let (mut out, mut at) = (Vec::new(), Vec::new());
@@ -236,7 +273,16 @@ impl Checker {
             }
         }
         self.facts.reshaped.insert(e, at);
-        Ok(self.arena.ty(Ty::Module { abs: Vec::new(), descs, vals: out }))
+        let descs: Vec<(Sym, TyId)> = descs.iter().map(|(d, x)| (*d, self.subst(*x, &map))).collect();
+        let out: Vec<(Sym, TyId)> = out.iter().map(|(x, y)| (*x, self.subst(*y, &map))).collect();
+        for (n, t) in out.iter().chain(&descs) {
+            if let Some((h, _)) = gone.iter().find(|(_, v)| self.mentions_var(*t, *v)) {
+                let h = self.interner.name(*h);
+                return Err(FxError::at(span, format!("`{}`'s type mentions the first module's `{h}`, which the second's `{h}` replaces", self.interner.name(*n))));
+            }
+        }
+        let abs = kept.into_iter().chain(a1).collect();
+        Ok(self.arena.ty(Ty::Module { abs, descs, vals: out }))
     }
 
     /// A module's items, as `letrec*`'s (`crate::modorder`): its typed

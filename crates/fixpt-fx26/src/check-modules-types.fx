@@ -118,4 +118,8 @@
             (val k-subst-each
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (k-parts k-map)
-                       k-parts))))
+                       k-parts))
+            (val k-mentions-var?
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (int int)
+                       bool))))

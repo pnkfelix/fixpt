@@ -95,6 +95,15 @@
 (define k-fail-at (with check-errors k-fail-at))
 (define k-first-mentioned (with check-modules k-first-mentioned))
 (define k-module-var? (with check-modules k-module-var?))
+(define k-mentions-var? (with check-modules k-mentions-var?))
+(define k-subst-each (with check-modules k-subst-each))
+(define k-dvar-kind (with check-types k-dvar-kind))
+(define k-new-dvar-of (with check-types k-new-dvar-of))
+(define k-abstract-funs (with check-types k-abstract-funs))
+(define dt (with check-types-types dt))
+(define df (with check-types-types df))
+(define-type k-map (select check-types-types k-map))
+(define-type k-renamed (select check-modules-types k-renamed))
 (define k-resolve-selects (with check-modules k-resolve-selects))
 (define k-items (with check-read k-items))
 (define k-lambda-item? (with check-modorder k-lambda-item?))
@@ -260,15 +269,22 @@
 ;; `reshape_path`): a path, from 2^40 on.
 (define k-reshape-path (subr pure (int int) int)
   (lambda (k j) (+ 1099511627776 (+ (* k 1048576) j))))
-;; One side of an `extend`, of type `t`: a module, a bound one's abstract
-;; types its descriptions (as `k-inc-module`'s), or an error.
-(define k-extend-side (subr (maxeff checks spin) (int string int int) int)
-  (lambda (t which a b)
+;; One side of an `extend`, of type `t`, its own abstract types `own` and
+;; `m` for all the sides' (`k-taken-abs`): a module, a bound one's abstract
+;; types its descriptions, aliases.
+(define k-extend-side (subr (maxeff checks spin) (int k-parts k-map) int)
+  (lambda (t own m)
     (tagcase (k-get t)
       (ty-module (abs ds vs)
-        (if (k-all-module-vars? abs)
-            (k-ty-new (ty-module nil (append (k-abs-aliases abs) ds) vs))
-            (k-fail "`extend` takes a module with abstract types by its name" a b)))
+        (k-ty-new (ty-module own (k-subst-each (append (k-abs-aliases abs) ds) m)
+                             (k-subst-each vs m))))
+      (else z t))))
+;; The abstract types of `t`, an `extend`'s `which` side, that are its own
+;; there, fresh (`k-abs-own`); an error if it is not a module.
+(define k-taken-abs (subr (maxeff checks spin) (int string int int) k-renamed)
+  (lambda (t which a b)
+    (tagcase (k-get t)
+      (ty-module (abs ds vs) (k-abs-own abs))
       (else z (k-fail (k-cat5 "`extend` extends a module by a module, and its " which " is a "
                               (k-show-ty t) "")
                       a b)))))
@@ -307,27 +323,68 @@
 ;; `(extend e0 e1)` at `a`..`b`, its values `vs` the two modules: one of the
 ;; values of both, `e1`'s where both have a name, `e0`'s in its order first
 ;; and then `e1`'s others; its types likewise. Made of theirs, by path
-;; (`k-reshape-path`, noted in `k-reshapes`). As Rust's `Checker::extended`.
+;; (`k-reshape-path`, noted in `k-reshapes`). A side's own abstract types
+;; the new module's, `e1`'s replacing `e0`'s of their names, refused if what
+;; is kept mentions one (`k-replaced-check`). As Rust's `Checker::extended`.
 (define k-extended (subr (maxeff checks spin) (k-parts int int) int)
   (lambda (vs a b)
-    (let ((t0 (k-extend-side (extract (car vs) 2) "first" a b))
-          (t1 (k-extend-side (extract (car (cdr vs)) 2) "second" a b)))
+    (let* ((x0 (extract (car vs) 2)) (x1 (extract (car (cdr vs)) 2))
+           (r0 (k-taken-abs x0 "first" a b)) (r1 (k-taken-abs x1 "second" a b))
+           (m (append (extract r0 2) (extract r1 2)))
+           (t0 (k-extend-side x0 (extract r0 1) m))
+           (t1 (k-extend-side x1 (extract r1 1) m)))
       (tagcase (k-get t0)
         (ty-module (a0 d0 v0)
           (tagcase (k-get t1)
             (ty-module (a1 d1 v1)
-              (let ((at (append (k-ext-firsts-at v0 v1 0) (k-ext-rest-at v1 v0 0))))
+              (let* ((at (append (k-ext-firsts-at v0 v1 0) (k-ext-rest-at v1 v0 0)))
+                     (d0 (k-parts-not-in d0 a1 #f))
+                     (ds (append (k-ext-firsts d0 d1) (k-ext-rest d1 d0)))
+                     (out (append (k-ext-firsts v0 v1) (k-ext-rest v1 v0)))
+                     (gone (k-parts-not-in a0 (append a1 d1) #t)))
                 (begin (set k-reshapes (cons (product (1 a) (2 b) (3 at)) (get k-reshapes)))
-                       (k-ty-new (ty-module nil (append (k-ext-firsts d0 d1) (k-ext-rest d1 d0))
-                                            (append (k-ext-firsts v0 v1) (k-ext-rest v1 v0)))))))
+                       (k-replaced-check (append out ds) gone a b)
+                       (k-ty-new (ty-module (append (k-parts-not-in a0 (append a1 d1) #f) a1)
+                                            ds out)))))
             (else z t1)))
         (else z t0)))))
+;; Those of `ps` whose names are not in `qs` (if `in?`, those that are).
+(define k-parts-not-in (subr (maxeff (read @globals) (alloc @t)) (k-parts k-parts bool) k-parts)
+  (lambda (ps qs in?)
+    (cond ((null? ps) nil)
+          ((let ((found (>= (k-ext-index qs (extract (car ps) 1) 0) 0))) (if in? found (not found)))
+           (the k-parts (cons (car ps) (k-parts-not-in (cdr ps) qs in?))))
+          (else (k-parts-not-in (cdr ps) qs in?)))))
+;; An error at `a`..`b` if one of `ps` mentions one of abstract types `gone`,
+;; `e0`'s that `e1`'s replace.
+(define k-replaced-check (subr (maxeff checks spin) (k-parts k-parts int int) unit)
+  (lambda (ps gone a b)
+    (if (null? ps)
+        #u
+        (let ((h (k-first-mentioning (extract (car ps) 2) gone)))
+          (if (null? h)
+              (k-replaced-check (cdr ps) gone a b)
+              (let ((h (symbol->string (extract (car h) 1))))
+                (k-fail (k-cat5 "`" (symbol->string (extract (car ps) 1))
+                                "`'s type mentions the first module's `"
+                                h (k-cat3 "`, which the second's `" h "` replaces"))
+                        a b)))))))
+;; The first of abstract types `abs` that `t` mentions, and those after it.
+(define k-first-mentioning (subr (maxeff kstate spin) (int k-parts) k-parts)
+  (lambda (t abs)
+    (cond ((null? abs) nil)
+          ((k-mentions-var? t (extract (car abs) 2)) abs)
+          (else (k-first-mentioning t (cdr abs))))))
 
 ;;; ------------------------------------------------------------ include
 
 ;; What a module's includes give (`TODO.md` §69), newest first: types,
-;; values, and where each value is, by path.
-(define-type k-incs (productof (1 k-parts) (2 k-parts) (3 k-ids)))
+;; values, and where each value is, by path; the abstract types that are the
+;; module's own (`k-abs-own`), and the map to them.
+(define-type k-incs (productof (1 k-parts) (2 k-parts) (3 k-ids) (4 k-parts) (5 k-map)))
+;; `acc` with types `d`, values `v` and paths `p`.
+(define k-incs-of (subr (alloc @t) (k-parts k-parts k-ids k-incs) k-incs)
+  (lambda (d v p acc) (product (1 d) (2 v) (3 p) (4 (extract acc 4)) (5 (extract acc 5)))))
 ;; Whether a module is an `include`s' bucket, as the parser makes one: of
 ;; values `%include-0`, … only.
 (define k-bucket-items? (subr (read @globals) (k-items) bool)
@@ -345,43 +402,72 @@
   (lambda (p s)
     (and (>= (string-length s) (string-length p))
          (string=? (substring s 0 (string-length p)) p))))
-;; Whether each of abstract types `abs` is a bound module's.
-(define k-all-module-vars? (subr kreads (k-parts) bool)
-  (lambda (abs)
-    (or (null? abs)
-        (and (k-module-var? (extract (car abs) 2)) (k-all-module-vars? (cdr abs))))))
-;; Abstract types `abs`, each a description of its variable.
+;; Of abstract types `abs`, a bound module's (`k-rename-abs`'s `m..t`), each
+;; a description of its variable: aliases, so that its values and `m`'s stay
+;; one another's (`TODO.md` §69).
 (define k-abs-aliases (subr (maxeff kstate spin) (k-parts) k-parts)
   (lambda (abs)
-    (if (null? abs)
-        nil
-        (let ((t (k-ty-new (ty-var (extract (car abs) 2)))))
-          (cons (product (1 (extract (car abs) 1)) (2 t)) (k-abs-aliases (cdr abs)))))))
+    (cond ((null? abs) nil)
+          ((k-module-var? (extract (car abs) 2))
+           (let ((t (k-ty-new (ty-var (extract (car abs) 2)))))
+             (cons (product (1 (extract (car abs) 1)) (2 t)) (k-abs-aliases (cdr abs)))))
+          (else (k-abs-aliases (cdr abs))))))
+;; Of abstract types `abs`, those not a bound module's, of a module made
+;; where it is taken in (`include`, `extend`): the new module's own, each a
+;; fresh variable, and the map to them from the old, as its own
+;; `define-generative`s are; two calls of one functor share a type, and
+;; their types are not one another's. As Rust's `Checker::abs_taken`.
+(define k-abs-own (subr (maxeff kstate spin) (k-parts) k-renamed)
+  (lambda (abs)
+    (cond ((null? abs) (product (1 (the k-parts nil)) (2 (the k-map nil))))
+          ((k-module-var? (extract (car abs) 2)) (k-abs-own (cdr abs)))
+          (else
+           (let* ((a (extract (car abs) 1))
+                  (k (k-dvar-kind (extract (car abs) 2)))
+                  (w (k-new-dvar-of a k))
+                  (noted (if (= k 2) #u (set k-abstract-funs (cons w (get k-abstract-funs)))))
+                  (to (if (= k 2) (dt (k-ty-new (ty-var w))) (df (k-ty-new (ty-var w)))))
+                  (rest (k-abs-own (cdr abs))))
+             (product (1 (the k-parts (cons (product (1 a) (2 w)) (extract rest 1))))
+                      (2 (the k-map (cons (cons (extract (car abs) 2) to) (extract rest 2))))))))))
 (define k-twice (subr checks (symbol int int) void)
   (lambda (n a b) (k-fail (k-cat3 "`" (symbol->string n) "` is defined twice in this module") a b)))
-;; Module type `t`, an `include`'s: a bound module's abstract types (its
-;; `m..t`, `k-rename-abs`'s) its descriptions, aliases, so that its values
-;; and `m`'s stay one another's (`TODO.md` §69); any other an error.
+;; Module type `t`, an `include`'s, or an error.
 (define k-inc-module (subr (maxeff checks spin) (int int int) int)
   (lambda (t a b)
     (tagcase (k-get t)
-      (ty-module (abs ds vs)
-        (if (k-all-module-vars? abs)
-            (k-ty-new (ty-module nil (append (k-abs-aliases abs) ds) vs))
-            (k-fail "`include` takes a module with abstract types by its name" a b)))
+      (ty-module (abs ds vs) t)
       (else z (k-fail (k-cat3 "`include` includes a module, and this is a " (k-show-ty t) "")
                       a b)))))
-;; `ds` onto `acc`'s types, none named there or in `own`.
-(define k-inc-descs (subr (maxeff checks spin) (k-parts k-incs k-parts int int) k-incs)
-  (lambda (ds acc own a b)
+;; Abstract types `ns`, an included module's own now, onto `acc`'s, none
+;; named there, nor in `own-abs` or `own-ds`, the module's own, nor in
+;; `acc`'s types.
+(define k-inc-abs (subr (maxeff checks spin) (k-parts k-incs k-parts k-parts int int) k-incs)
+  (lambda (ns acc own-abs own-ds a b)
+    (cond ((null? ns) acc)
+          ((k-named-in? (extract (car ns) 1) (extract acc 4) own-abs (extract acc 1) own-ds)
+           (k-twice (extract (car ns) 1) a b))
+          (else (k-inc-abs (cdr ns)
+                           (product (1 (extract acc 1)) (2 (extract acc 2)) (3 (extract acc 3))
+                                    (4 (cons (car ns) (extract acc 4))) (5 (extract acc 5)))
+                           own-abs own-ds a b)))))
+;; Whether one of `p`, `q`, `r` and `s` names `n`.
+(define k-named-in? (subr (read @globals) (symbol k-parts k-parts k-parts k-parts) bool)
+  (lambda (n p q r s)
+    (or (>= (k-ext-index p n 0) 0) (>= (k-ext-index q n 0) 0)
+        (>= (k-ext-index r n 0) 0) (>= (k-ext-index s n 0) 0))))
+;; `ds` onto `acc`'s types, none named there or in `own`, nor an abstract
+;; type of `own-abs`, the module's own, or of `acc`'s.
+(define k-inc-descs (subr (maxeff checks spin) (k-parts k-incs k-parts k-parts int int) k-incs)
+  (lambda (ds acc own-abs own a b)
     (cond ((null? ds) acc)
           ((and (not (k-prefix? "%hidden:" (symbol->string (extract (car ds) 1))))
-                (or (>= (k-ext-index (extract acc 1) (extract (car ds) 1) 0) 0)
-                    (>= (k-ext-index own (extract (car ds) 1) 0) 0)))
+                (k-named-in? (extract (car ds) 1) (extract acc 1) own own-abs (extract acc 4)))
            (k-twice (extract (car ds) 1) a b))
-          (else (k-inc-descs (cdr ds) (product (1 (cons (car ds) (extract acc 1)))
-                                               (2 (extract acc 2)) (3 (extract acc 3)))
-                             own a b)))))
+          (else (k-inc-descs (cdr ds)
+                             (k-incs-of (cons (car ds) (extract acc 1)) (extract acc 2)
+                                        (extract acc 3) acc)
+                             own-abs own a b)))))
 ;; `vs`, from value `j` of the module that is value `k`, onto `acc`'s
 ;; values, none named there or in `own`.
 (define k-inc-vals (subr (maxeff checks spin) (k-parts int int k-incs k-parts int int) k-incs)
@@ -391,28 +477,38 @@
                (>= (k-ext-index own (extract (car vs) 1) 0) 0))
            (k-twice (extract (car vs) 1) a b))
           (else (k-inc-vals (cdr vs) k (+ j 1)
-                            (product (1 (extract acc 1)) (2 (cons (car vs) (extract acc 2)))
-                                     (3 (cons (k-reshape-path k j) (extract acc 3))))
+                            (k-incs-of (extract acc 1) (cons (car vs) (extract acc 2))
+                                       (cons (k-reshape-path k j) (extract acc 3)) acc)
                             own a b)))))
 ;; Each of the modules `from`, the `k`th on, onto `acc`: its values from
-;; value `at`, if not -1, else `k`.
+;; value `at`, if not -1, else `k`; its abstract types a bound module's,
+;; aliases, or the module's own (`k-abs-own`).
 (define k-inc-all
-  (subr (maxeff checks spin) (k-parts int int k-incs k-parts k-parts int int) k-incs)
-  (lambda (from k at acc own-ds own-vs a b)
+  (subr (maxeff checks spin) (k-parts int int k-incs k-parts k-parts k-parts int int) k-incs)
+  (lambda (from k at acc own-abs own-ds own-vs a b)
     (if (null? from)
         acc
         (tagcase (k-get (k-inc-module (extract (car from) 2) a b))
           (ty-module (ab ds vs)
-            (let ((r (k-inc-vals vs (if (< at 0) k at) 0 (k-inc-descs ds acc own-ds a b)
-                                 own-vs a b)))
+            (let* ((o (k-abs-own ab))
+                   (acc (k-inc-abs (extract o 1)
+                                   (product (1 (extract acc 1)) (2 (extract acc 2))
+                                            (3 (extract acc 3)) (4 (extract acc 4))
+                                            (5 (append (extract acc 5) (extract o 2))))
+                                   own-abs own-ds a b))
+                   (ds (append (k-abs-aliases ab) ds))
+                   (r (k-inc-vals vs (if (< at 0) k at) 0 (k-inc-descs ds acc own-abs own-ds a b)
+                                  own-vs a b)))
               (k-inc-all (cdr from) (+ k 1) at
                          ;; A hidden `include`'s (`%hinclude-k`): each name marked
                          ;; hidden, for the module's type to leave out (`k-hiding`).
                          (if (k-prefix? "%hinclude-" (symbol->string (extract (car from) 1)))
-                             (product (1 (k-hidden-marks vs (k-hidden-marks ds (extract r 1))))
-                                      (2 (extract r 2)) (3 (extract r 3)))
+                             (k-incs-of (k-hidden-marks
+                                         vs (k-hidden-marks ds (k-hidden-marks (extract o 1)
+                                                                               (extract r 1))))
+                                        (extract r 2) (extract r 3) r)
                              r)
-                         own-ds own-vs a b)))
+                         own-abs own-ds own-vs a b)))
           (else z acc)))))
 ;; A `%hidden:name` type for each of `ps`, onto `acc` (newest first).
 (define k-hidden-marks (subr (maxeff (read @globals) (alloc @t)) (k-parts k-parts) k-parts)
@@ -443,13 +539,17 @@
 (define k-included
   (subr (maxeff checks spin) (k-parts k-parts k-parts k-parts int int int) int)
   (lambda (from abs ds own at a b)
-    (let ((r (k-inc-all from 0 at (product (1 nil) (2 nil) (3 nil)) ds own a b)))
+    (let* ((r (k-inc-all from 0 at (product (1 nil) (2 nil) (3 nil) (4 nil) (5 nil)) abs ds own
+                         a b))
+           (m (extract r 5)))
       (begin
         (set k-reshapes (cons (product (1 a) (2 b)
                                        (3 (append (reverse (extract r 3)) (k-own-at own at 0))))
                               (get k-reshapes)))
-        (k-ty-new (ty-module abs (append (reverse (extract r 1)) ds)
-                             (append (reverse (extract r 2)) own)))))))
+        ;; The included modules' own abstract types, then the module's.
+        (k-ty-new (ty-module (append (reverse (extract r 4)) abs)
+                             (k-subst-each (append (reverse (extract r 1)) ds) m)
+                             (k-subst-each (append (reverse (extract r 2)) own) m)))))))
 
 ;;; ------------------------------------------------------------ hide
 

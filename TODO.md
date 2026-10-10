@@ -1831,18 +1831,11 @@ The conversion is done (`DONE.md` §68). Left from it:
 from by path (a reshape, as a module given where fewer values are wanted
 is). Left:
 
-- `include` and `extend` of a module with abstract types that is not a
-  name: refused now (`DONE.md` §69 has the named ones, aliases). For the
-  two that are literal text, an inline `(module …)` and a `(load-module
-  "f")`, its items could be spliced in, the types then the module's own
-  (the user's, 2026-10-09; OCaml's `include struct … end`); every other is
-  a value made when the program runs. `(extend m (module
-  (define-generative u …) …))`, an `e1` with abstract types of its own,
-  is the common case refused: FX-91 makes them the result's own `abs`.
-  Sheldon's thesis and FX-91 on this: `docs/research/sheldon-combining-modules.md`.
 - A hidden abstract type in an exported one: refused for now (the
   user's, 2026-10-09); abstract in the module's type, the existential
-  reading, could come later.
+  reading, could come later. Likewise an `extend` whose `e1` replaces an
+  abstract type of `e0`'s own that a value kept still mentions (`DONE.md`
+  §69, `modules/extend-abstract-replaced.fx`).
 - The pass these were wanted for: the import blocks §68 wrote, 3,449
   lines (2026-10-09, 39 files converted then), every converted file
   naming all of its own types file (263 lines in 23 files), the rest

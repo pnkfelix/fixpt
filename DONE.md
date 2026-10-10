@@ -1316,6 +1316,24 @@ by its name ``, likewise `extend`. Tests: `modules/include-abstract-alias.fx`,
 `include-abstract-escape.fx`, `include-abstract.fx`,
 `extend-abstract-alias.fx`, `extend-abstract.fx`.
 
+Then a module with abstract types that is not a name (2026-10-10): its
+abstract types the new module's own, each a fresh variable
+(`abs_taken`, `k-abs-own`), one substitution over every side and the
+module's own items; the values by path as before. Not the splicing of
+literal text the TODO suggested: at the type level an existential
+unpacked and packed again, which covers a `(module …)`, a `(load-module
+"f")` and a call alike and changes nothing at run time. In `extend`,
+`e1`'s names replace `e0`'s, abstract ones too; one replaced that a kept
+value or type mentions is refused. In `include`, a name given twice,
+abstract or not, is refused (the Rust checker had missed a description
+of the module's own against an included abstract type), and `(hide
+(include …))` hides the abstract types as well. Choices:
+`CLAUDES_CHOICES.md`. Tests: `modules/include-abstract.fx`,
+`include-abstract-made.fx`, `include-abstract-opaque.fx`,
+`include-abstract-apart.fx`, `include-abstract-twice.fx`,
+`include-abstract-hidden.fx`, `include-abstract-hidden-ok.fx`,
+`extend-abstract.fx`, `extend-abstract-replaced.fx`.
+
 `with` shadows (2026-10-10; the user's: "`with` should absolutely shadow
 bindings"), as FX-91 §2.3.19's: in `(with m …)`, a type or effect name
 `m` gives is `m`'s, whatever it is outside, so `extend`'s `e1`, `(with
