@@ -1995,6 +1995,18 @@ header; nothing uses a static field count. So:
 - With a suffix layout in the type, `(bloblet (fields …) F R)`, likewise
   by prefix: `F₁ ≤ F₂` where `F₂`'s layout is a prefix of `F₁`'s.
 - Kept: freezing is still a change of type, never a subtype.
+- **Exact or a lower bound, both** (the user's, 2026-10-10: fine to tell
+  apart a type that declares its exact field list from one that declares
+  only a lower bound). Proposed: `(bloblet (fields T …) R)` stays exact,
+  today's meaning and what `make-bloblet` gives; `(bloblet (at-least
+  (fields T …)) R)` is a lower bound, and `(at-least (frozen T …))` with
+  it. Exact ≤ exact when the counts are equal; exact or at-least of m
+  fields ≤ at-least of n when m ≥ n; at-least ≤ exact never. Shared
+  fields compared as today. What exact buys: field access is by offset
+  from the suffix either way, but an exact count puts the header at
+  8(F+1) bytes before the suffix, so compiled code could read the length,
+  frozen flags and kind in line, without the trailer or a backward scan.
+  The suffix's layout likewise: `F` exact, or `(at-least F)`, a prefix.
 
 **`(blobref F R)` or `(ref F R)`?** (the user's, 2026-10-10: open to a
 type of its own, since a suffix ref is "a pretty special snowflake".)
