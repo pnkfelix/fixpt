@@ -652,20 +652,6 @@
           ((and (> base 0) (= (extract (car fs) 2) base)) (the loaded-files (cons (car fs) nil)))
           (else (loaded-based (cdr fs) base)))))
 
-;; `s`, its positions moved by `base`.
-(define-rec
-  (syn-moved (subr (maxeff (read @globals) (read rs) (alloc rs) spin) (syn int) syn)
-    (lambda (s base)
-      (tagcase s
-        (atom (d a b) (atom d (+ a base) (+ b base)))
-        (lst (items d a b) (lst (syns-moved items base) d (+ a base) (+ b base)))
-        (dotted (items t d a b)
-          (dotted (syns-moved items base) (syn-moved t base) d (+ a base) (+ b base)))
-        (vec (items d a b) (vec (syns-moved items base) d (+ a base) (+ b base))))))
-  (syns-moved (subr (maxeff (read @globals) (read rs) (alloc rs) spin) (syns-a int) syns-a)
-    (lambda (xs base)
-      (if (null? xs) nil (cons (syn-moved (car xs) base) (syns-moved (cdr xs) base))))))
-
 ;; Where position `at` of `text` is: `line:column`, each from 1.
 (define text-place (subr (maxeff (read @globals) spin) (string int) string)
   (lambda (text at)

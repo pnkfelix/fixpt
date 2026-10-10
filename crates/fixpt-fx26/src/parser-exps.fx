@@ -122,7 +122,6 @@
 (define module-usage (with parser-module module-usage))
 (define loaded (with parser-module loaded))
 (define loaded-next-at (with parser-module loaded-next-at))
-(define syns-moved (with parser-module syns-moved))
 (define in-loaded (with parser-module in-loaded))
 (define loaded-mark (with parser-module loaded-mark))
 (define loaded-error (with parser-module loaded-error))

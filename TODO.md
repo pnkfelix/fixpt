@@ -1782,29 +1782,25 @@ same type.
 
 The conversion is done (`DONE.md` §68). Left from it:
 
-- Profiled (2026-10-09), against 452274e^ (before phase 2), back to back:
-  the front end's text grew 34% (29,878 lines to 40,019; 3,946 more
-  definitions, nearly all imports). Three costs had grown far faster, each
-  a walk along something phase 2 made long, and each fixed: the Rust
-  checker's masking walked the regions of every free variable's type,
-  signatures included, at each node (now kept by type, `69d9fc2`: 1300 ms
-  to 540, from 677 before phase 2); the FX checker looked for each type
-  among the closed named ones in a list (now a table, `c9485fa`: 5.36 G
-  cells to 4.51 G, from 4.43 G); and the FX compiler looked for each
-  expression among every module reshaped (now indexed by start,
-  `7989f6f`: 5.37 G cells to 1.04 G, from 0.80 G; 646 ms to 301, from 252).
-  Left: every phase but one now grows no faster than its input (`fx
-  check` +23%, `fx words` +19%, `fx arm64` +21%, `fx read` +27%); `fx
-  parse` is 2x (11.3 ms to 23.6): its search for each load's file among
-  all 850 is gone (`2980a06`), and what is left is moving each loaded
-  file's syntax to its base, once a file (`syn-moved`, 12.5 M of its 42.7
-  M cells), which grows with the text loaded, now nearly all of the front
-  end. Reading each file at its base would end it: `read-text` given an
-  offset, in the eager reader (licensed: its effects stay on its own
-  regions) and in each driver that reads loaded files (`syn.rs`
-  `read_to_syns`, `bootstrap.fx`). In the FX compiler,
-  `c-find` (90 M cells to 181 M) and `c-member?` (38 M to 116 M) walk
-  lists of names that the imports lengthen; in the FX checker,
+- Profiled (2026-10-09), against 452274e^ (before phase 2), back to
+  back: the front end's text grew 34% (29,878 lines to 40,019; 3,946
+  more definitions, nearly all imports). Three costs had grown far
+  faster, each a walk along something phase 2 made long, and each fixed:
+  the Rust checker's masking walked the regions of every free variable's
+  type, signatures included, at each node (now kept by type, `69d9fc2`:
+  1300 ms to 540, from 677 before phase 2); the FX checker looked for
+  each type among the closed named ones in a list (now a table,
+  `c9485fa`: 5.36 G cells to 4.51 G, from 4.43 G); and the FX compiler
+  looked for each expression among every module reshaped (now indexed by
+  start, `7989f6f`: 5.37 G cells to 1.04 G, from 0.80 G; 646 ms to 301,
+  from 252). Left: every phase but one now grows no faster than its
+  input (`fx check` +23%, `fx words` +19%, `fx arm64` +21%, `fx read`
+  +27%); `fx parse` (11.3 ms before phase 2, 23.6 after): its search for
+  each load's file among all 850 is gone (`2980a06`), and each loaded
+  file is read at its base rather than its syntax moved there afterwards
+  (`77d7ec5`): 13.9 ms, 27.6 M cells (26.0 M before phase 2). In the FX
+  compiler, `c-find` (90 M cells to 181 M) and `c-member?` (38 M to 116
+  M) walk lists of names that the imports lengthen; in the FX checker,
   `k-has-name?` (160 M to 317 M). §69 and §70 shorten the imports; these
   may be worth tables then. `probe_profile_check` names each word by its
   loaded file's number now (`lambda/k-…@1009:…`), so its count of the
