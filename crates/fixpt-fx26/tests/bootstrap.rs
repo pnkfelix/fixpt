@@ -742,7 +742,7 @@ fn probe_phases_as_register_code() {
             gcs = now;
             t = std::time::Instant::now();
         };
-        // With `FIXPT_PROFILE_PHASE` naming a phase (`read`, `check`, `compile`), that
+        // With `FIXPT_PROFILE_PHASE` naming a phase (`read`, `parse`, `check`, `compile`), that
         // phase on the Rust machine, counting cells and words allocated by
         // word: its work, whatever its code.
         let phase = std::env::var("FIXPT_PROFILE_PHASE").unwrap_or_default();
@@ -758,8 +758,10 @@ fn probe_phases_as_register_code() {
         profile_from(sc, "");
         let syns = sc.make(|m| { let l = m.get(syns); m.heap().car(l) });
         let std = sc.make(|m| { let l = m.get(std); m.heap().car(l) });
+        profile_from(sc, "parse");
         let parsed = run(sc, parse, &[syns]);
         lap(sc, "parse");
+        profile_from(sc, "");
         let progs = sc.make(|m| { let r = m.get(parsed); let p = m.heap().bloblet_slot(r, 3); m.heap().bloblet_slot(p, 2) });
         profile_from(sc, "check");
         run(sc, check, &[std, progs]);
