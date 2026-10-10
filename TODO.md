@@ -1826,18 +1826,13 @@ The conversion is done (`DONE.md` §68). Left from it:
 
 ## 69. Combining modules: `include` and `hide`, then the front end's imports (the user's, 2026-10-09: high priority)
 
-`(extend e0 e1)` is done (`DONE.md` §69): it and these share one way of
-being made, a module of hidden items its values are taken from by path
-(a reshape, as a module given where fewer values are wanted is). Left:
+`(extend e0 e1)` and `(include m)` are done (`DONE.md` §69), made one
+way, which `hide` shares: a module of hidden items its values are taken
+from by path (a reshape, as a module given where fewer values are wanted
+is). Left:
 
-- `(include e)`, an item: `e`'s values the module's own, in one bucket
-  with its definitions and other `include`s, a name given twice an error
-  (as `k-defined-twice` already says of a module's own). Decided in
-  making `extend`, and to be said so: `e` is made before the module's
-  items and does not see them, so the bucket stays free of order; its
-  values are in scope in the module, its types are in the module's type
-  but not in scope inside, yet; a module whose type has abstract types is
-  not included, yet, as it is not extended.
+- `include`'s types in scope inside the module, and `include` and
+  `extend` of a module whose type has abstract types (`DONE.md` §69).
 - `(hide item …)`, items seen by the module's body but not in its type,
   so helpers do not pollute its signature; it composes: `(hide (define
   helper …))`, `(hide (define-type t …))`, `(hide (include m))` for using a
@@ -1907,3 +1902,9 @@ name, not the name. Found in the conductor (TODO.md §68), where the entry
 item uses is one of the module's items and also bound outside it, the
 message says so (`` `checker` here is the module's own item, made after
 `lines`, not the `checker` bound outside it ``), in both checkers, agreeing.
+
+Likewise a hidden name: an `include` whose module uses one of the
+module's own items is refused rightly, but as `` `%include` uses `k`,
+defined after it `` (2026-10-09, `TODO.md` §69), naming the hidden item
+that holds the modules included; it should say `` an `include` uses `k`,
+which the module defines: an included module is made before its items ``.

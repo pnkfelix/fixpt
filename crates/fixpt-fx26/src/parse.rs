@@ -2425,6 +2425,9 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
 
     fn parse_module_items(&mut self, forms: &[Syntax]) -> R<Vec<ModItem>> {
         let mut out = Vec::new();
+        // Each `(include m)`, and where each item's values are written (a
+        // `define-rec`'s, each binding's), for `with_includes`.
+        let (mut includes, mut spans): (Vec<(fixpt_read::Span, ExpId)>, Vec<Vec<fixpt_read::Span>>) = (Vec::new(), Vec::new());
         for f in forms {
             let parts = self.items(f, "a module's definition")?.to_vec();
             let name_of = |p: &Self, s: &Syntax| s.as_symbol().ok_or_else(|| FxError::at(s.span, "a name")).map(|n| (n, p.name(n).to_string()));
@@ -2514,8 +2517,14 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                     let ty = self.parse_type(t)?;
                     out.push(ModItem::Val { name, ty: Some(ty), init: self.parse_exp(init)?, infer });
                 }
+                // `(include m)` (`TODO.md` §69): `m`'s values the module's own.
+                (Some("include"), [_, m]) => {
+                    includes.push((f.span, self.parse_exp(m)?));
+                    continue;
+                }
                 (Some("define-rec"), [_, bs @ ..]) => {
                     let mut group = Vec::new();
+                    spans.push(bs.iter().map(|b| b.span).collect());
                     for b in bs {
                         let triple = self.items(b, "`(name type expression)`")?.to_vec();
                         let [n, t, init] = &triple[..] else {
@@ -2530,12 +2539,74 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                 _ => {
                     return Err(FxError::at(
                         f.span,
-                        "a module holds `(define-generative t T)`, `(define-type d T)`, `(define-effect e E)`, `(define x [T] e)`, `(define* f T e)` and `(define-rec (f T e) …)`",
+                        "a module holds `(define-generative t T)`, `(define-type d T)`, `(define-effect e E)`, `(define x [T] e)`, `(define* f T e)`, `(define-rec (f T e) …)` and `(include m)`",
                     ));
                 }
             }
+            spans.resize(out.len(), vec![f.span]);
+        }
+        if !includes.is_empty() {
+            self.with_includes(&mut out, &spans, includes);
         }
         Ok(out)
+    }
+
+    /// A module's `(include m)`s (`TODO.md` §69): one hidden item first,
+    /// `%include`, a module of hidden items `%include-0`, … that are the
+    /// modules included, made before the module's own items and seeing
+    /// none of them; each own item's value in a `(with %include …)` (a
+    /// lambda's body, so that it stays a lambda), its place the item's, as
+    /// the compilers find facts by place. The checkers make the module's
+    /// type of its own values and those (`Checker::included`).
+    fn with_includes(&mut self, out: &mut Vec<ModItem>, spans: &[Vec<fixpt_read::Span>], includes: Vec<(fixpt_read::Span, ExpId)>) {
+        let inc = self.interner.intern("%include");
+        let first = includes[0].0;
+        let bucket = includes
+            .into_iter()
+            .enumerate()
+            .map(|(k, (_, m))| ModItem::Val { name: self.interner.intern(&format!("%include-{k}")), ty: None, init: m, infer: false })
+            .collect();
+        let bucket = self.arena.exp(first, Exp::Module(bucket));
+        for (item, at) in out.iter_mut().zip(spans) {
+            match item {
+                ModItem::Val { init, .. } => *init = self.in_includes(*init, at[0], inc),
+                ModItem::Rec(bs) => {
+                    for (b, span) in bs.iter_mut().zip(at) {
+                        b.2 = self.in_includes(b.2, *span, inc);
+                    }
+                }
+                ModItem::Abs { .. } | ModItem::Desc { .. } => {}
+            }
+        }
+        out.insert(0, ModItem::Val { name: inc, ty: None, init: bucket, infer: false });
+    }
+
+    /// `x` in `(with inc …)` at `span`: a lambda's body, under any
+    /// `plambda`, `the` or region lambda, so that it stays a lambda.
+    fn in_includes(&mut self, x: ExpId, span: fixpt_read::Span, inc: Sym) -> ExpId {
+        match self.arena.exp_at(x).clone() {
+            Exp::Lambda { params, body } => {
+                let body = self.arena.exp(span, Exp::With { module: inc, body });
+                self.arena.replace_exp(x, Exp::Lambda { params, body });
+                x
+            }
+            Exp::PLambda { binders, body } => {
+                let body = self.in_includes(body, span, inc);
+                self.arena.replace_exp(x, Exp::PLambda { binders, body });
+                x
+            }
+            Exp::The { ty, exp } => {
+                let exp = self.in_includes(exp, span, inc);
+                self.arena.replace_exp(x, Exp::The { ty, exp });
+                x
+            }
+            Exp::RLambda { region, lambda } => {
+                let lambda = self.in_includes(lambda, span, inc);
+                self.arena.replace_exp(x, Exp::RLambda { region, lambda });
+                x
+            }
+            _ => self.arena.exp(span, Exp::With { module: inc, body: x }),
+        }
     }
 
     fn label(&mut self, s: &Syntax) -> R<Sym> {

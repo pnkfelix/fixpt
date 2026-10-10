@@ -321,11 +321,109 @@
             (else z t1)))
         (else z t0)))))
 
+;;; ------------------------------------------------------------ include
+
+;; What a module's includes give (`TODO.md` §69), newest first: types,
+;; values, and where each value is, by path.
+(define-type k-incs (productof (1 k-parts) (2 k-parts) (3 k-ids)))
+;; Whether a module is an `include`s' bucket, as the parser makes one: of
+;; values `%include-0`, … only.
+(define k-bucket-items? (subr (read @globals) (k-items) bool)
+  (lambda (items)
+    (letrec ((all (subr (read @globals) (k-items) bool)
+                (lambda (its)
+                  (or (null? its)
+                      (let ((s (symbol->string (car (extract (car its) 2)))))
+                        (and (= (extract (car its) 1) 2) (>= (string-length s) 9)
+                             (string=? (substring s 0 9) "%include-") (all (cdr its))))))))
+      (and (not (null? items)) (all items)))))
+(define k-twice (subr checks (symbol int int) void)
+  (lambda (n a b) (k-fail (k-cat3 "`" (symbol->string n) "` is defined twice in this module") a b)))
+;; Module type `t`, an `include`'s: with no abstract types, or an error.
+(define k-inc-module (subr (maxeff checks spin) (int int int) int)
+  (lambda (t a b)
+    (tagcase (k-get t)
+      (ty-module (abs ds vs)
+        (if (null? abs)
+            t
+            (k-fail "`include` of a module with abstract types is not supported yet" a b)))
+      (else z (k-fail (k-cat3 "`include` includes a module, and this is a " (k-show-ty t) "")
+                      a b)))))
+;; `ds` onto `acc`'s types, none named there or in `own`.
+(define k-inc-descs (subr (maxeff checks spin) (k-parts k-incs k-parts int int) k-incs)
+  (lambda (ds acc own a b)
+    (cond ((null? ds) acc)
+          ((or (>= (k-ext-index (extract acc 1) (extract (car ds) 1) 0) 0)
+               (>= (k-ext-index own (extract (car ds) 1) 0) 0))
+           (k-twice (extract (car ds) 1) a b))
+          (else (k-inc-descs (cdr ds) (product (1 (cons (car ds) (extract acc 1)))
+                                               (2 (extract acc 2)) (3 (extract acc 3)))
+                             own a b)))))
+;; `vs`, from value `j` of the module that is value `k`, onto `acc`'s
+;; values, none named there or in `own`.
+(define k-inc-vals (subr (maxeff checks spin) (k-parts int int k-incs k-parts int int) k-incs)
+  (lambda (vs k j acc own a b)
+    (cond ((null? vs) acc)
+          ((or (>= (k-ext-index (extract acc 2) (extract (car vs) 1) 0) 0)
+               (>= (k-ext-index own (extract (car vs) 1) 0) 0))
+           (k-twice (extract (car vs) 1) a b))
+          (else (k-inc-vals (cdr vs) k (+ j 1)
+                            (product (1 (extract acc 1)) (2 (cons (car vs) (extract acc 2)))
+                                     (3 (cons (k-reshape-path k j) (extract acc 3))))
+                            own a b)))))
+;; Each of the modules `from`, the `k`th on, onto `acc`: its values from
+;; value `at`, if not -1, else `k`.
+(define k-inc-all
+  (subr (maxeff checks spin) (k-parts int int k-incs k-parts k-parts int int) k-incs)
+  (lambda (from k at acc own-ds own-vs a b)
+    (if (null? from)
+        acc
+        (tagcase (k-get (k-inc-module (extract (car from) 2) a b))
+          (ty-module (ab ds vs)
+            (k-inc-all (cdr from) (+ k 1) at
+                       (k-inc-vals vs (if (< at 0) k at) 0 (k-inc-descs ds acc own-ds a b)
+                                   own-vs a b)
+                       own-ds own-vs a b))
+          (else z acc)))))
+;; The positions of a module's own values `own`, past `%include`'s, at `k`.
+(define k-own-at (subr (maxeff (read @globals) (alloc @t)) (k-parts int int) k-ids)
+  (lambda (own k i)
+    (if (or (null? own) (< k 0))
+        nil
+        (cons (if (< i k) i (+ i 1)) (k-own-at (cdr own) k (+ i 1))))))
+;; `vs` but the `k`th, from `i`.
+(define k-parts-but (subr (maxeff (read @globals) (alloc @t)) (k-parts int int) k-parts)
+  (lambda (vs k i)
+    (cond ((null? vs) nil)
+          ((= i k) (cdr vs))
+          (else (the k-parts (cons (car vs) (k-parts-but (cdr vs) k (+ i 1))))))))
+;; The modules `from` included, their values and types with `abs`, `ds` and
+;; `own`, the module's own: one bucket, a name given twice refused. Made of
+;; theirs by path, from value `at` if it is a module's own `%include` (its
+;; values then after it), else from each of `from`. As Rust's
+;; `Checker::included`.
+(define k-included
+  (subr (maxeff checks spin) (k-parts k-parts k-parts k-parts int int int) int)
+  (lambda (from abs ds own at a b)
+    (let ((r (k-inc-all from 0 at (product (1 nil) (2 nil) (3 nil)) ds own a b)))
+      (begin
+        (set k-reshapes (cons (product (1 a) (2 b)
+                                       (3 (append (reverse (extract r 3)) (k-own-at own at 0))))
+                              (get k-reshapes)))
+        (k-ty-new (ty-module abs (append (reverse (extract r 1)) ds)
+                             (append (reverse (extract r 2)) own)))))))
+
 ;; A module's type, at `a`..`b`, of its abstract types, descriptions and
-;; values: an `extend`'s, of the two it holds (`k-extended`).
+;; values: an `extend`'s, of the two it holds (`k-extended`); an
+;; `include`s', of the modules included; a module's that includes some, of
+;; those and its own. As Rust's `Checker::module_type`.
 (define k-module-type (subr (maxeff checks spin) (k-items k-parts k-parts k-parts int int) int)
   (lambda (items abs ds vs a b)
-    (if (k-extend-items? items) (k-extended vs a b) (k-ty-new (ty-module abs ds vs)))))
+    (let ((k (k-ext-index vs '%include 0)))
+      (cond ((k-extend-items? items) (k-extended vs a b))
+            ((k-bucket-items? items) (k-included vs nil nil nil -1 a b))
+            ((>= k 0) (k-included (list (k-nth vs k)) abs ds (k-parts-but vs k 0) k a b))
+            (else (k-ty-new (ty-module abs ds vs)))))))
 
 ;;; ------------------------------------------------------------ with
 

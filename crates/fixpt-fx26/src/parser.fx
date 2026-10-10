@@ -340,6 +340,79 @@
            (params (mk-list (cdr hs) ha hb))
            (fun (mk-list (list (mk-symbol "dlambda" ha hb) params t) a b)))
       (mod-item-of 1 (syn-symbol (car hs)) (one-syn fun) nil))))
+;;; ------------------------------------------------------------ include
+
+;; A module's `(include m)`s (`TODO.md` §69), as `parse.rs`'s
+;; `with_includes`: one hidden item first, `%include`, a module of hidden
+;; items `%include-0`, … that are the modules included, made before the
+;; module's own items and seeing none of them; each own item's value in a
+;; `(with %include …)` (a lambda's body, so that it stays a lambda), its
+;; place the item's, as the compilers find facts by place. An `include`
+;; is read as an item of kind 9, its form kept for its place.
+(define include-form? (subr (maxeff (read @globals) (read rs)) (syn) bool)
+  (lambda (f)
+    (tagcase f
+      (lst (xs d a b) (and (not (null? xs)) (symbol=? (syn-head (car xs)) 'include)))
+      (else y #f))))
+(define any-include? (subr (maxeff (read @globals) (read rs)) (syns-a) bool)
+  (lambda (fs) (and (not (null? fs)) (or (include-form? (car fs)) (any-include? (cdr fs))))))
+;; `x` in `(with %include …)` at `a`..`b`: a lambda's body, under any
+;; `plambda`, `the` or region lambda.
+(define in-includes (subr (maxeff tree-builds spin) (exp int int) exp)
+  (lambda (x a b)
+    (tagcase x
+      (e-lambda (ps body la lb) (e-lambda ps (e-with '%include body a b) la lb))
+      (e-plambda (bs body la lb) (e-plambda bs (in-includes body a b) la lb))
+      (e-the (t e la lb) (e-the t (in-includes e a b) la lb))
+      (e-rlambda (r l la lb) (e-rlambda r (in-includes l a b) la lb))
+      (else y (e-with '%include x a b)))))
+;; Each of `xs` so, at the place of the binding of `bs` it is.
+(define inits-in-includes (subr (maxeff tree-builds spin) (exp-list syns-a) exp-list)
+  (lambda (xs bs)
+    (if (or (null? xs) (null? bs))
+        xs
+        (cons (in-includes (car xs) (syn-start (car bs)) (syn-end (car bs)))
+              (inits-in-includes (cdr xs) (cdr bs))))))
+;; Item `it`, read from form `f`, its values so.
+(define item-in-includes (subr (maxeff tree-builds spin) (mod-item syn) mod-item)
+  (lambda (it f)
+    (let ((k (extract it 1)) (xs (extract it 4)))
+      (product (1 k) (2 (extract it 2)) (3 (extract it 3))
+               (4 (cond ((= k 2) (inits-in-includes xs (one-syn f)))
+                        ((= k 3) (tagcase f (lst (bs d a b) (inits-in-includes xs (cdr bs)))
+                                   (else y xs)))
+                        (else xs)))))))
+;; The included modules of `items`, from `%include-k` on.
+(define include-items (subr (maxeff tree-builds spin) (mod-items int) mod-items)
+  (lambda (items k)
+    (cond ((null? items) nil)
+          ((= (extract (car items) 1) 9)
+           (cons (mod-item-of 2 (string->symbol (string-append "%include-" (int->string k))) nil
+                              (extract (car items) 4))
+                 (include-items (cdr items) (+ k 1))))
+          (else (include-items (cdr items) k)))))
+;; `items` but their includes; and the first include's form.
+(define own-items (subr (maxeff tree-builds spin) (mod-items) mod-items)
+  (lambda (items)
+    (cond ((null? items) nil)
+          ((= (extract (car items) 1) 9) (own-items (cdr items)))
+          (else (cons (car items) (own-items (cdr items)))))))
+(define first-include (subr (maxeff tree-builds spin) (mod-items) syns-a)
+  (lambda (items)
+    (cond ((null? items) nil)
+          ((= (extract (car items) 1) 9) (extract (car items) 3))
+          (else (first-include (cdr items))))))
+;; A module's items, its includes made one `%include` first.
+(define with-includes (subr (maxeff tree-builds spin) (mod-items) mod-items)
+  (lambda (items)
+    (let ((f (first-include items)))
+      (if (null? f)
+          items
+          (cons (mod-item-of 2 '%include nil
+                             (list (e-module (include-items items 0) (syn-start (car f))
+                                             (syn-end (car f)))))
+                (own-items items))))))
+
 ;; `(lambda (x) x)`, spanning `a`..`b`: an abstract type's conversion.
 (define identity-at (subr (read @globals) (int int) exp)
   (lambda (a b)
@@ -347,8 +420,8 @@
       (e-lambda (the param-list (cons x nil)) (e-var 'x a b) a b))))
 (define module-usage string
   (string-append "a module holds `(define-generative t T)`, `(define-type d T)`, "
-                 (string-append "`(define-effect e E)`, `(define x [T] e)`, `(define* f T e)` and "
-                                "`(define-rec (f T e) …)`")))
+                 (string-append "`(define-effect e E)`, `(define x [T] e)`, `(define* f T e)`, "
+                                "`(define-rec (f T e) …)` and `(include m)`")))
 ;; A `define-rec`'s names, types and expressions, each in order.
 (define rec-names (subr (read @globals) (letrec-list) names)
   (lambda (bs) (if (null? bs) nil (cons (extract (car bs) 1) (rec-names (cdr bs))))))

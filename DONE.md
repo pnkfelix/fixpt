@@ -1257,3 +1257,19 @@ a global bound to one included): what the two's abstract types become in
 the one is to decide. `extend` is a keyword now, as `module` is; the
 evaluator's procedure of that name is `bind1`. Tests:
 `modules/extend.fx`, `extend-not-module.fx`, `extend-abstract.fx`.
+
+`(include m)` (2026-10-09), an item: `m`'s values and types the module's
+own, one bucket with its definitions and other `include`s, a name given
+twice refused, never shadowed. Both parsers (`with_includes`,
+`with-includes`) make a module's `include`s one hidden item first,
+`%include`, a module of hidden items `%include-0`, … (the modules
+included, made before the module's items and seeing none of them), and
+put each own item's value in `(with %include …)`, a lambda's body so that
+it stays a lambda, its place the item's (the compilers find facts by
+place). Both checkers (`Checker::included`, `k-included`) give the bucket
+the type of the one, and the module the type of its own values and the
+bucket's, each made by path as `extend`'s are: nothing new in a compiler
+or the evaluator. Not yet: an `include`'s types in scope inside the
+module, and a module whose type has abstract types. `include` is a module
+item's keyword now. Tests: `modules/include.fx`, `include-twice.fx`,
+`include-own-twice.fx`, `include-not-module.fx`, `include-abstract.fx`.

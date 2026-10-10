@@ -51,6 +51,9 @@
 (define arity (with parser-module arity))
 (define big-literal (with parser-module big-literal))
 (define mod-item-of (with parser-module mod-item-of))
+(define with-includes (with parser-module with-includes))
+(define any-include? (with parser-module any-include?))
+(define item-in-includes (with parser-module item-in-includes))
 (define datatype? (with parser-module datatype?))
 (define expand-datatype (with parser-module expand-datatype))
 (define e-var (with parser-module e-var))
@@ -830,10 +833,16 @@
   ;; A `module`'s items, in order.
   ;; A module's forms, its `define-datatype`s expanded.
   (parse-module-items (subr (maxeff parses spin) (syns-a) mod-items)
-    (lambda (fs)
+    (lambda (fs) (with-includes (parse-module-items-in fs (any-include? fs)))))
+  ;; The same, each item's values in `(with %include …)` if `inc?`.
+  (parse-module-items-in (subr (maxeff parses spin) (syns-a bool) mod-items)
+    (lambda (fs inc?)
       (cond ((null? fs) nil)
-            ((datatype? (car fs)) (parse-module-items (append (expand-datatype (car fs)) (cdr fs))))
-            (else (let* ((item (parse-module-item (car fs))) (rest (parse-module-items (cdr fs))))
+            ((datatype? (car fs))
+             (parse-module-items-in (append (expand-datatype (car fs)) (cdr fs)) inc?))
+            (else (let* ((item (parse-module-item (car fs)))
+                         (item (if inc? (item-in-includes item (car fs)) item))
+                         (rest (parse-module-items-in (cdr fs) inc?)))
                     (cons item rest))))))
   ;; `(define-generative t T)`, `(define-type d T)`, `(define x e)`, `(define
   ;; x T e)` or `(define-rec (f T e) …)`.
@@ -877,6 +886,9 @@
                       (mark (mk-symbol "*" (syn-start f) (syn-end f))))
                  (mod-item-of 2 name (the syns-a (list (nth parts 2) mark))
                               (the exp-list (cons init nil)))))
+              ;; `(include m)` (`TODO.md` §69): kind 9, its form kept.
+              ((and (symbol=? head 'include) (= n 2))
+               (mod-item-of 9 '%include (one-syn f) (list (parse-exp (nth parts 1)))))
               ((symbol=? head 'define-rec)
                (let ((bs (parse-typed-bindings (cdr parts) "`(name type expression)`"
                                                "`(define-rec (name type expression) …)`")))

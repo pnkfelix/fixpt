@@ -707,6 +707,11 @@ impl Arena {
         ExpId(last_id(self.exps.len(), "expressions"))
     }
 
+    /// Node `id` made `e`, its span kept: a parser rewriting what it made.
+    pub fn replace_exp(&mut self, id: ExpId, e: Exp) {
+        self.exps[id.0 as usize].1 = e;
+    }
+
     pub fn exp_at(&self, id: ExpId) -> &Exp {
         &self.exps[id.0 as usize].1
     }

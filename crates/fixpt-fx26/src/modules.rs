@@ -45,15 +45,73 @@ impl Checker {
                     return Err(FxError::at(span, format!("`{}`'s type mentions `{shown}`, which is not known outside the module", self.interner.name(*n))));
                 }
             }
-            if self.is_extend(items) {
-                return self.extended(e, span, &vals).map(|t| (t, eff));
-            }
-            Ok((self.arena.ty(Ty::Module { abs, descs, vals }), eff))
+            self.module_type(e, span, items, abs, descs, vals).map(|t| (t, eff))
         });
         self.skolems.truncate(named);
         let (t, eff) = r?;
         let eff = self.mask(e, &eff, t);
         Ok((t, eff))
+    }
+
+    /// A module's type, of its abstract types, descriptions and values: an
+    /// `extend`'s, of the two it holds; an `include`s' (`with_includes`), of
+    /// the modules included; a module's that includes some, of those and its
+    /// own. As the FX-26 checker's `k-module-type`.
+    fn module_type(&mut self, e: ExpId, span: Span, items: &[ModItem], abs: Vec<(Sym, DVar)>, descs: Vec<(Sym, TyId)>, vals: Vec<(Sym, TyId)>) -> R<TyId> {
+        if self.is_extend(items) {
+            return self.extended(e, span, &vals);
+        }
+        let hidden = |c: &Self, n: Sym, pre: &str| c.interner.name(n).starts_with(pre);
+        if !items.is_empty() && items.iter().all(|it| matches!(it, ModItem::Val { name, .. } if hidden(self, *name, "%include-"))) {
+            return self.included(e, span, Vec::new(), Vec::new(), Vec::new(), &vals, None);
+        }
+        if let Some(k) = vals.iter().position(|(n, _)| self.interner.name(*n) == "%include") {
+            let own: Vec<(Sym, TyId)> = vals.iter().enumerate().filter(|(i, _)| *i != k).map(|(_, v)| *v).collect();
+            return self.included(e, span, abs, descs, own, &vals[k..=k], Some(k));
+        }
+        Ok(self.arena.ty(Ty::Module { abs, descs, vals }))
+    }
+
+    /// The modules `from` included (`TODO.md` §69), their values and types
+    /// with `abs`, `descs` and `vals`, the module's own: one bucket, a name
+    /// given twice refused. Made of theirs by path, from the modules of
+    /// value `at` if it is a module's own `%include` (its values then
+    /// after it), else from each of `from`, values `0`, `1`, ….
+    #[allow(clippy::too_many_arguments)]
+    fn included(&mut self, e: ExpId, span: Span, abs: Vec<(Sym, DVar)>, mut descs: Vec<(Sym, TyId)>, own: Vec<(Sym, TyId)>, from: &[(Sym, TyId)], at: Option<usize>) -> R<TyId> {
+        let (mut out, mut path): (Vec<(Sym, TyId)>, Vec<usize>) = (Vec::new(), Vec::new());
+        let mut own_descs = std::mem::take(&mut descs);
+        for (k, (_, t)) in from.iter().enumerate() {
+            let (ds, vs) = match self.arena.get(self.arena.resolve(*t)).clone() {
+                Ty::Module { abs, descs, vals } if abs.is_empty() => (descs, vals),
+                Ty::Module { .. } => return Err(FxError::at(span, "`include` of a module with abstract types is not supported yet")),
+                _ => return Err(FxError::at(span, format!("`include` includes a module, and this is a {}", self.show_ty(*t)))),
+            };
+            for d in ds {
+                if descs.iter().chain(&own_descs).any(|(n, _)| *n == d.0) {
+                    return Err(FxError::at(span, format!("`{}` is defined twice in this module", self.interner.name(d.0))));
+                }
+                descs.push(d);
+            }
+            for (j, v) in vs.into_iter().enumerate() {
+                if out.iter().chain(&own).any(|(n, _)| *n == v.0) {
+                    return Err(FxError::at(span, format!("`{}` is defined twice in this module", self.interner.name(v.0))));
+                }
+                out.push(v);
+                path.push(reshape_path(at.unwrap_or(k), j));
+            }
+        }
+        descs.append(&mut own_descs);
+        // The module's own values after the included, by position, past
+        // `%include`'s.
+        if let Some(k) = at {
+            for (i, v) in own.iter().enumerate() {
+                out.push(*v);
+                path.push(if i < k { i } else { i + 1 });
+            }
+        }
+        self.facts.reshaped.insert(e, path);
+        Ok(self.arena.ty(Ty::Module { abs, descs, vals: out }))
     }
 
     /// Whether a module is an `(extend e0 e1)`, as the parser makes one.
