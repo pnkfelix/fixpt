@@ -168,6 +168,15 @@ pub struct Checker {
     /// Why each member of a recursive group that may not end may not: said
     /// when its declared type leaves out `spin`.
     pub(crate) spin_why: Vec<((Sym, TyId), String)>,
+    /// The regions each type mentions (`regions_in`), kept for types with
+    /// no inference slot unsolved in them, which cannot change: masking
+    /// asks for those of every free variable at each node, and a module
+    /// given to a file has a signature's worth of entries
+    /// (`TODO.md` §68). Forgotten when the arena is reset.
+    pub(crate) regions_memo: std::cell::RefCell<HashMap<TyId, std::rc::Rc<[Region]>>>,
+    /// Set by `regions_walk` on meeting an unsolved slot: what it found
+    /// may change, so it is not kept.
+    pub(crate) regions_open: std::cell::Cell<bool>,
     /// Every `define-generative`, by number.
     pub(crate) generatives: Vec<Generative>,
     /// The generative types whose insides the definition being checked may
@@ -511,6 +520,8 @@ impl Checker {
             holes: None,
             hole_hint: None,
             spin_why: Vec::new(),
+            regions_memo: std::cell::RefCell::new(HashMap::new()),
+            regions_open: std::cell::Cell::new(false),
             generatives: Vec::new(),
             transparent: Vec::new(),
             inside: Vec::new(),
@@ -1994,14 +2005,25 @@ impl Checker {
 
     /// Every region mentioned in type `t`, following recursive types once.
     pub fn regions_in(&self, t: TyId, out: &mut HashSet<Region>) {
+        let t = self.arena.resolve(t);
+        if let Some(rs) = self.regions_memo.borrow().get(&t) {
+            out.extend(rs.iter().copied());
+            return;
+        }
         let mut seen = HashSet::new();
-        self.regions_walk(t, &mut seen, out);
+        let mut found = HashSet::new();
+        let outer = self.regions_open.replace(false);
+        self.regions_walk(t, &mut seen, &mut found);
         // Frozen data mentions the place it is in.
-        let places: Vec<Region> = out.iter().filter_map(|r| match r {
+        let places: Vec<Region> = found.iter().filter_map(|r| match r {
             Region::Frozen(Some(p), _) => Some(Region::Var(*p)),
             _ => None,
         }).collect();
-        out.extend(places);
+        found.extend(places);
+        if !self.regions_open.replace(outer) {
+            self.regions_memo.borrow_mut().insert(t, found.iter().copied().collect());
+        }
+        out.extend(found);
     }
 
     fn regions_walk(&self, t: TyId, seen: &mut HashSet<TyId>, out: &mut HashSet<Region>) {
@@ -2010,7 +2032,8 @@ impl Checker {
             return;
         }
         match self.arena.get(t).clone() {
-            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Nil | Ty::False | Ty::Proving { .. } | Ty::Var(_) | Ty::Link(None) | Ty::Select(..) | Ty::ParamSel(..) => {}
+            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Nil | Ty::False | Ty::Proving { .. } | Ty::Var(_) | Ty::Select(..) | Ty::ParamSel(..) => {}
+            Ty::Link(None) => self.regions_open.set(true),
             Ty::Union(ms) => {
                 for m in ms {
                     self.regions_walk(m, seen, out);

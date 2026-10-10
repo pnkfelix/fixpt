@@ -1018,6 +1018,7 @@ impl Checker {
         self.dscope.truncate(dscope);
         self.facts.forget_from(arena.exps());
         self.arena.reset(arena);
+        self.regions_memo.borrow_mut().clear();
         out
     }
 
