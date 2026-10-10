@@ -136,7 +136,11 @@ impl Checker {
                         from = seen[f].1;
                     }
                     chain.reverse();
-                    return Err(FxError::at(self.arena.span_of(*init), self.too_soon(*name, &chain)));
+                    let why = match self.captured(*init, i, &places) {
+                        Some(c) => self.capture_said(*name, c),
+                        None => self.too_soon(*name, &chain),
+                    };
+                    return Err(FxError::at(self.arena.span_of(*init), why));
                 }
                 if let Some(l) = lambda(n) {
                     for m in self.module_names_in(lambdas[l].2, &places) {
@@ -151,16 +155,47 @@ impl Checker {
         Ok(())
     }
 
+    /// Of the names item `i`'s value `init` names itself, the first the
+    /// module defines at or after it that is bound outside the module too:
+    /// a name the item captures, meant, likely, as the one outside
+    /// (`TODO.md` §72). Not one of the modules checked first, which are the
+    /// module's own as bound.
+    fn captured(&self, init: ExpId, i: usize, places: &[(Sym, usize)]) -> Option<Sym> {
+        self.module_names_in(init, places).into_iter().find(|c| {
+            places.iter().any(|(n, at)| n == c && *at >= i)
+                && self.lookup(*c).is_some()
+                && !self.hazard_modules.iter().any(|(m, _)| m == c)
+        })
+    }
+
+    /// What is said where `x`'s value names `c`, the module's own item, not
+    /// made yet, and bound outside it too.
+    fn capture_said(&self, x: Sym, c: Sym) -> String {
+        let c = self.interner.name(c);
+        let when = if self.interner.name(x) == "%include" {
+            "made after the modules included".to_string()
+        } else if self.interner.name(x) == c {
+            "this one".to_string()
+        } else {
+            format!("made after `{}`", self.interner.name(x))
+        };
+        format!("`{c}` here is the module's own item, {when}, not the `{c}` bound outside it")
+    }
+
     /// What is said of `x`, whose value reaches `chain`'s last name, not
-    /// made yet, through the lambdas before it.
+    /// made yet, through the lambdas before it. Of `%include` (the modules
+    /// a module includes, `with_includes`), what an `include` is.
     fn too_soon(&self, x: Sym, chain: &[Sym]) -> String {
         let name = |n: &Sym| format!("`{}`", self.interner.name(*n));
         let last = chain.last().expect("a chain");
-        let mut s = format!("{} uses {}", name(&x), name(&chain[0]));
+        let include = self.interner.name(x) == "%include";
+        let mut s = if include { format!("an `include` uses {}", name(&chain[0])) } else { format!("{} uses {}", name(&x), name(&chain[0])) };
         for n in &chain[1..] {
             s.push_str(&format!(", which uses {}", name(n)));
         }
-        if *last == x {
+        if include {
+            s.push_str(", which the module defines: an included module is made before its items");
+        } else if *last == x {
             s.push_str(", before it is made");
         } else if chain.len() == 1 {
             s.push_str(", defined after it");

@@ -265,11 +265,42 @@
 (define k-too-soon (subr (read @globals) (symbol k-names) string)
   (lambda (x chain)
     (let* ((last (car (reverse chain)))
-           (head (k-cat4 (k-quote-name x) " uses " (k-quote-name (car chain))
-                         (k-chain-rest (cdr chain)))))
-      (cond ((symbol=? last x) (string-append head ", before it is made"))
+           ;; Of `%include` (the modules a module includes), what an
+           ;; `include` is.
+           (include? (symbol=? x '%include))
+           (head (k-cat4 (if include? "an `include`" (k-quote-name x)) " uses "
+                         (k-quote-name (car chain)) (k-chain-rest (cdr chain)))))
+      (cond (include?
+             (string-append head (string-append ", which the module defines: an included module"
+                                                " is made before its items")))
+            ((symbol=? last x) (string-append head ", before it is made"))
             ((null? (cdr chain)) (string-append head ", defined after it"))
             (else (k-cat3 head ", defined after " (k-quote-name x)))))))
+;; Of the names `ns` an item's value names itself, the first the module
+;; (`ps`) defines at or after item `i` that is bound outside the module too:
+;; a name the item captures, meant, likely, as the one outside (`TODO.md`
+;; §72); not one of the modules checked first (`k-hazard-mods`), the
+;; module's own as bound. In a list of one, or none. As the Rust checker's
+;; `captured`.
+(define k-captured (subr (maxeff checks spin) (k-names k-places int) k-names)
+  (lambda (ns ps i)
+    (cond ((null? ns) nil)
+          ((and (>= (k-place-of ps (car ns)) i) (>= (k-lookup (car ns)) 0)
+                (not (k-hazard-mod? (get k-hazard-mods) (car ns))))
+           (the k-names (cons (car ns) nil)))
+          (else (k-captured (cdr ns) ps i)))))
+(define k-hazard-mod? (subr (read @globals) (k-hazard-list symbol) bool)
+  (lambda (hs n)
+    (and (not (null? hs)) (or (symbol=? (extract (car hs) 1) n) (k-hazard-mod? (cdr hs) n)))))
+;; What is said where `x`'s value names `c`, the module's own item, not
+;; made yet, and bound outside it too: as the Rust checker's `capture_said`.
+(define k-capture-said (subr (maxeff (read @globals) (alloc @t)) (symbol symbol) string)
+  (lambda (x c)
+    (let ((when (cond ((symbol=? x '%include) "made after the modules included")
+                      ((symbol=? x c) "this one")
+                      (else (k-cat3 "made after `" (symbol->string x) "`")))))
+      (k-cat4 (k-quote-name c) " here is the module's own item, " when
+              (k-cat3 ", not the " (k-quote-name c) " bound outside it")))))
 ;; Names `ns` not reached yet, in order.
 (define k-not-reached (subr kallocs (k-names k-reached) k-names)
   (lambda (ns rs)
@@ -285,7 +316,11 @@
         #u
         (let ((n (car todo)) (ps (extract h 1)))
           (if (>= (k-place-of ps n) (extract h 3))
-              (k-fail-at (k-too-soon (extract h 4) (k-chain-to rs n nil)) (extract h 5))
+              (let ((c (k-captured (k-mod-names-in (extract h 5) ps) ps (extract h 3))))
+                (k-fail-at (if (null? c)
+                               (k-too-soon (extract h 4) (k-chain-to rs n nil))
+                               (k-capture-said (extract h 4) (car c)))
+                           (extract h 5)))
               (let ((l (k-mlam-named (extract h 2) n)))
                 (if (null? l)
                     (k-hazard-walk (cdr todo) rs h)

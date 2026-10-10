@@ -1309,3 +1309,21 @@ text (`tests/parser.rs`, `the_built_in_files_load_no_cycle`; shown to
 catch the cycle of 2026-10-09 when it is put back). Test:
 `modules/load-cycle.fx`, a file that loads itself. Two files deep, the
 checkers place errors differently, a cycle or not: `TODO.md` §73.
+
+## 72. Say which name a module item captures (2026-10-09)
+
+A module's items scope over all of it (`letrec*`), so an item can capture
+a name the module's own code means from outside it, as the conductor's
+entry `check-program` captured the module of that name. Both checkers
+refused it rightly but said `` `lines` uses `lines`, before it is made ``:
+what `(with checker lines)` reaches through the captured name. Now, where
+an item's value names, itself, a later item of the module that is bound
+outside it too (and is not a module checked first, the module's own as
+bound), they say so (`captured` and `capture_said`, `k-captured` and
+`k-capture-said`): `` `checker` here is the module's own item, made after
+`lines`, not the `checker` bound outside it `` (`this one`, where the item
+captures its own name). And where an `include`'s module uses one of the
+module's items, the hidden `%include` is not named: `` an `include` uses
+`k`, which the module defines: an included module is made before its
+items ``. Tests: `modules/capture.fx`, `capture-self.fx`,
+`include-uses-own.fx`.

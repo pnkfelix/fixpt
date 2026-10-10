@@ -1864,30 +1864,6 @@ which may remove many of these names outright, so perhaps after §69.
 The tools that know which name comes from which file and module are in
 `scripts/conductor/` (`deps.py`, `registry2.py`; see its README).
 
-## 72. Say which name a module item captures (2026-10-09)
-
-A module's items scope over all its items (`letrec*`), so an item can
-capture a name the module's own code means from outside it:
-
-    (define entries
-      (let ((checker (module (define checker …) (define lines …))))
-        (module (define lines (with checker lines))
-                (define checker (with checker checker)))))
-
-Both checkers refuse it rightly, but say `` `lines` uses `lines`, before
-it is made ``: what `(with checker lines)` reaches through the captured
-name, not the name. Found in the conductor (TODO.md §68), where the entry
-`check-program` captured the module of that name. Wanted: when a name an
-item uses is one of the module's items and also bound outside it, the
-message says so (`` `checker` here is the module's own item, made after
-`lines`, not the `checker` bound outside it ``), in both checkers, agreeing.
-
-Likewise a hidden name: an `include` whose module uses one of the
-module's own items is refused rightly, but as `` `%include` uses `k`,
-defined after it `` (2026-10-09, `TODO.md` §69), naming the hidden item
-that holds the modules included; it should say `` an `include` uses `k`,
-which the module defines: an included module is made before its items ``.
-
 ## 73. An error two loads deep, placed alike by both checkers (2026-10-10)
 
 Found making a load cycle an error (`DONE.md` §71): where a file loaded

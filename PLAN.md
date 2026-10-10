@@ -191,8 +191,8 @@ weighed with the other items, not ahead of them.
   pass (`DONE.md` §68, §69), and §71, a load cycle an error. Next:
   `TODO.md` §69's rest, an `include`'s types in scope inside, then the
   pass over the front end's 3,449 import lines with `(hide (include m))`;
-  §70, short names for the modules a file binds; §72 and §73, messages
-  and where an error two loads deep is placed.
+  §70, short names for the modules a file binds; §73, where an error two
+  loads deep is placed (§72's messages done, `DONE.md` §72).
 - S1. Done (2026-09-30): **the `acyclic?` gap**, F13: shown a
   use-after-free on every path, and fixed in both checkers with data at a
   place, `(t data p)` (`docs/research/shapes.md`, the framing: regions,
