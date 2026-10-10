@@ -598,9 +598,17 @@
 ;;; ------------------------------------------------------------ files loaded
 
 (define loaded (ref loaded-files rs) (new nil))
-;; For a driver: what the program's `load-module`s read.
-(define loaded-files! (subr (maxeff (read @globals) (write rs)) (loaded-files) unit)
-  (lambda (fs) (set loaded fs)))
+;; The same, in the order a driver reads them, depth first, as the parser
+;; meets the loads: the next load's, first, most often (`loaded-next-at`).
+(define loaded-next (ref loaded-files rs) (new nil))
+;; For a driver: what the program's `load-module`s read, the last read
+;; first.
+(define loaded-files! (subr (maxeff (read @globals) (write rs) (alloc rs)) (loaded-files) unit)
+  (lambda (fs) (begin (set loaded fs) (set loaded-next (loaded-onto fs nil)))))
+;; `xs` reversed onto `ys`.
+(define loaded-onto
+  (subr (maxeff (read @globals) (alloc rs)) (loaded-files loaded-files) loaded-files)
+  (lambda (xs ys) (if (null? xs) ys (loaded-onto (cdr xs) (the loaded-files (cons (car xs) ys))))))
 ;; The positions of one file and the next apart.
 (define load-base int 1000000000)
 
@@ -628,6 +636,15 @@
     (cond ((null? fs) nil)
           ((= (extract (car fs) 1) a) (the loaded-files (cons (car fs) nil)))
           (else (loaded-at (cdr fs) a)))))
+;; The same, taking it from the front of `loaded-next` where it is there,
+;; as it is when the driver read the files in the order they are parsed;
+;; else found as `loaded-at` finds it.
+(define loaded-next-at (subr (maxeff (read @globals) (read rs) (write rs)) (int) loaded-files)
+  (lambda (a)
+    (let ((next (get loaded-next)))
+      (if (and (not (null? next)) (= (extract (car next) 1) a))
+          (begin (set loaded-next (cdr next)) (the loaded-files (cons (car next) nil)))
+          (loaded-at (get loaded) a)))))
 ;; The file read at `base`, in a list of one.
 (define loaded-based (subr (maxeff (read @globals) (read rs)) (loaded-files int) loaded-files)
   (lambda (fs base)

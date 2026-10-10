@@ -121,7 +121,7 @@
 (define rec-inits (with parser-module rec-inits))
 (define module-usage (with parser-module module-usage))
 (define loaded (with parser-module loaded))
-(define loaded-at (with parser-module loaded-at))
+(define loaded-next-at (with parser-module loaded-next-at))
 (define syns-moved (with parser-module syns-moved))
 (define in-loaded (with parser-module in-loaded))
 (define loaded-mark (with parser-module loaded-mark))
@@ -884,7 +884,7 @@
   ;; file, and a `load-input`'s `input` its keyword, `head`.
   (parse-loaded (subr (maxeff parses spin) (string bool syn int int) exp)
     (lambda (path input? head a b)
-      (let ((f (loaded-at (get loaded) a)))
+      (let ((f (loaded-next-at a)))
         (if (null? f)
             (e-module (loaded-error (str3 "cannot read `" path "`: it was not read")) a b)
             (let* ((key (string-append (if input? "input:" "") (extract (car f) 7)))
