@@ -1782,13 +1782,26 @@ same type.
 
 The conversion is done (`DONE.md` §68). Left from it:
 
-- Profile both checkers on the front end, now that its files have stopped
-  moving: their time rose with each checker file converted (Rust 0.63 s
-  before §68, 1.11 s at `check-binders.fx`; FX 1.20 s after three walks
-  were fixed, 1.37 s; `k-has-id?` 9% then), and compiling the front end
-  is 207.6 M words, from 171.0 at the start of phase 2. A sample mixes the
-  FX phases in; the FX profile probe is exact. Measure on a quiet machine
-  (the load average reached 33 on 2026-10-09).
+- Profiled (2026-10-09), against 452274e^ (before phase 2), back to back:
+  the front end's text grew 34% (29,878 lines to 40,019; 3,946 more
+  definitions, nearly all imports). Three costs had grown far faster, each
+  a walk along something phase 2 made long, and each fixed: the Rust
+  checker's masking walked the regions of every free variable's type,
+  signatures included, at each node (now kept by type, `69d9fc2`: 1300 ms
+  to 540, from 677 before phase 2); the FX checker looked for each type
+  among the closed named ones in a list (now a table, `c9485fa`: 5.36 G
+  cells to 4.51 G, from 4.43 G); and the FX compiler looked for each
+  expression among every module reshaped (now indexed by start,
+  `7989f6f`: 5.37 G cells to 1.04 G, from 0.80 G; 646 ms to 301, from 252).
+  Left: every phase but one now grows no faster than its input (`fx
+  check` +23%, `fx words` +19%, `fx arm64` +21%, `fx read` +27%); `fx
+  parse` is 2.2x (11.5 ms to 25.5), not yet looked at. In the FX compiler,
+  `c-find` (90 M cells to 181 M) and `c-member?` (38 M to 116 M) walk
+  lists of names that the imports lengthen; in the FX checker,
+  `k-has-name?` (160 M to 317 M). §69 and §70 shorten the imports; these
+  may be worth tables then. `probe_profile_check` names each word by its
+  loaded file's number now (`lambda/k-…@1009:…`), so its count of the
+  checker's own cells says 0: to fix.
 - Effects written naming globals that are now a module's imports,
   `(read (globals exp-end exp-start))` and the like (`regcode.fx`,
   `compile-programs.fx`): checked, as they say more than is done, but
