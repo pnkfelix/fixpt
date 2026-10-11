@@ -526,3 +526,23 @@ than a word unless its name says so.
    the owner's header (TODO §77); but `blobref-at` would then fail where
    it makes a ref that today fails only where read. A change of meaning,
    so written up for the user instead.
+
+## Native profiling of the front end (2026-10-11, autonomous)
+
+1. **Profiled natively, not by cells**: `FIXPT_SYMBOLS` + `fixpt-symbolize`
+   on `sample`. The cell counts (`FIXPT_PROFILE_PHASE`) pointed at
+   `k-has-name?`; natively it was under 1 %, and the real top was the
+   FX-26 assembler's `arm-times-pow2`. Recorded both in TODO §43.
+2. **`arithmetic-shift` counted as never collecting** (a bignum it makes
+   only allocates), so register code calls it in line; and the cellular
+   convention's register compiler (where the front end runs) got the
+   fixnum fast paths `direct.rs` already had (`int_fast`), rather than
+   moving the front end to the native convention.
+3. **The Rust checker's `env` as `Bindings`** (a slice to read, an index
+   by name beside it, changed only by methods), not a `HashMap` beside a
+   public `Vec`: the compiler found every place that changed it.
+4. **Not done: a memo of free names for `mask`** (about a fifth of the
+   Rust `check`): a stale memo would mask too much, which is unsound, and
+   `with`'s facts are set as checking goes; for the user (TODO §43).
+5. **Not done: path compression in `k-resolve`**: it would make a read a
+   write, changing an effect many signatures name.
