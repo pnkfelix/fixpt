@@ -2654,6 +2654,18 @@ impl Compiler<'_> {
             g.op("prim2imm", &[Value::fixnum(p), *v]);
             return Some(());
         }
+        // Of one, likewise, `prim1`: `array-length`'s `%bloblet-fields`.
+        if let [x @ (Arg::E(_) | Arg::Slot(_))] = args
+            && fixpt_runtime::never_collects(name)
+        {
+            match x {
+                Arg::E(x) => self.r_exp(g, *x, env, te, false)?,
+                Arg::Slot(s) => g.op("stack", &[Gen::n(*s)]),
+                _ => unreachable!(),
+            }
+            g.op("prim1", &[Value::fixnum(p)]);
+            return Some(());
+        }
         self.r_call_out(g, "prim", p, args, env, te)
     }
 

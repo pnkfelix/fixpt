@@ -2884,3 +2884,10 @@ a word, each word of two of the part's. `scheme-bench/string` 2.15 →
 and freed, to call `contains` on it: `scheme-bench/parsing`'s scanner asks
 it of every character it reads. `Heap::string_has` looks in place, two
 code points to a word: `parsing` 7.3 → 4.0 s.
+
+`array-length` was `%bloblet-fields` by the general call-out, everything
+live spilled to the frame for a read of one word: `scheme-bench/
+hashtable0` asks it in every loop. It never collects, so register code
+calls it with `prim1` now (both register compilers make a never-collecting
+primitive of one operand so), and natively it is the trailer's distance,
+in line: `hashtable0` 1.08 → 0.71 s.

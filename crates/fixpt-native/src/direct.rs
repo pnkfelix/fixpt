@@ -3752,6 +3752,20 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
         a.bind(done);
         return true;
     }
+    // A bloblet's count of fields (`array-length`): its trailer's distance,
+    // where it has a trailer (`Heap::make_bloblet`'s layout).
+    if name == "%bloblet-fields" {
+        a.e(and_low(X13, x, 3));
+        a.e(cmp_imm(X13, fixpt_heap::value::TAG_BLOBLET as u32));
+        a.to(slow, Fix::If(Cond::Ne));
+        a.e(ldur(X16, x, field_off(1)));
+        a.e(and_low(X13, X16, 3));
+        a.e(cmp_imm(X13, fixpt_heap::value::TAG_TRAILER as u32));
+        a.to(slow, Fix::If(Cond::Ne));
+        a.e(ubfx(X16, X16, fixpt_heap::layout::T_DISTANCE.lo, 32));
+        a.e(lsl_imm(RESULT, X16, 3));
+        return true;
+    }
     if name == "%fx26-flatarray-length" {
         flat_count(a, x, X13);
         a.e(lsl_imm(RESULT, X13, 3));

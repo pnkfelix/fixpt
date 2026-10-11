@@ -412,21 +412,30 @@
 
 ;; Runtime primitive `name` declined if there is none; else, if it never
 ;; collects and its operands are a value and a constant, in line
-;; (`prim2imm`), as `Compiler::r_prim` does: whether it was either.
+;; (`prim2imm`), or a value alone (`prim1`), as `Compiler::r_prim` does:
+;; whether it was any of these.
 (define r-prim-imm (subr rcompiles (rgen string rargs renv cenv r-exper) bool)
   (lambda (g name args env te r-exp)
-    (let ((p (runtime-primitive name)))
+    (let ((p (runtime-primitive name)) (n (r-count-args args)))
       (cond ((< p 0) (begin (r-decline) #t))
-            ((not (and (= (r-count-args args) 2) (r-never-collects? name))) #f)
+            ((not (r-never-collects? name)) #f)
+            ((= n 1)
+             (and (r-arg-loaded g (r-nth-arg args 0) env te r-exp)
+                  (begin (r-opn g rop-prim1 p) #t)))
+            ((not (= n 2)) #f)
             (else
              (tagcase (r-nth-arg args 1)
                (a-v (v)
-                 (and (tagcase (r-nth-arg args 0)
-                        (a-e (x) (begin (r-exp g x env te #f) #t))
-                        (a-slot (s) (begin (r-opn g rop-stack s) #t))
-                        (else y #f))
+                 (and (r-arg-loaded g (r-nth-arg args 0) env te r-exp)
                       (begin (r-op2 g rop-prim2imm (wcell-int p) v) #t)))
                (else y #f)))))))
+;; Operand `a` into RESULT, if an expression or a frame slot: whether it was.
+(define r-arg-loaded (subr rcompiles (rgen rarg renv cenv r-exper) bool)
+  (lambda (g a env te r-exp)
+    (tagcase a
+      (a-e (x) (begin (r-exp g x env te #f) #t))
+      (a-slot (s) (begin (r-opn g rop-stack s) #t))
+      (else y #f))))
 ;; `(extract p l)`, its field `i` as the checker found it: a field of a
 ;; product; or, past `check::BLOBREF_FIELD`, a blobref to its field at its
 ;; offset; declined if the checker did not see it.

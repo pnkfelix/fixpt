@@ -447,6 +447,8 @@ pub fn never_collects(name: &str) -> bool {
     matches!(name, "%fx26-mul" | "%fx26-quotient" | "modulo" | "%fx26-string->f64" | "%fx26-flatarray-ref" | "%fx26-flatarray-length")
         // A shift: a bignum it makes is an allocation, which never collects.
         || name == "%fx26-arithmetic-shift"
+        // A bloblet's count of fields (`array-length`), which only looks.
+        || name == "%bloblet-fields"
         || matches!(name, "%fx26-eqtable-has?" | "%fx26-eqtable-count" | "%fx26-eqtable-delete!")
         // A blobref's read, owner, offset and step (`TODO.md` §77): an `f64`
         // read allocates its box, which never collects.
