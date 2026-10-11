@@ -1861,7 +1861,11 @@ is). Left:
   quadratically, each name looked for in a list of those so far, in both
   checkers; fixed (`DONE.md` §69): `check` 555, `fx check` 1475, 228.7 M
   words. Left: `fx check` still about 14 % over; not `k-with-used`'s scan
-  of the bucket for each item (a memo of it changed nothing).
+  of the bucket for each item (a memo of it changed nothing). Profiled
+  with `FIXPT_SYMBOLS` and `fixpt-symbolize`, before the pass and after
+  the fixes: no one place; the difference spread over collections (+56
+  samples of 7,302), copying, the assembler over more code (+25) and
+  `k-has-name?` (+8).
 - Done (2026-10-11): an included type family applied in a declared
   type (`DONE.md` §69). Left: the front end's files that kept
   table-types's import lines for it could now include it.
