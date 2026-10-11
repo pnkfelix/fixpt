@@ -871,6 +871,20 @@ in one branch joins to the other branch's list type.
     (`nil_is_of_the_type_nil_where_nothing_says_which_list`, and
     `a_type_nothing_determines_is_an_error` now with `(car nil)`).
 
+## 62. Literals for `int->u32` and `int->i32` in existing sources (2026-10-11)
+
+Since a5f0979 a literal in range is an `i32` or `u32` where one is
+expected. The benchmark ports converted by hand; now `md5.fx` writes 72
+of its constants as literals (all), `DLXSimulator.fx` 33 of 35 and
+`psdes-random.fx` 4 of 5, each kept only where both checkers still agree,
+both compilers still agree, and the program gives the same answer
+(`"59ebddd335d8defbcaf5b76c08c64278"`, 477019433, 2419669511); the three
+left have no type expected there (a `let`'s value, an `array-set!`'s).
+Not "the same code": the cellular words called `%fx26-int->u32` on each
+literal at run time, which a literal does not need. Their comments say
+so. The tests about the conversion keep it (`fixed-width-ops.fx`,
+`fixed-width.fx`, `flat-ints.fx`).
+
 ## 64. The reader's module types, shown, are megabytes (2026-10-08)
 
 Since the reader and the parser are module files made by `reader.fx`, the

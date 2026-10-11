@@ -18,8 +18,8 @@
 ;;; prints an error, so the answer is the same for any count.
 ;;;
 ;;; What changed:
-;;; - Word32.word is `u32`. FX-26 has no literals of type u32, so each
-;;;   constant is `int->u32` of an int. `u32-shl` and `u32-shr` take their
+;;; - Word32.word is `u32`. A constant is a literal where a `u32` is
+;;;   expected, else `int->u32` of an int. `u32-shl` and `u32-shr` take their
 ;;;   count modulo 32, where SML's `<<` and `>>` give 0 for 32 or more, and
 ;;;   `~>>` the sign: `shl`, `shr` and `ashr` are SML's. `Word32.toIntX` is
 ;;;   `to-intx`; MLton's Int is 32 bits, so the ALU's signed `ADD` and `SUB`
@@ -93,12 +93,12 @@
 ;; ---- Word32
 
 ;; SML's <<, >> and ~>>: a count of 32 or more shifts every bit out.
-(define* shl (subr pure (u32 int) u32) (lambda (x n) (if (>= n 32) (int->u32 0) (u32-shl x n))))
-(define* shr (subr pure (u32 int) u32) (lambda (x n) (if (>= n 32) (int->u32 0) (u32-shr x n))))
+(define* shl (subr pure (u32 int) u32) (lambda (x n) (if (>= n 32) 0 (u32-shl x n))))
+(define* shr (subr pure (u32 int) u32) (lambda (x n) (if (>= n 32) 0 (u32-shr x n))))
 (define* ashr (subr pure (u32 int) u32)
   (lambda (x n)
     (let ((n (if (>= n 32) 31 n)))
-      (if (u32< x (int->u32 2147483648)) (u32-shr x n) (u32-not (u32-shr (u32-not x) n))))))
+      (if (u32< x 2147483648) (u32-shr x n) (u32-not (u32-shr (u32-not x) n))))))
 
 ;; Word.fromLarge (Word32.toLarge w), as a shift's count.
 (define* word-toint (subr pure (u32) int) (lambda (w) (u32->int w)))
@@ -123,10 +123,10 @@
       (if (= (string-length s) 0) (NONE) (loop 0 0)))))
 
 ;; sweeks added rand: from page 284 of Numerical Recipes in C.
-(define seed (ref u32 @o) (new (int->u32 13)))
+(define seed (ref u32 @o) (new 13))
 (define* rand (subr (maxeff (read @o) (write @o)) () u32)
   (lambda ()
-    (let ((res (u32+ (u32* (int->u32 1664525) (get seed)) (int->u32 1013904223))))
+    (let ((res (u32+ (u32* 1664525 (get seed)) 1013904223)))
       (begin (set seed res) res))))
 
 ;; ---- ImmArray: an immutable array is a list.
@@ -180,11 +180,11 @@
 (define* init-register-file (subr (maxeff (read @i) (alloc @i) spin) () words)
   (lambda ()
     (let ((upd (proj ia-update u32)))
-      (upd (upd (upd (upd ((proj ia-tabulate u32) 32 (lambda (i) (int->u32 0)))
-                          0 (int->u32 0))
-                     28 (int->u32 0))
-                29 (int->u32 262144))
-           30 (int->u32 262144)))))
+      (upd (upd (upd (upd ((proj ia-tabulate u32) 32 (lambda (i) 0))
+                          0 0)
+                     28 0)
+                29 262144)
+           30 262144))))
 
 (define* load-register (subr (maxeff (read @i) spin) (words int) u32)
   (lambda (rf reg) ((proj ia-nth u32) rf reg)))
@@ -200,14 +200,14 @@
 
 ;; The ALU's handler: "Error : ALU returning 0".
 (define* alu-error (subr (maxeff (read @o) (write @o) spin) () u32)
-  (lambda () (begin (print-string "Error : ALU returning 0\n") (int->u32 0))))
+  (lambda () (begin (print-string "Error : ALU returning 0\n") 0)))
 
 ;; Int.+ and Int.- on MLton's 32-bit Int: outside it, Overflow, which the
 ;; ALU handles.
 (define* int32 (subr (maxeff (read @o) (write @o) spin) (int) u32)
   (lambda (n) (if (and (>= n -2147483648) (< n 2147483648)) (int->u32 n) (alu-error))))
 
-(define* flag (subr pure (bool) u32) (lambda (b) (if b (int->u32 1) (int->u32 0))))
+(define* flag (subr pure (bool) u32) (lambda (b) (if b 1 0)))
 
 (define* perform-al (subr (maxeff (read @o) (write @o) spin) (aluop u32 u32) u32)
   (lambda (opcode s1 s2)
@@ -236,7 +236,7 @@
 
 (define* mem-init (subr (maxeff (alloc @i) spin) () memory)
   (lambda ()
-    (product (words ((proj ia-tabulate u32) (u32->int (int->u32 65536)) (lambda (i) (int->u32 0))))
+    (product (words ((proj ia-tabulate u32) (u32->int 65536) (lambda (i) 0)))
              (reads 0) (writes 0))))
 
 (define* align-w-address (subr pure (u32) u32) (lambda (a) (shl (shr a 2) 2)))
@@ -321,7 +321,7 @@
       (u32->int (u32-remainder (rand) modulus)))))
 
 (define* zero-block (subr (maxeff (alloc @i) spin) () words)
-  (lambda () ((proj ia-tabulate u32) BlockSize (lambda (i) (int->u32 0)))))
+  (lambda () ((proj ia-tabulate u32) BlockSize (lambda (i) 0))))
 
 (define* init-cache (subr (maxeff (alloc @i) spin) () cache)
   (lambda ()
@@ -339,12 +339,12 @@
 (define* get-index (subr pure (u32) u32)
   (lambda (address)
     (let* ((bits (+ IndexBits BlockOffsetBits))
-           (mask (u32-not (shl (shr (int->u32 4294967295) bits) bits))))
+           (mask (u32-not (shl (shr 4294967295 bits) bits))))
       (shr (u32-and address mask) BlockOffsetBits))))
 
 (define* get-block-offset (subr pure (u32) u32)
   (lambda (address)
-    (let ((mask (u32-not (shl (shr (int->u32 4294967295) BlockOffsetBits) BlockOffsetBits))))
+    (let ((mask (u32-not (shl (shr 4294967295 BlockOffsetBits) BlockOffsetBits))))
       (u32-and address mask))))
 
 ;; InCache: whether the word at address is in the cache, and valid.
@@ -370,7 +370,7 @@
     ((proj ia-foldr cacheline u32)
      (lambda (entry result)
        (if (c-in-entry entry address) (c-read-entry entry address) result))
-     (int->u32 0) set)))
+     0 set)))
 
 (define* c-read-cache (subr cb (cache u32) u32)
   (lambda (cac address)
@@ -530,7 +530,7 @@
                (word (cond ((= a 0) (if signed (ashr (shl l-word 16) 16) (shr (shl l-word 16) 16)))
                            ((= a 16) (if signed (ashr (shl l-word 0) 16) (shr (shl l-word 0) 16)))
                            (else (begin (memory-error name "returning 0")
-                                        (int->u32 0)))))))))
+                                        0))))))))
 
 ;; LoadByte and LoadByteU.
 (define* c-load-byte-of (subr cb (cmemory u32 bool string) cmem-word)
@@ -545,7 +545,7 @@
                            ((= a 16) (byte 8))
                            ((= a 24) (byte 0))
                            (else (begin (memory-error name "returning 0")
-                                        (int->u32 0)))))))))
+                                        0))))))))
 
 ;; StoreByte: the memory Load gives is dropped, as the original's is.
 (define* c-store-byte (subr cb (cmemory u32 u32) cmemory)
@@ -554,7 +554,7 @@
            (a (u32->int address))
            (put (lambda ((mask int) (s int))
                   (c-store m address (u32-or (u32-and (int->u32 mask) s-word)
-                                             (shl (u32-and (int->u32 255) data) s))))))
+                                             (shl (u32-and 255 data) s))))))
       (cond ((= a 0) (put 4294967040 0))
             ((= a 8) (put 4294902015 8))
             ((= a 16) (put 4278255615 16))
@@ -660,7 +660,7 @@
           (rs2 (u32->int (field instr 16 31)))
           (rd (u32->int (field instr 11 31)))
           (shamt (u32->int (field instr 6 31)))
-          (functcode (r-funct (u32->int (u32-and instr (int->u32 63))))))
+          (functcode (r-funct (u32->int (u32-and instr 63)))))
       (tagcase functcode
         (NON_FUNCT () (ILLEGAL))
         (else o (RTYPE (SPECIAL) rs1 rs2 rd shamt functcode))))))
@@ -731,7 +731,7 @@
 (define* perform-branch (subr cb (bool int u32 machine) machine)
   (lambda (if-zero rs1 immediate m)
     (let ((pc (extract m pc)) (rf (extract m rf)))
-      (if (let ((zero (u32= (load-register rf rs1) (int->u32 0)))) (if if-zero zero (not zero)))
+      (if (let ((zero (u32= (load-register rf rs1) 0))) (if if-zero zero (not zero)))
           (machine-of (branch-target pc immediate) rf (extract m mem) (extract m trap))
           m))))
 
@@ -761,11 +761,11 @@
         (SGEI () (perform-alu-i (A-SGE) rs1 rd immediate m))
         (LB () (perform-load (lambda (mem a) (c-load-byte-of mem a #t "LB")) rs1 rd immediate m))
         (LBU () (perform-load (lambda (mem a) (c-load-byte-of mem a #f "LBU")) rs1 rd immediate m))
-        (SB () (perform-store c-store-byte rs1 rd immediate (int->u32 255) m))
+        (SB () (perform-store c-store-byte rs1 rd immediate 255 m))
         (LH () (perform-load (lambda (mem a) (c-load-hword-of mem a #t "LH")) rs1 rd immediate m))
         (LHU () (perform-load (lambda (mem a) (c-load-hword-of mem a #f "LHU")) rs1 rd immediate m))
         ;; SH stores with StoreByte, as the original's does.
-        (SH () (perform-store c-store-byte rs1 rd immediate (int->u32 65535) m))
+        (SH () (perform-store c-store-byte rs1 rd immediate 65535 m))
         (LW () (perform-load c-load-word rs1 rd immediate m))
         (SW () (perform-store c-store-word rs1 rd immediate all-bits m))
         (else o (begin (print-string "Error : Non I-Type opcode, performing NOP\n") m))))))
@@ -833,7 +833,7 @@
 (define* halt-or-illegal? (subr pure (instruction) bool)
   (lambda (instr)
     (tagcase instr
-      (JTYPE (op offset) (tagcase op (TRAP () (u32= offset (int->u32 0))) (else o #f)))
+      (JTYPE (op offset) (tagcase op (TRAP () (u32= offset 0)) (else o #f)))
       (ILLEGAL () #t)
       (else o #f))))
 
@@ -846,7 +846,7 @@
     (let* ((r (c-load-word (extract m mem) (extract m pc)))
            (nmem (extract r mem))
            (instr (decode-instr (extract r word)))
-           (npc (u32+ (extract m pc) (int->u32 4))))
+           (npc (u32+ (extract m pc) 4)))
       (if (halt-or-illegal? instr)
           (product (statistics (lambda () (c-statistics nmem)))
                    (state (extract (extract m trap) state)))
@@ -858,7 +858,7 @@
 (define* invalid-instruction (subr (maxeff (read @o) (write @o) spin) () u32)
   (lambda ()
     (begin (print-string "Error : Invalid instruction format, returning NOP\n")
-           (int->u32 0))))
+           0)))
 
 ;; LoadProg: the program's words into memory, from 0x10000 on.
 (define* load-prog-aux (subr cb (strings cmemory u32) cmemory)
@@ -868,13 +868,13 @@
         (let ((instr (tagcase (from-string (car instrs))
                        (SOME (w) w)
                        (NONE () (invalid-instruction))))
-              (next (u32+ address (int->u32 4))))
+              (next (u32+ address 4)))
           (load-prog-aux (cdr instrs) (c-store-word mem address instr) next)))))
 
 (define* run-prog (subr cb (strings trap) result)
   (lambda (instructions trap)
-    (cycle-loop (machine-of (int->u32 65536) (init-register-file)
-                            (load-prog-aux instructions (c-init) (int->u32 65536))
+    (cycle-loop (machine-of 65536 (init-register-file)
+                            (load-prog-aux instructions (c-init) 65536)
                             trap))))
 
 ;; ---- The example programs

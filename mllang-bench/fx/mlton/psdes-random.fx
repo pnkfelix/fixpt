@@ -14,7 +14,7 @@
 ;;; Word32 is `u32`, whose arithmetic wraps as Word32's does: `+`, `*`,
 ;;; `xorb`, `andb`, `orb`, `notb`, `>>` and `<<` are `u32+`, `u32*`,
 ;;; `u32-xor`, `u32-and`, `u32-or`, `u32-not`, `u32-shr` and `u32-shl`.
-;;; FX-26 has no literals of type u32, so each constant is `int->u32` of
+;;; A constant is a literal where a u32 is expected, else `int->u32` of
 ;;; an int. The answer is the sum's `u32->int`. (Until FX-26 had `u32`,
 ;;; this port did the same with ints masked to 32 bits, `xorb` a byte at a
 ;;; time through a table; that emulation was most of what it measured.)
@@ -45,7 +45,7 @@
 ;; `make`: the list's elements, in an array, looked up by index.
 (define* make (subr (maxeff (alloc @h) (write @h) spin) (ints) lookup)
   (lambda (l)
-    (let ((a (the (arrayof u32 @h) (make-array 4 (int->u32 0)))))
+    (let ((a (the (arrayof u32 @h) (make-array 4 0))))
       (begin (fill a 0 l) (lambda (i) (array-ref a i))))))
 
 (define* once (subr ps () int)
@@ -69,8 +69,8 @@
                                    (r (u32-xor lword
                                                (u32+ (u32* itmpl itmph)
                                                      (u32-xor (c2 i) (reverse ib)))))))))))
-           (lword (the (ref u32 @h) (new (int->u32 13))))
-           (irword (the (ref u32 @h) (new (int->u32 14))))
+           (lword (the (ref u32 @h) (new 13)))
+           (irword (the (ref u32 @h) (new 14)))
            (need-to (the (ref bool @h) (new #t)))
            (word (lambda ()
                    (if (get need-to)
@@ -83,6 +83,6 @@
                        (begin (set need-to #t) (get irword))))))
       (letrec ((loop (subr (maxeff ps (read (globals nat-fold))) (int u32) u32)
                  (lambda (i w) (if (= i 0) w (loop (- i 1) (u32+ w (word)))))))
-        (u32->int (loop count (int->u32 0)))))))
+        (u32->int (loop count 0))))))
 
 (once)

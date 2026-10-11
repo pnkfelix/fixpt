@@ -1738,20 +1738,6 @@ unfold them whole.
 - Both checkers; the printing then needs no matching of a type against the
   families. Ties to the non-regular work (`docs/research/nonregular-*.md`).
 
-## 62. Literals for `int->u32` and `int->i32` in existing sources (2026-10-08)
-
-Since a5f0979 a literal in range is an `i32` or `u32` where one is
-expected, so `(int->u32 16777619)` can be written `16777619`. The sources
-still convert by hand: `mllang-bench/fx/mlton/md5.fx` (69),
-`DLXSimulator.fx` (32), `psdes-random.fx` (5),
-`tests/programs/native/fixed-width-ops.fx` (10),
-`fixpt-cli/tests/programs/fixed-width.fx` (5), `native/flat-ints.fx` (1).
-Rewrite where the context expects the type (a `define` with its type, an
-argument to a `u32` operation), keeping a few `int->u32` calls in the
-tests that are about the conversion. Check first that compiled code is
-unchanged (a literal is folded either way; disassemble one to be sure),
-and that no line passes 100 columns or moves.
-
 ## 63. `i64` and `u64` below `int`, with literals (2026-10-08)
 
 `i32` and `u32` are below `int` (a5f0979) because one is at run time the

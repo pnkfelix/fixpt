@@ -14,8 +14,8 @@
 ;;;
 ;;; Word32 is `u32`, whose arithmetic wraps as Word32's does: `W32.+`,
 ;;; `andb`, `orb`, `xorb`, `notb`, `<<`, `>>` and `<` are `u32+`, `u32-and`,
-;;; `u32-or`, `u32-xor`, `u32-not`, `u32-shl`, `u32-shr` and `u32<`. FX-26
-;;; has no literals of type u32, so each constant is `int->u32` of an int;
+;;; `u32-or`, `u32-xor`, `u32-not`, `u32-shl`, `u32-shr` and `u32<`. A
+;;; constant is a literal where a u32 is expected, else `int->u32` of an int;
 ;;; shift counts are ints. (Until FX-26 had `u32`, this port did the same
 ;;; with ints masked to 32 bits, `andb`, `orb` and `xorb` a byte at a time
 ;;; through tables; that emulation was most of what it measured, and is
@@ -92,7 +92,7 @@
 (define-type word128 (productof (A u32) (B u32) (C u32) (D u32)))
 (define-type md5state (productof (digest word128) (mlen word64) (buf bytes)))
 
-(define w64-zero word64 (product (hi (int->u32 0)) (lo (int->u32 0))))
+(define w64-zero word64 (product (hi 0) (lo 0)))
 
 (define* mul8add (subr pure (word64 int) word64)
   (lambda (w n)
@@ -104,7 +104,7 @@
       (product (hi hi) (lo lo)))))
 
 ;; Word8.fromLarge (W32.toLarge w): w's low byte.
-(define* low-byte (subr pure (u32) int) (lambda (w) (u32->int (u32-and w (int->u32 255)))))
+(define* low-byte (subr pure (u32) int) (lambda (w) (u32->int (u32-and w 255))))
 
 (define-type words (listof u32 @l))
 
@@ -168,8 +168,8 @@
 
 (define empty-buf bytes (w8v-tabulate 0 (lambda (x) 0)))
 (define init md5state
-  (product (digest (product (A (int->u32 1732584193)) (B (int->u32 4023233417))
-                            (C (int->u32 2562383102)) (D (int->u32 271733878))))
+  (product (digest (product (A 1732584193) (B 4023233417)
+                            (C 2562383102) (D 271733878)))
            (mlen w64-zero)
            (buf empty-buf)))
 
@@ -184,22 +184,22 @@
 (define* round1 (subr (read @v) (word128 xwords) word128)
   (lambda (dg xs)
     (let* ((a (extract dg A)) (b (extract dg B)) (c (extract dg C)) (d (extract dg D))
-           (a (FF a b c d (array-ref xs 0) S11 (int->u32 3614090360))) ; 1
-           (d (FF d a b c (array-ref xs 1) S12 (int->u32 3905402710))) ; 2
-           (c (FF c d a b (array-ref xs 2) S13 (int->u32 606105819))) ; 3
-           (b (FF b c d a (array-ref xs 3) S14 (int->u32 3250441966))) ; 4
-           (a (FF a b c d (array-ref xs 4) S11 (int->u32 4118548399))) ; 5
-           (d (FF d a b c (array-ref xs 5) S12 (int->u32 1200080426))) ; 6
-           (c (FF c d a b (array-ref xs 6) S13 (int->u32 2821735955))) ; 7
-           (b (FF b c d a (array-ref xs 7) S14 (int->u32 4249261313))) ; 8
-           (a (FF a b c d (array-ref xs 8) S11 (int->u32 1770035416))) ; 9
-           (d (FF d a b c (array-ref xs 9) S12 (int->u32 2336552879))) ; 10
-           (c (FF c d a b (array-ref xs 10) S13 (int->u32 4294925233))) ; 11
-           (b (FF b c d a (array-ref xs 11) S14 (int->u32 2304563134))) ; 12
-           (a (FF a b c d (array-ref xs 12) S11 (int->u32 1804603682))) ; 13
-           (d (FF d a b c (array-ref xs 13) S12 (int->u32 4254626195))) ; 14
-           (c (FF c d a b (array-ref xs 14) S13 (int->u32 2792965006))) ; 15
-           (b (FF b c d a (array-ref xs 15) S14 (int->u32 1236535329))) ; 16
+           (a (FF a b c d (array-ref xs 0) S11 3614090360)) ; 1
+           (d (FF d a b c (array-ref xs 1) S12 3905402710)) ; 2
+           (c (FF c d a b (array-ref xs 2) S13 606105819)) ; 3
+           (b (FF b c d a (array-ref xs 3) S14 3250441966)) ; 4
+           (a (FF a b c d (array-ref xs 4) S11 4118548399)) ; 5
+           (d (FF d a b c (array-ref xs 5) S12 1200080426)) ; 6
+           (c (FF c d a b (array-ref xs 6) S13 2821735955)) ; 7
+           (b (FF b c d a (array-ref xs 7) S14 4249261313)) ; 8
+           (a (FF a b c d (array-ref xs 8) S11 1770035416)) ; 9
+           (d (FF d a b c (array-ref xs 9) S12 2336552879)) ; 10
+           (c (FF c d a b (array-ref xs 10) S13 4294925233)) ; 11
+           (b (FF b c d a (array-ref xs 11) S14 2304563134)) ; 12
+           (a (FF a b c d (array-ref xs 12) S11 1804603682)) ; 13
+           (d (FF d a b c (array-ref xs 13) S12 4254626195)) ; 14
+           (c (FF c d a b (array-ref xs 14) S13 2792965006)) ; 15
+           (b (FF b c d a (array-ref xs 15) S14 1236535329)) ; 16
            )
       (product (A a) (B b) (C c) (D d)))))
 
@@ -207,22 +207,22 @@
 (define* round2 (subr (read @v) (word128 xwords) word128)
   (lambda (dg xs)
     (let* ((a (extract dg A)) (b (extract dg B)) (c (extract dg C)) (d (extract dg D))
-           (a (GG a b c d (array-ref xs 1) S21 (int->u32 4129170786))) ; 17
-           (d (GG d a b c (array-ref xs 6) S22 (int->u32 3225465664))) ; 18
-           (c (GG c d a b (array-ref xs 11) S23 (int->u32 643717713))) ; 19
-           (b (GG b c d a (array-ref xs 0) S24 (int->u32 3921069994))) ; 20
-           (a (GG a b c d (array-ref xs 5) S21 (int->u32 3593408605))) ; 21
-           (d (GG d a b c (array-ref xs 10) S22 (int->u32 38016083))) ; 22
-           (c (GG c d a b (array-ref xs 15) S23 (int->u32 3634488961))) ; 23
-           (b (GG b c d a (array-ref xs 4) S24 (int->u32 3889429448))) ; 24
-           (a (GG a b c d (array-ref xs 9) S21 (int->u32 568446438))) ; 25
-           (d (GG d a b c (array-ref xs 14) S22 (int->u32 3275163606))) ; 26
-           (c (GG c d a b (array-ref xs 3) S23 (int->u32 4107603335))) ; 27
-           (b (GG b c d a (array-ref xs 8) S24 (int->u32 1163531501))) ; 28
-           (a (GG a b c d (array-ref xs 13) S21 (int->u32 2850285829))) ; 29
-           (d (GG d a b c (array-ref xs 2) S22 (int->u32 4243563512))) ; 30
-           (c (GG c d a b (array-ref xs 7) S23 (int->u32 1735328473))) ; 31
-           (b (GG b c d a (array-ref xs 12) S24 (int->u32 2368359562))) ; 32
+           (a (GG a b c d (array-ref xs 1) S21 4129170786)) ; 17
+           (d (GG d a b c (array-ref xs 6) S22 3225465664)) ; 18
+           (c (GG c d a b (array-ref xs 11) S23 643717713)) ; 19
+           (b (GG b c d a (array-ref xs 0) S24 3921069994)) ; 20
+           (a (GG a b c d (array-ref xs 5) S21 3593408605)) ; 21
+           (d (GG d a b c (array-ref xs 10) S22 38016083)) ; 22
+           (c (GG c d a b (array-ref xs 15) S23 3634488961)) ; 23
+           (b (GG b c d a (array-ref xs 4) S24 3889429448)) ; 24
+           (a (GG a b c d (array-ref xs 9) S21 568446438)) ; 25
+           (d (GG d a b c (array-ref xs 14) S22 3275163606)) ; 26
+           (c (GG c d a b (array-ref xs 3) S23 4107603335)) ; 27
+           (b (GG b c d a (array-ref xs 8) S24 1163531501)) ; 28
+           (a (GG a b c d (array-ref xs 13) S21 2850285829)) ; 29
+           (d (GG d a b c (array-ref xs 2) S22 4243563512)) ; 30
+           (c (GG c d a b (array-ref xs 7) S23 1735328473)) ; 31
+           (b (GG b c d a (array-ref xs 12) S24 2368359562)) ; 32
            )
       (product (A a) (B b) (C c) (D d)))))
 
@@ -230,22 +230,22 @@
 (define* round3 (subr (read @v) (word128 xwords) word128)
   (lambda (dg xs)
     (let* ((a (extract dg A)) (b (extract dg B)) (c (extract dg C)) (d (extract dg D))
-           (a (HH a b c d (array-ref xs 5) S31 (int->u32 4294588738))) ; 33
-           (d (HH d a b c (array-ref xs 8) S32 (int->u32 2272392833))) ; 34
-           (c (HH c d a b (array-ref xs 11) S33 (int->u32 1839030562))) ; 35
-           (b (HH b c d a (array-ref xs 14) S34 (int->u32 4259657740))) ; 36
-           (a (HH a b c d (array-ref xs 1) S31 (int->u32 2763975236))) ; 37
-           (d (HH d a b c (array-ref xs 4) S32 (int->u32 1272893353))) ; 38
-           (c (HH c d a b (array-ref xs 7) S33 (int->u32 4139469664))) ; 39
-           (b (HH b c d a (array-ref xs 10) S34 (int->u32 3200236656))) ; 40
-           (a (HH a b c d (array-ref xs 13) S31 (int->u32 681279174))) ; 41
-           (d (HH d a b c (array-ref xs 0) S32 (int->u32 3936430074))) ; 42
-           (c (HH c d a b (array-ref xs 3) S33 (int->u32 3572445317))) ; 43
-           (b (HH b c d a (array-ref xs 6) S34 (int->u32 76029189))) ; 44
-           (a (HH a b c d (array-ref xs 9) S31 (int->u32 3654602809))) ; 45
-           (d (HH d a b c (array-ref xs 12) S32 (int->u32 3873151461))) ; 46
-           (c (HH c d a b (array-ref xs 15) S33 (int->u32 530742520))) ; 47
-           (b (HH b c d a (array-ref xs 2) S34 (int->u32 3299628645))) ; 48
+           (a (HH a b c d (array-ref xs 5) S31 4294588738)) ; 33
+           (d (HH d a b c (array-ref xs 8) S32 2272392833)) ; 34
+           (c (HH c d a b (array-ref xs 11) S33 1839030562)) ; 35
+           (b (HH b c d a (array-ref xs 14) S34 4259657740)) ; 36
+           (a (HH a b c d (array-ref xs 1) S31 2763975236)) ; 37
+           (d (HH d a b c (array-ref xs 4) S32 1272893353)) ; 38
+           (c (HH c d a b (array-ref xs 7) S33 4139469664)) ; 39
+           (b (HH b c d a (array-ref xs 10) S34 3200236656)) ; 40
+           (a (HH a b c d (array-ref xs 13) S31 681279174)) ; 41
+           (d (HH d a b c (array-ref xs 0) S32 3936430074)) ; 42
+           (c (HH c d a b (array-ref xs 3) S33 3572445317)) ; 43
+           (b (HH b c d a (array-ref xs 6) S34 76029189)) ; 44
+           (a (HH a b c d (array-ref xs 9) S31 3654602809)) ; 45
+           (d (HH d a b c (array-ref xs 12) S32 3873151461)) ; 46
+           (c (HH c d a b (array-ref xs 15) S33 530742520)) ; 47
+           (b (HH b c d a (array-ref xs 2) S34 3299628645)) ; 48
            )
       (product (A a) (B b) (C c) (D d)))))
 
@@ -253,22 +253,22 @@
 (define* round4 (subr (read @v) (word128 xwords) word128)
   (lambda (dg xs)
     (let* ((a (extract dg A)) (b (extract dg B)) (c (extract dg C)) (d (extract dg D))
-           (a (II a b c d (array-ref xs 0) S41 (int->u32 4096336452))) ; 49
-           (d (II d a b c (array-ref xs 7) S42 (int->u32 1126891415))) ; 50
-           (c (II c d a b (array-ref xs 14) S43 (int->u32 2878612391))) ; 51
-           (b (II b c d a (array-ref xs 5) S44 (int->u32 4237533241))) ; 52
-           (a (II a b c d (array-ref xs 12) S41 (int->u32 1700485571))) ; 53
-           (d (II d a b c (array-ref xs 3) S42 (int->u32 2399980690))) ; 54
-           (c (II c d a b (array-ref xs 10) S43 (int->u32 4293915773))) ; 55
-           (b (II b c d a (array-ref xs 1) S44 (int->u32 2240044497))) ; 56
-           (a (II a b c d (array-ref xs 8) S41 (int->u32 1873313359))) ; 57
-           (d (II d a b c (array-ref xs 15) S42 (int->u32 4264355552))) ; 58
-           (c (II c d a b (array-ref xs 6) S43 (int->u32 2734768916))) ; 59
-           (b (II b c d a (array-ref xs 13) S44 (int->u32 1309151649))) ; 60
-           (a (II a b c d (array-ref xs 4) S41 (int->u32 4149444226))) ; 61
-           (d (II d a b c (array-ref xs 11) S42 (int->u32 3174756917))) ; 62
-           (c (II c d a b (array-ref xs 2) S43 (int->u32 718787259))) ; 63
-           (b (II b c d a (array-ref xs 9) S44 (int->u32 3951481745))) ; 64
+           (a (II a b c d (array-ref xs 0) S41 4096336452)) ; 49
+           (d (II d a b c (array-ref xs 7) S42 1126891415)) ; 50
+           (c (II c d a b (array-ref xs 14) S43 2878612391)) ; 51
+           (b (II b c d a (array-ref xs 5) S44 4237533241)) ; 52
+           (a (II a b c d (array-ref xs 12) S41 1700485571)) ; 53
+           (d (II d a b c (array-ref xs 3) S42 2399980690)) ; 54
+           (c (II c d a b (array-ref xs 10) S43 4293915773)) ; 55
+           (b (II b c d a (array-ref xs 1) S44 2240044497)) ; 56
+           (a (II a b c d (array-ref xs 8) S41 1873313359)) ; 57
+           (d (II d a b c (array-ref xs 15) S42 4264355552)) ; 58
+           (c (II c d a b (array-ref xs 6) S43 2734768916)) ; 59
+           (b (II b c d a (array-ref xs 13) S44 1309151649)) ; 60
+           (a (II a b c d (array-ref xs 4) S41 4149444226)) ; 61
+           (d (II d a b c (array-ref xs 11) S42 3174756917)) ; 62
+           (c (II c d a b (array-ref xs 2) S43 718787259)) ; 63
+           (b (II b c d a (array-ref xs 9) S44 3951481745)) ; 64
            )
       (product (A a) (B b) (C c) (D d)))))
 
@@ -281,7 +281,7 @@
 (define* transform (subr bv (word128 int bytes) word128)
   (lambda (dg i buf)
     (let* ((off (quotient i 4))
-           (xs (the xwords (make-array 16 (int->u32 0))))
+           (xs (the xwords (make-array 16 0)))
            (fetch (letrec ((fetch (subr (maxeff (read @v) (write @v) spin (read (globals sub-vec)))
                                         (int) unit)
                              (lambda (n)
