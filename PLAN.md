@@ -196,8 +196,10 @@ weighed with the other items, not ahead of them.
   (2026-10-10), for §22's FX-26 library: §75, `string->int` and
   `string->number`; §76, Scheme's numeric tower, perhaps by functors.
   §77, suffix refs (tag `010`, interior pointers into bloblet suffixes):
-  the runtime done (`DONE.md` §77); next, the `flat` kind reached through
-  them, and whether its type is `ref` or a `blobref` of its own.
+  done (`DONE.md` §77), the runtime, the `flat` kind, `(blobref B F)`,
+  flat products, arrays and sums, in every machine; next, a flat sum's
+  tag read in line natively and its `tagcase` in a leaf, arrays of a
+  length not literal, a blobref's `f64` read unboxed natively.
 - S1. Done (2026-09-30): **the `acyclic?` gap**, F13: shown a
   use-after-free on every path, and fixed in both checkers with data at a
   place, `(t data p)` (`docs/research/shapes.md`, the framing: regions,
