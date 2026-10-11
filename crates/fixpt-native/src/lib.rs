@@ -13,6 +13,7 @@
 #![allow(unsafe_code)]
 
 pub mod arm64;
+pub mod x86_64;
 pub mod codespace;
 mod control;
 pub mod stencil;
@@ -27,6 +28,12 @@ pub use codespace::CodeSpace;
 /// cannot, a code space cannot be made, and so neither can any machine here;
 /// the encoder and disassembler work anywhere.
 pub const AVAILABLE: bool = cfg!(target_arch = "aarch64");
+
+/// Whether this machine can run the hand-encoded cellular machine and the
+/// words the Rust side compiles into it (`cellular::run_word`,
+/// `run_word_compiled`): on arm64, and on x86_64 (`cellular::x64`), where
+/// the rest of this crate's machines are not yet.
+pub const CELLULAR_AVAILABLE: bool = cfg!(any(target_arch = "aarch64", target_arch = "x86_64"));
 
 /// What to say where [`AVAILABLE`] is false.
 pub const UNAVAILABLE: &str = "this runs arm64 machine code, and this machine is not arm64";

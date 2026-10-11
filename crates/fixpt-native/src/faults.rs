@@ -36,30 +36,59 @@ fn install() {
     });
 }
 
-/// The faulting pc, the 29 general registers, and fp, lr and sp, from the
-/// kernel's ucontext for this thread; `None` where that is not arm64.
+/// The faulting pc, and the registers by name, from the kernel's ucontext
+/// for this thread; `None` where this does not know its layout.
 ///
 /// # Safety
 /// `ctx` must be the ucontext a signal handler was given.
-unsafe fn registers(ctx: *mut libc::c_void) -> Option<(usize, [u64; 29], [u64; 3])> {
+unsafe fn registers(ctx: *mut libc::c_void) -> Option<(usize, Vec<(String, u64)>)> {
     let uc = ctx as *mut libc::ucontext_t;
+    let xs = |x: &[u64]| x.iter().enumerate().map(|(i, v)| (format!("x{i}"), *v)).collect::<Vec<_>>();
     #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
     // SAFETY: the caller's ucontext (macOS, arm64).
     unsafe {
         let ss = &(*(*uc).uc_mcontext).__ss;
-        Some((ss.__pc as usize, ss.__x, [ss.__fp, ss.__lr, ss.__sp]))
+        let mut r = xs(&ss.__x);
+        r.extend([("fp".into(), ss.__fp), ("lr".into(), ss.__lr), ("sp".into(), ss.__sp)]);
+        Some((ss.__pc as usize, r))
     }
     #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
     // SAFETY: the caller's ucontext (Linux, arm64).
     unsafe {
         let mc = &(*uc).uc_mcontext;
-        let mut x = [0; 29];
-        x.copy_from_slice(&mc.regs[..29]);
-        Some((mc.pc as usize, x, [mc.regs[29], mc.regs[30], mc.sp]))
+        let mut r = xs(&mc.regs[..29]);
+        r.extend([("fp".into(), mc.regs[29]), ("lr".into(), mc.regs[30]), ("sp".into(), mc.sp)]);
+        Some((mc.pc as usize, r))
     }
-    #[cfg(not(target_arch = "aarch64"))]
+    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
+    // SAFETY: the caller's ucontext (Linux, x86_64).
+    unsafe {
+        let _ = xs;
+        let g = &(*uc).uc_mcontext.gregs;
+        let at = |i: libc::c_int| g[i as usize] as u64;
+        let names = [
+            ("rax", libc::REG_RAX),
+            ("rcx", libc::REG_RCX),
+            ("rdx", libc::REG_RDX),
+            ("rbx", libc::REG_RBX),
+            ("rsp", libc::REG_RSP),
+            ("rbp", libc::REG_RBP),
+            ("rsi", libc::REG_RSI),
+            ("rdi", libc::REG_RDI),
+            ("r8", libc::REG_R8),
+            ("r9", libc::REG_R9),
+            ("r10", libc::REG_R10),
+            ("r11", libc::REG_R11),
+            ("r12", libc::REG_R12),
+            ("r13", libc::REG_R13),
+            ("r14", libc::REG_R14),
+            ("r15", libc::REG_R15),
+        ];
+        Some((at(libc::REG_RIP) as usize, names.iter().map(|(n, i)| (n.to_string(), at(*i))).collect()))
+    }
+    #[cfg(not(any(target_arch = "aarch64", all(target_os = "linux", target_arch = "x86_64"))))]
     {
-        let _ = uc;
+        let _ = (uc, xs);
         None
     }
 }
@@ -68,23 +97,23 @@ extern "C" fn handler(_sig: libc::c_int, info: *mut libc::siginfo_t, ctx: *mut l
     // SAFETY: the kernel's siginfo and ucontext for this thread.
     unsafe {
         let addr = (*info).si_addr() as usize;
-        let Some((pc, xs, [fp, lr, sp])) = registers(ctx) else {
+        let Some((pc, regs)) = registers(ctx) else {
             eprintln!("\nfault at address {addr:#x}");
             return;
         };
         let mut where_ = String::from("outside the code space");
         if let Ok(p) = PIECES.try_lock() {
             if let Some((s, _, w)) = p.iter().find(|(s, l, _)| (*s..s + l).contains(&pc)) {
-                where_ = format!("{w}, instruction {}", (pc - s) / 4);
+                where_ = if cfg!(target_arch = "x86_64") { format!("{w}, byte {}", pc - s) } else { format!("{w}, instruction {}", (pc - s) / 4) };
             }
         }
         eprintln!("\nfault at pc {pc:#x} ({where_}), address {addr:#x}");
-        for (i, x) in xs.iter().enumerate() {
-            eprint!("x{i}={x:#x} ");
+        for (i, (name, v)) in regs.iter().enumerate() {
+            eprint!("{name}={v:#x} ");
             if i % 4 == 3 {
                 eprintln!();
             }
         }
-        eprintln!("fp={fp:#x} lr={lr:#x} sp={sp:#x}");
+        eprintln!();
     }
 }

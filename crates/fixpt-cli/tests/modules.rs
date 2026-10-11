@@ -35,6 +35,18 @@ const MODES: [&[&str]; 10] = [
     &["--fx26-run", "cellular", "--cellular-machine", "registers", "--calling-convention", "native"],
 ];
 
+/// Whether a mode's machine runs here: every one on arm64; on x86_64 those
+/// of the hand-encoded machine and the Rust compiler's words; elsewhere
+/// only those of no machine code.
+fn runs_here(mode: &[&str]) -> bool {
+    if fixpt_native::AVAILABLE {
+        return true;
+    }
+    let cellular = |m: &&str| fixpt_native::CELLULAR_AVAILABLE && matches!(*m, "native" | "native-compiled");
+    let machine = mode.iter().skip_while(|a| **a != "--cellular-machine").nth(1);
+    mode.windows(2).all(|w| w != ["--calling-convention", "native"]) && machine.is_none_or(cellular)
+}
+
 fn dir() -> std::path::PathBuf {
     std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../fixpt-fx26/tests/programs/modules")
 }
@@ -74,8 +86,7 @@ fn module_programs_run_alike_in_every_mode() {
             if mode.contains(&"stencils") && !stencils {
                 continue;
             }
-            // Where machine code is not arm64, the modes that need none.
-            if !fixpt_native::AVAILABLE && mode.len() > 2 {
+            if !runs_here(mode) {
                 continue;
             }
             runs.push((p, mode, want.clone(), forms.clone()));
@@ -108,6 +119,6 @@ fn module_programs_run_alike_in_every_mode() {
             .collect();
         handles.into_iter().flat_map(|h| h.join().expect("a run")).collect()
     });
-    assert!(runs.len() >= if fixpt_native::AVAILABLE { 32 } else { 12 }, "only {} runs", runs.len());
+    assert!(runs.len() >= PROGRAMS.len() * MODES.iter().filter(|m| runs_here(m) && !m.contains(&"stencils")).count(), "only {} runs", runs.len());
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }

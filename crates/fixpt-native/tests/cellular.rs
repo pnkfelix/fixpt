@@ -3,8 +3,10 @@
 //! machine and the stencil machine at every optimisation level it was built
 //! at.
 //!
-//! Only where arm64 code runs: every test here runs some.
-#![cfg(target_arch = "aarch64")]
+//! Only where the hand-encoded machine runs, arm64 or x86_64: every test
+//! here runs it. The stencils are arm64's only: elsewhere `opt_levels()` is
+//! empty.
+#![cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 
 use fixpt_engine::cellular::{Machine, Trap, WordBuilder, examples, prim, primitive_word};
 use fixpt_heap::layout::cellular::WORD_NAME;
@@ -28,6 +30,13 @@ fn both(heap: &mut Heap, word: Value, args: &[Value]) -> Result<Vec<Value>, Trap
     let word = heap.root_at(root);
     let n = NativeMachine::new().run(heap, word, args, FUEL);
     assert_eq!(n, r, "the hand-encoded machine and the Rust machine disagree");
+    // And with every word it reaches compiled to machine code.
+    let mut m = NativeMachine::new();
+    let word = heap.root_at(root);
+    m.compile_reachable(heap, word).expect("compiles");
+    let word = heap.root_at(root);
+    let c = m.run(heap, word, args, FUEL);
+    assert_eq!(c, r, "the compiled words and the Rust machine disagree");
     for opt in opt_levels() {
         let word = heap.root_at(root);
         let s = StencilMachine::new(opt).expect("built").run(heap, word, args, FUEL);
@@ -38,6 +47,7 @@ fn both(heap: &mut Heap, word: Value, args: &[Value]) -> Result<Vec<Value>, Trap
 }
 
 #[test]
+#[cfg(target_arch = "aarch64")]
 fn stencils_were_built_at_every_level() {
     // The build script warns and carries on without a nightly compiler; on
     // this project's machines there is one, so their absence is a failure.
@@ -199,4 +209,15 @@ fn code_sizes() {
         eprintln!("stencils -O{opt}: {} bytes", StencilMachine::new(opt).expect("built").code_bytes);
     }
     assert!(hand > 0);
+}
+
+/// The disassembler reads every instruction of the x86_64 machine, as
+/// `tests/arm64_disasm.rs` checks of the arm64 one.
+#[test]
+#[cfg(target_arch = "x86_64")]
+fn the_disassembler_reads_the_whole_machine() {
+    let code = NativeMachine::new().machine_bytes();
+    let text = fixpt_native::x86_64::disasm::listing(&code);
+    let unknown: Vec<&str> = text.lines().filter(|l| l.contains(".byte")).collect();
+    assert!(unknown.is_empty(), "{}", unknown.join("\n"));
 }

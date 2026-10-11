@@ -34,10 +34,11 @@ fn page() -> usize {
 
 impl CodeSpace {
     /// Map a space of at least `bytes` bytes, rounded up to whole pages.
-    /// The code is arm64, so on any other machine there is no space to map.
+    /// The code is arm64 or x86_64, so on any other machine there is no
+    /// space to map.
     pub fn new(bytes: usize) -> io::Result<CodeSpace> {
-        if !cfg!(target_arch = "aarch64") {
-            return Err(io::Error::new(io::ErrorKind::Unsupported, "machine code here is arm64, and this machine is not"));
+        if !crate::CELLULAR_AVAILABLE {
+            return Err(io::Error::new(io::ErrorKind::Unsupported, "machine code here is arm64 or x86_64, and this machine is neither"));
         }
         let p = page();
         let size = bytes.max(1).div_ceil(p) * p;

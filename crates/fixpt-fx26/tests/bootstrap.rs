@@ -98,15 +98,15 @@ use common::same_code;
 #[test]
 #[cfg_attr(not(optimized), ignore = "4 s in release, 7 minutes in debug: run with --release, or --ignored")]
 fn fixpoint() {
-    // Where arm64 code cannot run, on the machine written in Rust.
-    fixpoint_on(if fixpt_native::AVAILABLE { fixpt_native::cellular::run_word } else { fixpt_engine::cellular::run_word });
+    // Where no machine code runs, on the machine written in Rust.
+    fixpoint_on(if fixpt_native::CELLULAR_AVAILABLE { fixpt_native::cellular::run_word } else { fixpt_engine::cellular::run_word });
 }
 
 /// The same, with stage 2's words compiled to machine code (step 11a) as
 /// they run: it must make the same code.
 #[test]
-#[cfg_attr(all(not(optimized), target_arch = "aarch64"), ignore = "4 s in release, 7 minutes in debug: run with --release, or --ignored")]
-#[cfg_attr(not(target_arch = "aarch64"), ignore = "runs arm64 machine code")]
+#[cfg_attr(all(not(optimized), any(target_arch = "aarch64", target_arch = "x86_64")), ignore = "4 s in release, 7 minutes in debug: run with --release, or --ignored")]
+#[cfg_attr(not(any(target_arch = "aarch64", target_arch = "x86_64")), ignore = "runs machine code")]
 fn fixpoint_with_words_compiled() {
     fixpoint_on(fixpt_native::cellular::run_word_compiled);
 }

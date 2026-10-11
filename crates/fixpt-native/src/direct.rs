@@ -815,6 +815,9 @@ pub struct Compiled {
 
 impl DirectMachine {
     pub fn new() -> Result<DirectMachine, String> {
+        if !crate::AVAILABLE {
+            return Err(crate::UNAVAILABLE.into());
+        }
         fixpt_runtime::crossing::set_foreign_marks(marks_of);
         let mut space = CodeSpace::new(8 << 20).map_err(|e| e.to_string())?;
         let code = trampoline();

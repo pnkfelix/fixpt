@@ -3,8 +3,9 @@
 //! to machine code, runs them and drops them, over and over, must not run
 //! out of room for code, however long it goes on.
 //!
-//! Only where arm64 code runs: every test here runs some.
-#![cfg(target_arch = "aarch64")]
+//! Only where the hand-encoded machine runs, arm64 or x86_64: every test
+//! here runs it.
+#![cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 
 use fixpt_engine::cellular::WordBuilder;
 use fixpt_heap::Value;
@@ -55,22 +56,11 @@ fn running_placed_code_does_not_collect_at_every_run() {
     let mut placed = 0;
     while placed < 9 << 20 {
         let w = fresh_word(&mut rt, 0, 2000);
-        let (code, _) = fixpt_native::cellular::assemble_word(&rt.heap, w, [0, 0]).expect("assembles");
-        fixpt_native::cellular::with_machine(|m| {
-            let (at, far) = m.reserve(code.len()).expect("room");
-            let (code, starts) = fixpt_native::cellular::assemble_word(&rt.heap, w, far).expect("assembles");
-            m.install(&mut rt.heap, w, at, &code, &starts).expect("installs");
-        });
-        placed += 4 * code.len();
+        placed += place(&mut rt, w);
     }
     assert!(fixpt_native::cellular::with_machine(|m| m.code_collection_due()));
     let w = fresh_word(&mut rt, 7, 1);
-    let (code, _) = fixpt_native::cellular::assemble_word(&rt.heap, w, [0, 0]).expect("assembles");
-    fixpt_native::cellular::with_machine(|m| {
-        let (at, far) = m.reserve(code.len()).expect("room");
-        let (code, starts) = fixpt_native::cellular::assemble_word(&rt.heap, w, far).expect("assembles");
-        m.install(&mut rt.heap, w, at, &code, &starts).expect("installs");
-    });
+    place(&mut rt, w);
     let at = rt.heap.push_root(w);
     let before = rt.heap.gc_count;
     for _ in 0..100 {
@@ -79,4 +69,24 @@ fn running_placed_code_does_not_collect_at_every_run() {
     }
     assert!(rt.heap.gc_count - before <= 1, "{} major collections in 100 runs", rt.heap.gc_count - before);
     assert!(!fixpt_native::cellular::with_machine(|m| m.code_collection_due()));
+}
+
+/// Place word `w`'s code, assembled apart, in the machine `run_word` uses,
+/// as the compiler written in FX-26 has it placed: how many bytes.
+fn place(rt: &mut Runtime, w: Value) -> usize {
+    if cfg!(target_arch = "x86_64") {
+        let (code, starts) = fixpt_native::cellular::x64::assemble_word(&rt.heap, w).expect("assembles");
+        return fixpt_native::cellular::with_machine(|m| {
+            let at = m.reserve_bytes(code.len()).expect("room");
+            m.install_bytes(&mut rt.heap, w, at, &code, &starts).expect("installs");
+            code.len()
+        });
+    }
+    let (code, _) = fixpt_native::cellular::assemble_word(&rt.heap, w, [0, 0]).expect("assembles");
+    fixpt_native::cellular::with_machine(|m| {
+        let (at, far) = m.reserve(code.len()).expect("room");
+        let (code, starts) = fixpt_native::cellular::assemble_word(&rt.heap, w, far).expect("assembles");
+        m.install(&mut rt.heap, w, at, &code, &starts).expect("installs");
+    });
+    4 * code.len()
 }

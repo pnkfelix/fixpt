@@ -150,9 +150,9 @@ fn fx26_runs_cellular_on_each_machine() {
     // stencils only where this build found a nightly compiler.
     let src = "(letrec ((f (subr spin (int) int) (lambda (n) (if (< n 2) n (+ (f (- n 1)) (f (- n 2))))))) (f 15))";
     let stencils = !fixpt_native::stencil::opt_levels().is_empty();
-    // Only the Rust one where machine code is not arm64.
-    let native = fixpt_native::AVAILABLE;
-    for machine in ["rust", "native", "stencils"].into_iter().filter(|m| stencils || *m != "stencils").filter(|m| native || *m == "rust") {
+    // Only the Rust one where the hand-encoded machine cannot run.
+    let native = fixpt_native::CELLULAR_AVAILABLE;
+    for machine in ["rust", "native", "native-compiled", "stencils"].into_iter().filter(|m| stencils || *m != "stencils").filter(|m| native || *m == "rust") {
         let out = Command::new(FIXPT)
             .args(["--dialect", "fx26", "--fx26-run", "cellular", "--cellular-machine", machine, "eval", src])
             .output()
@@ -162,8 +162,8 @@ fn fx26_runs_cellular_on_each_machine() {
     }
     let out = Command::new(FIXPT).args(["--cellular-machine", "forth", "eval", "1"]).output().expect("fixpt runs");
     assert!(!out.status.success(), "an unknown machine is refused");
-    if !native {
-        let out = Command::new(FIXPT).args(["--cellular-machine", "native", "eval", "1"]).output().expect("fixpt runs");
+    if !fixpt_native::AVAILABLE {
+        let out = Command::new(FIXPT).args(["--cellular-machine", "registers", "eval", "1"]).output().expect("fixpt runs");
         let err = String::from_utf8_lossy(&out.stderr);
         assert!(out.status.code() == Some(2) && err.contains("arm64"), "a machine that cannot run here is refused: {err}");
     }
@@ -457,10 +457,18 @@ fn on_every_machine(program: &str) -> Vec<(&'static [&'static str], String)> {
         &["--fx26-run", "cellular", "--cellular-machine", "registers"],
         &["--fx26-run", "cellular", "--calling-convention", "native"],
     ];
-    // Where machine code is not arm64, only the first two run.
+    // Where machine code is not arm64, only the first two run, and on
+    // x86_64 the hand-encoded machine's two.
+    let here = if fixpt_native::AVAILABLE {
+        machines.len()
+    } else if fixpt_native::CELLULAR_AVAILABLE {
+        4
+    } else {
+        2
+    };
     let children: Vec<_> = machines
         .iter()
-        .take(if fixpt_native::AVAILABLE { machines.len() } else { 2 })
+        .take(here)
         .map(|m| {
             let mut child = Command::new(FIXPT)
                 .args(["--dialect", "fx26"])
@@ -598,7 +606,13 @@ fn fx26_machines_by_name() {
         String::from_utf8_lossy(&out.stdout).lines().find(|l| l.contains("Machine:")).unwrap_or("").to_string()
     };
     // Where arm64 code cannot run, the fastest that can.
-    let fast = if fixpt_native::AVAILABLE { "Machine: fx-regs-rsjit-nativecc;" } else { "Machine: fx-cells-rsinterp;" };
+    let fast = if fixpt_native::AVAILABLE {
+        "Machine: fx-regs-rsjit-nativecc;"
+    } else if fixpt_native::CELLULAR_AVAILABLE {
+        "Machine: fx-cells-rsjit-cellcc;"
+    } else {
+        "Machine: fx-cells-rsinterp;"
+    };
     assert!(banner(&["fx26"]).contains(fast));
     assert!(banner(&["--dialect", "fx26", "repl"]).contains(fast));
     assert!(banner(&["--dialect", "fx26", "--fx26-machine", "fast", "repl"]).contains(fast));

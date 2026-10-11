@@ -120,9 +120,11 @@ pub fn command(args: &[String]) -> i32 {
     if fixpt_native::stencil::opt_levels().is_empty() {
         machines.retain(|m| *m != "rs-cells-stencils-cellcc");
     }
-    // Every machine but these runs arm64 code.
+    // Every machine but these runs arm64 code; the hand-encoded one and
+    // its compiled words run on x86_64 too.
     if !fixpt_native::AVAILABLE {
-        machines.retain(|m| ["rs-scheme-vm", "rs-cells-rsinterp"].contains(m));
+        let cellular: &[&str] = if fixpt_native::CELLULAR_AVAILABLE { &["rs-cells-asminterp", "rs-cells-rsjit-cellcc"] } else { &[] };
+        machines.retain(|m| ["rs-scheme-vm", "rs-cells-rsinterp"].contains(m) || cellular.contains(m));
     }
     let mid_sized = files.is_empty();
     if files.is_empty() {

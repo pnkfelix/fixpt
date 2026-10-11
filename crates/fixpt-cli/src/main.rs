@@ -72,8 +72,8 @@ options:
                                  convention (cellcc: inside the cellular
                                  machine; nativecc: native procedures):
     fx-regs-rsjit-nativecc       the default, also `fast`: register code,
-                                 compiled to arm64 by Rust (direct.rs); where
-                                 arm64 code cannot run, fx-cells-rsinterp
+                                 compiled to arm64 by Rust (direct.rs); on
+                                 x86_64, fx-cells-rsjit-cellcc
     rs-scheme-vm                 lowered to Scheme by Rust, on the bytecode VM
     fx-ast-eval                  the evaluator written in FX-26
     fx-cells-rsinterp            cellular words, interpreted by Rust
@@ -270,9 +270,12 @@ fn run(args: &[String]) -> i32 {
             None => format!("--fx26-run {} --cellular-machine {} --calling-convention {}", parts.0, parts.1.unwrap_or("rust"), parts.2.unwrap_or("cellular")),
         },
     );
-    // The machines that run arm64 code, refused where that cannot run.
+    // The machines that run arm64 code, refused where that cannot run: all
+    // but the hand-encoded one and the words Rust compiles into it, which
+    // run on x86_64 too (`fixpt_native::cellular::x64`).
     if !fixpt_native::AVAILABLE {
-        let machine = flags.cellular_machine.as_deref().filter(|m| *m != "rust").map(|m| ("--cellular-machine", m));
+        let cellular = |m: &str| fixpt_native::CELLULAR_AVAILABLE && matches!(m, "native" | "native-compiled");
+        let machine = flags.cellular_machine.as_deref().filter(|m| *m != "rust" && !cellular(m)).map(|m| ("--cellular-machine", m));
         let convention = flags.calling_convention.as_deref().filter(|c| *c == "native").map(|c| ("--calling-convention", c));
         if let Some((flag, value)) = machine.or(convention)
             && ["native", "native-compiled", "fx-compiled", "stencils", "registers"].contains(&value)
@@ -541,10 +544,18 @@ pub(crate) const FX26_MACHINES: [(&str, &str, Option<&str>, Option<&str>, &str);
         "register code, compiled to arm64 by Rust's direct.rs, native calls",
     ),
 ];
-/// The machine `fast` names: `fx-regs-rsjit-nativecc`, or, where arm64 code
-/// cannot run, `fx-cells-rsinterp`, faster than `rs-scheme-vm` on each of
-/// `fixpt bench`'s programs (x86_64 Linux, 2026-10-11).
-pub(crate) const FASTEST: &str = if fixpt_native::AVAILABLE { "fx-regs-rsjit-nativecc" } else { "fx-cells-rsinterp" };
+/// The machine `fast` names: `fx-regs-rsjit-nativecc`; where arm64 code
+/// cannot run, but the hand-encoded machine can (x86_64),
+/// `fx-cells-rsjit-cellcc`, the fastest there on each of `fixpt bench`'s
+/// programs (2026-10-11); and elsewhere `fx-cells-rsinterp`, faster than
+/// `rs-scheme-vm` on each of them.
+pub(crate) const FASTEST: &str = if fixpt_native::AVAILABLE {
+    "fx-regs-rsjit-nativecc"
+} else if fixpt_native::CELLULAR_AVAILABLE {
+    "fx-cells-rsjit-cellcc"
+} else {
+    "fx-cells-rsinterp"
+};
 /// The FX-26 machine this process runs, by name (`FX26_MACHINES`), or the
 /// parts given one by one where they name none.
 pub(crate) static FX26_MACHINE_NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
@@ -563,10 +574,17 @@ pub(crate) static CELLULAR_MACHINE_NAME: std::sync::OnceLock<&'static str> = std
 /// `--calling-convention native`, for every FX-26 session this process
 /// starts.
 /// The machine for register code, where the front end runs: the hand
-/// register machine, or where that cannot run (not arm64), the cellular
-/// machine written in Rust.
+/// register machine; where that cannot run (not arm64), the hand-encoded
+/// machine with its words compiled (x86_64), which runs the cells; and
+/// where that cannot either, the cellular machine written in Rust.
 pub(crate) fn register_machine() -> fixpt_runtime::RunWord {
-    if fixpt_native::AVAILABLE { fixpt_native::cellular::run_word_registers } else { fixpt_engine::cellular::run_word }
+    if fixpt_native::AVAILABLE {
+        fixpt_native::cellular::run_word_registers
+    } else if fixpt_native::CELLULAR_AVAILABLE {
+        fixpt_native::cellular::run_word_compiled
+    } else {
+        fixpt_engine::cellular::run_word
+    }
 }
 
 pub(crate) static NATIVE_CONVENTION: std::sync::OnceLock<bool> = std::sync::OnceLock::new();

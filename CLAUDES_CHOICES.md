@@ -595,3 +595,49 @@ than a word unless its name says so.
    - Not done, for the user: whether a failing `pure` call may be dropped
      (`rs-scheme-vm` drops `(error …)` when its value is unused; native
      code does not): TODO §85.
+
+## An x86_64 back end: the hand-encoded cellular machine first (2026-10-11)
+
+The user's: "work autonomously on a native backend for x86_64 Linux, to
+eventually be in FX26 itself".
+
+1. **The hand-encoded cellular machine first**, and the words Rust compiles
+   into it (`cellular::x64`: `generate`, `routine_body`, `assemble_word`),
+   over register code or the native convention: its only contract is
+   `State` and the `callout` hook, all control is already Rust's
+   (`control.rs`, `round_trip`), and the differential tests
+   (`tests/cellular.rs`, `frames.rs`, `code_gc.rs`) check it against the
+   Rust machine unchanged. `native.fx` compiles for this machine, so it is
+   also the one an FX-26 port follows.
+2. **A module beside the arm64 code, not a trait over both.** The arm64
+   routines are written in its idioms (post-increment loads, `stp`, `csel`,
+   `cbz`); a trait of ~60 operations would have meant rewriting upstream's
+   most-edited file. The x86_64 routines follow the arm64 ones in order and
+   in the names of their steps (`save`, `push_return`, `enter_cur`, …), so
+   a change to one is made to the other by reading them side by side.
+3. **No BASE register; the fuel in the state.** BASE is always 0 (values
+   are addresses); x86_64 has 15 registers to the 19 the arm64 machine
+   names, and `sub qword [st + fuel], 1` costs about what `subs` does.
+   Only `ST` (r15) must survive a call into Rust; the rest are saved and
+   loaded as on arm64.
+4. **`#t`/`#f` from the state** (`cmov` from `[st + tru]`), which already
+   held them, rather than 10-byte immediates.
+5. **Every branch to a label 32 bits**, and a jump to the next instruction
+   dropped when its label is bound: no `long_branches` retry, no
+   relaxation. Trap stubs go after the whole word, so each cell's code
+   falls into the next.
+6. **Code counted in bytes in `NativeMachine`**: `install_bytes` and
+   `reserve_bytes`, with `install` and `reserve` kept for arm64's `u32`s
+   (the FX-26 compiler's `place_code`, tests), so no caller changed.
+7. **Encodings checked as arm64's are**, against GNU `as`
+   (`tests/x86_64.rs`), each instruction assembled alone (a symbol per
+   line, so lengths come from `nm`), and the disassembler reading each back;
+   chosen to be the assembler's own encodings (the `rax` short forms, REX
+   only where needed), so that the test needs no exceptions.
+8. **What "available" means is split**: `AVAILABLE` stays "every machine
+   here" (arm64), and `CELLULAR_AVAILABLE` is the hand-encoded machine and
+   its compiled words (arm64 or x86_64). `DirectMachine::new` now refuses
+   off arm64 itself, since a code space can be made on x86_64.
+9. **`fast` on x86_64 is `fx-cells-rsjit-cellcc`**, the fastest there on
+   every program `fixpt bench` times (fib 254 → 27 ms against the Rust
+   interpreter, tak 87 → 10), and the front end runs on it too.

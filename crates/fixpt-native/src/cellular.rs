@@ -62,6 +62,7 @@ mod state {
     include!("state.rs");
 }
 pub(crate) mod regcode;
+pub mod x64;
 pub use regcode::{assemble_adapter, assemble_register_word};
 pub(crate) use state::{ROUTINE_SLOTS, State};
 
@@ -1688,7 +1689,7 @@ pub const NATIVE_SLOTS: usize = 1 << 16;
 static NEXT_SLOT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(PRIMITIVES);
 
 /// Each installed code's machine code, by native slot: where it runs, and
-/// how many instructions. For showing it (`,disassemble-asm`), which is
+/// how many bytes. For showing it (`,disassemble-asm`), which is
 /// asked for from inside a machine's run, and so cannot reach the machine.
 /// A machine's entries go when it does.
 static CODE_OF_SLOT: std::sync::Mutex<std::collections::BTreeMap<usize, (usize, usize)>> =
@@ -1702,7 +1703,13 @@ pub fn machine_code_text(heap: &Heap, word: Value) -> Option<String> {
     if slot < PRIMITIVES as i64 {
         return None;
     }
-    let (at, n) = *CODE_OF_SLOT.lock().expect("not poisoned").get(&(slot as usize))?;
+    let (at, bytes) = *CODE_OF_SLOT.lock().expect("not poisoned").get(&(slot as usize))?;
+    if cfg!(target_arch = "x86_64") {
+        // SAFETY: as below, `bytes` bytes at `at`.
+        let code = unsafe { std::slice::from_raw_parts(at as *const u8, bytes) };
+        return Some(format!("machine code, {bytes} bytes at {at:#x} (native slot {slot}):\n{}", crate::x86_64::disasm::listing(code)));
+    }
+    let n = bytes / 4;
     // SAFETY: the record is of code a live machine installed and flushed,
     // `n` instructions at `at`, in its code space's read+execute view,
     // which is readable, and stays mapped while the machine lives; its
@@ -1725,9 +1732,10 @@ const CODE_SPACE: usize = 256 << 20;
 pub struct NativeMachine {
     space: CodeSpace,
     entry: Offset,
-    /// Where the machine's code is, and in it the common trap and exit.
+    /// Where the machine's code is, and in it the common trap and exit, in
+    /// bytes.
     machine_at: Offset,
-    commons: [i64; 2],
+    commons: [usize; 2],
     /// Each entry number's code: a routine's, a compiled word's entry as a
     /// cell, or, for a number this machine has no code for, `docol`'s.
     table: Vec<u64>,
@@ -1738,8 +1746,8 @@ pub struct NativeMachine {
     pub fuel_left: u64,
     /// The native slots this machine has installed code in.
     slots: Vec<usize>,
-    /// How many instructions the machine's own code is.
-    machine_len: usize,
+    /// How many bytes the machine's own code is.
+    machine_bytes: usize,
     /// Each word compiled into this machine, for [`collect_code`]
     /// (NativeMachine::collect_code) to keep, moved, or let go.
     installed: Vec<Installed>,
@@ -1782,19 +1790,29 @@ impl Drop for NativeMachine {
     }
 }
 
+/// The machine for the instruction set this runs on: its code, where its
+/// entry, each routine and the common trap and exit are, in bytes.
+fn machine_code() -> (Vec<u8>, usize, Vec<usize>, [usize; 2]) {
+    if cfg!(target_arch = "x86_64") {
+        return x64::generate();
+    }
+    let (code, entry, starts, commons) = generate();
+    (crate::arm64::bytes(&code), 4 * entry, starts.iter().map(|s| 4 * s).collect(), commons.map(|c| 4 * c as usize))
+}
+
 impl NativeMachine {
     pub fn new() -> NativeMachine {
-        let (code, entry, starts, commons) = generate();
+        let (code, entry, starts, commons) = machine_code();
         let mut space = CodeSpace::new(CODE_SPACE).expect("a code space");
-        let at = space.alloc(code.len() * 4, 16).expect("room for the machine");
-        space.write_code(at, &code);
-        space.flush(at, code.len() * 4);
-        let mut table: Vec<u64> = starts.iter().map(|s| space.exec_addr(at + 4 * s) as u64).collect();
+        let at = space.alloc(code.len(), 16).expect("room for the machine");
+        space.write(at, &code);
+        space.flush(at, code.len());
+        let mut table: Vec<u64> = starts.iter().map(|s| space.exec_addr(at + s) as u64).collect();
         let docol = table[ROUTINE_DOCOL as usize];
         table.resize(NATIVE_SLOTS, docol);
         let resume = vec![0; NATIVE_SLOTS];
         let m = NativeMachine {
-            entry: at + 4 * entry,
+            entry: at + entry,
             machine_at: at,
             commons,
             space,
@@ -1803,7 +1821,7 @@ impl NativeMachine {
             stacks: Stacks::new(),
             fuel_left: 0,
             slots: Vec::new(),
-            machine_len: code.len(),
+            machine_bytes: code.len(),
             installed: Vec::new(),
             free_slots: Vec::new(),
             since_collect: 0,
@@ -1821,7 +1839,7 @@ impl NativeMachine {
             return;
         }
         let start = self.space.exec_addr(self.machine_at) as u64;
-        let end = start + 4 * self.machine_len as u64;
+        let end = start + self.machine_bytes as u64;
         let first = self.table[0];
         crate::symbols::note(start as usize, (first - start) as usize, "cellular machine: entry and exits");
         for (n, (name, _)) in ROUTINES.iter().enumerate() {
@@ -1856,7 +1874,7 @@ impl NativeMachine {
         let mut new = CodeSpace::new(CODE_SPACE).map_err(|e| format!("a code space: {e}"))?;
         let old_exec = |space: &CodeSpace, at: Offset| space.exec_addr(at) as u64;
         // The machine's own code, its routines' entries moved with it.
-        let len = 4 * self.machine_len;
+        let len = self.machine_bytes;
         let m_at = new.alloc(len, 16).ok_or("the code space is full")?;
         new.write(m_at, self.space.bytes(self.machine_at, len));
         let (lo, hi) = (old_exec(&self.space, self.machine_at), old_exec(&self.space, self.machine_at) + len as u64);
@@ -1905,7 +1923,7 @@ impl NativeMachine {
             }
             self.table[w.slot] = old_exec(&new, at);
             self.resume[w.slot] = old_exec(&new, rt_at);
-            code_of.insert(w.slot, (new.exec_addr(at), w.code.1 / 4));
+            code_of.insert(w.slot, (new.exec_addr(at), w.code.1));
             crate::faults::note(new.exec_addr(at), w.code.1, w.name.clone());
             kept.push(Installed { code: (at, w.code.1), resume: (rt_at, w.resume.1), ..w });
         }
@@ -1939,6 +1957,11 @@ impl NativeMachine {
         if entry != ROUTINE_DOCOL {
             return if entry >= PRIMITIVES as u64 { Ok(()) } else { Err("not a word made of cells".into()) };
         }
+        if cfg!(target_arch = "x86_64") {
+            let (code, starts) = x64::assemble_word(heap, word)?;
+            let at = self.reserve_bytes_collecting(heap, code.len())?;
+            return self.install_bytes(heap, word, at, &code, &starts);
+        }
         // Assembled once for its size, which does not depend on where it goes.
         let (code, _) = assemble_word(heap, word, [0, 0])?;
         let (at, far) = self.reserve_collecting(heap, code.len())?;
@@ -1961,29 +1984,53 @@ impl NativeMachine {
     /// Room for `len` instructions: where, and where the machine's common
     /// trap and exit are from there, in instructions, for [`assemble_word`].
     pub fn reserve(&mut self, len: usize) -> Result<(Offset, [i64; 2]), String> {
-        let at = self.space.alloc(4 * len, 32).ok_or("the code space is full")?;
-        let origin = (at - self.machine_at) as i64 / 4;
-        Ok((at, [self.commons[0] - origin, self.commons[1] - origin]))
+        let at = self.reserve_bytes(4 * len)?;
+        let origin = (at - self.machine_at) as i64;
+        Ok((at, self.commons.map(|c| (c as i64 - origin) / 4)))
+    }
+
+    /// Room for `len` bytes of code.
+    pub fn reserve_bytes(&mut self, len: usize) -> Result<Offset, String> {
+        Ok(self.space.alloc(len, 32).ok_or("the code space is full")?)
+    }
+
+    /// [`reserve_bytes`](Self::reserve_bytes), collecting the code first if
+    /// there is no room, as [`reserve_collecting`](Self::reserve_collecting).
+    pub fn reserve_bytes_collecting(&mut self, heap: &mut Heap, len: usize) -> Result<Offset, String> {
+        match self.reserve_bytes(len) {
+            Ok(r) => Ok(r),
+            Err(_) => {
+                self.collect_code(heap)?;
+                self.reserve_bytes(len)
+            }
+        }
     }
 
     /// Place `code`, assembled for `at` (from [`reserve`](Self::reserve)),
     /// and make `word`'s entry name it. `starts[i]` is where cell `i`'s
     /// code starts, in instructions, or -1 if no instruction starts there.
     pub fn install(&mut self, heap: &mut Heap, word: Value, at: Offset, code: &[u32], starts: &[i64]) -> Result<(), String> {
+        let starts: Vec<i64> = starts.iter().map(|&s| if s < 0 { s } else { 4 * s }).collect();
+        self.install_bytes(heap, word, at, &crate::arm64::bytes(code), &starts)
+    }
+
+    /// [`install`](Self::install), of code in bytes, of any instruction
+    /// set: `starts[i]` in bytes.
+    pub fn install_bytes(&mut self, heap: &mut Heap, word: Value, at: Offset, code: &[u8], starts: &[i64]) -> Result<(), String> {
         let fields = heap.bloblet_head(word).fields;
         if starts.len() != fields + 1 - WORD_CELL0 {
             return Err(format!("{} starts for {} cells", starts.len(), fields + 1 - WORD_CELL0));
         }
-        self.space.write_code(at, code);
-        self.space.flush(at, 4 * code.len());
+        self.space.write(at, code);
+        self.space.flush(at, code.len());
         let what = format!("{} {}", if heap.is_register_word(word) { "register word" } else { "word" }, heap.symbol_name(heap.bloblet_slot(word, WORD_NAME)));
-        crate::faults::note(self.space.exec_addr(at), 4 * code.len(), what.clone());
+        crate::faults::note(self.space.exec_addr(at), code.len(), what.clone());
         // Where to resume, by k: each instruction's start.
         let table_len = fields + 2;
         let rt_at = self.space.alloc(8 * table_len, 8).ok_or("the code space is full")?;
         for k in 0..table_len {
-            let ins = k.checked_sub(WORD_CELL0).and_then(|i| starts.get(i)).copied().unwrap_or(-1);
-            let v = if ins < 0 { 0 } else { self.space.exec_addr(at + 4 * ins as usize) as u64 };
+            let byte = k.checked_sub(WORD_CELL0).and_then(|i| starts.get(i)).copied().unwrap_or(-1);
+            let v = if byte < 0 { 0 } else { self.space.exec_addr(at + byte as usize) as u64 };
             self.space.write_u64(rt_at + 8 * k, v);
         }
         let slot = match self.free_slots.pop() {
@@ -2000,8 +2047,8 @@ impl NativeMachine {
         heap.set_bloblet_slot(word, WORD_ENTRY, Value::fixnum(slot as i64));
         let weak = heap.weak_add(word);
         self.compiled += 1;
-        self.installed.push(Installed { seq: self.compiled, slot, heap: heap.serial(), weak, code: (at, 4 * code.len()), resume: (rt_at, 8 * table_len), name: what });
-        self.since_collect += 4 * code.len() + 8 * table_len;
+        self.installed.push(Installed { seq: self.compiled, slot, heap: heap.serial(), weak, code: (at, code.len()), resume: (rt_at, 8 * table_len), name: what });
+        self.since_collect += code.len() + 8 * table_len;
         Ok(())
     }
 
@@ -2048,7 +2095,7 @@ impl NativeMachine {
             }
             if entry == ROUTINE_DOCOL {
                 let twin = heap.bloblet_slot(w, fixpt_heap::layout::cellular::WORD_TWIN);
-                if registers && heap.is_register_word(twin) {
+                if registers && heap.is_register_word(twin) && crate::AVAILABLE {
                     for k in WORD_CELL0..=heap.bloblet_head(twin).fields {
                         let v = heap.bloblet_slot(twin, k);
                         if heap.is_cellular_word(v) {
@@ -2068,12 +2115,17 @@ impl NativeMachine {
     /// The machine's own code, its routines and its entry, as instructions:
     /// for looking at, and for checking the disassembler reads all of it.
     pub fn machine_instructions(&self) -> Vec<u32> {
-        (0..self.machine_len).map(|i| self.space.read_u32(self.machine_at + 4 * i)).collect()
+        (0..self.machine_bytes / 4).map(|i| self.space.read_u32(self.machine_at + 4 * i)).collect()
+    }
+
+    /// The machine's own code, as bytes.
+    pub fn machine_bytes(&self) -> Vec<u8> {
+        self.space.bytes(self.machine_at, self.machine_bytes).to_vec()
     }
 
     /// Where this machine's common trap and exit are, for the state.
     fn commons_addresses(&self) -> (u64, u64) {
-        let at = |i: i64| self.space.exec_addr(self.machine_at + 4 * i as usize) as u64;
+        let at = |i: usize| self.space.exec_addr(self.machine_at + i) as u64;
         (at(self.commons[0]), at(self.commons[1]))
     }
 
@@ -2219,7 +2271,7 @@ pub fn run_word(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]) ->
 
 /// The same, compiling or not as `compile` says.
 pub fn run_word_as(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value], compile: bool) -> Result<Value, String> {
-    if !crate::AVAILABLE {
+    if !crate::CELLULAR_AVAILABLE {
         return Err(crate::UNAVAILABLE.into());
     }
     MACHINE.with(|m| {
