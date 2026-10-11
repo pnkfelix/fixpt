@@ -1550,6 +1550,15 @@ heap allows (up to `FIXPT_NATIVE_STACK_MAX`, 2^28 words by default), its
 stack in the nursery, flushed in place at every collection and overflow.
 Left:
 
+- **A capture copies its frames** (sampled 2026-10-11): `captures` is
+  slower natively than as register code in the cellular convention (9.4
+  against 7.5 ms). A third of its native time is `Heap::vector_with`,
+  `chunks_of` copying the 20 frames each capture takes into a heap
+  vector (about 1.3 ns a word, so the copying itself is not slow; that
+  it happens each round is). Ideas, for later: copy lazily (the frames
+  stay on the stack until a resumption or a collection needs them), or a
+  capture that its handler resumes at once (as here) not copying at all.
+
 - **What the stack costs the collector, measured (2026-10-07).** Unlike
   Larceny, which flushes the stack at every collection, minor or major
   (`src/Rts/Sys/nursery.c:211-216`), so its collector never walks one,
