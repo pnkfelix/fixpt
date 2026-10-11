@@ -307,7 +307,6 @@
 (define k-dependent-callee (with check-dependent k-dependent-callee))
 (define k-instantiate-params (with check-dependent k-instantiate-params))
 (define k-result-back (with check-dependent k-result-back))
-(define k-bind-parts (with check-module-rules k-bind-parts))
 (define k-module-type (with check-module-rules k-module-type))
 (define k-comp-names (with check-module-rules k-comp-names))
 (define k-ends-with (with check-module-rules k-ends-with))
@@ -329,6 +328,7 @@
 (define k-flat-view (with check-read-helpers k-flat-view))
 (define k-else-type (with check-read-helpers k-else-type))
 (define k-in-scope-check (with check-read-helpers k-in-scope-check))
+(define k-in-scope-parts (with check-read-helpers k-in-scope-parts))
 (define k-call-te (with check-proving k-call-te))
 (define k-cert-len-has? (with check-test-facts k-cert-len-has?))
 (define k-length-arg (with check-test-facts k-length-arg))
@@ -917,7 +917,9 @@
                (else (otherwise)))))
           (x-with (m body xa xb)
             (let ((r (k-fx-poly-check x m body expected)))
-              (if (null? r) (otherwise) (begin (k-note-fx-plain body a b) (car r)))))
+              (cond ((not (null? r)) (begin (k-note-fx-plain body a b) (car r)))
+                    ((k-fx-module? m) (otherwise))
+                    (else (extract (k-synth-with x m body a b expected) 2)))))
           (x-if (p c d xa xb)
             (let* ((pe (k-check p k-bool))
                    (tested (k-enter-then p))
@@ -1273,9 +1275,9 @@
                      (set k-hide-mark hid)
                      (get got)))))))
   ;; `(with m body)`: the body with `m`'s values in scope, by name, at their
-  ;; types for `m`.
-  (k-synth-with (subr (maxeff checks spin) (kx symbol kx int int) k-te)
-    (lambda (x m body a b)
+  ;; types for `m`; checked against `expected` if given (≥ 0).
+  (k-synth-with (subr (maxeff checks spin) (kx symbol kx int int int) k-te)
+    (lambda (x m body a b expected)
       (let ((mt (k-lookup m)) (shown (symbol->string m)))
         (if (k-fx-module? m)
             (k-synth-fx x mt body a b)
@@ -1288,10 +1290,8 @@
                                 (product (1 a) (2 b) (3 (k-comp-names (extract used 1)))
                                          (4 (extract used 2)))))
                        (naming (k-naming-effect m mt))
-                       (saved (k-mark))
-                       (bound (k-bind-parts (extract used 1)))
-                       (r (k-synth body))
-                       (unbound (k-unbind-to saved)))
+                       (r (k-in-scope-parts (extract used 1) body expected k-synth-as
+                                            a b (k-start body) (k-end body))))
                   (k-te-masked x (extract r 1) (k-union naming (extract r 2)))))
               (else y (k-fail (k-with-not-module shown (k-show-ty mt)) a b))))))))
   ;; `(with #%fx n)`: the standard `n`'s type, whatever binds `n` since.
@@ -1327,5 +1327,5 @@
     (lambda (x)
       (tagcase x
         (x-module (items a b) (k-synth-module x items a b))
-        (x-with (m body a b) (k-synth-with x m body a b))
+        (x-with (m body a b) (k-synth-with x m body a b -1))
         (else y (k-fail-at "a module" x)))))))))

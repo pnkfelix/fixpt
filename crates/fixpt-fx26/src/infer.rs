@@ -272,6 +272,10 @@ impl Checker {
                 self.plain_fx(e);
                 Ok(Effect::pure())
             }
+            // `(with m e)` checked as its body is, `m`'s values in scope:
+            // so an `include`'s module item, `(with %include e)`, is checked
+            // against the type the item declares (`TODO.md` §69).
+            Exp::With { module, body } if !self.is_fx_module(module) => Ok(self.with_as(e, module, body, Some(expected))?.1),
             Exp::Var(s) if self.lookup(s).is_some_and(|t| matches!(self.arena.get(t), Ty::Poly { .. })) => {
                 let t = self.lookup(s).expect("bound");
                 let inst = self.instantiate_against(t, expected, span)?;

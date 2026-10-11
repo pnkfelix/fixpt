@@ -510,6 +510,11 @@ impl Checker {
     /// (`Facts::with_vals`), so that a `with` of one of a wide module's
     /// values, as a re-export is, binds one.
     pub(crate) fn synth_with(&mut self, e: ExpId, m: Sym, body: ExpId) -> R<(TyId, Effect)> {
+        self.with_as(e, m, body, None)
+    }
+
+    /// `(with m body)`: its body synthesized, or checked against `expected`.
+    pub(crate) fn with_as(&mut self, e: ExpId, m: Sym, body: ExpId, expected: Option<TyId>) -> R<(TyId, Effect)> {
         let span = self.arena.span_of(e);
         if self.is_fx_module(m) {
             if self.lookup(m).is_some() {
@@ -545,7 +550,13 @@ impl Checker {
         self.facts.with_vals.insert(e, used.iter().map(|(i, (n, _))| (*n, *i)).collect());
         let vals: Vec<(Sym, TyId)> = used.into_iter().map(|(_, v)| v).collect();
         let naming = self.naming_effect(m, mt);
-        let (t, be) = self.in_scope(&vals, |c| c.synth(body))?;
+        // Checked, an error at the body is said of the `with`, so that a
+        // call's argument's is the argument's (`as_argument`).
+        let at = self.arena.span_of(body);
+        let (t, be) = self.in_scope(&vals, |c| match expected {
+            Some(x) => Ok((x, c.check(body, x).map_err(|err| if err.span == at { FxError::at(span, err.message) } else { err })?)),
+            None => c.synth(body),
+        })?;
         let eff = self.mask(e, &naming.union(&be), t);
         Ok((t, eff))
     }

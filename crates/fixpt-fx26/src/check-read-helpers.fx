@@ -149,6 +149,10 @@
 (define k-bind (with check-env k-bind))
 (define k-unbind-to (with check-env k-unbind-to))
 (define k-lookup (with check-env k-lookup))
+(define k-ok (with check-types-types k-ok))
+(define k-err (with check-types-types k-err))
+(define k-done (with check-types-types k-done))
+(define k-tag (with check-types k-tag))
 (define k-std-binding? (with check-types k-std-binding?))
 (define x-app (with check-types-types x-app))
 (define x-var (with check-types-types x-var))
@@ -748,6 +752,34 @@
         (k-bind y t)
         (let ((r (synth-as body expected)))
           (begin (k-unbind-to saved) r))))))
+;; `body`, at `ba`..`bb`, its type and effect with `ps` bound, the first
+;; first, by `synth-as` (the checker's knot), against `expected` if given
+;; (≥ 0): a `with`'s body, at `a`..`b`, of which an error at the body is
+;; said, so that a call's argument's is the argument's (`Checker::with_as`).
+(define k-in-scope-parts
+  (subr (maxeff checks spin) (k-parts kx int k-synth-as-knot int int int int) k-te)
+  (lambda (ps body expected synth-as a b ba bb)
+    (let ((saved (k-mark)))
+      (begin
+        (k-bind-each ps)
+        (let ((r (if (< expected 0)
+                     (synth-as body expected)
+                     (k-respanning (lambda () (synth-as body expected)) ba bb a b))))
+          (begin (k-unbind-to saved) r))))))
+;; `f`, an error at `a`..`b` said at `ta`..`tb` instead, any other as it is.
+(define k-respanning
+  (subr (maxeff checks spin) ((subr (maxeff checks spin) () k-te) int int int int) k-te)
+  (lambda (f a b ta tb)
+    (let ((r (prompt k-tag (k-done (f)) (lambda (r) r))))
+      (tagcase r
+        (k-done (te) te)
+        (k-err (m ea eb) (if (and (= ea a) (= eb b)) (k-fail m ta tb) (k-fail m ea eb)))
+        (k-ok (xs) (k-fail "k-ok inside" a b))))))
+(define k-bind-each (subr (maxeff kstate spin) (k-parts) unit)
+  (lambda (ps)
+    (if (null? ps)
+        #u
+        (begin (k-bind (extract (car ps) 1) (extract (car ps) 2)) (k-bind-each (cdr ps))))))
 ;; `blobref-variant!` at `a`..`z` of the flat sum `f` a blobref of type `xt`
 ;; and owner `b` points to, its label `lx` at `la`..`lz`: a blobref to the
 ;; variant, of effect `e` and the owner's region read and written; the

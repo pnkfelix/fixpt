@@ -1836,6 +1836,12 @@ is). Left:
   reading, could come later. Likewise an `extend` whose `e1` replaces an
   abstract type of `e0`'s own that a value kept still mentions (`DONE.md`
   §69, `modules/extend-abstract-replaced.fx`).
+- Done (2026-10-11): an `include`'s types in scope inside the module;
+  they were already, by `with` shadowing (§69's `with` work), but an
+  item was not checked against the type it declares (its `(with
+  %include e)` synthesized), so `cons` there made its pair at a fresh
+  region; now a `with` checked against a type checks its body (`DONE.md`
+  §69).
 - The pass these were wanted for: the import blocks §68 wrote, 3,449
   lines (2026-10-09, 39 files converted then), every converted file
   naming all of its own types file (263 lines in 23 files), the rest

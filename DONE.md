@@ -1359,6 +1359,17 @@ in one type each fall back to their own. Type forms are not shadowed.
 Choices: `CLAUDES_CHOICES.md`. Tests: `modules/with-shadows-applied.fx`,
 `with-applied-missing.fx`.
 
+An `include`'s types inside the module (2026-10-11): they were in scope
+already, by `with` shadowing, in an item's declared type and in a
+`define-type`; but an item's value, `(with %include e)`, was synthesized,
+not checked against the type the item declares, so `(define p (pairof
+int int @heap) (cons …))` made its pair at a fresh region and was
+refused. A `with` checked against a type now checks its body against it
+(`Checker::with_as`; `k-synth-with` given `expected`, its binding in
+`k-in-scope-parts`), an error at the body said of the `with` so that a
+call's argument's is still "argument 1 is a …" (`k-respanning`). Test:
+`modules/include-types-inside.fx`.
+
 ## 71. A load cycle is an error, not a hang (2026-10-10)
 
 Found 2026-10-09 (`TODO.md` §68 phase 2): two types files loading each
