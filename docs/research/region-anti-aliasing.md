@@ -256,6 +256,30 @@ primitives (§5, one-region versions of standard procedures like Rust's
 3. Does kayak need heap data (pairs, lists) as `&mut`, or is flat data
    plus `&` for the rest enough? That decides whether §5.3 matters.
 
+### Answers (the user's, 2026-10-11)
+
+1. Prototype (C), opt-in distinctness, first.
+2. No fatter refs: a piece refuses `blobref+` (§5.1). A substructural
+   type system is the only further step imaginable, and not yet.
+3. kayak does not know yet; it is early there.
+
+### What opt-in distinctness can and cannot give `&mut`
+
+The user doubts `&mut` can be built on it, and the doubt is right for
+heap data. Distinctness says two *regions* do not overlap. It gives:
+two parameters at declared-distinct regions are disjoint borrows
+(`fn f(a: &mut i32, b: &mut i32)`); with `blobref-split`, flat data is
+`&mut [T]` down to `split_at_mut`; and effects on distinct regions
+commute (`kill_paths`). It does not give uniqueness *within* a region:
+two arguments `(ref int r1)` may be one cell, and data in `r1` may share
+internally, where Rust's `&mut Vec<T>` relies on ownership making it a
+tree. Nor, declared pairwise, does it say `r1` is distinct from a region
+the callee reaches otherwise (a global at `@heap`): that is Lucassen's
+clause (a), which the opt-in would need too (`(distinct r1 *)`, say). So:
+`&mut` for flat data and for separate parameters on distinctness and
+splits; `&mut` to a general heap structure needs a single owning path to
+a tree, a substructural property, and waits for that.
+
 ## References
 
 - [GJLS87] Gifford, Jouvelot, Lucassen, Sheldon. *FX-87 Reference
