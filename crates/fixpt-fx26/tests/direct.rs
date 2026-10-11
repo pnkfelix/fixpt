@@ -404,6 +404,18 @@ fn flat_keyed_as_the_rust_machine_gives_them() {
     assert!(run(defs, "past", &[2], FUEL).direct.as_ref().is_ok_and(|d| d == "8"));
 }
 
+/// Sums and products made in line (`%make-frozen`,
+/// `programs/native/frozen-made.fx`): of one to seven fields, taken apart
+/// again, as the Rust machine gives them, with collections moving them.
+#[test]
+fn frozen_data_made_in_line() {
+    for gc_every in [None, Some(7)] {
+        let r = run_collecting(&program("native/frozen-made"), "frozen-made", &[300], FUEL, gc_every);
+        assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "collecting every {gc_every:?}: {:?} against {}", r.direct, r.rust);
+        assert_eq!(r.rust, "3032200");
+    }
+}
+
 /// `arithmetic-shift` (`programs/native/shifts.fx`): in line for fixnums,
 /// the primitive past them, as the Rust machine gives it.
 #[test]

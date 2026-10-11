@@ -2834,3 +2834,25 @@ Deep recursion gains, frequent shallow calls lose, and the sum over
 these is about 3 % worse; how deep a procedure will recurse is not known
 where it is compiled. So returns stay `ret` (`TODO.md` §52 has what might
 get both).
+
+## Sums and products made in line natively (2026-10-11)
+
+Sampled natively, `mlton/peek` spent most of its time making data: each
+`(E key x)` or `(SOME v)` was `%make-frozen` by the general call-out,
+whose arguments Rust gathered into a vector, malloc'd and freed
+(`_xzm_free` alone 19 % of the run). `direct.rs` now makes a sum or a
+product from the free space as it makes a pair or a mutable bloblet: the
+header (its kind from `x1`, fields and suffix frozen), the fields from
+`x2`…, the trailer; the call-out where there is no room or past eight
+registers. Over the MLton ports, each run whole, alternated twice:
+
+| program               | before | after |
+| --------------------- | -----: | ----: |
+| `mlton/peek`          |   4.35 |  0.91 |
+| `binarytrees5`        |   1.11 |  0.43 |
+| `mlton/logic`         |   1.10 |  0.62 |
+| `mlton/boyer`         |   1.00 |  0.83 |
+| `mlton/ratio-regions` |   0.60 |  0.54 |
+| nine others           |   same |  same |
+
+(seconds, start-up and checking included.)

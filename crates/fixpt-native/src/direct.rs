@@ -2282,6 +2282,49 @@ impl Compiling<'_> {
                         a.e(add_imm(RESULT, X11, (8 * (1 + total) + fixpt_heap::value::TAG_BLOBLET as usize) as u32));
                         a.to(done, Fix::B);
                     }
+                    // A sum or product (`%make-frozen`, `x1` its kind, else the
+                    // call-out), from the free space likewise:
+                    // its header, frozen fields and suffix; its fields from
+                    // `x2`…; its trailer (`Heap::make_frozen`'s layout).
+                    if let Callout::Prim { p, n } = c
+                        && fixpt_runtime::PRIMITIVES[p].name == "%make-frozen"
+                        && (2..=fixpt_heap::layout::regcode::REGS).contains(&n)
+                    {
+                        use fixpt_heap::layout::{H_FIELDS_FROZEN, H_SUFFIX_FROZEN, kind};
+                        let total = n;
+                        let (sum_k, product_k) = (kind("sum"), kind("product"));
+                        let header = |k: u8| H_SUFFIX_FROZEN.put(H_FIELDS_FROZEN.put(fixpt_heap::value::make_header(k, total, 0), 1), 1);
+                        let (sum, kinded) = (a.label(), a.label());
+                        a.es(&mov_imm64(X15, Value::fixnum(sum_k as i64).raw()));
+                        a.e(cmp(1, X15));
+                        a.to(sum, Fix::If(Cond::Eq));
+                        a.es(&mov_imm64(X15, Value::fixnum(product_k as i64).raw()));
+                        a.e(cmp(1, X15));
+                        a.to(slow, Fix::If(Cond::Ne));
+                        a.es(&mov_imm64(X17, header(product_k)));
+                        a.to(kinded, Fix::B);
+                        a.bind(sum);
+                        a.es(&mov_imm64(X17, header(sum_k)));
+                        a.bind(kinded);
+                        a.e(ldr(X13, ST, st_off(offset_of!(DState, top))));
+                        a.e(ldr(X14, X13, 0));
+                        a.e(ldr(X15, ST, st_off(offset_of!(DState, alloc_limit))));
+                        a.e(add_imm(X16, X14, 1 + total as u32));
+                        a.e(cmp(X16, X15));
+                        a.to(slow, Fix::If(Cond::Hi));
+                        a.e(ldr(X9, ST, st_off(offset_of!(DState, words))));
+                        a.e(add_lsl(X11, X9, X14, 3));
+                        a.e(str(X16, X13, 0));
+                        a.e(str(X17, X11, 0));
+                        for j in 2..=n {
+                            a.e(str(j as Reg, X11, 8 * (1 + total - j) as u32));
+                        }
+                        let t = fixpt_heap::layout::T_DISTANCE.put(fixpt_heap::value::TAG_TRAILER, total as u64);
+                        a.es(&mov_imm64(X15, t));
+                        a.e(str(X15, X11, 8 * total as u32));
+                        a.e(add_imm(RESULT, X11, (8 * (1 + total) + fixpt_heap::value::TAG_BLOBLET as usize) as u32));
+                        a.to(done, Fix::B);
+                    }
                     if let Callout::Cons = c {
                         a.e(ldr(X13, ST, st_off(offset_of!(DState, top))));
                         a.e(ldr(X14, X13, 0));

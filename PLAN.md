@@ -101,7 +101,8 @@ are in the last section, "Log: the glance's details", and in
   FX-26 assembler's powers of two by a shift, and the Rust checker's
   bindings indexed by name. On itself, before the pass → now: `check`
   575 → 520 ms, `fx check` 1295 → 1233, `fx arm64` 835 → 418
-  (`docs/performance.md`).
+  (`docs/performance.md`). Native code makes sums and products in line:
+  `mlton/peek` 4.35 → 0.91 s, `binarytrees5` 1.11 → 0.43.
 - **Tools**: `fixpt check|compile|eval INPUT` (both checkers, both
   compilers); `sexp-edit`, `edit` included; the phase probe
   (`probe_phases_as_register_code`), with collections and allocation by
