@@ -391,6 +391,11 @@
              (k-ty-new (ty-markkey t r)))))
         (else
          (cond ((k-module-type-head? hd) (k-read-module-type s items hd))
+               ;; In a module with `include`s, an unbound name applied: the
+               ;; modules included's family (`TODO.md` §69), as `parse.rs`.
+               ((and (not (symbol=? hd '|()|)) (not (null? (k-lookup-desc '%include-scope)))
+                     (null? (k-lookup-desc hd)))
+                (k-parse-app s (k-ty-new (ty-select '%include hd)) (cdr items)))
                (else (k-sfail (k-not-type-list hd) s))))))))
 ;; `(dletrec ((name type) …) type)`: each name gets a forwarding slot
 ;; before any body is read, so the bodies can refer to it and each other.

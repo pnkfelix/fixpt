@@ -792,8 +792,15 @@ impl Checker {
                 Ok(self.arena.ty(Ty::MarkKey(t, r)))
             }
             // A name applied that is no description function: unbound, a
-            // typo, or a type.
+            // typo, or a type. In a module with `include`s, an unbound one
+            // is the modules included's family, found when they are typed,
+            // as a type's name is (`TODO.md` §69).
             _ => match items.first().and_then(|h| h.as_symbol()) {
+                Some(h) if self.include_scope > 0 && self.lookup_desc(h).is_none() => {
+                    let inc = self.interner.intern("%include");
+                    let f = self.arena.ty(Ty::Select(inc, h));
+                    self.parse_app(s, f, &items[1..])
+                }
                 Some(h) => Err(FxError::at(s.span, format!("`{}` is not a description function", self.name(h)))),
                 None => Err(FxError::at(s.span, "expected a type")),
             },

@@ -1394,7 +1394,15 @@ compared both ways before seeing it was the same type. Now a table of
 the names so far in both checkers (`Checker::included`; `k-included`,
 `k-saw`), the same type first by identity, and no substitution where
 there is nothing to substitute: `check` 555 ms, `fx check` 1475, the fx
-phases' allocation 274.9 → 228.7 M words.
+phases' allocation 274.9 → 228.7 M words. `hide`'s marks looked up in sets too
+(`Checker::hiding`; `k-shown?` by a table), not lists of thousands.
+
+**An included type family applied in a declared type** (2026-10-11):
+`(box int @heap)` in a module with `include`s, `box` bound nowhere, is
+`((select %include box) int @heap)`, found when the modules included
+are typed, as a type's name already was; in both checkers (`parse.rs`'s
+type-list fallback, `check-read-descs.fx`'s `k-parse-type-form`). Tests:
+`modules/include-family.fx`, `include-family-missing.fx`.
 ## 71. A load cycle is an error, not a hang (2026-10-10)
 
 Found 2026-10-09 (`TODO.md` §68 phase 2): two types files loading each

@@ -1862,9 +1862,9 @@ is). Left:
   checkers; fixed (`DONE.md` §69): `check` 555, `fx check` 1475, 228.7 M
   words. Left: `fx check` still about 14 % over; not `k-with-used`'s scan
   of the bucket for each item (a memo of it changed nothing).
-- An included type family applied in a declared type ("`table` is not a
-  description function"): the files using `table` keep table-types's
-  import lines.
+- Done (2026-10-11): an included type family applied in a declared
+  type (`DONE.md` §69). Left: the front end's files that kept
+  table-types's import lines for it could now include it.
 
 If `extend` is ever n-ary, `(extend m1 m2 m3)` should be a left fold (the
 later wins), not "all at once", which would blur it and `include` together:
