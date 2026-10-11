@@ -1516,3 +1516,13 @@ standard primitives `f64->bits`, `bits->f64`, `f32->bits`, `bits->f32`, in
 both lowerings, the runtime and the evaluator. The evaluator's test runs
 `bloblet/` too, every program agreeing with the lowering.
 
+Blobrefs in native code (2026-10-10): `direct.rs` reads, writes, steps and
+takes the owner and offset of a blobref in line (`suffix_owner`,
+`suffix_get`, `suffix_set`): `ubfx` the owner, `lsr #37` the offset, the
+owner's header through its trailer for the bounds, its kind and its
+suffix's frozen bit; what it does not do is the primitive's. Those
+primitives never collect, in both register-code generators' lists. Test:
+`direct.rs`'s `blobrefs_as_the_rust_machine_gives_them`
+(`programs/native/blobrefs.fx`, with collections too). A fill-and-sum of
+10 million `f64`s: 1.09 s, against 0.92 s for a flat array.
+

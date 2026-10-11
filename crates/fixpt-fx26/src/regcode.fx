@@ -527,8 +527,8 @@
 
 ;; Whether runtime primitive `name` never collects (`fixpt_runtime::never_collects`): FX-26's
 ;; `*`, `quotient` and `modulo`, the fixed-width integers' and floats' operations, and a flat
-;; array's element and length, and an eqtable's operations of one or two, which register code
-;; calls with its values in registers.
+;; array's element and length, a blobref's read, owner, offset and step (`TODO.md` §77), and an
+;; eqtable's operations of one or two, which register code calls with its values in registers.
 (define r-never-collects? (subr (read (globals r-eqtable-quick? r-fixed-width-op?)) (string) bool)
   (lambda (name)
     (case name
@@ -538,7 +538,8 @@
         "%fx26-string<?" "%fx26-string<=?" "%fx26-string>?" "%fx26-string>=?"
         "%fx26-char<?" "%fx26-char<=?" "%fx26-char>?" "%fx26-char>=?"
         "null?" "pair?" "exact-integer?" "char?" "boolean?" "string?" "symbol?" "%fx26-procedure?"
-        "%fx26-array?" "%fx26-f32?" "%fx26-box?" "%fx26-sum?" "%fx26-product?")
+        "%fx26-array?" "%fx26-f32?" "%fx26-box?" "%fx26-sum?" "%fx26-product?"
+        "%fx26-suffix-ref-get" "%suffix-ref-owner" "%suffix-ref-offset" "%suffix-ref+")
        #t)
       (else (or (r-eqtable-quick? name) (r-fixed-width-op? name))))))
 ;; Runtime primitive `name` as a call-out, when it is one and `n` = `k`; in line, if it never

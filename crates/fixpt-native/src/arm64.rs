@@ -85,6 +85,10 @@ pub fn ldur(t: Reg, n: Reg, imm: i64) -> u32 {
 pub fn ldur_w(t: Reg, n: Reg, imm: i64) -> u32 {
     0xB840_0000 | simm(imm, 9) << 12 | r(n) << 5 | r(t)
 }
+/// `stur wt, [xn, #imm]`: the low 32 bits.
+pub fn stur_w(t: Reg, n: Reg, imm: i64) -> u32 {
+    0xB800_0000 | simm(imm, 9) << 12 | r(n) << 5 | r(t)
+}
 /// `stur xt, [xn, #imm]`.
 pub fn stur(t: Reg, n: Reg, imm: i64) -> u32 {
     0xF800_0000 | simm(imm, 9) << 12 | r(n) << 5 | r(t)

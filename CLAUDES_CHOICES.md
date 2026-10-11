@@ -301,3 +301,29 @@ than a word unless its name says so.
    not be in a recursive group with `ev-eq?`.
 5. **The evaluator's test now runs `bloblet/`**, every program agreeing
    with the lowering.
+
+## Blobrefs in native code (TODO.md §77, 2026-10-10)
+
+1. **In `direct.rs` only**, the compiler of register code to arm64, where
+   flat arrays are in line too; the cells' assemblers (`native.fx`, the
+   Rust one) call out, as they do for flat arrays.
+2. **In line: read, write, step, owner, offset.** `blobref-at` and
+   `blobref-index` stay call-outs (made less often than used).
+3. **Bounds from the owner's header, found through its trailer**: a read or
+   write must lie within `B`, so that the inline path refuses what the
+   primitive refuses (an unaligned 4-byte read at `B - 1` reads padding
+   otherwise). An owner without a trailer, or with a large header, goes to
+   the primitive. Every bloblet FX-26 makes has a trailer.
+4. **A read's layout a compile-time constant** (`prim2imm`), so each read is
+   one specialised sequence; a write is a call-out instruction with three
+   registers, dispatching on the layout at run time, as `flat_set` does.
+5. **Writes check the owner's kind** (a program's bloblet or a flat array)
+   and its suffix-frozen bit, as the primitive does.
+6. **Never collects**: the read, owner, offset and step join the
+   primitives register code calls with values in registers, in both
+   register-code generators' lists; an `f64` read boxes from the free
+   space, or calls the primitive when there is no room.
+7. **Measured** (10 million elements, fill then sum by stepping): 1.09 s
+   against 0.92 s for the same loop over a flat array, whose elements stay
+   raw `f64`s; a blobref's `f64` is boxed on the way out. Unboxing it as
+   `reps` does for flat arrays is a follow-up.

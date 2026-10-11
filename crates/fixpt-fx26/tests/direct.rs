@@ -338,6 +338,24 @@ fn floats_as_the_rust_machine_gives_them() {
     assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "{:?} against {}", r.direct, r.rust);
 }
 
+/// Blobrefs natively (`TODO.md` §77, `programs/native/blobrefs.fx`): every
+/// scalar read and written in line, at any alignment, a bignum `i64` by the
+/// primitive, steps, owners and offsets; as the Rust machine gives them,
+/// with collections moving the owner too. A read past the end fails as
+/// the primitive says. (FX-26 cannot freeze a suffix: `fixpt-heap`'s tests
+/// and the runtime's primitives check a write into one.)
+#[test]
+fn blobrefs_as_the_rust_machine_gives_them() {
+    for gc_every in [None, Some(7)] {
+        let r = run_collecting(&program("native/blobrefs"), "blobrefs", &[5], FUEL, gc_every);
+        assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "collecting every {gc_every:?}: {:?} against {}", r.direct, r.rust);
+    }
+    let defs = "(define-type o (bloblet (fields) @heap)) \
+                (define* past (subr (maxeff (alloc @heap) (read @heap)) (int) int) \
+                  (lambda (k) (i64->int (blobref-get (the (blobref o i64) (blobref-at (the o (make-bloblet 12)) k))))))";
+    assert!(matches!(&run(defs, "past", &[8], FUEL).direct, Err(m) if m.contains("no byte")));
+}
+
 /// Identity (PLAN.md Q5, `programs/native/identity.fx`): `pair-eq?` and
 /// kin in line, and a union-find whose roots are found by it, as the Rust
 /// machine gives them, and with its nodes moved by collections; and tables

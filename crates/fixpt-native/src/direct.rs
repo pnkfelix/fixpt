@@ -70,6 +70,7 @@ const X14: Reg = 14;
 const X15: Reg = 15;
 const X16: Reg = 16;
 const X17: Reg = 17;
+const X12: Reg = 12;
 
 /// What code in the native convention shares with the Rust side that runs
 /// it: where to go back to, the stack's limit, fuel, and what trapped.
@@ -1980,6 +1981,21 @@ impl Compiling<'_> {
                         a.bind(done);
                         continue;
                     }
+                    // A blobref's read of a scalar the layout of which is
+                    // the constant: in line, as that scalar is kept.
+                    if name == "%fx26-suffix-ref-get" && op == "prim2imm" && o(1).is_fixnum() {
+                        let (slow, done) = (a.label(), a.label());
+                        suffix_get(&mut a, o(1).as_fixnum(), slow);
+                        a.to(done, Fix::B);
+                        a.bind(slow);
+                        a.es(&mov_imm64(X17, o(1).raw()));
+                        pure_call(&mut a, self.callouts, Callout::Pure { p: pn, n: 2 }, &[RESULT, X17], RESULT);
+                        a.e(ldr(X9, ST, st_off(offset_of!(DState, trap))));
+                        a.e(cmp_imm(X9, 0));
+                        trap(&mut a, &mut stubs, PRIM_FAILED, Cond::Ne);
+                        a.bind(done);
+                        continue;
+                    }
                     if let Some(RawOp::F64 { what }) = reps::raw_op(name) {
                         match what {
                             "from-int" => f64_of_int(&mut a, self.callouts, pn),
@@ -2119,6 +2135,11 @@ impl Compiling<'_> {
                         && fixpt_runtime::PRIMITIVES[p].name == "%fx26-flatarray-set!"
                     {
                         flat_set(&mut a, slow, done, raw_store);
+                    }
+                    if let Callout::Prim { p, n: 3 } = c
+                        && fixpt_runtime::PRIMITIVES[p].name == "%fx26-suffix-ref-set!"
+                    {
+                        suffix_set(&mut a, slow, done);
                     }
                     // `int`'s bit operations of fixnums (`TODO.md` §56): of
                     // two, `and`, `ior` and `xor` are one; `not` of one, its
@@ -2770,19 +2791,7 @@ fn flat_ref(a: &mut Asm, y: Reg, slow: Label) {
     let (not_f64, not_f32, not_i32, not_u32) = (a.label(), a.label(), a.label(), a.label());
     is(a, FLAT_F64, not_f64);
     a.e(ldr_x8(X9, X15, X14));
-    a.e(ldr(X13, ST, st_off(offset_of!(DState, top))));
-    a.e(ldr(X14, X13, 0));
-    a.e(ldr(X15, ST, st_off(offset_of!(DState, alloc_limit))));
-    a.e(add_imm(X16, X14, 2));
-    a.e(cmp(X16, X15));
-    a.to(slow, Fix::If(Cond::Hi));
-    a.e(ldr(X17, ST, st_off(offset_of!(DState, words))));
-    a.e(add_lsl(X11, X17, X14, 3));
-    a.es(&mov_imm64(X17, fixpt_heap::value::make_header(fixpt_heap::ObjType::Flonum as u8, 0, 8)));
-    a.e(str(X17, X11, 0));
-    a.e(str(X9, X11, 8));
-    a.e(str(X16, X13, 0));
-    a.e(add_imm(RESULT, X11, 8 + fixpt_heap::value::TAG_BLOBLET as u32));
+    box_bits(a, slow);
     a.to(end, Fix::B);
     a.bind(not_f64);
     is(a, FLAT_F32, not_f32);
@@ -2818,6 +2827,167 @@ fn flat_ref(a: &mut Asm, y: Reg, slow: Label) {
     a.to(slow, Fix::If(Cond::Ne));
     a.e(lsl_imm(RESULT, X13, 3));
     a.bind(end);
+}
+
+/// An `f64` boxed from the free space into `RESULT`, its bits in X9; to
+/// `slow` when there is no room. Uses X11 and X13 to X17.
+fn box_bits(a: &mut Asm, slow: Label) {
+    a.e(ldr(X13, ST, st_off(offset_of!(DState, top))));
+    a.e(ldr(X14, X13, 0));
+    a.e(ldr(X15, ST, st_off(offset_of!(DState, alloc_limit))));
+    a.e(add_imm(X16, X14, 2));
+    a.e(cmp(X16, X15));
+    a.to(slow, Fix::If(Cond::Hi));
+    a.e(ldr(X17, ST, st_off(offset_of!(DState, words))));
+    a.e(add_lsl(X11, X17, X14, 3));
+    a.es(&mov_imm64(X17, fixpt_heap::value::make_header(fixpt_heap::ObjType::Flonum as u8, 0, 8)));
+    a.e(str(X17, X11, 0));
+    a.e(str(X9, X11, 8));
+    a.e(str(X16, X13, 0));
+    a.e(add_imm(RESULT, X11, 8 + fixpt_heap::value::TAG_BLOBLET as u32));
+}
+
+/// Suffix ref `r` (tag `010`, `docs/object-model.md`) taken apart, to `slow`
+/// unless it is one whose owner has a trailer and a header of one word:
+/// X15 its offset, X11 where its owner's suffix starts, X12 the owner's
+/// header, X13 the suffix's length `B`. The owner is the heap's word
+/// `ubfx` bits 3..37 of the ref, the offset bits 37.. (`lsr #37`). Uses X9,
+/// X14 and X16 too.
+fn suffix_owner(a: &mut Asm, r: Reg, slow: Label) {
+    use fixpt_heap::layout::*;
+    use fixpt_heap::value::{SUFFIX_OFFSET_SHIFT, SUFFIX_OWNER_BITS, TAG_SUFFIX_REF, TAG_TRAILER};
+    a.e(and_low(X16, r, 3));
+    a.e(cmp_imm(X16, TAG_SUFFIX_REF as u32));
+    a.to(slow, Fix::If(Cond::Ne));
+    a.e(ubfx(X14, r, 3, SUFFIX_OWNER_BITS));
+    a.e(lsr_imm(X15, r, SUFFIX_OFFSET_SHIFT));
+    a.e(ldr(X9, ST, st_off(offset_of!(DState, words))));
+    a.e(add_lsl(X11, X9, X14, 3));
+    // The trailer, the last field, says how far back the header is.
+    a.e(ldur(X16, X11, -8));
+    a.e(and_low(X9, X16, 3));
+    a.e(cmp_imm(X9, TAG_TRAILER as u32));
+    a.to(slow, Fix::If(Cond::Ne));
+    a.e(ubfx(X16, X16, T_DISTANCE.lo, 32));
+    a.e(lsl_imm(X9, X16, 3));
+    a.e(sub(X9, X11, X9));
+    a.e(ldur(X12, X9, -8));
+    a.e(ubfx(X9, X12, H_LARGE.lo, 1));
+    a.e(cmp_imm(X9, 0));
+    a.to(slow, Fix::If(Cond::Ne));
+    a.e(lsr_imm(X13, X12, H_BYTES.lo));
+}
+
+/// `blobref-get` of the suffix ref in `RESULT`, a scalar of layout `code`
+/// (`fixpt_heap::layout::FLAT_*`), into `RESULT`, at any alignment: an
+/// `f64` boxed, an `f32` an immediate, a 32-bit integer its fixnum, a
+/// 64-bit one its fixnum where it is one; to `slow` (the primitive's) for
+/// what it does not do, or a read past the suffix.
+fn suffix_get(a: &mut Asm, code: i64, slow: Label) {
+    use fixpt_heap::layout::*;
+    suffix_owner(a, RESULT, slow);
+    a.e(add_imm(X9, X15, flat_size(code) as u32));
+    a.e(cmp(X9, X13));
+    a.to(slow, Fix::If(Cond::Hi));
+    a.e(add(X11, X11, X15));
+    match code {
+        FLAT_F64 => {
+            a.e(ldur(X9, X11, 0));
+            box_bits(a, slow);
+        }
+        FLAT_F32 => {
+            a.e(ldur_w(X13, X11, 0));
+            a.e(lsl_imm(X13, X13, 32));
+            a.e(add_imm(RESULT, X13, (Value::f32(0.0).raw() & 0xff) as u32));
+        }
+        FLAT_I32 => {
+            a.e(ldur_w(X13, X11, 0));
+            a.e(lsl_imm(X13, X13, 32));
+            a.e(asr_imm(RESULT, X13, 29));
+        }
+        FLAT_U32 => {
+            a.e(ldur_w(X13, X11, 0));
+            a.e(lsl_imm(RESULT, X13, 3));
+        }
+        FLAT_I64 => {
+            a.e(ldur(X13, X11, 0));
+            a.e(lsl_imm(X14, X13, 3));
+            a.e(asr_imm(X15, X14, 3));
+            a.e(cmp(X15, X13));
+            a.to(slow, Fix::If(Cond::Ne));
+            a.e(mov(RESULT, X14));
+        }
+        _ => {
+            a.e(ldur(X13, X11, 0));
+            a.e(lsr_imm(X15, X13, 60));
+            a.e(cmp_imm(X15, 0));
+            a.to(slow, Fix::If(Cond::Ne));
+            a.e(lsl_imm(RESULT, X13, 3));
+        }
+    }
+}
+
+/// `blobref-set!` of the suffix ref in `x1`, a scalar of the layout the
+/// fixnum in `x2` says, to `x3`: into a program's own bloblet or a flat
+/// array whose suffix is not frozen, within it; else to `slow` (the
+/// call-out, which says why), as for a 64-bit integer that is a bignum.
+/// Unit into `RESULT`, and to `done`.
+fn suffix_set(a: &mut Asm, slow: Label, done: Label) {
+    use fixpt_heap::layout::*;
+    let (v, c) = (3 as Reg, 2 as Reg);
+    suffix_owner(a, 1, slow);
+    let owned = a.label();
+    a.e(ubfx(X9, X12, H_KIND.lo, H_KIND.width));
+    a.e(cmp_imm(X9, kind("bloblet") as u32));
+    a.to(owned, Fix::If(Cond::Eq));
+    a.e(cmp_imm(X9, kind("flat-array") as u32));
+    a.to(slow, Fix::If(Cond::Ne));
+    a.bind(owned);
+    a.e(ubfx(X9, X12, H_SUFFIX_FROZEN.lo, 1));
+    a.e(cmp_imm(X9, 0));
+    a.to(slow, Fix::If(Cond::Ne));
+    // The width: 8 for the 64-bit layouts, as bits of a word, else 4.
+    a.e(lsr_imm(X16, c, 3));
+    let wide = [FLAT_I64, FLAT_U64, FLAT_F64].iter().fold(0u32, |m, c| m | 1 << c);
+    a.e(movz(X9, wide, 0));
+    a.e(lsrv(X9, X9, X16));
+    a.e(and_low(X9, X9, 1));
+    a.e(lsl_imm(X9, X9, 2));
+    a.e(add_imm(X9, X9, 4));
+    a.e(add(X9, X15, X9));
+    a.e(cmp(X9, X13));
+    a.to(slow, Fix::If(Cond::Hi));
+    a.e(add(X11, X11, X15));
+    let is = |a: &mut Asm, code: i64, not: Label| {
+        a.e(cmp_imm(c, (code << 3) as u32));
+        a.to(not, Fix::If(Cond::Ne));
+    };
+    let (not_f64, not_f32, wide, stored) = (a.label(), a.label(), a.label(), a.label());
+    is(a, FLAT_F64, not_f64);
+    a.e(ldur(X13, v, -(fixpt_heap::value::TAG_BLOBLET as i64)));
+    a.e(stur(X13, X11, 0));
+    a.to(stored, Fix::B);
+    a.bind(not_f64);
+    is(a, FLAT_F32, not_f32);
+    a.e(lsr_imm(X13, v, 32));
+    a.e(stur_w(X13, X11, 0));
+    a.to(stored, Fix::B);
+    a.bind(not_f32);
+    a.e(cmp_imm(c, (FLAT_I64 << 3) as u32));
+    a.to(wide, Fix::If(Cond::Eq));
+    a.e(cmp_imm(c, (FLAT_U64 << 3) as u32));
+    a.to(wide, Fix::If(Cond::Eq));
+    a.e(asr_imm(X13, v, 3));
+    a.e(stur_w(X13, X11, 0));
+    a.to(stored, Fix::B);
+    a.bind(wide);
+    a.e(tst_low(v, 3));
+    a.to(slow, Fix::If(Cond::Ne));
+    a.e(asr_imm(X13, v, 3));
+    a.e(stur(X13, X11, 0));
+    a.bind(stored);
+    a.es(&mov_imm64(RESULT, Value::UNIT.raw()));
+    a.to(done, Fix::B);
 }
 
 /// `flatarray-set!` of the flat array in `x1` at `x2` to `x3`, as its
@@ -3200,6 +3370,35 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
     }
     if name == "%fx26-flatarray-ref" {
         flat_ref(a, y, slow);
+        return true;
+    }
+    // A suffix ref's offset, and its owner, a bloblet (`TODO.md` §77).
+    if name == "%suffix-ref-offset" || name == "%suffix-ref-owner" {
+        a.e(and_low(X16, x, 3));
+        a.e(cmp_imm(X16, fixpt_heap::value::TAG_SUFFIX_REF as u32));
+        a.to(slow, Fix::If(Cond::Ne));
+        if name == "%suffix-ref-offset" {
+            a.e(lsr_imm(X13, x, fixpt_heap::value::SUFFIX_OFFSET_SHIFT));
+            a.e(lsl_imm(RESULT, X13, 3));
+        } else {
+            a.e(ubfx(X14, x, 3, fixpt_heap::value::SUFFIX_OWNER_BITS));
+            a.e(ldr(X9, ST, st_off(offset_of!(DState, words))));
+            a.e(add_lsl(X11, X9, X14, 3));
+            a.e(add_imm(RESULT, X11, fixpt_heap::value::TAG_BLOBLET as u32));
+        }
+        return true;
+    }
+    // `y` bytes along: still in the owner's suffix, the offset rebuilt.
+    if name == "%suffix-ref+" {
+        fixnum(a, y);
+        suffix_owner(a, x, slow);
+        a.e(asr_imm(X9, y, 3));
+        a.e(add(X9, X15, X9));
+        a.e(cmp(X9, X13));
+        a.to(slow, Fix::If(Cond::Hs));
+        a.e(ubfx(X14, x, 0, fixpt_heap::value::SUFFIX_OFFSET_SHIFT));
+        a.e(lsl_imm(X9, X9, fixpt_heap::value::SUFFIX_OFFSET_SHIFT));
+        a.e(orr(RESULT, X14, X9));
         return true;
     }
     let Some(rest) = name.strip_prefix("%fx26-") else { return false };

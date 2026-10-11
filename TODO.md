@@ -1957,8 +1957,9 @@ refs are what FX-26's flat data will be reached by:
 `blobref-owner`, `blobref-offset`, `blobref-get`, `blobref-set!`), flat
 products and arrays (`extract`, `blobref-index`). Next: flat sums (a tag
 layout, and a variant reached only after testing the tag: a `tagcase` on
-a blobref); arrays of a length not literal; reading and writing in line
-in native code. The rule
+a blobref); arrays of a length not literal; a blobref's `f64` read raw in
+native code (`reps`, as a flat array's element is), and `blobref-at` and
+`blobref-index` in line. The rule
 (the user's): no operation copies more than a word unless its name says
 so.
 

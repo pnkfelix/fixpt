@@ -531,8 +531,10 @@ suffix covers its offset. The runtime's primitives: `%suffix-ref`,
 `%suffix-ref+`, `%suffix-ref-owner`, `%suffix-ref-offset`, and reads and
 writes by width (`%suffix-ref-u8`, `-u32`, `-u64`, `-f64`, each with a
 `-set!`), writes only into a program's own bloblets and flat arrays.
-Compiled code reaches them through the runtime; reading in line (`ubfx` the
-owner, `lsr #37` the offset) waits for the language to type them.
+Native code reads and writes through one in line (`docs/fx26.md`,
+Bloblets): `ubfx` the owner, `lsr #37` the offset, the address the heap's
+base plus 8 × owner plus offset, the owner's header found through its
+trailer for the bounds.
 
 This took the tag from the two uses it was kept for:
 - **A pointer to the header**, as `010` was. Measured, its gain was nil

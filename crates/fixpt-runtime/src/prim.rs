@@ -446,6 +446,9 @@ fn flat_at(rt: &mut Runtime, a: Value, i: Value) -> Outcome<usize> {
 pub fn never_collects(name: &str) -> bool {
     matches!(name, "%fx26-mul" | "%fx26-quotient" | "modulo" | "%fx26-string->f64" | "%fx26-flatarray-ref" | "%fx26-flatarray-length")
         || matches!(name, "%fx26-eqtable-has?" | "%fx26-eqtable-count" | "%fx26-eqtable-delete!")
+        // A blobref's read, owner, offset and step (`TODO.md` §77): an `f64`
+        // read allocates its box, which never collects.
+        || matches!(name, "%fx26-suffix-ref-get" | "%suffix-ref-owner" | "%suffix-ref-offset" | "%suffix-ref+")
         // Characters and strings looked at, never made (strings compared in
         // place, `Heap::string_cmp`): each of a fixed arity, as `pure_call`
         // passes by the primitive's.
