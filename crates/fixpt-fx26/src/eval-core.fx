@@ -72,6 +72,9 @@
 (define the-unit (with values the-unit))
 (define ev-bloblet (with prims ev-bloblet))
 (define ev-bref (with prims ev-bref))
+(define ev-blobref (with prims ev-blobref))
+(define ev-flat-tag (with prims ev-flat-tag))
+(define ev-label-is? (with prims ev-label-is?))
 (define o-bref (with eval-types o-bref))
 (define standard (with prims standard))
 (define k-fx-module? (with env k-fx-module?))
@@ -323,7 +326,7 @@
         (e-product (fs a b) (o-product (eval-fields fs e)))
         (e-extract (p l a b) (ev-extract (eval p e) l a b))
         (e-sum (t v a b) (o-sum t (eval v e)))
-        (e-tagcase (s arms els a b) (eval-tagcase (eval s e) arms els e))
+        (e-tagcase (s arms els a b) (eval-tagcase (eval s e) arms els e (ev-fact-at a b)))
         ;; A module: a product of its values, in order, each labelled by its
         ;; name; its abstract types' conversions the identity.
         (e-module (items a b) (eval-module items e))
@@ -389,8 +392,10 @@
           (let ((v (eval (extract (car fs) 2) e)))
             (cons (cons (extract (car fs) 1) v) (eval-fields (cdr fs) e))))))
   ;; The arm for sum `s`'s tag, its fields bound; else the `else`.
-  (eval-tagcase (subr (maxeff evals spin) (val exp-arms exp-let-bs env) val)
-    (lambda (s arms els e)
+  (eval-tagcase (subr (maxeff evals spin) (val exp-arms exp-let-bs env int) val)
+    (lambda (s arms els e k)
+      (if (>= k 0)
+          (eval-flat-tagcase s (ev-flat-tag s k) arms els e k)
       (tagcase (as-other s "a sum")
         (o-sum (tag v)
           (letrec ((try (subr (maxeff evals spin) (exp-arms) val)
@@ -407,6 +412,19 @@
                              (else (try (cdr as)))))))
             (try arms)))
         (else y (efail-expected "a sum"))))))
+  ;; On a blobref to a flat sum, of layout `k` (`TODO.md` §77): the arm for
+  ;; its tag, `t`, given a blobref to the variant; else the `else`.
+  (eval-flat-tagcase (subr (maxeff evals spin) (val val exp-arms exp-let-bs env int) val)
+    (lambda (s t arms els e k)
+      (cond ((null? arms)
+             (if (null? els)
+                 (efail "tagcase: no arm for this flat sum's tag")
+                 (eval (extract (car els) 2) (bind1 (extract (car els) 1) s e))))
+            ((ev-label-is? t (extract (car arms) 1) k)
+             (eval (extract (car arms) 4)
+                   (bind1 (car (extract (car arms) 3))
+                          (ev-blobref 'blobref+ 0 (list s (quotient k 256))) e)))
+            (else (eval-flat-tagcase s t (cdr arms) els e k))))))
 
 ;; Names whose next definition keeps the cell they have: definitions that
 ;; assign their globals (`checked-tops`, under redefinition).

@@ -46,7 +46,7 @@ pub(crate) const CONSTRUCTORS: &[(&str, &[(&str, Kind)])] = &[
 
 /// The scalar flats: the names whose bytes a `blobref` reads as a value of
 /// the type of the same name.
-use crate::check::FLAT_ARRAYOF_INDEX;
+use crate::check::{FLAT_ARRAYOF_INDEX, FLAT_KEYED_INDEX};
 
 pub(crate) const FLAT_SCALARS: [&str; 6] = ["f64", "f32", "i32", "u32", "i64", "u64"];
 
@@ -402,7 +402,7 @@ impl Checker {
     /// `i32`, `u32`, `i64` or `u64`, as the type its bytes are read as; or a
     /// variable of kind `flat`, or a family's flat parameter.
     pub(crate) fn parse_flat(&mut self, s: &Syntax) -> R<TyId> {
-        let usage = "a flat is `f64`, `f32`, `i32`, `u32`, `i64`, `u64`, `(productof (label flat) …)`, `(arrayof flat n)`, or a variable of kind `flat`";
+        let usage = "a flat is `f64`, `f32`, `i32`, `u32`, `i64`, `u64`, `(productof (label flat) …)`, `(sumof [key] (label flat) …)`, `(arrayof flat n)`, or a variable of kind `flat`";
         if let Some(items) = s.as_proper_list() {
             return self.parse_flat_list(s, items, usage);
         }
@@ -420,21 +420,35 @@ impl Checker {
     }
 
     /// `(productof (label flat) …)`, its fields laid out in the order
-    /// written; or `(arrayof flat n)`, `n` a literal length.
+    /// written; `(sumof [key] (label flat) …)`, a tag then the widest
+    /// variant; or `(arrayof flat n)`, `n` a literal length.
     fn parse_flat_list(&mut self, s: &Syntax, items: &[Syntax], usage: &str) -> R<TyId> {
         let head = items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h).to_string());
         match (head.as_deref(), items) {
             (Some("productof"), [_, ps @ ..]) => {
-                let mut parts = Vec::new();
-                for p in ps {
-                    let Some([label, f]) = p.as_proper_list() else { return Err(FxError::at(p.span, "`(label flat)`")) };
-                    let label = self.label(label)?;
-                    if parts.iter().any(|(l, _)| *l == label) {
-                        return Err(FxError::at(p.span, format!("`{}` appears twice", self.interner.name(label))));
-                    }
-                    parts.push((label, self.parse_flat(f)?));
-                }
+                let parts = self.parse_flat_parts(ps, None)?;
                 Ok(self.arena.ty(Ty::Product(parts)))
+            }
+            // A key first, a width, if the labels are numbers stored as
+            // they are; else the tag is an index into the owner's fields,
+            // which hold the labels (`TODO.md` §77).
+            (Some("sumof"), [_, ps @ ..]) => {
+                let key = match ps.first().and_then(|k| k.as_symbol()) {
+                    Some(k) => match self.interner.name(k) {
+                        "u8" => Some(1),
+                        "u16" => Some(2),
+                        "u32" => Some(4),
+                        _ => return Err(FxError::at(ps[0].span, "a flat sum's key is `u8`, `u16` or `u32`")),
+                    },
+                    None => None,
+                };
+                let ps = if key.is_some() { &ps[1..] } else { ps };
+                let parts = self.parse_flat_parts(ps, key)?;
+                let sum = self.arena.ty(Ty::Sum(parts));
+                Ok(match key {
+                    Some(w) => self.arena.ty(Ty::Named { which: FLAT_KEYED_INDEX, args: vec![D::Size(Size::lit(w)), D::Type(sum)] }),
+                    None => sum,
+                })
             }
             (Some("arrayof"), [_, f, n]) => {
                 let f = self.parse_flat(f)?;
@@ -449,14 +463,34 @@ impl Checker {
         }
     }
 
+    /// A flat product's or sum's `(label flat)`s; each label a number
+    /// below `256^w` if the sum has a key `w` bytes wide.
+    fn parse_flat_parts(&mut self, ps: &[Syntax], key: Option<i64>) -> R<Vec<(Sym, TyId)>> {
+        let mut parts = Vec::new();
+        for p in ps {
+            let Some([label, f]) = p.as_proper_list() else { return Err(FxError::at(p.span, "`(label flat)`")) };
+            let l = self.label(label)?;
+            if parts.iter().any(|(m, _)| *m == l) {
+                return Err(FxError::at(p.span, format!("`{}` appears twice", self.interner.name(l))));
+            }
+            if let Some(w) = key
+                && !self.interner.name(l).parse::<u64>().is_ok_and(|n| n >> (8 * w) == 0)
+            {
+                return Err(FxError::at(label.span, format!("a label of a sum keyed by `u{}` is a number below 2^{}", 8 * w, 8 * w)));
+            }
+            parts.push((l, self.parse_flat(f)?));
+        }
+        Ok(parts)
+    }
+
     /// Whether `t` is a flat: a scalar, a variable of kind `flat`, a product
-    /// of flats, or a flat array.
+    /// or sum of flats, or a flat array.
     pub(crate) fn is_flat(&self, t: TyId) -> bool {
         match self.arena.get(self.arena.resolve(t)) {
             Ty::Base(s) => FLAT_SCALARS.contains(&self.interner.name(*s)),
             Ty::Var(v) => self.arena.dvar_kind_known(*v) == Some(Kind::Flat),
-            Ty::Product(ps) => ps.iter().all(|(_, f)| self.is_flat(*f)),
-            Ty::Named { which: FLAT_ARRAYOF_INDEX, .. } => true,
+            Ty::Product(ps) | Ty::Sum(ps) => ps.iter().all(|(_, f)| self.is_flat(*f)),
+            Ty::Named { which: FLAT_ARRAYOF_INDEX | FLAT_KEYED_INDEX, .. } => true,
             _ => false,
         }
     }
@@ -480,6 +514,10 @@ impl Checker {
                 }
                 Some((at.next_multiple_of(align), align))
             }
+            Ty::Sum(_) | Ty::Named { which: FLAT_KEYED_INDEX, .. } => {
+                let (_, size, align, _) = self.flat_sum_layout(t)?;
+                Some((size, align))
+            }
             Ty::Named { which: FLAT_ARRAYOF_INDEX, args } => match &args[..] {
                 [D::Type(f), D::Size(Size::Lin { k, terms })] if terms.is_empty() => {
                     let (size, a) = self.flat_layout(*f)?;
@@ -489,6 +527,41 @@ impl Checker {
             },
             _ => None,
         }
+    }
+
+    /// A flat sum's variants, its key's width in bytes, and whether its
+    /// labels are numbers (a key given) or names (the tag an index into the
+    /// owner's fields, a byte).
+    pub(crate) fn flat_sum_parts(&self, t: TyId) -> Option<(Vec<(Sym, TyId)>, usize, bool)> {
+        match self.arena.get(self.arena.resolve(t)) {
+            Ty::Sum(ps) if ps.iter().all(|(_, f)| self.is_flat(*f)) => Some((ps.clone(), 1, false)),
+            Ty::Named { which: FLAT_KEYED_INDEX, args } => match &args[..] {
+                [D::Size(Size::Lin { k, terms }), D::Type(s)] if terms.is_empty() => {
+                    let Ty::Sum(ps) = self.arena.get(self.arena.resolve(*s)) else { return None };
+                    Some((ps.clone(), *k as usize, true))
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// A flat sum's code for the compilers, its size and alignment, and its
+    /// variants: the tag first, `w` bytes, then the variant at the widest
+    /// one's alignment, at `p`; the size padded to the alignment. The code
+    /// is `w + 8 * numeric + 256 * p` (`TODO.md` §77).
+    pub(crate) fn flat_sum_layout(&self, t: TyId) -> Option<(i64, usize, usize, Vec<(Sym, TyId)>)> {
+        let (ps, w, numeric) = self.flat_sum_parts(t)?;
+        let (mut size, mut align) = (0usize, 1usize);
+        for (_, f) in &ps {
+            let (s, a) = self.flat_layout(*f)?;
+            size = size.max(s);
+            align = align.max(a);
+        }
+        let p = w.next_multiple_of(align);
+        let align = align.max(w);
+        let code = (w + 8 * numeric as usize + 256 * p) as i64;
+        Some((code, (p + size).next_multiple_of(align), align, ps))
     }
 
     /// Flat product `t`'s field `label`: its offset in bytes, and its flat.

@@ -1526,3 +1526,27 @@ primitives never collect, in both register-code generators' lists. Test:
 (`programs/native/blobrefs.fx`, with collections too). A fill-and-sum of
 10 million `f64`s: 1.09 s, against 0.92 s for a flat array.
 
+Flat sums (2026-10-10): `(sumof (label F) …)` where a flat is wanted, a
+tag then the widest variant at its alignment. With no key the tag is a
+byte indexing the owner's fields, which hold the labels (the user's
+choice, for sums to interoperate); with a key, `(sumof u8|u16|u32 …)`
+(standard generative type 7, `flat-keyed`), numeric labels stored as they
+are (the user's: Rust's model, for "flat world" benchmarks); a label may
+be 0 now, everywhere. `(blobref-variant! r 'l)` writes the tag (the first
+of the owner's fields holding `l`) and gives a blobref to the variant;
+`tagcase` on a blobref to a flat sum reads the tag once
+(`%fx26-flat-tag`) and gives each arm a blobref to its variant, failing at
+run time where no arm has the tag (`%fx26-flat-no-arm`). The layout's code
+told the compilers as the `tagcase`'s or `blobref-variant!`'s fact, `w + 8
+* numeric + 256 * p`. Both checkers, the lowering, both compilers, both
+register-code generators (call-outs, so not in a leaf), the evaluator
+written in FX-26; native code calls out. `check-rules.fx`'s debt lowered
+to 1331 (`k-in-scope-check` moved to `check-read-helpers.fx`). Tests:
+`bloblet/flat-sum.fx`, `flat-sum-key.fx`, `flat-sum-label.fx`,
+`flat-sum-name-label.fx`, `flat-variant-literal.fx`, `flat-variant-none.fx`,
+`flat-variant-not-sum.fx`, `flat-tagcase-apart.fx`, `flat-tagcase-cover.fx`,
+`flat-tagcase-no-tag.fx`, `bloblet-errors/flat-variant-no-field.fx`,
+`flat-tagcase-no-arm.fx`, `flat-tagcase-no-field.fx`; natively,
+`direct.rs`'s `flat_sums_as_the_rust_machine_gives_them`
+(`programs/native/flat-sums.fx`, with collections too).
+

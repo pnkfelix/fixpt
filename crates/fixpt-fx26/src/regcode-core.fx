@@ -305,6 +305,7 @@
 (define r-split-app (with regcode-helpers r-split-app))
 (define r-unit (with regcode-helpers r-unit))
 (define r-bloblet (with regcode-helpers r-bloblet))
+(define r-flat-tagcase (with regcode-helpers r-flat-tagcase))
 (define r-extract (with regcode-helpers r-extract))
 (define r-unknowing (with regcode-helpers r-unknowing))
 (define r-var-value (with regcode-helpers r-var-value))
@@ -382,16 +383,15 @@
           (begin
             (r-make-frozen g 37 (r-field-args fs) env te)
             (r-done g tail)))
-        (e-bloblet (op i args a b)
-          ;; A `blobref-get` or `-set!`'s index is its scalar's layout.
-          (let ((i (if (< i 0) (c-field-at a b) i)))
-            (begin (r-bloblet g (symbol->string op) i args env te r-exp r-prim) (r-done g tail))))
+        (e-bloblet (op i args a b) (r-bloblet g op i args a b env te tail r-exp r-prim))
         (e-prompt (t body h a b)
           (let ((ops (r-args-3 (a-e t) (a-e h) (a-thunk body))))
             (begin
               (r-call-out g rop-cellular routine-prompt ops env te)
               (r-done g tail))))
-        (e-tagcase (s arms els a b) (r-tagcase g s arms els env te tail))
+        (e-tagcase (s arms els a b)
+          (if (< (c-field-at a b) 0) (r-tagcase g s arms els env te tail)
+              (r-flat-tagcase g (c-field-at a b) s arms els env te tail r-exp r-prim)))
         (e-letrec (bs body a b)
           (let ((ks (r-lifted a b)))
             (cond ((not (null? ks))

@@ -2059,6 +2059,52 @@ prims! {
         suffix_write(rt, a[0], fixpt_heap::layout::flat_size(code), bits)?;
         Ok(Value::UNIT)
     });
+    // FX-26's flat sums (`TODO.md` §77), by their layout's code, `w + 8 *
+    // numeric + 256 * p`: a tag of `w` bytes at the ref, the variant at
+    // `p`. The tag as a label: a number as it is, or else the owner's
+    // field it indexes, which holds the label.
+    "%fx26-flat-tag", 2, Some(2), simple!(|rt, a| {
+        let code = int(rt, a[1])?;
+        let bits = suffix_read(rt, a[0], (code & 7) as usize)?;
+        if code & 8 != 0 {
+            return Ok(Value::fixnum(bits as i64));
+        }
+        let o = rt.heap.suffix_ref_owner(a[0]);
+        match rt.heap.bloblet_field(o, bits as usize + 2) {
+            Ok(l) => Ok(l),
+            Err(_) => rt.fail("flat sum: its tag names no field of its owner", &[a[0]]),
+        }
+    });
+    // `blobref-variant!`: the tag made label `a[2]`'s, a number as it is, or
+    // else the index of the first of the owner's fields holding it; then a
+    // ref to the variant.
+    "%fx26-flat-variant!", 3, Some(3), simple!(|rt, a| {
+        let r = suffix_ref(rt, a[0])?;
+        let code = int(rt, a[1])?;
+        let w = (code & 7) as usize;
+        let tag = if code & 8 != 0 {
+            int(rt, a[2])? as u64
+        } else {
+            let o = rt.heap.suffix_ref_owner(r);
+            let mut i = 0;
+            loop {
+                match rt.heap.bloblet_field(o, i + 2) {
+                    Ok(l) if l == a[2] => break i as u64,
+                    Ok(_) => i += 1,
+                    Err(_) => return rt.fail("blobref-variant!: no field of the owner holds the label", &[a[0], a[2]]),
+                }
+            }
+        };
+        if tag >> (8 * w) != 0 {
+            return rt.fail("blobref-variant!: the tag does not fit its key", &[a[0], a[2]]);
+        }
+        suffix_write(rt, r, w, tag)?;
+        match rt.heap.suffix_ref_add(r, code >> 8) {
+            Ok(r) => Ok(r),
+            Err(e) => rt.fail(&format!("suffix ref: {e}"), &[a[0]]),
+        }
+    });
+    "%fx26-flat-no-arm", 1, Some(1), simple!(|rt, a| rt.fail("tagcase: no arm for this flat sum's tag", &[a[0]]));
     "%suffix-ref-u8-set!", 2, Some(2), simple!(|rt, a| {
         let x = int(rt, a[1])?;
         let Ok(b) = u8::try_from(x) else { return rt.fail("suffix ref: not a byte", &[a[1]]) };

@@ -890,6 +890,18 @@ impl<'a> Compiler<'a> {
                 self.prim(code, "%make-frozen", 3)?;
                 self.done(code, tail);
             }
+            // A blobref to a flat sum (`TODO.md` §77): its tag read once, as
+            // a label, into the slot after it.
+            Exp::TagCase { scrutinee, arms, els } if self.c.facts.field_index.contains_key(&x) => {
+                let k = self.c.facts.field_index[&x];
+                let end = self.fresh();
+                self.exp(scrutinee, e, depth, code, false)?;
+                self.op1(code, "slot", Value::fixnum(depth as i64));
+                self.int(code, k as i64);
+                self.prim(code, "%fx26-flat-tag", 2)?;
+                self.flat_arms(&arms, &els, k, e, depth, code, tail, end)?;
+                code.push(Item::Label(end));
+            }
             Exp::TagCase { scrutinee, arms, els } => {
                 let end = self.fresh();
                 self.exp(scrutinee, e, depth, code, false)?;
@@ -2011,6 +2023,15 @@ impl<'a> Compiler<'a> {
                 self.int(code, k as i64);
                 self.prim(code, "%fx26-suffix-ref-index", n + 1)?;
             }
+            // The flat sum's layout, as the checker found it, between the
+            // ref and the label.
+            BlobletOp::RefVariant => {
+                let k = *self.c.facts.field_index.get(&x).ok_or("a blobref-variant! the checker did not see")?;
+                self.exp(args[0], e, depth, code, false)?;
+                self.int(code, k as i64);
+                self.exp(args[1], e, depth + 2, code, false)?;
+                self.prim(code, "%fx26-flat-variant!", 3)?;
+            }
             // The scalar's layout, as the checker found it, after the ref.
             BlobletOp::RefGet | BlobletOp::RefSet => {
                 let k = *self.c.facts.field_index.get(&x).ok_or("a blobref read the checker did not see")?;
@@ -2091,6 +2112,63 @@ impl<'a> Compiler<'a> {
         }
         code.push(Item::Label(next));
         self.arms(rest, els, e, depth, code, tail, end)
+    }
+
+    /// A flat sum's arms: the blobref in slot `depth`, its tag, a label,
+    /// in the next; each arm's name a blobref to its variant, `k >> 8`
+    /// bytes along; no arm for the tag a failure at run time.
+    #[allow(clippy::too_many_arguments)]
+    fn flat_arms(
+        &mut self,
+        arms: &[crate::ast::Arm],
+        els: &Option<(Sym, ExpId)>,
+        k: usize,
+        e: &Env,
+        depth: usize,
+        code: &mut Vec<Item>,
+        tail: bool,
+        end: usize,
+    ) -> R<()> {
+        for arm in arms {
+            let ArmBind::Value(x) = &arm.bind else { return Err("an arm on a flat sum that takes its variant apart".into()) };
+            let next = self.fresh();
+            self.op1(code, "slot", Value::fixnum(depth as i64 + 1));
+            let label = self.flat_label(self.c.interner.name(arm.tag), k);
+            self.lit(code, label);
+            self.op(code, "eq");
+            code.push(Item::ZBranch(next));
+            self.op1(code, "slot", Value::fixnum(depth as i64));
+            self.int(code, (k >> 8) as i64);
+            self.prim(code, "%suffix-ref+", 2)?;
+            let mut bound = e.clone();
+            bound.push((*x, Loc::Slot(depth + 2)));
+            self.exp(arm.body, &bound, depth + 3, code, tail)?;
+            self.unbind(code, depth, 3, tail);
+            if !tail {
+                code.push(Item::Branch(end));
+            }
+            code.push(Item::Label(next));
+        }
+        match els {
+            Some((y, body)) => {
+                let mut inner = e.clone();
+                inner.push((*y, Loc::Slot(depth)));
+                self.exp(*body, &inner, depth + 2, code, tail)?;
+            }
+            None => {
+                self.op1(code, "slot", Value::fixnum(depth as i64 + 1));
+                self.prim(code, "%fx26-flat-no-arm", 1)?;
+                self.done(code, tail);
+            }
+        }
+        self.unbind(code, depth, 2, tail);
+        Ok(())
+    }
+
+    /// A flat sum's label as a value: a number as it is, where the key is
+    /// numeric (`k`'s bit 3); else the symbol.
+    fn flat_label(&mut self, name: &str, k: usize) -> Value {
+        if k & 8 != 0 { Value::fixnum(name.parse().expect("checked")) } else { self.heap.intern(name) }
     }
 
     // -------------------------------------------------------- programs

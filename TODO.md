@@ -1955,9 +1955,12 @@ refs are what FX-26's flat data will be reached by:
 **Done so far** (`DONE.md` §77): the kind `flat` (the scalars), the type
 `(blobref B F)`, and its operations (`blobref-at`, `blobref+`,
 `blobref-owner`, `blobref-offset`, `blobref-get`, `blobref-set!`), flat
-products and arrays (`extract`, `blobref-index`). Next: flat sums (a tag
-layout, and a variant reached only after testing the tag: a `tagcase` on
-a blobref); arrays of a length not literal; a blobref's `f64` read raw in
+products and arrays (`extract`, `blobref-index`), flat sums
+(`blobref-variant!`, `tagcase` on a blobref). Next: a flat sum's tag read
+in line in native code, and its `tagcase` in a leaf (call-outs now, so a
+leaf declines to register code); a wider index into the owner's fields
+than a byte (`(key symbol u16)` was proposed); arrays of a length not
+literal; a blobref's `f64` read raw in
 native code (`reps`, as a flat array's element is), and `blobref-at` and
 `blobref-index` in line. The rule
 (the user's): no operation copies more than a word unless its name says
@@ -1969,13 +1972,13 @@ FX-26's labels are names (a positive integer only a spelling, interned
 as a name; a sum value holds a symbol), and a sum has no key type. A flat
 sum says its key, which decides the encoding:
 - **None given, the default: the tag is an index into the owner's
-  fields**, which hold the labels as symbols (`u8` wide; `(key symbol
-  u16)` for more): so a flat sum's tags mean what a value sum's do, and
-  sum types interoperate (the user's choice, for that). A read loads the
-  byte, then the field; a `tagcase` with no arm for what it finds fails
-  at run time. Proposed: no static table; `(blobref-variant! r b)` finds
-  the first field holding `b`, a write failing where none does; the
-  program puts the labels in fields itself (`(make-bloblet n 'a 'b)`).
+  fields**, which hold the labels as symbols (`u8` wide; wider not yet):
+  so a flat sum's tags mean what a value sum's do, and sum types
+  interoperate (the user's choice, for that). A read loads the byte, then
+  the field; a `tagcase` with no arm for what it finds fails at run time.
+  Done so: no static table; `(blobref-variant! r 'b)` finds the first
+  field holding `b`, a write failing where none does; the program puts
+  the labels in fields itself (`(make-bloblet n 'a 'b)`).
   Sound whatever the bytes say: flat scalars have no invalid bits, so a
   wrong tag only reads bytes as another variant (the payload area sized
   for the largest). Nothing keeps the labels unique or stable (the
@@ -1986,14 +1989,16 @@ sum says its key, which decides the encoding:
   lacks: its unions are of shapes, and every symbol has one) would make
   both static: distinct labels a condition of the type, and a field of
   type `'a` holding only `'a`.
-- **`(key u8)`, `(key u16)`, `(key u32)`: numeric labels, stored as they
-  are** (0 allowed there), compared against constants: Rust's model; and
-  sum types sharing codes agree on them with no indirection. `u8`/`u16`
-  only as key widths, no value types.
-- Reading through a flat sum: a `tagcase` on a blobref to one binds each
-  arm to a blobref to its payload (no copy); `else` may later be refined
-  to the tags left, the run-time check keeping it sound under aliasing.
-  The payload at the widest variant's alignment, the size padded to it.
+- **A key, `(sumof u8 …)`, `u16`, `u32`: numeric labels, stored as they
+  are** (0 allowed, everywhere now), compared against constants: Rust's
+  model; and sum types sharing codes agree on them with no indirection.
+  `u8`/`u16` only as key widths, no value types. Done; written as a bare
+  first item, not `(key u8)`, which a variant named `key` could be.
+- Reading through a flat sum (done): a `tagcase` on a blobref to one binds
+  each arm to a blobref to its payload (no copy); `else` binds the blobref
+  as it is, and may later be refined to the tags left, the run-time check
+  keeping it sound under aliasing. The payload at the widest variant's
+  alignment, the size padded to it.
 
 **Field indices in flat data** (the user's, 2026-10-10: to be leveraged).
 A suffix ref has one owning bloblet, recoverable from it, so a flat

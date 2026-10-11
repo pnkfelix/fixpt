@@ -5,6 +5,9 @@
 ;; The types these use, from the files that define them.
 (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
 (define-type exp (select parser-types exp))
+(define check-resolve-types (load-module "fx26:check-resolve-types.fx"))
+(define-type exp-arms (select check-resolve-types exp-arms))
+(define-type exp-let-bs (select check-resolve-types exp-let-bs))
 (define regcode-types (load-module "fx26:regcode-types.fx"))
 (define-type rconst (select regcode-types rconst))
 (define-type wcells (select regcode-types wcells))
@@ -115,12 +118,17 @@
             (val r-bloblet
                  (subr (maxeff (alloc @k) (goto @y) (read @globals) (read @k) (read @t) (write @k)
                                spin)
-                       (rgen string int exps renv cenv r-exper r-primer)
+                       (rgen symbol int exps int int renv cenv bool r-exper r-primer)
                        unit))
             (val r-extract
                  (subr (maxeff (alloc @k) (goto @y) (read @globals) (read @k) (read @t) (write @k)
                                spin)
                        (rgen exp int renv cenv bool r-exper r-primer)
+                       unit))
+            (val r-flat-tagcase
+                 (subr (maxeff (alloc @k) (goto @y) (read @globals) (read @k) (read @t) (write @k)
+                               spin)
+                       (rgen int exp exp-arms exp-let-bs renv cenv bool r-exper r-primer)
                        unit))
             (val r-unit
                  (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k)) (rgen) unit))

@@ -208,6 +208,8 @@
 (define k-blobref-element (with check-read-helpers k-blobref-element))
 (define k-flat-field (with check-read-helpers k-flat-field))
 (define k-flat-array-parts (with check-read-helpers k-flat-array-parts))
+(define k-flat-sum-size (with check-read-helpers k-flat-sum-size))
+(define k-blobref-variant (with check-read-helpers k-blobref-variant))
 (define k-blobref-field int 1099511627776)
 (define k-handler-wants (with check-errors k-handler-wants))
 (define k-insert (with check-effects k-insert))
@@ -906,10 +908,13 @@
                      (k-fail-ty-at "a blobref to a flat array is expected here, and this is a "
                                    xt ox)
                      k-int))
+                ((and (string=? name "blobref-variant!")
+                      (< (car (k-flat-sum-size (cdr (car p)))) 0))
+                 (k-fail-ty-at "a blobref to a flat sum is expected here, and this is a " xt ox))
                 (else -1))))))
-;; Its type and effect, `e` its operands'.
-(define k-blobref-result (subr (maxeff checks spin) (kx string int k-eff int) k-te)
-  (lambda (x name xt e expected)
+;; Its type and effect, `e` its operands', `args` them.
+(define k-blobref-result (subr (maxeff checks spin) (kx string int k-eff int kxs) k-te)
+  (lambda (x name xt e expected args)
     (let ((a (k-start x)) (z (k-end x)))
       (if (string=? name "blobref-at")
           (k-te (k-blobref-of xt (k-blobref-wanted a z expected)) e)
@@ -920,6 +925,9 @@
               (("blobref-offset") (k-te k-int e))
               (("blobref-index") (k-te (k-blobref-of b (k-blobref-element a z f)) e))
               (("blobref-get") (k-te-reading f (k-blobref-region a z xt b f #t) e))
+              (("blobref-variant!")
+               (let ((lx (car (cdr args))))
+                 (k-blobref-variant a z xt b f lx (k-start lx) (k-end lx) e)))
               (else (k-te-writing k-unit (k-blobref-region a z xt b f #t) e))))))))
 ;; `(extract ex l)`, `ex` of type `pt` and effect in `r`, not a product: a
 ;; blobref to a flat product's field (`Checker`'s `Exp::Extract`).
@@ -976,5 +984,5 @@
            (e (if (< want 0)
                   (extract rx 2)
                   (k-union (extract rx 2) (check (car (cdr args)) want)))))
-      (k-masked x (k-blobref-result x name xt e expected)))))
+      (k-masked x (k-blobref-result x name xt e expected args)))))
 )))

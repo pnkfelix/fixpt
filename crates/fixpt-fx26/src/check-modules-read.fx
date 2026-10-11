@@ -131,6 +131,8 @@
 (define k-tag (with check-types k-tag))
 (define k-te (with check-types k-te))
 (define k-ty-new (with check-types k-ty-new))
+(define k-length (with check-types k-length))
+(define ty-base (with check-types-types ty-base))
 (define exp-end (with check-resolve exp-end))
 (define exp-start (with check-resolve exp-start))
 (define k-copy-names (with check-resolve k-copy-names))
@@ -244,6 +246,16 @@
                   (else (k-defined-twice (cdr items) (k-names-onto ts seen)
                                          (k-names-onto vs vseen)))))))))
 ;; How many of `xs` there are.
+;; A `blobref-variant!`'s operands resolved, `xs`, from `args`: its label, a
+;; quoted name, kept as a constant whose type holds the name and whose value
+;; is -1 (`check-read-helpers.fx`'s `k-variant-label`).
+(define k-label-const (subr (maxeff kstate spin) (symbol exp-list kxs) kxs)
+  (lambda (op args xs)
+    (if (and (symbol=? op 'blobref-variant!) (= (k-length xs) 2))
+        (tagcase (car (cdr args))
+          (e-sym (v a b) (list (car xs) (x-const (k-ty-new (ty-base v)) -1 a b)))
+          (else y xs))
+        xs)))
 (define k-syns-count (subr (read @globals) (k-syns) int)
   (lambda (xs) (if (null? xs) 0 (+ 1 (k-syns-count (cdr xs))))))
 ;; The newest `n` of scope `s` onto `onto`: a module's file's parameters,
@@ -330,7 +342,8 @@
           (let* ((t (k-parse-type ty)) (x (k-resolve-exp body))) (x-the t x a b)))
         (e-convention (c body a b)
           (let* ((cv (k-parse-conv c)) (x (k-resolve-exp body))) (x-convention cv x a b)))
-        (e-bloblet (op i args a b) (x-bloblet op i (k-resolve-all args) a b))
+        (e-bloblet (op i args a b)
+          (x-bloblet op i (k-label-const op args (k-resolve-all args)) a b))
         (e-product (fs a b) (x-product (k-resolve-fields fs nil a b) a b))
         (e-extract (body l a b) (x-extract (k-resolve-exp body) l a b))
         (e-sum (l body a b) (x-sum l (k-resolve-exp body) a b))

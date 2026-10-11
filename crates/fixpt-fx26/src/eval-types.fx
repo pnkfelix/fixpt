@@ -113,4 +113,7 @@
   (moduleof
    (val ev-bloblet (subr (maxeff evals spin) (symbol int vals) val))
    (val ev-bref (subr (maxeff evals spin) (val int) val))
+   (val ev-blobref (subr (maxeff evals spin) (symbol int vals) val))
+   (val ev-flat-tag (subr (maxeff evals spin) (val int) val))
+   (val ev-label-is? (subr (read @globals) (val symbol int) bool))
    (val standard (subr (maxeff evals spin) (symbol) val))))

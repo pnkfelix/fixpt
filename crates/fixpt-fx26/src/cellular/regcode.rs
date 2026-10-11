@@ -989,6 +989,10 @@ impl Compiler<'_> {
                         let Some(&k) = self.c.facts.field_index.get(&x) else { return self.decline("blobref-index") };
                         self.r_prim(g, "%fx26-suffix-ref-index", &[es[0], es[1], Arg::V(Value::fixnum(k as i64))], env, te)?
                     }
+                    BlobletOp::RefVariant => {
+                        let Some(&k) = self.c.facts.field_index.get(&x) else { return self.decline("blobref-variant!") };
+                        self.r_prim(g, "%fx26-flat-variant!", &[es[0], Arg::V(Value::fixnum(k as i64)), es[1]], env, te)?
+                    }
                     // The scalar's layout, as the checker found it.
                     BlobletOp::RefGet | BlobletOp::RefSet => {
                         let Some(&k) = self.c.facts.field_index.get(&x) else { return self.decline("blobref-get") };
@@ -1005,6 +1009,10 @@ impl Compiler<'_> {
             Exp::Prompt { tag, body, handler } => {
                 self.r_call_out(g, "cellular", routine("prompt") as i64, &[Arg::E(tag), Arg::E(handler), Arg::Thunk(body)], env, te)?;
                 g.done(tail);
+            }
+            Exp::TagCase { scrutinee, arms, els } if self.c.facts.field_index.contains_key(&x) => {
+                let k = self.c.facts.field_index[&x];
+                self.r_flat_tagcase(g, k, scrutinee, &arms, els, env, te, tail)?
             }
             Exp::TagCase { scrutinee, arms, els } => self.r_tagcase(g, scrutinee, &arms, els, env, te, tail)?,
             Exp::Module(items) => self.r_module(g, &items, env, te, tail)?,
@@ -2903,6 +2911,77 @@ impl Compiler<'_> {
             env.push((y, sc));
             te.push((y, Loc::Slot(usize::MAX)));
             self.r_exp(g, body, env, te, tail)?;
+        }
+        g.items.push(RItem::Label(end));
+        env.truncate(depth);
+        te.truncate(tdepth);
+        g.next_reg = regs;
+        g.next_slot = slots;
+        Some(())
+    }
+
+    /// A `tagcase` on a blobref to a flat sum (`TODO.md` §77), of layout
+    /// code `k`: the blobref and its tag, a label, kept in frame slots; each
+    /// arm's name a blobref to its variant, `k >> 8` bytes along; no arm
+    /// for the tag a failure at run time. Call-outs, so never in a leaf.
+    #[allow(clippy::too_many_arguments)]
+    fn r_flat_tagcase(
+        &mut self,
+        g: &mut Gen,
+        k: usize,
+        scrutinee: ExpId,
+        arms: &[crate::ast::Arm],
+        els: Option<(Sym, ExpId)>,
+        env: &mut Vec<(Sym, RLoc)>,
+        te: &mut Env,
+        tail: bool,
+    ) -> O<()> {
+        if g.leaf {
+            return self.decline("a flat sum's tagcase in a leaf");
+        }
+        let (depth, tdepth, regs, slots) = (env.len(), te.len(), g.next_reg, g.next_slot);
+        self.r_exp(g, scrutinee, env, te, false)?;
+        let sc = g.slot();
+        g.op("setstk", &[Gen::n(sc)]);
+        self.r_prim(g, "%fx26-flat-tag", &[Arg::Slot(sc), Arg::V(Value::fixnum(k as i64))], env, te)?;
+        let tag = g.slot();
+        g.op("setstk", &[Gen::n(tag)]);
+        let end = g.label();
+        let eq = Value::fixnum(routine("eq") as i64);
+        for arm in arms {
+            let crate::ast::ArmBind::Value(x) = &arm.bind else { return self.decline("an arm on a flat sum that takes it apart") };
+            let next = g.label();
+            g.op("stack", &[Gen::n(tag)]);
+            let name = self.c.interner.name(arm.tag);
+            let label = if k & 8 != 0 { Value::fixnum(name.parse().ok()?) } else { self.heap.intern(name) };
+            g.op("op2imm", &[eq, label]);
+            g.items.push(RItem::Branch(true, next));
+            let (d, td, r, s) = (env.len(), te.len(), g.next_reg, g.next_slot);
+            self.r_prim(g, "%suffix-ref+", &[Arg::Slot(sc), Arg::V(Value::fixnum((k >> 8) as i64))], env, te)?;
+            let at = g.slot();
+            g.op("setstk", &[Gen::n(at)]);
+            env.push((*x, RLoc::Slot(at)));
+            te.push((*x, Loc::Slot(usize::MAX)));
+            self.r_exp(g, arm.body, env, te, tail)?;
+            env.truncate(d);
+            te.truncate(td);
+            g.next_reg = r;
+            g.next_slot = s;
+            if !tail {
+                g.items.push(RItem::Branch(false, end));
+            }
+            g.items.push(RItem::Label(next));
+        }
+        match els {
+            Some((y, body)) => {
+                env.push((y, RLoc::Slot(sc)));
+                te.push((y, Loc::Slot(usize::MAX)));
+                self.r_exp(g, body, env, te, tail)?;
+            }
+            None => {
+                self.r_prim(g, "%fx26-flat-no-arm", &[Arg::Slot(tag)], env, te)?;
+                g.done(tail);
+            }
         }
         g.items.push(RItem::Label(end));
         env.truncate(depth);

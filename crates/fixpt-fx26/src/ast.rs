@@ -657,12 +657,15 @@ pub enum BlobletOp {
     RefSet,
     /// `(blobref-index r i)`: element `i` of the flat array it points at.
     RefIndex,
+    /// `(blobref-variant! r 'l)`: the flat sum it points at made variant
+    /// `l`, a literal; a blobref to its variant.
+    RefVariant,
 }
 
 impl BlobletOp {
     pub const NAMES: &[&str] =
         &["make-bloblet", "rmake-bloblet", "bloblet-ref", "bloblet-set!", "bloblet-freeze", "bloblet-byte", "bloblet-set-byte!", "bloblet-bytes",
-          "blobref-at", "blobref+", "blobref-owner", "blobref-offset", "blobref-get", "blobref-set!", "blobref-index"];
+          "blobref-at", "blobref+", "blobref-owner", "blobref-offset", "blobref-get", "blobref-set!", "blobref-index", "blobref-variant!"];
 }
 
 #[derive(Default)]

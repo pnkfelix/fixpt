@@ -138,12 +138,12 @@
                (k-atoms-on (string=? head "read") (car gs)))
               (else (k-sfail (k-cat3 "globals are only read and written, not `" head "`") x)))))))
 
-;; A label or tag: a name, or a positive integer, which is its digits.
+;; A label or tag: a name, or a natural number, which is its digits.
 (define k-syn-label (subr checks (syn) symbol)
   (lambda (s)
     (cond ((syn-symbol? s) (syn-head s))
-          ((> (syn-int s) 0) (string->symbol (int->string (syn-int s))))
-          (else (k-sfail "a label is a name or a positive integer" s)))))
+          ((>= (syn-int s) 0) (string->symbol (int->string (syn-int s))))
+          (else (k-sfail "a label is a name or a natural number" s)))))
 (define k-has-label? (subr kreads (k-parts symbol) bool)
   (lambda (ps l)
     (cond ((null? ps) #f) ((symbol=? (extract (car ps) 1) l) #t) (else (k-has-label? (cdr ps) l)))))

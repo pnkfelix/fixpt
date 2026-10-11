@@ -138,12 +138,12 @@
 (define drop (subr (maxeff (read @globals) (read rs)) (syns-a int) syns-a)
   (lambda (xs i) (if (= i 0) xs (drop (cdr xs) (- i 1)))))
 
-;; A label or tag: a name, or a positive integer, which is its digits.
+;; A label or tag: a name, or a natural number, which is its digits.
 (define label (subr parses (syn) symbol)
   (lambda (s)
     (cond ((syn-symbol? s) (syn-head s))
-          ((> (syn-int s) 0) (string->symbol (int->string (syn-int s))))
-          (else (pfail "a label is a name or a positive integer" s)))))
+          ((>= (syn-int s) 0) (string->symbol (int->string (syn-int s))))
+          (else (pfail "a label is a name or a natural number" s)))))
 
 (define keep (subr (maxeff (read @globals) (read rs)) (syns-a) syns-a)
   (lambda (xs) (if (null? xs) nil (cons (car xs) (keep (cdr xs))))))
@@ -265,7 +265,8 @@
   (lambda (head)
     (or (symbol=? head 'blobref-at) (symbol=? head 'blobref+) (symbol=? head 'blobref-owner)
         (symbol=? head 'blobref-offset) (symbol=? head 'blobref-get)
-        (symbol=? head 'blobref-set!) (symbol=? head 'blobref-index))))
+        (symbol=? head 'blobref-set!) (symbol=? head 'blobref-index)
+        (symbol=? head 'blobref-variant!))))
 (define bloblet-untagged? (subr pure (symbol int) bool)
   (lambda (op n)
     (or (and (symbol=? op 'bloblet-freeze) (= n 1)) (and (symbol=? op 'bloblet-byte) (= n 2))

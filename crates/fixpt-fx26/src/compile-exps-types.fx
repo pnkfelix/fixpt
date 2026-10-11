@@ -103,4 +103,5 @@
                                (write @k)
                                spin)
                        (c-params exp cenv syms)
-                       c-closing))))
+                       c-closing))
+            (val c-flat-label (subr (maxeff (alloc @k) (read @globals) spin) (symbol int) wcell))))

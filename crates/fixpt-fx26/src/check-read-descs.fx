@@ -536,7 +536,10 @@
                    (k-ty-new (ty-bloblet fs (string=? which "frozen") r)))
                  (k-sfail "`(fields type …)` or `(frozen type …)`" fields)))))
         ((productof) (k-ty-new (ty-product (k-parse-parts (cdr items) nil))))
-        ((sumof) (k-ty-new (ty-sum (k-parse-parts (cdr items) nil))))
+        ;; With a key, a flat sum (`TODO.md` §77).
+        ((sumof) (if (and (> n 1) (syn-symbol? (k-nth items 1)))
+                     (k-parse-flat s)
+                     (k-ty-new (ty-sum (k-parse-parts (cdr items) nil)))))
         ((arrayof)
          (begin
            (k-shape (= n 3) "`(arrayof type region)`" s)

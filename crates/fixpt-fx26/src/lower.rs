@@ -661,6 +661,10 @@ impl Lowerer<'_> {
                     BlobletOp::RefIndex => {
                         format!("(%fx26-suffix-ref-index {} {} {})", a[0], a[1], self.c.facts.field_index[&e])
                     }
+                    // The flat sum's layout, as the checker found it.
+                    BlobletOp::RefVariant => {
+                        format!("(%fx26-flat-variant! {} {} {})", a[0], self.c.facts.field_index[&e], a[1])
+                    }
                     BlobletOp::RefSet => {
                         format!("(%fx26-suffix-ref-set! {} {} {})", a[0], self.c.facts.field_index[&e], a[1])
                     }
@@ -704,6 +708,27 @@ impl Lowerer<'_> {
             }
             Exp::Sum(tag, x) => {
                 format!("(%fx26-sum '{} {})", fixpt_read::escape_symbol(self.c.interner.name(tag)), self.go(x))
+            }
+            // A blobref to a flat sum: its tag read once, as a label; each
+            // arm given a blobref to the variant (`TODO.md` §77).
+            Exp::TagCase { scrutinee, arms, els } if self.c.facts.field_index.contains_key(&e) => {
+                let code = self.c.facts.field_index[&e];
+                let s = self.go(scrutinee);
+                let mut out = match els {
+                    Some((y, body)) => format!("(let (({} %fx26-tc)) {})", self.local(y), self.body(&[y], body)),
+                    None => "(%fx26-flat-no-arm %fx26-tag)".to_string(),
+                };
+                for arm in arms.iter().rev() {
+                    let ArmBind::Value(x) = &arm.bind else { unreachable!("checked") };
+                    let body = self.body(&[*x], arm.body);
+                    out = format!(
+                        "(if (eq? %fx26-tag {}) (let (({} (%suffix-ref+ %fx26-tc {}))) {body}) {out})",
+                        flat_label(self.c.interner.name(arm.tag), code),
+                        self.local(*x),
+                        code >> 8
+                    );
+                }
+                format!("(let* ((%fx26-tc {s}) (%fx26-tag (%fx26-flat-tag %fx26-tc {code}))) {out})")
             }
             Exp::TagCase { scrutinee, arms, els } => {
                 let s = self.go(scrutinee);
@@ -802,4 +827,10 @@ fn scheme_string(s: &str) -> String {
     }
     out.push('"');
     out
+}
+
+/// A flat sum's label as the lowering writes it: a number as it is, where
+/// the sum's key is numeric (`code`'s bit 3), else a quoted symbol.
+fn flat_label(name: &str, code: usize) -> String {
+    if code & 8 != 0 { name.to_string() } else { format!("'{}", fixpt_read::escape_symbol(name)) }
 }

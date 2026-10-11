@@ -116,6 +116,10 @@ pub(crate) const BLOBREF_INDEX: u32 = 5;
 /// the safety analyses.
 pub const FLAT_ARRAYOF: &str = "(flat-arrayof (f flat) (n size)) int";
 pub(crate) const FLAT_ARRAYOF_INDEX: u32 = 6;
+/// A flat sum with a key (`TODO.md` §77), generative type 7: `w` bytes of
+/// tag holding its numeric labels as they are, then the sum's variant.
+pub const FLAT_KEYED: &str = "(flat-keyed (w size) (s flat)) int";
+pub(crate) const FLAT_KEYED_INDEX: u32 = 7;
 /// A scalar flat's layout (`fixpt_heap::layout::FLAT_*`), as the runtime
 /// reads and writes its bytes.
 pub(crate) fn flat_code(name: &str) -> Option<i64> {
@@ -650,7 +654,7 @@ impl Checker {
         // generative type, in both checkers, whose insides nothing sees
         // (no `up-` or `down-`: a `vsubr` is called with its arguments, not
         // their list). `vlambda` makes one; `apply` calls one on a list.
-        for decl in [VSUBR, FLATLAYOUT, FLATARRAYOF, IDENTITY, EQTABLE, BLOBREF, FLAT_ARRAYOF] {
+        for decl in [VSUBR, FLATLAYOUT, FLATARRAYOF, IDENTITY, EQTABLE, BLOBREF, FLAT_ARRAYOF, FLAT_KEYED] {
             let forms = c.read(decl).expect("reads");
             c.define_generative(&forms[0], &forms[1]).unwrap_or_else(|e| panic!("`{decl}` is wrong: {e}"));
         }
@@ -3499,13 +3503,30 @@ impl Checker {
     ) -> R<(TyId, Effect)> {
         let span = self.arena.span_of(e);
         let (st, mut eff) = self.synth(scrutinee)?;
-        let Ty::Sum(variants) = self.arena.get(st).clone() else {
-            return Err(FxError::at(self.arena.span_of(scrutinee), format!("a sum is expected here, and this is a {}", self.show_ty(st))));
+        // A blobref to a flat sum (`TODO.md` §77): each arm given a blobref
+        // to its variant, the `else` the blobref as it is; the tag read from
+        // the owner's region, by the layout's code told the compilers.
+        let flat = self.blobref_parts(st).and_then(|(b, f)| Some((b, self.flat_sum_layout(f)?)));
+        let variants = match &flat {
+            Some((b, (code, _, _, vs))) => {
+                let region = self.owner_region(span, st, *b)?;
+                eff.0.insert(Atom::Read(region));
+                self.facts.field_index.insert(e, *code as usize);
+                vs.iter().map(|(l, g)| (*l, self.blobref_of(*b, *g))).collect()
+            }
+            None => {
+                let Ty::Sum(variants) = self.arena.get(st).clone() else {
+                    return Err(FxError::at(self.arena.span_of(scrutinee), format!("a sum is expected here, and this is a {}", self.show_ty(st))));
+                };
+                variants
+            }
         };
+        // A flat sum's shown as the sum of blobrefs its arms see.
+        let shown = if flat.is_some() { self.arena.ty(Ty::Sum(variants.clone())) } else { st };
         let mut types = Vec::new();
         for arm in arms {
             let Some((_, t)) = variants.iter().find(|(l, _)| *l == arm.tag) else {
-                return Err(FxError::at(self.arena.span_of(arm.body), format!("a {} has no tag `{}`", self.show_ty(st), self.interner.name(arm.tag))));
+                return Err(FxError::at(self.arena.span_of(arm.body), format!("a {} has no tag `{}`", self.show_ty(shown), self.interner.name(arm.tag))));
             };
             let bound: Vec<(Sym, TyId)> = match &arm.bind {
                 ArmBind::Value(x) => vec![(*x, *t)],
@@ -3526,7 +3547,7 @@ impl Checker {
         let rest: Vec<(Sym, TyId)> = variants.iter().filter(|(l, _)| !arms.iter().any(|a| a.tag == *l)).cloned().collect();
         match els {
             Some((y, body)) => {
-                let rest_ty = self.arena.ty(Ty::Sum(rest));
+                let rest_ty = if flat.is_some() { st } else { self.arena.ty(Ty::Sum(rest)) };
                 let (t, be) = self.in_scope(&[(*y, rest_ty)], |c| match expected {
                     Some(x) => Ok((x, c.check(*body, x)?)),
                     None => c.synth(*body),
@@ -3634,7 +3655,14 @@ impl Checker {
         }
         if matches!(
             op,
-            BlobletOp::RefAt | BlobletOp::RefAdd | BlobletOp::RefOwner | BlobletOp::RefOffset | BlobletOp::RefGet | BlobletOp::RefSet | BlobletOp::RefIndex
+            BlobletOp::RefAt
+                | BlobletOp::RefAdd
+                | BlobletOp::RefOwner
+                | BlobletOp::RefOffset
+                | BlobletOp::RefGet
+                | BlobletOp::RefSet
+                | BlobletOp::RefIndex
+                | BlobletOp::RefVariant
         ) {
             return self.synth_blobref(e, op, args, expected);
         }
@@ -3656,7 +3684,8 @@ impl Checker {
             | BlobletOp::RefOffset
             | BlobletOp::RefGet
             | BlobletOp::RefSet
-            | BlobletOp::RefIndex => unreachable!("synth_blobref"),
+            | BlobletOp::RefIndex
+            | BlobletOp::RefVariant => unreachable!("synth_blobref"),
             BlobletOp::Ref(i) => {
                 let t = field(self, i)?;
                 if !frozen {
@@ -3744,6 +3773,30 @@ impl Checker {
                 self.facts.field_index.insert(e, (n << 32) | size);
                 self.blobref_of(b, g)
             }
+            // A flat sum made a variant, named by a literal: its layout's
+            // code told the compilers (`Checker::flat_sum_layout`). Without
+            // a key, the tag found among the owner's fields at run time.
+            BlobletOp::RefVariant => {
+                let Some((code, _, _, variants)) = self.flat_sum_layout(f) else {
+                    return Err(FxError::at(self.arena.span_of(*x), format!("a blobref to a flat sum is expected here, and this is a {}", self.show_ty(xt))));
+                };
+                let label = match self.arena.exp_at(rest[0]) {
+                    Exp::Symbol(l) if code & 8 == 0 => Some(*l),
+                    Exp::Int(n) if code & 8 != 0 => Some(self.interner.intern(&n.to_string())),
+                    _ => None,
+                };
+                let Some(label) = label else {
+                    return Err(FxError::at(self.arena.span_of(rest[0]), "a variant is named by a literal: `'label`, or a number where the sum has a key"));
+                };
+                let Some(&(_, g)) = variants.iter().find(|(l, _)| *l == label) else {
+                    return Err(FxError::at(self.arena.span_of(rest[0]), format!("a {} has no variant `{}`", self.show_ty(f), self.interner.name(label))));
+                };
+                let region = self.owner_region(span, xt, b)?;
+                eff.0.insert(Atom::Read(region));
+                eff.0.insert(Atom::Write(region));
+                self.facts.field_index.insert(e, code as usize);
+                self.blobref_of(b, g)
+            }
             _ => {
                 // A scalar, whose bytes are read as the type of its name, of
                 // the owner's region.
@@ -3754,9 +3807,7 @@ impl Checker {
                 let Some(code) = code else {
                     return Err(FxError::at(span, format!("only a scalar's bytes are read or written, and this points to a {}", self.show_ty(f))));
                 };
-                let Ty::Bloblet { region, .. } = self.arena.get(self.arena.resolve(b)).clone() else {
-                    return Err(FxError::at(span, format!("the region of a {}'s owner is not known", self.show_ty(xt))));
-                };
+                let region = self.owner_region(span, xt, b)?;
                 self.facts.field_index.insert(e, code as usize);
                 if op == BlobletOp::RefGet {
                     eff.0.insert(Atom::Read(region));
@@ -3770,6 +3821,14 @@ impl Checker {
         };
         let eff = self.mask(e, &eff, t);
         Ok((t, eff))
+    }
+
+    /// The region of blobref type `xt`'s owner, `b`.
+    fn owner_region(&self, span: fixpt_read::Span, xt: TyId, b: TyId) -> R<Region> {
+        let Ty::Bloblet { region, .. } = self.arena.get(self.arena.resolve(b)).clone() else {
+            return Err(FxError::at(span, format!("the region of a {}'s owner is not known", self.show_ty(xt))));
+        };
+        Ok(region)
     }
 
     /// `(blobref b f)`'s owner and flat, if `t` is one.

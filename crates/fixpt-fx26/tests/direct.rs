@@ -356,6 +356,18 @@ fn blobrefs_as_the_rust_machine_gives_them() {
     assert!(matches!(&run(defs, "past", &[8], FUEL).direct, Err(m) if m.contains("no byte")));
 }
 
+/// Flat sums (`TODO.md` §77, `programs/native/flat-sums.fx`): variants
+/// made and read back through blobrefs, the tag an index into the owner's
+/// fields or a number, as the Rust machine gives them, with collections.
+#[test]
+fn flat_sums_as_the_rust_machine_gives_them() {
+    for gc_every in [None, Some(7)] {
+        let r = run_collecting(&program("native/flat-sums"), "flat-sums", &[5], FUEL, gc_every);
+        assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "collecting every {gc_every:?}: {:?} against {}", r.direct, r.rust);
+        assert_eq!(r.rust, "(3295581 128 1 0 7 0)");
+    }
+}
+
 /// Identity (PLAN.md Q5, `programs/native/identity.fx`): `pair-eq?` and
 /// kin in line, and a union-find whose roots are found by it, as the Rust
 /// machine gives them, and with its nodes moved by collections; and tables

@@ -89,6 +89,17 @@
 ;; What it uses of the modules it is given.
 (define r-add-name? (with regcode r-add-name?))
 (define r-bind (with regcode r-bind))
+(define r-emit (with regcode r-emit))
+(define r-new-label (with regcode r-new-label))
+(define r-local (with regcode r-local))
+(define r-keep-in-slot (with regcode-exps r-keep-in-slot))
+(define c-flat-label (with compile-exps c-flat-label))
+(define c-field-at (with compile c-field-at))
+(define a-slot (with regcode-types a-slot))
+(define r-branch (with regcode-types r-branch))
+(define r-label (with regcode-types r-label))
+(define-type exp-arms (select check-resolve-types exp-arms))
+(define-type exp-let-bs (select check-resolve-types exp-let-bs))
 (define r-const-cell (with regcode r-const-cell))
 (define r-const-in (with regcode r-const-in))
 (define r-const-lists (with regcode r-const-lists))
@@ -468,9 +479,16 @@
 ;; The knot's `r-exp` and `r-prim`, as `r-bloblet` is given them.
 (define-type r-exper (subr rcompiles (rgen exp renv cenv bool) unit))
 (define-type r-primer (subr rcompiles (rgen string rargs renv cenv) unit))
-;; A bloblet form, `op`, its field index or (a `blobref-get` or `-set!`)
-;; its scalar's layout `i`.
-(define r-bloblet (subr rcompiles (rgen string int exps renv cenv r-exper r-primer) unit)
+;; A bloblet form at `a`..`b`, `op`, its field index `i`, or else (a
+;; blobref's) what the checker found there: a scalar's layout, an array's,
+;; a flat sum's; then done.
+(define r-bloblet
+  (subr rcompiles (rgen symbol int exps int int renv cenv bool r-exper r-primer) unit)
+  (lambda (g sop fi args a b env te tail r-exp r-prim)
+    (begin (r-bloblet-op g (symbol->string sop) (if (< fi 0) (c-field-at a b) fi) args env te r-exp
+                         r-prim)
+           (r-done g tail))))
+(define r-bloblet-op (subr rcompiles (rgen string int exps renv cenv r-exper r-primer) unit)
 (lambda (g op i args env te r-exp r-prim)
     (let ((all (r-exp-args args)))
       (case op (("bloblet-ref")
@@ -500,10 +518,11 @@
                     (r-prim g "%fx26-suffix-ref-index"
                             (r-args-3 (a-e (car args)) (a-e (car (cdr args))) (a-v (wcell-int i)))
                             env te)))
-               (("blobref-set!")
+               (("blobref-set!" "blobref-variant!")
                 (if (< i 0)
                     (r-decline)
-                    (r-prim g "%fx26-suffix-ref-set!"
+                    (r-prim g (if (string=? op "blobref-set!") "%fx26-suffix-ref-set!"
+                                  "%fx26-flat-variant!")
                             (r-args-3 (a-e (car args)) (a-v (wcell-int i)) (a-e (car (cdr args))))
                             env te)))
                (else (r-decline))))))
@@ -520,4 +539,51 @@
                           env te)
                   (r-done g tail)))
           (else (begin (r-exp g p env te #f) (r-opn g rop-field (+ i 2)) (r-done g tail))))))
+;; A `tagcase` on a blobref to a flat sum, of layout code `k`
+;; (`Compiler::r_flat_tagcase`): the blobref and its tag, a label, kept in
+;; frame slots; each arm's name a blobref to its variant, `k / 256` bytes
+;; along; no arm for the tag a failure. Call-outs, so never in a leaf.
+(define r-flat-tagcase
+  (subr rcompiles (rgen int exp exp-arms exp-let-bs renv cenv bool r-exper r-primer) unit)
+  (lambda (g k s arms els env te tail r-exp r-prim)
+    (if (extract g leaf)
+        (r-decline)
+        (let ((regs (get (extract g nreg))) (slots (get (extract g nslot))))
+          (begin
+            (r-exp g s env te #f)
+            (let* ((sc (r-keep-in-slot g))
+                   (tag (begin (r-prim g "%fx26-flat-tag" (r-args-2 (a-slot sc) (a-v (wcell-int k)))
+                                       env te)
+                               (r-keep-in-slot g)))
+                   (end (r-new-label g)))
+              (begin
+                (r-flat-arms g k arms sc tag end env te tail r-exp r-prim)
+                (if (null? els)
+                    (begin (r-prim g "%fx26-flat-no-arm" (the rargs (cons (a-slot tag) nil)) env te)
+                           (r-done g tail))
+                    (let ((n (extract (car els) 1)))
+                      (r-exp g (extract (car els) 2) (r-bind n (rl-slot sc) env) (r-local te n)
+                             tail)))
+                (r-emit g (r-label end))))
+            (r-restore g regs slots))))))
+(define r-flat-arms
+  (subr rcompiles (rgen int exp-arms int int int renv cenv bool r-exper r-primer) unit)
+  (lambda (g k arms sc tag end env te tail r-exp r-prim)
+    (if (null? arms)
+        #u
+        (let* ((arm (car arms)) (next (r-new-label g)))
+          (begin
+            (r-opn g rop-stack tag)
+            (r-op2imm g routine-eq (c-flat-label (extract arm 1) k))
+            (r-emit g (r-branch #t next))
+            (let ((regs (get (extract g nreg))) (slots (get (extract g nslot))))
+              (begin
+                (r-prim g "%suffix-ref+" (r-args-2 (a-slot sc) (a-v (wcell-int (quotient k 256))))
+                        env te)
+                (let* ((x (car (extract arm 3))) (at (r-keep-in-slot g)))
+                  (r-exp g (extract arm 4) (r-bind x (rl-slot at) env) (r-local te x) tail))
+                (r-restore g regs slots)))
+            (if tail #u (r-emit g (r-branch #f end)))
+            (r-emit g (r-label next))
+            (r-flat-arms g k (cdr arms) sc tag end env te tail r-exp r-prim))))))
 )))

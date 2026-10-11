@@ -175,6 +175,7 @@ fn show_exp(c: &Checker, chars: &Chars, e: ExpId) -> String {
                 BlobletOp::RefGet => ("blobref-get", -1),
                 BlobletOp::RefSet => ("blobref-set!", -1),
                 BlobletOp::RefIndex => ("blobref-index", -1),
+                BlobletOp::RefVariant => ("blobref-variant!", -1),
             };
             format!("(e-bloblet {n} {i} {} {a} {b})", list(args.iter().map(|x| go(*x)).collect()))
         }

@@ -534,9 +534,61 @@
                        (ev-bref o (+ at (* k size)))
                        (efail "blobref-index: out of range"))))
                 ((blobref-get) (let ((p (ev-bref-bytes r))) (ev-scalar-get (car p) at i)))
+                ((blobref-variant!) (ev-flat-variant r i (ev-arg xs 1)))
                 (else (let ((p (ev-bref-bytes r)))
                         (begin (ev-scalar-set! (car p) at i (ev-arg xs 1)) the-unit)))))
             (else y (efail-expected "a blobref")))))))
+
+;; A flat sum's tag, of layout `k` (`TODO.md` §77): `w` bytes, a number as
+;; it is if the key is numeric; else the owner's field it indexes, which
+;; holds the label (`%fx26-flat-tag`).
+(define* ev-flat-tag (subr (maxeff evals spin) (val int) val)
+  (lambda (r k)
+    (let* ((p (ev-bref-bytes r)) (bs (car p)) (at (cdr p)) (w (modulo k 8)))
+      (if (> (+ at w) (array-length bs))
+          (efail "suffix ref: the bloblet's suffix has no such byte")
+          (let ((n (ev-bytes-int bs at (- w 1) 0)))
+            (if (= (modulo (quotient k 8) 2) 1)
+                n
+                (tagcase (as-other (ev-bref-owner r) "a bloblet")
+                  (o-blob (fs gs)
+                    (if (< n (array-length fs))
+                        (array-ref fs n)
+                        (efail "flat sum: its tag names no field of its owner")))
+                  (else y (efail-expected "a bloblet")))))))))
+;; Whether tag `t` is label `l` of a flat sum of layout `k`: its number, or
+;; the symbol.
+(define* ev-label-is? (subr (read @globals) (val symbol int) bool)
+  (lambda (t l k)
+    (typecase t
+      (int n (and (= (modulo (quotient k 8) 2) 1) (string=? (int->string n) (symbol->string l))))
+      (symbol s (and (= (modulo (quotient k 8) 2) 0) (symbol=? s l)))
+      (else #f))))
+;; `blobref-variant!` (`%fx26-flat-variant!`): the tag made `label`'s, a
+;; number as it is, or else the first of the owner's fields holding it; a
+;; blobref to the variant.
+(define* ev-flat-variant (subr (maxeff evals spin) (val int val) val)
+  (lambda (r k label)
+    (let* ((p (ev-bref-bytes r)) (bs (car p)) (at (cdr p)) (w (modulo k 8))
+           (n (if (= (modulo (quotient k 8) 2) 1)
+                  (as-int label)
+                  (tagcase (as-other (ev-bref-owner r) "a bloblet")
+                    (o-blob (fs gs) (ev-field-holding fs label 0))
+                    (else y (efail-expected "a bloblet"))))))
+      (cond ((>= n (ev-pow256 w 1)) (efail "blobref-variant!: the tag does not fit its key"))
+            ((> (+ at w) (array-length bs))
+             (efail "suffix ref: the bloblet's suffix has no such byte"))
+            (else (begin (ev-int-bytes! bs at w n)
+                         (ev-bref (ev-bref-owner r) (+ at (quotient k 256)))))))))
+(define* ev-field-holding (subr (maxeff evals spin) ((arrayof val @v) val int) int)
+  (lambda (fs label i)
+    (cond ((= i (array-length fs))
+           (efail "blobref-variant!: no field of the owner holds the label"))
+          ((ev-eq? (array-ref fs i) label) i)
+          (else (ev-field-holding fs label (+ i 1))))))
+(define* ev-bref-owner (subr (maxeff evals spin) (val) val)
+  (lambda (r)
+    (tagcase (as-other r "a blobref") (o-bref (o at) o) (else y (efail-expected "a blobref")))))
 
 ;; Bloblet operation `op`, at field `i`, of `xs`.
 (define* ev-bloblet (subr (maxeff evals spin) (symbol int vals) val)
@@ -544,7 +596,8 @@
     (case op
       ((rmake-bloblet) (ev-make-bloblet (cdr xs)))
       ((make-bloblet) (ev-make-bloblet xs))
-      ((blobref-at blobref+ blobref-owner blobref-offset blobref-get blobref-set! blobref-index)
+      ((blobref-at blobref+ blobref-owner blobref-offset blobref-get blobref-set! blobref-index
+        blobref-variant!)
        (ev-blobref op i xs))
       (else
        (tagcase (as-other (ev-arg xs 0) "a bloblet")

@@ -203,6 +203,20 @@
 (define table-ref (with tables table-ref))
 (define table-set! (with tables table-set!))
 
+;; A flat sum's label as a word (`Compiler::flat_label`): a number as it is
+;; where the key is numeric (`k`'s bit 3), else the symbol.
+(define c-flat-label (subr (maxeff (read @globals) (alloc @k) spin) (symbol int) wcell)
+  (lambda (l k)
+    (if (= (modulo (quotient k 8) 2) 1)
+        (wcell-int (c-digits-value (symbol->string l) 0 0))
+        (wcell-symbol l))))
+;; A label's number, from its digits (`TODO.md` §75: no `string->int` yet).
+(define c-digits-value (subr (maxeff (read @globals) spin) (string int int) int)
+  (lambda (s i n)
+    (if (= i (string-length s))
+        n
+        (c-digits-value s (+ i 1) (+ (* n 10) (- (char->integer (string-ref s i)) 48))))))
+
 (define-rec
   (c-exps (subr (maxeff compiles spin) (exps cenv int code) int)
     (lambda (es e depth c)
@@ -322,7 +336,7 @@
         (e-sum (t v a b)
           (begin (c-int c 36) (c-lit c (wcell-symbol t)) (c-exp v e (+ depth 2) c #f)
                  (c-prim c "%make-frozen" 3) (c-done c tail)))
-        (e-tagcase (s arms els a b) (c-tagcase s arms els e depth c tail))
+        (e-tagcase (s arms els a b) (c-tagcase s arms els e depth c tail (c-field-at a b)))
         (e-module (items a b)
           (let ((outer (get c-collecting)))
             (begin (set c-collecting (get c-module-members))
@@ -640,16 +654,52 @@
                (else
                 (begin (c-exp (car args) e depth c #f) (c-int c i)
                        (c-exp (car (cdr args)) e (+ depth 2) c #f)
-                       (c-prim c "%fx26-suffix-ref-set!" 3))))))
+                       (c-prim c (if (string=? op "blobref-set!") "%fx26-suffix-ref-set!"
+                                     "%fx26-flat-variant!")
+                               3))))))
   ;;; ----------------------------------------------------------------- tagcase
+  ;; On a blobref to a flat sum, of layout code `k` (≥ 0, `TODO.md` §77): its
+  ;; tag read once, as a label, into the slot after it.
   (c-tagcase
-    (subr (maxeff compiles spin) (exp c-cases c-binds cenv int code bool) unit)
-    (lambda (s arms els e depth c tail)
+    (subr (maxeff compiles spin) (exp c-cases c-binds cenv int code bool int) unit)
+    (lambda (s arms els e depth c tail k)
       (let ((end (c-fresh)))
         (begin
           (c-exp s e depth c #f)
-          (c-arms arms els e depth c tail end)
+          (if (< k 0)
+              (c-arms arms els e depth c tail end)
+              (begin (c-op1 c routine-slot (wcell-int depth)) (c-int c k)
+                     (c-prim c "%fx26-flat-tag" 2)
+                     (c-flat-arms arms els k e depth c tail end)))
           (c-emit c (i-label end))))))
+  ;; A flat sum's arms (`Compiler::flat_arms`): each name a blobref to its
+  ;; variant, `k / 256` bytes along; no arm for the tag a failure.
+  (c-flat-arms
+    (subr (maxeff compiles spin) (c-cases c-binds int cenv int code bool int) unit)
+    (lambda (arms els k e depth c tail end)
+      (if (null? arms)
+          (begin
+            (if (null? els)
+                (begin (c-op1 c routine-slot (wcell-int (+ depth 1)))
+                       (c-prim c "%fx26-flat-no-arm" 1) (c-done c tail))
+                (c-exp (extract (car els) 2) (c-extend (extract (car els) 1) (at-slot depth) e)
+                       (+ depth 2) c tail))
+            (c-unbind c depth 2 tail))
+          (let ((arm (car arms)) (next (c-fresh)))
+            (begin
+              (c-op1 c routine-slot (wcell-int (+ depth 1)))
+              (c-lit c (c-flat-label (extract arm 1) k))
+              (c-op c routine-eq)
+              (c-emit c (i-zbranch next))
+              (c-op1 c routine-slot (wcell-int depth))
+              (c-int c (quotient k 256))
+              (c-prim c "%suffix-ref+" 2)
+              (c-exp (extract arm 4) (c-extend (car (extract arm 3)) (at-slot (+ depth 2)) e)
+                     (+ depth 3) c tail)
+              (c-unbind c depth 3 tail)
+              (if tail #u (c-emit c (i-branch end)))
+              (c-emit c (i-label next))
+              (c-flat-arms (cdr arms) els k e depth c tail end))))))
   (c-arms
     (subr (maxeff compiles spin) (c-cases c-binds cenv int code bool int) unit)
     (lambda (arms els e depth c tail end)

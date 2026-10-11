@@ -327,3 +327,43 @@ than a word unless its name says so.
    against 0.92 s for the same loop over a flat array, whose elements stay
    raw `f64`s; a blobref's `f64` is boxed on the way out. Unboxing it as
    `reps` does for flat arrays is a follow-up.
+
+## Flat sums (TODO.md §77, 2026-10-10)
+
+1. **A key written as a bare first item**, `(sumof u8 (0 f64) (7 i32))`,
+   not `(key u8)` as the TODO had it: a list first could be a variant
+   named `key` (of type `u32`, a type too); a bare symbol cannot be a
+   variant. No key: the tag indexes the owner's fields.
+2. **A label may be 0, everywhere** (both readers, both checkers): Rust's
+   discriminants start at 0; a positional label 0 was refused before for
+   no reason I found.
+3. **`(blobref-variant! r 'l)`: the label a literal**, a quoted name, or a
+   number where the sum has a key; the result a blobref to the variant, so
+   one form writes the tag and reaches the payload. The FX checker's
+   resolved expressions keep no symbol's name, so the resolver keeps this
+   one operand as a constant whose type holds the name and whose value is
+   -1 (`k-label-const`, `k-variant-label`).
+4. **Layout**: the tag at offset 0, `w` bytes (1 without a key); the
+   variant at `w` rounded up to the widest variant's alignment; the size
+   padded to the larger of the two alignments. The variants' order does
+   not matter (a tag is a label, not a position).
+5. **The compilers' fact**: `w + 8 * numeric + 256 * p`, on the `tagcase`
+   or the `blobref-variant!`, through the field-index channel.
+6. **`tagcase` on a flat sum**: each arm binds one name, a blobref to its
+   variant; a product's fields are not taken apart (that would copy), the
+   message the one a product arm already gets. Coverage is checked as for
+   a value sum, and the tag again at run time. `else` binds the blobref as
+   it is. Effects: reading the owner's region; `blobref-variant!` reads
+   and writes it.
+7. **Messages**: "has no tag" shows the sum of blobrefs the arms see, in
+   both checkers (the FX one sees that sum).
+8. **Owner fields compared by `eq?`** (a word compare), the first match
+   written; a tag naming no field, and a numeric label too wide for its
+   key, are run-time errors.
+9. **Register code calls out**, so a flat `tagcase` declines in a leaf;
+   native code calls the primitives. Reading the tag in line is a
+   follow-up (TODO §77), as is an index wider than a byte.
+10. **Size debts**: `check-rules.fx` lowered to 1331 by moving
+    `k-in-scope-check` to `check-read-helpers.fx` (given the knot's
+    `k-synth-as`); `regcode-core.fx` kept at 1403 by moving `r-bloblet`'s
+    fact lookup and `r-done` into it.

@@ -726,6 +726,9 @@ impl Checker {
                 let region = self.parse_region(r)?;
                 Ok(self.arena.ty(Ty::Bloblet { fields, frozen, region }))
             }
+            // A flat sum with a key (`TODO.md` §77), so `define-type` may
+            // name one.
+            "sumof" if items.get(1).is_some_and(|k| k.as_symbol().is_some()) => self.parse_flat(s),
             "productof" | "sumof" => {
                 let mut parts = Vec::new();
                 for p in &items[1..] {
@@ -2891,8 +2894,8 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
             return Ok(x);
         }
         match self.literal_int(s) {
-            Some(n) if n > 0 => Ok(self.interner.intern(&n.to_string())),
-            _ => Err(FxError::at(s.span, "a label is a name or a positive integer")),
+            Some(n) if n >= 0 => Ok(self.interner.intern(&n.to_string())),
+            _ => Err(FxError::at(s.span, "a label is a name or a natural number")),
         }
     }
 
@@ -3009,6 +3012,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
             ("blobref-get", [_]) => (BlobletOp::RefGet, args),
             ("blobref-set!", [_, _]) => (BlobletOp::RefSet, args),
             ("blobref-index", [_, _]) => (BlobletOp::RefIndex, args),
+            ("blobref-variant!", [_, _]) => (BlobletOp::RefVariant, args),
             _ => {
                 let shape = match name {
                     "make-bloblet" => "(make-bloblet bytes field …)",
@@ -3025,6 +3029,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                     "blobref-get" => "(blobref-get blobref)",
                     "blobref-set!" => "(blobref-set! blobref value)",
                     "blobref-index" => "(blobref-index blobref i)",
+                    "blobref-variant!" => "(blobref-variant! blobref 'label)",
                     _ => "(bloblet-bytes bloblet)",
                 };
                 return Err(FxError::at(span, format!("`{shape}`")));

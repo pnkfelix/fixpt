@@ -137,6 +137,17 @@
 (define syn-head (with parser syn-head))
 (define syn-name (with parser syn-name))
 (define syn-symbol? (with parser syn-symbol?))
+(define a-read (with check-types-types a-read))
+(define a-write (with check-types-types a-write))
+(define-type k-te (select check-types-types k-te))
+(define-type kx (select check-types-types kx))
+(define x-const (with check-types-types x-const))
+(define k-insert (with check-effects k-insert))
+(define k-te (with check-types k-te))
+(define k-int (with check-env k-int))
+(define k-mark (with check-env k-mark))
+(define k-bind (with check-env k-bind))
+(define k-unbind-to (with check-env k-unbind-to))
 
 ;; A `dlambda` of no parameters, as an error says.
 (define k-dlambda-empty string "a `dlambda` takes at least one description")
@@ -466,8 +477,8 @@
         (symbol=? s 'i64) (symbol=? s 'u64))))
 (define k-flat-usage string
   (string-append "a flat is `f64`, `f32`, `i32`, `u32`, `i64`, `u64`, "
-                 (string-append "`(productof (label flat) …)`, `(arrayof flat n)`, "
-                                "or a variable of kind `flat`")))
+                 (k-cat3 "`(productof (label flat) …)`, `(sumof [key] (label flat) …)`, "
+                         "`(arrayof flat n)`, " "or a variable of kind `flat`")))
 ;; What a flat named `n` where a type is wanted is told.
 (define k-flat-not-type (subr (read @globals) (string) string)
   (lambda (n) (string-append (string-append "`" n) "` is a flat, not a type")))
@@ -481,7 +492,8 @@
       (ty-base (s) (k-flat-scalar? s))
       (ty-var (v) (k-flat-var? v))
       (ty-product (ps) (k-flat-parts? ps))
-      (ty-named (g ds) (= g k-flat-arrayof-gen))
+      (ty-sum (ps) (k-flat-parts? ps))
+      (ty-named (g ds) (or (= g k-flat-arrayof-gen) (= g k-flat-keyed-gen)))
       (else y #f))))
 (define k-flat-parts? (subr (maxeff kreads spin) (k-parts) bool)
   (lambda (ps) (or (null? ps) (and (k-is-flat? (extract (car ps) 2)) (k-flat-parts? (cdr ps))))))
@@ -509,7 +521,9 @@
 (define k-parse-flat-list (subr (maxeff checks spin) (syn k-syns) int)
   (lambda (s items)
     (let ((hd (if (syn-symbol? (car items)) (syn-name (car items)) "")))
-      (cond ((string=? hd "productof") (k-ty-new (ty-product (k-parse-flat-parts (cdr items) nil))))
+      (cond ((string=? hd "productof")
+             (k-ty-new (ty-product (k-parse-flat-parts (cdr items) nil 0))))
+            ((string=? hd "sumof") (k-parse-flat-sum (cdr items)))
             ((and (string=? hd "arrayof") (= (k-length items) 3))
              (let* ((f (k-parse-flat (k-nth items 1))) (n (k-nth items 2)) (z (k-parse-size n)))
                (tagcase z
@@ -519,23 +533,52 @@
                        (k-sfail "a flat array's length is a literal, for now" n)))
                  (else y (k-sfail "a flat array's length is a literal, for now" n)))))
             (else (k-sfail k-flat-usage s))))))
-(define k-parse-flat-parts (subr (maxeff checks spin) (k-syns k-parts) k-parts)
-  (lambda (ps done)
+(define k-parse-flat-parts (subr (maxeff checks spin) (k-syns k-parts int) k-parts)
+  (lambda (ps done w)
     (if (null? ps)
         (reverse done)
         (let ((pair (k-items (car ps) "`(label flat)`")))
           (if (= (k-length pair) 2)
               (let ((l (k-syn-label (car pair))))
-                (if (k-has-label? done l)
-                    (k-sfail (k-twice (symbol->string l)) (car ps))
-                    (let ((f (k-parse-flat (k-nth pair 1))))
-                      (k-parse-flat-parts (cdr ps) (cons (product (1 l) (2 f)) done)))))
+                (cond ((k-has-label? done l) (k-sfail (k-twice (symbol->string l)) (car ps)))
+                      ((and (> w 0) (not (k-digits-below? (symbol->string l) 0 0 (k-key-limit w))))
+                       (k-sfail (k-cat5 "a label of a sum keyed by `u" (int->string (* 8 w))
+                                        "` is a number below 2^" (int->string (* 8 w)) "")
+                                (car pair)))
+                      (else
+                       (let ((f (k-parse-flat (k-nth pair 1))))
+                         (k-parse-flat-parts (cdr ps) (cons (product (1 l) (2 f)) done) w)))))
               (k-sfail "`(label flat)`" (car ps)))))))
+;; `(sumof [key] (label flat) …)`: a key first, a width, if the labels are numbers stored as they
+;; are; else the tag indexes the owner's fields, which hold the labels (`TODO.md` §77).
+(define k-parse-flat-sum (subr (maxeff checks spin) (k-syns) int)
+  (lambda (ps)
+    (let ((w (if (and (not (null? ps)) (syn-symbol? (car ps))) (k-key-width (car ps)) 0)))
+      (if (= w 0)
+          (k-ty-new (ty-sum (k-parse-flat-parts ps nil 0)))
+          (let ((sum (k-ty-new (ty-sum (k-parse-flat-parts (cdr ps) nil w)))))
+            (k-ty-new (ty-named k-flat-keyed-gen (list (dz (k-size-lit w)) (dt sum)))))))))
+(define k-key-width (subr (maxeff checks spin) (syn) int)
+  (lambda (k)
+    (case (syn-name k)
+      (("u8") 1) (("u16") 2) (("u32") 4)
+      (else (k-sfail "a flat sum's key is `u8`, `u16` or `u32`" k)))))
+(define k-key-limit (subr (read @globals) (int) int)
+  (lambda (w) (case w ((1) 256) ((2) 65536) (else 4294967296))))
+;; Whether `s` from `i` is a number's digits, `n` so far, below `limit`.
+(define k-digits-below? (subr (maxeff (read @globals) spin) (string int int int) bool)
+  (lambda (s i n limit)
+    (cond ((>= n limit) #f)
+          ((= i (string-length s)) (> i 0))
+          ((and (char>=? (string-ref s i) #\0) (char<=? (string-ref s i) #\9))
+           (k-digits-below? s (+ i 1) (+ (* n 10) (- (char->integer (string-ref s i)) 48)) limit))
+          (else #f))))
 
 ;; `blobref`, standard generative type 5 (`check::BLOBREF_INDEX`); a flat
-;; array, 6 (`check::FLAT_ARRAYOF_INDEX`).
+;; array, 6 (`check::FLAT_ARRAYOF_INDEX`); a flat sum with a key, 7.
 (define k-blobref-gen int 5)
 (define k-flat-arrayof-gen int 6)
+(define k-flat-keyed-gen int 7)
 ;; A scalar flat's layout (`fixpt_heap::layout::FLAT_*`), or -1.
 (define k-flat-code (subr (read @globals) (symbol) int)
   (lambda (s)
@@ -554,12 +597,15 @@
         (case (symbol->string s)
           (("i32" "u32" "f32") (cons 4 4)) (("i64" "u64" "f64") (cons 8 8)) (else (cons -1 -1))))
       (ty-product (ps) (k-flat-parts-layout ps 0 1))
+      (ty-sum (ps) (k-flat-sum-size t))
       (ty-named (g ds)
         (let ((p (k-flat-array-parts t)))
+          (if (= g k-flat-keyed-gen)
+              (k-flat-sum-size t)
           (if (< (car p) 0)
               (cons -1 -1)
               (let ((e (k-flat-layout (car p))))
-                (if (< (car e) 0) e (cons (* (car e) (cdr p)) (cdr e)))))))
+                (if (< (car e) 0) e (cons (* (car e) (cdr p)) (cdr e))))))))
       (else y (cons -1 -1)))))
 (define k-flat-parts-layout (subr (maxeff kreads (alloc @t) spin) (k-parts int int) k-int-pair)
   (lambda (ps at align)
@@ -601,6 +647,142 @@
               (else y (cons -1 -1)))
             (cons -1 -1)))
       (else y (cons -1 -1)))))
+;; A flat sum's variants, its key's width in bytes (-1 if `t` is no flat
+;; sum), and whether its labels are numbers (`Checker::flat_sum_parts`).
+(define-type k-sum-parts (productof (1 k-parts) (2 int) (3 bool)))
+(define k-no-sum k-sum-parts (product (1 (the k-parts nil)) (2 -1) (3 #f)))
+(define k-flat-sum-parts (subr (maxeff kreads (alloc @t) spin) (int) k-sum-parts)
+  (lambda (t)
+    (tagcase (k-get (k-resolve t))
+      (ty-sum (ps) (if (k-flat-parts? ps) (product (1 ps) (2 1) (3 #f)) k-no-sum))
+      (ty-named (g ds)
+        (if (and (= g k-flat-keyed-gen) (= (k-length ds) 2))
+            (tagcase (car ds)
+              (dz (z)
+                (tagcase z
+                  (sz-lin (k ts)
+                    (tagcase (car (cdr ds))
+                      (dt (s) (tagcase (k-get (k-resolve s))
+                                (ty-sum (ps) (product (1 ps) (2 k) (3 #t)))
+                                (else y k-no-sum)))
+                      (else y k-no-sum)))
+                  (else y k-no-sum)))
+              (else y k-no-sum))
+            k-no-sum))
+      (else y k-no-sum))))
+;; A flat sum's code for the compilers, size, alignment and variants
+;; (`Checker::flat_sum_layout`): the tag, `w` bytes, then the variant at the
+;; widest one's alignment, at `p`; the code `w + 8 * numeric + 256 * p`, or
+;; -1 if `t` is no flat sum or its layout is not known.
+(define-type k-sum-layout (productof (1 int) (2 int) (3 int) (4 k-parts)))
+(define k-no-layout k-sum-layout (product (1 -1) (2 -1) (3 -1) (4 (the k-parts nil))))
+(define k-flat-sum-layout (subr (maxeff kreads (alloc @t) spin) (int) k-sum-layout)
+  (lambda (t)
+    (let ((p (k-flat-sum-parts t)))
+      (if (< (extract p 2) 0)
+          k-no-layout
+          (k-sum-layout-of (extract p 1) (extract p 2) (extract p 3) (extract p 1) 0 1)))))
+(define k-sum-layout-of
+  (subr (maxeff kreads (alloc @t) spin) (k-parts int bool k-parts int int) k-sum-layout)
+  (lambda (ps w numeric all size align)
+    (if (null? ps)
+        (let ((p (k-round-up w align)) (al (if (> w align) w align)))
+          (product (1 (+ (+ w (if numeric 8 0)) (* 256 p))) (2 (k-round-up (+ p size) al)) (3 al)
+                   (4 all)))
+        (let ((l (k-flat-layout (extract (car ps) 2))))
+          (if (< (car l) 0)
+              k-no-layout
+              (k-sum-layout-of (cdr ps) w numeric all (if (> (car l) size) (car l) size)
+                               (if (> (cdr l) align) (cdr l) align)))))))
+(define k-flat-sum-size (subr (maxeff kreads (alloc @t) spin) (int) k-int-pair)
+  (lambda (t)
+    (let ((l (k-flat-sum-layout t)))
+      (if (< (extract l 1) 0) (cons -1 -1) (cons (extract l 2) (extract l 3))))))
+;; A `tagcase` at `a`..`z` whose scrutinee is of type and effect `rs`: if a
+;; blobref to a flat sum (`TODO.md` §77), seen as a sum of blobrefs to its
+;; variants, its tag read from the owner's region, and its layout's code
+;; noted for the compilers; else `rs`.
+(define k-flat-view (subr (maxeff checks spin) (int int k-te) k-te)
+  (lambda (a z rs)
+    (let* ((st (extract rs 1)) (p (k-blobref-parts st))
+           (l (if (null? p) k-no-layout (k-flat-sum-layout (cdr (car p))))))
+      (if (< (extract l 1) 0)
+          rs
+          (let* ((b (car (car p))) (r (k-owner-region a z st b)))
+            (begin
+              (set k-extracts (cons (product (1 a) (2 z) (3 (extract l 1))) (get k-extracts)))
+              (k-te (k-ty-new (ty-sum (k-blobref-variants b (extract l 4))))
+                    (k-insert (a-read r) (extract rs 2)))))))))
+(define k-blobref-variants (subr (maxeff kstate spin) (int k-parts) k-parts)
+  (lambda (b ps)
+    (if (null? ps)
+        nil
+        (let* ((v (product (1 (extract (car ps) 1)) (2 (k-blobref-of b (extract (car ps) 2)))))
+               (rest (k-blobref-variants b (cdr ps))))
+          (the k-parts (cons v rest))))))
+;; What a `tagcase`'s `else` binds, its scrutinee of type `st`, the variants
+;; `rest` not named: the blobref as it is, to a flat sum; else their sum.
+(define k-else-type (subr (maxeff kstate spin) (int k-parts) int)
+  (lambda (st rest)
+    (let ((p (k-blobref-parts st)))
+      (if (and (not (null? p)) (>= (extract (k-flat-sum-layout (cdr (car p))) 1) 0))
+          st
+          (k-ty-new (ty-sum rest))))))
+;; The region of blobref type `xt`'s owner, `b`, at `a`..`z`.
+(define k-owner-region (subr (maxeff checks spin) (int int int int) k-region)
+  (lambda (a z xt b)
+    (tagcase (k-get (k-resolve b))
+      (ty-bloblet (fs fz r) r)
+      (else y (k-fail (k-cat3 "the region of a " (k-show-ty xt) "'s owner is not known") a z)))))
+;; `body`'s type and effect with `y` bound to `t`, by `synth-as` (the
+;; checker's knot), against `expected` if given (≥ 0).
+(define-type k-synth-as-knot (subr (maxeff checks spin) (kx int) k-te))
+(define k-in-scope-check (subr (maxeff checks spin) (symbol int kx int k-synth-as-knot) k-te)
+  (lambda (y t body expected synth-as)
+    (let ((saved (k-mark)))
+      (begin
+        (k-bind y t)
+        (let ((r (synth-as body expected)))
+          (begin (k-unbind-to saved) r))))))
+;; `blobref-variant!` at `a`..`z` of the flat sum `f` a blobref of type `xt`
+;; and owner `b` points to, its label `lx` at `la`..`lz`: a blobref to the
+;; variant, of effect `e` and the owner's region read and written; the
+;; layout's code noted for the compilers (`Checker::synth_blobref`).
+(define k-blobref-variant
+  (subr (maxeff checks spin) (int int int int int kx int int k-eff) k-te)
+  (lambda (a z xt b f lx la lz e)
+    (let* ((l (k-flat-sum-layout f)) (code (extract l 1)) (label (k-variant-label lx code)))
+      (if (null? label)
+          (k-fail (string-append "a variant is named by a literal: `'label`, or a number where "
+                                 "the sum has a key")
+                  la lz)
+          (let ((g (k-variant-find (extract l 4) (car label))))
+            (if (< g 0)
+                (k-fail (k-cat5 "a " (k-show-ty f) " has no variant `" (symbol->string (car label))
+                                "`")
+                        la lz)
+                (let ((r (k-owner-region a z xt b)))
+                  (begin
+                    (set k-extracts (cons (product (1 a) (2 z) (3 code)) (get k-extracts)))
+                    (k-te (k-blobref-of b g) (k-insert (a-write r) (k-insert (a-read r) e)))))))))))
+;; A `blobref-variant!`'s label, `lx`, for a sum of layout `code`: a number
+;; where the sum has a key, else a name, as `check-modules-read.fx`'s
+;; `k-label-const` resolves it (its value -1, its name the type's); none if
+;; it is neither.
+(define k-variant-label (subr (maxeff kreads spin) (kx int) (listof symbol acyclic))
+  (lambda (lx code)
+    (tagcase lx
+      (x-const (t n c d)
+        (cond ((= (modulo (quotient code 8) 2) 1)
+               (if (= t k-int) (list (string->symbol (int->string n))) nil))
+              ((or (= t k-int) (not (= n -1))) nil)
+              (else (tagcase (k-get t) (ty-base (s) (list s)) (else y nil)))))
+      (else y nil))))
+(define k-variant-find (subr (maxeff (read @globals) spin) (k-parts symbol) int)
+  (lambda (ps l)
+    (cond ((null? ps) -1)
+          ((symbol=? (extract (car ps) 1) l) (extract (car ps) 2))
+          (else (k-variant-find (cdr ps) l)))))
 ;; `(blobref b f)`'s owner and flat, if `t` is one.
 (define-type k-owner-flat (listof (pairof int int @t) acyclic))
 (define k-blobref-parts (subr (maxeff kreads (alloc @t) spin) (int) k-owner-flat)
