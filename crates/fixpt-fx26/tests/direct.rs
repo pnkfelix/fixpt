@@ -135,14 +135,13 @@ fn program(name: &str) -> String {
     lines[..lines.len() - 1].join("\n")
 }
 
-/// The identity on ints is two instructions: nothing to check, no frame
-/// (a return is `br x30`, not `ret`: `direct.rs`, "return").
+/// The identity on ints is two instructions: nothing to check, no frame.
 #[test]
 fn the_identity_is_a_move_and_a_return() {
     let r = run("(define* id (subr pure (int) int) (lambda (x) x))", "id", &[42], FUEL);
     assert_eq!(r.direct, Ok("42".into()));
     assert_eq!(r.rust, "42");
-    assert_eq!(r.code, "mov x0, x1\nbr x30\n");
+    assert_eq!(r.code, "mov x0, x1\nret\n");
 }
 
 /// Adding one is one instruction, with its checks: that the operand is a
@@ -151,7 +150,7 @@ fn the_identity_is_a_move_and_a_return() {
 fn adding_one_checks_its_operand_and_overflow() {
     let r = run("(define* inc (subr pure (int) int) (lambda (x) (+ x 1)))", "inc", &[41], FUEL);
     assert_eq!(r.direct, Ok("42".into()));
-    assert!(r.code.starts_with("tst x1, #0x7\nb.ne @5\nadds x0, x1, #8\nb.vs @5\nbr x30\n"), "{}", r.code);
+    assert!(r.code.starts_with("tst x1, #0x7\nb.ne @5\nadds x0, x1, #8\nb.vs @5\nret\n"), "{}", r.code);
     let r = run("(define* inc (subr pure (int) int) (lambda (x) (+ x 1)))", "inc", &[(1 << 60) - 1], FUEL);
     assert_eq!((r.direct, r.rust.as_str()), (Ok("1152921504606846976".into()), "1152921504606846976"));
     let r = run("(define* acc (subr pure (int int) int) (lambda (x y) (- x (- y x))))", "acc", &[-(1 << 60), (1 << 59)], FUEL);

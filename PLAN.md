@@ -101,9 +101,7 @@ are in the last section, "Log: the glance's details", and in
   FX-26 assembler's powers of two by a shift, and the Rust checker's
   bindings indexed by name. On itself, before the pass → now: `check`
   575 → 520 ms, `fx check` 1295 → 1233, `fx arm64` 835 → 418
-  (`docs/performance.md`). And native code returns by `br x30`, not
-  `ret`, whose predictor deep recursion overflowed: `closures` 21.4 →
-  9.2 ms, `fib` 2.8 → 3.1.
+  (`docs/performance.md`).
 - **Tools**: `fixpt check|compile|eval INPUT` (both checkers, both
   compilers); `sexp-edit`, `edit` included; the phase probe
   (`probe_phases_as_register_code`), with collections and allocation by

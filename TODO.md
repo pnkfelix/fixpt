@@ -1550,6 +1550,14 @@ heap allows (up to `FIXPT_NATIVE_STACK_MAX`, 2^28 words by default), its
 stack in the nursery, flushed in place at every collection and overflow.
 Left:
 
+- **Deep recursion and the return stack predictor** (2026-10-11,
+  `docs/performance.md`, "Native returns by `br`, tried and undone"):
+  past a few dozen frames every native `ret` is mispredicted (`closures`
+  21.4 ms, against 9.2 returning by `br x30`); but `br` costs shallow
+  calls (`fib`, `peek` about 10 %). To try: `br` only where a recursion
+  is deep, e.g. a second entry for calls made deeper than the predictor
+  holds (a depth counter in the frame), or returning by `br` from frames
+  that a stack-cache flush or a counter marks deep.
 - **A capture copies its frames** (sampled 2026-10-11): `captures` is
   slower natively than as register code in the cellular convention (9.4
   against 7.5 ms). A third of its native time is `Heap::vector_with`,

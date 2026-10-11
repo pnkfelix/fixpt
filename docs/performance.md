@@ -2807,27 +2807,30 @@ for what a fixnum cannot be. Back to back, the clean runs:
 
 `fx check` is now below its time before §69's import pass (1295).
 
-## Native returns by `br`, not `ret` (2026-10-11)
+## Native returns by `br`, tried and undone (2026-10-11)
 
-The default machine, the native convention, was slower than register
-code in the cellular convention on `closures` (21.5 against 15.0 ms)
-and `captures`. Sampled natively, 57 % of `closures`' time was at one
-place in `map-add`, its recursive call 1000 deep. By depth, the same
-work: 20 deep, native 9.7 ms against cellular 12.4; 200 deep, 22.8
-against 12.8, the cellular one unchanged. A `ret` is predicted by the
-return stack, a few dozen entries, which a recursion deeper than that
-overflows, so that nearly every return past it is mispredicted; the
-cellular convention returns by `br LR`, which the branch predictor
-learns (a recursion returns to one place). Native code now returns by
-`br x30` too. Back to back, alternated three times, best of five:
+The default machine, the native convention, is slower than register code
+in the cellular convention on `closures` (21.5 against 15.0 ms). Sampled
+natively, 57 % of `closures`' time was at `map-add`'s recursive call,
+1000 deep; by depth, the same work: 20 deep, native 9.7 ms against
+cellular 12.4; 200 deep, 22.8 against 12.8, the cellular one unchanged.
+A `ret` is predicted by the return stack, a few dozen entries, which a
+deeper recursion overflows; the cellular convention returns by `br LR`,
+which the branch predictor learns. Native code returning by `br x30`
+too: `closures` 21.4 → 9.2 ms; but `fib` 2.8 → 3.1. Over the MLton ports
+(whole runs, seconds, alternated twice):
 
-| benchmark (ms) | `ret` | `br x30` |
-| -------------- | ----: | -------: |
-| closures       |  21.4 |      9.2 |
-| fib            |   2.8 |      3.1 |
-| the others     |  same |     same |
+| program               | `ret` | `br x30` |
+| --------------------- | ----: | -------: |
+| `mlton/merge`         |  0.74 |     0.57 |
+| `mlton/boyer`         |  1.05 |     1.00 |
+| `mlton/fib`           |  2.28 |     2.50 |
+| `mlton/peek`          |  4.39 |     4.82 |
+| `mlton/life`          |  1.60 |     1.64 |
+| `binarytrees5`        |  1.12 |     1.19 |
+| eight others          |  same |     same |
 
-`fib`, 30 deep, loses a little of the return stack's help; the sum of
-the eight benchmarks is 55.3 → 42.8 ms. The stubs that return to Rust
-keep `ret`. (A procedure cannot return both ways: how deep it will
-recurse is not known where it is compiled.)
+Deep recursion gains, frequent shallow calls lose, and the sum over
+these is about 3 % worse; how deep a procedure will recurse is not known
+where it is compiled. So returns stay `ret` (`TODO.md` §52 has what might
+get both).

@@ -546,8 +546,9 @@ than a word unless its name says so.
    `with`'s facts are set as checking goes; for the user (TODO §43).
 5. **Not done: path compression in `k-resolve`**: it would make a read a
    write, changing an effect many signatures name.
-6. **Native returns by `br x30`, not `ret`** (`direct.rs`): `closures`
-   21.4 → 9.2 ms (a recursion 1000 deep overflowed the return stack
-   predictor), `fib` 2.8 → 3.1 (shallow, it loses the predictor's help),
-   the rest the same. Taken for the sum (55.3 → 42.8 ms); one line to
-   undo if `fib`'s shape matters more to the user than deep recursion's.
+6. **Native returns by `br x30` instead of `ret`: committed, then
+   undone.** The eight per-commit benchmarks favored it (`closures`
+   21.4 → 9.2 ms: a recursion 1000 deep overflowed the return stack
+   predictor; `fib` 2.8 → 3.1). The MLton ports, timed both ways, were
+   about 3 % worse (`fib`, `peek` +10 %; `merge` −24 %): the broader set
+   decided. Data in docs/performance.md; ideas in TODO §52.
