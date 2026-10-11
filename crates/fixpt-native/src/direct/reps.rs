@@ -221,14 +221,17 @@ fn demand_step(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) -> &'s
     d
 }
 
-/// Whether instruction `op` reads a flat array's element (`flatarray-ref`).
+/// Whether instruction `op` reads a flat array's element (`flatarray-ref`),
+/// or an `f64` at a blobref (`blobref-get`).
 fn is_flat_ref(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) -> &'static str) -> bool {
-    matches!(op, "prim2" | "prim2imm") && prim(o(0).as_fixnum() as usize) == "%fx26-flatarray-ref"
+    let name = || prim(o(0).as_fixnum() as usize);
+    (matches!(op, "prim2" | "prim2imm") && name() == "%fx26-flatarray-ref")
+        || (op == "prim2imm" && name() == "%fx26-suffix-ref-get" && o(1) == Value::fixnum(fixpt_heap::layout::FLAT_F64))
 }
 
 /// Instruction `op`, operands `o`, on `reps`: the conversions it needs
 /// first, and `reps` after it. `prim` names a primitive by number.
-/// `raw_ref`: whether a `flatarray-ref` here gives its element raw, an
+/// `raw_ref`: whether a `flatarray-ref` (or `f64` `blobref-get`) here gives its element raw, an
 /// `f64`'s bits, since only `f64` operations use it (`demand_step`).
 /// `fast`: in a procedure's fixnum version.
 pub(super) fn step(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) -> &'static str, raw_ref: bool, fast: bool, reps: &mut Reps) -> Vec<Convert> {
@@ -388,8 +391,8 @@ fn successors(cells: &[Value], starts: &[usize]) -> Vec<Vec<usize>> {
         .collect()
 }
 
-/// Which instructions are a `flatarray-ref` whose element only `f64`
-/// operations use: the backward fixpoint of `demand_step`, over the ways
+/// Which instructions are a `flatarray-ref` (or `f64` `blobref-get`) whose
+/// element only `f64` operations use: the backward fixpoint of `demand_step`, over the ways
 /// out of each instruction.
 pub(super) fn raw_refs(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str) -> Vec<bool> {
     let (before, succ) = demands(cells, starts, prim);

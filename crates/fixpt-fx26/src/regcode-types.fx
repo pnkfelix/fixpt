@@ -267,6 +267,7 @@
                        (renv exp)
                        rconsts))
             (val r-count-args (subr (maxeff (read @globals) (read @k) spin) (rargs) int))
+            (val r-never-collects? (subr (read @globals) (string) bool))
             (val r-exp-args (subr (maxeff (alloc @k) (read @globals)) (exps) rargs))
             (val r-last-hard
                  (subr (maxeff (read @globals) (read @k) spin) (rargs int int) int))

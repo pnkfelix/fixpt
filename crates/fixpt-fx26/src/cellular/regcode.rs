@@ -2587,8 +2587,22 @@ impl Compiler<'_> {
         Some(())
     }
 
+    /// Runtime primitive `name` on `args`: a call-out; or, if it never
+    /// collects and its operands are a value and a constant, in line
+    /// (`prim2imm`), as a blobref's step or read is.
     fn r_prim(&mut self, g: &mut Gen, name: &str, args: &[Arg], env: &mut Vec<(Sym, RLoc)>, te: &mut Env) -> O<()> {
         let p = fixpt_engine::cellular::runtime_primitive(name)? as i64;
+        if let [x @ (Arg::E(_) | Arg::Slot(_)), Arg::V(v)] = args
+            && fixpt_runtime::never_collects(name)
+        {
+            match x {
+                Arg::E(x) => self.r_exp(g, *x, env, te, false)?,
+                Arg::Slot(s) => g.op("stack", &[Gen::n(*s)]),
+                _ => unreachable!(),
+            }
+            g.op("prim2imm", &[Value::fixnum(p), *v]);
+            return Some(());
+        }
         self.r_call_out(g, "prim", p, args, env, te)
     }
 

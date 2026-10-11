@@ -120,6 +120,11 @@
                                spin)
                        (rgen symbol int exps int int renv cenv bool r-exper r-primer)
                        unit))
+            (val r-prim-imm
+                 (subr (maxeff (alloc @k) (goto @y) (read @globals) (read @k) (read @t) (write @k)
+                               spin)
+                       (rgen string rargs renv cenv r-exper)
+                       bool))
             (val r-extract
                  (subr (maxeff (alloc @k) (goto @y) (read @globals) (read @k) (read @t) (write @k)
                                spin)

@@ -459,3 +459,19 @@ than a word unless its name says so.
    bad `field` (too far), which is why nothing ran wrong. Now a fact is
    kept in the node, as a span below -1 that `c-field-at` reads back,
    rather than a new node kind: no other pass changes.
+2. **A never-collecting primitive on a value and a constant is
+   `prim2imm`**, in both register compilers' `r_prim` / `r-prim-imm`, not a
+   call-out: a blobref's step (`%suffix-ref+` of an `extract`'s offset, a
+   flat sum's variant), its read (`%fx26-suffix-ref-get`) and a flat sum's
+   tag (`%fx26-flat-tag`, now counted as never collecting). No new op.
+3. **In line natively** (`direct.rs`): a step by a constant (by 0, only
+   the tag checked), a numeric key's tag (`ldurb`/`ldurh`/`ldur w`, encoders
+   added), an `f64` read that only `f64` operations use (raw, as a flat
+   array's element already was), and `blobref-index` inside the general
+   call-out (as `blobref-set!` already was). An index-key tag (labels in
+   the owner's fields) still calls the primitive.
+4. **Left for later**: a loop over a flat array still keeps its `f64`
+   accumulator boxed in a frame slot, because `blobref-index` (three
+   operands) and a flat `tagcase`'s no-arm failure are call-outs, so the
+   procedure is no leaf. Making it one wants a three-operand in-line op
+   (`prim3imm`) and a flat `tagcase` in a leaf; recorded in TODO §77.

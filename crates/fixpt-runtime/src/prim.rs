@@ -449,6 +449,8 @@ pub fn never_collects(name: &str) -> bool {
         // A blobref's read, owner, offset and step (`TODO.md` §77): an `f64`
         // read allocates its box, which never collects.
         || matches!(name, "%fx26-suffix-ref-get" | "%suffix-ref-owner" | "%suffix-ref-offset" | "%suffix-ref+")
+        // A flat sum's tag (`TODO.md` §77): a number, or an owner's field.
+        || name == "%fx26-flat-tag"
         // Characters and strings looked at, never made (strings compared in
         // place, `Heap::string_cmp`): each of a fixed arity, as `pure_call`
         // passes by the primitive's.

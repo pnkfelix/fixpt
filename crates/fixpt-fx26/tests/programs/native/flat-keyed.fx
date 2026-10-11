@@ -1,0 +1,82 @@
+;;; Flat sums of numeric keys natively (`TODO.md` §77): a tag of one, two
+;;; or four bytes read in line, a blobref stepped to a variant's fields,
+;;; `f64`s read only for `f64` operations (raw, no box), and
+;;; `blobref-index` in line, each element of an array of them; with loops
+;;; that allocate as they go, so that a collection moves the owner.
+(define-type pt (productof (x f64) (y f64)))
+(define-type s1 (sumof u8 (0 f64) (1 pt)))
+(define-type s2 (sumof u16 (300 f64) (2 pt)))
+(define-type s4 (sumof u32 (70000 f64) (4 pt)))
+(define-type o (bloblet (fields) @heap))
+(define-effect makes (maxeff (alloc @heap) (read @heap) (write @heap) spin))
+(define-type a1 (blobref o (arrayof s1 6)))
+(define-type a2 (blobref o (arrayof s2 6)))
+(define-type a4 (blobref o (arrayof s4 6)))
+(define* fill1 (subr makes (a1 int) unit)
+  (lambda (a i)
+    (if (= i 6)
+        #u
+        (let ((junk (list i i)))
+          (begin
+            (if (= (modulo i 3) 0)
+                (blobref-set! (blobref-variant! (blobref-index a i) 0) (int->f64 i))
+                (let ((p (blobref-variant! (blobref-index a i) 1)))
+                  (begin (blobref-set! (extract p x) (int->f64 i))
+                         (blobref-set! (extract p y) 0.5))))
+            (fill1 a (+ i 1)))))))
+(define* sum1 (subr (maxeff (alloc @heap) (read @heap) spin) (a1 int f64) f64)
+  (lambda (a i acc)
+    (if (= i 6)
+        acc
+        (let ((junk (list i i)))
+          (sum1 a (+ i 1)
+                (f64+ acc (tagcase (blobref-index a i)
+                            (0 c (blobref-get c))
+                            (1 p (f64* (blobref-get (extract p x))
+                                       (blobref-get (extract p y)))))))))))
+(define* fill2 (subr (maxeff (read @heap) (write @heap) spin) (a2 int) unit)
+  (lambda (a i)
+    (if (= i 6)
+        #u
+        (begin
+          (if (= (modulo i 2) 0)
+              (blobref-set! (blobref-variant! (blobref-index a i) 300) 1.25)
+              (blobref-set! (extract (blobref-variant! (blobref-index a i) 2) y) (int->f64 i)))
+          (fill2 a (+ i 1))))))
+(define* sum2 (subr (maxeff (read @heap) spin) (a2 int f64) f64)
+  (lambda (a i acc)
+    (if (= i 6)
+        acc
+        (sum2 a (+ i 1)
+              (f64+ acc (tagcase (blobref-index a i)
+                          (300 c (blobref-get c))
+                          (2 p (blobref-get (extract p y)))))))))
+(define* fill4 (subr (maxeff (read @heap) (write @heap) spin) (a4 int) unit)
+  (lambda (a i)
+    (if (= i 6)
+        #u
+        (begin
+          (if (< i 3)
+              (blobref-set! (blobref-variant! (blobref-index a i) 70000) 2.0)
+              (blobref-set! (extract (blobref-variant! (blobref-index a i) 4) x) 3.0))
+          (fill4 a (+ i 1))))))
+(define* tags4 (subr (maxeff (read @heap) spin) (a4 int int) int)
+  (lambda (a i acc)
+    (if (= i 6)
+        acc
+        (tags4 a (+ i 1) (+ (* acc 10) (tagcase (blobref-index a i) (70000 c 7) (4 p 4)))))))
+(define-type ints (listof int @heap))
+(define* flat-keyed (subr makes (int) ints)
+  (lambda (n)
+    (let* ((b (the o (make-bloblet 1024)))
+           (x1 (the a1 (blobref-at b 0)))
+           (x2 (the a2 (blobref-at b 256)))
+           (x4 (the a4 (blobref-at b 512))))
+      (begin
+        (fill1 x1 0) (fill2 x2 0) (fill4 x4 0)
+        (list (f64->int (f64* 100.0 (sum1 x1 0 (int->f64 n))))
+              (f64->int (f64* 100.0 (sum2 x2 0 0.0)))
+              (tags4 x4 0 0)
+              (bloblet-byte b 256) (bloblet-byte b 257)
+              (bloblet-byte b 512) (bloblet-byte b 514))))))
+(flat-keyed 5)

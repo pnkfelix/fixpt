@@ -368,6 +368,24 @@ fn flat_sums_as_the_rust_machine_gives_them() {
     }
 }
 
+/// Flat sums of numeric keys (`TODO.md` §77, `programs/native/flat-keyed.fx`):
+/// tags of one, two and four bytes, steps, `blobref-index` and raw `f64`
+/// reads, all in line, as the Rust machine gives them, with collections;
+/// an index past the end fails as the primitive says.
+#[test]
+fn flat_keyed_as_the_rust_machine_gives_them() {
+    for gc_every in [None, Some(7)] {
+        let r = run_collecting(&program("native/flat-keyed"), "flat-keyed", &[5], FUEL, gc_every);
+        assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "collecting every {gc_every:?}: {:?} against {}", r.direct, r.rust);
+        assert_eq!(r.rust, "(1400 1275 777444 44 1 112 1)");
+    }
+    let defs = "(define-type o (bloblet (fields) @heap)) \
+                (define* past (subr (maxeff (alloc @heap) (read @heap)) (int) int) \
+                  (lambda (k) (blobref-offset (blobref-index (the (blobref o (arrayof i32 3)) (blobref-at (the o (make-bloblet 12)) 0)) k))))";
+    assert!(matches!(&run(defs, "past", &[3], FUEL).direct, Err(m) if m.contains("out of range")));
+    assert!(run(defs, "past", &[2], FUEL).direct.as_ref().is_ok_and(|d| d == "8"));
+}
+
 /// Identity (PLAN.md Q5, `programs/native/identity.fx`): `pair-eq?` and
 /// kin in line, and a union-find whose roots are found by it, as the Rust
 /// machine gives them, and with its nodes moved by collections; and tables

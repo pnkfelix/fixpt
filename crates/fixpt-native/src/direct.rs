@@ -1983,9 +1983,37 @@ impl Compiling<'_> {
                     }
                     // A blobref's read of a scalar the layout of which is
                     // the constant: in line, as that scalar is kept.
+                    // An `f64` only `f64` operations use: its bits.
                     if name == "%fx26-suffix-ref-get" && op == "prim2imm" && o(1).is_fixnum() {
+                        let raw = raw_refs[si - 1];
                         let (slow, done) = (a.label(), a.label());
-                        suffix_get(&mut a, o(1).as_fixnum(), slow);
+                        suffix_get(&mut a, o(1).as_fixnum(), raw, slow);
+                        a.to(done, Fix::B);
+                        a.bind(slow);
+                        a.es(&mov_imm64(X17, o(1).raw()));
+                        pure_call(&mut a, self.callouts, Callout::Pure { p: pn, n: 2 }, &[RESULT, X17], RESULT);
+                        a.e(ldr(X9, ST, st_off(offset_of!(DState, trap))));
+                        a.e(cmp_imm(X9, 0));
+                        trap(&mut a, &mut stubs, PRIM_FAILED, Cond::Ne);
+                        if raw {
+                            unbox_f64(&mut a, RESULT);
+                        }
+                        a.bind(done);
+                        continue;
+                    }
+                    // A blobref stepped a constant number of bytes along
+                    // (an `extract`'s, a flat sum's variant), or a flat
+                    // sum's numeric tag: in line, checked as the primitive
+                    // checks.
+                    let step = name == "%suffix-ref+" && o(1).is_fixnum() && (0..1 << 24).contains(&o(1).as_fixnum());
+                    let tag = name == "%fx26-flat-tag" && o(1).is_fixnum() && o(1).as_fixnum() & 8 != 0;
+                    if op == "prim2imm" && (step || tag) {
+                        let (slow, done) = (a.label(), a.label());
+                        if step {
+                            suffix_step(&mut a, o(1).as_fixnum(), slow);
+                        } else {
+                            flat_tag(&mut a, o(1).as_fixnum(), slow);
+                        }
                         a.to(done, Fix::B);
                         a.bind(slow);
                         a.es(&mov_imm64(X17, o(1).raw()));
@@ -2142,6 +2170,12 @@ impl Compiling<'_> {
                         && fixpt_runtime::PRIMITIVES[p].name == "%fx26-suffix-ref-set!"
                     {
                         suffix_set(&mut a, slow, done);
+                    }
+                    if let Callout::Prim { p, n: 3 } = c
+                        && fixpt_runtime::PRIMITIVES[p].name == "%fx26-suffix-ref-index"
+                    {
+                        suffix_index(&mut a, slow);
+                        a.to(done, Fix::B);
                     }
                     // `int`'s bit operations of fixnums (`TODO.md` §56): of
                     // two, `and`, `ior` and `xor` are one; `not` of one, its
@@ -2880,12 +2914,73 @@ fn suffix_owner(a: &mut Asm, r: Reg, slow: Label) {
     a.e(lsr_imm(X13, X12, H_BYTES.lo));
 }
 
+/// Suffix ref `RESULT` moved `d` bytes along (`%suffix-ref+`), into
+/// `RESULT`; to `slow` (the primitive's) unless it stays within its
+/// owner's suffix. By none it is itself, once seen to be a suffix ref.
+fn suffix_step(a: &mut Asm, d: i64, slow: Label) {
+    use fixpt_heap::value::{SUFFIX_OFFSET_SHIFT, TAG_SUFFIX_REF};
+    if d == 0 {
+        a.e(and_low(X16, RESULT, 3));
+        a.e(cmp_imm(X16, TAG_SUFFIX_REF as u32));
+        a.to(slow, Fix::If(Cond::Ne));
+        return;
+    }
+    suffix_owner(a, RESULT, slow);
+    a.es(&mov_imm64(X9, d as u64));
+    a.e(add(X9, X15, X9));
+    a.e(cmp(X9, X13));
+    a.to(slow, Fix::If(Cond::Hs));
+    a.es(&mov_imm64(X9, (d as u64) << SUFFIX_OFFSET_SHIFT));
+    a.e(add(RESULT, RESULT, X9));
+}
+
+/// `blobref-index` (`%fx26-suffix-ref-index`) of the suffix ref in `x1`,
+/// at `x2`, of the layout in `x3`, `n << 32 | size`, into `RESULT`: the
+/// ref `x2 × size` bytes along, within the suffix; to `slow` (the
+/// call-out, which says why) unless `x2` is a fixnum below `n`.
+fn suffix_index(a: &mut Asm, slow: Label) {
+    use fixpt_heap::value::SUFFIX_OFFSET_SHIFT;
+    a.e(tst_low(2, 3));
+    a.to(slow, Fix::If(Cond::Ne));
+    suffix_owner(a, 1, slow);
+    a.e(asr_imm(X9, 2, 3));
+    a.e(lsr_imm(X17, 3, 35));
+    a.e(cmp(X9, X17));
+    a.to(slow, Fix::If(Cond::Hs));
+    a.e(ubfx(X17, 3, 3, 32));
+    a.e(mul(X9, X9, X17));
+    a.e(add(X16, X15, X9));
+    a.e(cmp(X16, X13));
+    a.to(slow, Fix::If(Cond::Hs));
+    a.e(lsl_imm(X9, X9, SUFFIX_OFFSET_SHIFT));
+    a.e(add(RESULT, 1, X9));
+}
+
+/// A flat sum's tag at the suffix ref in `RESULT`, into `RESULT`, of
+/// layout `code` with a numeric key (`%fx26-flat-tag`): its `code & 7`
+/// bytes, a fixnum; to `slow` for a read past the suffix.
+fn flat_tag(a: &mut Asm, code: i64, slow: Label) {
+    let w = code & 7;
+    suffix_owner(a, RESULT, slow);
+    a.e(add_imm(X9, X15, w as u32));
+    a.e(cmp(X9, X13));
+    a.to(slow, Fix::If(Cond::Hi));
+    a.e(add(X11, X11, X15));
+    a.e(match w {
+        1 => ldurb(X13, X11, 0),
+        2 => ldurh(X13, X11, 0),
+        _ => ldur_w(X13, X11, 0),
+    });
+    a.e(lsl_imm(RESULT, X13, 3));
+}
+
 /// `blobref-get` of the suffix ref in `RESULT`, a scalar of layout `code`
 /// (`fixpt_heap::layout::FLAT_*`), into `RESULT`, at any alignment: an
 /// `f64` boxed, an `f32` an immediate, a 32-bit integer its fixnum, a
 /// 64-bit one its fixnum where it is one; to `slow` (the primitive's) for
-/// what it does not do, or a read past the suffix.
-fn suffix_get(a: &mut Asm, code: i64, slow: Label) {
+/// what it does not do, or a read past the suffix. With `raw`, an `f64`'s
+/// bits, not boxed.
+fn suffix_get(a: &mut Asm, code: i64, raw: bool, slow: Label) {
     use fixpt_heap::layout::*;
     suffix_owner(a, RESULT, slow);
     a.e(add_imm(X9, X15, flat_size(code) as u32));
@@ -2893,6 +2988,7 @@ fn suffix_get(a: &mut Asm, code: i64, slow: Label) {
     a.to(slow, Fix::If(Cond::Hi));
     a.e(add(X11, X11, X15));
     match code {
+        FLAT_F64 if raw => a.e(ldur(RESULT, X11, 0)),
         FLAT_F64 => {
             a.e(ldur(X9, X11, 0));
             box_bits(a, slow);

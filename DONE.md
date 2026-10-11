@@ -1575,6 +1575,21 @@ to 1331 (`k-in-scope-check` moved to `check-read-helpers.fx`). Tests:
 `direct.rs`'s `flat_sums_as_the_rust_machine_gives_them`
 (`programs/native/flat-sums.fx`, with collections too).
 
+**In line natively** (2026-10-11). A primitive that never collects, on a
+value and a constant, is register code's `prim2imm` rather than a
+call-out, in both register compilers (`r_prim`, `r-prim-imm`): a
+blobref's step by an `extract`'s or a variant's offset, its read, and a
+flat sum's tag (`%fx26-flat-tag`, now counted as never collecting).
+`direct.rs` does in line a step by a constant (`suffix_step`), a numeric
+key's tag (`flat_tag`, by `ldurb`/`ldurh`/`ldur w`), an `f64` read that
+only `f64` operations use, raw (`reps`, as a flat array's element), and
+`blobref-index` inside its call-out (`suffix_index`); each falls back to
+the primitive, which says why. A shapes loop (a million elements, filled
+then summed): 214.9 ms to 65.0 natively. On the way, the FX-26
+compiler's inlined bodies lost their blobref facts (`c-resolved-at`).
+Test: `direct.rs`'s `flat_keyed_as_the_rust_machine_gives_them`
+(`programs/native/flat-keyed.fx`, keys of one, two and four bytes).
+
 ## 78. The best REPL in one short command (the user's, 2026-10-10)
 
 Done 2026-10-11. The fastest FX-26 machine is the default: `fixpt

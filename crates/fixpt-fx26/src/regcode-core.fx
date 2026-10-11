@@ -767,8 +767,8 @@
       (begin (r-args g args env te (the maybe-exp nil)) (r-opnn g how what (r-count-args args)))))
   (r-prim (subr rcompiles (rgen string rargs renv cenv) unit)
     (lambda (g name args env te)
-      (let ((p (runtime-primitive name)))
-        (if (< p 0) (r-decline) (r-call-out g rop-prim p args env te)))))
+      (if (r-prim-imm g name args env te r-exp) #u
+          (r-call-out g rop-prim (runtime-primitive name) args env te))))
   ;; A closure of a lambda into RESULT, its free values into REG1…REGn first;
   ;; `own` as for `c-lambda-word`. With a `region` (an `rlambda`'s, one or
   ;; none), the closure is made there, by `%region-closure h fv … w`. What it
