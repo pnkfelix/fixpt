@@ -3,7 +3,7 @@
 ;;; items in the order they were there.
 
 ;; The types these use, from the files that define them.
-(define check-types-types (load-module "fx26:check-types-types.fx"))
+(hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type k-ids (select check-types-types k-ids))
 (define-type k-pending (productof (1 int) (2 int) (3 int)))
 (define-type k-sides (pairof k-ids k-ids @t))

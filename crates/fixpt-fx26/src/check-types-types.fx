@@ -3,7 +3,7 @@
 ;;; items in the order they were there.
 
 ;; The types these use, from the files that define them.
-(define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
+(hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type syn (select parser-types syn))
 ;; The checker's state, and everything checking may do.
 (define-effect kstate (maxeff (read @globals) (read @t) (write @t) (alloc @t)))

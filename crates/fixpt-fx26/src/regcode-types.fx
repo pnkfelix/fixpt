@@ -3,13 +3,13 @@
 ;;; items in the order they were there.
 
 ;; The types these use, from the files that define them.
-(define compile-types (load-module "fx26:compile-types.fx"))
+(hide (define compile-types (load-module "fx26:compile-types.fx")))
 (define-type c-this (select compile-types c-this))
 (define-effect compiles (select compile-types compiles))
 (define-type items (select compile-types items))
-(define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
+(hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type exp (select parser-types exp))
-(define table-types (load-module "fx26:table-types.fx"))
+(hide (define table-types (load-module "fx26:table-types.fx")))
 (define-type table (select table-types table))
 ;; What register code's own helpers do: read the globals and what is being
 ;; made (`rreads`); and walk it, maybe at length (`rscans`), making more of
@@ -149,7 +149,7 @@
 ;; What its clients use of it (`compile-programs.fx`).
 ;; The types it names, from the files that define them.
 (define-type cenv (select compile-types cenv))
-(define check-resolve-types (load-module "fx26:check-resolve-types.fx"))
+(hide (define check-resolve-types (load-module "fx26:check-resolve-types.fx")))
 (define-type exp-letrec-bs (select check-resolve-types exp-letrec-bs))
 (define-type exps (select compile-types exps))
 ;; The types it names, from the files that define them.

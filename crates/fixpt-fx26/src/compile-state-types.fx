@@ -7,20 +7,20 @@
 ;; `compile-programs.fx`, `compile-twins.fx`, `regcode-core.fx`,
 ;; `regcode-entry.fx`, `regcode-exps.fx`, `regcode-helpers.fx`, `regcode.fx`).
 ;; The types it names, from the files that define them.
-(define compile-exps-types (load-module "fx26:compile-exps-types.fx"))
+(hide (define compile-exps-types (load-module "fx26:compile-exps-types.fx")))
 (define-type c-closing (select compile-exps-types c-closing))
 (define-type c-copy-twin (select compile-exps-types c-copy-twin))
 (define-type c-inlinables (select compile-exps-types c-inlinables))
 (define-type c-made (select compile-exps-types c-made))
 (define-type c-mslots (select compile-exps-types c-mslots))
 (define-type c-mvals (select compile-exps-types c-mvals))
-(define compile-types (load-module "fx26:compile-types.fx"))
+(hide (define compile-types (load-module "fx26:compile-types.fx")))
 (define-type c-params (select compile-types c-params))
 (define-type c-spec (select compile-exps-types c-spec))
 (define-type c-twin (select compile-exps-types c-twin))
 (define-type c-waits (select compile-exps-types c-waits))
 (define-type cenv (select compile-types cenv))
-(define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
+(hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type exp (select parser-types exp))
 (define-type mod-items (select parser-types mod-items))
 (define-type patches (select compile-types patches))
@@ -29,7 +29,7 @@
 (define-type c-this (select compile-types c-this))
 (define-type code (select compile-types code))
 (define-type exps (select compile-types exps))
-(define check-types-types (load-module "fx26:check-types-types.fx"))
+(hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type k-ids (select check-types-types k-ids))
 (define-type loc (select compile-types loc))
 (define-type compile-state-sig

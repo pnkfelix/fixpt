@@ -3,9 +3,9 @@
 ;;; items in the order they were there.
 
 ;; The types these use, from the files that define them.
-(define check-env-types (load-module "fx26:check-env-types.fx"))
+(hide (define check-env-types (load-module "fx26:check-env-types.fx")))
 (define-type k-scope (select check-env-types k-scope))
-(define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
+(hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type syn (select parser-types syn))
 (define-type k-slots (listof (pairof int syn @t) acyclic))
 ;; The type families being expanded, each with the descriptions given it
@@ -25,9 +25,9 @@
 
 ;; What its clients use of it (`check-program.fx`).
 ;; The types it names, from the files that define them.
-(define check-types-types (load-module "fx26:check-types-types.fx"))
+(hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type k-names (select check-types-types k-names))
-(define check-read-types (load-module "fx26:check-read-types.fx"))
+(hide (define check-read-types (load-module "fx26:check-read-types.fx")))
 (define-type k-syns (select check-read-types k-syns))
 ;; The types it names, from the files that define them.
 (define-type k-conv (select check-types-types k-conv))

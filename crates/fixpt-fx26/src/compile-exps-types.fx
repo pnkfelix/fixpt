@@ -3,12 +3,12 @@
 ;;; items in the order they were there.
 
 ;; The types these use, from the files that define them.
-(define compile-types (load-module "fx26:compile-types.fx"))
+(hide (define compile-types (load-module "fx26:compile-types.fx")))
 (define-type c-params (select compile-types c-params))
 (define-type c-this (select compile-types c-this))
 (define-type cenv (select compile-types cenv))
 (define-type syms (select compile-types syms))
-(define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
+(hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type exp (select parser-types exp))
 ;; A small global procedure a call in register code may inline, guarded
 ;; (`regcode.fx`'s `r-inline`): its name, word, parameters and body, and

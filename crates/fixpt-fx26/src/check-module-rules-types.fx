@@ -3,12 +3,12 @@
 ;;; items in the order they were there.
 
 ;; The types these use, from the files that define them.
-(define check-types-types (load-module "fx26:check-types-types.fx"))
+(hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-effect checks (select check-types-types checks))
 (define-type k-eff (select check-types-types k-eff))
 (define-type k-ids (select check-types-types k-ids))
 (define-type k-parts (select check-types-types k-parts))
-(define check-resolve-types (load-module "fx26:check-resolve-types.fx"))
+(hide (define check-resolve-types (load-module "fx26:check-resolve-types.fx")))
 (define-type k-letrec-bs (select check-resolve-types k-letrec-bs))
 ;; What an error's message `m` is made into.
 (define-type k-say (subr (maxeff checks spin) (string) string))
@@ -33,17 +33,17 @@
 
 ;; What its clients use of it (`check-program.fx`).
 ;; The types it names, from the files that define them.
-(define check-env-types (load-module "fx26:check-env-types.fx"))
+(hide (define check-env-types (load-module "fx26:check-env-types.fx")))
 (define-type k-hazard-list (select check-env-types k-hazard-list))
 (define-type k-item (select check-types-types k-item))
 (define-type k-items (select check-types-types k-items))
-(define check-modorder-types (load-module "fx26:check-modorder-types.fx"))
+(hide (define check-modorder-types (load-module "fx26:check-modorder-types.fx")))
 (define-type k-mlams (select check-modorder-types k-mlams))
 (define-type k-names (select check-types-types k-names))
-(define check-subtype-types (load-module "fx26:check-subtype-types.fx"))
+(hide (define check-subtype-types (load-module "fx26:check-subtype-types.fx")))
 (define-type k-saying (select check-subtype-types k-saying))
 (define-type k-te (select check-types-types k-te))
-(define check-terminate-types (load-module "fx26:check-terminate-types.fx"))
+(hide (define check-terminate-types (load-module "fx26:check-terminate-types.fx")))
 (define-type k-thunk (select check-terminate-types k-thunk))
 (define-type check-module-rules-sig
   (moduleof (val k-rebind-top

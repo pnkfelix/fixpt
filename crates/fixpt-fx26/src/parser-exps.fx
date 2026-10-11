@@ -959,7 +959,10 @@
                              (let* ((ps (loaded-params forms))
                                     (items (parse-module-items (if (null? ps) forms (cdr forms))))
                                     (m (e-module (cons (loaded-mark base path ps) items) base end)))
-                               (t-exp (loaded-made ps m base end))))))
+                               (t-exp (if (null? ps)
+                                          m
+                                          (loaded-made ps m (syn-start (car forms))
+                                                       (syn-end (car forms)))))))))
                  (r (prompt parse-tag (p-ok (cons (made) nil)) (lambda (r) r))))
             (tagcase r
               (p-err (m x y)

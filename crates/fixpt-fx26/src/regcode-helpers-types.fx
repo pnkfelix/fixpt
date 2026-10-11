@@ -3,15 +3,15 @@
 ;;; items in the order they were there.
 
 ;; The types these use, from the files that define them.
-(define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
+(hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type exp (select parser-types exp))
-(define check-resolve-types (load-module "fx26:check-resolve-types.fx"))
+(hide (define check-resolve-types (load-module "fx26:check-resolve-types.fx")))
 (define-type exp-arms (select check-resolve-types exp-arms))
 (define-type exp-let-bs (select check-resolve-types exp-let-bs))
-(define regcode-types (load-module "fx26:regcode-types.fx"))
+(hide (define regcode-types (load-module "fx26:regcode-types.fx")))
 (define-type rconst (select regcode-types rconst))
 (define-type wcells (select regcode-types wcells))
-(define compile-types (load-module "fx26:compile-types.fx"))
+(hide (define compile-types (load-module "fx26:compile-types.fx")))
 (define-type syms (select compile-types syms))
 ;; An expression, or none: a call's procedure (`r-args`), a closure's
 ;; region (`r-lambda`).
@@ -43,13 +43,13 @@
 ;; The types it names, from the files that define them.
 (define-type rgen (select regcode-types rgen))
 ;; The types it names, from the files that define them.
-(define compile-exps-types (load-module "fx26:compile-exps-types.fx"))
+(hide (define compile-exps-types (load-module "fx26:compile-exps-types.fx")))
 (define-type c-spec (select compile-exps-types c-spec))
 (define-type c-spec-copies (select compile-types c-spec-copies))
-(define compile-plan-types (load-module "fx26:compile-plan-types.fx"))
+(hide (define compile-plan-types (load-module "fx26:compile-plan-types.fx")))
 (define-type c-special (select compile-plan-types c-special))
 (define-type cenv (select compile-types cenv))
-(define check-subst-types (load-module "fx26:check-subst-types.fx"))
+(hide (define check-subst-types (load-module "fx26:check-subst-types.fx")))
 (define-type exp-params (select check-subst-types exp-params))
 (define-type exps (select compile-types exps))
 (define-type patches (select compile-types patches))
@@ -66,7 +66,7 @@
   (subr (maxeff (alloc @k) (goto @y) (read @globals) (read @k) (read @t) (write @k) spin)
         (rgen string rargs renv cenv)
         unit))
-(define regcode-exps-types (load-module "fx26:regcode-exps-types.fx"))
+(hide (define regcode-exps-types (load-module "fx26:regcode-exps-types.fx")))
 (define-type rinline (select regcode-exps-types rinline))
 (define-type rlocs (select regcode-types rlocs))
 (define-type regcode-helpers-sig

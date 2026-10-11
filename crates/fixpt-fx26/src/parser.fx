@@ -871,9 +871,11 @@
                         (syn-start (car forms)) (syn-end (car forms)))
                  (the syns-a (cons (nth items 1) nil))))
         nil)))
-;; Module `m` read from a file of parameters `ps` (`loaded-params`), at
-;; `a`..`b`: a `plambda` over them of a `lambda` of none making it, so that
+;; Module `m` read from a file of parameters `ps` (`loaded-params`), whose
+;; `module-parameters` form is at `a`..`b`: a `plambda` over them, there, of
+;; a `lambda` of none making it, where the form starts, of no width (each
+;; at a place of its own, as the compiler finds facts by place), so that
 ;; whoever loads it gives them, and each call makes one. `m`, if none.
 (define* loaded-made (subr pure (syns-a exp int int) exp)
   (lambda (ps m a b)
-    (if (null? ps) m (e-plambda (car ps) (e-lambda (the param-list nil) m a b) a b))))
+    (if (null? ps) m (e-plambda (car ps) (e-lambda (the param-list nil) m a a) a b))))

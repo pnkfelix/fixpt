@@ -3,7 +3,7 @@
 ;;; items in the order they were there.
 
 ;; The types these use, from the files that define them.
-(define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
+(hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type syn (select parser-types syn))
 (define-type k-syns (listof syn acyclic))
 ;; `(=> (k1 … kn) k)` as written: its parameters' kinds and its result's, in
@@ -27,7 +27,7 @@
 
 ;; What its clients use of it (`check-program.fx`).
 ;; The types it names, from the files that define them.
-(define check-types-types (load-module "fx26:check-types-types.fx"))
+(hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type k-items (select check-types-types k-items))
 ;; The types it names, from the files that define them.
 (define-type k-binders (select check-types-types k-binders))

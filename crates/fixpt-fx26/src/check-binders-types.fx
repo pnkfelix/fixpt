@@ -6,9 +6,9 @@
 ;; What its clients use of it (`check-facts.fx`, `check-rules.fx`,
 ;; `check-synth.fx`, `check-test-facts.fx`).
 ;; The types it names, from the files that define them.
-(define check-types-types (load-module "fx26:check-types-types.fx"))
+(hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type k-binders (select check-types-types k-binders))
-(define check-infer-types (load-module "fx26:check-infer-types.fx"))
+(hide (define check-infer-types (load-module "fx26:check-infer-types.fx")))
 (define-type k-bound-body (select check-infer-types k-bound-body))
 (define-type k-ids (select check-types-types k-ids))
 (define-type k-map (select check-types-types k-map))

@@ -3,7 +3,7 @@
 ;;; items in the order they were there.
 
 ;; The types these use, from the files that define them.
-(define check-types-types (load-module "fx26:check-types-types.fx"))
+(hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-effect checks (select check-types-types checks))
 (define-type k-ids (select check-types-types k-ids))
 (define-type k-te (select check-types-types k-te))
@@ -36,7 +36,7 @@
 
 ;; What its clients use of it (`check-program.fx`).
 ;; The types it names, from the files that define them.
-(define check-resolve-types (load-module "fx26:check-resolve-types.fx"))
+(hide (define check-resolve-types (load-module "fx26:check-resolve-types.fx")))
 (define-type k-letrec-bs (select check-resolve-types k-letrec-bs))
 (define-type kx (select check-types-types kx))
 ;; The types it names, from the files that define them.

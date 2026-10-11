@@ -3,11 +3,11 @@
 ;;; items in the order they were there.
 
 ;; The types these use, from the files that define them.
-(define check-test-facts-types (load-module "fx26:check-test-facts-types.fx"))
+(hide (define check-test-facts-types (load-module "fx26:check-test-facts-types.fx")))
 (define-type k-branch-facts (select check-test-facts-types k-branch-facts))
 (define-type k-cert-lens (select check-test-facts-types k-cert-lens))
 (define-type k-fact-list (select check-test-facts-types k-fact-list))
-(define check-types-types (load-module "fx26:check-types-types.fx"))
+(hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type k-eff (select check-types-types k-eff))
 (define-type k-ids (select check-types-types k-ids))
 (define-type k-named (select check-types-types k-named))
@@ -57,14 +57,14 @@
 (define-type kx (select check-types-types kx))
 ;; The types it names, from the files that define them.
 (define-type k-binders (select check-types-types k-binders))
-(define check-resolve-types (load-module "fx26:check-resolve-types.fx"))
+(hide (define check-resolve-types (load-module "fx26:check-resolve-types.fx")))
 (define-type k-callable (select check-resolve-types k-callable))
 (define-type k-desc (select check-types-types k-desc))
 (define-type k-names (select check-types-types k-names))
 (define-type k-parts (select check-types-types k-parts))
 (define-type k-region (select check-types-types k-region))
 (define-type k-size (select check-types-types k-size))
-(define check-infer-types (load-module "fx26:check-infer-types.fx"))
+(hide (define check-infer-types (load-module "fx26:check-infer-types.fx")))
 (define-type k-solved (select check-infer-types k-solved))
 (define-type k-te (select check-types-types k-te))
 (define-type kxs (select check-types-types kxs))

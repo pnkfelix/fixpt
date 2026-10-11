@@ -6,10 +6,10 @@
 ;; What its clients use of it (`check-proofs.fx`, `check-rules.fx`,
 ;; `check-test-facts.fx`).
 ;; The types it names, from the files that define them.
-(define check-types-types (load-module "fx26:check-types-types.fx"))
+(hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type kxs (select check-types-types kxs))
 ;; The types it names, from the files that define them.
-(define check-terminate-types (load-module "fx26:check-terminate-types.fx"))
+(hide (define check-terminate-types (load-module "fx26:check-terminate-types.fx")))
 (define-type k-calls (select check-terminate-types k-calls))
 (define-type k-graph (select check-terminate-types k-graph))
 (define-type k-guards (select check-terminate-types k-guards))

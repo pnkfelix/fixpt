@@ -425,18 +425,33 @@
   (lambda (n p q r s)
     (or (>= (k-ext-index p n 0) 0) (>= (k-ext-index q n 0) 0)
         (>= (k-ext-index r n 0) 0) (>= (k-ext-index s n 0) 0))))
-;; `ds` onto `acc`'s types, none named there or in `own`, nor an abstract
-;; type of `own-abs`, the module's own, or of `acc`'s.
+;; `ds` onto `acc`'s types, none named there or in `own` but as the same
+;; type (a types file's re-export: one name), nor an abstract type of
+;; `own-abs`, the module's own, or of `acc`'s.
 (define k-inc-descs (subr (maxeff checks spin) (k-parts k-incs k-parts k-parts int int) k-incs)
   (lambda (ds acc own-abs own a b)
-    (cond ((null? ds) acc)
-          ((and (not (k-prefix? "%hidden:" (symbol->string (extract (car ds) 1))))
-                (k-named-in? (extract (car ds) 1) (extract acc 1) own own-abs (extract acc 4)))
-           (k-twice (extract (car ds) 1) a b))
-          (else (k-inc-descs (cdr ds)
-                             (k-incs-of (cons (car ds) (extract acc 1)) (extract acc 2)
-                                        (extract acc 3) acc)
-                             own-abs own a b)))))
+    (if (null? ds)
+        acc
+        (let* ((n (extract (car ds) 1)) (t (extract (car ds) 2))
+               (prior (k-prior-desc n (extract acc 1) own))
+               (same (and (>= prior 0) (k-subtype prior t) (k-subtype t prior))))
+          (cond ((and (not (k-prefix? "%hidden:" (symbol->string n)))
+                      (or (and (>= prior 0) (not same))
+                          (k-named-in? n own-abs (extract acc 4) nil nil)))
+                 (k-twice n a b))
+                (same (k-inc-descs (cdr ds) acc own-abs own a b))
+                (else (k-inc-descs (cdr ds)
+                                   (k-incs-of (cons (car ds) (extract acc 1)) (extract acc 2)
+                                              (extract acc 3) acc)
+                                   own-abs own a b)))))))
+;; The type `n` names among the types included so far, `inc`, or the
+;; module's own, `own`; -1 if none.
+(define k-prior-desc (subr (maxeff (read @globals) spin) (symbol k-parts k-parts) int)
+  (lambda (n inc own)
+    (let ((i (k-ext-index inc n 0)))
+      (if (>= i 0)
+          (extract (k-nth inc i) 2)
+          (let ((j (k-ext-index own n 0))) (if (>= j 0) (extract (k-nth own j) 2) -1))))))
 ;; `vs`, from value `j` of the module that is value `k`, onto `acc`'s
 ;; values, none named there or in `own`.
 (define k-inc-vals (subr (maxeff checks spin) (k-parts int int k-incs k-parts int int) k-incs)

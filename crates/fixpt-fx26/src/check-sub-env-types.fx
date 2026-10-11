@@ -6,10 +6,10 @@
 ;; What its clients use of it (`check-infer.fx`, `check-proofs.fx`,
 ;; `check-rules.fx`, `check-synth.fx`).
 ;; The types it names, from the files that define them.
-(define check-types-types (load-module "fx26:check-types-types.fx"))
+(hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type k-parts (select check-types-types k-parts))
 ;; The types it names, from the files that define them.
-(define check-subtype-types (load-module "fx26:check-subtype-types.fx"))
+(hide (define check-subtype-types (load-module "fx26:check-subtype-types.fx")))
 (define-type k-assumed (select check-subtype-types k-assumed))
 (define-type k-benv (select check-subtype-types k-benv))
 (define-type k-conv (select check-types-types k-conv))

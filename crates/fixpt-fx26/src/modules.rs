@@ -152,11 +152,18 @@ impl Checker {
                 Vec::new()
             };
             for d in ds {
-                let twice = descs.iter().chain(&own_descs).any(|(n, _)| *n == d.0) || abs.iter().chain(&fresh).any(|(n, _)| *n == d.0);
+                // A type or effect name given twice is one name if it
+                // describes the same both times (re-exported, as a types
+                // file gives on another's): `TODO.md` §69, the import pass.
+                let prior = descs.iter().chain(&own_descs).find(|(n, _)| *n == d.0).map(|(_, t)| *t);
+                let same = prior.is_some_and(|t| self.subtype(t, d.1) && self.subtype(d.1, t));
+                let twice = (prior.is_some() && !same) || abs.iter().chain(&fresh).any(|(n, _)| *n == d.0);
                 if !self.interner.name(d.0).starts_with("%hidden:") && twice {
                     return Err(FxError::at(span, format!("`{}` is defined twice in this module", self.interner.name(d.0))));
                 }
-                descs.push(d);
+                if !same {
+                    descs.push(d);
+                }
             }
             for (j, v) in vs.into_iter().enumerate() {
                 if out.iter().chain(&own).any(|(n, _)| *n == v.0) {

@@ -427,3 +427,13 @@ than a word unless its name says so.
    whose import lines stay.
 4. **Measured back to back** against the commit before (peval's front-end
    phases, old and new builds alternated): no difference past noise.
+5. **A type or effect name two `include`s give is one name when it is the
+   same both times** (each a subtype of the other), a value still refused:
+   the types files re-export each other's types for their signatures, the
+   same type under the same name. A different type under one name is still
+   "defined twice". The module's own `define-type` against an included one
+   likewise.
+6. **The types files hide their module bindings** (`(hide (define m
+   (load-module …)))`): each binds the modules it names types from, the
+   same loads in most of them, which an include of two would give twice as
+   values; nothing selected them through a types file.

@@ -3,11 +3,11 @@
 ;;; items in the order they were there.
 
 ;; The types these use, from the files that define them.
-(define check-types-types (load-module "fx26:check-types-types.fx"))
+(hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type k-ds (select check-types-types k-ds))
 (define-type k-ids (select check-types-types k-ids))
 (define-type k-names (select check-types-types k-names))
-(define table-types (load-module "fx26:table-types.fx"))
+(hide (define table-types (load-module "fx26:table-types.fx")))
 (define-type table (select table-types table))
 ;; Bindings, as lists of them are passed around.
 (define-type k-bindings (listof (pairof symbol int @t) acyclic))

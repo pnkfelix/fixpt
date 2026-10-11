@@ -2527,12 +2527,17 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         self.loaded.insert(e, (path.to_string(), text.clone(), file));
         // A file of parameters, `(module-parameters ((name kind) …))` first:
         // a `plambda` over them of a `lambda` of none making the module, so
-        // that whoever loads it gives them, and each call makes one.
+        // that whoever loads it gives them, and each call makes one. Each
+        // at a place of its own, as the FX-26 compiler finds facts by place
+        // (a reshape of the module's, `hide`'s, is the module's alone): the
+        // `plambda` at the `module-parameters` form, the `lambda` where it
+        // starts, of no width.
         Ok(match params {
             None => e,
             Some(binders) => {
-                let made = self.arena.exp(whole, Exp::Lambda { params: Vec::new(), body: e });
-                self.arena.exp(whole, Exp::PLambda { binders, body: made })
+                let p = forms[0].span;
+                let made = self.arena.exp(fixpt_read::Span::new(p.file, p.start, p.start), Exp::Lambda { params: Vec::new(), body: e });
+                self.arena.exp(p, Exp::PLambda { binders, body: made })
             }
         })
     }

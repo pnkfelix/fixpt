@@ -3,12 +3,12 @@
 ;;; items in the order they were there.
 
 ;; The types these use, from the files that define them.
-(define check-resolve-types (load-module "fx26:check-resolve-types.fx"))
+(hide (define check-resolve-types (load-module "fx26:check-resolve-types.fx")))
 (define-type k-letrec-bs (select check-resolve-types k-letrec-bs))
-(define check-types-types (load-module "fx26:check-types-types.fx"))
+(hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type k-names (select check-types-types k-names))
 (define-type kx (select check-types-types kx))
-(define table-types (load-module "fx26:table-types.fx"))
+(hide (define table-types (load-module "fx26:table-types.fx")))
 (define-type table (select table-types table))
 ;; Reading the checker's tables and making lists.
 (define-effect kallocs (maxeff (read @globals) (alloc @t)))
@@ -41,7 +41,7 @@
 
 ;; What its clients use of it (`check-program.fx`).
 ;; The types it names, from the files that define them.
-(define check-env-types (load-module "fx26:check-env-types.fx"))
+(hide (define check-env-types (load-module "fx26:check-env-types.fx")))
 (define-type k-hazard-list (select check-env-types k-hazard-list))
 (define-type k-item (select check-types-types k-item))
 (define-type k-items (select check-types-types k-items))

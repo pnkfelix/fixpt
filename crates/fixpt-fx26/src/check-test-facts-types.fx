@@ -3,12 +3,12 @@
 ;;; items in the order they were there.
 
 ;; The types these use, from the files that define them.
-(define check-types-types (load-module "fx26:check-types-types.fx"))
+(hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type k-cert-len (select check-types-types k-cert-len))
 (define-type k-props (select check-types-types k-props))
 (define-type k-size (select check-types-types k-size))
 (define-type kxs (select check-types-types kxs))
-(define check-print-types (load-module "fx26:check-print-types.fx"))
+(hide (define check-print-types (load-module "fx26:check-print-types.fx")))
 (define-type k-size-fact (select check-print-types k-size-fact))
 ;; What a test shows when it holds, and when not.
 (define-type k-fact-list (listof k-size-fact acyclic))

@@ -5,17 +5,17 @@
 
 ;; What its clients use of it (`check-program.fx`).
 ;; The types it names, from the files that define them.
-(define check-types-types (load-module "fx26:check-types-types.fx"))
+(hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type kx (select check-types-types kx))
 ;; The types it names, from the files that define them.
-(define check-env-types (load-module "fx26:check-env-types.fx"))
+(hide (define check-env-types (load-module "fx26:check-env-types.fx")))
 (define-type k-bindings (select check-env-types k-bindings))
-(define check-subtype-types (load-module "fx26:check-subtype-types.fx"))
+(hide (define check-subtype-types (load-module "fx26:check-subtype-types.fx")))
 (define-type k-checking (select check-subtype-types k-checking))
 (define-type k-conv (select check-types-types k-conv))
 (define-type k-eff (select check-types-types k-eff))
 (define-type k-ids (select check-types-types k-ids))
-(define check-resolve-types (load-module "fx26:check-resolve-types.fx"))
+(hide (define check-resolve-types (load-module "fx26:check-resolve-types.fx")))
 (define-type k-let-bs (select check-resolve-types k-let-bs))
 (define-type k-names (select check-types-types k-names))
 (define-type k-saying (select check-subtype-types k-saying))

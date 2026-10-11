@@ -5,13 +5,13 @@
 
 ;; What its clients use of it (`check-rules.fx`).
 ;; The types it names, from the files that define them.
-(define check-types-types (load-module "fx26:check-types-types.fx"))
+(hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type k-te (select check-types-types k-te))
 ;; The types it names, from the files that define them.
 (define-type k-props (select check-types-types k-props))
 ;; The types it names, from the files that define them.
 (define-type k-names (select check-types-types k-names))
-(define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
+(hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type syn (select parser-types syn))
 (define-type check-proving-sig
   (moduleof (val k-call-te (subr (maxeff (read @globals) (read @t) spin) (k-te) k-te))

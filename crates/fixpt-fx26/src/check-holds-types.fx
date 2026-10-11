@@ -3,9 +3,9 @@
 ;;; items in the order they were there.
 
 ;; The types these use, from the files that define them.
-(define check-types-types (load-module "fx26:check-types-types.fx"))
+(hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type k-region (select check-types-types k-region))
-(define table-types (load-module "fx26:table-types.fx"))
+(hide (define table-types (load-module "fx26:table-types.fx")))
 (define-type table (select table-types table))
 ;; Regions storage is kept in, for `k-knot-in`.
 (define-type k-kept (listof k-region acyclic))

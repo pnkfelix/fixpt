@@ -3,11 +3,11 @@
 ;;; items in the order they were there.
 
 ;; The types these use, from the files that define them.
-(define check-types-types (load-module "fx26:check-types-types.fx"))
+(hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-effect kreads (select check-types-types kreads))
-(define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
+(hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type syns-a (select parser-types syns-a))
-(define table-types (load-module "fx26:table-types.fx"))
+(hide (define table-types (load-module "fx26:table-types.fx")))
 (define-type table (select table-types table))
 ;; Pairs of integers.
 (define-type k-pairs (listof (pairof int int @t) acyclic))

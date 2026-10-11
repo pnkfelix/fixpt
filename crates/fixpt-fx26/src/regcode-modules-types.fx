@@ -3,9 +3,9 @@
 ;;; items in the order they were there.
 
 ;; The types these use, from the files that define them.
-(define compile-types (load-module "fx26:compile-types.fx"))
+(hide (define compile-types (load-module "fx26:compile-types.fx")))
 (define-type cenv (select compile-types cenv))
-(define regcode-types (load-module "fx26:regcode-types.fx"))
+(hide (define regcode-types (load-module "fx26:regcode-types.fx")))
 (define-type renv (select regcode-types renv))
 ;; Where names are, to register code and to the cellular compiler.
 (define-type r-scopes (pairof renv cenv @k))
@@ -14,13 +14,13 @@
 
 ;; What its clients use of it (`regcode-core.fx`).
 ;; The types it names, from the files that define them.
-(define compile-exps-types (load-module "fx26:compile-exps-types.fx"))
+(hide (define compile-exps-types (load-module "fx26:compile-exps-types.fx")))
 (define-type c-mslots (select compile-exps-types c-mslots))
 (define-type c-mvals (select compile-exps-types c-mvals))
 (define-type c-waits (select compile-exps-types c-waits))
-(define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
+(hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type exp (select parser-types exp))
-(define check-types-types (load-module "fx26:check-types-types.fx"))
+(hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type k-ids (select check-types-types k-ids))
 (define-type rargs (select regcode-types rargs))
 (define-type rgen (select regcode-types rgen))

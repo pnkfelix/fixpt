@@ -5,7 +5,7 @@
 
 ;; What its clients use of it (`check-program.fx`).
 ;; The types it names, from the files that define them.
-(define check-types-types (load-module "fx26:check-types-types.fx"))
+(hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type k-eff (select check-types-types k-eff))
 (define-type k-te (select check-types-types k-te))
 (define-type kx (select check-types-types kx))

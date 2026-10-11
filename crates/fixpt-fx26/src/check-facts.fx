@@ -18,13 +18,7 @@
     (module
 
 ;; The types it uses of the files before it.
-(define-type k-branch-facts (select check-test-facts-types k-branch-facts))
-(define-type k-fact-list (select check-test-facts-types k-fact-list))
-(define-effect kreads (select check-types-types kreads))
-(define-type kx (select check-types-types kx))
-(define x-app (with check-types-types x-app))
-(define x-const (with check-types-types x-const))
-(define x-if (with check-types-types x-if))
+(hide (include check-test-facts-types) (include check-types-types))
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-env) (include check-test-facts) (include check-binders) (include check-calls))
 

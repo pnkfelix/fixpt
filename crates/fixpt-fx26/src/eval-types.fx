@@ -4,7 +4,7 @@
 ;;; modules as the others use them.
 
 ;; The checker's types it uses.
-(define check-types-types (load-module "fx26:check-types-types.fx"))
+(hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type k-ids (select check-types-types k-ids))
 (define-type k-names (select check-types-types k-names))
 

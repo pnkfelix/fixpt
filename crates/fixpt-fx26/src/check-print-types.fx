@@ -3,9 +3,9 @@
 ;;; items in the order they were there.
 
 ;; The types these use, from the files that define them.
-(define check-types-types (load-module "fx26:check-types-types.fx"))
+(hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type k-strings (select check-types-types k-strings))
-(define check-env-types (load-module "fx26:check-env-types.fx"))
+(hide (define check-env-types (load-module "fx26:check-env-types.fx")))
 (define-type k-scope (select check-env-types k-scope))
 (define-type k-ids (select check-types-types k-ids))
 (define-type k-parts (select check-types-types k-parts))

@@ -3,9 +3,9 @@
 ;;; items in the order they were there.
 
 ;; The types these use, from the files that define them.
-(define compile-exps-types (load-module "fx26:compile-exps-types.fx"))
+(hide (define compile-exps-types (load-module "fx26:compile-exps-types.fx")))
 (define-type c-inlinables (select compile-exps-types c-inlinables))
-(define regcode-types (load-module "fx26:regcode-types.fx"))
+(hide (define regcode-types (load-module "fx26:regcode-types.fx")))
 (define-type r-member-const (select regcode-types r-member-const))
 (define-type r-module-const (select regcode-types r-module-const))
 (define-type rconst (select regcode-types rconst))

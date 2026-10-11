@@ -3,14 +3,14 @@
 ;;; items in the order they were there.
 
 ;; The types these use, from the files that define them.
-(define compile-exps-types (load-module "fx26:compile-exps-types.fx"))
+(hide (define compile-exps-types (load-module "fx26:compile-exps-types.fx")))
 (define-type c-inline (select compile-exps-types c-inline))
-(define compile-types (load-module "fx26:compile-types.fx"))
+(hide (define compile-types (load-module "fx26:compile-types.fx")))
 (define-type c-params (select compile-types c-params))
 (define-type syms (select compile-types syms))
-(define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
+(hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type exp (select parser-types exp))
-(define table-types (load-module "fx26:table-types.fx"))
+(hide (define table-types (load-module "fx26:table-types.fx")))
 (define-type table (select table-types table))
 ;; A global procedure whose parameter (6) is only called, with (7)
 ;; arguments, or passed as itself to a call of the procedure: a call with a

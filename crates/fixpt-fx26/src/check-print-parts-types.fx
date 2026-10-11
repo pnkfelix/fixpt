@@ -12,12 +12,12 @@
 ;; `check-subst.fx`, `check-subtype.fx`, `check-syntax.fx`, `check-synth.fx`,
 ;; `check-test-facts.fx`).
 ;; The types it names, from the files that define them.
-(define check-types-types (load-module "fx26:check-types-types.fx"))
+(hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type k-atom (select check-types-types k-atom))
 (define-type k-conv (select check-types-types k-conv))
 (define-type k-eff (select check-types-types k-eff))
 (define-type k-map (select check-types-types k-map))
-(define check-print-types (load-module "fx26:check-print-types.fx"))
+(hide (define check-print-types (load-module "fx26:check-print-types.fx")))
 (define-type k-printing (select check-print-types k-printing))
 (define-type k-region (select check-types-types k-region))
 (define-type k-size (select check-types-types k-size))
@@ -30,7 +30,7 @@
 (define-type k-ids (select check-types-types k-ids))
 (define-type k-parts (select check-types-types k-parts))
 (define-type k-props (select check-types-types k-props))
-(define check-env-types (load-module "fx26:check-env-types.fx"))
+(hide (define check-env-types (load-module "fx26:check-env-types.fx")))
 (define-type k-scope (select check-env-types k-scope))
 (define-type k-strings (select check-types-types k-strings))
 (define-type check-print-parts-sig

@@ -3,12 +3,12 @@
 ;;; items in the order they were there.
 
 ;; The types these use, from the files that define them.
-(define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
+(hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type exp (select parser-types exp))
 (define-type names (select parser-types names))
 (define-type syn (select parser-types syn))
 (define-type top (select parser-types top))
-(define check-types-types (load-module "fx26:check-types-types.fx"))
+(hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type k-eff (select check-types-types k-eff))
 (define-type k-ids (select check-types-types k-ids))
 (define-type k-names (select check-types-types k-names))
@@ -56,7 +56,7 @@
 ;; The types it names, from the files that define them.
 (define-type k-items (select check-types-types k-items))
 ;; The types it names, from the files that define them.
-(define check-subst-types (load-module "fx26:check-subst-types.fx"))
+(hide (define check-subst-types (load-module "fx26:check-subst-types.fx")))
 (define-type k-pairs (select check-subst-types k-pairs))
 ;; The types it names, from the files that define them.
 (define-type k-hyps (select check-types-types k-hyps))

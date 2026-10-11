@@ -2,14 +2,14 @@
 ;;; clients use it (`TODO.md` §68): a module file of no state.
 
 ;; The types these use, from the files that define them.
-(define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
+(hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type exp (select parser-types exp))
 (define-type syn (select parser-types syn))
 (define-type top (select parser-types top))
-(define check-resolve-types (load-module "fx26:check-resolve-types.fx"))
+(hide (define check-resolve-types (load-module "fx26:check-resolve-types.fx")))
 (define-type k-def (select check-resolve-types k-def))
 (define-type k-run (select check-resolve-types k-run))
-(define check-types-types (load-module "fx26:check-types-types.fx"))
+(hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type k-names (select check-types-types k-names))
 (define-type kx (select check-types-types kx))
 (define-type k-out (listof string acyclic))

@@ -3,14 +3,14 @@
 ;;; items in the order they were there.
 
 ;; The types these use, from the files that define them.
-(define check-types-types (load-module "fx26:check-types-types.fx"))
+(hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-effect checks (select check-types-types checks))
 (define-type k-eff (select check-types-types k-eff))
 (define-type k-hyps (select check-types-types k-hyps))
 (define-type k-te (select check-types-types k-te))
 (define-type k-ty (select check-types-types k-ty))
 (define-effect kstate (select check-types-types kstate))
-(define check-subst-types (load-module "fx26:check-subst-types.fx"))
+(hide (define check-subst-types (load-module "fx26:check-subst-types.fx")))
 (define-type k-pairs (select check-subst-types k-pairs))
 (define-type k-trail (ref k-pairs @t))
 ;; A subtype question's binder environment, for one side: each `poly`

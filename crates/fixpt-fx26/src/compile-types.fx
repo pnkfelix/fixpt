@@ -3,14 +3,14 @@
 ;;; items in the order they were there.
 
 ;; The types these use, from the files that define them.
-(define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
+(hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type exp (select parser-types exp))
 (define-type names (select parser-types names))
 (define-type syn (select parser-types syn))
 (define-type syns-a (select parser-types syns-a))
-(define check-env-types (load-module "fx26:check-env-types.fx"))
+(hide (define check-env-types (load-module "fx26:check-env-types.fx")))
 (define-type k-with-list (select check-env-types k-with-list))
-(define table-types (load-module "fx26:table-types.fx"))
+(hide (define table-types (load-module "fx26:table-types.fx")))
 (define-type table (select table-types table))
 ;; What looking at the trees and the compiler's state may do: build lists
 ;; on @k (and, walking the trees, spin); and adding to code.
@@ -119,7 +119,7 @@
 ;; The types it names, from the files that define them.
 (define-type k-facts (select check-env-types k-facts))
 ;; The types it names, from the files that define them.
-(define check-types-types (load-module "fx26:check-types-types.fx"))
+(hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type k-ids (select check-types-types k-ids))
 (define-type compile-sig
   (moduleof (val c-frozen-define-at

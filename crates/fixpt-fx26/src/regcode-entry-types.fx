@@ -3,7 +3,7 @@
 ;;; items in the order they were there.
 
 ;; The types these use, from the files that define them.
-(define regcode-types (load-module "fx26:regcode-types.fx"))
+(hide (define regcode-types (load-module "fx26:regcode-types.fx")))
 (define-type rgen (select regcode-types rgen))
 ;; A top-level definition's name and word, in a list (`c-own-now`).
 (define-type rowner (listof (productof (1 symbol) (2 tword)) @k))
@@ -14,11 +14,11 @@
 
 ;; What its clients use of it (`compile-twins.fx`).
 ;; The types it names, from the files that define them.
-(define compile-types (load-module "fx26:compile-types.fx"))
+(hide (define compile-types (load-module "fx26:compile-types.fx")))
 (define-type cenv (select compile-types cenv))
-(define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
+(hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type exp (select parser-types exp))
-(define check-subst-types (load-module "fx26:check-subst-types.fx"))
+(hide (define check-subst-types (load-module "fx26:check-subst-types.fx")))
 (define-type exp-params (select check-subst-types exp-params))
 (define-type rthis (select regcode-types rthis))
 (define-type wcells (select regcode-types wcells))

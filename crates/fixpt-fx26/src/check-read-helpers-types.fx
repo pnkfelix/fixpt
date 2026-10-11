@@ -7,7 +7,7 @@
 ;; `check-kinds.fx`, `check-module-rules.fx`, `check-modules.fx`,
 ;; `check-rules.fx`).
 ;; The types it names, from the files that define them.
-(define check-types-types (load-module "fx26:check-types-types.fx"))
+(hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type k-binders (select check-types-types k-binders))
 (define-type k-desc (select check-types-types k-desc))
 (define-type k-descs (select check-types-types k-descs))
@@ -15,13 +15,13 @@
 (define-type k-parts (select check-types-types k-parts))
 ;; The types it names, from the files that define them.
 (define-type k-names (select check-types-types k-names))
-(define check-read-types (load-module "fx26:check-read-types.fx"))
+(hide (define check-read-types (load-module "fx26:check-read-types.fx")))
 (define-type k-params (select check-read-types k-params))
-(define check-env-types (load-module "fx26:check-env-types.fx"))
+(hide (define check-env-types (load-module "fx26:check-env-types.fx")))
 (define-type k-scope (select check-env-types k-scope))
 (define-type k-selects (select check-env-types k-selects))
 (define-type k-syns (select check-read-types k-syns))
-(define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
+(hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type syn (select parser-types syn))
 (define-type k-region (select check-types-types k-region))
 (define-type k-te (select check-types-types k-te))

@@ -3,7 +3,7 @@
 ;;; items in the order they were there.
 
 ;; The types these use, from the files that define them.
-(define check-types-types (load-module "fx26:check-types-types.fx"))
+(hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type k-binders (select check-types-types k-binders))
 (define-type k-map (select check-types-types k-map))
 (define-type k-solved (ref k-map @t))
@@ -16,12 +16,12 @@
 
 ;; What its clients use of it (`check-proofs.fx`).
 ;; The types it names, from the files that define them.
-(define check-resolve-types (load-module "fx26:check-resolve-types.fx"))
+(hide (define check-resolve-types (load-module "fx26:check-resolve-types.fx")))
 (define-type k-let-bs (select check-resolve-types k-let-bs))
 (define-type k-parts (select check-types-types k-parts))
 ;; The types it names, from the files that define them.
 (define-type k-arms (select check-resolve-types k-arms))
-(define check-env-types (load-module "fx26:check-env-types.fx"))
+(hide (define check-env-types (load-module "fx26:check-env-types.fx")))
 (define-type k-bindings (select check-env-types k-bindings))
 (define-type k-eff (select check-types-types k-eff))
 (define-type k-ids (select check-types-types k-ids))
@@ -32,7 +32,7 @@
 (define-type kxs (select check-types-types kxs))
 ;; The types it names, from the files that define them.
 (define-type k-named (select check-types-types k-named))
-(define check-subtype-types (load-module "fx26:check-subtype-types.fx"))
+(hide (define check-subtype-types (load-module "fx26:check-subtype-types.fx")))
 (define-type k-trail (select check-subtype-types k-trail))
 (define-type check-infer-sig
   (moduleof (val k-same-labels?

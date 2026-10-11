@@ -6,7 +6,7 @@
 
 (module-parameters ((rs region) (re region) (rm region) (rc region) (rp region)))
 ;; The reader's types, at these regions, and what these use of them.
-(define reader-types ((proj (load-module "fx26:eager-reader-types.fx") rs re rm rc)))
+(hide (define reader-types ((proj (load-module "fx26:eager-reader-types.fx") rs re rm rc))))
 (define-type syn (select reader-types syn))
 
 ;; What a parse may do: read what was read and build a tree

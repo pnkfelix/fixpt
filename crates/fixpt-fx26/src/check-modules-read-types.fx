@@ -6,11 +6,11 @@
 ;; What its clients use of it (`check-program.fx`, `check-proofs.fx`,
 ;; `check-rules.fx`).
 ;; The types it names, from the files that define them.
-(define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
+(hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type exp (select parser-types exp))
-(define check-types-types (load-module "fx26:check-types-types.fx"))
+(hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type k-binders (select check-types-types k-binders))
-(define check-modules-types (load-module "fx26:check-modules-types.fx"))
+(hide (define check-modules-types (load-module "fx26:check-modules-types.fx")))
 (define-type k-thunk-unit (select check-modules-types k-thunk-unit))
 (define-type kx (select check-types-types kx))
 (define-type check-modules-read-sig
