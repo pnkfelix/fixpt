@@ -76,6 +76,7 @@ fn what_no_encoder_makes_is_a_word() {
 /// Every instruction a native machine makes reads as one: its own code,
 /// and the code of words it compiles.
 #[test]
+#[cfg_attr(not(target_arch = "aarch64"), ignore = "maps a machine of arm64 code")]
 fn everything_the_native_machine_makes_reads_back() {
     use fixpt_engine::cellular::examples;
     use fixpt_heap::Heap;

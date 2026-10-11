@@ -1,7 +1,8 @@
 //! The encoder is ours; the system assembler is only the oracle here. Every
 //! encoding in `arm64.rs` is checked against it: each
 //! instruction is written out as assembly text, assembled by `as`, and the
-//! word it produced compared with the encoder's.
+//! word it produced compared with the encoder's. On Linux, binutils for
+//! arm64: on another machine, the cross ones (`aarch64-linux-gnu-as`).
 
 use fixpt_native::arm64::*;
 
@@ -16,18 +17,39 @@ fn assemble(lines: &[String]) -> Vec<u32> {
     let obj = dir.join("t.o");
     let text = format!(".text\n.p2align 2\n{}\n", lines.join("\n"));
     std::fs::write(&src, text).expect("writes");
-    let out = std::process::Command::new("as")
-        .args(["-arch", "arm64", "-o"])
+    if cfg!(target_os = "macos") {
+        let out = std::process::Command::new("as")
+            .args(["-arch", "arm64", "-o"])
+            .arg(&obj)
+            .arg(&src)
+            .output()
+            .expect("runs as");
+        assert!(out.status.success(), "as failed: {}", String::from_utf8_lossy(&out.stderr));
+        let dump = std::process::Command::new("otool").args(["-t", "-X"]).arg(&obj).output().expect("runs otool");
+        let text = String::from_utf8_lossy(&dump.stdout);
+        return text
+            .lines()
+            .flat_map(|l| l.split_whitespace().skip(1).map(|w| u32::from_str_radix(w, 16).expect("hex word")).collect::<Vec<_>>())
+            .collect();
+    }
+    // Elsewhere GNU binutils: the host's own on arm64, else the cross ones.
+    let prefix = if cfg!(target_arch = "aarch64") { "" } else { "aarch64-linux-gnu-" };
+    let out = std::process::Command::new(format!("{prefix}as"))
+        .arg("-o")
         .arg(&obj)
         .arg(&src)
         .output()
-        .expect("runs as");
-    assert!(out.status.success(), "as failed: {}", String::from_utf8_lossy(&out.stderr));
-    let dump = std::process::Command::new("otool").args(["-t", "-X"]).arg(&obj).output().expect("runs otool");
-    let text = String::from_utf8_lossy(&dump.stdout);
-    text.lines()
-        .flat_map(|l| l.split_whitespace().skip(1).map(|w| u32::from_str_radix(w, 16).expect("hex word")).collect::<Vec<_>>())
-        .collect()
+        .unwrap_or_else(|e| panic!("runs {prefix}as (binutils for arm64): {e}"));
+    assert!(out.status.success(), "{prefix}as failed: {}", String::from_utf8_lossy(&out.stderr));
+    let bin = dir.join("t.bin");
+    let out = std::process::Command::new(format!("{prefix}objcopy"))
+        .args(["-O", "binary", "--only-section=.text"])
+        .arg(&obj)
+        .arg(&bin)
+        .output()
+        .unwrap_or_else(|e| panic!("runs {prefix}objcopy: {e}"));
+    assert!(out.status.success(), "{prefix}objcopy failed: {}", String::from_utf8_lossy(&out.stderr));
+    std::fs::read(&bin).expect("reads").chunks(4).map(|w| u32::from_le_bytes(w.try_into().expect("a word"))).collect()
 }
 
 #[test]

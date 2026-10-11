@@ -1,0 +1,5 @@
+[env]
+# Room for the checker's recursion on a test thread (whose stack is 2 MiB
+# otherwise): a debug build's frames on x86_64 are larger than on arm64, and
+# the deepest programs outgrow it there.
+RUST_MIN_STACK = "8388608"

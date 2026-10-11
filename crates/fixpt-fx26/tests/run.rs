@@ -219,7 +219,9 @@ fn cellular_forms_stop_at_the_step_limit() {
         fixpt_native::cellular::run_word,
         fixpt_native::cellular::run_word_registers,
     ];
-    for (name, i, m) in ["spin", "resume"].into_iter().flat_map(|n| machines.into_iter().enumerate().map(move |(i, m)| (n, i, m))) {
+    // Only the first where arm64 code cannot run.
+    let machines = &machines[..if fixpt_native::AVAILABLE { machines.len() } else { 1 }];
+    for (name, i, m) in ["spin", "resume"].into_iter().flat_map(|n| machines.iter().copied().enumerate().map(move |(i, m)| (n, i, m))) {
         let text = std::fs::read_to_string(format!("{}/tests/programs/diverge/{name}.fx", env!("CARGO_MANIFEST_DIR"))).unwrap();
         let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
         s.strategy = fixpt_fx26::session::Strategy::Cellular;

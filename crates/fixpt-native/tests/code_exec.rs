@@ -1,6 +1,9 @@
 //! Code in the heap's code area (`docs/object-model.md`, "A collected code
 //! area"), run from its read+execute view: it reaches GC-traced fields of
 //! its own bloblet PC-relatively, and the collector keeps them current.
+//!
+//! Only where arm64 code runs: every test here runs some.
+#![cfg(target_arch = "aarch64")]
 #![allow(unsafe_code)]
 
 use fixpt_heap::{Heap, Value, layout};

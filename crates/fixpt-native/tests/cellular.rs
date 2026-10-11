@@ -2,6 +2,9 @@
 //! words: the same results, and the same traps. "Native" is the hand-encoded
 //! machine and the stencil machine at every optimisation level it was built
 //! at.
+//!
+//! Only where arm64 code runs: every test here runs some.
+#![cfg(target_arch = "aarch64")]
 
 use fixpt_engine::cellular::{Machine, Trap, WordBuilder, examples, prim, primitive_word};
 use fixpt_heap::layout::cellular::WORD_NAME;

@@ -22,3 +22,11 @@ pub mod cellular;
 pub mod direct;
 
 pub use codespace::CodeSpace;
+
+/// Whether this machine can run what this crate makes: arm64 code. Where it
+/// cannot, a code space cannot be made, and so neither can any machine here;
+/// the encoder and disassembler work anywhere.
+pub const AVAILABLE: bool = cfg!(target_arch = "aarch64");
+
+/// What to say where [`AVAILABLE`] is false.
+pub const UNAVAILABLE: &str = "this runs arm64 machine code, and this machine is not arm64";

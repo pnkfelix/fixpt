@@ -1,4 +1,7 @@
 //! Code written through one view and run through the other.
+//!
+//! Only where arm64 code runs: every test here runs some.
+#![cfg(target_arch = "aarch64")]
 #![allow(unsafe_code)]
 
 use fixpt_native::CodeSpace;

@@ -14,27 +14,6 @@
 
 use std::io;
 
-unsafe extern "C" {
-    fn sys_icache_invalidate(start: *mut libc::c_void, len: usize);
-    fn mach_task_self() -> libc::mach_port_t;
-    fn mach_vm_remap(
-        target: libc::mach_port_t,
-        target_addr: *mut u64,
-        size: u64,
-        mask: u64,
-        flags: libc::c_int,
-        src_task: libc::mach_port_t,
-        src_addr: u64,
-        copy: libc::boolean_t,
-        cur: *mut libc::c_int,
-        max: *mut libc::c_int,
-        inherit: libc::c_uint,
-    ) -> libc::c_int;
-}
-
-const VM_FLAGS_ANYWHERE: libc::c_int = 1;
-const VM_INHERIT_SHARE: libc::c_uint = 1;
-
 /// An offset into a code space. The same offset names a byte in both views.
 pub type Offset = usize;
 
@@ -55,7 +34,11 @@ fn page() -> usize {
 
 impl CodeSpace {
     /// Map a space of at least `bytes` bytes, rounded up to whole pages.
+    /// The code is arm64, so on any other machine there is no space to map.
     pub fn new(bytes: usize) -> io::Result<CodeSpace> {
+        if !cfg!(target_arch = "aarch64") {
+            return Err(io::Error::new(io::ErrorKind::Unsupported, "machine code here is arm64, and this machine is not"));
+        }
         let p = page();
         let size = bytes.max(1).div_ceil(p) * p;
         // SAFETY: a fresh anonymous shared mapping; nothing else refers to it.
@@ -72,41 +55,15 @@ impl CodeSpace {
         if rw == libc::MAP_FAILED {
             return Err(io::Error::last_os_error());
         }
-        let mut alias: u64 = 0;
-        let (mut cur, mut max) = (0, 0);
-        // SAFETY: remaps the mapping just made, into a fresh address chosen by
-        // the kernel (VM_FLAGS_ANYWHERE), sharing the same pages.
-        let kr = unsafe {
-            mach_vm_remap(
-                mach_task_self(),
-                &mut alias,
-                size as u64,
-                0,
-                VM_FLAGS_ANYWHERE,
-                mach_task_self(),
-                rw as u64,
-                0,
-                &mut cur,
-                &mut max,
-                VM_INHERIT_SHARE,
-            )
-        };
-        if kr != 0 {
-            // SAFETY: unmapping what was mapped above.
-            unsafe { libc::munmap(rw, size) };
-            return Err(io::Error::other(format!("mach_vm_remap failed: {kr}")));
-        }
-        // SAFETY: `alias` is the mapping just made, `size` long.
-        let r = unsafe { libc::mprotect(alias as *mut _, size, libc::PROT_READ | libc::PROT_EXEC) };
-        if r != 0 {
-            let e = io::Error::last_os_error();
-            // SAFETY: unmapping both views made above.
-            unsafe {
-                libc::munmap(alias as *mut _, size);
-                libc::munmap(rw, size);
+        // SAFETY: `rw` is the shared mapping just made, whole pages.
+        let alias = match unsafe { fixpt_memmgmt::exec::map_exec_alias(rw, size) } {
+            Ok(a) => a,
+            Err(e) => {
+                // SAFETY: unmapping what was mapped above.
+                unsafe { libc::munmap(rw, size) };
+                return Err(e);
             }
-            return Err(e);
-        }
+        };
         Ok(CodeSpace { rw: rw as *mut u8, rx: alias as *const u8, size, top: 0 })
     }
 
@@ -186,7 +143,7 @@ impl CodeSpace {
     pub fn flush(&self, at: Offset, len: usize) {
         self.check(at, len);
         // SAFETY: the range is inside the RX view.
-        unsafe { sys_icache_invalidate(self.rx.add(at) as *mut _, len) };
+        unsafe { fixpt_memmgmt::exec::flush_icache(self.rx.add(at) as *mut _, len) };
     }
 
     /// The address `at` has in the executable view: what a branch, a return

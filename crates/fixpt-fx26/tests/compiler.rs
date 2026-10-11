@@ -102,6 +102,7 @@ fn every_program_compiled() {
 /// Control, and everything else a native machine has no code for, runs
 /// there through the Rust machine (the round trip).
 #[test]
+#[cfg_attr(not(target_arch = "aarch64"), ignore = "runs arm64 machine code")]
 fn every_program_on_every_machine() {
     type Run = fn(&mut fixpt_runtime::Runtime, fixpt_heap::Value, &[fixpt_heap::Value]) -> Result<fixpt_heap::Value, String>;
     // Each: its name, its machine, whether the compiler makes register

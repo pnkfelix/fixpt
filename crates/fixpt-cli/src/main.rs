@@ -72,7 +72,8 @@ options:
                                  convention (cellcc: inside the cellular
                                  machine; nativecc: native procedures):
     fx-regs-rsjit-nativecc       the default, also `fast`: register code,
-                                 compiled to arm64 by Rust (direct.rs)
+                                 compiled to arm64 by Rust (direct.rs); where
+                                 arm64 code cannot run, fx-cells-rsinterp
     rs-scheme-vm                 lowered to Scheme by Rust, on the bytecode VM
     fx-ast-eval                  the evaluator written in FX-26
     fx-cells-rsinterp            cellular words, interpreted by Rust
@@ -207,7 +208,7 @@ fn run(args: &[String]) -> i32 {
         (None, false) => Some("fast".to_string()),
     };
     if let Some(m) = named {
-        let Some((run, machine, convention)) = FX26_MACHINES.iter().find(|(n, ..)| *n == m || (m == "fast" && *n == "fx-regs-rsjit-nativecc")).map(|(_, r, c, v, _)| (*r, *c, *v))
+        let Some((run, machine, convention)) = FX26_MACHINES.iter().find(|(n, ..)| *n == m || (m == "fast" && *n == FASTEST)).map(|(_, r, c, v, _)| (*r, *c, *v))
         else {
             let names: Vec<&str> = FX26_MACHINES.iter().map(|(n, ..)| *n).collect();
             eprintln!("fixpt: unknown --fx26-machine `{m}` (want fast, or one of {})", names.join(", "));
@@ -269,6 +270,17 @@ fn run(args: &[String]) -> i32 {
             None => format!("--fx26-run {} --cellular-machine {} --calling-convention {}", parts.0, parts.1.unwrap_or("rust"), parts.2.unwrap_or("cellular")),
         },
     );
+    // The machines that run arm64 code, refused where that cannot run.
+    if !fixpt_native::AVAILABLE {
+        let machine = flags.cellular_machine.as_deref().filter(|m| *m != "rust").map(|m| ("--cellular-machine", m));
+        let convention = flags.calling_convention.as_deref().filter(|c| *c == "native").map(|c| ("--calling-convention", c));
+        if let Some((flag, value)) = machine.or(convention)
+            && ["native", "native-compiled", "fx-compiled", "stencils", "registers"].contains(&value)
+        {
+            eprintln!("fixpt: `{flag} {value}`: {}", fixpt_native::UNAVAILABLE);
+            return 2;
+        }
+    }
     let machine: fixpt_runtime::RunWord = match flags.cellular_machine.as_deref() {
         None | Some("rust") => fixpt_engine::cellular::run_word,
         Some("native") => fixpt_native::cellular::run_word,
@@ -511,7 +523,7 @@ struct Flags {
 /// generates the code (`rs` Rust, `fx` FX-26), what code (Scheme, the
 /// checked tree, cellular words, register code), and what runs it; then
 /// the parts' options they stand for, and what each is, for the help and
-/// the REPL. `fast` is `fx-regs-rsjit-nativecc`.
+/// the REPL. `fast` is `FASTEST`.
 pub(crate) const FX26_MACHINES: [(&str, &str, Option<&str>, Option<&str>, &str); 9] = [
     ("rs-scheme-vm", "lower", None, None, "lowered to Scheme by Rust, run on the bytecode VM"),
     ("fx-ast-eval", "evaluate", None, None, "run by the evaluator written in FX-26"),
@@ -529,6 +541,10 @@ pub(crate) const FX26_MACHINES: [(&str, &str, Option<&str>, Option<&str>, &str);
         "register code, compiled to arm64 by Rust's direct.rs, native calls",
     ),
 ];
+/// The machine `fast` names: `fx-regs-rsjit-nativecc`, or, where arm64 code
+/// cannot run, `fx-cells-rsinterp`, faster than `rs-scheme-vm` on each of
+/// `fixpt bench`'s programs (x86_64 Linux, 2026-10-11).
+pub(crate) const FASTEST: &str = if fixpt_native::AVAILABLE { "fx-regs-rsjit-nativecc" } else { "fx-cells-rsinterp" };
 /// The FX-26 machine this process runs, by name (`FX26_MACHINES`), or the
 /// parts given one by one where they name none.
 pub(crate) static FX26_MACHINE_NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
@@ -546,6 +562,13 @@ pub(crate) static CELLULAR_MACHINE_CODE: std::sync::OnceLock<Option<fixpt_runtim
 pub(crate) static CELLULAR_MACHINE_NAME: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
 /// `--calling-convention native`, for every FX-26 session this process
 /// starts.
+/// The machine for register code, where the front end runs: the hand
+/// register machine, or where that cannot run (not arm64), the cellular
+/// machine written in Rust.
+pub(crate) fn register_machine() -> fixpt_runtime::RunWord {
+    if fixpt_native::AVAILABLE { fixpt_native::cellular::run_word_registers } else { fixpt_engine::cellular::run_word }
+}
+
 pub(crate) static NATIVE_CONVENTION: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 /// `--emacs`: the REPL as Emacs drives it (`editors/emacs/fx26-mode.el`).
 pub(crate) static EMACS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();

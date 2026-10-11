@@ -357,7 +357,7 @@ fn survey(text: &str, propagate: bool, show: Option<String>) -> Result<Found, St
             comp.registers = true;
             comp.program(&tops).unwrap_or(Value::FALSE)
         });
-        sc.runtime_unrooted().run_word = Some(fixpt_native::cellular::run_word_registers);
+        sc.runtime_unrooted().run_word = Some(crate::register_machine());
         let none = sc.make(|_| Value::NULL);
         sc.call_global("%run-word", &[w, none]).map_err(|e| e.to_string())?;
         sc.make(|m| {

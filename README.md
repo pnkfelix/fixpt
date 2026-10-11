@@ -14,6 +14,18 @@ See [`PLAN.md`](PLAN.md) for the design and the milestone list,
 [`docs/divergences.md`](docs/divergences.md) for every intentional difference
 from the references.
 
+## Platforms
+
+It builds and runs on macOS and Linux. The machines that run machine code
+(`fixpt-native`: `hand`, `stencils`, `compiled`, `registers`, `native` below,
+and `--calling-convention native`) make arm64 code, so they run only on arm64,
+macOS or Linux. Elsewhere (x86_64), FX-26 runs lowered, by the evaluator, or
+on the cellular machine written in Rust, which also runs the front end; the
+arm64 options are refused, saying why, `fixpt bench` leaves their columns out,
+and the tests that run arm64 code are ignored. The arm64 encoder's test
+assembles with the system's `as` on macOS, and with binutils for arm64 on Linux
+(`aarch64-linux-gnu-as` on another machine).
+
 ## Reading a `fixpt bench` table
 
 Commit messages carry two tables from `fixpt bench`: how long FX-26

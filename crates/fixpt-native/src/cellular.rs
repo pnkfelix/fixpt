@@ -2219,6 +2219,9 @@ pub fn run_word(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]) ->
 
 /// The same, compiling or not as `compile` says.
 pub fn run_word_as(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value], compile: bool) -> Result<Value, String> {
+    if !crate::AVAILABLE {
+        return Err(crate::UNAVAILABLE.into());
+    }
     MACHINE.with(|m| {
         // A run within a run (a primitive running a word) gets a machine
         // of its own, which compiles nothing.
@@ -2258,6 +2261,9 @@ fn collect_for_code(m: &mut NativeMachine, rt: &mut fixpt_runtime::Runtime, word
 /// [`run_word`], compiling what it runs, and running as register code
 /// (PLAN.md 13h′) each word that has some.
 pub fn run_word_registers(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]) -> Result<Value, String> {
+    if !crate::AVAILABLE {
+        return Err(crate::UNAVAILABLE.into());
+    }
     MACHINE.with(|m| {
         let Ok(mut m) = m.try_borrow_mut() else {
             let out = NativeMachine::new().run_in_runtime(rt, word, args, u64::MAX).map_err(|t| t.to_string());
@@ -2290,6 +2296,9 @@ pub fn with_machine<R>(f: impl FnOnce(&mut NativeMachine) -> R) -> R {
 /// this thread: the runtime's `place_code`. The code reaches the machine's
 /// common trap and exit through the state, so it may go anywhere.
 pub fn place_word(heap: &mut Heap, word: Value, code: &[u32], starts: &[i64]) -> Result<(), String> {
+    if !crate::AVAILABLE {
+        return Err(crate::UNAVAILABLE.into());
+    }
     with_machine(|m| {
         let (at, _) = m.reserve(code.len())?;
         m.install(heap, word, at, code, starts)

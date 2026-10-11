@@ -2,6 +2,9 @@
 //! "A collected code area"): a program that generates words, compiles them
 //! to machine code, runs them and drops them, over and over, must not run
 //! out of room for code, however long it goes on.
+//!
+//! Only where arm64 code runs: every test here runs some.
+#![cfg(target_arch = "aarch64")]
 
 use fixpt_engine::cellular::WordBuilder;
 use fixpt_heap::Value;

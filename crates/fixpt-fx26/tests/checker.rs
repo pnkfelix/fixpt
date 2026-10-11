@@ -238,7 +238,10 @@ fn the_front_end_compiled_checks_alike() {
     let programs = ["run/recursion.fx", "sizes/solved-by-test.fx", "sizes/solved-negative.fx", "native/many-values.fx"];
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     s.front_end_compiled = true;
-    s.scheme.runtime_unrooted().front_end_run_word = Some(fixpt_native::cellular::run_word_registers);
+    // On the hand register machine; where arm64 code cannot run, on the
+    // Rust one.
+    s.scheme.runtime_unrooted().front_end_run_word =
+        Some(if fixpt_native::AVAILABLE { fixpt_native::cellular::run_word_registers } else { fixpt_engine::cellular::run_word });
     for p in programs {
         let text = std::fs::read_to_string(format!("{dir}/{p}")).unwrap();
         let compiled = canon(fx26_check_in(&mut s, &text).expect("parses"));

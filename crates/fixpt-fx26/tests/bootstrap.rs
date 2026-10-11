@@ -98,13 +98,15 @@ use common::same_code;
 #[test]
 #[cfg_attr(not(optimized), ignore = "4 s in release, 7 minutes in debug: run with --release, or --ignored")]
 fn fixpoint() {
-    fixpoint_on(fixpt_native::cellular::run_word);
+    // Where arm64 code cannot run, on the machine written in Rust.
+    fixpoint_on(if fixpt_native::AVAILABLE { fixpt_native::cellular::run_word } else { fixpt_engine::cellular::run_word });
 }
 
 /// The same, with stage 2's words compiled to machine code (step 11a) as
 /// they run: it must make the same code.
 #[test]
-#[cfg_attr(not(optimized), ignore = "4 s in release, 7 minutes in debug: run with --release, or --ignored")]
+#[cfg_attr(all(not(optimized), target_arch = "aarch64"), ignore = "4 s in release, 7 minutes in debug: run with --release, or --ignored")]
+#[cfg_attr(not(target_arch = "aarch64"), ignore = "runs arm64 machine code")]
 fn fixpoint_with_words_compiled() {
     fixpoint_on(fixpt_native::cellular::run_word_compiled);
 }
@@ -118,7 +120,9 @@ fn fixpoint_as_register_code() {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     load_eager_reader(&mut s.scheme).expect("loads");
     s.scheme.engine.set_step_limit(None);
-    s.scheme.runtime_unrooted().run_word = Some(fixpt_native::cellular::run_word_registers);
+    // Where arm64 code cannot run, register code on the machine written in Rust.
+    s.scheme.runtime_unrooted().run_word =
+        Some(if fixpt_native::AVAILABLE { fixpt_native::cellular::run_word_registers } else { fixpt_engine::cellular::run_word });
     if let Some(n) = std::env::var("FIXPT_GC_EVERY").ok().and_then(|n| n.parse().ok()) {
         s.scheme.set_gc_every(n);
     }
@@ -473,7 +477,8 @@ fn probe_read() {
 /// compiled and running on the native machine: stage 2 runs on code that
 /// FX-26 made, placed by the Rust side and nothing more (step 11c).
 #[test]
-#[cfg_attr(not(optimized), ignore = "seconds in release, minutes in debug: run with --release, or --ignored")]
+#[cfg_attr(all(not(optimized), target_arch = "aarch64"), ignore = "seconds in release, minutes in debug: run with --release, or --ignored")]
+#[cfg_attr(not(target_arch = "aarch64"), ignore = "runs arm64 machine code")]
 fn fixpoint_with_words_compiled_by_fx26() {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     load_eager_reader(&mut s.scheme).expect("loads");

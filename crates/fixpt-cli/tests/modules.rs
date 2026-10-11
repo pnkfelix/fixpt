@@ -74,6 +74,10 @@ fn module_programs_run_alike_in_every_mode() {
             if mode.contains(&"stencils") && !stencils {
                 continue;
             }
+            // Where machine code is not arm64, the modes that need none.
+            if !fixpt_native::AVAILABLE && mode.len() > 2 {
+                continue;
+            }
             runs.push((p, mode, want.clone(), forms.clone()));
         }
     }
@@ -104,6 +108,6 @@ fn module_programs_run_alike_in_every_mode() {
             .collect();
         handles.into_iter().flat_map(|h| h.join().expect("a run")).collect()
     });
-    assert!(runs.len() >= 32, "only {} runs", runs.len());
+    assert!(runs.len() >= if fixpt_native::AVAILABLE { 32 } else { 12 }, "only {} runs", runs.len());
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }

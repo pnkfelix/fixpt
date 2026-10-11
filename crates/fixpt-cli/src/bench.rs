@@ -120,6 +120,10 @@ pub fn command(args: &[String]) -> i32 {
     if fixpt_native::stencil::opt_levels().is_empty() {
         machines.retain(|m| *m != "rs-cells-stencils-cellcc");
     }
+    // Every machine but these runs arm64 code.
+    if !fixpt_native::AVAILABLE {
+        machines.retain(|m| ["rs-scheme-vm", "rs-cells-rsinterp"].contains(m));
+    }
     let mid_sized = files.is_empty();
     if files.is_empty() {
         let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixpt-fx26/tests/programs/bench");
@@ -473,7 +477,7 @@ fn fx_phase<T>(
 /// the REPL runs them.
 fn fx_session() -> Result<Fx26Session, String> {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).map_err(|e| e.message)?;
-    s.scheme.runtime_unrooted().front_end_run_word = Some(fixpt_native::cellular::run_word_registers);
+    s.scheme.runtime_unrooted().front_end_run_word = Some(crate::register_machine());
     s.front_end_compiled = true;
     s.load_own_pieces().map_err(|e| e.message)?;
     s.scheme.engine.set_step_limit(None);

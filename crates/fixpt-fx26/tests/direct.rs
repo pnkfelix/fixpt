@@ -2,6 +2,9 @@
 //! step 2; `fixpt_native::direct`): first-order procedures compiled from
 //! their register code, called by `bl`, on native frames, give what the
 //! Rust machine gives; what they cannot do they decline.
+//!
+//! Only where arm64 code runs: every test here runs some.
+#![cfg(target_arch = "aarch64")]
 
 use fixpt_engine::Backend;
 use fixpt_fx26::session::Fx26Session;

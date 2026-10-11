@@ -113,15 +113,18 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
     }
     // Cellular code calls native code (what the native compiler did not
     // decline, or an adapter), and a conversion makes adapters.
-    s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
-    s.scheme.runtime_unrooted().adapt = Some(fixpt_native::direct::adapt);
+    if fixpt_native::AVAILABLE {
+        s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
+        s.scheme.runtime_unrooted().adapt = Some(fixpt_native::direct::adapt);
+    }
     crate::apply_gc_policy(&mut s.scheme);
     if let Some(l) = crate::STEP_LIMIT.get() {
         s.set_step_limit(*l);
     }
     // The front end's checker and compilers as register code, on the hand
-    // register machine, whatever machine runs the program.
-    s.scheme.runtime_unrooted().front_end_run_word = Some(fixpt_native::cellular::run_word_registers);
+    // register machine, whatever machine runs the program. Where there is no
+    // native machine (not arm64), on the cellular machine written in Rust.
+    s.scheme.runtime_unrooted().front_end_run_word = Some(crate::register_machine());
     s.front_end_compiled = std::env::var_os("FIXPT_FRONT_END_LOWERED").is_none();
     if let Some(l) = crate::SPECULATION_STEP_LIMIT.get() {
         s.speculation_limit = *l;
