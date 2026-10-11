@@ -195,6 +195,11 @@ weighed with the other items, not ahead of them.
   loads deep is placed (§72's messages done, `DONE.md` §72). Asked for
   (2026-10-10), for §22's FX-26 library: §75, `string->int` and
   `string->number`; §76, Scheme's numeric tower, perhaps by functors.
+  Done (2026-10-11): §78, the FX-26 machines named by who makes the code,
+  what code, what runs it and the calling convention, the fastest
+  (`fx-regs-rsjit-nativecc`) the default; it showed §81, no register code
+  to machine code written in FX-26. Next, the user's order (2026-10-11):
+  §69's rest, then §77's native follow-ups.
   §77, suffix refs (tag `010`, interior pointers into bloblet suffixes):
   done (`DONE.md` §77), the runtime, the `flat` kind, `(blobref B F)`,
   flat products, arrays and sums, in every machine; next, a flat sum's
