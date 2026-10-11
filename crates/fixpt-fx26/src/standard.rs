@@ -462,7 +462,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
 
 /// The initial environment as text, for the checker written in FX-26:
 /// the standard generative types' declarations (`check::VSUBR`,
-/// `FLATLAYOUT`, `FLATARRAYOF`, `IDENTITY`, `EQTABLE`, `BLOBREF`: 0 to 5), `datum`'s
+/// `FLATLAYOUT`, `FLATARRAYOF`, `IDENTITY`, `EQTABLE`, `BLOBREF`, `FLAT_ARRAYOF`: 0 to 6), `datum`'s
 /// (`check::DATUM`), then `(name type)` for each binding.
 pub fn standard_text() -> String {
     let decl: String = [
@@ -472,6 +472,7 @@ pub fn standard_text() -> String {
         crate::check::IDENTITY,
         crate::check::EQTABLE,
         crate::check::BLOBREF,
+        crate::check::FLAT_ARRAYOF,
     ]
         .iter()
         .map(|d| format!("(define-generative {d})\n"))

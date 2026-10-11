@@ -26,7 +26,8 @@
        (check-terminate-types (load-module "fx26:check-terminate-types.fx"))
        (check-holds-types (load-module "fx26:check-holds-types.fx"))
        (check-calls-types (load-module "fx26:check-calls-types.fx"))
-       (check-subst-types (load-module "fx26:check-subst-types.fx")))
+       (check-subst-types (load-module "fx26:check-subst-types.fx"))
+       (check-read-helpers-types (load-module "fx26:check-read-helpers-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-types (select check-types-types check-types-sig))
            (check-test-facts (select check-test-facts-types check-test-facts-sig))
@@ -48,7 +49,8 @@
            (check-subst (select check-subst-types check-subst-sig))
            (check-binders (select check-binders-types check-binders-sig))
            (check-sub-env (select check-sub-env-types check-sub-env-sig))
-           (check-print-parts (select check-print-parts-types check-print-parts-sig)))
+           (check-print-parts (select check-print-parts-types check-print-parts-sig))
+           (check-read-helpers (select check-read-helpers-types check-read-helpers-sig)))
     (module
 (define-type k-types-eff (select check-synth-types k-types-eff))
 (define-type k-done (select check-synth-types k-done))
@@ -199,6 +201,14 @@
 (define k-fail-ty (with check-errors k-fail-ty))
 (define k-fail-ty-at (with check-errors k-fail-ty-at))
 (define k-fail-frozen (with check-errors k-fail-frozen))
+(define k-blobref-parts (with check-read-helpers k-blobref-parts))
+(define k-blobref-of (with check-read-helpers k-blobref-of))
+(define k-blobref-wanted (with check-read-helpers k-blobref-wanted))
+(define k-blobref-region (with check-read-helpers k-blobref-region))
+(define k-blobref-element (with check-read-helpers k-blobref-element))
+(define k-flat-field (with check-read-helpers k-flat-field))
+(define k-flat-array-parts (with check-read-helpers k-flat-array-parts))
+(define k-blobref-field int 1099511627776)
 (define k-handler-wants (with check-errors k-handler-wants))
 (define k-insert (with check-effects k-insert))
 (define k-region=? (with check-effects k-region=?))
@@ -875,53 +885,6 @@
                (k-fail-at (k-cat4 wants "; it is a " (k-show-ty ht) "") handler)))))))
 
 ;;; ------------------------------------------------------------ blobrefs
-;; `blobref`, standard generative type 5 (`check::BLOBREF_INDEX`).
-(define k-blobref-index int 5)
-;; A scalar flat's layout (`fixpt_heap::layout::FLAT_*`), or -1.
-(define k-flat-code (subr (read @globals) (symbol) int)
-  (lambda (s)
-    (case (symbol->string s)
-      (("i32") 0) (("u32") 1) (("i64") 2) (("u64") 3) (("f32") 4) (("f64") 5) (else -1))))
-;; `(blobref b f)`'s owner and flat, if `t` is one.
-(define-type k-owner-flat (listof (pairof int int @t) acyclic))
-(define k-blobref-parts (subr (maxeff kreads (alloc @t) spin) (int) k-owner-flat)
-  (lambda (t)
-    (tagcase (k-get (k-resolve t))
-      (ty-named (g ds)
-        (if (and (= g k-blobref-index) (= (k-length ds) 2))
-            (tagcase (car ds)
-              (dt (b) (tagcase (car (cdr ds)) (dt (f) (list (cons b f))) (else y nil)))
-              (else y nil))
-            nil))
-      (else y nil))))
-(define k-blobref-of (subr (maxeff kstate spin) (int int) int)
-  (lambda (b f) (k-ty-new (ty-named k-blobref-index (list (dt b) (dt f))))))
-;; The flat the type checked against says, for a new blobref.
-(define k-blobref-wanted (subr (maxeff checks spin) (kx int) int)
-  (lambda (x expected)
-    (let ((p (if (< expected 0) nil (k-blobref-parts expected))))
-      (if (null? p)
-          (k-fail (string-append "which flat a new `blobref` points to is said by the type it is "
-                                 "checked against: `(the (blobref B F) …)`")
-                  (k-start x) (k-end x))
-          (cdr (car p))))))
-;; Of a blobref of type `xt`, owner `b`, flat `f`, read or written: the
-;; owner's region, `f` a scalar; noting the scalar's layout at `x`'s span
-;; for the compilers if `note`.
-(define k-blobref-region (subr (maxeff checks spin) (kx int int int bool) k-region)
-  (lambda (x xt b f note)
-    (let ((code (tagcase (k-get (k-resolve f)) (ty-base (s) (k-flat-code s)) (else y -1)))
-          (a (k-start x)) (z (k-end x)))
-      (if (< code 0)
-          (k-fail (k-cat3 "only a scalar's bytes are read or written, and this points to a "
-                          (k-show-ty f) "")
-                  a z)
-          (tagcase (k-get (k-resolve b))
-            (ty-bloblet (fs fz r)
-              (let ((fact (product (1 a) (2 z) (3 code))))
-                (begin (if note (set k-extracts (cons fact (get k-extracts))) #u) r)))
-            (else y (k-fail (k-cat3 "the region of a " (k-show-ty xt) "'s owner is not known")
-                            a z)))))))
 ;; The `blobref` forms (`Checker::synth_blobref`), first operand `ox` of
 ;; type `xt`: what the second, if any, is checked against (an `int`, or the
 ;; scalar's type; -1 for none), failing in the Rust checker's order.
@@ -935,20 +898,42 @@
           (cond ((null? p) (k-fail-ty-at "a blobref is expected here, and this is a " xt ox))
                 ((string=? name "blobref+") k-int)
                 ((string=? name "blobref-set!")
-                 (let ((r (k-blobref-region x xt (car (car p)) (cdr (car p)) #f))) (cdr (car p))))
+                 (let ((r (k-blobref-region (k-start x) (k-end x) xt (car (car p)) (cdr (car p))
+                                            #f)))
+                   (cdr (car p))))
+                ((string=? name "blobref-index")
+                 (if (< (car (k-flat-array-parts (cdr (car p)))) 0)
+                     (k-fail-ty-at "a blobref to a flat array is expected here, and this is a "
+                                   xt ox)
+                     k-int))
                 (else -1))))))
 ;; Its type and effect, `e` its operands'.
 (define k-blobref-result (subr (maxeff checks spin) (kx string int k-eff int) k-te)
   (lambda (x name xt e expected)
-    (if (string=? name "blobref-at")
-        (k-te (k-blobref-of xt (k-blobref-wanted x expected)) e)
-        (let* ((p (car (k-blobref-parts xt))) (b (car p)) (f (cdr p)))
-          (case name
-            (("blobref+") (k-te (k-blobref-of b (k-blobref-wanted x expected)) e))
-            (("blobref-owner") (k-te b e))
-            (("blobref-offset") (k-te k-int e))
-            (("blobref-get") (k-te-reading f (k-blobref-region x xt b f #t) e))
-            (else (k-te-writing k-unit (k-blobref-region x xt b f #t) e)))))))
+    (let ((a (k-start x)) (z (k-end x)))
+      (if (string=? name "blobref-at")
+          (k-te (k-blobref-of xt (k-blobref-wanted a z expected)) e)
+          (let* ((p (car (k-blobref-parts xt))) (b (car p)) (f (cdr p)))
+            (case name
+              (("blobref+") (k-te (k-blobref-of b (k-blobref-wanted a z expected)) e))
+              (("blobref-owner") (k-te b e))
+              (("blobref-offset") (k-te k-int e))
+              (("blobref-index") (k-te (k-blobref-of b (k-blobref-element a z f)) e))
+              (("blobref-get") (k-te-reading f (k-blobref-region a z xt b f #t) e))
+              (else (k-te-writing k-unit (k-blobref-region a z xt b f #t) e))))))))
+;; `(extract ex l)`, `ex` of type `pt` and effect in `r`, not a product: a
+;; blobref to a flat product's field (`Checker`'s `Exp::Extract`).
+(define k-extract-blobref (subr (maxeff checks spin) (kx int kx symbol k-te) k-te)
+  (lambda (x pt ex l r)
+    (let ((p (k-blobref-parts pt)) (a (k-start x)) (z (k-end x)))
+      (if (null? p)
+          (k-fail-ty-at "a product is expected here, and this is a " pt ex)
+          (let ((fld (k-flat-field (cdr (car p)) l)))
+            (if (< (car fld) 0)
+                (k-fail (k-cat5 "a " (k-show-ty pt) " has no `" (symbol->string l) "` laid out")
+                        a z)
+                (begin (k-note-extract a z (+ k-blobref-field (car fld)))
+                       (k-te-masked x (k-blobref-of (car (car p)) (cdr fld)) (extract r 2)))))))))
 
 
 ;; The checker's knot, `check-rules.fx`'s, given to what checks forms here.

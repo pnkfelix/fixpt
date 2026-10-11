@@ -1148,6 +1148,6 @@ pub const KEYWORDS: &[&str] = &[
     "bloblet", "fields", "frozen", "arrayof", "icell", "await", "define-rec", "letrena", "letreap", "rlambda", "quote", "productof", "sumof", "product", "extract", "sum", "tagcase", "module", "moduleof", "with", "select", "load-module",
     "define-datatype", "make-bloblet", "bloblet-ref", "bloblet-set!", "bloblet-freeze", "bloblet-byte",
     "bloblet-set-byte!", "bloblet-bytes", "rmake-bloblet", "dlambda", "=>",
-    "blobref-at", "blobref+", "blobref-owner", "blobref-offset", "blobref-get", "blobref-set!",
+    "blobref-at", "blobref+", "blobref-owner", "blobref-offset", "blobref-get", "blobref-set!", "blobref-index",
 ];
 

@@ -238,6 +238,7 @@
 (define syn-name (with parser syn-name))
 (define syn-start (with parser syn-start))
 (define syn-symbol? (with parser syn-symbol?))
+(define syn-int (with parser syn-int))
 
 (define k-effects (subr (maxeff checks spin) (k-syns) k-eff)
   (lambda (xs)
@@ -539,8 +540,11 @@
         ((arrayof)
          (begin
            (k-shape (= n 3) "`(arrayof type region)`" s)
-           (let* ((t (k-parse-type (k-nth items 1))) (r (k-parse-region (k-nth items 2))))
-             (k-ty-new (ty-array t r)))))
+           ;; With a literal length, a flat array (`TODO.md` §77).
+           (if (>= (syn-int (k-nth items 2)) 0)
+               (k-parse-flat s)
+               (let* ((t (k-parse-type (k-nth items 1))) (r (k-parse-region (k-nth items 2))))
+                 (k-ty-new (ty-array t r))))))
         ((icell)
          (begin
            (k-shape (= n 3) "`(icell type region)`" s)

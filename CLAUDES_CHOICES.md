@@ -253,3 +253,34 @@ The user's okasaki.fx met "a (moduleof …) is expected here, and this is a
    `regcode-helpers.fx`, each given the knot's procedures (`k-synth`,
    `k-check`; `r-exp`, `r-prim`) as arguments; both files shrank, and
    their debts were lowered.
+
+## Flat products and arrays (TODO.md §77, 2026-10-10)
+
+The user chose natural alignment and `extract` on blobrefs, products and
+fixed-length arrays before sums; and set a rule: no operation copies more
+than a word unless its name says so.
+
+1. **A flat product is the product type node**, read where a flat is
+   wanted, as the scalars are their value types; fields laid out in the
+   order written (the reader keeps it).
+2. **A flat array is standard generative type 6**, `(flat-arrayof (f flat)
+   (n size)) int`, not a new type form; written `(arrayof F n)` where a
+   flat is wanted, or in a type when `n` is a literal (a region never is),
+   so `define-type` can name one. Its length a literal for now.
+3. **Natural alignment**, C's: scalars at their size, products padded to
+   their widest member (`flat_layout`, `k-flat-layout`).
+4. **`extract` of a blobref** to a flat product gives a blobref to the
+   field; the offset reaches the compilers as the extract's field fact past
+   `BLOBREF_FIELD` (2^40), as `RESHAPE_PATH` marks reshape paths: one
+   channel, no new fact kind.
+5. **`(blobref-index r i)`**, a new form, since an index is an expression;
+   its fact is `n << 32 | size`, and the run time checks `0 ≤ i < n`.
+6. **No copy larger than a word**: projections give blobrefs; only a
+   scalar is read out, so the user's rule holds with nothing more.
+7. **Moves to keep sizes**: the type-level blobref helpers from
+   `check-synth.fx` to `check-read-helpers.fx` (which `check-synth` is now
+   given), `r-extract` to `regcode-helpers.fx`; the projection rule in
+   `check-rules.fx` is one line, `k-extract-blobref`.
+8. **Run-time failures in `bloblet-errors/`**: each machine says a run-time
+   error its own way, which the compilers' tests would count as a
+   disagreement.

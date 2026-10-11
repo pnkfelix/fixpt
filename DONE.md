@@ -1495,3 +1495,16 @@ blobref.fx` (every scalar), `blobref-sees-bytes.fx`, `blobref-width.fx`,
 and refused, `blobref-unknown-flat.fx`, `blobref-not-scalar.fx`,
 `blobref-wrong-value.fx`, `blobref-escape.fx`. Docs: `docs/fx26.md`.
 
+Flat products and arrays (2026-10-10): `(productof (label F) …)` and
+`(arrayof F n)` (standard generative type 6, `flat-arrayof`, `n` a
+literal) where a flat is wanted, an `arrayof` of literal length a flat
+array in a type too; laid out as C does. `(extract r l)` of a blobref to a
+flat product, a blobref to the field (its offset a fact past
+`BLOBREF_FIELD`); `(blobref-index r i)`, one to an element, its range
+checked at run time (`%fx26-suffix-ref-index`). Nothing larger than a word
+is copied (the user's rule). Both checkers, the lowering, both compilers,
+both register-code generators. Tests: `bloblet/flat-product.fx`,
+`flat-no-field.fx`, `flat-index-not-array.fx`, `flat-length-literal.fx`,
+`flat-product-of-type.fx`, `flat-no-copy.fx`, `bloblet-errors/
+flat-index-range.fx`.
+

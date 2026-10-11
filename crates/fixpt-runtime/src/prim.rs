@@ -2025,6 +2025,20 @@ prims! {
         let bits = suffix_read(rt, a[0], fixpt_heap::layout::flat_size(code))?;
         Ok(flat_value(rt, code, bits))
     });
+    // FX-26's `blobref-index`: element `i` of a flat array of `n`, each
+    // `size` bytes, `code` being `n << 32 | size`.
+    "%fx26-suffix-ref-index", 3, Some(3), simple!(|rt, a| {
+        let r = suffix_ref(rt, a[0])?;
+        let (i, code) = (int(rt, a[1])?, int(rt, a[2])?);
+        let (n, size) = (code >> 32, code & 0xffff_ffff);
+        if !(0..n).contains(&i) {
+            return rt.fail("blobref-index: out of range", &[a[0], a[1]]);
+        }
+        match rt.heap.suffix_ref_add(r, i * size) {
+            Ok(r) => Ok(r),
+            Err(e) => rt.fail(&format!("suffix ref: {e}"), &[a[0], a[1]]),
+        }
+    });
     "%fx26-suffix-ref-set!", 3, Some(3), simple!(|rt, a| {
         let code = int(rt, a[1])?;
         let bits = flat_bits_of(rt, code, a[2])?;

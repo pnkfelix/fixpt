@@ -758,6 +758,11 @@ impl Checker {
                 let [_, t, r] = &items[..] else {
                     return Err(FxError::at(s.span, "`(arrayof type region)`"));
                 };
+                // With a literal length, a flat array (`TODO.md` §77), so a
+                // `define-type` may name one.
+                if self.literal_int(r).is_some_and(|k| k >= 0) {
+                    return self.parse_flat(s);
+                }
                 let t = self.parse_type(t)?;
                 let r = self.parse_region(r)?;
                 Ok(self.arena.ty(Ty::Array(t, r)))
@@ -2881,7 +2886,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         }
     }
 
-    fn label(&mut self, s: &Syntax) -> R<Sym> {
+    pub(crate) fn label(&mut self, s: &Syntax) -> R<Sym> {
         if let Some(x) = s.as_symbol() {
             return Ok(x);
         }
@@ -3003,6 +3008,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
             ("blobref-offset", [_]) => (BlobletOp::RefOffset, args),
             ("blobref-get", [_]) => (BlobletOp::RefGet, args),
             ("blobref-set!", [_, _]) => (BlobletOp::RefSet, args),
+            ("blobref-index", [_, _]) => (BlobletOp::RefIndex, args),
             _ => {
                 let shape = match name {
                     "make-bloblet" => "(make-bloblet bytes field …)",
@@ -3018,6 +3024,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                     "blobref-offset" => "(blobref-offset blobref)",
                     "blobref-get" => "(blobref-get blobref)",
                     "blobref-set!" => "(blobref-set! blobref value)",
+                    "blobref-index" => "(blobref-index blobref i)",
                     _ => "(bloblet-bytes bloblet)",
                 };
                 return Err(FxError::at(span, format!("`{shape}`")));

@@ -190,7 +190,8 @@
            check-infer check-facts check-print check-bounds
            check-expect check-errors check-effects check-mask
            check-unions check-terminate check-holds check-subtype
-           check-calls check-subst check-binders check-sub-env check-print-parts))
+           check-calls check-subst check-binders check-sub-env check-print-parts
+           check-read-helpers))
          ;; The checker, a module's order: its items as a letrec*, used only once made.
          (check-modorder
           ((load-input "fx26:check-modorder.fx")

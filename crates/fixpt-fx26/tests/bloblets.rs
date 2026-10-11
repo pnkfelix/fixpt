@@ -1,15 +1,20 @@
 //! Bloblets (`docs/fx26.md`, "Bloblets"): each program in
 //! `programs/bloblet` whose first line says what it gives, `;; => value`,
 //! or what its refusal says, `;; ! words`, does so, lowered. The others
-//! are compared only, by `checker.rs` and `compiler.rs`.
+//! are compared only, by `checker.rs` and `compiler.rs`. Those that fail
+//! at run time are in `programs/bloblet-errors`, which the compilers' tests
+//! do not read: each machine says a run-time error in its own words.
 
 use fixpt_engine::Backend;
 use fixpt_fx26::session::Fx26Session;
 
 #[test]
 fn bloblet_programs_do_as_they_say() {
-    let dir = format!("{}/tests/programs/bloblet", env!("CARGO_MANIFEST_DIR"));
-    let mut names: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
+    let dir = |d: &str| format!("{}/tests/programs/{d}", env!("CARGO_MANIFEST_DIR"));
+    let mut names: Vec<_> = ["bloblet", "bloblet-errors"]
+        .iter()
+        .flat_map(|d| std::fs::read_dir(dir(d)).unwrap().map(|e| e.unwrap().path()))
+        .collect();
     names.sort();
     let (mut wrong, mut seen) = (Vec::new(), 0);
     for path in names {

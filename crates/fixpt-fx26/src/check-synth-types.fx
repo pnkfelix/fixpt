@@ -352,6 +352,16 @@
                                spin)
                        (kx string int kxs k-synther k-checker)
                        k-te))
+            (val k-extract-blobref
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (kx int kx symbol k-te)
+                       k-te))
             (val k-blobref-op
                  (subr (maxeff (alloc @t)
                                (goto @z)

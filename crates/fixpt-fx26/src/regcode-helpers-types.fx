@@ -117,6 +117,11 @@
                                spin)
                        (rgen string int exps renv cenv r-exper r-primer)
                        unit))
+            (val r-extract
+                 (subr (maxeff (alloc @k) (goto @y) (read @globals) (read @k) (read @t) (write @k)
+                               spin)
+                       (rgen exp int renv cenv bool r-exper r-primer)
+                       unit))
             (val r-unit
                  (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k)) (rgen) unit))
             (val r-add-imm

@@ -1954,10 +1954,13 @@ refs are what FX-26's flat data will be reached by:
 
 **Done so far** (`DONE.md` §77): the kind `flat` (the scalars), the type
 `(blobref B F)`, and its operations (`blobref-at`, `blobref+`,
-`blobref-owner`, `blobref-offset`, `blobref-get`, `blobref-set!`). Next:
-flat products, sums and arrays (a projection to a field or element at its
-offset); the evaluator written in FX-26 (no blobrefs yet); reading and
-writing in line in native code.
+`blobref-owner`, `blobref-offset`, `blobref-get`, `blobref-set!`), flat
+products and arrays (`extract`, `blobref-index`). Next: flat sums (a tag
+layout, and a variant reached only after testing the tag: a `tagcase` on
+a blobref); arrays of a length not literal; the evaluator written in FX-26
+(no blobrefs yet); reading and writing in line in native code. The rule
+(the user's): no operation copies more than a word unless its name says
+so.
 
 **Field indices in flat data** (the user's, 2026-10-10: to be leveraged).
 A suffix ref has one owning bloblet, recoverable from it, so a flat

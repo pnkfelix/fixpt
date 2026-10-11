@@ -265,7 +265,7 @@
   (lambda (head)
     (or (symbol=? head 'blobref-at) (symbol=? head 'blobref+) (symbol=? head 'blobref-owner)
         (symbol=? head 'blobref-offset) (symbol=? head 'blobref-get)
-        (symbol=? head 'blobref-set!))))
+        (symbol=? head 'blobref-set!) (symbol=? head 'blobref-index))))
 (define bloblet-untagged? (subr pure (symbol int) bool)
   (lambda (op n)
     (or (and (symbol=? op 'bloblet-freeze) (= n 1)) (and (symbol=? op 'bloblet-byte) (= n 2))

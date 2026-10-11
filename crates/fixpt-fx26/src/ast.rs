@@ -655,12 +655,14 @@ pub enum BlobletOp {
     RefGet,
     /// `(blobref-set! r v)`.
     RefSet,
+    /// `(blobref-index r i)`: element `i` of the flat array it points at.
+    RefIndex,
 }
 
 impl BlobletOp {
     pub const NAMES: &[&str] =
         &["make-bloblet", "rmake-bloblet", "bloblet-ref", "bloblet-set!", "bloblet-freeze", "bloblet-byte", "bloblet-set-byte!", "bloblet-bytes",
-          "blobref-at", "blobref+", "blobref-owner", "blobref-offset", "blobref-get", "blobref-set!"];
+          "blobref-at", "blobref+", "blobref-owner", "blobref-offset", "blobref-get", "blobref-set!", "blobref-index"];
 }
 
 #[derive(Default)]

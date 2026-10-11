@@ -111,6 +111,11 @@ pub const EQTABLE: &str = "(eqtable (k type) (v type) (kr region) (r region)) (a
 pub const BLOBREF: &str = "(blobref (b type +) (f flat)) b";
 /// `BLOBREF`'s number among the generative types.
 pub(crate) const BLOBREF_INDEX: u32 = 5;
+/// A flat array, `(arrayof F n)` where a flat is wanted (`TODO.md` §77),
+/// generative type 6: `n` `F`s, one after another; no value, so nothing to
+/// the safety analyses.
+pub const FLAT_ARRAYOF: &str = "(flat-arrayof (f flat) (n size)) int";
+pub(crate) const FLAT_ARRAYOF_INDEX: u32 = 6;
 /// A scalar flat's layout (`fixpt_heap::layout::FLAT_*`), as the runtime
 /// reads and writes its bytes.
 pub(crate) fn flat_code(name: &str) -> Option<i64> {
@@ -440,6 +445,10 @@ pub struct NodeFacts {
 /// position at least this is a path, value `j` of value `k`.
 pub const RESHAPE_PATH: usize = 1 << 40;
 
+/// Where an `extract`'s field index means a blobref's field (`TODO.md` §77):
+/// at least this, the field's offset in bytes past it.
+pub const BLOBREF_FIELD: usize = 1 << 40;
+
 /// Value `j` of the module that is value `k`, as a reshape's position.
 pub fn reshape_path(k: usize, j: usize) -> usize {
     RESHAPE_PATH + (k << 20) + j
@@ -641,7 +650,7 @@ impl Checker {
         // generative type, in both checkers, whose insides nothing sees
         // (no `up-` or `down-`: a `vsubr` is called with its arguments, not
         // their list). `vlambda` makes one; `apply` calls one on a list.
-        for decl in [VSUBR, FLATLAYOUT, FLATARRAYOF, IDENTITY, EQTABLE, BLOBREF] {
+        for decl in [VSUBR, FLATLAYOUT, FLATARRAYOF, IDENTITY, EQTABLE, BLOBREF, FLAT_ARRAYOF] {
             let forms = c.read(decl).expect("reads");
             c.define_generative(&forms[0], &forms[1]).unwrap_or_else(|e| panic!("`{decl}` is wrong: {e}"));
         }
@@ -1668,6 +1677,16 @@ impl Checker {
             }
             Exp::Extract(x, label) => {
                 let (pt, eff) = self.synth(x)?;
+                // A blobref to a flat product: one to its field, at its offset.
+                if let Some((b, f)) = self.blobref_parts(pt) {
+                    let Some((at, g)) = self.flat_field(f, label) else {
+                        return Err(FxError::at(span, format!("a {} has no `{}` laid out", self.show_ty(pt), self.interner.name(label))));
+                    };
+                    self.facts.field_index.insert(e, BLOBREF_FIELD + at);
+                    let t = self.blobref_of(b, g);
+                    let eff = self.mask(e, &eff, t);
+                    return Ok((t, eff));
+                }
                 let Ty::Product(fields) = self.arena.get(pt).clone() else {
                     return Err(FxError::at(self.arena.span_of(x), format!("a product is expected here, and this is a {}", self.show_ty(pt))));
                 };
@@ -3613,7 +3632,10 @@ impl Checker {
             let eff = self.mask(e, &eff, t);
             return Ok((t, eff));
         }
-        if matches!(op, BlobletOp::RefAt | BlobletOp::RefAdd | BlobletOp::RefOwner | BlobletOp::RefOffset | BlobletOp::RefGet | BlobletOp::RefSet) {
+        if matches!(
+            op,
+            BlobletOp::RefAt | BlobletOp::RefAdd | BlobletOp::RefOwner | BlobletOp::RefOffset | BlobletOp::RefGet | BlobletOp::RefSet | BlobletOp::RefIndex
+        ) {
             return self.synth_blobref(e, op, args, expected);
         }
         let (b, rest) = args.split_first().expect("parsed");
@@ -3628,9 +3650,13 @@ impl Checker {
         };
         let t = match op {
             BlobletOp::Make | BlobletOp::RMake => unreachable!(),
-            BlobletOp::RefAt | BlobletOp::RefAdd | BlobletOp::RefOwner | BlobletOp::RefOffset | BlobletOp::RefGet | BlobletOp::RefSet => {
-                unreachable!("synth_blobref")
-            }
+            BlobletOp::RefAt
+            | BlobletOp::RefAdd
+            | BlobletOp::RefOwner
+            | BlobletOp::RefOffset
+            | BlobletOp::RefGet
+            | BlobletOp::RefSet
+            | BlobletOp::RefIndex => unreachable!("synth_blobref"),
             BlobletOp::Ref(i) => {
                 let t = field(self, i)?;
                 if !frozen {
@@ -3705,6 +3731,19 @@ impl Checker {
             }
             BlobletOp::RefOwner => b,
             BlobletOp::RefOffset => int,
+            // An element of a flat array: its length and element's size
+            // told the compilers, `n << 32 | size`, checked at run time.
+            BlobletOp::RefIndex => {
+                let Some((g, n)) = self.flat_array_parts(f) else {
+                    return Err(FxError::at(self.arena.span_of(*x), format!("a blobref to a flat array is expected here, and this is a {}", self.show_ty(xt))));
+                };
+                eff = eff.union(&self.check(rest[0], int)?);
+                let Some((size, _)) = self.flat_layout(g) else {
+                    return Err(FxError::at(span, format!("the layout of a {} is not known", self.show_ty(g))));
+                };
+                self.facts.field_index.insert(e, (n << 32) | size);
+                self.blobref_of(b, g)
+            }
             _ => {
                 // A scalar, whose bytes are read as the type of its name, of
                 // the owner's region.

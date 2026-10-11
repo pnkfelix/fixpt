@@ -873,7 +873,13 @@ impl<'a> Compiler<'a> {
             Exp::Extract(p, _) => {
                 let i = *self.c.facts.field_index.get(&x).ok_or("an extract the checker did not see")?;
                 self.exp(p, e, depth, code, false)?;
-                self.field(code, i as i64 + 2);
+                // A blobref's field: one at its offset.
+                if i >= crate::check::BLOBREF_FIELD {
+                    self.int(code, (i - crate::check::BLOBREF_FIELD) as i64);
+                    self.prim(code, "%suffix-ref+", 2)?;
+                } else {
+                    self.field(code, i as i64 + 2);
+                }
                 self.done(code, tail);
             }
             Exp::Sum(t, v) => {
@@ -1996,6 +2002,14 @@ impl<'a> Compiler<'a> {
                     _ => "%suffix-ref-offset",
                 };
                 self.prim(code, name, n)?;
+            }
+            // The array's length and element's size, as the checker found
+            // them, after the ref and the index.
+            BlobletOp::RefIndex => {
+                let k = *self.c.facts.field_index.get(&x).ok_or("a blobref-index the checker did not see")?;
+                let n = self.exps(args, e, depth, code)?;
+                self.int(code, k as i64);
+                self.prim(code, "%fx26-suffix-ref-index", n + 1)?;
             }
             // The scalar's layout, as the checker found it, after the ref.
             BlobletOp::RefGet | BlobletOp::RefSet => {

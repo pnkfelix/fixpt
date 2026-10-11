@@ -654,6 +654,9 @@ impl Lowerer<'_> {
                     BlobletOp::RefOffset => format!("(%suffix-ref-offset {})", a[0]),
                     // The scalar's layout, as the checker found it.
                     BlobletOp::RefGet => format!("(%fx26-suffix-ref-get {} {})", a[0], self.c.facts.field_index[&e]),
+                    BlobletOp::RefIndex => {
+                        format!("(%fx26-suffix-ref-index {} {} {})", a[0], a[1], self.c.facts.field_index[&e])
+                    }
                     BlobletOp::RefSet => {
                         format!("(%fx26-suffix-ref-set! {} {} {})", a[0], self.c.facts.field_index[&e], a[1])
                     }
@@ -689,6 +692,10 @@ impl Lowerer<'_> {
             }
             Exp::Extract(x, _) => {
                 let i = self.c.facts.field_index[&e];
+                // A blobref's field: one at its offset.
+                if i >= crate::check::BLOBREF_FIELD {
+                    return format!("(%suffix-ref+ {} {})", self.go(x), i - crate::check::BLOBREF_FIELD);
+                }
                 format!("(%bloblet-ref {} {})", self.go(x), i + 2)
             }
             Exp::Sum(tag, x) => {

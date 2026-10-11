@@ -924,6 +924,12 @@ impl Compiler<'_> {
                 let bindings: Vec<(Sym, ExpId)> = ps.into_iter().zip(args.iter().copied()).collect();
                 self.r_let(g, &bindings, lbody, env, te, tail)?;
             }
+            // A blobref's field: one at its offset.
+            Exp::Extract(p, _) if *self.c.facts.field_index.get(&x)? >= crate::check::BLOBREF_FIELD => {
+                let at = *self.c.facts.field_index.get(&x)? - crate::check::BLOBREF_FIELD;
+                self.r_prim(g, "%suffix-ref+", &[Arg::E(p), Arg::V(Value::fixnum(at as i64))], env, te)?;
+                g.done(tail);
+            }
             Exp::Extract(p, _) => {
                 let i = *self.c.facts.field_index.get(&x)?;
                 self.r_exp(g, p, env, te, false)?;
@@ -979,6 +985,10 @@ impl Compiler<'_> {
                     BlobletOp::RefAdd => self.r_prim(g, "%suffix-ref+", &es, env, te)?,
                     BlobletOp::RefOwner => self.r_prim(g, "%suffix-ref-owner", &es, env, te)?,
                     BlobletOp::RefOffset => self.r_prim(g, "%suffix-ref-offset", &es, env, te)?,
+                    BlobletOp::RefIndex => {
+                        let Some(&k) = self.c.facts.field_index.get(&x) else { return self.decline("blobref-index") };
+                        self.r_prim(g, "%fx26-suffix-ref-index", &[es[0], es[1], Arg::V(Value::fixnum(k as i64))], env, te)?
+                    }
                     // The scalar's layout, as the checker found it.
                     BlobletOp::RefGet | BlobletOp::RefSet => {
                         let Some(&k) = self.c.facts.field_index.get(&x) else { return self.decline("blobref-get") };

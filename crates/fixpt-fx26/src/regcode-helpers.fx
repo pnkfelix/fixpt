@@ -494,6 +494,12 @@
                     (r-decline)
                     (r-prim g "%fx26-suffix-ref-get"
                             (r-args-2 (a-e (car args)) (a-v (wcell-int i))) env te)))
+               (("blobref-index")
+                (if (< i 0)
+                    (r-decline)
+                    (r-prim g "%fx26-suffix-ref-index"
+                            (r-args-3 (a-e (car args)) (a-e (car (cdr args))) (a-v (wcell-int i)))
+                            env te)))
                (("blobref-set!")
                 (if (< i 0)
                     (r-decline)
@@ -501,4 +507,17 @@
                             (r-args-3 (a-e (car args)) (a-v (wcell-int i)) (a-e (car (cdr args))))
                             env te)))
                (else (r-decline))))))
+
+
+;; `(extract p l)`, its field `i` as the checker found it: a field of a
+;; product; or, past `check::BLOBREF_FIELD`, a blobref to its field at its
+;; offset; declined if the checker did not see it.
+(define r-extract (subr rcompiles (rgen exp int renv cenv bool r-exper r-primer) unit)
+  (lambda (g p i env te tail r-exp r-prim)
+    (cond ((< i 0) (r-decline))
+          ((>= i 1099511627776)
+           (begin (r-prim g "%suffix-ref+" (r-args-2 (a-e p) (a-v (wcell-int (- i 1099511627776))))
+                          env te)
+                  (r-done g tail)))
+          (else (begin (r-exp g p env te #f) (r-opn g rop-field (+ i 2)) (r-done g tail))))))
 )))

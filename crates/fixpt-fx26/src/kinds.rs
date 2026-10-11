@@ -46,6 +46,8 @@ pub(crate) const CONSTRUCTORS: &[(&str, &[(&str, Kind)])] = &[
 
 /// The scalar flats: the names whose bytes a `blobref` reads as a value of
 /// the type of the same name.
+use crate::check::FLAT_ARRAYOF_INDEX;
+
 pub(crate) const FLAT_SCALARS: [&str; 6] = ["f64", "f32", "i32", "u32", "i64", "u64"];
 
 impl Checker {
@@ -400,7 +402,10 @@ impl Checker {
     /// `i32`, `u32`, `i64` or `u64`, as the type its bytes are read as; or a
     /// variable of kind `flat`, or a family's flat parameter.
     pub(crate) fn parse_flat(&mut self, s: &Syntax) -> R<TyId> {
-        let usage = "a flat is `f64`, `f32`, `i32`, `u32`, `i64`, `u64`, or a variable of kind `flat`";
+        let usage = "a flat is `f64`, `f32`, `i32`, `u32`, `i64`, `u64`, `(productof (label flat) …)`, `(arrayof flat n)`, or a variable of kind `flat`";
+        if let Some(items) = s.as_proper_list() {
+            return self.parse_flat_list(s, items, usage);
+        }
         let Some(sym) = s.as_symbol() else { return Err(FxError::at(s.span, usage)) };
         match self.lookup_desc(sym) {
             Some(DScope::Var(v, Kind::Flat)) => return Ok(self.arena.ty(Ty::Var(v))),
@@ -414,12 +419,101 @@ impl Checker {
         Err(FxError::at(s.span, usage))
     }
 
-    /// Whether `t` is a flat: a scalar, or a variable of kind `flat`.
+    /// `(productof (label flat) …)`, its fields laid out in the order
+    /// written; or `(arrayof flat n)`, `n` a literal length.
+    fn parse_flat_list(&mut self, s: &Syntax, items: &[Syntax], usage: &str) -> R<TyId> {
+        let head = items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h).to_string());
+        match (head.as_deref(), items) {
+            (Some("productof"), [_, ps @ ..]) => {
+                let mut parts = Vec::new();
+                for p in ps {
+                    let Some([label, f]) = p.as_proper_list() else { return Err(FxError::at(p.span, "`(label flat)`")) };
+                    let label = self.label(label)?;
+                    if parts.iter().any(|(l, _)| *l == label) {
+                        return Err(FxError::at(p.span, format!("`{}` appears twice", self.interner.name(label))));
+                    }
+                    parts.push((label, self.parse_flat(f)?));
+                }
+                Ok(self.arena.ty(Ty::Product(parts)))
+            }
+            (Some("arrayof"), [_, f, n]) => {
+                let f = self.parse_flat(f)?;
+                match self.parse_size(n)? {
+                    Size::Lin { k, terms } if terms.is_empty() && k >= 0 => {
+                        Ok(self.arena.ty(Ty::Named { which: FLAT_ARRAYOF_INDEX, args: vec![D::Type(f), D::Size(Size::lit(k))] }))
+                    }
+                    _ => Err(FxError::at(n.span, "a flat array's length is a literal, for now")),
+                }
+            }
+            _ => Err(FxError::at(s.span, usage)),
+        }
+    }
+
+    /// Whether `t` is a flat: a scalar, a variable of kind `flat`, a product
+    /// of flats, or a flat array.
     pub(crate) fn is_flat(&self, t: TyId) -> bool {
         match self.arena.get(self.arena.resolve(t)) {
             Ty::Base(s) => FLAT_SCALARS.contains(&self.interner.name(*s)),
             Ty::Var(v) => self.arena.dvar_kind_known(*v) == Some(Kind::Flat),
+            Ty::Product(ps) => ps.iter().all(|(_, f)| self.is_flat(*f)),
+            Ty::Named { which: FLAT_ARRAYOF_INDEX, .. } => true,
             _ => false,
+        }
+    }
+
+    /// A flat's size and alignment in bytes, each scalar aligned to its
+    /// size and a product padded to its widest member, as C lays them out;
+    /// none for a variable, whose layout is not known.
+    pub(crate) fn flat_layout(&self, t: TyId) -> Option<(usize, usize)> {
+        match self.arena.get(self.arena.resolve(t)) {
+            Ty::Base(s) => match self.interner.name(*s) {
+                "i32" | "u32" | "f32" => Some((4, 4)),
+                "i64" | "u64" | "f64" => Some((8, 8)),
+                _ => None,
+            },
+            Ty::Product(ps) => {
+                let (mut at, mut align) = (0usize, 1usize);
+                for (_, f) in ps {
+                    let (size, a) = self.flat_layout(*f)?;
+                    at = at.next_multiple_of(a) + size;
+                    align = align.max(a);
+                }
+                Some((at.next_multiple_of(align), align))
+            }
+            Ty::Named { which: FLAT_ARRAYOF_INDEX, args } => match &args[..] {
+                [D::Type(f), D::Size(Size::Lin { k, terms })] if terms.is_empty() => {
+                    let (size, a) = self.flat_layout(*f)?;
+                    Some((size * *k as usize, a))
+                }
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// Flat product `t`'s field `label`: its offset in bytes, and its flat.
+    pub(crate) fn flat_field(&self, t: TyId, label: Sym) -> Option<(usize, TyId)> {
+        let Ty::Product(ps) = self.arena.get(self.arena.resolve(t)) else { return None };
+        let mut at = 0usize;
+        for (l, f) in ps {
+            let (size, a) = self.flat_layout(*f)?;
+            at = at.next_multiple_of(a);
+            if *l == label {
+                return Some((at, *f));
+            }
+            at += size;
+        }
+        None
+    }
+
+    /// Flat array `t`'s element and length.
+    pub(crate) fn flat_array_parts(&self, t: TyId) -> Option<(TyId, usize)> {
+        match self.arena.get(self.arena.resolve(t)) {
+            Ty::Named { which: FLAT_ARRAYOF_INDEX, args } => match &args[..] {
+                [D::Type(f), D::Size(Size::Lin { k, terms })] if terms.is_empty() => Some((*f, *k as usize)),
+                _ => None,
+            },
+            _ => None,
         }
     }
 
