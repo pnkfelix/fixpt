@@ -514,7 +514,19 @@ fn fixed_op(rt: &mut Runtime, a: &[Value], op: &str, w: Width) -> Outcome<Value>
         return Ok(exact_out(rt, w.wrap(!x)));
     }
     if op == "shl" || op == "shr" {
-        let k = (int(rt, a[1])? as u32) & (w.bits() - 1);
+        // The count, any integer, modulo the width: its low bits, as two's
+        // complement has them, a bignum's too (kayak's report: a count past
+        // a fixnum was refused here, and natively shifted by a pointer's bits).
+        let k = match a[1] {
+            c if c.is_fixnum() => (c.as_fixnum() as u32) & (w.bits() - 1),
+            c => match exact_bigint(rt, c) {
+                Some(c) => {
+                    let b = num_bigint::BigInt::from(w.bits());
+                    u32::try_from(((c % &b) + &b) % &b).expect("under the width")
+                }
+                None => return rt.type_error("an exact integer", c),
+            },
+        };
         // Signed: arithmetic; unsigned: logical (`x` is non-negative).
         let r = if op == "shl" { x << k } else { x >> k };
         return Ok(exact_out(rt, w.wrap(r)));
@@ -572,6 +584,19 @@ fn bitwise_big(rt: &mut Runtime, a: &[Value], op: &str) -> Outcome<Value> {
     let r = if op == "not" {
         !x
     } else if op == "shift" {
+        // A count past a fixnum: right, all of `x` gone but its sign; left,
+        // nothing of 0, and too large for anything else.
+        if !a[1].is_fixnum() {
+            let Some(k) = exact_bigint(rt, a[1]) else { return rt.type_error("an exact integer", a[1]) };
+            let zero = num_bigint::BigInt::from(0);
+            return if k < zero {
+                Ok(exact_out(rt, if x < zero { -1 } else { 0 }))
+            } else if x == zero {
+                Ok(Value::fixnum(0))
+            } else {
+                rt.fail("arithmetic-shift: the count is too large", &[a[0], a[1]])
+            };
+        }
         let k = int(rt, a[1])?;
         if k > 1 << 24 && x != num_bigint::BigInt::from(0) {
             return rt.fail("arithmetic-shift: the count is too large", &[a[0], a[1]]);

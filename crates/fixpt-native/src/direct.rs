@@ -2036,11 +2036,24 @@ impl Compiling<'_> {
                         continue;
                     }
                     if let Some(RawOp::Int { signed, what }) = reps::raw_op(name) {
+                        // A shift's count is an `int`, a bignum maybe: its
+                        // low bits (`unbox_reg`), as a fixnum's are, in a
+                        // copy (kayak's report: a bignum's pointer's bits
+                        // were taken for them).
+                        let count = matches!(what, "-shl" | "-shr");
+                        let count_of = |a: &mut Asm, callouts: &mut Vec<Callout>| {
+                            unbox_reg(a, callouts, X17);
+                            a.e(lsl_imm(X17, X17, 3));
+                        };
                         let y = match op {
+                            "prim2" if count => {
+                                a.e(mov(X17, reg(o(1))));
+                                count_of(&mut a, self.callouts);
+                                X17
+                            }
                             "prim2" => reg(o(1)),
                             "prim2imm" => {
                                 let v = o(1);
-                                let count = matches!(what, "-shl" | "-shr");
                                 if v.is_fixnum() && !count {
                                     a.es(&mov_imm64(X17, v.as_fixnum() as u64));
                                 } else if v.is_fixnum() || v.raw() & 7 == 3 {
@@ -2048,7 +2061,9 @@ impl Compiling<'_> {
                                 } else {
                                     let f = self.field(p, Field::Const(v));
                                     ldr_field(&mut a, X17, f);
-                                    if !count {
+                                    if count {
+                                        count_of(&mut a, self.callouts);
+                                    } else {
                                         unbox_reg(&mut a, self.callouts, X17);
                                     }
                                 }

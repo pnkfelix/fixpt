@@ -404,6 +404,18 @@ fn flat_keyed_as_the_rust_machine_gives_them() {
     assert!(run(defs, "past", &[2], FUEL).direct.as_ref().is_ok_and(|d| d == "8"));
 }
 
+/// Shift counts past a fixnum (kayak's report, `programs/native/
+/// shift-counts.fx`): a fixed-width shift's count modulo its width, a
+/// bignum's low bits, not its pointer's; as the Rust machine gives them.
+#[test]
+fn shift_counts_past_a_fixnum() {
+    for gc_every in [None, Some(7)] {
+        let r = run_collecting(&program("native/shift-counts"), "shift-counts", &[1], FUEL, gc_every);
+        assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "collecting every {gc_every:?}: {:?} against {}", r.direct, r.rust);
+        assert_eq!(r.rust, "(1 2 2147483648 1 2 9223372036854775808 -4 -1 6 512 0 -1 0)");
+    }
+}
+
 /// Sums and products made in line (`%make-frozen`,
 /// `programs/native/frozen-made.fx`): of one to seven fields, taken apart
 /// again, as the Rust machine gives them, with collections moving them.
