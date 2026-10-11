@@ -1101,6 +1101,28 @@ locals, which grow with a procedure, not the program (a long `let*`
 pays); `c-member?`'s callers (17), sets of names kept as lists; and
 `c-genv-limits`, which walks every inlining note at each global made.
 
+Second pass, the check phase (2026-10-11, after `DONE.md` §69's bucket
+fix): `FIXPT_PROFILE_PHASE=check`, the same probe (nine minutes), 5.23 G
+cells. The top, by word itself:
+
+| word                      |   cells | share | what it is                     |
+| ------------------------- | ------: | ----: | ------------------------------ |
+| `k-has-name?`             | 433.6 M |  8.3% | a name in a list of names      |
+| `k-resolve`               | 335.3 M |  6.4% | a type's link followed         |
+| `k-on-path?`              | 250.9 M |  4.8% | the cycle walk's path, a list  |
+| `bucket-find` (tables)    | 228.1 M |  4.4% | a table's bucket searched      |
+| `k-cyclic-from?`          | 205.7 M |  3.9% | the `acyclic` check's walk     |
+| `k-length`                | 182.0 M |  3.5% | a list's length, counted again |
+| `rehash-bucket`, `-array` | 251.0 M |  4.8% | tables growing                 |
+| `k-strail-in?`            |  85.3 M |  1.6% | a subtyping trail, a list      |
+
+These are the Rust machine's cells, not native time: a memo of
+`k-with-used`, `k-has-name?`'s largest caller by reading, changed the
+native `fx check` by nothing measurable. To do: time natively (with
+`FIXPT_SYMBOLS` and `fixpt-symbolize`) the callers of `k-has-name?`,
+`k-on-path?` and `k-length` before changing any; tables that grow from
+empty might start at the size they reach.
+
 ## 44. One simplifier: propagation, folding and reduction together (the user's, 2026-10-07)
 
 "We probably need to combine these things together. Eg arith eval yields
