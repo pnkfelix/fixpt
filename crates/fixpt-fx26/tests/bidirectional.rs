@@ -191,6 +191,18 @@ fn fixed_widths_are_ints_and_have_literals() {
     assert!(err.contains("4294967296 is not a u32: its range is 0 to 4294967295"), "{err}");
 }
 
+/// `length` of a list at `acyclic`, a `nlist` of some length; of one at
+/// a region, which may be written, refused, `list-length` named (kayak's
+/// report, 2026-10-11).
+#[test]
+fn length_of_an_acyclic_list() {
+    assert_eq!(check(include_str!("programs/sizes/length-of-a-list.fx")), "nat ! (read (globals l))");
+    let err = rejects("(length (list 1 2))");
+    let hint = "where a (nlist ? n) is expected; a `listof` is no `nlist`, whose length is in its type: `list-length` measures a list";
+    assert!(err.contains(hint), "{err}");
+    assert_eq!(check("(list-length (list 1 2))"), "nat ! pure");
+}
+
 /// An `i64` or `u64` literal likewise, past a fixnum too
 /// (`programs/sizes/fixed-width-64-literals.fx`); one out of its type's
 /// range refused, the range said (kayak's request, 2026-10-11).

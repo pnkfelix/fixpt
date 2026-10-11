@@ -267,10 +267,18 @@
             ;; A test's result is a `bool`.
             ((and (= p 0) (= a 27)) #f)
             ((and (= p 6) (= a 18)) #f)
+            ;; A list at `acyclic` is a `nlist`.
+            ((and (= p 18) (= a 6) (k-acyclic-pair? actual)) #f)
             ;; A `nat` is an `int`.
             ((and (= p 0) (= a 19)) #f)
             (else (not (= p a)))))))
 
+;; Whether region `r` is `acyclic`'s, frozen data never written; and
+;; whether `t` is a list there.
+(define k-acyclic-region? (subr pure (k-region) bool)
+  (lambda (r) (tagcase r (r-frozen (p f) f) (else w #f))))
+(define k-acyclic-pair? (subr (maxeff kreads spin) (int) bool)
+  (lambda (t) (tagcase (k-get t) (ty-pair (x y r nl) (k-acyclic-region? r)) (else w #f))))
 ;; Each type binder of `kinds` not yet solved, onto `acc`, mapped to `?`.
 (define* k-holes (subr (maxeff kstate spin) (k-binders k-solved k-map) k-map)
   (lambda (kinds solved acc)
@@ -291,6 +299,11 @@
   (lambda (want result)
     (let ((w (k-ty-rank want)) (r (k-ty-rank result)))
       (cond ((= r 2) #f) ((and (= w 18) (= r 6)) #f) (else (k-wrong-shape? want result))))))
+;; What an argument that is a list, where a `nlist` is expected, is told
+;; (`LIST_LENGTH_HINT`): the operation that measures a list.
+(define k-list-length-hint string
+  (string-append "; a `listof` is no `nlist`, whose length is in its type: "
+                 "`list-length` measures a list"))
 ;; An argument of the wrong shape altogether is the error to report, before
 ;; any binder it left unsolved.
 (define k-inst-shapes
@@ -300,9 +313,12 @@
         #u
         (let ((t (array-ref done-t i)))
           (if (and (>= t 0) (k-wrong-shape? (car params) t))
-              (let ((p (k-show-open (k-subst (car params) (get solved)) kinds solved)))
+              (let ((p (k-show-open (k-subst (car params) (get solved)) kinds solved))
+                    (hint (if (and (= (k-ty-rank (car params)) 18) (= (k-ty-rank t) 6))
+                              k-list-length-hint
+                              "")))
                 (k-fail (k-cat5 "argument " (int->string (+ i 1)) " is a " (k-show-ty t)
-                                (k-cat3 ", where a " p " is expected"))
+                                (k-cat3 ", where a " p (string-append " is expected" hint)))
                         (k-start (car args)) (k-end (car args))))
               (k-inst-shapes (cdr args) (cdr params) (+ i 1) kinds solved done-t))))))
 ;; The error that the callee's `result` cannot fit `expected`, what the
@@ -617,6 +633,12 @@
           (ty-nlist (x sz r)
             (tagcase at
               (ty-nlist (y sz2 s) (begin (ur r s) (u x y) (k-unify-size sz sz2 kinds solved)))
+              ;; A list at `acyclic` is a `nlist` of some length (`k-sub`), so
+              ;; `length` takes one (kayak's, 2026-10-11).
+              (ty-pair (y1 y2 s nl)
+                (if (k-acyclic-region? s)
+                    (begin (ur r s) (u x y1) (k-unify-size sz (sz-finite) kinds solved))
+                    #u))
               (else z #u)))
           (ty-nat (sz) (tagcase at (ty-nat (sz2) (k-unify-size sz sz2 kinds solved)) (else z #u)))
           (ty-product (pp)

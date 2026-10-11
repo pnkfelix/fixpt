@@ -290,12 +290,17 @@
 (define* ev-make-array (subr (maxeff evals spin) (val val) val)
   (lambda (n x) (the (arrayof val @v) (make-array (as-int n) x))))
 
+;; How many pairs list `v` has, `n` so far: `length`'s and `list-length`'s.
+(define* ev-list-length (subr (maxeff evals spin) (val int) int)
+  (lambda (v n) (if (null? v) n (ev-list-length (cdr (as-pair v)) (+ n 1)))))
 (define* ev-data-prims! (subr (maxeff stores spin) () unit)
   (lambda ()
     (begin
       (prim! 'cons (lambda (xs) (cons (ev-arg xs 0) (ev-arg xs 1))))
       (prim! 'car (lambda (xs) (car (as-pair (ev-arg xs 0)))))
       (prim! 'cdr (lambda (xs) (cdr (as-pair (ev-arg xs 0)))))
+      (prim! 'length (lambda (xs) (ev-list-length (ev-arg xs 0) 0)))
+      (prim! 'list-length (lambda (xs) (ev-list-length (ev-arg xs 0) 0)))
       (prim! 'set-car! (lambda (xs) (ev-set-car! xs)))
       (prim! 'set-cdr! (lambda (xs) (ev-set-cdr! xs)))
       (prim! 'list (lambda (xs) (vals->val xs)))

@@ -68,6 +68,10 @@ impl Unknowns {
     }
 }
 
+/// What an argument that is a list, where a `nlist` is expected, is told
+/// (`k-list-length-hint`).
+const LIST_LENGTH_HINT: &str = "; a `listof` is no `nlist`, whose length is in its type: `list-length` measures a list";
+
 impl Checker {
     /// The range of the fixed-width integer type `t` is, if it is one.
     pub(crate) fn fixed_expected(&self, t: TyId) -> Option<(i128, i128)> {
@@ -1368,12 +1372,18 @@ impl Checker {
             if let Some((t, _)) = done[i]
                 && self.wrong_shape(params[i], t)
             {
+                // A list where a `nlist` is wanted, `length`'s: the
+                // operation that measures a list said (kayak's, 2026-10-11).
+                let hint = match (self.arena.get(params[i]), self.arena.get(t)) {
+                    (Ty::NList { .. }, Ty::Pair(..)) => LIST_LENGTH_HINT,
+                    _ => "",
+                };
                 let map = self.partial_map(u);
                 let p = self.subst(params[i], &map);
                 let p = self.show_open(p, u);
                 return Err(FxError::at(
                     self.arena.span_of(*a),
-                    format!("argument {} is a {}, where a {} is expected", i + 1, self.show_ty(t), p),
+                    format!("argument {} is a {}, where a {} is expected{hint}", i + 1, self.show_ty(t), p),
                 ));
             }
         }
@@ -1413,8 +1423,9 @@ impl Checker {
                 _ => false,
             },
             (Ty::Subr { .. }, _) => a.as_subr().is_none(),
-            // A `nlist` is a list.
+            // A `nlist` is a list; a list at `acyclic`, a `nlist`.
             (Ty::Pair(..), Ty::NList { .. }) => false,
+            (Ty::NList { .. }, Ty::Pair(_, _, Region::Frozen(_, true), _)) => false,
             // A `nat` is an `int`; a test's result, a `bool`.
             (Ty::Base(_), Ty::Nat(_) | Ty::Proving { .. }) => false,
             _ => std::mem::discriminant(&p) != std::mem::discriminant(&a),
@@ -1748,6 +1759,13 @@ impl Checker {
                 self.unify_size(&m, &n, u);
             }
             (Ty::Nat(m), Ty::Nat(n)) => self.unify_size(&m, &n, u),
+            // A list at `acyclic` is a `nlist` of some length (`Checker::sub`),
+            // so `length` takes one (kayak's, 2026-10-11).
+            (Ty::NList { elem: x, size: m, region: r }, Ty::Pair(y, _, s, _)) if matches!(s, Region::Frozen(_, true)) => {
+                self.unify_region(r, s, u);
+                self.unify(x, y, u, trail);
+                self.unify_size(&m, &Size::Finite, u);
+            }
             (Ty::Pair(x, t2, r, _), Ty::NList { elem: y, size, region: s }) => {
                 self.unify_region(r, s, u);
                 self.unify(x, y, u, trail);
