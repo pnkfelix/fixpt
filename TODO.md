@@ -1849,13 +1849,19 @@ is). Left:
   on (an include would give it twice), a types module whose type family
   the file uses (an included family is not yet applied in a declared
   type: to do), and re-exported types' lines.
-- The cost, to measure on a quiet machine: back to back under load, the
-  FX-26 compiler's phases (`fx words`, `fx arm64` on peval) 3 to 5 %
-  slower, within the noise of `fx check`. Likely: an item's lambda's body
-  is `(with %include …)`, so each call loads the included names it uses
-  from the bucket, where an import bound them once. A `with` of a bucket
-  of hidden includes could be made once, at the module (each name bound
-  as the import line did), not per call.
+- The cost, measured on a quiet machine (2026-10-11, the commits before
+  and after the pass built side by side, alternated four times). Running
+  the compiler (peval's `fx` phases): about 3 % slower, `fx check` and
+  `fx words`; an item's lambda's body is `(with %include …)`, so each
+  call loads the included names it uses from the bucket, where an import
+  bound them once. A `with` of a bucket of hidden includes could be made
+  once, at the module (each name bound as the import line did), not per
+  call. Checking the front end itself, much more: `check` 575 → 762 ms,
+  `fx check` 1295 → 2127, 223.6 → 273.9 M words. Mostly the bucket made
+  quadratically, each name looked for in a list of those so far, in both
+  checkers; fixed (`DONE.md` §69): `check` 555, `fx check` 1475, 228.7 M
+  words. Left: `fx check` still about 14 % over; not `k-with-used`'s scan
+  of the bucket for each item (a memo of it changed nothing).
 - An included type family applied in a declared type ("`table` is not a
   description function"): the files using `table` keep table-types's
   import lines.

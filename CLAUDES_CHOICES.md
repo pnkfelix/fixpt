@@ -495,3 +495,17 @@ than a word unless its name says so.
    an index key's tag and variant in line natively (a field read, and a
    short loop over the owner's fields by identity), which needed nothing
    new of the types.
+
+## §69's cost, measured (2026-10-11, autonomous)
+
+1. **Measured the import pass against the commit before it**, built side
+   by side, alternated: peval's phases ~3 % (as feared, small), but the
+   front end's own checking 33 % (Rust) and 64 % (FX-26) slower, which
+   the earlier peval-only measurement missed. Fixed the cause found by
+   profiling (the bucket made quadratically) rather than revert the pass.
+2. **Kept only what measured**: a constant-time `free_into` (a counted
+   bound set) and a memo of `k-with-used`'s scan were tried and changed
+   nothing measurable; both reverted, the diff kept to the fix.
+3. **Left**: `fx check` still ~14 % above before the pass; the per-call
+   `with` cost (~3 % when the compiler runs) and its remedy as TODO §69
+   says.

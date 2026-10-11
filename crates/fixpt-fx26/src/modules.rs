@@ -133,13 +133,17 @@ impl Checker {
         let (mut out, mut path): (Vec<(Sym, TyId)>, Vec<usize>) = (Vec::new(), Vec::new());
         let mut own_descs = std::mem::take(&mut descs);
         let (mut fresh, mut map) = (Vec::new(), HashMap::new());
+        // The names so far, for lookups in constant time: an include of a
+        // types file brings hundreds of each.
+        let mut desc_at: HashMap<Sym, TyId> = own_descs.iter().map(|(n, t)| (*n, *t)).collect();
+        let mut val_names: HashSet<Sym> = own.iter().map(|(n, _)| *n).collect();
         for (k, (name, t)) in from.iter().enumerate() {
             let (ds, vs, taken) = match self.arena.get(self.arena.resolve(*t)).clone() {
                 Ty::Module { abs: a, descs, vals } => {
                     let (mut ds, own_abs) = self.abs_taken(&a, &mut map);
                     let taken: Vec<Sym> = own_abs.iter().map(|(n, _)| *n).collect();
                     for (n, _) in &own_abs {
-                        if abs.iter().chain(&fresh).any(|(m, _)| m == n) || descs.iter().chain(&own_descs).any(|(m, _)| m == n) {
+                        if abs.iter().chain(&fresh).any(|(m, _)| m == n) || desc_at.contains_key(n) {
                             return Err(FxError::at(span, format!("`{}` is defined twice in this module", self.interner.name(*n))));
                         }
                     }
@@ -160,18 +164,19 @@ impl Checker {
                 // A type or effect name given twice is one name if it
                 // describes the same both times (re-exported, as a types
                 // file gives on another's): `TODO.md` §69, the import pass.
-                let prior = descs.iter().chain(&own_descs).find(|(n, _)| *n == d.0).map(|(_, t)| *t);
-                let same = prior.is_some_and(|t| self.subtype(t, d.1) && self.subtype(d.1, t));
+                let prior = desc_at.get(&d.0).copied();
+                let same = prior.is_some_and(|t| self.arena.resolve(t) == self.arena.resolve(d.1) || (self.subtype(t, d.1) && self.subtype(d.1, t)));
                 let twice = (prior.is_some() && !same) || abs.iter().chain(&fresh).any(|(n, _)| *n == d.0);
                 if !self.interner.name(d.0).starts_with("%hidden") && twice {
                     return Err(FxError::at(span, format!("`{}` is defined twice in this module", self.interner.name(d.0))));
                 }
                 if !same {
+                    desc_at.entry(d.0).or_insert(d.1);
                     descs.push(d);
                 }
             }
             for (j, v) in vs.into_iter().enumerate() {
-                if out.iter().chain(&own).any(|(n, _)| *n == v.0) {
+                if !val_names.insert(v.0) {
                     return Err(FxError::at(span, format!("`{}` is defined twice in this module", self.interner.name(v.0))));
                 }
                 out.push(v);
@@ -179,6 +184,7 @@ impl Checker {
             }
             for (n, value) in marks {
                 let name = self.interner.intern(&format!("{}{}", if value { "%hiddenv:" } else { "%hidden:" }, self.interner.name(n)));
+                desc_at.entry(name).or_insert(self.unit);
                 descs.push((name, self.unit));
             }
         }
@@ -192,8 +198,11 @@ impl Checker {
             }
         }
         self.facts.reshaped.insert(e, path);
-        let descs = descs.iter().map(|(d, x)| (*d, self.subst(*x, &map))).collect();
-        let vals = out.iter().map(|(x, y)| (*x, self.subst(*y, &map))).collect();
+        let (descs, vals) = if map.is_empty() {
+            (descs, out)
+        } else {
+            (descs.iter().map(|(d, x)| (*d, self.subst(*x, &map))).collect(), out.iter().map(|(x, y)| (*x, self.subst(*y, &map))).collect())
+        };
         fresh.extend(abs);
         Ok(self.arena.ty(Ty::Module { abs: fresh, descs, vals }))
     }

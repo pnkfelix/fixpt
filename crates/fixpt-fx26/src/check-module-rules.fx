@@ -50,6 +50,10 @@
       (include check-modules-types))
 ;; The types it uses of the files before it.
 (define-type k-done (select check-synth-types k-done))
+(define-type table (select table-types table))
+;; The names a bucket has so far (`k-included`), each a type's or a
+;; value's: by name, its type, for lookups in constant time.
+(define-type k-saw (table symbol int @t))
 (define-type k-saying (select check-subtype-types k-saying))
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-env) (include check-print) (include check-errors)
@@ -398,48 +402,57 @@
 ;; `ds` onto `acc`'s types, none named there or in `own` but as the same
 ;; type (a types file's re-export: one name), nor an abstract type of
 ;; `own-abs`, the module's own, or of `acc`'s.
-(define k-inc-descs (subr (maxeff checks spin) (k-parts k-incs k-parts k-parts int int) k-incs)
-  (lambda (ds acc own-abs own a b)
+(define k-inc-descs
+  (subr (maxeff checks spin) (k-parts k-incs k-parts k-saw int int) k-incs)
+  (lambda (ds acc own-abs seen a b)
     (if (null? ds)
         acc
         (let* ((n (extract (car ds) 1)) (t (extract (car ds) 2))
-               (prior (k-prior-desc n (extract acc 1) own))
-               (same (and (>= prior 0) (k-subtype prior t) (k-subtype t prior))))
+               (prior (table-ref seen n -1))
+               (same (and (>= prior 0)
+                          (or (= (k-resolve prior) (k-resolve t))
+                              (and (k-subtype prior t) (k-subtype t prior))))))
           (cond ((and (not (k-prefix? "%hidden" (symbol->string n)))
                       (or (and (>= prior 0) (not same))
                           (k-named-in? n own-abs (extract acc 4) nil nil)))
                  (k-twice n a b))
-                (same (k-inc-descs (cdr ds) acc own-abs own a b))
-                (else (k-inc-descs (cdr ds)
-                                   (k-incs-of (cons (car ds) (extract acc 1)) (extract acc 2)
-                                              (extract acc 3) acc)
-                                   own-abs own a b)))))))
-;; The type `n` names among the types included so far, `inc`, or the
-;; module's own, `own`; -1 if none.
-(define k-prior-desc (subr (maxeff (read @globals) spin) (symbol k-parts k-parts) int)
-  (lambda (n inc own)
-    (let ((i (k-ext-index inc n 0)))
-      (if (>= i 0)
-          (extract (k-nth inc i) 2)
-          (let ((j (k-ext-index own n 0))) (if (>= j 0) (extract (k-nth own j) 2) -1))))))
+                (same (k-inc-descs (cdr ds) acc own-abs seen a b))
+                (else (begin
+                        (k-see seen n t)
+                        (k-inc-descs (cdr ds)
+                                     (k-incs-of (cons (car ds) (extract acc 1)) (extract acc 2)
+                                                (extract acc 3) acc)
+                                     own-abs seen a b))))))))
+;; `n`, of type `t`, onto `seen`, unless there already.
+(define k-see
+  (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t)) (k-saw symbol int) unit)
+  (lambda (seen n t) (if (table-has? seen n) #u (table-set! seen n t))))
+;; Each of `ps` onto `seen`.
+(define k-see-all
+  (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t)) (k-saw k-parts) k-saw)
+  (lambda (seen ps)
+    (if (null? ps)
+        seen
+        (begin (k-see seen (extract (car ps) 1) (extract (car ps) 2))
+               (k-see-all seen (cdr ps))))))
 ;; `vs`, from value `j` of the module that is value `k`, onto `acc`'s
 ;; values, none named there or in `own`.
-(define k-inc-vals (subr (maxeff checks spin) (k-parts int int k-incs k-parts int int) k-incs)
-  (lambda (vs k j acc own a b)
+(define k-inc-vals (subr (maxeff checks spin) (k-parts int int k-incs k-saw int int) k-incs)
+  (lambda (vs k j acc seen a b)
     (cond ((null? vs) acc)
-          ((or (>= (k-ext-index (extract acc 2) (extract (car vs) 1) 0) 0)
-               (>= (k-ext-index own (extract (car vs) 1) 0) 0))
-           (k-twice (extract (car vs) 1) a b))
-          (else (k-inc-vals (cdr vs) k (+ j 1)
-                            (k-incs-of (extract acc 1) (cons (car vs) (extract acc 2))
-                                       (cons (k-reshape-path k j) (extract acc 3)) acc)
-                            own a b)))))
+          ((table-has? seen (extract (car vs) 1)) (k-twice (extract (car vs) 1) a b))
+          (else (begin
+                  (table-set! seen (extract (car vs) 1) 0)
+                  (k-inc-vals (cdr vs) k (+ j 1)
+                              (k-incs-of (extract acc 1) (cons (car vs) (extract acc 2))
+                                         (cons (k-reshape-path k j) (extract acc 3)) acc)
+                              seen a b))))))
 ;; Each of the modules `from`, the `k`th on, onto `acc`: its values from
 ;; value `at`, if not -1, else `k`; its abstract types a bound module's,
 ;; aliases, or the module's own (`k-abs-own`).
 (define k-inc-all
-  (subr (maxeff checks spin) (k-parts int int k-incs k-parts k-parts k-parts int int) k-incs)
-  (lambda (from k at acc own-abs own-ds own-vs a b)
+  (subr (maxeff checks spin) (k-parts int int k-incs k-parts k-parts k-saw k-saw int int) k-incs)
+  (lambda (from k at acc own-abs own-ds dseen vseen a b)
     (if (null? from)
         acc
         (tagcase (k-get (k-inc-module (extract (car from) 2) a b))
@@ -451,31 +464,33 @@
                                             (5 (append (extract acc 5) (extract o 2))))
                                    own-abs own-ds a b))
                    (ds (append (k-abs-aliases ab) ds))
-                   (r (k-inc-vals vs (if (< at 0) k at) 0 (k-inc-descs ds acc own-abs own-ds a b)
-                                  own-vs a b)))
+                   (r (k-inc-vals vs (if (< at 0) k at) 0 (k-inc-descs ds acc own-abs dseen a b)
+                                  vseen a b)))
               (k-inc-all (cdr from) (+ k 1) at
                          ;; A hidden `include`'s (`%hinclude-k`): each name marked
                          ;; hidden, for the module's type to leave out (`k-hiding`).
                          (if (k-prefix? "%hinclude-" (symbol->string (extract (car from) 1)))
                              (k-incs-of (k-hidden-marks
-                                         "%hiddenv:" vs
-                                         (k-hidden-marks "%hidden:" ds
+                                         "%hiddenv:" vs dseen
+                                         (k-hidden-marks "%hidden:" ds dseen
                                                          (k-hidden-marks "%hidden:" (extract o 1)
-                                                                         (extract r 1))))
+                                                                         dseen (extract r 1))))
                                         (extract r 2) (extract r 3) r)
                              r)
-                         own-abs own-ds own-vs a b)))
+                         own-abs own-ds dseen vseen a b)))
           (else z acc)))))
 ;; A `prefix`ed type for each of `ps`, onto `acc` (newest first): a type's
 ;; `%hidden:name`, a value's `%hiddenv:name`.
 (define k-hidden-marks
-  (subr (maxeff (read @globals) (alloc @t)) (string k-parts k-parts) k-parts)
-  (lambda (prefix ps acc)
+  (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t)) (string k-parts k-saw k-parts)
+        k-parts)
+  (lambda (prefix ps seen acc)
     (if (null? ps)
         acc
-        (k-hidden-marks prefix (cdr ps)
-                        (cons (product (1 (k-hidden-name prefix (extract (car ps) 1))) (2 k-unit))
-                              acc)))))
+        (let ((n (k-hidden-name prefix (extract (car ps) 1))))
+          (begin (k-see seen n k-unit)
+                 (k-hidden-marks prefix (cdr ps) seen
+                                 (cons (product (1 n) (2 k-unit)) acc)))))))
 (define k-hidden-name (subr (read @globals) (string symbol) symbol)
   (lambda (prefix n) (string->symbol (string-append prefix (symbol->string n)))))
 ;; The positions of a module's own values `own`, past `%include`'s, at `k`.
@@ -498,8 +513,10 @@
 (define k-included
   (subr (maxeff checks spin) (k-parts k-parts k-parts k-parts int int int) int)
   (lambda (from abs ds own at a b)
-    (let* ((r (k-inc-all from 0 at (product (1 nil) (2 nil) (3 nil) (4 nil) (5 nil)) abs ds own
-                         a b))
+    (let* ((dseen (k-see-all (make-table symbol-hash symbol=?) ds))
+           (vseen (k-see-all (make-table symbol-hash symbol=?) own))
+           (r (k-inc-all from 0 at (product (1 nil) (2 nil) (3 nil) (4 nil) (5 nil)) abs ds dseen
+                         vseen a b))
            (m (extract r 5)))
       (begin
         (set k-reshapes (cons (product (1 a) (2 b)
@@ -507,8 +524,11 @@
                               (get k-reshapes)))
         ;; The included modules' own abstract types, then the module's.
         (k-ty-new (ty-module (append (reverse (extract r 4)) abs)
-                             (k-subst-each (append (reverse (extract r 1)) ds) m)
-                             (k-subst-each (append (reverse (extract r 2)) own) m)))))))
+                             (k-subst-some (append (reverse (extract r 1)) ds) m)
+                             (k-subst-some (append (reverse (extract r 2)) own) m)))))))
+;; `ps` with `m` substituted, if it says anything.
+(define k-subst-some (subr (maxeff kstate spin) (k-parts k-map) k-parts)
+  (lambda (ps m) (if (null? m) ps (k-subst-each ps m))))
 
 ;;; ------------------------------------------------------------ hide
 

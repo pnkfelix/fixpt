@@ -1384,6 +1384,17 @@ end); and `hide` marking a type and a value of one name alike, so hiding
 one hid both (`%hidden:` for types, `%hiddenv:` for values now). Test:
 `modules/hide-type-not-value.fx`.
 
+
+**The bucket made in linear time** (2026-10-11). Measured side by side
+with the commit before the pass, checking the front end had become
+slower, `check` 575 → 762 ms and `fx check` 1295 → 2127: an `include`'s
+bucket was made by looking each name up in a list of those so far (every
+value of every hidden include, thousands), and a type given twice was
+compared both ways before seeing it was the same type. Now a table of
+the names so far in both checkers (`Checker::included`; `k-included`,
+`k-saw`), the same type first by identity, and no substitution where
+there is nothing to substitute: `check` 555 ms, `fx check` 1475, the fx
+phases' allocation 274.9 → 228.7 M words.
 ## 71. A load cycle is an error, not a hang (2026-10-10)
 
 Found 2026-10-09 (`TODO.md` §68 phase 2): two types files loading each
