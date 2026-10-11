@@ -238,14 +238,58 @@ with indices, as kayak would have to today.
 3. Then decide, with the survey's numbers, whether (B) should become the
    default for written binders.
 
-## 8. The survey
+## 8. What the survey found, and what was built
 
-`anti-aliasing-survey.md` (in progress, 2026-10-11) measures variants (L),
-(A) and (B) as a diagnostic in the Rust checker over the test programs,
-the front end written in FX-26, the benchmark ports and the standard
-environment: how many instantiations each refuses, why, and which
-primitives (§5, one-region versions of standard procedures like Rust's
-`copy_within`, region subtyping) would remove each class.
+**The survey** (`anti-aliasing-survey.md`, measured at `4670769`, by a
+diagnostic left on its own branch) asked: if the rule came back, how many
+places in our code would stop checking?
+
+| How strict                                                     | Places that would break |
+| -------------------------------------------------------------- | ----------------------: |
+| (L) Lucassen's rule as written                                 |                     274 |
+| (A) different region binders always get different regions     |                      96 |
+| (B) may share a region only if neither is written through      |                       9 |
+
+In plain terms:
+
+- Almost all of it is ordinary code like `(append xs ys)` or `(reverse
+  xs)`. Those standard procedures are typed over two regions, one for the
+  input and one for the result, and programs routinely use one region for
+  both. That is harmless, since they only read their input, but a strict
+  rule refuses it. Our own code almost never defines a procedure over two
+  regions: the breakage is the standard library's types, not user code.
+- (L)'s extra 178 are all the frozen `acyclic` region, which every
+  variadic call (`list`) carries in its type: an artifact of that
+  encoding, and harmless since frozen data is never written.
+- (B), Rust's rule, breaks almost nothing. Its 9 are a real instance of
+  what it forbids: one benchmark's hash tables (`scheme-bench/equal.fx`)
+  write into the same region as their keys.
+- No soundness hole: today's checker never assumes two region variables
+  are distinct (§3).
+
+So: the full rule (L or A) would be costly, needing `append`, `reverse`
+and kin retyped or given one-region versions; (B) is nearly free and is
+what a Rust transpiler wants, the candidate default for later.
+
+**What was built** (2026-10-11, `31eebfb`): the opt-in, (C), per binder.
+A region binder may be marked `distinct`:
+
+```
+(poly ((r1 region distinct) (r2 region)) …)
+```
+
+Each instantiation must then give `r1` a region provably different from
+the other binders' regions and from any region the procedure's type
+mentions (different constants, the heap, a fresh or `letregion` region,
+or an enclosing procedure's own `distinct` binder); else it is refused.
+Inside, the checker may rely on `r1` overlapping nothing else (facts
+read through it survive writes elsewhere). A procedure needing a
+`distinct` region is no procedure that does not. Nothing unmarked
+changes, so nothing broke. Both checkers; `docs/fx26.md`, "Distinct
+regions"; tests `regions/distinct-*.fx`. Not yet: module parameters and
+signatures. It gives Rust-style `&mut` disjointness between parameters;
+`&mut` into a linked heap structure needs a substructural discipline
+(§9, "What opt-in distinctness can and cannot give `&mut`").
 
 ## 9. Questions for the user
 
