@@ -63,29 +63,8 @@
 (define t-define-rec (with parser-types t-define-rec))
 (define t-exp (with parser-types t-exp))
 (define-type top (select parser-types top))
-;; What it uses of the modules it is given.
-(define c-count-exps (with compile c-count-exps))
-(define c-count-params (with compile c-count-params))
-(define c-field-at (with compile c-field-at))
-(define c-genv-now (with compile c-genv-now))
-(define c-lambda-of (with compile c-lambda-of))
-(define c-mentions? (with compile c-mentions?))
-(define c-plain-fx-at (with compile c-plain-fx-at))
-(define c-plain-table (with compile c-plain-table))
-(define c-drop-special (with compile-plan c-drop-special))
-(define c-forget-inline! (with compile-plan c-forget-inline!))
-(define c-inline-limit (with compile-plan c-inline-limit))
-(define c-inline-room (with compile-plan c-inline-room))
-(define c-note-inline! (with compile-plan c-note-inline!))
-(define c-nth (with compile-plan c-nth))
-(define c-special-limit (with compile-plan c-special-limit))
-(define c-specials (with compile-plan c-specials))
-(define c-unrolls (with compile-plan c-unrolls))
-(define c-unrolls-of (with compile-plan c-unrolls-of))
-(define c-last-word (with compile-state c-last-word))
-(define c-prev-word (with compile-state c-prev-word))
-(define table-count (with tables table-count))
-(define table-set! (with tables table-set!))
+;; What it uses of the modules it is given: all of each, hidden.
+(hide (include compile) (include compile-plan) (include compile-state) (include tables))
 
 ;; Two arities found: the same one, or -2 if they differ or either failed;
 ;; -1 is none found yet.

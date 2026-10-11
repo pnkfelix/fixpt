@@ -42,21 +42,9 @@
 (define ty-proving (with check-types-types ty-proving))
 (define-type k-items (select check-types-types k-items))
 (define-type k-syns (select check-read-types k-syns))
-;; What it uses of the modules it is given.
-(define k-cat3 (with check-types k-cat3))
-(define k-get (with check-types k-get))
-(define k-length (with check-types k-length))
-(define k-nth (with check-types k-nth))
-(define k-te (with check-types k-te))
-(define k-ty-new (with check-types k-ty-new))
-(define k-bool (with check-env k-bool))
-(define k-items (with check-read k-items))
-(define k-sfail (with check-read k-sfail))
-(define k-list-head (with check-syntax k-list-head))
-(define k-shape (with check-syntax k-shape))
-(define syn-int (with parser syn-int))
-(define syn-name (with parser syn-name))
-(define syn-symbol? (with parser syn-symbol?))
+;; What it uses of the modules it is given: all of each, hidden.
+(hide (include check-types) (include check-env) (include check-read) (include check-syntax)
+      (include parser))
 
 ;; Shape `n`'s number (`check-unions.fx`), or -1.
 (define k-shape-named (subr (read @globals) (string) int)

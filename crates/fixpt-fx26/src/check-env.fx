@@ -62,18 +62,8 @@
 (define x-with (with check-types-types x-with))
 (define-type table (select table-types table))
 (define-type k-trail (select check-subtype-types k-trail))
-;; What it uses of the modules it is given.
-(define k-cat3 (with check-types k-cat3))
-(define k-cat5 (with check-types k-cat5))
-(define k-length (with check-types k-length))
-(define k-narrowed (with check-types k-narrowed))
-(define k-narrows (with check-types k-narrows))
-(define k-std-type (with check-types k-std-type))
-(define k-ty-new (with check-types k-ty-new))
-(define make-table (with tables make-table))
-(define symbol-hash (with tables symbol-hash))
-(define table-ref (with tables table-ref))
-(define table-set! (with tables table-set!))
+;; What it uses of the modules it is given: all of each, hidden.
+(hide (include check-types) (include tables))
 
 ;; The base types, made first, in this order, so their indexes are known.
 (define k-int int 0)

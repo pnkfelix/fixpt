@@ -68,11 +68,13 @@ pub fn str_pre(t: Reg, n: Reg, imm: i64) -> u32 {
     0xF800_0C00 | simm(imm, 9) << 12 | r(n) << 5 | r(t)
 }
 /// `ldr xt, [xn, #off]`, `off` a multiple of 8 in 0..32768.
+#[track_caller]
 pub fn ldr(t: Reg, n: Reg, off: u32) -> u32 {
     assert!(off.is_multiple_of(8) && off < 32768, "ldr offset {off}");
     0xF940_0000 | (off / 8) << 10 | r(n) << 5 | r(t)
 }
 /// `str xt, [xn, #off]`.
+#[track_caller]
 pub fn str(t: Reg, n: Reg, off: u32) -> u32 {
     assert!(off.is_multiple_of(8) && off < 32768, "str offset {off}");
     0xF900_0000 | (off / 8) << 10 | r(n) << 5 | r(t)
@@ -122,21 +124,25 @@ pub fn str_w4(t: Reg, n: Reg, m: Reg) -> u32 {
     0xB820_7800 | r(m) << 16 | r(n) << 5 | r(t)
 }
 /// `stp xt, xt2, [xn, #imm]!`, `imm` a multiple of 8.
+#[track_caller]
 pub fn stp_pre(t: Reg, t2: Reg, n: Reg, imm: i64) -> u32 {
     assert!(imm % 8 == 0);
     0xA980_0000 | simm(imm / 8, 7) << 15 | r(t2) << 10 | r(n) << 5 | r(t)
 }
 /// `ldp xt, xt2, [xn], #imm`.
+#[track_caller]
 pub fn ldp_post(t: Reg, t2: Reg, n: Reg, imm: i64) -> u32 {
     assert!(imm % 8 == 0);
     0xA8C0_0000 | simm(imm / 8, 7) << 15 | r(t2) << 10 | r(n) << 5 | r(t)
 }
 /// `stp xt, xt2, [xn, #imm]`.
+#[track_caller]
 pub fn stp(t: Reg, t2: Reg, n: Reg, imm: i64) -> u32 {
     assert!(imm % 8 == 0);
     0xA900_0000 | simm(imm / 8, 7) << 15 | r(t2) << 10 | r(n) << 5 | r(t)
 }
 /// `ldp xt, xt2, [xn, #imm]`.
+#[track_caller]
 pub fn ldp(t: Reg, t2: Reg, n: Reg, imm: i64) -> u32 {
     assert!(imm % 8 == 0);
     0xA940_0000 | simm(imm / 8, 7) << 15 | r(t2) << 10 | r(n) << 5 | r(t)
@@ -145,16 +151,19 @@ pub fn ldp(t: Reg, t2: Reg, n: Reg, imm: i64) -> u32 {
 // --------------------------------------------------------------- arithmetic
 
 /// `add xd, xn, #imm` (0..4096).
+#[track_caller]
 pub fn add_imm(d: Reg, n: Reg, imm: u32) -> u32 {
     assert!(imm < 4096);
     0x9100_0000 | imm << 10 | r(n) << 5 | r(d)
 }
 /// `add xd, xn, #imm, lsl #12` (0..4096): `imm` 4 KB pages.
+#[track_caller]
 pub fn add_imm_pages(d: Reg, n: Reg, imm: u32) -> u32 {
     assert!(imm < 4096);
     0x9140_0000 | imm << 10 | r(n) << 5 | r(d)
 }
 /// `sub xd, xn, #imm` (0..4096).
+#[track_caller]
 pub fn sub_imm(d: Reg, n: Reg, imm: u32) -> u32 {
     assert!(imm < 4096);
     0xD100_0000 | imm << 10 | r(n) << 5 | r(d)
@@ -164,6 +173,7 @@ pub fn add(d: Reg, n: Reg, m: Reg) -> u32 {
     0x8B00_0000 | r(m) << 16 | r(n) << 5 | r(d)
 }
 /// `add xd, xn, xm, lsl #s`.
+#[track_caller]
 pub fn add_lsl(d: Reg, n: Reg, m: Reg, s: u32) -> u32 {
     assert!(s < 64);
     0x8B00_0000 | r(m) << 16 | s << 10 | r(n) << 5 | r(d)
@@ -181,6 +191,7 @@ pub fn subs(d: Reg, n: Reg, m: Reg) -> u32 {
     0xEB00_0000 | r(m) << 16 | r(n) << 5 | r(d)
 }
 /// `subs xd, xn, #imm` (0..4096).
+#[track_caller]
 pub fn subs_imm(d: Reg, n: Reg, imm: u32) -> u32 {
     assert!(imm < 4096);
     0xF100_0000 | imm << 10 | r(n) << 5 | r(d)
@@ -191,6 +202,7 @@ pub fn cmp_sp(m: Reg) -> u32 {
     0xEB20_63FF | r(m) << 16
 }
 /// `adds xd, xn, #imm`.
+#[track_caller]
 pub fn adds_imm(d: Reg, n: Reg, imm: u32) -> u32 {
     assert!(imm < 4096);
     0xB100_0000 | imm << 10 | r(n) << 5 | r(d)
@@ -200,26 +212,31 @@ pub fn orr(d: Reg, n: Reg, m: Reg) -> u32 {
     0xAA00_0000 | r(m) << 16 | r(n) << 5 | r(d)
 }
 /// `and xd, xn, #(2^bits - 1)`: the low `bits` bits (1..64).
+#[track_caller]
 pub fn and_low(d: Reg, n: Reg, bits: u32) -> u32 {
     assert!((1..64).contains(&bits));
     0x9240_0000 | (bits - 1) << 10 | r(n) << 5 | r(d)
 }
 /// `tst xn, #(2^bits - 1)`: are the low `bits` bits all zero?
+#[track_caller]
 pub fn tst_low(n: Reg, bits: u32) -> u32 {
     assert!((1..64).contains(&bits));
     0xF240_001F | (bits - 1) << 10 | r(n) << 5
 }
 /// `ubfx xd, xn, #lsb, #width`: an unsigned bit field.
+#[track_caller]
 pub fn ubfx(d: Reg, n: Reg, lsb: u32, width: u32) -> u32 {
     assert!(lsb < 64 && width >= 1 && lsb + width <= 64);
     0xD340_0000 | lsb << 16 | (lsb + width - 1) << 10 | r(n) << 5 | r(d)
 }
 /// `asr xd, xn, #s`: shift right, keeping the sign.
+#[track_caller]
 pub fn asr_imm(d: Reg, n: Reg, s: u32) -> u32 {
     assert!(s < 64);
     0x9340_FC00 | s << 16 | r(n) << 5 | r(d)
 }
 /// `cmp xn, #imm` (0..4096).
+#[track_caller]
 pub fn cmp_imm(n: Reg, imm: u32) -> u32 {
     assert!(imm < 4096);
     0xF100_001F | imm << 10 | r(n) << 5
@@ -237,16 +254,19 @@ pub fn mov(d: Reg, m: Reg) -> u32 {
     0xAA00_03E0 | r(m) << 16 | r(d)
 }
 /// `movz xd, #imm16, lsl #(16 * hw)`.
+#[track_caller]
 pub fn movz(d: Reg, imm16: u32, hw: u32) -> u32 {
     assert!(imm16 < 1 << 16 && hw < 4);
     0xD280_0000 | hw << 21 | imm16 << 5 | r(d)
 }
 /// `movk xd, #imm16, lsl #(16 * hw)`.
+#[track_caller]
 pub fn movk(d: Reg, imm16: u32, hw: u32) -> u32 {
     assert!(imm16 < 1 << 16 && hw < 4);
     0xF280_0000 | hw << 21 | imm16 << 5 | r(d)
 }
 /// `lsr xd, xn, #s`.
+#[track_caller]
 pub fn lsr_imm(d: Reg, n: Reg, s: u32) -> u32 {
     assert!(s < 64);
     0xD340_FC00 | s << 16 | r(n) << 5 | r(d)
@@ -353,11 +373,13 @@ pub fn and(d: Reg, n: Reg, m: Reg) -> u32 {
 }
 /// `and xd, xn, #mask`, the mask `width` ones from bit `lsb` (a run that
 /// does not wrap, and is not all 64).
+#[track_caller]
 pub fn and_bits(d: Reg, n: Reg, lsb: u32, width: u32) -> u32 {
     assert!(width >= 1 && lsb + width <= 64 && width < 64);
     0x9240_0000 | ((64 - lsb) % 64) << 16 | (width - 1) << 10 | r(n) << 5 | r(d)
 }
 /// `lsl xd, xn, #s`.
+#[track_caller]
 pub fn lsl_imm(d: Reg, n: Reg, s: u32) -> u32 {
     assert!(s < 64);
     0xD340_0000 | ((64 - s) % 64) << 16 | (63 - s) << 10 | r(n) << 5 | r(d)

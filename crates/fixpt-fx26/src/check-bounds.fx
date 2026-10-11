@@ -27,9 +27,8 @@
 (define dt (with check-types-types dt))
 (define-type k-map (select check-types-types k-map))
 (define-effect kstate (select check-types-types kstate))
-;; What it uses of the modules it is given.
-(define k-unify-exact (with check-types k-unify-exact))
-(define k-subtype (with check-subtype k-subtype))
+;; What it uses of the modules it is given: all of each, hidden.
+(hide (include check-types) (include check-subtype))
 
 (define k-bounds-stack (ref (listof k-bound-entry @t) @t) (new nil))
 ;; Whether `k-unify` bounds from above: matching what is expected of a call's

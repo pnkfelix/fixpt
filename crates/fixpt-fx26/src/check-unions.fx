@@ -43,17 +43,8 @@
 (define ty-sum (with check-types-types ty-sum))
 (define ty-union (with check-types-types ty-union))
 (define ty-void (with check-types-types ty-void))
-;; What it uses of the modules it is given.
-(define k-cat3 (with check-types k-cat3))
-(define k-cat5 (with check-types k-cat5))
-(define k-fail (with check-types k-fail))
-(define k-get (with check-types k-get))
-(define k-has-id? (with check-types k-has-id?))
-(define k-pending-unions (with check-types k-pending-unions))
-(define k-resolve (with check-types k-resolve))
-(define k-ty-new (with check-types k-ty-new))
-(define k-show-ty (with check-print k-show-ty))
-(define k-void (with check-env k-void))
+;; What it uses of the modules it is given: all of each, hidden.
+(hide (include check-types) (include check-print) (include check-env))
 
 ;; The shapes, by number in `check.rs`'s `SHAPES` order: 0 int, 1 f64,
 ;; 2 f32, 3 char, 4 bool, 5 nil, 6 pair, 7 string, 8 symbol, 9 procedure,

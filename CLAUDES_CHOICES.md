@@ -406,3 +406,24 @@ than a word unless its name says so.
    machine it named.
 5. **The native machine's step-limit trap** now reads "evaluation step
    limit exceeded", as the other machines say it, not "out of fuel".
+
+## The import pass, `(hide (include m))` (TODO.md §69, 2026-10-11)
+
+1. **Only the modules a file is given** (its `lambda`'s parameters), not
+   the types files it loads: including whole types files collides on
+   about 2,000 re-exported type names (each types file re-exports others'
+   types for its signatures) and on the module values they bind
+   (`check-types-types` in each), which `include`'s "a name given twice is
+   refused" forbids. Relaxing that rule for "the same thing twice" is a
+   language change kept for later; the given modules alone carry most of
+   the lines.
+2. **A file whose signature gives on something it imports from a module
+   keeps all of that module's import lines**, and does not include it: the
+   re-export must stay a definition, and an include of the module would
+   give the name twice.
+3. **Files with clashes left as they are** (15 of 59): a name two given
+   modules both give (`k-union`, `k-one` through `check-read`'s re-export),
+   or one the file defines itself. To do: include all but the clashing
+   modules.
+4. **Measured back to back** against the commit before (peval's front-end
+   phases, old and new builds alternated): no difference past noise.

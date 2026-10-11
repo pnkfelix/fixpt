@@ -31,22 +31,9 @@
 (define-type c-spec (select compile-exps-types c-spec))
 (define-type c-twin (select compile-exps-types c-twin))
 (define-type c-standard-twin (select compile-lift-types c-standard-twin))
-;; What it uses of the modules it is given.
-(define c-genv (with compile c-genv))
-(define c-registers (with compile c-registers))
-(define c-made-reuse (with compile-state c-made-reuse))
-(define c-own-now (with compile-state c-own-now))
-(define c-r-plan-ctx (with compile-state c-r-plan-ctx))
-(define c-spec-now (with compile-state c-spec-now))
-(define c-twins (with compile-state c-twins))
-(define c-make-copies (with compile-plan c-make-copies))
-(define c-plan-copy-order (with compile-plan c-plan-copy-order))
-(define c-planned-fv (with compile-lift c-planned-fv))
-(define c-r-in-plan (with compile-lift c-r-in-plan))
-(define c-standard-twins (with compile-lift c-standard-twins))
-(define c-twin-depth (with compile-lift c-twin-depth))
-(define r-register-code (with regcode-entry r-register-code))
-(define r-standard-word (with regcode-entry r-standard-word))
+;; What it uses of the modules it is given: all of each, hidden.
+(hide (include compile) (include compile-state) (include compile-plan) (include compile-lift)
+      (include regcode-entry))
 
 ;; `cells` as word `w`'s register twin, unless there are none.
 (define c-twin! (subr c-emits (tword (listof wcell @k)) unit)

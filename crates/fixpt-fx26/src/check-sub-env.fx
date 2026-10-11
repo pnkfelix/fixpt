@@ -75,20 +75,9 @@
 (define ty-select (with check-types-types ty-select))
 (define-effect kmakes (select check-subst-types kmakes))
 (define-type table (select table-types table))
-;; What it uses of the modules it is given.
-(define k-get (with check-types k-get))
-(define k-bound-of (with check-types k-bound-of))
-(define k-data-var? (with check-types k-data-var?))
-(define k-new-epoch (with check-types k-new-epoch))
-(define k-resolve (with check-types k-resolve))
-(define k-visit? (with check-types k-visit?))
-(define k-length (with check-types k-length))
-(define k-conv=? (with check-print-parts k-conv=?))
-(define k-region=? (with check-effects k-region=?))
-(define make-table (with tables make-table))
-(define table-ref (with tables table-ref))
-(define table-set! (with tables table-set!))
-(define drop (with parser drop))
+;; What it uses of the modules it is given: all of each, hidden.
+(hide (include check-types) (include check-print-parts) (include check-effects) (include tables)
+      (include parser))
 
 ;; Base `x` below base `y`: the same, or an `i32` or `u32`, the fixnum it
 ;; stands for, below `int`. As the Rust checker's rule.

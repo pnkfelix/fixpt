@@ -38,19 +38,9 @@
 (define-type k-desc (select check-types-types k-desc))
 (define-effect kstate (select check-types-types kstate))
 (define ty-named (with check-types-types ty-named))
-;; What it uses of the modules it is given.
-(define k-arrow (with check-types k-arrow))
-(define k-arrow-kind? (with check-types k-arrow-kind?))
-(define k-binder-kinds (with check-types k-binder-kinds))
-(define k-dvar-name (with check-types k-dvar-name))
-(define k-gen-of (with check-types k-gen-of))
-(define k-new-dvar-of (with check-types k-new-dvar-of))
-(define k-ty-new (with check-types k-ty-new))
-(define k-binders-as-descs (with check-read-helpers k-binders-as-descs))
-(define k-lam (with check-read-helpers k-lam))
-(define k-fun-kind (with check-holds k-fun-kind))
-(define k-place? (with check-print-parts k-place?))
-(define k-is-flat? (with check-read-helpers k-is-flat?))
+;; What it uses of the modules it is given: all of each, hidden.
+(hide (include check-types) (include check-read-helpers) (include check-holds)
+      (include check-print-parts))
 
 ;; Whether description `d` is of kind `k`, as a binder of that kind takes; a
 ;; function whose kind is not known yet, a `select`, is let through.

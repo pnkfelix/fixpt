@@ -25,12 +25,8 @@
 (define x-app (with check-types-types x-app))
 (define x-const (with check-types-types x-const))
 (define x-if (with check-types-types x-if))
-;; What it uses of the modules it is given.
-(define k-bool (with check-env k-bool))
-(define k-branch-facts-of (with check-test-facts k-branch-facts-of))
-(define k-latent-facts (with check-test-facts k-latent-facts))
-(define k-sc-one-arg? (with check-binders k-sc-one-arg?))
-(define k-std-op (with check-calls k-std-op))
+;; What it uses of the modules it is given: all of each, hidden.
+(hide (include check-env) (include check-test-facts) (include check-binders) (include check-calls))
 
   ;; Whether `x` is the literal boolean `v`.
   (define k-bool-lit? (subr (read @globals) (kx bool) bool)

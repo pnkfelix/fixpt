@@ -23,17 +23,9 @@
 (define-type k-eff (select check-types-types k-eff))
 (define-effect kreads (select check-types-types kreads))
 (define-type kx (select check-types-types kx))
-;; What it uses of the modules it is given.
-(define k-cat3 (with check-types k-cat3))
-(define k-cat4 (with check-types k-cat4))
-(define k-cat5 (with check-types k-cat5))
-(define k-fail (with check-types k-fail))
-(define k-length (with check-types k-length))
-(define k-quote (with check-types k-quote))
-(define k-end (with check-resolve k-end))
-(define k-start (with check-resolve k-start))
-(define k-show-effect (with check-print-parts k-show-effect))
-(define k-show-ty (with check-print k-show-ty))
+;; What it uses of the modules it is given: all of each, hidden.
+(hide (include check-types) (include check-resolve) (include check-print-parts)
+      (include check-print))
 
 ;; The error `m` at expression `x`.
 (define k-fail-at (subr checks (string kx) void) (lambda (m x) (k-fail m (k-start x) (k-end x))))

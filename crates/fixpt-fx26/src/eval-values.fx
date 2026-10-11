@@ -53,9 +53,8 @@
 (define o-esc (with eval-types o-esc))
 (define o-key (with eval-types o-key))
 (define ev-err (with eval-types ev-err))
-;; What it uses of the modules it is given.
-(define k-cat3 (with check-types k-cat3))
-(define k-cat5 (with check-types k-cat5))
+;; What it uses of the modules it is given: all of each, hidden.
+(hide (include check-types))
 
 ;; Unit: one value, made once.
 (define the-unit val (o-unit))

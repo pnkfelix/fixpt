@@ -76,20 +76,9 @@
 (define x-var (with check-types-types x-var))
 (define x-with (with check-types-types x-with))
 (define-type k-items (select check-types-types k-items))
-;; What it uses of the modules it is given.
-(define k-items-bound (with check-resolve k-items-bound))
-(define k-bool (with check-env k-bool))
-(define k-int (with check-env k-int))
-(define k-lookup (with check-env k-lookup))
-(define k-with-names (with check-env k-with-names))
-(define k-conversions (with check-types k-conversions))
-(define k-get (with check-types k-get))
-(define k-has-id? (with check-types k-has-id?))
-(define k-named-has? (with check-types k-named-has?))
-(define k-resolve (with check-types k-resolve))
-(define k-std-binding? (with check-types k-std-binding?))
-(define k-items (with check-read k-items))
-(define k-under (with check-calls k-under))
+;; What it uses of the modules it is given: all of each, hidden.
+(hide (include check-resolve) (include check-env) (include check-types) (include check-read)
+      (include check-calls))
 
 (define k-sc-members (ref k-names @t) (new nil))
 (define k-sc-current (ref int @t) (new 0))

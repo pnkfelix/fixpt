@@ -71,6 +71,16 @@ impl Asm {
             self.e(sub(d, n, X16));
         }
     }
+    /// `d` := `n + k`, as `sub_const` subtracts: a frame of more than 511
+    /// slots is past `add`'s immediate.
+    fn add_const(&mut self, d: Reg, n: Reg, k: u64) {
+        if k < 4096 {
+            self.e(add_imm(d, n, k as u32));
+        } else {
+            self.es(&mov_imm64(X16, k));
+            self.e(add(d, n, X16));
+        }
+    }
     /// `dst` := field `f` of the running register word.
     fn cell(&mut self, dst: Reg, f: usize, fields: usize) {
         let off = 8 * (fields - f) as u64;
@@ -808,12 +818,12 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
                     a.e(str(X15, DSP, 8 * s as u32));
                 }
                 a.e(str(LR, DSP, 0));
-                a.e(add_imm(FP, DSP, 8 * m as u32));
+                a.add_const(FP, DSP, 8 * m as u64);
                 a.ds_limit();
             }
             "pop" => {
                 let m = k(o(0));
-                a.e(add_imm(DSP, DSP, 8 * (m as u32 + 1)));
+                a.add_const(DSP, DSP, 8 * (m as u64 + 1));
             }
             "stack" => a.slot(RESULT, k(o(0)), false),
             "setstk" => a.slot(RESULT, k(o(0)), true),

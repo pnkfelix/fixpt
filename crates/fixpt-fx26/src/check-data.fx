@@ -50,23 +50,9 @@
 (define ty-union (with check-types-types ty-union))
 (define ty-var (with check-types-types ty-var))
 (define ty-void (with check-types-types ty-void))
-;; What it uses of the modules it is given.
-(define k-bound-of (with check-types k-bound-of))
-(define k-cat3 (with check-types k-cat3))
-(define k-cat4 (with check-types k-cat4))
-(define k-cat5 (with check-types k-cat5))
-(define k-data-var? (with check-types k-data-var?))
-(define k-fail (with check-types k-fail))
-(define k-get (with check-types k-get))
-(define k-new-epoch (with check-types k-new-epoch))
-(define k-resolve (with check-types k-resolve))
-(define k-visit? (with check-types k-visit?))
-(define k-map-find (with check-print-parts k-map-find))
-(define k-region-show (with check-print-parts k-region-show))
-(define k-show-ty (with check-print k-show-ty))
-(define k-quote-dvar (with check-expect k-quote-dvar))
-(define k-region=? (with check-effects k-region=?))
-(define k-subst-region (with check-subst k-subst-region))
+;; What it uses of the modules it is given: all of each, hidden.
+(hide (include check-types) (include check-print-parts) (include check-print)
+      (include check-expect) (include check-effects) (include check-subst))
 
 ;; Data, and what a wider bloblet type may forget: `check-sub-env.fx`'s,
 ;; which the subtype test, before this file, asks.

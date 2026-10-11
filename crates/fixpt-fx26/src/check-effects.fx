@@ -46,8 +46,8 @@
 (define r-var (with check-types-types r-var))
 (define sz-finite (with check-types-types sz-finite))
 (define sz-lin (with check-types-types sz-lin))
-;; What it uses of the modules it is given.
-(define k-int-cmp (with check-types k-int-cmp))
+;; What it uses of the modules it is given: all of each, hidden.
+(hide (include check-types))
 
 ;; Booleans in order, false first.
 (define k-bool-cmp (subr (read @globals) (bool bool) int)
