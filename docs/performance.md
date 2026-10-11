@@ -2856,3 +2856,11 @@ registers. Over the MLton ports, each run whole, alternated twice:
 | nine others           |   same |  same |
 
 (seconds, start-up and checking included.)
+
+The same profile showed why a call-out cost so much beyond its work:
+`callout` gathered its arguments into a new `Vec` each time, malloc'd and
+freed. It now keeps one between call-outs (a thread-local, taken and put
+back; a call-out within one takes an empty one). Over the ports again:
+`checksum` 0.59 → 0.41 s, `fannkuchredux` 0.36 → 0.32, `imp-for` 0.62 →
+0.52, `flat-array` 0.49 → 0.43, `logic` 0.61 → 0.56, `boyer` 0.86 →
+0.81, the rest the same.

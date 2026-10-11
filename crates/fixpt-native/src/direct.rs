@@ -3922,8 +3922,13 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
     let rt = unsafe { &mut *(st.rt as *mut fixpt_runtime::Runtime) };
     let c = unsafe { *(st.table as *const Callout).add(which as usize) };
     let n = if let Callout::Foreign | Callout::ClosureAny | Callout::Rest = c { st.nargs as usize } else { c.arity() };
-    // Past 8, the eighth is a list of the rest (Larceny's convention).
-    let mut args: Vec<Value> = st.args[..n.min(8)].iter().map(|a| Value::from_raw(*a)).collect();
+    // Past 8, the eighth is a list of the rest (Larceny's convention). The
+    // vector kept from the last call-out, not a new one each time: making
+    // and freeing it was a fifth of a run that calls out often (`mlton/
+    // peek`). A call-out within this one takes an empty one.
+    let mut args: Vec<Value> = CALLOUT_ARGS.take();
+    args.clear();
+    args.extend(st.args[..n.min(8)].iter().map(|a| Value::from_raw(*a)));
     if n > 8 {
         let mut rest = args.pop().expect("eight");
         while args.len() < n {
@@ -4084,7 +4089,14 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
     st.words = rt.heap.words_address() as u64;
     st.alloc_limit = rt.heap.inline_limit() as u64;
     st.regions = Value::fixnum(rt.heap.live_regions() as i64).raw();
+    CALLOUT_ARGS.set(args);
     out
+}
+
+thread_local! {
+    /// The vector a call-out's arguments are gathered into, kept between
+    /// call-outs (`callout`).
+    static CALLOUT_ARGS: std::cell::Cell<Vec<Value>> = const { std::cell::Cell::new(Vec::new()) };
 }
 
 /// An abort to `tag` with `v`: to the innermost prompt for it in this run's
