@@ -112,7 +112,8 @@ All three deliverables of the brief are done. What follows is
 [`TODO.md`](TODO.md).
 
 ```
-$ cargo test              # 103 tests
+$ cargo test --profile checked   # every test, optimized, debug assertions and overflow checks on
+$ cargo test --release           # the same tests, no checks
 $ cargo run -p fixpt-cli -- repl
 fixpt 0.1.0 — scheme reader, bytecode engine
 > (define (count-to n) (let loop ((i 0) (acc 0)) (if (= i n) acc (loop (+ i 1) (+ acc i)))))

@@ -96,7 +96,7 @@ use common::same_code;
 /// compiles the front end again (stage 2), reading, parsing and checking
 /// it itself. The two words must be the same code.
 #[test]
-#[cfg_attr(debug_assertions, ignore = "4 s in release, 7 minutes in debug: run with --release, or --ignored")]
+#[cfg_attr(not(optimized), ignore = "4 s in release, 7 minutes in debug: run with --release, or --ignored")]
 fn fixpoint() {
     fixpoint_on(fixpt_native::cellular::run_word);
 }
@@ -104,7 +104,7 @@ fn fixpoint() {
 /// The same, with stage 2's words compiled to machine code (step 11a) as
 /// they run: it must make the same code.
 #[test]
-#[cfg_attr(debug_assertions, ignore = "4 s in release, 7 minutes in debug: run with --release, or --ignored")]
+#[cfg_attr(not(optimized), ignore = "4 s in release, 7 minutes in debug: run with --release, or --ignored")]
 fn fixpoint_with_words_compiled() {
     fixpoint_on(fixpt_native::cellular::run_word_compiled);
 }
@@ -113,7 +113,7 @@ fn fixpoint_with_words_compiled() {
 /// code and all (PLAN.md 13h′), and run as register code: the front end,
 /// run so, must compile itself to the same code.
 #[test]
-#[cfg_attr(debug_assertions, ignore = "seconds in release: run with --release, or --ignored")]
+#[cfg_attr(not(optimized), ignore = "seconds in release: run with --release, or --ignored")]
 fn fixpoint_as_register_code() {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     load_eager_reader(&mut s.scheme).expect("loads");
@@ -473,7 +473,7 @@ fn probe_read() {
 /// compiled and running on the native machine: stage 2 runs on code that
 /// FX-26 made, placed by the Rust side and nothing more (step 11c).
 #[test]
-#[cfg_attr(debug_assertions, ignore = "seconds in release, minutes in debug: run with --release, or --ignored")]
+#[cfg_attr(not(optimized), ignore = "seconds in release, minutes in debug: run with --release, or --ignored")]
 fn fixpoint_with_words_compiled_by_fx26() {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     load_eager_reader(&mut s.scheme).expect("loads");

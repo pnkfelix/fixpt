@@ -455,6 +455,7 @@ impl Heap {
     /// starts.
     #[inline(always)]
     pub(crate) fn ix(&self, v: Value) -> usize {
+        debug_assert!(v.index() >= self.base, "{v:?} is not a reference into the heap");
         v.index() - self.base
     }
     /// Reference `v`'s word in the heap: a pair's cell, a bloblet's suffix
@@ -671,8 +672,13 @@ impl Heap {
     fn obj_word(&self, o: Value, i: usize) -> u64 {
         self.word(self.payload_base(o) + i)
     }
+    /// Raw bits into payload word `i` of an object the collector does not
+    /// trace into (a flonum's bits, a bignum's limbs): no write barrier,
+    /// since the bits are no value, though they may look like a reference.
     #[inline]
-    fn obj_set_word(&mut self, o: Value, i: usize, w: u64) {
+    pub fn obj_set_word(&mut self, o: Value, i: usize, w: u64) {
+        debug_assert!(i < self.obj_len(o), "payload index {i} out of range");
+        debug_assert!(self.obj_type(o).is_some_and(|t| !t.payload_is_scanned()), "{o:?}'s payload is traced");
         let at = self.payload_base(o) + i;
         self.set_word(at, w)
     }

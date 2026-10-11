@@ -38,6 +38,11 @@ fn every_encoder_reads_back() {
         (and_bits(13, 14, 3, 61), "and x13, x14, #0xfffffffffffffff8"),
         (tst_low(9, 3), "tst x9, #0x7"),
         (ubfx(1, 2, 3, 4), "ubfx x1, x2, #3, #4"),
+        (lsl_imm(1, 2, 3), "lsl x1, x2, #3"),
+        (lsl_imm(1, 2, 0), "lsr x1, x2, #0"),
+        (lsr_imm(1, 2, 37), "lsr x1, x2, #37"),
+        // `ubfiz`, which no encoder makes, but its `ubfm` decoded in range.
+        (0xD340_0000 | 61 << 16 | 4 << 10 | 2 << 5 | 1, "ubfiz x1, x2, #3, #5"),
         (asr_imm(1, 2, 3), "asr x1, x2, #3"),
         (cmp_imm(13, 0), "cmp x13, #0"),
         (cmp(1, 2), "cmp x1, x2"),

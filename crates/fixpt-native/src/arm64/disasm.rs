@@ -55,8 +55,17 @@ pub fn disassemble(w: u32, at: i64) -> String {
         _ if is(0xFFC0_0000, 0x9240_0000) => format!("and {}, {}, #{:#x}", x(d), x(n), run_mask(w)),
         _ if is(0xFFC0_FC00, 0x9340_FC00) => format!("asr {}, {}, #{m}", x(d), x(n), m = (w >> 16) & 63),
         _ if is(0xFFC0_0000, 0xD340_0000) => {
-            let (lsb, top) = ((w >> 16) & 63, (w >> 10) & 63);
-            if top == 63 { format!("lsr {}, {}, #{lsb}", x(d), x(n)) } else { format!("ubfx {}, {}, #{lsb}, #{}", x(d), x(n), top - lsb + 1) }
+            // `ubfm d, n, #immr, #imms`, by its aliases.
+            let (immr, imms) = ((w >> 16) & 63, (w >> 10) & 63);
+            if imms == 63 {
+                format!("lsr {}, {}, #{immr}", x(d), x(n))
+            } else if imms + 1 == immr {
+                format!("lsl {}, {}, #{}", x(d), x(n), 63 - imms)
+            } else if imms < immr {
+                format!("ubfiz {}, {}, #{}, #{}", x(d), x(n), 64 - immr, imms + 1)
+            } else {
+                format!("ubfx {}, {}, #{immr}, #{}", x(d), x(n), imms - immr + 1)
+            }
         }
         _ if is(0xFFE0_0C00, 0x9A80_0000) => format!("csel {}, {}, {}, {}", x(d), x(n), x(m), cond((w >> 12) & 15)),
         _ if is(0xFF80_0000, 0xD280_0000) => mov16("movz", w),

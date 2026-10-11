@@ -186,7 +186,7 @@ fn the_rust_compilers_words_run_as_lowered() {
 
 /// The whole bootstrap program: every word the same.
 #[test]
-#[cfg_attr(debug_assertions, ignore = "seconds in release: run with --release")]
+#[cfg_attr(not(optimized), ignore = "seconds in release: run with --release")]
 fn the_bootstrap_program_compiles_the_same() {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     load_eager_reader(&mut s.scheme).expect("loads");

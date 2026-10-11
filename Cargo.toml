@@ -25,3 +25,11 @@ repository = "https://github.com/pnkfelix/fixpt"
 
 [workspace.lints.rust]
 unsafe_code = "deny"
+
+# Release speed with the checks a debug build has: `debug_assert!`s and
+# arithmetic overflow panics (`cargo test --profile checked`). The suite
+# runs in about release's time, so nothing waits on an unoptimized build.
+[profile.checked]
+inherits = "release"
+debug-assertions = true
+overflow-checks = true

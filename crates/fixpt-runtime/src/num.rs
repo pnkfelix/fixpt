@@ -480,7 +480,7 @@ fn write_bignum(heap: &mut Heap, b: &BigInt) -> Value {
     for (i, limb) in mag.iter().enumerate() {
         // Limbs are raw bits, not values: `Bignum` is one of the four object
         // types the collector does not trace into, precisely for this.
-        heap.obj_set(o, 2 + i, Value(*limb));
+        heap.obj_set_word(o, 2 + i, *limb);
     }
     o
 }

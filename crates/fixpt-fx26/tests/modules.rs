@@ -20,7 +20,7 @@ fn programs() -> Vec<std::path::PathBuf> {
 
 #[test]
 fn module_programs_do_as_they_say() {
-    let mut names = programs();
+    let names = programs();
     let (mut wrong, mut seen) = (Vec::new(), 0);
     for path in names {
         let text = std::fs::read_to_string(&path).unwrap();
@@ -69,7 +69,7 @@ fn the_rust_compiler_runs_modules_as_lowered() {
         }
         Ok((c, tops))
     };
-    let mut names = programs();
+    let names = programs();
     let (mut wrong, mut ran) = (Vec::new(), 0);
     for path in names {
         let text = std::fs::read_to_string(&path).unwrap();

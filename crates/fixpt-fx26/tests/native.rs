@@ -95,7 +95,7 @@ fn some_words_as_the_rust_compiler_compiles_them() {
 }
 
 #[test]
-#[cfg_attr(debug_assertions, ignore = "every word of the front end: run with --release")]
+#[cfg_attr(not(optimized), ignore = "every word of the front end: run with --release")]
 fn every_word_of_the_front_end_as_the_rust_compiler_compiles_it() {
     compare(usize::MAX);
 }
