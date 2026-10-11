@@ -404,6 +404,18 @@ fn flat_keyed_as_the_rust_machine_gives_them() {
     assert!(run(defs, "past", &[2], FUEL).direct.as_ref().is_ok_and(|d| d == "8"));
 }
 
+/// `arithmetic-shift` (`programs/native/shifts.fx`): in line for fixnums,
+/// the primitive past them, as the Rust machine gives it.
+#[test]
+fn shifts_as_the_rust_machine_gives_them() {
+    let r = run(&program("native/shifts"), "shifts", &[5], FUEL);
+    assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "{:?} against {}", r.direct, r.rust);
+    assert_eq!(
+        r.rust,
+        "(8 -20 3 -4 1152921504606846976 2305843009213693952 3541774862152233910272 -1 0 2305843009213693950 -1152921504606846976 5)"
+    );
+}
+
 /// Identity (PLAN.md Q5, `programs/native/identity.fx`): `pair-eq?` and
 /// kin in line, and a union-find whose roots are found by it, as the Rust
 /// machine gives them, and with its nodes moved by collections; and tables

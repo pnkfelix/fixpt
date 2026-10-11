@@ -3682,6 +3682,33 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
         a.e(mov(RESULT, X14));
         return true;
     }
+    // `arithmetic-shift` of fixnums: left by fewer than 61 while the result
+    // stays a fixnum (shifted back, the same), right (floor) by fewer than
+    // 63; a bignum, and the rest, the primitive's.
+    if name == "%fx26-arithmetic-shift" {
+        fixnums(a);
+        let (right, done) = (a.label(), a.label());
+        a.e(asr_imm(X14, y, 3));
+        a.e(cmp(X14, XZR));
+        a.to(right, Fix::If(Cond::Lt));
+        a.e(cmp_imm(X14, 61));
+        a.to(slow, Fix::If(Cond::Ge));
+        a.e(lslv(X13, x, X14));
+        a.e(asrv(X15, X13, X14));
+        a.e(cmp(X15, x));
+        a.to(slow, Fix::If(Cond::Ne));
+        a.e(mov(RESULT, X13));
+        a.to(done, Fix::B);
+        a.bind(right);
+        a.e(sub(X14, XZR, X14));
+        a.e(cmp_imm(X14, 63));
+        a.to(slow, Fix::If(Cond::Hs));
+        a.e(asrv(X13, x, X14));
+        a.e(asr_imm(X13, X13, 3));
+        a.e(lsl_imm(RESULT, X13, 3));
+        a.bind(done);
+        return true;
+    }
     if name == "%fx26-flatarray-length" {
         flat_count(a, x, X13);
         a.e(lsl_imm(RESULT, X13, 3));

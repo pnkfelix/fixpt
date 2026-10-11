@@ -1121,7 +1121,9 @@ These are the Rust machine's cells, not native time: a memo of
 native `fx check` by nothing measurable. To do: time natively (with
 `FIXPT_SYMBOLS` and `fixpt-symbolize`) the callers of `k-has-name?`,
 `k-on-path?` and `k-length` before changing any; tables that grow from
-empty might start at the size they reach.
+empty might start at the size they reach. Natively the top FX-26 word of the
+whole front-end compile was the assembler's `arm-times-pow2`: fixed
+(`docs/performance.md`, "`fx arm64` halved").
 
 ## 44. One simplifier: propagation, folding and reduction together (the user's, 2026-10-07)
 

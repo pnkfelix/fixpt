@@ -2769,3 +2769,21 @@ allocates nothing.
 The same shapes with symbol labels (the default key, the tag a byte
 indexing the owner's fields): 36.0 ms while `blobref-variant!` searched
 the fields in its primitive, 11.2 once it and the tag's read were in line.
+
+## `fx arm64` halved: a power of two by a shift (2026-10-11)
+
+Sampled natively (`FIXPT_SYMBOLS`, `fixpt-symbolize`), the front end's
+own compile showed one FX-26 word on top of every other: `arm64.fx`'s
+`arm-times-pow2`, 137 of 2,935 samples. The assembler written in FX-26
+placed each instruction field by multiplying by `2^shift`, found by
+`shift` doublings, up to 31 a field. Now `arm-pow2` is `(arithmetic-shift
+1 n)` and a field is `(arithmetic-shift v shift)`; and `arithmetic-shift`
+never collects (a bignum it makes is an allocation), so register code
+calls it with `prim2`, in line natively for fixnums (`pure_fast`: left
+while the result stays a fixnum, right by fewer than 63). Back to back,
+alternated three times:
+
+| `fx arm64` (ms) | before | after |
+| --------------- | -----: | ----: |
+| peval           |   16.7 |   6.9 |
+| the front end   |   1097 |   557 |

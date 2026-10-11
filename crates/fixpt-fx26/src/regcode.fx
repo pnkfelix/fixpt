@@ -460,7 +460,8 @@
 (define r-never-collects? (subr (read (globals r-eqtable-quick? r-fixed-width-op?)) (string) bool)
   (lambda (name)
     (case name
-      (("%fx26-mul" "%fx26-quotient" "modulo" "%fx26-string->f64" "%fx26-flatarray-ref"
+      (("%fx26-mul" "%fx26-quotient" "modulo" "%fx26-arithmetic-shift" "%fx26-string->f64"
+        "%fx26-flatarray-ref"
         "%fx26-flatarray-length" "char->integer" "integer->char" "string-length" "string-ref"
         "%string-hash" "%symbol-hash" "%fx26-string-compare" "%fx26-symbol-compare"
         "%fx26-string<?" "%fx26-string<=?" "%fx26-string>?" "%fx26-string>=?"

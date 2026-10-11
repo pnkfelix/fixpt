@@ -445,6 +445,8 @@ fn flat_at(rt: &mut Runtime, a: Value, i: Value) -> Outcome<usize> {
 /// for the next point that may. It may fail, which ends the run.
 pub fn never_collects(name: &str) -> bool {
     matches!(name, "%fx26-mul" | "%fx26-quotient" | "modulo" | "%fx26-string->f64" | "%fx26-flatarray-ref" | "%fx26-flatarray-length")
+        // A shift: a bignum it makes is an allocation, which never collects.
+        || name == "%fx26-arithmetic-shift"
         || matches!(name, "%fx26-eqtable-has?" | "%fx26-eqtable-count" | "%fx26-eqtable-delete!")
         // A blobref's read, owner, offset and step (`TODO.md` §77): an `f64`
         // read allocates its box, which never collects.

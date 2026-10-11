@@ -23,11 +23,9 @@
   (module
 (hide (include arm64-types))
 
-;; `acc` times 2 to the `n`.
-(define arm-times-pow2 (subr encodes (int int) int)
-  (lambda (n acc) (if (= n 0) acc (arm-times-pow2 (- n 1) (* 2 acc)))))
+;; 2 to the `n`, `n` ≥ 0: a shift (in line natively), not `n` doublings.
 (define arm-pow2 (subr encodes (int) int)
-  (lambda (n) (arm-times-pow2 n 1)))
+  (lambda (n) (arithmetic-shift 1 n)))
 
 ;; `v` as a `bits`-bit two's-complement field, or -1 if it does not fit.
 (define arm-simm (subr encodes (int int) int)
@@ -37,7 +35,7 @@
 
 ;; Fields at their places: each is -1 if it did not fit, and so the sum.
 (define arm-f (subr encodes (int int) int)
-  (lambda (v shift) (if (< v 0) -1 (* v (arm-pow2 shift)))))
+  (lambda (v shift) (if (< v 0) -1 (arithmetic-shift v shift))))
 (define arm-sum (subr pure (int int) int)
   (lambda (a b) (if (or (< a 0) (< b 0)) -1 (+ a b))))
 (define arm-sum3 (subr (read @globals) (int int int) int)
