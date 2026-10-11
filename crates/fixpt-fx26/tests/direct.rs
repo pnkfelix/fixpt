@@ -366,6 +366,12 @@ fn flat_sums_as_the_rust_machine_gives_them() {
         assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "collecting every {gc_every:?}: {:?} against {}", r.direct, r.rust);
         assert_eq!(r.rust, "(3295581 128 1 0 7 0)");
     }
+    // In line, a label no field holds and a tag past the fields fail as
+    // the primitives say.
+    let defs = include_str!("programs/native/flat-sums-fail.fx");
+    assert!(matches!(&run(defs, "var", &[0], FUEL).direct, Err(m) if m.contains("no field of the owner holds the label")));
+    assert!(matches!(&run(defs, "tag", &[1], FUEL).direct, Err(m) if m.contains("names no field")));
+    assert!(run(defs, "tag", &[0], FUEL).direct.as_ref().is_ok_and(|d| d == "1"));
 }
 
 /// Flat sums of numeric keys (`TODO.md` §77, `programs/native/flat-keyed.fx`):

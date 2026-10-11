@@ -1,6 +1,6 @@
 # `fixpt` — a Rust Scheme engine with FX-87 and FX-91 front ends
 
-## At a glance (kept current; last updated 2026-10-10)
+## At a glance (kept current; last updated 2026-10-11)
 
 Where things stand. Below it is the plan as it grew, oldest first (the
 contents are at the end of this section); the details behind this summary
@@ -202,9 +202,13 @@ weighed with the other items, not ahead of them.
   §69's rest, then §77's native follow-ups.
   §77, suffix refs (tag `010`, interior pointers into bloblet suffixes):
   done (`DONE.md` §77), the runtime, the `flat` kind, `(blobref B F)`,
-  flat products, arrays and sums, in every machine; next, a flat sum's
-  tag read in line natively and its `tagcase` in a leaf, arrays of a
-  length not literal, a blobref's `f64` read unboxed natively.
+  flat products, arrays and sums, in every machine; natively in line
+  (2026-10-11): steps, reads (an `f64` raw), writes, elements, a numeric
+  key's tag and variant, register code's `prim3imm`, and a flat
+  `tagcase` in a leaf, so a loop over a flat array is one (a million
+  shapes 214.9 → 10.5 ms; an index key's tag and variant too). Next:
+  arrays of a length not literal (a type-system question for the user),
+  a wider index key.
 - S1. Done (2026-09-30): **the `acyclic?` gap**, F13: shown a
   use-after-free on every path, and fixed in both checkers with data at a
   place, `(t data p)` (`docs/research/shapes.md`, the framing: regions,

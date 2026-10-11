@@ -2765,3 +2765,7 @@ keeps its `f64` accumulator boxed in the frame. Now a flat `tagcase` on a
 variable uses its place, an arm's ref reuses the blobref's and the tag's,
 and a loop argument that is its own parameter stays put; the sum
 allocates nothing.
+
+The same shapes with symbol labels (the default key, the tag a byte
+indexing the owner's fields): 36.0 ms while `blobref-variant!` searched
+the fields in its primitive, 11.2 once it and the tag's read were in line.

@@ -489,3 +489,9 @@ than a word unless its name says so.
    (`r-self-temp`, both compilers): general, it changes every loop that
    passes a parameter on unchanged; measured no slower (peval's phases
    re-run back to back: `fx arm64` 16.6 ms, as before).
+8. **Arrays of a length not literal left for the user**: a size variable
+   in `(arrayof T n)` is a type-system extension (my notes: optimize from
+   what the type system proves; extensions discussed first). Done instead:
+   an index key's tag and variant in line natively (a field read, and a
+   short loop over the owner's fields by identity), which needed nothing
+   new of the types.

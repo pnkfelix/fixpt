@@ -2006,7 +2006,7 @@ impl Compiling<'_> {
                     // sum's numeric tag: in line, checked as the primitive
                     // checks.
                     let step = name == "%suffix-ref+" && o(1).is_fixnum() && (0..1 << 24).contains(&o(1).as_fixnum());
-                    let tag = name == "%fx26-flat-tag" && o(1).is_fixnum() && o(1).as_fixnum() & 8 != 0;
+                    let tag = name == "%fx26-flat-tag" && o(1).is_fixnum();
                     if op == "prim2imm" && (step || tag) {
                         let (slow, done) = (a.label(), a.label());
                         if step {
@@ -2108,7 +2108,7 @@ impl Compiling<'_> {
                     match (name, code) {
                         ("%fx26-blobref-index", Some(c)) => blobref_index(&mut a, c, z, slow),
                         ("%fx26-suffix-ref-set!", Some(c)) => suffix_store(&mut a, c, z, raw, slow),
-                        ("%fx26-flat-variant!", Some(c)) if c & 8 != 0 => flat_variant(&mut a, c, z, slow),
+                        ("%fx26-flat-variant!", Some(c)) => flat_variant(&mut a, c, z, slow),
                         _ => {}
                     }
                     if a.used(slow) {
@@ -2931,7 +2931,8 @@ fn box_bits(a: &mut Asm, slow: Label) {
 /// Suffix ref `r` (tag `010`, `docs/object-model.md`) taken apart, to `slow`
 /// unless it is one whose owner has a trailer and a header of one word:
 /// X15 its offset, X11 where its owner's suffix starts, X12 the owner's
-/// header, X13 the suffix's length `B`. The owner is the heap's word
+/// header, X13 the suffix's length `B`, X16 the trailer's distance (the
+/// last field's index: field `k`, 2 ≤ k ≤ X16, is `8k` bytes before X11). The owner is the heap's word
 /// `ubfx` bits 3..37 of the ref, the offset bits 37.. (`lsr #37`). Uses X9,
 /// X14 and X16 too.
 fn suffix_owner(a: &mut Asm, r: Reg, slow: Label) {
@@ -3038,22 +3039,43 @@ fn blobref_index(a: &mut Asm, code: i64, i: Reg, slow: Label) {
 }
 
 /// `blobref-variant!` (`%fx26-flat-variant!`) of the suffix ref in `RESULT`
-/// to label `l`, of layout `code` with a numeric key: the tag's `code & 7`
-/// bytes written, and a ref to the variant, `code >> 8` along, into
-/// `RESULT`; to `slow` unless the label is a fixnum that fits and the
-/// variant is within a suffix that may be written.
+/// to label `l`, of layout `code`: the tag's `code & 7` bytes written (with
+/// a numeric key, the label; else the index of the first of the owner's
+/// fields that holds it, by identity, as the primitive looks), and a ref
+/// to the variant, `code >> 8` along, into `RESULT`; to `slow` unless the
+/// tag fits and the variant is within a suffix that may be written.
 fn flat_variant(a: &mut Asm, code: i64, l: Reg, slow: Label) {
     use fixpt_heap::value::SUFFIX_OFFSET_SHIFT;
     let (w, p) = (code & 7, code >> 8);
-    a.e(tst_low(l, 3));
-    a.to(slow, Fix::If(Cond::Ne));
-    a.e(asr_imm(X17, l, 3));
+    let numeric = code & 8 != 0;
+    if numeric {
+        a.e(tst_low(l, 3));
+        a.to(slow, Fix::If(Cond::Ne));
+        a.e(asr_imm(X17, l, 3));
+    }
+    suffix_writable(a, RESULT, slow);
+    if !numeric {
+        // Fields 2 to the trailer's distance (X16), the first that is `l`.
+        let (look, found) = (a.label(), a.label());
+        a.e(movz(X17, 2, 0));
+        a.bind(look);
+        a.e(cmp(X17, X16));
+        a.to(slow, Fix::If(Cond::Hi));
+        a.e(lsl_imm(X9, X17, 3));
+        a.e(sub(X9, X11, X9));
+        a.e(ldur(X9, X9, 0));
+        a.e(cmp(X9, l));
+        a.to(found, Fix::If(Cond::Eq));
+        a.e(add_imm(X17, X17, 1));
+        a.to(look, Fix::B);
+        a.bind(found);
+        a.e(sub_imm(X17, X17, 2));
+    }
     if w < 8 {
         a.e(lsr_imm(X9, X17, 8 * w as u32));
         a.e(cmp_imm(X9, 0));
         a.to(slow, Fix::If(Cond::Ne));
     }
-    suffix_writable(a, RESULT, slow);
     a.es(&mov_imm64(X9, p as u64));
     a.e(add(X16, X15, X9));
     a.e(cmp(X16, X13));
@@ -3111,21 +3133,32 @@ fn suffix_index(a: &mut Asm, slow: Label) {
 }
 
 /// A flat sum's tag at the suffix ref in `RESULT`, into `RESULT`, of
-/// layout `code` with a numeric key (`%fx26-flat-tag`): its `code & 7`
-/// bytes, a fixnum; to `slow` for a read past the suffix.
+/// layout `code` (`%fx26-flat-tag`): with a numeric key, its `code & 7`
+/// bytes, a fixnum; else its byte `b` indexes the owner's fields, and the
+/// label is field `b + 2`. To `slow` for a read past the suffix, or an
+/// index past the fields.
 fn flat_tag(a: &mut Asm, code: i64, slow: Label) {
     let w = code & 7;
     suffix_owner(a, RESULT, slow);
     a.e(add_imm(X9, X15, w as u32));
     a.e(cmp(X9, X13));
     a.to(slow, Fix::If(Cond::Hi));
-    a.e(add(X11, X11, X15));
+    a.e(add(X14, X11, X15));
     a.e(match w {
-        1 => ldurb(X13, X11, 0),
-        2 => ldurh(X13, X11, 0),
-        _ => ldur_w(X13, X11, 0),
+        1 => ldurb(X13, X14, 0),
+        2 => ldurh(X13, X14, 0),
+        _ => ldur_w(X13, X14, 0),
     });
-    a.e(lsl_imm(RESULT, X13, 3));
+    if code & 8 != 0 {
+        a.e(lsl_imm(RESULT, X13, 3));
+        return;
+    }
+    a.e(add_imm(X13, X13, 2));
+    a.e(cmp(X13, X16));
+    a.to(slow, Fix::If(Cond::Hi));
+    a.e(lsl_imm(X13, X13, 3));
+    a.e(sub(X13, X11, X13));
+    a.e(ldur(RESULT, X13, 0));
 }
 
 /// `blobref-get` of the suffix ref in `RESULT`, a scalar of layout `code`

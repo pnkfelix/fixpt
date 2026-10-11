@@ -1603,7 +1603,11 @@ those operations call out (`r_collects`, `r-bloblet-quiet?`), and a loop
 of them is a leaf. A self-call's argument that is its own parameter
 stays put (`r-self-temp`). The shapes loop: 10.5 ms natively, the sum
 allocating nothing (`docs/performance.md`, "Flat sums and blobrefs in
-line").
+line"). An index key's tag (the label, the owner's field the byte
+indexes) and its variant (the first field holding the label, found by a
+short loop) in line too: the shapes with symbol labels 36.0 → 11.2 ms
+(10.5 with a numeric key). Tests: `flat_sums_as_the_rust_machine_gives_them`
+also fails a label no field holds and a tag past the fields, in line.
 
 ## 78. The best REPL in one short command (the user's, 2026-10-10)
 
