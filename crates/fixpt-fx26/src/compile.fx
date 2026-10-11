@@ -112,11 +112,17 @@
 (define c-apply-shares-at (subr (maxeff (read @globals) (read @k)) (int int) bool)
   (lambda (a b) (= (car (table-ref (get c-shares-table) a c-no-conversion)) b)))
 
-;; The field of the `extract` from `a` to `b`, or -1.
+;; The field of the `extract` from `a` to `b`, or -1; or what else the
+;; checker found there (a scalar's layout, a flat sum's). A form kept to be
+;; inlined has it in place of where it was (`c-resolved-at`).
 (define c-field-at (subr c-builds (int int) int)
   (lambda (a b)
-    (let ((e (table-ref (get c-fact-table) a (the c-span (cons -1 -1)))))
-      (if (= (car e) b) (cdr e) -1))))
+    (if (< a -1)
+        (- -2 a)
+        (let ((e (table-ref (get c-fact-table) a (the c-span (cons -1 -1)))))
+          (if (= (car e) b) (cdr e) -1)))))
+;; Where a form with fact `i` (`c-field-at`) is, kept to be inlined.
+(define c-resolved-at (subr pure (int) int) (lambda (i) (- -2 i)))
 
 ;; Each `with` the checker saw (its `k-with-vals`, as `c-set-facts!` took
 ;; them): where it starts and ends, and its module's values' names, in

@@ -447,3 +447,15 @@ than a word unless its name says so.
 9. **Committed with a possible 3–5 % cost** in the FX-26 compiler's phases
    (measured under load, back to back; see TODO.md §69), the pass being
    the user's priority; the likely cause and a remedy are in the TODO.
+
+## §77 native follow-ups (2026-10-11, autonomous)
+
+1. **An inlined body's facts go with it** (`c-resolved-at`): the FX-26
+   compiler, keeping a body to inline, made every `extract` it had a fact
+   for a `bloblet-ref`, a blobref's field (`%suffix-ref+`) too, and left a
+   flat `tagcase`'s layout and a `blobref-get`'s where the next form's
+   table could not find them. Found because `fixpt compile` said the two
+   compilers disagree on the shapes benchmark; `direct.rs` declined the
+   bad `field` (too far), which is why nothing ran wrong. Now a fact is
+   kept in the node, as a span below -1 that `c-field-at` reads back,
+   rather than a new node kind: no other pass changes.

@@ -218,9 +218,11 @@
           (else y t)))))
 
 ;; `x`, each `extract` in it that the checker's facts give a field made the
-;; `bloblet-ref` of that field, which compiles as it would: for a body kept
-;; to be inlined or specialized in a later form, whose facts, keyed by
-;; position in its own form's text, are gone by then.
+;; `bloblet-ref` of that field, which compiles as it would, and each other
+;; fact (a blobref's field, a scalar's layout, a flat sum's) kept in its form
+;; (`c-resolved-at`): for a body kept to be inlined or specialized in a later
+;; form, whose facts, keyed by position in its own form's text, are gone by
+;; then.
 (define-rec
   (c-resolve-extracts (subr c-walks (exp) exp)
     (lambda (x)
@@ -240,16 +242,20 @@
         (e-rlambda (r l a b) (e-rlambda (c-resolve-extracts r) (c-resolve-extracts l) a b))
         (e-the (t body a b) (e-the t (c-resolve-extracts body) a b))
         (e-convention (cv body a b) (e-convention cv (c-resolve-extracts body) a b))
-        (e-bloblet (op i args a b) (e-bloblet op i (c-resolve-all args) a b))
+        (e-bloblet (op i args a b)
+          (e-bloblet op (if (< i 0) (c-field-at a b) i) (c-resolve-all args) a b))
         (e-product (fs a b) (e-product (c-resolve-named fs) a b))
         (e-extract (p l a b)
           (let ((i (c-field-at a b)) (q (c-resolve-extracts p)))
-            (if (< i 0)
-                (e-extract q l a b)
-                (e-bloblet 'bloblet-ref i (the exps (cons q nil)) a b))))
+            (cond ((< i 0) (e-extract q l a b))
+                  ;; A blobref's field (`check::BLOBREF_FIELD`).
+                  ((>= i 1099511627776) (e-extract q l (c-resolved-at i) b))
+                  (else (e-bloblet 'bloblet-ref i (the exps (cons q nil)) a b)))))
         (e-sum (t v a b) (e-sum t (c-resolve-extracts v) a b))
         (e-tagcase (s arms els a b)
-          (e-tagcase (c-resolve-extracts s) (c-resolve-arms arms) (c-resolve-named els) a b))
+          (let ((k (c-field-at a b)))
+            (e-tagcase (c-resolve-extracts s) (c-resolve-arms arms) (c-resolve-named els)
+                       (if (< k 0) a (c-resolved-at k)) b)))
         (else y x))))
   (c-resolve-all (subr c-walks (exps) exps)
     (lambda (es)
