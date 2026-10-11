@@ -830,6 +830,34 @@
             (string-append (str3 "in `" path "`, ")
                            (str3 (text-place text (- at base)) ": " m)))))))
 
+;; Error `m` at `at`, said in each file on the way out to the program
+;; (`TODO.md` §73): while `at` is in a file read (past `load-base`), `in
+;; `path`, line:col: m`, at where that file is first loaded (in a file read
+;; before it, so this ends, a load cycle too); and where it is then. As
+;; Rust's `Checker::in_loaded`.
+(define loaded-placed
+  (subr (maxeff (read @globals) (read rs) spin) (loaded-files string int)
+        (productof (1 string) (2 int)))
+  (lambda (fs m at)
+    (let ((f (if (< at load-base) nil (loaded-first fs (* load-base (quotient at load-base)) nil))))
+      (if (null? f)
+          (product (1 m) (2 at))
+          (let* ((base (extract (car f) 2))
+                 (where (text-place (extract (car f) 6) (- at base))))
+            (loaded-placed
+             fs (string-append (str3 "in `" (extract (car f) 4) "`, ") (str3 where ": " m))
+             (extract (car f) 1)))))))
+
+;; The file read at `base`, as it was first loaded, in a list of one: the
+;; last of `fs`, newest first (`loaded-files!`).
+(define loaded-first
+  (subr (maxeff (read @globals) (read rs)) (loaded-files int loaded-files) loaded-files)
+  (lambda (fs base found)
+    (cond ((null? fs) found)
+          ((= (extract (car fs) 2) base)
+           (loaded-first (cdr fs) base (the loaded-files (cons (car fs) nil))))
+          (else (loaded-first (cdr fs) base found)))))
+
 ;; The same, the file named `path`, as the load being read wrote it: a
 ;; file read once may be loaded under more than one path (`TODO.md` §71).
 (define in-loaded-as

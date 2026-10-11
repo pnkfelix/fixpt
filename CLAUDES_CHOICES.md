@@ -509,3 +509,15 @@ than a word unless its name says so.
 3. **Left**: `fx check` still ~14 % above before the pass; the per-call
    `with` cost (~3 % when the compiler runs) and its remedy as TODO §69
    says.
+
+## §73, and what waits (2026-10-11, autonomous)
+
+1. **§75 (`string->int`) left for the user**: wanted as FX-26 in §22's
+   library, whose prelude design (how a program gets it) is still open
+   with the user; a Rust primitive would go against "no Rust at all".
+2. **§73's errors placed at the load's start, zero width, in both**: the
+   FX-26 parser keeps only where a load starts; Rust's spans were the
+   whole load form. Agreeing on less was simpler than carrying the end
+   through the loaded files' list.
+3. **A file loaded more than once is placed at its first load** (where
+   Rust read it), in both: the walk out then always reaches the program.

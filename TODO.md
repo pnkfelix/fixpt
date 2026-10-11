@@ -1887,25 +1887,6 @@ which may remove many of these names outright, so perhaps after §69.
 The tools that know which name comes from which file and module are in
 `scripts/conductor/` (`deps.py`, `registry2.py`; see its README).
 
-## 73. An error two loads deep, placed alike by both checkers (2026-10-10)
-
-Found making a load cycle an error (`DONE.md` §71): where a file loaded
-by a file loaded by the program is wrong, the checkers say the same thing
-but place it differently. With `deep.fx` loading `deep-a.fx` loading
-`deep-b.fx`:
-
-- a type error in `deep-b.fx`: Rust `deep.fx:1:1: in `deep-b.fx`, 1:15:
-  …`, the FX-26 checker `deep.fx:3:1: in `deep-b.fx`, 1:15: …` (a line
-  `deep.fx` does not have);
-- `deep-b.fx` loading a file that is not there: Rust `deep.fx:1:11: in
-  `deep-a.fx`, 1:11: in `deep-b.fx`, 1:11: cannot read …`, the FX-26
-  checker `deep.fx:3:1: cannot read …`.
-
-One level deep they agree (every `modules/load-*.fx`). Wanted: both say
-each file on the way, at the program's load, as Rust does for a reading
-error; a test program two loads deep. `modules/load-cycle.fx` is a file
-loading itself, one level deep, until this is done.
-
 ## 74. A list one element short, said of its length (the user's, 2026-10-10)
 
 `(the (nlist int 4) (cons 1 (cons 2 (cons 3 nil))))` is told, at the

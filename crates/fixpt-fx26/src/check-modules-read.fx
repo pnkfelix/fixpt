@@ -65,9 +65,15 @@
       (tagcase r
         (k-err (m ea eb)
           (if (and (>= ea base) (< ea (+ base load-base)))
-              (k-fail (in-loaded (get loaded) base m ea) a b)
+              (k-fail-placed m ea)
               (k-fail m ea eb)))
         (else y #u)))))
+;; Error `m` at `at`, in a file read, said in each file on the way out to
+;; the program (`loaded-placed`), there.
+(define k-fail-placed (subr (maxeff checks spin) (string int) void)
+  (lambda (m at)
+    (let ((p (loaded-placed (get loaded) m at)))
+      (k-fail (extract p 1) (extract p 2) (extract p 2)))))
 ;; What a module's first item says of where it was read: from its file, at
 ;; a base (> 3); not, and why (-1); or not from a file (0 to 3).
 (define k-items-kind (subr pure (mod-items) int)
@@ -356,7 +362,11 @@
     (lambda (items a b)
       (let ((k (k-items-kind items)) (saved (get k-dscope)))
         (cond
-          ((< k 0) (k-fail (symbol->string (car (extract (car items) 2))) a b))
+          ;; Said in each file on the way out, if loaded in a file read.
+          ((< k 0)
+           (if (>= a load-base)
+               (k-fail-placed (symbol->string (car (extract (car items) 2))) a)
+               (k-fail (symbol->string (car (extract (car items) 2))) a b)))
           ((not (null? (k-defined-twice items nil nil)))
            (k-fail (string-append (k-quote (symbol->string (car (k-defined-twice items nil nil))))
                                   " is defined twice in this module")

@@ -20,12 +20,11 @@ impl Checker {
     /// it; the module's type, its abstract types bound in it.
     pub(crate) fn synth_module(&mut self, e: ExpId, items: &[ModItem]) -> R<(TyId, Effect)> {
         // Read from a file: it sees only the standard environment.
-        if let Some((path, text, file)) = self.loaded.get(&e).cloned() {
-            let span = self.arena.span_of(e);
+        if let Some((_, _, file)) = self.loaded.get(&e).cloned() {
             let outer = self.hidden.replace(((self.standard_len, self.env.len()), (self.standard_dscope, self.dscope.len())));
             let r = self.synth_module_here(e, items);
             self.hidden = outer;
-            return r.map_err(|err| self.in_loaded(err, span, &path, &text, file));
+            return r.map_err(|err| self.in_loaded(err, file));
         }
         self.synth_module_here(e, items)
     }

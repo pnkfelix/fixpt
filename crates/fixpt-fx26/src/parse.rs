@@ -2498,7 +2498,8 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         };
         self.files_read += 1;
         let file = fixpt_read::FileId(self.files_read + 1000);
-        let at_file = |e: FxError, c: &Self| c.in_loaded(e, span, path, &text, file);
+        self.load_sites.insert(file, (span, path.to_string(), text.as_str().into()));
+        let at_file = |e: FxError, c: &Self| c.in_loaded(e, file);
         let forms = match self.read_module_file(file, &text) {
             Ok(f) => f,
             Err(e) => return Err(at_file(e, self)),
@@ -2573,15 +2574,27 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     }
 
     /// An error in a module's file, said at the `load-module` that reads it,
-    /// with where in the file.
-    pub(crate) fn in_loaded(&self, e: FxError, span: fixpt_read::Span, path: &str, text: &str, file: fixpt_read::FileId) -> FxError {
+    /// with where in the file; and so on out, a file loaded by a file loaded
+    /// saying each on the way (`TODO.md` §73), whether or not the files
+    /// between are being read or checked now (a load is made once, at the
+    /// program's top).
+    pub(crate) fn in_loaded(&self, mut e: FxError, file: fixpt_read::FileId) -> FxError {
         if e.span.file != file {
             return e;
         }
+        while let Some((at, path, text)) = self.load_sites.get(&e.span.file) {
+            e = Self::said_in(e, *at, path, text);
+        }
+        e
+    }
+
+    /// Error `e`, in the file of `path` and `text`, said where `span`
+    /// starts (the load's start: all the FX-26 parser keeps of it).
+    fn said_in(e: FxError, span: fixpt_read::Span, path: &str, text: &str) -> FxError {
         let before = &text[..(e.span.start as usize).min(text.len())];
         let line = before.matches('\n').count() + 1;
         let col = before.chars().rev().take_while(|c| *c != '\n').count() + 1;
-        FxError::at(span, format!("in `{path}`, {line}:{col}: {}", e.message))
+        FxError::at(fixpt_read::Span::new(span.file, span.start, span.start), format!("in `{path}`, {line}:{col}: {}", e.message))
     }
 
     /// A `module`'s items, in order, each seeing those before it:

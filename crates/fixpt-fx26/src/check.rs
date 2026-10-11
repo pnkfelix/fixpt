@@ -343,6 +343,10 @@ pub struct Checker {
     /// Modules read from files: each one's path and text, and the file id
     /// its spans have.
     pub(crate) loaded: HashMap<ExpId, (String, String, fixpt_read::FileId)>,
+    /// Each file read, by its id: where it is loaded (in the file that
+    /// loads it), its path as written and its text; for an error in it to
+    /// say each file on the way out to the program (`TODO.md` §73).
+    pub(crate) load_sites: HashMap<fixpt_read::FileId, (fixpt_read::Span, String, std::rc::Rc<str>)>,
     /// How many module files have been read: the next one's number, in the
     /// order they are begun, a file a loaded file loads after it, as the
     /// driver supplies them to the parser written in FX-26 (`syn.rs`).
@@ -636,6 +640,7 @@ impl Checker {
             shared_globals: HashSet::new(),
             hoisted: Vec::new(),
             loaded: HashMap::new(),
+            load_sites: HashMap::new(),
             files_read: 0,
             base_dir: None,
             ahead: Vec::new(),

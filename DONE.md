@@ -1463,6 +1463,29 @@ on the `%include-scope` mark. Not given either: `` `e` is not an effect,
 nor one a module included gives ``. Tests: `modules/include-effects.fx`,
 `include-effect-missing.fx`.
 
+## 73. An error two loads deep, placed alike by both checkers (2026-10-11)
+
+Found making a load cycle an error (§71): where a file loaded by a file
+loaded by the program was wrong, the checkers said the same thing but
+placed it differently, and neither well: a type error in `deep-b.fx`
+(loaded by `deep-a.fx`, loaded by `deep.fx`) was `deep.fx:1:1: in
+`deep-b.fx`, 1:15: …` from Rust and `deep.fx:4:1: …` from FX-26 (a line
+`deep.fx` does not have); a file not there, two loads deep, `deep.fx:4:1:
+cannot read …` from FX-26. A load is made once, at the program's top, so
+the file between was not being checked when the error came, and its
+place was a position in another file.
+
+Now both say each file on the way, at the program's load: `deep.fx:2:11:
+in `deep-a.fx`, 1:11: in `deep-b.fx`, 1:15: …`. Rust keeps each file's
+first load site (`Checker::load_sites`) and `in_loaded` walks out from
+the error's file; FX-26's `loaded-placed` (`parser.fx`) walks a position
+out through the files read, each at its first load (`loaded-first`: a
+file loaded again, by a cycle or another file, is placed where it was
+first read, in a file read before it, so the walk ends). Both place it at
+the load's start (FX-26's parser keeps no more of it). Tests:
+`modules/load-deep.fx`, `load-deep-missing.fx`, `load-cycle-two.fx`
+(two files loading each other: the first try of this looped there).
+
 ## 77. Suffix refs: interior pointers into bloblet suffixes, tag `010` (the user's, 2026-10-10)
 
 The runtime (`docs/object-model.md`, invariant 5 and "Tags, before and

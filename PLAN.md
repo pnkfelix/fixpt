@@ -191,8 +191,9 @@ weighed with the other items, not ahead of them.
   pass (`DONE.md` §68, §69), and §71, a load cycle an error. Next:
   `TODO.md` §69's rest, an `include`'s types in scope inside, then the
   pass over the front end's 3,449 import lines with `(hide (include m))`;
-  §70, short names for the modules a file binds; §73, where an error two
-  loads deep is placed (§72's messages done, `DONE.md` §72). Asked for
+  §70, short names for the modules a file binds; §73 done (2026-10-11),
+  an error two loads deep placed alike (§72's messages done, `DONE.md`
+  §72). Asked for
   (2026-10-10), for §22's FX-26 library: §75, `string->int` and
   `string->number`; §76, Scheme's numeric tower, perhaps by functors.
   Done (2026-10-11): §78, the FX-26 machines named by who makes the code,
