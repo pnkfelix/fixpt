@@ -521,3 +521,8 @@ than a word unless its name says so.
    through the loaded files' list.
 3. **A file loaded more than once is placed at its first load** (where
    Rust read it), in both: the walk out then always reaches the program.
+4. **A blobref's bounds by its type, proposed, not done**: checking that
+   all of `F` fits where a ref is made would let every step and read skip
+   the owner's header (TODO §77); but `blobref-at` would then fail where
+   it makes a ref that today fails only where read. A change of meaning,
+   so written up for the user instead.

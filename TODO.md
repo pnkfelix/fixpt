@@ -1970,7 +1970,18 @@ key's tag, a blobref's step by a constant, `blobref-index`,
 in line, and a flat `tagcase` in a leaf; an index key's tag and variant
 too, and `blobref-at` at a literal offset (2026-10-11). Next: each step
 of a blobref takes its owner apart again (`suffix_owner`, about 20
-instructions), which a loop could do once; a wider index into
+instructions, two loads that depend on each other: the trailer, then the
+header for the suffix's length), which a loop could do once. Proposed
+(2026-10-11, for the user: it changes when an error comes), from what the
+types already say: let `(blobref O F)` promise that all of `F` lies in
+the suffix, checked where a ref is made, by the layout's size, which the
+checker knows there (`blobref-at`, `blobref+`; `extract`, `blobref-index`
+and a variant keep it by construction). Then no step or read needs the
+length: a read is the owner's word, the offset and a load (about five
+instructions), a step by a constant one `add`, and `blobref-index`
+compares with its constant `n` only. The change: `(blobref-at b 10)` of
+an `i32` in a 12-byte suffix would fail where it is made, not where it
+is read; a wider index into
 the owner's fields than a byte (`(key symbol u16)` was proposed); arrays
 of a length not literal (a type-system question, for the user: a size
 variable's length then known only at run time, where `blobref-index`
