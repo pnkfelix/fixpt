@@ -546,3 +546,8 @@ than a word unless its name says so.
    `with`'s facts are set as checking goes; for the user (TODO §43).
 5. **Not done: path compression in `k-resolve`**: it would make a read a
    write, changing an effect many signatures name.
+6. **Native returns by `br x30`, not `ret`** (`direct.rs`): `closures`
+   21.4 → 9.2 ms (a recursion 1000 deep overflowed the return stack
+   predictor), `fib` 2.8 → 3.1 (shallow, it loses the predictor's help),
+   the rest the same. Taken for the sum (55.3 → 42.8 ms); one line to
+   undo if `fib`'s shape matters more to the user than deep recursion's.

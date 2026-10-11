@@ -555,10 +555,10 @@ impl Asm {
             let to = self.labels[l.0].ok_or("a label never placed")?;
             let d = to as i64 - at as i64;
             self.code[at] = match f {
-                // A branch to a `ret` is that `ret`: a fast path that joins
-                // the slow one only to return (nothing counts a code's
-                // returns; a return address is a call's).
-                Fix::B if self.code[to] == ret() => ret(),
+                // A branch to a return is that return: a fast path that
+                // joins the slow one only to return (nothing counts a
+                // code's returns; a return address is a call's).
+                Fix::B if self.code[to] == br(LINK) => br(LINK),
                 Fix::B => b(d),
                 Fix::Bl => bl(d),
                 Fix::If(c) => b_cond(c, d),
@@ -2488,7 +2488,15 @@ impl Compiling<'_> {
                     }
                     a.to(entry, Fix::Bl);
                 }
-                "return" => a.e(ret()),
+                // By `br`, not `ret`: `ret` is predicted by the return
+                // stack, a few dozen deep, which a recursion deeper than
+                // that overflows, every return past it mispredicted (the
+                // `closures` benchmark, 1000 deep: 21.4 → 9.2 ms); `br`
+                // by the branch predictor, which learns one place a
+                // recursion returns to. Shallow recursion pays a little
+                // (`fib` 2.8 → 3.1). The cellular convention's register
+                // code returns so already.
+                "return" => a.e(br(LINK)),
                 "branch" | "branchf" | "brancht" => {
                     let to = (i as i64 + 2 + o(0).as_fixnum()) as usize;
                     let l = edge(&mut a, si - 1, to);
