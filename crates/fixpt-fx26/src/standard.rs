@@ -172,6 +172,12 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("f32->string", "(subr pure (f32) string)"),
     ("f32->f64", "(subr pure (f32) f64)"),
     ("f64->f32", "(subr pure (f64) f32)"),
+    // A float's bits, and back (`TODO.md` §77: what reading a suffix's bytes
+    // as one, by hand, takes).
+    ("f64->bits", "(subr pure (f64) u64)"),
+    ("bits->f64", "(subr pure (u64) f64)"),
+    ("f32->bits", "(subr pure (f32) u32)"),
+    ("bits->f32", "(subr pure (u32) f32)"),
     // Flat arrays (Q6): made by a layout, the elements raw.
     ("make-flatarray", "(poly ((r region)) (poly ((t type)) (subr (alloc r) ((flatlayout t) int t) (flatarrayof t r))))"),
     ("flatarray-ref", "(poly ((r region)) (poly ((t type)) (subr (read r) ((flatarrayof t r) int) t)))"),

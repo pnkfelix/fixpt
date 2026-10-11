@@ -26,6 +26,7 @@
 (define o-sum (with eval-types o-sum))
 (define o-icell (with eval-types o-icell))
 (define o-blob (with eval-types o-blob))
+(define o-bref (with eval-types o-bref))
 (define o-tag (with eval-types o-tag))
 (define o-cont (with eval-types o-cont))
 (define o-esc (with eval-types o-esc))
@@ -389,7 +390,11 @@
       (prim! 'f32->int (lambda (xs) (f32->int (as-f32 (ev-arg xs 0)))))
       (prim! 'f32->string (lambda (xs) (f32->string (as-f32 (ev-arg xs 0)))))
       (prim! 'f32->f64 (lambda (xs) (f32->f64 (as-f32 (ev-arg xs 0)))))
-      (prim! 'f64->f32 (lambda (xs) (f64->f32 (as-f64 (ev-arg xs 0))))))))
+      (prim! 'f64->f32 (lambda (xs) (f64->f32 (as-f64 (ev-arg xs 0)))))
+      (prim! 'f64->bits (lambda (xs) (u64->int (f64->bits (as-f64 (ev-arg xs 0))))))
+      (prim! 'bits->f64 (lambda (xs) (bits->f64 (int->u64 (as-int (ev-arg xs 0))))))
+      (prim! 'f32->bits (lambda (xs) (u32->int (f32->bits (as-f32 (ev-arg xs 0))))))
+      (prim! 'bits->f32 (lambda (xs) (bits->f32 (int->u32 (as-int (ev-arg xs 0)))))))))
 
 ;; `cwcc` of `f`, at @x, which nothing here would infer: the escape kept.
 (define* ev-cwcc (subr (maxeff evals spin) (val) val)
@@ -448,16 +453,99 @@
       (begin (ev-fill-array fs fields 0)
              (o-blob fs (the (arrayof int @v) (make-array n 0)))))))
 
+;;; ------------------------------------------------------------ blobrefs
+;; A blobref to byte `at` of `owner`'s suffix, checked to be one of it.
+(define* ev-bref (subr (maxeff evals spin) (val int) val)
+  (lambda (owner at)
+    (tagcase (as-other owner "a bloblet")
+      (o-blob (fs bs)
+        (if (and (>= at 0) (< at (array-length bs)))
+            (o-bref owner at)
+            (efail "suffix ref: the bloblet's suffix has no such byte")))
+      (else y (efail-expected "a bloblet")))))
+;; Blobref `v`'s owner's suffix's bytes, and its offset.
+(define* ev-bref-bytes (subr (maxeff evals spin) (val) (pairof (arrayof int @v) int @v))
+  (lambda (v)
+    (tagcase (as-other v "a blobref")
+      (o-bref (o at)
+        (tagcase (as-other o "a bloblet")
+          (o-blob (fs bs) (cons bs at))
+          (else y (efail "a bloblet"))))
+      (else y (efail-expected "a blobref")))))
+;; 256 to the `w`, times `acc`.
+(define* ev-pow256 (subr (maxeff (read @globals) spin) (int int) int)
+  (lambda (w acc) (if (= w 0) acc (ev-pow256 (- w 1) (* 256 acc)))))
+;; Bytes `at` to `at` + `k`, little-endian, after `acc`: the highest first.
+(define* ev-bytes-int (subr (maxeff (read @globals) (read @v) spin) ((arrayof int @v) int int int)
+                           int)
+  (lambda (bs at k acc)
+    (if (< k 0) acc (ev-bytes-int bs at (- k 1) (+ (* acc 256) (array-ref bs (+ at k)))))))
+;; `w` bytes from `at` := `n`, not negative, little-endian.
+(define* ev-int-bytes! (subr (maxeff stores spin) ((arrayof int @v) int int int) unit)
+  (lambda (bs at w n)
+    (if (= w 0)
+        #u
+        (begin (array-set! bs at (modulo n 256))
+               (ev-int-bytes! bs (+ at 1) (- w 1) (quotient n 256))))))
+;; A scalar's width, by its layout (`fixpt_heap::layout::FLAT_*`).
+(define* ev-flat-width (subr (read @globals) (int) int)
+  (lambda (code) (if (or (= code 2) (= code 3) (= code 5)) 8 4)))
+;; The scalar of layout `code` at byte `at` of `bs`, as a value.
+(define* ev-scalar-get (subr (maxeff evals spin) ((arrayof int @v) int int) val)
+  (lambda (bs at code)
+    (let ((w (ev-flat-width code)))
+      (if (> (+ at w) (array-length bs))
+          (efail "suffix ref: the bloblet's suffix has no such byte")
+          (let ((u (ev-bytes-int bs at (- w 1) 0)))
+            (case code
+              ((0) (if (>= u 2147483648) (- u 4294967296) u))
+              ((2) (if (>= u 9223372036854775808) (- u 18446744073709551616) u))
+              ((4) (bits->f32 (int->u32 u)))
+              ((5) (bits->f64 (int->u64 u)))
+              (else u)))))))
+;; The scalar of layout `code` at byte `at` of `bs` := `v`.
+(define* ev-scalar-set! (subr (maxeff evals spin) ((arrayof int @v) int int val) unit)
+  (lambda (bs at code v)
+    (let ((w (ev-flat-width code)))
+      (if (> (+ at w) (array-length bs))
+          (efail "suffix ref: the bloblet's suffix has no such byte")
+          (let ((n (case code
+                     ((4) (u32->int (f32->bits (as-f32 v))))
+                     ((5) (u64->int (f64->bits (as-f64 v))))
+                     (else (as-int v)))))
+            (ev-int-bytes! bs at w (if (< n 0) (+ n (ev-pow256 w 1)) n)))))))
+;; Blobref operation `op` on `xs`; `i` the layout the checker found: a
+;; scalar's (`blobref-get`, `-set!`), or an array's `n << 32 | size`.
+(define* ev-blobref (subr (maxeff evals spin) (symbol int vals) val)
+  (lambda (op i xs)
+    (if (symbol=? op 'blobref-at)
+        (ev-bref (ev-arg xs 0) (as-int (ev-arg xs 1)))
+        (let ((r (ev-arg xs 0)))
+          (tagcase (as-other r "a blobref")
+            (o-bref (o at)
+              (case op
+                ((blobref+) (ev-bref o (+ at (as-int (ev-arg xs 1)))))
+                ((blobref-owner) o)
+                ((blobref-offset) at)
+                ((blobref-index)
+                 (let ((k (as-int (ev-arg xs 1))) (n (quotient i 4294967296))
+                       (size (modulo i 4294967296)))
+                   (if (and (>= k 0) (< k n))
+                       (ev-bref o (+ at (* k size)))
+                       (efail "blobref-index: out of range"))))
+                ((blobref-get) (let ((p (ev-bref-bytes r))) (ev-scalar-get (car p) at i)))
+                (else (let ((p (ev-bref-bytes r)))
+                        (begin (ev-scalar-set! (car p) at i (ev-arg xs 1)) the-unit)))))
+            (else y (efail-expected "a blobref")))))))
+
 ;; Bloblet operation `op`, at field `i`, of `xs`.
 (define* ev-bloblet (subr (maxeff evals spin) (symbol int vals) val)
   (lambda (op i xs)
     (case op
       ((rmake-bloblet) (ev-make-bloblet (cdr xs)))
       ((make-bloblet) (ev-make-bloblet xs))
-      ;; Its bloblets' suffixes are arrays of bytes here: no suffix refs yet
-      ;; (`TODO.md` §77).
       ((blobref-at blobref+ blobref-owner blobref-offset blobref-get blobref-set! blobref-index)
-       (efail "the evaluator written in FX-26 has no blobrefs yet"))
+       (ev-blobref op i xs))
       (else
        (tagcase (as-other (ev-arg xs 0) "a bloblet")
          (o-blob (fs bs)

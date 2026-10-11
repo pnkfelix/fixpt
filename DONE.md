@@ -1508,3 +1508,11 @@ both register-code generators. Tests: `bloblet/flat-product.fx`,
 `flat-product-of-type.fx`, `flat-no-copy.fx`, `bloblet-errors/
 flat-index-range.fx`.
 
+Blobrefs in the evaluator written in FX-26 (2026-10-10): a value form
+`o-bref`, owner and offset over the evaluator's bloblets of byte arrays;
+every blobref form, `extract` of one included, reading the layouts and
+offsets the checker found (its facts copied in at `ev-begin!`). New
+standard primitives `f64->bits`, `bits->f64`, `f32->bits`, `bits->f32`, in
+both lowerings, the runtime and the evaluator. The evaluator's test runs
+`bloblet/` too, every program agreeing with the lowering.
+

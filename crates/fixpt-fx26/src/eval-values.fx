@@ -47,6 +47,7 @@
 (define o-sum (with eval-types o-sum))
 (define o-icell (with eval-types o-icell))
 (define o-blob (with eval-types o-blob))
+(define o-bref (with eval-types o-bref))
 (define o-tag (with eval-types o-tag))
 (define o-cont (with eval-types o-cont))
 (define o-esc (with eval-types o-esc))
@@ -157,6 +158,18 @@
 (define* apply1 (subr (maxeff evals spin) (val val) val)
   (lambda (f x) (apply-val f (the vals (cons x nil)))))
 
+;; Whether `o` and `p` are the same bloblet, a blobref's owner.
+(define* ev-same-blob? (subr pure (val val) bool)
+  (lambda (o p)
+    (typecase o
+      (sum x
+        (typecase p
+          (sum y
+            (tagcase x
+              (o-blob (fs bs) (tagcase y (o-blob (gs cs) (eq? fs gs)) (else z #f)))
+              (else z #f)))
+          (else #f)))
+      (else #f))))
 ;; `eq?` of two `other`s: unit is unit, and a mutable one is itself; any
 ;; other (a product, a sum, the control) #f, which `eq?` allows of
 ;; immutable data.
@@ -166,6 +179,8 @@
       (o-unit () (tagcase b (o-unit () #t) (else y #f)))
       (o-icell (f c) (tagcase b (o-icell (g d) (eq? f g)) (else y #f)))
       (o-blob (fs bs) (tagcase b (o-blob (gs cs) (eq? fs gs)) (else y #f)))
+      ;; Owner and offset, as the machines' one word.
+      (o-bref (o i) (tagcase b (o-bref (p j) (and (= i j) (ev-same-blob? o p))) (else y #f)))
       (else y #f))))
 
 ;; `eq?` of two values, as the machines have it: the same mutable object;
@@ -227,6 +242,7 @@
       (o-sum (t x) (k-cat3 "#<sum " (symbol->string t) ">"))
       (o-icell (f c) "#<bloblet 3 fields 0 bytes>")
       (o-blob (fs bs) (show-bloblet (+ 1 (array-length fs)) (array-length bs)))
+      (o-bref (o i) (k-cat3 "#<suffix-ref bloblet +" (int->string i) ">"))
       (o-tag (t) "#<prompt-tag>")
       (o-cont (k) "#<continuation>")
       (o-esc (k) "#<continuation>")

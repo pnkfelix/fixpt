@@ -1349,6 +1349,17 @@ prims! {
     "%fx26-f32->int", 1, Some(1), simple!(|rt, a| f32_op(rt, a, "->int"));
     "%fx26-f32->f64", 1, Some(1), simple!(|rt, a| f32_op(rt, a, "->f64"));
     "%fx26-f64->f32", 1, Some(1), simple!(|rt, a| { let x = f64_in(rt, a[0])?; Ok(Value::f32(x as f32)) });
+    // A float's bits, and back.
+    "%fx26-f64->bits", 1, Some(1), simple!(|rt, a| { let x = f64_in(rt, a[0])?; Ok(exact_out(rt, x.to_bits() as i128)) });
+    "%fx26-bits->f64", 1, Some(1), simple!(|rt, a| {
+        let b = fixed_in(rt, a[0], Width::U64)?;
+        Ok(rt.heap.make_flonum(f64::from_bits(b as u64)))
+    });
+    "%fx26-f32->bits", 1, Some(1), simple!(|rt, a| { let x = f32_in(rt, a[0])?; Ok(Value::fixnum(x.to_bits() as i64)) });
+    "%fx26-bits->f32", 1, Some(1), simple!(|rt, a| {
+        let b = fixed_in(rt, a[0], Width::U32)?;
+        Ok(Value::f32(f32::from_bits(b as u32)))
+    });
     // `int->f32`, correctly rounded (not through an f64, which would round
     // twice).
     "%fx26-int->f32", 1, Some(1), simple!(|rt, a| match exact_bigint(rt, a[0]) {

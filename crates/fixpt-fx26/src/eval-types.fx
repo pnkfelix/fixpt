@@ -37,6 +37,9 @@
   (o-sum symbol val)
   (o-icell (ref bool @v) (ref val @v))
   (o-blob (arrayof val @v) (arrayof int @v))
+  ;; A blobref (`TODO.md` §77): its owner, a bloblet, and a byte of its
+  ;; suffix.
+  (o-bref val int)
   (o-tag (prompt-tag val val (maxeff runs spin) @x))
   (o-cont (composable val val (maxeff runs spin) @x))
   ;; A `cwcc` escape.
@@ -109,4 +112,5 @@
 (define-type eval-prims-sig
   (moduleof
    (val ev-bloblet (subr (maxeff evals spin) (symbol int vals) val))
+   (val ev-bref (subr (maxeff evals spin) (val int) val))
    (val standard (subr (maxeff evals spin) (symbol) val))))

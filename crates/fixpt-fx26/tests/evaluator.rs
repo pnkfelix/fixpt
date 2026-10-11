@@ -86,7 +86,7 @@ fn the_long_programs() {
 fn every_program(wanted: impl Fn(&str) -> bool) {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
     let mut report = Vec::new();
-    for sub in ["bidirectional", "control", "run", "pldi89", "modules"] {
+    for sub in ["bidirectional", "control", "run", "pldi89", "modules", "bloblet"] {
         let mut names: Vec<_> = std::fs::read_dir(format!("{dir}/{sub}")).unwrap().map(|e| e.unwrap().path()).collect();
         names.sort();
         for path in names {

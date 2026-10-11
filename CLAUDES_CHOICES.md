@@ -284,3 +284,20 @@ than a word unless its name says so.
 8. **Run-time failures in `bloblet-errors/`**: each machine says a run-time
    error its own way, which the compilers' tests would count as a
    disagreement.
+
+## Blobrefs in the evaluator written in FX-26 (TODO.md §77, 2026-10-10)
+
+1. **A value form `o-bref`**, an owner (an `o-blob`) and an offset, over
+   the evaluator's own bloblets, whose suffixes are arrays of bytes; not a
+   host suffix ref, so the evaluator stays in its own values.
+2. **The checker's facts copied in at the start** (`ev-begin!`, as the
+   reshapes and `with`s are), so `eval` reads only the evaluator's store
+   and its effect stays `evals`; looked up by span, as the compilers do.
+3. **Four standard primitives**, `f64->bits`, `bits->f64`, `f32->bits`,
+   `bits->f32`: the evaluator, reading a scalar from bytes by hand, needs
+   them, and a program may too. Rejected: an evaluator-only primitive.
+4. **Equality of two blobrefs** compares their owners' field arrays
+   directly (`ev-same-blob?`): `ev-other-eq?` is a `define*`, which may
+   not be in a recursive group with `ev-eq?`.
+5. **The evaluator's test now runs `bloblet/`**, every program agreeing
+   with the lowering.

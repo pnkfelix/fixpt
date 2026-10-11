@@ -50,6 +50,7 @@
 (define-type top (select parser-types top))
 (define-type k-reshape-list (select check-env-types k-reshape-list))
 (define-type k-with-list (select check-env-types k-with-list))
+(define-type k-facts (select check-env-types k-facts))
 (define-type exp-arms (select check-resolve-types exp-arms))
 (define-type exp-let-bs (select check-resolve-types exp-let-bs))
 (define-type exp-letrec-bs (select check-resolve-types exp-letrec-bs))
@@ -70,10 +71,13 @@
 (define show-val (with values show-val))
 (define the-unit (with values the-unit))
 (define ev-bloblet (with prims ev-bloblet))
+(define ev-bref (with prims ev-bref))
+(define o-bref (with eval-types o-bref))
 (define standard (with prims standard))
 (define k-fx-module? (with env k-fx-module?))
 (define k-reshapes (with env k-reshapes))
 (define k-with-vals (with env k-with-vals))
+(define k-extracts (with env k-extracts))
 (define exp-start (with resolve exp-start))
 (define exp-end (with resolve exp-end))
 
@@ -148,6 +152,28 @@
 ;; them: where it is, and the module's values its body names, with their
 ;; positions.
 (define ev-withs (ref k-with-list @v) (new nil))
+;; What the checker found at each place, as `run-checked` was given it: a
+;; blobref's layouts, and offsets (`checked-extracts`).
+(define ev-facts (ref k-facts @v) (new nil))
+;; The fact at `a`..`b` not negative, or -1.
+(define* ev-fact-in (subr (maxeff (read @globals) spin) (k-facts int int) int)
+  (lambda (fs a b)
+    (cond ((null? fs) -1)
+          ((and (= (extract (car fs) 1) a) (= (extract (car fs) 2) b) (>= (extract (car fs) 3) 0))
+           (extract (car fs) 3))
+          (else (ev-fact-in (cdr fs) a b)))))
+(define* ev-fact-at (subr (maxeff (read @globals) (read @v) spin) (int int) int)
+  (lambda (a b) (ev-fact-in (get ev-facts) a b)))
+;; `(extract v l)` at `a`..`b`: a product's field; or, of a blobref, one to
+;; its field, at the offset the checker found (past `check::BLOBREF_FIELD`).
+(define* ev-extract (subr (maxeff evals spin) (val symbol int int) val)
+  (lambda (v l a b)
+    (let ((i (ev-fact-at a b)))
+      (if (>= i 1099511627776)
+          (tagcase (as-other v "a blobref")
+            (o-bref (o at) (ev-bref o (+ at (- i 1099511627776))))
+            (else y (efail-expected "a blobref")))
+          (field-of v l)))))
 
 (define* ev-with-in (subr (maxeff (alloc @v) spin) (k-with-list int int) ev-with-at)
   (lambda (ws a b)
@@ -291,9 +317,11 @@
         (e-prompt (t body h a b)
           (let* ((tag (as-tag (eval t e))) (hv (eval h e)))
             (prompt tag (eval body e) (lambda (v) (apply1 hv v)))))
-        (e-bloblet (op i args a b) (ev-bloblet op i (eval-all args e)))
+        ;; A blobref's read, write or index: its layout, as the checker found it.
+        (e-bloblet (op i args a b)
+          (ev-bloblet op (if (< i 0) (ev-fact-at a b) i) (eval-all args e)))
         (e-product (fs a b) (o-product (eval-fields fs e)))
-        (e-extract (p l a b) (field-of (eval p e) l))
+        (e-extract (p l a b) (ev-extract (eval p e) l a b))
         (e-sum (t v a b) (o-sum t (eval v e)))
         (e-tagcase (s arms els a b) (eval-tagcase (eval s e) arms els e))
         ;; A module: a product of its values, in order, each labelled by its
@@ -500,21 +528,24 @@
       (lambda (r) r))))
 
 ;; A whole program begins with no globals, and no names kept.
-(define* ev-begin! (subr stores (k-reshape-list k-with-list) unit)
-  (lambda (rs ws) (begin (set genv nil) (set ev-keep nil) (set ev-reshapes rs) (set ev-withs ws))))
+(define* ev-begin! (subr stores (k-reshape-list k-with-list k-facts) unit)
+  (lambda (rs ws fs)
+    (begin (set genv nil) (set ev-keep nil) (set ev-reshapes rs) (set ev-withs ws)
+           (set ev-facts fs))))
 
 ;; The entry point for a program the checker written in FX-26 checked: what
 ;; it runs (`checked-tops`, under redefinition), run; its value shown, or
 ;; its error. A whole program, as each is.
 (define run-checked (subr (maxeff evals (read @t) spin) ((listof k-run acyclic)) string)
   (lambda (runs)
-    (tagcase (begin (ev-begin! (get k-reshapes) (get k-with-vals)) (eval-runs runs))
+    (tagcase (begin (ev-begin! (get k-reshapes) (get k-with-vals) (get k-extracts))
+                    (eval-runs runs))
       (ev-ok (v) (show-val v))
       (ev-err (m) (string-append "!! " m)))))
 
 ;; The entry point: a program's trees, run; its value shown, or its error.
 (define run-program (subr (maxeff evals spin) ((listof top acyclic)) string)
   (lambda (tops)
-    (tagcase (begin (ev-begin! nil nil) (eval-program tops))
+    (tagcase (begin (ev-begin! nil nil nil) (eval-program tops))
       (ev-ok (v) (show-val v))
       (ev-err (m) (string-append "!! " m))))))))
