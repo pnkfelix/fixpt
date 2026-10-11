@@ -94,6 +94,14 @@ are in the last section, "Log: the glance's details", and in
   one value, made once and purely. The front end joined is now `reader.fx`
   (the reader's top-level face, which Rust names) and `conductor.fx`.
   Compiling it: 207.6 M words (171.0 when phase 2 began; 215 before §68).
+- **The front end compiling itself, faster** (2026-10-11): §69's import
+  pass had made checking it slower (found measuring side by side, fixed:
+  `DONE.md` §69); then, sampled natively with `FIXPT_SYMBOLS`, its
+  integer arithmetic in line in register code's cellular convention, the
+  FX-26 assembler's powers of two by a shift, and the Rust checker's
+  bindings indexed by name. On itself, before the pass → now: `check`
+  575 → 520 ms, `fx check` 1295 → 1233, `fx arm64` 835 → 418
+  (`docs/performance.md`).
 - **Tools**: `fixpt check|compile|eval INPUT` (both checkers, both
   compilers); `sexp-edit`, `edit` included; the phase probe
   (`probe_phases_as_register_code`), with collections and allocation by
