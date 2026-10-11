@@ -2997,6 +2997,12 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
             ("bloblet-byte", [_, _]) => (BlobletOp::Byte, args),
             ("bloblet-set-byte!", [_, _, _]) => (BlobletOp::SetByte, args),
             ("bloblet-bytes", [_]) => (BlobletOp::Bytes, args),
+            ("blobref-at", [_, _]) => (BlobletOp::RefAt, args),
+            ("blobref+", [_, _]) => (BlobletOp::RefAdd, args),
+            ("blobref-owner", [_]) => (BlobletOp::RefOwner, args),
+            ("blobref-offset", [_]) => (BlobletOp::RefOffset, args),
+            ("blobref-get", [_]) => (BlobletOp::RefGet, args),
+            ("blobref-set!", [_, _]) => (BlobletOp::RefSet, args),
             _ => {
                 let shape = match name {
                     "make-bloblet" => "(make-bloblet bytes field …)",
@@ -3006,6 +3012,12 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                     "bloblet-freeze" => "(bloblet-freeze bloblet)",
                     "bloblet-byte" => "(bloblet-byte bloblet i)",
                     "bloblet-set-byte!" => "(bloblet-set-byte! bloblet i byte)",
+                    "blobref-at" => "(blobref-at bloblet offset)",
+                    "blobref+" => "(blobref+ blobref bytes)",
+                    "blobref-owner" => "(blobref-owner blobref)",
+                    "blobref-offset" => "(blobref-offset blobref)",
+                    "blobref-get" => "(blobref-get blobref)",
+                    "blobref-set!" => "(blobref-set! blobref value)",
                     _ => "(bloblet-bytes bloblet)",
                 };
                 return Err(FxError::at(span, format!("`{shape}`")));

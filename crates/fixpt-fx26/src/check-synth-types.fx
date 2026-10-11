@@ -68,6 +68,15 @@
 (define-type k-solved (select check-infer-types k-solved))
 (define-type k-te (select check-types-types k-te))
 (define-type kxs (select check-types-types kxs))
+;; The checker's knot, as `check-synth.fx`'s forms are given it.
+(define-type k-synther
+  (subr (maxeff (alloc @t) (goto @z) (read @globals) (read @s) (read @t) (write @t) spin)
+        (kx)
+        k-te))
+(define-type k-checker
+  (subr (maxeff (alloc @t) (goto @z) (read @globals) (read @s) (read @t) (write @t) spin)
+        (kx int)
+        k-eff))
 (define-type check-synth-sig
   (moduleof (val k-note-frozen-define
                  (subr (maxeff (alloc @t)
@@ -332,6 +341,26 @@
             (val k-te-reading
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
                        (int k-region k-eff)
+                       k-te))
+            (val k-bloblet-op
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (kx string int kxs k-synther k-checker)
+                       k-te))
+            (val k-blobref-op
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (kx string kxs int k-synther k-checker)
                        k-te))
             (val k-te-writing
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin)

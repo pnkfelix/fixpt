@@ -125,7 +125,11 @@
 (define-type result (select eager-reader-types result))
 ;; What it uses of the modules it is given.
 (define k-binder-has? (with check-types k-binder-has?))
+(define k-cat3 (with check-types k-cat3))
 (define k-cat4 (with check-types k-cat4))
+(define k-int (with check-env k-int))
+(define k-unit (with check-env k-unit))
+(define ty-named (with check-types-types ty-named))
 (define k-cat5 (with check-types k-cat5))
 (define k-certified (with check-types k-certified))
 (define k-certified-lengths (with check-types k-certified-lengths))
@@ -194,6 +198,7 @@
 (define k-fail-not-known (with check-errors k-fail-not-known))
 (define k-fail-ty (with check-errors k-fail-ty))
 (define k-fail-ty-at (with check-errors k-fail-ty-at))
+(define k-fail-frozen (with check-errors k-fail-frozen))
 (define k-handler-wants (with check-errors k-handler-wants))
 (define k-insert (with check-effects k-insert))
 (define k-region=? (with check-effects k-region=?))
@@ -867,4 +872,124 @@
             ((k-handles? (car c) payload answer) (car c))
             (else
              (let ((wants (k-handler-wants payload answer)))
-               (k-fail-at (k-cat4 wants "; it is a " (k-show-ty ht) "") handler))))))))))
+               (k-fail-at (k-cat4 wants "; it is a " (k-show-ty ht) "") handler)))))))
+
+;;; ------------------------------------------------------------ blobrefs
+;; `blobref`, standard generative type 5 (`check::BLOBREF_INDEX`).
+(define k-blobref-index int 5)
+;; A scalar flat's layout (`fixpt_heap::layout::FLAT_*`), or -1.
+(define k-flat-code (subr (read @globals) (symbol) int)
+  (lambda (s)
+    (case (symbol->string s)
+      (("i32") 0) (("u32") 1) (("i64") 2) (("u64") 3) (("f32") 4) (("f64") 5) (else -1))))
+;; `(blobref b f)`'s owner and flat, if `t` is one.
+(define-type k-owner-flat (listof (pairof int int @t) acyclic))
+(define k-blobref-parts (subr (maxeff kreads (alloc @t) spin) (int) k-owner-flat)
+  (lambda (t)
+    (tagcase (k-get (k-resolve t))
+      (ty-named (g ds)
+        (if (and (= g k-blobref-index) (= (k-length ds) 2))
+            (tagcase (car ds)
+              (dt (b) (tagcase (car (cdr ds)) (dt (f) (list (cons b f))) (else y nil)))
+              (else y nil))
+            nil))
+      (else y nil))))
+(define k-blobref-of (subr (maxeff kstate spin) (int int) int)
+  (lambda (b f) (k-ty-new (ty-named k-blobref-index (list (dt b) (dt f))))))
+;; The flat the type checked against says, for a new blobref.
+(define k-blobref-wanted (subr (maxeff checks spin) (kx int) int)
+  (lambda (x expected)
+    (let ((p (if (< expected 0) nil (k-blobref-parts expected))))
+      (if (null? p)
+          (k-fail (string-append "which flat a new `blobref` points to is said by the type it is "
+                                 "checked against: `(the (blobref B F) …)`")
+                  (k-start x) (k-end x))
+          (cdr (car p))))))
+;; Of a blobref of type `xt`, owner `b`, flat `f`, read or written: the
+;; owner's region, `f` a scalar; noting the scalar's layout at `x`'s span
+;; for the compilers if `note`.
+(define k-blobref-region (subr (maxeff checks spin) (kx int int int bool) k-region)
+  (lambda (x xt b f note)
+    (let ((code (tagcase (k-get (k-resolve f)) (ty-base (s) (k-flat-code s)) (else y -1)))
+          (a (k-start x)) (z (k-end x)))
+      (if (< code 0)
+          (k-fail (k-cat3 "only a scalar's bytes are read or written, and this points to a "
+                          (k-show-ty f) "")
+                  a z)
+          (tagcase (k-get (k-resolve b))
+            (ty-bloblet (fs fz r)
+              (let ((fact (product (1 a) (2 z) (3 code))))
+                (begin (if note (set k-extracts (cons fact (get k-extracts))) #u) r)))
+            (else y (k-fail (k-cat3 "the region of a " (k-show-ty xt) "'s owner is not known")
+                            a z)))))))
+;; The `blobref` forms (`Checker::synth_blobref`), first operand `ox` of
+;; type `xt`: what the second, if any, is checked against (an `int`, or the
+;; scalar's type; -1 for none), failing in the Rust checker's order.
+(define k-blobref-arg (subr (maxeff checks spin) (kx string kx int) int)
+  (lambda (x name ox xt)
+    (if (string=? name "blobref-at")
+        (tagcase (k-get (k-resolve xt))
+          (ty-bloblet (fs z r) k-int)
+          (else y (k-fail-ty-at "a bloblet is expected here, and this is a " xt ox)))
+        (let ((p (k-blobref-parts xt)))
+          (cond ((null? p) (k-fail-ty-at "a blobref is expected here, and this is a " xt ox))
+                ((string=? name "blobref+") k-int)
+                ((string=? name "blobref-set!")
+                 (let ((r (k-blobref-region x xt (car (car p)) (cdr (car p)) #f))) (cdr (car p))))
+                (else -1))))))
+;; Its type and effect, `e` its operands'.
+(define k-blobref-result (subr (maxeff checks spin) (kx string int k-eff int) k-te)
+  (lambda (x name xt e expected)
+    (if (string=? name "blobref-at")
+        (k-te (k-blobref-of xt (k-blobref-wanted x expected)) e)
+        (let* ((p (car (k-blobref-parts xt))) (b (car p)) (f (cdr p)))
+          (case name
+            (("blobref+") (k-te (k-blobref-of b (k-blobref-wanted x expected)) e))
+            (("blobref-owner") (k-te b e))
+            (("blobref-offset") (k-te k-int e))
+            (("blobref-get") (k-te-reading f (k-blobref-region x xt b f #t) e))
+            (else (k-te-writing k-unit (k-blobref-region x xt b f #t) e)))))))
+
+
+;; The checker's knot, `check-rules.fx`'s, given to what checks forms here.
+(define-type k-synther (subr (maxeff checks spin) (kx) k-te))
+(define-type k-checker (subr (maxeff checks spin) (kx int) k-eff))
+;; `(name bx i rest …)`: a bloblet's field `i` read or written, it frozen,
+;; or a byte of it; `synth` and `check` the knot's.
+(define k-bloblet-op (subr (maxeff checks spin) (kx string int kxs k-synther k-checker) k-te)
+  (lambda (x name i args synth check)
+    (let* ((a (k-start x)) (b (k-end x))
+           (bx (car args)) (rest (cdr args)) (rb (synth bx)) (bt (extract rb 1)))
+      (tagcase (k-get bt)
+        (ty-bloblet (fields frozen region)
+          (let* ((e (extract rb 2))
+                 (te
+                  (case name
+                    (("bloblet-ref")
+                     (let ((t (k-bloblet-field bt fields i a b)))
+                       (if frozen (k-te t e) (k-te-reading t region e))))
+                    (("bloblet-set!")
+                     (let ((t (k-bloblet-field bt fields i a b)))
+                       (if frozen
+                           (k-fail-frozen bt a b)
+                           (k-te-writing k-unit region (k-union e (check (car rest) t))))))
+                    (("bloblet-freeze")
+                     (k-te-writing (k-ty-new (ty-bloblet fields #t region)) region e))
+                    (("bloblet-byte")
+                     (k-te-reading k-int region (k-union e (check (car rest) k-int))))
+                    (("bloblet-set-byte!")
+                     (let* ((e1 (check (car rest) k-int)) (e2 (check (car (cdr rest)) k-int)))
+                       (k-te-writing k-unit region (k-union e (k-union e1 e2)))))
+                    (else (k-te k-int e)))))
+            (k-masked x te)))
+        (else y (k-fail-ty-at "a bloblet is expected here, and this is a " bt bx))))))
+;; The `blobref` forms (`k-blobref-arg`, `k-blobref-result`).
+(define k-blobref-op (subr (maxeff checks spin) (kx string kxs int k-synther k-checker) k-te)
+  (lambda (x name args expected synth check)
+    (let* ((rx (synth (car args))) (xt (extract rx 1))
+           (want (k-blobref-arg x name (car args) xt))
+           (e (if (< want 0)
+                  (extract rx 2)
+                  (k-union (extract rx 2) (check (car (cdr args)) want)))))
+      (k-masked x (k-blobref-result x name xt e expected)))))
+)))

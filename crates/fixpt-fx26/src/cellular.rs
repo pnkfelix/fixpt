@@ -859,7 +859,7 @@ impl<'a> Compiler<'a> {
                 self.done(code, tail);
             }
             Exp::Bloblet { op, args } => {
-                self.bloblet(op, &args, e, depth, code)?;
+                self.bloblet(x, op, &args, e, depth, code)?;
                 self.done(code, tail);
             }
             Exp::Product(fields) => {
@@ -1945,7 +1945,7 @@ impl<'a> Compiler<'a> {
         Ok(())
     }
 
-    fn bloblet(&mut self, op: BlobletOp, args: &[ExpId], e: &Env, depth: usize, code: &mut Vec<Item>) -> R<()> {
+    fn bloblet(&mut self, x: ExpId, op: BlobletOp, args: &[ExpId], e: &Env, depth: usize, code: &mut Vec<Item>) -> R<()> {
         match op {
             BlobletOp::Make => {
                 let n = self.exps(args, e, depth, code)?;
@@ -1986,6 +1986,28 @@ impl<'a> Compiler<'a> {
             BlobletOp::Bytes => {
                 let n = self.exps(args, e, depth, code)?;
                 self.prim(code, "%bloblet-bytes", n)?;
+            }
+            BlobletOp::RefAt | BlobletOp::RefAdd | BlobletOp::RefOwner | BlobletOp::RefOffset => {
+                let n = self.exps(args, e, depth, code)?;
+                let name = match op {
+                    BlobletOp::RefAt => "%suffix-ref",
+                    BlobletOp::RefAdd => "%suffix-ref+",
+                    BlobletOp::RefOwner => "%suffix-ref-owner",
+                    _ => "%suffix-ref-offset",
+                };
+                self.prim(code, name, n)?;
+            }
+            // The scalar's layout, as the checker found it, after the ref.
+            BlobletOp::RefGet | BlobletOp::RefSet => {
+                let k = *self.c.facts.field_index.get(&x).ok_or("a blobref read the checker did not see")?;
+                self.exp(args[0], e, depth, code, false)?;
+                self.int(code, k as i64);
+                if op == BlobletOp::RefSet {
+                    self.exp(args[1], e, depth + 2, code, false)?;
+                    self.prim(code, "%fx26-suffix-ref-set!", 3)?;
+                } else {
+                    self.prim(code, "%fx26-suffix-ref-get", 2)?;
+                }
             }
         }
         Ok(())

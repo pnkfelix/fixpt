@@ -648,6 +648,15 @@ impl Lowerer<'_> {
                     BlobletOp::Byte => format!("(%bloblet-byte {} {})", a[0], a[1]),
                     BlobletOp::SetByte => format!("(%fx26-bloblet-set-byte! {} {} {})", a[0], a[1], a[2]),
                     BlobletOp::Bytes => format!("(%bloblet-bytes {})", a[0]),
+                    BlobletOp::RefAt => format!("(%suffix-ref {} {})", a[0], a[1]),
+                    BlobletOp::RefAdd => format!("(%suffix-ref+ {} {})", a[0], a[1]),
+                    BlobletOp::RefOwner => format!("(%suffix-ref-owner {})", a[0]),
+                    BlobletOp::RefOffset => format!("(%suffix-ref-offset {})", a[0]),
+                    // The scalar's layout, as the checker found it.
+                    BlobletOp::RefGet => format!("(%fx26-suffix-ref-get {} {})", a[0], self.c.facts.field_index[&e]),
+                    BlobletOp::RefSet => {
+                        format!("(%fx26-suffix-ref-set! {} {} {})", a[0], self.c.facts.field_index[&e], a[1])
+                    }
                 }
             }
             // Immutable data is a frozen bloblet: a product's fields in

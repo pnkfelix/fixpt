@@ -223,3 +223,33 @@ The user's okasaki.fx met "a (moduleof …) is expected here, and this is a
    `k-datas` is. `k-try-kind` and its kin moved from `check-read-descs.fx`
    (1003 lines with the change) to `check-read-helpers.fx`.
 6. **The name `blobref`**, the user's; `flatref` named the kind instead.
+
+## The `blobref` operations (TODO.md §77, 2026-10-10)
+
+1. **Syntax, not primitives**: `blobref-at`, `blobref+`, `blobref-owner`,
+   `blobref-offset`, `blobref-get`, `blobref-set!`, kept as the bloblet
+   forms are (`BlobletOp`, `e-bloblet`), so they read the owner's own type
+   and its region, which no primitive's type could name without bounds.
+2. **A new blobref's flat from the type checked against**, as
+   `make-bloblet`'s region is, not a flat written in the form: no type
+   syntax in the FX-26 parser's expression trees. Without one: "which flat
+   a new `blobref` points to is said by the type it is checked against".
+3. **Read and write only scalars, named**: a blobref to a flat variable is
+   not read ("only a scalar's bytes are read or written"); generic code
+   over flats passes refs, and the code that knows the scalar reads.
+4. **The layout reaches the compilers as a fact at the form's span**, the
+   way an `extract`'s field index does (`Facts::field_index`, `k-extracts`,
+   `c-field-at`), since the runtime cannot tell an owner's scalar.
+5. **Runtime primitives** `%fx26-suffix-ref-get` and `-set!`, taking the
+   layout code and reading or writing as a flat array's element is
+   (`flat_value`, `flat_bits_of`); the others are the runtime's own
+   `%suffix-ref…`.
+6. **`blobref-at` masked** in the Rust checker as every other form is (its
+   first draft returned before masking).
+7. **The evaluator written in FX-26 refuses blobrefs** for now: it keeps a
+   suffix as an array of bytes, and would need a value form of its own.
+8. **Size debts kept**: `k-bloblet-op` moved from `check-rules.fx` to
+   `check-synth.fx`, and `r-bloblet` from `regcode-core.fx` to
+   `regcode-helpers.fx`, each given the knot's procedures (`k-synth`,
+   `k-check`; `r-exp`, `r-prim`) as arguments; both files shrank, and
+   their debts were lowered.

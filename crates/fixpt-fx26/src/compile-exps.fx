@@ -303,7 +303,10 @@
             (c-op c routine-prompt)
             (c-done c tail)))
         (e-bloblet (op i args a b)
-          (begin (c-bloblet (symbol->string op) i args e depth c) (c-done c tail)))
+          ;; A `blobref-get` or `-set!`'s index is its scalar's layout, as
+          ;; the checker found it.
+          (let ((i (if (< i 0) (c-field-at a b) i)))
+            (begin (c-bloblet (symbol->string op) i args e depth c) (c-done c tail))))
         (e-product (fs a b)
           (begin (c-int c 37)
                  (c-prim c "%make-frozen" (+ 1 (c-exps (c-bound-exps fs) e (+ depth 1) c)))
@@ -621,7 +624,18 @@
                (("bloblet-byte") (c-prim c "%bloblet-byte" (c-exps args e depth c)))
                (("bloblet-set-byte!")
                 (begin (c-prim c "%bloblet-set-byte!" (c-exps args e depth c)) (c-unit-after c)))
-               (else (c-prim c "%bloblet-bytes" (c-exps args e depth c))))))
+               (("bloblet-bytes") (c-prim c "%bloblet-bytes" (c-exps args e depth c)))
+               (("blobref-at") (c-prim c "%suffix-ref" (c-exps args e depth c)))
+               (("blobref+") (c-prim c "%suffix-ref+" (c-exps args e depth c)))
+               (("blobref-owner") (c-prim c "%suffix-ref-owner" (c-exps args e depth c)))
+               (("blobref-offset") (c-prim c "%suffix-ref-offset" (c-exps args e depth c)))
+               (("blobref-get")
+                (begin (c-exp (car args) e depth c #f) (c-int c i)
+                       (c-prim c "%fx26-suffix-ref-get" 2)))
+               (else
+                (begin (c-exp (car args) e depth c #f) (c-int c i)
+                       (c-exp (car (cdr args)) e (+ depth 2) c #f)
+                       (c-prim c "%fx26-suffix-ref-set!" 3))))))
   ;;; ----------------------------------------------------------------- tagcase
   (c-tagcase
     (subr (maxeff compiles spin) (exp c-cases c-binds cenv int code bool) unit)

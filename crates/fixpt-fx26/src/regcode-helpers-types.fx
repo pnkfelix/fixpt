@@ -54,6 +54,15 @@
 (define-type rargs (select regcode-types rargs))
 (define-type rconsts (select regcode-types rconsts))
 (define-type renv (select regcode-types renv))
+;; The knot's `r-exp` and `r-prim`, as `r-bloblet` is given them.
+(define-type r-exper
+  (subr (maxeff (alloc @k) (goto @y) (read @globals) (read @k) (read @t) (write @k) spin)
+        (rgen exp renv cenv bool)
+        unit))
+(define-type r-primer
+  (subr (maxeff (alloc @k) (goto @y) (read @globals) (read @k) (read @t) (write @k) spin)
+        (rgen string rargs renv cenv)
+        unit))
 (define regcode-exps-types (load-module "fx26:regcode-exps-types.fx"))
 (define-type rinline (select regcode-exps-types rinline))
 (define-type rlocs (select regcode-types rlocs))
@@ -102,6 +111,11 @@
             (val r-const-value
                  (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
                        (rgen wcell bool)
+                       unit))
+            (val r-bloblet
+                 (subr (maxeff (alloc @k) (goto @y) (read @globals) (read @k) (read @t) (write @k)
+                               spin)
+                       (rgen string int exps renv cenv r-exper r-primer)
                        unit))
             (val r-unit
                  (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k)) (rgen) unit))

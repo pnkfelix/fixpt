@@ -2018,6 +2018,19 @@ prims! {
         let bits = suffix_read(rt, a[0], 8)?;
         Ok(rt.heap.make_flonum(f64::from_bits(bits)))
     });
+    // FX-26's `blobref-get` and `blobref-set!`: a scalar of layout `code`
+    // (`fixpt_heap::layout::FLAT_*`), as a flat array's element is.
+    "%fx26-suffix-ref-get", 2, Some(2), simple!(|rt, a| {
+        let code = int(rt, a[1])?;
+        let bits = suffix_read(rt, a[0], fixpt_heap::layout::flat_size(code))?;
+        Ok(flat_value(rt, code, bits))
+    });
+    "%fx26-suffix-ref-set!", 3, Some(3), simple!(|rt, a| {
+        let code = int(rt, a[1])?;
+        let bits = flat_bits_of(rt, code, a[2])?;
+        suffix_write(rt, a[0], fixpt_heap::layout::flat_size(code), bits)?;
+        Ok(Value::UNIT)
+    });
     "%suffix-ref-u8-set!", 2, Some(2), simple!(|rt, a| {
         let x = int(rt, a[1])?;
         let Ok(b) = u8::try_from(x) else { return rt.fail("suffix ref: not a byte", &[a[1]]) };

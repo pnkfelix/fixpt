@@ -1,0 +1,26 @@
+;; => (5 37 12 7 4000000000 -2 4)
+;; `blobref`s (`TODO.md` §77): pointers into a bloblet's suffix, each of the
+;; flat its type says, made with `blobref-at` and moved with `blobref+`
+;; (the flat from the type checked against), read and written as their
+;; scalars, and giving back their owner and offset.
+(define-type pt (bloblet (fields int) @b))
+(define b pt (make-bloblet 32 7))
+(define x (blobref pt f64) (blobref-at b 0))
+(define n (blobref pt i32) (blobref-at b 8))
+(define m (blobref pt i32) (blobref+ n 4))
+(define u (blobref pt u32) (blobref-at b 16))
+(define f (blobref pt f32) (blobref+ u 4))
+(define w (blobref pt i64) (blobref-at b 24))
+(blobref-set! x 5.)
+(blobref-set! n -3)
+(blobref-set! m 40)
+(blobref-set! u 4000000000)
+(blobref-set! f (f64->f32 4.))
+(blobref-set! w (int->i64 -2))
+(list (f64->int (blobref-get x))
+      (i32->int (i32+ (blobref-get n) (blobref-get m)))
+      (blobref-offset m)
+      (bloblet-ref (blobref-owner m) 0)
+      (u32->int (blobref-get u))
+      (i64->int (blobref-get w))
+      (f32->int (blobref-get f)))

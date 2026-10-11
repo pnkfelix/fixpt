@@ -975,6 +975,20 @@ impl Compiler<'_> {
                     }
                     BlobletOp::Bytes => self.r_prim(g, "%bloblet-bytes", &es, env, te)?,
                     BlobletOp::Freeze | BlobletOp::Ref(_) => return self.decline("bloblet-freeze"),
+                    BlobletOp::RefAt => self.r_prim(g, "%suffix-ref", &es, env, te)?,
+                    BlobletOp::RefAdd => self.r_prim(g, "%suffix-ref+", &es, env, te)?,
+                    BlobletOp::RefOwner => self.r_prim(g, "%suffix-ref-owner", &es, env, te)?,
+                    BlobletOp::RefOffset => self.r_prim(g, "%suffix-ref-offset", &es, env, te)?,
+                    // The scalar's layout, as the checker found it.
+                    BlobletOp::RefGet | BlobletOp::RefSet => {
+                        let Some(&k) = self.c.facts.field_index.get(&x) else { return self.decline("blobref-get") };
+                        let k = Arg::V(Value::fixnum(k as i64));
+                        if op == BlobletOp::RefGet {
+                            self.r_prim(g, "%fx26-suffix-ref-get", &[es[0], k], env, te)?
+                        } else {
+                            self.r_prim(g, "%fx26-suffix-ref-set!", &[es[0], k, es[1]], env, te)?
+                        }
+                    }
                 }
                 g.done(tail);
             }

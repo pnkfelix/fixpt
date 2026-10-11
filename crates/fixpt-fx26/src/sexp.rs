@@ -168,6 +168,12 @@ fn show_exp(c: &Checker, chars: &Chars, e: ExpId) -> String {
                 BlobletOp::Byte => ("bloblet-byte", -1),
                 BlobletOp::SetByte => ("bloblet-set-byte!", -1),
                 BlobletOp::Bytes => ("bloblet-bytes", -1),
+                BlobletOp::RefAt => ("blobref-at", -1),
+                BlobletOp::RefAdd => ("blobref+", -1),
+                BlobletOp::RefOwner => ("blobref-owner", -1),
+                BlobletOp::RefOffset => ("blobref-offset", -1),
+                BlobletOp::RefGet => ("blobref-get", -1),
+                BlobletOp::RefSet => ("blobref-set!", -1),
             };
             format!("(e-bloblet {n} {i} {} {a} {b})", list(args.iter().map(|x| go(*x)).collect()))
         }

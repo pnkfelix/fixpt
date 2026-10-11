@@ -109,6 +109,22 @@ pub const EQTABLE: &str = "(eqtable (k type) (v type) (kr region) (r region)) (a
 /// To safety's analyses it is its owner (its regions, its storage); `b`
 /// covariant, since the owner is only given out; at run time, tag `010`.
 pub const BLOBREF: &str = "(blobref (b type +) (f flat)) b";
+/// `BLOBREF`'s number among the generative types.
+pub(crate) const BLOBREF_INDEX: u32 = 5;
+/// A scalar flat's layout (`fixpt_heap::layout::FLAT_*`), as the runtime
+/// reads and writes its bytes.
+pub(crate) fn flat_code(name: &str) -> Option<i64> {
+    use fixpt_heap::layout::*;
+    Some(match name {
+        "i32" => FLAT_I32,
+        "u32" => FLAT_U32,
+        "i64" => FLAT_I64,
+        "u64" => FLAT_U64,
+        "f32" => FLAT_F32,
+        "f64" => FLAT_F64,
+        _ => return None,
+    })
+}
 
 /// A `define-generative`: its name, parameters, their variance, and the
 /// representation, a type over the parameters.
@@ -3597,6 +3613,9 @@ impl Checker {
             let eff = self.mask(e, &eff, t);
             return Ok((t, eff));
         }
+        if matches!(op, BlobletOp::RefAt | BlobletOp::RefAdd | BlobletOp::RefOwner | BlobletOp::RefOffset | BlobletOp::RefGet | BlobletOp::RefSet) {
+            return self.synth_blobref(e, op, args, expected);
+        }
         let (b, rest) = args.split_first().expect("parsed");
         let (bt, mut eff) = self.synth(*b)?;
         let Ty::Bloblet { fields, frozen, region } = self.arena.get(bt).clone() else {
@@ -3609,6 +3628,9 @@ impl Checker {
         };
         let t = match op {
             BlobletOp::Make | BlobletOp::RMake => unreachable!(),
+            BlobletOp::RefAt | BlobletOp::RefAdd | BlobletOp::RefOwner | BlobletOp::RefOffset | BlobletOp::RefGet | BlobletOp::RefSet => {
+                unreachable!("synth_blobref")
+            }
             BlobletOp::Ref(i) => {
                 let t = field(self, i)?;
                 if !frozen {
@@ -3645,6 +3667,85 @@ impl Checker {
         };
         let eff = self.mask(e, &eff, t);
         Ok((t, eff))
+    }
+
+    /// The `blobref` forms (`TODO.md` §77). A new one's flat is the type it
+    /// is checked against's; reading or writing one is of its owner's
+    /// region, and gives or takes a value of its scalar's type, whose
+    /// layout the compilers are told (`Facts::field_index`).
+    fn synth_blobref(&mut self, e: ExpId, op: BlobletOp, args: &[ExpId], expected: Option<TyId>) -> R<(TyId, Effect)> {
+        let span = self.arena.span_of(e);
+        let int = self.int;
+        // The flat the type checked against says.
+        let wanted = |c: &Self| -> R<TyId> {
+            expected.and_then(|t| c.blobref_parts(t)).map(|(_, f)| f).ok_or_else(|| {
+                FxError::at(span, "which flat a new `blobref` points to is said by the type it is checked against: `(the (blobref B F) …)`")
+            })
+        };
+        let (x, rest) = args.split_first().expect("parsed");
+        let (xt, mut eff) = self.synth(*x)?;
+        if op == BlobletOp::RefAt {
+            if !matches!(self.arena.get(self.arena.resolve(xt)), Ty::Bloblet { .. }) {
+                return Err(FxError::at(self.arena.span_of(*x), format!("a bloblet is expected here, and this is a {}", self.show_ty(xt))));
+            }
+            eff = eff.union(&self.check(rest[0], int)?);
+            let f = wanted(self)?;
+            let t = self.blobref_of(xt, f);
+            let eff = self.mask(e, &eff, t);
+            return Ok((t, eff));
+        }
+        let Some((b, f)) = self.blobref_parts(xt) else {
+            return Err(FxError::at(self.arena.span_of(*x), format!("a blobref is expected here, and this is a {}", self.show_ty(xt))));
+        };
+        let t = match op {
+            BlobletOp::RefAdd => {
+                eff = eff.union(&self.check(rest[0], int)?);
+                let f = wanted(self)?;
+                self.blobref_of(b, f)
+            }
+            BlobletOp::RefOwner => b,
+            BlobletOp::RefOffset => int,
+            _ => {
+                // A scalar, whose bytes are read as the type of its name, of
+                // the owner's region.
+                let code = match self.arena.get(self.arena.resolve(f)) {
+                    Ty::Base(s) => flat_code(self.interner.name(*s)),
+                    _ => None,
+                };
+                let Some(code) = code else {
+                    return Err(FxError::at(span, format!("only a scalar's bytes are read or written, and this points to a {}", self.show_ty(f))));
+                };
+                let Ty::Bloblet { region, .. } = self.arena.get(self.arena.resolve(b)).clone() else {
+                    return Err(FxError::at(span, format!("the region of a {}'s owner is not known", self.show_ty(xt))));
+                };
+                self.facts.field_index.insert(e, code as usize);
+                if op == BlobletOp::RefGet {
+                    eff.0.insert(Atom::Read(region));
+                    f
+                } else {
+                    eff = eff.union(&self.check(rest[0], f)?);
+                    eff.0.insert(Atom::Write(region));
+                    self.unit
+                }
+            }
+        };
+        let eff = self.mask(e, &eff, t);
+        Ok((t, eff))
+    }
+
+    /// `(blobref b f)`'s owner and flat, if `t` is one.
+    pub(crate) fn blobref_parts(&self, t: TyId) -> Option<(TyId, TyId)> {
+        match self.arena.get(self.arena.resolve(t)) {
+            Ty::Named { which: BLOBREF_INDEX, args } => match &args[..] {
+                [D::Type(b), D::Type(f)] => Some((*b, *f)),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    pub(crate) fn blobref_of(&mut self, b: TyId, f: TyId) -> TyId {
+        self.arena.ty(Ty::Named { which: BLOBREF_INDEX, args: vec![D::Type(b), D::Type(f)] })
     }
 
     fn synth_prompt(&mut self, e: ExpId, tag: ExpId, body: ExpId, handler: ExpId) -> R<(TyId, Effect)> {

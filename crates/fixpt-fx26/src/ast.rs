@@ -640,11 +640,27 @@ pub enum BlobletOp {
     SetByte,
     /// `(bloblet-bytes b)`: how many bytes the suffix has.
     Bytes,
+    /// `(blobref-at b off)`: a `blobref` to byte `off` of bloblet `b`'s
+    /// suffix, of the flat the type it is checked against says (`TODO.md`
+    /// §77).
+    RefAt,
+    /// `(blobref+ r d)`: `d` bytes along, of the flat the type it is checked
+    /// against says.
+    RefAdd,
+    /// `(blobref-owner r)`: the bloblet it points into.
+    RefOwner,
+    /// `(blobref-offset r)`: the byte it points at.
+    RefOffset,
+    /// `(blobref-get r)`: the scalar it points at, as a value.
+    RefGet,
+    /// `(blobref-set! r v)`.
+    RefSet,
 }
 
 impl BlobletOp {
     pub const NAMES: &[&str] =
-        &["make-bloblet", "rmake-bloblet", "bloblet-ref", "bloblet-set!", "bloblet-freeze", "bloblet-byte", "bloblet-set-byte!", "bloblet-bytes"];
+        &["make-bloblet", "rmake-bloblet", "bloblet-ref", "bloblet-set!", "bloblet-freeze", "bloblet-byte", "bloblet-set-byte!", "bloblet-bytes",
+          "blobref-at", "blobref+", "blobref-owner", "blobref-offset", "blobref-get", "blobref-set!"];
 }
 
 #[derive(Default)]

@@ -1480,3 +1480,18 @@ so the safety analyses see a blobref as its owner. FX-26: kind 7, kept in
 refused, `flat-not-type.fx`, `flat-family-not-type.fx`,
 `blobref-not-flat.fx`, `flat-proj.fx`. Docs: `docs/fx26.md` (Bloblets).
 
+The `blobref` operations (2026-10-10): `(blobref-at b off)` and `(blobref+
+r d)`, their flat the type checked against's; `(blobref-owner r)`,
+`(blobref-offset r)`, pure; `(blobref-get r)`, `(blobref-set! r v)`, of a
+scalar, reading or writing the owner's region. Syntax as the bloblet forms
+are, in both checkers (`synth_blobref`; `k-blobref-arg`,
+`k-blobref-result`), the lowering, both compilers and both register-code
+generators; each read or write's layout told the compilers as a fact at
+its span; runtime `%fx26-suffix-ref-get` and `-set!`. The evaluator
+written in FX-26 refuses them for now. To keep the size debts,
+`k-bloblet-op` moved to `check-synth.fx` and `r-bloblet` to
+`regcode-helpers.fx`, given the knots' procedures. Tests: `bloblet/
+blobref.fx` (every scalar), `blobref-sees-bytes.fx`, `blobref-width.fx`,
+and refused, `blobref-unknown-flat.fx`, `blobref-not-scalar.fx`,
+`blobref-wrong-value.fx`, `blobref-escape.fx`. Docs: `docs/fx26.md`.
+

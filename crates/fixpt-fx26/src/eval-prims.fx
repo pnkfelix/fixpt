@@ -454,6 +454,10 @@
     (case op
       ((rmake-bloblet) (ev-make-bloblet (cdr xs)))
       ((make-bloblet) (ev-make-bloblet xs))
+      ;; Its bloblets' suffixes are arrays of bytes here: no suffix refs yet
+      ;; (`TODO.md` §77).
+      ((blobref-at blobref+ blobref-owner blobref-offset blobref-get blobref-set!)
+       (efail "the evaluator written in FX-26 has no blobrefs yet"))
       (else
        (tagcase (as-other (ev-arg xs 0) "a bloblet")
          (o-blob (fs bs)

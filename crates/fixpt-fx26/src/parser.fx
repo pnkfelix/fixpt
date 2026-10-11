@@ -259,11 +259,22 @@
   (lambda (head)
     (or (symbol=? head 'make-bloblet) (symbol=? head 'rmake-bloblet) (symbol=? head 'bloblet-ref)
         (symbol=? head 'bloblet-set!) (symbol=? head 'bloblet-freeze) (symbol=? head 'bloblet-byte)
-        (symbol=? head 'bloblet-set-byte!) (symbol=? head 'bloblet-bytes))))
+        (symbol=? head 'bloblet-set-byte!) (symbol=? head 'bloblet-bytes) (blobref-form? head))))
+;; Whether `head` is a `blobref` form's (`TODO.md` §77).
+(define blobref-form? (subr pure (symbol) bool)
+  (lambda (head)
+    (or (symbol=? head 'blobref-at) (symbol=? head 'blobref+) (symbol=? head 'blobref-owner)
+        (symbol=? head 'blobref-offset) (symbol=? head 'blobref-get)
+        (symbol=? head 'blobref-set!))))
 (define bloblet-untagged? (subr pure (symbol int) bool)
   (lambda (op n)
     (or (and (symbol=? op 'bloblet-freeze) (= n 1)) (and (symbol=? op 'bloblet-byte) (= n 2))
-        (and (symbol=? op 'bloblet-set-byte!) (= n 3)) (and (symbol=? op 'bloblet-bytes) (= n 1)))))
+        (and (symbol=? op 'bloblet-set-byte!) (= n 3)) (and (symbol=? op 'bloblet-bytes) (= n 1))
+        (and (blobref-form? op)
+             (= n (if (or (symbol=? op 'blobref-owner) (symbol=? op 'blobref-offset)
+                          (symbol=? op 'blobref-get))
+                      1
+                      2))))))
 
 ;; A `confirm-length`'s length, `n`: a natural literal, or -1 for a
 ;; variable holding a `nat`.
