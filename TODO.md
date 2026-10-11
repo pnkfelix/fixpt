@@ -1963,6 +1963,31 @@ native code (`reps`, as a flat array's element is), and `blobref-at` and
 (the user's): no operation copies more than a word unless its name says
 so.
 
+**Flat sums: their key** (the user's, 2026-10-10; the goal: a "flat
+world" with Rust's model of values, for apples-to-apples benchmarks).
+FX-26's labels are names (a positive integer only a spelling, interned
+as a name; a sum value holds a symbol), and a sum has no key type. A flat
+sum says its key, which decides the encoding:
+- **None given, the default: the tag is an index into the owner's
+  fields**, which hold the labels as symbols (`u8` wide; `(key symbol
+  u16)` for more): so a flat sum's tags mean what a value sum's do, and
+  sum types interoperate (the user's choice, for that). A read loads the
+  byte, then the field; a `tagcase` with no arm for what it finds fails
+  at run time. Proposed: no static table; `(blobref-variant! r b)` finds
+  the first field holding `b`, a write failing where none does; the
+  program puts the labels in fields itself (`(make-bloblet n 'a 'b)`).
+  Sound whatever the bytes say: flat scalars have no invalid bits, so a
+  wrong tag only reads bytes as another variant (the payload area sized
+  for the largest).
+- **`(key u8)`, `(key u16)`, `(key u32)`: numeric labels, stored as they
+  are** (0 allowed there), compared against constants: Rust's model; and
+  sum types sharing codes agree on them with no indirection. `u8`/`u16`
+  only as key widths, no value types.
+- Reading through a flat sum: a `tagcase` on a blobref to one binds each
+  arm to a blobref to its payload (no copy); `else` may later be refined
+  to the tags left, the run-time check keeping it sound under aliasing.
+  The payload at the widest variant's alignment, the size padded to it.
+
 **Field indices in flat data** (the user's, 2026-10-10: to be leveraged).
 A suffix ref has one owning bloblet, recoverable from it, so a flat
 component can be a small index (a byte) naming one of the owner's fields:
