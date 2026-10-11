@@ -182,7 +182,7 @@ fn assemble_by_fx26(s: &mut Session, word: Handle) -> Result<(), String> {
 /// `compile_reachable` compiles.
 pub fn cell_words_reachable(heap: &fixpt_heap::Heap, word: Value) -> Vec<Value> {
     use fixpt_heap::layout::cellular::{CLOSURE_WORD, PRIMITIVES, ROUTINE_DOCOL, WORD_CELL0, WORD_ENTRY};
-    let closure = fixpt_heap::layout::kind("cellular-closure");
+    let closure = const { fixpt_heap::layout::kind("cellular-closure") };
     let (mut todo, mut seen, mut found) = (vec![word], std::collections::HashSet::new(), Vec::new());
     while let Some(w) = todo.pop() {
         if !seen.insert(w.raw()) {

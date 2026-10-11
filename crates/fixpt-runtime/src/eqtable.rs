@@ -28,7 +28,7 @@ const NEXT: usize = 2;
 /// A new table, with 8 buckets.
 pub fn make(heap: &mut Heap) -> Value {
     let buckets = heap.make_vector(8, Value::FALSE);
-    let t = heap.make_bloblet(fixpt_heap::layout::kind("eqtable"), 3, 0, false);
+    let t = heap.make_bloblet(const { fixpt_heap::layout::kind("eqtable") }, 3, 0, false);
     heap.set_bloblet_slot(t, STAMP, Value::fixnum(heap.collections() as i64));
     heap.set_bloblet_slot(t, COUNT, Value::fixnum(0));
     heap.set_bloblet_slot(t, BUCKETS, buckets);

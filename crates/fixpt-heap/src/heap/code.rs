@@ -38,7 +38,7 @@ pub(super) fn in_code_area(i: usize) -> bool {
 
 /// A free block of `len` words at `at`: a raw bloblet, all suffix.
 fn put_free(mem: &mut [u64], at: usize, len: usize) {
-    mem[at] = make_header(layout::kind("bloblet"), 0, (len - 1) * 8);
+    mem[at] = make_header(const { layout::kind("bloblet") }, 0, (len - 1) * 8);
 }
 
 impl Heap {

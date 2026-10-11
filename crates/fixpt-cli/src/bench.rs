@@ -600,7 +600,7 @@ fn compile_row(fx: &mut Fx26Session, name: &str, text: &str, runs: usize, native
 fn assemble_registers(heap: &fixpt_heap::Heap, word: Value) -> Result<(), String> {
     use fixpt_heap::layout::cellular::{CLOSURE_WORD, PRIMITIVES, ROUTINE_DOCOL, WORD_CELL0, WORD_ENTRY, WORD_TWIN};
     use fixpt_native::cellular::{assemble_register_word, assemble_word};
-    let closure = fixpt_heap::layout::kind("cellular-closure");
+    let closure = const { fixpt_heap::layout::kind("cellular-closure") };
     let vargs = fixpt_heap::layout::regcode::op("vargs");
     let (mut todo, mut seen) = (vec![word], std::collections::HashSet::new());
     while let Some(w) = todo.pop() {

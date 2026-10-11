@@ -20,7 +20,7 @@ pub fn disassemble(heap: &Heap, v: Value) -> String {
 /// word (a continuation's).
 pub fn native_source(heap: &Heap, v: Value) -> Option<String> {
     use fixpt_heap::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD, CODE_SOURCE};
-    if !(v.is_bloblet() && heap.bloblet_kind(v) == kind("native-closure")) {
+    if !(v.is_bloblet() && heap.bloblet_kind(v) == const { kind("native-closure") }) {
         return None;
     }
     let code = heap.bloblet_slot(v, CLOSURE_WORD);
@@ -60,8 +60,8 @@ pub fn inlines_global(heap: &Heap, v: Value, cell: Value) -> bool {
         return false;
     }
     let start = match heap.bloblet_kind(v) {
-        k if k == kind("cellular-closure") => heap.bloblet_slot(v, CLOSURE_WORD),
-        k if k == kind("native-closure") => heap.bloblet_slot(heap.bloblet_slot(v, CLOSURE_WORD), CODE_SOURCE),
+        k if k == const { kind("cellular-closure") } => heap.bloblet_slot(v, CLOSURE_WORD),
+        k if k == const { kind("native-closure") } => heap.bloblet_slot(heap.bloblet_slot(v, CLOSURE_WORD), CODE_SOURCE),
         _ => return false,
     };
     let (mut todo, mut seen) = (vec![start], Vec::new());
@@ -94,7 +94,7 @@ pub fn inlines_global(heap: &Heap, v: Value, cell: Value) -> bool {
 /// The same, with each word's machine code as `asm` shows it, after its
 /// cells and after its register code's (`,disassemble-asm`).
 pub fn disassemble_with(heap: &Heap, v: Value, asm: Option<crate::runtime::MachineCode>) -> String {
-    let closure = kind("cellular-closure");
+    let closure = const { kind("cellular-closure") };
     let mut out = String::new();
     if let Some(k) = heap.continuation_of(v) {
         let mut todo = continuation(heap, k, &mut out);
@@ -194,7 +194,7 @@ fn name_of(heap: &Heap, w: Value) -> String {
 
 /// One word: its name, how it is entered, and a line per instruction.
 fn word(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>, asm: Option<crate::runtime::MachineCode>) {
-    let closure = kind("cellular-closure");
+    let closure = const { kind("cellular-closure") };
     let fields = heap.bloblet_head(w).fields;
     let entry = heap.bloblet_slot(w, WORD_ENTRY).as_fixnum();
     let how = match entry {
@@ -317,7 +317,7 @@ fn register_lines(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>
 fn global(heap: &Heap, g: Value) -> String {
     if g.is_bloblet() && heap.bloblet_head(g).fields >= 3 {
         let n = heap.bloblet_slot(g, 3);
-        if n.is_bloblet() && heap.bloblet_kind(n) == kind("symbol") {
+        if n.is_bloblet() && heap.bloblet_kind(n) == const { kind("symbol") } {
             return heap.symbol_name(n);
         }
     }

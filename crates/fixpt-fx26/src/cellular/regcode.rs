@@ -2326,11 +2326,11 @@ impl Compiler<'_> {
             Exp::Sum(t, v) => {
                 let v = self.r_const(env, v)?;
                 let tag = self.heap.intern(self.c.interner.name(t));
-                Some(self.heap.make_frozen(kind("sum"), &[tag, v]))
+                Some(self.heap.make_frozen(const { kind("sum") }, &[tag, v]))
             }
             Exp::Product(fields) => {
                 let vs: Vec<Value> = fields.iter().map(|(_, f)| self.r_const(env, *f)).collect::<O<_>>()?;
-                Some(self.heap.make_frozen(kind("product"), &vs))
+                Some(self.heap.make_frozen(const { kind("product") }, &vs))
             }
             Exp::App { fun, args } => {
                 if let Some(v) = self.r_known_test(env, x) {
@@ -2394,7 +2394,7 @@ impl Compiler<'_> {
         for a in &args {
             key.push(match self.r_const(env, *a) {
                 Some(v) if v.is_fixnum() || v.is_char() || v == Value::TRUE || v == Value::FALSE || v == Value::NULL => (0, v.raw()),
-                Some(v) if v.is_bloblet() && self.heap.bloblet_kind(v) == kind("symbol") => (0, v.raw()),
+                Some(v) if v.is_bloblet() && self.heap.bloblet_kind(v) == const { kind("symbol") } => (0, v.raw()),
                 Some(_) => return None,
                 None => match self.r_var(env, *a)? {
                     RLoc::Reg(k) => (1, k as u64),

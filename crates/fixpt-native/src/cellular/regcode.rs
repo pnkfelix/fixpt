@@ -347,13 +347,13 @@ impl Asm {
                 self.e(csel(RESULT, X16, X13, Cond::Eq));
                 return true;
             }
-            "symbol?" => vec![kind("symbol")],
-            "string?" => vec![kind("string")],
-            "exact-integer?" => vec![kind("bignum")],
-            "%fx26-array?" => vec![kind("bloblet")],
-            "%fx26-box?" => vec![kind("box")],
-            "%fx26-sum?" => vec![kind("sum")],
-            "%fx26-product?" => vec![kind("product")],
+            "symbol?" => vec![const { kind("symbol") }],
+            "string?" => vec![const { kind("string") }],
+            "exact-integer?" => vec![const { kind("bignum") }],
+            "%fx26-array?" => vec![const { kind("bloblet") }],
+            "%fx26-box?" => vec![const { kind("box") }],
+            "%fx26-sum?" => vec![const { kind("sum") }],
+            "%fx26-product?" => vec![const { kind("product") }],
             "%fx26-procedure?" => ["closure", "primitive", "continuation", "cellular-closure", "native-closure", "cellular-continuation"]
                 .iter()
                 .map(|n| kind(n))
@@ -410,7 +410,7 @@ impl Asm {
                 let frees: Vec<Reg> = if region { (2..count).map(reg).collect() } else { (1..=count).map(reg).collect() };
                 let total = frees.len() + 2;
                 self.bump_words(1 + total as u32, region, slow);
-                self.es(&mov_imm64(X15, make_header(fixpt_heap::layout::kind("cellular-closure"), total, 0)));
+                self.es(&mov_imm64(X15, make_header(const { fixpt_heap::layout::kind("cellular-closure") }, total, 0)));
                 self.bloblet_at(total);
                 if region {
                     self.field_at(reg(count), CLOSURE_WORD, total);
@@ -444,7 +444,7 @@ impl Asm {
                 let total = count;
                 self.cbnz(1, slow);
                 self.bump_words(1 + total as u32, false, slow);
-                self.es(&mov_imm64(X15, make_header(fixpt_heap::layout::kind("bloblet"), total, 0)));
+                self.es(&mov_imm64(X15, make_header(const { fixpt_heap::layout::kind("bloblet") }, total, 0)));
                 self.bloblet_at(total);
                 for j in 2..=count {
                     self.field_at(reg(j), j, total);
@@ -467,7 +467,7 @@ impl Asm {
             // `rmake-icell`: two fields, both `#f`, in the region in `REG1`.
             "ricell" => {
                 self.bump_words(4, true, slow);
-                self.es(&mov_imm64(X15, make_header(fixpt_heap::layout::kind("bloblet"), 3, 0)));
+                self.es(&mov_imm64(X15, make_header(const { fixpt_heap::layout::kind("bloblet") }, 3, 0)));
                 self.bloblet_at(3);
                 self.value(X15, Value::FALSE);
                 self.field_at(X15, 2, 3);
@@ -600,13 +600,13 @@ impl Asm {
             "symbol?" | "string?" | "exact-integer?" | "array?" | "box?" | "sum?" | "product?" | "procedure?" => {
                 use fixpt_heap::layout::kind;
                 let codes: Vec<u32> = match what {
-                    "symbol?" => vec![kind("symbol")],
-                    "string?" => vec![kind("string")],
-                    "exact-integer?" => vec![kind("bignum")],
-                    "array?" => vec![kind("bloblet")],
-                    "box?" => vec![kind("box")],
-                    "sum?" => vec![kind("sum")],
-                    "product?" => vec![kind("product")],
+                    "symbol?" => vec![const { kind("symbol") }],
+                    "string?" => vec![const { kind("string") }],
+                    "exact-integer?" => vec![const { kind("bignum") }],
+                    "array?" => vec![const { kind("bloblet") }],
+                    "box?" => vec![const { kind("box") }],
+                    "sum?" => vec![const { kind("sum") }],
+                    "product?" => vec![const { kind("product") }],
                     _ => ["closure", "primitive", "continuation", "cellular-closure", "native-closure", "cellular-continuation"]
                         .iter()
                         .map(|n| kind(n))

@@ -136,14 +136,14 @@ fn fold(op: &str, x: u64, y: u64) -> Option<Value> {
 /// Every word with register code that `start` reaches, through its cells,
 /// its register code's, closures and the globals they name.
 fn words_of(heap: &Heap, start: Value) -> Vec<Value> {
-    let closure = fixpt_heap::layout::kind("cellular-closure");
+    let closure = const { fixpt_heap::layout::kind("cellular-closure") };
     let (mut todo, mut seen, mut out) = (vec![start], HashSet::new(), Vec::new());
     let push = |v: Value, todo: &mut Vec<Value>| {
         if heap.is_cellular_word(v) {
             todo.push(v);
         } else if v.is_bloblet() && heap.bloblet_kind(v) == closure {
             todo.push(heap.bloblet_slot(v, CLOSURE_WORD));
-        } else if v.is_bloblet() && heap.bloblet_kind(v) == fixpt_heap::layout::kind("bloblet") && heap.bloblet_head(v).fields >= GLOBAL_FIELDS {
+        } else if v.is_bloblet() && heap.bloblet_kind(v) == const { fixpt_heap::layout::kind("bloblet") } && heap.bloblet_head(v).fields >= GLOBAL_FIELDS {
             let g = heap.bloblet_slot(v, GLOBAL_VALUE);
             if g.is_bloblet() && heap.bloblet_kind(g) == closure {
                 todo.push(heap.bloblet_slot(g, CLOSURE_WORD));
@@ -229,7 +229,7 @@ fn survey_word(heap: &Heap, rw: Value, found: &mut Found) {
                 if let Some(g) = was_global {
                     let m = heap.bloblet_slot(g, GLOBAL_VALUE);
                     let k = o(0).as_fixnum() as usize;
-                    if m.is_bloblet() && heap.bloblet_kind(m) != fixpt_heap::layout::kind("cellular-closure") && k <= heap.bloblet_head(m).fields && immediate(heap.bloblet_slot(m, k)) {
+                    if m.is_bloblet() && heap.bloblet_kind(m) != const { fixpt_heap::layout::kind("cellular-closure") } && k <= heap.bloblet_head(m).fields && immediate(heap.bloblet_slot(m, k)) {
                         found.note("global module's literal member read", lp, None);
                         if found.propagate {
                             p.result = Some(Known::Const(heap.bloblet_slot(m, k).raw(), true));

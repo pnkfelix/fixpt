@@ -395,7 +395,7 @@ pub fn adapt(rt: &mut fixpt_runtime::Runtime, f: Value, arity: usize, native: bo
     a.e(ldr(X16, ST, st_off(offset_of!(DState, foreign))));
     a.e(br(X16));
     let code = a.finish().expect("no labels");
-    let blob = heap.make_code_bloblet(fixpt_heap::layout::kind("bloblet"), 1, 4 * code.len(), false);
+    let blob = heap.make_code_bloblet(const { fixpt_heap::layout::kind("bloblet") }, 1, 4 * code.len(), false);
     heap.set_bloblet_slot(blob, 1, blob);
     let bytes: Vec<u8> = code.iter().flat_map(|i| i.to_le_bytes()).collect();
     heap.set_bloblet_bytes(blob, 0, &bytes).map_err(|e| format!("{e:?}"))?;
@@ -731,7 +731,7 @@ impl DirectMachine {
         // Every bloblet first, then their fields, which refer to each other.
         // Nothing here collects, so the values held do not move.
         let blobs: Vec<Value> =
-            procs.iter().map(|p| heap.make_code_bloblet(fixpt_heap::layout::kind("bloblet"), p.fields.len(), 4 * p.code.len(), false)).collect();
+            procs.iter().map(|p| heap.make_code_bloblet(const { fixpt_heap::layout::kind("bloblet") }, p.fields.len(), 4 * p.code.len(), false)).collect();
         for (p, &blob) in procs.iter().zip(&blobs) {
             for (k, f) in p.fields.iter().enumerate() {
                 let v = match f {
@@ -761,7 +761,7 @@ impl DirectMachine {
     /// A native closure, as what it runs: its code, all of it, and the
     /// closure; its arity is not recorded, so a call of it is not checked.
     pub fn compiled_of(heap: &Heap, closure: Value) -> Option<Compiled> {
-        if !closure.is_bloblet() || heap.bloblet_kind(closure) != fixpt_heap::layout::kind("native-closure") {
+        if !closure.is_bloblet() || heap.bloblet_kind(closure) != const { fixpt_heap::layout::kind("native-closure") } {
             return None;
         }
         let code = heap.bloblet_slot(closure, CLOSURE_WORD);
@@ -1164,7 +1164,7 @@ impl Compiling<'_> {
     /// else.
     fn closure_parts(&self, v: Value) -> Option<(Value, Vec<Value>)> {
         let h = self.heap;
-        if !v.is_bloblet() || h.bloblet_kind(v) != fixpt_heap::layout::kind("cellular-closure") {
+        if !v.is_bloblet() || h.bloblet_kind(v) != const { fixpt_heap::layout::kind("cellular-closure") } {
             return None;
         }
         let fields = h.bloblet_head(v).fields;
@@ -2270,7 +2270,7 @@ impl Compiling<'_> {
                         a.e(ldr(X9, ST, st_off(offset_of!(DState, words))));
                         a.e(add_lsl(X11, X9, X14, 3));
                         a.e(str(X16, X13, 0));
-                        let h = fixpt_heap::value::make_header(fixpt_heap::layout::kind("bloblet"), total, 0);
+                        let h = fixpt_heap::value::make_header(const { fixpt_heap::layout::kind("bloblet") }, total, 0);
                         a.es(&mov_imm64(X15, h));
                         a.e(str(X15, X11, 0));
                         for j in 2..=n {
@@ -2292,7 +2292,7 @@ impl Compiling<'_> {
                     {
                         use fixpt_heap::layout::{H_FIELDS_FROZEN, H_SUFFIX_FROZEN, kind};
                         let total = n;
-                        let (sum_k, product_k) = (kind("sum"), kind("product"));
+                        let (sum_k, product_k) = (const { kind("sum") }, const { kind("product") });
                         let header = |k: u8| H_SUFFIX_FROZEN.put(H_FIELDS_FROZEN.put(fixpt_heap::value::make_header(k, total, 0), 1), 1);
                         let (sum, kinded) = (a.label(), a.label());
                         a.es(&mov_imm64(X15, Value::fixnum(sum_k as i64).raw()));
@@ -2401,7 +2401,7 @@ impl Compiling<'_> {
                         a.to(slow, Fix::If(Cond::Hi));
                         a.e(ldr(X9, ST, st_off(offset_of!(DState, words))));
                         a.e(add_lsl(X11, X9, X14, 3));
-                        let header = fixpt_heap::value::make_header(fixpt_heap::layout::kind("native-closure"), total, 0);
+                        let header = fixpt_heap::value::make_header(const { fixpt_heap::layout::kind("native-closure") }, total, 0);
                         a.es(&mov_imm64(X17, header));
                         a.e(str(X17, X11, 0));
                         for i in 0..n {
@@ -3014,9 +3014,9 @@ fn suffix_writable(a: &mut Asm, r: Reg, slow: Label) {
     suffix_owner(a, r, slow);
     let owned = a.label();
     a.e(ubfx(X9, X12, H_KIND.lo, H_KIND.width));
-    a.e(cmp_imm(X9, kind("bloblet") as u32));
+    a.e(cmp_imm(X9, const { kind("bloblet") } as u32));
     a.to(owned, Fix::If(Cond::Eq));
-    a.e(cmp_imm(X9, kind("flat-array") as u32));
+    a.e(cmp_imm(X9, const { kind("flat-array") } as u32));
     a.to(slow, Fix::If(Cond::Ne));
     a.bind(owned);
     a.e(ubfx(X9, X12, H_SUFFIX_FROZEN.lo, 1));
@@ -3611,20 +3611,20 @@ fn shape_fast(a: &mut Asm, name: &str, slow: Label) -> bool {
             a.e(csel(RESULT, X16, X13, Cond::Eq));
             return true;
         }
-        "exact-integer?" => &[kind("bignum")],
-        "symbol?" => &[kind("symbol")],
-        "string?" => &[kind("string")],
-        "%fx26-array?" => &[kind("bloblet")],
-        "%fx26-box?" => &[kind("box")],
-        "%fx26-sum?" => &[kind("sum")],
-        "%fx26-product?" => &[kind("product")],
+        "exact-integer?" => &[const { kind("bignum") }],
+        "symbol?" => &[const { kind("symbol") }],
+        "string?" => &[const { kind("string") }],
+        "%fx26-array?" => &[const { kind("bloblet") }],
+        "%fx26-box?" => &[const { kind("box") }],
+        "%fx26-sum?" => &[const { kind("sum") }],
+        "%fx26-product?" => &[const { kind("product") }],
         "%fx26-procedure?" => &[
-            kind("closure"),
-            kind("primitive"),
-            kind("continuation"),
-            kind("cellular-closure"),
-            kind("native-closure"),
-            kind("cellular-continuation"),
+            const { kind("closure") },
+            const { kind("primitive") },
+            const { kind("continuation") },
+            const { kind("cellular-closure") },
+            const { kind("native-closure") },
+            const { kind("cellular-continuation") },
         ],
         _ => return false,
     };
@@ -4801,7 +4801,7 @@ fn native_frames<'a>(st: &DState) -> Vec<&'a mut [Value]> {
 
 /// A native closure of the code in code bloblet `code`, over `free`.
 fn native_closure(heap: &mut Heap, code: Value, free: &[Value]) -> Value {
-    let c = heap.make_bloblet(fixpt_heap::layout::kind("native-closure"), free.len() + 1, 0, true);
+    let c = heap.make_bloblet(const { fixpt_heap::layout::kind("native-closure") }, free.len() + 1, 0, true);
     heap.set_bloblet_slot(c, CLOSURE_WORD, code);
     for (i, v) in free.iter().enumerate() {
         heap.set_bloblet_slot(c, CLOSURE_FREE0 + i, *v);
@@ -4814,7 +4814,7 @@ fn native_closure(heap: &mut Heap, code: Value, free: &[Value]) -> Value {
 /// bloblet's fields, each once. For `%disassemble` (`Runtime::native_code`).
 pub fn code_text(heap: &Heap, closure: Value) -> Option<String> {
     use std::fmt::Write as _;
-    if !closure.is_bloblet() || heap.bloblet_kind(closure) != fixpt_heap::layout::kind("native-closure") {
+    if !closure.is_bloblet() || heap.bloblet_kind(closure) != const { fixpt_heap::layout::kind("native-closure") } {
         return None;
     }
     let mut out = String::new();
@@ -4841,7 +4841,7 @@ pub fn code_text(heap: &Heap, closure: Value) -> Option<String> {
             let f = heap.bloblet_slot(code, k);
             if heap.is_code_bloblet(f) {
                 todo.push(f);
-            } else if f.is_bloblet() && heap.bloblet_kind(f) == fixpt_heap::layout::kind("native-closure") {
+            } else if f.is_bloblet() && heap.bloblet_kind(f) == const { fixpt_heap::layout::kind("native-closure") } {
                 todo.push(heap.bloblet_slot(f, CLOSURE_WORD));
             }
         }

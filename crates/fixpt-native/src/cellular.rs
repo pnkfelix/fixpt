@@ -440,7 +440,7 @@ impl Asm {
         self.e(sub(X14, X11, X15));
         self.e(ldur(X14, X14, -7));
         self.e(ubfx(X14, X14, 3, 8));
-        self.e(cmp_imm(X14, kind("cellular-closure") as u32));
+        self.e(cmp_imm(X14, const { kind("cellular-closure") } as u32));
         self.b_cond(Cond::Ne, not);
     }
 
@@ -1058,7 +1058,7 @@ pub fn fx26_module() -> String {
         ("n-tag-pair", TAG_PAIR, "a tag"),
         ("n-tag-trailer", TAG_TRAILER, "a tag"),
         ("n-kind-word", KIND as u64, "the kind of a cellular word"),
-        ("n-kind-closure", kind("cellular-closure") as u64, "the kind of a cellular closure"),
+        ("n-kind-closure", const { kind("cellular-closure") } as u64, "the kind of a cellular closure"),
         ("n-closure-word", CLOSURE_WORD as u64, "a closure's field"),
         ("n-closure-free0", CLOSURE_FREE0 as u64, "a closure's field"),
         ("n-word-entry", WORD_ENTRY as u64, "a word's field"),
@@ -1414,7 +1414,7 @@ fn closure(st: &mut State) -> Result<(), Trap> {
     if count == 0 && st.dsp - 8 < st.ds_limit {
         return Err(Trap::StackOverflow);
     }
-    let c = heap.make_bloblet(fixpt_heap::layout::kind("cellular-closure"), count + 1, 0, true);
+    let c = heap.make_bloblet(const { fixpt_heap::layout::kind("cellular-closure") }, count + 1, 0, true);
     heap.set_bloblet_slot(c, CLOSURE_WORD, w);
     // SAFETY: the machine's data stack; the top is at `dsp`, the free
     // values deepest first.
@@ -1934,7 +1934,7 @@ impl NativeMachine {
         if self.code_collection_due() {
             self.collect_code(heap)?;
         }
-        let closure = kind("cellular-closure");
+        let closure = const { kind("cellular-closure") };
         let (mut todo, mut seen, mut n) = (vec![word], std::collections::HashSet::new(), 0);
         while let Some(w) = todo.pop() {
             if !seen.insert(w.raw()) {

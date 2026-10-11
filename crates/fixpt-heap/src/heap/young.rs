@@ -198,7 +198,7 @@ impl Heap {
                     let main = at + is_extension(w) as usize;
                     let head = read_head(mem, main);
                     // A weak pair's car is not traced (`scan_one`).
-                    let weak = head.kind == layout::kind("weak-pair");
+                    let weak = head.kind == const { layout::kind("weak-pair") };
                     if weak {
                         c.weak_pairs.push(main);
                     }

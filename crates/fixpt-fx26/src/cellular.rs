@@ -2176,7 +2176,7 @@ impl<'a> Compiler<'a> {
     fn push_global(&mut self, n: Sym) -> Value {
         let undefined = self.heap.undefined_closure();
         let name = self.heap.intern(self.c.interner.name(n));
-        let g = self.heap.make_bloblet(kind("bloblet"), GLOBAL_FIELDS, 0, true);
+        let g = self.heap.make_bloblet(const { kind("bloblet") }, GLOBAL_FIELDS, 0, true);
         self.heap.set_bloblet_slot(g, GLOBAL_VALUE, undefined);
         self.heap.set_bloblet_slot(g, GLOBAL_NAME, name);
         self.heap.set_bloblet_slot(g, GLOBAL_WRITES, Value::fixnum(0));

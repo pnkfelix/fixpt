@@ -1257,7 +1257,7 @@ impl Fx26Session {
             let heap = m.heap();
             let g = heap.car(cells);
             let v = heap.bloblet_slot(g, 2);
-            if v.is_bloblet() && heap.bloblet_kind(v) == fixpt_heap::layout::kind("cellular-closure") {
+            if v.is_bloblet() && heap.bloblet_kind(v) == const { fixpt_heap::layout::kind("cellular-closure") } {
                 let start = std::time::Instant::now();
                 let compiled = compile(heap, v);
                 nanos = start.elapsed().as_nanos() as u64;

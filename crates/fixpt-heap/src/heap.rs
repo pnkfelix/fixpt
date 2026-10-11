@@ -1137,7 +1137,7 @@ impl Heap {
     /// A flat array of `n` elements of layout `code` (`layout::FLAT_*`),
     /// all bits zero.
     pub fn make_flat_array(&mut self, code: i64, n: usize) -> Value {
-        let a = self.make_bloblet(layout::kind("flat-array"), 1, n * layout::flat_size(code), true);
+        let a = self.make_bloblet(const { layout::kind("flat-array") }, 1, n * layout::flat_size(code), true);
         self.set_bloblet_slot(a, 2, Value::fixnum(code));
         a
     }
@@ -1293,7 +1293,7 @@ impl Heap {
     /// until set): what a compiler makes once for a procedure it lifts,
     /// before the procedures that call it are compiled.
     pub fn closure_over_nothing(&mut self) -> Value {
-        let c = self.make_bloblet(layout::kind("cellular-closure"), 1, 0, true);
+        let c = self.make_bloblet(const { layout::kind("cellular-closure") }, 1, 0, true);
         self.set_bloblet_slot(c, layout::cellular::CLOSURE_WORD, Value::FALSE);
         c
     }
@@ -1593,7 +1593,7 @@ impl Heap {
     /// `cdr` as a pair holds it. A bloblet of kind `weak-pair`
     /// (`layout::KINDS`), so that an image keeps it.
     pub fn make_weak_pair(&mut self, car: Value, cdr: Value) -> Value {
-        let p = self.make_bloblet(layout::kind("weak-pair"), 2, 0, false);
+        let p = self.make_bloblet(const { layout::kind("weak-pair") }, 2, 0, false);
         self.set_bloblet_slot(p, 2, car);
         self.set_bloblet_slot(p, 1, cdr);
         p
@@ -1601,7 +1601,7 @@ impl Heap {
 
     /// Whether `v` is a weak pair.
     pub fn is_weak_pair(&self, v: Value) -> bool {
-        v.is_bloblet() && self.bloblet_head(v).kind == layout::kind("weak-pair")
+        v.is_bloblet() && self.bloblet_head(v).kind == const { layout::kind("weak-pair") }
     }
 
     /// A weak pair's car, if its referent is alive (or it is not a
@@ -1690,7 +1690,7 @@ impl Heap {
             let pad = 1 + (self.gc_count as usize % 7);
             if self.top - self.active + pad <= self.semi {
                 // A raw bloblet: a header, then a suffix the scan skips.
-                mem[to] = make_header(layout::kind("bloblet"), 0, (pad - 1) * 8);
+                mem[to] = make_header(const { layout::kind("bloblet") }, 0, (pad - 1) * 8);
                 for i in 1..pad {
                     mem[to + i] = 0;
                 }
@@ -1908,7 +1908,7 @@ impl Heap {
             let head = read_head(mem, main);
             // A weak pair's car is not traced: noted, to be moved on or
             // cleared once everything live is copied.
-            let first = if head.kind == layout::kind("weak-pair") {
+            let first = if head.kind == const { layout::kind("weak-pair") } {
                 c.weak_pairs.push(main);
                 1
             } else {

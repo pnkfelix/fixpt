@@ -37,7 +37,7 @@ pub fn show_value(v: Local<'_>) -> String {
     if let Some(s) = v.string() {
         return format!("{s:?}");
     }
-    if v.bloblet_kind() == Some(kind("sum")) {
+    if v.bloblet_kind() == Some(const { kind("sum") }) {
         let tag = v.field(2).and_then(|t| t.symbol_name()).unwrap_or_default();
         if matches!(tag.as_str(), "atom" | "lst" | "dotted" | "vec") {
             return "_".into();
@@ -50,7 +50,7 @@ pub fn show_value(v: Local<'_>) -> String {
         out.push(')');
         return out;
     }
-    if v.bloblet_kind() == Some(kind("product")) {
+    if v.bloblet_kind() == Some(const { kind("product") }) {
         let parts: Vec<String> = fields(v).into_iter().map(show_value).collect();
         return format!("[{}]", parts.join(" "));
     }

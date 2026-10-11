@@ -159,7 +159,7 @@ fn run_word_by(rt: &mut Runtime, a: &[Value], run: Option<crate::RunWord>) -> Ou
     // `lit a1 … lit an lit closure call n exit`. A word's frame starts
     // above what it is run on, so the arguments are the word's to push.
     // Allocation does not collect here.
-    let (word, args) = if a[0].is_bloblet() && rt.heap.bloblet_kind(a[0]) == fixpt_heap::layout::kind("cellular-closure") {
+    let (word, args) = if a[0].is_bloblet() && rt.heap.bloblet_kind(a[0]) == const { fixpt_heap::layout::kind("cellular-closure") } {
         use fixpt_heap::layout::cellular::routine;
         let f = |n: u64| Value::fixnum(n as i64);
         let mut cells = Vec::with_capacity(2 * args.len() + 5);
@@ -426,7 +426,7 @@ fn flat_value(rt: &mut Runtime, code: i64, bits: u64) -> Value {
 
 /// A flat array, and index `i` in its range.
 fn flat_at(rt: &mut Runtime, a: Value, i: Value) -> Outcome<usize> {
-    if !(a.is_bloblet() && rt.heap.bloblet_kind(a) == fixpt_heap::layout::kind("flat-array")) {
+    if !(a.is_bloblet() && rt.heap.bloblet_kind(a) == const { fixpt_heap::layout::kind("flat-array") }) {
         return rt.type_error("a flat array", a);
     }
     let n = rt.heap.flat_array_len(a);
@@ -663,7 +663,7 @@ fn suffix_write(rt: &mut Runtime, r: Value, width: usize, bits: u64) -> Outcome<
     let r = suffix_ref(rt, r)?;
     let o = rt.heap.suffix_ref_owner(r);
     let kind = rt.heap.bloblet_kind(o);
-    if kind != PLAIN_BLOBLET && kind != fixpt_heap::layout::kind("flat-array") {
+    if kind != PLAIN_BLOBLET && kind != const { fixpt_heap::layout::kind("flat-array") } {
         return rt.type_error("a suffix ref into a bloblet the program may change", r);
     }
     match rt.heap.suffix_ref_write(r, width, bits) {
@@ -747,7 +747,7 @@ fn fx26_procedure(rt: &Runtime, v: Value) -> bool {
     use fixpt_heap::layout::kind;
     is_procedure(rt, v)
         || (v.is_bloblet()
-            && [kind("cellular-closure"), kind("native-closure"), kind("cellular-continuation")].contains(&rt.heap.bloblet_kind(v)))
+            && [const { kind("cellular-closure") }, const { kind("native-closure") }, const { kind("cellular-continuation") }].contains(&rt.heap.bloblet_kind(v)))
 }
 
 pub fn is_procedure(rt: &Runtime, v: Value) -> bool {
@@ -1540,7 +1540,7 @@ prims! {
             Ok(rw) => rt.heap.set_bloblet_slot(word, WORD_TWIN, rw),
             Err(e) => return rt.fail(&e, &[a[0]]),
         }
-        let c = rt.heap.make_bloblet(fixpt_heap::layout::kind("cellular-closure"), 2, 0, true);
+        let c = rt.heap.make_bloblet(const { fixpt_heap::layout::kind("cellular-closure") }, 2, 0, true);
         rt.heap.set_bloblet_slot(c, CLOSURE_WORD, word);
         rt.heap.set_bloblet_slot(c, CLOSURE_FREE0, a[0]);
         Ok(c)
@@ -1755,7 +1755,7 @@ prims! {
     // A cellular word or closure's code, shown: every word it reaches.
     "%disassemble", 1, Some(1), simple!(|rt, a| {
         let asm = if rt.show_machine_code { rt.machine_code } else { None };
-        let native = a[0].is_bloblet() && rt.heap.bloblet_kind(a[0]) == fixpt_heap::layout::kind("native-closure");
+        let native = a[0].is_bloblet() && rt.heap.bloblet_kind(a[0]) == const { fixpt_heap::layout::kind("native-closure") };
         // A native closure: the cellular word it was compiled from, or,
         // asked for machine code (`,disassemble-asm`), its machine code.
         let source = crate::disasm::native_source(&rt.heap, a[0]).filter(|_| native && !rt.show_machine_code);
@@ -2252,7 +2252,7 @@ prims! {
         let h = region_handle(a[0]);
         let (w, free) = (a[a.len() - 1], &a[1..a.len() - 1]);
         Ok(rt.heap.in_region(h, |heap| {
-            let c = heap.make_bloblet(fixpt_heap::layout::kind("cellular-closure"), free.len() + 1, 0, true);
+            let c = heap.make_bloblet(const { fixpt_heap::layout::kind("cellular-closure") }, free.len() + 1, 0, true);
             heap.set_bloblet_slot(c, CLOSURE_WORD, w);
             for (i, v) in free.iter().enumerate() {
                 heap.set_bloblet_slot(c, CLOSURE_FREE0 + i, *v);

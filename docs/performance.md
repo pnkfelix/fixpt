@@ -2864,3 +2864,10 @@ back; a call-out within one takes an empty one). Over the ports again:
 `checksum` 0.59 → 0.41 s, `fannkuchredux` 0.36 → 0.32, `imp-for` 0.62 →
 0.52, `flat-array` 0.49 → 0.43, `logic` 0.61 → 0.56, `boyer` 0.86 →
 0.81, the rest the same.
+
+`layout::kind("native-closure")`, by name, is a `const fn`; called where
+no constant is wanted it ran each time, a search of the kinds' names:
+159 samples of `earley`'s 1,724, every closure made natively, and the
+collector's (`young.rs`) too. Its 92 uses outside a constant are now
+`const { kind(…) }`, constants as they always could have been: `gcbench`
+0.93 → 0.72 s, `binarytrees5` 0.44 → 0.38, `boyer` 0.85 → 0.79.

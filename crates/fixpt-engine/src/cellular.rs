@@ -575,7 +575,7 @@ impl Machine {
     /// Run closure `thunk` with no arguments above a marker entry: its
     /// frame, the marker's `(sentinel, a, b, c)`, and where to resume after.
     fn enter_above(&mut self, heap: &Heap, r: &mut Regs, thunk: Value, marker: [Value; 4], routine: &'static str) -> Result<(), Trap> {
-        if !(thunk.is_bloblet() && heap.bloblet_kind(thunk) == kind("cellular-closure")) {
+        if !(thunk.is_bloblet() && heap.bloblet_kind(thunk) == const { kind("cellular-closure") }) {
             return Err(Trap::Type { routine });
         }
         self.check_limits()?;
@@ -590,7 +590,7 @@ impl Machine {
     fn capture(&mut self, heap: &mut Heap, r: &mut Regs, rs_from: usize, ds_from: usize, whole: bool) -> Value {
         let ds = heap.vector_from(&self.ds[ds_from..]);
         let rs = heap.vector_from(&self.rs[rs_from..]);
-        let k = heap.make_bloblet(kind("cellular-continuation"), CONT_FIELDS, 0, true);
+        let k = heap.make_bloblet(const { kind("cellular-continuation") }, CONT_FIELDS, 0, true);
         let fields = [
             (CONT_DS, ds),
             (CONT_RS, rs),
@@ -717,7 +717,7 @@ impl Machine {
         }
         let heap = cx.heap();
         let c = self.ds.pop().expect("counted");
-        if c.is_bloblet() && heap.bloblet_kind(c) == kind("cellular-continuation") {
+        if c.is_bloblet() && heap.bloblet_kind(c) == const { kind("cellular-continuation") } {
             if n != 1 {
                 return Err(Trap::Prim(format!("a continuation takes one value, and was given {n}")));
             }
@@ -727,7 +727,7 @@ impl Machine {
             self.reinstate(heap, r, c, v, tail);
             return Ok(());
         }
-        if !(c.is_bloblet() && heap.bloblet_kind(c) == kind("cellular-closure")) {
+        if !(c.is_bloblet() && heap.bloblet_kind(c) == const { kind("cellular-closure") }) {
             return Err(Trap::Type { routine });
         }
         self.check_limits()?;
@@ -1018,7 +1018,7 @@ impl Machine {
                 if self.ds.len() < r.fp + count {
                     return Err(Trap::Underflow { routine: name });
                 }
-                let c = heap.make_bloblet(kind("cellular-closure"), count + 1, 0, true);
+                let c = heap.make_bloblet(const { kind("cellular-closure") }, count + 1, 0, true);
                 heap.set_bloblet_slot(c, CLOSURE_WORD, w);
                 let free = self.ds.split_off(self.ds.len() - count);
                 for (i, v) in free.into_iter().enumerate() {
@@ -1035,7 +1035,7 @@ impl Machine {
                 let callee = self.ds.last().copied().filter(|_| self.ds.len() > r.fp + count);
                 if let (Some(c), Ctx::Rt(rt)) = (callee, &mut *cx)
                     && c.is_bloblet()
-                    && rt.heap.bloblet_kind(c) == kind("native-closure")
+                    && rt.heap.bloblet_kind(c) == const { kind("native-closure") }
                 {
                     // A continuation was thrown past it, and is where this
                     // machine now is; or an abort found no prompt in it, and
@@ -1064,7 +1064,7 @@ impl Machine {
                 let k = self.pop(name)?;
                 let v = self.pop(name)?;
                 let heap = cx.heap();
-                if !(k.is_bloblet() && heap.bloblet_kind(k) == kind("cellular-continuation")) {
+                if !(k.is_bloblet() && heap.bloblet_kind(k) == const { kind("cellular-continuation") }) {
                     return Err(Trap::Type { routine: name });
                 }
                 self.check_limits()?;
@@ -1119,7 +1119,7 @@ impl Machine {
                 let v = self.pop(name)?;
                 let key = self.pop(name)?;
                 let heap = cx.heap();
-                if !(thunk.is_bloblet() && heap.bloblet_kind(thunk) == kind("cellular-closure")) {
+                if !(thunk.is_bloblet() && heap.bloblet_kind(thunk) == const { kind("cellular-closure") }) {
                     return Err(Trap::Type { routine: name });
                 }
                 self.check_limits()?;
@@ -1334,7 +1334,7 @@ pub fn call_value(rt: &mut Runtime, f: Value, args: &[Value]) -> Result<Value, N
 /// in a tail call, which calls native code as every call here does.
 pub fn cellular_adapter(heap: &mut Heap, f: Value, arity: usize) -> Value {
     let word = WordBuilder::new().free(0).tailcall(arity).build(heap, "adapter");
-    let c = heap.make_bloblet(kind("cellular-closure"), 2, 0, true);
+    let c = heap.make_bloblet(const { kind("cellular-closure") }, 2, 0, true);
     heap.set_bloblet_slot(c, CLOSURE_WORD, word);
     heap.set_bloblet_slot(c, CLOSURE_FREE0, f);
     c
