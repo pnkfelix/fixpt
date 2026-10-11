@@ -2166,3 +2166,20 @@ compilers in Rust and in FX-26, the evaluator) to make an `f32` constant
 there, through a fact on the literal. To settle: a literal that does not
 round-trip through `f32` exactly (`0.1`): accepted, rounded, as Rust and C
 do, or refused.
+
+## 81. Register code to machine code, in FX-26: `fx-regs-fxjit` (found 2026-10-11)
+
+Naming the machines by who generates code, what code, and what runs it
+(§78) showed a gap: there is no `fx-regs-fxjit`. `native.fx` ports only
+the cellular words' assembler (`fixpt-native/src/cellular.rs`'s
+`assemble_word`, about 935 lines of FX-26), which `--cellular-machine
+fx-compiled` uses. The compiler from register code to arm64, `direct.rs`
+and `direct/reps.rs` (about 4,900 lines of Rust), has no FX-26 twin, so the
+fastest machine, `fx-regs-rsjit` (the default since §78), depends on Rust
+for its last step: "FX all the way down" (`PLAN.md`) holds for the
+cellular machines only. A port would follow `native.fx`'s pattern: the
+Rust compiler as its oracle, the same instructions for every procedure
+(as `tests/native.rs` checks `native.fx`), over the encoder `arm64.fx`.
+Size: about five times `native.fx`, and `direct.rs` is still moving
+(blobrefs, flat sums, raw `f64`s in §77's follow-ups), so a port is best
+started once it settles.
