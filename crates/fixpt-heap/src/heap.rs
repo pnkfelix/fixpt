@@ -856,6 +856,18 @@ impl Heap {
         o
     }
 
+    /// Whether string `o` has code point `c`, looked for where it is, two
+    /// to a word, nothing copied.
+    pub fn string_has(&self, o: Value, c: char) -> bool {
+        let base = self.payload_base(o);
+        let n = self.word(base) as usize;
+        let c = c as u64;
+        (0..n.div_ceil(2)).any(|k| {
+            let w = self.word(base + 1 + k);
+            w & 0xffff_ffff == c || (2 * k + 1 < n && w >> 32 == c)
+        })
+    }
+
     /// FNV-1a of string `o`'s code points, each as a `u64`, in the heap: the
     /// runtime's `%string-hash` before its shift, with nothing copied.
     pub fn string_fnv(&self, o: Value) -> u64 {

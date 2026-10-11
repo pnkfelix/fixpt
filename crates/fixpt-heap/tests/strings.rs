@@ -61,3 +61,17 @@ fn appending_matches_points_gathered() {
         }
     }
 }
+
+/// `string_has`, a code point looked for in place, says what `contains`
+/// says of the Rust string: odd lengths too, where a word's spare half (0)
+/// is no point.
+#[test]
+fn a_point_is_found_in_place() {
+    let mut heap = Heap::new();
+    for text in ["", "a", "ab", "abc", "aλ", "λμν", "xyz\u{1F600}"] {
+        let s = heap.make_string(text);
+        for c in ['a', 'b', 'c', 'λ', 'ν', 'z', '\u{1F600}', '\0', 'q'] {
+            assert_eq!(heap.string_has(s, c), text.contains(c), "{c:?} in {text:?}");
+        }
+    }
+}

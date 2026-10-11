@@ -1276,8 +1276,11 @@ prims! {
     // own: primitives here, so that cellular code can call them too.
     "%fx26-char-in?", 2, Some(2), simple!(|rt, a| {
         let c = get_char(rt, a[0])?;
-        let s = get_string(rt, a[1])?;
-        Ok(Value::boolean(s.contains(c)))
+        if !rt.heap.is_a(a[1], ObjType::String) {
+            return rt.type_error("a string", a[1]);
+        }
+        // Looked for in place: a scanner asks this of each character it reads.
+        Ok(Value::boolean(rt.heap.string_has(a[1], c)))
     });
     // `f64`, IEEE binary64, on flonums (`docs/fx26.md`, "Floats").
     "%fx26-f64+", 2, Some(2), simple!(|rt, a| f64_op(rt, a, "add"));

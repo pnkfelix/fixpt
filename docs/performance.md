@@ -2879,3 +2879,8 @@ the string at its length and puts each part in place: its words copied
 where it starts at an even code point (two to a word), else shifted half
 a word, each word of two of the part's. `scheme-bench/string` 2.15 →
 1.25 s.
+
+`char-in?` made the string it searched a Rust `String` each time, malloc'd
+and freed, to call `contains` on it: `scheme-bench/parsing`'s scanner asks
+it of every character it reads. `Heap::string_has` looks in place, two
+code points to a word: `parsing` 7.3 → 4.0 s.
