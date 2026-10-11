@@ -295,7 +295,7 @@ pub fn repl(backend: Backend) -> i32 {
                 Ok(t) => {
                     let dir = std::path::Path::new(path).parent().map(|d| d.to_path_buf());
                     let outer = std::mem::replace(&mut session.checker.base_dir, dir);
-                    eval_program_in(&mut session, path, &t);
+                    eval_program_in(&mut session, path, &t, false);
                     session.checker.base_dir = outer;
                 }
                 Err(e) => println!("; cannot read `{path}`: {e}"),
@@ -442,7 +442,7 @@ pub fn repl(backend: Backend) -> i32 {
             }
             match ran {
                 Ok(out) if disassembling => match &out.value {
-                    Ok(Some(v)) => print!("{}", unwrite_string(v)),
+                    Ok(Some(v)) => print!("{}", unwrite_string(v).unwrap_or_else(|| format!("{v}\n"))),
                     _ => show(&session, &out, show_code),
                 },
                 Ok(out) => show(&session, &out, show_code),
@@ -536,26 +536,6 @@ fn ask_redefine(q: &fixpt_fx26::session::Redefinition) -> fixpt_fx26::session::R
         "r" | "refuse" => Redefine::Refuse,
         _ => Redefine::Break,
     }
-}
-
-/// A string as it was written, `"…"` with escapes, back to its text.
-fn unwrite_string(w: &str) -> String {
-    let Some(inner) = w.strip_prefix('"').and_then(|x| x.strip_suffix('"')) else { return format!("{w}\n") };
-    let mut out = String::new();
-    let mut chars = inner.chars();
-    while let Some(c) = chars.next() {
-        if c != '\\' {
-            out.push(c);
-            continue;
-        }
-        match chars.next() {
-            Some('n') => out.push('\n'),
-            Some('t') => out.push('\t'),
-            Some(x) => out.push(x),
-            None => {}
-        }
-    }
-    out
 }
 
 /// Run every form of `files` in one session, printing only what the program
@@ -704,8 +684,9 @@ pub fn compile(backend: Backend, name: &str, text: &str) -> i32 {
 }
 
 /// `fixpt eval` of a file: the whole program (definitions in any order),
-/// each form's value and type.
-pub fn eval_program(backend: Backend, name: &str, text: &str) -> i32 {
+/// each form's value and type; or, `raw`, only the last form's value, a
+/// string, its characters exactly (`fixpt eval --raw`).
+pub fn eval_program(backend: Backend, name: &str, text: &str, raw: bool) -> i32 {
     let mut session = match start(backend) {
         Ok(s) => s,
         Err(code) => return code,
@@ -716,7 +697,7 @@ pub fn eval_program(backend: Backend, name: &str, text: &str) -> i32 {
     // A `load-module`'s relative path is from the program's directory.
     session.checker.base_dir = std::path::Path::new(name).parent().map(|d| d.to_path_buf());
     let before = GcStats::of(&mut session);
-    let code = eval_program_in(&mut session, name, text);
+    let code = eval_program_in(&mut session, name, text, raw);
     if report {
         GcStats::of(&mut session).since(&before);
     }
@@ -835,7 +816,7 @@ impl GcStats {
     }
 }
 
-fn eval_program_in(session: &mut Fx26Session, name: &str, text: &str) -> i32 {
+fn eval_program_in(session: &mut Fx26Session, name: &str, text: &str, raw: bool) -> i32 {
     let forms = match session.checker.read_in(FileId(0), text) {
         Ok(f) => f,
         Err(e) => {
@@ -850,8 +831,18 @@ fn eval_program_in(session: &mut Fx26Session, name: &str, text: &str) -> i32 {
             return 1;
         }
     };
-    for out in outs {
+    let n = outs.len();
+    for (i, out) in outs.into_iter().enumerate() {
         match out {
+            Ok(out) if raw => {
+                if let Err(e) = &out.value {
+                    eprintln!("! evaluation failed: {e}");
+                    return 1;
+                }
+                if i + 1 == n {
+                    return print_raw(session, &out);
+                }
+            }
             Ok(out) => {
                 show(session, &out, false);
                 if out.value.is_err() {
@@ -864,7 +855,74 @@ fn eval_program_in(session: &mut Fx26Session, name: &str, text: &str) -> i32 {
             }
         }
     }
+    if raw {
+        eprintln!("fixpt eval --raw: no form gives a string");
+        return 1;
+    }
     0
+}
+
+/// `fixpt eval --raw`: the last form's value, a string, as its characters,
+/// with nothing before or after them.
+fn print_raw(session: &Fx26Session, out: &Outcome) -> i32 {
+    use std::io::Write;
+    let shown = match &out.top {
+        Top::Exp(k) => session.checker.show_ty(k.ty),
+        _ => String::from("definition"),
+    };
+    let chars = match (&out.value, shown.as_str()) {
+        (Ok(Some(w)), "string") => unwrite_string(w),
+        _ => None,
+    };
+    let Some(chars) = chars else {
+        eprintln!("fixpt eval --raw: the last form is a {shown}, not a string");
+        return 1;
+    };
+    let mut stdout = std::io::stdout().lock();
+    if stdout.write_all(chars.as_bytes()).and_then(|()| stdout.flush()).is_err() {
+        return 1;
+    }
+    0
+}
+
+/// A string as the printer writes it (`fixpt_runtime::print`'s
+/// `put_string`), read back: its characters. None if `w` is no such.
+fn unwrite_string(w: &str) -> Option<String> {
+    let inner = w.strip_prefix('"')?.strip_suffix('"')?;
+    let mut out = String::new();
+    let mut cs = inner.chars();
+    while let Some(c) = cs.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match cs.next()? {
+            '"' => out.push('"'),
+            '\\' => out.push('\\'),
+            'n' => out.push('\n'),
+            't' => out.push('\t'),
+            'r' => out.push('\r'),
+            'x' => {
+                let hex: String = cs.by_ref().take_while(|c| *c != ';').collect();
+                out.push(char::from_u32(u32::from_str_radix(&hex, 16).ok()?)?);
+            }
+            _ => return None,
+        }
+    }
+    Some(out)
+}
+
+#[cfg(test)]
+mod tests {
+    /// Every character the printer escapes, and some it does not, read back.
+    #[test]
+    fn a_written_string_reads_back() {
+        let s: String = (0u32..0x80).chain([0xe9, 0x2026, 0x1f600]).filter_map(char::from_u32).collect();
+        let mut heap = fixpt_heap::Heap::new();
+        let v = heap.make_string(&s);
+        let w = fixpt_runtime::print::write_value(&heap, v);
+        assert_eq!(super::unwrite_string(&w).as_deref(), Some(s.as_str()), "{w}");
+    }
 }
 
 /// Run the forms of `text` and print what each is.

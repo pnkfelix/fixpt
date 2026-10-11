@@ -31,6 +31,10 @@ usage:
                                  FX-26, EXPR may be a file (a whole program,
                                  and a `.fx` one needs no --dialect) or `-`
                                  for the standard input
+  fixpt eval --raw INPUT         FX-26: print only the last form's value, a
+                                 string, as its characters (no quotes,
+                                 escapes, type or effect); exit 1 if it is
+                                 no string, or the program fails
   fixpt check INPUT              FX-26: both checkers (Rust and FX-26) on a
                                  file, `-` or program text; each form's type
                                  and effect, and where the checkers disagree
@@ -335,9 +339,16 @@ fn run(args: &[String]) -> i32 {
                 Dialect::Fx87 => return fx87::eval(backend, &rest[1..].join(" ")),
                 Dialect::Fx91 => return fx91::eval(backend, &rest[1..].join(" ")),
                 Dialect::Fx26 => {
-                    return match fx26::input(&rest[1..]) {
-                        Ok((name, text)) if name == "<argument>" => fx26::eval(backend, &text),
-                        Ok((name, text)) => fx26::eval_program(backend, &name, &text),
+                    // `--raw`: the last form's string as it is, nothing else.
+                    let raw = rest[1] == "--raw";
+                    let args = &rest[1 + raw as usize..];
+                    if args.is_empty() {
+                        eprintln!("fixpt eval: needs an expression");
+                        return 2;
+                    }
+                    return match fx26::input(args) {
+                        Ok((name, text)) if name == "<argument>" && !raw => fx26::eval(backend, &text),
+                        Ok((name, text)) => fx26::eval_program(backend, &name, &text, raw),
                         Err(e) => {
                             eprintln!("fixpt: {e}");
                             1

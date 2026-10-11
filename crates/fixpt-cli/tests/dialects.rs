@@ -355,6 +355,33 @@ fn fixed_width_integers_on_every_machine() {
     }
 }
 
+/// `fixpt eval --raw`: the last form's string, its characters exactly,
+/// and nothing else; non-zero, and nothing on standard output, for a last
+/// form that is no string or a run that fails (kayak's request,
+/// 2026-10-11).
+#[test]
+fn eval_raw_prints_a_string_exactly() {
+    let raw = |program: &str| {
+        let mut child = Command::new(FIXPT)
+            .args(["--dialect", "fx26", "eval", "--raw", "-"])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("fixpt starts");
+        use std::io::Write as _;
+        child.stdin.take().expect("piped").write_all(program.as_bytes()).expect("writes");
+        child.wait_with_output().expect("finishes")
+    };
+    let out = raw("(define x int 1)\n\"a\\nb\\\"c\\x7;\"\n");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(out.stdout, b"a\nb\"c\x07");
+    for program in ["(define x int 1)\nx\n", "(string-append \"a\" (car (the (listof string @r) nil)))\n"] {
+        let out = raw(program);
+        assert!(!out.status.success() && out.stdout.is_empty(), "{program}: {}", String::from_utf8_lossy(&out.stdout));
+    }
+}
+
 /// Literals of `i64` and `u64`, past a fixnum too, alike on every machine
 /// (`fixpt-fx26`'s `programs/sizes/fixed-width-64-literals.fx`).
 #[test]
