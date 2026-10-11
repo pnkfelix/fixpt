@@ -148,6 +148,10 @@
 (define k-mark (with check-env k-mark))
 (define k-bind (with check-env k-bind))
 (define k-unbind-to (with check-env k-unbind-to))
+(define k-lookup (with check-env k-lookup))
+(define k-std-binding? (with check-types k-std-binding?))
+(define x-app (with check-types-types x-app))
+(define x-var (with check-types-types x-var))
 
 ;; A `dlambda` of no parameters, as an error says.
 (define k-dlambda-empty string "a `dlambda` takes at least one description")
@@ -876,4 +880,64 @@
             (if (or (k-has-id? ks -1) (not (= (k-try-kind what) 2)))
                 (k-sfail k-abs-ctor-usage name)
                 (k-arrow ks 2)))))))
+;; Literal `k` at `a`..`b` checked against fixed-width integer type `b`:
+;; whether `b` is one, refused, its range said, if `k` is out of it
+;; (`Checker::literal_in_range`).
+(define k-in-fixed-range? (subr (maxeff checks spin) (symbol int int int) bool)
+  (lambda (t k a b)
+    (let ((r (k-fixed-range (symbol->string t))))
+      (cond ((null? r) #f)
+            ((and (>= k (car (car r))) (<= k (cdr (car r)))) #t)
+            (else (k-fail (k-cat5 (int->string k) " is not a " (symbol->string t)
+                                  ": its range is "
+                                  (k-cat3 (int->string (car (car r))) " to "
+                                          (int->string (cdr (car r)))))
+                          a b))))))
+(define k-fixed-range
+  (subr (maxeff (read @globals) (alloc @t)) (string) (listof (pairof int int @t) acyclic))
+  (lambda (n)
+    (case n
+      (("i32") (list (cons -2147483648 2147483647)))
+      (("u32") (list (cons 0 4294967295)))
+      (("i64") (list (cons -9223372036854775808 9223372036854775807)))
+      (("u64") (list (cons 0 18446744073709551615)))
+      (else nil))))
+;; Whether `x`, at `a`..`b`, is an integer literal as the parsers write one
+;; past a fixnum, checked against a fixed-width integer type, `expected`,
+;; whose range it is in; refused if out of it (`Checker::literal_value`).
+(define k-fixed-literal? (subr (maxeff checks spin) (kx int int int) bool)
+  (lambda (x expected a b)
+    (let ((v (k-literal-value x a b)))
+      (and (not (null? v))
+           (tagcase (k-get (k-resolve expected))
+             (ty-base (t) (k-in-fixed-range? t (car v) a b))
+             (else y #f))))))
+;; The integer literal `x` is: a fixnum; or arithmetic on fixnums by the
+;; standard `+`, `*` and `-`, every node spanning `a`..`b`, the literal
+;; (the parser's `big-literal`), which no arithmetic written out does.
+(define k-literal-value (subr (maxeff kreads spin) (kx int int) (listof int acyclic))
+  (lambda (x a b)
+    (tagcase x
+      (x-const (t n c d) (if (and (= t k-int) (= c a) (= d b)) (list n) nil))
+      (x-app (f args c d)
+        (if (and (= c a) (= d b) (= (k-length args) 2))
+            (tagcase f
+              (x-var (s fa fb)
+                (if (and (= fa a) (= fb b) (k-std-binding? s (k-lookup s)))
+                    (k-literal-op (symbol->string s) (k-literal-value (car args) a b)
+                                  (k-literal-value (car (cdr args)) a b))
+                    nil))
+              (else y nil))
+            nil))
+      (else y nil))))
+(define k-literal-op
+  (subr (read @globals) (string (listof int acyclic) (listof int acyclic)) (listof int acyclic))
+  (lambda (op l r)
+    (if (or (null? l) (null? r))
+        nil
+        (case op
+          (("+") (list (+ (car l) (car r))))
+          (("*") (list (* (car l) (car r))))
+          (("-") (list (- (car l) (car r))))
+          (else nil)))))
 )))

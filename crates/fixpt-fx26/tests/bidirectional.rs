@@ -188,5 +188,28 @@ fn fixed_widths_are_ints_and_have_literals() {
     let p = include_str!("programs/sizes/fixed-width-literals.fx");
     assert_eq!(check(p), "int ! (read (globals bump x y))");
     let err = rejects(include_str!("programs/sizes/fixed-width-literal-too-big.fx"));
-    assert!(err.contains("a u32 is expected here, and this is a int"), "{err}");
+    assert!(err.contains("4294967296 is not a u32: its range is 0 to 4294967295"), "{err}");
+}
+
+/// An `i64` or `u64` literal likewise, past a fixnum too
+/// (`programs/sizes/fixed-width-64-literals.fx`); one out of its type's
+/// range refused, the range said (kayak's request, 2026-10-11).
+#[test]
+fn literals_check_against_any_fixed_width() {
+    assert_eq!(check("(i64+ 1 2)"), "i64 ! pure");
+    assert_eq!(check("(define x i64 5) x"), "i64 ! (read (globals x))");
+    let p = include_str!("programs/sizes/fixed-width-64-literals.fx");
+    assert_eq!(check(p), "(listof int @r.1) ! (maxeff (alloc @r.1) (read (globals add big neg x)))");
+    for (p, want) in [
+        ("(define y u32 -1)", "-1 is not a u32: its range is 0 to 4294967295"),
+        ("(define y i32 2147483648)", "2147483648 is not a i32: its range is -2147483648 to 2147483647"),
+        ("(define y u64 18446744073709551616)", "18446744073709551616 is not a u64: its range is 0 to 18446744073709551615"),
+        ("(define y i64 -9223372036854775809)", "-9223372036854775809 is not a i64: its range is -9223372036854775808 to 9223372036854775807"),
+        ("(i64+ 9223372036854775808 1)", "9223372036854775808 is not a i64"),
+    ] {
+        let err = rejects(p);
+        assert!(err.contains(want), "{p}: {err}");
+    }
+    // A sum written out is no literal, past a fixnum or not.
+    assert!(rejects("(define y i64 (+ 1 2))").contains("a i64 is expected here, and this is a (nat 3)"));
 }

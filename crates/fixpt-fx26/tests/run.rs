@@ -246,6 +246,12 @@ fn a_primitive_given_a_cyclic_list_fails_rather_than_loops() {
 
 /// `(u32+ 4294967295 1)` wraps to 0, then `+` takes the `u32`s as `int`s.
 #[test]
+fn fixed_width_64_literals_run() {
+    let p = include_str!("programs/sizes/fixed-width-64-literals.fx");
+    assert_eq!(run(p), "(3 9223372036854775805 18446744073709551615 -9223372036854775808)");
+}
+
+#[test]
 fn fixed_width_literals_run() {
     assert_eq!(run(include_str!("programs/sizes/fixed-width-literals.fx")), "8");
 }

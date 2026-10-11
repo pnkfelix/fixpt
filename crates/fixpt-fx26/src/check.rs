@@ -37,10 +37,12 @@ pub const VSUBR: &str = "(vsubr (e effect +) (t type -) (r type +)) (subr e ((li
 /// as, a number at run time; nothing sees inside it.
 /// The integers an `i32` or a `u32` holds, least and greatest: what a
 /// literal of one may be.
-pub(crate) fn fixed_range(name: &str) -> Option<(i64, i64)> {
+pub(crate) fn fixed_range(name: &str) -> Option<(i128, i128)> {
     match name {
-        "i32" => Some((i32::MIN as i64, i32::MAX as i64)),
-        "u32" => Some((0, u32::MAX as i64)),
+        "i32" => Some((i32::MIN as i128, i32::MAX as i128)),
+        "u32" => Some((0, u32::MAX as i128)),
+        "i64" => Some((i64::MIN as i128, i64::MAX as i128)),
+        "u64" => Some((0, u64::MAX as i128)),
         _ => None,
     }
 }

@@ -302,7 +302,15 @@
                        (kx symbol kx int)
                        (listof k-eff @t)))
             (val k-literal-within?
-                 (subr (maxeff (read @globals) (read @t)) (k-ty int) bool))
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (k-ty int kx)
+                       bool))
             (val k-may-be-empty? (subr (maxeff (read @globals) (read @t)) (k-ty) bool))
             (val k-arms-type
                  (subr (maxeff (alloc @t)

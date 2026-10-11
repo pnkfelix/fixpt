@@ -69,6 +69,55 @@ impl Unknowns {
 }
 
 impl Checker {
+    /// The range of the fixed-width integer type `t` is, if it is one.
+    pub(crate) fn fixed_expected(&self, t: TyId) -> Option<(i128, i128)> {
+        match self.arena.get(self.arena.resolve(t)) {
+            Ty::Base(b) => crate::check::fixed_range(self.interner.name(*b)),
+            _ => None,
+        }
+    }
+
+    /// Literal `e`, of value `v`, checked against fixed-width `t`: in its
+    /// range, or refused, the range said.
+    pub(crate) fn literal_in_range(&self, e: ExpId, v: i128, t: TyId) -> R<()> {
+        let (lo, hi) = self.fixed_expected(t).expect("a fixed-width type");
+        if (lo..=hi).contains(&v) {
+            return Ok(());
+        }
+        Err(FxError::at(self.arena.span_of(e), format!("{v} is not a {}: its range is {lo} to {hi}", self.show_ty(t))))
+    }
+
+    /// The integer literal `e` is, as the parsers write one: a fixnum; or,
+    /// past one, arithmetic on fixnums by the standard `+`, `*` and `-`,
+    /// every node spanning the literal (`Checker::big_literal`), which no
+    /// arithmetic written out does.
+    pub(crate) fn literal_value(&self, e: ExpId) -> Option<i128> {
+        self.literal_value_in(e, self.arena.span_of(e))
+    }
+
+    fn literal_value_in(&self, e: ExpId, span: fixpt_read::Span) -> Option<i128> {
+        if self.arena.span_of(e) != span {
+            return None;
+        }
+        match self.arena.exp_at(e) {
+            Exp::Int(k) => Some(*k as i128),
+            Exp::App { fun, args } if args.len() == 2 && self.arena.span_of(*fun) == span => {
+                let Exp::Var(f) = self.arena.exp_at(*fun) else { return None };
+                if !self.is_standard(*f) {
+                    return None;
+                }
+                let (a, b) = (self.literal_value_in(args[0], span)?, self.literal_value_in(args[1], span)?);
+                match self.interner.name(*f) {
+                    "+" => a.checked_add(b),
+                    "*" => a.checked_mul(b),
+                    "-" => a.checked_sub(b),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
     // ----------------------------------------------------------- check mode
 
     /// Check `e` against `expected`, returning its effect.
@@ -160,7 +209,11 @@ impl Checker {
             }
             Exp::App { fun, args } => {
                 let (t, eff) = self.synth_app(e, fun, &args, Some(expected))?;
-                self.expect(e, t, expected)?;
+                // A literal past a fixnum, as the parsers write one.
+                match self.literal_value(e) {
+                    Some(v) if self.fixed_expected(expected).is_some() => self.literal_in_range(e, v, expected)?,
+                    _ => self.expect(e, t, expected)?,
+                }
                 self.checked_call = Some((e, t));
                 Ok(eff)
             }
@@ -192,8 +245,10 @@ impl Checker {
             }
             // A natural literal is a `nat`, and a `(nat k)`.
             Exp::Int(k) if k >= 0 && matches!(&expected_ty, Ty::Nat(s) if self.size_le(&Size::lit(k), s)) => Ok(Effect::pure()),
-            // A literal in an `i32`'s or a `u32`'s range is one.
-            Exp::Int(k) if matches!(&expected_ty, Ty::Base(b) if crate::check::fixed_range(self.interner.name(*b)).is_some_and(|(lo, hi)| (lo..=hi).contains(&k))) => {
+            // A literal in a fixed-width type's range is one; past it, an
+            // error saying the range.
+            Exp::Int(k) if self.fixed_expected(expected).is_some() => {
+                self.literal_in_range(e, k as i128, expected)?;
                 Ok(Effect::pure())
             }
             // `nil` is a `nlist` of no elements, or of some.

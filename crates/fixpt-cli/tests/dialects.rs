@@ -355,6 +355,15 @@ fn fixed_width_integers_on_every_machine() {
     }
 }
 
+/// Literals of `i64` and `u64`, past a fixnum too, alike on every machine
+/// (`fixpt-fx26`'s `programs/sizes/fixed-width-64-literals.fx`).
+#[test]
+fn fixed_width_64_literals_on_every_machine() {
+    for (m, text) in on_every_machine(include_str!("../../fixpt-fx26/tests/programs/sizes/fixed-width-64-literals.fx")) {
+        assert!(text.contains("(3 9223372036854775805 18446744073709551615 -9223372036854775808) : "), "{m:?}: {text}");
+    }
+}
+
 /// Unions' shape predicates and `typecase` alike on every machine, no
 /// shape taken for another (`programs/unions.fx`).
 #[test]

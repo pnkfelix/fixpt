@@ -209,6 +209,8 @@
 (define k-flat-field (with check-read-helpers k-flat-field))
 (define k-flat-array-parts (with check-read-helpers k-flat-array-parts))
 (define k-flat-sum-size (with check-read-helpers k-flat-sum-size))
+(define k-in-fixed-range? (with check-read-helpers k-in-fixed-range?))
+(define k-fixed-literal? (with check-read-helpers k-fixed-literal?))
 (define k-blobref-variant (with check-read-helpers k-blobref-variant))
 (define k-blobref-field int 1099511627776)
 (define k-handler-wants (with check-errors k-handler-wants))
@@ -673,7 +675,9 @@
 ;; Call `x`, found `r`, as `expected`: its effect, and its type noted.
 (define k-as-expected-call (subr (maxeff checks spin) (kx k-te int) k-eff)
   (lambda (x r expected)
-    (let ((e (k-as-expected x r expected)))
+    (let ((e (if (k-fixed-literal? x expected (k-start x) (k-end x))
+                 (extract r 2)
+                 (k-as-expected x r expected))))
       (begin (set k-checked-call (product (1 (k-start x)) (2 (k-end x)) (3 (extract r 1)))) e))))
 ;; `k-unify` of a call's `result` against what is `expected` of it: bounds
 ;; from above.
@@ -811,17 +815,14 @@
           (begin (k-expect x (k-instantiate-against t expected (k-start x) (k-end x)) expected)
                  (the (listof k-eff @t) (cons nil nil)))
           (the (listof k-eff @t) nil)))))
-;; Whether `et` is a `(nat z)` that literal `k` is one of, or an `i32` or a
-;; `u32` whose range it is in.
-(define k-literal-within? (subr kreads (k-ty int) bool)
-  (lambda (et k)
+;; Whether `et` is a `(nat z)` that literal `k` is one of, or a fixed-width
+;; integer type whose range it is in: refused, the range said, if out of
+;; it (`k-in-fixed-range?`).
+(define k-literal-within? (subr (maxeff checks spin) (k-ty int kx) bool)
+  (lambda (et k x)
     (tagcase et
       (ty-nat (z) (and (>= k 0) (k-size-le? (k-size-lit k) z)))
-      (ty-base (b)
-        (case (symbol->string b)
-          (("i32") (and (>= k -2147483648) (<= k 2147483647)))
-          (("u32") (and (>= k 0) (<= k 4294967295)))
-          (else #f)))
+      (ty-base (b) (k-in-fixed-range? b k (k-start x) (k-end x)))
       (else w #f))))
 ;; Whether `et` is a `nlist` of no elements, or of any number.
 (define k-may-be-empty? (subr kreads (k-ty) bool)
