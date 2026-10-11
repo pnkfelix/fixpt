@@ -552,3 +552,9 @@ than a word unless its name says so.
    predictor; `fib` 2.8 → 3.1). The MLton ports, timed both ways, were
    about 3 % worse (`fib`, `peek` +10 %; `merge` −24 %): the broader set
    decided. Data in docs/performance.md; ideas in TODO §52.
+7. **Native run time, by sampling the ports** (after the `br` lesson,
+   each change timed on the programs it was for and the MLton set):
+   only changes that remove work were kept (sums and products in line, a
+   kept call-out vector, constant kinds, `string-append`/`char-in?` in
+   place, `array-length` by `prim1`); `fixpt-heap`'s ban on `unsafe` kept
+   (`string-append` shifts words rather than viewing them as `u32`s).
