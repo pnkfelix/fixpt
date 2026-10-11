@@ -2210,3 +2210,51 @@ Rust compiler as its oracle, the same instructions for every procedure
 Size: about five times `native.fx`, and `direct.rs` is still moving
 (blobrefs, flat sums, raw `f64`s in §77's follow-ups), so a port is best
 started once it settles.
+
+## 83. GADTs: constructors that refine their type's parameters (the user's, 2026-10-11)
+
+Planned in `docs/research/gadts.md` (stages N1–N6) and listed in
+`PLAN.md`'s queue (item 7, "GADTs (N4, to design with the user)"), but
+until now with no section here. What is done: N1, nominal families; N2,
+declared variance, invariant by default; N3, lemmas (`proves` types,
+erased identity coercions); N6, the `data` kind and `acyclic`. On the
+propositions' side: §54's latent propositions and §65's parameters by
+name. Left, N4, GADTs proper, in both checkers and both front ends:
+
+- **A variant states its result type.** `(tag field … => (expr int))`,
+  with a leading list of binders, `((b type) …)`, for the constructor's
+  own type variables; one not in the result is existential. A variant
+  without `=>` means `(expr a)`, as `define-datatype` does today.
+- **Refinement in `tagcase` arms.** With the scrutinee's type `(expr a)`,
+  `a` rigid (a `poly` binder from a declared signature), an arm checks its
+  body under the equation its constructor states (`a = int`). Equations,
+  not inequalities, which is why indices are invariant (gadts.md, E8).
+  The bidirectional checker already has the signature in hand.
+- **Impossible arms and escape.** An arm whose equation cannot hold
+  (`vnil`'s `0 = n + 1`) is not needed for exhaustiveness. An
+  existential's type may not leave its arm, as a `letregion`'s region may
+  not leave its body.
+- **One grammar of propositions** (gadts.md, "GADTs and latent
+  propositions"): a type equation `(= a int)` is one more atom beside
+  §54's; `given` means "holds under" everywhere (lemmas already use it);
+  `=> (expr int)` is sugar for `given (= a int)` on a variant of result
+  `(expr a)`, which is how the checkers would elaborate it. Two rules in
+  the checkers, not one: values narrow by a meet and die at a write;
+  type variables refine by equations and need invariance.
+
+**To decide with the user first** (PLAN.md's "Unknown"): the spelling
+(`=>`, binders, `given`); how GADTs meet subtyping (an index covariant
+only under Scherer and Rémy's upward closure, which few FX-26 types meet
+given width sums and region and effect subsumption; or invariant
+always); and which program motivates it first. Candidates: E1's typed
+evaluator (`docs/research/examples/gadts/`), whose `eval` could then be
+typed precisely, and perhaps the FX-26 evaluator's `val` (`eval-values.fx`);
+E5's sized `head`, a size guard, which would want N5.
+
+**After it:** N5, size indices as their own sort with their own decision
+procedure, for `confirm` (CF1, CF3), where a variant's type would say its
+size.
+
+**Where to start:** the toy examples' `; proposed` forms in gadts.md as
+the first test programs (refused today, accepted after, both checkers
+agreeing), then the variant's result type in both parsers.

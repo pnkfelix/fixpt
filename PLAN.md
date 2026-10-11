@@ -384,7 +384,7 @@ shorthand next). Then, as before:
 5. Sizes N5c: inequalities, "at most n" results, array bounds.
 6. The front end written in FX-26: quick wins, then the split into
    `src/fx-rsmirror/` and `src/fx-idiomatic/`.
-7. GADTs (N4, to design with the user); a top effect; confirming types
+7. GADTs (N4, to design with the user; `TODO.md` §83); a top effect; confirming types
    at run time (CF1–CF5); concurrency and actors.
 8. Smaller: `nlist` error messages; the language gaps the survey found;
    M8 docs and polish.
@@ -425,7 +425,7 @@ copy of the code per type.
 - Whether code free of `spin` always ends: T5 is conjectured, and false
   until each hole is closed; a proof wants a logical relation.
 - How much space programs take against the model: no harness measures it.
-- How GADTs should meet subtyping, what regions a top effect covers, and
+- How GADTs should meet subtyping (`TODO.md` §83), what regions a top effect covers, and
   which of the two front ends bootstraps: each needs a decision with the
   user.
 - Older items may still be done but unmarked; when one is found, mark it
