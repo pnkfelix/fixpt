@@ -96,8 +96,11 @@ impl Checker {
         if hidden.is_empty() && hidden_vals.is_empty() {
             return Ok(t);
         }
-        let shown = |c: &Self, n: Sym| !hidden.iter().any(|h| h == c.interner.name(n));
-        let shown_val = |c: &Self, n: Sym| !hidden_vals.iter().any(|h| h == c.interner.name(n));
+        // As sets of names: a module's hidden includes hide thousands.
+        let hidden: HashSet<Sym> = hidden.iter().map(|h| self.interner.intern(h)).collect();
+        let hidden_vals: HashSet<Sym> = hidden_vals.iter().map(|h| self.interner.intern(h)).collect();
+        let shown = |_: &Self, n: Sym| !hidden.contains(&n);
+        let shown_val = |_: &Self, n: Sym| !hidden_vals.contains(&n);
         let marker = |c: &Self, n: Sym| c.interner.name(n).starts_with("%hidden:") || c.interner.name(n).starts_with("%hiddenv:");
         let (kept_abs, gone): (Vec<(Sym, DVar)>, Vec<(Sym, DVar)>) = abs.into_iter().partition(|(n, _)| shown(self, *n));
         let descs: Vec<(Sym, TyId)> = descs.into_iter().filter(|(n, _)| !marker(self, *n) && shown(self, *n)).collect();

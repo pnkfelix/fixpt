@@ -543,10 +543,18 @@
                                             (string-length (symbol->string (extract (car ds) 1)))))
                  (k-hidden-in (cdr ds) prefix)))
           (else (k-hidden-in (cdr ds) prefix)))))
-(define k-shown? (subr (read @globals) (k-names symbol) bool)
-  (lambda (hs n) (or (null? hs) (and (not (symbol=? (car hs) n)) (k-shown? (cdr hs) n)))))
+;; Whether `n` is not among the names `hs` hides (a table: a module's
+;; hidden includes hide thousands).
+(define k-shown? (subr (maxeff (read @globals) (read @t)) (k-saw symbol) bool)
+  (lambda (hs n) (not (table-has? hs n))))
+;; `ns` as a table.
+(define k-saw-of (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t)) (k-names) k-saw)
+  (lambda (ns) (k-saw-all (make-table symbol-hash symbol=?) ns)))
+(define k-saw-all
+  (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t)) (k-saw k-names) k-saw)
+  (lambda (t ns) (if (null? ns) t (begin (table-set! t (car ns) 0) (k-saw-all t (cdr ns))))))
 ;; `ps` but those hidden, and the markers.
-(define k-parts-shown (subr (maxeff (read @globals) (alloc @t)) (k-parts k-names) k-parts)
+(define k-parts-shown (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-parts k-saw) k-parts)
   (lambda (ps hs)
     (cond ((null? ps) nil)
           ((or (not (k-shown? hs (extract (car ps) 1)))
@@ -554,7 +562,7 @@
            (k-parts-shown (cdr ps) hs))
           (else (the k-parts (cons (car ps) (k-parts-shown (cdr ps) hs)))))))
 ;; The positions `at` of the values of `vs` shown.
-(define k-at-shown (subr (maxeff (read @globals) (alloc @t)) (k-parts k-ids k-names) k-ids)
+(define k-at-shown (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-parts k-ids k-saw) k-ids)
   (lambda (vs at hs)
     (cond ((null? vs) nil)
           ((k-shown? hs (extract (car vs) 1)) (cons (car at) (k-at-shown (cdr vs) (cdr at) hs)))
@@ -585,7 +593,8 @@
     (cond ((null? ps) '?) ((= (extract (car ps) 2) v) (extract (car ps) 1))
           (else (k-part-named (cdr ps) v)))))
 ;; The abstract types of `abs` hidden (`gone?`) or not.
-(define k-abs-split (subr (maxeff (read @globals) (alloc @t)) (k-parts k-names bool) k-parts)
+(define k-abs-split
+  (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-parts k-saw bool) k-parts)
   (lambda (abs hs gone?)
     (cond ((null? abs) nil)
           ((eq? gone? (k-shown? hs (extract (car abs) 1))) (k-abs-split (cdr abs) hs gone?))
@@ -597,10 +606,11 @@
   (lambda (t a b)
     (tagcase (k-get t)
       (ty-module (abs ds vs)
-        (let ((hs (k-hidden-in ds "%hidden:")) (hv (k-hidden-in ds "%hiddenv:")))
-          (if (and (null? hs) (null? hv))
+        (let ((hs0 (k-hidden-in ds "%hidden:")) (hv0 (k-hidden-in ds "%hiddenv:")))
+          (if (and (null? hs0) (null? hv0))
               t
-              (let* ((rs (get k-reshapes))
+              (let* ((hs (k-saw-of hs0)) (hv (k-saw-of hv0))
+                     (rs (get k-reshapes))
                      (mine (and (not (null? rs)) (= (extract (car rs) 1) a)
                                 (= (extract (car rs) 2) b)))
                      (at (if mine (extract (car rs) 3) (k-upto (k-length vs) nil)))
