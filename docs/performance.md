@@ -2787,3 +2787,22 @@ alternated three times:
 | --------------- | -----: | ----: |
 | peval           |   16.7 |   6.9 |
 | the front end   |   1097 |   557 |
+
+## The front end's integer arithmetic in line (2026-10-11)
+
+The front end runs as register code in the cellular convention
+(`fixpt-native`'s `cellular/regcode.rs`), not in `direct.rs`, so the
+fixnum fast paths `direct.rs` has for `*`, `quotient`, `modulo` and now
+`arithmetic-shift` never applied to it: each was a call into Rust and the
+runtime's generic integers (`N::load`, `N::modulo`, `N::store` stood out
+in a native sample), `modulo` at every table lookup's hash among them.
+Now that compiler does the same in line (`Asm::int_fast`), the call only
+for what a fixnum cannot be. Back to back, the clean runs:
+
+| front end (ms) | before | after |
+| -------------- | -----: | ----: |
+| `fx check`     |   1523 |  1233 |
+| `fx words`     |    387 |   350 |
+| `fx arm64`     |    566 |   418 |
+
+`fx check` is now below its time before §69's import pass (1295).

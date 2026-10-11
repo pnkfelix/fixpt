@@ -1861,7 +1861,9 @@ is). Left:
   `fx check` 1295 → 2127, 223.6 → 273.9 M words. Mostly the bucket made
   quadratically, each name looked for in a list of those so far, in both
   checkers; fixed (`DONE.md` §69): `check` 555, `fx check` 1475, 228.7 M
-  words. Left: `fx check` still about 14 % over; not `k-with-used`'s scan
+  words; and since the front end's integer arithmetic went in line
+  (`docs/performance.md`), 1233, below before. Was left: `fx check`
+  still about 14 % over; not `k-with-used`'s scan
   of the bucket for each item (a memo of it changed nothing). Profiled
   with `FIXPT_SYMBOLS` and `fixpt-symbolize`, before the pass and after
   the fixes: no one place; the difference spread over collections (+56

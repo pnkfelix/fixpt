@@ -66,6 +66,81 @@ impl Asm {
         self.e(cmp_imm(X13, 0));
         self.trap_if(Cond::Ne, Trap::Prim(String::new()));
     }
+    /// `modulo`, `quotient`, `*` and `arithmetic-shift` of the fixnums in
+    /// `RESULT` and `y`, into `RESULT`, as `direct.rs`'s `pure_fast` does
+    /// them: whether this is one, its fast path emitted, to `slow` (the
+    /// call) for what it leaves (a bignum, a zero divisor, a result past a
+    /// fixnum). Uses X14 to X16; `RESULT` and `y` kept until it is done.
+    fn int_fast(&mut self, name: &str, y: Reg, slow: Label) -> bool {
+        if !matches!(name, "modulo" | "%fx26-quotient" | "%fx26-mul" | "%fx26-arithmetic-shift") {
+            return false;
+        }
+        let x = RESULT;
+        self.e(orr(X15, x, y));
+        self.e(tst_low(X15, 3));
+        self.b_cond(Cond::Ne, slow);
+        match name {
+            // A product in 61 bits: the high word only the low's sign.
+            "%fx26-mul" => {
+                self.e(asr_imm(X14, y, 3));
+                self.e(mul(X15, x, X14));
+                self.e(smulh(X16, x, X14));
+                self.e(asr_imm(X14, X15, 63));
+                self.e(cmp(X16, X14));
+                self.b_cond(Cond::Ne, slow);
+                self.e(mov(RESULT, X15));
+            }
+            // A quotient past a fixnum is the primitive's; a remainder is
+            // `modulo`'s when it has the divisor's sign, or is 0.
+            "%fx26-quotient" | "modulo" => {
+                self.e(cmp_imm(y, 0));
+                self.b_cond(Cond::Eq, slow);
+                self.e(sdiv(X15, x, y));
+                if name == "%fx26-quotient" {
+                    self.e(lsl_imm(X14, X15, 3));
+                    self.e(asr_imm(X16, X14, 3));
+                    self.e(cmp(X16, X15));
+                    self.b_cond(Cond::Ne, slow);
+                } else {
+                    let signed = self.label();
+                    self.e(msub(X14, X15, y, x));
+                    self.e(cmp_imm(X14, 0));
+                    self.b_cond(Cond::Eq, signed);
+                    self.e(eor(X16, X14, y));
+                    self.e(cmp_imm(X16, 0));
+                    self.b_cond(Cond::Ge, signed);
+                    self.e(add(X14, X14, y));
+                    self.bind(signed);
+                }
+                self.e(mov(RESULT, X14));
+            }
+            // Left while the result stays a fixnum; right (floor) by fewer
+            // than 63.
+            _ => {
+                let (right, done) = (self.label(), self.label());
+                self.e(asr_imm(X14, y, 3));
+                self.e(cmp(X14, XZR));
+                self.b_cond(Cond::Lt, right);
+                self.e(cmp_imm(X14, 61));
+                self.b_cond(Cond::Ge, slow);
+                self.e(lslv(X15, x, X14));
+                self.e(asrv(X16, X15, X14));
+                self.e(cmp(X16, x));
+                self.b_cond(Cond::Ne, slow);
+                self.e(mov(RESULT, X15));
+                self.b(done);
+                self.bind(right);
+                self.e(sub(X14, XZR, X14));
+                self.e(cmp_imm(X14, 63));
+                self.b_cond(Cond::Hs, slow);
+                self.e(asrv(X15, x, X14));
+                self.e(asr_imm(X15, X15, 3));
+                self.e(lsl_imm(RESULT, X15, 3));
+                self.bind(done);
+            }
+        }
+        true
+    }
     /// `IP` := the address of the running register word's field `fields`,
     /// its last, from which field `f` is `8 × (fields − f)` bytes up.
     fn pool(&mut self, fields: usize) {
@@ -922,7 +997,10 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
                 // A shape predicate in line (`TODO.md` §56); the call for
                 // what it leaves.
                 let (slow, done) = (a.label(), a.label());
-                if name == "prim1" && a.shape_test(RESULT, fixpt_runtime::PRIMITIVES[p].name, slow) {
+                let pname = fixpt_runtime::PRIMITIVES[p].name;
+                // Fixnum arithmetic in line too, as `direct.rs`'s
+                // `pure_fast`: the front end runs here.
+                if (name == "prim1" && a.shape_test(RESULT, pname, slow)) || (name != "prim1" && a.int_fast(pname, y, slow)) {
                     a.b(done);
                     a.bind(slow);
                     a.pure_call(p, y);
