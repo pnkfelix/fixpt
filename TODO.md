@@ -1978,7 +1978,14 @@ sum says its key, which decides the encoding:
   program puts the labels in fields itself (`(make-bloblet n 'a 'b)`).
   Sound whatever the bytes say: flat scalars have no invalid bits, so a
   wrong tag only reads bytes as another variant (the payload area sized
-  for the largest).
+  for the largest). Nothing keeps the labels unique or stable (the
+  user's, 2026-10-10: "we'll see how it goes"): a label in two fields
+  reads back the same through either index, the lowest one written; a
+  label field overwritten turns every value tagged with it into the new
+  label's variant. Declared tables (singleton symbol types, which FX-26
+  lacks: its unions are of shapes, and every symbol has one) would make
+  both static: distinct labels a condition of the type, and a field of
+  type `'a` holding only `'a`.
 - **`(key u8)`, `(key u16)`, `(key u32)`: numeric labels, stored as they
   are** (0 allowed there), compared against constants: Rust's model; and
   sum types sharing codes agree on them with no indirection. `u8`/`u16`
