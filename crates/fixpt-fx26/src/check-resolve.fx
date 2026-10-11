@@ -172,6 +172,7 @@
 (define k-arrow-vars (with check-types k-arrow-vars))
 (define k-binder-has? (with check-types k-binder-has?))
 (define k-bounds (with check-types k-bounds))
+(define k-distincts (with check-types k-distincts))
 (define k-cat3 (with check-types k-cat3))
 (define k-certified (with check-types k-certified))
 (define k-certified-lengths (with check-types k-certified-lengths))
@@ -448,6 +449,7 @@
   (lambda ()
     (begin
       (set k-dvars nil) (set k-ndvars 0) (set k-places nil) (set k-bounds nil) (set k-outers nil)
+      (set k-distincts nil)
       (set k-lifetimes nil) (set k-freezing nil) (set k-written nil)
       (set k-arrow-vars nil) (set k-abstract-funs nil))))
 ;; Forget the names bound, and what is known of them.

@@ -1120,21 +1120,28 @@ impl Checker {
         if self.path_narrowed.iter().all(|f| f.dead) {
             return;
         }
-        let may_alias = |w: &Region, r: &Region| w == r || matches!(w, Region::Var(_)) || matches!(r, Region::Var(_));
+        let may_alias = |w: &Region, r: &Region| !self.regions_distinct(*w, *r) && (w == r || matches!(w, Region::Var(_)) || matches!(r, Region::Var(_)));
         // A closure's body, checked deeper, runs only when it is called,
         // which is the call's effect, out here.
         let depth = self.closure_depth;
-        for f in self.path_narrowed.iter_mut().filter(|f| !f.dead && f.depth == depth) {
-            let open: Vec<&Region> = f.regions.iter().filter(|r| !matches!(r, Region::Frozen(..))).collect();
-            if open.is_empty() {
-                continue;
-            }
-            let kills = eff.0.iter().any(|a| match a {
-                Atom::Write(w) => open.iter().any(|r| may_alias(w, r)),
-                Atom::Goto(_) | Atom::Comefrom(_) | Atom::Await(_) | Atom::Var(_) | Atom::App(_) => true,
-                _ => false,
-            });
-            if kills {
+        let killed: Vec<bool> = self
+            .path_narrowed
+            .iter()
+            .map(|f| {
+                if f.dead || f.depth != depth {
+                    return false;
+                }
+                let open: Vec<&Region> = f.regions.iter().filter(|r| !matches!(r, Region::Frozen(..))).collect();
+                !open.is_empty()
+                    && eff.0.iter().any(|a| match a {
+                        Atom::Write(w) => open.iter().any(|r| may_alias(w, r)),
+                        Atom::Goto(_) | Atom::Comefrom(_) | Atom::Await(_) | Atom::Var(_) | Atom::App(_) => true,
+                        _ => false,
+                    })
+            })
+            .collect();
+        for (f, k) in self.path_narrowed.iter_mut().zip(killed) {
+            if k {
                 f.dead = true;
             }
         }
@@ -1548,6 +1555,7 @@ impl Checker {
                     map.insert(*v, d);
                 }
                 self.check_bounds(&binders, &map, span)?;
+                self.check_distinct(&binders, &map, inner, span)?;
                 self.check_finite_sizes(&binders, &map, inner, span)?;
                 let result = self.subst(inner, &map);
                 self.no_knot(result, span)?;
@@ -3155,13 +3163,16 @@ impl Checker {
                     inner.a.insert(*va, l);
                     inner.b.insert(*vb, l);
                 }
-                // Bounded region binders must have the same bounds.
+                // Bounded region binders must have the same bounds; a
+                // `distinct` one of `a`'s must be one of `b`'s, whose callers
+                // promise at least what `a` needs.
                 let bounds = ba.iter().zip(&bb).all(|((va, _), (vb, _))| {
-                    match (self.arena.bound(*va), self.arena.bound(*vb)) {
+                    let same = match (self.arena.bound(*va), self.arena.bound(*vb)) {
                         (None, None) => true,
                         (Some(x), Some(y)) => inner.region(&inner.a, x) == inner.region(&inner.b, y),
                         _ => false,
-                    }
+                    };
+                    same && (!self.arena.is_distinct(*va) || self.arena.is_distinct(*vb))
                 });
                 bounds && self.sub(xa, xb, &inner, st)
             }

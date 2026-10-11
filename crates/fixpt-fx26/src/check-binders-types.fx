@@ -38,6 +38,15 @@
             (val k-certified-has?
                  (subr (maxeff (read @globals) (read @t)) (k-named symbol int) bool))
             (val k-sc-one-arg? (subr (read @t) (kxs) bool))
+            (val k-regions-distinct?
+                 (subr (maxeff (read @globals) (read @t) spin) (k-region k-region) bool))
+            (val k-check-distinct (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin) (k-binders k-map int int int) unit))
             (val k-check-bounds
                  (subr (maxeff (alloc @t)
                                (goto @z)

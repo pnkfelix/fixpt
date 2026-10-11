@@ -413,6 +413,14 @@
               (else 2))))))
 (define k-bounds (ref k-bounded @t) (new nil))
 (define k-outers (ref k-nesting @t) (new nil))
+;; Region variables that alias no other region in their scope: binders
+;; marked `distinct`, and `letregion`'s fresh regions (`Arena::set_distinct`;
+;; `docs/research/region-anti-aliasing.md`, (C)).
+(define k-distincts (ref k-ids @t) (new nil))
+(define k-distinct-var? (subr (maxeff (read @globals) (read @t)) (int) bool)
+  (lambda (v) (k-has-id? (get k-distincts) v)))
+(define k-set-distinct (subr kstate (int) unit)
+  (lambda (v) (set k-distincts (cons v (get k-distincts)))))
 ;; The region and place variables bound around what is being read, by
 ;; expressions (not types), innermost first.
 (define k-lifetimes (ref k-ids @t) (new nil))

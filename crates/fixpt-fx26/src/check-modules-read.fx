@@ -131,6 +131,7 @@
 (define k-tag (with check-types k-tag))
 (define k-te (with check-types k-te))
 (define k-ty-new (with check-types k-ty-new))
+(define k-set-distinct (with check-types k-set-distinct))
 (define k-length (with check-types k-length))
 (define ty-base (with check-types-types ty-base))
 (define exp-end (with check-resolve exp-end))
@@ -319,6 +320,8 @@
                  ;; so it may be allocated only in that place or one outliving
                  ;; it: those are all it won't outlive.
                  (ordered (begin
+                            ;; Fresh, so it aliases nothing (Lucassen's `PRIVATE`).
+                            (k-set-distinct v)
                             (k-set-outer v (if (= k 3) (k-place-lives place) lives))
                             (set k-lifetimes (cons v lives))))
                  (pushed (k-push-desc name (ds-var v kind)))

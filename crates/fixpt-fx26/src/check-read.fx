@@ -76,6 +76,7 @@
 (define k-fail (with check-types k-fail))
 (define k-length (with check-types k-length))
 (define k-new-dvar-of (with check-types k-new-dvar-of))
+(define k-set-distinct (with check-types k-set-distinct))
 (define k-nth (with check-types k-nth))
 (define k-quote (with check-types k-quote))
 (define k-ty-new (with check-types k-ty-new))
@@ -283,7 +284,7 @@
 ;; What a binder may be.
 (define k-binder-shapes string
   (string-append "a binder is `(name kind)`, `(name region place)` "
-                 "or `(name data place)`"))
+                 "or `(name data place)`, a region's perhaps `distinct` last"))
 ;; A binder's bound, none or one, from what follows its kind: `(r region
 ;; p)` is a region that won't outlive `p`, a place bound before it.
 (define k-parse-bound (subr (maxeff checks spin) (k-syns int) k-regions)
@@ -301,17 +302,32 @@
   (lambda (bs)
     (if (null? bs)
         nil
-        (let ((pair (k-items (car bs) "a binder")))
+        (let* ((whole (k-items (car bs) "a binder"))
+               ;; A region binder marked `distinct`, last (`Checker::
+               ;; parse_binders`).
+               (distinct (k-distinct-marked? whole))
+               (pair (if distinct (k-drop-last whole) whole)))
           (if (or (= (k-length pair) 2) (= (k-length pair) 3))
               (let* ((name (k-name-of (car pair) "a binder's name"))
                      (kind (k-parse-kind (k-nth pair 1)))
                      (bound (k-parse-bound (cdr (cdr pair)) kind))
-                     (v (k-new-dvar-of name kind))
-                     (bounded (k-note-bound v bound))
+                     (v (if (and distinct (not (= kind 0)))
+                            (k-sfail "only a region binder is `distinct`" (car bs))
+                            (k-new-dvar-of name kind)))
+                     (bounded (begin (k-note-bound v bound) (if distinct (k-set-distinct v) #u)))
                      (pushed (k-push-desc name (ds-var v kind)))
                      (rest (k-binders-each (cdr bs))))
                 (cons (product (1 v) (2 kind)) rest))
               (k-sfail k-binder-shapes (car bs)))))))
+
+;; Whether binder `items`, of three or more, ends with `distinct`.
+(define k-distinct-marked? (subr (maxeff (read @globals) (read @s) spin) (k-syns) bool)
+  (lambda (items)
+    (and (>= (k-length items) 3)
+         (let ((last (k-nth items (- (k-length items) 1))))
+           (and (syn-symbol? last) (string=? (syn-name last) "distinct"))))))
+(define k-drop-last (subr (maxeff (read @globals) (alloc @t) spin) (k-syns) k-syns)
+  (lambda (xs) (if (null? (cdr xs)) nil (the k-syns (cons (car xs) (k-drop-last (cdr xs)))))))
 
 ;; `((name kind) …)`, binding each name for the rest of the reading.
 (define k-parse-binders (subr (maxeff checks spin) (syn) k-binders)

@@ -367,3 +367,27 @@ than a word unless its name says so.
     `k-in-scope-check` to `check-read-helpers.fx` (given the knot's
     `k-synth-as`); `regcode-core.fx` kept at 1403 by moving `r-bloblet`'s
     fact lookup and `r-done` into it.
+
+## Opt-in distinct regions, a prototype (2026-10-11)
+
+1. **Per binder, `(r region distinct)`, not pairs `(distinct r1 r2)`**: a
+   distinct binder aliases nothing else its procedure sees, which is what
+   `&mut` says, and needs no new form in a `poly`'s binder list. Lucassen's
+   rule (§3.6.3) for that binder: distinct from every other binder's region
+   and from every region the `poly`'s type mentions besides its binders
+   (frozen regions exempt, as nothing may write them).
+2. **Known distinct**: different constants, the heap or globals (not
+   `@globals` against a global); a fresh region; a `letregion`'s region
+   (Lucassen's `PRIVATE`, marked distinct when made); a `distinct` binder
+   of an enclosing procedure. Two other region variables are not known
+   distinct.
+3. **Stored beside the variable** (`Arena::set_distinct`, FX-26's
+   `k-distincts`), as a region bound is, so `poly`'s shape is unchanged.
+4. **Subtyping**: a `distinct` binder of `a`'s must be one of `b`'s for
+   `a ≤ b`.
+5. **Messages** say which binder and region, but not which region the
+   type mentions, so that both checkers, which order regions differently,
+   say the same thing.
+6. **The survey's diagnostic stays on its branch**; its report is in
+   `docs/research/anti-aliasing-survey.md`, marked with the commit it
+   measured.

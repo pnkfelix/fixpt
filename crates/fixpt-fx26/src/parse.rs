@@ -229,10 +229,17 @@ impl Checker {
         let mut out = Vec::new();
         for b in self.items(s, "binders")? {
             let pair = self.items(b, "a binder")?;
+            // A region binder marked `distinct`, last: one that aliases no
+            // other region its procedure sees (`docs/research/
+            // region-anti-aliasing.md`, (C)).
+            let (pair, distinct) = match pair.split_last() {
+                Some((last, rest)) if rest.len() >= 2 && last.as_symbol().is_some_and(|x| self.name(x) == "distinct") => (rest, true),
+                _ => (pair, false),
+            };
             let (name, kind, bound) = match pair {
                 [name, kind] => (name, kind, None),
                 [name, kind, bound] => (name, kind, Some(bound)),
-                _ => return Err(FxError::at(b.span, "a binder is `(name kind)`, `(name region place)` or `(name data place)`")),
+                _ => return Err(FxError::at(b.span, "a binder is `(name kind)`, `(name region place)` or `(name data place)`, a region's perhaps `distinct` last")),
             };
             let name = name.as_symbol().ok_or_else(|| FxError::at(name.span, "a binder's name"))?;
             let kind = self.parse_kind(kind)?;
@@ -246,9 +253,15 @@ impl Checker {
                 }
                 None => None,
             };
+            if distinct && kind != Kind::Region {
+                return Err(FxError::at(b.span, "only a region binder is `distinct`"));
+            }
             let v = self.arena.dvar_of(name, kind);
             if let Some(p) = bound {
                 self.arena.set_bound(v, p);
+            }
+            if distinct {
+                self.arena.set_distinct(v);
             }
             self.dscope.push((name, DScope::Var(v, kind)));
             out.push((v, kind));
@@ -1736,6 +1749,8 @@ impl Checker {
                 // region), `letregion` a region only.
                 let kind = if matches!(form, RegionForm::Region | RegionForm::Freeze(_)) { Kind::Region } else { Kind::Place };
                 let region = self.arena.dvar_of(name, kind);
+                // Fresh, so it aliases nothing (Lucassen's `PRIVATE`).
+                self.arena.set_distinct(region);
                 // A `letfreeze`'s data leaves in the place it freezes into, so
                 // it may be allocated only in that place or one outliving it:
                 // those are all it won't outlive.

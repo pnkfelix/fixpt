@@ -103,6 +103,7 @@
 (define k-arrow-kind? (with check-types k-arrow-kind?))
 (define k-binder-has? (with check-types k-binder-has?))
 (define k-bound-of (with check-types k-bound-of))
+(define k-distinct-var? (with check-types k-distinct-var?))
 (define k-dvar-kind (with check-types k-dvar-kind))
 (define k-gen-of (with check-types k-gen-of))
 (define k-get (with check-types k-get))
@@ -185,6 +186,10 @@
           (and (cond ((and (null? x) (null? y)) #t)
                      ((or (null? x) (null? y)) #f)
                      (else (k-benv-region=? (car x) (car y) ea eb)))
+               ;; A `distinct` binder of `a`'s is one of `b`'s, whose
+               ;; callers promise at least what `a` needs.
+               (or (not (k-distinct-var? (extract (car ba) 1)))
+                   (k-distinct-var? (extract (car bb) 1)))
                (k-same-bounds? (cdr ba) (cdr bb) ea eb))))))
 ;; Whether two nodes are the same generative type's.
 (define k-same-named? (subr pure (k-ty k-ty) bool)

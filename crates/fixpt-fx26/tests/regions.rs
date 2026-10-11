@@ -170,3 +170,23 @@ fn data_is_at_a_place() {
     let same_at = "(define same (poly ((p place) (t data p)) (subr pure (t) t)) (lambda (x) x))";
     assert_eq!(check(&format!("{same_at} {placed}")), Ok(vec!["int ! (read (globals same))".to_string()]));
 }
+
+/// A `distinct` region binder (`docs/research/region-anti-aliasing.md`,
+/// variant (C), a prototype): given two regions it checks; given one region
+/// twice, or a region its procedure's type mentions, refused; inside, the
+/// binder is distinct from the others, which may still be one region; and
+/// a procedure needing one is no procedure that does not.
+#[test]
+fn distinct_region_binders() {
+    let ok = check(include_str!("programs/regions/distinct-swap.fx")).expect("checks");
+    assert_eq!(ok.last().map(String::as_str), Some("int ! (read (globals swap))"));
+    for (p, want) in [
+        (include_str!("programs/regions/distinct-one-region.fx"), "`r1` is distinct, and is given r, as `r2` is"),
+        (include_str!("programs/regions/distinct-mentioned.fx"), "`r` is distinct, and @heap may be a region the procedure's type mentions"),
+        (include_str!("programs/regions/distinct-passes-on.fx"), "`r1` is distinct, and r2 may be r3, given for `r2`"),
+        (include_str!("programs/regions/distinct-not-loose.fx"), "`r1` is distinct, and r1 may be r2, given for `r2`"),
+    ] {
+        let err = check(p).expect_err("refused");
+        assert!(err.contains(want), "{err}");
+    }
+}

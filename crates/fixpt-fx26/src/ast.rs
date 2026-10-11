@@ -681,6 +681,10 @@ pub struct Arena {
     /// Each region binder's bound, if it has one: `(r region p)`, a region
     /// that won't outlive `p` (`docs/research/places-and-regions.md`).
     dvar_bounds: Vec<Option<Region>>,
+    /// Region binders that alias no other region in their scope: a
+    /// `(r region distinct)` binder, or a `letregion`'s fresh region
+    /// (`docs/research/region-anti-aliasing.md`, variant (C)).
+    dvar_distinct: Vec<bool>,
     /// The region and place variables bound around each one's binder, which
     /// it won't outlive: the order of lifetimes, by nesting.
     dvar_outer: Vec<Vec<DVar>>,
@@ -758,6 +762,7 @@ impl Arena {
         self.dvar_places.push(false);
         self.dvar_data.push(false);
         self.dvar_bounds.push(None);
+        self.dvar_distinct.push(false);
         self.dvar_outer.push(Vec::new());
         self.dvar_kinds.push(Kind::Type);
         DVar(last_id(self.dvar_names.len(), "description variables"))
@@ -801,6 +806,15 @@ impl Arena {
         self.dvar_data[v.0 as usize] = kind == Kind::Data;
         self.dvar_kinds[v.0 as usize] = kind;
         v
+    }
+
+    /// Mark region `v` distinct: it aliases no other region in its scope.
+    pub fn set_distinct(&mut self, v: DVar) {
+        self.dvar_distinct[v.0 as usize] = true;
+    }
+    /// Whether region `v` is distinct (`set_distinct`).
+    pub fn is_distinct(&self, v: DVar) -> bool {
+        self.dvar_distinct.get(v.0 as usize).copied().unwrap_or(false)
     }
 
     /// Give region binder `v` a bound: a region it won't outlive.
@@ -867,6 +881,7 @@ impl Arena {
         self.dvar_places.truncate(mark.dvars);
         self.dvar_data.truncate(mark.dvars);
         self.dvar_bounds.truncate(mark.dvars);
+        self.dvar_distinct.truncate(mark.dvars);
         self.dvar_outer.truncate(mark.dvars);
         self.dvar_kinds.truncate(mark.dvars);
     }

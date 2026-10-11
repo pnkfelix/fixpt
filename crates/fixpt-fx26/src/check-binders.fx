@@ -50,6 +50,11 @@
 (define-type k-named (select check-types-types k-named))
 (define-type k-parts (select check-types-types k-parts))
 (define-type k-region (select check-types-types k-region))
+(define-type k-regions (select check-types-types k-regions))
+(define r-const (with check-types-types r-const))
+(define r-fresh (with check-types-types r-fresh))
+(define r-heap (with check-types-types r-heap))
+(define r-global (with check-types-types r-global))
 (define-type k-size (select check-types-types k-size))
 (define-type k-terms (select check-types-types k-terms))
 (define-type k-ty (select check-types-types k-ty))
@@ -112,6 +117,8 @@
 (define k-pair-seen? (with check-resolve k-pair-seen?))
 (define k-quote-dvar (with check-expect k-quote-dvar))
 (define k-region=? (with check-effects k-region=?))
+(define k-distinct-var? (with check-types k-distinct-var?))
+(define k-regions-in (with check-resolve k-regions-in))
 (define k-unescaped (with check-modules k-unescaped))
 (define table-ref (with tables table-ref))
 (define table-set! (with tables table-set!))
@@ -267,6 +274,82 @@
           (k-fail (k-cat5 (k-quote-dvar v) " must not outlive " (k-quote (k-region-show bound))
                           ", and " (k-cat3 (k-region-show r) " could outlive " (k-region-show c)))
                   a b)))))
+;; Whether regions `p` and `q` are known not to overlap: one is distinct (a
+;; binder so marked, in whose scope we are, or a `letregion`'s), or both are
+;; constants, fresh, the heap or globals, and differ
+;; (`Checker::regions_distinct`).
+(define k-regions-distinct? (subr (maxeff (read @globals) (read @t) spin) (k-region k-region) bool)
+  (lambda (p q)
+    (and (not (k-region=? p q))
+         (or (k-distinct-region? p) (k-distinct-region? q)
+             (and (k-constant-region? p) (k-constant-region? q))))))
+(define k-distinct-region? (subr (maxeff (read @globals) (read @t)) (k-region) bool)
+  (lambda (r) (tagcase r (r-var (v) (k-distinct-var? v)) (else y #f))))
+(define k-constant-region? (subr pure (k-region) bool)
+  (lambda (r)
+    (tagcase r (r-const (n) #t) (r-fresh (i n) #t) (r-heap () #t) (r-global (g) #t) (else y #f))))
+;; Each `distinct` region binder of `kinds`, as `m` instantiates it, given a
+;; region known not to overlap any other binder's, nor any region `inner`
+;; mentions besides its binders: Lucassen's rule, where it is asked for
+;; (`Checker::check_distinct`).
+(define k-check-distinct (subr (maxeff checks spin) (k-binders k-map int int int) unit)
+  (lambda (kinds m inner a b)
+    (if (k-any-distinct? kinds)
+        (k-check-distinct-each kinds kinds m (k-regions-in inner) a b)
+        #u)))
+(define k-any-distinct? (subr (maxeff (read @globals) (read @t) spin) (k-binders) bool)
+  (lambda (ks)
+    (and (not (null? ks)) (or (k-distinct-var? (extract (car ks) 1)) (k-any-distinct? (cdr ks))))))
+(define k-check-distinct-each
+  (subr (maxeff checks spin) (k-binders k-binders k-map k-regions int int) unit)
+  (lambda (ks all m mentioned a b)
+    (if (null? ks)
+        #u
+        (let ((v (extract (car ks) 1)))
+          (begin
+            (if (k-distinct-var? v)
+                (let ((p (k-subst-region (r-var v) m)))
+                  (if (k-region=? p (r-var v))
+                      #u
+                      (begin (k-distinct-from-binders v p all m a b)
+                             (k-distinct-from-mentioned v p mentioned all a b))))
+                #u)
+            (k-check-distinct-each (cdr ks) all m mentioned a b))))))
+(define k-distinct-from-binders
+  (subr (maxeff checks spin) (int k-region k-binders k-map int int) unit)
+  (lambda (v p ws m a b)
+    (if (null? ws)
+        #u
+        (let* ((w (extract (car ws) 1)) (q (k-subst-region (r-var w) m)))
+          (begin
+            (cond ((or (= w v) (k-region=? q (r-var w)) (k-regions-distinct? p q)) #u)
+                  ((k-region=? p q)
+                   (k-fail (k-cat5 (k-quote-dvar v) " is distinct, and is given " (k-region-show p)
+                                   ", as " (string-append (k-quote-dvar w) " is"))
+                           a b))
+                  (else
+                   (k-fail (k-cat5 (k-quote-dvar v) " is distinct, and " (k-region-show p)
+                                   " may be "
+                                   (k-cat3 (k-region-show q) ", given for " (k-quote-dvar w)))
+                           a b)))
+            (k-distinct-from-binders v p (cdr ws) m a b))))))
+(define k-distinct-from-mentioned
+  (subr (maxeff checks spin) (int k-region k-regions k-binders int int) unit)
+  (lambda (v p rs own a b)
+    (cond ((null? rs) #u)
+          ((or (k-own-region? (car rs) own)
+               (tagcase (car rs) (r-frozen (x f) #t) (else y #f))
+               (k-regions-distinct? p (car rs)))
+           (k-distinct-from-mentioned v p (cdr rs) own a b))
+          (else
+           (k-fail (k-cat3 (k-quote-dvar v) " is distinct, and "
+                           (string-append (k-region-show p)
+                                          " may be a region the procedure's type mentions"))
+                   a b)))))
+(define k-own-region? (subr (maxeff (read @globals) spin) (k-region k-binders) bool)
+  (lambda (r own)
+    (and (not (null? own))
+         (or (k-region=? r (r-var (extract (car own) 1))) (k-own-region? r (cdr own))))))
 (define k-check-bounds (subr (maxeff checks spin) (k-binders k-map int int) unit)
   (lambda (kinds m a b)
     (if (null? kinds)

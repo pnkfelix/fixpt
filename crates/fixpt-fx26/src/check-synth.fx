@@ -168,6 +168,8 @@
 (define k-binding-depth (with check-binders k-binding-depth))
 (define k-certified-has? (with check-binders k-certified-has?))
 (define k-check-bounds (with check-binders k-check-bounds))
+(define k-check-distinct (with check-binders k-check-distinct))
+(define k-regions-distinct? (with check-binders k-regions-distinct?))
 (define k-check-finite-sizes (with check-infer k-check-finite-sizes))
 (define k-fin-region (with check-binders k-fin-region))
 (define k-finish (with check-infer k-finish))
@@ -315,7 +317,8 @@
 ;; `inner`, under binders `bs`, with `m` for them, each within its bound and finite if need be.
 (define k-subst-checked (subr (maxeff checks spin) (k-binders k-map int int int) int)
   (lambda (bs m inner a b)
-    (begin (k-check-bounds bs m a b) (k-check-finite-sizes bs m inner a b) (k-subst inner m))))
+    (begin (k-check-bounds bs m a b) (k-check-distinct bs m inner a b)
+           (k-check-finite-sizes bs m inner a b) (k-subst inner m))))
 ;; `inner`, under binders `bs`, projected with `ds`: an error where they do not fit, or knot.
 (define k-projected (subr (maxeff checks spin) (k-binders (listof k-desc acyclic) int int int) int)
   (lambda (bs ds inner a b)
@@ -582,12 +585,13 @@
 ;; a path reads through, or to one that may be it (a region variable may be
 ;; any region), and any transfer of control or effect not known. A path
 ;; through frozen data, or products' fields alone, is never written.
-(define k-may-alias? (subr (maxeff (read @globals) spin) (k-region k-region) bool)
+(define k-may-alias? (subr (maxeff (read @globals) (read @t) spin) (k-region k-region) bool)
   (lambda (w r)
-    (or (k-region=? w r)
-        (tagcase w (r-var (v) #t) (else y #f))
-        (tagcase r (r-var (v) #t) (else y #f)))))
-(define k-hits? (subr (maxeff (read @globals) spin) (k-region k-regions) bool)
+    (and (not (k-regions-distinct? w r))
+         (or (k-region=? w r)
+             (tagcase w (r-var (v) #t) (else y #f))
+             (tagcase r (r-var (v) #t) (else y #f))))))
+(define k-hits? (subr (maxeff (read @globals) (read @t) spin) (k-region k-regions) bool)
   (lambda (w rs)
     (and (not (null? rs)) (or (k-may-alias? w (car rs)) (k-hits? w (cdr rs))))))
 (define k-open-regions (subr (maxeff (read @globals) (alloc @t)) (k-regions) k-regions)
@@ -595,7 +599,7 @@
     (cond ((null? rs) nil)
           ((tagcase (car rs) (r-frozen (p f) #t) (else y #f)) (k-open-regions (cdr rs)))
           (else (the k-regions (cons (car rs) (k-open-regions (cdr rs))))))))
-(define k-kills? (subr (maxeff (read @globals) spin) (k-eff k-regions) bool)
+(define k-kills? (subr (maxeff (read @globals) (read @t) spin) (k-eff k-regions) bool)
   (lambda (e open)
     (and (not (null? e))
          (or (tagcase (car e)
@@ -605,7 +609,7 @@
                (else y #f))
              (k-kills? (cdr e) open)))))
 (define k-kill-each
-  (subr (maxeff (read @globals) (alloc @t) spin) (k-path-facts k-eff int) k-path-facts)
+  (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (k-path-facts k-eff int) k-path-facts)
   (lambda (fs e depth)
     (if (null? fs)
         nil

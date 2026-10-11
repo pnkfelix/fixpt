@@ -1070,6 +1070,7 @@ impl Checker {
         }
         let map = self.finish(&u, span, ft)?;
         self.check_bounds(&u.kinds, &map, span)?;
+        self.check_distinct(&u.kinds, &map, inner, span)?;
         self.check_finite_sizes(&u.kinds, &map, inner, span)?;
         let inst = self.subst(inner, &map);
         Ok((inst, done))
@@ -1129,6 +1130,7 @@ impl Checker {
         self.default_regions(&mut u);
         let map = self.finish(&u, span, t)?;
         self.check_bounds(&u.kinds, &map, span)?;
+        self.check_distinct(&u.kinds, &map, inner, span)?;
         self.check_finite_sizes(&u.kinds, &map, inner, span)?;
         let inst = self.subst(inner, &map);
         self.no_knot(inst, span)?;
@@ -1238,6 +1240,60 @@ impl Checker {
 
     /// Each bounded region binder, as solved, won't outlive its bound, as
     /// solved; or an error saying which would.
+    /// Whether regions `p` and `q` are known not to overlap: one is a
+    /// `distinct` region (a binder so marked, in whose scope we are, or a
+    /// `letregion`'s fresh one), or both are different constants, the heap,
+    /// or different globals. Else they may be one
+    /// (`docs/research/region-anti-aliasing.md`, (C)).
+    pub(crate) fn regions_distinct(&self, p: Region, q: Region) -> bool {
+        if p == q {
+            return false;
+        }
+        let distinct_var = |r: Region| matches!(r, Region::Var(v) if self.arena.is_distinct(v));
+        let constant = |r: Region| matches!(r, Region::Const(_) | Region::Heap | Region::Global(_));
+        distinct_var(p) || distinct_var(q) || (constant(p) && constant(q))
+    }
+
+    /// Each `distinct` region binder of `kinds`, instantiated by `map`, given
+    /// a region known not to overlap any other binder's, nor any region the
+    /// type `inner` mentions besides its binders: Lucassen's rule
+    /// (MIT/LCS/TR-408 §3.6.3), where it is asked for.
+    pub(crate) fn check_distinct(&self, kinds: &[(DVar, Kind)], map: &HashMap<DVar, D>, inner: TyId, span: fixpt_read::Span) -> R<()> {
+        if !kinds.iter().any(|(v, _)| self.arena.is_distinct(*v)) {
+            return Ok(());
+        }
+        let given = |v: DVar| match map.get(&v) {
+            Some(D::Region(r)) => Some(*r),
+            _ => None,
+        };
+        let mut mentioned = HashSet::new();
+        self.regions_in(inner, &mut mentioned);
+        let own: HashSet<Region> = kinds.iter().map(|(v, _)| Region::Var(*v)).collect();
+        let name = |v: DVar| self.interner.name(self.arena.dvar_name(v));
+        for (v, _) in kinds.iter().filter(|(v, _)| self.arena.is_distinct(*v)) {
+            let Some(p) = given(*v) else { continue };
+            for (w, _) in kinds.iter().filter(|(w, _)| w != v) {
+                if let Some(q) = given(*w)
+                    && !self.regions_distinct(p, q)
+                {
+                    let said = if p == q {
+                        format!("`{}` is distinct, and is given {}, as `{}` is", name(*v), self.show_region(p), name(*w))
+                    } else {
+                        format!("`{}` is distinct, and {} may be {}, given for `{}`", name(*v), self.show_region(p), self.show_region(q), name(*w))
+                    };
+                    return Err(FxError::at(span, said));
+                }
+            }
+            if mentioned.iter().any(|q| !own.contains(q) && !q.is_frozen() && !self.regions_distinct(p, *q)) {
+                return Err(FxError::at(
+                    span,
+                    format!("`{}` is distinct, and {} may be a region the procedure's type mentions", name(*v), self.show_region(p)),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn check_bounds(&self, kinds: &[(DVar, Kind)], map: &HashMap<DVar, D>, span: fixpt_read::Span) -> R<()> {
         let region = |r: Region| match r {
             Region::Var(w) => match map.get(&w) {

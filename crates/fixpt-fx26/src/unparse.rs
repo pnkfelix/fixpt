@@ -278,9 +278,10 @@ impl Checker {
                     .iter()
                     .map(|(v, k)| {
                         let k = self.show_kind(*k);
+                        let d = if self.arena.is_distinct(*v) { " distinct" } else { "" };
                         match self.arena.bound(*v) {
-                            Some(b) => format!("({} {k} {})", self.dvar_text(*v, 'b'), self.show_region(b)),
-                            None => format!("({} {k})", self.dvar_text(*v, 'b')),
+                            Some(b) => format!("({} {k} {}{d})", self.dvar_text(*v, 'b'), self.show_region(b)),
+                            None => format!("({} {k}{d})", self.dvar_text(*v, 'b')),
                         }
                     })
                     .collect();
