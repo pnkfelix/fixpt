@@ -626,7 +626,7 @@ impl Checker {
             let span = self.arena.span_of(e);
             let v = match &args[..] {
                 [a] => match self.arena.exp_at(*a) {
-                    Exp::Var(v) => self.env.iter().rposition(|(n, _)| n == v).map(|i| (*v, i)),
+                    Exp::Var(v) => self.env.rpos(*v).map(|i| (*v, i)),
                     _ => None,
                 },
                 _ => None,
@@ -646,7 +646,7 @@ impl Checker {
             let span = self.arena.span_of(e);
             let v = match &args[..] {
                 [a] => match self.arena.exp_at(*a) {
-                    Exp::Var(v) => self.env.iter().rposition(|(n, _)| n == v).map(|i| (*v, i)),
+                    Exp::Var(v) => self.env.rpos(*v).map(|i| (*v, i)),
                     _ => None,
                 },
                 _ => None,
@@ -781,7 +781,7 @@ impl Checker {
             if self.recursive.contains(&b) {
                 return true;
             }
-            let at = self.env.iter().rposition(|(n, _)| *n == b.0);
+            let at = self.env.rpos(b.0);
             if at.is_some_and(|i| self.known.contains(&(b.0, i))) || self.is_standard(b.0) {
                 return false;
             }

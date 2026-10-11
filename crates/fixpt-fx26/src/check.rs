@@ -151,7 +151,7 @@ pub struct Checker {
     pub arena: Arena,
     pub interner: Interner,
     /// Value variables in scope, innermost last.
-    pub env: Vec<(Sym, TyId)>,
+    pub env: Bindings,
     /// Description names in scope while parsing, innermost last.
     pub(crate) dscope: Vec<(Sym, DScope)>,
     /// The region and place variables bound around what is being parsed,
@@ -576,7 +576,7 @@ impl Checker {
         let mut c = Checker {
             arena,
             interner,
-            env: Vec::new(),
+            env: Bindings::default(),
             dscope: Vec::new(),
             lifetimes: Vec::new(),
             freezing: Vec::new(),
@@ -799,7 +799,7 @@ impl Checker {
         let hidden = self.hidden.map(|(e, _)| e);
         // A shared load's hidden global is seen everywhere, loaded files too.
         let seen = |i: usize| !hidden.is_some_and(|(a, b)| (a..b).contains(&i)) || self.shared_globals.contains(&s);
-        let i = (0..self.env.len()).rev().find(|i| self.env[*i].0 == s && seen(*i))?;
+        let i = self.env.positions(s).find(|i| seen(*i))?;
         if self.broken.get(&s).is_some_and(|(b, _)| *b == i) {
             return None;
         }
@@ -1033,7 +1033,7 @@ impl Checker {
     pub(crate) fn path_of(&self, e: ExpId) -> Option<(Sym, usize, Vec<crate::ast::Step>)> {
         use crate::ast::Step;
         match self.arena.exp_at(e) {
-            Exp::Var(v) => Some((*v, self.env.iter().rposition(|(n, _)| n == v)?, Vec::new())),
+            Exp::Var(v) => Some((*v, self.env.rpos(*v)?, Vec::new())),
             Exp::App { fun, args } if args.len() == 1 => {
                 let step = match self.standard_ref(*fun).map(|op| self.interner.name(op)) {
                     Some("car") => Step::Car,
@@ -1200,7 +1200,7 @@ impl Checker {
 
     /// The type of the global `s` as defined now, broken or not.
     pub fn global_type(&self, s: Sym) -> Option<TyId> {
-        self.env.iter().rposition(|(n, _)| *n == s).filter(|i| *i >= self.standard_len).map(|i| self.env[i].1)
+        self.env.rpos(s).filter(|i| *i >= self.standard_len).map(|i| self.env[i].1)
     }
 
     /// Where the environment is now, to go back to (`rollback`).
@@ -1217,14 +1217,14 @@ impl Checker {
     /// The global `s`, as defined now, broken: a use of it is an error
     /// saying `why`, until it is defined again.
     pub fn break_global(&mut self, s: Sym, why: String) {
-        if let Some(i) = self.env.iter().rposition(|(n, _)| *n == s) {
+        if let Some(i) = self.env.rpos(s) {
             self.broken.insert(s, (i, why));
         }
     }
 
     /// Whether the global `s` is broken, and why.
     pub fn broken_why(&self, s: Sym) -> Option<&str> {
-        let i = self.env.iter().rposition(|(n, _)| *n == s)?;
+        let i = self.env.rpos(s)?;
         self.broken.get(&s).filter(|(b, _)| *b == i).map(|(_, w)| w.as_str())
     }
 
@@ -1410,7 +1410,7 @@ impl Checker {
 
     /// Whether `s`, where it is used, is the initial environment's binding.
     pub(crate) fn is_standard(&self, s: Sym) -> bool {
-        self.env.iter().rposition(|(n, _)| *n == s).is_some_and(|i| i < self.standard_len)
+        self.env.rpos(s).is_some_and(|i| i < self.standard_len)
     }
 
     /// The standard operations a rule checks at each call, by their name
@@ -1434,7 +1434,7 @@ impl Checker {
 
     /// The standard binding of `s`'s type, whatever binds `s` since.
     pub(crate) fn standard_type(&self, s: Sym) -> Option<TyId> {
-        self.env[..self.standard_len].iter().rposition(|(n, _)| *n == s).map(|i| self.env[i].1)
+        self.env.positions(s).find(|i| *i < self.standard_len).map(|i| self.env[i].1)
     }
 
     /// Notes `e`, a `(with #%fx n)` where nothing shadows `n`, as the plain
@@ -1817,7 +1817,7 @@ impl Checker {
         if self.recursive.contains(&(s, t)) {
             e.0.insert(Atom::Spin);
         }
-        if self.globals_effects && self.env.iter().rposition(|(n, _)| *n == s).is_some_and(|i| self.global_slots.contains(&i)) {
+        if self.globals_effects && self.env.rpos(s).is_some_and(|i| self.global_slots.contains(&i)) {
             e.0.insert(Atom::Read(Region::Global(s)));
         }
         e
@@ -2421,7 +2421,7 @@ impl Checker {
     /// Argument `i` of `args`, a variable, as the binding it is.
     fn arg_var(&self, args: &[ExpId], i: usize) -> Option<(Sym, usize)> {
         match self.arena.exp_at(*args.get(i)?) {
-            Exp::Var(v) => Some((*v, self.env.iter().rposition(|(n, _)| n == v)?)),
+            Exp::Var(v) => Some((*v, self.env.rpos(*v)?)),
             _ => None,
         }
     }
@@ -2460,7 +2460,7 @@ impl Checker {
         if !matches!(self.arena.exp_at(n), Exp::Int(_) | Exp::Var(_)) {
             return None;
         }
-        Some((*v, self.env.iter().rposition(|(x, _)| x == v)?, self.nat_size(n)?))
+        Some((*v, self.env.rpos(*v)?, self.nat_size(n)?))
     }
 
     /// `t` with its frozen regions made finite: what data `acyclic?` has
@@ -4046,5 +4046,60 @@ impl BinderEnv {
                 })
                 .collect(),
         )
+    }
+}
+
+/// Value variables in scope, innermost last: read as a slice, each name's
+/// positions kept beside it, so that a name's innermost binding is found
+/// without a scan of them all (`TODO.md` §43; every lookup of a global
+/// walked every binding). Changed only by these methods, which keep both.
+#[derive(Clone, Debug, Default)]
+pub struct Bindings {
+    list: Vec<(Sym, TyId)>,
+    at: HashMap<Sym, Vec<usize>>,
+}
+
+impl Bindings {
+    pub fn push(&mut self, b: (Sym, TyId)) {
+        self.at.entry(b.0).or_default().push(self.list.len());
+        self.list.push(b);
+    }
+    pub fn extend(&mut self, bs: impl IntoIterator<Item = (Sym, TyId)>) {
+        for b in bs {
+            self.push(b);
+        }
+    }
+    pub fn extend_from_slice(&mut self, bs: &[(Sym, TyId)]) {
+        self.extend(bs.iter().copied());
+    }
+    pub fn truncate(&mut self, n: usize) {
+        while self.list.len() > n {
+            let (s, _) = self.list.pop().expect("longer than n");
+            if let std::collections::hash_map::Entry::Occupied(mut e) = self.at.entry(s) {
+                e.get_mut().pop();
+                if e.get().is_empty() {
+                    e.remove();
+                }
+            }
+        }
+    }
+    /// Binding `i`'s type now `t`.
+    pub fn set_ty(&mut self, i: usize, t: TyId) {
+        self.list[i].1 = t;
+    }
+    /// Where `s` is bound, innermost first.
+    pub fn positions(&self, s: Sym) -> impl Iterator<Item = usize> + '_ {
+        self.at.get(&s).into_iter().flat_map(|v| v.iter().rev().copied())
+    }
+    /// Where `s`'s innermost binding is.
+    pub fn rpos(&self, s: Sym) -> Option<usize> {
+        self.at.get(&s).and_then(|v| v.last().copied())
+    }
+}
+
+impl std::ops::Deref for Bindings {
+    type Target = [(Sym, TyId)];
+    fn deref(&self) -> &[(Sym, TyId)] {
+        &self.list
     }
 }

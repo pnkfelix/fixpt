@@ -1123,7 +1123,12 @@ native `fx check` by nothing measurable. To do: time natively (with
 `k-on-path?` and `k-length` before changing any; tables that grow from
 empty might start at the size they reach. Natively the top FX-26 word of the
 whole front-end compile was the assembler's `arm-times-pow2`: fixed
-(`docs/performance.md`, "`fx arm64` halved").
+(`docs/performance.md`, "`fx arm64` halved"). And the Rust checker's
+`lookup` (with `is_standard` and a dozen like it) scanned every binding in
+scope for a name: an index now (`Bindings`), `check` on the front end
+568 → 520 ms. Its `mask` walks each masked expression's free names
+(`free_into`, about a fifth of the Rust `check` now): a node's free names
+could be kept as it is checked, if `with`'s facts allow.
 
 ## 44. One simplifier: propagation, folding and reduction together (the user's, 2026-10-07)
 

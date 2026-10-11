@@ -653,7 +653,7 @@ impl Checker {
                         let reads = self.globals_read_by(e);
                         let found = self.with_latent(declared, &reads).expect("a subr");
                         let at = self.env.len() - 1;
-                        self.env[at].1 = found;
+                        self.env.set_ty(at, found);
                         self.recursive.truncate(rdepth);
                         self.note_termination(&[(name, found, e)]);
                         let again = self.check_declared(name, found, e).map_err(|err| {
@@ -933,7 +933,7 @@ impl Checker {
 
     /// The type a name is bound to, if it is a value.
     pub fn type_of_name(&self, name: Sym) -> Option<TyId> {
-        self.env.iter().rev().find(|(n, _)| *n == name).map(|(_, t)| *t)
+        self.env.rpos(name).map(|i| self.env[i].1)
     }
 
     /// The type a name abbreviates, if `define-type` bound it.
