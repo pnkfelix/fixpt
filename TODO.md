@@ -2153,3 +2153,16 @@ shown in messages, principal types, inference's interaction with the
 choice; both checkers must choose alike. The compilers need nothing for
 `length`, whose arms are one list walk at run time; arms with different
 code would.
+
+## 80. Real literals as `f32` where one is expected (kayak's request, 2026-10-11)
+
+Since `fb86975` an integer literal checks as any fixed-width integer type
+it is in the range of. kayak also asked for a real literal checked
+against `f32` to be one (the user's, 2026-10-11: left as a TODO for now).
+Unlike the integers, this changes the value's representation: a real
+literal is a boxed `f64`, an `f32` an immediate (subtag 9), so the
+checker must tell every compiler (the lowering, the cellular and register
+compilers in Rust and in FX-26, the evaluator) to make an `f32` constant
+there, through a fact on the literal. To settle: a literal that does not
+round-trip through `f32` exactly (`0.1`): accepted, rounded, as Rust and C
+do, or refused.
