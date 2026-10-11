@@ -156,7 +156,7 @@
 (define k-subst-checked (subr (maxeff checks spin) (k-binders k-map int int int) int)
   (lambda (bs m inner a b)
     (begin (k-check-bounds bs m a b) (k-check-distinct bs m inner a b)
-           (k-check-finite-sizes bs m inner a b) (k-subst inner m))))
+           (k-check-finite-sizes bs m inner a b) (k-spin-for-cyclic inner (k-subst inner m) m))))
 ;; `inner`, under binders `bs`, projected with `ds`: an error where they do not fit, or knot.
 (define k-projected (subr (maxeff checks spin) (k-binders (listof k-desc acyclic) int int int) int)
   (lambda (bs ds inner a b)

@@ -558,3 +558,14 @@ than a word unless its name says so.
    kept call-out vector, constant kinds, `string-append`/`char-in?` in
    place, `array-length` by `prim1`); `fixpt-heap`'s ban on `unsafe` kept
    (`string-append` shifts words rather than viewing them as `u32`s).
+8. **kayak's two reports (2026-10-11).** Shift counts: a fixed-width
+   shift takes any count, a bignum's too, modulo its width, as
+   `docs/fx26.md` already said and the FX-26 evaluator did;
+   `arithmetic-shift` by a count past a fixnum is 0 or -1 rightwards and
+   fails leftwards (unless of 0) rather than trying to allocate it.
+   Self-application through a type binder (F17): marked at instantiation,
+   not by making calls through any type variable `spin` (which would mark
+   every `map`); only procedures in positive positions it can rebuild
+   (procedure, result, `poly`, product, sum), since a pair's or a
+   reference's type may be written and cannot change; that the rest is
+   closed is argued, not proved.

@@ -29,7 +29,8 @@
        (check-kinds-types (load-module "fx26:check-kinds-types.fx"))
        (check-unions-types (load-module "fx26:check-unions-types.fx"))
        (check-holds-types (load-module "fx26:check-holds-types.fx"))
-       (check-expect-types (load-module "fx26:check-expect-types.fx")))
+       (check-expect-types (load-module "fx26:check-expect-types.fx"))
+       (check-calls-types (load-module "fx26:check-calls-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-types (select check-types-types check-types-sig))
            (check-resolve (select check-resolve-types check-resolve-sig))
@@ -48,7 +49,8 @@
            (check-subst (select check-subst-types check-subst-sig))
            (check-sub-env (select check-sub-env-types check-sub-env-sig))
            (check-read-helpers (select check-read-helpers-types check-read-helpers-sig))
-           (check-print-parts (select check-print-parts-types check-print-parts-sig)))
+           (check-print-parts (select check-print-parts-types check-print-parts-sig))
+           (check-calls (select check-calls-types check-calls-sig)))
     (module
 (hide (include check-infer-types) (include check-types-types) (include eager-reader-types)
       (include parser-types) (include check-resolve-types) (include check-env-types)
@@ -60,6 +62,7 @@
       (include check-print-parts) (include check-print) (include check-read-helpers)
       (include check-kinds) (include check-unions) (include check-subtype) (include check-holds)
       (include check-expect) (include check-subst))
+(define k-spin-for-cyclic (with check-calls k-spin-for-cyclic))
 (define k-data-places-solved (with check-data k-data-places-solved))
 (define k-part-find (with check-sub-env k-part-find))
 
@@ -628,7 +631,7 @@
           (begin (k-check-bounds kinds m a b)
                  (k-check-distinct kinds m inner a b)
                  (k-check-finite-sizes kinds m inner a b)
-                 (let ((inst (k-subst inner m)))
+                 (let ((inst (k-spin-for-cyclic inner (k-subst inner m) m)))
                    (begin (k-no-knot inst a b) (k-drop-bounds solved inst)))))))))
 ;; Instantiate a polymorphic value used, unapplied, where `expected` is
 ;; wanted. A list of any elements (`nil`, `no-pair`) is the empty list, so

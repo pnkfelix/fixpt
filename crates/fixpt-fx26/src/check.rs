@@ -1563,6 +1563,7 @@ impl Checker {
                 self.check_distinct(&binders, &map, inner, span)?;
                 self.check_finite_sizes(&binders, &map, inner, span)?;
                 let result = self.subst(inner, &map);
+                let result = self.spin_for_cyclic(inner, result, &map);
                 self.no_knot(result, span)?;
                 let eff = self.mask(e, &eff, result);
                 Ok((result, eff))
@@ -2669,6 +2670,89 @@ impl Checker {
             }
             _ => {}
         }
+    }
+
+    /// A polymorphic value of type `inner`, instantiated by `map` as `t`:
+    /// if a type it was given is cyclic (a procedure of it could be given
+    /// itself, [`Checker::cyclic`]) and the value is given a procedure whose
+    /// type mentions that binder, its code may call that procedure on what
+    /// it is given, a self-application its body could not see (kayak's
+    /// report: `((proj app T) w w)`, `app` calling its `f` on its `x`, `T` a
+    /// procedure type taking a `T`, looped typed `pure`). So each procedure
+    /// it gives says `spin`: the procedure itself, what it returns, those in
+    /// products and sums. `cons`, given no procedure, is untouched. In both
+    /// checkers (`k-spin-for-cyclic`).
+    pub(crate) fn spin_for_cyclic(&mut self, inner: TyId, t: TyId, map: &HashMap<DVar, D>) -> TyId {
+        let cyclic: Vec<DVar> = map.iter().filter(|(_, d)| self.d_types(d).into_iter().any(|x| self.cyclic(x))).map(|(v, _)| *v).collect();
+        if cyclic.is_empty() || !self.calls_through(inner, &cyclic, true, &mut HashSet::new()) {
+            return t;
+        }
+        self.spin_positive(t, &mut HashMap::new())
+    }
+
+    /// Whether `t` has, below its top (`top`), a procedure type that
+    /// mentions one of `vars`: what code of type `t` could call.
+    fn calls_through(&self, t: TyId, vars: &[DVar], top: bool, seen: &mut HashSet<TyId>) -> bool {
+        let t = self.arena.resolve(t);
+        if !seen.insert(t) {
+            return false;
+        }
+        let kids: Vec<TyId> = match self.arena.get(t) {
+            Ty::Subr { params, result, .. } => {
+                if !top && vars.iter().any(|v| self.mentions_var(t, *v)) {
+                    return true;
+                }
+                params.iter().copied().chain([*result]).collect()
+            }
+            Ty::Composable { arg, answer, .. } => {
+                if vars.iter().any(|v| self.mentions_var(t, *v)) {
+                    return true;
+                }
+                vec![*arg, *answer]
+            }
+            Ty::Poly { body, .. } => vec![*body],
+            Ty::Ref(a, _) | Ty::Array(a, _) | Ty::ICell(a, _) | Ty::MarkKey(a, _) => vec![*a],
+            Ty::Pair(a, b, _, _) => vec![*a, *b],
+            Ty::Bloblet { fields, .. } => fields.clone(),
+            Ty::Product(ps) | Ty::Sum(ps) => ps.iter().map(|(_, x)| *x).collect(),
+            Ty::Union(ms) => ms.clone(),
+            Ty::NList { elem, .. } => vec![*elem],
+            Ty::PromptTag { answer, payload, .. } => vec![*answer, *payload],
+            Ty::Named { which, args } => [self.generatives[*which as usize].rep].into_iter().chain(args.iter().flat_map(|d| self.d_types(d))).collect(),
+            Ty::App { args, .. } => args.iter().flat_map(|d| self.d_types(d)).collect(),
+            _ => vec![],
+        };
+        kids.into_iter().any(|k| self.calls_through(k, vars, false, seen))
+    }
+
+    /// `t` with `spin` in the latent effect of each procedure it gives:
+    /// itself, what it returns, those in products and sums (not in what
+    /// may be written, a pair's or a reference's). `done`: each node made
+    /// so far, as a slot linked once made, so a cycle is made a cycle.
+    fn spin_positive(&mut self, t: TyId, done: &mut HashMap<TyId, TyId>) -> TyId {
+        let t = self.arena.resolve(t);
+        if let Some(x) = done.get(&t) {
+            return *x;
+        }
+        if !matches!(self.arena.get(t), Ty::Subr { .. } | Ty::Poly { .. } | Ty::Product(_) | Ty::Sum(_)) {
+            return t;
+        }
+        let slot = self.arena.ty(Ty::Link(None));
+        done.insert(t, slot);
+        let mut spin = |c: &mut Self, x: TyId| c.spin_positive(x, done);
+        let made = match self.arena.get(t).clone() {
+            Ty::Subr { conv, mut effect, params, result } => {
+                effect.0.insert(Atom::Spin);
+                Ty::Subr { conv, effect, params, result: spin(self, result) }
+            }
+            Ty::Poly { binders, body } => Ty::Poly { binders, body: spin(self, body) },
+            Ty::Product(ps) => Ty::Product(ps.into_iter().map(|(l, x)| (l, spin(self, x))).collect()),
+            Ty::Sum(ps) => Ty::Sum(ps.into_iter().map(|(l, x)| (l, spin(self, x))).collect()),
+            _ => unreachable!("only those made"),
+        };
+        let made = self.arena.ty(made);
+        self.arena.set_link(slot, made);
+        slot
     }
 
     /// `Ok`, unless `t` keeps, in storage at some region `r`, a procedure

@@ -1077,6 +1077,7 @@ impl Checker {
         self.check_distinct(&u.kinds, &map, inner, span)?;
         self.check_finite_sizes(&u.kinds, &map, inner, span)?;
         let inst = self.subst(inner, &map);
+        let inst = self.spin_for_cyclic(inner, inst, &map);
         Ok((inst, done))
     }
 
@@ -1137,6 +1138,7 @@ impl Checker {
         self.check_distinct(&u.kinds, &map, inner, span)?;
         self.check_finite_sizes(&u.kinds, &map, inner, span)?;
         let inst = self.subst(inner, &map);
+        let inst = self.spin_for_cyclic(inner, inst, &map);
         self.no_knot(inst, span)?;
         Ok(inst)
     }

@@ -7,6 +7,8 @@
 ;; anything loop. `path`: the nodes on the way down, newest first, each with
 ;; whether it was reached through a parameter.
 (define-type k-cpath (listof (pairof int bool @t) acyclic))
+;; Types made with `spin` (`k-spin-positive`): each node, what it was made.
+(define-type k-spun (listof (pairof int int @t) acyclic))
 
 ;;; ------------------------------------------------------------ signatures
 
@@ -18,6 +20,7 @@
 (define-type kxs (select check-types-types kxs))
 ;; The types it names, from the files that define them.
 (define-type k-eff (select check-types-types k-eff))
+(define-type k-map (select check-types-types k-map))
 (define-type check-calls-sig
   (moduleof (val k-under (subr (read @globals) (kx) kx))
             (val k-callee-name
@@ -27,4 +30,8 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (kx int kxs)
                        bool))
+            (val k-spin-for-cyclic
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (int int k-map)
+                       int))
             (val k-has-comefrom? (subr (maxeff (read @globals) (read @t)) (k-eff) bool))))

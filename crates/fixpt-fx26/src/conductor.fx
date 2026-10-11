@@ -123,7 +123,7 @@
          (check-calls
           ((load-input "fx26:check-calls.fx")
            check-types check-resolve check-holds check-env
-           check-expect))
+           check-expect check-effects check-modules check-read-helpers))
          ;; The checker, dependent subroutines: parameters selected from.
          (check-dependent
           ((load-input "fx26:check-dependent.fx")
@@ -151,7 +151,7 @@
            check-env check-bounds check-print check-data
            check-read-descs check-kinds check-unions check-subtype
            check-holds check-expect check-subst check-sub-env
-           check-read-helpers check-print-parts))
+           check-read-helpers check-print-parts check-calls))
          ;; The checker, closing: what a definition leaves solved.
          (check-close
           ((load-input "fx26:check-close.fx")

@@ -41,6 +41,7 @@ T5 fails here, and here is why", with F2 flagged for a closer look.
 | F14  | fixed (2026-10-07): native code (`direct.rs`) bound a global's procedure, called or used as a value, to its code as compiled, and dropped a `global-guard` or `value-guard` the cell met then; kept past a `define*` of that global (a closure kept from before, recursing), it ran the old one where every other machine runs the new. Each now tests the cell when it runs. Test `native/redefined.fx`                                                      |
 | F15  | fixed (2026-10-07): `cwcc` bound to another name, `(let ((callcc cwcc)) …)`, was called past F3's rule, which looked for the name `cwcc` at the call: a `pure` procedure looped forever. `cwcc` and the `certify-*` operations are now named only as a call's operator (past `proj` and `the`), so every call of them meets its rule. Both checkers. Tests `control/cwcc-alias.fx`, `second_class_operations_are_named_only_to_call`                          |
 | F16  | fixed (2026-10-07): the same for `certify-nat`: `(let ((cn certify-nat)) (cn -3))` was a `nat`. The same fix. Test `sizes/certify-nat-alias.fx`                                                                                                                                                                                                                                                                                                               |
+| F17  | fixed (2026-10-11, kayak's report): a polymorphic procedure calling a procedure it is given on a value it is given, instantiated at a type whose cycle runs through a parameter, gave it itself with no `spin`. Each procedure such an instantiation gives now says `spin`. Both checkers. Tests `terminate/poly-self-application*.fx`                                                                                                                        |
 
 **Re-verification of F1–F7, A2, A3 against d83face** (fresh offline build,
 2026-09-27). F1: the name-shadowing probe (`known.fx`) is now rejected
@@ -574,6 +575,42 @@ of `apply` keeps F11's copy: the lowering's `apply` copies its list (a
 walks two elements), and the compilers refuse `apply` as a value. Tests
 `control/cwcc-alias.fx`, `sizes/certify-nat-alias.fx`,
 `second_class_operations_are_named_only_to_call`.
+
+## F17 — self-application through a type binder, unseen by the termination check
+
+Reported 2026-10-11 by the kayak team. A call through a type whose cycle
+runs through a procedure's parameter (`(define-type T (subr pure (T)
+int))`) says `spin` (`k-may-spin?`, `Checker::cyclic`): a procedure of it
+could be given itself. But a polymorphic procedure's body calls through a
+type binder, not through `T`, and saw no cycle:
+
+```
+(define-type T (subr pure (T) int))
+(define omega (subr pure () int)
+  (lambda ()
+    (let ((app (the (poly ((t type)) (subr pure ((subr pure (t) int) t) int))
+                    (plambda ((t type)) (lambda ((f (subr pure (t) int)) (x t)) (f x))))))
+      (let ((w (the T (lambda (x) ((proj app T) x x)))))
+        ((proj app T) w w)))))
+```
+
+checked `pure` in both checkers and looped. `app` calls `f` on `x`; at
+`T`, `((proj app T) w w)` is `(w w)`.
+
+**Fix.** Where a polymorphic value is instantiated (a `proj`, a call's
+binders solved, a value used where a type is expected), if a type given a
+binder is cyclic, and the value's type has, below its top, a procedure
+type mentioning that binder (what its code could call on what it is
+given), each procedure it gives says `spin`: the procedure itself, what it
+returns, those in products and sums, a cycle made a cycle
+(`Checker::spin_for_cyclic`, `k-spin-for-cyclic`). A value given no
+procedure, `cons` or an identity, is untouched, at a cyclic type as at any
+other. Procedures it gives in what may be written (a pair, a reference)
+are not marked: their types cannot change there. Getting from such a
+procedure back to itself needs a call of the instantiation (now `spin`), a
+call through the cyclic type (already `spin`), or the store (`no_knot`).
+That is argued, not proved. Tests `terminate/poly-self-application.fx` and
+`terminate/poly-self-application-spin.fx`.
 
 ## Assumptions the proof makes
 

@@ -12,20 +12,27 @@
        (check-subst-types (load-module "fx26:check-subst-types.fx"))
        (check-holds-types (load-module "fx26:check-holds-types.fx"))
        (check-env-types (load-module "fx26:check-env-types.fx"))
-       (check-expect-types (load-module "fx26:check-expect-types.fx")))
+       (check-expect-types (load-module "fx26:check-expect-types.fx"))
+       (check-effects-types (load-module "fx26:check-effects-types.fx"))
+       (check-modules-types (load-module "fx26:check-modules-types.fx"))
+       (check-read-helpers-types (load-module "fx26:check-read-helpers-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-types (select check-types-types check-types-sig))
            (check-resolve (select check-resolve-types check-resolve-sig))
            (check-holds (select check-holds-types check-holds-sig))
            (check-env (select check-env-types check-env-sig))
-           (check-expect (select check-expect-types check-expect-sig)))
+           (check-expect (select check-expect-types check-expect-sig))
+           (check-effects (select check-effects-types check-effects-sig))
+           (check-modules (select check-modules-types check-modules-sig))
+           (check-read-helpers (select check-read-helpers-types check-read-helpers-sig)))
     (module
 (hide (include check-calls-types) (include check-types-types) (include check-resolve-types)
       (include check-subst-types))
 ;; The types it uses of the files before it.
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-resolve) (include check-holds) (include check-env)
-      (include check-expect))
+      (include check-expect) (include check-effects) (include check-modules)
+      (include check-read-helpers))
 
 (define k-on-path? (subr kreads (k-cpath int) bool)
   (lambda (path t) (and (not (null? path)) (or (= (car (car path)) t) (k-on-path? (cdr path) t)))))
@@ -76,6 +83,99 @@
            (or (k-cyclic-from? (extract (car ps) 2) #f path) (k-cyclic-parts? (cdr ps) path))))))
 (define k-cyclic? (subr (maxeff kstate spin) (int) bool)
   (lambda (t) (k-cyclic-from? t #f nil)))
+;; Whether `t` mentions any of `vs`.
+(define k-mentions-any? (subr (maxeff kstate spin) (int k-ids) bool)
+  (lambda (t vs)
+    (and (not (null? vs)) (or (k-mentions-var? t (car vs)) (k-mentions-any? t (cdr vs))))))
+;; Whether `t` has, below its top (`top`), a procedure type that mentions
+;; one of `vs`: what code of type `t` could call. `seen`, the nodes walked.
+(define-rec
+  (k-calls-through? (subr (maxeff kstate spin) (int k-ids bool (ref k-ids @t)) bool)
+    (lambda (t vs top seen)
+      (let ((t (k-resolve t)))
+        (and (not (k-has-id? (get seen) t))
+             (begin
+               (set seen (cons t (get seen)))
+               (tagcase (k-get t)
+                 (ty-subr (e ps r cv)
+                   (or (and (not top) (k-mentions-any? t vs))
+                       (k-calls-through-list? (k-ty-kids t) vs seen)))
+                 (ty-comp (x a e r)
+                   (or (k-mentions-any? t vs) (k-calls-through-list? (k-ty-kids t) vs seen)))
+                 (ty-named (g ds)
+                   (k-calls-through-list?
+                    (the k-ids (cons (extract (k-gen-of g) 4) (k-ds-types ds))) vs seen))
+                 (ty-app (f ds) (k-calls-through-list? (k-ds-types ds) vs seen))
+                 (ty-lam (bs x) #f)
+                 (ty-module (abs ds xs) #f)
+                 (else y (k-calls-through-list? (k-ty-kids t) vs seen))))))))
+  (k-calls-through-list? (subr (maxeff kstate spin) (k-ids k-ids (ref k-ids @t)) bool)
+    (lambda (ts vs seen)
+      (and (not (null? ts))
+           (or (k-calls-through? (car ts) vs #f seen) (k-calls-through-list? (cdr ts) vs seen))))))
+;; `t` with `spin` in the latent effect of each procedure it gives: itself,
+;; what it returns, those in products and sums (not in what may be written,
+;; a pair's or a reference's). `done`: each node made so far, as a slot
+;; linked once made, so a cycle is made a cycle.
+(define-rec
+  (k-spin-positive (subr (maxeff kstate spin) (int (ref k-spun @t)) int)
+    (lambda (t done)
+      (let* ((t (k-resolve t)) (old (k-spun-of (get done) t)))
+        (cond ((>= old 0) old)
+              ((not (tagcase (k-get t)
+                      (ty-subr (e ps r cv) #t) (ty-poly (bs x) #t)
+                      (ty-product (ps) #t) (ty-sum (ps) #t) (else y #f)))
+               t)
+              (else
+               (let ((slot (k-slot)))
+                 (begin
+                   (set done (cons (cons t slot) (get done)))
+                   (k-set-link slot (k-ty-new (k-spin-node t done)))
+                   slot)))))))
+  ;; Node `t`, a procedure, poly, product or sum, made with `spin`.
+  (k-spin-node (subr (maxeff kstate spin) (int (ref k-spun @t)) k-ty)
+    (lambda (t done)
+      (tagcase (k-get t)
+        (ty-subr (e ps r cv) (ty-subr (k-insert (a-spin) e) ps (k-spin-positive r done) cv))
+        (ty-poly (bs x) (ty-poly bs (k-spin-positive x done)))
+        (ty-product (ps) (ty-product (k-spin-parts ps done)))
+        (ty-sum (ps) (ty-sum (k-spin-parts ps done)))
+        (else y (k-get t)))))
+  (k-spin-parts (subr (maxeff kstate spin) (k-parts (ref k-spun @t)) k-parts)
+    (lambda (ps done)
+      (if (null? ps)
+          nil
+          (let* ((x (k-spin-positive (extract (car ps) 2) done))
+                 (rest (k-spin-parts (cdr ps) done)))
+            (cons (product (1 (extract (car ps) 1)) (2 x)) rest))))))
+;; What `t` is made into, in `done`, or -1.
+(define k-spun-of (subr kreads (k-spun int) int)
+  (lambda (done t)
+    (cond ((null? done) -1)
+          ((= (car (car done)) t) (cdr (car done)))
+          (else (k-spun-of (cdr done) t)))))
+;; The binders of `m` given a cyclic type (`k-cyclic?`).
+(define k-cyclic-binders (subr (maxeff kstate spin) (k-map) k-ids)
+  (lambda (m)
+    (cond ((null? m) nil)
+          ((k-any-cyclic? (k-d-types (cdr (car m))))
+           (the k-ids (cons (car (car m)) (k-cyclic-binders (cdr m)))))
+          (else (k-cyclic-binders (cdr m))))))
+(define k-any-cyclic? (subr (maxeff kstate spin) (k-ids) bool)
+  (lambda (ts) (and (not (null? ts)) (or (k-cyclic? (car ts)) (k-any-cyclic? (cdr ts))))))
+;; A polymorphic value of type `inner`, instantiated by `m` as `t`: if a
+;; type it was given is cyclic (a procedure of it could be given itself) and
+;; the value is given a procedure whose type mentions that binder, its code
+;; may call that procedure on what it is given, a self-application its body
+;; could not see. So each procedure it gives says `spin`
+;; (`docs/research/soundness-findings.md`). In both checkers
+;; (`Checker::spin_for_cyclic`).
+(define k-spin-for-cyclic (subr (maxeff kstate spin) (int int k-map) int)
+  (lambda (inner t m)
+    (let ((vs (k-cyclic-binders m)))
+      (if (or (null? vs) (not (k-calls-through? inner vs #t (the (ref k-ids @t) (new nil)))))
+          t
+          (k-spin-positive t (the (ref k-spun @t) (new nil)))))))
 ;; `f` under any projections and ascriptions.
 (define k-under (subr (read @globals) (kx) kx)
   (lambda (f)
