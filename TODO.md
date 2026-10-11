@@ -2109,3 +2109,24 @@ owner<<3 + offset.
 **Not planned:** refs into fields or pairs (a locative would need another
 encoding), the direct-address variant with owner hints, segment tables, a
 boxed fallback for owners of 128 MiB or more.
+
+## 78. The best REPL in one short command (the user's, 2026-10-10)
+
+The fastest FX-26 REPL today takes `cargo run --release --bin fixpt --
+--dialect fx26 --fx26-run cellular --cellular-machine registers
+--calling-convention native repl`: long, and which `--cellular-machine`
+is wanted (`registers`, `native`, `native-compiled`, `fx-compiled`) is not
+clear from the help, which says what each is, not which to use. Most of
+those choices are oracles and comparisons (the Rust machine, the cells
+run by the arm64 machine, words compiled by Rust or by `native.fx`), kept
+for testing; a user wants the fastest, or the most checked. To decide:
+- **Better defaults**: `--dialect fx26` alone gives the fastest machine
+  (cellular, register code, the native convention), the others only when
+  asked; if a default must stay for the tests, the tests say so.
+- **One option for the common choices**: e.g. `--fx26-machine fast|lower|
+  evaluate|rust` naming the few combinations that matter, the separate
+  flags kept for the rest; or a preset (`--fast`).
+- **The help says which to use**: the combinations grouped by purpose
+  (what to run, what is an oracle), the default marked.
+- Perhaps `fixpt fx26` (or `fixpt repl fx26`) as the short form of
+  `--dialect fx26 repl`.

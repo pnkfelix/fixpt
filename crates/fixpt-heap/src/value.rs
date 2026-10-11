@@ -96,8 +96,17 @@ impl Value {
     }
 
     // ---------------------------------------------------------------- fixnums
+    /// The fixnum `n`, which must fit in 61 bits (`try_fixnum` asks).
     #[inline]
-    pub const fn fixnum(n: i64) -> Value {
+    #[track_caller]
+    pub fn fixnum(n: i64) -> Value {
+        debug_assert!(n >= FIXNUM_MIN && n <= FIXNUM_MAX, "{n} is no fixnum's integer");
+        Value((n as u64) << 3)
+    }
+    /// `n`'s low 61 bits as a fixnum, the rest dropped: for what wants a
+    /// fixnum of any integer, as a hash does, never for an integer's value.
+    #[inline]
+    pub const fn fixnum_wrapping(n: i64) -> Value {
         Value((n as u64) << 3)
     }
     #[inline]
@@ -105,13 +114,15 @@ impl Value {
         self.tag() == TAG_FIXNUM
     }
     #[inline]
-    pub const fn as_fixnum(self) -> i64 {
+    #[track_caller]
+    pub fn as_fixnum(self) -> i64 {
+        debug_assert!(self.is_fixnum(), "as_fixnum of {self:?} ({:#x}), no fixnum", self.0);
         (self.0 as i64) >> 3
     }
     /// `None` when `n` does not fit in 61 bits, so callers can promote to a bignum.
     #[inline]
     pub const fn try_fixnum(n: i64) -> Option<Value> {
-        if n >= FIXNUM_MIN && n <= FIXNUM_MAX { Some(Value::fixnum(n)) } else { None }
+        if n >= FIXNUM_MIN && n <= FIXNUM_MAX { Some(Value::fixnum_wrapping(n)) } else { None }
     }
 
     // ------------------------------------------------------------- references
@@ -138,7 +149,9 @@ impl Value {
     /// bloblet's suffix. (The heap finds its word as this less where its
     /// memory starts, `Heap::ix`.)
     #[inline]
-    pub const fn index(self) -> usize {
+    #[track_caller]
+    pub fn index(self) -> usize {
+        debug_assert!(matches!(self.tag(), TAG_PAIR | TAG_BLOBLET | TAG_FORWARD), "index of {self:?} ({:#x}), no pair, bloblet or forwarding pointer", self.0);
         (self.0 >> 3) as usize
     }
     /// True for anything the collector must trace.
@@ -163,12 +176,16 @@ impl Value {
     }
     /// A suffix ref's owner: the word index of its suffix's start.
     #[inline]
-    pub const fn owner(self) -> usize {
+    #[track_caller]
+    pub fn owner(self) -> usize {
+        debug_assert!(self.is_suffix_ref(), "owner of {self:?} ({:#x}), no suffix ref", self.0);
         ((self.0 >> 3) & SUFFIX_OWNER_MASK) as usize
     }
     /// A suffix ref's byte offset into its owner's suffix.
     #[inline]
-    pub const fn offset(self) -> usize {
+    #[track_caller]
+    pub fn offset(self) -> usize {
+        debug_assert!(self.is_suffix_ref(), "offset of {self:?} ({:#x}), no suffix ref", self.0);
         (self.0 >> SUFFIX_OFFSET_SHIFT) as usize
     }
 
@@ -248,7 +265,9 @@ impl Value {
         self.is_imm(IMM_CHAR)
     }
     #[inline]
+    #[track_caller]
     pub fn as_char(self) -> char {
+        debug_assert!(self.is_char(), "as_char of {self:?}");
         char::from_u32((self.0 >> IMM_PAYLOAD_SHIFT) as u32).expect("valid char payload")
     }
 
@@ -263,7 +282,9 @@ impl Value {
         self.is_imm(IMM_F32)
     }
     #[inline]
+    #[track_caller]
     pub fn as_f32(self) -> f32 {
+        debug_assert!(self.is_f32(), "as_f32 of {self:?}");
         f32::from_bits((self.0 >> 32) as u32)
     }
 

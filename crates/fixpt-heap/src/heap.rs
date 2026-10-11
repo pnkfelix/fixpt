@@ -91,7 +91,7 @@ fn read_head(mem: &[u64], at: usize) -> Head {
 static NEXT_SERIAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 /// What a weak reference to an object that died becomes.
-pub const WEAK_DEAD: Value = Value::fixnum(-1);
+pub const WEAK_DEAD: Value = Value::fixnum_wrapping(-1);
 
 /// After a collection has copied everything live out of `from` (the
 /// nursery, if `minor`): each of `weak` that pointed there moved on to its
@@ -1458,7 +1458,7 @@ impl Heap {
         let s = self.make_string(name);
         let sym = self.alloc(ObjType::Symbol, 3, Value::fixnum(0));
         self.obj_set(sym, 0, s);
-        self.obj_set(sym, 1, Value::fixnum(fnv1a(name) as i64 & i64::MAX));
+        self.obj_set(sym, 1, Value::fixnum_wrapping(fnv1a(name) as i64 & i64::MAX));
         self.obj_set(sym, 2, Value::fixnum(-1));
         sym
     }
@@ -2323,7 +2323,7 @@ fn map_refs(words: &mut [u64], f: impl Fn(Value) -> Value) {
 /// The hash `intern` keeps in symbol `name` (`%symbol-hash`), as a
 /// fixnum: what a compiler may know of it from the name alone.
 pub fn symbol_hash_of(name: &str) -> i64 {
-    Value::fixnum(fnv1a(name) as i64 & i64::MAX).as_fixnum()
+    Value::fixnum_wrapping(fnv1a(name) as i64 & i64::MAX).as_fixnum()
 }
 
 /// `%string-hash` of a string of `text`: FNV-1a of its code points, shifted

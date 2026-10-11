@@ -48,8 +48,8 @@ pub fn same_code(h: &Heap, a: Value, b: Value, pairs: &mut HashMap<u64, u64>, wh
         let v = h.bloblet_slot(w, i);
         let word = ka == Some(fixpt_heap::layout::kind("cellular-code"));
         let register = ka == Some(fixpt_heap::layout::kind("register-code"));
-        let native = (word && v.as_fixnum() >= fixpt_heap::layout::cellular::PRIMITIVES as i64 || register)
-            && i == fixpt_heap::layout::cellular::WORD_ENTRY;
+        let native = i == fixpt_heap::layout::cellular::WORD_ENTRY
+            && (word && v.as_fixnum() >= fixpt_heap::layout::cellular::PRIMITIVES as i64 || register);
         if native { Value::fixnum(0) } else { v }
     };
     (2..=na).all(|i| same_code(h, entry(a, i), entry(b, i), pairs, why))

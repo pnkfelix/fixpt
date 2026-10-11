@@ -2069,7 +2069,9 @@ impl Compiling<'_> {
                 "prim" | "cellular" | "lambda" => {
                     // A closure's code: this bloblet's field.
                     let mut code_field = None;
-                    let c = match (op, ROUTINES.get(k(o(0))).map(|r| r.0)) {
+                    // A `lambda`'s operand is its code word, no routine's number.
+                    let routine = if op == "lambda" { None } else { ROUTINES.get(k(o(0))).map(|r| r.0) };
+                    let c = match (op, routine) {
                         ("lambda", _) => {
                             let q = self.proc_of(o(0)).map_err(|e| format!("`{name}` makes a closure of {e}"))?;
                             code_field = Some(self.field(p, Field::Code(q)));
