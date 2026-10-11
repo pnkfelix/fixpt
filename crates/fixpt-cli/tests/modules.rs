@@ -42,7 +42,7 @@ fn runs_here(mode: &[&str]) -> bool {
     if fixpt_native::AVAILABLE {
         return true;
     }
-    let cellular = |m: &&str| fixpt_native::CELLULAR_AVAILABLE && matches!(*m, "native" | "native-compiled");
+    let cellular = |m: &&str| fixpt_native::CELLULAR_AVAILABLE && matches!(*m, "native" | "native-compiled" | "fx-compiled");
     let machine = mode.iter().skip_while(|a| **a != "--cellular-machine").nth(1);
     mode.windows(2).all(|w| w != ["--calling-convention", "native"]) && machine.is_none_or(cellular)
 }

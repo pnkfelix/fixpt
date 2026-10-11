@@ -60,6 +60,9 @@ pub const ARM64_TYPES: &str = include_str!("arm64-types.fx");
 /// The types of `convention.fx`: a module file of no state (`TODO.md` §97).
 pub const CONVENTION_TYPES: &str = include_str!("convention-types.fx");
 
+/// The types of `x86_64.fx`: a module file of no state (`TODO.md` §68).
+pub const X86_64_TYPES: &str = include_str!("x86_64-types.fx");
+
 /// The types of `native.fx`: a module file of no state (`TODO.md` §68).
 pub const NATIVE_TYPES: &str = include_str!("native-types.fx");
 
@@ -478,6 +481,22 @@ pub const ARM64: &str = include_str!("arm64.fx");
 /// (`TODO.md` §97): a `load-input` file, its module of no state.
 pub const CONVENTION: &str = include_str!("convention.fx");
 
+/// The types of `native-x64.fx`, and the signature of what it is given of
+/// the x86_64 machine: a module file of no state (`TODO.md` §68).
+pub const NATIVE_X64_TYPES: &str = include_str!("native-x64-types.fx");
+
+/// Words compiled to x86_64 machine code, in FX-26: the x86_64 machine's
+/// `assemble_word`, over [`X86_64`], as [`NATIVE`] is for arm64.
+pub const NATIVE_X64: &str = include_str!("native-x64.fx");
+
+/// The x86_64 encoder written in FX-26, the Rust one its oracle, as
+/// [`ARM64`] is for arm64.
+pub const X86_64: &str = include_str!("x86_64.fx");
+
+/// What the compiler to x86_64 written in FX-26 knows of the x86_64
+/// machine, generated from it, as [`NATIVE_LAYOUT`] is for arm64.
+pub const NATIVE_X64_LAYOUT: &str = include_str!("native-x64-layout.fx");
+
 /// What the compiler to machine code written in FX-26 knows of the
 /// hand-encoded machine, generated from it: a module file, which the
 /// conductor loads.
@@ -511,7 +530,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 145] = [
+pub const FRONT_END_MODULES: [(&str, &str); 150] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("eager-reader-states.fx", EAGER_READER_STATES),
     ("syn.fx", SYN),
@@ -543,6 +562,8 @@ pub const FRONT_END_MODULES: [(&str, &str); 145] = [
     ("native-types.fx", NATIVE_TYPES),
     ("arm64-types.fx", ARM64_TYPES),
     ("convention-types.fx", CONVENTION_TYPES),
+    ("x86_64-types.fx", X86_64_TYPES),
+    ("native-x64-types.fx", NATIVE_X64_TYPES),
     ("layout-types.fx", LAYOUT_TYPES),
     ("native-layout-types.fx", NATIVE_LAYOUT_TYPES),
     ("check-resolve-types.fx", CHECK_RESOLVE_TYPES),
@@ -569,6 +590,9 @@ pub const FRONT_END_MODULES: [(&str, &str); 145] = [
     ("native-layout.fx", NATIVE_LAYOUT),
     ("arm64.fx", ARM64),
     ("convention.fx", CONVENTION),
+    ("x86_64.fx", X86_64),
+    ("native-x64-layout.fx", NATIVE_X64_LAYOUT),
+    ("native-x64.fx", NATIVE_X64),
     ("native.fx", NATIVE),
     ("compile-twins-types.fx", COMPILE_TWINS_TYPES),
     ("compile-inline-types.fx", COMPILE_INLINE_TYPES),

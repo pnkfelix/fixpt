@@ -641,3 +641,29 @@ eventually be in FX26 itself".
 9. **`fast` on x86_64 is `fx-cells-rsjit-cellcc`**, the fastest there on
    every program `fixpt bench` times (fib 254 → 27 ms against the Rust
    interpreter, tak 87 → 10), and the front end runs on it too.
+
+## x86_64 in FX-26: `x86_64.fx` and `native-x64.fx` (2026-10-11)
+
+1. **The cellular compiler first**, as for arm64 (`native.fx`, step 11c):
+   `native-x64.fx` makes exactly the bytes `cellular::x64::assemble_word`
+   does, over `x86_64.fx`, which makes exactly `x86_64.rs`'s; each tested
+   against its Rust oracle (`tests/x86_64.rs`: 15 061 encodings;
+   `tests/native_x64.rs`: every word of the front end). Register code and
+   the native convention in FX-26 wait on TODO §81, as for arm64.
+2. **A file beside `native.fx`, not one over both instruction sets**, for
+   the reason the Rust machine is (above, item 2); and since `native.fx`
+   is upstream's and still moving. The two share `layout.fx` and the
+   generator of their layouts (`fx26_module_of`).
+3. **Both compilers in the front end**, the conductor applying each, and
+   Rust choosing by the machine it runs on (`syn::assemble_reachable_by_fx26`):
+   the front end cannot know which machine runs it, and one more module
+   costs it little beside the 135 it has.
+4. **A complete layout for x86_64** (`native-x64-layout.fx`, generated
+   with the arm64 one's shared part), not the arm64 one plus registers:
+   both define `n-ip` and the rest, and a module cannot include both.
+5. **`place_code` takes bytes** (`PlaceCode`, starts in bytes): arm64's
+   words become bytes where FX-26's ints are read (`syn.rs`), so
+   `place_word` serves both machines.
+6. **Lists of bytes, not ints of instructions**: each encoder gives its
+   instruction's bytes as a list (`x86-bytes`), made with `cons` at the
+   encoders' region; `(list …)` would make one at a region of its own.

@@ -227,13 +227,15 @@ pub fn cell_words_reachable(heap: &fixpt_heap::Heap, word: Value) -> Vec<Value> 
 }
 
 /// Every word made of cells that `word` reaches
-/// ([`cell_words_reachable`]), compiled to machine code by the compiler
-/// written in FX-26 (`native.fx`'s `native-assemble`) and given to `place`
-/// with the heap: its instructions, and where each cell's start.
+/// ([`cell_words_reachable`]), compiled to machine code for the machine
+/// this runs on by the compiler written in FX-26 (`native.fx`'s
+/// `native-assemble` for arm64, `native-x64.fx`'s `native-assemble-x64`
+/// for x86_64) and given to `place` with the heap: its bytes, and where
+/// each cell's code starts in them.
 pub fn assemble_reachable_by_fx26(
     s: &mut Session,
     word: Handle,
-    place: &mut dyn FnMut(&mut fixpt_heap::Heap, Value, &[u32], &[i64]) -> Result<(), String>,
+    place: &mut dyn FnMut(&mut fixpt_heap::Heap, Value, &[u8], &[i64]) -> Result<(), String>,
 ) -> Result<(), String> {
     // Found where nothing can collect, then rooted: running the compiler
     // may collect.
@@ -247,8 +249,13 @@ pub fn assemble_reachable_by_fx26(
     // The code reaches the machine's common trap and exit through the
     // state, so where it goes does not change it.
     let far = s.make(|_| Value::fixnum(0));
+    let x64 = cfg!(target_arch = "x86_64");
     for w in words {
-        let assembled = s.call_global(&format!("{READER_PREFIX}native-assemble"), &[w, far, far]);
+        let assembled = if x64 {
+            s.call_global(&format!("{READER_PREFIX}native-assemble-x64"), &[w])
+        } else {
+            s.call_global(&format!("{READER_PREFIX}native-assemble"), &[w, far, far])
+        };
         let assembled = assembled.map_err(|e| e.to_string())?;
         let (code, starts) = s.view(|v| {
             let r = v.get(assembled);
@@ -258,7 +265,12 @@ pub fn assemble_reachable_by_fx26(
             };
             (ints(r.field(2)), ints(r.field(3)))
         });
-        let code: Vec<u32> = code.into_iter().map(|x| x as u32).collect();
+        // arm64's instructions are words of 4 bytes, little-endian.
+        let (code, starts): (Vec<u8>, Vec<i64>) = if x64 {
+            (code.into_iter().map(|x| x as u8).collect(), starts)
+        } else {
+            (code.into_iter().flat_map(|x| (x as u32).to_le_bytes()).collect(), starts.into_iter().map(|s| if s < 0 { s } else { 4 * s }).collect())
+        };
         let mut placed = Ok(());
         s.make(|m| {
             let w = m.get(w);

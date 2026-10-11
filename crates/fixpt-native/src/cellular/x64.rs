@@ -905,3 +905,21 @@ pub fn assemble_word(heap: &Heap, word: Value) -> Result<(Vec<u8>, Vec<i64>), St
     let at: Vec<i64> = (0..cells.len()).map(|i| if starts[i] { a.labels[labels[i].0].expect("bound") as i64 } else { -1 }).collect();
     Ok((a.finish(), at))
 }
+
+/// What the compiler written in FX-26 needs to know of this machine to make
+/// the code [`assemble_word`] does: `src/native-x64-layout.fx` in
+/// `fixpt-fx26`, as `super::fx26_module` is `native-layout.fx` for the
+/// arm64 one. Its registers by their hardware numbers, and the state's
+/// `#f` and `#t`, which this machine reads where the arm64 one moves them.
+pub fn fx26_module() -> String {
+    let registers = [
+        ("n-ip", IP), ("n-cur", CUR), ("n-dsp", DSP), ("n-rsp", RSP), ("n-st", ST), ("n-table", TABLE), ("n-fp", FP),
+        ("n-clo", CLO), ("n-w", W), ("n-x10", X10), ("n-x11", X11), ("n-x13", X13), ("n-x14", X14), ("n-x15", X15),
+        ("n-x16", X16),
+    ];
+    super::fx26_module_of(
+        "fixpt_native::cellular::x64::fx26_module",
+        &registers.map(|(n, r)| (n, r as i64)),
+        &[("n-st-fal", offset_of!(State, fal)), ("n-st-tru", offset_of!(State, tru))],
+    )
+}

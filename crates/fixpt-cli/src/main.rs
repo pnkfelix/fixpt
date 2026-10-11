@@ -274,7 +274,7 @@ fn run(args: &[String]) -> i32 {
     // but the hand-encoded one and the words Rust compiles into it, which
     // run on x86_64 too (`fixpt_native::cellular::x64`).
     if !fixpt_native::AVAILABLE {
-        let cellular = |m: &str| fixpt_native::CELLULAR_AVAILABLE && matches!(m, "native" | "native-compiled");
+        let cellular = |m: &str| fixpt_native::CELLULAR_AVAILABLE && matches!(m, "native" | "native-compiled" | "fx-compiled");
         let machine = flags.cellular_machine.as_deref().filter(|m| *m != "rust" && !cellular(m)).map(|m| ("--cellular-machine", m));
         let convention = flags.calling_convention.as_deref().filter(|c| *c == "native").map(|c| ("--calling-convention", c));
         if let Some((flag, value)) = machine.or(convention)
