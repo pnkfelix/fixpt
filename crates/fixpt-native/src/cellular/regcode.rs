@@ -37,12 +37,22 @@ impl Asm {
     /// `y`, called in Rust (`pure_call`) with no safepoint, REG1…REG8 and
     /// the link kept on the machine stack around it; its failure a trap.
     fn pure_call(&mut self, p: usize, y: Reg) {
+        self.pure_call3(p, y, None);
+    }
+    /// The same of `RESULT`, `y` and `z` (`prim3imm`).
+    fn pure_call3(&mut self, p: usize, y: Reg, z: Option<Reg>) {
         self.e(mov(X14, y));
+        if let Some(z) = z {
+            self.e(mov(X15, z));
+        }
         for r in [1, 3, 5, 7] {
             self.e(stp_pre(r, r + 1, SP, -16));
         }
         self.e(stp_pre(LR, 31, SP, -16));
         self.e(mov(3, X14));
+        if z.is_some() {
+            self.e(mov(4, X15));
+        }
         self.e(mov(2, RESULT));
         self.e(mov(0, ST));
         self.es(&mov_imm64(1, p as u64));
@@ -920,6 +930,20 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
                 } else {
                     a.pure_call(p, y);
                 }
+            }
+            // Of three: `RESULT`, a constant, `REGk`.
+            "prim3imm" => {
+                let p = k(o(0));
+                if !fixpt_runtime::PRIMITIVES.get(p).is_some_and(|d| fixpt_runtime::never_collects(d.name)) {
+                    return Err(format!("`{name}` of primitive {p}, which may collect"));
+                }
+                let v = o(1);
+                if v.is_fixnum() || v.raw() & 7 == 3 {
+                    a.es(&mov_imm64(X13, v.raw()));
+                } else {
+                    a.cell(X13, f(1), fields);
+                }
+                a.pure_call3(p, X13, Some(reg(k(o(2)))));
             }
             "field" => {
                 a.field_of(RESULT, RESULT, k(o(0)));

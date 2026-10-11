@@ -470,8 +470,22 @@ than a word unless its name says so.
    array's element already was), and `blobref-index` inside the general
    call-out (as `blobref-set!` already was). An index-key tag (labels in
    the owner's fields) still calls the primitive.
-4. **Left for later**: a loop over a flat array still keeps its `f64`
-   accumulator boxed in a frame slot, because `blobref-index` (three
-   operands) and a flat `tagcase`'s no-arm failure are call-outs, so the
-   procedure is no leaf. Making it one wants a three-operand in-line op
-   (`prim3imm`) and a flat `tagcase` in a leaf; recorded in TODO §77.
+4. **A new register-code op, `prim3imm p x k`** (`RESULT := p(RESULT, x,
+   REGk)`), rather than a fast path in the call-out only: a call-out
+   keeps the procedure from being a leaf, so a loop's `f64` stays boxed
+   in the frame. The constant in the middle fits `blobref-set!` and
+   `blobref-variant!` as their primitives are; `blobref-index` got a twin
+   primitive with its operands in that order (`%fx26-blobref-index`)
+   rather than a reordered original, which the lowering and the cellular
+   compilers use.
+5. **`r-prim3`'s operands simply**: `a` made and kept in its place, `b`
+   made into a fresh register, `a` reloaded; not `r_operands`' cleverer
+   orders, which the FX-26 helpers file cannot reach (it is in the
+   knot of `regcode-core.fx`, which is at its size limit).
+6. **A flat `tagcase` arm reuses the blobref's and tag's places** for its
+   ref, and a scrutinee variable is used where it is: a leaf has eight
+   registers, and the shapes sum's fast version ran out without both.
+7. **A self-call's argument that is its own parameter stays put**
+   (`r-self-temp`, both compilers): general, it changes every loop that
+   passes a parameter on unchanged; measured no slower (peval's phases
+   re-run back to back: `fx arm64` 16.6 ms, as before).

@@ -95,6 +95,14 @@ pub fn ldurh(t: Reg, n: Reg, imm: i64) -> u32 {
 pub fn ldurb(t: Reg, n: Reg, imm: i64) -> u32 {
     0x3840_0000 | simm(imm, 9) << 12 | r(n) << 5 | r(t)
 }
+/// `sturh wt, [xn, #imm]`: the low 16 bits.
+pub fn sturh(t: Reg, n: Reg, imm: i64) -> u32 {
+    0x7800_0000 | simm(imm, 9) << 12 | r(n) << 5 | r(t)
+}
+/// `sturb wt, [xn, #imm]`: the low byte.
+pub fn sturb(t: Reg, n: Reg, imm: i64) -> u32 {
+    0x3800_0000 | simm(imm, 9) << 12 | r(n) << 5 | r(t)
+}
 /// `stur wt, [xn, #imm]`: the low 32 bits.
 pub fn stur_w(t: Reg, n: Reg, imm: i64) -> u32 {
     0xB800_0000 | simm(imm, 9) << 12 | r(n) << 5 | r(t)

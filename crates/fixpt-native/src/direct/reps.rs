@@ -207,6 +207,13 @@ fn demand_step(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) -> &'s
                 use_(&mut d, k(1), y);
             }
         }
+        // Of three: `RESULT`, a constant and `REGk`; an `f64` to write at a
+        // blobref (`blobref-set!`) taken raw.
+        "prim3imm" => {
+            def(&mut d, 0);
+            use_(&mut d, 0, Demand::Other);
+            use_(&mut d, k(2), if is_f64_set(o, prim) { Demand::F64 } else { Demand::Other });
+        }
         "prim" | "lambda" | "cellular" | "invoke" | "tailinvoke" | "invokeself" => {
             let n = if matches!(op, "prim" | "lambda" | "cellular") { k(1) } else { k(0) };
             d = [Demand::None; 9];
@@ -227,6 +234,12 @@ fn is_flat_ref(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) -> &'s
     let name = || prim(o(0).as_fixnum() as usize);
     (matches!(op, "prim2" | "prim2imm") && name() == "%fx26-flatarray-ref")
         || (op == "prim2imm" && name() == "%fx26-suffix-ref-get" && o(1) == Value::fixnum(fixpt_heap::layout::FLAT_F64))
+}
+
+/// Whether `prim3imm`, operands `o`, writes an `f64` at a blobref
+/// (`blobref-set!`), which it may take raw.
+pub(super) fn is_f64_set(o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) -> &'static str) -> bool {
+    prim(o(0).as_fixnum() as usize) == "%fx26-suffix-ref-set!" && o(1) == Value::fixnum(fixpt_heap::layout::FLAT_F64)
 }
 
 /// Instruction `op`, operands `o`, on `reps`: the conversions it needs
@@ -291,6 +304,13 @@ pub(super) fn step(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) ->
                 need(reps, k(1), y);
             }
             reps[0] = if raw_ref && is_flat_ref(op, o, prim) { Rep::F64 } else { out };
+        }
+        "prim3imm" => {
+            need(reps, 0, Rep::Value);
+            if !(is_f64_set(o, prim) && reps[k(2)] == Rep::F64) {
+                need(reps, k(2), Rep::Value);
+            }
+            reps[0] = Rep::Value;
         }
         // Calls and call-outs: their operands values; the registers then
         // undefined, `RESULT` the value.

@@ -1590,6 +1590,21 @@ compiler's inlined bodies lost their blobref facts (`c-resolved-at`).
 Test: `direct.rs`'s `flat_keyed_as_the_rust_machine_gives_them`
 (`programs/native/flat-keyed.fx`, keys of one, two and four bytes).
 
+**In a leaf** (2026-10-11). Register code's `prim3imm p x k`, `RESULT :=
+p(RESULT, x, REGk)`, `x` a constant, for a primitive that never collects
+(`fixpt_heap::layout::regcode`, its check, `disasm`, the cellular
+convention's `pure_call3`, `direct.rs`, `reps`): `blobref-index` (by
+`%fx26-blobref-index`, its operands in that order), `blobref-set!` (an
+`f64` taken raw) and `blobref-variant!` (a numeric key's tag written in
+line), made by `r_prim3` / `r-prim3`. A flat `tagcase` keeps its blobref
+and tag in places (registers in a leaf), a variable's where it is, an
+arm's ref in theirs; its no-arm failure is `prim1`; so neither it nor
+those operations call out (`r_collects`, `r-bloblet-quiet?`), and a loop
+of them is a leaf. A self-call's argument that is its own parameter
+stays put (`r-self-temp`). The shapes loop: 10.5 ms natively, the sum
+allocating nothing (`docs/performance.md`, "Flat sums and blobrefs in
+line").
+
 ## 78. The best REPL in one short command (the user's, 2026-10-10)
 
 Done 2026-10-11. The fastest FX-26 machine is the default: `fixpt

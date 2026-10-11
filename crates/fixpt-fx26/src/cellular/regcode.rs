@@ -629,7 +629,11 @@ impl Compiler<'_> {
             Exp::LetRegion { .. } => true,
             Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::Convention { exp: body, .. } => self.r_collects(body, e, this, tail),
             Exp::Extract(y, _) => self.r_collects(y, e, this, false),
-            Exp::Bloblet { op: BlobletOp::Ref(_), args } => args.iter().any(|y| self.r_collects(*y, e, this, false)),
+            // A field's read; a blobref's read, write, element or variant,
+            // in line (`prim2imm`, `prim3imm`).
+            Exp::Bloblet { op: BlobletOp::Ref(_) | BlobletOp::RefGet | BlobletOp::RefSet | BlobletOp::RefIndex | BlobletOp::RefVariant, args } => {
+                args.iter().any(|y| self.r_collects(*y, e, this, false))
+            }
             Exp::TagCase { scrutinee, arms, els } => {
                 self.r_collects(scrutinee, e, this, false)
                     || arms.iter().any(|a| self.r_collects(a.body, e, this, tail))
@@ -987,20 +991,19 @@ impl Compiler<'_> {
                     BlobletOp::RefOffset => self.r_prim(g, "%suffix-ref-offset", &es, env, te)?,
                     BlobletOp::RefIndex => {
                         let Some(&k) = self.c.facts.field_index.get(&x) else { return self.decline("blobref-index") };
-                        self.r_prim(g, "%fx26-suffix-ref-index", &[es[0], es[1], Arg::V(Value::fixnum(k as i64))], env, te)?
+                        self.r_prim3(g, "%fx26-blobref-index", args[0], Value::fixnum(k as i64), args[1], env, te)?
                     }
                     BlobletOp::RefVariant => {
                         let Some(&k) = self.c.facts.field_index.get(&x) else { return self.decline("blobref-variant!") };
-                        self.r_prim(g, "%fx26-flat-variant!", &[es[0], Arg::V(Value::fixnum(k as i64)), es[1]], env, te)?
+                        self.r_prim3(g, "%fx26-flat-variant!", args[0], Value::fixnum(k as i64), args[1], env, te)?
                     }
                     // The scalar's layout, as the checker found it.
                     BlobletOp::RefGet | BlobletOp::RefSet => {
                         let Some(&k) = self.c.facts.field_index.get(&x) else { return self.decline("blobref-get") };
-                        let k = Arg::V(Value::fixnum(k as i64));
                         if op == BlobletOp::RefGet {
-                            self.r_prim(g, "%fx26-suffix-ref-get", &[es[0], k], env, te)?
+                            self.r_prim(g, "%fx26-suffix-ref-get", &[es[0], Arg::V(Value::fixnum(k as i64))], env, te)?
                         } else {
-                            self.r_prim(g, "%fx26-suffix-ref-set!", &[es[0], k, es[1]], env, te)?
+                            self.r_prim3(g, "%fx26-suffix-ref-set!", args[0], Value::fixnum(k as i64), args[1], env, te)?
                         }
                     }
                 }
@@ -2011,10 +2014,18 @@ impl Compiler<'_> {
             // Each argument kept (in a register, in a leaf); then, the
             // procedure again, each into its parameter's place, and back to
             // the start.
+            // An argument that is its parameter itself, unchanged, stays
+            // where it is: no move.
             let mut made = Vec::new();
-            for a in args {
-                self.r_exp(g, *a, env, te, false)?;
-                made.push(Self::r_keep(g, g.leaf)?);
+            for (i, a) in args.iter().enumerate() {
+                let own = if g.leaf { RLoc::Reg(i + 1) } else { RLoc::Slot(i) };
+                match self.r_var(env, *a) {
+                    Some(l) if l == own => made.push(l),
+                    _ => {
+                        self.r_exp(g, *a, env, te, false)?;
+                        made.push(Self::r_keep(g, g.leaf)?);
+                    }
+                }
             }
             let assumed = self.r_assume(cell);
             if !assumed {
@@ -2022,6 +2033,8 @@ impl Compiler<'_> {
             }
             for (i, m) in made.iter().enumerate() {
                 match m {
+                    RLoc::Reg(r) if *r == i + 1 => {}
+                    RLoc::Slot(s) if *s == i => {}
                     RLoc::Reg(r) => g.op("movereg", &[Gen::n(*r), Gen::n(i + 1)]),
                     RLoc::Slot(s) => {
                         g.op("stack", &[Gen::n(*s)]);
@@ -2587,6 +2600,37 @@ impl Compiler<'_> {
         Some(())
     }
 
+    /// RESULT := runtime primitive `name`, one that never collects, of
+    /// `a`'s value, constant `x` and `b`'s (`prim3imm`): `a` kept in its
+    /// place (a register in a leaf, else a frame slot) while `b` is made
+    /// into a register of its own.
+    #[allow(clippy::too_many_arguments)]
+    fn r_prim3(&mut self, g: &mut Gen, name: &str, a: ExpId, x: Value, b: ExpId, env: &mut Vec<(Sym, RLoc)>, te: &mut Env) -> O<()> {
+        let p = fixpt_engine::cellular::runtime_primitive(name)? as i64;
+        let (regs, slots) = (g.next_reg, g.next_slot);
+        self.r_exp(g, a, env, te, false)?;
+        let at = Self::r_keep(g, g.leaf)?;
+        self.r_exp(g, b, env, te, false)?;
+        let k = g.reg()?;
+        g.op("setreg", &[Gen::n(k)]);
+        match at {
+            RLoc::Reg(r) => g.op("reg", &[Gen::n(r)]),
+            RLoc::Slot(s) => g.op("stack", &[Gen::n(s)]),
+            _ => unreachable!(),
+        }
+        g.op("prim3imm", &[Value::fixnum(p), x, Gen::n(k)]);
+        (g.next_reg, g.next_slot) = (regs, slots);
+        Some(())
+    }
+
+    /// RESULT := runtime primitive `name`, one that never collects, of
+    /// RESULT and constant `v` (`prim2imm`).
+    fn r_imm_prim(&mut self, g: &mut Gen, name: &str, v: Value) -> O<()> {
+        let p = fixpt_engine::cellular::runtime_primitive(name)? as i64;
+        g.op("prim2imm", &[Value::fixnum(p), v]);
+        Some(())
+    }
+
     /// Runtime primitive `name` on `args`: a call-out; or, if it never
     /// collects and its operands are a value and a constant, in line
     /// (`prim2imm`), as a blobref's step or read is.
@@ -2935,9 +2979,9 @@ impl Compiler<'_> {
     }
 
     /// A `tagcase` on a blobref to a flat sum (`TODO.md` §77), of layout
-    /// code `k`: the blobref and its tag, a label, kept in frame slots; each
-    /// arm's name a blobref to its variant, `k >> 8` bytes along; no arm
-    /// for the tag a failure at run time. Call-outs, so never in a leaf.
+    /// code `k`: the blobref and its tag, a label, kept in places (registers
+    /// in a leaf); each arm's name a blobref to its variant, `k >> 8` bytes
+    /// along; no arm for the tag a failure at run time. No call-outs.
     #[allow(clippy::too_many_arguments)]
     fn r_flat_tagcase(
         &mut self,
@@ -2950,31 +2994,45 @@ impl Compiler<'_> {
         te: &mut Env,
         tail: bool,
     ) -> O<()> {
-        if g.leaf {
-            return self.decline("a flat sum's tagcase in a leaf");
-        }
         let (depth, tdepth, regs, slots) = (env.len(), te.len(), g.next_reg, g.next_slot);
-        self.r_exp(g, scrutinee, env, te, false)?;
-        let sc = g.slot();
-        g.op("setstk", &[Gen::n(sc)]);
-        self.r_prim(g, "%fx26-flat-tag", &[Arg::Slot(sc), Arg::V(Value::fixnum(k as i64))], env, te)?;
-        let tag = g.slot();
-        g.op("setstk", &[Gen::n(tag)]);
+        let place = |g: &mut Gen| Self::r_keep(g, g.leaf);
+        let get = |g: &mut Gen, l: RLoc| match l {
+            RLoc::Reg(r) => g.op("reg", &[Gen::n(r)]),
+            RLoc::Slot(s) => g.op("stack", &[Gen::n(s)]),
+            _ => unreachable!(),
+        };
+        // A variable in a register or the frame stays there.
+        let sc = match self.r_var(env, scrutinee) {
+            Some(l @ (RLoc::Reg(_) | RLoc::Slot(_))) => {
+                get(g, l);
+                l
+            }
+            _ => {
+                self.r_exp(g, scrutinee, env, te, false)?;
+                place(g)?
+            }
+        };
+        self.r_imm_prim(g, "%fx26-flat-tag", Value::fixnum(k as i64))?;
+        let tag = place(g)?;
         let end = g.label();
         let eq = Value::fixnum(routine("eq") as i64);
         for arm in arms {
             let crate::ast::ArmBind::Value(x) = &arm.bind else { return self.decline("an arm on a flat sum that takes it apart") };
             let next = g.label();
-            g.op("stack", &[Gen::n(tag)]);
+            get(g, tag);
             let name = self.c.interner.name(arm.tag);
             let label = if k & 8 != 0 { Value::fixnum(name.parse().ok()?) } else { self.heap.intern(name) };
             g.op("op2imm", &[eq, label]);
             g.items.push(RItem::Branch(true, next));
             let (d, td, r, s) = (env.len(), te.len(), g.next_reg, g.next_slot);
-            self.r_prim(g, "%suffix-ref+", &[Arg::Slot(sc), Arg::V(Value::fixnum((k >> 8) as i64))], env, te)?;
-            let at = g.slot();
-            g.op("setstk", &[Gen::n(at)]);
-            env.push((*x, RLoc::Slot(at)));
+            get(g, sc);
+            self.r_imm_prim(g, "%suffix-ref+", Value::fixnum((k >> 8) as i64))?;
+            // The arm's ref where the blobref and its tag were: neither is
+            // used past here on this path (the next arm's test is reached
+            // only where this one's failed), and a leaf's registers are few.
+            (g.next_reg, g.next_slot) = (regs, slots);
+            let at = place(g)?;
+            env.push((*x, at));
             te.push((*x, Loc::Slot(usize::MAX)));
             self.r_exp(g, arm.body, env, te, tail)?;
             env.truncate(d);
@@ -2988,12 +3046,14 @@ impl Compiler<'_> {
         }
         match els {
             Some((y, body)) => {
-                env.push((y, RLoc::Slot(sc)));
+                env.push((y, sc));
                 te.push((y, Loc::Slot(usize::MAX)));
                 self.r_exp(g, body, env, te, tail)?;
             }
             None => {
-                self.r_prim(g, "%fx26-flat-no-arm", &[Arg::Slot(tag)], env, te)?;
+                get(g, tag);
+                let p = fixpt_engine::cellular::runtime_primitive("%fx26-flat-no-arm")? as i64;
+                g.op("prim1", &[Value::fixnum(p)]);
                 g.done(tail);
             }
         }

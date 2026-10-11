@@ -298,7 +298,7 @@ fn register_lines(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>
                 let pname = crate::PRIMITIVES.get(ops[0].as_fixnum() as usize).map_or("?", |d| d.name);
                 vec![pname.to_string(), ops[1].as_fixnum().to_string()]
             }
-            "prim1" | "prim2" | "prim2imm" => {
+            "prim1" | "prim2" | "prim2imm" | "prim3imm" => {
                 let pname = crate::PRIMITIVES.get(ops[0].as_fixnum() as usize).map_or("?", |d| d.name);
                 std::iter::once(pname.to_string()).chain(ops[1..].iter().map(|v| short(heap, *v))).collect()
             }

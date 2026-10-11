@@ -56,6 +56,7 @@
 (define-type rarg (select regcode-types rarg))
 (define-type rargs (select regcode-types rargs))
 (define-type rconsts (select regcode-types rconsts))
+(define-type rloc (select regcode-types rloc))
 (define-type renv (select regcode-types renv))
 ;; The knot's `r-exp` and `r-prim`, as `r-bloblet` is given them.
 (define-type r-exper
@@ -120,6 +121,11 @@
                                spin)
                        (rgen symbol int exps int int renv cenv bool r-exper r-primer)
                        unit))
+            (val r-self-temp
+                 (subr (maxeff (alloc @k) (goto @y) (read @globals) (read @k) (read @t) (write @k)
+                               spin)
+                       (rgen exp int renv cenv r-exper)
+                       rloc))
             (val r-prim-imm
                  (subr (maxeff (alloc @k) (goto @y) (read @globals) (read @k) (read @t) (write @k)
                                spin)

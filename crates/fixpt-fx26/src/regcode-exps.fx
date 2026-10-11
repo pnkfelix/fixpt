@@ -361,8 +361,8 @@
         #u
         (begin
           (tagcase (car made)
-            (rl-reg (r) (r-opnn g rop-movereg r (+ i 1)))
-            (rl-slot (s) (r-slot-move g s i))
+            (rl-reg (r) (if (= r (+ i 1)) #u (r-opnn g rop-movereg r (+ i 1))))
+            (rl-slot (s) (if (= s i) #u (r-slot-move g s i)))
             (else y (r-decline)))
           (r-self-moves g (cdr made) (+ i 1))))))
 ;; A frame slot as a call-out operand; anything else, declined.
@@ -553,6 +553,15 @@
                  (else y #f)))))
       (else y #t))))
 
+;; Whether bloblet form `op` itself never calls out: a field's read; a
+;; blobref's read, write, element or variant, in line (`prim2imm`,
+;; `prim3imm`).
+(define r-bloblet-quiet? (subr pure (string) bool)
+  (lambda (op)
+    (case op
+      (("bloblet-ref" "blobref-get" "blobref-set!" "blobref-index" "blobref-variant!") #t)
+      (else #f))))
+
 (define-rec
   ;; Whether evaluating `x` may call or call out, and so collect: a
   ;; conversion calls out.
@@ -592,7 +601,7 @@
         (e-convention (cnv body a b) (r-collects body e this tail))
         (e-extract (p l a b) (r-collects p e this #f))
         (e-bloblet (op i args a b)
-          (if (string=? (symbol->string op) "bloblet-ref") (r-collects-all args e this) #t))
+          (if (r-bloblet-quiet? (symbol->string op)) (r-collects-all args e this) #t))
         (e-tagcase (s arms els a b)
           (or (r-collects s e this #f)
               (or (r-collects-arms arms e this tail) (r-collects-else els e this tail))))

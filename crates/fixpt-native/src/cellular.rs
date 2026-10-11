@@ -1133,10 +1133,11 @@ pub(crate) struct PureOut {
 }
 
 /// Register code's call of primitive `p`, one that never collects
-/// (`fixpt_runtime::never_collects`), on `x`, and `y` if it takes two: no
+/// (`fixpt_runtime::never_collects`), on `x`, and `y` and `z` if it takes
+/// two or three (`prim3imm`): no
 /// safepoint, so the machine's registers need not be where a collection
 /// would find them. A failure's message is kept for the trap to report.
-pub(crate) extern "C" fn pure_call(st: *mut State, p: u64, x: u64, y: u64) -> PureOut {
+pub(crate) extern "C" fn pure_call(st: *mut State, p: u64, x: u64, y: u64, z: u64) -> PureOut {
     // SAFETY: `st` is the state the machine runs with; its `rt`, when not
     // 0, the runtime `run_in_runtime` holds exclusively.
     let st = unsafe { &mut *st };
@@ -1151,8 +1152,8 @@ pub(crate) extern "C" fn pure_call(st: *mut State, p: u64, x: u64, y: u64) -> Pu
     let def = &fixpt_runtime::PRIMITIVES[p as usize];
     let fixpt_runtime::PrimKind::Simple(f) = def.kind else { return fail(format!("`{}` needs an engine", def.name)) };
     // On the stack: a call per primitive run, no allocation for it.
-    let mut buf = [Value::from_raw(x), Value::from_raw(y)];
-    let args = if def.min == 1 { &mut buf[..1] } else { &mut buf[..] };
+    let mut buf = [Value::from_raw(x), Value::from_raw(y), Value::from_raw(z)];
+    let args = &mut buf[..def.min.clamp(1, 3)];
     let out = match f(rt, args) {
         Ok(v) => PureOut { v: v.raw(), failed: 0 },
         Err(t) => fail(fixpt_engine::cellular::describe(rt, t.obj)),

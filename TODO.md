@@ -1974,14 +1974,12 @@ refs are what FX-26's flat data will be reached by:
 `blobref-owner`, `blobref-offset`, `blobref-get`, `blobref-set!`), flat
 products and arrays (`extract`, `blobref-index`), flat sums
 (`blobref-variant!`, `tagcase` on a blobref); in native code, a numeric
-key's tag, a blobref's step by a constant, `blobref-index` and an `f64`
-read raw, in line (2026-10-11). Next: a flat `tagcase` in a leaf, so
-that a loop over a flat array keeps an `f64` accumulator raw (now a
-frame slot holds it, boxed each time round): `blobref-index`,
-`blobref-set!` and `blobref-variant!` are call-outs of three operands, so
-register code wants an in-line op of three (`prim3imm`), and the no-arm
-failure must be one that never collects; an index key's tag (a label in
-the owner's fields) and `blobref-variant!` in line; a wider index into
+key's tag, a blobref's step by a constant, `blobref-index`,
+`blobref-set!`, `blobref-variant!` (`prim3imm`) and an `f64` read raw,
+in line, and a flat `tagcase` in a leaf (2026-10-11). Next: an index
+key's tag (a label in the owner's fields) and variant in line; each step
+of a blobref takes its owner apart again (`suffix_owner`, about 20
+instructions), which a loop could do once; a wider index into
 the owner's fields than a byte (`(key symbol u16)` was proposed); arrays
 of a length not literal; `blobref-at` in line. The rule
 (the user's): no operation copies more than a word unless its name says

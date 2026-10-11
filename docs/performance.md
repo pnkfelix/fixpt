@@ -2736,3 +2736,32 @@ written out where names had been; 6,391 ms once two of the checker's
 lookups became tables; then 1,056 ms once a module's early items' `select`s
 were linked as a global module's are, and the names came back (`DONE.md`
 §64). A session starts in 0.18 s, from 0.15 s.
+
+## Flat sums and blobrefs in line (2026-10-11)
+
+A loop over a million flat-sum shapes (`(sumof u8 (0 f64) (1 (productof
+(w f64) (h f64))))`, an array of them in a bloblet's suffix), filled by
+`blobref-variant!` and `blobref-set!`, then summed by a `tagcase` in an
+inlined `area` (`TODO.md` §77). Each step, in milliseconds and the
+millions of words allocated (3.0 of them the bloblet):
+
+| step                                                      | nativecc | cellcc | M words |
+| --------------------------------------------------------- | -------: | -----: | ------: |
+| call-outs for every blobref and flat-sum operation        |    214.9 |  236.3 |     9.0 |
+| `prim2imm`: steps, reads, tags in line                    |     83.4 |  193.6 |     9.0 |
+| an `f64` read only `f64` operations use, raw              |     80.5 |  193.0 |     7.0 |
+| `blobref-index` in line in its call-out                   |     65.0 |  185.1 |     7.0 |
+| `prim3imm`: `blobref-index`, `-set!`, `-variant!` in line |     29.8 |  128.9 |     6.0 |
+| no call-out left: a flat `tagcase` and those in a leaf    |     19.4 |  128.4 |     5.0 |
+| a loop's unchanged argument not moved: the sum a leaf     |     10.5 |  129.7 |     3.0 |
+
+`prim3imm p x k` is `RESULT := p(RESULT, x, REGk)`, `x` a constant (the
+layout), for a primitive that never collects: no safepoint, the values
+stay in registers. The last step was registers: a leaf keeps its places
+in eight, and the sum's fast version ran out (three parameters, two loop
+arguments made, the inlined `area`'s parameter, the `tagcase`'s blobref
+and tag, then `f64*`'s operands), so it fell back to a plain version that
+keeps its `f64` accumulator boxed in the frame. Now a flat `tagcase` on a
+variable uses its place, an arm's ref reuses the blobref's and the tag's,
+and a loop argument that is its own parameter stays put; the sum
+allocates nothing.

@@ -493,6 +493,7 @@ pub mod regcode {
         ("prim1", 1, "RESULT := runtime primitive p applied to RESULT: one that never collects (`fixpt_runtime::never_collects`), so that no register need be in the frame"),
         ("prim2", 2, "RESULT := such a primitive p applied to RESULT and REGk"),
         ("prim2imm", 2, "RESULT := such a primitive p applied to RESULT and x"),
+        ("prim3imm", 3, "RESULT := such a primitive p applied to RESULT, x and REGk"),
     ];
 
     pub const fn op(name: &str) -> usize {

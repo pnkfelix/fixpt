@@ -201,4 +201,5 @@
 (define rop-prim1 int 31)
 (define rop-prim2 int 32)  ; 2: RESULT := such a primitive p applied to RESULT and REGk
 (define rop-prim2imm int 33)  ; 2: RESULT := such a primitive p applied to RESULT and x
+(define rop-prim3imm int 34)  ; 3: RESULT := such a primitive p applied to RESULT, x and REGk
 (define register-regs int 8)

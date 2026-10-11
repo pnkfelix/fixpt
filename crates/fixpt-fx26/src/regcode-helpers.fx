@@ -392,19 +392,13 @@
                     (r-decline)
                     (r-prim g "%fx26-suffix-ref-get"
                             (r-args-2 (a-e (car args)) (a-v (wcell-int i))) env te)))
-               (("blobref-index")
+               (("blobref-index" "blobref-set!" "blobref-variant!")
                 (if (< i 0)
                     (r-decline)
-                    (r-prim g "%fx26-suffix-ref-index"
-                            (r-args-3 (a-e (car args)) (a-e (car (cdr args))) (a-v (wcell-int i)))
-                            env te)))
-               (("blobref-set!" "blobref-variant!")
-                (if (< i 0)
-                    (r-decline)
-                    (r-prim g (if (string=? op "blobref-set!") "%fx26-suffix-ref-set!"
-                                  "%fx26-flat-variant!")
-                            (r-args-3 (a-e (car args)) (a-v (wcell-int i)) (a-e (car (cdr args))))
-                            env te)))
+                    (r-prim3 g (case op (("blobref-index") "%fx26-blobref-index")
+                                        (("blobref-set!") "%fx26-suffix-ref-set!")
+                                        (else "%fx26-flat-variant!"))
+                             (car args) (wcell-int i) (car (cdr args)) env te r-exp)))
                (else (r-decline))))))
 
 
@@ -438,49 +432,85 @@
           (else (begin (r-exp g p env te #f) (r-opn g rop-field (+ i 2)) (r-done g tail))))))
 ;; A `tagcase` on a blobref to a flat sum, of layout code `k`
 ;; (`Compiler::r_flat_tagcase`): the blobref and its tag, a label, kept in
-;; frame slots; each arm's name a blobref to its variant, `k / 256` bytes
-;; along; no arm for the tag a failure. Call-outs, so never in a leaf.
+;; places (registers in a leaf); each arm's name a blobref to its variant,
+;; `k / 256` bytes along; no arm for the tag a failure. No call-outs.
 (define r-flat-tagcase
   (subr rcompiles (rgen int exp exp-arms exp-let-bs renv cenv bool r-exper r-primer) unit)
   (lambda (g k s arms els env te tail r-exp r-prim)
-    (if (extract g leaf)
-        (r-decline)
-        (let ((regs (get (extract g nreg))) (slots (get (extract g nslot))))
+    (let ((regs (get (extract g nreg))) (slots (get (extract g nslot))))
+      (begin
+        (let* ((sc (r-scrutinee-place g s env te r-exp))
+               (tag (begin (r-imm-prim g "%fx26-flat-tag" (wcell-int k)) (r-place-value g)))
+               (end (r-new-label g)))
           (begin
-            (r-exp g s env te #f)
-            (let* ((sc (r-keep-in-slot g))
-                   (tag (begin (r-prim g "%fx26-flat-tag" (r-args-2 (a-slot sc) (a-v (wcell-int k)))
-                                       env te)
-                               (r-keep-in-slot g)))
-                   (end (r-new-label g)))
-              (begin
-                (r-flat-arms g k arms sc tag end env te tail r-exp r-prim)
-                (if (null? els)
-                    (begin (r-prim g "%fx26-flat-no-arm" (the rargs (cons (a-slot tag) nil)) env te)
-                           (r-done g tail))
-                    (let ((n (extract (car els) 1)))
-                      (r-exp g (extract (car els) 2) (r-bind n (rl-slot sc) env) (r-local te n)
-                             tail)))
-                (r-emit g (r-label end))))
-            (r-restore g regs slots))))))
+            (r-flat-arms g k arms sc tag end regs slots env te tail r-exp)
+            (if (null? els)
+                (begin (r-get g tag) (r-opn g rop-prim1 (runtime-primitive "%fx26-flat-no-arm"))
+                       (r-done g tail))
+                (let ((n (extract (car els) 1)))
+                  (r-exp g (extract (car els) 2) (r-bind n sc env) (r-local te n) tail)))
+            (r-emit g (r-label end))))
+        (r-restore g regs slots)))))
 (define r-flat-arms
-  (subr rcompiles (rgen int exp-arms int int int renv cenv bool r-exper r-primer) unit)
-  (lambda (g k arms sc tag end env te tail r-exp r-prim)
+  (subr rcompiles (rgen int exp-arms rloc rloc int int int renv cenv bool r-exper) unit)
+  (lambda (g k arms sc tag end regs0 slots0 env te tail r-exp)
     (if (null? arms)
         #u
         (let* ((arm (car arms)) (next (r-new-label g)))
           (begin
-            (r-opn g rop-stack tag)
+            (r-get g tag)
             (r-op2imm g routine-eq (c-flat-label (extract arm 1) k))
             (r-emit g (r-branch #t next))
             (let ((regs (get (extract g nreg))) (slots (get (extract g nslot))))
               (begin
-                (r-prim g "%suffix-ref+" (r-args-2 (a-slot sc) (a-v (wcell-int (quotient k 256))))
-                        env te)
-                (let* ((x (car (extract arm 3))) (at (r-keep-in-slot g)))
-                  (r-exp g (extract arm 4) (r-bind x (rl-slot at) env) (r-local te x) tail))
+                (r-get g sc)
+                (r-imm-prim g "%suffix-ref+" (wcell-int (quotient k 256)))
+                ;; The arm's ref where the blobref and its tag were: neither
+                ;; is used past here on this path (`Compiler::r_flat_tagcase`).
+                (r-restore g regs0 slots0)
+                (let* ((x (car (extract arm 3))) (at (r-place-value g)))
+                  (r-exp g (extract arm 4) (r-bind x at env) (r-local te x) tail))
                 (r-restore g regs slots)))
             (if tail #u (r-emit g (r-branch #f end)))
             (r-emit g (r-label next))
-            (r-flat-arms g k (cdr arms) sc tag end env te tail r-exp r-prim))))))
+            (r-flat-arms g k (cdr arms) sc tag end regs0 slots0 env te tail r-exp))))))
+;; Argument `i` of a loop (`r-self-temps`), `x`, kept: where it is already
+;; if it is the parameter itself, unchanged (no move then); else its value
+;; kept as `r-place-value` keeps it.
+(define r-self-temp (subr rcompiles (rgen exp int renv cenv r-exper) rloc)
+  (lambda (g x i env te r-exp)
+    (let ((v (r-plain-var-loc env x)) (leaf (extract g leaf)))
+      (if (and (not (null? v))
+               (tagcase (car v) (rl-reg (r) (and leaf (= r (+ i 1))))
+                 (rl-slot (n) (and (not leaf) (= n i))) (else y #f)))
+          (car v)
+          (begin (r-exp g x env te #f) (r-place-value g))))))
+;; `s`'s value into RESULT, and where it is kept: where it is already, if
+;; a variable in a register or the frame; else a place of its own.
+(define r-scrutinee-place (subr rcompiles (rgen exp renv cenv r-exper) rloc)
+  (lambda (g s env te r-exp)
+    (let ((v (r-plain-var-loc env s)))
+      (if (and (not (null? v))
+               (tagcase (car v) (rl-reg (r) #t) (rl-slot (n) #t) (else y #f)))
+          (begin (r-get g (car v)) (car v))
+          (begin (r-exp g s env te #f) (r-place-value g))))))
+;; RESULT := runtime primitive `name`, one that never collects, of `a`'s
+;; value, constant `x` and `b`'s (`prim3imm`), as `Compiler::r_prim3`: `a`
+;; kept in its place while `b` is made into a register of its own.
+(define r-prim3 (subr rcompiles (rgen string exp wcell exp renv cenv r-exper) unit)
+  (lambda (g name a x b env te r-exp)
+    (let ((regs (get (extract g nreg))) (slots (get (extract g nslot))))
+      (begin
+        (r-exp g a env te #f)
+        (let* ((at (r-place-value g))
+               (k (begin (r-exp g b env te #f) (r-reg g))))
+          (begin (r-opn g rop-setreg k)
+                 (r-get g at)
+                 (r-op2 g rop-prim3imm (wcell-int (runtime-primitive name)) x)
+                 (r-emit g (r-cell (wcell-int k)))))
+        (r-restore g regs slots)))))
+;; RESULT := runtime primitive `name`, one that never collects, of RESULT
+;; and constant `v` (`prim2imm`).
+(define r-imm-prim (subr rcompiles (rgen string wcell) unit)
+  (lambda (g name v) (r-op2 g rop-prim2imm (wcell-int (runtime-primitive name)) v)))
 )))

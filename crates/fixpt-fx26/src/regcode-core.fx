@@ -536,7 +536,7 @@
                    (call (r-new-label g)) (end (r-new-label g)))
               (begin
                 (if tail
-                    (let* ((made (r-self-temps g args env te)) (assumed (r-assume cell)))
+                    (let* ((made (r-self-temps g args 0 env te)) (assumed (r-assume cell)))
                       (begin
                         (if assumed #u (r-guard g cell call))
                         (r-self-moves g made 0)
@@ -562,12 +562,12 @@
                 (r-restore g regs slots)))))))
   ;; Each argument kept, in a register in a leaf, else a frame slot, in
   ;; order: where each is.
-  (r-self-temps (subr rcompiles (rgen exps renv cenv) rlocs)
-    (lambda (g args env te)
+  (r-self-temps (subr rcompiles (rgen exps int renv cenv) rlocs)
+    (lambda (g args i env te)
       (if (null? args)
           nil
-          (let* ((l (begin (r-exp g (car args) env te #f) (r-keep g (extract g leaf))))
-                 (rest (r-self-temps g (cdr args) env te)))
+          (let* ((l (r-self-temp g (car args) i env te r-exp))
+                 (rest (r-self-temps g (cdr args) (+ i 1) env te)))
             (cons l rest)))))
   ;; RESULT := r(a, b), `a` evaluated first; a constant `b` an immediate.
   (r-binary (subr rcompiles (rgen int exp exp renv cenv) unit)

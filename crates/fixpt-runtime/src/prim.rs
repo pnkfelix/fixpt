@@ -449,8 +449,12 @@ pub fn never_collects(name: &str) -> bool {
         // A blobref's read, owner, offset and step (`TODO.md` §77): an `f64`
         // read allocates its box, which never collects.
         || matches!(name, "%fx26-suffix-ref-get" | "%suffix-ref-owner" | "%suffix-ref-offset" | "%suffix-ref+")
-        // A flat sum's tag (`TODO.md` §77): a number, or an owner's field.
-        || name == "%fx26-flat-tag"
+        // A flat sum's tag (`TODO.md` §77): a number, or an owner's field;
+        // and a `tagcase` with no arm for it, which only fails.
+        || matches!(name, "%fx26-flat-tag" | "%fx26-flat-no-arm")
+        // Of three (`prim3imm`): an element's ref, a scalar written, a flat
+        // sum's variant set.
+        || matches!(name, "%fx26-blobref-index" | "%fx26-suffix-ref-set!" | "%fx26-flat-variant!")
         // Characters and strings looked at, never made (strings compared in
         // place, `Heap::string_cmp`): each of a fixed arity, as `pure_call`
         // passes by the primitive's.
@@ -2053,6 +2057,20 @@ prims! {
         match rt.heap.suffix_ref_add(r, i * size) {
             Ok(r) => Ok(r),
             Err(e) => rt.fail(&format!("suffix ref: {e}"), &[a[0], a[1]]),
+        }
+    });
+    // The same, its operands in register code's `prim3imm` order: the ref,
+    // the constant `code`, the index.
+    "%fx26-blobref-index", 3, Some(3), simple!(|rt, a| {
+        let r = suffix_ref(rt, a[0])?;
+        let (code, i) = (int(rt, a[1])?, int(rt, a[2])?);
+        let (n, size) = (code >> 32, code & 0xffff_ffff);
+        if !(0..n).contains(&i) {
+            return rt.fail("blobref-index: out of range", &[a[0], a[2]]);
+        }
+        match rt.heap.suffix_ref_add(r, i * size) {
+            Ok(r) => Ok(r),
+            Err(e) => rt.fail(&format!("suffix ref: {e}"), &[a[0], a[2]]),
         }
     });
     "%fx26-suffix-ref-set!", 3, Some(3), simple!(|rt, a| {
