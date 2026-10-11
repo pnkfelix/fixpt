@@ -2994,9 +2994,12 @@ impl Checker {
             (Ty::False, Ty::False) => true,
             (Ty::False, Ty::Base(_)) => b == self.bool_,
             (Ty::Nil, Ty::NList { size, .. }) => self.size_le(&Size::lit(0), &size),
-            // An `i32` or `u32` is the fixnum it stands for: an `int`.
+            // An `i32` or `u32` is the fixnum it stands for, an `i64` or
+            // `u64` the exact integer (a bignum past a fixnum): an `int`
+            // (`TODO.md` §63; native code boxes a raw one where a value is
+            // wanted, `direct/reps.rs`).
             (Ty::Base(x), Ty::Base(y)) => {
-                x == y || (matches!(self.interner.name(x), "i32" | "u32") && self.interner.name(y) == "int")
+                x == y || (matches!(self.interner.name(x), "i32" | "u32" | "i64" | "u64") && self.interner.name(y) == "int")
             }
             // What proves something is a `bool`; and what proves more is
             // below what proves less.

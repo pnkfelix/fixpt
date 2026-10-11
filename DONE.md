@@ -885,6 +885,19 @@ literal at run time, which a literal does not need. Their comments say
 so. The tests about the conversion keep it (`fixed-width-ops.fx`,
 `fixed-width.fx`, `flat-ints.fx`).
 
+## 63. `i64` and `u64` below `int`, with literals (2026-10-11)
+
+Literals of each fixed width, the 64-bit ones past a fixnum included,
+came with kayak's request (2026-10-11, `docs/fx26.md`). Now the
+subtyping too: an `i64` or `u64` is the exact integer it stands for, so
+it is an `int` wherever one is wanted, as an `i32` or `u32` is (`check.rs`'s
+base rule, `k-base-below?`). The worry was native code, which keeps one
+raw in a register: `direct/reps.rs` already boxes a raw register where an
+instruction wants a value, a bignum past a fixnum, so nothing else
+changed; every other machine has it as the integer already. Test:
+`programs/native/i64-as-int.fx` (on every machine; natively, with
+collections, in `i64_and_u64_raw_in_registers`).
+
 ## 64. The reader's module types, shown, are megabytes (2026-10-08)
 
 Since the reader and the parser are module files made by `reader.fx`, the

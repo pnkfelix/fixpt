@@ -313,6 +313,13 @@ fn i64_and_u64_raw_in_registers() {
     assert!(matches!(&run(defs, "q", &[7, 0], FUEL).direct, Err(m) if m.contains("zero")));
     let defs = "(define* w (subr pure (int) int) (lambda (a) (i64->int (i64* (int->i64 a) (int->i64 a)))))";
     assert_eq!(run(defs, "w", &[1 << 31], FUEL).direct, Ok("4611686018427387904".into()));
+    // An `i64` or `u64` where an `int` is wanted (`TODO.md` §63,
+    // `programs/native/i64-as-int.fx`): boxed there, a bignum past a fixnum.
+    for gc_every in [None, Some(7)] {
+        let r = run_collecting(&program("native/i64-as-int"), "run", &[0], FUEL, gc_every);
+        assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "collecting every {gc_every:?}: {:?} against {}", r.direct, r.rust);
+        assert_eq!(r.rust, "(9223372036854775808 18446744073709551616 -9223372036854775805 6 42)");
+    }
 }
 
 /// `f64` natively (`programs/native/floats.fx`): raw in registers around a

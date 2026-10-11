@@ -1738,20 +1738,11 @@ unfold them whole.
 - Both checkers; the printing then needs no matching of a type against the
   families. Ties to the non-regular work (`docs/research/nonregular-*.md`).
 
-## 63. `i64` and `u64` below `int`, with literals (2026-10-08)
+## 63. Fixed-width values as sizes (2026-10-08)
 
-`i32` and `u32` are below `int` (a5f0979) because one is at run time the
-fixnum of its value. An `i64` or `u64` is the exact integer it stands for
-too (a bignum past 60 bits), so the same rule is sound: `i64`, `u64` ≤
-`int`, and a literal in range is one. What to settle first: native code
-keeps `i64`/`u64` raw in registers ("`i64` and `u64` raw in native
-registers", `docs/performance.md`), so a raw value used as an `int` must
-be boxed (or tagged as a fixnum when it fits) at that point; find where the
-compilers would need that conversion and whether the subsumption is
-already a coercion point. Both checkers (`fixed_range`,
-`k-literal-within?`, `k-base-below?`), then tests on every machine.
-Then fixed-width values could also count as sizes (`nat` terms), since
-each is an integer the checker knows the range of.
+`i64` and `u64` are below `int`, with literals (`DONE.md` §63). Left:
+fixed-width values could also count as sizes (`nat` terms), since each is
+an integer the checker knows the range of.
 
 ## 65. Named parameters in `subr` types (the user's, 2026-10-08)
 
