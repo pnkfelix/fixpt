@@ -1550,3 +1550,24 @@ to 1331 (`k-in-scope-check` moved to `check-read-helpers.fx`). Tests:
 `direct.rs`'s `flat_sums_as_the_rust_machine_gives_them`
 (`programs/native/flat-sums.fx`, with collections too).
 
+## 78. The best REPL in one short command (the user's, 2026-10-10)
+
+Done 2026-10-11. The fastest FX-26 machine is the default: `fixpt
+--dialect fx26 repl`, or `fixpt fx26`, where it took `--fx26-run cellular
+--cellular-machine registers --calling-convention native` (the user's
+choice: the default, not an opt-in). The machines have names, one
+vocabulary for `--fx26-machine NAME`, `fixpt bench`'s columns, the REPL's
+banner ("Machine: …") and the docs, which say who generates the code (`rs`
+Rust, `fx` FX-26), what code (`scheme`, `ast`, `cells`, `regs`), what runs
+it, and, where it is compiled to arm64, the calling convention (`cellcc`,
+`nativecc`) (the user's design, 2026-10-11): `fx-regs-rsjit-nativecc` (the
+default, `fast`), `rs-scheme-vm`, `fx-ast-eval`, `fx-cells-rsinterp`,
+`fx-cells-asminterp`, `fx-cells-rsjit-cellcc`, `fx-cells-fxjit-cellcc`,
+`fx-cells-stencils-cellcc`, `fx-regs-rsjit-cellcc`; bench's, made by the
+Rust compiler, `rs-…`. The older flags still work and keep their old
+defaults when given one by one; a name with them, or an unknown name, is
+refused. The names showed a gap: no `fx-regs-fxjit-nativecc` (TODO §81).
+The native machine's step limit is said as the others say it. Tests:
+dialects.rs's `fx26_machines_by_name`; `on_every_machine` names
+`rs-scheme-vm` for its reference. Docs: README (the machines' table),
+`fixpt help`, `fixpt bench --help`, the Emacs mode's arguments.

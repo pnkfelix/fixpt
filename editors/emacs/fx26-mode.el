@@ -45,11 +45,10 @@ next to this file."
   :type '(choice (const :tag "Find it" nil) file))
 
 (defcustom fx26-repl-arguments
-  '("--dialect" "fx26" "--fx26-run" "cellular" "--cellular-machine" "registers"
-    "--calling-convention" "native" "--emacs" "repl")
-  "Arguments for the REPL: native code, by register code, by default.
-Keep \"--emacs\".  Without the cellular flags the REPL runs lowered
-Scheme, slower."
+  '("--dialect" "fx26" "--emacs" "repl")
+  "Arguments for the REPL: FX-26's default machine, the fastest.
+Keep \"--emacs\".  Another machine is \"--fx26-machine\" NAME before
+\"repl\" (`fixpt help' lists them)."
   :type '(repeat string))
 
 (defcustom fx26-check-arguments '("check" "-")

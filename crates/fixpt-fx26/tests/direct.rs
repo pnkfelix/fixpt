@@ -200,7 +200,7 @@ fn calls_between_procedures() {
 #[test]
 fn fuel_and_stack_run_out() {
     let forever = "(define* forever (subr spin (int) int) (lambda (n) (forever (+ n 1))))";
-    assert_eq!(direct_only(forever, "forever", &[0], 100_000).direct, Err("out of fuel".into()));
+    assert_eq!(direct_only(forever, "forever", &[0], 100_000).direct, Err("evaluation step limit exceeded".into()));
     // Past the most a run's frames may take, with the stack cache's chain:
     // here 2^20 words, through a cache of 4096.
     let deep = "(define* deep (subr spin (int) int) (lambda (n) (+ 1 (deep n))))";

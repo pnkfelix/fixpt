@@ -475,23 +475,37 @@ in Rust and one written in FX-26:
   for cells, and register code) and `direct.rs` (the native calling
   convention). In FX-26: `native.fx`, for cells only.
 
-What each way of invoking `fixpt` uses:
+What each way of invoking `fixpt` uses. Each FX-26 machine has a name
+(`--fx26-machine NAME`, TODO §78) saying who generates the code (`rs`
+Rust, `fx` FX-26), what code, what runs it, and, where the code is
+compiled to arm64, the calling convention (`cellcc`: inside the cellular
+machine; `nativecc`: native procedures). With no machine named, FX-26
+runs on the fastest, `fx-regs-rsjit-nativecc` (also `fast`); `fixpt fx26`
+is its REPL. The older flags still work, and pick the same machines:
 
-| invocation                                                | stage A        | stage B                        | runs on                         |
-| --------------------------------------------------------- | -------------- | ------------------------------ | ------------------------------- |
-| `--dialect fx26` (lowered, the default)                   | none: lowered  | none                           | the Scheme bytecode VM          |
-| `--fx26-run evaluate`                                     | none           | none                           | the evaluator written in FX-26  |
-| `--fx26-run cellular`                                     | FX-26          | none                           | the cellular machine in Rust    |
-| `--fx26-run cellular --cellular-machine native`           | FX-26          | none                           | the hand machine, running cells |
-| `--fx26-run cellular --cellular-machine stencils`         | FX-26          | Rust (stencils)                | the stencil machine             |
-| `--fx26-run cellular --cellular-machine native-compiled`  | FX-26          | Rust (`assemble_word`)         | the hand machine, as arm64      |
-| `--fx26-run cellular --cellular-machine fx-compiled`      | FX-26          | FX-26 (`native.fx`)            | the hand machine, as arm64      |
-| `--fx26-run cellular --cellular-machine registers`        | FX-26          | Rust (register code)           | the hand machine, as arm64      |
-| `--fx26-run cellular --calling-convention native`         | FX-26          | Rust (`direct.rs`)             | arm64, the native convention    |
-| `fixpt bench`, every column but `lowered`                 | Rust           | Rust, or none (`rust`, `hand`) | as its column says              |
-| the front end itself (`--fx26-run cellular`, any machine) | Rust           | Rust (register code)           | the hand machine, as arm64      |
-| `fixpt check INPUT`                                       | none           | none                           | both checkers, compared         |
-| `fixpt compile INPUT`                                     | both, compared | none                           | nothing: the code is shown      |
+| `--fx26-machine`                    | older flags (each after `--fx26-run cellular`, but the first two) | stage A        | stage B                | runs on                         |
+| ----------------------------------- | ----------------------------------------------------------------- | -------------- | ---------------------- | ------------------------------- |
+| `fx-regs-rsjit-nativecc` (default)  | `--cellular-machine registers --calling-convention native`         | FX-26          | Rust (`direct.rs`)     | arm64, the native convention    |
+| `rs-scheme-vm`                      | `--fx26-run lower` (the default before §78)                        | none: lowered  | none                   | the Scheme bytecode VM          |
+| `fx-ast-eval`                       | `--fx26-run evaluate`                                              | none           | none                   | the evaluator written in FX-26  |
+| `fx-cells-rsinterp`                 | (none)                                                             | FX-26          | none                   | the cellular machine in Rust    |
+| `fx-cells-asminterp`                | `--cellular-machine native`                                        | FX-26          | none                   | the hand machine, running cells |
+| `fx-cells-stencils-cellcc`          | `--cellular-machine stencils`                                      | FX-26          | Rust (stencils)        | the stencil machine             |
+| `fx-cells-rsjit-cellcc`             | `--cellular-machine native-compiled`                               | FX-26          | Rust (`assemble_word`) | the hand machine, as arm64      |
+| `fx-cells-fxjit-cellcc`             | `--cellular-machine fx-compiled`                                   | FX-26          | FX-26 (`native.fx`)    | the hand machine, as arm64      |
+| `fx-regs-rsjit-cellcc`              | `--cellular-machine registers`                                     | FX-26          | Rust (register code)   | the hand machine, as arm64      |
+
+And the other commands:
+
+| invocation                                  | stage A        | stage B                | runs on                    |
+| ------------------------------------------- | -------------- | ---------------------- | -------------------------- |
+| `fixpt bench`, its `rs-…` columns            | Rust           | as its column's name   | as its column's name says  |
+| the front end itself, any machine            | Rust           | Rust (register code)   | the hand machine, as arm64 |
+| `fixpt check INPUT`                          | none           | none                   | both checkers, compared    |
+| `fixpt compile INPUT`                        | both, compared | none                   | nothing: the code is shown |
+
+There is no `fx-regs-fxjit-…`: register code to arm64 has no compiler
+written in FX-26 (TODO §81).
 
 The rest of the detail:
 

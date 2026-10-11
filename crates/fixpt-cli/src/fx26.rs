@@ -140,6 +140,7 @@ pub fn repl(backend: Backend) -> i32 {
         Strategy::Cellular => format!("compiled to cellular words by the compiler written in FX-26, and run on {machine}"),
     };
     println!("(each form is checked, {how}.");
+    println!(" Machine: {}; `fixpt help` lists the others.", crate::FX26_MACHINE_NAME.get().map(String::as_str).unwrap_or("rs-scheme-vm"));
     match session.strategy {
         Strategy::Lower => println!(" `,help` for commands, `,code` to show the lowered Scheme. ^D leaves.)"),
         Strategy::Cellular => println!(" `,help` for commands, `,code` to show the words each form makes. ^D leaves.)"),

@@ -428,7 +428,7 @@ fn bitwise_on_every_machine() {
 /// killed by a signal.
 fn on_every_machine(program: &str) -> Vec<(&'static [&'static str], String)> {
     let machines: [&'static [&'static str]; 6] = [
-        &[],
+        &["--fx26-machine", "rs-scheme-vm"],
         &["--fx26-run", "cellular"],
         &["--fx26-run", "cellular", "--cellular-machine", "native"],
         &["--fx26-run", "cellular", "--cellular-machine", "native-compiled"],
@@ -549,5 +549,36 @@ fn front_end_files_lists_what_the_front_end_is_made_of() {
     for l in &lines {
         let path = l.split_whitespace().nth(1).expect("a path");
         assert!(std::path::Path::new(path).is_file(), "{path} is not a file");
+    }
+}
+
+/// The FX-26 machines by name (`TODO.md` §78): with none named, the
+/// fastest, `fx-regs-rsjit-nativecc` (`fast`); `fixpt fx26` is the FX-26
+/// REPL; a name and the parts' options together, or an unknown name, are
+/// refused; the parts given alone keep their old defaults.
+#[test]
+fn fx26_machines_by_name() {
+    let banner = |args: &[&str]| {
+        let mut child = Command::new(FIXPT)
+            .args(args)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("fixpt starts");
+        use std::io::Write as _;
+        child.stdin.take().expect("piped").write_all(b",q\n").expect("writes");
+        let out = child.wait_with_output().expect("finishes");
+        String::from_utf8_lossy(&out.stdout).lines().find(|l| l.contains("Machine:")).unwrap_or("").to_string()
+    };
+    assert!(banner(&["fx26"]).contains("Machine: fx-regs-rsjit-nativecc;"));
+    assert!(banner(&["--dialect", "fx26", "repl"]).contains("Machine: fx-regs-rsjit-nativecc;"));
+    assert!(banner(&["--dialect", "fx26", "--fx26-machine", "fast", "repl"]).contains("Machine: fx-regs-rsjit-nativecc;"));
+    assert!(banner(&["--dialect", "fx26", "--fx26-machine", "fx-cells-fxjit-cellcc", "repl"]).contains("Machine: fx-cells-fxjit-cellcc;"));
+    assert!(banner(&["--dialect", "fx26", "--fx26-run", "cellular", "repl"]).contains("Machine: fx-cells-rsinterp;"));
+    assert!(banner(&["--dialect", "fx26", "--fx26-run", "lower", "repl"]).contains("Machine: rs-scheme-vm;"));
+    for args in [&["--fx26-machine", "nope", "eval", "1"][..], &["--fx26-machine", "fast", "--fx26-run", "lower", "eval", "1"]] {
+        let out = Command::new(FIXPT).args(args).output().expect("runs");
+        assert_eq!(out.status.code(), Some(2), "{args:?}");
     }
 }

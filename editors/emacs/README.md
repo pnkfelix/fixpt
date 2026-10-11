@@ -44,13 +44,13 @@ this repository; `M-x customize-group RET fx26` sets another
 
 ## The REPL
 
-`M-x run-fx26` runs, in `*fx26*`, `fixpt --dialect fx26 --fx26-run
-cellular --cellular-machine registers --calling-convention native --emacs
-repl`: forms compiled to native code by register code; the code of what
-you redefine is collected, so reloading on every save can go on all day
-(300 reloads of a 370-line file, checked). `M-x fx26-restart-repl` starts
-afresh. Without the three cellular flags (`fx26-repl-arguments`) the REPL
-runs lowered Scheme, slower.
+`M-x run-fx26` runs, in `*fx26*`, `fixpt --dialect fx26 --emacs repl`, on
+FX-26's default machine, the fastest (`fx-regs-rsjit-nativecc`: forms
+compiled to native code by register code); the code of what you redefine
+is collected, so reloading on every save can go on all day (300 reloads of
+a 370-line file, checked). `M-x fx26-restart-repl` starts afresh. Another
+machine is `--fx26-machine NAME` in `fx26-repl-arguments` (`fixpt help`
+lists them).
 With `--emacs`, `fixpt` prints no continuation prompt, and takes `,at FILE
 LINE COL` before a form: what is sent from a buffer is preceded by one, so
 its errors name the file, line and column it came from, and

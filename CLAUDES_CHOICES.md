@@ -391,3 +391,18 @@ than a word unless its name says so.
 6. **The survey's diagnostic stays on its branch**; its report is in
    `docs/research/anti-aliasing-survey.md`, marked with the commit it
    measured.
+
+## The FX-26 machines by name (TODO.md §78, 2026-10-11)
+
+1. **The old flags keep their old defaults when given one by one**: a name
+   (or nothing, the fastest) sets all three; any of `--fx26-run`,
+   `--cellular-machine`, `--calling-convention` given means the rest
+   default as before (`rs-scheme-vm`'s parts), so every existing script
+   and test means what it meant. A name and the parts together are refused.
+2. **The banner says the machine's name**, worked out from the parts too,
+   and the parts' flags when they name no machine.
+3. **bench accepts its old column names** in `--machines`.
+4. **The Emacs mode** now passes no machine flags, the default being the
+   machine it named.
+5. **The native machine's step-limit trap** now reads "evaluation step
+   limit exceeded", as the other machines say it, not "out of fuel".

@@ -21,17 +21,26 @@ whose compiling, unlike theirs, takes long enough to follow over time.
 
 The run table: each way of running them, the run alone (checking and
 compiling are done before the clock starts); an answer that differs from
-the lowered one is marked `✗`. Machines (--machines, default: all):
-  lowered     lowered to Scheme, run on the bytecode engine (its compiling
-              of the lowered Scheme, quick, counted as run)
-  rust        compiled to cellular words, run by the machine written in Rust
-  hand        run by the hand-encoded arm64 machine
-  stencils    run by the stencil machine (a build with nightly only)
-  compiled    each word compiled to machine code first (native-compiled)
-  registers   each lambda's register code, run by the hand-encoded machine
-  native      the native calling convention: the procedure the program's
-              last line calls, on integer literals, compiled and called
-              (`—` if the last line is not such a call, or it is declined)
+rs-scheme-vm's is marked `✗`. Machines (--machines, default: all), named
+as `fixpt --fx26-machine` names them: who makes the code (here always rs,
+the compiler written in Rust), what code, and what runs it; the older
+names in brackets are accepted too:
+  rs-scheme-vm        lowered to Scheme, run on the bytecode VM (its
+                      compiling of the Scheme, quick, counted as run)
+                      [lowered]
+  rs-cells-rsinterp   cellular words, interpreted by Rust [rust]
+  rs-cells-asminterp  cellular words, interpreted by hand-written arm64
+                      [hand]
+  rs-cells-stencils-cellcc   cellular words, by copy-and-patch stencils (a build
+                      with nightly only) [stencils]
+  rs-cells-rsjit-cellcc      cellular words, each compiled to arm64 first
+                      [compiled]
+  rs-regs-rsjit-cellcc       each lambda's register code, compiled to arm64, in
+                      the cellular convention [registers]
+  rs-regs-rsjit-nativecc    the native calling convention (direct.rs): the
+                      procedure the program's last line calls, on integer
+                      literals, compiled and called (`—` if the last line is
+                      not such a call, or it is declined) [native]
 
 The compile table: each phase alone, for each program; with --front-end,
 also for the front end (the FX-26 reader, checker and compilers with
@@ -93,18 +102,23 @@ pub fn command(args: &[String]) -> i32 {
             f => files.push(std::path::PathBuf::from(f)),
         }
     }
-    let all = ["lowered", "rust", "hand", "stencils", "compiled", "registers", "native"];
+    // Each machine named as `fixpt --fx26-machine` names them (who makes the
+    // code, what code, what runs it; here the Rust compiler makes it), and
+    // by its older name.
+    let all = ["rs-scheme-vm", "rs-cells-rsinterp", "rs-cells-asminterp", "rs-cells-stencils-cellcc", "rs-cells-rsjit-cellcc", "rs-regs-rsjit-cellcc", "rs-regs-rsjit-nativecc"];
+    let old = ["lowered", "rust", "hand", "stencils", "compiled", "registers", "native"];
     let mut machines: Vec<&str> = match &wanted {
         Some(w) => {
-            if let Some(bad) = w.iter().find(|m| !all.contains(&m.as_str())) {
+            let w: Vec<&str> = w.iter().map(|m| old.iter().position(|o| o == m).map_or(m.as_str(), |i| all[i])).collect();
+            if let Some(bad) = w.iter().find(|m| !all.contains(m)) {
                 return usage(&format!("unknown machine `{bad}`"));
             }
-            all.iter().copied().filter(|m| w.iter().any(|x| x == m)).collect()
+            all.iter().copied().filter(|m| w.contains(m)).collect()
         }
         None => all.to_vec(),
     };
     if fixpt_native::stencil::opt_levels().is_empty() {
-        machines.retain(|m| *m != "stencils");
+        machines.retain(|m| *m != "rs-cells-stencils-cellcc");
     }
     let mid_sized = files.is_empty();
     if files.is_empty() {
@@ -161,12 +175,12 @@ fn run_table_of(programs: &[(String, String)], machines: &[&str], runs: usize) -
     }
     let mut header = vec!["program".to_string(), "answer".to_string()];
     header.extend(machines.iter().map(|m| m.to_string()));
-    if machines.contains(&"native") {
+    if machines.contains(&"rs-regs-rsjit-nativecc") {
         header.extend(["M words".to_string(), "GCs".to_string()]);
     }
     print_table(&header, &rows, 2);
-    println!("\nrun alone: best of {runs} run(s), in milliseconds; the answer is the lowered program's.");
-    if machines.contains(&"native") {
+    println!("\nrun alone: best of {runs} run(s), in milliseconds; the answer is rs-scheme-vm's.");
+    if machines.contains(&"rs-regs-rsjit-nativecc") {
         println!("M words: millions of words the native run allocated; GCs: its collections, minor and major.");
     }
     for n in notes {
@@ -206,12 +220,12 @@ fn row(name: &str, text: &str, machines: &[&str], runs: usize, notes: &mut Vec<S
     let mut work = None;
     for m in machines {
         let got = match *m {
-            "lowered" => Some(lowered.clone()),
-            "rust" => on_machine(text, &c, &tops, runs, fixpt_engine::cellular::run_word, false, false),
-            "hand" => on_machine(text, &c, &tops, runs, fixpt_native::cellular::run_word_as_is, false, false),
-            "stencils" => on_machine(text, &c, &tops, runs, fixpt_native::stencil::run_word, false, false),
-            "compiled" => on_machine(text, &c, &tops, runs, fixpt_native::cellular::run_word_compiled, false, true),
-            "registers" => on_machine(text, &c, &tops, runs, fixpt_native::cellular::run_word_registers, true, true),
+            "rs-scheme-vm" => Some(lowered.clone()),
+            "rs-cells-rsinterp" => on_machine(text, &c, &tops, runs, fixpt_engine::cellular::run_word, false, false),
+            "rs-cells-asminterp" => on_machine(text, &c, &tops, runs, fixpt_native::cellular::run_word_as_is, false, false),
+            "rs-cells-stencils-cellcc" => on_machine(text, &c, &tops, runs, fixpt_native::stencil::run_word, false, false),
+            "rs-cells-rsjit-cellcc" => on_machine(text, &c, &tops, runs, fixpt_native::cellular::run_word_compiled, false, true),
+            "rs-regs-rsjit-cellcc" => on_machine(text, &c, &tops, runs, fixpt_native::cellular::run_word_registers, true, true),
             _ => in_native_convention(text, runs).map(|(v, t, w)| {
                 work = Some(w);
                 (v, t)
@@ -219,7 +233,7 @@ fn row(name: &str, text: &str, machines: &[&str], runs: usize, notes: &mut Vec<S
         };
         out.push(cell(m, got));
     }
-    if machines.contains(&"native") {
+    if machines.contains(&"rs-regs-rsjit-nativecc") {
         match work {
             Some((words, gcs)) => out.extend([format!("{:.1}", words as f64 / 1e6), gcs.to_string()]),
             None => out.extend(["—".to_string(), "—".to_string()]),
