@@ -53,6 +53,23 @@
 (define-effect kreads (select check-types-types kreads))
 (define-effect kstate (select check-types-types kstate))
 (define r-frozen (with check-types-types r-frozen))
+(define r-heap (with check-types-types r-heap))
+(define ty-array (with check-types-types ty-array))
+(define ty-base (with check-types-types ty-base))
+(define ty-bloblet (with check-types-types ty-bloblet))
+(define ty-icell (with check-types-types ty-icell))
+(define ty-nat (with check-types-types ty-nat))
+(define ty-nil (with check-types-types ty-nil))
+(define ty-nlist (with check-types-types ty-nlist))
+(define ty-pair (with check-types-types ty-pair))
+(define ty-product (with check-types-types ty-product))
+(define ty-ref (with check-types-types ty-ref))
+(define ty-sum (with check-types-types ty-sum))
+(define ty-union (with check-types-types ty-union))
+(define ty-var (with check-types-types ty-var))
+(define ty-void (with check-types-types ty-void))
+(define-type k-ids (select check-types-types k-ids))
+(define-type k-regions (select check-types-types k-regions))
 (define r-var (with check-types-types r-var))
 (define ty-param (with check-types-types ty-param))
 (define ty-select (with check-types-types ty-select))
@@ -60,6 +77,11 @@
 (define-type table (select table-types table))
 ;; What it uses of the modules it is given.
 (define k-get (with check-types k-get))
+(define k-bound-of (with check-types k-bound-of))
+(define k-data-var? (with check-types k-data-var?))
+(define k-new-epoch (with check-types k-new-epoch))
+(define k-resolve (with check-types k-resolve))
+(define k-visit? (with check-types k-visit?))
 (define k-length (with check-types k-length))
 (define k-conv=? (with check-print-parts k-conv=?))
 (define k-region=? (with check-effects k-region=?))
@@ -236,4 +258,113 @@
         (if (< found 0)
             found
             (let ((l (- -1000 (k-length (get labels)))))
-              (begin (set labels (cons (product (1 a) (2 b) (3 i) (4 l)) (get labels))) l))))))))))
+              (begin (set labels (cons (product (1 a) (2 b) (3 i) (4 l)) (get labels))) l)))))))
+
+;; Whether `r` is frozen data's region.
+(define k-frozen-region? (subr pure (k-region) bool)
+  (lambda (r) (tagcase r (r-frozen (p f) #t) (else y #f))))
+;; Where data at region `r` is: the place it is frozen into, or the place or
+;; region it was made at, or else the heap.
+(define* k-data-place (subr pure (k-region) k-region)
+  (lambda (r)
+    (tagcase r
+      (r-frozen (p f) (if (< p 0) (r-heap) (r-var p)))
+      (r-var (v) (r-var v))
+      (else y (r-heap)))))
+;; Where the data a `data` variable stands for is: its bound, or the heap.
+(define* k-data-var-place (subr (maxeff kreads (alloc @t)) (int) k-region)
+  (lambda (v) (let ((b (k-bound-of v))) (if (null? b) (r-heap) (car b)))))
+;; Whether data at `q` may be taken where data at `place` is wanted: `place`
+;; empty for anywhere, or else the heap or the one place it holds.
+(define* k-data-here? (subr (maxeff (read @globals) spin) (k-regions k-region) bool)
+  (lambda (place q) (or (null? place) (k-region=? q (r-heap)) (k-region=? q (car place)))))
+
+;; Whether `t` is data: built only from base types, `datum`, products and
+;; sums, and pairs and bloblets that are frozen, of data; and type variables
+;; of kind `data`. With `place` naming one, each frozen part is also in the
+;; heap or in that place.
+(define-rec
+  (k-data-walk (subr (maxeff kstate spin) (int int k-regions) bool)
+    (lambda (t seen place)
+      (let ((t (k-resolve t)))
+        (if (k-visit? t seen)
+            #t
+            (tagcase (k-get t)
+              (ty-base (s) #t)
+              (ty-void () #t)
+              (ty-var (v) (and (k-data-var? v) (k-data-here? place (k-data-var-place v))))
+              (ty-product (ps) (k-data-parts ps seen place))
+              (ty-sum (ps) (k-data-parts ps seen place))
+              (ty-nil () #t)
+              (ty-union (ms) (k-data-list ms seen place))
+              (ty-pair (a b r nl)
+                (and (k-frozen-region? r) (k-data-here? place (k-data-place r))
+                     (k-data-walk a seen place) (k-data-walk b seen place)))
+              (ty-bloblet (fs z r)
+                (and z (k-data-here? place (k-data-place r)) (k-data-list fs seen place)))
+              (ty-nlist (e z r)
+                (and (k-data-here? place (k-data-place r)) (k-data-walk e seen place)))
+              (ty-nat (z) #t)
+              (else y #f))))))
+  (k-data-parts (subr (maxeff kstate spin) (k-parts int k-regions) bool)
+    (lambda (ps seen place)
+      (or (null? ps)
+          (and (k-data-walk (extract (car ps) 2) seen place) (k-data-parts (cdr ps) seen place)))))
+  (k-data-list (subr (maxeff kstate spin) (k-ids int k-regions) bool)
+    (lambda (ts seen place)
+      (or (null? ts) (and (k-data-walk (car ts) seen place) (k-data-list (cdr ts) seen place))))))
+(define k-is-data? (subr (maxeff kstate spin) (int) bool)
+  (lambda (t) (k-data-walk t (k-new-epoch) nil)))
+;; Whether `t` is data at `place`, a place variable or the heap.
+(define k-is-data-at? (subr (maxeff kstate spin) (int k-region) bool)
+  (lambda (t place) (k-data-walk t (k-new-epoch) (the k-regions (cons place nil)))))
+;; Whether a field of type `t` may be forgotten from a bloblet at region
+;; `r`, frozen if `frozen`, as a bloblet type of fewer fields does
+;; (`Checker::forgettable`): of a frozen bloblet, data at its place; of one
+;; not frozen, what mentions no region but `r` and the heap, stores only in
+;; `r`, and holds no procedure, nor a variable that could be one.
+(define k-forgettable? (subr (maxeff kstate spin) (int k-region bool) bool)
+  (lambda (t r frozen)
+    (if frozen (k-is-data-at? t (k-data-place r)) (k-forget-walk t r (k-new-epoch)))))
+;; Frozen data's region `q`, as near as `r`: the heap's, or `r`'s place.
+(define k-near? (subr (maxeff (read @globals) spin) (k-region k-region) bool)
+  (lambda (q r)
+    (tagcase q
+      (r-heap () #t)
+      (r-frozen (p f) (or (< p 0) (k-region=? (r-var p) r)))
+      (else y (k-region=? q r)))))
+;; A region `q` of storage, or of frozen data if `frozen`, as `r` allows.
+(define k-forget-region? (subr (maxeff (read @globals) spin) (k-region k-region bool) bool)
+  (lambda (q r frozen) (if frozen (k-near? q r) (k-region=? q r))))
+(define-rec
+  (k-forget-walk (subr (maxeff kstate spin) (int k-region int) bool)
+    (lambda (t r seen)
+      (let ((t (k-resolve t)))
+        (if (k-visit? t seen)
+            #t
+            (tagcase (k-get t)
+              (ty-base (s) #t)
+              (ty-nat (z) #t)
+              (ty-void () #t)
+              (ty-nil () #t)
+              (ty-var (v) (and (k-data-var? v) (k-near? (k-data-var-place v) r)))
+              (ty-ref (a q) (and (k-region=? q r) (k-forget-walk a r seen)))
+              (ty-array (a q) (and (k-region=? q r) (k-forget-walk a r seen)))
+              (ty-icell (a q) (and (k-region=? q r) (k-forget-walk a r seen)))
+              (ty-pair (a b q nl)
+                (and (k-forget-region? q r (k-frozen-region? q))
+                     (k-forget-walk a r seen) (k-forget-walk b r seen)))
+              (ty-bloblet (fs z q) (and (k-forget-region? q r z) (k-forget-list fs r seen)))
+              (ty-product (ps) (k-forget-parts ps r seen))
+              (ty-sum (ps) (k-forget-parts ps r seen))
+              (ty-union (ms) (k-forget-list ms r seen))
+              (ty-nlist (e z q) (and (k-near? q r) (k-forget-walk e r seen)))
+              (else y #f))))))
+  (k-forget-parts (subr (maxeff kstate spin) (k-parts k-region int) bool)
+    (lambda (ps r seen)
+      (or (null? ps)
+          (and (k-forget-walk (extract (car ps) 2) r seen) (k-forget-parts (cdr ps) r seen)))))
+  (k-forget-list (subr (maxeff kstate spin) (k-ids k-region int) bool)
+    (lambda (ts r seen)
+      (or (null? ts) (and (k-forget-walk (car ts) r seen) (k-forget-list (cdr ts) r seen))))))
+)))

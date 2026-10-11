@@ -1452,3 +1452,20 @@ and reaps, weak references, images, graph copies, the verifier), `value.rs`'s
 (also under `gc-stress` with `FIXPT_VERIFY_BARRIER=1`). Docs:
 `docs/object-model.md`, `value.rs`'s header, `docs/research/floats.md` Q7.
 
+Bloblet types by width (2026-10-10, the user's plan): `(bloblet (fields T
+…) R)` lists at least a bloblet's fields, so one of more fields fits one
+of fewer (fields count from the suffix, so each keeps its offset;
+compiled code uses no static field count, checked in both back ends), in
+both checkers, and inference matches the fields a pattern lists. A field
+is forgotten only if no analysis of the wider type needed it
+(`Checker::forgettable`, `k-forgettable?`): of a frozen bloblet, data at
+its place; of one not frozen, it mentions no region but `R` (and frozen
+heap data), stores only in `R`, and holds no procedure nor a type
+variable that could be one; so escape, masking, storage, data and knots
+all read what a type lists. The FX-26 data walk moved from `check-data.fx`
+to `check-sub-env.fx`, which the subtype test is given. Tests:
+`bloblet/width.fx`, `width-infer.fx`, and refused, `width-escape.fx`,
+`width-frozen-data.fx`, `width-procedure.fx`, `width-variable.fx`,
+`width-exact-region.fx`, checked by `tests/bloblets.rs`. Docs:
+`docs/fx26.md` (Bloblets).
+

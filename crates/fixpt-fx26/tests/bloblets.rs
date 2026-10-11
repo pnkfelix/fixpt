@@ -1,0 +1,40 @@
+//! Bloblets (`docs/fx26.md`, "Bloblets"): each program in
+//! `programs/bloblet` whose first line says what it gives, `;; => value`,
+//! or what its refusal says, `;; ! words`, does so, lowered. The others
+//! are compared only, by `checker.rs` and `compiler.rs`.
+
+use fixpt_engine::Backend;
+use fixpt_fx26::session::Fx26Session;
+
+#[test]
+fn bloblet_programs_do_as_they_say() {
+    let dir = format!("{}/tests/programs/bloblet", env!("CARGO_MANIFEST_DIR"));
+    let mut names: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
+    names.sort();
+    let (mut wrong, mut seen) = (Vec::new(), 0);
+    for path in names {
+        let text = std::fs::read_to_string(&path).unwrap();
+        let first = text.lines().next().unwrap_or("");
+        let (gives, refused) = (first.strip_prefix(";; => "), first.strip_prefix(";; ! "));
+        if gives.is_none() && refused.is_none() {
+            continue;
+        }
+        let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+        let got = match s.run_program(&text) {
+            Ok(Ok(v)) => Ok(v),
+            Ok(Err(e)) => Err(e.to_string()),
+            Err(e) => Err(e.message),
+        };
+        seen += 1;
+        let ok = match (gives, refused, &got) {
+            (Some(want), _, Ok(v)) => v == want,
+            (_, Some(want), Err(e)) => e.contains(want),
+            _ => false,
+        };
+        if !ok {
+            wrong.push(format!("{}: says `{first}`, gives {got:?}", path.display()));
+        }
+    }
+    assert!(seen >= 7, "only {seen} programs");
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}

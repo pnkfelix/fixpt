@@ -630,7 +630,9 @@
           (ty-bloblet (fp zp r)
             (tagcase at
               (ty-bloblet (fa za s)
-                (if (= (k-length fp) (k-length fa))
+                ;; The fields the pattern lists, of an actual bloblet of
+                ;; at least as many.
+                (if (<= (k-length fp) (k-length fa))
                     (begin (ur r s) (k-unify-lists fp fa kinds solved trail))
                     #u))
               (else z #u)))

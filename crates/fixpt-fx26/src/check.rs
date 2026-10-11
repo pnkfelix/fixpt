@@ -2274,6 +2274,50 @@ impl Checker {
         }
     }
 
+    /// Whether a field of type `t` may be forgotten from a bloblet at
+    /// `region`, frozen or not, as a bloblet type of fewer fields does
+    /// (`(bloblet (fields T …) R)` lists at least its fields, `TODO.md` §77):
+    /// only what no analysis of the wider type would have needed. Of a
+    /// frozen bloblet, data at its place, so that it is still data; of one
+    /// not frozen, what mentions no region but `region` and the heap,
+    /// stores only in `region`, and holds no procedure, nor a variable that
+    /// could be one: so the regions a type mentions (escape, masking), its
+    /// storage, and the knots tied through it are all in what it lists.
+    pub(crate) fn forgettable(&self, t: TyId, region: Region, frozen: bool) -> bool {
+        if frozen {
+            return self.is_data_at(t, Self::data_place(region));
+        }
+        self.forget_walk(t, region, &mut HashSet::new())
+    }
+
+    fn forget_walk(&self, t: TyId, r: Region, seen: &mut HashSet<TyId>) -> bool {
+        let t = self.arena.resolve(t);
+        if !seen.insert(t) {
+            return true;
+        }
+        // Frozen data's region, as near as `r`: the heap's, or `r`'s place.
+        let near = |q: Region| match q {
+            Region::Frozen(None, _) | Region::Heap => true,
+            Region::Frozen(Some(p), _) => Region::Var(p) == r,
+            q => q == r,
+        };
+        match self.arena.get(t).clone() {
+            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Nil => true,
+            Ty::Var(v) => self.arena.is_data_var(v) && near(self.data_var_place(v)),
+            Ty::Ref(a, q) | Ty::Array(a, q) | Ty::ICell(a, q) => q == r && self.forget_walk(a, r, seen),
+            Ty::Pair(a, b, q, _) => {
+                (if q.is_frozen() { near(q) } else { q == r }) && self.forget_walk(a, r, seen) && self.forget_walk(b, r, seen)
+            }
+            Ty::Bloblet { fields, frozen, region: q } => {
+                (if frozen { near(q) } else { q == r }) && fields.iter().all(|f| self.forget_walk(*f, r, seen))
+            }
+            Ty::Product(ps) | Ty::Sum(ps) => ps.iter().all(|(_, x)| self.forget_walk(*x, r, seen)),
+            Ty::Union(ms) => ms.iter().all(|x| self.forget_walk(*x, r, seen)),
+            Ty::NList { elem, region: q, .. } => near(q) && self.forget_walk(elem, r, seen),
+            _ => false,
+        }
+    }
+
     /// The places, other than the heap, that data `t`'s parts are in.
     pub(crate) fn data_places(&self, t: TyId, seen: &mut HashSet<TyId>, out: &mut Vec<Region>) {
         let t = self.arena.resolve(t);
@@ -2962,6 +3006,9 @@ impl Checker {
             (Ty::MarkKey(x, r), Ty::MarkKey(y, s)) => ra(r) == rb(s) && self.sub(x, y, env, st) && self.sub(y, x, &flip, st),
             // A bloblet's fields are invariant, as a reference's contents
             // are, unless they are frozen, when nothing can store into them.
+            // A type lists at least a bloblet's fields: one of more fields
+            // fits one of fewer, since fields count from the suffix, so
+            // each keeps its offset (`TODO.md` §77).
             // Freezing is a change of type, never a subtype: a bloblet seen
             // as frozen through one name could still be written through
             // another.
@@ -2971,8 +3018,11 @@ impl Checker {
             ) => {
                 (ra(r) == rb(s) || (za && Region::frozen_le(ra(r), rb(s))))
                     && za == zb
-                    && fa.len() == fb.len()
+                    && fa.len() >= fb.len()
                     && fa.iter().zip(&fb).all(|(x, y)| self.sub(*x, *y, env, st) && (za || self.sub(*y, *x, &flip, st)))
+                    // Fields past the wider type's are forgotten: only
+                    // those no analysis of it needed (`forgettable`).
+                    && fa[fb.len()..].iter().all(|x| self.forgettable(*x, r, za))
             }
             // Immutable, so covariant: a product in its fields, a sum in its
             // variants, and a sum with fewer tags fits one with more.

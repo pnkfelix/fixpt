@@ -153,6 +153,14 @@
 (define k-tail-size (with check-print-parts k-tail-size))
 (define k-eff=? (with check-effects k-eff=?))
 (define k-region=? (with check-effects k-region=?))
+(define k-forgettable? (with check-sub-env k-forgettable?))
+;; Fields `fs` past the first `n`, each forgettable from a bloblet at `r`,
+;; frozen if `z` (`k-forgettable?`).
+(define k-forgettable-past? (subr (maxeff kstate spin) (k-ids int k-region bool) bool)
+  (lambda (fs n r z)
+    (cond ((null? fs) #t)
+          ((> n 0) (k-forgettable-past? (cdr fs) (- n 1) r z))
+          (else (and (k-forgettable? (car fs) r z) (k-forgettable-past? (cdr fs) 0 r z))))))
 (define k-within? (with check-effects k-within?))
 (define k-props-within? (with check-proving k-props-within?))
 (define k-props=? (with check-proving k-props=?))
@@ -537,9 +545,12 @@
             (ty-bloblet (fa za r)
               (tagcase tb
                 (ty-bloblet (fb zb s)
+                  ;; At least its fields: those past the wider type's
+                  ;; forgotten, if no analysis of it needed them.
                   (and (if za (k-benv-frozen-le? r s ea eb) (k-benv-region=? r s ea eb))
-                       (k-bool=? za zb) (= (k-length fa) (k-length fb))
-                       (k-sub-fields fa fb za ea eb trail labels)))
+                       (k-bool=? za zb) (>= (k-length fa) (k-length fb))
+                       (k-sub-fields fa fb za ea eb trail labels)
+                       (k-forgettable-past? fa (k-length fb) r za)))
                 (else z #f)))
             (ty-product (pa)
               (tagcase tb
@@ -626,7 +637,7 @@
                (k-sub-descs (cdr xs) (cdr ys) (cdr vs) ea eb trail labels)))))
   (k-sub-fields (subr (maxeff kstate spin) (k-ids k-ids bool k-benv k-benv k-strail k-labels) bool)
     (lambda (fa fb frozen ea eb trail labels)
-      (cond ((null? fa) #t)
+      (cond ((null? fb) #t)
             (else (and (k-sub-held frozen (car fa) (car fb) ea eb trail labels)
                        (k-sub-fields (cdr fa) (cdr fb) frozen ea eb trail labels))))))
   (k-sub-product (subr (maxeff kstate spin) (k-parts k-parts k-benv k-benv k-strail k-labels) bool)

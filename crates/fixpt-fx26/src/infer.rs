@@ -1666,7 +1666,9 @@ impl Checker {
                     }
                 }
             }
-            (Ty::Bloblet { fields: fp, region: r, .. }, Ty::Bloblet { fields: fa, region: s, .. }) if fp.len() == fa.len() => {
+            // The fields the pattern lists, of an actual bloblet of at least
+            // as many (a bloblet type lists at least its fields).
+            (Ty::Bloblet { fields: fp, region: r, .. }, Ty::Bloblet { fields: fa, region: s, .. }) if fp.len() <= fa.len() => {
                 self.unify_region(r, s, u);
                 for (x, y) in fp.iter().zip(&fa) {
                     self.unify(*x, *y, u, trail);

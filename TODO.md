@@ -2022,6 +2022,9 @@ header; nothing uses a static field count. So:
   "hidden fields reach only regions outliving the bloblet's", needs
   outlives facts FX-26 does not generally have). To check too: whether
   the `data`/`acyclic` shape analyses (`check.rs`) need every field seen.
+- **Done** (`DONE.md` §77): width subtyping, by the rule below. Left: a
+  message saying which field could not be forgotten and why; the
+  suffix's layout in the type, by prefix, once `F` is there.
 - **Plan (the user's, 2026-10-10): today's syntax *is* the lower bound**;
   an exact form waits for a need. Checked against `check.rs`'s walks of
   a bloblet's fields: the region-only ones (`regions_walk`, the escape

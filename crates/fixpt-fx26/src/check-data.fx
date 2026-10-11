@@ -11,14 +11,16 @@
        (check-print-parts-types (load-module "fx26:check-print-parts-types.fx"))
        (check-expect-types (load-module "fx26:check-expect-types.fx"))
        (check-effects-types (load-module "fx26:check-effects-types.fx"))
-       (check-subst-types (load-module "fx26:check-subst-types.fx")))
+       (check-subst-types (load-module "fx26:check-subst-types.fx"))
+       (check-sub-env-types (load-module "fx26:check-sub-env-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-types (select check-types-types check-types-sig))
            (check-print (select check-print-types check-print-sig))
            (check-expect (select check-expect-types check-expect-sig))
            (check-effects (select check-effects-types check-effects-sig))
            (check-subst (select check-subst-types check-subst-sig))
-           (check-print-parts (select check-print-parts-types check-print-parts-sig)))
+           (check-print-parts (select check-print-parts-types check-print-parts-sig))
+           (check-sub-env (select check-sub-env-types check-sub-env-sig)))
     (module
 
 ;; The types it uses of the files before it.
@@ -66,64 +68,12 @@
 (define k-region=? (with check-effects k-region=?))
 (define k-subst-region (with check-subst k-subst-region))
 
-;; Whether `r` is frozen data's region.
-(define k-frozen-region? (subr pure (k-region) bool)
-  (lambda (r) (tagcase r (r-frozen (p f) #t) (else y #f))))
-;; Where data at region `r` is: the place it is frozen into, or the place or
-;; region it was made at, or else the heap.
-(define* k-data-place (subr pure (k-region) k-region)
-  (lambda (r)
-    (tagcase r
-      (r-frozen (p f) (if (< p 0) (r-heap) (r-var p)))
-      (r-var (v) (r-var v))
-      (else y (r-heap)))))
-;; Where the data a `data` variable stands for is: its bound, or the heap.
-(define* k-data-var-place (subr (maxeff kreads (alloc @t)) (int) k-region)
-  (lambda (v) (let ((b (k-bound-of v))) (if (null? b) (r-heap) (car b)))))
-;; Whether data at `q` may be taken where data at `place` is wanted: `place`
-;; empty for anywhere, or else the heap or the one place it holds.
-(define* k-data-here? (subr (maxeff (read @globals) spin) (k-regions k-region) bool)
-  (lambda (place q) (or (null? place) (k-region=? q (r-heap)) (k-region=? q (car place)))))
-
-;; Whether `t` is data: built only from base types, `datum`, products and
-;; sums, and pairs and bloblets that are frozen, of data; and type variables
-;; of kind `data`. With `place` naming one, each frozen part is also in the
-;; heap or in that place.
-(define-rec
-  (k-data-walk (subr (maxeff kstate spin) (int int k-regions) bool)
-    (lambda (t seen place)
-      (let ((t (k-resolve t)))
-        (if (k-visit? t seen)
-            #t
-            (tagcase (k-get t)
-              (ty-base (s) #t)
-              (ty-void () #t)
-              (ty-var (v) (and (k-data-var? v) (k-data-here? place (k-data-var-place v))))
-              (ty-product (ps) (k-data-parts ps seen place))
-              (ty-sum (ps) (k-data-parts ps seen place))
-              (ty-nil () #t)
-              (ty-union (ms) (k-data-list ms seen place))
-              (ty-pair (a b r nl)
-                (and (k-frozen-region? r) (k-data-here? place (k-data-place r))
-                     (k-data-walk a seen place) (k-data-walk b seen place)))
-              (ty-bloblet (fs z r)
-                (and z (k-data-here? place (k-data-place r)) (k-data-list fs seen place)))
-              (ty-nlist (e z r)
-                (and (k-data-here? place (k-data-place r)) (k-data-walk e seen place)))
-              (ty-nat (z) #t)
-              (else y #f))))))
-  (k-data-parts (subr (maxeff kstate spin) (k-parts int k-regions) bool)
-    (lambda (ps seen place)
-      (or (null? ps)
-          (and (k-data-walk (extract (car ps) 2) seen place) (k-data-parts (cdr ps) seen place)))))
-  (k-data-list (subr (maxeff kstate spin) (k-ids int k-regions) bool)
-    (lambda (ts seen place)
-      (or (null? ts) (and (k-data-walk (car ts) seen place) (k-data-list (cdr ts) seen place))))))
-(define k-is-data? (subr (maxeff kstate spin) (int) bool)
-  (lambda (t) (k-data-walk t (k-new-epoch) nil)))
-;; Whether `t` is data at `place`, a place variable or the heap.
-(define k-is-data-at? (subr (maxeff kstate spin) (int k-region) bool)
-  (lambda (t place) (k-data-walk t (k-new-epoch) (the k-regions (cons place nil)))))
+;; Data, and what a wider bloblet type may forget: `check-sub-env.fx`'s,
+;; which the subtype test, before this file, asks.
+(define k-data-place (with check-sub-env k-data-place))
+(define k-data-var-place (with check-sub-env k-data-var-place))
+(define k-is-data? (with check-sub-env k-is-data?))
+(define k-is-data-at? (with check-sub-env k-is-data-at?))
 
 (define k-region-in? (subr (maxeff (read @globals) spin) (k-regions k-region) bool)
   (lambda (rs q) (and (not (null? rs)) (or (k-region=? (car rs) q) (k-region-in? (cdr rs) q)))))

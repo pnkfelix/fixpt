@@ -168,3 +168,33 @@ The user's okasaki.fx met "a (moduleof …) is expected here, and this is a
    types them, so the in-line `ubfx`/`lsr #37` path waits (TODO.md §77).
 8. **Names** `%suffix-ref…`, after `%bloblet-…`: runtime-level, a `%`
    prefix, not yet FX-26 names.
+
+## Bloblet types by width (TODO.md §77, 2026-10-10)
+
+1. **Today's syntax is the lower bound** (the user's plan); no exact form
+   until something needs one.
+2. **What may be forgotten**, one rule (`forgettable`): of a frozen
+   bloblet, data at its place (`is_data_at`), so a frozen bloblet type
+   that is data stays so; of one not frozen, a walk that allows base types,
+   data variables near `R`, refs/arrays/i-cells/mutable pairs and bloblets
+   only at `R`, frozen pairs, bloblets and nlists in the heap or `R`'s
+   place, products, sums and unions of those; nothing else (procedures,
+   type variables of kind `type`, generative types, modules, prompt tags…
+   refused, conservatively).
+3. **`@heap` storage hidden is refused**; frozen heap data is allowed.
+   `storage_regions` would not see heap storage behind a hidden field;
+   refusing costs little and can be relaxed.
+4. **One walk of its own**, not `regions_in` and `storage_regions` reused:
+   the FX-26 subtype test runs before `check-resolve.fx` and
+   `check-holds.fx`, which have those walks.
+5. **The data walk moved from `check-data.fx` to `check-sub-env.fx`**, so
+   the subtype test (given `check-sub-env`) reaches it; `check-data` is
+   given `check-sub-env` and imports it back, its exports unchanged.
+   Rejected: a new module file, which would need the conductor's wiring
+   and a types file for four functions; `check-sub-env` already had what
+   the walk uses (`check-types`, `check-effects`).
+6. **Inference matches the pattern's fields** against an actual bloblet
+   of at least as many, both checkers.
+7. **No message of its own** for a refused widening yet: it says "a W is
+   expected here, and this is a G", as any mismatch. A line saying which
+   field could not be forgotten, and why, would help; for later.

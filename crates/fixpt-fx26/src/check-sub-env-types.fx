@@ -19,8 +19,24 @@
 (define-type k-labels (select check-subtype-types k-labels))
 (define-type k-region (select check-types-types k-region))
 (define-type k-strail (select check-subtype-types k-strail))
+(define-type k-regions (select check-types-types k-regions))
 (define-type check-sub-env-sig
-  (moduleof (val k-part-find (subr (maxeff (read @globals) (read @t)) (k-parts symbol) int))
+  (moduleof (val k-data-place (subr pure (k-region) k-region))
+            (val k-data-var-place
+                 (subr (maxeff (alloc @t) (read @globals) (read @t)) (int) k-region))
+            (val k-is-data?
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (int)
+                       bool))
+            (val k-is-data-at?
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (int k-region)
+                       bool))
+            (val k-forgettable?
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (int k-region bool)
+                       bool))
+            (val k-part-find (subr (maxeff (read @globals) (read @t)) (k-parts symbol) int))
             (val k-base-below? (subr (read @globals) (symbol symbol) bool))
             (val k-bool=? (subr pure (bool bool) bool))
             (val k-benv-var=?

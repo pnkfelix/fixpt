@@ -133,7 +133,7 @@
          (check-data
           ((load-input "fx26:check-data.fx")
            check-types check-print check-expect check-effects
-           check-subst check-print-parts))
+           check-subst check-print-parts check-sub-env))
          ;; The checker, bounds on type binders.
          (check-bounds
           ((load-input "fx26:check-bounds.fx")
