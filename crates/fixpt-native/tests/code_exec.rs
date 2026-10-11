@@ -46,7 +46,7 @@ fn code_reads_its_own_field_across_a_collection() {
         // The semispaces alternate, so each collection moves the pair.
         assert_ne!(now, before, "the pair moved (round {round})");
         before = now;
-        let read = Value(run(&heap, c));
+        let read = Value::from_raw(run(&heap, c));
         assert_eq!(read, now, "the code reads the field as the collector left it");
         assert_eq!(heap.car(read), Value::fixnum(41));
     }
@@ -60,7 +60,7 @@ fn code_reads_a_farther_field() {
     let mut heap = Heap::new();
     let c = code_bloblet(&mut heap, 2, &[ldr_lit(0, -4), ret()]);
     heap.set_bloblet_slot(c, 2, Value::fixnum(12345));
-    assert_eq!(Value(run(&heap, c)), Value::fixnum(12345));
+    assert_eq!(Value::from_raw(run(&heap, c)), Value::fixnum(12345));
 }
 
 /// Code no longer reachable is freed, and its room given to new code, which

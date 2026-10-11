@@ -1151,7 +1151,7 @@ pub(crate) extern "C" fn pure_call(st: *mut State, p: u64, x: u64, y: u64) -> Pu
     let def = &fixpt_runtime::PRIMITIVES[p as usize];
     let fixpt_runtime::PrimKind::Simple(f) = def.kind else { return fail(format!("`{}` needs an engine", def.name)) };
     // On the stack: a call per primitive run, no allocation for it.
-    let mut buf = [Value(x), Value(y)];
+    let mut buf = [Value::from_raw(x), Value::from_raw(y)];
     let args = if def.min == 1 { &mut buf[..1] } else { &mut buf[..] };
     let out = match f(rt, args) {
         Ok(v) => PureOut { v: v.raw(), failed: 0 },
@@ -1285,7 +1285,7 @@ fn round_trip(st: &mut State, n: u64) -> Result<(), Trap> {
     let nds = (st.ds_base - st.dsp) as usize / 8;
     let nentries = (st.rs_base - st.rsp) as usize / 32;
     // SAFETY: the machine's stacks, between their pointers and bases.
-    let word = |a: u64| unsafe { Value(*(a as *const u64)) };
+    let word = |a: u64| unsafe { Value::from_raw(*(a as *const u64)) };
     let ds: Vec<Value> = (0..nds).map(|i| word(st.ds_base - 8 - 8 * i as u64)).collect();
     let mut rs = Vec::with_capacity(4 * nentries);
     for e in 0..nentries {
@@ -1297,7 +1297,7 @@ fn round_trip(st: &mut State, n: u64) -> Result<(), Trap> {
     if TIMING.with(|t| *t) {
         ROUND_TRIP_WORDS.with(|w| *w.borrow_mut() += (nds + 4 * nentries) as u64);
     }
-    let mut at = Snapshot { cur: Value(st.cur), k: (st.d / 8) as usize, fp: (st.fp / 8) as usize, clo: Value(st.clo) };
+    let mut at = Snapshot { cur: Value::from_raw(st.cur), k: (st.d / 8) as usize, fp: (st.fp / 8) as usize, clo: Value::from_raw(st.clo) };
     let mut m = Machine::from_stacks(ds, rs);
     let result = if st.rt != 0 {
         // SAFETY: the runtime `run_in_runtime` holds exclusively.
@@ -1341,8 +1341,8 @@ fn prim(st: &mut State) -> Result<(), Trap> {
     // SAFETY: the runtime `run_in_runtime` holds exclusively.
     let rt = unsafe { &mut *(st.rt as *mut fixpt_runtime::Runtime) };
     let k = (st.d / 8) as usize;
-    let p = rt.heap.bloblet_slot(Value(st.cur), k).as_fixnum() as usize;
-    let count = rt.heap.bloblet_slot(Value(st.cur), k + 1).as_fixnum() as usize;
+    let p = rt.heap.bloblet_slot(Value::from_raw(st.cur), k).as_fixnum() as usize;
+    let count = rt.heap.bloblet_slot(Value::from_raw(st.cur), k + 1).as_fixnum() as usize;
     let depth = (st.ds_base - st.dsp) as usize / 8;
     if depth < count {
         return Err(Trap::Underflow { routine: name });
@@ -1353,7 +1353,7 @@ fn prim(st: &mut State) -> Result<(), Trap> {
     let Some(def) = fixpt_runtime::PRIMITIVES.get(p) else { return Err(Trap::Prim(format!("no primitive {p}"))) };
     if TIMING.with(|t| *t) {
         PRIM_COUNTS.with(|c| *c.borrow_mut().entry(def.name).or_insert(0) += 1);
-        let caller = rt.heap.symbol_name(rt.heap.bloblet_slot(Value(st.cur), WORD_NAME));
+        let caller = rt.heap.symbol_name(rt.heap.bloblet_slot(Value::from_raw(st.cur), WORD_NAME));
         PRIM_CALLERS.with(|c| *c.borrow_mut().entry((def.name, caller)).or_insert(0) += 1);
     }
     let fixpt_runtime::PrimKind::Simple(f) = def.kind else { return Err(Trap::Prim(format!("`{}` needs an engine", def.name))) };
@@ -1363,7 +1363,7 @@ fn prim(st: &mut State) -> Result<(), Trap> {
     safepoint(st, &mut rt.heap);
     // The top is at `dsp`; the arguments go deepest first.
     // SAFETY: as above.
-    let word = |a: u64| unsafe { Value(*(a as *const u64)) };
+    let word = |a: u64| unsafe { Value::from_raw(*(a as *const u64)) };
     // On the stack, for as many as most primitives take.
     let (mut buf, mut many) = ([Value::NULL; 8], Vec::new());
     let args: &mut [Value] = if count <= buf.len() {
@@ -1391,7 +1391,7 @@ fn safepoint(st: &mut State, heap: &mut Heap) {
     // word a value.
     let ds = unsafe { std::slice::from_raw_parts_mut(st.dsp as *mut Value, nds) };
     let rs = unsafe { std::slice::from_raw_parts_mut(st.rsp as *mut Value, nrs) };
-    let mut regs = [Value(st.cur), Value(st.clo)];
+    let mut regs = [Value::from_raw(st.cur), Value::from_raw(st.clo)];
     heap.maybe_collect(&mut [ds, rs, &mut regs]);
     (st.cur, st.clo) = (regs[0].raw(), regs[1].raw());
 }
@@ -1404,8 +1404,8 @@ fn closure(st: &mut State) -> Result<(), Trap> {
     let heap = unsafe { heap_of(st) };
     safepoint(st, heap);
     let k = (st.d / 8) as usize;
-    let w = heap.bloblet_slot(Value(st.cur), k);
-    let count = heap.bloblet_slot(Value(st.cur), k + 1).as_fixnum() as usize;
+    let w = heap.bloblet_slot(Value::from_raw(st.cur), k);
+    let count = heap.bloblet_slot(Value::from_raw(st.cur), k + 1).as_fixnum() as usize;
     let depth = (st.ds_base - st.dsp) as usize / 8;
     if depth < st.fp as usize / 8 + count {
         return Err(Trap::Underflow { routine: "closure" });
@@ -1417,7 +1417,7 @@ fn closure(st: &mut State) -> Result<(), Trap> {
     heap.set_bloblet_slot(c, CLOSURE_WORD, w);
     // SAFETY: the machine's data stack; the top is at `dsp`, the free
     // values deepest first.
-    let word = |a: u64| unsafe { Value(*(a as *const u64)) };
+    let word = |a: u64| unsafe { Value::from_raw(*(a as *const u64)) };
     for i in 0..count {
         heap.set_bloblet_slot(c, CLOSURE_FREE0 + i, word(st.dsp + 8 * (count - 1 - i) as u64));
     }
@@ -1456,7 +1456,7 @@ fn callout_routine(heap: &mut Heap, st: &mut State, ds: &mut [Value], rs: &mut [
             if ds.len() < 2 {
                 return Err(underflow);
             }
-            let mut regs = [Value(st.cur), Value(st.clo)];
+            let mut regs = [Value::from_raw(st.cur), Value::from_raw(st.clo)];
             heap.maybe_collect(&mut [ds, rs, &mut regs]);
             st.cur = regs[0].raw();
             st.clo = regs[1].raw();
@@ -2038,7 +2038,7 @@ impl NativeMachine {
         // For finding a fault: with `FIXPT_TRAP_WHERE` set, the word and the
         // closure running when the machine trapped.
         if st.status != 0 && std::env::var_os("FIXPT_TRAP_WHERE").is_some() {
-            let show = |v: u64| fixpt_runtime::print::write_value(&rt.heap, Value(v));
+            let show = |v: u64| fixpt_runtime::print::write_value(&rt.heap, Value::from_raw(v));
             eprintln!("; trapped in {} (closure {})", show(st.cur), show(st.clo));
         }
         self.stacks.finish(&st)

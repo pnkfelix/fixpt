@@ -83,9 +83,17 @@ const IMM_PAYLOAD_SHIFT: u32 = 8;
 /// docs in `heap`: a `Value` held across a *collection* is stale. It stays
 /// valid across allocation, which never moves anything.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct Value(pub u64);
+pub struct Value(pub(crate) u64);
 
 impl Value {
+    /// The value whose word is `bits`, unchecked: for a word read from
+    /// memory that holds a value (a frame slot, a machine's register). Raw
+    /// bits that are no value (a bignum's limb, a float's bits) are never
+    /// made a `Value`: `Heap::obj_set_word` stores them.
+    #[inline]
+    pub const fn from_raw(bits: u64) -> Value {
+        Value(bits)
+    }
     #[inline]
     pub const fn raw(self) -> u64 {
         self.0

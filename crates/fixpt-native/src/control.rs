@@ -36,7 +36,7 @@ impl Stacks<'_> {
     }
     fn ds_get(&self, i: usize) -> Value {
         // SAFETY: below `ds_len`, a word of the data stack.
-        unsafe { Value(*(self.ds_at(i) as *const u64)) }
+        unsafe { Value::from_raw(*(self.ds_at(i) as *const u64)) }
     }
     fn ds_push(&mut self, v: Value) -> Result<(), Trap> {
         if self.st.dsp - 8 < self.st.ds_limit {
@@ -67,7 +67,7 @@ impl Stacks<'_> {
         // Entry `i / 4` from the bottom, word `i % 4` within it.
         let at = self.st.rs_base - 32 * (i as u64 / 4 + 1) + 8 * (i as u64 % 4);
         // SAFETY: below `rs_len`, a word of the return stack.
-        unsafe { Value(*(at as *const u64)) }
+        unsafe { Value::from_raw(*(at as *const u64)) }
     }
     fn rs_push_entry(&mut self, e: [Value; 4]) -> Result<(), Trap> {
         if self.st.rsp - 32 <= self.st.rs_limit {
@@ -86,7 +86,7 @@ impl Stacks<'_> {
 
     /// The registers as a return entry, and back.
     fn push_return(&mut self) -> Result<(), Trap> {
-        let e = [Value(self.st.cur), Value(self.st.d), Value(self.st.fp), Value(self.st.clo)];
+        let e = [Value::from_raw(self.st.cur), Value::from_raw(self.st.d), Value::from_raw(self.st.fp), Value::from_raw(self.st.clo)];
         self.rs_push_entry(e)
     }
     fn fp(&self) -> usize {
@@ -206,10 +206,10 @@ fn capture(s: &Stacks, heap: &mut Heap, rs_from: usize, ds_from: usize, whole: b
     let fields = [
         (CONT_DS, ds),
         (CONT_RS, rs),
-        (CONT_CUR, Value(s.st.cur)),
-        (CONT_K, Value(s.st.d)),
-        (CONT_FP, Value(s.st.fp)),
-        (CONT_CLO, Value(s.st.clo)),
+        (CONT_CUR, Value::from_raw(s.st.cur)),
+        (CONT_K, Value::from_raw(s.st.d)),
+        (CONT_FP, Value::from_raw(s.st.fp)),
+        (CONT_CLO, Value::from_raw(s.st.clo)),
         (CONT_BASE, Value::fixnum(ds_from as i64)),
         (CONT_WHOLE, Value::boolean(whole)),
         (CONT_RUN, Value::fixnum(0)),
@@ -279,7 +279,7 @@ fn routine(st: &mut State, heap: &mut Heap, name: &'static str, safepoint: fn(&m
     match name {
         "call" | "tailcall" | "tcall" | "ttailcall" => {
             let k = (st.d / 8) as usize;
-            let n = heap.bloblet_slot(Value(st.cur), k).as_fixnum() as usize;
+            let n = heap.bloblet_slot(Value::from_raw(st.cur), k).as_fixnum() as usize;
             st.d += 8;
             call(&mut Stacks { st }, heap, n, name.ends_with("tailcall"), name)
         }

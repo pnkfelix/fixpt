@@ -434,8 +434,8 @@ pub fn call_native(rt: &mut fixpt_runtime::Runtime, closure: Value, args: &[Valu
 /// What a prompt's frame, and a mark's, holds first, and a continuation's
 /// data: values no program can make (`UNBOUND` with a payload), so no other
 /// frame's first slot is one.
-const PROMPT_MARK: Value = Value(Value::UNBOUND.raw() + (1 << 8));
-const MARK_MARK: Value = Value(Value::UNBOUND.raw() + (2 << 8));
+const PROMPT_MARK: Value = Value::from_raw(Value::UNBOUND.raw() + (1 << 8));
+const MARK_MARK: Value = Value::from_raw(Value::UNBOUND.raw() + (2 << 8));
 const CONT_MARK: Value = fixpt_heap::NATIVE_CONT_MARK;
 /// A prompt's frame, and a mark's: the link, the landing (for a mark, 0),
 /// the marker, the tag and handler (the key and value), and the regions
@@ -870,7 +870,7 @@ fn run(r: &Runner, rt: &mut fixpt_runtime::Runtime, p: Compiled, args: &[Value],
         };
         return Err(DirectTrap { what, pc: st.pc });
     }
-    Ok(Value(v))
+    Ok(Value::from_raw(v))
 }
 
 /// From Rust, `entry(state, procedure)`: the callee-saved registers saved,
@@ -3536,7 +3536,7 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
     let c = unsafe { *(st.table as *const Callout).add(which as usize) };
     let n = if let Callout::Foreign | Callout::ClosureAny | Callout::Rest = c { st.nargs as usize } else { c.arity() };
     // Past 8, the eighth is a list of the rest (Larceny's convention).
-    let mut args: Vec<Value> = st.args[..n.min(8)].iter().map(|a| Value(*a)).collect();
+    let mut args: Vec<Value> = st.args[..n.min(8)].iter().map(|a| Value::from_raw(*a)).collect();
     if n > 8 {
         let mut rest = args.pop().expect("eight");
         while args.len() < n {
@@ -3545,9 +3545,9 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
         }
     }
     if let Callout::Foreign = c {
-        args.push(Value(st.aux));
+        args.push(Value::from_raw(st.aux));
     }
-    let mut code = [Value(st.code)];
+    let mut code = [Value::from_raw(st.code)];
     // The frames walked only for a collection; none for a primitive that
     // never collects, whose caller's values are in registers.
     let quiet = matches!(c, Callout::Pure { .. } | Callout::Box { .. } | Callout::Unbox | Callout::BoxF64 | Callout::Underflow | Callout::Overflow);
@@ -3556,7 +3556,7 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
     // no stack; then the innermost restored, where the code goes on.
     if !quiet && rt.heap.collection_due() {
         flush_all(&mut rt.heap, st);
-        let mut cont = [Value(st.cont)];
+        let mut cont = [Value::from_raw(st.cont)];
         rt.heap.collect_due(&mut [&mut args, &mut code, &mut cont]);
         st.cont = cont[0].raw();
         match restore(&rt.heap, st, cont_pos(st)) {
@@ -3572,7 +3572,7 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
         }
         Callout::Unbox => fixpt_runtime::low_64_bits(rt, args[0]),
         Callout::BoxF64 => rt.heap.make_flonum(f64::from_bits(args[0].raw())).raw(),
-        Callout::Closure { .. } | Callout::ClosureAny => native_closure(&mut rt.heap, Value(st.aux), &args).raw(),
+        Callout::Closure { .. } | Callout::ClosureAny => native_closure(&mut rt.heap, Value::from_raw(st.aux), &args).raw(),
         Callout::RegionClosure { n } => {
             let h = if args[0].is_fixnum() { args[0].as_fixnum() as usize } else { usize::MAX };
             let (free, code) = (&args[1..n - 1], args[n - 1]);
@@ -3585,7 +3585,7 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
             let held: Vec<Value> = native_frames(st).iter().flat_map(|s| s.iter().copied()).collect();
             let kept = rt.heap.vector_from(&held);
             let at = rt.heap.push_root(kept);
-            rt.heap.push_root(Value(st.cont));
+            rt.heap.push_root(Value::from_raw(st.cont));
             // A native call from the cellular code runs below these frames.
             let runner = RUNNING.get().expect("native code is running");
             let outer = CALLED_OUT.replace(Some((runner, st.native_sp)));
@@ -3724,7 +3724,7 @@ fn abort_to(rt: &mut fixpt_runtime::Runtime, st: &mut DState, tag: Value, v: Val
     };
     match pf {
         Some(pf) => {
-            rt.heap.region_exit(Value(word(pf + 40)).as_fixnum() as usize);
+            rt.heap.region_exit(Value::from_raw(word(pf + 40)).as_fixnum() as usize);
             (st.resume_sp, st.resume_fp, st.resume_pc, st.resume_x0) = (pf, pf, word(pf + 8), v.raw());
             true
         }
@@ -3812,7 +3812,7 @@ impl Pos {
 
 /// The rest of this run's frames, in the heap.
 fn cont_pos(st: &DState) -> Pos {
-    Pos::new(Value(st.cont), st.cont_at as usize, st.cont_pc)
+    Pos::new(Value::from_raw(st.cont), st.cont_at as usize, st.cont_pc)
 }
 
 fn set_cont(st: &mut DState, p: Pos) {
@@ -3836,7 +3836,7 @@ impl Rec {
     fn word(&self, j: usize) -> Value {
         // SAFETY: within its chunk (`j < n - 2`), which does not move
         // while the chain is walked.
-        Value(unsafe { *self.words.add(self.at + 2 + j) })
+        Value::from_raw(unsafe { *self.words.add(self.at + 2 + j) })
     }
     /// Whether it is left by a return to its second word (a procedure's
     /// frame, a stub's, a mark's in tail position), not popped by the code
@@ -3872,7 +3872,7 @@ fn step(heap: &Heap, p: Pos) -> Option<(Rec, Pos)> {
     while at >= len {
         // SAFETY: the chunk's header words, which do not move while the
         // chain is walked.
-        let (next, next_at) = unsafe { (Value(*words.add(CH_NEXT)), Value(*words.add(CH_NEXT_AT)).as_fixnum() as usize) };
+        let (next, next_at) = unsafe { (Value::from_raw(*words.add(CH_NEXT)), Value::from_raw(*words.add(CH_NEXT_AT)).as_fixnum() as usize) };
         if next == Value::FALSE {
             return None;
         }
@@ -3880,7 +3880,7 @@ fn step(heap: &Heap, p: Pos) -> Option<(Rec, Pos)> {
         (chunk, at, words, len) = (next, next_at, w.as_ptr(), w.len());
     }
     // SAFETY: a frame's first two words, within its chunk.
-    let (n, w8) = unsafe { (Value(*words.add(at)).as_fixnum() as usize, Value(*words.add(at + 1)).as_fixnum() as u64) };
+    let (n, w8) = unsafe { (Value::from_raw(*words.add(at)).as_fixnum() as usize, Value::from_raw(*words.add(at + 1)).as_fixnum() as u64) };
     Some((Rec { chunk, at, n, w8, pc: p.pc, words }, Pos { chunk, at: at + n, pc: w8, words, len }))
 }
 
@@ -3911,7 +3911,7 @@ fn kept_mask(fp: u64, end: u64) -> u64 {
     if end - fp <= 16 {
         return 0;
     }
-    let head = Value(word(fp + 16));
+    let head = Value::from_raw(word(fp + 16));
     if !head.is_fixnum() || head.as_fixnum() < 0 { u64::MAX } else { (head.as_fixnum() as u64) << 1 | 1 }
 }
 
@@ -3950,7 +3950,7 @@ fn chunks_of(heap: &mut Heap, frames: &[(u64, u64)], last: u64, tail: Pos) -> Po
                     1 => Value::fixnum(if f == outermost { last } else { word(fp + 8) } as i64),
                     _ => {
                         let j = k - 2;
-                        if j >= 64 || mask & (1 << j) != 0 { Value(word(fp + 8 * k as u64)) } else { Value::fixnum(0) }
+                        if j >= 64 || mask & (1 << j) != 0 { Value::from_raw(word(fp + 8 * k as u64)) } else { Value::fixnum(0) }
                     }
                 };
                 k += 1;
@@ -4080,7 +4080,7 @@ fn overflow(heap: &mut Heap, st: &mut DState) -> u64 {
     }
     // The kept frames aside, where the flush writes its chunk's start; the
     // marks' words are values to keep.
-    let mut kept: Vec<Value> = (0..size / 8).map(|i| Value(word(f0 + 8 * i))).collect();
+    let mut kept: Vec<Value> = (0..size / 8).map(|i| Value::from_raw(word(f0 + 8 * i))).collect();
     let last = outermost_second(st, frames.last().expect("a frame").0);
     let mut p = flush_in_place(heap, &frames, last, cont_pos(st));
     p.pc = kept[((outer - f0) / 8 + 1) as usize].raw();
@@ -4092,11 +4092,11 @@ fn overflow(heap: &mut Heap, st: &mut DState) -> u64 {
     let info = st.overflow_info;
     let variadic = info & 1 << 9 != 0;
     let n = if variadic { (st.nargs as usize).min(8) } else { (info & 0xff) as usize };
-    let mut regs: Vec<Value> = (1..=n).map(|r| Value(st.kept[r])).collect();
-    let mut saved: Vec<Value> = if variadic { st.args[..n].iter().map(|a| Value(*a)).collect() } else { Vec::new() };
-    let mut clo: Vec<Value> = if info & 1 << 8 != 0 { vec![Value(st.kept[CLO as usize])] } else { Vec::new() };
-    let mut code = [Value(st.overflow_code), Value(st.code)];
-    let mut cont = [Value(st.cont)];
+    let mut regs: Vec<Value> = (1..=n).map(|r| Value::from_raw(st.kept[r])).collect();
+    let mut saved: Vec<Value> = if variadic { st.args[..n].iter().map(|a| Value::from_raw(*a)).collect() } else { Vec::new() };
+    let mut clo: Vec<Value> = if info & 1 << 8 != 0 { vec![Value::from_raw(st.kept[CLO as usize])] } else { Vec::new() };
+    let mut code = [Value::from_raw(st.overflow_code), Value::from_raw(st.code)];
+    let mut cont = [Value::from_raw(st.cont)];
     {
         let mut roots: Vec<&mut [Value]> = vec![&mut regs, &mut saved, &mut clo, &mut code, &mut cont];
         // The marks' words, from the third on, in each kept frame but this.
@@ -4199,7 +4199,7 @@ fn continuation(rt: &mut fixpt_runtime::Runtime, st: &DState, p: Pos, whole: boo
     let heap = &mut rt.heap;
     let regions = Value::fixnum(heap.live_regions() as i64);
     let data = heap.vector_from(&[CONT_MARK, p.chunk, Value::fixnum(p.at as i64), Value::fixnum(p.pc as i64), regions, Value::boolean(whole)]);
-    native_closure(heap, Value(st.aux), &[data])
+    native_closure(heap, Value::from_raw(st.aux), &[data])
 }
 
 /// A continuation's chain.
@@ -4322,7 +4322,7 @@ fn reinstate(rt: &mut fixpt_runtime::Runtime, st: &mut DState, k: Value, v: Valu
 /// The marks for `key` in this run, innermost first: on the stack, then in
 /// the chain.
 fn run_marks(heap: &Heap, st: &DState, key: Value) -> Vec<Value> {
-    let mut out: Vec<Value> = frames(st).filter(|&(fp, end)| is_control(fp, end, MARK_MARK, key)).map(|(fp, _)| Value(word(fp + 32))).collect();
+    let mut out: Vec<Value> = frames(st).filter(|&(fp, end)| is_control(fp, end, MARK_MARK, key)).map(|(fp, _)| Value::from_raw(word(fp + 32))).collect();
     out.extend(chain_marks(heap, cont_pos(st), key));
     out
 }
@@ -4364,7 +4364,7 @@ fn traced(fp: u64, end: u64) -> Vec<(u64, usize)> {
     if n == 0 {
         return Vec::new();
     }
-    let head = Value(word(fp + 16));
+    let head = Value::from_raw(word(fp + 16));
     if !head.is_fixnum() {
         return vec![(fp + 16, n)];
     }
