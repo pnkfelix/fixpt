@@ -1004,13 +1004,11 @@ prims! {
         Ok(rt.heap.string_from_chars(&chars))
     });
     "string-append", 0, None, simple!(|rt, a| {
-        // The code points straight from the heap, then one string made.
-        let mut out = Vec::new();
+        // Straight from the heap into the one string made.
         for v in a.iter().copied() {
             if !rt.heap.is_a(v, ObjType::String) { return rt.type_error("a string", v); }
-            rt.heap.string_points_into(v, &mut out);
         }
-        Ok(rt.heap.string_from_points(&out))
+        Ok(rt.heap.string_append(a))
     });
     "string->list", 1, Some(1), simple!(|rt, a| {
         let s = get_string(rt, a[0])?;

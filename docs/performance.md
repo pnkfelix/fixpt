@@ -2871,3 +2871,11 @@ no constant is wanted it ran each time, a search of the kinds' names:
 collector's (`young.rs`) too. Its 92 uses outside a constant are now
 `const { kind(…) }`, constants as they always could have been: `gcbench`
 0.93 → 0.72 s, `binarytrees5` 0.44 → 0.38, `boyer` 0.85 → 0.79.
+
+`string-append` gathered every part's code points into a new `Vec`, then
+made the string of them (`scheme-bench/string`, appending in a loop: the
+two were most of its native profile). `Heap::string_append` now makes
+the string at its length and puts each part in place: its words copied
+where it starts at an even code point (two to a word), else shifted half
+a word, each word of two of the part's. `scheme-bench/string` 2.15 →
+1.25 s.

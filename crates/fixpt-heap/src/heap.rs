@@ -822,6 +822,40 @@ impl Heap {
         o
     }
 
+    /// The strings `parts`, one after another, as one new string, nothing
+    /// gathered first. A string's code points are two to a word, the first
+    /// in the low half: a part that starts at an even point is its words
+    /// copied; at an odd one, its points shifted half a word, each word made
+    /// of two of the part's. Allocation never collects, so `parts` stay
+    /// where they are.
+    pub fn string_append(&mut self, parts: &[Value]) -> Value {
+        let n: usize = parts.iter().map(|p| self.string_len(*p)).sum();
+        let o = self.alloc(ObjType::String, 1 + n.div_ceil(2), Value::fixnum(0));
+        let base = self.payload_base(o);
+        self.set_word(base, n as u64);
+        let mut at = 0;
+        for &p in parts {
+            let pb = self.payload_base(p);
+            let m = self.word(pb) as usize;
+            let (src, dst) = (pb + 1, base + 1 + at / 2);
+            let words = self.mem.words_mut();
+            if at % 2 == 0 {
+                words.copy_within(src..src + m.div_ceil(2), dst);
+            } else if m > 0 {
+                // Point 0 into the high half of the word begun; then point
+                // 2k+1 and 2k+2 of the part make word k after it.
+                let sw = m.div_ceil(2);
+                words[dst] = words[dst] & 0xffff_ffff | words[src] << 32;
+                for k in 0..m / 2 {
+                    let next = if k + 1 < sw { words[src + k + 1] & 0xffff_ffff } else { 0 };
+                    words[dst + 1 + k] = words[src + k] >> 32 | next << 32;
+                }
+            }
+            at += m;
+        }
+        o
+    }
+
     /// FNV-1a of string `o`'s code points, each as a `u64`, in the heap: the
     /// runtime's `%string-hash` before its shift, with nothing copied.
     pub fn string_fnv(&self, o: Value) -> u64 {
