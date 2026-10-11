@@ -7,3 +7,6 @@
 # therefore drops .fxt files into the corpus directory. They are derived, and
 # committing them would let a stale cache mask a real change.
 *.fxt
+
+# macOS Finder metadata.
+.DS_Store
