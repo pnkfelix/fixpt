@@ -2130,3 +2130,26 @@ for testing; a user wants the fastest, or the most checked. To decide:
   (what to run, what is an oracle), the default marked.
 - Perhaps `fixpt fx26` (or `fixpt repl fx26`) as the short form of
   `--dialect fx26 repl`.
+
+## 79. Intersections of procedure types, `overload` (the user's, 2026-10-11)
+
+Designed, not built: `docs/research/logical-types.md` (decision 4 and
+§8, "Proposed syntax") proposes `(overload (subr …) …)`, intersections of
+`subr` types only, with Davies and Pfenning's restrictions (introduced
+only by checking a `lambda` against each arm, no distributivity),
+ordered selection at a call, one convention; `PLAN.md` Q7 has it as
+"later", its open questions the user's (`logical-types.md` §9).
+
+A use that came up (kayak's `length` report, 2026-10-11): `length` of a
+`(listof T acyclic)` now checks by subtyping (`b5ae910`), but of a list at
+a region it is refused, `list-length` being the operation for that. One
+`length` for both would be
+`(overload (poly ((t type) (n size)) (subr pure ((nlist t n)) (nat n)))
+(poly ((r region) (t type)) (subr (read r) ((listof t r)) nat)))`: each
+call the more precise member it fits, its own effect. Arms that are
+polymorphic are a question the note leaves open (its examples are
+monomorphic). To settle with the open questions: how a call's choice is
+shown in messages, principal types, inference's interaction with the
+choice; both checkers must choose alike. The compilers need nothing for
+`length`, whose arms are one list walk at run time; arms with different
+code would.
