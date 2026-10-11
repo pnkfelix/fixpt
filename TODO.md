@@ -2210,16 +2210,3 @@ Rust compiler as its oracle, the same instructions for every procedure
 Size: about five times `native.fx`, and `direct.rs` is still moving
 (blobrefs, flat sums, raw `f64`s in §77's follow-ups), so a port is best
 started once it settles.
-
-## 82. `scripts/bench-history.py` across the machines' renaming (the user's, 2026-10-11)
-
-`fixpt bench`'s run-table columns were renamed in `1567626` (§78, `DONE.md`):
-`lowered` is `rs-scheme-vm`, `rust` `rs-cells-rsinterp`, `hand`
-`rs-cells-asminterp`, `stencils` `rs-cells-stencils-cellcc`, `compiled`
-`rs-cells-rsjit-cellcc`, `registers` `rs-regs-rsjit-cellcc`, `native`
-`rs-regs-rsjit-nativecc`. `scripts/bench-history.py` (the user's, not yet
-in git) names each metric by its column header, so every machine's
-history now splits into two series at that commit. Give it a table of the
-old names to the new (the run table's only: the compile table's columns,
-`registers` and `native` among them, are phases and were not renamed),
-applied before grouping, so each sheet and chart runs across the rename.

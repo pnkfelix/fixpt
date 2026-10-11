@@ -1703,3 +1703,19 @@ The native machine's step limit is said as the others say it. Tests:
 dialects.rs's `fx26_machines_by_name`; `on_every_machine` names
 `rs-scheme-vm` for its reference. Docs: README (the machines' table),
 `fixpt help`, `fixpt bench --help`, the Emacs mode's arguments.
+
+## 82. `scripts/bench-history.py` across the machines' renaming (the user's, 2026-10-11)
+
+The user's script, which turns `git log` into a CSV and a spreadsheet of
+`fixpt bench` tables, named each metric by its column header, so every
+machine's history split in two at `1567626` (§78's renaming). Now a table
+of the run table's old names to the new (`RUN_RENAMED`: `lowered` →
+`rs-scheme-vm`, `rust` → `rs-cells-rsinterp`, `hand` →
+`rs-cells-asminterp`, `stencils` → `rs-cells-stencils-cellcc`, `compiled`
+→ `rs-cells-rsjit-cellcc`, `registers` → `rs-regs-rsjit-cellcc`, `native`
+→ `rs-regs-rsjit-nativecc`) is applied to a run table's header as it is
+read, before grouping; the compile table's `registers` and `native`,
+phases, are left alone. These seven are the only run-table names the
+history has. Over the whole log (517 commits), each machine is one series
+of 517 commits, one sheet and its two charts. The script is in git now.
+
