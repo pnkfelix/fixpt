@@ -62,25 +62,11 @@
 (define-effect kmakes (select check-subst-types kmakes))
 (define-type table (select table-types table))
 (define-type names (select parser-types names))
-;; What it uses of the modules it is given.
-(define k-cat3 (with check-types k-cat3))
-(define k-cat4 (with check-types k-cat4))
-(define k-get (with check-types k-get))
-(define k-has-name? (with check-types k-has-name?))
-(define k-quote (with check-types k-quote))
-(define k-resolve (with check-types k-resolve))
+;; What it uses of the modules it is given: all of each, hidden.
+(hide (include check-types) (include check-errors) (include check-env) (include check-read)
+      (include check-expect) (include tables))
 (define k-conversion-name (with check-resolve k-conversion-name))
 (define k-free-vars (with check-resolve k-free-vars))
-(define k-fail-at (with check-errors k-fail-at))
-(define k-hazard-mods (with check-env k-hazard-mods))
-(define k-lookup (with check-env k-lookup))
-(define k-shared-name? (with check-env k-shared-name?))
-(define k-items (with check-read k-items))
-(define k-lambda? (with check-expect k-lambda?))
-(define make-table (with tables make-table))
-(define symbol-hash (with tables symbol-hash))
-(define table-ref (with tables table-ref))
-(define table-set! (with tables table-set!))
 
 ;; Whether item `it` is a definition of a lambda with a written type.
 (define k-lambda-item? (subr (read @globals) (k-item) bool)

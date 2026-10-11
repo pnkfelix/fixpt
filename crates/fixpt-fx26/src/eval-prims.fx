@@ -58,12 +58,8 @@
 (define the-unit (with values the-unit))
 (define val->vals (with values val->vals))
 (define vals->val (with values vals->val))
-(define make-table (with tables make-table))
-(define std-nil-name? (with tables std-nil-name?))
-(define symbol-hash (with tables symbol-hash))
-(define table-ref (with tables table-ref))
-(define table-set! (with tables table-set!))
-(define k-cat3 (with check-types k-cat3))
+;; What it uses of the modules it is given: all of each, hidden.
+(hide (include tables) (include check-types))
 
 (define ev-prims (table symbol val @v) (make-table symbol-hash symbol=?))
 

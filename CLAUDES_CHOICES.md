@@ -421,9 +421,9 @@ than a word unless its name says so.
    keeps all of that module's import lines**, and does not include it: the
    re-export must stay a definition, and an include of the module would
    give the name twice.
-3. **Files with clashes left as they are** (15 of 59): a name two given
-   modules both give (`k-union`, `k-one` through `check-read`'s re-export),
-   or one the file defines itself. To do: include all but the clashing
-   modules.
+3. **Files with clashes**, 15 of 59 (a name two given modules both give,
+   `k-union` and `k-one` through `check-read`'s re-export, or one the file
+   defines itself): every given module included but those that clash,
+   whose import lines stay.
 4. **Measured back to back** against the commit before (peval's front-end
    phases, old and new builds alternated): no difference past noise.

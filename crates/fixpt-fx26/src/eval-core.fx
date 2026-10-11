@@ -77,12 +77,8 @@
 (define ev-label-is? (with prims ev-label-is?))
 (define o-bref (with eval-types o-bref))
 (define standard (with prims standard))
-(define k-fx-module? (with env k-fx-module?))
-(define k-reshapes (with env k-reshapes))
-(define k-with-vals (with env k-with-vals))
-(define k-extracts (with env k-extracts))
-(define exp-start (with resolve exp-start))
-(define exp-end (with resolve exp-end))
+;; What it uses of the modules it is given: all of each, hidden.
+(hide (include env) (include resolve))
 
 ;; The global environment, newest first.
 (define genv (ref env @v) (new nil))
