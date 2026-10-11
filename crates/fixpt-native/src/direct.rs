@@ -2007,12 +2007,15 @@ impl Compiling<'_> {
                     // checks.
                     let step = name == "%suffix-ref+" && o(1).is_fixnum() && (0..1 << 24).contains(&o(1).as_fixnum());
                     let tag = name == "%fx26-flat-tag" && o(1).is_fixnum();
-                    if op == "prim2imm" && (step || tag) {
+                    let at = name == "%suffix-ref" && o(1).is_fixnum() && (0..1 << 26).contains(&o(1).as_fixnum());
+                    if op == "prim2imm" && (step || tag || at) {
                         let (slow, done) = (a.label(), a.label());
                         if step {
                             suffix_step(&mut a, o(1).as_fixnum(), slow);
-                        } else {
+                        } else if tag {
                             flat_tag(&mut a, o(1).as_fixnum(), slow);
+                        } else {
+                            blobref_at(&mut a, o(1).as_fixnum(), slow);
                         }
                         a.to(done, Fix::B);
                         a.bind(slow);
@@ -3088,6 +3091,47 @@ fn flat_variant(a: &mut Asm, code: i64, l: Reg, slow: Label) {
     });
     a.e(lsl_imm(X9, X9, SUFFIX_OFFSET_SHIFT));
     a.e(add(RESULT, RESULT, X9));
+}
+
+/// `blobref-at` (`%suffix-ref`) of the bloblet in `RESULT` at byte `d` of
+/// its suffix, into `RESULT`: the ref, its owner the suffix's start, a
+/// word of the heap (`Value::suffix_ref`); to `slow` (the primitive's)
+/// unless the bloblet has a trailer, a header of one word, a suffix short
+/// enough for refs and a byte `d`.
+fn blobref_at(a: &mut Asm, d: i64, slow: Label) {
+    use fixpt_heap::layout::*;
+    use fixpt_heap::value::{SUFFIX_OFFSET_LIMIT, SUFFIX_OFFSET_SHIFT, SUFFIX_OWNER_BITS, TAG_BLOBLET, TAG_SUFFIX_REF, TAG_TRAILER};
+    a.e(and_low(X16, RESULT, 3));
+    a.e(cmp_imm(X16, TAG_BLOBLET as u32));
+    a.to(slow, Fix::If(Cond::Ne));
+    a.e(sub_imm(X11, RESULT, TAG_BLOBLET as u32));
+    a.e(ldur(X16, X11, -8));
+    a.e(and_low(X9, X16, 3));
+    a.e(cmp_imm(X9, TAG_TRAILER as u32));
+    a.to(slow, Fix::If(Cond::Ne));
+    a.e(ubfx(X16, X16, T_DISTANCE.lo, 32));
+    a.e(lsl_imm(X9, X16, 3));
+    a.e(sub(X9, X11, X9));
+    a.e(ldur(X12, X9, -8));
+    a.e(ubfx(X9, X12, H_LARGE.lo, 1));
+    a.e(cmp_imm(X9, 0));
+    a.to(slow, Fix::If(Cond::Ne));
+    a.e(lsr_imm(X13, X12, H_BYTES.lo));
+    a.es(&mov_imm64(X9, SUFFIX_OFFSET_LIMIT as u64));
+    a.e(cmp(X13, X9));
+    a.to(slow, Fix::If(Cond::Hs));
+    a.es(&mov_imm64(X9, d as u64));
+    a.e(cmp(X9, X13));
+    a.to(slow, Fix::If(Cond::Hs));
+    // The owner, the suffix's word in the heap, as `Heap::ix` counts it,
+    // where it fits its bits.
+    a.e(ldr(X9, ST, st_off(offset_of!(DState, words))));
+    a.e(sub(X11, X11, X9));
+    a.e(lsr_imm(X9, X11, 3 + SUFFIX_OWNER_BITS));
+    a.e(cmp_imm(X9, 0));
+    a.to(slow, Fix::If(Cond::Ne));
+    a.es(&mov_imm64(X9, ((d as u64) << SUFFIX_OFFSET_SHIFT) | TAG_SUFFIX_REF));
+    a.e(orr(RESULT, X11, X9));
 }
 
 /// Suffix ref `RESULT` moved `d` bytes along (`%suffix-ref+`), into

@@ -1968,14 +1968,13 @@ products and arrays (`extract`, `blobref-index`), flat sums
 key's tag, a blobref's step by a constant, `blobref-index`,
 `blobref-set!`, `blobref-variant!` (`prim3imm`) and an `f64` read raw,
 in line, and a flat `tagcase` in a leaf; an index key's tag and variant
-too (2026-10-11). Next: each step
+too, and `blobref-at` at a literal offset (2026-10-11). Next: each step
 of a blobref takes its owner apart again (`suffix_owner`, about 20
 instructions), which a loop could do once; a wider index into
 the owner's fields than a byte (`(key symbol u16)` was proposed); arrays
 of a length not literal (a type-system question, for the user: a size
 variable's length then known only at run time, where `blobref-index`
-takes its bound from the layout's constant now); `blobref-at` in line.
-The rule
+takes its bound from the layout's constant now). The rule
 (the user's): no operation copies more than a word unless its name says
 so.
 

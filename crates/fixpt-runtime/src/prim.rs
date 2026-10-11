@@ -448,7 +448,7 @@ pub fn never_collects(name: &str) -> bool {
         || matches!(name, "%fx26-eqtable-has?" | "%fx26-eqtable-count" | "%fx26-eqtable-delete!")
         // A blobref's read, owner, offset and step (`TODO.md` §77): an `f64`
         // read allocates its box, which never collects.
-        || matches!(name, "%fx26-suffix-ref-get" | "%suffix-ref-owner" | "%suffix-ref-offset" | "%suffix-ref+")
+        || matches!(name, "%fx26-suffix-ref-get" | "%suffix-ref-owner" | "%suffix-ref-offset" | "%suffix-ref+" | "%suffix-ref")
         // A flat sum's tag (`TODO.md` §77): a number, or an owner's field;
         // and a `tagcase` with no arm for it, which only fails.
         || matches!(name, "%fx26-flat-tag" | "%fx26-flat-no-arm")

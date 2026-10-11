@@ -985,7 +985,14 @@ impl Compiler<'_> {
                     }
                     BlobletOp::Bytes => self.r_prim(g, "%bloblet-bytes", &es, env, te)?,
                     BlobletOp::Freeze | BlobletOp::Ref(_) => return self.decline("bloblet-freeze"),
-                    BlobletOp::RefAt => self.r_prim(g, "%suffix-ref", &es, env, te)?,
+                    // At a literal offset, in line (`prim2imm`).
+                    BlobletOp::RefAt => match self.exp_at(args[1]) {
+                        Exp::Int(k) if (0..1 << 26).contains(k) => {
+                            let k = *k;
+                            self.r_prim(g, "%suffix-ref", &[es[0], Arg::V(Value::fixnum(k))], env, te)?
+                        }
+                        _ => self.r_prim(g, "%suffix-ref", &es, env, te)?,
+                    },
                     BlobletOp::RefAdd => self.r_prim(g, "%suffix-ref+", &es, env, te)?,
                     BlobletOp::RefOwner => self.r_prim(g, "%suffix-ref-owner", &es, env, te)?,
                     BlobletOp::RefOffset => self.r_prim(g, "%suffix-ref-offset", &es, env, te)?,
