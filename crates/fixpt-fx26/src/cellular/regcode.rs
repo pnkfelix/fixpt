@@ -164,7 +164,7 @@ impl Gen {
     /// Pop the frame, if there is one, before leaving.
     fn leave(&mut self) {
         if !self.leaf {
-            self.cell(Value::fixnum(op("pop") as i64));
+            self.cell(Value::fixnum(const { op("pop") } as i64));
             self.items.push(RItem::Frame);
         }
     }
@@ -203,11 +203,11 @@ impl Gen {
                     cells.push(Value::fixnum(at[*n] - (pos + 2)));
                 }
                 RItem::BranchT(n) => {
-                    cells.push(Value::fixnum(op("brancht") as i64));
+                    cells.push(Value::fixnum(const { op("brancht") } as i64));
                     cells.push(Value::fixnum(at[*n] - (pos + 2)));
                 }
                 RItem::Guard(c, w, n) => {
-                    cells.extend([Value::fixnum(op("global-guard") as i64), *c, *w, Value::fixnum(at[*n] - (pos + 4))]);
+                    cells.extend([Value::fixnum(const { op("global-guard") } as i64), *c, *w, Value::fixnum(at[*n] - (pos + 4))]);
                 }
             }
             pos += size(i);
@@ -260,7 +260,7 @@ impl Compiler<'_> {
                 let mut cells = fast[..2].to_vec();
                 for (k, cell) in assumptions.iter().enumerate() {
                     let at = 2 + 4 * k as i64;
-                    cells.extend([Value::fixnum(op("global-guard") as i64), *cell, self.writes_expected(*cell), Value::fixnum(plain_at - (at + 4))]);
+                    cells.extend([Value::fixnum(const { op("global-guard") } as i64), *cell, self.writes_expected(*cell), Value::fixnum(plain_at - (at + 4))]);
                 }
                 cells.extend_from_slice(&fast[2..]);
                 cells.extend_from_slice(&plain[2..]);
@@ -347,7 +347,7 @@ impl Compiler<'_> {
             g.next_reg = params.len();
         } else {
             // The frame, and the parameters into it.
-            g.cell(Value::fixnum(op("save") as i64));
+            g.cell(Value::fixnum(const { op("save") } as i64));
             g.items.push(RItem::Frame);
             for i in 0..params.len() {
                 let s = g.slot();
@@ -356,11 +356,11 @@ impl Compiler<'_> {
                     continue;
                 }
                 g.op("reg", &[Gen::n(REGS)]);
-                g.op("op1", &[Value::fixnum(routine("pair-car") as i64)]);
+                g.op("op1", &[Value::fixnum(const { routine("pair-car") } as i64)]);
                 g.op("setstk", &[Gen::n(s)]);
                 if i + 1 < params.len() {
                     g.op("reg", &[Gen::n(REGS)]);
-                    g.op("op1", &[Value::fixnum(routine("pair-cdr") as i64)]);
+                    g.op("op1", &[Value::fixnum(const { routine("pair-cdr") } as i64)]);
                     g.op("setreg", &[Gen::n(REGS)]);
                 }
             }
@@ -468,7 +468,7 @@ impl Compiler<'_> {
                 // primitive, register code does too.
                 let mut tmp = Vec::new();
                 self.standard_on(name, n, &mut tmp).ok()?;
-                let prim = Value::fixnum(routine("prim") as i64);
+                let prim = Value::fixnum(const { routine("prim") } as i64);
                 match tmp[..] {
                     [] if n == 1 => Some(Std::Identity),
                     [super::Item::Cell(r), super::Item::Cell(p), super::Item::Cell(k)] if r == prim && k.as_fixnum() as usize == n => {
@@ -496,7 +496,7 @@ impl Compiler<'_> {
         let mut g = Gen { items: Vec::new(), leaf: !callout, next_reg: n, next_slot: 0, max_slot: 0, labels: 0, this: None, spec: None, own: None, joins: Vec::new(), looped: false };
         g.op("args", &[Gen::n(n)]);
         if callout {
-            g.cell(Value::fixnum(op("save") as i64));
+            g.cell(Value::fixnum(const { op("save") } as i64));
             g.items.push(RItem::Frame);
         }
         let r = |name: &str| Value::fixnum(routine(name) as i64);
@@ -1017,7 +1017,7 @@ impl Compiler<'_> {
                 g.done(tail);
             }
             Exp::Prompt { tag, body, handler } => {
-                self.r_call_out(g, "cellular", routine("prompt") as i64, &[Arg::E(tag), Arg::E(handler), Arg::Thunk(body)], env, te)?;
+                self.r_call_out(g, "cellular", const { routine("prompt") } as i64, &[Arg::E(tag), Arg::E(handler), Arg::Thunk(body)], env, te)?;
                 g.done(tail);
             }
             Exp::TagCase { scrutinee, arms, els } if self.c.facts.field_index.contains_key(&x) => {
@@ -1374,9 +1374,9 @@ impl Compiler<'_> {
                     {
                         self.r_exp(g, core, env, te, false)?;
                         if k > 0 {
-                            g.op("op2imm", &[Value::fixnum(routine("int-add") as i64), Value::fixnum(k)]);
+                            g.op("op2imm", &[Value::fixnum(const { routine("int-add") } as i64), Value::fixnum(k)]);
                         } else if k < 0 {
-                            g.op("op2imm", &[Value::fixnum(routine("int-sub") as i64), Value::fixnum(-k)]);
+                            g.op("op2imm", &[Value::fixnum(const { routine("int-sub") } as i64), Value::fixnum(-k)]);
                         }
                         g.done(tail);
                         return Some(());
@@ -1398,7 +1398,7 @@ impl Compiler<'_> {
                         self.r_binary(g, r, x, y, env, te)?;
                     }
                     if not {
-                        g.op("op2imm", &[Value::fixnum(routine("eq") as i64), Value::FALSE]);
+                        g.op("op2imm", &[Value::fixnum(const { routine("eq") } as i64), Value::FALSE]);
                     }
                 }
                 Std::Op1(r) => {
@@ -1434,7 +1434,7 @@ impl Compiler<'_> {
                     let es: Vec<Arg> = args.iter().map(|a| Arg::E(*a)).collect();
                     self.r_args(g, &es, env, te, None)?;
                     g.leave();
-                    g.op("cellular", &[Value::fixnum(routine("withmark-tail") as i64), Gen::n(3)]);
+                    g.op("cellular", &[Value::fixnum(const { routine("withmark-tail") } as i64), Gen::n(3)]);
                     // Never reached (the call-out goes on in the thunk):
                     // register code ends each path so.
                     g.op("return", &[]);
@@ -2552,7 +2552,7 @@ impl Compiler<'_> {
         for i in (from..args.len()).rev() {
             g.op("setreg", &[Gen::n(2)]);
             self.r_arg_into(g, &args[i], kept[i], 1, env, te)?;
-            g.op("cellular", &[Value::fixnum(routine("cons") as i64), Gen::n(2)]);
+            g.op("cellular", &[Value::fixnum(const { routine("cons") } as i64), Gen::n(2)]);
         }
         Some(())
     }
@@ -2855,7 +2855,7 @@ impl Compiler<'_> {
     /// Arrays, and the tag and key makers: as the stack compiler does them.
     fn r_special(&mut self, g: &mut Gen, what: &str, args: &[ExpId], env: &mut Vec<(Sym, RLoc)>, te: &mut Env) -> O<()> {
         let two = Value::fixnum(2);
-        let add = Value::fixnum(routine("int-add") as i64);
+        let add = Value::fixnum(const { routine("int-add") } as i64);
         let es: Vec<Arg> = args.iter().map(|a| Arg::E(*a)).collect();
         match what {
             // Field i + 2, by index: checked, since i is any int.
@@ -2878,7 +2878,7 @@ impl Compiler<'_> {
             }
             "array-length" => {
                 self.r_prim(g, "%bloblet-fields", &es, env, te)?;
-                g.op("op2imm", &[Value::fixnum(routine("int-sub") as i64), Value::fixnum(1)]);
+                g.op("op2imm", &[Value::fixnum(const { routine("int-sub") } as i64), Value::fixnum(1)]);
             }
             "make-array" => self.r_prim(g, "%make-bloblet-filled", &[Arg::V(Value::fixnum(0)), es[0], es[1]], env, te)?,
             "make-box" => {
@@ -2931,7 +2931,7 @@ impl Compiler<'_> {
             _ => unreachable!(),
         };
         let end = g.label();
-        let eq = Value::fixnum(routine("eq") as i64);
+        let eq = Value::fixnum(const { routine("eq") } as i64);
         for (i, arm) in arms.iter().enumerate() {
             let last = i + 1 == arms.len() && els.is_none();
             let next = g.label();
@@ -3022,7 +3022,7 @@ impl Compiler<'_> {
         self.r_imm_prim(g, "%fx26-flat-tag", Value::fixnum(k as i64))?;
         let tag = place(g)?;
         let end = g.label();
-        let eq = Value::fixnum(routine("eq") as i64);
+        let eq = Value::fixnum(const { routine("eq") } as i64);
         for arm in arms {
             let crate::ast::ArmBind::Value(x) = &arm.bind else { return self.decline("an arm on a flat sum that takes it apart") };
             let next = g.label();

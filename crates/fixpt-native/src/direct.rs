@@ -1147,7 +1147,7 @@ impl Compiling<'_> {
             return Err(format!("`{}` has no register code", self.name(word)));
         }
         // A variadic procedure's (`vargs`) arity is none: any number.
-        let variadic = h.bloblet_slot(rw, WORD_CELL0).as_fixnum() as usize == fixpt_heap::layout::regcode::op("vargs");
+        let variadic = h.bloblet_slot(rw, WORD_CELL0).as_fixnum() as usize == const { fixpt_heap::layout::regcode::op("vargs") };
         let arity = if variadic { usize::MAX } else { h.bloblet_slot(rw, WORD_CELL0 + 1).as_fixnum() as usize };
         let p = self.procs.len();
         self.procs.push(Proc { word, rw, name: self.name(word), arity, fields: vec![Field::Myself, Field::Const(word)], code: Vec::new(), len: 0, global: false });

@@ -1040,8 +1040,8 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
             }
             "prim" | "lambda" | "cellular" => {
                 let (count, routine_n, at) = match name {
-                    "prim" => (k(o(1)), routine("prim"), f(0)),
-                    "lambda" => (k(o(1)), routine("closure"), f(0)),
+                    "prim" => (k(o(1)), const { routine("prim") }, f(0)),
+                    "lambda" => (k(o(1)), const { routine("closure") }, f(0)),
                     _ => (k(o(1)), k(o(0)) as u64, WORD_CELL0 + next),
                 };
                 // Some are done here, when they can be: the call-out is then
@@ -1318,7 +1318,7 @@ impl NativeMachine {
         // A variadic procedure's register code (`vargs`) is for native code,
         // which passes the count in a register; here, its stack code, which
         // finds the count from its frame.
-        if heap.bloblet_slot(rw, WORD_CELL0).as_fixnum() as usize == fixpt_heap::layout::regcode::op("vargs") {
+        if heap.bloblet_slot(rw, WORD_CELL0).as_fixnum() as usize == const { fixpt_heap::layout::regcode::op("vargs") } {
             self.compile_word(heap, word)?;
             return Ok(true);
         }

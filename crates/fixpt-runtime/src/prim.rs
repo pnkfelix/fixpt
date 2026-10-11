@@ -164,9 +164,9 @@ fn run_word_by(rt: &mut Runtime, a: &[Value], run: Option<crate::RunWord>) -> Ou
         let f = |n: u64| Value::fixnum(n as i64);
         let mut cells = Vec::with_capacity(2 * args.len() + 5);
         for x in &args {
-            cells.extend([f(routine("lit")), *x]);
+            cells.extend([f(const { routine("lit") }), *x]);
         }
-        cells.extend([f(routine("lit")), a[0], f(routine("call")), f(args.len() as u64), f(routine("exit"))]);
+        cells.extend([f(const { routine("lit") }), a[0], f(const { routine("call") }), f(args.len() as u64), f(const { routine("exit") })]);
         let name = rt.heap.intern(CALL_CLOSURE);
         match rt.heap.make_cellular_word(name, &cells) {
             Ok(w) => (w, Vec::new()),
@@ -1524,7 +1524,7 @@ prims! {
         use fixpt_heap::layout::cellular::{routine, CLOSURE_FREE0, CLOSURE_WORD, WORD_TWIN};
         use fixpt_heap::layout::regcode::op;
         let f = |n: u64| Value::fixnum(n as i64);
-        let cells = [f(routine("rest")), f(routine("free")), Value::fixnum(0), f(routine("ttailcall")), Value::fixnum(1)];
+        let cells = [f(const { routine("rest") }), f(const { routine("free") }), Value::fixnum(0), f(const { routine("ttailcall") }), Value::fixnum(1)];
         let name = rt.heap.intern("vlambda");
         let word = match rt.heap.make_cellular_word(name, &cells) {
             Ok(w) => w,
@@ -1533,7 +1533,7 @@ prims! {
         let o = |n: &str| Value::fixnum(op(n) as i64);
         let (zero, one) = (Value::fixnum(0), Value::fixnum(1));
         let regs = [
-            o("vargs"), o("save"), zero, o("cellular"), f(routine("rest")), zero, o("setreg"), one,
+            o("vargs"), o("save"), zero, o("cellular"), f(const { routine("rest") }), zero, o("setreg"), one,
             o("lexical"), zero, o("pop"), zero, o("tailinvoke"), one,
         ];
         match rt.heap.make_register_word(name, word, &regs) {

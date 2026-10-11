@@ -112,7 +112,7 @@ impl Heap {
     pub fn continuation_closure(&mut self, k: Value) -> Value {
         use crate::layout::cellular::{routine, CLOSURE_FREE0, CLOSURE_WORD};
         let f = |n: u64| Value::fixnum(n as i64);
-        let cells = [f(routine("slot")), f(0), f(routine("free")), f(0), f(routine("resume"))];
+        let cells = [f(const { routine("slot") }), f(0), f(const { routine("free") }), f(0), f(const { routine("resume") })];
         let name = self.intern("continuation");
         let word = self.make_cellular_word(name, &cells).expect("a well-formed word");
         let c = self.make_bloblet(crate::layout::kind("cellular-closure"), 2, 0, true);
@@ -148,7 +148,7 @@ impl Heap {
         let (word, x) = (self.bloblet_slot(v, CLOSURE_WORD), self.bloblet_slot(v, CLOSURE_FREE0));
         let fields = self.bloblet_head(word).fields;
         let last = self.bloblet_slot(word, fields);
-        (x.is_bloblet() && self.bloblet_kind(x) == k && last == Value::fixnum(routine("resume") as i64)).then_some(x)
+        (x.is_bloblet() && self.bloblet_kind(x) == k && last == Value::fixnum(const { routine("resume") } as i64)).then_some(x)
     }
 
     /// A procedure not yet defined: a closure whose word traps when called
@@ -156,7 +156,7 @@ impl Heap {
     /// which a checked program never sees.
     pub fn undefined_closure(&mut self) -> Value {
         use crate::layout::cellular::{routine, CLOSURE_WORD};
-        let cells = [Value::fixnum(routine("undefined") as i64)];
+        let cells = [Value::fixnum(const { routine("undefined") } as i64)];
         let name = self.intern("undefined");
         let word = self.make_cellular_word(name, &cells).expect("a well-formed word");
         let c = self.make_bloblet(crate::layout::kind("cellular-closure"), 1, 0, true);
