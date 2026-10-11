@@ -45,37 +45,11 @@
            (check-read-helpers (select check-read-helpers-types check-read-helpers-sig))
            (check-print-parts (select check-print-parts-types check-print-parts-sig)))
     (module
-(define-type k-say (select check-module-rules-types k-say))
-(define-type k-made (select check-module-rules-types k-made))
-(define-type k-mod-bound (select check-module-rules-types k-mod-bound))
-(define-type k-ends (select check-module-rules-types k-ends))
-(define-type k-eff-ty (select check-module-rules-types k-eff-ty))
-(define-type k-mod-checked (select check-module-rules-types k-mod-checked))
+(hide (include check-module-rules-types) (include check-types-types) (include check-env-types)
+      (include check-modorder-types) (include check-resolve-types) (include check-terminate-types)
+      (include check-modules-types))
 ;; The types it uses of the files before it.
-(define a-read (with check-types-types a-read))
-(define-effect checks (select check-types-types checks))
-(define-type k-eff (select check-types-types k-eff))
-(define k-err (with check-types-types k-err))
-(define-type k-ids (select check-types-types k-ids))
-(define-type k-item (select check-types-types k-item))
-(define-type k-names (select check-types-types k-names))
-(define k-ok (with check-types-types k-ok))
-(define-type k-parts (select check-types-types k-parts))
-(define-type k-te (select check-types-types k-te))
-(define-effect kbuilds (select check-types-types kbuilds))
-(define-effect kreads (select check-types-types kreads))
-(define-effect kstate (select check-types-types kstate))
-(define r-globals (with check-types-types r-globals))
-(define ty-module (with check-types-types ty-module))
-(define ty-var (with check-types-types ty-var))
-(define k-done (with check-types-types k-done))
-(define-type k-items (select check-types-types k-items))
-(define-type k-hazard-list (select check-env-types k-hazard-list))
 (define-type k-done (select check-synth-types k-done))
-(define-type k-mlam (select check-modorder-types k-mlam))
-(define-type k-mlams (select check-modorder-types k-mlams))
-(define-type k-letrec-bs (select check-resolve-types k-letrec-bs))
-(define-type k-thunk (select check-terminate-types k-thunk))
 (define-type k-saying (select check-subtype-types k-saying))
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-env) (include check-print) (include check-errors)
@@ -83,10 +57,6 @@
       (include check-subtype) (include check-read-helpers) (include check-terminate)
       (include check-letrec) (include tables))
 (define k-dvar-string (with check-print-parts k-dvar-string))
-(define dt (with check-types-types dt))
-(define df (with check-types-types df))
-(define-type k-map (select check-types-types k-map))
-(define-type k-renamed (select check-modules-types k-renamed))
 (define k-items (with check-read k-items))
 (define k-one (with check-effects k-one))
 
@@ -435,7 +405,7 @@
         (let* ((n (extract (car ds) 1)) (t (extract (car ds) 2))
                (prior (k-prior-desc n (extract acc 1) own))
                (same (and (>= prior 0) (k-subtype prior t) (k-subtype t prior))))
-          (cond ((and (not (k-prefix? "%hidden:" (symbol->string n)))
+          (cond ((and (not (k-prefix? "%hidden" (symbol->string n)))
                       (or (and (>= prior 0) (not same))
                           (k-named-in? n own-abs (extract acc 4) nil nil)))
                  (k-twice n a b))
@@ -488,21 +458,26 @@
                          ;; hidden, for the module's type to leave out (`k-hiding`).
                          (if (k-prefix? "%hinclude-" (symbol->string (extract (car from) 1)))
                              (k-incs-of (k-hidden-marks
-                                         vs (k-hidden-marks ds (k-hidden-marks (extract o 1)
-                                                                               (extract r 1))))
+                                         "%hiddenv:" vs
+                                         (k-hidden-marks "%hidden:" ds
+                                                         (k-hidden-marks "%hidden:" (extract o 1)
+                                                                         (extract r 1))))
                                         (extract r 2) (extract r 3) r)
                              r)
                          own-abs own-ds own-vs a b)))
           (else z acc)))))
-;; A `%hidden:name` type for each of `ps`, onto `acc` (newest first).
-(define k-hidden-marks (subr (maxeff (read @globals) (alloc @t)) (k-parts k-parts) k-parts)
-  (lambda (ps acc)
+;; A `prefix`ed type for each of `ps`, onto `acc` (newest first): a type's
+;; `%hidden:name`, a value's `%hiddenv:name`.
+(define k-hidden-marks
+  (subr (maxeff (read @globals) (alloc @t)) (string k-parts k-parts) k-parts)
+  (lambda (prefix ps acc)
     (if (null? ps)
         acc
-        (k-hidden-marks (cdr ps)
-                        (cons (product (1 (k-hidden-name (extract (car ps) 1))) (2 k-unit)) acc)))))
-(define k-hidden-name (subr (read @globals) (symbol) symbol)
-  (lambda (n) (string->symbol (string-append "%hidden:" (symbol->string n)))))
+        (k-hidden-marks prefix (cdr ps)
+                        (cons (product (1 (k-hidden-name prefix (extract (car ps) 1))) (2 k-unit))
+                              acc)))))
+(define k-hidden-name (subr (read @globals) (string symbol) symbol)
+  (lambda (prefix n) (string->symbol (string-append prefix (symbol->string n)))))
 ;; The positions of a module's own values `own`, past `%include`'s, at `k`.
 (define k-own-at (subr (maxeff (read @globals) (alloc @t)) (k-parts int int) k-ids)
   (lambda (own k i)
@@ -537,16 +512,17 @@
 
 ;;; ------------------------------------------------------------ hide
 
-;; The names `(hide item …)` hid (`TODO.md` §69): each a `%hidden:name`
-;; type marks, in order.
-(define k-hidden-in (subr (maxeff (read @globals) (alloc @t)) (k-parts) k-names)
-  (lambda (ds)
+;; The names `(hide item …)` hid (`TODO.md` §69): each a `prefix`ed type
+;; marks (types `%hidden:`, values `%hiddenv:`), in order.
+(define k-hidden-in (subr (maxeff (read @globals) (alloc @t)) (k-parts string) k-names)
+  (lambda (ds prefix)
     (cond ((null? ds) nil)
-          ((k-prefix? "%hidden:" (symbol->string (extract (car ds) 1)))
-           (cons (string->symbol (substring (symbol->string (extract (car ds) 1)) 8
+          ((k-prefix? prefix (symbol->string (extract (car ds) 1)))
+           (cons (string->symbol (substring (symbol->string (extract (car ds) 1))
+                                            (string-length prefix)
                                             (string-length (symbol->string (extract (car ds) 1)))))
-                 (k-hidden-in (cdr ds))))
-          (else (k-hidden-in (cdr ds))))))
+                 (k-hidden-in (cdr ds) prefix)))
+          (else (k-hidden-in (cdr ds) prefix)))))
 (define k-shown? (subr (read @globals) (k-names symbol) bool)
   (lambda (hs n) (or (null? hs) (and (not (symbol=? (car hs) n)) (k-shown? (cdr hs) n)))))
 ;; `ps` but those hidden, and the markers.
@@ -554,7 +530,7 @@
   (lambda (ps hs)
     (cond ((null? ps) nil)
           ((or (not (k-shown? hs (extract (car ps) 1)))
-               (k-prefix? "%hidden:" (symbol->string (extract (car ps) 1))))
+               (k-prefix? "%hidden" (symbol->string (extract (car ps) 1))))
            (k-parts-shown (cdr ps) hs))
           (else (the k-parts (cons (car ps) (k-parts-shown (cdr ps) hs)))))))
 ;; The positions `at` of the values of `vs` shown.
@@ -601,18 +577,18 @@
   (lambda (t a b)
     (tagcase (k-get t)
       (ty-module (abs ds vs)
-        (let ((hs (k-hidden-in ds)))
-          (if (null? hs)
+        (let ((hs (k-hidden-in ds "%hidden:")) (hv (k-hidden-in ds "%hiddenv:")))
+          (if (and (null? hs) (null? hv))
               t
               (let* ((rs (get k-reshapes))
                      (mine (and (not (null? rs)) (= (extract (car rs) 1) a)
                                 (= (extract (car rs) 2) b)))
                      (at (if mine (extract (car rs) 3) (k-upto (k-length vs) nil)))
-                     (out (k-parts-shown vs hs))
+                     (out (k-parts-shown vs hv))
                      (shown (k-parts-shown ds hs))
                      (gone (k-abs-split abs hs #t))
                      (checked (k-hidden-escape (append out shown) gone a b))
-                     (path (k-at-shown vs at hs)))
+                     (path (k-at-shown vs at hv)))
                 (begin
                   (if (k-identity? path 0 (k-length vs))
                       #u

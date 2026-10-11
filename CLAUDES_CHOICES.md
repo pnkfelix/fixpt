@@ -437,3 +437,13 @@ than a word unless its name says so.
    (load-module …)))`): each binds the modules it names types from, the
    same loads in most of them, which an include of two would give twice as
    values; nothing selected them through a types file.
+7. **Hidden marks per kind**: `%hidden:name` for a type, `%hiddenv:name`
+   for a value (an abstract type's `up-`/`down-` values), since a module
+   may have a type and a value of one name (`check-read`'s `k-items`).
+8. **What the types pass keeps**: a types module whose type family a file
+   uses (an included family is not applied in a declared type yet), and a
+   module of which the file's own signature gives on a value; a re-exported
+   *type* keeps only its own line, the module included still.
+9. **Committed with a possible 3–5 % cost** in the FX-26 compiler's phases
+   (measured under load, back to back; see TODO.md §69), the pass being
+   the user's priority; the likely cause and a remedy are in the TODO.

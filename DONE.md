@@ -1370,6 +1370,20 @@ refused. A `with` checked against a type now checks its body against it
 call's argument's is still "argument 1 is a …" (`k-respanning`). Test:
 `modules/include-types-inside.fx`.
 
+The import pass (2026-10-11): the front end's import blocks, `(define x
+(with m x))` and `(define-type t (select m t))` for each name a file uses
+of a module it is given or a types file it loads, 5,684 lines, became
+`(hide (include m) …)`: 637 lines left (check-rules.fx 1,331 to 1,069,
+regcode-core.fx 1,403 to 1,130; their size debts lowered). Made possible
+by `include` taking a type name twice where it is the same type, and the
+types files hiding their module bindings. It found three bugs, fixed: a
+frame of more than 511 slots in register code (`add_const`); a file of
+`module-parameters` whose `plambda`, `lambda` and module shared one place,
+so the FX-26 compiler reshaped the closure (a SIGSEGV running the front
+end); and `hide` marking a type and a value of one name alike, so hiding
+one hid both (`%hidden:` for types, `%hiddenv:` for values now). Test:
+`modules/hide-type-not-value.fx`.
+
 ## 71. A load cycle is an error, not a hang (2026-10-10)
 
 Found 2026-10-09 (`TODO.md` §68 phase 2): two types files loading each

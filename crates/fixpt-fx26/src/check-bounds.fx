@@ -17,16 +17,8 @@
   (lambda ((check-types (select check-types-types check-types-sig))
            (check-subtype (select check-subtype-types check-subtype-sig)))
     (module
-(define-type k-bound (select check-bounds-types k-bound))
-(define-type k-bound-map (select check-bounds-types k-bound-map))
-(define-type k-bound-entry (select check-bounds-types k-bound-entry))
-(define-type k-maybe-bounds (select check-bounds-types k-maybe-bounds))
-(define-type k-maybe-bound (select check-bounds-types k-maybe-bound))
-(define-type k-unifying (select check-bounds-types k-unifying))
+(hide (include check-bounds-types) (include check-types-types))
 ;; The types it uses of the files before it.
-(define dt (with check-types-types dt))
-(define-type k-map (select check-types-types k-map))
-(define-effect kstate (select check-types-types kstate))
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-subtype))
 

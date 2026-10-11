@@ -27,11 +27,7 @@
            (parser (select reader-types parser-sig))
            (check-print-parts (select check-print-parts-types check-print-parts-sig)))
     (module
-(define-type k-syns (select check-read-types k-syns))
-(define-type k-arrow-syns (select check-read-types k-arrow-syns))
-(define-type k-params (select check-read-types k-params))
-(define-type k-effect-sels (select check-read-types k-effect-sels))
-(define-type k-effect-falls (select check-read-types k-effect-falls))
+(hide (include check-read-types) (include eager-reader-types) (include parser-types))
 ;; The types it uses of the files before it.
 (define a-alloc (with check-types-types a-alloc))
 (define a-await (with check-types-types a-await))
@@ -64,9 +60,6 @@
 (define r-var (with check-types-types r-var))
 (define ty-lam (with check-types-types ty-lam))
 (define-type k-items (select check-types-types k-items))
-(define lst (with eager-reader-types lst))
-(define-type result (select eager-reader-types result))
-(define-type syn (select parser-types syn))
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-env) (include check-print-parts) (include parser))
 (define k-insert (with check-effects k-insert))

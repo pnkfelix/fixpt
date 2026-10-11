@@ -26,11 +26,7 @@
     (module
 
 ;; The types it uses of the files before it.
-(define-effect c-emits (select compile-types c-emits))
-(define-effect compiles (select compile-types compiles))
-(define-type c-spec (select compile-exps-types c-spec))
-(define-type c-twin (select compile-exps-types c-twin))
-(define-type c-standard-twin (select compile-lift-types c-standard-twin))
+(hide (include compile-types) (include compile-exps-types) (include compile-lift-types))
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include compile) (include compile-state) (include compile-plan) (include compile-lift)
       (include regcode-entry))

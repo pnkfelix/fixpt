@@ -17,12 +17,7 @@
     (module
 
 ;; The types it uses of the files before it.
-(define-effect checks (select check-types-types checks))
-(define-type k-binders (select check-types-types k-binders))
-(define-type k-desc (select check-types-types k-desc))
-(define-type k-eff (select check-types-types k-eff))
-(define-effect kreads (select check-types-types kreads))
-(define-type kx (select check-types-types kx))
+(hide (include check-types-types))
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-resolve) (include check-print-parts)
       (include check-print))

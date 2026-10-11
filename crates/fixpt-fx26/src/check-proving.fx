@@ -22,26 +22,8 @@
     (module
 
 ;; The types it uses of the files before it.
-(define atom (with eager-reader-types atom))
-(define-type syn (select parser-types syn))
-(define-effect checks (select check-types-types checks))
-(define-type k-names (select check-types-types k-names))
-(define-type k-prop (select check-types-types k-prop))
-(define-type k-props (select check-types-types k-props))
-(define-type k-te (select check-types-types k-te))
-(define-type k-term (select check-types-types k-term))
-(define-effect kreads (select check-types-types kreads))
-(define pr-acyclic (with check-types-types pr-acyclic))
-(define pr-length (with check-types-types pr-length))
-(define pr-nat (with check-types-types pr-nat))
-(define pr-rel (with check-types-types pr-rel))
-(define pr-shape (with check-types-types pr-shape))
-(define tm-length (with check-types-types tm-length))
-(define tm-lit (with check-types-types tm-lit))
-(define tm-param (with check-types-types tm-param))
-(define ty-proving (with check-types-types ty-proving))
-(define-type k-items (select check-types-types k-items))
-(define-type k-syns (select check-read-types k-syns))
+(hide (include eager-reader-types) (include parser-types) (include check-types-types)
+      (include check-read-types))
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-env) (include check-read) (include check-syntax)
       (include parser))

@@ -1842,12 +1842,23 @@ is). Left:
   %include e)` synthesized), so `cons` there made its pair at a fresh
   region; now a `with` checked against a type checks its body (`DONE.md`
   §69).
-- The pass these were wanted for: the import blocks §68 wrote, 3,449
-  lines (2026-10-09, 39 files converted then), every converted file
-  naming all of its own types file (263 lines in 23 files), the rest
-  naming 40 to 60 of `check-types-types.fx`'s 148 and what it uses of each
-  module it is given. `(hide (include m))` says each in a line, once its
-  types are in scope too.
+- Done (2026-10-11): the pass these were wanted for (`DONE.md` §69):
+  5,684 import lines in the front end's files down to 637, by `(hide
+  (include m) …)` of the modules each file is given and the types files
+  it loads. What stays: a module whose value the file's signature gives
+  on (an include would give it twice), a types module whose type family
+  the file uses (an included family is not yet applied in a declared
+  type: to do), and re-exported types' lines.
+- The cost, to measure on a quiet machine: back to back under load, the
+  FX-26 compiler's phases (`fx words`, `fx arm64` on peval) 3 to 5 %
+  slower, within the noise of `fx check`. Likely: an item's lambda's body
+  is `(with %include …)`, so each call loads the included names it uses
+  from the bucket, where an import bound them once. A `with` of a bucket
+  of hidden includes could be made once, at the module (each name bound
+  as the import line did), not per call.
+- An included type family applied in a declared type ("`table` is not a
+  description function"): the files using `table` keep table-types's
+  import lines.
 
 If `extend` is ever n-ary, `(extend m1 m2 m3)` should be a left fold (the
 later wins), not "all at once", which would blur it and `include` together:

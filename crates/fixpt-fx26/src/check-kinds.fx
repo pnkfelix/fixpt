@@ -28,16 +28,7 @@
     (module
 
 ;; The types it uses of the files before it.
-(define dc (with check-types-types dc))
-(define de (with check-types-types de))
-(define df (with check-types-types df))
-(define dr (with check-types-types dr))
-(define dt (with check-types-types dt))
-(define dz (with check-types-types dz))
-(define-type k-binders (select check-types-types k-binders))
-(define-type k-desc (select check-types-types k-desc))
-(define-effect kstate (select check-types-types kstate))
-(define ty-named (with check-types-types ty-named))
+(hide (include check-types-types))
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-read-helpers) (include check-holds)
       (include check-print-parts))

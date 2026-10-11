@@ -87,19 +87,24 @@ impl Checker {
         let Ty::Module { abs, descs, vals } = self.arena.get(t).clone() else {
             return Ok(t);
         };
-        let hidden: Vec<String> =
-            descs.iter().filter_map(|(n, _)| self.interner.name(*n).strip_prefix("%hidden:").map(str::to_string)).collect();
-        if hidden.is_empty() {
+        // Types and values marked apart (`%hidden:`, `%hiddenv:`): a type
+        // and a value may share a name.
+        let marked = |c: &Self, prefix: &str| -> Vec<String> {
+            descs.iter().filter_map(|(n, _)| c.interner.name(*n).strip_prefix(prefix).map(str::to_string)).collect()
+        };
+        let (hidden, hidden_vals) = (marked(self, "%hidden:"), marked(self, "%hiddenv:"));
+        if hidden.is_empty() && hidden_vals.is_empty() {
             return Ok(t);
         }
         let shown = |c: &Self, n: Sym| !hidden.iter().any(|h| h == c.interner.name(n));
+        let shown_val = |c: &Self, n: Sym| !hidden_vals.iter().any(|h| h == c.interner.name(n));
+        let marker = |c: &Self, n: Sym| c.interner.name(n).starts_with("%hidden:") || c.interner.name(n).starts_with("%hiddenv:");
         let (kept_abs, gone): (Vec<(Sym, DVar)>, Vec<(Sym, DVar)>) = abs.into_iter().partition(|(n, _)| shown(self, *n));
-        let descs: Vec<(Sym, TyId)> =
-            descs.into_iter().filter(|(n, _)| !self.interner.name(*n).starts_with("%hidden:") && shown(self, *n)).collect();
+        let descs: Vec<(Sym, TyId)> = descs.into_iter().filter(|(n, _)| !marker(self, *n) && shown(self, *n)).collect();
         let at: Vec<usize> = self.facts.reshaped.get(&e).cloned().unwrap_or_else(|| (0..vals.len()).collect());
         let (mut out, mut path) = (Vec::new(), Vec::new());
         for (v, p) in vals.iter().zip(at) {
-            if shown(self, v.0) {
+            if shown_val(self, v.0) {
                 out.push(*v);
                 path.push(p);
             }
@@ -146,8 +151,8 @@ impl Checker {
             };
             // A hidden `include`'s (`%hinclude-k`): each name marked hidden,
             // for the module's type to leave out (`hiding`).
-            let marks: Vec<Sym> = if self.interner.name(*name).starts_with("%hinclude-") {
-                taken.into_iter().chain(ds.iter().chain(&vs).map(|(n, _)| *n)).collect()
+            let marks: Vec<(Sym, bool)> = if self.interner.name(*name).starts_with("%hinclude-") {
+                taken.into_iter().chain(ds.iter().map(|(n, _)| *n)).map(|n| (n, false)).chain(vs.iter().map(|(n, _)| (*n, true))).collect()
             } else {
                 Vec::new()
             };
@@ -158,7 +163,7 @@ impl Checker {
                 let prior = descs.iter().chain(&own_descs).find(|(n, _)| *n == d.0).map(|(_, t)| *t);
                 let same = prior.is_some_and(|t| self.subtype(t, d.1) && self.subtype(d.1, t));
                 let twice = (prior.is_some() && !same) || abs.iter().chain(&fresh).any(|(n, _)| *n == d.0);
-                if !self.interner.name(d.0).starts_with("%hidden:") && twice {
+                if !self.interner.name(d.0).starts_with("%hidden") && twice {
                     return Err(FxError::at(span, format!("`{}` is defined twice in this module", self.interner.name(d.0))));
                 }
                 if !same {
@@ -172,8 +177,8 @@ impl Checker {
                 out.push(v);
                 path.push(reshape_path(at.unwrap_or(k), j));
             }
-            for n in marks {
-                let name = self.interner.intern(&format!("%hidden:{}", self.interner.name(n)));
+            for (n, value) in marks {
+                let name = self.interner.intern(&format!("{}{}", if value { "%hiddenv:" } else { "%hidden:" }, self.interner.name(n)));
                 descs.push((name, self.unit));
             }
         }

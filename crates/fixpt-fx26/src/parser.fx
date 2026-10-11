@@ -384,29 +384,36 @@
       (lst (xs d a b) (and (not (null? xs)) (symbol=? (syn-head (car xs)) 'hide)))
       (else y #f))))
 ;; Each name hidden item `it` (read from `f`) defines, marked by a type of
-;; its own, `%hidden:name`, onto `rest`: a type, so that no compiler makes
-;; a value of it; the checkers leave them out of the module's type. A
+;; its own, onto `rest`: a type's `%hidden:name`, a value's `%hiddenv:name`
+;; (a type and a value may share a name); types, so that no compiler makes
+;; a value of them; the checkers leave them out of the module's type. A
 ;; hidden `include` is `%hinclude`. As `parse.rs`.
 (define hidden-marks (subr (maxeff tree-builds spin) (mod-item syn mod-items) mod-items)
   (lambda (it f rest)
-    (let* ((k (extract it 1)) (ns (extract it 2))
-           (ns (if (= k 0)
-                   (let ((t (symbol->string (car ns))))
-                     (the names (list (car ns) (string->symbol (string-append "up-" t))
-                                      (string->symbol (string-append "down-" t)))))
-                   ns)))
-      (if (= k 9)
-          (cons (product (1 9) (2 (the names (list '%hinclude))) (3 (extract it 3))
-                         (4 (extract it 4)))
-                rest)
-          (cons it (hidden-marks-of ns (syn-start f) (syn-end f) rest))))))
-(define hidden-marks-of (subr (maxeff tree-builds spin) (names int int mod-items) mod-items)
-  (lambda (ns a b rest)
+    (let* ((k (extract it 1)) (ns (extract it 2)) (a (syn-start f)) (b (syn-end f)))
+      (cond ((= k 9)
+             (cons (product (1 9) (2 (the names (list '%hinclude))) (3 (extract it 3))
+                            (4 (extract it 4)))
+                   rest))
+            ((= k 0)
+             (let ((t (symbol->string (car ns))))
+               (cons it (hidden-marks-of "%hidden:" (the names (list (car ns))) a b
+                                         (hidden-marks-of "%hiddenv:"
+                                                          (the names
+                                                               (list (string->symbol
+                                                                      (string-append "up-" t))
+                                                                     (string->symbol
+                                                                      (string-append "down-" t))))
+                                                          a b rest)))))
+            (else (cons it (hidden-marks-of (if (= k 1) "%hidden:" "%hiddenv:") ns a b rest)))))))
+(define hidden-marks-of
+  (subr (maxeff tree-builds spin) (string names int int mod-items) mod-items)
+  (lambda (prefix ns a b rest)
     (if (null? ns)
         rest
-        (cons (mod-item-of 1 (string->symbol (string-append "%hidden:" (symbol->string (car ns))))
+        (cons (mod-item-of 1 (string->symbol (string-append prefix (symbol->string (car ns))))
                            (one-syn (mk-symbol "unit" a b)) nil)
-              (hidden-marks-of (cdr ns) a b rest)))))
+              (hidden-marks-of prefix (cdr ns) a b rest)))))
 ;; `x` in `(with %include …)` at `a`..`b`: a lambda's body, under any
 ;; `plambda`, `the` or region lambda.
 (define in-includes (subr (maxeff tree-builds spin) (exp int int) exp)

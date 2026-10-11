@@ -21,11 +21,7 @@
 ;; values; the module names what it uses of them.
 (let ((arm64-types (load-module "fx26:arm64-types.fx")))
   (module
-(define-effect encodes (select arm64-types encodes))
-(define-type arm-op2 (select arm64-types arm-op2))
-(define-type arm-op3 (select arm64-types arm-op3))
-(define-type arm-op4 (select arm64-types arm-op4))
-(define-type arm-code (select arm64-types arm-code))
+(hide (include arm64-types))
 
 ;; `acc` times 2 to the `n`.
 (define arm-times-pow2 (subr encodes (int int) int)

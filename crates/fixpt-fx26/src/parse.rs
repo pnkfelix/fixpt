@@ -2824,20 +2824,23 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                 }
             }
             spans.resize(out.len(), vec![f.span]);
-            // Each name a hidden item defines, marked by a type of its own,
-            // `%hidden:name`: a type, so that no compiler makes a value of
-            // it. The checkers leave them out of the module's type.
+            // Each name a hidden item defines, marked by a type of its own:
+            // a type's `%hidden:name`, a value's `%hiddenv:name`, as a type
+            // and a value may share a name; types, so that no compiler makes
+            // a value of them. The checkers leave them out of the module's
+            // type.
             if hidden {
                 let mut names = Vec::new();
                 for item in &out[before..] {
                     match item {
-                        ModItem::Abs { name, up, down, .. } => names.extend([*name, *up, *down]),
-                        ModItem::Desc { name, .. } | ModItem::Val { name, .. } => names.push(*name),
-                        ModItem::Rec(bs) => names.extend(bs.iter().map(|(n, _, _)| *n)),
+                        ModItem::Abs { name, up, down, .. } => names.extend([(*name, false), (*up, true), (*down, true)]),
+                        ModItem::Desc { name, .. } => names.push((*name, false)),
+                        ModItem::Val { name, .. } => names.push((*name, true)),
+                        ModItem::Rec(bs) => names.extend(bs.iter().map(|(n, _, _)| (*n, true))),
                     }
                 }
-                for n in names {
-                    let name = self.interner.intern(&format!("%hidden:{}", self.name(n)));
+                for (n, value) in names {
+                    let name = self.interner.intern(&format!("{}{}", if value { "%hiddenv:" } else { "%hidden:" }, self.name(n)));
                     out.push(ModItem::Desc { name, ty: self.unit });
                 }
                 spans.resize(out.len(), vec![f.span]);

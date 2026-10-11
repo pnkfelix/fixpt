@@ -27,19 +27,7 @@
            (layout (select layout-types layout-sig))
            (native-layout (select native-layout-types native-layout-sig)))
     (module
-(define-effect assembles (select native-types assembles))
-(define-effect n-writes (select native-types n-writes))
-(define-effect n-lists (select native-types n-lists))
-(define-type n-ints (select native-types n-ints))
-(define-type n-bools (select native-types n-bools))
-(define-type n-instrs (select native-types n-instrs))
-(define-type n-assembled (select native-types n-assembled))
-(define-type n-fix (select native-types n-fix))
-(define fix-b (with native-types fix-b))
-(define fix-bcond (with native-types fix-bcond))
-(define fix-cbz (with native-types fix-cbz))
-(define fix-cbnz (with native-types fix-cbnz))
-(define-type n-stub-list (select native-types n-stub-list))
+(hide (include native-types))
 
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include arm64) (include layout) (include native-layout))
