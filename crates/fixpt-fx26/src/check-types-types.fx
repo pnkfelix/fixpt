@@ -314,6 +314,7 @@
    (val k-bound-of (subr (maxeff (alloc @t) (read @globals) (read @t)) (int) k-regions))
    (val k-outer-of (subr (maxeff (read @globals) (read @t)) (int) k-ids))
    (val k-data-var? (subr (maxeff (read @globals) (read @t)) (int) bool))
+   (val k-flat-var? (subr (maxeff (read @globals) (read @t)) (int) bool))
    (val k-find-sub (subr (maxeff (read @globals) spin) (string string int) int))
    (val k-arrow-kind? (subr pure (int) bool))
    (val k-new-dvar-of
@@ -334,6 +335,7 @@
    (val k-ndvars (ref int @t))
    (val k-places (ref k-ids @t))
    (val k-datas (ref k-ids @t))
+   (val k-flats (ref k-ids @t))
    (val k-arrow-vars (ref (listof (pairof int int @t) acyclic) @t))
    (val k-bounds (ref k-bounded @t))
    (val k-outers (ref k-nesting @t))

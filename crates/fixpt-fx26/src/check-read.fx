@@ -121,14 +121,15 @@
 ;; Whether kind `k` describes values, or makes what does: a type, data, or
 ;; a description function (which may give one).
 (define k-typed-kind? (subr pure (int) bool)
-  (lambda (k) (or (= k 2) (= k 4) (>= k 100))))
+  (lambda (k) (or (= k 2) (= k 4) (= k 7) (>= k 100))))
 (define k-any-typed-kind? (subr (read @globals) (k-ids) bool)
   (lambda (ks) (and (not (null? ks)) (or (k-typed-kind? (car ks)) (k-any-typed-kind? (cdr ks))))))
 
 ;; What a kind is, what a description function gives, and what one to an
 ;; effect takes, as errors say.
 (define k-kind-usage string
-  "a kind is `region`, `place`, `effect`, `type`, `data`, `size`, `conv` or `(=> (kind …) kind)`")
+  (string-append "a kind is `region`, `place`, `effect`, `type`, `data`, `flat`, `size`, `conv` "
+                 "or `(=> (kind …) kind)`"))
 (define k-fun-result-usage string
   "a description function gives a type, an effect, or another description function")
 (define k-effect-fun-usage string
@@ -152,6 +153,7 @@
                 (("effect") 1)
                 (("type") 2)
                 (("data") 4)
+                (("flat") 7)
                 (("size") 5)
                 (("conv") 6)
                 (else

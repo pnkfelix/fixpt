@@ -319,6 +319,8 @@
       (begin (set k-dvars (cons name (get k-dvars))) (set k-ndvars (+ n 1)) n))))
 ;; The description variables bound as places (kind 3), which are regions too.
 (define k-places (ref k-ids @t) (new nil))
+;; Which description variables are of kind `flat` (`TODO.md` §77).
+(define k-flats (ref k-ids @t) (new nil))
 (define k-datas (ref k-ids @t) (new nil))
 ;; The variables `acyclic?` has just found acyclic, in the branch where it
 ;; did: each by name and by which binding it is (how deep its name's stack).
@@ -387,6 +389,7 @@
     (let ((v (k-new-dvar name)))
       (begin (if (= kind 3) (set k-places (cons v (get k-places))) #u)
              (if (= kind 4) (set k-datas (cons v (get k-datas))) #u)
+             (if (= kind 7) (set k-flats (cons v (get k-flats))) #u)
              (if (>= kind 100) (set k-arrow-vars (cons (cons v kind) (get k-arrow-vars))) #u)
              v))))
 ;; Which description variables are of kind `data`.
@@ -394,6 +397,8 @@
   (lambda (v) (k-has-id? (get k-datas) v)))
 (define k-place-var? (subr (maxeff (read @globals) (read @t)) (int) bool)
   (lambda (v) (k-has-id? (get k-places) v)))
+(define k-flat-var? (subr (maxeff (read @globals) (read @t)) (int) bool)
+  (lambda (v) (k-has-id? (get k-flats) v)))
 ;; Each description variable of an arrow kind, with its kind
 ;; (`k-new-dvar-of` notes them).
 (define k-dvar-kind (subr kreads (int) int)
@@ -404,7 +409,8 @@
                              ((= (car (car xs)) v) (cdr (car xs)))
                              (else (find (cdr xs)))))))
       (let ((a (find (get k-arrow-vars))))
-        (cond ((>= a 0) a) ((k-place-var? v) 3) ((k-data-var? v) 4) (else 2))))))
+        (cond ((>= a 0) a) ((k-place-var? v) 3) ((k-data-var? v) 4) ((k-flat-var? v) 7)
+              (else 2))))))
 (define k-bounds (ref k-bounded @t) (new nil))
 (define k-outers (ref k-nesting @t) (new nil))
 ;; The region and place variables bound around what is being read, by

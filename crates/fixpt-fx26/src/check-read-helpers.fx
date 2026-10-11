@@ -106,6 +106,13 @@
 (define k-ty-new (with check-types k-ty-new))
 (define k-atom-head? (with check-read k-atom-head?))
 (define k-sfail (with check-read k-sfail))
+(define k-any-typed-kind? (with check-read k-any-typed-kind?))
+(define k-arrow-syntax (with check-read k-arrow-syntax))
+(define k-arrow (with check-types k-arrow))
+(define k-has-id? (with check-types k-has-id?))
+(define k-resolve (with check-types k-resolve))
+(define k-flat-var? (with check-types k-flat-var?))
+(define ty-base (with check-types-types ty-base))
 (define k-base (with check-env k-base))
 (define k-find (with check-env k-find))
 (define k-lookup-desc (with check-env k-lookup-desc))
@@ -222,6 +229,7 @@
         nil
         (let* ((v (extract (car bs) 1)) (k (extract (car bs) 2))
                (d (cond ((k-type-kind? k) (ds-rec (k-ty-new (ty-var v))))
+                        ((= k 7) (ds-var v 7))
                         ((or (= k 0) (= k 3)) (ds-region (r-var v)))
                         ((= k 1) (ds-eff (k-one (a-var v))))
                         ((= k 5) (ds-size (k-size-var v)))
@@ -440,4 +448,86 @@
               rest
               (the k-selects (cons (product (1 m) (2 x) (3 (k-ty-new (ty-param k x)))) rest)))))))
 (define k-all-unnamed? (subr (maxeff (read @globals) spin) (k-names) bool)
-  (lambda (ns) (or (null? ns) (and (symbol=? (car ns) k-no-name) (k-all-unnamed? (cdr ns)))))))))
+  (lambda (ns) (or (null? ns) (and (symbol=? (car ns) k-no-name) (k-all-unnamed? (cdr ns))))))
+
+;; A flat (`TODO.md` §77): the scalars' names, whose bytes a `blobref`
+;; reads as a value of the type of the same name.
+(define k-flat-scalar? (subr (read @globals) (symbol) bool)
+  (lambda (s)
+    (or (symbol=? s 'f64) (symbol=? s 'f32) (symbol=? s 'i32) (symbol=? s 'u32)
+        (symbol=? s 'i64) (symbol=? s 'u64))))
+(define k-flat-usage string
+  "a flat is `f64`, `f32`, `i32`, `u32`, `i64`, `u64`, or a variable of kind `flat`")
+;; What a flat named `n` where a type is wanted is told.
+(define k-flat-not-type (subr (read @globals) (string) string)
+  (lambda (n) (string-append (string-append "`" n) "` is a flat, not a type")))
+;; Whether `t` is a variable of kind `flat`.
+(define k-flat-var-type? (subr (maxeff kreads spin) (int) bool)
+  (lambda (t) (tagcase (k-get (k-resolve t)) (ty-var (v) (k-flat-var? v)) (else y #f))))
+;; Whether `t` is a flat: a scalar, or a variable of kind `flat`.
+(define k-is-flat? (subr (maxeff kreads spin) (int) bool)
+  (lambda (t)
+    (tagcase (k-get (k-resolve t))
+      (ty-base (s) (k-flat-scalar? s))
+      (ty-var (v) (k-flat-var? v))
+      (else y #f))))
+;; A flat, as written (`Checker::parse_flat`): a scalar's name, as the type
+;; its bytes are read as; or a variable of kind `flat`, or a family's flat
+;; parameter.
+(define k-parse-flat (subr (maxeff checks spin) (syn) int)
+  (lambda (s)
+    (if (syn-symbol? s)
+        (let* ((sym (syn-head s)) (d (k-lookup-desc sym)))
+          (if (null? d)
+              (if (k-flat-scalar? sym) (k-ty-new (ty-base sym)) (k-sfail k-flat-usage s))
+              (tagcase (car d)
+                (ds-var (v k) (if (= k 7) (k-ty-new (ty-var v)) (k-sfail k-flat-usage s)))
+                (ds-rec (t) (if (k-is-flat? t) t (k-sfail k-flat-usage s)))
+                (else x (k-sfail k-flat-usage s)))))
+        (k-sfail k-flat-usage s))))
+
+;; Kind `s`, or -1 where `k-parse-kind` would refuse it: for a reader that
+;; gives its own message instead (`moduleof`'s `abs`).
+(define k-try-kind (subr (maxeff kstate (read @s) spin) (syn) int)
+  (lambda (s)
+    (let ((n (if (syn-symbol? s) (syn-name s) "")))
+      (case n (("region") 0)
+              (("place") 3)
+              (("effect") 1)
+              (("type") 2)
+              (("data") 4)
+              (("flat") 7)
+              (("size") 5)
+              (("conv") 6)
+              (else
+               (cond ((syn-symbol? s) -1)
+                     (else (k-try-arrow-kind s))))))))
+(define k-try-arrow-kind (subr (maxeff kstate (read @s) spin) (syn) int)
+  (lambda (s)
+    (let ((parts (k-arrow-syntax s)))
+      (if (null? parts)
+          -1
+          (let* ((params (k-try-kinds (car (car parts))))
+                 (result (k-try-kind (cdr (car parts)))))
+            (cond ((or (k-has-id? params -1) (< result 0)) -1)
+                  ((or (= result 0) (= result 3) (= result 5) (= result 6)) -1)
+                  ((and (= result 1) (k-any-typed-kind? params)) -1)
+                  (else (k-arrow params result))))))))
+(define k-try-kinds (subr (maxeff kstate (read @s) spin) (k-syns) k-ids)
+  (lambda (xs)
+    (if (null? xs)
+        nil
+        (let* ((k (k-try-kind (car xs))) (rest (k-try-kinds (cdr xs))))
+          (the k-ids (cons k rest))))))
+;; An `abs`'s kind, `what`; or, `(abs (f (name kind) …) type)`, `(=> (kind
+;; …) type)`.
+(define k-abs-kind (subr (maxeff checks spin) (syn syn) int)
+  (lambda (name what)
+    (let ((ps (k-abs-ctor-params name)))
+      (if (null? ps)
+          (k-try-kind what)
+          (let ((ks (k-try-kinds ps)))
+            (if (or (k-has-id? ks -1) (not (= (k-try-kind what) 2)))
+                (k-sfail k-abs-ctor-usage name)
+                (k-arrow ks 2)))))))
+)))

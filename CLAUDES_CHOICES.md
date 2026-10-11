@@ -198,3 +198,28 @@ The user's okasaki.fx met "a (moduleof …) is expected here, and this is a
 7. **No message of its own** for a refused widening yet: it says "a W is
    expected here, and this is a G", as any mismatch. A line saying which
    field could not be forgotten, and why, would help; for later.
+
+## The kind `flat` and `(blobref B F)`, types (TODO.md §77, 2026-10-10)
+
+1. **`flat` as a kind beside `data`**, its descriptions types (`D::Type`)
+   that are flats: a scalar's base type, or a variable of kind `flat`.
+   Unlike `data`, not a subkind of `type`: a flat variable, or a family's
+   flat parameter given one, is refused where a type is wanted.
+2. **The scalars' names are both**: `f64` as a flat is the type `f64`, the
+   type its bytes are read as. So a family's flat parameter given `f64`
+   may stand as a type (harmless: it is one); given a flat variable, not.
+3. **`blobref` a standard generative type**, `(blobref (b type +) (f
+   flat)) b`, number 5, declared in one text for both checkers, as
+   `flatarrayof` is: to the safety analyses it is its owner, so escape,
+   masking, storage and knots see what they should, with no new type
+   form. `b` covariant: the owner is only given out. `f` invariant.
+   Rejected: a new type form (`Ty::BlobRef`), a case in every walk of
+   both checkers for what a generative type gets for free.
+4. **The owner is any type here**: binders have no subtype bounds, so a
+   primitive's type cannot say "`b`, a bloblet at `r`". The operations
+   will be syntax (as `bloblet-ref` is, for its literal index), reading
+   the owner's type, its region from it.
+5. **FX-26 kind code 7**; a variable's kind kept in `k-flats`, reset as
+   `k-datas` is. `k-try-kind` and its kin moved from `check-read-descs.fx`
+   (1003 lines with the change) to `check-read-helpers.fx`.
+6. **The name `blobref`**, the user's; `flatref` named the kind instead.

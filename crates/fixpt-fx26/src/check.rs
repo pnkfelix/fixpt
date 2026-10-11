@@ -104,6 +104,11 @@ pub const IDENTITY: &str = "(identity (k type) (r region)) int";
 /// values `v`, the table in `r`; to safety's analyses, entries of both in
 /// `r`, and opaque to anything else (`fixpt_runtime::eqtable`).
 pub const EQTABLE: &str = "(eqtable (k type) (v type) (kr region) (r region)) (arrayof (pairof k v r) r)";
+/// A suffix ref (`TODO.md` §77), generative type 5: a pointer to a flat `f`
+/// in the suffix of a bloblet of type `b`, its owner, which it keeps alive.
+/// To safety's analyses it is its owner (its regions, its storage); `b`
+/// covariant, since the owner is only given out; at run time, tag `010`.
+pub const BLOBREF: &str = "(blobref (b type +) (f flat)) b";
 
 /// A `define-generative`: its name, parameters, their variance, and the
 /// representation, a type over the parameters.
@@ -620,7 +625,7 @@ impl Checker {
         // generative type, in both checkers, whose insides nothing sees
         // (no `up-` or `down-`: a `vsubr` is called with its arguments, not
         // their list). `vlambda` makes one; `apply` calls one on a list.
-        for decl in [VSUBR, FLATLAYOUT, FLATARRAYOF, IDENTITY, EQTABLE] {
+        for decl in [VSUBR, FLATLAYOUT, FLATARRAYOF, IDENTITY, EQTABLE, BLOBREF] {
             let forms = c.read(decl).expect("reads");
             c.define_generative(&forms[0], &forms[1]).unwrap_or_else(|e| panic!("`{decl}` is wrong: {e}"));
         }
@@ -712,6 +717,7 @@ impl Checker {
     fn stand_in(&self, k: Kind) -> String {
         match k {
             Kind::Type | Kind::Data => "unit".into(),
+            Kind::Flat => "f64".into(),
             Kind::Effect => "pure".into(),
             Kind::Region | Kind::Place => "@heap".into(),
             Kind::Size => "0".into(),

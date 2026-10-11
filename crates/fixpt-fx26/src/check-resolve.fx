@@ -179,6 +179,7 @@
 (define k-closure-depth (with check-types k-closure-depth))
 (define k-conversions (with check-types k-conversions))
 (define k-datas (with check-types k-datas))
+(define k-flats (with check-types k-flats))
 (define k-dvar-name (with check-types k-dvar-name))
 (define k-dvars (with check-types k-dvars))
 (define k-fail (with check-types k-fail))
@@ -464,6 +465,7 @@
   (lambda ()
     (begin
       (set k-lemmas nil) (set k-pending-lemma nil) (set k-datas nil) (set k-certified nil)
+      (set k-flats nil)
       (set k-narrowed nil) (set k-path-narrowed nil) (set k-closure-depth 0)
       (set k-certified-lengths nil) (set k-certified-nats nil) (set k-size-facts nil)
       (set k-skolems nil))))

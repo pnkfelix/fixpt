@@ -26,6 +26,11 @@ pub enum Kind {
     /// and sent (`docs/research/generative-types.md`, §3). Every data type
     /// is a type.
     Data,
+    /// A layout of raw bytes in a bloblet's suffix (`TODO.md` §77): `f64`,
+    /// `f32`, `i32`, `u32`, `i64`, `u64`, or a variable of this kind. Not a
+    /// type: a flat thing is no value, and is reached through a `blobref`;
+    /// only a scalar's bytes are read out, as the type of its name.
+    Flat,
     /// A list's length (`docs/research/sizes.md`): a natural, or `finite`.
     Size,
     /// How a procedure is called (`docs/research/native-conventions.md`).

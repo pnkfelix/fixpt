@@ -1469,3 +1469,14 @@ to `check-sub-env.fx`, which the subtype test is given. Tests:
 `width-exact-region.fx`, checked by `tests/bloblets.rs`. Docs:
 `docs/fx26.md` (Bloblets).
 
+The kind `flat` and `(blobref B F)`, as types (2026-10-10): `flat` a kind
+beside `data`, its descriptions the scalars `f64` `f32` `i32` `u32` `i64`
+`u64` or a variable of the kind, not a subkind of `type` (`` `f` is a flat,
+not a type ``, also through a family's flat parameter); `(blobref (b type
++) (f flat)) b`, standard generative type 5 in both checkers' one text,
+so the safety analyses see a blobref as its owner. FX-26: kind 7, kept in
+`k-flats`; `k-parse-flat`, `k-is-flat?` in `check-read-helpers.fx`, with
+`k-try-kind` and its kin moved there. Tests: `bloblet/flat-kind.fx`, and
+refused, `flat-not-type.fx`, `flat-family-not-type.fx`,
+`blobref-not-flat.fx`, `flat-proj.fx`. Docs: `docs/fx26.md` (Bloblets).
+

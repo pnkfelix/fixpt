@@ -1952,6 +1952,13 @@ refs are what FX-26's flat data will be reached by:
   flat sums (a tag word, alignment); `new` of a flat ref (a one-element
   flat array, a ref at offset 0).
 
+**Done so far** (`DONE.md` §77): the kind `flat` (the scalars) and the
+type `(blobref B F)`, standard generative type 5. Next: the operations
+(make one from a bloblet and an offset, its owner and offset, project,
+read and write a scalar), as syntax reading the owner's type, through
+both checkers, the lowering, both compilers, the evaluator and register
+code; then flat products, sums and arrays.
+
 **Field indices in flat data** (the user's, 2026-10-10: to be leveraged).
 A suffix ref has one owning bloblet, recoverable from it, so a flat
 component can be a small index (a byte) naming one of the owner's fields:

@@ -44,6 +44,10 @@ pub(crate) const CONSTRUCTORS: &[(&str, &[(&str, Kind)])] = &[
     ("mark-key", &[("t", Kind::Type), ("r", Kind::Region)]),
 ];
 
+/// The scalar flats: the names whose bytes a `blobref` reads as a value of
+/// the type of the same name.
+pub(crate) const FLAT_SCALARS: [&str; 6] = ["f64", "f32", "i32", "u32", "i64", "u64"];
+
 impl Checker {
     /// A kind as it is written: `type`, or `(=> (type) type)`.
     pub(crate) fn show_kind(&self, k: Kind) -> String {
@@ -53,6 +57,7 @@ impl Checker {
             Kind::Effect => "effect".into(),
             Kind::Type => "type".into(),
             Kind::Data => "data".into(),
+            Kind::Flat => "flat".into(),
             Kind::Size => "size".into(),
             Kind::Conv => "conv".into(),
             Kind::Arrow(_) => {
@@ -107,6 +112,7 @@ impl Checker {
         match (k, d) {
             (Kind::Region, D::Region(_)) | (Kind::Effect, D::Effect(_)) | (Kind::Type | Kind::Data, D::Type(_)) => true,
             (Kind::Size, D::Size(_)) | (Kind::Conv, D::Conv(_)) => true,
+            (Kind::Flat, D::Type(t)) => self.is_flat(*t),
             (Kind::Place, D::Region(r)) => self.arena.is_place(*r),
             (Kind::Arrow(_), D::Fun(f)) => self.fun_kind(*f).is_none_or(|got| got == k),
             _ => false,
@@ -258,7 +264,7 @@ impl Checker {
             Kind::Effect => D::Effect(Effect::atom(crate::ast::Atom::Var(v))),
             Kind::Size => D::Size(Size::var(v)),
             Kind::Conv => D::Conv(crate::ast::Conv::Var(v)),
-            Kind::Type | Kind::Data => D::Type(self.arena.ty(Ty::Var(v))),
+            Kind::Type | Kind::Data | Kind::Flat => D::Type(self.arena.ty(Ty::Var(v))),
             Kind::Arrow(_) => D::Fun(self.arena.ty(Ty::Var(v))),
         }
     }
@@ -380,6 +386,7 @@ impl Checker {
     pub(crate) fn parse_desc_at(&mut self, s: &Syntax, k: Kind) -> R<D> {
         Ok(match k {
             Kind::Type | Kind::Data => D::Type(self.parse_type(s)?),
+            Kind::Flat => D::Type(self.parse_flat(s)?),
             Kind::Region => D::Region(self.parse_region(s)?),
             Kind::Place => D::Region(self.parse_place(s)?),
             Kind::Effect => D::Effect(self.parse_effect(s)?),
@@ -387,6 +394,33 @@ impl Checker {
             Kind::Conv => D::Conv(self.parse_conv(s)?),
             Kind::Arrow(_) => D::Fun(self.parse_fun(s, Some(k))?),
         })
+    }
+
+    /// A flat, as written (`Kind::Flat`): a scalar's name, `f64`, `f32`,
+    /// `i32`, `u32`, `i64` or `u64`, as the type its bytes are read as; or a
+    /// variable of kind `flat`, or a family's flat parameter.
+    pub(crate) fn parse_flat(&mut self, s: &Syntax) -> R<TyId> {
+        let usage = "a flat is `f64`, `f32`, `i32`, `u32`, `i64`, `u64`, or a variable of kind `flat`";
+        let Some(sym) = s.as_symbol() else { return Err(FxError::at(s.span, usage)) };
+        match self.lookup_desc(sym) {
+            Some(DScope::Var(v, Kind::Flat)) => return Ok(self.arena.ty(Ty::Var(v))),
+            Some(DScope::Rec(t)) if self.is_flat(t) => return Ok(t),
+            Some(_) => return Err(FxError::at(s.span, usage)),
+            None => {}
+        }
+        if FLAT_SCALARS.contains(&self.interner.name(sym)) {
+            return Ok(self.arena.ty(Ty::Base(sym)));
+        }
+        Err(FxError::at(s.span, usage))
+    }
+
+    /// Whether `t` is a flat: a scalar, or a variable of kind `flat`.
+    pub(crate) fn is_flat(&self, t: TyId) -> bool {
+        match self.arena.get(self.arena.resolve(t)) {
+            Ty::Base(s) => FLAT_SCALARS.contains(&self.interner.name(*s)),
+            Ty::Var(v) => self.arena.dvar_kind_known(*v) == Some(Kind::Flat),
+            _ => false,
+        }
     }
 
     /// `(f d …)` as a type: `f` given the descriptions `args` are, of the

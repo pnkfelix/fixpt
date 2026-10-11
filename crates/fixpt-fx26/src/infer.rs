@@ -126,7 +126,7 @@ impl Checker {
                         let d = match k {
                             Kind::Region | Kind::Place => D::Region(Region::Var(*va)),
                             Kind::Effect => D::Effect(Effect::atom(Atom::Var(*va))),
-                            Kind::Type | Kind::Data => D::Type(self.arena.ty(Ty::Var(*va))),
+                            Kind::Type | Kind::Data | Kind::Flat => D::Type(self.arena.ty(Ty::Var(*va))),
                             Kind::Size => D::Size(Size::var(*va)),
                             Kind::Conv => D::Conv(crate::ast::Conv::Var(*va)),
                             Kind::Arrow(_) => D::Fun(self.arena.ty(Ty::Var(*va))),
@@ -1288,7 +1288,7 @@ impl Checker {
                 Kind::Size => {
                     map.insert(*v, D::Size(Size::Finite));
                 }
-                Kind::Type | Kind::Data | Kind::Place | Kind::Arrow(_) => {
+                Kind::Type | Kind::Data | Kind::Flat | Kind::Place | Kind::Arrow(_) => {
                     return Err(FxError::at(
                         span,
                         format!(
