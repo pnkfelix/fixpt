@@ -569,3 +569,29 @@ than a word unless its name says so.
    (procedure, result, `poly`, product, sum), since a pair's or a
    reference's type may be written and cannot change; that the rest is
    closed is argued, not proved.
+9. **kayak's I/O (TODO §84), the choices not asked about (2026-10-12).**
+   Made while building the five stages; each easy to change.
+   - `bytevectorof` a new generative type (heap bytevector at run time,
+     an array of `u8` to the safety analyses), not `(arrayof u8 r)` nor
+     a flat array of `u8`; a reader's `bytevector` in a `datum` left
+     opaque, so a quoted bytevector is still refused.
+   - `u8` and `i8` made last among the base types in both checkers, so
+     no existing type id moved.
+   - `io` not a reserved word: a program may still name a variable `io`.
+   - `io-error`'s kinds: the eight Rust's `ErrorKind` maps onto most
+     usefully, `other` for the rest.
+   - `read-line` strips `\n` and `\r\n`; a line not UTF-8 is a failure
+     and reading goes on after it.
+   - `clock`'s zero is near the run's start (the first time asked), so
+     its nanoseconds stay a fixnum.
+   - `fixpt run FILE… -- ARG…` for the program's arguments; `fixpt run`
+     gives a program no step budget unless `--step-limit` is given (the
+     REPL's budget stopped a 4 MB loop).
+   - `fixpt eval` keeps its "exit 1 if the program fails"; only `run`
+     exits 70, though both honour `exit`.
+   - The cellular machines' traps say themselves in the native machine's
+     words (`Trap`'s `Display`), not Rust's debug form; the run's word is
+     no longer an irritant of the message.
+   - Not done, for the user: whether a failing `pure` call may be dropped
+     (`rs-scheme-vm` drops `(error …)` when its value is unused; native
+     code does not): TODO §85.
