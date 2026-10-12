@@ -2437,9 +2437,24 @@ stored there: a loop's `f64` total costs a heap box each time round
   raw: a loop's variable stays raw across the loop's back edge.
 - Costs two words a frame (header, trailer), and the frame code that
   writes the map writes them.
-First: time the `f64`-heavy MLton ports, how much of their run is boxing
-what a loop carries, to know what this buys beyond the one loop; then
-the layout, in `direct.rs` and the collector's walk of native frames.
+Measured (2026-10-12): no float benchmark was ported, so four were
+(`mllang-bench/fx/`: `mlton/mandelbrot`, `mlton/matrix-multiply`,
+`benchmarksgame/spectralnorm2`, `benchmarksgame/nbody`). In
+`mandelbrot`, natively, 78.5 ms where the same loops in fixed-point
+`int`s take 11.4 (1.07M inner iterations each): about 85% of the run is
+`f64` handling, 16 words allocated an inner iteration, 8 boxes. Each
+`f64` that reaches a frame slot is boxed (a bump allocation, header and
+bits) and unboxed when read back (a tag check, a load): `let`
+temporaries as well as what a self tail call carries. Words allocated an
+inner iteration: `matrix-multiply` 2 (the dot's sum), `spectralnorm2` 4
+(the row's sum, and `eval-a`'s result), `nbody` about 32 (temporaries,
+and `at`/`put`'s arguments and results). So three sources: (1) `let`
+temporaries in frame slots, (2) what a loop carries across its self tail
+call, (3) `f64` arguments and results of calls. Raw frame slots end (1)
+and (2); (3) wants the native convention to pass and return a raw `f64`
+(registers, or the callee's raw slots), a follow-on. Next: the layout,
+in `direct.rs` and the collector's walk of native frames; the four ports
+timed both ways.
 - **Later, frames' uniqueness restored by a collection** (the user's,
   2026-10-12). A frame (or chunk) gets a "shared" header flag, set when a
   continuation capture takes a reference to it; underflow or a resume

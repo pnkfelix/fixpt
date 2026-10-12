@@ -25,7 +25,7 @@ To run one as machine code:
 fixpt eval --step-limit none --fx26-run cellular --calling-convention native mllang-bench/fx/mlton/NAME.fx
 ```
 
-## Ported: 42
+## Ported: 46
 
 Every port passes both checkers, runs natively, and agrees with the
 program lowered to Scheme. Times are one native run each, alone, on
@@ -34,12 +34,18 @@ program lowered to Scheme. Times are one native run each, alone, on
 including about 1.8 to 3.5 s of start-up. Start-up is about 0.5 s since
 2026-09-30 (the front end's checker and compilers are no longer also
 loaded lowered): subtract about 2.2 s from a time here for today's.
+The four float ports (2026-10-12: `mandelbrot`, `matrix-multiply`,
+`nbody`, `spectralnorm2`) are timed with today's start-up, about 0.5 s;
+each `f64` that reaches a frame slot, a call's argument or its result is
+a heap box today, most of their run (`TODO.md` §91).
 
 | benchmark                      | answer                                          | native s | count and notes                                             |
 | ------------------------------ | ----------------------------------------------- | -------- | ----------------------------------------------------------- |
 | `benchmarksgame/binarytrees5`  | 14985902                                        | 3.2      | depth 16                                                    |
 | `benchmarksgame/fannkuchredux` | 862930                                          | 2.6      | n = 9                                                       |
+| `benchmarksgame/nbody`         | "-0.16908618459855648"                          | 2.1      | 1 000 000 steps (2026-10-12); the bodies one flat array     |
 | `benchmarksgame/pidigits5`     | 112361924                                       | 3.9      | N = 3000 (default 27); hash of the output                   |
+| `benchmarksgame/spectralnorm2` | "1.274224152228617"                             | 3.4      | n = 2000 (2026-10-12)                                       |
 | `mlton/boyer`                  | #t                                              | 4.6      | 30 proofs                                                   |
 | `mlton/checksum`               | 0                                               | 3.6      | (doit 2); Word8Array as a bloblet                           |
 | `mlton/count-graphs`           | (0 0 1 1 2 2 4 4 20 20 250 250)                 | 25.2     | 1 `doit`, sizes 0–11                                        |
@@ -51,6 +57,8 @@ loaded lowered): subtract about 2.2 s from a time here for today's.
 | `mlton/knuth-bendix`           | 24                                              | 6.1      | 1 completion                                                |
 | `mlton/life`                   | 205                                             | 4.4      | (doit 1)                                                    |
 | `mlton/logic`                  | 2                                               | 3.6      | 2 runs                                                      |
+| `mlton/mandelbrot`             | 1073042                                         | 1.8      | 20 runs of a 1024² grid (MLton: 32768²) (2026-10-12)        |
+| `mlton/matrix-multiply`        | 2646700                                         | 1.8      | 20 runs at 200² (MLton: 500²) (2026-10-12); a flat array    |
 | `mlton/md5`                    | "59ebddd335d8defbcaf5b76c08c64278"              | 2.9      | 20 blocks (MLton: 100 000); Word32 as `u32` (was 3.3)       |
 | `mlton/merge`                  | 0                                               | 2.6      | lists of 50 000 (MLton: 100 000): 8 MB native stack         |
 | `mlton/mpuz`                   | "J = 0 I = 1 D = 8 E = 2 C = 5 B = 6 F …        | 8.2      | (doit 1)                                                    |
@@ -89,13 +97,13 @@ and `psdes-random` in 2.5 s where they took 5.6 s.
 
 ## Not ported
 
-| benchmarks                                                                                             | what they need                                               |
-| ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------ |
-| mlton: mandelbrot, matrix-multiply, fft, tsp, ray, zern, nucleic, barnes-hut, simple, raytrace, tensor | floats                                                       |
-| mlton: output1, wc-input1, wc-scanStream                                                               | file I/O is the benchmark                                    |
-| mlton: lexgen, vliw                                                                                    | feasible, not yet done: 1300 and 3700 lines, inputs to embed |
-| mlton: mlyacc, model-elimination, fxp, hamlet                                                          | size: 7 000 to 23 000 lines                                  |
-| ocaml: fft, almabench, nucleic                                                                         | floats                                                       |
-| benchmarksgame: mandelbrot6, nbody, spectralnorm2, fasta3, fasta6                                      | floats (fasta: and text output)                              |
-| benchmarksgame: regexredux2                                                                            | regular expressions, file input                              |
-| benchmarksgame: knucleotide, knucleotide3, revcomp2                                                    | FASTA input from stdin, hash tables                          |
+| benchmarks                                                                | what they need                                               |
+| ------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| mlton: fft, tsp, ray, zern, nucleic, barnes-hut, simple, raytrace, tensor | floats: feasible since FX-26 has `f64`, not yet done         |
+| mlton: output1, wc-input1, wc-scanStream                                  | file I/O is the benchmark                                    |
+| mlton: lexgen, vliw                                                       | feasible, not yet done: 1300 and 3700 lines, inputs to embed |
+| mlton: mlyacc, model-elimination, fxp, hamlet                             | size: 7 000 to 23 000 lines                                  |
+| ocaml: fft, almabench, nucleic                                            | floats: feasible since FX-26 has `f64`, not yet done         |
+| benchmarksgame: mandelbrot6, fasta3, fasta6                               | floats, feasible; fasta: and text output                     |
+| benchmarksgame: regexredux2                                               | regular expressions, file input                              |
+| benchmarksgame: knucleotide, knucleotide3, revcomp2                       | FASTA input from stdin, hash tables                          |
