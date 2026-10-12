@@ -2347,3 +2347,50 @@ Beside it:
   (`docs/research/gadts.md`) and facts that a divisor is nonzero each
   remove a class of debt; stage 1's measurement says what each is worth.
 
+## 87. What a callee does, summarized for its callers (the user's, 2026-10-12)
+
+Several facts are computed about a callee and wanted by its callers:
+whether it may fail (§86), its effect summary (0 to 3), whether it never
+collects (`never_collects`, so far for primitives only), whether it needs
+a frame, and which registers it clobbers. Each wants the same three
+things:
+1. **A summary bottom-up for known callees**, over the call graph, a
+   recursive group's settled by a fixpoint (as the checker's effect
+   summaries are).
+2. **Types to carry it to unknown callees**, a closure passed in or a
+   higher-order procedure's argument. `subr` types already carry a
+   calling convention (`cv-cellular`, `cv-native`, `cv-fx`) and
+   convention variables (`cv-var`), so `map` is polymorphic in its
+   argument's convention, and instantiating it brings the callee's facts
+   along. A summary is effect-like: summaries join under `maxeff`, one
+   fits where a larger is expected, and a procedure that saves and
+   restores a register before returning masks it, as `letregion` masks
+   a region. Inferred, never written, as §86's debts are.
+3. **A guard where a fact can change underneath**: a global redefined by
+   `define*` (F14 already guards the procedure a global is bound to; a
+   summary taken from its old code needs the same guard, or its callers
+   recompiled); a closure from outside whose real convention is wider
+   than expected, given an adapter that saves the rest, as
+   `%fx26-convert` makes adapters between conventions now.
+
+**First instance: registers kept live across calls** (an "extra-flexible
+calling convention"). Native code keeps no Value in a register across a
+safepoint (`docs/research/native-conventions.md`): every call may
+collect, and the collector updates only the frame's slots the stack map
+names, so a pointer left in a register would be stale after a moving
+collection. A Value may stay in a register across a call only when the
+callee (with all it calls) never collects (no allocation that calls in,
+no call-out that collects) and captures no continuation (effect summary
+below 3: a copied stack holds no registers), and does not clobber that
+register. Checked 2026-10-12: running out of fuel, or of stack, traps and
+ends the run (`direct.rs`, `common_trap`), so a fuel check does not count
+against a callee. A raw `i64`, `u64` or `f64` is not traced, so for one
+only the clobber set matters.
+
+**Measure first**: in the native code of the MLton ports, how many calls
+are to callees that never collect, and how many values are spilled to the
+frame around them. A code-generation trade-off, so timed on the MLton
+ports both ways, not only `fixpt bench`'s eight. Other summaries this
+would serve later: a frame's size, for the stack-limit check; bounded
+work, for fuel checks; an allocation bound.
+
