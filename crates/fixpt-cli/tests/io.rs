@@ -72,3 +72,42 @@ fn a_failed_write_is_a_value() {
         assert!(err.starts_with("broken pipe: "), "{m}: {err}");
     }
 }
+
+/// Files, relative to the working directory, each machine's its own: two
+/// written, one replaced (no file of its left beside it), the names
+/// sorted, one read back, a missing one `not-found`.
+#[test]
+fn files_written_listed_and_read() {
+    let path = format!("{}/tests/programs/io/files.fx", env!("CARGO_MANIFEST_DIR"));
+    for m in MACHINES {
+        let dir = std::env::temp_dir().join(format!("fixpt-io-files-{m}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a directory");
+        let out = Command::new(FIXPT).args(["--fx26-machine", m, "run", &path]).current_dir(&dir).stdin(Stdio::null()).output().expect("fixpt runs");
+        let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert_eq!((out.status.code(), stdout.as_ref()), (Some(5), "a.txt\nb.txt\nbee, again\n"), "{m}: {stderr}");
+        let mut left: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
+        left.sort();
+        assert_eq!(left, ["a.txt", "b.txt"], "{m}");
+        std::fs::remove_dir_all(&dir).expect("removed");
+    }
+}
+
+/// The program's own arguments after `--`, an empty one too; and a sleep
+/// on the clock, which the clock then shows has passed.
+#[test]
+fn arguments_and_the_clock() {
+    let path = format!("{}/tests/programs/io/args-clock.fx", env!("CARGO_MANIFEST_DIR"));
+    let runs: Vec<_> = MACHINES
+        .iter()
+        .map(|m| {
+            let path = path.clone();
+            (*m, std::thread::spawn(move || Command::new(FIXPT).args(["--fx26-machine", m, "run", &path, "--", "one", "two words", ""]).output().expect("fixpt runs")))
+        })
+        .collect();
+    for (m, t) in runs {
+        let out = t.join().expect("ran");
+        let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert_eq!((out.status.code(), stdout.as_ref()), (Some(0), "one;two words;;"), "{m}: {stderr}");
+    }
+}

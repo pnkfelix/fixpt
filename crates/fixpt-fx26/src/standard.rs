@@ -195,6 +195,16 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("write-out", "(subr (io stdout) (string) (sumof (done unit) (failed io-error)))"),
     ("write-err", "(subr (io stderr) (string) (sumof (done unit) (failed io-error)))"),
     ("exit", "(subr (io exit) (int) void)"),
+    // Files: a path as the working directory resolves it; what is read made
+    // at a region; a file replaced whole, atomically.
+    // The clock: monotonic nanoseconds since the run began, and a sleep
+    // until a time on it. The program's own arguments.
+    ("clock", "(subr (io clock) () i64)"),
+    ("sleep-until", "(subr (io clock) (i64) unit)"),
+    ("args", "(poly ((r region)) (subr (maxeff (io args) (alloc r)) () (listof string r)))"),
+    ("read-file", "(poly ((r region)) (subr (maxeff (io fs-read) (alloc r)) (string) (sumof (data (bytevectorof r)) (failed io-error))))"),
+    ("list-dir", "(poly ((r region)) (subr (maxeff (io fs-read) (alloc r)) (string) (sumof (names (listof string r)) (failed io-error))))"),
+    ("write-file", "(poly ((r region)) (subr (maxeff (io fs-write) (read r)) (string (bytevectorof r)) (sumof (done unit) (failed io-error))))"),
     // Bytevectors (`TODO.md` §84): made, read and written at a region, as
     // arrays are; R7RS's names. `bytevector-copy` takes a start and an end,
     // `bytevector-copy!` R7RS's `to at from start end`.

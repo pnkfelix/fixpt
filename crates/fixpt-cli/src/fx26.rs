@@ -558,15 +558,21 @@ fn exited(session: &mut Fx26Session) -> Option<i32> {
 }
 
 /// `fixpt run`: each file's forms, in one session; then, if the program
-/// defines `main`, a call of it (`TODO.md` §84). The status is `main`'s
+/// defines `main`, a call of it (`TODO.md` §84). What follows `--` is the
+/// program's own arguments, which `args` gives. The status is `main`'s
 /// result's low byte if that is an integer, else 0; 70 if the run fails
 /// (`failed_status`); `exit`'s, if it is called; 1 if a file cannot be
 /// read or the program is refused.
 pub fn run_files(backend: Backend, files: &[String]) -> i32 {
+    let (files, args) = match files.iter().position(|a| a == "--") {
+        Some(i) => (&files[..i], &files[i + 1..]),
+        None => (files, &[][..]),
+    };
     let mut session = match start(backend) {
         Ok(s) => s,
         Err(code) => return code,
     };
+    session.scheme.runtime_unrooted().world.args = args.to_vec();
     for f in files {
         let text = match std::fs::read_to_string(f) {
             Ok(t) => t,

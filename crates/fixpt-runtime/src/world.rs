@@ -80,3 +80,60 @@ pub fn error_kind(e: &std::io::Error) -> &'static str {
         _ => "other",
     }
 }
+
+/// The names in directory `path`, sorted by their bytes; one that is not
+/// UTF-8 is an error of kind `invalid-data`, since FX-26's strings are.
+pub fn list_dir(path: &str) -> std::io::Result<Vec<String>> {
+    let mut names = Vec::new();
+    for entry in std::fs::read_dir(path)? {
+        let name = entry?.file_name();
+        match name.into_string() {
+            Ok(n) => names.push(n),
+            Err(n) => {
+                return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, format!("a name that is not UTF-8: {n:?}")));
+            }
+        }
+    }
+    names.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes()));
+    Ok(names)
+}
+
+/// File `path` replaced by `bytes` whole, atomically: written to a file
+/// beside it, flushed to the disk, and renamed over it, so that a reader
+/// sees the old contents or the new, never part of either.
+pub fn replace_file(path: &str, bytes: &[u8]) -> std::io::Result<()> {
+    let target = std::path::Path::new(path);
+    let name = target.file_name().ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, format!("no file name in {path:?}")))?;
+    let mut temp_name = std::ffi::OsString::from(".");
+    temp_name.push(name);
+    temp_name.push(format!(".fixpt-{}.tmp", std::process::id()));
+    let temp = target.with_file_name(temp_name);
+    let written = (|| {
+        let mut f = std::fs::File::create(&temp)?;
+        f.write_all(bytes)?;
+        f.sync_all()
+    })();
+    match written.and_then(|()| std::fs::rename(&temp, target)) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let _ = std::fs::remove_file(&temp);
+            Err(e)
+        }
+    }
+}
+
+/// Nanoseconds since the first time this was asked, by the monotonic
+/// clock: what FX-26's `clock` gives, so its zero is near the run's start.
+pub fn clock_ns() -> i64 {
+    static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    let start = *START.get_or_init(std::time::Instant::now);
+    i64::try_from(start.elapsed().as_nanos()).unwrap_or(i64::MAX)
+}
+
+/// Sleep until `clock_ns` reaches `t`; at once if it has.
+pub fn sleep_until(t: i64) {
+    let now = clock_ns();
+    if t > now {
+        std::thread::sleep(std::time::Duration::from_nanos((t - now) as u64));
+    }
+}

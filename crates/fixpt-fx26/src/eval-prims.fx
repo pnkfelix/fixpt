@@ -300,22 +300,26 @@
                    (text s (the val (o-sum 'text s)))
                    (bad k (the val (o-sum 'bad k))))))))))
 
+;; `(sum failed e)`, `e` an `io-error`, as the evaluator's value: a
+;; product of its kind and detail.
+(define* ev-io-failed (subr (maxeff stores spin) (io-error) val)
+  (lambda (e)
+    (let ((kind (tagcase (extract e kind)
+                  (not-found u 'not-found) (permission-denied u 'permission-denied)
+                  (already-exists u 'already-exists) (not-a-directory u 'not-a-directory)
+                  (is-a-directory u 'is-a-directory) (broken-pipe u 'broken-pipe)
+                  (invalid-data u 'invalid-data) (other u 'other))))
+      (the val
+        (o-sum 'failed
+               (o-product (list (cons 'kind (the val (o-sum kind the-unit)))
+                                (cons 'detail (the val (extract e detail))))))))))
 ;; What an I/O primitive gave, as the evaluator's value: `(sum done #u)`,
-;; or `(sum failed e)`, `e` an `io-error` product of its kind and detail.
+;; or a failure.
 (define* ev-io-result (subr (maxeff stores spin) ((sumof (done unit) (failed io-error))) val)
-  (lambda (r)
-    (tagcase r
-      (done u (the val (o-sum 'done the-unit)))
-      (failed e
-        (let ((kind (tagcase (extract e kind)
-                      (not-found u 'not-found) (permission-denied u 'permission-denied)
-                      (already-exists u 'already-exists) (not-a-directory u 'not-a-directory)
-                      (is-a-directory u 'is-a-directory) (broken-pipe u 'broken-pipe)
-                      (invalid-data u 'invalid-data) (other u 'other))))
-          (the val
-            (o-sum 'failed
-                   (o-product (list (cons 'kind (the val (o-sum kind the-unit)))
-                                    (cons 'detail (the val (extract e detail))))))))))))
+  (lambda (r) (tagcase r (done u (the val (o-sum 'done the-unit))) (failed e (ev-io-failed e)))))
+;; Strings `ns`, as the evaluator's list of them.
+(define* ev-strings (subr (maxeff stores spin) ((listof string @v)) val)
+  (lambda (ns) (if (null? ns) nil (cons (car ns) (ev-strings (cdr ns))))))
 
 ;; The program's I/O (`TODO.md` §84), done by the primitives themselves.
 (define* ev-io-prims! (subr (maxeff stores spin) () unit)
@@ -323,7 +327,26 @@
     (begin
       (prim! 'write-out (lambda (xs) (ev-io-result (write-out (as-str (ev-arg xs 0))))))
       (prim! 'write-err (lambda (xs) (ev-io-result (write-err (as-str (ev-arg xs 0))))))
-      (prim! 'exit (lambda (xs) (exit (as-int (ev-arg xs 0))))))))
+      (prim! 'exit (lambda (xs) (exit (as-int (ev-arg xs 0)))))
+      (prim! 'clock (lambda (xs) (clock)))
+      (prim! 'sleep-until
+             (lambda (xs) (begin (sleep-until (int->i64 (as-int (ev-arg xs 0)))) the-unit)))
+      (prim! 'args (lambda (xs) (ev-strings (the (listof string @v) (args)))))
+      (prim! 'read-file
+             (lambda (xs)
+               (tagcase (the (sumof (data (bytevectorof @v)) (failed io-error))
+                             (read-file (as-str (ev-arg xs 0))))
+                 (data b (the val (o-sum 'data (o-bytes b))))
+                 (failed e (ev-io-failed e)))))
+      (prim! 'list-dir
+             (lambda (xs)
+               (tagcase (the (sumof (names (listof string @v)) (failed io-error))
+                             (list-dir (as-str (ev-arg xs 0))))
+                 (names ns (the val (o-sum 'names (ev-strings ns))))
+                 (failed e (ev-io-failed e)))))
+      (prim! 'write-file
+             (lambda (xs)
+               (ev-io-result (write-file (as-str (ev-arg xs 0)) (as-bytes (ev-arg xs 1)))))))))
 
 ;; How many pairs list `v` has, `n` so far: `length`'s and `list-length`'s.
 (define* ev-list-length (subr (maxeff evals spin) (val int) int)

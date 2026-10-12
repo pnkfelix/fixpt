@@ -27,9 +27,10 @@ fixpt — a Scheme engine with FX-87 and FX-91 front ends
 usage:
   fixpt repl                     start a read-eval-print loop
   fixpt fx26                     the FX-26 REPL: `fixpt --dialect fx26 repl`
-  fixpt run FILE...              run each file in one session; FX-26: then
+  fixpt run FILE... [-- ARG...]  run each file in one session; FX-26: then
                                  `main`, if defined, its integer result the
-                                 exit status (70 if the run fails)
+                                 exit status (70 if the run fails); `args`
+                                 gives the ARGs
   fixpt eval EXPR                evaluate one expression and print it; in
                                  FX-26, EXPR may be a file (a whole program,
                                  and a `.fx` one needs no --dialect) or `-`

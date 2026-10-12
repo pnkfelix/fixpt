@@ -1,0 +1,35 @@
+; Files (TODO.md §84), relative to the working directory: two written, one
+; of them replaced; the directory's names, sorted; one read back; one that
+; is not there, `not-found`: status 5.
+(define-type strs (listof string @l))
+(define-type read-result (sumof (data (bytevectorof @b)) (failed io-error)))
+(define* show-names (subr (maxeff (io stdout) (read @l) spin) (strs) unit)
+  (lambda (ns)
+    (if (null? ns)
+        #u
+        (begin (write-out (string-append (car ns) "\n")) (show-names (cdr ns))))))
+(define put (subr (maxeff (io fs-write) (alloc @b) (read @b)) (string string) unit)
+  (lambda (path text)
+    (tagcase (write-file path (the (bytevectorof @b) (string->utf8 text)))
+      (done u #u)
+      (failed e #u))))
+(define text-of (subr (read @b) (read-result) string)
+  (lambda (r)
+    (tagcase r
+      (data b (tagcase (utf8->string b) (text s s) (bad k "not UTF-8")))
+      (failed e (extract e detail)))))
+(define main (subr (maxeff (io fs-read) (io fs-write) (io stdout) (alloc @b) (read @b) (alloc @l)
+                           (read @l) spin (read (globals show-names put text-of)))
+                   () int)
+  (lambda ()
+    (begin
+      (put "b.txt" "bee")
+      (put "a.txt" "ay")
+      (put "b.txt" "bee, again")
+      (tagcase (the (sumof (names strs) (failed io-error)) (list-dir "."))
+        (names ns (show-names ns))
+        (failed e #u))
+      (write-out (string-append (text-of (read-file "b.txt")) "\n"))
+      (tagcase (the read-result (read-file "none.txt"))
+        (data b 0)
+        (failed e (tagcase (extract e kind) (not-found u 5) (else k 6)))))))

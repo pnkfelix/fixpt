@@ -1227,6 +1227,58 @@ prims! {
     // program sees; `exit` the status recorded, and the run stopped.
     "%fx26-write-out", 1, Some(1), simple!(|rt, a| fx26_write(rt, a[0], crate::world::Stream::Stdout));
     "%fx26-write-err", 1, Some(1), simple!(|rt, a| fx26_write(rt, a[0], crate::world::Stream::Stderr));
+    // Files (stage 3): a path as the process's working directory resolves
+    // it. A file read whole; a directory's names, sorted by their bytes, so
+    // that its answer does not depend on the file system's order; a file
+    // replaced whole, atomically: written beside it, then renamed over it.
+    "%fx26-read-file", 1, Some(1), simple!(|rt, a| {
+        let path = get_string(rt, a[0])?;
+        Ok(match std::fs::read(&path) {
+            Ok(bytes) => {
+                let bv = rt.heap.make_bytevector(&bytes);
+                fx26_sum(rt, "data", bv)
+            }
+            Err(e) => fx26_io_result(rt, Err(e)),
+        })
+    });
+    "%fx26-list-dir", 1, Some(1), simple!(|rt, a| {
+        let path = get_string(rt, a[0])?;
+        Ok(match crate::world::list_dir(&path) {
+            Ok(names) => {
+                let mut list = Value::NULL;
+                for n in names.iter().rev() {
+                    let s = rt.heap.make_string(n);
+                    list = rt.heap.cons(s, list);
+                }
+                fx26_sum(rt, "names", list)
+            }
+            Err(e) => fx26_io_result(rt, Err(e)),
+        })
+    });
+    "%fx26-write-file", 2, Some(2), simple!(|rt, a| {
+        let path = get_string(rt, a[0])?;
+        let n = bytevector_in(rt, a[1])?;
+        let bytes: Vec<u8> = (0..n).map(|i| rt.heap.bytevector_ref(a[1], i)).collect();
+        let r = crate::world::replace_file(&path, &bytes);
+        Ok(fx26_io_result(rt, r))
+    });
+    // The clock (stage 4): monotonic nanoseconds since the run began; and
+    // the program's own arguments, as `fixpt run … -- ARG…` gives them.
+    "%fx26-clock", 0, Some(0), simple!(|rt, _a| Ok(exact_out(rt, crate::world::clock_ns() as i128)));
+    "%fx26-sleep-until", 1, Some(1), simple!(|rt, a| {
+        let t = fixed_in(rt, a[0], Width::I64)?;
+        crate::world::sleep_until(t as i64);
+        Ok(Value::UNIT)
+    });
+    "%fx26-args", 0, Some(0), simple!(|rt, _a| {
+        let args = rt.world.args.clone();
+        let mut list = Value::NULL;
+        for arg in args.iter().rev() {
+            let s = rt.heap.make_string(arg);
+            list = rt.heap.cons(s, list);
+        }
+        Ok(list)
+    });
     "%fx26-exit", 1, Some(1), simple!(|rt, a| {
         let Some(n) = exact_bigint(rt, a[0]) else { return rt.type_error("an exact integer", a[0]) };
         let m = num_bigint::BigInt::from(256);

@@ -1764,3 +1764,15 @@ written in FX-26 does all of it with the primitives themselves (its
 the streams, `main`'s status, `exit`, a failed run, a broken pipe as a
 value). Found on the way: §85.
 
+**Stages 3 and 4: files, the clock and the arguments** (2026-10-12).
+`read-file` and `list-dir`, `(io fs-read)`, make what they give at a
+region the caller picks; `list-dir`'s names sorted by their bytes, a name
+not UTF-8 an `invalid-data` failure; `write-file`, `(io fs-write)`,
+replaces a file whole and atomically (written beside it, flushed to the
+disk, renamed over it). `clock`, `(io clock)`, monotonic nanoseconds since
+the run began, an `i64`; `sleep-until` a time on it. `args`, `(io args)`:
+what follows `--` in `fixpt run FILE… -- ARG…`. On every machine and in
+the evaluator written in FX-26. Tests: `tests/programs/io/` (both
+checkers), `fixpt-cli/tests/io.rs` (five machines, each in a directory
+of its own for the files).
+

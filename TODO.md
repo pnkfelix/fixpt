@@ -2312,15 +2312,16 @@ quoted bytevector, still refused (a reader's is the opaque `bytevector`,
 not a `bytevectorof`).
 2. Built (`DONE.md` §84): the `io` atom, `write-out`, `write-err`,
    `exit`, `main` and the exit status.
-3. `read-file`, `write-file` (whole, atomic: a temporary file renamed),
-   `list-dir`; `io-error`.
-4. `clock` (monotonic, `i64` nanoseconds), `sleep-until` on it, `args`.
-5. `read-line`.
+3. and 4. Built (`DONE.md` §84): files, the clock, the arguments.
+5. `read-line`: `(subr (io stdin) () (sumof (line string) (eof unit)
+   (failed io-error)))`, bytes not UTF-8 a failure of kind
+   `invalid-data`. The `World` reads the process's standard input, or a
+   test's bytes.
 
-**Where to start:** stage 3, beside stage 2's primitives: a runtime
-primitive each (`fixpt_runtime::world`, which a test can capture), the
-standard types (`standard.rs`), the lowering's names, and the evaluator's
-`ev-io-prims!`; `read-file` and `list-dir` allocate, so take a region.
+**Where to start:** stage 5, as stage 2's `write-out` was made: a
+runtime primitive reading `fixpt_runtime::world`, the standard type, the
+lowering's name, the evaluator's `ev-io-prims!`; then a test in
+`fixpt-cli/tests/io.rs` that gives the program its standard input.
 
 ## 85. Machines that disagree on a failure (found 2026-10-12)
 
