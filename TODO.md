@@ -2293,8 +2293,9 @@ not agree when a run fails.
   allow both answers; a question for the user. Both compilers must agree,
   so today they do not.
 - **The messages differ.** `(car nil)` says "car or cdr of a non-pair"
-  natively, "error: expected a pair: ()" on `rs-scheme-vm`, "a pair is
-  expected" in the evaluator, and `Type { routine: "pair-car" }:
-  #<cellular-word program>` (Rust's debug form) on the cellular machines.
-  One wording, from the runtime, for each.
+  natively and on the cellular machines (whose traps say themselves in
+  the native machine's words since 2026-10-12, not Rust's debug form),
+  but "error: expected a pair: ()" on `rs-scheme-vm` (the Scheme
+  primitive's own message, which Scheme code shares) and "a pair is
+  expected" in the evaluator written in FX-26. One wording for each.
 

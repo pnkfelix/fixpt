@@ -158,7 +158,7 @@ pub fn compile_with_fx26_compiler_showing(
                 let why = e.to_string();
                 let why = why.trim_start_matches("error: cellular word: ");
                 // As the lowered form says it, whichever machine ran out.
-                let why = if why.contains("OutOfFuel") { "evaluation step limit exceeded" } else { why };
+                let why = if why.contains("step limit") { "evaluation step limit exceeded" } else { why };
                 Ok((format!("!! {why}"), words))
             }
         }

@@ -69,6 +69,25 @@ pub enum Trap {
     Prim(String),
 }
 
+/// A trap as a program's failure is said (`TODO.md` §85): in the native
+/// machine's words where it has the same trap, not Rust's debug form.
+impl std::fmt::Display for Trap {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Trap::Type { routine } if routine.starts_with("pair-") => write!(f, "car or cdr of a non-pair"),
+            Trap::Type { routine } => write!(f, "`{routine}` was given a value of the wrong kind"),
+            Trap::Overflow { routine } => write!(f, "`{routine}`'s result does not fit"),
+            Trap::Underflow { routine } => write!(f, "`{routine}` found too few values on the data stack"),
+            Trap::Field { routine } => write!(f, "`{routine}` named a field that is not there"),
+            Trap::NoRoutine(n) => write!(f, "no routine is numbered {n}"),
+            Trap::NotAWord => write!(f, "`execute` was given what is no word"),
+            Trap::OutOfFuel => write!(f, "evaluation step limit exceeded"),
+            Trap::StackOverflow | Trap::TooDeep => write!(f, "stack overflow"),
+            Trap::Prim(why) => write!(f, "{why}"),
+        }
+    }
+}
+
 impl Trap {
     /// A trap as the number the native machine reports it by, and back.
     pub fn code(&self) -> (u64, u64) {
@@ -1260,7 +1279,7 @@ pub fn run_word(rt: &mut Runtime, word: Value, args: &[Value]) -> Result<Value, 
         m.profile = Some(Profile::default());
     }
     m.ds.extend_from_slice(args);
-    let out = m.run_in_runtime(rt, word).map_err(|t| format!("{t:?}"));
+    let out = m.run_in_runtime(rt, word).map_err(|t| format!("{t}"));
     if let Some(p) = &m.profile {
         eprintln!("profile: {} cells", m.steps);
         for (name, n) in p.top(40) {
@@ -1324,7 +1343,7 @@ pub fn call_value(rt: &mut Runtime, f: Value, args: &[Value]) -> Result<Value, N
             let (k, v) = m.thrown.expect("thrown");
             Err(NativeExit::Throw { k, v })
         }
-        Err(t) => Err(NativeExit::Failed(format!("{t:?}"))),
+        Err(t) => Err(NativeExit::Failed(t.to_string())),
     }
 }
 

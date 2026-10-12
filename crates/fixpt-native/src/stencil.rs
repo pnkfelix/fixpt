@@ -34,7 +34,7 @@ pub fn opt_levels() -> Vec<&'static str> {
 /// runtime's `%run-word` (`Runtime::run_word`).
 pub fn run_word(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]) -> Result<Value, String> {
     let mut m = StencilMachine::new("2").ok_or("no stencils: this build had no nightly compiler")?;
-    let out = m.run_in_runtime(rt, word, args, u64::MAX).map_err(|t| format!("{t:?}"))?;
+    let out = m.run_in_runtime(rt, word, args, u64::MAX).map_err(|t| format!("{t}"))?;
     out.last().copied().ok_or_else(|| "the word left nothing".to_string())
 }
 

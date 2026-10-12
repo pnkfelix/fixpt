@@ -2066,7 +2066,7 @@ pub fn run_word_as(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value],
         // A run within a run (a primitive running a word) gets a machine
         // of its own, which compiles nothing.
         let Ok(mut m) = m.try_borrow_mut() else {
-            let out = NativeMachine::new().run_in_runtime(rt, word, args, u64::MAX).map_err(|t| format!("{t:?}"));
+            let out = NativeMachine::new().run_in_runtime(rt, word, args, u64::MAX).map_err(|t| t.to_string());
             return out?.last().copied().ok_or_else(|| "the word left nothing".to_string());
         };
         let m = m.get_or_insert_with(NativeMachine::new);
@@ -2075,7 +2075,7 @@ pub fn run_word_as(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value],
             m.compile_reachable(&mut rt.heap, word)?;
         }
         let fuel = rt.word_fuel;
-        let out = m.run_in_runtime(rt, word, &args, fuel).map_err(|t| format!("{t:?}"));
+        let out = m.run_in_runtime(rt, word, &args, fuel).map_err(|t| t.to_string());
         report_callouts();
         out?.last().copied().ok_or_else(|| "the word left nothing".to_string())
     })
@@ -2103,14 +2103,14 @@ fn collect_for_code(m: &mut NativeMachine, rt: &mut fixpt_runtime::Runtime, word
 pub fn run_word_registers(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]) -> Result<Value, String> {
     MACHINE.with(|m| {
         let Ok(mut m) = m.try_borrow_mut() else {
-            let out = NativeMachine::new().run_in_runtime(rt, word, args, u64::MAX).map_err(|t| format!("{t:?}"));
+            let out = NativeMachine::new().run_in_runtime(rt, word, args, u64::MAX).map_err(|t| t.to_string());
             return out?.last().copied().ok_or_else(|| "the word left nothing".to_string());
         };
         let m = m.get_or_insert_with(NativeMachine::new);
         let (word, args) = collect_for_code(m, rt, word, args)?;
         m.compile_reachable_as(&mut rt.heap, word, true)?;
         let fuel = rt.word_fuel;
-        let out = m.run_in_runtime(rt, word, &args, fuel).map_err(|t| format!("{t:?}"));
+        let out = m.run_in_runtime(rt, word, &args, fuel).map_err(|t| t.to_string());
         report_callouts();
         out?.last().copied().ok_or_else(|| "the word left nothing".to_string())
     })
