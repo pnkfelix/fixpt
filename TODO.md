@@ -2007,12 +2007,37 @@ instructions), a step by a constant one `add`, and `blobref-index`
 compares with its constant `n` only. The change: `(blobref-at b 10)` of
 an `i32` in a 12-byte suffix would fail where it is made, not where it
 is read; a wider index into
-the owner's fields than a byte (`(key symbol u16)` was proposed); arrays
-of a length not literal (a type-system question, for the user: a size
-variable's length then known only at run time, where `blobref-index`
-takes its bound from the layout's constant now). The rule
+the owner's fields than a byte (`(key symbol u16)` was proposed); and
+flat arrays of a length not literal, decided below. The rule
 (the user's): no operation copies more than a word unless its name says
 so.
+
+**Flat arrays of a length not literal** (decided with the user,
+2026-10-12). A flat array's length is already a size: the type is
+`(flat-arrayof (f flat) (n size))` (`check.rs`), and only the readers
+refuse anything but a literal ("a flat array's length is a literal, for
+now", `kinds.rs`; its twin in `check-read-helpers.fx`). So the length may
+be a size variable, bound as any is (`docs/research/sizes.md`):
+- **Offsets after it are symbolic**, linear in the length (`8 + 4n`),
+  which the checker states and the layout computes.
+- **Run-time code needs the length's value**: a `(nat n)` in scope (a
+  dependent parameter, or computed), with which the array may be
+  anywhere and what follows it is reached by `n`.
+- **Or none is in scope**, and the length is recovered from the owner:
+  its suffix's length, less the static prefix, divided by the element's
+  size. That needs exactly one length unknown, so such an array is last,
+  in a product that is then last in turn, and so on out to the suffix
+  (Rust's rule for unsized types, here only for this case). Its type is
+  existential, an array of some `n`; an operation such as
+  `blobref-length` gives the `(nat n)` that opens it, as `length` does an
+  `nlist`'s. The divisibility is checked once, where the bloblet is made.
+- **Not as an array's element** (indexing needs one static element
+  size), and not, to start, in a flat sum's variant.
+- **Bounds are N5c's**: with `i : (nat i)` and the fact `i < n`,
+  `blobref-index` needs no check and carries no debt (§86; CF4,
+  `docs/research/confirmation.md`). The ports' largest class of debt is
+  indices (758 sites; bounds would take them from 53% failure-free to
+  60%), so this and array bounds are one piece of work.
 
 **Flat sums: their key** (the user's, 2026-10-10; the goal: a "flat
 world" with Rust's model of values, for apples-to-apples benchmarks).

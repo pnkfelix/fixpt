@@ -223,8 +223,8 @@ weighed with the other items, not ahead of them.
   key's tag and variant, register code's `prim3imm`, and a flat
   `tagcase` in a leaf, so a loop over a flat array is one (a million
   shapes 214.9 → 10.5 ms; an index key's tag and variant too). Next:
-  arrays of a length not literal (a type-system question for the user),
-  a wider index key.
+  flat arrays of a length not literal (decided with the user, 2026-10-12,
+  `TODO.md` §77: a size variable, with N5c's bounds), a wider index key.
   Done (2026-10-12, kayak's request): I/O, `DONE.md` §84, a fixed family
   of `(io k)` effects under one ordering rule (the user's); `u8`, `i8`
   and bytevectors; the terminal, files, the clock, the arguments; `main`
