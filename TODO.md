@@ -2540,10 +2540,10 @@ reaches its fixpoint on all three. Left, in the order they would pay:
    `captures` (22 against register code's 18 ms, continuations), so `fast`
    stays register code for now; and the native convention's `ret` against
    arm64's `br` (CLAUDES_CHOICES.md, "Native profiling" 6), unmeasured.
-3. **Stencils** on x86_64: `build.rs` reads x86_64 ELF (`EM_X86_64`),
-   refuses relocations, and needs its own check of branches in range;
-   SysV passes six integer arguments in registers, the stencils' routines
-   take eight, so their signature changes or two go on the stack.
+3. ~~**Stencils**~~ (done: CLAUDES_CHOICES.md "Stencils on x86_64"; the
+   routines in `preserve_none`, all eight arguments in registers;
+   branches checked in LLVM's assembly; 1.06–1.55 of the hand-encoded
+   machine, as on arm64).
 4. **In FX-26**, as for arm64 (§81): register code and the native
    convention after their Rust forms settle.
 5. **Smaller:** a 32-bit jump that could be 8 (relaxation) would shrink

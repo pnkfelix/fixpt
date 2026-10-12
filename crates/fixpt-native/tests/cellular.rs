@@ -4,8 +4,8 @@
 //! at.
 //!
 //! Only where the hand-encoded machine runs, arm64 or x86_64: every test
-//! here runs it. The stencils are arm64's only: elsewhere `opt_levels()` is
-//! empty.
+//! here runs it. The stencils are built for arm64 and x86_64 Linux, with a
+//! nightly compiler: elsewhere, or without one, `opt_levels()` is empty.
 #![cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 
 use fixpt_engine::cellular::{Machine, Trap, WordBuilder, examples, prim, primitive_word};
@@ -47,7 +47,7 @@ fn both(heap: &mut Heap, word: Value, args: &[Value]) -> Result<Vec<Value>, Trap
 }
 
 #[test]
-#[cfg(target_arch = "aarch64")]
+#[cfg(any(target_arch = "aarch64", all(target_arch = "x86_64", target_os = "linux")))]
 fn stencils_were_built_at_every_level() {
     // The build script warns and carries on without a nightly compiler; on
     // this project's machines there is one, so their absence is a failure.

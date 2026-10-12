@@ -100,8 +100,8 @@ fn every_program_compiled() {
 /// hand-encoded native machine, its words compiled by the Rust assembler
 /// or by `native.fx`, or run as register code; and the stencils at -O2.
 /// Control, and everything else a native machine has no code for, runs
-/// there through the Rust machine (the round trip). On x86_64, all but the
-/// stencils, which are arm64 code.
+/// there through the Rust machine (the round trip). The stencils only where
+/// the build made them (a nightly compiler, arm64 or x86_64 Linux).
 #[test]
 #[cfg_attr(not(any(target_arch = "aarch64", target_arch = "x86_64")), ignore = "runs machine code")]
 fn every_program_on_every_machine() {
@@ -116,7 +116,7 @@ fn every_program_on_every_machine() {
         ("register code", fixpt_native::cellular::run_word_registers, true, None),
         ("stencils", fixpt_native::stencil::run_word, false, None),
     ];
-    let machines = &machines[..if fixpt_native::AVAILABLE { machines.len() } else { 4 }];
+    let machines = &machines[..if fixpt_native::stencil::opt_levels().is_empty() { 4 } else { machines.len() }];
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
     let mut report = Vec::new();
     // A session for each machine, for every program.

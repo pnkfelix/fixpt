@@ -743,3 +743,28 @@ The user: "Go for it" (TODO §105's next item, `direct.rs`).
    register** (a blobref's element, write or variant in `prim3imm`), the
    primitive is called instead: arm64 never meets it, its REGs being
    registers.
+
+## Stencils on x86_64 (2026-10-12)
+
+1. **The routines in LLVM's `preserve_none` convention** (`extern
+   "rust-preserve-none"`, nightly's `rust_preserve_none_cc`), not SysV's
+   C: C passes six integer arguments in registers, the routines take
+   eight, and keeps five registers for the caller, which every stencil
+   then pushes and pops. `preserve_none` passes all eight in registers
+   and keeps none: `-O2`'s `dup` is a load, a store and the inlined
+   dispatch. Rejected: two of the machine's registers moved into the
+   state (a load and store more in most routines, and the two machines'
+   sources would differ beyond a signature).
+2. **`st_start` stays C, and calls the first routine** where arm64's
+   `become`s it: its prologue keeps the host's registers, which no
+   routine keeps, and a routine that returns (a trap, the end) returns
+   through it, as on arm64 it returns to the host.
+3. **Branches checked in the assembly LLVM writes beside the object**
+   (`--emit obj=…,asm=…`), not in the bytes: an x86 instruction's length
+   needs a decoder of every form LLVM may use, and the assembly names each
+   branch's target, a label inside the stencil or an indirect one. The
+   relocation check is the same ELF reader's, for `EM_X86_64`.
+4. Measured (ms, `fixpt bench`): within 1.06–1.55 of the hand-encoded
+   machine (`fib` 52.7 against 36.7, 1.44; arm64's README has 21.8
+   against 16.1, 1.35), as on arm64 the cost of Rust's code for the same
+   routines.

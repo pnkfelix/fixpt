@@ -271,10 +271,11 @@ fn run(args: &[String]) -> i32 {
         },
     );
     // The machines that run arm64 code, refused where that cannot run: all
-    // but the hand-encoded one, the words compiled into it and register
-    // code, which run on x86_64 too (`fixpt_native::cellular::x64`).
+    // but the hand-encoded one, the words compiled into it, register code
+    // and the stencils, which run on x86_64 too (`fixpt_native::cellular::x64`;
+    // the stencils where the build made them, below).
     if !fixpt_native::AVAILABLE {
-        let cellular = |m: &str| fixpt_native::CELLULAR_AVAILABLE && matches!(m, "native" | "native-compiled" | "fx-compiled" | "registers");
+        let cellular = |m: &str| fixpt_native::CELLULAR_AVAILABLE && matches!(m, "native" | "native-compiled" | "fx-compiled" | "registers" | "stencils");
         let machine = flags.cellular_machine.as_deref().filter(|m| *m != "rust" && !cellular(m)).map(|m| ("--cellular-machine", m));
         let convention = flags.calling_convention.as_deref().filter(|c| *c == "native" && !fixpt_native::NATIVE_CONVENTION_AVAILABLE).map(|c| ("--calling-convention", c));
         if let Some((flag, value)) = machine.or(convention)

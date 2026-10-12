@@ -162,7 +162,9 @@ fn fx26_runs_cellular_on_each_machine() {
     }
     let out = Command::new(FIXPT).args(["--cellular-machine", "forth", "eval", "1"]).output().expect("fixpt runs");
     assert!(!out.status.success(), "an unknown machine is refused");
-    if !fixpt_native::AVAILABLE {
+    // Where no machine code runs (neither arm64 nor x86_64), a machine of
+    // it is refused.
+    if !fixpt_native::CELLULAR_AVAILABLE {
         let out = Command::new(FIXPT).args(["--cellular-machine", "stencils", "eval", "1"]).output().expect("fixpt runs");
         let err = String::from_utf8_lossy(&out.stderr);
         assert!(out.status.code() == Some(2) && err.contains("arm64"), "a machine that cannot run here is refused: {err}");

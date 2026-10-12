@@ -18,14 +18,15 @@ from the references.
 
 It builds and runs on macOS and Linux. The machines that run machine code
 (`fixpt-native`) make arm64 code, so they run on arm64, macOS or Linux, and
-x86_64 code, so they run on x86_64 Linux: all but the stencils
-(`--cellular-machine stencils`, arm64 code built by the build script),
-which are refused there, saying why, `fixpt bench` leaving their column
-out. The x86_64 forms are `fixpt_native::cellular::x64` (the hand-encoded
-cellular machine, its compiled words, and register code), `native-x64.fx`
-(the words compiled by the compiler written in FX-26), and
-`fixpt_native::direct::x64` (the native convention, `--calling-convention
-native`). `fast`, the default, names `fx-regs-rsjit-cellcc` there, register
+x86_64 code, so they run on x86_64 Linux, every one. The x86_64 forms
+are `fixpt_native::cellular::x64` (the hand-encoded cellular machine, its
+compiled words, and register code), `native-x64.fx` (the words compiled
+by the compiler written in FX-26), `fixpt_native::direct::x64` (the
+native convention, `--calling-convention native`), and the stencils
+(`--cellular-machine stencils`), compiled for x86_64 by the build script
+in LLVM's `preserve_none` convention. The stencils need a nightly
+compiler on either machine; a build without one refuses them, saying
+why, and `fixpt bench` leaves their column out. `fast`, the default, names `fx-regs-rsjit-cellcc` there, register
 code, which runs the front end. Elsewhere
 FX-26 runs lowered, by the evaluator, or on the cellular machine written in
 Rust. The encoders' tests assemble with the system's `as`: on macOS for arm64,

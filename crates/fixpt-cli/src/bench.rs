@@ -120,11 +120,12 @@ pub fn command(args: &[String]) -> i32 {
     if fixpt_native::stencil::opt_levels().is_empty() {
         machines.retain(|m| *m != "rs-cells-stencils-cellcc");
     }
-    // Every machine but these runs arm64 code; all but the stencils run
-    // on x86_64 too, but the native convention, not yet.
+    // Every machine but these runs arm64 code; each runs on x86_64 too
+    // (the stencils where the build made them, above), but the native
+    // convention, not yet.
     if !fixpt_native::AVAILABLE {
         let cellular: &[&str] = if fixpt_native::CELLULAR_AVAILABLE {
-            &["rs-cells-asminterp", "rs-cells-rsjit-cellcc", "rs-regs-rsjit-cellcc"]
+            &["rs-cells-asminterp", "rs-cells-stencils-cellcc", "rs-cells-rsjit-cellcc", "rs-regs-rsjit-cellcc"]
         } else {
             &[]
         };

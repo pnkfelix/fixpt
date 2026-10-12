@@ -15,8 +15,16 @@
 //! which is why the code below avoids anything that stays a call when not
 //! optimised: `core`'s methods (the overflow intrinsics instead) and closures
 //! (macros instead).
+//!
+//! On x86_64 the C convention passes only six arguments in registers, and
+//! keeps five registers for the caller: the routines there use LLVM's
+//! `preserve_none` instead (`extern "rust-preserve-none"`), all eight in
+//! registers and none kept, and `st_start`, which the host calls, stays C
+//! and *calls* the first routine, so that its prologue keeps the host's
+//! registers and a routine's return comes back through it.
 #![no_std]
 #![feature(explicit_tail_calls, core_intrinsics)]
+#![cfg_attr(target_arch = "x86_64", feature(rust_preserve_none_cc))]
 #![allow(incomplete_features, internal_features, clippy::missing_safety_doc)]
 
 include!("state.rs");
@@ -27,7 +35,10 @@ fn panic(_: &core::panic::PanicInfo) -> ! {
     loop {}
 }
 
+#[cfg(not(target_arch = "x86_64"))]
 type Routine = unsafe extern "C" fn(u64, u64, u64, u64, u64, *mut State, u64, u64) -> u64;
+#[cfg(target_arch = "x86_64")]
+type Routine = unsafe extern "rust-preserve-none" fn(u64, u64, u64, u64, u64, *mut State, u64, u64) -> u64;
 
 #[inline(always)]
 unsafe fn rd(a: u64) -> u64 {
@@ -144,9 +155,25 @@ macro_rules! checks {
 
 macro_rules! routine {
     ($name:ident, |$base:ident, $ip:ident, $cur:ident, $dsp:ident, $rsp:ident, $st:ident, $fp:ident, $w:ident| $body:block) => {
+        #[cfg(not(target_arch = "x86_64"))]
         #[unsafe(no_mangle)]
         #[allow(unused_variables, unused_mut)]
         pub unsafe extern "C" fn $name(
+            $base: u64,
+            $ip: u64,
+            $cur: u64,
+            $dsp: u64,
+            $rsp: u64,
+            $st: *mut State,
+            $fp: u64,
+            $w: u64,
+        ) -> u64 {
+            $body
+        }
+        #[cfg(target_arch = "x86_64")]
+        #[unsafe(no_mangle)]
+        #[allow(unused_variables, unused_mut)]
+        pub unsafe extern "rust-preserve-none" fn $name(
             $base: u64,
             $ip: u64,
             $cur: u64,
@@ -163,6 +190,7 @@ macro_rules! routine {
 
 // Where the host starts: run the word in `w`; or, `w` 0, go on where the
 // state stopped (a time slice's end).
+#[cfg(not(target_arch = "x86_64"))]
 routine!(st_start, |base, ip, cur, dsp, rsp, st, fp, w| {
     if w == 0 {
         next!(base, ip, cur, dsp, rsp, st, fp)
@@ -170,6 +198,21 @@ routine!(st_start, |base, ip, cur, dsp, rsp, st, fp, w| {
     let e = unsafe { entry_of(base, w) };
     become unsafe { routine(st, e) }(base, ip, cur, dsp, rsp, st, fp, w)
 });
+// The same on x86_64, in the C convention the host calls, calling the
+// first routine in the routines' own.
+#[cfg(target_arch = "x86_64")]
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn st_start(base: u64, ip: u64, cur: u64, dsp: u64, rsp: u64, st: *mut State, fp: u64, w: u64) -> u64 {
+    if w == 0 {
+        // `next!`, called rather than become.
+        let c = unsafe { rd(ip) };
+        let ip = ip.wrapping_sub(8);
+        let e = if c & TAG_MASK == 0 { c } else { unsafe { entry_of(base, c) } };
+        return unsafe { routine(st, e)(base, ip, cur, dsp, rsp, st, fp, c) };
+    }
+    let e = unsafe { entry_of(base, w) };
+    unsafe { routine(st, e)(base, ip, cur, dsp, rsp, st, fp, w) }
+}
 
 /// Leave the machine for the Rust side of routine `r`, and carry on from
 /// the state it leaves, unless it reports a trap.

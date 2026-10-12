@@ -7,9 +7,12 @@
 //! else fails the build, with the offending stencil named.
 //!
 //! No nightly, no stencils: the build carries on without them, and says so.
-//! Likewise on a target that is not arm64: the stencils are arm64 code.
+//! Likewise on a target that is neither arm64 nor x86_64 Linux.
 //!
 //! The object is Mach-O on macOS and ELF on Linux; each has a small reader.
+//! An arm64 branch is checked in the machine code, its instructions all
+//! four bytes; an x86_64 one in the assembly LLVM writes beside the
+//! object, whose branches name their targets.
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -90,17 +93,19 @@ fn main() {
     let format = match target.as_str() {
         "aarch64-apple-darwin" => Some(Format::MachO),
         t if t.starts_with("aarch64-") && t.contains("-linux-") => Some(Format::Elf),
+        t if t.starts_with("x86_64-") && t.contains("-linux-") => Some(Format::ElfX64),
         _ => None,
     };
     let Some(format) = format else {
-        println!("cargo:warning=no stencils: they are arm64 code, and the target is {target}");
+        println!("cargo:warning=no stencils: they are arm64 or x86_64 Linux code, and the target is {target}");
         fs::write(out.join("stencils.rs"), "pub static STENCIL_SETS: &[StencilSet] = &[\n];\n").unwrap();
         fs::write(out.join("stencils.txt"), "").unwrap();
         return;
     };
     for opt in OPT_LEVELS {
         let obj = out.join(format!("cellular-O{opt}.o"));
-        match compile(&out, &target, opt, &obj) {
+        let asm = matches!(format, Format::ElfX64).then(|| out.join(format!("cellular-O{opt}.s")));
+        match compile(&out, &target, opt, &obj, asm.as_deref()) {
             Ok(()) => {}
             // No nightly, or none for this target: build without stencils,
             // and say so.
@@ -116,7 +121,16 @@ fn main() {
         let bytes = fs::read(&obj).unwrap();
         let stencils = match format {
             Format::MachO => read_stencils(&bytes),
-            Format::Elf => read_stencils_elf(&bytes),
+            Format::Elf => read_stencils_elf(&bytes, 183, check_branches),
+            Format::ElfX64 => {
+                let text = fs::read_to_string(asm.as_ref().unwrap()).unwrap();
+                read_stencils_elf(&bytes, 62, |_, _| Ok(())).and_then(|s| {
+                    for (name, _) in &s {
+                        check_branches_x64(name, &text)?;
+                    }
+                    Ok(s)
+                })
+            }
         };
         let stencils = stencils.unwrap_or_else(|e| panic!("stencils at -O{opt}: {e}"));
         writeln!(table, "  StencilSet {{ opt: {opt:?}, stencils: &[").unwrap();
@@ -135,6 +149,7 @@ fn main() {
 enum Format {
     MachO,
     Elf,
+    ElfX64,
 }
 
 enum Compile {
@@ -142,9 +157,15 @@ enum Compile {
     Failed(String),
 }
 
-fn compile(dir: &Path, target: &str, opt: &str, obj: &Path) -> Result<(), Compile> {
+/// The stencils compiled at `-C opt-level=opt` to `obj`, and to `asm` too
+/// if it is given, the assembly for the same code.
+fn compile(dir: &Path, target: &str, opt: &str, obj: &Path, asm: Option<&Path>) -> Result<(), Compile> {
+    let emit = match asm {
+        Some(asm) => format!("obj={},asm={}", obj.display(), asm.display()),
+        None => format!("obj={}", obj.display()),
+    };
     let out = Command::new("rustup")
-        .args(["run", "nightly", "rustc", "--edition", "2024", "--crate-type", "lib", "--emit", "obj"])
+        .args(["run", "nightly", "rustc", "--edition", "2024", "--crate-type", "lib", "--emit", &emit])
         .args(["--target", target, "-C", &format!("opt-level={opt}")])
         // On ELF each function would otherwise get a section of its own;
         // one `.text` keeps the reader as simple as the Mach-O one.
@@ -154,8 +175,6 @@ fn compile(dir: &Path, target: &str, opt: &str, obj: &Path) -> Result<(), Compil
         // (overflow, and null and alignment on every dereference) call into
         // `core`, which a stencil cannot reach, so they are off at every level.
         .args(["-C", "debug-assertions=off", "-C", "overflow-checks=off"])
-        .arg("-o")
-        .arg(obj)
         .arg(dir.join("cellular.rs"))
         .output()
         .map_err(|e| Compile::NoNightly(format!("cannot run `rustup run nightly rustc`: {e}")))?;
@@ -268,11 +287,13 @@ fn u16le(b: &[u8], o: usize) -> u16 {
     u16::from_le_bytes(b[o..o + 2].try_into().unwrap())
 }
 
-/// As [`read_stencils`], for an arm64 ELF relocatable object.
-fn read_stencils_elf(b: &[u8]) -> Result<Vec<(String, Vec<u8>)>, String> {
-    // 64-bit, little-endian, relocatable, EM_AARCH64.
-    if b.get(..4) != Some(b"\x7fELF") || b[4] != 2 || b[5] != 1 || u16le(b, 16) != 1 || u16le(b, 18) != 183 {
-        return Err("not an arm64 ELF object".into());
+/// As [`read_stencils`], for an ELF relocatable object of machine `em`
+/// (`EM_AARCH64`, 183, or `EM_X86_64`, 62), each stencil's branches checked
+/// by `check`.
+fn read_stencils_elf(b: &[u8], em: u16, check: fn(&str, &[u8]) -> Result<(), String>) -> Result<Vec<(String, Vec<u8>)>, String> {
+    // 64-bit, little-endian, relocatable, of the machine.
+    if b.get(..4) != Some(b"\x7fELF") || b[4] != 2 || b[5] != 1 || u16le(b, 16) != 1 || u16le(b, 18) != em {
+        return Err(format!("not an ELF object for machine {em}"));
     }
     let (shoff, shentsize, shnum, shstrndx) =
         (u64le(b, 40) as usize, u16le(b, 58) as usize, u16le(b, 60) as usize, u16le(b, 62) as usize);
@@ -307,7 +328,7 @@ fn read_stencils_elf(b: &[u8]) -> Result<Vec<(String, Vec<u8>)>, String> {
         }
         let (value, size) = (u64le(b, e + 8) as usize, u64le(b, e + 16) as usize);
         let code = b[text + value..text + value + size].to_vec();
-        check_branches(&name, &code)?;
+        check(&name, &code)?;
         out.push((value, name, code));
     }
     // In address order, as the Mach-O reader gives them.
@@ -334,6 +355,32 @@ fn check_branches(name: &str, code: &[u8]) -> Result<(), String> {
             && !(0..n).contains(&(i + d))
         {
             return Err(format!("st_{name}: the branch at +{:#x} leaves the stencil", 4 * i));
+        }
+    }
+    Ok(())
+}
+
+/// As [`check_branches`], for x86_64, in the assembly LLVM wrote for the
+/// object: every jump or call in `st_name` either indirect (`*%reg`,
+/// `*mem`: the routine table, the call-out) or to a label inside it.
+fn check_branches_x64(name: &str, asm: &str) -> Result<(), String> {
+    let head = format!("st_{name}:");
+    let mut lines = asm.lines().map(|l| l.split('#').next().unwrap_or("").trim()).skip_while(|l| *l != head).skip(1);
+    // Its lines, to where the next function's begin, or its own end label.
+    let body: Vec<&str> = lines.by_ref().take_while(|l| !l.starts_with(".Lfunc_end") && !l.starts_with(".type")).collect();
+    if body.is_empty() {
+        return Err(format!("st_{name} is not in the assembly"));
+    }
+    let labels: Vec<&str> = body.iter().filter_map(|l| l.strip_suffix(':')).collect();
+    for l in &body {
+        let mut words = l.split_whitespace();
+        let Some(op) = words.next() else { continue };
+        if !(op.starts_with('j') || op.starts_with("call")) {
+            continue;
+        }
+        let target = words.collect::<Vec<_>>().join(" ");
+        if !target.starts_with('*') && !labels.contains(&target.as_str()) {
+            return Err(format!("st_{name}: `{l}` leaves the stencil"));
         }
     }
     Ok(())
