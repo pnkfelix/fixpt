@@ -667,3 +667,41 @@ eventually be in FX26 itself".
 6. **Lists of bytes, not ints of instructions**: each encoder gives its
    instruction's bytes as a list (`x86-bytes`), made with `cons` at the
    encoders' region; `(list …)` would make one at a region of its own.
+
+## Register code on x86_64 (2026-10-11)
+
+The user, asked which `REG`s should live in memory: "go right ahead"
+(to choose them from counts).
+
+1. **REG1–REG3 in registers, REG4–REG8 in the state** (`State::regs`).
+   `fixpt regcode-survey --front-end` now counts each `REG`'s uses as an
+   operand: of the front end's 129 801, REG1 has 61 289, REG2 48 724,
+   REG3 9 137, REG4 4 608, and REG5–REG8 fewer than 3 000 each, so three
+   in registers keep 92% of them there. Larceny's x86 back ends kept about
+   four. `RESULT` is `rax`, `REG0` stays `CLO`.
+2. **No pool pointer.** arm64 keeps `IP` at the word's last field because
+   its loads reach only 32 KB up; a 32-bit displacement from `CUR`
+   reaches every field, so `IP`'s register (`r14`) is a fourth scratch
+   register, beside `rcx`, `rdx` and `r11`, and the machine's other
+   registers keep their roles. That is what lets the code share the
+   hand-encoded machine's sequences (`save`, `load`, the return stack).
+3. **The link on the machine stack, at most one deep.** A call is a
+   `call`; `save` pops its return address into the frame's link slot
+   (where arm64 stores `x30`), `pop` pushes it back, and `return` is
+   `ret`; a leaf keeps it on the machine stack, and in `leaf_link` around
+   a call-out, as arm64 keeps `x30`. Return points are 8-aligned (no-ops
+   before the `call`) so a link in a frame reads as a fixnum, as on
+   arm64; the adapter pushes 0. The assembler checks that every path
+   agrees on where the link is, and refuses code where they do not.
+4. **The machine's exit restores `rsp`** from the state (`machine_sp`,
+   stored by its entry), so a trap or an exit with a link pushed leaves
+   cleanly.
+5. **`ret`, for now.** arm64 returns by `br`, since a deep recursion
+   overflows the return predictor (CLAUDES_CHOICES, "Native profiling").
+   On x86 `call` pushes onto the predictor anyway, so `ret` keeps calls
+   and returns paired; not yet measured against `pop`/`jmp`.
+6. **`fast` on x86_64 is register code** (`fx-regs-rsjit-cellcc`); the
+   front end runs on it (`register_machine`), and the bootstrap reaches
+   its fixpoint so. Against the compiled cellular words, in ms: fib 27.5 →
+   12.5, tak 10.0 → 3.6, loop 76.6 → 26.0, helpers 123.1 → 14.9,
+   lists-region 129.2 → 13.4, closures 123.4 → 29.7, captures 23.1 → 18.4.

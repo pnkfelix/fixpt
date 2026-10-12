@@ -2526,22 +2526,13 @@ itself". Done (CLAUDES_CHOICES.md, the two x86_64 entries): the
 hand-encoded cellular machine (`cellular::x64`), the words Rust compiles
 into it, and the same compiled by FX-26 (`native-x64.fx` over
 `x86_64.fx`), each byte for byte against its oracle; the bootstrap
-reaches its fixpoint on all three. `fast` on x86_64 is
-`fx-cells-rsjit-cellcc`. Left, in the order they would pay:
+reaches its fixpoint on all three. Left, in the order they would pay:
 
-1. **Register code** (`regcode.rs`, `--cellular-machine registers`): the
-   front end's machine on arm64, and the next speed-up here. The decision
-   first: arm64 keeps `RESULT`, `REG0`–`REG8` and seven machine registers
-   in seventeen registers; x86_64 has fifteen, and the machine's scratch
-   besides. Larceny's x86 back ends kept REG1–REG4 (or so) in hardware and
-   the rest in memory beside the state; `REGS` is fixed at 8 by the IR
-   (`layout::regcode::REGS`). Which `REG`s go to memory is best chosen
-   from counts of their uses in the front end's register code. Then the
-   link: no `x30`; a call's return address is pushed on the machine
-   stack, so `save n`'s link slot is filled from it (`pop`), and a leaf
-   keeps it there (no `leaf_link`). Return points still need 8-byte
-   alignment, so that a saved link reads as a fixnum (byte-granular
-   `nop`s before the `call`).
+1. ~~**Register code**~~ (done: `cellular::x64::regcode`, CLAUDES_CHOICES.md
+   "Register code on x86_64"; REG1–REG3 in registers, the rest in the
+   state; `fast` on x86_64 is now `fx-regs-rsjit-cellcc`). Left of it:
+   `ret` measured against `pop`/`jmp` for deep recursions, as arm64's
+   `br` was.
 2. **The native convention** (`direct.rs`, `fx-regs-rsjit-nativecc`, the
    arm64 default): about 4 000 lines of emission. Keep the frame's layout
    (`[fp]` link, `[fp+8]` return address, `[fp+16]` map) so that the

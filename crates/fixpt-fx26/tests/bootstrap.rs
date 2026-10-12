@@ -120,9 +120,9 @@ fn fixpoint_as_register_code() {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     load_eager_reader(&mut s.scheme).expect("loads");
     s.scheme.engine.set_step_limit(None);
-    // Where arm64 code cannot run, register code on the machine written in Rust.
+    // Where no machine code runs, register code on the machine written in Rust.
     s.scheme.runtime_unrooted().run_word =
-        Some(if fixpt_native::AVAILABLE { fixpt_native::cellular::run_word_registers } else { fixpt_engine::cellular::run_word });
+        Some(if fixpt_native::CELLULAR_AVAILABLE { fixpt_native::cellular::run_word_registers } else { fixpt_engine::cellular::run_word });
     if let Some(n) = std::env::var("FIXPT_GC_EVERY").ok().and_then(|n| n.parse().ok()) {
         s.scheme.set_gc_every(n);
     }

@@ -1670,6 +1670,8 @@ impl Stacks {
             leaf_link: 0,
             pure: pure_call as *const () as u64,
             reserve: 0,
+            regs: [0; 9],
+            machine_sp: 0,
         }
     }
 
@@ -2105,7 +2107,7 @@ impl NativeMachine {
             }
             if entry == ROUTINE_DOCOL {
                 let twin = heap.bloblet_slot(w, fixpt_heap::layout::cellular::WORD_TWIN);
-                if registers && heap.is_register_word(twin) && crate::AVAILABLE {
+                if registers && heap.is_register_word(twin) && crate::CELLULAR_AVAILABLE {
                     for k in WORD_CELL0..=heap.bloblet_head(twin).fields {
                         let v = heap.bloblet_slot(twin, k);
                         if heap.is_cellular_word(v) {
@@ -2323,7 +2325,7 @@ fn collect_for_code(m: &mut NativeMachine, rt: &mut fixpt_runtime::Runtime, word
 /// [`run_word`], compiling what it runs, and running as register code
 /// (PLAN.md 13h′) each word that has some.
 pub fn run_word_registers(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]) -> Result<Value, String> {
-    if !crate::AVAILABLE {
+    if !crate::CELLULAR_AVAILABLE {
         return Err(crate::UNAVAILABLE.into());
     }
     MACHINE.with(|m| {

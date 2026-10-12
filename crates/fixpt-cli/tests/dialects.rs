@@ -152,7 +152,7 @@ fn fx26_runs_cellular_on_each_machine() {
     let stencils = !fixpt_native::stencil::opt_levels().is_empty();
     // Only the Rust one where the hand-encoded machine cannot run.
     let native = fixpt_native::CELLULAR_AVAILABLE;
-    for machine in ["rust", "native", "native-compiled", "stencils"].into_iter().filter(|m| stencils || *m != "stencils").filter(|m| native || *m == "rust") {
+    for machine in ["rust", "native", "native-compiled", "registers", "stencils"].into_iter().filter(|m| stencils || *m != "stencils").filter(|m| native || *m == "rust") {
         let out = Command::new(FIXPT)
             .args(["--dialect", "fx26", "--fx26-run", "cellular", "--cellular-machine", machine, "eval", src])
             .output()
@@ -163,7 +163,7 @@ fn fx26_runs_cellular_on_each_machine() {
     let out = Command::new(FIXPT).args(["--cellular-machine", "forth", "eval", "1"]).output().expect("fixpt runs");
     assert!(!out.status.success(), "an unknown machine is refused");
     if !fixpt_native::AVAILABLE {
-        let out = Command::new(FIXPT).args(["--cellular-machine", "registers", "eval", "1"]).output().expect("fixpt runs");
+        let out = Command::new(FIXPT).args(["--calling-convention", "native", "eval", "1"]).output().expect("fixpt runs");
         let err = String::from_utf8_lossy(&out.stderr);
         assert!(out.status.code() == Some(2) && err.contains("arm64"), "a machine that cannot run here is refused: {err}");
     }
@@ -458,11 +458,11 @@ fn on_every_machine(program: &str) -> Vec<(&'static [&'static str], String)> {
         &["--fx26-run", "cellular", "--calling-convention", "native"],
     ];
     // Where machine code is not arm64, only the first two run, and on
-    // x86_64 the hand-encoded machine's two.
+    // x86_64 the hand-encoded machine's three.
     let here = if fixpt_native::AVAILABLE {
         machines.len()
     } else if fixpt_native::CELLULAR_AVAILABLE {
-        4
+        5
     } else {
         2
     };
@@ -609,7 +609,7 @@ fn fx26_machines_by_name() {
     let fast = if fixpt_native::AVAILABLE {
         "Machine: fx-regs-rsjit-nativecc;"
     } else if fixpt_native::CELLULAR_AVAILABLE {
-        "Machine: fx-cells-rsjit-cellcc;"
+        "Machine: fx-regs-rsjit-cellcc;"
     } else {
         "Machine: fx-cells-rsinterp;"
     };

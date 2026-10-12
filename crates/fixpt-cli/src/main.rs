@@ -271,10 +271,10 @@ fn run(args: &[String]) -> i32 {
         },
     );
     // The machines that run arm64 code, refused where that cannot run: all
-    // but the hand-encoded one and the words Rust compiles into it, which
-    // run on x86_64 too (`fixpt_native::cellular::x64`).
+    // but the hand-encoded one, the words compiled into it and register
+    // code, which run on x86_64 too (`fixpt_native::cellular::x64`).
     if !fixpt_native::AVAILABLE {
-        let cellular = |m: &str| fixpt_native::CELLULAR_AVAILABLE && matches!(m, "native" | "native-compiled" | "fx-compiled");
+        let cellular = |m: &str| fixpt_native::CELLULAR_AVAILABLE && matches!(m, "native" | "native-compiled" | "fx-compiled" | "registers");
         let machine = flags.cellular_machine.as_deref().filter(|m| *m != "rust" && !cellular(m)).map(|m| ("--cellular-machine", m));
         let convention = flags.calling_convention.as_deref().filter(|c| *c == "native").map(|c| ("--calling-convention", c));
         if let Some((flag, value)) = machine.or(convention)
@@ -546,13 +546,13 @@ pub(crate) const FX26_MACHINES: [(&str, &str, Option<&str>, Option<&str>, &str);
 ];
 /// The machine `fast` names: `fx-regs-rsjit-nativecc`; where arm64 code
 /// cannot run, but the hand-encoded machine can (x86_64),
-/// `fx-cells-rsjit-cellcc`, the fastest there on each of `fixpt bench`'s
-/// programs (2026-10-11); and elsewhere `fx-cells-rsinterp`, faster than
-/// `rs-scheme-vm` on each of them.
+/// `fx-regs-rsjit-cellcc`, register code, the fastest there on each of
+/// `fixpt bench`'s programs (2026-10-11); and elsewhere
+/// `fx-cells-rsinterp`, faster than `rs-scheme-vm` on each of them.
 pub(crate) const FASTEST: &str = if fixpt_native::AVAILABLE {
     "fx-regs-rsjit-nativecc"
 } else if fixpt_native::CELLULAR_AVAILABLE {
-    "fx-cells-rsjit-cellcc"
+    "fx-regs-rsjit-cellcc"
 } else {
     "fx-cells-rsinterp"
 };
@@ -574,14 +574,11 @@ pub(crate) static CELLULAR_MACHINE_NAME: std::sync::OnceLock<&'static str> = std
 /// `--calling-convention native`, for every FX-26 session this process
 /// starts.
 /// The machine for register code, where the front end runs: the hand
-/// register machine; where that cannot run (not arm64), the hand-encoded
-/// machine with its words compiled (x86_64), which runs the cells; and
-/// where that cannot either, the cellular machine written in Rust.
+/// register machine (arm64 or x86_64); where that cannot run, the cellular
+/// machine written in Rust.
 pub(crate) fn register_machine() -> fixpt_runtime::RunWord {
-    if fixpt_native::AVAILABLE {
+    if fixpt_native::CELLULAR_AVAILABLE {
         fixpt_native::cellular::run_word_registers
-    } else if fixpt_native::CELLULAR_AVAILABLE {
-        fixpt_native::cellular::run_word_compiled
     } else {
         fixpt_engine::cellular::run_word
     }

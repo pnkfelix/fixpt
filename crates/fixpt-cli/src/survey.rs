@@ -34,6 +34,10 @@ struct Found {
     /// known, as if propagated, and simple operations on constants are
     /// worked out, so that what they make is known too.
     propagate: bool,
+    /// Each `REGk`'s uses as an instruction's operand, in all and in loops
+    /// (`REG0` is the closure): what a machine short of registers chooses
+    /// to keep in memory by.
+    regs: [(usize, usize); 9],
 }
 
 impl Found {
@@ -211,6 +215,17 @@ fn survey_word(heap: &Heap, rw: Value, found: &mut Found) {
         let (name, _, _) = OPS[cell(WORD_CELL0 + at).as_fixnum() as usize];
         let o = |i: usize| cell(WORD_CELL0 + at + 1 + i);
         let was_global = from_global.take();
+        let uses: &[usize] = match name {
+            "reg" | "setreg" | "load" | "store" | "prim3imm" => &[if name == "prim3imm" { 2 } else { 0 }],
+            "op2" | "prim2" | "setfield" => &[1],
+            "movereg" => &[0, 1],
+            _ => &[],
+        };
+        for &u in uses {
+            let r = &mut found.regs[(o(u).as_fixnum() as usize).min(8)];
+            r.0 += 1;
+            r.1 += lp as usize;
+        }
         match name {
             "const" => p.result = Some(Known::Const(o(0).raw(), immediate(o(0)))),
             "global" => {
@@ -433,9 +448,17 @@ pub fn command(args: &[String]) -> i32 {
                 for (k, n) in f.ops {
                     *totals.ops.entry(k).or_default() += n;
                 }
+                for (t, r) in totals.regs.iter_mut().zip(f.regs) {
+                    t.0 += r.0;
+                    t.1 += r.1;
+                }
             }
             Err(e) => println!("| {name} | !! {e} |"),
         }
+    }
+    println!("\nEach REGk's uses as an operand, (n) in a loop:");
+    for (k, (a, l)) in totals.regs.iter().enumerate() {
+        println!("  REG{k}  {a:>7} ({l})");
     }
     println!("\n(n) of each: in a loop. By operation, over all:");
     let mut ops: Vec<_> = totals.ops.into_iter().collect();

@@ -82,8 +82,8 @@ fn the_rust_compiler_runs_modules_as_lowered() {
         // register code too, on the hand-encoded machine.
         let machines: [(&str, Option<fixpt_runtime::RunWord>); 2] =
             [("cellular words", None), ("register code", Some(fixpt_native::cellular::run_word_registers))];
-        // The hand-encoded machine only where arm64 code runs.
-        for (what, run) in machines.into_iter().filter(|(_, run)| fixpt_native::AVAILABLE || run.is_none()) {
+        // The hand-encoded machine only where arm64 or x86_64 code runs.
+        for (what, run) in machines.into_iter().filter(|(_, run)| fixpt_native::CELLULAR_AVAILABLE || run.is_none()) {
             let got = s.scheme.scope(|sc| {
                 let mut err = None;
                 let w = sc.make(|m| {

@@ -434,6 +434,11 @@ pub fn neg(d: Reg) -> Ins {
     op_rr(true, &[0xF7], 3, d)
 }
 
+/// `neg qword [mem]`.
+pub fn neg_m(mem: Mem) -> Ins {
+    op_rm(true, &[0xF7], 3, mem)
+}
+
 /// `not d`.
 pub fn not(d: Reg) -> Ins {
     op_rr(true, &[0xF7], 2, d)
@@ -585,6 +590,16 @@ pub fn push(s: Reg) -> Ins {
     rex(&mut i, false, 0, 0, reg(s));
     i.b(0x50 + (s & 7));
     i
+}
+
+/// `push qword [mem]`.
+pub fn push_m(mem: Mem) -> Ins {
+    op_rm(false, &[0xFF], 6, mem)
+}
+
+/// `pop qword [mem]`.
+pub fn pop_m(mem: Mem) -> Ins {
+    op_rm(false, &[0x8F], 0, mem)
 }
 
 /// `pop d`.

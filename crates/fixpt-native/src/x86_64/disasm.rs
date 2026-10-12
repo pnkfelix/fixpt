@@ -218,7 +218,7 @@ fn decode(c: &[u8], at: usize) -> Option<(String, usize)> {
         0x50..=0x57 if !w => (format!("push {}", r64((op & 7) | rex.b)), i),
         0x58..=0x5F if !w => (format!("pop {}", r64((op & 7) | rex.b)), i),
         0xF7 => {
-            let (reg, o, n) = modrm(i, "")?;
+            let (reg, o, n) = modrm(i, if w { "qword ptr " } else { "" })?;
             match (reg & 7, w) {
                 (0, false) => (format!("test {}, {}", show(&o, &r32), i32_at(i + n)? as u32), i + n + 4),
                 (2, true) => (format!("not {}", show(&o, &r64)), i + n),
@@ -232,9 +232,17 @@ fn decode(c: &[u8], at: usize) -> Option<(String, usize)> {
             let name = match reg & 7 {
                 2 => "call",
                 4 => "jmp",
+                6 => "push",
                 _ => return None,
             };
             (format!("{name} {}", show(&o, &r64)), i + n)
+        }
+        0x8F if !w => {
+            let (reg, o, n) = modrm(i, "qword ptr ")?;
+            if reg & 7 != 0 {
+                return None;
+            }
+            (format!("pop {}", show(&o, &r64)), i + n)
         }
         _ => return None,
     };

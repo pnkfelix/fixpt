@@ -219,14 +219,8 @@ fn cellular_forms_stop_at_the_step_limit() {
         fixpt_native::cellular::run_word,
         fixpt_native::cellular::run_word_registers,
     ];
-    // Only the first where no machine code runs, the first two on x86_64.
-    let machines = &machines[..if fixpt_native::AVAILABLE {
-        machines.len()
-    } else if fixpt_native::CELLULAR_AVAILABLE {
-        2
-    } else {
-        1
-    }];
+    // Only the first where no machine code runs.
+    let machines = &machines[..if fixpt_native::CELLULAR_AVAILABLE { machines.len() } else { 1 }];
     for (name, i, m) in ["spin", "resume"].into_iter().flat_map(|n| machines.iter().copied().enumerate().map(move |(i, m)| (n, i, m))) {
         let text = std::fs::read_to_string(format!("{}/tests/programs/diverge/{name}.fx", env!("CARGO_MANIFEST_DIR"))).unwrap();
         let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");

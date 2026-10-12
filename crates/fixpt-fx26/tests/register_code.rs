@@ -534,8 +534,8 @@ fn constants_are_folded_behind_global_guards() {
     }
 }
 
-/// The machine that runs register code; where arm64 code cannot run, the
-/// Rust machine, running the same words' cells.
+/// The machine that runs register code; where neither arm64 nor x86_64
+/// code can run, the Rust machine, running the same words' cells.
 fn registers() -> fixpt_runtime::RunWord {
-    if fixpt_native::AVAILABLE { fixpt_native::cellular::run_word_registers } else { fixpt_engine::cellular::run_word }
+    if fixpt_native::CELLULAR_AVAILABLE { fixpt_native::cellular::run_word_registers } else { fixpt_engine::cellular::run_word }
 }

@@ -28,11 +28,16 @@
 //!
 //!   Only `ST` must survive a call into Rust, and it is callee-saved; the
 //!   rest are saved in the state and loaded again, as on arm64.
-//! - No link register, and no register code (`regcode`) yet.
+//! - No link register: register code (`regcode`) is called by `call`,
+//!   which pushes where it returns to on the machine stack.
 //! - Variable-length instructions: code and offsets are in bytes, and every
 //!   branch to a label is a 32-bit one, so none is ever out of reach (the
 //!   arm64 machine's `long_branches` has no counterpart). A jump to the
 //!   very next instruction is dropped.
+
+mod regcode;
+pub use regcode::{assemble_adapter, assemble_register_word};
+pub(crate) use regcode::dump;
 
 use super::State;
 use crate::x86_64::*;
@@ -95,6 +100,10 @@ struct Asm {
     target: Option<(Label, usize)>,
     /// Compiling a word: the cell being compiled.
     at: usize,
+    /// Compiling register code (`regcode`): its frame's size, once `save`
+    /// has made it, and whether the link is on the machine stack here.
+    link: Option<usize>,
+    link_pushed: bool,
 }
 
 impl Asm {
@@ -110,6 +119,8 @@ impl Asm {
             cont: None,
             target: None,
             at: 0,
+            link: None,
+            link_pushed: false,
         };
         a.trap_common = a.label();
         a.exit_common = a.label();
@@ -322,10 +333,45 @@ impl Asm {
         self.e(store(m(RSP, 24), CLO));
     }
 
+    /// The same, marked as register code's `call` pushes it (`regcode`):
+    /// its `8k` negated.
+    fn push_return_marked(&mut self) {
+        self.e(mov(X13, IP));
+        self.e(lea(X14, m(CUR, -4)));
+        self.e(sub(X13, X14));
+        self.fp_encode(X14);
+        self.e(sub_imm(RSP, 32));
+        self.e(store(m(RSP, 0), CUR));
+        self.e(store(m(RSP, 8), X13));
+        self.e(store(m(RSP, 16), X14));
+        self.e(store(m(RSP, 24), CLO));
+    }
+
+    /// The return entry on top made plain, if register code's `call`
+    /// marked it: before a tail call of stack code, which returns the
+    /// stack's way.
+    fn unmark_return(&mut self) {
+        let plain = self.label();
+        self.e(load(X13, m(RSP, 8)));
+        self.e(test(X13, X13));
+        self.jcc(Cond::Ge, plain);
+        self.e(neg(X13));
+        self.e(store(m(RSP, 8), X13));
+        self.bind(plain);
+    }
+
     /// Pop a return entry and return to it, or leave the machine at the
     /// bottom one (whose word is `#f`). Prompts' and marks' entries are
     /// not returns: pass them by.
     fn pop_return(&mut self) {
+        self.pop_return_of(false);
+    }
+
+    /// The same; with `marked`, an entry register code's `call` pushed
+    /// (its `8k` negated, `regcode`) is returned to the stack's way all
+    /// the same. Only register code's own `return` can meet one: stack
+    /// code is never called with one.
+    fn pop_return_of(&mut self, marked: bool) {
         let again = self.label();
         self.bind(again);
         self.e(load(X13, m(RSP, 0)));
@@ -339,6 +385,13 @@ impl Asm {
         }
         self.e(load(CUR, m(RSP, 0)));
         self.e(load(X13, m(RSP, 8)));
+        if marked {
+            let plain = self.label();
+            self.e(test(X13, X13));
+            self.jcc(Cond::Ge, plain);
+            self.e(neg(X13));
+            self.bind(plain);
+        }
         self.e(load(X14, m(RSP, 16)));
         self.e(load(CLO, m(RSP, 24)));
         self.e(add_imm(RSP, 32));
@@ -477,6 +530,7 @@ pub(super) fn generate() -> (Vec<u8>, usize, Vec<usize>, [usize; 2]) {
     }
     a.e(sub_imm(RSP_, 8));
     a.e(mov(ST, RDI));
+    a.e(store(st(offset_of!(State, machine_sp)), RSP_));
     a.load();
     a.e(load(W, st(offset_of!(State, start))));
     a.run_word_in_w();
@@ -488,6 +542,7 @@ pub(super) fn generate() -> (Vec<u8>, usize, Vec<usize>, [usize; 2]) {
     a.e(store(st(offset_of!(State, aux)), X14));
     a.bind(ec);
     a.save();
+    a.e(load(RSP_, st(offset_of!(State, machine_sp))));
     a.e(add_imm(RSP_, 8));
     for r in [R15, R14, R13, R12, RBP, RBX] {
         a.e(pop(r));

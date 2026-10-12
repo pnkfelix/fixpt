@@ -18,14 +18,15 @@ from the references.
 
 It builds and runs on macOS and Linux. The machines that run machine code
 (`fixpt-native`) make arm64 code, so they run on arm64, macOS or Linux; on
-x86_64 so far only the hand-encoded cellular machine and the words compiled
-into it (`hand` and `compiled` below, `--cellular-machine native`,
-`native-compiled`, and `fx-compiled`, whose words the compiler written in
-FX-26 makes, `native-x64.fx`; by `fixpt_native::cellular::x64`), which `fast`,
-the default, names there (`fx-cells-rsjit-cellcc`), and which runs the front
-end. The other arm64 options (`stencils`, `registers`, `native`, and
-`--calling-convention native`) are refused there, saying why, `fixpt bench`
-leaves their columns out, and the tests that run them are ignored. Elsewhere
+x86_64 so far the hand-encoded cellular machine, the words compiled into it,
+and register code (`hand`, `compiled` and `registers` below,
+`--cellular-machine native`, `native-compiled`, `registers`, and
+`fx-compiled`, whose words the compiler written in FX-26 makes,
+`native-x64.fx`; by `fixpt_native::cellular::x64`). Register code is what
+`fast`, the default, names there (`fx-regs-rsjit-cellcc`), and what runs the
+front end. The other arm64 options (`stencils` and `--calling-convention
+native`) are refused there, saying why, `fixpt bench` leaves their columns
+out, and the tests that run them are ignored. Elsewhere
 FX-26 runs lowered, by the evaluator, or on the cellular machine written in
 Rust. The encoders' tests assemble with the system's `as`: on macOS for arm64,
 and with binutils on Linux (`aarch64-linux-gnu-as` for arm64 on another
