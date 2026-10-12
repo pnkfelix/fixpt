@@ -768,3 +768,38 @@ The user: "Go for it" (TODO §105's next item, `direct.rs`).
    machine (`fib` 52.7 against 36.7, 1.44; arm64's README has 21.8
    against 16.1, 1.35), as on arm64 the cost of Rust's code for the same
    routines.
+
+## Register code compiled by FX-26 on x86_64 (2026-10-12)
+
+1. **`native-x64-regs.fx`, a module of its own over `native-x64.fx`'s
+   assembler** (its bytes, labels, trap stubs and the machine sequences
+   the two share, through `native-x64-asm-sig`), not more of
+   `native-x64.fx`: that file would pass the thousand lines `fx_size`
+   allows, and the two compilers share the assembler as the Rust ones share
+   `Asm`. It is two files for the same reason: `native-x64-regs-ops.fx`, of
+   no state, its fast paths and what it does inline (`int_fast`,
+   `shape_test`, `bump_words`, `inline_op`) and the helpers they share;
+   `native-x64-regs.fx`, the rest, with the compile's state. Its steps are
+   `regcode.rs`'s, named `rg-` and the Rust name.
+2. **What it knows of the machine, generated**
+   (`native-x64-regs-layout.fx`, `fx26_regs_module`, kept so by
+   `tests/layout.rs`): its registers, the state's fields, each
+   instruction's operand count, the primitives register code names (by
+   number and by name), which never collect, and the kinds a shape test
+   takes. FX-26 compares primitives by name, as the Rust compiler does.
+3. **A primitive, `tword-bits`, and the `tword-…` ones taking register
+   words**: a constant operand goes in an instruction as its bits, which
+   only fixnums could be read as before.
+4. **Placed where `fx-compiled` places words** (`syn::assemble_reachable_by_fx26`):
+   a word with register code has it compiled by FX-26 and placed, and the
+   adapter into it, also FX-26's, as its entry, as `compile_register_word`
+   does; a variadic one, or one of more than `REGS` arguments, stays
+   stack code. The machine is `--cellular-machine fx-registers`,
+   `fx-regs-fxjit-cellcc`, x86_64 only (refused on arm64, which has no
+   FX-26 compiler of register code yet, §81).
+5. **Checked byte for byte** (`tests/native_x64.rs`): every register word
+   of the front end compiled with register code, 4,014 words and 18 MB,
+   the same bytes and resume points as `assemble_register_word`, and the
+   adapters for every count; every test program runs alike on the machine
+   (`tests/compiler.rs`). Where Rust returns an error, FX-26 notes the
+   first and returns it.

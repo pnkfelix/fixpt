@@ -84,6 +84,8 @@ options:
                                  native.fx (FX-26)
     fx-cells-stencils-cellcc     cellular words, copy-and-patch (nightly)
     fx-regs-rsjit-cellcc         register code, compiled to arm64 by Rust
+    fx-regs-fxjit-cellcc         register code, compiled to x86_64 by
+                                 native-x64-regs.fx (FX-26); x86_64 only
                                  The others are references the tests compare
                                  against. The three options below pick the
                                  parts one by one, as before; given any, the
@@ -94,7 +96,7 @@ options:
                                  evaluator written in FX-26, or compiled to
                                  cellular words by the compiler written in FX-26
                                  and run on the cellular machine
-  --cellular-machine rust|native|native-compiled|fx-compiled|stencils|registers
+  --cellular-machine rust|native|native-compiled|fx-compiled|stencils|registers|fx-registers
                                  which cellular machine runs compiled words: the
                                  one written in Rust (default); the hand-encoded
                                  arm64 one, running the cells (native), or with
@@ -104,7 +106,8 @@ options:
                                  (fx-compiled); the stencils (built with
                                  nightly); or the hand-encoded one running each
                                  lambda's register code, which the compiler then
-                                 makes
+                                 makes, compiled by Rust (registers) or, on
+                                 x86_64, by native-x64-regs.fx (fx-registers)
   --calling-convention cellular|native
                                  FX-26's default calling convention: what a
                                  procedure type that names none has, and how
@@ -275,11 +278,11 @@ fn run(args: &[String]) -> i32 {
     // and the stencils, which run on x86_64 too (`fixpt_native::cellular::x64`;
     // the stencils where the build made them, below).
     if !fixpt_native::AVAILABLE {
-        let cellular = |m: &str| fixpt_native::CELLULAR_AVAILABLE && matches!(m, "native" | "native-compiled" | "fx-compiled" | "registers" | "stencils");
+        let cellular = |m: &str| fixpt_native::CELLULAR_AVAILABLE && matches!(m, "native" | "native-compiled" | "fx-compiled" | "registers" | "stencils" | "fx-registers");
         let machine = flags.cellular_machine.as_deref().filter(|m| *m != "rust" && !cellular(m)).map(|m| ("--cellular-machine", m));
         let convention = flags.calling_convention.as_deref().filter(|c| *c == "native" && !fixpt_native::NATIVE_CONVENTION_AVAILABLE).map(|c| ("--calling-convention", c));
         if let Some((flag, value)) = machine.or(convention)
-            && ["native", "native-compiled", "fx-compiled", "stencils", "registers"].contains(&value)
+            && ["native", "native-compiled", "fx-compiled", "stencils", "registers", "fx-registers"].contains(&value)
         {
             eprintln!("fixpt: `{flag} {value}`: {}", fixpt_native::UNAVAILABLE);
             return 2;
@@ -291,6 +294,13 @@ fn run(args: &[String]) -> i32 {
         Some("native-compiled") => fixpt_native::cellular::run_word_compiled,
         // Compiled before the run, by `native.fx` (`CELLULAR_PLACE_CODE`).
         Some("fx-compiled") => fixpt_native::cellular::run_word_as_is,
+        // Register code compiled before the run, by `native-x64-regs.fx`:
+        // only for x86_64 so far (`TODO.md` §81 for arm64).
+        Some("fx-registers") if !cfg!(target_arch = "x86_64") => {
+            eprintln!("fixpt: `--cellular-machine fx-registers`: FX-26 compiles register code for x86_64 only (TODO.md §81)");
+            return 2;
+        }
+        Some("fx-registers") => fixpt_native::cellular::run_word_as_is,
         Some("stencils") if fixpt_native::stencil::opt_levels().is_empty() => {
             eprintln!("fixpt: this build has no stencils (it found no nightly compiler)");
             return 2;
@@ -298,13 +308,13 @@ fn run(args: &[String]) -> i32 {
         Some("stencils") => fixpt_native::stencil::run_word,
         Some("registers") => fixpt_native::cellular::run_word_registers,
         Some(name) => {
-            eprintln!("fixpt: unknown --cellular-machine `{name}` (want rust, native, native-compiled, fx-compiled, stencils or registers)");
+            eprintln!("fixpt: unknown --cellular-machine `{name}` (want rust, native, native-compiled, fx-compiled, stencils, registers or fx-registers)");
             return 2;
         }
     };
     let _ = CELLULAR_MACHINE.set(machine);
     let _ = CELLULAR_PLACE_CODE.set(match flags.cellular_machine.as_deref() {
-        Some("fx-compiled") => Some(fixpt_native::cellular::place_word as fixpt_runtime::PlaceCode),
+        Some("fx-compiled" | "fx-registers") => Some(fixpt_native::cellular::place_word as fixpt_runtime::PlaceCode),
         _ => None,
     });
     let _ = EMACS.set(flags.emacs);
@@ -317,7 +327,7 @@ fn run(args: &[String]) -> i32 {
         }
     });
     let _ = CELLULAR_MACHINE_CODE.set(match flags.cellular_machine.as_deref() {
-        Some("native-compiled" | "fx-compiled" | "registers") => Some(fixpt_native::cellular::machine_code_text as fixpt_runtime::MachineCode),
+        Some("native-compiled" | "fx-compiled" | "registers" | "fx-registers") => Some(fixpt_native::cellular::machine_code_text as fixpt_runtime::MachineCode),
         Some("stencils") => Some(fixpt_native::stencil::stencil_source_text as fixpt_runtime::MachineCode),
         _ => None,
     });
@@ -325,6 +335,7 @@ fn run(args: &[String]) -> i32 {
         Some("native") => "the hand-encoded native machine",
         Some("native-compiled") => "the hand-encoded native machine, its words compiled to machine code",
         Some("fx-compiled") => "the hand-encoded native machine, its words compiled to machine code by native.fx",
+        Some("fx-registers") => "the native machine, as register code compiled by native-x64-regs.fx",
         Some("stencils") => "the stencil machine",
         Some("registers") => "the native machine, as register code",
         _ => "the cellular machine written in Rust",
@@ -528,7 +539,7 @@ struct Flags {
 /// checked tree, cellular words, register code), and what runs it; then
 /// the parts' options they stand for, and what each is, for the help and
 /// the REPL. `fast` is `FASTEST`.
-pub(crate) const FX26_MACHINES: [(&str, &str, Option<&str>, Option<&str>, &str); 9] = [
+pub(crate) const FX26_MACHINES: [(&str, &str, Option<&str>, Option<&str>, &str); 10] = [
     ("rs-scheme-vm", "lower", None, None, "lowered to Scheme by Rust, run on the bytecode VM"),
     ("fx-ast-eval", "evaluate", None, None, "run by the evaluator written in FX-26"),
     ("fx-cells-rsinterp", "cellular", Some("rust"), None, "cellular words by the FX-26 compiler, interpreted by Rust"),
@@ -537,6 +548,7 @@ pub(crate) const FX26_MACHINES: [(&str, &str, Option<&str>, Option<&str>, &str);
     ("fx-cells-fxjit-cellcc", "cellular", Some("fx-compiled"), None, "cellular words, compiled to arm64 by native.fx (FX-26)"),
     ("fx-cells-stencils-cellcc", "cellular", Some("stencils"), None, "cellular words, by copy-and-patch stencils (nightly)"),
     ("fx-regs-rsjit-cellcc", "cellular", Some("registers"), None, "register code, compiled to arm64 by Rust, cellular calls"),
+    ("fx-regs-fxjit-cellcc", "cellular", Some("fx-registers"), None, "register code, compiled to x86_64 by native-x64-regs.fx (FX-26), cellular calls"),
     (
         "fx-regs-rsjit-nativecc",
         "cellular",
@@ -565,7 +577,8 @@ pub(crate) static FX26_MACHINE_NAME: std::sync::OnceLock<String> = std::sync::On
 pub(crate) static FX26_RUN: std::sync::OnceLock<fixpt_fx26::session::Strategy> = std::sync::OnceLock::new();
 /// `--cellular-machine`, for every FX-26 session this process starts.
 pub(crate) static CELLULAR_MACHINE: std::sync::OnceLock<fixpt_runtime::RunWord> = std::sync::OnceLock::new();
-/// How words' machine code made by `native.fx` is placed: `fx-compiled` only.
+/// How words' machine code made by `native.fx` (or `native-x64.fx` and
+/// `native-x64-regs.fx`) is placed: `fx-compiled` and `fx-registers` only.
 pub(crate) static CELLULAR_PLACE_CODE: std::sync::OnceLock<Option<fixpt_runtime::PlaceCode>> = std::sync::OnceLock::new();
 /// How that machine shows a word's machine code (`,disassemble-asm`): none
 /// for the one written in Rust, which interprets cells.

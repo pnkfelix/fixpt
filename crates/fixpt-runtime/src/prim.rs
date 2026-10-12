@@ -256,6 +256,12 @@ fn exact_out(rt: &mut Runtime, x: i128) -> Value {
 
 /// The integer `x` as the runtime keeps it: a fixnum where it fits, else a
 /// bignum. For native code's `i64` and `u64`, boxed.
+/// Whether `v` is a word the `%tword-…` primitives look at: a cellular
+/// word, or a register word.
+fn is_tword(rt: &Runtime, v: Value) -> bool {
+    rt.heap.is_cellular_word(v) || rt.heap.is_register_word(v)
+}
+
 pub fn integer_value(rt: &mut Runtime, x: i128) -> Value {
     exact_out(rt, x)
 }
@@ -2199,23 +2205,33 @@ prims! {
         }
     });
     // A cellular word's cells, looked at: for the compiler to machine code
-    // written in FX-26. Words are frozen, so these are pure.
+    // written in FX-26. Words are frozen, so these are pure. A register
+    // word's too (`layout::regcode`), for its compiler (`native-x64-regs.fx`).
     "%tword-fields", 1, Some(1), simple!(|rt, a| {
-        if !rt.heap.is_cellular_word(a[0]) { return rt.type_error("a cellular word", a[0]); }
+        if !is_tword(rt, a[0]) { return rt.type_error("a cellular word", a[0]); }
         Ok(Value::fixnum(rt.heap.bloblet_head(a[0]).fields as i64))
     });
     "%tword-fixnum?", 2, Some(2), simple!(|rt, a| {
-        if !rt.heap.is_cellular_word(a[0]) { return rt.type_error("a cellular word", a[0]); }
+        if !is_tword(rt, a[0]) { return rt.type_error("a cellular word", a[0]); }
         let k = int(rt, a[1])?;
         let fields = rt.heap.bloblet_head(a[0]).fields as i64;
         Ok(Value::boolean((1..=fields).contains(&k) && rt.heap.bloblet_slot(a[0], k as usize).is_fixnum()))
     });
     "%tword-int", 2, Some(2), simple!(|rt, a| {
-        if !rt.heap.is_cellular_word(a[0]) { return rt.type_error("a cellular word", a[0]); }
+        if !is_tword(rt, a[0]) { return rt.type_error("a cellular word", a[0]); }
         let k = int(rt, a[1])?;
         let fields = rt.heap.bloblet_head(a[0]).fields as i64;
         let v = if (1..=fields).contains(&k) { rt.heap.bloblet_slot(a[0], k as usize) } else { Value::fixnum(0) };
         Ok(if v.is_fixnum() { v } else { Value::fixnum(0) })
+    });
+    // Field k's bits, as an unsigned 64-bit integer (0 past the fields):
+    // for an operand a compiler puts in an instruction as it is.
+    "%tword-bits", 2, Some(2), simple!(|rt, a| {
+        if !is_tword(rt, a[0]) { return rt.type_error("a cellular word", a[0]); }
+        let k = int(rt, a[1])?;
+        let fields = rt.heap.bloblet_head(a[0]).fields as i64;
+        let bits = if (1..=fields).contains(&k) { rt.heap.bloblet_slot(a[0], k as usize).raw() } else { 0 };
+        Ok(integer_value(rt, bits as i128))
     });
     "%string-hash", 1, Some(1), simple!(|rt, a| {
         if !rt.heap.is_a(a[0], ObjType::String) { return rt.type_error("a string", a[0]); }

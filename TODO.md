@@ -2545,7 +2545,11 @@ reaches its fixpoint on all three. Left, in the order they would pay:
    branches checked in LLVM's assembly; 1.06–1.55 of the hand-encoded
    machine, as on arm64).
 4. **In FX-26**, as for arm64 (§81): register code and the native
-   convention after their Rust forms settle.
+   convention. Register code is done (`native-x64-regs.fx`, CLAUDES_CHOICES.md
+   "Register code compiled by FX-26 on x86_64"; every register word of the
+   front end, about 4,000 of them, the same bytes as Rust's;
+   `fx-regs-fxjit-cellcc`). Left: the native convention, `direct/x64.rs`
+   with the parts of `direct.rs` it uses.
 5. **Smaller:** a 32-bit jump that could be 8 (relaxation) would shrink
    compiled words by about a fifth; `,disassemble-asm` for x86_64 shows
    bytes with the disassembler's text, which knows only the forms the

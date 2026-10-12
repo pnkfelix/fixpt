@@ -424,6 +424,7 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("disassemble", "%disassemble", false),
     ("tword-int?", "%tword-fixnum?", false),
     ("tword-int", "%tword-int", false),
+    ("tword-bits", "%tword-bits", false),
     ("wcell-routine", "%fx26-identity", false),
     ("wcell-int", "%fx26-identity", false),
     ("wcell-bool", "%fx26-identity", false),

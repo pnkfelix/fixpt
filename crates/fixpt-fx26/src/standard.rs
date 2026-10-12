@@ -486,6 +486,8 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("disassemble", "(poly ((t type)) (subr pure (t) string))"),
     ("tword-int?", "(subr pure (tword int) bool)"),
     ("tword-int", "(subr pure (tword int) int)"),
+    // Field k's bits, unsigned: a constant operand as an instruction has it.
+    ("tword-bits", "(subr pure (tword int) int)"),
     ("wcell-routine", "(subr pure (int) wcell)"),
     ("wcell-int", "(subr pure (int) wcell)"),
     ("wcell-bool", "(subr pure (bool) wcell)"),

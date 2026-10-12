@@ -513,6 +513,7 @@ is its REPL. The older flags still work, and pick the same machines:
 | `fx-cells-rsjit-cellcc`             | `--cellular-machine native-compiled`                               | FX-26          | Rust (`assemble_word`) | the hand machine, as arm64      |
 | `fx-cells-fxjit-cellcc`             | `--cellular-machine fx-compiled`                                   | FX-26          | FX-26 (`native.fx`)    | the hand machine, as arm64      |
 | `fx-regs-rsjit-cellcc`              | `--cellular-machine registers`                                     | FX-26          | Rust (register code)   | the hand machine, as arm64      |
+| `fx-regs-fxjit-cellcc`              | `--cellular-machine fx-registers`                                  | FX-26          | FX-26 (`native-x64-regs.fx`) | the hand machine, as x86_64 only |
 
 And the other commands:
 

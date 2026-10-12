@@ -7,7 +7,8 @@
 (define-effect x86-encodes (maxeff (alloc @k) (read @k) (read @globals) spin))
 ;; An instruction's bytes, in order.
 (define-type x86-bytes (listof int @k))
-;; The encoders of one to six operands.
+;; The encoders of none to six operands.
+(define-type x86-op0 (subr x86-encodes () x86-bytes))
 (define-type x86-op1 (subr x86-encodes (int) x86-bytes))
 (define-type x86-op2 (subr x86-encodes (int int) x86-bytes))
 (define-type x86-op3 (subr x86-encodes (int int int) x86-bytes))
@@ -17,7 +18,8 @@
 
 ;;; ------------------------------------------------------------ signatures
 
-;; What `native-x64.fx` uses of the encoders (`TODO.md` §68).
+;; What `native-x64.fx` and `native-x64-regs.fx` use of the encoders
+;; (`TODO.md` §68).
 (define-type x86-64-sig
   (moduleof (val x86-mov x86-op2)
             (val x86-load x86-op3)
@@ -39,4 +41,20 @@
             (val x86-jmp-r x86-op1)
             (val x86-jmp-m x86-op4)
             (val x86-call-m x86-op2)
-            (val x86-store8-imm x86-op5)))
+            (val x86-store8-imm x86-op5)
+            (val x86-call-m-ix x86-op4)
+            (val x86-call x86-op1)
+            (val x86-ret x86-op0)
+            (val x86-push x86-op1)
+            (val x86-pop x86-op1)
+            (val x86-push-m x86-op2)
+            (val x86-pop-m x86-op2)
+            (val x86-neg x86-op1)
+            (val x86-neg-m x86-op2)
+            (val x86-imul x86-op2)
+            (val x86-idiv x86-op1)
+            (val x86-cqo x86-op0)
+            (val x86-movzx8 x86-op2)
+            (val x86-load32-ix x86-op5)
+            (val x86-shift-cl x86-op2)
+            (val x86-nops x86-op1)))

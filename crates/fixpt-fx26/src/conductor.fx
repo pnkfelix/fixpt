@@ -338,13 +338,25 @@
          ;; The same for x86_64.
          (native-x64
           ((load-input "fx26:native-x64.fx")
-           (load-input "fx26:x86_64.fx") layout (load-module "fx26:native-x64-layout.fx"))))
+           (load-input "fx26:x86_64.fx") layout (load-module "fx26:native-x64-layout.fx")))
+         ;; And register code to x86_64, over that assembler: its fast
+         ;; paths, then the rest.
+         (native-x64-regs-ops
+          ((load-input "fx26:native-x64-regs-ops.fx")
+           (load-input "fx26:x86_64.fx") layout (load-module "fx26:native-x64-layout.fx")
+           (load-module "fx26:native-x64-regs-layout.fx") native-x64))
+         (native-x64-regs
+          ((load-input "fx26:native-x64-regs.fx")
+           (load-input "fx26:x86_64.fx") layout (load-module "fx26:native-x64-layout.fx")
+           (load-module "fx26:native-x64-regs-layout.fx") native-x64 native-x64-regs-ops)))
     ;; What Rust and `bootstrap.fx` call of them (`syn.rs`, `session.rs`).
     (product (run-checked (with eval-core run-checked))
              (run-checked-more (with eval-core run-checked-more))
              (run-program (with eval-core run-program))
              (native-assemble (with native native-assemble))
              (native-assemble-x64 (with native-x64 native-assemble-x64))
+             (native-assemble-x64-regs (with native-x64-regs native-assemble-x64-regs))
+             (native-adapter-x64 (with native-x64-regs native-adapter-x64))
              (compile-forget-globals! (with compile-programs compile-forget-globals!))
              (compile-keep-global! (with compile-programs compile-keep-global!))
              (compile-new-global (with compile-programs compile-new-global))
@@ -376,6 +388,8 @@
 (define run-program (extract front-end-entries run-program))
 (define native-assemble (extract front-end-entries native-assemble))
 (define native-assemble-x64 (extract front-end-entries native-assemble-x64))
+(define native-assemble-x64-regs (extract front-end-entries native-assemble-x64-regs))
+(define native-adapter-x64 (extract front-end-entries native-adapter-x64))
 (define compile-forget-globals! (extract front-end-entries compile-forget-globals!))
 (define compile-keep-global! (extract front-end-entries compile-keep-global!))
 (define compile-new-global (extract front-end-entries compile-new-global))

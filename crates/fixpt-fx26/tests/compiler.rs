@@ -101,7 +101,8 @@ fn every_program_compiled() {
 /// or by `native.fx`, or run as register code; and the stencils at -O2.
 /// Control, and everything else a native machine has no code for, runs
 /// there through the Rust machine (the round trip). The stencils only where
-/// the build made them (a nightly compiler, arm64 or x86_64 Linux).
+/// the build made them (a nightly compiler, arm64 or x86_64 Linux); and on
+/// x86_64, register code compiled by `native-x64-regs.fx`.
 #[test]
 #[cfg_attr(not(any(target_arch = "aarch64", target_arch = "x86_64")), ignore = "runs machine code")]
 fn every_program_on_every_machine() {
@@ -109,14 +110,21 @@ fn every_program_on_every_machine() {
     // Each: its name, its machine, whether the compiler makes register
     // code for it, and how code `native.fx` makes is placed, if it makes it.
     type Place = Option<fixpt_runtime::PlaceCode>;
-    let machines: [(&str, Run, bool, Place); 5] = [
+    let machines: [(&str, Run, bool, Place); 6] = [
         ("native", fixpt_native::cellular::run_word, false, None),
         ("native, words compiled", fixpt_native::cellular::run_word_compiled, false, None),
         ("native, words compiled by native.fx", fixpt_native::cellular::run_word_as_is, false, Some(fixpt_native::cellular::place_word)),
         ("register code", fixpt_native::cellular::run_word_registers, true, None),
         ("stencils", fixpt_native::stencil::run_word, false, None),
+        ("register code compiled by native-x64-regs.fx", fixpt_native::cellular::run_word_as_is, true, Some(fixpt_native::cellular::place_word)),
     ];
-    let machines = &machines[..if fixpt_native::stencil::opt_levels().is_empty() { 4 } else { machines.len() }];
+    // The stencils where the build made them; FX-26's register code for
+    // x86_64 only.
+    let machines: Vec<_> = machines
+        .into_iter()
+        .filter(|(name, ..)| *name != "stencils" || !fixpt_native::stencil::opt_levels().is_empty())
+        .filter(|(name, ..)| !name.contains("native-x64-regs") || cfg!(target_arch = "x86_64"))
+        .collect();
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
     let mut report = Vec::new();
     // A session for each machine, for every program.

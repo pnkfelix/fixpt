@@ -82,12 +82,44 @@ fn every_instruction_as_the_rust_encoder_makes_it() {
             }
         }
         add("x86-jmp-r", vec![d as i64], x::jmp_r(d));
+        // Register code's.
+        add("x86-push", vec![d as i64], x::push(d));
+        add("x86-pop", vec![d as i64], x::pop(d));
+        add("x86-neg", vec![d as i64], x::neg(d));
+        add("x86-idiv", vec![d as i64], x::idiv(d));
+        for s in 0..16u8 {
+            add("x86-imul", vec![d as i64, s as i64], x::imul(d, s));
+            add("x86-movzx8", vec![d as i64, s as i64], x::movzx8(d, s));
+        }
+        for op in [Shift::Shl, Shift::Shr, Shift::Sar] {
+            add("x86-shift-cl", vec![op as i64, d as i64], x::shift_cl(op, d));
+        }
+        for b in 0..16u8 {
+            for disp in [0, 8, -12, 744, 4096] {
+                add("x86-push-m", vec![b as i64, disp as i64], x::push_m(m(b, disp)));
+                add("x86-pop-m", vec![b as i64, disp as i64], x::pop_m(m(b, disp)));
+                add("x86-neg-m", vec![b as i64, disp as i64], x::neg_m(m(b, disp)));
+                add("x86-load32-ix", vec![d as i64, b as i64, -1, 1, disp as i64], x::load32(d, m(b, disp)));
+            }
+            for (ix, scale, disp) in [(0u8, 1u8, 0i32), (1, 4, 4), (12, 8, -16)] {
+                add("x86-load32-ix", vec![d as i64, b as i64, ix as i64, scale as i64, disp as i64], x::load32(d, mi(b, ix, scale, disp)));
+                add("x86-call-m-ix", vec![b as i64, ix as i64, scale as i64, disp as i64], x::call_m(mi(b, ix, scale, disp)));
+            }
+        }
     }
+    add("x86-cqo", vec![], x::cqo());
+    add("x86-ret", vec![], x::ret());
+
     for rel in [0i32, -5, 100, -0x8000_0000, 0x7fff_ffff] {
         add("x86-jmp", vec![rel as i64], x::jmp(rel));
+        add("x86-call", vec![rel as i64], x::call(rel));
         for c in 0..16u8 {
             add("x86-jcc", vec![c as i64, rel as i64], x::jcc(Cond::from_bits(c), rel));
         }
+    }
+    // No-ops are bytes, not one instruction.
+    for n in 0..40usize {
+        cases.push(("x86-nops".into(), vec![n as i64], x::nops(n)));
     }
     let mut wrong = Vec::new();
     for (name, args, want) in &cases {

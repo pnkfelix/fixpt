@@ -36,7 +36,7 @@
 //!   very next instruction is dropped.
 
 mod regcode;
-pub use regcode::{assemble_adapter, assemble_register_word};
+pub use regcode::{assemble_adapter, assemble_register_word, fx26_regs_module};
 pub(crate) use regcode::dump;
 
 use super::State;

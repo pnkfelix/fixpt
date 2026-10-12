@@ -152,7 +152,14 @@ fn fx26_runs_cellular_on_each_machine() {
     let stencils = !fixpt_native::stencil::opt_levels().is_empty();
     // Only the Rust one where the hand-encoded machine cannot run.
     let native = fixpt_native::CELLULAR_AVAILABLE;
-    for machine in ["rust", "native", "native-compiled", "registers", "stencils"].into_iter().filter(|m| stencils || *m != "stencils").filter(|m| native || *m == "rust") {
+    // FX-26's register code where it compiles some: x86_64.
+    let fx_registers = cfg!(target_arch = "x86_64");
+    for machine in ["rust", "native", "native-compiled", "registers", "stencils", "fx-registers"]
+        .into_iter()
+        .filter(|m| stencils || *m != "stencils")
+        .filter(|m| fx_registers || *m != "fx-registers")
+        .filter(|m| native || *m == "rust")
+    {
         let out = Command::new(FIXPT)
             .args(["--dialect", "fx26", "--fx26-run", "cellular", "--cellular-machine", machine, "eval", src])
             .output()

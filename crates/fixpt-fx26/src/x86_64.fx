@@ -152,4 +152,54 @@
 (define x86-store8-imm x86-op5
   (lambda (base index scale disp imm)
     (append (x86-op-rm 0 (x86-b1 198) 0 base index scale disp) (x86-b1 imm))))
+(define x86-call-m-ix x86-op4
+  (lambda (base index scale disp) (x86-op-rm 0 (x86-b1 255) 2 base index scale disp)))
+(define x86-call x86-op1 (lambda (rel) (cons 232 (x86-le 4 rel))))
+(define x86-ret x86-op0 (lambda () (x86-b1 195)))
+
+;;; ------------------------------------------------------------ register code's
+;;; What register code (`native-x64-regs.fx`) uses besides: the machine
+;;; stack, multiplying and dividing, narrow loads, shifts by `cl`, no-ops.
+
+(define x86-push x86-op1
+  (lambda (s) (append (x86-rex 0 0 0 s) (x86-b1 (+ 80 (x86-lo s))))))
+(define x86-pop x86-op1
+  (lambda (d) (append (x86-rex 0 0 0 d) (x86-b1 (+ 88 (x86-lo d))))))
+(define x86-push-m x86-op2 (lambda (base disp) (x86-op-rm 0 (x86-b1 255) 6 base -1 1 disp)))
+(define x86-pop-m x86-op2 (lambda (base disp) (x86-op-rm 0 (x86-b1 143) 0 base -1 1 disp)))
+(define x86-neg x86-op1 (lambda (d) (x86-op-rr 1 (x86-b1 247) 3 d)))
+(define x86-neg-m x86-op2 (lambda (base disp) (x86-op-rm 1 (x86-b1 247) 3 base -1 1 disp)))
+(define x86-imul x86-op2 (lambda (d s) (x86-op-rr 1 (x86-b2 15 175) d s)))
+(define x86-idiv x86-op1 (lambda (s) (x86-op-rr 1 (x86-b1 247) 7 s)))
+(define x86-cqo x86-op0 (lambda () (x86-b2 72 153)))
+;; `movzx d32, s8`: a REX prefix for s of 4 to 7 too, so that it names
+;; `spl` … `dil`, not `ah` … `bh`.
+(define x86-movzx8 x86-op2
+  (lambda (d s)
+    (append (if (or (>= d 8) (>= s 4)) (x86-b1 (+ 64 (+ (* 4 (x86-hi d)) (x86-hi s)))) nil)
+            (cons 15 (cons 182 (x86-b1 (+ (+ 192 (* 8 (x86-lo d))) (x86-lo s))))))))
+;; `mov d32, [mem]`: 32 bits, zero-extended.
+(define x86-load32-ix x86-op5
+  (lambda (d base index scale disp) (x86-op-rm 0 (x86-b1 139) d base index scale disp)))
+(define x86-shift-cl x86-op2 (lambda (op d) (x86-op-rr 1 (x86-b1 211) op d)))
+;; The no-op of `n` bytes, 1 to 9, as the manuals recommend them.
+(define x86-nop x86-op1
+  (lambda (n)
+    (case n
+      ((1) (x86-b1 144))
+      ((2) (x86-b2 102 144))
+      ((3) (cons 15 (x86-b2 31 0)))
+      ((4) (cons 15 (cons 31 (x86-b2 64 0))))
+      ((5) (cons 15 (cons 31 (cons 68 (x86-b2 0 0)))))
+      ((6) (cons 102 (cons 15 (cons 31 (cons 68 (x86-b2 0 0))))))
+      ((7) (cons 15 (cons 31 (cons 128 (x86-le 4 0)))))
+      ((8) (cons 15 (cons 31 (cons 132 (cons 0 (x86-le 4 0))))))
+      (else (cons 102 (cons 15 (cons 31 (cons 132 (cons 0 (x86-le 4 0))))))))))
+;; No-ops of `n` bytes more after `acc`, nine at most each.
+(define x86-nops-after (subr x86-encodes (int x86-bytes) x86-bytes)
+  (lambda (n acc)
+    (cond ((= n 0) acc)
+          ((> n 9) (x86-nops-after (- n 9) (append acc (x86-nop 9))))
+          (else (append acc (x86-nop n))))))
+(define x86-nops x86-op1 (lambda (n) (x86-nops-after n nil)))
 ))

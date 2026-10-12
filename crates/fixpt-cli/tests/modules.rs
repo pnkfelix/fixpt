@@ -22,7 +22,7 @@ const PROGRAMS: [&str; 6] = ["load", "functor-max", "width", "region-parameter",
 const AT_THE_REPL: [&str; 4] = ["load", "functor-max", "load-input", "load-input-built-in"];
 
 /// Each run mode, as options.
-const MODES: [&[&str]; 10] = [
+const MODES: [&[&str]; 11] = [
     &[],
     &["--fx26-run", "evaluate"],
     &["--fx26-run", "cellular"],
@@ -31,14 +31,18 @@ const MODES: [&[&str]; 10] = [
     &["--fx26-run", "cellular", "--cellular-machine", "fx-compiled"],
     &["--fx26-run", "cellular", "--cellular-machine", "registers"],
     &["--fx26-run", "cellular", "--cellular-machine", "stencils"],
+    &["--fx26-run", "cellular", "--cellular-machine", "fx-registers"],
     &["--fx26-run", "cellular", "--calling-convention", "native"],
     &["--fx26-run", "cellular", "--cellular-machine", "registers", "--calling-convention", "native"],
 ];
 
 /// Whether a mode's machine runs here: every one on arm64 and x86_64 (the
-/// stencils where the build made them, `stencils_built`); elsewhere only
-/// those of no machine code.
+/// stencils where the build made them, `stencils_built`; FX-26's register
+/// code on x86_64 only); elsewhere only those of no machine code.
 fn runs_here(mode: &[&str]) -> bool {
+    if mode.contains(&"fx-registers") {
+        return cfg!(target_arch = "x86_64");
+    }
     if fixpt_native::AVAILABLE {
         return true;
     }

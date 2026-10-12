@@ -497,6 +497,17 @@ pub const X86_64: &str = include_str!("x86_64.fx");
 /// machine, generated from it, as [`NATIVE_LAYOUT`] is for arm64.
 pub const NATIVE_X64_LAYOUT: &str = include_str!("native-x64-layout.fx");
 
+/// Register code compiled to x86_64 machine code, in FX-26: the x86_64
+/// machine's `assemble_register_word`, over [`NATIVE_X64`]'s assembler.
+pub const NATIVE_X64_REGS: &str = include_str!("native-x64-regs.fx");
+
+/// Its fast paths and what it does inline, and the helpers they share.
+pub const NATIVE_X64_REGS_OPS: &str = include_str!("native-x64-regs-ops.fx");
+
+/// What [`NATIVE_X64_REGS`] knows of the x86_64 machine's register code
+/// beyond [`NATIVE_X64_LAYOUT`], generated from it.
+pub const NATIVE_X64_REGS_LAYOUT: &str = include_str!("native-x64-regs-layout.fx");
+
 /// What the compiler to machine code written in FX-26 knows of the
 /// hand-encoded machine, generated from it: a module file, which the
 /// conductor loads.
@@ -530,7 +541,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 150] = [
+pub const FRONT_END_MODULES: [(&str, &str); 153] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("eager-reader-states.fx", EAGER_READER_STATES),
     ("syn.fx", SYN),
@@ -593,6 +604,9 @@ pub const FRONT_END_MODULES: [(&str, &str); 150] = [
     ("x86_64.fx", X86_64),
     ("native-x64-layout.fx", NATIVE_X64_LAYOUT),
     ("native-x64.fx", NATIVE_X64),
+    ("native-x64-regs-layout.fx", NATIVE_X64_REGS_LAYOUT),
+    ("native-x64-regs-ops.fx", NATIVE_X64_REGS_OPS),
+    ("native-x64-regs.fx", NATIVE_X64_REGS),
     ("native.fx", NATIVE),
     ("compile-twins-types.fx", COMPILE_TWINS_TYPES),
     ("compile-inline-types.fx", COMPILE_INLINE_TYPES),
