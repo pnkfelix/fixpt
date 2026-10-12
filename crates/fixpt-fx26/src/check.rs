@@ -409,6 +409,10 @@ pub struct Checker {
     /// Whether naming a global reads its binding, `(read (globals g))`, as
     /// the language will say once every program says so (off until then).
     pub globals_effects: bool,
+    /// Whether to keep the operand types of standard operations
+    /// instantiated (`NodeFacts::operand_types`): for measuring what types
+    /// discharge (`crate::debts`); off, as it costs every check.
+    pub record_operands: bool,
     /// Where in `env` the globals are: the bindings top-level definitions
     /// made.
     pub(crate) global_slots: HashSet<usize>,
@@ -425,6 +429,10 @@ pub struct Checker {
 pub struct NodeFacts {
     /// Each expression's effect, after masking.
     pub effects: HashMap<ExpId, Effect>,
+    /// With `record_operands`, each application of a polymorphic standard
+    /// operation: its arguments' types where instantiating it synthesised
+    /// them (`crate::debts`, `TODO.md` §86).
+    pub operand_types: HashMap<ExpId, Vec<Option<TyId>>>,
     /// Applications whose operator is a standard binding, by name. The
     /// initial environment cannot be assigned, so the operator is known.
     pub standard_operator: HashMap<ExpId, Sym>,
@@ -671,6 +679,7 @@ impl Checker {
             defer_reruns: false,
             outdated: Vec::new(),
             globals_effects: true,
+            record_operands: false,
             global_slots: HashSet::new(),
             fixed_slots: HashSet::new(),
         };

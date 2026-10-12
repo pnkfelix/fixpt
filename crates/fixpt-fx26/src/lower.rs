@@ -50,8 +50,10 @@ pub(crate) fn total_operation(name: &str) -> bool {
         "string-append", "string-length", "string=?", "string<?", "string<=?", "string>?", "string>=?", "char=?",
         "char<?", "char<=?", "char>?", "char>=?", "char->integer", "char-upcase", "char-downcase", "symbol->string",
         "string->symbol", "symbol=?", "int->f64", "int->f32", "f64->string", "f32->string", "f32->f64", "f64->f32",
+        "string-hash", "char-in?", "wcell-nil", "wcell-unit", "wglobal=?",
     ];
-    if TOTAL.contains(&name) {
+    // What is lowered to the identity (`wcell-int` and its kin) does nothing.
+    if TOTAL.contains(&name) || STANDARD.iter().any(|(n, l, _)| *n == name && *l == "%fx26-identity") {
         return true;
     }
     let partial = |t: &str, rest: &str| matches!(rest, "-quotient" | "-remainder") || (rest == "->int" && t.starts_with('f'));

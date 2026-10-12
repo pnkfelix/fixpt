@@ -199,6 +199,48 @@ With the call graph, the same classification for each procedure's
 callers shows how far "may fail" would spread under inference. The
 measurement needs no language change and nothing written by anyone.
 
+### Results (2026-10-12)
+
+Measured by `crates/fixpt-fx26/src/debts.rs` (`cargo run --release -p
+fixpt-fx26 --example debts`): each definition (a top-level `define`, or a
+module's item) of the front end written in FX-26, checked as one program,
+and of 94 of the 95 benchmark ports (`mllang-bench/fx`, `scheme-bench`;
+`bv2string.fx` does not check, `TODO.md` §88). A definition's debts are
+its own; "may fail" spreads to a caller by name, over the call graph.
+
+| class                                           | front end |  ports |
+| ----------------------------------------------- | ---------:| ------:|
+| definitions                                     |      5549 |   2877 |
+| failure-free, and everything it calls           |     62.1% |  52.9% |
+| failure-free, but calls a procedure it is given |      0.1% |   3.9% |
+| failure-free itself, calls one that may fail    |     29.4% |  26.3% |
+| internal debt only (owed)                       |      3.7% |   6.5% |
+| passes debt to callers (via a parameter)        |      4.6% |   8.7% |
+| states debt (calls `error`)                     |      0.0% |   1.7% |
+
+What it says:
+- **"May fail" would not reach everything.** Most definitions stay
+  failure-free under inference: 62% of the front end, 53% of the ports.
+- **The call graph amplifies.** Only 8% of the front end's definitions,
+  and 17% of the ports', have a debt of their own; three times as many
+  inherit one by calling. Where the spread comes from is a few sources
+  deep in the graph.
+- **Types already discharge most of the commonest debt.** Of `car` and
+  `cdr`, the front end's 4,685 sites are 84% discharged (a `pairof`, or a
+  branch a test narrowed), the ports' 1,697 sites 82%.
+- **What is left differs by corpus.** In the front end, `car` and `cdr` of
+  a `listof` dominate (770 sites, 471 of them on a parameter): a
+  parameter typed `pairof` would move each to its caller's type. In the
+  ports, indices dominate (758 sites); were every index proved in bounds
+  (N5), the ports' failure-free share would rise from 52.9% to 59.7%,
+  the front end's from 62.1% to 64.7%.
+- **Stated debt is rare**: one `error` in the front end, 58 in the ports.
+
+Approximations, each toward more debt: a local bound from a parameter is
+not followed (its debts count as owed, not passed); a call is linked to
+every definition of its name; a call of a procedure given is counted
+apart, neither failing nor free.
+
 ## 8. A design that follows
 
 1. **Inferred, not written.** The checker infers each expression's and

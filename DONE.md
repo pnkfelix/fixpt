@@ -1808,3 +1808,18 @@ evaluator written in FX-26 fails the program on an `int` division by
 zero, as the machines do, where it failed itself (`int-div`). Test:
 `an_unused_failing_call_still_fails_on_every_machine` (six machines).
 
+## 86. Failure as proof debt: stage 1, measured (2026-10-12)
+
+What is left, stages 2 to 5, is in `TODO.md` §86.
+
+`crates/fixpt-fx26/src/debts.rs` and its example (`cargo run --release
+-p fixpt-fx26 --example debts`): each definition of a program checked
+with `Checker::record_operands` (the operand types of the polymorphic
+standard operations' applications, kept as `NodeFacts::operand_types`;
+off otherwise), its debts discharged, owed, passed or stated, and
+whether through its calls it may fail. Over the front end and 94 of the
+95 benchmark ports: `docs/research/failure-and-blame.md`, section 7,
+"Results". On the way, the lowering's `total_operation` (§85) learned
+the operations lowered to the identity (`wcell-int` and kin),
+`string-hash`, `char-in?`, `wglobal=?`.
+

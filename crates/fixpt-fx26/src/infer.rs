@@ -675,6 +675,9 @@ impl Checker {
         let mut done: Vec<Synthesised> = vec![None; args.len()];
         if matches!(self.arena.get(ft), Ty::Poly { .. }) {
             let (inst, cached) = self.instantiate(e, ft, args, expected, span)?;
+            if self.record_operands && self.facts.standard_operator.contains_key(&e) {
+                self.facts.operand_types.insert(e, cached.iter().map(|c| c.as_ref().map(|(t, _)| *t)).collect());
+            }
             self.no_knot(inst, span)?;
             ft = inst;
             done = cached;

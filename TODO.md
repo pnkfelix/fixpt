@@ -2296,12 +2296,10 @@ From `docs/research/failure-and-blame.md`: "may fail" read as a debt the
 code carries, a precondition it has not discharged; inferred, not
 written; blamed on the site that took it. In order, each stage deciding
 how far the next goes:
-1. **Measure** (the note's section 7). Instrument the checker to classify
-   each procedure of the front end written in FX-26 and of the 42
-   benchmark ports: failure-free; internal debt only; passes debt to its
-   callers (through which parameters); states debt (calls `error`). Then
-   over the call graph, how far "may fail" would spread under inference.
-   No language change. Whether the rest is worth it is this answer.
+1. Measured (`DONE.md` §86; the note's section 7, "Results"): "may
+   fail" would leave 62% of the front end's definitions and 53% of the
+   ports' failure-free; most spread is by calls, from few sources: `car`
+   and `cdr` of a `listof` (the front end), indices (the ports).
 2. **Decide `error`'s effect**, with the user: `(goto @fail)` on a
    constant region (a future handler a prompt that masks it), or a
    failure atom of its own beside `spin`, so `goto` keeps one meaning.
@@ -2371,4 +2369,15 @@ frame around them. A code-generation trade-off, so timed on the MLton
 ports both ways, not only `fixpt bench`'s eight. Other summaries this
 would serve later: a frame's size, for the stack-limit check; bounded
 work, for fuel checks; an allocation bound.
+
+## 88. A program's `define-type` of a standard type's name (found 2026-10-12)
+
+`scheme-bench/bv2string.fx` defines `(define-type bytevector (bloblet
+(fields) @heap))`, and since `bytevector` became a standard base type
+(2026-10-08, a reader's datums) the port no longer checks: a parameter
+written `bytevector` is the standard type, not the port's ("a bloblet is
+expected here, and this is a bytevector", 56:33, both checkers agreeing).
+A program's own definition of the name should shadow the standard one,
+as a `define` of a standard procedure's name does; or be refused where it
+is written. Found measuring §86 (the port is the one not measured).
 
