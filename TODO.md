@@ -2455,6 +2455,25 @@ and (2); (3) wants the native convention to pass and return a raw `f64`
 (registers, or the callee's raw slots), a follow-on. Next: the layout,
 in `direct.rs` and the collector's walk of native frames; the four ports
 timed both ways.
+- **Then, raw `f64` arguments and results** (design, with the user,
+  2026-10-12). On raw frame slots, not before: a callee stores its
+  parameters to its slots at once, so a raw argument with nowhere raw to
+  go is boxed there anyway. The static types settle most calls (a `subr`
+  type says which parameters are `f64`); polymorphic code takes a `t`
+  boxed (uniform, as dictionary passing is), so a caller that sees only
+  `(subr (f64) f64)` cannot know the callee was compiled for `(subr (t)
+  t)`. So `invoke` carries the count of raw `f64` arguments apart from
+  the others; the callee's entry compares it with what it takes, and on a
+  mismatch goes by an adapter that boxes or unboxes (as `adapt` does
+  between the cellular and native conventions): one compare a call. A
+  raw result likewise, said by the callee, adapted where the caller
+  wanted a value. Arguments raw in `d0`–`d7` or raw in the `x` registers,
+  as measured.
+- **Last, `f64`s in floating-point registers in the abstract register
+  machine**: only once the `fmov`s between `x` and `d` registers show in a
+  disassembly, and once register code keeps values in registers across
+  more of a procedure (today nothing across a call, and parameters and
+  `let`s in slots): a register allocator's project.
 - **Later, frames' uniqueness restored by a collection** (the user's,
   2026-10-12). A frame (or chunk) gets a "shared" header flag, set when a
   continuation capture takes a reference to it; underflow or a resume
