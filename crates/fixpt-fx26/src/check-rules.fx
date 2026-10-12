@@ -132,7 +132,7 @@
         (x-const (t v a b) (k-te t nil))
         (x-lambda (ps body a b) (k-synth-lambda-as x nil -1))
         (x-app (f args a b) (k-synth-app x f args -1))
-        (x-the (t0 e a b) (let ((t (k-resolve-selects t0 a b))) (k-te t (k-check e t))))
+        (x-the (t0 e a b) (let ((t (k-resolve-selects t0 a b))) (k-sized e (k-te t (k-check e t)))))
         (x-convention (c e a b)
           (let* ((r (k-synth e)) (t (k-resolve (extract r 1))))
             (tagcase (k-get t)
@@ -323,7 +323,7 @@
           (("cons")
            (let ((r (k-nlist-cons x args expected)))
              (if (null? r) (k-synth-app-plain x f args expected) (car r))))
-          (else (k-call-te (k-path-te x (k-synth-app-plain x f args expected))))))))
+          (else (k-call-te (k-path-te x (k-sized x (k-synth-app-plain x f args expected)))))))))
   ;; `+` and `-` of naturals: a natural, of a size when both are known. Only
   ;; what has a type of its own is asked for it; anything else is told it
   ;; is an int, as for any call.

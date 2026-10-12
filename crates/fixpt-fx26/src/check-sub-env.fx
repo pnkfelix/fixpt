@@ -294,7 +294,7 @@
               (ty-nil () #t)
               (ty-var (v) (and (k-data-var? v) (k-near? (k-data-var-place v) r)))
               (ty-ref (a q) (and (k-region=? q r) (k-forget-walk a r seen)))
-              (ty-array (a q) (and (k-region=? q r) (k-forget-walk a r seen)))
+              (ty-array (a nz q) (and (k-region=? q r) (k-forget-walk a r seen)))
               (ty-icell (a q) (and (k-region=? q r) (k-forget-walk a r seen)))
               (ty-pair (a b q nl)
                 (and (k-forget-region? q r (k-frozen-region? q))

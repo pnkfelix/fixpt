@@ -324,7 +324,7 @@ impl Checker {
                 n1 == n2
                     && self.match_region(l, r1, r2, map) && self.match_ty(l, a1, a2, map, seen) && self.match_ty(l, b1, b2, map, seen)
             }
-            (Ty::Ref(x, r), Ty::Ref(y, s)) | (Ty::Array(x, r), Ty::Array(y, s)) | (Ty::ICell(x, r), Ty::ICell(y, s)) => {
+            (Ty::Ref(x, r), Ty::Ref(y, s)) | (Ty::Array(x, _, r), Ty::Array(y, _, s)) | (Ty::ICell(x, r), Ty::ICell(y, s)) => {
                 self.match_region(l, r, s, map) && self.match_ty(l, x, y, map, seen)
             }
             (Ty::Product(ps), Ty::Product(qs)) | (Ty::Sum(ps), Ty::Sum(qs)) => {

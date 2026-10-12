@@ -89,7 +89,7 @@
   (ty-markkey int k-region)
   (ty-product k-parts)
   (ty-sum k-parts)
-  (ty-array int k-region)
+  (ty-array int k-size k-region)
   (ty-icell int k-region)
   ;; The place a region is allocated in, as a value: what `letrena` and
   ;; `letreap` bind.

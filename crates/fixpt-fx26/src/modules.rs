@@ -988,7 +988,7 @@ impl Checker {
             Ty::Union(ms) => ms.clone(),
             Ty::Subr { params, result, .. } => params.iter().copied().chain([*result]).collect(),
             Ty::Poly { body, .. } => vec![*body],
-            Ty::Ref(a, _) | Ty::Array(a, _) | Ty::ICell(a, _) | Ty::MarkKey(a, _) => vec![*a],
+            Ty::Ref(a, _) | Ty::Array(a, _, _) | Ty::ICell(a, _) | Ty::MarkKey(a, _) => vec![*a],
             Ty::Pair(a, b, _, _) => vec![*a, *b],
             Ty::PromptTag { answer, payload, .. } => vec![*answer, *payload],
             Ty::Composable { arg, answer, .. } => vec![*arg, *answer],

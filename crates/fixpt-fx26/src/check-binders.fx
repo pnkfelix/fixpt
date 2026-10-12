@@ -334,7 +334,7 @@
                 (ty-sum (ps) (k-size-walk-parts ps pol v seen))
                 (ty-union (ms) (k-size-walk-list ms pol v seen))
                 (ty-ref (x r) (k-size-walk x 0 v seen))
-                (ty-array (x r) (k-size-walk x 0 v seen))
+                (ty-array (x nz r) (+ (k-size-bad nz pol v) (k-size-walk x 0 v seen)))
                 (ty-icell (x r) (k-size-walk x 0 v seen))
                 (ty-markkey (x r) (k-size-walk x 0 v seen))
                 (ty-tag (x y e r) (+ (k-size-walk x 0 v seen) (k-size-walk y 0 v seen)))
@@ -385,6 +385,11 @@
       (ty-nlist (e z r)
         (if (k-size-alone? z v)
             (product (1 (k-size-walk e -1 v seen)) (2 1))
+            (k-size-whole p v seen)))
+      ;; An array's own length, likewise; its elements, mutable, both ways.
+      (ty-array (e z r)
+        (if (k-size-alone? z v)
+            (product (1 (k-size-walk e 0 v seen)) (2 1))
             (k-size-whole p v seen)))
       (else y (k-size-whole p v seen)))))
 ;; Each parameter's count of such occurrences, and how many parameters are

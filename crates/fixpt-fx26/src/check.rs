@@ -1540,6 +1540,12 @@ impl Checker {
             Exp::The { ty, exp } => {
                 let ty = self.resolve_selects(ty, span)?;
                 let eff = self.check(exp, ty)?;
+                // `(the (arrayof T R) (make-array n …))`: the region said,
+                // the length kept (`TODO.md` §77).
+                let ty = match self.arena.exp_at(exp).clone() {
+                    Exp::App { fun, args } => self.array_sized(exp, fun, &args, ty),
+                    _ => ty,
+                };
                 Ok((ty, eff))
             }
             Exp::Convention { conv, exp } => {
@@ -1981,7 +1987,7 @@ impl Checker {
             match self.arena.get(t) {
                 Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Nil | Ty::Place(_) => {}
                 Ty::Pair(a, b, _, _) => stack.extend([*a, *b]),
-                Ty::NList { elem: a, .. } | Ty::Ref(a, _) | Ty::Array(a, _) | Ty::ICell(a, _) => stack.push(*a),
+                Ty::NList { elem: a, .. } | Ty::Ref(a, _) | Ty::Array(a, _, _) | Ty::ICell(a, _) => stack.push(*a),
                 Ty::Bloblet { fields, .. } => stack.extend(fields),
                 Ty::Product(ps) | Ty::Sum(ps) => stack.extend(ps.iter().map(|(_, x)| *x)),
                 Ty::Union(ms) => stack.extend(ms.iter().copied()),
@@ -2211,7 +2217,7 @@ impl Checker {
                 self.regions_walk(result, seen, out);
             }
             Ty::Poly { body, .. } => self.regions_walk(body, seen, out),
-            Ty::Ref(a, r) | Ty::Array(a, r) | Ty::ICell(a, r) => {
+            Ty::Ref(a, r) | Ty::Array(a, _, r) | Ty::ICell(a, r) => {
                 out.insert(r);
                 self.regions_walk(a, seen, out);
             }
@@ -2289,7 +2295,7 @@ impl Checker {
             }
         };
         let kids: Vec<TyId> = match self.arena.get(t).clone() {
-            Ty::Ref(a, r) | Ty::Array(a, r) | Ty::ICell(a, r) | Ty::MarkKey(a, r) => {
+            Ty::Ref(a, r) | Ty::Array(a, _, r) | Ty::ICell(a, r) | Ty::MarkKey(a, r) => {
                 add(r, out);
                 vec![a]
             }
@@ -2404,7 +2410,7 @@ impl Checker {
         match self.arena.get(t).clone() {
             Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Nil => true,
             Ty::Var(v) => self.arena.is_data_var(v) && near(self.data_var_place(v)),
-            Ty::Ref(a, q) | Ty::Array(a, q) | Ty::ICell(a, q) => q == r && self.forget_walk(a, r, seen),
+            Ty::Ref(a, q) | Ty::Array(a, _, q) | Ty::ICell(a, q) => q == r && self.forget_walk(a, r, seen),
             Ty::Pair(a, b, q, _) => {
                 (if q.is_frozen() { near(q) } else { q == r }) && self.forget_walk(a, r, seen) && self.forget_walk(b, r, seen)
             }
@@ -2642,7 +2648,7 @@ impl Checker {
                 self.polarity(result, v, at, seen, found);
             }
             Ty::Poly { body, .. } => self.polarity(body, v, at, seen, found),
-            Ty::Ref(a, r) | Ty::Array(a, r) | Ty::ICell(a, r) | Ty::MarkKey(a, r) => {
+            Ty::Ref(a, r) | Ty::Array(a, _, r) | Ty::ICell(a, r) | Ty::MarkKey(a, r) => {
                 reg(r, found);
                 self.polarity(a, v, Variance::Inv, seen, found);
             }
@@ -2750,7 +2756,7 @@ impl Checker {
                 vec![*arg, *answer]
             }
             Ty::Poly { body, .. } => vec![*body],
-            Ty::Ref(a, _) | Ty::Array(a, _) | Ty::ICell(a, _) | Ty::MarkKey(a, _) => vec![*a],
+            Ty::Ref(a, _) | Ty::Array(a, _, _) | Ty::ICell(a, _) | Ty::MarkKey(a, _) => vec![*a],
             Ty::Pair(a, b, _, _) => vec![*a, *b],
             Ty::Bloblet { fields, .. } => fields.clone(),
             Ty::Product(ps) | Ty::Sum(ps) => ps.iter().map(|(_, x)| *x).collect(),
@@ -2840,7 +2846,7 @@ impl Checker {
             })
         };
         match self.arena.get(t).clone() {
-            Ty::Ref(a, r) | Ty::Array(a, r) | Ty::ICell(a, r) | Ty::MarkKey(a, r) => self.knot_in(a, &with(r), seen),
+            Ty::Ref(a, r) | Ty::Array(a, _, r) | Ty::ICell(a, r) | Ty::MarkKey(a, r) => self.knot_in(a, &with(r), seen),
             Ty::Pair(a, b, r, _) => {
                 let k = if r.is_frozen() { kept.to_vec() } else { with(r) };
                 self.knot_in(a, &k, seen).or_else(|| self.knot_in(b, &k, seen))
@@ -2910,7 +2916,7 @@ impl Checker {
                 Ty::PromptTag { answer, payload, effect, .. } => (vec![effect], vec![*answer, *payload]),
                 Ty::Composable { arg, answer, effect, .. } => (vec![effect], vec![*arg, *answer]),
                 Ty::Poly { body, .. } => (vec![], vec![*body]),
-                Ty::Ref(a, _) | Ty::Array(a, _) | Ty::ICell(a, _) | Ty::MarkKey(a, _) => (vec![], vec![*a]),
+                Ty::Ref(a, _) | Ty::Array(a, _, _) | Ty::ICell(a, _) | Ty::MarkKey(a, _) => (vec![], vec![*a]),
                 Ty::Pair(a, b, _, _) => (vec![], vec![*a, *b]),
                 Ty::NList { elem, .. } => (vec![], vec![*elem]),
                 Ty::Bloblet { fields, .. } => (vec![], fields.clone()),
@@ -3153,8 +3159,13 @@ impl Checker {
             // References and pairs are mutable, so their contents are
             // invariant: FX-87's `ref` rule, and its pairs.
             (Ty::Place(r), Ty::Place(s)) => ra(r) == rb(s),
-            (Ty::Ref(x, r), Ty::Ref(y, s)) | (Ty::Array(x, r), Ty::Array(y, s)) | (Ty::ICell(x, r), Ty::ICell(y, s)) => {
+            (Ty::Ref(x, r), Ty::Ref(y, s)) | (Ty::ICell(x, r), Ty::ICell(y, s)) => {
                 ra(r) == rb(s) && self.sub(x, y, env, st) && self.sub(y, x, &flip, st)
+            }
+            // An array's length never changes, so it may be forgotten, as a
+            // `nlist`'s is.
+            (Ty::Array(x, m, r), Ty::Array(y, n, s)) => {
+                ra(r) == rb(s) && self.size_le(&m, &n) && self.sub(x, y, env, st) && self.sub(y, x, &flip, st)
             }
             // Frozen pairs cannot be written, so, as a frozen bloblet's
             // fields, their contents are covariant.
@@ -3392,7 +3403,7 @@ impl Checker {
             Ty::Union(ms) => ms.iter().all(|m| self.closed_data(*m, seen)),
             Ty::Sum(ps) | Ty::Product(ps) => ps.iter().all(|(_, p)| self.closed_data(*p, seen)),
             Ty::Pair(a, b, r, _) => region(&r) && self.closed_data(a, seen) && self.closed_data(b, seen),
-            Ty::Ref(a, r) | Ty::Array(a, r) => region(&r) && self.closed_data(a, seen),
+            Ty::Ref(a, r) | Ty::Array(a, _, r) => region(&r) && self.closed_data(a, seen),
             _ => false,
         }
     }
@@ -3482,7 +3493,7 @@ impl Checker {
             }
             Ty::Poly { binders, body } => Ty::Poly { binders, body: self.subst_memo(body, map, memo) },
             Ty::Ref(a, r) => Ty::Ref(self.subst_memo(a, map, memo), region(r)),
-            Ty::Array(a, r) => Ty::Array(self.subst_memo(a, map, memo), region(r)),
+            Ty::Array(a, n, r) => Ty::Array(self.subst_memo(a, map, memo), crate::sizes::subst_size(&n, map), region(r)),
             Ty::ICell(a, r) => Ty::ICell(self.subst_memo(a, map, memo), region(r)),
             Ty::Place(r) => Ty::Place(region(r)),
             Ty::Pair(a, b, r, n) => Ty::Pair(self.subst_memo(a, map, memo), self.subst_memo(b, map, memo), region(r), n),

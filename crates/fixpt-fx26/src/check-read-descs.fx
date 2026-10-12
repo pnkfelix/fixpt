@@ -402,7 +402,15 @@
            (if (k-size-written? (k-nth items 2))
                (k-parse-flat s)
                (let* ((t (k-parse-type (k-nth items 1))) (r (k-parse-region (k-nth items 2))))
-                 (k-ty-new (ty-array t r))))))
+                 (k-ty-new (ty-array t (sz-finite) r))))))
+        ;; `(narrayof type size region)`: an array of `size` elements.
+        ((narrayof)
+         (begin
+           (k-shape (= n 4) "`(narrayof type size region)`" s)
+           (let* ((t (k-parse-type (k-nth items 1)))
+                  (z (k-parse-size (k-nth items 2)))
+                  (r (k-parse-region (k-nth items 3))))
+             (k-ty-new (ty-array t z r)))))
         ((icell)
          (begin
            (k-shape (= n 3) "`(icell type region)`" s)

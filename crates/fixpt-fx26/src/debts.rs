@@ -128,6 +128,9 @@ impl Walk<'_> {
         }
         Some(match name {
             "error" => Debt::Stated,
+            // An index the facts showed within its array's length
+            // (`NodeFacts::in_bounds`, `TODO.md` §77).
+            "array-ref" | "array-set!" if self.c.facts.in_bounds.contains(&e) => Debt::Discharged,
             "car" | "cdr" => {
                 let ty = self.c.facts.operand_types.get(&e).and_then(|ts| ts.first().copied().flatten());
                 let pair = ty.is_some_and(|t| matches!(self.c.arena.get(self.c.arena.resolve(t)), Ty::Pair(_, _, _, false)));

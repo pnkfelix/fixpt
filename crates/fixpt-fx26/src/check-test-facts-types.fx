@@ -8,6 +8,7 @@
 (define-type k-props (select check-types-types k-props))
 (define-type k-size (select check-types-types k-size))
 (define-type kxs (select check-types-types kxs))
+(define-type k-te (select check-types-types k-te))
 (hide (define check-print-types (load-module "fx26:check-print-types.fx")))
 (define-type k-size-fact (select check-print-types k-size-fact))
 ;; What a test shows when it holds, and when not.
@@ -47,6 +48,10 @@
             (val k-latent-props
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (kx) k-latent))
             (val k-arg-at (subr (read @globals) (kxs int) kxs))
+            (val k-sized
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (kx k-te)
+                       k-te))
             (val k-latent-cert
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (kx int) k-named))
             (val k-length-test

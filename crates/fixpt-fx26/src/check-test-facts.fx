@@ -60,6 +60,13 @@
       (x-var (v a b)
         (let ((t (k-lookup v)))
           (if (< t 0) nil (k-nat-ty-size t))))
+      ;; A variable's array's length (`TODO.md` §77): its size, where known.
+      (x-app (f args a b)
+        (if (and (string=? (k-std-op f) "array-length") (= (k-length args) 1))
+            (tagcase (car args)
+              (x-var (v va vb) (let ((t (k-lookup v))) (if (< t 0) nil (k-array-size t))))
+              (else y nil))
+            nil))
       ;; A variable's flat array's length (`TODO.md` §77): its size, where it
       ;; is one array's, not `finite`.
       (x-bloblet (o i xs a b)
@@ -69,6 +76,40 @@
               (else y nil))
             nil))
       (else y nil))))
+;; The length of an array of type `t`, where it is not `finite` (none or
+;; one).
+(define k-array-size (subr (maxeff kreads spin) (int) k-maybe-size)
+  (lambda (t)
+    (tagcase (k-get (k-resolve t))
+      (ty-array (e z r) (tagcase z (sz-finite () nil) (else y (k-one-size z))))
+      (else y nil))))
+;; Call `op` on `args`, its type and effect `te`, as arrays' lengths say
+;; (`Checker::array_sized`): a `make-array` of a natural's length is an
+;; array of that length.
+(define k-array-sized (subr (maxeff kstate spin) (string kxs k-te) k-te)
+  (lambda (op args te)
+    (cond ((and (string=? op "make-array") (= (k-length args) 2)) (k-array-of-length (car args) te))
+          ((and (string=? op "rmake-array") (= (k-length args) 3))
+           (k-array-of-length (car (cdr args)) te))
+          (else te))))
+(define k-array-of-length (subr (maxeff kstate spin) (kx k-te) k-te)
+  (lambda (n te)
+    (let ((z (k-nat-size n)))
+      (if (null? z)
+          te
+          (tagcase (k-get (k-resolve (extract te 1)))
+            (ty-array (e nz r)
+              (tagcase nz
+                (sz-finite () (k-te (k-ty-new (ty-array e (car z) r)) (extract te 2)))
+                (else y te)))
+            (else y te))))))
+;; `x`, of type and effect `te`, as arrays' lengths say, if a call; of a
+;; call, and of `(the t x)`, which keeps a `make-array`'s length.
+(define k-sized (subr (maxeff kstate spin) (kx k-te) k-te)
+  (lambda (x te)
+    (tagcase x
+      (x-app (f args a b) (k-array-sized (k-std-op f) args te))
+      (else y te))))
 ;; The length of the flat array a blobref of type `t` points to (generative
 ;; types 5 and 6), where it is one array's, not `finite` (none or one).
 (define k-blobref-array-size (subr (maxeff kreads spin) (int) k-maybe-size)

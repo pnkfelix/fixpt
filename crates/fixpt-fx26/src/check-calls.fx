@@ -55,7 +55,7 @@
                    (ty-tag (a h e r) (or (k-cyclic-from? a #f p) (k-cyclic-from? h #f p)))
                    (ty-poly (bs x) (k-cyclic-from? x #f p))
                    (ty-ref (a r) (k-cyclic-from? a #f p))
-                   (ty-array (a r) (k-cyclic-from? a #f p))
+                   (ty-array (a nz r) (k-cyclic-from? a #f p))
                    (ty-icell (a r) (k-cyclic-from? a #f p))
                    (ty-markkey (a r) (k-cyclic-from? a #f p))
                    (ty-pair (a b r nl) (or (k-cyclic-from? a #f p) (k-cyclic-from? b #f p)))

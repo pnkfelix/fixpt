@@ -69,7 +69,7 @@
                   (ty-subr (e ps r cv) (begin (eff e at) (gos ps (k-flip at)) (go r at)))
                   (ty-poly (bs body) (go body at))
                   (ty-ref (a r) (begin (reg r) (go a 2)))
-                  (ty-array (a r) (begin (reg r) (go a 2)))
+                  (ty-array (a nz r) (begin (reg r) (go a 2)))
                   (ty-icell (a r) (begin (reg r) (go a 2)))
                   (ty-markkey (a r) (begin (reg r) (go a 2)))
                   (ty-pair (a b r nl)

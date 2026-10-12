@@ -158,7 +158,11 @@
         (ty-ref (a r) (k-show-in-region "(ref " a r p st))
         (ty-product (ps) (k-put ")" (k-show-parts ps p (k-put "(productof" st))))
         (ty-sum (ps) (k-put ")" (k-show-parts ps p (k-put "(sumof" st))))
-        (ty-array (a r) (k-show-in-region "(arrayof " a r p st))
+        (ty-array (a nz r)
+          (tagcase nz
+            (sz-finite () (k-show-in-region "(arrayof " a r p st))
+            (else y (k-put (k-cat5 " " (k-show-size nz) " " (k-region-show r) ")")
+                           (k-show-on a p (k-put "(narrayof " st))))))
         (ty-icell (a r) (k-show-in-region "(icell " a r p st))
         (ty-place (r) (k-put (k-cat3 "(place " (k-region-show r) ")") st))
         (ty-pair (a b r nl)

@@ -220,7 +220,8 @@
                 (ty-union (ys) (and (= (k-length xs) (k-length ys)) (k-match-list l xs ys m seen)))
                 (else z (same))))
             (ty-ref (x r) (tagcase tt (ty-ref (y q) (and (mr r q) (mt x y))) (else z (same))))
-            (ty-array (x r) (tagcase tt (ty-array (y q) (and (mr r q) (mt x y))) (else z (same))))
+            (ty-array (x nz r)
+              (tagcase tt (ty-array (y nz q) (and (mr r q) (mt x y))) (else z (same))))
             (ty-icell (x r) (tagcase tt (ty-icell (y q) (and (mr r q) (mt x y))) (else z (same))))
             (ty-product (ps)
               (tagcase tt (ty-product (qs) (k-match-parts l ps qs m seen)) (else z (same))))
@@ -377,9 +378,13 @@
               (tagcase tb
                 (ty-ref (y s) (and (k-benv-region=? r s ea eb) (k-inv x y ea eb trail labels)))
                 (else z #f)))
-            (ty-array (x r)
+            ;; An array's length never changes, so it may be forgotten, as a
+            ;; `nlist`'s is.
+            (ty-array (x m r)
               (tagcase tb
-                (ty-array (y s) (and (k-benv-region=? r s ea eb) (k-inv x y ea eb trail labels)))
+                (ty-array (y n s)
+                  (and (k-benv-region=? r s ea eb) (k-size-le? m n)
+                       (k-inv x y ea eb trail labels)))
                 (else z #f)))
             (ty-icell (x r)
               (tagcase tb

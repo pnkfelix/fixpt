@@ -105,7 +105,8 @@ fn symbols_are_values() {
 
 #[test]
 fn arrays_are_bloblets_indexed_at_run_time() {
-    assert_eq!(check("(the (arrayof int @r) (make-array 3 0))"), "(arrayof int @r) ! (alloc @r)");
+    // Its length kept, from `make-array`'s (`TODO.md` §77, N5c).
+    assert_eq!(check("(the (arrayof int @r) (make-array 3 0))"), "(narrayof int 3 @r) ! (alloc @r)");
     let a = "(define a (arrayof string @r) (make-array 2 \"\"))";
     assert_eq!(check(&format!("{a} (array-ref a 1)")), "string ! (maxeff (read @r) (read (globals a)))");
     assert_eq!(check(&format!("{a} (array-set! a 0 \"x\")")), "unit ! (maxeff (write @r) (read (globals a)))");

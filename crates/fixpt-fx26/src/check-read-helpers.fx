@@ -57,9 +57,9 @@
 ;; The heads of the type forms a type is read from, and every keyword: no
 ;; parameter's name.
 (define k-type-forms k-names
-  (list 'arrayof 'bloblet 'composable 'dletrec 'icell 'listof 'mark-key 'moduleof 'mu 'nat 'nlist
-        'pairof 'place 'poly 'productof 'prompt-tag 'proves 'ref 'select 'subr 'sumof 'bool
-        'union))
+  (list 'arrayof 'narrayof 'bloblet 'composable 'dletrec 'icell 'listof 'mark-key 'moduleof 'mu
+        'nat 'nlist 'pairof 'place 'poly 'productof 'prompt-tag 'proves 'ref 'select 'subr 'sumof
+        'bool 'union))
 ;; Whether `hd` heads a type form: not a name a `with` shadows.
 (define k-type-form? (subr (maxeff (read @globals) (read @t)) (symbol) bool)
   (lambda (hd) (k-has-name? k-type-forms hd)))
@@ -157,7 +157,7 @@
            (r (r-var (if (null? (cdr (cdr bs))) second (extract (car (cdr (cdr bs))) 1)))))
       (case n (("ref") (k-ty-new (ty-ref t r)))
               (("icell") (k-ty-new (ty-icell t r)))
-              (("arrayof") (k-ty-new (ty-array t r)))
+              (("arrayof") (k-ty-new (ty-array t (sz-finite) r)))
               (("mark-key") (k-ty-new (ty-markkey t r)))
               (("pairof") (k-ty-new (ty-pair t (k-ty-new (ty-var second)) r #f)))
               (else (let* ((slot (k-slot)) (pair (k-ty-new (ty-pair t slot r #t))))
@@ -305,7 +305,7 @@
       (ty-subr (e ps r cv) (k-ids-then ps r))
       (ty-poly (bs x) (the k-ids (cons x nil)))
       (ty-ref (a r) (the k-ids (cons a nil)))
-      (ty-array (a r) (the k-ids (cons a nil)))
+      (ty-array (a nz r) (the k-ids (cons a nil)))
       (ty-icell (a r) (the k-ids (cons a nil)))
       (ty-markkey (a r) (the k-ids (cons a nil)))
       (ty-pair (a d r nl) (k-ids-then (the k-ids (cons a nil)) d))

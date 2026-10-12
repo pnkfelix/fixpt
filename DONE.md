@@ -1929,3 +1929,21 @@ Nothing caught it: the only test that ran `knot-spin.fx` natively was
 `a_redefinition_breaking_what_it_calls_natively` (`tests/redefine.rs`,
 which fails without the fix).
 
+**Heap arrays' lengths: `narrayof`** (2026-10-12, N5c's part of §77, the
+user's offer): `(narrayof T n R)`, an array of `n` elements;
+`(arrayof T R)` is one of length `finite`. `Ty::Array` and FX's
+`ty-array` carry the length: subtyping forgets it (`size_le`), inference
+unifies it, substitution, printing, the polarity walk (F8) and F4's rule
+(one parameter's own length may be `finite`) know it, in both checkers.
+`array-length` is `(narrayof t n r) → (nat n)`; a `make-array` or
+`rmake-array` of a natural's size is an array of that size, kept by
+`the` (`Checker::array_sized`, FX `k-sized`); a variable bound to an
+array of a length not known is given its own (`name_nat`,
+`k-name-nat`); `(array-length a)` is a natural's size (`nat_size`,
+`k-nat-size`). An `array-ref`/`array-set!` of a variable's array whose
+index the facts show below its length is recorded in bounds, and the
+debts tool counts it discharged: in the ports, 34 of 732 (31 writes, 3
+reads; none before). Tests: `sizes/narrayof-lengths.fx`,
+`narrayof-wrong-length.fx`, `narrayof-not-known.fx`,
+`narrayof-escapes.fx`.
+

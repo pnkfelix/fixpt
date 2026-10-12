@@ -413,7 +413,8 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("make-array", "(poly ((r region)) (poly ((t type)) (subr (alloc r) (int t) (arrayof t r))))"),
     ("array-ref", "(poly ((r region)) (poly ((t type)) (subr (read r) ((arrayof t r) int) t)))"),
     ("array-set!", "(poly ((r region)) (poly ((t type)) (subr (write r) ((arrayof t r) int t) unit)))"),
-    ("array-length", "(poly ((r region)) (poly ((t type)) (subr pure ((arrayof t r)) nat)))"),
+    // Its length, a `(nat n)` of an array's `n` (`TODO.md` §77, N5c).
+    ("array-length", "(poly ((r region)) (poly ((t type) (n size)) (subr pure ((narrayof t n r)) (nat n))))"),
     // I-cells: written once, read after (docs/research/recursion-and-initialization.md).
     // A read waits for the write, so it is ordered after writes to the
     // region (`await`), but not after other reads.

@@ -225,8 +225,10 @@ weighed with the other items, not ahead of them.
   shapes 214.9 → 10.5 ms; an index key's tag and variant too); flat
   arrays of a length not literal (2026-10-12: a size variable, running to
   the end of the suffix), `blobref-length`, and indexes shown in bounds by
-  N5c's facts, their debts discharged. Next: a wider index key; leaving
-  out a proved index's check natively, only if measured worth it.
+  N5c's facts, their debts discharged; a new blobref's flat checked whole
+  in the suffix; heap arrays' lengths (`narrayof`). Next (agreed with the
+  user): leaving out a proved index's check and a read's header lookup
+  natively, disassembled and timed first; a wider index key.
   Done (2026-10-12, kayak's request): I/O, `DONE.md` §84, a fixed family
   of `(io k)` effects under one ordering rule (the user's); `u8`, `i8`
   and bytevectors; the terminal, files, the clock, the arguments; `main`

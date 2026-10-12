@@ -328,7 +328,8 @@ impl Checker {
                     parts.iter().map(|(l, x)| format!(" ({} {})", self.interner.name(*l), self.show_ty_on(*x, path))).collect();
                 format!("({head}{})", ps.concat())
             }
-            Ty::Array(a, r) => format!("(arrayof {} {})", self.show_ty_on(a, path), self.show_region(r)),
+            Ty::Array(a, crate::ast::Size::Finite, r) => format!("(arrayof {} {})", self.show_ty_on(a, path), self.show_region(r)),
+            Ty::Array(a, n, r) => format!("(narrayof {} {} {})", self.show_ty_on(a, path), self.show_size(&n), self.show_region(r)),
             Ty::ICell(a, r) => format!("(icell {} {})", self.show_ty_on(a, path), self.show_region(r)),
             Ty::Place(r) => format!("(place {})", self.show_region(r)),
             Ty::Nat(crate::ast::Size::Finite) => "nat".to_string(),

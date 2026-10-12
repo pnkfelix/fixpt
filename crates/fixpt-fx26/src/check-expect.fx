@@ -181,6 +181,14 @@
             (let ((v (k-new-dvar-of name 5)))
               (begin (set k-skolems (cons v (get k-skolems))) (k-ty-new (ty-nat (k-size-var v))))))
           (else w t)))
+      ;; An array of a length not known, likewise (`TODO.md` §77).
+      (ty-array (e z r)
+        (tagcase z
+          (sz-finite ()
+            (let ((v (k-new-dvar-of name 5)))
+              (begin (set k-skolems (cons v (get k-skolems)))
+                     (k-ty-new (ty-array e (k-size-var v) r)))))
+          (else w t)))
       (else y t))))
 ;; Bind each, the first first, a `nat` of no known size given one.
 (define k-bind-named (subr (maxeff kstate spin) (k-bindings) unit)

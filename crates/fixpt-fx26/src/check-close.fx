@@ -111,7 +111,7 @@
                 (or (k-eff-writes-noting? e r) (k-writes-in a r seen) (k-writes-in b r seen)))
               (ty-poly (bs body) (k-writes-in body r seen))
               (ty-ref (a x) (k-writes-in a r seen))
-              (ty-array (a x) (k-writes-in a r seen))
+              (ty-array (a nz x) (k-writes-in a r seen))
               (ty-icell (a x) (k-writes-in a r seen))
               (ty-markkey (a x) (k-writes-in a r seen))
               (ty-pair (a b x nl) (or (k-writes-in a r seen) (k-writes-in b r seen)))

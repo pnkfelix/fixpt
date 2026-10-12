@@ -389,9 +389,10 @@ pub enum Ty {
     /// FX-91's `(sumof (tag T) …)`: an immutable tagged union; at run time
     /// a frozen bloblet of the tag, as a symbol, and the value.
     Sum(Vec<(Sym, TyId)>),
-    /// `(arrayof T R)`: a bloblet in region `R` with any number of fields,
-    /// all of type `T`, read and written by index.
-    Array(TyId, Region),
+    /// `(narrayof T N R)`: a bloblet in region `R` with `N` fields, all of
+    /// type `T`, read and written by index; `(arrayof T R)` is one of
+    /// length `finite`, any (`TODO.md` §77, N5c).
+    Array(TyId, Size, Region),
     /// `(icell T R)`: an I-cell in region `R` (Arvind's I-structures): empty
     /// until its one write of a `T`, and never changed after.
     ICell(TyId, Region),

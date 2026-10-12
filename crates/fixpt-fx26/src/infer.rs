@@ -514,6 +514,7 @@ impl Checker {
     /// that is known; it helps solve the operator's binders.
     pub(crate) fn synth_app(&mut self, e: ExpId, fun: ExpId, args: &[ExpId], expected: Option<TyId>) -> R<(TyId, Effect)> {
         let (t, eff) = self.synth_app_of(e, fun, args, expected)?;
+        let t = self.array_sized(e, fun, args, t);
         // A path a fact in force narrows (`(car x)` …), its type there.
         let t = self.path_typed(e, t);
         // A test's call is a `bool`: what the test's type says it proves is
@@ -880,7 +881,7 @@ impl Checker {
                 Ty::Composable { arg, answer, .. } => vec![(*arg, true), (*answer, false)],
                 Ty::PromptTag { answer, payload, .. } => vec![(*answer, false), (*payload, false)],
                 Ty::Poly { body, .. } => vec![(*body, false)],
-                Ty::Ref(a, _) | Ty::Array(a, _) | Ty::ICell(a, _) | Ty::MarkKey(a, _) => vec![(*a, false)],
+                Ty::Ref(a, _) | Ty::Array(a, _, _) | Ty::ICell(a, _) | Ty::MarkKey(a, _) => vec![(*a, false)],
                 Ty::Pair(a, b, _, _) => vec![(*a, false), (*b, false)],
                 Ty::Bloblet { fields, .. } => fields.iter().map(|f| (*f, false)).collect(),
                 Ty::Product(ps) | Ty::Sum(ps) => ps.iter().map(|(_, t)| (*t, false)).collect(),
@@ -1537,9 +1538,13 @@ impl Checker {
                     stack.push(body);
                     false
                 }
-                Ty::Ref(x, r) | Ty::MarkKey(x, r) | Ty::Array(x, r) | Ty::ICell(x, r) => {
+                Ty::Ref(x, r) | Ty::MarkKey(x, r) | Ty::ICell(x, r) => {
                     stack.push(x);
                     region(r)
+                }
+                Ty::Array(x, size, r) => {
+                    stack.push(x);
+                    region(r) || matches!(&size, Size::Lin { terms, .. } if terms.iter().any(|(v, _)| open(*v)))
                 }
                 Ty::Place(r) => region(r),
                 Ty::Pair(x, y, r, _) => {
@@ -1666,7 +1671,7 @@ impl Checker {
                 params.iter().any(|p| self.walk_vars(*p, seen, hit)) || self.walk_vars(result, seen, hit)
             }
             Ty::Poly { body, .. } => self.walk_vars(body, seen, hit),
-            Ty::Ref(a, _) | Ty::MarkKey(a, _) | Ty::Array(a, _) | Ty::ICell(a, _) => self.walk_vars(a, seen, hit),
+            Ty::Ref(a, _) | Ty::MarkKey(a, _) | Ty::Array(a, _, _) | Ty::ICell(a, _) => self.walk_vars(a, seen, hit),
             Ty::Bloblet { fields, .. } => fields.iter().any(|f| self.walk_vars(*f, seen, hit)),
             Ty::Product(parts) | Ty::Sum(parts) => parts.iter().any(|(_, t)| self.walk_vars(*t, seen, hit)),
             Ty::Union(ms) => ms.iter().any(|t| self.walk_vars(*t, seen, hit)),
@@ -1763,7 +1768,6 @@ impl Checker {
             // Mutable, so invariant, as a pair's contents are: what it meets.
             (Ty::Ref(x, r), Ty::Ref(y, s))
             | (Ty::MarkKey(x, r), Ty::MarkKey(y, s))
-            | (Ty::Array(x, r), Ty::Array(y, s))
             | (Ty::ICell(x, r), Ty::ICell(y, s)) => {
                 self.unify_region(r, s, u);
                 let outer = std::mem::replace(&mut self.unify_exact, true);
@@ -1824,6 +1828,13 @@ impl Checker {
                 self.unify_size(&m, &n, u);
             }
             (Ty::Nat(m), Ty::Nat(n)) => self.unify_size(&m, &n, u),
+            (Ty::Array(x, m, r), Ty::Array(y, n, s)) => {
+                self.unify_region(r, s, u);
+                let outer = std::mem::replace(&mut self.unify_exact, true);
+                self.unify(x, y, u, trail);
+                self.unify_exact = outer;
+                self.unify_size(&m, &n, u);
+            }
             // A list at `acyclic` is a `nlist` of some length (`Checker::sub`),
             // so `length` takes one (kayak's, 2026-10-11).
             (Ty::NList { elem: x, size: m, region: r }, Ty::Pair(y, _, s, _)) if matches!(s, Region::Frozen(_, true)) => {

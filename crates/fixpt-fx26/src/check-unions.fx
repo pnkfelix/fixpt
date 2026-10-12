@@ -73,7 +73,7 @@
         (ty-subr (e ps r cv) 512)
         (ty-comp (a h e r) 512)
         ;; An array is a bloblet as `(bloblet …)` is, of the same kind.
-        (ty-array (a r) 1024)
+        (ty-array (a nz r) 1024)
         (ty-bloblet (fs z r) 1024)
         (ty-ref (a r) 2048)
         (ty-sum (ps) 4096)

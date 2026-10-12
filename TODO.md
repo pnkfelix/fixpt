@@ -2023,10 +2023,12 @@ made (it is found only for the suffix's length; the address is the
 heap's base plus the owner times 8 plus the offset). Disassemble a proved
 loop, then time it both ways (the MLton ports too); the cost is that
 memory safety then rests on the checker's proof (kept checked under
-`--profile checked`), and the FX checker would record it too. Bounds for
-the heap's arrays, `(arrayof t r)`, which carry no length in their type
-(CF4); a non-last array of a length a `(nat n)` in scope gives (offsets
-after it computed from `n`), waiting on a need.
+`--profile checked`), and the FX checker would record it too. Heap
+arrays' bounds are shown as flat ones' are (`narrayof`, `DONE.md` §77),
+34 of the ports' 732 indexes; more would need indexes counted as `nat`s,
+facts of a count down (`(>= i 0)` before `(- i 1)`), or arrays of arrays'
+lengths, each waiting on a need. A non-last array of a length a `(nat n)`
+in scope gives (offsets after it computed from `n`), waiting on a need.
 
 **Flat sums: their key** (the user's, 2026-10-10; the goal: a "flat
 world" with Rust's model of values, for apples-to-apples benchmarks).

@@ -219,6 +219,18 @@ impl Checker {
                 Ty::Nat(s) => Some(s.clone()),
                 _ => None,
             },
+            // A variable's array's length: its size, where it is known.
+            Exp::App { fun, args }
+                if self.standard_ref(*fun).is_some_and(|op| self.interner.name(op) == "array-length") =>
+            {
+                let [x] = args[..] else { return None };
+                let Exp::Var(v) = self.arena.exp_at(x) else { return None };
+                match self.arena.get(self.arena.resolve(self.lookup(*v)?)) {
+                    Ty::Array(_, Size::Finite, _) => None,
+                    Ty::Array(_, n, _) => Some(n.clone()),
+                    _ => None,
+                }
+            }
             // A variable's flat array's length (`TODO.md` §77): its size,
             // where it is one array's, not `finite`.
             Exp::Bloblet { op: crate::ast::BlobletOp::RefLength, args } => {
@@ -327,6 +339,34 @@ impl Checker {
     /// `(+ a b)` and `(- a b)` of naturals: a natural of the sum, and of the
     /// difference where the facts show it no less than 0. `None` for any
     /// other call, which is then an ordinary one.
+    /// Call `e` of `fun` on `args`, of type `t`, as arrays' lengths say
+    /// (`TODO.md` §77, N5c): a `make-array` of a natural's length is an
+    /// array of that length; an `array-ref` or `array-set!` whose index the
+    /// facts show below its array's length is recorded in bounds.
+    pub(crate) fn array_sized(&mut self, e: ExpId, fun: ExpId, args: &[ExpId], t: TyId) -> TyId {
+        let Some(op) = self.standard_ref(fun) else { return t };
+        let length = match (self.interner.name(op), args) {
+            ("make-array", [n, _]) | ("rmake-array", [_, n, _]) => *n,
+            ("array-ref", [a, i]) | ("array-set!", [a, i, _]) => {
+                let n = match self.arena.exp_at(*a) {
+                    Exp::Var(v) => self.lookup(*v).map(|t| self.arena.get(self.arena.resolve(t)).clone()),
+                    _ => None,
+                };
+                if let (Some(Ty::Array(_, n @ Size::Lin { .. }, _)), Some(i)) = (n, self.nat_size(*i))
+                    && self.size_nonneg(&n.add_scaled(&i.plus(1), -1))
+                {
+                    self.facts.in_bounds.insert(e);
+                }
+                return t;
+            }
+            _ => return t,
+        };
+        match (self.arena.get(self.arena.resolve(t)).clone(), self.nat_size(length)) {
+            (Ty::Array(x, Size::Finite, r), Some(n)) => self.arena.ty(Ty::Array(x, n, r)),
+            _ => t,
+        }
+    }
+
     pub(crate) fn nat_arith(&self, op: &str, a: &Size, b: &Size) -> Option<Size> {
         match op {
             "+" => Some(a.add_scaled(b, 1)),
@@ -396,6 +436,12 @@ impl Checker {
                         Ty::NList { elem, size, .. } if alone(&size) => {
                             top += 1;
                             self.size_walk(elem, Polarity::Neg, v, &mut bad, &mut seen);
+                        }
+                        // An array's own length, likewise; its elements,
+                        // mutable, both ways.
+                        Ty::Array(elem, size, _) if alone(&size) => {
+                            top += 1;
+                            self.size_walk(elem, Polarity::Inv, v, &mut bad, &mut seen);
                         }
                         _ => self.size_walk(p, Polarity::Neg, v, &mut bad, &mut seen),
                     }
@@ -500,7 +546,12 @@ impl Checker {
                     self.size_walk(x, pol, v, bad, seen);
                 }
             }
-            Ty::Ref(x, _) | Ty::Array(x, _) | Ty::ICell(x, _) | Ty::MarkKey(x, _) => self.size_walk(x, Polarity::Inv, v, bad, seen),
+            Ty::Ref(x, _) | Ty::ICell(x, _) | Ty::MarkKey(x, _) => self.size_walk(x, Polarity::Inv, v, bad, seen),
+            // Its length, as a `nlist`'s; its elements, mutable, both ways.
+            Ty::Array(x, s, _) => {
+                size(&s, pol, bad);
+                self.size_walk(x, Polarity::Inv, v, bad, seen);
+            }
             Ty::PromptTag { answer: x, payload: y, .. } | Ty::Composable { arg: x, answer: y, .. } => {
                 self.size_walk(x, Polarity::Inv, v, bad, seen);
                 self.size_walk(y, Polarity::Inv, v, bad, seen);
@@ -527,6 +578,13 @@ impl Checker {
             self.skolems.push(v);
             let f = self.with_unsized_length(f, Size::var(v));
             return self.blobref_of(b, f);
+        }
+        // An array of a length not known, likewise (`TODO.md` §77): its
+        // length never changes.
+        if let Ty::Array(x, Size::Finite, r) = self.arena.get(self.arena.resolve(t)).clone() {
+            let v = self.arena.dvar_of(name, Kind::Size);
+            self.skolems.push(v);
+            return self.arena.ty(Ty::Array(x, Size::var(v), r));
         }
         if !matches!(self.arena.get(self.arena.resolve(t)), Ty::Nat(Size::Finite)) {
             return t;

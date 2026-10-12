@@ -60,7 +60,7 @@ pub enum FamilyArg {
 const ABS_CTOR_USAGE: &str = "an abstract type constructor is `(abs (f (name kind) …) type)`";
 
 const TYPE_FORMS: &[&str] = &[
-    "arrayof", "bloblet", "composable", "dletrec", "icell", "listof", "mark-key", "moduleof", "mu", "nat", "nlist", "pairof", "place",
+    "arrayof", "narrayof", "bloblet", "composable", "dletrec", "icell", "listof", "mark-key", "moduleof", "mu", "nat", "nlist", "pairof", "place",
     "poly", "productof", "prompt-tag", "proves", "ref", "select", "subr", "sumof", "bool", "union",
 ];
 
@@ -797,7 +797,17 @@ impl Checker {
                 }
                 let t = self.parse_type(t)?;
                 let r = self.parse_region(r)?;
-                Ok(self.arena.ty(Ty::Array(t, r)))
+                Ok(self.arena.ty(Ty::Array(t, Size::Finite, r)))
+            }
+            // `(narrayof type size region)`: an array of `size` elements.
+            "narrayof" => {
+                let [_, t, n, r] = &items[..] else {
+                    return Err(FxError::at(s.span, "`(narrayof type size region)`"));
+                };
+                let t = self.parse_type(t)?;
+                let n = self.parse_size(n)?;
+                let r = self.parse_region(r)?;
+                Ok(self.arena.ty(Ty::Array(t, n, r)))
             }
             "mark-key" => {
                 let [_, t, r] = &items[..] else {
