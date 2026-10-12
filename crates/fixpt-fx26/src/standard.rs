@@ -197,6 +197,8 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("exit", "(subr (io exit) (int) void)"),
     // Files: a path as the working directory resolves it; what is read made
     // at a region; a file replaced whole, atomically.
+    // A line of the standard input, its ending left off; or its end.
+    ("read-line", "(subr (io stdin) () (sumof (line string) (eof unit) (failed io-error)))"),
     // The clock: monotonic nanoseconds since the run began, and a sleep
     // until a time on it. The program's own arguments.
     ("clock", "(subr (io clock) () i64)"),

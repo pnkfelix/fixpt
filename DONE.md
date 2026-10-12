@@ -1719,10 +1719,12 @@ phases, are left alone. These seven are the only run-table names the
 history has. Over the whole log (517 commits), each machine is one series
 of 517 commits, one sheet and its two charts. The script is in git now.
 
-## 84. I/O, stage 1: `u8`, `i8` and bytevectors (kayak's request, 2026-10-12)
+## 84. I/O: bytes, the `io` effects, files, the clock, the arguments, the standard input (kayak's request, 2026-10-12)
 
-What is left, stages 2 to 5 (the `io` effects and the primitives), is in
-`TODO.md` §84.
+In five stages, each in both checkers, both compilers, every machine and
+the evaluator written in FX-26. What is left is in `TODO.md` §84.
+
+**Stage 1: `u8`, `i8` and bytevectors.**
 
 **`u8` and `i8`**, the fixed-width table as `i32` and `u32` have it
 (`u8+` to `u8->int`, 18 operations each), fixnum-shaped: the runtime's
@@ -1775,4 +1777,12 @@ what follows `--` in `fixpt run FILE… -- ARG…`. On every machine and in
 the evaluator written in FX-26. Tests: `tests/programs/io/` (both
 checkers), `fixpt-cli/tests/io.rs` (five machines, each in a directory
 of its own for the files).
+
+**Stage 5: the standard input** (2026-10-12). `read-line`, `(io
+stdin)`: the next line with its ending (`\n` or `\r\n`) left off, the
+last one even with none, then `eof`; a line not UTF-8 an `invalid-data`
+failure, reading going on after it. The `World` reads the process's
+standard input, or bytes a test gives. Tests: `tests/programs/io/io-stdin.fx`,
+`fixpt-cli/tests/io.rs`'s `the_standard_input_read_by_lines` (five
+machines).
 

@@ -178,6 +178,7 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("write-out", "%fx26-write-out", true),
     ("write-err", "%fx26-write-err", true),
     ("exit", "%fx26-exit", true),
+    ("read-line", "%fx26-read-line", true),
     ("clock", "%fx26-clock", true),
     ("sleep-until", "%fx26-sleep-until", true),
     ("args", "%fx26-args", true),

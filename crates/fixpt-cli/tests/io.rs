@@ -111,3 +111,25 @@ fn arguments_and_the_clock() {
         assert_eq!((out.status.code(), stdout.as_ref()), (Some(0), "one;two words;;"), "{m}: {stderr}");
     }
 }
+
+/// The standard input, a line at a time: a `\r\n` ending left off as a
+/// `\n` is, a line not UTF-8 a failure the program goes on from, the last
+/// line with no ending, then the end.
+#[test]
+fn the_standard_input_read_by_lines() {
+    use std::io::Write as _;
+    let path = format!("{}/tests/programs/io/echo.fx", env!("CARGO_MANIFEST_DIR"));
+    for m in MACHINES {
+        let mut child = Command::new(FIXPT)
+            .args(["--fx26-machine", m, "run", &path])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("fixpt runs");
+        child.stdin.take().expect("piped").write_all(b"one\r\ntwo\n\xff\xfe\nlast").expect("written");
+        let out = child.wait_with_output().expect("ends");
+        let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert_eq!((out.status.code(), stdout.as_ref()), (Some(4), "0: one\n1: two\n2: bad\n3: last\n"), "{m}: {stderr}");
+    }
+}

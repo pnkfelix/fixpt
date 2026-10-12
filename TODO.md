@@ -2259,69 +2259,25 @@ size.
 the first test programs (refused today, accepted after, both checkers
 agreeing), then the variant's result type in both parsers.
 
-## 84. I/O: files, the terminal, the clock and arguments, with bytes (kayak's request, 2026-10-12)
+## 84. I/O: what is left (kayak's request, 2026-10-12)
 
-kayak asked for FX-26 programs to do I/O through primitives, each with an
-effect from a fixed family, so a type shows which procedures touch the
-world and how; and, since files are bytes, for `u8`, `i8` and
-bytevectors as a full type. They will build simulation, recording and
-replay themselves, as FX-26 libraries. Later members of the family:
-subprocesses, sockets, signals, terminal modes.
-
-**Decided with the user (2026-10-12):**
-- **The effects.** A new atom, `(io k)`, `k` one of a fixed family:
-  `stdin`, `stdout`, `stderr`, `fs-read`, `fs-write`, `clock`, `args`,
-  and `exit`. They combine with `maxeff` and appear in `subr` types as
-  other atoms do. **One ordering rule for all I/O:** no two `io` effects
-  commute, and none is dropped, merged or moved, whatever their kinds (a
-  `write-err` must not pass an earlier `write-out` on a terminal, nor a
-  `read-file` an earlier `write-file`). The kinds are for reading types
-  and for licences, not for the optimizer. As `spin`, an `io` atom has no
-  region, so nothing masks it; the REPL's speculation licence refuses
-  every one. `(io args)` is an effect though the arguments do not change
-  in a run: what it gives depends on the world.
-- **Exit status.** If the entry procedure returns an integer, its low
-  byte is the status, else 0. An uncaught trap or `error` exits with 70
-  (`EX_SOFTWARE`), its message on stderr. `(exit n)`, of effect `(io
-  exit)` and result `void`, ends the program early. `fixpt run` needs an
-  FX-26 entry point for this (a `main`); today it runs a file's forms.
-
-**Proposed in the reply to kayak (theirs to confirm):**
-- Primitives that allocate (`read-file`, `list-dir`, `read-line`,
-  `utf8->string`) take a region binder and say `(alloc r)`, as
-  `make-flatarray` does, not `@heap` implicitly.
-- `io-error`'s kind a sum, `(sumof (not-found unit) (permission unit)
-  (exists unit) … (other string))`, not a string, so a `tagcase` is
-  checked exhaustive.
-- Bytes not valid UTF-8 from `read-line` or in `list-dir`'s names: a
-  failure of their own kind. `list-dir` sorts by bytes.
-- Bytevectors are the heap's existing bytevector object, typed
-  `(bytevector r)` at a region as arrays are, written by
-  `bytevector-u8-set!` with `(write r)` (no builder type). Not a flat
-  array of `u8` (§77), which would need `u8` among the flat layouts and
-  would not be what the reader makes.
-- Parts of their message were cut off (`write-out`'s and `read-file`'s
-  results, `write-file`, `bytevector-copy`, `utf8->string`'s failure):
-  asked for the full text.
-
-**Stages**, each in both checkers, both compilers, every machine
-(native call-outs too) and the evaluator written in FX-26. Stage 1, `u8`,
-`i8` and bytevectors, is built (`DONE.md` §84); left of it: a bytevector
-in a place (`rmake-bytevector`), the operations in line natively, and a
-quoted bytevector, still refused (a reader's is the opaque `bytevector`,
-not a `bytevectorof`).
-2. Built (`DONE.md` §84): the `io` atom, `write-out`, `write-err`,
-   `exit`, `main` and the exit status.
-3. and 4. Built (`DONE.md` §84): files, the clock, the arguments.
-5. `read-line`: `(subr (io stdin) () (sumof (line string) (eof unit)
-   (failed io-error)))`, bytes not UTF-8 a failure of kind
-   `invalid-data`. The `World` reads the process's standard input, or a
-   test's bytes.
-
-**Where to start:** stage 5, as stage 2's `write-out` was made: a
-runtime primitive reading `fixpt_runtime::world`, the standard type, the
-lowering's name, the evaluator's `ev-io-prims!`; then a test in
-`fixpt-cli/tests/io.rs` that gives the program its standard input.
+All five stages are built (`DONE.md` §84): `u8`, `i8` and bytevectors;
+the `io` effects under one ordering rule, `write-out`, `write-err`,
+`exit`, `main` and the exit status; files; the clock and the arguments;
+the standard input. Left:
+- **kayak to confirm** what was proposed back to them and built so: the
+  allocating primitives taking a region; `io-error`'s kind a sum; bytes
+  not UTF-8 a failure of their own kind; bytevectors written in place
+  (no builder); and the lines cut off in their message, which were
+  filled in as R7RS has them (`bytevector-copy`'s start and end,
+  `bytevector-copy!`'s `to at from start end`).
+- **Bytevectors**: one in a place (`rmake-bytevector`); the operations in
+  line natively (each is a call of the runtime's primitive today); a
+  quoted bytevector, still refused (a reader's is the opaque
+  `bytevector`, not a `bytevectorof`).
+- **Later members of the family**, as kayak listed them: subprocesses,
+  sockets, signals, terminal modes; each a new kind of `(io k)` under
+  the same ordering rule.
 
 ## 85. Machines that disagree on a failure (found 2026-10-12)
 

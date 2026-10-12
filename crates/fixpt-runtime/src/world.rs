@@ -19,6 +19,9 @@ pub struct World {
     pub stdout: Vec<u8>,
     /// And to its standard error.
     pub stderr: Vec<u8>,
+    /// A captured world's standard input, and how much of it is read.
+    pub stdin: Vec<u8>,
+    pub stdin_at: usize,
     /// The program's command-line arguments, its own (not `fixpt`'s).
     pub args: Vec<String>,
     /// The status `exit` asked for, once it has: the run then stops, and
@@ -62,6 +65,42 @@ impl World {
                 err.flush()
             }
         }
+    }
+}
+
+/// What `read_line` found.
+pub enum Line {
+    Text(String),
+    Eof,
+}
+
+impl World {
+    /// The next line of the standard input, its ending (`\n` or `\r\n`)
+    /// left off; the last may have none. A line that is not UTF-8 is an
+    /// error of kind `invalid-data`, and is read all the same.
+    pub fn read_line(&mut self) -> std::io::Result<Line> {
+        use std::io::BufRead as _;
+        let mut bytes = Vec::new();
+        if self.captured {
+            let rest = &self.stdin[self.stdin_at..];
+            let n = rest.iter().position(|b| *b == b'\n').map_or(rest.len(), |i| i + 1);
+            bytes.extend_from_slice(&rest[..n]);
+            self.stdin_at += n;
+        } else {
+            std::io::stdin().lock().read_until(b'\n', &mut bytes)?;
+        }
+        if bytes.is_empty() {
+            return Ok(Line::Eof);
+        }
+        if bytes.last() == Some(&b'\n') {
+            bytes.pop();
+            if bytes.last() == Some(&b'\r') {
+                bytes.pop();
+            }
+        }
+        String::from_utf8(bytes)
+            .map(Line::Text)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("a line that is not UTF-8, from byte {}", e.utf8_error().valid_up_to())))
     }
 }
 

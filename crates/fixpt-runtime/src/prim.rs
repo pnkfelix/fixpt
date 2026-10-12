@@ -1262,6 +1262,17 @@ prims! {
         let r = crate::world::replace_file(&path, &bytes);
         Ok(fx26_io_result(rt, r))
     });
+    // The standard input (stage 5): a line, the end, or a failure.
+    "%fx26-read-line", 0, Some(0), simple!(|rt, _a| {
+        Ok(match rt.world.read_line() {
+            Ok(crate::world::Line::Text(s)) => {
+                let s = rt.heap.make_string(&s);
+                fx26_sum(rt, "line", s)
+            }
+            Ok(crate::world::Line::Eof) => fx26_sum(rt, "eof", Value::UNIT),
+            Err(e) => fx26_io_result(rt, Err(e)),
+        })
+    });
     // The clock (stage 4): monotonic nanoseconds since the run began; and
     // the program's own arguments, as `fixpt run … -- ARG…` gives them.
     "%fx26-clock", 0, Some(0), simple!(|rt, _a| Ok(exact_out(rt, crate::world::clock_ns() as i128)));

@@ -251,6 +251,7 @@
          (("bits->f32") "%fx26-bits->f32")
          (("write-out") "%fx26-write-out")
          (("write-err") "%fx26-write-err")
+         (("read-line") "%fx26-read-line")
          (("read-file") "%fx26-read-file")
          (("remainder") "%fx26-remainder")
          (("string<=?") "%fx26-string<=?")

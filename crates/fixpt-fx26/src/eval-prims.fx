@@ -328,6 +328,12 @@
       (prim! 'write-out (lambda (xs) (ev-io-result (write-out (as-str (ev-arg xs 0))))))
       (prim! 'write-err (lambda (xs) (ev-io-result (write-err (as-str (ev-arg xs 0))))))
       (prim! 'exit (lambda (xs) (exit (as-int (ev-arg xs 0)))))
+      (prim! 'read-line
+             (lambda (xs)
+               (tagcase (read-line)
+                 (line s (the val (o-sum 'line s)))
+                 (eof u (the val (o-sum 'eof the-unit)))
+                 (failed e (ev-io-failed e)))))
       (prim! 'clock (lambda (xs) (clock)))
       (prim! 'sleep-until
              (lambda (xs) (begin (sleep-until (int->i64 (as-int (ev-arg xs 0)))) the-unit)))
