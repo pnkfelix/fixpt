@@ -446,11 +446,6 @@ copy of the code per type.
   user.
 - Older items may still be done but unmarked; when one is found, mark it
   where it is written.
-- Known, in a test harness only: a session that runs the Rust front end
-  with a native runner checks a redefinition with the checker written in
-  FX-26's `check-more`, which rejects one that breaks a dependent where
-  the REPL breaks it with a note (`redefine/knot-spin.fx` in the report
-  `every_test_program_runs_natively_as_cellular`).
 
 **Contents** (the plan as it grew): §0 What this is; §1 Findings from the
 archive; §2 Architecture; §3 The core runtime; §4 The core Scheme engine;
@@ -2240,7 +2235,8 @@ ports' headers or `/private/tmp/claude-501/*` (to be moved into tests):
   `char-downcase` and the like are values in both compilers; `parse-int`
   is `parse-nat` (a natural number or -1; signed numbers are
   `parse-number`'s), and a radix past 2…36 fails instead of panicking.
-- A redefinition check in the harness-only session path (`knot-spin`).
+- Fixed (2026-10-12, `DONE.md` §90): a redefinition check in the native
+  convention's session path (`knot-spin`).
 
 **Q2. Integers**, in this order: (a) every path traps alike; (b) the
 fixed-width integers, wrapping; (c) a bignum library written in FX-26,
