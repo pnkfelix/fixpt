@@ -73,7 +73,7 @@ options:
                                  machine; nativecc: native procedures):
     fx-regs-rsjit-nativecc       the default, also `fast`: register code,
                                  compiled to arm64 by Rust (direct.rs); on
-                                 x86_64, fx-cells-rsjit-cellcc
+                                 x86_64, fx-regs-rsjit-cellcc
     rs-scheme-vm                 lowered to Scheme by Rust, on the bytecode VM
     fx-ast-eval                  the evaluator written in FX-26
     fx-cells-rsinterp            cellular words, interpreted by Rust
