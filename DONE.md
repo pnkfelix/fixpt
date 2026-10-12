@@ -1862,3 +1862,20 @@ Tests: `run/conditions.fx` (`(4 6 -1)` on every machine and in the
 evaluator); `docs/research/examples/conditions/library.fx` and
 `unhandled.fx`. Docs: `docs/research/conditions.md`, section 6b.
 
+**Flat arrays of a length not literal** (2026-10-12, with the user):
+`(arrayof F n)`, `n` a size, runs to the end of its owner's suffix. Both
+checkers: the flat readers take a size (and a type's `arrayof` is a flat
+array whenever its second part is written as a size); only a product's
+last part may be one, nor an array's element, nor a sum's variant (a
+named type read as a flat too, `flat_parts_wrong`); a new blobref may
+claim only `finite`; binding one names the length (`name_nat`,
+`k-name-nat`), forgotten where given back, refused where a caller would
+supply it (`size_walk`, `k-size-walk`); a size binder is solved from a
+generative type's size argument (`unify_ds`, `k-unify-descs`,
+`k-descs-open?`). `blobref-index` into one is told `FLAT_TO_THE_END`
+(`fixpt_heap::layout`), and the run time, native code (the whole element
+within the suffix) and the evaluator written in FX-26 bound it by the
+suffix. Tests: `bloblet/flat-unsized*.fx` (a record's samples summed,
+`10.0`, on every machine; five refusals),
+`bloblet-errors/flat-unsized-range.fx`. Docs: `docs/fx26.md`.
+

@@ -403,7 +403,12 @@
               (if (k-flat-scalar? sym) (k-ty-new (ty-base sym)) (k-sfail k-flat-usage s))
               (tagcase (car d)
                 (ds-var (v k) (if (= k 7) (k-ty-new (ty-var v)) (k-sfail k-flat-usage s)))
-                (ds-rec (t) (if (k-is-flat? t) t (k-sfail k-flat-usage s)))
+                ;; A type named, read as a flat: its parts as `productof` and
+                ;; `sumof` would have them (`TODO.md` §77).
+                (ds-rec (t)
+                  (if (k-is-flat? t)
+                      (let ((why (k-flat-parts-wrong t))) (if (string=? why "") t (k-sfail why s)))
+                      (k-sfail k-flat-usage s)))
                 (else x (k-sfail k-flat-usage s)))))
         (k-sfail k-flat-usage s)))))
 ;; A list's items, or none for what is no list (or an empty one).
@@ -415,16 +420,26 @@
   (lambda (s items)
     (let ((hd (if (syn-symbol? (car items)) (syn-name (car items)) "")))
       (cond ((string=? hd "productof")
-             (k-ty-new (ty-product (k-parse-flat-parts (cdr items) nil 0))))
+             (let* ((parts (k-parse-flat-parts (cdr items) nil 0))
+                    (bad (k-unsized-before-last parts (cdr items) nil)))
+               (if (null? bad)
+                   (k-ty-new (ty-product parts))
+                   (k-sfail (string-append "only a flat product's last part may be of a length not "
+                                           "known: it runs to the end of the suffix")
+                            (car bad)))))
             ((string=? hd "sumof") (k-parse-flat-sum (cdr items)))
+            ;; A length a literal; or a size, which runs to the end of the
+            ;; suffix (`TODO.md` §77).
             ((and (string=? hd "arrayof") (= (k-length items) 3))
-             (let* ((f (k-parse-flat (k-nth items 1))) (n (k-nth items 2)) (z (k-parse-size n)))
-               (tagcase z
-                 (sz-lin (k ts)
-                   (if (and (null? ts) (>= k 0))
-                       (k-ty-new (ty-named k-flat-arrayof-gen (list (dt f) (dz (k-size-lit k)))))
-                       (k-sfail "a flat array's length is a literal, for now" n)))
-                 (else y (k-sfail "a flat array's length is a literal, for now" n)))))
+             (let ((f (k-parse-flat (k-nth items 1))) (n (k-nth items 2)))
+               (if (not (k-flat-sized? f))
+                   (k-sfail "a flat array's element has a length of its own" (k-nth items 1))
+                   (let ((z (k-parse-size n)))
+                     (if (tagcase z
+                           (sz-lin (k ts) (and (null? ts) (or (< k 0) (>= k 268435455))))
+                           (else y #f))
+                         (k-sfail "a flat array's literal length is 0 to 268435454" n)
+                         (k-ty-new (ty-named k-flat-arrayof-gen (list (dt f) (dz z)))))))))
             (else (k-sfail k-flat-usage s))))))
 (define k-parse-flat-parts (subr (maxeff checks spin) (k-syns k-parts int) k-parts)
   (lambda (ps done w)
@@ -446,11 +461,49 @@
 ;; are; else the tag indexes the owner's fields, which hold the labels (`TODO.md` §77).
 (define k-parse-flat-sum (subr (maxeff checks spin) (k-syns) int)
   (lambda (ps)
-    (let ((w (if (and (not (null? ps)) (syn-symbol? (car ps))) (k-key-width (car ps)) 0)))
-      (if (= w 0)
-          (k-ty-new (ty-sum (k-parse-flat-parts ps nil 0)))
-          (let ((sum (k-ty-new (ty-sum (k-parse-flat-parts (cdr ps) nil w)))))
-            (k-ty-new (ty-named k-flat-keyed-gen (list (dz (k-size-lit w)) (dt sum)))))))))
+    (let* ((w (if (and (not (null? ps)) (syn-symbol? (car ps))) (k-key-width (car ps)) 0))
+           (written (if (= w 0) ps (cdr ps)))
+           (parts (k-parse-flat-parts written nil w))
+           (bad (k-unsized-first parts written)))
+      (cond ((not (null? bad)) (k-sfail "a flat sum's variant has a length of its own" (car bad)))
+            ((= w 0) (k-ty-new (ty-sum parts)))
+            (else
+             (k-ty-new (ty-named k-flat-keyed-gen
+                                 (list (dz (k-size-lit w)) (dt (k-ty-new (ty-sum parts)))))))))))
+;; What is wrong with flat `t`'s parts, "" if nothing (`Checker::flat_parts_wrong`).
+(define k-flat-parts-wrong (subr (maxeff kreads (alloc @t) spin) (int) string)
+  (lambda (t)
+    (tagcase (k-get (k-resolve t))
+      (ty-product (ps)
+        (if (k-unsized-before-last? ps)
+            (string-append "only a flat product's last part may be of a length not known: it runs "
+                           "to the end of the suffix")
+            ""))
+      (ty-sum (ps) (if (k-any-unsized? ps) "a flat sum's variant has a length of its own" ""))
+      (else y ""))))
+(define k-unsized-before-last? (subr (maxeff kreads (alloc @t) spin) (k-parts) bool)
+  (lambda (ps)
+    (and (not (null? ps)) (not (null? (cdr ps)))
+         (or (not (k-flat-sized? (extract (car ps) 2))) (k-unsized-before-last? (cdr ps))))))
+(define k-any-unsized? (subr (maxeff kreads (alloc @t) spin) (k-parts) bool)
+  (lambda (ps)
+    (and (not (null? ps))
+         (or (not (k-flat-sized? (extract (car ps) 2))) (k-any-unsized? (cdr ps))))))
+;; The first of `parts`, written `ps`, of a length not known: its syntax.
+(define k-unsized-first (subr (maxeff kreads (alloc @t) spin) (k-parts k-syns) k-syns)
+  (lambda (parts ps)
+    (cond ((null? parts) nil)
+          ((not (k-flat-sized? (extract (car parts) 2))) (the k-syns (cons (car ps) nil)))
+          (else (k-unsized-first (cdr parts) (cdr ps))))))
+;; The last of `parts` before the last, written `ps`, of a length not known,
+;; `found` so far: its syntax.
+(define k-unsized-before-last
+  (subr (maxeff kreads (alloc @t) spin) (k-parts k-syns k-syns) k-syns)
+  (lambda (parts ps found)
+    (cond ((or (null? parts) (null? (cdr parts))) found)
+          ((not (k-flat-sized? (extract (car parts) 2)))
+           (k-unsized-before-last (cdr parts) (cdr ps) (the k-syns (cons (car ps) nil))))
+          (else (k-unsized-before-last (cdr parts) (cdr ps) found)))))
 (define k-key-width (subr (maxeff checks spin) (syn) int)
   (lambda (k)
     (case (syn-name k)
@@ -495,7 +548,7 @@
         (let ((p (k-flat-array-parts t)))
           (if (= g k-flat-keyed-gen)
               (k-flat-sum-size t)
-          (if (< (car p) 0)
+          (if (or (< (car p) 0) (not (k-flat-sized? t)))
               (cons -1 -1)
               (let ((e (k-flat-layout (car p))))
                 (if (< (car e) 0) e (cons (* (car e) (cdr p)) (cdr e))))))))
@@ -520,12 +573,71 @@
   (lambda (ps l at)
     (if (null? ps)
         (cons -1 -1)
-        (let ((e (k-flat-layout (extract (car ps) 2))))
-          (cond ((< (car e) 0) (cons -1 -1))
-                ((symbol=? (extract (car ps) 1) l)
-                 (cons (k-round-up at (cdr e)) (extract (car ps) 2)))
-                (else (k-flat-field-from (cdr ps) l (+ (k-round-up at (cdr e)) (car e)))))))))
-;; Flat array `t`'s element and length; -1s if it is none.
+        (let ((a (k-flat-align (extract (car ps) 2))))
+          (cond ((< a 0) (cons -1 -1))
+                ;; The last may be of a length not known: its offset is not.
+                ((symbol=? (extract (car ps) 1) l) (cons (k-round-up at a) (extract (car ps) 2)))
+                (else
+                 (let ((e (k-flat-layout (extract (car ps) 2))))
+                   (if (< (car e) 0)
+                       (cons -1 -1)
+                       (k-flat-field-from (cdr ps) l (+ (k-round-up at a) (car e)))))))))))
+;; A flat's alignment in bytes, known whether or not its size is; -1 if not
+;; known (`Checker::flat_align`).
+(define k-flat-align (subr (maxeff kreads (alloc @t) spin) (int) int)
+  (lambda (t)
+    (tagcase (k-get (k-resolve t))
+      (ty-product (ps) (k-parts-align ps 1))
+      (ty-named (g ds)
+        (if (= g k-flat-arrayof-gen)
+            (let ((p (k-flat-array-parts t))) (if (< (car p) 0) -1 (k-flat-align (car p))))
+            (cdr (k-flat-layout t))))
+      (else y (cdr (k-flat-layout t))))))
+(define k-parts-align (subr (maxeff kreads (alloc @t) spin) (k-parts int) int)
+  (lambda (ps a)
+    (if (null? ps)
+        a
+        (let ((b (k-flat-align (extract (car ps) 2))))
+          (if (< b 0) -1 (k-parts-align (cdr ps) (if (> b a) b a)))))))
+;; The length of the array of a length not known that flat `t` is, or ends
+;; in: none if `t` has a size of its own (`TODO.md` §77).
+(define k-unsized-length (subr (maxeff kreads (alloc @t) spin) (int) (listof k-size acyclic))
+  (lambda (t)
+    (tagcase (k-get (k-resolve t))
+      (ty-named (g ds)
+        (if (and (= g k-flat-arrayof-gen) (= (k-length ds) 2))
+            (tagcase (car (cdr ds))
+              (dz (z) (tagcase z
+                        (sz-lin (k ts) (if (null? ts) nil (the (listof k-size acyclic) (list z))))
+                        (else y (the (listof k-size acyclic) (list z)))))
+              (else y nil))
+            nil))
+      (ty-product (ps) (if (null? ps) nil (k-unsized-length (extract (k-last-part ps) 2))))
+      (else y nil))))
+(define k-last-part (subr (read @globals) (k-parts) (productof (1 symbol) (2 int)))
+  (lambda (ps) (if (null? (cdr ps)) (car ps) (k-last-part (cdr ps)))))
+(define k-flat-sized? (subr (maxeff kreads (alloc @t) spin) (int) bool)
+  (lambda (t) (null? (k-unsized-length t))))
+;; Flat `t` with the length of the array of a length not known that it is,
+;; or ends in, `z`.
+(define k-with-unsized-length (subr (maxeff kstate spin) (int k-size) int)
+  (lambda (t z)
+    (tagcase (k-get (k-resolve t))
+      (ty-named (g ds)
+        (tagcase (car ds)
+          (dt (f) (k-ty-new (ty-named k-flat-arrayof-gen (list (dt f) (dz z)))))
+          (else y t)))
+      (ty-product (ps) (k-ty-new (ty-product (k-with-last-part ps z))))
+      (else y t))))
+(define k-with-last-part (subr (maxeff kstate spin) (k-parts k-size) k-parts)
+  (lambda (ps z)
+    (if (null? (cdr ps))
+        (the k-parts
+             (list (product (1 (extract (car ps) 1))
+                            (2 (k-with-unsized-length (extract (car ps) 2) z)))))
+        (cons (car ps) (k-with-last-part (cdr ps) z)))))
+;; Flat array `t`'s element and length, 268435455 (`FLAT_TO_THE_END`) for
+;; one that runs to the end of the suffix; -1s if it is none.
 (define k-flat-array-parts (subr (maxeff kreads (alloc @t) spin) (int) k-int-pair)
   (lambda (t)
     (tagcase (k-get (k-resolve t))
@@ -534,8 +646,8 @@
             (tagcase (car ds)
               (dt (f)
                 (tagcase (car (cdr ds))
-                  (dz (z) (tagcase z (sz-lin (k ts) (if (null? ts) (cons f k) (cons -1 -1)))
-                            (else y (cons -1 -1))))
+                  (dz (z) (tagcase z (sz-lin (k ts) (if (null? ts) (cons f k) (cons f 268435455)))
+                            (else y (cons f 268435455))))
                   (else y (cons -1 -1))))
               (else y (cons -1 -1)))
             (cons -1 -1)))
@@ -726,7 +838,14 @@
           (k-fail (string-append "which flat a new `blobref` points to is said by the type it is "
                                  "checked against: `(the (blobref B F) …)`")
                   a z)
-          (cdr (car p))))))
+          (let* ((f (cdr (car p))) (n (k-unsized-length f)))
+            (if (or (null? n) (tagcase (car n) (sz-finite () #t) (else y #f)))
+                f
+                (k-fail (k-cat3 "a new blobref's array of a length not literal is of length "
+                                "`finite`, not a "
+                                (string-append (k-show-ty f)
+                                               ": the length is named where the blobref is bound"))
+                        a z)))))))
 ;; Of a blobref at `a`..`z` of type `xt`, owner `b`, flat `f`, read or
 ;; written: the owner's region, `f` a scalar; noting the scalar's layout at
 ;; the span for the compilers if `note`.

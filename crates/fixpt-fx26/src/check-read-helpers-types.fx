@@ -32,6 +32,7 @@
   (subr (maxeff (alloc @t) (goto @z) (read @globals) (read @s) (read @t) (write @t) spin)
         (kx int)
         k-te))
+(define-type k-size (select check-types-types k-size))
 (define-type check-read-helpers-sig
   (moduleof (val k-lam
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
@@ -156,6 +157,14 @@
                        (listof (pairof int int @t) acyclic)))
             (val k-blobref-of
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (int int) int))
+            (val k-unsized-length
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
+                       (int)
+                       (listof k-size acyclic)))
+            (val k-with-unsized-length
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (int k-size)
+                       int))
             (val k-blobref-wanted (subr (maxeff (alloc @t)
                                (goto @z)
                                (read @globals)

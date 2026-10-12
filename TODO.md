@@ -2013,31 +2013,13 @@ flat arrays of a length not literal, decided below. The rule
 so.
 
 **Flat arrays of a length not literal** (decided with the user,
-2026-10-12). A flat array's length is already a size: the type is
-`(flat-arrayof (f flat) (n size))` (`check.rs`), and only the readers
-refuse anything but a literal ("a flat array's length is a literal, for
-now", `kinds.rs`; its twin in `check-read-helpers.fx`). So the length may
-be a size variable, bound as any is (`docs/research/sizes.md`):
-- **Offsets after it are symbolic**, linear in the length (`8 + 4n`),
-  which the checker states and the layout computes.
-- **Run-time code needs the length's value**: a `(nat n)` in scope (a
-  dependent parameter, or computed), with which the array may be
-  anywhere and what follows it is reached by `n`.
-- **Or none is in scope**, and the length is recovered from the owner:
-  its suffix's length, less the static prefix, divided by the element's
-  size. That needs exactly one length unknown, so such an array is last,
-  in a product that is then last in turn, and so on out to the suffix
-  (Rust's rule for unsized types, here only for this case). Its type is
-  existential, an array of some `n`; an operation such as
-  `blobref-length` gives the `(nat n)` that opens it, as `length` does an
-  `nlist`'s. The divisibility is checked once, where the bloblet is made.
-- **Not as an array's element** (indexing needs one static element
-  size), and not, to start, in a flat sum's variant.
-- **Bounds are N5c's**: with `i : (nat i)` and the fact `i < n`,
-  `blobref-index` needs no check and carries no debt (§86; CF4,
-  `docs/research/confirmation.md`). The ports' largest class of debt is
-  indices (758 sites; bounds would take them from 53% failure-free to
-  60%), so this and array bounds are one piece of work.
+2026-10-12): built (`DONE.md` §77), an array that runs to the end of the
+suffix, its length named where its blobref is bound. Left, N5c's part:
+`(blobref-length r)`, a `(nat n)` of the length, so that a test teaches
+`i < n`; and `blobref-index` with that fact needing no check (recorded,
+so that §86's debts count it discharged, and natively the compare left
+out). A non-last array of a length a `(nat n)` in scope gives (offsets
+after it computed from `n`) waits on a need.
 
 **Flat sums: their key** (the user's, 2026-10-10; the goal: a "flat
 world" with Rust's model of values, for apples-to-apples benchmarks).

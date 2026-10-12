@@ -173,6 +173,12 @@ pub const KINDS: &[Kind] = &[
 
 /// A flat array's element layouts: what `(flatlayout T)` is at run time.
 pub const FLAT_I32: i64 = 0;
+/// A flat array's length, as `blobref-index` is told it, when the array
+/// runs to the end of its owner's suffix (`TODO.md` §77): its length is
+/// what is left of the suffix, in elements, found when it is indexed.
+/// Below 2^28, so that `n << 32 | size` stays a fixnum; a literal length
+/// is below it.
+pub const FLAT_TO_THE_END: i64 = 0x0fff_ffff;
 pub const FLAT_U32: i64 = 1;
 pub const FLAT_I64: i64 = 2;
 pub const FLAT_U64: i64 = 3;

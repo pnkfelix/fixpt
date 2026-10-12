@@ -118,7 +118,8 @@
          (check-expect
           ((load-input "fx26:check-expect.fx")
            check-types check-env check-subtype check-print
-           check-kinds check-resolve check-effects check-modules check-print-parts))
+           check-kinds check-resolve check-effects check-modules check-print-parts
+           check-read-helpers))
          ;; The checker, calls: which may reach their own caller.
          (check-calls
           ((load-input "fx26:check-calls.fx")

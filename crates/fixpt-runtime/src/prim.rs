@@ -673,6 +673,18 @@ fn plain_bloblet(rt: &mut Runtime, v: Value) -> Outcome<Value> {
     }
 }
 
+/// A flat array's length and element's size, from `blobref-index`'s code,
+/// `n << 32 | size`: `n` as the checker knew it, or, for an array that runs
+/// to the end of the suffix (`FLAT_TO_THE_END`), the whole elements left of
+/// it after suffix ref `r` (`TODO.md` §77).
+fn flat_index_bound(rt: &Runtime, r: Value, code: i64) -> (i64, i64) {
+    let (n, size) = (code >> 32, code & 0xffff_ffff);
+    if n == fixpt_heap::layout::FLAT_TO_THE_END && size > 0 {
+        return (rt.heap.suffix_ref_room(r) as i64 / size, size);
+    }
+    (n, size)
+}
+
 fn suffix_ref(rt: &mut Runtime, v: Value) -> Outcome<Value> {
     if v.is_suffix_ref() { Ok(v) } else { rt.type_error("a suffix ref", v) }
 }
@@ -2283,7 +2295,7 @@ prims! {
     "%fx26-suffix-ref-index", 3, Some(3), simple!(|rt, a| {
         let r = suffix_ref(rt, a[0])?;
         let (i, code) = (int(rt, a[1])?, int(rt, a[2])?);
-        let (n, size) = (code >> 32, code & 0xffff_ffff);
+        let (n, size) = flat_index_bound(rt, r, code);
         if !(0..n).contains(&i) {
             return rt.fail("blobref-index: out of range", &[a[0], a[1]]);
         }
@@ -2297,7 +2309,7 @@ prims! {
     "%fx26-blobref-index", 3, Some(3), simple!(|rt, a| {
         let r = suffix_ref(rt, a[0])?;
         let (code, i) = (int(rt, a[1])?, int(rt, a[2])?);
-        let (n, size) = (code >> 32, code & 0xffff_ffff);
+        let (n, size) = flat_index_bound(rt, r, code);
         if !(0..n).contains(&i) {
             return rt.fail("blobref-index: out of range", &[a[0], a[2]]);
         }

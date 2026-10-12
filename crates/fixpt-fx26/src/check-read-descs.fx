@@ -103,6 +103,22 @@
               (k-sfail (string-append "an I/O effect's kind is one of " k-io-kinds-shown) x)
               (k-one (a-io k))))
         (k-sfail (string-append "`(io kind)`, the kind one of " k-io-kinds-shown) s))))
+;; Whether `s` is written as a size, not a region (`Checker::size_written`):
+;; a natural literal, `finite`, a size variable or value, `(+ …)`, `(- …)`.
+(define k-size-written? (subr (maxeff checks spin) (syn) bool)
+  (lambda (s)
+    (cond ((>= (syn-int s) 0) #t)
+          ((syn-symbol? s)
+           (or (string=? (syn-name s) "finite")
+               (let ((d (k-lookup-desc (syn-head s))))
+                 (and (not (null? d))
+                      (tagcase (car d) (ds-var (v k) (= k 5)) (ds-size (z) #t) (else x #f))))))
+          (else
+           (let ((items (tagcase s
+                          (lst (items d a b) items)
+                          (else x (the k-syns nil)))))
+             (and (not (null? items)) (syn-symbol? (car items))
+                  (case (syn-name (car items)) (("+" "-") #t) (else #f))))))))
 (define k-parse-types (subr (maxeff checks spin) (k-syns) k-ids)
   (lambda (xs)
     (if (null? xs)
@@ -382,8 +398,8 @@
         ((arrayof)
          (begin
            (k-shape (= n 3) "`(arrayof type region)`" s)
-           ;; With a literal length, a flat array (`TODO.md` §77).
-           (if (>= (syn-int (k-nth items 2)) 0)
+           ;; With a length, a literal or a size, a flat array (`TODO.md` §77).
+           (if (k-size-written? (k-nth items 2))
                (k-parse-flat s)
                (let* ((t (k-parse-type (k-nth items 1))) (r (k-parse-region (k-nth items 2))))
                  (k-ty-new (ty-array t r))))))

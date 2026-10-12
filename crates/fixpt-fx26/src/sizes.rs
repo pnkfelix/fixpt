@@ -433,6 +433,26 @@ impl Checker {
                     }
                 }
             }
+            // A blobref's array that runs to the end of the suffix is truly
+            // of its length wherever the blobref is given back: forgotten
+            // there, it is still of `finite`'s, the rest of the suffix. Where
+            // a caller supplies one, it stays bad (`TODO.md` §77).
+            Ty::Named { which: crate::check::BLOBREF_INDEX, args } => {
+                for d in args {
+                    if let D::Type(x) = d {
+                        self.size_walk(x, pol, v, bad, seen);
+                    }
+                }
+            }
+            Ty::Named { which: crate::check::FLAT_ARRAYOF_INDEX, args } => {
+                for d in args {
+                    match d {
+                        D::Size(s) => size(&s, pol, bad),
+                        D::Type(x) => self.size_walk(x, Polarity::Inv, v, bad, seen),
+                        _ => {}
+                    }
+                }
+            }
             Ty::Named { args, .. } => {
                 for d in args {
                     match d {
@@ -485,6 +505,17 @@ impl Checker {
         // A module's abstract types are named too, for this binding.
         if matches!(self.arena.get(self.arena.resolve(t)), Ty::Module { .. }) {
             return self.name_module(name, t);
+        }
+        // A blobref to an array that runs to the end of the suffix, its
+        // length `finite`: given one of its own (`TODO.md` §77), as a `nat`
+        // is, so that what is learned of it is of this array.
+        if let Some((b, f)) = self.blobref_parts(t)
+            && self.unsized_length(f) == Some(Size::Finite)
+        {
+            let v = self.arena.dvar_of(name, Kind::Size);
+            self.skolems.push(v);
+            let f = self.with_unsized_length(f, Size::var(v));
+            return self.blobref_of(b, f);
         }
         if !matches!(self.arena.get(self.arena.resolve(t)), Ty::Nat(Size::Finite)) {
             return t;

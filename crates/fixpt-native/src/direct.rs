@@ -3232,9 +3232,13 @@ fn suffix_index(a: &mut Asm, slow: Label) {
     a.to(slow, Fix::If(Cond::Hs));
     a.e(ubfx(X17, 3, 3, 32));
     a.e(mul(X9, X9, X17));
+    // The whole element within the suffix, which is the bound of an array
+    // that runs to the end of it (`FLAT_TO_THE_END`, `TODO.md` §77): one
+    // only partly in it is the primitive's to judge.
     a.e(add(X16, X15, X9));
+    a.e(add(X16, X16, X17));
     a.e(cmp(X16, X13));
-    a.to(slow, Fix::If(Cond::Hs));
+    a.to(slow, Fix::If(Cond::Hi));
     a.e(lsl_imm(X9, X9, SUFFIX_OFFSET_SHIFT));
     a.e(add(RESULT, 1, X9));
 }

@@ -606,8 +606,8 @@
                 ((blobref-owner) o)
                 ((blobref-offset) at)
                 ((blobref-index)
-                 (let ((k (as-int (ev-arg xs 1))) (n (quotient i 4294967296))
-                       (size (modulo i 4294967296)))
+                 (let* ((k (as-int (ev-arg xs 1))) (size (modulo i 4294967296))
+                        (n (ev-flat-length r (quotient i 4294967296) size)))
                    (if (and (>= k 0) (< k n))
                        (ev-bref o (+ at (* k size)))
                        (efail "blobref-index: out of range"))))
@@ -616,6 +616,16 @@
                 (else (let ((p (ev-bref-bytes r)))
                         (begin (ev-scalar-set! (car p) at i (ev-arg xs 1)) the-unit)))))
             (else y (efail-expected "a blobref")))))))
+
+;; A flat array's length, `n` as the checker knew it, or, for one that runs
+;; to the end of the suffix (`n` 268435455, `FLAT_TO_THE_END`), the whole
+;; elements of `size` bytes left of the suffix after blobref `r` (`TODO.md`
+;; §77).
+(define* ev-flat-length (subr (maxeff evals spin) (val int int) int)
+  (lambda (r n size)
+    (if (and (= n 268435455) (> size 0))
+        (let ((p (ev-bref-bytes r))) (quotient (- (array-length (car p)) (cdr p)) size))
+        n)))
 
 ;; A flat sum's tag, of layout `k` (`TODO.md` §77): `w` bytes, a number as
 ;; it is if the key is numeric; else the owner's field it indexes, which

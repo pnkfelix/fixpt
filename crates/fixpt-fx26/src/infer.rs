@@ -1879,6 +1879,9 @@ impl Checker {
                 (D::Region(r), D::Region(s)) => self.unify_region(*r, *s, u),
                 (D::Effect(d), D::Effect(e)) => self.unify_effect(d, e, u),
                 (D::Conv(c), D::Conv(d)) => self.unify_conv(*c, *d, u),
+                // A size given a generative type: a flat array's length
+                // (`TODO.md` §77).
+                (D::Size(m), D::Size(n)) => self.unify_size(m, n, u),
                 (D::Fun(f), D::Fun(g)) => {
                     if let Ty::Var(v) = self.arena.get(*f).clone()
                         && u.is_unknown(v)

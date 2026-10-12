@@ -789,9 +789,10 @@ impl Checker {
                 let [_, t, r] = &items[..] else {
                     return Err(FxError::at(s.span, "`(arrayof type region)`"));
                 };
-                // With a literal length, a flat array (`TODO.md` §77), so a
-                // `define-type` may name one.
-                if self.literal_int(r).is_some_and(|k| k >= 0) {
+                // With a length, a literal or a size (`finite`, a size
+                // variable, a sum of sizes), a flat array (`TODO.md` §77), so
+                // a `define-type` may name one.
+                if self.size_written(r) {
                     return self.parse_flat(s);
                 }
                 let t = self.parse_type(t)?;
@@ -1034,6 +1035,18 @@ impl Checker {
 
     /// A size: a natural literal, `finite` (some number not known), a size
     /// variable, `(+ size …)`, or `(- size k)`.
+    /// Whether `s` is written as a size, not a region: a natural literal,
+    /// `finite`, a size variable or value, or `(+ …)` or `(- …)`.
+    pub(crate) fn size_written(&self, s: &Syntax) -> bool {
+        if self.literal_int(s).is_some_and(|k| k >= 0) {
+            return true;
+        }
+        if let Some(x) = s.as_symbol() {
+            return self.name(x) == "finite" || matches!(self.lookup_desc(x), Some(DScope::Var(_, Kind::Size) | DScope::SizeVal(_)));
+        }
+        matches!(s.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).map(|h| self.name(h)), Some("+" | "-"))
+    }
+
     pub(crate) fn parse_size(&mut self, s: &Syntax) -> R<Size> {
         let usage = "a size is a natural number, `finite`, a size variable, `(+ size …)` or `(- size k)`";
         if let Some(n) = self.literal_int(s)

@@ -17,7 +17,8 @@
        (check-print-parts-types (load-module "fx26:check-print-parts-types.fx"))
        (check-kinds-types (load-module "fx26:check-kinds-types.fx"))
        (check-effects-types (load-module "fx26:check-effects-types.fx"))
-       (check-modules-types (load-module "fx26:check-modules-types.fx")))
+       (check-modules-types (load-module "fx26:check-modules-types.fx"))
+       (check-read-helpers-types (load-module "fx26:check-read-helpers-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-types (select check-types-types check-types-sig))
            (check-env (select check-env-types check-env-sig))
@@ -27,7 +28,8 @@
            (check-resolve (select check-resolve-types check-resolve-sig))
            (check-effects (select check-effects-types check-effects-sig))
            (check-modules (select check-modules-types check-modules-sig))
-           (check-print-parts (select check-print-parts-types check-print-parts-sig)))
+           (check-print-parts (select check-print-parts-types check-print-parts-sig))
+           (check-read-helpers (select check-read-helpers-types check-read-helpers-sig)))
     (module
 
 ;; The types it uses of the files before it.
@@ -160,6 +162,19 @@
   (lambda (name t)
     (tagcase (k-get (k-resolve t))
       (ty-module (abs ds vs) (k-name-module name t))
+      ;; A blobref to an array that runs to the end of the suffix, its length
+      ;; `finite`: given one of its own (`TODO.md` §77), as a `nat` is.
+      (ty-named (g ds)
+        (let* ((p ((with check-read-helpers k-blobref-parts) t))
+               (n (if (null? p) nil ((with check-read-helpers k-unsized-length) (cdr (car p))))))
+          (if (and (not (null? n)) (tagcase (car n) (sz-finite () #t) (else y #f)))
+              (let ((v (k-new-dvar-of name 5)))
+                (begin
+                  (set k-skolems (cons v (get k-skolems)))
+                  ((with check-read-helpers k-blobref-of)
+                   (car (car p))
+                   ((with check-read-helpers k-with-unsized-length) (cdr (car p)) (k-size-var v)))))
+              t)))
       (ty-nat (z)
         (tagcase z
           (sz-finite ()

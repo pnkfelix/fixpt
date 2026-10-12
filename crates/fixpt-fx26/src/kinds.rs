@@ -409,7 +409,14 @@ impl Checker {
         let Some(sym) = s.as_symbol() else { return Err(FxError::at(s.span, usage)) };
         match self.lookup_desc(sym) {
             Some(DScope::Var(v, Kind::Flat)) => return Ok(self.arena.ty(Ty::Var(v))),
-            Some(DScope::Rec(t)) if self.is_flat(t) => return Ok(t),
+            // A type named, read as a flat: its parts as `productof` and
+            // `sumof` would have them (`TODO.md` §77).
+            Some(DScope::Rec(t)) if self.is_flat(t) => {
+                return match self.flat_parts_wrong(t) {
+                    Some(why) => Err(FxError::at(s.span, why)),
+                    None => Ok(t),
+                };
+            }
             Some(_) => return Err(FxError::at(s.span, usage)),
             None => {}
         }
@@ -427,6 +434,12 @@ impl Checker {
         match (head.as_deref(), items) {
             (Some("productof"), [_, ps @ ..]) => {
                 let parts = self.parse_flat_parts(ps, None)?;
+                // Of a length not known, only the last part (`TODO.md` §77):
+                // it runs to the end of the suffix.
+                if let Some(i) = parts.iter().rev().skip(1).position(|(_, f)| !self.flat_sized(*f)) {
+                    let at = parts.len() - 2 - i;
+                    return Err(FxError::at(ps[at].span, "only a flat product's last part may be of a length not known: it runs to the end of the suffix"));
+                }
                 Ok(self.arena.ty(Ty::Product(parts)))
             }
             // A key first, a width, if the labels are numbers stored as
@@ -444,20 +457,29 @@ impl Checker {
                 };
                 let ps = if key.is_some() { &ps[1..] } else { ps };
                 let parts = self.parse_flat_parts(ps, key)?;
+                if let Some(i) = parts.iter().position(|(_, f)| !self.flat_sized(*f)) {
+                    return Err(FxError::at(ps[i].span, "a flat sum's variant has a length of its own"));
+                }
                 let sum = self.arena.ty(Ty::Sum(parts));
                 Ok(match key {
                     Some(w) => self.arena.ty(Ty::Named { which: FLAT_KEYED_INDEX, args: vec![D::Size(Size::lit(w)), D::Type(sum)] }),
                     None => sum,
                 })
             }
-            (Some("arrayof"), [_, f, n]) => {
-                let f = self.parse_flat(f)?;
-                match self.parse_size(n)? {
-                    Size::Lin { k, terms } if terms.is_empty() && k >= 0 => {
-                        Ok(self.arena.ty(Ty::Named { which: FLAT_ARRAYOF_INDEX, args: vec![D::Type(f), D::Size(Size::lit(k))] }))
-                    }
-                    _ => Err(FxError::at(n.span, "a flat array's length is a literal, for now")),
+            // A length a literal; or a size, a variable or `finite`, which
+            // means the array runs to the end of the suffix (`TODO.md` §77).
+            (Some("arrayof"), [_, fs, n]) => {
+                let f = self.parse_flat(fs)?;
+                if !self.flat_sized(f) {
+                    return Err(FxError::at(fs.span, "a flat array's element has a length of its own"));
                 }
+                let size = match self.parse_size(n)? {
+                    Size::Lin { k, terms } if terms.is_empty() && !(0..fixpt_heap::layout::FLAT_TO_THE_END).contains(&k) => {
+                        return Err(FxError::at(n.span, "a flat array's literal length is 0 to 268435454"));
+                    }
+                    s => s,
+                };
+                Ok(self.arena.ty(Ty::Named { which: FLAT_ARRAYOF_INDEX, args: vec![D::Type(f), D::Size(size)] }))
             }
             _ => Err(FxError::at(s.span, usage)),
         }
@@ -565,25 +587,89 @@ impl Checker {
     }
 
     /// Flat product `t`'s field `label`: its offset in bytes, and its flat.
+    /// The last may be of a length not known: its offset is not.
     pub(crate) fn flat_field(&self, t: TyId, label: Sym) -> Option<(usize, TyId)> {
         let Ty::Product(ps) = self.arena.get(self.arena.resolve(t)) else { return None };
         let mut at = 0usize;
         for (l, f) in ps {
-            let (size, a) = self.flat_layout(*f)?;
-            at = at.next_multiple_of(a);
+            at = at.next_multiple_of(self.flat_align(*f)?);
             if *l == label {
                 return Some((at, *f));
             }
-            at += size;
+            at += self.flat_layout(*f)?.0;
         }
         None
     }
 
-    /// Flat array `t`'s element and length.
-    pub(crate) fn flat_array_parts(&self, t: TyId) -> Option<(TyId, usize)> {
+    /// A flat's alignment in bytes, known whether or not its size is.
+    pub(crate) fn flat_align(&self, t: TyId) -> Option<usize> {
+        match self.arena.get(self.arena.resolve(t)) {
+            Ty::Product(ps) => ps.iter().try_fold(1, |a, (_, f)| Some(a.max(self.flat_align(*f)?))),
+            Ty::Named { which: FLAT_ARRAYOF_INDEX, args } => match &args[..] {
+                [D::Type(f), _] => self.flat_align(*f),
+                _ => None,
+            },
+            _ => self.flat_layout(t).map(|(_, a)| a),
+        }
+    }
+
+    /// What is wrong with flat `t`'s parts, if anything, as `productof` and
+    /// `sumof` would say it of flats written there: a part of a length not
+    /// known before a product's last, or as a sum's variant.
+    pub(crate) fn flat_parts_wrong(&self, t: TyId) -> Option<&'static str> {
+        match self.arena.get(self.arena.resolve(t)) {
+            Ty::Product(ps) if ps.iter().rev().skip(1).any(|(_, f)| !self.flat_sized(*f)) => {
+                Some("only a flat product's last part may be of a length not known: it runs to the end of the suffix")
+            }
+            Ty::Sum(ps) if ps.iter().any(|(_, f)| !self.flat_sized(*f)) => Some("a flat sum's variant has a length of its own"),
+            _ => None,
+        }
+    }
+
+    /// Whether flat `t` has a size of its own: not an array of a length
+    /// not known, nor a product ending in one (`TODO.md` §77).
+    pub(crate) fn flat_sized(&self, t: TyId) -> bool {
+        self.unsized_length(t).is_none()
+    }
+
+    /// The length of the array of a length not known that flat `t` is, or
+    /// ends in: what runs to the end of the suffix.
+    pub(crate) fn unsized_length(&self, t: TyId) -> Option<Size> {
         match self.arena.get(self.arena.resolve(t)) {
             Ty::Named { which: FLAT_ARRAYOF_INDEX, args } => match &args[..] {
-                [D::Type(f), D::Size(Size::Lin { k, terms })] if terms.is_empty() => Some((*f, *k as usize)),
+                [_, D::Size(Size::Lin { terms, .. })] if terms.is_empty() => None,
+                [_, D::Size(s)] => Some(s.clone()),
+                _ => None,
+            },
+            Ty::Product(ps) => ps.last().and_then(|(_, f)| self.unsized_length(*f)),
+            _ => None,
+        }
+    }
+
+    /// Flat `t` with the length of the array of a length not known that it
+    /// is, or ends in, `n`.
+    pub(crate) fn with_unsized_length(&mut self, t: TyId, n: Size) -> TyId {
+        match self.arena.get(self.arena.resolve(t)).clone() {
+            Ty::Named { which: FLAT_ARRAYOF_INDEX, args } => {
+                let D::Type(f) = args[0] else { return t };
+                self.arena.ty(Ty::Named { which: FLAT_ARRAYOF_INDEX, args: vec![D::Type(f), D::Size(n)] })
+            }
+            Ty::Product(mut ps) => {
+                if let Some(last) = ps.last_mut() {
+                    last.1 = self.with_unsized_length(last.1, n);
+                }
+                self.arena.ty(Ty::Product(ps))
+            }
+            _ => t,
+        }
+    }
+
+    /// Flat array `t`'s element and length: a literal, or a size that runs
+    /// to the end of the suffix.
+    pub(crate) fn flat_array_parts(&self, t: TyId) -> Option<(TyId, Size)> {
+        match self.arena.get(self.arena.resolve(t)) {
+            Ty::Named { which: FLAT_ARRAYOF_INDEX, args } => match &args[..] {
+                [D::Type(f), D::Size(s)] => Some((*f, s.clone())),
                 _ => None,
             },
             _ => None,

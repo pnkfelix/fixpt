@@ -264,6 +264,7 @@
                (dr (r) (k-open-region? r kinds solved))
                (de (e) (k-open-effect? e kinds solved))
                (dc (c) (k-open-conv? c kinds solved))
+               (dz (z) (k-size-open? z kinds solved))
                (else y #f))
              (k-descs-open? (cdr ds) kinds solved)))))
 (define k-any-walk (subr (maxeff kstate spin) (k-ids int k-binders k-solved) bool)
@@ -579,7 +580,8 @@
               (dt (x) (tagcase (car ys) (dt (y) (k-unify x y kinds solved trail)) (else z #u)))
               (dr (r) (tagcase (car ys) (dr (q) (k-unify-region r q kinds solved)) (else z #u)))
               (de (d) (tagcase (car ys) (de (e) (k-unify-effect d e kinds solved)) (else z #u)))
-              (dz (m) #u)
+              ;; A size given a generative type: a flat array's length (§77).
+              (dz (m) (tagcase (car ys) (dz (n) (k-unify-size m n kinds solved)) (else z #u)))
               (dc (c) (tagcase (car ys) (dc (d) (k-unify-conv c d kinds solved)) (else z #u)))
               (df (f) (tagcase (car ys) (df (g) (k-unify-fun f g kinds solved)) (else z #u))))
             (k-unify-descs (cdr xs) (cdr ys) kinds solved trail)))))

@@ -314,7 +314,13 @@
               (tagcase (k-get t)
                 (ty-nat (z) (k-size-bad z pol v))
                 (ty-nlist (e z r) (+ (k-size-bad z pol v) (k-size-walk e pol v seen)))
-                (ty-named (g ds) (k-size-walk-descs ds v seen))
+;; A blobref (generative type 5) given back, its array that runs to
+                ;; the end of the suffix (type 6) of its length truly, so forgotten
+                ;; there as `finite`; where a caller supplies one, bad (`TODO.md` §77).
+                (ty-named (g ds)
+                  (if (or (= g 5) (= g 6))
+                      (k-size-walk-descs-at ds (if (= g 5) pol 0) pol v seen)
+                      (k-size-walk-descs ds v seen)))
                 ;; What a description function is given, it may use either way.
                 (ty-app (f ds) (k-size-walk-descs ds v seen))
                 (ty-subr (e ps r cv)
@@ -348,6 +354,17 @@
           0
           (let ((here (k-size-walk (extract (car ps) 2) pol v seen)))
             (+ here (k-size-walk-parts (cdr ps) pol v seen))))))
+  ;; Of a blobref's or flat array's descriptions: types at `tpol`, sizes at
+  ;; `zpol`.
+  (k-size-walk-descs-at (subr (maxeff kstate spin) (k-descs int int int k-seen-pol) int)
+    (lambda (ds tpol zpol v seen)
+      (if (null? ds)
+          0
+          (let ((here (tagcase (car ds)
+                        (dz (z) (k-size-bad z zpol v))
+                        (dt (x) (k-size-walk x tpol v seen))
+                        (else y 0))))
+            (+ here (k-size-walk-descs-at (cdr ds) tpol zpol v seen))))))
   (k-size-walk-descs (subr (maxeff kstate spin) (k-descs int k-seen-pol) int)
     (lambda (ds v seen)
       (if (null? ds)

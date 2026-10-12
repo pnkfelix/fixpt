@@ -1255,6 +1255,12 @@ impl Heap {
         debug_assert!(r.is_suffix_ref(), "{r:?} is not a suffix ref");
         Value::bloblet(r.owner() + self.base)
     }
+    /// How many bytes of its owner's suffix lie from suffix ref `r` on: what
+    /// an array that runs to the end of the suffix has (`TODO.md` §77).
+    pub fn suffix_ref_room(&self, r: Value) -> usize {
+        let (o, at) = (self.suffix_ref_owner(r), r.offset());
+        self.bloblet_head(o).bytes.saturating_sub(at)
+    }
     /// Suffix ref `r` moved `delta` bytes along its owner's suffix: checked
     /// again, as one made there would be.
     pub fn suffix_ref_add(&self, r: Value, delta: i64) -> Result<Value, BlobletError> {

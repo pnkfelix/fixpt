@@ -3885,6 +3885,7 @@ impl Checker {
             }
             eff = eff.union(&self.check(rest[0], int)?);
             let f = wanted(self)?;
+            self.unsized_new(span, f)?;
             let t = self.blobref_of(xt, f);
             let eff = self.mask(e, &eff, t);
             return Ok((t, eff));
@@ -3896,12 +3897,15 @@ impl Checker {
             BlobletOp::RefAdd => {
                 eff = eff.union(&self.check(rest[0], int)?);
                 let f = wanted(self)?;
+                self.unsized_new(span, f)?;
                 self.blobref_of(b, f)
             }
             BlobletOp::RefOwner => b,
             BlobletOp::RefOffset => int,
             // An element of a flat array: its length and element's size
-            // told the compilers, `n << 32 | size`, checked at run time.
+            // told the compilers, `n << 32 | size`, checked at run time. A
+            // length not a literal runs to the end of the suffix
+            // (`FLAT_TO_THE_END`, `TODO.md` §77).
             BlobletOp::RefIndex => {
                 let Some((g, n)) = self.flat_array_parts(f) else {
                     return Err(FxError::at(self.arena.span_of(*x), format!("a blobref to a flat array is expected here, and this is a {}", self.show_ty(xt))));
@@ -3909,6 +3913,10 @@ impl Checker {
                 eff = eff.union(&self.check(rest[0], int)?);
                 let Some((size, _)) = self.flat_layout(g) else {
                     return Err(FxError::at(span, format!("the layout of a {} is not known", self.show_ty(g))));
+                };
+                let n = match n {
+                    Size::Lin { k, terms } if terms.is_empty() => k as usize,
+                    _ => fixpt_heap::layout::FLAT_TO_THE_END as usize,
                 };
                 self.facts.field_index.insert(e, (n << 32) | size);
                 self.blobref_of(b, g)
@@ -3969,6 +3977,23 @@ impl Checker {
             return Err(FxError::at(span, format!("the region of a {}'s owner is not known", self.show_ty(xt))));
         };
         Ok(region)
+    }
+
+    /// `Ok` unless flat `f`, a new blobref's, runs to the end of the suffix
+    /// with a length other than `finite` (`TODO.md` §77): a length is named
+    /// where the blobref is bound, one for each, so that what is learned of
+    /// it is of that blobref's array; a new one could claim another's.
+    fn unsized_new(&self, span: fixpt_read::Span, f: TyId) -> R<()> {
+        match self.unsized_length(f) {
+            Some(Size::Finite) | None => Ok(()),
+            Some(_) => Err(FxError::at(
+                span,
+                format!(
+                    "a new blobref's array of a length not literal is of length `finite`, not a {}: the length is named where the blobref is bound",
+                    self.show_ty(f)
+                ),
+            )),
+        }
     }
 
     /// `(blobref b f)`'s owner and flat, if `t` is one.
