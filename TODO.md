@@ -2428,8 +2428,19 @@ frame slots, as the suffix. Left:
   was one copy, and each restore scanning back to a frame's header (no
   trailer on the stack: a trailer word in every procedure frame pushed
   `merge`'s 50 000 frames past the stack cache, 500 collections, 1.97 s).
-  A collector's fast path for native frames, or a trailer where a frame
-  has a word to align it, may win it back.
+  Measured (2026-10-12, `merge` × 3000, best of 6: 2.91 s before §91,
+  3.34 after): the collector's per-object costs (two forwarding words, a
+  header read, the crossing map), about 4 ns a frame, where a chunk paid
+  them once; and restore, frame by frame where a chunk was one copy.
+  Tried and dropped (the user's suggestion, and the user's caution that
+  Cheney's loop is hard to beat): copying ahead along a run of objects
+  each linked to the next in memory (frames flushed in place), in one
+  walk or by one `memmove`: 10% of minor collections' time, nothing end
+  to end. Kept: restore looks for a frame's header where the frame before
+  it ended (`native_frame_parts_after`), half of `merge`'s found so, 1%.
+  A restore of adjacent frames by one copy needs them adjacent, which
+  only the dropped run copy kept them. A trailer where a frame has a word
+  to align it would not help `merge` (its frames have none).
 - **Then, raw `f64` arguments and results** (design, with the user,
   2026-10-12). On raw frame slots, not before: a callee stores its
   parameters to its slots at once, so a raw argument with nowhere raw to

@@ -731,7 +731,29 @@ impl Heap {
     /// Native frame `v`'s fields (its trailer, if any, left out) and its
     /// raw words, its suffix.
     pub fn native_frame_parts(&self, v: Value) -> (&[u64], &[u64]) {
-        let main = self.main_of(v);
+        self.native_frame_parts_after(v, 0)
+    }
+
+    /// [`native_frame_parts`](Self::native_frame_parts), its header looked
+    /// for first at address `after`: where the frame before it in a chain
+    /// ends, which is where it starts when the two lie in order (flushed
+    /// together, or the second copied by the scan of the first, its link
+    /// its first field: about half of `merge`'s). Taken only where `after` is an
+    /// object's start, in a space whose objects lie end to end (the old
+    /// space and the nursery below their tops, the native stack), and holds
+    /// a frame's header whose suffix starts at `v`: so `v`'s own.
+    pub fn native_frame_parts_after(&self, v: Value, after: u64) -> (&[u64], &[u64]) {
+        let p = self.ix(v);
+        let at = (after.wrapping_sub(self.mem.words().as_ptr() as u64) / 8) as usize;
+        let dense = (self.active..self.top).contains(&at)
+            || (NURSERY_BASE..self.nursery_top).contains(&at)
+            || (NATIVE_STACK_BASE..NATIVE_STACK_BASE + NATIVE_STACK_WORDS).contains(&at);
+        let main = match self.mem.words().get(at) {
+            Some(&h) if dense && at < p && is_header(h) && !is_extension(h) && !header_is_large(h)
+                && header_kind(h) == const { layout::kind("native-frame") }
+                && at + 1 + layout::H_FIELDS.get(h) as usize == p => at,
+            _ => self.main_of(v),
+        };
         let head = read_head(self.mem.words(), main);
         let p = self.ix(v);
         let fields = p - main - 1 - (self.word(p - 1) & TAG_MASK == TAG_TRAILER) as usize;

@@ -4433,14 +4433,25 @@ impl Rec {
     fn pos(&self) -> Pos {
         Pos::new(self.frame, self.pc)
     }
+    /// The address just past it, in the heap: where the next frame out
+    /// mostly starts.
+    fn end(&self) -> u64 {
+        self.raw as u64 + 8 * (self.n - 1 - self.nfields) as u64
+    }
 }
 
 /// The frame at `p`, and the place after it; none at the chain's end.
 fn step(heap: &Heap, p: Pos) -> Option<(Rec, Pos)> {
+    step_after(heap, p, 0)
+}
+
+/// [`step`], the frame looked for first where the one before it, `after`,
+/// ends ([`Rec::end`]): a chain's frames often lie in order.
+fn step_after(heap: &Heap, p: Pos, after: u64) -> Option<(Rec, Pos)> {
     if p.frame == Value::FALSE {
         return None;
     }
-    let (w, raw) = heap.native_frame_parts(p.frame);
+    let (w, raw) = heap.native_frame_parts_after(p.frame, after);
     let (next, w8) = (Value::from_raw(w[0]), Value::from_raw(w[1]).as_fixnum() as u64);
     let r = Rec { frame: p.frame, n: 1 + w.len() + raw.len(), w8, pc: p.pc, fields: w.as_ptr(), nfields: w.len(), raw: raw.as_ptr() };
     Some((r, Pos::new(next, w8)))
@@ -4449,9 +4460,10 @@ fn step(heap: &Heap, p: Pos) -> Option<(Rec, Pos)> {
 /// Each frame of the chain from `p`, newest first.
 fn records(heap: &Heap, mut p: Pos) -> Vec<Rec> {
     let mut out = Vec::new();
-    while let Some((r, q)) = step(heap, p) {
+    let mut after = 0;
+    while let Some((r, q)) = step_after(heap, p, after) {
         out.push(r);
-        p = q;
+        (p, after) = (q, r.end());
     }
     out
 }
@@ -4531,20 +4543,20 @@ fn step_nonempty(st: &DState) -> bool {
 /// underflow. The rest of the chain is the run's. Where the innermost is,
 /// and where it resumes.
 fn restore(heap: &Heap, st: &mut DState, p: Pos, chain: u64) -> Result<(u64, u64), String> {
-    let (mut recs, mut words, mut q) = (Vec::with_capacity(64), 0, p);
-    while let Some((r, nq)) = step(heap, q) {
+    let (mut recs, mut words, mut q, mut after) = (Vec::with_capacity(64), 0, p, 0);
+    while let Some((r, nq)) = step_after(heap, q, after) {
         let returns = r.returns();
         recs.push((r, returns));
         words += r.n;
-        q = nq;
-        if words >= RESTORE_WORDS && returns && !step(heap, q).is_some_and(|(r2, _)| r2.is_tail_mark()) {
+        (q, after) = (nq, r.end());
+        if words >= RESTORE_WORDS && returns && !step_after(heap, q, after).is_some_and(|(r2, _)| r2.is_tail_mark()) {
             break;
         }
     }
     if recs.is_empty() {
         return Err("the stack cache has nothing to restore".into());
     }
-    let more = step(heap, q).is_some();
+    let more = q.frame != Value::FALSE;
     let (link, ret) = if more { (0, st.underflow) } else { (st.bottom_link, st.bottom_ret) };
     let base = place(st, &recs, words, st.stack_top, link, ret)?;
     set_cont(st, if more { q } else { END }, if more { chain.saturating_sub(words as u64) } else { 0 });
