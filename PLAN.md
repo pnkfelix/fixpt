@@ -390,7 +390,9 @@ shorthand next). Then, as before:
 5. Sizes N5c: inequalities, "at most n" results, array bounds.
 6. The front end written in FX-26: quick wins, then the split into
    `src/fx-rsmirror/` and `src/fx-idiomatic/`.
-7. GADTs (N4, to design with the user; `TODO.md` §83); a top effect; confirming types
+7. GADTs (N4, to design with the user; `TODO.md` §83); a top effect
+   (named `yolo`, the user's, 2026-10-12; wanted as a prompt tag's `D`,
+   `docs/research/conditions.md`); confirming types
    at run time (CF1–CF5); concurrency and actors.
 8. Smaller: `nlist` error messages; the language gaps the survey found;
    M8 docs and polish.
