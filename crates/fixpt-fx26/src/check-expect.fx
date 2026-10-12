@@ -171,6 +171,7 @@
               (let ((v (k-new-dvar-of name 5)))
                 (begin
                   (set k-skolems (cons v (get k-skolems)))
+                  (set k-to-end-sizes (cons v (get k-to-end-sizes)))
                   ((with check-read-helpers k-blobref-of)
                    (car (car p))
                    ((with check-read-helpers k-with-unsized-length) (cdr (car p)) (k-size-var v)))))

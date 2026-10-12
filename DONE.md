@@ -1947,3 +1947,17 @@ reads; none before). Tests: `sizes/narrayof-lengths.fx`,
 `narrayof-wrong-length.fx`, `narrayof-not-known.fx`,
 `narrayof-escapes.fx`.
 
+**A blobref's length named where it is bound, as `finite`; `blobref-length`
+in line** (2026-10-12, §77): a procedure of a blobref to an array that
+runs to the end of the suffix could not pass its own parameter on: the
+parameter's length, named where it is bound, was not `finite`, and a
+blobref is invariant in its flat. Such lengths (`to_end_sizes`,
+`k-to-end-sizes`) now mean what `finite` does inside a blobref's flat
+(`Checker::sub`'s generative case, FX `k-to-end-forgot`); a literal length
+does not, nor another blobref's. Natively, `%fx26-suffix-ref-length` never
+collects, in line (`suffix_length`): 9.4 → 3.2 ns an element in a loop
+over a million `i64`s. Measured and not done: leaving out the checks a
+proof makes needless (at most 15% more, `TODO.md` §77). Tests:
+`bloblet/flat-unsized-recur.fx`, `sizes/flat-literal-not-to-end.fx`,
+`sizes/flat-to-end-not-another.fx`.
+

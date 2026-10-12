@@ -294,6 +294,7 @@
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (k-ty) int))
    (val k-certified (ref (listof (pairof symbol int @t) acyclic) @t))
    (val k-skolems (ref k-ids @t))
+   (val k-to-end-sizes (ref k-ids @t))
    (val k-certified-nats (ref (listof (pairof symbol int @t) acyclic) @t))
    (val k-certified-lengths (ref (listof k-cert-len acyclic) @t))
    (val k-freezing (ref k-ids @t))

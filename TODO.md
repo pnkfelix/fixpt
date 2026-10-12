@@ -2016,14 +2016,15 @@ so.
 2026-10-12): built (`DONE.md` §77), an array that runs to the end of the
 suffix, its length named where its blobref is bound, `blobref-length`,
 and an index shown in bounds recorded; a new blobref's flat checked whole
-in the suffix where it is made, so that its type's length holds. Next
-(agreed with the user, 2026-10-12): the compilers leaving out a recorded
-index's check, and the owner's header found for a read through a ref so
-made (it is found only for the suffix's length; the address is the
-heap's base plus the owner times 8 plus the offset). Disassemble a proved
-loop, then time it both ways (the MLton ports too); the cost is that
-memory safety then rests on the checker's proof (kept checked under
-`--profile checked`), and the FX checker would record it too. Heap
+in the suffix where it is made, so that its type's length holds;
+`blobref-length` in line natively. Measured (2026-10-12, a loop summing a
+million `i64`s, ns an element): 9.4 with `blobref-length` a call-out, 3.2
+in line; a read with no owner found 2.8; and a proved index with no check
+at all 2.7. So leaving out checks the proof makes needless gains 15% at
+most here, and the index's part nothing measurable: not done, as memory
+safety would then rest on the checker. What remains of the loop's cost
+is the length found again each time round (its owner, a division), and
+an `f64` total's box (about 7 ns, `fixpt bench`'s concern). Heap
 arrays' bounds are shown as flat ones' are (`narrayof`, `DONE.md` §77),
 34 of the ports' 732 indexes; more would need indexes counted as `nat`s,
 facts of a count down (`(>= i 0)` before `(- i 1)`), or arrays of arrays'

@@ -346,6 +346,9 @@
 ;; The sizes given to `nat` variables of no known size, newest first
 ;; (`k-name-nat`).
 (define k-skolems (ref k-ids @t) (new nil))
+;; Of those, the lengths given to arrays that run to the end of the suffix
+;; (`Checker::to_end_sizes`): each means just what `finite` does there.
+(define k-to-end-sizes (ref k-ids @t) (new nil))
 ;; The same for `nat?`: the variables it has just found no less than 0.
 (define k-certified-nats (ref (listof (pairof symbol int @t) acyclic) @t) (new nil))
 (define k-certified-lengths (ref (listof k-cert-len acyclic) @t) (new nil))

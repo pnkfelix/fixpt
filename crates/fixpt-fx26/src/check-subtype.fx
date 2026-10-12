@@ -17,7 +17,8 @@
        (check-print-parts-types (load-module "fx26:check-print-parts-types.fx"))
        (check-effects-types (load-module "fx26:check-effects-types.fx"))
        (check-proving-types (load-module "fx26:check-proving-types.fx"))
-       (check-modules-types (load-module "fx26:check-modules-types.fx")))
+       (check-modules-types (load-module "fx26:check-modules-types.fx"))
+       (check-read-helpers-types (load-module "fx26:check-read-helpers-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-types (select check-types-types check-types-sig))
            (check-resolve (select check-resolve-types check-resolve-sig))
@@ -28,7 +29,8 @@
            (check-proving (select check-proving-types check-proving-sig))
            (check-subst (select check-subst-types check-subst-sig))
            (check-modules (select check-modules-types check-modules-sig))
-           (check-print-parts (select check-print-parts-types check-print-parts-sig)))
+           (check-print-parts (select check-print-parts-types check-print-parts-sig))
+           (check-read-helpers (select check-read-helpers-types check-read-helpers-sig)))
     (module
 (hide (include check-subtype-types) (include check-types-types) (include check-subst-types)
       (include check-env-types))
@@ -37,6 +39,39 @@
 (hide (include check-types) (include check-resolve) (include check-sub-env) (include check-env)
       (include check-print-parts) (include check-effects) (include check-proving)
       (include check-subst) (include check-modules))
+(define k-unsized-length (with check-read-helpers k-unsized-length))
+(define k-with-unsized-length (with check-read-helpers k-with-unsized-length))
+;; A blobref's (generative 5) arguments `xs`, to an array that runs to the
+;; end of the suffix, its length named where it was bound, as one of
+;; length `finite`, which means just that, where `ys`'s is (`TODO.md` §77).
+(define k-to-end-forgot (subr (maxeff kstate spin) (int k-descs k-descs) k-descs)
+  (lambda (g xs ys)
+    (if (and (= g 5) (= (k-length xs) 2) (= (k-length ys) 2))
+        (tagcase (car (cdr xs))
+          (dt (xf)
+            (tagcase (car (cdr ys))
+              (dt (yf)
+                (if (and (k-finite-end? yf) (k-to-end-var? xf))
+                    (the k-descs (list (car xs) (dt (k-with-unsized-length xf (sz-finite)))))
+                    xs))
+              (else w xs)))
+          (else w xs))
+        xs)))
+(define k-finite-end? (subr (maxeff kstate spin) (int) bool)
+  (lambda (f)
+    (let ((n (k-unsized-length f)))
+      (and (not (null? n)) (tagcase (car n) (sz-finite () #t) (else y #f))))))
+(define k-to-end-var? (subr (maxeff kstate spin) (int) bool)
+  (lambda (f)
+    (let ((n (k-unsized-length f)))
+      (and (not (null? n))
+           (tagcase (car n)
+             (sz-lin (k ts)
+               (and (= k 0) (= (k-length ts) 1) (= (cdr (car ts)) 1)
+                    (k-id-member? (car (car ts)) (get k-to-end-sizes))))
+             (else y #f))))))
+(define k-id-member? (subr (read @globals) (int k-ids) bool)
+  (lambda (v vs) (and (not (null? vs)) (or (= v (car vs)) (k-id-member? v (cdr vs))))))
 ;; Fields `fs` past the first `n`, each forgettable from a bloblet at `r`,
 ;; frozen if `z` (`k-forgettable?`).
 (define k-forgettable-past? (subr (maxeff kstate spin) (k-ids int k-region bool) bool)
@@ -480,7 +515,9 @@
             (ty-named (g xs)
               (tagcase tb
                 (ty-named (h ys)
-                  (and (= g h) (k-sub-descs xs ys (extract (k-gen-of g) 3) ea eb trail labels)))
+                  (and (= g h)
+                       (k-sub-descs (k-to-end-forgot g xs ys) ys (extract (k-gen-of g) 3)
+                                    ea eb trail labels)))
                 (else z #f)))
             ;; A description function applied: the same function, given
             ;; the same descriptions (FX-91's congruence).

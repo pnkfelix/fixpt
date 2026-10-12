@@ -113,7 +113,7 @@
           ((load-input "fx26:check-subtype.fx")
            check-types check-resolve check-sub-env check-env
            check-print check-effects check-proving check-subst
-           check-modules check-print-parts))
+           check-modules check-print-parts check-read-helpers))
          ;; The checker, expected types: checking against what is wanted.
          (check-expect
           ((load-input "fx26:check-expect.fx")

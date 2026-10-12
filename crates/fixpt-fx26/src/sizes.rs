@@ -576,6 +576,7 @@ impl Checker {
         {
             let v = self.arena.dvar_of(name, Kind::Size);
             self.skolems.push(v);
+            self.to_end_sizes.insert(v);
             let f = self.with_unsized_length(f, Size::var(v));
             return self.blobref_of(b, f);
         }

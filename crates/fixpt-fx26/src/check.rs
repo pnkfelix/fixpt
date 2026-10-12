@@ -286,6 +286,9 @@ pub struct Checker {
     /// The sizes given to `nat` variables of no known size, innermost last
     /// (`Checker::name_nat`).
     pub(crate) skolems: Vec<DVar>,
+    /// Of those, the lengths given to arrays that run to the end of the
+    /// suffix (`TODO.md` §77): each means just what `finite` does there.
+    pub(crate) to_end_sizes: HashSet<DVar>,
     /// Of those, the ones made for a module's abstract types as it was
     /// bound (`Checker::name_module`): not forgotten, but kept from leaving.
     pub(crate) module_vars: HashSet<DVar>,
@@ -655,6 +658,7 @@ impl Checker {
             checked_call: None,
             size_facts: Vec::new(),
             skolems: Vec::new(),
+            to_end_sizes: HashSet::new(),
             module_vars: HashSet::new(),
             abstract_funs: HashSet::new(),
             effect_selects: Vec::new(),
@@ -3255,7 +3259,17 @@ impl Checker {
             }
             // A generative type is related only to itself, argument by
             // argument, as its variance says.
-            (Ty::Named { which: g, args: xa }, Ty::Named { which: h, args: xb }) if g == h => {
+            (Ty::Named { which: g, args: mut xa }, Ty::Named { which: h, args: xb }) if g == h => {
+                // A blobref to an array that runs to the end of the suffix,
+                // its length named where it was bound, is one of length
+                // `finite`, which means just that (`TODO.md` §77).
+                if g == BLOBREF_INDEX
+                    && let ([_, D::Type(xf)], [_, D::Type(yf)]) = (&xa[..], &xb[..])
+                    && self.unsized_length(*yf) == Some(Size::Finite)
+                    && matches!(self.unsized_length(*xf), Some(Size::Lin { k: 0, terms }) if matches!(terms[..], [(v, 1)] if self.to_end_sizes.contains(&v)))
+                {
+                    xa[1] = D::Type(self.with_unsized_length(*xf, Size::Finite));
+                }
                 let variance = self.generatives[g as usize].variance.clone();
                 xa.iter().zip(&xb).zip(variance).all(|((x, y), v)| match (x, y) {
                     (D::Type(x), D::Type(y)) => match v {

@@ -2009,7 +2009,8 @@ impl Compiling<'_> {
                     let tag = name == "%fx26-flat-tag" && o(1).is_fixnum();
                     let at = name == "%suffix-ref" && o(1).is_fixnum() && (0..1 << 26).contains(&o(1).as_fixnum());
                     let fits = name == "%fx26-suffix-fits" && o(1).is_fixnum() && (0..1 << 24).contains(&o(1).as_fixnum());
-                    if op == "prim2imm" && (step || tag || at || fits) {
+                    let length = name == "%fx26-suffix-ref-length" && o(1).is_fixnum() && o(1).as_fixnum() & 0xffff_ffff > 0;
+                    if op == "prim2imm" && (step || tag || at || fits || length) {
                         let (slow, done) = (a.label(), a.label());
                         if step {
                             suffix_step(&mut a, o(1).as_fixnum(), slow);
@@ -2017,6 +2018,8 @@ impl Compiling<'_> {
                             flat_tag(&mut a, o(1).as_fixnum(), slow);
                         } else if fits {
                             suffix_fits(&mut a, o(1).as_fixnum(), slow);
+                        } else if length {
+                            suffix_length(&mut a, o(1).as_fixnum(), slow);
                         } else {
                             blobref_at(&mut a, o(1).as_fixnum(), slow);
                         }
@@ -3229,6 +3232,28 @@ fn suffix_fits(a: &mut Asm, size: i64, slow: Label) {
     a.e(add(X9, X15, X9));
     a.e(cmp(X9, X13));
     a.to(slow, Fix::If(Cond::Hi));
+}
+
+/// `blobref-length` (`%fx26-suffix-ref-length`) of the suffix ref in
+/// `RESULT`, of the layout `code`, `n << 32 | size` (`size` > 0), into
+/// `RESULT`: `n`, or, for an array that runs to the end of the suffix
+/// (`FLAT_TO_THE_END`), the whole elements left of it; to `slow` (the
+/// primitive's) for what is no suffix ref, or one whose owner it does not
+/// find in line.
+fn suffix_length(a: &mut Asm, code: i64, slow: Label) {
+    let (n, size) = (code >> 32, code & 0xffff_ffff);
+    if n != fixpt_heap::layout::FLAT_TO_THE_END {
+        a.e(and_low(X16, RESULT, 3));
+        a.e(cmp_imm(X16, fixpt_heap::value::TAG_SUFFIX_REF as u32));
+        a.to(slow, Fix::If(Cond::Ne));
+        a.es(&mov_imm64(RESULT, Value::fixnum(n).raw()));
+        return;
+    }
+    suffix_owner(a, RESULT, slow);
+    a.e(sub(X9, X13, X15));
+    a.es(&mov_imm64(X17, size as u64));
+    a.e(udiv(X9, X9, X17));
+    a.e(lsl_imm(RESULT, X9, 3));
 }
 
 /// `blobref-index` (`%fx26-suffix-ref-index`) of the suffix ref in `x1`,
