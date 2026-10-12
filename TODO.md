@@ -2411,3 +2411,33 @@ instantiation are written today; or syntax for `handle` and
 programs need them; the front end's `k-sfail` moved onto it; a panic
 caught at a task's boundary, once there are tasks.
 
+## 91. Each native stack frame a bloblet (the user's, 2026-10-12)
+
+The bloblet format exists for objects that hold both values and raw
+bits (`docs/object-model.md`), and a frame is one. Today a native frame
+is `[link][return][stack map][slots…]`, every slot a value; a flush
+(`flush_in_place`, `chunks_of` in `fixpt-native/src/direct.rs`) makes a
+run of frames one heap vector, a chunk of the chain. So raw bits cannot
+live in a frame, and `reps.rs` boxes a raw `f64` or `i64` before it is
+stored there: a loop's `f64` total costs a heap box each time round
+(about 7.5 ns of 10.8 an element, summing a million `f64`s).
+- **Layout**: a frame laid out as a bloblet from the start: a reserved
+  header word, its value slots as fields (addressed back from the
+  suffix, as fields are), a reserved trailer word, and its raw slots as
+  the suffix. The frame pointer is where the suffix starts, as a bloblet
+  pointer is. A flush in place then only stamps each frame's header (its
+  F and B) and trailer: the frame *is* its heap object, and its raw slots
+  its suffix, which no collection traces.
+- **The chain** links frames, each its own bloblet, not a vector of
+  them; what the chunk's fields (next, where it resumes, the rest's size)
+  say moves to the frames, or a small chunk object that points at them.
+- **The stack map** says the value slots only; the raw ones are the
+  suffix, by the trailer's place. Underflow copies a frame back whole.
+- **`reps.rs`**: a raw register is stored to a raw slot and read back
+  raw: a loop's variable stays raw across the loop's back edge.
+- Costs two words a frame (header, trailer), and the frame code that
+  writes the map writes them.
+First: time the `f64`-heavy MLton ports, how much of their run is boxing
+what a loop carries, to know what this buys beyond the one loop; then
+the layout, in `direct.rs` and the collector's walk of native frames.
+
