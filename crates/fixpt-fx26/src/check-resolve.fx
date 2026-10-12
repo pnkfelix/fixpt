@@ -280,6 +280,8 @@
       (k-ty-new (ty-void))
       ;; 17 and 18, after `void`: as `check.rs` makes them.
       (k-basic "vector") (k-basic "bytevector")
+      ;; 19 and 20, last, so no type made before them moved (`TODO.md` §84).
+      (k-basic "i8") (k-basic "u8")
       #u)))
 (define n-copy-memo (subr (maxeff kreads (write @t) spin) (k-region-lists k-region-lists int) unit)
   (lambda (from to i)

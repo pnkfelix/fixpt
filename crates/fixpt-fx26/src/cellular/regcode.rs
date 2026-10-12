@@ -2363,9 +2363,11 @@ impl Compiler<'_> {
                     "char=?" if vs.len() == 2 && vs.iter().all(|v| v.is_char()) => Some(Value::boolean(vs[0] == vs[1])),
                     // A fixed-width integer is the fixnum of its value: an
                     // integer that fits the type is its own conversion.
-                    "int->i32" | "int->u32" | "int->i64" | "int->u64" if vs.len() == 1 && vs[0].is_fixnum() => {
+                    "int->i8" | "int->u8" | "int->i32" | "int->u32" | "int->i64" | "int->u64" if vs.len() == 1 && vs[0].is_fixnum() => {
                         let n = vs[0].as_fixnum();
                         let fits = match name.as_str() {
+                            "int->i8" => i8::try_from(n).is_ok(),
+                            "int->u8" => u8::try_from(n).is_ok(),
                             "int->i32" => i32::try_from(n).is_ok(),
                             "int->u32" => u32::try_from(n).is_ok(),
                             "int->i64" => true,

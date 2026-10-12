@@ -22,6 +22,7 @@
 (define apply1 (with values apply1))
 (define as-array (with values as-array))
 (define as-bool (with values as-bool))
+(define as-bytes (with values as-bytes))
 (define as-char (with values as-char))
 (define as-cont (with values as-cont))
 (define as-f32 (with values as-f32))
@@ -270,6 +271,34 @@
 
 (define* ev-make-array (subr (maxeff evals spin) (val val) val)
   (lambda (n x) (the (arrayof val @v) (make-array (as-int n) x))))
+
+;; Bytevectors (`TODO.md` §84), the machines' own, with the operations
+;; the program has: an `i8` or `u8` is the int it stands for.
+(define* ev-bytes-prims! (subr (maxeff stores spin) () unit)
+  (lambda ()
+    (let ((b (lambda ((xs vals) (i int)) (as-bytes (ev-arg xs i))))
+          (n (lambda ((xs vals) (i int)) (as-int (ev-arg xs i))))
+          (made (lambda ((b (bytevectorof @v))) (the val (o-bytes b)))))
+      (begin
+        (prim! 'make-bytevector
+               (lambda (xs) (made (make-bytevector (n xs 0) (int->u8 (n xs 1))))))
+        (prim! 'bytevector-length (lambda (xs) (bytevector-length (b xs 0))))
+        (prim! 'bytevector-u8-ref (lambda (xs) (u8->int (bytevector-u8-ref (b xs 0) (n xs 1)))))
+        (prim! 'bytevector-u8-set!
+               (lambda (xs)
+                 (begin (bytevector-u8-set! (b xs 0) (n xs 1) (int->u8 (n xs 2))) the-unit)))
+        (prim! 'bytevector-copy
+               (lambda (xs) (made (bytevector-copy (b xs 0) (n xs 1) (n xs 2)))))
+        (prim! 'bytevector-copy!
+               (lambda (xs)
+                 (begin (bytevector-copy! (b xs 0) (n xs 1) (b xs 2) (n xs 3) (n xs 4)) the-unit)))
+        (prim! 'bytevector=? (lambda (xs) (bytevector=? (b xs 0) (b xs 1))))
+        (prim! 'string->utf8 (lambda (xs) (made (string->utf8 (as-str (ev-arg xs 0))))))
+        (prim! 'utf8->string
+               (lambda (xs)
+                 (tagcase (utf8->string (b xs 0))
+                   (text s (the val (o-sum 'text s)))
+                   (bad k (the val (o-sum 'bad k))))))))))
 
 ;; How many pairs list `v` has, `n` so far: `length`'s and `list-length`'s.
 (define* ev-list-length (subr (maxeff evals spin) (val int) int)
@@ -600,7 +629,8 @@
 
 (define ev-prims-made unit
   (begin (ev-int-prims!) (ev-text-prims!) (ev-shape-prims!) (ev-data-prims!) (ev-f64-prims!)
-         (ev-f32-prims!) (ev-control-prims!)
+         (ev-f32-prims!) (ev-control-prims!) (ev-bytes-prims!)
+         (ev-width-prims! "i8" 8 #t) (ev-width-prims! "u8" 8 #f)
          (ev-width-prims! "i32" 32 #t) (ev-width-prims! "u32" 32 #f)
          (ev-width-prims! "i64" 64 #t) (ev-width-prims! "u64" 64 #f)))
 

@@ -2305,11 +2305,11 @@ subprocesses, sockets, signals, terminal modes.
   asked for the full text.
 
 **Stages**, each in both checkers, both compilers, every machine
-(native call-outs too) and the evaluator written in FX-26:
-1. `u8` and `i8` (the fixed-width table, as `u32` has it), and
-   bytevectors: make, length, ref, set, copy, `bytevector=?`, a quoted
-   one no longer refused; `string->utf8` and `utf8->string`. Useful with
-   no I/O at all.
+(native call-outs too) and the evaluator written in FX-26. Stage 1, `u8`,
+`i8` and bytevectors, is built (`DONE.md` §84); left of it: a bytevector
+in a place (`rmake-bytevector`), the operations in line natively, and a
+quoted bytevector, still refused (a reader's is the opaque `bytevector`,
+not a `bytevectorof`).
 2. The `io` atom and its ordering rule in both checkers, the compilers'
    effect summaries and the licence; `write-out`, `write-err`; the entry
    point and the exit status, `exit`.
@@ -2318,6 +2318,7 @@ subprocesses, sockets, signals, terminal modes.
 4. `clock` (monotonic, `i64` nanoseconds), `sleep-until` on it, `args`.
 5. `read-line`.
 
-**Where to start:** stage 1's `u8`, beside `u32` in `reps.rs`, the
-checkers' fixed-width tables and `docs/fx26.md`'s; then the bytevector
-operations, the runtime already having the object.
+**Where to start:** stage 2, the `io` atom: `Atom` in `ast.rs` and its
+twin in `check-types-types.fx`, the effect reader in both checkers, the
+compilers' effect summaries (any `io` is "anything else"), and the
+licence (`licence.rs`) refusing it.

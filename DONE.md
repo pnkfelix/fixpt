@@ -1719,3 +1719,30 @@ phases, are left alone. These seven are the only run-table names the
 history has. Over the whole log (517 commits), each machine is one series
 of 517 commits, one sheet and its two charts. The script is in git now.
 
+## 84. I/O, stage 1: `u8`, `i8` and bytevectors (kayak's request, 2026-10-12)
+
+What is left, stages 2 to 5 (the `io` effects and the primitives), is in
+`TODO.md` §84.
+
+**`u8` and `i8`**, the fixed-width table as `i32` and `u32` have it
+(`u8+` to `u8->int`, 18 operations each), fixnum-shaped: the runtime's
+`Width`, both checkers' types, ranges of literals, shapes and subtyping
+(an `int`), both lowerings, both register compilers' constant folds, the
+evaluator written in FX-26 (`ev-width-prims!`), and native code, which
+makes them in line as `i32`'s (`pure_fast`, its wrap now for 8 bits or
+32). The base types are made last in both checkers, so no type id before
+them moved. Test: `native/small-width-ops.fx`, every operation at a
+byte's edges, the same on nine machines and the evaluator; in `direct.rs`
+and `evaluator.rs`.
+
+**Bytevectors**, `(bytevectorof r)`, generative type 8: the heap's
+bytevector at run time; an array of `u8` at `r` to the safety analyses.
+`make-bytevector`, `bytevector-length`, `-u8-ref`, `-u8-set!`, `-copy`,
+`-copy!`, `bytevector=?`, `string->utf8`, and `utf8->string`, whose bytes
+that are not UTF-8 give `(sum bad k)`, `k` the offset of the first. New
+runtime primitives where the Scheme ones would not do (a write gives
+unit; spans checked); the evaluator holds one as `(o-bytes …)` and prints
+it as the machines do, `#u8(…)`. Tests: `run/bytevectors.fx`,
+`run/bytevector-printed.fx`, `regions/bytevector-escapes.fx`. Docs:
+`docs/fx26.md`, "Bytevectors" and "Fixed-width integers".
+

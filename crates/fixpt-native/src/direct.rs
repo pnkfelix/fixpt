@@ -3571,14 +3571,15 @@ fn raw_fast(a: &mut Asm, stubs: &mut Vec<(Label, u32)>, signed: bool, what: &str
     }
 }
 
-/// `RESULT`, the fixnum of an integer, wrapped to a 32-bit type's range: its
-/// bits 3 to 34 kept, sign-extended if the type is signed.
-fn wrap32(a: &mut Asm, signed: bool) {
+/// `RESULT`, the fixnum of an integer, wrapped to the range of a type of
+/// `bits` bits (8 or 32): its bits 3 to `bits` + 2 kept, sign-extended if
+/// the type is signed.
+fn wrap_small(a: &mut Asm, signed: bool, bits: u32) {
     if signed {
-        a.e(lsl_imm(RESULT, RESULT, 29));
-        a.e(asr_imm(RESULT, RESULT, 29));
+        a.e(lsl_imm(RESULT, RESULT, 61 - bits));
+        a.e(asr_imm(RESULT, RESULT, 61 - bits));
     } else {
-        a.e(and_bits(RESULT, RESULT, 3, 32));
+        a.e(and_bits(RESULT, RESULT, 3, bits));
     }
 }
 
@@ -3823,18 +3824,27 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
     if let Some(what) = rest.strip_prefix("f32") {
         return f32_fast(a, what, y);
     }
-    let signed = |t: &str| match t {
-        "i32" => Some(true),
-        "u32" => Some(false),
+    // The fixnum-shaped widths: whether signed, and their bits.
+    let width = |t: &str| match t {
+        "i8" => Some((true, 8)),
+        "u8" => Some((false, 8)),
+        "i32" => Some((true, 32)),
+        "u32" => Some((false, 32)),
         _ => None,
     };
-    if let Some(s) = rest.strip_prefix("int->").and_then(signed) {
+    if let Some((s, bits)) = rest.strip_prefix("int->").and_then(width) {
         fixnum(a, x);
-        wrap32(a, s);
+        wrap_small(a, s, bits);
         return true;
     }
-    let Some(s) = rest.get(..3).and_then(signed) else { return false };
-    let test = match &rest[3..] {
+    let Some((s, bits, op)) = ["i8", "u8", "i32", "u32"]
+        .iter()
+        .find_map(|t| rest.strip_prefix(t).filter(|op| !op.starts_with(|c: char| c.is_ascii_digit())).and_then(|op| width(t).map(|(s, b)| (s, b, op))))
+    else {
+        return false;
+    };
+    let wrap = |a: &mut Asm, s: bool| wrap_small(a, s, bits);
+    let test = match op {
         "<" => Some(Cond::Lt),
         "<=" => Some(Cond::Le),
         ">" => Some(Cond::Gt),
@@ -3849,26 +3859,26 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
         a.e(csel(RESULT, X13, X14, c));
         return true;
     }
-    match &rest[3..] {
+    match op {
         "->int" => {}
         "+" => {
             a.e(add(RESULT, x, y));
-            wrap32(a, s);
+            wrap(a, s);
         }
         "-" => {
             a.e(sub(RESULT, x, y));
-            wrap32(a, s);
+            wrap(a, s);
         }
         "*" => {
             a.e(asr_imm(X13, y, 3));
             a.e(mul(RESULT, x, X13));
-            wrap32(a, s);
+            wrap(a, s);
         }
         "-quotient" => {
             nonzero(a);
             a.e(sdiv(X13, x, y));
             a.e(lsl_imm(RESULT, X13, 3));
-            wrap32(a, s);
+            wrap(a, s);
         }
         "-remainder" => {
             nonzero(a);
@@ -3881,18 +3891,18 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
         "-not" => {
             a.e(sub(RESULT, XZR, x));
             a.e(sub_imm(RESULT, RESULT, 8));
-            wrap32(a, s);
+            wrap(a, s);
         }
         "-shl" => {
             fixnum(a, y);
-            a.e(ubfx(X13, y, 3, 5));
+            a.e(ubfx(X13, y, 3, bits.trailing_zeros()));
             a.e(lslv(RESULT, x, X13));
-            wrap32(a, s);
+            wrap(a, s);
         }
         // An arithmetic or logical shift right, the tag's bits cleared.
         "-shr" => {
             fixnum(a, y);
-            a.e(ubfx(X13, y, 3, 5));
+            a.e(ubfx(X13, y, 3, bits.trailing_zeros()));
             a.e(if s { asrv(X14, x, X13) } else { lsrv(X14, x, X13) });
             a.e(and_bits(RESULT, X14, 3, 61));
         }

@@ -190,6 +190,56 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("f32-flat", "(subr pure () (flatlayout f32))"),
     ("f64-flat", "(subr pure () (flatlayout f64))"),
     // The fixed-width integers (PLAN.md, Q2 b): wrapping arithmetic.
+    // Bytevectors (`TODO.md` §84): made, read and written at a region, as
+    // arrays are; R7RS's names. `bytevector-copy` takes a start and an end,
+    // `bytevector-copy!` R7RS's `to at from start end`.
+    ("make-bytevector", "(poly ((r region)) (subr (alloc r) (int u8) (bytevectorof r)))"),
+    ("bytevector-length", "(poly ((r region)) (subr pure ((bytevectorof r)) nat))"),
+    ("bytevector-u8-ref", "(poly ((r region)) (subr (read r) ((bytevectorof r) int) u8))"),
+    ("bytevector-u8-set!", "(poly ((r region)) (subr (write r) ((bytevectorof r) int u8) unit))"),
+    ("bytevector-copy", "(poly ((r1 region) (r2 region)) (subr (maxeff (read r1) (alloc r2)) ((bytevectorof r1) int int) (bytevectorof r2)))"),
+    ("bytevector-copy!", "(poly ((r1 region) (r2 region)) (subr (maxeff (read r1) (write r2)) ((bytevectorof r2) int (bytevectorof r1) int int) unit))"),
+    ("bytevector=?", "(poly ((r1 region) (r2 region)) (subr (maxeff (read r1) (read r2)) ((bytevectorof r1) (bytevectorof r2)) bool))"),
+    // A string's UTF-8, and back: bytes not UTF-8 give the offset of the
+    // first bad one.
+    ("string->utf8", "(poly ((r region)) (subr (alloc r) (string) (bytevectorof r)))"),
+    ("utf8->string", "(poly ((r region)) (subr (read r) ((bytevectorof r)) (sumof (text string) (bad int))))"),
+    ("i8+", "(subr pure (i8 i8) i8)"),
+    ("i8-", "(subr pure (i8 i8) i8)"),
+    ("i8*", "(subr pure (i8 i8) i8)"),
+    ("i8-quotient", "(subr pure (i8 i8) i8)"),
+    ("i8-remainder", "(subr pure (i8 i8) i8)"),
+    ("i8-and", "(subr pure (i8 i8) i8)"),
+    ("i8-or", "(subr pure (i8 i8) i8)"),
+    ("i8-xor", "(subr pure (i8 i8) i8)"),
+    ("i8<", "(subr pure (i8 i8) (bool (then (< 0 1)) (else (<= 1 0))))"),
+    ("i8<=", "(subr pure (i8 i8) (bool (then (<= 0 1)) (else (< 1 0))))"),
+    ("i8>", "(subr pure (i8 i8) (bool (then (< 1 0)) (else (<= 0 1))))"),
+    ("i8>=", "(subr pure (i8 i8) (bool (then (<= 1 0)) (else (< 0 1))))"),
+    ("i8=", "(subr pure (i8 i8) (bool (then (= 0 1)) (else (not (= 0 1)))))"),
+    ("i8-shl", "(subr pure (i8 int) i8)"),
+    ("i8-shr", "(subr pure (i8 int) i8)"),
+    ("i8-not", "(subr pure (i8) i8)"),
+    ("int->i8", "(subr pure (int) i8)"),
+    ("i8->int", "(subr pure (i8) int)"),
+    ("u8+", "(subr pure (u8 u8) u8)"),
+    ("u8-", "(subr pure (u8 u8) u8)"),
+    ("u8*", "(subr pure (u8 u8) u8)"),
+    ("u8-quotient", "(subr pure (u8 u8) u8)"),
+    ("u8-remainder", "(subr pure (u8 u8) u8)"),
+    ("u8-and", "(subr pure (u8 u8) u8)"),
+    ("u8-or", "(subr pure (u8 u8) u8)"),
+    ("u8-xor", "(subr pure (u8 u8) u8)"),
+    ("u8<", "(subr pure (u8 u8) (bool (then (< 0 1)) (else (<= 1 0))))"),
+    ("u8<=", "(subr pure (u8 u8) (bool (then (<= 0 1)) (else (< 1 0))))"),
+    ("u8>", "(subr pure (u8 u8) (bool (then (< 1 0)) (else (<= 0 1))))"),
+    ("u8>=", "(subr pure (u8 u8) (bool (then (<= 1 0)) (else (< 0 1))))"),
+    ("u8=", "(subr pure (u8 u8) (bool (then (= 0 1)) (else (not (= 0 1)))))"),
+    ("u8-shl", "(subr pure (u8 int) u8)"),
+    ("u8-shr", "(subr pure (u8 int) u8)"),
+    ("u8-not", "(subr pure (u8) u8)"),
+    ("int->u8", "(subr pure (int) u8)"),
+    ("u8->int", "(subr pure (u8) int)"),
     ("i32+", "(subr pure (i32 i32) i32)"),
     ("i32-", "(subr pure (i32 i32) i32)"),
     ("i32*", "(subr pure (i32 i32) i32)"),
@@ -468,7 +518,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
 
 /// The initial environment as text, for the checker written in FX-26:
 /// the standard generative types' declarations (`check::VSUBR`,
-/// `FLATLAYOUT`, `FLATARRAYOF`, `IDENTITY`, `EQTABLE`, `BLOBREF`, `FLAT_ARRAYOF`, `FLAT_KEYED`: 0 to 7), `datum`'s
+/// `FLATLAYOUT`, `FLATARRAYOF`, `IDENTITY`, `EQTABLE`, `BLOBREF`, `FLAT_ARRAYOF`, `FLAT_KEYED`, `BYTEVECTOROF`: 0 to 8), `datum`'s
 /// (`check::DATUM`), then `(name type)` for each binding.
 pub fn standard_text() -> String {
     let decl: String = [
@@ -480,6 +530,7 @@ pub fn standard_text() -> String {
         crate::check::BLOBREF,
         crate::check::FLAT_ARRAYOF,
         crate::check::FLAT_KEYED,
+        crate::check::BYTEVECTOROF,
     ]
         .iter()
         .map(|d| format!("(define-generative {d})\n"))

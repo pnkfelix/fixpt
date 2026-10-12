@@ -583,7 +583,9 @@
   (lambda (name c)
     (tagcase c
       (rc-int (n)
-        (case name (("int->i32") (and (>= n -2147483648) (<= n 2147483647)))
+        (case name (("int->i8") (and (>= n -128) (<= n 127)))
+                   (("int->u8") (and (>= n 0) (<= n 255)))
+                   (("int->i32") (and (>= n -2147483648) (<= n 2147483647)))
                    (("int->u32") (and (>= n 0) (<= n 4294967295)))
                    (("int->i64") #t)
                    (("int->u64") (>= n 0))

@@ -48,6 +48,11 @@
 (define* efail-expected (subr evals (string) void)
   (lambda (what) (efail (string-append what " is expected"))))
 
+;; `v`, a bytevector; or fails.
+(define* as-bytes (subr evals (val) (bytevectorof @v))
+  (lambda (v)
+    (tagcase (as-other v "a bytevector") (o-bytes (b) b) (else y (efail-expected "a bytevector")))))
+
 ;; `v`, an `other`; or fails, `what` being expected.
 (define* as-other (subr evals (val string) other)
   (lambda (v what) (typecase v (sum o o) (else (efail-expected what)))))
@@ -159,6 +164,7 @@
       (o-blob (fs bs) (tagcase b (o-blob (gs cs) (eq? fs gs)) (else y #f)))
       ;; Owner and offset, as the machines' one word.
       (o-bref (o i) (tagcase b (o-bref (p j) (and (= i j) (ev-same-blob? o p))) (else y #f)))
+      (o-bytes (x) (tagcase b (o-bytes (y) (eq? x y)) (else y #f)))
       (else y #f))))
 
 ;; `eq?` of two values, as the machines have it: the same mutable object;
@@ -208,6 +214,16 @@
 (define* ev-count (subr (maxeff (read @v) spin) (vfields) int)
   (lambda (fs) (if (null? fs) 0 (+ 1 (ev-count (cdr fs))))))
 
+;; A bytevector's bytes up to `i`, space-separated as Scheme writes them,
+;; before `acc`, those after.
+(define* show-bytes
+  (subr (maxeff (read @globals) (read @v) spin) ((bytevectorof @v) int string) string)
+  (lambda (b i acc)
+    (if (< i 0)
+        acc
+        (let ((x (int->string (bytevector-u8-ref b i))))
+          (show-bytes b (- i 1) (if (string=? acc "") x (k-cat3 x " " acc)))))))
+
 ;; How Scheme writes a bloblet of `n` fields and `m` bytes.
 (define* show-bloblet (subr (read @globals) (int int) string)
   (lambda (n m) (k-cat5 "#<bloblet " (int->string n) " fields " (int->string m) " bytes>")))
@@ -221,6 +237,7 @@
       (o-icell (f c) "#<bloblet 3 fields 0 bytes>")
       (o-blob (fs bs) (show-bloblet (+ 1 (array-length fs)) (array-length bs)))
       (o-bref (o i) (k-cat3 "#<suffix-ref bloblet +" (int->string i) ">"))
+      (o-bytes (b) (k-cat3 "#u8(" (show-bytes b (- (bytevector-length b) 1) "") ")"))
       (o-tag (t) "#<prompt-tag>")
       (o-cont (k) "#<continuation>")
       (o-esc (k) "#<continuation>")

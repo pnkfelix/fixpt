@@ -287,6 +287,17 @@ fn fixed_width_operations_as_the_rust_machine_gives_them() {
     }
 }
 
+/// `i8` and `u8` (`TODO.md` §84), in line as `i32` and `u32` are, wrapped
+/// to a byte (`programs/native/small-width-ops.fx`), as the Rust machine
+/// gives them.
+#[test]
+fn byte_width_operations_as_the_rust_machine_gives_them() {
+    for gc_every in [None, Some(7)] {
+        let r = run_collecting(&program("native/small-width-ops"), "small-width-ops", &[0], FUEL, gc_every);
+        assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "collecting every {gc_every:?}: {:?} against {}", r.direct, r.rust);
+    }
+}
+
 /// Mutable bloblets made and written in line (`TODO.md` §57,
 /// `programs/native/bloblet-tree.fx`): a tree built, its leaves replaced by
 /// younger nodes, summed; as the Rust machine gives it, collecting often too.

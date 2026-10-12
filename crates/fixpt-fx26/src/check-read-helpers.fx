@@ -814,6 +814,8 @@
   (subr (maxeff (read @globals) (alloc @t)) (string) (listof (pairof int int @t) acyclic))
   (lambda (n)
     (case n
+      (("i8") (list (cons -128 127)))
+      (("u8") (list (cons 0 255)))
       (("i32") (list (cons -2147483648 2147483647)))
       (("u32") (list (cons 0 4294967295)))
       (("i64") (list (cons -9223372036854775808 9223372036854775807)))

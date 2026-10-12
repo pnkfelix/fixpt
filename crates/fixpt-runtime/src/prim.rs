@@ -200,6 +200,8 @@ fn run_word_by(rt: &mut Runtime, a: &[Value], run: Option<crate::RunWord>) -> Ou
 /// A fixed-width integer type: its bits, and whether it is signed.
 #[derive(Clone, Copy)]
 enum Width {
+    I8,
+    U8,
     I32,
     U32,
     I64,
@@ -209,15 +211,18 @@ enum Width {
 impl Width {
     fn bits(self) -> u32 {
         match self {
+            Width::I8 | Width::U8 => 8,
             Width::I32 | Width::U32 => 32,
             Width::I64 | Width::U64 => 64,
         }
     }
     fn signed(self) -> bool {
-        matches!(self, Width::I32 | Width::I64)
+        matches!(self, Width::I8 | Width::I32 | Width::I64)
     }
     fn name(self) -> &'static str {
         match self {
+            Width::I8 => "an i8",
+            Width::U8 => "a u8",
             Width::I32 => "an i32",
             Width::U32 => "a u32",
             Width::I64 => "an i64",
@@ -486,7 +491,7 @@ pub fn never_collects(name: &str) -> bool {
                 | "%fx26-sum?"
                 | "%fx26-product?"
         )
-        || ["%fx26-i32", "%fx26-u32", "%fx26-i64", "%fx26-u64", "%fx26-f64", "%fx26-f32", "%fx26-int->"].iter().any(|p| name.starts_with(p))
+        || ["%fx26-i8", "%fx26-u8", "%fx26-i32", "%fx26-u32", "%fx26-i64", "%fx26-u64", "%fx26-f64", "%fx26-f32", "%fx26-int->"].iter().any(|p| name.starts_with(p))
 }
 
 /// Operation `op` of the fixed-width integers of width `w`.
@@ -751,6 +756,23 @@ fn string_cmp(rt: &mut Runtime, a: Value, b: Value) -> Outcome<std::cmp::Orderin
         }
     }
     Ok(rt.heap.string_cmp(a, b))
+}
+
+/// A bytevector's length, or a type error.
+fn bytevector_in(rt: &mut Runtime, v: Value) -> Outcome<usize> {
+    if !rt.heap.is_a(v, ObjType::Bytevector) {
+        return rt.type_error("a bytevector", v);
+    }
+    Ok(rt.heap.bytevector_len(v))
+}
+
+/// Bytes `start` to `end` of bytevector `v`, checked: `start` no more than
+/// `end`, `end` no more than its length.
+fn bytevector_span(rt: &mut Runtime, v: Value, start: Value, end: Value) -> Outcome<(usize, usize)> {
+    let n = bytevector_in(rt, v)?;
+    let e = index(rt, end, n + 1, "bytevector")?;
+    let s = index(rt, start, e + 1, "bytevector")?;
+    Ok((s, e))
 }
 
 fn get_string(rt: &mut Runtime, v: Value) -> Outcome<String> {
@@ -1130,6 +1152,50 @@ prims! {
         Ok(Value::UNSPECIFIED)
     });
 
+    // FX-26's bytevectors (`TODO.md` §84): a write gives unit; a copy and
+    // a span checked; UTF-8 made, and read with the offset of the first
+    // byte that is not.
+    "%fx26-bytevector-u8-set!", 3, Some(3), simple!(|rt, a| {
+        let n = bytevector_in(rt, a[0])?;
+        let i = index(rt, a[1], n, "bytevector")?;
+        let b = int(rt, a[2])?;
+        if !(0..=255).contains(&b) { return rt.fail("byte out of range", &[a[2]]); }
+        rt.heap.bytevector_set(a[0], i, b as u8);
+        Ok(Value::UNIT)
+    });
+    "%fx26-bytevector-copy", 3, Some(3), simple!(|rt, a| {
+        let (start, end) = bytevector_span(rt, a[0], a[1], a[2])?;
+        let bytes: Vec<u8> = (start..end).map(|i| rt.heap.bytevector_ref(a[0], i)).collect();
+        Ok(rt.heap.make_bytevector(&bytes))
+    });
+    "%fx26-bytevector-copy!", 5, Some(5), simple!(|rt, a| {
+        let (start, end) = bytevector_span(rt, a[2], a[3], a[4])?;
+        let n = bytevector_in(rt, a[0])?;
+        let at = index(rt, a[1], n + 1, "bytevector")?;
+        if at + (end - start) > n { return rt.fail("bytevector-copy!: the bytes do not fit", &[a[1]]); }
+        let bytes: Vec<u8> = (start..end).map(|i| rt.heap.bytevector_ref(a[2], i)).collect();
+        for (k, b) in bytes.into_iter().enumerate() { rt.heap.bytevector_set(a[0], at + k, b); }
+        Ok(Value::UNIT)
+    });
+    "%fx26-bytevector=?", 2, Some(2), simple!(|rt, a| {
+        let (n, m) = (bytevector_in(rt, a[0])?, bytevector_in(rt, a[1])?);
+        Ok(Value::boolean(n == m && (0..n).all(|i| rt.heap.bytevector_ref(a[0], i) == rt.heap.bytevector_ref(a[1], i))))
+    });
+    "%fx26-string->utf8", 1, Some(1), simple!(|rt, a| {
+        let s = get_string(rt, a[0])?;
+        Ok(rt.heap.make_bytevector(s.as_bytes()))
+    });
+    "%fx26-utf8->string", 1, Some(1), simple!(|rt, a| {
+        let n = bytevector_in(rt, a[0])?;
+        let bytes: Vec<u8> = (0..n).map(|i| rt.heap.bytevector_ref(a[0], i)).collect();
+        let (tag, v) = match std::str::from_utf8(&bytes) {
+            Ok(text) => ("text", rt.heap.make_string(text)),
+            Err(e) => ("bad", Value::fixnum(e.valid_up_to() as i64)),
+        };
+        let tag = rt.heap.intern(tag);
+        Ok(rt.heap.make_frozen(SUM_KIND, &[tag, v]))
+    });
+
     // ---- errors ----
     "error", 1, None, simple!(|rt, a| {
         let msg = get_string(rt, a[0])?;
@@ -1462,8 +1528,45 @@ prims! {
     "%fx26-intern-datum", 1, Some(1), simple!(|rt, a| Ok(rt.heap.intern_datum(a[0])));
     // Whether a datum is an `f64`, and it as one (the reader's atoms).
     "%fx26-datum-f64?", 1, Some(1), simple!(|rt, a| Ok(Value::boolean(rt.heap.obj_type(a[0]) == Some(ObjType::Flonum))));
-    // The fixed-width integers, `i32`, `u32`, `i64`, `u64` (PLAN.md, Q2 b):
+    // The fixed-width integers, `i8`, `u8`, `i32`, `u32`, `i64`, `u64` (PLAN.md,
+    // Q2 b; `u8` and `i8` kayak's, TODO.md §84):
     // wrapping arithmetic, on values that are the integers they stand for.
+    "%fx26-i8+", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "add", Width::I8));
+    "%fx26-i8-", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "sub", Width::I8));
+    "%fx26-i8*", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "mul", Width::I8));
+    "%fx26-i8-quotient", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "quot", Width::I8));
+    "%fx26-i8-remainder", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "rem", Width::I8));
+    "%fx26-i8-and", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "and", Width::I8));
+    "%fx26-i8-or", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "or", Width::I8));
+    "%fx26-i8-xor", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "xor", Width::I8));
+    "%fx26-i8<", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "lt", Width::I8));
+    "%fx26-i8<=", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "le", Width::I8));
+    "%fx26-i8>", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "gt", Width::I8));
+    "%fx26-i8>=", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "ge", Width::I8));
+    "%fx26-i8=", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "eq", Width::I8));
+    "%fx26-i8-shl", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "shl", Width::I8));
+    "%fx26-i8-shr", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "shr", Width::I8));
+    "%fx26-i8-not", 1, Some(1), simple!(|rt, a| fixed_op(rt, a, "not", Width::I8));
+    "%fx26-int->i8", 1, Some(1), simple!(|rt, a| fixed_op(rt, a, "from", Width::I8));
+    "%fx26-i8->int", 1, Some(1), simple!(|rt, a| fixed_op(rt, a, "to", Width::I8));
+    "%fx26-u8+", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "add", Width::U8));
+    "%fx26-u8-", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "sub", Width::U8));
+    "%fx26-u8*", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "mul", Width::U8));
+    "%fx26-u8-quotient", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "quot", Width::U8));
+    "%fx26-u8-remainder", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "rem", Width::U8));
+    "%fx26-u8-and", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "and", Width::U8));
+    "%fx26-u8-or", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "or", Width::U8));
+    "%fx26-u8-xor", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "xor", Width::U8));
+    "%fx26-u8<", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "lt", Width::U8));
+    "%fx26-u8<=", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "le", Width::U8));
+    "%fx26-u8>", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "gt", Width::U8));
+    "%fx26-u8>=", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "ge", Width::U8));
+    "%fx26-u8=", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "eq", Width::U8));
+    "%fx26-u8-shl", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "shl", Width::U8));
+    "%fx26-u8-shr", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "shr", Width::U8));
+    "%fx26-u8-not", 1, Some(1), simple!(|rt, a| fixed_op(rt, a, "not", Width::U8));
+    "%fx26-int->u8", 1, Some(1), simple!(|rt, a| fixed_op(rt, a, "from", Width::U8));
+    "%fx26-u8->int", 1, Some(1), simple!(|rt, a| fixed_op(rt, a, "to", Width::U8));
     "%fx26-i32+", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "add", Width::I32));
     "%fx26-i32-", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "sub", Width::I32));
     "%fx26-i32*", 2, Some(2), simple!(|rt, a| fixed_op(rt, a, "mul", Width::I32));

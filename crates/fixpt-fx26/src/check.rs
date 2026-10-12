@@ -35,10 +35,12 @@ use std::collections::{HashMap, HashSet};
 pub const VSUBR: &str = "(vsubr (e effect +) (t type -) (r type +)) (subr e ((listof t acyclic)) r)";
 /// A flat array's element layout (Q6), generative type 1: what `t` is kept
 /// as, a number at run time; nothing sees inside it.
-/// The integers an `i32` or a `u32` holds, least and greatest: what a
-/// literal of one may be.
+/// The integers a fixed-width integer type holds, least and greatest: what
+/// a literal of one may be.
 pub(crate) fn fixed_range(name: &str) -> Option<(i128, i128)> {
     match name {
+        "i8" => Some((i8::MIN as i128, i8::MAX as i128)),
+        "u8" => Some((0, u8::MAX as i128)),
         "i32" => Some((i32::MIN as i128, i32::MAX as i128)),
         "u32" => Some((0, u32::MAX as i128)),
         "i64" => Some((i64::MIN as i128, i64::MAX as i128)),
@@ -122,6 +124,11 @@ pub(crate) const FLAT_ARRAYOF_INDEX: u32 = 6;
 /// tag holding its numeric labels as they are, then the sum's variant.
 pub const FLAT_KEYED: &str = "(flat-keyed (w size) (s flat)) int";
 pub(crate) const FLAT_KEYED_INDEX: u32 = 7;
+/// A bytevector made by a program (`TODO.md` §84), generative type 8: at
+/// run time the heap's bytevector, its bytes raw; to safety's analyses an
+/// array of `u8` at `r`, which its writes and reads name, and opaque to
+/// anything else. A reader's bytevector, in a `datum`, is `bytevector`.
+pub const BYTEVECTOROF: &str = "(bytevectorof (r region)) (arrayof u8 r)";
 /// A scalar flat's layout (`fixpt_heap::layout::FLAT_*`), as the runtime
 /// reads and writes its bytes.
 pub(crate) fn flat_code(name: &str) -> Option<i64> {
@@ -569,7 +576,9 @@ impl Checker {
         let void = arena.ty(Ty::Void);
         // A Scheme vector and bytevector, as a reader makes them in a datum:
         // opaque, each a shape of its own.
-        for name in ["vector", "bytevector"] {
+        // Then `i8` and `u8` (`TODO.md` §84), the fixnums they stand for, as
+        // an `i32` is: last, so no type made before them moved.
+        for name in ["vector", "bytevector", "i8", "u8"] {
             let sym = interner.intern(name);
             base.insert(sym, arena.ty(Ty::Base(sym)));
         }
@@ -661,7 +670,7 @@ impl Checker {
         // generative type, in both checkers, whose insides nothing sees
         // (no `up-` or `down-`: a `vsubr` is called with its arguments, not
         // their list). `vlambda` makes one; `apply` calls one on a list.
-        for decl in [VSUBR, FLATLAYOUT, FLATARRAYOF, IDENTITY, EQTABLE, BLOBREF, FLAT_ARRAYOF, FLAT_KEYED] {
+        for decl in [VSUBR, FLATLAYOUT, FLATARRAYOF, IDENTITY, EQTABLE, BLOBREF, FLAT_ARRAYOF, FLAT_KEYED, BYTEVECTOROF] {
             let forms = c.read(decl).expect("reads");
             c.define_generative(&forms[0], &forms[1]).unwrap_or_else(|e| panic!("`{decl}` is wrong: {e}"));
         }
@@ -824,7 +833,7 @@ impl Checker {
         let t = self.arena.resolve(t);
         match self.arena.get(t) {
             Ty::Base(s) => match self.interner.name(*s) {
-                "int" | "i32" | "u32" | "i64" | "u64" => bit("int"),
+                "int" | "i8" | "u8" | "i32" | "u32" | "i64" | "u64" => bit("int"),
                 "f64" => bit("f64"),
                 "f32" => bit("f32"),
                 "char" => bit("char"),
@@ -3083,7 +3092,7 @@ impl Checker {
             // (`TODO.md` §63; native code boxes a raw one where a value is
             // wanted, `direct/reps.rs`).
             (Ty::Base(x), Ty::Base(y)) => {
-                x == y || (matches!(self.interner.name(x), "i32" | "u32" | "i64" | "u64") && self.interner.name(y) == "int")
+                x == y || (matches!(self.interner.name(x), "i8" | "u8" | "i32" | "u32" | "i64" | "u64") && self.interner.name(y) == "int")
             }
             // What proves something is a `bool`; and what proves more is
             // below what proves less.

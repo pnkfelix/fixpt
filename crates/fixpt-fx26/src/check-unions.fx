@@ -39,7 +39,8 @@
 (define k-base-shape (subr (read @globals) (symbol) int)
   (lambda (s)
     (case (symbol->string s)
-      (("int" "i32" "u32" "i64" "u64") 0) (("f64") 1) (("f32") 2) (("char") 3) (("bool") 4)
+      (("int" "i8" "u8" "i32" "u32" "i64" "u64") 0)
+      (("f64") 1) (("f32") 2) (("char") 3) (("bool") 4)
       (("string") 7)
       ;; `unit` is the symbol `#u` at run time.
       (("symbol" "unit") 8)

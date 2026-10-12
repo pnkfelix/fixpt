@@ -40,6 +40,8 @@
   ;; A blobref (`TODO.md` §77): its owner, a bloblet, and a byte of its
   ;; suffix.
   (o-bref val int)
+  ;; A bytevector (`TODO.md` §84), as the machines have one.
+  (o-bytes (bytevectorof @v))
   (o-tag (prompt-tag val val (maxeff runs spin) @x))
   (o-cont (composable val val (maxeff runs spin) @x))
   ;; A `cwcc` escape.
@@ -92,6 +94,7 @@
    (val as-int (subr evals (val) int))
    (val as-key (subr (maxeff evals spin) (val) (mark-key val @x)))
    (val as-other (subr evals (val string) other))
+   (val as-bytes (subr evals (val) (bytevectorof @v)))
    (val as-pair (subr evals (val) (pairof val val @v)))
    (val as-ref (subr evals (val) vcell))
    (val as-str (subr evals (val) string))

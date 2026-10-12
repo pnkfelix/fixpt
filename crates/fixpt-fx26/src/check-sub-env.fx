@@ -31,15 +31,16 @@
 (hide (include check-types) (include check-print-parts) (include check-effects) (include tables)
       (include parser))
 
-;; Base `x` below base `y`: the same, or an `i32` or `u32`, the fixnum it
-;; stands for, or an `i64` or `u64`, the exact integer, below `int`. As the
-;; Rust checker's rule.
+;; Base `x` below base `y`: the same, or an `i8`, `u8`, `i32` or `u32`, the
+;; fixnum it stands for, or an `i64` or `u64`, the exact integer, below
+;; `int`. As the Rust checker's rule.
 (define k-base-below? (subr (read @globals) (symbol symbol) bool)
   (lambda (x y)
     (or (symbol=? x y)
         (and (string=? (symbol->string y) "int")
-             (or (or (string=? (symbol->string x) "i32") (string=? (symbol->string x) "u32"))
-                 (or (string=? (symbol->string x) "i64") (string=? (symbol->string x) "u64")))))))
+             (case (symbol->string x)
+               (("i8" "u8" "i32" "u32" "i64" "u64") #t)
+               (else #f))))))
 
 (define k-bool=? (subr pure (bool bool) bool) (lambda (x y) (if x y (not y))))
 (define k-part-find (subr kreads (k-parts symbol) int)

@@ -51,6 +51,8 @@ fn test_programs() {
         // every operation, at the edges of each type.
         include_str!("programs/sizes/fixed-width-literals.fx"),
         include_str!("programs/native/fixed-width-ops.fx"),
+        // And `i8` and `u8` (TODO.md §84).
+        include_str!("programs/native/small-width-ops.fx"),
     ] {
         both(p);
     }
