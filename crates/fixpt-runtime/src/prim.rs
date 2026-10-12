@@ -454,6 +454,8 @@ pub fn never_collects(name: &str) -> bool {
         || name == "%fx26-arithmetic-shift"
         // A bloblet's count of fields (`array-length`), which only looks.
         || name == "%bloblet-fields"
+        // A bytevector's length and a byte of it (`TODO.md` §84).
+        || matches!(name, "bytevector-length" | "bytevector-u8-ref")
         || matches!(name, "%fx26-eqtable-has?" | "%fx26-eqtable-count" | "%fx26-eqtable-delete!")
         // A blobref's read, owner, offset and step (`TODO.md` §77): an `f64`
         // read allocates its box, which never collects.

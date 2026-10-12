@@ -573,6 +573,11 @@ pub fn run_files(backend: Backend, files: &[String]) -> i32 {
         Err(code) => return code,
     };
     session.scheme.runtime_unrooted().world.args = args.to_vec();
+    // A program run whole has no budget, as the REPL's forms do, unless
+    // one is asked for (`TODO.md` §84): it ends when it ends.
+    if crate::STEP_LIMIT.get().is_none() {
+        session.set_step_limit(None);
+    }
     for f in files {
         let text = match std::fs::read_to_string(f) {
             Ok(t) => t,

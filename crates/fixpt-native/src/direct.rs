@@ -3782,6 +3782,25 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
         a.e(lsl_imm(RESULT, X16, 3));
         return true;
     }
+    // A bytevector (`TODO.md` §84), all suffix: its length the word before
+    // the bytes, a byte at its index. The type says it is one; an index
+    // past it, or not a fixnum, is the primitive's to refuse.
+    if name == "bytevector-length" {
+        a.e(ldur(X13, x, -4));
+        a.e(lsl_imm(RESULT, X13, 3));
+        return true;
+    }
+    if name == "bytevector-u8-ref" {
+        fixnum(a, y);
+        a.e(ldur(X14, x, -4));
+        a.e(asr_imm(X15, y, 3));
+        a.e(cmp(X15, X14));
+        a.to(slow, Fix::If(Cond::Hs));
+        a.e(add(X13, x, X15));
+        a.e(ldurb(X16, X13, 4));
+        a.e(lsl_imm(RESULT, X16, 3));
+        return true;
+    }
     if name == "%fx26-flatarray-length" {
         flat_count(a, x, X13);
         a.e(lsl_imm(RESULT, X13, 3));

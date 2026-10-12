@@ -298,6 +298,23 @@ fn byte_width_operations_as_the_rust_machine_gives_them() {
     }
 }
 
+/// A bytevector's bytes and length read in line (`TODO.md` §84,
+/// `programs/native/bytevector-sum.fx`), as the Rust machine gives them,
+/// collecting often too; and a read past the end refused as the
+/// primitive refuses it.
+#[test]
+fn bytevector_reads_in_line() {
+    for gc_every in [None, Some(7)] {
+        let r = run_collecting(&program("native/bytevector-sum"), "bytevector-sum", &[1000], FUEL, gc_every);
+        assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "collecting every {gc_every:?}: {:?} against {}", r.direct, r.rust);
+    }
+    let defs = "(define* past (subr (maxeff (alloc @b) (read @b)) (int) int) (lambda (i) (bytevector-u8-ref (the (bytevectorof @b) (make-bytevector 3 (int->u8 1))) i)))";
+    for i in [3, -1] {
+        let r = run(defs, "past", &[i], FUEL);
+        assert!(matches!(&r.direct, Err(m) if m.contains("out of range")), "{i}: {:?}", r.direct);
+    }
+}
+
 /// Mutable bloblets made and written in line (`TODO.md` §57,
 /// `programs/native/bloblet-tree.fx`): a tree built, its leaves replaced by
 /// younger nodes, summed; as the Rust machine gives it, collecting often too.
