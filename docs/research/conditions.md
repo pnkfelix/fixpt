@@ -171,7 +171,14 @@ restart's `(goto r)` by its prompt.
 
 ## 7. Questions for the user
 
-1. Design B (handlers at the raise, restarts as escapes), or A alone?
+1. Decided by the user (2026-10-12): **design B**, handlers at the raise,
+   restarts as escapes. R6RS's model (from memory: `with-exception-handler`
+   calls its handler where `raise` is, before unwinding;
+   `raise-continuable` returns the handler's value; `guard` unwinds, so is
+   design A on top of B), with Common Lisp's named restarts, which typed
+   prompts give FX-26; R7RS kept R6RS's handlers, and `fixpt`'s Scheme
+   implements them (`with-exception-handler`, `raise-continuable`,
+   `guard`).
 2. Syntax (`handle`, `raise`) or standard procedures only?
 3. The `D` of an escape: an escape-only kind of tag, or the top effect,
    `yolo`?
