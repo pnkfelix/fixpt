@@ -157,6 +157,13 @@
                        (listof (pairof int int @t) acyclic)))
             (val k-blobref-of
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (int int) int))
+            (val k-blobref-length
+                 (subr (maxeff (alloc @t) (goto @z) (read @globals) (read @s) (read @t) (write @t)
+                               spin)
+                       (int int int)
+                       int))
+            (val k-flat-array-length
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int) k-size))
             (val k-unsized-length
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
                        (int)

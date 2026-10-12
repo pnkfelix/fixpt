@@ -1879,3 +1879,15 @@ suffix. Tests: `bloblet/flat-unsized*.fx` (a record's samples summed,
 `10.0`, on every machine; five refusals),
 `bloblet-errors/flat-unsized-range.fx`. Docs: `docs/fx26.md`.
 
+**`blobref-length` and bounds shown** (2026-10-12, N5c's part of §77):
+`(blobref-length r)`, a flat array's length, a `(nat n)` of its length,
+a new form in both parsers, both checkers, both compilers, the lowering,
+the evaluator and the run time (`%fx26-suffix-ref-length`, as
+`blobref-index`'s code says it). A natural's size now includes a
+variable's array's length (`nat_size`, `k-nat-size`), so a test against
+it teaches `i < n`; a `blobref-index` whose index the facts so show is
+recorded (`NodeFacts::in_bounds`: `n - (i + 1) >= 0`, by
+Fourier–Motzkin where needed), and §86's debts count it discharged.
+Tests: `bloblet/flat-bounds.fx` (`(5 3 5)` on every machine) and
+`indices_shown_in_bounds`.
+

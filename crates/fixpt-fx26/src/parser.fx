@@ -266,14 +266,14 @@
     (or (symbol=? head 'blobref-at) (symbol=? head 'blobref+) (symbol=? head 'blobref-owner)
         (symbol=? head 'blobref-offset) (symbol=? head 'blobref-get)
         (symbol=? head 'blobref-set!) (symbol=? head 'blobref-index)
-        (symbol=? head 'blobref-variant!))))
+        (symbol=? head 'blobref-length) (symbol=? head 'blobref-variant!))))
 (define bloblet-untagged? (subr pure (symbol int) bool)
   (lambda (op n)
     (or (and (symbol=? op 'bloblet-freeze) (= n 1)) (and (symbol=? op 'bloblet-byte) (= n 2))
         (and (symbol=? op 'bloblet-set-byte!) (= n 3)) (and (symbol=? op 'bloblet-bytes) (= n 1))
         (and (blobref-form? op)
              (= n (if (or (symbol=? op 'blobref-owner) (symbol=? op 'blobref-offset)
-                          (symbol=? op 'blobref-get))
+                          (symbol=? op 'blobref-get) (symbol=? op 'blobref-length))
                       1
                       2))))))
 

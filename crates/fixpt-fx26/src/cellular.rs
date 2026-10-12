@@ -2033,6 +2033,13 @@ impl<'a> Compiler<'a> {
                 self.exp(args[1], e, depth + 2, code, false)?;
                 self.prim(code, "%fx26-flat-variant!", 3)?;
             }
+            // The array's length and element's size, after the ref.
+            BlobletOp::RefLength => {
+                let k = *self.c.facts.field_index.get(&x).ok_or("a blobref-length the checker did not see")?;
+                self.exp(args[0], e, depth, code, false)?;
+                self.int(code, k as i64);
+                self.prim(code, "%fx26-suffix-ref-length", 2)?;
+            }
             // The scalar's layout, as the checker found it, after the ref.
             BlobletOp::RefGet | BlobletOp::RefSet => {
                 let k = *self.c.facts.field_index.get(&x).ok_or("a blobref read the checker did not see")?;

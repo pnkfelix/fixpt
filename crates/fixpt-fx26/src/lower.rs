@@ -743,6 +743,7 @@ impl Lowerer<'_> {
                     BlobletOp::RefOffset => format!("(%suffix-ref-offset {})", a[0]),
                     // The scalar's layout, as the checker found it.
                     BlobletOp::RefGet => format!("(%fx26-suffix-ref-get {} {})", a[0], self.c.facts.field_index[&e]),
+                    BlobletOp::RefLength => format!("(%fx26-suffix-ref-length {} {})", a[0], self.c.facts.field_index[&e]),
                     BlobletOp::RefIndex => {
                         format!("(%fx26-suffix-ref-index {} {} {})", a[0], a[1], self.c.facts.field_index[&e])
                     }

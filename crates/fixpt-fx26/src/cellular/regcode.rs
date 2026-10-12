@@ -1004,6 +1004,11 @@ impl Compiler<'_> {
                         let Some(&k) = self.c.facts.field_index.get(&x) else { return self.decline("blobref-variant!") };
                         self.r_prim3(g, "%fx26-flat-variant!", args[0], Value::fixnum(k as i64), args[1], env, te)?
                     }
+                    // The array's length and element's size.
+                    BlobletOp::RefLength => {
+                        let Some(&k) = self.c.facts.field_index.get(&x) else { return self.decline("blobref-length") };
+                        self.r_prim(g, "%fx26-suffix-ref-length", &[es[0], Arg::V(Value::fixnum(k as i64))], env, te)?
+                    }
                     // The scalar's layout, as the checker found it.
                     BlobletOp::RefGet | BlobletOp::RefSet => {
                         let Some(&k) = self.c.facts.field_index.get(&x) else { return self.decline("blobref-get") };

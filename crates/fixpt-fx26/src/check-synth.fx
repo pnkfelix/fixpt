@@ -746,11 +746,13 @@
                  (let ((r (k-blobref-region (k-start x) (k-end x) xt (car (car p)) (cdr (car p))
                                             #f)))
                    (cdr (car p))))
-                ((string=? name "blobref-index")
-                 (if (< (car (k-flat-array-parts (cdr (car p)))) 0)
-                     (k-fail-ty-at "a blobref to a flat array is expected here, and this is a "
-                                   xt ox)
-                     k-int))
+                ((or (string=? name "blobref-index") (string=? name "blobref-length"))
+                 (cond ((< (car (k-flat-array-parts (cdr (car p)))) 0)
+                        (k-fail-ty-at "a blobref to a flat array is expected here, and this is a "
+                                      xt ox))
+                       ;; A length takes no second operand.
+                       ((string=? name "blobref-length") -1)
+                       (else k-int)))
                 ((and (string=? name "blobref-variant!")
                       (< (car (k-flat-sum-size (cdr (car p)))) 0))
                  (k-fail-ty-at "a blobref to a flat sum is expected here, and this is a " xt ox))
@@ -767,6 +769,7 @@
               (("blobref-owner") (k-te b e))
               (("blobref-offset") (k-te k-int e))
               (("blobref-index") (k-te (k-blobref-of b (k-blobref-element a z f)) e))
+              (("blobref-length") (k-te (k-blobref-length a z f) e))
               (("blobref-get") (k-te-reading f (k-blobref-region a z xt b f #t) e))
               (("blobref-variant!")
                (let ((lx (car (cdr args))))

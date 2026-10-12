@@ -79,9 +79,9 @@ test and a certifying conversion the checker accepts only in its branch.
 
 ## Stages
 
-| stage | what                                                                                                                                      |
-| ----- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| N5a   | done: the `nlist` type with literal sizes and `finite`; `cons`, `nil`; `nlist finite` as `listof finite`; `confirm-length` with a literal |
-| N5b   | done: kind `size`, variables in `poly`; facts from `null?`; `cdr`; equalities                                                             |
-| N5c   | arithmetic and inequalities (Fourier–Motzkin); existentials for results such as `filter`'s; array bounds; flat arrays' lengths (§77)      |
-| N5d   | done: `nat` and `(nat s)`; facts from comparisons; `length`; `confirm-length` with a run-time length; `nat` counts end                    |
+| stage | what                                                                                                                                                         |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| N5a   | done: the `nlist` type with literal sizes and `finite`; `cons`, `nil`; `nlist finite` as `listof finite`; `confirm-length` with a literal                    |
+| N5b   | done: kind `size`, variables in `poly`; facts from `null?`; `cdr`; equalities                                                                                |
+| N5c   | arithmetic and inequalities (Fourier–Motzkin); existentials for results such as `filter`'s; flat arrays' lengths and their bounds, done; heap arrays' bounds |
+| N5d   | done: `nat` and `(nat s)`; facts from comparisons; `length`; `confirm-length` with a run-time length; `nat` counts end                                       |

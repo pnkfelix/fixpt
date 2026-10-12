@@ -165,6 +165,17 @@ impl Walk<'_> {
     fn walk(&mut self, e: ExpId, at: Option<usize>, params: &[Sym]) {
         let c = self.c;
         match c.arena.exp_at(e).clone() {
+            // An element of a flat array: discharged where the facts showed
+            // the index within its length (`NodeFacts::in_bounds`, N5c).
+            Exp::Bloblet { op: crate::ast::BlobletOp::RefIndex, args } => {
+                if let Some(i) = at {
+                    let d = if c.facts.in_bounds.contains(&e) { Debt::Discharged } else { self.owed_or_passed(&args, params) };
+                    self.units[i].debts.push(("blobref-index".into(), d));
+                }
+                for a in args {
+                    self.walk(a, at, params);
+                }
+            }
             Exp::App { fun, args } => {
                 if let (Some(i), Some(s)) = (at, c.facts.standard_operator.get(&e)) {
                     let name = c.interner.name(*s).to_string();

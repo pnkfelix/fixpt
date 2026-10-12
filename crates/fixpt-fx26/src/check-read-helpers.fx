@@ -862,6 +862,24 @@
                 (begin (if note (set k-extracts (cons fact (get k-extracts))) #u) r)))
             (else y (k-fail (k-cat3 "the region of a " (k-show-ty xt) "'s owner is not known")
                             a z)))))))
+;; A `blobref-length` at `a`..`z` of flat array `f`: a `(nat n)` of its
+;; length `n`, told the compilers as `blobref-index`'s is (`TODO.md` §77).
+(define k-blobref-length (subr (maxeff checks spin) (int int int) int)
+  (lambda (a z f)
+    (let* ((p (k-flat-array-parts f)) (e (k-flat-layout (car p))))
+      (if (< (car e) 0)
+          (k-fail (k-cat3 "the layout of a " (k-show-ty (car p)) " is not known") a z)
+          (let ((fact (product (1 a) (2 z) (3 (+ (* (cdr p) 4294967296) (car e))))))
+            (begin
+              (set k-extracts (cons fact (get k-extracts)))
+              (k-ty-new (ty-nat (k-flat-array-length f)))))))))
+;; Flat array `t`'s length, a size (`Checker::flat_array_parts`).
+(define k-flat-array-length (subr (maxeff kreads (alloc @t) spin) (int) k-size)
+  (lambda (t)
+    (tagcase (k-get (k-resolve t))
+      (ty-named (g ds)
+        (tagcase (car (cdr ds)) (dz (z) z) (else y (sz-finite))))
+      (else y (sz-finite)))))
 ;; A `blobref-index` at `a`..`z` into flat array `f`: its element, its
 ;; length and the element's size noted for the compilers, `n << 32 | size`.
 (define k-blobref-element (subr (maxeff checks spin) (int int int) int)

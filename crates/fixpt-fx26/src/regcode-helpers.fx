@@ -400,6 +400,11 @@
                     (r-decline)
                     (r-prim g "%fx26-suffix-ref-get"
                             (r-args-2 (a-e (car args)) (a-v (wcell-int i))) env te)))
+               (("blobref-length")
+                (if (< i 0)
+                    (r-decline)
+                    (r-prim g "%fx26-suffix-ref-length"
+                            (r-args-2 (a-e (car args)) (a-v (wcell-int i))) env te)))
                (("blobref-index" "blobref-set!" "blobref-variant!")
                 (if (< i 0)
                     (r-decline)

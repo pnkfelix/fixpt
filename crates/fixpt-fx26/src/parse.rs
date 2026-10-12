@@ -3083,6 +3083,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
             ("blobref-get", [_]) => (BlobletOp::RefGet, args),
             ("blobref-set!", [_, _]) => (BlobletOp::RefSet, args),
             ("blobref-index", [_, _]) => (BlobletOp::RefIndex, args),
+            ("blobref-length", [_]) => (BlobletOp::RefLength, args),
             ("blobref-variant!", [_, _]) => (BlobletOp::RefVariant, args),
             _ => {
                 let shape = match name {
@@ -3100,6 +3101,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                     "blobref-get" => "(blobref-get blobref)",
                     "blobref-set!" => "(blobref-set! blobref value)",
                     "blobref-index" => "(blobref-index blobref i)",
+                    "blobref-length" => "(blobref-length blobref)",
                     "blobref-variant!" => "(blobref-variant! blobref 'label)",
                     _ => "(bloblet-bytes bloblet)",
                 };

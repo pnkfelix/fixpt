@@ -441,6 +441,11 @@ pub struct NodeFacts {
     /// operation: its arguments' types where instantiating it synthesised
     /// them (`crate::debts`, `TODO.md` §86).
     pub operand_types: HashMap<ExpId, Vec<Option<TyId>>>,
+    /// Each `blobref-index` whose index the facts in scope show within the
+    /// array's length (`TODO.md` §77, N5c): a `(nat i)` with `i < n`, `n`
+    /// a literal or the array's own named length. Its check is then
+    /// needless, and its debt discharged (`crate::debts`).
+    pub in_bounds: HashSet<ExpId>,
     /// Applications whose operator is a standard binding, by name. The
     /// initial environment cannot be assigned, so the operator is known.
     pub standard_operator: HashMap<ExpId, Sym>,
@@ -3802,6 +3807,7 @@ impl Checker {
                 | BlobletOp::RefGet
                 | BlobletOp::RefSet
                 | BlobletOp::RefIndex
+                | BlobletOp::RefLength
                 | BlobletOp::RefVariant
         ) {
             return self.synth_blobref(e, op, args, expected);
@@ -3825,6 +3831,7 @@ impl Checker {
             | BlobletOp::RefGet
             | BlobletOp::RefSet
             | BlobletOp::RefIndex
+                | BlobletOp::RefLength
             | BlobletOp::RefVariant => unreachable!("synth_blobref"),
             BlobletOp::Ref(i) => {
                 let t = field(self, i)?;
@@ -3914,12 +3921,37 @@ impl Checker {
                 let Some((size, _)) = self.flat_layout(g) else {
                     return Err(FxError::at(span, format!("the layout of a {} is not known", self.show_ty(g))));
                 };
+                // Shown within the length by the facts in scope: a natural
+                // `i` with `n - (i + 1) >= 0`, `n` a literal or a named
+                // length, never `finite`, which is no one array's.
+                if let Some(i) = self.nat_size(rest[0])
+                    && !matches!(n, Size::Finite)
+                    && self.size_nonneg(&n.add_scaled(&i.plus(1), -1))
+                {
+                    self.facts.in_bounds.insert(e);
+                }
                 let n = match n {
                     Size::Lin { k, terms } if terms.is_empty() => k as usize,
                     _ => fixpt_heap::layout::FLAT_TO_THE_END as usize,
                 };
                 self.facts.field_index.insert(e, (n << 32) | size);
                 self.blobref_of(b, g)
+            }
+            // A flat array's length, a `(nat n)` of its length `n`: told the
+            // compilers as `blobref-index`'s is, `n << 32 | size`.
+            BlobletOp::RefLength => {
+                let Some((g, n)) = self.flat_array_parts(f) else {
+                    return Err(FxError::at(self.arena.span_of(*x), format!("a blobref to a flat array is expected here, and this is a {}", self.show_ty(xt))));
+                };
+                let Some((size, _)) = self.flat_layout(g) else {
+                    return Err(FxError::at(span, format!("the layout of a {} is not known", self.show_ty(g))));
+                };
+                let k = match n {
+                    Size::Lin { k, ref terms } if terms.is_empty() => k as usize,
+                    _ => fixpt_heap::layout::FLAT_TO_THE_END as usize,
+                };
+                self.facts.field_index.insert(e, (k << 32) | size);
+                self.arena.ty(Ty::Nat(n))
             }
             // A flat sum made a variant, named by a literal: its layout's
             // code told the compilers (`Checker::flat_sum_layout`). Without

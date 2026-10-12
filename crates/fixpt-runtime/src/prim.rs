@@ -2283,6 +2283,13 @@ prims! {
         let bits = suffix_read(rt, a[0], 8)?;
         Ok(rt.heap.make_flonum(f64::from_bits(bits)))
     });
+    // FX-26's `blobref-length`: a flat array's length, `code` as
+    // `blobref-index`'s (`TODO.md` §77).
+    "%fx26-suffix-ref-length", 2, Some(2), simple!(|rt, a| {
+        let r = suffix_ref(rt, a[0])?;
+        let code = int(rt, a[1])?;
+        Ok(Value::fixnum(flat_index_bound(rt, r, code).0))
+    });
     // FX-26's `blobref-get` and `blobref-set!`: a scalar of layout `code`
     // (`fixpt_heap::layout::FLAT_*`), as a flat array's element is.
     "%fx26-suffix-ref-get", 2, Some(2), simple!(|rt, a| {

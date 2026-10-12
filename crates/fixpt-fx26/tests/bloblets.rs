@@ -43,3 +43,28 @@ fn bloblet_programs_do_as_they_say() {
     assert!(seen >= 7, "only {seen} programs");
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
+
+/// An index shown within a flat array's length by the facts in scope is
+/// recorded (`NodeFacts::in_bounds`, `TODO.md` §77, N5c): `total`'s, under
+/// a test against `blobref-length`; not `main`'s `(blobref-index s 4)`,
+/// which nothing shows below the length.
+#[test]
+fn indices_shown_in_bounds() {
+    let text = include_str!("programs/bloblet/flat-bounds.fx");
+    let mut c = fixpt_fx26::Checker::new();
+    let forms = c.read_in(fixpt_read::FileId(0), text).expect("reads");
+    let done = c.declare_ahead(&forms).expect("declares");
+    for (f, done) in forms.iter().zip(done) {
+        if !done {
+            c.top_all(f).expect("checks");
+        }
+    }
+    let indices: Vec<_> = c
+        .facts
+        .field_index
+        .keys()
+        .filter(|e| matches!(c.arena.exp_at(**e), fixpt_fx26::ast::Exp::Bloblet { op: fixpt_fx26::ast::BlobletOp::RefIndex, .. }))
+        .collect();
+    assert_eq!(indices.len(), 2, "two indices");
+    assert_eq!(c.facts.in_bounds.len(), 1, "one shown in bounds: {:?}", c.facts.in_bounds);
+}

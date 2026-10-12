@@ -2014,12 +2014,14 @@ so.
 
 **Flat arrays of a length not literal** (decided with the user,
 2026-10-12): built (`DONE.md` §77), an array that runs to the end of the
-suffix, its length named where its blobref is bound. Left, N5c's part:
-`(blobref-length r)`, a `(nat n)` of the length, so that a test teaches
-`i < n`; and `blobref-index` with that fact needing no check (recorded,
-so that §86's debts count it discharged, and natively the compare left
-out). A non-last array of a length a `(nat n)` in scope gives (offsets
-after it computed from `n`) waits on a need.
+suffix, its length named where its blobref is bound, `blobref-length`,
+and an index shown in bounds recorded. Left: the compilers leaving out a
+recorded index's check (natively, the compare with the length and, for
+an array that runs to the end, the element's end with the suffix's: the
+owner found is most of the cost, so worth it only measured); bounds for
+the heap's arrays, `(arrayof t r)`, which carry no length in their type
+(CF4); a non-last array of a length a `(nat n)` in scope gives (offsets
+after it computed from `n`), waiting on a need.
 
 **Flat sums: their key** (the user's, 2026-10-10; the goal: a "flat
 world" with Rust's model of values, for apples-to-apples benchmarks).

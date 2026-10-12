@@ -605,6 +605,7 @@
                 ((blobref+) (ev-bref o (+ at (as-int (ev-arg xs 1)))))
                 ((blobref-owner) o)
                 ((blobref-offset) at)
+                ((blobref-length) (ev-flat-length r (quotient i 4294967296) (modulo i 4294967296)))
                 ((blobref-index)
                  (let* ((k (as-int (ev-arg xs 1))) (size (modulo i 4294967296))
                         (n (ev-flat-length r (quotient i 4294967296) size)))
@@ -685,7 +686,7 @@
       ((rmake-bloblet) (ev-make-bloblet (cdr xs)))
       ((make-bloblet) (ev-make-bloblet xs))
       ((blobref-at blobref+ blobref-owner blobref-offset blobref-get blobref-set! blobref-index
-        blobref-variant!)
+        blobref-length blobref-variant!)
        (ev-blobref op i xs))
       (else
        (tagcase (as-other (ev-arg xs 0) "a bloblet")

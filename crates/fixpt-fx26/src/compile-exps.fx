@@ -482,6 +482,9 @@
                        (c-prim c "%fx26-suffix-ref-get" 2)))
                (("blobref-index")
                 (begin (c-exps args e depth c) (c-int c i) (c-prim c "%fx26-suffix-ref-index" 3)))
+               (("blobref-length")
+                (begin (c-exp (car args) e depth c #f) (c-int c i)
+                       (c-prim c "%fx26-suffix-ref-length" 2)))
                (else
                 (begin (c-exp (car args) e depth c #f) (c-int c i)
                        (c-exp (car (cdr args)) e (+ depth 2) c #f)

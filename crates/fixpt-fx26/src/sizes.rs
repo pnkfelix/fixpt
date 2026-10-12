@@ -219,6 +219,17 @@ impl Checker {
                 Ty::Nat(s) => Some(s.clone()),
                 _ => None,
             },
+            // A variable's flat array's length (`TODO.md` §77): its size,
+            // where it is one array's, not `finite`.
+            Exp::Bloblet { op: crate::ast::BlobletOp::RefLength, args } => {
+                let [x] = args[..] else { return None };
+                let Exp::Var(v) = self.arena.exp_at(x) else { return None };
+                let (_, f) = self.blobref_parts(self.lookup(*v)?)?;
+                match self.flat_array_parts(f)?.1 {
+                    Size::Finite => None,
+                    n => Some(n),
+                }
+            }
             _ => None,
         }
     }
