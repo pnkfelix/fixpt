@@ -2440,4 +2440,24 @@ stored there: a loop's `f64` total costs a heap box each time round
 First: time the `f64`-heavy MLton ports, how much of their run is boxing
 what a loop carries, to know what this buys beyond the one loop; then
 the layout, in `direct.rs` and the collector's walk of native frames.
+- **Later, frames' uniqueness restored by a collection** (the user's,
+  2026-10-12). A frame (or chunk) gets a "shared" header flag, set when a
+  continuation capture takes a reference to it; underflow or a resume
+  that finds it clear moves the frames back and reuses them in place, not
+  copying (a dynamic one-shot continuation). A collection clears it again
+  where it finds exactly one reference: in a copying collection, the
+  first reference reached copies the frame and leaves, in the old copy
+  beside the forwarding pointer, a back pointer to the slot that reached
+  it; a second reference follows that back pointer to mark the slot
+  shared, and leaves a "shared" sentinel for any after. The old copy is
+  garbage, so this takes no space in the live object; to-space slots and
+  roots stay put during the collection, so the back pointer stays good. A
+  minor collection sees every reference to a nursery object (roots, the
+  nursery, the remembered set's cards), so it is exact for young frames;
+  old ones wait on a major collection. Suffix refs count as references to
+  their owner, roots and register code's registers too; weak references
+  do not. Worth it once a workload captures often (PLAN queue item 7,
+  `docs/performance.md`: capture is a small cost today). A uniqueness bit
+  in every pointer is a separate, later question: no tag is free, and the
+  mutator would mark a pointer shared at every copy that stays live.
 
