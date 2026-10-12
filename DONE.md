@@ -1851,3 +1851,14 @@ inferred, the handler pure but for its globals: `(6 -1 0)` on every
 machine and in the evaluator) and `control/escape-tag-not-captured.fx`
 (refused). Docs: `docs/fx26.md`, "Control, typed".
 
+**The first library** (2026-10-12): `fx26:conditions.fx`, a module file
+built in (`STANDARD_MODULES`, beside the front end's, resolved by
+`built_in_module`), which a program loads by name: `handle` (a body
+given a fresh region's escape tag, by rank-2 polymorphism, which both
+checkers accept), `with-handler` (a body given a fresh region's key whose
+mark is the handler) and `raise` (the handler called where `raise` is;
+else a panic). A restart is a handler escaping to a `handle` around it.
+Tests: `run/conditions.fx` (`(4 6 -1)` on every machine and in the
+evaluator); `docs/research/examples/conditions/library.fx` and
+`unhandled.fx`. Docs: `docs/research/conditions.md`, section 6b.
+

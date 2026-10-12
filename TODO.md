@@ -2412,10 +2412,10 @@ the handler that always escapes.
   place.
 - First large user: the front end's `k-sfail`, a hand-made abort to a
   prompt today.
-Where to start: the library's procedures, over the escape-only tag and
-the marks, with `docs/research/examples/conditions/` rewritten on them
-as its first tests. Procedures cannot make a region (`letregion` is
-syntax), so the caller writes the `letregion` and the procedures take
-its tag and key; or a handler procedure takes the body as a procedure
-polymorphic in the region (rank 2), if the checkers allow it.
+The first library is built (`DONE.md` §89). Left: inference into a
+rank-2 argument (its parameters' types and the library procedure's
+instantiation are written today; or syntax for `handle` and
+`with-handler`, if that proves the better way); condition types grown as
+programs need them; the front end's `k-sfail` moved onto it; a panic
+caught at a task's boundary, once there are tasks.
 

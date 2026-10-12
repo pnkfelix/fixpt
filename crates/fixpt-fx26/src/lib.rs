@@ -621,11 +621,17 @@ pub const FRONT_END_MODULES: [(&str, &str); 135] = [
 pub const BUILT_IN_PREFIX: &str = "fx26:";
 
 /// The text of the module file built in that `path` names
-/// (`fx26:parser.fx`), if it names one.
+/// (`fx26:parser.fx`), if it names one: the front end's, or a standard
+/// library's ([`STANDARD_MODULES`]).
 pub fn built_in_module(path: &str) -> Option<&'static str> {
     let name = path.strip_prefix(BUILT_IN_PREFIX)?;
-    FRONT_END_MODULES.iter().find(|(n, _)| *n == name).map(|(_, t)| *t)
+    FRONT_END_MODULES.iter().chain(STANDARD_MODULES.iter()).find(|(n, _)| *n == name).map(|(_, t)| *t)
 }
+
+/// Libraries written in FX-26 that a program loads by name, `(load-module
+/// "fx26:conditions.fx")`: raising and handling conditions (`TODO.md` §89,
+/// `docs/research/conditions.md`).
+pub const STANDARD_MODULES: [(&str, &str); 1] = [("conditions.fx", include_str!("conditions.fx"))];
 
 /// The front end's files, by name, in the order [`front_end`] joins them;
 /// [`bootstrap_program`] puts `bootstrap.fx` after them. The module files

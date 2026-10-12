@@ -198,6 +198,39 @@ new:
   write of one "world" region, so that no two tasks doing I/O
   interleave; `yolo` covers it, as `any` touches every region.
 
+## 6b. The library, built (2026-10-12)
+
+`fx26:conditions.fx` (`crates/fixpt-fx26/src/conditions.fx`), a module
+file built in, which a program loads by name, over an escape-only tag
+(`(escape-tag A H R)`, no `D`; `docs/fx26.md`, "Control, typed"):
+
+| procedure      | type, in short                                                                    |
+| -------------- | --------------------------------------------------------------------------------- |
+| `handle`       | `body`, given a fresh region's escape tag (rank 2), and `on-escape`; gives an `a` |
+| `with-handler` | `handler`, and `body`, given a fresh region's key whose mark is the handler       |
+| `raise`        | the key's handler called with the condition where `raise` is; else a panic        |
+
+A restart is a handler that escapes to a `handle` around the
+`with-handler`; the key is then made inside the prompt's body by
+construction, so strain 4 of section 5 is gone. The examples of
+`handlers.fx`, written with it (`library.fx`, and
+`tests/programs/run/conditions.fx`), give `(4 6 -1)` on every machine;
+an unhandled raise panics (`unhandled.fx`).
+
+What building it showed:
+- **Procedures can make a region**, through rank-2 polymorphism: the
+  body is a `plambda` over the region, as Haskell's `runST` is (from
+  memory). Both checkers accept a parameter of `poly` type and its
+  `proj`.
+- **Inference stops at a rank-2 argument.** A `plambda` argument's
+  parameters need their types written, and the library procedure's own
+  instantiation (`(proj with-handler char int int bodies pure)`) too:
+  nothing infers `e` from a polymorphic argument. Syntax, or inference
+  into such arguments, would take this away; the user chose procedures
+  for now, so it stays visible.
+- **Reading globals is bookkeeping** in every signature; `define*`
+  infers it for the program's own definitions.
+
 ## 7. Questions for the user
 
 1. Decided by the user (2026-10-12): **design B**, handlers at the raise,
