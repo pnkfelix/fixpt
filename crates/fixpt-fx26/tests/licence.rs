@@ -19,7 +19,8 @@ fn the_licence_allows_allocation_and_what_the_driver_owns() {
     assert_eq!(unlicensed(&pure, &[]), None);
     assert_eq!(unlicensed(&alloc, &[]), None, "a new object is invisible until handed over");
     assert_eq!(unlicensed(&own, &[mine]), None);
-    for bad in ["(read @theirs)", "(write @theirs)", "(goto @theirs)", "(comefrom @theirs)"] {
+    // Nor the world, ever (`TODO.md` §84): no region of it is the driver's.
+    for bad in ["(read @theirs)", "(write @theirs)", "(goto @theirs)", "(comefrom @theirs)", "(io stdout)", "(io clock)"] {
         let e = c.effect_of_str(bad).expect("an effect");
         assert!(unlicensed(&e, &[mine]).is_some(), "{bad} was licensed");
     }
@@ -70,6 +71,14 @@ fn an_unlicensed_expression_is_not_run() {
     run(&mut s, "(define* probe (subr (read @c) () int) (lambda () (get c)))");
     let forms = s.checker.read_in(fixpt_read::FileId(0), "(probe)").expect("reads");
     assert_eq!(s.run(&forms[0]).expect("runs").value, Ok(Some("1".into())), "the speculative write happened");
+}
+
+/// Writing to the world is never speculated (`TODO.md` §84): the REPL may
+/// not print what the program has not been asked to.
+#[test]
+fn io_is_not_run_early() {
+    let mut s = session();
+    assert_eq!(speculate(&mut s, "(write-out \"early\")"), Speculation::NotLicensed("(io stdout)".into()));
 }
 
 #[test]

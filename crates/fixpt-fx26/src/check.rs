@@ -53,6 +53,14 @@ pub(crate) fn fixed_range(name: &str) -> Option<(i128, i128)> {
 /// acyclic, or a vector or bytevector (TODO §51). The same text defines it
 /// in the checker written in FX-26 (`standard::standard_text`).
 pub const DATUM: &str = "(union int f64 char bool string symbol nil (pairof datum datum acyclic) vector bytevector)";
+/// What an I/O primitive gives when it fails (`TODO.md` §84): its kind, one
+/// of a fixed few as `tagcase` can check, and the system's description. A
+/// value the program sees, not a failure of the run.
+pub const IO_ERROR: &str = "(productof (kind (sumof (not-found unit) (permission-denied unit) (already-exists unit) (not-a-directory unit) (is-a-directory unit) (broken-pipe unit) (invalid-data unit) (other unit))) (detail string))";
+/// The types the initial environment names, before its bindings, whose
+/// types name them: `datum`, what a reader reads (`docs/fx26.md`,
+/// "Datums"), and `io-error`. In both checkers (`standard_text`).
+pub const STANDARD_TYPES: [(&str, &str); 2] = [("datum", DATUM), ("io-error", IO_ERROR)];
 pub const FLATLAYOUT: &str = "(flatlayout (t type)) int";
 /// A flat array (`flatarrayof`, Q6), generative type 2: an array to
 /// safety's analyses (its regions), opaque to anything else; its elements
@@ -674,11 +682,11 @@ impl Checker {
             let forms = c.read(decl).expect("reads");
             c.define_generative(&forms[0], &forms[1]).unwrap_or_else(|e| panic!("`{decl}` is wrong: {e}"));
         }
-        // `datum`, what a reader reads (`docs/fx26.md`, "Datums"): before the
-        // bindings, whose types name it.
-        let forms = c.read(DATUM).expect("reads");
-        let datum = c.interner.intern("datum");
-        c.define_type(datum, &forms[0], forms[0].span).unwrap_or_else(|e| panic!("`DATUM` is wrong: {e}"));
+        for (name, text) in STANDARD_TYPES {
+            let forms = c.read(text).expect("reads");
+            let sym = c.interner.intern(name);
+            c.define_type(sym, &forms[0], forms[0].span).unwrap_or_else(|e| panic!("`{name}` is wrong: {e}"));
+        }
         for (name, ty) in crate::standard::ENTRIES {
             c.bind(name, ty).unwrap_or_else(|e| panic!("the standard type of `{name}` is wrong: {e}"));
         }
@@ -3562,6 +3570,7 @@ pub(crate) fn subst_effect(e: &Effect, map: &HashMap<DVar, D>, arena: &crate::as
             Atom::Comefrom(r) => Effect::atom(Atom::Comefrom(sub_r(r))),
             Atom::Await(r) => Effect::atom(Atom::Await(sub_r(r))),
             Atom::Spin => Effect::atom(Atom::Spin),
+            Atom::Io(k) => Effect::atom(Atom::Io(k)),
             // An effect function applied: given what it is substituted by,
             // reduced if that is a `dlambda`.
             Atom::App(n) => {
@@ -4122,6 +4131,7 @@ impl BinderEnv {
                     Atom::Comefrom(x) => Atom::Comefrom(r(x)),
                     Atom::Await(x) => Atom::Await(r(x)),
                     Atom::Spin => Atom::Spin,
+                    Atom::Io(k) => Atom::Io(k),
                     // Its variable, and what it was given, as named here.
                     Atom::App(n) => {
                         let (head, args) = apps.parts(n);

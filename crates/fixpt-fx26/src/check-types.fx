@@ -50,6 +50,7 @@
 (define a-comefrom (with check-types-types a-comefrom))
 (define a-await (with check-types-types a-await))
 (define a-spin (with check-types-types a-spin))
+(define a-io (with check-types-types a-io))
 (define a-var (with check-types-types a-var))
 (define a-app (with check-types-types a-app))
 (define-type k-eff (select check-types-types k-eff))
@@ -244,6 +245,18 @@
     (lambda ((xs (listof t acyclic)) (i int)) (if (= i 0) (car xs) (k-nth (cdr xs) (- i 1))))))
 (define k-has-name? (subr (maxeff (read @globals) (read @t)) (k-names symbol) bool)
   (lambda (xs s) (cond ((null? xs) #f) ((symbol=? (car xs) s) #t) (else (k-has-name? (cdr xs) s)))))
+;; The I/O effects' kinds (`TODO.md` §84), by number, as the Rust
+;; checker's `IoKind`; a name's number, -1 if none.
+(define k-io-kind-name (subr pure (int) string)
+  (lambda (k)
+    (case k ((0) "stdin") ((1) "stdout") ((2) "stderr") ((3) "fs-read") ((4) "fs-write")
+            ((5) "clock") ((6) "args") (else "exit"))))
+(define k-io-kind-code (subr pure (string) int)
+  (lambda (n)
+    (case n (("stdin") 0) (("stdout") 1) (("stderr") 2) (("fs-read") 3) (("fs-write") 4)
+            (("clock") 5) (("args") 6) (("exit") 7) (else -1))))
+(define k-io-kinds-shown string
+  "`stdin`, `stdout`, `stderr`, `fs-read`, `fs-write`, `clock`, `args`, `exit`")
 (define k-has-id? (subr (maxeff (read @globals) (read @t)) (k-ids int) bool)
   (lambda (xs s) (cond ((null? xs) #f) ((= (car xs) s) #t) (else (k-has-id? (cdr xs) s)))))
 

@@ -20,6 +20,8 @@ pub struct Runtime {
     pub interner: Interner,
     pub sources: SourceMap,
     pub out: Sink,
+    /// The world an FX-26 program's I/O primitives touch (`TODO.md` §84).
+    pub world: crate::world::World,
     /// Where `%open-input-file` resolves a relative path.
     pub file_base: std::path::PathBuf,
 
@@ -137,6 +139,7 @@ impl Runtime {
             interner,
             sources: SourceMap::new(),
             out: Sink::Stdout,
+            world: crate::world::World::default(),
             file_base: std::path::PathBuf::from("."),
             error_rtd_root,
             run_word: None,
@@ -224,6 +227,7 @@ impl Runtime {
             interner: Interner::new(),
             sources: SourceMap::new(),
             out: Sink::Stdout,
+            world: crate::world::World::default(),
             file_base: std::path::PathBuf::from("."),
             error_rtd_root: ERROR_RTD_ROOT,
             run_word: None,

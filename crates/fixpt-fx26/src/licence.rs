@@ -53,6 +53,8 @@ pub fn unlicensed(effect: &Effect, owned: &[Region]) -> Option<Atom> {
         Atom::Var(_) | Atom::App(_) => true,
         // A speculative run has a step budget of its own.
         Atom::Spin => false,
+        // Never speculate on the world (`TODO.md` §84).
+        Atom::Io(_) => true,
     })
 }
 

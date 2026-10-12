@@ -190,6 +190,11 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("f32-flat", "(subr pure () (flatlayout f32))"),
     ("f64-flat", "(subr pure () (flatlayout f64))"),
     // The fixed-width integers (PLAN.md, Q2 b): wrapping arithmetic.
+    // I/O (`TODO.md` §84): each with an effect of the fixed family; a
+    // failure a value the program sees.
+    ("write-out", "(subr (io stdout) (string) (sumof (done unit) (failed io-error)))"),
+    ("write-err", "(subr (io stderr) (string) (sumof (done unit) (failed io-error)))"),
+    ("exit", "(subr (io exit) (int) void)"),
     // Bytevectors (`TODO.md` §84): made, read and written at a region, as
     // arrays are; R7RS's names. `bytevector-copy` takes a start and an end,
     // `bytevector-copy!` R7RS's `to at from start end`.
@@ -519,7 +524,8 @@ pub const ENTRIES: &[(&str, &str)] = &[
 /// The initial environment as text, for the checker written in FX-26:
 /// the standard generative types' declarations (`check::VSUBR`,
 /// `FLATLAYOUT`, `FLATARRAYOF`, `IDENTITY`, `EQTABLE`, `BLOBREF`, `FLAT_ARRAYOF`, `FLAT_KEYED`, `BYTEVECTOROF`: 0 to 8), `datum`'s
-/// (`check::DATUM`), then `(name type)` for each binding.
+/// and `io-error`'s (`check::STANDARD_TYPES`), then `(name type)` for each
+/// binding.
 pub fn standard_text() -> String {
     let decl: String = [
         crate::check::VSUBR,
@@ -535,6 +541,6 @@ pub fn standard_text() -> String {
         .iter()
         .map(|d| format!("(define-generative {d})\n"))
         .collect::<String>()
-        + &format!("(define-type datum {})\n", crate::check::DATUM);
+        + &crate::check::STANDARD_TYPES.iter().map(|(n, t)| format!("(define-type {n} {t})\n")).collect::<String>();
     decl + &ENTRIES.iter().map(|(n, t)| format!("({n} {t})\n")).collect::<String>()
 }

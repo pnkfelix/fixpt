@@ -15,7 +15,13 @@
 ;; not known to end (`TODO.md` §68).
 (define-effect stores (maxeff (read @globals) (read @v) (write @v) (alloc @v)))
 
-(define-effect runs (maxeff stores (read @x) (write @x) (alloc @x)))
+;; And the world the program's I/O touches (`TODO.md` §84): every kind,
+;; since the program it runs may do any.
+(define-effect io-any
+  (maxeff (io stdin) (io stdout) (io stderr) (io fs-read) (io fs-write) (io clock) (io args)
+          (io exit)))
+
+(define-effect runs (maxeff stores (read @x) (write @x) (alloc @x) io-any))
 
 (define-effect evals (maxeff runs (goto @x) (comefrom @x) spin))
 

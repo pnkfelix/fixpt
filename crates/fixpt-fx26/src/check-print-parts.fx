@@ -75,6 +75,7 @@
         (a-comefrom (r) (k-region-atom-show "comefrom" r))
         (a-await (r) (k-region-atom-show "await" r))
         (a-spin () "spin")
+        (a-io (k) (k-cat3 "(io " (k-io-kind-name k) ")"))
         (a-var (v) (k-dvar-string v))
         (a-app (v ds) (k-cat4 "(" (k-dvar-string v) (k-eargs-show ds) ")")))))
   ;; What an effect application was given, each after a space.

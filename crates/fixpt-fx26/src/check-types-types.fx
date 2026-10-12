@@ -29,7 +29,11 @@
   (r-global symbol) (r-globals))
 (define-datatype k-atom
   (a-read k-region) (a-write k-region) (a-alloc k-region)
-  (a-goto k-region) (a-comefrom k-region) (a-await k-region) (a-spin) (a-var int)
+  (a-goto k-region) (a-comefrom k-region) (a-await k-region) (a-spin)
+  ;; `(io k)` (`TODO.md` §84): `k` the kind's number, in
+  ;; `k-io-kind-name`'s order, as `IoKind`'s in the Rust checker.
+  (a-io int)
+  (a-var int)
   ;; `(e d …)`: a description function to an effect, a variable, applied
   ;; to descriptions, none a type (`check-kinds.fx`): an unknown effect, as
   ;; a variable is.
@@ -283,6 +287,9 @@
    (val k-named-has? (subr (maxeff (read @globals) (read @t)) (k-named symbol int) bool))
    (val k-te (subr pure (int k-eff) k-te))
    (val k-has-id? (subr (maxeff (read @globals) (read @t)) (k-ids int) bool))
+   (val k-io-kind-name (subr pure (int) string))
+   (val k-io-kind-code (subr pure (string) int))
+   (val k-io-kinds-shown string)
    (val k-ty-new
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (k-ty) int))
    (val k-certified (ref (listof (pairof symbol int @t) acyclic) @t))

@@ -6,7 +6,7 @@
 //! bodies are implicit `begin`s. A `lambda` parameter may be a bare name, when
 //! the `lambda` is checked against a type that says what it is.
 
-use crate::ast::{Arm, ArmBind, Atom, BlobletOp, Conv, D, DVar, Effect, Exp, ExpId, Kind, ModItem, Region, RegionForm, Size, Ty, TyId, Variance};
+use crate::ast::{Arm, ArmBind, Atom, BlobletOp, Conv, D, DVar, Effect, Exp, ExpId, IoKind, Kind, ModItem, Region, RegionForm, Size, Ty, TyId, Variance};
 use crate::check::Checker;
 use crate::error::{FxError, R};
 use fixpt_read::{Datum, Sym, Syntax};
@@ -419,6 +419,17 @@ impl Checker {
             "goto" => atom(Atom::Goto),
             "comefrom" => atom(Atom::Comefrom),
             "await" => atom(Atom::Await),
+            // `(io k)`, `k` one of the fixed family (`TODO.md` §84).
+            "io" => {
+                let kinds = || IoKind::ALL.map(|k| format!("`{}`", k.name())).join(", ");
+                let [_, k] = items else {
+                    return Err(FxError::at(s.span, format!("`(io kind)`, the kind one of {}", kinds())));
+                };
+                match k.as_symbol().and_then(|k| IoKind::named(self.name(k))) {
+                    Some(k) => Ok(Effect::atom(Atom::Io(k))),
+                    None => Err(FxError::at(k.span, format!("an I/O effect's kind is one of {}", kinds()))),
+                }
+            }
             "maxeff" => {
                 let mut e = Effect::pure();
                 for part in &items[1..] {
@@ -1217,7 +1228,7 @@ impl Checker {
         }
         matches!(
             self.head(self.items(s, "").unwrap_or(&[])),
-            Some("read" | "write" | "alloc" | "goto" | "comefrom" | "await" | "maxeff")
+            Some("read" | "write" | "alloc" | "goto" | "comefrom" | "await" | "io" | "maxeff")
         )
     }
 
@@ -1277,7 +1288,7 @@ impl Checker {
             "+" | "-" => Ok(D::Size(self.parse_size(s)?)),
             // Every atom `parse_effect` reads, as the FX-26 checker's
             // `k-atom-head?` (PLAN.md Q13, O15).
-            "read" | "write" | "alloc" | "goto" | "comefrom" | "await" | "maxeff" => {
+            "read" | "write" | "alloc" | "goto" | "comefrom" | "await" | "io" | "maxeff" => {
                 Ok(D::Effect(self.parse_effect(s)?))
             }
             _ => Ok(D::Type(self.parse_type(s)?)),

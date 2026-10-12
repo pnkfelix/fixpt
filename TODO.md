@@ -2310,15 +2310,33 @@ subprocesses, sockets, signals, terminal modes.
 in a place (`rmake-bytevector`), the operations in line natively, and a
 quoted bytevector, still refused (a reader's is the opaque `bytevector`,
 not a `bytevectorof`).
-2. The `io` atom and its ordering rule in both checkers, the compilers'
-   effect summaries and the licence; `write-out`, `write-err`; the entry
-   point and the exit status, `exit`.
+2. Built (`DONE.md` §84): the `io` atom, `write-out`, `write-err`,
+   `exit`, `main` and the exit status.
 3. `read-file`, `write-file` (whole, atomic: a temporary file renamed),
    `list-dir`; `io-error`.
 4. `clock` (monotonic, `i64` nanoseconds), `sleep-until` on it, `args`.
 5. `read-line`.
 
-**Where to start:** stage 2, the `io` atom: `Atom` in `ast.rs` and its
-twin in `check-types-types.fx`, the effect reader in both checkers, the
-compilers' effect summaries (any `io` is "anything else"), and the
-licence (`licence.rs`) refusing it.
+**Where to start:** stage 3, beside stage 2's primitives: a runtime
+primitive each (`fixpt_runtime::world`, which a test can capture), the
+standard types (`standard.rs`), the lowering's names, and the evaluator's
+`ev-io-prims!`; `read-file` and `list-dir` allocate, so take a region.
+
+## 85. Machines that disagree on a failure (found 2026-10-12)
+
+Found making `fixpt run`'s exit status (§84): two ways the machines do
+not agree when a run fails.
+- **A failing `pure` call dropped.** `(begin (error "boom") 3)` gives 3
+  on `rs-scheme-vm` and fails on the others: `error` is `pure` ("failing
+  is not an effect", `docs/fx26.md`), so the lowering's `(pure)` claim
+  lets the Scheme compiler drop the unused call, which native code does
+  not. Either failing is an effect after all (a `fail` atom, or `error`
+  typed `spin`), or every machine may drop such a call and the tests
+  allow both answers; a question for the user. Both compilers must agree,
+  so today they do not.
+- **The messages differ.** `(car nil)` says "car or cdr of a non-pair"
+  natively, "error: expected a pair: ()" on `rs-scheme-vm`, "a pair is
+  expected" in the evaluator, and `Type { routine: "pair-car" }:
+  #<cellular-word program>` (Rust's debug form) on the cellular machines.
+  One wording, from the runtime, for each.
+

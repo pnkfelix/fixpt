@@ -300,6 +300,31 @@
                    (text s (the val (o-sum 'text s)))
                    (bad k (the val (o-sum 'bad k))))))))))
 
+;; What an I/O primitive gave, as the evaluator's value: `(sum done #u)`,
+;; or `(sum failed e)`, `e` an `io-error` product of its kind and detail.
+(define* ev-io-result (subr (maxeff stores spin) ((sumof (done unit) (failed io-error))) val)
+  (lambda (r)
+    (tagcase r
+      (done u (the val (o-sum 'done the-unit)))
+      (failed e
+        (let ((kind (tagcase (extract e kind)
+                      (not-found u 'not-found) (permission-denied u 'permission-denied)
+                      (already-exists u 'already-exists) (not-a-directory u 'not-a-directory)
+                      (is-a-directory u 'is-a-directory) (broken-pipe u 'broken-pipe)
+                      (invalid-data u 'invalid-data) (other u 'other))))
+          (the val
+            (o-sum 'failed
+                   (o-product (list (cons 'kind (the val (o-sum kind the-unit)))
+                                    (cons 'detail (the val (extract e detail))))))))))))
+
+;; The program's I/O (`TODO.md` §84), done by the primitives themselves.
+(define* ev-io-prims! (subr (maxeff stores spin) () unit)
+  (lambda ()
+    (begin
+      (prim! 'write-out (lambda (xs) (ev-io-result (write-out (as-str (ev-arg xs 0))))))
+      (prim! 'write-err (lambda (xs) (ev-io-result (write-err (as-str (ev-arg xs 0))))))
+      (prim! 'exit (lambda (xs) (exit (as-int (ev-arg xs 0))))))))
+
 ;; How many pairs list `v` has, `n` so far: `length`'s and `list-length`'s.
 (define* ev-list-length (subr (maxeff evals spin) (val int) int)
   (lambda (v n) (if (null? v) n (ev-list-length (cdr (as-pair v)) (+ n 1)))))
@@ -630,6 +655,7 @@
 (define ev-prims-made unit
   (begin (ev-int-prims!) (ev-text-prims!) (ev-shape-prims!) (ev-data-prims!) (ev-f64-prims!)
          (ev-f32-prims!) (ev-control-prims!) (ev-bytes-prims!)
+         (ev-io-prims!)
          (ev-width-prims! "i8" 8 #t) (ev-width-prims! "u8" 8 #f)
          (ev-width-prims! "i32" 32 #t) (ev-width-prims! "u32" 32 #f)
          (ev-width-prims! "i64" 64 #t) (ev-width-prims! "u64" 64 #f)))

@@ -127,6 +127,7 @@ impl Checker {
             Atom::Await(r) => ("await", r),
             Atom::Var(v) => return self.dvar_text(v, 'f'),
             Atom::Spin => return "spin".to_string(),
+            Atom::Io(k) => return format!("(io {})", k.name()),
             Atom::App(n) => {
                 let (head, args) = self.arena.effect_apps.parts(n);
                 let ds: Vec<String> = args.iter().map(|a| self.show_earg(a)).collect();

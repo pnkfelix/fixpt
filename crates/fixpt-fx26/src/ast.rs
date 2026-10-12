@@ -117,6 +117,42 @@ impl Region {
     }
 }
 
+/// The fixed family of I/O effects (`TODO.md` §84): what of the world an
+/// `(io k)` touches. Their order is the one effects are kept in, in both
+/// checkers (`k-atom-ord`'s codes).
+#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
+pub enum IoKind {
+    Stdin,
+    Stdout,
+    Stderr,
+    FsRead,
+    FsWrite,
+    Clock,
+    Args,
+    Exit,
+}
+
+impl IoKind {
+    pub const ALL: [IoKind; 8] =
+        [IoKind::Stdin, IoKind::Stdout, IoKind::Stderr, IoKind::FsRead, IoKind::FsWrite, IoKind::Clock, IoKind::Args, IoKind::Exit];
+    /// Its name, as `(io k)` writes it.
+    pub fn name(self) -> &'static str {
+        match self {
+            IoKind::Stdin => "stdin",
+            IoKind::Stdout => "stdout",
+            IoKind::Stderr => "stderr",
+            IoKind::FsRead => "fs-read",
+            IoKind::FsWrite => "fs-write",
+            IoKind::Clock => "clock",
+            IoKind::Args => "args",
+            IoKind::Exit => "exit",
+        }
+    }
+    pub fn named(n: &str) -> Option<IoKind> {
+        IoKind::ALL.into_iter().find(|k| k.name() == n)
+    }
+}
+
 /// One indivisible piece of an effect.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 pub enum Atom {
@@ -136,6 +172,10 @@ pub enum Atom {
     /// type. It has no region, so nothing masks it
     /// (`docs/research/type-and-effect-directions.md`, R6).
     Spin,
+    /// `(io k)`: touches the world outside the program, in way `k`
+    /// (`TODO.md` §84). No region, so nothing masks it; and no two commute,
+    /// whatever their kinds: to the compilers each is "anything else".
+    Io(IoKind),
     /// An effect variable.
     Var(DVar),
     /// `(e d …)`: a description function to an effect, a variable, applied
@@ -206,7 +246,7 @@ impl Atom {
             Atom::Read(r) | Atom::Write(r) | Atom::Alloc(r) | Atom::Goto(r) | Atom::Comefrom(r) | Atom::Await(r) => {
                 Some(r)
             }
-            Atom::Var(_) | Atom::Spin | Atom::App(_) => None,
+            Atom::Var(_) | Atom::Spin | Atom::Io(_) | Atom::App(_) => None,
         }
     }
 }

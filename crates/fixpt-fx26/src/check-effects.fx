@@ -60,14 +60,15 @@
     (tagcase a
       (a-read (r) 0) (a-write (r) 1) (a-alloc (r) 2)
       (a-goto (r) 3) (a-comefrom (r) 4) (a-await (r) 5)
-      (a-spin () 6) (a-var (v) 7) (a-app (v ds) 8))))
+      (a-spin () 6) (a-io (k) 6) (a-var (v) 7) (a-app (v ds) 8))))
 ;; The atom's region; a variable's is none, shown as a binder -1.
 (define k-atom-region (subr (read @globals) (k-atom) k-region)
   (lambda (a)
     (tagcase a
       (a-read (r) r) (a-write (r) r) (a-alloc (r) r)
       (a-goto (r) r) (a-comefrom (r) r) (a-await (r) r)
-      (a-spin () (r-var -1)) (a-var (v) (r-var -1)) (a-app (v ds) (r-var -1)))))
+      (a-spin () (r-var -1)) (a-io (k) (r-var -1)) (a-var (v) (r-var -1))
+      (a-app (v ds) (r-var -1)))))
 (define k-has-region? (subr (read @globals) (k-atom) bool) (lambda (a) (< (k-atom-rank a) 6)))
 ;; The effect variable an atom is, or -1.
 (define k-atom-var (subr pure (k-atom) int)
@@ -132,6 +133,8 @@
       (a-comefrom (r) (+ 288230376151711744 (k-region-ord r)))
       (a-await (r) (+ 360287970189639680 (k-region-ord r)))
       (a-spin () 432345564227567616)
+      ;; After `spin`, by kind, as the Rust checker's `Atom` orders them.
+      (a-io (k) (+ 432345564227567617 k))
       (a-var (v) (+ 504403158265495552 (+ v 1099511627776)))
       (a-app (v ds) (+ 576460752303423488 (+ v 1099511627776))))))
 ;; Two names by their stored hashes; by their text only if those are equal.
@@ -190,7 +193,7 @@
     (tagcase a
       (a-read (x) (a-read r)) (a-write (x) (a-write r)) (a-alloc (x) (a-alloc r))
       (a-goto (x) (a-goto r)) (a-comefrom (x) (a-comefrom r)) (a-await (x) (a-await r))
-      (a-spin () a) (a-var (v) a) (a-app (v ds) a))))
+      (a-spin () a) (a-io (k) a) (a-var (v) a) (a-app (v ds) a))))
 ;; Whether `a` comes before `b`, and whether they are one atom.
 (define k-atom<? (subr (maxeff (read @globals) spin) (k-atom k-atom) bool)
   (lambda (a b) (< (k-atom-cmp a b) 0)))

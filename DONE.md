@@ -1746,3 +1746,21 @@ it as the machines do, `#u8(…)`. Tests: `run/bytevectors.fx`,
 `run/bytevector-printed.fx`, `regions/bytevector-escapes.fx`. Docs:
 `docs/fx26.md`, "Bytevectors" and "Fixed-width integers".
 
+**Stage 2: the `io` effects, `write-out`, `write-err`, `exit` and
+`main`** (2026-10-12). `(io k)`, `k` one of `stdin`, `stdout`, `stderr`,
+`fs-read`, `fs-write`, `clock`, `args`, `exit`: `Atom::Io` and `a-io`,
+read, printed and kept in one order in both checkers, no region (so
+never masked), never licensed for speculation; to the compilers each is
+"anything else", so no two commute (the user's one ordering rule).
+`io-error`, a standard type beside `datum` (`check::STANDARD_TYPES`): a
+kind of eight, for a `tagcase`, and the system's description. The
+runtime's `World` (`fixpt_runtime::world`): the process's streams, each
+write flushed, or captured for a test; the status `exit` asked for.
+`fixpt run` calls `main` if it is defined, its integer result's low byte
+the status; 70 if the run fails; `exit`'s status at once. The evaluator
+written in FX-26 does all of it with the primitives themselves (its
+`runs` effect now has every `io` kind). Tests: `tests/programs/io/`
+(both checkers), `licence.rs`, `fixpt-cli/tests/io.rs` (five machines:
+the streams, `main`'s status, `exit`, a failed run, a broken pipe as a
+value). Found on the way: §85.
+

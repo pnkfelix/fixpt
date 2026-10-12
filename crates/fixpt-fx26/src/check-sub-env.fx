@@ -134,6 +134,7 @@
                     (a-comefrom (r) (a-comefrom (k-benv-region env r)))
                     (a-await (r) (a-await (k-benv-region env r)))
                     (a-spin () x)
+                    (a-io (k) x)
                     (a-var (v) (a-var (k-benv-var env v)))
                     ;; Its variable, and what it was given, as named here.
                     (a-app (v ds) (a-app (k-benv-var env v) (k-benv-eargs env ds))))

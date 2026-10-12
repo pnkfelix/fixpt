@@ -758,6 +758,34 @@ fn string_cmp(rt: &mut Runtime, a: Value, b: Value) -> Outcome<std::cmp::Orderin
     Ok(rt.heap.string_cmp(a, b))
 }
 
+/// `(sum tag v)`, as FX-26 makes one.
+fn fx26_sum(rt: &mut Runtime, tag: &str, v: Value) -> Value {
+    let tag = rt.heap.intern(tag);
+    rt.heap.make_frozen(SUM_KIND, &[tag, v])
+}
+
+/// What an I/O primitive gives: `(sum done #u)`, or `(sum failed e)`, `e`
+/// an `io-error` (`check::IO_ERROR`): its kind, a sum of units, and its
+/// description.
+fn fx26_io_result(rt: &mut Runtime, r: std::io::Result<()>) -> Value {
+    match r {
+        Ok(()) => fx26_sum(rt, "done", Value::UNIT),
+        Err(e) => {
+            let kind = fx26_sum(rt, crate::world::error_kind(&e), Value::UNIT);
+            let detail = rt.heap.make_string(&e.to_string());
+            let error = rt.heap.make_frozen(PRODUCT_KIND, &[kind, detail]);
+            fx26_sum(rt, "failed", error)
+        }
+    }
+}
+
+/// `s`, a string, written to `stream`.
+fn fx26_write(rt: &mut Runtime, s: Value, stream: crate::world::Stream) -> Outcome<Value> {
+    let text = get_string(rt, s)?;
+    let r = rt.world.write(stream, text.as_bytes());
+    Ok(fx26_io_result(rt, r))
+}
+
 /// A bytevector's length, or a type error.
 fn bytevector_in(rt: &mut Runtime, v: Value) -> Outcome<usize> {
     if !rt.heap.is_a(v, ObjType::Bytevector) {
@@ -1192,8 +1220,19 @@ prims! {
             Ok(text) => ("text", rt.heap.make_string(text)),
             Err(e) => ("bad", Value::fixnum(e.valid_up_to() as i64)),
         };
-        let tag = rt.heap.intern(tag);
-        Ok(rt.heap.make_frozen(SUM_KIND, &[tag, v]))
+        Ok(fx26_sum(rt, tag, v))
+    });
+
+    // FX-26's I/O (`TODO.md` §84): the world's streams, an error a value the
+    // program sees; `exit` the status recorded, and the run stopped.
+    "%fx26-write-out", 1, Some(1), simple!(|rt, a| fx26_write(rt, a[0], crate::world::Stream::Stdout));
+    "%fx26-write-err", 1, Some(1), simple!(|rt, a| fx26_write(rt, a[0], crate::world::Stream::Stderr));
+    "%fx26-exit", 1, Some(1), simple!(|rt, a| {
+        let Some(n) = exact_bigint(rt, a[0]) else { return rt.type_error("an exact integer", a[0]) };
+        let m = num_bigint::BigInt::from(256);
+        let status = i32::try_from(((n % &m) + &m) % &m).expect("a byte");
+        rt.world.exit = Some(status);
+        rt.fail(&format!("the program exits with status {status}"), &[])
     });
 
     // ---- errors ----

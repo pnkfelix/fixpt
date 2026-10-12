@@ -35,6 +35,7 @@
 (define a-goto (with check-types-types a-goto))
 (define a-read (with check-types-types a-read))
 (define a-spin (with check-types-types a-spin))
+(define a-io (with check-types-types a-io))
 (define a-var (with check-types-types a-var))
 (define a-write (with check-types-types a-write))
 (define-effect checks (select check-types-types checks))
@@ -373,7 +374,7 @@
 (define k-atom-head? (subr pure (string) bool)
   (lambda (h)
     (or (string=? h "read") (string=? h "write") (string=? h "alloc")
-        (string=? h "goto") (string=? h "comefrom") (string=? h "await"))))
+        (string=? h "goto") (string=? h "comefrom") (string=? h "await") (string=? h "io"))))
 ;; The atom `(head r)`, `head` one `k-atom-head?` accepts.
 (define k-atom-of (subr (read @globals) (string k-region) k-atom)
   (lambda (head r)

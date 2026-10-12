@@ -541,6 +541,27 @@ fn ask_redefine(q: &fixpt_fx26::session::Redefinition) -> fixpt_fx26::session::R
 
 /// Run every form of `files` in one session, printing only what the program
 /// prints. The first error, static or dynamic, stops it.
+/// The status a program's run ends with when it fails (`TODO.md` §84):
+/// what `exit` asked for, if it did; else 70, `EX_SOFTWARE`, the failure
+/// said on the standard error.
+fn failed_status(session: &mut Fx26Session, message: impl FnOnce() -> String) -> i32 {
+    if let Some(status) = exited(session) {
+        return status;
+    }
+    eprintln!("fixpt: {}", message());
+    70
+}
+
+/// The status the program's `exit` asked for, if it called it.
+fn exited(session: &mut Fx26Session) -> Option<i32> {
+    session.scheme.runtime_unrooted().world.exit
+}
+
+/// `fixpt run`: each file's forms, in one session; then, if the program
+/// defines `main`, a call of it (`TODO.md` §84). The status is `main`'s
+/// result's low byte if that is an integer, else 0; 70 if the run fails
+/// (`failed_status`); `exit`'s, if it is called; 1 if a file cannot be
+/// read or the program is refused.
 pub fn run_files(backend: Backend, files: &[String]) -> i32 {
     let mut session = match start(backend) {
         Ok(s) => s,
@@ -574,18 +595,43 @@ pub fn run_files(backend: Backend, files: &[String]) -> i32 {
                 Ok(out) => {
                     print!("{}", out.printed);
                     if let Err(e) = out.value {
-                        eprintln!("fixpt: {e}");
-                        return 1;
+                        return failed_status(&mut session, || e);
                     }
                 }
                 Err(e) => {
+                    if let Some(status) = exited(&mut session) {
+                        return status;
+                    }
                     eprintln!("fixpt: {}", located(f, &text, &e));
                     return 1;
                 }
             }
         }
     }
-    0
+    let main = session.checker.interner.intern("main");
+    if session.checker.global_type(main).is_none() {
+        return 0;
+    }
+    let call = match session.checker.read_in(FileId(0), "(main)") {
+        Ok(forms) => forms,
+        Err(e) => {
+            eprintln!("fixpt: {}", e.message);
+            return 1;
+        }
+    };
+    match session.run(&call[0]) {
+        Ok(out) => {
+            print!("{}", out.printed);
+            match out.value {
+                Ok(v) => v.and_then(|v| v.trim().parse::<i128>().ok()).map_or(0, |n| n.rem_euclid(256) as i32),
+                Err(e) => failed_status(&mut session, || e),
+            }
+        }
+        Err(e) => exited(&mut session).unwrap_or_else(|| {
+            eprintln!("fixpt: `main`: {}", e.message);
+            1
+        }),
+    }
 }
 
 /// A command's INPUT, its arguments: a file, if there is one at the one
@@ -837,6 +883,9 @@ fn eval_program_in(session: &mut Fx26Session, name: &str, text: &str, raw: bool)
         match out {
             Ok(out) if raw => {
                 if let Err(e) = &out.value {
+                    if let Some(status) = exited(session) {
+                        return status;
+                    }
                     eprintln!("! evaluation failed: {e}");
                     return 1;
                 }
@@ -845,6 +894,11 @@ fn eval_program_in(session: &mut Fx26Session, name: &str, text: &str, raw: bool)
                 }
             }
             Ok(out) => {
+                if out.value.is_err()
+                    && let Some(status) = exited(session)
+                {
+                    return status;
+                }
                 show(session, &out, false);
                 if out.value.is_err() {
                     return 1;
