@@ -2403,8 +2403,7 @@ on with or escaping to a prompt (a restart); escape-only exceptions are
 the handler that always escapes.
 - **Standard procedures**, not syntax, for now (the region, key and tag
   written or inferred; syntax later if the bookkeeping proves heavy).
-- **An escape-only kind of prompt tag**: allows no capture, so needs no
-  bound `D` on its bodies' effect (the strain the examples met); the top
+- The escape-only kind of prompt tag is built (`DONE.md` §89); the top
   effect, named `yolo`, kept for later.
 - **Condition types: start small**, one type per key, and find what more
   is needed by using it.
@@ -2413,8 +2412,10 @@ the handler that always escapes.
   place.
 - First large user: the front end's `k-sfail`, a hand-made abort to a
   prompt today.
-Where to start: the escape-only tag in both checkers (a tag type that
-`call-with-composable-continuation` refuses, its prompts checking no
-`D`), then the library's procedures over it and the marks, with
-`docs/research/examples/conditions/` as its first tests.
+Where to start: the library's procedures, over the escape-only tag and
+the marks, with `docs/research/examples/conditions/` rewritten on them
+as its first tests. Procedures cannot make a region (`letregion` is
+syntax), so the caller writes the `letregion` and the procedures take
+its tag and key; or a handler procedure takes the body as a procedure
+polymorphic in the region (rank 2), if the checkers allow it.
 

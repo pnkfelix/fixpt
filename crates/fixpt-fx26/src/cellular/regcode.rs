@@ -447,7 +447,7 @@ impl Compiler<'_> {
             ("get", 1) => Some(Std::Field(2)),
             ("cons", 2) => Some(Std::Cellular("cons")),
             ("set", 2) => Some(Std::Set),
-            ("abort-current-continuation", 2) => Some(Std::Cellular("abort")),
+            ("abort-current-continuation" | "escape", 2) => Some(Std::Cellular("abort")),
             ("call-with-composable-continuation", 2) => Some(Std::Cellular("callcomp")),
             ("cwcc", 1) => Some(Std::Cellular("callcc")),
             ("with-mark", 3) => Some(Std::Cellular("withmark")),
@@ -460,7 +460,7 @@ impl Compiler<'_> {
             ("make-array", 2) => Some(Std::Special("make-array")),
             ("set-car!", 2) => Some(Std::Special("set-car!")),
             ("set-cdr!", 2) => Some(Std::Special("set-cdr!")),
-            ("make-continuation-prompt-tag" | "make-continuation-mark-key", 0) => Some(Std::Special("make-box")),
+            ("make-continuation-prompt-tag" | "make-escape-tag" | "make-continuation-mark-key", 0) => Some(Std::Special("make-box")),
             ("apply", 2) => Some(Std::Apply),
             ("list", _) => Some(Std::List),
             _ => {

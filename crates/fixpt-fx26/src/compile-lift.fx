@@ -361,7 +361,7 @@
 (define c-arity (subr (read (globals standard-primitive std-eq-name?)) (string) int)
   (lambda (n)
     (case n
-      (("make-continuation-prompt-tag" "make-continuation-mark-key")
+      (("make-continuation-prompt-tag" "make-escape-tag" "make-continuation-mark-key")
        0)
       (("car" "cdr" "null?" "not" "new" "get" "char->integer" "integer->char" "string-length"
         "char->string" "symbol->string" "string->symbol" "array-length" "current-marks" "cwcc")
@@ -369,7 +369,7 @@
       (("with-mark" "array-set!" "substring") 3)
       (("+" "-" "*" "<" ">" "<=" ">=" "=" "modulo" "quotient" "cons" "set-car!" "set-cdr!" "char=?"
         "string-append" "string=?" "array-ref" "string-ref" "make-array"
-        "abort-current-continuation" "set" "marks-of" "call-with-composable-continuation"
+        "abort-current-continuation" "escape" "set" "marks-of" "call-with-composable-continuation"
         "first-mark")
        2)
       (else
@@ -411,9 +411,9 @@
       (("null?") (begin (c-lit c (wcell-nil)) (c-op c routine-eq)))
       (("not") (c-not c))
       (("char->string") (c-prim c "string" 1))
-      (("make-continuation-prompt-tag" "make-continuation-mark-key")
+      (("make-continuation-prompt-tag" "make-escape-tag" "make-continuation-mark-key")
        (begin (c-lit c (wcell-unit)) (c-prim c "%make-box" 1)))
-      (("abort-current-continuation") (c-op c routine-abort))
+      (("abort-current-continuation" "escape") (c-op c routine-abort))
       (("call-with-composable-continuation") (c-op c routine-callcomp))
       (("cwcc") (c-op c routine-callcc))
       (("with-mark") (c-op c routine-withmark))

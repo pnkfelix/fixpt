@@ -436,6 +436,9 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("runtime-primitive-arity", "%runtime-primitive-arity", false),
     ("make-continuation-prompt-tag", "%fx26-make-prompt-tag", false),
     ("abort-current-continuation", "%fx26-abort", false),
+    // An escape-only tag is a prompt tag at run time (`TODO.md` §89).
+    ("make-escape-tag", "%fx26-make-prompt-tag", false),
+    ("escape", "%fx26-abort", false),
     ("call-with-composable-continuation", "%fx26-call/comp", false),
     ("make-continuation-mark-key", "%fx26-make-mark-key", false),
     ("with-mark", "%fx26-with-mark", false),

@@ -137,6 +137,14 @@ pub(crate) const FLAT_KEYED_INDEX: u32 = 7;
 /// array of `u8` at `r`, which its writes and reads name, and opaque to
 /// anything else. A reader's bytevector, in a `datum`, is `bytevector`.
 pub const BYTEVECTOROF: &str = "(bytevectorof (r region)) (arrayof u8 r)";
+/// An escape-only prompt tag (`TODO.md` §89), generative type 9: its
+/// prompts deliver an `a`, its escapes carry an `h`, in region `r`. No
+/// continuation is captured with one (`call-with-composable-continuation`
+/// takes a `prompt-tag`), so its prompts bound nothing their bodies do:
+/// a `prompt-tag`'s `D`, which only a captured continuation needs. To
+/// safety's analyses a tag in `r`, as a `prompt-tag` is; at run time one.
+pub const ESCAPE_TAG: &str = "(escape-tag (a type) (h type) (r region)) (prompt-tag a h pure r)";
+pub(crate) const ESCAPE_TAG_INDEX: u32 = 9;
 /// A scalar flat's layout (`fixpt_heap::layout::FLAT_*`), as the runtime
 /// reads and writes its bytes.
 pub(crate) fn flat_code(name: &str) -> Option<i64> {
@@ -687,7 +695,7 @@ impl Checker {
         // generative type, in both checkers, whose insides nothing sees
         // (no `up-` or `down-`: a `vsubr` is called with its arguments, not
         // their list). `vlambda` makes one; `apply` calls one on a list.
-        for decl in [VSUBR, FLATLAYOUT, FLATARRAYOF, IDENTITY, EQTABLE, BLOBREF, FLAT_ARRAYOF, FLAT_KEYED, BYTEVECTOROF] {
+        for decl in [VSUBR, FLATLAYOUT, FLATARRAYOF, IDENTITY, EQTABLE, BLOBREF, FLAT_ARRAYOF, FLAT_KEYED, BYTEVECTOROF, ESCAPE_TAG] {
             let forms = c.read(decl).expect("reads");
             c.define_generative(&forms[0], &forms[1]).unwrap_or_else(|e| panic!("`{decl}` is wrong: {e}"));
         }
@@ -3980,11 +3988,20 @@ impl Checker {
 
     fn synth_prompt(&mut self, e: ExpId, tag: ExpId, body: ExpId, handler: ExpId) -> R<(TyId, Effect)> {
         let (tt, te) = self.synth(tag)?;
-        let Ty::PromptTag { answer, payload, effect: bound, region } = self.arena.get(tt).clone() else {
-            return Err(FxError::at(
-                self.arena.span_of(tag),
-                format!("a prompt needs a prompt tag, not a {}", self.show_ty(tt)),
-            ));
+        // A `prompt-tag`'s bound on what the body does; an escape-only
+        // tag's, none (`ESCAPE_TAG`).
+        let (answer, payload, bound, region) = match self.arena.get(tt).clone() {
+            Ty::PromptTag { answer, payload, effect, region } => (answer, payload, Some(effect), region),
+            Ty::Named { which: ESCAPE_TAG_INDEX, args } => match &args[..] {
+                [D::Type(a), D::Type(h), D::Region(r)] => (*a, *h, None, *r),
+                _ => unreachable!("an escape tag's three descriptions"),
+            },
+            _ => {
+                return Err(FxError::at(
+                    self.arena.span_of(tag),
+                    format!("a prompt needs a prompt tag, not a {}", self.show_ty(tt)),
+                ));
+            }
         };
         // Checked against the answer type, so that what the body needs to
         // know — an operator's binders, a `nil` — it is told.
@@ -3995,13 +4012,16 @@ impl Checker {
             _ => err,
         })?;
         let own = Effect([Atom::Goto(region), Atom::Comefrom(region)].into_iter().collect());
-        let beyond = Effect(be.0.iter().copied().filter(|a| !Effect::atom(*a).within(&bound) && !own.contains(*a)).collect());
-        if !beyond.is_pure() {
+        let beyond = match &bound {
+            Some(bound) => Effect(be.0.iter().copied().filter(|a| !Effect::atom(*a).within(bound) && !own.contains(*a)).collect()),
+            None => Effect::pure(),
+        };
+        if let (Some(bound), false) = (&bound, beyond.is_pure()) {
             return Err(FxError::at(
                 self.arena.span_of(body),
                 format!(
                     "the tag allows its delimited computations {}, and this body also has {}",
-                    self.show_effect(&bound),
+                    self.show_effect(bound),
                     self.show_effect(&beyond)
                 ),
             ));

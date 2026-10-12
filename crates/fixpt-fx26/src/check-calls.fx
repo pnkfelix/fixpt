@@ -176,6 +176,29 @@
       (if (or (null? vs) (not (k-calls-through? inner vs #t (the (ref k-ids @t) (new nil)))))
           t
           (k-spin-positive t (the (ref k-spun @t) (new nil)))))))
+;; A prompt tag's parts: what its prompts deliver, what its aborts carry,
+;; its bodies' bound and its region, and whether it has a bound. One of a
+;; `prompt-tag`, or of an escape-only tag (generative type 9, `TODO.md`
+;; §89), which is never captured and so bounds nothing; none of anything
+;; else.
+(define k-tag-parts (subr (maxeff kreads (alloc @t) spin) (int) k-tag-parts)
+  (lambda (tt)
+    (tagcase (k-get tt)
+      (ty-tag (a h e r) (the k-tag-parts (cons (product (1 a) (2 h) (3 e) (4 r) (5 #t)) nil)))
+      (ty-named (g ds)
+        (if (and (= g 9) (= (k-length ds) 3))
+            (tagcase (car ds)
+              (dt (a)
+                (tagcase (car (cdr ds))
+                  (dt (h)
+                    (tagcase (car (cdr (cdr ds)))
+                      (dr (r)
+                        (the k-tag-parts (cons (product (1 a) (2 h) (3 nil) (4 r) (5 #f)) nil)))
+                      (else z nil)))
+                  (else z nil)))
+              (else z nil))
+            nil))
+      (else y nil))))
 ;; `f` under any projections and ascriptions.
 (define k-under (subr (read @globals) (kx) kx)
   (lambda (f)

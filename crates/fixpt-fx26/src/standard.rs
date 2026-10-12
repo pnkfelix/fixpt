@@ -507,6 +507,10 @@ pub const ENTRIES: &[(&str, &str)] = &[
         "(poly ((r region)) (poly ((a type) (h type) (d effect))
            (subr (goto r) ((prompt-tag a h d r) h) void)))",
     ),
+    // An escape-only tag (`TODO.md` §89): made, and escaped to, as a
+    // `prompt-tag` is, but never captured, so it bounds no body's effect.
+    ("make-escape-tag", "(poly ((r region)) (poly ((a type) (h type)) (subr (alloc r) () (escape-tag a h r))))"),
+    ("escape", "(poly ((r region)) (poly ((a type) (h type)) (subr (goto r) ((escape-tag a h r) h) void)))"),
     (
         "call-with-composable-continuation",
         "(poly ((r region)) (poly ((a type) (h type) (d effect) (t type) (e effect))
@@ -535,7 +539,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
 
 /// The initial environment as text, for the checker written in FX-26:
 /// the standard generative types' declarations (`check::VSUBR`,
-/// `FLATLAYOUT`, `FLATARRAYOF`, `IDENTITY`, `EQTABLE`, `BLOBREF`, `FLAT_ARRAYOF`, `FLAT_KEYED`, `BYTEVECTOROF`: 0 to 8), `datum`'s
+/// `FLATLAYOUT`, `FLATARRAYOF`, `IDENTITY`, `EQTABLE`, `BLOBREF`, `FLAT_ARRAYOF`, `FLAT_KEYED`, `BYTEVECTOROF`, `ESCAPE_TAG`: 0 to 9), `datum`'s
 /// and `io-error`'s (`check::STANDARD_TYPES`), then `(name type)` for each
 /// binding.
 pub fn standard_text() -> String {
@@ -549,6 +553,7 @@ pub fn standard_text() -> String {
         crate::check::FLAT_ARRAYOF,
         crate::check::FLAT_KEYED,
         crate::check::BYTEVECTOROF,
+        crate::check::ESCAPE_TAG,
     ]
         .iter()
         .map(|d| format!("(define-generative {d})\n"))

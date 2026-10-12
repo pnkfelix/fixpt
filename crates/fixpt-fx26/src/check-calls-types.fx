@@ -7,6 +7,9 @@
 ;; anything loop. `path`: the nodes on the way down, newest first, each with
 ;; whether it was reached through a parameter.
 (define-type k-cpath (listof (pairof int bool @t) acyclic))
+;; A prompt tag's parts, if it is one (`k-tag-parts`).
+(define-type k-tag-parts
+  (listof (productof (1 int) (2 int) (3 k-eff) (4 k-region) (5 bool)) acyclic))
 ;; Types made with `spin` (`k-spin-positive`): each node, what it was made.
 (define-type k-spun (listof (pairof int int @t) acyclic))
 
@@ -21,6 +24,7 @@
 ;; The types it names, from the files that define them.
 (define-type k-eff (select check-types-types k-eff))
 (define-type k-map (select check-types-types k-map))
+(define-type k-region (select check-types-types k-region))
 (define-type check-calls-sig
   (moduleof (val k-under (subr (read @globals) (kx) kx))
             (val k-callee-name
@@ -34,4 +38,6 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (int int k-map)
                        int))
+            (val k-tag-parts
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int) k-tag-parts))
             (val k-has-comefrom? (subr (maxeff (read @globals) (read @t)) (k-eff) bool))))

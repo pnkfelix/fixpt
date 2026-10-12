@@ -1834,3 +1834,20 @@ one, as they already did `nil`, `false` and `nat` (`parse_type_node`,
 `k-type-named`). The port checks and gives 0 again. Test:
 `bidirectional/shadow-standard-type.fx`.
 
+## 89. Conditions: the escape-only tag (2026-10-12)
+
+What is left, the library of raising and handling, is in `TODO.md` §89.
+
+`(escape-tag A H R)`, generative type 9 (`check::ESCAPE_TAG`), made by
+`make-escape-tag`, escaped to by `escape`: a prompt tag at run time (the
+same operations in both compilers, the lowering and the evaluator
+written in FX-26), never captured with, so its prompts check no bound
+`D` on what their bodies do, the strain the examples of
+`docs/research/conditions.md` met. Both checkers' prompt rules read a
+tag's parts from either kind (`synth_prompt`; `k-tag-parts`, new in
+`check-calls.fx`, `check-rules.fx` no longer). Tests:
+`control/escape-tag.fx` (a raise through a generic procedure, its effect
+inferred, the handler pure but for its globals: `(6 -1 0)` on every
+machine and in the evaluator) and `control/escape-tag-not-captured.fx`
+(refused). Docs: `docs/fx26.md`, "Control, typed".
+

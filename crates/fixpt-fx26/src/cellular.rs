@@ -1644,13 +1644,13 @@ impl<'a> Compiler<'a> {
     /// How many arguments a standard operation takes, as a value.
     fn arity(n: &str) -> Option<usize> {
         match n {
-            "make-continuation-prompt-tag" | "make-continuation-mark-key" => Some(0),
+            "make-continuation-prompt-tag" | "make-escape-tag" | "make-continuation-mark-key" => Some(0),
             "car" | "cdr" | "null?" | "not" | "new" | "get" | "char->integer" | "integer->char" | "string-length"
             | "symbol->string" | "string->symbol" | "char->string" | "array-length" | "current-marks" | "cwcc" => Some(1),
             "with-mark" | "array-set!" | "substring" => Some(3),
             "+" | "-" | "*" | "<" | ">" | "<=" | ">=" | "=" | "modulo" | "quotient" | "cons" | "set-car!" | "set-cdr!"
             | "set" | "char=?" | "string-append" | "string=?" | "symbol=?" | "wglobal=?" | "eq?" | "bool=?" | "array-ref" | "string-ref" | "make-array"
-            | "abort-current-continuation" | "call-with-composable-continuation" | "first-mark" | "marks-of" => Some(2),
+            | "abort-current-continuation" | "escape" | "call-with-composable-continuation" | "first-mark" | "marks-of" => Some(2),
             // The rest: the arity of the runtime primitive it runs as, if
             // that takes a fixed number (`char-downcase`).
             _ => standard_primitive(n).filter(|p| *p != "%fx26-identity").and_then(|p| {
@@ -1912,12 +1912,13 @@ impl<'a> Compiler<'a> {
                 self.op(code, "eq");
             }
             "char->string" => self.prim(code, "string", 1)?,
-            "make-continuation-prompt-tag" | "make-continuation-mark-key" => {
+            // An escape-only tag is a prompt tag at run time (`TODO.md` §89).
+            "make-continuation-prompt-tag" | "make-escape-tag" | "make-continuation-mark-key" => {
                 let u = self.unit();
                 self.lit(code, u);
                 self.prim(code, "%make-box", 1)?;
             }
-            "abort-current-continuation" => self.op(code, "abort"),
+            "abort-current-continuation" | "escape" => self.op(code, "abort"),
             "call-with-composable-continuation" => self.op(code, "callcomp"),
             "cwcc" => self.op(code, "callcc"),
             "with-mark" => self.op(code, "withmark"),

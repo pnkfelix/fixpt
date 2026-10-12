@@ -499,6 +499,10 @@
              (lambda (xs) (let ((f (ev-arg xs 0))) (lambda ((ys vals)) (apply1 f (vals->val ys))))))
       (prim! 'apply (lambda (xs) (ev-apply xs)))
       (prim! 'make-continuation-prompt-tag (lambda (xs) (o-tag (make-continuation-prompt-tag))))
+      ;; An escape-only tag is a prompt tag at run time (`TODO.md` §89).
+      (prim! 'make-escape-tag (lambda (xs) (o-tag (make-continuation-prompt-tag))))
+      (prim! 'escape
+             (lambda (xs) (abort-current-continuation (as-tag (ev-arg xs 0)) (ev-arg xs 1))))
       (prim! 'abort-current-continuation
              (lambda (xs) (abort-current-continuation (as-tag (ev-arg xs 0)) (ev-arg xs 1))))
       (prim! 'call-with-composable-continuation (lambda (xs) (ev-ccc xs)))

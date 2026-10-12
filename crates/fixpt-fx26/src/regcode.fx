@@ -484,10 +484,10 @@
 
 ;; Whether `name` is an equality `op2 eq` does (`std-eq-name?`).
 (define r-eq-name? (subr (read @globals) (string) bool) (lambda (name) (std-eq-name? name)))
-;; Whether `name` makes a box: a prompt tag or a mark key.
+;; Whether `name` makes a box: a prompt tag (an escape-only one too) or a mark key.
 (define r-box-name? (subr (read @globals) (string) bool)
   (lambda (name)
-    (or (string=? name "make-continuation-prompt-tag")
+    (or (or (string=? name "make-continuation-prompt-tag") (string=? name "make-escape-tag"))
         (string=? name "make-continuation-mark-key"))))
 ;; Whether `name` is a runtime primitive of that name to the cellular
 ;; compiler, one register code calls out to as well.
@@ -524,7 +524,7 @@
             ((is "get" 1) (s-field 2))
             ((is "cons" 2) (s-cellular routine-cons))
             ((is "set" 2) (s-set))
-            ((is "abort-current-continuation" 2) (s-cellular routine-abort))
+            ((or (is "abort-current-continuation" 2) (is "escape" 2)) (s-cellular routine-abort))
             ((is "call-with-composable-continuation" 2) (s-cellular routine-callcomp))
             ((is "cwcc" 1) (s-cellular routine-callcc))
             ((is "with-mark" 3) (s-cellular routine-withmark))
