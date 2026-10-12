@@ -208,12 +208,14 @@ new:
    prompts give FX-26; R7RS kept R6RS's handlers, and `fixpt`'s Scheme
    implements them (`with-exception-handler`, `raise-continuable`,
    `guard`).
-2. Syntax (`handle`, `raise`) or standard procedures only?
-3. The `D` of an escape: an escape-only kind of tag, or the top effect,
-   `yolo`?
-4. Conditions' types: one per key, or unions of shapes, or a hierarchy?
-5. Should a panic be catchable at all inside one run, and if so only at a
-   task's boundary?
+2. Decided (2026-10-12): **standard procedures**, for now.
+3. Decided: **an escape-only kind of tag**, which allows no capture and
+   so needs no `D`; `yolo` kept for later.
+4. The user's answer: **start small**, one condition type per key, and
+   find what more is needed by using it.
+5. Decided: a panic is caught **only at a task's boundary**, once there
+   are tasks; never in place. And `error` stays the panic (`pure`, never
+   dropped, ending the run); `raise` is the new, typed one.
 
 Sources, all *(from memory)*: Racket's reference (exceptions,
 continuation marks, `with-handlers`); Pitman, *Condition handling in the

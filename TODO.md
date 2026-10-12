@@ -2300,18 +2300,17 @@ how far the next goes:
    fail" would leave 62% of the front end's definitions and 53% of the
    ports' failure-free; most spread is by calls, from few sources: `car`
    and `cdr` of a `listof` (the front end), indices (the ports).
-2. **Decide `error`'s effect**, with the user: `(goto @fail)` on a
-   constant region (a future handler a prompt that masks it), or a
-   failure atom of its own beside `spin`, so `goto` keeps one meaning.
+2. Decided (the user, 2026-10-12): `error` keeps no effect; it is the
+   panic, `pure`, never dropped. A failure a layer exports is a `raise`
+   of §89's condition library, typed there.
 3. **Debt inference in both checkers**: each expression's and
    procedure's debts, each with its site, and whether it is owed within
    or passed to callers. Replaces §85's conservative rule for `(pure)`.
 4. **Blame in failure messages**: a failed run names the site that took
    the debt (a consumer, or a trusted assertion), not only the primitive
    that tripped. Debts are static, so the site can be compiled in.
-5. **`total`**: a promise a signature may make, verified by the checker;
-   callers may rely on it. What it promises about resources: nothing
-   (the note's section 3), so its name and documentation say "no debt".
+5. Not for now (the user, 2026-10-12): inferred debt is enough. Later,
+   perhaps, `total`, a promise a signature may make, verified.
 
 Beside it:
 - **The trusted boundaries, audited**: the standard operations' types,
@@ -2369,3 +2368,28 @@ frame around them. A code-generation trade-off, so timed on the MLton
 ports both ways, not only `fixpt bench`'s eight. Other summaries this
 would serve later: a frame's size, for the stack-limit check; bounded
 work, for fuel checks; an allocation bound.
+
+## 89. Conditions: raise and handle, design B (the user's, 2026-10-12)
+
+`docs/research/conditions.md`. Decided with the user: Common Lisp's and
+R6RS's model, a handler found in a continuation mark and called where
+the condition is raised, before anything unwinds, returning a value to go
+on with or escaping to a prompt (a restart); escape-only exceptions are
+the handler that always escapes.
+- **Standard procedures**, not syntax, for now (the region, key and tag
+  written or inferred; syntax later if the bookkeeping proves heavy).
+- **An escape-only kind of prompt tag**: allows no capture, so needs no
+  bound `D` on its bodies' effect (the strain the examples met); the top
+  effect, named `yolo`, kept for later.
+- **Condition types: start small**, one type per key, and find what more
+  is needed by using it.
+- **`error` stays the panic** (§86): `pure`, never dropped, ending the
+  run; caught only at a task's boundary, once there are tasks, never in
+  place.
+- First large user: the front end's `k-sfail`, a hand-made abort to a
+  prompt today.
+Where to start: the escape-only tag in both checkers (a tag type that
+`call-with-composable-continuation` refuses, its prompts checking no
+`D`), then the library's procedures over it and the marks, with
+`docs/research/examples/conditions/` as its first tests.
+
