@@ -3893,6 +3893,7 @@ impl Checker {
             eff = eff.union(&self.check(rest[0], int)?);
             let f = wanted(self)?;
             self.unsized_new(span, f)?;
+            self.note_fits(e, span, f)?;
             let t = self.blobref_of(xt, f);
             let eff = self.mask(e, &eff, t);
             return Ok((t, eff));
@@ -3905,6 +3906,7 @@ impl Checker {
                 eff = eff.union(&self.check(rest[0], int)?);
                 let f = wanted(self)?;
                 self.unsized_new(span, f)?;
+                self.note_fits(e, span, f)?;
                 self.blobref_of(b, f)
             }
             BlobletOp::RefOwner => b,
@@ -4015,6 +4017,18 @@ impl Checker {
     /// with a length other than `finite` (`TODO.md` §77): a length is named
     /// where the blobref is bound, one for each, so that what is learned of
     /// it is of that blobref's array; a new one could claim another's.
+    /// The bytes a new blobref's flat `f` takes, told the compilers: that
+    /// many lie in the suffix from where it points, checked at run time
+    /// (`%fx26-suffix-fits`), so that what its type says of the flat, an
+    /// array's length above all, holds of the suffix.
+    fn note_fits(&mut self, e: ExpId, span: fixpt_read::Span, f: TyId) -> R<()> {
+        let Some(size) = self.flat_least_size(f) else {
+            return Err(FxError::at(span, format!("the layout of a {} is not known", self.show_ty(f))));
+        };
+        self.facts.field_index.insert(e, size);
+        Ok(())
+    }
+
     fn unsized_new(&self, span: fixpt_read::Span, f: TyId) -> R<()> {
         match self.unsized_length(f) {
             Some(Size::Finite) | None => Ok(()),

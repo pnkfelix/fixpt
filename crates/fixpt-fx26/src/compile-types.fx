@@ -309,6 +309,15 @@
                        unit))
             (val c-unit-after
                  (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k)) (code) unit))
+            (val c-fits
+                 (subr (maxeff (alloc @k)
+                               (goto @y)
+                               (read @globals)
+                               (read @k)
+                               (read @t)
+                               (write @k))
+                       (code int)
+                       unit))
             (val c-this-start (ref int @k))
             (val c-this-added (ref int @k))
             (val c-load

@@ -2015,10 +2015,15 @@ so.
 **Flat arrays of a length not literal** (decided with the user,
 2026-10-12): built (`DONE.md` §77), an array that runs to the end of the
 suffix, its length named where its blobref is bound, `blobref-length`,
-and an index shown in bounds recorded. Left: the compilers leaving out a
-recorded index's check (natively, the compare with the length and, for
-an array that runs to the end, the element's end with the suffix's: the
-owner found is most of the cost, so worth it only measured); bounds for
+and an index shown in bounds recorded; a new blobref's flat checked whole
+in the suffix where it is made, so that its type's length holds. Next
+(agreed with the user, 2026-10-12): the compilers leaving out a recorded
+index's check, and the owner's header found for a read through a ref so
+made (it is found only for the suffix's length; the address is the
+heap's base plus the owner times 8 plus the offset). Disassemble a proved
+loop, then time it both ways (the MLton ports too); the cost is that
+memory safety then rests on the checker's proof (kept checked under
+`--profile checked`), and the FX checker would record it too. Bounds for
 the heap's arrays, `(arrayof t r)`, which carry no length in their type
 (CF4); a non-last array of a length a `(nat n)` in scope gives (offsets
 after it computed from `n`), waiting on a need.

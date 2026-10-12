@@ -2015,6 +2015,11 @@ impl<'a> Compiler<'a> {
                     _ => "%suffix-ref-offset",
                 };
                 self.prim(code, name, n)?;
+                // A new blobref's flat's bytes checked in the suffix.
+                if matches!(op, BlobletOp::RefAt | BlobletOp::RefAdd) && self.c.facts.field_index[&x] > 1 {
+                    self.int(code, self.c.facts.field_index[&x] as i64);
+                    self.prim(code, "%fx26-suffix-fits", 2)?;
+                }
             }
             // The array's length and element's size, as the checker found
             // them, after the ref and the index.

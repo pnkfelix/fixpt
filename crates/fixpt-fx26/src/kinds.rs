@@ -646,6 +646,14 @@ impl Checker {
         }
     }
 
+    /// The bytes flat `t` takes at the least: its size, or, for one that is
+    /// or ends in an array that runs to the end of the suffix, its size
+    /// with none of that array's elements.
+    pub(crate) fn flat_least_size(&mut self, t: TyId) -> Option<usize> {
+        let t = if self.flat_sized(t) { t } else { self.with_unsized_length(t, Size::lit(0)) };
+        self.flat_layout(t).map(|(size, _)| size)
+    }
+
     /// Flat `t` with the length of the array of a length not known that it
     /// is, or ends in, `n`.
     pub(crate) fn with_unsized_length(&mut self, t: TyId, n: Size) -> TyId {

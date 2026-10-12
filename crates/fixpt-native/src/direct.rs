@@ -2008,12 +2008,15 @@ impl Compiling<'_> {
                     let step = name == "%suffix-ref+" && o(1).is_fixnum() && (0..1 << 24).contains(&o(1).as_fixnum());
                     let tag = name == "%fx26-flat-tag" && o(1).is_fixnum();
                     let at = name == "%suffix-ref" && o(1).is_fixnum() && (0..1 << 26).contains(&o(1).as_fixnum());
-                    if op == "prim2imm" && (step || tag || at) {
+                    let fits = name == "%fx26-suffix-fits" && o(1).is_fixnum() && (0..1 << 24).contains(&o(1).as_fixnum());
+                    if op == "prim2imm" && (step || tag || at || fits) {
                         let (slow, done) = (a.label(), a.label());
                         if step {
                             suffix_step(&mut a, o(1).as_fixnum(), slow);
                         } else if tag {
                             flat_tag(&mut a, o(1).as_fixnum(), slow);
+                        } else if fits {
+                            suffix_fits(&mut a, o(1).as_fixnum(), slow);
                         } else {
                             blobref_at(&mut a, o(1).as_fixnum(), slow);
                         }
@@ -3215,6 +3218,17 @@ fn suffix_step(a: &mut Asm, d: i64, slow: Label) {
     a.to(slow, Fix::If(Cond::Hs));
     a.es(&mov_imm64(X9, (d as u64) << SUFFIX_OFFSET_SHIFT));
     a.e(add(RESULT, RESULT, X9));
+}
+
+/// A new blobref (`%fx26-suffix-fits`): the suffix ref in `RESULT` left
+/// there, to `slow` (the primitive's, which says why) unless `size` bytes
+/// from it lie in its owner's suffix.
+fn suffix_fits(a: &mut Asm, size: i64, slow: Label) {
+    suffix_owner(a, RESULT, slow);
+    a.es(&mov_imm64(X9, size as u64));
+    a.e(add(X9, X15, X9));
+    a.e(cmp(X9, X13));
+    a.to(slow, Fix::If(Cond::Hi));
 }
 
 /// `blobref-index` (`%fx26-suffix-ref-index`) of the suffix ref in `x1`,

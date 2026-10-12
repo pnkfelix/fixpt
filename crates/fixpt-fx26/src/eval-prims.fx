@@ -541,6 +541,14 @@
             (o-bref owner at)
             (efail "suffix ref: the bloblet's suffix has no such byte")))
       (else y (efail-expected "a bloblet")))))
+;; New blobref `r`, back where its flat's `size` bytes lie in the suffix
+;; (`Checker::note_fits`).
+(define* ev-fits (subr (maxeff evals spin) (val int) val)
+  (lambda (r size)
+    (let ((p (ev-bref-bytes r)))
+      (if (<= (+ (cdr p) size) (array-length (car p)))
+          r
+          (efail "suffix ref: a flat runs past the end of the suffix")))))
 ;; Blobref `v`'s owner's suffix's bytes, and its offset.
 (define* ev-bref-bytes (subr (maxeff evals spin) (val) (pairof (arrayof int @v) int @v))
   (lambda (v)
@@ -597,12 +605,12 @@
 (define* ev-blobref (subr (maxeff evals spin) (symbol int vals) val)
   (lambda (op i xs)
     (if (symbol=? op 'blobref-at)
-        (ev-bref (ev-arg xs 0) (as-int (ev-arg xs 1)))
+        (ev-fits (ev-bref (ev-arg xs 0) (as-int (ev-arg xs 1))) i)
         (let ((r (ev-arg xs 0)))
           (tagcase (as-other r "a blobref")
             (o-bref (o at)
               (case op
-                ((blobref+) (ev-bref o (+ at (as-int (ev-arg xs 1)))))
+                ((blobref+) (ev-fits (ev-bref o (+ at (as-int (ev-arg xs 1)))) i))
                 ((blobref-owner) o)
                 ((blobref-offset) at)
                 ((blobref-length) (ev-flat-length r (quotient i 4294967296) (modulo i 4294967296)))

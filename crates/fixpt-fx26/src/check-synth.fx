@@ -27,7 +27,8 @@
        (check-holds-types (load-module "fx26:check-holds-types.fx"))
        (check-calls-types (load-module "fx26:check-calls-types.fx"))
        (check-subst-types (load-module "fx26:check-subst-types.fx"))
-       (check-read-helpers-types (load-module "fx26:check-read-helpers-types.fx")))
+       (check-read-helpers-types (load-module "fx26:check-read-helpers-types.fx"))
+       (check-blobrefs-types (load-module "fx26:check-blobrefs-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-types (select check-types-types check-types-sig))
            (check-test-facts (select check-test-facts-types check-test-facts-sig))
@@ -50,7 +51,8 @@
            (check-binders (select check-binders-types check-binders-sig))
            (check-sub-env (select check-sub-env-types check-sub-env-sig))
            (check-print-parts (select check-print-parts-types check-print-parts-sig))
-           (check-read-helpers (select check-read-helpers-types check-read-helpers-sig)))
+           (check-read-helpers (select check-read-helpers-types check-read-helpers-sig))
+           (check-blobrefs (select check-blobrefs-types check-blobrefs-sig)))
     (module
 (hide (include check-synth-types) (include check-types-types) (include check-resolve-types)
       (include check-infer-types) (include check-subtype-types) (include parser-types)
@@ -61,6 +63,7 @@
       (include check-binders) (include check-infer) (include check-facts)
       (include check-print-parts) (include check-print) (include check-bounds)
       (include check-expect) (include check-errors) (include check-read-helpers)
+      (include check-blobrefs)
       (include check-effects) (include check-mask) (include check-unions)
       (include check-terminate) (include check-holds) (include check-sub-env)
       (include check-subtype) (include check-calls) (include check-subst))

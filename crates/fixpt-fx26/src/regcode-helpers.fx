@@ -385,14 +385,16 @@
                (("bloblet-bytes") (r-prim g "%bloblet-bytes" all env te))
                ;; At a literal offset, in line (`prim2imm`).
                (("blobref-at")
-                (tagcase (car (cdr args))
-                  (e-int (k a b)
-                    (if (and (>= k 0) (< k 67108864))
-                        (r-prim g "%suffix-ref" (r-args-2 (a-e (car args)) (a-v (wcell-int k)))
-                                env te)
-                        (r-prim g "%suffix-ref" all env te)))
-                  (else y (r-prim g "%suffix-ref" all env te))))
-               (("blobref+") (r-prim g "%suffix-ref+" all env te))
+                (begin
+                  (tagcase (car (cdr args))
+                    (e-int (k a b)
+                      (if (and (>= k 0) (< k 67108864))
+                          (r-prim g "%suffix-ref" (r-args-2 (a-e (car args)) (a-v (wcell-int k)))
+                                  env te)
+                          (r-prim g "%suffix-ref" all env te)))
+                    (else y (r-prim g "%suffix-ref" all env te)))
+                  (r-fits g i)))
+               (("blobref+") (begin (r-prim g "%suffix-ref+" all env te) (r-fits g i)))
                (("blobref-owner") (r-prim g "%suffix-ref-owner" all env te))
                (("blobref-offset") (r-prim g "%suffix-ref-offset" all env te))
                (("blobref-get")
@@ -531,6 +533,13 @@
                  (r-op2 g rop-prim3imm (wcell-int (runtime-primitive name)) x)
                  (r-emit g (r-cell (wcell-int k)))))
         (r-restore g regs slots)))))
+;; A new blobref's flat's `size` bytes checked in the suffix, in line
+;; (`Checker::note_fits`); declined where the checker noted none.
+(define r-fits (subr rcompiles (rgen int) unit)
+  (lambda (g size)
+    (cond ((< size 0) (r-decline))
+          ((> size 1) (r-imm-prim g "%fx26-suffix-fits" (wcell-int size)))
+          (else #u))))
 ;; RESULT := runtime primitive `name`, one that never collects, of RESULT
 ;; and constant `v` (`prim2imm`).
 (define r-imm-prim (subr rcompiles (rgen string wcell) unit)

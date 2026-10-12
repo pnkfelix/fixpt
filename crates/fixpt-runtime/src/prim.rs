@@ -455,7 +455,7 @@ pub fn never_collects(name: &str) -> bool {
         || matches!(name, "%fx26-eqtable-has?" | "%fx26-eqtable-count" | "%fx26-eqtable-delete!")
         // A blobref's read, owner, offset and step (`TODO.md` §77): an `f64`
         // read allocates its box, which never collects.
-        || matches!(name, "%fx26-suffix-ref-get" | "%suffix-ref-owner" | "%suffix-ref-offset" | "%suffix-ref+" | "%suffix-ref")
+        || matches!(name, "%fx26-suffix-ref-get" | "%suffix-ref-owner" | "%suffix-ref-offset" | "%suffix-ref+" | "%suffix-ref" | "%fx26-suffix-fits")
         // A flat sum's tag (`TODO.md` §77): a number, or an owner's field;
         // and a `tagcase` with no arm for it, which only fails.
         || matches!(name, "%fx26-flat-tag" | "%fx26-flat-no-arm")
@@ -2246,6 +2246,17 @@ prims! {
             Some(Err(e)) => rt.fail(&format!("suffix ref: {e}"), &[a[0], a[1]]),
             None => rt.fail("suffix ref: a negative offset", &[a[0], a[1]]),
         }
+    });
+    // A new blobref (`TODO.md` §77): ref `a[0]` back where `a[1]` bytes lie
+    // in its owner's suffix from it, so that what its type says of the flat
+    // it points to (an array's length) holds of the suffix.
+    "%fx26-suffix-fits", 2, Some(2), simple!(|rt, a| {
+        let r = suffix_ref(rt, a[0])?;
+        let size = int(rt, a[1])?;
+        if (rt.heap.suffix_ref_room(r) as i64) < size {
+            return rt.fail(&format!("suffix ref: a flat of {size} bytes at byte {} runs past the end of the suffix", r.offset()), &[a[0], a[1]]);
+        }
+        Ok(a[0])
     });
     "%suffix-ref?", 1, Some(1), simple!(|_rt, a| Ok(Value::boolean(a[0].is_suffix_ref())));
     "%suffix-ref+", 2, Some(2), simple!(|rt, a| {

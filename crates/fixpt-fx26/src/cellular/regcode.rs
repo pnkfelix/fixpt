@@ -1019,6 +1019,14 @@ impl Compiler<'_> {
                         }
                     }
                 }
+                // A new blobref's flat's bytes checked in the suffix
+                // (`Checker::note_fits`), in line.
+                if matches!(op, BlobletOp::RefAt | BlobletOp::RefAdd) {
+                    let Some(&k) = self.c.facts.field_index.get(&x) else { return self.decline("blobref-at") };
+                    if k > 1 {
+                        self.r_imm_prim(g, "%fx26-suffix-fits", Value::fixnum(k as i64))?;
+                    }
+                }
                 g.done(tail);
             }
             Exp::Prompt { tag, body, handler } => {

@@ -1891,3 +1891,18 @@ Fourier–Motzkin where needed), and §86's debts count it discharged.
 Tests: `bloblet/flat-bounds.fx` (`(5 3 5)` on every machine) and
 `indices_shown_in_bounds`.
 
+**A new blobref's flat whole in the suffix** (2026-10-12, §77): what a
+blobref's type said of its flat was not checked against the suffix: a
+`(blobref o (arrayof f64 10))` made over 8 bytes had `blobref-length` 10,
+and an index below 10 was recorded in bounds (and its debt discharged)
+yet failed at run time; only the first byte was checked where a blobref
+was made. Now `blobref-at` and `blobref+` check the bytes the flat takes
+(`Checker::note_fits`, `flat_least_size`: of an array that runs to the
+end, none of its elements) with `%fx26-suffix-fits`, after `%suffix-ref`
+and `%suffix-ref+`, in both checkers, both compilers, the evaluator, and
+natively in line (`suffix_fits`); field and variant steps need none, the
+flat holding them whole. The FX checker's blobref helpers moved to
+`check-blobrefs.fx` (`check-read-helpers.fx` was at the 1000-line limit).
+Found by an audit of whether reads could skip the owner's header. Tests:
+`bloblet-errors/flat-past-suffix.fx`, `flat-step-past-suffix.fx`.
+

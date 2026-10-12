@@ -256,6 +256,11 @@
           (c-fail (string-append "no runtime primitive " name))
           (begin (c-op1 c routine-prim (wcell-int p)) (c-emit c (i-cell (wcell-int n))))))))
 
+;; A new blobref's flat's `size` bytes checked in the suffix, where more
+;; than the one byte making it checked (`Checker::note_fits`).
+(define c-fits (subr compiles (code int) unit)
+  (lambda (c size) (if (> size 1) (begin (c-int c size) (c-prim c "%fx26-suffix-fits" 2)) #u)))
+
 ;; Drop what a mutator left, and leave FX-26's unit value instead.
 (define c-unit-after (subr c-emits (code) unit)
   (lambda (c) (begin (c-op c routine-drop) (c-lit c (wcell-unit)))))

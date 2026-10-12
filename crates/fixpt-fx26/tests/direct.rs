@@ -395,7 +395,9 @@ fn blobrefs_as_the_rust_machine_gives_them() {
     let defs = "(define-type o (bloblet (fields) @heap)) \
                 (define* past (subr (maxeff (alloc @heap) (read @heap)) (int) int) \
                   (lambda (k) (i64->int (blobref-get (the (blobref o i64) (blobref-at (the o (make-bloblet 12)) k))))))";
-    assert!(matches!(&run(defs, "past", &[8], FUEL).direct, Err(m) if m.contains("no byte")));
+    // An `i64` at byte 8 of 12 runs past the end: refused where it is made
+    // (`Checker::note_fits`).
+    assert!(matches!(&run(defs, "past", &[8], FUEL).direct, Err(m) if m.contains("runs past the end")));
     // At a literal offset, in line: one past the suffix fails likewise.
     let defs = "(define-type o (bloblet (fields) @heap)) \
                 (define* at (subr (alloc @heap) (int) int) \

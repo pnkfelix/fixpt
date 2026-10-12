@@ -830,66 +830,6 @@
       (else y nil))))
 (define k-blobref-of (subr (maxeff kstate spin) (int int) int)
   (lambda (b f) (k-ty-new (ty-named k-blobref-gen (list (dt b) (dt f))))))
-;; The flat the type checked against says, for a new blobref at `a`..`z`.
-(define k-blobref-wanted (subr (maxeff checks spin) (int int int) int)
-  (lambda (a z expected)
-    (let ((p (if (< expected 0) nil (k-blobref-parts expected))))
-      (if (null? p)
-          (k-fail (string-append "which flat a new `blobref` points to is said by the type it is "
-                                 "checked against: `(the (blobref B F) …)`")
-                  a z)
-          (let* ((f (cdr (car p))) (n (k-unsized-length f)))
-            (if (or (null? n) (tagcase (car n) (sz-finite () #t) (else y #f)))
-                f
-                (k-fail (k-cat3 "a new blobref's array of a length not literal is of length "
-                                "`finite`, not a "
-                                (string-append (k-show-ty f)
-                                               ": the length is named where the blobref is bound"))
-                        a z)))))))
-;; Of a blobref at `a`..`z` of type `xt`, owner `b`, flat `f`, read or
-;; written: the owner's region, `f` a scalar; noting the scalar's layout at
-;; the span for the compilers if `note`.
-(define k-blobref-region (subr (maxeff checks spin) (int int int int int bool) k-region)
-  (lambda (a z xt b f note)
-    (let ((code (tagcase (k-get (k-resolve f)) (ty-base (s) (k-flat-code s)) (else y -1))))
-      (if (< code 0)
-          (k-fail (k-cat3 "only a scalar's bytes are read or written, and this points to a "
-                          (k-show-ty f) "")
-                  a z)
-          (tagcase (k-get (k-resolve b))
-            (ty-bloblet (fs fz r)
-              (let ((fact (product (1 a) (2 z) (3 code))))
-                (begin (if note (set k-extracts (cons fact (get k-extracts))) #u) r)))
-            (else y (k-fail (k-cat3 "the region of a " (k-show-ty xt) "'s owner is not known")
-                            a z)))))))
-;; A `blobref-length` at `a`..`z` of flat array `f`: a `(nat n)` of its
-;; length `n`, told the compilers as `blobref-index`'s is (`TODO.md` §77).
-(define k-blobref-length (subr (maxeff checks spin) (int int int) int)
-  (lambda (a z f)
-    (let* ((p (k-flat-array-parts f)) (e (k-flat-layout (car p))))
-      (if (< (car e) 0)
-          (k-fail (k-cat3 "the layout of a " (k-show-ty (car p)) " is not known") a z)
-          (let ((fact (product (1 a) (2 z) (3 (+ (* (cdr p) 4294967296) (car e))))))
-            (begin
-              (set k-extracts (cons fact (get k-extracts)))
-              (k-ty-new (ty-nat (k-flat-array-length f)))))))))
-;; Flat array `t`'s length, a size (`Checker::flat_array_parts`).
-(define k-flat-array-length (subr (maxeff kreads (alloc @t) spin) (int) k-size)
-  (lambda (t)
-    (tagcase (k-get (k-resolve t))
-      (ty-named (g ds)
-        (tagcase (car (cdr ds)) (dz (z) z) (else y (sz-finite))))
-      (else y (sz-finite)))))
-;; A `blobref-index` at `a`..`z` into flat array `f`: its element, its
-;; length and the element's size noted for the compilers, `n << 32 | size`.
-(define k-blobref-element (subr (maxeff checks spin) (int int int) int)
-  (lambda (a z f)
-    (let* ((p (k-flat-array-parts f)) (e (k-flat-layout (car p))))
-      (if (< (car e) 0)
-          (k-fail (k-cat3 "the layout of a " (k-show-ty (car p)) " is not known") a z)
-          (let ((fact (product (1 a) (2 z) (3 (+ (* (cdr p) 4294967296) (car e))))))
-            (begin (set k-extracts (cons fact (get k-extracts))) (car p)))))))
-
 ;; Kind `s`, or -1 where `k-parse-kind` would refuse it: for a reader that
 ;; gives its own message instead (`moduleof`'s `abs`).
 (define k-try-kind (subr (maxeff kstate (read @s) spin) (syn) int)

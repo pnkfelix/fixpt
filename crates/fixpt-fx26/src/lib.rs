@@ -244,6 +244,12 @@ pub const CHECK_MODORDER: &str = include_str!("check-modorder.fx");
 /// `check-synth.fx`: a `load-input` file, which the conductor applies (`TODO.md` §68).
 pub const CHECK_SYNTH: &str = include_str!("check-synth.fx");
 
+/// `check-blobrefs-types.fx`: types and signatures, a module file of no state (`TODO.md` §68).
+pub const CHECK_BLOBREFS_TYPES: &str = include_str!("check-blobrefs-types.fx");
+
+/// `check-blobrefs.fx`: a `load-input` file, which the conductor applies (`TODO.md` §68).
+pub const CHECK_BLOBREFS: &str = include_str!("check-blobrefs.fx");
+
 /// `check-facts-types.fx`: types and signatures, a module file of no state (`TODO.md` §68).
 pub const CHECK_FACTS_TYPES: &str = include_str!("check-facts-types.fx");
 
@@ -478,7 +484,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 135] = [
+pub const FRONT_END_MODULES: [(&str, &str); 137] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("table-types.fx", TABLE_TYPES),
     ("table.fx", TABLE),
@@ -571,8 +577,10 @@ pub const FRONT_END_MODULES: [(&str, &str); 135] = [
     ("check-module-rules.fx", CHECK_MODULE_RULES),
     ("check-modorder.fx", CHECK_MODORDER),
     ("check-facts-types.fx", CHECK_FACTS_TYPES),
+    ("check-blobrefs-types.fx", CHECK_BLOBREFS_TYPES),
     ("check-synth.fx", CHECK_SYNTH),
     ("check-facts.fx", CHECK_FACTS),
+    ("check-blobrefs.fx", CHECK_BLOBREFS),
     ("check-letrec.fx", CHECK_LETREC),
     ("check-test-facts.fx", CHECK_TEST_FACTS),
     ("check-sc-graphs-types.fx", CHECK_SC_GRAPHS_TYPES),

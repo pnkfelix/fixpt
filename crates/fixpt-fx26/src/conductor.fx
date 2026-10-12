@@ -184,6 +184,11 @@
           ((load-input "fx26:check-facts.fx")
            check-env check-test-facts check-infer check-calls
            check-binders))
+         ;; The checker, blobrefs: their forms' types, and what the compilers
+         ;; are told.
+         (check-blobrefs
+          ((load-input "fx26:check-blobrefs.fx")
+           check-types check-env check-print check-read-helpers))
          ;; The checker, synthesis: calls, their arguments and type binders.
          (check-synth
           ((load-input "fx26:check-synth.fx")
@@ -192,7 +197,7 @@
            check-expect check-errors check-effects check-mask
            check-unions check-terminate check-holds check-subtype
            check-calls check-subst check-binders check-sub-env check-print-parts
-           check-read-helpers))
+           check-read-helpers check-blobrefs))
          ;; The checker, a module's order: its items as a letrec*, used only once made.
          (check-modorder
           ((load-input "fx26:check-modorder.fx")
