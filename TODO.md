@@ -2289,8 +2289,12 @@ not agree when a run fails.
   lets the Scheme compiler drop the unused call, which native code does
   not. Either failing is an effect after all (a `fail` atom, or `error`
   typed `spin`), or every machine may drop such a call and the tests
-  allow both answers; a question for the user. Both compilers must agree,
-  so today they do not.
+  allow both answers. Both compilers must agree, so today they do not.
+  Settled with the user (2026-10-12): emit the `(pure)` claim only for
+  code that cannot fail, and perhaps type `error` as a control effect;
+  the larger question behind it, failure as proof debt and blame across
+  components, is `docs/research/failure-and-blame.md`, whose section 7
+  is a measurement to make before deciding more.
 - **The messages differ.** `(car nil)` says "car or cdr of a non-pair"
   natively and on the cellular machines (whose traps say themselves in
   the native machine's words since 2026-10-12, not Rust's debug form),
