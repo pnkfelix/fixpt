@@ -169,6 +169,35 @@ restart's `(goto r)` by its prompt.
 - **The front end** could move from `k-sfail`'s hand-made abort to the
   library once it exists, its first large user.
 
+## 6a. `yolo` in coopt
+
+coopt (`~/Dev/Rust/coopt`), the asynchronous runtime, gives effects a
+run-time form (its R7, `docs/research/effects-scheduling.md`; its
+DONE.md, "M9, stage 2" and "stage 3"): an FX-26 effect is lowered to a
+descriptor (`coopt-sched/src/effect.rs`: reads, writes and control per
+numbered region, `read_all`, `write_all`, and `any`, "assumed to touch
+every region"), and `(effect-handle F)` is a run-time handle covering at
+least `F`, contravariant in `F`. The top effect fits both with nothing
+new:
+- **`yolo` lowers to `Effect::any()`**, which interferes with everything
+  but `pure`: what "may do anything" must mean to a scheduler.
+- **`(effect-handle yolo)` is the handle that covers everything**, and by
+  contravariance it stands wherever any handle is wanted; `handle-of`
+  gives it the constant `any` descriptor. coopt chose handles over
+  evidence passing so that polymorphism stays erased; that is what makes
+  `yolo` need no run-time form beyond `any`.
+- **Its cost is where it reaches the scheduler.** coopt measured an entry
+  beside a loader it does not interfere with answered within 5 of the
+  loader's slices, and with either as `any`, 384. Under R7's option (b)
+  a loop's tag bound `D` becomes its fibers' descriptor, so a loop whose
+  `D` is `yolo` makes every fiber `any`. A condition handler's
+  escape-only tag never reaches the scheduler: `yolo` costs nothing as
+  its `D`, which is where section 5 wants it.
+- **FX-26's `(io k)` atoms** (`TODO.md` §84) have no row in coopt's
+  lowering table yet. Under the one ordering rule they all lower to a
+  write of one "world" region, so that no two tasks doing I/O
+  interleave; `yolo` covers it, as `any` touches every region.
+
 ## 7. Questions for the user
 
 1. Decided by the user (2026-10-12): **design B**, handlers at the raise,
