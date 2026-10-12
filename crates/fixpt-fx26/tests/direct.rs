@@ -3,14 +3,14 @@
 //! their register code, called by `bl`, on native frames, give what the
 //! Rust machine gives; what they cannot do they decline.
 //!
-//! Only where arm64 code runs: every test here runs some.
+//! Only where code in the native convention runs (arm64; x86_64's is not
+//! yet ported onto the frames of `TODO.md` §91): every test here runs some.
 #![cfg(target_arch = "aarch64")]
 
 use fixpt_engine::Backend;
 use fixpt_fx26::session::Fx26Session;
 use fixpt_fx26::Checker;
 use fixpt_heap::Value;
-use fixpt_native::arm64::disasm::disassemble;
 use fixpt_native::direct::{DirectMachine, DirectTrap};
 use fixpt_read::FileId;
 
@@ -99,7 +99,7 @@ fn direct_in(defs: &str, name: &str, args: &[i64], fuel: u64, gc_every: Option<u
             Err(e) => return Ran { direct: Err(format!("declined: {e}")), rust, code: String::new(), collections: (0, 0), code_words: (0, 0) },
         };
         let p = procs[0].1;
-        let code: String = m.instructions(&rt.heap, p).iter().enumerate().map(|(i, w)| disassemble(*w, i as i64) + "\n").collect();
+        let code = code_of(&m, &rt.heap, p);
         if std::env::var("DIRECT_SHOW").is_ok() {
             eprintln!("{code}");
         }
@@ -115,6 +115,24 @@ fn direct_in(defs: &str, name: &str, args: &[i64], fuel: u64, gc_every: Option<u
         rt.heap.collect(&mut []);
         Ran { direct, rust, code, collections, code_words: (after_run, rt.heap.code_words().0 - kept) }
     })
+}
+
+/// A procedure's own instructions, one to a line, as the disassembler
+/// reads them: arm64's, or x86_64's, a branch's target `@byte`.
+fn code_of(m: &DirectMachine, heap: &fixpt_heap::Heap, p: fixpt_native::direct::Compiled) -> String {
+    if cfg!(target_arch = "x86_64") {
+        let bytes = &heap.bloblet_bytes(p.code)[..p.len];
+        let mut at = 0;
+        let mut out = String::new();
+        while at < bytes.len() {
+            let (text, n) = fixpt_native::x86_64::disasm::disassemble(bytes, at);
+            out.push_str(&text);
+            out.push('\n');
+            at += n;
+        }
+        return out;
+    }
+    m.instructions(heap, p).iter().enumerate().map(|(i, w)| fixpt_native::arm64::disasm::disassemble(*w, i as i64) + "\n").collect()
 }
 
 fn on_rust_machine(text: &str) -> String {
@@ -151,7 +169,7 @@ fn the_identity_is_a_move_and_a_return() {
     let r = run("(define* id (subr pure (int) int) (lambda (x) x))", "id", &[42], FUEL);
     assert_eq!(r.direct, Ok("42".into()));
     assert_eq!(r.rust, "42");
-    assert_eq!(r.code, "mov x0, x1\nret\n");
+    assert_eq!(r.code, if cfg!(target_arch = "x86_64") { "mov rax, rdi\nret\n" } else { "mov x0, x1\nret\n" });
 }
 
 /// Adding one is one instruction, with its checks: that the operand is a
@@ -160,7 +178,8 @@ fn the_identity_is_a_move_and_a_return() {
 fn adding_one_checks_its_operand_and_overflow() {
     let r = run("(define* inc (subr pure (int) int) (lambda (x) (+ x 1)))", "inc", &[41], FUEL);
     assert_eq!(r.direct, Ok("42".into()));
-    assert!(r.code.starts_with("tst x1, #0x7\nb.ne @5\nadds x0, x1, #8\nb.vs @5\nret\n"), "{}", r.code);
+    let want = if cfg!(target_arch = "x86_64") { "test edi, 7\njne @" } else { "tst x1, #0x7\nb.ne @5\nadds x0, x1, #8\nb.vs @5\nret\n" };
+    assert!(r.code.starts_with(want), "{}", r.code);
     let r = run("(define* inc (subr pure (int) int) (lambda (x) (+ x 1)))", "inc", &[(1 << 60) - 1], FUEL);
     assert_eq!((r.direct, r.rust.as_str()), (Ok("1152921504606846976".into()), "1152921504606846976"));
     let r = run("(define* acc (subr pure (int int) int) (lambda (x y) (- x (- y x))))", "acc", &[-(1 << 60), (1 << 59)], FUEL);
@@ -1320,6 +1339,11 @@ fn every_test_program_runs_natively_as_cellular() {
         paths.sort();
         for path in paths {
             let text = std::fs::read_to_string(&path).unwrap();
+            // With `DIRECT_PROGRESS`, each program as it starts: the report
+            // is long, and a program that loops would look like it.
+            if std::env::var_os("DIRECT_PROGRESS").is_some() {
+                eprintln!("{}", path.display());
+            }
             let (Some(want), Some(got)) = (forms_of(&text, None), forms_of(&text, Some(run_native))) else { continue };
             for (i, (w, g)) in want.iter().zip(&got).enumerate() {
                 let (Ok((w, _)), Ok((g, printed))) = (w, g) else { continue };

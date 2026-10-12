@@ -276,7 +276,7 @@ fn run(args: &[String]) -> i32 {
     if !fixpt_native::AVAILABLE {
         let cellular = |m: &str| fixpt_native::CELLULAR_AVAILABLE && matches!(m, "native" | "native-compiled" | "fx-compiled" | "registers");
         let machine = flags.cellular_machine.as_deref().filter(|m| *m != "rust" && !cellular(m)).map(|m| ("--cellular-machine", m));
-        let convention = flags.calling_convention.as_deref().filter(|c| *c == "native").map(|c| ("--calling-convention", c));
+        let convention = flags.calling_convention.as_deref().filter(|c| *c == "native" && !fixpt_native::NATIVE_CONVENTION_AVAILABLE).map(|c| ("--calling-convention", c));
         if let Some((flag, value)) = machine.or(convention)
             && ["native", "native-compiled", "fx-compiled", "stencils", "registers"].contains(&value)
         {

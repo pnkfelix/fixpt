@@ -54,7 +54,11 @@ use std::mem::offset_of;
 mod reps;
 mod declare;
 pub use declare::native_convention;
+mod x64;
 use reps::{Convert, RawOp, Rep};
+
+/// Whether the machine is x86_64's (`x64`): every other code is arm64's.
+const X86: bool = cfg!(target_arch = "x86_64");
 
 const RESULT: Reg = 0;
 const ST: Reg = 24;
@@ -190,6 +194,9 @@ struct DState {
     poll: u64,
     cons: u64,
     bloblet: u64,
+    /// x86_64's REG4…REG8 (`x64`), by number: that machine has registers
+    /// for only three.
+    regs: [u64; 9],
 }
 
 /// What the stack cache did: overflows and collections, and the frames and
@@ -549,10 +556,9 @@ pub fn adapt(rt: &mut fixpt_runtime::Runtime, f: Value, arity: usize, native: bo
     let blob = match heap.adapter_code() {
         Some(b) => b,
         None => {
-            let code = adapter_code();
-            let blob = heap.make_code_bloblet(const { fixpt_heap::layout::kind("bloblet") }, 1, 4 * code.len(), false);
+            let bytes = if X86 { x64::adapter() } else { crate::arm64::bytes(&adapter_code()) };
+            let blob = heap.make_code_bloblet(const { fixpt_heap::layout::kind("bloblet") }, 1, bytes.len(), false);
             heap.set_bloblet_slot(blob, 1, blob);
-            let bytes: Vec<u8> = code.iter().flat_map(|i| i.to_le_bytes()).collect();
             heap.set_bloblet_bytes(blob, 0, &bytes).map_err(|e| format!("{e:?}"))?;
             heap.flush_code(blob);
             crate::symbols::note(heap.code_exec_address(blob), bytes.len(), "native convention: an adapter");
@@ -744,15 +750,15 @@ impl Asm {
 }
 
 /// A procedure, compiled or being compiled: its cellular word and register
-/// word, name and arity, its code bloblet's fields, and its code, of which
-/// the first `len` instructions are its own (the rest, its traps').
+/// word, name and arity, its code bloblet's fields, and its code, in bytes,
+/// of which the first `len` are its own (the rest, its traps').
 struct Proc {
     word: Value,
     rw: Value,
     name: String,
     arity: usize,
     fields: Vec<Field>,
-    code: Vec<u32>,
+    code: Vec<u8>,
     len: usize,
     /// A global's procedure, which may be called through its cell instead.
     global: bool,
@@ -799,7 +805,7 @@ pub struct DirectTrap {
 }
 
 /// A compiled procedure: its code bloblet (in the heap's code area), how
-/// many instructions are its own, its arity, and a native closure of it
+/// many of its bytes are its own code, its arity, and a native closure of it
 /// over what the closure compiled captured (for the first procedure a
 /// compile gives; `#f` for the others). The bloblet lives while something
 /// the collector traces refers to it, and while a call runs it; the
@@ -815,23 +821,13 @@ pub struct Compiled {
 
 impl DirectMachine {
     pub fn new() -> Result<DirectMachine, String> {
-        if !crate::AVAILABLE {
+        if !crate::NATIVE_CONVENTION_AVAILABLE {
             return Err(crate::UNAVAILABLE.into());
         }
         fixpt_runtime::crossing::set_foreign_marks(marks_of);
         let mut space = CodeSpace::new(8 << 20).map_err(|e| e.to_string())?;
-        let code = trampoline();
-        let entry = space.alloc(4 * code.len(), 16).ok_or("no room for the trampoline")?;
-        space.write_code(entry, &code);
-        space.flush(entry, 4 * code.len());
-        let pop_mark = [ldp(FRAME, LINK, SP, 8), add_imm(SP, SP, CONTROL_FRAME as u32), ret()];
-        let mark_ret = space.alloc(4 * pop_mark.len(), 16).ok_or("no room for the mark's return")?;
-        space.write_code(mark_ret, &pop_mark);
-        space.flush(mark_ret, 4 * pop_mark.len());
-        let code = common_trap();
-        let trap_stub = space.alloc(4 * code.len(), 16).ok_or("no room for the common trap")?;
-        space.write_code(trap_stub, &code);
-        space.flush(trap_stub, 4 * code.len());
+        // The machine's own code, in bytes, for this instruction set.
+        let a64 = |w: Vec<u32>| crate::arm64::bytes(&w);
         // Call-out 0: what is not native code, called (`common_foreign`);
         // 1: a closure made (`common_closure`); 2 and 3: the stack cache's
         // underflow and overflow (`common_underflow`, `common_overflow`);
@@ -852,45 +848,41 @@ impl DirectMachine {
             Callout::Cons,
             Callout::Bloblet,
         ];
-        let code = common_foreign(0);
-        let foreign = space.alloc(4 * code.len(), 16).ok_or("no room for the common foreign call")?;
-        space.write_code(foreign, &code);
-        space.flush(foreign, 4 * code.len());
-        let code = common_closure(1);
-        let closure = space.alloc(4 * code.len(), 16).ok_or("no room for the common closure")?;
-        space.write_code(closure, &code);
-        space.flush(closure, 4 * code.len());
-        let code = common_underflow(2);
-        let underflow = space.alloc(4 * code.len(), 16).ok_or("no room for the underflow")?;
-        space.write_code(underflow, &code);
-        space.flush(underflow, 4 * code.len());
-        let code = common_overflow(3);
-        let overflow = space.alloc(4 * code.len(), 16).ok_or("no room for the overflow")?;
-        space.write_code(overflow, &code);
-        space.flush(overflow, 4 * code.len());
-        let code = common_poll();
-        let poll = space.alloc(4 * code.len(), 16).ok_or("no room for the common poll")?;
-        space.write_code(poll, &code);
-        space.flush(poll, 4 * code.len());
-        let code = common_cons();
-        let cons = space.alloc(4 * code.len(), 16).ok_or("no room for the common cons")?;
-        space.write_code(cons, &code);
-        space.flush(cons, 4 * code.len());
-        let code = common_bloblet();
-        let bloblet = space.alloc(4 * code.len(), 16).ok_or("no room for the common bloblet")?;
-        space.write_code(bloblet, &code);
-        space.flush(bloblet, 4 * code.len());
-        let stub = |at: usize, len: usize, what: &str| crate::symbols::note(space.exec_addr(at), 4 * len, &format!("native convention: {what}"));
-        stub(underflow, common_underflow(2).len(), "stack cache underflow");
-        stub(overflow, common_overflow(3).len(), "stack cache overflow");
-        stub(entry, trampoline().len(), "trampoline");
-        stub(mark_ret, pop_mark.len(), "a mark's return");
-        stub(trap_stub, common_trap().len(), "common trap");
-        stub(foreign, common_foreign(0).len(), "common foreign call");
-        stub(closure, common_closure(1).len(), "common closure");
-        stub(poll, common_poll().len(), "common poll");
-        stub(cons, common_cons().len(), "common cons");
-        stub(bloblet, common_bloblet().len(), "common bloblet");
+        let pieces: [(Vec<u8>, &str); 10] = if X86 {
+            [
+                (x64::trampoline(), "trampoline"),
+                (x64::mark_ret(), "a mark's return"),
+                (x64::common_trap(), "common trap"),
+                (x64::common_foreign(0), "common foreign call"),
+                (x64::common_closure(1), "common closure"),
+                (x64::common_underflow(2), "stack cache underflow"),
+                (x64::common_overflow(3), "stack cache overflow"),
+                (x64::common_poll(), "common poll"),
+                (x64::common_cons(), "common cons"),
+                (x64::common_bloblet(), "common bloblet"),
+            ]
+        } else {
+            [
+                (a64(trampoline()), "trampoline"),
+                (a64(vec![ldp(FRAME, LINK, SP, 8), add_imm(SP, SP, CONTROL_FRAME as u32), ret()]), "a mark's return"),
+                (a64(common_trap()), "common trap"),
+                (a64(common_foreign(0)), "common foreign call"),
+                (a64(common_closure(1)), "common closure"),
+                (a64(common_underflow(2)), "stack cache underflow"),
+                (a64(common_overflow(3)), "stack cache overflow"),
+                (a64(common_poll()), "common poll"),
+                (a64(common_cons()), "common cons"),
+                (a64(common_bloblet()), "common bloblet"),
+            ]
+        };
+        let mut at = [0; 10];
+        for (k, (code, what)) in pieces.iter().enumerate() {
+            at[k] = space.alloc(code.len(), 16).ok_or_else(|| format!("no room for the {what}"))?;
+            space.write(at[k], code);
+            space.flush(at[k], code.len());
+            crate::symbols::note(space.exec_addr(at[k]), code.len(), &format!("native convention: {what}"));
+        }
+        let [entry, mark_ret, trap_stub, foreign, closure, underflow, overflow, poll, cons, bloblet] = at;
         let (cache_words, max_words) = stack_words_wanted();
         Ok(DirectMachine {
             space,
@@ -948,7 +940,7 @@ impl DirectMachine {
         // Every bloblet first, then their fields, which refer to each other.
         // Nothing here collects, so the values held do not move.
         let blobs: Vec<Value> =
-            procs.iter().map(|p| heap.make_code_bloblet(const { fixpt_heap::layout::kind("bloblet") }, p.fields.len(), 4 * p.code.len(), false)).collect();
+            procs.iter().map(|p| heap.make_code_bloblet(const { fixpt_heap::layout::kind("bloblet") }, p.fields.len(), p.code.len(), false)).collect();
         for (p, &blob) in procs.iter().zip(&blobs) {
             for (k, f) in p.fields.iter().enumerate() {
                 let v = match f {
@@ -959,8 +951,8 @@ impl DirectMachine {
                 };
                 heap.set_bloblet_slot(blob, k + 1, v);
             }
-            let bytes: Vec<u8> = p.code.iter().flat_map(|i| i.to_le_bytes()).collect();
-            heap.set_bloblet_bytes(blob, 0, &bytes).map_err(|e| format!("{e:?}"))?;
+            let bytes = &p.code;
+            heap.set_bloblet_bytes(blob, 0, bytes).map_err(|e| format!("{e:?}"))?;
             heap.flush_code(blob);
             if crate::symbols::enabled() {
                 crate::symbols::note(heap.code_exec_address(blob), bytes.len(), &format!("native {}", p.name));
@@ -982,7 +974,7 @@ impl DirectMachine {
             return None;
         }
         let code = heap.bloblet_slot(closure, CLOSURE_WORD);
-        Some(Compiled { code, len: heap.bloblet_head(code).bytes / 4, arity: usize::MAX, closure })
+        Some(Compiled { code, len: heap.bloblet_head(code).bytes, arity: usize::MAX, closure })
     }
 
     /// Call `p` with `args`, in at most about `fuel` steps, in `rt`, whose
@@ -1012,10 +1004,16 @@ impl DirectMachine {
         }
     }
 
-    /// `p`'s instructions, as they are in its code bloblet.
+    /// `p`'s instructions, as they are in its code bloblet: arm64's.
     pub fn instructions(&self, heap: &Heap, p: Compiled) -> Vec<u32> {
         let bytes = heap.bloblet_bytes(p.code);
-        (0..p.len).map(|i| u32::from_le_bytes(bytes[4 * i..4 * i + 4].try_into().expect("four bytes"))).collect()
+        (0..p.len / 4).map(|i| u32::from_le_bytes(bytes[4 * i..4 * i + 4].try_into().expect("four bytes"))).collect()
+    }
+
+    /// `p`'s own code, an instruction to a line, for this machine's
+    /// instruction set.
+    pub fn lines(&self, heap: &Heap, p: Compiled) -> Vec<String> {
+        code_lines(&heap.bloblet_bytes(p.code)[..p.len])
     }
 }
 
@@ -1486,7 +1484,10 @@ impl Compiling<'_> {
         if let Some(q) = self.resume {
             return q;
         }
-        let code = continuation_code(REINSTATE);
+        if X86 {
+            return self.resume_proc_x64();
+        }
+        let code = crate::arm64::bytes(&continuation_code(REINSTATE));
         let q = self.procs.len();
         self.procs.push(Proc { word: Value::FALSE, rw: Value::FALSE, name: "continuation".into(), arity: 1, fields: vec![Field::Myself, Field::Const(Value::FALSE)], len: code.len(), code, global: false, params: Some(0) });
         self.resume = Some(q);
@@ -1629,6 +1630,9 @@ impl Compiling<'_> {
 
     /// One procedure's code, from its register word.
     fn procedure(&mut self, p: usize) -> Result<(), String> {
+        if X86 {
+            return self.procedure_x64(p);
+        }
         let h = self.heap;
         let (word, rw) = (self.procs[p].word, self.procs[p].rw);
         let cells = register_cells(h, rw);
@@ -3238,8 +3242,8 @@ impl Compiling<'_> {
             a.e(ldr(X16, ST, st_off(offset_of!(DState, trap_stub))));
             a.e(br(X16));
         }
-        self.procs[p].code = a.finish()?;
-        self.procs[p].len = own;
+        self.procs[p].code = crate::arm64::bytes(&a.finish()?);
+        self.procs[p].len = 4 * own;
         Ok(())
     }
 }
@@ -5904,11 +5908,10 @@ pub fn code_text(heap: &Heap, closure: Value) -> Option<String> {
             continue;
         }
         seen.push(code.raw());
-        let bytes = heap.bloblet_bytes(code);
-        let _ = writeln!(out, "\ncode {}, {} instructions:", seen.len(), bytes.len() / 4);
-        for (i, w) in bytes.chunks_exact(4).enumerate() {
-            let w = u32::from_le_bytes(w.try_into().expect("four bytes"));
-            let _ = writeln!(out, "  {i:>4}  {}", crate::arm64::disasm::disassemble(w, i as i64));
+        let lines = code_lines(&heap.bloblet_bytes(code));
+        let _ = writeln!(out, "\ncode {}, {} instructions:", seen.len(), lines.len());
+        for l in lines {
+            let _ = writeln!(out, "  {l}");
         }
         // What it calls, and makes closures of: code in its fields, and
         // in the closures there.
@@ -5925,3 +5928,15 @@ pub fn code_text(heap: &Heap, closure: Value) -> Option<String> {
 }
 
 
+/// Code in bytes, an instruction to a line: arm64's numbered by
+/// instruction, x86_64's by byte.
+fn code_lines(bytes: &[u8]) -> Vec<String> {
+    if X86 {
+        return crate::x86_64::disasm::listing(bytes).lines().map(str::to_string).collect();
+    }
+    bytes
+        .chunks_exact(4)
+        .enumerate()
+        .map(|(i, w)| format!("{i:>4}  {}", crate::arm64::disasm::disassemble(u32::from_le_bytes(w.try_into().expect("four bytes")), i as i64)))
+        .collect()
+}

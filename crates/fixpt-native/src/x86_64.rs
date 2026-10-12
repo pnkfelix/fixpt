@@ -220,7 +220,30 @@ fn modrm_mem(i: &mut Ins, field: u8, mem: Mem) {
     }
 }
 
+/// The same with `[rip + disp]` in `rm`: `disp` from the end of the
+/// instruction, its last four bytes.
+fn op_rip(w: bool, opcode: &[u8], field: u8, disp: i32) -> Ins {
+    let mut i = Ins::new();
+    rex(&mut i, w, field, 0, 0);
+    for &b in opcode {
+        i.b(b);
+    }
+    i.b((field & 7) << 3 | 5);
+    i.i32(disp);
+    i
+}
+
 // ---------------------------------------------------------------- moves
+
+/// `mov d, [rip + disp]`: a word `disp` bytes past this instruction's end.
+pub fn load_rip(d: Reg, disp: i32) -> Ins {
+    op_rip(true, &[0x8B], d, disp)
+}
+
+/// `lea d, [rip + disp]`.
+pub fn lea_rip(d: Reg, disp: i32) -> Ins {
+    op_rip(true, &[0x8D], d, disp)
+}
 
 /// `mov d, s`.
 pub fn mov(d: Reg, s: Reg) -> Ins {
@@ -681,5 +704,141 @@ pub fn card_mark(obj: Reg, disp: i32, st: Reg, cards_off: i32, t1: Reg, t2: Reg)
 pub fn store8_imm(mem: Mem, imm: u8) -> Ins {
     let mut i = op_rm(false, &[0xC6], 0, mem);
     i.b(imm);
+    i
+}
+
+// ------------------------------------------------- narrower memory, `div`
+
+/// `movzx d32, word [mem]`.
+pub fn load16(d: Reg, mem: Mem) -> Ins {
+    op_rm(false, &[0x0F, 0xB7], d, mem)
+}
+
+/// `mov byte [mem], s8`: a REX prefix for `sil` and `dil`, which name
+/// something else without one.
+pub fn store8(mem: Mem, s: Reg) -> Ins {
+    let mut i = Ins::new();
+    let x = mem.index.map_or(0, |(r, _)| reg(r));
+    let v = 0x40 | (reg(s) >> 3) << 2 | (x >> 3) << 1 | (reg(mem.base) >> 3);
+    if v != 0x40 || (4..8).contains(&s) {
+        i.b(v);
+    }
+    i.b(0x88);
+    modrm_mem(&mut i, s, mem);
+    i
+}
+
+/// `mov word [mem], s16`.
+pub fn store16(mem: Mem, s: Reg) -> Ins {
+    prefixed(0x66, op_rm(false, &[0x89], s, mem))
+}
+
+/// `div s`: `rdx:rax` by `s`, unsigned, the quotient in `rax`, the
+/// remainder in `rdx`.
+pub fn div(s: Reg) -> Ins {
+    op_rr(true, &[0xF7], 6, s)
+}
+
+/// `i` after a mandatory prefix, which goes before any REX.
+fn prefixed(p: u8, i: Ins) -> Ins {
+    let mut out = Ins::new();
+    out.b(p);
+    for &b in i.iter() {
+        out.b(b);
+    }
+    out
+}
+
+// --------------------------------------------- scalar floating point (SSE)
+
+/// An `xmm` register, by number.
+pub type Xmm = u8;
+
+/// An SSE instruction on two registers: `prefix` (0 for none), REX, `0F`
+/// and `op`, with `field` in ModRM's `reg` and `rm` in its `rm`.
+fn sse(prefix: u8, w: bool, op: &[u8], field: u8, rm: u8) -> Ins {
+    let mut i = Ins::new();
+    if prefix != 0 {
+        i.b(prefix);
+    }
+    rex(&mut i, w, field, 0, rm);
+    i.b(0x0F);
+    for &b in op {
+        i.b(b);
+    }
+    i.b(0xC0 | (field & 7) << 3 | (rm & 7));
+    i
+}
+
+/// `movq x, r`: an `f64`'s bits into `x`.
+pub fn movq_to_xmm(x: Xmm, r: Reg) -> Ins {
+    sse(0x66, true, &[0x6E], x, r)
+}
+
+/// `movq r, x`.
+pub fn movq_from_xmm(r: Reg, x: Xmm) -> Ins {
+    sse(0x66, true, &[0x7E], x, r)
+}
+
+/// `movd x, r32`: an `f32`'s bits into `x`.
+pub fn movd_to_xmm(x: Xmm, r: Reg) -> Ins {
+    sse(0x66, false, &[0x6E], x, r)
+}
+
+/// `movd r32, x`, zero-extended.
+pub fn movd_from_xmm(r: Reg, x: Xmm) -> Ins {
+    sse(0x66, false, &[0x7E], x, r)
+}
+
+/// Scalar arithmetic, by its opcode.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Fop {
+    Sqrt = 0x51,
+    Add = 0x58,
+    Mul = 0x59,
+    Sub = 0x5C,
+    Div = 0x5E,
+}
+
+impl Fop {
+    pub fn name(self) -> &'static str {
+        match self {
+            Fop::Sqrt => "sqrt",
+            Fop::Add => "add",
+            Fop::Mul => "mul",
+            Fop::Sub => "sub",
+            Fop::Div => "div",
+        }
+    }
+}
+
+/// `{op}sd d, s` (`double`), or `{op}ss` (`!double`): `d op= s`, or for
+/// `sqrt`, `d := sqrt s`.
+pub fn fop(double: bool, op: Fop, d: Xmm, s: Xmm) -> Ins {
+    sse(if double { 0xF2 } else { 0xF3 }, false, &[op as u8], d, s)
+}
+
+/// `ucomisd a, b` (`double`), or `ucomiss`: `a` against `b`, unordered
+/// setting ZF, PF and CF.
+pub fn ucomis(double: bool, a: Xmm, b: Xmm) -> Ins {
+    sse(if double { 0x66 } else { 0 }, false, &[0x2E], a, b)
+}
+
+/// `cvtsi2sd x, r`: the signed integer in `r`, rounded as the mode says.
+pub fn cvtsi2sd(x: Xmm, r: Reg) -> Ins {
+    sse(0xF2, true, &[0x2A], x, r)
+}
+
+/// `cvttsd2si r, x`: truncated; out of range, `i64::MIN`.
+pub fn cvttsd2si(r: Reg, x: Xmm) -> Ins {
+    sse(0xF2, true, &[0x2C], r, x)
+}
+
+/// `roundsd d, s, mode` (`double`), or `roundss` (SSE4.1): 0 to nearest
+/// (even), 1 down, 2 up, 3 toward zero.
+pub fn round(double: bool, d: Xmm, s: Xmm, mode: u8) -> Ins {
+    let mut i = sse(0x66, false, &[0x3A, if double { 0x0B } else { 0x0A }], d, s);
+    i.b(mode);
     i
 }

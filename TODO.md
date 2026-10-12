@@ -2533,13 +2533,13 @@ reaches its fixpoint on all three. Left, in the order they would pay:
    state; `fast` on x86_64 is now `fx-regs-rsjit-cellcc`). Left of it:
    `ret` measured against `pop`/`jmp` for deep recursions, as arm64's
    `br` was.
-2. **The native convention** (`direct.rs`, `fx-regs-rsjit-nativecc`, the
-   arm64 default): about 4 000 lines of emission. Keep the frame's layout
-   (`[fp]` link, `[fp+8]` return address, `[fp+16]` map) so that the
-   stack cache, the stack maps and the continuations (all ISA-neutral)
-   carry over; the prologue moves the return address `call` pushed into
-   the frame. `ret` against `jmp` is the return-stack-predictor question
-   CLAUDES_CHOICES.md's "Native profiling" item 6 settled for arm64.
+2. ~~**The native convention**~~ (done: `direct/x64.rs`, CLAUDES_CHOICES.md
+   "The native convention on x86_64"; the same frames, so the Rust side is
+   shared). Left of it: whether `fast` should name it on x86_64, as on
+   arm64: it is the fastest there on all of `fixpt bench`'s programs but
+   `captures` (22 against register code's 18 ms, continuations), so `fast`
+   stays register code for now; and the native convention's `ret` against
+   arm64's `br` (CLAUDES_CHOICES.md, "Native profiling" 6), unmeasured.
 3. **Stencils** on x86_64: `build.rs` reads x86_64 ELF (`EM_X86_64`),
    refuses relocations, and needs its own check of branches in range;
    SysV passes six integer arguments in registers, the stencils' routines

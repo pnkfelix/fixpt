@@ -705,3 +705,41 @@ The user, asked which `REG`s should live in memory: "go right ahead"
    its fixpoint so. Against the compiled cellular words, in ms: fib 27.5 →
    12.5, tak 10.0 → 3.6, loop 76.6 → 26.0, helpers 123.1 → 14.9,
    lists-region 129.2 → 13.4, closures 123.4 → 29.7, captures 23.1 → 18.4.
+
+## The native convention on x86_64 (2026-10-11)
+
+The user: "Go for it" (TODO §105's next item, `direct.rs`).
+
+1. **A file of its own, `direct/x64.rs`, step for step**, as the cellular
+   machine's and register code's x86 forms are: the trampoline, the common
+   routines and `procedure`, each beside its arm64 original's name. The
+   Rust side (call-outs, the stack cache, continuations, stack maps,
+   `place`, `restore`) is shared unchanged, since the frames are laid out
+   alike. `direct.rs` now keeps code as bytes (`Proc::code`,
+   `Compiled::len`), and chooses by `X86`.
+2. **The same frame**: `[fp]` the link, `[fp + 8]` the return address,
+   `[fp + 16]` the map, slots from `[fp + 24]`, the same sizes. `save`
+   moves the return address `call` pushed (the frame's top word) to
+   `[fp + 8]`; `pop` pushes it back, so `return` is `ret` and a tail
+   call's callee finds it where a `call` leaves it; a leaf keeps it where
+   the `call` left it. Calls and returns stay paired for the return
+   predictor.
+3. **REG1–REG3 in registers, REG4–REG8 in the state**, as register code
+   has them (the same counts decide), and the eight scratch registers
+   named for arm64's (`X9`, `X11`–`X17`), so that each helper reads as its
+   original. Fuel, the stack's limit and code's run address, pinned on
+   arm64, are the state's (`sub qword [st + fuel], 1`; `cmp rsp, [st +
+   stack_limit]`; `add r9, [st + delta]`): x86 has the memory operands, and
+   not the registers.
+4. **A code bloblet's fields `rip`-relatively** (`mov r, [rip + d]`), as
+   arm64 reads them `pc`-relatively; every label a 32-bit displacement, so
+   no code is too long (arm64's `too_far` has no counterpart).
+5. **Raw `f64`s in `xmm0`/`xmm1`**, `ucomisd` read so that a NaN compares
+   false as arm64's `fcmp` conditions do (`<` and `<=` the other way
+   round, `=` without parity); rounding by SSE4.1's `roundsd` (a procedure
+   that rounds declines on a processor without it); `abs` and `neg` on the
+   bits. `i64::MIN / -1` is itself, as `sdiv` has it (`idiv` would fault).
+6. **Where a REG in the state meets a helper that uses every scratch
+   register** (a blobref's element, write or variant in `prim3imm`), the
+   primitive is called instead: arm64 never meets it, its REGs being
+   registers.

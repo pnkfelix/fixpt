@@ -35,5 +35,10 @@ pub const AVAILABLE: bool = cfg!(target_arch = "aarch64");
 /// the rest of this crate's machines are not yet.
 pub const CELLULAR_AVAILABLE: bool = cfg!(any(target_arch = "aarch64", target_arch = "x86_64"));
 
+/// Whether this machine can run code in the native convention
+/// (`direct::DirectMachine`): arm64 only, until x86_64's (`direct::x64`)
+/// is ported onto the frames of `TODO.md` §91.
+pub const NATIVE_CONVENTION_AVAILABLE: bool = AVAILABLE;
+
 /// What to say where [`AVAILABLE`] is false.
 pub const UNAVAILABLE: &str = "this runs arm64 machine code, and this machine is not arm64";

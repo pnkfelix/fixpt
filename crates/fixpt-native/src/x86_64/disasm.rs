@@ -39,9 +39,18 @@ struct Rex {
 fn decode(c: &[u8], at: usize) -> Option<(String, usize)> {
     let mut i = 0;
     let mut opsize16 = false;
-    if c.first() == Some(&0x66) {
-        opsize16 = true;
-        i += 1;
+    // A mandatory prefix of SSE's: `F2` (`sd`) or `F3` (`ss`).
+    let mut rep = 0u8;
+    match c.first() {
+        Some(&0x66) => {
+            opsize16 = true;
+            i += 1;
+        }
+        Some(&p @ (0xF2 | 0xF3)) => {
+            rep = p;
+            i += 1;
+        }
+        _ => {}
     }
     let mut rex = Rex { w: false, r: 0, x: 0, b: 0, present: false };
     if let Some(&p) = c.get(i)
@@ -66,6 +75,12 @@ fn decode(c: &[u8], at: usize) -> Option<(String, usize)> {
             return Some((reg, Operand::Reg(rm | rex.b), 1));
         }
         let mut n = 1;
+        // `[rip + disp32]`: shown so, as the assembler takes it.
+        if md == 0 && rm == 5 {
+            let disp = i32_at(i + 1)?;
+            let s = if disp < 0 { format!("{size}[rip-{}]", disp.unsigned_abs()) } else { format!("{size}[rip+{disp}]") };
+            return Some((reg, Operand::Mem(s), 5));
+        }
         let (base, index) = if rm == 4 {
             let sib = *c.get(i + 1)?;
             n += 1;
@@ -138,6 +153,47 @@ fn decode(c: &[u8], at: usize) -> Option<(String, usize)> {
                     let (reg, o, n) = modrm(i, "byte ptr ")?;
                     (format!("movzx {}, {}", r32(reg), show(&o, &r8)), i + n)
                 }
+                0xB7 if !w => {
+                    let (reg, o, n) = modrm(i, "word ptr ")?;
+                    (format!("movzx {}, {}", r32(reg), show(&o, &r32)), i + n)
+                }
+                0x6E | 0x7E if opsize16 => {
+                    let (reg, o, n) = modrm(i, "")?;
+                    let (name, gpr) = if w { ("movq", show(&o, &r64)) } else { ("movd", show(&o, &r32)) };
+                    let x = format!("xmm{}", reg);
+                    if op2 == 0x6E { (format!("{name} {x}, {gpr}"), i + n) } else { (format!("{name} {gpr}, {x}"), i + n) }
+                }
+                0x51 | 0x58 | 0x59 | 0x5C | 0x5E if rep != 0 => {
+                    let (reg, o, n) = modrm(i, "")?;
+                    let Operand::Reg(rm) = o else { return None };
+                    let name = [(0x51, "sqrt"), (0x58, "add"), (0x59, "mul"), (0x5C, "sub"), (0x5E, "div")].iter().find(|(b, _)| *b == op2)?.1;
+                    (format!("{name}{} xmm{reg}, xmm{rm}", if rep == 0xF2 { "sd" } else { "ss" }), i + n)
+                }
+                0x2E => {
+                    let (reg, o, n) = modrm(i, "")?;
+                    let Operand::Reg(rm) = o else { return None };
+                    (format!("ucomis{} xmm{reg}, xmm{rm}", if opsize16 { "d" } else { "s" }), i + n)
+                }
+                0x2A if rep == 0xF2 && w => {
+                    let (reg, o, n) = modrm(i, "")?;
+                    (format!("cvtsi2sd xmm{reg}, {}", show(&o, &r64)), i + n)
+                }
+                0x2C if rep == 0xF2 && w => {
+                    let (reg, o, n) = modrm(i, "")?;
+                    let Operand::Reg(rm) = o else { return None };
+                    (format!("cvttsd2si {}, xmm{rm}", r64(reg)), i + n)
+                }
+                0x3A if opsize16 => {
+                    let op3 = *c.get(i)?;
+                    let (reg, o, n) = modrm(i + 1, "")?;
+                    let Operand::Reg(rm) = o else { return None };
+                    let name = match op3 {
+                        0x0A => "roundss",
+                        0x0B => "roundsd",
+                        _ => return None,
+                    };
+                    (format!("{name} xmm{reg}, xmm{rm}, {}", c.get(i + 1 + n)?), i + 2 + n)
+                }
                 _ => return None,
             }
         }
@@ -159,6 +215,15 @@ fn decode(c: &[u8], at: usize) -> Option<(String, usize)> {
         0x85 if w => {
             let (reg, o, n) = modrm(i, "")?;
             (format!("test {}, {}", show(&o, &r64), r64(reg)), i + n)
+        }
+        0x88 => {
+            let (reg, o, n) = modrm(i, "byte ptr ")?;
+            (format!("mov {}, {}", show(&o, &r8), r8(reg)), i + n)
+        }
+        0x89 if opsize16 => {
+            let (reg, o, n) = modrm(i, "word ptr ")?;
+            let r16 = |n: u8| ["ax", "cx", "dx", "bx", "sp", "bp", "si", "di"].get(n as usize).map_or(format!("{}w", NAMES[n as usize]), |s| s.to_string());
+            (format!("mov {}, {}", show(&o, &r16), r16(reg)), i + n)
         }
         0x89 => {
             let (reg, o, n) = modrm(i, "")?;
@@ -223,6 +288,7 @@ fn decode(c: &[u8], at: usize) -> Option<(String, usize)> {
                 (0, false) => (format!("test {}, {}", show(&o, &r32), i32_at(i + n)? as u32), i + n + 4),
                 (2, true) => (format!("not {}", show(&o, &r64)), i + n),
                 (3, true) => (format!("neg {}", show(&o, &r64)), i + n),
+                (6, true) => (format!("div {}", show(&o, &r64)), i + n),
                 (7, true) => (format!("idiv {}", show(&o, &r64)), i + n),
                 _ => return None,
             }

@@ -35,16 +35,15 @@ const MODES: [&[&str]; 10] = [
     &["--fx26-run", "cellular", "--cellular-machine", "registers", "--calling-convention", "native"],
 ];
 
-/// Whether a mode's machine runs here: every one on arm64; on x86_64 those
-/// of the hand-encoded machine, the words compiled into it and register
-/// code; elsewhere only those of no machine code.
+/// Whether a mode's machine runs here: every one on arm64; on x86_64 all
+/// but the stencils; elsewhere only those of no machine code.
 fn runs_here(mode: &[&str]) -> bool {
     if fixpt_native::AVAILABLE {
         return true;
     }
     let cellular = |m: &&str| fixpt_native::CELLULAR_AVAILABLE && matches!(*m, "native" | "native-compiled" | "fx-compiled" | "registers");
     let machine = mode.iter().skip_while(|a| **a != "--cellular-machine").nth(1);
-    mode.windows(2).all(|w| w != ["--calling-convention", "native"]) && machine.is_none_or(cellular)
+    (fixpt_native::NATIVE_CONVENTION_AVAILABLE || mode.windows(2).all(|w| w != ["--calling-convention", "native"])) && machine.is_none_or(cellular)
 }
 
 fn dir() -> std::path::PathBuf {

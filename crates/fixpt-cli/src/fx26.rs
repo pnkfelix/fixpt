@@ -113,7 +113,7 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
     }
     // Cellular code calls native code (what the native compiler did not
     // decline, or an adapter), and a conversion makes adapters.
-    if fixpt_native::AVAILABLE {
+    if fixpt_native::NATIVE_CONVENTION_AVAILABLE {
         s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
         s.scheme.runtime_unrooted().adapt = Some(fixpt_native::direct::adapt);
     }
@@ -1584,9 +1584,10 @@ fn listing(m: &fixpt_native::direct::DirectMachine, heap: &fixpt_heap::Heap, pro
     let mut out = String::new();
     for (i, (n, p)) in procs.iter().enumerate() {
         let n = if i == 0 { format!("{name} ({n})") } else { n.clone() };
-        out.push_str(&format!("; {n}, {} instructions:\n", p.len));
-        for (i, w) in m.instructions(heap, *p).iter().enumerate() {
-            out.push_str(&format!(";   {i:>4}  {}\n", fixpt_native::arm64::disasm::disassemble(*w, i as i64)));
+        let lines = m.lines(heap, *p);
+        out.push_str(&format!("; {n}, {} instructions:\n", lines.len()));
+        for l in lines {
+            out.push_str(&format!(";   {l}\n"));
         }
     }
     out
