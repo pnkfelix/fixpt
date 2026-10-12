@@ -708,33 +708,55 @@ impl Heap {
         self.blob_v(main + 2 + n)
     }
 
+    /// A native frame (`layout` kind `native-frame`) of `fields` fields,
+    /// each `f(i)` from the first (the next frame out) on, a trailer, and
+    /// `raw`, its raw words, as its suffix: a frame of the stack cache
+    /// copied into the heap (`fixpt-native`). The trailer, which a frame
+    /// flushed in place has no room for, finds the header for each walk of
+    /// the chain.
+    pub fn native_frame_with(&mut self, fields: usize, raw: &[u64], mut f: impl FnMut(usize) -> Value) -> Value {
+        // As `vector_with`: a store into an object this new needs no barrier.
+        let main = self.put_header(const { layout::kind("native-frame") }, fields + 1, 8 * raw.len());
+        for i in 0..fields {
+            let w = f(i).raw();
+            self.set_word(main + 1 + i, w);
+        }
+        self.set_word(main + 1 + fields, Self::trailer_word(fields + 1));
+        for (i, &w) in raw.iter().enumerate() {
+            self.set_word(main + 2 + fields + i, w);
+        }
+        self.blob_v(main + 2 + fields)
+    }
+
+    /// Native frame `v`'s fields (its trailer, if any, left out) and its
+    /// raw words, its suffix.
+    pub fn native_frame_parts(&self, v: Value) -> (&[u64], &[u64]) {
+        let main = self.main_of(v);
+        let head = read_head(self.mem.words(), main);
+        let p = self.ix(v);
+        let fields = p - main - 1 - (self.word(p - 1) & TAG_MASK == TAG_TRAILER) as usize;
+        let words = self.mem.words();
+        (&words[main + 1..main + 1 + fields], &words[p..p + head.bytes / 8])
+    }
+
+    /// A native frame made where its words are, on the native stack: its
+    /// header written at address `at`, its `fields` fields (written already,
+    /// as values) after it, and its `raw` raw words, its suffix: no trailer,
+    /// which a frame on the stack has no room for (each word of a frame
+    /// counts against the stack cache). An object of the nursery, which the
+    /// next collection moves out: a frame flushed where it is.
+    pub fn native_frame_in_place(&mut self, at: u64, fields: usize, raw: usize) -> Value {
+        let main = ((at - self.mem.words().as_ptr() as u64) / 8) as usize;
+        assert!((NATIVE_STACK_BASE..NATIVE_STACK_BASE + NATIVE_STACK_WORDS).contains(&main), "on the native stack");
+        self.set_word(main, make_header(const { layout::kind("native-frame") }, fields, 8 * raw));
+        self.blob_v(main + 1 + fields)
+    }
+
     /// The native convention's stack: the addresses of its lowest word and
     /// one past its highest, at the nursery's top (`NATIVE_STACK_WORDS`).
     pub fn native_stack(&self) -> (u64, u64) {
         let at = |i: usize| self.mem.words().as_ptr() as u64 + 8 * i as u64;
         (at(NATIVE_STACK_BASE), at(NATIVE_STACK_BASE + NATIVE_STACK_WORDS))
-    }
-
-    /// A vector of `n` elements made where its words are, on the native
-    /// stack: its header at address `at` (and, past what one header word
-    /// counts, an extension word before it), its elements (written already,
-    /// as values) after it, its trailer after them. An object of the nursery,
-    /// which the next collection moves out: for frames flushed where they
-    /// are (`fixpt-native`).
-    pub fn vector_in_place(&mut self, at: u64, n: usize) -> Value {
-        let main = ((at - self.mem.words().as_ptr() as u64) / 8) as usize;
-        assert!((NATIVE_STACK_BASE..NATIVE_STACK_BASE + NATIVE_STACK_WORDS).contains(&main), "on the native stack");
-        // Past what one header word counts, an extension word before it,
-        // as `put_header` makes: the caller leaves that word free too.
-        if (n + 1) as u64 > layout::H_FIELDS.max() {
-            let (x, h) = make_large_header(ObjType::Vector as u8, n + 1, 0);
-            self.set_word(main - 1, x);
-            self.set_word(main, h);
-        } else {
-            self.set_word(main, make_header(ObjType::Vector as u8, n + 1, 0));
-        }
-        self.set_word(main + 1 + n, Self::trailer_word(n + 1));
-        self.blob_v(main + 2 + n)
     }
 
     /// A collection now: of the nursery alone if there is one, else of

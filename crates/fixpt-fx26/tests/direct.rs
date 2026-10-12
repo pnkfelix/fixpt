@@ -971,6 +971,28 @@ fn deep_recursion_through_the_stack_cache() {
     fixpt_native::direct::with_machine(|m| m.set_stack_words(1 << 20, 1 << 28)).expect("a machine");
 }
 
+/// `f64`s in raw frame slots (`TODO.md` §91, `programs/native/raw-slots.fx`):
+/// live across a deep recursion, through a small stack cache's overflows
+/// and underflows, collecting every 7 words, so frames holding raw words
+/// are flushed into the heap, copied, collected and restored; and a slot
+/// that holds an `f64`, then an `int`, which must stay a value's. As the
+/// Rust machine gives them, and through the heap many times over.
+#[test]
+fn raw_slots_through_the_stack_cache_and_collections() {
+    let text = program("native/raw-slots");
+    let defs: String = text.lines().filter(|l| !l.starts_with("(raw-slots ")).map(|l| format!("{l}\n")).collect();
+    let r = run_collecting(&defs, "raw-slots", &[3000], FUEL, Some(7));
+    assert_eq!(r.rust, "4277");
+    assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "collecting: {:?} against {}", r.direct, r.rust);
+    let before = fixpt_native::direct::stack_stats();
+    let r = direct_in(&defs, "raw-slots", &[3000], FUEL, Some(7), Some((2048, 1 << 26)));
+    assert_eq!(r.direct.as_deref(), Ok("4277"), "through a small stack cache");
+    let after = fixpt_native::direct::stack_stats();
+    // Through the heap: flushed at overflows and collections, restored
+    // after each.
+    assert!(after.overflows - before.overflows > 10 && after.frames_restored - before.frames_restored > 1000, "{before:?} {after:?}");
+}
+
 fn run_native_collecting(rt: &mut fixpt_runtime::Runtime, closure: Value, fuel: u64) -> fixpt_fx26::session::NativeRun {
     let was = std::mem::replace(&mut rt.heap.gc_every, 97);
     let r = run_native(rt, closure, fuel);

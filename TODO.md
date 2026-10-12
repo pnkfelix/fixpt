@@ -2413,61 +2413,23 @@ caught at a task's boundary, once there are tasks.
 
 ## 91. Each native stack frame a bloblet (the user's, 2026-10-12)
 
-The bloblet format exists for objects that hold both values and raw
-bits (`docs/object-model.md`), and a frame is one. Today a native frame
-is `[link][return][stack map][slots…]`, every slot a value; a flush
-(`flush_in_place`, `chunks_of` in `fixpt-native/src/direct.rs`) makes a
-run of frames one heap vector, a chunk of the chain. So raw bits cannot
-live in a frame, and `reps.rs` boxes a raw `f64` or `i64` before it is
-stored there: a loop's `f64` total costs a heap box each time round
-(about 7.5 ns of 10.8 an element, summing a million `f64`s).
-- **Layout**: a frame laid out as a bloblet from the start: a reserved
-  header word, its value slots as fields (addressed back from the
-  suffix, as fields are), a reserved trailer word, and its raw slots as
-  the suffix. The frame pointer is where the suffix starts, as a bloblet
-  pointer is. A flush in place then only stamps each frame's header (its
-  F and B) and trailer: the frame *is* its heap object, and its raw slots
-  its suffix, which no collection traces.
-- **The chain** links frames, each its own bloblet, not a vector of
-  them; what the chunk's fields (next, where it resumes, the rest's size)
-  say moves to the frames, or a small chunk object that points at them.
-- **The stack map** says the value slots only; the raw ones are the
-  suffix, by the trailer's place. Underflow copies a frame back whole.
-- **`reps.rs`**: a raw register is stored to a raw slot and read back
-  raw: a loop's variable stays raw across the loop's back edge.
-- Costs two words a frame (header, trailer), and the frame code that
-  writes the map writes them.
-Measured (2026-10-12): no float benchmark was ported, so four were
-(`mllang-bench/fx/`: `mlton/mandelbrot`, `mlton/matrix-multiply`,
-`benchmarksgame/spectralnorm2`, `benchmarksgame/nbody`). In
-`mandelbrot`, natively, 78.5 ms where the same loops in fixed-point
-`int`s take 11.4 (1.07M inner iterations each): about 85% of the run is
-`f64` handling, 16 words allocated an inner iteration, 8 boxes. Each
-`f64` that reaches a frame slot is boxed (a bump allocation, header and
-bits) and unboxed when read back (a tag check, a load): `let`
-temporaries as well as what a self tail call carries. Words allocated an
-inner iteration: `matrix-multiply` 2 (the dot's sum), `spectralnorm2` 4
-(the row's sum, and `eval-a`'s result), `nbody` about 32 (temporaries,
-and `at`/`put`'s arguments and results). So three sources: (1) `let`
-temporaries in frame slots, (2) what a loop carries across its self tail
-call, (3) `f64` arguments and results of calls. Raw frame slots end (1)
-and (2); (3) wants the native convention to pass and return a raw `f64`
-(registers, or the callee's raw slots), a follow-on. Next: the layout,
-in `direct.rs` and the collector's walk of native frames; the four ports
-timed both ways.
-- **Stage 1 done** (2026-10-12): every native frame laid out as its
-  bloblet will be, a header word below its link (`x29` still at the
-  link, so code's offsets are as they were); stub and control frames
-  32 and 64 bytes; the runtime walks frames as regions from the header.
-  No trailer (not a hard invariant; the runtime knows each header). Cost,
-  back to back: `captures` 8.75 → 10.2 ms (a capture copies the larger
-  frames), the rest even. Next, stage 2: the chain of flushed frames as
-  linked frame bloblets in place of chunk vectors (`Pos` a frame, `Rec`
-  its words; the chain's word count kept in the state and in each
-  continuation; a frame's field count in its stack map word, written
-  before every call); copies leave out the alignment word. Stage 3: raw
-  slots (`reps.rs` finds the slots only `f64`s use), after the fields,
-  as the suffix, out of the stack map.
+Built (`DONE.md` §91): every native frame laid out as its bloblet, the
+chain of flushed frames linked frame bloblets, and `f64`s kept raw in
+frame slots, as the suffix. Left:
+- **Copies leave out the alignment word** of a stub's or control frame's
+  (and capture's cost, 8.75 → 10.5 ms on `captures`, the frames' header
+  words): a frame copied into the heap need not keep the word that aligns
+  it on the stack, its region rebuilt from its header.
+- **Raw `i64` and `u64` slots**, as `f64`'s are (`raw_slots` takes only
+  `f64`'s webs).
+- **Deep recursion that collects as it goes costs more**: `merge` 0.66 →
+  0.73 s (natively 438 → 519 ms, 95 collections each), a frame now an
+  object the collector copies one by one (`copy_object`) where a chunk
+  was one copy, and each restore scanning back to a frame's header (no
+  trailer on the stack: a trailer word in every procedure frame pushed
+  `merge`'s 50 000 frames past the stack cache, 500 collections, 1.97 s).
+  A collector's fast path for native frames, or a trailer where a frame
+  has a word to align it, may win it back.
 - **Then, raw `f64` arguments and results** (design, with the user,
   2026-10-12). On raw frame slots, not before: a callee stores its
   parameters to its slots at once, so a raw argument with nowhere raw to

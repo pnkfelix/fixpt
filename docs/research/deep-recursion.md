@@ -207,6 +207,19 @@ to 9.0 ms natively: one chunk copied whole each way.
 In place, in the nursery (Larceny's), and the underflow in line, are next
 (`TODO.md` §52), measured against this.
 
+## Frames as bloblets (2026-10-12, `TODO.md` §91)
+
+The chain is no longer chunks: every native frame is laid out on the stack
+as its bloblet will be (a header word below its link), a flush stamps each
+frame's header where it is, and the chain links frame bloblets, so that a
+frame's raw `f64` slots are its suffix (`DONE.md` §91). That is the first
+version above again, one object a frame, written in place; its cost, back
+to back: `captures` 8.6 → 11.2 ms, `merge` (50 000 frames deep,
+collecting as it goes) 0.66 → 0.73 s, the collector copying each frame as
+an object. A trailer word in every frame would find each header in one
+load, but pushed `merge` past the stack cache (500 collections, 1.97 s):
+on the stack, every word of a frame counts.
+
 ## Larceny's design, adopted (2026-10-07)
 
 The user's direction, after measuring what the stack cost the collector

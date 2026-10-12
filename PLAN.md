@@ -228,10 +228,11 @@ weighed with the other items, not ahead of them.
   N5c's facts, their debts discharged; a new blobref's flat checked whole
   in the suffix; heap arrays' lengths (`narrayof`); `blobref-length` in
   line natively (3x on a loop). Leaving out checks a proof makes needless
-  was measured (at most 15%) and not done. Next: a wider index key;
-  each native stack frame a bloblet, its raw slots the suffix, so a loop's
-  `f64` is not boxed (`TODO.md` §91, the user's): measured on four new
-  float ports, boxing is about 85% of `mandelbrot`'s native run.
+  was measured (at most 15%) and not done. Done (2026-10-12, the
+  user's, `DONE.md` §91): each native stack frame a bloblet, the chain of
+  flushed frames linked frame bloblets, `f64`s raw in frame slots (the
+  suffix): the four float ports 42–60% faster. Next: raw `f64` arguments
+  and results (`TODO.md` §91), a wider index key.
   Done (2026-10-12, kayak's request): I/O, `DONE.md` §84, a fixed family
   of `(io k)` effects under one ordering rule (the user's); `u8`, `i8`
   and bytevectors; the terminal, files, the clock, the arguments; `main`

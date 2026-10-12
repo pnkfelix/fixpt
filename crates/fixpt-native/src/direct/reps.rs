@@ -11,9 +11,14 @@
 //!   comparison and `T->int` excepted; so does one of `f64` the machine does
 //!   exactly as IEEE says (`raw_op`), a comparison excepted;
 //! - `reg`, `setreg` and `movereg` move a register as it is;
+//! - a frame slot that only `f64` operations read (`raw_slots`) holds an
+//!   `f64` raw: what is stored there is unboxed first, and what is read
+//!   from it is raw (`TODO.md` §91). The frame keeps such slots after its
+//!   values, as its bloblet's suffix, which no collection traces;
 //! - anything else that reads a register reads it as a value: a raw one is
-//!   boxed first, in its register. So nothing raw is stored in a frame,
-//!   passed, returned or kept in the heap, and a collection never sees one.
+//!   boxed first, in its register. So nothing raw is stored in a frame's
+//!   values, passed, returned or kept in the heap's values, and a
+//!   collection never sees one.
 //!   (A call or call-out leaves the registers undefined: register code keeps
 //!   nothing in them across one.)
 //!
@@ -143,12 +148,27 @@ pub(super) enum Convert {
 }
 
 /// How a register's value is used from a point on: not at all, only as a
-/// raw `f64` (an operand of an `f64` operation `raw_op` does), or otherwise.
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug)]
+/// raw `f64` (an operand of an `f64` operation `raw_op` does), otherwise,
+/// or both: as an `f64` somewhere, so an `f64` by the program's types, and
+/// otherwise too (as a loop's `f64` total is, returned at its end).
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub(super) enum Demand {
     None,
     F64,
     Other,
+    Both,
+}
+
+impl Demand {
+    /// Both ways' uses.
+    fn join(self, other: Demand) -> Demand {
+        match (self, other) {
+            (Demand::None, x) | (x, Demand::None) => x,
+            (x, y) if x == y => x,
+            (Demand::Other, Demand::Other) => Demand::Other,
+            _ => Demand::Both,
+        }
+    }
 }
 
 type Demands = [Demand; 9];
@@ -160,16 +180,16 @@ type Demands = [Demand; 9];
 /// conservatively, for a value. Only a genuine `f64` operand asks for one,
 /// so that a flat array's element read raw is an `f64`'s by the program's
 /// types.
-fn demand_step(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) -> &'static str, after: &Demands) -> Demands {
+fn demand_step(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) -> &'static str, after: &Demands, raw: &[bool]) -> Demands {
     let k = |j: usize| o(j).as_fixnum() as usize;
     let mut d = *after;
     let def = |d: &mut Demands, r: usize| d[r] = Demand::None;
-    let use_ = |d: &mut Demands, r: usize, how: Demand| d[r] = d[r].max(how);
+    let use_ = |d: &mut Demands, r: usize, how: Demand| d[r] = d[r].join(how);
     let mv = |d: &mut Demands, from: usize, to: usize| {
         let how = d[to];
         d[to] = Demand::None;
         if from != 0 || to != 0 {
-            d[from] = d[from].max(how);
+            d[from] = d[from].join(how);
         }
     };
     let regs = |n: usize| 1..=n.min(8);
@@ -183,8 +203,10 @@ fn demand_step(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) -> &'s
         "setreg" => mv(&mut d, 0, k(0)),
         "movereg" if k(0) == 0 => def(&mut d, k(1)),
         "movereg" => mv(&mut d, k(0), k(1)),
-        "store" => use_(&mut d, k(0), Demand::Other),
-        "setstk" | "setglbl" | "return" | "branchf" | "brancht" => use_(&mut d, 0, Demand::Other),
+        // Into a raw slot, an `f64`.
+        "store" => use_(&mut d, k(0), if raw_slot(raw, k(1)) { Demand::F64 } else { Demand::Other }),
+        "setstk" => use_(&mut d, 0, if raw_slot(raw, k(0)) { Demand::F64 } else { Demand::Other }),
+        "setglbl" | "return" | "branchf" | "brancht" => use_(&mut d, 0, Demand::Other),
         "op1" | "op2imm" | "field" | "op2" | "setfield" => {
             def(&mut d, 0);
             use_(&mut d, 0, Demand::Other);
@@ -247,7 +269,7 @@ pub(super) fn is_f64_set(o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) -> &'s
 /// `raw_ref`: whether a `flatarray-ref` (or `f64` `blobref-get`) here gives its element raw, an
 /// `f64`'s bits, since only `f64` operations use it (`demand_step`).
 /// `fast`: in a procedure's fixnum version.
-pub(super) fn step(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) -> &'static str, raw_ref: bool, fast: bool, reps: &mut Reps) -> Vec<Convert> {
+pub(super) fn step(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) -> &'static str, raw_ref: bool, fast: bool, raw: &[bool], reps: &mut Reps) -> Vec<Convert> {
     let mut first = Vec::new();
     let k = |j: usize| o(j).as_fixnum() as usize;
     let mut need = |reps: &mut Reps, r: usize, want: Rep| {
@@ -269,12 +291,13 @@ pub(super) fn step(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) ->
         "args" => regs(k(0)).for_each(|r| reps[r] = Rep::Value),
         "vargs" => regs(8).for_each(|r| reps[r] = Rep::Value),
         "const" if fast && o(0).is_fixnum() => reps[0] = Rep::Fix,
-        "const" | "global" | "lexical" | "stack" => reps[0] = Rep::Value,
+        "stack" => reps[0] = if raw_slot(raw, k(0)) { Rep::F64 } else { Rep::Value },
+        "const" | "global" | "lexical" => reps[0] = Rep::Value,
         "reg" => reps[0] = if k(0) == 0 { Rep::Value } else { reps[k(0)] },
         "setreg" => reps[k(0)] = reps[0],
         "movereg" => reps[k(1)] = if k(0) == 0 { Rep::Value } else { reps[k(0)] },
-        "load" => reps[k(0)] = Rep::Value,
-        "store" => need(reps, k(0), Rep::Value),
+        "load" => reps[k(0)] = if raw_slot(raw, k(1)) { Rep::F64 } else { Rep::Value },
+        "store" => need(reps, k(0), if raw_slot(raw, k(1)) { Rep::F64 } else { Rep::Value }),
         // In a fixnum version, `int`'s operations: operands known (tested
         // first where they are not), a sum or difference one too.
         "op2" | "op2imm" if fast && int_routine(k(0)) => {
@@ -293,7 +316,8 @@ pub(super) fn step(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) ->
             need(reps, k(1), Rep::Value);
             reps[0] = Rep::Value;
         }
-        "setstk" | "setglbl" | "return" | "branchf" | "brancht" => need(reps, 0, Rep::Value),
+        "setstk" => need(reps, 0, if raw_slot(raw, k(0)) { Rep::F64 } else { Rep::Value }),
+        "setglbl" | "return" | "branchf" | "brancht" => need(reps, 0, Rep::Value),
         "prim1" | "prim2" | "prim2imm" => {
             let (x, y, out) = match raw_op(prim(k(0))) {
                 Some(op) => raw_shape(op),
@@ -344,8 +368,8 @@ pub(super) fn int_routine(n: usize) -> bool {
     matches!(ROUTINES.get(n).map(|r| r.0), Some("int-add" | "int-sub" | "int-less" | "int-eq"))
 }
 
-pub(super) fn reps_of(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str, fast: bool) -> (Vec<Reps>, Vec<Reps>) {
-    let raw_refs = raw_refs(cells, starts, prim);
+pub(super) fn reps_of(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str, fast: bool, raw: &[bool]) -> (Vec<Reps>, Vec<Reps>) {
+    let raw_refs = raw_refs(cells, starts, prim, raw);
     let ns = starts.len();
     let at: std::collections::HashMap<usize, usize> = starts.iter().enumerate().map(|(si, &i)| (i, si)).collect();
     let succ = |si: usize| -> Vec<usize> {
@@ -371,7 +395,7 @@ pub(super) fn reps_of(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) ->
             let Some(mut reps) = ins[si] else { continue };
             let i = starts[si];
             let o = |j: usize| cells[i + 1 + j];
-            step(OPS[cells[i].as_fixnum() as usize].0, &o, prim, raw_refs[si], fast, &mut reps);
+            step(OPS[cells[i].as_fixnum() as usize].0, &o, prim, raw_refs[si], fast, raw, &mut reps);
             outs[si] = reps;
             for t in succ(si) {
                 let new = match &ins[t] {
@@ -414,14 +438,14 @@ fn successors(cells: &[Value], starts: &[usize]) -> Vec<Vec<usize>> {
 /// Which instructions are a `flatarray-ref` (or `f64` `blobref-get`) whose
 /// element only `f64` operations use: the backward fixpoint of `demand_step`, over the ways
 /// out of each instruction.
-pub(super) fn raw_refs(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str) -> Vec<bool> {
-    let (before, succ) = demands(cells, starts, prim);
+pub(super) fn raw_refs(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str, raw: &[bool]) -> Vec<bool> {
+    let (before, succ) = demands(cells, starts, prim, raw);
     let ns = starts.len();
     (0..ns)
         .map(|si| {
             let i = starts[si];
             let o = |j: usize| cells[i + 1 + j];
-            let after = succ[si].iter().fold(Demand::None, |m, &t| m.max(before[t][0]));
+            let after = succ[si].iter().fold(Demand::None, |m, &t| m.join(before[t][0]));
             is_flat_ref(OPS[cells[i].as_fixnum() as usize].0, &o, prim) && after == Demand::F64
         })
         .collect()
@@ -429,13 +453,13 @@ pub(super) fn raw_refs(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -
 
 /// Which registers each instruction's value is used from (live, as it
 /// starts), from `demands`.
-pub(super) fn live_in(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str) -> Vec<[bool; 9]> {
-    demands(cells, starts, prim).0.iter().map(|d| std::array::from_fn(|r| d[r] != Demand::None)).collect()
+pub(super) fn live_in(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str, raw: &[bool]) -> Vec<[bool; 9]> {
+    demands(cells, starts, prim, raw).0.iter().map(|d| std::array::from_fn(|r| d[r] != Demand::None)).collect()
 }
 
 /// What each instruction asks of the registers as it starts (the backward
 /// fixpoint of `demand_step`), and each instruction's successors.
-fn demands(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str) -> (Vec<Demands>, Vec<Vec<usize>>) {
+fn demands(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str, raw: &[bool]) -> (Vec<Demands>, Vec<Vec<usize>>) {
     let ns = starts.len();
     let succ = successors(cells, starts);
     let mut before = vec![[Demand::None; 9]; ns];
@@ -445,12 +469,12 @@ fn demands(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static s
             let mut after = [Demand::None; 9];
             for &t in &succ[si] {
                 for r in 0..9 {
-                    after[r] = after[r].max(before[t][r]);
+                    after[r] = after[r].join(before[t][r]);
                 }
             }
             let i = starts[si];
             let o = |j: usize| cells[i + 1 + j];
-            let d = demand_step(OPS[cells[i].as_fixnum() as usize].0, &o, prim, &after);
+            let d = demand_step(OPS[cells[i].as_fixnum() as usize].0, &o, prim, &after, raw);
             if d != before[si] {
                 before[si] = d;
                 changed = true;
@@ -461,4 +485,105 @@ fn demands(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static s
         }
     }
     (before, succ)
+}
+
+/// Whether frame slot `n` holds a raw `f64` (`raw_slots`).
+fn raw_slot(raw: &[bool], n: usize) -> bool {
+    raw.get(n).copied().unwrap_or(false)
+}
+
+/// Which of the procedure's `slots` frame slots hold a raw `f64`
+/// (`TODO.md` §91). Register code may use a slot for one variable, then
+/// another, so a slot is taken apart into *webs*: its writes (`setstk`,
+/// `store`) and reads (`stack`, `load`) joined where a write reaches a
+/// read, each web one variable's. A web is an `f64`'s where the program's
+/// types say so: one of its reads is used by an `f64` operation, or one of
+/// its writes stores what an `f64` operation made (each as if no slot were
+/// raw, so that nothing here rests on itself). A slot is raw if every web
+/// of it is an `f64`'s, or never read: what is stored there is unboxed,
+/// and a read used otherwise (a loop's `f64` total, returned at its end)
+/// boxes it there.
+pub(super) fn raw_slots(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str, slots: usize) -> Vec<bool> {
+    let ns = starts.len();
+    let none = vec![false; slots];
+    let (before, succ) = demands(cells, starts, prim, &none);
+    let (ins, _) = reps_of(cells, starts, prim, false, &none);
+    let mut preds: Vec<Vec<usize>> = vec![Vec::new(); ns];
+    for (si, ts) in succ.iter().enumerate() {
+        for &t in ts {
+            preds[t].push(si);
+        }
+    }
+    // Each instruction's slot access: (slot, read?, register).
+    let access = |si: usize| -> Option<(usize, bool, usize)> {
+        let i = starts[si];
+        let o = |j: usize| cells[i + 1 + j].as_fixnum() as usize;
+        match OPS[cells[i].as_fixnum() as usize].0 {
+            "stack" => Some((o(0), true, 0)),
+            "load" => Some((o(1), true, o(0))),
+            "setstk" => Some((o(0), false, 0)),
+            "store" => Some((o(1), false, o(0))),
+            _ => None,
+        }
+    };
+    // Webs: a union-find over the instructions that touch a slot.
+    let mut parent: Vec<usize> = (0..ns).collect();
+    fn find(parent: &mut [usize], x: usize) -> usize {
+        let mut r = x;
+        while parent[r] != r {
+            r = parent[r];
+        }
+        let mut y = x;
+        while parent[y] != r {
+            let next = parent[y];
+            parent[y] = r;
+            y = next;
+        }
+        r
+    }
+    for si in 0..ns {
+        let Some((slot, true, _)) = access(si) else { continue };
+        // The writes of `slot` that reach this read: back from it.
+        let mut seen = vec![false; ns];
+        let mut work: Vec<usize> = preds[si].clone();
+        while let Some(p) = work.pop() {
+            if std::mem::replace(&mut seen[p], true) {
+                continue;
+            }
+            match access(p) {
+                Some((s2, false, _)) if s2 == slot => {
+                    let (a, b) = (find(&mut parent, p), find(&mut parent, si));
+                    parent[a] = b;
+                }
+                _ => work.extend(preds[p].iter().copied()),
+            }
+        }
+    }
+    // What each web shows: an `f64`'s, and whether it is read (used).
+    let mut f64_web = vec![false; ns];
+    let mut used_web = vec![false; ns];
+    for si in 0..ns {
+        let Some((_, read, reg)) = access(si) else { continue };
+        let w = find(&mut parent, si);
+        if read {
+            let after = succ[si].iter().fold(Demand::None, |m, &t| m.join(before[t][reg]));
+            if matches!(after, Demand::F64 | Demand::Both) {
+                f64_web[w] = true;
+            }
+            if after != Demand::None {
+                used_web[w] = true;
+            }
+        } else if ins[si][reg] == Rep::F64 {
+            f64_web[w] = true;
+        }
+    }
+    let mut raw = vec![true; slots];
+    for si in 0..ns {
+        let Some((slot, _, _)) = access(si) else { continue };
+        let w = find(&mut parent, si);
+        if slot < slots && used_web[w] && !f64_web[w] {
+            raw[slot] = false;
+        }
+    }
+    raw
 }

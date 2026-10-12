@@ -66,6 +66,7 @@
 (define kind-flat-array int 42)
 (define kind-eqtable int 43)
 (define kind-weak-pair int 44)
+(define kind-native-frame int 45)
 (define kind-extension int 255)
 
 ;;; A closure's fields, and an environment frame's, by negative offset.

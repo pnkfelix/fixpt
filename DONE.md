@@ -1961,3 +1961,44 @@ proof makes needless (at most 15% more, `TODO.md` §77). Tests:
 `bloblet/flat-unsized-recur.fx`, `sizes/flat-literal-not-to-end.fx`,
 `sizes/flat-to-end-not-another.fx`.
 
+## 91. Each native stack frame a bloblet; `f64`s raw in frame slots (the user's, 2026-10-12)
+
+The bloblet format exists for objects that hold both values and raw bits,
+and a frame is one (`docs/object-model.md`). Measured first: no float
+benchmark was ported, so four were (`mllang-bench/fx/`: `mlton/mandelbrot`,
+`mlton/matrix-multiply`, `benchmarksgame/spectralnorm2`,
+`benchmarksgame/nbody`); in `mandelbrot` about 85% of the native run was
+`f64` handling, every `f64` that reached a frame slot boxed (a `let`'s, a
+loop's) and unboxed when read back. In three stages:
+- **Stage 1** (`a1fbde2`): every native frame laid out as its bloblet
+  will be, a header word below its link (`x29` still at the link, the
+  code's frame offsets unchanged; `push_frame`, `pop_frame`); the runtime
+  walks frames as regions, from each header word.
+- **Stage 2**: the stack cache's chain of flushed frames is linked
+  `native-frame` bloblets (a new kind) in place of chunk vectors: a
+  flush stamps each frame's header where it is (`native_frame_in_place`),
+  a copy makes one with a trailer (`native_frame_with`); `Pos` is a frame
+  and where it resumes, `Rec` its fields; the chain's word count is kept
+  in the state (`cont_words`) and each continuation's data.
+- **Stage 3**: `f64`s raw in frame slots. `reps::raw_slots` takes each
+  slot apart into webs (its writes and reads joined where a write reaches
+  a read, one variable's each) and keeps raw a slot all of whose webs are
+  an `f64`'s by the program's types (a read used by an `f64` operation, or
+  a write of what one made); what is stored there is unboxed, a read used
+  otherwise (a loop's total, returned) boxed there. Raw slots go after the
+  frame's values, the code bloblet and the closure, as its bloblet's
+  suffix, never traced; the stack map numbers values only, and carries the
+  frame's field count above `MAP_BITS` (48), for a flush (`frame_shape`).
+Natively (`rs-regs-rsjit-nativecc`, at the ports' first sizes), before →
+after: `mandelbrot` 81.3 → 31.2 ms (17.0 → 4.2 M words), `matrix-multiply`
+79.6 → 26.1 (16.1 → 0.2), `spectralnorm2` 32.6 → 17.1 (14.4 → 7.2;
+`eval-a`'s result is still boxed: raw arguments and results are next),
+`nbody` 31.4 → 14.6 (6.4 → 2.6). Whole runs at the ports' sizes: 1.85 →
+0.89 s, 1.85 → 0.75, 3.32 → 1.91, 2.07 → 1.20; the other 42 ports the
+same answers, within a few percent but `merge`, 0.66 → 0.73 (`TODO.md`
+§91); `captures` 8.6 → 11.2 ms (frames a word larger, and objects).
+Tests: `programs/native/raw-slots.fx`,
+`raw_slots_through_the_stack_cache_and_collections` (raw words through a
+small stack cache, collecting every 7 words; a slot an `f64`'s, then an
+`int`'s).
+

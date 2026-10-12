@@ -169,6 +169,15 @@ pub const KINDS: &[Kind] = &[
     // `heap::WEAK_DEAD`; field 1, its cdr, is an ordinary field. The car is
     // the first field a scan meets (`main + 1`).
     Kind { name: "weak-pair", code: 44, traced: true },
+    // A frame of code in the native convention, flushed from its stack into
+    // the heap (`fixpt-native`'s stack cache, `TODO.md` §91): laid out on
+    // the stack as it is here, its header word below its link. Its fields:
+    // the next frame out (or `#f`), its second word (a fixnum: where it
+    // returns, or a control frame's), then its stack map or marker and its
+    // values, the words its map leaves out 0; a trailer where it was copied
+    // into the heap (none where it was flushed in place, on the stack); and
+    // its raw words (`f64`s), its suffix.
+    Kind { name: "native-frame", code: 45, traced: true },
 ];
 
 /// A flat array's element layouts: what `(flatlayout T)` is at run time.

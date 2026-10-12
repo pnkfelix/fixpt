@@ -36,16 +36,17 @@ including about 1.8 to 3.5 s of start-up. Start-up is about 0.5 s since
 loaded lowered): subtract about 2.2 s from a time here for today's.
 The four float ports (2026-10-12: `mandelbrot`, `matrix-multiply`,
 `nbody`, `spectralnorm2`) are timed with today's start-up, about 0.5 s;
-each `f64` that reaches a frame slot, a call's argument or its result is
-a heap box today, most of their run (`TODO.md` §91).
+since §91 (2026-10-12) an `f64` in a frame slot is raw, not a heap box
+(they were 1.85, 1.85, 3.32 and 2.07 s); an `f64` passed to or returned
+from a call is boxed still.
 
 | benchmark                      | answer                                          | native s | count and notes                                             |
 | ------------------------------ | ----------------------------------------------- | -------- | ----------------------------------------------------------- |
 | `benchmarksgame/binarytrees5`  | 14985902                                        | 3.2      | depth 16                                                    |
 | `benchmarksgame/fannkuchredux` | 862930                                          | 2.6      | n = 9                                                       |
-| `benchmarksgame/nbody`         | "-0.16908618459855648"                          | 2.1      | 1 000 000 steps (2026-10-12); the bodies one flat array     |
+| `benchmarksgame/nbody`         | "-0.16908618459855648"                          | 1.2      | 1 000 000 steps (2026-10-12); the bodies one flat array     |
 | `benchmarksgame/pidigits5`     | 112361924                                       | 3.9      | N = 3000 (default 27); hash of the output                   |
-| `benchmarksgame/spectralnorm2` | "1.274224152228617"                             | 3.4      | n = 2000 (2026-10-12)                                       |
+| `benchmarksgame/spectralnorm2` | "1.274224152228617"                             | 1.9      | n = 2000 (2026-10-12)                                       |
 | `mlton/boyer`                  | #t                                              | 4.6      | 30 proofs                                                   |
 | `mlton/checksum`               | 0                                               | 3.6      | (doit 2); Word8Array as a bloblet                           |
 | `mlton/count-graphs`           | (0 0 1 1 2 2 4 4 20 20 250 250)                 | 25.2     | 1 `doit`, sizes 0–11                                        |
@@ -57,8 +58,8 @@ a heap box today, most of their run (`TODO.md` §91).
 | `mlton/knuth-bendix`           | 24                                              | 6.1      | 1 completion                                                |
 | `mlton/life`                   | 205                                             | 4.4      | (doit 1)                                                    |
 | `mlton/logic`                  | 2                                               | 3.6      | 2 runs                                                      |
-| `mlton/mandelbrot`             | 1073042                                         | 1.8      | 20 runs of a 1024² grid (MLton: 32768²) (2026-10-12)        |
-| `mlton/matrix-multiply`        | 2646700                                         | 1.8      | 20 runs at 200² (MLton: 500²) (2026-10-12); a flat array    |
+| `mlton/mandelbrot`             | 1073042                                         | 0.9      | 20 runs of a 1024² grid (MLton: 32768²) (2026-10-12)        |
+| `mlton/matrix-multiply`        | 2646700                                         | 0.8      | 20 runs at 200² (MLton: 500²) (2026-10-12); a flat array    |
 | `mlton/md5`                    | "59ebddd335d8defbcaf5b76c08c64278"              | 2.9      | 20 blocks (MLton: 100 000); Word32 as `u32` (was 3.3)       |
 | `mlton/merge`                  | 0                                               | 2.6      | lists of 50 000 (MLton: 100 000): 8 MB native stack         |
 | `mlton/mpuz`                   | "J = 0 I = 1 D = 8 E = 2 C = 5 B = 6 F …        | 8.2      | (doit 1)                                                    |

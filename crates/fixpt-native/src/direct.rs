@@ -16,8 +16,10 @@
 //! | the stack's limit    | `x27`, pinned                                              |
 //! | the closure called   | `x10`, as the call enters it; kept in the frame if read    |
 //! | code's run address   | `x26`, pinned: a code bloblet's reference plus it          |
-//! | values across a call | the frame's slots, `[x29, #24 + 8n]` for slot `n`          |
-//! | the frame's stack map | `[x29, #16]`: a fixnum, the mask of the slots traced       |
+//! | values across a call | the frame's slots, from `[x29, #24]`: its values, the code  |
+//! |                      | bloblet and the closure, then its raw `f64`s (`raw_slots`)  |
+//! | the frame's stack map | `[x29, #16]`: a fixnum, the mask of the values traced, and |
+//! |                      | its count of fields (`MAP_BITS`, `frame_shape`)            |
 //! | the frame's header   | `[x29, #-8]`: room for its bloblet's header (`STUB_FRAME`)  |
 //!
 //! Every register but the pinned ones is the caller's to lose across a
@@ -150,12 +152,14 @@ struct DState {
     /// they are, raw or not, since nothing moves.
     kept: [u64; 12],
     /// The stack cache (`docs/research/deep-recursion.md`): the rest of
-    /// this run's frames, older than any on the stack, copied into the
-    /// heap as a chain of chunks (`CH_*`): the chunk (or `#f`), where in it
-    /// the next frame starts, and where that frame resumes; and the most
-    /// words a run's frames may take.
+    /// this run's frames, older than any on the stack, in the heap, each a
+    /// native frame linked to the next out (`TODO.md` §91): the innermost
+    /// (or `#f`), and where it resumes; and the most words a run's frames
+    /// may take.
     cont: u64,
-    cont_at: u64,
+    /// How many words of frames the chain at `cont` holds (`TODO.md` §91):
+    /// what bounds the run's frames (`max_words`).
+    cont_words: u64,
     cont_pc: u64,
     max_words: u64,
     /// What the run's outermost frame links to and returns to: the
@@ -445,17 +449,23 @@ const CONTROL_FRAME: u64 = 64;
 /// Every native frame is laid out as its bloblet will be, once flushed
 /// into the heap (`TODO.md` §91, `docs/object-model.md`): a header word
 /// below its link (at `[x29, #-8]`), then its link, its second word (the
-/// return address, or a control frame's), and the rest. No trailer: the
-/// runtime always knows where a frame's header is, and a trailer is not a
-/// bloblet's hard invariant. On the stack the header is only room; the
-/// frame's words, its *region*, run from `x29 - 8` to the next frame's. A
-/// stub's frame is `[header][link][return]`, and a word to align it.
+/// return address, or a control frame's), the rest of its values, and its
+/// raw words, its suffix. No trailer: each word of a frame counts against
+/// the stack cache (a deep recursion that fits it no longer would), and a
+/// trailer is not a bloblet's hard invariant. On the stack the header is
+/// only room; the frame's words, its *region*, run from `x29 - 8` to the
+/// next frame's. A stub's frame is `[header][link][return]`, and a word to
+/// align it.
 const STUB_FRAME: u64 = 32;
 /// Where in a frame's region its link, its second word and its third (a
 /// procedure's stack map, a control frame's marker) are.
 const R_LINK: u64 = 8;
 const R_SECOND: u64 = 16;
 const R_HEAD: u64 = 24;
+/// The bits of a procedure frame's stack map that say which values are
+/// live; above them, its count of fields (`frame_shape`). A frame of more
+/// values has no map: its map word is minus its count of fields.
+const MAP_BITS: u32 = 48;
 
 fn st_off(f: usize) -> u32 {
     f as u32
@@ -463,7 +473,7 @@ fn st_off(f: usize) -> u32 {
 
 /// The native stack is the heap's (`Heap::native_stack`), at the nursery's
 /// top; a run's stack cache is part of it, with room below its limit for
-/// the frame that finds it has passed it, and a chunk's start.
+/// the frame that finds it has passed it.
 /// The most a stack cache may be.
 const MOST_CACHE_WORDS: u64 = 1 << 22;
 const STACK_SLACK: u64 = 64 * 1024;
@@ -487,20 +497,6 @@ fn stack_words_wanted() -> (u64, u64) {
 /// Bruggeman's copy bound).
 const RESTORE_WORDS: usize = 256;
 
-/// A chunk of the stack cache's chain, a vector: the next chunk and where
-/// in it the next frame starts (`#f` and 0 at the chain's end); the words
-/// of frames from there on; then frames, each as it was on the stack, its
-/// link its size (a fixnum), its second word a fixnum (a return address, a
-/// landing, or 0), and its words from the third on those its stack map says
-/// are dead the fixnum 0. A chunk's last frame's second word is where the
-/// next resumes.
-const CH_NEXT: usize = 0;
-const CH_NEXT_AT: usize = 1;
-const CH_REST: usize = 2;
-const CH_FRAMES: usize = 3;
-/// About the most words of frames a chunk holds: so that a chain mostly
-/// restored keeps little more than it needs alive.
-const CHUNK_WORDS: usize = 1 << 12;
 
 #[derive(Copy, Clone)]
 struct Label(usize);
@@ -786,8 +782,8 @@ impl DirectMachine {
     /// Call `p` with `args`, in at most about `fuel` steps, in `rt`, whose
     /// heap its call-outs allocate in, collecting when they must.
     pub fn call(&mut self, rt: &mut fixpt_runtime::Runtime, p: Compiled, args: &[Value], fuel: u64) -> Result<Value, DirectTrap> {
-        // The heap's native stack (`Heap::native_stack`), with room at its
-        // top for a chunk's trailer (`flush_in_place`).
+        // The heap's native stack (`Heap::native_stack`), with a little room
+        // at its top, where the outermost frame flushed there points.
         let top = (rt.heap.native_stack().1 - 16) & !15;
         run(&self.runner(), rt, p, args, fuel, top)
     }
@@ -836,6 +832,7 @@ fn run(r: &Runner, rt: &mut fixpt_runtime::Runtime, p: Compiled, args: &[Value],
         // entry flushes the rest into the heap.
         stack_limit: (rt.heap.native_stack().0 + STACK_SLACK).max(top.saturating_sub(8 * r.cache_words)),
         cont: Value::FALSE.raw(),
+        cont_words: 0,
         max_words: r.max_words,
         underflow: r.underflow,
         overflow: r.overflow,
@@ -1312,13 +1309,42 @@ impl Compiling<'_> {
         if frame.is_some_and(|m| 32 + 8 * (m + 2) > 4080) {
             return decline("a frame too large".into());
         }
-        // A frame of more slots than a fixnum's mask has bits has no stack
-        // map: all its slots are traced, and cleared as it is made.
-        let unmapped = frame.is_some_and(|m| m + 2 > 60);
-        // Its region: the header, then those words.
+        // The slots only `f64` operations read hold the `f64` raw
+        // (`reps::raw_slots`, `TODO.md` §91): kept after the frame's values,
+        // the code bloblet and the closure, as its bloblet's suffix, which
+        // no collection traces. Each slot's place, from `x29`.
+        let prim_name = |p: usize| fixpt_runtime::PRIMITIVES.get(p).map_or("?", |d| d.name);
+        let raw = frame.map_or(Vec::new(), |m| reps::raw_slots(&cells, &starts, &prim_name, m));
+        let values = raw.iter().filter(|r| !**r).count() as u32;
+        let (slot_off, value_index) = {
+            let (mut v, mut r) = (0u32, 0u32);
+            let mut offs = Vec::new();
+            let mut index = Vec::new();
+            for &is_raw in &raw {
+                if is_raw {
+                    offs.push(24 + 8 * (values + 2 + r));
+                    index.push(None);
+                    r += 1;
+                } else {
+                    offs.push(24 + 8 * v);
+                    index.push(Some(v));
+                    v += 1;
+                }
+            }
+            (offs, index)
+        };
+        // A frame of more values than its stack map has bits for has none:
+        // all its values are traced, and cleared as it is made.
+        let unmapped = frame.is_some() && values + 2 > MAP_BITS;
+        // Its fields: the link, the second word, the map, the values, the
+        // code bloblet and the closure; said in the map word, for a flush.
+        let fields = values as u64 + 5;
+        // Its region: the header, those fields, then the raw slots.
         let size = frame.map(|m| (32 + 8 * (m as u32 + 2)).div_ceil(16) * 16);
-        let self_slot = frame.map(|m| 24 + 8 * m as u32);
-        let clo_slot = frame.map(|m| 24 + 8 * (m as u32 + 1));
+        let self_slot = frame.map(|_| 24 + 8 * values);
+        let clo_slot = frame.map(|_| 24 + 8 * (values + 1));
+        // A mask of register code's slots as one of the frame's values.
+        let value_mask = |mask: u64| (0..raw.len()).filter(|&k| k < 64 && mask & (1 << k) != 0).filter_map(|k| value_index[k]).fold(0u64, |m, v| m | 1 << v);
         // Which slots are live after each instruction: a backward pass over
         // register code's slots (`stack` and `load` read one, `setstk` and
         // `store` write one), for the stack map a frame stores before each
@@ -1402,15 +1428,14 @@ impl Compiling<'_> {
         // Where `i64` and `u64` values are raw (`reps`): the registers as
         // each instruction starts, and ends; the ways into an instruction
         // that must unbox some first, each a stub of its own.
-        let prim_name = |p: usize| fixpt_runtime::PRIMITIVES.get(p).map_or("?", |d| d.name);
-        let raw_refs = reps::raw_refs(&cells, &starts, &prim_name);
+        let raw_refs = reps::raw_refs(&cells, &starts, &prim_name, &raw);
         let si_at: HashMap<usize, usize> = starts.iter().enumerate().map(|(si, &i)| (i, si)).collect();
         // A procedure with `int` operations gets a fixnum version first, where
         // a value tested once stays known (`reps`, `Rep::Fix`), and whose
         // tests and overflows go over to the general version, at the same
         // instruction: the registers and frame are the same in both there.
         let has_int = starts.iter().any(|&i| matches!(op_at(i), "op2" | "op2imm") && reps::int_routine(cells[i + 1].as_fixnum() as usize));
-        let live = reps::live_in(&cells, &starts, &prim_name);
+        let live = reps::live_in(&cells, &starts, &prim_name, &raw);
         let labels_g = labels;
         let labels_f: Vec<Label> = (0..=cells.len()).map(|_| a.label()).collect();
         let versions: &[bool] = if has_int { &[true, false] } else { &[false] };
@@ -1418,7 +1443,7 @@ impl Compiling<'_> {
         let mut int_slows: Vec<IntSlow> = Vec::new();
         for &fast in versions {
         let labels = if fast { &labels_f } else { &labels_g };
-        let (reps_in, reps_out) = reps::reps_of(&cells, &starts, &prim_name, fast);
+        let (reps_in, reps_out) = reps::reps_of(&cells, &starts, &prim_name, fast, &raw);
         let mut src = RESULT;
         let mut pending: Option<Field> = None;
         // The global the pending call was bound to as compiled: its cell,
@@ -1462,7 +1487,7 @@ impl Compiling<'_> {
             {
                 let o = |j: usize| cells[i + 1 + j];
                 let mut reps = reps_in[si - 1];
-                let first = reps::step(op, &o, &prim_name, raw_refs[si - 1], fast, &mut reps);
+                let first = reps::step(op, &o, &prim_name, raw_refs[si - 1], fast, &raw, &mut reps);
                 // `RESULT`, where a `reg` just before left it in its register
                 // (`src`), is tested there.
                 convert(&mut a, self.callouts, &first, labels_g[i], src);
@@ -1472,13 +1497,14 @@ impl Compiling<'_> {
             }
             // Before what may collect, in a frame: the slots live after it,
             // the code bloblet's, and the closure's if the code reads it.
-            if let Some(m) = frame
+            if frame.is_some()
                 && framed[i]
                 && (matches!(op, "prim" | "cellular" | "lambda" | "invokeself") || op == "invoke")
             {
-                let map = if unmapped { u64::MAX } else { live_out[si - 1] | 1 << m | if captures { 1 << (m + 1) } else { 0 } };
+                let v = values;
+                let map = if unmapped { u64::MAX } else { value_mask(live_out[si - 1]) | 1 << v | if captures { 1 << (v + 1) } else { 0 } | fields << MAP_BITS };
                 if map_stored != Some(map) {
-                    a.es(&mov_imm64(X16, Value::fixnum(if unmapped { -1 } else { map as i64 }).raw()));
+                    a.es(&mov_imm64(X16, Value::fixnum(if unmapped { -(fields as i64) } else { map as i64 }).raw()));
                     a.e(str(X16, FRAME, 16));
                     map_stored = Some(map);
                 }
@@ -1633,8 +1659,8 @@ impl Compiling<'_> {
                         }
                     } else {
                         let unwritten = live_out[si - 1];
-                        for k in (0..64).filter(|k| unwritten & (1 << k) != 0) {
-                            a.e(str(XZR, FRAME, 24 + 8 * k));
+                        for k in (0..raw.len()).filter(|&k| k < 64 && unwritten & (1 << k) != 0 && !raw[k]) {
+                            a.e(str(XZR, FRAME, slot_off[k]));
                         }
                     }
                     ldr_field(&mut a, X9, 1);
@@ -1646,11 +1672,11 @@ impl Compiling<'_> {
                 "pop" => {
                     pop_frame(&mut a, size.expect("a frame") as u64);
                 }
-                "stack" => a.e(ldr(RESULT, FRAME, 24 + 8 * k(o(0)) as u32)),
-                "setstk" => a.e(str(RESULT, FRAME, 24 + 8 * k(o(0)) as u32)),
-                "load" => a.e(ldr(reg(o(0)), FRAME, 24 + 8 * k(o(1)) as u32)),
+                "stack" => a.e(ldr(RESULT, FRAME, slot_off[k(o(0))])),
+                "setstk" => a.e(str(RESULT, FRAME, slot_off[k(o(0))])),
+                "load" => a.e(ldr(reg(o(0)), FRAME, slot_off[k(o(1))])),
                 "store" => {
-                    a.e(str(reg(o(0)), FRAME, 24 + 8 * k(o(1)) as u32));
+                    a.e(str(reg(o(0)), FRAME, slot_off[k(o(1))]));
                     // Its slot read back at once: the register is still it.
                     if let Some(j) = joinable(si - 1)
                         && op_at(j) == "stack"
@@ -4090,7 +4116,7 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
         let mut cont = [Value::from_raw(st.cont)];
         rt.heap.collect_due(&mut [&mut args, &mut code, &mut cont]);
         st.cont = cont[0].raw();
-        match restore(&rt.heap, st, cont_pos(st)) {
+        match restore(&rt.heap, st, cont_pos(st), st.cont_words) {
             Ok((lo, _)) => (st.fp, st.native_sp) = (lo + R_LINK, lo),
             Err(why) => return failed(st, why),
         }
@@ -4172,7 +4198,7 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
             abort_to(rt, st, args[0], args[1]);
             0
         }
-        Callout::Underflow => match restore(&rt.heap, st, cont_pos(st)) {
+        Callout::Underflow => match restore(&rt.heap, st, cont_pos(st), st.cont_words) {
             Ok((lo, pc)) => {
                 st.stats.underflows += 1;
                 (st.resume_sp, st.resume_fp, st.resume_pc) = (lo, lo + R_LINK, pc);
@@ -4238,6 +4264,19 @@ thread_local! {
     static CALLOUT_ARGS: std::cell::Cell<Vec<Value>> = const { std::cell::Cell::new(Vec::new()) };
 }
 
+/// The innermost prompt for `tag` in the chain from `p`, and how many words
+/// of frames are newer than it.
+fn chain_prompt(heap: &Heap, p: Pos, tag: Value) -> Option<(Rec, u64)> {
+    let mut dropped = 0;
+    for r in records(heap, p) {
+        if r.is_control(PROMPT_MARK, tag) {
+            return Some((r, dropped));
+        }
+        dropped += r.n as u64;
+    }
+    None
+}
+
 /// An abort to `tag` with `v`: to the innermost prompt for it in this run's
 /// frames, on the stack or in the stack cache's chain, whose frame is put
 /// on top and resumed at its landing, with what the regions entered inside
@@ -4249,8 +4288,8 @@ fn abort_to(rt: &mut fixpt_runtime::Runtime, st: &mut DState, tag: Value, v: Val
     let pf = match on_stack {
         Some(pf) => Some(pf),
         // In the chain: every frame newer dropped, the prompt's restored.
-        None => match records(&rt.heap, cont_pos(st)).into_iter().find(|r| r.is_control(PROMPT_MARK, tag)) {
-            Some(r) => match restore(&rt.heap, st, r.pos()) {
+        None => match chain_prompt(&rt.heap, cont_pos(st), tag) {
+            Some((r, dropped)) => match restore(&rt.heap, st, r.pos(), st.cont_words.saturating_sub(dropped)) {
                 Ok((pf, _)) => Some(pf),
                 Err(why) => {
                     failed(st, why);
@@ -4328,54 +4367,52 @@ fn is_control(lo: u64, hi: u64, marker: Value, key: Value) -> bool {
     hi - lo == CONTROL_FRAME && word(lo + R_HEAD) == marker.raw() && word(lo + R_HEAD + 8) == key.raw()
 }
 
-/// A place in the stack cache's chain: a chunk, where in it a frame starts,
-/// and where that frame resumes; or the chain's end (`#f`). And, once
-/// looked up, where the chunk's words are and how many: nothing collects
-/// while a place is walked, so they stay where they are.
+/// A place in the stack cache's chain: a frame (a native frame in the
+/// heap, `TODO.md` §91), and where it resumes; or the chain's end (`#f`).
 #[derive(Clone, Copy)]
 struct Pos {
-    chunk: Value,
-    at: usize,
+    frame: Value,
     pc: u64,
-    words: *const u64,
-    len: usize,
 }
 
-const END: Pos = Pos::new(Value::FALSE, 0, 0);
+const END: Pos = Pos::new(Value::FALSE, 0);
 
 impl Pos {
-    const fn new(chunk: Value, at: usize, pc: u64) -> Pos {
-        Pos { chunk, at, pc, words: std::ptr::null(), len: 0 }
+    const fn new(frame: Value, pc: u64) -> Pos {
+        Pos { frame, pc }
     }
 }
 
 /// The rest of this run's frames, in the heap.
 fn cont_pos(st: &DState) -> Pos {
-    Pos::new(Value::from_raw(st.cont), st.cont_at as usize, st.cont_pc)
+    Pos::new(Value::from_raw(st.cont), st.cont_pc)
 }
 
-fn set_cont(st: &mut DState, p: Pos) {
-    (st.cont, st.cont_at, st.cont_pc) = (p.chunk.raw(), p.at as u64, p.pc);
+fn set_cont(st: &mut DState, p: Pos, words: u64) {
+    (st.cont, st.cont_pc, st.cont_words) = (p.frame.raw(), p.pc, words);
 }
 
-/// A frame of the chain: its chunk, where in it it starts, its words, its
-/// second word, where it resumes, and where its chunk's words are.
+/// A frame of the chain: the native frame, its words (its header's
+/// included, as on the stack), its second word, where it resumes, and
+/// where its fields are: nothing collects while the chain is walked, so
+/// they stay where they are.
 #[derive(Clone, Copy)]
 struct Rec {
-    chunk: Value,
-    at: usize,
+    frame: Value,
     n: usize,
     w8: u64,
     pc: u64,
-    words: *const u64,
+    fields: *const u64,
+    nfields: usize,
+    raw: *const u64,
 }
 
 impl Rec {
     /// Its `j`th word from its third on (its map, or its marker).
     fn word(&self, j: usize) -> Value {
-        // SAFETY: within its chunk (`j < n - 3`), which does not move
-        // while the chain is walked.
-        Value::from_raw(unsafe { *self.words.add(self.at + 3 + j) })
+        // SAFETY: one of its fields (`j < n - 3`), which do not move while
+        // the chain is walked.
+        Value::from_raw(unsafe { *self.fields.add(2 + j) })
     }
     /// Whether it is left by a return to its second word (a procedure's
     /// frame, a stub's, a mark's in tail position), not popped by the code
@@ -4394,33 +4431,19 @@ impl Rec {
         self.n == CONTROL_FRAME as usize / 8 && self.word(0) == MARK_MARK && self.w8 != 0
     }
     fn pos(&self) -> Pos {
-        Pos::new(self.chunk, self.at, self.pc)
+        Pos::new(self.frame, self.pc)
     }
 }
 
 /// The frame at `p`, and the place after it; none at the chain's end.
 fn step(heap: &Heap, p: Pos) -> Option<(Rec, Pos)> {
-    let (mut chunk, mut at, mut words, mut len) = (p.chunk, p.at, p.words, p.len);
-    if chunk == Value::FALSE {
+    if p.frame == Value::FALSE {
         return None;
     }
-    if words.is_null() {
-        let w = heap.obj_words(chunk);
-        (words, len) = (w.as_ptr(), w.len());
-    }
-    while at >= len {
-        // SAFETY: the chunk's header words, which do not move while the
-        // chain is walked.
-        let (next, next_at) = unsafe { (Value::from_raw(*words.add(CH_NEXT)), Value::from_raw(*words.add(CH_NEXT_AT)).as_fixnum() as usize) };
-        if next == Value::FALSE {
-            return None;
-        }
-        let w = heap.obj_words(next);
-        (chunk, at, words, len) = (next, next_at, w.as_ptr(), w.len());
-    }
-    // SAFETY: a frame's size and second word, within its chunk.
-    let (n, w8) = unsafe { (Value::from_raw(*words.add(at)).as_fixnum() as usize, Value::from_raw(*words.add(at + 2)).as_fixnum() as u64) };
-    Some((Rec { chunk, at, n, w8, pc: p.pc, words }, Pos { chunk, at: at + n, pc: w8, words, len }))
+    let (w, raw) = heap.native_frame_parts(p.frame);
+    let (next, w8) = (Value::from_raw(w[0]), Value::from_raw(w[1]).as_fixnum() as u64);
+    let r = Rec { frame: p.frame, n: 1 + w.len() + raw.len(), w8, pc: p.pc, fields: w.as_ptr(), nfields: w.len(), raw: raw.as_ptr() };
+    Some((r, Pos::new(next, w8)))
 }
 
 /// Each frame of the chain from `p`, newest first.
@@ -4433,85 +4456,59 @@ fn records(heap: &Heap, mut p: Pos) -> Vec<Rec> {
     out
 }
 
-/// How many words of frames the chain from `p` holds.
-fn chain_words(heap: &Heap, p: Pos) -> u64 {
-    if p.chunk == Value::FALSE {
-        return 0;
-    }
-    (heap.obj_len(p.chunk) - p.at.min(heap.obj_len(p.chunk))) as u64 + heap.obj_ref(p.chunk, CH_REST).as_fixnum() as u64
-}
-
-/// The stack map of the frame from `fp` to `end`: the mask of the words
-/// from its third on that are values to keep (the third itself, the map or
-/// a control frame's marker, always; all of a control frame, and of one
-/// too wide for a map). What it leaves out, dead or not a value, a chunk
+/// The shape of the frame whose region is `lo` to `hi`, as its bloblet
+/// will be: how many fields (its link, its second word, its map or marker,
+/// its values), the rest of it raw words, its suffix (`TODO.md` §91); and
+/// the mask of its fields from the third on that are values to keep (the
+/// third itself, the map or a control frame's marker, always; all of one
+/// too wide for a map). What it leaves out, dead or not a value, a flush
 /// keeps as the fixnum 0.
-fn kept_mask(lo: u64, hi: u64) -> u64 {
+fn frame_shape(lo: u64, hi: u64) -> (usize, u64) {
+    let n = ((hi - lo) / 8) as usize;
+    // A stub's: its link, its return and a word to align it, none kept.
     if hi - lo <= STUB_FRAME {
-        return 0;
+        return (n - 1, 0);
     }
     let head = Value::from_raw(word(lo + R_HEAD));
     // A control frame: its marker and the three words after it, not its
     // padding.
     if !head.is_fixnum() {
-        return 0b1111;
+        return (n - 1, 0b1111);
     }
-    if head.as_fixnum() < 0 { u64::MAX } else { (head.as_fixnum() as u64) << 1 | 1 }
+    match head.as_fixnum() {
+        // Too wide for a map: every value.
+        m if m < 0 => ((-m) as usize, u64::MAX),
+        m => ((m as u64 >> MAP_BITS) as usize, (m as u64 & ((1 << MAP_BITS) - 1)) << 1 | 1),
+    }
 }
 
 /// The stack's `frames`, innermost first, copied into the heap onto the
-/// chain at `tail` (older than they), in chunks of about `CHUNK_WORDS`:
-/// each frame as it was, its link its size, its dead words 0; the
+/// chain at `tail` (older than they), each a native frame: as it was, its
+/// link the next out, its second word a fixnum, its dead words 0; the
 /// outermost's second word `last` (where the chain at `tail` resumes, if
 /// that frame's own says the underflow). Where the innermost is, its `pc`
 /// for the caller to say. Allocates and never collects, so what the frames
 /// and `tail` hold stays where it is.
-fn chunks_of(heap: &mut Heap, frames: &[(u64, u64)], last: u64, tail: Pos) -> Pos {
-    let (mut next, mut rest) = ((tail.chunk, tail.at), chain_words(heap, tail));
-    let mut i = frames.len();
-    while i > 0 {
-        let (mut j, mut w) = (i, 0);
-        while j > 0 {
-            let (fp, end) = frames[j - 1];
-            let fw = ((end - fp) / 8) as usize;
-            if w > 0 && w + fw > CHUNK_WORDS {
-                break;
-            }
-            w += fw;
-            j -= 1;
-        }
-        // Frames `j..i`, a word at a time: which frame, and where in it.
-        let (mut f, mut k, mut mask) = (j, 0usize, kept_mask(frames[j].0, frames[j].1));
-        let outermost = frames.len() - 1;
-        let chunk = heap.vector_with(CH_FRAMES + w, |at| match at {
-            CH_NEXT => next.0,
-            CH_NEXT_AT => Value::fixnum(next.1 as i64),
-            CH_REST => Value::fixnum(rest as i64),
+fn heap_frames(heap: &mut Heap, frames: &[(u64, u64)], last: u64, tail: Pos) -> Pos {
+    let outermost = frames.len() - 1;
+    let mut next = tail.frame;
+    for (f, &(lo, hi)) in frames.iter().enumerate().rev() {
+        let (fields, mask) = frame_shape(lo, hi);
+        let second = if f == outermost { last } else { word(lo + R_SECOND) };
+        let link = next;
+        // SAFETY: the frame's raw words, on the native stack.
+        let raw = unsafe { std::slice::from_raw_parts((lo + 8 * (1 + fields as u64)) as *const u64, ((hi - lo) / 8) as usize - 1 - fields) };
+        next = heap.native_frame_with(fields, raw, |i| match i {
+            0 => link,
+            1 => Value::fixnum(second as i64),
             _ => {
-                let (fp, end) = frames[f];
-                let v = match k {
-                    0 => Value::fixnum(((end - fp) / 8) as i64),
-                    1 => Value::fixnum(0),
-                    2 => Value::fixnum(if f == outermost { last } else { word(fp + R_SECOND) } as i64),
-                    _ => {
-                        let j = k - 3;
-                        if j >= 64 || mask & (1 << j) != 0 { Value::from_raw(word(fp + 8 * k as u64)) } else { Value::fixnum(0) }
-                    }
-                };
-                k += 1;
-                if fp + 8 * k as u64 == end && f + 1 < i {
-                    f += 1;
-                    k = 0;
-                    mask = kept_mask(frames[f].0, frames[f].1);
-                }
-                v
+                let j = i - 2;
+                let at = lo + 8 * (i as u64 + 1);
+                if j >= 64 || mask & (1 << j) != 0 { Value::from_raw(word(at)) } else { Value::fixnum(0) }
             }
         });
-        next = (chunk, CH_FRAMES);
-        rest += w as u64;
-        i = j;
     }
-    Pos::new(next.0, next.1, 0)
+    Pos::new(next, 0)
 }
 
 /// The second word the outermost of this run's frames on the stack should
@@ -4525,7 +4522,7 @@ fn step_nonempty(st: &DState) -> bool {
     st.cont != Value::FALSE.raw()
 }
 
-/// Frames restored from the chain at `p` onto the run's empty stack cache,
+/// Frames restored from the chain at `p`, of `chain` words, onto the run's empty stack cache,
 /// at its top: at least one, and on to `RESTORE_WORDS`, never ending with
 /// one its code pops (whose code is in the frame outside it), nor above a
 /// mark in tail position (which a mark in tail position in the frame above
@@ -4533,7 +4530,7 @@ fn step_nonempty(st: &DState) -> bool {
 /// returns to the bottom if the chain ends there, else returns through the
 /// underflow. The rest of the chain is the run's. Where the innermost is,
 /// and where it resumes.
-fn restore(heap: &Heap, st: &mut DState, p: Pos) -> Result<(u64, u64), String> {
+fn restore(heap: &Heap, st: &mut DState, p: Pos, chain: u64) -> Result<(u64, u64), String> {
     let (mut recs, mut words, mut q) = (Vec::with_capacity(64), 0, p);
     while let Some((r, nq)) = step(heap, q) {
         let returns = r.returns();
@@ -4550,7 +4547,7 @@ fn restore(heap: &Heap, st: &mut DState, p: Pos) -> Result<(u64, u64), String> {
     let more = step(heap, q).is_some();
     let (link, ret) = if more { (0, st.underflow) } else { (st.bottom_link, st.bottom_ret) };
     let base = place(st, &recs, words, st.stack_top, link, ret)?;
-    set_cont(st, if more { q } else { END });
+    set_cont(st, if more { q } else { END }, if more { chain.saturating_sub(words as u64) } else { 0 });
     st.stats.frames_restored += recs.len() as u64;
     Ok((base, recs[0].0.pc))
 }
@@ -4579,8 +4576,11 @@ fn put_frame(r: Rec, lo: u64, link: u64, second: u64) {
     set_word(lo + R_LINK, link);
     set_word(lo + R_SECOND, second);
     // SAFETY: words of the native stack, above its limit, which no Rust
-    // code holds while the call-out runs; the frame's, in its chunk.
-    unsafe { std::ptr::copy_nonoverlapping(r.words.add(r.at + 3), (lo + R_HEAD) as *mut u64, r.n - 3) };
+    // code holds while the call-out runs; the frame's fields, in the heap.
+    unsafe {
+        std::ptr::copy_nonoverlapping(r.fields.add(2), (lo + R_HEAD) as *mut u64, r.nfields - 2);
+        std::ptr::copy_nonoverlapping(r.raw, (lo + 8 * (1 + r.nfields as u64)) as *mut u64, r.n - 1 - r.nfields);
+    }
 }
 
 /// What an overflow's site says of its procedure's entry: how many of
@@ -4620,16 +4620,16 @@ fn overflow(heap: &mut Heap, st: &mut DState) -> u64 {
     let size = kept_end - f0;
     let frames: Vec<(u64, u64)> = frames_from(caller, top).collect();
     let words: u64 = frames.iter().map(|&(a, b)| (b - a) / 8).sum();
-    if chain_words(heap, cont_pos(st)) + words + size / 8 > st.max_words {
+    if st.cont_words + words + size / 8 > st.max_words {
         return failed(st, "stack overflow".into());
     }
-    // The kept frames aside, where the flush writes its chunk's start; the
-    // marks' words are values to keep.
+    // The kept frames aside, to move them; the marks' words are values to
+    // keep.
     let mut kept: Vec<Value> = (0..size / 8).map(|i| Value::from_raw(word(f0 + 8 * i))).collect();
     let last = outermost_second(st, frames.last().expect("a frame").0);
     let mut p = flush_in_place(heap, &frames, last, cont_pos(st));
     p.pc = kept[((outer + R_SECOND - f0) / 8) as usize].raw();
-    set_cont(st, p);
+    set_cont(st, p, st.cont_words + words);
     st.stats.overflows += 1;
     st.stats.frames_flushed += frames.len() as u64;
     st.stats.words_flushed += words;
@@ -4686,34 +4686,30 @@ fn overflow(heap: &mut Heap, st: &mut DState) -> u64 {
 }
 
 /// The stack's `frames`, innermost first, contiguous and the run's last,
-/// made a chunk of the chain onto `tail` where they are (Larceny's flush in
-/// place): its header and fields written below the innermost, its trailer
-/// at the run's top; each frame's link its size, its second word a fixnum
-/// (the outermost's `last`), its dead words 0. An object of the nursery,
-/// which the collection that must follow moves out. Where the innermost
-/// is, its `pc` for the caller to say.
+/// made the chain's newest frames onto `tail` where they are (Larceny's
+/// flush in place): each a native frame, its header written in the word
+/// below its link, its link the next out, its second word a fixnum (the
+/// outermost's `last`), its dead words 0. Objects of the nursery, which the
+/// collection that must follow moves out. Where the innermost is, its `pc`
+/// for the caller to say.
 fn flush_in_place(heap: &mut Heap, frames: &[(u64, u64)], last: u64, tail: Pos) -> Pos {
-    let (lo, hi) = (frames[0].0, frames.last().expect("a frame").1);
-    let rest = chain_words(heap, tail);
-    set_word(lo - 8 * (CH_FRAMES - CH_NEXT) as u64, tail.chunk.raw());
-    set_word(lo - 8 * (CH_FRAMES - CH_NEXT_AT) as u64, Value::fixnum(tail.at as i64).raw());
-    set_word(lo - 8 * (CH_FRAMES - CH_REST) as u64, Value::fixnum(rest as i64).raw());
+    // From the outermost in, each linking to the one made before it;
+    // nothing collects until all of them are made.
     let outermost = frames.len() - 1;
-    for (f, &(fp, end)) in frames.iter().enumerate() {
-        let mask = kept_mask(fp, end);
-        let second = if f == outermost { last } else { word(fp + R_SECOND) };
-        set_word(fp, Value::fixnum(((end - fp) / 8) as i64).raw());
-        set_word(fp + R_LINK, Value::fixnum(0).raw());
-        set_word(fp + R_SECOND, Value::fixnum(second as i64).raw());
-        for (j, at) in (fp + R_HEAD..end).step_by(8).enumerate() {
+    let mut next = tail.frame;
+    for (f, &(lo, hi)) in frames.iter().enumerate().rev() {
+        let (fields, mask) = frame_shape(lo, hi);
+        let second = if f == outermost { last } else { word(lo + R_SECOND) };
+        set_word(lo + R_LINK, next.raw());
+        set_word(lo + R_SECOND, Value::fixnum(second as i64).raw());
+        for j in 0..fields - 2 {
             if j < 64 && mask & (1 << j) == 0 {
-                set_word(at, Value::fixnum(0).raw());
+                set_word(lo + R_HEAD + 8 * j as u64, Value::fixnum(0).raw());
             }
         }
+        next = heap.native_frame_in_place(lo, fields, ((hi - lo) / 8) as usize - 1 - fields);
     }
-    let n = CH_FRAMES + ((hi - lo) / 8) as usize;
-    let chunk = heap.vector_in_place(lo - 8 * (CH_FRAMES as u64 + 1), n);
-    Pos::new(chunk, CH_FRAMES, 0)
+    Pos::new(next, 0)
 }
 
 /// Every frame of the run on the stack, from the one that called out (at
@@ -4728,7 +4724,7 @@ fn flush_all(heap: &mut Heap, st: &mut DState) {
     let words: u64 = frames.iter().map(|&(a, b)| (b - a) / 8).sum();
     let last = outermost_second(st, outer);
     let p = flush_in_place(heap, &frames, last, cont_pos(st));
-    set_cont(st, p);
+    set_cont(st, p, st.cont_words + words);
     st.stats.collection_flushes += 1;
     st.stats.frames_flushed += frames.len() as u64;
     st.stats.words_flushed += words;
@@ -4741,16 +4737,16 @@ fn is_tail_mark(lo: u64, hi: u64) -> bool {
 }
 
 /// A continuation's data, around `p`, the chain of its frames.
-fn continuation(rt: &mut fixpt_runtime::Runtime, st: &DState, p: Pos, whole: bool) -> Value {
+fn continuation(rt: &mut fixpt_runtime::Runtime, st: &DState, p: Pos, words: u64, whole: bool) -> Value {
     let heap = &mut rt.heap;
     let regions = Value::fixnum(heap.live_regions() as i64);
-    let data = heap.vector_from(&[CONT_MARK, p.chunk, Value::fixnum(p.at as i64), Value::fixnum(p.pc as i64), regions, Value::boolean(whole)]);
+    let data = heap.vector_from(&[CONT_MARK, p.frame, Value::fixnum(words as i64), Value::fixnum(p.pc as i64), regions, Value::boolean(whole)]);
     native_closure(heap, Value::from_raw(st.aux), &[data])
 }
 
-/// A continuation's chain.
-fn continuation_pos(heap: &Heap, data: Value) -> Pos {
-    Pos::new(heap.obj_ref(data, 1), heap.obj_ref(data, 2).as_fixnum() as usize, heap.obj_ref(data, 3).as_fixnum() as u64)
+/// A continuation's chain, and how many words of frames it holds.
+fn continuation_pos(heap: &Heap, data: Value) -> (Pos, u64) {
+    (Pos::new(heap.obj_ref(data, 1), heap.obj_ref(data, 3).as_fixnum() as u64), heap.obj_ref(data, 2).as_fixnum() as u64)
 }
 
 /// The whole continuation of the frames from the one that called out,
@@ -4760,40 +4756,51 @@ fn continuation_pos(heap: &Heap, data: Value) -> Pos {
 fn capture_whole(rt: &mut fixpt_runtime::Runtime, st: &DState) -> Value {
     let frames = frames_of(st);
     let last = outermost_second(st, frames.last().expect("a frame").0);
-    let mut p = chunks_of(&mut rt.heap, &frames, last, cont_pos(st));
+    let mut p = heap_frames(&mut rt.heap, &frames, last, cont_pos(st));
     p.pc = st.ret_pc;
-    continuation(rt, st, p, true)
+    continuation(rt, st, p, region_words(&frames) + st.cont_words, true)
 }
 
 /// A continuation's frames, delimited by the innermost prompt for `tag`:
 /// those on the stack before it; or all of them and a copy of the chain's
-/// before it, in one chunk; none if no prompt for `tag` is in this run.
+/// before it; none if no prompt for `tag` is in this run.
 fn capture_delimited(rt: &mut fixpt_runtime::Runtime, st: &DState, tag: Value) -> Option<Value> {
     let frames = frames_of(st);
     if let Some(j) = frames.iter().position(|&(fp, end)| is_control(fp, end, PROMPT_MARK, tag)) {
         let last = word(frames[j - 1].0 + R_SECOND);
-        let mut p = chunks_of(&mut rt.heap, &frames[..j], last, END);
+        let mut p = heap_frames(&mut rt.heap, &frames[..j], last, END);
         p.pc = st.ret_pc;
-        return Some(continuation(rt, st, p, false));
+        return Some(continuation(rt, st, p, region_words(&frames[..j]), false));
     }
     let recs = records(&rt.heap, cont_pos(st));
     let j = recs.iter().position(|r| r.is_control(PROMPT_MARK, tag))?;
-    let tail = copy_records(&mut rt.heap, &recs[..j], END);
+    let (tail, _) = copy_records(&mut rt.heap, &recs[..j], END);
     let last = outermost_second(st, frames.last().expect("a frame").0);
-    let mut p = chunks_of(&mut rt.heap, &frames, last, tail);
+    let mut p = heap_frames(&mut rt.heap, &frames, last, tail);
     p.pc = st.ret_pc;
-    Some(continuation(rt, st, p, false))
+    let words = region_words(&frames) + recs[..j].iter().map(|r| r.n as u64).sum::<u64>();
+    Some(continuation(rt, st, p, words, false))
 }
 
-/// Frames `recs` of a chain copied into one new chunk onto `tail`.
-fn copy_records(heap: &mut Heap, recs: &[Rec], tail: Pos) -> Pos {
-    let rest = chain_words(heap, tail);
-    let mut v = vec![tail.chunk, Value::fixnum(tail.at as i64), Value::fixnum(rest as i64)];
-    for r in recs {
-        v.extend((0..r.n).map(|k| heap.obj_ref(r.chunk, r.at + k)));
+/// Frames `recs` of a chain copied onto `tail`, each a new native frame;
+/// and the outermost copied.
+fn copy_records(heap: &mut Heap, recs: &[Rec], tail: Pos) -> (Pos, Value) {
+    let (mut next, mut outermost) = (tail.frame, Value::FALSE);
+    for r in recs.iter().rev() {
+        let link = next;
+        // SAFETY: its fields, which do not move: nothing collects here.
+        let raw = unsafe { std::slice::from_raw_parts(r.raw, r.n - 1 - r.nfields) };
+        next = heap.native_frame_with(r.nfields, raw, |i| if i == 0 { link } else { Value::from_raw(unsafe { *r.fields.add(i) }) });
+        if outermost == Value::FALSE {
+            outermost = next;
+        }
     }
-    let chunk = heap.vector_from(&v);
-    Pos::new(chunk, CH_FRAMES, recs.first().map_or(tail.pc, |r| r.pc))
+    (Pos::new(next, recs.first().map_or(tail.pc, |r| r.pc)), outermost)
+}
+
+/// How many words of frames `frames` (regions) hold.
+fn region_words(frames: &[(u64, u64)]) -> u64 {
+    frames.iter().map(|&(lo, hi)| (hi - lo) / 8).sum()
 }
 
 /// Continuation `k` given `v`: its frames put back, and the state told to
@@ -4807,10 +4814,10 @@ fn copy_records(heap: &mut Heap, recs: &[Rec], tail: Pos) -> Pos {
 fn reinstate(rt: &mut fixpt_runtime::Runtime, st: &mut DState, k: Value, v: Value) -> u64 {
     let heap = &mut rt.heap;
     let data = heap.bloblet_slot(k, CLOSURE_FREE0);
-    let (kp, regions, whole) = (continuation_pos(heap, data), heap.obj_ref(data, 4), heap.obj_ref(data, 5) == Value::TRUE);
-    let to = if whole {
+    let ((kp, kwords), regions, whole) = (continuation_pos(heap, data), heap.obj_ref(data, 4), heap.obj_ref(data, 5) == Value::TRUE);
+    let (to, chain) = if whole {
         heap.region_exit(regions.as_fixnum() as usize);
-        kp
+        (kp, kwords)
     } else {
         let (link, ret) = (word(st.fp), word(st.fp + 8));
         // Its words, then, if they fit, its frames, with no list made.
@@ -4840,25 +4847,20 @@ fn reinstate(rt: &mut fixpt_runtime::Runtime, st: &mut DState, k: Value, v: Valu
             cont_pos(st)
         } else {
             let last = outermost_second(st, below.last().expect("a frame").0);
-            let mut p = chunks_of(heap, &below, last, cont_pos(st));
+            let mut p = heap_frames(heap, &below, last, cont_pos(st));
             p.pc = ret;
             p
         };
+        let rest_words = region_words(&below) + st.cont_words;
         // `k`'s last returns where the caller resumes.
-        let mut p = copy_records(heap, &recs.iter().map(|r| r.0).collect::<Vec<_>>(), rest);
-        let len = heap.obj_len(p.chunk);
-        let mut at = CH_FRAMES;
-        while at < len {
-            let n = heap.obj_ref(p.chunk, at).as_fixnum() as usize;
-            if at + n == len {
-                heap.obj_set(p.chunk, at + 2, Value::fixnum(rest.pc as i64));
-            }
-            at += n;
+        let (mut p, outermost) = copy_records(heap, &recs.iter().map(|r| r.0).collect::<Vec<_>>(), rest);
+        if outermost != Value::FALSE {
+            heap.obj_set(outermost, 1, Value::fixnum(rest.pc as i64));
         }
         p.pc = kp.pc;
-        p
+        (p, words + rest_words)
     };
-    match restore(heap, st, to) {
+    match restore(heap, st, to, chain) {
         Ok((lo, pc)) => {
             (st.resume_sp, st.resume_fp, st.resume_pc, st.resume_x0) = (lo, lo + R_LINK, pc, v.raw());
             0
@@ -4885,7 +4887,7 @@ fn chain_marks(heap: &Heap, p: Pos, key: Value) -> Vec<Value> {
 /// stack's entries. None if `k` is neither.
 fn marks_of(heap: &Heap, k: Value, key: Value) -> Option<Vec<Value>> {
     if let Some(data) = heap.native_continuation_of(k) {
-        return Some(chain_marks(heap, continuation_pos(heap, data), key));
+        return Some(chain_marks(heap, continuation_pos(heap, data).0, key));
     }
     let c = heap.continuation_of(k)?;
     let rs = heap.bloblet_slot(c, fixpt_heap::layout::cellular::CONT_RS);
@@ -4901,31 +4903,27 @@ fn marks_of(heap: &Heap, k: Value, key: Value) -> Option<Vec<Value>> {
     Some(out)
 }
 
-/// The words of the frame from `fp` to `end` that a collection traces, as
-/// runs (where each starts, and how many words). A frame of 16 bytes (a
-/// stub's) has none. A procedure's frame has a stack map where the first
-/// slot would be, a fixnum: the mask of its slots, from `fp + 24`, that are
-/// live. A control frame has its marker there instead, and every word of
-/// it after the link and return address is a value.
-fn traced(fp: u64, end: u64) -> Vec<(u64, usize)> {
-    if end - fp <= STUB_FRAME {
+/// The words of the frame whose region is `lo` to `hi` that a collection
+/// traces, as runs (where each starts, and how many words). A stub's frame
+/// has none. A procedure's frame has its stack map after its link and
+/// return address (`frame_shape`): the mask of its values, from the word
+/// after the map, that are live; its raw words, after its values, never.
+/// A control frame has its marker there instead, and its four words from
+/// the marker on are values.
+fn traced(lo: u64, hi: u64) -> Vec<(u64, usize)> {
+    let (fields, mask) = frame_shape(lo, hi);
+    if hi - lo <= STUB_FRAME {
         return Vec::new();
     }
-    // From the head on; any padding is not a value.
-    let n = ((end - fp - R_HEAD) / 8) as usize;
-    let head = Value::from_raw(word(fp + R_HEAD));
-    if !head.is_fixnum() {
-        return vec![(fp + R_HEAD, 4)];
+    if !Value::from_raw(word(lo + R_HEAD)).is_fixnum() {
+        return vec![(lo + R_HEAD, 4)];
     }
-    // A frame too large for a mask: every slot (cleared as it was made,
-    // its padding too).
-    if head.as_fixnum() < 0 {
-        return vec![(fp + R_HEAD + 8, n - 1)];
-    }
-    let map = head.as_fixnum() as u64;
+    // Its values, after the map: those the mask says (every one, too wide
+    // for a map, cleared as it was made); never its raw words.
+    let values = fields - 3;
     let mut runs: Vec<(u64, usize)> = Vec::new();
-    for k in (0..n - 1).filter(|&k| k < 64 && map & (1 << k) != 0) {
-        let at = fp + R_HEAD + 8 + 8 * k as u64;
+    for k in (0..values).filter(|&k| k + 1 >= 64 || mask & (1 << (k + 1)) != 0) {
+        let at = lo + R_HEAD + 8 + 8 * k as u64;
         match runs.last_mut() {
             Some((start, len)) if *start + 8 * *len as u64 == at => *len += 1,
             _ => runs.push((at, 1)),
