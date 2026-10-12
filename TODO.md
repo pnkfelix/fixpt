@@ -2271,11 +2271,10 @@ the standard input. Left:
   (no builder); and the lines cut off in their message, which were
   filled in as R7RS has them (`bytevector-copy`'s start and end,
   `bytevector-copy!`'s `to at from start end`).
-- **Bytevectors**: one in a place (`rmake-bytevector`); a write in line
-  natively (`bytevector-u8-set!` takes three operands, so it wants
-  register code's `prim3`, as `flatarray-set!` has; reads and the length
-  are in line since 2026-10-12); a quoted bytevector, still refused (a
-  reader's is the opaque `bytevector`, not a `bytevectorof`).
+- **Bytevectors**: one in a place (`rmake-bytevector`); a quoted
+  bytevector, still refused (a reader's is the opaque `bytevector`, not a
+  `bytevectorof`). (Reads, writes and the length are in line natively
+  since 2026-10-12.)
 - **Later members of the family**, as kayak listed them: subprocesses,
   sockets, signals, terminal modes; each a new kind of `(io k)` under
   the same ordering rule.

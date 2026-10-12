@@ -298,7 +298,8 @@ fn byte_width_operations_as_the_rust_machine_gives_them() {
     }
 }
 
-/// A bytevector's bytes and length read in line (`TODO.md` §84,
+/// A bytevector's bytes and length read, and its bytes written, in line
+/// (`TODO.md` §84,
 /// `programs/native/bytevector-sum.fx`), as the Rust machine gives them,
 /// collecting often too; and a read past the end refused as the
 /// primitive refuses it.
@@ -311,6 +312,12 @@ fn bytevector_reads_in_line() {
     let defs = "(define* past (subr (maxeff (alloc @b) (read @b)) (int) int) (lambda (i) (bytevector-u8-ref (the (bytevectorof @b) (make-bytevector 3 (int->u8 1))) i)))";
     for i in [3, -1] {
         let r = run(defs, "past", &[i], FUEL);
+        assert!(matches!(&r.direct, Err(m) if m.contains("out of range")), "{i}: {:?}", r.direct);
+    }
+    // And a write, in line too, refused alike.
+    let defs = "(define* put (subr (maxeff (alloc @b) (write @b)) (int) unit) (lambda (i) (bytevector-u8-set! (the (bytevectorof @b) (make-bytevector 3 (int->u8 1))) i (int->u8 2))))";
+    for i in [3, -1] {
+        let r = run(defs, "put", &[i], FUEL);
         assert!(matches!(&r.direct, Err(m) if m.contains("out of range")), "{i}: {:?}", r.direct);
     }
 }

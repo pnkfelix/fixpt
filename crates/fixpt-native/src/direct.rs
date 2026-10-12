@@ -2230,6 +2230,11 @@ impl Compiling<'_> {
                         flat_set(&mut a, slow, done, raw_store);
                     }
                     if let Callout::Prim { p, n: 3 } = c
+                        && fixpt_runtime::PRIMITIVES[p].name == "%fx26-bytevector-u8-set!"
+                    {
+                        bytes_set(&mut a, slow, done);
+                    }
+                    if let Callout::Prim { p, n: 3 } = c
                         && fixpt_runtime::PRIMITIVES[p].name == "%fx26-suffix-ref-set!"
                     {
                         suffix_set(&mut a, slow, done);
@@ -3363,6 +3368,26 @@ fn suffix_set(a: &mut Asm, slow: Label, done: Label) {
     a.e(asr_imm(X13, v, 3));
     a.e(stur(X13, X11, 0));
     a.bind(stored);
+    a.es(&mov_imm64(RESULT, Value::UNIT.raw()));
+    a.to(done, Fix::B);
+}
+
+/// `bytevector-u8-set!` of the bytevector in `x1` at `x2` to the `u8` in
+/// `x3` (`TODO.md` §84): its byte stored, no barrier for a byte; an index
+/// that is no fixnum, or out of range, to `slow` (the call-out, which
+/// refuses it). Unit into `RESULT`, and to `done`.
+fn bytes_set(a: &mut Asm, slow: Label, done: Label) {
+    let (bv, i, v) = (1 as Reg, 2 as Reg, 3 as Reg);
+    a.e(tst_low(i, 3));
+    a.to(slow, Fix::If(Cond::Ne));
+    a.e(asr_imm(X15, i, 3));
+    a.e(ldur(X14, bv, -4));
+    a.e(cmp(X15, X14));
+    a.to(slow, Fix::If(Cond::Hs));
+    a.e(lsr_imm(X13, v, 3));
+    a.e(add(X11, bv, X15));
+    a.e(add_imm(X11, X11, 4));
+    a.e(strb(X13, X11));
     a.es(&mov_imm64(RESULT, Value::UNIT.raw()));
     a.to(done, Fix::B);
 }
