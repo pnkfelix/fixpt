@@ -1786,3 +1786,25 @@ standard input, or bytes a test gives. Tests: `tests/programs/io/io-stdin.fx`,
 `fixpt-cli/tests/io.rs`'s `the_standard_input_read_by_lines` (five
 machines).
 
+## 85. Machines that disagree on a failure: the part done (2026-10-12)
+
+What is left (one wording for each failure) is in `TODO.md` §85.
+
+**A failing `pure` call no longer dropped.** The lowering claimed
+`(pure)`, "its value may be dropped when unused", of every application
+whose effect was `pure`, `(error …)`, `(quotient 1 0)` and `(car nil)`
+among them, and the bytecode compiler under `rs-scheme-vm` dropped a
+`begin`'s non-final one: 3 where every other machine failed. Now the
+claim is made only of an application of a total standard operation
+(`lower.rs`, `total_operation`: arithmetic on `int`, comparisons, the
+shape predicates, `cons`, the fixed widths' and floats' operations but
+division, remainder, and a float's conversion to `int`) to variables,
+constants, closures or such applications. The bytecode compiler was the
+claim's only reader; the register compilers drop nothing (each `begin`
+item compiled, its value dropped after) and fold only what succeeds
+(`car` of a constant pair, a conversion that fits), so no compiler moves
+or drops code that may fail across an `io` effect or anywhere. And the
+evaluator written in FX-26 fails the program on an `int` division by
+zero, as the machines do, where it failed itself (`int-div`). Test:
+`an_unused_failing_call_still_fails_on_every_machine` (six machines).
+

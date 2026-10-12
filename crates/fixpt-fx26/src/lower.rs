@@ -36,6 +36,31 @@ use crate::check::Checker;
 use fixpt_read::Sym;
 use std::collections::HashMap;
 
+/// Whether standard operation `name` cannot fail, whatever its arguments
+/// of their types (`TODO.md` §85): arithmetic on `int` (a bignum, so no
+/// overflow), comparisons, the shape predicates, `cons`; the fixed widths'
+/// operations and the floats', but for a division or remainder (by zero)
+/// and a conversion to `int` (of a float not integral). Not `car`, `cdr`,
+/// an index, `quotient`, `length` (of a cyclic list), `error`.
+pub(crate) fn total_operation(name: &str) -> bool {
+    const TOTAL: &[&str] = &[
+        "+", "-", "*", "<", ">", "=", "<=", ">=", "not", "eq?", "bool=?", "cons", "max", "min", "zero?", "null?",
+        "pair?", "int?", "f64?", "f32?", "char?", "bool?", "string?", "symbol?", "procedure?", "array?", "ref?",
+        "sum?", "product?", "vector?", "bytevector?", "bitwise-and", "bitwise-ior", "bitwise-xor", "bitwise-not",
+        "string-append", "string-length", "string=?", "string<?", "string<=?", "string>?", "string>=?", "char=?",
+        "char<?", "char<=?", "char>?", "char>=?", "char->integer", "char-upcase", "char-downcase", "symbol->string",
+        "string->symbol", "symbol=?", "int->f64", "int->f32", "f64->string", "f32->string", "f32->f64", "f64->f32",
+    ];
+    if TOTAL.contains(&name) {
+        return true;
+    }
+    let partial = |t: &str, rest: &str| matches!(rest, "-quotient" | "-remainder") || (rest == "->int" && t.starts_with('f'));
+    ["i8", "u8", "i32", "u32", "i64", "u64", "f64", "f32"].iter().any(|t| {
+        name.strip_prefix(t).is_some_and(|rest| !rest.starts_with(|c: char| c.is_ascii_digit()) && !partial(t, rest))
+            || (name.strip_prefix("int->") == Some(t) && !t.starts_with('f'))
+    })
+}
+
 /// How each standard FX-26 name is lowered, and whether it means exactly what
 /// the Scheme name does — in which case, if the engine has it as a
 /// primitive, an application may be claimed `integrable`.
@@ -841,6 +866,24 @@ impl Lowerer<'_> {
         self.annotate(e, code)
     }
 
+    /// Whether evaluating `e` cannot fail, conservatively: a variable, a
+    /// constant, a closure made, or an application of a standard
+    /// operation that is total (`total_operation`) to such. Anything else,
+    /// a call of a program's own procedure among them, may (`TODO.md` §85;
+    /// §86 would make this precise, by the debts types discharge).
+    fn cannot_fail(&self, e: ExpId) -> bool {
+        match self.c.arena.exp_at(e) {
+            Exp::Var(_) | Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Lambda { .. } => true,
+            // A `plambda` is its body, evaluated once; `the` and `proj` theirs.
+            Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } => self.cannot_fail(*body),
+            Exp::App { args, .. } => {
+                self.c.facts.standard_operator.get(&e).is_some_and(|s| total_operation(self.c.interner.name(*s)))
+                    && args.iter().all(|a| self.cannot_fail(*a))
+            }
+            _ => false,
+        }
+    }
+
     /// Wrap `code` in the claims the checker proved about `e`, if any.
     fn annotate(&self, e: ExpId, code: String) -> String {
         let facts = &self.c.facts;
@@ -855,7 +898,11 @@ impl Lowerer<'_> {
             }
         }
         let effect = facts.effects.get(&e);
-        if is_app && effect.is_some_and(|x| x.is_pure()) {
+        // `pure` licenses dropping the call when its value is unused, which
+        // is sound only if it cannot fail: dropping `(car nil)` turns a run
+        // that fails into one that does not (`TODO.md` §85). So only an
+        // application that cannot fail, its arguments included, is claimed.
+        if is_app && effect.is_some_and(|x| x.is_pure()) && self.cannot_fail(e) {
             claims.push("(pure)".into());
         }
         if facts.no_escape.contains(&e) {

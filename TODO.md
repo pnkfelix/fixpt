@@ -2279,38 +2279,16 @@ the standard input. Left:
   sockets, signals, terminal modes; each a new kind of `(io k)` under
   the same ordering rule.
 
-## 85. Machines that disagree on a failure (found 2026-10-12)
+## 85. Machines that disagree on a failure: one wording (found 2026-10-12)
 
-Found making `fixpt run`'s exit status (§84): two ways the machines do
-not agree when a run fails.
-- **A failing `pure` call dropped.** `(begin (error "boom") 3)` gives 3
-  on `rs-scheme-vm` and fails on the others: `error` is `pure` ("failing
-  is not an effect", `docs/fx26.md`), so the lowering's `(pure)` claim
-  lets the Scheme compiler drop the unused call, which native code does
-  not. Either failing is an effect after all (a `fail` atom, or `error`
-  typed `spin`), or every machine may drop such a call and the tests
-  allow both answers. Both compilers must agree, so today they do not.
-  Settled with the user (2026-10-12): emit the `(pure)` claim only for
-  code that cannot fail, and perhaps type `error` as a control effect;
-  the larger question behind it, failure as proof debt and blame across
-  components, is `docs/research/failure-and-blame.md`, whose section 7
-  is a measurement to make before deciding more.
-- **To do, now** (the machines disagree, so this is a bug):
-  - Emit the lowering's `(pure)` claim, in both lowerings, only for code
-    that cannot fail. First conservatively: no `error`, no partial
-    primitive whose arguments' types do not discharge it (`car` of a
-    `listof`, `quotient` by a divisor not known nonzero, an index), no
-    call of an unknown procedure. §86's debt inference later makes it
-    precise.
-  - Check whether any compiler moves `pure` code across an `io` effect;
-    stop it moving code that may fail, or what is written before a
-    failure would differ between machines.
-- **The messages differ.** `(car nil)` says "car or cdr of a non-pair"
-  natively and on the cellular machines (whose traps say themselves in
-  the native machine's words since 2026-10-12, not Rust's debug form),
-  but "error: expected a pair: ()" on `rs-scheme-vm` (the Scheme
-  primitive's own message, which Scheme code shares) and "a pair is
-  expected" in the evaluator written in FX-26. One wording for each.
+Found making `fixpt run`'s exit status (§84). The dropped failing call is
+fixed (`DONE.md` §85); whether `error` becomes an effect is §86, stage 2.
+Left: `(car nil)` says "car or cdr of a non-pair" natively and on the
+cellular machines (whose traps say themselves in the native machine's
+words since 2026-10-12, not Rust's debug form), but "error: expected a
+pair: ()" on `rs-scheme-vm` (the Scheme primitive's own message, which
+Scheme code shares) and "a pair is expected" in the evaluator written in
+FX-26. One wording for each.
 
 ## 86. Failure as proof debt (the user's, 2026-10-12)
 

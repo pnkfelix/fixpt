@@ -89,15 +89,20 @@
 (define* f32-test (subr (maxeff evals spin) (vals (subr pure (f32) bool)) val)
   (lambda (xs f) (f (as-f32 (ev-arg xs 0)))))
 
+;; `modulo`, `quotient` or `remainder` of `int`s; by zero, the program's
+;; failure, as on the machines, not the evaluator's own.
+(define* int-div (subr (maxeff evals spin) (vals (subr pure (int int) int)) val)
+  (lambda (xs f) (if (zero? (as-int (ev-arg xs 1))) (efail "division by zero") (int2 xs f))))
+
 (define* ev-int-prims! (subr (maxeff stores spin) () unit)
   (lambda ()
     (begin
       (prim! '+ (lambda (xs) (int2 xs (lambda (a b) (+ a b)))))
       (prim! '- (lambda (xs) (int2 xs (lambda (a b) (- a b)))))
       (prim! '* (lambda (xs) (int2 xs (lambda (a b) (* a b)))))
-      (prim! 'modulo (lambda (xs) (int2 xs (lambda (a b) (modulo a b)))))
-      (prim! 'quotient (lambda (xs) (int2 xs (lambda (a b) (quotient a b)))))
-      (prim! 'remainder (lambda (xs) (int2 xs (lambda (a b) (remainder a b)))))
+      (prim! 'modulo (lambda (xs) (int-div xs (lambda (a b) (modulo a b)))))
+      (prim! 'quotient (lambda (xs) (int-div xs (lambda (a b) (quotient a b)))))
+      (prim! 'remainder (lambda (xs) (int-div xs (lambda (a b) (remainder a b)))))
       (prim! 'max (lambda (xs) (int2 xs (lambda (a b) (max a b)))))
       (prim! 'min (lambda (xs) (int2 xs (lambda (a b) (min a b)))))
       (prim! '= (lambda (xs) (int-cmp xs (lambda (a b) (= a b)))))
