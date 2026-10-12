@@ -2369,15 +2369,3 @@ frame around them. A code-generation trade-off, so timed on the MLton
 ports both ways, not only `fixpt bench`'s eight. Other summaries this
 would serve later: a frame's size, for the stack-limit check; bounded
 work, for fuel checks; an allocation bound.
-
-## 88. A program's `define-type` of a standard type's name (found 2026-10-12)
-
-`scheme-bench/bv2string.fx` defines `(define-type bytevector (bloblet
-(fields) @heap))`, and since `bytevector` became a standard base type
-(2026-10-08, a reader's datums) the port no longer checks: a parameter
-written `bytevector` is the standard type, not the port's ("a bloblet is
-expected here, and this is a bytevector", 56:33, both checkers agreeing).
-A program's own definition of the name should shadow the standard one,
-as a `define` of a standard procedure's name does; or be refused where it
-is written. Found measuring §86 (the port is the one not measured).
-

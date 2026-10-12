@@ -469,7 +469,11 @@ impl Checker {
             if name == "nat" && self.lookup_desc(sym).is_none() {
                 return Ok(self.arena.ty(Ty::Nat(Size::Finite)));
             }
-            if let Some(&t) = self.base.get(&sym) {
+            // A standard type, unless the program defines the name itself
+            // (`TODO.md` §88), as it may `nil` and the rest above.
+            if let Some(&t) = self.base.get(&sym)
+                && self.lookup_desc(sym).is_none()
+            {
                 return Ok(t);
             }
             let withs = self.withs_over(sym);

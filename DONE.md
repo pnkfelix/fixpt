@@ -1823,3 +1823,14 @@ whether through its calls it may fail. Over the front end and 94 of the
 the operations lowered to the identity (`wcell-int` and kin),
 `string-hash`, `char-in?`, `wglobal=?`.
 
+## 88. A program's `define-type` of a standard type's name (2026-10-12)
+
+`scheme-bench/bv2string.fx` defines `(define-type bytevector (bloblet
+(fields) @heap))`; since `bytevector` became a standard base type
+(2026-10-08) its parameters written `bytevector` were the standard type,
+and the port no longer checked (found measuring §86). Both checkers now
+read a standard type's name as the program's own definition where it has
+one, as they already did `nil`, `false` and `nat` (`parse_type_node`,
+`k-type-named`). The port checks and gives 0 again. Test:
+`bidirectional/shadow-standard-type.fx`.
+

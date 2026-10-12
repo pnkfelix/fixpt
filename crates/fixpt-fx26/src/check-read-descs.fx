@@ -203,7 +203,9 @@
             ((and (string=? n "false") (null? (k-lookup-desc sym))) (k-ty-new (ty-false)))
             ((and (string=? n "nat") (null? (k-lookup-desc sym)))
              (k-ty-new (ty-nat (sz-finite))))
-            ((>= base 0) base)
+            ;; A standard type, unless the program defines the name itself
+            ;; (`TODO.md` §88), as it may `nil` and the rest above.
+            ((and (>= base 0) (null? (k-lookup-desc sym))) base)
             (else
              ;; In `with` bodies, the modules' names first (`k-with-selected`).
              (let ((withs (k-withs-over sym)))
