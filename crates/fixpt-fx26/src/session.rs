@@ -46,6 +46,9 @@ pub struct Fx26Session {
     globals_effects: bool,
     /// Whether re-runs wait (`set_defer_reruns`).
     defer_reruns: bool,
+    /// Whether the FX-26 checker holds aside its last check's breaks
+    /// (`Session::hold_breaks`).
+    breaks_held: bool,
     /// Whether the form running is one the pieces written in FX-26 made
     /// already (`run_forms`).
     own_made: bool,
@@ -426,6 +429,7 @@ impl Fx26Session {
             native_compiler: None,
             globals_effects: true,
             defer_reruns: false,
+            breaks_held: false,
             own_made: false,
             own_begun: false,
             redefine: None,
@@ -737,6 +741,34 @@ impl Fx26Session {
     /// but which the native convention's definitions and the lowering do
     /// here.
     fn run_checked(&mut self, top: Top, form: &Syntax, again: bool) -> R<Outcome> {
+        let r = self.run_checked_in(top, form, again);
+        // The breaks a native definition's check made, held while its value
+        // was checked again (`native_define`), put back, on every path.
+        let back = self.hold_breaks(false);
+        let out = r?;
+        back?;
+        Ok(out)
+    }
+
+    /// Whether the FX-26 checker holds aside the breaks its last check made
+    /// (`check-hold-breaks!`), so that the checks after see the definitions
+    /// as that check did: on while a native definition's value is checked
+    /// again, after the definition was; off when the definition is done.
+    fn hold_breaks(&mut self, on: bool) -> R<()> {
+        if self.breaks_held == on {
+            return Ok(());
+        }
+        // Its handles released at its end, as `native_define`'s are.
+        let mark = self.scheme.root_mark();
+        let v = self.scheme.make(|_| fixpt_heap::Value::boolean(on));
+        let r = self.scheme.call_global(&format!("{READER_PREFIX}check-hold-breaks!"), &[v]);
+        self.scheme.release_to(mark);
+        r.map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), e.to_string()))?;
+        self.breaks_held = on;
+        Ok(())
+    }
+
+    fn run_checked_in(&mut self, top: Top, form: &Syntax, again: bool) -> R<Outcome> {
         let code = lower_top(&self.checker, &mut self.globals, &top);
         if self.strategy != Strategy::Lower {
             if self.own_made {
@@ -993,9 +1025,9 @@ impl Fx26Session {
 
     /// The front end's entry points the Rust side calls by name
     /// (`READER_PREFIX`), each rebound by [`Self::front_end_as_register_code`].
-    pub const FRONT_ENTRIES: [&'static str; 23] = [
+    pub const FRONT_ENTRIES: [&'static str; 24] = [
         "read-text-at", "check-program", "check-more", "checked-tops", "checked-extracts", "checked-effects", "check-conv-native!", "checked-withs!", "checked-reshapes!",
-        "check-globals-effects!", "check-defer-reruns!", "check-lines!", "parse-program", "loaded-files!", "run-checked", "compile-program", "compile-checked", "compile-registers!",
+        "check-globals-effects!", "check-defer-reruns!", "check-hold-breaks!", "check-lines!", "parse-program", "loaded-files!", "run-checked", "compile-program", "compile-checked", "compile-registers!",
         "compile-global-cell", "compile-new-global", "compile-keep-global!", "compile-note-inline!", "native-assemble",
     ];
 
@@ -1154,6 +1186,11 @@ impl Fx26Session {
         if let Err(why) = crate::syn::check_only(&mut self.scheme, standard, FileId(0), form)? {
             return Ok(Err(NativeRun::Declined(format!("check: {why}"))));
         }
+        // The value is checked again below, as an expression (and, if the
+        // native compiler declines it, the definition as cellular code):
+        // under the breaks as this check began, so that a definition this
+        // one broke is not refused where its new body calls it.
+        self.hold_breaks(true)?;
         self.own_begun = true;
         let fail = |e: fixpt_scheme::SessionError| FxError::at(Span::new(FileId(0), 0, 0), e.to_string());
         let sym = self.scheme.make(|m| m.heap().intern(name));

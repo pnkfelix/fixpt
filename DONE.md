@@ -1906,3 +1906,26 @@ flat holding them whole. The FX checker's blobref helpers moved to
 Found by an audit of whether reads could skip the owner's header. Tests:
 `bloblet-errors/flat-past-suffix.fx`, `flat-step-past-suffix.fx`.
 
+## 90. The native convention: a redefinition that breaks what it calls (the system76 team's report, 2026-10-12)
+
+Under `--fx26-machine fx-regs-rsjit-nativecc`, `redefine/knot-spin.fx`
+ended with "check: `h` is broken, since `f` was redefined … define it
+again to use it", where every other machine went on. `native_define`
+(`session.rs`) checks a definition (`check_only`), which redefines `f`
+and breaks `h`; then checks its value again, as an expression to
+compile, and (the native compiler declining) the definition again as
+cellular code. The new `f` calls `h`, so those later checks, seeing `h`
+broken, refused it. Fixed as the team proposed: a front-end entry,
+`check-hold-breaks!` (`check-program.fx`, `FRONT_ENTRIES`), which on sets
+aside the breaks the last check made (the broken list as that check
+began, `k-broken-began`), and off puts them back after any the checks
+between made; `native_define` turns it on once its check succeeds, and
+`run_checked` off when the definition is done, on every path
+(`Session::hold_breaks`). `h` is still broken after. Checking the value
+before the definition would give a recursive `define*` its old type;
+deferring the dependents' re-checks would leave them their old types.
+Nothing caught it: the only test that ran `knot-spin.fx` natively was
+`tests/direct.rs`'s every-program report, which is ignored. Test:
+`a_redefinition_breaking_what_it_calls_natively` (`tests/redefine.rs`,
+which fails without the fix).
+

@@ -123,6 +123,41 @@ fn redefining_lets_the_old_definitions_die() {
     assert!(seen[8..].iter().all(|x| *x == settled), "roots and live words, round by round: {seen:?}");
 }
 
+/// A session in the native convention, as `fixpt --fx26-machine
+/// fx-regs-rsjit-nativecc` runs one.
+fn native_session() -> Fx26Session {
+    let mut s = session();
+    s.strategy = Strategy::Cellular;
+    s.scheme.runtime_unrooted().run_word = Some(fixpt_native::cellular::run_word_registers);
+    s.scheme.runtime_unrooted().front_end_run_word = Some(fixpt_native::cellular::run_word_registers);
+    s.front_end_compiled = true;
+    s.set_native_convention(true);
+    s.native_runner = Some(run_native);
+    s.native_compiler = Some(fixpt_native::direct::compile_closure);
+    s.register_code = true;
+    s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
+    s.scheme.runtime_unrooted().adapt = Some(fixpt_native::direct::adapt);
+    s
+}
+
+/// In the native convention, a redefinition that breaks what its own body
+/// calls (the new `f` calls `h`, which it breaks) is defined, as on every
+/// other machine: the definition is checked, then its value again as an
+/// expression, and that second check sees `h` as the first did (the
+/// breaks held, `check-hold-breaks!`); `h` is broken after, until
+/// defined again (the system76 team's report, 2026-10-12).
+#[test]
+fn a_redefinition_breaking_what_it_calls_natively() {
+    let mut s = native_session();
+    let out = run(&mut s, include_str!("programs/redefine/knot-spin.fx"));
+    assert!(out[2].contains("broken until defined again: `h`") && !out[2].contains("!!"), "{out:?}");
+    assert!(out[3].contains("run again, as they use it: `f`") && !out[3].contains("!!"), "{out:?}");
+    let mut s = native_session();
+    let out = run(&mut s, &format!("{}(h 1)\n", &include_str!("programs/redefine/knot-spin.fx")[..]
+        .lines().take(5).map(|l| format!("{l}\n")).collect::<String>()));
+    assert!(out[3].contains("`h` is broken, since `f` was redefined"), "{out:?}");
+}
+
 fn run_native(rt: &mut fixpt_runtime::Runtime, closure: fixpt_heap::Value, fuel: u64) -> fixpt_fx26::session::NativeRun {
     use fixpt_fx26::session::NativeRun;
     fixpt_native::direct::with_machine(|m| match m.compile(&mut rt.heap, closure) {

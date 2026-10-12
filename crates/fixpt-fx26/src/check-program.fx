@@ -608,6 +608,55 @@
   (lambda (on) (set k-show-lines on)))
 (define check-defer-reruns! (subr (maxeff (read @globals) (write @t)) (bool) unit)
   (lambda (on) (set k-defer-reruns on)))
+;; The breaks as the last check began (`k-broken`, which only grows, newest
+;; first); and, while they are held (`check-hold-breaks!`), those the check
+;; made, set aside, and the breaks as it began.
+(define k-broken-began (ref (listof k-break acyclic) @t) (new nil))
+(define k-broken-held (ref (listof k-break acyclic) @t) (new nil))
+(define k-broken-under (ref (listof k-break acyclic) @t) (new nil))
+(define k-holding-breaks (ref bool @t) (new #f))
+(define k-breaks-count (subr (read @globals) ((listof k-break acyclic)) int)
+  (lambda (bs) (if (null? bs) 0 (+ 1 (k-breaks-count (cdr bs))))))
+;; The first `n` of `bs`, onto `rest`.
+(define k-breaks-onto
+  (subr (maxeff (read @globals) (alloc @t))
+        ((listof k-break acyclic) int (listof k-break acyclic))
+        (listof k-break acyclic))
+  (lambda (bs n rest)
+    (if (= n 0)
+        rest
+        (the (listof k-break acyclic) (cons (car bs) (k-breaks-onto (cdr bs) (- n 1) rest))))))
+;; The breaks made since `k-broken` was `under`, newest first.
+(define k-breaks-since
+  (subr (maxeff (read @globals) (read @t) (alloc @t))
+        ((listof k-break acyclic))
+        (listof k-break acyclic))
+  (lambda (under)
+    (let ((now (get k-broken)))
+      (k-breaks-onto now (- (k-breaks-count now) (k-breaks-count under)) nil))))
+;; For a driver (the native convention's definition, `Session::native_define`,
+;; which checks the definition, then its value again, as an expression): on,
+;; the breaks the last check made set aside, the broken as it began, so that
+;; the value's check sees the definitions it uses as the definition's did;
+;; off, put back, after those the checks between made.
+(define check-hold-breaks!
+  (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t)) (bool) unit)
+  (lambda (on)
+    (cond ((and on (not (get k-holding-breaks)))
+           (let ((under (get k-broken-began)))
+             (begin (set k-broken-held (k-breaks-since under))
+                    (set k-broken-under under)
+                    (set k-broken under)
+                    (set k-holding-breaks #t))))
+          ((and (not on) (get k-holding-breaks))
+           (let* ((under (get k-broken-under))
+                  (held (get k-broken-held))
+                  (between (k-breaks-since under)))
+             (begin (set k-broken (k-breaks-onto between (k-breaks-count between)
+                                                 (k-breaks-onto held (k-breaks-count held) under)))
+                    (set k-broken-held nil)
+                    (set k-holding-breaks #f))))
+          (else #u))))
 ;; A top-level form, checked under redefinition: its lines, and those of
 ;; the definitions it has run again.
 (define k-defining (subr (maxeff checks spin) (top) k-out)
@@ -639,7 +688,8 @@
 (define check-program (subr (maxeff (read @globals) checks spin) (syns-a k-tops) k-result)
   (lambda (standard forms)
     (prompt k-tag
-      (begin (k-reset) (k-standard standard) (set k-std-dscope (get k-dscope))
+      (begin (k-reset) (set k-broken-began (get k-broken)) (k-standard standard)
+             (set k-std-dscope (get k-dscope))
              (k-ahead forms) (k-ok (k-forms forms nil)))
       (lambda (r) r))))
 
@@ -651,6 +701,7 @@
   (lambda (forms)
     (prompt k-tag
       (begin (set k-extracts nil)
+             (set k-broken-began (get k-broken))
              (set k-effect-notes nil)
              (k-forget-withs)
              (set k-reshapes nil)
