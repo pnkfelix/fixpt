@@ -225,6 +225,10 @@ weighed with the other items, not ahead of them.
   shapes 214.9 → 10.5 ms; an index key's tag and variant too). Next:
   arrays of a length not literal (a type-system question for the user),
   a wider index key.
+  Asked for (2026-10-12, kayak): I/O, `TODO.md` §84, a fixed family of
+  `(io k)` effects under one ordering rule, with `u8`, `i8` and
+  bytevectors first; decided with the user: the ordering rule and the
+  exit status.
 - S1. Done (2026-09-30): **the `acyclic?` gap**, F13: shown a
   use-after-free on every path, and fixed in both checkers with data at a
   place, `(t data p)` (`docs/research/shapes.md`, the framing: regions,

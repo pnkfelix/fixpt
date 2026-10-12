@@ -2258,3 +2258,66 @@ size.
 **Where to start:** the toy examples' `; proposed` forms in gadts.md as
 the first test programs (refused today, accepted after, both checkers
 agreeing), then the variant's result type in both parsers.
+
+## 84. I/O: files, the terminal, the clock and arguments, with bytes (kayak's request, 2026-10-12)
+
+kayak asked for FX-26 programs to do I/O through primitives, each with an
+effect from a fixed family, so a type shows which procedures touch the
+world and how; and, since files are bytes, for `u8`, `i8` and
+bytevectors as a full type. They will build simulation, recording and
+replay themselves, as FX-26 libraries. Later members of the family:
+subprocesses, sockets, signals, terminal modes.
+
+**Decided with the user (2026-10-12):**
+- **The effects.** A new atom, `(io k)`, `k` one of a fixed family:
+  `stdin`, `stdout`, `stderr`, `fs-read`, `fs-write`, `clock`, `args`,
+  and `exit`. They combine with `maxeff` and appear in `subr` types as
+  other atoms do. **One ordering rule for all I/O:** no two `io` effects
+  commute, and none is dropped, merged or moved, whatever their kinds (a
+  `write-err` must not pass an earlier `write-out` on a terminal, nor a
+  `read-file` an earlier `write-file`). The kinds are for reading types
+  and for licences, not for the optimizer. As `spin`, an `io` atom has no
+  region, so nothing masks it; the REPL's speculation licence refuses
+  every one. `(io args)` is an effect though the arguments do not change
+  in a run: what it gives depends on the world.
+- **Exit status.** If the entry procedure returns an integer, its low
+  byte is the status, else 0. An uncaught trap or `error` exits with 70
+  (`EX_SOFTWARE`), its message on stderr. `(exit n)`, of effect `(io
+  exit)` and result `void`, ends the program early. `fixpt run` needs an
+  FX-26 entry point for this (a `main`); today it runs a file's forms.
+
+**Proposed in the reply to kayak (theirs to confirm):**
+- Primitives that allocate (`read-file`, `list-dir`, `read-line`,
+  `utf8->string`) take a region binder and say `(alloc r)`, as
+  `make-flatarray` does, not `@heap` implicitly.
+- `io-error`'s kind a sum, `(sumof (not-found unit) (permission unit)
+  (exists unit) … (other string))`, not a string, so a `tagcase` is
+  checked exhaustive.
+- Bytes not valid UTF-8 from `read-line` or in `list-dir`'s names: a
+  failure of their own kind. `list-dir` sorts by bytes.
+- Bytevectors are the heap's existing bytevector object, typed
+  `(bytevector r)` at a region as arrays are, written by
+  `bytevector-u8-set!` with `(write r)` (no builder type). Not a flat
+  array of `u8` (§77), which would need `u8` among the flat layouts and
+  would not be what the reader makes.
+- Parts of their message were cut off (`write-out`'s and `read-file`'s
+  results, `write-file`, `bytevector-copy`, `utf8->string`'s failure):
+  asked for the full text.
+
+**Stages**, each in both checkers, both compilers, every machine
+(native call-outs too) and the evaluator written in FX-26:
+1. `u8` and `i8` (the fixed-width table, as `u32` has it), and
+   bytevectors: make, length, ref, set, copy, `bytevector=?`, a quoted
+   one no longer refused; `string->utf8` and `utf8->string`. Useful with
+   no I/O at all.
+2. The `io` atom and its ordering rule in both checkers, the compilers'
+   effect summaries and the licence; `write-out`, `write-err`; the entry
+   point and the exit status, `exit`.
+3. `read-file`, `write-file` (whole, atomic: a temporary file renamed),
+   `list-dir`; `io-error`.
+4. `clock` (monotonic, `i64` nanoseconds), `sleep-until` on it, `args`.
+5. `read-line`.
+
+**Where to start:** stage 1's `u8`, beside `u32` in `reps.rs`, the
+checkers' fixed-width tables and `docs/fx26.md`'s; then the bytevector
+operations, the runtime already having the object.
