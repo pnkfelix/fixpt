@@ -2295,10 +2295,55 @@ not agree when a run fails.
   the larger question behind it, failure as proof debt and blame across
   components, is `docs/research/failure-and-blame.md`, whose section 7
   is a measurement to make before deciding more.
+- **To do, now** (the machines disagree, so this is a bug):
+  - Emit the lowering's `(pure)` claim, in both lowerings, only for code
+    that cannot fail. First conservatively: no `error`, no partial
+    primitive whose arguments' types do not discharge it (`car` of a
+    `listof`, `quotient` by a divisor not known nonzero, an index), no
+    call of an unknown procedure. §86's debt inference later makes it
+    precise.
+  - Check whether any compiler moves `pure` code across an `io` effect;
+    stop it moving code that may fail, or what is written before a
+    failure would differ between machines.
 - **The messages differ.** `(car nil)` says "car or cdr of a non-pair"
   natively and on the cellular machines (whose traps say themselves in
   the native machine's words since 2026-10-12, not Rust's debug form),
   but "error: expected a pair: ()" on `rs-scheme-vm` (the Scheme
   primitive's own message, which Scheme code shares) and "a pair is
   expected" in the evaluator written in FX-26. One wording for each.
+
+## 86. Failure as proof debt (the user's, 2026-10-12)
+
+From `docs/research/failure-and-blame.md`: "may fail" read as a debt the
+code carries, a precondition it has not discharged; inferred, not
+written; blamed on the site that took it. In order, each stage deciding
+how far the next goes:
+1. **Measure** (the note's section 7). Instrument the checker to classify
+   each procedure of the front end written in FX-26 and of the 42
+   benchmark ports: failure-free; internal debt only; passes debt to its
+   callers (through which parameters); states debt (calls `error`). Then
+   over the call graph, how far "may fail" would spread under inference.
+   No language change. Whether the rest is worth it is this answer.
+2. **Decide `error`'s effect**, with the user: `(goto @fail)` on a
+   constant region (a future handler a prompt that masks it), or a
+   failure atom of its own beside `spin`, so `goto` keeps one meaning.
+3. **Debt inference in both checkers**: each expression's and
+   procedure's debts, each with its site, and whether it is owed within
+   or passed to callers. Replaces §85's conservative rule for `(pure)`.
+4. **Blame in failure messages**: a failed run names the site that took
+   the debt (a consumer, or a trusted assertion), not only the primitive
+   that tripped. Debts are static, so the site can be compiled in.
+5. **`total`**: a promise a signature may make, verified by the checker;
+   callers may rely on it. What it promises about resources: nothing
+   (the note's section 3), so its name and documentation say "no debt".
+
+Beside it:
+- **The trusted boundaries, audited**: the standard operations' types,
+  data from the host (A3), and `error` are the only places blame can
+  land beyond consumers. Write the list where
+  `docs/research/soundness-findings.md` keeps its assumptions, and check
+  each I/O primitive's type against what the runtime guarantees.
+- **Debts discharged statically**: N5's array bounds
+  (`docs/research/gadts.md`) and facts that a divisor is nonzero each
+  remove a class of debt; stage 1's measurement says what each is worth.
 
