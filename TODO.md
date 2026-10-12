@@ -2455,6 +2455,19 @@ and (2); (3) wants the native convention to pass and return a raw `f64`
 (registers, or the callee's raw slots), a follow-on. Next: the layout,
 in `direct.rs` and the collector's walk of native frames; the four ports
 timed both ways.
+- **Stage 1 done** (2026-10-12): every native frame laid out as its
+  bloblet will be, a header word below its link (`x29` still at the
+  link, so code's offsets are as they were); stub and control frames
+  32 and 64 bytes; the runtime walks frames as regions from the header.
+  No trailer (not a hard invariant; the runtime knows each header). Cost,
+  back to back: `captures` 8.75 → 10.2 ms (a capture copies the larger
+  frames), the rest even. Next, stage 2: the chain of flushed frames as
+  linked frame bloblets in place of chunk vectors (`Pos` a frame, `Rec`
+  its words; the chain's word count kept in the state and in each
+  continuation; a frame's field count in its stack map word, written
+  before every call); copies leave out the alignment word. Stage 3: raw
+  slots (`reps.rs` finds the slots only `f64`s use), after the fields,
+  as the suffix, out of the stack map.
 - **Then, raw `f64` arguments and results** (design, with the user,
   2026-10-12). On raw frame slots, not before: a callee stores its
   parameters to its slots at once, so a raw argument with nowhere raw to
