@@ -317,6 +317,9 @@ pub(super) fn step(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) ->
             reps[0] = Rep::Value;
         }
         "setstk" => need(reps, 0, if raw_slot(raw, k(0)) { Rep::F64 } else { Rep::Value }),
+        // An `f64` returned raw, where the caller takes it so (`direct.rs`,
+        // `raw_return`); boxed there where it does not.
+        "return" if reps[0] == Rep::F64 => {}
         "setglbl" | "return" | "branchf" | "brancht" => need(reps, 0, Rep::Value),
         "prim1" | "prim2" | "prim2imm" => {
             let (x, y, out) = match raw_op(prim(k(0))) {
@@ -348,7 +351,8 @@ pub(super) fn step(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) ->
             let keep = set && reps[3] == Rep::F64;
             regs(n).filter(|&r| !(keep && r == 3)).for_each(|r| need(reps, r, Rep::Value));
             *reps = [Rep::Undefined; 9];
-            reps[0] = Rep::Value;
+            // A call whose value only `f64` operations use takes it raw.
+            reps[0] = if raw_ref && matches!(op, "invoke" | "invokeself") { Rep::F64 } else { Rep::Value };
         }
         "branch" | "global-guard" | "save" | "pop" => {}
         _ => {
@@ -436,8 +440,9 @@ fn successors(cells: &[Value], starts: &[usize]) -> Vec<Vec<usize>> {
 }
 
 /// Which instructions are a `flatarray-ref` (or `f64` `blobref-get`) whose
-/// element only `f64` operations use: the backward fixpoint of `demand_step`, over the ways
-/// out of each instruction.
+/// element only `f64` operations use, or a call (not in tail position)
+/// whose value only they use: the backward fixpoint of `demand_step`, over
+/// the ways out of each instruction.
 pub(super) fn raw_refs(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str, raw: &[bool]) -> Vec<bool> {
     let (before, succ) = demands(cells, starts, prim, raw);
     let ns = starts.len();
@@ -446,7 +451,8 @@ pub(super) fn raw_refs(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -
             let i = starts[si];
             let o = |j: usize| cells[i + 1 + j];
             let after = succ[si].iter().fold(Demand::None, |m, &t| m.join(before[t][0]));
-            is_flat_ref(OPS[cells[i].as_fixnum() as usize].0, &o, prim) && after == Demand::F64
+            let op = OPS[cells[i].as_fixnum() as usize].0;
+            (is_flat_ref(op, &o, prim) || matches!(op, "invoke" | "invokeself")) && after == Demand::F64
         })
         .collect()
 }

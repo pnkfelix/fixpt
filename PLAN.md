@@ -1,6 +1,6 @@
 # `fixpt` — a Rust Scheme engine with FX-87 and FX-91 front ends
 
-## At a glance (kept current; last updated 2026-10-11)
+## At a glance (kept current; last updated 2026-10-12)
 
 Where things stand. Below it is the plan as it grew, oldest first (the
 contents are at the end of this section); the details behind this summary
@@ -231,8 +231,10 @@ weighed with the other items, not ahead of them.
   was measured (at most 15%) and not done. Done (2026-10-12, the
   user's, `DONE.md` §91): each native stack frame a bloblet, the chain of
   flushed frames linked frame bloblets, `f64`s raw in frame slots (the
-  suffix): the four float ports 42–60% faster. Next: raw `f64` arguments
-  and results (`TODO.md` §91), a wider index key.
+  suffix): the four float ports 42–60% faster; `f64` results returned
+  raw where the caller takes them so (`spectralnorm2` 26% faster, its
+  boxes gone). Next: raw `f64` arguments (`TODO.md` §91), a wider index
+  key.
   Done (2026-10-12, kayak's request): I/O, `DONE.md` §84, a fixed family
   of `(io k)` effects under one ordering rule (the user's); `u8`, `i8`
   and bytevectors; the terminal, files, the clock, the arguments; `main`

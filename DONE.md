@@ -2002,3 +2002,22 @@ Tests: `programs/native/raw-slots.fx`,
 small stack cache, collecting every 7 words; a slot an `f64`'s, then an
 `int`'s).
 
+**Raw `f64` results** (2026-10-12): a procedure returns an `f64` raw to a
+caller that takes it so, told by the caller's return address. A call
+whose value only `f64` operations use (`reps::raw_refs`, now of
+`invoke` and `invokeself` too) puts a mark there, `movk xzr, #0xf64f,
+lsl #48`, which does nothing, then a branch to an unbox, then a branch
+on (`take_raw_f64`); a `return` of a raw `f64` (`raw_return`) loads the
+word at its return address and, the mark there, returns 8 past it, raw;
+else boxes, as before. Every other return (a callee's that does not
+know, a stub's, an underflow's, a continuation's, a call from Rust)
+comes to the mark and the value is unboxed: nothing else changed. A
+`flatarray-ref` just before a `return` returns an `f64` element so, the
+others as they were. Natively, full sizes: `spectralnorm2` 1737 →
+1277 ms, 320.2 → 0.2 M words (`eval-a`'s result); the other float ports
+the same (their boxes are arguments'). Test:
+`programs/native/raw-returns.fx`, `raw_returns_to_every_kind_of_caller`
+(raw to raw and to value-keeping callers, a polymorphic callee's boxed
+`f64` taken raw, flat arrays' `f64` and `i64` elements returned, through
+the stack cache and collections; a return 4 past the mark fails it).
+

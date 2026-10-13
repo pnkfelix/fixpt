@@ -2021,6 +2021,22 @@ impl Compiling<'_> {
                         a.bind(done);
                         continue;
                     }
+                    // An element returned: an `f64`'s bits returned raw,
+                    // where the caller takes them so (`raw_return`); any
+                    // other, or a read that fails, as below.
+                    if name == "%fx26-flatarray-ref" && starts.get(si).is_some_and(|&j| op_at(j) == "return") {
+                        let y = if op == "prim2" { reg(o(1)) } else {
+                            a.es(&mov_imm64(X17, o(1).raw()));
+                            X17
+                        };
+                        let generic = a.label();
+                        flat_element(&mut a, RESULT, y, generic);
+                        a.e(cmp_imm(X16, (fixpt_heap::layout::FLAT_F64 << 3) as u32));
+                        a.to(generic, Fix::If(Cond::Ne));
+                        a.e(ldr_x8(RESULT, X15, X14));
+                        raw_return(&mut a, self.callouts);
+                        a.bind(generic);
+                    }
                     // A blobref's read of a scalar the layout of which is
                     // the constant: in line, as that scalar is kept.
                     // An `f64` only `f64` operations use: its bits.
@@ -2589,13 +2605,20 @@ impl Compiling<'_> {
                     a.e(add(X16, X16, DELTA));
                     a.e(if tail { br(X16) } else { blr(X16) });
                     a.bind(after);
+                    if !tail && raw_refs[si - 1] {
+                        take_raw_f64(&mut a);
+                    }
                 }
                 "invokeself" => {
                     if let Some(s) = clo_slot.filter(|_| captures) {
                         a.e(ldr(CLO, FRAME, s));
                     }
                     a.to(entry, Fix::Bl);
+                    if raw_refs[si - 1] {
+                        take_raw_f64(&mut a);
+                    }
                 }
+                "return" if reps_in[si - 1][0] == Rep::F64 => raw_return(&mut a, self.callouts),
                 "return" => a.e(ret()),
                 "branch" | "branchf" | "brancht" => {
                     let to = (i as i64 + 2 + o(0).as_fixnum()) as usize;
@@ -2865,6 +2888,44 @@ fn unbox_f64(a: &mut Asm, r: Reg) {
     a.bind(other);
     a.e(movz(r, 0, 0));
     a.bind(done);
+}
+
+/// The word a call that takes an `f64` value raw puts where the callee
+/// returns to: `movk xzr, #0xf64f, lsl #48`, which does nothing, and which
+/// nothing else emits (`TODO.md` §91).
+fn raw_f64_mark() -> u32 {
+    movk(XZR, 0xf64f, 3)
+}
+
+/// After a call whose value only `f64` operations use: the value raw in
+/// `RESULT`. A callee returning an `f64` raw sees the mark at its return
+/// address and returns 8 past it (`raw_return`); any other return (a
+/// callee's that does not know, a stub's, an underflow's, a continuation's)
+/// comes to the mark, which does nothing, and the value is unboxed.
+fn take_raw_f64(a: &mut Asm) {
+    let (boxed, join) = (a.label(), a.label());
+    a.e(raw_f64_mark());
+    a.to(boxed, Fix::B);
+    a.to(join, Fix::B);
+    a.bind(boxed);
+    unbox_f64(a, RESULT);
+    a.bind(join);
+}
+
+/// A return of the raw `f64` in `RESULT`: as it is, 8 past the return
+/// address, where the caller takes it so (its mark there, `take_raw_f64`);
+/// else boxed, to the return address.
+fn raw_return(a: &mut Asm, callouts: &mut Vec<Callout>) {
+    let boxed = a.label();
+    a.e(ldur_w(X16, LINK, 0));
+    a.es(&mov_imm64(X17, raw_f64_mark() as u64));
+    a.e(cmp(X16, X17));
+    a.to(boxed, Fix::If(Cond::Ne));
+    a.e(add_imm(LINK, LINK, 8));
+    a.e(ret());
+    a.bind(boxed);
+    box_f64(a, callouts, RESULT);
+    a.e(ret());
 }
 
 /// Register `r`'s raw `f64` boxed, in place: a flonum from the free space

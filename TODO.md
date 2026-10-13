@@ -2441,9 +2441,12 @@ frame slots, as the suffix. Left:
   A restore of adjacent frames by one copy needs them adjacent, which
   only the dropped run copy kept them. A trailer where a frame has a word
   to align it would not help `merge` (its frames have none).
-- **Then, raw `f64` arguments and results** (design, with the user,
-  2026-10-12). On raw frame slots, not before: a callee stores its
-  parameters to its slots at once, so a raw argument with nowhere raw to
+- **Then, raw `f64` arguments** (results done, `DONE.md` §91: the
+  caller's mark at its return address; design, with the user,
+  2026-10-12). What still boxes in the float ports: `mandelbrot`'s
+  `loop3` (83.9 M words, its `f64` arguments, a tail call of itself
+  through its global), `nbody`'s `put` and `body` (130 M). On raw frame
+  slots, not before: a callee stores its parameters to its slots at once, so a raw argument with nowhere raw to
   go is boxed there anyway. The static types settle most calls (a `subr`
   type says which parameters are `f64`); polymorphic code takes a `t`
   boxed (uniform, as dictionary passing is), so a caller that sees only
@@ -2451,10 +2454,12 @@ frame slots, as the suffix. Left:
   t)`. So `invoke` carries the count of raw `f64` arguments apart from
   the others; the callee's entry compares it with what it takes, and on a
   mismatch goes by an adapter that boxes or unboxes (as `adapt` does
-  between the cellular and native conventions): one compare a call. A
-  raw result likewise, said by the callee, adapted where the caller
-  wanted a value. Arguments raw in `d0`–`d7` or raw in the `x` registers,
-  as measured.
+  between the cellular and native conventions): one compare a call; a
+  mask of which, in `X9` above the count, so that a caller that passes
+  only the count (cellular code, the runtime) passes none raw. The
+  callee's stack-overflow stub boxes its raw parameters around the call
+  out (it keeps the argument registers as values). Arguments raw in
+  `d0`–`d7` or raw in the `x` registers, as measured.
 - **Last, `f64`s in floating-point registers in the abstract register
   machine**: only once the `fmov`s between `x` and `d` registers show in a
   disassembly, and once register code keeps values in registers across

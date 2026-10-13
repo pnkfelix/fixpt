@@ -993,6 +993,28 @@ fn raw_slots_through_the_stack_cache_and_collections() {
     assert!(after.overflows - before.overflows > 10 && after.frames_restored - before.frames_restored > 1000, "{before:?} {after:?}");
 }
 
+/// `f64`s returned raw (`TODO.md` §91): to callers that take them so and to
+/// callers that keep the value, from a polymorphic procedure that returns
+/// one boxed, a flat array's element, and through the stack cache's
+/// overflows and underflows, collecting as it goes. As the Rust machine
+/// gives them.
+#[test]
+fn raw_returns_to_every_kind_of_caller() {
+    let text = program("native/raw-returns");
+    let defs: String = text.lines().filter(|l| !l.starts_with("(raw-returns ")).map(|l| format!("{l}\n")).collect();
+    let r = run_collecting(&defs, "raw-returns", &[3000], FUEL, Some(7));
+    assert_eq!(r.rust, "4506016");
+    assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "collecting: {:?} against {}", r.direct, r.rust);
+    let before = fixpt_native::direct::stack_stats();
+    let r = direct_in(&defs, "raw-returns", &[3000], FUEL, Some(7), Some((2048, 1 << 26)));
+    assert_eq!(r.direct.as_deref(), Ok("4506016"), "through a small stack cache");
+    let after = fixpt_native::direct::stack_stats();
+    // Through the heap: flushed (at collections, here, before the cache
+    // fills) and restored.
+    let flushes = after.overflows + after.collection_flushes - before.overflows - before.collection_flushes;
+    assert!(flushes > 10 && after.frames_restored - before.frames_restored > 1000, "{before:?} {after:?}");
+}
+
 fn run_native_collecting(rt: &mut fixpt_runtime::Runtime, closure: Value, fuel: u64) -> fixpt_fx26::session::NativeRun {
     let was = std::mem::replace(&mut rt.heap.gc_every, 97);
     let r = run_native(rt, closure, fuel);
