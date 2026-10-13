@@ -151,12 +151,16 @@ pub(super) enum Convert {
 /// raw `f64` (an operand of an `f64` operation `raw_op` does), otherwise,
 /// or both: as an `f64` somewhere, so an `f64` by the program's types, and
 /// otherwise too (as a loop's `f64` total is, returned at its end).
+///
+/// `Any`: passed to a call, which takes an `f64` raw or as a value (said
+/// in `X9`): no evidence of an `f64`, and no use against one.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub(super) enum Demand {
     None,
     F64,
     Other,
     Both,
+    Any,
 }
 
 impl Demand {
@@ -164,6 +168,7 @@ impl Demand {
     fn join(self, other: Demand) -> Demand {
         match (self, other) {
             (Demand::None, x) | (x, Demand::None) => x,
+            (Demand::Any, x) | (x, Demand::Any) => x,
             (x, y) if x == y => x,
             (Demand::Other, Demand::Other) => Demand::Other,
             _ => Demand::Both,
@@ -242,7 +247,8 @@ fn demand_step(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) -> &'s
             if matches!(op, "invoke" | "tailinvoke") {
                 use_(&mut d, 0, Demand::Other);
             }
-            regs(n).for_each(|r| use_(&mut d, r, Demand::Other));
+            let how = if matches!(op, "invoke" | "tailinvoke" | "invokeself") { Demand::Any } else { Demand::Other };
+            regs(n).for_each(|r| use_(&mut d, r, how));
         }
         "branch" | "global-guard" | "save" | "pop" => {}
         _ => d = [Demand::Other; 9],
@@ -269,7 +275,7 @@ pub(super) fn is_f64_set(o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) -> &'s
 /// `raw_ref`: whether a `flatarray-ref` (or `f64` `blobref-get`) here gives its element raw, an
 /// `f64`'s bits, since only `f64` operations use it (`demand_step`).
 /// `fast`: in a procedure's fixnum version.
-pub(super) fn step(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) -> &'static str, raw_ref: bool, fast: bool, raw: &[bool], reps: &mut Reps) -> Vec<Convert> {
+pub(super) fn step(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) -> &'static str, raw_ref: bool, fast: bool, raw: &[bool], params: u8, reps: &mut Reps) -> Vec<Convert> {
     let mut first = Vec::new();
     let k = |j: usize| o(j).as_fixnum() as usize;
     let mut need = |reps: &mut Reps, r: usize, want: Rep| {
@@ -288,7 +294,9 @@ pub(super) fn step(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) ->
     };
     let regs = |n: usize| 1..=n.min(8);
     match op {
-        "args" => regs(k(0)).for_each(|r| reps[r] = Rep::Value),
+        // The parameters the procedure takes raw (`raw_params`), raw: the
+        // caller's so, or made so at the entry (`direct.rs`).
+        "args" => regs(k(0)).for_each(|r| reps[r] = if raw_param(params, r) { Rep::F64 } else { Rep::Value }),
         "vargs" => regs(8).for_each(|r| reps[r] = Rep::Value),
         "const" if fast && o(0).is_fixnum() => reps[0] = Rep::Fix,
         "stack" => reps[0] = if raw_slot(raw, k(0)) { Rep::F64 } else { Rep::Value },
@@ -346,10 +354,23 @@ pub(super) fn step(op: &str, o: &dyn Fn(usize) -> Value, prim: &dyn Fn(usize) ->
             if matches!(op, "invoke" | "tailinvoke") {
                 need(reps, 0, Rep::Value);
             }
-            // `flatarray-set!` takes a raw `f64` to store as it is.
+            // `flatarray-set!` takes a raw `f64` to store as it is; a call
+            // an `f64` raw, said in `X9` (the callee adapting at its entry);
+            // a call of this procedure, its parameters as it takes them.
             let set = op == "prim" && prim(k(0)) == "%fx26-flatarray-set!";
-            let keep = set && reps[3] == Rep::F64;
-            regs(n).filter(|&r| !(keep && r == 3)).for_each(|r| need(reps, r, Rep::Value));
+            let was = *reps;
+            let keep = |r: usize| match op {
+                "invoke" | "tailinvoke" => was[r] == Rep::F64,
+                "invokeself" => false,
+                _ => set && r == 3 && was[3] == Rep::F64,
+            };
+            for r in regs(n) {
+                if op == "invokeself" {
+                    need(reps, r, if raw_param(params, r) { Rep::F64 } else { Rep::Value });
+                } else if !keep(r) {
+                    need(reps, r, Rep::Value);
+                }
+            }
             *reps = [Rep::Undefined; 9];
             // A call whose value only `f64` operations use takes it raw.
             reps[0] = if raw_ref && matches!(op, "invoke" | "invokeself") { Rep::F64 } else { Rep::Value };
@@ -372,7 +393,7 @@ pub(super) fn int_routine(n: usize) -> bool {
     matches!(ROUTINES.get(n).map(|r| r.0), Some("int-add" | "int-sub" | "int-less" | "int-eq"))
 }
 
-pub(super) fn reps_of(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str, fast: bool, raw: &[bool]) -> (Vec<Reps>, Vec<Reps>) {
+pub(super) fn reps_of(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str, fast: bool, raw: &[bool], params: u8) -> (Vec<Reps>, Vec<Reps>) {
     let raw_refs = raw_refs(cells, starts, prim, raw);
     let ns = starts.len();
     let at: std::collections::HashMap<usize, usize> = starts.iter().enumerate().map(|(si, &i)| (i, si)).collect();
@@ -399,7 +420,7 @@ pub(super) fn reps_of(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) ->
             let Some(mut reps) = ins[si] else { continue };
             let i = starts[si];
             let o = |j: usize| cells[i + 1 + j];
-            step(OPS[cells[i].as_fixnum() as usize].0, &o, prim, raw_refs[si], fast, raw, &mut reps);
+            step(OPS[cells[i].as_fixnum() as usize].0, &o, prim, raw_refs[si], fast, raw, params, &mut reps);
             outs[si] = reps;
             for t in succ(si) {
                 let new = match &ins[t] {
@@ -455,6 +476,25 @@ pub(super) fn raw_refs(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -
             (is_flat_ref(op, &o, prim) || matches!(op, "invoke" | "invokeself")) && after == Demand::F64
         })
         .collect()
+}
+
+/// Whether parameter register `r` (REG1…REG8) is one `params` says is
+/// taken raw.
+pub(super) fn raw_param(params: u8, r: usize) -> bool {
+    (1..=8).contains(&r) && params & 1 << (r - 1) != 0
+}
+
+/// The parameters (REG1…REG8, bit 0 for REG1) the procedure takes raw:
+/// those only `f64` operations use (an operand, or a raw slot's store), so
+/// `f64`s by the program's types. None of a variadic procedure's.
+pub(super) fn raw_params(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str, raw: &[bool]) -> u8 {
+    let (before, succ) = demands(cells, starts, prim, raw);
+    let si = 0;
+    if starts.first().is_none_or(|&i| OPS[cells[i].as_fixnum() as usize].0 != "args") {
+        return 0;
+    }
+    let n = cells[starts[si] + 1].as_fixnum() as usize;
+    (1..=n.min(8)).filter(|&r| succ[si].iter().all(|&t| before[t][r] == Demand::F64) && !succ[si].is_empty()).fold(0, |m, r| m | 1 << (r - 1))
 }
 
 /// Which registers each instruction's value is used from (live, as it
@@ -513,7 +553,7 @@ pub(super) fn raw_slots(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) 
     let ns = starts.len();
     let none = vec![false; slots];
     let (before, succ) = demands(cells, starts, prim, &none);
-    let (ins, _) = reps_of(cells, starts, prim, false, &none);
+    let (ins, _) = reps_of(cells, starts, prim, false, &none, 0);
     let mut preds: Vec<Vec<usize>> = vec![Vec::new(); ns];
     for (si, ts) in succ.iter().enumerate() {
         for &t in ts {

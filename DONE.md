@@ -2021,3 +2021,31 @@ the same (their boxes are arguments'). Test:
 `f64` taken raw, flat arrays' `f64` and `i64` elements returned, through
 the stack cache and collections; a return 4 past the mark fails it).
 
+**Raw `f64` arguments** (2026-10-12): a call passes an argument raw that
+is raw where it is called, said in `X9` above the count (bit `r − 1` for
+REGr, `movk x9, #mask, lsl #16`); a procedure takes a parameter raw that
+only `f64` operations use (`reps::raw_params`; a call's operand, which
+takes either, `Demand::Any`, no evidence and no use against). Every
+native code has a raw entry, 16 bytes before its entry (`RAW_ENTRY`,
+`delta` past it): a call passing none raw, all but a few, comes in as
+before, where a procedure that takes some raw unboxes them; one passing
+some raw comes in 16 earlier, where a procedure that takes some raw
+compares the masks, on if the same, else by its adapter (each that
+differs boxed or unboxed); code that takes none raw (and the
+continuation's, and `adapt`'s) goes to the machine's common boxing
+(`common_raw_box`), which comes back to the entry. `invokeself` passes
+them as the procedure takes them, past the check. A call of what is not
+native code keeps the mask in `X9`, and the call-out boxes them. The
+overflow at a frame's entry boxes the raw argument registers around it
+(it keeps them as roots). Natively, full sizes: `mandelbrot` 662 →
+342 ms, 83.9 → 0.0 M words (`loop3`'s `f64`s); `nbody` 130 → 120 M words
+(its `put` takes its `v` as a value: only `flatarray-set!` uses it, which
+says nothing of an `f64`); the rest the same. Test:
+`programs/native/raw-args.fx`, `raw_args_between_every_kind_of_caller_and_callee`
+(callers raw and not, callees taking raw and not, partly; through the
+stack cache's overflows; each of the adapter's and the common boxing's
+tests inverted fails it, as does the entry's unboxing left out). Not
+caught by a test: the boxing around an overflow (the collector passes
+over raw bits outside every space), and a raw call of what is not
+native code (none of the test programs makes one).
+

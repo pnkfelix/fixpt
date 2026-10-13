@@ -1015,6 +1015,25 @@ fn raw_returns_to_every_kind_of_caller() {
     assert!(flushes > 10 && after.frames_restored - before.frames_restored > 1000, "{before:?} {after:?}");
 }
 
+/// `f64`s passed raw (`TODO.md` §91): to callees that take them raw and to
+/// ones that take values, from callers that have them raw and ones that
+/// have values, in tail calls through a global, to a continuation, and
+/// through the stack cache's overflows at an entry that takes them raw,
+/// collecting as it goes. As the Rust machine gives them.
+#[test]
+fn raw_args_between_every_kind_of_caller_and_callee() {
+    let text = program("native/raw-args");
+    let defs: String = text.lines().filter(|l| !l.starts_with("(raw-args ")).map(|l| format!("{l}\n")).collect();
+    let r = run_collecting(&defs, "raw-args", &[3000], FUEL, Some(7));
+    assert_eq!(r.rust, "8315");
+    assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "collecting: {:?} against {}", r.direct, r.rust);
+    let before = fixpt_native::direct::stack_stats();
+    let r = direct_in(&defs, "raw-args", &[3000], FUEL, None, Some((2048, 1 << 26)));
+    assert_eq!(r.direct.as_deref(), Ok("8315"), "through a small stack cache");
+    let after = fixpt_native::direct::stack_stats();
+    assert!(after.overflows - before.overflows > 10, "{before:?} {after:?}");
+}
+
 fn run_native_collecting(rt: &mut fixpt_runtime::Runtime, closure: Value, fuel: u64) -> fixpt_fx26::session::NativeRun {
     let was = std::mem::replace(&mut rt.heap.gc_every, 97);
     let r = run_native(rt, closure, fuel);

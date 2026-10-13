@@ -2441,25 +2441,15 @@ frame slots, as the suffix. Left:
   A restore of adjacent frames by one copy needs them adjacent, which
   only the dropped run copy kept them. A trailer where a frame has a word
   to align it would not help `merge` (its frames have none).
-- **Then, raw `f64` arguments** (results done, `DONE.md` §91: the
-  caller's mark at its return address; design, with the user,
-  2026-10-12). What still boxes in the float ports: `mandelbrot`'s
-  `loop3` (83.9 M words, its `f64` arguments, a tail call of itself
-  through its global), `nbody`'s `put` and `body` (130 M). On raw frame
-  slots, not before: a callee stores its parameters to its slots at once, so a raw argument with nowhere raw to
-  go is boxed there anyway. The static types settle most calls (a `subr`
-  type says which parameters are `f64`); polymorphic code takes a `t`
-  boxed (uniform, as dictionary passing is), so a caller that sees only
-  `(subr (f64) f64)` cannot know the callee was compiled for `(subr (t)
-  t)`. So `invoke` carries the count of raw `f64` arguments apart from
-  the others; the callee's entry compares it with what it takes, and on a
-  mismatch goes by an adapter that boxes or unboxes (as `adapt` does
-  between the cellular and native conventions): one compare a call; a
-  mask of which, in `X9` above the count, so that a caller that passes
-  only the count (cellular code, the runtime) passes none raw. The
-  callee's stack-overflow stub boxes its raw parameters around the call
-  out (it keeps the argument registers as values). Arguments raw in
-  `d0`–`d7` or raw in the `x` registers, as measured.
+- **Raw `f64` parameters known from the types** (arguments and results
+  done, `DONE.md` §91). A procedure takes a parameter raw only where its
+  code shows it an `f64` (an `f64` operation's operand); `nbody`'s `put`
+  passes its `v` to `flatarray-set!`, which says nothing, so it takes it
+  as a value and its callers' raw `f64`s are boxed at its entry (120 M
+  words). The `subr` type says `f64`: register code could carry which
+  parameters are (in `args`), from both compilers, to take them raw.
+  Also: a test of a raw call of what is not native code (the call-out's
+  boxing), which none of the test programs makes.
 - **Last, `f64`s in floating-point registers in the abstract register
   machine**: only once the `fmov`s between `x` and `d` registers show in a
   disassembly, and once register code keeps values in registers across
