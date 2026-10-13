@@ -644,7 +644,7 @@ impl Machine {
             // The regions entered since it was taken were the frames' it
             // replaces: nothing left can resume their bodies, so they end,
             // as an abort's do (`docs/research/soundness-findings.md`, F7).
-            heap.region_exit(heap.bloblet_slot(k, CONT_REGIONS).as_fixnum() as usize);
+            heap.regions_exit_to(heap.bloblet_slot(k, CONT_REGIONS).as_fixnum() as usize);
         } else if tail {
             self.ds.truncate(r.fp);
         } else {
@@ -827,7 +827,7 @@ impl Machine {
         self.ds.truncate(height);
         // What the regions entered inside the prompt held is gone with what
         // was cut: no frame left can resume their bodies.
-        cx.heap().region_exit(regions);
+        cx.heap().regions_exit_to(regions);
         self.ds.push(v);
         self.ds.push(handler);
         self.call(cx, r, 1, false, name)

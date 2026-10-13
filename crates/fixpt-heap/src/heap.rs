@@ -2136,7 +2136,7 @@ impl Heap {
     /// contents, which `from_image` loads at word 0. Raw suffix words are
     /// left as they are.
     pub fn image_parts(&self) -> (Vec<u64>, Vec<Value>, Vec<Value>, Vec<Value>) {
-        assert_eq!(self.live_regions(), 0, "an image is made with no region live");
+        assert_eq!(self.all_live_regions(), 0, "an image is made with no region live");
         assert_eq!(self.code.used, 0, "an image cannot yet carry the code area (docs/object-model.md, \"A collected code area\")");
         // The old space, then the nursery after it, as one run of words.
         let old = self.top - self.active;

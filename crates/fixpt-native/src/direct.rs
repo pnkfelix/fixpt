@@ -4454,7 +4454,7 @@ fn abort_to(rt: &mut fixpt_runtime::Runtime, st: &mut DState, tag: Value, v: Val
     };
     match pf {
         Some(pf) => {
-            rt.heap.region_exit(Value::from_raw(word(pf + R_HEAD + 24)).as_fixnum() as usize);
+            rt.heap.regions_exit_to(Value::from_raw(word(pf + R_HEAD + 24)).as_fixnum() as usize);
             (st.resume_sp, st.resume_fp, st.resume_pc, st.resume_x0) = (pf, pf + R_LINK, word(pf + R_SECOND), v.raw());
             true
         }
@@ -4981,7 +4981,7 @@ fn reinstate(rt: &mut fixpt_runtime::Runtime, st: &mut DState, k: Value, v: Valu
     let data = heap.bloblet_slot(k, CLOSURE_FREE0);
     let ((kp, kwords), regions, whole) = (continuation_pos(heap, data), heap.obj_ref(data, 4), heap.obj_ref(data, 5) == Value::TRUE);
     let (to, chain) = if whole {
-        heap.region_exit(regions.as_fixnum() as usize);
+        heap.regions_exit_to(regions.as_fixnum() as usize);
         (kp, kwords)
     } else {
         let (link, ret) = (word(st.fp), word(st.fp + 8));

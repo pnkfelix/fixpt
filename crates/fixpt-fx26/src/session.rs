@@ -565,7 +565,7 @@ impl Fx26Session {
         let r = self.run_expression_own(text);
         self.step_limit = saved;
         self.scheme.engine.set_step_limit(saved);
-        self.scheme.scope(|s| s.runtime_unrooted().heap.region_exit(0));
+        self.scheme.scope(|s| s.runtime_unrooted().heap.regions_exit_to(0));
         match r {
             Ok(Ok(v)) => Speculation::Value(v),
             Ok(Err(e)) | Err(FxError { message: e, .. }) => Speculation::Failed(e),
@@ -645,7 +645,7 @@ impl Fx26Session {
         let out = self.run_defining(form);
         // No body of a region runs once a form is done: any region still
         // live was left by an error, or an escape no prompt ended.
-        self.scheme.scope(|s| s.runtime_unrooted().heap.region_exit(0));
+        self.scheme.scope(|s| s.runtime_unrooted().heap.regions_exit_to(0));
         out
     }
 

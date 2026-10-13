@@ -2045,3 +2045,21 @@ caught by it: the boxing around an overflow (the collector passes over
 raw bits outside every space) and before a call through a cell written
 since (no test program redefines such a global).
 
+
+## 92. Concurrency: per-task place stacks (Q1; kayak's request, 2026-10-13)
+
+The first of kayak's three stages (`TODO.md` §92). A region's handle was
+its position in one stack of live places, and ending one ended every
+newer: wrong once tasks interleave (A enters `r1` and waits, B enters
+`r2`, A leaves `r1`, and `r2` would end). Now a handle is a slot of its
+own, the lowest free, and each task has a stack of the slots it entered
+(`heap/regions.rs`): entering, leaving and counting places are the
+current task's (`task_new`, `task_switch`, `task_end`, `tasks_reset`). An
+abort, or a whole continuation resumed, ends the current task's places
+past the depth its prompt noted (`regions_exit_to`); `%region-exit`
+ends a handle and what its task entered after it, and nothing if the
+handle is not the current task's. Machine code's table of current chunks
+is indexed by slot, as it was by position. Test: `fixpt-heap`'s
+`tasks_end_their_own_regions_in_any_order` (two tasks' arenas and reaps
+interleaved, one ended first, the other's kept through collections) and
+`an_abort_ends_only_the_current_tasks_regions`.

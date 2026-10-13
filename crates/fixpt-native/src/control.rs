@@ -233,7 +233,7 @@ fn reinstate(s: &mut Stacks, heap: &mut Heap, k: Value, v: Value, tail: bool) ->
         s.ds_truncate(0);
         s.rs_truncate(0);
         // The regions entered since it was taken end, as an abort's do.
-        heap.region_exit(heap.bloblet_slot(k, CONT_REGIONS).as_fixnum() as usize);
+        heap.regions_exit_to(heap.bloblet_slot(k, CONT_REGIONS).as_fixnum() as usize);
     } else if tail {
         let fp = s.fp();
         s.ds_truncate(fp);
@@ -343,7 +343,7 @@ fn routine(st: &mut State, heap: &mut Heap, name: &'static str, safepoint: fn(&m
             s.ds_truncate(height);
             // What the regions entered inside the prompt held is gone with
             // what was cut: no frame left can resume their bodies.
-            heap.region_exit(regions);
+            heap.regions_exit_to(regions);
             s.ds_push(v)?;
             s.ds_push(handler)?;
             call(&mut s, heap, 1, false, name)

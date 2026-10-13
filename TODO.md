@@ -2478,3 +2478,20 @@ frame slots, as the suffix. Left:
   in every pointer is a separate, later question: no tag is free, and the
   mutator would mark a pointer shared at every copy that stays live.
 
+
+## 92. Concurrency: processes and `par` (kayak's request, 2026-10-13)
+
+kayak's request, in its order (`docs/research/actors-and-distribution.md`,
+`docs/research/type-and-effect-directions.md` §3), meaning the same under
+green threads and OS threads:
+1. **Q1, per-task place stacks**: done (`DONE.md` §92).
+2. **M1, H1, M3 and I-cells that suspend**: `spawn`, `(addr M R)`,
+   `send` and `receive` with their effects, the transmissible types,
+   `nondet`; a process's own place; messages copied; replies through
+   I-cells that suspend; a deadlock an error. The `init` effect (P4) comes
+   with it, since a process that fills a reply's cell must not be said to
+   write.
+3. **P5 and P7**: the interference table, and `par`.
+
+Out of scope, as kayak asked: transfer of mutable data, session types,
+distribution, links and monitors.

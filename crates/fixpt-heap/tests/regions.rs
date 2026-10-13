@@ -190,3 +190,82 @@ fn a_reference_an_ended_reap_left_is_not_followed() {
     assert!(seen.contains(&chunk(stale)), "once none is found, it is");
     h.region_exit(r4);
 }
+
+/// Two tasks' regions interleaved (`regions.rs`, Q1): A enters an arena and
+/// a reap, B enters its own, and A leaves its regions first. B's live on,
+/// through collections, and each task counts and ends only its own.
+#[test]
+fn tasks_end_their_own_regions_in_any_order() {
+    let mut h = Heap::new();
+    let a = 0;
+    let b = h.task_new();
+    let (a_arena, a_reap) = (h.region_enter(), h.reap_enter());
+    h.task_switch(b);
+    assert_eq!(h.live_regions(), 0, "B has none yet");
+    let (b_arena, b_reap) = (h.region_enter(), h.reap_enter());
+    let mut b_lists = [Value::NULL, Value::NULL];
+    let mut a_lists = [Value::NULL, Value::NULL];
+    for i in 0..3_000 {
+        h.task_switch(a);
+        a_lists[0] = h.in_region(a_arena, |h| h.cons(Value::fixnum(i), a_lists[0]));
+        a_lists[1] = h.in_region(a_reap, |h| h.cons(Value::fixnum(i), a_lists[1]));
+        h.task_switch(b);
+        b_lists[0] = h.in_region(b_arena, |h| h.cons(Value::fixnum(2 * i), b_lists[0]));
+        b_lists[1] = h.in_region(b_reap, |h| h.cons(Value::fixnum(2 * i), b_lists[1]));
+    }
+    // A leaves first, though B entered after it.
+    h.task_switch(a);
+    assert_eq!(h.live_regions(), 2);
+    h.region_exit(a_arena);
+    assert_eq!(h.live_regions(), 0);
+    assert_eq!(h.all_live_regions(), 2, "B's are live");
+    // A's handle again, from A, is nothing; B's, from A, ends nothing either.
+    h.region_exit(b_arena);
+    assert_eq!(h.all_live_regions(), 2);
+    // A new region of A's takes the lowest free slot, A's old one, and its
+    // chunks; B's are not given out.
+    let a_again = h.region_enter();
+    assert_eq!(a_again, a_arena);
+    let mut junk = Value::NULL;
+    for i in 0..20_000 {
+        junk = h.in_region(a_again, |h| h.cons(Value::fixnum(i), junk));
+    }
+    let mut roots = [b_lists[0], b_lists[1], junk];
+    gc(&mut h, &mut roots);
+    h.task_switch(b);
+    assert_eq!(h.live_regions(), 2);
+    assert_eq!(list_sum(&h, roots[0]), (0..3_000).map(|i| 2 * i).sum::<i64>());
+    assert_eq!(list_sum(&h, roots[1]), (0..3_000).map(|i| 2 * i).sum::<i64>());
+    assert_eq!(h.region_in_use(b_reap), 3_000 * 2, "B's reap, collected, keeps its list");
+    // Ending B ends what it left, and makes A current.
+    h.task_end(b);
+    assert_eq!(h.task_current(), a);
+    assert_eq!(h.all_live_regions(), 1);
+    h.region_exit(a_again);
+    assert_eq!(h.all_live_regions(), 0);
+}
+
+/// A task's place stack where it was left, after another task has entered
+/// and ended regions: an abort's depth is the task's own.
+#[test]
+fn an_abort_ends_only_the_current_tasks_regions() {
+    let mut h = Heap::new();
+    let b = h.task_new();
+    let _outer = h.region_enter();
+    let depth = h.live_regions();
+    let _inner = h.region_enter();
+    h.task_switch(b);
+    let theirs = h.region_enter();
+    h.task_switch(0);
+    h.regions_exit_to(depth);
+    assert_eq!(h.live_regions(), 1);
+    h.task_switch(b);
+    assert_eq!(h.live_regions(), 1);
+    let p = h.in_region(theirs, |h| h.cons(Value::fixnum(5), Value::NULL));
+    assert_eq!(h.car(p).as_fixnum(), 5);
+    h.tasks_reset();
+    assert_eq!(h.task_current(), 0);
+    assert_eq!(h.all_live_regions(), 1);
+    h.regions_exit_to(0);
+    assert_eq!(h.all_live_regions(), 0);
+}
