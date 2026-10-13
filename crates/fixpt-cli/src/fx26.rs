@@ -1564,9 +1564,8 @@ fn listing(m: &fixpt_native::direct::DirectMachine, heap: &fixpt_heap::Heap, pro
     let mut out = String::new();
     for (i, (n, p)) in procs.iter().enumerate() {
         let n = if i == 0 { format!("{name} ({n})") } else { n.clone() };
-        let code = m.instructions(heap, *p);
-        out.push_str(&format!("; {n}, {} instructions:\n", code.len()));
-        for (i, w) in code.iter().enumerate() {
+        out.push_str(&format!("; {n}, {} instructions:\n", p.len));
+        for (i, w) in m.instructions(heap, *p).iter().enumerate() {
             out.push_str(&format!(";   {i:>4}  {}\n", fixpt_native::arm64::disasm::disassemble(*w, i as i64)));
         }
     }

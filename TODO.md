@@ -2441,15 +2441,17 @@ frame slots, as the suffix. Left:
   A restore of adjacent frames by one copy needs them adjacent, which
   only the dropped run copy kept them. A trailer where a frame has a word
   to align it would not help `merge` (its frames have none).
-- **Raw `f64` parameters known from the types** (arguments and results
-  done, `DONE.md` §91). A procedure takes a parameter raw only where its
-  code shows it an `f64` (an `f64` operation's operand); `nbody`'s `put`
-  passes its `v` to `flatarray-set!`, which says nothing, so it takes it
-  as a value and its callers' raw `f64`s are boxed at its entry (120 M
-  words). The `subr` type says `f64`: register code could carry which
-  parameters are (in `args`), from both compilers, to take them raw.
-  Also: a test of a raw call of what is not native code (the call-out's
-  boxing), which none of the test programs makes.
+- **Raw `f64`s at more calls** (known calls done, `DONE.md` §91; the
+  user's, 2026-10-13: no masks). A call passes `f64`s raw only to a
+  procedure known where it is compiled; and a procedure takes a parameter
+  raw only where its code shows it an `f64`, so `nbody`'s `put`, whose
+  `v` goes only to `flatarray-set!`, takes it as a value (120 M words).
+  The `subr` type says `f64`, but polymorphism can hide it from a caller,
+  which is why a mask was needed for unknown callees. The user's
+  question (2026-10-13): unboxed floats as a kind of their own that no
+  type variable ranges over, as `flat` is, so that every call agrees from
+  the types; a design to write up and decide (GHC's `Double#`, OCaml's
+  layouts).
 - **Last, `f64`s in floating-point registers in the abstract register
   machine**: only once the `fmov`s between `x` and `d` registers show in a
   disassembly, and once register code keeps values in registers across

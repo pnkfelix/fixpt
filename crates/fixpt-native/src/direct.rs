@@ -110,9 +110,6 @@ struct DState {
     /// arguments it is given.
     aux: u64,
     nargs: u64,
-    /// `X9` as a procedure's entry found it, while its adapter boxes and
-    /// unboxes the arguments passed raw (a call-out may change `X9`).
-    raw_args: u64,
     /// The closure the call starts in; `DELTA`; and where the code area
     /// starts, below which a closure's code is not native code.
     clo: u64,
@@ -138,11 +135,6 @@ struct DState {
     /// The machine's common call of what is not native code
     /// (`common_foreign`), where it runs.
     foreign: u64,
-    /// The machine's common boxing of arguments passed raw
-    /// (`common_raw_box`), where it runs; and the raw entry it was come to
-    /// from, while it runs.
-    raw_box: u64,
-    raw_target: u64,
     /// The machine's common making of a closure by call-out
     /// (`common_closure`), where it runs.
     closure: u64,
@@ -218,10 +210,6 @@ pub fn stack_stats() -> StackStats {
 /// The traps this code raises, by code.
 const TRAPS: [&str; 6] = ["", "evaluation step limit exceeded", "stack overflow", "a primitive failed", "car or cdr of a non-pair", "division by zero"];
 const OUT_OF_FUEL: u32 = 1;
-/// Bytes of a native code's raw entry, before its entry (`delta`'s): where
-/// a call passing some arguments raw (`f64`s), said in `X9` above the
-/// count, comes in (`TODO.md` §91).
-const RAW_ENTRY: u64 = 16;
 const STACK_OVERFLOW: u32 = 2;
 const PRIM_FAILED: u32 = 3;
 const NOT_A_PAIR: u32 = 4;
@@ -355,7 +343,6 @@ struct Runner {
     mark_ret: u64,
     trap_stub: u64,
     foreign: u64,
-    raw_box: u64,
     closure: u64,
     underflow: u64,
     overflow: u64,
@@ -408,7 +395,6 @@ pub fn adapt(rt: &mut fixpt_runtime::Runtime, f: Value, arity: usize, native: bo
         return Ok(fixpt_engine::cellular::cellular_adapter(heap, f, arity));
     }
     let mut a = Asm::new();
-    raw_entry_boxing(&mut a);
     a.e(ldur(CLO, CLO, field_off(CLOSURE_FREE0)));
     a.e(movz(X9, arity as u32, 0));
     a.e(ldr(X16, ST, st_off(offset_of!(DState, foreign))));
@@ -607,6 +593,8 @@ struct Proc {
     len: usize,
     /// A global's procedure, which may be called through its cell instead.
     global: bool,
+    /// The parameters it takes raw (`reps::raw_params`), once known.
+    params: Option<u8>,
 }
 
 /// Compiles procedures and runs them.
@@ -622,9 +610,6 @@ pub struct DirectMachine {
     /// The common call of what is not native code, which every code's
     /// calls of it go to.
     foreign: Offset,
-    /// The common boxing of arguments passed raw, which the raw entry of
-    /// every code that takes none raw goes to.
-    raw_box: Offset,
     /// The common making of a closure by call-out, which every code's
     /// closures go to when the inline path has no room.
     closure: Offset,
@@ -680,7 +665,7 @@ impl DirectMachine {
         // Call-out 0: what is not native code, called (`common_foreign`);
         // 1: a closure made (`common_closure`); 2 and 3: the stack cache's
         // underflow and overflow (`common_underflow`, `common_overflow`).
-        let mut callouts = vec![Callout::Foreign, Callout::ClosureAny, Callout::Underflow, Callout::Overflow];
+        let callouts = vec![Callout::Foreign, Callout::ClosureAny, Callout::Underflow, Callout::Overflow];
         let code = common_foreign(0);
         let foreign = space.alloc(4 * code.len(), 16).ok_or("no room for the common foreign call")?;
         space.write_code(foreign, &code);
@@ -697,11 +682,6 @@ impl DirectMachine {
         let overflow = space.alloc(4 * code.len(), 16).ok_or("no room for the overflow")?;
         space.write_code(overflow, &code);
         space.flush(overflow, 4 * code.len());
-        let code = common_raw_box(&mut callouts);
-        let raw_box = space.alloc(4 * code.len(), 16).ok_or("no room for the common raw boxing")?;
-        space.write_code(raw_box, &code);
-        space.flush(raw_box, 4 * code.len());
-        crate::symbols::note(space.exec_addr(raw_box), 4 * code.len(), "native convention: arguments passed raw, boxed");
         let stub = |at: usize, len: usize, what: &str| crate::symbols::note(space.exec_addr(at), 4 * len, &format!("native convention: {what}"));
         stub(underflow, common_underflow(2).len(), "stack cache underflow");
         stub(overflow, common_overflow(3).len(), "stack cache overflow");
@@ -717,7 +697,6 @@ impl DirectMachine {
             mark_ret,
             trap_stub,
             foreign,
-            raw_box,
             closure,
             underflow,
             overflow,
@@ -817,7 +796,6 @@ impl DirectMachine {
             mark_ret: self.space.exec_addr(self.mark_ret) as u64,
             trap_stub: self.space.exec_addr(self.trap_stub) as u64,
             foreign: self.space.exec_addr(self.foreign) as u64,
-            raw_box: self.space.exec_addr(self.raw_box) as u64,
             closure: self.space.exec_addr(self.closure) as u64,
             underflow: self.space.exec_addr(self.underflow) as u64,
             overflow: self.space.exec_addr(self.overflow) as u64,
@@ -827,11 +805,10 @@ impl DirectMachine {
         }
     }
 
-    /// `p`'s instructions, as they are in its code bloblet, from its entry.
+    /// `p`'s instructions, as they are in its code bloblet.
     pub fn instructions(&self, heap: &Heap, p: Compiled) -> Vec<u32> {
         let bytes = heap.bloblet_bytes(p.code);
-        // From its entry: its raw entry left out (`RAW_ENTRY`).
-        (RAW_ENTRY as usize / 4..p.len).map(|i| u32::from_le_bytes(bytes[4 * i..4 * i + 4].try_into().expect("four bytes"))).collect()
+        (0..p.len).map(|i| u32::from_le_bytes(bytes[4 * i..4 * i + 4].try_into().expect("four bytes"))).collect()
     }
 }
 
@@ -879,12 +856,10 @@ fn run(r: &Runner, rt: &mut fixpt_runtime::Runtime, p: Compiled, args: &[Value],
     st.nargs = count;
     st.code = p.code.raw();
     st.clo = p.closure.raw();
-    // Code is entered past its raw entry (`RAW_ENTRY`).
-    let target = rt.heap.code_exec_address(p.code) as u64 + RAW_ENTRY;
+    let target = rt.heap.code_exec_address(p.code) as u64;
     st.delta = target.wrapping_sub(p.code.raw());
     st.code_lo = rt.heap.code_area_address() as u64;
     (st.mark_ret, st.trap_stub, st.foreign, st.closure) = (r.mark_ret, r.trap_stub, r.foreign, r.closure);
-    st.raw_box = r.raw_box;
     // SAFETY: the trampoline follows the C convention, saves what it
     // must, runs on the machine's stack from `top` (which outlives the
     // call, and which nothing else uses below `top` while it runs),
@@ -1055,42 +1030,6 @@ fn pop_frame(a: &mut Asm, size: u64) {
     a.e(add_imm(SP, SP, size as u32));
 }
 
-/// The common boxing of arguments passed raw: come to from the raw entry
-/// of code that takes every argument as a value (`raw_entry_boxing`), the
-/// raw entry's address in X16, `X9` the count and which arguments are raw
-/// (`RAW_ENTRY`): each of those boxed, the count alone left in `X9`, and on
-/// at the code's entry, past its raw one. One for the machine.
-fn common_raw_box(callouts: &mut Vec<Callout>) -> Vec<u32> {
-    let mut a = Asm::new();
-    a.e(str(X16, ST, st_off(offset_of!(DState, raw_target))));
-    a.e(str(X9, ST, st_off(offset_of!(DState, raw_args))));
-    for r in 1..=8u32 {
-        let skip = a.label();
-        a.e(ldr(X9, ST, st_off(offset_of!(DState, raw_args))));
-        a.e(ubfx(X16, X9, 16 + r - 1, 1));
-        a.e(cmp_imm(X16, 0));
-        a.to(skip, Fix::If(Cond::Eq));
-        box_f64(&mut a, callouts, r as Reg);
-        a.bind(skip);
-    }
-    a.e(ldr(X9, ST, st_off(offset_of!(DState, raw_args))));
-    a.e(and_low(X9, X9, 16));
-    a.e(ldr(X16, ST, st_off(offset_of!(DState, raw_target))));
-    a.e(add_imm(X16, X16, RAW_ENTRY as u32));
-    a.e(br(X16));
-    a.finish().expect("labels bound")
-}
-
-/// The raw entry (`RAW_ENTRY`) of code that takes every argument as a
-/// value: to the machine's common boxing (`common_raw_box`), which comes
-/// back to the entry just after.
-fn raw_entry_boxing(a: &mut Asm) {
-    a.e(ldr(X17, ST, st_off(offset_of!(DState, raw_box))));
-    a.e(br(X17));
-    a.e(movz(XZR, 0, 0));
-    a.e(movz(XZR, 0, 0));
-}
-
 fn common_foreign(n: usize) -> Vec<u32> {
     let mut a = Asm::new();
     push_frame(&mut a, LINK, STUB_FRAME);
@@ -1201,7 +1140,6 @@ impl Compiling<'_> {
             return q;
         }
         let mut a = Asm::new();
-        raw_entry_boxing(&mut a);
         push_frame(&mut a, LINK, STUB_FRAME);
         let args = offset_of!(DState, args) as u32;
         a.e(str(1, ST, args));
@@ -1219,7 +1157,7 @@ impl Compiling<'_> {
         leave(&mut a);
         let code = a.finish().expect("placed");
         let q = self.procs.len();
-        self.procs.push(Proc { word: Value::FALSE, rw: Value::FALSE, name: "continuation".into(), arity: 1, fields: vec![Field::Myself, Field::Const(Value::FALSE)], len: code.len(), code, global: false });
+        self.procs.push(Proc { word: Value::FALSE, rw: Value::FALSE, name: "continuation".into(), arity: 1, fields: vec![Field::Myself, Field::Const(Value::FALSE)], len: code.len(), code, global: false, params: Some(0) });
         self.resume = Some(q);
         q
     }
@@ -1238,7 +1176,7 @@ impl Compiling<'_> {
         let variadic = h.bloblet_slot(rw, WORD_CELL0).as_fixnum() as usize == const { fixpt_heap::layout::regcode::op("vargs") };
         let arity = if variadic { usize::MAX } else { h.bloblet_slot(rw, WORD_CELL0 + 1).as_fixnum() as usize };
         let p = self.procs.len();
-        self.procs.push(Proc { word, rw, name: self.name(word), arity, fields: vec![Field::Myself, Field::Const(word)], code: Vec::new(), len: 0, global: false });
+        self.procs.push(Proc { word, rw, name: self.name(word), arity, fields: vec![Field::Myself, Field::Const(word)], code: Vec::new(), len: 0, global: false, params: None });
         self.by_word.insert(word.raw(), p);
         self.queue.push(p);
         Ok(p)
@@ -1300,6 +1238,32 @@ impl Compiling<'_> {
             });
         }
         Ok(Field::Cell(cell))
+    }
+
+    /// The parameters procedure `q` takes raw (`reps::raw_params`), from its
+    /// register code: what a call of it known where the call is compiled
+    /// passes raw, entering past its unboxing of them (`raw_entry_skip`).
+    fn params_of(&mut self, q: usize) -> u8 {
+        if let Some(m) = self.procs[q].params {
+            return m;
+        }
+        let h = self.heap;
+        let rw = self.procs[q].rw;
+        let cells: Vec<Value> = (WORD_CELL0..=h.bloblet_head(rw).fields).map(|k| h.bloblet_slot(rw, k)).collect();
+        let (mut starts, mut frame, mut i) = (Vec::new(), None, 0);
+        while i < cells.len() {
+            starts.push(i);
+            let (op, n, _) = OPS[cells[i].as_fixnum() as usize];
+            if op == "save" {
+                frame = Some(cells[i + 1].as_fixnum() as usize);
+            }
+            i += 1 + n;
+        }
+        let prim_name = |p: usize| fixpt_runtime::PRIMITIVES.get(p).map_or("?", |d| d.name);
+        let raw = frame.map_or(Vec::new(), |m| reps::raw_slots(&cells, &starts, &prim_name, m));
+        let m = reps::raw_params(&cells, &starts, &prim_name, &raw);
+        self.procs[q].params = Some(m);
+        m
     }
 
     /// One procedure's code, from its register word.
@@ -1380,10 +1344,32 @@ impl Compiling<'_> {
         let prim_name = |p: usize| fixpt_runtime::PRIMITIVES.get(p).map_or("?", |d| d.name);
         let raw = frame.map_or(Vec::new(), |m| reps::raw_slots(&cells, &starts, &prim_name, m));
         let values = raw.iter().filter(|r| !**r).count() as u32;
-        // The parameters it takes raw (`reps::raw_params`): a caller says
-        // in `X9`, above the count, which of its arguments are raw; the
-        // entry adapts them where the two differ.
-        let params = reps::raw_params(&cells, &starts, &prim_name, &raw);
+        // The parameters it takes raw (`reps::raw_params`): unboxed at its
+        // entry, past which a call that knows this procedure comes, with
+        // them raw (`raw_entry_skip`); and, for each call of a procedure
+        // known here, that one's.
+        let params = self.params_of(p);
+        let mut callees = vec![0u8; starts.len()];
+        for &j in &starts {
+            let Some(c) = called(j) else { continue };
+            let q = match op_at(j) {
+                "global" => match self.global_value(cells[j + 1]).map_err(|e| format!("`{name}` calls {e}"))? {
+                    Field::Code(q) => Some(q),
+                    _ => None,
+                },
+                "const" => match self.closure_parts(cells[j + 1]) {
+                    Some((word, free)) if !h.is_cellular_word(cells[j + 1]) && free.is_empty() && self.name(word) != "undefined" => {
+                        Some(self.proc_of(word).map_err(|e| format!("`{name}` calls {e}"))?)
+                    }
+                    _ => None,
+                },
+                _ => None,
+            };
+            if let Some(q) = q {
+                let si = starts.iter().position(|&s| s == c).expect("an instruction");
+                callees[si] = self.params_of(q);
+            }
+        }
         let (slot_off, value_index) = {
             let (mut v, mut r) = (0u32, 0u32);
             let mut offs = Vec::new();
@@ -1469,14 +1455,14 @@ impl Compiling<'_> {
         // not, to a stub of its own (with where to come back to, how many
         // arguments, and whether a tail call), which calls the common
         // routine that calls out for it.
-        let mut foreign: Vec<(Label, Label, usize, bool, u8)> = Vec::new();
+        let mut foreign: Vec<(Label, Label, usize, bool)> = Vec::new();
         // Each frame's entry past the stack cache's limit: its stub, and
         // where it comes back to.
         let mut overflows: Vec<(Label, Label, Vec<Reg>)> = Vec::new();
         // Each call of a global bound when compiled whose cell holds
         // something else when the code runs: out of the way, the call
         // through the cell (with the call's stub, and where to come back).
-        let mut cell_slows: Vec<(Label, Label, Label)> = Vec::new();
+        let mut cell_slows: Vec<(Label, Label, Label, Vec<Reg>)> = Vec::new();
         // Where a call-out that does not return goes on (an abort), if one
         // does here.
         let (resume_at, mut uses_resume) = (a.label(), false);
@@ -1485,20 +1471,8 @@ impl Compiling<'_> {
             stubs.push((l, code));
             a.to(l, Fix::If(c));
         };
-        // The raw entry (`RAW_ENTRY`), for a caller that passes some
-        // arguments raw, said in `X9`: as this procedure takes them, on;
-        // else adapted, out of the way. Then the entry every other call
-        // comes to, its arguments values: those taken raw unboxed.
-        let (adapt_l, entry_checked) = (a.label(), a.label());
-        if params == 0 {
-            raw_entry_boxing(&mut a);
-        } else {
-            a.e(lsr_imm(X16, X9, 16));
-            a.e(cmp_imm(X16, params as u32));
-            a.to(adapt_l, Fix::If(Cond::Ne));
-            a.to(entry_checked, Fix::B);
-        }
         a.bind(entry);
+        let entry_checked = a.label();
         for r in (1..=8).filter(|&r| reps::raw_param(params, r)) {
             unbox_f64(&mut a, r as Reg);
         }
@@ -1528,7 +1502,7 @@ impl Compiling<'_> {
         let mut int_slows: Vec<IntSlow> = Vec::new();
         for &fast in versions {
         let labels = if fast { &labels_f } else { &labels_g };
-        let (reps_in, reps_out) = reps::reps_of(&cells, &starts, &prim_name, fast, &raw, params);
+        let (reps_in, reps_out) = reps::reps_of(&cells, &starts, &prim_name, fast, &raw, params, &callees);
         let mut src = RESULT;
         let mut pending: Option<Field> = None;
         // The global the pending call was bound to as compiled: its cell,
@@ -1572,7 +1546,8 @@ impl Compiling<'_> {
             {
                 let o = |j: usize| cells[i + 1 + j];
                 let mut reps = reps_in[si - 1];
-                let first = reps::step(op, &o, &prim_name, raw_refs[si - 1], fast, &raw, params, &mut reps);
+                let calls = reps::Calls { own: params, callee: callees[si - 1] };
+                let first = reps::step(op, &o, &prim_name, raw_refs[si - 1], fast, &raw, calls, &mut reps);
                 // `RESULT`, where a `reg` just before left it in its register
                 // (`src`), is tested there.
                 convert(&mut a, self.callouts, &first, labels_g[i], src);
@@ -1944,15 +1919,13 @@ impl Compiling<'_> {
                     let args = offset_of!(DState, args) as u32;
                     // A call of the closure in `CLO`, `n` arguments in
                     // registers, back at `after`: native code, or not.
-                    let call_clo = |a: &mut Asm, foreign: &mut Vec<(Label, Label, usize, bool, u8)>, n: usize, after: Label| {
+                    let call_clo = |a: &mut Asm, foreign: &mut Vec<(Label, Label, usize, bool)>, n: usize, after: Label| {
                         let stub = a.label();
                         a.e(ldur(X16, CLO, field_off(CLOSURE_WORD)));
                         a.e(ldr(X17, ST, st_off(offset_of!(DState, code_lo))));
                         a.e(cmp(X16, X17));
                         a.to(stub, Fix::If(Cond::Lo));
-                        foreign.push((stub, after, n, false, 0));
-                        // The count, no argument raw (the entry reads it).
-                        a.e(movz(X9, n as u32, 0));
+                        foreign.push((stub, after, n, false));
                         a.e(add(X16, X16, DELTA));
                         a.e(blr(X16));
                         a.bind(after);
@@ -2048,8 +2021,7 @@ impl Compiling<'_> {
                             a.e(ldr(X17, ST, st_off(offset_of!(DState, code_lo))));
                             a.e(cmp(X16, X17));
                             a.to(stub, Fix::If(Cond::Lo));
-                            foreign.push((stub, after, 0, true, 0));
-                            a.e(movz(X9, 0, 0));
+                            foreign.push((stub, after, 0, true));
                             a.e(add(X16, X16, DELTA));
                             a.e(br(X16));
                             a.bind(after);
@@ -2627,8 +2599,10 @@ impl Compiling<'_> {
                 // in the code area is not native code, and traps.
                 "invoke" | "tailinvoke" => {
                     let tail = op == "tailinvoke";
-                    // The arguments passed raw (`f64`s), said in `X9`.
-                    let arg_mask = (1..=k(o(0)).min(8)).filter(|&r| reps_in[si - 1][r] == Rep::F64).fold(0u8, |m, r| m | 1 << (r - 1));
+                    // A procedure known here that takes some arguments raw:
+                    // given them so, entered past its unboxing of them.
+                    let callee = callees[si - 1];
+                    let raws: Vec<Reg> = (1..=8).filter(|&r| reps::raw_param(callee, r)).map(|r| r as Reg).collect();
                     let (stub, after) = (a.label(), a.label());
                     let not_native = |a: &mut Asm| {
                         a.e(ldur(X16, CLO, field_off(CLOSURE_WORD)));
@@ -2652,6 +2626,9 @@ impl Compiling<'_> {
                             Some(Field::Code(q)) => {
                                 let f = self.field(p, Field::Code(q));
                                 ldr_field(&mut a, X16, f);
+                                if !raws.is_empty() {
+                                    a.e(add_imm(X16, X16, raw_entry_skip(raws.len())));
+                                }
                             }
                             Some(g) => {
                                 let f = self.field(p, g);
@@ -2661,13 +2638,16 @@ impl Compiling<'_> {
                             None => unreachable!("a global bound is called"),
                         }
                         a.bind(join);
-                        cell_slows.push((slow, join, stub));
-                        foreign.push((stub, after, k(o(0)), tail, arg_mask));
+                        cell_slows.push((slow, join, stub, raws));
+                        foreign.push((stub, after, k(o(0)), tail));
                     } else {
                         match pending.take() {
                             Some(Field::Code(q)) => {
                                 let f = self.field(p, Field::Code(q));
                                 ldr_field(&mut a, X16, f);
+                                if !raws.is_empty() {
+                                    a.e(add_imm(X16, X16, raw_entry_skip(raws.len())));
+                                }
                             }
                             // Through the global's cell, when the code runs: what
                             // it holds then, native code or not.
@@ -2676,7 +2656,7 @@ impl Compiling<'_> {
                                 ldr_field(&mut a, X9, f);
                                 a.e(ldur(CLO, X9, field_off(2)));
                                 not_native(&mut a);
-                                foreign.push((stub, after, k(o(0)), tail, arg_mask));
+                                foreign.push((stub, after, k(o(0)), tail));
                             }
                             Some(g) => {
                                 let f = self.field(p, g);
@@ -2686,7 +2666,7 @@ impl Compiling<'_> {
                             None => {
                                 a.e(mov(CLO, RESULT));
                                 not_native(&mut a);
-                                foreign.push((stub, after, k(o(0)), tail, arg_mask));
+                                foreign.push((stub, after, k(o(0)), tail));
                             }
                         }
                     }
@@ -2694,10 +2674,6 @@ impl Compiling<'_> {
                     // way: every call passes it.
                     a.e(movz(X9, k(o(0)) as u32, 0));
                     a.e(add(X16, X16, DELTA));
-                    if arg_mask != 0 {
-                        a.e(movk(X9, arg_mask as u32, 1));
-                        a.e(sub_imm(X16, X16, RAW_ENTRY as u32));
-                    }
                     a.e(if tail { br(X16) } else { blr(X16) });
                     a.bind(after);
                     if !tail && raw_refs[si - 1] {
@@ -2758,22 +2734,21 @@ impl Compiling<'_> {
         // goes there to return from it to this procedure's caller.
         // Each call of what is not native code: to the machine's common
         // routine (`common_foreign`), with the arguments' count.
-        for (slow, join, stub) in &cell_slows {
+        for (slow, join, stub, raws) in &cell_slows {
             a.bind(*slow);
+            // Not the procedure known: what it holds takes values.
+            for &r in raws {
+                box_f64(&mut a, self.callouts, r);
+            }
             a.e(ldur(X16, CLO, field_off(CLOSURE_WORD)));
             a.e(ldr(X17, ST, st_off(offset_of!(DState, code_lo))));
             a.e(cmp(X16, X17));
             a.to(*stub, Fix::If(Cond::Lo));
             a.to(*join, Fix::B);
         }
-        for (stub, after, n, tail, mask) in &foreign {
+        for (stub, after, n, tail) in &foreign {
             a.bind(*stub);
-            // What is not native code takes values: those passed raw, said
-            // in `X9`, boxed by the call-out (`callout`).
             a.e(movz(X9, *n as u32, 0));
-            if *mask != 0 {
-                a.e(movk(X9, *mask as u32, 1));
-            }
             a.e(ldr(X16, ST, st_off(offset_of!(DState, foreign))));
             if *tail {
                 a.e(br(X16));
@@ -2803,31 +2778,6 @@ impl Compiling<'_> {
                 unbox_f64(&mut a, r);
             }
             a.to(*back, Fix::B);
-        }
-        // The entry's adapter, for a procedure that takes some arguments
-        // raw: each argument the caller passed raw that this procedure takes
-        // as a value boxed, each it passed as a value that this takes raw
-        // unboxed; the count left alone.
-        a.bind(adapt_l);
-        if params != 0 {
-            a.e(str(X9, ST, st_off(offset_of!(DState, raw_args))));
-            for r in 1..=self.procs[p].arity.min(8) {
-                let skip = a.label();
-                a.e(ldr(X9, ST, st_off(offset_of!(DState, raw_args))));
-                a.e(ubfx(X16, X9, 16 + r as u32 - 1, 1));
-                a.e(cmp_imm(X16, 0));
-                if reps::raw_param(params, r) {
-                    a.to(skip, Fix::If(Cond::Ne));
-                    unbox_f64(&mut a, r as Reg);
-                } else {
-                    a.to(skip, Fix::If(Cond::Eq));
-                    box_f64(&mut a, self.callouts, r as Reg);
-                }
-                a.bind(skip);
-            }
-            a.e(ldr(X9, ST, st_off(offset_of!(DState, raw_args))));
-            a.e(and_low(X9, X9, 16));
-            a.to(entry_checked, Fix::B);
         }
         // The traps, out of the way: a stub per site, calling its kind's
         // stub, which goes to the machine's common trap (`common_trap`),
@@ -3058,6 +3008,16 @@ fn raw_return(a: &mut Asm, callouts: &mut Vec<Callout>) {
     a.bind(boxed);
     box_f64(a, callouts, RESULT);
     a.e(ret());
+}
+
+/// Bytes from a procedure's entry past its unboxing of the `n` parameters
+/// it takes raw: where a call that knows it, passing them raw, enters.
+fn raw_entry_skip(n: usize) -> u32 {
+    let mut a = Asm::new();
+    unbox_f64(&mut a, 1);
+    // A word after it, where its last label is placed.
+    a.e(ret());
+    (4 * (a.finish().expect("placed").len() - 1) * n) as u32
 }
 
 /// Register `r`'s raw `f64` boxed, in place: a flonum from the free space
@@ -4279,13 +4239,7 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
     let st = unsafe { &mut *st };
     let rt = unsafe { &mut *(st.rt as *mut fixpt_runtime::Runtime) };
     let c = unsafe { *(st.table as *const Callout).add(which as usize) };
-    // A call of what is not native code says in its count's high bits
-    // which arguments are raw `f64`s: boxed here, before anything collects.
-    let raw = if let Callout::Foreign = c { (st.nargs >> 16) as u8 } else { 0 };
-    let n = if let Callout::Foreign | Callout::ClosureAny | Callout::Rest = c { (st.nargs & 0xffff) as usize } else { c.arity() };
-    for j in (0..8).filter(|&j| raw & 1 << j != 0) {
-        st.args[j] = rt.heap.make_flonum(f64::from_bits(st.args[j])).raw();
-    }
+    let n = if let Callout::Foreign | Callout::ClosureAny | Callout::Rest = c { st.nargs as usize } else { c.arity() };
     // Past 8, the eighth is a list of the rest (Larceny's convention). The
     // vector kept from the last call-out, not a new one each time: making
     // and freeing it was a fifth of a run that calls out often (`mlton/
@@ -5189,8 +5143,7 @@ pub fn code_text(heap: &Heap, closure: Value) -> Option<String> {
             continue;
         }
         seen.push(code.raw());
-        // From its entry: its raw entry left out (`RAW_ENTRY`).
-        let bytes = &heap.bloblet_bytes(code)[RAW_ENTRY as usize..];
+        let bytes = heap.bloblet_bytes(code);
         let _ = writeln!(out, "\ncode {}, {} instructions:", seen.len(), bytes.len() / 4);
         for (i, w) in bytes.chunks_exact(4).enumerate() {
             let w = u32::from_le_bytes(w.try_into().expect("four bytes"));
