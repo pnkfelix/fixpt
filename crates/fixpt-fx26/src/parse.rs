@@ -2756,6 +2756,11 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     ) -> R<()> {
         while let Some((f, hidden)) = work.pop() {
             let f = &f;
+            // A string: a comment, read past (in a `hide` too, and among a
+            // module file's forms).
+            if f.as_str().is_some() {
+                continue;
+            }
             let parts = self.items(f, "a module's definition")?.to_vec();
             // `(hide item …)`: its items, their `define-datatype`s expanded,
             // each hidden.

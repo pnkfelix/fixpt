@@ -849,6 +849,8 @@
   (parse-module-items-in (subr (maxeff parses spin) (syns-a bool bool) mod-items)
     (lambda (fs inc? hid?)
       (cond ((null? fs) nil)
+            ;; A string: a comment, read past.
+            ((syn-string? (car fs)) (parse-module-items-in (cdr fs) inc? hid?))
             ((hide-form? (car fs))
              (append (parse-module-items-in (hide-forms (car fs)) inc? #t)
                      (parse-module-items-in (cdr fs) inc? hid?)))
