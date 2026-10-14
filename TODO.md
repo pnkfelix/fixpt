@@ -2532,3 +2532,22 @@ recovered (`DONE.md` §93). Left:
   fails where the same procedure as native code runs. An error, not a
   crash. To do: a capture that crosses the two machines' frames, or no
   declining of what captures.
+
+## 94. Process monitors (kayak's request, 2026-10-14; after Q2, §92)
+
+A process watches another and receives its failure (a panic, `error`) as
+an ordinary message, so that a long-lived process (a REPL front end
+handing each piece of work to a worker) reports the failure and carries
+on, where today any process's failure fails the form it ran in
+(`docs/research/processes.md`, item 6). Shapes asked about: a
+`spawn-monitored` form taking the body and a procedure from the failure's
+message (a string) to a value of the watcher's mailbox type; or a
+`monitor` operation on an existing address. Unmonitored processes keep
+today's meaning. `self` and the `sendable` kind (§92) give the watcher's
+address and the message the types they need. Their questions, to answer
+in the design: whether a normal exit also sends a message; a watcher that
+has itself exited; whether `par` keeps a branch's failure as its own;
+whether `race` could lose a failed branch rather than fail; what becomes
+of values a failed process left half-built in shared regions (it shares
+only what may cross, so perhaps nothing); and whether the payload is the
+message string or richer.
