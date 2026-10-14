@@ -2529,3 +2529,23 @@ recovered (`DONE.md` §93). Left:
   fails where the same procedure as native code runs. An error, not a
   crash. To do: a capture that crosses the two machines' frames, or no
   declining of what captures.
+
+## 95. Byte input and terminal modes (kayak's request, 2026-10-14)
+
+Asked for so that an interactive program (a REPL front end that edits a
+line as it is typed) can be written in FX-26, not leave keys to host code.
+Two of §84's later members of the family:
+- **Bytes from the standard input**: `read-byte` (a `u8` or eof), or
+  `read-bytes` filling a bytevector and giving how many arrived, under
+  `(io stdin)`; best if a process can wait for input as it waits for a
+  message, as a `pselect` arm, beside a message or a deadline.
+- **A terminal mode**, perhaps `(io terminal)`: raw mode (no echo, no
+  line buffering, keys as they arrive, ^C a key, not a signal), restored
+  afterwards even if the program fails; the terminal's size in rows and
+  columns. When the standard input is no terminal, these report so rather
+  than fail, so the same program runs from a script.
+
+Kayak's questions for the design: restoring the terminal a form around a
+body (so it happens on failure too), or a pair of operations? A read that
+waits on a byte, or on input being ready, given `pselect`? A change in the
+terminal's size reaching the program as a message, or by asking again?
