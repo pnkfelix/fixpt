@@ -1204,7 +1204,11 @@ impl<'a> Compiler<'a> {
         match self.exp_at(x).clone() {
             Exp::With { body, .. } if withs => self.room(body, n, withs),
             Exp::Lambda { .. } | Exp::RLambda { .. } | Exp::Letrec { .. } | Exp::Prompt { .. } | Exp::Module(_) | Exp::With { .. } => -1,
-            Exp::App { fun, args } => all(&args, self.room(fun, n, withs)),
+            // A standard operation called is a node; as a value it is a
+            // closure of a word that the stack code of a form inlining
+            // the body would not have made (`standard_word`), so none.
+            Exp::App { fun, args } => all(&args, if matches!(*self.exp_at(fun), Exp::Var(_)) { n - 1 } else { self.room(fun, n, withs) }),
+            Exp::Var(v) if Self::has_standard_value(self.c.interner.name(v)) => -1,
             Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::Convention { exp: body, .. } => self.room(body, n, withs),
             Exp::LetRegion { body, .. } => self.room(body, n, withs),
             Exp::If { test, then, els } => all(&[then, els], self.room(test, n, withs)),

@@ -2134,3 +2134,13 @@ untyped one does, in both assemblers (`fixpt_native::cellular`,
 leaves a native closure to it), which calls native code. Test:
 `direct.rs`, `typed_calls_of_native_code`. Its cost to assembling words:
 `TODO.md` §93.
+
+**A standard operation as a value is never inlined.** Register code
+inlines small globals' bodies into later forms (`inlines`), but a standard
+operation as a value is a closure of a word only the stack code of the
+form that names it makes (`standard_word`, made afresh for each form). A
+later form inlining such a body declined as a whole, and ran as cellular
+code: on the REPL's machine `(define f … (let ((g +)) (g a b)))` then `(f 1
+2)` was the crash above. Now such a body has no room to be inlined or
+specialized (`room`, `c-room`, both compilers): the call stays a call. Test:
+`direct.rs`, `typed_calls_of_native_code` (its second half).

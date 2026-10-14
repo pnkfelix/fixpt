@@ -2520,8 +2520,8 @@ native closure entered it as a cellular one, a crash (`(stay-cellular (g
 1))`, `g` native). Fixed (`DONE.md` §93): typed calls check for a cellular
 closure as untyped ones do, and call anything else out to the Rust machine,
 which calls native code. Left:
-- **Its cost to assembling words** (measured back to back on peval: `fx
-  arm64` 4.76 → 6.88 ms, `arm64` 0.27 → 0.33 ms; run times unchanged): the
+- **Its cost to assembling words** (measured on a quiet machine on peval:
+  `fx arm64` 4.79 → 6.74 ms, `arm64` 0.28 → 0.36 ms; run times unchanged): the
   check and the call-out are in line at every typed call. Cheaper: the
   kind alone (a typed call's callee is a bloblet), and the call-out in one
   stub per word, out of line.

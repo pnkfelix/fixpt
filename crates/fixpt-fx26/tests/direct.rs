@@ -727,17 +727,23 @@ fn session(native: bool) -> Fx26Session {
 /// The REPL's machine (the native convention, what it declines run on
 /// the arm64 cellular machine): cellular code calls a native closure, by a
 /// typed call, through the Rust machine (it had been entered as a cellular
-/// one, and the machine crashed).
+/// one, and the machine crashed). And a standard operation as a value in a
+/// global's body, which a later form calls, makes that form decline
+/// nothing: such a body is not inlined, as it would need the operation's
+/// word, which only the stack code of the form making the closure makes.
 #[test]
 fn typed_calls_of_native_code() {
     let mut s = session(true);
     s.scheme.runtime_unrooted().run_word = Some(fixpt_native::cellular::run_word_registers);
     let text = "(define g (subr pure (int) int) (lambda (x) (+ x 1)))\n\
-                (stay-cellular (g 1))";
+                (stay-cellular (g 1))\n\
+                (define f (subr pure (int int) int) (lambda (a b) (let ((h +)) (h a b))))\n\
+                (f 1 2)";
     let forms = s.checker.read_in(FileId(0), text).expect("reads");
     let out: Vec<String> =
         s.run_forms(&forms).expect("runs").into_iter().map(|o| o.map_or_else(|e| e.message, |o| format!("{}{:?}", o.printed, o.value))).collect();
     assert!(out[1].ends_with("Ok(Some(\"2\"))"), "{out:?}");
+    assert_eq!(out[3], "Ok(Some(\"3\"))", "{out:?}");
 }
 
 /// A form run early, as the REPL does while it is typed, reads the globals

@@ -107,7 +107,10 @@
 ;; Rust compiler's `room` counts them: negative, and counted no further,
 ;; once they run out, or at a form that makes a closure, which an inlined
 ;; body would have to capture its slots in; a `with` counted as its body if
-;; `w` (a fast version's question, `TODO.md` §42), else as such a form.
+;; `w` (a fast version's question, `TODO.md` §42), else as such a form. A
+;; standard operation called is a node; as a value it is a closure of a
+;; word that the stack code of a form inlining the body would not have made
+;; (`c-standard-word`), so none.
 (define-rec
   (c-room (subr (maxeff (read @globals) spin) (exp int bool) int)
     (lambda (x n0 w)
@@ -121,7 +124,9 @@
               (e-prompt (t body h a b) -1)
               (e-module (items a b) -1)
               (e-with (m body a b) (if w (c-room body n w) -1))
-              (e-app (f args a b) (c-room-all args (c-room f n w) w))
+              (e-app (f args a b)
+                (c-room-all args (tagcase f (e-var (v c d) (- n 1)) (else y (c-room f n w))) w))
+              (e-var (v c d) (if (c-has-standard-value? (symbol->string v)) -1 n))
               (e-plambda (d body a b) (c-room body n w))
               (e-proj (body ds a b) (c-room body n w))
               (e-the (d body a b) (c-room body n w))
