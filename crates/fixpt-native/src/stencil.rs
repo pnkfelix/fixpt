@@ -34,7 +34,8 @@ pub fn opt_levels() -> Vec<&'static str> {
 /// runtime's `%run-word` (`Runtime::run_word`).
 pub fn run_word(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]) -> Result<Value, String> {
     let mut m = StencilMachine::new("2").ok_or("no stencils: this build had no nightly compiler")?;
-    let out = m.run_in_runtime(rt, word, args, u64::MAX).map_err(|t| format!("{t}"))?;
+    let fuel = rt.word_fuel;
+    let out = m.run_in_runtime(rt, word, args, fuel).map_err(|t| format!("{t}"))?;
     out.last().copied().ok_or_else(|| "the word left nothing".to_string())
 }
 
@@ -115,13 +116,51 @@ impl StencilMachine {
         let rt_ptr = rt as *mut fixpt_runtime::Runtime as u64;
         let mut st = self.stacks.start(&mut rt.heap, word, args, fuel);
         st.rt = rt_ptr;
-        self.go(st, word)
+        // Fuel in time slices, as `NativeMachine::run_in_runtime` gives it:
+        // at each one's end, the scheduler's `preempt` called if it would
+        // have another task run, then on from the state.
+        let slice = fixpt_runtime::sched::SLICE;
+        if st.fuel > slice {
+            (st.fuel, st.reserve) = (slice, st.fuel - slice);
+        }
+        let mut word = word;
+        loop {
+            self.go_on(&mut st, word);
+            if !(st.status == Trap::OutOfFuel.code().0 && st.reserve > 0 && st.aux <= 1) {
+                break;
+            }
+            if st.aux == 1 {
+                st.d -= 8;
+            }
+            let take = st.reserve.min(slice);
+            (st.status, st.aux, st.fuel, st.reserve) = (0, 0, take, st.reserve - take);
+            word = Value::from_raw(0);
+            let st_ref = &mut st;
+            let due = fixpt_runtime::sched::preempt_due_with(rt, |_, tag| crate::control::has_prompt(st_ref, tag));
+            let own = |f: Value| f.is_bloblet() && rt.heap.bloblet_kind(f) == const { fixpt_heap::layout::kind("cellular-closure") };
+            if let Some((f, t)) = due.filter(|&(f, _)| own(f))
+                && let Err(trap) = crate::control::enter_preempt(&mut st, f, t)
+            {
+                (st.status, st.aux) = trap.code();
+                break;
+            }
+        }
+        self.fuel_left = st.fuel;
+        self.stacks.finish(&st)
     }
 
     fn go(&mut self, mut st: State, word: Value) -> Result<Vec<Value>, Trap> {
+        self.go_on(&mut st, word);
+        self.fuel_left = st.fuel;
+        self.stacks.finish(&st)
+    }
+
+    /// Into the machine with `word` to run; or, `word` 0, on from where
+    /// the state stopped.
+    fn go_on(&mut self, st: &mut State, word: Value) {
         st.routines = self.routines;
-        let ip = st.base.wrapping_add(st.cur).wrapping_sub(4);
-        let stp = &mut st as *mut State as u64;
+        let ip = st.base.wrapping_add(st.cur).wrapping_sub(4).wrapping_sub(st.d);
+        let stp = st as *mut State as u64;
         // SAFETY: `start` is a stencil with the eight-argument signature,
         // placed whole with no relocations to patch (the build script
         // checked); the argument registers are the machine's registers, set
@@ -130,8 +169,6 @@ impl StencilMachine {
             let fp = st.ds_base - 8 - st.fp;
             self.space.call8(self.start, [st.base, ip, st.cur, st.dsp, st.rsp, stp, fp, word.raw()]);
         }
-        self.fuel_left = st.fuel;
-        self.stacks.finish(&st)
     }
 }
 

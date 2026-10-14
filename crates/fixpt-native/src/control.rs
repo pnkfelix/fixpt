@@ -262,6 +262,24 @@ fn reinstate(s: &mut Stacks, heap: &mut Heap, k: Value, v: Value, tail: bool) ->
     s.ds_push(v)
 }
 
+/// Whether the prompt of `tag` is on the state's return stack, which a
+/// capture up to it would reach (a time slice's end, `preempt_due`).
+pub(crate) fn has_prompt(st: &mut State, tag: Value) -> bool {
+    Stacks { st }.find_marked(PROMPT_MARK, tag).is_some()
+}
+
+/// At a time slice's end, the state stopped at a cell boundary: `f`, the
+/// scheduler's `preempt`, called there by entering trampoline word `t`
+/// (`call 0`, `drop`, `exit`) with it on the data stack, over a return to
+/// where the state was.
+pub(crate) fn enter_preempt(st: &mut State, f: Value, t: Value) -> Result<(), Trap> {
+    let mut s = Stacks { st };
+    s.push_return()?;
+    let fp = s.ds_len();
+    s.set_regs(t, WORD_CELL0, fp, Value::FALSE);
+    s.ds_push(f)
+}
+
 /// Routine `name`, if it is one done here; its operands, if any, start at
 /// the saved ip. `None` for the rest, and for a call of a native closure,
 /// which the Rust machine makes (`call_native`): cellular code run where

@@ -811,6 +811,7 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
         i += 1 + OPS[cells[i].as_fixnum() as usize].1;
     }
     let mut a = Asm::new();
+    a.in_regcode = true;
     a.long_branches = long;
     let labels: Vec<Label> = (0..=cells.len()).map(|_| a.label()).collect();
     let mut resume = vec![-1i64; cells.len()];
@@ -1276,6 +1277,7 @@ fn dump(heap: &Heap, rw: Value, at: usize, code: &[u32]) {
 /// to the register word's entry, native slot `slot`.
 pub fn assemble_adapter(n: usize, slot: usize) -> Vec<u32> {
     let mut a = Asm::new();
+    a.in_regcode = true;
     for i in 0..n {
         a.e(ldur(reg(i + 1), FP, -8 * i as i64));
     }

@@ -2493,12 +2493,16 @@ Built, all three of kayak's stages (`DONE.md` §92; the design,
   `VmFrame::Discard`), the Rust cellular machine (a trampoline word entered
   at a cell boundary), and the evaluator written in FX-26 (its own poll,
   `ev-poll`); test `processes.rs`, `a_spinning_process_is_preempted`.
-  Left: the arm64 cellular machines (interpreter, both JITs) and the
-  stencils, by leaving at a poll and coming back in through the trampoline
-  (the `docol` and word-entry polls moved after `CUR` and `IP` are set,
-  so that every poll is at a cell boundary); and register code, both
-  conventions, whose polls hold values in registers: a liveness pass over
-  register code, and a frame of the stub's own for what is live.
+  Then the arm64 cellular machines (interpreter, both JITs) and the
+  stencils: a slice's end leaves the machine at a cell boundary (the
+  `docol` and word-entry polls after `CUR` and `IP` are set; a call's
+  poll, detail 1, one cell back) and comes back in through the state
+  (`start` 0), the trampoline entered first if the scheduler would
+  preempt; test `fixpt-cli/tests/preempt.rs`, on each machine. Left:
+  register code, both conventions, whose polls hold values in registers
+  (their slices are taken in line meanwhile, `State::reserve`): a
+  liveness pass over register code, and a frame of the stub's own for
+  what is live.
 - **The cost of a switch** (the actors note's A4): measured, 585 ns for a
   message's two switches, after 890 (`DONE.md` §92). What is left is the
   call-out from native code and the frames copied to capture and

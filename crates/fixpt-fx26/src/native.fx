@@ -348,8 +348,14 @@
       (n-e (arm-ldr n-x14 n-st n-st-fp))
       (n-fp-decode n-x14))))
 
+;; A poll, at a cell boundary: `CUR` and `IP` say where to go on, so that a
+;; time slice's end leaves the machine (detail 0) and comes back there.
 (define n-fuel-check (subr (maxeff assembles spin) () unit)
   (lambda () (begin (n-e (arm-subs-imm n-fuel n-fuel 1)) (n-trap-if 0 n-trap-out-of-fuel 0))))
+;; A call's poll, before anything is done: its cell, one before `IP`, is
+;; where to go on (detail 1).
+(define n-fuel-call (subr (maxeff assembles spin) () unit)
+  (lambda () (begin (n-e (arm-subs-imm n-fuel n-fuel 1)) (n-trap-if 0 n-trap-out-of-fuel 1))))
 ;; A taken branch's poll: only a backward one can make a loop, so a branch
 ;; known to go forward (in a compiled word) makes none.
 (define n-fuel-unless-forward (subr (maxeff assembles spin) () unit)
@@ -490,7 +496,7 @@
       (begin
         (n-e (arm-ldr n-w n-dsp 0))
         (if typed (n-is-native n-w other) (n-is-closure n-w other))
-        (n-fuel-check)
+        (n-fuel-call)
         (if (and typed tail) #u (begin (n-ds-limit) (n-rs-limit)))
         (n-e (arm-ldr-post n-x10 n-ip -8))
         (n-e (arm-add-imm n-dsp n-dsp 8))
@@ -568,9 +574,10 @@
     (cond
       ((= n routine-docol)
        (begin
-         (n-fuel-check) (n-ds-limit) (n-rs-limit) (n-push-return)
+         (n-ds-limit) (n-rs-limit) (n-push-return)
          (n-e (arm-mov n-cur n-w))
          (n-e (arm-sub-imm n-ip n-x11 (+ 4 (* 8 n-word-cell0))))
+         (n-fuel-check)
          (n-next)))
       ((= n routine-exit) (n-pop-return))
       ((= n routine-halt) (n-b (get n-exit-common)))
@@ -787,9 +794,10 @@
              (labels (n-labels-for (+ cells 1)))
              (far-exit-label (get n-exit-common)))
         (begin
-          (n-fuel-check) (n-ds-limit) (n-rs-limit) (n-push-return)
+          (n-ds-limit) (n-rs-limit) (n-push-return)
           (n-e (arm-mov n-cur n-w))
           (n-e (arm-sub-imm n-ip n-x11 (+ 4 (* 8 n-word-cell0))))
+          (n-fuel-check)
           (n-b (array-ref labels 0))
           (n-flush-stubs)
           (n-cells w 0 cells starts labels far-exit-label)

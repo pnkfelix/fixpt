@@ -116,16 +116,26 @@ unsafe fn trap(st: *mut State, code: u64, aux: u64, base: u64, ip: u64, cur: u64
     0
 }
 
-/// Check fp and the data stack's limit: where a word is entered and a
-/// branch is taken.
-macro_rules! checks {
-    ($base:ident, $ip:ident, $cur:ident, $dsp:ident, $rsp:ident, $st:ident, $fp:ident) => {
+/// A poll: fuel taken, and, past a time slice's end, the machine left with
+/// the state where to go on, a cell boundary (detail 0: at `ip`; 1: at the
+/// call one before it), for the host to come back to
+/// (`StencilMachine::go`).
+macro_rules! fuel {
+    ($aux:expr, $base:ident, $ip:ident, $cur:ident, $dsp:ident, $rsp:ident, $st:ident, $fp:ident) => {
         // Fuel is in the state: the argument registers are the frame's.
         let fuel = unsafe { (*$st).fuel }.wrapping_sub(1);
         unsafe { (*$st).fuel = fuel };
         if fuel == 0 {
-            return unsafe { trap($st, TRAP_OUT_OF_FUEL, 0, $base, $ip, $cur, $dsp, $rsp, $fp) };
+            return unsafe { trap($st, TRAP_OUT_OF_FUEL, $aux, $base, $ip, $cur, $dsp, $rsp, $fp) };
         }
+    };
+}
+
+/// A poll, and the data stack's limit: where a branch is taken and a call
+/// made (`$aux` as `fuel!`'s).
+macro_rules! checks {
+    ($aux:expr, $base:ident, $ip:ident, $cur:ident, $dsp:ident, $rsp:ident, $st:ident, $fp:ident) => {
+        fuel!($aux, $base, $ip, $cur, $dsp, $rsp, $st, $fp);
         if $dsp < unsafe { (*$st).ds_limit } {
             return unsafe { trap($st, TRAP_STACK_OVERFLOW, 0, $base, $ip, $cur, $dsp, $rsp, $fp) };
         }
@@ -151,8 +161,12 @@ macro_rules! routine {
     };
 }
 
-// Where the host starts: run the word in `w`.
+// Where the host starts: run the word in `w`; or, `w` 0, go on where the
+// state stopped (a time slice's end).
 routine!(st_start, |base, ip, cur, dsp, rsp, st, fp, w| {
+    if w == 0 {
+        next!(base, ip, cur, dsp, rsp, st, fp)
+    }
     let e = unsafe { entry_of(base, w) };
     become unsafe { routine(st, e) }(base, ip, cur, dsp, rsp, st, fp, w)
 });
@@ -203,12 +217,16 @@ unsafe fn is_closure(base: u64, v: u64) -> bool {
 }
 
 routine!(st_docol, |base, ip, cur, dsp, rsp, st, fp, w| {
-    checks!(base, ip, cur, dsp, rsp, st, fp);
+    if dsp < unsafe { (*st).ds_limit } {
+        return unsafe { trap(st, TRAP_STACK_OVERFLOW, 0, base, ip, cur, dsp, rsp, fp) };
+    }
     if rsp <= unsafe { (*st).rs_limit } {
         return unsafe { trap(st, TRAP_TOO_DEEP, 0, base, ip, cur, dsp, rsp, fp) };
     }
     let rsp = unsafe { push_return(st, base, ip, cur, rsp, fp) };
     let ip = base.wrapping_add(w).wrapping_sub(4 + 8 * WORD_CELL0);
+    // The poll once the word is entered, at its first cell.
+    fuel!(0, base, ip, w, dsp, rsp, st, fp);
     next!(base, ip, w, dsp, rsp, st, fp)
 });
 
@@ -310,13 +328,9 @@ macro_rules! call {
         }
         if $typed && $tail {
             // A typed tail call grows neither stack: only fuel is checked.
-            let fuel = unsafe { (*$st).fuel }.wrapping_sub(1);
-            unsafe { (*$st).fuel = fuel };
-            if fuel == 0 {
-                return unsafe { trap($st, TRAP_OUT_OF_FUEL, 0, $base, $ip, $cur, $dsp, $rsp, $fp) };
-            }
+            fuel!(1, $base, $ip, $cur, $dsp, $rsp, $st, $fp);
         } else {
-            checks!($base, $ip, $cur, $dsp, $rsp, $st, $fp);
+            checks!(1, $base, $ip, $cur, $dsp, $rsp, $st, $fp);
         }
         if !($typed && $tail) && $rsp <= unsafe { (*$st).rs_limit } {
             return unsafe { trap($st, TRAP_TOO_DEEP, 0, $base, $ip, $cur, $dsp, $rsp, $fp) };
@@ -385,7 +399,7 @@ routine!(st_lit, |base, ip, cur, dsp, rsp, st, fp, w| {
 routine!(st_branch, |base, ip, cur, dsp, rsp, st, fp, w| {
     let off = unsafe { rd(ip) };
     let ip = ip.wrapping_sub(8).wrapping_sub(off);
-    checks!(base, ip, cur, dsp, rsp, st, fp);
+    checks!(0, base, ip, cur, dsp, rsp, st, fp);
     next!(base, ip, cur, dsp, rsp, st, fp)
 });
 
@@ -396,7 +410,7 @@ routine!(st_zbranch, |base, ip, cur, dsp, rsp, st, fp, w| {
     let ip = ip.wrapping_sub(8);
     if flag == FALSE {
         let ip = ip.wrapping_sub(off);
-        checks!(base, ip, cur, dsp, rsp, st, fp);
+        checks!(0, base, ip, cur, dsp, rsp, st, fp);
         next!(base, ip, cur, dsp, rsp, st, fp)
     }
     next!(base, ip, cur, dsp, rsp, st, fp)

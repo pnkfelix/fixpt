@@ -73,4 +73,10 @@ pub struct State {
     /// Where `pure_call` is: register code's `prim1`, `prim2` and `prim2imm`
     /// call a primitive that never collects there, with no safepoint.
     pub pure: u64,
+    /// Fuel not yet given out: `fuel` is a time slice of it
+    /// (`fixpt_runtime::sched::SLICE`), at whose end the machine leaves, for
+    /// the scheduler to have another task run if it would, and comes back
+    /// (`NativeMachine::run_in_runtime`); register code, whose polls are no
+    /// cell boundaries, takes the next slice itself.
+    pub reserve: u64,
 }

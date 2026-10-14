@@ -134,6 +134,10 @@ struct Asm {
     /// whose callee is native code goes to the machine's routine, which
     /// has the call-out in line.
     in_word: bool,
+    /// Register code, whose polls take their next time slice in line
+    /// (`fuel`), from these stubs: each, and where it goes back to.
+    in_regcode: bool,
+    refills: Vec<(Label, Label)>,
 }
 
 impl Asm {
@@ -151,6 +155,8 @@ impl Asm {
             link: None,
             long_branches: false,
             in_word: false,
+            in_regcode: false,
+            refills: Vec::new(),
         };
         a.trap_common = a.label();
         a.exit_common = a.label();
@@ -226,6 +232,26 @@ impl Asm {
         self.stubs.push((l, code, aux));
     }
     fn flush_stubs(&mut self) {
+        // Register code's next slice: out of fuel if the reserve is spent.
+        for (refill, back) in std::mem::take(&mut self.refills) {
+            self.bind(refill);
+            let out = self.label();
+            self.e(ldr(X13, ST, off(offset_of!(State, reserve))));
+            self.cbz(X13, out);
+            self.es(&mov_imm64(X14, fixpt_runtime::sched::SLICE));
+            self.e(cmp(X13, X14));
+            self.e(csel(X14, X13, X14, Cond::Lo));
+            self.e(sub(X13, X13, X14));
+            self.e(str(X13, ST, off(offset_of!(State, reserve))));
+            self.e(mov(FUEL, X14));
+            self.b(back);
+            self.bind(out);
+            let (code, aux) = Trap::OutOfFuel.code();
+            self.e(movz(X13, code as u32, 0));
+            self.e(movz(X14, aux as u32, 0));
+            let t = self.trap_common;
+            self.b(t);
+        }
         for (l, code, aux) in std::mem::take(&mut self.stubs) {
             self.bind(l);
             self.e(movz(X13, code as u32, 0));
@@ -466,9 +492,29 @@ impl Asm {
         self.fp_decode(X14);
     }
 
+    /// A poll, at a cell boundary: `CUR` and `IP` say where to go on, as a
+    /// return entry would, so that a time slice's end leaves the machine
+    /// (as running out of fuel, detail 0) and comes back there. In register
+    /// code, which keeps values in registers, the next slice is taken from
+    /// the reserve here instead (`refills`).
     fn fuel(&mut self) {
         self.e(subs_imm(FUEL, FUEL, 1));
-        self.trap_if(Cond::Eq, Trap::OutOfFuel);
+        if self.in_regcode {
+            let (refill, back) = (self.label(), self.label());
+            self.b_cond(Cond::Eq, refill);
+            self.bind(back);
+            self.refills.push((refill, back));
+        } else {
+            self.trap_if(Cond::Eq, Trap::OutOfFuel);
+        }
+    }
+    /// A call's poll, before anything is done: its cell, one before `IP`,
+    /// is where to go on (detail 1).
+    fn fuel_call(&mut self) {
+        self.e(subs_imm(FUEL, FUEL, 1));
+        let l = self.label();
+        self.b_cond(Cond::Eq, l);
+        self.stubs.push((l, Trap::OutOfFuel.code().0, 1));
     }
 
     /// A taken branch's poll: only a backward one can make a loop, so a
@@ -552,8 +598,14 @@ fn generate() -> (Vec<u32>, usize, Vec<usize>, [i64; 2]) {
         mov(ST, 0),
     ]);
     a.load();
+    // `start` 0: going on where the state says, as after a control
+    // call-out (a time slice's end, `NativeMachine::run_in_runtime`).
+    let resume = a.label();
     a.e(ldr(W, ST, off(offset_of!(State, start))));
+    a.cbz(W, resume);
     a.run_word_in_w();
+    a.bind(resume);
+    a.enter_cur(X13);
 
     // A trap: code in x13 and detail in x14; then the common exit.
     let (tc, ec) = (a.trap_common, a.exit_common);
@@ -590,13 +642,14 @@ fn generate() -> (Vec<u32>, usize, Vec<usize>, [i64; 2]) {
 fn routine_body(a: &mut Asm, n: usize, name: &'static str) {
     match name {
         "docol" => {
-            // x9 is the word and x11 its suffix + 4.
-            a.fuel();
+            // x9 is the word and x11 its suffix + 4. The poll once the word
+            // is entered, at its first cell: a cell boundary (`fuel`).
             a.ds_limit();
             a.rs_limit();
             a.push_return();
             a.e(mov(CUR, W));
             a.e(sub_imm(IP, X11, (4 + 8 * WORD_CELL0) as u32));
+            a.fuel();
             a.next();
         }
         "exit" => a.pop_return(),
@@ -884,7 +937,7 @@ fn routine_body(a: &mut Asm, n: usize, name: &'static str) {
             } else {
                 a.is_closure(W, other);
             }
-            a.fuel();
+            a.fuel_call();
             if !(typed && name == "tailcall") {
                 a.ds_limit();
                 a.rs_limit();
@@ -974,12 +1027,12 @@ fn assemble_word_as(heap: &Heap, word: Value, far: [i64; 2], long: bool) -> Resu
     // jump of its own, placed after it.
     let far_exit = a.exit_common;
     // As a cell: `docol`'s work, then the first cell.
-    a.fuel();
     a.ds_limit();
     a.rs_limit();
     a.push_return();
     a.e(mov(CUR, W));
     a.e(sub_imm(IP, X11, (4 + 8 * WORD_CELL0) as u32));
+    a.fuel();
     a.b(labels[0]);
     a.flush_stubs();
     for (i, cell) in cells.iter().enumerate() {
@@ -1597,6 +1650,7 @@ impl Stacks {
             code_lo: heap.code_area_address() as u64,
             leaf_link: 0,
             pure: pure_call as *const () as u64,
+            reserve: 0,
         }
     }
 
@@ -2054,9 +2108,38 @@ impl NativeMachine {
         st.table = self.table.as_ptr() as u64;
         st.resume = self.resume.as_ptr() as u64;
         (st.trap, st.exit) = self.commons_addresses();
-        // SAFETY: as for `run`; the runtime, and so the heap, is reached
-        // only through the state while the machine runs.
-        unsafe { self.space.call(self.entry, [&mut st as *mut State as u64, 0, 0, 0]) };
+        // Fuel in time slices (`State::reserve`).
+        let slice = fixpt_runtime::sched::SLICE;
+        if st.fuel > slice {
+            (st.fuel, st.reserve) = (slice, st.fuel - slice);
+        }
+        loop {
+            // SAFETY: as for `run`; the runtime, and so the heap, is reached
+            // only through the state while the machine runs.
+            unsafe { self.space.call(self.entry, [&mut st as *mut State as u64, 0, 0, 0]) };
+            // A time slice's end, at a cell boundary (detail 0, or 1 at a
+            // call, whose cell is one back): the next slice, and, if the
+            // scheduler would have another task run, its `preempt` called
+            // there; then on from the state (`start` 0).
+            if !(st.status == Trap::OutOfFuel.code().0 && st.reserve > 0 && st.aux <= 1) {
+                break;
+            }
+            if st.aux == 1 {
+                st.d -= 8;
+            }
+            let take = st.reserve.min(slice);
+            (st.status, st.aux, st.fuel, st.reserve, st.start) = (0, 0, take, st.reserve - take, 0);
+            let st_ref = &mut st;
+            let due = fixpt_runtime::sched::preempt_due_with(rt, |_, tag| crate::control::has_prompt(st_ref, tag));
+            let own = |f: Value| f.is_bloblet() && rt.heap.bloblet_kind(f) == const { fixpt_heap::layout::kind("cellular-closure") };
+            if let Some((f, t)) = due.filter(|&(f, _)| own(f))
+                && let Err(trap) = crate::control::enter_preempt(&mut st, f, t)
+            {
+                let (code, aux) = trap.code();
+                (st.status, st.aux) = (code, aux);
+                break;
+            }
+        }
         self.fuel_left = st.fuel;
         // For finding a fault: with `FIXPT_TRAP_WHERE` set, the word and the
         // closure running when the machine trapped.
