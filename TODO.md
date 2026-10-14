@@ -2484,28 +2484,6 @@ frame slots, as the suffix. Left:
 Built, all three of kayak's stages (`DONE.md` §92; the design,
 `docs/research/processes.md`; the forms, `docs/fx26.md`, "Processes and
 `par`"). Left:
-- **Q2: preemption at fuel polls**, so that a process that spins cannot
-  starve another (fairness, which the semantics promises and the prototype
-  does not keep); on every machine (the user's, 2026-10-14). Built: the
-  scheduler's `preempt` and parked tasks, the runtime's decision
-  (`sched::preempt_due`, a time slice of `SLICE` polls), the bytecode
-  machine (a call at an instruction boundary, its value dropped:
-  `VmFrame::Discard`), the Rust cellular machine (a trampoline word entered
-  at a cell boundary), and the evaluator written in FX-26 (its own poll,
-  `ev-poll`); test `processes.rs`, `a_spinning_process_is_preempted`.
-  Then the arm64 cellular machines (interpreter, both JITs) and the
-  stencils: a slice's end leaves the machine at a cell boundary (the
-  `docol` and word-entry polls after `CUR` and `IP` are set; a call's
-  poll, detail 1, one cell back) and comes back in through the state
-  (`start` 0), the trampoline entered first if the scheduler would
-  preempt; test `fixpt-cli/tests/preempt.rs`, on each machine. Then
-  register code in the cellular convention: its entry's and loops' polls
-  push what is live (a liveness pass over register code) and leave, detail
-  2, coming back by the resume table; and a task is not preempted again
-  until its `preempt` is done and it has had a slice of its own (the
-  heap's per-task state). Left: the native convention (`direct.rs`), whose
-  polls hold values in registers, some raw: a frame of the stub's own for
-  what is live, and the call made from native code.
 - **The cost of a switch** (the actors note's A4): measured, 585 ns for a
   message's two switches, after 890 (`DONE.md` §92). What is left is the
   call-out from native code and the frames copied to capture and

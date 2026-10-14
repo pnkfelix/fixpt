@@ -50,6 +50,7 @@ fn machines() -> Vec<&'static str> {
         "fx-cells-fxjit-cellcc",
         "fx-cells-stencils-cellcc",
         "fx-regs-rsjit-cellcc",
+        "fx-regs-rsjit-nativecc",
     ]
     .into_iter()
     .filter(|m| stencils || !m.contains("stencils"))

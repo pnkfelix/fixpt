@@ -61,7 +61,7 @@ use std::mem::offset_of;
 mod state {
     include!("state.rs");
 }
-mod regcode;
+pub(crate) mod regcode;
 pub use regcode::{assemble_adapter, assemble_register_word};
 pub(crate) use state::{ROUTINE_SLOTS, State};
 

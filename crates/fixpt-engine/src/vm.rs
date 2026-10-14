@@ -523,6 +523,7 @@ impl Vm {
         match frame {
             VmFrame::Halt => Ok(Some(v)),
             VmFrame::Discard { pc, fp } => {
+                fixpt_runtime::sched::preempt_done(rt);
                 self.frames.pop();
                 self.marks.trim(self.frames.len());
                 self.stack.truncate(self.fp as usize);

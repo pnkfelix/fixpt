@@ -152,12 +152,23 @@ Two refinements:
    (the scheduler begins again). Erlang would let an unlinked process die
    alone; that needs F1 and F2 (signals to a top prompt).
 7. **Fairness.** The semantics is fair, Clinger's: every message sent is
-   received by a process that keeps receiving. The prototype does not
-   preempt: a task runs until it waits, ends, or (the program's) sends.
-   So a process that spins for ever starves the others, where OS threads
-   would not; but its form never ends either way, so the difference shows
-   only in I/O made before. Preemption at fuel polls (the actors note's
-   Q2) closes it.
+   received by a process that keeps receiving. Built (2026-10-14, Q2):
+   preemption at fuel polls on every machine, so a process that spins
+   for ever starves no other. Each machine's fuel is given out in time
+   slices; at a slice's end the runtime decides (`sched::preempt_due`)
+   and the machine calls the scheduler's `preempt` where it is: the
+   bytecode machine at an instruction boundary, the cellular machines at
+   a cell boundary (through a trampoline word, `call 0`, `drop`, `exit`),
+   register code at its entry and loops (the registers live pushed, by a
+   liveness pass), native code from a frame of the poll's own, mapped as
+   a procedure's, and the evaluator written in FX-26 from a poll of its
+   own. Preemption made the scheduler's check-then-act sequences races,
+   all fixed: a waker given for what was already ready (a message arrived
+   between the check and the wait) now runs at once; `race`'s winner
+   fills its cell in one step; the first task looks again before it says
+   deadlock; and a task is not preempted until its `preempt` has returned,
+   nor from its wait's capture until it is resumed, nor again until it
+   has had a slice.
 8. **`spawn`, `send`, `receive`, `par`, `icell-get` and `icell-put!` are
    forms**, so their names are keywords: one benchmark port's `send`
    became `send-to`. `icell-get` and `icell-put!` were procedures; they
@@ -217,8 +228,8 @@ its use over futures that compute.
    - *Losers*: an implementation may stop them at once, at their next
      wait, or never. FX-26's stops each at its next wait, or before it
      starts: a cancelled task ends, its places with it, instead of
-     resuming; one that computes without waiting runs to its end, as
-     nothing preempts it (Q2). So that no program can tell which, a branch's
+     resuming; one that computes without waiting is stopped where it is
+     next preempted (Q2), its waker the same. So that no program can tell which, a branch's
      effect must be **cancellable**: it may read, allocate, await,
      receive, spin, and do anything on regions of its own, but not write,
      fill a visible I-cell, send, or do I/O outside itself. A branch
@@ -278,7 +289,6 @@ to rather than its frames copied, would take most of that; not done.
 
 ## What is left
 
-- **Q2**: preemption at fuel polls, for fairness.
 - **The cost of a switch** (the actors note's A4): measured, 585 ns a
   message's two (above); one-shot stack segments if it matters.
 - **Links, monitors, supervisors** (F1–F4), session types (P9–P11), and

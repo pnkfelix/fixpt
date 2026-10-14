@@ -60,9 +60,11 @@ pub(super) struct Regions {
     /// Each task's regions, the newest last; none for a task ended (`None`).
     stacks: Vec<Option<Vec<usize>>>,
     /// Each task's state as the scheduler preempts it
-    /// (`fixpt_runtime::sched::preempt_due`): 0, as any; 1, its `preempt`
-    /// running, called at a poll, until it is done; 2, done, the next time
-    /// slice the task's own, whole, before it is preempted again.
+    /// (`fixpt_runtime::sched::preempt_due`): how many things that must not
+    /// be preempted it is in (its `preempt`, called at a poll, until that
+    /// call has returned; its wait, from the capture until resumed), and,
+    /// in the top bit, a grace: the next time slice the task's own, whole,
+    /// before it is preempted again.
     quiet: Vec<u8>,
     /// The task current.
     task: usize,
@@ -284,18 +286,38 @@ impl Heap {
         t
     }
 
-    /// The current task's state as the scheduler preempts it
-    /// (`Regions::quiet`).
-    pub fn task_quiet(&self) -> u8 {
-        self.regions.quiet.get(self.regions.task).copied().unwrap_or(0)
-    }
-
-    /// The current task's state as the scheduler preempts it, set.
-    pub fn set_task_quiet(&mut self, state: u8) {
+    fn quiet_mut(&mut self) -> &mut u8 {
         let t = self.regions.task;
         let q = &mut self.regions.quiet;
         q.resize(q.len().max(t + 1), 0);
-        q[t] = state;
+        &mut q[t]
+    }
+
+    /// Whether the current task is in something that must not be preempted
+    /// (`Regions::quiet`).
+    pub fn task_quiet(&self) -> bool {
+        self.regions.quiet.get(self.regions.task).is_some_and(|q| q & 0x7f != 0)
+    }
+
+    /// The current task into something that must not be preempted.
+    pub fn quiet_enter(&mut self) {
+        let q = self.quiet_mut();
+        *q = (*q & 0x80) | ((*q & 0x7f) + 1).min(0x7f);
+    }
+
+    /// Out of it; out of the last, a grace begins.
+    pub fn quiet_leave(&mut self) {
+        let q = self.quiet_mut();
+        let d = (*q & 0x7f).saturating_sub(1);
+        *q = d | if d == 0 { 0x80 } else { *q & 0x80 };
+    }
+
+    /// Whether the current task has a grace, which ends here.
+    pub fn take_grace(&mut self) -> bool {
+        let q = self.quiet_mut();
+        let g = *q & 0x80 != 0;
+        *q &= 0x7f;
+        g
     }
 
     /// Make task `t` current; the task that was.

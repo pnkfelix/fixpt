@@ -855,12 +855,13 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
 /// the compilers never read again before writing; so it is taken to write
 /// them all. For a time slice's end at a poll, which keeps only these
 /// (`poll_regs`).
-fn liveness(cells: &[Value], starts: &[bool]) -> Vec<u16> {
+pub(crate) fn liveness(cells: &[Value], starts: &[bool]) -> Vec<u16> {
     let all_regs: u16 = 0b1_1111_1110;
     let upto = |n: usize| -> u16 { (1u16 << (n.min(REGS) + 1)) - 2 };
     let bit = |k: usize| -> u16 { if k == 0 || k > REGS { 0 } else { 1 << k } };
-    // Each instruction's (uses, defs, successors).
-    let mut info: Vec<(usize, u16, u16, Vec<usize>)> = Vec::new();
+    const NONE: u32 = u32::MAX;
+    // Each instruction's start, uses, defs, and up to two successors.
+    let mut info: Vec<(u32, u16, u16, u32, u32)> = Vec::with_capacity(cells.len() / 2 + 1);
     let mut i = 0;
     while i < cells.len() {
         let (name, n, _) = OPS[cells[i].as_fixnum() as usize];
@@ -884,27 +885,24 @@ fn liveness(cells: &[Value], starts: &[bool]) -> Vec<u16> {
             "tailinvoke" => (1 | upto(o(0)), 0),
             _ => (0, 0),
         };
-        let mut succ = Vec::new();
-        if !matches!(name, "return" | "tailinvoke" | "branch") {
-            succ.push(next);
-        }
-        match name {
-            "branch" | "branchf" | "brancht" => succ.push((i as i64 + 2 + cells[i + 1].as_fixnum()) as usize),
-            "global-guard" => succ.push((i as i64 + 4 + cells[i + 3].as_fixnum()) as usize),
-            _ => {}
-        }
-        info.push((i, uses, defs, succ));
+        let fall = if matches!(name, "return" | "tailinvoke" | "branch") { NONE } else { next as u32 };
+        let jump = match name {
+            "branch" | "branchf" | "brancht" => (i as i64 + 2 + cells[i + 1].as_fixnum()) as u32,
+            "global-guard" => (i as i64 + 4 + cells[i + 3].as_fixnum()) as u32,
+            _ => NONE,
+        };
+        info.push((i as u32, uses, defs, fall, jump));
         i = next;
     }
     let mut live = vec![0u16; cells.len() + 1];
     let _ = starts;
     loop {
         let mut changed = false;
-        for (i, uses, defs, succ) in info.iter().rev() {
-            let out = succ.iter().fold(0u16, |m, &s| m | live.get(s).copied().unwrap_or(0));
-            let inn = uses | (out & !defs);
-            if inn != live[*i] {
-                live[*i] = inn;
+        for &(i, uses, defs, fall, jump) in info.iter().rev() {
+            let at = |s: u32| if s == NONE { 0 } else { live[s as usize] };
+            let inn = uses | ((at(fall) | at(jump)) & !defs);
+            if inn != live[i as usize] {
+                live[i as usize] = inn;
                 changed = true;
             }
         }
@@ -937,7 +935,20 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
     let far_exit = a.exit_common;
     let near_exit = a.label();
     a.exit_common = near_exit;
-    let live = liveness(&cells, &starts);
+    // What each loop's poll keeps: only a word with a loop needs it, and
+    // the pass is not free (a third of assembling register code, done for
+    // every word).
+    let looped = {
+        let mut i = 0;
+        let mut any = false;
+        while i < cells.len() && !any {
+            let (name, n, _) = OPS[cells[i].as_fixnum() as usize];
+            any = name == "branch" && cells[i + 1].as_fixnum() < -1;
+            i += 1 + n;
+        }
+        any
+    };
+    let live = if looped { liveness(&cells, &starts) } else { Vec::new() };
     // The register entry. Its poll keeps the arguments, REG1…REGn, unless
     // they are counted (`vargs`, whose count is in X9 then).
     let entry = a.label();

@@ -195,7 +195,7 @@
           (begin
             (set ev-ticks 4096)
             (if (and (procedure? (get ev-preempt)) ((proj %sched val val bool) 31 #f #f))
-                (begin (apply-val (get ev-preempt) nil) #u)
+                (begin (apply-val (get ev-preempt) nil) ((proj %sched val val val) 32 #f #f) #u)
                 #u))))))
 
 ;; Quoted data interned (TODO §51), as the heap interns them

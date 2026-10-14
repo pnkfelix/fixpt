@@ -247,6 +247,7 @@ fn a_spinning_process_is_preempted() {
         ("lowered", lowered(text, None)),
         ("evaluated", printed(common::with_own(|s| s.eval_with_own_evaluator(text)))),
         ("compiled", printed(common::with_own(|s| s.compile_with_own_compiler(text)))),
+        ("native", native(text)),
     ];
     for (way, got) in ways {
         assert_eq!(got, Ok("42".to_string()), "{way}");

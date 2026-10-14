@@ -143,7 +143,8 @@ are in the last section, "Log: the glance's details", and in
   scheduler sleeps until the earliest); and `race`, best effort (losers
   stopped at their next wait). Messages copied, measured (H3: 9 ns a
   word, after 0.59 µs a message, a switch's cost, a third less); `self`,
-  and a `sendable` kind. Left: preemption (Q2).
+  a `sendable` kind; and preemption at fuel polls on every machine (Q2).
+  Next: process monitors (kayak's, `TODO.md` §94).
 - **Cellular code calling native code** (2026-10-13, `TODO.md` §93):
   fixed, a crash on the REPL's machine where the native convention
   declined a form; its cost to assembling words mostly recovered (peval's

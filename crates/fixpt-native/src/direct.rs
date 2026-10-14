@@ -176,6 +176,11 @@ struct DState {
     /// where they are by the collection the overflow makes.
     overflow_info: u64,
     overflow_code: u64,
+    /// Fuel not yet given out: `fuel` is a time slice of it
+    /// (`fixpt_runtime::sched::slice`), at whose end a poll takes the next
+    /// and asks whether the scheduler would have another task run
+    /// (`Callout::Poll`).
+    reserve: u64,
 }
 
 /// What the stack cache did: overflows and collections, and the frames and
@@ -210,6 +215,106 @@ pub fn stack_stats() -> StackStats {
 /// The traps this code raises, by code.
 const TRAPS: [&str; 6] = ["", "evaluation step limit exceeded", "stack overflow", "a primitive failed", "car or cdr of a non-pair", "division by zero"];
 const OUT_OF_FUEL: u32 = 1;
+/// The call-out a poll makes at a time slice's end (`Callout::Poll`).
+const POLL: usize = 4;
+const POLL_DONE: usize = 5;
+/// A poll's frame (`emit_poll`), laid out as a procedure's: its link, its
+/// second word, its map, eleven values (x0…x8 where they hold values, the
+/// closure, the code bloblet), then the raw words (x0…x8 where they hold
+/// raw bits, and x9), and a word to align it.
+const POLL_FRAME: u64 = 208;
+const POLL_FIELDS: u64 = 14;
+const POLL_RAW0: u32 = 24 + 8 * 11;
+
+/// A poll whose slice is spent (`emit_poll`): where its way out is, and
+/// where the procedure goes on; which of x0…x8 hold values to keep, and
+/// which raw bits; whether the closure lives only in `CLO` (no frame, and
+/// the code reads it); and whether the procedure has its frame, whose map
+/// for here (`map`) is stored first.
+struct NPoll {
+    out: Label,
+    back: Label,
+    values: Vec<Reg>,
+    raws: Vec<Reg>,
+    clo: bool,
+    map: Option<i64>,
+}
+
+/// A poll's way out, at a time slice's end: out of fuel (as before) if the
+/// reserve is spent; else a frame of its own, mapped as a procedure's,
+/// holding what is live (`NPoll`), the call-out that gives the next slice
+/// and says whether the scheduler would have another task run, and if so
+/// its `preempt` called from here, as any procedure is, so that a capture
+/// in it takes this frame as it takes any. Back: what was kept put back,
+/// the frame popped, and on: to `back` by its return if the procedure has
+/// a frame (its second word, which a restore may have made the underflow
+/// that brings the procedure's frame back first); else by a branch, the
+/// link the procedure's own again.
+fn emit_poll(a: &mut Asm, p: &NPoll, stubs: &mut Vec<(Label, u32)>) {
+    a.bind(p.out);
+    a.e(ldr(X16, ST, st_off(offset_of!(DState, reserve))));
+    a.e(cmp_imm(X16, 0));
+    let spent = a.label();
+    stubs.push((spent, OUT_OF_FUEL));
+    a.to(spent, Fix::If(Cond::Eq));
+    if let Some(m) = p.map {
+        a.es(&mov_imm64(X16, Value::fixnum(m).raw()));
+        a.e(str(X16, FRAME, 16));
+        a.to(p.back, Fix::Adr(X17));
+        push_frame(a, X17, POLL_FRAME);
+    } else {
+        push_frame(a, LINK, POLL_FRAME);
+    }
+    let mut mask = 1u64 << 10;
+    for &r in &p.values {
+        mask |= 1 << r;
+    }
+    if p.clo {
+        mask |= 1 << 9;
+    }
+    a.es(&mov_imm64(X16, Value::fixnum((POLL_FIELDS << MAP_BITS | mask) as i64).raw()));
+    a.e(str(X16, FRAME, 16));
+    for &r in &p.values {
+        a.e(str(r, FRAME, 24 + 8 * r as u32));
+    }
+    if p.clo {
+        a.e(str(CLO, FRAME, 24 + 8 * 9));
+    }
+    ldr_field(a, X16, 1);
+    a.e(str(X16, FRAME, 24 + 8 * 10));
+    for &r in &p.raws {
+        a.e(str(r, FRAME, POLL_RAW0 + 8 * r as u32));
+    }
+    a.e(str(X9, FRAME, POLL_RAW0 + 8 * 9));
+    call_out(a, POLL);
+    a.e(ldr(FUEL, ST, st_off(offset_of!(DState, fuel))));
+    a.e(ldr(CLO, ST, st_off(offset_of!(DState, aux))));
+    let resume = a.label();
+    a.e(cmp_imm(CLO, 0));
+    a.to(resume, Fix::If(Cond::Eq));
+    a.e(ldur(X16, CLO, field_off(CLOSURE_WORD)));
+    a.e(add(X16, X16, DELTA));
+    a.e(movz(X9, 0, 0));
+    a.e(blr(X16));
+    call_out(a, POLL_DONE);
+    a.bind(resume);
+    for &r in &p.values {
+        a.e(ldr(r, FRAME, 24 + 8 * r as u32));
+    }
+    if p.clo {
+        a.e(ldr(CLO, FRAME, 24 + 8 * 9));
+    }
+    for &r in &p.raws {
+        a.e(ldr(r, FRAME, POLL_RAW0 + 8 * r as u32));
+    }
+    a.e(ldr(X9, FRAME, POLL_RAW0 + 8 * 9));
+    pop_frame(a, POLL_FRAME);
+    if p.map.is_some() {
+        a.e(ret());
+    } else {
+        a.to(p.back, Fix::B);
+    }
+}
 const STACK_OVERFLOW: u32 = 2;
 const PRIM_FAILED: u32 = 3;
 const NOT_A_PAIR: u32 = 4;
@@ -275,6 +380,12 @@ enum Callout {
     /// copied into the heap, that one moved to the cache's top. No
     /// collection, as for `Underflow`.
     Overflow,
+    /// A time slice's end, at a poll (`poll_frame`): the next slice given,
+    /// and in `aux` the scheduler's `preempt` if it would have another task
+    /// run, for the poll to call, else 0. No collection.
+    Poll,
+    /// That call returned (`sched::preempt_done`). No collection.
+    PollDone,
 }
 
 impl Callout {
@@ -283,7 +394,7 @@ impl Callout {
             Callout::Cons | Callout::FieldRef | Callout::Abort | Callout::Reinstate | Callout::FirstMark | Callout::MarksOf => 2,
             Callout::Capture { whole } => if whole { 1 } else { 2 },
             Callout::CurrentMarks | Callout::Box { .. } | Callout::Unbox | Callout::BoxF64 => 1,
-            Callout::Foreign | Callout::ClosureAny | Callout::Rest | Callout::Underflow | Callout::Overflow => 0,
+            Callout::Foreign | Callout::ClosureAny | Callout::Rest | Callout::Underflow | Callout::Overflow | Callout::Poll | Callout::PollDone => 0,
             Callout::Prim { n, .. } | Callout::Pure { n, .. } | Callout::Closure { n } | Callout::RegionClosure { n } => n,
         }
     }
@@ -664,8 +775,10 @@ impl DirectMachine {
         space.flush(trap_stub, 4 * code.len());
         // Call-out 0: what is not native code, called (`common_foreign`);
         // 1: a closure made (`common_closure`); 2 and 3: the stack cache's
-        // underflow and overflow (`common_underflow`, `common_overflow`).
-        let callouts = vec![Callout::Foreign, Callout::ClosureAny, Callout::Underflow, Callout::Overflow];
+        // underflow and overflow (`common_underflow`, `common_overflow`);
+        // 4 and 5: a time slice's end at a poll, and its call of `preempt`
+        // returned (`POLL`, `POLL_DONE`).
+        let callouts = vec![Callout::Foreign, Callout::ClosureAny, Callout::Underflow, Callout::Overflow, Callout::Poll, Callout::PollDone];
         let code = common_foreign(0);
         let foreign = space.alloc(4 * code.len(), 16).ok_or("no room for the common foreign call")?;
         space.write_code(foreign, &code);
@@ -850,6 +963,11 @@ fn run(r: &Runner, rt: &mut fixpt_runtime::Runtime, p: Compiled, args: &[Value],
         region_table: rt.heap.region_table_address() as u64,
         ..DState::default()
     };
+    // Fuel in time slices (`DState::reserve`).
+    let slice = fixpt_runtime::sched::slice();
+    if st.fuel > slice {
+        (st.fuel, st.reserve) = (slice, st.fuel - slice);
+    }
     for (i, a) in args.iter().enumerate() {
         st.args[i] = a.raw();
     }
@@ -1451,6 +1569,8 @@ impl Compiling<'_> {
         // Each trap site branches to a stub of its own, which calls the
         // trap's code: so the return address says where it was.
         let mut stubs: Vec<(Label, u32)> = Vec::new();
+        // The polls' ways out at a time slice's end (`emit_poll`).
+        let mut polls: Vec<NPoll> = Vec::new();
         // Each call of what may not be native code branches, when it is
         // not, to a stub of its own (with where to come back to, how many
         // arguments, and whether a tail call), which calls the common
@@ -1478,8 +1598,15 @@ impl Compiling<'_> {
         }
         a.bind(entry_checked);
         if calls || frame.is_some() {
+            // The arguments live (all, for a variadic procedure, whose
+            // count is in X9, which the poll keeps too), raw or not.
+            let n = if op_at(starts[0]) == "args" { (cells[starts[0] + 1].as_fixnum() as usize).min(8) } else { 8 };
+            let (raws, values): (Vec<Reg>, Vec<Reg>) = (1..=n).map(|r| r as Reg).partition(|&r| reps::raw_param(params, r as usize));
+            let (out, back) = (a.label(), a.label());
             a.e(subs_imm(FUEL, FUEL, 1));
-            trap(&mut a, &mut stubs, OUT_OF_FUEL, Cond::Lo);
+            a.to(out, Fix::If(Cond::Lo));
+            a.bind(back);
+            polls.push(NPoll { out, back, values, raws, clo: captures, map: None });
         }
         let sets_first = |j: usize| matches!(op_at(j), "const" | "reg" | "stack" | "global" | "lexical");
         let ignores = |j: usize| sets_first(j) || matches!(op_at(j), "invokeself");
@@ -2713,8 +2840,28 @@ impl Compiling<'_> {
                         a.to(l, Fix::If(if op == "branchf" { Cond::Eq } else { Cond::Ne }));
                     } else {
                         if back_to[to] {
+                            // What the loop's head reads, kept as it is
+                            // here, raw or not; the frame's map for here.
+                            let t = si_at[&to];
+                            let rep = reps_in[si - 1];
+                            let kept = |r: usize| live[t][r] && !matches!(rep[r], Rep::Undefined);
+                            let raw_r = |r: usize| matches!(rep[r], Rep::F64 | Rep::Raw { .. });
+                            let vals: Vec<Reg> = (0..=8).filter(|&r| kept(r) && !raw_r(r)).map(|r| r as Reg).collect();
+                            let raws: Vec<Reg> = (0..=8).filter(|&r| kept(r) && raw_r(r)).map(|r| r as Reg).collect();
+                            let map = (frame.is_some() && framed[i]).then(|| {
+                                let v = values;
+                                if unmapped {
+                                    -(fields as i64)
+                                } else {
+                                    (value_mask(live_out[si - 1]) | 1 << v | if captures { 1 << (v + 1) } else { 0 } | fields << MAP_BITS) as i64
+                                }
+                            });
+                            let (out, back) = (a.label(), a.label());
                             a.e(subs_imm(FUEL, FUEL, 1));
-                            trap(&mut a, &mut stubs, OUT_OF_FUEL, Cond::Lo);
+                            a.to(out, Fix::If(Cond::Lo));
+                            a.bind(back);
+                            polls.push(NPoll { out, back, values: vals, raws, clo: captures && !framed[i], map });
+                            map_stored = None;
                         }
                         a.to(l, Fix::B);
                     }
@@ -2795,6 +2942,9 @@ impl Compiling<'_> {
         // The traps, out of the way: a stub per site, calling its kind's
         // stub, which goes to the machine's common trap (`common_trap`),
         // which records the trap and where, and leaves.
+        for poll in std::mem::take(&mut polls) {
+            emit_poll(&mut a, &poll, &mut stubs);
+        }
         let kinds: Vec<Label> = (0..TRAPS.len()).map(|_| a.label()).collect();
         for (l, code) in &stubs {
             a.bind(*l);
@@ -4273,7 +4423,7 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
     let mut code = [Value::from_raw(st.code)];
     // The frames walked only for a collection; none for a primitive that
     // never collects, whose caller's values are in registers.
-    let quiet = matches!(c, Callout::Pure { .. } | Callout::Box { .. } | Callout::Unbox | Callout::BoxF64 | Callout::Underflow | Callout::Overflow);
+    let quiet = matches!(c, Callout::Pure { .. } | Callout::Box { .. } | Callout::Unbox | Callout::BoxF64 | Callout::Underflow | Callout::Overflow | Callout::Poll | Callout::PollDone);
     // A collection, Larceny's way (`docs/research/deep-recursion.md`): the
     // run's frames flushed into the heap first, so that the collector reads
     // no stack; then the innermost restored, where the code goes on.
@@ -4362,6 +4512,18 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
         }
         Callout::Abort => {
             abort_to(rt, st, args[0], args[1]);
+            0
+        }
+        Callout::PollDone => {
+            fixpt_runtime::sched::preempt_done(rt);
+            0
+        }
+        Callout::Poll => {
+            let take = st.reserve.min(fixpt_runtime::sched::slice());
+            (st.fuel, st.reserve) = (take, st.reserve - take);
+            let own = |h: &Heap, f: Value| DirectMachine::compiled_of(h, f).is_some();
+            let due = fixpt_runtime::sched::preempt_due(rt, own, |rt, tag| has_prompt(&rt.heap, st, tag));
+            st.aux = due.map_or(0, |f| f.raw());
             0
         }
         Callout::Underflow => match restore(&rt.heap, st, cont_pos(st), st.cont_words) {
@@ -4942,6 +5104,13 @@ fn capture_whole(rt: &mut fixpt_runtime::Runtime, st: &DState) -> Value {
 /// A continuation's frames, delimited by the innermost prompt for `tag`:
 /// those on the stack before it; or all of them and a copy of the chain's
 /// before it; none if no prompt for `tag` is in this run.
+/// Whether the prompt of `tag` is among this run's frames, on the stack or
+/// in its chain, which a capture up to it would reach (`Callout::Poll`).
+fn has_prompt(heap: &Heap, st: &DState, tag: Value) -> bool {
+    frames_of(st).iter().any(|&(fp, end)| is_control(fp, end, PROMPT_MARK, tag))
+        || records(heap, cont_pos(st)).iter().any(|r| r.is_control(PROMPT_MARK, tag))
+}
+
 fn capture_delimited(rt: &mut fixpt_runtime::Runtime, st: &DState, tag: Value) -> Option<Value> {
     let frames = frames_of(st);
     if let Some(j) = frames.iter().position(|&(fp, end)| is_control(fp, end, PROMPT_MARK, tag)) {

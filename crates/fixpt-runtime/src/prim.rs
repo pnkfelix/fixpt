@@ -1288,6 +1288,12 @@ prims! {
     // The clock (stage 4): monotonic nanoseconds since the run began; and
     // the program's own arguments, as `fixpt run … -- ARG…` gives them.
     "%fx26-clock", 0, Some(0), simple!(|rt, _a| Ok(exact_out(rt, crate::world::clock_ns() as i128)));
+    // A call of the scheduler's `preempt` made at a poll returned: the
+    // cellular machines' trampoline's (`sched::preempt_done`).
+    "%fx26-preempt-done", 0, Some(0), simple!(|rt, _a| {
+        crate::sched::preempt_done(rt);
+        Ok(rt.heap.intern_static("#u"))
+    });
     "%fx26-sleep-until", 1, Some(1), simple!(|rt, a| {
         let t = fixed_in(rt, a[0], Width::I64)?;
         crate::world::sleep_until(t as i64);

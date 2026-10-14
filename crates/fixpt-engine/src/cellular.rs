@@ -570,7 +570,8 @@ impl Machine {
         let due = fixpt_runtime::sched::preempt_due_with(rt, own, |_, tag| Self::find_marked(rs, floor, PROMPT_MARK, tag).is_some());
         let Some((f, t)) = due else { return false };
         if self.check_limits().is_err() {
-            rt.heap.set_task_quiet(0);
+            rt.heap.quiet_leave();
+            rt.heap.take_grace();
             return false;
         }
         r.k -= 1;

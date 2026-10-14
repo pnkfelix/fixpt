@@ -66,18 +66,22 @@
   ;; The current task waits: the rest of it, captured, is handed to
   ;; `register` as a thunk that resumes it, as this task, and the scheduler
   ;; goes on. Made the first task first, so that the abort ends none of
-  ;; this task's places.
+  ;; this task's places. Not preempted from the capture until resumed (33,
+  ;; 32): a preemption between would leave two ways to resume it.
   (define suspend (subr any ((subr sched (thunk) unit)) unit)
     (lambda (register)
       (let ((tag (the-tag)))
-        (call-with-composable-continuation
-          (lambda ((k (composable unit unit sched @run)))
-            (let ((me (task-current)))
-              (begin
-                (register (resumer me k))
-                (task-switch 0)
-                (abort-current-continuation tag #u))))
-          tag))))
+        (begin
+          ((proj %sched unit unit unit) 33 #u #u)
+          (call-with-composable-continuation
+            (lambda ((k (composable unit unit sched @run)))
+              (let ((me (task-current)))
+                (begin
+                  (register (resumer me k))
+                  (task-switch 0)
+                  (abort-current-continuation tag #u))))
+            tag)
+          ((proj %sched unit unit unit) 32 #u #u)))))
   ;; The next task to run, or, with none, the oldest parked.
   (define pop-any (subr sched () (union false thunk))
     (lambda () ((proj %sched unit unit (union false thunk)) 28 #u #u)))
@@ -87,16 +91,15 @@
   ;; other task, the oldest queued, else the oldest parked. Parked tasks are
   ;; apart from the queue, so that `drain` ends: they run when the first
   ;; task waits or is preempted.
-  ;; Until it is done (32), the runtime preempts the task no more.
+  ;; Until the call has returned, the runtime preempts the task no more:
+  ;; the machine that called it says so (`sched::preempt_done`).
   (define preempt (subr any () unit)
     (lambda ()
-      (begin
-        (if (main?)
-            (begin
-              ((proj %sched unit unit bool) 30 #u #u)
-              (let ((t (pop-any))) (if (procedure? t) (run-task t) #u)))
-            (suspend (lambda (w) ((proj %sched thunk unit unit) 27 w #u))))
-        ((proj %sched unit unit unit) 32 #u #u))))
+      (if (main?)
+          (begin
+            ((proj %sched unit unit bool) 30 #u #u)
+            (let ((t (pop-any))) (if (procedure? t) (run-task t) #u)))
+          (suspend (lambda (w) ((proj %sched thunk unit unit) 27 w #u))))))
   ;; The first task, waiting until `ready` gives a place (0 or more): the
   ;; others run, one at a time until it does, and, when none can, the clock
   ;; is waited for, if a task waits for it; if nothing is left that could
@@ -111,6 +114,9 @@
                          (let ((t (pop-any)))
                            (cond ((procedure? t) (begin (run-task t) (go)))
                                  (((proj %sched unit unit bool) 21 #u #u) (go))
+                                 ;; Preempted since it looked, it may have
+                                 ;; run the task that made it so.
+                                 ((>= (ready) 0) (go))
                                  (else (error stuck)))))))))
         (go))))
   ;; Wait until `ready?`, `register` handing over the waker. The first
@@ -257,9 +263,7 @@
                          (let ((v (h)))
                            (begin
                              (set done #t)
-                             (if ((proj %sched (icell a @par) unit bool) 10 won #u)
-                                 #u
-                                 ((proj (proj fill @par) a) won v)))))))
+                             ((proj %sched (icell a @par) a unit) 34 won v))))))
              (d1 (the (ref bool @sched) (new #f)))
              (d2 (the (ref bool @sched) (new #f)))
              (t1 (fork (branch f d1)))

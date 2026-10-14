@@ -103,6 +103,8 @@ pub mod op {
     pub const TIMERS_FIRE: i64 = 30;
     pub const PREEMPT_WANTED: i64 = 31;
     pub const PREEMPT_DONE: i64 = 32;
+    pub const QUIET: i64 = 33;
+    pub const ICELL_OFFER: i64 = 34;
 }
 
 /// The state's vector, made if there is none yet.
@@ -229,7 +231,7 @@ pub fn run_op(rt: &mut Runtime, n: i64, a: Value, b: Value) -> Outcome<Value> {
             return rt.type_error("a mailbox", a);
         }
         op::MAILBOX_UNWAIT if !is(rt, a, MAILBOX) => return rt.type_error("a mailbox", a),
-        op::ICELL_FULL | op::ICELL_WAIT | op::ICELL_VALUE | op::ICELL_UNWAIT if !is(rt, a, ICELL) => {
+        op::ICELL_FULL | op::ICELL_WAIT | op::ICELL_VALUE | op::ICELL_UNWAIT | op::ICELL_OFFER if !is(rt, a, ICELL) => {
             return rt.type_error("an i-cell", a);
         }
         op::TIMER_ADD | op::TIMER_DUE => {
@@ -247,13 +249,20 @@ pub fn run_op(rt: &mut Runtime, n: i64, a: Value, b: Value) -> Outcome<Value> {
                 None => false,
             };
             if w {
-                rt.heap.set_task_quiet(1);
+                rt.heap.quiet_enter();
             }
             return Ok(Value::boolean(w));
         }
-        // The current task's `preempt` done: it may be preempted again.
+        // Out of what `QUIET` began (`preempt_done`).
         op::PREEMPT_DONE => {
-            rt.heap.set_task_quiet(2);
+            preempt_done(rt);
+            return Ok(rt.heap.intern_static("#u"));
+        }
+        // The current task not to be preempted until `PREEMPT_DONE`: from
+        // when it hands its waker over until it has left (`suspend`), lest
+        // a preemption between leave two ways to resume it.
+        op::QUIET => {
+            rt.heap.quiet_enter();
             return Ok(rt.heap.intern_static("#u"));
         }
         _ => {}
@@ -305,7 +314,8 @@ pub fn run_op(rt: &mut Runtime, n: i64, a: Value, b: Value) -> Outcome<Value> {
             heap.obj_set(s, PREEMPT, a);
             if heap.obj_ref(s, TRAMPOLINE) == Value::FALSE {
                 use fixpt_heap::layout::cellular::routine;
-                let cells = [routine("call"), 0, routine("drop"), routine("exit")].map(|n| Value::fixnum(n as i64));
+                let done = crate::PRIMITIVES.iter().position(|d| d.name == "%fx26-preempt-done").expect("a primitive") as u64;
+                let cells = [routine("call"), 0, routine("drop"), routine("prim"), done, 0, routine("drop"), routine("exit")].map(|n| Value::fixnum(n as i64));
                 let name = heap.intern_static("%preempt-trampoline");
                 let t = heap.make_cellular_word(name, &cells).expect("a word");
                 let s = state(heap);
@@ -398,12 +408,25 @@ pub fn run_op(rt: &mut Runtime, n: i64, a: Value, b: Value) -> Outcome<Value> {
             heap.set_bloblet_slot(a, MB_FRONT, rest);
             m
         }
+        // Waker `b` for `a`'s next message; run at once if one is there.
+        // A task checks, then waits, and may be preempted in between
+        // (`preempt_due`): what arrived meanwhile must still wake it.
         op::MAILBOX_WAIT => {
-            heap.set_bloblet_slot(a, MB_WAITER, b);
+            if heap.bloblet_slot(a, MB_FRONT).is_pair() || heap.bloblet_slot(a, MB_BACK).is_pair() {
+                push(heap, b);
+            } else {
+                heap.set_bloblet_slot(a, MB_WAITER, b);
+            }
             unit
         }
         op::ICELL_FULL => heap.bloblet_slot(a, ICELL_FULL),
         op::ICELL_VALUE => heap.bloblet_slot(a, ICELL_VALUE),
+        // Waker `b` for `a`'s value; run at once if it has one (as
+        // `MAILBOX_WAIT`).
+        op::ICELL_WAIT if heap.bloblet_slot(a, ICELL_FULL) != Value::FALSE => {
+            push(heap, b);
+            unit
+        }
         op::ICELL_WAIT => {
             let ws = heap.bloblet_slot(a, ICELL_WAITERS);
             let ws = heap.cons(b, ws);
@@ -432,6 +455,11 @@ pub fn run_op(rt: &mut Runtime, n: i64, a: Value, b: Value) -> Outcome<Value> {
             unit
         }
         op::ICELL_PUT => return icell_put(rt, a, b),
+        // I-cell `a` given `b` if it has no value yet, in one step: the
+        // first of `race`'s branches to finish, though another, preempted
+        // between a test and a fill, finishes too.
+        op::ICELL_OFFER if heap.bloblet_slot(a, ICELL_FULL) != Value::FALSE => unit,
+        op::ICELL_OFFER => return icell_put(rt, a, b),
         // `(sum some tag)`, the scheduler's prompt tag, or `(sum none #u)`
         // before the scheduler has made one.
         op::TAG => {
@@ -475,9 +503,14 @@ fn without(heap: &mut Heap, l: Value, drop: impl Fn(&Heap, Value) -> bool) -> Va
     if any { heap.list_from(&kept) } else { l }
 }
 
-/// Waker `w` run when the clock reaches `t` (a time `clock_ns` gives).
+/// Waker `w` run when the clock reaches `t` (a time `clock_ns` gives); at
+/// once if it has (as `MAILBOX_WAIT`).
 fn timer_add(rt: &mut Runtime, t: i64, w: Value) -> Value {
     let heap = &mut rt.heap;
+    if crate::world::clock_ns() >= t {
+        push(heap, w);
+        return heap.intern_static("#u");
+    }
     let t = Value::fixnum(t.clamp(fixpt_heap::value::FIXNUM_MIN, fixpt_heap::value::FIXNUM_MAX));
     let entry = heap.cons(t, w);
     let s = state(heap);
@@ -549,9 +582,9 @@ pub fn preempt_due(rt: &mut Runtime, own: impl FnOnce(&Heap, Value) -> bool, rea
 }
 
 /// `preempt_due`'s procedure, with a cellular word for a cellular machine
-/// to enter with it on the data stack: `call 0`, `drop`, `exit`, which
-/// calls it and goes back to the cell it stopped at, the stacks as they
-/// were.
+/// to enter with it on the data stack: `call 0`, `drop`, then
+/// `%fx26-preempt-done` (`preempt_done`), `drop`, `exit`, which calls it
+/// and goes back to the cell it stopped at, the stacks as they were.
 pub fn preempt_due_with(
     rt: &mut Runtime,
     own: impl FnOnce(&Heap, Value) -> bool,
@@ -564,20 +597,15 @@ pub fn preempt_due_with(
         return None;
     }
     let f = rt.heap.obj_ref(s, PREEMPT);
-    rt.heap.set_task_quiet(1);
+    rt.heap.quiet_enter();
     Some((f, rt.heap.obj_ref(s, TRAMPOLINE)))
 }
 
 /// Whether the scheduler would have the current task preempted here
 /// (`preempt_due`), whoever calls its `preempt`.
 fn wanted(rt: &mut Runtime, s: Value, reachable: impl FnOnce(&Runtime, Value) -> bool) -> bool {
-    match rt.heap.task_quiet() {
-        1 => return false,
-        2 => {
-            rt.heap.set_task_quiet(0);
-            return false;
-        }
-        _ => {}
+    if rt.heap.task_quiet() || rt.heap.take_grace() {
+        return false;
     }
     let heap = &rt.heap;
     if heap.task_current() == 0 {
@@ -586,6 +614,13 @@ fn wanted(rt: &mut Runtime, s: Value, reachable: impl FnOnce(&Runtime, Value) ->
     }
     let tag = heap.obj_ref(s, TAG);
     tag != Value::FALSE && reachable(rt, tag)
+}
+
+/// What a machine does once a call of `preempt` it made at a poll has
+/// returned (the task resumed, if it was parked): the task may be preempted
+/// again, after a slice of its own; as `PREEMPT_DONE` ends a wait's quiet.
+pub fn preempt_done(rt: &mut Runtime) {
+    rt.heap.quiet_leave();
 }
 
 /// Whether a timer is due.

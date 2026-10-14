@@ -2182,6 +2182,41 @@ FX-26 checker's transmissibility rules moved from `check-processes.fx` to
 (the same of kind `type`, refused), `sendable-ref.fx` (a reference given
 to one, refused).
 
+**Q2: preemption at fuel polls, on every machine** (the user's,
+2026-10-14; `docs/fx26.md`, "Running"; `docs/research/processes.md`, item
+7). Each machine's fuel given out in time slices (`sched::SLICE`, 2^16
+polls; `FIXPT_SLICE` for testing); at a slice's end the runtime decides
+(`sched::preempt_due`: a task wherever the scheduler's prompt is on the
+machine's own stack; the first task if another could run) and the machine
+calls the scheduler's `preempt` there: a task parks itself, apart from the
+run queue so that `drain` ends; the first task runs one other. Per machine:
+the bytecode machine at an instruction boundary (`VmFrame::Discard`); the
+Rust cellular machine, the arm64 ones (interpreter, both JITs) and the
+stencils at a cell boundary, the polls moved so that each is one, through a
+trampoline word (`call 0`, `drop`, `exit`), the arm64 ones and stencils
+leaving and coming back in from the state; register code (cellular
+convention) at its entry and loops, the live registers pushed (a liveness
+pass) and resumed by its resume table; the native convention from a frame
+of the poll's own, mapped as a procedure's, through which a capture and a
+restore go as any; the evaluator written in FX-26 from a poll of its own.
+A task is not preempted until the call of `preempt` made at its poll has
+returned, nor from its wait's capture until it is resumed, nor again until
+it has had a slice (the heap's per-task `quiet`, a depth and a grace;
+each machine says when its call returned: `sched::preempt_done`).
+Preemption made the scheduler's check-then-act sequences races, each found
+with tiny slices and fixed: a waker given for what is already ready runs at
+once (a message arriving between a task's check and its wait was lost);
+`race`'s winner fills its cell in one step (`ICELL_OFFER`, 34); the first
+task, finding nothing to run, looks once more before it says deadlock (its
+own preemption may have run what it waited for). And memory growing as the
+scheduler was preempted within itself, a livelock (the slice spent before a
+task went on), and two resumers of one task. Tests:
+`fixpt-cli/tests/preempt.rs`, a spinner, two processes allocating while
+preempted, and the same at a slice of 7 polls, on each of the nine
+machines; `processes.rs`, `a_spinning_process_is_preempted`, four ways.
+By hand: every program of `programs/processes` on each machine at slices
+of 3, 7 and 13 polls, and with `--gc-every 10` on register code.
+
 
 **`append` and `string-append` as `vsubr`s** (the user's, 2026-10-13;
 `docs/fx26.md`, "Variadic procedures"): called with any count, a call the
