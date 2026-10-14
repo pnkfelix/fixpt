@@ -162,10 +162,12 @@ Two refinements:
    forms**, so their names are keywords: one benchmark port's `send`
    became `send-to`. `icell-get` and `icell-put!` were procedures; they
    are forms now so that the waiting one reaches the scheduler.
-9. **No `self`.** A process learns its own address from a message (the
-   program introduces peers: `programs/processes/exchange.fx`). Binding it
-   in `spawn` needs the address's region inside the body, which is the
-   spawner's choice; later, with a `sendable` kind.
+9. **`self` at the process's place** (2026-10-14). `(self box)` is the
+   process's address as `(addr M r)`, `r` its own place, not the region
+   the spawner chose for it, which the body cannot name. So it serves
+   messages to itself and to processes it spawns, but cannot leave the
+   place; a peer elsewhere still learns it from a message
+   (`programs/processes/exchange.fx`).
 10. **Two senders, one mailbox**: FIFO per sender (a sender's messages
     arrive in the order sent), any order between senders. The test
     `arrival_order_varies_with_the_schedule` sees both orders.
