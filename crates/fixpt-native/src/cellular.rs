@@ -130,6 +130,10 @@ struct Asm {
     /// a `b`: for a word too long for their 19 bits (±1 MB), which
     /// [`Asm::branches_fit`] finds after a first assembly.
     long_branches: bool,
+    /// Compiling a word, not the machine's own routines: a typed call
+    /// whose callee is native code goes to the machine's routine, which
+    /// has the call-out in line.
+    in_word: bool,
 }
 
 impl Asm {
@@ -146,6 +150,7 @@ impl Asm {
             at: 0,
             link: None,
             long_branches: false,
+            in_word: false,
         };
         a.trap_common = a.label();
         a.exit_common = a.label();
@@ -863,9 +868,22 @@ fn routine_body(a: &mut Asm, n: usize, name: &'static str) {
             // a typed one does not check them.
             let typed = matches!(name, "tcall" | "ttailcall");
             let name = if typed { &name[1..] } else { name };
+            // A typed call's callee is a closure (the checker says so): a
+            // native one if its code is in the code area (`code_lo`), one
+            // comparison. In a word, that goes to the machine's own routine
+            // for the cell, which calls it out: the state at a cell's start
+            // is the routine's, the cell consumed and nothing yet done.
             let other = a.label();
             a.e(ldr(W, DSP, 0));
-            a.is_closure(W, other);
+            if typed {
+                a.e(add(X11, BASE, W));
+                a.e(ldur(X16, X11, field_off(CLOSURE_WORD)));
+                a.e(ldr(X15, ST, off(offset_of!(State, code_lo))));
+                a.e(cmp(X16, X15));
+                a.b_cond(Cond::Hs, other);
+            } else {
+                a.is_closure(W, other);
+            }
             a.fuel();
             if !(typed && name == "tailcall") {
                 a.ds_limit();
@@ -904,7 +922,12 @@ fn routine_body(a: &mut Asm, n: usize, name: &'static str) {
             a.e(movz(X13, (8 * WORD_CELL0) as u32, 0));
             a.enter_cur(X13);
             a.bind(other);
-            a.callout(n as u64);
+            if typed && a.in_word {
+                a.e(ldr(X16, TABLE, (8 * n) as u32));
+                a.e(br(X16));
+            } else {
+                a.callout(n as u64);
+            }
         }
         "return" => {
             // The value on top replaces the frame; then back.
@@ -944,6 +967,7 @@ fn assemble_word_as(heap: &Heap, word: Value, far: [i64; 2], long: bool) -> Resu
     }
     let mut a = Asm::new();
     a.long_branches = long;
+    a.in_word = true;
     let labels: Vec<Label> = (0..=cells.len()).map(|_| a.label()).collect();
     // The machine's common exit is a conditional branch away from some
     // routines, too far from a large word's code: each cell's goes to a
@@ -1043,6 +1067,7 @@ pub fn fx26_module() -> String {
         ("n-st-rs-limit", offset_of!(State, rs_limit)), ("n-st-fp", offset_of!(State, fp)), ("n-st-clo", offset_of!(State, clo)),
         ("n-st-resume", offset_of!(State, resume)), ("n-st-trap", offset_of!(State, trap)),
         ("n-st-exit", offset_of!(State, exit)), ("n-st-cards", offset_of!(State, cards)),
+        ("n-st-code-lo", offset_of!(State, code_lo)),
     ] {
         c(name, o as i64, "a State field's offset");
     }
@@ -1569,6 +1594,7 @@ impl Stacks {
             alloc_limit: heap.inline_limit() as u64,
             regions: heap.region_table_address() as u64,
             cards: heap.card_table_address() as u64,
+            code_lo: heap.code_area_address() as u64,
             leaf_link: 0,
             pure: pure_call as *const () as u64,
         }

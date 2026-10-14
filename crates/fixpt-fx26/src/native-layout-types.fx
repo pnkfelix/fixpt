@@ -38,6 +38,7 @@
             (val n-st-trap int)
             (val n-st-exit int)
             (val n-st-cards int)
+            (val n-st-code-lo int)
             (val n-false int)
             (val n-true int)
             (val n-prompt-mark int)

@@ -2144,8 +2144,23 @@ word's entry, a crash. Now a typed call checks for a cellular closure as an
 untyped one does, in both assemblers (`fixpt_native::cellular`,
 `native.fx`), and anything else goes to the Rust machine (`control::run`
 leaves a native closure to it), which calls native code. Test:
-`direct.rs`, `typed_calls_of_native_code`. Its cost to assembling words:
-`TODO.md` §93.
+`direct.rs`, `typed_calls_of_native_code`.
+
+**Its cost to assembling words, mostly recovered** (2026-10-14, the
+user's). In line at every typed call, the closure test and the call-out
+made peval's words 40% slower to assemble (`fx arm64` 4.75 → 6.80 ms,
+`arm64` 0.28 → 0.32). Now a typed call in a word tests only whether its
+callee's code is in the code area (`State::code_lo`, the comparison native
+code makes: one load and a compare after the closure's code, which the
+call loads anyway), and if it is, jumps to the machine's own routine for
+the cell, through the routine table: the state at a cell's start is that
+routine's (the cell consumed, nothing yet done, the fuel not yet taken),
+and the routine has the call-out in line. Seven instructions a typed call,
+none a word: `fx arm64` 4.93 ms, `arm64` 0.28 (measured back to back, three
+times). A call-out stub at each word's end was tried first: its branches
+did not reach in the front end's largest word (half a million
+instructions), and the stub, as long as the call-out, cost a small word as
+much as the call-out in line.
 
 **A standard operation as a value is never inlined.** Register code
 inlines small globals' bodies into later forms (`inlines`), but a standard

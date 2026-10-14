@@ -53,6 +53,10 @@ pub struct State {
     /// The heap's card table, biased (`Heap::card_table_address`): the
     /// write barrier marks the card of each word a store writes.
     pub cards: u64,
+    /// Where the heap's code area starts (`Heap::code_area_address`): a
+    /// closure whose code is at or above it is native code, which a typed
+    /// call gives the Rust machine to call.
+    pub code_lo: u64,
     /// The routines' addresses, by number, for machines that find them
     /// through the state rather than a register.
     pub routines: [u64; ROUTINE_SLOTS],

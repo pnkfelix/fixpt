@@ -2516,12 +2516,8 @@ the arm64 cellular machine, and a typed call there of a global holding a
 native closure entered it as a cellular one, a crash (`(stay-cellular (g
 1))`, `g` native). Fixed (`DONE.md` §93): typed calls check for a cellular
 closure as untyped ones do, and call anything else out to the Rust machine,
-which calls native code. Left:
-- **Its cost to assembling words** (measured on a quiet machine on peval:
-  `fx arm64` 4.79 → 6.74 ms, `arm64` 0.28 → 0.36 ms; run times unchanged): the
-  check and the call-out are in line at every typed call. Cheaper: the
-  kind alone (a typed call's callee is a bloblet), and the call-out in one
-  stub per word, out of line.
+which calls native code; the check's cost to assembling words mostly
+recovered (`DONE.md` §93). Left:
 - **A prelude in FX-26** (raised by the user with `append` and
   `string-append`, 2026-10-13): standard procedures written as FX-26
   definitions every program sees, a module file built in and loaded
