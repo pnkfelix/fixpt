@@ -987,7 +987,7 @@ fn native_session_adapters_aborts_and_stack_maps() {
 /// return, collecting often as they run (`programs/native/deep-control.fx`):
 /// values the flushed frames hold; an abort to a prompt among them; a
 /// mark read through them; a composable continuation of them, taken and
-/// run twice.
+/// run twice; and continuations that cross machines.
 #[test]
 fn deep_recursion_through_the_stack_cache() {
     fixpt_native::direct::with_machine(|m| m.set_stack_words(4096, 1 << 26)).expect("a machine");
@@ -1007,6 +1007,14 @@ fn deep_recursion_through_the_stack_cache() {
     // Each program's frames went through the heap, and came back.
     let after = fixpt_native::direct::stack_stats();
     assert!(after.overflows - before.overflows > 100 && after.underflows - before.underflows > 1000, "{before:?} {after:?}");
+    // Composable continuations that cross machines, and marks read across
+    // them (`TODO.md` §93, `programs/native/captures.fx`), on this small
+    // cache too, so that frames each machine took are in its chain.
+    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/captures.fx")).expect("reads");
+    let (values, fell) = values_and_fallbacks(&mut s, &forms);
+    let want = ["(10 10 10 10 343 343 343 343 16 16 60001 60001)", "(918 1215 1009 1009 1009)", "(77 88 158 157)"];
+    assert_eq!(values, want, "captures");
+    assert_eq!(fell, ["grab-c", "climb-c", "tail-c", "under-c", "grab-marks", "mark-c", "look-c", "in-c"], "only those that stay cellular do");
     fixpt_native::direct::with_machine(|m| m.set_stack_words(1 << 20, 1 << 28)).expect("a machine");
 }
 

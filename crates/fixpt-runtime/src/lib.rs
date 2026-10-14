@@ -6,6 +6,7 @@
 //! difference between them cannot come from this layer.
 
 pub mod cmarks;
+pub mod crossing;
 pub mod disasm;
 pub mod eqtable;
 pub mod equal;

@@ -218,6 +218,7 @@ const OUT_OF_FUEL: u32 = 1;
 /// The call-out a poll makes at a time slice's end (`Callout::Poll`).
 const POLL: usize = 4;
 const POLL_DONE: usize = 5;
+const REINSTATE: usize = 7;
 const FAILED: usize = 6;
 /// A poll's frame (`emit_poll`), laid out as a procedure's: its link, its
 /// second word, its map, eleven values (x0…x8 where they hold values, the
@@ -766,6 +767,7 @@ pub struct Compiled {
 
 impl DirectMachine {
     pub fn new() -> Result<DirectMachine, String> {
+        fixpt_runtime::crossing::set_foreign_marks(marks_of);
         let mut space = CodeSpace::new(8 << 20).map_err(|e| e.to_string())?;
         let code = trampoline();
         let entry = space.alloc(4 * code.len(), 16).ok_or("no room for the trampoline")?;
@@ -783,9 +785,18 @@ impl DirectMachine {
         // 1: a closure made (`common_closure`); 2 and 3: the stack cache's
         // underflow and overflow (`common_underflow`, `common_overflow`);
         // 4 and 5: a time slice's end at a poll, and its call of `preempt`
-        // returned (`POLL`, `POLL_DONE`); 6: a trap (`FAILED`).
-        let callouts =
-            vec![Callout::Foreign, Callout::ClosureAny, Callout::Underflow, Callout::Overflow, Callout::Poll, Callout::PollDone, Callout::Failed];
+        // returned (`POLL`, `POLL_DONE`); 6: a trap (`FAILED`); 7: a
+        // continuation given a value (`REINSTATE`).
+        let callouts = vec![
+            Callout::Foreign,
+            Callout::ClosureAny,
+            Callout::Underflow,
+            Callout::Overflow,
+            Callout::Poll,
+            Callout::PollDone,
+            Callout::Failed,
+            Callout::Reinstate,
+        ];
         let code = common_foreign(0);
         let foreign = space.alloc(4 * code.len(), 16).ok_or("no room for the common foreign call")?;
         space.write_code(foreign, &code);
@@ -1226,6 +1237,40 @@ fn common_closure(n: usize) -> Vec<u32> {
     a.finish().expect("labels bound")
 }
 
+/// The continuation procedure's code (`Compiling::resume_proc`), call-out
+/// `n` its `Callout::Reinstate`.
+fn continuation_code(n: usize) -> Vec<u32> {
+    let mut a = Asm::new();
+    push_frame(&mut a, LINK, STUB_FRAME);
+    let args = offset_of!(DState, args) as u32;
+    a.e(str(1, ST, args));
+    a.e(str(CLO, ST, args + 8));
+    call_out(&mut a, n);
+    let failed = a.label();
+    a.e(ldr(X9, ST, st_off(offset_of!(DState, trap))));
+    a.e(cmp_imm(X9, 0));
+    a.to(failed, Fix::If(Cond::Ne));
+    resume(&mut a);
+    a.bind(failed);
+    a.e(str(FUEL, ST, st_off(offset_of!(DState, fuel))));
+    leave(&mut a);
+    a.finish().expect("placed")
+}
+
+/// The continuation procedure as a code bloblet of its own, for a
+/// continuation taken where no code gave it one: at a call of what is not
+/// native code (`capture_foreign`).
+fn continuation_bloblet(heap: &mut Heap) -> Value {
+    let code = continuation_code(REINSTATE);
+    let blob = heap.make_code_bloblet(const { fixpt_heap::layout::kind("bloblet") }, 2, 4 * code.len(), false);
+    heap.set_bloblet_slot(blob, 1, blob);
+    heap.set_bloblet_slot(blob, 2, Value::FALSE);
+    let bytes: Vec<u8> = code.iter().flat_map(|i| i.to_le_bytes()).collect();
+    heap.set_bloblet_bytes(blob, 0, &bytes).expect("room for its code");
+    heap.flush_code(blob);
+    blob
+}
+
 /// Where a call-out that does not return to its caller said to go: its
 /// stack, frame and value, and there.
 fn resume(a: &mut Asm) {
@@ -1273,23 +1318,7 @@ impl Compiling<'_> {
         if let Some(q) = self.resume {
             return q;
         }
-        let mut a = Asm::new();
-        push_frame(&mut a, LINK, STUB_FRAME);
-        let args = offset_of!(DState, args) as u32;
-        a.e(str(1, ST, args));
-        a.e(str(CLO, ST, args + 8));
-        let n = self.callouts.len();
-        self.callouts.push(Callout::Reinstate);
-        call_out(&mut a, n);
-        let failed = a.label();
-        a.e(ldr(X9, ST, st_off(offset_of!(DState, trap))));
-        a.e(cmp_imm(X9, 0));
-        a.to(failed, Fix::If(Cond::Ne));
-        resume(&mut a);
-        a.bind(failed);
-        a.e(str(FUEL, ST, st_off(offset_of!(DState, fuel))));
-        leave(&mut a);
-        let code = a.finish().expect("placed");
+        let code = continuation_code(REINSTATE);
         let q = self.procs.len();
         self.procs.push(Proc { word: Value::FALSE, rw: Value::FALSE, name: "continuation".into(), arity: 1, fields: vec![Field::Myself, Field::Const(Value::FALSE)], len: code.len(), code, global: false, params: Some(0) });
         self.resume = Some(q);
@@ -4469,50 +4498,7 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
         }
         Callout::Foreign => {
             let (f, args) = args.split_last().expect("the callee");
-            // What the native frames hold, kept where the heap roots it while
-            // the cellular machine runs, which may collect; then put back.
-            let held: Vec<Value> = native_frames(st).iter().flat_map(|s| s.iter().copied()).collect();
-            let kept = rt.heap.vector_from(&held);
-            let at = rt.heap.push_root(kept);
-            rt.heap.push_root(Value::from_raw(st.cont));
-            // A native call from the cellular code runs below these frames.
-            let runner = RUNNING.get().expect("native code is running");
-            let outer = CALLED_OUT.replace(Some((runner, st.native_sp)));
-            let r = fixpt_engine::cellular::call_value(rt, *f, args);
-            CALLED_OUT.set(outer);
-            let kept = rt.heap.root_at(at);
-            st.cont = rt.heap.root_at(at + 1).raw();
-            rt.heap.pop_roots_to(at);
-            let mut i = 0;
-            for s in native_frames(st) {
-                for v in s.iter_mut() {
-                    *v = rt.heap.obj_ref(kept, i);
-                    i += 1;
-                }
-            }
-            match r {
-                Ok(v) => v.raw(),
-                Err(e) => {
-                    match e {
-                        fixpt_runtime::NativeExit::Failed(m) => LAST_MESSAGE.with(|c| *c.borrow_mut() = Some(m)),
-                        fixpt_runtime::NativeExit::Throw { k, v } => {
-                            THROWN.with(|t| t.set(Some((k, v))));
-                            LAST_MESSAGE.with(|c| *c.borrow_mut() = Some("a continuation of cellular code was thrown past native code".into()));
-                        }
-                        // An abort the cellular code found no prompt for: to
-                        // one in these frames, which `common_foreign` resumes
-                        // at; or on, out of this run.
-                        fixpt_runtime::NativeExit::Abort { tag, v } => {
-                            if abort_to(rt, st, tag, v) {
-                                st.foreign_resume = 1;
-                                return 0;
-                            }
-                        }
-                    }
-                    st.trap = PRIM_FAILED as u64;
-                    0
-                }
-            }
+            call_foreign(rt, st, *f, args)
         }
         Callout::FieldRef => {
             let k = if args[1].is_fixnum() { usize::try_from(args[1].as_fixnum()).ok() } else { None };
@@ -4595,9 +4581,9 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
         }
         Callout::Reinstate => reinstate(rt, st, args[1], args[0]),
         Callout::Rest => rt.heap.list_from(&args).raw(),
-        Callout::FirstMark => run_marks(&rt.heap, st, args[0]).first().copied().unwrap_or(args[1]).raw(),
+        Callout::FirstMark => all_marks(rt, st, args[0]).first().copied().unwrap_or(args[1]).raw(),
         Callout::CurrentMarks => {
-            let marks = run_marks(&rt.heap, st, args[0]);
+            let marks = all_marks(rt, st, args[0]);
             rt.heap.list_from(&marks).raw()
         }
         Callout::MarksOf => match marks_of(&rt.heap, args[0], args[1]) {
@@ -4625,6 +4611,128 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
     st.regions = Value::fixnum(rt.heap.live_regions() as i64).raw();
     CALLOUT_ARGS.set(args);
     out
+}
+
+/// What is not native code, `f`, called with `args` from the frames at
+/// `st.fp` on: its value; or, back with an abort to a prompt in those
+/// frames, where `common_foreign` resumes (`foreign_resume`); or a trap.
+/// While it runs, the frames' values are kept where the heap roots them,
+/// and the call is a boundary a capture crosses (`capture_foreign`).
+fn call_foreign(rt: &mut fixpt_runtime::Runtime, st: &mut DState, f: Value, args: &[Value]) -> u64 {
+    let held: Vec<Value> = native_frames(st).iter().flat_map(|s| s.iter().copied()).collect();
+    let kept = rt.heap.vector_from(&held);
+    let at = rt.heap.push_root(kept);
+    rt.heap.push_root(Value::from_raw(st.cont));
+    // A native call from the cellular code runs below these frames.
+    let runner = RUNNING.get().expect("native code is running");
+    let outer = CALLED_OUT.replace(Some((runner, st.native_sp)));
+    let boundary = std::rc::Rc::new(Foreign { st: st as *mut DState, at });
+    let r = fixpt_runtime::crossing::across(boundary, || fixpt_engine::cellular::call_value(rt, f, args));
+    CALLED_OUT.set(outer);
+    put_back(rt, st, at);
+    rt.heap.pop_roots_to(at);
+    match r {
+        Ok(v) => v.raw(),
+        Err(e) => {
+            match e {
+                fixpt_runtime::NativeExit::Failed(m) => LAST_MESSAGE.with(|c| *c.borrow_mut() = Some(m)),
+                fixpt_runtime::NativeExit::Throw { k, v } => {
+                    THROWN.with(|t| t.set(Some((k, v))));
+                    LAST_MESSAGE.with(|c| *c.borrow_mut() = Some("a continuation of cellular code was thrown past native code".into()));
+                }
+                // An abort the cellular code found no prompt for: to
+                // one in these frames, which `common_foreign` resumes
+                // at; or on, out of this run.
+                fixpt_runtime::NativeExit::Abort { tag, v } => {
+                    if abort_to(rt, st, tag, v) {
+                        st.foreign_resume = 1;
+                        return 0;
+                    }
+                }
+            }
+            st.trap = PRIM_FAILED as u64;
+            0
+        }
+    }
+}
+
+/// A run of native code in a call of what is not native code
+/// (`call_foreign`): its call-out's state, and where the heap keeps the
+/// values of its frames meanwhile.
+struct Foreign {
+    st: *mut DState,
+    at: usize,
+}
+
+impl fixpt_runtime::crossing::Crossing for Foreign {
+    fn capture(&self, rt: &mut fixpt_runtime::Runtime, tag: Value, inner: Value) -> fixpt_runtime::crossing::Crossed {
+        // SAFETY: the state of the call-out that made this boundary, which
+        // is in this call, and holds no reference to it meanwhile.
+        capture_foreign(rt, unsafe { &mut *self.st }, self.at, tag, inner)
+    }
+
+    /// Its frames' marks, and on: a machine in a call, if there is one, is
+    /// the one that called this run (`call_native`).
+    fn marks(&self, rt: &mut fixpt_runtime::Runtime, key: Value) -> (Vec<Value>, bool) {
+        // SAFETY: as for `capture`.
+        let st = unsafe { &mut *self.st };
+        put_back(rt, st, self.at);
+        (run_marks(&rt.heap, st, key), true)
+    }
+}
+
+/// The values of the frames from `st.fp` on, and the chain, as the heap
+/// has kept them from `at` (`call_foreign`), moved, put back.
+fn put_back(rt: &mut fixpt_runtime::Runtime, st: &mut DState, at: usize) {
+    let kept = rt.heap.root_at(at);
+    st.cont = rt.heap.root_at(at + 1).raw();
+    let mut i = 0;
+    for s in native_frames(st) {
+        for v in s.iter_mut() {
+            *v = rt.heap.obj_ref(kept, i);
+            i += 1;
+        }
+    }
+}
+
+/// A capture crossing a call of what is not native code (`call_foreign`,
+/// `fixpt_runtime::crossing`): the frames that made it, from the stub's
+/// out to the innermost prompt for `tag`, or all of them, with `inner`
+/// inside, resumed where the call returns; or `inner`, if none are
+/// between. The frames' values first as the heap has kept them, moved.
+fn capture_foreign(rt: &mut fixpt_runtime::Runtime, st: &mut DState, at: usize, tag: Value, inner: Value) -> fixpt_runtime::crossing::Crossed {
+    use fixpt_runtime::crossing::Crossed;
+    put_back(rt, st, at);
+    let all = frames_of(st);
+    // The stub's frame, whose return is where its caller resumes.
+    let pc = word(all[0].0 + R_SECOND);
+    let frames = &all[1..];
+    let code = continuation_bloblet(&mut rt.heap);
+    if let Some(j) = frames.iter().position(|&(fp, end)| is_control(fp, end, PROMPT_MARK, tag)) {
+        if j == 0 {
+            return Crossed::Found(inner);
+        }
+        let last = word(frames[j - 1].0 + R_SECOND);
+        let mut p = heap_frames(&mut rt.heap, &frames[..j], last, END);
+        p.pc = pc;
+        return Crossed::Found(continuation(rt, code, p, region_words(&frames[..j]), false, inner));
+    }
+    let recs = records(&rt.heap, cont_pos(st));
+    let (tail, words, found) = match recs.iter().position(|r| r.is_control(PROMPT_MARK, tag)) {
+        Some(j) => (copy_records(&mut rt.heap, &recs[..j], END).0, recs[..j].iter().map(|r| r.n as u64).sum::<u64>(), true),
+        None => (cont_pos(st), st.cont_words, false),
+    };
+    let p = if frames.is_empty() {
+        tail
+    } else {
+        let last = outermost_second(st, frames.last().expect("a frame").0);
+        let mut p = heap_frames(&mut rt.heap, frames, last, tail);
+        p.pc = pc;
+        p
+    };
+    let words = words + region_words(frames);
+    let k = if words == 0 { inner } else { continuation(rt, code, p, words, false, inner) };
+    if found { Crossed::Found(k) } else { Crossed::Beyond(k) }
 }
 
 thread_local! {
@@ -5117,12 +5225,18 @@ fn is_tail_mark(lo: u64, hi: u64) -> bool {
     hi - lo == CONTROL_FRAME && word(lo + R_HEAD) == MARK_MARK.raw() && word(lo + R_SECOND) != 0
 }
 
-/// A continuation's data, around `p`, the chain of its frames.
-fn continuation(rt: &mut fixpt_runtime::Runtime, st: &DState, p: Pos, words: u64, whole: bool) -> Value {
+/// A continuation's data, around `p`, the chain of its frames, its code
+/// `code` (the continuation procedure's); with the continuation of another
+/// machine's frames inside it, `inner`, if not `#f` (`reinstate`).
+fn continuation(rt: &mut fixpt_runtime::Runtime, code: Value, p: Pos, words: u64, whole: bool, inner: Value) -> Value {
     let heap = &mut rt.heap;
     let regions = Value::fixnum(heap.live_regions() as i64);
-    let data = heap.vector_from(&[CONT_MARK, p.frame, Value::fixnum(words as i64), Value::fixnum(p.pc as i64), regions, Value::boolean(whole)]);
-    native_closure(heap, Value::from_raw(st.aux), &[data])
+    let mut data = vec![CONT_MARK, p.frame, Value::fixnum(words as i64), Value::fixnum(p.pc as i64), regions, Value::boolean(whole)];
+    if inner != Value::FALSE {
+        data.push(inner);
+    }
+    let data = heap.vector_from(&data);
+    native_closure(heap, code, &[data])
 }
 
 /// A continuation's chain, and how many words of frames it holds.
@@ -5139,7 +5253,7 @@ fn capture_whole(rt: &mut fixpt_runtime::Runtime, st: &DState) -> Value {
     let last = outermost_second(st, frames.last().expect("a frame").0);
     let mut p = heap_frames(&mut rt.heap, &frames, last, cont_pos(st));
     p.pc = st.ret_pc;
-    continuation(rt, st, p, region_words(&frames) + st.cont_words, true)
+    continuation(rt, Value::from_raw(st.aux), p, region_words(&frames) + st.cont_words, true, Value::FALSE)
 }
 
 /// A continuation's frames, delimited by the innermost prompt for `tag`:
@@ -5158,16 +5272,27 @@ fn capture_delimited(rt: &mut fixpt_runtime::Runtime, st: &DState, tag: Value) -
         let last = word(frames[j - 1].0 + R_SECOND);
         let mut p = heap_frames(&mut rt.heap, &frames[..j], last, END);
         p.pc = st.ret_pc;
-        return Some(continuation(rt, st, p, region_words(&frames[..j]), false));
+        return Some(continuation(rt, Value::from_raw(st.aux), p, region_words(&frames[..j]), false, Value::FALSE));
     }
     let recs = records(&rt.heap, cont_pos(st));
-    let j = recs.iter().position(|r| r.is_control(PROMPT_MARK, tag))?;
-    let (tail, _) = copy_records(&mut rt.heap, &recs[..j], END);
+    let found = recs.iter().position(|r| r.is_control(PROMPT_MARK, tag));
+    // None in this run: every frame of it, and those of the machines out
+    // from it up to the prompt, if a machine called it (`crossing`).
+    if found.is_none() && !fixpt_runtime::crossing::crossed() {
+        return None;
+    }
+    let (tail, words) = match found {
+        Some(j) => (copy_records(&mut rt.heap, &recs[..j], END).0, recs[..j].iter().map(|r| r.n as u64).sum::<u64>()),
+        None => (cont_pos(st), st.cont_words),
+    };
     let last = outermost_second(st, frames.last().expect("a frame").0);
     let mut p = heap_frames(&mut rt.heap, &frames, last, tail);
     p.pc = st.ret_pc;
-    let words = region_words(&frames) + recs[..j].iter().map(|r| r.n as u64).sum::<u64>();
-    Some(continuation(rt, st, p, words, false))
+    let k = continuation(rt, Value::from_raw(st.aux), p, region_words(&frames) + words, false, Value::FALSE);
+    if found.is_some() {
+        return Some(k);
+    }
+    fixpt_runtime::crossing::capture(rt, tag, k)
 }
 
 /// Frames `recs` of a chain copied onto `tail`, each a new native frame;
@@ -5199,7 +5324,34 @@ fn region_words(frames: &[(u64, u64)]) -> u64 {
 /// where), its last frame returning to that caller: on the stack if it
 /// fits, as it mostly does; else the caller's frames copied onto the chain,
 /// and a copy of `k`'s onto them.
+///
+/// A continuation with another machine's inside it (`capture_foreign`):
+/// once its frames are back, that one is called with `v`, as what is not
+/// native code, from them, where they called it, and they resume with
+/// what it returns.
 fn reinstate(rt: &mut fixpt_runtime::Runtime, st: &mut DState, k: Value, v: Value) -> u64 {
+    let data = rt.heap.bloblet_slot(k, CLOSURE_FREE0);
+    let inner = if rt.heap.obj_len(data) > 6 { rt.heap.obj_ref(data, 6) } else { Value::FALSE };
+    let out = put_continuation(rt, st, k, v);
+    if inner == Value::FALSE || st.trap != 0 {
+        return out;
+    }
+    (st.fp, st.native_sp) = (st.resume_fp, st.resume_sp);
+    let x = call_foreign(rt, st, inner, &[v]);
+    if st.trap == 0 {
+        // Back with an abort to a prompt in these frames, which is where
+        // the state now says to resume.
+        if st.foreign_resume != 0 {
+            st.foreign_resume = 0;
+        } else {
+            st.resume_x0 = x;
+        }
+    }
+    0
+}
+
+/// `reinstate`'s frames put back, and where they resume.
+fn put_continuation(rt: &mut fixpt_runtime::Runtime, st: &mut DState, k: Value, v: Value) -> u64 {
     let heap = &mut rt.heap;
     let data = heap.bloblet_slot(k, CLOSURE_FREE0);
     let ((kp, kwords), regions, whole) = (continuation_pos(heap, data), heap.obj_ref(data, 4), heap.obj_ref(data, 5) == Value::TRUE);
@@ -5265,6 +5417,14 @@ fn run_marks(heap: &Heap, st: &DState, key: Value) -> Vec<Value> {
     out
 }
 
+/// The marks for `key` in this run, then in the frames of the machines out
+/// from it, if a machine called it (`fixpt_runtime::crossing`).
+fn all_marks(rt: &mut fixpt_runtime::Runtime, st: &DState, key: Value) -> Vec<Value> {
+    let mut out = run_marks(&rt.heap, st, key);
+    out.extend(fixpt_runtime::crossing::marks(rt, key));
+    out
+}
+
 /// The marks for `key` in the chain from `p`, newest first.
 fn chain_marks(heap: &Heap, p: Pos, key: Value) -> Vec<Value> {
     records(heap, p).into_iter().filter(|r| r.is_control(MARK_MARK, key)).map(|r| r.word(2)).collect()
@@ -5275,12 +5435,16 @@ fn chain_marks(heap: &Heap, p: Pos, key: Value) -> Vec<Value> {
 /// stack's entries. None if `k` is neither.
 fn marks_of(heap: &Heap, k: Value, key: Value) -> Option<Vec<Value>> {
     if let Some(data) = heap.native_continuation_of(k) {
-        return Some(chain_marks(heap, continuation_pos(heap, data).0, key));
+        // The marks of the continuation inside it first (`reinstate`).
+        let mut out = if heap.obj_len(data) > 6 { marks_of(heap, heap.obj_ref(data, 6), key)? } else { Vec::new() };
+        out.extend(chain_marks(heap, continuation_pos(heap, data).0, key));
+        return Some(out);
     }
     let c = heap.continuation_of(k)?;
     let rs = heap.bloblet_slot(c, fixpt_heap::layout::cellular::CONT_RS);
     let entries: Vec<Value> = (0..heap.obj_len(rs)).map(|i| heap.obj_ref(rs, i)).collect();
-    let mut out = Vec::new();
+    let inner = heap.bloblet_slot(c, fixpt_heap::layout::cellular::CONT_INNER);
+    let mut out = if inner != Value::FALSE { marks_of(heap, inner, key)? } else { Vec::new() };
     let mut i = entries.len();
     while i >= 4 {
         i -= 4;

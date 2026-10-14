@@ -123,14 +123,15 @@ impl Heap {
 
     /// The saved frames of the native continuation `v` is: a native closure
     /// over one vector, marked first with `NATIVE_CONT_MARK`, which only the
-    /// native convention's `Callout::Capture` makes (`fixpt-native`).
+    /// native convention makes (`fixpt-native`): six values, or seven with
+    /// another machine's continuation inside it.
     pub fn native_continuation_of(&self, v: Value) -> Option<Value> {
         use crate::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD};
         if !(v.is_bloblet() && self.bloblet_kind(v) == crate::layout::kind("native-closure")) || self.bloblet_head(v).fields <= CLOSURE_WORD {
             return None;
         }
         let data = self.bloblet_slot(v, CLOSURE_FREE0);
-        (self.obj_type(data) == Some(crate::ObjType::Vector) && self.obj_len(data) == 6 && self.obj_ref(data, 0) == NATIVE_CONT_MARK).then_some(data)
+        (self.obj_type(data) == Some(crate::ObjType::Vector) && (6..=7).contains(&self.obj_len(data)) && self.obj_ref(data, 0) == NATIVE_CONT_MARK).then_some(data)
     }
 
     /// The continuation `v` is, or wraps: a closure over exactly one

@@ -2521,14 +2521,13 @@ recovered (`DONE.md` §93). Left:
   a variadic definition's call makes the list of its arguments, where a
   built-in primitive takes them as they are; and every machine would load
   and compile it.
-- **A capture in cellular code up to a prompt native code set** fails,
-  "no prompt for this tag" (found 2026-10-14, when the scheduler's module
-  reached 32 members and the native convention declined it, `ldur`'s
-  reach, since fixed: `DONE.md` §93). Each machine walks its own frames;
-  so a declined procedure that captures, called under a native `prompt`,
-  fails where the same procedure as native code runs. An error, not a
-  crash. To do: a capture that crosses the two machines' frames, or no
-  declining of what captures.
+- **What else stops at a machine's own frames** (left by the crossing
+  captures and marks, `DONE.md` §93): a whole continuation (`callcc`)
+  thrown past native code is still an error; a poll in cellular code
+  native code called asks to be preempted only for a prompt in its own
+  frames, so such code runs on until it returns to native code; and the
+  evaluator knows no `stay-cellular`, so `programs/native/captures.fx` is
+  not run there.
 
 ## 95. Byte input and terminal modes (kayak's request, 2026-10-14)
 

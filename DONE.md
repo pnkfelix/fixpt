@@ -2279,6 +2279,34 @@ waited failed on the REPL's machine. Now a field to 4095 bytes away (511)
 is reached through its address in x16, one `sub` more. Test: `direct.rs`,
 `far_fields_are_native_code`.
 
+**Captures and marks that cross machines (2026-10-14).** A capture in
+cellular code (a procedure the native convention declined) up to a prompt
+native code set failed, "no prompt for this tag", and so did the reverse,
+native code capturing up to a cellular prompt: each machine walked only
+its own frames. Marks were the same: `current-marks` and `first-mark` saw
+only the running machine's. Now a machine in a call of another's code is a
+*boundary* (`fixpt_runtime::crossing`, one stack of them per thread,
+innermost last, since the calls nest strictly): the native convention's
+call of cellular code (`call_foreign`) and the Rust machine's call of
+native code (`call_native`). A capture that finds no prompt in its own
+machine takes all of that machine's frames, then each boundary's out to
+the prompt, innermost first. Each piece is a continuation of its own
+machine's frames with the piece inside it as its *inner* one (a native
+continuation's seventh value; a cellular one's `CONT_INNER`): given a
+value, it puts its frames back, then calls its inner one with the value
+where the call between the machines was, and resumes with what that
+returns. Native code taken past a boundary resumes where the stub's call
+returns, with a continuation procedure of its own (`continuation_bloblet`,
+call-out 7, `REINSTATE`); a cellular machine's, in tail position, returns
+the value. Marks read past the running machine go on through the
+boundaries, and `marks-of` reads a crossing continuation's inner pieces
+first (the Rust machine reads a native one's through
+`crossing::foreign_marks`). Test: `programs/native/captures.fx`, in
+`direct.rs`'s `deep_recursion_through_the_stack_cache` (a small stack
+cache, collecting often): through three machines, in tail position at each
+boundary, 20 000 deep, marks, and an abort from inside a crossing
+continuation to the prompt outside it.
+
 ## 94. Process monitors (kayak's request, 2026-10-14)
 
 `(spawn-monitored watcher on-failure (box M r) body …)`: a process whose

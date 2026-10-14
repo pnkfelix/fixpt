@@ -436,7 +436,9 @@ pub mod cellular {
     /// any entered since, as an abort does; and which run of a machine took
     /// it (a fixnum, 0 for a run native code did not call): given a value
     /// in a run native code called, a whole continuation another run took
-    /// is thrown past the native code, to that run.
+    /// is thrown past the native code, to that run; and the continuation of
+    /// another machine's frames inside it, which it calls once its own are
+    /// back, or `#f` (`fixpt_runtime::crossing`).
     pub const CONT_DS: usize = 2;
     pub const CONT_RS: usize = 3;
     pub const CONT_CUR: usize = 4;
@@ -447,7 +449,8 @@ pub mod cellular {
     pub const CONT_WHOLE: usize = 9;
     pub const CONT_REGIONS: usize = 10;
     pub const CONT_RUN: usize = 11;
-    pub const CONT_FIELDS: usize = 10;
+    pub const CONT_INNER: usize = 12;
+    pub const CONT_FIELDS: usize = 11;
 
     pub const fn routine(name: &str) -> u64 {
         let mut i = 0;

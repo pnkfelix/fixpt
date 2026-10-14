@@ -23,10 +23,11 @@
 
 use fixpt_heap::layout::kind;
 use fixpt_heap::layout::cellular::{
-    CLOSURE_FREE0, CLOSURE_WORD, CONT_BASE, CONT_CLO, CONT_CUR, CONT_DS, CONT_FIELDS, CONT_FP, CONT_K, CONT_RS, CONT_REGIONS, CONT_RUN, CONT_WHOLE,
+    CLOSURE_FREE0, CLOSURE_WORD, CONT_BASE, CONT_CLO, CONT_CUR, CONT_DS, CONT_FIELDS, CONT_FP, CONT_INNER, CONT_K, CONT_RS, CONT_REGIONS, CONT_RUN, CONT_WHOLE,
     KIND, PRIMITIVES, ROUTINE_DOCOL, ROUTINES, WORD_CELL0, WORD_ENTRY, WORD_NAME, routine,
 };
 use fixpt_heap::{Heap, Value};
+use fixpt_runtime::crossing::{self, Crossed, Crossing};
 use fixpt_runtime::{NativeExit, PrimKind, Runtime};
 
 /// The most values the data stack may hold, and the most calls the return
@@ -673,25 +674,7 @@ impl Machine {
     /// A continuation of the stacks from `rs_from` and `ds_from` up, and of
     /// `r`; `whole` when it is everything (`callcc`).
     fn capture(&mut self, heap: &mut Heap, r: &mut Regs, rs_from: usize, ds_from: usize, whole: bool) -> Value {
-        let ds = heap.vector_from(&self.ds[ds_from..]);
-        let rs = heap.vector_from(&self.rs[rs_from..]);
-        let k = heap.make_bloblet(const { kind("cellular-continuation") }, CONT_FIELDS, 0, true);
-        let fields = [
-            (CONT_DS, ds),
-            (CONT_RS, rs),
-            (CONT_CUR, r.cur),
-            (CONT_K, Value::fixnum(r.k as i64)),
-            (CONT_FP, Value::fixnum(r.fp as i64)),
-            (CONT_CLO, r.clo),
-            (CONT_BASE, Value::fixnum(ds_from as i64)),
-            (CONT_WHOLE, Value::boolean(whole)),
-            (CONT_REGIONS, Value::fixnum(heap.live_regions() as i64)),
-            (CONT_RUN, Value::fixnum(self.run as i64)),
-        ];
-        for (f, v) in fields {
-            heap.set_bloblet_slot(k, f, v);
-        }
-        k
+        continuation(heap, &self.ds[ds_from..], &self.rs[rs_from..], r, ds_from, whole, self.run, Value::FALSE)
     }
 
     /// Give continuation `k` the value `v`. A delimited one is composed: its
@@ -810,7 +793,7 @@ impl Machine {
             self.check_limits()?;
             self.escape(heap, c, v)?;
             self.reinstate(heap, r, c, v, tail);
-            return Ok(());
+            return self.resume_inner(cx, r, c, routine);
         }
         if !(c.is_bloblet() && heap.bloblet_kind(c) == const { kind("cellular-closure") }) {
             return Err(Trap::Type { routine });
@@ -839,11 +822,65 @@ impl Machine {
         Ok(())
     }
 
+    /// A capture up to `tag`, whose prompt is not on this machine's stacks:
+    /// in a run native code called, every frame of the run, and the frames
+    /// of the machines out from it up to the prompt (`crossing`), given to
+    /// `proc_`; else none to take.
+    fn capture_across(&mut self, cx: &mut Ctx, r: &mut Regs, tag: Value, proc_: Value, name: &'static str) -> Result<(), Trap> {
+        let missing = || Trap::Prim("call-with-composable-continuation: no prompt for this tag".into());
+        let Ctx::Rt(rt) = cx else { return Err(missing()) };
+        if !self.nested || !crossing::crossed() {
+            return Err(missing());
+        }
+        self.ds.push(proc_);
+        self.safepoint(&mut rt.heap, r);
+        let proc_ = self.ds.pop().expect("pushed");
+        // Above the entry of the word `call_value` made, which ends the run.
+        let own = self.capture(&mut rt.heap, r, self.rs_floor + 4, 0, false);
+        // Nothing allocated here collects, so `proc_` stays where it is.
+        let k = crossing::capture(rt, tag, own).ok_or_else(missing)?;
+        let k = if rt.heap.bloblet_kind(k) == const { kind("cellular-continuation") } { rt.heap.continuation_closure(k) } else { k };
+        self.ds.push(k);
+        self.ds.push(proc_);
+        self.call(cx, r, 1, false, name)
+    }
+
+    /// In a run native code called, the marks for `key` in the frames of the
+    /// machines out from it (`crossing`).
+    fn marks_beyond(&self, cx: &mut Ctx, key: Value) -> Vec<Value> {
+        match cx {
+            Ctx::Rt(rt) if self.nested => crossing::marks(rt, key),
+            _ => Vec::new(),
+        }
+    }
+
+    /// Once continuation `k`'s frames are back, with the value on top: its
+    /// inner continuation, if it has one (`crossing`), called with the
+    /// value, as native code, which these frames had called there; or, the
+    /// native code's frames all gone in tail calls, as this machine's.
+    fn resume_inner(&mut self, cx: &mut Ctx, r: &mut Regs, k: Value, name: &'static str) -> Result<(), Trap> {
+        let inner = cx.heap().bloblet_slot(k, CONT_INNER);
+        if inner == Value::FALSE {
+            return Ok(());
+        }
+        self.ds.push(inner);
+        if cx.heap().bloblet_kind(inner) == const { kind("cellular-continuation") } {
+            return self.call(cx, r, 1, false, name);
+        }
+        let Ctx::Rt(rt) = cx else { return Err(Trap::Type { routine: name }) };
+        match self.call_native(rt, r, 1, false, name)? {
+            Back::Value(v) => self.ds.push(v),
+            Back::Moved => {}
+            Back::Abort(tag, v) => self.abort(cx, r, tag, v, name)?,
+        }
+        Ok(())
+    }
+
     /// A call of the native closure on top with the `n` values below it,
     /// by the runtime's `call_native`, on Rust's stack: its value. The call
     /// may collect, so the stacks and registers are kept in a vector the
     /// heap roots meanwhile, and taken back from it after, moved.
-    fn call_native(&mut self, rt: &mut Runtime, r: &mut Regs, n: usize, routine: &'static str) -> Result<Back, Trap> {
+    fn call_native(&mut self, rt: &mut Runtime, r: &mut Regs, n: usize, tail: bool, routine: &'static str) -> Result<Back, Trap> {
         let Some(call) = rt.call_native else { return Err(Trap::Type { routine }) };
         self.check_limits()?;
         let c = self.ds.pop().expect("counted");
@@ -854,7 +891,8 @@ impl Machine {
         all.extend([r.cur, r.clo]);
         let kept = rt.heap.vector_from(&all);
         let at = rt.heap.push_root(kept);
-        let v = call(rt, c, &args);
+        let held = Held { at, nd, nr, k: r.k, fp: r.fp, tail, floor: self.rs_floor, nested: self.nested, run: self.run };
+        let v = crossing::across(std::rc::Rc::new(held), || call(rt, c, &args));
         let kept = rt.heap.root_at(at);
         rt.heap.pop_roots_to(at);
         let all: Vec<Value> = (0..rt.heap.obj_len(kept)).map(|i| rt.heap.obj_ref(kept, i)).collect();
@@ -1125,7 +1163,7 @@ impl Machine {
                     // A continuation was thrown past it, and is where this
                     // machine now is; or an abort found no prompt in it, and
                     // goes on here.
-                    let v = match self.call_native(rt, r, count, name)? {
+                    let v = match self.call_native(rt, r, count, tail, name)? {
                         Back::Value(v) => v,
                         Back::Moved => return Ok(Flow::Next),
                         Back::Abort(tag, v) => {
@@ -1155,6 +1193,7 @@ impl Machine {
                 self.check_limits()?;
                 self.escape(heap, k, v)?;
                 self.reinstate(heap, r, k, v, true);
+                self.resume_inner(cx, r, k, name)?;
             }
             UNDEFINED => return Err(Trap::Prim("a procedure was called before it was defined".into())),
             PRIM => {
@@ -1227,7 +1266,7 @@ impl Machine {
                     let tag = self.pop(name)?;
                     let proc_ = self.pop(name)?;
                     let Some(at) = Self::find_marked(&self.rs, self.rs_floor, PROMPT_MARK, tag) else {
-                        return Err(Trap::Prim("call-with-composable-continuation: no prompt for this tag".into()));
+                        return self.capture_across(cx, r, tag, proc_, name).map(|()| Flow::Next);
                     };
                     (proc_, Some(at))
                 } else {
@@ -1255,23 +1294,19 @@ impl Machine {
                 let key = self.pop(name)?;
                 let v = match Self::find_marked(&self.rs, self.rs_floor, MARK_MARK, key) {
                     Some(at) => self.rs[at + 2],
-                    None => default,
+                    None => self.marks_beyond(cx, key).first().copied().unwrap_or(default),
                 };
                 self.ds.push(v);
             }
             CURRENTMARKS | MARKSOF => {
                 let key = self.pop(name)?;
                 let marks = if n == CURRENTMARKS {
-                    Self::marks_in(&self.rs, self.rs_floor, key)
+                    let mut marks = Self::marks_in(&self.rs, self.rs_floor, key);
+                    marks.extend(self.marks_beyond(cx, key));
+                    marks
                 } else {
                     let k = self.pop(name)?;
-                    let heap = cx.heap();
-                    let Some(k) = heap.continuation_of(k) else {
-                        return Err(Trap::Type { routine: name });
-                    };
-                    let rs = heap.bloblet_slot(k, CONT_RS);
-                    let entries: Vec<Value> = (0..heap.obj_len(rs)).map(|i| heap.obj_ref(rs, i)).collect();
-                    Self::marks_in(&entries, 0, key)
+                    marks_of(cx.heap(), k, key).ok_or(Trap::Type { routine: name })?
                 };
                 let heap = cx.heap();
                 let list = heap.list_from(&marks);
@@ -1368,6 +1403,112 @@ pub const THROWN: &str = "a continuation thrown past native code";
 /// What a run native code called traps with when an abort finds no prompt
 /// in it (`Machine::aborted` says to what).
 pub const ABORTED: &str = "an abort past native code";
+
+/// A delimited or whole continuation of these stacks' values and return
+/// entries, at `r`, the data stack's taken from height `base`; `inner`
+/// inside it (`crossing`), or `#f`.
+#[allow(clippy::too_many_arguments)]
+fn continuation(heap: &mut Heap, ds: &[Value], rs: &[Value], r: &Regs, base: usize, whole: bool, run: u64, inner: Value) -> Value {
+    let ds = heap.vector_from(ds);
+    let rs = heap.vector_from(rs);
+    let k = heap.make_bloblet(const { kind("cellular-continuation") }, CONT_FIELDS, 0, true);
+    let fields = [
+        (CONT_DS, ds),
+        (CONT_RS, rs),
+        (CONT_CUR, r.cur),
+        (CONT_K, Value::fixnum(r.k as i64)),
+        (CONT_FP, Value::fixnum(r.fp as i64)),
+        (CONT_CLO, r.clo),
+        (CONT_BASE, Value::fixnum(base as i64)),
+        (CONT_WHOLE, Value::boolean(whole)),
+        (CONT_REGIONS, Value::fixnum(heap.live_regions() as i64)),
+        (CONT_RUN, Value::fixnum(run as i64)),
+        (CONT_INNER, inner),
+    ];
+    for (f, v) in fields {
+        heap.set_bloblet_slot(k, f, v);
+    }
+    k
+}
+
+/// The marks for `key` continuation `k` took, innermost first: those of
+/// the continuation inside it (`crossing`) first; a native continuation's,
+/// as `fixpt-native` reads them; none if `k` is no continuation.
+fn marks_of(heap: &Heap, k: Value, key: Value) -> Option<Vec<Value>> {
+    let Some(k) = heap.continuation_of(k) else {
+        return crossing::foreign_marks(heap, k, key);
+    };
+    let inner = heap.bloblet_slot(k, CONT_INNER);
+    let mut out = if inner != Value::FALSE { marks_of(heap, inner, key)? } else { Vec::new() };
+    let rs = heap.bloblet_slot(k, CONT_RS);
+    let entries: Vec<Value> = (0..heap.obj_len(rs)).map(|i| heap.obj_ref(rs, i)).collect();
+    out.extend(Machine::marks_in(&entries, 0, key));
+    Some(out)
+}
+
+/// A machine in a call of native code (`Machine::call_native`): its
+/// stacks and registers, kept in the vector rooted at `at` (`nd` values,
+/// `nr` return words, then the word and closure), the rest of its
+/// registers; whether the call was in tail position; its return stack's
+/// floor, and whether native code called it too, and its run.
+#[derive(Clone, Copy)]
+struct Held {
+    at: usize,
+    nd: usize,
+    nr: usize,
+    k: usize,
+    fp: usize,
+    tail: bool,
+    floor: usize,
+    nested: bool,
+    run: u64,
+}
+
+/// A held machine's frames, from its call of native code out to a prompt
+/// for `tag`, or to its first frame if native code called it, with `inner`
+/// inside: resumed, they take the call's value where it would have come
+/// back; or, from a tail call, return it.
+impl Crossing for Held {
+    fn capture(&self, rt: &mut Runtime, tag: Value, inner: Value) -> Crossed {
+        capture_held(rt, self, tag, inner)
+    }
+
+    fn marks(&self, rt: &mut Runtime, key: Value) -> (Vec<Value>, bool) {
+        let all = self.kept(&rt.heap);
+        (Machine::marks_in(&all[self.nd..self.nd + self.nr], self.floor, key), self.nested)
+    }
+}
+
+impl Held {
+    /// The values kept, as the heap has them now.
+    fn kept(&self, heap: &Heap) -> Vec<Value> {
+        let kept = heap.root_at(self.at);
+        (0..heap.obj_len(kept)).map(|i| heap.obj_ref(kept, i)).collect()
+    }
+}
+
+fn capture_held(rt: &mut Runtime, h: &Held, tag: Value, inner: Value) -> Crossed {
+    let all = h.kept(&rt.heap);
+    let heap = &mut rt.heap;
+    let (ds, rs) = (&all[..h.nd], &all[h.nd..h.nd + h.nr]);
+    let (cur, clo) = (all[h.nd + h.nr], all[h.nd + h.nr + 1]);
+    let found = Machine::find_marked(rs, h.floor, PROMPT_MARK, tag);
+    let (rs_from, ds_from) = match found {
+        Some(at) => (at + 4, prompt_height(rs[at + 3])),
+        None if h.nested => (h.floor + 4, 0),
+        None => return Crossed::Missing,
+    };
+    let r = if h.tail {
+        let cells = [Value::fixnum(const { routine("return") } as i64)];
+        let name = heap.intern("return");
+        let word = heap.make_cellular_word(name, &cells).expect("a well-formed word");
+        Regs { cur: word, k: WORD_CELL0, fp: h.fp, clo }
+    } else {
+        Regs { cur, k: h.k, fp: h.fp, clo }
+    };
+    let k = continuation(heap, &ds[ds_from..], &rs[rs_from..], &r, ds_from, false, h.run, inner);
+    if found.is_some() { Crossed::Found(k) } else { Crossed::Beyond(k) }
+}
 
 /// How a call of native code came back: with a value; moved, a continuation
 /// thrown past it; or with an abort that found no prompt in it.
