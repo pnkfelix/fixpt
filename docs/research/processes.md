@@ -190,16 +190,22 @@ Two refinements:
 - **The evaluator** written in FX-26 runs the library as it runs any
   program, with `%sched` among its primitives and the machines' I-cells.
 
-## Next: `select` and `race` (decided with the user, 2026-10-13)
+## Next: `pselect` and `race` (decided with the user, 2026-10-13)
 
-Two operations async programs reach for, in this order:
+Two operations async programs reach for, in this order. Together they are
+Tokio's `select!`: `pselect` its use over futures that only wait, `race`
+its use over futures that compute.
 
-1. **`select` over waits**: the first of several I-cells to be filled, or
-   a message, or (with a clock event) a deadline. One waker registered
-   with several cells or mailboxes, the first to fire winning (a fired
-   flag, so later wakes do nothing: `async.md`'s one-shot waker). Its
-   effect is its arms' `await`s and `receive`s, and `nondet`: which arm
-   wins is the schedule's.
+1. **`pselect` over waits** (built; `docs/fx26.md`, "`pselect`"): the
+   first of several I-cells to be filled, or a message, and later (with
+   a clock event) a deadline. One waker registered with several cells or
+   mailboxes, the first to fire winning (a fired flag, so later wakes do
+   nothing: `async.md`'s one-shot waker). Its effect is its arms'
+   `await`s and `receive`s, and `nondet`: which arm wins is the
+   schedule's. Named `pselect` because `select` is a module's component
+   in types and effects. A fired waker stays in an I-cell's list until
+   the cell is filled: a loop that waits on one cell many times keeps one
+   per wait (`TODO.md` §92).
 2. **`race`, best effort**: `(race e1 … en)` gives the value of a branch
    that finished. The contract, which an implementation may strengthen
    but not change:

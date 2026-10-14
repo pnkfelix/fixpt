@@ -75,6 +75,11 @@
                          ((main?) (begin (drain) (if (ready?) #u (error stuck))))
                          (else (begin (suspend register) (go)))))))
         (go))))
+  ;; Waker `w`, made to run at most once, however many wake it.
+  (define once (subr sched (thunk) thunk)
+    (lambda (w)
+      (let ((fired (the (ref bool @sched) (new #f))))
+        (lambda () (if (get fired) #u (begin (set fired #t) (w)))))))
   ;; A new task of `body`, runnable.
   (define fork (subr sched (thunk) unit)
     (lambda (body)
@@ -122,6 +127,46 @@
 (define icell-put! (poly ((r region)) (poly ((t type)) (subr any ((icell t r) t) unit)))
   (plambda ((r region))
     (plambda ((t type)) (lambda (c v) (begin ((proj (proj fill r) t) c v) (settle))))))
+;; An event, what `pselect` waits for: each of its parts, in order, whether
+;; it is ready, and how to give it a waker (`or-event` joins two).
+(define-type event (listof (pairof (subr sched () bool) (subr sched (thunk) unit) @sched) @sched))
+(define cell-event (poly ((r region)) (poly ((t type)) (subr sched ((icell t r)) event)))
+  (plambda ((r region))
+    (plambda ((t type))
+      (lambda (c)
+        (the event (list (cons (lambda () ((proj %sched (icell t r) unit bool) 10 c #u))
+                               (lambda (w) ((proj %sched (icell t r) thunk unit) 11 c w)))))))))
+(define mailbox-event (subr sched (mbox) event)
+  (lambda (mb)
+    (the event (list (cons (lambda () ((proj %sched mbox unit bool) 17 mb #u))
+                           (lambda (w) ((proj %sched mbox thunk unit) 9 mb w)))))))
+(define or-event (subr sched (event event) event)
+  (lambda (a b) (if (null? a) b (the event (cons (car a) (or-event (cdr a) b))))))
+;; The first of `e`'s parts that is ready, by its place from `i`; -1 if none.
+(define-rec
+  (first-ready (subr sched (event int) int)
+    (lambda (e i)
+      (cond ((null? e) -1) (((car (car e))) i) (else (first-ready (cdr e) (+ i 1))))))
+  ;; Waker `w` given to each of `e`'s parts.
+  (give-all (subr sched (event thunk) unit)
+    (lambda (e w) (if (null? e) #u (begin ((cdr (car e)) w) (give-all (cdr e) w))))))
+;; What a `pselect` says when nothing can make any of its events ready.
+(define stuck-select "a `pselect` whose events no task is left to make ready: a deadlock")
+;; The place in `e` of a part that is ready, waiting for one: the first in
+;; order of those ready when the task looks. The waker given to every part
+;; runs once, the first time one of them is ready; the rest do nothing.
+(define sync (subr any (event) int)
+  (lambda (e)
+    (letrec ((go (subr any () int)
+               (lambda ()
+                 (let ((i (first-ready e 0)))
+                   (cond ((>= i 0) i)
+                         ((main?)
+                          (begin (drain)
+                                 (let ((j (first-ready e 0)))
+                                   (if (>= j 0) j (error stuck-select)))))
+                         (else (begin (suspend (lambda (w) (give-all e (once w)))) (go))))))))
+      (go))))
 ;; `f` and `g`, each a task, and both their values.
 (define par2
   (poly ((a type) (b type))

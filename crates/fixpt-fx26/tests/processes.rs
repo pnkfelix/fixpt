@@ -54,8 +54,10 @@ fn lowered(text: &str, seed: Option<i64>) -> Result<String, String> {
     }
 }
 
-/// What the pieces written in FX-26 print, as a value or why not.
-fn printed(out: String) -> Result<String, String> {
+/// What the pieces written in FX-26 print, as a value or why not; or why
+/// they could not run it, a program they could not parse.
+fn printed(out: Result<String, fixpt_fx26::FxError>) -> Result<String, String> {
+    let out = out.map_err(|e| e.message)?;
     match out.strip_prefix("!! ") {
         Some(e) => Err(e.to_string()),
         None => Ok(out),
@@ -105,8 +107,8 @@ fn process_programs_do_as_they_say_every_way() {
     for (name, text, says) in &all {
         let ways = [
             ("lowered", lowered(text, None)),
-            ("evaluated", printed(common::with_own(|s| s.eval_with_own_evaluator(text)).expect("runs"))),
-            ("compiled", printed(common::with_own(|s| s.compile_with_own_compiler(text)).expect("runs"))),
+            ("evaluated", printed(common::with_own(|s| s.eval_with_own_evaluator(text)))),
+            ("compiled", printed(common::with_own(|s| s.compile_with_own_compiler(text)))),
             ("native", native(text)),
         ];
         for (way, got) in ways {

@@ -2104,3 +2104,18 @@ interleaved, one ended first, the other's kept through collections) and
   machine) and `evaluator.rs`. The full suite; the new tests under
   `--profile checked`.
 
+
+**`pselect`** (the user's, 2026-10-13; `docs/fx26.md`, "`pselect`").
+`(pselect ((icell-get c) x body …) ((receive box) y body …) …)` waits
+until one arm's wait is ready, and runs that arm: Tokio's `select!` over
+futures that only wait. Expanded in both parsers (`select_expansion`,
+`select-form`) into the scheduler's events: `cell-event`,
+`mailbox-event`, `or-event`, and `sync`, which gives the chosen arm's
+number, `nondet`; generative type `(event e)` (13, `check::EVENT`). A task
+that waits gives each event one waker that runs only once. Named
+`pselect` because `select` is a module's component in types and effects.
+Found on the way: a parse error in any process form (`par` too) aborted
+to a prompt tag no prompt had (`parser-forms.fx` made its own instance of
+`parser.fx`); its forms now fail through the caller's `pfail-at`. Tests:
+four programs in `programs/processes` (a cell chosen, a server stopped by
+a cell, a deadlock, a malformed arm), every way they run.

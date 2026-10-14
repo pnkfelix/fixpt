@@ -90,6 +90,8 @@ impl Checker {
                 self.par_expansion(span, lib, &parts, body)
             }
             ("par", _) => return Err(usage("(par ((name expression) …) body …)")),
+            ("pselect", [_, arms @ ..]) if !arms.is_empty() => self.select_expansion(span, lib, arms)?,
+            ("pselect", _) => return Err(usage("(pselect ((icell-get i-cell) name body …) ((receive mailbox) name body …) …)")),
             _ => unreachable!("a form of processes"),
         };
         self.parse_exp(&expansion)
@@ -145,6 +147,81 @@ impl Checker {
         }
         let outer_bind = Syntax::list(span, vec![Syntax::list(span, vec![p.clone(), tree])]);
         Syntax::list(span, vec![sym(self, span, "let"), outer_bind, out])
+    }
+
+    /// `(pselect (W0 x0 body0 …) … (Wn xn bodyn …))`, each `W` `(icell-get
+    /// c)` or `(receive box)`: `(let ((%sel-0 c0) … (%sel-n cn)) (let ((%sel
+    /// (sync (or-event E0 (or-event E1 … En))))) (if (= %sel 0) (let ((x0
+    /// (icell-get %sel-0))) body0 …) … (let ((xn …)) bodyn …))))`, each `E`
+    /// `(cell-event %sel-i)` or `(mailbox-event %sel-i)`, through `lib`.
+    /// Each node made has a place of its own (`par_expansion`): an arm's
+    /// event from its start to its `W`'s, its `or-event` from its start to
+    /// the form's end, its test none wide at its end, its `if` from its
+    /// `W`'s end to the form's end, its `let` the arm's, its `W` the `W`'s;
+    /// `sync` from the form's start to the first arm's.
+    fn select_expansion(&mut self, span: fixpt_read::Span, lib: fixpt_read::Sym, arms: &[Syntax]) -> R<Syntax> {
+        let at = |a: u32, b: u32| fixpt_read::Span::new(span.file, a, b);
+        let sym = |c: &mut Self, sp: fixpt_read::Span, s: &str| Syntax::symbol(sp, c.interner.intern(s));
+        let shape = "a `pselect` arm is `((icell-get i-cell) name body …)` or `((receive mailbox) name body …)`";
+        let mut parts = Vec::new();
+        for arm in arms {
+            let Some([w, x, body @ ..]) = arm.as_proper_list() else { return Err(FxError::at(arm.span, shape)) };
+            let event = match w.as_proper_list() {
+                Some([h, c]) if x.as_symbol().is_some() && !body.is_empty() => match h.as_symbol().map(|h| self.interner.name(h)) {
+                    Some("icell-get") => "cell-event",
+                    Some("receive") => "mailbox-event",
+                    _ => return Err(FxError::at(arm.span, shape)),
+                },
+                _ => return Err(FxError::at(arm.span, shape)),
+            };
+            parts.push((arm.span, w.clone(), x.clone(), body.to_vec(), event));
+        }
+        let lib_op = |c: &mut Self, sp: fixpt_read::Span, name: &str| {
+            let with = sym(c, sp, "with");
+            let name = sym(c, sp, name);
+            Syntax::list(sp, vec![with, Syntax::symbol(sp, lib), name])
+        };
+        let n = parts.len();
+        let names: Vec<Syntax> = (0..n).map(|i| sym(self, span, &format!("%sel-{i}"))).collect();
+        // The events, joined from the last.
+        let mut events = None;
+        for (i, (arm, w, ..)) in parts.iter().enumerate().rev() {
+            let sp = at(arm.start, w.span.start);
+            let e = Syntax::list(sp, vec![lib_op(self, sp, parts[i].4), names[i].clone()]);
+            events = Some(match events {
+                None => e,
+                Some(rest) => {
+                    let sp = at(arm.start, span.end);
+                    Syntax::list(sp, vec![lib_op(self, sp, "or-event"), e, rest])
+                }
+            });
+        }
+        let sync_at = at(span.start, parts[0].0.start);
+        let sync = Syntax::list(sync_at, vec![lib_op(self, sync_at, "sync"), events.expect("an arm")]);
+        let sel = sym(self, span, "%sel");
+        // The arms, the last first.
+        let mut out = None;
+        for (i, (arm, w, x, body, _)) in parts.iter().enumerate().rev() {
+            let head = w.as_proper_list().expect("an arm's wait")[0].clone();
+            let get = Syntax::list(w.span, vec![head, names[i].clone()]);
+            let mut l = vec![sym(self, *arm, "let"), Syntax::list(*arm, vec![Syntax::list(*arm, vec![x.clone(), get])])];
+            l.extend(body.iter().cloned());
+            let this = Syntax::list(*arm, l);
+            out = Some(match out {
+                None => this,
+                Some(rest) => {
+                    let t = at(arm.end, arm.end);
+                    let k = Syntax::new(t, fixpt_read::Datum::Number(fixpt_read::Num::Int(i as i64)));
+                    let test = Syntax::list(t, vec![sym(self, t, "="), sel.clone(), k]);
+                    let sp = at(w.span.end, span.end);
+                    Syntax::list(sp, vec![sym(self, sp, "if"), test, this, rest])
+                }
+            });
+        }
+        let let_ = sym(self, span, "let");
+        let inner = Syntax::list(span, vec![let_.clone(), Syntax::list(span, vec![Syntax::list(span, vec![sel, sync])]), out.expect("an arm")]);
+        let binds = parts.iter().enumerate().map(|(i, (_, w, ..))| Syntax::list(span, vec![names[i].clone(), w.as_proper_list().expect("an arm's wait")[1].clone()]));
+        Ok(Syntax::list(span, vec![let_, Syntax::list(span, binds.collect()), inner]))
     }
 
     /// The procedure of the scheduler's that `fun` names, if it names one:

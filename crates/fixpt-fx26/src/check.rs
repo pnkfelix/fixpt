@@ -163,6 +163,11 @@ pub(crate) const INBOX_INDEX: u32 = 11;
 /// process is checked transmissible.
 pub const PROCESS: &str = "(process (m type) (e effect +)) (poly ((r place)) (subr e ((inbox m r) (place r)) unit))";
 pub(crate) const PROCESS_INDEX: u32 = 12;
+/// What a `pselect` waits for (`docs/fx26.md`, "`pselect`"), generative type
+/// 13: some of I-cells to be filled and mailboxes to have a message, whose
+/// waiting does `e`. Made only by the forms, and never sent: to safety's
+/// analyses a procedure doing `e`; at run time the scheduler's list.
+pub const EVENT: &str = "(event (e effect +)) (subr e () bool)";
 /// The scheduler of processes and `par`, a module file built in, which the
 /// forms `spawn`, `send`, `receive`, `par`, `icell-get` and `icell-put!`
 /// call through the hidden global of its load (`Checker::library_type`).
@@ -737,7 +742,7 @@ impl Checker {
         // generative type, in both checkers, whose insides nothing sees
         // (no `up-` or `down-`: a `vsubr` is called with its arguments, not
         // their list). `vlambda` makes one; `apply` calls one on a list.
-        for decl in [VSUBR, FLATLAYOUT, FLATARRAYOF, IDENTITY, EQTABLE, BLOBREF, FLAT_ARRAYOF, FLAT_KEYED, BYTEVECTOROF, ESCAPE_TAG, ADDR, INBOX, PROCESS] {
+        for decl in [VSUBR, FLATLAYOUT, FLATARRAYOF, IDENTITY, EQTABLE, BLOBREF, FLAT_ARRAYOF, FLAT_KEYED, BYTEVECTOROF, ESCAPE_TAG, ADDR, INBOX, PROCESS, EVENT] {
             let forms = c.read(decl).expect("reads");
             c.define_generative(&forms[0], &forms[1]).unwrap_or_else(|e| panic!("`{decl}` is wrong: {e}"));
         }

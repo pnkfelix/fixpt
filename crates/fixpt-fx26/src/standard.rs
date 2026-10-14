@@ -542,6 +542,15 @@ pub const ENTRIES: &[(&str, &str)] = &[
         "(poly ((a type) (b type) (e1 effect) (e2 effect))
            (subr (maxeff e1 e2) ((subr e1 () a) (subr e2 () b)) (productof (1 a) (2 b))))",
     ),
+    // `pselect`'s (`docs/fx26.md`, "`pselect`"): which of its events is
+    // ready, waiting for one, a choice when more than one is.
+    ("%processes:cell-event", "(poly ((r region)) (poly ((t type)) (subr pure ((icell t r)) (event (await r)))))"),
+    ("%processes:mailbox-event", "(poly ((m type) (r place)) (subr pure ((inbox m r)) (event (receive r))))"),
+    (
+        "%processes:or-event",
+        "(poly ((e1 effect) (e2 effect)) (subr pure ((event e1) (event e2)) (event (maxeff e1 e2))))",
+    ),
+    ("%processes:sync", "(poly ((e effect)) (subr (maxeff e nondet) ((event e)) int))"),
     (
         "%sched",
         "(poly ((a type) (b type) (c type))
@@ -567,7 +576,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
 
 /// The initial environment as text, for the checker written in FX-26:
 /// the standard generative types' declarations (`check::VSUBR`,
-/// `FLATLAYOUT`, `FLATARRAYOF`, `IDENTITY`, `EQTABLE`, `BLOBREF`, `FLAT_ARRAYOF`, `FLAT_KEYED`, `BYTEVECTOROF`, `ESCAPE_TAG`, `ADDR`, `INBOX`, `PROCESS`: 0 to 12), `datum`'s
+/// `FLATLAYOUT`, `FLATARRAYOF`, `IDENTITY`, `EQTABLE`, `BLOBREF`, `FLAT_ARRAYOF`, `FLAT_KEYED`, `BYTEVECTOROF`, `ESCAPE_TAG`, `ADDR`, `INBOX`, `PROCESS`, `EVENT`: 0 to 13), `datum`'s
 /// and `io-error`'s (`check::STANDARD_TYPES`), then `(name type)` for each
 /// binding.
 pub fn standard_text() -> String {
@@ -585,6 +594,7 @@ pub fn standard_text() -> String {
         crate::check::ADDR,
         crate::check::INBOX,
         crate::check::PROCESS,
+        crate::check::EVENT,
     ]
         .iter()
         .map(|d| format!("(define-generative {d})\n"))

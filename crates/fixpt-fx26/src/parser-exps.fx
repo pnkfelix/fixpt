@@ -446,8 +446,8 @@
                        (parse-body (drop items 2) a b) a b)))
         ((begin) (parse-body (cdr items) a b))
         ;; Processes and `par` (`parser-forms.fx`).
-        ((spawn send receive par icell-get icell-put!)
-         (parse-exp (process-form head items (parse-loaded processes #f (car items) a b) a b)))
+        ((spawn send receive par pselect icell-get icell-put!)
+         (parse-exp (process-form pfail-at items (parse-loaded processes #f (car items) a b) a b)))
         ((cond) (parse-cond (cdr items) a b))
         ((case) (parse-case (cdr items) a b))
         ((typecase) (parse-typecase items a b))
