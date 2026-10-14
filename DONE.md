@@ -2152,6 +2152,13 @@ chosen, three computations of one answer, a loser stopped at its wait,
 which would otherwise spin for ever; a write, two types, two receives
 refused), every way and under 20 schedules; both checkers on each.
 
+**H3: copying against sharing, measured** (`docs/research/processes.md`,
+"H3"; `docs/research/processes-h3.fx`): a message costs about 0.87 µs
+whatever its size, and 9 ns a word copied, after the copier's map stopped
+hashing with SipHash (`WordHasher`, one multiply a word), which had made
+it 22: 10,000 cells 443 → 179 µs. Building the data costs a ninth of
+copying it. Decided: copy; share only if large messages turn out common.
+
 
 **`append` and `string-append` as `vsubr`s** (the user's, 2026-10-13;
 `docs/fx26.md`, "Variadic procedures"): called with any count, a call the

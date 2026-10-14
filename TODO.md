@@ -2484,9 +2484,6 @@ frame slots, as the suffix. Left:
 Built, all three of kayak's stages (`DONE.md` §92; the design,
 `docs/research/processes.md`; the forms, `docs/fx26.md`, "Processes and
 `par`"). Left:
-- **H3: copying against sharing**, for messages of 1 to 10,000 words
-  (`fixpt_runtime::sched::words_copied` counts them), to decide whether
-  large frozen data is shared.
 - **Q2: preemption at fuel polls**, so that a process that spins cannot
   starve another (fairness, which the semantics promises and the prototype
   does not keep).

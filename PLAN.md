@@ -141,8 +141,9 @@ are in the last section, "Log: the glance's details", and in
   places (Q1). On every machine, a scheduler written in FX-26. And
   `pselect`, Tokio's `select!` over waits, deadlines among them (the
   scheduler sleeps until the earliest); and `race`, best effort (losers
-  stopped at their next wait). Left: copying against sharing (H3),
-  preemption (Q2), a `sendable` kind.
+  stopped at their next wait). Messages copied, measured (H3: 9 ns a
+  word, after 0.87 µs a message). Left: preemption (Q2), a `sendable`
+  kind, the switch's cost.
 - **Cellular code calling native code** (2026-10-13, `TODO.md` §93):
   fixed, a crash on the REPL's machine where the native convention
   declined a form; its cost to assembling words mostly recovered (peval's

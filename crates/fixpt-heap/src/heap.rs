@@ -1489,7 +1489,7 @@ impl Heap {
     /// copied. Nothing collects meanwhile: allocation never does.
     pub fn copy_within(&mut self, root: Value, share: impl Fn(&Heap, Value) -> bool) -> (Value, usize) {
         use std::collections::hash_map::Entry;
-        let mut made: HashMap<u64, Value> = HashMap::new();
+        let mut made: HashMap<u64, Value, std::hash::BuildHasherDefault<WordHasher>> = HashMap::default();
         let mut order: Vec<Value> = Vec::new();
         let mut todo = vec![root];
         let mut words = 0;
@@ -2517,4 +2517,33 @@ fn fnv1a(s: &str) -> u64 {
         h = h.wrapping_mul(0x100_0000_01b3);
     }
     h
+}
+
+/// A hasher for a map keyed by values' bits, as `copy_within`'s: one
+/// multiply a word (Fibonacci hashing), where the standard hasher's
+/// SipHash, made to resist chosen keys, cost a message most of its copy
+/// (`TODO.md` §92, H3). The keys are addresses the heap chose, so none are
+/// chosen against it.
+#[derive(Default)]
+struct WordHasher(u64);
+
+impl std::hash::Hasher for WordHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        let mut words = bytes.chunks_exact(8);
+        for w in &mut words {
+            self.write_u64(u64::from_le_bytes(w.try_into().expect("8 bytes")));
+        }
+        let rest = words.remainder();
+        if !rest.is_empty() {
+            let mut last = [0u8; 8];
+            last[..rest.len()].copy_from_slice(rest);
+            self.write_u64(u64::from_le_bytes(last) ^ (rest.len() as u64) << 59);
+        }
+    }
+    fn write_u64(&mut self, x: u64) {
+        self.0 = (self.0 ^ x).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    }
 }

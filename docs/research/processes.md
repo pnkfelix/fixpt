@@ -228,10 +228,37 @@ its use over futures that compute.
      FX-26 programs) only ends more often. The same relation as fairness
      under preemption (Q2).
 
+## H3: copying against sharing (measured 2026-10-14)
+
+`processes-h3.fx`: a process takes messages, each a frozen list of `n`
+ints (a list cell is two words), and the first task sends it many; beside
+each, what building the list once costs, which is what sharing it would
+leave. Nanoseconds per message, on the REPL's machine
+(`fx-regs-rsjit-nativecc`), before and after the copier's map stopped
+hashing with SipHash (`Heap::copy_within`, `WordHasher`):
+
+| n      | send, SipHash | send, now | build  |
+| -----: | ------------: | --------: | -----: |
+|      0 |           877 |       867 |      2 |
+|      1 |           889 |       875 |      3 |
+|     10 |         1,353 |     1,194 |     18 |
+|    100 |         5,362 |     3,084 |    200 |
+|  1,000 |        48,650 |    21,156 |  1,950 |
+| 10,000 |       442,548 |   179,156 | 19,600 |
+
+So a message costs about 0.87 µs whatever its size (a switch to the
+receiver and back: "The cost of a switch", below), and about 18 ns a list
+cell copied, 9 a word: nine times what building it costs. The two are
+equal at about 50 cells. **Decision: copy.** Below a few hundred words
+the copy is lost in the switch; above, sharing frozen data would save up
+to nine tenths of a large message, but would tie the meaning of a message
+to one heap shared by every process, which an implementation with a heap
+for each (OS threads, distribution) would not have. Revisit if a client sends messages
+of thousands of words often; a size above which frozen data is shared is
+then the shape of it.
+
 ## What is left
 
-- **H3**: measure copying against sharing, for messages of 1 to 10,000
-  words (`fixpt_runtime::sched::words_copied` counts them).
 - **Q2**: preemption at fuel polls, for fairness.
 - **A `sendable` kind**, for servers polymorphic in their messages; and
   `self`.
