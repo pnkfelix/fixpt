@@ -67,10 +67,20 @@ pub fn parse_with_fx26_parser(scheme: &mut Session, file: FileId, text: &str) ->
 /// checker says the program runs (`checked-tops`, under redefinition): its
 /// value as Scheme would write it, or `!! ` and its error.
 pub fn eval_with_fx26_evaluator(scheme: &mut Session, standard: Handle, file: FileId, text: &str) -> R<String> {
+    eval_more_with_fx26_evaluator(scheme, Some(standard), file, text, 0)
+}
+
+/// [`eval_with_fx26_evaluator`], or, `standard` none, `text` as more of the
+/// program the evaluator ran before: checked after the forms before, and
+/// run with the globals they made (`run-checked-more`). Its positions are
+/// counted from `base`, past every text given before, so that what the
+/// checker says of a place is said of no other form's.
+pub fn eval_more_with_fx26_evaluator(scheme: &mut Session, standard: Option<Handle>, file: FileId, text: &str, base: i64) -> R<String> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
+    let entry = if standard.is_some() { "run-checked" } else { "run-checked-more" };
     scheme.scope(|s| {
-        let tops = parse_to_trees(s, file, text)?;
-        let checked = check_in(s, Some(standard), tops).map_err(|e| fail(e.to_string()))?;
+        let tops = parse_to_trees_at(s, file, text, base)?;
+        let checked = check_in(s, standard, tops).map_err(|e| fail(e.to_string()))?;
         if let Some(m) = s.view(|v| {
             let r = v.get(checked);
             (r.field(2).and_then(|t| t.symbol_name()).as_deref() == Some("k-err"))
@@ -79,7 +89,7 @@ pub fn eval_with_fx26_evaluator(scheme: &mut Session, standard: Handle, file: Fi
             return Ok(format!("!! check: {m}"));
         }
         let runs = s.call_global(&format!("{READER_PREFIX}checked-tops"), &[]).map_err(|e| fail(e.to_string()))?;
-        let out = s.call_global(&format!("{READER_PREFIX}run-checked"), &[runs]).map_err(|e| fail(e.to_string()))?;
+        let out = s.call_global(&format!("{READER_PREFIX}{entry}"), &[runs]).map_err(|e| fail(e.to_string()))?;
         Ok(s.view(|v| v.get(out).string().unwrap_or_default()))
     })
 }
@@ -608,14 +618,24 @@ fn word_of(scheme: &mut Session, result: Handle) -> R<Result<Handle, String>> {
 /// The parser's trees for `text`: a list of `top`s, as a handle in the
 /// caller's scope.
 fn parse_to_trees(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
-    supply_loaded(scheme, file, text)?;
-    let syns = read_to_syns(scheme, file, text)?;
-    parse_syns(scheme, file, text, syns)
+    parse_to_trees_at(scheme, file, text, 0)
+}
+
+/// [`parse_to_trees`], its positions counted from `base`.
+fn parse_to_trees_at(scheme: &mut Session, file: FileId, text: &str, base: i64) -> R<Handle> {
+    supply_loaded_at(scheme, file, text, base)?;
+    let syns = read_to_syns_at(scheme, file, text, base)?;
+    parse_syns_at(scheme, file, text, syns, base)
 }
 
 /// What the parser written in FX-26 makes of `syns`, read from `text`
 /// ([`read_to_syns`]): the program's trees, or where it is wrong.
 pub fn parse_syns(scheme: &mut Session, file: FileId, text: &str, syns: Handle) -> R<Handle> {
+    parse_syns_at(scheme, file, text, syns, 0)
+}
+
+/// [`parse_syns`], the positions read counted from `base`.
+fn parse_syns_at(scheme: &mut Session, file: FileId, text: &str, syns: Handle, base: i64) -> R<Handle> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     let result = scheme.call_global(&format!("{READER_PREFIX}parse-program"), &[syns]).map_err(|e| fail(e.to_string()))?;
     let (tag, err) = scheme.view(|v| {
@@ -629,7 +649,7 @@ pub fn parse_syns(scheme: &mut Session, file: FileId, text: &str, syns: Handle) 
     });
     if let Some((msg, a, b)) = err {
         let offsets = byte_offsets(text);
-        let at = |c: i64| offsets.get(c as usize).copied().unwrap_or(text.len()) as u32;
+        let at = |c: i64| offsets.get((c - base).max(0) as usize).copied().unwrap_or(text.len()) as u32;
         return Err(FxError::at(Span::new(file, at(a), at(b)), msg));
     }
     debug_assert_eq!(tag, "p-ok");
@@ -758,8 +778,13 @@ fn load_modules_at(f: &Syntax, interner: &Interner, out: &mut Vec<(u32, String, 
 /// was not read), its path, why not, its forms and its text. A file read is
 /// a module's in order, as the Rust checker numbers them.
 pub fn supply_loaded(scheme: &mut Session, file: FileId, text: &str) -> R<()> {
+    supply_loaded_at(scheme, file, text, 0)
+}
+
+/// [`supply_loaded`], `text`'s positions counted from `base`.
+fn supply_loaded_at(scheme: &mut Session, file: FileId, text: &str, base: i64) -> R<()> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
-    let list = loaded_files(scheme, file, text)?;
+    let list = loaded_files_at(scheme, file, text, base)?;
     scheme.call_global(&format!("{READER_PREFIX}loaded-files!"), &[list]).map_err(|e| fail(e.to_string()))?;
     Ok(())
 }
@@ -769,11 +794,15 @@ pub fn supply_loaded(scheme: &mut Session, file: FileId, text: &str) -> R<()> {
 /// its own (`tests/bootstrap.rs`, whose front end reads the front end's
 /// built-in module files).
 pub fn loaded_files(scheme: &mut Session, file: FileId, text: &str) -> R<fixpt_scheme::Handle> {
+    loaded_files_at(scheme, file, text, 0)
+}
+
+fn loaded_files_at(scheme: &mut Session, file: FileId, text: &str, base: i64) -> R<fixpt_scheme::Handle> {
     let base_dir = LOAD_BASE.with(|b| b.borrow().clone());
     let mut list = scheme.make(|_| Value::NULL);
     let mut read = 0;
     let mut seen = HashMap::new();
-    supply_loaded_in(scheme, file, text, 0, base_dir, &mut read, &mut seen, &mut list)?;
+    supply_loaded_in(scheme, file, text, base, base_dir, &mut read, &mut seen, &mut list)?;
     Ok(list)
 }
 

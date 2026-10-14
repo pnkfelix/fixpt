@@ -268,8 +268,8 @@ weighed with the other items, not ahead of them.
   ways the machines disagree when a run fails. Then (2026-10-14, kayak's
   request, `DONE.md` §95) bytes from the standard input, a `pselect` arm
   for a key, and `(io terminal)`: raw mode, back, the size. Found on the
-  way: `TODO.md` §96, the evaluator written in FX-26 runs each definition
-  again with each later form.
+  way, and fixed (`DONE.md` §96): the evaluator written in FX-26 ran each
+  definition again with each later form.
 - S1. Done (2026-09-30): **the `acyclic?` gap**, F13: shown a
   use-after-free on every path, and fixed in both checkers with data at a
   place, `(t data p)` (`docs/research/shapes.md`, the framing: regions,
@@ -2070,11 +2070,11 @@ should fragmentation call for moving code.
   what it returns, which is where session types, which the user has also
   raised, would come in. This is for when the type system is extended.
 
-- **The cellular REPL's state.** Under `--fx26-run cellular` or
-  `evaluate`, each form is compiled with the definitions before it re-run.
-  So a definition's state does not survive from one form to the next: a
-  reference set by an earlier expression is fresh again. A session that
-  keeps its compiled globals between forms would fix this.
+- **The cellular REPL's state.** Done: under `--fx26-run cellular` each
+  form is checked after the ones before and compiled against the globals
+  they made (`compile_form_showing`); under `evaluate`, since 2026-10-14
+  (`DONE.md` §96), each form is evaluated once, with the globals the forms
+  before made, where every definition before it was run again.
 
 - **Pinned code, with raw return addresses into it.** Possibly pinned only
   speculatively, with moving still possible at the cost of rewriting return

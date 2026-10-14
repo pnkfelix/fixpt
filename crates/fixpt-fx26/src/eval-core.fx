@@ -529,6 +529,21 @@
       (ev-ok (v) (show-val v))
       (ev-err (m) (string-append "!! " m)))))
 
+;; More of a program, form by form, as the REPL gives them (`check-more`):
+;; what it runs, with the globals the forms before made, and what the
+;; checker said of its places beside what it said of theirs (a closure made
+;; before may run now). Each form's positions are past every one's before
+;; (`syn::eval_more_with_fx26_evaluator`), so no two places are one.
+(define run-checked-more (subr (maxeff evals (read @t) spin) ((listof k-run acyclic)) string)
+  (lambda (runs)
+    (begin
+      (set ev-reshapes (append (get k-reshapes) (get ev-reshapes)))
+      (set ev-withs (append (get k-with-vals) (get ev-withs)))
+      (set ev-facts (append (get k-extracts) (get ev-facts)))
+      (tagcase (eval-runs runs)
+        (ev-ok (v) (show-val v))
+        (ev-err (m) (string-append "!! " m))))))
+
 ;; The entry point: a program's trees, run; its value shown, or its error.
 (define run-program (subr (maxeff evals spin) ((listof top acyclic)) string)
   (lambda (tops)

@@ -199,3 +199,14 @@ fn a_process_waits_for_a_key() {
         assert_eq!(status, Some(want), "{m}: {err}");
     }
 }
+
+/// Each form runs once (`TODO.md` §96): a definition that writes, an
+/// expression that writes, a process a definition spawned, then `main`;
+/// the evaluator written in FX-26 too, which once ran every definition
+/// again with each later form.
+#[test]
+fn each_form_runs_once() {
+    for (m, (status, out, err)) in on_every_machine("once.fx") {
+        assert_eq!((status, out.as_str()), (Some(42), "define x\nan expression\nthe process\nmain\n"), "{m}: {err}");
+    }
+}

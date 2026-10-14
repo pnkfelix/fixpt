@@ -2417,3 +2417,30 @@ io.rs`: `the_standard_input_read_by_bytes`, `a_process_waits_for_a_key`
 and by hand on the other four; by hand on a pseudo-terminal (`script`):
 raw mode, no echo, ^C a key (3), and the terminal back in canonical mode
 with echo after a program that failed while raw.
+
+## 96. The evaluator ran every definition again with each form (found 2026-10-14)
+
+The evaluator written in FX-26 (`fx-ast-eval`) was given, with each form,
+the text of every definition before it (and of every expression that
+wrote), and ran them all again: it kept no state between forms, and
+rebuilt it by replaying, which was sound while nothing replayed could be
+seen. With I/O and processes it could: a definition that wrote, then four
+forms, wrote six times; a process a definition spawned ran once per later
+form. Found testing `read-byte` (§95). The user suggested not running
+again what does I/O; but the values of what was not run again would be
+missing (a process's address), so the evaluator now keeps its state.
+
+Each form is checked after the forms before (`check-more`, as the
+compiler's forms are) and run once with the globals they made
+(`run-checked-more`, `Session::eval_form`). What the checker says of a
+place (an `extract`'s offset, a module to reshape, a `with`'s values) the
+evaluator looks up when the code runs, perhaps long after, in a closure
+or a process an earlier form made; so each form's positions begin past
+every text given before (`syn::eval_more_with_fx26_evaluator`, the reader
+and the loads' scan given a base, as module files are), and the facts
+of every form are kept together. A whole program
+(`eval_with_own_evaluator`) still begins again. Test: `fixpt-cli/tests/
+io.rs`, `each_form_runs_once` (`programs/io/once.fx`: a definition and an
+expression that write, a process a definition spawned, then `main`), on
+five machines; the old evaluator wrote `define x` seven times.
+

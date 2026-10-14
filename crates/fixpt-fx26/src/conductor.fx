@@ -337,6 +337,7 @@
            (load-input "fx26:arm64.fx") layout (load-module "fx26:native-layout.fx"))))
     ;; What Rust and `bootstrap.fx` call of them (`syn.rs`, `session.rs`).
     (product (run-checked (with eval-core run-checked))
+             (run-checked-more (with eval-core run-checked-more))
              (run-program (with eval-core run-program))
              (native-assemble (with native native-assemble))
              (compile-forget-globals! (with compile-programs compile-forget-globals!))
@@ -365,6 +366,7 @@
              (k-done (with check-types k-done)))))
 
 (define run-checked (extract front-end-entries run-checked))
+(define run-checked-more (extract front-end-entries run-checked-more))
 (define run-program (extract front-end-entries run-program))
 (define native-assemble (extract front-end-entries native-assemble))
 (define compile-forget-globals! (extract front-end-entries compile-forget-globals!))

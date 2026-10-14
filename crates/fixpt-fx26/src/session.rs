@@ -83,10 +83,9 @@ pub struct Fx26Session {
     /// The initial environment as the FX-26 reader read it, for the checker
     /// written in FX-26: read once, as it takes the reader a while.
     standard26: Option<fixpt_scheme::Handle>,
-    /// Under a strategy other than `Lower`, the definitions run so far, as
-    /// text: each form is given to the pieces written in FX-26 as a whole
-    /// program, so these go before it, and what it says can use them.
-    defined26: String,
+    /// Under `Evaluate`, where the next form's positions begin: past every
+    /// text the evaluator was given before (`eval_form`).
+    eval_base: i64,
     /// How many steps a form may take when run, or no limit: see
     /// [`set_step_limit`](Fx26Session::set_step_limit).
     step_limit: Option<u64>,
@@ -442,7 +441,7 @@ impl Fx26Session {
             show_words: false,
             words_shown: Default::default(),
             standard26: None,
-            defined26: String::new(),
+            eval_base: 0,
             step_limit: Some(DEFAULT_STEP_LIMIT),
             speculation_limit: Some(SPECULATION_STEP_LIMIT),
             pending: Vec::new(),
@@ -589,7 +588,7 @@ impl Fx26Session {
             }
         }
         let out = match self.strategy {
-            Strategy::Evaluate => self.eval_with_own_evaluator(&format!("{}{text}\n", self.defined26))?,
+            Strategy::Evaluate => self.eval_form(&format!("{text}\n"))?,
             _ => self.compile_form_showing(&format!("{text}\n"), false)?.0,
         };
         Ok(match out.strip_prefix("!! ") {
@@ -609,12 +608,14 @@ impl Fx26Session {
         if self.strategy != Strategy::Lower {
             let ahead: Vec<&Syntax> = forms.iter().zip(&done).filter(|(_, d)| **d).map(|(f, _)| f).collect();
             let text: String = ahead.iter().map(|f| format!("{}\n", fixpt_read::write_syntax(f, &self.checker.interner))).collect();
-            if self.strategy == Strategy::Evaluate {
-                self.defined26.push_str(&text);
-            } else if let (Some(first), false) = (ahead.first(), text.is_empty())
-                && let Some(e) = self.compile_form_showing(&text, false)?.0.strip_prefix("!! ")
-            {
-                return Err(FxError::at(first.span, e.to_string()));
+            if let (Some(first), false) = (ahead.first(), text.is_empty()) {
+                let out = match self.strategy {
+                    Strategy::Evaluate => self.eval_form(&text)?,
+                    _ => self.compile_form_showing(&text, false)?.0,
+                };
+                if let Some(e) = out.strip_prefix("!! ") {
+                    return Err(FxError::at(first.span, e.to_string()));
+                }
             }
         }
         // What the reader made of a `define-generative` declared ahead (its
@@ -880,7 +881,7 @@ impl Fx26Session {
                 }
             }
             let (out, words) = match self.strategy {
-                Strategy::Evaluate => (self.eval_with_own_evaluator(&format!("{}{form_text}\n", self.defined26))?, None),
+                Strategy::Evaluate => (self.eval_form(&format!("{form_text}\n"))?, None),
                 _ => self.compile_form_showing(&format!("{form_text}\n"), self.show_words)?,
             };
             // A form is compiled with every definition before it, so only
@@ -902,22 +903,6 @@ impl Fx26Session {
                     .to_string(),
                 None => code,
             };
-            // What the next form's run starts from (the evaluator keeps no
-            // state between forms): every definition, and every expression
-            // that writes, whose write a later form may see. It has no I/O,
-            // so a write replayed does just what it did.
-            // A send is one: the message waits in its mailbox for later.
-            let writes = |c: &crate::check::Checked| {
-                c.effect.0.iter().any(|a| matches!(a, crate::ast::Atom::Write(_) | crate::ast::Atom::Init(_) | crate::ast::Atom::Send(_)))
-            };
-            let replay = match &top {
-                Top::Exp(c) => writes(c),
-                _ => true,
-            };
-            if replay && !out.starts_with("!! ") {
-                self.defined26.push_str(&form_text);
-                self.defined26.push('\n');
-            }
             let value = match out.strip_prefix("!! ") {
                 Some(e) => Err(e.to_string()),
                 None if matches!(top, Top::Exp(_)) => Ok(Some(out)),
@@ -1003,6 +988,27 @@ impl Fx26Session {
         r
     }
 
+    /// `text`, one form or more, as the next of this session's program, by
+    /// the evaluator written in FX-26: checked after the forms before, and
+    /// run with the globals they made, once (`run-checked-more`); its
+    /// positions past every text's before. As the compiler's forms are
+    /// (`compile_form_showing`), where the evaluator once ran every
+    /// definition before again with each form (`TODO.md` §96).
+    fn eval_form(&mut self, text: &str) -> R<String> {
+        self.own_pieces()?;
+        let standard = self.next_standard()?;
+        if standard.is_some() {
+            self.eval_base = 0;
+        }
+        let base = self.eval_base;
+        self.eval_base += text.chars().count() as i64 + 1;
+        self.scheme.engine.set_step_limit(None);
+        let r = crate::syn::eval_more_with_fx26_evaluator(&mut self.scheme, standard, FileId(0), text, base);
+        self.scheme.engine.set_step_limit(self.step_limit);
+        self.own_begun |= !matches!(&r, Ok(out) if out.starts_with("!! check:"));
+        r
+    }
+
     /// The initial environment as the FX-26 reader reads it, read once.
     fn standard26(&mut self) -> R<fixpt_scheme::Handle> {
         if let Some(h) = self.standard26 {
@@ -1074,9 +1080,9 @@ impl Fx26Session {
 
     /// The front end's entry points the Rust side calls by name
     /// (`READER_PREFIX`), each rebound by [`Self::front_end_as_register_code`].
-    pub const FRONT_ENTRIES: [&'static str; 25] = [
+    pub const FRONT_ENTRIES: [&'static str; 26] = [
         "read-text-at", "check-program", "check-more", "checked-tops", "checked-extracts", "checked-effects", "check-conv-native!", "checked-withs!", "checked-reshapes!",
-        "check-globals-effects!", "check-defer-reruns!", "check-hold-breaks!", "check-lines!", "parse-program", "loaded-files!", "run-checked", "compile-program", "compile-checked", "compile-registers!",
+        "check-globals-effects!", "check-defer-reruns!", "check-hold-breaks!", "check-lines!", "parse-program", "loaded-files!", "run-checked", "run-checked-more", "compile-program", "compile-checked", "compile-registers!",
         "compile-global-cell", "compile-new-global", "compile-keep-global!", "compile-note-inline!", "native-assemble",
         "check-built-in!",
     ];

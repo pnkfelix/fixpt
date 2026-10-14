@@ -2517,17 +2517,3 @@ recovered (`DONE.md` §93). Left:
   frames, so such code runs on until it returns to native code; and the
   evaluator knows no `stay-cellular`, so `programs/native/captures.fx` is
   not run there.
-
-## 96. The evaluator runs every definition again with each form (found 2026-10-14)
-
-The evaluator written in FX-26 (`fx-ast-eval`, `Strategy::Evaluate`) is
-given, with each form, the text of every definition before it
-(`Session::defined26`), and evaluates them all again: it keeps no state
-between forms. So what a definition does is done again with each later
-form: `(define x int (begin (write-out "define\n") 1))` then four forms
-writes `define` six times, and a process spawned by a definition runs its
-body once per later form (each a new I-cell, so no "written twice"). Found
-while testing `read-byte` (`DONE.md` §95), whose test programs now do their
-I/O in `main`, which runs once. Harmless for a pure definition; wrong for
-one with I/O or processes. To do: the evaluator keeps its environment
-between forms, as the other machines keep their globals.
