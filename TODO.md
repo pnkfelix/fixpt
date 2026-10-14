@@ -2488,11 +2488,6 @@ Built, all three of kayak's stages (`DONE.md` §92; the design,
   message's two switches, after 890 (`DONE.md` §92). What is left is the
   call-out from native code and the frames copied to capture and
   reinstate: one-shot stack segments, a task's own stack switched to.
-- **A cancelled task's wakers**: a `race`'s loser, stopped at its next
-  wait, ends when that wait's waker runs, so one waiting for a cell never
-  filled stays (a task, and its places) until the run ends; and a deadline
-  it waited for is still slept for. Stopping it at once would need each
-  waker taken back where it was given (as `sync` does its own).
 - Out of scope, as kayak asked: transfer of mutable data (by consuming a
   place's handle, after H3), session types, distribution, and links
   (monitors are built, `DONE.md` §94).

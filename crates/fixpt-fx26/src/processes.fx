@@ -31,9 +31,29 @@
   (define task-switch (subr sched (int) int) (lambda (t) ((proj %sched int unit int) 1 t #u)))
   (define task-end (subr sched (int) unit) (lambda (t) ((proj %sched int unit unit) 2 t #u)))
   (define task-current (subr sched () int) (lambda () ((proj %sched unit unit int) 3 #u #u)))
+  ;; How a task that waits stops waiting: its waker taken back.
+  (define-type stop (subr sched () unit))
+  (define-type stops (listof (pairof int stop @sched) @sched))
+  ;; Each cancelled task that waits, ended now, its waker taken back (42),
+  ;; so that none is left waiting for what may never come. Not preempted
+  ;; meanwhile (33, 32): a waker that fired already would run its task's
+  ;; resumer between, which would end the task first.
+  (define reap (subr sched () unit)
+    (lambda ()
+      (letrec ((go (subr sched (stops) unit)
+                 (lambda (ws)
+                   (if (null? ws)
+                       #u
+                       (begin ((cdr (car ws))) (task-end (car (car ws))) (go (cdr ws)))))))
+        (begin
+          ((proj %sched unit unit unit) 33 #u #u)
+          (go ((proj %sched unit unit stops) 42 #u #u))
+          ((proj %sched unit unit unit) 32 #u #u)))))
   ;; Task `t` cancelled (a `race`'s loser), and whether it is: it ends
-  ;; instead of running the next time it would, its places with it.
-  (define cancel (subr sched (int) unit) (lambda (t) ((proj %sched int unit unit) 24 t #u)))
+  ;; instead of running the next time it would, its places with it; at
+  ;; once, if it waits.
+  (define cancel (subr sched (int) unit)
+    (lambda (t) (begin ((proj %sched int unit unit) 24 t #u) (reap))))
   (define cancelled? (subr sched (int) bool) (lambda (t) ((proj %sched int unit bool) 25 t #u)))
   (define main? (subr sched () bool) (lambda () (= (task-current) 0)))
   (define push (subr sched (thunk) unit) (lambda (t) ((proj %sched thunk unit unit) 4 t #u)))
@@ -58,7 +78,7 @@
         ((proj %sched int unit unit) 29 1 #u)
         (prompt (the-tag) (t) (lambda ((u unit)) u))
         (let ((f ((proj %sched unit unit failure) 37 #u #u)))
-          (if (pair? f) ((cdr f) (car f)) #u))
+          (if (pair? f) (begin ((cdr f) (car f)) (reap)) #u))
         ((proj %sched int unit unit) 29 -1 #u))))
   ;; Every task that can run, run, until none can.
   (define drain (subr any () unit)
@@ -69,24 +89,35 @@
         (go))))
   ;; Drained, if the first task asks.
   (define settle (subr any () unit) (lambda () (if (main?) (drain) #u)))
-  ;; What resumes task `me` at `k`, as `me`; or, if it was cancelled, ends it.
-  (define resumer (subr sched (int (composable unit unit sched @run)) thunk)
-    (lambda (me k) (lambda () (if (cancelled? me) (task-end me) (begin (task-switch me) (k #u))))))
+  ;; What resumes task `me` at `k`, as `me`, waiting no more (41); or, if
+  ;; it was cancelled, ends it; or nothing, if it was ended already (`reap`,
+  ;; `alive` cleared), its number perhaps another task's now.
+  (define resumer (subr sched (int (composable unit unit sched @run) (ref bool @sched)) thunk)
+    (lambda (me k alive)
+      (lambda ()
+        (if (get alive)
+            (begin
+              ((proj %sched int unit unit) 41 me #u)
+              (if (cancelled? me) (task-end me) (begin (task-switch me) (k #u))))
+            #u))))
   ;; The current task waits: the rest of it, captured, is handed to
   ;; `register` as a thunk that resumes it, as this task, and the scheduler
-  ;; goes on. Made the first task first, so that the abort ends none of
-  ;; this task's places. Not preempted from the capture until resumed (33,
-  ;; 32): a preemption between would leave two ways to resume it.
-  (define suspend (subr any ((subr sched (thunk) unit)) unit)
+  ;; goes on; how to take that back, kept, should it be cancelled (40).
+  ;; Made the first task first, so that the abort ends none of this task's
+  ;; places. Not preempted from the capture until resumed (33, 32): a
+  ;; preemption between would leave two ways to resume it.
+  (define suspend (subr any ((subr sched (thunk) stop)) unit)
     (lambda (register)
       (let ((tag (the-tag)))
         (begin
           ((proj %sched unit unit unit) 33 #u #u)
           (call-with-composable-continuation
             (lambda ((k (composable unit unit sched @run)))
-              (let ((me (task-current)))
+              (let* ((me (task-current))
+                     (alive (the (ref bool @sched) (new #t)))
+                     (undo (register (resumer me k alive))))
                 (begin
-                  (register (resumer me k))
+                  ((proj %sched int stop unit) 40 me (lambda () (begin (set alive #f) (undo))))
                   (task-switch 0)
                   (abort-current-continuation tag #u))))
             tag)
@@ -108,7 +139,7 @@
           (begin
             ((proj %sched unit unit bool) 30 #u #u)
             (let ((t (pop-any))) (if (procedure? t) (run-task t) #u)))
-          (suspend (lambda (w) ((proj %sched thunk unit unit) 27 w #u))))))
+          (suspend (lambda (w) (begin ((proj %sched thunk unit unit) 27 w #u) (lambda () #u)))))))
   ;; The first task, waiting until `ready` gives a place (0 or more): the
   ;; others run, one at a time until it does, and, when none can, the clock
   ;; is waited for, if a task waits for it; if nothing is left that could
@@ -130,7 +161,7 @@
         (go))))
   ;; Wait until `ready?`, `register` handing over the waker. The first
   ;; task runs the others until then (`main-wait`).
-  (define wait-until (subr any ((subr sched () bool) (subr sched (thunk) unit) string) unit)
+  (define wait-until (subr any ((subr sched () bool) (subr sched (thunk) stop) string) unit)
     (lambda (ready? register stuck)
       (letrec ((go (subr any () unit)
                  (lambda ()
@@ -172,7 +203,9 @@
         (lambda (c)
           (begin
             (wait-until (lambda () ((proj %sched (icell t r) unit bool) 10 c #u))
-                        (lambda (w) ((proj %sched (icell t r) thunk unit) 11 c w))
+                        (lambda (w)
+                          (begin ((proj %sched (icell t r) thunk unit) 11 c w)
+                                 (lambda () ((proj %sched (icell t r) thunk unit) 22 c w))))
                         (string-append "an i-cell read before it was written, "
                                        "and no task is left to write it: a deadlock"))
             ((proj %sched (icell t r) unit t) 15 c #u))))))
@@ -221,7 +254,9 @@
     (lambda (mb)
       (begin
         (wait-until (lambda () ((proj %sched mbox unit bool) 17 mb #u))
-                    (lambda (w) ((proj %sched mbox thunk unit) 9 mb w))
+                    (lambda (w)
+                      (begin ((proj %sched mbox thunk unit) 9 mb w)
+                             (lambda () ((proj %sched mbox thunk unit) 23 mb w))))
                     "a message no task is left to send: a deadlock")
         ((proj %sched mbox unit m) 8 mb #u)))))
 (define icell-get await)
@@ -286,7 +321,9 @@
                             (begin (undo-all us) j)))
                          (else
                           (let ((us (the (ref (listof undo @sched) @sched) (new nil))))
-                            (begin (suspend (lambda (w) (set us (give-all e (once w)))))
+                            (begin (suspend (lambda (w)
+                                              (begin (set us (give-all e (once w)))
+                                                     (lambda () (undo-all (get us))))))
                                    (undo-all (get us))
                                    (go)))))))))
       (go))))
@@ -300,12 +337,13 @@
   (plambda ((r region))
     (plambda ((a type)) (lambda (c o) ((proj %sched (outcomes a r) (outcome a) unit) 34 c o)))))
 ;; `f` and `g`, each a task, and the value of the first to finish (`race`,
-;; best effort): the other, cancelled, ends at its next wait, or when it is
-;; next preempted, or before it starts. A branch that fails is lost, a
-;; monitored group of its own (`fork-race-branch`), inside the current
-;; task's, which cancels it should it fail; if both are, the race fails
-;; as the last did. Each branch's `done` says it has finished or failed,
-;; after which its task's number may be another's, so it is not cancelled.
+;; best effort): the other, cancelled, ends at once if it waits (`reap`),
+;; else at its next wait, or when it is next preempted, or before it
+;; starts. A branch that fails is lost, a monitored group of its own
+;; (`fork-race-branch`), inside the current task's, which cancels it should
+;; it fail; if both are, the race fails as the last did. Each branch's
+;; `done` says it has finished or failed, after which its task's number
+;; may be another's, so it is not cancelled.
 (define race2 (poly ((a type)) (subr any ((subr any () a) (subr any () a)) a))
   (plambda ((a type))
     (lambda (f g)

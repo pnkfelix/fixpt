@@ -28,8 +28,10 @@
 //! process's tasks, or a `race` branch's), with its group (its first
 //! task), as pairs; each group's handler, `(group . handler)`; a
 //! failure caught, `(message . handler)`, for the scheduler to give the
-//! handler (`task_failed`); and each `race` branch's group with the group
-//! it is inside, `(group . group)`, which its failure cancels too.
+//! handler (`task_failed`); each `race` branch's group with the group it
+//! is inside, `(group . group)`, which its failure cancels too; and each
+//! task that waits, with how it stops waiting, `(task . stop)`, so that,
+//! cancelled, it ends at once (`REAP`).
 
 use crate::error::Outcome;
 use crate::runtime::Runtime;
@@ -52,6 +54,7 @@ const GROUPS: usize = 11;
 const MONITORS: usize = 12;
 const FAILURE: usize = 13;
 const PARENTS: usize = 14;
+const WAITING: usize = 15;
 
 /// The polls between two decisions whether to preempt (`preempt_due`): a
 /// task's time slice, in each machine's polls (a bytecode machine's
@@ -120,6 +123,9 @@ pub mod op {
     pub const TAKE_FAILURE: i64 = 37;
     pub const TASK_FAILED: i64 = 38;
     pub const BRANCH_GROUP: i64 = 39;
+    pub const WAITING: i64 = 40;
+    pub const WOKEN: i64 = 41;
+    pub const REAP: i64 = 42;
 }
 
 /// The state's vector, made if there is none yet.
@@ -131,7 +137,7 @@ fn state(heap: &mut Heap) -> Value {
         return s;
     }
     let seed = std::env::var("FIXPT_SCHED_SEED").ok().and_then(|s| s.parse::<i64>().ok());
-    let s = heap.vector_from(&[Value::NULL, Value::NULL, Value::FALSE, seed.map_or(Value::FALSE, Value::fixnum), Value::fixnum(0), Value::NULL, Value::NULL, Value::FALSE, Value::NULL, Value::fixnum(0), Value::FALSE, Value::NULL, Value::NULL, Value::FALSE, Value::NULL]);
+    let s = heap.vector_from(&[Value::NULL, Value::NULL, Value::FALSE, seed.map_or(Value::FALSE, Value::fixnum), Value::fixnum(0), Value::NULL, Value::NULL, Value::FALSE, Value::NULL, Value::fixnum(0), Value::FALSE, Value::NULL, Value::NULL, Value::FALSE, Value::NULL, Value::NULL]);
     heap.set_global(slot, s);
     s
 }
@@ -242,8 +248,8 @@ pub fn run_op(rt: &mut Runtime, n: i64, a: Value, b: Value) -> Outcome<Value> {
     let unit = rt.heap.intern_static("#u");
     let is = |rt: &Runtime, v: Value, k: u8| v.is_bloblet() && rt.heap.bloblet_kind(v) == k;
     match n {
-        op::TASK_SWITCH | op::TASK_END | op::TASK_CANCEL | op::MONITOR | op::INHERIT | op::BRANCH_GROUP if !a.is_fixnum() || !rt.heap.task_live(a.as_fixnum() as usize) => {
-            return rt.fail("%fx26-sched: no such task", &[a]);
+        op::TASK_SWITCH | op::TASK_END | op::TASK_CANCEL | op::MONITOR | op::INHERIT | op::BRANCH_GROUP | op::WAITING if !a.is_fixnum() || !rt.heap.task_live(a.as_fixnum() as usize) => {
+            return rt.fail(&format!("%fx26-sched: no such task (op {n})"), &[a]);
         }
         op::MAILBOX_PUT | op::MAILBOX_TAKE | op::MAILBOX_WAIT | op::MAILBOX_READY if !is(rt, a, MAILBOX) => {
             return rt.type_error("a mailbox", a);
@@ -402,6 +408,51 @@ pub fn run_op(rt: &mut Runtime, n: i64, a: Value, b: Value) -> Outcome<Value> {
                 heap.obj_set(s, TRAMPOLINE, t);
             }
             unit
+        }
+        // Task `a` waits, and `b` stops it waiting: its waker taken back.
+        op::WAITING => {
+            let s = state(heap);
+            let e = heap.cons(a, b);
+            let ws = heap.obj_ref(s, WAITING);
+            let ws = heap.cons(e, ws);
+            heap.obj_set(s, WAITING, ws);
+            unit
+        }
+        // Task `a` waits no more: it was woken.
+        op::WOKEN => {
+            let s = state(heap);
+            let ws = heap.obj_ref(s, WAITING);
+            let ws = without(heap, ws, |h, e| h.car(e) == a);
+            heap.obj_set(s, WAITING, ws);
+            unit
+        }
+        // Each cancelled task that waits, `(task . stop)`, for the scheduler
+        // to stop and end, now: none is left waiting.
+        op::REAP => {
+            let s = state(heap);
+            let (cs, mut ws) = (heap.obj_ref(s, CANCELLED), heap.obj_ref(s, WAITING));
+            let cancelled = |h: &Heap, t: Value| {
+                let mut c = cs;
+                while c.is_pair() {
+                    if h.car(c) == t {
+                        return true;
+                    }
+                    c = h.cdr(c);
+                }
+                false
+            };
+            let mut reaped = Vec::new();
+            while ws.is_pair() {
+                let e = heap.car(ws);
+                if cancelled(heap, heap.car(e)) {
+                    reaped.push(e);
+                }
+                ws = heap.cdr(ws);
+            }
+            let ws = heap.obj_ref(s, WAITING);
+            let ws = without(heap, ws, |h, e| cancelled(h, h.car(e)));
+            heap.obj_set(s, WAITING, ws);
+            heap.list_from(&reaped)
         }
         // A task stopped at a poll, apart from the run queue.
         op::PARK => {
@@ -717,9 +768,9 @@ fn timer_due(heap: &Heap, s: Value) -> bool {
 }
 
 /// What the scheduler kept of task `t`, ended: its number, free for another
-/// task, is neither cancelled nor of a group; and, if it began a monitored
-/// process, the monitor goes with it, and what group it was inside, or
-/// had inside it.
+/// task, is neither cancelled nor of a group nor waiting; and, if it began
+/// a monitored process, the monitor goes with it, and what group it was
+/// inside, or had inside it.
 fn forget_task(heap: &mut Heap, t: Value) {
     let s = state(heap);
     let cs = heap.obj_ref(s, CANCELLED);
@@ -734,6 +785,9 @@ fn forget_task(heap: &mut Heap, t: Value) {
     let ps = heap.obj_ref(s, PARENTS);
     let ps = without(heap, ps, |h, e| h.car(e) == t || h.cdr(e) == t);
     heap.obj_set(s, PARENTS, ps);
+    let ws = heap.obj_ref(s, WAITING);
+    let ws = without(heap, ws, |h, e| h.car(e) == t);
+    heap.obj_set(s, WAITING, ws);
 }
 
 /// The group task `t` is of, if any.

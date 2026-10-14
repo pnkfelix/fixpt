@@ -2244,6 +2244,22 @@ whole, `spawn`'s box. `regcode-core.fx` binds `self` again. Test:
 `syn.rs`, `the_scheduler_is_loaded_by_forms_only`; and the whole suite with
 `self` bound.
 
+**A cancelled task that waits ends at once (2026-10-14).** A cancelled
+task (a `race`'s loser, a task of a monitored process that failed) ended
+only when it next ran: one waiting for a cell never filled stayed, a task
+and its places, until the run ended, and a deadline it waited for was
+still slept for. Now each wait hands the scheduler how to take its waker
+back (`suspend`'s `register` gives it: `ICELL_UNWAIT`, `MAILBOX_UNWAIT`, a
+`pselect`'s `undo-all`), kept with the task (`WAITING`, 40) until it is
+woken (`WOKEN`, 41); a cancel, and a failure's handler, then end each
+cancelled task that waits (`REAP`, 42; `reap`), its waker taken back. A
+resumer that runs after (its waker fired, and queued, before the cancel)
+does nothing: each wait's `alive`, cleared by the reaping, says so, since
+the task's number may be another's by then. Test:
+`programs/monitors/cancelled-waits.fx`: a monitored process fails while
+its other branch waits for a deadline ten minutes away; a wait for what
+no task will fill is a deadlock at once (it slept for the ten minutes).
+
 ## 93. Cellular code calling native code, where the native convention declines (2026-10-13)
 
 **Typed calls of native closures.** On the REPL's machine a form the native
