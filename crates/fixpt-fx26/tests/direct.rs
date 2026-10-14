@@ -746,6 +746,23 @@ fn typed_calls_of_native_code() {
     assert_eq!(out[3], "Ok(Some(\"3\"))", "{out:?}");
 }
 
+/// A module of more members than `ldur` reaches (31) is native code too:
+/// a far field is read through its address. (Declined, it ran as cellular
+/// code, which cannot capture up to a prompt native code set: the
+/// scheduler's module, at 32 members, failed every wait so.)
+#[test]
+fn far_fields_are_native_code() {
+    let mut s = session(true);
+    let members: String = (0..40).map(|i| format!("(define a{i} int {i}) ")).collect();
+    let text = format!("(define m (module {members}(define f (subr pure () int) (lambda () (+ a0 a39)))))\n\
+                        (+ (with m a39) ((with m f)))");
+    let forms = s.checker.read_in(FileId(0), &text).expect("reads");
+    let out: Vec<String> =
+        s.run_forms(&forms).expect("runs").into_iter().map(|o| o.map_or_else(|e| e.message, |o| format!("{}{:?}", o.printed, o.value))).collect();
+    assert_eq!(out[1], "Ok(Some(\"78\"))", "{out:?}");
+    assert!(!out.iter().any(|o| o.contains("not in the native convention")), "{out:?}");
+}
+
 /// A form run early, as the REPL does while it is typed, reads the globals
 /// the forms before it defined, where this session's strategy put them: not
 /// the lowered program's, which compiled sessions never fill. Then runs for

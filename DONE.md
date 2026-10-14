@@ -2171,3 +2171,13 @@ code: on the REPL's machine `(define f … (let ((g +)) (g a b)))` then `(f 1
 2)` was the crash above. Now such a body has no room to be inlined or
 specialized (`room`, `c-room`, both compilers): the call stays a call. Test:
 `direct.rs`, `typed_calls_of_native_code` (its second half).
+
+**A far field is native code (2026-10-14).** The native convention read
+and wrote a field with one `ldur`/`stur`, whose offset reaches 256 bytes:
+field 31. Past it, it declined, so a module of more than 31 members ran
+as cellular code. Found when the scheduler's module (`fx26:processes.fx`)
+grew to 32: declined, its waits captured up to the prompts native callers
+set, which cellular code cannot (`TODO.md` §93), and every program that
+waited failed on the REPL's machine. Now a field to 4095 bytes away (511)
+is reached through its address in x16, one `sub` more. Test: `direct.rs`,
+`far_fields_are_native_code`.

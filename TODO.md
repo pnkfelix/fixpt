@@ -2525,3 +2525,11 @@ recovered (`DONE.md` §93). Left:
   a variadic definition's call makes the list of its arguments, where a
   built-in primitive takes them as they are; and every machine would load
   and compile it.
+- **A capture in cellular code up to a prompt native code set** fails,
+  "no prompt for this tag" (found 2026-10-14, when the scheduler's module
+  reached 32 members and the native convention declined it, `ldur`'s
+  reach, since fixed: `DONE.md` §93). Each machine walks its own frames;
+  so a declined procedure that captures, called under a native `prompt`,
+  fails where the same procedure as native code runs. An error, not a
+  crash. To do: a capture that crosses the two machines' frames, or no
+  declining of what captures.

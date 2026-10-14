@@ -1892,19 +1892,32 @@ impl Compiling<'_> {
                     }
                     a.bind(back);
                 }
+                // A field past `ldur`'s reach (a module of more than 31
+                // members, say) through its address, in X16, as far as one
+                // `sub` reaches.
                 "field" => {
                     let off = field_off(k(o(0)));
-                    if off < -256 {
+                    if off < -4095 {
                         return decline("a field too far".into());
                     }
-                    a.e(ldur(RESULT, RESULT, off));
+                    if off < -256 {
+                        a.e(sub_imm(X16, RESULT, off.unsigned_abs() as u32));
+                        a.e(ldur(RESULT, X16, 0));
+                    } else {
+                        a.e(ldur(RESULT, RESULT, off));
+                    }
                 }
                 "setfield" => {
                     let off = field_off(k(o(0)));
-                    if off < -256 {
+                    if off < -4095 {
                         return decline("a field too far".into());
                     }
-                    a.e(stur(reg(o(1)), RESULT, off));
+                    if off < -256 {
+                        a.e(sub_imm(X16, RESULT, off.unsigned_abs() as u32));
+                        a.e(stur(reg(o(1)), X16, 0));
+                    } else {
+                        a.e(stur(reg(o(1)), RESULT, off));
+                    }
                     a.es(&card_mark(RESULT, off, ST, st_off(offset_of!(DState, cards)), X16, X17));
                 }
                 // Control, on the native stack (`docs/research/
