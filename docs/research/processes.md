@@ -277,8 +277,6 @@ to rather than its frames copied, would take most of that; not done.
 ## What is left
 
 - **Q2**: preemption at fuel polls, for fairness.
-- **A `sendable` kind**, for servers polymorphic in their messages; and
-  `self`.
 - **The cost of a switch** (the actors note's A4): measured, 585 ns a
   message's two (above); one-shot stack segments if it matters.
 - **Links, monitors, supervisors** (F1–F4), session types (P9–P11), and

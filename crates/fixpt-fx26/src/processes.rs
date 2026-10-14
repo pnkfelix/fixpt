@@ -26,8 +26,8 @@ impl Checker {
     /// load, made here if it is not yet:
     /// - `(spawn (box M r) body …)`: `((with lib spawn-process) (plambda
     ///   ((r place)) (lambda ((box (inbox M r)) (r (place r))) body … #u)))`;
-    /// - `(send a v)`, `(receive box)`, `(icell-get c)`, `(icell-put! c v)`:
-    ///   `((with lib name) …)`;
+    /// - `(send a v)`, `(receive box)`, `(self box)`, `(icell-get c)`,
+    ///   `(icell-put! c v)`: `((with lib name) …)`;
     /// - `(par ((x1 e1) … (xn en)) body …)`: `par2` of the first branch and
     ///   the `par` of the rest, as thunks, its parts bound by `let`;
     /// - `(race e1 … en)`: `race2` of the first branch and the `race` of the
@@ -52,6 +52,8 @@ impl Checker {
             ("send", _) => return Err(usage("(send address message)")),
             ("receive", [_, b]) => call(self, "receive", &[b.clone()]),
             ("receive", _) => return Err(usage("(receive mailbox)")),
+            ("self", [_, b]) => call(self, "self", &[b.clone()]),
+            ("self", _) => return Err(usage("(self mailbox)")),
             ("icell-get", [_, c]) => call(self, "icell-get", &[c.clone()]),
             ("icell-get", _) => return Err(usage("(icell-get i-cell)")),
             ("icell-put!", [_, c, v]) => call(self, "icell-put!", &[c.clone(), v.clone()]),
@@ -299,7 +301,7 @@ impl Checker {
         };
         match self.arena.get(t).clone() {
             Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Nil | Ty::False | Ty::Proving { .. } => None,
-            Ty::Var(v) if bound.contains(&v) => None,
+            Ty::Var(v) if bound.contains(&v) || self.arena.dvar_kind_known(v) == Some(Kind::Sendable) => None,
             Ty::Var(v) if self.arena.is_data_var(v) && self.arena.bound(v).is_none_or(|p| p == Region::Heap) => None,
             Ty::Var(v) => Some(format!("a `{}`, which could be anything", self.interner.name(self.arena.dvar_name(v)))),
             Ty::Product(ps) | Ty::Sum(ps) => ps.iter().find_map(|(_, x)| self.untransmissible_in(*x, seen, bound)),

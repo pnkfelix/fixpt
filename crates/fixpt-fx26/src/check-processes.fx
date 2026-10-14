@@ -13,6 +13,7 @@
        (check-env-types (load-module "fx26:check-env-types.fx"))
        (check-resolve-types (load-module "fx26:check-resolve-types.fx"))
        (check-binders-types (load-module "fx26:check-binders-types.fx"))
+       (check-data-types (load-module "fx26:check-data-types.fx"))
        (check-print-types (load-module "fx26:check-print-types.fx"))
        (check-print-parts-types (load-module "fx26:check-print-parts-types.fx"))
        (check-calls-types (load-module "fx26:check-calls-types.fx"))
@@ -25,6 +26,7 @@
            (check-env (select check-env-types check-env-sig))
            (check-resolve (select check-resolve-types check-resolve-sig))
            (check-binders (select check-binders-types check-binders-sig))
+           (check-data (select check-data-types check-data-sig))
            (check-print (select check-print-types check-print-sig))
            (check-print-parts (select check-print-parts-types check-print-parts-sig))
            (check-calls (select check-calls-types check-calls-sig))
@@ -46,10 +48,12 @@
 (define k-with-used (with check-synth k-with-used))
 (define k-comp-names (with check-module-rules k-comp-names))
 
-;; The generative types of processes (`check::ADDR`, `INBOX`, `PROCESS`).
-(define k-addr-index int 10)
-(define k-inbox-index int 11)
-(define k-process-index int 12)
+;; The generative types of processes, and what may be sent to one
+;; (`check-data.fx`).
+(define k-addr-index (with check-data k-addr-index))
+(define k-inbox-index (with check-data k-inbox-index))
+(define k-untransmissible (with check-data k-untransmissible))
+(define k-crossing-atom? (with check-data k-crossing-atom?))
 
 ;;; ------------------------------------------------------------ the library
 
@@ -94,129 +98,6 @@
                                   (4 (extract used 2))))
             (k-te lt nil))))
       (else y (k-te lt nil)))))
-
-;;; ------------------------------------------------------------ transmissible
-
-;; Why a value of type `t` may not cross into another process, or "" if it
-;; may (the Rust checker's `untransmissible`), `bound` the binders of the
-;; `poly`s around.
-(define-rec
-  (k-untransmissible (subr (maxeff kstate spin) (int k-ids k-ids) string)
-    (lambda (t seen bound)
-      (let ((t (k-resolve t)))
-        (if (k-has-id? seen t)
-            ""
-            (let ((seen (the k-ids (cons t seen))))
-              (tagcase (k-get t)
-                (ty-base (s) "") (ty-void () "") (ty-nil () "") (ty-nat (z) "") (ty-false () "")
-                (ty-proving (p q) "")
-                (ty-var (v) (k-var-untransmissible v bound))
-                (ty-product (ps) (k-parts-untransmissible ps seen bound))
-                (ty-sum (ps) (k-parts-untransmissible ps seen bound))
-                (ty-union (ms) (k-ids-untransmissible ms seen bound))
-                (ty-pair (x y r nl)
-                  (k-or-else (k-data-at r bound "pair")
-                             (lambda () (k-ids-untransmissible (the k-ids (list x y)) seen bound))))
-                (ty-nlist (x z r)
-                  (k-or-else (k-data-at r bound "list")
-                             (lambda () (k-untransmissible x seen bound))))
-                (ty-array (x z r)
-                  (k-or-else (k-data-at r bound "array")
-                             (lambda () (k-untransmissible x seen bound))))
-                (ty-ref (x r)
-                  (k-or-else (k-data-at r bound "reference")
-                             (lambda () (k-untransmissible x seen bound))))
-                (ty-bloblet (fs z r)
-                  (k-or-else (if z "" (k-data-at r bound "bloblet"))
-                             (lambda () (k-ids-untransmissible fs seen bound))))
-                (ty-icell (x r) (k-untransmissible x seen bound))
-                (ty-named (w ds) (k-named-untransmissible w ds t bound))
-                (ty-subr (e ps res cv)
-                  (let ((bad (k-crossing-bad e bound)))
-                    (if (null? bad)
-                        (k-ids-untransmissible (k-snoc ps res) seen bound)
-                        (string-append "a procedure that has " (k-show-effect bad)))))
-                (ty-poly (bs body) (k-untransmissible body seen (k-binder-ids bs bound)))
-                (else y (string-append "a " (k-show-ty t)))))))))
-  (k-parts-untransmissible (subr (maxeff kstate spin) (k-parts k-ids k-ids) string)
-    (lambda (ps seen bound)
-      (if (null? ps)
-          ""
-          (k-or-else (k-untransmissible (extract (car ps) 2) seen bound)
-                     (lambda () (k-parts-untransmissible (cdr ps) seen bound))))))
-  (k-ids-untransmissible (subr (maxeff kstate spin) (k-ids k-ids k-ids) string)
-    (lambda (ts seen bound)
-      (if (null? ts)
-          ""
-          (k-or-else (k-untransmissible (car ts) seen bound)
-                     (lambda () (k-ids-untransmissible (cdr ts) seen bound)))))))
-;; `why`, or if it is "", what `next` says.
-(define k-or-else (subr (maxeff kstate spin) (string (subr (maxeff kstate spin) () string)) string)
-  (lambda (why next) (if (string=? why "") (next) why)))
-(define k-snoc (subr (maxeff (read @globals) (alloc @t)) (k-ids int) k-ids)
-  (lambda (xs x) (if (null? xs) (the k-ids (list x)) (cons (car xs) (k-snoc (cdr xs) x)))))
-(define k-binder-ids (subr (maxeff (read @globals) (alloc @t)) (k-binders k-ids) k-ids)
-  (lambda (bs acc) (if (null? bs) acc (cons (extract (car bs) 1) (k-binder-ids (cdr bs) acc)))))
-;; A type variable: transmissible if a binder around, or of kind `data` in
-;; the heap.
-(define k-var-untransmissible (subr (maxeff kstate spin) (int k-ids) string)
-  (lambda (v bound)
-    (cond ((k-has-id? bound v) "")
-          ((k-heap-data-var? v) "")
-          (else (k-cat3 "a `" (symbol->string (k-dvar-name v)) "`, which could be anything")))))
-;; Whether `v` is of kind `data` in the heap.
-(define k-heap-data-var? (subr (maxeff kstate spin) (int) bool)
-  (lambda (v)
-    (and (k-data-var? v)
-         (let ((b (k-bound-of v))) (or (null? b) (k-region=? (car b) (r-heap)))))))
-;; Data at `r`: transmissible only frozen in the heap, or at a binder around.
-(define k-data-at (subr (maxeff kstate spin) (k-region k-ids string) string)
-  (lambda (r bound what)
-    (cond ((tagcase r (r-frozen (p f) (< p 0)) (else y #f)) "")
-          ((tagcase r (r-var (v) (k-has-id? bound v)) (else y #f)) "")
-          (else (k-cat5 "a " what " at " (k-region-show r) ", which can be written")))))
-(define k-named-untransmissible (subr (maxeff kstate spin) (int k-descs int k-ids) string)
-  (lambda (w ds t bound)
-    (cond ((or (= w k-addr-index) (= w k-process-index)) "")
-          ;; A procedure's parameter, at a region it binds, the caller's.
-          ((and (= w k-inbox-index) (k-bound-inbox? ds bound)) "")
-          ((= w k-inbox-index) "a process's own mailbox, which only it may take from")
-          (else (string-append "a " (k-show-ty t))))))
-;; Whether an inbox's descriptions `ds` name a region in `bound`.
-(define k-bound-inbox? (subr (maxeff kstate spin) (k-descs k-ids) bool)
-  (lambda (ds bound)
-    (and (= (k-length ds) 2)
-         (tagcase (car (cdr ds))
-           (dr (q) (tagcase q (r-var (v) (k-has-id? bound v)) (else y #f)))
-           (else y #f)))))
-
-;; Whether atom `a` is one a process may have that is seen outside it: a
-;; send, a fill or an await, I/O, `spin`, `nondet`, reading globals'
-;; bindings or data frozen in the heap, allocating at a region that is no
-;; place (a constant, or the heap) (the Rust checker's `crossing_atom`).
-(define k-crossing-atom? (subr (read @globals) (k-atom) bool)
-  (lambda (a)
-    (tagcase a
-      (a-send (r) #t) (a-init (r) #t) (a-await (r) #t) (a-io (k) #t) (a-spin () #t) (a-nondet () #t)
-      (a-read (r)
-        (tagcase r (r-global (g) #t) (r-globals () #t) (r-frozen (p f) (< p 0)) (else y #f)))
-      (a-alloc (r) (tagcase r (r-const (n) #t) (r-fresh (i n) #t) (r-heap () #t) (else y #f)))
-      (else y #f))))
-;; The first atom of `e` a procedure crossing into a process may not have,
-;; alone in an effect; none if none: what is on a binder in `bound`, which
-;; its caller gives, it may.
-(define k-crossing-bad (subr (maxeff kstate spin) (k-eff k-ids) k-eff)
-  (lambda (e bound)
-    (cond ((null? e) nil)
-          ((let ((a (car e)))
-             (tagcase a
-               (a-var (v) (k-has-id? bound v))
-               (else y (or (k-crossing-atom? a)
-                           (tagcase (k-atom-region a)
-                             (r-var (v) (and (k-has-region? a) (k-has-id? bound v)))
-                             (else z #f))))))
-           (k-crossing-bad (cdr e) bound))
-          (else (k-one (car e))))))
 
 ;;; ------------------------------------------------------------ spawn and par
 

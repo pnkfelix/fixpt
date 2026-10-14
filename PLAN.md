@@ -142,8 +142,8 @@ are in the last section, "Log: the glance's details", and in
   `pselect`, Tokio's `select!` over waits, deadlines among them (the
   scheduler sleeps until the earliest); and `race`, best effort (losers
   stopped at their next wait). Messages copied, measured (H3: 9 ns a
-  word, after 0.59 µs a message, a switch's cost, a third less). Left:
-  preemption (Q2), a `sendable` kind.
+  word, after 0.59 µs a message, a switch's cost, a third less); `self`,
+  and a `sendable` kind. Left: preemption (Q2).
 - **Cellular code calling native code** (2026-10-13, `TODO.md` §93):
   fixed, a crash on the REPL's machine where the native convention
   declined a form; its cost to assembling words mostly recovered (peval's

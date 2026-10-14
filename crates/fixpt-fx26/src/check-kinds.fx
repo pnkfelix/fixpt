@@ -40,7 +40,7 @@
     (tagcase d
       (dr (r) (or (= k 0) (and (= k 3) (k-place? r))))
       (de (e) (= k 1))
-      (dt (t) (or (= k 2) (= k 4) (and (= k 7) (k-is-flat? t))))
+      (dt (t) (or (= k 2) (= k 4) (= k 8) (and (= k 7) (k-is-flat? t))))
       (dz (z) (= k 5))
       (dc (c) (= k 6))
       (df (f) (and (k-arrow-kind? k) (let ((g (k-fun-kind f))) (or (< g 0) (= g k))))))))

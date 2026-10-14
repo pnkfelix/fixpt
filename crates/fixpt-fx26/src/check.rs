@@ -833,7 +833,7 @@ impl Checker {
     /// A description of kind `k` to stand in for any (`stand_ins`).
     fn stand_in(&self, k: Kind) -> String {
         match k {
-            Kind::Type | Kind::Data => "unit".into(),
+            Kind::Type | Kind::Data | Kind::Sendable => "unit".into(),
             Kind::Flat => "f64".into(),
             Kind::Effect => "pure".into(),
             Kind::Region | Kind::Place => "@heap".into(),

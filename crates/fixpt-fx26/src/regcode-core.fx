@@ -993,8 +993,8 @@
       (let* ((n (c-count-params ps))
              (own (r-sibling-env all at i 0 lbody n env te))
              ;; The closure's own name, as it knows itself.
-             (self (the syms (cons name nil))))
-        (r-lambda g ps lbody (extract own 1) (extract own 2) self region #f))))
+             (itself (the syms (cons name nil))))
+        (r-lambda g ps lbody (extract own 1) (extract own 2) itself region #f))))
   ;;; ------------------------------------------------------------- modules
   ;;; (`docs/research/first-class-modules.md`, stage M3), as the Rust
   ;;; compiler's `r_module` and `r_with` make them; their helpers in
@@ -1003,16 +1003,16 @@
   ;; captured as a `letrec`'s siblings are, to be given once made.
   (r-module-closure (subr rcompiles (rgen symbol exp r-scopes c-mslots) patches)
     (lambda (g n x sc later)
-      (let ((self (the syms (cons n nil))))
+      (let ((itself (the syms (cons n nil))))
         (tagcase (car (c-lambda-of x))
           (e-lambda (ps lbody a b)
             (let ((own (r-module-own n sc later lbody (c-count-params ps))))
-              (r-lambda g ps lbody (car own) (cdr own) self (the maybe-exp nil) #f)))
+              (r-lambda g ps lbody (car own) (cdr own) itself (the maybe-exp nil) #f)))
           (e-rlambda (r l a b)
             (tagcase l
               (e-lambda (ps lbody la lb)
                 (let ((own (r-module-own n sc later lbody (c-count-params ps))))
-                  (r-lambda g ps lbody (car own) (cdr own) self (r-just-exp r) #f)))
+                  (r-lambda g ps lbody (car own) (cdr own) itself (r-just-exp r) #f)))
               (else y (begin (r-decline) (the patches nil)))))
           (else y (begin (r-decline) (the patches nil)))))))
   ;; Values `vs` made in their slots, `later`, in order, as a `letrec*`'s

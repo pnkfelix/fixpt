@@ -683,7 +683,7 @@ fn load_modules_in(forms: &[Syntax], interner: &Interner, out: &mut Vec<(u32, St
         }
         // A form of processes or `par` loads the scheduler (`parser-forms.fx`).
         let head = items.first().and_then(|h| h.as_symbol()).map(|h| interner.name(h));
-        if matches!(head, Some("spawn" | "send" | "receive" | "par" | "race" | "pselect" | "icell-get" | "icell-put!")) {
+        if matches!(head, Some("spawn" | "send" | "receive" | "self" | "par" | "race" | "pselect" | "icell-get" | "icell-put!")) {
             out.push((f.span.start, crate::check::PROCESSES.to_string(), false));
         }
         match head {

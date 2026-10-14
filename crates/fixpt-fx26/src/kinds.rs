@@ -59,6 +59,7 @@ impl Checker {
             Kind::Effect => "effect".into(),
             Kind::Type => "type".into(),
             Kind::Data => "data".into(),
+            Kind::Sendable => "sendable".into(),
             Kind::Flat => "flat".into(),
             Kind::Size => "size".into(),
             Kind::Conv => "conv".into(),
@@ -112,7 +113,7 @@ impl Checker {
     /// checked once it is resolved.
     pub(crate) fn d_fits(&mut self, d: &D, k: Kind) -> bool {
         match (k, d) {
-            (Kind::Region, D::Region(_)) | (Kind::Effect, D::Effect(_)) | (Kind::Type | Kind::Data, D::Type(_)) => true,
+            (Kind::Region, D::Region(_)) | (Kind::Effect, D::Effect(_)) | (Kind::Type | Kind::Data | Kind::Sendable, D::Type(_)) => true,
             (Kind::Size, D::Size(_)) | (Kind::Conv, D::Conv(_)) => true,
             (Kind::Flat, D::Type(t)) => self.is_flat(*t),
             (Kind::Place, D::Region(r)) => self.arena.is_place(*r),
@@ -266,7 +267,7 @@ impl Checker {
             Kind::Effect => D::Effect(Effect::atom(crate::ast::Atom::Var(v))),
             Kind::Size => D::Size(Size::var(v)),
             Kind::Conv => D::Conv(crate::ast::Conv::Var(v)),
-            Kind::Type | Kind::Data | Kind::Flat => D::Type(self.arena.ty(Ty::Var(v))),
+            Kind::Type | Kind::Data | Kind::Sendable | Kind::Flat => D::Type(self.arena.ty(Ty::Var(v))),
             Kind::Arrow(_) => D::Fun(self.arena.ty(Ty::Var(v))),
         }
     }
@@ -387,7 +388,7 @@ impl Checker {
     /// A description of kind `k`, as written.
     pub(crate) fn parse_desc_at(&mut self, s: &Syntax, k: Kind) -> R<D> {
         Ok(match k {
-            Kind::Type | Kind::Data => D::Type(self.parse_type(s)?),
+            Kind::Type | Kind::Data | Kind::Sendable => D::Type(self.parse_type(s)?),
             Kind::Flat => D::Type(self.parse_flat(s)?),
             Kind::Region => D::Region(self.parse_region(s)?),
             Kind::Place => D::Region(self.parse_place(s)?),

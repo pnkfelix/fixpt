@@ -213,7 +213,7 @@
          ;; The checker, the rules for processes and `par`.
          (check-processes
           ((load-input "fx26:check-processes.fx")
-           check-types check-env check-resolve check-binders
+           check-types check-env check-resolve check-binders check-data
            check-print check-print-parts check-calls check-effects
            check-synth check-subtype check-module-rules))
          ;; The checker, its rules: the one recursive group over expressions.

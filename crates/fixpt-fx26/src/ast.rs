@@ -26,6 +26,11 @@ pub enum Kind {
     /// and sent (`docs/research/generative-types.md`, §3). Every data type
     /// is a type.
     Data,
+    /// A type whose values may be sent to another process: transmissible
+    /// (`docs/fx26.md`, "What a process may hold"), so that a server may be
+    /// polymorphic in its messages. Every sendable type is a type; data in
+    /// the heap is sendable.
+    Sendable,
     /// A layout of raw bytes in a bloblet's suffix (`TODO.md` §77): `f64`,
     /// `f32`, `i32`, `u32`, `i64`, `u64`, or a variable of this kind. Not a
     /// type: a flat thing is no value, and is reached through a `blobref`;
@@ -67,7 +72,9 @@ impl Kind {
     /// Whether a description of kind `self` may stand where one of kind
     /// `want` is expected: the same kind, or a place for a region.
     pub fn fits(self, want: Kind) -> bool {
-        self == want || (self == Kind::Place && want == Kind::Region) || (self == Kind::Data && want == Kind::Type)
+        self == want
+            || (self == Kind::Place && want == Kind::Region)
+            || (matches!(self, Kind::Data | Kind::Sendable) && want == Kind::Type)
     }
 }
 

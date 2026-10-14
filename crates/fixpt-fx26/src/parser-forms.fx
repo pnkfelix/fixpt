@@ -5,8 +5,8 @@
 ;;; its load.
 ;;; - `(spawn (box M r) body …)`: `((with lib spawn-process) (plambda ((r
 ;;;   place)) (lambda ((box (inbox M r)) (r (place r))) body … #u)))`;
-;;; - `(send a v)`, `(receive box)`, `(icell-get c)`, `(icell-put! c v)`:
-;;;   `((with lib name) …)`;
+;;; - `(send a v)`, `(receive box)`, `(self box)`, `(icell-get c)`,
+;;;   `(icell-put! c v)`: `((with lib name) …)`;
 ;;; - `(par ((x1 e1) … (xn en)) body …)`: `par2` of the first branch and
 ;;;   the `par` of the rest, as thunks, the parts bound by `let`;
 ;;; - `(pselect (W x body …) …)`: `sync` of its arms' events, and the arm
@@ -61,6 +61,7 @@
       (case (syn-head (car items))
         ((send) (fixed 3 "`(send address message)`" "send"))
         ((receive) (fixed 2 "`(receive mailbox)`" "receive"))
+        ((self) (fixed 2 "`(self mailbox)`" "self"))
         ((icell-get) (fixed 2 "`(icell-get i-cell)`" "icell-get"))
         ((icell-put!) (fixed 3 "`(icell-put! i-cell value)`" "icell-put!"))
         ((spawn) (call "spawn-process" (the syns-a (list (spawn-body fail items a b)))))

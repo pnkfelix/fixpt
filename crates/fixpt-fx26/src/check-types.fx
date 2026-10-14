@@ -398,7 +398,8 @@
 ;; Binders' kinds.
 (define k-binder-kinds (subr (read @globals) (k-binders) k-ids)
   (lambda (bs) (if (null? bs) nil (cons (extract (car bs) 2) (k-binder-kinds (cdr bs))))))
-;; Each description variable of an arrow kind, with its kind (`check-kinds.fx`).
+;; Each description variable of an arrow kind, or of kind `sendable`, with
+;; its kind (`check-kinds.fx`).
 (define k-arrow-vars (ref (listof (pairof int int @t) acyclic) @t) (new nil))
 ;; The description-function variables that are a module's abstract type
 ;; constructors, whose representations no one outside can see: what is
@@ -410,7 +411,9 @@
       (begin (if (= kind 3) (set k-places (cons v (get k-places))) #u)
              (if (= kind 4) (set k-datas (cons v (get k-datas))) #u)
              (if (= kind 7) (set k-flats (cons v (get k-flats))) #u)
-             (if (>= kind 100) (set k-arrow-vars (cons (cons v kind) (get k-arrow-vars))) #u)
+             (if (or (= kind 8) (>= kind 100))
+                 (set k-arrow-vars (cons (cons v kind) (get k-arrow-vars)))
+                 #u)
              v))))
 ;; Which description variables are of kind `data`.
 (define k-data-var? (subr (maxeff (read @globals) (read @t)) (int) bool)

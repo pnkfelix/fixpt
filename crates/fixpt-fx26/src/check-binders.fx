@@ -275,9 +275,11 @@
         #u
         (let* ((v (extract (car kinds) 1)) (bd (k-bound-of v)))
           (begin
-            ;; A `data` binder takes only data, at its place (F13); a region
-            ;; binder won't outlive its bound.
+            ;; A `data` binder takes only data, at its place (F13); a
+            ;; `sendable` one, what may be sent; a region binder won't
+            ;; outlive its bound.
             (cond ((= (extract (car kinds) 2) 4) (k-check-data v bd m a b))
+                  ((= (extract (car kinds) 2) 8) (k-check-sendable v m a b))
                   ((null? bd) #u)
                   (else (k-check-bound v (car bd) m a b)))
             (k-check-bounds (cdr kinds) m a b))))))

@@ -179,7 +179,7 @@ impl Checker {
                         let d = match k {
                             Kind::Region | Kind::Place => D::Region(Region::Var(*va)),
                             Kind::Effect => D::Effect(Effect::atom(Atom::Var(*va))),
-                            Kind::Type | Kind::Data | Kind::Flat => D::Type(self.arena.ty(Ty::Var(*va))),
+                            Kind::Type | Kind::Data | Kind::Sendable | Kind::Flat => D::Type(self.arena.ty(Ty::Var(*va))),
                             Kind::Size => D::Size(Size::var(*va)),
                             Kind::Conv => D::Conv(crate::ast::Conv::Var(*va)),
                             Kind::Arrow(_) => D::Fun(self.arena.ty(Ty::Var(*va))),
@@ -1331,6 +1331,15 @@ impl Checker {
         for (v, k) in kinds {
             // A `data` binder takes only data, at its place: the heap, or
             // the place its bound says (F13).
+            // A `sendable` binder takes only what may be sent to a process.
+            if *k == Kind::Sendable {
+                let Some(D::Type(t)) = map.get(v) else { continue };
+                if let Some(why) = self.untransmissible(*t) {
+                    let name = self.interner.name(self.arena.dvar_name(*v));
+                    return Err(FxError::at(span, format!("`{name}` is bound as sendable, and a {} is not: {why}", self.show_ty(*t))));
+                }
+                continue;
+            }
             if *k == Kind::Data {
                 let Some(D::Type(t)) = map.get(v) else { continue };
                 let name = self.interner.name(self.arena.dvar_name(*v));
@@ -1429,7 +1438,7 @@ impl Checker {
                 Kind::Size => {
                     map.insert(*v, D::Size(Size::Finite));
                 }
-                Kind::Type | Kind::Data | Kind::Flat | Kind::Place | Kind::Arrow(_) => {
+                Kind::Type | Kind::Data | Kind::Sendable | Kind::Flat | Kind::Place | Kind::Arrow(_) => {
                     return Err(FxError::at(
                         span,
                         format!(

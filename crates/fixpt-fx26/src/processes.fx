@@ -1,7 +1,7 @@
 ;; The scheduler of processes and `par` (`docs/fx26.md`, "Processes and
 ;; `par`"): a module file built in, which the forms `spawn`, `send`,
-;; `receive`, `par`, `race`, `pselect`, `icell-get` and `icell-put!` call,
-;; each through this file's one value, loaded once. The checkers give those
+;; `receive`, `self`, `par`, `race`, `pselect`, `icell-get` and
+;; `icell-put!` call, each through this file's one value, loaded once. The checkers give those
 ;; forms types of their own (`Checker::library_type`); the types written
 ;; here are this file's, in which a task may do anything (`any`): what a
 ;; program that loads this file itself sees, which lets it do nothing a
@@ -140,6 +140,8 @@
 (define send (poly ((m type)) (subr any (mbox m) unit))
   (plambda ((m type))
     (lambda (mb v) (begin ((proj %sched mbox m unit) 7 mb v) (settle)))))
+;; The process's own address: its mailbox, which others send to.
+(define self (subr sched (mbox) mbox) (lambda (mb) mb))
 ;; The oldest message in `mb`, once there is one.
 (define receive (poly ((m type)) (subr any (mbox) m))
   (plambda ((m type))

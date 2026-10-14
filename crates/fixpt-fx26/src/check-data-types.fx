@@ -10,6 +10,10 @@
 (define-type k-map (select check-types-types k-map))
 ;; The types it names, from the files that define them.
 (define-type k-regions (select check-types-types k-regions))
+(define-type k-ids (select check-types-types k-ids))
+(define-type k-atom (select check-types-types k-atom))
+(define-effect kstate (select check-types-types kstate))
+(define-effect checks (select check-types-types checks))
 (define-type check-data-sig
   (moduleof (val k-is-data?
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
@@ -46,4 +50,10 @@
                                (write @t)
                                spin)
                        (int k-regions k-map int int)
-                       unit))))
+                       unit))
+            (val k-addr-index int)
+            (val k-inbox-index int)
+            (val k-process-index int)
+            (val k-untransmissible (subr (maxeff kstate spin) (int k-ids k-ids) string))
+            (val k-crossing-atom? (subr (read @globals) (k-atom) bool))
+            (val k-check-sendable (subr (maxeff checks spin) (int k-map int int) unit))))

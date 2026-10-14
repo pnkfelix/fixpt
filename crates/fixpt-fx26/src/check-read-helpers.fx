@@ -840,6 +840,7 @@
               (("effect") 1)
               (("type") 2)
               (("data") 4)
+              (("sendable") 8)
               (("flat") 7)
               (("size") 5)
               (("conv") 6)

@@ -2168,6 +2168,20 @@ looked its kind up by name. Now `Heap::intern_static` finds a name the
 runtime asks for at every turn by where it is kept, the symbol table
 hashes with `WordHasher`, and the kinds are constants.
 
+**`self` and the `sendable` kind** (`docs/fx26.md`, "The forms" and "What
+a process may hold"). `(self box)`, a form, is the process's own address
+at its place, `(addr M r)`, from its mailbox (the same mailbox at run
+time); test `programs/processes/self.fx`, a process counting down by
+messages to itself. `(m sendable)`, `data ≤ sendable ≤ type`, a binder
+that takes only a transmissible type, so that a server may be polymorphic
+in its messages: a variable of it is transmissible, and each
+instantiation is checked to be (`check_bounds`, `k-check-sendable`). The
+FX-26 checker's transmissibility rules moved from `check-processes.fx` to
+`check-data.fx`, before the binders' check that needs them. Tests:
+`sendable.fx` (an echo server for any sendable `m`), `sendable-type.fx`
+(the same of kind `type`, refused), `sendable-ref.fx` (a reference given
+to one, refused).
+
 
 **`append` and `string-append` as `vsubr`s** (the user's, 2026-10-13;
 `docs/fx26.md`, "Variadic procedures"): called with any count, a call the

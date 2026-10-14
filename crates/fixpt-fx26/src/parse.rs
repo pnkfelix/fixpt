@@ -168,7 +168,7 @@ impl Checker {
 
     // --------------------------------------------------------------- kinds
     pub(crate) fn parse_kind(&mut self, s: &Syntax) -> R<Kind> {
-        let usage = "a kind is `region`, `place`, `effect`, `type`, `data`, `flat`, `size`, `conv` or `(=> (kind …) kind)`";
+        let usage = "a kind is `region`, `place`, `effect`, `type`, `data`, `sendable`, `flat`, `size`, `conv` or `(=> (kind …) kind)`";
         // `(=> (k1 … kn) k)`: a description function's (`crate::kinds`).
         if let Some([head, ks, result]) = s.as_proper_list()
             && head.as_symbol().is_some_and(|h| self.name(h) == "=>")
@@ -181,7 +181,7 @@ impl Checker {
             if matches!(result, Kind::Region | Kind::Place | Kind::Size | Kind::Conv) {
                 return Err(FxError::at(at, "a description function gives a type, an effect, or another description function"));
             }
-            if result == Kind::Effect && params.iter().any(|k| matches!(k, Kind::Type | Kind::Data | Kind::Flat | Kind::Arrow(_))) {
+            if result == Kind::Effect && params.iter().any(|k| matches!(k, Kind::Type | Kind::Data | Kind::Sendable | Kind::Flat | Kind::Arrow(_))) {
                 return Err(FxError::at(s.span, "a description function to an effect takes regions, places, effects, sizes and conventions"));
             }
             return Ok(self.arena.arrow(params, result));
@@ -192,6 +192,7 @@ impl Checker {
             Some("effect") => Ok(Kind::Effect),
             Some("type") => Ok(Kind::Type),
             Some("data") => Ok(Kind::Data),
+            Some("sendable") => Ok(Kind::Sendable),
             Some("flat") => Ok(Kind::Flat),
             Some("size") => Ok(Kind::Size),
             Some("conv") => Ok(Kind::Conv),
@@ -504,7 +505,7 @@ impl Checker {
     /// Type name `sym`, as the description scope and `include`s say.
     fn type_name_read(&mut self, s: &Syntax, sym: Sym) -> R<TyId> {
         match self.lookup_desc(sym) {
-            Some(DScope::Var(v, Kind::Type | Kind::Data)) => Ok(self.arena.ty(Ty::Var(v))),
+            Some(DScope::Var(v, Kind::Type | Kind::Data | Kind::Sendable)) => Ok(self.arena.ty(Ty::Var(v))),
             // A flat is no type: it is reached through a `blobref`.
             Some(DScope::Var(_, Kind::Flat)) => Err(FxError::at(s.span, format!("`{}` is a flat, not a type", self.name(sym)))),
             // A family's flat parameter, a variable of kind `flat`, is no
@@ -1003,7 +1004,7 @@ impl Checker {
         let mut key = Vec::new();
         for ((p, k), a) in params.iter().zip(args) {
             let (d, arg) = match k {
-                Kind::Type | Kind::Data | Kind::Flat => {
+                Kind::Type | Kind::Data | Kind::Sendable | Kind::Flat => {
                     let t = if *k == Kind::Flat { self.parse_flat(a)? } else { self.parse_type(a)? };
                     (DScope::Rec(t), crate::parse::FamilyArg::Ty(self.arena.resolve(t)))
                 }
@@ -1143,7 +1144,7 @@ impl Checker {
         let mut ds = Vec::new();
         for ((_, k), a) in params.iter().zip(args) {
             ds.push(match k {
-                Kind::Type | Kind::Data => D::Type(self.parse_type(a)?),
+                Kind::Type | Kind::Data | Kind::Sendable => D::Type(self.parse_type(a)?),
                 Kind::Flat => D::Type(self.parse_flat(a)?),
                 Kind::Region => D::Region(self.parse_region(a)?),
                 Kind::Place => D::Region(self.parse_place(a)?),
@@ -1526,7 +1527,7 @@ impl Checker {
             }
             "begin" => self.parse_body(span, &items[1..]),
             // Processes and `par` (`processes.rs`).
-            head @ ("spawn" | "send" | "receive" | "par" | "race" | "pselect" | "icell-get" | "icell-put!") => {
+            head @ ("spawn" | "send" | "receive" | "self" | "par" | "race" | "pselect" | "icell-get" | "icell-put!") => {
                 let head = head.to_string();
                 self.parse_process_form(span, &head, &items)
             }

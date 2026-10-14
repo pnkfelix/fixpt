@@ -535,6 +535,8 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ),
     ("%processes:send", "(poly ((m type) (r region)) (subr (send r) ((addr m r) m) unit))"),
     ("%processes:receive", "(poly ((m type) (r place)) (subr (maxeff (receive r) nondet) ((inbox m r)) m))"),
+    // A process's own address, at its place: its mailbox, as others see it.
+    ("%processes:self", "(poly ((m type) (r place)) (subr pure ((inbox m r)) (addr m r)))"),
     ("%processes:icell-get", "(poly ((r region)) (poly ((t type)) (subr (await r) ((icell t r)) t)))"),
     ("%processes:icell-put!", "(poly ((r region)) (poly ((t type)) (subr (init r) ((icell t r) t) unit)))"),
     (

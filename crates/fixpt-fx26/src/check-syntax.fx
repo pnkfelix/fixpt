@@ -297,9 +297,9 @@
   (lambda (h)
     (or (string=? h "ref") (string=? h "icell") (string=? h "pairof") (string=? h "listof")
         (string=? h "bloblet") (string=? h "arrayof") (string=? h "mark-key") (string=? h "mu"))))
-;; Whether kind `k` is `type` or `data`.
+;; Whether kind `k` is `type`, `data` or `sendable`.
 (define k-type-kind? (subr pure (int) bool)
-  (lambda (k) (or (= k 2) (= k 4))))
+  (lambda (k) (or (= k 2) (= k 4) (= k 8))))
 ;; The size a name stands for: `finite`, or a size variable.
 (define k-size-named (subr (maxeff checks spin) (syn string) k-size)
   (lambda (s usage)
