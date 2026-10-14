@@ -148,7 +148,7 @@
          (("bool=?") "eq?")
          (("char<?") "%fx26-char<?")
          (("char>?") "%fx26-char>?")
-         (("append") "%fx26-append")
+         (("append") "append")
          (("%sched") "%fx26-sched")
          (else "")))
       ((7)
@@ -333,6 +333,7 @@
          (("char->string") "string")
          (("list->string") "list->string")
          (("string->list") "string->list")
+         (("%append-list") "%fx26-append-list")
          (("parse-number") "%fx26-parse-number")
          (("datum-dotted") "append")
          (("ref-identity") "%fx26-address-identity")
@@ -412,6 +413,10 @@
          (("bytevector-u8-set!") "%fx26-bytevector-u8-set!")
          (("datum-list->vector") "list->vector")
          (("datum-proper-list?") "%fx26-list?")
+         (else "")))
+      ((19)
+       (case n
+         (("%string-append-list") "%fx26-string-append-list")
          (else "")))
       ((22)
        (case n

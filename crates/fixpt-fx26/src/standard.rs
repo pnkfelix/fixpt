@@ -102,7 +102,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("char->integer", "(subr pure (char) int)"),
     ("integer->char", "(subr pure (int) char)"),
     ("char-in?", "(subr pure (char string) bool)"),
-    ("string-append", "(subr pure (string string) string)"),
+    ("string-append", "(vsubr pure string string)"),
     // Lengths never below 0: naturals.
     ("string-length", "(subr pure (string) nat)"),
     ("string-ref", "(subr pure (string int) char)"),
@@ -368,7 +368,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("string>=?", "(subr pure (string string) bool)"),
     // The run fails, saying why; it returns to no one.
     ("error", "(subr pure (string) void)"),
-    ("append", "(poly ((r1 region) (r2 region)) (poly ((t type)) (subr (maxeff (read r1) (alloc r2)) ((listof t r1) (listof t r2)) (listof t r2))))"),
+    ("append", "(poly ((r region)) (poly ((t type)) (vsubr (maxeff (read r) (alloc r)) (listof t r) (listof t r))))"),
     // A list's length at any region; a cycle is an error.
     ("list-length", "(poly ((r region)) (poly ((t type)) (subr (read r) ((listof t r)) nat)))"),
     ("array->list", "(poly ((r1 region) (r2 region)) (poly ((t type)) (subr (maxeff (read r1) (alloc r2)) ((arrayof t r1)) (listof t r2))))"),

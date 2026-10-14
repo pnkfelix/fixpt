@@ -368,7 +368,7 @@
        1)
       (("with-mark" "array-set!" "substring") 3)
       (("+" "-" "*" "<" ">" "<=" ">=" "=" "modulo" "quotient" "cons" "set-car!" "set-cdr!" "char=?"
-        "string-append" "string=?" "array-ref" "string-ref" "make-array"
+        "string=?" "array-ref" "string-ref" "make-array"
         "abort-current-continuation" "escape" "set" "marks-of" "call-with-composable-continuation"
         "first-mark")
        2)
@@ -440,10 +440,21 @@
                         (("") (c-fail (string-append "not yet compiled: " name)))
                         (else (c-prim c p n))))))))))
 
-;; Whether a standard name has a value: an operation of an arity, or `list`,
-;; a `vsubr`.
+;; The standard `vsubr`s, `list`, `append` and `string-append`, each with
+;; the operation of one list that its value applies; "" for the rest (the
+;; Rust compiler's `vsubr_list_op`).
+(define c-vsubr-list-op (subr pure (string) string)
+  (lambda (n)
+    (cond ((string=? n "list") "datum-list")
+          ((string=? n "append") "%append-list")
+          ((string=? n "string-append") "%string-append-list")
+          (else ""))))
+(define* c-vsubr? (subr pure (string) bool)
+  (lambda (n) (not (string=? (c-vsubr-list-op n) ""))))
+;; Whether a standard name has a value: an operation of an arity, or a
+;; `vsubr` (`c-vsubr-list-op`).
 (define* c-has-standard-value? (subr pure (string) bool)
-  (lambda (n) (or (string=? n "list") (>= (c-arity n) 0))))
+  (lambda (n) (or (c-vsubr? n) (>= (c-arity n) 0))))
 
 (define c-standard-twins (ref (listof c-standard-twin @k) @k) (new nil))
 ;; Word `w`, with register code as standard operation `op` of `n` arguments
@@ -462,20 +473,21 @@
 (define c-standard-assembled (subr (maxeff compiles spin) (code string string int) tword)
   (lambda (body name op n) (c-register-twin (c-assemble body (string->symbol name)) op n)))
 ;; A standard operation's word as a value: a procedure of its arity that
-;; applies it to its parameters. `list`'s, a `vsubr`'s, is of one list
-;; that it copies, as `datum-list` does (and its register code is
-;; `datum-list`'s). A copy, not the list itself: `apply` gives a list at
-;; `acyclic` as it is (F11), and `list` may give it at any region, one that
-;; can be written.
+;; applies it to its parameters. A `vsubr`'s is of one list, its
+;; operation's on that list (`c-vsubr-list-op`), whose register code is
+;; that operation's. `list`'s copies it, as `datum-list` does: a copy, not
+;; the list itself, as `apply` gives a list at `acyclic` as it is (F11),
+;; and `list` may give it at any region, one that can be written.
 (define c-standard-word-made (subr (maxeff compiles spin) (string) tword)
   (lambda (name)
     (let ((n (c-arity name)) (body (the code (new nil))))
-      (cond ((string=? name "list")
-             (begin
-               (c-op1 body routine-slot (wcell-int 0))
-               (c-standard-on "datum-list" 1 body)
-               (c-op body routine-return)
-               (c-standard-assembled body name "datum-list" 1)))
+      (cond ((c-vsubr? name)
+             (let ((op (c-vsubr-list-op name)))
+               (begin
+                 (c-op1 body routine-slot (wcell-int 0))
+                 (c-standard-on op 1 body)
+                 (c-op body routine-return)
+                 (c-standard-assembled body name op 1))))
             ((< n 0) (c-fail (string-append "not yet compiled as a value: " name)))
             (else
              (begin
@@ -510,12 +522,12 @@
                    w))
           (car found)))))
 ;; A standard operation as a value: a closure of its word (`c-standard-word`),
-;; over no values; `list`'s given to `%fx26-vlambda`.
+;; over no values; a `vsubr`'s given to `%fx26-vlambda`.
 (define c-standard-value (subr (maxeff compiles spin) (string code) unit)
   (lambda (name c)
     (let ((w (c-standard-word name)))
       (begin (c-op1 c routine-closure (wcell-word w)) (c-emit c (i-cell (wcell-int 0)))
-             (if (string=? name "list") (c-prim c "%fx26-vlambda" 1) #u)))))
+             (if (c-vsubr? name) (c-prim c "%fx26-vlambda" 1) #u)))))
 
 (define c-count-names (subr (read @globals) (names) int)
   (lambda (ns) (if (null? ns) 0 (+ 1 (c-count-names (cdr ns))))))

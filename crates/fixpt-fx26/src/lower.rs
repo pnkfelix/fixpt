@@ -361,7 +361,11 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("string>?", "%fx26-string>?", false),
     ("string>=?", "%fx26-string>=?", false),
     ("error", "%fx26-error", false),
-    ("append", "%fx26-append", false),
+    ("append", "append", true),
+    // What `append`'s and `string-append`'s values apply to their list of
+    // arguments (`Compiler::vsubr_list_op`); named by no program.
+    ("%append-list", "%fx26-append-list", false),
+    ("%string-append-list", "%fx26-string-append-list", false),
     ("list-length", "length", true),
     ("array->list", "%fx26-array->list", false),
     ("list->array", "%fx26-list->array", false),

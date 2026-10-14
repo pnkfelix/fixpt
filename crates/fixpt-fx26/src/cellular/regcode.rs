@@ -604,10 +604,10 @@ impl Compiler<'_> {
                         None => true,
                     })
             }
-            // A standard operation as a value: a closure made; `list`'s
-            // then given to `%fx26-vlambda`, a call-out.
+            // A standard operation as a value: a closure made; a
+            // `vsubr`'s then given to `%fx26-vlambda`, a call-out.
             Exp::Var(n) if self.where_is(e, n).is_none() && Self::has_standard_value(self.name(n)) => {
-                !tail || self.name(n) == "list"
+                !tail || Self::vsubr_list_op(self.name(n)).is_some()
             }
             Exp::Var(_) | Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Unit => false,
             // A closure made as the value: its call-out may collect, but
@@ -663,7 +663,7 @@ impl Compiler<'_> {
             }
             // `(with #%fx n)`: as the standard `n` as a value.
             Exp::With { body, .. } if self.r_fx_name(x).is_some() => match *self.exp_at(body) {
-                Exp::Var(n) => Self::has_standard_value(self.name(n)) && (!tail || self.name(n) == "list"),
+                Exp::Var(n) => Self::has_standard_value(self.name(n)) && (!tail || Self::vsubr_list_op(self.name(n)).is_some()),
                 _ => true,
             },
             // A `with` only loads fields (`r_with`): as its body.
@@ -801,11 +801,11 @@ impl Compiler<'_> {
                             return self.decline("a standard operation as a value the stack code did not make");
                         };
                         g.op("lambda", &[w, Gen::n(0)]);
-                        // `list`'s, a `vsubr`: that closure given to
+                        // A `vsubr`'s: that closure given to
                         // `%fx26-vlambda`.
-                        if self.name(n) == "list" {
+                        if Self::vsubr_list_op(self.name(n)).is_some() {
                             if g.leaf {
-                                return self.decline("`list` as a value, in a leaf");
+                                return self.decline("a `vsubr` as a value, in a leaf");
                             }
                             let p = fixpt_engine::cellular::runtime_primitive("%fx26-vlambda")? as i64;
                             g.op("setreg", &[Gen::n(1)]);

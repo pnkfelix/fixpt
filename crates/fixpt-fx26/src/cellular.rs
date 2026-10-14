@@ -1653,7 +1653,7 @@ impl<'a> Compiler<'a> {
             | "symbol->string" | "string->symbol" | "char->string" | "array-length" | "current-marks" | "cwcc" => Some(1),
             "with-mark" | "array-set!" | "substring" => Some(3),
             "+" | "-" | "*" | "<" | ">" | "<=" | ">=" | "=" | "modulo" | "quotient" | "cons" | "set-car!" | "set-cdr!"
-            | "set" | "char=?" | "string-append" | "string=?" | "symbol=?" | "wglobal=?" | "eq?" | "bool=?" | "array-ref" | "string-ref" | "make-array"
+            | "set" | "char=?" | "string=?" | "symbol=?" | "wglobal=?" | "eq?" | "bool=?" | "array-ref" | "string-ref" | "make-array"
             | "abort-current-continuation" | "escape" | "call-with-composable-continuation" | "first-mark" | "marks-of" => Some(2),
             // The rest: the arity of the runtime primitive it runs as, if
             // that takes a fixed number (`char-downcase`).
@@ -1664,24 +1664,39 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    /// Whether a standard name has a value: an operation of an arity, or
-    /// `list`, a `vsubr`.
+    /// Whether a standard name has a value: an operation of an arity, or a
+    /// `vsubr` (`vsubr_list_op`).
     pub(crate) fn has_standard_value(name: &str) -> bool {
-        name == "list" || Self::arity(name).is_some()
+        Self::vsubr_list_op(name).is_some() || Self::arity(name).is_some()
+    }
+
+    /// The standard `vsubr`s, `list`, `append` and `string-append`, each
+    /// with the operation of one list that its value applies: a call is
+    /// the runtime's primitive of any count (`list` made in line in
+    /// register code), and its value `%vlambda`'s closure over a procedure
+    /// of the list of arguments (`standard_value`).
+    pub(crate) fn vsubr_list_op(name: &str) -> Option<&'static str> {
+        match name {
+            "list" => Some("datum-list"),
+            "append" => Some("%append-list"),
+            "string-append" => Some("%string-append-list"),
+            _ => None,
+        }
     }
 
     /// A standard operation as a value: a closure of its arity whose body
-    /// applies it to its parameters. `list` is a `vsubr`: `%vlambda`'s
-    /// closure over a procedure of one list that copies it, as `datum-list`
-    /// does (and its register code is `datum-list`'s). A copy, not the list
-    /// itself: `apply` gives a list at `acyclic` as it is (F11), and `list`
-    /// may give it at any region, one that can be written. Its word made
-    /// once, the first time (`standard_word`).
+    /// applies it to its parameters. A `vsubr` is `%vlambda`'s closure over
+    /// a procedure of one list, its operation's on that list
+    /// (`vsubr_list_op`), whose register code is that operation's. `list`'s
+    /// copies it, as `datum-list` does: a copy, not the list itself, as
+    /// `apply` gives a list at `acyclic` as it is (F11), and `list` may give
+    /// it at any region, one that can be written. Its word made once, the
+    /// first time (`standard_word`).
     fn standard_value(&mut self, name: &str, code: &mut Vec<Item>) -> R<()> {
         let w = self.standard_word(name)?;
         self.op1(code, "closure", w);
         code.push(Item::Cell(Value::fixnum(0)));
-        if name == "list" {
+        if Self::vsubr_list_op(name).is_some() {
             return self.prim(code, "%fx26-vlambda", 1);
         }
         Ok(())
@@ -1699,13 +1714,13 @@ impl<'a> Compiler<'a> {
     }
 
     fn standard_word_made(&mut self, name: &str) -> R<Value> {
-        if name == "list" {
+        if let Some(op) = Self::vsubr_list_op(name) {
             let mut body = Vec::new();
             self.op1(&mut body, "slot", Value::fixnum(0));
-            self.standard_on("datum-list", 1, &mut body)?;
+            self.standard_on(op, 1, &mut body)?;
             self.op(&mut body, "return");
             let w = self.assemble(&body, name)?;
-            self.register_twin(w, name, "datum-list", 1)?;
+            self.register_twin(w, name, op, 1)?;
             return Ok(w);
         }
         let n = Self::arity(name).ok_or_else(|| format!("not yet compiled as a value: {name}"))?;

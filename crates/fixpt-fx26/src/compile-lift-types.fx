@@ -58,6 +58,7 @@
                        syms))
             (val c-has-standard-value?
                  (subr (read (globals standard-primitive std-eq-name?)) (string) bool))
+            (val c-vsubr? (subr pure (string) bool))
             (val c-standard-word-of
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
                        (string)

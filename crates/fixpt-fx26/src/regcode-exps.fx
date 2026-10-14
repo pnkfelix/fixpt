@@ -438,16 +438,16 @@
           (else (r-inline-named (cdr xs) n k lim)))))
 ;; A standard operation as a value, into RESULT: its closure, of the word
 ;; the stack code made for it (`c-standard-word`), and that word's
-;; register code. A leaf makes it only in tail position. `list`'s, a
-;; `vsubr`, is then given to `%fx26-vlambda`, a call-out: never in a leaf.
+;; register code. A leaf makes it only in tail position. A `vsubr`'s is
+;; then given to `%fx26-vlambda`, a call-out: never in a leaf.
 (define r-standard-value (subr rcompiles (rgen string bool) unit)
   (lambda (g name tail)
     (let ((found (c-standard-word-of name)))
-      (if (or (null? found) (and (extract g leaf) (or (not tail) (string=? name "list"))))
+      (if (or (null? found) (and (extract g leaf) (or (not tail) (c-vsubr? name))))
           (r-decline)
           (begin
             (r-op2 g rop-lambda (wcell-word (car found)) (wcell-int 0))
-            (if (string=? name "list")
+            (if (c-vsubr? name)
                 (begin (r-opn g rop-setreg 1)
                        (r-opnn g rop-prim (runtime-primitive "%fx26-vlambda") 1))
                 #u))))))
@@ -574,7 +574,7 @@
     (lambda (x e this tail)
       (tagcase x
         (e-var (n a b)
-          (and (r-standard-value? e n) (or (not tail) (string=? (symbol->string n) "list"))))
+          (and (r-standard-value? e n) (or (not tail) (c-vsubr? (symbol->string n)))))
         (e-int (n a b) #f) (e-bool (v a b) #f) (e-str (v a b) #f) (e-char (v a b) #f)
         (e-float (v a b) #f)
         ;; Join points only: no closure made, and their calls are jumps.
@@ -626,7 +626,7 @@
           (let ((ns (c-with-at a b)) (n (c-fx-name m body)))
             (if (string=? n "")
                 (r-collects body (if (null? ns) e (r-local-syms e (car ns))) this tail)
-                (and (c-has-standard-value? n) (or (not tail) (string=? n "list"))))))
+                (and (c-has-standard-value? n) (or (not tail) (c-vsubr? n))))))
         (else y #t))))
   (r-collects-all (subr rcompiles (exps cenv rthis) bool)
     (lambda (es e this)

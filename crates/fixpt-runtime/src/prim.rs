@@ -1840,12 +1840,28 @@ prims! {
     "%fx26-string>=?", 2, Some(2), simple!(|rt, a| { let o = string_cmp(rt, a[0], a[1])?; Ok(Value::boolean(o >= std::cmp::Ordering::Equal)) });
     // `(error message)`: the run fails, with the message.
     "%fx26-error", 1, Some(1), simple!(|rt, a| { let m = get_string(rt, a[0])?; rt.fail(&m, &[]) });
-    // Two lists, the first copied (a cycle in it is an error, not a loop).
-    "%fx26-append", 2, Some(2), simple!(|rt, a| {
-        let Some(front) = rt.heap.list_to_vec(a[0]) else { return rt.type_error("a proper list", a[0]) };
-        let mut acc = a[1];
-        for v in front.into_iter().rev() { acc = rt.heap.cons(v, acc); }
+    // FX-26's `append` and `string-append` as values (`vsubr`s): applied
+    // to a list of their arguments, each a list or a string.
+    "%fx26-append-list", 1, Some(1), simple!(|rt, a| {
+        let Some(lists) = rt.heap.list_to_vec(a[0]) else { return rt.type_error("a proper list", a[0]) };
+        let Some((&last, front)) = lists.split_last() else { return Ok(Value::NULL) };
+        let mut items = Vec::new();
+        for v in front.iter().copied() {
+            match rt.heap.list_to_vec(v) {
+                Some(mut xs) => items.append(&mut xs),
+                None => return rt.type_error("a proper list", v),
+            }
+        }
+        let mut acc = last;
+        for v in items.into_iter().rev() { acc = rt.heap.cons(v, acc); }
         Ok(acc)
+    });
+    "%fx26-string-append-list", 1, Some(1), simple!(|rt, a| {
+        let Some(strings) = rt.heap.list_to_vec(a[0]) else { return rt.type_error("a proper list", a[0]) };
+        for v in strings.iter().copied() {
+            if !rt.heap.is_a(v, ObjType::String) { return rt.type_error("a string", v); }
+        }
+        Ok(rt.heap.string_append(&strings))
     });
     // An array's elements as a list, and a list's as an array (`runtime.scm`'s
     // layout: a plain bloblet, element `i` in field `i + 2`).

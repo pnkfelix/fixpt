@@ -171,6 +171,9 @@
         (prim! (fw-name "int->" w) (lambda (xs) (fw-wrap bits signed (as-int (ev-arg xs 0)))))
         (prim! (n "->int") (lambda (xs) (as-int (ev-arg xs 0))))))))
 
+;; `string-append`: the strings `xs`, one after another.
+(define* ev-string-append (subr (maxeff evals spin) (vals) string)
+  (lambda (xs) (if (null? xs) "" (string-append (as-str (car xs)) (ev-string-append (cdr xs))))))
 (define* ev-text-prims! (subr (maxeff stores spin) () unit)
   (lambda ()
     (begin
@@ -185,8 +188,7 @@
       (prim! 'char->integer (lambda (xs) (char->integer (as-char (ev-arg xs 0)))))
       (prim! 'integer->char (lambda (xs) (integer->char (as-int (ev-arg xs 0)))))
       (prim! 'char->string (lambda (xs) (char->string (as-char (ev-arg xs 0)))))
-      (prim! 'string-append
-             (lambda (xs) (string-append (as-str (ev-arg xs 0)) (as-str (ev-arg xs 1)))))
+      (prim! 'string-append (lambda (xs) (ev-string-append xs)))
       (prim! 'string-length (lambda (xs) (string-length (as-str (ev-arg xs 0)))))
       (prim! 'string-ref
              (lambda (xs) (string-ref (as-str (ev-arg xs 0)) (as-int (ev-arg xs 1)))))
@@ -365,6 +367,15 @@
              (lambda (xs)
                (ev-io-result (write-file (as-str (ev-arg xs 0)) (as-bytes (ev-arg xs 1)))))))))
 
+;; `append`: the lists `xs`, all but the last copied, in front of it.
+(define* ev-append (subr (maxeff evals spin) (vals) val)
+  (lambda (xs)
+    (cond ((null? xs) nil)
+          ((null? (cdr xs)) (car xs))
+          (else (ev-onto (car xs) (ev-append (cdr xs)))))))
+;; List `v`'s elements, copied, in front of `tail`.
+(define* ev-onto (subr (maxeff evals spin) (val val) val)
+  (lambda (v tail) (if (null? v) tail (cons (car (as-pair v)) (ev-onto (cdr (as-pair v)) tail)))))
 ;; How many pairs list `v` has, `n` so far: `length`'s and `list-length`'s.
 (define* ev-list-length (subr (maxeff evals spin) (val int) int)
   (lambda (v n) (if (null? v) n (ev-list-length (cdr (as-pair v)) (+ n 1)))))
@@ -379,6 +390,7 @@
       (prim! 'set-car! (lambda (xs) (ev-set-car! xs)))
       (prim! 'set-cdr! (lambda (xs) (ev-set-cdr! xs)))
       (prim! 'list (lambda (xs) (vals->val xs)))
+      (prim! 'append (lambda (xs) (ev-append xs)))
       (prim! 'new (lambda (xs) (the vcell (new (ev-arg xs 0)))))
       (prim! 'get (lambda (xs) (get (as-ref (ev-arg xs 0)))))
       (prim! 'set (lambda (xs) (begin (set (as-ref (ev-arg xs 0)) (ev-arg xs 1)) the-unit)))

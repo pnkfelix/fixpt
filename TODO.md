@@ -2504,9 +2504,6 @@ Built, all three of kayak's stages (`DONE.md` §92; the design,
   cell is filled, so a loop that waits on one cell many times keeps one
   per wait; a removal operation, or wakers that drop themselves, if it
   matters.
-- **`append` and `string-append` as proper vsubrs** (the user's,
-  2026-10-13): the evaluator written in FX-26 has no `append`, which the
-  scheduler's `or-event` had to work around.
 - Out of scope, as kayak asked: transfer of mutable data (by consuming a
   place's handle, after H3), session types, distribution, links and
   monitors.
@@ -2525,3 +2522,10 @@ which calls native code. Left:
   check and the call-out are in line at every typed call. Cheaper: the
   kind alone (a typed call's callee is a bloblet), and the call-out in one
   stub per word, out of line.
+- **A prelude in FX-26** (raised by the user with `append` and
+  `string-append`, 2026-10-13): standard procedures written as FX-26
+  definitions every program sees, a module file built in and loaded
+  implicitly, as `fx26:processes.fx` is for its forms. What it would cost:
+  a variadic definition's call makes the list of its arguments, where a
+  built-in primitive takes them as they are; and every machine would load
+  and compile it.

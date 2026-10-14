@@ -2121,6 +2121,15 @@ four programs in `programs/processes` (a cell chosen, a server stopped by
 a cell, a deadlock, a malformed arm), every way they run.
 
 
+**`append` and `string-append` as `vsubr`s** (the user's, 2026-10-13;
+`docs/fx26.md`, "Variadic procedures"): called with any count, a call the
+runtime's primitive of that count, and as a value `%vlambda`'s closure over
+the operation on its list of arguments, as `list` is, in both compilers,
+the lowering and the evaluator written in FX-26 (which had no `append`).
+`append` at one region, the last list shared. Test:
+`programs/native/variadic-standard.fx`, on every machine.
+
+
 ## 93. Cellular code calling native code, where the native convention declines (2026-10-13)
 
 **Typed calls of native closures.** On the REPL's machine a form the native
