@@ -388,6 +388,10 @@ pub struct Machine {
     /// Cells left to run before the machine traps with `OutOfFuel`, so that
     /// a program that runs away stops instead of hanging its host.
     pub fuel: u64,
+    /// Fuel not yet given out: `fuel` is a time slice of it
+    /// (`fixpt_runtime::sched::SLICE`), at whose end the scheduler may have
+    /// another task run (`poll`).
+    reserve: u64,
     /// When profiling: cells run in each word, by the word's name.
     pub profile: Option<Profile>,
     /// Whether native code called this run (`call_value`): a whole
@@ -481,7 +485,7 @@ impl Profile {
 
 impl Default for Machine {
     fn default() -> Machine {
-        Machine { ds: Vec::new(), rs: Vec::new(), rs_floor: 0, steps: 0, fuel: u64::MAX, profile: None, nested: false, thrown: None, aborted: None, run: 0 }
+        Machine { ds: Vec::new(), rs: Vec::new(), rs_floor: 0, steps: 0, fuel: u64::MAX, reserve: 0, profile: None, nested: false, thrown: None, aborted: None, run: 0 }
     }
 }
 
@@ -512,6 +516,10 @@ impl Machine {
         if !self.enter(cx, word, &mut r)? {
             return Ok(());
         }
+        let slice = fixpt_runtime::sched::SLICE;
+        if self.reserve == 0 && self.fuel > slice {
+            (self.fuel, self.reserve) = (slice, self.fuel - slice);
+        }
         loop {
             let cell = cx.heap().bloblet_slot(r.cur, r.k);
             r.k += 1;
@@ -520,7 +528,12 @@ impl Machine {
                 p.count(cx.heap(), r.cur);
             }
             if self.fuel == 0 {
-                return Err(Trap::OutOfFuel);
+                if self.reserve == 0 {
+                    return Err(Trap::OutOfFuel);
+                }
+                if self.poll(cx, &mut r) {
+                    continue;
+                }
             }
             self.fuel -= 1;
             if cell.is_fixnum() {
@@ -538,6 +551,32 @@ impl Machine {
                 self.enter(cx, cell, &mut r)?;
             }
         }
+    }
+
+    /// A time slice's end, between fetching a cell and running it: the next
+    /// slice given out of the reserve, and, if the scheduler would have
+    /// another task run (`fixpt_runtime::sched::preempt_due_with`), its
+    /// `preempt` called first: the cell put back, a return to it pushed, and
+    /// the trampoline word entered with `preempt` on the data stack. Whether
+    /// it was.
+    fn poll(&mut self, cx: &mut Ctx, r: &mut Regs) -> bool {
+        let take = self.reserve.min(fixpt_runtime::sched::SLICE);
+        (self.fuel, self.reserve) = (take, self.reserve - take);
+        let Ctx::Rt(rt) = cx else { return false };
+        let (rs, floor) = (&self.rs, self.rs_floor);
+        let due = fixpt_runtime::sched::preempt_due_with(rt, |_, tag| Self::find_marked(rs, floor, PROMPT_MARK, tag).is_some());
+        // One of this machine's own closures: another machine's program may
+        // have left its scheduler's (they share a runtime).
+        let own = |f: Value| f.is_bloblet() && rt.heap.bloblet_kind(f) == const { kind("cellular-closure") };
+        let Some((f, t)) = due.filter(|&(f, _)| own(f)) else { return false };
+        if self.check_limits().is_err() {
+            return false;
+        }
+        r.k -= 1;
+        self.push_return(r);
+        (r.cur, r.k, r.fp, r.clo) = (t, WORD_CELL0, self.ds.len(), Value::FALSE);
+        self.ds.push(f);
+        true
     }
 
     fn push_return(&mut self, r: &Regs) {
@@ -1234,7 +1273,7 @@ impl Machine {
     /// return stack's entries oldest first, each `(word, fixnum k, fixnum
     /// frame pointer, closure)` or a marker, as this machine keeps them.
     pub fn from_stacks(ds: Vec<Value>, rs: Vec<Value>) -> Machine {
-        Machine { ds, rs, rs_floor: 0, steps: 0, fuel: u64::MAX, profile: None, nested: false, thrown: None, aborted: None, run: 0 }
+        Machine { ds, rs, rs_floor: 0, steps: 0, fuel: u64::MAX, reserve: 0, profile: None, nested: false, thrown: None, aborted: None, run: 0 }
     }
 
     /// The stacks, as `from_stacks` takes them.

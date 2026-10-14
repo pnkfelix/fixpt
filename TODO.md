@@ -2486,7 +2486,19 @@ Built, all three of kayak's stages (`DONE.md` §92; the design,
 `par`"). Left:
 - **Q2: preemption at fuel polls**, so that a process that spins cannot
   starve another (fairness, which the semantics promises and the prototype
-  does not keep).
+  does not keep); on every machine (the user's, 2026-10-14). Built: the
+  scheduler's `preempt` and parked tasks, the runtime's decision
+  (`sched::preempt_due`, a time slice of `SLICE` polls), the bytecode
+  machine (a call at an instruction boundary, its value dropped:
+  `VmFrame::Discard`), the Rust cellular machine (a trampoline word entered
+  at a cell boundary), and the evaluator written in FX-26 (its own poll,
+  `ev-poll`); test `processes.rs`, `a_spinning_process_is_preempted`.
+  Left: the arm64 cellular machines (interpreter, both JITs) and the
+  stencils, by leaving at a poll and coming back in through the trampoline
+  (the `docol` and word-entry polls moved after `CUR` and `IP` are set,
+  so that every poll is at a cell boundary); and register code, both
+  conventions, whose polls hold values in registers: a liveness pass over
+  register code, and a frame of the stub's own for what is live.
 - **The cost of a switch** (the actors note's A4): measured, 585 ns for a
   message's two switches, after 890 (`DONE.md` §92). What is left is the
   call-out from native code and the frames copied to capture and

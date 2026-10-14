@@ -235,3 +235,20 @@ fn a_process_that_fails_fails_the_run() {
     assert!(outs[2].as_ref().is_err_and(|e| e.contains("an i-cell written twice")), "{outs:?}");
     assert_eq!(outs[3], Ok(Some("3".to_string())), "{outs:?}");
 }
+
+/// Preemption at fuel polls (`TODO.md` §92, Q2): a process that spins for
+/// ever does not starve the others (`programs/preempt/`), each way that
+/// preempts. Without it, the spinner, run first, keeps the thread, and the
+/// program waits for ever.
+#[test]
+fn a_spinning_process_is_preempted() {
+    let text = include_str!("programs/preempt/spinner.fx");
+    let ways = [
+        ("lowered", lowered(text, None)),
+        ("evaluated", printed(common::with_own(|s| s.eval_with_own_evaluator(text)))),
+        ("compiled", printed(common::with_own(|s| s.compile_with_own_compiler(text)))),
+    ];
+    for (way, got) in ways {
+        assert_eq!(got, Ok("42".to_string()), "{way}");
+    }
+}

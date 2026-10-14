@@ -115,6 +115,8 @@
    (val efail-expected (subr evals (string) void))
    (val ev-arg (subr (maxeff evals spin) (vals int) val))
    (val ev-eq? (subr pure (val val) bool))
+   (val ev-poll (subr (maxeff evals spin) () unit))
+   (val ev-preempt-set! (subr (maxeff (write @v) (read @globals)) (val) unit))
    (val ev-intern (subr (maxeff stores spin) (val) val))
    (val eval-tag (prompt-tag eresult eresult (maxeff runs spin) @x))
    (val list->val (subr (maxeff (read @globals) (read @x) (alloc @v) spin) ((listof val @x)) val))

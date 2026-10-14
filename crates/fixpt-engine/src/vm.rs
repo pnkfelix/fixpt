@@ -72,6 +72,13 @@ enum VmFrame {
         consumer: u32,
         mode: Call,
     },
+    /// A call made at a poll, not by the code (the scheduler's `preempt`,
+    /// `drive`): returned to, its value is dropped and the code goes on at
+    /// `pc` as if nothing had been called.
+    Discard {
+        pc: u32,
+        fp: u32,
+    },
 }
 
 const TAG_HALT: u64 = 0;
@@ -79,6 +86,7 @@ const TAG_RETURN: u64 = 1;
 const TAG_CONSUME: u64 = 2;
 const TAG_CONSUME_TAIL: u64 = 3;
 const TAG_CONSUME_FRAMED: u64 = 4;
+const TAG_DISCARD: u64 = 5;
 
 /// Words per encoded frame.
 pub const FRAME_WORDS: usize = 4;
@@ -88,6 +96,7 @@ impl VmFrame {
         match self {
             VmFrame::Halt => [TAG_HALT, 0, 0, 0],
             VmFrame::Return { pc, fp } => [TAG_RETURN, pc as u64, fp as u64, 0],
+            VmFrame::Discard { pc, fp } => [TAG_DISCARD, pc as u64, fp as u64, 0],
             VmFrame::Consume { pc, fp, consumer, mode } => {
                 let tag = match mode {
                     Call::Next => TAG_CONSUME,
@@ -106,6 +115,7 @@ impl VmFrame {
         match self {
             VmFrame::Halt => VmFrame::Halt,
             VmFrame::Return { pc, fp } => VmFrame::Return { pc, fp: r(fp) },
+            VmFrame::Discard { pc, fp } => VmFrame::Discard { pc, fp: r(fp) },
             VmFrame::Consume { pc, fp, consumer, mode } => VmFrame::Consume {
                 pc,
                 fp: r(fp),
@@ -119,6 +129,10 @@ impl VmFrame {
         Some(match w[0] {
             TAG_HALT => VmFrame::Halt,
             TAG_RETURN => VmFrame::Return {
+                pc: w[1] as u32,
+                fp: w[2] as u32,
+            },
+            TAG_DISCARD => VmFrame::Discard {
                 pc: w[1] as u32,
                 fp: w[2] as u32,
             },
@@ -169,6 +183,9 @@ pub struct Vm {
     /// unlimited.
     pub step_limit: Option<u64>,
     steps: u64,
+    /// The step at which `drive` next looks up from the code: the step
+    /// limit, or the end of a time slice (`fixpt_runtime::sched::SLICE`).
+    next_poll: u64,
 }
 
 impl Default for Vm {
@@ -189,6 +206,7 @@ impl Vm {
             pc: 0,
             step_limit: None,
             steps: 0,
+            next_poll: 0,
         }
     }
 
@@ -201,6 +219,7 @@ impl Vm {
         self.fp = 0;
         self.pc = 0;
         self.steps = 0;
+        self.next_poll = 0;
         for r in self.regs.iter_mut() {
             *r = Value::UNSPECIFIED;
         }
@@ -258,10 +277,21 @@ impl Vm {
     fn drive(&mut self, rt: &mut Runtime, p: &mut Prepared) -> Outcome<Value> {
         loop {
             self.steps += 1;
-            if let Some(limit) = self.step_limit
-                && self.steps > limit
-            {
-                return rt.fail("evaluation step limit exceeded", &[]);
+            if self.steps >= self.next_poll {
+                // The limit is no condition a program's handler may catch.
+                if self.step_limit.is_some_and(|l| self.steps > l) {
+                    return rt.fail("evaluation step limit exceeded", &[]);
+                }
+                match self.poll(rt, p) {
+                    Ok(None) => {}
+                    Ok(Some(v)) => return Ok(v),
+                    Err(t) => {
+                        if let Some(v) = self.dispatch_condition(rt, p, t)? {
+                            return Ok(v);
+                        }
+                    }
+                }
+                continue;
             }
             match self.step(rt, p) {
                 Ok(None) => {}
@@ -273,6 +303,25 @@ impl Vm {
                 }
             }
         }
+    }
+
+    /// Between two instructions, at a time slice's end (`drive` enforces
+    /// the step limit): if the scheduler would have another task run
+    /// (`fixpt_runtime::sched::preempt_due`), its `preempt` called here, its
+    /// value dropped (`VmFrame::Discard`).
+    fn poll(&mut self, rt: &mut Runtime, p: &mut Prepared) -> Outcome<Option<Value>> {
+        let limit = self.step_limit.map_or(u64::MAX, |l| l.saturating_add(1));
+        let first = self.next_poll == 0;
+        self.next_poll = (self.steps + fixpt_runtime::sched::SLICE).min(limit);
+        let marks = &self.marks;
+        let due = if first { None } else { fixpt_runtime::sched::preempt_due(rt, |_, tag| marks.find_prompt(tag).is_some()) };
+        // One of this machine's own procedures: another machine's program
+        // may have left its scheduler's (they share a runtime).
+        let Some(f) = due.filter(|&f| rt.heap.obj_type(f) == Some(ObjType::Closure)) else { return Ok(None) };
+        let base = self.stack.len();
+        self.stack.push(f);
+        self.frames.push(VmFrame::Discard { pc: self.pc, fp: self.fp });
+        self.apply(rt, p, base, Call::Framed)
     }
 
     /// One instruction. `Some(v)` means the machine halted with `v`.
@@ -472,6 +521,15 @@ impl Vm {
         let frame = *self.frames.last().expect("the Halt frame is never popped");
         match frame {
             VmFrame::Halt => Ok(Some(v)),
+            VmFrame::Discard { pc, fp } => {
+                self.frames.pop();
+                self.marks.trim(self.frames.len());
+                self.stack.truncate(self.fp as usize);
+                self.fp = fp;
+                self.pc = pc;
+                self.load_code(rt);
+                Ok(None)
+            }
             VmFrame::Return { pc, fp } => {
                 self.frames.pop();
                 self.marks.trim(self.frames.len());

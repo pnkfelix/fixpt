@@ -42,9 +42,15 @@
         (some t t)
         (none u (let ((t (the tag (make-continuation-prompt-tag))))
                   (begin ((proj %sched tag unit unit) 13 t #u) t))))))
-  ;; Task `t`, run under the scheduler's prompt, until it ends or waits.
+  ;; Task `t`, run under the scheduler's prompt, until it ends, waits, or
+  ;; is preempted; the runtime told, so that the first task is not
+  ;; preempted meanwhile (`fixpt_runtime::sched::preempt_due`).
   (define run-task (subr any (thunk) unit)
-    (lambda (t) (prompt (the-tag) (t) (lambda ((u unit)) u))))
+    (lambda (t)
+      (begin
+        ((proj %sched int unit unit) 29 1 #u)
+        (prompt (the-tag) (t) (lambda ((u unit)) u))
+        ((proj %sched int unit unit) 29 -1 #u))))
   ;; Every task that can run, run, until none can.
   (define drain (subr any () unit)
     (lambda ()
@@ -72,6 +78,22 @@
                 (task-switch 0)
                 (abort-current-continuation tag #u))))
           tag))))
+  ;; The next task to run, or, with none, the oldest parked.
+  (define pop-any (subr sched () (union false thunk))
+    (lambda () ((proj %sched unit unit (union false thunk)) 28 #u #u)))
+  ;; What a machine calls at a poll whose time slice is spent, when another
+  ;; task could run (`preempt_due`): a task parks itself, resumable, and the
+  ;; scheduler goes on; the first task fires the deadlines due and runs one
+  ;; other task, the oldest queued, else the oldest parked. Parked tasks are
+  ;; apart from the queue, so that `drain` ends: they run when the first
+  ;; task waits or is preempted.
+  (define preempt (subr any () unit)
+    (lambda ()
+      (if (main?)
+          (begin
+            ((proj %sched unit unit bool) 30 #u #u)
+            (let ((t (pop-any))) (if (procedure? t) (run-task t) #u)))
+          (suspend (lambda (w) ((proj %sched thunk unit unit) 27 w #u))))))
   ;; The first task, waiting until `ready` gives a place (0 or more): the
   ;; others run, one at a time until it does, and, when none can, the clock
   ;; is waited for, if a task waits for it; if nothing is left that could
@@ -83,7 +105,7 @@
                    (let ((i (ready)))
                      (if (>= i 0)
                          i
-                         (let ((t (pop)))
+                         (let ((t (pop-any)))
                            (cond ((procedure? t) (begin (run-task t) (go)))
                                  (((proj %sched unit unit bool) 21 #u #u) (go))
                                  (else (error stuck)))))))))
@@ -109,6 +131,7 @@
     (lambda (body)
       (let ((t (task-new)))
         (begin
+          ((proj %sched (subr any () unit) unit unit) 26 preempt #u)
           (push (lambda () (begin (task-switch t) (if (cancelled? t) #u (body)) (task-end t))))
           t))))
   ;; The value of I-cell `c`, once it has one.

@@ -176,6 +176,28 @@
       (sum o (typecase b (sum p (ev-other-eq? o p)) (else #f)))
       (else (eq? a b)))))
 
+;; The program's scheduler's `preempt` (`fx26:processes.fx`), one of the
+;; evaluator's values, which this evaluator calls at its own polls: kept
+;; here, not given to the runtime, whose machines would call it as theirs
+;; (`ev-sched`). And how many applications until the next poll.
+(define ev-preempt (ref val @v) (new #f))
+(define ev-ticks (ref int @v) (new 0))
+(define* ev-preempt-set! (subr (maxeff (write @v) (read @globals)) (val) unit)
+  (lambda (f) (set ev-preempt f)))
+;; A poll, at each application: every 4096th, the program's `preempt`
+;; called, if the runtime says the scheduler would have another task run
+;; (`fixpt_runtime::sched`, operation 31).
+(define* ev-poll (subr (maxeff evals spin) () unit)
+  (lambda ()
+    (let ((t (- (get ev-ticks) 1)))
+      (if (> t 0)
+          (set ev-ticks t)
+          (begin
+            (set ev-ticks 4096)
+            (if (and (procedure? (get ev-preempt)) ((proj %sched val val bool) 31 #f #f))
+                (begin (apply-val (get ev-preempt) nil) #u)
+                #u))))))
+
 ;; Quoted data interned (TODO §51), as the heap interns them
 ;; (`Heap::intern_datum`): a pair found by its interned parts, a string by
 ;; its characters; so a quote is one value each time, and equal quotes one.

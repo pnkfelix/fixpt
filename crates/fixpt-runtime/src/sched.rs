@@ -19,7 +19,11 @@
 //! of its own (`FIXPT_SCHED_SEED`), else `#f`, the words copied, the
 //! timers: what waits for the clock (a `pselect`'s deadline), each a pair
 //! of the time and the waker, newest first; and the tasks cancelled (a
-//! `race`'s losers), which end, not run, the next time they would.
+//! `race`'s losers), which end, not run, the next time they would; the
+//! scheduler's `preempt`, which a machine calls at a poll whose time slice
+//! is spent (`preempt_due`), or `#f`; the tasks it stopped, parked apart
+//! from the run queue (newest first), so that `drain` ends; and how many
+//! tasks the first task is running now, one inside another.
 
 use crate::error::Outcome;
 use crate::runtime::Runtime;
@@ -34,6 +38,15 @@ const SEED: usize = 3;
 const COPIED: usize = 4;
 const TIMERS: usize = 5;
 const CANCELLED: usize = 6;
+const PREEMPT: usize = 7;
+const PARKED: usize = 8;
+const RUNNING: usize = 9;
+const TRAMPOLINE: usize = 10;
+
+/// The polls between two decisions whether to preempt (`preempt_due`): a
+/// task's time slice, in each machine's polls (a bytecode machine's
+/// instructions; procedure entries and backward branches in compiled code).
+pub const SLICE: u64 = 1 << 16;
 
 pub const ICELL: u8 = kind("icell");
 pub const MAILBOX: u8 = kind("mailbox");
@@ -75,6 +88,12 @@ pub mod op {
     pub const MAILBOX_UNWAIT: i64 = 23;
     pub const TASK_CANCEL: i64 = 24;
     pub const TASK_CANCELLED: i64 = 25;
+    pub const SET_PREEMPT: i64 = 26;
+    pub const PARK: i64 = 27;
+    pub const POP_ANY: i64 = 28;
+    pub const RUNNING: i64 = 29;
+    pub const TIMERS_FIRE: i64 = 30;
+    pub const PREEMPT_WANTED: i64 = 31;
 }
 
 /// The state's vector, made if there is none yet.
@@ -86,9 +105,17 @@ fn state(heap: &mut Heap) -> Value {
         return s;
     }
     let seed = std::env::var("FIXPT_SCHED_SEED").ok().and_then(|s| s.parse::<i64>().ok());
-    let s = heap.vector_from(&[Value::NULL, Value::NULL, Value::FALSE, seed.map_or(Value::FALSE, Value::fixnum), Value::fixnum(0), Value::NULL, Value::NULL]);
+    let s = heap.vector_from(&[Value::NULL, Value::NULL, Value::FALSE, seed.map_or(Value::FALSE, Value::fixnum), Value::fixnum(0), Value::NULL, Value::NULL, Value::FALSE, Value::NULL, Value::fixnum(0), Value::FALSE]);
     heap.set_global(slot, s);
     s
+}
+
+/// The state's vector, if there is one: making nothing, for a poll, which
+/// must not allocate.
+fn state_if_any(heap: &Heap) -> Option<Value> {
+    let sym = heap.interned(STATE)?;
+    let s = heap.global(heap.symbol_global_slot(sym));
+    heap.is_a(s, fixpt_heap::ObjType::Vector).then_some(s)
 }
 
 /// Take the run queue in an order of the seed's (a test's, to try many), or,
@@ -114,6 +141,8 @@ pub fn reset(heap: &mut Heap) {
     heap.obj_set(s, BACK, Value::NULL);
     heap.obj_set(s, TIMERS, Value::NULL);
     heap.obj_set(s, CANCELLED, Value::NULL);
+    heap.obj_set(s, PARKED, Value::NULL);
+    heap.obj_set(s, RUNNING, Value::fixnum(0));
     heap.tasks_reset();
 }
 
@@ -198,7 +227,15 @@ pub fn run_op(rt: &mut Runtime, n: i64, a: Value, b: Value) -> Outcome<Value> {
             let t = crate::prim::fixed_in(rt, a, crate::prim::Width::I64)? as i64;
             return Ok(if n == op::TIMER_DUE { Value::boolean(crate::world::clock_ns() >= t) } else { timer_add(rt, t, b) });
         }
-        op::TIMERS_WAIT => return Ok(timers_wait(rt)),
+        op::TIMERS_WAIT => return Ok(timers_wait(rt, true)),
+        op::TIMERS_FIRE => return Ok(timers_wait(rt, false)),
+        // For the evaluator written in FX-26, which runs a program's
+        // scheduler as its own values, and so calls its `preempt` itself:
+        // whether to, on the one machine it runs on.
+        op::PREEMPT_WANTED => {
+            let w = state_if_any(&rt.heap).is_some_and(|s| wanted(rt, s, |_, _| true));
+            return Ok(Value::boolean(w));
+        }
         _ => {}
     }
     let heap = &mut rt.heap;
@@ -242,6 +279,58 @@ pub fn run_op(rt: &mut Runtime, n: i64, a: Value, b: Value) -> Outcome<Value> {
             unit
         }
         op::POP => pop(heap),
+        // The scheduler's `preempt`, for the machines to call.
+        op::SET_PREEMPT => {
+            let s = state(heap);
+            heap.obj_set(s, PREEMPT, a);
+            if heap.obj_ref(s, TRAMPOLINE) == Value::FALSE {
+                use fixpt_heap::layout::cellular::routine;
+                let cells = [routine("call"), 0, routine("drop"), routine("exit")].map(|n| Value::fixnum(n as i64));
+                let name = heap.intern_static("%preempt-trampoline");
+                let t = heap.make_cellular_word(name, &cells).expect("a word");
+                let s = state(heap);
+                heap.obj_set(s, TRAMPOLINE, t);
+            }
+            unit
+        }
+        // A task stopped at a poll, apart from the run queue.
+        op::PARK => {
+            let s = state(heap);
+            let ps = heap.obj_ref(s, PARKED);
+            let ps = heap.cons(a, ps);
+            heap.obj_set(s, PARKED, ps);
+            unit
+        }
+        // The next task to run, or, with none, the oldest parked one.
+        op::POP_ANY => {
+            let t = pop(heap);
+            if t != Value::FALSE {
+                t
+            } else {
+                let s = state(heap);
+                let mut ps = heap.obj_ref(s, PARKED);
+                let mut rest = Vec::new();
+                while ps.is_pair() {
+                    rest.push(heap.car(ps));
+                    ps = heap.cdr(ps);
+                }
+                match rest.pop() {
+                    None => Value::FALSE,
+                    Some(t) => {
+                        let ps = heap.list_from(&rest);
+                        heap.obj_set(s, PARKED, ps);
+                        t
+                    }
+                }
+            }
+        }
+        // The first task begins (`a` 1) or ends (-1) running a task.
+        op::RUNNING => {
+            let s = state(heap);
+            let n = heap.obj_ref(s, RUNNING).as_fixnum() + if a.is_fixnum() { a.as_fixnum() } else { 0 };
+            heap.obj_set(s, RUNNING, Value::fixnum(n.max(0)));
+            unit
+        }
         op::MAILBOX_NEW => {
             let m = heap.make_bloblet(MAILBOX, 3, 0, true);
             heap.set_bloblet_slot(m, MB_FRONT, Value::NULL);
@@ -379,9 +468,9 @@ fn timer_add(rt: &mut Runtime, t: i64, w: Value) -> Value {
 }
 
 /// When no task can run and the first waits: `#f` if no timer is set;
-/// else, having slept until the earliest, each timer due taken, its waker
-/// run (in the order of their times), and `#t`.
-fn timers_wait(rt: &mut Runtime) -> Value {
+/// else, having slept until the earliest (if `sleep`), each timer due taken,
+/// its waker run (in the order of their times), and `#t`.
+fn timers_wait(rt: &mut Runtime, sleep: bool) -> Value {
     let heap = &mut rt.heap;
     let s = state(heap);
     let ts = heap.obj_ref(s, TIMERS);
@@ -394,7 +483,9 @@ fn timers_wait(rt: &mut Runtime) -> Value {
         earliest = earliest.min(heap.car(heap.car(x)).as_fixnum());
         x = heap.cdr(x);
     }
-    crate::world::sleep_until(earliest);
+    if sleep {
+        crate::world::sleep_until(earliest);
+    }
     let now = crate::world::clock_ns();
     let mut due = Vec::new();
     let mut x = ts;
@@ -414,6 +505,57 @@ fn timers_wait(rt: &mut Runtime) -> Value {
         push(heap, w);
     }
     Value::TRUE
+}
+
+/// At a poll whose time slice is spent: the scheduler's `preempt`, for the
+/// machine to call there and then go on, if another task could run and
+/// preempting is safe here; else none. In a task, the first task waits for
+/// it to stop (it runs every other), so it is preempted wherever
+/// `reachable` finds the scheduler's prompt on the machine's own stack,
+/// which `preempt` captures up to (no capture crosses from one machine to
+/// another). The first task is, if another is queued or parked, or a
+/// deadline is due, and it is not running one already (`preempt` runs one).
+pub fn preempt_due(rt: &mut Runtime, reachable: impl FnOnce(&Runtime, Value) -> bool) -> Option<Value> {
+    preempt_due_with(rt, reachable).map(|(f, _)| f)
+}
+
+/// `preempt_due`'s procedure, with a cellular word for a cellular machine
+/// to enter with it on the data stack: `call 0`, `drop`, `exit`, which
+/// calls it and goes back to the cell it stopped at, the stacks as they
+/// were.
+pub fn preempt_due_with(rt: &mut Runtime, reachable: impl FnOnce(&Runtime, Value) -> bool) -> Option<(Value, Value)> {
+    let heap = &rt.heap;
+    let s = state_if_any(heap)?;
+    let f = heap.obj_ref(s, PREEMPT);
+    if f == Value::FALSE || !wanted(rt, s, reachable) {
+        return None;
+    }
+    Some((f, rt.heap.obj_ref(s, TRAMPOLINE)))
+}
+
+/// Whether the scheduler would have the current task preempted here
+/// (`preempt_due`), whoever calls its `preempt`.
+fn wanted(rt: &Runtime, s: Value, reachable: impl FnOnce(&Runtime, Value) -> bool) -> bool {
+    let heap = &rt.heap;
+    if heap.task_current() == 0 {
+        let runnable = [FRONT, BACK, PARKED].iter().any(|&k| heap.obj_ref(s, k).is_pair()) || timer_due(heap, s);
+        return runnable && heap.obj_ref(s, RUNNING).as_fixnum() == 0;
+    }
+    let tag = heap.obj_ref(s, TAG);
+    tag != Value::FALSE && reachable(rt, tag)
+}
+
+/// Whether a timer is due.
+fn timer_due(heap: &Heap, s: Value) -> bool {
+    let now = crate::world::clock_ns();
+    let mut x = heap.obj_ref(s, TIMERS);
+    while x.is_pair() {
+        if heap.car(heap.car(x)).as_fixnum() <= now {
+            return true;
+        }
+        x = heap.cdr(x);
+    }
+    false
 }
 
 /// A new I-cell, empty, in the heap: shared by the processes it is sent

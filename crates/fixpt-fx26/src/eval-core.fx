@@ -32,6 +32,7 @@
 ;; What it uses of the modules it is given.
 (define apply-val (with values apply-val))
 (define apply1 (with values apply1))
+(define ev-poll (with values ev-poll))
 (define as-bool (with values as-bool))
 (define as-fields (with values as-fields))
 (define as-other (with values as-other))
@@ -269,7 +270,8 @@
         (e-unit (a b) the-unit)
         ;; A closure: the host's procedure of its arguments.
         (e-lambda (ps body a b) (lambda ((xs vals)) (eval body (bind ps xs e))))
-        (e-app (f args a b) (let* ((fv (eval f e)) (xs (eval-all args e))) (apply-val fv xs)))
+        (e-app (f args a b)
+          (let* ((fv (eval f e)) (xs (eval-all args e))) (begin (ev-poll) (apply-val fv xs))))
         (e-plambda (d body a b) (eval body e))
         ;; Regions and places are erased: a `letrena`'s or `letreap`'s
         ;; allocation is the heap's, and its name, the place as a value, is

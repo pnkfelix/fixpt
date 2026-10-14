@@ -1607,6 +1607,11 @@ impl Heap {
     }
 
     // ----------------------------------------------------------------- symbols
+    /// The symbol `name`, if it has been interned; making none.
+    pub fn interned(&self, name: &str) -> Option<Value> {
+        self.symbol_index.get(name).map(|&i| self.symbols[i as usize])
+    }
+
     /// `intern(name)`, for a name the runtime asks for at every turn (the
     /// scheduler's, `fixpt_runtime::sched`): found again by where the name
     /// is kept, one comparison among a few, not by hashing it.
