@@ -316,7 +316,7 @@
                            ((not (null? bound)) (symbol->string (car bound)))
                            (else "lambda")))
               (scope (get c-scope-name)))
-          (if (null? scope) inner (string-append (string-append (car scope) "/") inner)))
+          (if (null? scope) inner (string-append (car scope) "/" inner)))
         (car named))))
 ;; A lambda's word's name: `named`'s, if it has one; else `base` and where
 ;; its body starts, so that a profile can say which.
@@ -324,7 +324,7 @@
   (lambda (base named body)
     (string->symbol
       (if (null? named)
-          (string-append base (string-append "@" (c-place-name (exp-start body))))
+          (string-append base "@" (c-place-name (exp-start body)))
           (car named)))))
 
 ;; While a copy's register code is made: which (one, or none).

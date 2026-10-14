@@ -2128,6 +2128,9 @@ the operation on its list of arguments, as `list` is, in both compilers,
 the lowering and the evaluator written in FX-26 (which had no `append`).
 `append` at one region, the last list shared. Test:
 `programs/native/variadic-standard.fx`, on every machine.
+Then used in FX-26's own sources: the reader's `str3` and `str5`, three
+and five strings joined, gone for `string-append` of any count (20 calls),
+and 17 nested `string-append`s flattened; no nested `append` was found.
 
 
 ## 93. Cellular code calling native code, where the native convention declines (2026-10-13)

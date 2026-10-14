@@ -570,7 +570,7 @@
         (set c-word-name
              (the (listof string @k)
                (cons (string-append (symbol->string (extract sp 1))
-                                    (string-append "@lambda@" (c-place-name (exp-start lbody))))
+                                    "@lambda@" (c-place-name (exp-start lbody)))
                      nil)))
         (let ((made (c-lambda-word (extract sp 3) (extract sp 4) (the cenv nil) (the syms nil))))
           (begin

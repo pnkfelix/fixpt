@@ -19,7 +19,6 @@
 (define-type syn (select eager-reader-module syn))
 (define syn->datum (with eager-reader-module syn->datum))
 (define-type result (select eager-reader-module result))
-(define str3 (with eager-reader-module str3))
 (define atom (with eager-reader-module atom))
 (define lst (with eager-reader-module lst))
 (define dotted (with eager-reader-module dotted))
@@ -287,7 +286,7 @@
 ;; What a region form says when its name is not one, or has an `@`.
 (define region-name-error (subr (read @globals) (symbol) string)
   (lambda (head)
-    (str3 "a `" (symbol->string head) "` binds a region variable's name, without `@`")))
+    (string-append "a `" (symbol->string head) "` binds a region variable's name, without `@`")))
 
 ;; The names a `tagcase` arm binds, `bind`: a product's fields, `(name
 ;; …)`, if `fields`; else the one value's name.
@@ -483,8 +482,8 @@
       (e-lambda (the param-list (cons x nil)) (e-var 'x a b) a b))))
 (define module-usage string
   (string-append "a module holds `(define-generative t T)`, `(define-type d T)`, "
-                 (string-append "`(define-effect e E)`, `(define x [T] e)`, `(define* f T e)`, "
-                                "`(define-rec (f T e) …)`, `(include m)` and `(hide item …)`")))
+                 "`(define-effect e E)`, `(define x [T] e)`, `(define* f T e)`, "
+                 "`(define-rec (f T e) …)`, `(include m)` and `(hide item …)`"))
 ;; A `define-rec`'s names, types and expressions, each in order.
 (define rec-names (subr (read @globals) (letrec-list) names)
   (lambda (bs) (if (null? bs) nil (cons (extract (car bs) 1) (rec-names (cdr bs))))))
@@ -769,13 +768,13 @@
   (lambda (ks key acc)
     (cond ((null? ks) "")
           ((string=? (car (car ks)) key)
-           (string-append "a load cycle: `" (string-append (cdr (car ks)) acc)))
+           (string-append "a load cycle: `" (cdr (car ks)) acc))
           (else (load-chain (cdr ks) key
-                            (string-append "` loads `" (string-append (cdr (car ks)) acc)))))))
+                            (string-append "` loads `" (cdr (car ks)) acc))))))
 ;; If `key` is being read, the cycle a load of it at `path` makes; else "".
 (define load-cycle (subr (maxeff (read @globals) (read rs)) (string string) string)
   (lambda (key path)
-    (load-chain (get loading-keys) key (string-append "` loads `" (string-append path "`")))))
+    (load-chain (get loading-keys) key (string-append "` loads `" path "`"))))
 ;; The definitions not yet placed, in order, now placed: none left.
 (define shared-taken (subr (maxeff (read @globals) (read rs) (write rs)) () top-list)
   (lambda ()
@@ -813,7 +812,7 @@
     (letrec ((go (subr (maxeff (read @globals) spin) (int int int) string)
                (lambda (i line col)
                  (cond ((or (>= i at) (>= i (string-length text)))
-                        (str3 (int->string line) ":" (int->string col)))
+                        (string-append (int->string line) ":" (int->string col)))
                        ((char=? (string-ref text i) #\newline) (go (+ i 1) (+ line 1) 1))
                        (else (go (+ i 1) line (+ col 1)))))))
       (go 0 1 1))))
@@ -827,8 +826,8 @@
       (if (or (null? f) (< at base) (>= at (+ base load-base)))
           m
           (let ((path (extract (car f) 4)) (text (extract (car f) 6)))
-            (string-append (str3 "in `" path "`, ")
-                           (str3 (text-place text (- at base)) ": " m)))))))
+            (string-append "in `" path "`, "
+                           (text-place text (- at base)) ": " m))))))
 
 ;; Error `m` at `at`, said in each file on the way out to the program
 ;; (`TODO.md` §73): while `at` is in a file read (past `load-base`), `in
@@ -845,7 +844,7 @@
           (let* ((base (extract (car f) 2))
                  (where (text-place (extract (car f) 6) (- at base))))
             (loaded-placed
-             fs (string-append (str3 "in `" (extract (car f) 4) "`, ") (str3 where ": " m))
+             fs (string-append "in `" (extract (car f) 4) "`, " where ": " m)
              (extract (car f) 1)))))))
 
 ;; The file read at `base`, as it was first loaded, in a list of one: the
@@ -866,8 +865,8 @@
     (let ((f (loaded-based fs base)))
       (if (or (null? f) (< at base) (>= at (+ base load-base)))
           m
-          (string-append (str3 "in `" path "`, ")
-                         (str3 (text-place (extract (car f) 6) (- at base)) ": " m))))))
+          (string-append "in `" path "`, "
+                         (text-place (extract (car f) 6) (- at base)) ": " m)))))
 
 ;; The items of a form that is a module.
 (define module-items-of (subr pure (top) mod-items)

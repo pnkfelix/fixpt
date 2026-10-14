@@ -209,7 +209,7 @@
     (if (< at load-base)
         (int->string at)
         (string-append (int->string (+ 1000 (quotient at load-base)))
-                       (string-append ":" (int->string (remainder at load-base)))))))
+                       ":" (int->string (remainder at load-base))))))
 ;; An abstract type `n`'s conversion, `prefix` `up-` or `down-`.
 (define c-converter (subr (read @globals) (string symbol) symbol)
   (lambda (prefix n) (string->symbol (string-append prefix (symbol->string n)))))

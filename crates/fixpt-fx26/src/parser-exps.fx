@@ -24,7 +24,6 @@
 (define-type data (select eager-reader-module data))
 (define-type syn (select eager-reader-module syn))
 (define syn->datum (with eager-reader-module syn->datum))
-(define str3 (with eager-reader-module str3))
 (define atom (with eager-reader-module atom))
 (define lst (with eager-reader-module lst))
 (define dotted (with eager-reader-module dotted))
@@ -181,8 +180,8 @@
   "a `typecase` must end with an `else` clause, `(else body)` or `(else name body)`")
 (define typecase-shapes string
   (string-append "a shape `typecase` tests is one of "
-                 (string-append "int, char, bool, nil, pair, string, symbol, procedure, bloblet, "
-                                "f64, f32, box, sum, product, vector, bytevector")))
+                 "int, char, bool, nil, pair, string, symbol, procedure, bloblet, "
+                 "f64, f32, box, sum, product, vector, bytevector"))
 ;; A `case` datum's kind (`TODO.md` §46): 0 an integer, 1 a character, 2
 ;; a string, 3 a symbol, 4 a boolean, and -1 none of these.
 (define case-kind (subr (read @globals) (syn) int)
@@ -520,7 +519,7 @@
                           a b)))
         ((load-module load-input)
          (let* ((input? (eq? head 'load-input))
-                (usage (str3 "`(" (if input? "load-input" "load-module") " \"file\")`")))
+                (usage (string-append "`(" (if input? "load-input" "load-module") " \"file\")`")))
            (begin (arity items 2 usage a b)
                   (if (syn-string? (nth items 1))
                       (parse-loaded (syn-string (nth items 1)) input? (car items) a b)
@@ -546,7 +545,7 @@
   ;; `(letregion name body …)` and the other region forms.
   (parse-region-form (subr (maxeff parses spin) (syns-a symbol int int) exp)
     (lambda (items head a b)
-      (begin (at-least items 2 (str3 "`(" (symbol->string head) " name body …)`") a b)
+      (begin (at-least items 2 (string-append "`(" (symbol->string head) " name body …)`") a b)
              ;; `(letfreeze (r p) body …)` freezes into place `p`;
              ;; `(letfreeze r body …)` into the heap.
              (let* ((given (nth items 1))
@@ -801,7 +800,7 @@
                       (v (parse-exp (nth args 2))))
                  (e-bloblet op i (list x v) a b)))
               ((bloblet-untagged? op n) (e-bloblet op -1 (parse-exps args) a b))
-              (else (pfail-at (str3 "`(" (symbol->string op) " …)`") a b))))))
+              (else (pfail-at (string-append "`(" (symbol->string op) " …)`") a b))))))
   (parse-fields (subr (maxeff parses spin) (syns-a) let-list)
     (lambda (ps)
       (if (null? ps)
@@ -927,7 +926,7 @@
     (lambda (path input? head a b)
       (let ((f (loaded-next-at a)))
         (if (null? f)
-            (e-module (loaded-error (str3 "cannot read `" path "`: it was not read")) a b)
+            (e-module (loaded-error (string-append "cannot read `" path "`: it was not read")) a b)
             (let* ((key (string-append (if input? "input:" "") (extract (car f) 7)))
                    (name (string->symbol (string-append "%shared:" key)))
                    (cycle (load-cycle key path)))

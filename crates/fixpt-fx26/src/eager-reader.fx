@@ -227,10 +227,6 @@
 
 ;;; -------------------------------------------------------------- strings
 
-(define str3 (subr pure (string string string) string)
-  (lambda (a b c) (string-append a (string-append b c))))
-(define str5 (subr (read @globals) (string string string string string) string)
-  (lambda (a b c d e) (string-append a (string-append b (str3 c d e)))))
 (define char-string (subr pure (char) string) (lambda (c) (char->string c)))
 
 (define delimiter? (subr pure (char) bool)
@@ -479,7 +475,7 @@
 ;; The error that `#\name` is a `what` character name.
 (define char-name-fail (subr reads (cursor int string string) void)
   (lambda (cur start what name)
-    (fail-at cur start (str3 what " character name `#\\" (string-append name "`")))))
+    (fail-at cur start (string-append what " character name `#\\" name "`"))))
 
 ;; `#\c`, `#\space`, `#\x41`. The first character is taken whatever it is,
 ;; and anything after it up to a delimiter makes a name.
@@ -533,7 +529,7 @@
 (define atom-finish (subr reads (atom-in cursor string bool char) result)
   (lambda (in cur text escaped c)
     (if (and (string=? text "") (not escaped))
-        (fail cur (str3 "unexpected `" (char-string c) "`"))
+        (fail cur (string-append "unexpected `" (char-string c) "`"))
         (let ((n (as-number text escaped)))
           (if (null? n)
               (atom-at (string->symbol text) (extract in start) cur)
@@ -607,16 +603,19 @@
   (lambda (cur close) (and (not (hash-pending? cur)) (char=? (cur-char cur) close))))
 ;; The error that `close` was expected: `what` says what came instead.
 (define fail-expected (subr reads (cursor char string) void)
-  (lambda (cur close what) (fail cur (str3 "expected `" (char-string close) what))))
+  (lambda (cur close what) (fail cur (string-append "expected `" (char-string close) what))))
 ;; What was found instead of it, `c`.
 (define found-instead (subr (read @globals) (char) string)
-  (lambda (c) (str3 "` but found `" (char-string c) "`")))
+  (lambda (c) (string-append "` but found `" (char-string c) "`")))
+;; That `c` closes nothing.
+(define unbalanced-message (subr (read @globals) (char) string)
+  (lambda (c) (string-append "unbalanced `" (char-string c) "`")))
 ;; That `c` is reserved in FX-26.
 (define reserved-message (subr (read @globals) (char) string)
-  (lambda (c) (str3 "`" (char-string c) "` is reserved: it has no meaning yet")))
+  (lambda (c) (string-append "`" (char-string c) "` is reserved: it has no meaning yet")))
 ;; The error of unknown `#` syntax, `#what`, at `start`.
 (define unknown-hash (subr reads (cursor int string) void)
-  (lambda (cur start what) (fail-at cur start (str3 "unknown `#` syntax: `#" what "`"))))
+  (lambda (cur start what) (fail-at cur start (string-append "unknown `#` syntax: `#" what "`"))))
 (define bytes-message string "bytevector elements must be exact integers in 0..=255")
 
 ;; FX-26's `#%fx`, the module of the standard bindings, `cur` at the `%`;
@@ -665,7 +664,7 @@
                     ((and (char-in? c "[]") (fx26?))
                      (fail cur (reserved-message c)))
                     ((char=? c #\[) (read-list (advance cur) start #\]))
-                    ((char-in? c ")]") (fail cur (str3 "unbalanced `" (char-string c) "`")))
+                    ((char-in? c ")]") (fail cur (unbalanced-message c)))
                     ((char=? c #\") (read-string (advance cur) start))
                     ((char=? c #\#) (read-hash start (advance cur)))
                     ((char=? c #\') (read-abbrev (advance cur) start "quote"))

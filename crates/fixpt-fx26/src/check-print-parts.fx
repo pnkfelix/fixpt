@@ -142,7 +142,7 @@
   (lambda (xs)
     (if (null? xs)
         ""
-        (string-append (string-append " " (symbol->string (car xs))) (k-names-spaced (cdr xs))))))
+        (string-append " " (symbol->string (car xs)) (k-names-spaced (cdr xs))))))
 (define k-one-global? (subr pure (k-atom) bool)
   (lambda (a)
     (tagcase a

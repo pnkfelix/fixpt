@@ -166,7 +166,7 @@
       (and (symbol=? (extract o 1) s) (= (extract o 2) a) (= (extract o 3) b)))))
 (define k-named-only (subr pure (symbol) string)
   (lambda (s)
-    (string-append (string-append "`" (symbol->string s))
+    (string-append "`" (symbol->string s)
                    "` is named only to call it: its calls are checked where it is named")))
 ;; Whether `m` is `#%fx`, the module of the standard bindings, which
 ;; nothing binds: `(with #%fx n)` is the standard `n` wherever it is,

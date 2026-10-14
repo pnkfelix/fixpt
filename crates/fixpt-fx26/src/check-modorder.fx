@@ -228,8 +228,8 @@
            (head (k-cat4 (if include? "an `include`" (k-quote-name x)) " uses "
                          (k-quote-name (car chain)) (k-chain-rest (cdr chain)))))
       (cond (include?
-             (string-append head (string-append ", which the module defines: an included module"
-                                                " is made before its items")))
+             (string-append head ", which the module defines: an included module"
+                                " is made before its items"))
             ((symbol=? last x) (string-append head ", before it is made"))
             ((null? (cdr chain)) (string-append head ", defined after it"))
             (else (k-cat3 head ", defined after " (k-quote-name x)))))))

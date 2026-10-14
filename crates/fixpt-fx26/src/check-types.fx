@@ -201,7 +201,7 @@
 ;;; ---------------------------------------------------------------- strings
 
 (define k-cat3 (subr pure (string string string) string)
-  (lambda (a b c) (string-append a (string-append b c))))
+  (lambda (a b c) (string-append a b c)))
 (define k-cat4 (subr (read @globals) (string string string string) string)
   (lambda (a b c d) (string-append a (k-cat3 b c d))))
 (define k-cat5 (subr (read @globals) (string string string string string) string)

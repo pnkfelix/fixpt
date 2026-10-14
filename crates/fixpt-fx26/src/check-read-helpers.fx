@@ -374,7 +374,7 @@
                          "`(arrayof flat n)`, " "or a variable of kind `flat`")))
 ;; What a flat named `n` where a type is wanted is told.
 (define k-flat-not-type (subr (read @globals) (string) string)
-  (lambda (n) (string-append (string-append "`" n) "` is a flat, not a type")))
+  (lambda (n) (string-append "`" n "` is a flat, not a type")))
 ;; Whether `t` is a variable of kind `flat`.
 (define k-flat-var-type? (subr (maxeff kreads spin) (int) bool)
   (lambda (t) (tagcase (k-get (k-resolve t)) (ty-var (v) (k-flat-var? v)) (else y #f))))

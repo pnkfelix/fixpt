@@ -583,8 +583,8 @@
           (let ((s (car dependent)))
             (k-fail (string-append
                      (k-select-shown (extract s 1) (extract s 2))
-                     (string-append " names a parameter of the same `lambda`: "
-                                    "a dependent type, not supported yet"))
+                     " names a parameter of the same `lambda`: "
+                     "a dependent type, not supported yet")
                     a b))))))
 (define k-binding-names (subr kmakes (k-bindings) k-names)
   (lambda (bs) (if (null? bs) nil (cons (car (car bs)) (k-binding-names (cdr bs)))))))))
