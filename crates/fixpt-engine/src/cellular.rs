@@ -537,7 +537,14 @@ impl Machine {
             }
             self.fuel -= 1;
             if cell.is_fixnum() {
-                match self.prim(cx, cell.as_fixnum(), &mut r)? {
+                let flow = match self.prim(cx, cell.as_fixnum(), &mut r) {
+                    Ok(f) => f,
+                    Err(t) => {
+                        self.task_failed(cx, &mut r, t)?;
+                        continue;
+                    }
+                };
+                match flow {
                     Flow::Next => {}
                     Flow::Exit => {
                         if self.rs.len() == base {
@@ -547,8 +554,8 @@ impl Machine {
                     }
                     Flow::Halt => return Ok(()),
                 }
-            } else {
-                self.enter(cx, cell, &mut r)?;
+            } else if let Err(t) = self.enter(cx, cell, &mut r) {
+                self.task_failed(cx, &mut r, t)?;
             }
         }
     }
@@ -579,6 +586,24 @@ impl Machine {
         (r.cur, r.k, r.fp, r.clo) = (t, WORD_CELL0, self.ds.len(), Value::FALSE);
         self.ds.push(f);
         true
+    }
+
+    /// Trap `t`, in a task: if of a monitored process, an abort to the
+    /// scheduler's prompt, the failure its watcher's
+    /// (`fixpt_runtime::sched::task_failed`), and on; else `t`, the form's.
+    /// Not running out of fuel, the form's budget, nor what passes native
+    /// code.
+    fn task_failed(&mut self, cx: &mut Ctx, r: &mut Regs, t: Trap) -> Result<(), Trap> {
+        if matches!(&t, Trap::OutOfFuel) || matches!(&t, Trap::Prim(m) if m == ABORTED || m == THROWN) {
+            return Err(t);
+        }
+        let Ctx::Rt(rt) = cx else { return Err(t) };
+        let (rs, floor) = (&self.rs, self.rs_floor);
+        let Some(tag) = fixpt_runtime::sched::task_failed(rt, &t.to_string(), |_, tag| Self::find_marked(rs, floor, PROMPT_MARK, tag).is_some()) else {
+            return Err(t);
+        };
+        let unit = rt.heap.intern_static("#u");
+        self.abort(cx, r, tag, unit, "abort")
     }
 
     fn push_return(&mut self, r: &Regs) {
@@ -1338,11 +1363,11 @@ thread_local! {
 
 /// What a run native code called traps with when a whole continuation is
 /// thrown out of it (`Machine::thrown` says which).
-const THROWN: &str = "a continuation thrown past native code";
+pub const THROWN: &str = "a continuation thrown past native code";
 
 /// What a run native code called traps with when an abort finds no prompt
 /// in it (`Machine::aborted` says to what).
-const ABORTED: &str = "an abort past native code";
+pub const ABORTED: &str = "an abort past native code";
 
 /// How a call of native code came back: with a value; moved, a continuation
 /// thrown past it; or with an abort that found no prompt in it.

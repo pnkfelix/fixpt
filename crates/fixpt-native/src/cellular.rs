@@ -2144,6 +2144,12 @@ impl NativeMachine {
             // slice, and, if the
             // scheduler would have another task run, its `preempt` called
             // there; then on from the state (`start` 0).
+            if st.status != 0 && st.status != Trap::OutOfFuel.code().0 {
+                if task_failed(rt, &mut st) {
+                    continue;
+                }
+                break;
+            }
             if !(st.status == Trap::OutOfFuel.code().0 && st.reserve > 0 && st.aux <= 2) {
                 break;
             }
@@ -2171,6 +2177,42 @@ impl NativeMachine {
             eprintln!("; trapped in {} (closure {})", show(st.cur), show(st.clo));
         }
         self.stacks.finish(&st)
+    }
+}
+
+/// A trap, out of the machine, in a task: if of a monitored process, the
+/// state made an abort to the scheduler's prompt, the failure its
+/// watcher's (`fixpt_runtime::sched::task_failed`), for the machine to go
+/// on from (`start` 0); else the trap as it was, the form's.
+pub(crate) fn task_failed(rt: &mut fixpt_runtime::Runtime, st: &mut State) -> bool {
+    let t = Trap::from_code(st.status, st.aux);
+    let t = match t {
+        Trap::Prim(_) => LAST_MESSAGE.with(|c| c.borrow_mut().take()).map_or(t, Trap::Prim),
+        t => t,
+    };
+    if let Trap::Prim(m) = &t {
+        if m == fixpt_engine::cellular::ABORTED || m == fixpt_engine::cellular::THROWN {
+            LAST_MESSAGE.with(|c| *c.borrow_mut() = Some(m.clone()));
+            return false;
+        }
+    }
+    let st_ref = &mut *st;
+    let tag = fixpt_runtime::sched::task_failed(rt, &t.to_string(), |_, tag| crate::control::has_prompt(st_ref, tag));
+    let Some(tag) = tag else {
+        if let Trap::Prim(m) = t {
+            LAST_MESSAGE.with(|c| *c.borrow_mut() = Some(m));
+        }
+        return false;
+    };
+    (st.status, st.aux, st.start) = (0, 0, 0);
+    let unit = rt.heap.intern_static("#u");
+    match crate::control::abort_on(st, &mut rt.heap, tag, unit) {
+        Ok(()) => true,
+        Err(t) => {
+            let (code, aux) = t.code();
+            (st.status, st.aux) = (code, aux);
+            false
+        }
     }
 }
 

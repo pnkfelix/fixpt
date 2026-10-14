@@ -23,7 +23,12 @@
 //! scheduler's `preempt`, which a machine calls at a poll whose time slice
 //! is spent (`preempt_due`), or `#f`; the tasks it stopped, parked apart
 //! from the run queue (newest first), so that `drain` ends; and how many
-//! tasks the first task is running now, one inside another.
+//! tasks the first task is running now, one inside another; the trampoline
+//! word (`preempt_due_with`); each task of a monitored group (a monitored
+//! process's tasks, or a `race` branch's), with its group (its first
+//! task), as pairs; each group's handler, `(group . handler)`; and a
+//! failure caught, `(message . handler)`, for the scheduler to give the
+//! handler (`task_failed`).
 
 use crate::error::Outcome;
 use crate::runtime::Runtime;
@@ -42,6 +47,9 @@ const PREEMPT: usize = 7;
 const PARKED: usize = 8;
 const RUNNING: usize = 9;
 const TRAMPOLINE: usize = 10;
+const GROUPS: usize = 11;
+const MONITORS: usize = 12;
+const FAILURE: usize = 13;
 
 /// The polls between two decisions whether to preempt (`preempt_due`): a
 /// task's time slice, in each machine's polls (a bytecode machine's
@@ -105,6 +113,10 @@ pub mod op {
     pub const PREEMPT_DONE: i64 = 32;
     pub const QUIET: i64 = 33;
     pub const ICELL_OFFER: i64 = 34;
+    pub const MONITOR: i64 = 35;
+    pub const INHERIT: i64 = 36;
+    pub const TAKE_FAILURE: i64 = 37;
+    pub const TASK_FAILED: i64 = 38;
 }
 
 /// The state's vector, made if there is none yet.
@@ -116,7 +128,7 @@ fn state(heap: &mut Heap) -> Value {
         return s;
     }
     let seed = std::env::var("FIXPT_SCHED_SEED").ok().and_then(|s| s.parse::<i64>().ok());
-    let s = heap.vector_from(&[Value::NULL, Value::NULL, Value::FALSE, seed.map_or(Value::FALSE, Value::fixnum), Value::fixnum(0), Value::NULL, Value::NULL, Value::FALSE, Value::NULL, Value::fixnum(0), Value::FALSE]);
+    let s = heap.vector_from(&[Value::NULL, Value::NULL, Value::FALSE, seed.map_or(Value::FALSE, Value::fixnum), Value::fixnum(0), Value::NULL, Value::NULL, Value::FALSE, Value::NULL, Value::fixnum(0), Value::FALSE, Value::NULL, Value::NULL, Value::FALSE]);
     heap.set_global(slot, s);
     s
 }
@@ -154,6 +166,9 @@ pub fn reset(heap: &mut Heap) {
     heap.obj_set(s, CANCELLED, Value::NULL);
     heap.obj_set(s, PARKED, Value::NULL);
     heap.obj_set(s, RUNNING, Value::fixnum(0));
+    heap.obj_set(s, GROUPS, Value::NULL);
+    heap.obj_set(s, MONITORS, Value::NULL);
+    heap.obj_set(s, FAILURE, Value::FALSE);
     heap.tasks_reset();
 }
 
@@ -224,7 +239,7 @@ pub fn run_op(rt: &mut Runtime, n: i64, a: Value, b: Value) -> Outcome<Value> {
     let unit = rt.heap.intern_static("#u");
     let is = |rt: &Runtime, v: Value, k: u8| v.is_bloblet() && rt.heap.bloblet_kind(v) == k;
     match n {
-        op::TASK_SWITCH | op::TASK_END | op::TASK_CANCEL if !a.is_fixnum() || !rt.heap.task_live(a.as_fixnum() as usize) => {
+        op::TASK_SWITCH | op::TASK_END | op::TASK_CANCEL | op::MONITOR | op::INHERIT if !a.is_fixnum() || !rt.heap.task_live(a.as_fixnum() as usize) => {
             return rt.fail("%fx26-sched: no such task", &[a]);
         }
         op::MAILBOX_PUT | op::MAILBOX_TAKE | op::MAILBOX_WAIT | op::MAILBOX_READY if !is(rt, a, MAILBOX) => {
@@ -240,6 +255,18 @@ pub fn run_op(rt: &mut Runtime, n: i64, a: Value, b: Value) -> Outcome<Value> {
         }
         op::TIMERS_WAIT => return Ok(timers_wait(rt, true)),
         op::TIMERS_FIRE => return Ok(timers_wait(rt, false)),
+        // For the evaluator written in FX-26, whose failures are its own (an
+        // abort to its tag): the current task failed with message `a`; the
+        // scheduler's tag to abort to, if it is of a monitored process
+        // (`task_failed`), else `#f`. The evaluator runs on one machine, the
+        // scheduler's prompt on it.
+        op::TASK_FAILED => {
+            if !rt.heap.is_a(a, fixpt_heap::ObjType::String) {
+                return rt.type_error("a string", a);
+            }
+            let m = rt.heap.string_to_rust(a);
+            return Ok(task_failed(rt, &m, |_, _| true).unwrap_or(Value::FALSE));
+        }
         // For the evaluator written in FX-26, which runs a program's
         // scheduler as its own values, and so calls its `preempt` itself:
         // whether to, on the one machine it runs on.
@@ -274,13 +301,53 @@ pub fn run_op(rt: &mut Runtime, n: i64, a: Value, b: Value) -> Outcome<Value> {
         op::TASK_END => {
             if a.as_fixnum() != 0 {
                 heap.task_end(a.as_fixnum() as usize);
-                // Its number, free for another task, is not cancelled.
-                let s = state(heap);
-                let cs = heap.obj_ref(s, CANCELLED);
-                let cs = without(heap, cs, |_, t| t == a);
-                heap.obj_set(s, CANCELLED, cs);
+                forget_task(heap, a);
             }
             unit
+        }
+        // Task `a`, new, the first of a monitored group (a process, a
+        // `race` branch): a group of its own, whose failure handler `b`,
+        // `(subr any (string) unit)`, the scheduler calls with a failure's
+        // message.
+        op::MONITOR => {
+            let s = state(heap);
+            let g = heap.cons(a, a);
+            let gs = heap.obj_ref(s, GROUPS);
+            let gs = heap.cons(g, gs);
+            heap.obj_set(s, GROUPS, gs);
+            let m = heap.cons(a, b);
+            let ms = heap.obj_ref(s, MONITORS);
+            let ms = heap.cons(m, ms);
+            heap.obj_set(s, MONITORS, ms);
+            unit
+        }
+        // Task `a`, new, a branch (`par`, `race`) of the current task: of
+        // its group, if it has one, so that its failure is the process's.
+        op::INHERIT => {
+            if let Some(g) = group_of(heap, Value::fixnum(heap.task_current() as i64)) {
+                let s = state(heap);
+                let e = heap.cons(a, g);
+                let gs = heap.obj_ref(s, GROUPS);
+                let gs = heap.cons(e, gs);
+                heap.obj_set(s, GROUPS, gs);
+            }
+            unit
+        }
+        // The failure `task_failed` caught, if any: the current task, which
+        // failed, ended, and `(message . handler)` for the scheduler to call;
+        // else `#f`.
+        op::TAKE_FAILURE => {
+            let s = state(heap);
+            let f = heap.obj_ref(s, FAILURE);
+            if f != Value::FALSE {
+                heap.obj_set(s, FAILURE, Value::FALSE);
+                let t = heap.task_current();
+                if t != 0 {
+                    heap.task_end(t);
+                    forget_task(heap, Value::fixnum(t as i64));
+                }
+            }
+            f
         }
         // Task `a`, live, cancelled: it ends the next time it would run.
         op::TASK_CANCEL => {
@@ -634,6 +701,104 @@ fn timer_due(heap: &Heap, s: Value) -> bool {
         x = heap.cdr(x);
     }
     false
+}
+
+/// What the scheduler kept of task `t`, ended: its number, free for another
+/// task, is neither cancelled nor of a group; and, if it began a monitored
+/// process, the monitor goes with it.
+fn forget_task(heap: &mut Heap, t: Value) {
+    let s = state(heap);
+    let cs = heap.obj_ref(s, CANCELLED);
+    let cs = without(heap, cs, |_, c| c == t);
+    heap.obj_set(s, CANCELLED, cs);
+    let gs = heap.obj_ref(s, GROUPS);
+    let gs = without(heap, gs, |h, e| h.car(e) == t);
+    heap.obj_set(s, GROUPS, gs);
+    let ms = heap.obj_ref(s, MONITORS);
+    let ms = without(heap, ms, |h, m| h.car(m) == t);
+    heap.obj_set(s, MONITORS, ms);
+}
+
+/// The group task `t` is of, if any.
+fn group_of(heap: &Heap, t: Value) -> Option<Value> {
+    let s = state_if_any(heap)?;
+    let mut gs = heap.obj_ref(s, GROUPS);
+    while gs.is_pair() {
+        let e = heap.car(gs);
+        if heap.car(e) == t {
+            return Some(heap.cdr(e));
+        }
+        gs = heap.cdr(gs);
+    }
+    None
+}
+
+/// The current task failed (a panic, `error`, or a trap), with `message`:
+/// if it is of a monitored group (a monitored process's, a `race`
+/// branch's), and the scheduler's prompt is where `reachable` finds it, the
+/// failure is the group's, not the form's (`docs/fx26.md`, "Monitors"). The
+/// rest of the group cancelled, the failure kept for the scheduler to give
+/// the group's handler (`TAKE_FAILURE`), and the prompt's tag given back,
+/// for the machine to abort to, with `#u`, as a task that waits does; else
+/// none, and the failure is the form's.
+pub fn task_failed(rt: &mut Runtime, message: &str, reachable: impl FnOnce(&Runtime, Value) -> bool) -> Option<Value> {
+    let heap = &rt.heap;
+    let cur = heap.task_current();
+    if cur == 0 {
+        return None;
+    }
+    let s = state_if_any(heap)?;
+    let g = group_of(heap, Value::fixnum(cur as i64))?;
+    let mut ms = heap.obj_ref(s, MONITORS);
+    let mut mon = None;
+    while ms.is_pair() {
+        let m = heap.car(ms);
+        if heap.car(m) == g {
+            mon = Some(heap.cdr(m));
+        }
+        ms = heap.cdr(ms);
+    }
+    let mon = mon?;
+    let tag = heap.obj_ref(s, TAG);
+    if tag == Value::FALSE || !reachable(rt, tag) || heap.obj_ref(s, FAILURE) != Value::FALSE {
+        return None;
+    }
+    let heap = &mut rt.heap;
+    // The rest of the group cancelled: each ends the next time it would run.
+    let mut others = Vec::new();
+    let mut gs = heap.obj_ref(s, GROUPS);
+    while gs.is_pair() {
+        let e = heap.car(gs);
+        if heap.cdr(e) == g && heap.car(e).as_fixnum() as usize != cur {
+            others.push(heap.car(e));
+        }
+        gs = heap.cdr(gs);
+    }
+    for t in others {
+        let cs = heap.obj_ref(s, CANCELLED);
+        let cs = heap.cons(t, cs);
+        heap.obj_set(s, CANCELLED, cs);
+    }
+    let m = heap.make_string(message);
+    let f = heap.cons(m, mon);
+    heap.obj_set(s, FAILURE, f);
+    // Whatever it was in (a wait, a preemption) left behind.
+    while heap.task_quiet() {
+        heap.quiet_leave();
+    }
+    Some(tag)
+}
+
+/// What a failure says, as `task_failed` gives it to a monitor: an error
+/// object's message, or the condition written.
+pub fn condition_message(rt: &Runtime, obj: Value) -> String {
+    if rt.is_error_object(obj) {
+        let m = rt.heap.obj_ref(obj, 1);
+        if rt.heap.is_a(m, fixpt_heap::ObjType::String) {
+            return rt.heap.string_to_rust(m);
+        }
+    }
+    crate::print::write_value(&rt.heap, obj)
 }
 
 /// A new I-cell, empty, in the heap: shared by the processes it is sent

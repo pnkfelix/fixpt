@@ -65,10 +65,23 @@
         ((icell-get) (fixed 2 "`(icell-get i-cell)`" "icell-get"))
         ((icell-put!) (fixed 3 "`(icell-put! i-cell value)`" "icell-put!"))
         ((spawn) (call "spawn-process" (the syns-a (list (spawn-body fail items a b)))))
+        ((spawn-monitored) (spawn-monitored-form fail items call a b))
         ((pselect) (select-form fail items lib a b))
         ((race) (race-form fail items lib a b))
         (else (par-form fail items lib a b))))))
 
+;; How `process-form` makes a call of the scheduler's procedure, by name.
+(define-type calls (subr (maxeff parses spin) (string syns-a) syn))
+;; `(spawn-monitored w f (box M r) body …)`: `((with lib spawn-monitored) w
+;; f (plambda …))`, the body as `spawn`'s (`spawn-body`).
+(define spawn-monitored-form (subr (maxeff parses spin) (fails syns-a calls int int) syn)
+  (lambda (fail items call a b)
+    (let ((usage "`(spawn-monitored watcher on-failure (mailbox message-type place) body …)`"))
+      (begin
+        (at-least fail items 5 usage a b)
+        (call "spawn-monitored"
+              (the syns-a (list (nth items 1) (nth items 2)
+                                (spawn-body fail (cons (car items) (drop items 3)) a b))))))))
 ;; `(x y)`, at `a`..`b`.
 (define pair-syn (subr (maxeff (read @globals) (read rs)) (syn syn int int) syn)
   (lambda (x y a b) (mk-list (the syns-a (list x y)) a b)))

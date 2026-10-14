@@ -60,7 +60,11 @@ fn machines() -> Vec<&'static str> {
 /// Program `name` in `programs/preempt` on each of `machines`: as its
 /// first line says, `;; => value`.
 fn as_said(name: &str, machines: &[&str], slice: Option<u64>) {
-    let path = format!("{}/../fixpt-fx26/tests/programs/preempt/{name}", env!("CARGO_MANIFEST_DIR"));
+    as_said_in("preempt", name, machines, slice)
+}
+
+fn as_said_in(dir: &str, name: &str, machines: &[&str], slice: Option<u64>) {
+    let path = format!("{}/../fixpt-fx26/tests/programs/{dir}/{name}", env!("CARGO_MANIFEST_DIR"));
     let text = std::fs::read_to_string(&path).expect("readable");
     let want = format!("{} : int", text.lines().next().and_then(|l| l.strip_prefix(";; => ")).expect("says"));
     let mut wrong = Vec::new();
@@ -77,6 +81,16 @@ fn as_said(name: &str, machines: &[&str], slice: Option<u64>) {
 #[test]
 fn a_spinning_process_is_preempted_on_each_machine() {
     as_said("spinner.fx", &machines(), None);
+}
+
+/// A monitored process's failure is a message to its watcher, on each
+/// machine (`programs/monitors`, `TODO.md` §94): a failure the machine traps
+/// is caught as the runtime's primitives' are.
+#[test]
+fn a_monitored_failure_is_a_message_on_each_machine() {
+    for name in ["worker-fails.fx", "trap.fx", "par-branch.fx", "one-message.fx", "race-lost.fx"] {
+        as_said_in("monitors", name, &machines(), None);
+    }
 }
 
 /// What a preempted process keeps, in registers or frames, is there, moved

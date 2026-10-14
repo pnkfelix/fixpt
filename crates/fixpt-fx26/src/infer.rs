@@ -546,6 +546,7 @@ impl Checker {
         // The forms of processes and `par` (`processes.rs`).
         match (self.library_op(fun).map(str::to_string).as_deref(), args) {
             (Some("spawn-process"), [body]) => return self.synth_spawn(e, fun, *body, expected),
+            (Some("spawn-monitored"), [w, f, body]) => return self.synth_spawn_monitored(e, fun, *w, *f, *body, expected),
             (Some("par2"), _) => return self.synth_par(e, fun, args),
             (Some("race2"), _) => return self.synth_race(e, fun, args),
             _ => {}

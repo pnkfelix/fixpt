@@ -1198,6 +1198,17 @@ impl Vm {
         if t.fatal {
             return Err(t);
         }
+        // A failure in a monitored process's task: an abort to the
+        // scheduler's prompt, the failure its watcher's
+        // (`fixpt_runtime::sched::task_failed`).
+        let message = fixpt_runtime::sched::condition_message(rt, t.obj);
+        let marks = &self.marks;
+        if let Some(tag) = fixpt_runtime::sched::task_failed(rt, &message, |_, tag| marks.find_prompt(tag).is_some()) {
+            let pi = self.marks.find_prompt(tag).expect("found");
+            let unit = rt.heap.intern_static("#u");
+            let vals = rt.heap.list_from(&[unit]);
+            return self.abort_to(rt, p, pi, tag, vals, Value::FALSE);
+        }
         let Some(raise) = p.raise_procedure(&mut rt.heap) else {
             return Err(t);
         };

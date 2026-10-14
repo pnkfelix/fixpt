@@ -81,6 +81,7 @@
               (x-var (n c d)
                 (let ((s (symbol->string n)) (k (k-length args)))
                   (cond ((and (string=? s "spawn-process") (= k 1)) s)
+                        ((and (string=? s "spawn-monitored") (= k 3)) "spawn-process")
                         ((and (string=? s "par2") (= k 2)) s)
                         ((and (string=? s "race2") (= k 2)) s)
                         (else ""))))
@@ -107,7 +108,55 @@
 ;; `lambda` of two parameters, synthesized by `synth`, as the operator `f`
 ;; is: the process's address, and the spawn's effect (the Rust checker's
 ;; `synth_spawn`).
+;; `((with … spawn-process) body)`, or, of three, `spawn-monitored`'s
+;; (`k-spawn-monitored-te`).
 (define k-spawn-te (subr (maxeff checks spin) (kx kx kxs int k-synth-fn) k-te)
+  (lambda (x f args expected synth)
+    (if (null? (cdr args))
+        (k-spawn-process-te x f args expected synth)
+        (k-spawn-monitored-te x f args expected synth))))
+;; `((with … spawn-monitored) w on-fail body)`: `w` a watcher's address,
+;; `(addr W R)`; `on-fail` a `(subr pure (string) W)`; `body` as `spawn`'s;
+;; the effect `spawn`'s, the arguments', and `(send R)` (the Rust checker's
+;; `synth_spawn_monitored`).
+(define k-spawn-monitored-te (subr (maxeff checks spin) (kx kx kxs int k-synth-fn) k-te)
+  (lambda (x f args expected synth)
+    (let* ((wt (synth (car args))) (a (k-start x)) (b (k-end x))
+           (dest (k-addr-parts (extract wt 1))))
+      (if (null? dest)
+          (k-fail (string-append k-watcher-usage (k-show-ty (extract wt 1))) a b)
+          (let* ((msg (extract (car dest) 1)) (at (extract (car dest) 2))
+                 (ft (synth (car (cdr args))))
+                 (want (k-on-fail-type msg))
+                 (body (the kxs (list (car (cdr (cdr args)))))))
+            (if (k-subtype (extract ft 1) want)
+                (let ((te (k-spawn-process-te x f body expected synth)))
+                  (k-te (extract te 1)
+                        (k-union (k-union (extract te 2) (extract wt 2))
+                                 (k-union (extract ft 2) (k-one (a-send at))))))
+                (k-fail (k-cat5 "a monitor's `on-failure` makes the watcher's message of a "
+                                "failure's, a " (k-show-ty want) ", and this is a "
+                                (k-show-ty (extract ft 1)))
+                        a b)))))))
+;; `(subr pure (string) msg)`: what makes a watcher's message of a failure's.
+(define k-on-fail-type (subr (maxeff kstate spin) (int) int)
+  (lambda (msg) (k-ty-new (ty-subr nil (list (k-string-type)) msg (get k-conv-default)))))
+(define k-string-type (subr (maxeff kstate spin) () int) (lambda () (k-ty-new (ty-base 'string))))
+(define k-watcher-usage string "a watcher is a process's address, `(addr M R)`, and this is a ")
+;; An address type's message type and region, in a list of one; none if
+;; `t` is not one.
+(define-type k-addr-list (listof (productof (1 int) (2 k-region)) acyclic))
+(define k-addr-parts (subr (maxeff kstate spin) (int) k-addr-list)
+  (lambda (t)
+    (tagcase (k-get (k-resolve t))
+      (ty-named (w ds)
+        (if (and (= w k-addr-index) (= (k-length ds) 2))
+            (tagcase (car ds)
+              (dt (m) (tagcase (car (cdr ds)) (dr (r) (list (product (1 m) (2 r)))) (else y nil)))
+              (else y nil))
+            nil))
+      (else y nil))))
+(define k-spawn-process-te (subr (maxeff checks spin) (kx kx kxs int k-synth-fn) k-te)
   (lambda (x f args expected synth)
     (let* ((noted (synth f)) (body (car args)) (pt (synth body)) (a (k-start x)) (b (k-end x))
            (usage "a process's body is `(spawn (mailbox message-type place) body …)`")

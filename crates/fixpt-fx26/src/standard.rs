@@ -533,6 +533,15 @@ pub const ENTRIES: &[(&str, &str)] = &[
         "%processes:spawn-process",
         "(poly ((m type) (a region) (e effect)) (subr (maxeff e (alloc a)) ((process m e)) (addr m a)))",
     ),
+    // A monitored process (`docs/fx26.md`, "Monitors"): the body as
+    // `spawn-process`'s, and a watcher's address and what makes its message
+    // of a failure's; the checkers' rule is `spawn`'s, and more
+    // (`synth_spawn_monitored`).
+    (
+        "%processes:spawn-monitored",
+        "(poly ((m type) (a region) (e effect) (w type) (wr region))
+           (subr (maxeff e (alloc a) (send wr)) ((addr w wr) (subr pure (string) w) (process m e)) (addr m a)))",
+    ),
     ("%processes:send", "(poly ((m type) (r region)) (subr (send r) ((addr m r) m) unit))"),
     ("%processes:receive", "(poly ((m type) (r place)) (subr (maxeff (receive r) nondet) ((inbox m r)) m))"),
     // A process's own address, at its place: its mailbox, as others see it.

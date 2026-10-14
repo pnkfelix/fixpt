@@ -2278,3 +2278,34 @@ set, which cellular code cannot (`TODO.md` §93), and every program that
 waited failed on the REPL's machine. Now a field to 4095 bytes away (511)
 is reached through its address in x16, one `sub` more. Test: `direct.rs`,
 `far_fields_are_native_code`.
+
+## 94. Process monitors (kayak's request, 2026-10-14)
+
+`(spawn-monitored watcher on-failure (box M r) body …)`: a process whose
+failure (`error`, a trap) is a message to `watcher`, `(on-failure
+message)`, not the form's failure (`docs/fx26.md`, "Monitors"). In both
+parsers and both checkers (`synth_spawn_monitored`, `k-spawn-monitored-te`:
+`spawn`'s rule, the watcher an address, `on-failure` a `(subr pure
+(string) W)`, and `(send R)`). Kayak's questions, answered: a normal exit
+sends nothing; a watcher that has ended has the message unread; `par`'s
+branches fail as the `par` does (the process); a `race` branch that fails
+is lost, the race failing only if all do; a failed process leaves nothing
+half built that another can see (it shares only what cannot be written,
+and its places end with it); the payload is the message string.
+
+Built as groups: a monitored process's first task begins one (`MONITOR`,
+35) and its `par` and `race` branches join it (`INHERIT`, 36); a `race`
+branch is a group of its own. At a failure each machine asks
+`sched::task_failed`: in a group with a handler, and with the scheduler's
+prompt on the machine's stack, the rest of the group is cancelled, the
+failure kept, and the machine aborts to the prompt as a waiting task does:
+the bytecode machine from `dispatch_condition`; the Rust cellular machine
+from its loop; the arm64 ones and the stencils from their run loops
+(`control::abort_on`); the native convention from its common trap
+(`Callout::Failed`, `abort_to`); the evaluator written in FX-26 from its
+`efail` (`TASK_FAILED`, 38). The scheduler's `run-task` then gives the
+group's handler the message (`TAKE_FAILURE`, 37). Tests: `programs/monitors`
+(a worker's `error`, a trap, a `par` branch, two failures and one
+message, a `race` branch lost, a `race` all lost, two refusals), every way
+and under ten schedules (`processes.rs`), and on each of the nine machines
+(`fixpt-cli/tests/preempt.rs`).

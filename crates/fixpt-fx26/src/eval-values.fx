@@ -42,7 +42,15 @@
   (make-continuation-prompt-tag))
 
 (define* efail (subr evals (string) void)
-  (lambda (message) (abort-current-continuation eval-tag (ev-err message))))
+  (lambda (message)
+    ;; A task of a monitored process: the failure its watcher's, the task
+    ;; left by an abort to the scheduler's prompt (`TASK_FAILED`).
+    (typecase ((proj %sched string unit val) 38 message #u)
+      (sum o
+        (tagcase o
+          (o-tag (g) (abort-current-continuation g the-unit))
+          (else y (abort-current-continuation eval-tag (ev-err message)))))
+      (else (abort-current-continuation eval-tag (ev-err message))))))
 
 ;; Fails: `what` is expected.
 (define* efail-expected (subr evals (string) void)

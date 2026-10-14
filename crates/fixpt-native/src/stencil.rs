@@ -126,6 +126,13 @@ impl StencilMachine {
         let mut word = word;
         loop {
             self.go_on(&mut st, word);
+            if st.status != 0 && st.status != Trap::OutOfFuel.code().0 {
+                if crate::cellular::task_failed(rt, &mut st) {
+                    word = Value::from_raw(0);
+                    continue;
+                }
+                break;
+            }
             if !(st.status == Trap::OutOfFuel.code().0 && st.reserve > 0 && st.aux <= 1) {
                 break;
             }

@@ -147,10 +147,12 @@ Two refinements:
 5. **Deadlock** is the program waiting with nothing left that can run.
    Processes waiting on each other while the program goes on are not
    detected (no more than Erlang does).
-6. **Failure.** With links and monitors out of scope, a trap in any
-   process fails the form it ran in; the processes are then forgotten
-   (the scheduler begins again). Erlang would let an unlinked process die
-   alone; that needs F1 and F2 (signals to a top prompt).
+6. **Failure.** A trap in a process fails the form it ran in; the
+   processes are then forgotten (the scheduler begins again). Unless the
+   process is monitored (2026-10-14, kayak's request, `docs/fx26.md`,
+   "Monitors"): then its failure is a message to its watcher, and the
+   form goes on. Erlang's links (F1, F2) are not built; a monitor is the
+   one-way half of one, whose message is the watcher's own type.
 7. **Fairness.** The semantics is fair, Clinger's: every message sent is
    received by a process that keeps receiving. Built (2026-10-14, Q2):
    preemption at fuel polls on every machine, so a process that spins
@@ -229,7 +231,9 @@ its use over futures that compute.
      wait, or never. FX-26's stops each at its next wait, or before it
      starts: a cancelled task ends, its places with it, instead of
      resuming; one that computes without waiting is stopped where it is
-     next preempted (Q2), its waker the same. So that no program can tell which, a branch's
+     next preempted (Q2), its waker the same. A branch that fails is
+     lost; the race fails only if every branch does (2026-10-14, with
+     monitors). So that no program can tell which, a branch's
      effect must be **cancellable**: it may read, allocate, await,
      receive, spin, and do anything on regions of its own, but not write,
      fill a visible I-cell, send, or do I/O outside itself. A branch

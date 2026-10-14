@@ -16,7 +16,12 @@ use fixpt_read::FileId;
 
 /// The programs, and what each says it gives (`Ok`) or says (`Err`).
 fn programs() -> Vec<(String, String, Result<String, String>)> {
-    let dir = format!("{}/tests/programs/processes", env!("CARGO_MANIFEST_DIR"));
+    programs_in("processes")
+}
+
+/// Those of `programs/<dir>`.
+fn programs_in(dir: &str) -> Vec<(String, String, Result<String, String>)> {
+    let dir = format!("{}/tests/programs/{dir}", env!("CARGO_MANIFEST_DIR"));
     let mut names: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
     names.sort();
     names
@@ -252,4 +257,35 @@ fn a_spinning_process_is_preempted() {
     for (way, got) in ways {
         assert_eq!(got, Ok("42".to_string()), "{way}");
     }
+}
+
+/// Monitors (`docs/fx26.md`, "Monitors"; kayak's request, `TODO.md` §94):
+/// a monitored process's failure is a message to its watcher, not the
+/// form's (`programs/monitors`), every way, and under schedules of many
+/// orders.
+#[test]
+fn a_monitored_process_failure_is_a_message() {
+    let mut wrong = Vec::new();
+    for (name, text, says) in &programs_in("monitors") {
+        let ways = [
+            ("lowered", lowered(text, None)),
+            ("evaluated", printed(common::with_own(|s| s.eval_with_own_evaluator(text)))),
+            ("compiled", printed(common::with_own(|s| s.compile_with_own_compiler(text)))),
+            ("native", native(text)),
+        ];
+        for (way, got) in ways {
+            if !as_said(says, &got) {
+                wrong.push(format!("{name}, {way}: says {says:?}, gives {got:?}"));
+            }
+        }
+        if says.is_ok() {
+            for seed in 1..=10 {
+                let got = lowered(text, Some(seed * 7919));
+                if !as_said(says, &got) {
+                    wrong.push(format!("{name}, seed {seed}: gives {got:?}"));
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }

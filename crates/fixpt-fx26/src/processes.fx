@@ -23,6 +23,10 @@
   (define-type tag (prompt-tag unit unit sched @run))
   ;; A mailbox, as the runtime makes it; nothing here looks inside.
   (define-type mbox (ref unit @sched))
+  ;; A monitored group's failure handler (a process's, a `race` branch's),
+  ;; and a failure, as the runtime keeps it: its message, and the handler.
+  (define-type handler (subr any (string) unit))
+  (define-type failure (union false (pairof string handler @sched)))
   (define task-new (subr sched () int) (lambda () ((proj %sched unit unit int) 0 #u #u)))
   (define task-switch (subr sched (int) int) (lambda (t) ((proj %sched int unit int) 1 t #u)))
   (define task-end (subr sched (int) unit) (lambda (t) ((proj %sched int unit unit) 2 t #u)))
@@ -45,11 +49,16 @@
   ;; Task `t`, run under the scheduler's prompt, until it ends, waits, or
   ;; is preempted; the runtime told, so that the first task is not
   ;; preempted meanwhile (`fixpt_runtime::sched::preempt_due`).
+  ;; A task of a monitored group that fails aborts to the prompt, the
+  ;; failure kept (`sched::task_failed`): its handler called here with the
+  ;; message, before the first task may be preempted again.
   (define run-task (subr any (thunk) unit)
     (lambda (t)
       (begin
         ((proj %sched int unit unit) 29 1 #u)
         (prompt (the-tag) (t) (lambda ((u unit)) u))
+        (let ((f ((proj %sched unit unit failure) 37 #u #u)))
+          (if (pair? f) ((cdr f) (car f)) #u))
         ((proj %sched int unit unit) 29 -1 #u))))
   ;; Every task that can run, run, until none can.
   (define drain (subr any () unit)
@@ -134,15 +143,24 @@
     (lambda (w)
       (let ((fired (the (ref bool @sched) (new #f))))
         (lambda () (if (get fired) #u (begin (set fired #t) (w)))))))
-  ;; A new task of `body`, runnable: its number. Cancelled before it
-  ;; starts, it ends at once.
-  (define fork (subr sched (thunk) int)
-    (lambda (body)
+  ;; A new task of `body`, runnable: its number, given to `first` before
+  ;; it can run. Cancelled before it starts, it ends at once.
+  (define fork-as (subr sched (thunk (subr sched (int) unit)) int)
+    (lambda (body first)
       (let ((t (task-new)))
         (begin
           ((proj %sched (subr any () unit) unit unit) 26 preempt #u)
+          (first t)
           (push (lambda () (begin (task-switch t) (if (cancelled? t) #u (body)) (task-end t))))
           t))))
+  (define fork (subr sched (thunk) int) (lambda (body) (fork-as body (lambda (t) #u))))
+  ;; The first task of a monitored group, whose failure `h` handles (35).
+  (define fork-group (subr sched (thunk handler) int)
+    (lambda (body h) (fork-as body (lambda (t) ((proj %sched int handler unit) 35 t h)))))
+  ;; A branch of the current task (`par`, `race`): of its process's group,
+  ;; if it is monitored, so that the branch's failure is the process's.
+  (define fork-branch (subr sched (thunk) int)
+    (lambda (body) (fork-as body (lambda (t) ((proj %sched int unit unit) 36 t #u)))))
   ;; The value of I-cell `c`, once it has one.
   (define await (poly ((r region)) (poly ((t type)) (subr any ((icell t r)) t)))
     (plambda ((r region))
@@ -168,6 +186,25 @@
         (fork (lambda () ((proj body heap) mb ((proj %sched unit unit (place heap)) 16 #u #u))))
         (settle)
         mb))))
+;; A process's body, as `spawn` makes it, and the task that runs it with
+;; mailbox `mb` and a reap of its own.
+(define-type process-body (poly ((r place)) (subr any (mbox (place r)) unit)))
+(define process-task (subr sched (process-body mbox) thunk)
+  (lambda (body mb)
+    (lambda () ((proj body heap) mb ((proj %sched unit unit (place heap)) 16 #u #u)))))
+;; A process of `body`, as `spawn-process` makes one, monitored: should it
+;; fail, `watcher` is sent `(on-fail message)` instead of the form failing
+;; (`docs/fx26.md`, "Monitors"), the monitor set (35) before it can run.
+(define spawn-monitored
+  (poly ((w type)) (subr any (mbox (subr any (string) w) process-body) mbox))
+  (plambda ((w type))
+    (lambda (watcher on-fail body)
+      (let ((mb ((proj %sched unit unit mbox) 6 #u #u)))
+        (begin
+          (fork-group (process-task body mb)
+                      (lambda ((m string)) ((proj %sched mbox w unit) 7 watcher (on-fail m))))
+          (settle)
+          mb)))))
 ;; Message `v` to the mailbox `mb`, a copy of it.
 (define send (poly ((m type)) (subr any (mbox m) unit))
   (plambda ((m type))
@@ -249,30 +286,44 @@
                                    (undo-all (get us))
                                    (go)))))))))
       (go))))
+;; How a `race` came out: a branch's value, or, every branch failed, the
+;; last failure's message.
+(define-type (outcome (a type)) (sumof (won a) (lost string)))
+;; Cell `c` given `o`, if it has no value yet, in one step (34).
+(define-type (outcomes (a type) (r region)) (icell (outcome a) r))
+(define offer-outcome
+  (poly ((r region)) (poly ((a type)) (subr sched ((outcomes a r) (outcome a)) unit)))
+  (plambda ((r region))
+    (plambda ((a type)) (lambda (c o) ((proj %sched (outcomes a r) (outcome a) unit) 34 c o)))))
 ;; `f` and `g`, each a task, and the value of the first to finish (`race`,
-;; best effort): the other, cancelled, ends at its next wait, or before it
-;; starts; one that computes without waiting runs to its end. Each
-;; branch's `done` says it has finished, after which its task's number may
-;; be another's, so it is not cancelled.
+;; best effort): the other, cancelled, ends at its next wait, or when it is
+;; next preempted, or before it starts. A branch that fails is lost, a
+;; monitored group of its own (`fork-group`); if both are, the race fails
+;; as the last did. Each branch's `done` says it has finished or failed,
+;; after which its task's number may be another's, so it is not cancelled.
 (define race2 (poly ((a type)) (subr any ((subr any () a) (subr any () a)) a))
   (plambda ((a type))
     (lambda (f g)
-      (let* ((won (the (icell a @par) (make-icell)))
+      (let* ((res (the (icell (outcome a) @par) (make-icell)))
+             (lost (the (ref int @sched) (new 0)))
+             (offer (lambda ((o (outcome a))) ((proj (proj offer-outcome @par) a) res o)))
              (branch (lambda ((h (subr any () a)) (done (ref bool @sched)))
-                       (lambda ()
-                         (let ((v (h)))
-                           (begin
-                             (set done #t)
-                             ((proj %sched (icell a @par) a unit) 34 won v))))))
+                       (lambda () (let ((v (h))) (begin (set done #t) (offer (sum won v)))))))
+             (loser (lambda ((done (ref bool @sched)))
+                      (lambda ((m string))
+                        (begin
+                          (set done #t)
+                          (set lost (+ (get lost) 1))
+                          (if (= (get lost) 2) (offer (sum lost m)) #u)))))
              (d1 (the (ref bool @sched) (new #f)))
              (d2 (the (ref bool @sched) (new #f)))
-             (t1 (fork (branch f d1)))
-             (t2 (fork (branch g d2)))
-             (v ((proj (proj await @par) a) won)))
+             (t1 (fork-group (branch f d1) (loser d1)))
+             (t2 (fork-group (branch g d2) (loser d2)))
+             (r ((proj (proj await @par) (outcome a)) res)))
         (begin
           (if (get d1) #u (cancel t1))
           (if (get d2) #u (cancel t2))
-          v)))))
+          (tagcase r (won v v) (lost m (error m))))))))
 ;; `f` and `g`, each a task, and both their values.
 (define par2
   (poly ((a type) (b type))
@@ -281,6 +332,6 @@
     (lambda (f g)
       (let ((ca (the (icell a @par) (make-icell))) (cb (the (icell b @par) (make-icell))))
         (begin
-          (fork (lambda () ((proj (proj fill @par) a) ca (f))))
-          (fork (lambda () ((proj (proj fill @par) b) cb (g))))
+          (fork-branch (lambda () ((proj (proj fill @par) a) ca (f))))
+          (fork-branch (lambda () ((proj (proj fill @par) b) cb (g))))
           (product (1 ((proj (proj await @par) a) ca)) (2 ((proj (proj await @par) b) cb))))))))

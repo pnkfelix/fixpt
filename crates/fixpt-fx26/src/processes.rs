@@ -59,23 +59,15 @@ impl Checker {
             ("icell-put!", [_, c, v]) => call(self, "icell-put!", &[c.clone(), v.clone()]),
             ("icell-put!", _) => return Err(usage("(icell-put! i-cell value)")),
             ("spawn", [_, header, body @ ..]) if !body.is_empty() => {
-                let shape = "(spawn (mailbox message-type place) body …)";
-                let Some([b, m, r]) = header.as_proper_list() else { return Err(usage(shape)) };
-                if b.as_symbol().is_none() || r.as_symbol().is_none() {
-                    return Err(usage(shape));
-                }
-                let (place, inbox, lambda, plambda) = (sym(self, "place"), sym(self, "inbox"), sym(self, "lambda"), sym(self, "plambda"));
-                let inbox_t = Syntax::list(span, vec![inbox, m.clone(), r.clone()]);
-                let place_t = Syntax::list(span, vec![place.clone(), r.clone()]);
-                let params = Syntax::list(span, vec![Syntax::list(span, vec![b.clone(), inbox_t]), Syntax::list(span, vec![r.clone(), place_t])]);
-                let mut lam = vec![lambda, params];
-                lam.extend(body.iter().cloned());
-                lam.push(sym(self, "#u"));
-                let binder = Syntax::list(span, vec![Syntax::list(span, vec![r.clone(), place])]);
-                // The `lambda` at a place of its own (`par_expansion`).
-                let lam = Syntax::list(fixpt_read::Span::new(span.file, header.span.start, span.end), lam);
-                let proc = Syntax::list(span, vec![plambda, binder, lam]);
+                let proc = self.process_body(span, header, body)?;
                 call(self, "spawn-process", &[proc])
+            }
+            ("spawn-monitored", [_, w, f, header, body @ ..]) if !body.is_empty() => {
+                let proc = self.process_body(span, header, body)?;
+                call(self, "spawn-monitored", &[w.clone(), f.clone(), proc])
+            }
+            ("spawn-monitored", _) => {
+                return Err(usage("(spawn-monitored watcher on-failure (mailbox message-type place) body …)"));
             }
             ("spawn", _) => return Err(usage("(spawn (mailbox message-type place) body …)")),
             ("par", [_, bindings, body @ ..]) if !body.is_empty() => {
@@ -101,6 +93,28 @@ impl Checker {
             _ => unreachable!("a form of processes"),
         };
         self.parse_exp(&expansion)
+    }
+
+    /// A process's body, `(spawn (box M r) body …)`'s: `(plambda ((r
+    /// place)) (lambda ((box (inbox M r)) (r (place r))) body … #u))`.
+    fn process_body(&mut self, span: fixpt_read::Span, header: &Syntax, body: &[Syntax]) -> R<Syntax> {
+        let sym = |c: &mut Self, s: &str| Syntax::symbol(span, c.interner.intern(s));
+        let shape = "`(spawn (mailbox message-type place) body …)`";
+        let Some([b, m, r]) = header.as_proper_list() else { return Err(FxError::at(span, shape)) };
+        if b.as_symbol().is_none() || r.as_symbol().is_none() {
+            return Err(FxError::at(span, shape));
+        }
+        let (place, inbox, lambda, plambda) = (sym(self, "place"), sym(self, "inbox"), sym(self, "lambda"), sym(self, "plambda"));
+        let inbox_t = Syntax::list(span, vec![inbox, m.clone(), r.clone()]);
+        let place_t = Syntax::list(span, vec![place.clone(), r.clone()]);
+        let params = Syntax::list(span, vec![Syntax::list(span, vec![b.clone(), inbox_t]), Syntax::list(span, vec![r.clone(), place_t])]);
+        let mut lam = vec![lambda, params];
+        lam.extend(body.iter().cloned());
+        lam.push(sym(self, "#u"));
+        let binder = Syntax::list(span, vec![Syntax::list(span, vec![r.clone(), place])]);
+        // The `lambda` at a place of its own (`par_expansion`).
+        let lam = Syntax::list(fixpt_read::Span::new(span.file, header.span.start, span.end), lam);
+        Ok(Syntax::list(span, vec![plambda, binder, lam]))
     }
 
     /// `(par ((x1 e1) … (xn en)) body …)`: `(let ((%par tree)) (let ((x1
@@ -376,6 +390,36 @@ impl Checker {
     /// value is the process's address, `(addr M A)`, at the region the
     /// address is expected at, else at a region of its own; making it
     /// allocates there.
+    /// `((with … spawn-monitored) w f body)`, as `spawn-monitored` makes
+    /// it: `spawn`'s rule for the body; `w`, the watcher's address, `(addr
+    /// W R)`; `f`, a `(subr pure (string) W)`, which makes the watcher's
+    /// message of a failure's; and the form's effect `spawn`'s, its
+    /// arguments', and `(send R)`, the failure's message.
+    pub(crate) fn synth_spawn_monitored(&mut self, e: ExpId, fun: ExpId, w: ExpId, f: ExpId, body: ExpId, expected: Option<TyId>) -> R<(TyId, Effect)> {
+        let span = self.arena.span_of(e);
+        let (wt, we) = self.synth(w)?;
+        let (msg, at) = match self.arena.get(self.arena.resolve(wt)).clone() {
+            Ty::Named { which: ADDR_INDEX, args } => match &args[..] {
+                [D::Type(m), D::Region(a)] => (*m, *a),
+                _ => return Err(FxError::at(span, "a watcher is a process's address")),
+            },
+            _ => {
+                return Err(FxError::at(span, format!("a watcher is a process's address, `(addr M R)`, and this is a {}", self.show_ty(wt))));
+            }
+        };
+        let string = self.base[&self.interner.intern("string")];
+        let want = self.arena.ty(Ty::Subr { effect: Effect::pure(), params: vec![string], result: msg, conv: self.conv_default });
+        let (ft, fe) = self.synth(f)?;
+        if !self.subtype(ft, want) {
+            return Err(FxError::at(
+                span,
+                format!("a monitor's `on-failure` makes the watcher's message of a failure's, a {}, and this is a {}", self.show_ty(want), self.show_ty(ft)),
+            ));
+        }
+        let (t, eff) = self.synth_spawn(e, fun, body, expected)?;
+        Ok((t, eff.union(&we).union(&fe).union(&Effect::atom(Atom::Send(at)))))
+    }
+
     pub(crate) fn synth_spawn(&mut self, e: ExpId, fun: ExpId, body: ExpId, expected: Option<TyId>) -> R<(TyId, Effect)> {
         let span = self.arena.span_of(e);
         let usage = "a process's body is `(spawn (mailbox message-type place) body …)`";

@@ -268,6 +268,25 @@ pub(crate) fn has_prompt(st: &mut State, tag: Value) -> bool {
     Stacks { st }.find_marked(PROMPT_MARK, tag).is_some()
 }
 
+/// A task's failure, made an abort to the prompt of `tag` with `v`, as
+/// `abort-current-continuation` makes one (`sched::task_failed`): the
+/// state on from the prompt's handler.
+pub(crate) fn abort_on(st: &mut State, heap: &mut Heap, tag: Value, v: Value) -> Result<(), Trap> {
+    let mut s = Stacks { st };
+    let Some(at) = s.find_marked(PROMPT_MARK, tag) else {
+        return Err(Trap::Prim("abort: no prompt for this tag".into()));
+    };
+    let handler = s.rs_get(at + 2);
+    let (height, regions) = (prompt_height(s.rs_get(at + 3)), prompt_regions(s.rs_get(at + 3)));
+    s.rs_truncate(at);
+    s.pop_return();
+    s.ds_truncate(height);
+    heap.regions_exit_to(regions);
+    s.ds_push(v)?;
+    s.ds_push(handler)?;
+    call(&mut s, heap, 1, false, "abort")
+}
+
 /// At a time slice's end, the state stopped at a cell boundary: `f`, the
 /// scheduler's `preempt`, called there by entering trampoline word `t`
 /// (`call 0`, `drop`, `exit`) with it on the data stack, over a return to

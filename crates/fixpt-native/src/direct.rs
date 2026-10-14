@@ -218,6 +218,7 @@ const OUT_OF_FUEL: u32 = 1;
 /// The call-out a poll makes at a time slice's end (`Callout::Poll`).
 const POLL: usize = 4;
 const POLL_DONE: usize = 5;
+const FAILED: usize = 6;
 /// A poll's frame (`emit_poll`), laid out as a procedure's: its link, its
 /// second word, its map, eleven values (x0…x8 where they hold values, the
 /// closure, the code bloblet), then the raw words (x0…x8 where they hold
@@ -386,6 +387,11 @@ enum Callout {
     Poll,
     /// That call returned (`sched::preempt_done`). No collection.
     PollDone,
+    /// A trap, from the common trap: if the task is of a monitored process,
+    /// an abort to the scheduler's prompt made of it (`sched::task_failed`,
+    /// `abort_to`), and `aux` 1; else `aux` 0, and the run leaves. No
+    /// collection.
+    Failed,
 }
 
 impl Callout {
@@ -394,7 +400,7 @@ impl Callout {
             Callout::Cons | Callout::FieldRef | Callout::Abort | Callout::Reinstate | Callout::FirstMark | Callout::MarksOf => 2,
             Callout::Capture { whole } => if whole { 1 } else { 2 },
             Callout::CurrentMarks | Callout::Box { .. } | Callout::Unbox | Callout::BoxF64 => 1,
-            Callout::Foreign | Callout::ClosureAny | Callout::Rest | Callout::Underflow | Callout::Overflow | Callout::Poll | Callout::PollDone => 0,
+            Callout::Foreign | Callout::ClosureAny | Callout::Rest | Callout::Underflow | Callout::Overflow | Callout::Poll | Callout::PollDone | Callout::Failed => 0,
             Callout::Prim { n, .. } | Callout::Pure { n, .. } | Callout::Closure { n } | Callout::RegionClosure { n } => n,
         }
     }
@@ -777,8 +783,9 @@ impl DirectMachine {
         // 1: a closure made (`common_closure`); 2 and 3: the stack cache's
         // underflow and overflow (`common_underflow`, `common_overflow`);
         // 4 and 5: a time slice's end at a poll, and its call of `preempt`
-        // returned (`POLL`, `POLL_DONE`).
-        let callouts = vec![Callout::Foreign, Callout::ClosureAny, Callout::Underflow, Callout::Overflow, Callout::Poll, Callout::PollDone];
+        // returned (`POLL`, `POLL_DONE`); 6: a trap (`FAILED`).
+        let callouts =
+            vec![Callout::Foreign, Callout::ClosureAny, Callout::Underflow, Callout::Overflow, Callout::Poll, Callout::PollDone, Callout::Failed];
         let code = common_foreign(0);
         let foreign = space.alloc(4 * code.len(), 16).ok_or("no room for the common foreign call")?;
         space.write_code(foreign, &code);
@@ -1123,8 +1130,17 @@ fn common_trap() -> Vec<u32> {
     a.e(sub_imm(X9, LINK, 4));
     a.e(str(X9, ST, st_off(offset_of!(DState, pc))));
     a.e(str(FUEL, ST, st_off(offset_of!(DState, fuel))));
+    // A task of a monitored process: its failure an abort to the
+    // scheduler's prompt (`Callout::Failed`), on from there.
+    call_out(&mut a, FAILED);
+    let gone = a.label();
+    a.e(ldr(X9, ST, st_off(offset_of!(DState, aux))));
+    a.e(cmp_imm(X9, 0));
+    a.to(gone, Fix::If(Cond::Eq));
+    resume(&mut a);
+    a.bind(gone);
     leave(&mut a);
-    a.finish().expect("no labels")
+    a.finish().expect("labels bound")
 }
 
 /// The common call of what is not native code: from a code's stub for
@@ -4423,7 +4439,7 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
     let mut code = [Value::from_raw(st.code)];
     // The frames walked only for a collection; none for a primitive that
     // never collects, whose caller's values are in registers.
-    let quiet = matches!(c, Callout::Pure { .. } | Callout::Box { .. } | Callout::Unbox | Callout::BoxF64 | Callout::Underflow | Callout::Overflow | Callout::Poll | Callout::PollDone);
+    let quiet = matches!(c, Callout::Pure { .. } | Callout::Box { .. } | Callout::Unbox | Callout::BoxF64 | Callout::Underflow | Callout::Overflow | Callout::Poll | Callout::PollDone | Callout::Failed);
     // A collection, Larceny's way (`docs/research/deep-recursion.md`): the
     // run's frames flushed into the heap first, so that the collector reads
     // no stack; then the innermost restored, where the code goes on.
@@ -4512,6 +4528,31 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
         }
         Callout::Abort => {
             abort_to(rt, st, args[0], args[1]);
+            0
+        }
+        Callout::Failed => {
+            st.aux = 0;
+            let code = st.trap as usize;
+            let past = THROWN.with(|t| t.get()).is_some() || ABORTED.with(|a| a.get()).is_some();
+            if code == OUT_OF_FUEL as usize || code >= TRAPS.len() && code != PRIM_FAILED as usize || past {
+                return 0;
+            }
+            let message = match LAST_MESSAGE.with(|m| m.borrow_mut().take()) {
+                Some(m) => m,
+                None => TRAPS.get(code).copied().unwrap_or("a primitive failed").to_string(),
+            };
+            let st_ref = &*st;
+            let tag = fixpt_runtime::sched::task_failed(rt, &message, |rt, tag| has_prompt(&rt.heap, st_ref, tag));
+            match tag {
+                Some(tag) => {
+                    let unit = rt.heap.intern_static("#u");
+                    if abort_to(rt, st, tag, unit) {
+                        (st.trap, st.aux) = (0, 1);
+                    }
+                }
+                None if code == PRIM_FAILED as usize => LAST_MESSAGE.with(|m| *m.borrow_mut() = Some(message)),
+                None => {}
+            }
             0
         }
         Callout::PollDone => {
