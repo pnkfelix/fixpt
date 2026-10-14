@@ -291,7 +291,9 @@ pub struct Heap {
     symbols: Vec<Value>,
     /// Rust-side name lookup. Keys are plain `String`s, so a collection cannot
     /// invalidate them.
-    symbol_index: HashMap<String, u32>,
+    symbol_index: HashMap<String, u32, std::hash::BuildHasherDefault<WordHasher>>,
+    /// `intern_static`'s: each name's address, and its symbol's index.
+    static_symbols: Vec<(usize, u32)>,
 
     pub gc_count: u64,
     /// Collect at every `gc_every`th safepoint whatever the heap's fill, as
@@ -375,7 +377,8 @@ impl Heap {
             inhibited: 0,
             globals: Vec::new(),
             symbols: Vec::new(),
-            symbol_index: HashMap::new(),
+            symbol_index: HashMap::default(),
+            static_symbols: Vec::new(),
             gc_count: 0,
             gc_every: if cfg!(feature = "gc-stress") { 1 } else { 0 },
             safepoints: 0,
@@ -1604,6 +1607,20 @@ impl Heap {
     }
 
     // ----------------------------------------------------------------- symbols
+    /// `intern(name)`, for a name the runtime asks for at every turn (the
+    /// scheduler's, `fixpt_runtime::sched`): found again by where the name
+    /// is kept, one comparison among a few, not by hashing it.
+    pub fn intern_static(&mut self, name: &'static str) -> Value {
+        let key = name.as_ptr() as usize ^ name.len() << 48;
+        if let Some(&(_, i)) = self.static_symbols.iter().find(|(k, _)| *k == key) {
+            return self.symbols[i as usize];
+        }
+        let v = self.intern(name);
+        let i = self.symbol_index[name];
+        self.static_symbols.push((key, i));
+        v
+    }
+
     /// Symbol payload: `[name:String, hash, global-slot]`. The global slot is
     /// allocated eagerly so a global reference is one array index, not a lookup.
     pub fn intern(&mut self, name: &str) -> Value {
@@ -2281,7 +2298,7 @@ impl Heap {
         heap.globals = globals.into_iter().map(relocate).collect();
         heap.symbols = symbols.into_iter().map(relocate).collect();
         heap.roots = roots.into_iter().map(relocate).collect();
-        heap.symbol_index = HashMap::with_capacity(heap.symbols.len());
+        heap.symbol_index = HashMap::with_capacity_and_hasher(heap.symbols.len(), Default::default());
         for i in 0..heap.symbols.len() {
             let name = heap.symbol_name(heap.symbols[i]);
             heap.symbol_index.insert(name, i as u32);
@@ -2519,11 +2536,12 @@ fn fnv1a(s: &str) -> u64 {
     h
 }
 
-/// A hasher for a map keyed by values' bits, as `copy_within`'s: one
-/// multiply a word (Fibonacci hashing), where the standard hasher's
-/// SipHash, made to resist chosen keys, cost a message most of its copy
-/// (`TODO.md` §92, H3). The keys are addresses the heap chose, so none are
-/// chosen against it.
+/// A hasher for a map keyed by values' bits, as `copy_within`'s, or by
+/// symbols' names (`intern`): one multiply a word (Fibonacci hashing),
+/// where the standard hasher's SipHash, made to resist chosen keys, cost a
+/// message most of its copy (`TODO.md` §92, H3), and each of the
+/// scheduler's operations an `intern`'s worth. The keys are addresses the
+/// heap chose, or names the program and the runtime chose.
 #[derive(Default)]
 struct WordHasher(u64);
 

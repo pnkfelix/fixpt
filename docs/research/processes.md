@@ -257,13 +257,30 @@ for each (OS threads, distribution) would not have. Revisit if a client sends me
 of thousands of words often; a size above which frozen data is shared is
 then the shape of it.
 
+## The cost of a switch (measured 2026-10-14)
+
+The actors note's A4. A message to a process that waits for it is two
+switches: the receiver resumed (its continuation reinstated), and, once
+it waits again, suspended (the rest of it captured, and an abort to the
+scheduler). `processes-h3.fx` at `n` 0 measures the pair with the
+message: 890 ns on the REPL's machine. A profile found a third of it in
+the runtime's bookkeeping, not in the switch: each of `%sched`'s
+operations interned `#u` and its state's global's name (SipHash, a
+string's), and the prompt tag's sum its kind by name. Now the heap finds
+such names by where they are kept (`Heap::intern_static`) and hashes the
+rest with `WordHasher`, and the kinds are constants: **585 ns**. What is
+left is the switch itself: the call-out from native code to the runtime
+(a third), and walking and copying native frames to capture and
+reinstate (a sixth). One-shot stack segments, a task's own stack switched
+to rather than its frames copied, would take most of that; not done.
+
 ## What is left
 
 - **Q2**: preemption at fuel polls, for fairness.
 - **A `sendable` kind**, for servers polymorphic in their messages; and
   `self`.
-- **The cost of a switch** (the actors note's A4): a capture and an abort
-  per wait; one-shot stack segments if it matters.
+- **The cost of a switch** (the actors note's A4): measured, 585 ns a
+  message's two (above); one-shot stack segments if it matters.
 - **Links, monitors, supervisors** (F1–F4), session types (P9–P11), and
   distribution (N1–N6), out of scope as asked.
 - **Transfer of mutable data**, as kayak suggests, by consuming a whole

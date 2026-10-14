@@ -2489,8 +2489,10 @@ Built, all three of kayak's stages (`DONE.md` §92; the design,
   does not keep).
 - **A `sendable` kind**, `data ≤ sendable ≤ type`, for servers
   polymorphic in their messages; and `self`, a process's own address.
-- **The cost of a switch** (the actors note's A4): a capture and an abort
-  for each wait.
+- **The cost of a switch** (the actors note's A4): measured, 585 ns for a
+  message's two switches, after 890 (`DONE.md` §92). What is left is the
+  call-out from native code and the frames copied to capture and
+  reinstate: one-shot stack segments, a task's own stack switched to.
 - **A cancelled task's wakers**: a `race`'s loser, stopped at its next
   wait, ends when that wait's waker runs, so one waiting for a cell never
   filled stays (a task, and its places) until the run ends; and a deadline

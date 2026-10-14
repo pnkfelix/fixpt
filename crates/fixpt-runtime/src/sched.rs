@@ -79,7 +79,7 @@ pub mod op {
 
 /// The state's vector, made if there is none yet.
 fn state(heap: &mut Heap) -> Value {
-    let sym = heap.intern(STATE);
+    let sym = heap.intern_static(STATE);
     let slot = heap.symbol_global_slot(sym);
     let s = heap.global(slot);
     if heap.is_a(s, fixpt_heap::ObjType::Vector) {
@@ -173,15 +173,15 @@ fn shared(heap: &Heap, v: Value) -> bool {
     if v.is_pair() {
         return false;
     }
-    let copied = [kind("string"), kind("bytevector"), kind("bloblet"), kind("sum"), kind("product"), kind("flat-array")];
-    !copied.contains(&heap.bloblet_head(v).kind)
+    const COPIED: [u8; 6] = [kind("string"), kind("bytevector"), kind("bloblet"), kind("sum"), kind("product"), kind("flat-array")];
+    !COPIED.contains(&heap.bloblet_head(v).kind)
 }
 
 /// `%fx26-sched`'s operation `n` on `a` and `b`. Each operand is checked
 /// to be what the operation takes, so that no call of it can break the
 /// heap; only the scheduler calls it, which the checkers make so.
 pub fn run_op(rt: &mut Runtime, n: i64, a: Value, b: Value) -> Outcome<Value> {
-    let unit = rt.heap.intern("#u");
+    let unit = rt.heap.intern_static("#u");
     let is = |rt: &Runtime, v: Value, k: u8| v.is_bloblet() && rt.heap.bloblet_kind(v) == k;
     match n {
         op::TASK_SWITCH | op::TASK_END | op::TASK_CANCEL if !a.is_fixnum() || !rt.heap.task_live(a.as_fixnum() as usize) => {
@@ -328,13 +328,13 @@ pub fn run_op(rt: &mut Runtime, n: i64, a: Value, b: Value) -> Outcome<Value> {
         op::TAG => {
             let s = state(heap);
             let t = heap.obj_ref(s, TAG);
-            let sum = kind("sum");
+            const SUM: u8 = kind("sum");
             if t == Value::FALSE {
-                let none = heap.intern("none");
-                heap.make_frozen(sum, &[none, unit])
+                let none = heap.intern_static("none");
+                heap.make_frozen(SUM, &[none, unit])
             } else {
-                let some = heap.intern("some");
-                heap.make_frozen(sum, &[some, t])
+                let some = heap.intern_static("some");
+                heap.make_frozen(SUM, &[some, t])
             }
         }
         op::SET_TAG => {
@@ -375,7 +375,7 @@ fn timer_add(rt: &mut Runtime, t: i64, w: Value) -> Value {
     let ts = heap.obj_ref(s, TIMERS);
     let ts = heap.cons(entry, ts);
     heap.obj_set(s, TIMERS, ts);
-    heap.intern("#u")
+    heap.intern_static("#u")
 }
 
 /// When no task can run and the first waits: `#f` if no timer is set;
@@ -448,5 +448,5 @@ pub fn icell_put(rt: &mut Runtime, c: Value, v: Value) -> Outcome<Value> {
     for w in order.into_iter().rev() {
         push(heap, w);
     }
-    Ok(heap.intern("#u"))
+    Ok(heap.intern_static("#u"))
 }

@@ -2159,6 +2159,15 @@ hashing with SipHash (`WordHasher`, one multiply a word), which had made
 it 22: 10,000 cells 443 → 179 µs. Building the data costs a ninth of
 copying it. Decided: copy; share only if large messages turn out common.
 
+**The cost of a switch, a third less** (the actors note's A4;
+`docs/research/processes.md`, "The cost of a switch"): a message to a
+waiting process, its two switches, 890 → 585 ns. A profile found the
+runtime's bookkeeping a third of it: each `%sched` operation interned
+`#u` and its state's global's name, by SipHash, and the prompt tag's sum
+looked its kind up by name. Now `Heap::intern_static` finds a name the
+runtime asks for at every turn by where it is kept, the symbol table
+hashes with `WordHasher`, and the kinds are constants.
+
 
 **`append` and `string-append` as `vsubr`s** (the user's, 2026-10-13;
 `docs/fx26.md`, "Variadic procedures"): called with any count, a call the
