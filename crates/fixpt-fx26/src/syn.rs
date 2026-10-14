@@ -670,35 +670,84 @@ pub fn set_shared_made(made: std::collections::HashSet<String>) {
 const LOAD_BASE_STEP: i64 = 1_000_000_000;
 
 /// Each `(load-module "path")` in `forms`, in order: where it starts, and
-/// the path.
+/// the path; and each form of processes or `par`, which loads the scheduler
+/// (`parser-forms.fx`). Only where an expression is, as the parsers read
+/// them: a name bound, a parameter, a type, a `tagcase`'s arm's tag, which
+/// may be a list headed by a form's name (a binding `(self x)`), is none
+/// (`TODO.md` §92). A load found where the parsers find none would be a
+/// file read the Rust checker does not read, the numbering of the files
+/// after it moved.
 fn load_modules_in(forms: &[Syntax], interner: &Interner, out: &mut Vec<(u32, String, bool)>) {
     for f in forms {
-        let Some(items) = f.as_proper_list() else { continue };
-        if let [head, path] = items
-            && let Some(h) = head.as_symbol()
-            && matches!(interner.name(h), "load-module" | "load-input")
-            && let Datum::Str(p) = &path.datum
-        {
-            out.push((f.span.start, p.to_string(), interner.name(h) == "load-input"));
-        }
-        // A form of processes or `par` loads the scheduler (`parser-forms.fx`).
-        let head = items.first().and_then(|h| h.as_symbol()).map(|h| interner.name(h));
-        if matches!(head, Some("spawn" | "spawn-monitored" | "send" | "receive" | "self" | "par" | "race" | "pselect" | "icell-get" | "icell-put!")) {
-            out.push((f.span.start, crate::check::PROCESSES.to_string(), false));
-        }
-        match head {
-            // Data, not forms: a quotation, and a `case`'s clauses' data.
-            Some("quote" | "quasiquote") => {}
-            Some("case") => {
-                load_modules_in(&items[..items.len().min(2)], interner, out);
-                for clause in items.iter().skip(2) {
-                    if let Some([_, rest @ ..]) = clause.as_proper_list() {
-                        load_modules_in(rest, interner, out);
-                    }
-                }
+        load_modules_at(f, interner, out);
+    }
+}
+
+/// `load_modules_in` of one expression, or definition.
+fn load_modules_at(f: &Syntax, interner: &Interner, out: &mut Vec<(u32, String, bool)>) {
+    let Some(items) = f.as_proper_list() else { return };
+    let exps = |xs: &[Syntax], out: &mut Vec<(u32, String, bool)>| load_modules_in(xs, interner, out);
+    // The last item of each list in `xs`: a binding's expression.
+    let inits = |xs: Option<&[Syntax]>, out: &mut Vec<(u32, String, bool)>| {
+        for b in xs.unwrap_or_default() {
+            if let Some([_, .., init]) = b.as_proper_list() {
+                load_modules_at(init, interner, out);
             }
-            _ => load_modules_in(items, interner, out),
         }
+    };
+    // Each clause of `xs` from item `k` on: an arm's body.
+    let arms = |xs: &[Syntax], k: usize, out: &mut Vec<(u32, String, bool)>| {
+        for c in xs {
+            if let Some(parts) = c.as_proper_list() {
+                load_modules_in(parts.get(k..).unwrap_or_default(), interner, out);
+            }
+        }
+    };
+    if let [head, path] = items
+        && let Some(h) = head.as_symbol()
+        && matches!(interner.name(h), "load-module" | "load-input")
+        && let Datum::Str(p) = &path.datum
+    {
+        out.push((f.span.start, p.to_string(), interner.name(h) == "load-input"));
+    }
+    let head = items.first().and_then(|h| h.as_symbol()).map(|h| interner.name(h));
+    if matches!(head, Some("spawn" | "spawn-monitored" | "send" | "receive" | "self" | "par" | "race" | "pselect" | "icell-get" | "icell-put!")) {
+        out.push((f.span.start, crate::check::PROCESSES.to_string(), false));
+    }
+    let rest = items.get(1..).unwrap_or_default();
+    let from = |k: usize| items.get(k..).unwrap_or_default();
+    match head {
+        // Data, not forms: a quotation, and a `case`'s clauses' data.
+        Some("quote" | "quasiquote") => {}
+        Some("case") => {
+            exps(&items[..items.len().min(2)], out);
+            arms(from(2), 1, out);
+        }
+        // Types and effects, and the regions a module takes.
+        Some("define-type" | "define-effect" | "module-parameters") => {}
+        // Parameters, or a region's name, then a body.
+        Some("lambda" | "plambda" | "letregion" | "letfreeze" | "letrena" | "letreap") => exps(from(2), out),
+        Some("let" | "let*" | "letrec" | "letrec*" | "par") => {
+            inits(items.get(1).and_then(|b| b.as_proper_list()), out);
+            exps(from(2), out);
+        }
+        // `(define name expression)`, `(define name type expression)`.
+        Some("define" | "define*" | "the") => exps(&items[items.len().max(1) - 1..], out),
+        Some("define-rec") => inits(Some(rest), out),
+        Some("tagcase" | "typecase") => {
+            exps(&items[..items.len().min(2)], out);
+            arms(from(2), 2, out);
+        }
+        Some("cond") => arms(rest, 0, out),
+        Some("sum") => exps(from(2), out),
+        // `(spawn (box M r) body …)`; `spawn-monitored`'s watcher and
+        // `on-failure` first.
+        Some("spawn") => exps(from(2), out),
+        Some("spawn-monitored") => {
+            exps(&items[..items.len().min(3)], out);
+            exps(from(4), out);
+        }
+        _ => exps(items, out),
     }
 }
 
@@ -904,4 +953,48 @@ fn atom(interner: &mut Interner, v: Local<'_>) -> Option<Datum> {
         return Some(Datum::Bytevector(b));
     }
     v.flonum().map(|f| Datum::Number(Num::Real(f)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Where the loads' scan finds the scheduler loaded (`load_modules_in`).
+    fn scheduler_loads(text: &str) -> Vec<u32> {
+        let mut interner = Interner::new();
+        let forms = fixpt_read::Reader::new(text, FileId(0), fixpt_read::SyntaxProfile::FX26, &mut interner).read_all().expect("reads");
+        let mut out = Vec::new();
+        load_modules_in(&forms, &interner, &mut out);
+        out.into_iter().filter(|(_, p, _)| p == crate::check::PROCESSES).map(|(at, _, _)| at).collect()
+    }
+
+    /// A form's name bound, as a parameter, a variant, a type's effect or a
+    /// `tagcase`'s arm, is no form (`TODO.md` §92); a form is, where an
+    /// expression is, and a `pselect`'s events are.
+    #[test]
+    fn the_scheduler_is_loaded_by_forms_only() {
+        let names = [
+            "(let ((self 1) (send 2)) (+ self send))",
+            "(let* ((par 1)) par)",
+            "(lambda ((self int) (race int)) self)",
+            "(define-type m (sumof (send int) (receive int)))",
+            "(define f (subr (maxeff (send @w)) (int) int) (lambda ((x int)) x))",
+            "(tagcase v (send x x) (receive y y))",
+            "(cond (self 1) (else 2))",
+            "(the (sumof (self int)) (sum self 1))",
+        ];
+        for text in names {
+            assert_eq!(scheduler_loads(text), Vec::<u32>::new(), "{text}");
+        }
+        let forms = [
+            ("(send p 1)", vec![0]),
+            ("(let ((x (receive b))) x)", vec![9]),
+            ("(define x (icell-get c))", vec![10]),
+            ("(pselect ((receive b) x x))", vec![0, 10]),
+            ("(lambda ((self int)) (self box))", vec![21]),
+        ];
+        for (text, at) in forms {
+            assert_eq!(scheduler_loads(text), at, "{text}");
+        }
+    }
 }

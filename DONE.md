@@ -2230,6 +2230,20 @@ and five strings joined, gone for `string-append` of any count (20 calls),
 and 17 nested `string-append`s flattened; no nested `append` was found.
 
 
+**What loads the scheduler, found where expressions are (2026-10-14).**
+The loads' scan (`syn.rs`, `load_modules_in`), which reads the program's
+module files for the parser written in FX-26 before it parses, took any
+list headed by a form's name as that form: a binding `(self x)` loaded the
+scheduler, a file the Rust checker never read, so every file read after
+it was numbered otherwise, and the front end compiled by the compiler
+written in FX-26 with the Rust checker's facts failed (`regcode-core.fx`'s
+`self` had been renamed `itself` for it). Now the scan looks only where
+the parsers find expressions: not a name bound or a parameter, a type or
+an effect, a `tagcase`'s or `typecase`'s arm's tag, a `cond`'s clause as a
+whole, `spawn`'s box. `regcode-core.fx` binds `self` again. Test:
+`syn.rs`, `the_scheduler_is_loaded_by_forms_only`; and the whole suite with
+`self` bound.
+
 ## 93. Cellular code calling native code, where the native convention declines (2026-10-13)
 
 **Typed calls of native closures.** On the REPL's machine a form the native
