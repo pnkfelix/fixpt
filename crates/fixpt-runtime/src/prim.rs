@@ -1285,6 +1285,57 @@ prims! {
             Err(e) => fx26_io_result(rt, Err(e)),
         })
     });
+    // The standard input by bytes, and the terminal (`TODO.md` §95): a
+    // byte, or the end; as many bytes as have come, into a bytevector's
+    // span, at least one, or the end; whether a read would not wait. Raw
+    // mode, the modes before it, and the size, each `not-a-terminal` if
+    // the standard input is none.
+    "%fx26-read-byte", 0, Some(0), simple!(|rt, _a| {
+        Ok(match rt.world.read_byte() {
+            Ok(Some(b)) => fx26_sum(rt, "byte", Value::fixnum(b as i64)),
+            Ok(None) => fx26_sum(rt, "eof", Value::UNIT),
+            Err(e) => fx26_io_result(rt, Err(e)),
+        })
+    });
+    "%fx26-read-bytes", 3, Some(3), simple!(|rt, a| {
+        let (start, end) = bytevector_span(rt, a[0], a[1], a[2])?;
+        if start == end {
+            return Ok(fx26_sum(rt, "count", Value::fixnum(0)));
+        }
+        Ok(match rt.world.read_bytes(end - start) {
+            Ok(bytes) if bytes.is_empty() => fx26_sum(rt, "eof", Value::UNIT),
+            Ok(bytes) => {
+                for (k, b) in bytes.iter().enumerate() {
+                    rt.heap.bytevector_set(a[0], start + k, *b);
+                }
+                fx26_sum(rt, "count", Value::fixnum(bytes.len() as i64))
+            }
+            Err(e) => fx26_io_result(rt, Err(e)),
+        })
+    });
+    "%fx26-stdin-ready?", 0, Some(0), simple!(|rt, _a| Ok(Value::boolean(rt.world.stdin_ready())));
+    "%fx26-terminal-raw", 0, Some(0), simple!(|rt, _a| {
+        Ok(match rt.world.terminal_raw() {
+            Some(r) => fx26_io_result(rt, r),
+            None => fx26_sum(rt, "not-a-terminal", Value::UNIT),
+        })
+    });
+    "%fx26-terminal-restore", 0, Some(0), simple!(|rt, _a| {
+        Ok(match rt.world.terminal_restore() {
+            Some(r) => fx26_io_result(rt, r),
+            None => fx26_sum(rt, "not-a-terminal", Value::UNIT),
+        })
+    });
+    "%fx26-terminal-size", 0, Some(0), simple!(|rt, _a| {
+        Ok(match rt.world.terminal_size() {
+            Some(Ok((rows, columns))) => {
+                let size = rt.heap.make_frozen(PRODUCT_KIND, &[Value::fixnum(rows as i64), Value::fixnum(columns as i64)]);
+                fx26_sum(rt, "size", size)
+            }
+            Some(Err(e)) => fx26_io_result(rt, Err(e)),
+            None => fx26_sum(rt, "not-a-terminal", Value::UNIT),
+        })
+    });
     // The clock (stage 4): monotonic nanoseconds since the run began; and
     // the program's own arguments, as `fixpt run … -- ARG…` gives them.
     "%fx26-clock", 0, Some(0), simple!(|rt, _a| Ok(exact_out(rt, crate::world::clock_ns() as i128)));

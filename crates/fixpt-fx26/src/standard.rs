@@ -199,6 +199,20 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // at a region; a file replaced whole, atomically.
     // A line of the standard input, its ending left off; or its end.
     ("read-line", "(subr (io stdin) () (sumof (line string) (eof unit) (failed io-error)))"),
+    // The standard input by bytes, and the terminal (`TODO.md` §95).
+    ("read-byte", "(subr (io stdin) () (sumof (byte u8) (eof unit) (failed io-error)))"),
+    (
+        "read-bytes",
+        "(poly ((r region)) (subr (maxeff (io stdin) (write r)) ((bytevectorof r) int int)
+           (sumof (count int) (eof unit) (failed io-error))))",
+    ),
+    ("stdin-ready?", "(subr (io stdin) () bool)"),
+    ("terminal-raw", "(subr (io terminal) () (sumof (done unit) (not-a-terminal unit) (failed io-error)))"),
+    ("terminal-restore", "(subr (io terminal) () (sumof (done unit) (not-a-terminal unit) (failed io-error)))"),
+    (
+        "terminal-size",
+        "(subr (io terminal) () (sumof (size (productof (rows int) (columns int))) (not-a-terminal unit) (failed io-error)))",
+    ),
     // The clock: monotonic nanoseconds since the run began, and a sleep
     // until a time on it. The program's own arguments.
     ("clock", "(subr (io clock) () i64)"),
@@ -561,6 +575,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("%processes:cell-event", "(poly ((r region)) (poly ((t type)) (subr pure ((icell t r)) (event (await r)))))"),
     ("%processes:mailbox-event", "(poly ((m type) (r place)) (subr pure ((inbox m r)) (event (receive r))))"),
     ("%processes:clock-event", "(subr pure (i64) (event (io clock)))"),
+    ("%processes:stdin-event", "(subr pure (unit) (event (io stdin)))"),
     (
         "%processes:or-event",
         "(poly ((e1 effect) (e2 effect)) (subr pure ((event e1) (event e2)) (event (maxeff e1 e2))))",

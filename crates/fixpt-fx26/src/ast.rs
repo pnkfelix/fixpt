@@ -137,11 +137,21 @@ pub enum IoKind {
     Clock,
     Args,
     Exit,
+    Terminal,
 }
 
 impl IoKind {
-    pub const ALL: [IoKind; 8] =
-        [IoKind::Stdin, IoKind::Stdout, IoKind::Stderr, IoKind::FsRead, IoKind::FsWrite, IoKind::Clock, IoKind::Args, IoKind::Exit];
+    pub const ALL: [IoKind; 9] = [
+        IoKind::Stdin,
+        IoKind::Stdout,
+        IoKind::Stderr,
+        IoKind::FsRead,
+        IoKind::FsWrite,
+        IoKind::Clock,
+        IoKind::Args,
+        IoKind::Exit,
+        IoKind::Terminal,
+    ];
     /// Its name, as `(io k)` writes it.
     pub fn name(self) -> &'static str {
         match self {
@@ -153,6 +163,7 @@ impl IoKind {
             IoKind::Clock => "clock",
             IoKind::Args => "args",
             IoKind::Exit => "exit",
+            IoKind::Terminal => "terminal",
         }
     }
     pub fn named(n: &str) -> Option<IoKind> {

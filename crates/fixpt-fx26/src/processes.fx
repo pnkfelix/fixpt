@@ -290,6 +290,15 @@
                            (lambda (w)
                              (begin ((proj %sched i64 thunk unit) 18 t w)
                                     (lambda () ((proj %sched thunk unit unit) 20 w #u)))))))))
+;; Ready once a read of the standard input would not wait: a byte has
+;; come, or it is at its end (43-45; `TODO.md` §95). Its operand is unit,
+;; as a `pselect` arm `((read-byte) b body …)` has none.
+(define stdin-event (subr sched (unit) event)
+  (lambda (u)
+    (the event (list (cons (lambda () ((proj %sched unit unit bool) 43 #u #u))
+                           (lambda (w)
+                             (begin ((proj %sched thunk unit unit) 44 w #u)
+                                    (lambda () ((proj %sched thunk unit unit) 45 w #u)))))))))
 (define or-event (subr sched (event event) event)
   (lambda (a b) (if (null? a) b (the event (cons (car a) (or-event (cdr a) b))))))
 ;; The first of `e`'s parts that is ready, by its place from `i`; -1 if none.

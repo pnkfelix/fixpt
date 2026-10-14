@@ -144,7 +144,9 @@ fn main() {
     // command line, and never looks like the driver that built it.
     if let Some(heap) = image_run::embedded_in_self() {
         let argv: Vec<String> = std::env::args().skip(1).collect();
-        std::process::exit(image_run::run_entry(heap, "main", &argv));
+        let code = image_run::run_entry(heap, "main", &argv);
+        let _ = fixpt_runtime::tty::restore();
+        std::process::exit(code);
     }
     let args: Vec<String> = std::env::args().skip(1).collect();
     // The reader, the expander and the IR passes recurse on the Rust stack —
@@ -158,8 +160,11 @@ fn main() {
         .stack_size(STACK)
         .spawn(move || run(&args))
         .expect("the main thread can be spawned")
-        .join()
-        .unwrap_or_else(|e| std::panic::resume_unwind(e));
+        .join();
+    // A program that put the terminal in raw mode leaves it as it found
+    // it, however it ended (`TODO.md` §95).
+    let _ = fixpt_runtime::tty::restore();
+    let code = code.unwrap_or_else(|e| std::panic::resume_unwind(e));
     std::process::exit(code);
 }
 

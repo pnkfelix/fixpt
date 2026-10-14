@@ -2293,7 +2293,8 @@ the standard input. Left:
   `bytevectorof`). (Reads, writes and the length are in line natively
   since 2026-10-12.)
 - **Later members of the family**, as kayak listed them: subprocesses,
-  sockets, signals, terminal modes; each a new kind of `(io k)` under
+  sockets, signals (terminal modes and bytes from the standard input are
+  built, `DONE.md` §95); each a new kind of `(io k)` under
   the same ordering rule.
 
 ## 85. Machines that disagree on a failure: one wording (found 2026-10-12)
@@ -2517,22 +2518,16 @@ recovered (`DONE.md` §93). Left:
   evaluator knows no `stay-cellular`, so `programs/native/captures.fx` is
   not run there.
 
-## 95. Byte input and terminal modes (kayak's request, 2026-10-14)
+## 96. The evaluator runs every definition again with each form (found 2026-10-14)
 
-Asked for so that an interactive program (a REPL front end that edits a
-line as it is typed) can be written in FX-26, not leave keys to host code.
-Two of §84's later members of the family:
-- **Bytes from the standard input**: `read-byte` (a `u8` or eof), or
-  `read-bytes` filling a bytevector and giving how many arrived, under
-  `(io stdin)`; best if a process can wait for input as it waits for a
-  message, as a `pselect` arm, beside a message or a deadline.
-- **A terminal mode**, perhaps `(io terminal)`: raw mode (no echo, no
-  line buffering, keys as they arrive, ^C a key, not a signal), restored
-  afterwards even if the program fails; the terminal's size in rows and
-  columns. When the standard input is no terminal, these report so rather
-  than fail, so the same program runs from a script.
-
-Kayak's questions for the design: restoring the terminal a form around a
-body (so it happens on failure too), or a pair of operations? A read that
-waits on a byte, or on input being ready, given `pselect`? A change in the
-terminal's size reaching the program as a message, or by asking again?
+The evaluator written in FX-26 (`fx-ast-eval`, `Strategy::Evaluate`) is
+given, with each form, the text of every definition before it
+(`Session::defined26`), and evaluates them all again: it keeps no state
+between forms. So what a definition does is done again with each later
+form: `(define x int (begin (write-out "define\n") 1))` then four forms
+writes `define` six times, and a process spawned by a definition runs its
+body once per later form (each a new I-cell, so no "written twice"). Found
+while testing `read-byte` (`DONE.md` §95), whose test programs now do their
+I/O in `main`, which runs once. Harmless for a pure definition; wrong for
+one with I/O or processes. To do: the evaluator keeps its environment
+between forms, as the other machines keep their globals.

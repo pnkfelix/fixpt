@@ -437,6 +437,9 @@ pub fn repl(backend: Backend) -> i32 {
             }
             let before = timing.then(|| GcStats::start_form(&mut session));
             let ran = session.run(form);
+            // A form that left the terminal raw, done or failed, leaves the
+            // REPL's own as it was (`TODO.md` §95).
+            let _ = fixpt_runtime::tty::restore();
             if let Some(b) = before {
                 GcStats::of(&mut session).form_since(&b);
                 GcStats::end_form(&mut session, &b);

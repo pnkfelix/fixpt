@@ -19,7 +19,9 @@ pub struct World {
     pub stdout: Vec<u8>,
     /// And to its standard error.
     pub stderr: Vec<u8>,
-    /// A captured world's standard input, and how much of it is read.
+    /// A captured world's standard input, and how much of it is read; for
+    /// the process's own, what has been read from it and not yet taken,
+    /// so that reads by lines and by bytes take from one stream.
     pub stdin: Vec<u8>,
     pub stdin_at: usize,
     /// The program's command-line arguments, its own (not `fixpt`'s).
@@ -75,19 +77,35 @@ pub enum Line {
 }
 
 impl World {
+    /// The standard input's bytes not yet taken, read from it if there are
+    /// none (waiting for one): none only at its end.
+    fn buffered(&mut self) -> std::io::Result<&[u8]> {
+        if self.stdin_at == self.stdin.len() && !self.captured {
+            let mut buf = [0u8; 4096];
+            let n = crate::tty::read(&mut buf)?;
+            self.stdin.clear();
+            self.stdin_at = 0;
+            self.stdin.extend_from_slice(&buf[..n]);
+        }
+        Ok(&self.stdin[self.stdin_at..])
+    }
+
     /// The next line of the standard input, its ending (`\n` or `\r\n`)
     /// left off; the last may have none. A line that is not UTF-8 is an
     /// error of kind `invalid-data`, and is read all the same.
     pub fn read_line(&mut self) -> std::io::Result<Line> {
-        use std::io::BufRead as _;
         let mut bytes = Vec::new();
-        if self.captured {
-            let rest = &self.stdin[self.stdin_at..];
-            let n = rest.iter().position(|b| *b == b'\n').map_or(rest.len(), |i| i + 1);
+        loop {
+            let rest = self.buffered()?;
+            if rest.is_empty() {
+                break;
+            }
+            let (n, done) = rest.iter().position(|b| *b == b'\n').map_or((rest.len(), false), |i| (i + 1, true));
             bytes.extend_from_slice(&rest[..n]);
             self.stdin_at += n;
-        } else {
-            std::io::stdin().lock().read_until(b'\n', &mut bytes)?;
+            if done {
+                break;
+            }
         }
         if bytes.is_empty() {
             return Ok(Line::Eof);
@@ -101,6 +119,56 @@ impl World {
         String::from_utf8(bytes)
             .map(Line::Text)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("a line that is not UTF-8, from byte {}", e.utf8_error().valid_up_to())))
+    }
+
+    /// The next byte of the standard input, waiting for one; none at its
+    /// end.
+    pub fn read_byte(&mut self) -> std::io::Result<Option<u8>> {
+        let b = self.buffered()?.first().copied();
+        self.stdin_at += b.is_some() as usize;
+        Ok(b)
+    }
+
+    /// At most `n` bytes of the standard input, at least one, waiting for
+    /// one, then as many as have come; none at its end.
+    pub fn read_bytes(&mut self, n: usize) -> std::io::Result<Vec<u8>> {
+        let rest = self.buffered()?;
+        let k = rest.len().min(n);
+        let out = rest[..k].to_vec();
+        self.stdin_at += k;
+        Ok(out)
+    }
+
+    /// Whether a read of the standard input would not wait: a byte has
+    /// come, or it is at its end. A captured one never waits.
+    pub fn stdin_ready(&mut self) -> bool {
+        self.captured || self.stdin_at < self.stdin.len() || crate::tty::ready(0)
+    }
+
+    /// Wait until a read of the standard input would not, or until the
+    /// clock reaches `until` (`clock_ns`), if given; whether it would not.
+    pub fn wait_stdin(&mut self, until: Option<i64>) -> bool {
+        if self.stdin_ready() {
+            return true;
+        }
+        let ms = until.map_or(-1, |t| ((t - clock_ns()).max(0) as u64).div_ceil(1_000_000).min(i32::MAX as u64) as i32);
+        crate::tty::ready(ms)
+    }
+
+    /// The terminal the standard input is, put in raw mode (`tty::raw`):
+    /// none if it is no terminal.
+    pub fn terminal_raw(&mut self) -> Option<std::io::Result<()>> {
+        (!self.captured && crate::tty::is_terminal()).then(crate::tty::raw)
+    }
+
+    /// The terminal's modes as before raw mode: none if it is no terminal.
+    pub fn terminal_restore(&mut self) -> Option<std::io::Result<()>> {
+        (!self.captured && crate::tty::is_terminal()).then(|| crate::tty::restore().map(|_| ()))
+    }
+
+    /// The terminal's rows and columns: none if it is no terminal.
+    pub fn terminal_size(&mut self) -> Option<std::io::Result<(u16, u16)>> {
+        (!self.captured && crate::tty::is_terminal()).then(crate::tty::size)
     }
 }
 

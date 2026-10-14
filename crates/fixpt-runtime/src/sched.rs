@@ -31,7 +31,8 @@
 //! handler (`task_failed`); each `race` branch's group with the group it
 //! is inside, `(group . group)`, which its failure cancels too; and each
 //! task that waits, with how it stops waiting, `(task . stop)`, so that,
-//! cancelled, it ends at once (`REAP`).
+//! cancelled, it ends at once (`REAP`); and the wakers waiting for the
+//! standard input (`STDIN_WAIT`).
 
 use crate::error::Outcome;
 use crate::runtime::Runtime;
@@ -55,6 +56,7 @@ const MONITORS: usize = 12;
 const FAILURE: usize = 13;
 const PARENTS: usize = 14;
 const WAITING: usize = 15;
+const STDIN_WAITERS: usize = 16;
 
 /// The polls between two decisions whether to preempt (`preempt_due`): a
 /// task's time slice, in each machine's polls (a bytecode machine's
@@ -126,6 +128,9 @@ pub mod op {
     pub const WAITING: i64 = 40;
     pub const WOKEN: i64 = 41;
     pub const REAP: i64 = 42;
+    pub const STDIN_READY: i64 = 43;
+    pub const STDIN_WAIT: i64 = 44;
+    pub const STDIN_UNWAIT: i64 = 45;
 }
 
 /// The state's vector, made if there is none yet.
@@ -137,7 +142,7 @@ fn state(heap: &mut Heap) -> Value {
         return s;
     }
     let seed = std::env::var("FIXPT_SCHED_SEED").ok().and_then(|s| s.parse::<i64>().ok());
-    let s = heap.vector_from(&[Value::NULL, Value::NULL, Value::FALSE, seed.map_or(Value::FALSE, Value::fixnum), Value::fixnum(0), Value::NULL, Value::NULL, Value::FALSE, Value::NULL, Value::fixnum(0), Value::FALSE, Value::NULL, Value::NULL, Value::FALSE, Value::NULL, Value::NULL]);
+    let s = heap.vector_from(&[Value::NULL, Value::NULL, Value::FALSE, seed.map_or(Value::FALSE, Value::fixnum), Value::fixnum(0), Value::NULL, Value::NULL, Value::FALSE, Value::NULL, Value::fixnum(0), Value::FALSE, Value::NULL, Value::NULL, Value::FALSE, Value::NULL, Value::NULL, Value::NULL]);
     heap.set_global(slot, s);
     s
 }
@@ -409,6 +414,23 @@ pub fn run_op(rt: &mut Runtime, n: i64, a: Value, b: Value) -> Outcome<Value> {
             }
             unit
         }
+        // Whether a read of the standard input would not wait (`TODO.md`
+        // §95); waker `a` run once it would not, and taken back.
+        op::STDIN_READY => Value::boolean(rt.world.stdin_ready()),
+        op::STDIN_WAIT => {
+            let s = state(heap);
+            let ws = heap.obj_ref(s, STDIN_WAITERS);
+            let ws = heap.cons(a, ws);
+            heap.obj_set(s, STDIN_WAITERS, ws);
+            unit
+        }
+        op::STDIN_UNWAIT => {
+            let s = state(heap);
+            let ws = heap.obj_ref(s, STDIN_WAITERS);
+            let ws = without(heap, ws, |_, w| w == a);
+            heap.obj_set(s, STDIN_WAITERS, ws);
+            unit
+        }
         // Task `a` waits, and `b` stops it waiting: its waker taken back.
         op::WAITING => {
             let s = state(heap);
@@ -651,25 +673,49 @@ fn timer_add(rt: &mut Runtime, t: i64, w: Value) -> Value {
     heap.intern_static("#u")
 }
 
-/// When no task can run and the first waits: `#f` if no timer is set;
-/// else, having slept until the earliest (if `sleep`), each timer due taken,
-/// its waker run (in the order of their times), and `#t`.
+/// When no task can run and the first waits: `#f` if no timer is set and
+/// no waker waits for the standard input; else, having slept until the
+/// earliest timer or until the input is ready, whichever is first (if
+/// `sleep`), the input's wakers run if it is ready, and each timer due
+/// taken, its waker run (in the order of their times), and `#t`.
 fn timers_wait(rt: &mut Runtime, sleep: bool) -> Value {
-    let heap = &mut rt.heap;
-    let s = state(heap);
-    let ts = heap.obj_ref(s, TIMERS);
-    if !ts.is_pair() {
+    let s = state(&mut rt.heap);
+    let ts = rt.heap.obj_ref(s, TIMERS);
+    let input = rt.heap.obj_ref(s, STDIN_WAITERS).is_pair();
+    if !ts.is_pair() && !input {
         return Value::FALSE;
     }
-    let mut earliest = i64::MAX;
+    let heap = &rt.heap;
+    let mut earliest = None;
     let mut x = ts;
     while x.is_pair() {
-        earliest = earliest.min(heap.car(heap.car(x)).as_fixnum());
+        let t = heap.car(heap.car(x)).as_fixnum();
+        earliest = Some(earliest.map_or(t, |e: i64| e.min(t)));
         x = heap.cdr(x);
     }
     if sleep {
-        crate::world::sleep_until(earliest);
+        match (input, earliest) {
+            (true, until) => {
+                rt.world.wait_stdin(until);
+            }
+            (false, Some(t)) => crate::world::sleep_until(t),
+            (false, None) => {}
+        }
     }
+    if input && rt.world.stdin_ready() {
+        let heap = &mut rt.heap;
+        let mut ws = heap.obj_ref(s, STDIN_WAITERS);
+        heap.obj_set(s, STDIN_WAITERS, Value::NULL);
+        let mut order = Vec::new();
+        while ws.is_pair() {
+            order.push(heap.car(ws));
+            ws = heap.cdr(ws);
+        }
+        for w in order.into_iter().rev() {
+            push(heap, w);
+        }
+    }
+    let heap = &mut rt.heap;
     let now = crate::world::clock_ns();
     let mut due = Vec::new();
     let mut x = ts;

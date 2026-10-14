@@ -332,6 +332,19 @@
 ;; or a failure.
 (define* ev-io-result (subr (maxeff stores spin) ((sumof (done unit) (failed io-error))) val)
   (lambda (r) (tagcase r (done u (the val (o-sum 'done the-unit))) (failed e (ev-io-failed e)))))
+;; What a terminal's primitive gave, as the evaluator's value.
+(define* ev-terminal-result
+  (subr (maxeff stores spin) ((sumof (done unit) (not-a-terminal unit) (failed io-error))) val)
+  (lambda (r)
+    (tagcase r
+      (done u (the val (o-sum 'done the-unit)))
+      (not-a-terminal u (the val (o-sum 'not-a-terminal the-unit)))
+      (failed e (ev-io-failed e)))))
+;; A terminal's size, `(productof (rows int) (columns int))`, as the
+;; evaluator's value.
+(define* ev-size (subr (maxeff stores spin) (int int) val)
+  (lambda (rows columns)
+    (the val (o-product (list (cons 'rows (the val rows)) (cons 'columns (the val columns)))))))
 ;; Strings `ns`, as the evaluator's list of them.
 (define* ev-strings (subr (maxeff stores spin) ((listof string @v)) val)
   (lambda (ns) (if (null? ns) nil (cons (car ns) (ev-strings (cdr ns))))))
@@ -348,6 +361,28 @@
                (tagcase (read-line)
                  (line s (the val (o-sum 'line s)))
                  (eof u (the val (o-sum 'eof the-unit)))
+                 (failed e (ev-io-failed e)))))
+      (prim! 'read-byte
+             (lambda (xs)
+               (tagcase (read-byte)
+                 (byte k (the val (o-sum 'byte (u8->int k))))
+                 (eof u (the val (o-sum 'eof the-unit)))
+                 (failed e (ev-io-failed e)))))
+      (prim! 'read-bytes
+             (lambda (xs)
+               (tagcase (read-bytes (as-bytes (ev-arg xs 0)) (as-int (ev-arg xs 1))
+                                    (as-int (ev-arg xs 2)))
+                 (count k (the val (o-sum 'count k)))
+                 (eof u (the val (o-sum 'eof the-unit)))
+                 (failed e (ev-io-failed e)))))
+      (prim! 'stdin-ready? (lambda (xs) (stdin-ready?)))
+      (prim! 'terminal-raw (lambda (xs) (ev-terminal-result (terminal-raw))))
+      (prim! 'terminal-restore (lambda (xs) (ev-terminal-result (terminal-restore))))
+      (prim! 'terminal-size
+             (lambda (xs)
+               (tagcase (terminal-size)
+                 (size z (the val (o-sum 'size (ev-size (extract z rows) (extract z columns)))))
+                 (not-a-terminal u (the val (o-sum 'not-a-terminal the-unit)))
                  (failed e (ev-io-failed e)))))
       (prim! 'clock (lambda (xs) (clock)))
       (prim! 'sleep-until

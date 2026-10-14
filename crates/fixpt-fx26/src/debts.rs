@@ -55,7 +55,8 @@ impl Unit {
 /// Standard operations that are not `pure` but cannot fail: the store's,
 /// the I/O primitives' (a failure a value), control's that always return.
 const FAIL_FREE: &[&str] = &[
-    "new", "get", "set", "make-icell", "write-out", "write-err", "read-line", "read-file", "list-dir", "write-file", "clock", "args",
+    "new", "get", "set", "make-icell", "write-out", "write-err", "read-line", "read-byte", "stdin-ready?", "terminal-raw",
+    "terminal-restore", "terminal-size", "read-file", "list-dir", "write-file", "clock", "args",
     "sleep-until", "exit", "list", "length", "array-length", "bytevector-length", "flatarray-length", "string->list", "int->string",
     "acyclic?", "length-is?", "nat?", "certify-acyclic", "certify-nat", "certify-length", "cwcc", "make-continuation-prompt-tag",
     "make-continuation-mark-key", "with-mark", "current-marks", "first-mark", "marks-of", "%quote", "string->utf8", "utf8->string",

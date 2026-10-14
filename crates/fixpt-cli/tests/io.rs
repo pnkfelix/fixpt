@@ -133,3 +133,69 @@ fn the_standard_input_read_by_lines() {
         assert_eq!((out.status.code(), stdout.as_ref()), (Some(4), "0: one\n1: two\n2: bad\n3: last\n"), "{m}: {stderr}");
     }
 }
+
+/// `program` run on `machine`, its standard input a pipe written `input`
+/// after `delay`, then closed, or, `input` none, held open until it ends,
+/// however long it takes to start:
+/// its status, and its standard output and error.
+fn run_fed(machine: &str, program: &str, input: Option<&'static [u8]>, delay: std::time::Duration) -> (Option<i32>, String, String) {
+    use std::io::Write as _;
+    let path = format!("{}/tests/programs/io/{program}", env!("CARGO_MANIFEST_DIR"));
+    let mut child = Command::new(FIXPT)
+        .args(["--fx26-machine", machine, "run", &path])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("fixpt runs");
+    let mut stdin = child.stdin.take().expect("piped");
+    // Fed, then closed; or, no input, held open here until the run ends.
+    let (feeder, held) = match input {
+        Some(bytes) => (
+            Some(std::thread::spawn(move || {
+                std::thread::sleep(delay);
+                let _ = stdin.write_all(bytes);
+            })),
+            None,
+        ),
+        None => (None, Some(stdin)),
+    };
+    let out = child.wait_with_output().expect("ends");
+    drop(held);
+    if let Some(f) = feeder {
+        f.join().expect("fed");
+    }
+    (out.status.code(), String::from_utf8_lossy(&out.stdout).into_owned(), String::from_utf8_lossy(&out.stderr).into_owned())
+}
+
+/// The standard input by bytes (`TODO.md` §95), after a line: two bytes,
+/// then the rest that has come into a bytevector, then the end; the
+/// terminal's operations say a pipe is no terminal.
+#[test]
+fn the_standard_input_read_by_bytes() {
+    let runs: Vec<_> = MACHINES.iter().map(|m| (*m, std::thread::spawn(move || run_fed(m, "bytes.fx", Some(b"hello\nABcdefg"), Default::default())))).collect();
+    for (m, t) in runs {
+        let (status, out, err) = t.join().expect("ran");
+        let want = "hello\n65\n66\nready\n5\n99\neof\neof\nraw: none\nrestore: none\nsize: none\n";
+        assert_eq!((status, out.as_str()), (Some(0), want), "{m}: {err}");
+    }
+}
+
+/// A process waits for a key, a message or a deadline (`TODO.md` §95): a
+/// key that comes later than the wait began, the input's end, and, no
+/// key, the deadline, a second on.
+#[test]
+fn a_process_waits_for_a_key() {
+    let ms = std::time::Duration::from_millis;
+    let cases: [(Option<&'static [u8]>, i32); 3] = [(Some(b"q"), 113), (Some(b""), 255), (None, 1)];
+    let mut runs = Vec::new();
+    for m in MACHINES {
+        for (input, want) in cases {
+            runs.push((m, want, std::thread::spawn(move || run_fed(m, "key-or-message.fx", input, ms(300)))));
+        }
+    }
+    for (m, want, t) in runs {
+        let (status, _, err) = t.join().expect("ran");
+        assert_eq!(status, Some(want), "{m}: {err}");
+    }
+}

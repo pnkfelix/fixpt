@@ -212,11 +212,12 @@
 ;;; ----------------------------------------------------------- pselect
 
 ;; `(pselect (W0 x0 body0 …) … (Wn xn bodyn …))`, each `W` `(icell-get c)`,
-;; `(receive box)` or `(sleep-until t)`: `(let ((%sel-0 c0) … (%sel-n cn)) (let ((%sel (sync
+;; `(receive box)`, `(sleep-until t)` or `(read-byte)` (whose `c` is `#u`,
+;; at `W`, and which is called with none): `(let ((%sel-0 c0) … (%sel-n cn)) (let ((%sel (sync
 ;; (or-event E0 (or-event E1 … En))))) (if (= %sel 0) (let ((x0
 ;; (icell-get %sel-0))) body0 …) … (let ((xn …)) bodyn …))))`, each `E`
-;; `(cell-event %sel-i)`, `(mailbox-event %sel-i)` or `(clock-event %sel-i)`,
-;; through `lib`. Each
+;; `(cell-event %sel-i)`, `(mailbox-event %sel-i)`, `(clock-event %sel-i)` or
+;; `(stdin-event %sel-i)`, through `lib`. Each
 ;; node made has a place of its own, as the Rust parser's
 ;; `select_expansion` places them: an arm's event from its start to its
 ;; `W`'s, its `or-event` from its start to the form's end, its test none
@@ -243,32 +244,45 @@
 ;; What `pselect` is short of, said.
 (define select-usage string
   (string-append "`(pselect ((icell-get i-cell) name body …) ((receive mailbox) name body …) "
-                 "((sleep-until time) name body …) …)`"))
+                 "((sleep-until time) name body …) ((read-byte) name body …) …)`"))
 (define select-arm-usage string
   (string-append "a `pselect` arm is `((icell-get i-cell) name body …)`, "
-                 "`((receive mailbox) name body …)` or `((sleep-until time) name body …)`"))
+                 "`((receive mailbox) name body …)`, `((sleep-until time) name body …)` "
+                 "or `((read-byte) name body …)`"))
 ;; The event of a `pselect` arm whose wait is named `w`, or "" if none.
 (define wait-event (subr pure (symbol) string)
   (lambda (w)
     (cond ((symbol=? w 'icell-get) "cell-event")
           ((symbol=? w 'receive) "mailbox-event")
           ((symbol=? w 'sleep-until) "clock-event")
+          ((symbol=? w 'read-byte) "stdin-event")
           (else ""))))
-;; Each arm `(W x body …)`, `W` `(icell-get c)`, `(receive box)` or
-;; `(sleep-until t)`.
+;; How many items a `pselect` arm's wait named `w` has: `(read-byte)` one.
+(define wait-length (subr pure (symbol) int) (lambda (w) (if (symbol=? w 'read-byte) 1 2)))
+;; Each arm `(W x body …)`, `W` `(icell-get c)`, `(receive box)`,
+;; `(sleep-until t)` or `(read-byte)`.
 (define select-check (subr parses (fails syns-a) unit)
   (lambda (fail arms)
     (if (null? arms)
         #u
         (let* ((x (items-of (car arms)))
                (w (if (null? x) nil (items-of (car x)))))
-          (if (and (>= (len x) 3) (syn-symbol? (nth x 1)) (= (len w) 2)
+          (if (and (>= (len x) 3) (syn-symbol? (nth x 1)) (not (null? w))
+                   (= (len w) (wait-length (syn-head (car w))))
                    (not (string=? (wait-event (syn-head (car w))) "")))
               (select-check fail (cdr arms))
               (fail-at-syn fail select-arm-usage (car arms)))))))
 ;; An arm's `W`, and its `W`'s items.
 (define arm-wait (subr parses (syn) syn) (lambda (arm) (car (items-of arm))))
 (define arm-wait-items (subr parses (syn) syns-a) (lambda (arm) (items-of (arm-wait arm))))
+;; An arm's `c`: its `W`'s operand, or, `(read-byte)` having none, `#u` at
+;; its `W`.
+(define arm-operand (subr parses (syn) syn)
+  (lambda (arm)
+    (let ((w (arm-wait-items arm)))
+      (if (null? (cdr w))
+          (mk-symbol "#u" (syn-start (arm-wait arm)) (syn-end (arm-wait arm)))
+          (nth w 1)))))
 ;; `%sel-i`, at `a`..`b`.
 (define sel-name (subr (maxeff (read @globals) (read rs)) (int int int) syn)
   (lambda (i a b) (mk-symbol (string-append "%sel-" (int->string i)) a b)))
@@ -281,7 +295,7 @@
   (lambda (arms i a b)
     (if (null? arms)
         nil
-        (cons (pair-syn (sel-name i a b) (nth (arm-wait-items (car arms)) 1) a b)
+        (cons (pair-syn (sel-name i a b) (arm-operand (car arms)) a b)
               (select-binds (cdr arms) (+ i 1) a b)))))
 ;; The events of `arms`, from arm `i`, joined by `or-event`s.
 (define select-events (subr (maxeff parses spin) (syns-a int symbol int int) syn)
@@ -299,7 +313,9 @@
   (lambda (arms i sel a b)
     (let* ((arm (car arms)) (sa (syn-start arm)) (sb (syn-end arm)) (x (items-of arm))
            (w (arm-wait arm))
-           (get (mk-list (the syns-a (list (car (items-of w)) (sel-name i a b)))
+           (get (mk-list (if (null? (cdr (items-of w)))
+                             (the syns-a (list (car (items-of w))))
+                             (the syns-a (list (car (items-of w)) (sel-name i a b))))
                          (syn-start w) (syn-end w)))
            (bind (mk-list (the syns-a (list (pair-syn (nth x 1) get sa sb))) sa sb))
            (this (mk-list (cons (mk-symbol "let" sa sb) (cons bind (drop x 2))) sa sb)))

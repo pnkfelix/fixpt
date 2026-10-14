@@ -2377,3 +2377,43 @@ branch's group is made inside the current task's (`BRANCH_GROUP`, 39;
 it. Test: `programs/monitors/race-cancelled.fx`, whose branches would
 count a billion each: once the process fails, a wait for what no task will
 fill is a deadlock at once (it ran out of steps before).
+
+## 95. Byte input and terminal modes (kayak's request, 2026-10-14)
+
+For an interactive program written in FX-26, such as a front end that
+edits a line as it is typed (`docs/fx26.md`, "I/O"). Under `(io stdin)`:
+`read-byte`, a `u8` or `eof`; `read-bytes bv start end`, waiting for one
+byte, then as many as have come, how many or `eof`; `stdin-ready?`. A new
+kind, `(io terminal)`: `terminal-raw`, `terminal-restore`, `terminal-size`
+(`(productof (rows int) (columns int))`), each `not-a-terminal`, not a
+failure, when the standard input is none. A `pselect` arm `((read-byte) b
+body …)`, in both parsers (its wait has no operand: `#u` stands for it,
+at the wait), over the scheduler's `stdin-event` (ops 43-45); when no task
+can run, the scheduler sleeps until the input is ready or the earliest
+deadline (`timers_wait`).
+
+Kayak's questions, answered:
+- **Restoring: a form or a pair?** A pair of operations, and `fixpt` puts
+  the terminal back however the run ends (failed, `exit`, or done; and the
+  REPL after each form). A form would not help a failure: FX-26 unwinds
+  nothing on the way out, and a monitored process that fails leaves the
+  others running, raw.
+- **Wait on a byte, or on input ready?** On input ready: a `pselect` arm
+  is ready once a read would not wait, then reads, so `x` is the byte (or
+  `eof`). `stdin-ready?` asks without waiting.
+- **A change of size: a message, or ask again?** Ask again: cheap, and a
+  front end asks as it redraws. A message would need signals, a later
+  member of the family.
+
+Built: the runtime reads the standard input itself (`tty`, the crate's
+one module of system calls, `libc` as `fixpt-native` has it), one buffer
+for lines and bytes, so they mix. Raw mode is the usual one but for
+output, left as it was so that a newline still begins a line. Tests:
+`programs/io/io-bytes.fx`, `io-terminal.fx`, `io-terminal-unsaid.fx`
+(both checkers); `programs/processes/pselect-key.fx` (every way),
+`pselect-key-arm.fx` (refused, both parsers' words); `fixpt-cli/tests/
+io.rs`: `the_standard_input_read_by_bytes`, `a_process_waits_for_a_key`
+(a key after the wait began, the end, the deadline), on five machines,
+and by hand on the other four; by hand on a pseudo-terminal (`script`):
+raw mode, no echo, ^C a key (3), and the terminal back in canonical mode
+with echo after a program that failed while raw.

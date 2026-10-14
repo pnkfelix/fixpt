@@ -117,6 +117,7 @@ version = "0.1.0"
 dependencies = [
  "fixpt-heap",
  "fixpt-read",
+ "libc",
  "num-bigint",
  "num-integer",
  "num-rational",

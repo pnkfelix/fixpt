@@ -265,7 +265,11 @@ weighed with the other items, not ahead of them.
   and bytevectors; the terminal, files, the clock, the arguments; `main`
   and the exit status. Left: `TODO.md` §84 (kayak to confirm what was
   proposed; bytevectors in line natively). Found on the way: §85, two
-  ways the machines disagree when a run fails.
+  ways the machines disagree when a run fails. Then (2026-10-14, kayak's
+  request, `DONE.md` §95) bytes from the standard input, a `pselect` arm
+  for a key, and `(io terminal)`: raw mode, back, the size. Found on the
+  way: `TODO.md` §96, the evaluator written in FX-26 runs each definition
+  again with each later form.
 - S1. Done (2026-09-30): **the `acyclic?` gap**, F13: shown a
   use-after-free on every path, and fixed in both checkers with data at a
   place, `(t data p)` (`docs/research/shapes.md`, the framing: regions,

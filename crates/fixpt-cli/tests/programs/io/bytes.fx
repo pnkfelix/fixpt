@@ -1,0 +1,43 @@
+; The standard input by bytes, and the terminal (TODO.md §95): a line, then
+; two bytes, then as many as have come, into a bytevector, then the end;
+; and the terminal's operations, which say the input is no terminal, as a
+; pipe is not.
+(define-type byte-result (sumof (byte u8) (eof unit) (failed io-error)))
+(define-type count-result (sumof (count int) (eof unit) (failed io-error)))
+(define-type term-result (sumof (done unit) (not-a-terminal unit) (failed io-error)))
+(define said (subr (io stdout) (string) unit)
+  (lambda (s) (tagcase (write-out (string-append s "\n")) (done u #u) (failed e #u))))
+(define* bytes (subr (maxeff (io stdin) (io stdout) (read (globals said)) spin) (int) unit)
+  (lambda (n)
+    (if (= n 0)
+        #u
+        (tagcase (the byte-result (read-byte))
+          (byte b (begin (said (int->string (u8->int b))) (bytes (- n 1))))
+          (eof u (said "eof"))
+          (failed e (said "failed"))))))
+(define* counted (subr (io stdout) (count-result) unit)
+  (lambda (r)
+    (said (tagcase r (count k (int->string k)) (eof u "eof") (failed e "failed")))))
+(define* term (subr (io stdout) (string term-result) unit)
+  (lambda (what r)
+    (said (string-append what (tagcase r (done u ": done") (not-a-terminal u ": none")
+                                (failed e ": failed"))))))
+(define-effect all
+  (maxeff (io stdin) (io stdout) (io terminal) spin (alloc @b) (write @b) (read @b)
+          (read (globals said bytes counted term))))
+(define main (subr all () int)
+  (lambda ()
+    (let ((bv (the (bytevectorof @b) (make-bytevector 10 (int->u8 0)))))
+      (begin
+        (tagcase (read-line) (line s (said s)) (eof u (said "eof")) (failed e (said "failed")))
+        (bytes 2)
+        (said (if (stdin-ready?) "ready" "waits"))
+        (counted (read-bytes bv 2 10))
+        (said (int->string (u8->int (bytevector-u8-ref bv 2))))
+        (counted (read-bytes bv 0 10))
+        (bytes 1)
+        (term "raw" (terminal-raw))
+        (term "restore" (terminal-restore))
+        (said (tagcase (terminal-size) (size z "a size") (not-a-terminal u "size: none")
+                (failed e "size: failed")))
+        0))))
