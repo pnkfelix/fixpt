@@ -64,15 +64,29 @@
                 (task-switch 0)
                 (abort-current-continuation tag #u))))
           tag))))
+  ;; The first task, waiting until `ready` gives a place (0 or more): the
+  ;; others run, and, when none can, the clock is waited for, if a task
+  ;; waits for it, until it does; if nothing is left that could make it so,
+  ;; the program is deadlocked, and `stuck` says on what.
+  (define main-wait (subr any ((subr sched () int) string) int)
+    (lambda (ready stuck)
+      (letrec ((go (subr any () int)
+                 (lambda ()
+                   (begin
+                     (drain)
+                     (let ((i (ready)))
+                       (cond ((>= i 0) i)
+                             (((proj %sched unit unit bool) 21 #u #u) (go))
+                             (else (error stuck))))))))
+        (go))))
   ;; Wait until `ready?`, `register` handing over the waker. The first
-  ;; task runs the others until then; if none can make it so, the program
-  ;; is deadlocked, and `stuck` says on what.
+  ;; task runs the others until then (`main-wait`).
   (define wait-until (subr any ((subr sched () bool) (subr sched (thunk) unit) string) unit)
     (lambda (ready? register stuck)
       (letrec ((go (subr any () unit)
                  (lambda ()
                    (cond ((ready?) #u)
-                         ((main?) (begin (drain) (if (ready?) #u (error stuck))))
+                         ((main?) (begin (main-wait (lambda () (if (ready?) 0 -1)) stuck) #u))
                          (else (begin (suspend register) (go)))))))
         (go))))
   ;; Waker `w`, made to run at most once, however many wake it.
@@ -128,18 +142,32 @@
   (plambda ((r region))
     (plambda ((t type)) (lambda (c v) (begin ((proj (proj fill r) t) c v) (settle))))))
 ;; An event, what `pselect` waits for: each of its parts, in order, whether
-;; it is ready, and how to give it a waker (`or-event` joins two).
-(define-type event (listof (pairof (subr sched () bool) (subr sched (thunk) unit) @sched) @sched))
+;; it is ready, and how to give it a waker, which gives back how to take
+;; the waker away again (`or-event` joins two).
+(define-type undo (subr sched () unit))
+(define-type event (listof (pairof (subr sched () bool) (subr sched (thunk) undo) @sched) @sched))
 (define cell-event (poly ((r region)) (poly ((t type)) (subr sched ((icell t r)) event)))
   (plambda ((r region))
     (plambda ((t type))
       (lambda (c)
-        (the event (list (cons (lambda () ((proj %sched (icell t r) unit bool) 10 c #u))
-                               (lambda (w) ((proj %sched (icell t r) thunk unit) 11 c w)))))))))
+        (the event
+          (list (cons (lambda () ((proj %sched (icell t r) unit bool) 10 c #u))
+                      (lambda (w)
+                        (begin ((proj %sched (icell t r) thunk unit) 11 c w)
+                               (lambda () ((proj %sched (icell t r) thunk unit) 22 c w)))))))))))
 (define mailbox-event (subr sched (mbox) event)
   (lambda (mb)
     (the event (list (cons (lambda () ((proj %sched mbox unit bool) 17 mb #u))
-                           (lambda (w) ((proj %sched mbox thunk unit) 9 mb w)))))))
+                           (lambda (w)
+                             (begin ((proj %sched mbox thunk unit) 9 mb w)
+                                    (lambda () ((proj %sched mbox thunk unit) 23 mb w)))))))))
+;; Ready once the clock reaches `t`.
+(define clock-event (subr sched (i64) event)
+  (lambda (t)
+    (the event (list (cons (lambda () ((proj %sched i64 unit bool) 19 t #u))
+                           (lambda (w)
+                             (begin ((proj %sched i64 thunk unit) 18 t w)
+                                    (lambda () ((proj %sched thunk unit unit) 20 w #u)))))))))
 (define or-event (subr sched (event event) event)
   (lambda (a b) (if (null? a) b (the event (cons (car a) (or-event (cdr a) b))))))
 ;; The first of `e`'s parts that is ready, by its place from `i`; -1 if none.
@@ -147,14 +175,18 @@
   (first-ready (subr sched (event int) int)
     (lambda (e i)
       (cond ((null? e) -1) (((car (car e))) i) (else (first-ready (cdr e) (+ i 1))))))
-  ;; Waker `w` given to each of `e`'s parts.
-  (give-all (subr sched (event thunk) unit)
-    (lambda (e w) (if (null? e) #u (begin ((cdr (car e)) w) (give-all (cdr e) w))))))
+  ;; Waker `w` given to each of `e`'s parts, and how to take it from each.
+  (give-all (subr sched (event thunk) (listof undo @sched))
+    (lambda (e w) (if (null? e) nil (let ((u ((cdr (car e)) w))) (cons u (give-all (cdr e) w))))))
+  (undo-all (subr sched ((listof undo @sched)) unit)
+    (lambda (us) (if (null? us) #u (begin ((car us)) (undo-all (cdr us)))))))
 ;; What a `pselect` says when nothing can make any of its events ready.
 (define stuck-select "a `pselect` whose events no task is left to make ready: a deadlock")
 ;; The place in `e` of a part that is ready, waiting for one: the first in
 ;; order of those ready when the task looks. The waker given to every part
-;; runs once, the first time one of them is ready; the rest do nothing.
+;; runs once, the first time one of them is ready, and is then taken from
+;; them all. The first task gives them one that does nothing, so that the
+;; clock is waited for if one is a deadline (`main-wait`).
 (define sync (subr any (event) int)
   (lambda (e)
     (letrec ((go (subr any () int)
@@ -162,10 +194,14 @@
                  (let ((i (first-ready e 0)))
                    (cond ((>= i 0) i)
                          ((main?)
-                          (begin (drain)
-                                 (let ((j (first-ready e 0)))
-                                   (if (>= j 0) j (error stuck-select)))))
-                         (else (begin (suspend (lambda (w) (give-all e (once w)))) (go))))))))
+                          (let* ((us (give-all e (lambda () #u)))
+                                 (j (main-wait (lambda () (first-ready e 0)) stuck-select)))
+                            (begin (undo-all us) j)))
+                         (else
+                          (let ((us (the (ref (listof undo @sched) @sched) (new nil))))
+                            (begin (suspend (lambda (w) (set us (give-all e (once w)))))
+                                   (undo-all (get us))
+                                   (go)))))))))
       (go))))
 ;; `f` and `g`, each a task, and both their values.
 (define par2

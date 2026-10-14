@@ -149,6 +149,24 @@ fn a_deadlock_is_an_error() {
     }
 }
 
+/// A `pselect` takes its waker from every event once one has woken it: a
+/// deadline passed over, 30 s away, is not slept for when the program then
+/// deadlocks (`programs/processes/pselect-in-time.fx`, then a wait no task
+/// can end). Nor is an I-cell's list of waiters kept growing.
+#[test]
+fn a_deadline_passed_over_is_not_waited_for() {
+    let text = format!(
+        "{}\n(define never (icell int @c) (make-icell))\n(icell-get never)",
+        include_str!("programs/processes/pselect-in-time.fx")
+    );
+    for way in ["lowered", "native"] {
+        let start = std::time::Instant::now();
+        let got = if way == "lowered" { lowered(&text, None) } else { native(&text) };
+        assert!(got.as_ref().is_err_and(|e| e.contains("a deadlock")), "{way}: {got:?}");
+        assert!(start.elapsed() < std::time::Duration::from_secs(10), "{way}: slept {:?}", start.elapsed());
+    }
+}
+
 /// Arrival order is a choice when two processes send to one mailbox: under
 /// schedules of different orders, the receiver sees both. That is what
 /// `nondet` says of a process that receives.

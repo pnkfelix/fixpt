@@ -197,15 +197,15 @@ Tokio's `select!`: `pselect` its use over futures that only wait, `race`
 its use over futures that compute.
 
 1. **`pselect` over waits** (built; `docs/fx26.md`, "`pselect`"): the
-   first of several I-cells to be filled, or a message, and later (with
-   a clock event) a deadline. One waker registered with several cells or
+   first of several I-cells to be filled, a message, or a deadline (a
+   clock event, built 2026-10-14; the scheduler sleeps until the earliest
+   when no task can run). One waker registered with several cells or
    mailboxes, the first to fire winning (a fired flag, so later wakes do
    nothing: `async.md`'s one-shot waker). Its effect is its arms'
    `await`s and `receive`s, and `nondet`: which arm wins is the
    schedule's. Named `pselect` because `select` is a module's component
-   in types and effects. A fired waker stays in an I-cell's list until
-   the cell is filled: a loop that waits on one cell many times keeps one
-   per wait (`TODO.md` §92).
+   in types and effects. Once fired, the waker is taken back from every
+   event (`undo`), so no I-cell, mailbox or timer keeps one.
 2. **`race`, best effort**: `(race e1 … en)` gives the value of a branch
    that finished. The contract, which an implementation may strengthen
    but not change:

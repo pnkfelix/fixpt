@@ -2494,16 +2494,11 @@ Built, all three of kayak's stages (`DONE.md` §92; the design,
   polymorphic in their messages; and `self`, a process's own address.
 - **The cost of a switch** (the actors note's A4): a capture and an abort
   for each wait.
-- **Next (the user's, 2026-10-13): a deadline arm for `pselect`, then
-  `race`, best effort** (`docs/research/processes.md`, "Next"):
-  `pselect` over I-cells and mailboxes is built (`DONE.md` §92); its
-  clock arm waits on `(io clock)`. `race`'s branches cancellable (no
+- **Next (the user's, 2026-10-13): `race`, best effort**
+  (`docs/research/processes.md`, "Next"): `pselect`, its deadline arm
+  with it, is built (`DONE.md` §92). `race`'s branches cancellable (no
   write, fill, send or I/O outside), so whether losers are stopped is the
   implementation's, and only termination differs.
-- **`pselect`'s fired wakers**: one stays in an I-cell's waiters until the
-  cell is filled, so a loop that waits on one cell many times keeps one
-  per wait; a removal operation, or wakers that drop themselves, if it
-  matters.
 - Out of scope, as kayak asked: transfer of mutable data (by consuming a
   place's handle, after H3), session types, distribution, links and
   monitors.

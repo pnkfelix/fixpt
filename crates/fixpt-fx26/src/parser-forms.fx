@@ -171,11 +171,12 @@
       (mk-list (cons (mk-symbol "let" a b) (cons binds inside)) a b))))
 ;;; ----------------------------------------------------------- pselect
 
-;; `(pselect (W0 x0 body0 …) … (Wn xn bodyn …))`, each `W` `(icell-get c)`
-;; or `(receive box)`: `(let ((%sel-0 c0) … (%sel-n cn)) (let ((%sel (sync
+;; `(pselect (W0 x0 body0 …) … (Wn xn bodyn …))`, each `W` `(icell-get c)`,
+;; `(receive box)` or `(sleep-until t)`: `(let ((%sel-0 c0) … (%sel-n cn)) (let ((%sel (sync
 ;; (or-event E0 (or-event E1 … En))))) (if (= %sel 0) (let ((x0
 ;; (icell-get %sel-0))) body0 …) … (let ((xn …)) bodyn …))))`, each `E`
-;; `(cell-event %sel-i)` or `(mailbox-event %sel-i)`, through `lib`. Each
+;; `(cell-event %sel-i)`, `(mailbox-event %sel-i)` or `(clock-event %sel-i)`,
+;; through `lib`. Each
 ;; node made has a place of its own, as the Rust parser's
 ;; `select_expansion` places them: an arm's event from its start to its
 ;; `W`'s, its `or-event` from its start to the form's end, its test none
@@ -201,11 +202,20 @@
                    a b))))))
 ;; What `pselect` is short of, said.
 (define select-usage string
-  "`(pselect ((icell-get i-cell) name body …) ((receive mailbox) name body …) …)`")
+  (string-append "`(pselect ((icell-get i-cell) name body …) ((receive mailbox) name body …) "
+                 "((sleep-until time) name body …) …)`"))
 (define select-arm-usage string
-  (string-append "a `pselect` arm is `((icell-get i-cell) name body …)` "
-                 "or `((receive mailbox) name body …)`"))
-;; Each arm `(W x body …)`, `W` `(icell-get c)` or `(receive box)`.
+  (string-append "a `pselect` arm is `((icell-get i-cell) name body …)`, "
+                 "`((receive mailbox) name body …)` or `((sleep-until time) name body …)`"))
+;; The event of a `pselect` arm whose wait is named `w`, or "" if none.
+(define wait-event (subr pure (symbol) string)
+  (lambda (w)
+    (cond ((symbol=? w 'icell-get) "cell-event")
+          ((symbol=? w 'receive) "mailbox-event")
+          ((symbol=? w 'sleep-until) "clock-event")
+          (else ""))))
+;; Each arm `(W x body …)`, `W` `(icell-get c)`, `(receive box)` or
+;; `(sleep-until t)`.
 (define select-check (subr parses (fails syns-a) unit)
   (lambda (fail arms)
     (if (null? arms)
@@ -213,8 +223,7 @@
         (let* ((x (items-of (car arms)))
                (w (if (null? x) nil (items-of (car x)))))
           (if (and (>= (len x) 3) (syn-symbol? (nth x 1)) (= (len w) 2)
-                   (or (symbol=? (syn-head (car w)) 'icell-get)
-                       (symbol=? (syn-head (car w)) 'receive)))
+                   (not (string=? (wait-event (syn-head (car w))) "")))
               (select-check fail (cdr arms))
               (fail-at-syn fail select-arm-usage (car arms)))))))
 ;; An arm's `W`, and its `W`'s items.
@@ -238,9 +247,7 @@
 (define select-events (subr (maxeff parses spin) (syns-a int symbol int int) syn)
   (lambda (arms i lib a b)
     (let* ((arm (car arms)) (sa (syn-start arm)) (ws (syn-start (arm-wait arm)))
-           (op (if (symbol=? (syn-head (car (arm-wait-items arm))) 'icell-get)
-                   "cell-event"
-                   "mailbox-event"))
+           (op (wait-event (syn-head (car (arm-wait-items arm)))))
            (e (mk-list (the syns-a (list (lib-op lib op sa ws) (sel-name i a b))) sa ws)))
       (if (null? (cdr arms))
           e

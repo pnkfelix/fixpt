@@ -15,8 +15,10 @@
 //!
 //! The state is a vector, the value of a global no program names: the run
 //! queue (the front, oldest first; the back, newest first), the scheduler's
-//! prompt tag, and a seed (a fixnum) when the queue is to be taken in an
-//! order of its own (`FIXPT_SCHED_SEED`), else `#f`.
+//! prompt tag, a seed (a fixnum) when the queue is to be taken in an order
+//! of its own (`FIXPT_SCHED_SEED`), else `#f`, the words copied, and the
+//! timers: what waits for the clock (a `pselect`'s deadline), each a pair
+//! of the time and the waker, newest first.
 
 use crate::error::Outcome;
 use crate::runtime::Runtime;
@@ -29,6 +31,7 @@ const BACK: usize = 1;
 const TAG: usize = 2;
 const SEED: usize = 3;
 const COPIED: usize = 4;
+const TIMERS: usize = 5;
 
 pub const ICELL: u8 = kind("icell");
 pub const MAILBOX: u8 = kind("mailbox");
@@ -62,6 +65,12 @@ pub mod op {
     pub const ICELL_VALUE: i64 = 15;
     pub const REAP_ENTER: i64 = 16;
     pub const MAILBOX_READY: i64 = 17;
+    pub const TIMER_ADD: i64 = 18;
+    pub const TIMER_DUE: i64 = 19;
+    pub const TIMER_REMOVE: i64 = 20;
+    pub const TIMERS_WAIT: i64 = 21;
+    pub const ICELL_UNWAIT: i64 = 22;
+    pub const MAILBOX_UNWAIT: i64 = 23;
 }
 
 /// The state's vector, made if there is none yet.
@@ -73,7 +82,7 @@ fn state(heap: &mut Heap) -> Value {
         return s;
     }
     let seed = std::env::var("FIXPT_SCHED_SEED").ok().and_then(|s| s.parse::<i64>().ok());
-    let s = heap.vector_from(&[Value::NULL, Value::NULL, Value::FALSE, seed.map_or(Value::FALSE, Value::fixnum), Value::fixnum(0)]);
+    let s = heap.vector_from(&[Value::NULL, Value::NULL, Value::FALSE, seed.map_or(Value::FALSE, Value::fixnum), Value::fixnum(0), Value::NULL]);
     heap.set_global(slot, s);
     s
 }
@@ -99,6 +108,7 @@ pub fn reset(heap: &mut Heap) {
     let s = state(heap);
     heap.obj_set(s, FRONT, Value::NULL);
     heap.obj_set(s, BACK, Value::NULL);
+    heap.obj_set(s, TIMERS, Value::NULL);
     heap.tasks_reset();
 }
 
@@ -175,7 +185,15 @@ pub fn run_op(rt: &mut Runtime, n: i64, a: Value, b: Value) -> Outcome<Value> {
         op::MAILBOX_PUT | op::MAILBOX_TAKE | op::MAILBOX_WAIT | op::MAILBOX_READY if !is(rt, a, MAILBOX) => {
             return rt.type_error("a mailbox", a);
         }
-        op::ICELL_FULL | op::ICELL_WAIT | op::ICELL_VALUE if !is(rt, a, ICELL) => return rt.type_error("an i-cell", a),
+        op::MAILBOX_UNWAIT if !is(rt, a, MAILBOX) => return rt.type_error("a mailbox", a),
+        op::ICELL_FULL | op::ICELL_WAIT | op::ICELL_VALUE | op::ICELL_UNWAIT if !is(rt, a, ICELL) => {
+            return rt.type_error("an i-cell", a);
+        }
+        op::TIMER_ADD | op::TIMER_DUE => {
+            let t = crate::prim::fixed_in(rt, a, crate::prim::Width::I64)? as i64;
+            return Ok(if n == op::TIMER_DUE { Value::boolean(crate::world::clock_ns() >= t) } else { timer_add(rt, t, b) });
+        }
+        op::TIMERS_WAIT => return Ok(timers_wait(rt)),
         _ => {}
     }
     let heap = &mut rt.heap;
@@ -253,6 +271,27 @@ pub fn run_op(rt: &mut Runtime, n: i64, a: Value, b: Value) -> Outcome<Value> {
             heap.set_bloblet_slot(a, ICELL_WAITERS, ws);
             unit
         }
+        // Waker `b` no longer waits for `a`: a `pselect`'s, once one of its
+        // events has woken it (so that one waiting many times keeps none).
+        op::ICELL_UNWAIT => {
+            let ws = heap.bloblet_slot(a, ICELL_WAITERS);
+            let ws = without(heap, ws, |_, w| w == b);
+            heap.set_bloblet_slot(a, ICELL_WAITERS, ws);
+            unit
+        }
+        op::MAILBOX_UNWAIT => {
+            if heap.bloblet_slot(a, MB_WAITER) == b {
+                heap.set_bloblet_slot(a, MB_WAITER, Value::FALSE);
+            }
+            unit
+        }
+        op::TIMER_REMOVE => {
+            let s = state(heap);
+            let ts = heap.obj_ref(s, TIMERS);
+            let ts = without(heap, ts, |heap, t| heap.cdr(t) == a);
+            heap.obj_set(s, TIMERS, ts);
+            unit
+        }
         op::ICELL_PUT => return icell_put(rt, a, b),
         // `(sum some tag)`, the scheduler's prompt tag, or `(sum none #u)`
         // before the scheduler has made one.
@@ -277,6 +316,74 @@ pub fn run_op(rt: &mut Runtime, n: i64, a: Value, b: Value) -> Outcome<Value> {
         op::REAP_ENTER => Value::fixnum(heap.reap_enter() as i64),
         _ => return rt.fail("%fx26-sched: no such operation", &[Value::fixnum(n)]),
     })
+}
+
+/// List `l` without the items `drop` picks, in the same order; `l` itself
+/// if it has none.
+fn without(heap: &mut Heap, l: Value, drop: impl Fn(&Heap, Value) -> bool) -> Value {
+    let mut kept = Vec::new();
+    let mut any = false;
+    let mut x = l;
+    while x.is_pair() {
+        let v = heap.car(x);
+        if drop(heap, v) {
+            any = true;
+        } else {
+            kept.push(v);
+        }
+        x = heap.cdr(x);
+    }
+    if any { heap.list_from(&kept) } else { l }
+}
+
+/// Waker `w` run when the clock reaches `t` (a time `clock_ns` gives).
+fn timer_add(rt: &mut Runtime, t: i64, w: Value) -> Value {
+    let heap = &mut rt.heap;
+    let t = Value::fixnum(t.clamp(fixpt_heap::value::FIXNUM_MIN, fixpt_heap::value::FIXNUM_MAX));
+    let entry = heap.cons(t, w);
+    let s = state(heap);
+    let ts = heap.obj_ref(s, TIMERS);
+    let ts = heap.cons(entry, ts);
+    heap.obj_set(s, TIMERS, ts);
+    heap.intern("#u")
+}
+
+/// When no task can run and the first waits: `#f` if no timer is set;
+/// else, having slept until the earliest, each timer due taken, its waker
+/// run (in the order of their times), and `#t`.
+fn timers_wait(rt: &mut Runtime) -> Value {
+    let heap = &mut rt.heap;
+    let s = state(heap);
+    let ts = heap.obj_ref(s, TIMERS);
+    if !ts.is_pair() {
+        return Value::FALSE;
+    }
+    let mut earliest = i64::MAX;
+    let mut x = ts;
+    while x.is_pair() {
+        earliest = earliest.min(heap.car(heap.car(x)).as_fixnum());
+        x = heap.cdr(x);
+    }
+    crate::world::sleep_until(earliest);
+    let now = crate::world::clock_ns();
+    let mut due = Vec::new();
+    let mut x = ts;
+    while x.is_pair() {
+        let t = heap.car(x);
+        if heap.car(t).as_fixnum() <= now {
+            due.push((heap.car(t).as_fixnum(), heap.cdr(t)));
+        }
+        x = heap.cdr(x);
+    }
+    let ts = without(heap, ts, |heap, t| heap.car(t).as_fixnum() <= now);
+    heap.obj_set(s, TIMERS, ts);
+    // The oldest first among those of one time.
+    due.reverse();
+    due.sort_by_key(|&(t, _)| t);
+    for (_, w) in due {
+        push(heap, w);
+    }
+    Value::TRUE
 }
 
 /// A new I-cell, empty, in the heap: shared by the processes it is sent

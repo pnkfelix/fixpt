@@ -264,7 +264,7 @@
     (let ((n (as-int (ev-arg xs 0))) (a (ev-arg xs 1)) (b (ev-arg xs 2)))
       (cond ((and (= n 14) ((proj %sched (icell val @v) val bool) 10 (as-icell a) b))
              (efail "an i-cell written twice"))
-            ((or (= n 10) (= n 11) (= n 14) (= n 15))
+            ((or (= n 10) (= n 11) (= n 14) (= n 15) (= n 22))
              ((proj %sched (icell val @v) val val) n (as-icell a) b))
             ((= n 12)
              (tagcase ((proj %sched val val (sumof (some val) (none unit))) n a b)

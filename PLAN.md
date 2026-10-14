@@ -1,6 +1,6 @@
 # `fixpt` — a Rust Scheme engine with FX-87 and FX-91 front ends
 
-## At a glance (kept current; last updated 2026-10-13)
+## At a glance (kept current; last updated 2026-10-14)
 
 Where things stand. Below it is the plan as it grew, oldest first (the
 contents are at the end of this section); the details behind this summary
@@ -139,14 +139,16 @@ are in the last section, "Log: the glance's details", and in
   error) and deterministic `par` (FX's interference table), meaning the
   same under green threads and OS threads; each task its own stack of
   places (Q1). On every machine, a scheduler written in FX-26. And
-  `pselect`, Tokio's `select!` over waits. Next: a deadline arm, then
-  `race` (best effort). Left: copying against sharing (H3), preemption
-  (Q2), a `sendable` kind.
+  `pselect`, Tokio's `select!` over waits, deadlines among them (the
+  scheduler sleeps until the earliest). Next: `race` (best effort). Left:
+  copying against sharing (H3), preemption (Q2), a `sendable` kind.
 - **Cellular code calling native code** (2026-10-13, `TODO.md` §93):
   fixed, a crash on the REPL's machine where the native convention
   declined a form; its cost to assembling words mostly recovered (peval's
-  `fx arm64` 4.75 → 4.93 ms, from 6.80 with the check in line). Left: a
-  prelude in FX-26, an idea.
+  `fx arm64` 4.75 → 4.93 ms, from 6.80 with the check in line); a far
+  field native code (a module of more than 31 members had declined).
+  Left: a capture in cellular code up to a native prompt, which fails;
+  a prelude in FX-26, an idea.
 - **The collector** (the user's, 2026-09-29;
   `docs/research/generational-gc.md`): done, all four. Stack maps (each
   native frame's header word, a mask of its live slots); a card-marking

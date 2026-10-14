@@ -91,7 +91,7 @@ impl Checker {
             }
             ("par", _) => return Err(usage("(par ((name expression) …) body …)")),
             ("pselect", [_, arms @ ..]) if !arms.is_empty() => self.select_expansion(span, lib, arms)?,
-            ("pselect", _) => return Err(usage("(pselect ((icell-get i-cell) name body …) ((receive mailbox) name body …) …)")),
+            ("pselect", _) => return Err(usage("(pselect ((icell-get i-cell) name body …) ((receive mailbox) name body …) ((sleep-until time) name body …) …)")),
             _ => unreachable!("a form of processes"),
         };
         self.parse_exp(&expansion)
@@ -150,11 +150,11 @@ impl Checker {
     }
 
     /// `(pselect (W0 x0 body0 …) … (Wn xn bodyn …))`, each `W` `(icell-get
-    /// c)` or `(receive box)`: `(let ((%sel-0 c0) … (%sel-n cn)) (let ((%sel
-    /// (sync (or-event E0 (or-event E1 … En))))) (if (= %sel 0) (let ((x0
-    /// (icell-get %sel-0))) body0 …) … (let ((xn …)) bodyn …))))`, each `E`
-    /// `(cell-event %sel-i)` or `(mailbox-event %sel-i)`, through `lib`.
-    /// Each node made has a place of its own (`par_expansion`): an arm's
+    /// c)`, `(receive box)` or `(sleep-until t)`: `(let ((%sel-0 c0) …
+    /// (%sel-n cn)) (let ((%sel (sync (or-event E0 (or-event E1 … En)))))
+    /// (if (= %sel 0) (let ((x0 (icell-get %sel-0))) body0 …) … (let ((xn
+    /// …)) bodyn …))))`, each `E` `(cell-event %sel-i)`, `(mailbox-event
+    /// %sel-i)` or `(clock-event %sel-i)`, through `lib`. Each node made has a place of its own (`par_expansion`): an arm's
     /// event from its start to its `W`'s, its `or-event` from its start to
     /// the form's end, its test none wide at its end, its `if` from its
     /// `W`'s end to the form's end, its `let` the arm's, its `W` the `W`'s;
@@ -162,7 +162,8 @@ impl Checker {
     fn select_expansion(&mut self, span: fixpt_read::Span, lib: fixpt_read::Sym, arms: &[Syntax]) -> R<Syntax> {
         let at = |a: u32, b: u32| fixpt_read::Span::new(span.file, a, b);
         let sym = |c: &mut Self, sp: fixpt_read::Span, s: &str| Syntax::symbol(sp, c.interner.intern(s));
-        let shape = "a `pselect` arm is `((icell-get i-cell) name body …)` or `((receive mailbox) name body …)`";
+        let shape = "a `pselect` arm is `((icell-get i-cell) name body …)`, `((receive mailbox) name body …)` \
+                     or `((sleep-until time) name body …)`";
         let mut parts = Vec::new();
         for arm in arms {
             let Some([w, x, body @ ..]) = arm.as_proper_list() else { return Err(FxError::at(arm.span, shape)) };
@@ -170,6 +171,7 @@ impl Checker {
                 Some([h, c]) if x.as_symbol().is_some() && !body.is_empty() => match h.as_symbol().map(|h| self.interner.name(h)) {
                     Some("icell-get") => "cell-event",
                     Some("receive") => "mailbox-event",
+                    Some("sleep-until") => "clock-event",
                     _ => return Err(FxError::at(arm.span, shape)),
                 },
                 _ => return Err(FxError::at(arm.span, shape)),

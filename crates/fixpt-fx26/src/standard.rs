@@ -546,6 +546,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // ready, waiting for one, a choice when more than one is.
     ("%processes:cell-event", "(poly ((r region)) (poly ((t type)) (subr pure ((icell t r)) (event (await r)))))"),
     ("%processes:mailbox-event", "(poly ((m type) (r place)) (subr pure ((inbox m r)) (event (receive r))))"),
+    ("%processes:clock-event", "(subr pure (i64) (event (io clock)))"),
     (
         "%processes:or-event",
         "(poly ((e1 effect) (e2 effect)) (subr pure ((event e1) (event e2)) (event (maxeff e1 e2))))",

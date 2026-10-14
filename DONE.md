@@ -2120,6 +2120,23 @@ to a prompt tag no prompt had (`parser-forms.fx` made its own instance of
 four programs in `programs/processes` (a cell chosen, a server stopped by
 a cell, a deadlock, a malformed arm), every way they run.
 
+**`pselect`'s deadline arm** (the user's, 2026-10-13; `docs/fx26.md`,
+"`pselect`"): `((sleep-until t) u body …)`, ready once the clock reaches
+`t`, `(io clock)`; event `clock-event`. The runtime keeps the timers
+(`fixpt_runtime::sched`, operations 18 to 21): when the first task waits
+and no task can run, it sleeps until the earliest, and the wakers due run
+(`main-wait`, for `icell-get` and `receive` as for `pselect`). The first
+task's own `pselect` registers a waker that does nothing, so that its own
+deadline is among them. And **the fired-waker leak**, fixed with it: an
+event's registration now gives back how to take the waker away again
+(operations 20, 22, 23), and `sync` takes it from every event once one has
+fired, so a loop that waits on one cell many times leaves nothing behind,
+nor is a deadline passed over slept for. Tests: three programs in
+`programs/processes` (a deadline reached by a process, a message before a
+30 s deadline, the first task's own), every way and under 20 schedules;
+`processes.rs`, `a_deadline_passed_over_is_not_waited_for` (fails, having
+slept 30 s, with no removal).
+
 
 **`append` and `string-append` as `vsubr`s** (the user's, 2026-10-13;
 `docs/fx26.md`, "Variadic procedures"): called with any count, a call the

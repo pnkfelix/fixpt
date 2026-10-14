@@ -104,7 +104,7 @@
         (symbol=? s '%processes:icell-get) (symbol=? s '%processes:icell-put!)
         (symbol=? s '%processes:par2) (symbol=? s '%processes:cell-event)
         (symbol=? s '%processes:mailbox-event) (symbol=? s '%processes:or-event)
-        (symbol=? s '%processes:sync))))
+        (symbol=? s '%processes:sync) (symbol=? s '%processes:clock-event))))
 ;; Whether the innermost binding of `s` was made at depth `mark` or after.
 (define k-bound-since? (subr (maxeff (read @globals) (read @t) spin) (symbol int) bool)
   (lambda (s mark)

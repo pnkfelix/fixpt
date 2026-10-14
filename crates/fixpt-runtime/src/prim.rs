@@ -195,7 +195,7 @@ fn run_word_by(rt: &mut Runtime, a: &[Value], run: Option<crate::RunWord>) -> Ou
 
 /// A fixed-width integer type: its bits, and whether it is signed.
 #[derive(Clone, Copy)]
-enum Width {
+pub(crate) enum Width {
     I8,
     U8,
     I32,
@@ -242,7 +242,7 @@ fn exact_i128(rt: &Runtime, v: Value) -> Option<i128> {
 }
 
 /// A value of width `w`: the integer it stands for.
-fn fixed_in(rt: &mut Runtime, v: Value, w: Width) -> Outcome<i128> {
+pub(crate) fn fixed_in(rt: &mut Runtime, v: Value, w: Width) -> Outcome<i128> {
     match exact_i128(rt, v) {
         Some(x) if w.wrap(x) == x => Ok(x),
         _ => rt.type_error(w.name(), v),
