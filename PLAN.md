@@ -152,9 +152,9 @@ are in the last section, "Log: the glance's details", and in
   `fx arm64` 4.75 → 4.93 ms, from 6.80 with the check in line); a far
   field native code (a module of more than 31 members had declined);
   captures and marks that cross machines, either way, through any number
-  (2026-10-14); whole continuations, thrown and called again, too. Left:
-  preemption inside cellular code native code called; crossings nest on
-  Rust's stack; a prelude in FX-26, an idea.
+  (2026-10-14); whole continuations, thrown and called again, and
+  preemption in cellular code native code called, too. Left: crossings
+  nest on Rust's stack; a prelude in FX-26, an idea.
 - **The collector** (the user's, 2026-09-29;
   `docs/research/generational-gc.md`): done, all four. Stack maps (each
   native frame's header word, a mask of its live slots); a card-marking

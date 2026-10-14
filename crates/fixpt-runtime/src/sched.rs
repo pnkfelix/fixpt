@@ -147,6 +147,13 @@ fn state(heap: &mut Heap) -> Value {
     s
 }
 
+/// The scheduler's prompt tag, once it has one: what a machine at a poll
+/// looks for beyond its own frames (`crossing::reachable`), before it asks
+/// `preempt_due`.
+pub fn prompt_tag(heap: &Heap) -> Option<Value> {
+    state_if_any(heap).map(|s| heap.obj_ref(s, TAG)).filter(|t| *t != Value::FALSE)
+}
+
 /// The state's vector, if there is one: making nothing, for a poll, which
 /// must not allocate.
 fn state_if_any(heap: &Heap) -> Option<Value> {

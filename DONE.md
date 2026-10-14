@@ -2359,6 +2359,28 @@ collecting often): taken in either, thrown from the other through frames
 of both, 200 crossings deep; and kept, then called again after `cwcc`
 returned, from either; by hand, called again from a later form.
 
+**Preemption in cellular code native code called (2026-10-14).** A poll
+in cellular code that native code called asked to be preempted only for
+the scheduler's prompt in its own frames, which are never where it is: so
+such code (a procedure the native convention declined) ran on, starving
+the others, until it returned to native code or waited. Now a poll asks
+the boundaries out from it too (`crossing::reachable`, each boundary's
+`has_prompt`, asked before `preempt_due`, which must not walk them), in
+the Rust machine and in native code a machine called; and the Rust
+machine, nested, calls a native `preempt`. The capture `preempt` makes
+crosses the machines, as any does. Two faults the resumption showed:
+the frames `reinstate` puts back before it calls a continuation's inner
+piece have no stub's frame on top, so that boundary now says where they
+resume (`Foreign::resume`), where a capture had dropped the innermost;
+and a poll before the call of the word `call_value` made (preempted
+there) has that word's frame as the piece's bottom, which a capture had
+skipped as the return into its `exit`; now skipped only when it is
+(`nested_floor`), or each resumption would keep one more. Tests:
+`programs/preempt/spinner-cellular.fx` (each machine; the old binary
+waits for ever) and `allocating-cellular.fx` (each machine, every 7th
+poll), and the tiny-slice sweep (slices 3, 7 and 13) over every process,
+monitor and preemption program on every machine.
+
 ## 94. Process monitors (kayak's request, 2026-10-14)
 
 `(spawn-monitored watcher on-failure (box M r) body …)`: a process whose

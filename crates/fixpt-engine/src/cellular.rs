@@ -572,10 +572,19 @@ impl Machine {
         (self.fuel, self.reserve) = (take, self.reserve - take);
         let Ctx::Rt(rt) = cx else { return false };
         let (rs, floor) = (&self.rs, self.rs_floor);
-        // One of this machine's own closures: another machine's program may
-        // have left its scheduler's (they share a runtime).
-        let own = |h: &fixpt_heap::Heap, f: Value| f.is_bloblet() && h.bloblet_kind(f) == const { kind("cellular-closure") };
-        let due = fixpt_runtime::sched::preempt_due_with(rt, own, |_, tag| Self::find_marked(rs, floor, PROMPT_MARK, tag).is_some());
+        // In a run native code called, the scheduler's prompt may be in the
+        // frames of the machines out from it, which a capture up to it
+        // reaches (`crossing`): asked first, as the question must not walk
+        // them.
+        let nested = self.nested;
+        let beyond = nested && fixpt_runtime::sched::prompt_tag(&rt.heap).is_some_and(|t| crossing::reachable(rt, t));
+        // One of this machine's own closures, or, native code having called
+        // it, a native one, which it calls as native code: another machine's
+        // program may have left its scheduler's (they share a runtime).
+        let own = |h: &fixpt_heap::Heap, f: Value| {
+            f.is_bloblet() && (h.bloblet_kind(f) == const { kind("cellular-closure") } || nested && h.bloblet_kind(f) == const { kind("native-closure") })
+        };
+        let due = fixpt_runtime::sched::preempt_due_with(rt, own, |_, tag| beyond || Self::find_marked(rs, floor, PROMPT_MARK, tag).is_some());
         let Some((f, t)) = due else { return false };
         if self.check_limits().is_err() {
             rt.heap.quiet_leave();
@@ -835,8 +844,8 @@ impl Machine {
         self.ds.push(proc_);
         self.safepoint(&mut rt.heap, r);
         let proc_ = self.ds.pop().expect("pushed");
-        // Above the entry of the word `call_value` made, which ends the run.
-        let own = self.capture(&mut rt.heap, r, self.rs_floor + 4, 0, false);
+        let from = nested_floor(&rt.heap, &self.rs, self.rs_floor);
+        let own = self.capture(&mut rt.heap, r, from, 0, false);
         // Nothing allocated here collects, so `proc_` stays where it is.
         let k = crossing::capture(rt, tag, own).ok_or_else(missing)?;
         let k = if rt.heap.bloblet_kind(k) == const { kind("cellular-continuation") } { rt.heap.continuation_closure(k) } else { k };
@@ -1290,7 +1299,8 @@ impl Machine {
                 // the bottom one's (`crossing::capture_whole`), a native
                 // closure if the bottom machine is native code.
                 if let (None, true, Ctx::Rt(rt)) = (at, self.nested && crossing::crossed(), &mut *cx) {
-                    let own = self.capture(&mut rt.heap, r, self.rs_floor + 4, 0, false);
+                    let from = nested_floor(&rt.heap, &self.rs, self.rs_floor);
+                    let own = self.capture(&mut rt.heap, r, from, 0, false);
                     let k = crossing::capture_whole(rt, own);
                     let k = if rt.heap.bloblet_kind(k) == const { kind("native-closure") } { k } else { rt.heap.continuation_closure(k) };
                     self.ds.push(k);
@@ -1427,6 +1437,20 @@ pub const THROWN: &str = "a continuation thrown past native code";
 /// in it (`Machine::aborted` says to what).
 pub const ABORTED: &str = "an abort past native code";
 
+/// Where a run native code called keeps its frames for a continuation
+/// that crosses machines: above the return into the word `call_value`
+/// made, if that return goes to its `exit`, which the run that gives the
+/// continuation its value has of its own; else (a poll before that word's
+/// call, preempted) from its frame, whose `exit`, there, ends that run as
+/// that run's own would. Not both: each run's would pile up.
+fn nested_floor(heap: &Heap, rs: &[Value], floor: usize) -> usize {
+    let exits = rs.len() >= floor + 4 && {
+        let (w, k) = (rs[floor], rs[floor + 1]);
+        w.is_bloblet() && k.is_fixnum() && heap.bloblet_slot(w, k.as_fixnum() as usize) == Value::fixnum(const { routine("exit") } as i64)
+    };
+    if exits { floor + 4 } else { floor }
+}
+
 /// A delimited or whole continuation of these stacks' values and return
 /// entries, at `r`, the data stack's taken from height `base`; `inner`
 /// inside it (`crossing`), or `#f`.
@@ -1496,12 +1520,17 @@ impl Crossing for Held {
         capture_held(rt, self, tag, inner)
     }
 
-    /// Native code called it, its frames above the entry of the word
-    /// `call_value` made; else, the bottom machine, all of them, whole.
+    /// All its frames (native code having called it, from `nested_floor`):
+    /// the bottom machine's, whole.
     fn capture_whole(&self, rt: &mut Runtime, bottom: bool, inner: Value) -> Value {
         let all = self.kept(&rt.heap);
-        let rs_from = if self.nested { self.floor + 4 } else { self.floor };
-        held_piece(rt, self, &all, rs_from, 0, bottom && !self.nested, inner)
+        let from = if self.nested { nested_floor(&rt.heap, &all[self.nd..self.nd + self.nr], self.floor) } else { self.floor };
+        held_piece(rt, self, &all, from, 0, bottom && !self.nested, inner)
+    }
+
+    fn has_prompt(&self, rt: &mut Runtime, tag: Value) -> (bool, bool) {
+        let all = self.kept(&rt.heap);
+        (Machine::find_marked(&all[self.nd..self.nd + self.nr], self.floor, PROMPT_MARK, tag).is_some(), self.nested)
     }
 
     fn marks(&self, rt: &mut Runtime, key: Value) -> (Vec<Value>, bool) {
@@ -1524,7 +1553,7 @@ fn capture_held(rt: &mut Runtime, h: &Held, tag: Value, inner: Value) -> Crossed
     let found = Machine::find_marked(rs, h.floor, PROMPT_MARK, tag);
     let (rs_from, ds_from) = match found {
         Some(at) => (at + 4, prompt_height(rs[at + 3])),
-        None if h.nested => (h.floor + 4, 0),
+        None if h.nested => (nested_floor(&rt.heap, rs, h.floor), 0),
         None => return Crossed::Missing,
     };
     let k = held_piece(rt, h, &all, rs_from, ds_from, false, inner);

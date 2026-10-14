@@ -4498,7 +4498,7 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
         }
         Callout::Foreign => {
             let (f, args) = args.split_last().expect("the callee");
-            call_foreign(rt, st, *f, args)
+            call_foreign(rt, st, *f, args, None)
         }
         Callout::FieldRef => {
             let k = if args[1].is_fixnum() { usize::try_from(args[1].as_fixnum()).ok() } else { None };
@@ -4549,7 +4549,11 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
             let take = st.reserve.min(fixpt_runtime::sched::slice());
             (st.fuel, st.reserve) = (take, st.reserve - take);
             let own = |h: &Heap, f: Value| DirectMachine::compiled_of(h, f).is_some();
-            let due = fixpt_runtime::sched::preempt_due(rt, own, |rt, tag| has_prompt(&rt.heap, st, tag));
+            // Beyond this run's frames, those of the machines out from it
+            // (`fixpt_runtime::crossing`), asked first.
+            let beyond = fixpt_runtime::crossing::crossed()
+                && fixpt_runtime::sched::prompt_tag(&rt.heap).is_some_and(|t| fixpt_runtime::crossing::reachable(rt, t));
+            let due = fixpt_runtime::sched::preempt_due(rt, own, |rt, tag| beyond || has_prompt(&rt.heap, st, tag));
             st.aux = due.map_or(0, |f| f.raw());
             0
         }
@@ -4618,7 +4622,11 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
 /// frames, where `common_foreign` resumes (`foreign_resume`); or a trap.
 /// While it runs, the frames' values are kept where the heap roots them,
 /// and the call is a boundary a capture crosses (`capture_foreign`).
-fn call_foreign(rt: &mut fixpt_runtime::Runtime, st: &mut DState, f: Value, args: &[Value]) -> u64 {
+///
+/// The frames' innermost is the stub's (`common_foreign`), whose return is
+/// where they resume with the value; or, `resume` given, the frames are a
+/// continuation's just put back (`reinstate`), resuming there.
+fn call_foreign(rt: &mut fixpt_runtime::Runtime, st: &mut DState, f: Value, args: &[Value], resume: Option<u64>) -> u64 {
     let held: Vec<Value> = native_frames(st).iter().flat_map(|s| s.iter().copied()).collect();
     let kept = rt.heap.vector_from(&held);
     let at = rt.heap.push_root(kept);
@@ -4626,7 +4634,7 @@ fn call_foreign(rt: &mut fixpt_runtime::Runtime, st: &mut DState, f: Value, args
     // A native call from the cellular code runs below these frames.
     let runner = RUNNING.get().expect("native code is running");
     let outer = CALLED_OUT.replace(Some((runner, st.native_sp)));
-    let boundary = std::rc::Rc::new(Foreign { st: st as *mut DState, at });
+    let boundary = std::rc::Rc::new(Foreign { st: st as *mut DState, at, resume });
     let r = fixpt_runtime::crossing::across(boundary, || fixpt_engine::cellular::call_value(rt, f, args));
     CALLED_OUT.set(outer);
     put_back(rt, st, at);
@@ -4674,13 +4682,26 @@ fn call_foreign(rt: &mut fixpt_runtime::Runtime, st: &mut DState, f: Value, args
 struct Foreign {
     st: *mut DState,
     at: usize,
+    resume: Option<u64>,
+}
+
+impl Foreign {
+    /// Its frames out from the call, and where the innermost resumes: past
+    /// the stub's, at its return; or all of them, at `resume`.
+    fn frames(&self, st: &DState) -> (Vec<(u64, u64)>, u64) {
+        let all = frames_of(st);
+        match self.resume {
+            Some(pc) => (all, pc),
+            None => (all[1..].to_vec(), word(all[0].0 + R_SECOND)),
+        }
+    }
 }
 
 impl fixpt_runtime::crossing::Crossing for Foreign {
     fn capture(&self, rt: &mut fixpt_runtime::Runtime, tag: Value, inner: Value) -> fixpt_runtime::crossing::Crossed {
         // SAFETY: the state of the call-out that made this boundary, which
         // is in this call, and holds no reference to it meanwhile.
-        capture_foreign(rt, unsafe { &mut *self.st }, self.at, tag, inner)
+        capture_foreign(rt, unsafe { &mut *self.st }, self, tag, inner)
     }
 
     /// All its frames, from the stub's out, resumed where the call returns:
@@ -4689,14 +4710,14 @@ impl fixpt_runtime::crossing::Crossing for Foreign {
         // SAFETY: as for `capture`.
         let st = unsafe { &mut *self.st };
         put_back(rt, st, self.at);
-        let all = frames_of(st);
-        let frames = &all[1..];
+        let (frames, pc) = self.frames(st);
+        let frames = &frames[..];
         let p = if frames.is_empty() {
             cont_pos(st)
         } else {
             let last = outermost_second(st, frames.last().expect("a frame").0);
             let mut p = heap_frames(&mut rt.heap, frames, last, cont_pos(st));
-            p.pc = word(all[0].0 + R_SECOND);
+            p.pc = pc;
             p
         };
         let words = region_words(frames) + st.cont_words;
@@ -4707,6 +4728,13 @@ impl fixpt_runtime::crossing::Crossing for Foreign {
         }
         let code = continuation_bloblet(&mut rt.heap);
         continuation(rt, code, if words == 0 { END } else { p }, words, bottom, inner)
+    }
+
+    fn has_prompt(&self, rt: &mut fixpt_runtime::Runtime, tag: Value) -> (bool, bool) {
+        // SAFETY: as for `capture`.
+        let st = unsafe { &mut *self.st };
+        put_back(rt, st, self.at);
+        (has_prompt(&rt.heap, st, tag), true)
     }
 
     /// Its frames' marks, and on: a machine in a call, if there is one, is
@@ -4738,13 +4766,11 @@ fn put_back(rt: &mut fixpt_runtime::Runtime, st: &mut DState, at: usize) {
 /// out to the innermost prompt for `tag`, or all of them, with `inner`
 /// inside, resumed where the call returns; or `inner`, if none are
 /// between. The frames' values first as the heap has kept them, moved.
-fn capture_foreign(rt: &mut fixpt_runtime::Runtime, st: &mut DState, at: usize, tag: Value, inner: Value) -> fixpt_runtime::crossing::Crossed {
+fn capture_foreign(rt: &mut fixpt_runtime::Runtime, st: &mut DState, b: &Foreign, tag: Value, inner: Value) -> fixpt_runtime::crossing::Crossed {
     use fixpt_runtime::crossing::Crossed;
-    put_back(rt, st, at);
-    let all = frames_of(st);
-    // The stub's frame, whose return is where its caller resumes.
-    let pc = word(all[0].0 + R_SECOND);
-    let frames = &all[1..];
+    put_back(rt, st, b.at);
+    let (frames, pc) = b.frames(st);
+    let frames = &frames[..];
     let code = continuation_bloblet(&mut rt.heap);
     if let Some(j) = frames.iter().position(|&(fp, end)| is_control(fp, end, PROMPT_MARK, tag)) {
         if j == 0 {
@@ -5393,7 +5419,7 @@ fn reinstate(rt: &mut fixpt_runtime::Runtime, st: &mut DState, k: Value, v: Valu
     } else {
         (st.resume_fp, st.resume_sp)
     };
-    let x = call_foreign(rt, st, inner, &[v]);
+    let x = call_foreign(rt, st, inner, &[v], Some(st.resume_pc));
     if st.trap == 0 {
         // Back with an abort to a prompt in these frames, which is where
         // the state now says to resume.

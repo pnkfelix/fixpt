@@ -2489,6 +2489,12 @@ Built, all three of kayak's stages (`DONE.md` §92; the design,
   message's two switches, after 890 (`DONE.md` §92). What is left is the
   call-out from native code and the frames copied to capture and
   reinstate: one-shot stack segments, a task's own stack switched to.
+- **A time slice of one poll makes no progress** (found 2026-10-14):
+  `FIXPT_SLICE=1` never ends even a native-only program of 30 iterations,
+  on the old binaries too, and on the Rust cellular machine: the slice a
+  task is given after a preemption (`take_grace`) is spent before its
+  next poll, it seems. Testing uses 3 and more; nothing else sets so small
+  a slice.
 - Out of scope, as kayak asked: transfer of mutable data (by consuming a
   place's handle, after H3), session types, distribution, and links
   (monitors are built, `DONE.md` §94).
@@ -2510,10 +2516,6 @@ recovered (`DONE.md` §93). Left:
   a variadic definition's call makes the list of its arguments, where a
   built-in primitive takes them as they are; and every machine would load
   and compile it.
-- **What else stops at a machine's own frames** (left by the crossing
-  captures and marks, and whole continuations, `DONE.md` §93): a poll in
-  cellular code native code called asks to be preempted only for a prompt
-  in its own frames, so such code runs on until it returns to native code.
 - **Calls between the machines nest on Rust's stack**: each crossing is a
   few Rust frames, so recursion that alternates between native and
   cellular code a few thousand deep overflows the thread's stack (a crash,

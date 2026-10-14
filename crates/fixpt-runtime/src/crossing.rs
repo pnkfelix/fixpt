@@ -41,6 +41,9 @@ pub trait Crossing {
     /// The marks for `key` in its frames, from the call out, innermost
     /// first; and whether a machine called it, whose frames are further out.
     fn marks(&self, rt: &mut Runtime, key: Value) -> (Vec<Value>, bool);
+    /// Whether its frames hold a prompt for `tag`; and whether a machine
+    /// called it, whose frames are further out.
+    fn has_prompt(&self, rt: &mut Runtime, tag: Value) -> (bool, bool);
 }
 
 pub type Boundary = Rc<dyn Crossing>;
@@ -91,6 +94,21 @@ pub fn capture_whole(rt: &mut Runtime, own: Value) -> Value {
         inner = b.capture_whole(rt, i == 0, inner);
     }
     inner
+}
+
+/// Whether a prompt for `tag` is in the frames of the machines out from
+/// the one running: a capture up to it would reach it (`capture`).
+pub fn reachable(rt: &mut Runtime, tag: Value) -> bool {
+    let n = BOUNDARIES.with(|v| v.borrow().len());
+    for i in (0..n).rev() {
+        let b = BOUNDARIES.with(|v| v.borrow()[i].clone());
+        match b.has_prompt(rt, tag) {
+            (true, _) => return true,
+            (false, false) => return false,
+            (false, true) => {}
+        }
+    }
+    false
 }
 
 /// The marks for `key` in the frames of the machines out from the one

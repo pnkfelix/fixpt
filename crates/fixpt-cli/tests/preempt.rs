@@ -81,6 +81,8 @@ fn as_said_in(dir: &str, name: &str, machines: &[&str], slice: Option<u64>) {
 #[test]
 fn a_spinning_process_is_preempted_on_each_machine() {
     as_said("spinner.fx", &machines(), None);
+    // Spinning in cellular code native code called (`TODO.md` §93).
+    as_said("spinner-cellular.fx", &machines(), None);
 }
 
 /// A monitored process's failure is a message to its watcher, on each
@@ -107,4 +109,7 @@ fn preempted_processes_keep_what_they_hold() {
 #[test]
 fn preempted_at_nearly_every_poll() {
     as_said("allocating-short.fx", &machines(), Some(7));
+    // One loop in cellular code native code called, which calls native
+    // code each time round: continuations that cross the machines.
+    as_said("allocating-cellular.fx", &machines(), Some(7));
 }
