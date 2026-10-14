@@ -142,6 +142,10 @@ are in the last section, "Log: the glance's details", and in
   `pselect`, Tokio's `select!` over waits. Next: a deadline arm, then
   `race` (best effort). Left: copying against sharing (H3), preemption
   (Q2), a `sendable` kind.
+- **Cellular code calling native code** (2026-10-13, `TODO.md` §93):
+  fixed, a crash on the REPL's machine where the native convention
+  declined a form; left, its cost to assembling words (peval's `fx arm64`
+  4.79 → 6.74 ms), a check and call-out in line at every typed call.
 - **The collector** (the user's, 2026-09-29;
   `docs/research/generational-gc.md`): done, all four. Stack maps (each
   native frame's header word, a mask of its live slots); a card-marking
