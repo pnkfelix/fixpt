@@ -1,0 +1,315 @@
+//! What FX-26's processes and `par` need of the runtime (`docs/fx26.md`,
+//! "Processes"): a run queue of tasks, mailboxes, I-cells that tasks wait
+//! for, and messages copied. The scheduler itself is FX-26, over prompts
+//! (`fx26:processes.fx`, built in), and reaches these through one
+//! primitive, `%fx26-sched`, an operation's number and two operands; so
+//! every way FX-26 runs has them at once.
+//!
+//! A task is something the scheduler runs: a thunk, called under its
+//! prompt, which ends or waits by capturing the rest of itself and
+//! aborting there. Each task has the heap's place stack of its own
+//! (`Heap::task_new`), so that tasks interleaving never end each other's
+//! places. A task that waits hands over a thunk that resumes it; whatever
+//! it waits for (a message, an I-cell's value) puts that thunk on the run
+//! queue when it comes.
+//!
+//! The state is a vector, the value of a global no program names: the run
+//! queue (the front, oldest first; the back, newest first), the scheduler's
+//! prompt tag, and a seed (a fixnum) when the queue is to be taken in an
+//! order of its own (`FIXPT_SCHED_SEED`), else `#f`.
+
+use crate::error::Outcome;
+use crate::runtime::Runtime;
+use fixpt_heap::layout::kind;
+use fixpt_heap::{Heap, Value};
+
+const STATE: &str = "%fx26-sched-state";
+const FRONT: usize = 0;
+const BACK: usize = 1;
+const TAG: usize = 2;
+const SEED: usize = 3;
+const COPIED: usize = 4;
+
+pub const ICELL: u8 = kind("icell");
+pub const MAILBOX: u8 = kind("mailbox");
+/// An I-cell's fields: whether it is full, its value, its waiters.
+pub const ICELL_FULL: usize = 2;
+pub const ICELL_VALUE: usize = 3;
+pub const ICELL_WAITERS: usize = 4;
+/// A mailbox's fields: messages, oldest first, then newest first; the task
+/// waiting.
+const MB_FRONT: usize = 2;
+const MB_BACK: usize = 3;
+const MB_WAITER: usize = 4;
+
+/// The operations, by number, as `fx26:processes.fx` names them.
+pub mod op {
+    pub const TASK_NEW: i64 = 0;
+    pub const TASK_SWITCH: i64 = 1;
+    pub const TASK_END: i64 = 2;
+    pub const TASK_CURRENT: i64 = 3;
+    pub const PUSH: i64 = 4;
+    pub const POP: i64 = 5;
+    pub const MAILBOX_NEW: i64 = 6;
+    pub const MAILBOX_PUT: i64 = 7;
+    pub const MAILBOX_TAKE: i64 = 8;
+    pub const MAILBOX_WAIT: i64 = 9;
+    pub const ICELL_FULL: i64 = 10;
+    pub const ICELL_WAIT: i64 = 11;
+    pub const TAG: i64 = 12;
+    pub const SET_TAG: i64 = 13;
+    pub const ICELL_PUT: i64 = 14;
+    pub const ICELL_VALUE: i64 = 15;
+    pub const REAP_ENTER: i64 = 16;
+    pub const MAILBOX_READY: i64 = 17;
+}
+
+/// The state's vector, made if there is none yet.
+fn state(heap: &mut Heap) -> Value {
+    let sym = heap.intern(STATE);
+    let slot = heap.symbol_global_slot(sym);
+    let s = heap.global(slot);
+    if heap.is_a(s, fixpt_heap::ObjType::Vector) {
+        return s;
+    }
+    let seed = std::env::var("FIXPT_SCHED_SEED").ok().and_then(|s| s.parse::<i64>().ok());
+    let s = heap.vector_from(&[Value::NULL, Value::NULL, Value::FALSE, seed.map_or(Value::FALSE, Value::fixnum), Value::fixnum(0)]);
+    heap.set_global(slot, s);
+    s
+}
+
+/// Take the run queue in an order of the seed's (a test's, to try many), or,
+/// with none, oldest first.
+pub fn set_seed(heap: &mut Heap, seed: Option<i64>) {
+    let s = state(heap);
+    heap.obj_set(s, SEED, seed.map_or(Value::FALSE, |n| Value::fixnum(n & 0x0fff_ffff_ffff)));
+}
+
+/// Words copied into messages since the runtime began.
+pub fn words_copied(heap: &mut Heap) -> i64 {
+    let s = state(heap);
+    heap.obj_ref(s, COPIED).as_fixnum()
+}
+
+/// After a run that failed: no task is left to resume. The run queue is
+/// emptied, every task but the first ended, and the first made current. A
+/// mailbox or I-cell that a task waits for keeps the waiter, which will
+/// never run: harmless, as nothing else can wake it.
+pub fn reset(heap: &mut Heap) {
+    let s = state(heap);
+    heap.obj_set(s, FRONT, Value::NULL);
+    heap.obj_set(s, BACK, Value::NULL);
+    heap.tasks_reset();
+}
+
+fn push(heap: &mut Heap, thunk: Value) {
+    let s = state(heap);
+    let back = heap.obj_ref(s, BACK);
+    let back = heap.cons(thunk, back);
+    heap.obj_set(s, BACK, back);
+}
+
+/// The next task to run, or `#f`: the oldest, or, with a seed, one chosen
+/// by it, so that a test can try many orders.
+fn pop(heap: &mut Heap) -> Value {
+    let s = state(heap);
+    let mut front = heap.obj_ref(s, FRONT);
+    if front == Value::NULL {
+        let mut back = heap.obj_ref(s, BACK);
+        while back.is_pair() {
+            front = heap.cons(heap.car(back), front);
+            back = heap.cdr(back);
+        }
+        heap.obj_set(s, BACK, Value::NULL);
+    }
+    if !front.is_pair() {
+        heap.obj_set(s, FRONT, Value::NULL);
+        return Value::FALSE;
+    }
+    let seed = heap.obj_ref(s, SEED);
+    if seed.is_fixnum() {
+        // A linear congruential step, then that many places along.
+        let next = seed.as_fixnum().wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407) & 0x0fff_ffff_ffff;
+        heap.obj_set(s, SEED, Value::fixnum(next));
+        let mut items = Vec::new();
+        let mut l = front;
+        while l.is_pair() {
+            items.push(heap.car(l));
+            l = heap.cdr(l);
+        }
+        let i = (next >> 13) as usize % items.len();
+        let t = items.remove(i);
+        let rest = heap.list_from(&items);
+        heap.obj_set(s, FRONT, rest);
+        return t;
+    }
+    let t = heap.car(front);
+    let rest = heap.cdr(front);
+    heap.obj_set(s, FRONT, rest);
+    t
+}
+
+/// What a message shares with its sender rather than copies: what is
+/// never written (symbols, numbers kept in the heap), procedures and
+/// continuations (code, and what their effects say they do not write), and
+/// the capabilities, I-cells and mailboxes, whose identity is the point.
+/// Everything else a transmissible type allows is immutable data, copied.
+fn shared(heap: &Heap, v: Value) -> bool {
+    if v.is_pair() {
+        return false;
+    }
+    let copied = [kind("string"), kind("bytevector"), kind("bloblet"), kind("sum"), kind("product"), kind("flat-array")];
+    !copied.contains(&heap.bloblet_head(v).kind)
+}
+
+/// `%fx26-sched`'s operation `n` on `a` and `b`. Each operand is checked
+/// to be what the operation takes, so that no call of it can break the
+/// heap; only the scheduler calls it, which the checkers make so.
+pub fn run_op(rt: &mut Runtime, n: i64, a: Value, b: Value) -> Outcome<Value> {
+    let unit = rt.heap.intern("#u");
+    let is = |rt: &Runtime, v: Value, k: u8| v.is_bloblet() && rt.heap.bloblet_kind(v) == k;
+    match n {
+        op::TASK_SWITCH | op::TASK_END if !a.is_fixnum() || !rt.heap.task_live(a.as_fixnum() as usize) => {
+            return rt.fail("%fx26-sched: no such task", &[a]);
+        }
+        op::MAILBOX_PUT | op::MAILBOX_TAKE | op::MAILBOX_WAIT | op::MAILBOX_READY if !is(rt, a, MAILBOX) => {
+            return rt.type_error("a mailbox", a);
+        }
+        op::ICELL_FULL | op::ICELL_WAIT | op::ICELL_VALUE if !is(rt, a, ICELL) => return rt.type_error("an i-cell", a),
+        _ => {}
+    }
+    let heap = &mut rt.heap;
+    Ok(match n {
+        op::TASK_NEW => Value::fixnum(heap.task_new() as i64),
+        op::TASK_SWITCH => Value::fixnum(heap.task_switch(a.as_fixnum() as usize) as i64),
+        op::TASK_END => {
+            if a.as_fixnum() != 0 {
+                heap.task_end(a.as_fixnum() as usize);
+            }
+            unit
+        }
+        op::TASK_CURRENT => Value::fixnum(heap.task_current() as i64),
+        op::PUSH => {
+            push(heap, a);
+            unit
+        }
+        op::POP => pop(heap),
+        op::MAILBOX_NEW => {
+            let m = heap.make_bloblet(MAILBOX, 3, 0, true);
+            heap.set_bloblet_slot(m, MB_FRONT, Value::NULL);
+            heap.set_bloblet_slot(m, MB_BACK, Value::NULL);
+            heap.set_bloblet_slot(m, MB_WAITER, Value::FALSE);
+            m
+        }
+        // The message copied, at the back; the receiver, if it waits, run.
+        op::MAILBOX_PUT => {
+            let (msg, words) = heap.copy_within(b, shared);
+            let s = state(heap);
+            let copied = heap.obj_ref(s, COPIED).as_fixnum();
+            heap.obj_set(s, COPIED, Value::fixnum(copied + words as i64));
+            let back = heap.bloblet_slot(a, MB_BACK);
+            let back = heap.cons(msg, back);
+            heap.set_bloblet_slot(a, MB_BACK, back);
+            let w = heap.bloblet_slot(a, MB_WAITER);
+            if w != Value::FALSE {
+                heap.set_bloblet_slot(a, MB_WAITER, Value::FALSE);
+                push(heap, w);
+            }
+            unit
+        }
+        op::MAILBOX_READY => {
+            let ready = heap.bloblet_slot(a, MB_FRONT).is_pair() || heap.bloblet_slot(a, MB_BACK).is_pair();
+            Value::boolean(ready)
+        }
+        // The oldest message, taken.
+        op::MAILBOX_TAKE => {
+            let mut front = heap.bloblet_slot(a, MB_FRONT);
+            if !front.is_pair() {
+                let mut back = heap.bloblet_slot(a, MB_BACK);
+                while back.is_pair() {
+                    front = heap.cons(heap.car(back), front);
+                    back = heap.cdr(back);
+                }
+                heap.set_bloblet_slot(a, MB_BACK, Value::NULL);
+            }
+            if !front.is_pair() {
+                heap.set_bloblet_slot(a, MB_FRONT, Value::NULL);
+                return rt.fail("%fx26-sched: an empty mailbox taken from", &[]);
+            }
+            let m = heap.car(front);
+            let rest = heap.cdr(front);
+            heap.set_bloblet_slot(a, MB_FRONT, rest);
+            m
+        }
+        op::MAILBOX_WAIT => {
+            heap.set_bloblet_slot(a, MB_WAITER, b);
+            unit
+        }
+        op::ICELL_FULL => heap.bloblet_slot(a, ICELL_FULL),
+        op::ICELL_VALUE => heap.bloblet_slot(a, ICELL_VALUE),
+        op::ICELL_WAIT => {
+            let ws = heap.bloblet_slot(a, ICELL_WAITERS);
+            let ws = heap.cons(b, ws);
+            heap.set_bloblet_slot(a, ICELL_WAITERS, ws);
+            unit
+        }
+        op::ICELL_PUT => return icell_put(rt, a, b),
+        // `(sum some tag)`, the scheduler's prompt tag, or `(sum none #u)`
+        // before the scheduler has made one.
+        op::TAG => {
+            let s = state(heap);
+            let t = heap.obj_ref(s, TAG);
+            let sum = kind("sum");
+            if t == Value::FALSE {
+                let none = heap.intern("none");
+                heap.make_frozen(sum, &[none, unit])
+            } else {
+                let some = heap.intern("some");
+                heap.make_frozen(sum, &[some, t])
+            }
+        }
+        op::SET_TAG => {
+            let s = state(heap);
+            heap.obj_set(s, TAG, a);
+            unit
+        }
+        // A reap, the current task's newest place: a process's own.
+        op::REAP_ENTER => Value::fixnum(heap.reap_enter() as i64),
+        _ => return rt.fail("%fx26-sched: no such operation", &[Value::fixnum(n)]),
+    })
+}
+
+/// A new I-cell, empty, in the heap: shared by the processes it is sent
+/// to, so never in a place that could end before them.
+pub fn make_icell(heap: &mut Heap) -> Value {
+    let c = heap.make_bloblet(ICELL, 3, 0, true);
+    heap.set_bloblet_slot(c, ICELL_FULL, Value::FALSE);
+    heap.set_bloblet_slot(c, ICELL_VALUE, Value::FALSE);
+    heap.set_bloblet_slot(c, ICELL_WAITERS, Value::NULL);
+    c
+}
+
+/// I-cell `c` given `v`, its one write; the tasks waiting for it run.
+pub fn icell_put(rt: &mut Runtime, c: Value, v: Value) -> Outcome<Value> {
+    if !c.is_bloblet() || rt.heap.bloblet_kind(c) != ICELL {
+        return rt.type_error("an i-cell", c);
+    }
+    if rt.heap.bloblet_slot(c, ICELL_FULL) != Value::FALSE {
+        return rt.fail("an i-cell written twice", &[v]);
+    }
+    let heap = &mut rt.heap;
+    heap.set_bloblet_slot(c, ICELL_VALUE, v);
+    heap.set_bloblet_slot(c, ICELL_FULL, Value::TRUE);
+    let mut ws = heap.bloblet_slot(c, ICELL_WAITERS);
+    heap.set_bloblet_slot(c, ICELL_WAITERS, Value::NULL);
+    // In the order they began to wait.
+    let mut order = Vec::new();
+    while ws.is_pair() {
+        order.push(heap.car(ws));
+        ws = heap.cdr(ws);
+    }
+    for w in order.into_iter().rev() {
+        push(heap, w);
+    }
+    Ok(heap.intern("#u"))
+}

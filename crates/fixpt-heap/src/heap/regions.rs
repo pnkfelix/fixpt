@@ -280,6 +280,11 @@ impl Heap {
         std::mem::replace(&mut self.regions.task, t)
     }
 
+    /// Whether task `t` is live.
+    pub fn task_live(&self, t: usize) -> bool {
+        self.regions.stacks.get(t).is_some_and(|s| s.is_some())
+    }
+
     /// The task current.
     pub fn task_current(&self) -> usize {
         self.regions.task

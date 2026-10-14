@@ -15,6 +15,7 @@ pub mod port;
 pub mod prim;
 pub mod print;
 pub mod runtime;
+pub mod sched;
 pub mod world;
 
 pub use error::{Outcome, Thrown};

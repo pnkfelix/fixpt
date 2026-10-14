@@ -178,6 +178,16 @@ pub const KINDS: &[Kind] = &[
     // into the heap (none where it was flushed in place, on the stack); and
     // its raw words (`f64`s), its suffix.
     Kind { name: "native-frame", code: 45, traced: true },
+    // An I-cell (`(icell T R)`): field 2 whether it is full, field 3 its
+    // value, field 4 the tasks waiting for it, a list of thunks (FX-26's
+    // processes, `fixpt_runtime::sched`). Its own kind, so that a message
+    // copied between processes shares it, as a capability, rather than
+    // copying it.
+    Kind { name: "icell", code: 46, traced: true },
+    // A process's mailbox (`(addr M R)`, `fixpt_runtime::sched`): fields 2
+    // and 3 its messages, the oldest first then the newest first; field 4
+    // the task waiting for one, a thunk, or `#f`.
+    Kind { name: "mailbox", code: 47, traced: true },
 ];
 
 /// A flat array's element layouts: what `(flatlayout T)` is at run time.

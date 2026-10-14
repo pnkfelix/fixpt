@@ -133,7 +133,11 @@
                     (a-goto (r) (a-goto (k-benv-region env r)))
                     (a-comefrom (r) (a-comefrom (k-benv-region env r)))
                     (a-await (r) (a-await (k-benv-region env r)))
+                    (a-init (r) (a-init (k-benv-region env r)))
+                    (a-send (r) (a-send (k-benv-region env r)))
+                    (a-receive (r) (a-receive (k-benv-region env r)))
                     (a-spin () x)
+                    (a-nondet () x)
                     (a-io (k) x)
                     (a-var (v) (a-var (k-benv-var env v)))
                     ;; Its variable, and what it was given, as named here.

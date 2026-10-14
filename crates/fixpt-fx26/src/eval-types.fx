@@ -21,7 +21,11 @@
   (maxeff (io stdin) (io stdout) (io stderr) (io fs-read) (io fs-write) (io clock) (io args)
           (io exit)))
 
-(define-effect runs (maxeff stores (read @x) (write @x) (alloc @x) io-any))
+;; And the scheduler's state, for the processes and `par` a program makes
+;; (`fx26:processes.fx`, which the program loads and this runs).
+(define-effect scheduling (maxeff (read @sched) (write @sched) (alloc @sched)))
+
+(define-effect runs (maxeff stores (read @x) (write @x) (alloc @x) io-any scheduling))
 
 (define-effect evals (maxeff runs (goto @x) (comefrom @x) spin))
 
@@ -41,7 +45,8 @@
   (o-unit)
   (o-product (listof (pairof symbol val @v) @v))
   (o-sum symbol val)
-  (o-icell (ref bool @v) (ref val @v))
+  ;; The machines' own, which the scheduler's tasks can wait for.
+  (o-icell (icell val @v))
   (o-blob (arrayof val @v) (arrayof int @v))
   ;; A blobref (`TODO.md` §77): its owner, a bloblet, and a byte of its
   ;; suffix.

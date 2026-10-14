@@ -2481,17 +2481,24 @@ frame slots, as the suffix. Left:
 
 ## 92. Concurrency: processes and `par` (kayak's request, 2026-10-13)
 
-kayak's request, in its order (`docs/research/actors-and-distribution.md`,
-`docs/research/type-and-effect-directions.md` §3), meaning the same under
-green threads and OS threads:
-1. **Q1, per-task place stacks**: done (`DONE.md` §92).
-2. **M1, H1, M3 and I-cells that suspend**: `spawn`, `(addr M R)`,
-   `send` and `receive` with their effects, the transmissible types,
-   `nondet`; a process's own place; messages copied; replies through
-   I-cells that suspend; a deadlock an error. The `init` effect (P4) comes
-   with it, since a process that fills a reply's cell must not be said to
-   write.
-3. **P5 and P7**: the interference table, and `par`.
-
-Out of scope, as kayak asked: transfer of mutable data, session types,
-distribution, links and monitors.
+Built, all three of kayak's stages (`DONE.md` §92; the design,
+`docs/research/processes.md`; the forms, `docs/fx26.md`, "Processes and
+`par`"). Left:
+- **H3: copying against sharing**, for messages of 1 to 10,000 words
+  (`fixpt_runtime::sched::words_copied` counts them), to decide whether
+  large frozen data is shared.
+- **Q2: preemption at fuel polls**, so that a process that spins cannot
+  starve another (fairness, which the semantics promises and the prototype
+  does not keep).
+- **A `sendable` kind**, `data ≤ sendable ≤ type`, for servers
+  polymorphic in their messages; and `self`, a process's own address.
+- **The cost of a switch** (the actors note's A4): a capture and an abort
+  for each wait.
+- **Next (the user's, 2026-10-13): `select` over waits, then `race`, best
+  effort** (`docs/research/processes.md`, "Next"): `select`'s first
+  I-cell, message or deadline, `nondet`; `race`'s branches cancellable
+  (no write, fill, send or I/O outside), so whether losers are stopped is
+  the implementation's, and only termination differs.
+- Out of scope, as kayak asked: transfer of mutable data (by consuming a
+  place's handle, after H3), session types, distribution, links and
+  monitors.

@@ -59,9 +59,22 @@
                    (not (string=? (k-list-head (car ts)) "dlambda")))
               (the k-names (cons (car (extract it 2)) rest))
               rest)))))
+;; Whether the file read at `base` is built in (`fx26:…`): while one is
+;; checked, the standard names only it may name are seen
+;; (`k-built-in-only?`).
+(define k-built-in-at? (subr (maxeff checks spin) (loaded-files int) bool)
+  (lambda (fs base)
+    (cond ((null? fs) #f)
+          ((= (extract (car fs) 2) base)
+           (let ((p (extract (car fs) 4)))
+             (and (>= (string-length p) 5) (string=? (substring p 0 5) "fx26:"))))
+          (else (k-built-in-at? (cdr fs) base)))))
 (define k-in-loaded (subr (maxeff checks spin) (k-thunk-unit int int int) unit)
   (lambda (f base a b)
-    (let ((r (prompt k-tag (begin (f) (k-done (k-te 0 nil))) (lambda (r) r))))
+    (let* ((n (if (k-built-in-at? (get loaded) base) 1 0))
+           (in (set k-in-built-in (+ (get k-in-built-in) n)))
+           (r (prompt k-tag (begin (f) (k-done (k-te 0 nil))) (lambda (r) r)))
+           (out (set k-in-built-in (- (get k-in-built-in) n))))
       (tagcase r
         (k-err (m ea eb)
           (if (and (>= ea base) (< ea (+ base load-base)))

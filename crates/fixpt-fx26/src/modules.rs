@@ -20,9 +20,12 @@ impl Checker {
     /// it; the module's type, its abstract types bound in it.
     pub(crate) fn synth_module(&mut self, e: ExpId, items: &[ModItem]) -> R<(TyId, Effect)> {
         // Read from a file: it sees only the standard environment.
-        if let Some((_, _, file)) = self.loaded.get(&e).cloned() {
+        if let Some((path, _, file)) = self.loaded.get(&e).cloned() {
             let outer = self.hidden.replace(((self.standard_len, self.env.len()), (self.standard_dscope, self.dscope.len())));
+            let built_in = crate::built_in_module(&path).is_some() as usize;
+            self.in_built_in += built_in;
             let r = self.synth_module_here(e, items);
+            self.in_built_in -= built_in;
             self.hidden = outer;
             return r.map_err(|err| self.in_loaded(err, file));
         }
@@ -557,6 +560,10 @@ impl Checker {
             }
             return Ok((t, Effect::pure()));
         }
+        if let Some(t) = self.library_type(m, body) {
+            self.note_library_use(e, m, body);
+            return Ok((t, Effect::pure()));
+        }
         let Some(mt) = self.lookup(m) else {
             return Err(FxError::at(span, format!("`{}` is not bound", self.interner.name(m))));
         };
@@ -582,6 +589,33 @@ impl Checker {
         })?;
         let eff = self.mask(e, &naming.union(&be), t);
         Ok((t, eff))
+    }
+
+    /// The type of `(with m body)` as the forms of processes and `par` see
+    /// it, if `m` is the hidden global of the scheduler's load
+    /// (`check::PROCESSES`) and `body` names one of its procedures: the
+    /// standard `%processes:` binding's, not the file's own, in which a task
+    /// may do anything. Reading the hidden global is no effect: it never
+    /// changes.
+    pub(crate) fn library_type(&self, m: Sym, body: ExpId) -> Option<TyId> {
+        if self.shared_loads.get(crate::check::PROCESSES) != Some(&m) {
+            return None;
+        }
+        let crate::ast::Exp::Var(n) = *self.arena.exp_at(body) else { return None };
+        let name = format!("%processes:{}", self.interner.name(n));
+        let s = self.interner.get(&name)?;
+        self.standard_type(s)
+    }
+
+    /// The member `body` names, noted for the compilers as an ordinary
+    /// `with`'s are (`Facts::with_vals`).
+    fn note_library_use(&mut self, e: ExpId, m: Sym, body: ExpId) {
+        let crate::ast::Exp::Var(n) = *self.arena.exp_at(body) else { return };
+        let Some(mt) = self.lookup(m) else { return };
+        if let Ty::Module { vals, .. } = self.arena.get(self.arena.resolve(mt)) {
+            let used: Vec<(Sym, usize)> = vals.iter().enumerate().filter(|(_, (x, _))| *x == n).map(|(i, (x, _))| (*x, i)).collect();
+            self.facts.with_vals.insert(e, used);
+        }
     }
 
     /// A module's type, bound to `name`: its abstract types renamed for this

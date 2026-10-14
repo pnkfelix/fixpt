@@ -72,7 +72,7 @@ fn every_program_compiled() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
     let mut report = Vec::new();
     let mut ran = 0;
-    for sub in ["bidirectional", "control", "run", "pldi89", "bloblet", "datum", "modules", "higher-kinds"] {
+    for sub in ["bidirectional", "control", "run", "pldi89", "bloblet", "datum", "modules", "higher-kinds", "processes"] {
         let mut names: Vec<_> = std::fs::read_dir(format!("{dir}/{sub}")).unwrap().map(|e| e.unwrap().path()).collect();
         names.sort();
         for path in names {
@@ -85,7 +85,7 @@ fn every_program_compiled() {
             let compiled = common::with_own(|s| s.compile_with_own_compiler(&program)).map_err(|e| e.to_string());
             ran += 1;
             let name = path.file_name().unwrap().to_string_lossy().to_string();
-            if compiled.as_deref() != Ok(lowered.as_str()) {
+            if compiled.as_deref().map(common::one_wording) != Ok(common::one_wording(&lowered)) {
                 report.push(format!("{sub}/{name}: compiled {compiled:?}, lowered {lowered:?}"));
             }
         }
@@ -127,7 +127,7 @@ fn every_program_on_every_machine() {
             s
         })
         .collect();
-    for sub in ["bidirectional", "control", "run", "pldi89", "bloblet", "datum", "modules", "higher-kinds"] {
+    for sub in ["bidirectional", "control", "run", "pldi89", "bloblet", "datum", "modules", "higher-kinds", "processes"] {
         let mut names: Vec<_> = std::fs::read_dir(format!("{dir}/{sub}")).unwrap().map(|e| e.unwrap().path()).collect();
         names.sort();
         for path in names {
@@ -139,7 +139,7 @@ fn every_program_on_every_machine() {
             };
             for ((name, ..), s) in machines.iter().zip(&mut sessions) {
                 let compiled = s.compile_with_own_compiler(&program).map_err(|e| e.to_string());
-                if compiled.as_deref() != Ok(lowered.as_str()) {
+                if compiled.as_deref().map(common::one_wording) != Ok(common::one_wording(&lowered)) {
                     let file = path.file_name().unwrap().to_string_lossy().to_string();
                     report.push(format!("{name} {sub}/{file}: {compiled:?}, lowered {lowered:?}"));
                 }

@@ -235,7 +235,7 @@ impl Checker {
     pub(crate) fn d_writes(&self, d: &D, r: Region) -> bool {
         match d {
             D::Region(x) => *x == r,
-            D::Effect(e) => e.0.contains(&crate::ast::Atom::Write(r)),
+            D::Effect(e) => e.0.contains(&crate::ast::Atom::Write(r)) || e.0.contains(&crate::ast::Atom::Init(r)),
             D::Fun(f) => match self.arena.get(*f) {
                 Ty::Lam { body, .. } => self.d_writes(body, r),
                 _ => false,

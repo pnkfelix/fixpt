@@ -272,6 +272,15 @@ impl Checker {
                 self.plain_fx(e);
                 Ok(Effect::pure())
             }
+            // A procedure of the scheduler's, at the type its form gives
+            // it (`library_type`).
+            Exp::With { module, body } if self.library_type(module, body).is_some() => {
+                let t = self.library_type(module, body).expect("matched");
+                let inst = if matches!(self.arena.get(t), Ty::Poly { .. }) { self.instantiate_against(t, expected, span)? } else { t };
+                self.expect(e, inst, expected)?;
+                self.with_as(e, module, body, None)?;
+                Ok(Effect::pure())
+            }
             // `(with m e)` checked as its body is, `m`'s values in scope:
             // so an `include`'s module item, `(with %include e)`, is checked
             // against the type the item declares (`TODO.md` §69).
@@ -534,6 +543,12 @@ impl Checker {
             op = *body;
         }
         self.plain_fx(op);
+        // The forms of processes and `par` (`processes.rs`).
+        match (self.library_op(fun).map(str::to_string).as_deref(), args) {
+            (Some("spawn-process"), [body]) => return self.synth_spawn(e, fun, *body, expected),
+            (Some("par2"), _) => return self.synth_par(e, fun, args),
+            _ => {}
+        }
         // `(certify-length v k)`: `v`'s value as a `(nlist T k)`, where
         // `length-is?` has just found it so; nowhere else.
         if let Some(op) = self.standard_ref(fun)

@@ -1,3 +1,10 @@
+> **Built (2026-10-13), kayak's request:** Q1, M1, H1, M3, Q3 (I-cells
+> that suspend), and from `type-and-effect-directions.md` P4, P5 and P7
+> (`par`); how, and what changed of the plan here, is
+> `docs/research/processes.md`, the forms `docs/fx26.md`, "Processes and
+> `par`". The scheduler is a library over prompts, as stage A planned,
+> but typed by the checkers' own rules, and with a process's own place.
+
 > **Where this stands (2026-09-27).** Since this note was written, regions
 > are being split into places (for allocation) and regions (for analysis):
 > `docs/research/places-and-regions.md`. Read "a reap owned by a process"

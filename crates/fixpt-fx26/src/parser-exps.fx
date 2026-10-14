@@ -17,6 +17,9 @@
 ;; The parser's first part at these regions, the reader in it, and what this
 ;; file uses of them.
 (define parser-module ((proj (load-module "fx26:parser.fx") rs re rm rc rp)))
+(define forms-module ((proj (load-module "fx26:parser-forms.fx") rs re rm rc rp)))
+(define process-form (with forms-module process-form))
+(define processes (with forms-module processes))
 (define eager-reader-module (with parser-module eager-reader-module))
 (define-type data (select eager-reader-module data))
 (define-type syn (select eager-reader-module syn))
@@ -442,6 +445,9 @@
                 (e-let (parse-let-bindings (syn-items (nth items 1) "let bindings"))
                        (parse-body (drop items 2) a b) a b)))
         ((begin) (parse-body (cdr items) a b))
+        ;; Processes and `par` (`parser-forms.fx`).
+        ((spawn send receive par icell-get icell-put!)
+         (parse-exp (process-form head items (parse-loaded processes #f (car items) a b) a b)))
         ((cond) (parse-cond (cdr items) a b))
         ((case) (parse-case (cdr items) a b))
         ((typecase) (parse-typecase items a b))
@@ -927,6 +933,7 @@
                    (cycle (load-cycle key path)))
               (begin
                 (cond ((not (string=? cycle "")) (pfail-at cycle a b))
+                      ((< (extract (car f) 2) 0) #u)
                       ((shared-key? key (get shared-keys)) #u)
                       (else
                        (let* ((pushed (set loading-keys (cons (cons key path) (get loading-keys))))

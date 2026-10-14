@@ -1481,6 +1481,83 @@ impl Heap {
         map(root)
     }
 
+    /// A copy of what `root` reaches in this heap, but for what `share`
+    /// says to keep as it is (and what that reaches): pairs and bloblets,
+    /// sharing and cycles kept, raw suffixes as they are, frozen flags too.
+    /// For a message sent between FX-26's processes, which shares nothing
+    /// mutable with its sender (`fixpt_runtime::sched`). With the words
+    /// copied. Nothing collects meanwhile: allocation never does.
+    pub fn copy_within(&mut self, root: Value, share: impl Fn(&Heap, Value) -> bool) -> (Value, usize) {
+        use std::collections::hash_map::Entry;
+        let mut made: HashMap<u64, Value> = HashMap::new();
+        let mut order: Vec<Value> = Vec::new();
+        let mut todo = vec![root];
+        let mut words = 0;
+        while let Some(v) = todo.pop() {
+            if !v.is_ref() {
+                continue;
+            }
+            // A suffix ref is its owner's copy, at the same offset.
+            if v.is_suffix_ref() {
+                todo.push(Value::bloblet(v.owner() + self.base));
+                continue;
+            }
+            if share(self, v) {
+                continue;
+            }
+            let Entry::Vacant(slot) = made.entry(v.raw()) else { continue };
+            if v.is_pair() {
+                slot.insert(self.cons(Value::NULL, Value::NULL));
+                order.push(v);
+                words += 2;
+                todo.extend([self.car(v), self.cdr(v)]);
+                continue;
+            }
+            let head = self.bloblet_head(v);
+            let trailer = self.bloblet_has_trailer(v);
+            let copy = self.make_bloblet(head.kind, head.fields - trailer as usize, head.bytes, trailer);
+            slot.insert(copy);
+            order.push(v);
+            words += 1 + head.fields + head.bytes.div_ceil(8);
+            for k in (1 + trailer as usize)..=head.fields {
+                todo.push(self.slot(self.ix(v) - k));
+            }
+        }
+        let base = self.base;
+        let map = |x: Value| match x {
+            x if x.is_suffix_ref() => match made.get(&Value::bloblet(x.owner() + base).raw()) {
+                Some(owner) => rebuilt(base, x, *owner),
+                None => x,
+            },
+            x if x.is_ref() => made.get(&x.raw()).copied().unwrap_or(x),
+            x => x,
+        };
+        for v in order {
+            let copy = made[&v.raw()];
+            if v.is_pair() {
+                let (a, d) = (map(self.car(v)), map(self.cdr(v)));
+                self.set_car(copy, a);
+                self.set_cdr(copy, d);
+                continue;
+            }
+            let head = self.bloblet_head(v);
+            let trailer = self.bloblet_has_trailer(v);
+            for k in (1 + trailer as usize)..=head.fields {
+                let x = map(self.slot(self.ix(v) - k));
+                self.set_bloblet_slot(copy, k, x);
+            }
+            for j in 0..head.bytes.div_ceil(8) {
+                let w = self.word(self.ix(v) + j);
+                let at = self.ix(copy) + j;
+                self.set_word(at, w);
+            }
+            if head.fields_frozen || head.suffix_frozen {
+                self.freeze_bloblet(copy, head.fields_frozen, head.suffix_frozen);
+            }
+        }
+        (map(root), words)
+    }
+
     /// Freeze a bloblet's fields, its suffix, or both. There is no thawing.
     pub fn freeze_bloblet(&mut self, v: Value, fields: bool, suffix: bool) {
         let main = self.bloblet_main(v);

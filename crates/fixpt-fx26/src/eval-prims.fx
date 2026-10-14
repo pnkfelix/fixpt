@@ -242,27 +242,33 @@
       (prim! 'sum? (lambda (xs) (ev-sum? (ev-arg xs 0))))
       (prim! 'product? (lambda (xs) (ev-product? (ev-arg xs 0)))))))
 
-;; An i-cell: whether it is full, and its value.
-(define* as-icell (subr (maxeff evals spin) (val) (pairof (ref bool @v) vcell @v))
+;; An i-cell, the machines' own.
+(define* as-icell (subr (maxeff evals spin) (val) (icell val @v))
   (lambda (v)
     (tagcase (as-other v "an i-cell")
-      (o-icell (full c) (cons full c))
+      (o-icell (c) c)
       (else y (efail-expected "an i-cell")))))
 
 (define* ev-make-icell (subr (maxeff (alloc @v) spin) () val)
-  (lambda () (o-icell (new #f) (new the-unit))))
+  (lambda () (o-icell (the (icell val @v) (make-icell)))))
 
-(define* ev-icell-put! (subr (maxeff evals spin) (vals) val)
+;; What the scheduler (`fx26:processes.fx`, which a program's processes
+;; and `par` load, and this runs) asks of the runtime, `%sched`'s operation
+;; `n`: given the machines' i-cell where one is taken, and the one sum an
+;; operation makes, the scheduler's prompt tag or none, made one of the
+;; program's.
+(define* ev-sched (subr (maxeff evals spin) (vals) val)
   (lambda (xs)
-    (let ((c (as-icell (ev-arg xs 0))))
-      (if (get (car c))
-          (efail "an i-cell written twice")
-          (begin (set (cdr c) (ev-arg xs 1)) (set (car c) #t) the-unit)))))
-
-(define* ev-icell-get (subr (maxeff evals spin) (vals) val)
-  (lambda (xs)
-    (let ((c (as-icell (ev-arg xs 0))))
-      (if (get (car c)) (get (cdr c)) (efail "an i-cell read before it was written")))))
+    (let ((n (as-int (ev-arg xs 0))) (a (ev-arg xs 1)) (b (ev-arg xs 2)))
+      (cond ((and (= n 14) ((proj %sched (icell val @v) val bool) 10 (as-icell a) b))
+             (efail "an i-cell written twice"))
+            ((or (= n 10) (= n 11) (= n 14) (= n 15))
+             ((proj %sched (icell val @v) val val) n (as-icell a) b))
+            ((= n 12)
+             (tagcase ((proj %sched val val (sumof (some val) (none unit))) n a b)
+               (some t (o-sum 'some t))
+               (none u (o-sum 'none the-unit))))
+            (else ((proj %sched val val val) n a b))))))
 
 (define* ev-array-set! (subr (maxeff evals spin) (vals) val)
   (lambda (xs)
@@ -377,8 +383,7 @@
       (prim! 'get (lambda (xs) (get (as-ref (ev-arg xs 0)))))
       (prim! 'set (lambda (xs) (begin (set (as-ref (ev-arg xs 0)) (ev-arg xs 1)) the-unit)))
       (prim! 'make-icell (lambda (xs) (ev-make-icell)))
-      (prim! 'icell-put! (lambda (xs) (ev-icell-put! xs)))
-      (prim! 'icell-get (lambda (xs) (ev-icell-get xs)))
+      (prim! '%sched (lambda (xs) (ev-sched xs)))
       (prim! 'make-array (lambda (xs) (ev-make-array (ev-arg xs 0) (ev-arg xs 1))))
       (prim! 'array-ref (lambda (xs) (array-ref (as-array (ev-arg xs 0)) (as-int (ev-arg xs 1)))))
       (prim! 'array-set! (lambda (xs) (ev-array-set! xs)))

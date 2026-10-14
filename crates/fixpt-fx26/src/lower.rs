@@ -441,6 +441,7 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("escape", "%fx26-abort", false),
     ("call-with-composable-continuation", "%fx26-call/comp", false),
     ("make-continuation-mark-key", "%fx26-make-mark-key", false),
+    ("%sched", "%fx26-sched", false),
     ("with-mark", "%fx26-with-mark", false),
     ("first-mark", "%fx26-first-mark", false),
     ("current-marks", "%fx26-current-marks", false),

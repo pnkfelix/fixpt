@@ -132,12 +132,14 @@ are in the last section, "Log: the glance's details", and in
   concurrency as region scoping). Each has open questions for the user.
 
 **In progress**
-- **Concurrency, kayak's request** (2026-10-13, `TODO.md` §92):
-  processes that share only immutable data (`spawn`, `(addr M R)`,
-  `send`, `receive`, `nondet`, I-cells that suspend) and deterministic
-  `par`, meaning the same under green threads and OS threads. Stage 1
-  done: each task has its own stack of places (Q1). Next: processes, then
-  `par`.
+- **Concurrency, kayak's request** (2026-10-13, `TODO.md` §92,
+  `docs/research/processes.md`): built, all three stages. Processes that
+  share only immutable data (`spawn`, `(addr M R)`, `send`, `receive`,
+  transmissible types, `nondet`, I-cells that suspend, a deadlock an
+  error) and deterministic `par` (FX's interference table), meaning the
+  same under green threads and OS threads; each task its own stack of
+  places (Q1). On every machine, a scheduler written in FX-26. Left:
+  copying against sharing (H3), preemption (Q2), a `sendable` kind.
 - **The collector** (the user's, 2026-09-29;
   `docs/research/generational-gc.md`): done, all four. Stack maps (each
   native frame's header word, a mask of its live slots); a card-marking

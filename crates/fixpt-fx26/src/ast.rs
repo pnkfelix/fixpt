@@ -167,6 +167,15 @@ pub enum Atom {
     /// Reads an I-cell in this region, which waits for its one write: it
     /// must stay after writes to the region, but commutes with other reads.
     Await(Region),
+    /// Fills an I-cell in this region, its one write (FX's `init`): a write
+    /// to every analysis but `par`'s, against which it commutes with reads
+    /// and awaits (`docs/fx26.md`, "Processes"). Within `(write r)`.
+    Init(Region),
+    /// Sends a message to a process whose address is in this region.
+    Send(Region),
+    /// Takes a message from the mailbox of the process whose own place
+    /// this is: only a process's body can.
+    Receive(Region),
     /// May run for an unbounded time: a recursive call, a call of a closure
     /// that may have been fetched from the store, or through a recursive
     /// type. It has no region, so nothing masks it
@@ -176,6 +185,10 @@ pub enum Atom {
     /// (`TODO.md` §84). No region, so nothing masks it; and no two commute,
     /// whatever their kinds: to the compilers each is "anything else".
     Io(IoKind),
+    /// May give a different answer from run to run, as messages arrive in
+    /// one order or another (Clinger's arrival order), or as processes'
+    /// I/O interleaves. No region, so nothing masks it, as `spin`.
+    Nondet,
     /// An effect variable.
     Var(DVar),
     /// `(e d …)`: a description function to an effect, a variable, applied
@@ -243,10 +256,16 @@ impl EffectApps {
 impl Atom {
     pub fn region(self) -> Option<Region> {
         match self {
-            Atom::Read(r) | Atom::Write(r) | Atom::Alloc(r) | Atom::Goto(r) | Atom::Comefrom(r) | Atom::Await(r) => {
-                Some(r)
-            }
-            Atom::Var(_) | Atom::Spin | Atom::Io(_) | Atom::App(_) => None,
+            Atom::Read(r)
+            | Atom::Write(r)
+            | Atom::Alloc(r)
+            | Atom::Goto(r)
+            | Atom::Comefrom(r)
+            | Atom::Await(r)
+            | Atom::Init(r)
+            | Atom::Send(r)
+            | Atom::Receive(r) => Some(r),
+            Atom::Var(_) | Atom::Spin | Atom::Io(_) | Atom::Nondet | Atom::App(_) => None,
         }
     }
 }
@@ -269,13 +288,15 @@ impl Effect {
         Effect(self.0.union(&other.0).copied().collect())
     }
     /// Subeffecting: every atom of `self` is in `other`, or, if it reads or
-    /// writes one global, `other` does so to `@globals`.
+    /// writes one global, `other` does so to `@globals`; an I-cell's fill,
+    /// `(init r)`, is within `(write r)`.
     pub fn within(&self, other: &Effect) -> bool {
         self.0.iter().all(|a| {
             other.0.contains(a)
                 || match a {
                     Atom::Read(Region::Global(_)) => other.0.contains(&Atom::Read(Region::Globals)),
                     Atom::Write(Region::Global(_)) => other.0.contains(&Atom::Write(Region::Globals)),
+                    Atom::Init(r) => other.0.contains(&Atom::Write(*r)),
                     _ => false,
                 }
         })

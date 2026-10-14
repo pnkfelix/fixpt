@@ -125,8 +125,12 @@ impl Checker {
             Atom::Goto(r) => ("goto", r),
             Atom::Comefrom(r) => ("comefrom", r),
             Atom::Await(r) => ("await", r),
+            Atom::Init(r) => ("init", r),
+            Atom::Send(r) => ("send", r),
+            Atom::Receive(r) => ("receive", r),
             Atom::Var(v) => return self.dvar_text(v, 'f'),
             Atom::Spin => return "spin".to_string(),
+            Atom::Nondet => return "nondet".to_string(),
             Atom::Io(k) => return format!("(io {})", k.name()),
             Atom::App(n) => {
                 let (head, args) = self.arena.effect_apps.parts(n);

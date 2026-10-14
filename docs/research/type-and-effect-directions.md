@@ -193,6 +193,9 @@ keep elsewhere:
 
 ## 3. Concurrency, and processes as distinct from functions
 
+*Built 2026-10-13 (kayak's request): P4, P5, P6 (I-cells that suspend)
+and P7, with processes, in `docs/research/processes.md`.*
+
 *Refined 2026-09-27 by `docs/research/actors-and-distribution.md`, which
 takes the Actor model and Erlang as the model, for distribution as much
 as for local concurrency, and whose tasks (A1–N6) replace P1–P3, P6 and

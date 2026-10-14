@@ -81,6 +81,18 @@ fn io_is_not_run_early() {
     assert_eq!(speculate(&mut s, "(write-out \"early\")"), Speculation::NotLicensed("(io stdout)".into()));
 }
 
+/// Nor is anything that sends or receives (`docs/fx26.md`, "Processes and
+/// `par`"): a process made early would run, and a message sent early would
+/// arrive.
+#[test]
+fn processes_are_not_run_early() {
+    let mut s = session();
+    run(&mut s, "(define w (addr int @w) (spawn (box int p) (begin (receive box) #u)))");
+    assert_eq!(speculate(&mut s, "(send w 1)"), Speculation::NotLicensed("(send @w)".into()));
+    let early = speculate(&mut s, "(spawn (box int p) (begin (receive box) #u))");
+    assert!(matches!(early, Speculation::NotLicensed(_)), "{early:?}");
+}
+
 #[test]
 fn definitions_and_errors_are_not_run() {
     let mut s = session();

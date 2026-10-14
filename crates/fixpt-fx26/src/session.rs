@@ -64,6 +64,10 @@ pub struct Fx26Session {
     /// ones before (`check-more`), and compiled alone against the globals
     /// they made, which the compiler keeps.
     own_begun: bool,
+    /// The loads whose hidden globals this session's program has made, by
+    /// key (`syn::set_shared_made`): forms compiled one by one make none of
+    /// them again. Forgotten as a whole program begins.
+    shared_made: std::collections::HashSet<String>,
     /// How a redefinition that would break definitions is decided: asked of
     /// the driver, or, with none, `Redefine::Break`.
     pub redefine: Option<fn(&Redefinition) -> Redefine>,
@@ -432,6 +436,7 @@ impl Fx26Session {
             breaks_held: false,
             own_made: false,
             own_begun: false,
+            shared_made: Default::default(),
             redefine: None,
             next_redefine: None,
             show_words: false,
@@ -643,10 +648,24 @@ impl Fx26Session {
     /// not run.
     pub fn run(&mut self, form: &Syntax) -> R<Outcome> {
         let out = self.run_defining(form);
+        // A run that failed leaves no process to resume: a failure in any
+        // ends the run (`docs/fx26.md`, "Processes").
+        let failed = !matches!(&out, Ok(o) if o.value.is_ok());
         // No body of a region runs once a form is done: any region still
         // live was left by an error, or an escape no prompt ended.
-        self.scheme.scope(|s| s.runtime_unrooted().heap.regions_exit_to(0));
+        self.scheme.scope(|s| {
+            let heap = &mut s.runtime_unrooted().heap;
+            if failed {
+                fixpt_runtime::sched::reset(heap);
+            }
+            heap.regions_exit_to(0)
+        });
         out
+    }
+
+    /// A whole program begins with no process from one before.
+    fn processes_forgotten(&mut self) {
+        self.scheme.scope(|s| fixpt_runtime::sched::reset(&mut s.runtime_unrooted().heap));
     }
 
     /// `form`, run under redefinition (`Checker::top_defining`), as the
@@ -680,11 +699,16 @@ impl Fx26Session {
         // The hidden globals of the files it loads first, quietly.
         let mut first = String::new();
         for (top, f) in done.hoisted {
+            let shared = match &top {
+                Top::Define { name, .. } => self.checker.interner.name(*name).strip_prefix("%shared:").map(str::to_string),
+                _ => None,
+            };
             let mut o = self.run_checked(top, &f, false)?;
             if o.value.is_err() {
                 o.printed.insert_str(0, &first);
                 return Ok(o);
             }
+            self.shared_made.extend(shared);
             first.push_str(&o.printed);
         }
         let mut out = None;
@@ -768,6 +792,17 @@ impl Fx26Session {
         Ok(())
     }
 
+    /// Tell the checker written in FX-26 that the text it checks next is a
+    /// module file built in, or no longer (`check-built-in!`).
+    fn check_built_in(&mut self, on: bool) -> R<()> {
+        self.own_pieces()?;
+        let mark = self.scheme.root_mark();
+        let v = self.scheme.make(|_| fixpt_heap::Value::boolean(on));
+        let r = self.scheme.call_global(&format!("{READER_PREFIX}check-built-in!"), &[v]);
+        self.scheme.release_to(mark);
+        r.map(|_| ()).map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), e.to_string()))
+    }
+
     fn run_checked_in(&mut self, top: Top, form: &Syntax, again: bool) -> R<Outcome> {
         let code = lower_top(&self.checker, &mut self.globals, &top);
         if self.strategy != Strategy::Lower {
@@ -824,11 +859,20 @@ impl Fx26Session {
                 // Checked against the type the definition says, if it says
                 // one: a `lambda`'s parameters may be typed only by it.
                 let w = |s: &Syntax| fixpt_read::write_syntax(s, &self.checker.interner);
+                let built_in = ty.is_none().then(|| built_in_load(init, &self.checker)).flatten();
                 let init = match ty {
                     Some(t) => format!("(the {} {})", w(t), w(init)),
-                    None => w(init),
+                    None => built_in.clone().unwrap_or_else(|| w(init)),
                 };
-                match self.native_define(&name, &format!("{form_text}\n"), &init, run)? {
+                // A module file built in, as its text: seen as built in.
+                if built_in.is_some() {
+                    self.check_built_in(true)?;
+                }
+                let defined = self.native_define(&name, &format!("{form_text}\n"), &init, run);
+                if built_in.is_some() {
+                    self.check_built_in(false)?;
+                }
+                match defined? {
                     Ok(()) => return Ok(Outcome { top, code: String::new(), printed: String::new(), value: Ok(None) }),
                     Err(NativeRun::Ran(Err(e))) => return Ok(Outcome { top, code: String::new(), printed: String::new(), value: Err(e) }),
                     Err(NativeRun::Declined(why)) => note = format!("; not in the native convention yet, so `{name}` runs as cellular code: {why}\n"),
@@ -862,7 +906,10 @@ impl Fx26Session {
             // state between forms): every definition, and every expression
             // that writes, whose write a later form may see. It has no I/O,
             // so a write replayed does just what it did.
-            let writes = |c: &crate::check::Checked| c.effect.0.iter().any(|a| matches!(a, crate::ast::Atom::Write(_)));
+            // A send is one: the message waits in its mailbox for later.
+            let writes = |c: &crate::check::Checked| {
+                c.effect.0.iter().any(|a| matches!(a, crate::ast::Atom::Write(_) | crate::ast::Atom::Init(_) | crate::ast::Atom::Send(_)))
+            };
             let replay = match &top {
                 Top::Exp(c) => writes(c),
                 _ => true,
@@ -944,6 +991,8 @@ impl Fx26Session {
     /// it with the reader and the parser written in FX-26: its value as
     /// Scheme would write it, or `!! ` and its error.
     pub fn eval_with_own_evaluator(&mut self, text: &str) -> R<String> {
+        self.shared_made.clear();
+        self.processes_forgotten();
         self.own_pieces()?;
         let standard = self.standard26()?;
         // A whole program: the checker begins again.
@@ -1025,10 +1074,11 @@ impl Fx26Session {
 
     /// The front end's entry points the Rust side calls by name
     /// (`READER_PREFIX`), each rebound by [`Self::front_end_as_register_code`].
-    pub const FRONT_ENTRIES: [&'static str; 24] = [
+    pub const FRONT_ENTRIES: [&'static str; 25] = [
         "read-text-at", "check-program", "check-more", "checked-tops", "checked-extracts", "checked-effects", "check-conv-native!", "checked-withs!", "checked-reshapes!",
         "check-globals-effects!", "check-defer-reruns!", "check-hold-breaks!", "check-lines!", "parse-program", "loaded-files!", "run-checked", "compile-program", "compile-checked", "compile-registers!",
         "compile-global-cell", "compile-new-global", "compile-keep-global!", "compile-note-inline!", "native-assemble",
+        "check-built-in!",
     ];
 
     /// The front end's checker and compilers run as register code, not as
@@ -1119,6 +1169,7 @@ impl Fx26Session {
         let fail = crate::front_end_failure;
         // A `load-module`'s path is from where the Rust checker's is.
         crate::syn::set_load_base(self.checker.base_dir.clone());
+        crate::syn::set_shared_made(self.shared_made.clone());
         if self.front_end_compiled {
             if !self.scheme.is_bound(&format!("{READER_PREFIX}eager-start-fx26")) {
                 load_reader_alone(&mut self.scheme).map_err(fail)?;
@@ -1346,6 +1397,7 @@ impl Fx26Session {
     /// Check `text` with the checker written in FX-26 (read and parsed in
     /// FX-26 too): see [`crate::syn::check_with_fx26_checker`].
     pub fn check_with_own_checker(&mut self, text: &str) -> R<crate::syn::Checked26> {
+        self.shared_made.clear();
         self.own_pieces()?;
         // Generous, but a checker that loops is an error, not a hang.
         self.scheme.engine.set_step_limit(Some(2_000_000_000));
@@ -1405,6 +1457,8 @@ impl Fx26Session {
     /// The same, and, if `show`, the words it made, disassembled. A whole
     /// program: the checker begins again.
     pub fn compile_with_own_compiler_showing(&mut self, text: &str, show: bool) -> R<(String, Option<String>)> {
+        self.shared_made.clear();
+        self.processes_forgotten();
         self.own_pieces()?;
         let standard = self.standard26()?;
         self.own_begun = false;
@@ -1461,6 +1515,24 @@ impl Fx26Session {
         }
         Ok(last)
     }
+}
+
+/// A built-in module file's text as a `module`, if `init` loads one that
+/// takes no parameters (`(load-module "fx26:processes.fx")`): what a
+/// hidden global of a load is defined as natively, so that the file's
+/// procedures are in the convention the program's are. Loaded, they would
+/// be compiled apart, as cellular code, and a continuation captured in one
+/// called from the program (a process's `receive`) could not be taken
+/// across the call between the conventions.
+fn built_in_load(init: &Syntax, c: &Checker) -> Option<String> {
+    let fixpt_read::Datum::List { items, tail: None } = &init.datum else { return None };
+    let [head, path] = &items[..] else { return None };
+    if !head.as_symbol().is_some_and(|h| c.interner.name(h) == "load-module") {
+        return None;
+    }
+    let fixpt_read::Datum::Str(path) = &path.datum else { return None };
+    let text = crate::built_in_module(path)?;
+    (!text.contains("(module-parameters")).then(|| format!("(module\n{text}\n)"))
 }
 
 /// A definition's type, if it says one, and initializer, when `form` is

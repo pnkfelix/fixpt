@@ -88,7 +88,7 @@ fn the_long_programs() {
 fn every_program(wanted: impl Fn(&str) -> bool) {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
     let mut report = Vec::new();
-    for sub in ["bidirectional", "control", "run", "pldi89", "modules", "bloblet"] {
+    for sub in ["bidirectional", "control", "run", "pldi89", "modules", "bloblet", "processes"] {
         let mut names: Vec<_> = std::fs::read_dir(format!("{dir}/{sub}")).unwrap().map(|e| e.unwrap().path()).collect();
         names.sort();
         for path in names {
@@ -103,7 +103,7 @@ fn every_program(wanted: impl Fn(&str) -> bool) {
                 Err(_) => continue, // written to be rejected
             };
             let ours = common::with_own(|s| s.eval_with_own_evaluator(&program)).map_err(|e| e.to_string());
-            if ours.as_deref() != Ok(scheme.as_str()) {
+            if ours.as_deref().map(common::one_wording) != Ok(common::one_wording(&scheme)) {
                 report.push(format!("{name}: evaluator {ours:?}, Scheme {scheme:?}"));
             }
         }

@@ -1971,31 +1971,25 @@ prims! {
         }
         Ok(rt.heap.bloblet_slot(a[0], GLOBAL_NAME))
     });
-    // An I-cell (Arvind's I-structures): a plain bloblet whose field 2 says
-    // whether it is full and whose field 3 is its value. Written once; read
-    // only when full. Nothing else can fill it in a sequential run, so a
-    // read of an empty cell, which would wait forever, is an error.
-    "%fx26-make-icell", 0, Some(0), simple!(|rt, _a| {
-        let b = rt.heap.make_bloblet(PLAIN_BLOBLET, 2, 0, true);
-        rt.heap.set_bloblet_slot(b, 2, Value::FALSE);
-        rt.heap.set_bloblet_slot(b, 3, Value::FALSE);
-        Ok(b)
-    });
-    "%fx26-icell-put!", 2, Some(2), simple!(|rt, a| {
-        if !a[0].is_bloblet() { return rt.type_error("an i-cell", a[0]) }
-        if rt.heap.bloblet_slot(a[0], 2) != Value::FALSE {
-            return rt.fail("an i-cell written twice", &[a[1]]);
-        }
-        rt.heap.set_bloblet_slot(a[0], 3, a[1]);
-        rt.heap.set_bloblet_slot(a[0], 2, Value::TRUE);
-        Ok(rt.heap.intern("#u"))
-    });
+    // An I-cell (Arvind's I-structures): a bloblet of its own kind
+    // (`sched::make_icell`), written once, read once full. A read of an
+    // empty one waits for the write, which only a task can make
+    // (`fx26:processes.fx`'s `icell-get`); this one, which waits for
+    // nothing, is for a reader that knows it is full.
+    "%fx26-make-icell", 0, Some(0), simple!(|rt, _a| Ok(crate::sched::make_icell(&mut rt.heap)));
+    "%fx26-icell-put!", 2, Some(2), simple!(|rt, a| crate::sched::icell_put(rt, a[0], a[1]));
     "%fx26-icell-get", 1, Some(1), simple!(|rt, a| {
-        if !a[0].is_bloblet() { return rt.type_error("an i-cell", a[0]) }
-        if rt.heap.bloblet_slot(a[0], 2) == Value::FALSE {
+        if !a[0].is_bloblet() || rt.heap.bloblet_kind(a[0]) != crate::sched::ICELL { return rt.type_error("an i-cell", a[0]) }
+        if rt.heap.bloblet_slot(a[0], crate::sched::ICELL_FULL) == Value::FALSE {
             return rt.fail("an i-cell read before it was written", &[]);
         }
-        Ok(rt.heap.bloblet_slot(a[0], 3))
+        Ok(rt.heap.bloblet_slot(a[0], crate::sched::ICELL_VALUE))
+    });
+    // What FX-26's processes and `par` need (`sched`): operation `a[0]` on
+    // `a[1]` and `a[2]`. Only the scheduler, `fx26:processes.fx`, calls it.
+    "%fx26-sched", 3, Some(3), simple!(|rt, a| {
+        if !a[0].is_fixnum() { return rt.type_error("an operation's number", a[0]) }
+        crate::sched::run_op(rt, a[0].as_fixnum(), a[1], a[2])
     });
     // A cellular word or closure's code, shown: every word it reaches.
     "%disassemble", 1, Some(1), simple!(|rt, a| {
@@ -2499,15 +2493,9 @@ prims! {
             b
         }))
     });
-    "%region-make-icell", 1, Some(1), simple!(|rt, a| {
-        let h = region_handle(a[0]);
-        Ok(rt.heap.in_region(h, |heap| {
-            let b = heap.make_bloblet(PLAIN_BLOBLET, 2, 0, true);
-            heap.set_bloblet_slot(b, 2, Value::FALSE);
-            heap.set_bloblet_slot(b, 3, Value::FALSE);
-            b
-        }))
-    });
+    // An I-cell may be sent to a process that outlives the place: so in
+    // the heap, wherever it was asked for (`sched::make_icell`).
+    "%region-make-icell", 1, Some(1), simple!(|rt, _a| Ok(crate::sched::make_icell(&mut rt.heap)));
     // The `closure` routine's closure, in a region: `h`, the free values in
     // order, then the word.
     "%region-closure", 2, None, simple!(|rt, a| {

@@ -419,7 +419,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // A read waits for the write, so it is ordered after writes to the
     // region (`await`), but not after other reads.
     ("make-icell", "(poly ((r region)) (poly ((t type)) (subr (alloc r) () (icell t r))))"),
-    ("icell-put!", "(poly ((r region)) (poly ((t type)) (subr (write r) ((icell t r) t) unit)))"),
+    ("icell-put!", "(poly ((r region)) (poly ((t type)) (subr (init r) ((icell t r) t) unit)))"),
     ("icell-get", "(poly ((r region)) (poly ((t type)) (subr (await r) ((icell t r)) t)))"),
     // Identity (PLAN.md Q5, `docs/fx26.md`, "Identity"): whether two values
     // are the same object. Exact on mutable objects, which no compiler
@@ -520,6 +520,33 @@ pub const ENTRIES: &[(&str, &str)] = &[
                  t)))",
     ),
     ("make-continuation-mark-key", "(poly ((r region)) (poly ((t type)) (subr (alloc r) () (mark-key t r))))"),
+    // What the scheduler of processes and `par` (`fx26:processes.fx`)
+    // needs of the runtime, by an operation's number
+    // (`fixpt_runtime::sched::op`): seen only by the modules built in
+    // (`Checker::built_in_only`), since it says nothing of what the tasks
+    // it is given do.
+    // The scheduler's procedures (`fx26:processes.fx`) as the forms that
+    // call them see them (`Checker::library_type`): `spawn`, `send`,
+    // `receive`, `icell-get`, `icell-put!` and `par` (`docs/fx26.md`,
+    // "Processes"). Named by no program (`check::BUILT_IN_ONLY`).
+    (
+        "%processes:spawn-process",
+        "(poly ((m type) (a region) (e effect)) (subr (maxeff e (alloc a)) ((process m e)) (addr m a)))",
+    ),
+    ("%processes:send", "(poly ((m type) (r region)) (subr (send r) ((addr m r) m) unit))"),
+    ("%processes:receive", "(poly ((m type) (r place)) (subr (maxeff (receive r) nondet) ((inbox m r)) m))"),
+    ("%processes:icell-get", "(poly ((r region)) (poly ((t type)) (subr (await r) ((icell t r)) t)))"),
+    ("%processes:icell-put!", "(poly ((r region)) (poly ((t type)) (subr (init r) ((icell t r) t) unit)))"),
+    (
+        "%processes:par2",
+        "(poly ((a type) (b type) (e1 effect) (e2 effect))
+           (subr (maxeff e1 e2) ((subr e1 () a) (subr e2 () b)) (productof (1 a) (2 b))))",
+    ),
+    (
+        "%sched",
+        "(poly ((a type) (b type) (c type))
+           (subr (maxeff (read @sched) (write @sched) (alloc @sched)) (int a b) c))",
+    ),
     (
         "with-mark",
         "(poly ((r region)) (poly ((t type) (a type) (e effect))
@@ -540,7 +567,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
 
 /// The initial environment as text, for the checker written in FX-26:
 /// the standard generative types' declarations (`check::VSUBR`,
-/// `FLATLAYOUT`, `FLATARRAYOF`, `IDENTITY`, `EQTABLE`, `BLOBREF`, `FLAT_ARRAYOF`, `FLAT_KEYED`, `BYTEVECTOROF`, `ESCAPE_TAG`: 0 to 9), `datum`'s
+/// `FLATLAYOUT`, `FLATARRAYOF`, `IDENTITY`, `EQTABLE`, `BLOBREF`, `FLAT_ARRAYOF`, `FLAT_KEYED`, `BYTEVECTOROF`, `ESCAPE_TAG`, `ADDR`, `INBOX`, `PROCESS`: 0 to 12), `datum`'s
 /// and `io-error`'s (`check::STANDARD_TYPES`), then `(name type)` for each
 /// binding.
 pub fn standard_text() -> String {
@@ -555,6 +582,9 @@ pub fn standard_text() -> String {
         crate::check::FLAT_KEYED,
         crate::check::BYTEVECTOROF,
         crate::check::ESCAPE_TAG,
+        crate::check::ADDR,
+        crate::check::INBOX,
+        crate::check::PROCESS,
     ]
         .iter()
         .map(|d| format!("(define-generative {d})\n"))

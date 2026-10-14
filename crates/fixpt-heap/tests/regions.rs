@@ -269,3 +269,29 @@ fn an_abort_ends_only_the_current_tasks_regions() {
     h.regions_exit_to(0);
     assert_eq!(h.all_live_regions(), 0);
 }
+
+/// A message's copy (`Heap::copy_within`): pairs and bloblets copied,
+/// sharing and cycles kept, raw suffixes and frozen flags as they were;
+/// what the predicate says to share, shared, with what it reaches.
+#[test]
+fn a_message_is_copied_but_what_is_shared() {
+    use fixpt_heap::layout::kind;
+    let mut h = Heap::new();
+    let shared = h.make_bloblet(kind("icell"), 3, 0, true);
+    let s = h.make_string("hello");
+    let product = h.make_frozen(kind("product"), &[Value::fixnum(7), s, shared]);
+    let tail = h.cons(product, Value::NULL);
+    let list = h.cons(product, tail);
+    let (copy, words) = h.copy_within(list, |h, v| !v.is_pair() && h.bloblet_kind(v) == kind("icell"));
+    assert_ne!(copy, list, "the list is copied");
+    let (p0, p1) = (h.car(copy), h.car(h.cdr(copy)));
+    assert_ne!(p0, product, "the product is copied");
+    assert_eq!(p0, p1, "sharing is kept");
+    assert_eq!(h.bloblet_slot(p0, 2).as_fixnum(), 7);
+    let s2 = h.bloblet_slot(p0, 3);
+    assert_ne!(s2, s, "the string is copied");
+    assert_eq!(h.string_to_rust(s2), "hello");
+    assert_eq!(h.bloblet_slot(p0, 4), shared, "the I-cell is shared");
+    assert!(h.bloblet_head(p0).fields_frozen, "still frozen");
+    assert!(words > 6, "{words} words copied");
+}

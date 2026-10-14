@@ -40,7 +40,8 @@
        (check-calls-types (load-module "fx26:check-calls-types.fx"))
        (check-bounds-types (load-module "fx26:check-bounds-types.fx"))
        (check-holds-types (load-module "fx26:check-holds-types.fx"))
-       (check-subst-types (load-module "fx26:check-subst-types.fx")))
+       (check-subst-types (load-module "fx26:check-subst-types.fx"))
+       (check-processes-types (load-module "fx26:check-processes-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-types (select check-types-types check-types-sig))
            (check-infer (select check-infer-types check-infer-sig))
@@ -75,7 +76,8 @@
            (check-sub-env (select check-sub-env-types check-sub-env-sig))
            (check-modules-read (select check-modules-read-types check-modules-read-sig))
            (check-read-helpers (select check-read-helpers-types check-read-helpers-sig))
-           (check-print-parts (select check-print-parts-types check-print-parts-sig)))
+           (check-print-parts (select check-print-parts-types check-print-parts-sig))
+           (check-processes (select check-processes-types check-processes-sig)))
     (module
 
 ;; The types it uses of the files before it.
@@ -92,7 +94,7 @@
       (include check-print-parts) (include check-print) (include check-terminate)
       (include check-sc-graphs) (include check-unions) (include check-modules-read)
       (include check-modules) (include check-mask) (include check-calls) (include check-bounds)
-      (include check-holds) (include check-subtype) (include check-subst))
+      (include check-holds) (include check-subtype) (include check-subst) (include check-processes))
 (define k-as-subr (with check-resolve k-as-subr))
 (define k-callee-of (with check-resolve k-callee-of))
 (define k-conversion-name (with check-resolve k-conversion-name))
@@ -313,8 +315,11 @@
   ;;; ------------------------------------------------------------ application
   (k-synth-app (subr (maxeff checks spin) (kx kx kxs int) k-te)
     (lambda (x f args expected)
-      (let ((op (begin (k-note-fx-plain-op (k-under f)) (k-std-op f))))
-        (case op
+      (let ((op (begin (k-note-fx-plain-op (k-under f)) (k-std-op f))) (lop (k-library-op f args)))
+        (cond
+          ((string=? lop "spawn-process") (k-spawn-te x f args expected k-synth))
+          ((string=? lop "par2") (k-par-te x f args k-synth))
+          (else (case op
           (("certify-acyclic") (k-certify x args))
           (("certify-length") (k-certify-length x args))
           (("certify-nat") (k-certify-nat x args))
@@ -323,7 +328,7 @@
           (("cons")
            (let ((r (k-nlist-cons x args expected)))
              (if (null? r) (k-synth-app-plain x f args expected) (car r))))
-          (else (k-call-te (k-path-te x (k-sized x (k-synth-app-plain x f args expected)))))))))
+          (else (k-call-te (k-path-te x (k-sized x (k-synth-app-plain x f args expected)))))))))))
   ;; `+` and `-` of naturals: a natural, of a size when both are known. Only
   ;; what has a type of its own is asked for it; anything else is told it
   ;; is an int, as for any call.
@@ -1016,9 +1021,11 @@
   ;; types for `m`; checked against `expected` if given (≥ 0).
   (k-synth-with (subr (maxeff checks spin) (kx symbol kx int int int) k-te)
     (lambda (x m body a b expected)
-      (let ((mt (k-lookup m)) (shown (symbol->string m)))
+      (let ((mt (k-lookup m)) (shown (symbol->string m)) (lt (k-library-type m body)))
         (if (k-fx-module? m)
             (k-synth-fx x mt body a b)
+        (if (and (>= lt 0) (>= mt 0))
+            (k-library-with mt body lt a b)
         (if (< mt 0)
             (k-fail (k-cat3 "`" shown "` is not bound") a b)
             (tagcase (k-get mt)
@@ -1031,36 +1038,7 @@
                        (r (k-in-scope-parts (extract used 1) body expected k-synth-as
                                             a b (k-start body) (k-end body))))
                   (k-te-masked x (extract r 1) (k-union naming (extract r 2)))))
-              (else y (k-fail (k-with-not-module shown (k-show-ty mt)) a b))))))))
-  ;; `(with #%fx n)`: the standard `n`'s type, whatever binds `n` since.
-  (k-synth-fx (subr (maxeff checks spin) (kx int kx int int) k-te)
-    (lambda (x mt body a b)
-      (cond ((>= mt 0)
-             (k-fail "`#%fx` is the standard bindings' module, which nothing else may be" a b))
-            (else
-             (let ((t (tagcase body
-                        (x-var (n c d)
-                          (if (and (k-second-class? n) (not (k-operator? n a b)))
-                              (k-fail (k-named-only n) a b)
-                              (k-std-type n)))
-                        (else y -1))))
-               (if (< t 0)
-                   (k-fail "`(with #%fx name)` names one standard binding" a b)
-                   (begin (if (k-operator? (k-fx-name body) a b) #u (k-note-fx-plain body a b))
-                          (k-te t nil))))))))
-  ;; The operator `(with #%fx n)`, noted as `k-note-fx-plain` notes it, once.
-  (k-note-fx-plain-op (subr (maxeff checks spin) (kx) unit)
-    (lambda (f)
-      (tagcase f
-        (x-with (m body a b) (if (k-fx-module? m) (k-note-fx-plain body a b) #u))
-        (else y #u))))
-  ;; Where nothing shadows `n`, `(with #%fx n)` is the plain `n`: the fact
-  ;; -502, for the compiler (the Rust checker's `fx_plain`).
-  (k-note-fx-plain (subr (maxeff checks spin) (kx int int) unit)
-    (lambda (body a b)
-      (if (string=? (k-std-op body) "")
-          #u
-          (set k-extracts (cons (product (1 a) (2 b) (3 -502)) (get k-extracts))))))
+              (else y (k-fail (k-with-not-module shown (k-show-ty mt)) a b)))))))))
   (k-module-rule (subr (maxeff checks spin) (kx) k-te)
     (lambda (x)
       (tagcase x

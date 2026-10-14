@@ -445,6 +445,9 @@
     (and (not (null? e))
          (or (tagcase (car e)
                (a-write (w) (k-hits? w open))
+               (a-init (w) (k-hits? w open))
+               ;; A process waits at each.
+               (a-send (r) #t) (a-receive (r) #t)
                (a-goto (r) #t) (a-comefrom (r) #t) (a-await (r) #t) (a-var (v) #t)
                (a-app (v ds) #t)
                (else y #f))

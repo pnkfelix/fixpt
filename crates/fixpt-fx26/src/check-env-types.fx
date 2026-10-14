@@ -111,6 +111,8 @@
    (val k-bool int)
    (val k-unit int)
    (val k-hide-mark (ref int @t))
+   (val k-in-built-in (ref int @t))
+   (val check-built-in! (subr (maxeff (read @globals) (read @t) (write @t)) (bool) unit))
    (val k-unbound (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (symbol) string))
    (val k-operator (ref k-op-mark @t))
    (val k-second-class? (subr pure (symbol) bool))

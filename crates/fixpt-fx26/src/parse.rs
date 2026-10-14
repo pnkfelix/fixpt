@@ -340,6 +340,9 @@ impl Checker {
             if self.name(sym) == "spin" {
                 return Ok(Effect::atom(Atom::Spin));
             }
+            if self.name(sym) == "nondet" {
+                return Ok(Effect::atom(Atom::Nondet));
+            }
             let withs = self.withs_over(sym);
             if !withs.is_empty() {
                 let outer = if self.lookup_desc(sym).is_some() || self.include_scope > 0 { Some(self.effect_name_read(s, sym)?) } else { None };
@@ -419,6 +422,9 @@ impl Checker {
             "goto" => atom(Atom::Goto),
             "comefrom" => atom(Atom::Comefrom),
             "await" => atom(Atom::Await),
+            "init" => atom(Atom::Init),
+            "send" => atom(Atom::Send),
+            "receive" => atom(Atom::Receive),
             // `(io k)`, `k` one of the fixed family (`TODO.md` §84).
             "io" => {
                 let kinds = || IoKind::ALL.map(|k| format!("`{}`", k.name())).join(", ");
@@ -1251,11 +1257,11 @@ impl Checker {
     /// to one, or one of `parse_effect`'s atoms or `maxeff`.
     pub(crate) fn effect_shaped(&self, s: &Syntax) -> bool {
         if let Some(sym) = s.as_symbol() {
-            return matches!(self.name(sym), "pure" | "spin") || matches!(self.lookup_desc(sym), Some(DScope::Eff(_) | DScope::Var(_, Kind::Effect)));
+            return matches!(self.name(sym), "pure" | "spin" | "nondet") || matches!(self.lookup_desc(sym), Some(DScope::Eff(_) | DScope::Var(_, Kind::Effect)));
         }
         matches!(
             self.head(self.items(s, "").unwrap_or(&[])),
-            Some("read" | "write" | "alloc" | "goto" | "comefrom" | "await" | "io" | "maxeff")
+            Some("read" | "write" | "alloc" | "goto" | "comefrom" | "await" | "init" | "send" | "receive" | "io" | "maxeff")
         )
     }
 
@@ -1278,6 +1284,9 @@ impl Checker {
             }
             if name == "spin" {
                 return Ok(D::Effect(Effect::atom(Atom::Spin)));
+            }
+            if name == "nondet" {
+                return Ok(D::Effect(Effect::atom(Atom::Nondet)));
             }
             if name == "const" {
                 return Ok(D::Region(Region::Frozen(None, false)));
@@ -1315,7 +1324,7 @@ impl Checker {
             "+" | "-" => Ok(D::Size(self.parse_size(s)?)),
             // Every atom `parse_effect` reads, as the FX-26 checker's
             // `k-atom-head?` (PLAN.md Q13, O15).
-            "read" | "write" | "alloc" | "goto" | "comefrom" | "await" | "io" | "maxeff" => {
+            "read" | "write" | "alloc" | "goto" | "comefrom" | "await" | "init" | "send" | "receive" | "io" | "maxeff" => {
                 Ok(D::Effect(self.parse_effect(s)?))
             }
             _ => Ok(D::Type(self.parse_type(s)?)),
@@ -1516,6 +1525,11 @@ impl Checker {
                 Ok(self.arena.exp(span, Exp::Let { bindings: out, body }))
             }
             "begin" => self.parse_body(span, &items[1..]),
+            // Processes and `par` (`processes.rs`).
+            head @ ("spawn" | "send" | "receive" | "par" | "icell-get" | "icell-put!") => {
+                let head = head.to_string();
+                self.parse_process_form(span, &head, &items)
+            }
             "cond" => self.parse_cond(span, &items[1..]),
             "case" => self.parse_case(span, &items[1..]),
             "typecase" => self.parse_typecase(span, &items),
@@ -2461,7 +2475,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     /// Each expression made here has a place of its own, as the compilers'
     /// facts are found by place: the use the form's, the file's module the
     /// whole file, and a `load-input`'s `input` its keyword, `head`.
-    fn parse_load(&mut self, span: fixpt_read::Span, head: fixpt_read::Span, path: &str, input: bool) -> R<ExpId> {
+    pub(crate) fn parse_load(&mut self, span: fixpt_read::Span, head: fixpt_read::Span, path: &str, input: bool) -> R<ExpId> {
         let at = match &self.base_dir {
             Some(d) if std::path::Path::new(path).is_relative() && crate::built_in_module(path).is_none() => d.join(path),
             _ => std::path::PathBuf::from(path),

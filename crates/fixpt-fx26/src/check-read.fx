@@ -36,6 +36,10 @@
 (define a-read (with check-types-types a-read))
 (define a-spin (with check-types-types a-spin))
 (define a-io (with check-types-types a-io))
+(define a-init (with check-types-types a-init))
+(define a-send (with check-types-types a-send))
+(define a-receive (with check-types-types a-receive))
+(define a-nondet (with check-types-types a-nondet))
 (define a-var (with check-types-types a-var))
 (define a-write (with check-types-types a-write))
 (define-effect checks (select check-types-types checks))
@@ -319,6 +323,7 @@
     (let* ((n (syn-name s)) (sym (string->symbol n)))
       (case n (("pure") nil)
               (("spin") (k-one (a-spin)))
+              (("nondet") (k-one (a-nondet)))
               (else
                (let ((withs (k-withs-over sym)))
                  (if (null? withs)
@@ -374,7 +379,8 @@
 (define k-atom-head? (subr pure (string) bool)
   (lambda (h)
     (or (string=? h "read") (string=? h "write") (string=? h "alloc")
-        (string=? h "goto") (string=? h "comefrom") (string=? h "await") (string=? h "io"))))
+        (string=? h "goto") (string=? h "comefrom") (string=? h "await") (string=? h "io")
+        (string=? h "init") (string=? h "send") (string=? h "receive"))))
 ;; The atom `(head r)`, `head` one `k-atom-head?` accepts.
 (define k-atom-of (subr (read @globals) (string k-region) k-atom)
   (lambda (head r)
@@ -383,6 +389,9 @@
                (("alloc") (a-alloc r))
                (("goto") (a-goto r))
                (("await") (a-await r))
+               (("init") (a-init r))
+               (("send") (a-send r))
+               (("receive") (a-receive r))
                (else (a-comefrom r)))))
 
 (define k-effect-selects (ref k-effect-sels @t) (new nil))

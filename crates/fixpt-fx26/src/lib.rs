@@ -192,6 +192,8 @@ pub const CHECK_MODORDER_TYPES: &str = include_str!("check-modorder-types.fx");
 
 /// The types of `check-module-rules.fx`: a module file of no state (`TODO.md` §68).
 pub const CHECK_MODULE_RULES_TYPES: &str = include_str!("check-module-rules-types.fx");
+/// The types of `check-processes.fx`: a module file of no state (`TODO.md` §68).
+pub const CHECK_PROCESSES_TYPES: &str = include_str!("check-processes-types.fx");
 
 /// `check-proofs-types.fx`: types and signatures, a module file of no state (`TODO.md` §68).
 pub const CHECK_PROOFS_TYPES: &str = include_str!("check-proofs-types.fx");
@@ -237,6 +239,9 @@ pub const CHECK_PROVING_TYPES: &str = include_str!("check-proving-types.fx");
 
 /// `check-module-rules.fx`: a `load-input` file, which the conductor applies (`TODO.md` §68).
 pub const CHECK_MODULE_RULES: &str = include_str!("check-module-rules.fx");
+/// The checker's rules for processes and `par`: a `load-input` file, which
+/// the conductor applies (`TODO.md` §68).
+pub const CHECK_PROCESSES: &str = include_str!("check-processes.fx");
 
 /// `check-modorder.fx`: a `load-input` file, which the conductor applies (`TODO.md` §68).
 pub const CHECK_MODORDER: &str = include_str!("check-modorder.fx");
@@ -391,6 +396,8 @@ pub const EAGER_READER: &str = include_str!("eager-reader.fx");
 /// The parser written in FX-26, which needs the reader's types: a module
 /// file of the reader's regions and its own, loading the reader at them.
 pub const PARSER: &str = include_str!("parser.fx");
+/// The forms of processes and `par`, as syntax for the parser to parse.
+pub const PARSER_FORMS: &str = include_str!("parser-forms.fx");
 
 /// The parser's top-level forms, and a program of them.
 pub const PARSER_TOP: &str = include_str!("parser-top.fx");
@@ -484,11 +491,12 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 137] = [
+pub const FRONT_END_MODULES: [(&str, &str); 140] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("table-types.fx", TABLE_TYPES),
     ("table.fx", TABLE),
     ("check-module-rules-types.fx", CHECK_MODULE_RULES_TYPES),
+    ("check-processes-types.fx", CHECK_PROCESSES_TYPES),
     ("check-modorder-types.fx", CHECK_MODORDER_TYPES),
     ("check-synth-types.fx", CHECK_SYNTH_TYPES),
     ("check-letrec-types.fx", CHECK_LETREC_TYPES),
@@ -527,6 +535,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 137] = [
     ("eager-reader.fx", EAGER_READER),
     ("parser-types.fx", PARSER_TYPES),
     ("parser.fx", PARSER),
+    ("parser-forms.fx", PARSER_FORMS),
     ("parser-exps.fx", PARSER_EXPS),
     ("parser-top.fx", PARSER_TOP),
     ("eval-types.fx", EVAL_TYPES),
@@ -575,6 +584,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 137] = [
     ("check-close-types.fx", CHECK_CLOSE_TYPES),
     ("check-rules.fx", CHECK_RULES),
     ("check-module-rules.fx", CHECK_MODULE_RULES),
+    ("check-processes.fx", CHECK_PROCESSES),
     ("check-modorder.fx", CHECK_MODORDER),
     ("check-facts-types.fx", CHECK_FACTS_TYPES),
     ("check-blobrefs-types.fx", CHECK_BLOBREFS_TYPES),
@@ -639,7 +649,8 @@ pub fn built_in_module(path: &str) -> Option<&'static str> {
 /// Libraries written in FX-26 that a program loads by name, `(load-module
 /// "fx26:conditions.fx")`: raising and handling conditions (`TODO.md` §89,
 /// `docs/research/conditions.md`).
-pub const STANDARD_MODULES: [(&str, &str); 1] = [("conditions.fx", include_str!("conditions.fx"))];
+pub const STANDARD_MODULES: [(&str, &str); 2] =
+    [("conditions.fx", include_str!("conditions.fx")), ("processes.fx", include_str!("processes.fx"))];
 
 /// The front end's files, by name, in the order [`front_end`] joins them;
 /// [`bootstrap_program`] puts `bootstrap.fx` after them. The module files
@@ -715,6 +726,7 @@ pub mod lower;
 mod sizes;
 mod modules;
 mod modorder;
+mod processes;
 pub mod parse;
 pub mod session;
 pub mod sexp;

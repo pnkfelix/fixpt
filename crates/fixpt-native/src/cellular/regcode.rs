@@ -464,15 +464,6 @@ impl Asm {
                 self.bloblet_at(2);
                 self.field_at(1, 2, 2);
             }
-            // `rmake-icell`: two fields, both `#f`, in the region in `REG1`.
-            "ricell" => {
-                self.bump_words(4, true, slow);
-                self.es(&mov_imm64(X15, make_header(const { fixpt_heap::layout::kind("bloblet") }, 3, 0)));
-                self.bloblet_at(3);
-                self.value(X15, Value::FALSE);
-                self.field_at(X15, 2, 3);
-                self.field_at(X15, 3, 3);
-            }
             // Field `REG2` (8k, a fixnum) of the bloblet in `REG1`, whose
             // trailer says how many it has: 2 ≤ k ≤ F, else the call-out
             // reports it.
@@ -1082,7 +1073,6 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
                     ("prim", 2) if prim_named(k(o(0)), "modulo") => Some("modulo"),
                     ("prim", 1) if prim_named(k(o(0)), "%make-box") => Some("box"),
                     ("prim", 2) if prim_named(k(o(0)), "%region-new") => Some("rnew"),
-                    ("prim", 1) if prim_named(k(o(0)), "%region-make-icell") => Some("ricell"),
                     ("prim", c) if c >= 2 && c <= REGS && prim_named(k(o(0)), "%region-closure") => Some("region-closure"),
                     ("prim", c) if c >= 1 && prim_named(k(o(0)), "%make-frozen") => Some("frozen"),
                     ("prim", c) if c >= 1 && prim_named(k(o(0)), "%make-bloblet") => Some("bloblet"),

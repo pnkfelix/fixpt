@@ -210,6 +210,12 @@
            check-modules check-read check-modorder check-expect
            check-effects check-subtype check-read-descs
            check-terminate check-letrec tables check-read-helpers check-print-parts))
+         ;; The checker, the rules for processes and `par`.
+         (check-processes
+          ((load-input "fx26:check-processes.fx")
+           check-types check-env check-resolve check-binders
+           check-print check-print-parts check-calls check-effects
+           check-synth check-subtype check-module-rules))
          ;; The checker, its rules: the one recursive group over expressions.
          (check-rules
           ((load-input "fx26:check-rules.fx")
@@ -221,7 +227,7 @@
            check-effects check-data check-read check-mask
            check-calls check-bounds check-holds check-subtype
            check-subst check-sc-graphs check-binders check-sub-env
-           check-modules-read check-read-helpers check-print-parts))
+           check-modules-read check-read-helpers check-print-parts check-processes))
          ;; The checker, its proofs: lemmas proved.
          (check-proofs
           ((load-input "fx26:check-proofs.fx")
@@ -349,6 +355,7 @@
              (checked-tops (with check-program checked-tops))
              (check-conv-native! (with check-print-parts check-conv-native!))
              (check-globals-effects! (with check-env check-globals-effects!))
+             (check-built-in! (with check-env check-built-in!))
              (checked-effects (with check-env checked-effects))
              (checked-extracts (with check-env checked-extracts))
              (checked-reshapes! (with check-env checked-reshapes!))
@@ -376,6 +383,7 @@
 (define checked-tops (extract front-end-entries checked-tops))
 (define check-conv-native! (extract front-end-entries check-conv-native!))
 (define check-globals-effects! (extract front-end-entries check-globals-effects!))
+(define check-built-in! (extract front-end-entries check-built-in!))
 (define checked-effects (extract front-end-entries checked-effects))
 (define checked-extracts (extract front-end-entries checked-extracts))
 (define checked-reshapes! (extract front-end-entries checked-reshapes!))

@@ -651,6 +651,20 @@ pub fn set_load_base(dir: Option<std::path::PathBuf>) {
     LOAD_BASE.with(|b| *b.borrow_mut() = dir);
 }
 
+thread_local! {
+    /// The loads whose hidden globals the session has made already, by
+    /// key: the parser written in FX-26 is told so (a file at base -1), and
+    /// makes none of them again, so that a form compiled alone, as the
+    /// native convention compiles each, uses the one made in the program's
+    /// convention (`Fx26Session::shared_made`).
+    static SHARED_MADE: std::cell::RefCell<std::collections::HashSet<String>> = std::cell::RefCell::new(Default::default());
+}
+
+/// Set the loads the session has made (`SHARED_MADE`).
+pub fn set_shared_made(made: std::collections::HashSet<String>) {
+    SHARED_MADE.with(|m| *m.borrow_mut() = made);
+}
+
 /// The positions of one module file and the next apart, in the parser
 /// written in FX-26 (`parser-exps.fx`'s `load-base`).
 const LOAD_BASE_STEP: i64 = 1_000_000_000;
@@ -667,7 +681,24 @@ fn load_modules_in(forms: &[Syntax], interner: &Interner, out: &mut Vec<(u32, St
         {
             out.push((f.span.start, p.to_string(), interner.name(h) == "load-input"));
         }
-        load_modules_in(items, interner, out);
+        // A form of processes or `par` loads the scheduler (`parser-forms.fx`).
+        let head = items.first().and_then(|h| h.as_symbol()).map(|h| interner.name(h));
+        if matches!(head, Some("spawn" | "send" | "receive" | "par" | "icell-get" | "icell-put!")) {
+            out.push((f.span.start, crate::check::PROCESSES.to_string(), false));
+        }
+        match head {
+            // Data, not forms: a quotation, and a `case`'s clauses' data.
+            Some("quote" | "quasiquote") => {}
+            Some("case") => {
+                load_modules_in(&items[..items.len().min(2)], interner, out);
+                for clause in items.iter().skip(2) {
+                    if let Some([_, rest @ ..]) = clause.as_proper_list() {
+                        load_modules_in(rest, interner, out);
+                    }
+                }
+            }
+            _ => load_modules_in(items, interner, out),
+        }
     }
 }
 
@@ -747,6 +778,11 @@ fn supply_loaded_in(
         let shared = if input { format!("input:{key}") } else { key.clone() };
         if let Some(r) = seen.get(&shared) {
             entry(scheme, list, r)?;
+            continue;
+        }
+        if SHARED_MADE.with(|m| m.borrow().contains(&shared)) {
+            let nil = scheme.make(|_| Value::NULL);
+            entry(scheme, list, &Read { base: -1, why: String::new(), syns: nil, text: String::new() })?;
             continue;
         }
         // A module file built in (`fx26:…`) is its text, not a file's.

@@ -196,6 +196,7 @@
         (begin
           (tagcase (car e)
             (a-write (r) (tagcase r (r-var (v) (k-note-written v)) (else y #u)))
+            (a-init (r) (tagcase r (r-var (v) (k-note-written v)) (else y #u)))
             (else x #u))
           (k-note-writes (cdr e))))))
 (define k-mask (subr (maxeff kstate spin) (kx k-eff int) k-eff)

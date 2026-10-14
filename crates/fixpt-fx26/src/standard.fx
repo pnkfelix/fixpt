@@ -149,6 +149,7 @@
          (("char<?") "%fx26-char<?")
          (("char>?") "%fx26-char>?")
          (("append") "%fx26-append")
+         (("%sched") "%fx26-sched")
          (else "")))
       ((7)
        (case n

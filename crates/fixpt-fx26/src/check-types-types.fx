@@ -29,10 +29,16 @@
   (r-global symbol) (r-globals))
 (define-datatype k-atom
   (a-read k-region) (a-write k-region) (a-alloc k-region)
-  (a-goto k-region) (a-comefrom k-region) (a-await k-region) (a-spin)
+  (a-goto k-region) (a-comefrom k-region) (a-await k-region)
+  ;; An I-cell's fill (`init`), a send, a receive (`docs/fx26.md`,
+  ;; "Processes").
+  (a-init k-region) (a-send k-region) (a-receive k-region)
+  (a-spin)
   ;; `(io k)` (`TODO.md` §84): `k` the kind's number, in
   ;; `k-io-kind-name`'s order, as `IoKind`'s in the Rust checker.
   (a-io int)
+  ;; What may differ from run to run (`docs/fx26.md`, "Processes").
+  (a-nondet)
   (a-var int)
   ;; `(e d …)`: a description function to an effect, a variable, applied
   ;; to descriptions, none a type (`check-kinds.fx`): an unknown effect, as

@@ -31,5 +31,7 @@ crates/fixpt-fx26/src/regcode-core.fx 1130 0
 # (split from one it was given), the code unchanged (the user's,
 # 2026-10-09, `TODO.md` §68); and by one for `k-module-type`'s import
 # (`extend`, `TODO.md` §69), its code in `check-module-rules.fx`; then down
-# to 1069 by `(hide (include m))` in place of its imports (§69).
-crates/fixpt-fx26/src/check-rules.fx 1069 0
+# to 1069 by `(hide (include m))` in place of its imports (§69); then to
+# 1047 by `(with #%fx n)`'s rule, out of the group, moved to
+# `check-processes.fx` with the rules of processes and `par` (§92).
+crates/fixpt-fx26/src/check-rules.fx 1047 0

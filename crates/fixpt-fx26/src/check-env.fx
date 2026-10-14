@@ -87,6 +87,22 @@
 ;; ones; -1 otherwise. And the standard description names.
 (define k-hide-mark (ref int @t) (new -1))
 (define k-std-dscope (ref k-scope @t) (new nil))
+;; How deep the module files built in being checked are; and whether `s`
+;; is a standard name only they may name: what the scheduler needs of the
+;; runtime, and its procedures' types as the forms see them (the Rust
+;; checker's `built_in_only`).
+(define k-in-built-in (ref int @t) (new 0))
+;; For a driver (`Session::native_define` of a module file built in, given
+;; as its text, `built_in_load`): while on, that text sees what a module
+;; file built in sees.
+(define check-built-in! (subr (maxeff (read @globals) (read @t) (write @t)) (bool) unit)
+  (lambda (on) (set k-in-built-in (+ (get k-in-built-in) (if on 1 -1)))))
+(define k-built-in-only? (subr pure (symbol) bool)
+  (lambda (s)
+    (or (symbol=? s '%sched) (symbol=? s '%processes:spawn-process)
+        (symbol=? s '%processes:send) (symbol=? s '%processes:receive)
+        (symbol=? s '%processes:icell-get) (symbol=? s '%processes:icell-put!)
+        (symbol=? s '%processes:par2))))
 ;; Whether the innermost binding of `s` was made at depth `mark` or after.
 (define k-bound-since? (subr (maxeff (read @globals) (read @t) spin) (symbol int) bool)
   (lambda (s mark)
@@ -108,6 +124,14 @@
 ;; checked, a binding made before it began only if it is a standard one, or
 ;; the hidden global of a file loaded (`k-shared-name?`).
 (define k-lookup (subr (maxeff (read @globals) (read @t) spin) (symbol) int)
+  (lambda (s)
+    (let ((t (k-lookup-seen s)))
+      (if (and (>= t 0) (k-hidden-standard? s t)) -1 t))))
+;; Whether `s`, bound at `t`, is a standard name only the module files built
+;; in may name, named elsewhere.
+(define k-hidden-standard? (subr (maxeff (read @globals) (read @t)) (symbol int) bool)
+  (lambda (s t) (and (k-built-in-only? s) (= (get k-in-built-in) 0) (= t (k-std-type s)))))
+(define k-lookup-seen (subr (maxeff (read @globals) (read @t) spin) (symbol) int)
   (lambda (s)
     (let ((st (table-ref (get k-env) s nil)) (mark (get k-hide-mark)))
       (cond ((or (null? st) (not (null? (k-broken-why s)))) -1)

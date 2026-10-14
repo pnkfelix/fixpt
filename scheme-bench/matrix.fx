@@ -17,7 +17,7 @@
 ;;;   `brother`, `child` and `puke` with values of different types. Those
 ;;;   values are one datatype, `pv`: `no-perm` (Scheme's #f), `a-perm` (the
 ;;;   closure), `r-row` (the row `now` answers) and `r-rows` (what `puke`
-;;;   answers). The closure still dispatches on the message symbol; `send`
+;;;   answers). The closure still dispatches on the message symbol; `send-to`
 ;;;   calls it and `pv-row` takes the row out of a reply. An unknown message,
 ;;;   an error in the original, answers `no-perm`.
 ;;; - `go-folder`'s state is Larceny's list `(bsize blen . blist)`, as pairs
@@ -119,7 +119,7 @@
 ;; What a permutation object (below) is, and answers.
 (define-datatype pv (no-perm) (a-perm (subr M (symbol) pv)) (r-row row) (r-rows mat))
 
-(define send (subr M (pv symbol) pv)
+(define send-to (subr M (pv symbol) pv)
   (lambda (o msg) (tagcase o (a-perm (p) (p msg)) (else x (no-perm)))))
 (define perm? (subr pure (pv) bool)
   (lambda (o) (tagcase o (no-perm () #f) (else x #t))))
@@ -238,21 +238,21 @@
                  (or (not (perm? row-perm))
                      (and
                       (zulu (car mat)
-                            (row->func+ (pv-row (send row-perm 'now)))
+                            (row->func+ (pv-row (send-to row-perm 'now)))
                             partitions
                             (lambda ((new-partitions mat))
-                              (_-*- (send row-perm 'child)
+                              (_-*- (send-to row-perm 'child)
                                     (cdr mat)
                                     new-partitions)))
                       (zulu (car mat)
-                            (row->func- (pv-row (send row-perm 'now)))
+                            (row->func- (pv-row (send-to row-perm 'now)))
                             partitions
                             (lambda ((new-partitions mat))
-                              (_-*- (send row-perm 'child)
+                              (_-*- (send-to row-perm 'child)
                                     (cdr mat)
                                     new-partitions)))
                       (let ((new-row-perm
-                             (send row-perm 'brother)))
+                             (send-to row-perm 'brother)))
                         (or (not (perm? new-row-perm))
                             (_-*- new-row-perm
                                   mat
@@ -262,7 +262,7 @@
 (define* zunda (subr M (pv mat) bool)
   (lambda (first-row-perm mat)
     (let* ((first-row
-            (pv-row (send first-row-perm 'now)))
+            (pv-row (send-to first-row-perm 'now)))
            (number-of-cols
             (list-length first-row))
            (make-row->func
@@ -287,7 +287,7 @@
                         (array-ref vec i))))))))
            (mat
             (cdr mat)))
-      (zebra (send first-row-perm 'child)
+      (zebra (send-to first-row-perm 'child)
              (make-row->func 1 -1)
              (make-row->func -1 1)
              mat
@@ -329,7 +329,7 @@
                (lambda (first-row-perm)
                  (if (perm? first-row-perm)
                      (and (zunda first-row-perm mat)
-                          (pick-first-row (send first-row-perm 'brother)))
+                          (pick-first-row (send-to first-row-perm 'brother)))
                      #t))))
       (pick-first-row (gen-perms mat)))))
 

@@ -160,7 +160,7 @@
   (lambda (a b)
     (tagcase a
       (o-unit () (tagcase b (o-unit () #t) (else y #f)))
-      (o-icell (f c) (tagcase b (o-icell (g d) (eq? f g)) (else y #f)))
+      (o-icell (c) (tagcase b (o-icell (d) (eq? c d)) (else y #f)))
       (o-blob (fs bs) (tagcase b (o-blob (gs cs) (eq? fs gs)) (else y #f)))
       ;; Owner and offset, as the machines' one word.
       (o-bref (o i) (tagcase b (o-bref (p j) (and (= i j) (ev-same-blob? o p))) (else y #f)))
@@ -234,7 +234,7 @@
       (o-unit () "#u")
       (o-product (fs) (k-cat3 "#<product of " (int->string (ev-count fs)) ">"))
       (o-sum (t x) (k-cat3 "#<sum " (symbol->string t) ">"))
-      (o-icell (f c) "#<bloblet 3 fields 0 bytes>")
+      (o-icell (c) "#<icell 4 fields 0 bytes>")
       (o-blob (fs bs) (show-bloblet (+ 1 (array-length fs)) (array-length bs)))
       (o-bref (o i) (k-cat3 "#<suffix-ref bloblet +" (int->string i) ">"))
       (o-bytes (b) (k-cat3 "#u8(" (show-bytes b (- (bytevector-length b) 1) "") ")"))

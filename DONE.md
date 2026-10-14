@@ -2046,7 +2046,7 @@ raw bits outside every space) and before a call through a cell written
 since (no test program redefines such a global).
 
 
-## 92. Concurrency: per-task place stacks (Q1; kayak's request, 2026-10-13)
+## 92. Concurrency: processes and `par` (kayak's request, 2026-10-13)
 
 The first of kayak's three stages (`TODO.md` §92). A region's handle was
 its position in one stack of live places, and ending one ended every
@@ -2063,3 +2063,44 @@ is indexed by slot, as it was by position. Test: `fixpt-heap`'s
 `tasks_end_their_own_regions_in_any_order` (two tasks' arenas and reaps
 interleaved, one ended first, the other's kept through collections) and
 `an_abort_ends_only_the_current_tasks_regions`.
+
+**Processes and `par`** (stages 2 and 3, kayak's request, 2026-10-13;
+`docs/research/processes.md`, `docs/fx26.md`, "Processes and `par`").
+- **Forms**, derived in both parsers (`processes.rs`, `parser-forms.fx`):
+  `spawn`, `send`, `receive`, `par`, `icell-get`, `icell-put!`, each a
+  call of a procedure of `fx26:processes.fx`, a scheduler written in FX-26
+  over prompts, through the hidden global of its load; `%sched`
+  (`fixpt_runtime::sched`) its runtime part: the run queue, mailboxes,
+  I-cells' waiters, a message's copy (`Heap::copy_within`). Each node an
+  expansion makes has a place of its own (the FX-26 compiler finds facts
+  by place).
+- **Types and effects**, in both checkers: `(addr M R)`, `(inbox M r)`,
+  `(process M E)` (generative types 10 to 12); `(send R)`, `(receive R)`,
+  `(init R)` (P4, within `(write R)`), `nondet` (M3). The library's
+  procedures typed as the forms see them (`library_type`, the standard
+  `%processes:` entries), and they and `%sched` seen only by module files
+  built in.
+- **Rules**: `spawn`'s (`synth_spawn`, `k-spawn-te`): every free variable
+  of a process's body, and its messages, transmissible (H1,
+  `untransmissible`); what it does beyond its own place what a process may
+  do (`crossing_atom`), that the spawn's effect, with `nondet` for I/O.
+  `par`'s (`synth_par`, `k-par-te`): no branch escapes, no two interfere
+  (P5, `interference`; `par2`'s, nested).
+- **Runtime**: I-cells of a kind of their own, always in the heap, read
+  by waiting (Q3/P6); a process's own place a reap on its own task's
+  stack; the program runs the others when it waits and after each
+  `spawn`, `send` and `icell-put!`; a deadlock an error; a failure in a
+  process fails the form, the scheduler begun again. Natively, a built-in
+  module file is defined from its text in the program's convention
+  (`built_in_load`), and the FX-26 parser told it is made
+  (`syn::set_shared_made`), so a capture never crosses into cellular code.
+- **The evaluator** written in FX-26 runs the library, with `%sched` a
+  primitive and the machines' I-cells; it replays sends between forms.
+- **Tests**: `tests/processes.rs` (twelve programs in
+  `programs/processes`, each every way it runs; answers under twenty run
+  queue orders; arrival order seen to vary; the interference table cell by
+  cell in both checkers; a deadlock; a failing process), and the programs
+  in the every-program tests of `checker.rs`, `compiler.rs` (every
+  machine) and `evaluator.rs`. The full suite; the new tests under
+  `--profile checked`.
+

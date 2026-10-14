@@ -55,11 +55,15 @@
                         a b)
                 (k-te t masked)))))))
 
+;; Whether atom `a` writes region `r`: a write, or an I-cell's fill.
+(define k-atom-writes? (subr (maxeff kreads spin) (k-atom k-region) bool)
+  (lambda (a r)
+    (tagcase a (a-write (x) (k-region=? x r)) (a-init (x) (k-region=? x r)) (else y #f))))
 ;; Whether an effect writes region `r`.
 (define k-eff-writes? (subr (maxeff kreads spin) (k-eff k-region) bool)
   (lambda (e r)
     (and (not (null? e))
-         (or (tagcase (car e) (a-write (x) (k-region=? x r)) (else y #f))
+         (or (k-atom-writes? (car e) r)
              (k-eff-writes? (cdr e) r)))))
 ;; A generative type's representation writing one of its parameters writes
 ;; whatever it was given: cautiously, any region given any. Whether some
@@ -72,6 +76,7 @@
     (and (not (null? e))
          (or (tagcase (car e)
                (a-write (x) (k-gen-region? x))
+               (a-init (x) (k-gen-region? x))
                (a-var (v) (k-gen-param? v))
                (else y #f))
              (k-eff-writes-param? (cdr e))))))
@@ -140,10 +145,12 @@
 
 (define k-any-frozen? (subr kreads (k-eff) bool)
   (lambda (e) (and (not (null? e)) (or (k-frozen-atom? (car e)) (k-any-frozen? (cdr e))))))
+;; Whether an atom of rank `k` writes: a write, or an I-cell's fill.
+(define k-writing-rank? (subr pure (int) bool) (lambda (k) (or (= k 1) (= k 6))))
 (define k-writes-frozen? (subr kreads (k-eff) bool)
   (lambda (e)
     (and (not (null? e))
-         (or (and (k-frozen-atom? (car e)) (= (k-atom-rank (car e)) 1))
+         (or (and (k-frozen-atom? (car e)) (k-writing-rank? (k-atom-rank (car e))))
              (k-writes-frozen? (cdr e))))))
 ;; Whether an atom reads, allocates or awaits data frozen in the heap,
 ;; which never ends: that is pure.

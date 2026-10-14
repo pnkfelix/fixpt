@@ -145,6 +145,35 @@ pub const BYTEVECTOROF: &str = "(bytevectorof (r region)) (arrayof u8 r)";
 /// safety's analyses a tag in `r`, as a `prompt-tag` is; at run time one.
 pub const ESCAPE_TAG: &str = "(escape-tag (a type) (h type) (r region)) (prompt-tag a h pure r)";
 pub(crate) const ESCAPE_TAG_INDEX: u32 = 9;
+/// A process's address (`docs/fx26.md`, "Processes"), generative type 10:
+/// the right to send an `m` to the process's mailbox, in region `r`, which
+/// sending to it names (`(send r)`). To safety's analyses a reference at
+/// `r`; it may be copied, and sent, freely.
+pub const ADDR: &str = "(addr (m type) (r region)) (ref m r)";
+pub(crate) const ADDR_INDEX: u32 = 10;
+/// A process's own mailbox, as its body is given it, generative type 11:
+/// the right to take an `m` from it, at `r`, the process's own place
+/// (`(receive r)`). Never sent: no other process can receive for it.
+pub const INBOX: &str = "(inbox (m type) (r region)) (ref m r)";
+pub(crate) const INBOX_INDEX: u32 = 11;
+/// A process's body, ready to spawn, generative type 12: given its
+/// mailbox and its own place, both bound for it alone, it does `e` beyond
+/// what it does to them. Made only by checking a `lambda` against it
+/// (`Checker::process_body`), which is where what crosses into the new
+/// process is checked transmissible.
+pub const PROCESS: &str = "(process (m type) (e effect +)) (poly ((r place)) (subr e ((inbox m r) (place r)) unit))";
+pub(crate) const PROCESS_INDEX: u32 = 12;
+/// The scheduler of processes and `par`, a module file built in, which the
+/// forms `spawn`, `send`, `receive`, `par`, `icell-get` and `icell-put!`
+/// call through the hidden global of its load (`Checker::library_type`).
+pub const PROCESSES: &str = "fx26:processes.fx";
+/// The standard names only a module file built in may name: what the
+/// scheduler needs of the runtime, and its procedures' types as the forms
+/// see them. The runtime's part says nothing of what the tasks it is given
+/// do, so a program that could name it could hide an effect.
+pub(crate) fn built_in_only(name: &str) -> bool {
+    name == "%sched" || name.starts_with("%processes:")
+}
 /// A scalar flat's layout (`fixpt_heap::layout::FLAT_*`), as the runtime
 /// reads and writes its bytes.
 pub(crate) fn flat_code(name: &str) -> Option<i64> {
@@ -369,6 +398,9 @@ pub struct Checker {
     /// Modules read from files: each one's path and text, and the file id
     /// its spans have.
     pub(crate) loaded: HashMap<ExpId, (String, String, fixpt_read::FileId)>,
+    /// How deep the module files built in being checked are
+    /// (`built_in_only`'s names are seen only there).
+    pub(crate) in_built_in: usize,
     /// Each file read, by its id: where it is loaded (in the file that
     /// loads it), its path as written and its text; for an error in it to
     /// say each file on the way out to the program (`TODO.md` §73).
@@ -682,6 +714,7 @@ impl Checker {
             shared_globals: HashSet::new(),
             hoisted: Vec::new(),
             loaded: HashMap::new(),
+            in_built_in: 0,
             load_sites: HashMap::new(),
             files_read: 0,
             base_dir: None,
@@ -704,7 +737,7 @@ impl Checker {
         // generative type, in both checkers, whose insides nothing sees
         // (no `up-` or `down-`: a `vsubr` is called with its arguments, not
         // their list). `vlambda` makes one; `apply` calls one on a list.
-        for decl in [VSUBR, FLATLAYOUT, FLATARRAYOF, IDENTITY, EQTABLE, BLOBREF, FLAT_ARRAYOF, FLAT_KEYED, BYTEVECTOROF, ESCAPE_TAG] {
+        for decl in [VSUBR, FLATLAYOUT, FLATARRAYOF, IDENTITY, EQTABLE, BLOBREF, FLAT_ARRAYOF, FLAT_KEYED, BYTEVECTOROF, ESCAPE_TAG, ADDR, INBOX, PROCESS] {
             let forms = c.read(decl).expect("reads");
             c.define_generative(&forms[0], &forms[1]).unwrap_or_else(|e| panic!("`{decl}` is wrong: {e}"));
         }
@@ -843,6 +876,9 @@ impl Checker {
         // A shared load's hidden global is seen everywhere, loaded files too.
         let seen = |i: usize| !hidden.is_some_and(|(a, b)| (a..b).contains(&i)) || self.shared_globals.contains(&s);
         let i = self.env.positions(s).find(|i| seen(*i))?;
+        if i < self.standard_len && self.in_built_in == 0 && built_in_only(self.interner.name(s)) {
+            return None;
+        }
         if self.broken.get(&s).is_some_and(|(b, _)| *b == i) {
             return None;
         }
@@ -1182,8 +1218,10 @@ impl Checker {
                 let open: Vec<&Region> = f.regions.iter().filter(|r| !matches!(r, Region::Frozen(..))).collect();
                 !open.is_empty()
                     && eff.0.iter().any(|a| match a {
-                        Atom::Write(w) => open.iter().any(|r| may_alias(w, r)),
+                        Atom::Write(w) | Atom::Init(w) => open.iter().any(|r| may_alias(w, r)),
                         Atom::Goto(_) | Atom::Comefrom(_) | Atom::Await(_) | Atom::Var(_) | Atom::App(_) => true,
+                        // A process waits at each.
+                        Atom::Send(_) | Atom::Receive(_) => true,
                         _ => false,
                     })
             })
@@ -1415,7 +1453,7 @@ impl Checker {
         if !eff.0.iter().any(|a| a.region().is_some_and(Region::is_frozen)) {
             return Ok(eff);
         }
-        if eff.0.iter().any(|a| matches!(a, Atom::Write(r) if r.is_frozen())) {
+        if eff.0.iter().any(|a| matches!(a, Atom::Write(r) | Atom::Init(r) if r.is_frozen())) {
             return Err(FxError::at(self.arena.span_of(e), "this writes frozen data, whose region is `const`"));
         }
         let in_heap = |r: &Region| matches!(r, Region::Frozen(None, _));
@@ -1922,7 +1960,7 @@ impl Checker {
         // A write to a region a `letfreeze` is freezing, noted before
         // masking could hide it: that region's data may be cyclic.
         for (v, written) in self.freezing.iter_mut() {
-            if effect.0.contains(&Atom::Write(Region::Var(*v))) {
+            if effect.0.contains(&Atom::Write(Region::Var(*v))) || effect.0.contains(&Atom::Init(Region::Var(*v))) {
                 *written = true;
             }
         }
@@ -2949,11 +2987,11 @@ impl Checker {
                 }
                 _ => (vec![], vec![]),
             };
-            if effects.iter().any(|e| e.0.contains(&Atom::Write(r))) {
+            if effects.iter().any(|e| e.0.contains(&Atom::Write(r)) || e.0.contains(&Atom::Init(r))) {
                 return true;
             }
             writes_param |= effects.iter().any(|e| {
-                e.0.iter().any(|a| matches!(a, Atom::Write(x) if self.is_generative_param(*x)) || matches!(a, Atom::Var(v) if self.generatives.iter().any(|g| g.params.iter().any(|(p, _)| p == v))))
+                e.0.iter().any(|a| matches!(a, Atom::Write(x) | Atom::Init(x) if self.is_generative_param(*x)) || matches!(a, Atom::Var(v) if self.generatives.iter().any(|g| g.params.iter().any(|(p, _)| p == v))))
             });
             todo.extend(kids);
         }
@@ -3616,8 +3654,12 @@ pub(crate) fn subst_effect(e: &Effect, map: &HashMap<DVar, D>, arena: &crate::as
             Atom::Goto(r) => Effect::atom(Atom::Goto(sub_r(r))),
             Atom::Comefrom(r) => Effect::atom(Atom::Comefrom(sub_r(r))),
             Atom::Await(r) => Effect::atom(Atom::Await(sub_r(r))),
+            Atom::Init(r) => Effect::atom(Atom::Init(sub_r(r))),
+            Atom::Send(r) => Effect::atom(Atom::Send(sub_r(r))),
+            Atom::Receive(r) => Effect::atom(Atom::Receive(sub_r(r))),
             Atom::Spin => Effect::atom(Atom::Spin),
             Atom::Io(k) => Effect::atom(Atom::Io(k)),
+            Atom::Nondet => Effect::atom(Atom::Nondet),
             // An effect function applied: given what it is substituted by,
             // reduced if that is a `dlambda`.
             Atom::App(n) => {
@@ -4255,6 +4297,10 @@ impl BinderEnv {
                     Atom::Goto(x) => Atom::Goto(r(x)),
                     Atom::Comefrom(x) => Atom::Comefrom(r(x)),
                     Atom::Await(x) => Atom::Await(r(x)),
+                    Atom::Init(x) => Atom::Init(r(x)),
+                    Atom::Send(x) => Atom::Send(r(x)),
+                    Atom::Receive(x) => Atom::Receive(r(x)),
+                    Atom::Nondet => Atom::Nondet,
                     Atom::Spin => Atom::Spin,
                     Atom::Io(k) => Atom::Io(k),
                     // Its variable, and what it was given, as named here.
