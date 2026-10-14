@@ -427,6 +427,8 @@
       (prim! 'set-car! (lambda (xs) (ev-set-car! xs)))
       (prim! 'set-cdr! (lambda (xs) (ev-set-cdr! xs)))
       (prim! 'list (lambda (xs) (vals->val xs)))
+      ;; The native convention's mark, nothing to the evaluator.
+      (prim! 'stay-cellular (lambda (xs) (ev-arg xs 0)))
       (prim! 'append (lambda (xs) (ev-append xs)))
       (prim! 'new (lambda (xs) (the vcell (new (ev-arg xs 0)))))
       (prim! 'get (lambda (xs) (get (as-ref (ev-arg xs 0)))))

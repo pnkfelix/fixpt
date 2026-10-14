@@ -2511,9 +2511,13 @@ recovered (`DONE.md` §93). Left:
   built-in primitive takes them as they are; and every machine would load
   and compile it.
 - **What else stops at a machine's own frames** (left by the crossing
-  captures and marks, `DONE.md` §93): a whole continuation (`callcc`)
-  thrown past native code is still an error; a poll in cellular code
-  native code called asks to be preempted only for a prompt in its own
-  frames, so such code runs on until it returns to native code; and the
-  evaluator knows no `stay-cellular`, so `programs/native/captures.fx` is
-  not run there.
+  captures and marks, and whole continuations, `DONE.md` §93): a poll in
+  cellular code native code called asks to be preempted only for a prompt
+  in its own frames, so such code runs on until it returns to native code.
+- **Calls between the machines nest on Rust's stack**: each crossing is a
+  few Rust frames, so recursion that alternates between native and
+  cellular code a few thousand deep overflows the thread's stack (a crash,
+  not an error) where recursion within one machine goes a million deep:
+  `whole-captures.fx` crosses 200 deep, as a test thread's stack allows.
+  And the evaluator written in FX-26 recurses on the host's stack too, so
+  `programs/native/captures.fx`'s 20 000-deep case overflows it.

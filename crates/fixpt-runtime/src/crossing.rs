@@ -34,6 +34,10 @@ pub trait Crossing {
     /// Its frames, from the call out to a prompt for `tag` or its own
     /// first frame, with `inner` inside.
     fn capture(&self, rt: &mut Runtime, tag: Value, inner: Value) -> Crossed;
+    /// All its frames, from the call out, with `inner` inside: if it is
+    /// the bottom machine, as a whole continuation of them, which replaces
+    /// its frames when given a value.
+    fn capture_whole(&self, rt: &mut Runtime, bottom: bool, inner: Value) -> Value;
     /// The marks for `key` in its frames, from the call out, innermost
     /// first; and whether a machine called it, whose frames are further out.
     fn marks(&self, rt: &mut Runtime, key: Value) -> (Vec<Value>, bool);
@@ -73,6 +77,20 @@ pub fn capture(rt: &mut Runtime, tag: Value, own: Value) -> Option<Value> {
         }
     }
     None
+}
+
+/// The whole continuation of the machine running, whose own frames, all
+/// of them, are `own`: every machine's frames out to the bottom one's,
+/// whose piece is whole. A whole continuation is given its value by the
+/// bottom machine, to which a machine called from it throws it.
+pub fn capture_whole(rt: &mut Runtime, own: Value) -> Value {
+    let n = BOUNDARIES.with(|v| v.borrow().len());
+    let mut inner = own;
+    for i in (0..n).rev() {
+        let b = BOUNDARIES.with(|v| v.borrow()[i].clone());
+        inner = b.capture_whole(rt, i == 0, inner);
+    }
+    inner
 }
 
 /// The marks for `key` in the frames of the machines out from the one

@@ -2337,6 +2337,28 @@ cache, collecting often): through three machines, in tail position at each
 boundary, 20 000 deep, marks, and an abort from inside a crossing
 continuation to the prompt outside it.
 
+**Whole continuations that cross machines (2026-10-14).** A `cwcc`
+continuation taken in native code and given a value from below a call
+into cellular code was put back within the run that was running, so the
+cellular frames between were kept, and the value came back to them: 107
+where 6 was right, and a value of the wrong kind reached arithmetic in
+one case. (One taken in cellular code escaped to it, as `NativeExit::
+Throw` had, but could not be put back from another run.) Now a whole
+continuation where machines are nested is every machine's frames out to
+the bottom machine's, whose piece is whole (`crossing::capture_whole`,
+the boundaries' `capture_whole`; a bottom run with no frames of its own
+still a whole piece, of none, which returns from the run). Given a value
+anywhere but the bottom machine, it is thrown out through the boundaries
+to it (`reinstate`'s throw, `call_foreign`'s and the Rust machine's
+`call_native`'s), which puts its piece back in place of its frames and
+calls the pieces inside, as a delimited crossing's are. The evaluator
+written in FX-26 has `stay-cellular` (as the identity). Test:
+`programs/native/whole-captures.fx`, in `direct.rs`'s
+`deep_recursion_through_the_stack_cache` (a small stack cache,
+collecting often): taken in either, thrown from the other through frames
+of both, 200 crossings deep; and kept, then called again after `cwcc`
+returned, from either; by hand, called again from a later form.
+
 ## 94. Process monitors (kayak's request, 2026-10-14)
 
 `(spawn-monitored watcher on-failure (box M r) body …)`: a process whose

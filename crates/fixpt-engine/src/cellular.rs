@@ -904,9 +904,20 @@ impl Machine {
             Err(NativeExit::Failed(m)) => Err(Trap::Prim(m)),
             // Thrown past native code: this machine goes on from `k`, or,
             // itself called by native code, throws it on.
+            // A whole continuation of native code goes on out, to the
+            // machine at the bottom, which gives it its value: a cellular
+            // one only if it is this machine.
+            Err(NativeExit::Throw { k, v }) if rt.heap.bloblet_kind(k) != const { kind("cellular-continuation") } => {
+                if self.nested {
+                    self.thrown = Some((k, v));
+                    return Err(Trap::Prim(THROWN.into()));
+                }
+                Err(Trap::Prim("a whole continuation of native code, given a value under cellular code it did not take".into()))
+            }
             Err(NativeExit::Throw { k, v }) => {
                 self.escape(&rt.heap, k, v)?;
                 self.reinstate(&mut rt.heap, r, k, v, true);
+                self.resume_inner(&mut Ctx::Rt(rt), r, k, "call")?;
                 Ok(Back::Moved)
             }
             Err(NativeExit::Abort { tag, v }) => Ok(Back::Abort(tag, v)),
@@ -1275,6 +1286,18 @@ impl Machine {
                 self.ds.push(proc_);
                 self.safepoint(cx.heap(), r);
                 let proc_ = self.ds.pop().expect("pushed");
+                // Native code called this run: every machine's frames out to
+                // the bottom one's (`crossing::capture_whole`), a native
+                // closure if the bottom machine is native code.
+                if let (None, true, Ctx::Rt(rt)) = (at, self.nested && crossing::crossed(), &mut *cx) {
+                    let own = self.capture(&mut rt.heap, r, self.rs_floor + 4, 0, false);
+                    let k = crossing::capture_whole(rt, own);
+                    let k = if rt.heap.bloblet_kind(k) == const { kind("native-closure") } { k } else { rt.heap.continuation_closure(k) };
+                    self.ds.push(k);
+                    self.ds.push(proc_);
+                    self.call(cx, r, 1, false, name)?;
+                    return Ok(Flow::Next);
+                }
                 let heap = cx.heap();
                 let k = match at {
                     Some(at) => {
@@ -1473,6 +1496,14 @@ impl Crossing for Held {
         capture_held(rt, self, tag, inner)
     }
 
+    /// Native code called it, its frames above the entry of the word
+    /// `call_value` made; else, the bottom machine, all of them, whole.
+    fn capture_whole(&self, rt: &mut Runtime, bottom: bool, inner: Value) -> Value {
+        let all = self.kept(&rt.heap);
+        let rs_from = if self.nested { self.floor + 4 } else { self.floor };
+        held_piece(rt, self, &all, rs_from, 0, bottom && !self.nested, inner)
+    }
+
     fn marks(&self, rt: &mut Runtime, key: Value) -> (Vec<Value>, bool) {
         let all = self.kept(&rt.heap);
         (Machine::marks_in(&all[self.nd..self.nd + self.nr], self.floor, key), self.nested)
@@ -1489,15 +1520,25 @@ impl Held {
 
 fn capture_held(rt: &mut Runtime, h: &Held, tag: Value, inner: Value) -> Crossed {
     let all = h.kept(&rt.heap);
-    let heap = &mut rt.heap;
-    let (ds, rs) = (&all[..h.nd], &all[h.nd..h.nd + h.nr]);
-    let (cur, clo) = (all[h.nd + h.nr], all[h.nd + h.nr + 1]);
+    let rs = &all[h.nd..h.nd + h.nr];
     let found = Machine::find_marked(rs, h.floor, PROMPT_MARK, tag);
     let (rs_from, ds_from) = match found {
         Some(at) => (at + 4, prompt_height(rs[at + 3])),
         None if h.nested => (h.floor + 4, 0),
         None => return Crossed::Missing,
     };
+    let k = held_piece(rt, h, &all, rs_from, ds_from, false, inner);
+    if found.is_some() { Crossed::Found(k) } else { Crossed::Beyond(k) }
+}
+
+/// A held machine's frames from return entry `rs_from` and data stack
+/// height `ds_from` up to its call of native code, a continuation (whole,
+/// if `whole`) with `inner` inside: resumed, they take the call's value
+/// where it would have come back; or, from a tail call, return it.
+fn held_piece(rt: &mut Runtime, h: &Held, all: &[Value], rs_from: usize, ds_from: usize, whole: bool, inner: Value) -> Value {
+    let heap = &mut rt.heap;
+    let (ds, rs) = (&all[..h.nd], &all[h.nd..h.nd + h.nr]);
+    let (cur, clo) = (all[h.nd + h.nr], all[h.nd + h.nr + 1]);
     let r = if h.tail {
         let cells = [Value::fixnum(const { routine("return") } as i64)];
         let name = heap.intern("return");
@@ -1506,8 +1547,7 @@ fn capture_held(rt: &mut Runtime, h: &Held, tag: Value, inner: Value) -> Crossed
     } else {
         Regs { cur, k: h.k, fp: h.fp, clo }
     };
-    let k = continuation(heap, &ds[ds_from..], &rs[rs_from..], &r, ds_from, false, h.run, inner);
-    if found.is_some() { Crossed::Found(k) } else { Crossed::Beyond(k) }
+    continuation(heap, &ds[ds_from..], &rs[rs_from..], &r, ds_from, whole, h.run, inner)
 }
 
 /// How a call of native code came back: with a value; moved, a continuation

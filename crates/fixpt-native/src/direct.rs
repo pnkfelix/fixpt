@@ -4636,9 +4636,21 @@ fn call_foreign(rt: &mut fixpt_runtime::Runtime, st: &mut DState, f: Value, args
         Err(e) => {
             match e {
                 fixpt_runtime::NativeExit::Failed(m) => LAST_MESSAGE.with(|c| *c.borrow_mut() = Some(m)),
+                // A whole continuation: this run, if it is the bottom
+                // machine's, gives it its value, its frames replaced, and
+                // `common_foreign` resumes where it says; else on out.
                 fixpt_runtime::NativeExit::Throw { k, v } => {
+                    let bottom = !fixpt_runtime::crossing::crossed();
+                    if bottom && rt.heap.native_continuation_of(k).is_some() {
+                        reinstate(rt, st, k, v);
+                        if st.trap == 0 {
+                            st.foreign_resume = 1;
+                        }
+                        return 0;
+                    }
                     THROWN.with(|t| t.set(Some((k, v))));
-                    LAST_MESSAGE.with(|c| *c.borrow_mut() = Some("a continuation of cellular code was thrown past native code".into()));
+                    let why = if bottom { "a whole continuation of cellular code, given a value under native code it did not take" } else { "a whole continuation thrown out to the machine at the bottom" };
+                    LAST_MESSAGE.with(|c| *c.borrow_mut() = Some(why.into()));
                 }
                 // An abort the cellular code found no prompt for: to
                 // one in these frames, which `common_foreign` resumes
@@ -4669,6 +4681,32 @@ impl fixpt_runtime::crossing::Crossing for Foreign {
         // SAFETY: the state of the call-out that made this boundary, which
         // is in this call, and holds no reference to it meanwhile.
         capture_foreign(rt, unsafe { &mut *self.st }, self.at, tag, inner)
+    }
+
+    /// All its frames, from the stub's out, resumed where the call returns:
+    /// whole, if this run is the bottom machine's.
+    fn capture_whole(&self, rt: &mut fixpt_runtime::Runtime, bottom: bool, inner: Value) -> Value {
+        // SAFETY: as for `capture`.
+        let st = unsafe { &mut *self.st };
+        put_back(rt, st, self.at);
+        let all = frames_of(st);
+        let frames = &all[1..];
+        let p = if frames.is_empty() {
+            cont_pos(st)
+        } else {
+            let last = outermost_second(st, frames.last().expect("a frame").0);
+            let mut p = heap_frames(&mut rt.heap, frames, last, cont_pos(st));
+            p.pc = word(all[0].0 + R_SECOND);
+            p
+        };
+        let words = region_words(frames) + st.cont_words;
+        // None between: at the bottom, still a whole continuation, of no
+        // frames, which returns from the run (`put_continuation`).
+        if words == 0 && !bottom {
+            return inner;
+        }
+        let code = continuation_bloblet(&mut rt.heap);
+        continuation(rt, code, if words == 0 { END } else { p }, words, bottom, inner)
     }
 
     /// Its frames' marks, and on: a machine in a call, if there is one, is
@@ -5253,7 +5291,12 @@ fn capture_whole(rt: &mut fixpt_runtime::Runtime, st: &DState) -> Value {
     let last = outermost_second(st, frames.last().expect("a frame").0);
     let mut p = heap_frames(&mut rt.heap, &frames, last, cont_pos(st));
     p.pc = st.ret_pc;
-    continuation(rt, Value::from_raw(st.aux), p, region_words(&frames) + st.cont_words, true, Value::FALSE)
+    // A machine called this run: this run's frames are a piece of the
+    // whole, every machine's out to the bottom one's
+    // (`fixpt_runtime::crossing::capture_whole`).
+    let crossed = fixpt_runtime::crossing::crossed();
+    let own = continuation(rt, Value::from_raw(st.aux), p, region_words(&frames) + st.cont_words, !crossed, Value::FALSE);
+    if crossed { fixpt_runtime::crossing::capture_whole(rt, own) } else { own }
 }
 
 /// A continuation's frames, delimited by the innermost prompt for `tag`:
@@ -5331,12 +5374,25 @@ fn region_words(frames: &[(u64, u64)]) -> u64 {
 /// what it returns.
 fn reinstate(rt: &mut fixpt_runtime::Runtime, st: &mut DState, k: Value, v: Value) -> u64 {
     let data = rt.heap.bloblet_slot(k, CLOSURE_FREE0);
+    // A whole continuation is given its value by the bottom machine: from
+    // a run another machine called, it is thrown out to it.
+    if rt.heap.obj_ref(data, 5) == Value::TRUE && fixpt_runtime::crossing::crossed() {
+        THROWN.with(|t| t.set(Some((k, v))));
+        return failed(st, "a whole continuation thrown out to the machine at the bottom".into());
+    }
     let inner = if rt.heap.obj_len(data) > 6 { rt.heap.obj_ref(data, 6) } else { Value::FALSE };
     let out = put_continuation(rt, st, k, v);
     if inner == Value::FALSE || st.trap != 0 {
         return out;
     }
-    (st.fp, st.native_sp) = (st.resume_fp, st.resume_sp);
+    // The frames it put back are the call-out's; or, none (a whole one of
+    // no frames, which returns from the run), none: the stack's top, past
+    // which no frame is walked.
+    (st.fp, st.native_sp) = if st.resume_pc == st.bottom_ret && st.resume_sp == st.stack_top {
+        (st.stack_top + R_LINK, st.stack_top)
+    } else {
+        (st.resume_fp, st.resume_sp)
+    };
     let x = call_foreign(rt, st, inner, &[v]);
     if st.trap == 0 {
         // Back with an abort to a prompt in these frames, which is where
@@ -5357,6 +5413,12 @@ fn put_continuation(rt: &mut fixpt_runtime::Runtime, st: &mut DState, k: Value, 
     let ((kp, kwords), regions, whole) = (continuation_pos(heap, data), heap.obj_ref(data, 4), heap.obj_ref(data, 5) == Value::TRUE);
     let (to, chain) = if whole {
         heap.regions_exit_to(regions.as_fixnum() as usize);
+        // Of no frames: the run returns `v`, as its outermost frame would.
+        if kp.frame == Value::FALSE {
+            set_cont(st, END, 0);
+            (st.resume_sp, st.resume_fp, st.resume_pc, st.resume_x0) = (st.stack_top, st.bottom_link, st.bottom_ret, v.raw());
+            return 0;
+        }
         (kp, kwords)
     } else {
         let (link, ret) = (word(st.fp), word(st.fp + 8));

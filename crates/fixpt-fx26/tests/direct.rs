@@ -1015,6 +1015,12 @@ fn deep_recursion_through_the_stack_cache() {
     let want = ["(10 10 10 10 343 343 343 343 16 16 60001 60001)", "(918 1215 1009 1009 1009)", "(77 88 158 157)"];
     assert_eq!(values, want, "captures");
     assert_eq!(fell, ["grab-c", "climb-c", "tail-c", "under-c", "grab-marks", "mark-c", "look-c", "in-c"], "only those that stay cellular do");
+    // Whole continuations that cross machines, thrown and called again
+    // (`TODO.md` §93, `programs/native/whole-captures.fx`).
+    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/whole-captures.fx")).expect("reads");
+    let (values, fell) = values_and_fallbacks(&mut s, &forms);
+    assert_eq!(values, ["(6 6 6 6 6 6 8 8)", "(413 413 413 413)"], "whole captures");
+    assert_eq!(fell, ["throw-c", "via-c", "cap-c", "deep-c", "again-c", "keep-c"], "only those that stay cellular do");
     fixpt_native::direct::with_machine(|m| m.set_stack_words(1 << 20, 1 << 28)).expect("a machine");
 }
 
