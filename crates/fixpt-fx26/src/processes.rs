@@ -29,7 +29,9 @@ impl Checker {
     /// - `(send a v)`, `(receive box)`, `(icell-get c)`, `(icell-put! c v)`:
     ///   `((with lib name) …)`;
     /// - `(par ((x1 e1) … (xn en)) body …)`: `par2` of the first branch and
-    ///   the `par` of the rest, as thunks, its parts bound by `let`.
+    ///   the `par` of the rest, as thunks, its parts bound by `let`;
+    /// - `(race e1 … en)`: `race2` of the first branch and the `race` of the
+    ///   rest, as thunks.
     pub(crate) fn parse_process_form(&mut self, span: fixpt_read::Span, head: &str, items: &[Syntax]) -> R<ExpId> {
         let lib = self.parse_load(span, span, crate::check::PROCESSES, false)?;
         let Exp::Var(lib) = *self.arena.exp_at(lib) else { unreachable!("a load is its hidden global") };
@@ -90,6 +92,8 @@ impl Checker {
                 self.par_expansion(span, lib, &parts, body)
             }
             ("par", _) => return Err(usage("(par ((name expression) …) body …)")),
+            ("race", [_, branches @ ..]) if branches.len() >= 2 => self.race_expansion(span, lib, branches),
+            ("race", _) => return Err(usage("(race expression expression …)")),
             ("pselect", [_, arms @ ..]) if !arms.is_empty() => self.select_expansion(span, lib, arms)?,
             ("pselect", _) => return Err(usage("(pselect ((icell-get i-cell) name body …) ((receive mailbox) name body …) ((sleep-until time) name body …) …)")),
             _ => unreachable!("a form of processes"),
@@ -147,6 +151,34 @@ impl Checker {
         }
         let outer_bind = Syntax::list(span, vec![Syntax::list(span, vec![p.clone(), tree])]);
         Syntax::list(span, vec![sym(self, span, "let"), outer_bind, out])
+    }
+
+    /// `(race e1 … en)`: `((with lib race2) (lambda () e1) (lambda ()
+    /// ((with lib race2) (lambda () e2) … (lambda () en))))`. Each node
+    /// made has a place of its own (`par_expansion`): a branch's thunk none
+    /// wide at its expression's start, a level's call from its branch to
+    /// the form's end (the first's the form's), and the rest's thunk from
+    /// the branch before to the form's end.
+    fn race_expansion(&mut self, span: fixpt_read::Span, lib: fixpt_read::Sym, es: &[Syntax]) -> Syntax {
+        let at = |a: u32, b: u32| fixpt_read::Span::new(span.file, a, b);
+        let sym = |c: &mut Self, sp: fixpt_read::Span, s: &str| Syntax::symbol(sp, c.interner.intern(s));
+        let thunk = |c: &mut Self, sp: fixpt_read::Span, e: Syntax| {
+            let lambda = sym(c, sp, "lambda");
+            Syntax::list(sp, vec![lambda, Syntax::new(sp, fixpt_read::Datum::Nil), e])
+        };
+        let n = es.len();
+        let mut tree = thunk(self, at(es[n - 1].span.start, es[n - 1].span.start), es[n - 1].clone());
+        for i in (0..n - 1).rev() {
+            let e = &es[i];
+            let op = Syntax::list(span, vec![sym(self, span, "with"), Syntax::symbol(span, lib), sym(self, span, "race2")]);
+            let first = thunk(self, at(e.span.start, e.span.start), e.clone());
+            let call_at = if i == 0 { span } else { at(e.span.start, span.end) };
+            tree = Syntax::list(call_at, vec![op, first, tree]);
+            if i > 0 {
+                tree = thunk(self, at(es[i - 1].span.end, span.end), tree);
+            }
+        }
+        tree
     }
 
     /// `(pselect (W0 x0 body0 …) … (Wn xn bodyn …))`, each `W` `(icell-get
@@ -458,6 +490,69 @@ impl Checker {
         let two = self.interner.intern("2");
         let t = self.arena.ty(Ty::Product(vec![(one, a), (two, b)]));
         Ok((t, fe.union(&ge).union(&e1).union(&e2)))
+    }
+
+    /// `((with … race2) (lambda () e1) (lambda () e2))`, as `race` makes
+    /// it: both run, perhaps at once, and the first to finish gives the
+    /// value; the other may be stopped at once, at its next wait, or never.
+    /// So that no program can tell which, each branch must be
+    /// *cancellable*: it may read, allocate, await, receive and spin, but
+    /// not write, fill an I-cell, send, do I/O, or transfer control out of
+    /// itself, nor have an effect not known (a variable's); and the two
+    /// must not interfere (two receives). Its value is a branch's, both of
+    /// one type, and its effect both theirs and `nondet`: which finishes
+    /// first is the schedule's.
+    pub(crate) fn synth_race(&mut self, e: ExpId, fun: ExpId, args: &[ExpId]) -> R<(TyId, Effect)> {
+        let span = self.arena.span_of(e);
+        let usage = "`(race expression expression …)`";
+        let [f, g] = args else { return Err(FxError::at(span, usage)) };
+        let (ft, fe) = self.synth(*f)?;
+        let (gt, ge) = self.synth(*g)?;
+        let thunk = |c: &Self, t: TyId| match c.arena.get(c.arena.resolve(t)).clone() {
+            Ty::Subr { effect, params, result, .. } if params.is_empty() => Some((effect, result)),
+            _ => None,
+        };
+        let (Some((e1, a)), Some((e2, b))) = (thunk(self, ft), thunk(self, gt)) else {
+            return Err(FxError::at(span, usage));
+        };
+        for (branch, eff) in [(*f, &e1), (*g, &e2)] {
+            let uncancellable = |a: &Atom| {
+                matches!(a, Atom::Write(_) | Atom::Init(_) | Atom::Send(_) | Atom::Io(_) | Atom::Goto(_) | Atom::Comefrom(_) | Atom::Var(_) | Atom::App(_))
+            };
+            if let Some(a) = eff.0.iter().find(|a| uncancellable(a)) {
+                return Err(FxError::at(
+                    self.arena.span_of(branch),
+                    format!(
+                        "a `race` branch may be stopped half way, so it must do nothing another could see, and this one has {}",
+                        self.show_effect(&Effect::atom(*a))
+                    ),
+                ));
+            }
+        }
+        if let Some((x, y)) = self.interference(&e1, &e2) {
+            return Err(FxError::at(
+                span,
+                format!(
+                    "`race`'s branches interfere: one has {} and another {}",
+                    self.show_effect(&Effect::atom(x)),
+                    self.show_effect(&Effect::atom(y))
+                ),
+            ));
+        }
+        let t = if self.subtype(b, a) {
+            a
+        } else if self.subtype(a, b) {
+            b
+        } else {
+            return Err(FxError::at(
+                span,
+                format!("`race`'s branches give values of two types, {} and {}", self.show_ty(a), self.show_ty(b)),
+            ));
+        };
+        if let Exp::With { module, body } = *self.arena.exp_at(fun) {
+            self.with_as(fun, module, body, None)?;
+        }
+        Ok((t, fe.union(&ge).union(&e1).union(&e2).union(&Effect::atom(Atom::Nondet))))
     }
 
     /// The first pair of atoms, one of each effect, that interfere: on

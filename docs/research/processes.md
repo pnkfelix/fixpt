@@ -206,14 +206,17 @@ its use over futures that compute.
    schedule's. Named `pselect` because `select` is a module's component
    in types and effects. Once fired, the waker is taken back from every
    event (`undo`), so no I-cell, mailbox or timer keeps one.
-2. **`race`, best effort**: `(race e1 … en)` gives the value of a branch
+2. **`race`, best effort** (built 2026-10-14; `docs/fx26.md`, "`race`"):
+   `(race e1 … en)` gives the value of a branch
    that finished. The contract, which an implementation may strengthen
    but not change:
    - *Value*: some branch's, the implementation's choice, so `nondet`
      (unless every branch gives the same answer).
    - *Losers*: an implementation may stop them at once, at their next
-     wait, or never (FX-26's first version joins them, so no task
-     outlives the form). So that no program can tell which, a branch's
+     wait, or never. FX-26's stops each at its next wait, or before it
+     starts: a cancelled task ends, its places with it, instead of
+     resuming; one that computes without waiting runs to its end, as
+     nothing preempts it (Q2). So that no program can tell which, a branch's
      effect must be **cancellable**: it may read, allocate, await,
      receive, spin, and do anything on regions of its own, but not write,
      fill a visible I-cell, send, or do I/O outside itself. A branch

@@ -547,6 +547,7 @@ impl Checker {
         match (self.library_op(fun).map(str::to_string).as_deref(), args) {
             (Some("spawn-process"), [body]) => return self.synth_spawn(e, fun, *body, expected),
             (Some("par2"), _) => return self.synth_par(e, fun, args),
+            (Some("race2"), _) => return self.synth_race(e, fun, args),
             _ => {}
         }
         // `(certify-length v k)`: `v`'s value as a `(nlist T k)`, where

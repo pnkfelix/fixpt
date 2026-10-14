@@ -2494,11 +2494,11 @@ Built, all three of kayak's stages (`DONE.md` §92; the design,
   polymorphic in their messages; and `self`, a process's own address.
 - **The cost of a switch** (the actors note's A4): a capture and an abort
   for each wait.
-- **Next (the user's, 2026-10-13): `race`, best effort**
-  (`docs/research/processes.md`, "Next"): `pselect`, its deadline arm
-  with it, is built (`DONE.md` §92). `race`'s branches cancellable (no
-  write, fill, send or I/O outside), so whether losers are stopped is the
-  implementation's, and only termination differs.
+- **A cancelled task's wakers**: a `race`'s loser, stopped at its next
+  wait, ends when that wait's waker runs, so one waiting for a cell never
+  filled stays (a task, and its places) until the run ends; and a deadline
+  it waited for is still slept for. Stopping it at once would need each
+  waker taken back where it was given (as `sync` does its own).
 - Out of scope, as kayak asked: transfer of mutable data (by consuming a
   place's handle, after H3), session types, distribution, links and
   monitors.

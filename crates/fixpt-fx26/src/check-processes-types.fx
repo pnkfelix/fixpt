@@ -18,7 +18,7 @@
             (val k-library-op (subr (maxeff kreads spin) (kx kxs) string))
             (val k-library-with (subr (maxeff checks spin) (int kx int int int) k-te))
             (val k-spawn-te (subr (maxeff checks spin) (kx kx kxs int k-synth-fn) k-te))
-            (val k-par-te (subr (maxeff checks spin) (kx kx kxs k-synth-fn) k-te))
+            (val k-branches-te (subr (maxeff checks spin) (string kx kx kxs k-synth-fn) k-te))
             (val k-synth-fx (subr (maxeff checks spin) (kx int kx int int) k-te))
             (val k-note-fx-plain-op (subr (maxeff checks spin) (kx) unit))
             (val k-note-fx-plain (subr (maxeff checks spin) (kx int int) unit))))

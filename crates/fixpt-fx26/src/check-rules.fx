@@ -318,7 +318,7 @@
       (let ((op (begin (k-note-fx-plain-op (k-under f)) (k-std-op f))) (lop (k-library-op f args)))
         (cond
           ((string=? lop "spawn-process") (k-spawn-te x f args expected k-synth))
-          ((string=? lop "par2") (k-par-te x f args k-synth))
+          ((not (string=? lop "")) (k-branches-te lop x f args k-synth))
           (else (case op
           (("certify-acyclic") (k-certify x args))
           (("certify-length") (k-certify-length x args))

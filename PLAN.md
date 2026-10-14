@@ -140,8 +140,9 @@ are in the last section, "Log: the glance's details", and in
   same under green threads and OS threads; each task its own stack of
   places (Q1). On every machine, a scheduler written in FX-26. And
   `pselect`, Tokio's `select!` over waits, deadlines among them (the
-  scheduler sleeps until the earliest). Next: `race` (best effort). Left:
-  copying against sharing (H3), preemption (Q2), a `sendable` kind.
+  scheduler sleeps until the earliest); and `race`, best effort (losers
+  stopped at their next wait). Left: copying against sharing (H3),
+  preemption (Q2), a `sendable` kind.
 - **Cellular code calling native code** (2026-10-13, `TODO.md` §93):
   fixed, a crash on the REPL's machine where the native convention
   declined a form; its cost to assembling words mostly recovered (peval's

@@ -65,6 +65,7 @@
         ((icell-put!) (fixed 3 "`(icell-put! i-cell value)`" "icell-put!"))
         ((spawn) (call "spawn-process" (the syns-a (list (spawn-body fail items a b)))))
         ((pselect) (select-form fail items lib a b))
+        ((race) (race-form fail items lib a b))
         (else (par-form fail items lib a b))))))
 
 ;; `(x y)`, at `a`..`b`.
@@ -169,6 +170,31 @@
            (binds (mk-list (the syns-a (list mine next)) a b))
            (inside (if last? body (the syns-a (list (par-lets (cdr bs) p body a b))))))
       (mk-list (cons (mk-symbol "let" a b) (cons binds inside)) a b))))
+;;; -------------------------------------------------------------- race
+
+;; `(race e1 … en)`: `((with lib race2) (lambda () e1) (lambda () ((with
+;; lib race2) (lambda () e2) … (lambda () en))))`. Each node made has a
+;; place of its own, as the Rust parser's `race_expansion` places them: a
+;; branch's thunk none wide at its start, a level's call from its branch to
+;; the form's end (the first's the form's), the rest's thunk from the
+;; branch before to the form's end.
+(define race-form (subr (maxeff parses spin) (fails syns-a symbol int int) syn)
+  (lambda (fail items lib a b)
+    (begin
+      (at-least fail items 3 "`(race expression expression …)`" a b)
+      (race-tree (cdr items) lib a a b))))
+;; The branches `es` as nested `race2`s, the first's call from `ca`.
+(define race-tree (subr (maxeff parses spin) (syns-a symbol int int int) syn)
+  (lambda (es lib ca a b)
+    (let* ((e (car es)) (sa (syn-start e)))
+      (if (null? (cdr es))
+          (thunk-syn e sa sa)
+          (let* ((op (mk-list (the syns-a (list (mk-symbol "with" a b) (atom lib a b)
+                                                (mk-symbol "race2" a b)))
+                              a b))
+                 (inner (race-tree (cdr es) lib (syn-start (car (cdr es))) a b))
+                 (rest (if (null? (cdr (cdr es))) inner (thunk-syn inner (syn-end e) b))))
+            (mk-list (the syns-a (list op (thunk-syn e sa sa) rest)) ca b))))))
 ;;; ----------------------------------------------------------- pselect
 
 ;; `(pselect (W0 x0 body0 …) … (Wn xn bodyn …))`, each `W` `(icell-get c)`,

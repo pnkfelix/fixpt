@@ -2137,6 +2137,21 @@ nor is a deadline passed over slept for. Tests: three programs in
 `processes.rs`, `a_deadline_passed_over_is_not_waited_for` (fails, having
 slept 30 s, with no removal).
 
+**`race`, best effort** (the user's, 2026-10-13; `docs/fx26.md`,
+"`race`"): `(race e1 … en)`, the value of a branch that finished, nested
+`race2`s in both parsers. Both checkers (`synth_race`, `k-race-te`): each
+branch cancellable (no write, fill, send, I/O, `goto`, `comefrom`, or
+effect variable), no two interfering (`par`'s table), one type (the
+wider), and `nondet`. The scheduler cancels a loser that has not finished
+(`%sched` operations 24 and 25, a list of tasks cancelled, cleared as each
+ends): it ends instead of starting, or instead of resuming from its next
+wait, its places with it. With it, the first task, waiting, runs the
+others one at a time until what it waits for is ready (`main-wait`), not
+all of them first. Tests: six programs in `programs/processes` (a cell
+chosen, three computations of one answer, a loser stopped at its wait,
+which would otherwise spin for ever; a write, two types, two receives
+refused), every way and under 20 schedules; both checkers on each.
+
 
 **`append` and `string-append` as `vsubr`s** (the user's, 2026-10-13;
 `docs/fx26.md`, "Variadic procedures"): called with any count, a call the

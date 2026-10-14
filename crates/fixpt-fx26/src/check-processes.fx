@@ -3,7 +3,8 @@
 ;;; its words. The forms call the scheduler's procedures (`fx26:processes.fx`)
 ;;; through the hidden global of its load (`k-library-type`); a process's
 ;;; body must be transmissible, and do nothing outside it but what a process
-;;; may (`k-spawn-te`); `par`'s branches must not interfere (`k-par-te`).
+;;; may (`k-spawn-te`); `par`'s branches must not interfere (`k-par-te`);
+;;; `race`'s must be cancellable (`k-race-te`).
 ;;; Also `(with #%fx n)`'s rule, out of the rules' recursive group.
 
 ;; Its types, those it uses of the files before it, and the signatures of
@@ -77,6 +78,7 @@
                 (let ((s (symbol->string n)) (k (k-length args)))
                   (cond ((and (string=? s "spawn-process") (= k 1)) s)
                         ((and (string=? s "par2") (= k 2)) s)
+                        ((and (string=? s "race2") (= k 2)) s)
                         (else ""))))
               (else y ""))))
       (else y ""))))
@@ -368,6 +370,63 @@
                                   a b))))))
             (else y (k-fail usage a b))))
         (else y (k-fail usage a b))))))
+;; `par2`'s or `race2`'s rule, as `lop` says (`k-library-op`), of `x`.
+(define k-branches-te (subr (maxeff checks spin) (string kx kx kxs k-synth-fn) k-te)
+  (lambda (lop x op args synth)
+    (if (string=? lop "par2") (k-par-te x op args synth) (k-race-te x op args synth))))
+;; `((with … race2) f g)`, operator `op`, `f` and `g` thunks, synthesized
+;; by `synth`: a branch's value, both of one type, and every effect and
+;; `nondet`, if each branch is cancellable and the two do not interfere
+;; (the Rust checker's `synth_race`).
+(define k-race-te (subr (maxeff checks spin) (kx kx kxs k-synth-fn) k-te)
+  (lambda (x op args synth)
+    (let* ((noted (synth op)) (ft (synth (car args))) (gt (synth (car (cdr args))))
+           (usage "`(race expression expression …)`") (a (k-start x)) (b (k-end x)))
+      (tagcase (k-get (extract ft 1))
+        (ty-subr (e1 ps1 r1 c1)
+          (tagcase (k-get (extract gt 1))
+            (ty-subr (e2 ps2 r2 c2)
+              (if (or (not (null? ps1)) (not (null? ps2)))
+                  (k-fail usage a b)
+                  (begin
+                    (k-race-cancellable (car args) e1)
+                    (k-race-cancellable (car (cdr args)) e2)
+                    (let ((clash (k-interference e1 e2)))
+                      (if (null? clash)
+                          (k-te (k-race-type r1 r2 a b)
+                                (k-union (k-union (k-union (extract ft 2) (extract gt 2))
+                                                  (k-union e1 e2))
+                                         (k-one (a-nondet))))
+                          (k-fail (k-cat5 "`race`'s branches interfere: one has "
+                                          (k-show-effect (k-one (extract (car clash) 1)))
+                                          " and another "
+                                          (k-show-effect (k-one (extract (car clash) 2)))
+                                          "")
+                                  a b))))))
+            (else y (k-fail usage a b))))
+        (else y (k-fail usage a b))))))
+;; A `race` branch, of effect `e`, that does nothing another could see.
+(define k-race-cancellable (subr (maxeff checks spin) (kx k-eff) unit)
+  (lambda (branch e)
+    (cond ((null? e) #u)
+          ((tagcase (car e)
+             (a-write (r) #t) (a-init (r) #t) (a-send (r) #t) (a-io (k) #t) (a-goto (r) #t)
+             (a-comefrom (r) #t) (a-var (v) #t) (a-app (v ds) #t) (else y #f))
+           (k-fail (string-append k-race-unseen (k-show-effect (k-one (car e))))
+                   (k-start branch) (k-end branch)))
+          (else (k-race-cancellable branch (cdr e))))))
+;; What a `race` branch that could be seen is told, before its effect.
+(define k-race-unseen string
+  (string-append "a `race` branch may be stopped half way, so it must do nothing another "
+                 "could see, and this one has "))
+;; The one type of `race`'s branches, `ra` and `rb`: the wider.
+(define k-race-type (subr (maxeff checks spin) (int int int int) int)
+  (lambda (ra rb a b)
+    (cond ((k-subtype rb ra) ra)
+          ((k-subtype ra rb) rb)
+          (else (k-fail (k-cat5 "`race`'s branches give values of two types, " (k-show-ty ra)
+                                " and " (k-show-ty rb) "")
+                        a b)))))
 ;; `(productof (1 a) (2 b))`.
 (define k-pair-type (subr (maxeff kstate spin) (int int) int)
   (lambda (a b)

@@ -16,9 +16,10 @@
 //! The state is a vector, the value of a global no program names: the run
 //! queue (the front, oldest first; the back, newest first), the scheduler's
 //! prompt tag, a seed (a fixnum) when the queue is to be taken in an order
-//! of its own (`FIXPT_SCHED_SEED`), else `#f`, the words copied, and the
+//! of its own (`FIXPT_SCHED_SEED`), else `#f`, the words copied, the
 //! timers: what waits for the clock (a `pselect`'s deadline), each a pair
-//! of the time and the waker, newest first.
+//! of the time and the waker, newest first; and the tasks cancelled (a
+//! `race`'s losers), which end, not run, the next time they would.
 
 use crate::error::Outcome;
 use crate::runtime::Runtime;
@@ -32,6 +33,7 @@ const TAG: usize = 2;
 const SEED: usize = 3;
 const COPIED: usize = 4;
 const TIMERS: usize = 5;
+const CANCELLED: usize = 6;
 
 pub const ICELL: u8 = kind("icell");
 pub const MAILBOX: u8 = kind("mailbox");
@@ -71,6 +73,8 @@ pub mod op {
     pub const TIMERS_WAIT: i64 = 21;
     pub const ICELL_UNWAIT: i64 = 22;
     pub const MAILBOX_UNWAIT: i64 = 23;
+    pub const TASK_CANCEL: i64 = 24;
+    pub const TASK_CANCELLED: i64 = 25;
 }
 
 /// The state's vector, made if there is none yet.
@@ -82,7 +86,7 @@ fn state(heap: &mut Heap) -> Value {
         return s;
     }
     let seed = std::env::var("FIXPT_SCHED_SEED").ok().and_then(|s| s.parse::<i64>().ok());
-    let s = heap.vector_from(&[Value::NULL, Value::NULL, Value::FALSE, seed.map_or(Value::FALSE, Value::fixnum), Value::fixnum(0), Value::NULL]);
+    let s = heap.vector_from(&[Value::NULL, Value::NULL, Value::FALSE, seed.map_or(Value::FALSE, Value::fixnum), Value::fixnum(0), Value::NULL, Value::NULL]);
     heap.set_global(slot, s);
     s
 }
@@ -109,6 +113,7 @@ pub fn reset(heap: &mut Heap) {
     heap.obj_set(s, FRONT, Value::NULL);
     heap.obj_set(s, BACK, Value::NULL);
     heap.obj_set(s, TIMERS, Value::NULL);
+    heap.obj_set(s, CANCELLED, Value::NULL);
     heap.tasks_reset();
 }
 
@@ -179,7 +184,7 @@ pub fn run_op(rt: &mut Runtime, n: i64, a: Value, b: Value) -> Outcome<Value> {
     let unit = rt.heap.intern("#u");
     let is = |rt: &Runtime, v: Value, k: u8| v.is_bloblet() && rt.heap.bloblet_kind(v) == k;
     match n {
-        op::TASK_SWITCH | op::TASK_END if !a.is_fixnum() || !rt.heap.task_live(a.as_fixnum() as usize) => {
+        op::TASK_SWITCH | op::TASK_END | op::TASK_CANCEL if !a.is_fixnum() || !rt.heap.task_live(a.as_fixnum() as usize) => {
             return rt.fail("%fx26-sched: no such task", &[a]);
         }
         op::MAILBOX_PUT | op::MAILBOX_TAKE | op::MAILBOX_WAIT | op::MAILBOX_READY if !is(rt, a, MAILBOX) => {
@@ -203,8 +208,33 @@ pub fn run_op(rt: &mut Runtime, n: i64, a: Value, b: Value) -> Outcome<Value> {
         op::TASK_END => {
             if a.as_fixnum() != 0 {
                 heap.task_end(a.as_fixnum() as usize);
+                // Its number, free for another task, is not cancelled.
+                let s = state(heap);
+                let cs = heap.obj_ref(s, CANCELLED);
+                let cs = without(heap, cs, |_, t| t == a);
+                heap.obj_set(s, CANCELLED, cs);
             }
             unit
+        }
+        // Task `a`, live, cancelled: it ends the next time it would run.
+        op::TASK_CANCEL => {
+            if a.as_fixnum() != 0 {
+                let s = state(heap);
+                let cs = heap.obj_ref(s, CANCELLED);
+                let cs = heap.cons(a, cs);
+                heap.obj_set(s, CANCELLED, cs);
+            }
+            unit
+        }
+        op::TASK_CANCELLED => {
+            let s = state(heap);
+            let mut cs = heap.obj_ref(s, CANCELLED);
+            let mut found = false;
+            while cs.is_pair() && !found {
+                found = heap.car(cs) == a;
+                cs = heap.cdr(cs);
+            }
+            Value::boolean(found)
         }
         op::TASK_CURRENT => Value::fixnum(heap.task_current() as i64),
         op::PUSH => {
