@@ -26,9 +26,10 @@
 //! tasks the first task is running now, one inside another; the trampoline
 //! word (`preempt_due_with`); each task of a monitored group (a monitored
 //! process's tasks, or a `race` branch's), with its group (its first
-//! task), as pairs; each group's handler, `(group . handler)`; and a
+//! task), as pairs; each group's handler, `(group . handler)`; a
 //! failure caught, `(message . handler)`, for the scheduler to give the
-//! handler (`task_failed`).
+//! handler (`task_failed`); and each `race` branch's group with the group
+//! it is inside, `(group . group)`, which its failure cancels too.
 
 use crate::error::Outcome;
 use crate::runtime::Runtime;
@@ -50,6 +51,7 @@ const TRAMPOLINE: usize = 10;
 const GROUPS: usize = 11;
 const MONITORS: usize = 12;
 const FAILURE: usize = 13;
+const PARENTS: usize = 14;
 
 /// The polls between two decisions whether to preempt (`preempt_due`): a
 /// task's time slice, in each machine's polls (a bytecode machine's
@@ -117,6 +119,7 @@ pub mod op {
     pub const INHERIT: i64 = 36;
     pub const TAKE_FAILURE: i64 = 37;
     pub const TASK_FAILED: i64 = 38;
+    pub const BRANCH_GROUP: i64 = 39;
 }
 
 /// The state's vector, made if there is none yet.
@@ -128,7 +131,7 @@ fn state(heap: &mut Heap) -> Value {
         return s;
     }
     let seed = std::env::var("FIXPT_SCHED_SEED").ok().and_then(|s| s.parse::<i64>().ok());
-    let s = heap.vector_from(&[Value::NULL, Value::NULL, Value::FALSE, seed.map_or(Value::FALSE, Value::fixnum), Value::fixnum(0), Value::NULL, Value::NULL, Value::FALSE, Value::NULL, Value::fixnum(0), Value::FALSE, Value::NULL, Value::NULL, Value::FALSE]);
+    let s = heap.vector_from(&[Value::NULL, Value::NULL, Value::FALSE, seed.map_or(Value::FALSE, Value::fixnum), Value::fixnum(0), Value::NULL, Value::NULL, Value::FALSE, Value::NULL, Value::fixnum(0), Value::FALSE, Value::NULL, Value::NULL, Value::FALSE, Value::NULL]);
     heap.set_global(slot, s);
     s
 }
@@ -239,7 +242,7 @@ pub fn run_op(rt: &mut Runtime, n: i64, a: Value, b: Value) -> Outcome<Value> {
     let unit = rt.heap.intern_static("#u");
     let is = |rt: &Runtime, v: Value, k: u8| v.is_bloblet() && rt.heap.bloblet_kind(v) == k;
     match n {
-        op::TASK_SWITCH | op::TASK_END | op::TASK_CANCEL | op::MONITOR | op::INHERIT if !a.is_fixnum() || !rt.heap.task_live(a.as_fixnum() as usize) => {
+        op::TASK_SWITCH | op::TASK_END | op::TASK_CANCEL | op::MONITOR | op::INHERIT | op::BRANCH_GROUP if !a.is_fixnum() || !rt.heap.task_live(a.as_fixnum() as usize) => {
             return rt.fail("%fx26-sched: no such task", &[a]);
         }
         op::MAILBOX_PUT | op::MAILBOX_TAKE | op::MAILBOX_WAIT | op::MAILBOX_READY if !is(rt, a, MAILBOX) => {
@@ -309,8 +312,18 @@ pub fn run_op(rt: &mut Runtime, n: i64, a: Value, b: Value) -> Outcome<Value> {
         // `race` branch): a group of its own, whose failure handler `b`,
         // `(subr any (string) unit)`, the scheduler calls with a failure's
         // message.
-        op::MONITOR => {
+        op::MONITOR | op::BRANCH_GROUP => {
             let s = state(heap);
+            // A `race` branch's group is inside the current task's, if it
+            // has one: should that group fail, the branch is cancelled too.
+            if n == op::BRANCH_GROUP
+                && let Some(p) = group_of(heap, Value::fixnum(heap.task_current() as i64))
+            {
+                let e = heap.cons(a, p);
+                let ps = heap.obj_ref(s, PARENTS);
+                let ps = heap.cons(e, ps);
+                heap.obj_set(s, PARENTS, ps);
+            }
             let g = heap.cons(a, a);
             let gs = heap.obj_ref(s, GROUPS);
             let gs = heap.cons(g, gs);
@@ -705,7 +718,8 @@ fn timer_due(heap: &Heap, s: Value) -> bool {
 
 /// What the scheduler kept of task `t`, ended: its number, free for another
 /// task, is neither cancelled nor of a group; and, if it began a monitored
-/// process, the monitor goes with it.
+/// process, the monitor goes with it, and what group it was inside, or
+/// had inside it.
 fn forget_task(heap: &mut Heap, t: Value) {
     let s = state(heap);
     let cs = heap.obj_ref(s, CANCELLED);
@@ -717,6 +731,9 @@ fn forget_task(heap: &mut Heap, t: Value) {
     let ms = heap.obj_ref(s, MONITORS);
     let ms = without(heap, ms, |h, m| h.car(m) == t);
     heap.obj_set(s, MONITORS, ms);
+    let ps = heap.obj_ref(s, PARENTS);
+    let ps = without(heap, ps, |h, e| h.car(e) == t || h.cdr(e) == t);
+    heap.obj_set(s, PARENTS, ps);
 }
 
 /// The group task `t` is of, if any.
@@ -764,12 +781,28 @@ pub fn task_failed(rt: &mut Runtime, message: &str, reachable: impl FnOnce(&Runt
         return None;
     }
     let heap = &mut rt.heap;
-    // The rest of the group cancelled: each ends the next time it would run.
+    // The rest of the group cancelled, and every group inside it (`race`
+    // branches', `BRANCH_GROUP`): each ends the next time it would run.
+    let mut groups = vec![g];
+    loop {
+        let before = groups.len();
+        let mut ps = heap.obj_ref(s, PARENTS);
+        while ps.is_pair() {
+            let e = heap.car(ps);
+            if groups.contains(&heap.cdr(e)) && !groups.contains(&heap.car(e)) {
+                groups.push(heap.car(e));
+            }
+            ps = heap.cdr(ps);
+        }
+        if groups.len() == before {
+            break;
+        }
+    }
     let mut others = Vec::new();
     let mut gs = heap.obj_ref(s, GROUPS);
     while gs.is_pair() {
         let e = heap.car(gs);
-        if heap.cdr(e) == g && heap.car(e).as_fixnum() as usize != cur {
+        if groups.contains(&heap.cdr(e)) && heap.car(e).as_fixnum() as usize != cur {
             others.push(heap.car(e));
         }
         gs = heap.cdr(gs);

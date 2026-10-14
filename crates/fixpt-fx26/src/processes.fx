@@ -157,6 +157,10 @@
   ;; The first task of a monitored group, whose failure `h` handles (35).
   (define fork-group (subr sched (thunk handler) int)
     (lambda (body h) (fork-as body (lambda (t) ((proj %sched int handler unit) 35 t h)))))
+  ;; The same for a `race` branch, whose group is inside the current task's:
+  ;; should that one fail, the branch is cancelled with it (39).
+  (define fork-race-branch (subr sched (thunk handler) int)
+    (lambda (body h) (fork-as body (lambda (t) ((proj %sched int handler unit) 39 t h)))))
   ;; A branch of the current task (`par`, `race`): of its process's group,
   ;; if it is monitored, so that the branch's failure is the process's.
   (define fork-branch (subr sched (thunk) int)
@@ -298,7 +302,8 @@
 ;; `f` and `g`, each a task, and the value of the first to finish (`race`,
 ;; best effort): the other, cancelled, ends at its next wait, or when it is
 ;; next preempted, or before it starts. A branch that fails is lost, a
-;; monitored group of its own (`fork-group`); if both are, the race fails
+;; monitored group of its own (`fork-race-branch`), inside the current
+;; task's, which cancels it should it fail; if both are, the race fails
 ;; as the last did. Each branch's `done` says it has finished or failed,
 ;; after which its task's number may be another's, so it is not cancelled.
 (define race2 (poly ((a type)) (subr any ((subr any () a) (subr any () a)) a))
@@ -317,8 +322,8 @@
                           (if (= (get lost) 2) (offer (sum lost m)) #u)))))
              (d1 (the (ref bool @sched) (new #f)))
              (d2 (the (ref bool @sched) (new #f)))
-             (t1 (fork-group (branch f d1) (loser d1)))
-             (t2 (fork-group (branch g d2) (loser d2)))
+             (t1 (fork-race-branch (branch f d1) (loser d1)))
+             (t2 (fork-race-branch (branch g d2) (loser d2)))
              (r ((proj (proj await @par) (outcome a)) res)))
         (begin
           (if (get d1) #u (cancel t1))

@@ -2337,3 +2337,13 @@ group's handler the message (`TAKE_FAILURE`, 37). Tests: `programs/monitors`
 message, a `race` branch lost, a `race` all lost, two refusals), every way
 and under ten schedules (`processes.rs`), and on each of the nine machines
 (`fixpt-cli/tests/preempt.rs`).
+
+**A `race` in a process that fails is cancelled with it (2026-10-14).** A
+`race` branch's group was a group of its own and nothing more, so when the
+process running the race failed, its branches ran on: unseen (a branch
+does nothing another could see), but for as long as they took. Now a
+branch's group is made inside the current task's (`BRANCH_GROUP`, 39;
+`fork-race-branch`), and a failure cancels its group and every group inside
+it. Test: `programs/monitors/race-cancelled.fx`, whose branches would
+count a billion each: once the process fails, a wait for what no task will
+fill is a deadlock at once (it ran out of steps before).
