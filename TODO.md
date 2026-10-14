@@ -2498,11 +2498,14 @@ Built, all three of kayak's stages (`DONE.md` §92; the design,
   `docol` and word-entry polls after `CUR` and `IP` are set; a call's
   poll, detail 1, one cell back) and comes back in through the state
   (`start` 0), the trampoline entered first if the scheduler would
-  preempt; test `fixpt-cli/tests/preempt.rs`, on each machine. Left:
-  register code, both conventions, whose polls hold values in registers
-  (their slices are taken in line meanwhile, `State::reserve`): a
-  liveness pass over register code, and a frame of the stub's own for
-  what is live.
+  preempt; test `fixpt-cli/tests/preempt.rs`, on each machine. Then
+  register code in the cellular convention: its entry's and loops' polls
+  push what is live (a liveness pass over register code) and leave, detail
+  2, coming back by the resume table; and a task is not preempted again
+  until its `preempt` is done and it has had a slice of its own (the
+  heap's per-task state). Left: the native convention (`direct.rs`), whose
+  polls hold values in registers, some raw: a frame of the stub's own for
+  what is live, and the call made from native code.
 - **The cost of a switch** (the actors note's A4): measured, 585 ns for a
   message's two switches, after 890 (`DONE.md` §92). What is left is the
   call-out from native code and the frames copied to capture and

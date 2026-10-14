@@ -239,6 +239,57 @@ impl Asm {
             None => self.e(ldr(LR, ST, off(offset_of!(State, leaf_link)))),
         }
     }
+    /// A poll in register code, at which a time slice's end leaves the
+    /// machine as a cellular poll does (`Asm::fuel`), detail 2, and comes
+    /// back at the resume point field `f` names: first pushing the
+    /// registers `live` says (bit 0 `RESULT`, bit `k` `REGk`), and a leaf's
+    /// link, which reads as a fixnum (the points a `blr` returns to are
+    /// 8-aligned); there, popping them, and on. What is pushed are values,
+    /// for the collector to scan, and whatever runs meanwhile (the
+    /// scheduler's `preempt`) to keep.
+    fn poll_regs(&mut self, live: u16, f: usize, fields: usize, resume_at: &mut Vec<(usize, Label)>) {
+        self.e(subs_imm(FUEL, FUEL, 1));
+        let (out, back, again) = (self.label(), self.label(), self.label());
+        self.b_cond(Cond::Eq, out);
+        self.bind(back);
+        resume_at.push((f, again));
+        self.polls.push(Poll { out, back, again, live, f, fields, leaf: self.link });
+    }
+    /// The polls' code out of line (`poll_regs`).
+    fn flush_polls(&mut self) {
+        for p in std::mem::take(&mut self.polls) {
+            let regs = (0..=REGS).filter(|&k| p.live & (1 << k) != 0).map(|k| if k == 0 { RESULT } else { reg(k) });
+            let regs: Vec<Reg> = regs.collect();
+            self.bind(p.out);
+            for &r in &regs {
+                self.e(str_pre(r, DSP, -8));
+            }
+            if p.leaf.is_none() {
+                self.e(str_pre(LR, DSP, -8));
+            }
+            self.ip_at(p.f);
+            let (code, _) = Trap::OutOfFuel.code();
+            self.e(movz(X13, code as u32, 0));
+            self.e(movz(X14, 2, 0));
+            let t = self.trap_common;
+            self.b(t);
+            // Back, by the resume table, the machine's registers loaded.
+            self.bind(p.again);
+            self.pool(p.fields);
+            if p.leaf.is_none() {
+                self.e(ldr_post(LR, DSP, 8));
+            }
+            for &r in regs.iter().rev() {
+                self.e(ldr_post(r, DSP, 8));
+            }
+            let link = std::mem::replace(&mut self.link, p.leaf);
+            if p.leaf.is_some() {
+                self.relink();
+            }
+            self.link = link;
+            self.b(p.back);
+        }
+    }
     /// A call-out to routine `n` with the ip at field `f`: as
     /// [`callout`](Asm::callout), but on, whatever the routine, to the code
     /// after it, or, for control, to the resume point `f` names.
@@ -797,6 +848,72 @@ pub fn assemble_register_word(heap: &Heap, rw: Value, far: [i64; 2]) -> Result<(
     assemble_register_word_as(heap, rw, far, false)
 }
 
+/// Which registers each instruction of register code `cells` may read
+/// before writing, as it begins, as a mask: bit 0 `RESULT`, bit `k`
+/// `REGk` (`REG0`, the closure, is in the state, and not counted). What may
+/// collect (a call, a call-out) leaves none of REG1…REG8 as it was, which
+/// the compilers never read again before writing; so it is taken to write
+/// them all. For a time slice's end at a poll, which keeps only these
+/// (`poll_regs`).
+fn liveness(cells: &[Value], starts: &[bool]) -> Vec<u16> {
+    let all_regs: u16 = 0b1_1111_1110;
+    let upto = |n: usize| -> u16 { (1u16 << (n.min(REGS) + 1)) - 2 };
+    let bit = |k: usize| -> u16 { if k == 0 || k > REGS { 0 } else { 1 << k } };
+    // Each instruction's (uses, defs, successors).
+    let mut info: Vec<(usize, u16, u16, Vec<usize>)> = Vec::new();
+    let mut i = 0;
+    while i < cells.len() {
+        let (name, n, _) = OPS[cells[i].as_fixnum() as usize];
+        let o = |j: usize| cells[i + 1 + j].as_fixnum() as usize;
+        let next = i + 1 + n;
+        let (uses, defs): (u16, u16) = match name {
+            "args" => (0, upto(o(0))),
+            "vargs" => (0, all_regs),
+            "const" | "global" | "lexical" | "stack" => (0, 1),
+            "setglbl" | "setstk" | "branchf" | "brancht" | "return" => (1, 0),
+            "reg" => (bit(o(0)), 1),
+            "setreg" => (1, bit(o(0))),
+            "movereg" => (bit(o(0)), bit(o(1))),
+            "load" => (0, bit(o(0))),
+            "store" => (bit(o(0)), 0),
+            "op1" | "op2imm" | "field" | "prim1" | "prim2imm" => (1, 1),
+            "op2" | "prim2" | "setfield" => (1 | bit(o(1)), if name == "setfield" { 0 } else { 1 }),
+            "prim3imm" => (1 | bit(o(2)), 1),
+            "prim" | "lambda" | "cellular" => (upto(o(1)), 1 | all_regs),
+            "invoke" | "invokeself" => (upto(o(0)) | if name == "invoke" { 1 } else { 0 }, 1 | all_regs),
+            "tailinvoke" => (1 | upto(o(0)), 0),
+            _ => (0, 0),
+        };
+        let mut succ = Vec::new();
+        if !matches!(name, "return" | "tailinvoke" | "branch") {
+            succ.push(next);
+        }
+        match name {
+            "branch" | "branchf" | "brancht" => succ.push((i as i64 + 2 + cells[i + 1].as_fixnum()) as usize),
+            "global-guard" => succ.push((i as i64 + 4 + cells[i + 3].as_fixnum()) as usize),
+            _ => {}
+        }
+        info.push((i, uses, defs, succ));
+        i = next;
+    }
+    let mut live = vec![0u16; cells.len() + 1];
+    let _ = starts;
+    loop {
+        let mut changed = false;
+        for (i, uses, defs, succ) in info.iter().rev() {
+            let out = succ.iter().fold(0u16, |m, &s| m | live.get(s).copied().unwrap_or(0));
+            let inn = uses | (out & !defs);
+            if inn != live[*i] {
+                live[*i] = inn;
+                changed = true;
+            }
+        }
+        if !changed {
+            return live;
+        }
+    }
+}
+
 /// [`assemble_register_word`], with every conditional branch long if
 /// `long`: a word of hundreds of thousands of instructions has branches
 /// to its trap stubs and slow paths, placed at its end, that a conditional
@@ -815,13 +932,23 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
     a.long_branches = long;
     let labels: Vec<Label> = (0..=cells.len()).map(|_| a.label()).collect();
     let mut resume = vec![-1i64; cells.len()];
+    // Polls' resume points: each field, and its code's label.
+    let mut resume_at: Vec<(usize, Label)> = Vec::new();
     let far_exit = a.exit_common;
     let near_exit = a.label();
     a.exit_common = near_exit;
-    // The register entry.
+    let live = liveness(&cells, &starts);
+    // The register entry. Its poll keeps the arguments, REG1…REGn, unless
+    // they are counted (`vargs`, whose count is in X9 then).
     let entry = a.label();
     a.bind(entry);
-    a.fuel();
+    match OPS[cells[0].as_fixnum() as usize].0 {
+        "args" => {
+            let n = cells[1].as_fixnum() as usize;
+            a.poll_regs((1u16 << (n.min(REGS) + 1)) - 2, WORD_CELL0 + 1, fields, &mut resume_at);
+        }
+        _ => a.fuel(),
+    }
     a.rs_limit();
     a.pool(fields);
     // Where a backward branch goes: a loop's head, 32-aligned (words are),
@@ -1212,8 +1339,11 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
                     a.e(cmp(RESULT, X16));
                     a.b_cond(if name == "branchf" { Cond::Eq } else { Cond::Ne }, labels[to]);
                 } else {
+                    // A loop's poll keeps what the loop's head reads; its
+                    // resume point the branch's operand, where nothing
+                    // returns.
                     if to <= i {
-                        a.fuel();
+                        a.poll_regs(live[to], f(0), fields, &mut resume_at);
                     }
                     a.b(labels[to]);
                 }
@@ -1233,8 +1363,10 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
         i = next;
     }
     a.bind(labels[cells.len()]);
-    // Out of the way of the code that runs: the traps, and a jump to the
-    // machine's exit, which may be too far for a conditional branch.
+    // Out of the way of the code that runs: the polls' ways out and back,
+    // the traps, and a jump to the machine's exit, which may be too far for
+    // a conditional branch.
+    a.flush_polls();
     a.flush_stubs();
     a.bind(near_exit);
     a.b(far_exit);
@@ -1251,6 +1383,9 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
     let _ = (far, far_exit, starts, REGS);
     if !long && !a.branches_fit() {
         return assemble_register_word_as(heap, rw, far, true);
+    }
+    for (f, l) in resume_at {
+        resume[f - WORD_CELL0] = a.label_at(l).expect("bound");
     }
     Ok((a.finish(), resume))
 }

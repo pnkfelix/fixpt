@@ -184,7 +184,7 @@ pub struct Vm {
     pub step_limit: Option<u64>,
     steps: u64,
     /// The step at which `drive` next looks up from the code: the step
-    /// limit, or the end of a time slice (`fixpt_runtime::sched::SLICE`).
+    /// limit, or the end of a time slice (`fixpt_runtime::sched::slice()`).
     next_poll: u64,
 }
 
@@ -312,12 +312,13 @@ impl Vm {
     fn poll(&mut self, rt: &mut Runtime, p: &mut Prepared) -> Outcome<Option<Value>> {
         let limit = self.step_limit.map_or(u64::MAX, |l| l.saturating_add(1));
         let first = self.next_poll == 0;
-        self.next_poll = (self.steps + fixpt_runtime::sched::SLICE).min(limit);
+        self.next_poll = (self.steps + fixpt_runtime::sched::slice()).min(limit);
         let marks = &self.marks;
-        let due = if first { None } else { fixpt_runtime::sched::preempt_due(rt, |_, tag| marks.find_prompt(tag).is_some()) };
         // One of this machine's own procedures: another machine's program
         // may have left its scheduler's (they share a runtime).
-        let Some(f) = due.filter(|&f| rt.heap.obj_type(f) == Some(ObjType::Closure)) else { return Ok(None) };
+        let own = |h: &fixpt_heap::Heap, f: Value| h.obj_type(f) == Some(ObjType::Closure);
+        let due = if first { None } else { fixpt_runtime::sched::preempt_due(rt, own, |_, tag| marks.find_prompt(tag).is_some()) };
+        let Some(f) = due else { return Ok(None) };
         let base = self.stack.len();
         self.stack.push(f);
         self.frames.push(VmFrame::Discard { pc: self.pc, fp: self.fp });

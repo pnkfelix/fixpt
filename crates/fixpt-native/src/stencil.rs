@@ -119,7 +119,7 @@ impl StencilMachine {
         // Fuel in time slices, as `NativeMachine::run_in_runtime` gives it:
         // at each one's end, the scheduler's `preempt` called if it would
         // have another task run, then on from the state.
-        let slice = fixpt_runtime::sched::SLICE;
+        let slice = fixpt_runtime::sched::slice();
         if st.fuel > slice {
             (st.fuel, st.reserve) = (slice, st.fuel - slice);
         }
@@ -136,9 +136,9 @@ impl StencilMachine {
             (st.status, st.aux, st.fuel, st.reserve) = (0, 0, take, st.reserve - take);
             word = Value::from_raw(0);
             let st_ref = &mut st;
-            let due = fixpt_runtime::sched::preempt_due_with(rt, |_, tag| crate::control::has_prompt(st_ref, tag));
-            let own = |f: Value| f.is_bloblet() && rt.heap.bloblet_kind(f) == const { fixpt_heap::layout::kind("cellular-closure") };
-            if let Some((f, t)) = due.filter(|&(f, _)| own(f))
+            let own = |h: &fixpt_heap::Heap, f: Value| f.is_bloblet() && h.bloblet_kind(f) == const { fixpt_heap::layout::kind("cellular-closure") };
+            let due = fixpt_runtime::sched::preempt_due_with(rt, own, |_, tag| crate::control::has_prompt(st_ref, tag));
+            if let Some((f, t)) = due
                 && let Err(trap) = crate::control::enter_preempt(&mut st, f, t)
             {
                 (st.status, st.aux) = trap.code();

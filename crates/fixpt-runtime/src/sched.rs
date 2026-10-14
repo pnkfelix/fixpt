@@ -46,7 +46,15 @@ const TRAMPOLINE: usize = 10;
 /// The polls between two decisions whether to preempt (`preempt_due`): a
 /// task's time slice, in each machine's polls (a bytecode machine's
 /// instructions; procedure entries and backward branches in compiled code).
+/// `FIXPT_SLICE` sets another, for testing (`slice`).
 pub const SLICE: u64 = 1 << 16;
+
+/// The time slice: `SLICE`, or `FIXPT_SLICE` if set (1 or more), so that a
+/// test may preempt at nearly every poll.
+pub fn slice() -> u64 {
+    static S: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *S.get_or_init(|| std::env::var("FIXPT_SLICE").ok().and_then(|s| s.parse().ok()).filter(|&n| n > 0).unwrap_or(SLICE))
+}
 
 pub const ICELL: u8 = kind("icell");
 pub const MAILBOX: u8 = kind("mailbox");
@@ -94,6 +102,7 @@ pub mod op {
     pub const RUNNING: i64 = 29;
     pub const TIMERS_FIRE: i64 = 30;
     pub const PREEMPT_WANTED: i64 = 31;
+    pub const PREEMPT_DONE: i64 = 32;
 }
 
 /// The state's vector, made if there is none yet.
@@ -233,8 +242,19 @@ pub fn run_op(rt: &mut Runtime, n: i64, a: Value, b: Value) -> Outcome<Value> {
         // scheduler as its own values, and so calls its `preempt` itself:
         // whether to, on the one machine it runs on.
         op::PREEMPT_WANTED => {
-            let w = state_if_any(&rt.heap).is_some_and(|s| wanted(rt, s, |_, _| true));
+            let w = match state_if_any(&rt.heap) {
+                Some(s) => wanted(rt, s, |_, _| true),
+                None => false,
+            };
+            if w {
+                rt.heap.set_task_quiet(1);
+            }
             return Ok(Value::boolean(w));
+        }
+        // The current task's `preempt` done: it may be preempted again.
+        op::PREEMPT_DONE => {
+            rt.heap.set_task_quiet(2);
+            return Ok(rt.heap.intern_static("#u"));
         }
         _ => {}
     }
@@ -515,27 +535,50 @@ fn timers_wait(rt: &mut Runtime, sleep: bool) -> Value {
 /// which `preempt` captures up to (no capture crosses from one machine to
 /// another). The first task is, if another is queued or parked, or a
 /// deadline is due, and it is not running one already (`preempt` runs one).
-pub fn preempt_due(rt: &mut Runtime, reachable: impl FnOnce(&Runtime, Value) -> bool) -> Option<Value> {
-    preempt_due_with(rt, reachable).map(|(f, _)| f)
+///
+/// `own` says whether `preempt` is a procedure this machine calls (another
+/// machine's program may have left its scheduler's: they share a runtime).
+/// When this says to call it, the task is marked as being preempted until
+/// `preempt` is done (`PREEMPT_DONE`), and not preempted again meanwhile
+/// (the scheduler's own code, preempted, would capture a capture under
+/// way), nor at the next slice's end, so that it has a slice of its own
+/// whatever `preempt` cost: else, with a slice shorter than that, no task
+/// would ever go on.
+pub fn preempt_due(rt: &mut Runtime, own: impl FnOnce(&Heap, Value) -> bool, reachable: impl FnOnce(&Runtime, Value) -> bool) -> Option<Value> {
+    preempt_due_with(rt, own, reachable).map(|(f, _)| f)
 }
 
 /// `preempt_due`'s procedure, with a cellular word for a cellular machine
 /// to enter with it on the data stack: `call 0`, `drop`, `exit`, which
 /// calls it and goes back to the cell it stopped at, the stacks as they
 /// were.
-pub fn preempt_due_with(rt: &mut Runtime, reachable: impl FnOnce(&Runtime, Value) -> bool) -> Option<(Value, Value)> {
+pub fn preempt_due_with(
+    rt: &mut Runtime,
+    own: impl FnOnce(&Heap, Value) -> bool,
+    reachable: impl FnOnce(&Runtime, Value) -> bool,
+) -> Option<(Value, Value)> {
     let heap = &rt.heap;
     let s = state_if_any(heap)?;
     let f = heap.obj_ref(s, PREEMPT);
-    if f == Value::FALSE || !wanted(rt, s, reachable) {
+    if f == Value::FALSE || !own(heap, f) || !wanted(rt, s, reachable) {
         return None;
     }
+    let f = rt.heap.obj_ref(s, PREEMPT);
+    rt.heap.set_task_quiet(1);
     Some((f, rt.heap.obj_ref(s, TRAMPOLINE)))
 }
 
 /// Whether the scheduler would have the current task preempted here
 /// (`preempt_due`), whoever calls its `preempt`.
-fn wanted(rt: &Runtime, s: Value, reachable: impl FnOnce(&Runtime, Value) -> bool) -> bool {
+fn wanted(rt: &mut Runtime, s: Value, reachable: impl FnOnce(&Runtime, Value) -> bool) -> bool {
+    match rt.heap.task_quiet() {
+        1 => return false,
+        2 => {
+            rt.heap.set_task_quiet(0);
+            return false;
+        }
+        _ => {}
+    }
     let heap = &rt.heap;
     if heap.task_current() == 0 {
         let runnable = [FRONT, BACK, PARKED].iter().any(|&k| heap.obj_ref(s, k).is_pair()) || timer_due(heap, s);

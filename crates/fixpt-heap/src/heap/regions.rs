@@ -59,6 +59,11 @@ pub(super) struct Regions {
     pub(super) alive: Vec<bool>,
     /// Each task's regions, the newest last; none for a task ended (`None`).
     stacks: Vec<Option<Vec<usize>>>,
+    /// Each task's state as the scheduler preempts it
+    /// (`fixpt_runtime::sched::preempt_due`): 0, as any; 1, its `preempt`
+    /// running, called at a poll, until it is done; 2, done, the next time
+    /// slice the task's own, whole, before it is preempted again.
+    quiet: Vec<u8>,
     /// The task current.
     task: usize,
     /// For each handle below `REGION_SLOTS`, its current chunk: how far it
@@ -94,6 +99,7 @@ impl Regions {
             reap: Vec::new(),
             alive: Vec::new(),
             stacks: vec![Some(Vec::new())],
+            quiet: vec![0],
             task: 0,
             table: Box::new([[0; 2]; REGION_SLOTS]),
             free: Vec::new(),
@@ -262,7 +268,7 @@ impl Heap {
     /// A new task, with no region: its number. Not current until made so.
     pub fn task_new(&mut self) -> usize {
         let s = &mut self.regions.stacks;
-        match s.iter().position(|t| t.is_none()) {
+        let t = match s.iter().position(|t| t.is_none()) {
             Some(t) => {
                 s[t] = Some(Vec::new());
                 t
@@ -271,7 +277,25 @@ impl Heap {
                 s.push(Some(Vec::new()));
                 s.len() - 1
             }
-        }
+        };
+        let q = &mut self.regions.quiet;
+        q.resize(q.len().max(t + 1), 0);
+        q[t] = 0;
+        t
+    }
+
+    /// The current task's state as the scheduler preempts it
+    /// (`Regions::quiet`).
+    pub fn task_quiet(&self) -> u8 {
+        self.regions.quiet.get(self.regions.task).copied().unwrap_or(0)
+    }
+
+    /// The current task's state as the scheduler preempts it, set.
+    pub fn set_task_quiet(&mut self, state: u8) {
+        let t = self.regions.task;
+        let q = &mut self.regions.quiet;
+        q.resize(q.len().max(t + 1), 0);
+        q[t] = state;
     }
 
     /// Make task `t` current; the task that was.
@@ -310,6 +334,7 @@ impl Heap {
             self.task_end(t);
         }
         self.regions.task = 0;
+        self.regions.quiet.iter_mut().for_each(|q| *q = 0);
     }
 
     /// `f`, with what it allocates in region `h`, where that fits: for a

@@ -87,13 +87,16 @@
   ;; other task, the oldest queued, else the oldest parked. Parked tasks are
   ;; apart from the queue, so that `drain` ends: they run when the first
   ;; task waits or is preempted.
+  ;; Until it is done (32), the runtime preempts the task no more.
   (define preempt (subr any () unit)
     (lambda ()
-      (if (main?)
-          (begin
-            ((proj %sched unit unit bool) 30 #u #u)
-            (let ((t (pop-any))) (if (procedure? t) (run-task t) #u)))
-          (suspend (lambda (w) ((proj %sched thunk unit unit) 27 w #u))))))
+      (begin
+        (if (main?)
+            (begin
+              ((proj %sched unit unit bool) 30 #u #u)
+              (let ((t (pop-any))) (if (procedure? t) (run-task t) #u)))
+            (suspend (lambda (w) ((proj %sched thunk unit unit) 27 w #u))))
+        ((proj %sched unit unit unit) 32 #u #u))))
   ;; The first task, waiting until `ready` gives a place (0 or more): the
   ;; others run, one at a time until it does, and, when none can, the clock
   ;; is waited for, if a task waits for it; if nothing is left that could

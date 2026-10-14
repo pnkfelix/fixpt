@@ -138,6 +138,22 @@ struct Asm {
     /// (`fuel`), from these stubs: each, and where it goes back to.
     in_regcode: bool,
     refills: Vec<(Label, Label)>,
+    /// Register code's polls that may leave the machine (`poll_regs`).
+    polls: Vec<Poll>,
+}
+
+/// A poll in register code: its way out, where it goes on, the code that
+/// comes back by the resume table, the registers it keeps, its resume
+/// point's field, the word's field count, and whether there is a frame
+/// (`Asm::link`): if not, the link is kept too.
+struct Poll {
+    out: Label,
+    back: Label,
+    again: Label,
+    live: u16,
+    f: usize,
+    fields: usize,
+    leaf: Option<usize>,
 }
 
 impl Asm {
@@ -157,10 +173,15 @@ impl Asm {
             in_word: false,
             in_regcode: false,
             refills: Vec::new(),
+            polls: Vec::new(),
         };
         a.trap_common = a.label();
         a.exit_common = a.label();
         a
+    }
+    /// Where label `l` is bound, in instructions from this code's start.
+    fn label_at(&self, l: Label) -> Option<i64> {
+        self.labels[l.0]
     }
     fn here(&self) -> usize {
         self.code.len()
@@ -238,7 +259,7 @@ impl Asm {
             let out = self.label();
             self.e(ldr(X13, ST, off(offset_of!(State, reserve))));
             self.cbz(X13, out);
-            self.es(&mov_imm64(X14, fixpt_runtime::sched::SLICE));
+            self.es(&mov_imm64(X14, fixpt_runtime::sched::slice()));
             self.e(cmp(X13, X14));
             self.e(csel(X14, X13, X14, Cond::Lo));
             self.e(sub(X13, X13, X14));
@@ -2109,7 +2130,7 @@ impl NativeMachine {
         st.resume = self.resume.as_ptr() as u64;
         (st.trap, st.exit) = self.commons_addresses();
         // Fuel in time slices (`State::reserve`).
-        let slice = fixpt_runtime::sched::SLICE;
+        let slice = fixpt_runtime::sched::slice();
         if st.fuel > slice {
             (st.fuel, st.reserve) = (slice, st.fuel - slice);
         }
@@ -2118,10 +2139,12 @@ impl NativeMachine {
             // only through the state while the machine runs.
             unsafe { self.space.call(self.entry, [&mut st as *mut State as u64, 0, 0, 0]) };
             // A time slice's end, at a cell boundary (detail 0, or 1 at a
-            // call, whose cell is one back): the next slice, and, if the
+            // call, whose cell is one back; 2 in register code, at a poll's
+            // resume point, its registers on the data stack): the next
+            // slice, and, if the
             // scheduler would have another task run, its `preempt` called
             // there; then on from the state (`start` 0).
-            if !(st.status == Trap::OutOfFuel.code().0 && st.reserve > 0 && st.aux <= 1) {
+            if !(st.status == Trap::OutOfFuel.code().0 && st.reserve > 0 && st.aux <= 2) {
                 break;
             }
             if st.aux == 1 {
@@ -2130,9 +2153,9 @@ impl NativeMachine {
             let take = st.reserve.min(slice);
             (st.status, st.aux, st.fuel, st.reserve, st.start) = (0, 0, take, st.reserve - take, 0);
             let st_ref = &mut st;
-            let due = fixpt_runtime::sched::preempt_due_with(rt, |_, tag| crate::control::has_prompt(st_ref, tag));
-            let own = |f: Value| f.is_bloblet() && rt.heap.bloblet_kind(f) == const { fixpt_heap::layout::kind("cellular-closure") };
-            if let Some((f, t)) = due.filter(|&(f, _)| own(f))
+            let own = |h: &fixpt_heap::Heap, f: Value| f.is_bloblet() && h.bloblet_kind(f) == const { fixpt_heap::layout::kind("cellular-closure") };
+            let due = fixpt_runtime::sched::preempt_due_with(rt, own, |_, tag| crate::control::has_prompt(st_ref, tag));
+            if let Some((f, t)) = due
                 && let Err(trap) = crate::control::enter_preempt(&mut st, f, t)
             {
                 let (code, aux) = trap.code();
