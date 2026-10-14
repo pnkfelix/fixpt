@@ -466,7 +466,8 @@
         (n-e (arm-movz n-x14 n 0))
         (n-b (get n-trap-common))))))
 
-;; A typed call's callee is a closure, so it is not tested; and a typed
+;; A callee not a cellular closure (a native closure, which a typed call's
+;; may be in the native convention) goes the Rust machine's way; a typed
 ;; tail call, which grows neither stack, does not check them.
 (define n-call (subr (maxeff assembles spin) (int) unit)
   (lambda (n)
@@ -475,7 +476,7 @@
           (tail (or (= n routine-tailcall) (= n routine-ttailcall))))
       (begin
         (n-e (arm-ldr n-w n-dsp 0))
-        (if typed #u (n-is-closure n-w other))
+        (n-is-closure n-w other)
         (n-fuel-check)
         (if (and typed tail) #u (begin (n-ds-limit) (n-rs-limit)))
         (n-e (arm-ldr-post n-x10 n-ip -8))
@@ -507,7 +508,7 @@
         (n-e (arm-movz n-x13 (* 8 n-word-cell0) 0))
         (n-enter-cur n-x13)
         (n-bind other)
-        (if typed #u (n-callout n))))))
+        (n-callout n)))))
 
 ;;; ------------------------------------------------------------ routines
 

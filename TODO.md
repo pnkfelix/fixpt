@@ -2510,3 +2510,18 @@ Built, all three of kayak's stages (`DONE.md` §92; the design,
 - Out of scope, as kayak asked: transfer of mutable data (by consuming a
   place's handle, after H3), session types, distribution, links and
   monitors.
+
+## 93. Cellular code calling native code, where the native convention declines (2026-10-13)
+
+Found while making `append` and `string-append` `vsubr`s: on the REPL's
+machine, a form the native convention declined runs as cellular code on
+the arm64 cellular machine, and a typed call there of a global holding a
+native closure entered it as a cellular one, a crash (`(stay-cellular (g
+1))`, `g` native). Fixed (`DONE.md` §93): typed calls check for a cellular
+closure as untyped ones do, and call anything else out to the Rust machine,
+which calls native code. Left:
+- **Its cost to assembling words** (measured back to back on peval: `fx
+  arm64` 4.76 → 6.88 ms, `arm64` 0.27 → 0.33 ms; run times unchanged): the
+  check and the call-out are in line at every typed call. Cheaper: the
+  kind alone (a typed call's callee is a bloblet), and the call-out in one
+  stub per word, out of line.

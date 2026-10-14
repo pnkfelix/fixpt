@@ -263,8 +263,17 @@ fn reinstate(s: &mut Stacks, heap: &mut Heap, k: Value, v: Value, tail: bool) ->
 }
 
 /// Routine `name`, if it is one done here; its operands, if any, start at
-/// the saved ip. `None` for the rest.
+/// the saved ip. `None` for the rest, and for a call of a native closure,
+/// which the Rust machine makes (`call_native`): cellular code run where
+/// the native convention declined calls native code.
 pub(crate) fn run(st: &mut State, heap: &mut Heap, name: &'static str, safepoint: fn(&mut State, &mut Heap)) -> Option<Result<(), Trap>> {
+    if matches!(name, "call" | "tailcall" | "tcall" | "ttailcall") && st.dsp < st.ds_base {
+        // SAFETY: the data stack's top, below its base.
+        let top = Value::from_raw(unsafe { *(st.dsp as *const u64) });
+        if top.is_bloblet() && heap.bloblet_kind(top) == const { fixpt_heap::layout::kind("native-closure") } {
+            return None;
+        }
+    }
     let r = match name {
         "prompt" | "withmark" | "withmark-tail" | "abort" | "callcomp" | "callcc" | "firstmark" | "call" | "tailcall"
         | "tcall" | "ttailcall" | "resume" => {

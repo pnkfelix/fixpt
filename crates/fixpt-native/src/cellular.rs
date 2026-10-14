@@ -856,18 +856,16 @@ fn routine_body(a: &mut Asm, n: usize, name: &'static str) {
         }
         "call" | "tailcall" | "tcall" | "ttailcall" => {
             // A cellular closure on top: its word, over a frame of the n
-            // values below it. Anything else (a continuation, or not a
-            // procedure) goes the Rust machine's way. A typed call's callee
-            // is a closure (the checker says so), so it is not tested; and
-            // a tail call grows neither stack, so a typed one does not
-            // check them either.
+            // values below it. Anything else (a continuation, not a
+            // procedure, or a native closure, which a typed call's callee
+            // may be in the native convention) goes the Rust machine's way,
+            // which calls native code. A tail call grows neither stack, so
+            // a typed one does not check them.
             let typed = matches!(name, "tcall" | "ttailcall");
             let name = if typed { &name[1..] } else { name };
             let other = a.label();
             a.e(ldr(W, DSP, 0));
-            if !typed {
-                a.is_closure(W, other);
-            }
+            a.is_closure(W, other);
             a.fuel();
             if !(typed && name == "tailcall") {
                 a.ds_limit();
@@ -906,9 +904,7 @@ fn routine_body(a: &mut Asm, n: usize, name: &'static str) {
             a.e(movz(X13, (8 * WORD_CELL0) as u32, 0));
             a.enter_cur(X13);
             a.bind(other);
-            if !typed {
-                a.callout(n as u64);
-            }
+            a.callout(n as u64);
         }
         "return" => {
             // The value on top replaces the frame; then back.

@@ -2119,3 +2119,18 @@ to a prompt tag no prompt had (`parser-forms.fx` made its own instance of
 `parser.fx`); its forms now fail through the caller's `pfail-at`. Tests:
 four programs in `programs/processes` (a cell chosen, a server stopped by
 a cell, a deadlock, a malformed arm), every way they run.
+
+
+## 93. Cellular code calling native code, where the native convention declines (2026-10-13)
+
+**Typed calls of native closures.** On the REPL's machine a form the native
+convention declined runs as cellular code on the arm64 cellular machine;
+a typed call (`tcall`, `ttailcall`) there was not checked, the checker
+having said its callee is a closure, and a global holding a native closure
+was entered as a cellular one: the code bloblet's first field read as a
+word's entry, a crash. Now a typed call checks for a cellular closure as an
+untyped one does, in both assemblers (`fixpt_native::cellular`,
+`native.fx`), and anything else goes to the Rust machine (`control::run`
+leaves a native closure to it), which calls native code. Test:
+`direct.rs`, `typed_calls_of_native_code`. Its cost to assembling words:
+`TODO.md` §93.

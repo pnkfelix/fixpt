@@ -724,6 +724,22 @@ fn session(native: bool) -> Fx26Session {
     s
 }
 
+/// The REPL's machine (the native convention, what it declines run on
+/// the arm64 cellular machine): cellular code calls a native closure, by a
+/// typed call, through the Rust machine (it had been entered as a cellular
+/// one, and the machine crashed).
+#[test]
+fn typed_calls_of_native_code() {
+    let mut s = session(true);
+    s.scheme.runtime_unrooted().run_word = Some(fixpt_native::cellular::run_word_registers);
+    let text = "(define g (subr pure (int) int) (lambda (x) (+ x 1)))\n\
+                (stay-cellular (g 1))";
+    let forms = s.checker.read_in(FileId(0), text).expect("reads");
+    let out: Vec<String> =
+        s.run_forms(&forms).expect("runs").into_iter().map(|o| o.map_or_else(|e| e.message, |o| format!("{}{:?}", o.printed, o.value))).collect();
+    assert!(out[1].ends_with("Ok(Some(\"2\"))"), "{out:?}");
+}
+
 /// A form run early, as the REPL does while it is typed, reads the globals
 /// the forms before it defined, where this session's strategy put them: not
 /// the lowered program's, which compiled sessions never fill. Then runs for
