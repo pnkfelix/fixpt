@@ -61,3 +61,15 @@ fn code_made_to_a_declared_convention() {
         assert_eq!(t.join().expect("ran"), ["\"(target arm64)\"", "42"], "{m}");
     }
 }
+
+/// Typed calls of a made procedure in procedures, in tail position and
+/// not (`programs/made-code/typed-calls.fx`): on the arm64 cellular
+/// machines a typed tail call of one stopped ("no routine is numbered
+/// 40"), and register code's `invoke` crashed.
+#[test]
+fn typed_calls_of_a_made_procedure() {
+    let runs: Vec<_> = machines().into_iter().map(|(m, _)| (m, std::thread::spawn(move || values(m, "typed-calls.fx", 3)))).collect();
+    for (m, t) in runs {
+        assert_eq!(t.join().expect("ran"), ["42", "42", "42"], "{m}");
+    }
+}

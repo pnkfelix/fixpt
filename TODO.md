@@ -2536,6 +2536,13 @@ constants, both checkers comparing a program's with it
 (`programs/made-code/declared.fx`). Left: code that is not a leaf (step
 5), the declaration as data a generator reads, structured (step 6; today
 one string a clause, `native-convention`).
+Fixed (2026-10-14), found by made procedures: on the arm64 cellular
+machines a typed tail call of a native closure stopped ("no routine is
+numbered 40": the Rust machine made the call, then returned from the word,
+which `run_routine` took for an error), and register code's `invoke`
+crashed on one (it read the callee's word's twin); now the return is made,
+and `invoke` calls a native closure out to the Rust machine
+(`programs/made-code/typed-calls.fx`).
 - **An adapter from the native convention to the cellular one runs on
   only some machines** (found 2026-10-14, a made procedure typed
   `cellular`, which `native-procedure` now refuses): the cellular closure

@@ -1395,6 +1395,9 @@ impl Machine {
         let mut r = Regs { cur: at.cur, k: at.k, fp: at.fp, clo: at.clo };
         match self.prim(&mut Ctx::Rt(rt), n, &mut r)? {
             Flow::Next => {}
+            // A typed tail call of a native closure (`TODO.md` §97), which
+            // returns from the word, as the run's loop returns.
+            Flow::Exit if !self.rs.is_empty() => self.pop_return(&mut r),
             Flow::Exit | Flow::Halt => return Err(Trap::NoRoutine(n)),
         }
         *at = Snapshot { cur: r.cur, k: r.k, fp: r.fp, clo: r.clo };
@@ -1595,6 +1598,11 @@ pub fn call_value(rt: &mut Runtime, f: Value, args: &[Value]) -> Result<Value, N
     let heap = &mut rt.heap;
     let is = |k: &str| f.is_bloblet() && heap.bloblet_kind(f) == kind(k);
     if !(is("cellular-closure") || is("cellular-continuation")) {
+        // The bytecode VM's procedures: a primitive cannot run the VM again
+        // (`fixpt-runtime`'s `prim.rs`), so native code cannot call them.
+        if heap.obj_type(f) == Some(fixpt_heap::ObjType::Closure) {
+            return Err(NativeExit::Failed("native code cannot call back a procedure of the bytecode VM".into()));
+        }
         return Err(NativeExit::Failed("a call of what is not a procedure".into()));
     }
     // The arguments and `f` pushed, as the word's literals, and called.
