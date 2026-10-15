@@ -935,27 +935,17 @@ fn routine_body(a: &mut Asm, n: usize, name: &'static str) {
         }
         "call" | "tailcall" | "tcall" | "ttailcall" => {
             // A cellular closure on top: its word, over a frame of the n
-            // values below it. Anything else (a continuation, not a
-            // procedure, or a native closure, which a typed call's callee
-            // may be in the native convention) goes the Rust machine's way,
-            // which calls native code. A tail call grows neither stack, so
-            // a typed one does not check them.
+            // values below it. Untyped, anything else (a continuation, not
+            // a procedure, or a native closure) goes the Rust machine's
+            // way, which calls native code. Typed (`tcall`), the callee's
+            // type says `cellular`, so it is a cellular closure: nothing
+            // is checked (`TODO.md` §97). A tail call grows neither stack,
+            // so a typed one does not check them.
             let typed = matches!(name, "tcall" | "ttailcall");
             let name = if typed { &name[1..] } else { name };
-            // A typed call's callee is a closure (the checker says so): a
-            // native one if its code is in the code area (`code_lo`), one
-            // comparison. In a word, that goes to the machine's own routine
-            // for the cell, which calls it out: the state at a cell's start
-            // is the routine's, the cell consumed and nothing yet done.
             let other = a.label();
             a.e(ldr(W, DSP, 0));
-            if typed {
-                a.e(add(X11, BASE, W));
-                a.e(ldur(X16, X11, field_off(CLOSURE_WORD)));
-                a.e(ldr(X15, ST, off(offset_of!(State, code_lo))));
-                a.e(cmp(X16, X15));
-                a.b_cond(Cond::Hs, other);
-            } else {
+            if !typed {
                 a.is_closure(W, other);
             }
             a.fuel_call();
@@ -995,11 +985,8 @@ fn routine_body(a: &mut Asm, n: usize, name: &'static str) {
             a.e(sub_imm(IP, IP, (4 + 8 * WORD_CELL0) as u32));
             a.e(movz(X13, (8 * WORD_CELL0) as u32, 0));
             a.enter_cur(X13);
-            a.bind(other);
-            if typed && a.in_word {
-                a.e(ldr(X16, TABLE, (8 * n) as u32));
-                a.e(br(X16));
-            } else {
+            if !typed {
+                a.bind(other);
                 a.callout(n as u64);
             }
         }

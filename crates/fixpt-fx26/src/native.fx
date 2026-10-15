@@ -472,22 +472,11 @@
         (n-e (arm-movz n-x14 n 0))
         (n-b (get n-trap-common))))))
 
-;; Closure `reg` native code, its code in the code area: on to `native`.
-(define n-is-native (subr (maxeff assembles spin) (int int) unit)
-  (lambda (reg native)
-    (begin
-      (n-e (arm-add n-x11 n-base reg))
-      (n-e (arm-ldur n-x16 n-x11 (n-field-off n-closure-word)))
-      (n-e (arm-ldr n-x15 n-st n-st-code-lo))
-      (n-e (arm-cmp n-x16 n-x15))
-      (n-b-cond 2 native))))
-;; A callee not a cellular closure (a native closure, which a typed call's
-;; may be in the native convention) goes the Rust machine's way; a typed
-;; tail call, which grows neither stack, does not check them. A typed
-;; call's callee is a closure: a native one if its code is in the code area
-;; (`n-st-code-lo`), one comparison, which goes to the machine's own routine
-;; for the cell, which calls it out: the state at a cell's start is the
-;; routine's, the cell consumed and nothing yet done.
+;; Untyped, a callee not a cellular closure (a continuation, not a
+;; procedure, or a native closure) goes the Rust machine's way. Typed
+;; (`tcall`), the callee's type says `cellular`, so it is a cellular closure:
+;; nothing is checked (`TODO.md` §97); a typed tail call, which grows
+;; neither stack, does not check them.
 (define n-call (subr (maxeff assembles spin) (int) unit)
   (lambda (n)
     (let ((other (n-label))
@@ -495,7 +484,7 @@
           (tail (or (= n routine-tailcall) (= n routine-ttailcall))))
       (begin
         (n-e (arm-ldr n-w n-dsp 0))
-        (if typed (n-is-native n-w other) (n-is-closure n-w other))
+        (if typed #u (n-is-closure n-w other))
         (n-fuel-call)
         (if (and typed tail) #u (begin (n-ds-limit) (n-rs-limit)))
         (n-e (arm-ldr-post n-x10 n-ip -8))
@@ -526,10 +515,7 @@
         (n-e (arm-sub-imm n-ip n-ip (+ 4 (* 8 n-word-cell0))))
         (n-e (arm-movz n-x13 (* 8 n-word-cell0) 0))
         (n-enter-cur n-x13)
-        (n-bind other)
-        (if typed
-            (begin (n-e (arm-ldr n-x16 n-table (* 8 n))) (n-e (arm-br n-x16)))
-            (n-callout n))))))
+        (if typed #u (begin (n-bind other) (n-callout n)))))))
 
 ;;; ------------------------------------------------------------ routines
 

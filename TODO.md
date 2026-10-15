@@ -2566,10 +2566,11 @@ generator reads, structured (step 6; today one string a clause,
   convention (`NodeFacts::call_conv`, `n-call`), and both compilers' stack
   code calls a `cellular` callee by `tcall`, anything else by `call`, which
   looks (`fx`, a convention binder, `native` for now; `apply` of a `vsubr`,
-  whose type says none). Left, in order: a declined definition on the
-  native-convention machine converted to the convention its type says
-  (else its type says `native` and its value is cellular); then `tcall`
-  without its check on every machine (the Rust one refusing a mismatch),
+  whose type says none). `tcall` checks nothing on the arm64 machines
+  (2026-10-15; the Rust one, the oracle, traps on anything but a cellular
+  closure): a value typed `cellular` is one. Left, in order: a value typed
+  `native` always a native closure (what cellular code makes, where the
+  native compiler declines, is typed `native` and is cellular); then
   register code's `invoke` given the convention (`direct.rs` compiles from
   register code, so it cannot decline such calls), a direct `native` call
   from cellular code, and `direct.rs` calling by convention.

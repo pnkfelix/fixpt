@@ -805,6 +805,9 @@ impl Fx26Session {
     }
 
     fn run_checked_in(&mut self, top: Top, form: &Syntax, again: bool) -> R<Outcome> {
+        // What runs natively is typed so: a call typed `cellular` is made
+        // with no look at its callee (`TODO.md` §97).
+        debug_assert!(self.native_runner.is_none() || self.native_convention, "native code in the cellular convention");
         let code = lower_top(&self.checker, &mut self.globals, &top);
         if self.strategy != Strategy::Lower {
             if self.own_made {

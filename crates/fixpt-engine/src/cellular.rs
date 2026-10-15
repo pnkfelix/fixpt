@@ -1169,13 +1169,19 @@ impl Machine {
                 }
                 self.ds.push(c);
             }
-            // The typed calls check here as the untyped ones do: this
-            // machine is the oracle, and a well-typed program never fails
-            // them. The native machines leave the checks out.
+            // A typed call's callee's type says `cellular`: the native
+            // machines check nothing, and this one, the oracle, traps on
+            // anything but a cellular closure (`TODO.md` §97), which a
+            // well-typed program never calls so.
             CALL | TAILCALL | TCALL | TTAILCALL => {
                 let count = Self::operand(cx.heap(), r).as_fixnum() as usize;
                 let tail = n == TAILCALL || n == TTAILCALL;
                 let callee = self.ds.last().copied().filter(|_| self.ds.len() > r.fp + count);
+                if (n == TCALL || n == TTAILCALL)
+                    && !callee.is_some_and(|c| c.is_bloblet() && cx.heap().bloblet_kind(c) == const { kind("cellular-closure") })
+                {
+                    return Err(Trap::Type { routine: name });
+                }
                 if let (Some(c), Ctx::Rt(rt)) = (callee, &mut *cx)
                     && c.is_bloblet()
                     && rt.heap.bloblet_kind(c) == const { kind("native-closure") }
@@ -1395,7 +1401,7 @@ impl Machine {
         let mut r = Regs { cur: at.cur, k: at.k, fp: at.fp, clo: at.clo };
         match self.prim(&mut Ctx::Rt(rt), n, &mut r)? {
             Flow::Next => {}
-            // A typed tail call of a native closure (`TODO.md` §97), which
+            // A tail call of a native closure (`TODO.md` §97), which
             // returns from the word, as the run's loop returns.
             Flow::Exit if !self.rs.is_empty() => self.pop_return(&mut r),
             Flow::Exit | Flow::Halt => return Err(Trap::NoRoutine(n)),

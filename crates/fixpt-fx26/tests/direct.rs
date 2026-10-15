@@ -690,6 +690,7 @@ fn native_and_cellular_code_call_each_other() {
     use fixpt_fx26::session::Strategy;
     for gc_every in [500] {
         let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+        s.set_native_convention(true);
         s.strategy = Strategy::Cellular;
         s.native_runner = Some(run_native);
         s.native_compiler = Some(fixpt_native::direct::compile_closure);
@@ -1118,6 +1119,7 @@ fn control_on_native_frames() {
     // One session, loading the front end once: each program after the
     // ones before, as the REPL would run them, its names redefined.
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    s.set_native_convention(true);
     s.strategy = Strategy::Cellular;
     s.native_runner = Some(run_native_collecting);
     s.native_compiler = Some(fixpt_native::direct::compile_closure);
@@ -1147,6 +1149,7 @@ fn every_test_program_runs_natively_as_cellular() {
     let (mut report, mut native, mut declined) = (Vec::new(), 0, Vec::new());
     let forms_of = |text: &str, runner: Option<fixpt_fx26::session::NativeRunner>| {
         let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+        s.set_native_convention(runner.is_some());
         s.strategy = Strategy::Cellular;
         s.native_runner = runner;
         s.native_compiler = runner.map(|_| fixpt_native::direct::compile_closure as fixpt_fx26::session::NativeCompiler);
@@ -1204,6 +1207,7 @@ fn inlined_calls_see_a_redefinition() {
         s.strategy = Strategy::Cellular;
         s.register_code = true;
         if native {
+            s.set_native_convention(true);
             s.native_runner = Some(run_native);
             s.native_compiler = Some(fixpt_native::direct::compile_closure);
             s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
