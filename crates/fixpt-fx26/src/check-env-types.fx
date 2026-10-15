@@ -7,6 +7,7 @@
 (define-type k-ds (select check-types-types k-ds))
 (define-type k-ids (select check-types-types k-ids))
 (define-type k-names (select check-types-types k-names))
+(define-type k-at (select check-types-types k-at))
 (hide (define table-types (load-module "fx26:table-types.fx")))
 (define-type table (select table-types table))
 ;; Bindings, as lists of them are passed around.
@@ -33,26 +34,27 @@
 ;; The operator of the application being checked, past any `proj` or
 ;; `the`, by name and place: where a second-class standard operation may be
 ;; named (F15, F16).
-(define-type k-op-mark (productof (1 symbol) (2 int) (3 int)))
+(define-type k-op-mark (productof (1 symbol) (2 k-at)))
 ;; Description names in scope, innermost first.
 (define-type k-scope (listof (pairof symbol k-ds @t) acyclic))
 ;; What checking proved that running needs: each `extract`'s field, by
-;; position, keyed by where the `extract` is. Only the product's type says.
-(define-type k-fact (productof (1 int) (2 int) (3 int)))
+;; position, keyed by the `extract` (its identity, `k-at`). Only the
+;; product's type says.
+(define-type k-fact (productof (1 k-at) (2 int)))
 (define-type k-facts (listof k-fact acyclic))
-;; Each `with` checked, where it is, and its module's values its body names,
+;; Each `with` checked, its identity, and its module's values its body names,
 ;; with their positions in the module, newest first: a `with`'s body sees
 ;; them, once checking has found them; a re-export, of one value, binds one.
-(define-type k-with-noted (productof (1 int) (2 int) (3 k-names) (4 k-ids)))
+(define-type k-with-noted (productof (1 k-at) (2 k-names) (3 k-ids)))
 (define-type k-with-list (listof k-with-noted acyclic))
 ;; While a module's order is checked (`check-modorder.fx`): each earlier
 ;; item whose value is a module as written, and its values' names, which a
 ;; `with` of it not checked yet binds.
 (define-type k-hazard-list (listof (productof (1 symbol) (2 k-names)) acyclic))
 ;; Each module given where a type of fewer values, or the same in another
-;; order, is wanted (`k-reshape-at`): where, and for each value that type
+;; order, is wanted (`k-reshape-at`): which, and for each value that type
 ;; has, its position in the module given. Made into a module of that layout.
-(define-type k-reshaped (productof (1 int) (2 int) (3 k-ids)))
+(define-type k-reshaped (productof (1 k-at) (2 k-ids)))
 (define-type k-reshape-list (listof k-reshaped acyclic))
 ;; `with`'s `select` nodes and what each falls back to (`k-with-fallbacks`).
 (define-type k-fallbacks (listof (productof (1 int) (2 int)) acyclic))
@@ -116,7 +118,8 @@
    (val k-unbound (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (symbol) string))
    (val k-operator (ref k-op-mark @t))
    (val k-second-class? (subr pure (symbol) bool))
-   (val k-operator? (subr (maxeff (read @globals) (read @t)) (symbol int int) bool))
+   (val k-operator? (subr (maxeff (read @globals) (read @t)) (symbol int int int) bool))
+   (val k-no-operator k-op-mark)
    (val k-named-only (subr pure (symbol) string))
    (val k-fx-name (subr pure (kx) symbol))
    (val k-operator-mark (subr spin (kx) k-op-mark))
@@ -134,7 +137,8 @@
    (val k-note-fixed
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (symbol) unit))
    (val k-hazard-mods (ref k-hazard-list @t))
-   (val k-with-names (subr (maxeff (read @globals) (read @t)) (int int) k-names))
+   (val k-with-names (subr (maxeff (read @globals) (read @t)) (int int int) k-names))
+   (val k-at-is? (subr pure (k-at int int int) bool))
    (val k-summary (subr (read @globals) (k-eff) int))
    (val k-param-map (ref k-params-given @t))
    (val k-param-in

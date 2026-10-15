@@ -90,10 +90,10 @@
                 nil))
           (else y nil)))
       (else y nil))))
-;; Conversion `code` at `x`'s span, among the facts `checked-extracts` gives.
+;; Conversion `code` at `x`, among the facts `checked-extracts` gives.
 (define k-note-conversion (subr (maxeff checks spin) (kx int) unit)
   (lambda (x code)
-    (let ((fact (product (1 (k-start x)) (2 (k-end x)) (3 (- -1000 code)))))
+    (let ((fact (product (1 (k-at-of x)) (2 (- -1000 code)))))
       (set k-extracts (cons fact (get k-extracts))))))
 ;; A conversion of `x`'s procedure, of type `t`, to `to`. To `fx` or to a
 ;; convention binder it does nothing at run time; to `cellular` or `native`
@@ -226,10 +226,10 @@
 (define k-lambda? (subr (read @globals) (kx) bool)
   (lambda (x)
     (tagcase x
-      (x-lambda (ps body a b) #t)
-      (x-rlambda (r l a b) #t)
-      (x-plambda (bs e a b) (k-lambda? e))
-      (x-the (t e a b) (k-lambda? e))
+      (x-lambda (ps body a b abk) #t)
+      (x-rlambda (r l a b abk) #t)
+      (x-plambda (bs e a b abk) (k-lambda? e))
+      (x-the (t e a b abk) (k-lambda? e))
       (else y #f))))
 ;; How many of `ns` are `n`.
 (define k-count-name (subr (read @globals) (k-names symbol) int)
@@ -257,9 +257,9 @@
 (define k-rlambda-under? (subr (read @globals) (kx) bool)
   (lambda (x)
     (tagcase x
-      (x-rlambda (r l a b) #t)
-      (x-plambda (bs e a b) (k-rlambda-under? e))
-      (x-the (t e a b) (k-rlambda-under? e))
+      (x-rlambda (r l a b abk) #t)
+      (x-plambda (bs e a b abk) (k-rlambda-under? e))
+      (x-the (t e a b abk) (k-rlambda-under? e))
       (else y #f))))
 (define k-only-alloc? (subr kreads (k-eff) bool)
   (lambda (e)
@@ -326,8 +326,8 @@
           (else (k-some-untyped? (cdr ps))))))
 
 (define k-unannotated? (subr kreads (kx) bool)
-  (lambda (x) (tagcase x (x-lambda (ps body a b) (k-some-untyped? ps)) (else y #f))))
+  (lambda (x) (tagcase x (x-lambda (ps body a b abk) (k-some-untyped? ps)) (else y #f))))
 ;; A `lambda` missing parameter types, or a thunk: better told than asked.
 (define k-needs-telling? (subr kreads (kx) bool)
   (lambda (x)
-    (tagcase x (x-lambda (ps body a b) (or (null? ps) (k-some-untyped? ps))) (else y #f)))))))
+    (tagcase x (x-lambda (ps body a b abk) (or (null? ps) (k-some-untyped? ps))) (else y #f)))))))

@@ -10,6 +10,9 @@
 (define-type syns-a (select parser-types syns-a))
 (hide (define check-env-types (load-module "fx26:check-env-types.fx")))
 (define-type k-with-list (select check-env-types k-with-list))
+(define-type k-with-noted (select check-env-types k-with-noted))
+(define-type k-reshaped (select check-env-types k-reshaped))
+(define-type k-reshape-list (select check-env-types k-reshape-list))
 (hide (define table-types (load-module "fx26:table-types.fx")))
 (define-type table (select table-types table))
 ;; What looking at the trees and the compiler's state may do: build lists
@@ -27,10 +30,11 @@
 (define-type c-recs (listof (productof (1 symbol) (2 syn) (3 exp)) acyclic))
 (define-type c-cases (listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) acyclic))
 (define-type exps (listof exp acyclic))
-;; A span of the program, by where it starts: where it ends, and what is
-;; noted of it.
-(define-type c-span (pairof int int @k))
-(define-type c-spans (table int c-span @k))
+;; What is noted of each expression, by its identity (`k-at`): by where it
+;; starts, so that a lookup makes nothing, then the rest of it.
+(define-type k-at (select check-env-types k-at))
+(define-type c-noted (productof (1 k-at) (2 int)))
+(define-type c-by-at (table int (listof c-noted acyclic) @k))
 ;; A `letrec`-bound procedure lambda-lifted, as Twobit's pass 2 lifts
 ;; (`pass2p2.sch`): its closure, over nothing, made while compiling; the
 ;; names it would have captured, each passed as an argument before its own.
@@ -38,12 +42,11 @@
 ;; Whether a `letrec` is lifted: its members' indices in `c-lifts`, in a
 ;; list of one; none if not.
 (define-type c-lifting (listof (listof int @k) @k))
-;; Each expression's effect summary, by where it starts: where it ends, and
-;; the summary, for each span starting there.
-(define-type c-ends (listof c-span acyclic))
-;; The same, by where each starts: a program's `with`s are many (a file's
-;; re-exports), and each is asked for once (`TODO.md` §43).
+;; The `with`s the checker saw, by expression, likewise: a program's
+;; `with`s are many (a file's re-exports), and each is asked for once
+;; (`TODO.md` §43).
 (define-type c-with-table (table int k-with-list @k))
+(define-type c-reshape-table (table int k-reshape-list @k))
 (define-type c-with-names (listof syms @k))
 ;;; ----------------------------------------------------------------- code
 
@@ -97,7 +100,7 @@
 ;; ends, the names bound, and the answer. Asked of the same `letrec` many
 ;; times over (each time what encloses it is asked whether it calls), and
 ;; the answer is the same each time.
-(define-type c-join-answer (productof (1 int) (2 syms) (3 (listof bool acyclic))))
+(define-type c-join-answer (productof (1 syms) (2 (listof bool acyclic))))
 ;; Each standard operation's word as a value, made once (step 4): the
 ;; stack code's, which register code uses too.
 (define-type c-standard-word (productof (1 string) (2 tword)))
@@ -123,7 +126,7 @@
 (define-type k-ids (select check-types-types k-ids))
 (define-type compile-sig
   (moduleof (val c-frozen-define-at
-                 (subr (maxeff (read @globals) (read @k)) (int int) bool))
+                 (subr (maxeff (read @globals) (read @k)) (int int int) bool))
             (val c-tag
                  (prompt-tag cresult
                              cresult
@@ -180,24 +183,24 @@
                  (subr (maxeff (alloc @k) (read @globals)) (exp) (listof exp @k)))
             (val c-mentions?
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin) (exp symbol) bool))
-            (val c-plain-table (ref c-spans @k))
-            (val c-plain-fx-at (subr (maxeff (read @globals) (read @k)) (int int) bool))
+            (val c-plain-table (ref c-by-at @k))
+            (val c-plain-fx-at (subr (maxeff (read @globals) (read @k)) (int int int) bool))
             (val c-field-at
-                 (subr (maxeff (alloc @k) (read @globals) (read @k)) (int int) int))
+                 (subr (maxeff (alloc @k) (read @globals) (read @k)) (int int int) int))
             (val c-resolved-at (subr pure (int) int))
             (val c-genv-now
                  (subr (maxeff (read (globals c-genv c-genv-count)) (read @k)) () int))
             (val c-count-exps (subr (read @globals) (exps) int))
             (val c-count-params (subr (read @globals) (c-params) int))
             (val c-registers (ref bool @k))
-            (val c-summary-at (subr (maxeff (read @globals) (read @k)) (int int) int))
+            (val c-summary-at (subr (maxeff (read @globals) (read @k)) (int int int) int))
             (val c-conversion-at (subr (maxeff (read @globals) (read @k)) (exp) int))
-            (val c-apply-shares-at (subr (maxeff (read @globals) (read @k)) (int int) bool))
+            (val c-apply-shares-at (subr (maxeff (read @globals) (read @k)) (int int int) bool))
             (val c-with-at
-                 (subr (maxeff (alloc @k) (read @globals) (read @k)) (int int) c-with-names))
+                 (subr (maxeff (alloc @k) (read @globals) (read @k)) (int int int) c-with-names))
             (val c-with-places-at
                  (subr (maxeff (alloc @k) (read @globals) (read @k))
-                       (int int)
+                       (int int int)
                        (listof k-ids @k)))
             (val c-reshape-at
                  (subr (maxeff (alloc @k) (read @globals) (read @k))
@@ -219,15 +222,7 @@
                                        int)
                                @k)
                       @k))
-            (val c-spec-made
-                 (ref (bloblet (fields (subr pure (int) int)
-                                       (subr pure (int int) bool)
-                                       (arrayof (listof (pairof int c-spec-copies @k)
-                                                        acyclic)
-                                                @k)
-                                       int)
-                               @k)
-                      @k))
+            (val c-spec-made (ref (table k-at c-spec-copies @k) @k))
             (val c-member? (subr (maxeff (read @globals) (read @k)) (syms symbol) bool))
             (val c-changed? (subr (maxeff (read @globals) (read @k)) (exp) bool))
             (val c-loop? (subr pure (loc) bool))
@@ -235,15 +230,7 @@
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
                        (cenv symbol)
                        c-found))
-            (val c-join-memo
-                 (ref (bloblet (fields (subr pure (int) int)
-                                       (subr pure (int int) bool)
-                                       (arrayof (listof (pairof int c-join-answer @k)
-                                                        acyclic)
-                                                @k)
-                                       int)
-                               @k)
-                      @k))
+            (val c-join-memo (ref (table k-at c-join-answer @k) @k))
             (val c-free
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
                        (exp syms syms)
@@ -253,17 +240,14 @@
                        (c-recs exp int)
                        bool))
             (val std-eq-name? (subr pure (string) bool))
-            (val c-lifted
-                 (ref (bloblet (fields (subr pure (int) int)
-                                       (subr pure (int int) bool)
-                                       (arrayof (listof (pairof int c-lifting @k) acyclic)
-                                                @k)
-                                       int)
-                               @k)
-                      @k))
+            (val c-lifted (ref (table k-at c-lifting @k) @k))
             (val c-this-loc? (subr (read @globals) (loc loc) bool))
             (val c-int-hash (subr pure (int) int))
             (val c-int=? (subr pure (int int) bool))
+            (val c-span-key (subr pure (int int int) k-at))
+            (val c-at-hash (subr pure (k-at) int))
+            (val c-at=? (subr pure (k-at k-at) bool))
+            (val c-at-is? (subr pure (k-at int int int) bool))
             (val c-lift-count (ref int @k))
             (val c-place-name (subr (read @globals) (int) string))
             (val c-extend (subr (alloc @k) (symbol loc cenv) cenv))

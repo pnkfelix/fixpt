@@ -100,7 +100,7 @@
   (lambda (sp cell args)
     (let ((lam (c-nth args (extract sp 6))))
       (tagcase lam
-        (e-lambda (ps body la lb)
+        (e-lambda (ps body la lb lalbk)
           (if (and (= (c-count-params ps) (extract sp 7)) (r-inlinable? body))
               (the (listof rspecial @k) (cons (product (1 sp) (2 cell) (3 lam)) nil))
               nil))
@@ -114,7 +114,7 @@
     (if (not (null? (get c-spec-now)))
         nil
         (tagcase f
-          (e-var (n a b)
+          (e-var (n a b abk)
             (let ((l (r-where env n)))
               (if (null? l)
                   nil
@@ -132,7 +132,7 @@
     (and (not (null? (get c-spec-now)))
          (and (not (null? (get r-spec-at)))
               (tagcase x
-                (e-var (m a b)
+                (e-var (m a b abk)
                   (and (symbol=? m (extract (car (get c-spec-now)) 5))
                        (r-at? (r-where env m) (car (get r-spec-at)))))
                 (else y #f))))))
@@ -144,7 +144,7 @@
          (and (not (null? (get r-spec-at)))
               (let ((sp (car (get c-spec-now))))
                 (and (tagcase f
-                       (e-var (n a b)
+                       (e-var (n a b abk)
                          (and (symbol=? n (extract sp 1)) (not (null? (r-var-global env f)))))
                        (else y #f))
                      (and (= (c-count-exps args) (extract sp 6))
@@ -198,7 +198,7 @@
           (if (not (= (c-count-exps args) (extract o 3)))
               nil
               (tagcase f
-                (e-var (m a b) (if (symbol=? m (extract o 1)) (r-var-global env f) nil))
+                (e-var (m a b abk) (if (symbol=? m (extract o 1)) (r-var-global env f) nil))
                 (else y nil)))))))
 ;; The flags from `rest`, the `i`th binding of `bs` on.
 (define r-join-flags-from (subr rbuilds (exp-letrec-bs exp-letrec-bs exp bool int) bools)
@@ -217,8 +217,7 @@
 ;; `flags` remembered for the `letrec` of `names` whose body is `body`.
 (define r-join-remember (subr (maxeff emits spin) (exp syms bools) unit)
   (lambda (body names flags)
-    (table-set! (get c-join-memo) (exp-start body)
-                (the c-join-answer (product (1 (exp-end body)) (2 names) (3 flags))))))
+    (table-set! (get c-join-memo) (exp-at body) (the c-join-answer (product (1 names) (2 flags))))))
 ;; Each binding of `bs`: whether it is a join point (in tail position).
 ;; Remembered per `letrec` (`c-join-memo`), where it is in tail position.
 (define r-join-flags (subr (maxeff emits spin) (exp-letrec-bs exp bool) bools)
@@ -226,10 +225,12 @@
     (if (not tail)
         (r-join-flags-from bs bs body tail 0)
         (let* ((names (r-binding-names bs))
-               (none (the c-join-answer (product (1 -1) (2 (the syms nil)) (3 (the bools nil)))))
-               (known (table-ref (get c-join-memo) (exp-start body) none)))
-          (if (and (= (extract known 1) (exp-end body)) (r-same-syms? (extract known 2) names))
-              (extract known 3)
+               (at (exp-at body))
+               (known (table-ref (get c-join-memo) at
+                                 (the c-join-answer
+                                   (product (1 (the syms nil)) (2 (the bools nil)))))))
+          (if (and (table-has? (get c-join-memo) at) (r-same-syms? (extract known 1) names))
+              (extract known 2)
               (let ((flags (r-join-flags-from bs bs body tail 0)))
                 (begin (r-join-remember body names flags) flags)))))))
 (define r-all? (subr rreads (bools) bool)
@@ -252,7 +253,7 @@
 (define r-join-of (subr rbuilds (renv exp) rlocs)
   (lambda (env f)
     (tagcase f
-      (e-var (m a b)
+      (e-var (m a b abk)
         (let ((l (r-local-loc env m)))
           (if (null? l) nil (tagcase (car l) (rl-join (ps label) l) (else y nil)))))
       (else y nil))))
@@ -460,7 +461,7 @@
 (define r-inlined (subr rbuilds (renv exp int) (listof rinline @k))
   (lambda (env f k)
     (tagcase f
-      (e-var (n a b)
+      (e-var (n a b abk)
         (let ((l (r-where env n)))
           (if (or (null? l) (c-member? (get c-inlining) n))
               nil
@@ -474,7 +475,7 @@
 (define r-global-of (subr rbuilds (renv exp) (listof wglobal @k))
   (lambda (env f)
     (tagcase f
-      (e-var (n fa fb)
+      (e-var (n fa fb fafbk)
         (let ((l (r-where env n)))
           (if (null? l)
               nil
@@ -485,9 +486,9 @@
 ;; Call `f` at `a`-`b`: the small procedure it is inlined as, and its
 ;; global, as the plan decided (step 3), in a planned lambda's own code;
 ;; else as `r-inlined` decides here, in an inlined body or a copy.
-(define r-inline-of (subr rbuilds (int int renv exp int) (listof rinline @k))
-  (lambda (a b env f k)
-    (let ((p (c-planned-call a b)))
+(define r-inline-of (subr rbuilds (int int int renv exp int) (listof rinline @k))
+  (lambda (a b abk env f k)
+    (let ((p (c-planned-call a b abk)))
       (if (null? p)
           (r-inlined env f k)
           (let ((i (extract (car p) 1)) (g (r-global-of env f)))
@@ -495,9 +496,9 @@
                 nil
                 (the (listof rinline @k) (cons (cons (car i) (car g)) nil))))))))
 ;; The same for the procedure it is specialized as, with the lambda.
-(define r-special-of (subr rbuilds (int int renv exp exps) (listof rspecial @k))
-  (lambda (a b env f args)
-    (let ((p (c-planned-call a b)))
+(define r-special-of (subr rbuilds (int int int renv exp exps) (listof rspecial @k))
+  (lambda (a b abk env f args)
+    (let ((p (c-planned-call a b abk)))
       (if (null? p)
           (r-specialized env f args)
           (let ((s (extract (car p) 2)) (g (r-global-of env f)))
@@ -511,7 +512,7 @@
 (define r-self-call? (subr rcompiles (exp exps cenv rthis) bool)
   (lambda (f args e this)
     (tagcase f
-      (e-var (n a b)
+      (e-var (n a b abk)
         (or (r-this-name? this n (c-count-exps args))
             (let ((l (c-find e n))) (and (not (null? l)) (c-loop? (car l))))))
       (else y #f))))
@@ -520,7 +521,7 @@
 (define r-inline-op? (subr rcompiles (exp exps cenv) bool)
   (lambda (f args e)
     (tagcase (r-operator f)
-      (e-var (n a b)
+      (e-var (n a b abk)
         (and (null? (c-where e n))
              (tagcase (r-standard (symbol->string n) (c-count-exps args))
                (s-op1 (r) #t) (s-op2 (r w z) #t) (s-op2imm (r v) #t) (s-field (k) #t)
@@ -541,7 +542,7 @@
 (define r-plain-callee? (subr rcompiles (exp int cenv) bool)
   (lambda (f n e)
     (tagcase f
-      (e-var (name a b)
+      (e-var (name a b abk)
         (let ((l (c-where e name)))
           (and (not (null? l))
                (tagcase (car l)
@@ -573,39 +574,40 @@
   (r-collects-as-is (subr rcompiles (exp cenv rthis bool) bool)
     (lambda (x e this tail)
       (tagcase x
-        (e-var (n a b)
+        (e-var (n a b abk)
           (and (r-standard-value? e n) (or (not tail) (c-vsubr? (symbol->string n)))))
-        (e-int (n a b) #f) (e-bool (v a b) #f) (e-str (v a b) #f) (e-char (v a b) #f)
-        (e-float (v a b) #f)
+        (e-int (n a b abk) #f) (e-bool (v a b abk) #f) (e-str (v a b abk) #f)
+        (e-char (v a b abk) #f) (e-float (v a b abk) #f)
         ;; Join points only: no closure made, and their calls are jumps.
-        (e-letrec (bs body a b)
+        (e-letrec (bs body a b abk)
           (if (and tail (r-all? (r-join-flags bs body #t)))
               (let ((inner (r-loop-names e bs)))
                 (or (r-collects body inner this tail) (r-collects-joins bs inner this)))
               #t))
-        (e-sym (v a b) #f) (e-unit (a b) #f)
+        (e-sym (v a b abk) #f) (e-unit (a b abk) #f)
         ;; A closure made as the value: its call-out may collect, but nothing
         ;; is used after it (`r-lambda`).
-        (e-lambda (ps body a b) (not tail))
-        (e-if (t th el a b)
+        (e-lambda (ps body a b abk) (not tail))
+        (e-if (t th el a b abk)
           (or (r-collects t e this #f) (r-collects th e this tail) (r-collects el e this tail)))
-        (e-let (bs body a b)
+        (e-let (bs body a b abk)
           (or (r-collects-all (r-let-inits bs) e this) (r-collects body e this tail)))
-        (e-begin (es a b) (r-collects-begin es e this tail))
+        (e-begin (es a b abk) (r-collects-begin es e this tail))
         ;; A place is made and ended by calling out; a region for analysis
         ;; only is nothing at run time.
-        (e-letregion (k r i body a b) (if (or (= k 0) (= k 3)) (r-collects body e this tail) #t))
-        (e-plambda (d body a b) (r-collects body e this tail))
-        (e-proj (body ds a b) (r-collects body e this tail))
-        (e-the (d body a b) (r-collects body e this tail))
-        (e-convention (cnv body a b) (r-collects body e this tail))
-        (e-extract (p l a b) (r-collects p e this #f))
-        (e-bloblet (op i args a b)
+        (e-letregion (k r i body a b abk)
+          (if (or (= k 0) (= k 3)) (r-collects body e this tail) #t))
+        (e-plambda (d body a b abk) (r-collects body e this tail))
+        (e-proj (body ds a b abk) (r-collects body e this tail))
+        (e-the (d body a b abk) (r-collects body e this tail))
+        (e-convention (cnv body a b abk) (r-collects body e this tail))
+        (e-extract (p l a b abk) (r-collects p e this #f))
+        (e-bloblet (op i args a b abk)
           (if (r-bloblet-quiet? (symbol->string op)) (r-collects-all args e this) #t))
-        (e-tagcase (s arms els a b)
+        (e-tagcase (s arms els a b abk)
           (or (r-collects s e this #f)
               (or (r-collects-arms arms e this tail) (r-collects-else els e this tail))))
-        (e-app (f args a b)
+        (e-app (f args a b abk)
           (let* ((args-collect (r-collects-all args e this))
                  ;; A loop: a call of the procedure itself, in tail position.
                  (loop-call (and tail (r-self-call? f args e this)))
@@ -622,8 +624,8 @@
                 (not (or loop-call (or inline (or leaves (r-call-is-free? f n e tail))))))))
         ;; A `with` only loads fields (`r-with`): as its body. `(with #%fx n)`:
         ;; as the standard `n` as a value.
-        (e-with (m body a b)
-          (let ((ns (c-with-at a b)) (n (c-fx-name m body)))
+        (e-with (m body a b abk)
+          (let ((ns (c-with-at a b abk)) (n (c-fx-name m body)))
             (if (string=? n "")
                 (r-collects body (if (null? ns) e (r-local-syms e (car ns))) this tail)
                 (and (c-has-standard-value? n) (or (not tail) (c-vsubr? n))))))
@@ -652,7 +654,7 @@
     (lambda (f n e tail)
       (and (get r-assuming)
            (tagcase f
-             (e-var (name a b)
+             (e-var (name a b abk)
                (and (r-global-callee? e name)
                     (or (and tail (and (null? (get c-inlining)) (r-own-is? name n)))
                         (let ((i (r-inline-named (c-inlines-of name) name n (get c-genv))))
@@ -675,7 +677,7 @@
   (r-body-collects? (subr rcompiles (exp cenv rthis) bool)
     (lambda (l e this)
       (tagcase l
-        (e-lambda (ps lbody la lb) (r-collects lbody (r-local-params e ps) this #t))
+        (e-lambda (ps lbody la lb lalbk) (r-collects lbody (r-local-params e ps) this #t))
         (else y #t))))
   ;; Whether any of `bs`' lambdas' bodies, their parameters bound in `e`,
   ;; calls or calls out.
@@ -686,6 +688,6 @@
                  (if (null? lam)
                      #t
                      (tagcase (car lam)
-                       (e-rlambda (r l la lb) (r-body-collects? l e this))
+                       (e-rlambda (r l la lb lalbk) (r-body-collects? l e this))
                        (else y (r-body-collects? (car lam) e this)))))
                (r-collects-joins (cdr bs) e this)))))))))

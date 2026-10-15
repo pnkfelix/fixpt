@@ -246,10 +246,10 @@
 ;; `(with #%fx f)`: what an expansion calls, the standard binding, whatever
 ;; shadows or redefines `f` where it is (`TODO.md` §46).
 (define standard-ref (subr tree-builds (symbol int int) exp)
-  (lambda (f a b) (e-with '#%fx (e-var f a b) a b)))
+  (lambda (f a b) (e-with '#%fx (e-var f a b 0) a b 0)))
 (define call-tmp (subr tree-builds (symbol symbol exp-list int int) exp)
   (lambda (f tmp more a b)
-    (e-app (standard-ref f a b) (the exp-list (cons (e-var tmp a b) more)) a b)))
+    (e-app (standard-ref f a b) (the exp-list (cons (e-var tmp a b 0) more)) a b 0)))
 (define one-let (subr (read @globals) (symbol exp) let-list)
   (lambda (name e) (the let-list (cons (product (1 name) (2 e)) nil))))
 
@@ -305,23 +305,24 @@
   (lambda (v a b)
     (letrec ((call (subr (maxeff (read @globals) spin) (symbol exp exp) exp)
                    (lambda (f x y)
-                     (e-app (e-var f a b) (the exp-list (cons x (the exp-list (cons y nil)))) a b)))
+                     (e-app (e-var f a b 0) (the exp-list (cons x (the exp-list (cons y nil))))
+                            a b 0)))
              (fixnum? (subr spin (int) bool)
                       (lambda (n) (and (<= n 1152921504606846975) (>= n -1152921504606846976))))
              ;; The limbs below the first fixnum, most significant first.
              (peel (subr (maxeff (read @globals) spin) (int (listof int acyclic)) exp)
                    (lambda (n limbs)
                      (if (fixnum? n)
-                         (build (e-int n a b) limbs)
+                         (build (e-int n a b 0) limbs)
                          (peel (quotient n 1000000000) (cons (remainder n 1000000000) limbs)))))
              (build (subr (maxeff (read @globals) spin) (exp (listof int acyclic)) exp)
                     (lambda (acc limbs)
                       (if (null? limbs)
                           acc
-                          (let ((scaled (call '* acc (e-int 1000000000 a b))))
-                            (build (call '+ scaled (e-int (car limbs) a b)) (cdr limbs)))))))
-      (cond ((fixnum? v) (e-int v a b))
-            ((< v 0) (call '- (e-int 0 a b) (peel (- 0 v) nil)))
+                          (let ((scaled (call '* acc (e-int 1000000000 a b 0))))
+                            (build (call '+ scaled (e-int (car limbs) a b 0)) (cdr limbs)))))))
+      (cond ((fixnum? v) (e-int v a b 0))
+            ((< v 0) (call '- (e-int 0 a b 0) (peel (- 0 v) nil)))
             (else (peel v nil))))))
 
 ;; Whether `s` is a string literal; and the string it is.
@@ -419,11 +420,11 @@
 (define in-includes (subr (maxeff tree-builds spin) (exp int int) exp)
   (lambda (x a b)
     (tagcase x
-      (e-lambda (ps body la lb) (e-lambda ps (e-with '%include body a b) la lb))
-      (e-plambda (bs body la lb) (e-plambda bs (in-includes body a b) la lb))
-      (e-the (t e la lb) (e-the t (in-includes e a b) la lb))
-      (e-rlambda (r l la lb) (e-rlambda r (in-includes l a b) la lb))
-      (else y (e-with '%include x a b)))))
+      (e-lambda (ps body la lb lalbk) (e-lambda ps (e-with '%include body a b 0) la lb lalbk))
+      (e-plambda (bs body la lb lalbk) (e-plambda bs (in-includes body a b) la lb lalbk))
+      (e-the (t e la lb lalbk) (e-the t (in-includes e a b) la lb lalbk))
+      (e-rlambda (r l la lb lalbk) (e-rlambda r (in-includes l a b) la lb lalbk))
+      (else y (e-with '%include x a b 0)))))
 ;; Each of `xs` so, at the place of the binding of `bs` it is.
 (define inits-in-includes (subr (maxeff tree-builds spin) (exp-list syns-a) exp-list)
   (lambda (xs bs)
@@ -473,14 +474,14 @@
           items
           (cons (mod-item-of 2 '%include nil
                              (list (e-module (include-items items 0) (syn-start (car f))
-                                             (syn-end (car f)))))
+                                             (syn-end (car f)) 0)))
                 (own-items items))))))
 
 ;; `(lambda (x) x)`, spanning `a`..`b`: an abstract type's conversion.
 (define identity-at (subr (read @globals) (int int) exp)
   (lambda (a b)
     (let ((x (product (1 'x) (2 (the syns-a nil)))))
-      (e-lambda (the param-list (cons x nil)) (e-var 'x a b) a b))))
+      (e-lambda (the param-list (cons x nil)) (e-var 'x a b 0) a b 0))))
 (define module-usage string
   (string-append "a module holds `(define-generative t T)`, `(define-type d T)`, "
                  "`(define-effect e E)`, `(define x [T] e)`, `(define* f T e)`, "
@@ -881,7 +882,7 @@
 (define module-items-of (subr pure (top) mod-items)
   (lambda (t)
     (tagcase t
-      (t-exp (x) (tagcase x (e-module (items a b) items) (else y nil)))
+      (t-exp (x) (tagcase x (e-module (items a b abk) items) (else y nil)))
       (else y nil))))
 ;; A module's item that says it was read from a file: its base, its path,
 ;; and its parameters' binders (`loaded-params`), which it sees.
@@ -921,4 +922,4 @@
 ;; whoever loads it gives them, and each call makes one. `m`, if none.
 (define* loaded-made (subr pure (syns-a exp int int) exp)
   (lambda (ps m a b)
-    (if (null? ps) m (e-plambda (car ps) (e-lambda (the param-list nil) m a a) a b))))
+    (if (null? ps) m (e-plambda (car ps) (e-lambda (the param-list nil) m a a 0) a b 0))))

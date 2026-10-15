@@ -154,7 +154,11 @@
       (if (null? why)
           (k-cat3 "unbound variable `" n "`")
           (k-cat5 "`" n "` is broken, " (car why) ": define it again to use it")))))
-(define k-operator (ref k-op-mark @t) (new (product (1 '||) (2 -1) (3 -1))))
+;; Whether `at` is the identity `a`, `b`, `k`.
+(define k-at-is? (subr pure (k-at int int int) bool)
+  (lambda (at a b k) (and (= (extract at 1) a) (= (extract at 2) b) (= (extract at 3) k))))
+(define k-no-operator k-op-mark (product (1 '||) (2 (product (1 -1) (2 -1) (3 -1)))))
+(define k-operator (ref k-op-mark @t) (new k-no-operator))
 ;; The standard operations a rule checks at each call, by their name there:
 ;; named only as a call's operator, so that no other name, and no procedure
 ;; given one, can call them unchecked.
@@ -163,10 +167,10 @@
     (let ((n (symbol->string s)))
       (or (string=? n "cwcc") (string=? n "certify-length") (string=? n "certify-acyclic")
           (string=? n "certify-nat") (string=? n "native-procedure")))))
-(define k-operator? (subr (maxeff (read @globals) (read @t)) (symbol int int) bool)
-  (lambda (s a b)
+(define k-operator? (subr (maxeff (read @globals) (read @t)) (symbol int int int) bool)
+  (lambda (s a b k)
     (let ((o (get k-operator)))
-      (and (symbol=? (extract o 1) s) (= (extract o 2) a) (= (extract o 3) b)))))
+      (and (symbol=? (extract o 1) s) (k-at-is? (extract o 2) a b k)))))
 (define k-named-only (subr pure (symbol) string)
   (lambda (s)
     (string-append "`" (symbol->string s)
@@ -178,21 +182,22 @@
   (lambda (m) (string=? (symbol->string m) "#%fx")))
 ;; The name a `(with #%fx n)`'s body names, `||` if none.
 (define k-fx-name (subr pure (kx) symbol)
-  (lambda (body) (tagcase body (x-var (n c d) n) (else y '||))))
-;; An operator's mark: its variable's name and place, past `proj` and `the`.
+  (lambda (body) (tagcase body (x-var (n c d cdk) n) (else y '||))))
+;; An operator's mark: its variable's name and identity, past `proj` and
+;; `the`.
 (define k-operator-mark (subr spin (kx) k-op-mark)
   (lambda (f)
     (tagcase f
-      (x-var (s a b) (product (1 s) (2 a) (3 b)))
-      (x-proj (body ds a b) (k-operator-mark body))
-      (x-the (t e a b) (k-operator-mark e))
-      ;; `(with #%fx n)`: `n` at the `with`'s place.
-      (x-with (m body a b)
+      (x-var (s a b abk) (product (1 s) (2 (product (1 a) (2 b) (3 abk)))))
+      (x-proj (body ds a b abk) (k-operator-mark body))
+      (x-the (t e a b abk) (k-operator-mark e))
+      ;; `(with #%fx n)`: `n`, as the `with`.
+      (x-with (m body a b abk)
         (tagcase body
-          (x-var (n c d)
-            (if (k-fx-module? m) (product (1 n) (2 a) (3 b)) (product (1 '||) (2 -1) (3 -1))))
-          (else y (product (1 '||) (2 -1) (3 -1)))))
-      (else y (product (1 '||) (2 -1) (3 -1))))))
+          (x-var (n c d cdk)
+            (if (k-fx-module? m) (product (1 n) (2 (product (1 a) (2 b) (3 abk)))) k-no-operator))
+          (else y k-no-operator)))
+      (else y k-no-operator))))
 ;; A flag, off, for a new innermost binding of `s`.
 (define k-push-flag (subr (maxeff kstate spin) (k-flags symbol) unit)
   (lambda (flags s)
@@ -357,14 +362,14 @@
 (define k-effect-notes (ref k-facts @t) (new nil))
 ;; An effect note as `checked-extracts` gives it: its summary n as -1 - n.
 (define k-note-as-fact (subr (read @globals) (k-fact) k-fact)
-  (lambda (n) (product (1 (extract n 1)) (2 (extract n 2)) (3 (- -1 (extract n 3))))))
+  (lambda (n) (product (1 (extract n 1)) (2 (- -1 (extract n 2))))))
 (define k-add-effect-facts (subr (read @globals) (k-facts k-facts) k-facts)
   (lambda (notes acc)
     (if (null? notes)
         acc
         (k-add-effect-facts (cdr notes) (the k-facts (cons (k-note-as-fact (car notes)) acc))))))
-;; What checking found, for a compiler: each `extract`'s field, `(a b i)`;
-;; and each expression's effect summary (`k-effect-notes`), `(a b n)` with n
+;; What checking found, for a compiler: each `extract`'s field, `(at i)`;
+;; and each expression's effect summary (`k-effect-notes`), `(at n)` with n
 ;; negative, the summary -1 - n.
 (define checked-extracts (subr kreads () k-facts)
   (lambda () (k-add-effect-facts (get k-effect-notes) (get k-extracts))))
@@ -397,17 +402,18 @@
 ;; hundreds of them, and each is looked up (`k-with-names`).
 (define k-with-index (ref (table int k-with-list @t) @t)
   (new (make-table (lambda ((n int)) n) (lambda ((m int) (n int)) (= m n)))))
-(define k-with-names-in (subr (maxeff (read @globals) (read @t)) (k-with-list int int) k-names)
-  (lambda (ws a b)
+(define k-with-names-in
+  (subr (maxeff (read @globals) (read @t)) (k-with-list int int int) k-names)
+  (lambda (ws a b k)
     (cond ((null? ws) nil)
-          ((and (= (extract (car ws) 1) a) (= (extract (car ws) 2) b)) (extract (car ws) 3))
-          (else (k-with-names-in (cdr ws) a b)))))
-(define k-with-names (subr (maxeff (read @globals) (read @t)) (int int) k-names)
-  (lambda (a b) (k-with-names-in (table-ref (get k-with-index) a nil) a b)))
+          ((k-at-is? (extract (car ws) 1) a b k) (extract (car ws) 2))
+          (else (k-with-names-in (cdr ws) a b k)))))
+(define k-with-names (subr (maxeff (read @globals) (read @t)) (int int int) k-names)
+  (lambda (a b k) (k-with-names-in (table-ref (get k-with-index) a nil) a b k)))
 ;; Note `with` `w`, in the list and by where it starts.
 (define k-note-with (subr kstate (k-with-noted) unit)
   (lambda (w)
-    (let ((a (extract w 1)))
+    (let ((a (extract (extract w 1) 1)))
       (begin (set k-with-vals (the k-with-list (cons w (get k-with-vals))))
              (table-set! (get k-with-index) a
                          (the k-with-list (cons w (table-ref (get k-with-index) a nil))))))))

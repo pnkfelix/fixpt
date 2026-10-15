@@ -65,7 +65,7 @@
     (and tail
          (>= (get c-this-params) 0)
          (tagcase f
-           (e-var (n a b)
+           (e-var (n a b abk)
              (and (symbol=? n (get c-this-name))
                   (let ((l (c-find e n)))
                     (and (not (null? l))
@@ -120,7 +120,7 @@
       (if (or (null? ms) (null? l))
           #u
           (tagcase (car l)
-            (e-lambda (ps body a b)
+            (e-lambda (ps body a b abk)
               (if (null? (c-lambda-captured ps body e))
                   (let* ((word (car (get c-last-word)))
                          (it (product (1 n) (2 word) (3 ps) (4 body) (5 (c-genv-now)))))
@@ -140,10 +140,10 @@
 (define c-checked-lambda? (subr (read @globals) (exp) bool)
   (lambda (x)
     (tagcase x
-      (e-lambda (ps body a b) #t)
-      (e-rlambda (r l a b) #t)
-      (e-plambda (d body a b) (c-checked-lambda? body))
-      (e-the (d body a b) (c-checked-lambda? body))
+      (e-lambda (ps body a b abk) #t)
+      (e-rlambda (r l a b abk) #t)
+      (e-plambda (d body a b abk) (c-checked-lambda? body))
+      (e-the (d body a b abk) (c-checked-lambda? body))
       (else y #f))))
 (define c-mv-onto (subr (alloc @k) (symbol exp int bool c-mvals) c-mvals)
   (lambda (n x k l rest) (cons (product (1 n) (2 x) (3 k) (4 l)) rest)))
@@ -236,13 +236,14 @@
 ;; own name `own`, capturing `fv`.
 (define c-made-for? (subr c-walks (c-made exp syms syms syms) bool)
   (lambda (m body params own fv)
-    (and (= (extract m 1) (exp-start body)) (= (extract m 2) (exp-end body))
-         (k-syms=? (extract m 3) params) (k-syms=? (extract m 4) own) (k-syms=? (extract m 6) fv))))
+    (and (= (extract (extract m 1) 1) (exp-start body)) (= (extract (extract m 1) 2) (exp-end body))
+         (= (extract (extract m 1) 3) (exp-kth body))
+         (k-syms=? (extract m 2) params) (k-syms=? (extract m 3) own) (k-syms=? (extract m 5) fv))))
 
 ;; The word the stack code of the body being compiled made for this lambda,
 ;; if it made one here, and the names it captures: the first made, of two
-;; alike (a module's `up-` and `down-` conversions, of one span), as the
-;; Rust compiler finds it.
+;; alike, as the Rust compiler finds it. By the body's identity: a module's
+;; `up-` and `down-` conversions share a span, not an identity.
 (define c-made-word (subr c-walks (c-params exp cenv syms) (listof c-closing @k))
   (lambda (ps body e own0)
     (let ((fv (c-lambda-captured ps body e))
@@ -254,7 +255,7 @@
                        (let ((older (find (cdr ms))))
                          (cond ((not (null? older)) older)
                                ((c-made-for? (car ms) body params own fv)
-                                (cons (product (1 (extract (car ms) 5)) (2 fv)) nil))
+                                (cons (product (1 (extract (car ms) 4)) (2 fv)) nil))
                                (else nil)))))))
         ;; This body's own, first; then any the form's stack code made (a
         ;; join point's body, compiled in its `letrec`'s procedure's
@@ -364,16 +365,16 @@
 (define c-fx-name (subr (read @globals) (symbol exp) string)
   (lambda (m body)
     (tagcase body
-      (e-var (n a b) (if (string=? (symbol->string m) "#%fx") (symbol->string n) ""))
+      (e-var (n a b abk) (if (string=? (symbol->string m) "#%fx") (symbol->string n) ""))
       (else y ""))))
 ;; The standard operation `f` names, if it is a name bound nowhere else;
 ;; else "".
 (define c-standard-name (subr c-walks (exp cenv) string)
   (lambda (f e)
     (tagcase f
-      (e-var (n a b) (if (null? (c-where e n)) (symbol->string n) ""))
+      (e-var (n a b abk) (if (null? (c-where e n)) (symbol->string n) ""))
       ;; `(with #%fx n)` where `n` is shadowed: the standard `n`.
-      (e-with (m body a b) (c-fx-name m body))
+      (e-with (m body a b abk) (c-fx-name m body))
       (else y ""))))
 
 ;; Whether `f` names the standard `name`, as the quote rewrite writes it:
@@ -381,8 +382,8 @@
 (define c-quote-names? (subr (read @globals) (exp string) bool)
   (lambda (f name)
     (tagcase f
-      (e-var (n a b) (string=? (symbol->string n) name))
-      (e-with (m body a b) (string=? (c-fx-name m body) name))
+      (e-var (n a b abk) (string=? (symbol->string n) name))
+      (e-with (m body a b abk) (string=? (c-fx-name m body) name))
       (else y #f))))
 ;; The datum a quote builds (`%quote`'s argument, which only the quote
 ;; rewrite makes: `quoted` in `parser.fx`), as a constant's cell, made
@@ -394,14 +395,14 @@
   (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (exp) (listof wcell @k))
   (lambda (x)
     (tagcase x
-      (e-int (n a b) (cons (wcell-int n) nil))
-      (e-bool (v a b) (cons (wcell-bool v) nil))
-      (e-char (v a b) (cons (wcell-char v) nil))
-      (e-sym (s a b) (cons (wcell-symbol s) nil))
-      (e-the (d body a b) (c-quoted-cell body))
-      (e-var (n a b) (if (string=? (symbol->string n) "nil") (cons (wcell-nil) nil) nil))
-      (e-with (m body a b) (if (string=? (c-fx-name m body) "nil") (cons (wcell-nil) nil) nil))
-      (e-app (f args a b)
+      (e-int (n a b abk) (cons (wcell-int n) nil))
+      (e-bool (v a b abk) (cons (wcell-bool v) nil))
+      (e-char (v a b abk) (cons (wcell-char v) nil))
+      (e-sym (s a b abk) (cons (wcell-symbol s) nil))
+      (e-the (d body a b abk) (c-quoted-cell body))
+      (e-var (n a b abk) (if (string=? (symbol->string n) "nil") (cons (wcell-nil) nil) nil))
+      (e-with (m body a b abk) (if (string=? (c-fx-name m body) "nil") (cons (wcell-nil) nil) nil))
+      (e-app (f args a b abk)
         (if (and (c-quote-names? f "cons") (= (c-count-exps args) 2))
             (let ((h (c-quoted-cell (car args))) (t (c-quoted-cell (car (cdr args)))))
               (if (or (null? h) (null? t)) nil (cons (wcell-pair (car h) (car t)) nil)))

@@ -33,9 +33,6 @@
 (hide (include compile) (include layout) (include check-resolve) (include check-proofs)
       (include tables) (include standard))
 
-;; A `letrec`'s key in `c-lifted`: where it starts and ends.
-(define c-span-key (subr pure (int int) int) (lambda (a b) (+ (* a 4194304) b)))
-
 ;; The index in `c-lifts` of the procedure `n` names in `e`, if a lifted
 ;; one; else -1.
 (define c-lifted-index (subr c-walks (symbol cenv) int)
@@ -44,7 +41,7 @@
       (if (null? l) -1 (tagcase (car l) (at-lifted (k) k) (else y -1))))))
 
 (define c-lifted-at (subr c-walks (exp cenv) int)
-  (lambda (f e) (tagcase f (e-var (n a b) (c-lifted-index n e)) (else y -1))))
+  (lambda (f e) (tagcase f (e-var (n a b abk) (c-lifted-index n e)) (else y -1))))
 
 ;; Lifted procedure `k`, from `c-lifts`.
 (define c-lift-of (subr (maxeff (read @globals) (read @k)) (int) c-lift)
@@ -67,9 +64,9 @@
 ;; its parameters' names (a `define-datatype`'s constructors share their
 ;; form's place); its `letrec`s' liftings, by where they are: none if not
 ;; lifted, else each member's added names, as `c-lift-plan` gives them.
-(define c-plan-procs (ref (table int c-planneds @k) @k) (new (make-table c-int-hash c-int=?)))
-(define c-plan-lifts (ref (table int (listof c-added @k) @k) @k)
-  (new (make-table c-int-hash c-int=?)))
+(define c-plan-procs (ref (table k-at c-planneds @k) @k) (new (make-table c-at-hash c-at=?)))
+(define c-plan-lifts (ref (table k-at (listof c-added @k) @k) @k)
+  (new (make-table c-at-hash c-at=?)))
 ;; Whether a plan is in force; and how deep in register code the compile is,
 ;; whose own lambdas (an inlined body, a specialized copy) are not planned.
 (define c-planning (ref bool @k) (new #f))
@@ -89,16 +86,16 @@
     (if (or (not (get c-planning)) (> (get c-twin-depth) 0))
         nil
         (let ((found (c-planned-in (table-ref (get c-plan-procs)
-                                              (c-span-key (exp-start body) (exp-end body))
+                                              (exp-at body)
                                               (the c-planneds nil))
                                    (c-bind-params ps nil))))
           (if (null? found) nil (the (listof syms @k) (cons (extract (car found) 2) nil)))))))
 ;; Whether the `letrec` at `a`-`b` is lifted, as planned, in a list: of what
 ;; `c-lift-plan` would give; none where it was not planned, or in register
 ;; code.
-(define c-planned-lift (subr c-walks (int int) (listof (listof c-added @k) @k))
-  (lambda (a b)
-    (let ((key (c-span-key a b)))
+(define c-planned-lift (subr c-walks (int int int) (listof (listof c-added @k) @k))
+  (lambda (a b abk)
+    (let ((key (c-span-key a b abk)))
       (if (or (not (get c-planning)) (> (get c-twin-depth) 0)
               (not (table-has? (get c-plan-lifts) key)))
           nil
@@ -153,7 +150,7 @@
         (let ((lam (c-lambda-of (extract (car bs) 3))))
           (and (not (null? lam))
                (tagcase (car lam)
-                 (e-lambda (ps lbody a b)
+                 (e-lambda (ps lbody a b abk)
                    (let ((name (extract (car bs) 1)) (n (c-count-params ps)))
                      (and (c-called-only body name n)
                           (c-calls-only-all (c-rec-exps all) name n #f)
@@ -193,7 +190,7 @@
   (lambda (all bs i names e added calls)
     (or (null? bs)
         (tagcase (car (c-lambda-of (extract (car bs) 3)))
-          (e-lambda (ps lbody a b)
+          (e-lambda (ps lbody a b abk)
             (let* ((params (c-bind-params ps nil))
                    (free (c-with-lifted-names (c-free lbody params nil) params e))
                    (mine (c-lift-locals free names e nil)))
@@ -260,7 +257,7 @@
   (lambda (bs added i)
     (or (null? bs)
         (tagcase (car (c-lambda-of (extract (car bs) 3)))
-          (e-lambda (ps lbody a b)
+          (e-lambda (ps lbody a b abk)
             (let ((m (c-length (array-ref added i))))
               (and (< m 6)
                    (<= (+ m (c-count-params ps)) register-regs)

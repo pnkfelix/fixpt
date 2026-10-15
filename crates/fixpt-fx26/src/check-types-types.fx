@@ -158,44 +158,49 @@
   (ds-fun int))
 ;;; ------------------------------------------------------------ expressions
 ;;; The parser's trees with their descriptions read. Each ends with where it
-;;; starts and ends.
+;;; starts and ends, and which of the expressions there it is (as the
+;;; parser's trees do, `parser-types.fx`): the three its identity.
+
+;; An expression's identity, as what is found of it is kept: where it
+;; starts and ends, and which of the expressions there it is.
+(define-type k-at (productof (1 int) (2 int) (3 int)))
 
 (define-datatype kx
-  (x-var symbol int int)
+  (x-var symbol int int int)
   ;; A literal: its type, and its value if an integer (a boolean's is 1
   ;; or 0), which the termination check reads.
-  (x-const int int int int)
-  (x-lambda (listof (productof (1 symbol) (2 k-ids)) acyclic) kx int int)
-  (x-app kx (listof kx acyclic) int int)
-  (x-plambda k-binders kx int int)
+  (x-const int int int int int)
+  (x-lambda (listof (productof (1 symbol) (2 k-ids)) acyclic) kx int int int)
+  (x-app kx (listof kx acyclic) int int int)
+  (x-plambda k-binders kx int int int)
   ;; `letregion`, `letrena`, `letreap` or `letfreeze`: what it makes besides
   ;; the region (0 nothing, 1 an arena, 2 a reap, 3 nothing, frozen as it
   ;; ends), the region variable, what a `letfreeze` freezes into (`(const
   ;; p)`), and the body.
-  (x-letregion int int k-region kx int int)
+  (x-letregion int int k-region kx int int int)
   ;; `rlambda`: the region, and the `lambda`.
-  (x-rlambda kx kx int int)
-  (x-proj kx (listof k-desc acyclic) int int)
-  (x-if kx kx kx int int)
-  (x-letrec (listof (productof (1 symbol) (2 int) (3 kx)) acyclic) kx int int)
-  (x-let (listof (productof (1 symbol) (2 kx)) acyclic) kx int int)
-  (x-begin (listof kx acyclic) int int)
-  (x-prompt kx kx kx int int)
-  (x-the int kx int int)
+  (x-rlambda kx kx int int int)
+  (x-proj kx (listof k-desc acyclic) int int int)
+  (x-if kx kx kx int int int)
+  (x-letrec (listof (productof (1 symbol) (2 int) (3 kx)) acyclic) kx int int int)
+  (x-let (listof (productof (1 symbol) (2 kx)) acyclic) kx int int int)
+  (x-begin (listof kx acyclic) int int int)
+  (x-prompt kx kx kx int int int)
+  (x-the int kx int int int)
   ;; `(convention C e)`: the procedure converted to `C`.
-  (x-convention k-conv kx int int)
-  (x-bloblet symbol int (listof kx acyclic) int int)
-  (x-product (listof (productof (1 symbol) (2 kx)) acyclic) int int)
-  (x-extract kx symbol int int)
-  (x-sum symbol kx int int)
+  (x-convention k-conv kx int int int)
+  (x-bloblet symbol int (listof kx acyclic) int int int)
+  (x-product (listof (productof (1 symbol) (2 kx)) acyclic) int int int)
+  (x-extract kx symbol int int int)
+  (x-sum symbol kx int int int)
   (x-tagcase kx (listof (productof (1 symbol) (2 bool) (3 k-names) (4 kx)) acyclic)
-             (listof (productof (1 symbol) (2 kx)) acyclic) int int)
+             (listof (productof (1 symbol) (2 kx)) acyclic) int int int)
   ;; `module`: each item what it is (as `e-module`'s), its names, an
   ;; abstract type's variable (else -1), its types, and its expressions.
   (x-module (listof (productof (1 int) (2 k-names) (3 int) (4 k-ids) (5 (listof kx acyclic)))
                     acyclic)
-            int int)
-  (x-with symbol kx int int))
+            int int int)
+  (x-with symbol kx int int int))
 (define-type kxs (listof kx acyclic))
 (define-type k-item (productof (1 int) (2 k-names) (3 int) (4 k-ids) (5 kxs)))
 (define-type k-items (listof k-item acyclic))

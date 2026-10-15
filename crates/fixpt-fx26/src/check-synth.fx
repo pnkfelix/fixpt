@@ -90,7 +90,7 @@
     (if (tagcase (k-get t)
           (ty-pair (a d r nl) (tagcase r (r-frozen (p finite) #t) (else y #f)))
           (else y #f))
-        (set k-extracts (cons (product (1 (k-start x)) (2 (k-end x)) (3 -501)) (get k-extracts)))
+        (set k-extracts (cons (product (1 (k-at-of x)) (2 -501)) (get k-extracts)))
         #u)))
 ;; Note, for the compilers, that the call `x` of `f` (on parameters
 ;; `params`) is `apply` of a list at `acyclic`, which it need not copy: the
@@ -100,7 +100,7 @@
   (lambda (x f params)
     (let ((apply? (string=? (k-std-op f) "apply")))
       (if (and apply? (and (= (k-length params) 2) (k-acyclic-list? (car (cdr params)))))
-          (set k-extracts (cons (product (1 (k-start x)) (2 (k-end x)) (3 -500)) (get k-extracts)))
+          (set k-extracts (cons (product (1 (k-at-of x)) (2 -500)) (get k-extracts)))
           #u))))
 ;; `car` or `cdr` of a union with a pair member (a `datum`, say) takes that
 ;; member apart: every machine's `car` checks its argument is a pair, and
@@ -152,9 +152,9 @@
 (define k-region-form (subr pure (int) string)
   (lambda (k)
     (case k ((0) "letregion") ((1) "letrena") ((2) "letreap") (else "letfreeze"))))
-;; Note, for the compiler, that the `extract` at `a`..`b` takes part `i`.
-(define k-note-extract (subr kstate (int int int) unit)
-  (lambda (a b i) (set k-extracts (cons (product (1 a) (2 b) (3 i)) (get k-extracts)))))
+;; Note, for the compiler, that the `extract` `at` takes part `i`.
+(define k-note-extract (subr kstate (k-at int) unit)
+  (lambda (at i) (set k-extracts (cons (product (1 at) (2 i)) (get k-extracts)))))
 ;; `inner`, under binders `bs`, with `m` for them, each within its bound and finite if need be.
 (define k-subst-checked (subr (maxeff checks spin) (k-binders k-map int int int) int)
   (lambda (bs m inner a b)
@@ -247,13 +247,13 @@
 (define k-path-of (subr (maxeff kreads (alloc @t) spin) (kx) k-paths)
   (lambda (x)
     (tagcase x
-      (x-var (v a b) (the k-paths (cons (product (1 v) (2 (k-binding-depth v)) (3 nil)) nil)))
-      (x-app (f args a b)
+      (x-var (v a b abk) (the k-paths (cons (product (1 v) (2 (k-binding-depth v)) (3 nil)) nil)))
+      (x-app (f args a b abk)
         (let ((op (k-std-op f)))
           (if (and (k-sc-one-arg? args) (or (string=? op "car") (string=? op "cdr")))
               (k-path-step (k-path-of (car args)) (if (string=? op "car") (st-car) (st-cdr)))
               (the k-paths nil))))
-      (x-extract (e l a b) (k-path-step (k-path-of e) (st-field l)))
+      (x-extract (e l a b abk) (k-path-step (k-path-of e) (st-field l)))
       (else y (the k-paths nil)))))
 ;; The type the fact in force of the path from `v` at `d` by `steps` gives,
 ;; or -1.
@@ -371,12 +371,12 @@
   (lambda (p)
     (let ((none (the k-narrowing (cons nil nil))))
       (tagcase p
-        (x-if (q c d a b)
+        (x-if (q c d a b abk)
           (let ((nq (k-narrowings q)))
             (cond ((k-bool-lit? c #t) (cons nil (k-nars-append (cdr nq) (cdr (k-narrowings d)))))
                   ((k-bool-lit? d #f) (cons (k-nars-append (car nq) (car (k-narrowings c))) nil))
                   (else none))))
-        (x-app (f args a b)
+        (x-app (f args a b abk)
           (if (and (string=? (k-std-op f) "not") (k-sc-one-arg? args))
               (let ((ns (k-narrowings (car args)))) (cons (cdr ns) (car ns)))
               (k-latent-narrowing p)))
@@ -506,11 +506,20 @@
   (lambda (cs args)
     (and (k-sc-one-arg? args)
          (tagcase (car args)
-           (x-var (v va vb) (k-certified-has? cs v (k-binding-depth v)))
+           (x-var (v va vb vavbk) (k-certified-has? cs v (k-binding-depth v)))
            (else y #f)))))
 ;; Whether `x` is a `lambda` of no parameters.
+;; `(certify-nat v)`: `v`'s value as a `nat`, where `nat?` has just found
+;; `v` no less than 0; nowhere else. `synth` the checker's knot.
+(define k-certify-nat (subr (maxeff checks spin) (kx kxs k-synther) k-te)
+  (lambda (x args synth)
+    (if (not (k-certified-arg? (get k-certified-nats) args))
+        (k-fail-at "`certify-nat` takes only a variable `nat?` has just found no less than 0" x)
+        (let ((r (synth (car args))))
+          (begin (k-expect (car args) (extract r 1) k-int)
+                 (k-te (k-ty-new (ty-nat (sz-finite))) (extract r 2)))))))
 (define k-thunk-lambda? (subr (read @globals) (kx) bool)
-  (lambda (x) (tagcase x (x-lambda (ps body a b) (null? ps)) (else y #f))))
+  (lambda (x) (tagcase x (x-lambda (ps body a b abk) (null? ps)) (else y #f))))
 ;; Note argument `i` found to be a `t`, of effect `e`.
 (define k-arg-found (subr kstate (k-done int int k-eff) unit)
   (lambda (done i t e) (begin (array-set! (extract done 1) i t) (array-set! (extract done 2) i e))))
@@ -519,14 +528,15 @@
   (lambda (p kinds solved done i r)
     (begin (k-unify p (extract r 1) kinds solved (k-new-trail))
            (k-arg-found done i (extract r 1) (extract r 2)))))
-(define k-checked-call (ref k-call-checked @t) (new (product (1 -1) (2 -1) (3 -1))))
+(define k-no-call k-call-checked (product (1 (product (1 -1) (2 -1) (3 -1))) (2 -1)))
+(define k-checked-call (ref k-call-checked @t) (new k-no-call))
 ;; Call `x`, found `r`, as `expected`: its effect, and its type noted.
 (define k-as-expected-call (subr (maxeff checks spin) (kx k-te int) k-eff)
   (lambda (x r expected)
     (let ((e (if (k-fixed-literal? x expected (k-start x) (k-end x))
                  (extract r 2)
                  (k-as-expected x r expected))))
-      (begin (set k-checked-call (product (1 (k-start x)) (2 (k-end x)) (3 (extract r 1)))) e))))
+      (begin (set k-checked-call (product (1 (k-at-of x)) (2 (extract r 1)))) e))))
 ;; `k-unify` of a call's `result` against what is `expected` of it: bounds
 ;; from above.
 (define k-unify-above (subr (maxeff kstate spin) (int int k-binders k-solved) unit)
@@ -551,7 +561,7 @@
 (define k-mono-var? (subr (maxeff kreads spin) (kx) bool)
   (lambda (x)
     (tagcase x
-      (x-var (s a b)
+      (x-var (s a b abk)
         (let ((t (k-lookup s)))
           (and (>= t 0) (tagcase (k-get t) (ty-poly (bs body) #f) (else y #t)))))
       (else y #f))))
@@ -577,10 +587,10 @@
           (else
            (let ((q (k-at-most param solved)))
              (begin
-               (set k-checked-call (product (1 -1) (2 -1) (3 -1)))
+               (set k-checked-call k-no-call)
                (let* ((e (check arg q)) (c (get k-checked-call))
-                      (t (if (and (= (extract c 1) (k-start arg)) (= (extract c 2) (k-end arg)))
-                             (extract c 3)
+                      (t (if (k-at-is? (extract c 1) (k-start arg) (k-end arg) (k-kth arg))
+                             (extract c 2)
                              q)))
                  (begin (k-unify param t kinds solved (k-new-trail))
                         (k-arg-found done i t e)))))))))
@@ -593,7 +603,7 @@
 (define k-poly-var-at (subr (maxeff checks spin) (kx int) (listof k-te @t))
   (lambda (x p)
     (tagcase x
-      (x-var (s a b)
+      (x-var (s a b abk)
         (let ((t (k-lookup s)))
           (if (and (>= t 0) (tagcase (k-get t) (ty-poly (bs body) #t) (else y #f)))
               (the (listof k-te @t) (cons (k-poly-instance s t p a b) nil))
@@ -606,7 +616,7 @@
 (define k-nil-told (subr (maxeff checks spin) (kx int int int k-binders k-solved k-done) unit)
   (lambda (arg i p q kinds solved done)
     (tagcase arg
-      (x-var (s a b)
+      (x-var (s a b abk)
         (let ((t (k-lookup s)))
           (if (and (>= t 0) (k-list-of-any? t))
               (let ((nil-ty (k-ty-new (ty-nil))))
@@ -658,7 +668,9 @@
 ;; (`TODO.md` §46); its effect, in a list of one, or none.
 (define k-fx-poly-check (subr (maxeff checks spin) (kx symbol kx int) (listof k-eff @t))
   (lambda (x m body expected)
-    (let ((t (tagcase body (x-var (n a b) (if (k-fx-module? m) (k-std-type n) -1)) (else y -1))))
+    (let ((t (tagcase body
+               (x-var (n a b abk) (if (k-fx-module? m) (k-std-type n) -1))
+               (else y -1))))
       (if (and (>= t 0) (tagcase (k-get t) (ty-poly (bs pb) #t) (else y #f)))
           (begin (k-expect x (k-instantiate-against t expected (k-start x) (k-end x)) expected)
                  (the (listof k-eff @t) (cons nil nil)))
@@ -749,8 +761,8 @@
           (cond ((null? p) (k-fail-ty-at "a blobref is expected here, and this is a " xt ox))
                 ((string=? name "blobref+") k-int)
                 ((string=? name "blobref-set!")
-                 (let ((r (k-blobref-region (k-start x) (k-end x) xt (car (car p)) (cdr (car p))
-                                            #f)))
+                 (let ((r (k-blobref-region (k-start x) (k-end x) (k-kth x) xt (car (car p))
+                                            (cdr (car p)) #f)))
                    (cdr (car p))))
                 ((or (string=? name "blobref-index") (string=? name "blobref-length"))
                  (cond ((< (car (k-flat-array-parts (cdr (car p)))) 0)
@@ -766,21 +778,21 @@
 ;; Its type and effect, `e` its operands', `args` them.
 (define k-blobref-result (subr (maxeff checks spin) (kx string int k-eff int kxs) k-te)
   (lambda (x name xt e expected args)
-    (let ((a (k-start x)) (z (k-end x)))
+    (let ((a (k-start x)) (z (k-end x)) (zk (k-kth x)))
       (if (string=? name "blobref-at")
-          (k-te (k-blobref-of xt (k-blobref-wanted a z expected)) e)
+          (k-te (k-blobref-of xt (k-blobref-wanted a z zk expected)) e)
           (let* ((p (car (k-blobref-parts xt))) (b (car p)) (f (cdr p)))
             (case name
-              (("blobref+") (k-te (k-blobref-of b (k-blobref-wanted a z expected)) e))
+              (("blobref+") (k-te (k-blobref-of b (k-blobref-wanted a z zk expected)) e))
               (("blobref-owner") (k-te b e))
               (("blobref-offset") (k-te k-int e))
-              (("blobref-index") (k-te (k-blobref-of b (k-blobref-element a z f)) e))
-              (("blobref-length") (k-te (k-blobref-length a z f) e))
-              (("blobref-get") (k-te-reading f (k-blobref-region a z xt b f #t) e))
+              (("blobref-index") (k-te (k-blobref-of b (k-blobref-element a z zk f)) e))
+              (("blobref-length") (k-te (k-blobref-length a z zk f) e))
+              (("blobref-get") (k-te-reading f (k-blobref-region a z zk xt b f #t) e))
               (("blobref-variant!")
                (let ((lx (car (cdr args))))
-                 (k-blobref-variant a z xt b f lx (k-start lx) (k-end lx) e)))
-              (else (k-te-writing k-unit (k-blobref-region a z xt b f #t) e))))))))
+                 (k-blobref-variant a z zk xt b f lx (k-start lx) (k-end lx) e)))
+              (else (k-te-writing k-unit (k-blobref-region a z zk xt b f #t) e))))))))
 ;; `(extract ex l)`, `ex` of type `pt` and effect in `r`, not a product: a
 ;; blobref to a flat product's field (`Checker`'s `Exp::Extract`).
 (define k-extract-blobref (subr (maxeff checks spin) (kx int kx symbol k-te) k-te)
@@ -792,7 +804,7 @@
             (if (< (car fld) 0)
                 (k-fail (k-cat5 "a " (k-show-ty pt) " has no `" (symbol->string l) "` laid out")
                         a z)
-                (begin (k-note-extract a z (+ k-blobref-field (car fld)))
+                (begin (k-note-extract (k-at-of x) (+ k-blobref-field (car fld)))
                        (k-te-masked x (k-blobref-of (car (car p)) (cdr fld)) (extract r 2)))))))))
 
 

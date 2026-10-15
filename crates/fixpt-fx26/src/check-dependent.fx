@@ -138,7 +138,7 @@
         nil
         (let* ((k (extract (car found) 1)) (x (extract (car found) 2))
                (arg (if (< k (k-length args)) (the kxs (cons (k-nth args k) nil)) (the kxs nil)))
-               (v (if (null? arg) '|| (tagcase (car arg) (x-var (v va vb) v) (else z '||))))
+               (v (if (null? arg) '|| (tagcase (car arg) (x-var (v va vb vavbk) v) (else z '||))))
                (mt (if (symbol=? v '||) -1 (k-lookup v)))
                (to (if (< mt 0)
                        (k-fail (k-cat3 "argument " (int->string (+ k 1)) k-by-name) a b)

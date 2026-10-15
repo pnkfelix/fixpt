@@ -179,7 +179,7 @@
 (define r-join-place (subr rcompiles (rgen exp cenv) (listof rplace @k))
   (lambda (g lam named)
     (tagcase lam
-      (e-lambda (ps lbody la lb)
+      (e-lambda (ps lbody la lb lalbk)
         (let* ((locs (r-param-places g ps (r-join-in-regs? g ps lbody named)))
                (label (r-new-label g)))
           (the (listof rplace @k) (cons (the rplace (cons locs label)) nil))))

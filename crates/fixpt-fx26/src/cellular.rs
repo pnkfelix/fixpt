@@ -61,9 +61,9 @@ struct Lift {
 /// its body is, its parameters and its own name, and the names it captures.
 #[derive(Clone)]
 struct Made {
-    /// Its body's span: file, start and end (a `load-module`'s file has
-    /// positions of its own, which may be another's too).
-    span: (u32, u32, u32),
+    /// Its body: the expression, not its span, which a module's `up-` and
+    /// `down-` conversions share (`docs/research/loads-and-places.md`).
+    body: ExpId,
     params: Vec<Sym>,
     own: Option<Sym>,
     word: Value,
@@ -1009,9 +1009,8 @@ impl<'a> Compiler<'a> {
         let made = self.lambda_word_in(params, body, e, own);
         self.made = outer_made;
         let (w, fv) = made?;
-        let span = self.c.arena.span_of(body);
         let own = own.filter(|f| !params.contains(f));
-        let made = Made { span: (span.file.0, span.start, span.end), params: params.to_vec(), own, word: w, fv: fv.clone() };
+        let made = Made { body, params: params.to_vec(), own, word: w, fv: fv.clone() };
         if self.spec.is_none() {
             self.form_made.push(made.clone());
         }
@@ -1022,12 +1021,11 @@ impl<'a> Compiler<'a> {
     /// The word the stack code of the body being compiled made for this
     /// lambda, if it made one here.
     fn made_word(&self, params: &[Sym], body: ExpId, e: &Env, own: Option<Sym>) -> Option<(Value, Vec<Sym>)> {
-        let span = self.c.arena.span_of(body);
         let fv = self.captured(params, body, e);
         let own = own.filter(|f| !params.contains(f));
         // This body's own, first; then any the form's stack code made (a join
         // point's body, compiled in its letrec's procedure's register code).
-        let same = |m: &&Made| m.span == (span.file.0, span.start, span.end) && m.params == params && m.own == own && m.fv == fv;
+        let same = |m: &&Made| m.body == body && m.params == params && m.own == own && m.fv == fv;
         self.reuse.iter().find(same).or_else(|| self.form_made.iter().find(same)).map(|m| (m.word, fv))
     }
 

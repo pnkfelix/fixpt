@@ -4,6 +4,7 @@
 
 ;; The types these use, from the files that define them.
 (hide (define compile-types (load-module "fx26:compile-types.fx")))
+(define-type k-at (select compile-types k-at))
 (define-type c-params (select compile-types c-params))
 (define-type c-this (select compile-types c-this))
 (define-type cenv (select compile-types cenv))
@@ -26,10 +27,10 @@
 ;; Closures to finish: the closure's slot, its free value, and the slot it
 ;; waits for.
 (define-type c-waits (listof (productof (1 int) (2 int) (3 int)) @k))
-;; A lambda's word, made by the stack code of the body it is in: where its
-;; body starts and ends, its parameters, its own name, the word, and the
-;; names it captures.
-(define-type c-made (productof (1 int) (2 int) (3 syms) (4 syms) (5 tword) (6 syms)))
+;; A lambda's word, made by the stack code of the body it is in: its body
+;; (its identity), its parameters, its own name, the word, and the names it
+;; captures.
+(define-type c-made (productof (1 k-at) (2 syms) (3 syms) (4 tword) (5 syms)))
 ;; A lambda's word, and the names its closure captures, in order.
 (define-type c-closing (productof (1 tword) (2 syms)))
 ;; An `rlambda`'s region, in a list; none for a plain lambda.
@@ -92,7 +93,7 @@
                                (read @t)
                                (write @k)
                                spin)
-                       (c-recs exp int int cenv bool)
+                       (c-recs exp int int int cenv bool)
                        c-lifting))
             (val c-lambda-word
                  (subr (maxeff (alloc @k)

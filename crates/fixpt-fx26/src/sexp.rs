@@ -9,6 +9,7 @@
 
 use crate::ast::{ArmBind, BlobletOp, Exp, ExpId, ModItem, RegionForm};
 use crate::check::Checker;
+use crate::ids::Kth;
 use crate::top::Top;
 use fixpt_heap::layout::kind;
 use fixpt_scheme::Local;
@@ -84,8 +85,9 @@ impl Chars {
 }
 
 /// A top-level form the Rust side checked, in the shape of `parser.fx`'s
-/// `top`. `span` is the form's.
-pub fn show_top(c: &Checker, chars: &Chars, top: &Top, span: fixpt_read::Span) -> String {
+/// `top`. `span` is the form's; `kth`, which of the expressions at its span
+/// each is, the program's forms walked in order.
+pub fn show_top(c: &Checker, chars: &Chars, top: &Top, span: fixpt_read::Span, kth: &Kth) -> String {
     let (a, b) = (chars.at(span.start), chars.at(span.end));
     match top {
         Top::Define { name, exp, typed, inferred, .. } => {
@@ -95,26 +97,26 @@ pub fn show_top(c: &Checker, chars: &Chars, top: &Top, span: fixpt_read::Span) -
                 (true, _) => "(_)",
                 _ => "()",
             };
-            format!("(t-define {} {ty} {} {a} {b})", c.interner.name(*name), show_exp(c, chars, *exp))
+            format!("(t-define {} {ty} {} {a} {b})", c.interner.name(*name), show_exp(c, chars, *exp, kth))
         }
         Top::DefineRec { bindings, .. } => {
             let bs: Vec<String> =
-                bindings.iter().map(|(n, _, e)| format!("[{} _ {}]", c.interner.name(*n), show_exp(c, chars, *e))).collect();
+                bindings.iter().map(|(n, _, e)| format!("[{} _ {}]", c.interner.name(*n), show_exp(c, chars, *e, kth))).collect();
             format!("(t-define-rec ({}) {a} {b})", bs.join(" "))
         }
         Top::DefineType { .. } | Top::DefineTypeFamily { .. } => format!("(t-define-type _ _ {a} {b})"),
         Top::DefineGenerative { .. } => format!("(t-define-generative _ _ {a} {b})"),
         Top::DefineEffect { .. } => format!("(t-define-effect _ _ {a} {b})"),
         Top::DefineConvention { .. } => format!("(t-define-convention _ _ {a} {b})"),
-        Top::Exp(k) => format!("(t-exp {})", show_exp(c, chars, k.exp)),
+        Top::Exp(k) => format!("(t-exp {})", show_exp(c, chars, k.exp, kth)),
     }
 }
 
-fn show_exp(c: &Checker, chars: &Chars, e: ExpId) -> String {
+fn show_exp(c: &Checker, chars: &Chars, e: ExpId, kth: &Kth) -> String {
     let sp = c.arena.span_of(e);
-    let (a, b) = (chars.at(sp.start), chars.at(sp.end));
+    let (a, b) = (chars.at(sp.start), format!("{} {}", chars.at(sp.end), kth.of(e)));
     let name = |s| c.interner.name(s).to_string();
-    let go = |x: ExpId| show_exp(c, chars, x);
+    let go = |x: ExpId| show_exp(c, chars, x, kth);
     let list = |xs: Vec<String>| format!("({})", xs.join(" "));
     match c.arena.exp_at(e).clone() {
         Exp::Var(s) => format!("(e-var {} {a} {b})", name(s)),

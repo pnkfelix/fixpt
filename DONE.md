@@ -2510,3 +2510,18 @@ Still open in `TODO.md` §97; done so far:
   its module). Tests: `modules/load-input.fx` and
   `load-input-built-in.fx` (the arm64 encoder), in every run mode, whole
   and at the REPL (`fixpt-cli/tests/modules.rs`).
+- **Expressions with identities; facts keyed by them, not by place**
+  (the user's decision, 2026-10-15, on `docs/research/loads-and-places.md`,
+  option C). Every node of the FX-26 front end's trees (`exp`, `kx`)
+  carries where it starts and ends and `k`, which of the expressions there
+  it is: 0 for the first in a walk that takes each before what is in it,
+  1, 2, … for those a parser made there besides. Numbered after the parse
+  (`parser-ids.fx`; the Rust trees alike, `ids.rs`), so that the two
+  parsers need not build in one order; `tests/parser.rs` compares the
+  trees, `k` included. The checker's facts, the compiler's tables (one of
+  them keyed by `a·2²² + b`), the evaluator's, the words a body made, and
+  the Rust checker's facts handed to the FX-26 compiler are keyed by the
+  identity, a product `k-at`. The Rust compiler finds the word a body made
+  by its `ExpId`, not its span, as the FX-26 one by its identity: a
+  module's `up-` and `down-` conversions share a span and now have a word
+  each.

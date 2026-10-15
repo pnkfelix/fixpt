@@ -243,7 +243,7 @@
 ;; counted, as it only loads fields).
 (define r-fast-sound? (subr rcompiles (exp) bool)
   (lambda (body)
-    (and (< (c-summary-at (exp-start body) (exp-end body)) 3)
+    (and (< (c-summary-at (exp-start body) (exp-end body) (exp-kth body)) 3)
          (>= (c-room body 1000000000 #t) 0))))
 ;; Whether the fast version made (`fast`, in a list) pays: it is a leaf, or
 ;; it loops.

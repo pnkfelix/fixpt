@@ -148,22 +148,22 @@
 (define k-written-module? (subr (maxeff kreads spin) (kx k-names) bool)
   (lambda (x early)
     (tagcase x
-      (x-module (items a b) #t)
-      (x-app (f args a b) (and (null? args) (k-written-module? f early)))
-      (x-lambda (ps body a b) (and (null? ps) (k-written-module? body early)))
-      (x-proj (body ds a b) (k-written-module? body early))
-      (x-plambda (bs body a b) (k-written-module? body early))
-      (x-var (n a b) (or (k-has-name? early n) (k-shared-name? n)))
-      (x-with (m body a b)
+      (x-module (items a b abk) #t)
+      (x-app (f args a b abk) (and (null? args) (k-written-module? f early)))
+      (x-lambda (ps body a b abk) (and (null? ps) (k-written-module? body early)))
+      (x-proj (body ds a b abk) (k-written-module? body early))
+      (x-plambda (bs body a b abk) (k-written-module? body early))
+      (x-var (n a b abk) (or (k-has-name? early n) (k-shared-name? n)))
+      (x-with (m body a b abk)
         (and (or (k-has-name? early m) (k-shared-name? m))
-             (tagcase body (x-var (n c d) #t) (else y #f))))
+             (tagcase body (x-var (n c d cdk) #t) (else y #f))))
       (else y #f))))
 ;; The names the module (its places `ps`) defines that a module as written
 ;; `x` names: of `(with m y)`, `m` only, `y` being `m`'s.
 (define k-early-names-in (subr kmakes (kx k-places) k-names)
   (lambda (x ps)
     (tagcase x
-      (x-with (m body a b) (if (< (k-place-of ps m) 0) nil (the k-names (cons m nil))))
+      (x-with (m body a b abk) (if (< (k-place-of ps m) 0) nil (the k-names (cons m nil))))
       (else y (k-mod-names-in x ps)))))
 ;; Whether each of `ns` is one of `ks`.
 (define k-all-named? (subr kreads (k-names k-names) bool)

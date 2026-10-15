@@ -441,9 +441,16 @@ pub fn rust_facts(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
     c.base_dir = LOAD_BASE.with(|b| b.borrow().clone());
     let forms = c.read_in(file, text)?;
     let done = c.declare_ahead(&forms)?;
+    // Which of the expressions at its span each is, as the FX-26 parser
+    // numbers them (`crate::ids`): the forms in order, each after the
+    // hidden globals of the files it loads first.
+    let mut kth = crate::ids::Kth::new();
     for (f, done) in forms.iter().zip(done) {
         if !done {
-            c.top_defining(f)?;
+            let defining = c.top_defining(f)?;
+            for (t, _) in defining.hoisted.iter().chain(&defining.run[..1]) {
+                kth.top(&c, t);
+            }
         }
     }
     // Where a span is, as the pieces written in FX-26 have it: in
@@ -456,22 +463,17 @@ pub fn rust_facts(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
             _ => offsets.partition_point(|&o| o < byte as usize) as i64,
         }
     };
+    // An expression's identity (`k-at`): where it starts and ends, and which
+    // of the expressions there it is.
     let place = |e: ExpId| {
         let span = c.arena.span_of(e);
-        (at(span.file, span.start), at(span.file, span.end))
+        (at(span.file, span.start), at(span.file, span.end), kth.of(e) as i64)
     };
-    let facts: Vec<(i64, i64, i64)> = c
-        .facts
-        .field_index
-        .iter()
-        .map(|(e, i)| {
-            let (a, b) = place(*e);
-            (a, b, *i as i64)
-        })
-        .collect();
+    type At = (i64, i64, i64);
+    let facts: Vec<(At, i64)> = c.facts.field_index.iter().map(|(e, i)| (place(*e), *i as i64)).collect();
     // And each expression's effect summary, as -1 - s (`checked-extracts`):
-    // `Checker::effect_summaries`, by span in its file.
-    let mut summaries: HashMap<(i64, i64), i64> = HashMap::new();
+    // the greatest of its effects'.
+    let mut summaries: HashMap<At, i64> = HashMap::new();
     for (e, eff) in &c.facts.effects {
         use crate::ast::{Atom, Region};
         let s = if eff.is_pure() {
@@ -486,40 +488,32 @@ pub fn rust_facts(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
         let k = summaries.entry(place(*e)).or_insert(s);
         *k = (*k).max(s);
     }
-    let facts: Vec<(i64, i64, i64)> = facts
+    let facts: Vec<(At, i64)> = facts
         .into_iter()
-        .chain(summaries.into_iter().map(|((a, b), s)| (a, b, -1 - s)))
+        .chain(summaries.into_iter().map(|(at, s)| (at, -1 - s)))
         // And each conversion, as -1000 - its code (`k-convert-at`).
-        .chain(c.facts.converted.keys().filter_map(|e| {
-            let (a, b) = place(*e);
-            c.facts.conversion_code(*e).map(|k| (a, b, -1000 - k))
-        }))
+        .chain(c.facts.converted.keys().filter_map(|e| c.facts.conversion_code(*e).map(|k| (place(*e), -1000 - k))))
         // And each `apply` of a list at `acyclic`, as -500
         // (`k-note-apply-shares`).
-        .chain(c.facts.apply_shares.iter().map(|e| {
-            let (a, b) = place(*e);
-            (a, b, -500)
-        }))
+        .chain(c.facts.apply_shares.iter().map(|e| (place(*e), -500)))
         // And each definition's value that is a list nothing writes, as
         // -501 (`k-note-frozen-define`).
-        .chain(c.facts.frozen_defines.iter().map(|e| {
-            let (a, b) = place(*e);
-            (a, b, -501)
-        }))
+        .chain(c.facts.frozen_defines.iter().map(|e| (place(*e), -501)))
         // And each `(with #%fx n)` that is the plain `n`, as -502
         // (`k-synth-fx`).
-        .chain(c.facts.fx_plain.keys().map(|e| {
-            let (a, b) = place(*e);
-            (a, b, -502)
-        }))
+        .chain(c.facts.fx_plain.keys().map(|e| (place(*e), -502)))
         .collect();
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
+    // An identity, as the product `k-at` is.
+    let identity = |scheme: &mut Session, (a, b, k): At| -> R<Handle> {
+        let args = [37, a, b, k].map(|n| scheme.make(|_| Value::fixnum(n)));
+        scheme.call_global("%make-frozen", &args).map_err(|e| fail(e.to_string()))
+    };
     // And each `with`'s module's values it names, and their positions, by
-    // where it is (`checked-withs!`): the checker's record, which the
+    // expression (`checked-withs!`): the checker's record, which the
     // compiler reads.
     let mut withs = scheme.make(|_| Value::NULL);
     for (e, names) in &c.facts.with_vals {
-        let (wa, wb) = place(*e);
         let (mut ns, mut is) = (scheme.make(|_| Value::NULL), scheme.make(|_| Value::NULL));
         for (n, i) in names.iter().rev() {
             let sym = scheme.make(|m| m.heap().intern(c.interner.name(*n)));
@@ -527,31 +521,31 @@ pub fn rust_facts(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
             let at = scheme.make(|_| Value::fixnum(*i as i64));
             is = scheme.call_global("cons", &[at, is]).map_err(|e| fail(e.to_string()))?;
         }
-        let (a, b) = (scheme.make(|_| Value::fixnum(wa)), scheme.make(|_| Value::fixnum(wb)));
+        let at = identity(scheme, place(*e))?;
         let tag = scheme.make(|_| Value::fixnum(37));
-        let one = scheme.call_global("%make-frozen", &[tag, a, b, ns, is]).map_err(|e| fail(e.to_string()))?;
+        let one = scheme.call_global("%make-frozen", &[tag, at, ns, is]).map_err(|e| fail(e.to_string()))?;
         withs = scheme.call_global("cons", &[one, withs]).map_err(|e| fail(e.to_string()))?;
     }
     scheme.call_global(&format!("{READER_PREFIX}checked-withs!"), &[withs]).map_err(|e| fail(e.to_string()))?;
     // And each module reshaped, with the positions it keeps (`checked-reshapes!`).
     let mut reshapes = scheme.make(|_| Value::NULL);
     for (e, keep) in &c.facts.reshaped {
-        let (ra, rb) = place(*e);
         let mut ks = scheme.make(|_| Value::NULL);
         for k in keep.iter().rev() {
             let k = scheme.make(|_| Value::fixnum(*k as i64));
             ks = scheme.call_global("cons", &[k, ks]).map_err(|e| fail(e.to_string()))?;
         }
-        let (a, b) = (scheme.make(|_| Value::fixnum(ra)), scheme.make(|_| Value::fixnum(rb)));
+        let at = identity(scheme, place(*e))?;
         let tag = scheme.make(|_| Value::fixnum(37));
-        let one = scheme.call_global("%make-frozen", &[tag, a, b, ks]).map_err(|e| fail(e.to_string()))?;
+        let one = scheme.call_global("%make-frozen", &[tag, at, ks]).map_err(|e| fail(e.to_string()))?;
         reshapes = scheme.call_global("cons", &[one, reshapes]).map_err(|e| fail(e.to_string()))?;
     }
     scheme.call_global(&format!("{READER_PREFIX}checked-reshapes!"), &[reshapes]).map_err(|e| fail(e.to_string()))?;
     let mut list = scheme.make(|_| Value::NULL);
-    for (a, b, i) in facts {
-        let args = [37, a, b, i].map(|n| scheme.make(|_| Value::fixnum(n)));
-        let fact = scheme.call_global("%make-frozen", &args).map_err(|e| fail(e.to_string()))?;
+    for (at, i) in facts {
+        let at = identity(scheme, at)?;
+        let (tag, i) = (scheme.make(|_| Value::fixnum(37)), scheme.make(|_| Value::fixnum(i)));
+        let fact = scheme.call_global("%make-frozen", &[tag, at, i]).map_err(|e| fail(e.to_string()))?;
         list = scheme.call_global("cons", &[fact, list]).map_err(|e| fail(e.to_string()))?;
     }
     Ok(list)

@@ -117,22 +117,23 @@
 (define k-names-conversion? (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (kx) bool)
   (lambda (f)
     (tagcase (k-under f)
-      (x-var (s a b) (let ((t (k-lookup s))) (and (>= t 0) (k-named-has? (get k-conversions) s t))))
+      (x-var (s a b abk)
+        (let ((t (k-lookup s))) (and (>= t 0) (k-named-has? (get k-conversions) s t))))
       (else y #f))))
 ;; `e` under ascriptions and conversions, which are the identity.
 (define k-strip-conv (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (kx) kx)
   (lambda (e)
     (tagcase e
-      (x-the (t x a b) (k-strip-conv x))
-      (x-app (f args a b)
+      (x-the (t x a b abk) (k-strip-conv x))
+      (x-app (f args a b abk)
         (if (and (k-sc-one? args) (k-names-conversion? f)) (k-strip-conv (car args)) e))
       (else y e))))
 ;; The place `e` names, if it names one (none or one).
 (define k-place-of (subr (maxeff kreads (alloc @t) spin) (kx) (listof k-pos acyclic))
   (lambda (e)
     (tagcase (k-strip-conv e)
-      (x-var (s a b) (the (listof k-pos acyclic) (cons (cons s nil) nil)))
-      (x-extract (x l a b)
+      (x-var (s a b abk) (the (listof k-pos acyclic) (cons (cons s nil) nil)))
+      (x-extract (x l a b abk)
         (let ((p (k-place-of x)))
           (if (null? p) nil (the (listof k-pos acyclic) (cons (k-pos-field (car p) l) nil)))))
       (else y nil))))
@@ -197,15 +198,15 @@
   (k-rebuild-node (subr (maxeff checks spin) (kx k-pos int bool k-proving) unit)
     (lambda (e at ty guarded pv)
       (tagcase e
-        (x-app (f args a b) (k-rebuild-call e f args at guarded pv))
-        (x-tagcase (sc arms els a b)
+        (x-app (f args a b abk) (k-rebuild-call e f args at guarded pv))
+        (x-tagcase (sc arms els a b abk)
           (if (not (k-at? sc at))
               (k-proof-fail sc pv "a proof takes apart only what was given here")
               (tagcase (k-get (k-unfold-all ty 64))
                 (ty-sum (vs)
                   (begin (k-rebuild-arms arms vs at pv) (k-rebuild-else els ty guarded pv)))
                 (else z (k-proof-fail sc pv "what is given here is not a sum")))))
-        (x-product (gs a b) (k-rebuild-product e gs at ty pv))
+        (x-product (gs a b abk) (k-rebuild-product e gs at ty pv))
         (else y
           (k-proof-fail e pv "a proof may only take apart and rebuild what it was given")))))
   ;; A call `e`, of `f` on `args`: a hypothesis applied to what was given at
@@ -275,7 +276,7 @@
             (k-proof-fail body0 pv "an arm for a tag that is not there")
             (let ((body (k-strip-conv body0)))
               (tagcase body
-                (x-sum (t2 inner sa sb)
+                (x-sum (t2 inner sa sb sasbk)
                   (cond ((not (symbol=? t2 tag))
                          (k-proof-fail body0 pv "each arm rebuilds its own tag"))
                         ((extract arm 2) (k-rebuild-arm-fields inner vt names body0 pv))
@@ -289,7 +290,7 @@
         (ty-product (fs)
           (let ((inner (k-strip-conv inner0)))
             (tagcase inner
-              (x-product (gs pa pb)
+              (x-product (gs pa pb papbk)
                 (if (k-fields-fit? gs fs names)
                     (k-rebuild-fields gs fs names pv)
                     (k-proof-fail inner pv "each arm rebuilds its fields, in order")))
@@ -315,7 +316,7 @@
     (lambda (c0 guarded pv)
       (let ((c (k-strip-conv c0)))
         (tagcase c
-          (x-var (s a b)
+          (x-var (s a b abk)
             (cond ((k-has-name? (extract pv 2) s) #u)
                   ((symbol=? s (extract pv 1))
                    (if guarded
@@ -323,7 +324,7 @@
                        (k-proof-fail c pv "it passes itself on before rebuilding anything")))
                   ((k-lemma-named? s) #u)
                   (else (k-proof-fail c pv k-proof-given))))
-          (x-lambda (ps body a b) (k-rebuild-coercion c ps body guarded pv))
+          (x-lambda (ps body a b abk) (k-rebuild-coercion c ps body guarded pv))
           (else y (k-proof-fail c pv k-proof-given))))))
   ;; A coercion `c` that is a lambda of parameters `ps`: of one, its type
   ;; written, which its body rebuilds.
@@ -344,8 +345,8 @@
 (define k-under-abstractions (subr (maxeff (read @globals) spin) (kx) kx)
   (lambda (x)
     (tagcase x
-      (x-plambda (bs body a b) (k-under-abstractions body))
-      (x-the (t body a b) (k-under-abstractions body))
+      (x-plambda (bs body a b abk) (k-under-abstractions body))
+      (x-the (t body a b abk) (k-under-abstractions body))
       (else y x))))
 (define k-param-names-first (subr (maxeff kreads (alloc @t)) (k-typed-params int) k-names)
   (lambda (ps n)
@@ -359,7 +360,7 @@
     (let* ((want (k-cat5 "`" (k-show-ty (extract l 2)) " ≤ " (k-show-ty (extract l 3)) "`"))
            (x (k-under-abstractions e)))
       (tagcase x
-        (x-lambda (ps body a b)
+        (x-lambda (ps body a b abk)
           (let ((n (k-length (extract l 4))))
             (if (not (= (k-length ps) (+ n 1)))
                 (k-fail (k-cat3 "a proof of " want

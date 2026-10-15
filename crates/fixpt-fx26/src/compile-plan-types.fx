@@ -6,6 +6,7 @@
 (hide (define compile-exps-types (load-module "fx26:compile-exps-types.fx")))
 (define-type c-inline (select compile-exps-types c-inline))
 (hide (define compile-types (load-module "fx26:compile-types.fx")))
+(define-type k-at (select compile-types k-at))
 (define-type c-params (select compile-types c-params))
 (define-type syms (select compile-types syms))
 (hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
@@ -32,8 +33,11 @@
 ;; calls, by where they are; and the bodies they inline, by name and arity:
 ;; what an inlined body decides depending on the callee and the path to it,
 ;; not on the call.
-(define-type c-calls-at (table int c-called @k))
+(define-type c-calls-at (table k-at c-called @k))
 (define-type c-inlined-at (listof (productof (1 symbol) (2 int) (3 int)) @k))
+;; The copies made, by the procedure's name and the lambda's body: each one's
+;; context.
+(define-type c-copied-at (listof (productof (1 symbol) (2 k-at) (3 int)) @k))
 ;; The form's copies, last first, each with what it is made for (step 4):
 ;; the procedure, the lambda, the procedure's global, the names the
 ;; lambda's closure captures, the globals it sees, and the copy's context.
@@ -114,5 +118,5 @@
             (val c-sees? (subr pure (int int) bool))
             (val c-planned-call
                  (subr (maxeff (alloc @k) (read @globals) (read @k))
-                       (int int)
+                       (int int int)
                        (listof c-called @k)))))

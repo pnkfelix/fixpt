@@ -3,6 +3,7 @@
 
 use fixpt_engine::Backend;
 use fixpt_fx26::Checker;
+use fixpt_fx26::ids::Kth;
 use fixpt_fx26::sexp::{Chars, show_top};
 use fixpt_fx26::session::Fx26Session;
 use fixpt_read::FileId;
@@ -16,16 +17,21 @@ fn rust_trees(text: &str) -> Vec<String> {
     let mut c2 = Checker::new();
     let forms2 = c2.read_in(FileId(0), text).expect("reads");
     let chars = Chars::of(text);
-    let mut out = Vec::new();
+    let mut tops = Vec::new();
     for f in &forms2 {
         let top = c2.top(f).unwrap_or_else(|e| panic!("checks: {e}"));
         // The hidden globals of the files it loads first, defined before it.
         for (t, h) in std::mem::take(&mut c2.hoisted) {
-            out.push(show_top(&c2, &chars, &t, h.span));
+            tops.push((t, h.span));
         }
-        out.push(show_top(&c2, &chars, &top, f.span));
+        tops.push((top, f.span));
     }
-    out
+    // Which of the expressions at its span each is, the forms in order.
+    let mut kth = Kth::new();
+    for (t, _) in &tops {
+        kth.top(&c2, t);
+    }
+    tops.iter().map(|(t, span)| show_top(&c2, &chars, t, *span, &kth)).collect()
 }
 
 /// `tree` without the FX-26 parser's marks of where a loaded file's
@@ -192,7 +198,10 @@ fn case_parse_errors_agree() {
     }
 }
 
-/// What the comparison compares, spelled out once.
+/// What the comparison compares, spelled out once: each expression ends
+/// with where it starts and ends, and which of the expressions there it is,
+/// as the parser numbers them (`parser-ids.fx`): the `#f` that `and` makes
+/// is the second at its span, the `if` the first.
 #[test]
 fn a_tree_as_text() {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
@@ -200,7 +209,7 @@ fn a_tree_as_text() {
     let ours = s.parse_with_own_parser(text).expect("parses");
     assert_eq!(
         ours,
-        ["(t-exp (e-let ([a (e-bool #t 10 12)]) (e-if (e-var a 20 21) (e-bool #f 22 24) (e-bool #f 15 25) 15 25) 7 13))"]
+        ["(t-exp (e-let ([a (e-bool #t 10 12 0)]) (e-if (e-var a 20 21 0) (e-bool #f 22 24 0) (e-bool #f 15 25 1) 15 25 0) 7 13 0))"]
     );
     assert_eq!(ours, rust_trees(text));
 }

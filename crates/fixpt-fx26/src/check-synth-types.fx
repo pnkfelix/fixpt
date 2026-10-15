@@ -44,9 +44,10 @@
              (6 int)))
 ;;; Bounds (`TODO.md` §66): an argument a type binder bounded only from
 ;;; above (`check-bounds.fx`) is checked against says what it is.
-;; The last call checked against a type: where it is, and its own type there
+;; The last call checked against a type: which it is, and its own type there
 ;; (the Rust checker's `checked_call`).
-(define-type k-call-checked (productof (1 int) (2 int) (3 int)))
+(define-type k-at (select check-types-types k-at))
+(define-type k-call-checked (productof (1 k-at) (2 int)))
 ;; A type, or none: none or one.
 (define-type k-maybe-ty (listof k-ty acyclic))
 
@@ -155,7 +156,7 @@
             (val k-region-form (subr pure (int) string))
             (val k-note-extract
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t))
-                       (int int int)
+                       (k-at int)
                        unit))
             (val k-projected
                  (subr (maxeff (alloc @t)
@@ -197,6 +198,11 @@
                        unit))
             (val k-certified-arg?
                  (subr (maxeff (read @globals) (read @t) spin) (k-named kxs) bool))
+            (val k-certify-nat
+                 (subr (maxeff (alloc @t) (goto @z) (read @globals) (read @s) (read @t) (write @t)
+                               spin)
+                       (kx kxs k-synther)
+                       k-te))
             (val k-thunk-lambda? (subr (read @globals) (kx) bool))
             (val k-arg-found
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t))

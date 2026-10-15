@@ -4,6 +4,8 @@
 
 ;; The types these use, from the files that define them.
 (hide (define compile-types (load-module "fx26:compile-types.fx")))
+(define-type k-at (select compile-types k-at))
+(define-type table (select compile-types table))
 (define-type syms (select compile-types syms))
 ;; While a `letrec` is planned to be lifted, by member: the names each
 ;; takes, and the siblings each calls.
@@ -50,7 +52,6 @@
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
                        (c-recs (listof int @k) cenv)
                        cenv))
-            (val c-span-key (subr pure (int int) int))
             (val c-lift-added (subr (maxeff (read @globals) (read @k)) (int) syms))
             (val c-lambda-captured
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
@@ -69,23 +70,8 @@
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin) (exp cenv) int))
             (val c-lifted-entries
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin) (cenv) cenv))
-            (val c-plan-procs
-                 (ref (bloblet (fields (subr pure (int) int)
-                                       (subr pure (int int) bool)
-                                       (arrayof (listof (pairof int c-planneds @k) acyclic)
-                                                @k)
-                                       int)
-                               @k)
-                      @k))
-            (val c-plan-lifts
-                 (ref (bloblet (fields (subr pure (int) int)
-                                       (subr pure (int int) bool)
-                                       (arrayof (listof (pairof int (listof c-added @k) @k)
-                                                        acyclic)
-                                                @k)
-                                       int)
-                               @k)
-                      @k))
+            (val c-plan-procs (ref (table k-at c-planneds @k) @k))
+            (val c-plan-lifts (ref (table k-at (listof c-added @k) @k) @k))
             (val c-planning (ref bool @k))
             (val c-lift-plan
                  (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k) spin)
@@ -108,7 +94,7 @@
             (val c-lift-of (subr (maxeff (read @globals) (read @k)) (int) c-lift))
             (val c-planned-lift
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
-                       (int int)
+                       (int int int)
                        (listof (listof c-added @k) @k)))
             (val c-load-names
                  (subr (maxeff (alloc @k)

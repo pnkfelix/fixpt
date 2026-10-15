@@ -10,6 +10,7 @@
 (define-type top (select parser-types top))
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type k-eff (select check-types-types k-eff))
+(define-type k-at (select check-types-types k-at))
 (define-type k-ids (select check-types-types k-ids))
 (define-type k-names (select check-types-types k-names))
 (define-type k-regions (select check-types-types k-regions))
@@ -68,6 +69,8 @@
   (moduleof
    (val exp-start (subr pure (exp) int))
    (val exp-end (subr pure (exp) int))
+   (val exp-kth (subr pure (exp) int))
+   (val exp-at (subr pure (exp) k-at))
    (val k-has-region-in?
         (subr (maxeff (read @globals) (read @t) spin) (k-regions k-region) bool))
    (val k-defs (ref (listof k-def acyclic) @t))
@@ -83,6 +86,8 @@
               int))
    (val k-start (subr pure (kx) int))
    (val k-end (subr pure (kx) int))
+   (val k-kth (subr pure (kx) int))
+   (val k-at-of (subr pure (kx) k-at))
    (val k-as-subr
         (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
               (int)

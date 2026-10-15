@@ -42,6 +42,8 @@
 (hide (include check-types) (include check-env) (include check-print) (include check-print-parts)
       (include check-calls) (include check-effects) (include check-subtype))
 (define k-start (with check-resolve k-start))
+(define k-at-of (with check-resolve k-at-of))
+(define k-kth (with check-resolve k-kth))
 (define k-end (with check-resolve k-end))
 (define k-free-vars (with check-resolve k-free-vars))
 (define k-regions-distinct? (with check-binders k-regions-distinct?))
@@ -65,7 +67,7 @@
   (lambda (m body)
     (if (symbol=? m '%shared:fx26:processes.fx)
         (tagcase body
-          (x-var (n c d)
+          (x-var (n c d cdk)
             (k-std-type (string->symbol (string-append "%processes:" (symbol->string n)))))
           (else y -1))
         -1)))
@@ -74,11 +76,11 @@
 (define k-library-op (subr (maxeff kreads spin) (kx kxs) string)
   (lambda (f args)
     (tagcase f
-      (x-with (m body a b)
+      (x-with (m body a b abk)
         (if (< (k-library-type m body) 0)
             ""
             (tagcase body
-              (x-var (n c d)
+              (x-var (n c d cdk)
                 (let ((s (symbol->string n)) (k (k-length args)))
                   (cond ((and (string=? s "spawn-process") (= k 1)) s)
                         ((and (string=? s "spawn-monitored") (= k 3)) "spawn-process")
@@ -87,16 +89,16 @@
                         (else ""))))
               (else y ""))))
       (else y ""))))
-;; `(with m n)` of the library, its type `lt`: the member noted for the
-;; compilers, as an ordinary `with`'s is; reading the global no effect.
-(define k-library-with (subr (maxeff checks spin) (int kx int int int) k-te)
-  (lambda (mt body lt a b)
+;; `(with m n)`, `x`, of the library, its type `lt`: the member noted for
+;; the compilers, as an ordinary `with`'s is; reading the global no effect.
+(define k-library-with (subr (maxeff checks spin) (int kx int kx) k-te)
+  (lambda (mt body lt x)
     (tagcase (k-get mt)
       (ty-module (abs ds vs)
         (let ((used (k-with-used vs (k-free-vars body) 0)))
           (begin
-            (k-note-with (product (1 a) (2 b) (3 (k-comp-names (extract used 1)))
-                                  (4 (extract used 2))))
+            (k-note-with (product (1 (k-at-of x)) (2 (k-comp-names (extract used 1)))
+                                  (3 (extract used 2))))
             (k-te lt nil))))
       (else y (k-te lt nil)))))
 
@@ -195,9 +197,9 @@
                             (listof (productof (1 int) (2 k-eff) (3 int)) acyclic))
   (lambda (body pt)
     (tagcase body
-      (x-plambda (bs lam a b)
+      (x-plambda (bs lam a b abk)
         (if (and (= (k-length bs) 1) (= (extract (car bs) 2) 3)
-                 (tagcase lam (x-lambda (ps l c d) (= (k-length ps) 2)) (else y #f)))
+                 (tagcase lam (x-lambda (ps l c d cdk) (= (k-length ps) 2)) (else y #f)))
             (let ((r (extract (car bs) 1)))
               (tagcase (k-get (extract pt 1))
                 (ty-poly (pbs inner)
@@ -422,25 +424,27 @@
            (k-fail "`#%fx` is the standard bindings' module, which nothing else may be" a b))
           (else
            (let ((t (tagcase body
-                      (x-var (n c d)
-                        (if (and (k-second-class? n) (not (k-operator? n a b)))
+                      (x-var (n c d cdk)
+                        (if (and (k-second-class? n) (not (k-operator? n a b (k-kth x))))
                             (k-fail (k-named-only n) a b)
                             (k-std-type n)))
                       (else y -1))))
              (if (< t 0)
                  (k-fail "`(with #%fx name)` names one standard binding" a b)
-                 (begin (if (k-operator? (k-fx-name body) a b) #u (k-note-fx-plain body a b))
+                 (begin (if (k-operator? (k-fx-name body) a b (k-kth x))
+                            #u
+                            (k-note-fx-plain body (k-at-of x)))
                         (k-te t nil))))))))
 ;; The operator `(with #%fx n)`, noted as `k-note-fx-plain` notes it, once.
 (define k-note-fx-plain-op (subr (maxeff checks spin) (kx) unit)
   (lambda (f)
     (tagcase f
-      (x-with (m body a b) (if (k-fx-module? m) (k-note-fx-plain body a b) #u))
+      (x-with (m body a b abk) (if (k-fx-module? m) (k-note-fx-plain body (k-at-of f)) #u))
       (else y #u))))
 ;; Where nothing shadows `n`, `(with #%fx n)` is the plain `n`: the fact
 ;; -502, for the compiler (the Rust checker's `fx_plain`).
-(define k-note-fx-plain (subr (maxeff checks spin) (kx int int) unit)
-  (lambda (body a b)
+(define k-note-fx-plain (subr (maxeff checks spin) (kx k-at) unit)
+  (lambda (body at)
     (if (string=? (k-std-op body) "")
         #u
-        (set k-extracts (cons (product (1 a) (2 b) (3 -502)) (get k-extracts)))))))))
+        (set k-extracts (cons (product (1 at) (2 -502)) (get k-extracts)))))))))

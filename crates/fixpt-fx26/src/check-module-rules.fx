@@ -263,14 +263,15 @@
     (cond ((null? p1) nil)
           ((>= (k-ext-index p0 (extract (car p1) 1) 0) 0) (k-ext-rest-at (cdr p1) p0 (+ k 1)))
           (else (cons (k-reshape-path 1 k) (k-ext-rest-at (cdr p1) p0 (+ k 1)))))))
-;; `(extend e0 e1)` at `a`..`b`, its values `vs` the two modules: one of the
+;; `(extend e0 e1)` at `a`..`b`, the `which`th there, its values `vs` the
+;; two modules: one of the
 ;; values of both, `e1`'s where both have a name, `e0`'s in its order first
 ;; and then `e1`'s others; its types likewise. Made of theirs, by path
 ;; (`k-reshape-path`, noted in `k-reshapes`). A side's own abstract types
 ;; the new module's, `e1`'s replacing `e0`'s of their names, refused if what
 ;; is kept mentions one (`k-replaced-check`). As Rust's `Checker::extended`.
-(define k-extended (subr (maxeff checks spin) (k-parts int int) int)
-  (lambda (vs a b)
+(define k-extended (subr (maxeff checks spin) (k-parts int int int) int)
+  (lambda (vs a b which)
     (let* ((x0 (extract (car vs) 2)) (x1 (extract (car (cdr vs)) 2))
            (r0 (k-taken-abs x0 "first" a b)) (r1 (k-taken-abs x1 "second" a b))
            (m (append (extract r0 2) (extract r1 2)))
@@ -285,7 +286,8 @@
                      (ds (append (k-ext-firsts d0 d1) (k-ext-rest d1 d0)))
                      (out (append (k-ext-firsts v0 v1) (k-ext-rest v1 v0)))
                      (gone (k-parts-not-in a0 (append a1 d1) #t)))
-                (begin (set k-reshapes (cons (product (1 a) (2 b) (3 at)) (get k-reshapes)))
+                (begin (set k-reshapes (cons (product (1 (product (1 a) (2 b) (3 which))) (2 at))
+                                             (get k-reshapes)))
                        (k-replaced-check (append out ds) gone a b)
                        (k-ty-new (ty-module (append (k-parts-not-in a0 (append a1 d1) #f) a1)
                                             ds out)))))
@@ -511,16 +513,16 @@
 ;; values then after it), else from each of `from`. As Rust's
 ;; `Checker::included`.
 (define k-included
-  (subr (maxeff checks spin) (k-parts k-parts k-parts k-parts int int int) int)
-  (lambda (from abs ds own at a b)
+  (subr (maxeff checks spin) (k-parts k-parts k-parts k-parts int int int int) int)
+  (lambda (from abs ds own at a b which)
     (let* ((dseen (k-see-all (make-table symbol-hash symbol=?) ds))
            (vseen (k-see-all (make-table symbol-hash symbol=?) own))
            (r (k-inc-all from 0 at (product (1 nil) (2 nil) (3 nil) (4 nil) (5 nil)) abs ds dseen
                          vseen a b))
            (m (extract r 5)))
       (begin
-        (set k-reshapes (cons (product (1 a) (2 b)
-                                       (3 (append (reverse (extract r 3)) (k-own-at own at 0))))
+        (set k-reshapes (cons (product (1 (product (1 a) (2 b) (3 which)))
+                                       (2 (append (reverse (extract r 3)) (k-own-at own at 0))))
                               (get k-reshapes)))
         ;; The included modules' own abstract types, then the module's.
         (k-ty-new (ty-module (append (reverse (extract r 4)) abs)
@@ -599,11 +601,12 @@
     (cond ((null? abs) nil)
           ((eq? gone? (k-shown? hs (extract (car abs) 1))) (k-abs-split (cdr abs) hs gone?))
           (else (the k-parts (cons (car abs) (k-abs-split (cdr abs) hs gone?)))))))
-;; Module type `t`, at `a`..`b`, without what `(hide item …)` hid: each name
+;; Module type `t`, at `a`..`b`, the `which`th there, without what `(hide
+;; item …)` hid: each name
 ;; a `%hidden:name` type marks, the markers too; made of the values left
 ;; by position (a reshape, on any it has). As Rust's `Checker::hiding`.
-(define k-hiding (subr (maxeff checks spin) (int int int) int)
-  (lambda (t a b)
+(define k-hiding (subr (maxeff checks spin) (int int int int) int)
+  (lambda (t a b which)
     (tagcase (k-get t)
       (ty-module (abs ds vs)
         (let ((hs0 (k-hidden-in ds "%hidden:")) (hv0 (k-hidden-in ds "%hiddenv:")))
@@ -611,9 +614,8 @@
               t
               (let* ((hs (k-saw-of hs0)) (hv (k-saw-of hv0))
                      (rs (get k-reshapes))
-                     (mine (and (not (null? rs)) (= (extract (car rs) 1) a)
-                                (= (extract (car rs) 2) b)))
-                     (at (if mine (extract (car rs) 3) (k-upto (k-length vs) nil)))
+                     (mine (and (not (null? rs)) (k-at-is? (extract (car rs) 1) a b which)))
+                     (at (if mine (extract (car rs) 2) (k-upto (k-length vs) nil)))
                      (out (k-parts-shown vs hv))
                      (shown (k-parts-shown ds hs))
                      (gone (k-abs-split abs hs #t))
@@ -622,22 +624,26 @@
                 (begin
                   (if (k-identity? path 0 (k-length vs))
                       #u
-                      (set k-reshapes (cons (product (1 a) (2 b) (3 path)) (if mine (cdr rs) rs))))
+                      (set k-reshapes (cons (product (1 (product (1 a) (2 b) (3 which))) (2 path))
+                                            (if mine (cdr rs) rs))))
                   (k-ty-new (ty-module (k-abs-split abs hs #f) shown out)))))))
       (else z t))))
 
-;; A module's type, at `a`..`b`, of its abstract types, descriptions and
+;; A module's type, the module `at`, of its abstract types, descriptions
+;; and
 ;; values: an `extend`'s, of the two it holds (`k-extended`); an
 ;; `include`s', of the modules included; a module's that includes some, of
 ;; those and its own. As Rust's `Checker::module_type`.
-(define k-module-type (subr (maxeff checks spin) (k-items k-parts k-parts k-parts int int) int)
-  (lambda (items abs ds vs a b)
-    (let ((k (k-ext-index vs '%include 0)))
-      (cond ((k-extend-items? items) (k-extended vs a b))
-            ((k-bucket-items? items) (k-included vs nil nil nil -1 a b))
+(define k-module-type (subr (maxeff checks spin) (k-items k-parts k-parts k-parts k-at) int)
+  (lambda (items abs ds vs at)
+    (let ((k (k-ext-index vs '%include 0)) (a (extract at 1)) (b (extract at 2))
+          (which (extract at 3)))
+      (cond ((k-extend-items? items) (k-extended vs a b which))
+            ((k-bucket-items? items) (k-included vs nil nil nil -1 a b which))
             ((>= k 0)
-             (k-hiding (k-included (list (k-nth vs k)) abs ds (k-parts-but vs k 0) k a b) a b))
-            (else (k-hiding (k-ty-new (ty-module abs ds vs)) a b))))))
+             (k-hiding (k-included (list (k-nth vs k)) abs ds (k-parts-but vs k 0) k a b which)
+                       a b which))
+            (else (k-hiding (k-ty-new (ty-module abs ds vs)) a b which))))))
 
 ;;; ------------------------------------------------------------ with
 

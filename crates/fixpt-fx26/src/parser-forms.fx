@@ -48,7 +48,7 @@
 ;; `load` (its hidden global), at `a`..`b`.
 (define process-form (subr (maxeff parses spin) (fails syns-a exp int int) syn)
   (lambda (fail items load a b)
-    (let* ((lib (tagcase load (e-var (n c d) n) (else y '%none)))
+    (let* ((lib (tagcase load (e-var (n c d cdk) n) (else y '%none)))
            (call (lambda ((name string) (args syns-a))
                   (mk-list (cons (mk-list (the syns-a (list (mk-symbol "with" a b) (atom lib a b)
                                                             (mk-symbol name a b)))

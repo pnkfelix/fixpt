@@ -2546,11 +2546,22 @@ generator reads, structured (step 6; today one string a clause,
   `preempt.rs`'s spinning process unpreempted, and a `processes.rs` test
   hung. Only `load-input`'s hidden globals are declined now, so the
   scheduler is native again; the cellular path is still to fix.
-- **Loads' hidden globals and facts by place, reviewed** (the user's
-  question, 2026-10-15): `docs/research/loads-and-places.md` proposes an
-  explicit form for a hidden definition (A), then expressions with
-  identities in the front end written in FX-26, facts keyed by them, not
-  by place (C); not loads as a table (B). To decide with the user.
+- **Loads' hidden globals and facts by place** (the user's question,
+  2026-10-15; `docs/research/loads-and-places.md`). Decided: C first, and
+  done (`DONE.md` §97): expressions' identities `(start end k)`, facts
+  keyed by them. Left:
+  - The places invented so that made expressions would not collide, in
+    both parsers: a parameterized file's zero-width `lambda`, a
+    `load-input`'s `input` at the load's keyword, a REPL form's positions
+    past every earlier text. A made expression can now have its origin's
+    span.
+  - Fact kinds encoded in a fact's integer (-500, -501, -502, -1000 -
+    code, -1 - summary), and an inlined copy's field fact in its start
+    (`c-resolved-at`): a datatype of facts instead.
+  - Cause 2, the hidden definition read differently by who reads it: as
+    Sheldon's `input` was, a load whose identity is its own key, resolved
+    where it is read, rather than a hidden global defined by a parser in a
+    state of its own (the note's last section).
 - **The native-convention machine hides the FX-26 checker's refusals**
   (found 2026-10-14): a definition that checker refuses is "declined" and
   runs another way, so where the two checkers disagree on a form, that

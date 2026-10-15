@@ -24,7 +24,8 @@
 
   ;; Whether `x` is the literal boolean `v`.
   (define k-bool-lit? (subr (read @globals) (kx bool) bool)
-    (lambda (x v) (tagcase x (x-const (t n a b) (and (= t k-bool) (= n (if v 1 0)))) (else y #f))))
+    (lambda (x v)
+      (tagcase x (x-const (t n a b abk) (and (= t k-bool) (= n (if v 1 0)))) (else y #f))))
   (define k-facts-append (subr (read @globals) (k-fact-list k-fact-list) k-fact-list)
     (lambda (xs ys)
       (if (null? xs) ys (the k-fact-list (cons (car xs) (k-facts-append (cdr xs) ys))))))
@@ -40,14 +41,14 @@
     (lambda (p)
       (let ((none (k-branch-facts-of nil nil)))
         (tagcase p
-          (x-if (q c d a b)
+          (x-if (q c d a b abk)
             (let ((fq (k-test-facts q)))
               (cond ((k-bool-lit? c #t)
                      (k-branch-facts-of nil (k-facts-append (cdr fq) (cdr (k-test-facts d)))))
                     ((k-bool-lit? d #f)
                      (k-branch-facts-of (k-facts-append (car fq) (car (k-test-facts c))) nil))
                     (else none))))
-          (x-app (f args a b)
+          (x-app (f args a b abk)
             (let ((op (k-std-op f)))
               (if (and (string=? op "not") (k-sc-one-arg? args))
                   (let ((fs (k-test-facts (car args)))) (k-branch-facts-of (cdr fs) (car fs)))

@@ -402,6 +402,10 @@ pub const PARSER_FORMS: &str = include_str!("parser-forms.fx");
 /// The parser's top-level forms, and a program of them.
 pub const PARSER_TOP: &str = include_str!("parser-top.fx");
 
+/// Each expression's identity, numbered after the parse (`ids.rs` the
+/// Rust front end's alike). After [`PARSER_EXPS`], before [`PARSER_TOP`].
+pub const PARSER_IDS: &str = include_str!("parser-ids.fx");
+
 /// The parser's expressions, and its `load-module`
 /// (`docs/research/first-class-modules.md`, M7): the files a program names,
 /// as the driver read them. After [`PARSER`], before [`PARSER_TOP`].
@@ -491,7 +495,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 140] = [
+pub const FRONT_END_MODULES: [(&str, &str); 141] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("table-types.fx", TABLE_TYPES),
     ("table.fx", TABLE),
@@ -537,6 +541,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 140] = [
     ("parser.fx", PARSER),
     ("parser-forms.fx", PARSER_FORMS),
     ("parser-exps.fx", PARSER_EXPS),
+    ("parser-ids.fx", PARSER_IDS),
     ("parser-top.fx", PARSER_TOP),
     ("eval-types.fx", EVAL_TYPES),
     ("eval-values.fx", EVAL_VALUES),
@@ -719,6 +724,7 @@ pub const TABLE: &str = include_str!("table.fx");
 pub mod check;
 pub mod compare;
 mod convention;
+pub mod ids;
 pub mod infer;
 mod kinds;
 pub mod licence;

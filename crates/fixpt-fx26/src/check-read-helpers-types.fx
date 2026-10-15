@@ -27,6 +27,7 @@
 (define-type k-int-pair (pairof int int @t))
 (define-type k-te (select check-types-types k-te))
 (define-type kx (select check-types-types kx))
+(define-type k-at (select check-types-types k-at))
 (define-type k-eff (select check-types-types k-eff))
 ;; The checker's knot, `check-rules.fx`'s `k-synth-as`, as given here.
 (define-type k-synth-as-knot
@@ -183,7 +184,7 @@
                                (read @s)
                                (read @t)
                                (write @t)
-                               spin) (int int k-te) k-te))
+                               spin) (k-at k-te) k-te))
             (val k-else-type (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                                    (int k-parts)
                                    int))
@@ -210,7 +211,7 @@
                                (read @s)
                                (read @t)
                                (write @t)
-                               spin) (int int int int int kx int int k-eff) k-te))
+                               spin) (int int int int int int kx int int k-eff) k-te))
             (val k-in-fixed-range? (subr (maxeff (alloc @t)
                                (goto @z)
                                (read @globals)

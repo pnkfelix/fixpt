@@ -58,14 +58,48 @@
 ;; The checker's facts for the program being compiled.
 (define c-facts (ref k-facts @k) (new nil))
 
-;; The same, by where each `extract` starts (two cannot start at one place):
-;; where it ends, and its field. A table, so that a program's facts are not
-;; searched from the start for each `extract` compiled.
+;; The same, by expression (`k-at`, an expression's identity): each
+;; `extract`'s field. A table, so that a program's facts are not searched
+;; from the start for each `extract` compiled.
 (define c-int-hash (subr pure (int) int) (lambda (a) a))
 
 (define c-int=? (subr pure (int int) bool) (lambda (a b) (= a b)))
 
-(define c-fact-table (ref c-spans @k) (new (make-table c-int-hash c-int=?)))
+;; An expression's identity, as a table's key: where it starts and ends, and
+;; which of the expressions there it is. For tables asked once a lambda or
+;; a `letrec`; those asked of every expression are by where it starts
+;; (`c-by-at`), so that asking makes nothing.
+(define c-span-key (subr pure (int int int) k-at)
+  (lambda (a b k) (product (1 a) (2 b) (3 k))))
+(define c-at-hash (subr pure (k-at) int) (lambda (x) (extract x 1)))
+(define c-at-is? (subr pure (k-at int int int) bool) (lambda (x a b k) (k-at-is? x a b k)))
+(define c-at=? (subr pure (k-at k-at) bool)
+  (lambda (x y) (k-at-is? x (extract y 1) (extract y 2) (extract y 3))))
+
+;; What `t` notes of `a` `b` `k`, the newest; or `none`.
+(define c-noted-in
+  (subr (maxeff (read @globals) (read @k)) ((listof c-noted acyclic) int int int int) int)
+  (lambda (ns a b k none)
+    (cond ((null? ns) none)
+          ((k-at-is? (extract (car ns) 1) a b k) (extract (car ns) 2))
+          (else (c-noted-in (cdr ns) a b k none)))))
+(define c-noted-at (subr (maxeff (read @globals) (read @k)) (c-by-at int int int int) int)
+  (lambda (t a b k none) (c-noted-in (table-ref t a nil) a b k none)))
+;; The same of expression `x`: where it ends, and which it is there, found
+;; only if something is noted where it starts, as little is.
+(define c-noted-of (subr (maxeff (read @globals) (read @k)) (c-by-at exp int) int)
+  (lambda (t x none)
+    (let ((ns (table-ref t (exp-start x) nil)))
+      (if (null? ns) none (c-noted-in ns (exp-start x) (exp-end x) (exp-kth x) none)))))
+;; `t` noting `n` of `at`, over what it noted before.
+(define c-note! (subr c-emits (c-by-at k-at int) unit)
+  (lambda (t at n)
+    (let ((a (extract at 1)))
+      (table-set! t a (the (listof c-noted acyclic)
+                        (cons (product (1 at) (2 n)) (table-ref t a nil)))))))
+(define c-new-by-at (subr (alloc @k) () c-by-at) (lambda () (make-table c-int-hash c-int=?)))
+
+(define c-fact-table (ref c-by-at @k) (new (c-new-by-at)))
 
 ;; The procedures lambda-lifted, by index; and, by where each `letrec` is
 ;; (`c-span-key`), its members' (none if it is not lifted), so that its
@@ -74,128 +108,117 @@
 
 (define c-lift-count (ref int @k) (new 0))
 
-(define c-lifted (ref (table int c-lifting @k) @k) (new (make-table c-int-hash c-int=?)))
+(define c-lifted (ref (table k-at c-lifting @k) @k) (new (make-table c-at-hash c-at=?)))
 
 ;; The parameters a lifting added to the lambda about to be compiled.
 (define c-lifting-added (ref int @k) (new 0))
 
-(define c-summary-table (ref (table int c-ends @k) @k) (new (make-table c-int-hash c-int=?)))
+;; Each expression's effect summary, the greatest noted of it.
+(define c-summary-table (ref c-by-at @k) (new (c-new-by-at)))
 
-;; Each procedure converted to a convention (`k-convert-at`), by where it
-;; starts: where it ends, and what `%fx26-convert` is given for it.
-(define c-convert-table (ref c-spans @k) (new (make-table c-int-hash c-int=?)))
-
-(define c-no-conversion c-span (cons -1 -1))
+;; Each procedure converted to a convention (`k-convert-at`): what
+;; `%fx26-convert` is given for it.
+(define c-convert-table (ref c-by-at @k) (new (c-new-by-at)))
 
 ;; What `%fx26-convert` is given for `x`, if it is converted; or -1.
 (define c-conversion-at (subr (maxeff (read @globals) (read @k)) (exp) int)
-  (lambda (x)
-    (let ((e (table-ref (get c-convert-table) (exp-start x) c-no-conversion)))
-      (if (= (car e) (exp-end x)) (cdr e) -1))))
+  (lambda (x) (c-noted-of (get c-convert-table) x -1)))
 
 ;; Each `apply` whose list the checker found at `acyclic` (the fact -500,
-;; `k-note-apply-shares`), by where it starts: where it ends. Every other
-;; `apply` copies its list.
-(define c-shares-table (ref c-spans @k) (new (make-table c-int-hash c-int=?)))
+;; `k-note-apply-shares`). Every other `apply` copies its list.
+(define c-shares-table (ref c-by-at @k) (new (c-new-by-at)))
 ;; Each definition's value that is a list nothing writes (the fact -501,
-;; `k-note-frozen-define`), by where it starts: where it ends.
-(define c-frozen-table (ref c-spans @k) (new (make-table c-int-hash c-int=?)))
+;; `k-note-frozen-define`).
+(define c-frozen-table (ref c-by-at @k) (new (c-new-by-at)))
 ;; Each `(with #%fx n)` that is the plain `n` (the fact -502, `k-synth-fx`).
-(define c-plain-table (ref c-spans @k) (new (make-table c-int-hash c-int=?)))
-(define c-plain-fx-at (subr (maxeff (read @globals) (read @k)) (int int) bool)
-  (lambda (a b) (= (car (table-ref (get c-plain-table) a c-no-conversion)) b)))
-;; Whether the definition's value from `a` to `b` is such a list.
-(define c-frozen-define-at (subr (maxeff (read @globals) (read @k)) (int int) bool)
-  (lambda (a b) (= (car (table-ref (get c-frozen-table) a c-no-conversion)) b)))
+(define c-plain-table (ref c-by-at @k) (new (c-new-by-at)))
+(define c-plain-fx-at (subr (maxeff (read @globals) (read @k)) (int int int) bool)
+  (lambda (a b k) (>= (c-noted-at (get c-plain-table) a b k -1) 0)))
+;; Whether the definition's value `a` `b` `k` is such a list.
+(define c-frozen-define-at (subr (maxeff (read @globals) (read @k)) (int int int) bool)
+  (lambda (a b k) (>= (c-noted-at (get c-frozen-table) a b k -1) 0)))
 
-;; Whether the `apply` from `a` to `b` may give its list itself.
-(define c-apply-shares-at (subr (maxeff (read @globals) (read @k)) (int int) bool)
-  (lambda (a b) (= (car (table-ref (get c-shares-table) a c-no-conversion)) b)))
+;; Whether the `apply` `a` `b` `k` may give its list itself.
+(define c-apply-shares-at (subr (maxeff (read @globals) (read @k)) (int int int) bool)
+  (lambda (a b k) (>= (c-noted-at (get c-shares-table) a b k -1) 0)))
 
-;; The field of the `extract` from `a` to `b`, or -1; or what else the
-;; checker found there (a scalar's layout, a flat sum's). A form kept to be
-;; inlined has it in place of where it was (`c-resolved-at`).
-(define c-field-at (subr c-builds (int int) int)
-  (lambda (a b)
-    (if (< a -1)
-        (- -2 a)
-        (let ((e (table-ref (get c-fact-table) a (the c-span (cons -1 -1)))))
-          (if (= (car e) b) (cdr e) -1)))))
+;; The field of the `extract` `a` `b` `k`, or -1; or what else the checker
+;; found there (a scalar's layout, a flat sum's). A form kept to be inlined
+;; has it in place of where it starts (`c-resolved-at`).
+(define c-field-at (subr c-builds (int int int) int)
+  (lambda (a b k) (if (< a -1) (- -2 a) (c-noted-at (get c-fact-table) a b k -1))))
 ;; Where a form with fact `i` (`c-field-at`) is, kept to be inlined.
 (define c-resolved-at (subr pure (int) int) (lambda (i) (- -2 i)))
 
 ;; Each `with` the checker saw (its `k-with-vals`, as `c-set-facts!` took
-;; them): where it starts and ends, and its module's values' names, in
-;; order.
+;; them), by expression: its module's values' names, in order, and their
+;; positions in the module.
 ;; And each module reshaped (`k-reshapes`), as `c-set-facts!` took them, by
-;; where it starts: a module given through a signature is reshaped, so
-;; there are many, and every expression is asked after (`c-changed?`).
-(define c-reshape-index (ref (table int k-reshape-list @k) @k)
-  (new (make-table c-int-hash c-int=?)))
+;; expression: the positions of the values it keeps. A module given through
+;; a signature is reshaped, so there are many, and every expression is asked
+;; after (`c-changed?`).
+(define c-reshape-index (ref c-reshape-table @k) (new (make-table c-int-hash c-int=?)))
 (define c-index-reshapes! (subr c-emits (k-reshape-list) unit)
   (lambda (rs)
     (if (null? rs)
         #u
-        (let ((a (extract (car rs) 1)))
+        (let ((a (extract (extract (car rs) 1) 1)))
           (begin (c-index-reshapes! (cdr rs))
                  (table-set! (get c-reshape-index) a
                              (the k-reshape-list
                                (cons (car rs) (table-ref (get c-reshape-index) a nil)))))))))
-(define c-reshapes-from (subr (maxeff (read @globals) (read @k)) (int) k-reshape-list)
-  (lambda (a) (table-ref (get c-reshape-index) a nil)))
-(define c-withs (ref k-with-list @k) (new nil))
 (define c-with-index (ref c-with-table @k) (new (make-table c-int-hash c-int=?)))
 (define c-index-withs! (subr c-emits (k-with-list) unit)
   (lambda (ws)
     (if (null? ws)
         #u
-        (let ((a (extract (car ws) 1)))
+        (let ((a (extract (extract (car ws) 1) 1)))
           (begin (c-index-withs! (cdr ws))
                  (table-set! (get c-with-index) a
                              (the k-with-list
                                (cons (car ws) (table-ref (get c-with-index) a nil)))))))))
+;; The `with` `a` `b` `k`, in a list of one; none if the checker did not see
+;; it.
 (define c-with-in
-  (subr (maxeff (read @globals) (read @k) (alloc @k)) (k-with-list int int) c-with-names)
-  (lambda (ws a b)
+  (subr (maxeff (read @globals) (read @k)) (k-with-list int int int)
+        k-with-list)
+  (lambda (ws a b k)
     (cond ((null? ws) nil)
-          ((and (= (extract (car ws) 1) a) (= (extract (car ws) 2) b))
-           (the c-with-names (cons (extract (car ws) 3) nil)))
-          (else (c-with-in (cdr ws) a b)))))
-;; The values' names of the `with` from `a` to `b`, in a list of one; none
-;; if the checker did not see it.
-(define c-with-at (subr (maxeff (read @globals) (read @k) (alloc @k)) (int int) c-with-names)
-  (lambda (a b) (c-with-in (table-ref (get c-with-index) a nil) a b)))
+          ((k-at-is? (extract (car ws) 1) a b k) ws)
+          (else (c-with-in (cdr ws) a b k)))))
+;; Its module's values' names, in a list of one; none if it was not seen.
+(define c-with-at
+  (subr (maxeff (read @globals) (read @k) (alloc @k)) (int int int) c-with-names)
+  (lambda (a b k)
+    (let ((ws (c-with-in (table-ref (get c-with-index) a nil) a b k)))
+      (if (null? ws) nil (the c-with-names (cons (extract (car ws) 2) nil))))))
 ;; Their positions in the module, likewise.
-(define c-with-places-in
-  (subr (maxeff (read @globals) (read @k) (alloc @k)) (k-with-list int int) (listof k-ids @k))
-  (lambda (ws a b)
-    (cond ((null? ws) nil)
-          ((and (= (extract (car ws) 1) a) (= (extract (car ws) 2) b))
-           (the (listof k-ids @k) (cons (extract (car ws) 4) nil)))
-          (else (c-with-places-in (cdr ws) a b)))))
 (define c-with-places-at
-  (subr (maxeff (read @globals) (read @k) (alloc @k)) (int int) (listof k-ids @k))
-  (lambda (a b) (c-with-places-in (table-ref (get c-with-index) a nil) a b)))
-;; The positions of the values a module reshaped from `a` to `b` keeps, in
-;; a list of one; none if it is not reshaped.
+  (subr (maxeff (read @globals) (read @k) (alloc @k)) (int int int) (listof k-ids @k))
+  (lambda (a b k)
+    (let ((ws (c-with-in (table-ref (get c-with-index) a nil) a b k)))
+      (if (null? ws) nil (the (listof k-ids @k) (cons (extract (car ws) 3) nil))))))
+;; Module `x` reshaped, in a list of one; none if it is not.
 (define c-reshape-in
-  (subr (maxeff (read @globals) (read @k) (alloc @k)) (k-reshape-list int int) (listof k-ids @k))
-  (lambda (rs a b)
+  (subr (maxeff (read @globals) (read @k)) (k-reshape-list int int int)
+        k-reshape-list)
+  (lambda (rs a b k)
     (cond ((null? rs) nil)
-          ((and (= (extract (car rs) 1) a) (= (extract (car rs) 2) b))
-           (the (listof k-ids @k) (cons (extract (car rs) 3) nil)))
-          (else (c-reshape-in (cdr rs) a b)))))
+          ((k-at-is? (extract (car rs) 1) a b k) rs)
+          (else (c-reshape-in (cdr rs) a b k)))))
+(define c-reshape-of (subr (maxeff (read @globals) (read @k)) (exp) k-reshape-list)
+  (lambda (x)
+    (let* ((a (exp-start x)) (rs (table-ref (get c-reshape-index) a nil)))
+      (if (null? rs) rs (c-reshape-in rs a (exp-end x) (exp-kth x))))))
+;; The positions of the values the module `x` reshaped keeps, in a list of
+;; one; none if it is not reshaped.
 (define c-reshape-at (subr (maxeff (read @globals) (read @k) (alloc @k)) (exp) (listof k-ids @k))
-  (lambda (x) (c-reshape-in (c-reshapes-from (exp-start x)) (exp-start x) (exp-end x))))
-;; Whether one of `rs` reshapes the module from `a` to `b`.
-(define c-reshaped-in? (subr (maxeff (read @globals) (read @k)) (k-reshape-list int int) bool)
-  (lambda (rs a b)
-    (and (not (null? rs))
-         (or (and (= (extract (car rs) 1) a) (= (extract (car rs) 2) b))
-             (c-reshaped-in? (cdr rs) a b)))))
+  (lambda (x)
+    (let ((rs (c-reshape-of x)))
+      (if (null? rs) nil (the (listof k-ids @k) (cons (extract (car rs) 2) nil))))))
 ;; Whether the module `x` is reshaped.
 (define c-reshaped-at? (subr (maxeff (read @globals) (read @k)) (exp) bool)
-  (lambda (x) (c-reshaped-in? (c-reshapes-from (exp-start x)) (exp-start x) (exp-end x))))
+  (lambda (x) (not (null? (c-reshape-of x)))))
 ;; Whether `x`'s value is changed as it is given: converted to a
 ;; convention, or a module reshaped.
 (define c-changed? (subr (maxeff (read @globals) (read @k)) (exp) bool)
@@ -399,67 +422,52 @@
       (at-loop (z) (c-fail "a loop is only ever called, in tail position"))
       (at-lifted (k) (c-fail "a lifted procedure is only called")))))
 
-(define c-join-memo (ref (table int c-join-answer @k) @k) (new (make-table c-int-hash c-int=?)))
+(define c-join-memo (ref (table k-at c-join-answer @k) @k) (new (make-table c-at-hash c-at=?)))
 (define c-standard-words (ref (listof c-standard-word @k) @k) (new nil))
-(define c-spec-made (ref (table int c-spec-copies @k) @k) (new (make-table c-int-hash c-int=?)))
-
-;; `es` with span end `b`'s summary at least `s`.
-(define c-end-max (subr c-builds (c-ends int int) c-ends)
-  (lambda (es b s)
-    (cond ((null? es) (the c-ends (cons (the c-span (cons b s)) nil)))
-          ((= (car (car es)) b)
-           (let ((had (cdr (car es))))
-             (the c-ends (cons (the c-span (cons b (if (> s had) s had))) (cdr es)))))
-          (else (the c-ends (cons (car es) (c-end-max (cdr es) b s)))))))
+(define c-spec-made (ref (table k-at c-spec-copies @k) @k) (new (make-table c-at-hash c-at=?)))
 
 (define c-fill-facts (subr (maxeff c-emits (read @t)) (k-facts) unit)
   (lambda (fs)
     (if (null? fs)
         #u
-        (let ((a (extract (car fs) 1)) (b (extract (car fs) 2)) (n (extract (car fs) 3)))
+        (let ((at (extract (car fs) 1)) (n (extract (car fs) 2)))
           (begin
-            (cond ((>= n 0) (table-set! (get c-fact-table) a (the c-span (cons b n))))
-                  ((= n -500) (table-set! (get c-shares-table) a (the c-span (cons b 0))))
-                  ((= n -501) (table-set! (get c-frozen-table) a (the c-span (cons b 0))))
-                  ((= n -502) (table-set! (get c-plain-table) a (the c-span (cons b 0))))
+            (cond ((>= n 0) (c-note! (get c-fact-table) at n))
+                  ((= n -500) (c-note! (get c-shares-table) at 0))
+                  ((= n -501) (c-note! (get c-frozen-table) at 0))
+                  ((= n -502) (c-note! (get c-plain-table) at 0))
                   ;; A conversion, -1000 - code (`k-convert-at`).
-                  ((<= n -1000)
-                   (table-set! (get c-convert-table) a (the c-span (cons b (- -1000 n)))))
-                  ;; An effect summary, -1 - s: the greatest, per span.
+                  ((<= n -1000) (c-note! (get c-convert-table) at (- -1000 n)))
+                  ;; An effect summary, -1 - s: the greatest, per expression.
                   (else
-                   (let ((s (- -1 n)) (known (table-ref (get c-summary-table) a (the c-ends nil))))
-                     (table-set! (get c-summary-table) a (c-end-max known b s)))))
+                   (let ((s (- -1 n))
+                         (known (c-noted-at (get c-summary-table) (extract at 1) (extract at 2)
+                                            (extract at 3) -1)))
+                     (c-note! (get c-summary-table) at (if (> s known) s known)))))
             (c-fill-facts (cdr fs)))))))
 
-(define c-end-summary (subr (maxeff (read @globals) (read @k)) (c-ends int) int)
-  (lambda (es b)
-    (cond ((null? es) 3)
-          ((= (car (car es)) b) (cdr (car es)))
-          (else (c-end-summary (cdr es) b)))))
-
-;; The effect summary of the expression from `a` to `b` (3, the most, if
-;; none was noted: `checked-extracts`).
-(define c-summary-at (subr (maxeff (read @globals) (read @k)) (int int) int)
-  (lambda (a b) (c-end-summary (table-ref (get c-summary-table) a (the c-ends nil)) b)))
+;; The effect summary of the expression `a` `b` `k` (3, the most, if none was
+;; noted: `checked-extracts`).
+(define c-summary-at (subr (maxeff (read @globals) (read @k)) (int int int) int)
+  (lambda (a b k) (let ((s (c-noted-at (get c-summary-table) a b k -1))) (if (< s 0) 3 s))))
 
 ;; `c-facts` into `c-fact-table`.
 (define c-set-facts! (subr (maxeff c-emits (read @t)) (k-facts) unit)
   (lambda (fs)
     (begin
       (set c-facts fs)
-      (set c-fact-table (make-table c-int-hash c-int=?))
-      (set c-convert-table (make-table c-int-hash c-int=?))
-      (set c-shares-table (make-table c-int-hash c-int=?))
-      (set c-frozen-table (make-table c-int-hash c-int=?))
-      (set c-plain-table (make-table c-int-hash c-int=?))
-      (set c-summary-table (make-table c-int-hash c-int=?))
-      (set c-join-memo (make-table c-int-hash c-int=?))
-      (set c-spec-made (make-table c-int-hash c-int=?))
+      (set c-fact-table (c-new-by-at))
+      (set c-convert-table (c-new-by-at))
+      (set c-shares-table (c-new-by-at))
+      (set c-frozen-table (c-new-by-at))
+      (set c-plain-table (c-new-by-at))
+      (set c-summary-table (c-new-by-at))
+      (set c-join-memo (make-table c-at-hash c-at=?))
+      (set c-spec-made (make-table c-at-hash c-at=?))
       (set c-standard-words nil)
       (set c-lifts (make-table c-int-hash c-int=?))
       (set c-lift-count 0)
-      (set c-lifted (make-table c-int-hash c-int=?))
-      (set c-withs (get k-with-vals))
+      (set c-lifted (make-table c-at-hash c-at=?))
       (set c-with-index (make-table c-int-hash c-int=?))
       (c-index-withs! (get k-with-vals))
       (set c-reshape-index (make-table c-int-hash c-int=?))
@@ -517,36 +525,36 @@
   (c-free (subr c-walks (exp syms syms) syms)
     (lambda (x bound acc)
       (tagcase x
-        (e-var (n a b) (if (c-member? bound n) acc (c-adjoin acc n)))
-        (e-lambda (ps body a b) (c-free body (c-bind-params ps bound) acc))
-        (e-app (f args a b) (c-free f bound (c-free-all args bound acc)))
-        (e-plambda (d body a b) (c-free body bound acc))
-        (e-letregion (k r i body a b) (c-free body (cons r bound) acc))
-        (e-rlambda (r l a b) (c-free r bound (c-free l bound acc)))
-        (e-proj (body ds a b) (c-free body bound acc))
-        (e-the (d body a b) (c-free body bound acc))
-        (e-convention (cnv body a b) (c-free body bound acc))
-        (e-if (t th el a b) (c-free t bound (c-free th bound (c-free el bound acc))))
-        (e-letrec (bs body a b)
+        (e-var (n a b abk) (if (c-member? bound n) acc (c-adjoin acc n)))
+        (e-lambda (ps body a b abk) (c-free body (c-bind-params ps bound) acc))
+        (e-app (f args a b abk) (c-free f bound (c-free-all args bound acc)))
+        (e-plambda (d body a b abk) (c-free body bound acc))
+        (e-letregion (k r i body a b abk) (c-free body (cons r bound) acc))
+        (e-rlambda (r l a b abk) (c-free r bound (c-free l bound acc)))
+        (e-proj (body ds a b abk) (c-free body bound acc))
+        (e-the (d body a b abk) (c-free body bound acc))
+        (e-convention (cnv body a b abk) (c-free body bound acc))
+        (e-if (t th el a b abk) (c-free t bound (c-free th bound (c-free el bound acc))))
+        (e-letrec (bs body a b abk)
           (let ((inner (c-bind-letrec bs bound)))
             (c-free body inner (c-free-all (c-rec-exps bs) inner acc))))
-        (e-let (bs body a b)
+        (e-let (bs body a b abk)
           (c-free body (c-bind-let bs bound) (c-free-all (c-bound-exps bs) bound acc)))
-        (e-begin (es a b) (c-free-all es bound acc))
-        (e-prompt (t body h a b) (c-free t bound (c-free body bound (c-free h bound acc))))
-        (e-bloblet (op i args a b) (c-free-all args bound acc))
-        (e-product (fs a b) (c-free-all (c-bound-exps fs) bound acc))
-        (e-extract (p l a b) (c-free p bound acc))
-        (e-sum (t v a b) (c-free v bound acc))
-        (e-tagcase (s arms els a b)
+        (e-begin (es a b abk) (c-free-all es bound acc))
+        (e-prompt (t body h a b abk) (c-free t bound (c-free body bound (c-free h bound acc))))
+        (e-bloblet (op i args a b abk) (c-free-all args bound acc))
+        (e-product (fs a b abk) (c-free-all (c-bound-exps fs) bound acc))
+        (e-extract (p l a b abk) (c-free p bound acc))
+        (e-sum (t v a b abk) (c-free v bound acc))
+        (e-tagcase (s arms els a b abk)
           (c-free s bound (c-free-arms arms bound (c-free-else els bound acc))))
         ;; A module's items see all of them, as a `letrec*`'s.
-        (e-module (items a b) (c-free-items items (c-module-bound items bound) acc))
+        (e-module (items a b abk) (c-free-items items (c-module-bound items bound) acc))
         ;; The module, then the body, the module's values bound in it.
-        (e-with (m body a b)
+        (e-with (m body a b abk)
           (if (string=? (symbol->string m) "#%fx")
               acc
-              (let ((ns (c-with-at a b)) (acc (if (c-member? bound m) acc (c-adjoin acc m))))
+              (let ((ns (c-with-at a b abk)) (acc (if (c-member? bound m) acc (c-adjoin acc m))))
                 (c-free body (if (null? ns) bound (c-names (car ns) bound)) acc))))
         (else y acc))))
   (c-free-items (subr c-walks (mod-items syms syms) syms)
@@ -616,11 +624,11 @@
 (define c-lambda-of (subr (maxeff (read @globals) (alloc @k)) (exp) (listof exp @k))
   (lambda (x)
     (tagcase x
-      (e-plambda (d body a b) (c-lambda-of body))
-      (e-the (d body a b) (c-lambda-of body))
-      (e-convention (cnv body a b) (c-lambda-of body))
-      (e-lambda (ps body a b) (the (listof exp @k) (cons x nil)))
-      (e-rlambda (r l a b) (the (listof exp @k) (cons x nil)))
+      (e-plambda (d body a b abk) (c-lambda-of body))
+      (e-the (d body a b abk) (c-lambda-of body))
+      (e-convention (cnv body a b abk) (c-lambda-of body))
+      (e-lambda (ps body a b abk) (the (listof exp @k) (cons x nil)))
+      (e-rlambda (r l a b abk) (the (listof exp @k) (cons x nil)))
       (else y nil))))
 
 (define c-count-exps (subr (read @globals) (exps) int)
@@ -651,7 +659,7 @@
       (if (null? lam)
           nil
           (tagcase (car lam)
-            (e-lambda (ps body a b)
+            (e-lambda (ps body a b abk)
               (if (= (c-count-params ps) (c-count-exps args))
                   (the (listof (productof (1 c-binds) (2 exp)) @k)
                     (cons (product (1 (c-param-bindings ps args)) (2 body)) nil))
@@ -668,48 +676,48 @@
   (c-calls-only (subr c-walks (exp symbol int bool bool) bool)
     (lambda (x f n tail loops)
       (tagcase x
-        (e-var (m a b) (not (symbol=? m f)))
-        (e-lambda (ps body a b) (or (c-has-param? ps f) (c-calls-only-inside body f n loops)))
-        (e-app (fun args a b)
+        (e-var (m a b abk) (not (symbol=? m f)))
+        (e-lambda (ps body a b abk) (or (c-has-param? ps f) (c-calls-only-inside body f n loops)))
+        (e-app (fun args a b abk)
           (and (c-calls-only-all args f n loops)
                (tagcase fun
-                 (e-var (m a2 b2)
+                 (e-var (m a2 b2 a2b2k)
                    (if (symbol=? m f) (and (or tail (not loops)) (= (c-count-exps args) n)) #t))
                  (else y (c-calls-only fun f n #f loops)))))
-        (e-plambda (d body a b) (c-calls-only body f n tail loops))
-        (e-letregion (k r i body a b) (or (symbol=? r f) (c-calls-only body f n #f loops)))
-        (e-rlambda (r l a b) (and (c-calls-only r f n #f loops) (c-calls-only l f n #f loops)))
-        (e-proj (body ds a b) (c-calls-only body f n tail loops))
-        (e-the (d body a b) (c-calls-only body f n tail loops))
-        (e-convention (cnv body a b) (c-calls-only body f n tail loops))
-        (e-if (t th el a b)
+        (e-plambda (d body a b abk) (c-calls-only body f n tail loops))
+        (e-letregion (k r i body a b abk) (or (symbol=? r f) (c-calls-only body f n #f loops)))
+        (e-rlambda (r l a b abk) (and (c-calls-only r f n #f loops) (c-calls-only l f n #f loops)))
+        (e-proj (body ds a b abk) (c-calls-only body f n tail loops))
+        (e-the (d body a b abk) (c-calls-only body f n tail loops))
+        (e-convention (cnv body a b abk) (c-calls-only body f n tail loops))
+        (e-if (t th el a b abk)
           (and (c-calls-only t f n #f loops)
                (c-calls-only th f n tail loops)
                (c-calls-only el f n tail loops)))
-        (e-letrec (bs body a b)
+        (e-letrec (bs body a b abk)
           (or (c-member? (c-bind-letrec bs nil) f)
               (and (c-calls-only-all (c-rec-exps bs) f n loops)
                    (c-calls-only body f n tail loops))))
-        (e-let (bs body a b)
+        (e-let (bs body a b abk)
           (and (c-calls-only-all (c-bound-exps bs) f n loops)
                (or (c-member? (c-bind-let bs nil) f) (c-calls-only body f n tail loops))))
-        (e-begin (es a b) (c-calls-only-begin es f n tail loops))
-        (e-prompt (t body h a b)
+        (e-begin (es a b abk) (c-calls-only-begin es f n tail loops))
+        (e-prompt (t body h a b abk)
           (and (c-calls-only t f n #f loops)
                (c-calls-only h f n #f loops)
                (c-calls-only-inside body f n loops)))
-        (e-bloblet (op i args a b) (c-calls-only-all args f n loops))
-        (e-product (fs a b) (c-calls-only-all (c-bound-exps fs) f n loops))
-        (e-extract (p l a b) (c-calls-only p f n #f loops))
-        (e-sum (t v a b) (c-calls-only v f n #f loops))
-        (e-tagcase (s arms els a b)
+        (e-bloblet (op i args a b abk) (c-calls-only-all args f n loops))
+        (e-product (fs a b abk) (c-calls-only-all (c-bound-exps fs) f n loops))
+        (e-extract (p l a b abk) (c-calls-only p f n #f loops))
+        (e-sum (t v a b abk) (c-calls-only v f n #f loops))
+        (e-tagcase (s arms els a b abk)
           (and (c-calls-only s f n #f loops)
                (c-calls-only-arms arms f n tail loops)
                (c-calls-only-else els f n tail loops)))
         ;; Said of no module (as the Rust compiler's `loops_only` and
         ;; `called_only` say).
-        (e-module (items a b) #f)
-        (e-with (m body a b) #f)
+        (e-module (items a b abk) #f)
+        (e-with (m body a b abk) #f)
         (else y #t))))
   ;; The same for the body of a lambda or a prompt in `x`: where `loops`
   ;; asks, no call there is in tail position, so it may not mention `f`.
@@ -786,7 +794,7 @@
     (let* ((b (c-nth-binding bs i)) (name (extract b 1)) (lam (c-lambda-of (extract b 3))))
       (and (not (null? lam))
            (tagcase (car lam)
-             (e-lambda (ps lbody la lb)
+             (e-lambda (ps lbody la lb lalbk)
                (let ((n (c-count-params ps)))
                  (and (not (c-has-param? ps name))
                       (c-loops-only lbody name n #t)

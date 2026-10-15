@@ -1,6 +1,6 @@
 # `fixpt` — a Rust Scheme engine with FX-87 and FX-91 front ends
 
-## At a glance (kept current; last updated 2026-10-14)
+## At a glance (kept current; last updated 2026-10-15)
 
 Where things stand. Below it is the plan as it grew, oldest first (the
 contents are at the end of this section); the details behind this summary
@@ -154,6 +154,11 @@ are in the last section, "Log: the glance's details", and in
   both checkers); code that is not a leaf (frames, `cons`, `poll`); next,
   calls compiled by the convention their type says (no run-time check but
   for `fx`), then the declaration as structured data.
+- **Loads and facts by place** (the user's question, 2026-10-15,
+  `docs/research/loads-and-places.md`): the FX-26 front end's expressions
+  have identities, `(start end k)`, and facts are keyed by them, not by
+  place (done, `DONE.md` §97). Next: the places invented for made
+  expressions dropped; a load its own identity, as Sheldon's `input`.
 - **Cellular code calling native code** (2026-10-13, `TODO.md` §93):
   fixed, a crash on the REPL's machine where the native convention
   declined a form; its cost to assembling words mostly recovered (peval's

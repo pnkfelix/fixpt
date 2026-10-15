@@ -136,3 +136,67 @@ watch). B changes the most and fixes nothing A and C leave.
 Independently: the native machine should not treat a checker's refusal
 as a decline (`TODO.md` §97); a refusal there is a disagreement between
 the checkers, which the test suite should see.
+
+## Decided: C first, as identities that are spans (2026-10-15)
+
+The user's answer: C now, and the identity a span where a span is one,
+with a count for the rest, so that what works keeps its representation
+and made expressions have identities of their own. Not the place's two
+integers with a count packed into one of them: the user ruled that out,
+and the trees' types carry it instead.
+
+- **An expression's identity is `(start end k)`**: where it starts and
+  ends, and which of the expressions there it is. Every `exp` and `kx`
+  node carries the three. `k` is 0 for the first at a span in a walk of
+  the program's trees that takes each expression before what is in it,
+  the forms in order (each after the hidden globals of the files it loads
+  first); 1, 2, … for the others there, which the parsers made
+  (desugarings, a loaded file's `input`, a generative type's conversions).
+- **Numbered after the parse, not while parsing** (`parser-ids.fx`,
+  `number-tops`): the parsers build nodes in different orders, but their
+  trees are the same (`tests/parser.rs` compares them, `k` included), so
+  a walk of the trees numbers both alike. The Rust front end keeps
+  `ExpId`; `ids.rs` (`Kth`) says which `k` each is, so that the Rust
+  checker's facts reach the FX-26 compiler keyed as it looks them up
+  (`syn::rust_facts`).
+- **Facts are keyed by identity, a product `k-at`**, not by place: the
+  checker's (`k-fact`, `k-with-noted`, `k-reshaped`, the operator and
+  checked-call marks), the compiler's tables (`c-by-at`, the plan's and
+  the lifts' keys, where `c-span-key` was `a·2²² + b`), the evaluator's,
+  and the words a body made (`c-made`). Places stay for messages.
+
+What it costs, on `peval` (`fixpt bench`, back to back, alternated
+three times, against `e1ae91cf`): `fx parse` 0.15 → 0.52 ms (the
+numbering, a table of the spans walked; it rebuilds only what changes),
+`fx check` 19.3 → 20.2, `fx words` 11.36 → 12.15; the other phases
+unchanged. Counted exactly (cells, `probe_phases_as_register_code` on
+`peval`), the work is not what grew: checking 103.7 → 104.2 M cells,
+compiling 42.7 → 41.0 M (each lookup asks where an expression ends and
+which it is only if something is noted where it starts), but the trees
+are a field larger, and the words allocated 2–5 % more. A first version
+looked each fact up by a key made for it, and asked all three of every
+expression: `fx words` 14.0 ms, 1.51 G cells compiling the front end
+where it was 1.38 G; now 1.37 G.
+
+Not yet done, and what C makes possible:
+
+- The places invented so that made expressions would not collide (a
+  zero-width `lambda`, the load's keyword for `input`, a REPL form's
+  positions past every earlier text) can go: a made expression can have
+  its origin's span. Loaded files' bases stay: they are where a file's
+  text is, not identities.
+- Fact kinds are still encoded in the fact's integer (-500, -501, -502,
+  -1000 - code, -1 - summary), and an inlined copy's field fact in its
+  start (`c-resolved-at`).
+
+**On cause 2, Sheldon said it first.** In Sheldon's system `(input
+"file")` is an ordinary pure expression, and textual identity makes two
+of them one module (`sheldon-combining-modules.md` §2): a load's
+identity is what the expression says, the file, wherever it is read; and
+a `with` body cannot be parsed before its module's type is known (§3,
+pitfall 6), which is why the parsers need the loaded files. The hidden
+global, defined by a parser in a state of its own, departed from that.
+So A, if it is done, should be a load that is its own identity (its key),
+a `Loaded(K)` resolved where it is read, rather than a hidden definition
+of a better form: nearer B than A was put, but without the session's
+table, the key being the expression's own.

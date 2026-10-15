@@ -704,19 +704,19 @@
   (lambda (t)
     (let ((l (k-flat-sum-layout t)))
       (if (< (extract l 1) 0) (cons -1 -1) (cons (extract l 2) (extract l 3))))))
-;; A `tagcase` at `a`..`z` whose scrutinee is of type and effect `rs`: if a
+;; A `tagcase`, `at`, whose scrutinee is of type and effect `rs`: if a
 ;; blobref to a flat sum (`TODO.md` §77), seen as a sum of blobrefs to its
 ;; variants, its tag read from the owner's region, and its layout's code
 ;; noted for the compilers; else `rs`.
-(define k-flat-view (subr (maxeff checks spin) (int int k-te) k-te)
-  (lambda (a z rs)
+(define k-flat-view (subr (maxeff checks spin) (k-at k-te) k-te)
+  (lambda (at rs)
     (let* ((st (extract rs 1)) (p (k-blobref-parts st))
            (l (if (null? p) k-no-layout (k-flat-sum-layout (cdr (car p))))))
       (if (< (extract l 1) 0)
           rs
-          (let* ((b (car (car p))) (r (k-owner-region a z st b)))
+          (let* ((b (car (car p))) (r (k-owner-region (extract at 1) (extract at 2) st b)))
             (begin
-              (set k-extracts (cons (product (1 a) (2 z) (3 (extract l 1))) (get k-extracts)))
+              (set k-extracts (cons (product (1 at) (2 (extract l 1))) (get k-extracts)))
               (k-te (k-ty-new (ty-sum (k-blobref-variants b (extract l 4))))
                     (k-insert (a-read r) (extract rs 2)))))))))
 (define k-blobref-variants (subr (maxeff kstate spin) (int k-parts) k-parts)
@@ -783,8 +783,8 @@
 ;; variant, of effect `e` and the owner's region read and written; the
 ;; layout's code noted for the compilers (`Checker::synth_blobref`).
 (define k-blobref-variant
-  (subr (maxeff checks spin) (int int int int int kx int int k-eff) k-te)
-  (lambda (a z xt b f lx la lz e)
+  (subr (maxeff checks spin) (int int int int int int kx int int k-eff) k-te)
+  (lambda (a z k xt b f lx la lz e)
     (let* ((l (k-flat-sum-layout f)) (code (extract l 1)) (label (k-variant-label lx code)))
       (if (null? label)
           (k-fail (string-append "a variant is named by a literal: `'label`, or a number where "
@@ -797,7 +797,9 @@
                         la lz)
                 (let ((r (k-owner-region a z xt b)))
                   (begin
-                    (set k-extracts (cons (product (1 a) (2 z) (3 code)) (get k-extracts)))
+                    (set k-extracts
+                         (cons (product (1 (product (1 a) (2 z) (3 k))) (2 code))
+                               (get k-extracts)))
                     (k-te (k-blobref-of b g) (k-insert (a-write r) (k-insert (a-read r) e)))))))))))
 ;; A `blobref-variant!`'s label, `lx`, for a sum of layout `code`: a number
 ;; where the sum has a key, else a name, as `check-modules-read.fx`'s
@@ -806,7 +808,7 @@
 (define k-variant-label (subr (maxeff kreads spin) (kx int) (listof symbol acyclic))
   (lambda (lx code)
     (tagcase lx
-      (x-const (t n c d)
+      (x-const (t n c d cdk)
         (cond ((= (modulo (quotient code 8) 2) 1)
                (if (= t k-int) (list (string->symbol (int->string n))) nil))
               ((or (= t k-int) (not (= n -1))) nil)
@@ -916,11 +918,11 @@
 (define k-literal-value (subr (maxeff kreads spin) (kx int int) (listof int acyclic))
   (lambda (x a b)
     (tagcase x
-      (x-const (t n c d) (if (and (= t k-int) (= c a) (= d b)) (list n) nil))
-      (x-app (f args c d)
+      (x-const (t n c d cdk) (if (and (= t k-int) (= c a) (= d b)) (list n) nil))
+      (x-app (f args c d cdk)
         (if (and (= c a) (= d b) (= (k-length args) 2))
             (tagcase f
-              (x-var (s fa fb)
+              (x-var (s fa fb fafbk)
                 (if (and (= fa a) (= fb b) (k-std-binding? s (k-lookup s)))
                     (k-literal-op (symbol->string s) (k-literal-value (car args) a b)
                                   (k-literal-value (car (cdr args)) a b))

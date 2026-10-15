@@ -5,6 +5,7 @@
 ;; The types these use, from the files that define them.
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-effect checks (select check-types-types checks))
+(define-type k-at (select check-types-types k-at))
 (define-type k-eff (select check-types-types k-eff))
 (define-type k-ids (select check-types-types k-ids))
 (define-type k-parts (select check-types-types k-parts))
@@ -129,4 +130,4 @@
                        (k-parts)
                        unit))
             (val k-module-type
-                 (subr (maxeff checks spin) (k-items k-parts k-parts k-parts int int) int))))
+                 (subr (maxeff checks spin) (k-items k-parts k-parts k-parts k-at) int))))

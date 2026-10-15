@@ -1422,7 +1422,7 @@ impl Fx26Session {
 
     /// What the checker written in FX-26 noted of the effects of what it
     /// last checked (`checked-effects`): each expression's start, end (in
-    /// characters) and effect summary, newest first.
+    /// characters) and effect summary, newest first; two at one span apart.
     pub fn own_effect_summaries(&mut self) -> R<Vec<(i64, i64, i64)>> {
         self.released(|s| {
         let fail = |e: fixpt_scheme::SessionError| FxError::at(Span::new(FileId(0), 0, 0), e.to_string());
@@ -1433,7 +1433,9 @@ impl Fx26Session {
             let heap = m.heap();
             while l.is_pair() {
                 let p = heap.car(l);
-                out.push((heap.bloblet_slot(p, 2).as_fixnum(), heap.bloblet_slot(p, 3).as_fixnum(), heap.bloblet_slot(p, 4).as_fixnum()));
+                // Its expression's identity (`k-at`), and the summary.
+                let at = heap.bloblet_slot(p, 2);
+                out.push((heap.bloblet_slot(at, 2).as_fixnum(), heap.bloblet_slot(at, 3).as_fixnum(), heap.bloblet_slot(p, 3).as_fixnum()));
                 l = heap.cdr(l);
             }
             fixpt_heap::Value::FALSE

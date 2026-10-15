@@ -7,6 +7,8 @@
 ;; The parser's other parts at these regions, the reader in them, and what
 ;; this file uses of them.
 (define parser-exps-module ((proj (load-module "fx26:parser-exps.fx") rs re rm rc rp)))
+(define parser-ids-module ((proj (load-module "fx26:parser-ids.fx") rs re rm rc rp)))
+(define number-tops (with parser-ids-module number-tops))
 (define parser-module (with parser-exps-module parser-module))
 (define eager-reader-module (with parser-module eager-reader-module))
 (define-type syn (select eager-reader-module syn))
@@ -151,7 +153,7 @@
                          (let ((t (mk-pure-subr (the syns-a (cons from nil)) to a b)))
                            (if family? (mk-poly binders t a b) t))))
                  (x (product (1 'x) (2 (the syns-a nil))))
-                 (identity (e-lambda (the param-list (cons x nil)) (e-var 'x a b) a b))
+                 (identity (e-lambda (the param-list (cons x nil)) (e-var 'x a b 0) a b 0))
                  (up (gen-conversion "up-" n (conv rep used) identity a b))
                  (down (gen-conversion "down-" n (conv used rep) identity a b)))
             (list (t-define-generative head rep a b) up down))))))
@@ -176,10 +178,12 @@
         (let* ((made (parse-made (car xs))) (before (shared-taken)) (rest (parse-tops (cdr xs))))
           (append-tops before (append-tops made rest))))))
 
-;; The entry point: a program's forms, as read, to trees or an error. The
+;; The entry point: a program's forms, as read, to trees, each expression
+;; numbered (`parser-ids.fx`), or an error. The
 ;; prompt catches every failure, but its tag is a global whose type names
 ;; `rp`, so the control effect stays in the type, as the reader's on `re` do;
 ;; `rp` is one of the regions this module is given, so that is still licensed.
 (define parse-program (subr (maxeff (read @globals) parses spin) (syns-a) presult)
   (lambda (forms)
-    (begin (shared-reset!) (prompt parse-tag (p-ok (parse-tops forms)) (lambda (r) r)))))
+    (begin (shared-reset!)
+           (prompt parse-tag (p-ok (number-tops (parse-tops forms))) (lambda (r) r)))))

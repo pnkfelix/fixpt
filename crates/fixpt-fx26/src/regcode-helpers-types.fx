@@ -106,7 +106,7 @@
                        rsplits))
             (val r-inline-or-unroll
                  (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k) spin)
-                       (int int renv exp exps int)
+                       (int int int renv exp exps int)
                        (listof rinline @k)))
             (val r-just-exp (subr (alloc @k) (exp) maybe-exp))
             (val r-args-2 (subr (alloc @k) (rarg rarg) rargs))
@@ -119,7 +119,7 @@
             (val r-bloblet
                  (subr (maxeff (alloc @k) (goto @y) (read @globals) (read @k) (read @t) (write @k)
                                spin)
-                       (rgen symbol int exps int int renv cenv bool r-exper r-primer)
+                       (rgen symbol int exps int int int renv cenv bool r-exper r-primer)
                        unit))
             (val r-self-temp
                  (subr (maxeff (alloc @k) (goto @y) (read @globals) (read @k) (read @t) (write @k)

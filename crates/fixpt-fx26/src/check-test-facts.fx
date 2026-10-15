@@ -56,23 +56,24 @@
 (define k-nat-size (subr (maxeff kreads spin) (kx) k-maybe-size)
   (lambda (x)
     (tagcase x
-      (x-const (ty k a b) (if (and (= ty k-int) (>= k 0)) (k-one-size (k-size-lit k)) nil))
-      (x-var (v a b)
+      (x-const (ty k a b abk) (if (and (= ty k-int) (>= k 0)) (k-one-size (k-size-lit k)) nil))
+      (x-var (v a b abk)
         (let ((t (k-lookup v)))
           (if (< t 0) nil (k-nat-ty-size t))))
       ;; A variable's array's length (`TODO.md` §77): its size, where known.
-      (x-app (f args a b)
+      (x-app (f args a b abk)
         (if (and (string=? (k-std-op f) "array-length") (= (k-length args) 1))
             (tagcase (car args)
-              (x-var (v va vb) (let ((t (k-lookup v))) (if (< t 0) nil (k-array-size t))))
+              (x-var (v va vb vavbk) (let ((t (k-lookup v))) (if (< t 0) nil (k-array-size t))))
               (else y nil))
             nil))
       ;; A variable's flat array's length (`TODO.md` §77): its size, where it
       ;; is one array's, not `finite`.
-      (x-bloblet (o i xs a b)
+      (x-bloblet (o i xs a b abk)
         (if (and (symbol=? o 'blobref-length) (= (k-length xs) 1))
             (tagcase (car xs)
-              (x-var (v va vb) (let ((t (k-lookup v))) (if (< t 0) nil (k-blobref-array-size t))))
+              (x-var (v va vb vavbk)
+                (let ((t (k-lookup v))) (if (< t 0) nil (k-blobref-array-size t))))
               (else y nil))
             nil))
       (else y nil))))
@@ -110,7 +111,7 @@
 (define k-sized (subr (maxeff checks spin) (kx k-te) k-te)
   (lambda (x te)
     (tagcase x
-      (x-app (f args a b)
+      (x-app (f args a b abk)
         (let ((op (k-std-op f)))
           (if (string=? op "native-procedure") (k-made-native te a b) (k-array-sized op args te))))
       (else y te))))
@@ -150,10 +151,10 @@
 (define k-latent-props (subr (maxeff kmakes spin) (kx) k-latent)
   (lambda (p)
     (tagcase p
-      (x-app (f args a b)
+      (x-app (f args a b abk)
         (let* ((g (k-under f)) (op (k-std-op g))
                (t (if (string=? op "")
-                      (tagcase g (x-var (s sa sb) (k-lookup s)) (else y -1))
+                      (tagcase g (x-var (s sa sb sasbk) (k-lookup s)) (else y -1))
                       (k-std-type (string->symbol op)))))
           (if (< t 0)
               nil
@@ -175,7 +176,7 @@
 (define k-arg-type (subr (maxeff kreads spin) (kxs int) int)
   (lambda (args i)
     (let ((x (k-arg-at args i)))
-      (if (null? x) -1 (tagcase (car x) (x-var (v va vb) (k-lookup v)) (else y -1))))))
+      (if (null? x) -1 (tagcase (car x) (x-var (v va vb vavbk) (k-lookup v)) (else y -1))))))
 ;; A term's size, of `args`, if known and not just `finite` (none or one):
 ;; an argument's as a natural, its `nlist`'s length, a natural.
 (define k-term-size (subr (maxeff kreads (alloc @t) spin) (k-term kxs) k-maybe-size)
@@ -236,7 +237,7 @@
       (if (null? x)
           nil
           (tagcase (car x)
-            (x-var (v va vb) (the k-named (cons (cons v (k-binding-depth v)) nil)))
+            (x-var (v va vb vavbk) (the k-named (cons (cons v (k-binding-depth v)) nil)))
             (else y nil))))))
 (define k-cert-in (subr (maxeff kreads (alloc @t) spin) (k-props int kxs) k-named)
   (lambda (ps which args)
@@ -260,8 +261,8 @@
 (define k-length-arg (subr (maxeff kreads (alloc @t) spin) (kx kx) k-cert-lens)
   (lambda (a n)
     (tagcase a
-      (x-var (v va vb)
-        (if (tagcase n (x-const (ty k ka kb) #t) (x-var (w wa wb) #t) (else y #f))
+      (x-var (v va vb vavbk)
+        (if (tagcase n (x-const (ty k ka kb kakbk) #t) (x-var (w wa wb wawbk) #t) (else y #f))
             (let ((z (k-nat-size n)))
               (if (null? z)
                   nil
@@ -308,15 +309,17 @@
 (define k-natural-by-itself? (subr (maxeff (read @globals) (read @t) spin) (kx) bool)
   (lambda (x)
     (tagcase x
-      (x-const (ty k a b) (= ty k-int))
-      (x-var (v a b) #t)
-      (x-app (f args a b) (k-sizing-op? (k-std-op f)))
+      (x-const (ty k a b abk) (= ty k-int))
+      (x-var (v a b abk) #t)
+      (x-app (f args a b abk) (k-sizing-op? (k-std-op f)))
       (else y #f))))
 ;; The size an operand of `+` or `-` of type `t` is: a natural literal's,
 ;; or a `(nat s)`'s (none or one).
 (define k-operand-size (subr (maxeff kreads spin) (kx int) k-maybe-size)
   (lambda (x t)
-    (let ((lit (tagcase x (x-const (ty k a b) (if (and (= ty k-int) (>= k 0)) k -1)) (else y -1))))
+    (let ((lit (tagcase x
+                 (x-const (ty k a b abk) (if (and (= ty k-int) (>= k 0)) k -1))
+                 (else y -1))))
       (if (>= lit 0) (k-one-size (k-size-lit lit)) (k-nat-ty-size t)))))
 ;; `(+ a b)` and `(- a b)` of naturals of sizes `za` and `zb`, where known: the sum, and the
 ;; difference where the facts show it no less than 0 (none or one).

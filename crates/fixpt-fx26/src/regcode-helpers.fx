@@ -50,7 +50,7 @@
 (define r-unrolled (subr (maxeff emits spin) (renv exp exps) (listof rinline @k))
   (lambda (env f args)
     (tagcase f
-      (e-var (n a b)
+      (e-var (n a b abk)
         (let ((l (r-where env n)))
           (if (null? l)
               nil
@@ -72,7 +72,8 @@
   (subr (maxeff emits spin) (exp symbol wglobal c-inline r-unroll-found) (listof rinline @k))
   (lambda (f n cell i ks)
     (let ((body (extract i 4)))
-      (if (or (not (extract ks 3)) (>= (c-summary-at (exp-start body) (exp-end body)) 3))
+      (if (or (not (extract ks 3))
+              (>= (c-summary-at (exp-start body) (exp-end body) (exp-kth body)) 3))
           nil
           (let* ((own (if (c-member? (get c-inlining) n)
                           (the r-wglobals nil)
@@ -105,7 +106,7 @@
 (define r-unroll-global (subr rbuilds (renv exp) r-unroll-globals)
   (lambda (env a)
     (tagcase a
-      (e-var (n x y)
+      (e-var (n x y xyk)
         (let ((l (r-where env n)))
           (if (null? l)
               nil
@@ -192,7 +193,7 @@
         (if (not (null? small))
             (product (1 (the (listof exp @k) nil)) (2 (car small)))
             (let ((s (tagcase x
-                       (e-app (f args a b) (r-split-app env (r-standard-name env f) args))
+                       (e-app (f args a b abk) (r-split-app env (r-standard-name env f) args))
                        (else y (the rsplits nil)))))
               (if (null? s) (product (1 (the (listof exp @k) (cons x nil))) (2 0)) (car s)))))))
   ;; The same for standard operation `name` applied to `args`, if it is
@@ -211,9 +212,9 @@
                   (else (the rsplits (cons (product (1 (if (null? pa) pb pa)) (2 k)) nil)))))))))
 ;; A call's inlining: unrolled, if `r-unrolled` says so; else as planned.
 (define r-inline-or-unroll
-  (subr (maxeff emits spin) (int int renv exp exps int) (listof rinline @k))
-  (lambda (a b env f args n)
-    (let ((u (r-unrolled env f args))) (if (null? u) (r-inline-of a b env f n) u))))
+  (subr (maxeff emits spin) (int int int renv exp exps int) (listof rinline @k))
+  (lambda (a b abk env f args n)
+    (let ((u (r-unrolled env f args))) (if (null? u) (r-inline-of a b abk env f n) u))))
 (define r-just-exp (subr (alloc @k) (exp) maybe-exp)
   (lambda (x) (the maybe-exp (cons x nil))))
 ;; A call-out's operands: `a` and `b`, or `a`, `b` and `c`.
@@ -280,7 +281,8 @@
           (begin (r-var-value g (the rlocs nil) (string->symbol n) tail) (r-done g tail))))))
 ;; Whether `x` is an integer, boolean or character literal.
 (define r-literal? (subr pure (exp) bool)
-  (lambda (x) (tagcase x (e-int (n a b) #t) (e-bool (v a b) #t) (e-char (v a b) #t) (else z #f))))
+  (lambda (x)
+    (tagcase x (e-int (n a b abk) #t) (e-bool (v a b abk) #t) (e-char (v a b abk) #t) (else z #f))))
 ;; Whether operand `x` neither has an effect nor sees one: a variable or a
 ;; constant (only a definition writes a global).
 (define r-free-operand? (subr rbuilds (renv exp) bool)
@@ -321,7 +323,7 @@
 ;; was.
 (define r-spec-word (subr rcompiles (c-special c-spec exp) c-spec-copies)
   (lambda (sp spec lbody)
-    (c-spec-copy-find (table-ref (get c-spec-made) (c-span-key (exp-start lbody) (exp-end lbody))
+    (c-spec-copy-find (table-ref (get c-spec-made) (exp-at lbody)
                                  (the c-spec-copies nil))
                       (extract sp 2) (extract spec 10) (extract spec 11))))
 ;; Each free value of `fv` into REGj+1 (`r-reg-moves`, `r-free-regs`): the
@@ -363,10 +365,10 @@
 ;; blobref's) what the checker found there: a scalar's layout, an array's,
 ;; a flat sum's; then done.
 (define r-bloblet
-  (subr rcompiles (rgen symbol int exps int int renv cenv bool r-exper r-primer) unit)
-  (lambda (g sop fi args a b env te tail r-exp r-prim)
-    (begin (r-bloblet-op g (symbol->string sop) (if (< fi 0) (c-field-at a b) fi) args env te r-exp
-                         r-prim)
+  (subr rcompiles (rgen symbol int exps int int int renv cenv bool r-exper r-primer) unit)
+  (lambda (g sop fi args a b abk env te tail r-exp r-prim)
+    (begin (r-bloblet-op g (symbol->string sop) (if (< fi 0) (c-field-at a b abk) fi) args env te
+                         r-exp r-prim)
            (r-done g tail))))
 (define r-bloblet-op (subr rcompiles (rgen string int exps renv cenv r-exper r-primer) unit)
 (lambda (g op i args env te r-exp r-prim)
@@ -387,7 +389,7 @@
                (("blobref-at")
                 (begin
                   (tagcase (car (cdr args))
-                    (e-int (k a b)
+                    (e-int (k a b abk)
                       (if (and (>= k 0) (< k 67108864))
                           (r-prim g "%suffix-ref" (r-args-2 (a-e (car args)) (a-v (wcell-int k)))
                                   env te)

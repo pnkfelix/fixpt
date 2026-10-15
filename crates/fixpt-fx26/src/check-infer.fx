@@ -663,7 +663,7 @@
 (define k-plambda-matches? (subr kreads (kx k-ty) bool)
   (lambda (x et)
     (tagcase x
-      (x-plambda (binders body a b)
+      (x-plambda (binders body a b abk)
         (tagcase et
           (ty-poly (bs want) (and (= (k-length bs) (k-length binders)) (k-same-kinds? bs binders)))
           (else y #f)))
@@ -729,5 +729,5 @@
 ;; variable `tag`, if it is one.
 (define k-reaches-only? (subr (maxeff kstate spin) (kx kx k-region) bool)
   (lambda (body tag r)
-    (let ((tv (the k-names (tagcase tag (x-var (s a b) (cons s nil)) (else y nil)))))
+    (let ((tv (the k-names (tagcase tag (x-var (s a b abk) (cons s nil)) (else y nil)))))
       (k-none-reach? (k-free-vars body) tv r)))))))

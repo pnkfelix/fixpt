@@ -118,28 +118,28 @@
         (if (< n 0)
             n
             (tagcase x
-              (e-lambda (ps body a b) -1)
-              (e-rlambda (r l a b) -1)
-              (e-letrec (bs body a b) -1)
-              (e-prompt (t body h a b) -1)
-              (e-module (items a b) -1)
-              (e-with (m body a b) (if w (c-room body n w) -1))
-              (e-app (f args a b)
-                (c-room-all args (tagcase f (e-var (v c d) (- n 1)) (else y (c-room f n w))) w))
-              (e-var (v c d) (if (c-has-standard-value? (symbol->string v)) -1 n))
-              (e-plambda (d body a b) (c-room body n w))
-              (e-proj (body ds a b) (c-room body n w))
-              (e-the (d body a b) (c-room body n w))
-              (e-convention (cnv body a b) (c-room body n w))
-              (e-letregion (k r i body a b) (c-room body n w))
-              (e-if (t th el a b) (c-room-if el (c-room-if th (c-room t n w) w) w))
-              (e-let (bs body a b) (c-room-if body (c-room-let bs n w) w))
-              (e-begin (es a b) (c-room-all es n w))
-              (e-bloblet (op i args a b) (c-room-all args n w))
-              (e-product (fs a b) (c-room-let fs n w))
-              (e-extract (p l a b) (c-room p n w))
-              (e-sum (t v a b) (c-room v n w))
-              (e-tagcase (s arms els a b)
+              (e-lambda (ps body a b abk) -1)
+              (e-rlambda (r l a b abk) -1)
+              (e-letrec (bs body a b abk) -1)
+              (e-prompt (t body h a b abk) -1)
+              (e-module (items a b abk) -1)
+              (e-with (m body a b abk) (if w (c-room body n w) -1))
+              (e-app (f args a b abk)
+                (c-room-all args (tagcase f (e-var (v c d cdk) (- n 1)) (else y (c-room f n w))) w))
+              (e-var (v c d cdk) (if (c-has-standard-value? (symbol->string v)) -1 n))
+              (e-plambda (d body a b abk) (c-room body n w))
+              (e-proj (body ds a b abk) (c-room body n w))
+              (e-the (d body a b abk) (c-room body n w))
+              (e-convention (cnv body a b abk) (c-room body n w))
+              (e-letregion (k r i body a b abk) (c-room body n w))
+              (e-if (t th el a b abk) (c-room-if el (c-room-if th (c-room t n w) w) w))
+              (e-let (bs body a b abk) (c-room-if body (c-room-let bs n w) w))
+              (e-begin (es a b abk) (c-room-all es n w))
+              (e-bloblet (op i args a b abk) (c-room-all args n w))
+              (e-product (fs a b abk) (c-room-let fs n w))
+              (e-extract (p l a b abk) (c-room p n w))
+              (e-sum (t v a b abk) (c-room v n w))
+              (e-tagcase (s arms els a b abk)
                 (c-room-else els (c-room-arms arms (c-room s n w) w) w))
               (else y n))))))
   ;; `x`'s nodes counted from `n`, unless none are left.
@@ -168,10 +168,10 @@
 ;; The copies its calls make, by the procedure's name and where the
 ;; lambda's body is: each one's context, planned as `r-specialize` compiles
 ;; it; the next, the lambda's body in it, as `r-spec-lambda` inlines it.
-(define c-plan-copies (ref (table int c-inlined-at @k) @k) (new (make-table c-int-hash c-int=?)))
+(define c-plan-copies (ref (table int c-copied-at @k) @k) (new (make-table c-int-hash c-int=?)))
 (define c-plan-copy-order (ref (listof c-copy-at @k) @k) (new nil))
 (define c-plan-contexts (ref int @k) (new 1))
-(define c-no-calls (ref c-calls-at @k) (new (make-table c-int-hash c-int=?)))
+(define c-no-calls (ref c-calls-at @k) (new (make-table c-at-hash c-at=?)))
 ;; While the plan is made: the context it is in, and the names whose bodies
 ;; it is inlining on the way there. (While register code is made: the
 ;; contexts it is in, `c-r-plan-ctx`.)
@@ -186,25 +186,34 @@
 ;; Context `c`'s for the body of `n` taking `k` arguments, or -1.
 (define c-plan-child (subr c-walks (int symbol int) int)
   (lambda (c n k) (c-plan-find (table-ref (get c-plan-inlined) c (the c-inlined-at nil)) n k)))
-;; Context `c`'s for the copy of `n` made for the lambda whose body is at
+;; The context `xs` lists for the copy of `n` for the lambda whose body is
 ;; `key`, or -1.
-(define c-plan-copy (subr c-walks (int symbol int) int)
-  (lambda (c n key) (c-plan-find (table-ref (get c-plan-copies) c (the c-inlined-at nil)) n key)))
-;; Where lambda `lam`'s body is.
-(define c-lambda-key (subr c-walks (exp) int)
+(define c-copy-find (subr c-walks (c-copied-at symbol k-at) int)
+  (lambda (xs n key)
+    (cond ((null? xs) -1)
+          ((and (symbol=? (extract (car xs) 1) n) (c-at=? (extract (car xs) 2) key))
+           (extract (car xs) 3))
+          (else (c-copy-find (cdr xs) n key)))))
+;; Context `c`'s for the copy of `n` made for the lambda whose body is
+;; `key`, or -1.
+(define c-plan-copy (subr c-walks (int symbol k-at) int)
+  (lambda (c n key) (c-copy-find (table-ref (get c-plan-copies) c (the c-copied-at nil)) n key)))
+;; Lambda `lam`'s body.
+(define c-lambda-key (subr c-walks (exp) k-at)
   (lambda (lam)
     (tagcase lam
-      (e-lambda (ps body a b) (c-span-key (exp-start body) (exp-end body)))
-      (else y -1))))
+      (e-lambda (ps body a b abk) (exp-at body))
+      (else y (c-span-key -1 -1 -1)))))
 ;; Call `a`-`b` noted as planned, in the context the plan is in.
-(define p-note-call (subr (maxeff c-emits spin) (int int c-called) unit)
-  (lambda (a b called)
+(define p-note-call (subr (maxeff c-emits spin) (int int int c-called) unit)
+  (lambda (a b abk called)
     (let ((c (get c-plan-now)))
       (begin
         (if (table-has? (get c-plan-calls) c)
             #u
-            (table-set! (get c-plan-calls) c (make-table c-int-hash c-int=?)))
-        (table-set! (table-ref (get c-plan-calls) c (get c-no-calls)) (c-span-key a b) called)))))
+            (table-set! (get c-plan-calls) c (make-table c-at-hash c-at=?)))
+        (table-set! (table-ref (get c-plan-calls) c (get c-no-calls)) (c-span-key a b abk)
+                    called)))))
 ;; The one of `xs` that `n`, taking `k` arguments, names, if any.
 (define p-inline-named (subr (maxeff (read @globals) (alloc @k)) (c-inlinables symbol int int)
                             (listof c-inline acyclic))
@@ -230,7 +239,7 @@
   (lambda (sp args)
     (let ((lam (c-nth args (extract sp 6))))
       (tagcase lam
-        (e-lambda (ps body la lb)
+        (e-lambda (ps body la lb lalbk)
           (if (and (= (c-count-params ps) (extract sp 7))
                    (>= (c-inline-room body c-inline-limit) 0))
               (the c-spec-calls (cons (product (1 sp) (2 lam)) nil))
@@ -240,13 +249,14 @@
 ;; a planned lambda's register code, or an inlined body's or a copy's in it;
 ;; a call of no global, planned as neither. None elsewhere, where register
 ;; code decides.
-(define c-planned-call (subr c-builds (int int) (listof c-called @k))
-  (lambda (a b)
+(define c-planned-call (subr c-builds (int int int) (listof c-called @k))
+  (lambda (a b abk)
     (let ((c (if (null? (get c-r-plan-ctx)) 0 (car (get c-r-plan-ctx)))))
       (if (or (not (get c-r-in-plan)) (< c 0))
           nil
           (the (listof c-called @k)
-               (cons (table-ref (table-ref (get c-plan-calls) c (get c-no-calls)) (c-span-key a b)
+               (cons (table-ref (table-ref (get c-plan-calls) c (get c-no-calls))
+                                (c-span-key a b abk)
                                 (the c-called (product (1 nil) (2 nil))))
                      nil))))))
 
@@ -259,7 +269,7 @@
 ;; captures.
 (define p-note (subr (maxeff c-emits spin) (c-params exp syms) unit)
   (lambda (ps body fv)
-    (let ((key (c-span-key (exp-start body) (exp-end body))))
+    (let ((key (exp-at body)))
       (table-set! (get c-plan-procs) key
                   (cons (product (1 (c-bind-params ps nil)) (2 fv))
                         (table-ref (get c-plan-procs) key (the c-planneds nil)))))))
@@ -273,15 +283,15 @@
     (lambda (x e tail0)
       (let ((tail (and tail0 (< (c-conversion-at x) 0) (null? (c-reshape-at x)))))
         (tagcase x
-          (e-lambda (ps body a b) (p-lambda ps body e (the syms nil)))
-          (e-rlambda (r l a b)
+          (e-lambda (ps body a b abk) (p-lambda ps body e (the syms nil)))
+          (e-rlambda (r l a b abk)
             (begin (p-exp r e #f)
-                   (tagcase l (e-lambda (ps body la lb) (p-lambda ps body e (the syms nil)))
+                   (tagcase l (e-lambda (ps body la lb lalbk) (p-lambda ps body e (the syms nil)))
                      (else y #u))))
-          (e-app (f args a b)
+          (e-app (f args a b abk)
             (let ((l (c-applied-let f args)))
               (if (null? l)
-                  (begin (p-call f args a b e)
+                  (begin (p-call f args a b abk e)
                          (p-exps args e)
                          ;; A lifted procedure's name, or a standard one's, is
                          ;; not made as a value.
@@ -289,39 +299,39 @@
                              (p-exp f e #f)
                              #u))
                   (p-let (extract (car l) 1) (extract (car l) 2) e tail))))
-          (e-plambda (d body a b) (p-exp body e tail))
-          (e-proj (body ds a b) (p-exp body e tail))
-          (e-the (d body a b) (p-exp body e tail))
-          (e-convention (cnv body a b) (p-exp body e tail))
-          (e-letregion (k r i body a b)
+          (e-plambda (d body a b abk) (p-exp body e tail))
+          (e-proj (body ds a b abk) (p-exp body e tail))
+          (e-the (d body a b abk) (p-exp body e tail))
+          (e-convention (cnv body a b abk) (p-exp body e tail))
+          (e-letregion (k r i body a b abk)
             (if (or (= k 0) (= k 3))
                 (p-exp body e tail)
                 (p-exp body (c-extend r (at-slot 0) e) #f)))
-          (e-if (t th el a b) (begin (p-exp t e #f) (p-exp th e tail) (p-exp el e tail)))
-          (e-let (bs body a b) (p-let bs body e tail))
-          (e-letrec (bs body a b) (p-letrec bs body a b e tail))
-          (e-begin (es a b) (p-begin es e tail))
-          (e-prompt (t body h a b)
+          (e-if (t th el a b abk) (begin (p-exp t e #f) (p-exp th e tail) (p-exp el e tail)))
+          (e-let (bs body a b abk) (p-let bs body e tail))
+          (e-letrec (bs body a b abk) (p-letrec bs body a b abk e tail))
+          (e-begin (es a b abk) (p-begin es e tail))
+          (e-prompt (t body h a b abk)
             (begin (p-exp t e #f) (p-exp h e #f)
                    (p-lambda (the c-params nil) body e (the syms nil))))
-          (e-bloblet (op i args a b) (p-exps args e))
-          (e-product (fs a b) (p-exps (c-bound-exps fs) e))
-          (e-extract (p l a b) (p-exp p e #f))
-          (e-sum (t v a b) (p-exp v e #f))
-          (e-tagcase (s arms els a b) (begin (p-exp s e #f) (p-arms arms els e tail)))
-          (e-module (items a b)
+          (e-bloblet (op i args a b abk) (p-exps args e))
+          (e-product (fs a b abk) (p-exps (c-bound-exps fs) e))
+          (e-extract (p l a b abk) (p-exp p e #f))
+          (e-sum (t v a b abk) (p-exp v e #f))
+          (e-tagcase (s arms els a b abk) (begin (p-exp s e #f) (p-arms arms els e tail)))
+          (e-module (items a b abk)
             (let ((vs (c-module-values items))) (p-module vs e (c-module-slots vs 0))))
-          (e-with (m body a b)
-            (let ((ns (c-with-at a b)))
+          (e-with (m body a b abk)
+            (let ((ns (c-with-at a b abk)))
               (if (null? ns) #u (p-exp body (p-slots (car ns) e) tail))))
           (else y #u)))))
   ;; Call `f` `args` at `a`-`b`, in `e`, planned: as the Rust compiler's
   ;; `plan_call`, and register code's `r-inlined` and `r-specialized`; a body
   ;; it inlines, or a copy it makes, planned too, once in each context.
-  (p-call (subr (maxeff compiles spin) (exp exps int int cenv) unit)
-    (lambda (f args a b e)
+  (p-call (subr (maxeff compiles spin) (exp exps int int int cenv) unit)
+    (lambda (f args a b abk e)
       (tagcase f
-        (e-var (n fa fb)
+        (e-var (n fa fb fafbk)
           (let ((l (c-where e n)))
             (if (or (null? l) (not (c-global? (car l))))
                 #u
@@ -333,7 +343,7 @@
                                 (the (listof c-inline acyclic) nil)
                                 (p-inline-named (c-inlines-of n) n k (get c-genv)))))
                   (begin
-                    (p-note-call a b (product (1 inl) (2 spl)))
+                    (p-note-call a b abk (product (1 inl) (2 spl)))
                     (if (or (null? inl) (>= (c-plan-child (get c-plan-now) n k) 0))
                         #u
                         (p-inlined (car inl) k))
@@ -358,7 +368,7 @@
   (p-copy (subr (maxeff compiles spin) (c-special exp wglobal cenv) unit)
     (lambda (sp lam cell e)
       (tagcase lam
-        (e-lambda (lps lbody la lb)
+        (e-lambda (lps lbody la lb lalbk)
           (let ((c (get c-plan-contexts)) (outer (get c-plan-now))
                 (outer-genv (get c-genv)) (lam-genv (c-genv-now))
                 (fv (c-lambda-captured lps lbody e)))
@@ -366,7 +376,7 @@
               (set c-plan-contexts (+ c 2))
               (table-set! (get c-plan-copies) outer
                           (cons (product (1 (extract sp 1)) (2 (c-lambda-key lam)) (3 c))
-                                (table-ref (get c-plan-copies) outer (the c-inlined-at nil))))
+                                (table-ref (get c-plan-copies) outer (the c-copied-at nil))))
               (if (= outer 0)
                   (set c-plan-copy-order
                        (cons (product (1 sp) (2 lam) (3 cell) (4 fv) (5 lam-genv) (6 c))
@@ -425,11 +435,11 @@
   ;; As `c-letrec-or-lift`: lifted, each member's lambda in what it knows
   ;; (the lifted procedures), taking its added names first; else each
   ;; closure made with its siblings pending.
-  (p-letrec (subr (maxeff compiles spin) (c-recs exp int int cenv bool) unit)
-    (lambda (bs body a b e tail)
+  (p-letrec (subr (maxeff compiles spin) (c-recs exp int int int cenv bool) unit)
+    (lambda (bs body a b abk e tail)
       (let ((plan (c-lift-plan bs body e tail)))
         (begin
-          (table-set! (get c-plan-lifts) (c-span-key a b) plan)
+          (table-set! (get c-plan-lifts) (c-span-key a b abk) plan)
           (if (null? plan)
               (begin (p-rec-lambdas bs bs e 0) (p-exp body (c-letrec-slots bs e 0) tail))
               (let ((ks (c-lift-closures bs (car plan) 0)))
@@ -441,12 +451,12 @@
           #u
           (begin
             (tagcase (car (c-lambda-of (extract (car bs) 3)))
-              (e-lambda (ps body a b)
+              (e-lambda (ps body a b abk)
                 (p-lambda ps body (c-letrec-own all e 0 0 i body (c-count-params ps))
                           (the syms (cons (extract (car bs) 1) nil))))
-              (e-rlambda (r l a b)
+              (e-rlambda (r l a b abk)
                 (tagcase l
-                  (e-lambda (ps body la lb)
+                  (e-lambda (ps body la lb lalbk)
                     (let ((own (c-letrec-own all e 0 0 i body (c-count-params ps))))
                       (begin (p-exp r own #f)
                              (p-lambda ps body own (the syms (cons (extract (car bs) 1) nil))))))
@@ -459,7 +469,7 @@
           #u
           (begin
             (tagcase (car (c-lambda-of (extract (car bs) 3)))
-              (e-lambda (ps lbody la lb)
+              (e-lambda (ps lbody la lb lalbk)
                 (let* ((name (extract (car bs) 1))
                        (own (if (c-loops-only lbody name (c-count-params ps) #t)
                                 (the syms (cons name nil))
@@ -482,12 +492,12 @@
   (p-module-lambda (subr (maxeff compiles spin) (symbol exp cenv c-mslots) unit)
     (lambda (n x e later)
       (tagcase (car (c-lambda-of x))
-        (e-lambda (ps body a b)
+        (e-lambda (ps body a b abk)
           (p-lambda ps body (c-module-own n e later body (c-count-params ps))
                     (the syms (cons n nil))))
-        (e-rlambda (r l a b)
+        (e-rlambda (r l a b abk)
           (tagcase l
-            (e-lambda (ps body la lb)
+            (e-lambda (ps body la lb lalbk)
               (let ((own (c-module-own n e later body (c-count-params ps))))
                 (begin (p-exp r own #f) (p-lambda ps body own (the syms (cons n nil))))))
             (else y #u)))
@@ -508,8 +518,8 @@
 (define c-plan-top (subr (maxeff compiles spin) (exp) unit)
   (lambda (x)
     (let ((count (get c-lift-count)))
-      (begin (set c-plan-procs (make-table c-int-hash c-int=?))
-             (set c-plan-lifts (make-table c-int-hash c-int=?))
+      (begin (set c-plan-procs (make-table c-at-hash c-at=?))
+             (set c-plan-lifts (make-table c-at-hash c-at=?))
              (set c-plan-calls (make-table c-int-hash c-int=?))
              (set c-plan-inlined (make-table c-int-hash c-int=?))
              (set c-plan-copies (make-table c-int-hash c-int=?))
@@ -546,15 +556,15 @@
   (lambda (c)
     (let ((sp (extract c 1)))
       (tagcase (extract c 2)
-        (e-lambda (lps lbody la lb)
-          (let* ((key (c-span-key (exp-start lbody) (exp-end lbody)))
+        (e-lambda (lps lbody la lb lalbk)
+          (let* ((key (exp-at lbody))
                  (cs (table-ref (get c-spec-made) key (the c-spec-copies nil))))
             (if (null? (c-spec-copy-find cs (extract sp 2) (extract c 4) (extract c 5)))
                 (c-make-copy-of c sp lps lbody key cs)
                 #u)))
         (else y #u)))))
 (define c-make-copy-of
-  (subr (maxeff compiles spin) (c-copy-at c-special c-params exp int c-spec-copies) unit)
+  (subr (maxeff compiles spin) (c-copy-at c-special c-params exp k-at c-spec-copies) unit)
   (lambda (c sp lps lbody key cs)
     (let ((spec (the c-spec
                   (product (1 (extract sp 1)) (2 (extract c 3)) (3 (extract sp 2))

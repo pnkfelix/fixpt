@@ -227,7 +227,7 @@
             (val r-holds? (subr (maxeff (read @globals) (read @k)) (rconsts bool) bool))
             (val r-lifted
                  (subr (maxeff (read @globals) (read @k))
-                       (int int)
+                       (int int int)
                        (listof (listof int @k) @k)))
             (val r-bind-lifted
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
@@ -303,7 +303,7 @@
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
                        (renv exp)
                        (listof rtest @k)))
-            (val r-same-exp? (subr (read (globals exp-end exp-start)) (exp exp) bool))
+            (val r-same-exp? (subr (read (globals exp-end exp-start exp-kth)) (exp exp) bool))
             (val r-this-added (subr (read @k) (rgen) int))
             (val r-var-global
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
