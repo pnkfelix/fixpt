@@ -145,8 +145,12 @@ table) and `crates/fixpt-heap/src/layout.rs`.
 - **`routines`**: what the runtime does for code, each a routine whose
   entry is in a state field, called by `blr` with its inputs, outputs and
   what it loses declared: call what is not native code (`foreign`), make a
-  closure, allocate, call a primitive, fail (the trap, its kind in `x9`),
-  poll (a time slice spent), overflow (a frame past the stack's limit).
+  closure, allocate, fail (the trap, its kind in `x9`), poll (a time slice
+  spent), overflow (a frame past the stack's limit). No routine calls a
+  primitive by number, as fixpt's own code does: a number is fixpt's
+  alone. Made code reaches a primitive as it reaches any procedure, a
+  value in a field of its code bloblet that the program put there when it
+  made the code (see "Primitives, through fields").
   Routines, not inline sequences, are the contract wherever fixpt's own
   code has a sequence too intricate to standardise (a poll's is thirty
   instructions): the sequence lives in the runtime, once, and a declared
@@ -191,6 +195,16 @@ standard operation `native-convention`. A change to the convention is a change t
 same commit, and a program written against the old one is refused with
 the difference, not run.
 
+### Primitives, through fields
+
+Made code needs no names nor numbers for the runtime's primitives. A
+primitive is a procedure value in FX-26 (`*`, `string-append`); the program
+that makes the code puts the ones it calls in the code bloblet's fields,
+which the code reads PC-relatively and calls as any procedure: native code
+directly, anything else by `foreign`. The program names them in FX-26, the
+checker types them, and the fields keep them alive: linking through the
+object, not a table. (2026-10-15; test `programs/made-code/linked.fx`.)
+
 ### Data a generator reads
 
 The declaration is also data: a generator written in FX-26 reads the
@@ -219,9 +233,10 @@ for a program that must hand the power on.
   "Not yet decided").
 - **Other targets**: only `arm64`. A declaration for another target is
   refused, by its `target` clause.
-- **Primitives by name**: a routine that calls a runtime primitive takes
-  its number, which is fixpt's alone; a stable naming (by symbol, resolved
-  when the procedure is made) is to decide with kayak.
+- **A faster call of a procedure value**: made code calls a primitive
+  through `foreign`, the general path, where fixpt's own code calls its
+  primitives more directly. A routine for it, if made code needs the
+  speed, still takes the procedure, not a number.
 
 ## Steps, each committed and tested
 

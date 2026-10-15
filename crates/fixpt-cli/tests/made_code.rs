@@ -135,3 +135,30 @@ fn code_made_from_the_convention_read_as_data() {
     let made: Vec<&str> = last.split(" : ").next().unwrap_or("").trim_matches(['(', ')']).split(' ').collect();
     assert_eq!(made, written, "{last}");
 }
+
+/// A primitive reached by made code through a field of its code bloblet,
+/// not by a number (`programs/made-code/linked.fx`): `*`, the standard
+/// operation as a value, then a procedure of the program's own, each
+/// called by the code that holds it; a hundred thousand calls, `poll`
+/// among them. Then on two machines with time slices of 3 and a small
+/// nursery. On the bytecode VM, whose `*` is its primitive object, native
+/// code called that out of the machine's reach ("a call of what is not a
+/// procedure"); a simple primitive now runs as it is.
+#[test]
+fn a_primitive_reached_through_a_field() {
+    let want = ["49", "333338333350000", "48"];
+    let runs: Vec<_> = machines().into_iter().filter(|(m, _)| *m != "rs-scheme-vm").map(|(m, _)| (m, std::thread::spawn(move || values(m, "linked.fx", 3)))).collect();
+    for (m, t) in runs {
+        let got = t.join().expect("ran");
+        assert_eq!(got, want, "{m}");
+    }
+    // The bytecode VM calls the primitive (a simple one needs no machine),
+    // and cannot be called back for the program's own procedure.
+    let got = values("rs-scheme-vm", "linked.fx", 4);
+    assert_eq!(got[..2], want[..2], "{got:?}");
+    assert!(got[3].contains("cannot call back a procedure of the bytecode VM"), "{got:?}");
+    let stress = [("FIXPT_SLICE", "3"), ("FIXPT_NURSERY", "4096"), ("FIXPT_NATIVE_STACK_CACHE", "1024")];
+    for m in ["fx-cells-rsinterp", "fx-regs-rsjit-nativecc"] {
+        assert_eq!(values_with(m, "linked.fx", 3, &stress), want, "{m}, stressed");
+    }
+}

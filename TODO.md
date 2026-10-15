@@ -2546,8 +2546,9 @@ Left:
   `preempt.rs`'s spinning process unpreempted, and a `processes.rs` test
   hung. Only `load-input`'s hidden globals are declined now, so the
   scheduler is native again; the cellular path is still to fix.
-- **More routines** a generator will want: allocating a bloblet, calling a
-  primitive by name (its number is fixpt's own), making a closure.
+- **More routines** a generator will want: allocating a bloblet, making a
+  closure. (Not calling a primitive: made code reaches one through a field
+  of its code bloblet, `programs/made-code/linked.fx`.)
 - **An adapter from the native convention to the cellular one runs on
   only some machines** (found 2026-10-14, a made procedure typed
   `cellular`, which `native-procedure` now refuses): the cellular closure

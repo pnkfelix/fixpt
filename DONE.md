@@ -2632,3 +2632,15 @@ Still open in `TODO.md` §97; done so far:
   (`code_made_from_the_convention_read_as_data`);
   `programs/modules/convention-read.fx`, three refusals. The evaluator
   written in FX-26 gained `substring` and `char-numeric?`.
+- **Primitives reached through fields, not numbers** (2026-10-15, the
+  user's question why kayak would need fixpt's numbering). A program puts
+  the primitive, a procedure value, in a field of the code bloblet it
+  makes, and the code calls it as any procedure; no routine calls a
+  primitive by number, and "primitives by name" is no longer to decide
+  with kayak (`declared-conventions.md`, "Primitives, through fields").
+  Test: `programs/made-code/linked.fx`, `(* x x)` by `*` in field 0, a
+  hundred thousand calls with `poll` among them, then a procedure of the
+  program's own, on every machine and stressed. Fixed on the way: the
+  bytecode VM's `*` is its primitive object, which native code's
+  `foreign` refused ("a call of what is not a procedure"); a simple
+  primitive now runs as it is (`cellular::call_value`).

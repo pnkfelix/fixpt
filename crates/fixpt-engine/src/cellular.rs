@@ -1621,6 +1621,17 @@ pub fn call_value(rt: &mut Runtime, f: Value, args: &[Value]) -> Result<Value, N
     let heap = &mut rt.heap;
     let is = |k: &str| f.is_bloblet() && heap.bloblet_kind(f) == kind(k);
     if !(is("cellular-closure") || is("cellular-continuation")) {
+        // The bytecode VM's primitive, a standard operation as a value
+        // there: a simple one runs as it is, needing no machine.
+        if heap.obj_type(f) == Some(fixpt_heap::ObjType::Primitive) {
+            let def = fixpt_runtime::prim::def(heap.obj_ref(f, 1).as_fixnum() as u16);
+            if let fixpt_runtime::prim::PrimKind::Simple(func) = def.kind {
+                if !def.accepts(args.len()) {
+                    return Err(NativeExit::Failed(format!("{} got {} argument(s)", def.name, args.len())));
+                }
+                return func(rt, &mut args.to_vec()).map_err(|t| NativeExit::Failed(describe(rt, t.obj)));
+            }
+        }
         // The bytecode VM's procedures: a primitive cannot run the VM again
         // (`fixpt-runtime`'s `prim.rs`), so native code cannot call them.
         if heap.obj_type(f) == Some(fixpt_heap::ObjType::Closure) {
