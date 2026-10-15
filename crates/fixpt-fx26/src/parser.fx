@@ -752,21 +752,17 @@
 ;; The keys loaded, and the definitions not yet placed before their form.
 (define shared-keys (ref (listof string acyclic) rs) (new nil))
 (define shared-pending (ref top-list rs) (new nil))
-;; The hidden global a `(define %shared:… (load-… "file"))` defines, while
-;; its file is parsed: that file's load is the global's definition, its
-;; module, as the Rust parser's `sharing_now` says (`TODO.md` §97: the
-;; session gives this front end the definitions the Rust one made); else
-;; `||`.
-(define sharing-now (ref symbol rs) (new '||))
 ;; The files being read now, by key, each with its path as its load wrote
 ;; it, the innermost first: a load of one of them is a cycle (`TODO.md`
 ;; §71).
 (define loading-keys (ref (listof (pairof string string rs) acyclic) rs) (new nil))
+;; Whether `key` names a `load-input`'s file.
+(define input-key? (subr pure (string) bool)
+  (lambda (k) (and (> (string-length k) 6) (string=? (substring k 0 6) "input:"))))
 ;; A program's parse begins with none.
 (define shared-reset! (subr (maxeff (read @globals) (write rs)) () unit)
   (lambda ()
-    (begin (set shared-keys nil) (set shared-pending nil) (set loading-keys nil)
-           (set sharing-now '||))))
+    (begin (set shared-keys nil) (set shared-pending nil) (set loading-keys nil))))
 ;; The files being read, as `loading-keys` keeps them.
 (define-type loading-list (listof (pairof string string rs) acyclic))
 ;; The chain from the load of `key` on, onto `acc`, as `parse.rs` says it:

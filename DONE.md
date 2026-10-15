@@ -2542,3 +2542,10 @@ Still open in `TODO.md` §97; done so far:
   found of its `extract`s and `tagcase`s in their nodes (a field of
   `e-extract` and `e-tagcase`, -1 until then, as `e-bloblet`'s), not in
   where they start (`c-resolved-at`, gone).
+- **A load is its key, as Sheldon's `input`** (2026-10-15): a hidden
+  global's definition is `(define %shared:key (%loaded "key" "path"))`,
+  `%loaded` the module of the file its key (the path resolved, `input:`
+  before it for a `load-input`) names, in both parsers wherever it is
+  read; no longer a load that meant the module only to a parser in a state
+  of its own (`sharing_now`, `sharing-now`, gone). The native machine no
+  longer declines a `load-input`'s hidden global.

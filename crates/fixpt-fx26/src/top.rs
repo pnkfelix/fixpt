@@ -603,19 +603,14 @@ impl Checker {
     /// `(define* name type lambda)`: the globals the procedure reads, which
     /// its type leaves out, are found, precisely, and put in its type's
     /// latent effect.
-    /// A definition of a hidden global, `%shared:` and a file's key, as
-    /// `parse_load` makes them and the session gives the front end written
-    /// in FX-26 (`TODO.md` §97): parsed `sharing_now`, so that its load is
-    /// the file's module, and that file loaded; as that front end's
-    /// `parse-define` does.
+    /// A definition, which if of a hidden global, `%shared:` and a file's
+    /// key (`parse_load`'s, or one the session gives alone), makes every
+    /// later load of that key that global.
     fn sharing(&mut self, items: &[Syntax], f: impl FnOnce(&mut Self) -> R<Top>) -> R<Top> {
         let name = items.get(1).and_then(|n| n.as_symbol());
         let key = name.and_then(|n| self.interner.name(n).strip_prefix("%shared:").map(str::to_string));
-        let Some(key) = key.filter(|k| !self.sharing_now.contains(k)) else { return f(self) };
-        self.sharing_now.insert(key.clone());
         let r = f(self);
-        self.sharing_now.remove(&key);
-        if r.is_ok() {
+        if let (Ok(_), Some(key)) = (&r, key) {
             let name = name.expect("named");
             self.shared_loads.insert(key, name);
             self.shared_globals.insert(name);

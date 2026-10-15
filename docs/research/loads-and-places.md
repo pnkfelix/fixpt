@@ -213,3 +213,25 @@ So A, if it is done, should be a load that is its own identity (its key),
 a `Loaded(K)` resolved where it is read, rather than a hidden definition
 of a better form: nearer B than A was put, but without the session's
 table, the key being the expression's own.
+
+## Done: a load is its key (2026-10-15)
+
+As Sheldon's `input` is the file it names, a load is now its key, the
+path resolved (`input:` before it for a `load-input`), wherever it is
+read; its value the hidden global `%shared:key`, made once. What changed
+is the hidden definition: it was `(define %shared:key (load-input
+"path"))`, whose load meant the file's module only to a parser in a state
+of its own (`sharing_now`, `sharing-now`, `parse-define`'s case for
+`%shared:` names), and whose path was relative to a directory the reader
+had to know. It is now `(define %shared:key (%loaded "key" "path"))`:
+`%loaded` an expression whose meaning is fixed, the module of the file
+the key names (the path kept only for what is said of the file), so
+either front end reads it alike wherever it travels, the session's
+form-by-form machines included. Gone with the state: the native machine's
+decline of `load-input`'s hidden globals, whose initializer alone is now
+the module too.
+
+What stays: the hidden global, as the store that makes a load one value,
+made once (option B would make that a table of the session's); and the
+front end written in FX-26 finds a file read for it by where its load
+starts, as Rust supplies them.

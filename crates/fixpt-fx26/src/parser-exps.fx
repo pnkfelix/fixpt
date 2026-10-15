@@ -138,7 +138,7 @@
 (define-type loaded-file (select parser-module loaded-file))
 (define shared-keys (with parser-module shared-keys))
 (define shared-pending (with parser-module shared-pending))
-(define sharing-now (with parser-module sharing-now))
+(define input-key? (with parser-module input-key?))
 (define shared-key? (with parser-module shared-key?))
 (define load-cycle (with parser-module load-cycle))
 (define in-loaded-as (with parser-module in-loaded-as))
@@ -448,7 +448,7 @@
         ((begin) (parse-body (cdr items) a b))
         ;; Processes and `par` (`parser-forms.fx`).
         ((spawn spawn-monitored send receive self par race pselect icell-get icell-put!)
-         (parse-exp (process-form pfail-at items (parse-loaded processes #f a b) a b)))
+         (parse-exp (process-form pfail-at items (parse-loaded processes #f #f a b) a b)))
         ((cond) (parse-cond (cdr items) a b))
         ((case) (parse-case (cdr items) a b))
         ((typecase) (parse-typecase items a b))
@@ -524,9 +524,15 @@
                 (usage (string-append "`(" (if input? "load-input" "load-module") " \"file\")`")))
            (begin (arity items 2 usage a b)
                   (if (syn-string? (nth items 1))
-                      (parse-loaded (syn-string (nth items 1)) input? a b)
+                      (parse-loaded (syn-string (nth items 1)) input? #f a b)
                       (pfail (string-append usage ": the file's name, as a string")
                              (nth items 1))))))
+        ;; `(%loaded "key" "path")`: the module of the file `key` names, as a
+        ;; hidden global's definition is (`parse_loaded`).
+        ((%loaded)
+         (begin (arity items 3 "`(%loaded \"key\" \"path\")`" a b)
+                (parse-loaded (syn-string (nth items 2)) (input-key? (syn-string (nth items 1)))
+                              #t a b)))
         ((with)
          (begin (at-least items 2 "`(with module body …)`" a b)
                 (if (syn-symbol? (nth items 1))
@@ -924,8 +930,8 @@
   ;; form that loads it (`shared-pending`); a `load-input`'s, its one item.
   ;; What it makes is the form's, at `a`..`b`; the file's module, the whole
   ;; file's.
-  (parse-loaded (subr (maxeff parses spin) (string bool int int) exp)
-    (lambda (path input? a b)
+  (parse-loaded (subr (maxeff parses spin) (string bool bool int int) exp)
+    (lambda (path input? here? a b)
       (let ((f (loaded-next-at a)))
         (if (null? f)
             (e-module (loaded-error (string-append "cannot read `" path "`: it was not read"))
@@ -933,9 +939,9 @@
             (let* ((key (string-append (if input? "input:" "") (extract (car f) 7)))
                    (name (string->symbol (string-append "%shared:" key)))
                    (cycle (load-cycle key path)))
-              (if (symbol=? name (get sharing-now))
+              (if here?
                   ;; The hidden global's own definition: the file's module.
-                  (begin (set sharing-now '||) (set shared-keys (cons key (get shared-keys)))
+                  (begin (set shared-keys (cons key (get shared-keys)))
                          (parse-load-file (car f) path input? a b))
               (begin
                 (cond ((not (string=? cycle "")) (pfail-at cycle a b))

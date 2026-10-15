@@ -1716,6 +1716,17 @@ impl Checker {
                 };
                 self.parse_load(span, path, input)
             }
+            // `(%loaded "key" "path")`: the module of the file `key` names,
+            // `path` as a load wrote it (`parse_loaded`).
+            "%loaded" => {
+                let [_, key, path] = &items[..] else {
+                    return Err(FxError::at(span, "`(%loaded \"key\" \"path\")`"));
+                };
+                let (Datum::Str(key), Datum::Str(path)) = (&key.datum, &path.datum) else {
+                    return Err(FxError::at(span, "`(%loaded \"key\" \"path\")`"));
+                };
+                self.parse_loaded(span, key, path)
+            }
             "with" => {
                 let [_, m, body @ ..] = &items[..] else {
                     return Err(FxError::at(span, "`(with module body …)`"));
@@ -2464,10 +2475,12 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     }
 
     /// `(load-module "path")` or, `input`, `(load-input "path")`: every
-    /// load of a path is one value, made once (`TODO.md` §68). The first
-    /// defines a hidden global, `%shared:path`, as the file loaded (checked
-    /// so, alone, its definition running before the form that loads it,
-    /// `hoisted`); every load is that global. Making it must be pure: a
+    /// load of a path is one value, made once (`TODO.md` §68). A load is its
+    /// key, the path resolved (`input:` before it, for a `load-input`), as
+    /// Sheldon's `(input "file")` is the file it names; its value the hidden
+    /// global `%shared:key`, which the first defines, `(define %shared:key
+    /// (%loaded "key" "path"))`, checked so, alone, its definition running
+    /// before the form that loads it (`hoisted`). Making it must be pure: a
     /// file's state is made by applying what it makes, so that two loads
     /// that are one cannot be told apart.
     ///
@@ -2486,26 +2499,15 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
             let chain: Vec<String> = self.loading[i..].iter().map(|(_, p)| format!("`{p}`")).chain([format!("`{path}`")]).collect();
             return Err(FxError::at(span, format!("a load cycle: {}", chain.join(" loads "))));
         }
-        if self.sharing_now.contains(&key) {
-            self.loading.push((key, path.to_string()));
-            let r = self.parse_load_file(span, path, &at, input);
-            self.loading.pop();
-            return r;
-        }
         let name = match self.shared_loads.get(&key) {
             Some(n) => *n,
             None => {
                 let name = self.interner.intern(&format!("%shared:{key}"));
                 let sym = |c: &mut Self, s: &str| Syntax::symbol(span, c.interner.intern(s));
-                let load = Syntax::list(
-                    span,
-                    vec![sym(self, if input { "load-input" } else { "load-module" }), Syntax::new(span, Datum::Str(path.to_string()))],
-                );
-                let form = Syntax::list(span, vec![sym(self, "define"), Syntax::symbol(span, name), load]);
-                self.sharing_now.insert(key.clone());
-                let made = self.top_defining(&form);
-                self.sharing_now.remove(&key);
-                let made = made?;
+                let str = |s: &str| Syntax::new(span, Datum::Str(s.to_string()));
+                let loaded = Syntax::list(span, vec![sym(self, "%loaded"), str(&key), str(path)]);
+                let form = Syntax::list(span, vec![sym(self, "define"), Syntax::symbol(span, name), loaded]);
+                let made = self.top_defining(&form)?;
                 for (top, _) in &made.run {
                     // Pure but for reading globals: the hidden globals of the
                     // files it loads, which never change.
@@ -2536,6 +2538,27 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         let item = self.interner.intern("input");
         let body = self.arena.exp(span, Exp::Var(item));
         Ok(self.arena.exp(span, Exp::With { module: name, body }))
+    }
+
+    /// `(%loaded "key" "path")`: the module of the file `key` names (the
+    /// path resolved, `input:` before it for a file of one expression,
+    /// whose module's one item is `input`), wherever it is read; `path` as
+    /// the load wrote it, for what is said of the file.
+    fn parse_loaded(&mut self, span: fixpt_read::Span, key: &str, path: &str) -> R<ExpId> {
+        let (input, file) = match key.strip_prefix("input:") {
+            Some(f) => (true, f),
+            None => (false, key),
+        };
+        // A file loading one that is being read: a cycle, as `parse_load`
+        // refuses it.
+        if let Some(i) = self.loading.iter().position(|(k, _)| k == key) {
+            let chain: Vec<String> = self.loading[i..].iter().map(|(_, p)| format!("`{p}`")).chain([format!("`{path}`")]).collect();
+            return Err(FxError::at(span, format!("a load cycle: {}", chain.join(" loads "))));
+        }
+        self.loading.push((key.to_string(), path.to_string()));
+        let r = self.parse_load_file(span, path, std::path::Path::new(file), input);
+        self.loading.pop();
+        r
     }
 
     /// The file at `at`, `path` as written, read and parsed: its forms a

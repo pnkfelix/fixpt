@@ -679,6 +679,11 @@ pub fn set_shared_made(made: std::collections::HashSet<String>) {
 /// written in FX-26 (`parser-exps.fx`'s `load-base`).
 const LOAD_BASE_STEP: i64 = 1_000_000_000;
 
+/// A load found in a text: where it starts, its path as written, whether
+/// it is a `load-input`, and, a `(%loaded "key" "path")`'s, the file its key
+/// names, the path resolved.
+type Load = (u32, String, bool, Option<String>);
+
 /// Each `(load-module "path")` in `forms`, in order: where it starts, and
 /// the path; and each form of processes or `par`, which loads the scheduler
 /// (`parser-forms.fx`). Only where an expression is, as the parsers read
@@ -687,18 +692,18 @@ const LOAD_BASE_STEP: i64 = 1_000_000_000;
 /// (`TODO.md` §92). A load found where the parsers find none would be a
 /// file read the Rust checker does not read, the numbering of the files
 /// after it moved.
-fn load_modules_in(forms: &[Syntax], interner: &Interner, out: &mut Vec<(u32, String, bool)>) {
+fn load_modules_in(forms: &[Syntax], interner: &Interner, out: &mut Vec<Load>) {
     for f in forms {
         load_modules_at(f, interner, out);
     }
 }
 
 /// `load_modules_in` of one expression, or definition.
-fn load_modules_at(f: &Syntax, interner: &Interner, out: &mut Vec<(u32, String, bool)>) {
+fn load_modules_at(f: &Syntax, interner: &Interner, out: &mut Vec<Load>) {
     let Some(items) = f.as_proper_list() else { return };
-    let exps = |xs: &[Syntax], out: &mut Vec<(u32, String, bool)>| load_modules_in(xs, interner, out);
+    let exps = |xs: &[Syntax], out: &mut Vec<Load>| load_modules_in(xs, interner, out);
     // The last item of each list in `xs`: a binding's expression.
-    let inits = |xs: Option<&[Syntax]>, out: &mut Vec<(u32, String, bool)>| {
+    let inits = |xs: Option<&[Syntax]>, out: &mut Vec<Load>| {
         for b in xs.unwrap_or_default() {
             if let Some([_, .., init]) = b.as_proper_list() {
                 load_modules_at(init, interner, out);
@@ -706,7 +711,7 @@ fn load_modules_at(f: &Syntax, interner: &Interner, out: &mut Vec<(u32, String, 
         }
     };
     // Each clause of `xs` from item `k` on: an arm's body.
-    let arms = |xs: &[Syntax], k: usize, out: &mut Vec<(u32, String, bool)>| {
+    let arms = |xs: &[Syntax], k: usize, out: &mut Vec<Load>| {
         for c in xs {
             if let Some(parts) = c.as_proper_list() {
                 load_modules_in(parts.get(k..).unwrap_or_default(), interner, out);
@@ -718,11 +723,21 @@ fn load_modules_at(f: &Syntax, interner: &Interner, out: &mut Vec<(u32, String, 
         && matches!(interner.name(h), "load-module" | "load-input")
         && let Datum::Str(p) = &path.datum
     {
-        out.push((f.span.start, p.to_string(), interner.name(h) == "load-input"));
+        out.push((f.span.start, p.to_string(), interner.name(h) == "load-input", None));
+    }
+    if let [head, key, path] = items
+        && head.as_symbol().is_some_and(|h| interner.name(h) == "%loaded")
+        && let (Datum::Str(k), Datum::Str(p)) = (&key.datum, &path.datum)
+    {
+        let (input, file) = match k.strip_prefix("input:") {
+            Some(f) => (true, f),
+            None => (false, k.as_str()),
+        };
+        out.push((f.span.start, p.to_string(), input, Some(file.to_string())));
     }
     let head = items.first().and_then(|h| h.as_symbol()).map(|h| interner.name(h));
     if matches!(head, Some("spawn" | "spawn-monitored" | "send" | "receive" | "self" | "par" | "race" | "pselect" | "icell-get" | "icell-put!")) {
-        out.push((f.span.start, crate::check::PROCESSES.to_string(), false));
+        out.push((f.span.start, crate::check::PROCESSES.to_string(), false, None));
     }
     let rest = items.get(1..).unwrap_or_default();
     let from = |k: usize| items.get(k..).unwrap_or_default();
@@ -819,9 +834,10 @@ fn supply_loaded_in(
     load_modules_in(&forms, &interner, &mut loads);
     let offsets = byte_offsets(text);
     let char_at = |byte: u32| offsets.partition_point(|&o| o < byte as usize) as i64;
-    for (start, path, input) in loads {
-        let at = match &dir {
-            Some(d) if std::path::Path::new(&path).is_relative() && crate::built_in_module(&path).is_none() => d.join(&path),
+    for (start, path, input, resolved) in loads {
+        let at = match (&resolved, &dir) {
+            (Some(file), _) => std::path::PathBuf::from(file),
+            (None, Some(d)) if std::path::Path::new(&path).is_relative() && crate::built_in_module(&path).is_none() => d.join(&path),
             _ => std::path::PathBuf::from(&path),
         };
         // Every load of a path is one (`TODO.md` §68): the file read once,
@@ -848,7 +864,9 @@ fn supply_loaded_in(
             entry(scheme, list, r)?;
             continue;
         }
-        if SHARED_MADE.with(|m| m.borrow().contains(&shared)) {
+        // Made by a form before, and loaded here, not defined (a
+        // `%loaded` is its definition).
+        if resolved.is_none() && SHARED_MADE.with(|m| m.borrow().contains(&shared)) {
             let nil = scheme.make(|_| Value::NULL);
             entry(scheme, list, &Read { base: -1, why: String::new(), syns: nil, text: String::new() })?;
             continue;
@@ -984,7 +1002,7 @@ mod tests {
         let forms = fixpt_read::Reader::new(text, FileId(0), fixpt_read::SyntaxProfile::FX26, &mut interner).read_all().expect("reads");
         let mut out = Vec::new();
         load_modules_in(&forms, &interner, &mut out);
-        out.into_iter().filter(|(_, p, _)| p == crate::check::PROCESSES).map(|(at, _, _)| at).collect()
+        out.into_iter().filter(|(_, p, _, _)| p == crate::check::PROCESSES).map(|(at, ..)| at).collect()
     }
 
     /// A form's name bound, as a parameter, a variant, a type's effect or a

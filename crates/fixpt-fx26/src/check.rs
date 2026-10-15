@@ -380,9 +380,6 @@ pub struct Checker {
     /// and the hidden global its one value is (`%shared:…`): every load of
     /// a path is that value (`TODO.md` §68), made once, purely.
     pub(crate) shared_loads: HashMap<String, Sym>,
-    /// The paths being made into their hidden globals now: loaded there,
-    /// not referred to.
-    pub(crate) sharing_now: HashSet<String>,
     /// The files being read now, by key, each with its path as its load
     /// wrote it, the outermost first: a load of one of them is a cycle
     /// (`TODO.md` §71).
@@ -712,7 +709,6 @@ impl Checker {
             standard_dscope: 0,
             hidden: None,
             shared_loads: HashMap::new(),
-            sharing_now: HashSet::new(),
             loading: Vec::new(),
             include_scope: 0,
             with_depth: 0,

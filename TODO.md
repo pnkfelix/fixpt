@@ -2547,16 +2547,12 @@ generator reads, structured (step 6; today one string a clause,
   hung. Only `load-input`'s hidden globals are declined now, so the
   scheduler is native again; the cellular path is still to fix.
 - **Loads' hidden globals and facts by place** (the user's question,
-  2026-10-15; `docs/research/loads-and-places.md`). Decided: C first, and
-  done (`DONE.md` §97): expressions' identities `(start end k)`, facts
-  keyed by them. Left:
+  2026-10-15; `docs/research/loads-and-places.md`). Done (`DONE.md` §97):
+  expressions' identities `(start end k)`, facts keyed by them and a
+  datatype, no invented places, a load its key. Left:
   - What an operation needs, within a fact (`n-datum`), still told apart
     by the operation and by ranges: a blobref's field offset past `2^40`
     (`check::BLOBREF_FIELD`), a flat array's `n << 32 | size`.
-  - Cause 2, the hidden definition read differently by who reads it: as
-    Sheldon's `input` was, a load whose identity is its own key, resolved
-    where it is read, rather than a hidden global defined by a parser in a
-    state of its own (the note's last section).
 - **The native-convention machine hides the FX-26 checker's refusals**
   (found 2026-10-14): a definition that checker refuses is "declined" and
   runs another way, so where the two checkers disagree on a form, that
