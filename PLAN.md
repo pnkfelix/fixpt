@@ -148,8 +148,8 @@ are in the last section, "Log: the glance's details", and in
   branch.
 - **Code bloblets a program makes and runs, kayak's request**
   (2026-10-14, `TODO.md` §97): asked for, not started; layer 1 (make,
-  seal, a procedure at a stated type under `(io native)`) proposed now,
-  with a leaf contract, and the full native contract later.
+  seal, a procedure at a stated type under `(io native)`) proposed with
+  the native contract declared (`define-convention`), not leaf code only.
 - **Cellular code calling native code** (2026-10-13, `TODO.md` §93):
   fixed, a crash on the REPL's machine where the native convention
   declined a form; its cost to assembling words mostly recovered (peval's

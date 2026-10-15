@@ -2547,18 +2547,39 @@ code area"): code beside its fields, in the code area mapped twice.
 
 Kayak's questions, and the answers proposed (not yet decided with the
 user):
-- **Both layers, or the first now?** The first now, with a *leaf
-  contract* written down for it: arguments in `x0`–`x7` and the result in
-  `x0`, tagged values as `layout.rs` says; callee-saved registers kept (the
-  pinned ones are among them); its own fields read PC-relatively, and
-  values' fields and suffixes read by the layout; no allocation, no calls,
-  no stores of pointers into the heap (the write barrier is part of layer
-  2), so no safepoint, and the collector never runs inside it. Not
-  preempted: a loop in it holds its scheduler, as `(io native)` says
-  anything may. The second later, once the native convention stops
-  moving: its frames changed last on 2026-10-12 (§91), and raw `f64`s are
-  still being decided; written then as a chapter of `docs/fx26.md`, with a
-  conformance test both implementations run.
+- **Both layers, or the first now?** Not leaf code only (the user's,
+  2026-10-14): code a program makes may do all that ours does, so the
+  contract comes with layer 1, *declared*: a convention is a description
+  that means something, not a version number. Proposed:
+  - `(define-convention NAME clause …)`, each clause a role bound to where
+    it is: the target (`arm64`); the registers (arguments `x1`–`x8`, result
+    `x0`, closure `x10`, link `x30`, frame `x29`, pinned: state `x24`, fuel
+    `x28`, the stack's limit `x27`, the code area's distance `x26`; the
+    rest lost across a call); the value layout (tags, header fields,
+    closures' and frames' shapes); frames (header at `x29 − 8`, link,
+    return, stack map at `x29 + 16` with its 48 live bits, values from
+    `x29 + 24`, raw words after); the state's fields code may use, by
+    offset; call-outs, each named with its arguments and whether it may
+    collect (allocation, primitives, foreign calls, capture, reinstate,
+    abort, poll, overflow, traps); fuel (where it is decremented and
+    checked, what a spent slice calls); the write barrier (the card table,
+    a card's size).
+  - What a convention is, is its normal form: two declarations that
+    normalise alike are the same convention. A program's declaration is
+    accepted when it is one the implementation supports, and is then that
+    convention (so `≤ fx`, and every machine calls it); otherwise refused,
+    naming the first clause that differs. For the first deliverable the
+    supported set is one declaration, fixpt's `native` as it is.
+  - The declarations are generated from the implementation's own tables
+    (`layout.rs`'s tags and fields, `DState`'s offsets, `direct.rs`'s
+    registers and `Callout`s), as `standard.fx` is from `lower.rs`'s, and
+    a test checks them against the code; so a change to the convention
+    changes the declaration, and a program written to the old one is
+    refused with the difference, not run. Kayak's runtime publishes its
+    own set; where the two meet, the same code runs on both.
+  - The declaration is also data a generator reads (registers, offsets,
+    call-out numbers), so kayak's generators are written against it, not
+    against numbers copied out of fixpt.
 - **First-class, or called through a primitive?** First-class, a `subr`
   of the native convention at the stated type, latent effect included:
   every machine already calls native closures (cellular ones through the
