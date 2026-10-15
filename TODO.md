@@ -2546,10 +2546,20 @@ Left:
   `preempt.rs`'s spinning process unpreempted, and a `processes.rs` test
   hung. Only `load-input`'s hidden globals are declined now, so the
   scheduler is native again; the cellular path is still to fix.
-- **More routines** a generator will want: making a closure. (Not
-  calling a primitive: made code reaches one through a field of its code
-  bloblet, `programs/made-code/linked.fx`. Allocating a bloblet is done,
-  `DONE.md` §97.)
+- **Closures with captured values, when kayak asks** (2026-10-15).
+  `native-procedure` makes a native closure of no captured values, and
+  neither a program nor its made code can make one with them: the
+  `bloblet` routine (`DONE.md` §97) makes only plain bloblets. Not a
+  routine, as calling a primitive is not one: let `native-procedure` take
+  them, `(native-procedure c v …)`, an FX-26 operation extended, no clause
+  added to the contract (`closures` already lays them out). Made code
+  making closures as it runs reaches that operation through a field and
+  calls it by `foreign`, as `programs/made-code/linked.fx` calls `*`; it
+  reads the captured values by the `closures` clause. Until then a
+  generator can convert closures itself (the environment an extra
+  argument, a pair of code and environment in a bloblet), which works
+  now; only closures that the program calls as its own procedures need
+  this.
 - **An adapter from the native convention to the cellular one runs on
   only some machines** (found 2026-10-14, a made procedure typed
   `cellular`, which `native-procedure` now refuses): the cellular closure

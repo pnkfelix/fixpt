@@ -144,9 +144,12 @@ table) and `crates/fixpt-heap/src/layout.rs`.
   the card table, `code-lo`, and the routines' entries.
 - **`routines`**: what the runtime does for code, each a routine whose
   entry is in a state field, called by `blr` with its inputs, outputs and
-  what it loses declared: call what is not native code (`foreign`), make a
-  closure, allocate, fail (the trap, its kind in `x9`), poll (a time slice
-  spent), overflow (a frame past the stack's limit). No routine calls a
+  what it loses declared: call what is not native code (`foreign`),
+  allocate (`cons`, `bloblet`), fail (the trap, its kind in `x9`), poll
+  (a time slice spent), overflow (a frame past the stack's limit). No
+  routine makes a closure: one with captured values is to come from
+  `native-procedure` given them, reached through a field (`TODO.md` §97).
+  No routine calls a
   primitive by number, as fixpt's own code does: a number is fixpt's
   alone. Made code reaches a primitive as it reaches any procedure, a
   value in a field of its code bloblet that the program put there when it
