@@ -628,3 +628,29 @@ fn declared_conventions_alike() {
     refused(with(&|cs| cs[0] = "(target #t)".into()), "holds names, integers and lists");
     refused(with(&|cs| cs[0] = "target".into()), "a convention's clause is `(role …)`");
 }
+
+/// `native-procedure` (`TODO.md` §97) makes a native closure: its stated
+/// type says so, `(conv native)` (or a name declared as it) or `fx`; the
+/// program's own convention, `cellular`, is refused, and so is no type.
+#[test]
+fn a_made_procedure_is_native() {
+    for made in [
+        "(the (subr (conv native) pure (int int) int) (native-procedure (seal-code (make-bloblet 8))))",
+        "(the (subr (conv fx) pure (int int) int) (native-procedure (seal-code (make-bloblet 8))))",
+    ] {
+        assert!(both(made).is_ok(), "{made}");
+    }
+    for made in [
+        "(the (subr pure (int int) int) (native-procedure (seal-code (make-bloblet 8))))",
+        "(the (subr (conv cellular) pure (int int) int) (native-procedure (seal-code (make-bloblet 8))))",
+    ] {
+        let r = both(made);
+        assert!(r.as_ref().is_err_and(|(m, _, _)| m.contains("state `(conv native)`")), "{made}: {r:?}");
+    }
+    let r = both("(native-procedure (seal-code (make-bloblet 8)))");
+    assert!(r.as_ref().is_err_and(|(m, _, _)| m.contains("`t` cannot be inferred")), "{r:?}");
+    let r = both("(the int (native-procedure (seal-code (make-bloblet 8))))");
+    assert!(r.as_ref().is_err_and(|(m, _, _)| m.contains("makes a procedure, of the type stated")), "{r:?}");
+    let r = both("(let ((f native-procedure)) 1)");
+    assert!(r.is_err(), "{r:?}");
+}

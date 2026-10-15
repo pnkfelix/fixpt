@@ -162,7 +162,7 @@
   (lambda (s)
     (let ((n (symbol->string s)))
       (or (string=? n "cwcc") (string=? n "certify-length") (string=? n "certify-acyclic")
-          (string=? n "certify-nat")))))
+          (string=? n "certify-nat") (string=? n "native-procedure")))))
 (define k-operator? (subr (maxeff (read @globals) (read @t)) (symbol int int) bool)
   (lambda (s a b)
     (let ((o (get k-operator)))

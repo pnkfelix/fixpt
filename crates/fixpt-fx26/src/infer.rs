@@ -524,6 +524,12 @@ impl Checker {
     pub(crate) fn synth_app(&mut self, e: ExpId, fun: ExpId, args: &[ExpId], expected: Option<TyId>) -> R<(TyId, Effect)> {
         let (t, eff) = self.synth_app_of(e, fun, args, expected)?;
         let t = self.array_sized(e, fun, args, t);
+        // `native-procedure` (`TODO.md` §97) makes a native closure: the
+        // type stated is of the native convention, or `fx`.
+        let t = match self.standard_ref(fun) {
+            Some(op) if self.interner.name(op) == "native-procedure" => self.made_native(e, t)?,
+            _ => t,
+        };
         // A path a fact in force narrows (`(car x)` …), its type there.
         let t = self.path_typed(e, t);
         // A test's call is a `bool`: what the test's type says it proves is
@@ -533,6 +539,16 @@ impl Checker {
             _ => t,
         };
         Ok((t, eff))
+    }
+
+    fn made_native(&mut self, e: ExpId, t: TyId) -> R<TyId> {
+        let t = self.arena.resolve(t);
+        let span = self.arena.span_of(e);
+        match self.arena.get(t) {
+            Ty::Subr { conv: crate::ast::Conv::Native | crate::ast::Conv::Fx, .. } => Ok(t),
+            Ty::Subr { .. } => Err(FxError::at(span, "`native-procedure` makes a native procedure: state `(conv native)` in its type")),
+            _ => Err(FxError::at(span, "`native-procedure` makes a procedure, of the type stated: `(the (subr …) (native-procedure c))`")),
+        }
     }
 
     fn synth_app_of(&mut self, e: ExpId, fun: ExpId, args: &[ExpId], expected: Option<TyId>) -> R<(TyId, Effect)> {

@@ -104,12 +104,29 @@
                 (else y te)))
             (else y te))))))
 ;; `x`, of type and effect `te`, as arrays' lengths say, if a call; of a
-;; call, and of `(the t x)`, which keeps a `make-array`'s length.
-(define k-sized (subr (maxeff kstate spin) (kx k-te) k-te)
+;; call, and of `(the t x)`, which keeps a `make-array`'s length. And a
+;; call of `native-procedure` (`TODO.md` §97), which makes a native
+;; closure: the type stated is of the native convention, or `fx`.
+(define k-sized (subr (maxeff checks spin) (kx k-te) k-te)
   (lambda (x te)
     (tagcase x
-      (x-app (f args a b) (k-array-sized (k-std-op f) args te))
+      (x-app (f args a b)
+        (let ((op (k-std-op f)))
+          (if (string=? op "native-procedure") (k-made-native te a b) (k-array-sized op args te))))
       (else y te))))
+(define k-made-native (subr (maxeff checks spin) (k-te int int) k-te)
+  (lambda (te a b)
+    (tagcase (k-get (extract te 1))
+      (ty-subr (e ps res cv)
+        (tagcase cv
+          (cv-native () te)
+          (cv-fx () te)
+          (else z (k-fail (string-append "`native-procedure` makes a native procedure: "
+                                         "state `(conv native)` in its type")
+                          a b))))
+      (else y (k-fail (string-append "`native-procedure` makes a procedure, of the type stated: "
+                                     "`(the (subr …) (native-procedure c))`")
+                      a b)))))
 ;; The length of the flat array a blobref of type `t` points to (generative
 ;; types 5 and 6), where it is one array's, not `finite` (none or one).
 (define k-blobref-array-size (subr (maxeff kreads spin) (int) k-maybe-size)

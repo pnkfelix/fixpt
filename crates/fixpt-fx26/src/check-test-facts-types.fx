@@ -49,7 +49,8 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (kx) k-latent))
             (val k-arg-at (subr (read @globals) (kxs int) kxs))
             (val k-sized
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) (read @s) (goto @z)
+                               spin)
                        (kx k-te)
                        k-te))
             (val k-latent-cert

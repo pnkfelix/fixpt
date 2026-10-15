@@ -1503,7 +1503,7 @@ impl Checker {
     /// there: named only as a call's operator, so that no other name, and
     /// no procedure given one, can call them unchecked (F15, F16).
     pub(crate) fn second_class(&self, s: Sym) -> bool {
-        matches!(self.interner.name(s), "cwcc" | "certify-length" | "certify-acyclic" | "certify-nat")
+        matches!(self.interner.name(s), "cwcc" | "certify-length" | "certify-acyclic" | "certify-nat" | "native-procedure")
     }
 
     pub(crate) fn named_only_to_call(&self, span: fixpt_read::Span, s: Sym) -> FxError {

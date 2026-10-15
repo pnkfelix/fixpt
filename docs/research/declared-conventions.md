@@ -60,10 +60,13 @@ procedure of it has is given by `the`:
 - `native-procedure` checks, at run time, that its argument is a sealed
   copy (in the code area, its suffix frozen), else a failure, not a crash,
   and makes a native closure of it over nothing. Its type is `t`, whatever
-  `the` says: the trust `(io native)` marks. Every machine dispatches a
-  call on the callee's kind, so a procedure typed in the program's
-  convention, `cellular` by default, is called rightly too; `(conv
-  native)` says what it is.
+  `the` says (the trust `(io native)` marks), but for its convention: both
+  checkers require a procedure type of the native convention (`(conv
+  native)`, or a name `define-convention` bound to it) or `fx`, and refuse
+  any other, the program's own `cellular` among them (a convention left
+  out is the program's), rather than convert the closure: an adapter to
+  the cellular convention runs on only some machines today. Like `cwcc`,
+  it is named only as a call's operator.
 - `native-code?` is false where native procedures cannot be made (the
   evaluator written in FX-26, whose values are its own), where both other
   operations fail.

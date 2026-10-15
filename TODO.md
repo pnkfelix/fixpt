@@ -2536,6 +2536,13 @@ constants, both checkers comparing a program's with it
 (`programs/made-code/declared.fx`). Left: code that is not a leaf (step
 5), the declaration as data a generator reads, structured (step 6; today
 one string a clause, `native-convention`).
+- **An adapter from the native convention to the cellular one runs on
+  only some machines** (found 2026-10-14, a made procedure typed
+  `cellular`, which `native-procedure` now refuses): the cellular closure
+  `%fx26-convert` makes (`cellular_adapter`) fails on the arm64 cellular
+  machines ("no routine is numbered 27") and the bytecode VM ("attempt to
+  call a non-procedure"); the Rust cellular machine and the evaluator run
+  it.
 
 Kayak is writing FX-26's native code generators in KFX, which may use only
 what FX-26 has, and FX-26 has no way to place machine code it made and run
