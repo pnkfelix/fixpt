@@ -88,6 +88,16 @@
                                spin)
                        (k-parts kx)
                        void))
+            (val k-note-call
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (kx kx int k-ids)
+                       unit))
             (val k-note-apply-shares
                  (subr (maxeff (alloc @t)
                                (goto @z)

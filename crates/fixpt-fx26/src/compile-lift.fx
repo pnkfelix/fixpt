@@ -421,9 +421,11 @@
       (("array-set!")
        (begin (c-op c routine-swap) (c-array-index c) (c-op c routine-swap)
               (c-prim c "%bloblet-set!" 3) (c-unit-after c)))
+      ;; Its procedure called by its kind: a `vsubr`'s type says no
+      ;; convention.
       (("apply")
        (begin (c-op c routine-swap) (c-field c cellular-closure-free0)
-              (c-op1 c routine-tcall (wcell-int 1))))
+              (c-op1 c routine-call (wcell-int 1))))
       (("array-length")
        (begin (c-prim c "%bloblet-fields" 1) (c-int c 1) (c-op c routine-int-sub)))
       (("modulo" "char->integer" "integer->char" "string-append" "string-length" "string-ref"

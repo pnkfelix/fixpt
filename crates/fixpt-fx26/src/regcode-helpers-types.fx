@@ -129,6 +129,11 @@
                                spin)
                        (rgen exp renv cenv bool r-exper r-primer)
                        unit))
+            (val r-frozen-done
+                 (subr (maxeff (alloc @k) (goto @y) (read @globals) (read @k) (read @t) (write @k)
+                               spin)
+                       (rgen int rargs renv cenv bool r-primer)
+                       unit))
             (val r-datum-operand
                  (subr (maxeff (alloc @k) (read @globals) (read @k)) (k-datums int int int) int))
             (val r-flat-tagcase

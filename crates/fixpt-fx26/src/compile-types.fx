@@ -29,6 +29,10 @@
 (define-type k-at (select check-env-types k-at))
 (define-type c-noted (productof (1 k-at) (2 int)))
 (define-type c-by-at (table int (listof c-noted acyclic) @k))
+;; And each call's callee's convention (`n-call`), likewise.
+(define-type k-conv (select check-env-types k-conv))
+(define-type c-conv-noted (productof (1 k-at) (2 k-conv)))
+(define-type c-convs-at (table int (listof c-conv-noted acyclic) @k))
 ;; And what each operation takes (`k-datum`), likewise.
 (define-type c-datum-noted (productof (1 k-at) (2 k-datum)))
 (define-type c-datums-at (table int (listof c-datum-noted acyclic) @k))
@@ -182,6 +186,10 @@
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin) (exp symbol) bool))
             (val c-plain-table (ref c-by-at @k))
             (val c-plain-fx-at (subr (maxeff (read @globals) (read @k)) (int int int) bool))
+            (val c-call-conv
+                 (subr (maxeff (read @globals) (read @k)) (exp) k-conv))
+            (val c-call-conv-at
+                 (subr (maxeff (read @globals) (read @k)) (int int int) k-conv))
             (val c-datum-at
                  (subr (maxeff (alloc @k) (read @globals) (read @k)) (int int int) k-datums))
             (val c-datum-of

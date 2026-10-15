@@ -747,9 +747,11 @@ impl Checker {
         {
             self.facts.apply_shares.insert(e);
         }
-        // A procedure of the other convention is called as through `fx`
-        // (`native ≤ fx`, `cellular ≤ fx`): every call looks at its
-        // callee's kind, as a call through `fx` does.
+        // Called in its callee's convention, which the compilers read
+        // (`NodeFacts::call_conv`).
+        if let Ty::Subr { conv, .. } = callee {
+            self.facts.call_convs.insert(e, conv);
+        }
         if params.len() != args.len() {
             return Err(FxError::at(span, format!("expected {} argument(s), got {}", params.len(), args.len())));
         }

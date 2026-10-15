@@ -501,6 +501,9 @@ pub struct NodeFacts {
     /// procedure may have that list itself, since nothing can write it.
     /// Every other `apply` copies its list.
     pub apply_shares: HashSet<ExpId>,
+    /// Each call's callee's convention, as its type says it
+    /// (`NodeFacts::call_conv`): what the call is compiled in.
+    pub call_convs: HashMap<ExpId, Conv>,
     /// Each top-level definition's value whose type is a list in a frozen
     /// region (`acyclic`, `const`): data nothing writes, which the
     /// compilers may make once, as constant data, where it is made of
@@ -592,6 +595,7 @@ impl NodeFacts {
         self.reshaped.retain(|e, _| e.0 < first);
         self.converted.retain(|e, _| e.0 < first);
         self.apply_shares.retain(|e| e.0 < first);
+        self.call_convs.retain(|e, _| e.0 < first);
         self.frozen_defines.retain(|e| e.0 < first);
         self.fx_plain.retain(|e, _| e.0 < first);
     }
@@ -604,6 +608,18 @@ impl NodeFacts {
     /// convention, or a module reshaped.
     pub fn changed(&self, e: ExpId) -> bool {
         self.converted.contains_key(&e) || self.reshaped.contains_key(&e)
+    }
+
+    /// The convention call `e` is compiled in: its callee's, `cellular` or
+    /// `native`, called as that; or `fx`, where its type says `fx` or a
+    /// convention binder, or nothing was noted, which looks at the
+    /// callee's kind (`docs/research/native-conventions.md`).
+    pub fn call_conv(&self, e: ExpId) -> Conv {
+        match self.call_convs.get(&e) {
+            Some(Conv::Cellular) => Conv::Cellular,
+            Some(Conv::Native) => Conv::Native,
+            _ => Conv::Fx,
+        }
     }
 
     pub fn conversion_code(&self, e: ExpId) -> Option<i64> {

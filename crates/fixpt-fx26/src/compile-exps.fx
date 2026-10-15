@@ -109,7 +109,7 @@
                   ((and (string=? (c-standard-name f e) "apply") (not (c-apply-shares-at a b abk)))
                    (begin (c-exps args e depth c) (c-prim c "%fx26-list-copy" 1)
                           (c-standard-on "apply" 2 c) (c-done c tail)))
-                  (else (c-app f args e depth c tail)))))
+                  (else (c-app x f args e depth c tail)))))
         (e-plambda (d body a b abk) (c-exp body e depth c tail))
         ;; The region's name bound in a slot, as a `let`'s, to a region
         ;; entered (an arena, or a reap), and left with the body's value,
@@ -412,8 +412,8 @@
               (set c-scope-name outer-scope)
               (product (1 w) (2 fv))))))))
   ;;; ------------------------------------------------------------ applications
-  (c-app (subr (maxeff compiles spin) (exp exps cenv int code bool) unit)
-    (lambda (f args e depth c tail)
+  (c-app (subr (maxeff compiles spin) (exp exp exps cenv int code bool) unit)
+    (lambda (x f args e depth c tail)
       (if (c-self-call? f args e tail)
           ;; A loop: the arguments into the parameters' slots, the rest of
           ;; the frame dropped, and back to the start.
@@ -421,16 +421,17 @@
                  (c-loop-stores c (- (get c-this-params) 1) (get c-this-added))
                  (c-drops c (- depth (get c-this-params)))
                  (c-emit c (i-branch (get c-this-start))))
-          (c-app-other f args e depth c tail))))
-  (c-app-other (subr (maxeff compiles spin) (exp exps cenv int code bool) unit)
-    (lambda (f args e depth c tail)
+          (c-app-other x f args e depth c tail))))
+  (c-app-other (subr (maxeff compiles spin) (exp exp exps cenv int code bool) unit)
+    (lambda (x f args e depth c tail)
       (let ((k (c-lifted-at f e)) (standard (c-standard-name f e)))
         (cond ((>= k 0) (c-app-lifted k args e depth c tail))
               ((string=? standard "")
                (let ((n (c-exps args e depth c)))
                  (begin (c-exp f e (+ depth n) c #f)
-                        ;; The checker typed the callee a subroutine: a typed call.
-                        (c-typed-call c n tail))))
+                        ;; In the callee's convention, as its type says
+                        ;; (`c-call-conv`).
+                        (c-call-in c n tail (c-call-conv x)))))
               ;; A quoted datum (TODO §51): made once, here, where it is all
               ;; literals; else built as written.
               ((and (string=? standard "%quote") (= (c-count-exps args) 1)

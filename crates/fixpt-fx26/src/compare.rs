@@ -121,7 +121,7 @@ pub fn both_compilers_declining(s: &mut Fx26Session, text: &str) -> R<(Result<St
     let limit = s.step_limit();
     s.scheme.engine.set_step_limit(None);
     let out = s.scheme.scope(|sc| {
-        let facts = crate::syn::rust_facts(sc, FileId(0), text)?;
+        let facts = crate::syn::rust_facts_in(sc, FileId(0), text, c.conv_default)?;
         let fx26 = crate::syn::compile_to_word_with_registers(sc, FileId(0), text, facts)?;
         let fx26 = fx26.map(|w| {
             let mut shown = String::new();

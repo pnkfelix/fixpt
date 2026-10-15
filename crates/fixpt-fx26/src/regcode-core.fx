@@ -103,13 +103,8 @@
               (begin (r-lambda g ps body env te (the syms nil) (r-just-exp r) #f) (r-done g tail)))
             (else y (r-decline))))
         (e-sum (t v a b abk)
-          (begin
-            (r-make-frozen g 36 (r-args-2 (a-v (wcell-symbol t)) (a-e v)) env te)
-            (r-done g tail)))
-        (e-product (fs a b abk)
-          (begin
-            (r-make-frozen g 37 (r-field-args fs) env te)
-            (r-done g tail)))
+          (r-frozen-done g 36 (r-args-2 (a-v (wcell-symbol t)) (a-e v)) env te tail r-prim))
+        (e-product (fs a b abk) (r-frozen-done g 37 (r-field-args fs) env te tail r-prim))
         (e-bloblet (op i args got a b abk) (r-bloblet g x env te tail r-exp r-prim))
         (e-prompt (t body h a b abk)
           (let ((ops (r-args-3 (a-e t) (a-e h) (a-thunk body))))

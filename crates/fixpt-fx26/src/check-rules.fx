@@ -427,7 +427,7 @@
            (let* ((c (car callee))
                   (e (k-app-args args (extract c 2) 0 done (extract rf 2))))
              (begin
-               (k-note-apply-shares x f (extract c 2))
+               (k-note-call x f ft (extract c 2))
                (k-app-result x f ft args e (extract c 1) (extract c 3)))))))))
   ;; A call's type and effect, once its arguments have effect `e`: its
   ;; callee's latent effect too, `spin` where the call may loop, and what

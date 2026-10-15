@@ -4,7 +4,7 @@
 
 ;; The types these use, from the files that define them.
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
-(import check-types-types (type k-ds k-ids k-names k-at))
+(import check-types-types (type k-ds k-ids k-names k-at k-conv))
 (hide (define table-types (load-module "fx26:table-types.fx")))
 (define-type table (select table-types table))
 ;; Bindings, as lists of them are passed around.
@@ -50,7 +50,9 @@
   ;; A definition's value that is a list nothing writes.
   (n-frozen-define)
   ;; A `(with #%fx n)` that is the plain `n`.
-  (n-plain-fx))
+  (n-plain-fx)
+  ;; A call: its callee's convention, which it is compiled in.
+  (n-call k-conv))
 ;; Each keyed by the expression (its identity, `k-at`).
 (define-type k-fact (productof (1 k-at) (2 k-noted)))
 (define-type k-facts (listof k-fact acyclic))

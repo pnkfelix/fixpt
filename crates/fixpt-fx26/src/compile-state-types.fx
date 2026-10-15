@@ -21,7 +21,7 @@
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type k-ids (select check-types-types k-ids))
 (hide (define check-env-types (load-module "fx26:check-env-types.fx")))
-(import check-env-types (type k-pick k-picks))
+(import check-env-types (type k-pick k-picks k-conv))
 (define-type loc (select compile-types loc))
 (define-type compile-state-sig
   (moduleof (val c-defining (ref (listof symbol @k) @k))
@@ -143,6 +143,10 @@
             (val c-typed-call
                  (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
                        (code int bool)
+                       unit))
+            (val c-call-in
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                       (code int bool k-conv)
                        unit))
             (val c-reshape-fields
                  (subr (maxeff (alloc @k)

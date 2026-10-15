@@ -142,6 +142,27 @@
 (define c-apply-shares-at (subr (maxeff (read @globals) (read @k)) (int int int) bool)
   (lambda (a b k) (>= (c-noted-at (get c-shares-table) a b k -1) 0)))
 
+;; Each call's callee's convention (`n-call`), by where it starts.
+(define c-call-table (ref c-convs-at @k) (new (make-table c-int-hash c-int=?)))
+(define c-conv-in
+  (subr (maxeff (read @globals) (read @k)) ((listof c-conv-noted acyclic) int int int) k-conv)
+  (lambda (ns a b k)
+    (cond ((null? ns) (cv-fx))
+          ((k-at-is? (extract (car ns) 1) a b k) (extract (car ns) 2))
+          (else (c-conv-in (cdr ns) a b k)))))
+;; The convention call `x` is compiled in: its callee's, `cellular` or
+;; `native`; or `fx`, which looks at the callee's kind, where its type says
+;; `fx` or a convention binder, or nothing was noted (Rust's
+;; `NodeFacts::call_conv`).
+(define c-call-conv-at (subr (maxeff (read @globals) (read @k)) (int int int) k-conv)
+  (lambda (a b k)
+    (let ((ns (table-ref (get c-call-table) a nil)))
+      (if (null? ns)
+          (cv-fx)
+          (tagcase (c-conv-in ns a b k)
+            (cv-cellular () (cv-cellular)) (cv-native () (cv-native)) (else y (cv-fx)))))))
+(define c-call-conv (subr (maxeff (read @globals) (read @k)) (exp) k-conv)
+  (lambda (x) (c-call-conv-at (exp-start x) (exp-end x) (exp-kth x))))
 ;; What the checker found the operation `a` `b` `k` takes (`k-datum`), in a
 ;; list of one; none if nothing.
 (define c-datum-in
@@ -450,6 +471,12 @@
               (n-frozen-define () (c-note! (get c-frozen-table) at 0))
               (n-plain-fx () (c-note! (get c-plain-table) at 0))
               (n-conversion (code) (c-note! (get c-convert-table) at code))
+              (n-call (cv)
+                (let ((a (extract at 1)))
+                  (table-set! (get c-call-table) a
+                              (the (listof c-conv-noted acyclic)
+                                (cons (product (1 at) (2 cv))
+                                      (table-ref (get c-call-table) a nil))))))
               ;; The greatest summary, per expression.
               (n-summary (s)
                 (let ((known (c-noted-at (get c-summary-table) (extract at 1) (extract at 2)
@@ -468,6 +495,7 @@
     (begin
       (set c-facts fs)
       (set c-fact-table (make-table c-int-hash c-int=?))
+      (set c-call-table (make-table c-int-hash c-int=?))
       (set c-convert-table (c-new-by-at))
       (set c-shares-table (c-new-by-at))
       (set c-frozen-table (c-new-by-at))

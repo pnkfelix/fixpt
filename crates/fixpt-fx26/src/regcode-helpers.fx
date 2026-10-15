@@ -447,6 +447,11 @@
       (a-e (x) (begin (r-exp g x env te #f) #t))
       (a-slot (s) (begin (r-opn g rop-stack s) #t))
       (else y #f))))
+;; A frozen value of layout `tag` made, `args` its fields; then done.
+(define r-frozen-done (subr rcompiles (rgen int rargs renv cenv bool r-primer) unit)
+  (lambda (g tag args env te tail r-prim)
+    (begin (r-prim g "%make-frozen" (the rargs (cons (a-v (wcell-int tag)) args)) env te)
+           (r-done g tail))))
 ;; The operand of what the checker found the operation `a` `b` `k` takes,
 ;; holding `got` if it is a form kept to be inlined (`k-datum-operand`).
 (define r-datum-operand

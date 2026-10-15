@@ -352,6 +352,14 @@
 (define c-typed-call (subr c-emits (code int bool) unit)
   (lambda (c n tail)
     (if tail (c-op1 c routine-ttailcall (wcell-int n)) (c-op1 c routine-tcall (wcell-int n)))))
+;; A call of `n` arguments in convention `cv`: of a cellular closure, a
+;; typed call; else the call that looks at the callee's kind (Rust's
+;; `Compiler::app`).
+(define c-call-in (subr c-emits (code int bool k-conv) unit)
+  (lambda (c n tail cv)
+    (tagcase cv
+      (cv-cellular () (c-typed-call c n tail))
+      (else y (c-op1 c (if tail routine-tailcall routine-call) (wcell-int n))))))
 
 ;; The name `(with m body)` is the standard binding of, if `m` is `#%fx`
 ;; (where nothing shadows it, the checker made it the plain name), else "".

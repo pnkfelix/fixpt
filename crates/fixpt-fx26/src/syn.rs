@@ -435,9 +435,16 @@ pub fn read_to_syns_at(scheme: &mut Session, file: FileId, text: &str, at: i64) 
 /// What the Rust checker finds about `text` that the compiler written in
 /// FX-26 needs, as `checked-extracts` would give it: each `extract`'s
 /// field, keyed by where it is, in characters. A handle in the caller's
-/// scope; or the check's error.
+/// scope; or the check's error. In the cellular convention.
 pub fn rust_facts(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
-    let mut c = crate::Checker::new();
+    rust_facts_in(scheme, file, text, crate::ast::Conv::Cellular)
+}
+
+/// [`rust_facts`] of a program of convention `conv`, as its own checker
+/// (`Fx26Session::fresh_checker`) checks it: what each call is compiled in
+/// follows.
+pub fn rust_facts_in(scheme: &mut Session, file: FileId, text: &str, conv: crate::ast::Conv) -> R<Handle> {
+    let mut c = crate::Checker::with_convention(conv);
     c.base_dir = LOAD_BASE.with(|b| b.borrow().clone());
     let forms = c.read_in(file, text)?;
     let done = c.declare_ahead(&forms)?;
@@ -476,6 +483,8 @@ pub fn rust_facts(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
         None,
         Int(i64),
         Datum(crate::check::Datum),
+        // A sum of no fields, by its constructor's name.
+        Tag(&'static str),
     }
     let facts: Vec<(At, &str, Noted)> = c.facts.datum.iter().map(|(e, d)| (place(*e), "n-datum", Noted::Datum(*d))).collect();
     // And each expression's effect summary: the greatest of its effects'.
@@ -496,6 +505,15 @@ pub fn rust_facts(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
         .chain(c.facts.frozen_defines.iter().map(|e| (place(*e), "n-frozen-define", Noted::None)))
         // And each `(with #%fx n)` that is the plain `n` (`k-synth-fx`).
         .chain(c.facts.fx_plain.keys().map(|e| (place(*e), "n-plain-fx", Noted::None)))
+        // And each call's convention, a `k-conv` (`k-note-call`).
+        .chain(c.facts.call_convs.keys().map(|e| {
+            let cv = match c.facts.call_conv(*e) {
+                crate::ast::Conv::Cellular => "cv-cellular",
+                crate::ast::Conv::Native => "cv-native",
+                _ => "cv-fx",
+            };
+            (place(*e), "n-call", Noted::Tag(cv))
+        }))
         .collect();
     // A datatype's value: a sum of its constructor's name and the product
     // of its fields.
@@ -557,6 +575,7 @@ pub fn rust_facts(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
         let fields = match value {
             Noted::None => Vec::new(),
             Noted::Int(n) => vec![int(scheme, n)],
+            Noted::Tag(name) => vec![sum(scheme, name, &[])?],
             // A `k-datum`, `parser-types.fx`'s.
             Noted::Datum(d) => {
                 let (name, ns) = match d {

@@ -2562,7 +2562,17 @@ generator reads, structured (step 6; today one string a clause,
   noted (`conversion_code`, `k-convert-at`), and each compiler compiles
   `cellular` with no check, `native` directly (on the cellular machines,
   straight to the Rust machine's `call_native`), `fx` as now. Untyped
-  calls keep theirs.
+  calls keep theirs. Begun (2026-10-15): both checkers note each call's
+  convention (`NodeFacts::call_conv`, `n-call`), and both compilers' stack
+  code calls a `cellular` callee by `tcall`, anything else by `call`, which
+  looks (`fx`, a convention binder, `native` for now; `apply` of a `vsubr`,
+  whose type says none). Left, in order: a declined definition on the
+  native-convention machine converted to the convention its type says
+  (else its type says `native` and its value is cellular); then `tcall`
+  without its check on every machine (the Rust one refusing a mismatch),
+  register code's `invoke` given the convention (`direct.rs` compiles from
+  register code, so it cannot decline such calls), a direct `native` call
+  from cellular code, and `direct.rs` calling by convention.
 Fixed (2026-10-14), found by made procedures: on the arm64 cellular
 machines a typed tail call of a native closure stopped ("no routine is
 numbered 40": the Rust machine made the call, then returned from the word,

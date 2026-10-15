@@ -9,7 +9,7 @@
 //! `tailcall`. A variable is resolved once: to a slot, a free value, a
 //! global's cell, or, for `letrec`'s, a box in a slot or free value.
 
-use crate::ast::{ArmBind, BlobletOp, Exp, ExpId, ModItem, TyId};
+use crate::ast::{ArmBind, BlobletOp, Conv, Exp, ExpId, ModItem, TyId};
 use std::collections::HashMap;
 use crate::check::{Checker, Datum};
 use crate::top::Top;
@@ -1611,8 +1611,16 @@ impl<'a> Compiler<'a> {
             None => {
                 let n = self.exps(args, e, depth, code)?;
                 self.exp(f, e, depth + n, code, false)?;
-                // The checker typed the callee a subroutine: a typed call.
-                self.op1(code, if tail { "ttailcall" } else { "tcall" }, Value::fixnum(n as i64));
+                // In the callee's convention, as its type says
+                // (`NodeFacts::call_conv`): a cellular closure, called as one;
+                // anything else, by the call that looks at the callee's kind.
+                let op = match (self.c.facts.call_conv(x), tail) {
+                    (Conv::Cellular, false) => "tcall",
+                    (Conv::Cellular, true) => "ttailcall",
+                    (_, false) => "call",
+                    (_, true) => "tailcall",
+                };
+                self.op1(code, op, Value::fixnum(n as i64));
             }
             // A quoted datum (TODO §51): made once, here, where it is all
             // literals; else built as written.
@@ -1957,11 +1965,12 @@ impl<'a> Compiler<'a> {
             }
             // `(apply f xs)`: `f` is a `vsubr`, a closure of `%vlambda`'s
             // over the procedure of one list, free value 0; that procedure,
-            // called with `xs`.
+            // called with `xs`, by the call that looks at its kind: a
+            // `vsubr`'s type says no convention.
             "apply" => {
                 self.op(code, "swap");
                 self.op1(code, "field", Value::fixnum(fixpt_heap::layout::cellular::CLOSURE_FREE0 as i64));
-                self.op1(code, "tcall", Value::fixnum(1));
+                self.op1(code, "call", Value::fixnum(1));
             }
             "array-length" => {
                 self.prim(code, "%bloblet-fields", 1)?;
