@@ -2526,6 +2526,8 @@ recovered (`DONE.md` §93). Left:
 
 ## 97. Code bloblets a program makes and runs (kayak's request, 2026-10-14)
 
+Design: `docs/research/declared-conventions.md` (its steps are the plan).
+
 Kayak is writing FX-26's native code generators in KFX, which may use only
 what FX-26 has, and FX-26 has no way to place machine code it made and run
 it. Asked for, as our own code is (`docs/object-model.md`, "A collected
