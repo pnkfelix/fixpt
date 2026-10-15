@@ -146,6 +146,10 @@ are in the last section, "Log: the glance's details", and in
   a `sendable` kind; preemption at fuel polls on every machine (Q2); and
   process monitors (kayak's, `DONE.md` §94), a `race` losing a failed
   branch.
+- **Code bloblets a program makes and runs, kayak's request**
+  (2026-10-14, `TODO.md` §97): asked for, not started; layer 1 (make,
+  seal, a procedure at a stated type under `(io native)`) proposed now,
+  with a leaf contract, and the full native contract later.
 - **Cellular code calling native code** (2026-10-13, `TODO.md` §93):
   fixed, a crash on the REPL's machine where the native convention
   declined a form; its cost to assembling words mostly recovered (peval's

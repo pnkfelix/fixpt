@@ -2523,3 +2523,57 @@ recovered (`DONE.md` §93). Left:
   `whole-captures.fx` crosses 200 deep, as a test thread's stack allows.
   And the evaluator written in FX-26 recurses on the host's stack too, so
   `programs/native/captures.fx`'s 20 000-deep case overflows it.
+
+## 97. Code bloblets a program makes and runs (kayak's request, 2026-10-14)
+
+Kayak is writing FX-26's native code generators in KFX, which may use only
+what FX-26 has, and FX-26 has no way to place machine code it made and run
+it. Asked for, as our own code is (`docs/object-model.md`, "A collected
+code area"): code beside its fields, in the code area mapped twice.
+- **Layer 1, the smallest useful.** Make a code bloblet in the code area,
+  given its fields (traced values) and its suffix's size; write the suffix
+  with the existing suffix writes; seal it (the suffix frozen, the header's
+  bit 13, which `set_bloblet_byte` already refuses past; the instruction
+  cache flushed; runnable); make a procedure of a sealed one at a type the
+  program states, with an effect of its own, `(io native)`, or a
+  capability; and ask whether this machine runs native code at all.
+- **Layer 2, the contract** native code needs beyond leaf arithmetic,
+  part of FX-26's definition so that the same code runs on fixpt and on
+  kayak's runtime: the value layout (`layout.rs`), argument, result,
+  closure and pinned registers, call-outs (allocation, collection,
+  primitives, failure), how frames are described to the collector, fuel.
+  The native convention (`docs/research/native-conventions.md`) the
+  candidate.
+
+Kayak's questions, and the answers proposed (not yet decided with the
+user):
+- **Both layers, or the first now?** The first now, with a *leaf
+  contract* written down for it: arguments in `x0`–`x7` and the result in
+  `x0`, tagged values as `layout.rs` says; callee-saved registers kept (the
+  pinned ones are among them); its own fields read PC-relatively, and
+  values' fields and suffixes read by the layout; no allocation, no calls,
+  no stores of pointers into the heap (the write barrier is part of layer
+  2), so no safepoint, and the collector never runs inside it. Not
+  preempted: a loop in it holds its scheduler, as `(io native)` says
+  anything may. The second later, once the native convention stops
+  moving: its frames changed last on 2026-10-12 (§91), and raw `f64`s are
+  still being decided; written then as a chapter of `docs/fx26.md`, with a
+  conformance test both implementations run.
+- **First-class, or called through a primitive?** First-class, a `subr`
+  of the native convention at the stated type, latent effect included:
+  every machine already calls native closures (cellular ones through the
+  Rust machine, §93), so nothing new is needed to call one; and only the
+  making carries `(io native)`, where the stated type is trusted. An
+  effect over a capability: it is how FX-26 makes every other outside
+  power visible, and both checkers see it; a capability can come later as
+  a handle on top, if a program must hand the power on.
+- **Meeting the collector?** As ours do: in the code area, never moving,
+  mark-swept, fields updated in place, the procedure holding its code
+  bloblet in a field so that it lives while the procedure does. A heap
+  image carries no code area yet, so making an image of a program holding
+  one is refused until images carry it.
+- **A test in fixpt?** Yes: an FX-26 program that assembles a leaf adding
+  two fixnums and one returning its own field across a collection that
+  moves the field's value (as `fixpt-native/tests/code_exec.rs` does from
+  Rust), run on every machine; the no-native-code branch run by a switch
+  that turns native code off.
