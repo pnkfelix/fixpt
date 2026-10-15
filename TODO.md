@@ -2553,10 +2553,6 @@ generator reads, structured (step 6; today one string a clause,
   - What an operation needs, within a fact (`n-datum`), still told apart
     by the operation and by ranges: a blobref's field offset past `2^40`
     (`check::BLOBREF_FIELD`), a flat array's `n << 32 | size`.
-- **The native-convention machine hides the FX-26 checker's refusals**
-  (found 2026-10-14): a definition that checker refuses is "declined" and
-  runs another way, so where the two checkers disagree on a form, that
-  machine says nothing (it hid the `load-input` bug, `DONE.md` §97).
 - **More routines** a generator will want: allocating a bloblet, calling a
   primitive by name (its number is fixpt's own), making a closure.
 - **Calls do not use the convention their type says** (the user's

@@ -135,7 +135,8 @@ watch). B changes the most and fixes nothing A and C leave.
 
 Independently: the native machine should not treat a checker's refusal
 as a decline (`TODO.md` §97); a refusal there is a disagreement between
-the checkers, which the test suite should see.
+the checkers, which the test suite should see. (Done, 2026-10-15: an
+error saying so.)
 
 ## Decided: C first, as identities that are spans (2026-10-15)
 

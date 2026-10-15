@@ -1240,8 +1240,11 @@ impl Fx26Session {
         init: &str,
         run: NativeRunner,
     ) -> R<Result<(), NativeRun>> {
+        // The Rust checker took the form: the checker written in FX-26
+        // refusing it is the two disagreeing, said, not a reason to run it
+        // another way, which would hide it (`TODO.md` §97).
         if let Err(why) = crate::syn::check_only(&mut self.scheme, standard, FileId(0), form)? {
-            return Ok(Err(NativeRun::Declined(format!("check: {why}"))));
+            return Err(FxError::at(Span::new(FileId(0), 0, 0), format!("the checkers disagree: the Rust checker takes `{name}`'s definition, and the one written in FX-26 refuses it: {why}")));
         }
         // The value is checked again below, as an expression (and, if the
         // native compiler declines it, the definition as cellular code):

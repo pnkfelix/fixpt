@@ -2549,3 +2549,8 @@ Still open in `TODO.md` §97; done so far:
   read; no longer a load that meant the module only to a parser in a state
   of its own (`sharing_now`, `sharing-now`, gone). The native machine no
   longer declines a `load-input`'s hidden global.
+- **The native-convention machine says where the checkers disagree**
+  (found 2026-10-14, fixed 2026-10-15): a definition the Rust checker
+  took and the one written in FX-26 refused was "declined" and run another
+  way, which hid the `load-input` bug; it is now an error saying the two
+  disagree (`native_define_in`). No test program makes one.
