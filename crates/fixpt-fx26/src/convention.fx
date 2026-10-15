@@ -198,7 +198,7 @@
                (delta (at "delta")) (code-lo (at "code-lo")) (trap-stub (at "trap-stub"))
                (foreign (at "foreign")) (closure (at "closure")) (cards (at "cards"))
                (stack-limit (at "stack-limit")) (overflow (at "overflow")) (poll (at "poll"))
-               (cons (at "cons"))))))
+               (cons (at "cons")) (bloblet (at "bloblet"))))))
 (define cv-routine-of (subr cvr (cv-sxs cv-sxs) cv-routine)
   (lambda (r st)
     (product (entry (cx-state-at r "entry" st)) (in (cx-in (cx-get r "in")))
@@ -219,6 +219,7 @@
                (overflow (cv-overflow-of (cx-get rt "overflow") st))
                (poll (cv-routine-of (cx-get rt "poll") st))
                (cons (cv-routine-of (cx-get rt "cons") st))
+               (bloblet (cv-routine-of (cx-get rt "bloblet") st))
                (trap (product (entry (cx-state-at t "entry" st))
                               (kind (cx-reg-at (cx-get t "in") "kind"))
                               (kinds (cx-numbered (cx-get t "kinds")))))))))
@@ -287,7 +288,7 @@
             (f "foreign" (extract s foreign)) (f "closure" (extract s closure))
             (f "cards" (extract s cards)) (f "stack-limit" (extract s stack-limit))
             (f "overflow" (extract s overflow)) (f "poll" (extract s poll))
-            (f "cons" (extract s cons))))))
+            (f "cons" (extract s cons)) (f "bloblet" (extract s bloblet))))))
 ;; The name of the field at `k` in `ns`; "" if none is.
 (define cv-name-at (subr cvr (cv-names int) string)
   (lambda (ns k)
@@ -395,6 +396,9 @@
                                     (extract rg link))
                     (cv-pr-routine "poll" (extract rs poll) sn (list "(traps-when-spent 1)"))
                     (cv-pr-routine "cons" (extract rs cons) sn nil)
+                    (cv-pr-routine "bloblet" (extract rs bloblet) sn
+                                   (list "(makes (kind bloblet) (trailer 1) zeroed)"
+                                         "(traps-when-refused 3)"))
                     (let ((t (extract rs trap)))
                       (cv-par "trap"
                               (list (cv-pr-entry sn (extract t entry))

@@ -44,7 +44,7 @@
     (fuel 24) (reserve 552) (trap 32) (pc 40) (args 48) (nargs 192) (aux 184) (callout 112)
     (rust-sp 0) (native-sp 136) (fp 144) (top 152) (words 160) (alloc-limit 168) (code 176)
     (clo 200) (delta 208) (code-lo 216) (trap-stub 280) (foreign 288) (closure 296) (cards 304)
-    (stack-limit 16) (overflow 480) (poll 560) (cons 568))
+    (stack-limit 16) (overflow 480) (poll 560) (cons 568) (bloblet 576))
   (routines
     (foreign
       (entry state foreign) (in (closure x10) (count x9) (arguments x1 x2 x3 x4 x5 x6 x7 x8))
@@ -55,6 +55,9 @@
       (keeps x0 x1 x2 x3 x4 x5 x6 x7 x8 x9 x10))
     (poll (entry state poll) (in) (may-collect) (traps-when-spent 1))
     (cons (entry state cons) (in (car x1) (cdr x2)) (out x0) (may-collect))
+    (bloblet
+      (entry state bloblet) (in (bytes x1) (fields x2)) (out x0) (may-collect)
+      (makes (kind bloblet) (trailer 1) zeroed) (traps-when-refused 3))
     (trap
       (entry state trap-stub) (in (kind x9))
       (kinds

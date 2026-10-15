@@ -185,9 +185,11 @@ struct DState {
     reserve: u64,
     /// The machine's routines for code a program made (`TODO.md` §97,
     /// `declare.rs`), where they run: a poll at a spent time slice
-    /// (`common_poll`), and a pair made (`common_cons`).
+    /// (`common_poll`), a pair made (`common_cons`), and a bloblet
+    /// (`common_bloblet`).
     poll: u64,
     cons: u64,
+    bloblet: u64,
 }
 
 /// What the stack cache did: overflows and collections, and the frames and
@@ -227,6 +229,7 @@ const POLL: usize = 4;
 const POLL_DONE: usize = 5;
 const REINSTATE: usize = 7;
 const CONS: usize = 8;
+const BLOBLET: usize = 9;
 const FAILED: usize = 6;
 /// A poll's frame (`emit_poll`), laid out as a procedure's: its link, its
 /// second word, its map, eleven values (x0…x8 where they hold values, the
@@ -335,6 +338,10 @@ const DIVIDED_BY_ZERO: u32 = 5;
 #[derive(Copy, Clone)]
 enum Callout {
     Cons,
+    /// A plain bloblet of `bytes` suffix bytes and `fields` fields (two
+    /// fixnums), for code a program made (`common_bloblet`); refused, by
+    /// the trap, for sizes `%make-bloblet-filled` refuses.
+    Bloblet,
     Prim { p: usize, n: usize },
     Closure { n: usize },
     /// The same, over the state's `nargs` values: the machine's common
@@ -406,7 +413,7 @@ enum Callout {
 impl Callout {
     fn arity(self) -> usize {
         match self {
-            Callout::Cons | Callout::FieldRef | Callout::Abort | Callout::Reinstate | Callout::FirstMark | Callout::MarksOf => 2,
+            Callout::Cons | Callout::Bloblet | Callout::FieldRef | Callout::Abort | Callout::Reinstate | Callout::FirstMark | Callout::MarksOf => 2,
             Callout::Capture { whole } => if whole { 1 } else { 2 },
             Callout::CurrentMarks | Callout::Box { .. } | Callout::Unbox | Callout::BoxF64 => 1,
             Callout::Foreign | Callout::ClosureAny | Callout::Rest | Callout::Underflow | Callout::Overflow | Callout::Poll | Callout::PollDone | Callout::Failed => 0,
@@ -474,6 +481,7 @@ struct Runner {
     overflow: u64,
     poll: u64,
     cons: u64,
+    bloblet: u64,
     table: u64,
     /// The stack cache's size, and the most its chain may hold, in words.
     cache_words: u64,
@@ -768,6 +776,7 @@ pub struct DirectMachine {
     overflow: Offset,
     poll: Offset,
     cons: Offset,
+    bloblet: Offset,
     cache_words: u64,
     max_words: u64,
     /// What each call-out any compiled code makes does, by number.
@@ -819,7 +828,8 @@ impl DirectMachine {
         // 4 and 5: a time slice's end at a poll, and its call of `preempt`
         // returned (`POLL`, `POLL_DONE`); 6: a trap (`FAILED`); 7: a
         // continuation given a value (`REINSTATE`); 8: a pair made, for
-        // code a program made (`common_cons`, `CONS`).
+        // code a program made (`common_cons`, `CONS`); 9: a bloblet made,
+        // for it too (`common_bloblet`, `BLOBLET`).
         let callouts = vec![
             Callout::Foreign,
             Callout::ClosureAny,
@@ -830,6 +840,7 @@ impl DirectMachine {
             Callout::Failed,
             Callout::Reinstate,
             Callout::Cons,
+            Callout::Bloblet,
         ];
         let code = common_foreign(0);
         let foreign = space.alloc(4 * code.len(), 16).ok_or("no room for the common foreign call")?;
@@ -855,6 +866,10 @@ impl DirectMachine {
         let cons = space.alloc(4 * code.len(), 16).ok_or("no room for the common cons")?;
         space.write_code(cons, &code);
         space.flush(cons, 4 * code.len());
+        let code = common_bloblet();
+        let bloblet = space.alloc(4 * code.len(), 16).ok_or("no room for the common bloblet")?;
+        space.write_code(bloblet, &code);
+        space.flush(bloblet, 4 * code.len());
         let stub = |at: usize, len: usize, what: &str| crate::symbols::note(space.exec_addr(at), 4 * len, &format!("native convention: {what}"));
         stub(underflow, common_underflow(2).len(), "stack cache underflow");
         stub(overflow, common_overflow(3).len(), "stack cache overflow");
@@ -865,6 +880,7 @@ impl DirectMachine {
         stub(closure, common_closure(1).len(), "common closure");
         stub(poll, common_poll().len(), "common poll");
         stub(cons, common_cons().len(), "common cons");
+        stub(bloblet, common_bloblet().len(), "common bloblet");
         let (cache_words, max_words) = stack_words_wanted();
         Ok(DirectMachine {
             space,
@@ -877,6 +893,7 @@ impl DirectMachine {
             overflow,
             poll,
             cons,
+            bloblet,
             cache_words,
             max_words,
             callouts,
@@ -978,6 +995,7 @@ impl DirectMachine {
             overflow: self.space.exec_addr(self.overflow) as u64,
             poll: self.space.exec_addr(self.poll) as u64,
             cons: self.space.exec_addr(self.cons) as u64,
+            bloblet: self.space.exec_addr(self.bloblet) as u64,
             table: self.callouts.as_ptr() as u64,
             cache_words: self.cache_words,
             max_words: self.max_words,
@@ -1044,7 +1062,7 @@ fn run(r: &Runner, rt: &mut fixpt_runtime::Runtime, p: Compiled, args: &[Value],
     st.delta = target.wrapping_sub(p.code.raw());
     st.code_lo = rt.heap.code_area_address() as u64;
     (st.mark_ret, st.trap_stub, st.foreign, st.closure) = (r.mark_ret, r.trap_stub, r.foreign, r.closure);
-    (st.poll, st.cons) = (r.poll, r.cons);
+    (st.poll, st.cons, st.bloblet) = (r.poll, r.cons, r.bloblet);
     // SAFETY: the trampoline follows the C convention, saves what it
     // must, runs on the machine's stack from `top` (which outlives the
     // call, and which nothing else uses below `top` while it runs),
@@ -1254,6 +1272,41 @@ fn common_cons() -> Vec<u32> {
     pop_frame(&mut a, STUB_FRAME);
     a.e(ret());
     a.finish().expect("labels bound")
+}
+
+/// The common bloblet, for code a program made (`TODO.md` §97): from its
+/// call, by `blr`, the suffix's bytes in X1 and the count of fields in X2,
+/// fixnums; every value it keeps in its frame, as for `common_cons`. A
+/// stub's frame, and call-out `BLOBLET`, which may collect; a plain bloblet
+/// in `RESULT`, its trailer field 1, fields 2 on the fixnum 0, its suffix
+/// zero; or, for sizes it refuses, the trap.
+fn common_bloblet() -> Vec<u32> {
+    let mut a = Asm::new();
+    push_frame(&mut a, LINK, STUB_FRAME);
+    let args = offset_of!(DState, args) as u32;
+    a.e(str(1, ST, args));
+    a.e(str(2, ST, args + 8));
+    call_out(&mut a, BLOBLET);
+    a.e(ldr(X9, ST, st_off(offset_of!(DState, trap))));
+    let (failed, stub) = (a.label(), a.label());
+    a.e(cmp_imm(X9, 0));
+    a.to(failed, Fix::If(Cond::Ne));
+    pop_frame(&mut a, STUB_FRAME);
+    a.e(ret());
+    a.bind(failed);
+    a.to(stub, Fix::Bl);
+    a.bind(stub);
+    a.e(movz(X9, PRIM_FAILED, 0));
+    a.e(ldr(X16, ST, st_off(offset_of!(DState, trap_stub))));
+    a.e(br(X16));
+    a.finish().expect("labels bound")
+}
+
+/// What `%make-bloblet-filled` accepts: a suffix of 0 to 4 GiB, and a
+/// count of fields under 2^40; else none.
+fn bloblet_sizes(bytes: Value, fields: Value) -> Option<(usize, usize)> {
+    let (b, f) = (bytes.is_fixnum().then(|| bytes.as_fixnum())?, fields.is_fixnum().then(|| fields.as_fixnum())?);
+    ((0..=u32::MAX as i64).contains(&b) && (0..1 << 40).contains(&f)).then_some((b as usize, f as usize))
 }
 
 /// The common call of what is not native code: from a code's stub for
@@ -4613,6 +4666,15 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
     }
     let out = match c {
         Callout::Cons => rt.heap.cons(args[0], args[1]).raw(),
+        Callout::Bloblet => match bloblet_sizes(args[0], args[1]) {
+            Some((bytes, fields)) => rt.heap.make_bloblet(fixpt_heap::layout::kind("bloblet"), fields, bytes, true).raw(),
+            None => {
+                let (b, f) = (fixpt_engine::cellular::describe(rt, args[0]), fixpt_engine::cellular::describe(rt, args[1]));
+                LAST_MESSAGE.with(|c| *c.borrow_mut() = Some(format!("bloblet: no bloblet of {b} bytes and {f} fields")));
+                st.trap = PRIM_FAILED as u64;
+                0
+            }
+        },
         Callout::Box { signed } => {
             let bits = args[0].raw();
             fixpt_runtime::integer_value(rt, if signed { bits as i64 as i128 } else { bits as i128 }).raw()

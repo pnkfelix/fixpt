@@ -2644,3 +2644,16 @@ Still open in `TODO.md` §97; done so far:
   bytecode VM's `*` is its primitive object, which native code's
   `foreign` refused ("a call of what is not a procedure"); a simple
   primitive now runs as it is (`cellular::call_value`).
+- **A bloblet made by made code: the `bloblet` routine** (2026-10-15).
+  At the state's field `bloblet`, as `cons` is: from `blr`, the suffix's
+  bytes in `x1` and the count of fields in `x2`, fixnums; a stub's frame
+  and call-out 9 (`common_bloblet`, `Callout::Bloblet`), which may
+  collect; a plain bloblet in `x0` (kind `bloblet`, its trailer field 1,
+  the rest the fixnum 0, its suffix zero), as `%make-bloblet-filled`
+  makes; for sizes that refuses, the trap (`a primitive failed`). The
+  declaration states it, `(makes (kind bloblet) (trailer 1) zeroed)` and
+  `(traps-when-refused 3)`, and a `convention` holds it. Test:
+  `programs/made-code/allocated.fx`, `(pack s k)` made from the
+  convention: `s` and `k` stored in the fields, each store marking its
+  card; twenty thousand kept across collections; a size of -1 refused;
+  on every machine and stressed (`a_bloblet_made_by_the_routine`).

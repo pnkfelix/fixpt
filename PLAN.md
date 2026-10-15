@@ -151,8 +151,9 @@ are in the last section, "Log: the glance's details", and in
   `seal-code`, `native-procedure` at a stated type under `(io native)`,
   and `native-code?`, on every machine; the native contract declared
   (`define-convention`, checked against fixpt's generated declaration by
-  both checkers); code that is not a leaf (frames, `cons`, `poll`); calls
-  compiled by the convention their type says (2026-10-15): noted by both
+  both checkers); code that is not a leaf (frames, `cons`, `bloblet`,
+  `poll`); calls compiled by the convention their type says
+  (2026-10-15): noted by both
   checkers, `tcall` and register code's `cellular` `invoke` unchecked,
   native code's `native` calls direct, a value typed `native` always a
   native closure (`nclosure`); and the declaration as data a generator

@@ -162,3 +162,25 @@ fn a_primitive_reached_through_a_field() {
         assert_eq!(values_with(m, "linked.fx", 3, &stress), want, "{m}, stressed");
     }
 }
+
+/// A bloblet made by made code, by the convention's `bloblet` routine
+/// (`programs/made-code/allocated.fx`): its fields stored, twenty thousand
+/// kept across the collections their making makes, and a size it refuses,
+/// the trap.
+#[test]
+fn a_bloblet_made_by_the_routine() {
+    let want = ["\"made 24 24\"", "1000000"];
+    let refused = "no bloblet of -1 bytes and 2 fields";
+    let runs: Vec<_> = machines().into_iter().map(|(m, _)| (m, std::thread::spawn(move || values(m, "allocated.fx", 4)))).collect();
+    for (m, t) in runs {
+        let got = t.join().expect("ran");
+        assert_eq!(got[..2], want, "{m}");
+        assert!(got[3].contains(refused), "{m}: {got:?}");
+    }
+    let stress = [("FIXPT_SLICE", "3"), ("FIXPT_NURSERY", "4096"), ("FIXPT_NATIVE_STACK_CACHE", "1024")];
+    for m in ["fx-cells-rsinterp", "fx-regs-rsjit-nativecc"] {
+        let got = values_with(m, "allocated.fx", 4, &stress);
+        assert_eq!(got[..2], want, "{m}, stressed");
+        assert!(got[3].contains(refused), "{m}, stressed: {got:?}");
+    }
+}

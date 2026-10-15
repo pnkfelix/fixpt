@@ -281,7 +281,13 @@ for a program that must hand the power on.
    recursion 3000 deep; on all nine machines, and stressed (time slices
    of 3, a small nursery, a small stack cache, where the made code's own
    entry passes the limit 39 times). Not on the bytecode VM, which cannot
-   be called back.
+   be called back. Later (2026-10-15) a third routine, `bloblet`
+   (`common_bloblet`, call-out 9, which may collect): a plain bloblet of
+   the bytes in `x1` and the fields in `x2`, as `%make-bloblet-filled`
+   makes it, zeroed, or the trap for sizes that refuses. Test:
+   `programs/made-code/allocated.fx`, made from a `convention`: two
+   fields stored, each store marking its card, twenty thousand kept
+   across collections, a size of -1 refused.
 6. *(Done 2026-10-15.)* Data a generator reads: the declaration as a
    value of FX-26. `(load-input "fx26:convention.fx")` reads the clauses
    `native-convention` gives (or any in that canonical form) into a

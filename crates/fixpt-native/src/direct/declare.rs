@@ -151,6 +151,7 @@ fn clauses() -> Vec<D> {
             state!(
                 fuel, reserve, trap, pc, args, nargs, aux, callout, rust_sp, native_sp, fp, top, words, alloc_limit, code, clo,
                 delta, code_lo, trap_stub, foreign, closure, cards, stack_limit, overflow, poll, cons,
+                bloblet,
             ),
         ),
         c(
@@ -193,6 +194,20 @@ fn clauses() -> Vec<D> {
                         c("in", vec![c("car", vec![x(1)]), c("cdr", vec![x(2)])]),
                         c("out", vec![x(RESULT)]),
                         c("may-collect", vec![]),
+                    ],
+                ),
+                // A plain bloblet: its trailer field 1, the rest the fixnum
+                // 0, its suffix zero; sizes `%make-bloblet-filled` refuses,
+                // the trap.
+                c(
+                    "bloblet",
+                    vec![
+                        c("entry", vec![s("state"), s("bloblet")]),
+                        c("in", vec![c("bytes", vec![x(1)]), c("fields", vec![x(2)])]),
+                        c("out", vec![x(RESULT)]),
+                        c("may-collect", vec![]),
+                        c("makes", vec![c("kind", vec![s("bloblet")]), c("trailer", vec![i(1)]), s("zeroed")]),
+                        c("traps-when-refused", vec![i(PRIM_FAILED)]),
                     ],
                 ),
                 c(

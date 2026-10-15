@@ -63,7 +63,7 @@
              (callout int) (rust-sp int) (native-sp int) (fp int) (top int) (words int)
              (alloc-limit int) (code int) (clo int) (delta int) (code-lo int) (trap-stub int)
              (foreign int) (closure int) (cards int) (stack-limit int) (overflow int) (poll int)
-             (cons int)))
+             (cons int) (bloblet int)))
 
 ;; A routine: its entry's offset in the state, called by `blr`; its inputs,
 ;; each a role and its registers; its output's register, -1 for none; whether
@@ -82,7 +82,7 @@
 (define-type cv-trap (productof (entry int) (kind int) (kinds cv-names)))
 (define-type cv-routines
   (productof (foreign cv-routine) (overflow cv-overflow) (poll cv-routine) (cons cv-routine)
-             (trap cv-trap)))
+             (bloblet cv-routine) (trap cv-trap)))
 
 ;; Fuel: in `register`, less `subtract` on entry and on a back edge; at
 ;; zero, a call of `poll`.
