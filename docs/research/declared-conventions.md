@@ -13,20 +13,23 @@ accepts are a fixed set.
 
 ## What a program does
 
-1. **Make a code bloblet** in the heap's code area (`docs/object-model.md`,
-   "A collected code area"): so many fields, traced, and a suffix of so many
-   bytes, both zero.
-2. **Fill it**: its fields with any values, its suffix with the machine code,
-   by the suffix writes bloblets already have.
-3. **Seal it**: the suffix frozen (the header's bit 13, past which a suffix
-   write already fails), the instruction cache flushed for it, and the
-   bloblet marked as code that may run.
-4. **Make a procedure of it**, at a convention and a type the program
-   states. This is the step that is trusted: nothing checks that machine
-   code keeps a type, or a convention, so it carries an effect of its own,
-   `(io native)`, and every use of the power shows in effects.
-5. **Ask first** whether this machine runs native code at all, and fall back
-   to interpretation where it does not.
+1. **Make a bloblet** as any other (`make-bloblet`): its fields, traced, and
+   a suffix of so many bytes.
+2. **Fill it**: its fields with any values, its suffix with the machine
+   code, by the suffix writes bloblets already have.
+3. **Seal it** (`seal-code`): a copy in the code area (`docs/object-model.md`,
+   "A collected code area"), its fields, trailer and suffix as the
+   bloblet's, the suffix frozen (the header's bit 13, past which a suffix
+   write already fails) and flushed from the instruction cache. A copy,
+   not the bloblet itself, so that a bloblet is made, written and typed as
+   every other is, and the code area holds only code that is finished.
+4. **Make a procedure of it** (`native-procedure`), at a convention and a
+   type the program states. This is the step that is trusted: nothing
+   checks that machine code keeps a type, or a convention, so it carries an
+   effect of its own, `(io native)`, and every use of the power shows in
+   effects.
+5. **Ask first** (`native-code?`) whether this machine runs native code at
+   all, and fall back to interpretation where it does not.
 
 The procedure made is a first-class FX-26 procedure, a native closure of
 the code bloblet over nothing: every machine calls native closures
@@ -35,38 +38,38 @@ call of it needs nothing new. Its code bloblet is one of the code area's,
 collected as fixpt's own are: never moved, mark-swept, its fields traced
 and updated in place, alive while the closure, or a frame running it, is.
 
-## The forms
+## The operations (built 2026-10-14)
 
-Syntax, as the bloblet forms are (`docs/fx26.md`, "Bloblets"), since a
-code bloblet is a bloblet, and its type says its fields':
+Standard operations, not syntax: a code bloblet is a bloblet, made and
+written by the bloblet forms (`docs/fx26.md`, "Bloblets"), and the type a
+procedure of it has is given by `the`:
 
-| form                         | type                       | effect         |
-| ---------------------------- | -------------------------- | -------------- |
-| `(make-code-bloblet bytes e …)` | `(bloblet (fields T …) R)` | `(alloc R)` |
-| `(code-seal! b)`             | `unit`                     | `(write R)`    |
-| `(native-procedure T b)`     | `T`, a `subr` type         | `(io native)`  |
-| `(native-code?)`             | `bool`                     | pure           |
-| `(define-convention C clause …)` | at top level: binds `C` | none          |
+| operation          | type                                                  |
+| ------------------ | ----------------------------------------------------- |
+| `seal-code`        | `(poly ((a type)) (subr (io native) (a) a))`          |
+| `native-procedure` | `(poly ((a type) (t type)) (subr (io native) (a) t))` |
+| `native-code?`     | `(subr pure () bool)`                                 |
 
-- `make-code-bloblet` is `make-bloblet` in the code area. Its suffix is
-  written by `bloblet-set-byte!`, or four bytes at a time through a
-  `(blobref B u32)` (`blobref-set!`). Its fields stay mutable, before the
-  seal and after (the collector updates them in place already); its code,
-  once sealed, never changes.
-- `code-seal!` freezes the suffix and flushes it from the instruction
-  cache. Nothing else freezes a code bloblet's suffix, so a frozen one is
-  sealed.
-- `native-procedure` checks, at run time, that `b` is a sealed code
-  bloblet (else a failure, not a crash), and makes a native closure of it
-  over nothing; `T`'s convention must be one that names a supported
-  declaration (`native`, or a name `define-convention` bound to it); left
-  out, it is `native`. A program whose own convention is `cellular` gets
-  the closure through the checker's conversion, as any native closure.
-- `native-code?` is false on a machine that cannot run native code, where
-  `native-procedure` fails; a program asks first, and interprets instead.
-- `(io native)` is a new member of the `io` family, so a program that
-  makes procedures of code says so in its effects, and a caller's
-  `(io native)` shows it.
+```scheme
+(the (subr (conv native) pure (int int) int) (native-procedure (seal-code b)))
+```
+
+- `seal-code` takes a bloblet the program made (kind `bloblet`, an ordinary
+  header) and gives its sealed copy, of the same type: its fields stay
+  mutable if they were, and the collector updates them in place.
+- `native-procedure` checks, at run time, that its argument is a sealed
+  copy (in the code area, its suffix frozen), else a failure, not a crash,
+  and makes a native closure of it over nothing. Its type is `t`, whatever
+  `the` says: the trust `(io native)` marks. Every machine dispatches a
+  call on the callee's kind, so a procedure typed in the program's
+  convention, `cellular` by default, is called rightly too; `(conv
+  native)` says what it is.
+- `native-code?` is false where native procedures cannot be made (the
+  evaluator written in FX-26, whose values are its own), where both other
+  operations fail.
+- `(io native)` is the tenth member of the `io` family.
+- `(define-convention C clause …)`, at top level, binds `C` to a supported
+  declaration (step 4, below).
 
 ## A convention, declared
 
@@ -213,12 +216,16 @@ for a program that must hand the power on.
 ## Steps, each committed and tested
 
 1. This note.
-2. The runtime: sealing a code bloblet (`Heap::seal_code`: the suffix
-   frozen and flushed), a native closure of a sealed one, `native-code?`.
-3. The forms in both parsers, both checkers, both compilers and the
-   evaluator written in FX-26; `(io native)`. Test: a program that makes
-   a leaf adding two fixnums, and one returning its own field across a
-   collection that moves the field's value, on every machine.
+2. and 3. *(Done 2026-10-14.)* `seal-code` (`Heap::seal_code_copy`),
+   `native-procedure`, `native-code?` and `(io native)`, in both checkers'
+   tables, the lowering, the runtime and the evaluator written in FX-26;
+   the bytecode VM calls a native closure as it calls a primitive, and
+   the stencils' typed call checks for one, as the other arm64 machines'
+   do since `TODO.md` §93 (it crashed). Tests: `programs/made-code/
+   leaves.fx`, a leaf adding two fixnums and one returning its own field
+   across collections, on all nine machines (`fixpt-cli/tests/
+   made_code.rs`; the evaluator falls back); `fixpt-native/tests/
+   code_exec.rs`, `a_sealed_copy_runs_and_reads_its_field`.
 4. `define-convention`: fixpt's declaration generated and blessed, both
    checkers comparing a program's with it, refusals naming the clause.
 5. Code that is not a leaf: the routines a program's code calls (allocate,

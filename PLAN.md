@@ -147,9 +147,10 @@ are in the last section, "Log: the glance's details", and in
   process monitors (kayak's, `DONE.md` §94), a `race` losing a failed
   branch.
 - **Code bloblets a program makes and runs, kayak's request**
-  (2026-10-14, `TODO.md` §97): asked for, not started; layer 1 (make,
-  seal, a procedure at a stated type under `(io native)`) proposed with
-  the native contract declared (`define-convention`), not leaf code only.
+  (2026-10-14, `TODO.md` §97, `docs/research/declared-conventions.md`):
+  `seal-code`, `native-procedure` at a stated type under `(io native)`,
+  and `native-code?`, on every machine; next, the native contract
+  declared (`define-convention`), and code that is not a leaf.
 - **Cellular code calling native code** (2026-10-13, `TODO.md` §93):
   fixed, a crash on the REPL's machine where the native convention
   declined a form; its cost to assembling words mostly recovered (peval's

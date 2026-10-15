@@ -2528,6 +2528,12 @@ recovered (`DONE.md` §93). Left:
 
 Design: `docs/research/declared-conventions.md` (its steps are the plan).
 
+Built (2026-10-14), the note's steps 2 and 3: `seal-code`,
+`native-procedure`, `native-code?` and `(io native)`, on all nine
+machines (`programs/made-code/leaves.fx`, `fixpt-cli/tests/made_code.rs`).
+Left: `define-convention` (step 4), code that is not a leaf (step 5), the
+declaration as data (step 6).
+
 Kayak is writing FX-26's native code generators in KFX, which may use only
 what FX-26 has, and FX-26 has no way to place machine code it made and run
 it. Asked for, as our own code is (`docs/object-model.md`, "A collected

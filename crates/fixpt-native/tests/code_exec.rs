@@ -90,3 +90,30 @@ fn code_runs_in_a_heap_that_collected_first() {
     assert_eq!(run(&heap, c), 7);
 }
 
+
+/// A program's bloblet sealed into the code area (`TODO.md` §97,
+/// `Heap::seal_code_copy`): its trailer, fields and suffix copied, the
+/// suffix frozen, and the copy runs, reading its own field 0 (after the
+/// trailer, 16 bytes before the code) as each collection leaves it.
+#[test]
+fn a_sealed_copy_runs_and_reads_its_field() {
+    let mut heap = Heap::new();
+    let pair = heap.cons(Value::fixnum(41), Value::fixnum(1));
+    let code = [ldr_lit(0, -4), ret()];
+    let b = heap.make_bloblet(layout::kind("bloblet"), 1, 8, true);
+    heap.set_bloblet_slot(b, 2, pair);
+    let bytes: Vec<u8> = code.iter().flat_map(|i| i.to_le_bytes()).collect();
+    heap.set_bloblet_bytes(b, 0, &bytes).expect("the suffix is writable");
+    let c = heap.seal_code_copy(b);
+    assert!(heap.is_code_bloblet(c) && heap.bloblet_head(c).suffix_frozen);
+    assert!(heap.set_bloblet_bytes(c, 0, &[0]).is_err(), "sealed");
+    let root = heap.push_root(c);
+    for round in 0..3 {
+        heap.collect(&mut []);
+        heap.verify().unwrap_or_else(|e| panic!("round {round}: {e}"));
+        let read = Value::from_raw(run(&heap, c));
+        assert_eq!(read, heap.bloblet_slot(c, 2), "round {round}");
+        assert_eq!(heap.car(read), Value::fixnum(41));
+    }
+    heap.pop_roots_to(root);
+}

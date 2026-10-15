@@ -213,6 +213,13 @@ pub const ENTRIES: &[(&str, &str)] = &[
         "terminal-size",
         "(subr (io terminal) () (sumof (size (productof (rows int) (columns int))) (not-a-terminal unit) (failed io-error)))",
     ),
+    // Code a program makes (`TODO.md` §97, `docs/research/
+    // declared-conventions.md`): a bloblet's copy in the code area, its
+    // suffix machine code, sealed; a procedure of it, at the type `the`
+    // gives; whether this machine runs native code at all.
+    ("seal-code", "(poly ((a type)) (subr (io native) (a) a))"),
+    ("native-procedure", "(poly ((a type) (t type)) (subr (io native) (a) t))"),
+    ("native-code?", "(subr pure () bool)"),
     // The clock: monotonic nanoseconds since the run began, and a sleep
     // until a time on it. The program's own arguments.
     ("clock", "(subr (io clock) () i64)"),

@@ -509,7 +509,7 @@ fn probe_file() {
 fn every_program_meant_to_run_checks() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
     let mut report = Vec::new();
-    for sub in ["run", "bench", "bidirectional", "native", "groups"] {
+    for sub in ["run", "bench", "bidirectional", "native", "groups", "made-code"] {
         let mut names: Vec<_> = std::fs::read_dir(format!("{dir}/{sub}")).unwrap().map(|e| e.unwrap().path()).collect();
         names.sort();
         for path in names {

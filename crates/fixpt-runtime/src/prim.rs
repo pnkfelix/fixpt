@@ -1336,6 +1336,33 @@ prims! {
             None => fx26_sum(rt, "not-a-terminal", Value::UNIT),
         })
     });
+    // Code a program makes (`TODO.md` §97, `docs/research/
+    // declared-conventions.md`): a bloblet it made, copied into the code
+    // area and sealed; a native closure of that, over nothing, which every
+    // machine calls as it calls native code; and whether this one can.
+    "%fx26-seal-code", 1, Some(1), simple!(|rt, a| {
+        let b = plain_bloblet(rt, a[0])?;
+        if rt.call_native.is_none() {
+            return rt.fail("seal-code: this machine runs no native code", &[]);
+        }
+        if rt.heap.bloblet_head(b).pre != 0 {
+            return rt.fail("seal-code: too many fields for code", &[]);
+        }
+        Ok(rt.heap.seal_code_copy(b))
+    });
+    "%fx26-native-procedure", 1, Some(1), simple!(|rt, a| {
+        if rt.call_native.is_none() {
+            return rt.fail("native-procedure: this machine runs no native code", &[]);
+        }
+        let b = a[0];
+        if !(rt.heap.is_code_bloblet(b) && rt.heap.bloblet_kind(b) == PLAIN_BLOBLET && rt.heap.bloblet_head(b).suffix_frozen) {
+            return rt.fail("native-procedure: not code that `seal-code` gave", &[b]);
+        }
+        let c = rt.heap.make_bloblet(const { fixpt_heap::layout::kind("native-closure") }, 1, 0, true);
+        rt.heap.set_bloblet_slot(c, fixpt_heap::layout::cellular::CLOSURE_WORD, b);
+        Ok(c)
+    });
+    "%fx26-native-code?", 0, Some(0), simple!(|rt, _a| Ok(Value::boolean(rt.call_native.is_some())));
     // The clock (stage 4): monotonic nanoseconds since the run began; and
     // the program's own arguments, as `fixpt run … -- ARG…` gives them.
     "%fx26-clock", 0, Some(0), simple!(|rt, _a| Ok(exact_out(rt, crate::world::clock_ns() as i128)));

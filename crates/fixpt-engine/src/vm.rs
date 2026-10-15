@@ -682,6 +682,34 @@ impl Vm {
                 let value = if argc == 1 { vals[0] } else { make_values(rt, &vals) };
                 self.throw(rt, p, f, value, base, call)
             }
+            // A native closure (`TODO.md` §97: code a program made, which
+            // the lowering's program may be given): called as a primitive
+            // is, by the native machine, which may collect.
+            _ if f.is_bloblet()
+                && rt.heap.bloblet_kind(f) == const { fixpt_heap::layout::kind("native-closure") }
+                && rt.call_native.is_some() =>
+            {
+                let args: Vec<Value> = self.stack[base + 1..].to_vec();
+                let call_native = rt.call_native.expect("installed");
+                let result = call_native(rt, f, &args);
+                self.stack.truncate(base);
+                let v = match result {
+                    Ok(v) => v,
+                    Err(fixpt_runtime::NativeExit::Failed(m)) => return rt.fail(&m, &[]),
+                    Err(_) => return rt.fail("a continuation of another machine, thrown past native code", &[]),
+                };
+                match call {
+                    Call::Next => {
+                        self.stack.push(v);
+                        Ok(None)
+                    }
+                    Call::Tail => self.ret(rt, p, v),
+                    Call::Framed => {
+                        self.fp = base as u32;
+                        self.ret(rt, p, v)
+                    }
+                }
+            }
             _ => {
                 self.stack.truncate(base);
                 rt.fail(&format!("attempt to call a non-procedure, with {argc} argument(s)"), &[f])

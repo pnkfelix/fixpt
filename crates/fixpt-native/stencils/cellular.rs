@@ -322,8 +322,15 @@ routine!(st_global_set, |base, ip, cur, dsp, rsp, st, fp, w| {
 macro_rules! call {
     ($tail:expr, $typed:expr, $r:expr, $base:ident, $ip:ident, $cur:ident, $dsp:ident, $rsp:ident, $st:ident, $fp:ident) => {{
         let c = unsafe { rd($dsp) };
-        // A typed call's callee is a closure, by the checker: no test, no call-out.
-        if !$typed && !unsafe { is_closure($base, c) } {
+        // A typed call's callee is a closure, by the checker: a native one
+        // if its code is in the code area (`code_lo`), called out, as
+        // anything but a cellular closure is.
+        let other = if $typed {
+            unsafe { field($base, c, CLOSURE_WORD) >= (*$st).code_lo }
+        } else {
+            !unsafe { is_closure($base, c) }
+        };
+        if other {
             callout!($r, $base, $ip, $cur, $dsp, $rsp, $st, $fp)
         }
         if $typed && $tail {

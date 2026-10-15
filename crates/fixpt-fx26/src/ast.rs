@@ -138,10 +138,11 @@ pub enum IoKind {
     Args,
     Exit,
     Terminal,
+    Native,
 }
 
 impl IoKind {
-    pub const ALL: [IoKind; 9] = [
+    pub const ALL: [IoKind; 10] = [
         IoKind::Stdin,
         IoKind::Stdout,
         IoKind::Stderr,
@@ -151,6 +152,7 @@ impl IoKind {
         IoKind::Args,
         IoKind::Exit,
         IoKind::Terminal,
+        IoKind::Native,
     ];
     /// Its name, as `(io k)` writes it.
     pub fn name(self) -> &'static str {
@@ -164,6 +166,7 @@ impl IoKind {
             IoKind::Args => "args",
             IoKind::Exit => "exit",
             IoKind::Terminal => "terminal",
+            IoKind::Native => "native",
         }
     }
     pub fn named(n: &str) -> Option<IoKind> {

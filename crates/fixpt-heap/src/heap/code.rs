@@ -11,7 +11,7 @@
 
 use super::{CODE_BASE, CODE_WORDS, Heap, find_main, read_head};
 use crate::layout;
-use crate::value::{Value, is_extension, is_header, make_header};
+use crate::value::{TAG_MASK, TAG_TRAILER, Value, is_extension, is_header, make_header};
 use std::collections::HashSet;
 
 #[derive(Default)]
@@ -60,6 +60,29 @@ impl Heap {
             self.set_word(at + total, Self::trailer_word(total));
         }
         self.blob_v(at + 1 + total)
+    }
+
+    /// A copy of bloblet `v` in the code area, sealed (`TODO.md` §97): its
+    /// kind, fields, trailer and suffix as `v`'s, the suffix frozen and
+    /// flushed, so that it is machine code that may run at
+    /// [`code_exec_address`](Heap::code_exec_address). Its fields stay as
+    /// `v`'s are, frozen or not. Only ordinary headers.
+    pub fn seal_code_copy(&mut self, v: Value) -> Value {
+        let head = self.bloblet_head(v);
+        let trailer = head.fields > 0 && self.word(self.ix(v) - 1) & TAG_MASK == TAG_TRAILER;
+        let fields = head.fields - trailer as usize;
+        let c = self.make_code_bloblet(head.kind, fields, head.bytes, trailer);
+        for k in 1 + trailer as usize..=head.fields {
+            let x = self.bloblet_slot(v, k);
+            self.set_bloblet_slot(c, k, x);
+        }
+        for i in 0..head.bytes.div_ceil(8) {
+            let w = self.word(self.ix(v) + i);
+            self.set_word(self.ix(c) + i, w);
+        }
+        self.freeze_bloblet(c, head.fields_frozen, true);
+        self.flush_code(c);
+        c
     }
 
     /// `n` words of the code area: first fit, else past what is walkable.

@@ -384,6 +384,11 @@
                  (size z (the val (o-sum 'size (ev-size (extract z rows) (extract z columns)))))
                  (not-a-terminal u (the val (o-sum 'not-a-terminal the-unit)))
                  (failed e (ev-io-failed e)))))
+      ;; Code a program makes (`TODO.md` §97): none here, so none runs.
+      (prim! 'native-code? (lambda (xs) #f))
+      (prim! 'seal-code (lambda (xs) (efail "seal-code: this machine runs no native code")))
+      (prim! 'native-procedure
+             (lambda (xs) (efail "native-procedure: this machine runs no native code")))
       (prim! 'clock (lambda (xs) (clock)))
       (prim! 'sleep-until
              (lambda (xs) (begin (sleep-until (int->i64 (as-int (ev-arg xs 0)))) the-unit)))
