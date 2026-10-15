@@ -244,9 +244,23 @@ for a program that must hand the power on.
    has that the program left out, two of one role, an atom not a name nor
    an integer). Tests: `checker.rs`, `declared_conventions_alike`;
    `programs/made-code/declared.fx` on all nine machines.
-5. Code that is not a leaf: the routines a program's code calls (allocate,
-   poll, fail, call what is not native code), made routines at state
-   fields where today they are inline sequences or bare call-outs; a test
-   whose code makes a frame, conses across a collection, calls a closure
-   it is given, and is preempted in a loop.
+5. *(Done 2026-10-14.)* Code that is not a leaf. Two routines for it, at
+   state fields as `foreign` is, where fixpt's own code has inline
+   sequences or bare call-outs: `poll` (`common_poll`: a stub's frame, the
+   next slice or the trap for fuel spent, the scheduler's `preempt` if
+   due) and `cons` (`common_cons`, call-out 8, which may collect). The
+   declaration gained them, `overflow` (the stack's limit, as fixpt's own
+   entries meet it), `fuel`, and a stack map stated in full: bit `k`
+   below 48 value slot `k` live, above it the frame's fields (link,
+   return, map and the value slots), negative for all live. A program's
+   code finds its own code bloblet in its closure (field 2), so it needs
+   no `adr`. Test: `programs/made-code/frames.fx`, 51 instructions (made by
+   the encoder written in FX-26, `fx26:arm64.fx`): a frame of four value
+   slots, a million pairs by `cons` across collections, `poll` on the
+   loop's back edge, a call of the procedure it is given (native, or
+   cellular by `foreign`), and the same made at every depth of a
+   recursion 3000 deep; on all nine machines, and stressed (time slices
+   of 3, a small nursery, a small stack cache, where the made code's own
+   entry passes the limit 39 times). Not on the bytecode VM, which cannot
+   be called back.
 6. Data a generator reads: the declaration as a value of FX-26.

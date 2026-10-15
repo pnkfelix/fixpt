@@ -123,10 +123,26 @@ fn clauses() -> Vec<D> {
                 c("header", vec![x(FRAME), i(-8)]),
                 c("link", vec![x(FRAME), i(R_LINK as i64 - 8)]),
                 c("return", vec![x(FRAME), i(R_SECOND as i64 - 8)]),
-                c("map", vec![x(FRAME), i(R_HEAD as i64 - 8), c("live-bits", vec![i(MAP_BITS)]), c("count-above", vec![i(MAP_BITS)])]),
+                // A fixnum: bit `k` below 48 says value slot `k` is live;
+                // above, the frame's fields, its link, return and map and
+                // its value slots; negative, minus those, every value live.
+                c(
+                    "map",
+                    vec![
+                        x(FRAME),
+                        i(R_HEAD as i64 - 8),
+                        c("live-slots-below", vec![i(MAP_BITS)]),
+                        c("fields-above", vec![i(MAP_BITS), s("link"), s("return"), s("map"), s("values")]),
+                        c("all-live", vec![s("negative")]),
+                    ],
+                ),
                 c("values-from", vec![x(FRAME), i(R_HEAD as i64)]),
                 c("raw-after-values", vec![]),
+                // Its code bloblet among its values, so that the code it
+                // runs is alive; stored before anything that may collect.
                 c("keeps-its-code", vec![]),
+                c("map-stored-before", vec![s("calls"), s("routines-that-collect")]),
+                c("made", vec![s("sub"), s("sp"), s("stp"), x(FRAME), x(LINK), s("add"), x(FRAME), s("sp"), i(8)]),
                 c("stub", vec![i(STUB_FRAME)]),
             ],
         ),
@@ -134,7 +150,7 @@ fn clauses() -> Vec<D> {
             "state",
             state!(
                 fuel, reserve, trap, pc, args, nargs, aux, callout, rust_sp, native_sp, fp, top, words, alloc_limit, code, clo,
-                delta, code_lo, trap_stub, foreign, closure, cards, stack_limit,
+                delta, code_lo, trap_stub, foreign, closure, cards, stack_limit, overflow, poll, cons,
             ),
         ),
         c(
@@ -149,6 +165,36 @@ fn clauses() -> Vec<D> {
                         c("may-collect", vec![]),
                     ],
                 ),
+                // Past the stack's limit, right after the frame is made: the
+                // rest flushed, this frame moved; the arguments it holds in
+                // X1… (as `info` says) kept, its code bloblet in X16.
+                c(
+                    "overflow",
+                    vec![
+                        c("when", vec![s("sp"), s("below"), x(LIMIT), s("after-frame-made")]),
+                        c("entry", vec![s("state"), s("overflow"), s("by"), x(LINK)]),
+                        c("in", vec![c("code", vec![x(X16)]), c("info", vec![x(X17), c("arguments-held", vec![i(0), i(8)]), c("closure-read", vec![i(8)]), c("variadic", vec![i(9)])])]),
+                        c("keeps", (0..=10).map(x).collect()),
+                    ],
+                ),
+                c(
+                    "poll",
+                    vec![
+                        c("entry", vec![s("state"), s("poll")]),
+                        c("in", vec![]),
+                        c("may-collect", vec![]),
+                        c("traps-when-spent", vec![i(OUT_OF_FUEL)]),
+                    ],
+                ),
+                c(
+                    "cons",
+                    vec![
+                        c("entry", vec![s("state"), s("cons")]),
+                        c("in", vec![c("car", vec![x(1)]), c("cdr", vec![x(2)])]),
+                        c("out", vec![x(RESULT)]),
+                        c("may-collect", vec![]),
+                    ],
+                ),
                 c(
                     "trap",
                     vec![
@@ -159,6 +205,10 @@ fn clauses() -> Vec<D> {
                 ),
             ],
         ),
+        // One less on entry to a procedure that makes a frame, after it
+        // keeps what it holds there, and on a loop's back edge; below zero,
+        // `poll`.
+        c("fuel", vec![c("register", vec![x(FUEL)]), c("subtract", vec![i(1)]), c("on", vec![s("entry"), s("back-edge")]), c("borrow", vec![s("poll")])]),
         c("barrier", vec![c("cards", vec![s("state"), s("cards")]), c("card-shift", vec![i(crate::arm64::CARD_SHIFT)]), c("mark", vec![i(1)])]),
     ]
 }

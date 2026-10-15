@@ -151,7 +151,8 @@ are in the last section, "Log: the glance's details", and in
   `seal-code`, `native-procedure` at a stated type under `(io native)`,
   and `native-code?`, on every machine; the native contract declared
   (`define-convention`, checked against fixpt's generated declaration by
-  both checkers); next, code that is not a leaf.
+  both checkers); code that is not a leaf (frames, `cons`, `poll`); next,
+  the declaration as structured data.
 - **Cellular code calling native code** (2026-10-13, `TODO.md` §93):
   fixed, a crash on the REPL's machine where the native convention
   declined a form; its cost to assembling words mostly recovered (peval's

@@ -183,6 +183,11 @@ struct DState {
     /// and asks whether the scheduler would have another task run
     /// (`Callout::Poll`).
     reserve: u64,
+    /// The machine's routines for code a program made (`TODO.md` §97,
+    /// `declare.rs`), where they run: a poll at a spent time slice
+    /// (`common_poll`), and a pair made (`common_cons`).
+    poll: u64,
+    cons: u64,
 }
 
 /// What the stack cache did: overflows and collections, and the frames and
@@ -221,6 +226,7 @@ const OUT_OF_FUEL: u32 = 1;
 const POLL: usize = 4;
 const POLL_DONE: usize = 5;
 const REINSTATE: usize = 7;
+const CONS: usize = 8;
 const FAILED: usize = 6;
 /// A poll's frame (`emit_poll`), laid out as a procedure's: its link, its
 /// second word, its map, eleven values (x0…x8 where they hold values, the
@@ -466,6 +472,8 @@ struct Runner {
     closure: u64,
     underflow: u64,
     overflow: u64,
+    poll: u64,
+    cons: u64,
     table: u64,
     /// The stack cache's size, and the most its chain may hold, in words.
     cache_words: u64,
@@ -738,6 +746,8 @@ pub struct DirectMachine {
     /// cache's limit goes, the rest flushed into the heap.
     underflow: Offset,
     overflow: Offset,
+    poll: Offset,
+    cons: Offset,
     cache_words: u64,
     max_words: u64,
     /// What each call-out any compiled code makes does, by number.
@@ -788,7 +798,8 @@ impl DirectMachine {
         // underflow and overflow (`common_underflow`, `common_overflow`);
         // 4 and 5: a time slice's end at a poll, and its call of `preempt`
         // returned (`POLL`, `POLL_DONE`); 6: a trap (`FAILED`); 7: a
-        // continuation given a value (`REINSTATE`).
+        // continuation given a value (`REINSTATE`); 8: a pair made, for
+        // code a program made (`common_cons`, `CONS`).
         let callouts = vec![
             Callout::Foreign,
             Callout::ClosureAny,
@@ -798,6 +809,7 @@ impl DirectMachine {
             Callout::PollDone,
             Callout::Failed,
             Callout::Reinstate,
+            Callout::Cons,
         ];
         let code = common_foreign(0);
         let foreign = space.alloc(4 * code.len(), 16).ok_or("no room for the common foreign call")?;
@@ -815,6 +827,14 @@ impl DirectMachine {
         let overflow = space.alloc(4 * code.len(), 16).ok_or("no room for the overflow")?;
         space.write_code(overflow, &code);
         space.flush(overflow, 4 * code.len());
+        let code = common_poll();
+        let poll = space.alloc(4 * code.len(), 16).ok_or("no room for the common poll")?;
+        space.write_code(poll, &code);
+        space.flush(poll, 4 * code.len());
+        let code = common_cons();
+        let cons = space.alloc(4 * code.len(), 16).ok_or("no room for the common cons")?;
+        space.write_code(cons, &code);
+        space.flush(cons, 4 * code.len());
         let stub = |at: usize, len: usize, what: &str| crate::symbols::note(space.exec_addr(at), 4 * len, &format!("native convention: {what}"));
         stub(underflow, common_underflow(2).len(), "stack cache underflow");
         stub(overflow, common_overflow(3).len(), "stack cache overflow");
@@ -823,6 +843,8 @@ impl DirectMachine {
         stub(trap_stub, common_trap().len(), "common trap");
         stub(foreign, common_foreign(0).len(), "common foreign call");
         stub(closure, common_closure(1).len(), "common closure");
+        stub(poll, common_poll().len(), "common poll");
+        stub(cons, common_cons().len(), "common cons");
         let (cache_words, max_words) = stack_words_wanted();
         Ok(DirectMachine {
             space,
@@ -833,6 +855,8 @@ impl DirectMachine {
             closure,
             underflow,
             overflow,
+            poll,
+            cons,
             cache_words,
             max_words,
             callouts,
@@ -932,6 +956,8 @@ impl DirectMachine {
             closure: self.space.exec_addr(self.closure) as u64,
             underflow: self.space.exec_addr(self.underflow) as u64,
             overflow: self.space.exec_addr(self.overflow) as u64,
+            poll: self.space.exec_addr(self.poll) as u64,
+            cons: self.space.exec_addr(self.cons) as u64,
             table: self.callouts.as_ptr() as u64,
             cache_words: self.cache_words,
             max_words: self.max_words,
@@ -998,6 +1024,7 @@ fn run(r: &Runner, rt: &mut fixpt_runtime::Runtime, p: Compiled, args: &[Value],
     st.delta = target.wrapping_sub(p.code.raw());
     st.code_lo = rt.heap.code_area_address() as u64;
     (st.mark_ret, st.trap_stub, st.foreign, st.closure) = (r.mark_ret, r.trap_stub, r.foreign, r.closure);
+    (st.poll, st.cons) = (r.poll, r.cons);
     // SAFETY: the trampoline follows the C convention, saves what it
     // must, runs on the machine's stack from `top` (which outlives the
     // call, and which nothing else uses below `top` while it runs),
@@ -1153,6 +1180,59 @@ fn common_trap() -> Vec<u32> {
     resume(&mut a);
     a.bind(gone);
     leave(&mut a);
+    a.finish().expect("labels bound")
+}
+
+/// The common poll, for code a program made (`TODO.md` §97): from where its
+/// fuel ran out, by `blr`, every value it keeps in its frame, whose stack
+/// map it has stored, and none in registers but the pinned ones. A stub's
+/// frame; the next slice taken (`Callout::Poll`), or, with none left, the
+/// trap for fuel spent; the scheduler's `preempt` called if it would have
+/// another task run; and back, every register but the pinned ones lost.
+/// One for the machine.
+fn common_poll() -> Vec<u32> {
+    let mut a = Asm::new();
+    a.e(ldr(X16, ST, st_off(offset_of!(DState, reserve))));
+    let spent = a.label();
+    a.e(cmp_imm(X16, 0));
+    a.to(spent, Fix::If(Cond::Eq));
+    push_frame(&mut a, LINK, STUB_FRAME);
+    call_out(&mut a, POLL);
+    a.e(ldr(FUEL, ST, st_off(offset_of!(DState, fuel))));
+    a.e(ldr(CLO, ST, st_off(offset_of!(DState, aux))));
+    let back = a.label();
+    a.e(cmp_imm(CLO, 0));
+    a.to(back, Fix::If(Cond::Eq));
+    a.e(ldur(X16, CLO, field_off(CLOSURE_WORD)));
+    a.e(add(X16, X16, DELTA));
+    a.e(movz(X9, 0, 0));
+    a.e(blr(X16));
+    call_out(&mut a, POLL_DONE);
+    a.bind(back);
+    pop_frame(&mut a, STUB_FRAME);
+    a.e(ret());
+    // The trap's site the poll's call, as for a site's own stub.
+    a.bind(spent);
+    a.e(movz(X9, OUT_OF_FUEL, 0));
+    a.e(ldr(X16, ST, st_off(offset_of!(DState, trap_stub))));
+    a.e(br(X16));
+    a.finish().expect("labels bound")
+}
+
+/// The common cons, for code a program made (`TODO.md` §97): from its
+/// call, by `blr`, the car in X1 and the cdr in X2, values; every other
+/// value it keeps in its frame, whose stack map it has stored. A stub's
+/// frame, and call-out `CONS`, which may collect (the two are roots); the
+/// pair in `RESULT`, every register but the pinned ones lost.
+fn common_cons() -> Vec<u32> {
+    let mut a = Asm::new();
+    push_frame(&mut a, LINK, STUB_FRAME);
+    let args = offset_of!(DState, args) as u32;
+    a.e(str(1, ST, args));
+    a.e(str(2, ST, args + 8));
+    call_out(&mut a, CONS);
+    pop_frame(&mut a, STUB_FRAME);
+    a.e(ret());
     a.finish().expect("labels bound")
 }
 

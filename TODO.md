@@ -2533,9 +2533,19 @@ Built (2026-10-14), the note's steps 2 and 3: `seal-code`,
 machines (`programs/made-code/leaves.fx`, `fixpt-cli/tests/made_code.rs`).
 And step 4: `define-convention`, fixpt's declaration generated from its
 constants, both checkers comparing a program's with it
-(`programs/made-code/declared.fx`). Left: code that is not a leaf (step
-5), the declaration as data a generator reads, structured (step 6; today
-one string a clause, `native-convention`).
+(`programs/made-code/declared.fx`). And step 5: code that is not a leaf, with `poll` and `cons` routines
+(`programs/made-code/frames.fx`). Left: the declaration as data a
+generator reads, structured (step 6; today one string a clause,
+`native-convention`); and:
+- **Native code cannot call back the bytecode VM's procedures**: a
+  primitive cannot run the VM again, so on `rs-scheme-vm` a made procedure
+  given a procedure of the program fails, saying so.
+- **`load-input` of a built-in file** (`fx26:arm64.fx`, the encoder a
+  generator would use) checks only on the REPL's native-convention
+  machine: elsewhere "unbound variable `input`" (found 2026-10-14);
+  `frames.fx` carries the words the encoder made instead.
+- **More routines** a generator will want: allocating a bloblet, calling a
+  primitive by name (its number is fixpt's own), making a closure.
 Fixed (2026-10-14), found by made procedures: on the arm64 cellular
 machines a typed tail call of a native closure stopped ("no routine is
 numbered 40": the Rust machine made the call, then returned from the word,

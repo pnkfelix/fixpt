@@ -32,8 +32,13 @@ fn machines() -> Vec<(&'static str, bool)> {
 /// `fixpt --fx26-machine machine eval` of `programs/made-code/name`: the
 /// values of its last `n` forms, each as its line begins.
 fn values(machine: &str, name: &str, n: usize) -> Vec<String> {
+    values_with(machine, name, n, &[])
+}
+
+/// The same, with these variables in the environment.
+fn values_with(machine: &str, name: &str, n: usize, vars: &[(&str, &str)]) -> Vec<String> {
     let path = format!("{}/../fixpt-fx26/tests/programs/made-code/{name}", env!("CARGO_MANIFEST_DIR"));
-    let out = Command::new(FIXPT).args(["--fx26-machine", machine, "eval", &path]).output().expect("fixpt runs");
+    let out = Command::new(FIXPT).args(["--fx26-machine", machine, "eval", &path]).envs(vars.iter().copied()).output().expect("fixpt runs");
     let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
     let lines: Vec<&str> = text.lines().collect();
     lines[lines.len().saturating_sub(n)..].iter().map(|l| l.split(" : ").next().unwrap_or(l).to_string()).collect()
@@ -71,5 +76,30 @@ fn typed_calls_of_a_made_procedure() {
     let runs: Vec<_> = machines().into_iter().map(|(m, _)| (m, std::thread::spawn(move || values(m, "typed-calls.fx", 3)))).collect();
     for (m, t) in runs {
         assert_eq!(t.join().expect("ran"), ["42", "42", "42"], "{m}");
+    }
+}
+
+/// Code a program makes that is not a leaf (`programs/made-code/
+/// frames.fx`): a frame with its stack map, the stack's limit, a million
+/// pairs by `cons` across collections, fuel and `poll`, and a call of a
+/// procedure it is given, native or not; and made at every depth of a
+/// recursion. The bytecode VM's procedures cannot be called back, which it
+/// says. Then on two machines with time slices of 3, a small nursery and a
+/// small stack cache, where the made code's own entry passes the stack's
+/// limit (`overflow`).
+#[test]
+fn code_with_a_frame_made_and_run() {
+    let runs: Vec<_> = machines().into_iter().map(|(m, _)| (m, std::thread::spawn(move || values(m, "frames.fx", 2)))).collect();
+    for (m, t) in runs {
+        let got = t.join().expect("ran");
+        if m == "rs-scheme-vm" {
+            assert!(got.last().is_some_and(|l| l.contains("cannot call back a procedure of the bytecode VM")), "{m}: {got:?}");
+            continue;
+        }
+        assert_eq!(got, ["500000500000", "165055"], "{m}");
+    }
+    let stress = [("FIXPT_SLICE", "3"), ("FIXPT_NURSERY", "4096"), ("FIXPT_NATIVE_STACK_CACHE", "1024")];
+    for m in ["fx-cells-rsinterp", "fx-regs-rsjit-nativecc"] {
+        assert_eq!(values_with(m, "frames.fx", 2, &stress), ["500000500000", "165055"], "{m}, stressed");
     }
 }
