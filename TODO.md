@@ -2546,6 +2546,21 @@ generator reads, structured (step 6; today one string a clause,
   `frames.fx` carries the words the encoder made instead.
 - **More routines** a generator will want: allocating a bloblet, calling a
   primitive by name (its number is fixpt's own), making a closure.
+- **Calls do not use the convention their type says** (the user's
+  question, 2026-10-14). Both checkers know each call's convention, but
+  the compilers work from cellular words and register code, which carry
+  none, so a typed call dispatches at run time, `fx`'s way, everywhere:
+  fixpt's native code checks an unknown callee's code against `code_lo`;
+  the arm64 cellular machines' `tcall` (§93), the stencils' typed call and
+  register code's `invoke` (both 2026-10-14) do too. The design
+  (`docs/research/native-conventions.md`) and the user's rule (static
+  conventions, not run-time checks) say a call through `native` or
+  `cellular` compiles directly and only `fx` dispatches. To do: the
+  checkers note each call's convention by expression, as conversions are
+  noted (`conversion_code`, `k-convert-at`), and each compiler compiles
+  `cellular` with no check, `native` directly (on the cellular machines,
+  straight to the Rust machine's `call_native`), `fx` as now. Untyped
+  calls keep theirs.
 Fixed (2026-10-14), found by made procedures: on the arm64 cellular
 machines a typed tail call of a native closure stopped ("no routine is
 numbered 40": the Rust machine made the call, then returned from the word,

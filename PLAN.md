@@ -152,7 +152,8 @@ are in the last section, "Log: the glance's details", and in
   and `native-code?`, on every machine; the native contract declared
   (`define-convention`, checked against fixpt's generated declaration by
   both checkers); code that is not a leaf (frames, `cons`, `poll`); next,
-  the declaration as structured data.
+  calls compiled by the convention their type says (no run-time check but
+  for `fx`), then the declaration as structured data.
 - **Cellular code calling native code** (2026-10-13, `TODO.md` §93):
   fixed, a crash on the REPL's machine where the native convention
   declined a form; its cost to assembling words mostly recovered (peval's
