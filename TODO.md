@@ -2550,9 +2550,9 @@ generator reads, structured (step 6; today one string a clause,
   2026-10-15; `docs/research/loads-and-places.md`). Decided: C first, and
   done (`DONE.md` §97): expressions' identities `(start end k)`, facts
   keyed by them. Left:
-  - Fact kinds encoded in a fact's integer (-500, -501, -502, -1000 -
-    code, -1 - summary), and an inlined copy's field fact in its start
-    (`c-resolved-at`): a datatype of facts instead.
+  - What an operation needs, within a fact (`n-datum`), still told apart
+    by the operation and by ranges: a blobref's field offset past `2^40`
+    (`check::BLOBREF_FIELD`), a flat array's `n << 32 | size`.
   - Cause 2, the hidden definition read differently by who reads it: as
     Sheldon's `input` was, a load whose identity is its own key, resolved
     where it is read, rather than a hidden global defined by a parser in a

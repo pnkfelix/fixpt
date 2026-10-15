@@ -192,9 +192,15 @@ Not yet done, and what C makes possible:
   and effect summaries. Positions that stay: a loaded file's base and a
   REPL form's (past every earlier text), which say which text was read,
   as the user's count for repeat reads would.
-- Fact kinds are still encoded in the fact's integer (-500, -501, -502,
-  -1000 - code, -1 - summary), and an inlined copy's field fact in its
-  start (`c-resolved-at`).
+- ~~Fact kinds encoded in the fact's integer~~ (done, 2026-10-15): a fact
+  is a `k-noted`, a datatype (`n-datum`, `n-summary`, `n-conversion`,
+  `n-apply-shares`, `n-frozen-define`, `n-plain-fx`), not -500, -501,
+  -502, -1000 - code, -1 - summary; and a copy kept to be inlined holds
+  what was found of its `extract`s and `tagcase`s in their nodes, as
+  `e-bloblet` holds its field, not in where they start
+  (`c-resolved-at`). Still integers, within `n-datum`: what an operation
+  needs is told by the operation (a field, a blobref's offset past
+  `2^40`, a layout's code, `n << 32 | size`).
 
 **On cause 2, Sheldon said it first.** In Sheldon's system `(input
 "file")` is an ordinary pure expression, and textual identity makes two

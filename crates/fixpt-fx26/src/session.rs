@@ -1433,9 +1433,11 @@ impl Fx26Session {
             let heap = m.heap();
             while l.is_pair() {
                 let p = heap.car(l);
-                // Its expression's identity (`k-at`), and the summary.
-                let at = heap.bloblet_slot(p, 2);
-                out.push((heap.bloblet_slot(at, 2).as_fixnum(), heap.bloblet_slot(at, 3).as_fixnum(), heap.bloblet_slot(p, 3).as_fixnum()));
+                // Its expression's identity (`k-at`), and the summary
+                // (`n-summary`, a sum, its value a product of one field).
+                let (at, noted) = (heap.bloblet_slot(p, 2), heap.bloblet_slot(p, 3));
+                let summary = heap.bloblet_slot(heap.bloblet_slot(noted, 3), 2).as_fixnum();
+                out.push((heap.bloblet_slot(at, 2).as_fixnum(), heap.bloblet_slot(at, 3).as_fixnum(), summary));
                 l = heap.cdr(l);
             }
             fixpt_heap::Value::FALSE

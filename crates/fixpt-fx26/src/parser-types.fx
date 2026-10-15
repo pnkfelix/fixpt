@@ -59,11 +59,14 @@
   ;; A bloblet form, by name, with its field index, or -1.
   (e-bloblet symbol int (listof exp acyclic) int int int)
   (e-product (listof (productof (1 symbol) (2 exp)) acyclic) int int int)
-  (e-extract exp symbol int int int)
+  ;; `(extract e label)`: what the checker found it takes (`n-datum`), once
+  ;; a compiler has put it there (`c-resolve-extracts`); else -1.
+  (e-extract exp symbol int int int int)
   (e-sum symbol exp int int int)
   ;; Arms: the tag, whether it takes a product apart, the names, the body.
+  ;; Then, as `e-extract`'s, a flat sum's layout, or -1.
   (e-tagcase exp (listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) acyclic)
-             (listof (productof (1 symbol) (2 exp)) acyclic) int int int)
+             (listof (productof (1 symbol) (2 exp)) acyclic) int int int int)
   ;; `(module item …)` (`docs/research/first-class-modules.md`): each item
   ;; what it is (0 `define-generative`, 1 `define-type`, 2 `define`, 3
   ;; `define-rec`), the names it defines, their types (a `define`'s, none or

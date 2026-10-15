@@ -187,7 +187,7 @@
             (val c-plain-fx-at (subr (maxeff (read @globals) (read @k)) (int int int) bool))
             (val c-field-at
                  (subr (maxeff (alloc @k) (read @globals) (read @k)) (int int int) int))
-            (val c-resolved-at (subr pure (int) int))
+            (val c-found (subr (maxeff (alloc @k) (read @globals) (read @k)) (int int int int) int))
             (val c-genv-now
                  (subr (maxeff (read (globals c-genv c-genv-count)) (read @k)) () int))
             (val c-count-exps (subr (read @globals) (exps) int))

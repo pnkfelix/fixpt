@@ -93,14 +93,15 @@
 ;; Conversion `code` at `x`, among the facts `checked-extracts` gives.
 (define k-note-conversion (subr (maxeff checks spin) (kx int) unit)
   (lambda (x code)
-    (let ((fact (product (1 (k-at-of x)) (2 (- -1000 code)))))
+    (let ((fact (product (1 (k-at-of x)) (2 (n-conversion code)))))
       (set k-extracts (cons fact (get k-extracts))))))
 ;; A conversion of `x`'s procedure, of type `t`, to `to`. To `fx` or to a
 ;; convention binder it does nothing at run time; to `cellular` or `native`
 ;; it is `%fx26-convert`, which gives the value if it is already one of
 ;; those, and otherwise an adapter: a procedure of the convention asked
-;; for that calls it. The compiler learns of it as a fact at `x`'s span:
-;; -1000 less the arity times 4, plus 1 for `cellular` or 2 for `native`.
+;; for that calls it. The compiler learns of it as a fact of `x`
+;; (`n-conversion`): the arity times 4, plus 1 for `cellular` or 2 for
+;; `native`.
 (define k-convert-at (subr (maxeff checks spin) (kx int k-conv) unit)
   (lambda (x t to)
     (let ((n (tagcase (k-get (k-resolve t)) (ty-subr (e ps r cv) (* 4 (k-length ps))) (else y 0))))

@@ -2534,3 +2534,11 @@ Still open in `TODO.md` §97; done so far:
   cut from another's, so as not to collide. The Rust compiler's plans,
   liftings, specialized copies and effect summaries are keyed by
   expression, not span (`Checker::effect_summaries_by_exp`).
+- **Facts as a datatype** (2026-10-15): a fact is a `k-noted`
+  (`check-env-types.fx`: `n-datum`, `n-summary`, `n-conversion`,
+  `n-apply-shares`, `n-frozen-define`, `n-plain-fx`), built so by both
+  checkers (the Rust one's as sums, `syn::rust_facts`), not an integer
+  whose range said its kind. And a body kept to be inlined holds what was
+  found of its `extract`s and `tagcase`s in their nodes (a field of
+  `e-extract` and `e-tagcase`, -1 until then, as `e-bloblet`'s), not in
+  where they start (`c-resolved-at`, gone).

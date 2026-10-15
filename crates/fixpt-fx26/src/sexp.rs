@@ -215,7 +215,8 @@ fn show_exp(c: &Checker, chars: &Chars, e: ExpId, kth: &Kth) -> String {
             let fs = fields.iter().map(|(l, x)| format!("[{} {}]", name(*l), go(*x))).collect();
             format!("(e-product {} {a} {b})", list(fs))
         }
-        Exp::Extract(x, l) => format!("(e-extract {} {} {a} {b})", go(x), name(l)),
+        // What a compiler found it takes, -1 as the parser makes it.
+        Exp::Extract(x, l) => format!("(e-extract {} {} -1 {a} {b})", go(x), name(l)),
         Exp::Sum(t, x) => format!("(e-sum {} {} {a} {b})", name(t), go(x)),
         Exp::TagCase { scrutinee, arms, els } => {
             let arms = arms
@@ -227,7 +228,7 @@ fn show_exp(c: &Checker, chars: &Chars, e: ExpId, kth: &Kth) -> String {
                 })
                 .collect();
             let els = els.iter().map(|(y, x)| format!("[{} {}]", name(*y), go(*x))).collect();
-            format!("(e-tagcase {} {} {} {a} {b})", go(scrutinee), list(arms), list(els))
+            format!("(e-tagcase {} {} {} -1 {a} {b})", go(scrutinee), list(arms), list(els))
         }
     }
 }

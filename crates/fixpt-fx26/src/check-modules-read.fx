@@ -227,9 +227,9 @@
         (e-bloblet (op i args a b abk)
           (x-bloblet op i (k-label-const op args (k-resolve-all args)) a b abk))
         (e-product (fs a b abk) (x-product (k-resolve-fields fs nil a b) a b abk))
-        (e-extract (body l a b abk) (x-extract (k-resolve-exp body) l a b abk))
+        (e-extract (body l got a b abk) (x-extract (k-resolve-exp body) l a b abk))
         (e-sum (l body a b abk) (x-sum l (k-resolve-exp body) a b abk))
-        (e-tagcase (s arms els a b abk)
+        (e-tagcase (s arms els got a b abk)
           ;; The `else` arm, if any, is resolved as a `let` binding is.
           (let* ((sx (k-resolve-exp s))
                  (rarms (k-resolve-arms arms nil))

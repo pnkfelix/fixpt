@@ -441,10 +441,10 @@
     (tagcase f
       (x-with (m body a b abk) (if (k-fx-module? m) (k-note-fx-plain body (k-at-of f)) #u))
       (else y #u))))
-;; Where nothing shadows `n`, `(with #%fx n)` is the plain `n`: the fact
-;; -502, for the compiler (the Rust checker's `fx_plain`).
+;; Where nothing shadows `n`, `(with #%fx n)` is the plain `n`: noted for
+;; the compiler (`n-plain-fx`, the Rust checker's `fx_plain`).
 (define k-note-fx-plain (subr (maxeff checks spin) (kx k-at) unit)
   (lambda (body at)
     (if (string=? (k-std-op body) "")
         #u
-        (set k-extracts (cons (product (1 at) (2 -502)) (get k-extracts)))))))))
+        (set k-extracts (cons (product (1 at) (2 (n-plain-fx))) (get k-extracts)))))))))

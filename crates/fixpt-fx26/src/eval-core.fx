@@ -128,12 +128,12 @@
 ;; What the checker found of each expression, as `run-checked` was given
 ;; it: a blobref's layouts, and offsets (`checked-extracts`).
 (define ev-facts (ref k-facts @v) (new nil))
-;; The fact of `a` `b` `k` not negative, or -1.
+;; What an operation `a` `b` `k` needs (`n-datum`), or -1.
 (define* ev-fact-in (subr (maxeff (read @globals) spin) (k-facts int int int) int)
   (lambda (fs a b k)
     (cond ((null? fs) -1)
-          ((and (ev-at-is? (extract (car fs) 1) a b k) (>= (extract (car fs) 2) 0))
-           (extract (car fs) 2))
+          ((ev-at-is? (extract (car fs) 1) a b k)
+           (tagcase (extract (car fs) 2) (n-datum (i) i) (else y (ev-fact-in (cdr fs) a b k))))
           (else (ev-fact-in (cdr fs) a b k)))))
 (define* ev-fact-at (subr (maxeff (read @globals) (read @v) spin) (int int int) int)
   (lambda (a b k) (ev-fact-in (get ev-facts) a b k)))
@@ -296,9 +296,10 @@
         (e-bloblet (op i args a b abk)
           (ev-bloblet op (if (< i 0) (ev-fact-at a b abk) i) (eval-all args e)))
         (e-product (fs a b abk) (o-product (eval-fields fs e)))
-        (e-extract (p l a b abk) (ev-extract (eval p e) l a b abk))
+        (e-extract (p l got a b abk) (ev-extract (eval p e) l a b abk))
         (e-sum (t v a b abk) (o-sum t (eval v e)))
-        (e-tagcase (s arms els a b abk) (eval-tagcase (eval s e) arms els e (ev-fact-at a b abk)))
+        (e-tagcase (s arms els got a b abk)
+          (eval-tagcase (eval s e) arms els e (ev-fact-at a b abk)))
         ;; A module: a product of its values, in order, each labelled by its
         ;; name; its abstract types' conversions the identity.
         (e-module (items a b abk) (eval-module items e))

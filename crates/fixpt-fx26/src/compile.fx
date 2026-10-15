@@ -124,13 +124,13 @@
 (define c-conversion-at (subr (maxeff (read @globals) (read @k)) (exp) int)
   (lambda (x) (c-noted-of (get c-convert-table) x -1)))
 
-;; Each `apply` whose list the checker found at `acyclic` (the fact -500,
+;; Each `apply` whose list the checker found at `acyclic` (`n-apply-shares`,
 ;; `k-note-apply-shares`). Every other `apply` copies its list.
 (define c-shares-table (ref c-by-at @k) (new (c-new-by-at)))
-;; Each definition's value that is a list nothing writes (the fact -501,
+;; Each definition's value that is a list nothing writes (`n-frozen-define`,
 ;; `k-note-frozen-define`).
 (define c-frozen-table (ref c-by-at @k) (new (c-new-by-at)))
-;; Each `(with #%fx n)` that is the plain `n` (the fact -502, `k-synth-fx`).
+;; Each `(with #%fx n)` that is the plain `n` (`n-plain-fx`, `k-synth-fx`).
 (define c-plain-table (ref c-by-at @k) (new (c-new-by-at)))
 (define c-plain-fx-at (subr (maxeff (read @globals) (read @k)) (int int int) bool)
   (lambda (a b k) (>= (c-noted-at (get c-plain-table) a b k -1) 0)))
@@ -143,12 +143,13 @@
   (lambda (a b k) (>= (c-noted-at (get c-shares-table) a b k -1) 0)))
 
 ;; The field of the `extract` `a` `b` `k`, or -1; or what else the checker
-;; found there (a scalar's layout, a flat sum's). A form kept to be inlined
-;; has it in place of where it starts (`c-resolved-at`).
+;; found there (a scalar's layout, a flat sum's).
 (define c-field-at (subr c-builds (int int int) int)
-  (lambda (a b k) (if (< a -1) (- -2 a) (c-noted-at (get c-fact-table) a b k -1))))
-;; Where a form with fact `i` (`c-field-at`) is, kept to be inlined.
-(define c-resolved-at (subr pure (int) int) (lambda (i) (- -2 i)))
+  (lambda (a b k) (c-noted-at (get c-fact-table) a b k -1)))
+;; The same of an operation that holds `got`, if not -1: a form kept to be
+;; inlined holds it (`c-resolve-extracts`).
+(define c-found (subr c-builds (int int int int) int)
+  (lambda (got a b k) (if (< got 0) (c-field-at a b k) got)))
 
 ;; Each `with` the checker saw (its `k-with-vals`, as `c-set-facts!` took
 ;; them), by expression: its module's values' names, in order, and their
@@ -430,20 +431,19 @@
   (lambda (fs)
     (if (null? fs)
         #u
-        (let ((at (extract (car fs) 1)) (n (extract (car fs) 2)))
+        (let ((at (extract (car fs) 1)))
           (begin
-            (cond ((>= n 0) (c-note! (get c-fact-table) at n))
-                  ((= n -500) (c-note! (get c-shares-table) at 0))
-                  ((= n -501) (c-note! (get c-frozen-table) at 0))
-                  ((= n -502) (c-note! (get c-plain-table) at 0))
-                  ;; A conversion, -1000 - code (`k-convert-at`).
-                  ((<= n -1000) (c-note! (get c-convert-table) at (- -1000 n)))
-                  ;; An effect summary, -1 - s: the greatest, per expression.
-                  (else
-                   (let ((s (- -1 n))
-                         (known (c-noted-at (get c-summary-table) (extract at 1) (extract at 2)
-                                            (extract at 3) -1)))
-                     (c-note! (get c-summary-table) at (if (> s known) s known)))))
+            (tagcase (extract (car fs) 2)
+              (n-datum (i) (c-note! (get c-fact-table) at i))
+              (n-apply-shares () (c-note! (get c-shares-table) at 0))
+              (n-frozen-define () (c-note! (get c-frozen-table) at 0))
+              (n-plain-fx () (c-note! (get c-plain-table) at 0))
+              (n-conversion (code) (c-note! (get c-convert-table) at code))
+              ;; The greatest summary, per expression.
+              (n-summary (s)
+                (let ((known (c-noted-at (get c-summary-table) (extract at 1) (extract at 2)
+                                         (extract at 3) -1)))
+                  (c-note! (get c-summary-table) at (if (> s known) s known)))))
             (c-fill-facts (cdr fs)))))))
 
 ;; The effect summary of the expression `a` `b` `k` (3, the most, if none was
@@ -544,9 +544,9 @@
         (e-prompt (t body h a b abk) (c-free t bound (c-free body bound (c-free h bound acc))))
         (e-bloblet (op i args a b abk) (c-free-all args bound acc))
         (e-product (fs a b abk) (c-free-all (c-bound-exps fs) bound acc))
-        (e-extract (p l a b abk) (c-free p bound acc))
+        (e-extract (p l got a b abk) (c-free p bound acc))
         (e-sum (t v a b abk) (c-free v bound acc))
-        (e-tagcase (s arms els a b abk)
+        (e-tagcase (s arms els got a b abk)
           (c-free s bound (c-free-arms arms bound (c-free-else els bound acc))))
         ;; A module's items see all of them, as a `letrec*`'s.
         (e-module (items a b abk) (c-free-items items (c-module-bound items bound) acc))
@@ -708,9 +708,9 @@
                (c-calls-only-inside body f n loops)))
         (e-bloblet (op i args a b abk) (c-calls-only-all args f n loops))
         (e-product (fs a b abk) (c-calls-only-all (c-bound-exps fs) f n loops))
-        (e-extract (p l a b abk) (c-calls-only p f n #f loops))
+        (e-extract (p l got a b abk) (c-calls-only p f n #f loops))
         (e-sum (t v a b abk) (c-calls-only v f n #f loops))
-        (e-tagcase (s arms els a b abk)
+        (e-tagcase (s arms els got a b abk)
           (and (c-calls-only s f n #f loops)
                (c-calls-only-arms arms f n tail loops)
                (c-calls-only-else els f n tail loops)))

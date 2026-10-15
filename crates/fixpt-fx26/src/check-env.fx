@@ -360,17 +360,14 @@
 ;; may change across. Newest first. The Rust checker's `effect_summaries` is
 ;; the same.
 (define k-effect-notes (ref k-facts @t) (new nil))
-;; An effect note as `checked-extracts` gives it: its summary n as -1 - n.
-(define k-note-as-fact (subr (read @globals) (k-fact) k-fact)
-  (lambda (n) (product (1 (extract n 1)) (2 (- -1 (extract n 2))))))
+;; `notes` onto `acc`.
 (define k-add-effect-facts (subr (read @globals) (k-facts k-facts) k-facts)
   (lambda (notes acc)
     (if (null? notes)
         acc
-        (k-add-effect-facts (cdr notes) (the k-facts (cons (k-note-as-fact (car notes)) acc))))))
-;; What checking found, for a compiler: each `extract`'s field, `(at i)`;
-;; and each expression's effect summary (`k-effect-notes`), `(at n)` with n
-;; negative, the summary -1 - n.
+        (k-add-effect-facts (cdr notes) (the k-facts (cons (car notes) acc))))))
+;; What checking found, for a compiler and the evaluator (`k-noted`): the
+;; facts, and each expression's effect summary (`k-effect-notes`).
 (define checked-extracts (subr kreads () k-facts)
   (lambda () (k-add-effect-facts (get k-effect-notes) (get k-extracts))))
 (define checked-effects (subr kreads () k-facts) (lambda () (get k-effect-notes)))

@@ -170,7 +170,7 @@
 ;; `x`'s effect `e`, noted.
 (define k-note-effect (subr kstate (kx k-eff) unit)
   (lambda (x e)
-    (let ((fact (product (1 (k-at-of x)) (2 (k-summary e)))))
+    (let ((fact (product (1 (k-at-of x)) (2 (n-summary (k-summary e))))))
       (set k-effect-notes (the k-facts (cons fact (get k-effect-notes)))))))
 ;; `e`, the effect of `x`, with what it does to frozen data taken out; or an
 ;; error, if it writes it.

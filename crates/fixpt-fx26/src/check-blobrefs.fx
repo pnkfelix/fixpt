@@ -36,7 +36,7 @@
     (let ((s (k-flat-least-size f)))
       (if (< s 0)
           (k-fail (k-cat3 "the layout of a " (k-show-ty f) " is not known") a z)
-          (let ((fact (product (1 (product (1 a) (2 z) (3 k))) (2 s))))
+          (let ((fact (product (1 (product (1 a) (2 z) (3 k))) (2 (n-datum s)))))
             (begin (set k-extracts (cons fact (get k-extracts))) f))))))
 ;; The flat the type checked against says, for a new blobref at `a`..`z`,
 ;; the `k`th there.
@@ -68,7 +68,7 @@
                   a z)
           (tagcase (k-get (k-resolve b))
             (ty-bloblet (fs fz r)
-              (let ((fact (product (1 (product (1 a) (2 z) (3 k))) (2 code))))
+              (let ((fact (product (1 (product (1 a) (2 z) (3 k))) (2 (n-datum code)))))
                 (begin (if note (set k-extracts (cons fact (get k-extracts))) #u) r)))
             (else y (k-fail (k-cat3 "the region of a " (k-show-ty xt) "'s owner is not known")
                             a z)))))))
@@ -81,7 +81,7 @@
       (if (< (car e) 0)
           (k-fail (k-cat3 "the layout of a " (k-show-ty (car p)) " is not known") a z)
           (let ((fact (product (1 (product (1 a) (2 z) (3 k)))
-                                (2 (+ (* (cdr p) 4294967296) (car e))))))
+                                (2 (n-datum (+ (* (cdr p) 4294967296) (car e)))))))
             (begin
               (set k-extracts (cons fact (get k-extracts)))
               (k-ty-new (ty-nat (k-flat-array-length f)))))))))
@@ -101,6 +101,6 @@
       (if (< (car e) 0)
           (k-fail (k-cat3 "the layout of a " (k-show-ty (car p)) " is not known") a z)
           (let ((fact (product (1 (product (1 a) (2 z) (3 k)))
-                                (2 (+ (* (cdr p) 4294967296) (car e))))))
+                                (2 (n-datum (+ (* (cdr p) 4294967296) (car e)))))))
             (begin (set k-extracts (cons fact (get k-extracts))) (car p)))))))
 )))

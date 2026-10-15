@@ -72,9 +72,9 @@
         (e-begin (es a b abk) (c-call-only-all es p f k n))
         (e-bloblet (op i args a b abk) (c-call-only-all args p f k n))
         (e-product (fs a b abk) (c-call-only-fields fs p f k n))
-        (e-extract (e l a b abk) (c-call-only e p f k n))
+        (e-extract (e l got a b abk) (c-call-only e p f k n))
         (e-sum (t v a b abk) (c-call-only v p f k n))
-        (e-tagcase (s arms els a b abk)
+        (e-tagcase (s arms els got a b abk)
           (c-arity-merge (c-call-only s p f k n)
                          (c-arity-merge (c-call-only-arms arms p f k n)
                                         (c-call-only-else els p f k n))))
@@ -137,7 +137,7 @@
               (c-first-call-only (cdr ps) body f (+ k 1) n))))))
 
 ;; `x`, each `(with #%fx n)` in it that the checker found the plain `n`
-;; (the fact -502) made that `n`, at the `with`'s place: what the Rust
+;; (`n-plain-fx`) made that `n`, at the `with`'s place: what the Rust
 ;; checker gives its compilers (`Arena::replace`, `TODO.md` §46). Only the
 ;; forms of a program that has such a fact are walked.
 (define-rec
@@ -165,10 +165,10 @@
         (e-convention (cv body a b abk) (e-convention cv (c-plain-fx body) a b abk))
         (e-bloblet (op i args a b abk) (e-bloblet op i (c-plain-all args) a b abk))
         (e-product (fs a b abk) (e-product (c-plain-named fs) a b abk))
-        (e-extract (p l a b abk) (e-extract (c-plain-fx p) l a b abk))
+        (e-extract (p l got a b abk) (e-extract (c-plain-fx p) l got a b abk))
         (e-sum (t v a b abk) (e-sum t (c-plain-fx v) a b abk))
-        (e-tagcase (s arms els a b abk)
-          (e-tagcase (c-plain-fx s) (c-plain-arms arms) (c-plain-named els) a b abk))
+        (e-tagcase (s arms els got a b abk)
+          (e-tagcase (c-plain-fx s) (c-plain-arms arms) (c-plain-named els) got a b abk))
         (else y x))))
   (c-plain-all (subr c-walks (exps) exps)
     (lambda (es)
@@ -220,10 +220,10 @@
 
 ;; `x`, each `extract` in it that the checker's facts give a field made the
 ;; `bloblet-ref` of that field, which compiles as it would, and each other
-;; fact (a blobref's field, a scalar's layout, a flat sum's) kept in its form
-;; (`c-resolved-at`): for a body kept to be inlined or specialized in a later
-;; form, whose facts, keyed by position in its own form's text, are gone by
-;; then.
+;; fact (a blobref's field, a scalar's layout, a flat sum's) kept in its node
+;; (`e-extract`'s and `e-tagcase`'s, as `e-bloblet`'s): for a body kept to
+;; be inlined or specialized in a later form, whose facts, keyed by its own
+;; form's expressions, are gone by then.
 (define-rec
   (c-resolve-extracts (subr c-walks (exp) exp)
     (lambda (x)
@@ -248,17 +248,16 @@
         (e-bloblet (op i args a b abk)
           (e-bloblet op (if (< i 0) (c-field-at a b abk) i) (c-resolve-all args) a b abk))
         (e-product (fs a b abk) (e-product (c-resolve-named fs) a b abk))
-        (e-extract (p l a b abk)
-          (let ((i (c-field-at a b abk)) (q (c-resolve-extracts p)))
-            (cond ((< i 0) (e-extract q l a b abk))
+        (e-extract (p l got a b abk)
+          (let ((i (c-found got a b abk)) (q (c-resolve-extracts p)))
+            (cond ((< i 0) (e-extract q l got a b abk))
                   ;; A blobref's field (`check::BLOBREF_FIELD`).
-                  ((>= i 1099511627776) (e-extract q l (c-resolved-at i) b abk))
+                  ((>= i 1099511627776) (e-extract q l i a b abk))
                   (else (e-bloblet 'bloblet-ref i (the exps (cons q nil)) a b abk)))))
         (e-sum (t v a b abk) (e-sum t (c-resolve-extracts v) a b abk))
-        (e-tagcase (s arms els a b abk)
-          (let ((k (c-field-at a b abk)))
-            (e-tagcase (c-resolve-extracts s) (c-resolve-arms arms) (c-resolve-named els)
-                       (if (< k 0) a (c-resolved-at k)) b abk)))
+        (e-tagcase (s arms els got a b abk)
+          (e-tagcase (c-resolve-extracts s) (c-resolve-arms arms) (c-resolve-named els)
+                     (c-found got a b abk) a b abk))
         (else y x))))
   (c-resolve-all (subr c-walks (exps) exps)
     (lambda (es)

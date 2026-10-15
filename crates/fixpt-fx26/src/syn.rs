@@ -470,28 +470,27 @@ pub fn rust_facts(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
         (at(span.file, span.start), at(span.file, span.end), kth.of(e) as i64)
     };
     type At = (i64, i64, i64);
-    let facts: Vec<(At, i64)> = c.facts.field_index.iter().map(|(e, i)| (place(*e), *i as i64)).collect();
-    // And each expression's effect summary, as -1 - s (`checked-extracts`):
-    // the greatest of its effects'.
+    // What each is noted to be, as `k-noted` says it: its constructor, and
+    // its value if any.
+    let facts: Vec<(At, &str, Option<i64>)> = c.facts.field_index.iter().map(|(e, i)| (place(*e), "n-datum", Some(*i as i64))).collect();
+    // And each expression's effect summary: the greatest of its effects'.
     let mut summaries: HashMap<At, i64> = HashMap::new();
     for (e, s) in c.effect_summaries_by_exp() {
         let k = summaries.entry(place(e)).or_insert(s as i64);
         *k = (*k).max(s as i64);
     }
-    let facts: Vec<(At, i64)> = facts
+    let facts: Vec<(At, &str, Option<i64>)> = facts
         .into_iter()
-        .chain(summaries.into_iter().map(|(at, s)| (at, -1 - s)))
-        // And each conversion, as -1000 - its code (`k-convert-at`).
-        .chain(c.facts.converted.keys().filter_map(|e| c.facts.conversion_code(*e).map(|k| (place(*e), -1000 - k))))
-        // And each `apply` of a list at `acyclic`, as -500
-        // (`k-note-apply-shares`).
-        .chain(c.facts.apply_shares.iter().map(|e| (place(*e), -500)))
-        // And each definition's value that is a list nothing writes, as
-        // -501 (`k-note-frozen-define`).
-        .chain(c.facts.frozen_defines.iter().map(|e| (place(*e), -501)))
-        // And each `(with #%fx n)` that is the plain `n`, as -502
-        // (`k-synth-fx`).
-        .chain(c.facts.fx_plain.keys().map(|e| (place(*e), -502)))
+        .chain(summaries.into_iter().map(|(at, s)| (at, "n-summary", Some(s))))
+        // And each conversion, its code (`k-convert-at`).
+        .chain(c.facts.converted.keys().filter_map(|e| c.facts.conversion_code(*e).map(|k| (place(*e), "n-conversion", Some(k)))))
+        // And each `apply` of a list at `acyclic` (`k-note-apply-shares`).
+        .chain(c.facts.apply_shares.iter().map(|e| (place(*e), "n-apply-shares", None)))
+        // And each definition's value that is a list nothing writes
+        // (`k-note-frozen-define`).
+        .chain(c.facts.frozen_defines.iter().map(|e| (place(*e), "n-frozen-define", None)))
+        // And each `(with #%fx n)` that is the plain `n` (`k-synth-fx`).
+        .chain(c.facts.fx_plain.keys().map(|e| (place(*e), "n-plain-fx", None)))
         .collect();
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     // An identity, as the product `k-at` is.
@@ -532,10 +531,17 @@ pub fn rust_facts(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
     }
     scheme.call_global(&format!("{READER_PREFIX}checked-reshapes!"), &[reshapes]).map_err(|e| fail(e.to_string()))?;
     let mut list = scheme.make(|_| Value::NULL);
-    for (at, i) in facts {
+    for (at, noted, value) in facts {
         let at = identity(scheme, at)?;
-        let (tag, i) = (scheme.make(|_| Value::fixnum(37)), scheme.make(|_| Value::fixnum(i)));
-        let fact = scheme.call_global("%make-frozen", &[tag, at, i]).map_err(|e| fail(e.to_string()))?;
+        // The `k-noted`: a sum of its constructor's name and the product of
+        // its fields.
+        let mut fields = vec![scheme.make(|_| Value::fixnum(37))];
+        fields.extend(value.map(|v| scheme.make(|_| Value::fixnum(v))));
+        let fields = scheme.call_global("%make-frozen", &fields).map_err(|e| fail(e.to_string()))?;
+        let (sum, name) = (scheme.make(|_| Value::fixnum(36)), scheme.make(|m| m.heap().intern(noted)));
+        let noted = scheme.call_global("%make-frozen", &[sum, name, fields]).map_err(|e| fail(e.to_string()))?;
+        let tag = scheme.make(|_| Value::fixnum(37));
+        let fact = scheme.call_global("%make-frozen", &[tag, at, noted]).map_err(|e| fail(e.to_string()))?;
         list = scheme.call_global("cons", &[fact, list]).map_err(|e| fail(e.to_string()))?;
     }
     Ok(list)

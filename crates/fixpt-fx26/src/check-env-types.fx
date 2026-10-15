@@ -37,10 +37,26 @@
 (define-type k-op-mark (productof (1 symbol) (2 k-at)))
 ;; Description names in scope, innermost first.
 (define-type k-scope (listof (pairof symbol k-ds @t) acyclic))
-;; What checking proved that running needs: each `extract`'s field, by
-;; position, keyed by the `extract` (its identity, `k-at`). Only the
-;; product's type says.
-(define-type k-fact (productof (1 k-at) (2 int)))
+;; What checking found of an expression that running needs, for the
+;; compilers and the evaluator (`checked-extracts`):
+(define-datatype k-noted
+  ;; What an operation needs that only the types say: an `extract`'s field,
+  ;; by position (a blobref's, its offset past `k-blobref-field`); a
+  ;; blobref's scalar or flat sum's layout; a flat array's length and
+  ;; element size, `n << 32 | size`; the bytes a new blobref takes.
+  (n-datum int)
+  ;; The expression's effect, summarized (`k-summary`).
+  (n-summary int)
+  ;; A procedure converted to a convention: what `%fx26-convert` is given.
+  (n-conversion int)
+  ;; An `apply` whose list is at `acyclic`, which it need not copy.
+  (n-apply-shares)
+  ;; A definition's value that is a list nothing writes.
+  (n-frozen-define)
+  ;; A `(with #%fx n)` that is the plain `n`.
+  (n-plain-fx))
+;; Each keyed by the expression (its identity, `k-at`).
+(define-type k-fact (productof (1 k-at) (2 k-noted)))
 (define-type k-facts (listof k-fact acyclic))
 ;; Each `with` checked, its identity, and its module's values its body names,
 ;; with their positions in the module, newest first: a `with`'s body sees

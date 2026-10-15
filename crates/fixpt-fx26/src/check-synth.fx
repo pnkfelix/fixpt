@@ -56,7 +56,7 @@
     (module
 (hide (include check-synth-types) (include check-types-types) (include check-resolve-types)
       (include check-infer-types) (include check-subtype-types) (include parser-types)
-      (include eager-reader-types))
+      (include eager-reader-types) (include check-env-types))
 ;; The types it uses of the files before it.
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-env) (include check-test-facts) (include check-resolve)
@@ -84,23 +84,25 @@
 ;; Note, for the compilers, that a top-level definition's value `x`, of
 ;; type `t`, is a list in a frozen region (`acyclic` or `const`): data
 ;; nothing writes, which they may make once if it is made of literals; the
-;; fact -501 (`c-fill-facts`). As the Rust checker's `frozen_defines`.
+;; fact `n-frozen-define` (`c-fill-facts`). As the Rust checker's
+;; `frozen_defines`.
 (define k-note-frozen-define (subr (maxeff checks spin) (int kx) unit)
   (lambda (t x)
     (if (tagcase (k-get t)
           (ty-pair (a d r nl) (tagcase r (r-frozen (p finite) #t) (else y #f)))
           (else y #f))
-        (set k-extracts (cons (product (1 (k-at-of x)) (2 -501)) (get k-extracts)))
+        (set k-extracts (cons (product (1 (k-at-of x)) (2 (n-frozen-define))) (get k-extracts)))
         #u)))
 ;; Note, for the compilers, that the call `x` of `f` (on parameters
 ;; `params`) is `apply` of a list at `acyclic`, which it need not copy: the
-;; fact -500 (`c-fill-facts`). Every other `apply` copies its list, so that
+;; fact `n-apply-shares` (`c-fill-facts`). Every other `apply` copies its
+;; list, so that
 ;; the variadic procedure's is one nothing else can write.
 (define k-note-apply-shares (subr (maxeff checks spin) (kx kx k-ids) unit)
   (lambda (x f params)
     (let ((apply? (string=? (k-std-op f) "apply")))
       (if (and apply? (and (= (k-length params) 2) (k-acyclic-list? (car (cdr params)))))
-          (set k-extracts (cons (product (1 (k-at-of x)) (2 -500)) (get k-extracts)))
+          (set k-extracts (cons (product (1 (k-at-of x)) (2 (n-apply-shares))) (get k-extracts)))
           #u))))
 ;; `car` or `cdr` of a union with a pair member (a `datum`, say) takes that
 ;; member apart: every machine's `car` checks its argument is a pair, and
@@ -154,7 +156,7 @@
     (case k ((0) "letregion") ((1) "letrena") ((2) "letreap") (else "letfreeze"))))
 ;; Note, for the compiler, that the `extract` `at` takes part `i`.
 (define k-note-extract (subr kstate (k-at int) unit)
-  (lambda (at i) (set k-extracts (cons (product (1 at) (2 i)) (get k-extracts)))))
+  (lambda (at i) (set k-extracts (cons (product (1 at) (2 (n-datum i))) (get k-extracts)))))
 ;; `inner`, under binders `bs`, with `m` for them, each within its bound and finite if need be.
 (define k-subst-checked (subr (maxeff checks spin) (k-binders k-map int int int) int)
   (lambda (bs m inner a b)
