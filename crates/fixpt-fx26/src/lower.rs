@@ -879,7 +879,7 @@ impl Lowerer<'_> {
             Some(at) => {
                 let fields: Vec<String> = at
                     .iter()
-                    .map(|i| match crate::check::reshape_step(*i) {
+                    .map(|i| match i.steps() {
                         (k, None) => format!("(%bloblet-ref fx:%reshaped {})", k + 2),
                         // A path: a value of the module that is one of its values.
                         (k, Some(j)) => format!("(%bloblet-ref (%bloblet-ref fx:%reshaped {}) {})", k + 2, j + 2),

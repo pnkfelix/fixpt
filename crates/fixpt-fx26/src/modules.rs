@@ -10,7 +10,7 @@
 //! mention its abstract types (`forget_nats`, which also forgets sizes).
 
 use crate::ast::{Atom, D, DVar, Effect, ExpId, Kind, ModItem, Ty, TyId};
-use crate::check::{Checker, reshape_path};
+use crate::check::{Checker, Pick};
 use crate::error::{FxError, R};
 use fixpt_read::{Span, Sym};
 use std::collections::{HashMap, HashSet};
@@ -106,7 +106,7 @@ impl Checker {
         let marker = |c: &Self, n: Sym| c.interner.name(n).starts_with("%hidden:") || c.interner.name(n).starts_with("%hiddenv:");
         let (kept_abs, gone): (Vec<(Sym, DVar)>, Vec<(Sym, DVar)>) = abs.into_iter().partition(|(n, _)| shown(self, *n));
         let descs: Vec<(Sym, TyId)> = descs.into_iter().filter(|(n, _)| !marker(self, *n) && shown(self, *n)).collect();
-        let at: Vec<usize> = self.facts.reshaped.get(&e).cloned().unwrap_or_else(|| (0..vals.len()).collect());
+        let at: Vec<Pick> = self.facts.reshaped.get(&e).cloned().unwrap_or_else(|| (0..vals.len()).map(Pick::Value).collect());
         let (mut out, mut path) = (Vec::new(), Vec::new());
         for (v, p) in vals.iter().zip(at) {
             if shown_val(self, v.0) {
@@ -122,7 +122,7 @@ impl Checker {
                 ));
             }
         }
-        if path.iter().enumerate().any(|(i, p)| i != *p) || path.len() != vals.len() {
+        if path.iter().enumerate().any(|(i, p)| *p != Pick::Value(i)) || path.len() != vals.len() {
             self.facts.reshaped.insert(e, path);
         }
         Ok(self.arena.ty(Ty::Module { abs: kept_abs, descs, vals: out }))
@@ -135,7 +135,7 @@ impl Checker {
     /// after it), else from each of `from`, values `0`, `1`, ….
     #[allow(clippy::too_many_arguments)]
     fn included(&mut self, e: ExpId, span: Span, abs: Vec<(Sym, DVar)>, mut descs: Vec<(Sym, TyId)>, own: Vec<(Sym, TyId)>, from: &[(Sym, TyId)], at: Option<usize>) -> R<TyId> {
-        let (mut out, mut path): (Vec<(Sym, TyId)>, Vec<usize>) = (Vec::new(), Vec::new());
+        let (mut out, mut path): (Vec<(Sym, TyId)>, Vec<Pick>) = (Vec::new(), Vec::new());
         let mut own_descs = std::mem::take(&mut descs);
         let (mut fresh, mut map) = (Vec::new(), HashMap::new());
         // The names so far, for lookups in constant time: an include of a
@@ -185,7 +185,7 @@ impl Checker {
                     return Err(FxError::at(span, format!("`{}` is defined twice in this module", self.interner.name(v.0))));
                 }
                 out.push(v);
-                path.push(reshape_path(at.unwrap_or(k), j));
+                path.push(Pick::Path(at.unwrap_or(k), j));
             }
             for (n, value) in marks {
                 let name = self.interner.intern(&format!("{}{}", if value { "%hiddenv:" } else { "%hidden:" }, self.interner.name(n)));
@@ -199,7 +199,7 @@ impl Checker {
         if let Some(k) = at {
             for (i, v) in own.iter().enumerate() {
                 out.push(*v);
-                path.push(if i < k { i } else { i + 1 });
+                path.push(Pick::Value(if i < k { i } else { i + 1 }));
             }
         }
         self.facts.reshaped.insert(e, path);
@@ -250,7 +250,7 @@ impl Checker {
     /// `(extend e0 e1)`, its values `vals` the two modules: one of the values
     /// of both, `e1`'s where both have a name, `e0`'s in its order first and
     /// then `e1`'s others; its types likewise. Made of theirs, by path
-    /// (`reshape_path`). A bound module's abstract types (`m..t`) are its
+    /// (`Pick::Path`). A bound module's abstract types (`m..t`) are its
     /// descriptions, aliases; any other's the new module's own, fresh
     /// (`abs_taken`; FX-91's, for `e1`'s), and one of `e0`'s that `e1`
     /// replaces is refused if what is kept mentions it (`TODO.md` §69). As
@@ -284,18 +284,18 @@ impl Checker {
             match v1.iter().position(|(m, _)| m == n) {
                 Some(k) => {
                     out.push(v1[k]);
-                    at.push(reshape_path(1, k));
+                    at.push(Pick::Path(1, k));
                 }
                 None => {
                     out.push((*n, *t));
-                    at.push(reshape_path(0, j));
+                    at.push(Pick::Path(0, j));
                 }
             }
         }
         for (k, (n, t)) in v1.iter().enumerate() {
             if !v0.iter().any(|(m, _)| m == n) {
                 out.push((*n, *t));
-                at.push(reshape_path(1, k));
+                at.push(Pick::Path(1, k));
             }
         }
         self.facts.reshaped.insert(e, at);

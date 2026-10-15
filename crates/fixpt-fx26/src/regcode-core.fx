@@ -1062,7 +1062,7 @@
         (e-module (items a b abk) (r-module g items env te tail))
         (e-with (m body a b abk) (r-with g m body a b abk env te tail))
         (else y (r-decline)))))
-  (r-reshape (subr rcompiles (rgen exp k-ids renv cenv bool) unit)
+  (r-reshape (subr rcompiles (rgen exp k-picks renv cenv bool) unit)
     (lambda (g x at env te tail)
       (if (extract g leaf)
           (r-decline)

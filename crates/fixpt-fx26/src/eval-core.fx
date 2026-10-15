@@ -159,16 +159,14 @@
           (else (ev-with-in (cdr ws) a b k)))))
 
 ;; The fields of `fs` at positions `ks`, in order.
-;; Field `p` of `fs`: from 2^40 on, a path (`k-reshape-path`), value `j` of
-;; the module that is value `k`.
-(define* pick-field (subr (maxeff evals spin) (vfields int) (pairof symbol val @v))
+;; The field `p` picks of `fs`: its `k`th, or the `j`th of the module that
+;; is its `k`th.
+(define* pick-field (subr (maxeff evals spin) (vfields k-pick) (pairof symbol val @v))
   (lambda (fs p)
-    (if (< p 1099511627776)
-        (nth-field fs p)
-        (let ((q (- p 1099511627776)))
-          (nth-field (as-fields (cdr (nth-field fs (quotient q 1048576))) "a module")
-                     (remainder q 1048576))))))
-(define* pick-fields (subr (maxeff evals spin) (vfields k-ids) vfields)
+    (tagcase p
+      (pick-value (k) (nth-field fs k))
+      (pick-path (k j) (nth-field (as-fields (cdr (nth-field fs k)) "a module") j)))))
+(define* pick-fields (subr (maxeff evals spin) (vfields k-picks) vfields)
   (lambda (fs ks) (if (null? ks) nil (cons (pick-field fs (car ks)) (pick-fields fs (cdr ks))))))
 
 ;; Module `v` as `at` (in a list of one) reshapes it: its values at those

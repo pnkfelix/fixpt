@@ -31,6 +31,9 @@
 (define-type exps (select compile-types exps))
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type k-ids (select check-types-types k-ids))
+(hide (define check-env-types (load-module "fx26:check-env-types.fx")))
+(define-type k-pick (select check-env-types k-pick))
+(define-type k-picks (select check-env-types k-picks))
 (define-type loc (select compile-types loc))
 (define-type compile-state-sig
   (moduleof (val c-defining (ref (listof symbol @k) @k))
@@ -161,7 +164,7 @@
                                (read @t)
                                (write @k)
                                spin)
-                       (k-ids int code)
+                       (k-picks int code)
                        unit))
             (val c-slots-load
                  (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k) spin)

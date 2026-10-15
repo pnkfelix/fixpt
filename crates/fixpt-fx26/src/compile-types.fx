@@ -14,6 +14,8 @@
 (define-type k-with-list (select check-env-types k-with-list))
 (define-type k-with-noted (select check-env-types k-with-noted))
 (define-type k-reshaped (select check-env-types k-reshaped))
+(define-type k-pick (select check-env-types k-pick))
+(define-type k-picks (select check-env-types k-picks))
 (define-type k-reshape-list (select check-env-types k-reshape-list))
 (hide (define table-types (load-module "fx26:table-types.fx")))
 (define-type table (select table-types table))
@@ -212,7 +214,7 @@
             (val c-reshape-at
                  (subr (maxeff (alloc @k) (read @globals) (read @k))
                        (exp)
-                       (listof k-ids @k)))
+                       (listof k-picks @k)))
             (val c-applied-let
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
                        (exp exps)

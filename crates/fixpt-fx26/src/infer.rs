@@ -390,7 +390,7 @@ impl Checker {
             // Made already of another's values (`extend`): the two at once.
             let at = match self.facts.reshaped.get(&e) {
                 Some(inner) => at.iter().map(|i| inner[*i]).collect(),
-                None => at,
+                None => at.into_iter().map(crate::check::Pick::Value).collect(),
             };
             self.facts.reshaped.insert(e, at);
             return Ok(());

@@ -219,10 +219,10 @@
       (if (null? rs) rs (c-reshape-in rs a (exp-end x) (exp-kth x))))))
 ;; The positions of the values the module `x` reshaped keeps, in a list of
 ;; one; none if it is not reshaped.
-(define c-reshape-at (subr (maxeff (read @globals) (read @k) (alloc @k)) (exp) (listof k-ids @k))
+(define c-reshape-at (subr (maxeff (read @globals) (read @k) (alloc @k)) (exp) (listof k-picks @k))
   (lambda (x)
     (let ((rs (c-reshape-of x)))
-      (if (null? rs) nil (the (listof k-ids @k) (cons (extract (car rs) 2) nil))))))
+      (if (null? rs) nil (the (listof k-picks @k) (cons (extract (car rs) 2) nil))))))
 ;; Whether the module `x` is reshaped.
 (define c-reshaped-at? (subr (maxeff (read @globals) (read @k)) (exp) bool)
   (lambda (x) (not (null? (c-reshape-of x)))))

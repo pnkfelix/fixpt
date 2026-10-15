@@ -418,16 +418,15 @@
     (let ((made (c-quoted-cell arg)))
       (if (null? made) nil (cons (wcell-interned (car made)) nil)))))
 
-;; Field `p` of the module pushed: from 2^40 on, a path (`k-reshape-path`),
-;; value `j` of the module that is its value `k`.
-(define c-reshape-field (subr (maxeff compiles spin) (code int) unit)
+;; The value `p` picks of the module pushed: its value `k`, or value `j` of
+;; the module that is its value `k`.
+(define c-reshape-field (subr (maxeff compiles spin) (code k-pick) unit)
   (lambda (c p)
-    (if (< p 1099511627776)
-        (c-field c (+ p 2))
-        (let ((q (- p 1099511627776)))
-          (begin (c-field c (+ (quotient q 1048576) 2)) (c-field c (+ (remainder q 1048576) 2)))))))
+    (tagcase p
+      (pick-value (k) (c-field c (+ k 2)))
+      (pick-path (k j) (begin (c-field c (+ k 2)) (c-field c (+ j 2)))))))
 ;; The module in slot `depth`'s fields at positions `at`, pushed.
-(define c-reshape-fields (subr (maxeff compiles spin) (k-ids int code) unit)
+(define c-reshape-fields (subr (maxeff compiles spin) (k-picks int code) unit)
   (lambda (at depth c)
     (if (null? at)
         #u

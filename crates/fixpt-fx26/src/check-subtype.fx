@@ -795,10 +795,16 @@
   (lambda (x at rs)
     (if (and (not (null? rs)) (k-at-is? (extract (car rs) 1) (k-start x) (k-end x) (k-kth x)))
         (cons (product (1 (k-at-of x)) (2 (k-vals-picked (extract (car rs) 2) at))) (cdr rs))
-        (cons (product (1 (k-at-of x)) (2 at)) rs))))
-(define k-vals-picked (subr (maxeff kreads (alloc @t) spin) (k-ids k-ids) k-ids)
+        (cons (product (1 (k-at-of x)) (2 (k-picks-of at))) rs))))
+;; Positions `at` of the values `inner` takes.
+(define k-vals-picked (subr (maxeff kreads (alloc @t) spin) (k-picks k-ids) k-picks)
   (lambda (inner at)
-    (if (null? at) nil (cons (k-nth inner (car at)) (k-vals-picked inner (cdr at))))))
+    (if (null? at) nil (cons (k-pick-nth inner (car at)) (k-vals-picked inner (cdr at))))))
+(define k-pick-nth (subr (maxeff (read @globals) spin) (k-picks int) k-pick)
+  (lambda (ps i) (if (= i 0) (car ps) (k-pick-nth (cdr ps) (- i 1)))))
+;; Values at positions `at`.
+(define k-picks-of (subr (maxeff (read @globals) (alloc @t)) (k-ids) k-picks)
+  (lambda (at) (if (null? at) nil (cons (pick-value (car at)) (k-picks-of (cdr at))))))
 ;; Where `x`, of type `got`, is wanted as a `want`: reshaped, if it may be,
 ;; and noted so (`k-reshapes`).
 (define k-reshape-at (subr (maxeff checks spin) (kx int int) bool)

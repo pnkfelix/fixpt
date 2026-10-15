@@ -534,8 +534,13 @@ pub fn rust_facts(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
     let mut reshapes = scheme.make(|_| Value::NULL);
     for (e, keep) in &c.facts.reshaped {
         let mut ks = scheme.make(|_| Value::NULL);
+        // Each a `k-pick`, `check-env-types.fx`'s.
         for k in keep.iter().rev() {
-            let k = scheme.make(|_| Value::fixnum(*k as i64));
+            let ns: Vec<Handle> = match k.steps() {
+                (k, None) => vec![scheme.make(|_| Value::fixnum(k as i64))],
+                (k, Some(j)) => vec![scheme.make(|_| Value::fixnum(k as i64)), scheme.make(|_| Value::fixnum(j as i64))],
+            };
+            let k = sum(scheme, if ns.len() == 1 { "pick-value" } else { "pick-path" }, &ns)?;
             ks = scheme.call_global("cons", &[k, ks]).map_err(|e| fail(e.to_string()))?;
         }
         let at = identity(scheme, place(*e))?;

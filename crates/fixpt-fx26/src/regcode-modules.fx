@@ -108,16 +108,14 @@
 ;; A module reshaped (`k-reshape-at`): kept in a slot, its values the type
 ;; wanted has (by position `at`) into slots, and a product of them. Declined
 ;; in a leaf.
-;; Field `p` of the module in the accumulator: from 2^40 on, a path
-;; (`k-reshape-path`), value `j` of the module that is its value `k`.
-(define r-reshape-field (subr rcompiles (rgen int) unit)
+;; The value `p` picks of the module in the accumulator: its value `k`, or
+;; value `j` of the module that is its value `k`.
+(define r-reshape-field (subr rcompiles (rgen k-pick) unit)
   (lambda (g p)
-    (if (< p 1099511627776)
-        (r-opn g rop-field (+ p 2))
-        (let ((q (- p 1099511627776)))
-          (begin (r-opn g rop-field (+ (quotient q 1048576) 2))
-                 (r-opn g rop-field (+ (remainder q 1048576) 2)))))))
-(define r-reshape-fields (subr rcompiles (rgen int k-ids rargs) rargs)
+    (tagcase p
+      (pick-value (k) (r-opn g rop-field (+ k 2)))
+      (pick-path (k j) (begin (r-opn g rop-field (+ k 2)) (r-opn g rop-field (+ j 2)))))))
+(define r-reshape-fields (subr rcompiles (rgen int k-picks rargs) rargs)
   (lambda (g m at args)
     (if (null? at)
         args

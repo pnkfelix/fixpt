@@ -208,10 +208,6 @@
   (lambda (items)
     (and (not (null? items)) (not (null? (cdr items))) (null? (cdr (cdr items)))
          (k-extend-item? (car items) '%extend-0) (k-extend-item? (car (cdr items)) '%extend-1))))
-;; Value `j` of the module that is value `k`, as a reshape's position (Rust
-;; `reshape_path`): a path, from 2^40 on.
-(define k-reshape-path (subr pure (int int) int)
-  (lambda (k j) (+ 1099511627776 (+ (* k 1048576) j))))
 ;; One side of an `extend`, of type `t`, its own abstract types `own` and
 ;; `m` for all the sides' (`k-taken-abs`): a module, a bound one's abstract
 ;; types its descriptions, aliases.
@@ -251,23 +247,23 @@
           (else (the k-parts (cons (car p1) (k-ext-rest (cdr p1) p0)))))))
 ;; The same, as paths: `p0`'s from value 0, `p1`'s from value 1; `j`, `k`
 ;; where each is.
-(define k-ext-firsts-at (subr (maxeff (read @globals) (alloc @t)) (k-parts k-parts int) k-ids)
+(define k-ext-firsts-at (subr (maxeff (read @globals) (alloc @t)) (k-parts k-parts int) k-picks)
   (lambda (p0 p1 j)
     (if (null? p0)
         nil
         (let ((k (k-ext-index p1 (extract (car p0) 1) 0)))
-          (cons (if (< k 0) (k-reshape-path 0 j) (k-reshape-path 1 k))
+          (cons (if (< k 0) (pick-path 0 j) (pick-path 1 k))
                 (k-ext-firsts-at (cdr p0) p1 (+ j 1)))))))
-(define k-ext-rest-at (subr (maxeff (read @globals) (alloc @t)) (k-parts k-parts int) k-ids)
+(define k-ext-rest-at (subr (maxeff (read @globals) (alloc @t)) (k-parts k-parts int) k-picks)
   (lambda (p1 p0 k)
     (cond ((null? p1) nil)
           ((>= (k-ext-index p0 (extract (car p1) 1) 0) 0) (k-ext-rest-at (cdr p1) p0 (+ k 1)))
-          (else (cons (k-reshape-path 1 k) (k-ext-rest-at (cdr p1) p0 (+ k 1)))))))
+          (else (cons (pick-path 1 k) (k-ext-rest-at (cdr p1) p0 (+ k 1)))))))
 ;; `(extend e0 e1)` at `a`..`b`, the `which`th there, its values `vs` the
 ;; two modules: one of the
 ;; values of both, `e1`'s where both have a name, `e0`'s in its order first
 ;; and then `e1`'s others; its types likewise. Made of theirs, by path
-;; (`k-reshape-path`, noted in `k-reshapes`). A side's own abstract types
+;; (`pick-path`, noted in `k-reshapes`). A side's own abstract types
 ;; the new module's, `e1`'s replacing `e0`'s of their names, refused if what
 ;; is kept mentions one (`k-replaced-check`). As Rust's `Checker::extended`.
 (define k-extended (subr (maxeff checks spin) (k-parts int int int) int)
@@ -326,9 +322,9 @@
 ;; What a module's includes give (`TODO.md` §69), newest first: types,
 ;; values, and where each value is, by path; the abstract types that are the
 ;; module's own (`k-abs-own`), and the map to them.
-(define-type k-incs (productof (1 k-parts) (2 k-parts) (3 k-ids) (4 k-parts) (5 k-map)))
+(define-type k-incs (productof (1 k-parts) (2 k-parts) (3 k-picks) (4 k-parts) (5 k-map)))
 ;; `acc` with types `d`, values `v` and paths `p`.
-(define k-incs-of (subr (alloc @t) (k-parts k-parts k-ids k-incs) k-incs)
+(define k-incs-of (subr (alloc @t) (k-parts k-parts k-picks k-incs) k-incs)
   (lambda (d v p acc) (product (1 d) (2 v) (3 p) (4 (extract acc 4)) (5 (extract acc 5)))))
 ;; Whether a module is an `include`s' bucket, as the parser makes one: of
 ;; values `%include-0`, … only.
@@ -447,7 +443,7 @@
                   (table-set! seen (extract (car vs) 1) 0)
                   (k-inc-vals (cdr vs) k (+ j 1)
                               (k-incs-of (extract acc 1) (cons (car vs) (extract acc 2))
-                                         (cons (k-reshape-path k j) (extract acc 3)) acc)
+                                         (cons (pick-path k j) (extract acc 3)) acc)
                               seen a b))))))
 ;; Each of the modules `from`, the `k`th on, onto `acc`: its values from
 ;; value `at`, if not -1, else `k`; its abstract types a bound module's,
@@ -496,11 +492,11 @@
 (define k-hidden-name (subr (read @globals) (string symbol) symbol)
   (lambda (prefix n) (string->symbol (string-append prefix (symbol->string n)))))
 ;; The positions of a module's own values `own`, past `%include`'s, at `k`.
-(define k-own-at (subr (maxeff (read @globals) (alloc @t)) (k-parts int int) k-ids)
+(define k-own-at (subr (maxeff (read @globals) (alloc @t)) (k-parts int int) k-picks)
   (lambda (own k i)
     (if (or (null? own) (< k 0))
         nil
-        (cons (if (< i k) i (+ i 1)) (k-own-at (cdr own) k (+ i 1))))))
+        (cons (pick-value (if (< i k) i (+ i 1))) (k-own-at (cdr own) k (+ i 1))))))
 ;; `vs` but the `k`th, from `i`.
 (define k-parts-but (subr (maxeff (read @globals) (alloc @t)) (k-parts int int) k-parts)
   (lambda (vs k i)
@@ -564,17 +560,22 @@
            (k-parts-shown (cdr ps) hs))
           (else (the k-parts (cons (car ps) (k-parts-shown (cdr ps) hs)))))))
 ;; The positions `at` of the values of `vs` shown.
-(define k-at-shown (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-parts k-ids k-saw) k-ids)
+(define k-at-shown
+  (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-parts k-picks k-saw) k-picks)
   (lambda (vs at hs)
     (cond ((null? vs) nil)
           ((k-shown? hs (extract (car vs) 1)) (cons (car at) (k-at-shown (cdr vs) (cdr at) hs)))
           (else (k-at-shown (cdr vs) (cdr at) hs)))))
-;; `0`, … `n - 1` onto `acc`, from `n - 1` down.
-(define k-upto (subr (maxeff (read @globals) (alloc @t)) (int k-ids) k-ids)
-  (lambda (n acc) (if (<= n 0) acc (k-upto (- n 1) (cons (- n 1) acc)))))
-;; Whether `at` is `0`, … in order, all `n` of them.
-(define k-identity? (subr (read @globals) (k-ids int int) bool)
-  (lambda (at i n) (if (null? at) (= i n) (and (= (car at) i) (k-identity? (cdr at) (+ i 1) n)))))
+;; Values `0`, … `n - 1` onto `acc`, from `n - 1` down.
+(define k-upto (subr (maxeff (read @globals) (alloc @t)) (int k-picks) k-picks)
+  (lambda (n acc) (if (<= n 0) acc (k-upto (- n 1) (cons (pick-value (- n 1)) acc)))))
+;; Whether `at` is values `i`, … in order, to `n`.
+(define k-identity? (subr (read @globals) (k-picks int int) bool)
+  (lambda (at i n)
+    (if (null? at)
+        (= i n)
+        (and (tagcase (car at) (pick-value (k) (= k i)) (else y #f))
+             (k-identity? (cdr at) (+ i 1) n)))))
 ;; The first of `ps`, the parts shown, whose type mentions one of `gone`,
 ;; the abstract types hidden: refused (the user's, 2026-10-09).
 (define k-hidden-escape (subr (maxeff checks spin) (k-parts k-parts int int) unit)

@@ -750,7 +750,7 @@ impl Compiler<'_> {
             for i in &at {
                 g.op("stack", &[Gen::n(m)]);
                 // A path: a value of the module that is one of its values.
-                let (k, j) = crate::check::reshape_step(*i);
+                let (k, j) = i.steps();
                 g.op("field", &[Value::fixnum(k as i64 + 2)]);
                 if let Some(j) = j {
                     g.op("field", &[Value::fixnum(j as i64 + 2)]);

@@ -2546,12 +2546,6 @@ generator reads, structured (step 6; today one string a clause,
   `preempt.rs`'s spinning process unpreempted, and a `processes.rs` test
   hung. Only `load-input`'s hidden globals are declined now, so the
   scheduler is native again; the cellular path is still to fix.
-- **Loads' hidden globals and facts by place** (the user's question,
-  2026-10-15; `docs/research/loads-and-places.md`). Done (`DONE.md` §97):
-  expressions' identities `(start end k)`, facts keyed by them and a
-  datatype, no invented places, a load its key. Left:
-  - A reshape's positions still tell a path from a position by range:
-    `2^40 + (k << 20) + j` (`check::RESHAPE_PATH`, `k-reshape-path`).
 - **More routines** a generator will want: allocating a bloblet, calling a
   primitive by name (its number is fixpt's own), making a closure.
 - **Calls do not use the convention their type says** (the user's

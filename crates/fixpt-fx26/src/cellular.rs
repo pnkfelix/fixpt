@@ -629,7 +629,7 @@ impl<'a> Compiler<'a> {
             for i in &at {
                 self.op1(code, "slot", Value::fixnum(depth as i64));
                 // A path: a value of the module that is one of its values.
-                let (k, j) = crate::check::reshape_step(*i);
+                let (k, j) = i.steps();
                 self.field(code, k as i64 + 2);
                 if let Some(j) = j {
                     self.field(code, j as i64 + 2);

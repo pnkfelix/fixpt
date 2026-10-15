@@ -2566,3 +2566,9 @@ Still open in `TODO.md` §97; done so far:
   taken apart in one place each: `layout::array_operand`,
   `array_operand_parts` and `ARRAY_OPERAND_LENGTH_SHIFT`/`SIZE_BITS`
   (machine code's too), and `parser-types.fx`'s `k-array-operand`.
+- **A reshape's positions, a datatype** (2026-10-15): `k-pick`
+  (`check-env-types.fx`: `pick-value k`, `pick-path k j`) and Rust's
+  `check::Pick`, where a path was a position past `2^40`, `2^40 + (k <<
+  20) + j` (`RESHAPE_PATH`, `reshape_path`, `k-reshape-path`, gone), taken
+  apart with its constants written out in the FX-26 compiler, register
+  code and evaluator.

@@ -69,7 +69,12 @@
 ;; Each module given where a type of fewer values, or the same in another
 ;; order, is wanted (`k-reshape-at`): which, and for each value that type
 ;; has, its position in the module given. Made into a module of that layout.
-(define-type k-reshaped (productof (1 k-at) (2 k-ids)))
+;; Where each value is taken from: value `k` of the module given, or value
+;; `j` of the module that is its value `k` (`extend`, `include`, `hide`;
+;; Rust's `Pick`).
+(define-datatype k-pick (pick-value int) (pick-path int int))
+(define-type k-picks (listof k-pick acyclic))
+(define-type k-reshaped (productof (1 k-at) (2 k-picks)))
 (define-type k-reshape-list (listof k-reshaped acyclic))
 ;; `with`'s `select` nodes and what each falls back to (`k-with-fallbacks`).
 (define-type k-fallbacks (listof (productof (1 int) (2 int)) acyclic))

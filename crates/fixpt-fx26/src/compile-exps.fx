@@ -66,7 +66,7 @@
               (else (c-exp-as-is x e depth c tail))))))
   ;; A module reshaped (`k-reshape-at`): made, then a product of the values
   ;; the type wanted has, by position `at`.
-  (c-reshape (subr (maxeff compiles spin) (exp k-ids cenv int code bool) unit)
+  (c-reshape (subr (maxeff compiles spin) (exp k-picks cenv int code bool) unit)
     (lambda (x at e depth c tail)
       (begin (c-exp-as-is x e depth c #f)
              (c-int c 37)

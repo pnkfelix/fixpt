@@ -6,6 +6,9 @@
 ;; The checker's types it uses.
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type k-ids (select check-types-types k-ids))
+(hide (define check-env-types (load-module "fx26:check-env-types.fx")))
+(define-type k-pick (select check-env-types k-pick))
+(define-type k-picks (select check-env-types k-picks))
 (define-type k-names (select check-types-types k-names))
 
 ;; What changing the program's store on @v may do; what a delimited part
@@ -79,7 +82,7 @@
 
 ;; The positions a module reshaped from `a` to `b` keeps, in a list of one;
 ;; none if it is not reshaped.
-(define-type ev-at (listof k-ids @v))
+(define-type ev-at (listof k-picks @v))
 
 ;; Those of the `with` from `a` to `b`, in a list of one; none if the checker
 ;; did not see it (a program run unchecked, `run-program`).
