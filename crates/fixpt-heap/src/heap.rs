@@ -294,6 +294,9 @@ pub struct Heap {
     symbol_index: HashMap<String, u32, std::hash::BuildHasherDefault<WordHasher>>,
     /// `intern_static`'s: each name's address, and its symbol's index.
     static_symbols: Vec<(usize, u32)>,
+    /// The global slot holding the native adapters' shared code, once one
+    /// is made (`set_adapter_code`).
+    adapter_slot: Option<usize>,
 
     pub gc_count: u64,
     /// Collect at every `gc_every`th safepoint whatever the heap's fill, as
@@ -379,6 +382,7 @@ impl Heap {
             symbols: Vec::new(),
             symbol_index: HashMap::default(),
             static_symbols: Vec::new(),
+            adapter_slot: None,
             gc_count: 0,
             gc_every: if cfg!(feature = "gc-stress") { 1 } else { 0 },
             safepoints: 0,
@@ -1683,6 +1687,31 @@ impl Heap {
     pub fn symbol_global_slot(&self, sym: Value) -> usize {
         debug_assert!(self.is_a(sym, ObjType::Symbol));
         self.fixed(sym, 3, 2).as_fixnum() as usize
+    }
+
+    /// The code every adapter to the native convention shares
+    /// (`fixpt-native`'s `adapt`), once made: a code bloblet, which never
+    /// moves, held in a global of its own, so that it lives as the heap does.
+    pub fn adapter_code(&self) -> Option<Value> {
+        self.adapter_slot.map(|s| self.globals[s])
+    }
+    pub fn set_adapter_code(&mut self, code: Value) {
+        let sym = self.intern("%fx26-adapter-code");
+        let slot = self.symbol_global_slot(sym);
+        self.globals[slot] = code;
+        self.adapter_slot = Some(slot);
+    }
+
+    /// What `v` adapts, if it is an adapter to the native convention (a
+    /// native closure of the adapters' code, `adapter_code`): the procedure
+    /// of the other convention it calls, its one free value. What cellular
+    /// code makes in a program whose convention is native (`nclosure`) is
+    /// one, over the cellular closure it made.
+    pub fn adapted(&self, v: Value) -> Option<Value> {
+        use crate::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD};
+        let code = self.adapter_code()?;
+        let native = v.is_bloblet() && self.bloblet_kind(v) == crate::layout::kind("native-closure");
+        (native && self.bloblet_slot(v, CLOSURE_WORD) == code).then(|| self.bloblet_slot(v, CLOSURE_FREE0))
     }
 
     #[inline]

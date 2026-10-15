@@ -696,6 +696,7 @@ fn native_and_cellular_code_call_each_other() {
         s.native_compiler = Some(fixpt_native::direct::compile_closure);
         s.register_code = true;
         s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
+        s.scheme.runtime_unrooted().adapt = Some(fixpt_native::direct::adapt);
         s.scheme.runtime_unrooted().heap.gc_every = gc_every;
         let forms = s.checker.read_in(FileId(0), include_str!("programs/native/mixed.fx")).expect("reads");
         let out: Vec<String> =
@@ -896,6 +897,24 @@ fn conversions_make_adapters_in_cellular_code() {
 /// (`programs/native/dead-slot.fx`); a frame too wide for its map
 /// (`programs/native/wide-frame.fx`); and recursion a million deep
 /// (`programs/native/deep.fx`).
+/// In a program whose convention is native, what cellular code makes is
+/// native, as its type says (`nclosure`, `TODO.md` §97): a closure that a
+/// procedure the native compiler declines gives back, a `letrec`'s made
+/// where it declines (its siblings patched in through the adapters), a
+/// standard operation as a value there, a closure in a list; each a native
+/// closure, called by native code (`programs/native/made-native.fx`).
+#[test]
+fn what_cellular_code_makes_is_native() {
+    let mut s = session(true);
+    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/made-native.fx")).expect("reads");
+    let (values, fell) = values_and_fallbacks(&mut s, &forms);
+    assert_eq!(values, ["15", "#t", "5", "42"], "{fell:?}");
+    for name in ["add5", "even", "plus", "(car fns)"] {
+        let native = s.with_global_value(name, |rt, v| v.is_bloblet() && rt.heap.bloblet_kind(v) == fixpt_heap::layout::kind("native-closure"));
+        assert_eq!(native.expect("compiles"), Ok(true), "{name}");
+    }
+}
+
 #[test]
 fn native_session_adapters_aborts_and_stack_maps() {
     let mut s = session(true);
@@ -1125,6 +1144,7 @@ fn control_on_native_frames() {
     s.native_compiler = Some(fixpt_native::direct::compile_closure);
     s.register_code = true;
     s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
+    s.scheme.runtime_unrooted().adapt = Some(fixpt_native::direct::adapt);
     for (name, want) in programs {
         let text = std::fs::read_to_string(format!("{}/tests/programs/{name}.fx", env!("CARGO_MANIFEST_DIR"))).unwrap();
         let forms = s.checker.read_in(FileId(0), &text).expect("reads");
@@ -1211,6 +1231,7 @@ fn inlined_calls_see_a_redefinition() {
             s.native_runner = Some(run_native);
             s.native_compiler = Some(fixpt_native::direct::compile_closure);
             s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
+            s.scheme.runtime_unrooted().adapt = Some(fixpt_native::direct::adapt);
         } else {
             s.scheme.runtime_unrooted().run_word = Some(fixpt_native::cellular::run_word_registers);
         }

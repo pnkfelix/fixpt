@@ -447,7 +447,7 @@
       (if (or (null? found) (and (extract g leaf) (or (not tail) (c-vsubr? name))))
           (r-decline)
           (begin
-            (r-op2 g rop-lambda (wcell-word (car found)) (wcell-int 0))
+            (r-lambda-op g (wcell-word (car found)) 0)
             (if (c-vsubr? name)
                 (begin (r-opn g rop-setreg 1)
                        (r-opnn g rop-prim (runtime-primitive "%fx26-vlambda") 1))

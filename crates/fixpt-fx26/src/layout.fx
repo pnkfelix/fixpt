@@ -152,6 +152,8 @@
 (define routine-field int 48)  ; ( obj -- x ), field k of a bloblet that has it; k the next cell
 (define routine-rest int 49)  ; ( -- list ), this frame's values, from slot 0, as a list
 (define routine-int-eq int 50)  ; ( a b -- a=b ), ints, fixnums or bignums
+;; ( v1 … vn -- c ), word w closed over the v's, in the native convention; w and n the next cells
+(define routine-nclosure int 51)
 
 ;;; Register code's instructions by number, and how many registers it has.
 ;; 1: entered with n arguments in REG1…REGn; first, and only first (arities are static: nothing is
@@ -176,7 +178,9 @@
 (define rop-field int 17)  ; 1: RESULT := field k of the bloblet in RESULT
 (define rop-setfield int 18)  ; 2: field k of the bloblet in RESULT := REGj
 (define rop-prim int 19)  ; 2: RESULT := runtime primitive p applied to REG1…REGn; may collect
-(define rop-lambda int 20)  ; 2: RESULT := a closure of cellular word w over REG1…REGn; may collect
+;; 3: RESULT := a closure of cellular word w over REG1…REGn, as stack routine r makes it (`closure`,
+;; or `nclosure` in a program whose convention is native); natively, a native closure; may collect
+(define rop-lambda int 20)
 ;; 1: call the procedure in RESULT with REG1…REGn; RESULT := its value; may collect
 (define rop-invoke int 21)
 ;; 1: the same in tail position, the frame popped: its value is this one's

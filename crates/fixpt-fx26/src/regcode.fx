@@ -99,6 +99,20 @@
   (lambda (g op n) (r-op1 g op (wcell-int n))))
 (define r-opnn (subr emits (rgen int int int) unit)
   (lambda (g op n m) (r-op2 g op (wcell-int n) (wcell-int m))))
+;; RESULT := a closure of word `w` over REG1…REGn (`lambda`), made on a
+;; cellular machine as the stack code's are (`c-closure-routine`).
+(define r-lambda-op (subr emits (rgen wcell int) unit)
+  (lambda (g w n)
+    (begin (r-op2 g rop-lambda w (wcell-int n))
+           (r-emit g (r-cell (wcell-int (c-closure-routine)))))))
+;; RESULT := the closure in RESULT, made by `lambda` for a patch: in a
+;; program whose convention is native, the cellular closure its adapter
+;; calls (`%fx26-adapted`; natively, nothing).
+(define r-adapted (subr emits (rgen) unit)
+  (lambda (g)
+    (if (get c-native-program)
+        (r-op1 g rop-prim1 (wcell-int (runtime-primitive "%fx26-adapted")))
+        #u)))
 (define r-new-label (subr (maxeff (read @k) (write @k)) (rgen) int)
   (lambda (g) (let* ((l (extract g labels)) (n (get l))) (begin (set l (+ n 1)) n))))
 (define r-reg (subr (maxeff (read @globals) (read @k) (write @k)) (rgen) int)

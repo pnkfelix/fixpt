@@ -316,6 +316,24 @@ its code in one.
    convention would save that look (a compare and a branch in native
    code's unknown calls), and belongs with the step that stops calls in a
    specific convention from looking, if measurement says it pays.
+   Calls by the convention their type says (2026-10-15, `TODO.md` §97):
+   both checkers note each call's convention, and a call typed `cellular`
+   is `tcall`, which no machine checks (the Rust one, the oracle, traps on
+   anything but a cellular closure). For a call typed `native` to go
+   straight to its code, a value typed `native` must be a native closure;
+   so in a program whose convention is native, every closure cellular
+   code makes (where the native compiler declines) is made in it
+   (`nclosure`): the cellular closure, given to the runtime's `adapt`. The
+   adapters share one code bloblet (`Heap::adapter_code`), so an adapter
+   is known by it (`Heap::adapted`): cellular code calling one calls what
+   it adapts, with no crossing; the native compiler compiles what it
+   adapts; a `letrec`'s patch writes through it (`%fx26-adapted`, nothing
+   natively). Register code's `lambda` names the routine its closure is
+   made by on a cellular machine (`closure` or `nclosure`), which native
+   code ignores, its closures being native. The routines that call a
+   procedure given them (`callcc`, `withmark`, …) take a native one as
+   cellular code (`as_cellular`: what an adapter adapts, else a cellular
+   adapter over it). A region's closure is still cellular there.
 5. **Continuations, prompts and marks** on native frames (done,
    2026-09-28; `control_on_native_frames` in `tests/direct.rs`). A prompt,
    and a mark, is a 48-byte frame of its own around the thunk's call: the

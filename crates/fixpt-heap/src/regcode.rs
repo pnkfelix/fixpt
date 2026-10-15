@@ -71,7 +71,11 @@ fn check(heap: &Heap, twin: Value, cells: &[Value]) -> Result<(), String> {
             "prim1" | "prim2imm" => count(o(0), i64::MAX),
             "prim2" => count(o(0), i64::MAX) && reg(o(1)),
             "prim3imm" => count(o(0), i64::MAX) && reg(o(2)),
-            "lambda" => heap.is_cellular_word(o(0)) && many(o(1)),
+            "lambda" => {
+                use crate::layout::cellular::routine;
+                let r = o(2);
+                heap.is_cellular_word(o(0)) && many(o(1)) && r.is_fixnum() && [routine("closure"), routine("nclosure")].contains(&(r.as_fixnum() as u64))
+            }
             "invoke" | "tailinvoke" | "invokeself" => many(o(0)),
             "cellular" => count(o(0), ROUTINES.len() as i64 - 1) && many(o(1)),
             "global" | "setglbl" => o(0).is_bloblet(),

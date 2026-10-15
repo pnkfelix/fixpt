@@ -56,6 +56,7 @@
             (if (= (extract w 3) s)
                 (begin (r-opnn g rop-load 1 s)
                        (r-opn g rop-stack (extract w 1))
+                       (r-adapted g)
                        (r-opnn g rop-setfield (+ cellular-closure-free0 (extract w 2)) 1))
                 #u)
             (r-give-waiting g (cdr ws) s))))))

@@ -213,6 +213,7 @@
         (begin
           (r-opnn g rop-load 1 (cdr (car ps)))
           (r-opn g rop-stack slot)
+          (r-adapted g)
           (r-opnn g rop-setfield (+ cellular-closure-free0 (car (car ps))) 1)
           (r-patch-one g (cdr ps) slot)))))
 

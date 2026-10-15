@@ -350,6 +350,7 @@
   ;; name it is bound to, or none: its tail calls in its body are loops. What
   ;; it gives: for each `letrec` sibling it captured before the sibling was
   ;; made, its free value's index and the slot the sibling will be in.
+  ;; Outside a region, made in the program's convention (`c-closure-routine`).
   (c-lambda (subr (maxeff compiles spin) (c-params exp cenv int code syms c-region) patches)
     (lambda (ps body e depth c own0 region)
       (let* ((made (begin (if (null? region) #u (c-exp (car region) e depth c #f))
@@ -361,7 +362,7 @@
           (set c-prev-word (get c-last-word))
           (set c-last-word (the (listof tword @k) (cons (extract made 1) nil)))
           (if (null? region)
-              (begin (c-op1 c routine-closure w) (c-emit c (i-cell (wcell-int (c-length fv)))))
+              (begin (c-op1 c (c-closure-routine) w) (c-emit c (i-cell (wcell-int (c-length fv)))))
               (begin (c-lit c w) (c-prim c "%region-closure" (+ 2 (c-length fv)))))
           patches))))
   ;; A lambda's word, and the names its closure captures, in order; with its

@@ -134,7 +134,9 @@ fn is_a(heap: &Heap, v: Value, k: u8) -> bool {
 }
 
 /// Run closure `thunk` with no arguments above a marker entry.
-fn enter_above(s: &mut Stacks, heap: &Heap, thunk: Value, marker: [Value; 4], routine: &'static str) -> Result<(), Trap> {
+fn enter_above(s: &mut Stacks, heap: &mut Heap, thunk: Value, marker: [Value; 4], routine: &'static str) -> Result<(), Trap> {
+    // A native closure, as cellular code (`as_cellular`).
+    let thunk = fixpt_engine::cellular::as_cellular(heap, thunk, 0);
     if !is_a(heap, thunk, CLOSURE) {
         return Err(Trap::Type { routine });
     }
@@ -158,6 +160,7 @@ fn call(s: &mut Stacks, heap: &mut Heap, n: usize, tail: bool, routine: &'static
         let v = s.ds_pop(routine)?;
         return reinstate(s, heap, c, v, tail);
     }
+    let c = fixpt_engine::cellular::as_cellular(heap, c, n);
     if !is_a(heap, c, CLOSURE) {
         return Err(Trap::Type { routine });
     }
@@ -309,7 +312,12 @@ pub(crate) fn run(st: &mut State, heap: &mut Heap, name: &'static str, safepoint
     if matches!(name, "call" | "tailcall") && st.dsp < st.ds_base {
         // SAFETY: the data stack's top, below its base.
         let top = Value::from_raw(unsafe { *(st.dsp as *const u64) });
-        if top.is_bloblet() && heap.bloblet_kind(top) == const { fixpt_heap::layout::kind("native-closure") } {
+        // An adapter cellular code made (`nclosure`): what it calls,
+        // called here, with no crossing.
+        if let Some(inner) = heap.adapted(top) {
+            // SAFETY: as above.
+            unsafe { *(st.dsp as *mut u64) = inner.raw() };
+        } else if top.is_bloblet() && heap.bloblet_kind(top) == const { fixpt_heap::layout::kind("native-closure") } {
             return None;
         }
     }
@@ -360,6 +368,7 @@ fn routine(st: &mut State, heap: &mut Heap, name: &'static str, safepoint: fn(&m
             let thunk = s.ds_pop(name)?;
             let v = s.ds_pop(name)?;
             let key = s.ds_pop(name)?;
+            let thunk = fixpt_engine::cellular::as_cellular(heap, thunk, 0);
             if !is_a(heap, thunk, CLOSURE) {
                 return Err(Trap::Type { routine: name });
             }

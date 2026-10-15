@@ -228,7 +228,7 @@ fn word(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>, asm: Opt
                 let pname = crate::PRIMITIVES.get(p).map_or("?", |d| d.name);
                 vec![pname.to_string(), ops[1].as_fixnum().to_string()]
             }
-            "closure" => {
+            "closure" | "nclosure" => {
                 todo.push(ops[0]);
                 vec![format!("word {}", name_of(heap, ops[0])), format!("over {}", ops[1].as_fixnum())]
             }

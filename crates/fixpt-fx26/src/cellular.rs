@@ -822,6 +822,7 @@ impl<'a> Compiler<'a> {
                         for (c, j, _) in waiting.iter().filter(|(_, _, s)| *s == d) {
                             self.op1(code, "slot", Value::fixnum(d as i64));
                             self.op1(code, "slot", Value::fixnum(*c as i64));
+                            self.adapted(code)?;
                             self.int(code, (CLOSURE_FREE0 + j) as i64);
                             self.op(code, "field!");
                         }
@@ -970,10 +971,35 @@ impl<'a> Compiler<'a> {
             self.lit(code, w);
             self.prim(code, "%region-closure", fv.len() + 2)?;
         } else {
-            self.op1(code, "closure", w);
+            self.op1(code, self.closure_routine(), w);
             code.push(Item::Cell(Value::fixnum(fv.len() as i64)));
         }
         Ok(patches)
+    }
+
+    /// Whether the program's convention is native: then every `lambda` of
+    /// it, and every standard operation as a value, is typed `native`
+    /// (each takes the program's convention), so every closure cellular
+    /// code makes is made so (`nclosure`, `TODO.md` §97), its own thunks'
+    /// too, for one rule; but a region's (`%region-closure`), for now.
+    fn native_program(&self) -> bool {
+        self.c.conv_default == Conv::Native
+    }
+
+    /// The stack routine that makes a closure: `nclosure` in a program
+    /// whose convention is native, else `closure`.
+    fn closure_routine(&self) -> &'static str {
+        if self.native_program() { "nclosure" } else { "closure" }
+    }
+
+    /// Of the closure on top, made by `lambda` for a `letrec`'s patch: in
+    /// a program whose convention is native, the cellular closure its
+    /// adapter calls (`%fx26-adapted`), which the patch writes into.
+    fn adapted(&mut self, code: &mut Vec<Item>) -> R<()> {
+        if self.native_program() {
+            self.prim(code, "%fx26-adapted", 1)?;
+        }
+        Ok(())
     }
 
     /// A lambda's word, and the names its closure captures, in order; with
@@ -1511,6 +1537,7 @@ impl<'a> Compiler<'a> {
             for &(j, sibling) in ps {
                 self.op1(code, "slot", Value::fixnum(sibling as i64));
                 self.op1(code, "slot", Value::fixnum((depth + i) as i64));
+                self.adapted(code)?;
                 self.int(code, (CLOSURE_FREE0 + j) as i64);
                 self.op(code, "field!");
             }
@@ -1700,7 +1727,7 @@ impl<'a> Compiler<'a> {
     /// first time (`standard_word`).
     fn standard_value(&mut self, name: &str, code: &mut Vec<Item>) -> R<()> {
         let w = self.standard_word(name)?;
-        self.op1(code, "closure", w);
+        self.op1(code, self.closure_routine(), w);
         code.push(Item::Cell(Value::fixnum(0)));
         if Self::vsubr_list_op(name).is_some() {
             return self.prim(code, "%fx26-vlambda", 1);

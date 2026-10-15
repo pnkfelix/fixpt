@@ -799,7 +799,7 @@ impl Compiler<'_> {
                         let Some(w) = self.standard_words.get(self.name(n)).copied() else {
                             return self.decline("a standard operation as a value the stack code did not make");
                         };
-                        g.op("lambda", &[w, Gen::n(0)]);
+                        g.op("lambda", &[w, Gen::n(0), self.made_by()]);
                         // A `vsubr`'s: that closure given to
                         // `%fx26-vlambda`.
                         if Self::vsubr_list_op(self.name(n)).is_some() {
@@ -1083,6 +1083,7 @@ impl Compiler<'_> {
                     for &(j, sibling) in ps {
                         g.op("load", &[Gen::n(1), Gen::n(sibling)]);
                         g.op("stack", &[Gen::n(at[i])]);
+                        self.r_adapted(g)?;
                         g.op("setfield", &[Value::fixnum((super::CLOSURE_FREE0 + j) as i64), Gen::n(1)]);
                     }
                 }
@@ -1201,6 +1202,7 @@ impl Compiler<'_> {
             for (c, j, _) in waiting.iter().filter(|(_, _, s)| *s == at) {
                 g.op("load", &[Gen::n(1), Gen::n(at)]);
                 g.op("stack", &[Gen::n(*c)]);
+                self.r_adapted(g)?;
                 g.op("setfield", &[Value::fixnum((super::CLOSURE_FREE0 + j) as i64), Gen::n(1)]);
             }
         }
@@ -1861,7 +1863,7 @@ impl Compiler<'_> {
             return self.decline("a copy the plan did not make");
         };
         let s = g.slot();
-        g.op("lambda", &[copy, Gen::n(0)]);
+        g.op("lambda", &[copy, Gen::n(0), self.made_by()]);
         g.op("setstk", &[Gen::n(s)]);
         let es: Vec<Arg> = args.iter().map(|a| Arg::E(*a)).collect();
         self.r_args(g, &es, env, te, None)?;
@@ -2641,6 +2643,17 @@ impl Compiler<'_> {
         Some(())
     }
 
+    /// RESULT := the closure in RESULT, made by `lambda` for a patch: in
+    /// a program whose convention is native, the cellular closure its
+    /// adapter calls (`%fx26-adapted`; natively, nothing).
+    fn r_adapted(&mut self, g: &mut Gen) -> O<()> {
+        if self.native_program() {
+            let p = fixpt_engine::cellular::runtime_primitive("%fx26-adapted")? as i64;
+            g.op("prim1", &[Value::fixnum(p)]);
+        }
+        Some(())
+    }
+
     /// RESULT := runtime primitive `name`, one that never collects, of
     /// RESULT and constant `v` (`prim2imm`).
     fn r_imm_prim(&mut self, g: &mut Gen, name: &str, v: Value) -> O<()> {
@@ -2729,7 +2742,7 @@ impl Compiler<'_> {
                 self.r_prim(g, "%region-closure", &args, env, te)?;
             } else {
                 self.r_args(g, &args, env, te, None)?;
-                g.op("lambda", &[w, Gen::n(fv.len())]);
+                g.op("lambda", &[w, Gen::n(fv.len()), self.made_by()]);
             }
             return Some(patches);
         }
@@ -2765,8 +2778,15 @@ impl Compiler<'_> {
                 _ => return None,
             }
         }
-        g.op("lambda", &[w, Gen::n(fv.len())]);
+        g.op("lambda", &[w, Gen::n(fv.len()), self.made_by()]);
         Some(patches)
+    }
+
+    /// The stack routine a `lambda` op's closure is made by on a cellular
+    /// machine, as the stack code's (`closure_routine`); natively, either
+    /// is a native closure.
+    fn made_by(&self) -> Value {
+        Gen::n(routine(self.closure_routine()) as usize)
     }
 
     /// A call in tail position in a leaf, which has no frame: the arguments

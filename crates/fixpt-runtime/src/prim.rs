@@ -450,6 +450,8 @@ pub fn never_collects(name: &str) -> bool {
         || name == "%fx26-arithmetic-shift"
         // A bloblet's count of fields (`array-length`), which only looks.
         || name == "%bloblet-fields"
+        // What an `nclosure`'s adapter calls: a field read.
+        || name == "%fx26-adapted"
         // A bytevector's length and a byte of it (`TODO.md` §84).
         || matches!(name, "bytevector-length" | "bytevector-u8-ref")
         || matches!(name, "%fx26-eqtable-has?" | "%fx26-eqtable-count" | "%fx26-eqtable-delete!")
@@ -2044,6 +2046,10 @@ prims! {
         }
         Ok(f)
     });
+    // The closure an `nclosure`'s adapter calls, which a `letrec`'s patch
+    // writes into (`TODO.md` §97). Natively nothing: the closure made there
+    // is native, no adapter. Of anything else, itself.
+    "%fx26-adapted", 1, Some(1), simple!(|rt, a| Ok(rt.heap.adapted(a[0]).unwrap_or(a[0])));
     "%fx26-sum-cell", 2, Some(2), simple!(|rt, a| Ok(rt.heap.make_frozen(SUM_KIND, &a[..2])));
     "%fx26-pair-cell", 2, Some(2), simple!(|rt, a| Ok(rt.heap.cons(a[0], a[1])));
     "%fx26-product-cell", 1, Some(1), simple!(|rt, a| {

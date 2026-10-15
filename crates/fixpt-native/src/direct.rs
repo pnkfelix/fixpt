@@ -500,20 +500,27 @@ pub fn with_machine<T>(f: impl FnOnce(&mut DirectMachine) -> T) -> Result<T, Str
 }
 
 /// A cellular closure compiled on this thread's machine: a native closure
-/// of the same code over the same values, or why not.
+/// of the same code over the same values, or why not. So too an adapter
+/// cellular code made (`nclosure`): what it calls, compiled. Any other
+/// native closure is itself.
 pub fn compile_closure(heap: &mut Heap, closure: Value) -> Result<Value, String> {
+    if DirectMachine::compiled_of(heap, closure).is_some() && heap.adapted(closure).is_none() {
+        return Ok(closure);
+    }
     with_machine(|m| m.compile(heap, closure).map(|procs| procs[0].1.closure))?
 }
 
-/// A runtime's `adapt` (`%fx26-convert`): an adapter of `f`, of `arity`
-/// arguments, to the native convention if `native`, else to the cellular
-/// one. To the native convention, a native closure over `f` whose code
-/// calls it as native code calls what is not native code, through the
-/// machine's `common_foreign`, in a tail call:
+/// A runtime's `adapt` (`%fx26-convert`, `nclosure`): an adapter of `f`,
+/// to the native convention if `native`, else to the cellular one, of
+/// `arity` arguments (the cellular adapter's call passes them; native
+/// code passes its count in `x9` at every call, Larceny's way, so the
+/// native adapter needs none). To the native convention, a native closure
+/// over `f` whose code calls it as native code calls what is not native
+/// code, through the machine's `common_foreign`, in a tail call, the
+/// count as its caller passed it:
 ///
 /// ```text
 /// ldur x10, [x10, #free 0]    the closure called: now `f`
-/// movz x9, #arity
 /// ldr  x16, [x24, #foreign]
 /// br   x16
 /// ```
@@ -522,19 +529,32 @@ pub fn adapt(rt: &mut fixpt_runtime::Runtime, f: Value, arity: usize, native: bo
     if !native {
         return Ok(fixpt_engine::cellular::cellular_adapter(heap, f, arity));
     }
+    // The code, made once and shared (`Heap::adapter_code`), so that an
+    // adapter is known by it (`Heap::adapted`).
+    let blob = match heap.adapter_code() {
+        Some(b) => b,
+        None => {
+            let code = adapter_code();
+            let blob = heap.make_code_bloblet(const { fixpt_heap::layout::kind("bloblet") }, 1, 4 * code.len(), false);
+            heap.set_bloblet_slot(blob, 1, blob);
+            let bytes: Vec<u8> = code.iter().flat_map(|i| i.to_le_bytes()).collect();
+            heap.set_bloblet_bytes(blob, 0, &bytes).map_err(|e| format!("{e:?}"))?;
+            heap.flush_code(blob);
+            crate::symbols::note(heap.code_exec_address(blob), bytes.len(), "native convention: an adapter");
+            heap.set_adapter_code(blob);
+            blob
+        }
+    };
+    Ok(native_closure(heap, blob, &[f]))
+}
+
+/// The native adapter's code (`adapt`), the same for every adapter.
+fn adapter_code() -> Vec<u32> {
     let mut a = Asm::new();
     a.e(ldur(CLO, CLO, field_off(CLOSURE_FREE0)));
-    a.e(movz(X9, arity as u32, 0));
     a.e(ldr(X16, ST, st_off(offset_of!(DState, foreign))));
     a.e(br(X16));
-    let code = a.finish().expect("no labels");
-    let blob = heap.make_code_bloblet(const { fixpt_heap::layout::kind("bloblet") }, 1, 4 * code.len(), false);
-    heap.set_bloblet_slot(blob, 1, blob);
-    let bytes: Vec<u8> = code.iter().flat_map(|i| i.to_le_bytes()).collect();
-    heap.set_bloblet_bytes(blob, 0, &bytes).map_err(|e| format!("{e:?}"))?;
-    heap.flush_code(blob);
-    crate::symbols::note(heap.code_exec_address(blob), bytes.len(), "native convention: an adapter");
-    Ok(native_closure(heap, blob, &[f]))
+    a.finish().expect("no labels")
 }
 
 /// A runtime's `call_native`: native closure `closure` called with `args`
@@ -1435,6 +1455,8 @@ impl Compiling<'_> {
     /// else.
     fn closure_parts(&self, v: Value) -> Option<(Value, Vec<Value>)> {
         let h = self.heap;
+        // An adapter cellular code made (`nclosure`): what it calls.
+        let v = h.adapted(v).unwrap_or(v);
         if !v.is_bloblet() || h.bloblet_kind(v) != const { fixpt_heap::layout::kind("cellular-closure") } {
             return None;
         }
@@ -2326,6 +2348,11 @@ impl Compiling<'_> {
                     let name = fixpt_runtime::PRIMITIVES.get(pn).map_or("?", |d| d.name);
                     if !fixpt_runtime::never_collects(name) {
                         return decline(format!("`{op}` of `{name}`, which may collect"));
+                    }
+                    // What an `nclosure` made: here, the closure itself,
+                    // native (register code's `lambda`), with no adapter.
+                    if name == "%fx26-adapted" {
+                        continue;
                     }
                     // An `i64` or `u64` operation: its operands raw where it
                     // takes them so (unboxed already, as `reps` said), a

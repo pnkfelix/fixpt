@@ -307,6 +307,24 @@
           (c-fail (string-append "no runtime primitive " name))
           (begin (c-op1 c routine-prim (wcell-int p)) (c-emit c (i-cell (wcell-int n))))))))
 
+;; Whether the program's convention is native: then every `lambda` of it,
+;; and every standard operation as a value, is typed `native` (each takes
+;; the program's convention), so the closures cellular code makes of them
+;; are made so (`nclosure`, `TODO.md` §97). For a driver, as the checker's
+;; `check-conv-native!`: `compile-conv-native!`.
+(define c-native-program (ref bool @k) (new #f))
+(define compile-conv-native! (subr (maxeff (read @globals) (write @k)) (bool) unit)
+  (lambda (on) (set c-native-program on)))
+;; The stack routine every closure cellular code makes is made by (but a
+;; region's, `%region-closure`, for now), its own thunks' too, for one rule.
+(define c-closure-routine (subr (maxeff (read @globals) (read @k)) () int)
+  (lambda () (if (get c-native-program) routine-nclosure routine-closure)))
+;; Of the closure on top, made for a `letrec`'s patch: in a program whose
+;; convention is native, the cellular closure its adapter calls
+;; (`%fx26-adapted`), which the patch writes into.
+(define c-adapted (subr compiles (code) unit)
+  (lambda (c) (if (get c-native-program) (c-prim c "%fx26-adapted" 1) #u)))
+
 ;; A new blobref's flat's `size` bytes checked in the suffix, where more
 ;; than the one byte making it checked (`Checker::note_fits`).
 (define c-fits (subr compiles (code int) unit)
@@ -646,6 +664,7 @@
         #u
         (begin (c-op1 c routine-slot (wcell-int (cdr (car ps))))
                (c-op1 c routine-slot (wcell-int (+ depth i)))
+               (c-adapted c)
                (c-field-set c (+ cellular-closure-free0 (car (car ps))))
                (c-patch-one (cdr ps) depth i c)))))
 

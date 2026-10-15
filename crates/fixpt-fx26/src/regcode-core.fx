@@ -463,7 +463,7 @@
              (s (r-slot g))
              (n (c-count-exps args)))
         (begin
-          (r-op2 g rop-lambda (wcell-word copy) (wcell-int 0))
+          (r-lambda-op g (wcell-word copy) 0)
           (r-opn g rop-setstk s)
           (r-exp-args-into g args env te)
           (let* ((call (r-new-label g)) (end (r-new-label g)))
@@ -792,10 +792,10 @@
             (if (> n register-regs)
                 (let ((pa (r-free-args fv env 0)))
                   (begin (r-args g (extract pa 1) env te (the maybe-exp nil))
-                         (r-op2 g rop-lambda (wcell-word w) (wcell-int n))
+                         (r-lambda-op g (wcell-word w) n)
                          (extract pa 2)))
                 (let ((patches (r-free-into-regs g fv env)))
-                  (begin (r-op2 g rop-lambda (wcell-word w) (wcell-int n)) patches)))
+                  (begin (r-lambda-op g (wcell-word w) n) patches)))
             (let* ((pa (r-free-args fv env 0))
                    (ops (r-append-arg (extract pa 1) (a-v (wcell-word w)))))
               (begin

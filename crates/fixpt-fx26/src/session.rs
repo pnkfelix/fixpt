@@ -808,6 +808,8 @@ impl Fx26Session {
         // What runs natively is typed so: a call typed `cellular` is made
         // with no look at its callee (`TODO.md` §97).
         debug_assert!(self.native_runner.is_none() || self.native_convention, "native code in the cellular convention");
+        // And the closures cellular code makes then are made native (`nclosure`).
+        debug_assert!(!self.native_convention || self.scheme.runtime_unrooted().adapt.is_some(), "no adapters in the native convention");
         let code = lower_top(&self.checker, &mut self.globals, &top);
         if self.strategy != Strategy::Lower {
             if self.own_made {
@@ -1083,9 +1085,9 @@ impl Fx26Session {
 
     /// The front end's entry points the Rust side calls by name
     /// (`READER_PREFIX`), each rebound by [`Self::front_end_as_register_code`].
-    pub const FRONT_ENTRIES: [&'static str; 26] = [
+    pub const FRONT_ENTRIES: [&'static str; 27] = [
         "read-text-at", "check-program", "check-more", "checked-tops", "checked-extracts", "checked-effects", "check-conv-native!", "checked-withs!", "checked-reshapes!",
-        "check-globals-effects!", "check-defer-reruns!", "check-hold-breaks!", "check-lines!", "parse-program", "loaded-files!", "run-checked", "run-checked-more", "compile-program", "compile-checked", "compile-registers!",
+        "check-globals-effects!", "check-defer-reruns!", "check-hold-breaks!", "check-lines!", "parse-program", "loaded-files!", "run-checked", "run-checked-more", "compile-program", "compile-checked", "compile-registers!", "compile-conv-native!",
         "compile-global-cell", "compile-new-global", "compile-keep-global!", "compile-note-inline!", "native-assemble",
         "check-built-in!",
     ];
@@ -1195,6 +1197,7 @@ impl Fx26Session {
         let r = (|| {
             let on = self.scheme.make(|_| fixpt_heap::Value::boolean(self.native_convention));
             self.scheme.call_global(&format!("{READER_PREFIX}check-conv-native!"), &[on]).map_err(|e| fail(e.to_string()))?;
+            self.scheme.call_global(&format!("{READER_PREFIX}compile-conv-native!"), &[on]).map_err(|e| fail(e.to_string()))?;
             let on = self.scheme.make(|_| fixpt_heap::Value::boolean(self.globals_effects));
             self.scheme.call_global(&format!("{READER_PREFIX}check-globals-effects!"), &[on]).map_err(|e| fail(e.to_string()))?;
             let on = self.scheme.make(|_| fixpt_heap::Value::boolean(self.defer_reruns));
@@ -1357,7 +1360,12 @@ impl Fx26Session {
             let heap = m.heap();
             let g = heap.car(cells);
             let v = heap.bloblet_slot(g, 2);
-            if v.is_bloblet() && heap.bloblet_kind(v) == const { fixpt_heap::layout::kind("cellular-closure") } {
+            // A cellular closure; or, in the native convention, what
+            // cellular code makes, a native closure that adapts one
+            // (`nclosure`), which the compiler sees through (any other
+            // native closure it gives back as it is).
+            let kind = |k| v.is_bloblet() && heap.bloblet_kind(v) == fixpt_heap::layout::kind(k);
+            if kind("cellular-closure") || kind("native-closure") {
                 let start = std::time::Instant::now();
                 let compiled = compile(heap, v);
                 nanos = start.elapsed().as_nanos() as u64;

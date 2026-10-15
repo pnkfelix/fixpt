@@ -1171,7 +1171,9 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
             "prim" | "lambda" | "cellular" => {
                 let (count, routine_n, at) = match name {
                     "prim" => (k(o(1)), const { routine("prim") }, f(0)),
-                    "lambda" => (k(o(1)), const { routine("closure") }, f(0)),
+                    // The routine its closure is made by, `closure` or
+                    // `nclosure`, which only the call-out does.
+                    "lambda" => (k(o(1)), k(o(2)) as u64, f(0)),
                     _ => (k(o(1)), k(o(0)) as u64, WORD_CELL0 + next),
                 };
                 // Some are done here, when they can be: the call-out is then
@@ -1215,7 +1217,7 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
                     ("prim", c) if c >= 2 && c <= REGS && prim_named(k(o(0)), "%region-closure") => Some("region-closure"),
                     ("prim", c) if c >= 1 && prim_named(k(o(0)), "%make-frozen") => Some("frozen"),
                     ("prim", c) if c >= 1 && prim_named(k(o(0)), "%make-bloblet") => Some("bloblet"),
-                    ("lambda", _) => Some("closure"),
+                    ("lambda", _) if routine_n == const { routine("closure") } => Some("closure"),
                     _ => None,
                 };
                 if let Some(what) = inline.filter(|_| count <= REGS) {

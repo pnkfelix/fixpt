@@ -521,11 +521,12 @@
                    w))
           (car found)))))
 ;; A standard operation as a value: a closure of its word (`c-standard-word`),
-;; over no values; a `vsubr`'s given to `%fx26-vlambda`.
+;; over no values, in the program's convention; a `vsubr`'s given to
+;; `%fx26-vlambda`.
 (define c-standard-value (subr (maxeff compiles spin) (string code) unit)
   (lambda (name c)
     (let ((w (c-standard-word name)))
-      (begin (c-op1 c routine-closure (wcell-word w)) (c-emit c (i-cell (wcell-int 0)))
+      (begin (c-op1 c (c-closure-routine) (wcell-word w)) (c-emit c (i-cell (wcell-int 0)))
              (if (c-vsubr? name) (c-prim c "%fx26-vlambda" 1) #u)))))
 
 (define c-count-names (subr (read @globals) (names) int)

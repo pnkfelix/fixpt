@@ -186,6 +186,12 @@
                  (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
                        (rgen int int int)
                        unit))
+            (val r-lambda-op
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                       (rgen wcell int)
+                       unit))
+            (val r-adapted
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k)) (rgen) unit))
             (val r-slot (subr (maxeff (read @k) (write @k)) (rgen) int))
             (val r-done
                  (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))

@@ -669,7 +669,8 @@ impl Machine {
 
     /// Run closure `thunk` with no arguments above a marker entry: its
     /// frame, the marker's `(sentinel, a, b, c)`, and where to resume after.
-    fn enter_above(&mut self, heap: &Heap, r: &mut Regs, thunk: Value, marker: [Value; 4], routine: &'static str) -> Result<(), Trap> {
+    fn enter_above(&mut self, heap: &mut Heap, r: &mut Regs, thunk: Value, marker: [Value; 4], routine: &'static str) -> Result<(), Trap> {
+        let thunk = as_cellular(heap, thunk, 0);
         if !(thunk.is_bloblet() && heap.bloblet_kind(thunk) == const { kind("cellular-closure") }) {
             return Err(Trap::Type { routine });
         }
@@ -804,6 +805,7 @@ impl Machine {
             self.reinstate(heap, r, c, v, tail);
             return self.resume_inner(cx, r, c, routine);
         }
+        let c = as_cellular(heap, c, n);
         if !(c.is_bloblet() && heap.bloblet_kind(c) == const { kind("cellular-closure") }) {
             return Err(Trap::Type { routine });
         }
@@ -1153,7 +1155,7 @@ impl Machine {
                 let n = heap.bloblet_slot(g, w).as_fixnum();
                 heap.set_bloblet_slot(g, w, Value::fixnum(n + 1));
             }
-            CLOSURE => {
+            CLOSURE | NCLOSURE => {
                 self.safepoint(cx.heap(), r);
                 let heap = cx.heap();
                 let w = Self::operand(heap, r);
@@ -1167,6 +1169,16 @@ impl Machine {
                 for (i, v) in free.into_iter().enumerate() {
                     heap.set_bloblet_slot(c, CLOSURE_FREE0 + i, v);
                 }
+                // In the native convention, the closure its type says: an
+                // adapter (a native closure; its callers pass the count).
+                let c = match (n, &mut *cx) {
+                    (CLOSURE, _) => c,
+                    (_, Ctx::Rt(rt)) if rt.adapt.is_some() => {
+                        let adapt = rt.adapt.expect("an adapter maker");
+                        adapt(rt, c, 0, true).map_err(Trap::Prim)?
+                    }
+                    _ => return Err(Trap::Prim("no closure in the native convention can be made here".into())),
+                };
                 self.ds.push(c);
             }
             // A typed call's callee's type says `cellular`: the native
@@ -1176,7 +1188,13 @@ impl Machine {
             CALL | TAILCALL | TCALL | TTAILCALL => {
                 let count = Self::operand(cx.heap(), r).as_fixnum() as usize;
                 let tail = n == TAILCALL || n == TTAILCALL;
-                let callee = self.ds.last().copied().filter(|_| self.ds.len() > r.fp + count);
+                let mut callee = self.ds.last().copied().filter(|_| self.ds.len() > r.fp + count);
+                // An adapter cellular code made (`nclosure`), called by
+                // cellular code: what it calls, here, with no crossing.
+                if let Some(inner) = callee.and_then(|c| cx.heap().adapted(c)) {
+                    *self.ds.last_mut().expect("the callee") = inner;
+                    callee = Some(inner);
+                }
                 if (n == TCALL || n == TTAILCALL)
                     && !callee.is_some_and(|c| c.is_bloblet() && cx.heap().bloblet_kind(c) == const { kind("cellular-closure") })
                 {
@@ -1269,6 +1287,7 @@ impl Machine {
                 let v = self.pop(name)?;
                 let key = self.pop(name)?;
                 let heap = cx.heap();
+                let thunk = as_cellular(heap, thunk, 0);
                 if !(thunk.is_bloblet() && heap.bloblet_kind(thunk) == const { kind("cellular-closure") }) {
                     return Err(Trap::Type { routine: name });
                 }
@@ -1649,6 +1668,19 @@ pub fn cellular_adapter(heap: &mut Heap, f: Value, arity: usize) -> Value {
     c
 }
 
+/// `v`, called by a routine with `n` values (a thunk, a procedure given a
+/// continuation, a handler), as cellular code: a native closure, which
+/// cellular code makes in a program whose convention is native
+/// (`nclosure`), behind a cellular adapter, which calls it as `tailcall`
+/// does; anything else as it is.
+pub fn as_cellular(heap: &mut Heap, v: Value, n: usize) -> Value {
+    if v.is_bloblet() && heap.bloblet_kind(v) == const { kind("native-closure") } {
+        // An adapter cellular code made (`nclosure`): what it calls.
+        return heap.adapted(v).unwrap_or_else(|| cellular_adapter(heap, v, n));
+    }
+    v
+}
+
 /// A thrown value as a message.
 /// What a primitive raised, as a trap's message.
 pub fn describe(rt: &Runtime, obj: Value) -> String {
@@ -1686,6 +1718,7 @@ const RETURN: i64 = routine("return") as i64;
 const GLOBAL: i64 = routine("global") as i64;
 const GLOBAL_SET: i64 = routine("global!") as i64;
 const CLOSURE: i64 = routine("closure") as i64;
+const NCLOSURE: i64 = routine("nclosure") as i64;
 const CALL: i64 = routine("call") as i64;
 const TAILCALL: i64 = routine("tailcall") as i64;
 const PRIM: i64 = routine("prim") as i64;

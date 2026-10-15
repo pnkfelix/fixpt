@@ -50,7 +50,7 @@
 (define n-closure-free0 int 3)  ; a closure's field
 (define n-word-entry int 2)  ; a word's field
 (define n-word-cell0 int 5)  ; a word's field
-(define n-primitives int 51)  ; routines that may be cells
+(define n-primitives int 52)  ; routines that may be cells
 (define n-trap-type int 1)  ; a trap's code; a routine's number is its detail
 (define n-trap-overflow int 2)  ; a trap's code; a routine's number is its detail
 (define n-trap-underflow int 3)  ; a trap's code; a routine's number is its detail
@@ -80,6 +80,7 @@
       ((39) 1)  ; tcall
       ((40) 1)  ; ttailcall
       ((48) 1)  ; field
+      ((51) 2)  ; nclosure
       (else 0))))
 
 ;; Whether routine `n`'s call-out may leave the machine anywhere.

@@ -64,7 +64,7 @@ impl Heap {
                 "global" | "global!" if !self.is_global_cell(op(0)) => {
                     return Err(format!("cell {i}: a global is a bloblet with a field"));
                 }
-                "closure" if !(op(0) == Value::DEFAULT || self.is_cellular_word(op(0))) || !non_negative(op(1)) => {
+                "closure" | "nclosure" if !(op(0) == Value::DEFAULT || self.is_cellular_word(op(0))) || !non_negative(op(1)) => {
                     return Err(format!("cell {i}: a closure is of a word, over a count of values"));
                 }
                 "slot" | "slot!" | "free" | "call" | "tailcall" | "tcall" | "ttailcall" if !non_negative(op(0)) => {

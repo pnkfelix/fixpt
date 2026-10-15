@@ -2568,9 +2568,15 @@ generator reads, structured (step 6; today one string a clause,
   looks (`fx`, a convention binder, `native` for now; `apply` of a `vsubr`,
   whose type says none). `tcall` checks nothing on the arm64 machines
   (2026-10-15; the Rust one, the oracle, traps on anything but a cellular
-  closure): a value typed `cellular` is one. Left, in order: a value typed
-  `native` always a native closure (what cellular code makes, where the
-  native compiler declines, is typed `native` and is cellular); then
+  closure): a value typed `cellular` is one. A value typed `native` is a
+  native closure (2026-10-15): in a program whose convention is native,
+  every closure cellular code makes (where the native compiler declines)
+  is made so, `nclosure`, an adapter over it, which register code's
+  `lambda` names and native code ignores; a `letrec`'s patch writes
+  through it (`%fx26-adapted`); cellular code calling one calls what it
+  adapts, with no crossing (`Heap::adapted`), and the native compiler
+  compiles what it adapts. But a region's closure (`rlambda`, made by
+  `%region-closure`), still cellular there. Left, in order: then
   register code's `invoke` given the convention (`direct.rs` compiles from
   register code, so it cannot decline such calls), a direct `native` call
   from cellular code, and `direct.rs` calling by convention.

@@ -86,5 +86,6 @@
             (val rop-branchf int)
             (val rop-brancht int)
             (val routine-closure int)
+            (val routine-nclosure int)
             (val routine-field-set int)
             (val routine-prim int)))

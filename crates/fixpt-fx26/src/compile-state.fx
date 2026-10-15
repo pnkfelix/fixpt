@@ -204,6 +204,7 @@
             (if (= (extract w 3) d)
                 (begin (c-op1 c routine-slot (wcell-int d))
                        (c-op1 c routine-slot (wcell-int (extract w 1)))
+                       (c-adapted c)
                        (c-field-set c (+ cellular-closure-free0 (extract w 2))))
                 #u)
             (c-give-waiting (cdr ws) d c))))))

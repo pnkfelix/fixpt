@@ -405,6 +405,11 @@ pub mod cellular {
         // it was called with, the frame's count, as a list.
         ("rest", "( -- list ), this frame's values, from slot 0, as a list"),
         ("int-eq", "( a b -- a=b ), ints, fixnums or bignums"),
+        // A closure that cellular code makes in a program whose convention
+        // is native, where its type says `native` (`TODO.md` §97): what
+        // `closure` makes, given to the runtime's `adapt`, a native closure
+        // that calls it (`%fx26-convert`).
+        ("nclosure", "( v1 … vn -- c ), word w closed over the v's, in the native convention; w and n the next cells"),
     ];
     pub const PRIMITIVES: usize = ROUTINES.len();
 
@@ -412,7 +417,7 @@ pub mod cellular {
     /// are data, not code.
     pub const fn operands(name: &str) -> usize {
         let one: &[&str] = &["lit", "branch", "0branch", "slot", "slot!", "free", "global", "global!", "call", "tailcall", "tcall", "ttailcall", "field"];
-        let two: &[&str] = &["closure", "prim"];
+        let two: &[&str] = &["closure", "prim", "nclosure"];
         let mut i = 0;
         while i < one.len() {
             if super::const_str_eq(one[i], name) {
@@ -526,7 +531,7 @@ pub mod regcode {
         ("field", 1, "RESULT := field k of the bloblet in RESULT"),
         ("setfield", 2, "field k of the bloblet in RESULT := REGj"),
         ("prim", 2, "RESULT := runtime primitive p applied to REG1…REGn; may collect"),
-        ("lambda", 2, "RESULT := a closure of cellular word w over REG1…REGn; may collect"),
+        ("lambda", 3, "RESULT := a closure of cellular word w over REG1…REGn, as stack routine r makes it (`closure`, or `nclosure` in a program whose convention is native); natively, a native closure; may collect"),
         ("invoke", 1, "call the procedure in RESULT with REG1…REGn; RESULT := its value; may collect"),
         ("tailinvoke", 1, "the same in tail position, the frame popped: its value is this one's"),
         ("return", 0, "return RESULT, the frame popped"),
