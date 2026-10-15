@@ -718,6 +718,7 @@ pub const TABLE: &str = include_str!("table.fx");
 
 pub mod check;
 pub mod compare;
+mod convention;
 pub mod infer;
 mod kinds;
 pub mod licence;

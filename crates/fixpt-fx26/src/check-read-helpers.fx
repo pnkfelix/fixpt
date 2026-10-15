@@ -71,7 +71,8 @@
         'frozen 'arrayof 'icell 'await 'define-rec 'letrena 'letreap 'rlambda 'quote 'productof
         'sumof 'product 'extract 'sum 'tagcase 'module 'moduleof 'with 'select 'load-module
         'define-datatype 'make-bloblet 'bloblet-ref 'bloblet-set! 'bloblet-freeze 'bloblet-byte
-        'bloblet-set-byte! 'bloblet-bytes 'rmake-bloblet 'dlambda '=> 'case))
+        'bloblet-set-byte! 'bloblet-bytes 'rmake-bloblet 'dlambda '=> 'case
+        'define-convention))
 (define k-no-name symbol '||)
 ;; Whether effect `e` is variable `v` alone.
 (define k-eff-is-var? (subr (read @globals) (k-eff int) bool)

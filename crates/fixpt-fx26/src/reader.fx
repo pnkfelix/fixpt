@@ -105,6 +105,7 @@
 (define t-define-rec (with parser-module t-define-rec))
 (define t-define-type (with parser-module t-define-type))
 (define t-define-effect (with parser-module t-define-effect))
+(define t-define-convention (with parser-module t-define-convention))
 (define t-define-generative (with parser-module t-define-generative))
 (define t-exp (with parser-module t-exp))
 (define p-ok (with parser-module p-ok))

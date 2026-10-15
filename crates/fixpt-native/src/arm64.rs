@@ -296,11 +296,15 @@ pub fn strb(t: Reg, n: Reg) -> u32 {
 /// card table whose biased address (`Heap::card_table_address`) is at
 /// `[state, #cards]`. `t1` and `t2` are the caller's to lose; `obj` may be
 /// one of them.
+/// A card is 512 bytes: the byte for address `a` is the biased table's
+/// address plus `a >> CARD_SHIFT` (`Heap::card_table_address`).
+pub const CARD_SHIFT: u32 = 9;
+
 pub fn card_mark(obj: Reg, off: i64, state: Reg, cards: u32, t1: Reg, t2: Reg) -> Vec<u32> {
     assert!(off.unsigned_abs() < 4096, "a field's offset in reach of one `add`");
     vec![
         if off < 0 { sub_imm(t1, obj, off.unsigned_abs() as u32) } else { add_imm(t1, obj, off as u32) },
-        lsr_imm(t1, t1, 9),
+        lsr_imm(t1, t1, CARD_SHIFT),
         ldr(t2, state, cards),
         add(t2, t2, t1),
         movz(t1, 1, 0),

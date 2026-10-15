@@ -169,7 +169,7 @@ pub fn lower_top(checker: &Checker, globals: &mut Globals, top: &Top) -> String 
         _ => {}
     }
     match top {
-        Top::DefineType { .. } | Top::DefineTypeFamily { .. } | Top::DefineGenerative { .. } | Top::DefineEffect { .. } => {
+        Top::DefineType { .. } | Top::DefineTypeFamily { .. } | Top::DefineGenerative { .. } | Top::DefineEffect { .. } | Top::DefineConvention { .. } => {
             String::new()
         }
         Top::Define { name, exp, recursive, .. } => {

@@ -57,6 +57,7 @@ fn report(c: &Checker, top: &Top) -> String {
         Top::DefineTypeFamily { name } => format!("{}: a type with parameters", c.interner.name(*name)),
         Top::DefineGenerative { name } => format!("{}: a new type", c.interner.name(*name)),
         Top::DefineEffect { name, effect } => format!("{} = {}", c.interner.name(*name), c.show_effect(effect)),
+        Top::DefineConvention { name } => format!("{}: the native convention", c.interner.name(*name)),
     }
 }
 

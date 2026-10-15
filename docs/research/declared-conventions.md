@@ -177,11 +177,14 @@ fixpt's declaration is generated from the implementation's own tables
 (`layout.rs`'s tags, kinds and header fields; `DState`'s offsets by
 `offset_of!`; `direct.rs`'s registers, frame constants and routines; the
 card shift), as `standard.fx` is generated from `lower.rs`'s table, into a
-module file every program may load (`fx26:native-arm64.fx`), and a test
-compares the file with what the tables say now (`FIXPT_BLESS=1` to
+file, `crates/fixpt-runtime/src/native-arm64.conv` (one clause to a line,
+canonical; `fixpt_runtime::NATIVE_CONVENTION`), and a test
+(`fixpt-native/tests/convention.rs`) compares the file with what the
+tables say now (`FIXPT_BLESS=1` to
 rewrite). Both checkers compare a program's declaration with it: the Rust
 one reads it with `include_str!`, the one written in FX-26 from a
-generated module of the same text, which it reads with its own reader. A change to the convention is a change to that file, in the
+the same text, which a program reads too, one clause to a string, by the
+standard operation `native-convention`. A change to the convention is a change to that file, in the
 same commit, and a program written against the old one is refused with
 the difference, not run.
 
@@ -226,8 +229,18 @@ for a program that must hand the power on.
    across collections, on all nine machines (`fixpt-cli/tests/
    made_code.rs`; the evaluator falls back); `fixpt-native/tests/
    code_exec.rs`, `a_sealed_copy_runs_and_reads_its_field`.
-4. `define-convention`: fixpt's declaration generated and blessed, both
-   checkers comparing a program's with it, refusals naming the clause.
+4. *(Done 2026-10-14.)* `define-convention`: fixpt's declaration
+   generated (`fixpt_native::direct::native_convention`, `direct/
+   declare.rs`) and blessed; both checkers compare a program's with it
+   (`convention.rs`; `check-program.fx`, `k-check-convention`), the same
+   refusals at the same places, and bind its name to `native`; a program
+   reads the clauses by `native-convention`. Clauses are compared as
+   printed canonically (atoms apart by one space, integers in decimal),
+   sorted by role: the first role, in that order, that differs is the
+   refusal's (a clause not the implementation's, one it has not, one it
+   has that the program left out, two of one role, an atom not a name nor
+   an integer). Tests: `checker.rs`, `declared_conventions_alike`;
+   `programs/made-code/declared.fx` on all nine machines.
 5. Code that is not a leaf: the routines a program's code calls (allocate,
    poll, fail, call what is not native code), made routines at state
    fields where today they are inline sequences or bare call-outs; a test

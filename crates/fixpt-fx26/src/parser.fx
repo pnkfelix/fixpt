@@ -75,6 +75,7 @@
 (define t-define-rec (with parser-types t-define-rec))
 (define t-define-type (with parser-types t-define-type))
 (define t-define-effect (with parser-types t-define-effect))
+(define t-define-convention (with parser-types t-define-convention))
 (define t-define-generative (with parser-types t-define-generative))
 (define t-exp (with parser-types t-exp))
 (define p-ok (with parser-types p-ok))

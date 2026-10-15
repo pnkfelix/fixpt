@@ -1,0 +1,73 @@
+;;; A convention declared (`TODO.md` §97, `docs/research/
+;;; declared-conventions.md`): `arm64-native` names fixpt's native
+;;; convention, whose clauses these are, in a program that makes code to it
+;;; and calls it. Where this machine runs no native code, the answer it
+;;; would give.
+(define-convention arm64-native
+  (target arm64)
+  (registers
+    (arguments x1 x2 x3 x4 x5 x6 x7 x8) (rest-in x8) (count x9) (result x0) (closure x10)
+    (link x30) (frame x29) (pinned (state x24) (fuel x28) (stack-limit x27) (code-distance x26))
+    (lost-across-calls all-but-pinned))
+  (values
+    (tags
+      (fixnum 0) (pair 1) (suffix-ref 2) (immediate 3) (bloblet 4) (trailer 5) (header 6)
+      (forward 7))
+    (fixnum (shift 3) (bits 61))
+    (immediates
+      (false 3) (true 11) (null 19) (unit 27) (eof 35) (unspecified 43) (default 51) (unbound 59))
+    (character (subtag 8) (payload-shift 8)) (pair (car -1) (cdr 7))
+    (bloblet (reference suffix 4) (field-k-before-suffix 8))
+    (header
+      (tag 0 3) (kind 3 8) (large 11 1) (fields-frozen 12 1) (suffix-frozen 13 1) (fields 14 18)
+      (bytes 32 32))
+    (kinds
+      (string 1) (symbol 2) (vector 3) (bytevector 4) (flonum 5) (bignum 6) (ratnum 7) (closure 8)
+      (code 9) (box 10) (record 11) (record-type 12) (port 13) (continuation 14) (values 15)
+      (promise 16) (hash-table 17) (environment 18) (primitive 19) (bloblet 32) (cellular-code 33)
+      (compiled-code 34) (env-frame 35) (sum 36) (product 37) (cellular-closure 38)
+      (cellular-continuation 39) (register-code 40) (native-closure 41) (flat-array 42)
+      (eqtable 43) (weak-pair 44) (native-frame 45) (icell 46) (mailbox 47)))
+  (closures (kind 41) (code-field 2) (first-free-field 3) (native-when-code-at-least code-lo))
+  (code (runs-at reference plus x26) (field-k-before-code 8))
+  (frames
+    (align 16) (header x29 -8) (link x29 0) (return x29 8)
+    (map x29 16 (live-bits 48) (count-above 48)) (values-from x29 24) (raw-after-values)
+    (keeps-its-code) (stub 32))
+  (state
+    (fuel 24) (reserve 552) (trap 32) (pc 40) (args 48) (nargs 192) (aux 184) (callout 112)
+    (rust-sp 0) (native-sp 136) (fp 144) (top 152) (words 160) (alloc-limit 168) (code 176)
+    (clo 200) (delta 208) (code-lo 216) (trap-stub 280) (foreign 288) (closure 296) (cards 304)
+    (stack-limit 16))
+  (routines
+    (foreign
+      (entry state foreign) (in (closure x10) (count x9) (arguments x1 x2 x3 x4 x5 x6 x7 x8))
+      (out x0) (may-collect))
+    (trap
+      (entry state trap-stub) (in (kind x9))
+      (kinds
+        (1 evaluation-step-limit-exceeded) (2 stack-overflow) (3 a-primitive-failed)
+        (4 car-or-cdr-of-a-non-pair) (5 division-by-zero))))
+  (barrier (cards state cards) (card-shift 9) (mark 1)))
+
+;; Instruction `w` at byte `at` of `b`'s suffix, little-endian.
+(define* put4 (subr (write @heap) ((bloblet (fields) @heap) int int) unit)
+  (lambda (b at w)
+    (begin (bloblet-set-byte! b at (modulo w 256))
+           (bloblet-set-byte! b (+ at 1) (modulo (quotient w 256) 256))
+           (bloblet-set-byte! b (+ at 2) (modulo (quotient w 65536) 256))
+           (bloblet-set-byte! b (+ at 3) (quotient w 16777216)))))
+
+;; `sub x0, x1, x2; ret`: two fixnums' difference, their tags 0.
+(define* subtracter (subr (maxeff (alloc @heap) (write @heap) (io native)) ()
+                          (subr (conv arm64-native) pure (int int) int))
+  (lambda ()
+    (let ((b (the (bloblet (fields) @heap) (make-bloblet 8))))
+      (begin (put4 b 0 3405905952)
+             (put4 b 4 3596551104)
+             (the (subr (conv arm64-native) pure (int int) int)
+                  (native-procedure (seal-code b)))))))
+
+;; The clauses, as a program may read them: the first, `target`'s.
+(car (the (listof string @heap) (native-convention)))
+(if (native-code?) ((subtracter) 50 8) 42)

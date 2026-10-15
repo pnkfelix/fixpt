@@ -2531,8 +2531,11 @@ Design: `docs/research/declared-conventions.md` (its steps are the plan).
 Built (2026-10-14), the note's steps 2 and 3: `seal-code`,
 `native-procedure`, `native-code?` and `(io native)`, on all nine
 machines (`programs/made-code/leaves.fx`, `fixpt-cli/tests/made_code.rs`).
-Left: `define-convention` (step 4), code that is not a leaf (step 5), the
-declaration as data (step 6).
+And step 4: `define-convention`, fixpt's declaration generated from its
+constants, both checkers comparing a program's with it
+(`programs/made-code/declared.fx`). Left: code that is not a leaf (step
+5), the declaration as data a generator reads, structured (step 6; today
+one string a clause, `native-convention`).
 
 Kayak is writing FX-26's native code generators in KFX, which may use only
 what FX-26 has, and FX-26 has no way to place machine code it made and run

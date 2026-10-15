@@ -52,6 +52,8 @@ use std::collections::HashMap;
 use std::mem::offset_of;
 
 mod reps;
+mod declare;
+pub use declare::native_convention;
 use reps::{Convert, RawOp, Rep};
 
 const RESULT: Reg = 0;

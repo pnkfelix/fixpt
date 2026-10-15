@@ -592,3 +592,39 @@ fn effect_summaries_agree() {
     assert!(both > 1000, "only {both} compared");
     assert!(report.is_empty(), "{} disagreements:\n{}", report.len(), report.iter().take(40).cloned().collect::<Vec<_>>().join("\n"));
 }
+
+/// `define-convention` (`TODO.md` §97, `docs/research/
+/// declared-conventions.md`): the native convention's clauses, in any
+/// order, name it; anything else is refused, alike by both checkers, at the
+/// first clause by role that differs.
+#[test]
+fn declared_conventions_alike() {
+    let clauses: Vec<&str> = fixpt_runtime::NATIVE_CONVENTION.lines().collect();
+    let program = |cs: &[String]| {
+        format!(
+            "(define-convention kayak-arm64\n  {})\n(the (subr (conv kayak-arm64) pure (int) int) (native-procedure (seal-code (make-bloblet 8))))",
+            cs.join("\n  ")
+        )
+    };
+    let own: Vec<String> = clauses.iter().map(|c| c.to_string()).collect();
+    let accepted = both(&program(&own));
+    assert!(accepted.as_ref().is_ok_and(|ls| ls.last().is_some_and(|l| l.contains("(conv native)") && l.contains("(io native)"))), "{accepted:?}");
+    let reversed: Vec<String> = own.iter().rev().cloned().collect();
+    assert!(both(&program(&reversed)).is_ok());
+    let refused = |cs: Vec<String>, says: &str| {
+        let r = both(&program(&cs));
+        assert!(r.as_ref().is_err_and(|(m, _, _)| m.contains(says)), "{says}: {r:?}");
+    };
+    let with = |f: &dyn Fn(&mut Vec<String>)| {
+        let mut cs = own.clone();
+        f(&mut cs);
+        cs
+    };
+    refused(with(&|cs| cs[1] = cs[1].replace("(link x30)", "(link x29)")), "the `registers` clause is not this implementation's");
+    refused(with(&|cs| cs.retain(|c| !c.starts_with("(barrier"))), "no `barrier` clause, which this implementation's convention has");
+    refused(with(&|cs| cs.push("(colour blue)".into())), "has no `colour` clause");
+    refused(with(&|cs| cs.push("(target arm64)".into())), "two `target` clauses");
+    refused(with(&|cs| cs[0] = "(target \"arm64\")".into()), "holds names, integers and lists");
+    refused(with(&|cs| cs[0] = "(target #t)".into()), "holds names, integers and lists");
+    refused(with(&|cs| cs[0] = "target".into()), "a convention's clause is `(role …)`");
+}

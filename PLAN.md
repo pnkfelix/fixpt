@@ -149,8 +149,9 @@ are in the last section, "Log: the glance's details", and in
 - **Code bloblets a program makes and runs, kayak's request**
   (2026-10-14, `TODO.md` §97, `docs/research/declared-conventions.md`):
   `seal-code`, `native-procedure` at a stated type under `(io native)`,
-  and `native-code?`, on every machine; next, the native contract
-  declared (`define-convention`), and code that is not a leaf.
+  and `native-code?`, on every machine; the native contract declared
+  (`define-convention`, checked against fixpt's generated declaration by
+  both checkers); next, code that is not a leaf.
 - **Cellular code calling native code** (2026-10-13, `TODO.md` §93):
   fixed, a crash on the REPL's machine where the native convention
   declined a form; its cost to assembling words mostly recovered (peval's

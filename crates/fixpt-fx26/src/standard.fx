@@ -412,6 +412,7 @@
          (else "")))
       ((17)
        (case n
+         (("native-convention") "%fx26-native-convention")
          (("bytevector-length") "bytevector-length")
          (("bytevector-u8-ref") "bytevector-u8-ref")
          (("set-register-twin") "%set-register-twin")

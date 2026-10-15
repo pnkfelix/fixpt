@@ -215,6 +215,7 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("seal-code", "%fx26-seal-code", true),
     ("native-procedure", "%fx26-native-procedure", true),
     ("native-code?", "%fx26-native-code?", true),
+    ("native-convention", "%fx26-native-convention", true),
     ("clock", "%fx26-clock", true),
     ("sleep-until", "%fx26-sleep-until", true),
     ("args", "%fx26-args", true),

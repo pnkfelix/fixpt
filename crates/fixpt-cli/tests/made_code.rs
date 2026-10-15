@@ -49,3 +49,15 @@ fn leaves_made_and_run() {
         assert_eq!(t.join().expect("ran"), want, "{m}");
     }
 }
+
+/// A program that declares the convention it makes code to
+/// (`define-convention`, `programs/made-code/declared.fx`): the native
+/// convention, named so, its clauses as the program reads them, and a leaf
+/// that subtracts, made at it.
+#[test]
+fn code_made_to_a_declared_convention() {
+    let runs: Vec<_> = machines().into_iter().map(|(m, _)| (m, std::thread::spawn(move || values(m, "declared.fx", 2)))).collect();
+    for (m, t) in runs {
+        assert_eq!(t.join().expect("ran"), ["\"(target arm64)\"", "42"], "{m}");
+    }
+}

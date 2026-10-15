@@ -744,7 +744,7 @@ fn load_modules_at(f: &Syntax, interner: &Interner, out: &mut Vec<(u32, String, 
             arms(from(2), 1, out);
         }
         // Types and effects, and the regions a module takes.
-        Some("define-type" | "define-effect" | "module-parameters") => {}
+        Some("define-type" | "define-effect" | "define-convention" | "module-parameters") => {}
         // Parameters, or a region's name, then a body.
         Some("lambda" | "plambda" | "letregion" | "letfreeze" | "letrena" | "letreap") => exps(from(2), out),
         Some("let" | "let*" | "letrec" | "letrec*" | "par") => {

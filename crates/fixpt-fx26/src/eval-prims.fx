@@ -386,6 +386,8 @@
                  (failed e (ev-io-failed e)))))
       ;; Code a program makes (`TODO.md` §97): none here, so none runs.
       (prim! 'native-code? (lambda (xs) #f))
+      (prim! 'native-convention
+             (lambda (xs) (ev-strings (the (listof string @v) (native-convention)))))
       (prim! 'seal-code (lambda (xs) (efail "seal-code: this machine runs no native code")))
       (prim! 'native-procedure
              (lambda (xs) (efail "native-procedure: this machine runs no native code")))

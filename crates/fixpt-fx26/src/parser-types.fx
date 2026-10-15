@@ -77,6 +77,9 @@
   (t-define-rec (listof (productof (1 symbol) (2 syn) (3 exp)) acyclic) int int)
   (t-define-type syn syn int int)
   (t-define-effect syn syn int int)
+  ;; `(define-convention name clause …)`: its name and the whole form, read
+  ;; by the checker alone (`TODO.md` §97).
+  (t-define-convention syn syn int int)
   ;; `(define-generative head rep)`: read by the checker alone; its two
   ;; conversions follow it as definitions.
   (t-define-generative syn syn int int)

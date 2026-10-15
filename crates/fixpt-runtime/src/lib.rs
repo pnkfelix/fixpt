@@ -6,6 +6,14 @@
 //! difference between them cannot come from this layer.
 
 pub mod cmarks;
+
+/// fixpt's native convention, declared (`TODO.md` §97, `docs/research/
+/// declared-conventions.md`): its clauses, one to a line, canonical, as
+/// `fixpt_native::direct::native_convention` makes them (a test there
+/// says so). Both checkers compare a program's `define-convention` with
+/// it, and `native-convention` gives it to a program.
+pub const NATIVE_CONVENTION: &str = include_str!("native-arm64.conv");
+
 pub mod crossing;
 pub mod disasm;
 pub mod eqtable;

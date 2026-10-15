@@ -1363,6 +1363,14 @@ prims! {
         Ok(c)
     });
     "%fx26-native-code?", 0, Some(0), simple!(|rt, _a| Ok(Value::boolean(rt.call_native.is_some())));
+    "%fx26-native-convention", 0, Some(0), simple!(|rt, _a| {
+        let mut list = Value::NULL;
+        for line in crate::NATIVE_CONVENTION.lines().rev() {
+            let s = rt.heap.make_string(line);
+            list = rt.heap.cons(s, list);
+        }
+        Ok(list)
+    });
     // The clock (stage 4): monotonic nanoseconds since the run began; and
     // the program's own arguments, as `fixpt run … -- ARG…` gives them.
     "%fx26-clock", 0, Some(0), simple!(|rt, _a| Ok(exact_out(rt, crate::world::clock_ns() as i128)));

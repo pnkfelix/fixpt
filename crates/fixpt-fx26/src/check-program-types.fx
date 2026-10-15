@@ -29,6 +29,10 @@
 (define-type k-def-list (listof k-def acyclic))
 ;; The names of `ns` that are globals already, with their types.
 (define-type k-olds (listof (pairof symbol int acyclic) acyclic))
+;; A convention's clause (`TODO.md` §97): its role, its canonical text, and
+;; where it is.
+(define-type k-clause (productof (1 string) (2 string) (3 syn)))
+(define-type k-clauses (listof k-clause acyclic))
 
 ;;; ------------------------------------------------------------ signatures
 

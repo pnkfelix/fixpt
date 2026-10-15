@@ -47,6 +47,9 @@ pub enum Top {
     DefineGenerative { name: Sym },
     /// `(define-effect name …)`: an abbreviation for an effect.
     DefineEffect { name: Sym, effect: Effect },
+    /// `(define-convention name clause …)`: a name for the native
+    /// convention, whose declaration the clauses are (`TODO.md` §97).
+    DefineConvention { name: Sym },
     /// An expression.
     Exp(Checked),
 }
@@ -528,6 +531,15 @@ impl Checker {
                 self.dscope.push((name, crate::parse::DScope::Eff(effect.clone())));
                 Ok(Top::DefineEffect { name, effect })
             }
+            Some("define-convention") => {
+                let [_, name, clauses @ ..] = items else {
+                    return Err(FxError::at(form.span, "`(define-convention name clause …)`"));
+                };
+                let name = self.binder_name(name)?;
+                crate::convention::check(form.span, clauses, &|s| self.interner.name(s).to_string())?;
+                self.dscope.push((name, crate::parse::DScope::ConvVal(crate::ast::Conv::Native)));
+                Ok(Top::DefineConvention { name })
+            }
             Some("define-generative") => {
                 let [_, head, rep] = items else {
                     return Err(FxError::at(form.span, "`(define-generative name type)` or `(define-generative (name (param kind) …) type)`"));
@@ -909,7 +921,7 @@ impl Checker {
             let items = f.as_proper_list().unwrap_or(&[]);
             let head = items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h).to_string());
             match (head.as_deref(), items) {
-                (Some("define-type" | "define-generative" | "define-effect"), _) => {
+                (Some("define-type" | "define-generative" | "define-effect" | "define-convention"), _) => {
                     self.top(f)?;
                     done.push(true);
                 }
@@ -1144,7 +1156,7 @@ pub const KEYWORDS: &[&str] = &[
     "lambda", "plambda", "proj", "if", "letrec", "let", "begin", "define", "define*", "define-type", "define-generative",
     "subr", "poly", "ref", "pairof", "dletrec", "void", "pure", "maxeff", "read", "write",
     "alloc", "goto", "comefrom", "region", "effect", "type", "prompt", "prompt-tag",
-    "composable", "mark-key", "listof", "cond", "case", "else", "and", "or", "let*", "define-effect", "module-parameters", "the",
+    "composable", "mark-key", "listof", "cond", "case", "else", "and", "or", "let*", "define-effect", "define-convention", "module-parameters", "the",
     "bloblet", "fields", "frozen", "arrayof", "icell", "await", "define-rec", "letrena", "letreap", "rlambda", "quote", "productof", "sumof", "product", "extract", "sum", "tagcase", "module", "moduleof", "with", "select", "load-module",
     "define-datatype", "make-bloblet", "bloblet-ref", "bloblet-set!", "bloblet-freeze", "bloblet-byte",
     "bloblet-set-byte!", "bloblet-bytes", "rmake-bloblet", "dlambda", "=>",

@@ -220,6 +220,9 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("seal-code", "(poly ((a type)) (subr (io native) (a) a))"),
     ("native-procedure", "(poly ((a type) (t type)) (subr (io native) (a) t))"),
     ("native-code?", "(subr pure () bool)"),
+    // The native convention's clauses, one to a string, as `define-convention`
+    // compares them.
+    ("native-convention", "(poly ((r region)) (subr (alloc r) () (listof string r)))"),
     // The clock: monotonic nanoseconds since the run began, and a sleep
     // until a time on it. The program's own arguments.
     ("clock", "(subr (io clock) () i64)"),
