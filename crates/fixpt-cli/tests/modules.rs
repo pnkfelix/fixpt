@@ -13,9 +13,13 @@ const FIXPT: &str = env!("CARGO_BIN_EXE_fixpt");
 /// The programs, in `crates/fixpt-fx26/tests/programs/modules`: a module
 /// read from a file (`load-module`), a functor (a dependent procedure), a
 /// module reshaped where fewer values are wanted, and a module made in a
-/// procedure over a region; and those also typed at the REPL.
-const PROGRAMS: [&str; 4] = ["load", "functor-max", "width", "region-parameter"];
-const AT_THE_REPL: [&str; 2] = ["load", "functor-max"];
+/// procedure over a region; a file of one expression (`load-input`), the
+/// program's and a built-in one; and those also typed at the REPL, where
+/// each form is checked alone, the hidden globals of the files it loads
+/// before it (`TODO.md` §97: the front end written in FX-26 took a
+/// `load-input`'s for its value, not its file's module).
+const PROGRAMS: [&str; 6] = ["load", "functor-max", "width", "region-parameter", "load-input", "load-input-built-in"];
+const AT_THE_REPL: [&str; 4] = ["load", "functor-max", "load-input", "load-input-built-in"];
 
 /// Each run mode, as options.
 const MODES: [&[&str]; 10] = [

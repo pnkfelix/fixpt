@@ -2540,10 +2540,16 @@ generator reads, structured (step 6; today one string a clause,
 - **Native code cannot call back the bytecode VM's procedures**: a
   primitive cannot run the VM again, so on `rs-scheme-vm` a made procedure
   given a procedure of the program fails, saying so.
-- **`load-input` of a built-in file** (`fx26:arm64.fx`, the encoder a
-  generator would use) checks only on the REPL's native-convention
-  machine: elsewhere "unbound variable `input`" (found 2026-10-14);
-  `frames.fx` carries the words the encoder made instead.
+- **A scheduler defined as cellular code does not preempt on the
+  native-convention machine** (found 2026-10-14): declining the hidden
+  global of `fx26:processes.fx` natively (it ran as cellular code) left
+  `preempt.rs`'s spinning process unpreempted, and a `processes.rs` test
+  hung. Only `load-input`'s hidden globals are declined now, so the
+  scheduler is native again; the cellular path is still to fix.
+- **The native-convention machine hides the FX-26 checker's refusals**
+  (found 2026-10-14): a definition that checker refuses is "declined" and
+  runs another way, so where the two checkers disagree on a form, that
+  machine says nothing (it hid the `load-input` bug, `DONE.md` §97).
 - **More routines** a generator will want: allocating a bloblet, calling a
   primitive by name (its number is fixpt's own), making a closure.
 - **Calls do not use the convention their type says** (the user's

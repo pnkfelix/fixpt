@@ -2488,3 +2488,25 @@ io.rs`, `each_form_runs_once` (`programs/io/once.fx`: a definition and an
 expression that write, a process a definition spawned, then `main`), on
 five machines; the old evaluator wrote `define x` seven times.
 
+
+## 97. Code bloblets a program makes and runs (kayak's request, 2026-10-14)
+
+Still open in `TODO.md` §97; done so far:
+- **`load-input` form by form** (found 2026-10-14, fixed the same day).
+  The Rust parser defines each loaded file's hidden global first, with the
+  form `(define %shared:K (load-input "P"))`, whose load, while it parses
+  that definition (`sharing_now`), is the file's module. The session gives
+  that form to the front end written in FX-26 on the machines that check
+  each form with it, whose parser read the load as any other: the file's
+  `input`. The hidden global became the file's value, and the program's
+  own `(with %shared:K input)` failed ("unbound variable `input`", or
+  "`with` opens a module, and … is a int"). On the native-convention
+  machine the refusal was a decline, so the form ran another way, which
+  hid it. Now both parsers read a definition of a hidden global
+  `sharing_now` (Rust: `Checker::sharing`; FX-26: `parse-define`, moved to
+  `parser-top.fx`, and `sharing-now` in `parse-loaded`), and the native
+  machine declines a `load-input`'s such definition, whose initializer
+  alone is the file's `input`, not its module (a `load-module`'s alone is
+  its module). Tests: `modules/load-input.fx` and
+  `load-input-built-in.fx` (the arm64 encoder), in every run mode, whole
+  and at the REPL (`fixpt-cli/tests/modules.rs`).

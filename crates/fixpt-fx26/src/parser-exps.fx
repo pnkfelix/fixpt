@@ -138,6 +138,7 @@
 (define-type loaded-file (select parser-module loaded-file))
 (define shared-keys (with parser-module shared-keys))
 (define shared-pending (with parser-module shared-pending))
+(define sharing-now (with parser-module sharing-now))
 (define shared-key? (with parser-module shared-key?))
 (define load-cycle (with parser-module load-cycle))
 (define in-loaded-as (with parser-module in-loaded-as))
@@ -930,6 +931,10 @@
             (let* ((key (string-append (if input? "input:" "") (extract (car f) 7)))
                    (name (string->symbol (string-append "%shared:" key)))
                    (cycle (load-cycle key path)))
+              (if (symbol=? name (get sharing-now))
+                  ;; The hidden global's own definition: the file's module.
+                  (begin (set sharing-now '||) (set shared-keys (cons key (get shared-keys)))
+                         (parse-load-file (car f) path input? a b))
               (begin
                 (cond ((not (string=? cycle "")) (pfail-at cycle a b))
                       ((< (extract (car f) 2) 0) #u)
@@ -944,7 +949,7 @@
                                            (get shared-pending)))))))
                 (if input?
                     (e-with name (e-var 'input (syn-start head) (syn-end head)) a b)
-                    (e-var name a b))))))))
+                    (e-var name a b)))))))))
   ;; File `f`, loaded at `a`..`b` as `path`: the module, its items after its
   ;; mark (`loaded-made` of it, for a file of parameters; for a
   ;; `load-input`, `input?`, its one form, the item `input`); or why it
@@ -983,17 +988,3 @@
   (lambda (bs)
     (let ((usage "a define-rec binding is `(name type lambda)`"))
       (parse-typed-bindings bs "a define-rec binding" usage))))
-;; `(define name type expression)` or `(define name expression)`; for a
-;; `define*` (`star?`), the type's list holds the head too.
-(define parse-define (subr (maxeff parses spin) (syn bool) top)
-  (lambda (s star?)
-    (let* ((items (syn-items s "a definition")) (n (len items)) (a (syn-start s)) (b (syn-end s)))
-      (case n ((4)
-               (let* ((name (syn-symbol (nth items 1)))
-                      (heads (if star? (the syns-a (cons (car items) nil)) (the syns-a nil)))
-                      (ty (the syns-a (cons (nth items 2) heads))))
-                 (t-define name ty (parse-exp (nth items 3)) a b)))
-              ((3)
-               (let ((name (syn-symbol (nth items 1))))
-                 (t-define name (the syns-a nil) (parse-exp (nth items 2)) a b)))
-              (else (pfail "`(define name type expression)` or `(define name expression)`" s))))))

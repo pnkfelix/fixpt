@@ -1221,6 +1221,13 @@ impl Fx26Session {
     /// no arguments, by `run`; and its value put in the global. What `run`
     /// did instead, if anything else.
     fn native_define(&mut self, name: &str, form: &str, init: &str, run: NativeRunner) -> R<Result<(), NativeRun>> {
+        // A `load-input`'s hidden global: its load is its definition, the
+        // file's module, which its initializer alone, compiled below as an
+        // expression, is not: that is the file's `input` (`TODO.md` §97).
+        // A `load-module`'s initializer alone is its module.
+        if name.starts_with("%shared:input:") {
+            return Ok(Err(NativeRun::Declined("a loaded file's hidden global is defined by its load".into())));
+        }
         self.own_pieces()?;
         let standard = self.next_standard()?;
         // What is loaded is loaded, above; the handles below are this
