@@ -2548,45 +2548,6 @@ generator reads, structured (step 6; today one string a clause,
   scheduler is native again; the cellular path is still to fix.
 - **More routines** a generator will want: allocating a bloblet, calling a
   primitive by name (its number is fixpt's own), making a closure.
-- **Calls do not use the convention their type says** (the user's
-  question, 2026-10-14). Both checkers know each call's convention, but
-  the compilers work from cellular words and register code, which carry
-  none, so a typed call dispatches at run time, `fx`'s way, everywhere:
-  fixpt's native code checks an unknown callee's code against `code_lo`;
-  the arm64 cellular machines' `tcall` (§93), the stencils' typed call and
-  register code's `invoke` (both 2026-10-14) do too. The design
-  (`docs/research/native-conventions.md`) and the user's rule (static
-  conventions, not run-time checks) say a call through `native` or
-  `cellular` compiles directly and only `fx` dispatches. To do: the
-  checkers note each call's convention by expression, as conversions are
-  noted (`conversion_code`, `k-convert-at`), and each compiler compiles
-  `cellular` with no check, `native` directly (on the cellular machines,
-  straight to the Rust machine's `call_native`), `fx` as now. Untyped
-  calls keep theirs. Begun (2026-10-15): both checkers note each call's
-  convention (`NodeFacts::call_conv`, `n-call`), and both compilers' stack
-  code calls a `cellular` callee by `tcall`, anything else by `call`, which
-  looks (`fx`, a convention binder, `native` for now; `apply` of a `vsubr`,
-  whose type says none). `tcall` checks nothing on the arm64 machines
-  (2026-10-15; the Rust one, the oracle, traps on anything but a cellular
-  closure): a value typed `cellular` is one. A value typed `native` is a
-  native closure (2026-10-15): in a program whose convention is native,
-  every closure cellular code makes (where the native compiler declines)
-  is made so, `nclosure`, an adapter over it, which register code's
-  `lambda` names and native code ignores; a `letrec`'s patch writes
-  through it (`%fx26-adapted`); cellular code calling one calls what it
-  adapts, with no crossing (`Heap::adapted`), and the native compiler
-  compiles what it adapts. A place's closure (`rlambda`) has its adapter
-  in the same place (`%region-nclosure`, `Heap::adapter`). Left, in
-  order: register code's `invoke` given the convention (`direct.rs` compiles from
-  register code, so it cannot decline such calls), a direct `native` call
-  from cellular code, and `direct.rs` calling by convention.
-Fixed (2026-10-14), found by made procedures: on the arm64 cellular
-machines a typed tail call of a native closure stopped ("no routine is
-numbered 40": the Rust machine made the call, then returned from the word,
-which `run_routine` took for an error), and register code's `invoke`
-crashed on one (it read the callee's word's twin); now the return is made,
-and `invoke` calls a native closure out to the Rust machine
-(`programs/made-code/typed-calls.fx`).
 - **An adapter from the native convention to the cellular one runs on
   only some machines** (found 2026-10-14, a made procedure typed
   `cellular`, which `native-procedure` now refuses): the cellular closure

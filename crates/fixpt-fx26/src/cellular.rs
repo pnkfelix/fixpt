@@ -1648,7 +1648,7 @@ impl<'a> Compiler<'a> {
                 // In the callee's convention, as its type says
                 // (`NodeFacts::call_conv`): a cellular closure, called as one;
                 // anything else, by the call that looks at the callee's kind.
-                let op = match (self.c.facts.call_conv(x), tail) {
+                let op = match (self.c.facts.call_conv(f), tail) {
                     (Conv::Cellular, false) => "tcall",
                     (Conv::Cellular, true) => "ttailcall",
                     (_, false) => "call",
@@ -1978,8 +1978,9 @@ impl<'a> Compiler<'a> {
                 self.prim(code, "%make-box", 1)?;
             }
             "abort-current-continuation" | "escape" => self.op(code, "abort"),
-            "call-with-composable-continuation" => self.op(code, "callcomp"),
-            "cwcc" => self.op(code, "callcc"),
+            // In the native convention, the continuation given in it.
+            "call-with-composable-continuation" => self.op(code, if self.native_program() { "ncallcomp" } else { "callcomp" }),
+            "cwcc" => self.op(code, if self.native_program() { "ncallcc" } else { "callcc" }),
             "with-mark" => self.op(code, "withmark"),
             "first-mark" => self.op(code, "firstmark"),
             "current-marks" => self.op(code, "currentmarks"),

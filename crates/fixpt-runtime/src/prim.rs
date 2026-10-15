@@ -1854,11 +1854,11 @@ prims! {
     "%fx26-u64->int", 1, Some(1), simple!(|rt, a| fixed_op(rt, a, "to", Width::U64));
     // FX-26's `vlambda` (`%vlambda`): `f`, a procedure of one list, as a
     // variadic one, a cellular closure over `f` of the word `rest; free 0;
-    // tailcall 1` (`f` of either convention): however many arguments it is called with (the frame's
-    // count), their list, given to `f` in its place. Its register code, for
-    // native code, which passes the count in a register at every call:
-    // `vargs; save 0; cellular rest 0; setreg 1; lexical 0; pop 0;
-    // tailinvoke 1`.
+    // tailcall 1` (`f` of either convention): however many arguments it is
+    // called with (the frame's count), their list, given to `f` in its
+    // place. Its register code, for native code, which passes the count in
+    // a register at every call: `vargs; save 0; cellular rest 0; setreg 1;
+    // lexical 0; pop 0; tailinvoke 1 fx` (`f` of either convention).
     "%fx26-vlambda", 1, Some(1), simple!(|rt, a| {
         use fixpt_heap::layout::cellular::{routine, CLOSURE_FREE0, CLOSURE_WORD, WORD_TWIN};
         use fixpt_heap::layout::regcode::op;
@@ -1874,6 +1874,7 @@ prims! {
         let regs = [
             o("vargs"), o("save"), zero, o("cellular"), f(const { routine("rest") }), zero, o("setreg"), one,
             o("lexical"), zero, o("pop"), zero, o("tailinvoke"), one,
+            Value::fixnum(fixpt_heap::layout::regcode::conv("fx") as i64),
         ];
         match rt.heap.make_register_word(name, word, &regs) {
             Ok(rw) => rt.heap.set_bloblet_slot(word, WORD_TWIN, rw),

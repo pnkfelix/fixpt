@@ -748,9 +748,10 @@ impl Checker {
             self.facts.apply_shares.insert(e);
         }
         // Called in its callee's convention, which the compilers read
-        // (`NodeFacts::call_conv`).
+        // (`NodeFacts::call_conv`), noted at the operator, which every
+        // place a compiler makes the call has.
         if let Ty::Subr { conv, .. } = callee {
-            self.facts.call_convs.insert(e, conv);
+            self.facts.call_convs.insert(fun, conv);
         }
         if params.len() != args.len() {
             return Err(FxError::at(span, format!("expected {} argument(s), got {}", params.len(), args.len())));

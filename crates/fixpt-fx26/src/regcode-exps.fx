@@ -56,10 +56,21 @@
   (lambda (g cell call)
     (r-emit g (r-guard-to (wcell-global cell) (wcell-int (c-writes-expected cell)) call))))
 ;; `n` arguments in registers, the procedure in RESULT: called, or in tail
-;; position, the frame left first.
-(define r-invoke (subr emits (rgen int bool) unit)
-  (lambda (g n tail)
-    (if tail (begin (r-leave g) (r-opn g rop-tailinvoke n)) (r-opn g rop-invoke n))))
+;; position, the frame left first; `conv`, its convention by its type
+;; (`r-conv-of`).
+(define r-invoke (subr emits (rgen int bool int) unit)
+  (lambda (g n tail conv)
+    (if tail
+        (begin (r-leave g) (r-opnn g rop-tailinvoke n conv))
+        (r-opnn g rop-invoke n conv))))
+;; An `invoke`'s convention (`rconv-…`): the call's whose operator is `f`, as
+;; its callee's type says (`c-call-conv`). A call this compiler makes (a
+;; lifted procedure's, `apply`'s, a specialized copy's) is `rconv-fx`, which
+;; looks.
+(define r-conv-of (subr (maxeff (read @globals) (read @k)) (exp) int)
+  (lambda (f)
+    (tagcase (c-call-conv f)
+      (cv-cellular () rconv-cellular) (cv-native () rconv-native) (else y rconv-fx))))
 ;; RESULT kept in a new register, or a new frame slot: which.
 (define r-keep-in-reg (subr emits (rgen) int)
   (lambda (g) (let ((r (r-reg g))) (begin (r-opn g rop-setreg r) r))))

@@ -243,7 +243,12 @@ fn row(name: &str, text: &str, machines: &[&str], runs: usize, notes: &mut Vec<S
 }
 
 pub(crate) fn checked(text: &str) -> Result<(Checker, Vec<Top>), String> {
-    let mut c = Checker::new();
+    checked_in(text, Checker::new())
+}
+
+/// The same, by checker `c`: one of the native convention, for code run
+/// natively, whose calls are compiled as their types say (`TODO.md` §97).
+fn checked_in(text: &str, mut c: Checker) -> Result<(Checker, Vec<Top>), String> {
     let forms = c.read_in(FileId(0), text).map_err(|e| e.message)?;
     let done = c.declare_ahead(&forms).map_err(|e| e.message)?;
     let mut tops = Vec::new();
@@ -355,8 +360,10 @@ fn native_call(text: &str) -> Option<(String, String, Vec<Value>)> {
 /// it is declined.
 fn in_native_convention(text: &str, runs: usize) -> Option<(String, f64, (u64, u64))> {
     let (defs, _, args) = native_call(text)?;
-    let (c, tops) = checked(&defs).ok()?;
+    let (c, tops) = checked_in(&defs, Checker::with_convention(fixpt_fx26::ast::Conv::Native)).ok()?;
     let mut s = Fx26Session::with_backend(Backend::Bytecode).ok()?;
+    // What its definitions make, run as cellular code, is native (`nclosure`).
+    s.scheme.runtime_unrooted().adapt = Some(fixpt_native::direct::adapt);
     let mut m = fixpt_native::direct::DirectMachine::new().ok()?;
     s.scheme.scope(|sc| {
         let w = sc.make(|h| {
@@ -650,8 +657,10 @@ fn assemble_registers(heap: &fixpt_heap::Heap, word: Value) -> Result<(), String
 /// if it is declined.
 fn native_compile_time(text: &str, runs: usize) -> Option<f64> {
     let (defs, _, _) = native_call(text)?;
-    let (c, tops) = checked(&defs).ok()?;
+    let (c, tops) = checked_in(&defs, Checker::with_convention(fixpt_fx26::ast::Conv::Native)).ok()?;
     let mut s = Fx26Session::with_backend(Backend::Bytecode).ok()?;
+    // What its definitions make, run as cellular code, is native (`nclosure`).
+    s.scheme.runtime_unrooted().adapt = Some(fixpt_native::direct::adapt);
     let mut m = fixpt_native::direct::DirectMachine::new().ok()?;
     s.scheme.scope(|sc| {
         let w = sc.make(|h| {

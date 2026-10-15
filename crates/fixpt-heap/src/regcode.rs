@@ -76,7 +76,8 @@ fn check(heap: &Heap, twin: Value, cells: &[Value]) -> Result<(), String> {
                 let r = o(2);
                 heap.is_cellular_word(o(0)) && many(o(1)) && r.is_fixnum() && [routine("closure"), routine("nclosure")].contains(&(r.as_fixnum() as u64))
             }
-            "invoke" | "tailinvoke" | "invokeself" => many(o(0)),
+            "invoke" | "tailinvoke" => many(o(0)) && count(o(1), crate::layout::regcode::CONVS.len() as i64 - 1),
+            "invokeself" => many(o(0)),
             "cellular" => count(o(0), ROUTINES.len() as i64 - 1) && many(o(1)),
             "global" | "setglbl" => o(0).is_bloblet(),
             "branch" | "branchf" | "brancht" => {

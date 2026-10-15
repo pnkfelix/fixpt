@@ -150,8 +150,9 @@
     (cond ((null? ns) (cv-fx))
           ((k-at-is? (extract (car ns) 1) a b k) (extract (car ns) 2))
           (else (c-conv-in (cdr ns) a b k)))))
-;; The convention call `x` is compiled in: its callee's, `cellular` or
-;; `native`; or `fx`, which looks at the callee's kind, where its type says
+;; The convention the call whose operator is `x` is compiled in (noted at
+;; the operator, which every place a compiler makes the call has): its
+;; callee's, `cellular` or `native`; or `fx`, which looks at the callee's kind, where its type says
 ;; `fx` or a convention binder, or nothing was noted (Rust's
 ;; `NodeFacts::call_conv`).
 (define c-call-conv-at (subr (maxeff (read @globals) (read @k)) (int int int) k-conv)
@@ -319,6 +320,14 @@
 ;; thunks' too, for one rule.
 (define c-closure-routine (subr (maxeff (read @globals) (read @k)) () int)
   (lambda () (if (get c-native-program) routine-nclosure routine-closure)))
+;; The routine that takes a continuation, a whole one if `whole`, and
+;; calls a procedure with it: in a program whose convention is native, it
+;; gives it in that convention (`ncallcc`, `ncallcomp`).
+(define c-capture-routine (subr (maxeff (read @globals) (read @k)) (bool) int)
+  (lambda (whole)
+    (if (get c-native-program)
+        (if whole routine-ncallcc routine-ncallcomp)
+        (if whole routine-callcc routine-callcomp))))
 ;; The primitive a closure in a place is made by (an `rlambda`'s): in a
 ;; program whose convention is native, its adapter in the same place.
 (define c-region-closure-prim (subr (maxeff (read @globals) (read @k)) () string)

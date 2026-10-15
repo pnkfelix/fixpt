@@ -154,6 +154,9 @@
 (define routine-int-eq int 50)  ; ( a b -- a=b ), ints, fixnums or bignums
 ;; ( v1 … vn -- c ), word w closed over the v's, in the native convention; w and n the next cells
 (define routine-nclosure int 51)
+;; ( proc tag -- r ), callcomp, the continuation in the native convention
+(define routine-ncallcomp int 52)
+(define routine-ncallcc int 53)  ; ( proc -- r ), callcc, the continuation in the native convention
 
 ;;; Register code's instructions by number, and how many registers it has.
 ;; 1: entered with n arguments in REG1…REGn; first, and only first (arities are static: nothing is
@@ -181,9 +184,10 @@
 ;; 3: RESULT := a closure of cellular word w over REG1…REGn, as stack routine r makes it (`closure`,
 ;; or `nclosure` in a program whose convention is native); natively, a native closure; may collect
 (define rop-lambda int 20)
-;; 1: call the procedure in RESULT with REG1…REGn; RESULT := its value; may collect
+;; 2: call the procedure in RESULT with REG1…REGn, of convention c by its type (`CONVS`); RESULT :=
+;; its value; may collect
 (define rop-invoke int 21)
-;; 1: the same in tail position, the frame popped: its value is this one's
+;; 2: the same in tail position, the frame popped: its value is this one's
 (define rop-tailinvoke int 22)
 (define rop-return int 23)  ; 0: return RESULT, the frame popped
 (define rop-branch int 24)  ; 1: skip the operand's count of cells, counted after it
@@ -210,3 +214,10 @@
 (define rop-prim2imm int 33)  ; 2: RESULT := such a primitive p applied to RESULT and x
 (define rop-prim3imm int 34)  ; 3: RESULT := such a primitive p applied to RESULT, x and REGk
 (define register-regs int 8)
+
+;;; The conventions of an `invoke`'s callee, by its type (its second operand).
+(define rconv-fx int 0)  ; any procedure: its kind looked at
+(define rconv-cellular int 1)  ; a cellular closure: called as one, with no look
+;; a native closure: natively, its code called, with no look; on a cellular machine, as fx, an
+;; adapter (`nclosure`) called through what it adapts
+(define rconv-native int 2)

@@ -316,11 +316,15 @@ its code in one.
    convention would save that look (a compare and a branch in native
    code's unknown calls), and belongs with the step that stops calls in a
    specific convention from looking, if measurement says it pays.
-   Calls by the convention their type says (2026-10-15, `TODO.md` §97):
-   both checkers note each call's convention, and a call typed `cellular`
-   is `tcall`, which no machine checks (the Rust one, the oracle, traps on
-   anything but a cellular closure). For a call typed `native` to go
-   straight to its code, a value typed `native` must be a native closure;
+   Calls by the convention their type says (2026-10-15, `DONE.md` §97):
+   both checkers note each call's convention, at its operator; a call
+   typed `cellular` is `tcall` in stack code, which no machine checks (the
+   Rust one, the oracle, traps on anything but a cellular closure), and
+   register code's `invoke` names the convention (`regcode::CONVS`):
+   natively, a `native` callee's code is called with no look, a
+   `cellular` one called out with none, an `fx` one looked at. For a call
+   typed `native` to go straight to its code, a value typed `native` must
+   be a native closure;
    so in a program whose convention is native, every closure cellular
    code makes (where the native compiler declines) is made in it
    (`nclosure`): the cellular closure, given to the runtime's `adapt`. The
@@ -334,7 +338,12 @@ its code in one.
    procedure given them (`callcc`, `withmark`, …) take a native one as
    cellular code (`as_cellular`: what an adapter adapts, else a cellular
    adapter over it). A place's closure (`rlambda`) has its adapter in the
-   same place, so that the two end together (`%region-nclosure`).
+   same place, so that the two end together (`%region-nclosure`); a
+   continuation cellular code takes is given so too (`ncallcc`,
+   `ncallcomp`). On a cellular machine a call typed `native` still looks
+   at its callee, as `fx`: one an adapter is called through what it
+   adapts, where calling it natively would cross to native code and back,
+   on Rust's stack, for each call of a recursion declined code makes.
 5. **Continuations, prompts and marks** on native frames (done,
    2026-09-28; `control_on_native_frames` in `tests/direct.rs`). A prompt,
    and a mark, is a 48-byte frame of its own around the thunk's call: the

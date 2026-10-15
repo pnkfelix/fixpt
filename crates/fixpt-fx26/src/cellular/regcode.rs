@@ -24,7 +24,7 @@ use super::{find, Compiler, Env, Loc, This};
 fn two() -> Value {
     Value::fixnum(2)
 }
-use crate::ast::{BlobletOp, Exp, ExpId};
+use crate::ast::{BlobletOp, Conv, Exp, ExpId};
 use crate::check::Datum;
 use fixpt_heap::layout::regcode::{op, REGS};
 use fixpt_heap::layout::cellular::routine;
@@ -447,8 +447,9 @@ impl Compiler<'_> {
             ("cons", 2) => Some(Std::Cellular("cons")),
             ("set", 2) => Some(Std::Set),
             ("abort-current-continuation" | "escape", 2) => Some(Std::Cellular("abort")),
-            ("call-with-composable-continuation", 2) => Some(Std::Cellular("callcomp")),
-            ("cwcc", 1) => Some(Std::Cellular("callcc")),
+            // In the native convention, the continuation given in it.
+            ("call-with-composable-continuation", 2) => Some(Std::Cellular(if self.native_program() { "ncallcomp" } else { "callcomp" })),
+            ("cwcc", 1) => Some(Std::Cellular(if self.native_program() { "ncallcc" } else { "callcc" })),
             ("with-mark", 3) => Some(Std::Cellular("withmark")),
             ("first-mark", 2) => Some(Std::Cellular("firstmark")),
             ("current-marks", 1) => Some(Std::Cellular("currentmarks")),
@@ -1496,7 +1497,7 @@ impl Compiler<'_> {
                         g.op("setreg", &[Gen::n(1)]);
                     }
                     g.op("stack", &[Gen::n(s)]);
-                    self.r_invoke(g, 1, tail);
+                    self.r_invoke(g, 1, tail, Self::conv_op(None));
                     g.next_reg = regs;
                     g.next_slot = slots;
                     return Some(());
@@ -1547,9 +1548,9 @@ impl Compiler<'_> {
             g.op("const", &[closure]);
             if tail {
                 g.leave();
-                g.op("tailinvoke", &[Gen::n(all.len())]);
+                g.op("tailinvoke", &[Gen::n(all.len()), Self::conv_op(None)]);
             } else {
-                g.op("invoke", &[Gen::n(all.len())]);
+                g.op("invoke", &[Gen::n(all.len()), Self::conv_op(None)]);
             }
             return Some(());
         }
@@ -1564,9 +1565,9 @@ impl Compiler<'_> {
         self.r_args(g, &es, env, te, Some(f))?;
         if tail {
             g.leave();
-            g.op("tailinvoke", &[Gen::n(args.len())]);
+            g.op("tailinvoke", &[Gen::n(args.len()), self.conv_op_of(f)]);
         } else {
-            g.op("invoke", &[Gen::n(args.len())]);
+            g.op("invoke", &[Gen::n(args.len()), self.conv_op_of(f)]);
         }
         Some(())
     }
@@ -1724,9 +1725,9 @@ impl Compiler<'_> {
         self.r_args(g, &slow, env, te, Some(f))?;
         if tail {
             g.leave();
-            g.op("tailinvoke", &[Gen::n(args.len())]);
+            g.op("tailinvoke", &[Gen::n(args.len()), self.conv_op_of(f)]);
         } else {
-            g.op("invoke", &[Gen::n(args.len())]);
+            g.op("invoke", &[Gen::n(args.len()), self.conv_op_of(f)]);
         }
         g.items.push(RItem::Label(end));
         g.next_reg = regs;
@@ -1802,9 +1803,9 @@ impl Compiler<'_> {
         self.r_args(g, &slow, env, te, Some(f))?;
         if tail {
             g.leave();
-            g.op("tailinvoke", &[Gen::n(args.len())]);
+            g.op("tailinvoke", &[Gen::n(args.len()), self.conv_op_of(f)]);
         } else {
-            g.op("invoke", &[Gen::n(args.len())]);
+            g.op("invoke", &[Gen::n(args.len()), self.conv_op_of(f)]);
         }
         g.items.push(RItem::Label(end));
         g.next_reg = regs;
@@ -1870,20 +1871,20 @@ impl Compiler<'_> {
         let (call, end) = (g.label(), g.label());
         if self.r_assume(cell) {
             g.op("stack", &[Gen::n(s)]);
-            self.r_invoke(g, args.len(), tail);
+            self.r_invoke(g, args.len(), tail, Self::conv_op(None));
             g.next_reg = regs;
             g.next_slot = slots;
             return Some(());
         }
         self.r_guard(g, cell, call);
         g.op("stack", &[Gen::n(s)]);
-        self.r_invoke(g, args.len(), tail);
+        self.r_invoke(g, args.len(), tail, Self::conv_op(None));
         if !tail {
             g.items.push(RItem::Branch(false, end));
         }
         g.items.push(RItem::Label(call));
         g.op("global", &[cell]);
-        self.r_invoke(g, args.len(), tail);
+        self.r_invoke(g, args.len(), tail, Self::conv_op(None));
         g.items.push(RItem::Label(end));
         g.next_reg = regs;
         g.next_slot = slots;
@@ -1908,6 +1909,21 @@ impl Compiler<'_> {
         }
     }
 
+    /// An `invoke`'s convention (`regcode::CONVS`): the call's, as its
+    /// callee's type says it (`NodeFacts::call_conv`, by its operator); or,
+    /// for a call this compiler makes (a lifted procedure's, `apply`'s, a
+    /// specialized copy's), `fx`, which looks.
+    fn conv_op(conv: Option<Conv>) -> Value {
+        Gen::n(fixpt_heap::layout::regcode::conv(match conv {
+            Some(Conv::Cellular) => "cellular",
+            Some(Conv::Native) => "native",
+            _ => "fx",
+        }))
+    }
+    fn conv_op_of(&self, f: ExpId) -> Value {
+        Self::conv_op(Some(self.c.facts.call_conv(f)))
+    }
+
     /// The guard of an inlined or specialized call: to `call` unless the
     /// global `cell` has not been written since.
     fn r_guard(&self, g: &mut Gen, cell: Value, call: usize) {
@@ -1915,13 +1931,14 @@ impl Compiler<'_> {
     }
 
     /// `n` arguments in registers, the procedure in RESULT: called, or in
-    /// tail position, the frame left first.
-    fn r_invoke(&self, g: &mut Gen, n: usize, tail: bool) {
+    /// tail position, the frame left first; `conv`, its convention by its
+    /// type (`conv_op`).
+    fn r_invoke(&self, g: &mut Gen, n: usize, tail: bool, conv: Value) {
         if tail {
             g.leave();
-            g.op("tailinvoke", &[Gen::n(n)]);
+            g.op("tailinvoke", &[Gen::n(n), conv]);
         } else {
-            g.op("invoke", &[Gen::n(n)]);
+            g.op("invoke", &[Gen::n(n), conv]);
         }
     }
 
@@ -2077,7 +2094,7 @@ impl Compiler<'_> {
                 })
                 .collect::<O<_>>()?;
             self.r_args(g, &es, env, te, Some(f))?;
-            self.r_invoke(g, args.len(), true);
+            self.r_invoke(g, args.len(), true, self.conv_op_of(f));
         } else {
             let es: Vec<Arg> = args.iter().map(|a| Arg::E(*a)).collect();
             self.r_args(g, &es, env, te, None)?;
@@ -2092,7 +2109,7 @@ impl Compiler<'_> {
             g.items.push(RItem::Branch(false, end));
             g.items.push(RItem::Label(call));
             g.op("global", &[cell]);
-            g.op("invoke", &[Gen::n(args.len())]);
+            g.op("invoke", &[Gen::n(args.len()), self.conv_op_of(f)]);
             g.items.push(RItem::Label(end));
         }
         g.next_reg = regs;
@@ -2853,7 +2870,7 @@ impl Compiler<'_> {
             Some(None) => {}
             None => self.r_exp(g, f, env, te, false)?,
         }
-        g.op("tailinvoke", &[Gen::n(args.len())]);
+        g.op("tailinvoke", &[Gen::n(args.len()), self.conv_op_of(f)]);
         g.next_reg = regs;
         Some(())
     }

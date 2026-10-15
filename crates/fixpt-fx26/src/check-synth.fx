@@ -93,14 +93,14 @@
         (set k-extracts (cons (product (1 (k-at-of x)) (2 (n-frozen-define))) (get k-extracts)))
         #u)))
 ;; Note, for the compilers, call `x` of `f`, of type `ft` (on parameters
-;; `params`): its callee's convention, which the call is compiled in
-;; (`n-call`; the Rust checker's `call_convs`); and whether it is `apply` of a
+;; `params`): its callee's convention, which the call is compiled in, noted
+;; at `f` (`n-call`; the Rust checker's `call_convs`); and whether it is `apply` of a
 ;; list at `acyclic` (below).
 (define k-note-call (subr (maxeff checks spin) (kx kx int k-ids) unit)
   (lambda (x f ft params)
     (begin (tagcase (k-get (k-resolve ft))
              (ty-subr (e ps r cv)
-               (set k-extracts (cons (product (1 (k-at-of x)) (2 (n-call cv))) (get k-extracts))))
+               (set k-extracts (cons (product (1 (k-at-of f)) (2 (n-call cv))) (get k-extracts))))
              (else y #u))
            (k-note-apply-shares x f params))))
 ;; Note, for the compilers, that the call `x` of `f` (on parameters

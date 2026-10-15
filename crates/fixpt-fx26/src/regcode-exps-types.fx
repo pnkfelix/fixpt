@@ -124,8 +124,9 @@
                        unit))
             (val r-invoke
                  (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
-                       (rgen int bool)
+                       (rgen int bool int)
                        unit))
+            (val r-conv-of (subr (maxeff (read @globals) (read @k)) (exp) int))
             (val r-keep-in-reg
                  (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k)) (rgen) int))
             (val r-keep

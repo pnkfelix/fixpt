@@ -139,6 +139,10 @@ impl Heap {
     /// `continuation_closure` makes.
     pub fn continuation_of(&self, v: Value) -> Option<Value> {
         use crate::layout::cellular::{routine, CLOSURE_FREE0, CLOSURE_WORD};
+        // An adapter over one (`ncallcc`): the one it adapts.
+        if let Some(inner) = self.adapted(v) {
+            return self.continuation_of(inner);
+        }
         let k = crate::layout::kind("cellular-continuation");
         if v.is_bloblet() && self.bloblet_kind(v) == k {
             return Some(v);

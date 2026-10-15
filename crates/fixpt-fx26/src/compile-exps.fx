@@ -432,7 +432,7 @@
                  (begin (c-exp f e (+ depth n) c #f)
                         ;; In the callee's convention, as its type says
                         ;; (`c-call-conv`).
-                        (c-call-in c n tail (c-call-conv x)))))
+                        (c-call-in c n tail (c-call-conv f)))))
               ;; A quoted datum (TODO §51): made once, here, where it is all
               ;; literals; else built as written.
               ((and (string=? standard "%quote") (= (c-count-exps args) 1)

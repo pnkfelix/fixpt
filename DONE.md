@@ -2572,6 +2572,39 @@ Still open in `TODO.md` §97; done so far:
   20) + j` (`RESHAPE_PATH`, `reshape_path`, `k-reshape-path`, gone), taken
   apart with its constants written out in the FX-26 compiler, register
   code and evaluator.
+- **Calls compiled by the convention their type says** (the user's
+  question, 2026-10-14; done 2026-10-15). Both checkers note each call's
+  convention at its operator (`NodeFacts::call_conv`, `n-call`). Stack
+  code calls a `cellular` callee by `tcall`, which no machine checks (the
+  Rust one, the oracle, traps on anything else); register code's `invoke`
+  names the convention (`regcode::CONVS`, `rconv-…`): `cellular`, called
+  with no look on the register machine; `native`, natively its code called
+  with no look (`direct.rs`), and called out to the foreign stub with none
+  where `cellular`; `fx`, looked at, as are the calls a compiler makes
+  itself (a lifted procedure's, `apply`'s, a specialized copy's). For
+  that to be sound a value is what its type says: in the cellular
+  convention every closure is cellular; in the native one, every closure
+  cellular code makes (where the native compiler declines) is made in it,
+  an adapter over it (`nclosure`; `%region-nclosure`, in the closure's
+  own place; `ncallcc` and `ncallcomp`, a continuation), the adapters
+  sharing one code bloblet so that one is known by it (`Heap::adapted`):
+  the native compiler compiles what one adapts, cellular code calling one
+  calls what it adapts with no crossing, a `letrec`'s patch writes through
+  it (`%fx26-adapted`), and the routines given a procedure take a native
+  one as cellular code (`as_cellular`). Cellular code's calls typed
+  `native` still look: the callee may be such an adapter, which it calls
+  through what it adapts rather than by crossing to native code and back.
+  Sessions, tests and the bench that run code natively type it so (the
+  oracle's trap found four that did not). Native `closures` 21 → 20 ms.
+  Tests: `what_cellular_code_makes_is_native` (`made-native.fx`),
+  `a_place_holds_its_closures_adapter`.
+  Fixed on the way (2026-10-14), found by made procedures: on the arm64
+  cellular machines a typed tail call of a native closure stopped ("no
+  routine is numbered 40": the Rust machine made the call, then returned
+  from the word, which `run_routine` took for an error), and register code's
+  `invoke` crashed on one (it read the callee's word's twin); now the return
+  is made, and `invoke` calls a native closure out to the Rust machine
+  (`programs/made-code/typed-calls.fx`).
 - **`(import m name … (type name …) (effect name …))`** (2026-10-15, the
   user's; `docs/fx26.md`, Modules): what a module gives, by name, defined
   where it is, each as `(define x (with m x))`, `(define-type t (select m

@@ -1241,13 +1241,17 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
                 let (cellular, native) = (a.label(), a.label());
                 // The callee, its word, and the word's twin; or, its code in
                 // the code area (`code_lo`), a native closure (`TODO.md`
-                // §97), which the Rust machine calls.
+                // §97), which the Rust machine calls. A callee whose type
+                // says `cellular` is a cellular closure: not looked at.
+                let typed = k(o(1)) == const { fixpt_heap::layout::regcode::conv("cellular") };
                 a.e(mov(W, RESULT));
                 a.e(mov(X11, W));
                 a.e(ldur(X12, X11, field_off(CLOSURE_WORD)));
-                a.e(ldr(X15, ST, off(offset_of!(State, code_lo))));
-                a.e(cmp(X12, X15));
-                a.b_cond(Cond::Hs, native);
+                if !typed {
+                    a.e(ldr(X15, ST, off(offset_of!(State, code_lo))));
+                    a.e(cmp(X12, X15));
+                    a.b_cond(Cond::Hs, native);
+                }
                 a.e(mov(X11, X12));
                 a.e(ldur(X10, X11, field_off(WORD_TWIN)));
                 a.value(X15, Value::FALSE);
@@ -1283,15 +1287,17 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
                 // and the call's routine, which the Rust machine runs
                 // (`control::run` declines it), returning the stack's way.
                 a.bind(native);
-                if a.link.is_none() {
-                    a.e(str(LR, ST, off(offset_of!(State, leaf_link))));
+                if !typed {
+                    if a.link.is_none() {
+                        a.e(str(LR, ST, off(offset_of!(State, leaf_link))));
+                    }
+                    if tail {
+                        a.unmark_return();
+                    }
+                    a.push_regs(count);
+                    a.e(str_pre(W, DSP, -8));
+                    a.r_callout(if tail { const { routine("tailcall") } } else { const { routine("call") } }, f(0));
                 }
-                if tail {
-                    a.unmark_return();
-                }
-                a.push_regs(count);
-                a.e(str_pre(W, DSP, -8));
-                a.r_callout(if tail { const { routine("tailcall") } } else { const { routine("call") } }, f(0));
                 // Stack code: the arguments as its frame. It returns the
                 // stack's way, so an entry this procedure was called with
                 // by `blr` is unmarked first, in a tail call.
@@ -1318,8 +1324,12 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
                 a.enter_cur(X13);
                 if !tail {
                     // Returned to the stack's way (the resume table), the
-                    // value on the data stack; or by `ret`, in `RESULT`.
+                    // value on the data stack; or by `ret`, in `RESULT`. The
+                    // native closure's call-out (`call`) reads one operand,
+                    // the count, and returns to the cell after it, the
+                    // convention's: the same point.
                     resume[next] = a.here() as i64;
+                    resume[next - 1] = a.here() as i64;
                     a.e(ldr_post(RESULT, DSP, 8));
                     a.bind(back);
                     a.pool(fields);

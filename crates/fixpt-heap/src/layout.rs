@@ -410,6 +410,10 @@ pub mod cellular {
         // `closure` makes, given to the runtime's `adapt`, a native closure
         // that calls it (`%fx26-convert`).
         ("nclosure", "( v1 … vn -- c ), word w closed over the v's, in the native convention; w and n the next cells"),
+        // Likewise `callcomp` and `callcc` there: the continuation given in
+        // the native convention, an adapter over the closure they give.
+        ("ncallcomp", "( proc tag -- r ), callcomp, the continuation in the native convention"),
+        ("ncallcc", "( proc -- r ), callcc, the continuation in the native convention"),
     ];
     pub const PRIMITIVES: usize = ROUTINES.len();
 
@@ -532,8 +536,8 @@ pub mod regcode {
         ("setfield", 2, "field k of the bloblet in RESULT := REGj"),
         ("prim", 2, "RESULT := runtime primitive p applied to REG1…REGn; may collect"),
         ("lambda", 3, "RESULT := a closure of cellular word w over REG1…REGn, as stack routine r makes it (`closure`, or `nclosure` in a program whose convention is native); natively, a native closure; may collect"),
-        ("invoke", 1, "call the procedure in RESULT with REG1…REGn; RESULT := its value; may collect"),
-        ("tailinvoke", 1, "the same in tail position, the frame popped: its value is this one's"),
+        ("invoke", 2, "call the procedure in RESULT with REG1…REGn, of convention c by its type (`CONVS`); RESULT := its value; may collect"),
+        ("tailinvoke", 2, "the same in tail position, the frame popped: its value is this one's"),
         ("return", 0, "return RESULT, the frame popped"),
         ("branch", 1, "skip the operand's count of cells, counted after it"),
         ("branchf", 1, "the same if RESULT is #f"),
@@ -547,6 +551,25 @@ pub mod regcode {
         ("prim2imm", 2, "RESULT := such a primitive p applied to RESULT and x"),
         ("prim3imm", 3, "RESULT := such a primitive p applied to RESULT, x and REGk"),
     ];
+
+    /// The conventions an `invoke`'s callee has, by its type (its second
+    /// operand, `TODO.md` §97): how it is called.
+    pub const CONVS: &[(&str, &str)] = &[
+        ("fx", "any procedure: its kind looked at"),
+        ("cellular", "a cellular closure: called as one, with no look"),
+        ("native", "a native closure: natively, its code called, with no look; on a cellular machine, as fx, an adapter (`nclosure`) called through what it adapts"),
+    ];
+
+    pub const fn conv(name: &str) -> usize {
+        let mut i = 0;
+        while i < CONVS.len() {
+            if super::const_str_eq(CONVS[i].0, name) {
+                return i;
+            }
+            i += 1;
+        }
+        panic!("no such convention")
+    }
 
     pub const fn op(name: &str) -> usize {
         let mut i = 0;
@@ -657,6 +680,10 @@ fn fx26_definitions() -> String {
         commented(&mut out, &format!("(define rop-{} int {i})", fx_name(name)), &format!("{n}: {meaning}"));
     }
     out.push_str(&format!("(define register-regs int {})\n", regcode::REGS));
+    out.push_str("\n;;; The conventions of an `invoke`'s callee, by its type (its second operand).\n");
+    for (i, (name, meaning)) in regcode::CONVS.iter().enumerate() {
+        commented(&mut out, &format!("(define rconv-{name} int {i})"), meaning);
+    }
     out
 }
 

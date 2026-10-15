@@ -837,7 +837,7 @@ impl Machine {
     /// in a run native code called, every frame of the run, and the frames
     /// of the machines out from it up to the prompt (`crossing`), given to
     /// `proc_`; else none to take.
-    fn capture_across(&mut self, cx: &mut Ctx, r: &mut Regs, tag: Value, proc_: Value, name: &'static str) -> Result<(), Trap> {
+    fn capture_across(&mut self, cx: &mut Ctx, r: &mut Regs, tag: Value, proc_: Value, native: bool, name: &'static str) -> Result<(), Trap> {
         let missing = || Trap::Prim("call-with-composable-continuation: no prompt for this tag".into());
         let Ctx::Rt(rt) = cx else { return Err(missing()) };
         if !self.nested || !crossing::crossed() {
@@ -851,6 +851,7 @@ impl Machine {
         // Nothing allocated here collects, so `proc_` stays where it is.
         let k = crossing::capture(rt, tag, own).ok_or_else(missing)?;
         let k = if rt.heap.bloblet_kind(k) == const { kind("cellular-continuation") } { rt.heap.continuation_closure(k) } else { k };
+        let k = if native { as_native(cx, k)? } else { k };
         self.ds.push(k);
         self.ds.push(proc_);
         self.call(cx, r, 1, false, name)
@@ -1169,16 +1170,8 @@ impl Machine {
                 for (i, v) in free.into_iter().enumerate() {
                     heap.set_bloblet_slot(c, CLOSURE_FREE0 + i, v);
                 }
-                // In the native convention, the closure its type says: an
-                // adapter (a native closure; its callers pass the count).
-                let c = match (n, &mut *cx) {
-                    (CLOSURE, _) => c,
-                    (_, Ctx::Rt(rt)) if rt.adapt.is_some() => {
-                        let adapt = rt.adapt.expect("an adapter maker");
-                        adapt(rt, c, 0, true).map_err(Trap::Prim)?
-                    }
-                    _ => return Err(Trap::Prim("no closure in the native convention can be made here".into())),
-                };
+                // In the native convention, the closure its type says.
+                let c = if n == NCLOSURE { as_native(cx, c)? } else { c };
                 self.ds.push(c);
             }
             // A typed call's callee's type says `cellular`: the native
@@ -1306,12 +1299,15 @@ impl Machine {
                 let tag = self.pop(name)?;
                 self.abort(cx, r, tag, v, name)?;
             }
-            CALLCOMP | CALLCC => {
-                let (proc_, at) = if n == CALLCOMP {
+            // `ncallcomp` and `ncallcc`, in a program whose convention is
+            // native: the continuation given in it (`as_native`).
+            CALLCOMP | CALLCC | NCALLCOMP | NCALLCC => {
+                let native = matches!(n, NCALLCOMP | NCALLCC);
+                let (proc_, at) = if matches!(n, CALLCOMP | NCALLCOMP) {
                     let tag = self.pop(name)?;
                     let proc_ = self.pop(name)?;
                     let Some(at) = Self::find_marked(&self.rs, self.rs_floor, PROMPT_MARK, tag) else {
-                        return self.capture_across(cx, r, tag, proc_, name).map(|()| Flow::Next);
+                        return self.capture_across(cx, r, tag, proc_, native, name).map(|()| Flow::Next);
                     };
                     (proc_, Some(at))
                 } else {
@@ -1328,6 +1324,7 @@ impl Machine {
                     let own = self.capture(&mut rt.heap, r, from, 0, false);
                     let k = crossing::capture_whole(rt, own);
                     let k = if rt.heap.bloblet_kind(k) == const { kind("native-closure") } { k } else { rt.heap.continuation_closure(k) };
+                    let k = if native { as_native(cx, k)? } else { k };
                     self.ds.push(k);
                     self.ds.push(proc_);
                     self.call(cx, r, 1, false, name)?;
@@ -1343,6 +1340,7 @@ impl Machine {
                 };
                 // Given as a closure, so that everything callable is one.
                 let k = heap.continuation_closure(k);
+                let k = if native { as_native(cx, k)? } else { k };
                 self.ds.push(k);
                 self.ds.push(proc_);
                 self.call(cx, r, 1, false, name)?;
@@ -1668,6 +1666,19 @@ pub fn cellular_adapter(heap: &mut Heap, f: Value, arity: usize) -> Value {
     c
 }
 
+/// Cellular closure `c` in the native convention, as its type says there
+/// (`nclosure`, `ncallcc`): an adapter (`Runtime::adapt`), a native
+/// closure that calls it; its callers pass the count. Anything else as it
+/// is: a continuation another machine took may be native already.
+fn as_native(cx: &mut Ctx, c: Value) -> Result<Value, Trap> {
+    let Ctx::Rt(rt) = cx else { return Err(Trap::Prim("no closure in the native convention can be made here".into())) };
+    if !(c.is_bloblet() && rt.heap.bloblet_kind(c) == const { kind("cellular-closure") }) {
+        return Ok(c);
+    }
+    let Some(adapt) = rt.adapt else { return Err(Trap::Prim("no closure in the native convention can be made here".into())) };
+    adapt(rt, c, 0, true).map_err(Trap::Prim)
+}
+
 /// `v`, called by a routine with `n` values (a thunk, a procedure given a
 /// continuation, a handler), as cellular code: a native closure, which
 /// cellular code makes in a program whose convention is native
@@ -1719,6 +1730,8 @@ const GLOBAL: i64 = routine("global") as i64;
 const GLOBAL_SET: i64 = routine("global!") as i64;
 const CLOSURE: i64 = routine("closure") as i64;
 const NCLOSURE: i64 = routine("nclosure") as i64;
+const NCALLCOMP: i64 = routine("ncallcomp") as i64;
+const NCALLCC: i64 = routine("ncallcc") as i64;
 const CALL: i64 = routine("call") as i64;
 const TAILCALL: i64 = routine("tailcall") as i64;
 const PRIM: i64 = routine("prim") as i64;

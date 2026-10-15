@@ -23,7 +23,10 @@ struct Ran {
     /// Major and minor collections the run made.
     collections: (u64, u64),
     /// Words in the heap's code area in use just after the run, and after
-    /// a collection then, when nothing refers to the code any more.
+    /// a collection then, when nothing refers to the code any more: past
+    /// what was there before it was compiled (the adapters' code, which
+    /// lives as the heap does, `Heap::adapter_code`, made as the
+    /// definitions ran).
     code_words: (usize, usize),
 }
 
@@ -54,11 +57,14 @@ fn direct_only(defs: &str, name: &str, args: &[i64], fuel: u64) -> Ran {
 fn direct_in(defs: &str, name: &str, args: &[i64], fuel: u64, gc_every: Option<u64>, stack: Option<(u64, u64)>) -> Ran {
     let rust = String::new();
     let text = format!("{defs}\n{name}");
-    let mut c = Checker::new();
+    // Run natively, so typed so: its calls compiled as their types say.
+    let mut c = Checker::with_convention(fixpt_fx26::ast::Conv::Native);
     let forms = c.read_in(FileId(0), &text).expect("reads");
     let done = c.declare_ahead(&forms).expect("declares");
     let tops: Vec<_> = forms.iter().zip(done).filter(|(_, d)| !d).flat_map(|(f, _)| c.top_all(f).expect("checks")).collect();
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    // What the definitions make, run as cellular code, is native (`nclosure`).
+    s.scheme.runtime_unrooted().adapt = Some(fixpt_native::direct::adapt);
     let mut m = DirectMachine::new().expect("maps");
     if let Some((cache, max)) = stack {
         m.set_stack_words(cache, max);
@@ -84,6 +90,7 @@ fn direct_in(defs: &str, name: &str, args: &[i64], fuel: u64, gc_every: Option<u
         if std::env::var("DIRECT_SHOW").is_ok() {
             eprintln!("{}", fixpt_runtime::disasm::disassemble(&rt.heap, closure));
         }
+        let kept = rt.heap.code_words().0;
         let procs = match m.compile(&mut rt.heap, closure) {
             Ok(p) => p,
             Err(e) => return Ran { direct: Err(format!("declined: {e}")), rust, code: String::new(), collections: (0, 0), code_words: (0, 0) },
@@ -101,9 +108,9 @@ fn direct_in(defs: &str, name: &str, args: &[i64], fuel: u64, gc_every: Option<u
         let before = (rt.heap.gc_count, rt.heap.minor_count);
         let direct = m.call(rt, p, &vals, fuel).map(|v| fixpt_runtime::write_value(&rt.heap, v)).map_err(|DirectTrap { what, .. }| what);
         let collections = (rt.heap.gc_count - before.0, rt.heap.minor_count - before.1);
-        let after_run = rt.heap.code_words().0;
+        let after_run = rt.heap.code_words().0 - kept;
         rt.heap.collect(&mut []);
-        Ran { direct, rust, code, collections, code_words: (after_run, rt.heap.code_words().0) }
+        Ran { direct, rust, code, collections, code_words: (after_run, rt.heap.code_words().0 - kept) }
     })
 }
 
@@ -629,11 +636,14 @@ fn a_pair_written() {
 #[test]
 fn code_compiled_and_dropped_is_reclaimed() {
     let text = format!("{}\ntak", bench("tak"));
-    let mut c = Checker::new();
+    // Run natively, so typed so: its calls compiled as their types say.
+    let mut c = Checker::with_convention(fixpt_fx26::ast::Conv::Native);
     let forms = c.read_in(FileId(0), &text).expect("reads");
     let done = c.declare_ahead(&forms).expect("declares");
     let tops: Vec<_> = forms.iter().zip(done).filter(|(_, d)| !d).flat_map(|(f, _)| c.top_all(f).expect("checks")).collect();
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    // What the definitions make, run as cellular code, is native (`nclosure`).
+    s.scheme.runtime_unrooted().adapt = Some(fixpt_native::direct::adapt);
     let mut m = DirectMachine::new().expect("maps");
     s.scheme.scope(|sc| {
         let w = sc.make(|h| {

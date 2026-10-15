@@ -502,7 +502,8 @@ pub struct NodeFacts {
     /// Every other `apply` copies its list.
     pub apply_shares: HashSet<ExpId>,
     /// Each call's callee's convention, as its type says it
-    /// (`NodeFacts::call_conv`): what the call is compiled in.
+    /// (`NodeFacts::call_conv`): what the call is compiled in; by the
+    /// call's operator.
     pub call_convs: HashMap<ExpId, Conv>,
     /// Each top-level definition's value whose type is a list in a frozen
     /// region (`acyclic`, `const`): data nothing writes, which the
@@ -610,10 +611,10 @@ impl NodeFacts {
         self.converted.contains_key(&e) || self.reshaped.contains_key(&e)
     }
 
-    /// The convention call `e` is compiled in: its callee's, `cellular` or
-    /// `native`, called as that; or `fx`, where its type says `fx` or a
-    /// convention binder, or nothing was noted, which looks at the
-    /// callee's kind (`docs/research/native-conventions.md`).
+    /// The convention the call whose operator is `e` is compiled in: its
+    /// callee's, `cellular` or `native`, called as that; or `fx`, where its
+    /// type says `fx` or a convention binder, or nothing was noted, which
+    /// looks at the callee's kind (`docs/research/native-conventions.md`).
     pub fn call_conv(&self, e: ExpId) -> Conv {
         match self.call_convs.get(&e) {
             Some(Conv::Cellular) => Conv::Cellular,

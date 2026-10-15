@@ -2201,7 +2201,7 @@ impl Compiling<'_> {
                 // frame of its own around the thunk's call, which the frames'
                 // walk finds; the rest are call-outs, which walk the frames,
                 // and take and put back runs of them.
-                "cellular" if matches!(ROUTINES.get(k(o(0))).map(|r| r.0), Some("prompt" | "withmark" | "withmark-tail" | "abort" | "callcc" | "callcomp" | "firstmark" | "currentmarks" | "marksof")) => {
+                "cellular" if matches!(ROUTINES.get(k(o(0))).map(|r| r.0), Some("prompt" | "withmark" | "withmark-tail" | "abort" | "callcc" | "callcomp" | "ncallcc" | "ncallcomp" | "firstmark" | "currentmarks" | "marksof")) => {
                     if frame.is_none() {
                         return decline("a call-out outside a frame".into());
                     }
@@ -2321,8 +2321,9 @@ impl Compiling<'_> {
                             a.to(resume_at, Fix::B);
                         }
                         // The continuation resumes where `f`'s call returns:
-                        // it is taken, and `f` called with it.
-                        r @ ("callcc" | "callcomp") => {
+                        // it is taken, and `f` called with it; native here,
+                        // so `ncallcc`'s too.
+                        r @ ("callcc" | "callcomp" | "ncallcc" | "ncallcomp") => {
                             let after = a.label();
                             a.to(after, Fix::Adr(X9));
                             a.e(str(X9, ST, st_off(offset_of!(DState, ret_pc))));
@@ -2330,7 +2331,7 @@ impl Compiling<'_> {
                             let f = self.field(p, Field::Code(q));
                             ldr_field(&mut a, X9, f);
                             a.e(str(X9, ST, st_off(offset_of!(DState, aux))));
-                            callout(&mut a, &mut stubs, self.callouts, Callout::Capture { whole: r == "callcc" });
+                            callout(&mut a, &mut stubs, self.callouts, Callout::Capture { whole: r.ends_with("callcc") });
                             a.e(mov(1, RESULT));
                             a.e(ldr(CLO, ST, args));
                             call_clo(&mut a, &mut foreign, 1, after);
@@ -2899,11 +2900,23 @@ impl Compiling<'_> {
                     let callee = callees[si - 1];
                     let raws: Vec<Reg> = (1..=8).filter(|&r| reps::raw_param(callee, r)).map(|r| r as Reg).collect();
                     let (stub, after) = (a.label(), a.label());
+                    // The callee's convention, by its type (`regcode::CONVS`):
+                    // native, its code called with no look; cellular, called
+                    // out (`common_foreign`) with none; fx, looked at, its
+                    // code in the code area or not (`code_lo`).
+                    use fixpt_heap::layout::regcode::conv;
+                    let cv = k(o(1));
                     let not_native = |a: &mut Asm| {
+                        if cv == conv("cellular") {
+                            a.to(stub, Fix::B);
+                            return;
+                        }
                         a.e(ldur(X16, CLO, field_off(CLOSURE_WORD)));
-                        a.e(ldr(X17, ST, st_off(offset_of!(DState, code_lo))));
-                        a.e(cmp(X16, X17));
-                        a.to(stub, Fix::If(Cond::Lo));
+                        if cv == conv("fx") {
+                            a.e(ldr(X17, ST, st_off(offset_of!(DState, code_lo))));
+                            a.e(cmp(X16, X17));
+                            a.to(stub, Fix::If(Cond::Lo));
+                        }
                     };
                     // A global bound as compiled: while its cell has not
                     // been written since, as bound; else, out of the way,
@@ -2951,7 +2964,9 @@ impl Compiling<'_> {
                                 ldr_field(&mut a, X9, f);
                                 a.e(ldur(CLO, X9, field_off(2)));
                                 not_native(&mut a);
-                                foreign.push((stub, after, k(o(0)), tail));
+                                if cv != conv("native") {
+                                    foreign.push((stub, after, k(o(0)), tail));
+                                }
                             }
                             Some(g) => {
                                 let f = self.field(p, g);
@@ -2961,7 +2976,9 @@ impl Compiling<'_> {
                             None => {
                                 a.e(mov(CLO, RESULT));
                                 not_native(&mut a);
-                                foreign.push((stub, after, k(o(0)), tail));
+                                if cv != conv("native") {
+                                    foreign.push((stub, after, k(o(0)), tail));
+                                }
                             }
                         }
                     }

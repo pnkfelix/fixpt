@@ -333,7 +333,7 @@
                            (begin (r-opnn g rop-prim (runtime-primitive "%fx26-list-copy") 1)
                                   (r-opn g rop-setreg 1))
                            #u)
-                       (r-opn g rop-stack s) (r-invoke g 1 tail)))
+                       (r-opn g rop-stack s) (r-invoke g 1 tail rconv-fx)))
               (r-restore g regs slots))))))
   ;; A call: the arguments into REG1…REGn, the procedure in RESULT.
   (r-call (subr rcompiles (rgen exp exps int int int renv cenv bool) unit)
@@ -360,7 +360,7 @@
                  (begin
                    (r-args g all env te (the maybe-exp nil))
                    (r-op1 g rop-const (r-lifted-closure (r-lifted-at env f)))
-                   (r-invoke g (r-count-args all) tail))))
+                   (r-invoke g (r-count-args all) tail rconv-fx))))
               ;; A call of the procedure itself, not in tail position: by its
               ;; own entry, with no closure fetched.
               ((and (not tail) (r-self-known? g f n te))
@@ -368,7 +368,7 @@
               (else
                (begin
                  (r-args g (r-exp-args args) env te (r-just-exp f))
-                 (r-invoke g n tail)))))))
+                 (r-invoke g n tail (r-conv-of f))))))))
   ;; The expressions `args` as a call's arguments, into REG1…REGn
   ;; (`r-args`), with no procedure.
   (r-exp-args-into (subr rcompiles (rgen exps renv cenv) unit)
@@ -407,7 +407,7 @@
                   (if tail #u (r-emit g (r-branch #f end)))
                   (r-emit g (r-label call))
                   (r-args g (extract bound 3) env te (r-just-exp f))
-                  (r-invoke g n tail)
+                  (r-invoke g n tail (r-conv-of f))
                   (r-emit g (r-label end))))
             (r-restore g regs slots))))))
   ;; Each parameter bound to its argument, in order: where the body finds
@@ -468,15 +468,15 @@
           (r-exp-args-into g args env te)
           (let* ((call (r-new-label g)) (end (r-new-label g)))
             (if (r-assume cell)
-                (begin (r-opn g rop-stack s) (r-invoke g n tail))
+                (begin (r-opn g rop-stack s) (r-invoke g n tail rconv-fx))
                 (begin
                   (r-guard g cell call)
                   (r-opn g rop-stack s)
-                  (r-invoke g n tail)
+                  (r-invoke g n tail rconv-fx)
                   (if tail #u (r-emit g (r-branch #f end)))
                   (r-emit g (r-label call))
                   (r-op1 g rop-global (wcell-global cell))
-                  (r-invoke g n tail)
+                  (r-invoke g n tail rconv-fx)
                   (r-emit g (r-label end)))))
           (r-restore g regs slots)))))
   ;; In a procedure specialized at a lambda, a call of the parameter the
@@ -540,7 +540,7 @@
                             (begin
                               (r-emit g (r-label call))
                               (r-args g (r-slot-args-of made) env te (r-just-exp f))
-                              (r-invoke g n #t)))))
+                              (r-invoke g n #t (r-conv-of f))))))
                     (begin
                       (r-exp-args-into g args env te)
                       (if (r-assume cell)
@@ -551,7 +551,7 @@
                             (r-emit g (r-branch #f end))
                             (r-emit g (r-label call))
                             (r-op1 g rop-global (wcell-global cell))
-                            (r-opn g rop-invoke n)
+                            (r-opnn g rop-invoke n (r-conv-of f))
                             (r-emit g (r-label end))))))
                 (r-restore g regs slots)))))))
   ;; Each argument kept, in a register in a leaf, else a frame slot, in
@@ -1098,7 +1098,7 @@
           (r-par-moves g moves)
           (r-late-into g late env te)
           (cond ((> at 0) (r-opn g rop-reg at)) ((= at 0) (r-exp g f env te #f)) (else #u))
-          (r-opn g rop-tailinvoke (c-count-exps args))
+          (r-opnn g rop-tailinvoke (c-count-exps args) (r-conv-of f))
           (set nreg regs)))))
   ;; A leaf's tail call's arguments from REGk: one in a register moved from
   ;; there; a simple one left for after the moves; any other made now, in
