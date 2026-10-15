@@ -33,7 +33,7 @@ impl Checker {
     /// - `(race e1 … en)`: `race2` of the first branch and the `race` of the
     ///   rest, as thunks.
     pub(crate) fn parse_process_form(&mut self, span: fixpt_read::Span, head: &str, items: &[Syntax]) -> R<ExpId> {
-        let lib = self.parse_load(span, span, crate::check::PROCESSES, false)?;
+        let lib = self.parse_load(span, crate::check::PROCESSES, false)?;
         let Exp::Var(lib) = *self.arena.exp_at(lib) else { unreachable!("a load is its hidden global") };
         let sym = |c: &mut Self, s: &str| Syntax::symbol(span, c.interner.intern(s));
         let op = |c: &mut Self, name: &str| {
@@ -116,8 +116,7 @@ impl Checker {
         lam.extend(body.iter().cloned());
         lam.push(sym(self, "#u"));
         let binder = Syntax::list(span, vec![Syntax::list(span, vec![r.clone(), place])]);
-        // The `lambda` at a place of its own (`par_expansion`).
-        let lam = Syntax::list(fixpt_read::Span::new(span.file, header.span.start, span.end), lam);
+        let lam = Syntax::list(span, lam);
         Ok(Syntax::list(span, vec![plambda, binder, lam]))
     }
 
@@ -125,14 +124,10 @@ impl Checker {
     /// (extract %par 1)) (%par (extract %par 2))) … (let ((xn-1 (extract
     /// %par 1)) (xn (extract %par 2))) body …)))`, `tree` the branches as
     /// nested `par2`s, `(par2 (lambda () e1) (lambda () rest))`, so that
-    /// each branch is checked against all the others. The compilers find
-    /// what the checker says of an expression by where it is (an
-    /// `extract`'s field, a `lambda`'s lifting), so each node made here has
-    /// a place of its own: a branch's thunk its binding's, an `extract` none
-    /// wide at its binding's start or end, a level's call and its rest from
-    /// its binding to the form's end.
+    /// each branch is checked against all the others. What is made for a
+    /// binding (its thunk, its `extract`s) is at the binding; the rest at
+    /// the form.
     fn par_expansion(&mut self, span: fixpt_read::Span, lib: fixpt_read::Sym, parts: &[(Syntax, Syntax, fixpt_read::Span)], body: &[Syntax]) -> Syntax {
-        let at = |a: u32, b: u32| fixpt_read::Span::new(span.file, a, b);
         let sym = |c: &mut Self, sp: fixpt_read::Span, s: &str| Syntax::symbol(sp, c.interner.intern(s));
         let thunk = |c: &mut Self, sp: fixpt_read::Span, e: Syntax| {
             let lambda = sym(c, sp, "lambda");
@@ -146,9 +141,9 @@ impl Checker {
             let b = bindings[i];
             let op = Syntax::list(span, vec![sym(self, span, "with"), Syntax::symbol(span, lib), sym(self, span, "par2")]);
             let first = thunk(self, b, parts[i].1.clone());
-            tree = Syntax::list(at(b.start, span.end), vec![op, first, tree]);
+            tree = Syntax::list(span, vec![op, first, tree]);
             if i > 0 {
-                tree = thunk(self, at(bindings[i - 1].end, span.end), tree);
+                tree = thunk(self, span, tree);
             }
         }
         let p = Syntax::symbol(span, self.interner.intern("%par"));
@@ -159,13 +154,13 @@ impl Checker {
         // The innermost `let` first: the last two branches' values.
         let b = bindings[n - 2];
         let (x, y) = (parts[n - 2].0.clone(), parts[n - 1].0.clone());
-        let (ex, ey) = (extract(self, at(b.start, b.start), 1), extract(self, at(b.end, b.end), 2));
+        let (ex, ey) = (extract(self, b, 1), extract(self, b, 2));
         let mut inner = vec![sym(self, span, "let"), Syntax::list(span, vec![Syntax::list(span, vec![x, ex]), Syntax::list(span, vec![y, ey])])];
         inner.extend(body.iter().cloned());
         let mut out = Syntax::list(span, inner);
         for i in (0..n - 2).rev() {
             let b = bindings[i];
-            let (ex, ep) = (extract(self, at(b.start, b.start), 1), extract(self, at(b.end, b.end), 2));
+            let (ex, ep) = (extract(self, b, 1), extract(self, b, 2));
             let binds = Syntax::list(span, vec![Syntax::list(span, vec![parts[i].0.clone(), ex]), Syntax::list(span, vec![p.clone(), ep])]);
             out = Syntax::list(span, vec![sym(self, span, "let"), binds, out]);
         }
@@ -174,28 +169,23 @@ impl Checker {
     }
 
     /// `(race e1 … en)`: `((with lib race2) (lambda () e1) (lambda ()
-    /// ((with lib race2) (lambda () e2) … (lambda () en))))`. Each node
-    /// made has a place of its own (`par_expansion`): a branch's thunk none
-    /// wide at its expression's start, a level's call from its branch to
-    /// the form's end (the first's the form's), and the rest's thunk from
-    /// the branch before to the form's end.
+    /// ((with lib race2) (lambda () e2) … (lambda () en))))`: a branch's
+    /// thunk at its expression, the rest at the form.
     fn race_expansion(&mut self, span: fixpt_read::Span, lib: fixpt_read::Sym, es: &[Syntax]) -> Syntax {
-        let at = |a: u32, b: u32| fixpt_read::Span::new(span.file, a, b);
         let sym = |c: &mut Self, sp: fixpt_read::Span, s: &str| Syntax::symbol(sp, c.interner.intern(s));
         let thunk = |c: &mut Self, sp: fixpt_read::Span, e: Syntax| {
             let lambda = sym(c, sp, "lambda");
             Syntax::list(sp, vec![lambda, Syntax::new(sp, fixpt_read::Datum::Nil), e])
         };
         let n = es.len();
-        let mut tree = thunk(self, at(es[n - 1].span.start, es[n - 1].span.start), es[n - 1].clone());
+        let mut tree = thunk(self, es[n - 1].span, es[n - 1].clone());
         for i in (0..n - 1).rev() {
             let e = &es[i];
             let op = Syntax::list(span, vec![sym(self, span, "with"), Syntax::symbol(span, lib), sym(self, span, "race2")]);
-            let first = thunk(self, at(e.span.start, e.span.start), e.clone());
-            let call_at = if i == 0 { span } else { at(e.span.start, span.end) };
-            tree = Syntax::list(call_at, vec![op, first, tree]);
+            let first = thunk(self, e.span, e.clone());
+            tree = Syntax::list(span, vec![op, first, tree]);
             if i > 0 {
-                tree = thunk(self, at(es[i - 1].span.end, span.end), tree);
+                tree = thunk(self, span, tree);
             }
         }
         tree
@@ -208,13 +198,9 @@ impl Checker {
     /// (if (= %sel 0) (let ((x0 (icell-get %sel-0))) body0 …) … (let ((xn
     /// …)) bodyn …))))`, each `E` `(cell-event %sel-i)`, `(mailbox-event
     /// %sel-i)`, `(clock-event %sel-i)` or `(stdin-event %sel-i)`, through
-    /// `lib`. Each node made has a place of its own (`par_expansion`): an arm's
-    /// event from its start to its `W`'s, its `or-event` from its start to
-    /// the form's end, its test none wide at its end, its `if` from its
-    /// `W`'s end to the form's end, its `let` the arm's, its `W` the `W`'s;
-    /// `sync` from the form's start to the first arm's.
+    /// `lib`. An arm's event, test and `let` at the arm, its `W` at the
+    /// `W`; the rest at the form.
     fn select_expansion(&mut self, span: fixpt_read::Span, lib: fixpt_read::Sym, arms: &[Syntax]) -> R<Syntax> {
-        let at = |a: u32, b: u32| fixpt_read::Span::new(span.file, a, b);
         let sym = |c: &mut Self, sp: fixpt_read::Span, s: &str| Syntax::symbol(sp, c.interner.intern(s));
         let shape = "a `pselect` arm is `((icell-get i-cell) name body …)`, `((receive mailbox) name body …)`, \
                      `((sleep-until time) name body …)` or `((read-byte) name body …)`";
@@ -246,19 +232,14 @@ impl Checker {
         let names: Vec<Syntax> = (0..n).map(|i| sym(self, span, &format!("%sel-{i}"))).collect();
         // The events, joined from the last.
         let mut events = None;
-        for (i, (arm, w, ..)) in parts.iter().enumerate().rev() {
-            let sp = at(arm.start, w.span.start);
-            let e = Syntax::list(sp, vec![lib_op(self, sp, parts[i].4), names[i].clone()]);
+        for (i, (arm, ..)) in parts.iter().enumerate().rev() {
+            let e = Syntax::list(*arm, vec![lib_op(self, *arm, parts[i].4), names[i].clone()]);
             events = Some(match events {
                 None => e,
-                Some(rest) => {
-                    let sp = at(arm.start, span.end);
-                    Syntax::list(sp, vec![lib_op(self, sp, "or-event"), e, rest])
-                }
+                Some(rest) => Syntax::list(span, vec![lib_op(self, span, "or-event"), e, rest]),
             });
         }
-        let sync_at = at(span.start, parts[0].0.start);
-        let sync = Syntax::list(sync_at, vec![lib_op(self, sync_at, "sync"), events.expect("an arm")]);
+        let sync = Syntax::list(span, vec![lib_op(self, span, "sync"), events.expect("an arm")]);
         let sel = sym(self, span, "%sel");
         // The arms, the last first.
         let mut out = None;
@@ -275,11 +256,9 @@ impl Checker {
             out = Some(match out {
                 None => this,
                 Some(rest) => {
-                    let t = at(arm.end, arm.end);
-                    let k = Syntax::new(t, fixpt_read::Datum::Number(fixpt_read::Num::Int(i as i64)));
-                    let test = Syntax::list(t, vec![sym(self, t, "="), sel.clone(), k]);
-                    let sp = at(w.span.end, span.end);
-                    Syntax::list(sp, vec![sym(self, sp, "if"), test, this, rest])
+                    let k = Syntax::new(*arm, fixpt_read::Datum::Number(fixpt_read::Num::Int(i as i64)));
+                    let test = Syntax::list(*arm, vec![sym(self, *arm, "="), sel.clone(), k]);
+                    Syntax::list(span, vec![sym(self, span, "if"), test, this, rest])
                 }
             });
         }

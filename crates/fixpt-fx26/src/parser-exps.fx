@@ -448,7 +448,7 @@
         ((begin) (parse-body (cdr items) a b))
         ;; Processes and `par` (`parser-forms.fx`).
         ((spawn spawn-monitored send receive self par race pselect icell-get icell-put!)
-         (parse-exp (process-form pfail-at items (parse-loaded processes #f (car items) a b) a b)))
+         (parse-exp (process-form pfail-at items (parse-loaded processes #f a b) a b)))
         ((cond) (parse-cond (cdr items) a b))
         ((case) (parse-case (cdr items) a b))
         ((typecase) (parse-typecase items a b))
@@ -509,22 +509,22 @@
         ((module) (e-module (parse-module-items (cdr items)) a b 0))
         ;; `(extend e0 e1)` (`TODO.md` §69): a module of the two, made of
         ;; their values by the checker (`k-extended`), as `parse.rs`; `e1`
-        ;; sees `e0`'s bindings, `(with %extend-0 e1)`, as FX-91's, at no
-        ;; expression's place (`a`..`a`): facts are kept by place.
+        ;; sees `e0`'s bindings, `(with %extend-0 e1)`, as FX-91's, made at
+        ;; the form.
         ((extend)
          (begin (arity items 3 "`(extend module module)`" a b)
                 (e-module (the mod-items
                             (list (mod-item-of 2 '%extend-0 nil (list (parse-nth items 1)))
                                   (mod-item-of 2 '%extend-1 nil
                                                (list (e-with '%extend-0 (parse-nth items 2)
-                                                             a a 0)))))
+                                                             a b 0)))))
                           a b 0)))
         ((load-module load-input)
          (let* ((input? (eq? head 'load-input))
                 (usage (string-append "`(" (if input? "load-input" "load-module") " \"file\")`")))
            (begin (arity items 2 usage a b)
                   (if (syn-string? (nth items 1))
-                      (parse-loaded (syn-string (nth items 1)) input? (car items) a b)
+                      (parse-loaded (syn-string (nth items 1)) input? a b)
                       (pfail (string-append usage ": the file's name, as a string")
                              (nth items 1))))))
         ((with)
@@ -922,11 +922,10 @@
   ;; the hidden global every load of its path is (`TODO.md` §68), the
   ;; first defining it, as the file loaded (`parse-load-file`), before the
   ;; form that loads it (`shared-pending`); a `load-input`'s, its one item.
-  ;; Each expression made has a place of its own, as the compilers' facts
-  ;; are found by place: the use the form's, the file's module the whole
-  ;; file, and a `load-input`'s `input` its keyword, `head`.
-  (parse-loaded (subr (maxeff parses spin) (string bool syn int int) exp)
-    (lambda (path input? head a b)
+  ;; What it makes is the form's, at `a`..`b`; the file's module, the whole
+  ;; file's.
+  (parse-loaded (subr (maxeff parses spin) (string bool int int) exp)
+    (lambda (path input? a b)
       (let ((f (loaded-next-at a)))
         (if (null? f)
             (e-module (loaded-error (string-append "cannot read `" path "`: it was not read"))
@@ -951,7 +950,7 @@
                                      (cons (t-define name (the syns-a nil) x a b)
                                            (get shared-pending)))))))
                 (if input?
-                    (e-with name (e-var 'input (syn-start head) (syn-end head) 0) a b 0)
+                    (e-with name (e-var 'input a b 0) a b 0)
                     (e-var name a b 0)))))))))
   ;; File `f`, loaded at `a`..`b` as `path`: the module, its items after its
   ;; mark (`loaded-made` of it, for a file of parameters; for a

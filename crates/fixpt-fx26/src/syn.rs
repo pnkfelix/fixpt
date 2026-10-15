@@ -474,19 +474,9 @@ pub fn rust_facts(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
     // And each expression's effect summary, as -1 - s (`checked-extracts`):
     // the greatest of its effects'.
     let mut summaries: HashMap<At, i64> = HashMap::new();
-    for (e, eff) in &c.facts.effects {
-        use crate::ast::{Atom, Region};
-        let s = if eff.is_pure() {
-            0
-        } else if eff.0.iter().all(|a| matches!(a, Atom::Read(_))) {
-            1
-        } else if eff.0.iter().any(|a| matches!(a, Atom::Comefrom(_) | Atom::Var(_) | Atom::App(_) | Atom::Write(Region::Global(_) | Region::Globals))) {
-            3
-        } else {
-            2
-        };
-        let k = summaries.entry(place(*e)).or_insert(s);
-        *k = (*k).max(s);
+    for (e, s) in c.effect_summaries_by_exp() {
+        let k = summaries.entry(place(e)).or_insert(s as i64);
+        *k = (*k).max(s as i64);
     }
     let facts: Vec<(At, i64)> = facts
         .into_iter()

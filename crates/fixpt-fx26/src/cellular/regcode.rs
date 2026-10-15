@@ -283,13 +283,12 @@ impl Compiler<'_> {
         leaf
     }
 
-    /// The effect summary of `x`'s span (`Checker::effect_summaries`); 3, the
-    /// most, if none was noted.
+    /// The effect summary of `x` (`Checker::effect_summaries_by_exp`); 3,
+    /// the most, if none was noted.
     fn summary_of(&mut self, x: ExpId) -> u8 {
-        let span = self.c.arena.span_of(x);
         let c = self.c;
-        let all = self.summaries.get_or_insert_with(|| c.effect_summaries());
-        all.get(&(span.file.0, span.start, span.end)).copied().unwrap_or(3)
+        let all = self.summaries.get_or_insert_with(|| c.effect_summaries_by_exp());
+        all.get(&x).copied().unwrap_or(3)
     }
 
     /// A lambda's body in register code, not yet assembled. In a fast
@@ -393,8 +392,7 @@ impl Compiler<'_> {
         if !self.inlining.is_empty() || self.spec.is_some() {
             return None;
         }
-        let span = self.c.arena.span_of(x);
-        self.lifted.get(&(span.file.0, span.start, span.end)).cloned().flatten()
+        self.lifted.get(&x).cloned().flatten()
     }
 
     fn r_where(&self, env: &[(Sym, RLoc)], n: Sym) -> O<RLoc> {
@@ -1859,8 +1857,7 @@ impl Compiler<'_> {
         // The copy for the procedure, the lambda, what it captures and the
         // globals it sees, made with the form's words as the plan says
         // (`make_copy`).
-        let span = self.c.arena.span_of(body);
-        let key = (self.specials[k].word.raw(), span.file.0, span.start, span.end, self.captured(&lam_params, body, te), self.genv_limit);
+        let key = (self.specials[k].word.raw(), body, self.captured(&lam_params, body, te), self.genv_limit);
         let Some(copy) = self.spec_copies.get(&key).copied() else {
             return self.decline("a copy the plan did not make");
         };

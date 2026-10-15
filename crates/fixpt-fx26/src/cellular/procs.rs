@@ -25,31 +25,29 @@ pub(crate) struct Planned {
     pub fv: Vec<Sym>,
 }
 
-/// A form's procedures, by where their bodies are and their parameters (the
-/// lambdas a form expands to, a `define-datatype`'s constructors, share its
-/// place; their parameters tell them apart); and each `letrec`'s lifting, by
-/// where it is (as `lifted` keeps it): the names each member takes first, or
-/// none if it is not lifted. As the FX-26 compiler's `c-plan-procs`, whose
-/// trees, frozen data, have no identity to key by.
+/// A form's procedures, by their bodies and their parameters; and each
+/// `letrec`'s lifting (as `lifted` keeps it): the names each member takes
+/// first, or none if it is not lifted. By expression, as the FX-26
+/// compiler's `c-plan-procs` keys them by identity (`k-at`).
 #[derive(Default)]
 pub(crate) struct Plan {
-    pub procs: HashMap<((u32, u32, u32), Vec<Sym>), Planned>,
-    pub lifts: HashMap<(u32, u32, u32), Option<Vec<Vec<Sym>>>>,
-    /// Each call of a global, by where it is (step 3): what register code
+    pub procs: HashMap<(ExpId, Vec<Sym>), Planned>,
+    pub lifts: HashMap<ExpId, Option<Vec<Vec<Sym>>>>,
+    /// Each call of a global (step 3): what register code
     /// may do with it.
-    pub calls: HashMap<(u32, u32, u32), Called>,
+    pub calls: HashMap<ExpId, Called>,
     /// The bodies its calls inline, each planned as register code compiles
     /// it there (3b), by `inlines`'s index: once for every call of it here,
     /// what it decides depending on the callee and the path to it, not on
     /// the call.
     pub inlined: HashMap<usize, Plan>,
     /// The specialized copies its calls make (3b), by `specials`'s index
-    /// and where the lambda is: each planned as register code compiles it,
+    /// and the lambda's body: each planned as register code compiles it,
     /// the lambda's body in it (`lam`).
-    pub copies: HashMap<(usize, (u32, u32, u32)), Plan>,
+    pub copies: HashMap<(usize, ExpId), Plan>,
     /// The same keys, in the order the walk met them: the order the copies
     /// are made in (step 4).
-    pub copy_order: Vec<(usize, (u32, u32, u32))>,
+    pub copy_order: Vec<(usize, ExpId)>,
     /// In a copy's plan: the lambda's body, as it is inlined where the
     /// parameter is called (`r_spec_lambda`).
     pub lam: Option<Box<Plan>>,
@@ -74,7 +72,7 @@ pub(crate) struct CopyAt {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Step {
     Inline(usize),
-    Copy(usize, (u32, u32, u32)),
+    Copy(usize, ExpId),
     Lam,
 }
 
@@ -92,11 +90,6 @@ pub(crate) struct Called {
 const SLOT: Loc = Loc::Slot(0);
 
 impl Compiler<'_> {
-    fn span_key(&self, x: ExpId) -> (u32, u32, u32) {
-        let s = self.c.arena.span_of(x);
-        (s.file.0, s.start, s.end)
-    }
-
     /// The plan of top-level form `x`, compiled next, in no environment.
     /// The lifted procedures it would make are counted as the compile will
     /// make them, and forgotten after.
@@ -165,7 +158,7 @@ impl Compiler<'_> {
             }
             Exp::Let { bindings, body } => self.plan_let(&bindings, body, e, tail, plan),
             Exp::Letrec { bindings, body } => {
-                let key = self.span_key(x);
+                let key = x;
                 match self.lift_plan(&bindings, body, e, tail) {
                     Some((lams, added)) => {
                         // Each member's closure counted, as `lift` makes them.
@@ -273,7 +266,7 @@ impl Compiler<'_> {
                 _ => None,
             }
         });
-        plan.calls.insert(self.span_key(x), Called { inline, special });
+        plan.calls.insert(x, Called { inline, special });
         if let Some(k) = inline
             && !plan.inlined.contains_key(&k)
         {
@@ -283,7 +276,7 @@ impl Compiler<'_> {
         if let Some((k, lam)) = special
             && let Some(Loc::Global(cell)) = self.where_is(e, name)
         {
-            let key = (k, self.span_key(lam));
+            let key = (k, lam);
             if !plan.copies.contains_key(&key) {
                 let sub = self.plan_copy(k, lam, cell, e);
                 plan.copies.insert(key, sub);
@@ -354,7 +347,7 @@ impl Compiler<'_> {
             return None;
         }
         let plan = self.plan_here()?;
-        Some(plan.calls.get(&self.span_key(x)).copied().unwrap_or(Called { inline: None, special: None }))
+        Some(plan.calls.get(&x).copied().unwrap_or(Called { inline: None, special: None }))
     }
 
     /// In shadow (`FIXPT_PLAN_CHECK`), a call register code decides, where
@@ -364,11 +357,11 @@ impl Compiler<'_> {
             return;
         }
         let Some(plan) = self.plan_here() else {
-            let msg = format!("call at {:?}: no plan along {:?}", self.span_key(x), self.plan_path);
+            let msg = format!("call at {:?}: no plan along {:?}", x, self.plan_path);
             self.plan_mismatches.push(msg);
             return;
         };
-        let key = self.span_key(x);
+        let key = x;
         let planned = plan.calls.get(&key).copied().unwrap_or(Called { inline: None, special: None });
         self.plan_checks += 1;
         if planned != got {
@@ -435,7 +428,7 @@ impl Compiler<'_> {
     /// in the environment its word has, in tail position.
     fn plan_lambda(&mut self, params: &[Sym], body: ExpId, e: &Env, own: Option<Sym>, plan: &mut Plan) {
         let fv = self.captured(params, body, e);
-        plan.procs.insert((self.span_key(body), params.to_vec()), Planned { params: params.to_vec(), own, fv: fv.clone() });
+        plan.procs.insert((body, params.to_vec()), Planned { params: params.to_vec(), own, fv: fv.clone() });
         let own = own.filter(|f| !params.contains(f));
         // Lifted procedures are known everywhere inside: they are constants.
         let mut inner: Env = e.iter().filter(|(_, l)| matches!(l, Loc::Lifted(_))).copied().collect();
@@ -453,7 +446,7 @@ impl Compiler<'_> {
         if self.twin_depth > 0 || self.spec.is_some() {
             return None;
         }
-        self.plan.as_ref()?.procs.get(&(self.span_key(body), params.to_vec())).map(|p| p.fv.clone())
+        self.plan.as_ref()?.procs.get(&(body, params.to_vec())).map(|p| p.fv.clone())
     }
 
     /// Whether the `letrec` `x` is lifted, as the plan says (the names each
@@ -463,7 +456,7 @@ impl Compiler<'_> {
         if self.twin_depth > 0 || self.spec.is_some() {
             return None;
         }
-        self.plan.as_ref()?.lifts.get(&self.span_key(x)).cloned()
+        self.plan.as_ref()?.lifts.get(&x).cloned()
     }
 
     /// A lifted `letrec`'s members' parameters and bodies (each is a plain
@@ -483,7 +476,7 @@ impl Compiler<'_> {
         }
         let Some(plan) = &self.plan else { return };
         self.plan_checks += 1;
-        let key = (self.span_key(body), params.to_vec());
+        let key = (body, params.to_vec());
         let got = Planned { params: params.to_vec(), own, fv: fv.to_vec() };
         match plan.procs.get(&key) {
             Some(p) if *p == got => {}
@@ -501,7 +494,7 @@ impl Compiler<'_> {
         }
         let Some(plan) = &self.plan else { return };
         self.plan_checks += 1;
-        let key = self.span_key(x);
+        let key = x;
         let planned = plan.lifts.get(&key);
         if planned.map(|p| p.as_ref()) != Some(added) {
             let msg = format!("letrec at {key:?}: planned {planned:?}, compiled {added:?}");

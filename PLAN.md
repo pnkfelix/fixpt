@@ -157,8 +157,8 @@ are in the last section, "Log: the glance's details", and in
 - **Loads and facts by place** (the user's question, 2026-10-15,
   `docs/research/loads-and-places.md`): the FX-26 front end's expressions
   have identities, `(start end k)`, and facts are keyed by them, not by
-  place (done, `DONE.md` §97). Next: the places invented for made
-  expressions dropped; a load its own identity, as Sheldon's `input`.
+  place, and the places invented for made expressions gone (done,
+  `DONE.md` §97). Next: a load its own identity, as Sheldon's `input`.
 - **Cellular code calling native code** (2026-10-13, `TODO.md` §93):
   fixed, a crash on the REPL's machine where the native convention
   declined a form; its cost to assembling words mostly recovered (peval's

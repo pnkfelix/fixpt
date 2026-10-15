@@ -2525,3 +2525,12 @@ Still open in `TODO.md` §97; done so far:
   by its `ExpId`, not its span, as the FX-26 one by its identity: a
   module's `up-` and `down-` conversions share a span and now have a word
   each.
+- **The places invented for made expressions, gone** (2026-10-15): in both
+  parsers a made expression is at its origin's span, the form or the
+  binding, branch or arm it was made for (`extend`'s `with`, a
+  parameterized file's `lambda`, a `load-input`'s `input`, a quote's
+  `%quote`, `nil` and vector, `spawn`'s, `par`'s, `race`'s and
+  `pselect`'s pieces), where each had a place of its own, of no width or
+  cut from another's, so as not to collide. The Rust compiler's plans,
+  liftings, specialized copies and effect summaries are keyed by
+  expression, not span (`Checker::effect_summaries_by_exp`).

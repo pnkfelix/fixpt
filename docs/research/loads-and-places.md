@@ -180,11 +180,18 @@ where it was 1.38 G; now 1.37 G.
 
 Not yet done, and what C makes possible:
 
-- The places invented so that made expressions would not collide (a
-  zero-width `lambda`, the load's keyword for `input`, a REPL form's
-  positions past every earlier text) can go: a made expression can have
-  its origin's span. Loaded files' bases stay: they are where a file's
-  text is, not identities.
+- ~~The places invented so that made expressions would not collide~~
+  (done, 2026-10-15): a made expression is at its origin's span, the form
+  or the binding, branch or arm it was made for: `extend`'s `with`, a
+  parameterized file's `lambda` (both of no width before), a
+  `load-input`'s `input` (its keyword before), a quote's `%quote`, `nil`
+  and vector (its opening parenthesis, closing one, `#(`), and `spawn`'s,
+  `par`'s, `race`'s and `pselect`'s pieces (none wide, or from a branch
+  to the form's end). And the Rust compiler keys what it decides by
+  expression too, not by span: its plans, liftings, specialized copies
+  and effect summaries. Positions that stay: a loaded file's base and a
+  REPL form's (past every earlier text), which say which text was read,
+  as the user's count for repeat reads would.
 - Fact kinds are still encoded in the fact's integer (-500, -501, -502,
   -1000 - code, -1 - summary), and an inlined copy's field fact in its
   start (`c-resolved-at`).

@@ -132,7 +132,7 @@ pub struct Compiler<'a> {
     /// members' (none if it is not lifted), so that its register code
     /// lifts it as its stack code did, with the same words.
     lifts: Vec<Lift>,
-    lifted: HashMap<(u32, u32, u32), Option<Vec<usize>>>,
+    lifted: HashMap<ExpId, Option<Vec<usize>>>,
     /// The parameters added to the lambda about to be compiled.
     lifting_added: usize,
     declined: Option<String>,
@@ -182,7 +182,7 @@ pub struct Compiler<'a> {
     plan_path: Vec<procs::Step>,
     /// The specialized copies made, by the procedure's word, the lambda's
     /// span, what it captures and the globals it sees (`r_specialize`).
-    spec_copies: HashMap<(u64, u32, u32, u32, Vec<Sym>, Option<usize>), Value>,
+    spec_copies: HashMap<(u64, ExpId, Vec<Sym>, Option<usize>), Value>,
     /// While a procedure specialized at a lambda is compiled: which.
     spec: Option<Spec>,
     /// The globals defined as constants (`TODO.md` §42), by their cells: a
@@ -225,7 +225,7 @@ pub struct Compiler<'a> {
     /// the keys of the environment's `RLoc::Test`s.
     test_keys: Vec<(String, Vec<(u8, u64)>)>,
     /// Each expression's effect summary, by span, once asked.
-    summaries: Option<std::collections::HashMap<(u32, u32, u32), u8>>,
+    summaries: Option<std::collections::HashMap<ExpId, u8>>,
     /// The top-level definition whose body is being compiled: its name and
     /// arity.
     own_now: Option<(Sym, usize)>,
@@ -1315,8 +1315,7 @@ impl<'a> Compiler<'a> {
     /// words): its members' `lifts` if so, each member's word made, with
     /// the names it takes first.
     fn lift(&mut self, x: ExpId, bindings: &[(Sym, crate::ast::TyId, ExpId)], body: ExpId, e: &Env, tail: bool) -> R<Option<Vec<usize>>> {
-        let span = self.c.arena.span_of(x);
-        let key = (span.file.0, span.start, span.end);
+        let key = x;
         if let Some(done) = self.lifted.get(&key) {
             return Ok(done.clone());
         }
@@ -1772,11 +1771,11 @@ impl<'a> Compiler<'a> {
     /// made already (`spec_copies`): its procedure's body compiled again, in
     /// the globals it saw, and named for the procedure and the lambda; its
     /// twin, made with the others, is the specialized one.
-    fn make_copy(&mut self, k: usize, at: (u32, u32, u32), c: procs::CopyAt) -> R<()> {
+    fn make_copy(&mut self, k: usize, at: ExpId, c: procs::CopyAt) -> R<()> {
         let Exp::Lambda { params, body } = self.exp_at(c.lam).clone() else { return Ok(()) };
         let sp = &self.specials[k];
         let span = self.c.arena.span_of(body);
-        let key = (sp.word.raw(), span.file.0, span.start, span.end, c.fv.clone(), c.genv);
+        let key = (sp.word.raw(), body, c.fv.clone(), c.genv);
         if self.spec_copies.contains_key(&key) {
             return Ok(());
         }

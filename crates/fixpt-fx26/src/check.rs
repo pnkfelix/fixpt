@@ -1465,29 +1465,44 @@ impl Checker {
         Ok(Effect(eff.0.into_iter().filter(|a| !matches!(a, Atom::Read(r) | Atom::Alloc(r) | Atom::Await(r) if in_heap(r))).collect()))
     }
 
-    /// A summary of each expression's effect, for a compiler, by where it
-    /// starts and ends, each a stronger claim on what the code may do than
-    /// the one before, so that the greater of two is the safe one: 0 pure
-    /// (no atom at all, so no `spin` either), 1 reads only, 2 anything
-    /// else, 3 anything else that may also keep its continuation for later
-    /// (`comefrom`), write a global, or do what an effect variable stands
-    /// for, which a global's value may change across. Where two expressions
-    /// have one span, the greater. By file, start and end: a `load-module`'s
-    /// file has positions of its own. `check-types.fx`'s `checked-effects`
-    /// says the same.
+    /// A summary of an effect, for a compiler, each a stronger claim on what
+    /// the code may do than the one before, so that the greater of two is
+    /// the safe one: 0 pure (no atom at all, so no `spin` either), 1 reads
+    /// only, 2 anything else, 3 anything else that may also keep its
+    /// continuation for later (`comefrom`), write a global, or do what an
+    /// effect variable stands for, which a global's value may change
+    /// across. `check-env.fx`'s `k-summary` says the same.
+    pub fn effect_summary(eff: &Effect) -> u8 {
+        if eff.is_pure() {
+            0
+        } else if eff.0.iter().all(|a| matches!(a, Atom::Read(_))) {
+            1
+        } else if eff.0.iter().any(|a| matches!(a, Atom::Comefrom(_) | Atom::Var(_) | Atom::App(_) | Atom::Write(Region::Global(_) | Region::Globals))) {
+            3
+        } else {
+            2
+        }
+    }
+
+    /// Each expression's effect summary ([`Self::effect_summary`]), by
+    /// expression: the greater where it was noted twice.
+    pub fn effect_summaries_by_exp(&self) -> HashMap<ExpId, u8> {
+        let mut out: HashMap<ExpId, u8> = HashMap::new();
+        for (e, eff) in &self.facts.effects {
+            let k = out.entry(*e).or_insert(0);
+            *k = (*k).max(Self::effect_summary(eff));
+        }
+        out
+    }
+
+    /// The same by where each expression starts and ends, in its file (a
+    /// `load-module`'s file has positions of its own): the greatest of
+    /// those of one span, as the checker written in FX-26's
+    /// `checked-effects` are compared with them.
     pub fn effect_summaries(&self) -> HashMap<(u32, u32, u32), u8> {
         let mut out: HashMap<(u32, u32, u32), u8> = HashMap::new();
-        for (e, eff) in &self.facts.effects {
-            let s = if eff.is_pure() {
-                0
-            } else if eff.0.iter().all(|a| matches!(a, Atom::Read(_))) {
-                1
-            } else if eff.0.iter().any(|a| matches!(a, Atom::Comefrom(_) | Atom::Var(_) | Atom::App(_) | Atom::Write(Region::Global(_) | Region::Globals))) {
-                3
-            } else {
-                2
-            };
-            let span = self.arena.span_of(*e);
+        for (e, s) in self.effect_summaries_by_exp() {
+            let span = self.arena.span_of(e);
             let k = out.entry((span.file.0, span.start, span.end)).or_insert(s);
             *k = (*k).max(s);
         }

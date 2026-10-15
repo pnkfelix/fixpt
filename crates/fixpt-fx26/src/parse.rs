@@ -1695,10 +1695,8 @@ impl Checker {
                 let names = [self.interner.intern("%extend-0"), self.interner.intern("%extend-1")];
                 let e0 = self.parse_exp(e0)?;
                 let e1 = self.with_types_of(names[0], |p| p.parse_exp(e1))?;
-                // At no expression's place, the module's start with no
-                // width: facts are kept by place, and these are its own.
-                let at = fixpt_read::Span::new(span.file, span.start, span.start);
-                let e1 = self.arena.exp(at, Exp::With { module: names[0], body: e1 });
+                // Made at the form.
+                let e1 = self.arena.exp(span, Exp::With { module: names[0], body: e1 });
                 let items = vec![
                     ModItem::Val { name: names[0], ty: None, init: e0, infer: false },
                     ModItem::Val { name: names[1], ty: None, init: e1, infer: false },
@@ -1716,7 +1714,7 @@ impl Checker {
                 let Datum::Str(path) = &path.datum else {
                     return Err(FxError::at(path.span, format!("`({loader} \"file\")`: the file's name, as a string")));
                 };
-                self.parse_load(span, items[0].span, path, input)
+                self.parse_load(span, path, input)
             }
             "with" => {
                 let [_, m, body @ ..] = &items[..] else {
@@ -2473,10 +2471,9 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     /// file's state is made by applying what it makes, so that two loads
     /// that are one cannot be told apart.
     ///
-    /// Each expression made here has a place of its own, as the compilers'
-    /// facts are found by place: the use the form's, the file's module the
-    /// whole file, and a `load-input`'s `input` its keyword, `head`.
-    pub(crate) fn parse_load(&mut self, span: fixpt_read::Span, head: fixpt_read::Span, path: &str, input: bool) -> R<ExpId> {
+    /// What it makes is the form's, at its span; the file's module, the
+    /// whole file's.
+    pub(crate) fn parse_load(&mut self, span: fixpt_read::Span, path: &str, input: bool) -> R<ExpId> {
         let at = match &self.base_dir {
             Some(d) if std::path::Path::new(path).is_relative() && crate::built_in_module(path).is_none() => d.join(path),
             _ => std::path::PathBuf::from(path),
@@ -2537,7 +2534,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         }
         // A `load-input`'s value: its module's one item, `input`.
         let item = self.interner.intern("input");
-        let body = self.arena.exp(head, Exp::Var(item));
+        let body = self.arena.exp(span, Exp::Var(item));
         Ok(self.arena.exp(span, Exp::With { module: name, body }))
     }
 
@@ -2588,16 +2585,13 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         self.loaded.insert(e, (path.to_string(), text.clone(), file));
         // A file of parameters, `(module-parameters ((name kind) …))` first:
         // a `plambda` over them of a `lambda` of none making the module, so
-        // that whoever loads it gives them, and each call makes one. Each
-        // at a place of its own, as the FX-26 compiler finds facts by place
-        // (a reshape of the module's, `hide`'s, is the module's alone): the
-        // `plambda` at the `module-parameters` form, the `lambda` where it
-        // starts, of no width.
+        // that whoever loads it gives them, and each call makes one; both at
+        // the `module-parameters` form.
         Ok(match params {
             None => e,
             Some(binders) => {
                 let p = forms[0].span;
-                let made = self.arena.exp(fixpt_read::Span::new(p.file, p.start, p.start), Exp::Lambda { params: Vec::new(), body: e });
+                let made = self.arena.exp(p, Exp::Lambda { params: Vec::new(), body: e });
                 self.arena.exp(p, Exp::PLambda { binders, body: made })
             }
         })
@@ -3182,12 +3176,11 @@ impl Checker {
             Datum::List { .. } | Datum::Vector(_) | Datum::Bytevector(_) if !matches!(self.unquoted(x, depth), Some(_)) => {
                 let the = self.named(x.span, "the");
                 let datum = self.named(x.span, "datum");
-                // A quote's, not a quasiquote's, marked (`%quote`), at its
-                // opening parenthesis, a place of its own: everything in it
-                // the rewrite's, made once where it is all literals.
+                // A quote's, not a quasiquote's, marked (`%quote`):
+                // everything in it the rewrite's, made once where it is all
+                // literals.
                 let built = if depth.is_none() {
-                    let at = fixpt_read::Span { end: x.span.start + 1, ..x.span };
-                    self.call(at, "%quote", vec![built])
+                    self.call(x.span, "%quote", vec![built])
                 } else {
                     built
                 };
@@ -3286,10 +3279,10 @@ impl Checker {
             return e.clone();
         }
         // Under a quasiquote, a list or vector no unquote reaches is a
-        // constant: a quote, made once (`%quote` at its opening).
+        // constant: a quote, made once (`%quote`).
         if depth.is_some() && matches!(x.datum, Datum::List { .. } | Datum::Vector(_)) && self.unquote_free(x, depth) {
             let built = self.quoted_in(x, None);
-            return self.call(fixpt_read::Span { end: span.start + 1, ..span }, "%quote", vec![built]);
+            return self.call(span, "%quote", vec![built]);
         }
         match &x.datum {
             Datum::Symbol(s) => match self.name(*s) {
@@ -3313,10 +3306,8 @@ impl Checker {
                         k -= 1;
                     }
                 }
-                // Each `with` made here at a place of its own (the FX-26
-                // checker keys facts by place): `nil` at the closing
-                // parenthesis, each `cons` at its item, a constant suffix's
-                // `%quote` from its first item to the end.
+                // `nil` at the list, each `cons` from its item, a constant
+                // suffix's `%quote` from its first item to the end.
                 let mut acc = if k < items.len() {
                     let rest = Syntax::new(span, Datum::List { items: items[k..].to_vec(), tail: tail.clone() });
                     let built = self.quoted_in(&rest, None);
@@ -3324,7 +3315,7 @@ impl Checker {
                 } else {
                     match tail {
                         Some(t) => self.quoted_in(t, depth),
-                        None => self.standard_named(fixpt_read::Span { start: span.end.saturating_sub(1), ..span }, "nil"),
+                        None => self.standard_named(span, "nil"),
                     }
                 };
                 for (i, item) in items[..k].iter().enumerate().rev() {
@@ -3349,8 +3340,7 @@ impl Checker {
             Datum::Vector(items) => {
                 let list = Syntax::new(span, Datum::List { items: items.clone(), tail: None });
                 let l = self.quoted_in(&list, depth);
-                // At the `#(`, apart from the list's own places.
-                self.call(fixpt_read::Span { end: span.start + 2, ..span }, "datum-list->vector", vec![l])
+                self.call(span, "datum-list->vector", vec![l])
             }
             // Refused before (`no_bytevector`).
             Datum::Bytevector(_) => x.clone(),

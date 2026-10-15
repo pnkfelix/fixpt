@@ -106,9 +106,7 @@
                                                         (pair-syn r place-t a b)))
                                       a b))
                      (body (snoc (drop items 2) (mk-symbol "#u" a b)))
-                     ;; At a place of its own (`par-form`).
-                     (lam (mk-list (cons (mk-symbol "lambda" a b) (cons params body))
-                                   (syn-start (nth items 1)) b))
+                     (lam (mk-list (cons (mk-symbol "lambda" a b) (cons params body)) a b))
                      (binder (mk-list (the syns-a (list (pair-syn r place a b))) a b)))
                 (mk-list (the syns-a (list (mk-symbol "plambda" a b) binder lam)) a b))
               (fail usage a b)))))))
@@ -118,11 +116,9 @@
 ;; `(par ((x1 e1) … (xn en)) body …)`: `(let ((%par tree)) (let ((x1
 ;; (extract %par 1)) (%par (extract %par 2))) … (let ((xn-1 (extract %par
 ;; 1)) (xn (extract %par 2))) body …)))`, `tree` the branches as nested
-;; `par2`s (`par-tree`). Each node made has a place of its own, as the
-;; compilers find what the checker says of one by where it is: a branch's
-;; thunk its binding's, an `extract` none wide at its binding's start or
-;; end, a level's call and its rest from its binding to the form's end (the
-;; Rust parser's `par_expansion`).
+;; `par2`s (`par-tree`). What is made for a binding (its thunk, its
+;; `extract`s) is at the binding; the rest at the form (the Rust parser's
+;; `par_expansion`).
 (define par-form (subr (maxeff parses spin) (fails syns-a symbol int int) syn)
   (lambda (fail items lib a b)
     (let ((usage "`(par ((name expression) …) body …)`"))
@@ -162,53 +158,50 @@
                               a b))
                  (rest (if (null? (cdr (cdr bs)))
                            (par-tree (cdr bs) lib a b)
-                           (thunk-syn (par-tree (cdr bs) lib a b) sb b))))
-            (mk-list (the syns-a (list op (thunk-syn (par-exp bnd) sa sb) rest)) sa b))))))
+                           (thunk-syn (par-tree (cdr bs) lib a b) a b))))
+            (mk-list (the syns-a (list op (thunk-syn (par-exp bnd) sa sb) rest)) a b))))))
 ;; `(lambda () x)`, at `a`..`b`.
 (define thunk-syn (subr (maxeff (read @globals) (read rs)) (syn int int) syn)
   (lambda (x a b) (mk-list (the syns-a (list (mk-symbol "lambda" a b) (mk-list nil a b) x)) a b)))
-;; `(extract p k)`, none wide at `at`.
-(define extract-syn (subr (maxeff (read @globals) (read rs)) (syn int int) syn)
-  (lambda (p k at)
-    (mk-list (the syns-a (list (mk-symbol "extract" at at) p (mk-int k at at))) at at)))
+;; `(extract p k)`, at `a`..`b`.
+(define extract-syn (subr (maxeff (read @globals) (read rs)) (syn int int int) syn)
+  (lambda (p k a b)
+    (mk-list (the syns-a (list (mk-symbol "extract" a b) p (mk-int k a b))) a b)))
 ;; The `let`s binding each branch's value from `p`, the innermost the last
 ;; two's, around `body`.
 (define par-lets (subr (maxeff parses spin) (syns-a syn syns-a int int) syn)
   (lambda (bs p body a b)
     (let* ((bnd (car bs)) (sa (syn-start bnd)) (sb (syn-end bnd))
-           (mine (pair-syn (par-name bnd) (extract-syn p 1 sa) a b))
+           (mine (pair-syn (par-name bnd) (extract-syn p 1 sa sb) a b))
            (last? (null? (cdr (cdr bs))))
            (next (if last?
-                     (pair-syn (par-name (car (cdr bs))) (extract-syn p 2 sb) a b)
-                     (pair-syn p (extract-syn p 2 sb) a b)))
+                     (pair-syn (par-name (car (cdr bs))) (extract-syn p 2 sa sb) a b)
+                     (pair-syn p (extract-syn p 2 sa sb) a b)))
            (binds (mk-list (the syns-a (list mine next)) a b))
            (inside (if last? body (the syns-a (list (par-lets (cdr bs) p body a b))))))
       (mk-list (cons (mk-symbol "let" a b) (cons binds inside)) a b))))
 ;;; -------------------------------------------------------------- race
 
 ;; `(race e1 … en)`: `((with lib race2) (lambda () e1) (lambda () ((with
-;; lib race2) (lambda () e2) … (lambda () en))))`. Each node made has a
-;; place of its own, as the Rust parser's `race_expansion` places them: a
-;; branch's thunk none wide at its start, a level's call from its branch to
-;; the form's end (the first's the form's), the rest's thunk from the
-;; branch before to the form's end.
+;; lib race2) (lambda () e2) … (lambda () en))))`: a branch's thunk at its
+;; expression, the rest at the form (the Rust parser's `race_expansion`).
 (define race-form (subr (maxeff parses spin) (fails syns-a symbol int int) syn)
   (lambda (fail items lib a b)
     (begin
       (at-least fail items 3 "`(race expression expression …)`" a b)
-      (race-tree (cdr items) lib a a b))))
-;; The branches `es` as nested `race2`s, the first's call from `ca`.
-(define race-tree (subr (maxeff parses spin) (syns-a symbol int int int) syn)
-  (lambda (es lib ca a b)
-    (let* ((e (car es)) (sa (syn-start e)))
+      (race-tree (cdr items) lib a b))))
+;; The branches `es` as nested `race2`s.
+(define race-tree (subr (maxeff parses spin) (syns-a symbol int int) syn)
+  (lambda (es lib a b)
+    (let* ((e (car es)) (sa (syn-start e)) (sb (syn-end e)))
       (if (null? (cdr es))
-          (thunk-syn e sa sa)
+          (thunk-syn e sa sb)
           (let* ((op (mk-list (the syns-a (list (mk-symbol "with" a b) (atom lib a b)
                                                 (mk-symbol "race2" a b)))
                               a b))
-                 (inner (race-tree (cdr es) lib (syn-start (car (cdr es))) a b))
-                 (rest (if (null? (cdr (cdr es))) inner (thunk-syn inner (syn-end e) b))))
-            (mk-list (the syns-a (list op (thunk-syn e sa sa) rest)) ca b))))))
+                 (inner (race-tree (cdr es) lib a b))
+                 (rest (if (null? (cdr (cdr es))) inner (thunk-syn inner a b))))
+            (mk-list (the syns-a (list op (thunk-syn e sa sb) rest)) a b))))))
 ;;; ----------------------------------------------------------- pselect
 
 ;; `(pselect (W0 x0 body0 …) … (Wn xn bodyn …))`, each `W` `(icell-get c)`,
@@ -217,12 +210,9 @@
 ;; (or-event E0 (or-event E1 … En))))) (if (= %sel 0) (let ((x0
 ;; (icell-get %sel-0))) body0 …) … (let ((xn …)) bodyn …))))`, each `E`
 ;; `(cell-event %sel-i)`, `(mailbox-event %sel-i)`, `(clock-event %sel-i)` or
-;; `(stdin-event %sel-i)`, through `lib`. Each
-;; node made has a place of its own, as the Rust parser's
-;; `select_expansion` places them: an arm's event from its start to its
-;; `W`'s, its `or-event` from its start to the form's end, its test none
-;; wide at its end, its `if` from its `W`'s end to the form's end, its
-;; `let` the arm's; `sync` from the form's start to the first arm's.
+;; `(stdin-event %sel-i)`, through `lib`. An arm's event, test and `let` at
+;; the arm, its `W` at the `W`; the rest at the form (the Rust parser's
+;; `select_expansion`).
 (define select-form (subr (maxeff parses spin) (fails syns-a symbol int int) syn)
   (lambda (fail items lib a b)
     (let ((arms (cdr items)))
@@ -230,10 +220,9 @@
         (if (null? arms) (fail select-usage a b) #u)
         (select-check fail arms)
         (let* ((sel (mk-symbol "%sel" a b))
-               (at (syn-start (car arms)))
-               (sync (mk-list (the syns-a (list (lib-op lib "sync" a at)
+               (sync (mk-list (the syns-a (list (lib-op lib "sync" a b)
                                                 (select-events arms 0 lib a b)))
-                              a at))
+                              a b))
                (bind (mk-list (the syns-a (list (pair-syn sel sync a b))) a b))
                (inner (mk-list (the syns-a (list (mk-symbol "let" a b) bind
                                                  (select-arms arms 0 sel a b)))
@@ -300,14 +289,14 @@
 ;; The events of `arms`, from arm `i`, joined by `or-event`s.
 (define select-events (subr (maxeff parses spin) (syns-a int symbol int int) syn)
   (lambda (arms i lib a b)
-    (let* ((arm (car arms)) (sa (syn-start arm)) (ws (syn-start (arm-wait arm)))
+    (let* ((arm (car arms)) (sa (syn-start arm)) (sb (syn-end arm))
            (op (wait-event (syn-head (car (arm-wait-items arm)))))
-           (e (mk-list (the syns-a (list (lib-op lib op sa ws) (sel-name i a b))) sa ws)))
+           (e (mk-list (the syns-a (list (lib-op lib op sa sb) (sel-name i a b))) sa sb)))
       (if (null? (cdr arms))
           e
-          (mk-list (the syns-a (list (lib-op lib "or-event" sa b) e
+          (mk-list (the syns-a (list (lib-op lib "or-event" a b) e
                                      (select-events (cdr arms) (+ i 1) lib a b)))
-                   sa b)))))
+                   a b)))))
 ;; The arms of `arms`, from arm `i`, each chosen when `sel` is its number.
 (define select-arms (subr (maxeff parses spin) (syns-a int syn int int) syn)
   (lambda (arms i sel a b)
@@ -321,8 +310,8 @@
            (this (mk-list (cons (mk-symbol "let" sa sb) (cons bind (drop x 2))) sa sb)))
       (if (null? (cdr arms))
           this
-          (let ((test (mk-list (the syns-a (list (mk-symbol "=" sb sb) sel (mk-int i sb sb)))
-                               sb sb)))
-            (mk-list (the syns-a (list (mk-symbol "if" (syn-end w) b) test this
+          (let ((test (mk-list (the syns-a (list (mk-symbol "=" sa sb) sel (mk-int i sa sb)))
+                               sa sb)))
+            (mk-list (the syns-a (list (mk-symbol "if" a b) test this
                                        (select-arms (cdr arms) (+ i 1) sel a b)))
-                     (syn-end w) b))))))
+                     a b))))))

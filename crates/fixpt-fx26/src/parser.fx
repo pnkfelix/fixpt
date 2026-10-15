@@ -606,11 +606,10 @@
     (let ((built (quoted-in x depth)) (a (syn-start x)) (b (syn-end x)))
       (if (and (tagcase x (atom (d c e) #f) (lst (items d c e) (not (null? items))) (else y #t))
                (null? (unquoted x depth)))
-          ;; A quote's, not a quasiquote's, marked (`%quote`), at its
-          ;; opening parenthesis, a place of its own: everything in it the
-          ;; rewrite's, made once where it is all literals.
+          ;; A quote's, not a quasiquote's, marked (`%quote`): everything in
+          ;; it the rewrite's, made once where it is all literals.
           (mk-form "the" (list (mk-symbol "datum" a b)
-                               (if (< depth 0) (fx-call "%quote" (list built) a (+ a 1)) built))
+                               (if (< depth 0) (fx-call "%quote" (list built) a b) built))
                    a b)
           built))))
 ;; `(with #%fx name)`: the standard `name`, whatever a program binds it to.
@@ -677,10 +676,8 @@
                             (if (bytevector? d) (pfail "a bytevector cannot be quoted yet" x) x))
                            ((or (symbol=? d sym-true) (symbol=? d sym-false)) x)
                            (else (mk-form "quote" (list x) a b))))
-                   ;; Each `with` made here at a place of its own (facts are
-                   ;; kept by place): `nil` at the closing parenthesis, each
-                   ;; `cons` at its item, a constant suffix's `%quote` from
-                   ;; its first item to the end.
+                   ;; `nil` at the list, each `cons` from its item, a constant
+                   ;; suffix's `%quote` from its first item to the end.
                    (lst (items d c e)
                      (if (null? items)
                          (mk-symbol "nil" a b)
@@ -688,10 +685,10 @@
                    (dotted (items tail d c e) (quoted-items items #t tail dq a b))
                    (vec (items d c e)
                      (if (null? items)
-                         (fx-call "datum-list->vector" (list (fx-named "nil" (- b 1) b)) a (+ a 2))
+                         (fx-call "datum-list->vector" (list (fx-named "nil" a b)) a b)
                          (fx-call "datum-list->vector"
-                                  (list (quoted-items items #f (car items) dq a b)) a (+ a 2)))))))
-            (if mark? (fx-call "%quote" (list built) a (+ a 1)) built))))))
+                                  (list (quoted-items items #f (car items) dq a b)) a b))))))
+            (if mark? (fx-call "%quote" (list built) a b) built))))))
 ;; A list of `items`, then, if `dotted?`, `tail` (else `nil`), built.
 (define quoted-items (subr parses (syns-a bool syn int int int) syn)
   (lambda (items dotted? tail depth a b)
@@ -704,7 +701,7 @@
 (define quoted-plain (subr parses (syns-a bool syn int int) syn)
   (lambda (items dotted? tail a b)
     (if (null? items)
-        (if dotted? (quoted-in tail -1) (fx-named "nil" (- b 1) b))
+        (if dotted? (quoted-in tail -1) (fx-named "nil" a b))
         (fx-call "cons"
                  (list (quoted-in (car items) -1) (quoted-plain (cdr items) dotted? tail a b))
                  (syn-start (car items)) (syn-end (car items))))))
@@ -715,7 +712,7 @@
 (define quoted-onto (subr parses (syns-a bool syn int bool int int bool int int) syn)
   (lambda (items dotted? tail ldepth free-tail? depth inner first? a b)
     (cond
-      ((null? items) (if dotted? (quoted-in tail ldepth) (fx-named "nil" (- b 1) b)))
+      ((null? items) (if dotted? (quoted-in tail ldepth) (fx-named "nil" a b)))
       ((and free-tail? (not first?) (items-free? items inner inner))
        (fx-call "%quote" (list (quoted-plain items dotted? tail a b)) (syn-start (car items)) b))
       (else
@@ -916,10 +913,9 @@
                  (the syns-a (cons (nth items 1) nil))))
         nil)))
 ;; Module `m` read from a file of parameters `ps` (`loaded-params`), whose
-;; `module-parameters` form is at `a`..`b`: a `plambda` over them, there, of
-;; a `lambda` of none making it, where the form starts, of no width (each
-;; at a place of its own, as the compiler finds facts by place), so that
-;; whoever loads it gives them, and each call makes one. `m`, if none.
+;; `module-parameters` form is at `a`..`b`: a `plambda` over them of a
+;; `lambda` of none making it, both there, so that whoever loads it gives
+;; them, and each call makes one. `m`, if none.
 (define* loaded-made (subr pure (syns-a exp int int) exp)
   (lambda (ps m a b)
-    (if (null? ps) m (e-plambda (car ps) (e-lambda (the param-list nil) m a a 0) a b 0))))
+    (if (null? ps) m (e-plambda (car ps) (e-lambda (the param-list nil) m a b 0) a b 0))))

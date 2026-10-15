@@ -2550,11 +2550,6 @@ generator reads, structured (step 6; today one string a clause,
   2026-10-15; `docs/research/loads-and-places.md`). Decided: C first, and
   done (`DONE.md` §97): expressions' identities `(start end k)`, facts
   keyed by them. Left:
-  - The places invented so that made expressions would not collide, in
-    both parsers: a parameterized file's zero-width `lambda`, a
-    `load-input`'s `input` at the load's keyword, a REPL form's positions
-    past every earlier text. A made expression can now have its origin's
-    span.
   - Fact kinds encoded in a fact's integer (-500, -501, -502, -1000 -
     code, -1 - summary), and an inlined copy's field fact in its start
     (`c-resolved-at`): a datatype of facts instead.
