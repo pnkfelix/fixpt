@@ -301,6 +301,7 @@
             (val c-native-program (ref bool @k))
             (val compile-conv-native! (subr (maxeff (read @globals) (write @k)) (bool) unit))
             (val c-closure-routine (subr (maxeff (read @globals) (read @k)) () int))
+            (val c-region-closure-prim (subr (maxeff (read @globals) (read @k)) () string))
             (val c-adapted
                  (subr (maxeff (alloc @k) (goto @y) (read @globals) (read @k) (read @t) (write @k))
                        (code)

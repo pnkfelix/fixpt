@@ -2575,9 +2575,9 @@ generator reads, structured (step 6; today one string a clause,
   `lambda` names and native code ignores; a `letrec`'s patch writes
   through it (`%fx26-adapted`); cellular code calling one calls what it
   adapts, with no crossing (`Heap::adapted`), and the native compiler
-  compiles what it adapts. But a region's closure (`rlambda`, made by
-  `%region-closure`), still cellular there. Left, in order: then
-  register code's `invoke` given the convention (`direct.rs` compiles from
+  compiles what it adapts. A place's closure (`rlambda`) has its adapter
+  in the same place (`%region-nclosure`, `Heap::adapter`). Left, in
+  order: register code's `invoke` given the convention (`direct.rs` compiles from
   register code, so it cannot decline such calls), a direct `native` call
   from cellular code, and `direct.rs` calling by convention.
 Fixed (2026-10-14), found by made procedures: on the arm64 cellular

@@ -363,7 +363,7 @@
           (set c-last-word (the (listof tword @k) (cons (extract made 1) nil)))
           (if (null? region)
               (begin (c-op1 c (c-closure-routine) w) (c-emit c (i-cell (wcell-int (c-length fv)))))
-              (begin (c-lit c w) (c-prim c "%region-closure" (+ 2 (c-length fv)))))
+              (begin (c-lit c w) (c-prim c (c-region-closure-prim) (+ 2 (c-length fv)))))
           patches))))
   ;; A lambda's word, and the names its closure captures, in order; with its
   ;; register code as its twin, when this compiler makes register code

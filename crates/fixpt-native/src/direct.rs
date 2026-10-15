@@ -2589,7 +2589,8 @@ impl Compiling<'_> {
                         ("cellular", Some("rest")) if k(o(1)) == 0 => Callout::Rest,
                         ("cellular", Some("field@")) if k(o(1)) == 2 => Callout::FieldRef,
                         ("prim", _) => match fixpt_runtime::PRIMITIVES.get(k(o(0))) {
-                            Some(d) if d.name == "%region-closure" => Callout::RegionClosure { n: k(o(1)) },
+                            // `%region-nclosure`'s, natively: the same.
+                            Some(d) if matches!(d.name, "%region-closure" | "%region-nclosure") => Callout::RegionClosure { n: k(o(1)) },
                             // By design: a procedure calling `stay-cellular`
                             // runs as cellular code.
                             Some(d) if d.name == "%stay-cellular" => return decline("it calls `stay-cellular`".into()),

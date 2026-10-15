@@ -315,10 +315,14 @@
 (define c-native-program (ref bool @k) (new #f))
 (define compile-conv-native! (subr (maxeff (read @globals) (write @k)) (bool) unit)
   (lambda (on) (set c-native-program on)))
-;; The stack routine every closure cellular code makes is made by (but a
-;; region's, `%region-closure`, for now), its own thunks' too, for one rule.
+;; The stack routine every closure cellular code makes is made by, its own
+;; thunks' too, for one rule.
 (define c-closure-routine (subr (maxeff (read @globals) (read @k)) () int)
   (lambda () (if (get c-native-program) routine-nclosure routine-closure)))
+;; The primitive a closure in a place is made by (an `rlambda`'s): in a
+;; program whose convention is native, its adapter in the same place.
+(define c-region-closure-prim (subr (maxeff (read @globals) (read @k)) () string)
+  (lambda () (if (get c-native-program) "%region-nclosure" "%region-closure")))
 ;; Of the closure on top, made for a `letrec`'s patch: in a program whose
 ;; convention is native, the cellular closure its adapter calls
 ;; (`%fx26-adapted`), which the patch writes into.

@@ -901,18 +901,48 @@ fn conversions_make_adapters_in_cellular_code() {
 /// native, as its type says (`nclosure`, `TODO.md` §97): a closure that a
 /// procedure the native compiler declines gives back, a `letrec`'s made
 /// where it declines (its siblings patched in through the adapters), a
-/// standard operation as a value there, a closure in a list; each a native
-/// closure, called by native code (`programs/native/made-native.fx`).
+/// standard operation as a value there, a closure in a list, a place's
+/// (`rlambda`), its adapter in that place; each a native closure, called
+/// by native code (`programs/native/made-native.fx`).
 #[test]
 fn what_cellular_code_makes_is_native() {
     let mut s = session(true);
     let forms = s.checker.read_in(FileId(0), include_str!("programs/native/made-native.fx")).expect("reads");
     let (values, fell) = values_and_fallbacks(&mut s, &forms);
-    assert_eq!(values, ["15", "#t", "5", "42"], "{fell:?}");
+    assert_eq!(values, ["15", "#t", "5", "42", "500500"], "{fell:?}");
     for name in ["add5", "even", "plus", "(car fns)"] {
         let native = s.with_global_value(name, |rt, v| v.is_bloblet() && rt.heap.bloblet_kind(v) == fixpt_heap::layout::kind("native-closure"));
         assert_eq!(native.expect("compiles"), Ok(true), "{name}");
     }
+}
+
+/// A place's closure in a program whose convention is native
+/// (`%region-nclosure`): a native closure, an adapter over the cellular
+/// one, both in the place, so that they end together.
+#[test]
+fn a_place_holds_its_closures_adapter() {
+    let mut s = session(true);
+    let rt = s.scheme.runtime_unrooted();
+    let prim = |name: &str| match fixpt_runtime::PRIMITIVES.iter().find(|d| d.name == name).map(|d| &d.kind) {
+        Some(fixpt_runtime::PrimKind::Simple(f)) => *f,
+        _ => panic!("no simple primitive {name}"),
+    };
+    let word = { let u = rt.heap.undefined_closure(); rt.heap.bloblet_slot(u, fixpt_heap::layout::cellular::CLOSURE_WORD) };
+    let made = |rt: &mut fixpt_runtime::Runtime, name: &str| {
+        let h = rt.heap.region_enter();
+        let v = prim(name)(rt, &mut [Value::fixnum(h as i64), Value::fixnum(7), word]).unwrap_or_else(|_| panic!("{name}"));
+        (v, rt.heap.region_in_use(h))
+    };
+    let (plain, plain_words) = made(rt, "%region-closure");
+    let (native, native_words) = made(rt, "%region-nclosure");
+    let kind = |rt: &fixpt_runtime::Runtime, v: Value| rt.heap.bloblet_kind(v);
+    assert_eq!(kind(rt, plain), fixpt_heap::layout::kind("cellular-closure"));
+    assert_eq!(kind(rt, native), fixpt_heap::layout::kind("native-closure"));
+    let inner = rt.heap.adapted(native).expect("an adapter");
+    assert_eq!(kind(rt, inner), fixpt_heap::layout::kind("cellular-closure"));
+    // The adapter, a closure over one value, as the closure is, in the
+    // place with it.
+    assert_eq!(native_words, 2 * plain_words, "{plain_words} {native_words}");
 }
 
 #[test]

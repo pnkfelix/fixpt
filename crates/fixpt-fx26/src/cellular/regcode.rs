@@ -2739,7 +2739,7 @@ impl Compiler<'_> {
             }
             if region.is_some() {
                 args.push(Arg::V(w));
-                self.r_prim(g, "%region-closure", &args, env, te)?;
+                self.r_prim(g, self.region_closure_prim(), &args, env, te)?;
             } else {
                 self.r_args(g, &args, env, te, None)?;
                 g.op("lambda", &[w, Gen::n(fv.len()), self.made_by()]);

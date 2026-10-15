@@ -1702,6 +1702,19 @@ impl Heap {
         self.adapter_slot = Some(slot);
     }
 
+    /// An adapter to the native convention over `f`: a native closure of
+    /// the adapters' code, `f` its one free value; none until that code is
+    /// made (`set_adapter_code`). Allocated as anything is, so in a place
+    /// within `in_region`.
+    pub fn adapter(&mut self, f: Value) -> Option<Value> {
+        use crate::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD};
+        let code = self.adapter_code()?;
+        let c = self.make_bloblet(crate::layout::kind("native-closure"), 2, 0, true);
+        self.set_bloblet_slot(c, CLOSURE_WORD, code);
+        self.set_bloblet_slot(c, CLOSURE_FREE0, f);
+        Some(c)
+    }
+
     /// What `v` adapts, if it is an adapter to the native convention (a
     /// native closure of the adapters' code, `adapter_code`): the procedure
     /// of the other convention it calls, its one free value. What cellular

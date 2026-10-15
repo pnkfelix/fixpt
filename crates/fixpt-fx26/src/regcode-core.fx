@@ -799,7 +799,7 @@
             (let* ((pa (r-free-args fv env 0))
                    (ops (r-append-arg (extract pa 1) (a-v (wcell-word w)))))
               (begin
-                (r-prim g "%region-closure" (the rargs (cons (a-e (car region)) ops)) env te)
+                (r-prim g (c-region-closure-prim) (the rargs (cons (a-e (car region)) ops)) env te)
                 (extract pa 2)))))))
   ;; Arrays, and the tag and key makers: as the stack compiler does them.
   (r-special (subr rcompiles (rgen string exps renv cenv) unit)

@@ -333,7 +333,8 @@ its code in one.
    code ignores, its closures being native. The routines that call a
    procedure given them (`callcc`, `withmark`, …) take a native one as
    cellular code (`as_cellular`: what an adapter adapts, else a cellular
-   adapter over it). A region's closure is still cellular there.
+   adapter over it). A place's closure (`rlambda`) has its adapter in the
+   same place, so that the two end together (`%region-nclosure`).
 5. **Continuations, prompts and marks** on native frames (done,
    2026-09-28; `control_on_native_frames` in `tests/direct.rs`). A prompt,
    and a mark, is a 48-byte frame of its own around the thunk's call: the

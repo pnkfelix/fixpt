@@ -2612,18 +2612,24 @@ prims! {
     "%region-make-icell", 1, Some(1), simple!(|rt, _a| Ok(crate::sched::make_icell(&mut rt.heap)));
     // The `closure` routine's closure, in a region: `h`, the free values in
     // order, then the word.
-    "%region-closure", 2, None, simple!(|rt, a| {
-        use fixpt_heap::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD};
+    "%region-closure", 2, None, simple!(|rt, a| Ok(region_closure(rt, a)));
+    // The same in a program whose convention is native, as `nclosure` is
+    // to `closure` (`TODO.md` §97): the closure, then an adapter over it
+    // (`Heap::adapter`), in the same place, so that the two end together.
+    // Natively, `%region-closure`: a native closure.
+    "%region-nclosure", 2, None, simple!(|rt, a| {
         let h = region_handle(a[0]);
-        let (w, free) = (a[a.len() - 1], &a[1..a.len() - 1]);
-        Ok(rt.heap.in_region(h, |heap| {
-            let c = heap.make_bloblet(const { fixpt_heap::layout::kind("cellular-closure") }, free.len() + 1, 0, true);
-            heap.set_bloblet_slot(c, CLOSURE_WORD, w);
-            for (i, v) in free.iter().enumerate() {
-                heap.set_bloblet_slot(c, CLOSURE_FREE0 + i, *v);
+        let c = region_closure(rt, a);
+        if rt.heap.adapter_code().is_none() {
+            // The adapters' code, made once, by the first adapter.
+            let Some(adapt) = rt.adapt else {
+                return rt.fail("no closure in the native convention can be made here", &[c]);
+            };
+            if let Err(m) = adapt(rt, c, 0, true) {
+                return rt.fail(&m, &[c]);
             }
-            c
-        }))
+        }
+        Ok(rt.heap.in_region(h, |heap| heap.adapter(c)).expect("the adapters' code"))
     });
     "%region-make-bloblet", 2, None, simple!(|rt, a| {
         let h = region_handle(a[0]);
@@ -2673,6 +2679,22 @@ pub fn make_promise(rt: &mut Runtime, state: i64, payload: Value) -> Value {
     rt.heap.obj_set(p, 0, Value::fixnum(state));
     rt.heap.obj_set(p, 1, payload);
     p
+}
+
+/// `%region-closure h fv … w`: a cellular closure of word `w` over the
+/// `fv`s, in place `h`.
+fn region_closure(rt: &mut Runtime, a: &[Value]) -> Value {
+    use fixpt_heap::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD};
+    let h = region_handle(a[0]);
+    let (w, free) = (a[a.len() - 1], &a[1..a.len() - 1]);
+    rt.heap.in_region(h, |heap| {
+        let c = heap.make_bloblet(const { fixpt_heap::layout::kind("cellular-closure") }, free.len() + 1, 0, true);
+        heap.set_bloblet_slot(c, CLOSURE_WORD, w);
+        for (i, v) in free.iter().enumerate() {
+            heap.set_bloblet_slot(c, CLOSURE_FREE0 + i, *v);
+        }
+        c
+    })
 }
 
 /// A region's handle, as `Heap::in_region` takes it: a fixnum's value, or,

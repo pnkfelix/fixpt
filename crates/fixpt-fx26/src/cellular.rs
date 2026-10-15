@@ -969,7 +969,7 @@ impl<'a> Compiler<'a> {
         }
         if region.is_some() {
             self.lit(code, w);
-            self.prim(code, "%region-closure", fv.len() + 2)?;
+            self.prim(code, self.region_closure_prim(), fv.len() + 2)?;
         } else {
             self.op1(code, self.closure_routine(), w);
             code.push(Item::Cell(Value::fixnum(fv.len() as i64)));
@@ -981,7 +981,7 @@ impl<'a> Compiler<'a> {
     /// it, and every standard operation as a value, is typed `native`
     /// (each takes the program's convention), so every closure cellular
     /// code makes is made so (`nclosure`, `TODO.md` §97), its own thunks'
-    /// too, for one rule; but a region's (`%region-closure`), for now.
+    /// too, for one rule; a place's in that place (`%region-nclosure`).
     fn native_program(&self) -> bool {
         self.c.conv_default == Conv::Native
     }
@@ -990,6 +990,13 @@ impl<'a> Compiler<'a> {
     /// whose convention is native, else `closure`.
     fn closure_routine(&self) -> &'static str {
         if self.native_program() { "nclosure" } else { "closure" }
+    }
+
+    /// The primitive that makes a closure in a place (an `rlambda`'s):
+    /// `%region-nclosure` in a program whose convention is native, its
+    /// adapter in the same place; else `%region-closure`.
+    fn region_closure_prim(&self) -> &'static str {
+        if self.native_program() { "%region-nclosure" } else { "%region-closure" }
     }
 
     /// Of the closure on top, made by `lambda` for a `letrec`'s patch: in
