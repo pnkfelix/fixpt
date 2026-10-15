@@ -103,3 +103,35 @@ fn code_with_a_frame_made_and_run() {
         assert_eq!(values_with(m, "frames.fx", 2, &stress), ["500000500000", "165055"], "{m}, stressed");
     }
 }
+
+/// Code made by a generator that reads the convention as data
+/// (`programs/made-code/generated.fx`, `fx26:convention.fx`): `frames.fx`'s
+/// procedure, every register, offset, tag and routine's entry taken from
+/// the declaration read as a `convention`. It is word for word the code
+/// `frames.fx` writes out, and runs as that does.
+#[test]
+fn code_made_from_the_convention_read_as_data() {
+    let runs: Vec<_> = machines().into_iter().map(|(m, _)| (m, std::thread::spawn(move || values(m, "generated.fx", 2)))).collect();
+    for (m, t) in runs {
+        let got = t.join().expect("ran");
+        if m == "rs-scheme-vm" {
+            assert!(got.last().is_some_and(|l| l.contains("cannot call back a procedure of the bytecode VM")), "{m}: {got:?}");
+            continue;
+        }
+        assert_eq!(got, ["500000500000", "165055"], "{m}");
+    }
+    let dir = format!("{}/../fixpt-fx26/tests/programs/made-code", env!("CARGO_MANIFEST_DIR"));
+    let frames = std::fs::read_to_string(format!("{dir}/frames.fx")).expect("reads");
+    let written: Vec<&str> = frames.lines().skip_while(|l| !l.trim_end().ends_with("(list")).skip(1)
+        .map_while(|l| l.split_whitespace().next().map(|w| w.trim_end_matches(')')).filter(|w| w.parse::<u32>().is_ok()))
+        .collect();
+    assert_eq!(written.len(), 51);
+    let generated = std::fs::read_to_string(format!("{dir}/generated.fx")).expect("reads");
+    let path = format!("{}/generated-words.fx", env!("CARGO_TARGET_TMPDIR"));
+    std::fs::write(&path, format!("{generated}\n(build-code conv)\n")).expect("writes");
+    let out = Command::new(FIXPT).args(["--fx26-machine", "fx-regs-rsjit-nativecc", "eval", &path]).output().expect("fixpt runs");
+    let text = String::from_utf8_lossy(&out.stdout);
+    let last = text.lines().last().unwrap_or("");
+    let made: Vec<&str> = last.split(" : ").next().unwrap_or("").trim_matches(['(', ')']).split(' ').collect();
+    assert_eq!(made, written, "{last}");
+}

@@ -57,6 +57,9 @@ pub const CHECK_RESOLVE_TYPES: &str = include_str!("check-resolve-types.fx");
 /// The types of `arm64.fx`: a module file of no state (`TODO.md` §68).
 pub const ARM64_TYPES: &str = include_str!("arm64-types.fx");
 
+/// The types of `convention.fx`: a module file of no state (`TODO.md` §97).
+pub const CONVENTION_TYPES: &str = include_str!("convention-types.fx");
+
 /// The types of `native.fx`: a module file of no state (`TODO.md` §68).
 pub const NATIVE_TYPES: &str = include_str!("native-types.fx");
 
@@ -462,6 +465,10 @@ pub const STANDARD_OPS: &str = include_str!("standard.fx");
 /// `load-input` file, its module of no state, which the conductor loads.
 pub const ARM64: &str = include_str!("arm64.fx");
 
+/// A native convention's declaration read as data a generator reads
+/// (`TODO.md` §97): a `load-input` file, its module of no state.
+pub const CONVENTION: &str = include_str!("convention.fx");
+
 /// What the compiler to machine code written in FX-26 knows of the
 /// hand-encoded machine, generated from it: a module file, which the
 /// conductor loads.
@@ -495,7 +502,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 141] = [
+pub const FRONT_END_MODULES: [(&str, &str); 143] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("table-types.fx", TABLE_TYPES),
     ("table.fx", TABLE),
@@ -524,6 +531,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 141] = [
     ("compile-types.fx", COMPILE_TYPES),
     ("native-types.fx", NATIVE_TYPES),
     ("arm64-types.fx", ARM64_TYPES),
+    ("convention-types.fx", CONVENTION_TYPES),
     ("layout-types.fx", LAYOUT_TYPES),
     ("native-layout-types.fx", NATIVE_LAYOUT_TYPES),
     ("check-resolve-types.fx", CHECK_RESOLVE_TYPES),
@@ -549,6 +557,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 141] = [
     ("eval-core.fx", EVAL_CORE),
     ("native-layout.fx", NATIVE_LAYOUT),
     ("arm64.fx", ARM64),
+    ("convention.fx", CONVENTION),
     ("native.fx", NATIVE),
     ("compile-twins-types.fx", COMPILE_TWINS_TYPES),
     ("compile-inline-types.fx", COMPILE_INLINE_TYPES),

@@ -155,7 +155,8 @@ are in the last section, "Log: the glance's details", and in
   compiled by the convention their type says (2026-10-15): noted by both
   checkers, `tcall` and register code's `cellular` `invoke` unchecked,
   native code's `native` calls direct, a value typed `native` always a
-  native closure (`nclosure`); next, the declaration as structured data.
+  native closure (`nclosure`); and the declaration as data a generator
+  reads, a `convention` (`fx26:convention.fx`, 2026-10-15).
 - **Loads and facts by place** (the user's question, 2026-10-15,
   `docs/research/loads-and-places.md`): the FX-26 front end's expressions
   have identities, `(start end k)`, and facts are keyed by them, not by

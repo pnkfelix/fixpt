@@ -2614,3 +2614,21 @@ Still open in `TODO.md` §97; done so far:
   236 lines of `import` (`parser-exps.fx` 999 → 845 lines, `check-rules.fx`
   1041 → 1025, its debt lowered). `sexp-edit` knows it (an `import`
   defines its values and uses its module); `fx26-mode` highlights it.
+- **The declaration as data a generator reads** (2026-10-15, the note's
+  step 6). `(load-input "fx26:convention.fx")` reads a declaration's
+  clauses, as `native-convention` gives them, into a `convention`
+  (`convention-types.fx`): a product of the registers, the values' tags,
+  immediates, kinds and header fields, closures, code, frames, the
+  state's fields by name, the routines (each its entry's offset, its
+  inputs' registers, its output, whether it may collect; `overflow`'s and
+  `trap`'s own), fuel and the barrier. Reading is total, then the value
+  is printed back, and a declaration it does not print back to is
+  refused at the first clause that differs (`cv-read`: `ok` or
+  `refused`). `cv-native` is fixpt's own. A generator takes a
+  `convention` rather than numbers copied out of fixpt. Tests:
+  `programs/made-code/generated.fx`, `frames.fx`'s procedure made from
+  the convention by the arm64 encoder written in FX-26, word for word
+  the code `frames.fx` writes out, and run on all nine machines
+  (`code_made_from_the_convention_read_as_data`);
+  `programs/modules/convention-read.fx`, three refusals. The evaluator
+  written in FX-26 gained `substring` and `char-numeric?`.

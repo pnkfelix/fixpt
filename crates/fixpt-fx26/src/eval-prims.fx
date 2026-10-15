@@ -166,12 +166,16 @@
       (prim! 'char>=? (lambda (xs) (char-cmp xs (lambda (a b) (char>=? a b)))))
       (prim! 'char-upcase (lambda (xs) (char-upcase (as-char (ev-arg xs 0)))))
       (prim! 'char->integer (lambda (xs) (char->integer (as-char (ev-arg xs 0)))))
+      (prim! 'char-numeric? (lambda (xs) (char-numeric? (as-char (ev-arg xs 0)))))
       (prim! 'integer->char (lambda (xs) (integer->char (as-int (ev-arg xs 0)))))
       (prim! 'char->string (lambda (xs) (char->string (as-char (ev-arg xs 0)))))
       (prim! 'string-append (lambda (xs) (ev-string-append xs)))
       (prim! 'string-length (lambda (xs) (string-length (as-str (ev-arg xs 0)))))
       (prim! 'string-ref
              (lambda (xs) (string-ref (as-str (ev-arg xs 0)) (as-int (ev-arg xs 1)))))
+      (prim! 'substring
+             (lambda (xs)
+               (substring (as-str (ev-arg xs 0)) (as-int (ev-arg xs 1)) (as-int (ev-arg xs 2)))))
       (prim! 'string=? (lambda (xs) (str-cmp xs (lambda (a b) (string=? a b)))))
       (prim! 'string<? (lambda (xs) (str-cmp xs (lambda (a b) (string<? a b)))))
       (prim! 'string<=? (lambda (xs) (str-cmp xs (lambda (a b) (string<=? a b)))))

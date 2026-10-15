@@ -196,7 +196,11 @@ the difference, not run.
 The declaration is also data: a generator written in FX-26 reads the
 registers, offsets and routines' entries from it, rather than from numbers
 copied out of fixpt, so kayak's generators are parametric in the
-convention they emit for. Kayak's runtime publishes its own supported set,
+convention they emit for. A `convention` (`fx26:convention.fx`, step 6) is
+that data; the rules a declaration states besides its numbers (nothing
+kept across a call but the pinned registers, the map stored before every
+call, …) are what a `convention` means, and one that states other rules
+is refused when read. Kayak's runtime publishes its own supported set,
 and where the two meet, the same code runs on both.
 
 ## Where the trust is
@@ -263,4 +267,15 @@ for a program that must hand the power on.
    of 3, a small nursery, a small stack cache, where the made code's own
    entry passes the limit 39 times). Not on the bytecode VM, which cannot
    be called back.
-6. Data a generator reads: the declaration as a value of FX-26.
+6. *(Done 2026-10-15.)* Data a generator reads: the declaration as a
+   value of FX-26. `(load-input "fx26:convention.fx")` reads the clauses
+   `native-convention` gives (or any in that canonical form) into a
+   `convention` (`convention-types.fx`), a product of products: registers
+   by number, the state's fields by name and offset, each routine's
+   entry, inputs and output, the frame's offsets, the values' tags and
+   kinds. Reading is total, then the value is printed back, and a
+   declaration it does not print back to, clause for clause, is refused
+   at the first that differs, so that nothing a `convention` cannot hold
+   is dropped unseen. Test: `programs/made-code/generated.fx`, step 5's
+   procedure made from a `convention` by the encoder written in FX-26,
+   word for word the code `frames.fx` writes out, on all nine machines.

@@ -2534,9 +2534,9 @@ machines (`programs/made-code/leaves.fx`, `fixpt-cli/tests/made_code.rs`).
 And step 4: `define-convention`, fixpt's declaration generated from its
 constants, both checkers comparing a program's with it
 (`programs/made-code/declared.fx`). And step 5: code that is not a leaf, with `poll` and `cons` routines
-(`programs/made-code/frames.fx`). Left: the declaration as data a
-generator reads, structured (step 6; today one string a clause,
-`native-convention`); and:
+(`programs/made-code/frames.fx`). And step 6: the declaration as data a
+generator reads (`fx26:convention.fx`, `programs/made-code/generated.fx`).
+Left:
 - **Native code cannot call back the bytecode VM's procedures**: a
   primitive cannot run the VM again, so on `rs-scheme-vm` a made procedure
   given a procedure of the program fails, saying so.
