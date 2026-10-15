@@ -2546,6 +2546,11 @@ generator reads, structured (step 6; today one string a clause,
   `preempt.rs`'s spinning process unpreempted, and a `processes.rs` test
   hung. Only `load-input`'s hidden globals are declined now, so the
   scheduler is native again; the cellular path is still to fix.
+- **Loads' hidden globals and facts by place, reviewed** (the user's
+  question, 2026-10-15): `docs/research/loads-and-places.md` proposes an
+  explicit form for a hidden definition (A), then expressions with
+  identities in the front end written in FX-26, facts keyed by them, not
+  by place (C); not loads as a table (B). To decide with the user.
 - **The native-convention machine hides the FX-26 checker's refusals**
   (found 2026-10-14): a definition that checker refuses is "declined" and
   runs another way, so where the two checkers disagree on a form, that
