@@ -36,8 +36,7 @@
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-errors) (include check-env) (include check-read)
       (include check-expect) (include tables))
-(define k-conversion-name (with check-resolve k-conversion-name))
-(define k-free-vars (with check-resolve k-free-vars))
+(import check-resolve k-conversion-name k-free-vars)
 
 ;; Whether item `it` is a definition of a lambda with a written type.
 (define k-lambda-item? (subr (read @globals) (k-item) bool)

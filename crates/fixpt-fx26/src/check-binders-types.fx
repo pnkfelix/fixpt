@@ -10,15 +10,11 @@
 (define-type k-binders (select check-types-types k-binders))
 (hide (define check-infer-types (load-module "fx26:check-infer-types.fx")))
 (define-type k-bound-body (select check-infer-types k-bound-body))
-(define-type k-ids (select check-types-types k-ids))
-(define-type k-map (select check-types-types k-map))
-(define-type k-named (select check-types-types k-named))
-(define-type k-region (select check-types-types k-region))
+(import check-types-types (type k-ids k-map k-named k-region))
 (define-type k-solved (select check-infer-types k-solved))
 (define-type kxs (select check-types-types kxs))
 ;; The types it names, from the files that define them.
-(define-type k-desc (select check-types-types k-desc))
-(define-type k-terms (select check-types-types k-terms))
+(import check-types-types (type k-desc k-terms))
 (define-type check-binders-sig
   (moduleof (val k-binders-of
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin)

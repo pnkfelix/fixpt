@@ -84,8 +84,10 @@ fn lead_of(text: &str, start: usize) -> usize {
     if lead == line_start { start } else { lead }
 }
 
-/// Every definition in `text`: top-level ones, and the members of a
-/// `define-rec` (`(define-rec (name type lambda) …)`).
+/// Every definition in `text`: top-level ones, the members of a
+/// `define-rec` (`(define-rec (name type lambda) …)`), and the values an
+/// `import` defines (`(import m name … (type …) (effect …))`), each found at
+/// the `import`.
 pub fn definitions(text: &str, profile: SyntaxProfile) -> Result<Vec<Found>, String> {
     let (forms, i) = read(text, profile)?;
     let mut out = Vec::new();
@@ -102,6 +104,11 @@ pub fn definitions(text: &str, profile: SyntaxProfile) -> Result<Vec<Found>, Str
                     if let Some(n) = items(m).first().and_then(|h| sym(h, &i)) {
                         push(n, m, "define-rec");
                     }
+                }
+            }
+            "import" => {
+                for n in its.iter().skip(2).filter_map(|n| sym(n, &i)) {
+                    push(n, f, "import");
                 }
             }
             h if h.starts_with("define") => {
@@ -391,7 +398,7 @@ pub fn order(texts: &[(String, SyntaxProfile)]) -> Result<Vec<Early>, String> {
     for (k, (text, profile)) in texts.iter().enumerate() {
         let (forms, _) = read(text, *profile)?;
         for d in definitions(text, *profile)? {
-            if matches!(d.kind.as_str(), "define" | "define*" | "define-rec") {
+            if matches!(d.kind.as_str(), "define" | "define*" | "define-rec" | "import") {
                 let group = forms
                     .iter()
                     .find(|f| (f.span.start as usize) <= d.start && d.start < f.span.end as usize)
@@ -436,6 +443,12 @@ fn value_uses(s: &Syntax, i: &Interner, bound: &mut Vec<String>, out: &mut Vec<(
             let depth = bound.len();
             match head {
                 "define-type" | "define-datatype" | "define-effect" | "define-generative" | "module-parameters" | "quote" => {}
+                // `(import m name …)`: a use of `m`; its names are defined.
+                "import" => {
+                    if let Some(m) = its.get(1) {
+                        value_uses(m, i, bound, out);
+                    }
+                }
                 // `(define name type expression)`: the type is skipped.
                 "define" => {
                     if let Some(e) = its.last().filter(|_| its.len() >= 3) {

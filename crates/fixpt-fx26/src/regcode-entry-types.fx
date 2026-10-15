@@ -20,8 +20,7 @@
 (define-type exp (select parser-types exp))
 (hide (define check-subst-types (load-module "fx26:check-subst-types.fx")))
 (define-type exp-params (select check-subst-types exp-params))
-(define-type rthis (select regcode-types rthis))
-(define-type wcells (select regcode-types wcells))
+(import regcode-types (type rthis wcells))
 (define-type regcode-entry-sig
   (moduleof (val r-standard-word
                  (subr (maxeff (alloc @k)

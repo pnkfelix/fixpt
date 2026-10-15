@@ -30,14 +30,11 @@
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type k-items (select check-types-types k-items))
 ;; The types it names, from the files that define them.
-(define-type k-binders (select check-types-types k-binders))
-(define-type k-eff (select check-types-types k-eff))
+(import check-types-types (type k-binders k-eff))
 ;; The types it names, from the files that define them.
-(define-type k-ids (select check-types-types k-ids))
-(define-type k-region (select check-types-types k-region))
+(import check-types-types (type k-ids k-region))
 ;; The types it names, from the files that define them.
-(define-type k-atom (select check-types-types k-atom))
-(define-type k-regions (select check-types-types k-regions))
+(import check-types-types (type k-atom k-regions))
 (define-type check-read-sig
   (moduleof (val k-sfail
                  (subr (maxeff (alloc @t)

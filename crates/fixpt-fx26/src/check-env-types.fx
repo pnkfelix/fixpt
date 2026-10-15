@@ -4,10 +4,7 @@
 
 ;; The types these use, from the files that define them.
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
-(define-type k-ds (select check-types-types k-ds))
-(define-type k-ids (select check-types-types k-ids))
-(define-type k-names (select check-types-types k-names))
-(define-type k-at (select check-types-types k-at))
+(import check-types-types (type k-ds k-ids k-names k-at))
 (hide (define table-types (load-module "fx26:table-types.fx")))
 (define-type table (select table-types table))
 ;; Bindings, as lists of them are passed around.
@@ -94,8 +91,7 @@
 ;; The types it names, from the files that define them.
 (define-type k-eff (select check-types-types k-eff))
 ;; The types it names, from the files that define them.
-(define-type k-region (select check-types-types k-region))
-(define-type kx (select check-types-types kx))
+(import check-types-types (type k-region kx))
 (define-type check-env-sig
   (moduleof
    (val k-fx-module? (subr pure (symbol) bool))

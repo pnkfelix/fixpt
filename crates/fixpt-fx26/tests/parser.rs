@@ -123,6 +123,7 @@ fn the_parsers_agree_on_real_programs() {
         include_str!("programs/bloblet/else-narrows.fx"),
         include_str!("programs/modules/counter.fx"),
         include_str!("programs/modules/parameter.fx"),
+        include_str!("programs/modules/import.fx"),
         include_str!("programs/modules/rec.fx"),
         include_str!("programs/modules/select.fx"),
         include_str!("programs/modules/transparent.fx"),

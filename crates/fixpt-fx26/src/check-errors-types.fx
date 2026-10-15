@@ -8,9 +8,7 @@
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type kx (select check-types-types kx))
 ;; The types it names, from the files that define them.
-(define-type k-binders (select check-types-types k-binders))
-(define-type k-desc (select check-types-types k-desc))
-(define-type k-eff (select check-types-types k-eff))
+(import check-types-types (type k-binders k-desc k-eff))
 (define-type check-errors-sig
   (moduleof (val k-fail-at
                  (subr (maxeff (alloc @t)

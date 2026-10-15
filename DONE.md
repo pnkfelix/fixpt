@@ -2572,3 +2572,12 @@ Still open in `TODO.md` §97; done so far:
   20) + j` (`RESHAPE_PATH`, `reshape_path`, `k-reshape-path`, gone), taken
   apart with its constants written out in the FX-26 compiler, register
   code and evaluator.
+- **`(import m name … (type name …) (effect name …))`** (2026-10-15, the
+  user's; `docs/fx26.md`, Modules): what a module gives, by name, defined
+  where it is, each as `(define x (with m x))`, `(define-type t (select m
+  t))`, `(define-effect e (select m e))` would; expanded as it is read, in
+  both parsers (`Checker::expand_import`, `parser.fx`'s `expand-import`),
+  wherever a definition may be. The front end's 1176 one-line imports are
+  236 lines of `import` (`parser-exps.fx` 999 → 845 lines, `check-rules.fx`
+  1041 → 1025, its debt lowered). `sexp-edit` knows it (an `import`
+  defines its values and uses its module); `fx26-mode` highlights it.

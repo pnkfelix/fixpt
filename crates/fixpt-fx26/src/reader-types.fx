@@ -6,8 +6,7 @@
 ;; What its clients use of it (`check-program.fx`).
 ;; The types it names, from the files that define them.
 (hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
-(define-type syn (select parser-types syn))
-(define-type syns-a (select parser-types syns-a))
+(import parser-types (type syn syns-a))
 ;; The types it names, from the files that define them.
 (define-type loaded-files (select parser-types loaded-files))
 (define-type parser-sig

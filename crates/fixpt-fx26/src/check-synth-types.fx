@@ -4,19 +4,11 @@
 
 ;; The types these use, from the files that define them.
 (hide (define check-test-facts-types (load-module "fx26:check-test-facts-types.fx")))
-(define-type k-branch-facts (select check-test-facts-types k-branch-facts))
-(define-type k-cert-lens (select check-test-facts-types k-cert-lens))
-(define-type k-fact-list (select check-test-facts-types k-fact-list))
+(import check-test-facts-types (type k-branch-facts k-cert-lens k-fact-list))
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (hide (define check-env-types (load-module "fx26:check-env-types.fx")))
 (define-type k-datum (select check-env-types k-datum))
-(define-type k-eff (select check-types-types k-eff))
-(define-type k-ids (select check-types-types k-ids))
-(define-type k-named (select check-types-types k-named))
-(define-type k-narrows (select check-types-types k-narrows))
-(define-type k-regions (select check-types-types k-regions))
-(define-type k-steps (select check-types-types k-steps))
-(define-type k-ty (select check-types-types k-ty))
+(import check-types-types (type k-eff k-ids k-named k-narrows k-regions k-steps k-ty))
 ;; Types, and the effect of all.
 (define-type k-types-eff (productof (1 k-ids) (2 k-eff)))
 ;; What a call's arguments were found to be before they are checked: types (or -1), effects.
@@ -62,15 +54,10 @@
 (define-type k-binders (select check-types-types k-binders))
 (hide (define check-resolve-types (load-module "fx26:check-resolve-types.fx")))
 (define-type k-callable (select check-resolve-types k-callable))
-(define-type k-desc (select check-types-types k-desc))
-(define-type k-names (select check-types-types k-names))
-(define-type k-parts (select check-types-types k-parts))
-(define-type k-region (select check-types-types k-region))
-(define-type k-size (select check-types-types k-size))
+(import check-types-types (type k-desc k-names k-parts k-region k-size))
 (hide (define check-infer-types (load-module "fx26:check-infer-types.fx")))
 (define-type k-solved (select check-infer-types k-solved))
-(define-type k-te (select check-types-types k-te))
-(define-type kxs (select check-types-types kxs))
+(import check-types-types (type k-te kxs))
 ;; The checker's knot, as `check-synth.fx`'s forms are given it.
 (define-type k-synther
   (subr (maxeff (alloc @t) (goto @z) (read @globals) (read @s) (read @t) (write @t) spin)

@@ -42,13 +42,8 @@
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-subst) (include check-env) (include check-syntax)
       (include check-print-parts) (include check-read-descs) (include tables))
-(define k-atom-region (with check-effects k-atom-region))
-(define k-has-region? (with check-effects k-has-region?))
-(define k-insert (with check-effects k-insert))
-(define k-region=? (with check-effects k-region=?))
-(define k-effect-selects (with check-read k-effect-selects))
-(define k-with-effect-falls (with check-read k-with-effect-falls))
-(define k-items (with check-read k-items))
+(import check-effects k-atom-region k-has-region? k-insert k-region=?)
+(import check-read k-effect-selects k-with-effect-falls k-items)
 
 (define k-start (subr pure (kx) int)
   (lambda (x)

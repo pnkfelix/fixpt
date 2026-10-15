@@ -8,14 +8,11 @@
 (hide (define compile-plan-types (load-module "fx26:compile-plan-types.fx")))
 (define-type c-special (select compile-plan-types c-special))
 (hide (define compile-types (load-module "fx26:compile-types.fx")))
-(define-type cenv (select compile-types cenv))
-(define-type patches (select compile-types patches))
+(import compile-types (type cenv patches))
 (hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type exp (select parser-types exp))
 (hide (define regcode-types (load-module "fx26:regcode-types.fx")))
-(define-type rargs (select regcode-types rargs))
-(define-type renv (select regcode-types renv))
-(define-type rlocs (select regcode-types rlocs))
+(import regcode-types (type rargs renv rlocs))
 (hide (define table-types (load-module "fx26:table-types.fx")))
 (define-type table (select table-types table))
 ;; A specialized call: which of `c-specials`, its global, and the lambda.
@@ -55,21 +52,16 @@
 
 ;; What its clients use of it (`compile-programs.fx`).
 ;; The types it names, from the files that define them.
-(define-type r-const-list (select regcode-types r-const-list))
-(define-type rgen (select regcode-types rgen))
-(define-type rthis (select regcode-types rthis))
-(define-type wcells (select regcode-types wcells))
+(import regcode-types (type r-const-list rgen rthis wcells))
 ;; The types it names, from the files that define them.
 (define-type bools (select regcode-types bools))
 (hide (define check-resolve-types (load-module "fx26:check-resolve-types.fx")))
-(define-type exp-let-bs (select check-resolve-types exp-let-bs))
-(define-type exp-letrec-bs (select check-resolve-types exp-letrec-bs))
+(import check-resolve-types (type exp-let-bs exp-letrec-bs))
 (hide (define check-subst-types (load-module "fx26:check-subst-types.fx")))
 (define-type exp-params (select check-subst-types exp-params))
 (define-type exps (select compile-types exps))
 (define-type names (select parser-types names))
-(define-type rarg (select regcode-types rarg))
-(define-type rloc (select regcode-types rloc))
+(import regcode-types (type rarg rloc))
 (define-type syms (select compile-types syms))
 (define-type regcode-exps-sig
   (moduleof (val c-writes (ref c-write-table @k))

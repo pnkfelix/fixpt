@@ -347,6 +347,47 @@ impl Checker {
         Ok(out)
     }
 
+    /// `(import m item …)`: what module `m` gives, by name, defined here,
+    /// each as it is there (as R7RS's `(import (only m …))`, but of a module
+    /// bound to a variable, wherever a definition may be): a value `x`,
+    /// `(define x (with m x))`; each of `(type t …)`, `(define-type t
+    /// (select m t))`; each of `(effect e …)`, `(define-effect e (select m
+    /// e))`. Types and effects marked, as it is expanded as it is read,
+    /// as `define-datatype` is, before any type is known; each form at its
+    /// name. As `parser.fx`'s `expand-import`.
+    fn expand_import(&mut self, form: &Syntax, out: &mut Vec<Syntax>) -> R<()> {
+        let usage = "`(import module name … (type name …) (effect name …))`";
+        let items = form.as_proper_list().unwrap_or(&[]);
+        let Some((m, names)) = items.get(1..).and_then(|r| r.split_first()) else {
+            return Err(FxError::at(form.span, usage));
+        };
+        if m.as_symbol().is_none() {
+            return Err(FxError::at(m.span, format!("{usage}: the module, named by a variable")));
+        }
+        let mut one = |c: &mut Self, define: &str, wrap: &str, n: &Syntax| -> R<()> {
+            if n.as_symbol().is_none() {
+                return Err(FxError::at(n.span, format!("{usage}: a name")));
+            }
+            let sp = n.span;
+            let sym = |c: &mut Self, s: &str| Syntax::symbol(sp, c.interner.intern(s));
+            let got = Syntax::list(sp, vec![sym(c, wrap), m.clone(), n.clone()]);
+            out.push(Syntax::list(sp, vec![sym(c, define), n.clone(), got]));
+            Ok(())
+        };
+        for n in names {
+            match n.as_proper_list() {
+                Some([h, ns @ ..]) if h.as_symbol().is_some_and(|h| matches!(self.interner.name(h), "type" | "effect")) => {
+                    let define = if self.interner.name(h.as_symbol().expect("a symbol")) == "type" { "define-type" } else { "define-effect" };
+                    for t in ns {
+                        one(self, define, "select", t)?;
+                    }
+                }
+                _ => one(self, "define", "with", n)?,
+            }
+        }
+        Ok(())
+    }
+
     /// `(define-generative head rep)`: the form itself, which the checker
     /// alone reads, and its two conversions, each the identity:
     /// `(define up-name (poly (param …) (subr pure (rep) (name p …))) (lambda (x) x))`
@@ -418,6 +459,9 @@ impl Checker {
     /// constructors polymorphic in them.
     pub(crate) fn expand_datatype(&mut self, form: Syntax, out: &mut Vec<Syntax>) -> R<()> {
         let items = form.as_proper_list().unwrap_or(&[]).to_vec();
+        if items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h)) == Some("import") {
+            return self.expand_import(&form, out);
+        }
         if items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h)) != Some("define-datatype") {
             out.push(form);
             return Ok(());
@@ -1172,7 +1216,7 @@ pub const KEYWORDS: &[&str] = &[
     "subr", "poly", "ref", "pairof", "dletrec", "void", "pure", "maxeff", "read", "write",
     "alloc", "goto", "comefrom", "region", "effect", "type", "prompt", "prompt-tag",
     "composable", "mark-key", "listof", "cond", "case", "else", "and", "or", "let*", "define-effect", "define-convention", "module-parameters", "the",
-    "bloblet", "fields", "frozen", "arrayof", "icell", "await", "define-rec", "letrena", "letreap", "rlambda", "quote", "productof", "sumof", "product", "extract", "sum", "tagcase", "module", "moduleof", "with", "select", "load-module",
+    "bloblet", "fields", "frozen", "arrayof", "icell", "await", "define-rec", "letrena", "letreap", "rlambda", "quote", "productof", "sumof", "product", "extract", "sum", "tagcase", "module", "moduleof", "with", "select", "load-module", "import",
     "define-datatype", "make-bloblet", "bloblet-ref", "bloblet-set!", "bloblet-freeze", "bloblet-byte",
     "bloblet-set-byte!", "bloblet-bytes", "rmake-bloblet", "dlambda", "=>",
     "blobref-at", "blobref+", "blobref-owner", "blobref-offset", "blobref-get", "blobref-set!", "blobref-index", "blobref-length", "blobref-variant!",

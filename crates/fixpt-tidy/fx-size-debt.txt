@@ -34,4 +34,4 @@ crates/fixpt-fx26/src/regcode-core.fx 1129 0
 # to 1069 by `(hide (include m))` in place of its imports (§69); then to
 # 1047 by `(with #%fx n)`'s rule, out of the group, moved to
 # `check-processes.fx` with the rules of processes and `par` (§92).
-crates/fixpt-fx26/src/check-rules.fx 1041 0
+crates/fixpt-fx26/src/check-rules.fx 1025 0

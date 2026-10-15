@@ -6,12 +6,7 @@
 ;; What its clients use of it (`check-rules.fx`).
 ;; The types it names, from the files that define them.
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
-(define-type kx (select check-types-types kx))
-(define-type k-at (select check-types-types k-at))
-(define-type kxs (select check-types-types kxs))
-(define-type k-te (select check-types-types k-te))
-(define-effect checks (select check-types-types checks))
-(define-effect kreads (select check-types-types kreads))
+(import check-types-types (type kx k-at kxs k-te) (effect checks kreads))
 ;; What synthesizes an expression's type and effect: the rules' `k-synth`.
 (define-type k-synth-fn (subr (maxeff checks spin) (kx) k-te))
 (define-type check-processes-sig

@@ -33,10 +33,7 @@
 
 ;; Data, and what a wider bloblet type may forget: `check-sub-env.fx`'s,
 ;; which the subtype test, before this file, asks.
-(define k-data-place (with check-sub-env k-data-place))
-(define k-data-var-place (with check-sub-env k-data-var-place))
-(define k-is-data? (with check-sub-env k-is-data?))
-(define k-is-data-at? (with check-sub-env k-is-data-at?))
+(import check-sub-env k-data-place k-data-var-place k-is-data? k-is-data-at?)
 
 (define k-region-in? (subr (maxeff (read @globals) spin) (k-regions k-region) bool)
   (lambda (rs q) (and (not (null? rs)) (or (k-region=? (car rs) q) (k-region-in? (cdr rs) q)))))

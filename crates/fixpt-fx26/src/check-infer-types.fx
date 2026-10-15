@@ -4,8 +4,7 @@
 
 ;; The types these use, from the files that define them.
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
-(define-type k-binders (select check-types-types k-binders))
-(define-type k-map (select check-types-types k-map))
+(import check-types-types (type k-binders k-map))
 (define-type k-solved (ref k-map @t))
 ;; Binders, and the type under them.
 (define-type k-bound-body (productof (1 k-binders) (2 int)))
@@ -23,13 +22,7 @@
 (define-type k-arms (select check-resolve-types k-arms))
 (hide (define check-env-types (load-module "fx26:check-env-types.fx")))
 (define-type k-bindings (select check-env-types k-bindings))
-(define-type k-eff (select check-types-types k-eff))
-(define-type k-ids (select check-types-types k-ids))
-(define-type k-names (select check-types-types k-names))
-(define-type k-region (select check-types-types k-region))
-(define-type k-ty (select check-types-types k-ty))
-(define-type kx (select check-types-types kx))
-(define-type kxs (select check-types-types kxs))
+(import check-types-types (type k-eff k-ids k-names k-region k-ty kx kxs))
 ;; The types it names, from the files that define them.
 (define-type k-named (select check-types-types k-named))
 (hide (define check-subtype-types (load-module "fx26:check-subtype-types.fx")))

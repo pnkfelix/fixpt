@@ -159,7 +159,9 @@ are in the last section, "Log: the glance's details", and in
   have identities, `(start end k)`, and facts are keyed by them, not by
   place; the places invented for made expressions gone; facts a
   datatype; a load its key, as Sheldon's `input`, its hidden definition a
-  form of fixed meaning (done, `DONE.md` §97).
+  form of fixed meaning; and `(import m name …)`, which the front end's
+  module files now use for what they take of each other (done, `DONE.md`
+  §97).
 - **Cellular code calling native code** (2026-10-13, `TODO.md` §93):
   fixed, a crash on the REPL's machine where the native convention
   declined a form; its cost to assembling words mostly recovered (peval's

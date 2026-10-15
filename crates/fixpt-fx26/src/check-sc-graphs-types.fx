@@ -10,14 +10,9 @@
 (define-type kxs (select check-types-types kxs))
 ;; The types it names, from the files that define them.
 (hide (define check-terminate-types (load-module "fx26:check-terminate-types.fx")))
-(define-type k-calls (select check-terminate-types k-calls))
-(define-type k-graph (select check-terminate-types k-graph))
-(define-type k-guards (select check-terminate-types k-guards))
-(define-type k-ids (select check-types-types k-ids))
-(define-type k-names (select check-types-types k-names))
-(define-type k-passed (select check-terminate-types k-passed))
-(define-type k-trs (select check-terminate-types k-trs))
-(define-type k-tscope (select check-terminate-types k-tscope))
+(import check-terminate-types (type k-calls k-graph k-guards))
+(import check-types-types (type k-ids k-names))
+(import check-terminate-types (type k-passed k-trs k-tscope))
 (define-type kx (select check-types-types kx))
 (define-type check-sc-graphs-sig
   (moduleof (val k-op-either? (subr pure (string string string) bool))

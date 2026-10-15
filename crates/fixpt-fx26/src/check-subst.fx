@@ -33,12 +33,8 @@
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-holds) (include check-print-parts) (include check-env)
       (include tables) (include parser))
-(define k-atom-region (with check-effects k-atom-region))
-(define k-atom-with (with check-effects k-atom-with))
-(define k-one (with check-effects k-one))
-(define k-union (with check-effects k-union))
-(define k-keep-at (with check-read k-keep-at))
-(define k-subst-keep (with check-read k-subst-keep))
+(import check-effects k-atom-region k-atom-with k-one k-union)
+(import check-read k-keep-at k-subst-keep)
 
 (define k-gen-map (subr (maxeff (read @globals) (alloc @t)) (k-binders k-descs) k-map)
   (lambda (bs ds)

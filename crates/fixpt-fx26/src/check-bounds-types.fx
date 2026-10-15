@@ -4,8 +4,7 @@
 
 ;; The types these use, from the files that define them.
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
-(define-type k-map (select check-types-types k-map))
-(define-effect kstate (select check-types-types kstate))
+(import check-types-types (type k-map) (effect kstate))
 ;; At least `1`, at most `2`, exactly `3`: types, -1 where nothing has said.
 (define-type k-bound (productof (1 int) (2 int) (3 int)))
 (define-type k-bound-map (ref (listof (pairof int k-bound @t) @t) @t))

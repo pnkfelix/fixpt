@@ -6,9 +6,7 @@
 (hide (define compile-exps-types (load-module "fx26:compile-exps-types.fx")))
 (define-type c-inlinables (select compile-exps-types c-inlinables))
 (hide (define regcode-types (load-module "fx26:regcode-types.fx")))
-(define-type r-member-const (select regcode-types r-member-const))
-(define-type r-module-const (select regcode-types r-module-const))
-(define-type rconst (select regcode-types rconst))
+(import regcode-types (type r-member-const r-module-const rconst))
 ;; Globals kept for their names' next definitions: a redefinition of a type
 ;; the old one's users can take, for which the REPL asks
 ;; (`compile-keep-global!`).

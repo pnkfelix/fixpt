@@ -50,13 +50,8 @@
 (hide (include check-types) (include check-env) (include check-kinds) (include check-print-parts)
       (include check-print) (include check-holds) (include check-subst) (include check-read-descs)
       (include check-read-helpers) (include parser))
-(define k-effect-selects (with check-read k-effect-selects))
-(define k-with-effect-fall (with check-read k-with-effect-fall))
-(define k-union (with check-read k-union))
-(define k-one (with check-read k-one))
-(define k-keep-at (with check-read k-keep-at))
-(define k-keep-set! (with check-read k-keep-set!))
-(define k-subst-keep (with check-read k-subst-keep))
+(import check-read k-effect-selects k-with-effect-fall k-union k-one k-keep-at k-keep-set!
+        k-subst-keep)
 
 ;;; ------------------------------------------------------------ walking types
 

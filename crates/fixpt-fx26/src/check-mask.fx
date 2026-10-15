@@ -35,9 +35,7 @@
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-resolve) (include check-env)
       (include check-print-parts))
-(define k-atom-rank (with check-effects k-atom-rank))
-(define k-atom-region (with check-effects k-atom-region))
-(define k-has-region? (with check-effects k-has-region?))
+(import check-effects k-atom-rank k-atom-region k-has-region?)
 (define k-items (with check-read k-items))
 
 ;; Whether an atom is on `const`, the frozen region.

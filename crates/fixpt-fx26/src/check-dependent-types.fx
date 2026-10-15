@@ -4,8 +4,7 @@
 
 ;; The types these use, from the files that define them.
 (hide (define check-env-types (load-module "fx26:check-env-types.fx")))
-(define-type k-bindings (select check-env-types k-bindings))
-(define-type k-params-given (select check-env-types k-params-given))
+(import check-env-types (type k-bindings k-params-given))
 (hide (define check-resolve-types (load-module "fx26:check-resolve-types.fx")))
 (define-type k-callable (select check-resolve-types k-callable))
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))

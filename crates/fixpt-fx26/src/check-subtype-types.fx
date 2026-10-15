@@ -4,12 +4,7 @@
 
 ;; The types these use, from the files that define them.
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
-(define-effect checks (select check-types-types checks))
-(define-type k-eff (select check-types-types k-eff))
-(define-type k-hyps (select check-types-types k-hyps))
-(define-type k-te (select check-types-types k-te))
-(define-type k-ty (select check-types-types k-ty))
-(define-effect kstate (select check-types-types kstate))
+(import check-types-types (type k-eff k-hyps k-te k-ty) (effect checks kstate))
 (hide (define check-subst-types (load-module "fx26:check-subst-types.fx")))
 (define-type k-pairs (select check-subst-types k-pairs))
 (define-type k-trail (ref k-pairs @t))
@@ -45,8 +40,7 @@
 ;; The types it names, from the files that define them.
 (define-type k-parts (select check-types-types k-parts))
 ;; The types it names, from the files that define them.
-(define-type k-region (select check-types-types k-region))
-(define-type k-size (select check-types-types k-size))
+(import check-types-types (type k-region k-size))
 ;; The types it names, from the files that define them.
 (define-type kx (select check-types-types kx))
 (define-type check-subtype-sig

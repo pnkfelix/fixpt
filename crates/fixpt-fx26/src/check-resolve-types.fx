@@ -4,17 +4,9 @@
 
 ;; The types these use, from the files that define them.
 (hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
-(define-type exp (select parser-types exp))
-(define-type names (select parser-types names))
-(define-type syn (select parser-types syn))
-(define-type top (select parser-types top))
+(import parser-types (type exp names syn top))
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
-(define-type k-eff (select check-types-types k-eff))
-(define-type k-at (select check-types-types k-at))
-(define-type k-ids (select check-types-types k-ids))
-(define-type k-names (select check-types-types k-names))
-(define-type k-regions (select check-types-types k-regions))
-(define-type kx (select check-types-types kx))
+(import check-types-types (type k-eff k-at k-ids k-names k-regions kx))
 ;; The parts of a resolved tree, as `kx`'s constructors hold them: a
 ;; `lambda`'s parameters, a `letrec`'s and a `let`'s bindings (a product's
 ;; fields are as a `let`'s), and a `tagcase`'s arms.
@@ -51,17 +43,14 @@
 ;; The types it names, from the files that define them.
 (define-type k-descs (select check-types-types k-descs))
 ;; The types it names, from the files that define them.
-(define-type k-binders (select check-types-types k-binders))
-(define-type k-map (select check-types-types k-map))
-(define-type k-vsub (select check-types-types k-vsub))
+(import check-types-types (type k-binders k-map k-vsub))
 ;; The types it names, from the files that define them.
 (define-type k-items (select check-types-types k-items))
 ;; The types it names, from the files that define them.
 (hide (define check-subst-types (load-module "fx26:check-subst-types.fx")))
 (define-type k-pairs (select check-subst-types k-pairs))
 ;; The types it names, from the files that define them.
-(define-type k-hyps (select check-types-types k-hyps))
-(define-type k-lemma (select check-types-types k-lemma))
+(import check-types-types (type k-hyps k-lemma))
 ;; The types it names, from the files that define them.
 (define-type exp-params (select check-subst-types exp-params))
 (define-type syns-a (select parser-types syns-a))

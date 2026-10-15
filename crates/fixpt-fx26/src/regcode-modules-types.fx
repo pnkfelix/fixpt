@@ -15,19 +15,14 @@
 ;; What its clients use of it (`regcode-core.fx`).
 ;; The types it names, from the files that define them.
 (hide (define compile-exps-types (load-module "fx26:compile-exps-types.fx")))
-(define-type c-mslots (select compile-exps-types c-mslots))
-(define-type c-mvals (select compile-exps-types c-mvals))
-(define-type c-waits (select compile-exps-types c-waits))
+(import compile-exps-types (type c-mslots c-mvals c-waits))
 (hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type exp (select parser-types exp))
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type k-ids (select check-types-types k-ids))
 (hide (define check-env-types (load-module "fx26:check-env-types.fx")))
-(define-type k-pick (select check-env-types k-pick))
-(define-type k-picks (select check-env-types k-picks))
-(define-type rargs (select regcode-types rargs))
-(define-type rgen (select regcode-types rgen))
-(define-type rints (select regcode-types rints))
+(import check-env-types (type k-pick k-picks))
+(import regcode-types (type rargs rgen rints))
 (define-type syms (select compile-types syms))
 (define-type regcode-modules-sig
   (moduleof (val r-slots-oldest

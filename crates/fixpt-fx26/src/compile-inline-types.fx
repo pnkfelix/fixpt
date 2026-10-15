@@ -8,8 +8,7 @@
 (hide (define compile-types (load-module "fx26:compile-types.fx")))
 (define-type c-params (select compile-types c-params))
 (hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
-(define-type exp (select parser-types exp))
-(define-type top (select parser-types top))
+(import parser-types (type exp top))
 (define-type compile-inline-sig
   (moduleof (val c-plain-top
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin) (top) top))

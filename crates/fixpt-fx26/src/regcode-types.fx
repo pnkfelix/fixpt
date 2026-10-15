@@ -4,9 +4,7 @@
 
 ;; The types these use, from the files that define them.
 (hide (define compile-types (load-module "fx26:compile-types.fx")))
-(define-type c-this (select compile-types c-this))
-(define-effect compiles (select compile-types compiles))
-(define-type items (select compile-types items))
+(import compile-types (type c-this items) (effect compiles))
 (hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type exp (select parser-types exp))
 (hide (define table-types (load-module "fx26:table-types.fx")))

@@ -4,11 +4,7 @@
 
 ;; The types these use, from the files that define them.
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
-(define-effect checks (select check-types-types checks))
-(define-type k-ids (select check-types-types k-ids))
-(define-type k-map (select check-types-types k-map))
-(define-type k-parts (select check-types-types k-parts))
-(define-type kxs (select check-types-types kxs))
+(import check-types-types (type k-ids k-map k-parts kxs) (effect checks))
 ;; A `define-rec`'s types and expressions, each type read before its
 ;; expression, as the Rust parser reads them.
 (define-type k-rec-read (productof (1 k-ids) (2 kxs)))

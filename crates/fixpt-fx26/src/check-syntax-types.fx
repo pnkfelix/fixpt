@@ -32,14 +32,7 @@
 ;; The types it names, from the files that define them.
 (define-type k-conv (select check-types-types k-conv))
 ;; The types it names, from the files that define them.
-(define-type k-binders (select check-types-types k-binders))
-(define-type k-ds (select check-types-types k-ds))
-(define-type k-eff (select check-types-types k-eff))
-(define-type k-hyps (select check-types-types k-hyps))
-(define-type k-ids (select check-types-types k-ids))
-(define-type k-lemma (select check-types-types k-lemma))
-(define-type k-parts (select check-types-types k-parts))
-(define-type k-size (select check-types-types k-size))
+(import check-types-types (type k-binders k-ds k-eff k-hyps k-ids k-lemma k-parts k-size))
 (define-type check-syntax-sig
   (moduleof (val k-define-family
                  (subr (maxeff (alloc @t)

@@ -34,13 +34,8 @@
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-syntax) (include check-print-parts) (include check-env)
       (include check-subst) (include check-print) (include parser))
-(define k-atom-head? (with check-read k-atom-head?))
-(define k-sfail (with check-read k-sfail))
-(define k-items (with check-read k-items))
-(define k-any-typed-kind? (with check-read k-any-typed-kind?))
-(define k-arrow-syntax (with check-read k-arrow-syntax))
-(define k-one (with check-effects k-one))
-(define k-insert (with check-effects k-insert))
+(import check-read k-atom-head? k-sfail k-items k-any-typed-kind? k-arrow-syntax)
+(import check-effects k-one k-insert)
 
 ;; A `dlambda` of no parameters, as an error says.
 (define k-dlambda-empty string "a `dlambda` takes at least one description")

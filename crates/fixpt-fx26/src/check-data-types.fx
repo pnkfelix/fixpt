@@ -6,14 +6,9 @@
 ;; What its clients use of it (`check-rules.fx`).
 ;; The types it names, from the files that define them.
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
-(define-type k-binders (select check-types-types k-binders))
-(define-type k-map (select check-types-types k-map))
+(import check-types-types (type k-binders k-map))
 ;; The types it names, from the files that define them.
-(define-type k-regions (select check-types-types k-regions))
-(define-type k-ids (select check-types-types k-ids))
-(define-type k-atom (select check-types-types k-atom))
-(define-effect kstate (select check-types-types kstate))
-(define-effect checks (select check-types-types checks))
+(import check-types-types (type k-regions k-ids k-atom) (effect kstate checks))
 (define-type check-data-sig
   (moduleof (val k-is-data?
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)

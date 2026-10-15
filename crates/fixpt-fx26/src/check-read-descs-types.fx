@@ -10,9 +10,7 @@
 (hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type syn (select parser-types syn))
 ;; The types it names, from the files that define them.
-(define-type k-binders (select check-types-types k-binders))
-(define-type k-descs (select check-types-types k-descs))
-(define-type k-parts (select check-types-types k-parts))
+(import check-types-types (type k-binders k-descs k-parts))
 ;; The types it names, from the files that define them.
 (define-type k-ids (select check-types-types k-ids))
 ;; The types it names, from the files that define them.

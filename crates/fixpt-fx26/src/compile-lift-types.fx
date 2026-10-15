@@ -4,9 +4,7 @@
 
 ;; The types these use, from the files that define them.
 (hide (define compile-types (load-module "fx26:compile-types.fx")))
-(define-type k-at (select compile-types k-at))
-(define-type table (select compile-types table))
-(define-type syms (select compile-types syms))
+(import compile-types (type k-at table syms))
 ;; While a `letrec` is planned to be lifted, by member: the names each
 ;; takes, and the siblings each calls.
 (define-type c-added (arrayof syms @k))
@@ -32,8 +30,7 @@
 (hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type exp (select parser-types exp))
 ;; The types it names, from the files that define them.
-(define-type c-recs (select compile-types c-recs))
-(define-type cenv (select compile-types cenv))
+(import compile-types (type c-recs cenv))
 ;; The types it names, from the files that define them.
 (define-type c-lift (select compile-types c-lift))
 (hide (define compile-programs-types (load-module "fx26:compile-programs-types.fx")))

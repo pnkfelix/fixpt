@@ -41,21 +41,14 @@
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-env) (include check-print) (include check-print-parts)
       (include check-calls) (include check-effects) (include check-subtype))
-(define k-start (with check-resolve k-start))
-(define k-at-of (with check-resolve k-at-of))
-(define k-kth (with check-resolve k-kth))
-(define k-end (with check-resolve k-end))
-(define k-free-vars (with check-resolve k-free-vars))
+(import check-resolve k-start k-at-of k-kth k-end k-free-vars)
 (define k-regions-distinct? (with check-binders k-regions-distinct?))
 (define k-with-used (with check-synth k-with-used))
 (define k-comp-names (with check-module-rules k-comp-names))
 
 ;; The generative types of processes, and what may be sent to one
 ;; (`check-data.fx`).
-(define k-addr-index (with check-data k-addr-index))
-(define k-inbox-index (with check-data k-inbox-index))
-(define k-untransmissible (with check-data k-untransmissible))
-(define k-crossing-atom? (with check-data k-crossing-atom?))
+(import check-data k-addr-index k-inbox-index k-untransmissible k-crossing-atom?)
 
 ;;; ------------------------------------------------------------ the library
 

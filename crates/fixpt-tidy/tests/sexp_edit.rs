@@ -103,6 +103,12 @@ fn reports_values_used_before_their_definitions() {
     let star = "(define f (subr pure () int) (lambda () (h 1)))\n(define* h (subr pure (int) int) (lambda (n) n))\n";
     let early = se::order(&[(star.to_string(), P)]).unwrap();
     assert_eq!(early.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["h"]);
+    // An `import` defines its values where it is, and uses its module:
+    // `x` used before the import is early, `m` used by it before its own
+    // definition is too, and types are declared ahead.
+    let import = "(define f (subr pure () int) (lambda () x))\n(import m x (type t))\n(define m 1)\n";
+    let early = se::order(&[(import.to_string(), P)]).unwrap();
+    assert_eq!(early.iter().map(|e| e.name.as_str()).collect::<Vec<_>>(), ["x", "m"]);
 }
 
 #[test]

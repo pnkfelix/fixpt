@@ -22,9 +22,7 @@
 ;; The types it names, from the files that define them.
 (define-type kxs (select check-types-types kxs))
 ;; The types it names, from the files that define them.
-(define-type k-eff (select check-types-types k-eff))
-(define-type k-map (select check-types-types k-map))
-(define-type k-region (select check-types-types k-region))
+(import check-types-types (type k-eff k-map k-region))
 (define-type check-calls-sig
   (moduleof (val k-under (subr (read @globals) (kx) kx))
             (val k-callee-name

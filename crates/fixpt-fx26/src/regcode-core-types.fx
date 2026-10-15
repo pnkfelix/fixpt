@@ -10,8 +10,7 @@
 (hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type exp (select parser-types exp))
 (hide (define regcode-types (load-module "fx26:regcode-types.fx")))
-(define-type renv (select regcode-types renv))
-(define-type rgen (select regcode-types rgen))
+(import regcode-types (type renv rgen))
 (define-type regcode-core-sig
   (moduleof (val r-exp
                  (subr (maxeff (alloc @k)

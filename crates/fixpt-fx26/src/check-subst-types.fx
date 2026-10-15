@@ -28,10 +28,7 @@
 ;; The types it names, from the files that define them.
 (define-type k-region (select check-types-types k-region))
 ;; The types it names, from the files that define them.
-(define-type k-binders (select check-types-types k-binders))
-(define-type k-desc (select check-types-types k-desc))
-(define-type k-descs (select check-types-types k-descs))
-(define-type k-ids (select check-types-types k-ids))
+(import check-types-types (type k-binders k-desc k-descs k-ids))
 (define-type check-subst-sig
   (moduleof (val k-note-closed-filled
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)

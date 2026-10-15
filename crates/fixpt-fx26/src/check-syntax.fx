@@ -37,19 +37,9 @@
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-unions) (include check-print-parts) (include check-env)
       (include check-holds) (include parser))
-(define k-atom-of (with check-read k-atom-of))
-(define k-atoms-on (with check-read k-atoms-on))
-(define k-globals-region (with check-read k-globals-region))
-(define k-head (with check-read k-head))
-(define k-items (with check-read k-items))
-(define k-name-of (with check-read k-name-of))
-(define k-parse-kind (with check-read k-parse-kind))
-(define k-parse-region (with check-read k-parse-region))
-(define k-sfail (with check-read k-sfail))
-(define k-symbol-head (with check-read k-symbol-head))
-(define k-eff=? (with check-effects k-eff=?))
-(define k-one (with check-effects k-one))
-(define k-region=? (with check-effects k-region=?))
+(import check-read k-atom-of k-atoms-on k-globals-region k-head k-items k-name-of k-parse-kind
+        k-parse-region k-sfail k-symbol-head)
+(import check-effects k-eff=? k-one k-region=?)
 
 (define-rec
   ;; `(head x)`: one atom on region `x`; or, `x` being globals, one for

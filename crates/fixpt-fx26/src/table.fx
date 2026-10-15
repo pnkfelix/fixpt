@@ -15,13 +15,7 @@
 
 ;; Its types (`table-types.fx`), and what it names of them.
 (define table-types (load-module "fx26:table-types.fx"))
-(define-type bucket (select table-types bucket))
-(define-type bucket-array (select table-types bucket-array))
-(define-type entry (select table-types entry))
-(define-type key-hash (select table-types key-hash))
-(define-type key-same (select table-types key-same))
-(define-type table (select table-types table))
-(define-type rehashing (select table-types rehashing))
+(import table-types (type bucket bucket-array entry key-hash key-same table rehashing))
 
 ;; Whether `n` names the empty list: `nil`, or `no-pair`, the same value at
 ;; any pair type (`standard.rs`).

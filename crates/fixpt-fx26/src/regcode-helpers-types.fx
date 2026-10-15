@@ -4,14 +4,11 @@
 
 ;; The types these use, from the files that define them.
 (hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
-(define-type exp (select parser-types exp))
-(define-type k-datums (select parser-types k-datums))
+(import parser-types (type exp k-datums))
 (hide (define check-resolve-types (load-module "fx26:check-resolve-types.fx")))
-(define-type exp-arms (select check-resolve-types exp-arms))
-(define-type exp-let-bs (select check-resolve-types exp-let-bs))
+(import check-resolve-types (type exp-arms exp-let-bs))
 (hide (define regcode-types (load-module "fx26:regcode-types.fx")))
-(define-type rconst (select regcode-types rconst))
-(define-type wcells (select regcode-types wcells))
+(import regcode-types (type rconst wcells))
 (hide (define compile-types (load-module "fx26:compile-types.fx")))
 (define-type syms (select compile-types syms))
 ;; An expression, or none: a call's procedure (`r-args`), a closure's
@@ -52,13 +49,8 @@
 (define-type cenv (select compile-types cenv))
 (hide (define check-subst-types (load-module "fx26:check-subst-types.fx")))
 (define-type exp-params (select check-subst-types exp-params))
-(define-type exps (select compile-types exps))
-(define-type patches (select compile-types patches))
-(define-type rarg (select regcode-types rarg))
-(define-type rargs (select regcode-types rargs))
-(define-type rconsts (select regcode-types rconsts))
-(define-type rloc (select regcode-types rloc))
-(define-type renv (select regcode-types renv))
+(import compile-types (type exps patches))
+(import regcode-types (type rarg rargs rconsts rloc renv))
 ;; The knot's `r-exp` and `r-prim`, as `r-bloblet` is given them.
 (define-type r-exper
   (subr (maxeff (alloc @k) (goto @y) (read @globals) (read @k) (read @t) (write @k) spin)

@@ -30,24 +30,9 @@
 (hide (include eval-types) (include parser-types) (include check-env-types)
       (include check-resolve-types) (include check-types-types) (include check-subst-types))
 ;; What it uses of the modules it is given.
-(define apply-val (with values apply-val))
-(define apply1 (with values apply1))
-(define ev-poll (with values ev-poll))
-(define as-bool (with values as-bool))
-(define as-fields (with values as-fields))
-(define as-other (with values as-other))
-(define as-tag (with values as-tag))
-(define efail (with values efail))
-(define efail-expected (with values efail-expected))
-(define eval-tag (with values eval-tag))
-(define show-val (with values show-val))
-(define the-unit (with values the-unit))
-(define ev-bloblet (with prims ev-bloblet))
-(define ev-bref (with prims ev-bref))
-(define ev-blobref (with prims ev-blobref))
-(define ev-flat-tag (with prims ev-flat-tag))
-(define ev-label-is? (with prims ev-label-is?))
-(define standard (with prims standard))
+(import values apply-val apply1 ev-poll as-bool as-fields as-other as-tag efail efail-expected
+        eval-tag show-val the-unit)
+(import prims ev-bloblet ev-bref ev-blobref ev-flat-tag ev-label-is? standard)
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include env) (include resolve))
 

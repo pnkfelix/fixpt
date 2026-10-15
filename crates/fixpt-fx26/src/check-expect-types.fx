@@ -12,9 +12,7 @@
 (define-type k-bindings (select check-env-types k-bindings))
 (hide (define check-subtype-types (load-module "fx26:check-subtype-types.fx")))
 (define-type k-checking (select check-subtype-types k-checking))
-(define-type k-conv (select check-types-types k-conv))
-(define-type k-eff (select check-types-types k-eff))
-(define-type k-ids (select check-types-types k-ids))
+(import check-types-types (type k-conv k-eff k-ids))
 (hide (define check-resolve-types (load-module "fx26:check-resolve-types.fx")))
 (define-type k-let-bs (select check-resolve-types k-let-bs))
 (define-type k-names (select check-types-types k-names))
@@ -22,9 +20,7 @@
 (define-type k-te (select check-types-types k-te))
 (define-type k-typed-params (select check-resolve-types k-typed-params))
 ;; The types it names, from the files that define them.
-(define-type k-binders (select check-types-types k-binders))
-(define-type k-descs (select check-types-types k-descs))
-(define-type k-map (select check-types-types k-map))
+(import check-types-types (type k-binders k-descs k-map))
 ;; The types it names, from the files that define them.
 (define-type k-effs (select check-subtype-types k-effs))
 (define-type k-letrec-bs (select check-resolve-types k-letrec-bs))

@@ -25,8 +25,7 @@
 ;; The types it uses of the files before it.
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-effects))
-(define k-dscope (with check-env k-dscope))
-(define k-globals-region? (with check-env k-globals-region?))
+(import check-env k-dscope k-globals-region?)
 
 ;; Whether two types are being shown apart (`k-show-apart`): each
 ;; description variable printed as a mark, named after.

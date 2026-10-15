@@ -39,8 +39,7 @@
 (hide (include check-types) (include check-resolve) (include check-sub-env) (include check-env)
       (include check-print-parts) (include check-effects) (include check-proving)
       (include check-subst) (include check-modules))
-(define k-unsized-length (with check-read-helpers k-unsized-length))
-(define k-with-unsized-length (with check-read-helpers k-with-unsized-length))
+(import check-read-helpers k-unsized-length k-with-unsized-length)
 ;; A blobref's (generative 5) arguments `xs`, to an array that runs to the
 ;; end of the suffix, its length named where it was bound, as one of
 ;; length `finite`, which means just that, where `ys`'s is (`TODO.md` §77).

@@ -21,12 +21,9 @@
 
 ;; What its clients use of it (`check-rules.fx`).
 ;; The types it names, from the files that define them.
-(define-type k-descs (select check-types-types k-descs))
-(define-type k-ids (select check-types-types k-ids))
+(import check-types-types (type k-descs k-ids))
 ;; The types it names, from the files that define them.
-(define-type k-desc (select check-types-types k-desc))
-(define-type k-eff (select check-types-types k-eff))
-(define-type k-regions (select check-types-types k-regions))
+(import check-types-types (type k-desc k-eff k-regions))
 (define-type check-holds-sig
   (moduleof (val k-no-knot
                  (subr (maxeff (alloc @t)

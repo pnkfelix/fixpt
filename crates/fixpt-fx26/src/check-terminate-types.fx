@@ -4,9 +4,7 @@
 
 ;; The types these use, from the files that define them.
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
-(define-effect checks (select check-types-types checks))
-(define-type k-ids (select check-types-types k-ids))
-(define-type k-te (select check-types-types k-te))
+(import check-types-types (type k-ids k-te) (effect checks))
 ;; What is known of a value, relative to a parameter of the member walked:
 ;; the parameter, or (strictly) a part of it, of a type; or the integer
 ;; parameter plus an offset.

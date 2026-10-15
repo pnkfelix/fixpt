@@ -7,9 +7,7 @@
 (define-type k-strings (select check-types-types k-strings))
 (hide (define check-env-types (load-module "fx26:check-env-types.fx")))
 (define-type k-scope (select check-env-types k-scope))
-(define-type k-ids (select check-types-types k-ids))
-(define-type k-parts (select check-types-types k-parts))
-(define-type k-size (select check-types-types k-size))
+(import check-types-types (type k-ids k-parts k-size))
 ;; The `define-type`s of a scope by the type each resolves to, made once
 ;; for a type shown (`k-show-ty`), so that each of its nodes finds its name
 ;; in a tree, not by resolving every one in scope (`k-abbrev-in`, still for
@@ -45,15 +43,13 @@
 
 ;; What its clients use of it (`check-program.fx`).
 ;; The types it names, from the files that define them.
-(define-type k-atom (select check-types-types k-atom))
-(define-type k-eff (select check-types-types k-eff))
+(import check-types-types (type k-atom k-eff))
 ;; The types it names, from the files that define them.
 (define-type k-conv (select check-types-types k-conv))
 ;; The types it names, from the files that define them.
 (define-type k-map (select check-types-types k-map))
 ;; The types it names, from the files that define them.
-(define-type k-region (select check-types-types k-region))
-(define-type k-terms (select check-types-types k-terms))
+(import check-types-types (type k-region k-terms))
 (define-type check-print-sig
   (moduleof (val k-keep-atree!
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)

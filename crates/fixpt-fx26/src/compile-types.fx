@@ -4,19 +4,9 @@
 
 ;; The types these use, from the files that define them.
 (hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
-(define-type exp (select parser-types exp))
-(define-type k-datum (select parser-types k-datum))
-(define-type k-datums (select parser-types k-datums))
-(define-type names (select parser-types names))
-(define-type syn (select parser-types syn))
-(define-type syns-a (select parser-types syns-a))
+(import parser-types (type exp k-datum k-datums names syn syns-a))
 (hide (define check-env-types (load-module "fx26:check-env-types.fx")))
-(define-type k-with-list (select check-env-types k-with-list))
-(define-type k-with-noted (select check-env-types k-with-noted))
-(define-type k-reshaped (select check-env-types k-reshaped))
-(define-type k-pick (select check-env-types k-pick))
-(define-type k-picks (select check-env-types k-picks))
-(define-type k-reshape-list (select check-env-types k-reshape-list))
+(import check-env-types (type k-with-list k-with-noted k-reshaped k-pick k-picks k-reshape-list))
 (hide (define table-types (load-module "fx26:table-types.fx")))
 (define-type table (select table-types table))
 ;; What looking at the trees and the compiler's state may do: build lists

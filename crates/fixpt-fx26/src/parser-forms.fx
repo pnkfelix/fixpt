@@ -14,18 +14,9 @@
 (module-parameters ((rs region) (re region) (rm region) (rc region) (rp region)))
 (define parser-module ((proj (load-module "fx26:parser.fx") rs re rm rc rp)))
 (define eager-reader-module (with parser-module eager-reader-module))
-(define-type syn (select eager-reader-module syn))
-(define atom (with eager-reader-module atom))
-(define-effect parses (select parser-module parses))
-(define-type syns-a (select parser-module syns-a))
-(define-type exp (select parser-module exp))
-(define syn-symbol? (with parser-module syn-symbol?))
-(define syn-head (with parser-module syn-head))
-(define syn-start (with parser-module syn-start))
-(define syn-end (with parser-module syn-end))
-(define len (with parser-module len))
-(define nth (with parser-module nth))
-(define drop (with parser-module drop))
+(import eager-reader-module atom (type syn))
+(import parser-module syn-symbol? syn-head syn-start syn-end len nth drop (type syns-a exp)
+        (effect parses))
 
 ;; How a form here fails: the caller's `pfail-at`, as this file's instance
 ;; of `parser.fx` is not the caller's, and its prompt tag no prompt's.
@@ -38,9 +29,7 @@
 ;; `message`, said of `s`, through `fail`.
 (define fail-at-syn (subr parses (fails string syn) void)
   (lambda (fail message s) (fail message (syn-start s) (syn-end s))))
-(define mk-symbol (with parser-module mk-symbol))
-(define mk-list (with parser-module mk-list))
-(define mk-int (with parser-module mk-int))
+(import parser-module mk-symbol mk-list mk-int)
 
 ;; The scheduler's module file, which each form loads.
 (define processes string "fx26:processes.fx")

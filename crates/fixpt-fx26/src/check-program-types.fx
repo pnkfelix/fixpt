@@ -3,15 +3,11 @@
 
 ;; The types these use, from the files that define them.
 (hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
-(define-type exp (select parser-types exp))
-(define-type syn (select parser-types syn))
-(define-type top (select parser-types top))
+(import parser-types (type exp syn top))
 (hide (define check-resolve-types (load-module "fx26:check-resolve-types.fx")))
-(define-type k-def (select check-resolve-types k-def))
-(define-type k-run (select check-resolve-types k-run))
+(import check-resolve-types (type k-def k-run))
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
-(define-type k-names (select check-types-types k-names))
-(define-type kx (select check-types-types kx))
+(import check-types-types (type k-names kx))
 (define-type k-out (listof string acyclic))
 ;; A place in what a proof was given: a variable and the labels extracted.
 (define-type k-pos (pairof symbol (listof symbol acyclic) @t))

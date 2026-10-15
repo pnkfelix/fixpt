@@ -6,8 +6,7 @@
 (hide (define check-resolve-types (load-module "fx26:check-resolve-types.fx")))
 (define-type k-letrec-bs (select check-resolve-types k-letrec-bs))
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
-(define-type k-names (select check-types-types k-names))
-(define-type kx (select check-types-types kx))
+(import check-types-types (type k-names kx))
 (hide (define table-types (load-module "fx26:table-types.fx")))
 (define-type table (select table-types table))
 ;; Reading the checker's tables and making lists.
@@ -43,8 +42,7 @@
 ;; The types it names, from the files that define them.
 (hide (define check-env-types (load-module "fx26:check-env-types.fx")))
 (define-type k-hazard-list (select check-env-types k-hazard-list))
-(define-type k-item (select check-types-types k-item))
-(define-type k-items (select check-types-types k-items))
+(import check-types-types (type k-item k-items))
 (define-type check-modorder-sig
   (moduleof (val k-names-onto
                  (subr (maxeff (alloc @t) (read @globals)) (k-names k-names) k-names))

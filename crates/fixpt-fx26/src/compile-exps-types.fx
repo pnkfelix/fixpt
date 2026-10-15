@@ -4,11 +4,7 @@
 
 ;; The types these use, from the files that define them.
 (hide (define compile-types (load-module "fx26:compile-types.fx")))
-(define-type k-at (select compile-types k-at))
-(define-type c-params (select compile-types c-params))
-(define-type c-this (select compile-types c-this))
-(define-type cenv (select compile-types cenv))
-(define-type syms (select compile-types syms))
+(import compile-types (type k-at c-params c-this cenv syms))
 (hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type exp (select parser-types exp))
 ;; A small global procedure a call in register code may inline, guarded
@@ -61,9 +57,7 @@
 (define-type mod-items (select parser-types mod-items))
 (define-type patches (select compile-types patches))
 ;; The types it names, from the files that define them.
-(define-type c-lift (select compile-types c-lift))
-(define-type c-lifting (select compile-types c-lifting))
-(define-type c-recs (select compile-types c-recs))
+(import compile-types (type c-lift c-lifting c-recs))
 (define-type compile-exps-sig
   (moduleof (val c-exp
                  (subr (maxeff (alloc @k)

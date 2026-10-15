@@ -6,8 +6,7 @@
 ;; What its clients use of it (`check-synth.fx`).
 ;; The types it names, from the files that define them.
 (hide (define check-test-facts-types (load-module "fx26:check-test-facts-types.fx")))
-(define-type k-branch-facts (select check-test-facts-types k-branch-facts))
-(define-type k-fact-list (select check-test-facts-types k-fact-list))
+(import check-test-facts-types (type k-branch-facts k-fact-list))
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type kx (select check-types-types kx))
 (define-type check-facts-sig

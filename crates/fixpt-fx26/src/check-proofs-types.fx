@@ -7,9 +7,7 @@
 ;; `compile-state.fx`).
 ;; The types it names, from the files that define them.
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
-(define-type k-lemma (select check-types-types k-lemma))
-(define-type k-names (select check-types-types k-names))
-(define-type kx (select check-types-types kx))
+(import check-types-types (type k-lemma k-names kx))
 (hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type syns-a (select parser-types syns-a))
 (define-type check-proofs-sig

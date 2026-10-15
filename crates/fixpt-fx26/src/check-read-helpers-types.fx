@@ -8,27 +8,19 @@
 ;; `check-rules.fx`).
 ;; The types it names, from the files that define them.
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
-(define-type k-binders (select check-types-types k-binders))
-(define-type k-desc (select check-types-types k-desc))
-(define-type k-descs (select check-types-types k-descs))
-(define-type k-ids (select check-types-types k-ids))
-(define-type k-parts (select check-types-types k-parts))
+(import check-types-types (type k-binders k-desc k-descs k-ids k-parts))
 ;; The types it names, from the files that define them.
 (define-type k-names (select check-types-types k-names))
 (hide (define check-read-types (load-module "fx26:check-read-types.fx")))
 (define-type k-params (select check-read-types k-params))
 (hide (define check-env-types (load-module "fx26:check-env-types.fx")))
-(define-type k-scope (select check-env-types k-scope))
-(define-type k-selects (select check-env-types k-selects))
+(import check-env-types (type k-scope k-selects))
 (define-type k-syns (select check-read-types k-syns))
 (hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type syn (select parser-types syn))
 (define-type k-region (select check-types-types k-region))
 (define-type k-int-pair (pairof int int @t))
-(define-type k-te (select check-types-types k-te))
-(define-type kx (select check-types-types kx))
-(define-type k-at (select check-types-types k-at))
-(define-type k-eff (select check-types-types k-eff))
+(import check-types-types (type k-te kx k-at k-eff))
 ;; The checker's knot, `check-rules.fx`'s `k-synth-as`, as given here.
 (define-type k-synth-as-knot
   (subr (maxeff (alloc @t) (goto @z) (read @globals) (read @s) (read @t) (write @t) spin)

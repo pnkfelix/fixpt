@@ -27,15 +27,8 @@
            (check-program (select check-program-types check-program-sig))
            (check-proofs (select check-proofs-types check-proofs-sig)))
     (module
-(define-type c-inlinables (select compile-exps-types c-inlinables))
-(define-type c-mvals (select compile-exps-types c-mvals))
-(define-type c-mslots (select compile-exps-types c-mslots))
-(define-type c-waits (select compile-exps-types c-waits))
-(define-type c-made (select compile-exps-types c-made))
-(define-type c-closing (select compile-exps-types c-closing))
-(define-type c-spec (select compile-exps-types c-spec))
-(define-type c-copy-twin (select compile-exps-types c-copy-twin))
-(define-type c-twin (select compile-exps-types c-twin))
+(import compile-exps-types
+        (type c-inlinables c-mvals c-mslots c-waits c-made c-closing c-spec c-copy-twin c-twin))
 ;; The types it uses of the files before it.
 (hide (include compile-types) (include parser-types) (include reader-types)
       (include check-types-types))
