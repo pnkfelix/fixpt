@@ -32,7 +32,7 @@
 //! `define` shadows the first rather than assigning it.
 
 use crate::ast::{ArmBind, BlobletOp, Exp, ExpId};
-use crate::check::Checker;
+use crate::check::{Checker, Datum};
 use fixpt_read::Sym;
 use std::collections::HashMap;
 
@@ -757,25 +757,25 @@ impl Lowerer<'_> {
                     BlobletOp::RefAt | BlobletOp::RefAdd => {
                         let name = if op == BlobletOp::RefAt { "%suffix-ref" } else { "%suffix-ref+" };
                         let r = format!("({name} {} {})", a[0], a[1]);
-                        match self.c.facts.field_index[&e] {
-                            0 | 1 => r,
-                            size => format!("(%fx26-suffix-fits {r} {size})"),
+                        match self.c.facts.datum.get(&e) {
+                            Some(&Datum::Fits(size)) if size > 1 => format!("(%fx26-suffix-fits {r} {size})"),
+                            _ => r,
                         }
                     }
                     BlobletOp::RefOwner => format!("(%suffix-ref-owner {})", a[0]),
                     BlobletOp::RefOffset => format!("(%suffix-ref-offset {})", a[0]),
                     // The scalar's layout, as the checker found it.
-                    BlobletOp::RefGet => format!("(%fx26-suffix-ref-get {} {})", a[0], self.c.facts.field_index[&e]),
-                    BlobletOp::RefLength => format!("(%fx26-suffix-ref-length {} {})", a[0], self.c.facts.field_index[&e]),
+                    BlobletOp::RefGet => format!("(%fx26-suffix-ref-get {} {})", a[0], self.c.facts.operand(e).expect("checked")),
+                    BlobletOp::RefLength => format!("(%fx26-suffix-ref-length {} {})", a[0], self.c.facts.operand(e).expect("checked")),
                     BlobletOp::RefIndex => {
-                        format!("(%fx26-suffix-ref-index {} {} {})", a[0], a[1], self.c.facts.field_index[&e])
+                        format!("(%fx26-suffix-ref-index {} {} {})", a[0], a[1], self.c.facts.operand(e).expect("checked"))
                     }
                     // The flat sum's layout, as the checker found it.
                     BlobletOp::RefVariant => {
-                        format!("(%fx26-flat-variant! {} {} {})", a[0], self.c.facts.field_index[&e], a[1])
+                        format!("(%fx26-flat-variant! {} {} {})", a[0], self.c.facts.operand(e).expect("checked"), a[1])
                     }
                     BlobletOp::RefSet => {
-                        format!("(%fx26-suffix-ref-set! {} {} {})", a[0], self.c.facts.field_index[&e], a[1])
+                        format!("(%fx26-suffix-ref-set! {} {} {})", a[0], self.c.facts.operand(e).expect("checked"), a[1])
                     }
                 }
             }
@@ -807,21 +807,18 @@ impl Lowerer<'_> {
                 let names: Vec<Sym> = used.iter().map(|(n, _)| *n).collect();
                 format!("(let ({}) {})", bs.join(" "), self.body(&names, body))
             }
-            Exp::Extract(x, _) => {
-                let i = self.c.facts.field_index[&e];
+            Exp::Extract(x, _) => match self.c.facts.datum[&e] {
                 // A blobref's field: one at its offset.
-                if i >= crate::check::BLOBREF_FIELD {
-                    return format!("(%suffix-ref+ {} {})", self.go(x), i - crate::check::BLOBREF_FIELD);
-                }
-                format!("(%bloblet-ref {} {})", self.go(x), i + 2)
-            }
+                Datum::BlobrefField(at) => format!("(%suffix-ref+ {} {at})", self.go(x)),
+                Datum::Field(i) => format!("(%bloblet-ref {} {})", self.go(x), i + 2),
+                d => unreachable!("an extract's datum is a field: {d:?}"),
+            },
             Exp::Sum(tag, x) => {
                 format!("(%fx26-sum '{} {})", fixpt_read::escape_symbol(self.c.interner.name(tag)), self.go(x))
             }
             // A blobref to a flat sum: its tag read once, as a label; each
             // arm given a blobref to the variant (`TODO.md` §77).
-            Exp::TagCase { scrutinee, arms, els } if self.c.facts.field_index.contains_key(&e) => {
-                let code = self.c.facts.field_index[&e];
+            Exp::TagCase { scrutinee, arms, els } if let Some(&Datum::Layout(code)) = self.c.facts.datum.get(&e) => {
                 let s = self.go(scrutinee);
                 let mut out = match els {
                     Some((y, body)) => format!("(let (({} %fx26-tc)) {})", self.local(y), self.body(&[y], body)),

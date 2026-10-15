@@ -716,7 +716,9 @@
           rs
           (let* ((b (car (car p))) (r (k-owner-region (extract at 1) (extract at 2) st b)))
             (begin
-              (set k-extracts (cons (product (1 at) (2 (n-datum (extract l 1)))) (get k-extracts)))
+              (set k-extracts
+                   (cons (product (1 at) (2 (n-datum (datum-layout (extract l 1)))))
+                         (get k-extracts)))
               (k-te (k-ty-new (ty-sum (k-blobref-variants b (extract l 4))))
                     (k-insert (a-read r) (extract rs 2)))))))))
 (define k-blobref-variants (subr (maxeff kstate spin) (int k-parts) k-parts)
@@ -798,7 +800,8 @@
                 (let ((r (k-owner-region a z xt b)))
                   (begin
                     (set k-extracts
-                         (cons (product (1 (product (1 a) (2 z) (3 k))) (2 (n-datum code)))
+                         (cons (product (1 (product (1 a) (2 z) (3 k)))
+                                        (2 (n-datum (datum-layout code))))
                                (get k-extracts)))
                     (k-te (k-blobref-of b g) (k-insert (a-write r) (k-insert (a-read r) e)))))))))))
 ;; A `blobref-variant!`'s label, `lx`, for a sum of layout `code`: a number

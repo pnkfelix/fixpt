@@ -11,7 +11,7 @@
 
 use crate::ast::{ArmBind, BlobletOp, Exp, ExpId, ModItem, TyId};
 use std::collections::HashMap;
-use crate::check::Checker;
+use crate::check::{Checker, Datum};
 use crate::top::Top;
 use fixpt_heap::layout::kind;
 use fixpt_heap::layout::cellular::{routine, CLOSURE_FREE0, GLOBAL_FIELDS, GLOBAL_NAME, GLOBAL_VALUE, GLOBAL_WRITES, ROUTINES, WORD_TWIN};
@@ -871,14 +871,16 @@ impl<'a> Compiler<'a> {
                 self.done(code, tail);
             }
             Exp::Extract(p, _) => {
-                let i = *self.c.facts.field_index.get(&x).ok_or("an extract the checker did not see")?;
+                let d = *self.c.facts.datum.get(&x).ok_or("an extract the checker did not see")?;
                 self.exp(p, e, depth, code, false)?;
-                // A blobref's field: one at its offset.
-                if i >= crate::check::BLOBREF_FIELD {
-                    self.int(code, (i - crate::check::BLOBREF_FIELD) as i64);
-                    self.prim(code, "%suffix-ref+", 2)?;
-                } else {
-                    self.field(code, i as i64 + 2);
+                match d {
+                    // A blobref's field: one at its offset.
+                    Datum::BlobrefField(at) => {
+                        self.int(code, at as i64);
+                        self.prim(code, "%suffix-ref+", 2)?;
+                    }
+                    Datum::Field(i) => self.field(code, i as i64 + 2),
+                    _ => return Err("an extract's datum is a field".into()),
                 }
                 self.done(code, tail);
             }
@@ -892,8 +894,7 @@ impl<'a> Compiler<'a> {
             }
             // A blobref to a flat sum (`TODO.md` §77): its tag read once, as
             // a label, into the slot after it.
-            Exp::TagCase { scrutinee, arms, els } if self.c.facts.field_index.contains_key(&x) => {
-                let k = self.c.facts.field_index[&x];
+            Exp::TagCase { scrutinee, arms, els } if let Some(&Datum::Layout(k)) = self.c.facts.datum.get(&x) => {
                 let end = self.fresh();
                 self.exp(scrutinee, e, depth, code, false)?;
                 self.op1(code, "slot", Value::fixnum(depth as i64));
@@ -2032,15 +2033,18 @@ impl<'a> Compiler<'a> {
                 };
                 self.prim(code, name, n)?;
                 // A new blobref's flat's bytes checked in the suffix.
-                if matches!(op, BlobletOp::RefAt | BlobletOp::RefAdd) && self.c.facts.field_index[&x] > 1 {
-                    self.int(code, self.c.facts.field_index[&x] as i64);
+                if let Some(Datum::Fits(size)) = self.c.facts.datum.get(&x).copied()
+                    && matches!(op, BlobletOp::RefAt | BlobletOp::RefAdd)
+                    && size > 1
+                {
+                    self.int(code, size as i64);
                     self.prim(code, "%fx26-suffix-fits", 2)?;
                 }
             }
             // The array's length and element's size, as the checker found
             // them, after the ref and the index.
             BlobletOp::RefIndex => {
-                let k = *self.c.facts.field_index.get(&x).ok_or("a blobref-index the checker did not see")?;
+                let k = self.c.facts.operand(x).ok_or("a blobref-index the checker did not see")?;
                 let n = self.exps(args, e, depth, code)?;
                 self.int(code, k as i64);
                 self.prim(code, "%fx26-suffix-ref-index", n + 1)?;
@@ -2048,7 +2052,7 @@ impl<'a> Compiler<'a> {
             // The flat sum's layout, as the checker found it, between the
             // ref and the label.
             BlobletOp::RefVariant => {
-                let k = *self.c.facts.field_index.get(&x).ok_or("a blobref-variant! the checker did not see")?;
+                let k = self.c.facts.operand(x).ok_or("a blobref-variant! the checker did not see")?;
                 self.exp(args[0], e, depth, code, false)?;
                 self.int(code, k as i64);
                 self.exp(args[1], e, depth + 2, code, false)?;
@@ -2056,14 +2060,14 @@ impl<'a> Compiler<'a> {
             }
             // The array's length and element's size, after the ref.
             BlobletOp::RefLength => {
-                let k = *self.c.facts.field_index.get(&x).ok_or("a blobref-length the checker did not see")?;
+                let k = self.c.facts.operand(x).ok_or("a blobref-length the checker did not see")?;
                 self.exp(args[0], e, depth, code, false)?;
                 self.int(code, k as i64);
                 self.prim(code, "%fx26-suffix-ref-length", 2)?;
             }
             // The scalar's layout, as the checker found it, after the ref.
             BlobletOp::RefGet | BlobletOp::RefSet => {
-                let k = *self.c.facts.field_index.get(&x).ok_or("a blobref read the checker did not see")?;
+                let k = self.c.facts.operand(x).ok_or("a blobref read the checker did not see")?;
                 self.exp(args[0], e, depth, code, false)?;
                 self.int(code, k as i64);
                 if op == BlobletOp::RefSet {

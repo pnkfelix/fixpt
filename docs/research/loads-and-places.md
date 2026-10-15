@@ -199,9 +199,10 @@ Not yet done, and what C makes possible:
   -502, -1000 - code, -1 - summary; and a copy kept to be inlined holds
   what was found of its `extract`s and `tagcase`s in their nodes, as
   `e-bloblet` holds its field, not in where they start
-  (`c-resolved-at`). Still integers, within `n-datum`: what an operation
-  needs is told by the operation (a field, a blobref's offset past
-  `2^40`, a layout's code, `n << 32 | size`).
+  (`c-resolved-at`). And what an operation takes is a datatype too,
+  `k-datum` (Rust's `Datum`), not a field past `2^40` or `n << 32 |
+  size`; the run time's array operand made and taken apart in one place
+  each (`layout::array_operand`, `k-array-operand`).
 
 **On cause 2, Sheldon said it first.** In Sheldon's system `(input
 "file")` is an ordinary pure expression, and textual identity makes two

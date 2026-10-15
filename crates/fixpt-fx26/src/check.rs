@@ -490,9 +490,9 @@ pub struct NodeFacts {
     /// and the value is first-order data (`Checker::first_order`): nothing
     /// they allocate outlives them.
     pub no_escape: HashSet<ExpId>,
-    /// Each `extract`'s field, by position: lowering needs it, and only the
-    /// product's type says it.
-    pub field_index: HashMap<ExpId, usize>,
+    /// What each operation takes that only the types say (`Datum`): an
+    /// `extract`'s field, a blobref operation's layout, size or length.
+    pub datum: HashMap<ExpId, Datum>,
     /// Procedures converted to another convention, by the checker or by
     /// `(convention C e)`: the convention each is converted to, and how
     /// many arguments the procedure takes.
@@ -528,9 +528,42 @@ pub struct NodeFacts {
 /// position at least this is a path, value `j` of value `k`.
 pub const RESHAPE_PATH: usize = 1 << 40;
 
-/// Where an `extract`'s field index means a blobref's field (`TODO.md` §77):
-/// at least this, the field's offset in bytes past it.
-pub const BLOBREF_FIELD: usize = 1 << 40;
+/// What the checker found an operation takes, which only the types say,
+/// told the compilers (`Facts::datum`; the front end written in FX-26's
+/// `k-datum`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Datum {
+    /// An `extract`'s field, by position.
+    Field(usize),
+    /// An `extract` of a blobref to a flat product's field: its offset in
+    /// bytes (`TODO.md` §77).
+    BlobrefField(usize),
+    /// A blobref's scalar's or flat sum's layout, by its code.
+    Layout(usize),
+    /// A flat array's length (`layout::FLAT_TO_THE_END` if it runs to the
+    /// end of the suffix) and element size.
+    Array { n: i64, size: usize },
+    /// The bytes a new blobref's flat takes.
+    Fits(usize),
+}
+
+impl Datum {
+    /// The operand a blobref operation's primitive takes for it: the
+    /// layout's code, the size, or the array's (`layout::array_operand`).
+    pub fn operand(self) -> i64 {
+        match self {
+            Datum::Field(i) | Datum::BlobrefField(i) | Datum::Layout(i) | Datum::Fits(i) => i as i64,
+            Datum::Array { n, size } => fixpt_heap::layout::array_operand(n, size as i64),
+        }
+    }
+}
+
+impl NodeFacts {
+    /// [`Datum::operand`] of what `e` takes, if the checker found it.
+    pub fn operand(&self, e: ExpId) -> Option<i64> {
+        self.datum.get(&e).map(|d| d.operand())
+    }
+}
 
 /// Value `j` of the module that is value `k`, as a reshape's position.
 pub fn reshape_path(k: usize, j: usize) -> usize {
@@ -549,7 +582,7 @@ impl NodeFacts {
         self.effects.retain(|e, _| e.0 < first);
         self.standard_operator.retain(|e, _| e.0 < first);
         self.no_escape.retain(|e| e.0 < first);
-        self.field_index.retain(|e, _| e.0 < first);
+        self.datum.retain(|e, _| e.0 < first);
         self.with_vals.retain(|e, _| e.0 < first);
         self.reshaped.retain(|e, _| e.0 < first);
         self.converted.retain(|e, _| e.0 < first);
@@ -1805,7 +1838,7 @@ impl Checker {
                     let Some((at, g)) = self.flat_field(f, label) else {
                         return Err(FxError::at(span, format!("a {} has no `{}` laid out", self.show_ty(pt), self.interner.name(label))));
                     };
-                    self.facts.field_index.insert(e, BLOBREF_FIELD + at);
+                    self.facts.datum.insert(e, Datum::BlobrefField(at));
                     let t = self.blobref_of(b, g);
                     let eff = self.mask(e, &eff, t);
                     return Ok((t, eff));
@@ -1816,7 +1849,7 @@ impl Checker {
                 let Some(i) = fields.iter().position(|(l, _)| *l == label) else {
                     return Err(FxError::at(span, format!("a {} has no `{}`", self.show_ty(pt), self.interner.name(label))));
                 };
-                self.facts.field_index.insert(e, i);
+                self.facts.datum.insert(e, Datum::Field(i));
                 let t = fields[i].1;
                 let eff = self.mask(e, &eff, t);
                 Ok((t, eff))
@@ -3739,7 +3772,7 @@ impl Checker {
             Some((b, (code, _, _, vs))) => {
                 let region = self.owner_region(span, st, *b)?;
                 eff.0.insert(Atom::Read(region));
-                self.facts.field_index.insert(e, *code as usize);
+                self.facts.datum.insert(e, Datum::Layout(*code as usize));
                 vs.iter().map(|(l, g)| (*l, self.blobref_of(*b, *g))).collect()
             }
             None => {
@@ -3957,7 +3990,7 @@ impl Checker {
     /// The `blobref` forms (`TODO.md` §77). A new one's flat is the type it
     /// is checked against's; reading or writing one is of its owner's
     /// region, and gives or takes a value of its scalar's type, whose
-    /// layout the compilers are told (`Facts::field_index`).
+    /// layout the compilers are told (`Facts::datum`).
     fn synth_blobref(&mut self, e: ExpId, op: BlobletOp, args: &[ExpId], expected: Option<TyId>) -> R<(TyId, Effect)> {
         let span = self.arena.span_of(e);
         let int = self.int;
@@ -3995,7 +4028,7 @@ impl Checker {
             BlobletOp::RefOwner => b,
             BlobletOp::RefOffset => int,
             // An element of a flat array: its length and element's size
-            // told the compilers, `n << 32 | size`, checked at run time. A
+            // told the compilers (`Datum::Array`), checked at run time. A
             // length not a literal runs to the end of the suffix
             // (`FLAT_TO_THE_END`, `TODO.md` §77).
             BlobletOp::RefIndex => {
@@ -4019,11 +4052,11 @@ impl Checker {
                     Size::Lin { k, terms } if terms.is_empty() => k as usize,
                     _ => fixpt_heap::layout::FLAT_TO_THE_END as usize,
                 };
-                self.facts.field_index.insert(e, (n << 32) | size);
+                self.facts.datum.insert(e, Datum::Array { n: n as i64, size });
                 self.blobref_of(b, g)
             }
             // A flat array's length, a `(nat n)` of its length `n`: told the
-            // compilers as `blobref-index`'s is, `n << 32 | size`.
+            // compilers as `blobref-index`'s is.
             BlobletOp::RefLength => {
                 let Some((g, n)) = self.flat_array_parts(f) else {
                     return Err(FxError::at(self.arena.span_of(*x), format!("a blobref to a flat array is expected here, and this is a {}", self.show_ty(xt))));
@@ -4035,7 +4068,7 @@ impl Checker {
                     Size::Lin { k, ref terms } if terms.is_empty() => k as usize,
                     _ => fixpt_heap::layout::FLAT_TO_THE_END as usize,
                 };
-                self.facts.field_index.insert(e, (k << 32) | size);
+                self.facts.datum.insert(e, Datum::Array { n: k as i64, size });
                 self.arena.ty(Ty::Nat(n))
             }
             // A flat sum made a variant, named by a literal: its layout's
@@ -4059,7 +4092,7 @@ impl Checker {
                 let region = self.owner_region(span, xt, b)?;
                 eff.0.insert(Atom::Read(region));
                 eff.0.insert(Atom::Write(region));
-                self.facts.field_index.insert(e, code as usize);
+                self.facts.datum.insert(e, Datum::Layout(code as usize));
                 self.blobref_of(b, g)
             }
             _ => {
@@ -4073,7 +4106,7 @@ impl Checker {
                     return Err(FxError::at(span, format!("only a scalar's bytes are read or written, and this points to a {}", self.show_ty(f))));
                 };
                 let region = self.owner_region(span, xt, b)?;
-                self.facts.field_index.insert(e, code as usize);
+                self.facts.datum.insert(e, Datum::Layout(code as usize));
                 if op == BlobletOp::RefGet {
                     eff.0.insert(Atom::Read(region));
                     f
@@ -4108,7 +4141,7 @@ impl Checker {
         let Some(size) = self.flat_least_size(f) else {
             return Err(FxError::at(span, format!("the layout of a {} is not known", self.show_ty(f))));
         };
-        self.facts.field_index.insert(e, size);
+        self.facts.datum.insert(e, Datum::Fits(size));
         Ok(())
     }
 

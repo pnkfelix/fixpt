@@ -8,6 +8,8 @@
 (define-type k-cert-lens (select check-test-facts-types k-cert-lens))
 (define-type k-fact-list (select check-test-facts-types k-fact-list))
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
+(hide (define check-env-types (load-module "fx26:check-env-types.fx")))
+(define-type k-datum (select check-env-types k-datum))
 (define-type k-eff (select check-types-types k-eff))
 (define-type k-ids (select check-types-types k-ids))
 (define-type k-named (select check-types-types k-named))
@@ -156,8 +158,10 @@
             (val k-region-form (subr pure (int) string))
             (val k-note-extract
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t))
-                       (k-at int)
+                       (k-at k-datum)
                        unit))
+            (val k-note-field
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t)) (k-at int) unit))
             (val k-projected
                  (subr (maxeff (alloc @t)
                                (goto @z)

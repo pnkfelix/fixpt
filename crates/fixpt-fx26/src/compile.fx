@@ -99,7 +99,7 @@
                         (cons (product (1 at) (2 n)) (table-ref t a nil)))))))
 (define c-new-by-at (subr (alloc @k) () c-by-at) (lambda () (make-table c-int-hash c-int=?)))
 
-(define c-fact-table (ref c-by-at @k) (new (c-new-by-at)))
+(define c-fact-table (ref c-datums-at @k) (new (make-table c-int-hash c-int=?)))
 
 ;; The procedures lambda-lifted, by index; and, by where each `letrec` is
 ;; (`c-span-key`), its members' (none if it is not lifted), so that its
@@ -142,14 +142,20 @@
 (define c-apply-shares-at (subr (maxeff (read @globals) (read @k)) (int int int) bool)
   (lambda (a b k) (>= (c-noted-at (get c-shares-table) a b k -1) 0)))
 
-;; The field of the `extract` `a` `b` `k`, or -1; or what else the checker
-;; found there (a scalar's layout, a flat sum's).
-(define c-field-at (subr c-builds (int int int) int)
-  (lambda (a b k) (c-noted-at (get c-fact-table) a b k -1)))
-;; The same of an operation that holds `got`, if not -1: a form kept to be
+;; What the checker found the operation `a` `b` `k` takes (`k-datum`), in a
+;; list of one; none if nothing.
+(define c-datum-in
+  (subr (maxeff (read @globals) (read @k)) ((listof c-datum-noted acyclic) int int int) k-datums)
+  (lambda (ns a b k)
+    (cond ((null? ns) nil)
+          ((k-at-is? (extract (car ns) 1) a b k) (the k-datums (cons (extract (car ns) 2) nil)))
+          (else (c-datum-in (cdr ns) a b k)))))
+(define c-datum-at (subr c-builds (int int int) k-datums)
+  (lambda (a b k) (c-datum-in (table-ref (get c-fact-table) a nil) a b k)))
+;; The same of an operation that holds `got`, if any: a form kept to be
 ;; inlined holds it (`c-resolve-extracts`).
-(define c-found (subr c-builds (int int int int) int)
-  (lambda (got a b k) (if (< got 0) (c-field-at a b k) got)))
+(define c-datum-of (subr c-builds (k-datums int int int) k-datums)
+  (lambda (got a b k) (if (null? got) (c-datum-at a b k) got)))
 
 ;; Each `with` the checker saw (its `k-with-vals`, as `c-set-facts!` took
 ;; them), by expression: its module's values' names, in order, and their
@@ -434,7 +440,12 @@
         (let ((at (extract (car fs) 1)))
           (begin
             (tagcase (extract (car fs) 2)
-              (n-datum (i) (c-note! (get c-fact-table) at i))
+              (n-datum (d)
+                (let ((a (extract at 1)))
+                  (table-set! (get c-fact-table) a
+                              (the (listof c-datum-noted acyclic)
+                                (cons (product (1 at) (2 d))
+                                      (table-ref (get c-fact-table) a nil))))))
               (n-apply-shares () (c-note! (get c-shares-table) at 0))
               (n-frozen-define () (c-note! (get c-frozen-table) at 0))
               (n-plain-fx () (c-note! (get c-plain-table) at 0))
@@ -456,7 +467,7 @@
   (lambda (fs)
     (begin
       (set c-facts fs)
-      (set c-fact-table (c-new-by-at))
+      (set c-fact-table (make-table c-int-hash c-int=?))
       (set c-convert-table (c-new-by-at))
       (set c-shares-table (c-new-by-at))
       (set c-frozen-table (c-new-by-at))
@@ -542,7 +553,7 @@
           (c-free body (c-bind-let bs bound) (c-free-all (c-bound-exps bs) bound acc)))
         (e-begin (es a b abk) (c-free-all es bound acc))
         (e-prompt (t body h a b abk) (c-free t bound (c-free body bound (c-free h bound acc))))
-        (e-bloblet (op i args a b abk) (c-free-all args bound acc))
+        (e-bloblet (op i args got a b abk) (c-free-all args bound acc))
         (e-product (fs a b abk) (c-free-all (c-bound-exps fs) bound acc))
         (e-extract (p l got a b abk) (c-free p bound acc))
         (e-sum (t v a b abk) (c-free v bound acc))
@@ -706,7 +717,7 @@
           (and (c-calls-only t f n #f loops)
                (c-calls-only h f n #f loops)
                (c-calls-only-inside body f n loops)))
-        (e-bloblet (op i args a b abk) (c-calls-only-all args f n loops))
+        (e-bloblet (op i args got a b abk) (c-calls-only-all args f n loops))
         (e-product (fs a b abk) (c-calls-only-all (c-bound-exps fs) f n loops))
         (e-extract (p l got a b abk) (c-calls-only p f n #f loops))
         (e-sum (t v a b abk) (c-calls-only v f n #f loops))

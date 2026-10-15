@@ -6,6 +6,7 @@
 ;; what it is given.
 (let* ((check-types-types (load-module "fx26:check-types-types.fx"))
        (check-env-types (load-module "fx26:check-env-types.fx"))
+       (parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p)))
        (check-print-types (load-module "fx26:check-print-types.fx"))
        (check-read-helpers-types (load-module "fx26:check-read-helpers-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
@@ -16,7 +17,7 @@
     (module
 
 ;; The types it uses of the files before it.
-(hide (include check-types-types) (include check-env-types))
+(hide (include check-types-types) (include check-env-types) (include parser-types))
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-env) (include check-print)
       (include check-read-helpers))
@@ -36,7 +37,7 @@
     (let ((s (k-flat-least-size f)))
       (if (< s 0)
           (k-fail (k-cat3 "the layout of a " (k-show-ty f) " is not known") a z)
-          (let ((fact (product (1 (product (1 a) (2 z) (3 k))) (2 (n-datum s)))))
+          (let ((fact (product (1 (product (1 a) (2 z) (3 k))) (2 (n-datum (datum-fits s))))))
             (begin (set k-extracts (cons fact (get k-extracts))) f))))))
 ;; The flat the type checked against says, for a new blobref at `a`..`z`,
 ;; the `k`th there.
@@ -68,7 +69,8 @@
                   a z)
           (tagcase (k-get (k-resolve b))
             (ty-bloblet (fs fz r)
-              (let ((fact (product (1 (product (1 a) (2 z) (3 k))) (2 (n-datum code)))))
+              (let ((fact (product (1 (product (1 a) (2 z) (3 k)))
+                                   (2 (n-datum (datum-layout code))))))
                 (begin (if note (set k-extracts (cons fact (get k-extracts))) #u) r)))
             (else y (k-fail (k-cat3 "the region of a " (k-show-ty xt) "'s owner is not known")
                             a z)))))))
@@ -81,7 +83,7 @@
       (if (< (car e) 0)
           (k-fail (k-cat3 "the layout of a " (k-show-ty (car p)) " is not known") a z)
           (let ((fact (product (1 (product (1 a) (2 z) (3 k)))
-                                (2 (n-datum (+ (* (cdr p) 4294967296) (car e)))))))
+                                (2 (n-datum (datum-array (cdr p) (car e)))))))
             (begin
               (set k-extracts (cons fact (get k-extracts)))
               (k-ty-new (ty-nat (k-flat-array-length f)))))))))
@@ -101,6 +103,6 @@
       (if (< (car e) 0)
           (k-fail (k-cat3 "the layout of a " (k-show-ty (car p)) " is not known") a z)
           (let ((fact (product (1 (product (1 a) (2 z) (3 k)))
-                                (2 (n-datum (+ (* (cdr p) 4294967296) (car e)))))))
+                                (2 (n-datum (datum-array (cdr p) (car e)))))))
             (begin (set k-extracts (cons fact (get k-extracts))) (car p)))))))
 )))

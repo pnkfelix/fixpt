@@ -8,7 +8,8 @@
 ;; Its types, and the signatures of what it is given (`eval-types.fx`).
 (let* ((eval-types (load-module "fx26:eval-types.fx"))
        (table-types (load-module "fx26:table-types.fx"))
-       (check-types-types (load-module "fx26:check-types-types.fx")))
+       (check-types-types (load-module "fx26:check-types-types.fx"))
+       (parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
   ;; What it is given: the evaluator's values, the tables (`table.fx`) and
   ;; the checker's types module.
   (lambda ((values (select eval-types eval-values-sig))
@@ -17,6 +18,9 @@
     (module
 (hide (include eval-types))
 (define-type table (select table-types table))
+;; A flat array's operand taken apart (`k-array-operand`).
+(define k-array-length (with parser-types k-array-length))
+(define k-array-size (with parser-types k-array-size))
 ;; What it uses of the modules it is given.
 (define apply-val (with values apply-val))
 (define apply1 (with values apply1))
@@ -676,10 +680,10 @@
                 ((blobref+) (ev-fits (ev-bref o (+ at (as-int (ev-arg xs 1)))) i))
                 ((blobref-owner) o)
                 ((blobref-offset) at)
-                ((blobref-length) (ev-flat-length r (quotient i 4294967296) (modulo i 4294967296)))
+                ((blobref-length) (ev-flat-length r (k-array-length i) (k-array-size i)))
                 ((blobref-index)
-                 (let* ((k (as-int (ev-arg xs 1))) (size (modulo i 4294967296))
-                        (n (ev-flat-length r (quotient i 4294967296) size)))
+                 (let* ((k (as-int (ev-arg xs 1))) (size (k-array-size i))
+                        (n (ev-flat-length r (k-array-length i) size)))
                    (if (and (>= k 0) (< k n))
                        (ev-bref o (+ at (* k size)))
                        (efail "blobref-index: out of range"))))

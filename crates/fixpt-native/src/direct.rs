@@ -2393,7 +2393,7 @@ impl Compiling<'_> {
                     let tag = name == "%fx26-flat-tag" && o(1).is_fixnum();
                     let at = name == "%suffix-ref" && o(1).is_fixnum() && (0..1 << 26).contains(&o(1).as_fixnum());
                     let fits = name == "%fx26-suffix-fits" && o(1).is_fixnum() && (0..1 << 24).contains(&o(1).as_fixnum());
-                    let length = name == "%fx26-suffix-ref-length" && o(1).is_fixnum() && o(1).as_fixnum() & 0xffff_ffff > 0;
+                    let length = name == "%fx26-suffix-ref-length" && o(1).is_fixnum() && fixpt_heap::layout::array_operand_parts(o(1).as_fixnum()).1 > 0;
                     if op == "prim2imm" && (step || tag || at || fits || length) {
                         let (slow, done) = (a.label(), a.label());
                         if step {
@@ -3567,11 +3567,11 @@ fn suffix_store(a: &mut Asm, code: i64, v: Reg, raw: bool, slow: Label) {
 }
 
 /// `blobref-index` (`%fx26-blobref-index`) of the suffix ref in `RESULT`
-/// at `i`, of layout `code`, `n << 32 | size`, into `RESULT`; to `slow`
+/// at `i`, of layout `code` (`layout::array_operand`), into `RESULT`; to `slow`
 /// unless `i` is a fixnum below `n` and the element within the suffix.
 fn blobref_index(a: &mut Asm, code: i64, i: Reg, slow: Label) {
     use fixpt_heap::value::SUFFIX_OFFSET_SHIFT;
-    let (n, size) = (code >> 32, code & 0xffff_ffff);
+    let (n, size) = fixpt_heap::layout::array_operand_parts(code);
     a.e(tst_low(i, 3));
     a.to(slow, Fix::If(Cond::Ne));
     suffix_owner(a, RESULT, slow);
@@ -3717,13 +3717,13 @@ fn suffix_fits(a: &mut Asm, size: i64, slow: Label) {
 }
 
 /// `blobref-length` (`%fx26-suffix-ref-length`) of the suffix ref in
-/// `RESULT`, of the layout `code`, `n << 32 | size` (`size` > 0), into
+/// `RESULT`, of the layout `code` (`layout::array_operand`, `size` > 0), into
 /// `RESULT`: `n`, or, for an array that runs to the end of the suffix
 /// (`FLAT_TO_THE_END`), the whole elements left of it; to `slow` (the
 /// primitive's) for what is no suffix ref, or one whose owner it does not
 /// find in line.
 fn suffix_length(a: &mut Asm, code: i64, slow: Label) {
-    let (n, size) = (code >> 32, code & 0xffff_ffff);
+    let (n, size) = fixpt_heap::layout::array_operand_parts(code);
     if n != fixpt_heap::layout::FLAT_TO_THE_END {
         a.e(and_low(X16, RESULT, 3));
         a.e(cmp_imm(X16, fixpt_heap::value::TAG_SUFFIX_REF as u32));
@@ -3739,7 +3739,7 @@ fn suffix_length(a: &mut Asm, code: i64, slow: Label) {
 }
 
 /// `blobref-index` (`%fx26-suffix-ref-index`) of the suffix ref in `x1`,
-/// at `x2`, of the layout in `x3`, `n << 32 | size`, into `RESULT`: the
+/// at `x2`, of the layout in `x3` (`layout::array_operand`), into `RESULT`: the
 /// ref `x2 × size` bytes along, within the suffix; to `slow` (the
 /// call-out, which says why) unless `x2` is a fixnum below `n`.
 fn suffix_index(a: &mut Asm, slow: Label) {
@@ -3748,10 +3748,12 @@ fn suffix_index(a: &mut Asm, slow: Label) {
     a.to(slow, Fix::If(Cond::Ne));
     suffix_owner(a, 1, slow);
     a.e(asr_imm(X9, 2, 3));
-    a.e(lsr_imm(X17, 3, 35));
+    // The operand a fixnum: its length past the tag and the size.
+    use fixpt_heap::layout::{ARRAY_OPERAND_LENGTH_SHIFT, ARRAY_OPERAND_SIZE_BITS};
+    a.e(lsr_imm(X17, 3, 3 + ARRAY_OPERAND_LENGTH_SHIFT));
     a.e(cmp(X9, X17));
     a.to(slow, Fix::If(Cond::Hs));
-    a.e(ubfx(X17, 3, 3, 32));
+    a.e(ubfx(X17, 3, 3, ARRAY_OPERAND_SIZE_BITS));
     a.e(mul(X9, X9, X17));
     // The whole element within the suffix, which is the bound of an array
     // that runs to the end of it (`FLAT_TO_THE_END`, `TODO.md` §77): one

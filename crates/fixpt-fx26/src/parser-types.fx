@@ -26,6 +26,32 @@
 ;;; (`docs/research/loads-and-places.md`). A list of none or one stands
 ;;; for something optional: a parameter's type, a tagcase's `else`.
 
+;; What the checker found an operation takes, which only the types say:
+;; an `extract`'s field, by position, or a blobref's, by its offset; a
+;; blobref's scalar's or flat sum's layout, by its code; a flat array's
+;; length and element size; the bytes a new blobref takes. Kept in the
+;; operation's node once a compiler has put it there (`c-resolve-extracts`);
+;; none, `nil`, until then.
+(define-datatype k-datum
+  (datum-field int) (datum-blobref-field int) (datum-layout int) (datum-array int int)
+  (datum-fits int))
+(define-type k-datums (listof k-datum acyclic))
+;; A flat array's length `n` and element size, as the run time's primitives
+;; take them, one operand (`fixpt_heap::layout::array_operand`), and taken
+;; apart.
+(define k-array-operand (subr pure (int int) int) (lambda (n size) (+ (* n 4294967296) size)))
+(define k-array-length (subr pure (int) int) (lambda (o) (quotient o 4294967296)))
+(define k-array-size (subr pure (int) int) (lambda (o) (modulo o 4294967296)))
+;; The operand a primitive of a blobref operation takes for what the checker
+;; found of it: a layout's code, an array's operand, a size; -1 if none.
+(define k-datum-operand (subr pure (k-datums) int)
+  (lambda (ds)
+    (if (null? ds)
+        -1
+        (tagcase (car ds)
+          (datum-field (i) i) (datum-blobref-field (o) o) (datum-layout (c) c)
+          (datum-array (n size) (k-array-operand n size)) (datum-fits (s) s)))))
+
 (define-datatype exp
   (e-var symbol int int int)
   (e-int int int int int)
@@ -56,17 +82,16 @@
   (e-the syn exp int int int)
   ;; `(convention C expression)`: the procedure converted to `C`.
   (e-convention syn exp int int int)
-  ;; A bloblet form, by name, with its field index, or -1.
-  (e-bloblet symbol int (listof exp acyclic) int int int)
+  ;; A bloblet form, by name, with its field index, or -1, and its datum.
+  (e-bloblet symbol int (listof exp acyclic) k-datums int int int)
   (e-product (listof (productof (1 symbol) (2 exp)) acyclic) int int int)
-  ;; `(extract e label)`: what the checker found it takes (`n-datum`), once
-  ;; a compiler has put it there (`c-resolve-extracts`); else -1.
-  (e-extract exp symbol int int int int)
+  ;; `(extract e label)`, and its datum.
+  (e-extract exp symbol k-datums int int int)
   (e-sum symbol exp int int int)
   ;; Arms: the tag, whether it takes a product apart, the names, the body.
-  ;; Then, as `e-extract`'s, a flat sum's layout, or -1.
+  ;; Then, as `e-extract`'s, its datum (a flat sum's layout).
   (e-tagcase exp (listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) acyclic)
-             (listof (productof (1 symbol) (2 exp)) acyclic) int int int int)
+             (listof (productof (1 symbol) (2 exp)) acyclic) k-datums int int int)
   ;; `(module item …)` (`docs/research/first-class-modules.md`): each item
   ;; what it is (0 `define-generative`, 1 `define-type`, 2 `define`, 3
   ;; `define-rec`), the names it defines, their types (a `define`'s, none or

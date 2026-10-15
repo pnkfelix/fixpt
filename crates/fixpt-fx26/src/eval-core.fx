@@ -128,23 +128,26 @@
 ;; What the checker found of each expression, as `run-checked` was given
 ;; it: a blobref's layouts, and offsets (`checked-extracts`).
 (define ev-facts (ref k-facts @v) (new nil))
-;; What an operation `a` `b` `k` needs (`n-datum`), or -1.
-(define* ev-fact-in (subr (maxeff (read @globals) spin) (k-facts int int int) int)
+;; What an operation `a` `b` `k` takes (`n-datum`), in a list of one; none
+;; if nothing.
+(define* ev-fact-in (subr (maxeff (read @globals) (alloc @v) spin) (k-facts int int int) k-datums)
   (lambda (fs a b k)
-    (cond ((null? fs) -1)
+    (cond ((null? fs) nil)
           ((ev-at-is? (extract (car fs) 1) a b k)
-           (tagcase (extract (car fs) 2) (n-datum (i) i) (else y (ev-fact-in (cdr fs) a b k))))
+           (tagcase (extract (car fs) 2)
+             (n-datum (d) (the k-datums (cons d nil)))
+             (else y (ev-fact-in (cdr fs) a b k))))
           (else (ev-fact-in (cdr fs) a b k)))))
-(define* ev-fact-at (subr (maxeff (read @globals) (read @v) spin) (int int int) int)
+(define* ev-fact-at (subr (maxeff (read @globals) (read @v) (alloc @v) spin) (int int int) k-datums)
   (lambda (a b k) (ev-fact-in (get ev-facts) a b k)))
 ;; `(extract v l)`, `a` `b` `k`: a product's field; or, of a blobref, one to
-;; its field, at the offset the checker found (past `check::BLOBREF_FIELD`).
+;; its field, at the offset the checker found.
 (define* ev-extract (subr (maxeff evals spin) (val symbol int int int) val)
   (lambda (v l a b k)
-    (let ((i (ev-fact-at a b k)))
-      (if (>= i 1099511627776)
+    (let ((d (ev-fact-at a b k)))
+      (if (and (not (null? d)) (tagcase (car d) (datum-blobref-field (o) #t) (else y #f)))
           (tagcase (as-other v "a blobref")
-            (o-bref (o at) (ev-bref o (+ at (- i 1099511627776))))
+            (o-bref (o at) (ev-bref o (+ at (k-datum-operand d))))
             (else y (efail-expected "a blobref")))
           (field-of v l)))))
 
@@ -293,13 +296,13 @@
           (let* ((tag (as-tag (eval t e))) (hv (eval h e)))
             (prompt tag (eval body e) (lambda (v) (apply1 hv v)))))
         ;; A blobref's read, write or index: its layout, as the checker found it.
-        (e-bloblet (op i args a b abk)
-          (ev-bloblet op (if (< i 0) (ev-fact-at a b abk) i) (eval-all args e)))
+        (e-bloblet (op i args got a b abk)
+          (ev-bloblet op (if (< i 0) (k-datum-operand (ev-fact-at a b abk)) i) (eval-all args e)))
         (e-product (fs a b abk) (o-product (eval-fields fs e)))
         (e-extract (p l got a b abk) (ev-extract (eval p e) l a b abk))
         (e-sum (t v a b abk) (o-sum t (eval v e)))
         (e-tagcase (s arms els got a b abk)
-          (eval-tagcase (eval s e) arms els e (ev-fact-at a b abk)))
+          (eval-tagcase (eval s e) arms els e (k-datum-operand (ev-fact-at a b abk))))
         ;; A module: a product of its values, in order, each labelled by its
         ;; name; its abstract types' conversions the identity.
         (e-module (items a b abk) (eval-module items e))

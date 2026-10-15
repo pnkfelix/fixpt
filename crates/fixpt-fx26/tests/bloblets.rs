@@ -61,7 +61,7 @@ fn indices_shown_in_bounds() {
     }
     let indices: Vec<_> = c
         .facts
-        .field_index
+        .datum
         .keys()
         .filter(|e| matches!(c.arena.exp_at(**e), fixpt_fx26::ast::Exp::Bloblet { op: fixpt_fx26::ast::BlobletOp::RefIndex, .. }))
         .collect();

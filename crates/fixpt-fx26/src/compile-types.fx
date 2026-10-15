@@ -5,6 +5,8 @@
 ;; The types these use, from the files that define them.
 (hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type exp (select parser-types exp))
+(define-type k-datum (select parser-types k-datum))
+(define-type k-datums (select parser-types k-datums))
 (define-type names (select parser-types names))
 (define-type syn (select parser-types syn))
 (define-type syns-a (select parser-types syns-a))
@@ -35,6 +37,9 @@
 (define-type k-at (select check-env-types k-at))
 (define-type c-noted (productof (1 k-at) (2 int)))
 (define-type c-by-at (table int (listof c-noted acyclic) @k))
+;; And what each operation takes (`k-datum`), likewise.
+(define-type c-datum-noted (productof (1 k-at) (2 k-datum)))
+(define-type c-datums-at (table int (listof c-datum-noted acyclic) @k))
 ;; A `letrec`-bound procedure lambda-lifted, as Twobit's pass 2 lifts
 ;; (`pass2p2.sch`): its closure, over nothing, made while compiling; the
 ;; names it would have captured, each passed as an argument before its own.
@@ -185,9 +190,11 @@
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin) (exp symbol) bool))
             (val c-plain-table (ref c-by-at @k))
             (val c-plain-fx-at (subr (maxeff (read @globals) (read @k)) (int int int) bool))
-            (val c-field-at
-                 (subr (maxeff (alloc @k) (read @globals) (read @k)) (int int int) int))
-            (val c-found (subr (maxeff (alloc @k) (read @globals) (read @k)) (int int int int) int))
+            (val c-datum-at
+                 (subr (maxeff (alloc @k) (read @globals) (read @k)) (int int int) k-datums))
+            (val c-datum-of
+                 (subr (maxeff (alloc @k) (read @globals) (read @k)) (k-datums int int int)
+                       k-datums))
             (val c-genv-now
                  (subr (maxeff (read (globals c-genv c-genv-count)) (read @k)) () int))
             (val c-count-exps (subr (read @globals) (exps) int))

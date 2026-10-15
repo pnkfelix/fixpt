@@ -39,12 +39,11 @@
 (define-type k-scope (listof (pairof symbol k-ds @t) acyclic))
 ;; What checking found of an expression that running needs, for the
 ;; compilers and the evaluator (`checked-extracts`):
+(hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
+(define-type k-datum (select parser-types k-datum))
 (define-datatype k-noted
-  ;; What an operation needs that only the types say: an `extract`'s field,
-  ;; by position (a blobref's, its offset past `k-blobref-field`); a
-  ;; blobref's scalar or flat sum's layout; a flat array's length and
-  ;; element size, `n << 32 | size`; the bytes a new blobref takes.
-  (n-datum int)
+  ;; What an operation needs that only the types say (`k-datum`).
+  (n-datum k-datum)
   ;; The expression's effect, summarized (`k-summary`).
   (n-summary int)
   ;; A procedure converted to a convention: what `%fx26-convert` is given.

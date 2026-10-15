@@ -25,6 +25,7 @@ fn two() -> Value {
     Value::fixnum(2)
 }
 use crate::ast::{BlobletOp, Exp, ExpId};
+use crate::check::Datum;
 use fixpt_heap::layout::regcode::{op, REGS};
 use fixpt_heap::layout::cellular::routine;
 use fixpt_heap::layout::kind;
@@ -927,13 +928,12 @@ impl Compiler<'_> {
                 self.r_let(g, &bindings, lbody, env, te, tail)?;
             }
             // A blobref's field: one at its offset.
-            Exp::Extract(p, _) if *self.c.facts.field_index.get(&x)? >= crate::check::BLOBREF_FIELD => {
-                let at = *self.c.facts.field_index.get(&x)? - crate::check::BLOBREF_FIELD;
+            Exp::Extract(p, _) if let Some(&Datum::BlobrefField(at)) = self.c.facts.datum.get(&x) => {
                 self.r_prim(g, "%suffix-ref+", &[Arg::E(p), Arg::V(Value::fixnum(at as i64))], env, te)?;
                 g.done(tail);
             }
             Exp::Extract(p, _) => {
-                let i = *self.c.facts.field_index.get(&x)?;
+                let Some(&Datum::Field(i)) = self.c.facts.datum.get(&x) else { return None };
                 self.r_exp(g, p, env, te, false)?;
                 g.op("field", &[Value::fixnum(i as i64 + 2)]);
                 g.done(tail);
@@ -995,21 +995,21 @@ impl Compiler<'_> {
                     BlobletOp::RefOwner => self.r_prim(g, "%suffix-ref-owner", &es, env, te)?,
                     BlobletOp::RefOffset => self.r_prim(g, "%suffix-ref-offset", &es, env, te)?,
                     BlobletOp::RefIndex => {
-                        let Some(&k) = self.c.facts.field_index.get(&x) else { return self.decline("blobref-index") };
+                        let Some(k) = self.c.facts.operand(x) else { return self.decline("blobref-index") };
                         self.r_prim3(g, "%fx26-blobref-index", args[0], Value::fixnum(k as i64), args[1], env, te)?
                     }
                     BlobletOp::RefVariant => {
-                        let Some(&k) = self.c.facts.field_index.get(&x) else { return self.decline("blobref-variant!") };
+                        let Some(k) = self.c.facts.operand(x) else { return self.decline("blobref-variant!") };
                         self.r_prim3(g, "%fx26-flat-variant!", args[0], Value::fixnum(k as i64), args[1], env, te)?
                     }
                     // The array's length and element's size.
                     BlobletOp::RefLength => {
-                        let Some(&k) = self.c.facts.field_index.get(&x) else { return self.decline("blobref-length") };
+                        let Some(k) = self.c.facts.operand(x) else { return self.decline("blobref-length") };
                         self.r_prim(g, "%fx26-suffix-ref-length", &[es[0], Arg::V(Value::fixnum(k as i64))], env, te)?
                     }
                     // The scalar's layout, as the checker found it.
                     BlobletOp::RefGet | BlobletOp::RefSet => {
-                        let Some(&k) = self.c.facts.field_index.get(&x) else { return self.decline("blobref-get") };
+                        let Some(k) = self.c.facts.operand(x) else { return self.decline("blobref-get") };
                         if op == BlobletOp::RefGet {
                             self.r_prim(g, "%fx26-suffix-ref-get", &[es[0], Arg::V(Value::fixnum(k as i64))], env, te)?
                         } else {
@@ -1020,7 +1020,7 @@ impl Compiler<'_> {
                 // A new blobref's flat's bytes checked in the suffix
                 // (`Checker::note_fits`), in line.
                 if matches!(op, BlobletOp::RefAt | BlobletOp::RefAdd) {
-                    let Some(&k) = self.c.facts.field_index.get(&x) else { return self.decline("blobref-at") };
+                    let Some(k) = self.c.facts.operand(x) else { return self.decline("blobref-at") };
                     if k > 1 {
                         self.r_imm_prim(g, "%fx26-suffix-fits", Value::fixnum(k as i64))?;
                     }
@@ -1031,8 +1031,7 @@ impl Compiler<'_> {
                 self.r_call_out(g, "cellular", const { routine("prompt") } as i64, &[Arg::E(tag), Arg::E(handler), Arg::Thunk(body)], env, te)?;
                 g.done(tail);
             }
-            Exp::TagCase { scrutinee, arms, els } if self.c.facts.field_index.contains_key(&x) => {
-                let k = self.c.facts.field_index[&x];
+            Exp::TagCase { scrutinee, arms, els } if let Some(&Datum::Layout(k)) = self.c.facts.datum.get(&x) => {
                 self.r_flat_tagcase(g, k, scrutinee, &arms, els, env, te, tail)?
             }
             Exp::TagCase { scrutinee, arms, els } => self.r_tagcase(g, scrutinee, &arms, els, env, te, tail)?,

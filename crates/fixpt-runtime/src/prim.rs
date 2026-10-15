@@ -675,12 +675,12 @@ fn plain_bloblet(rt: &mut Runtime, v: Value) -> Outcome<Value> {
     }
 }
 
-/// A flat array's length and element's size, from `blobref-index`'s code,
-/// `n << 32 | size`: `n` as the checker knew it, or, for an array that runs
+/// A flat array's length and element's size, from `blobref-index`'s code
+/// (`layout::array_operand`): `n` as the checker knew it, or, for an array that runs
 /// to the end of the suffix (`FLAT_TO_THE_END`), the whole elements left of
 /// it after suffix ref `r` (`TODO.md` §77).
 fn flat_index_bound(rt: &Runtime, r: Value, code: i64) -> (i64, i64) {
-    let (n, size) = (code >> 32, code & 0xffff_ffff);
+    let (n, size) = fixpt_heap::layout::array_operand_parts(code);
     if n == fixpt_heap::layout::FLAT_TO_THE_END && size > 0 {
         return (rt.heap.suffix_ref_room(r) as i64 / size, size);
     }
@@ -2413,7 +2413,7 @@ prims! {
         Ok(flat_value(rt, code, bits))
     });
     // FX-26's `blobref-index`: element `i` of a flat array of `n`, each
-    // `size` bytes, `code` being `n << 32 | size`.
+    // `size` bytes, `code` being their operand (`layout::array_operand`).
     "%fx26-suffix-ref-index", 3, Some(3), simple!(|rt, a| {
         let r = suffix_ref(rt, a[0])?;
         let (i, code) = (int(rt, a[1])?, int(rt, a[2])?);

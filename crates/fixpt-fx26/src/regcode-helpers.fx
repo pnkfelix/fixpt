@@ -361,15 +361,17 @@
 ;; The knot's `r-exp` and `r-prim`, as `r-bloblet` is given them.
 (define-type r-exper (subr rcompiles (rgen exp renv cenv bool) unit))
 (define-type r-primer (subr rcompiles (rgen string rargs renv cenv) unit))
-;; A bloblet form at `a`..`b`, `op`, its field index `i`, or else (a
-;; blobref's) what the checker found there: a scalar's layout, an array's,
-;; a flat sum's; then done.
-(define r-bloblet
-  (subr rcompiles (rgen symbol int exps int int int renv cenv bool r-exper r-primer) unit)
-  (lambda (g sop fi args a b abk env te tail r-exp r-prim)
-    (begin (r-bloblet-op g (symbol->string sop) (if (< fi 0) (c-field-at a b abk) fi) args env te
-                         r-exp r-prim)
-           (r-done g tail))))
+;; A bloblet form `x`, by its field index, or else (a blobref's) what the
+;; checker found of it: a scalar's layout, an array's, a flat sum's; then
+;; done.
+(define r-bloblet (subr rcompiles (rgen exp renv cenv bool r-exper r-primer) unit)
+  (lambda (g x env te tail r-exp r-prim)
+    (tagcase x
+      (e-bloblet (sop fi args got a b abk)
+        (begin (r-bloblet-op g (symbol->string sop) (if (< fi 0) (r-datum-operand got a b abk) fi)
+                             args env te r-exp r-prim)
+               (r-done g tail)))
+      (else y (r-decline)))))
 (define r-bloblet-op (subr rcompiles (rgen string int exps renv cenv r-exper r-primer) unit)
 (lambda (g op i args env te r-exp r-prim)
     (let ((all (r-exp-args args)))
@@ -445,17 +447,29 @@
       (a-e (x) (begin (r-exp g x env te #f) #t))
       (a-slot (s) (begin (r-opn g rop-stack s) #t))
       (else y #f))))
-;; `(extract p l)`, its field `i` as the checker found it: a field of a
-;; product; or, past `check::BLOBREF_FIELD`, a blobref to its field at its
-;; offset; declined if the checker did not see it.
-(define r-extract (subr rcompiles (rgen exp int renv cenv bool r-exper r-primer) unit)
-  (lambda (g p i env te tail r-exp r-prim)
-    (cond ((< i 0) (r-decline))
-          ((>= i 1099511627776)
-           (begin (r-prim g "%suffix-ref+" (r-args-2 (a-e p) (a-v (wcell-int (- i 1099511627776))))
-                          env te)
-                  (r-done g tail)))
-          (else (begin (r-exp g p env te #f) (r-opn g rop-field (+ i 2)) (r-done g tail))))))
+;; The operand of what the checker found the operation `a` `b` `k` takes,
+;; holding `got` if it is a form kept to be inlined (`k-datum-operand`).
+(define r-datum-operand
+  (subr (maxeff (read @globals) (read @k) (alloc @k)) (k-datums int int int) int)
+  (lambda (got a b k) (k-datum-operand (c-datum-of got a b k))))
+;; `(extract p l)`, `x`, by what the checker found it takes: a field of a
+;; product; or a blobref to its field at its offset; declined if the
+;; checker did not see it.
+(define r-extract (subr rcompiles (rgen exp renv cenv bool r-exper r-primer) unit)
+  (lambda (g x env te tail r-exp r-prim)
+    (tagcase x
+      (e-extract (p l got a b abk)
+        (let ((d (c-datum-of got a b abk)))
+          (if (null? d)
+              (r-decline)
+              (tagcase (car d)
+                (datum-field (i)
+                  (begin (r-exp g p env te #f) (r-opn g rop-field (+ i 2)) (r-done g tail)))
+                (datum-blobref-field (o)
+                  (begin (r-prim g "%suffix-ref+" (r-args-2 (a-e p) (a-v (wcell-int o))) env te)
+                         (r-done g tail)))
+                (else y (r-decline))))))
+      (else y (r-decline)))))
 ;; A `tagcase` on a blobref to a flat sum, of layout code `k`
 ;; (`Compiler::r_flat_tagcase`): the blobref and its tag, a label, kept in
 ;; places (registers in a leaf); each arm's name a blobref to its variant,

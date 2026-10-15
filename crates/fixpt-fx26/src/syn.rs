@@ -471,27 +471,41 @@ pub fn rust_facts(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
     };
     type At = (i64, i64, i64);
     // What each is noted to be, as `k-noted` says it: its constructor, and
-    // its value if any.
-    let facts: Vec<(At, &str, Option<i64>)> = c.facts.field_index.iter().map(|(e, i)| (place(*e), "n-datum", Some(*i as i64))).collect();
+    // its value: none, an integer, or a `k-datum`.
+    enum Noted {
+        None,
+        Int(i64),
+        Datum(crate::check::Datum),
+    }
+    let facts: Vec<(At, &str, Noted)> = c.facts.datum.iter().map(|(e, d)| (place(*e), "n-datum", Noted::Datum(*d))).collect();
     // And each expression's effect summary: the greatest of its effects'.
     let mut summaries: HashMap<At, i64> = HashMap::new();
     for (e, s) in c.effect_summaries_by_exp() {
         let k = summaries.entry(place(e)).or_insert(s as i64);
         *k = (*k).max(s as i64);
     }
-    let facts: Vec<(At, &str, Option<i64>)> = facts
+    let facts: Vec<(At, &str, Noted)> = facts
         .into_iter()
-        .chain(summaries.into_iter().map(|(at, s)| (at, "n-summary", Some(s))))
+        .chain(summaries.into_iter().map(|(at, s)| (at, "n-summary", Noted::Int(s))))
         // And each conversion, its code (`k-convert-at`).
-        .chain(c.facts.converted.keys().filter_map(|e| c.facts.conversion_code(*e).map(|k| (place(*e), "n-conversion", Some(k)))))
+        .chain(c.facts.converted.keys().filter_map(|e| c.facts.conversion_code(*e).map(|k| (place(*e), "n-conversion", Noted::Int(k)))))
         // And each `apply` of a list at `acyclic` (`k-note-apply-shares`).
-        .chain(c.facts.apply_shares.iter().map(|e| (place(*e), "n-apply-shares", None)))
+        .chain(c.facts.apply_shares.iter().map(|e| (place(*e), "n-apply-shares", Noted::None)))
         // And each definition's value that is a list nothing writes
         // (`k-note-frozen-define`).
-        .chain(c.facts.frozen_defines.iter().map(|e| (place(*e), "n-frozen-define", None)))
+        .chain(c.facts.frozen_defines.iter().map(|e| (place(*e), "n-frozen-define", Noted::None)))
         // And each `(with #%fx n)` that is the plain `n` (`k-synth-fx`).
-        .chain(c.facts.fx_plain.keys().map(|e| (place(*e), "n-plain-fx", None)))
+        .chain(c.facts.fx_plain.keys().map(|e| (place(*e), "n-plain-fx", Noted::None)))
         .collect();
+    // A datatype's value: a sum of its constructor's name and the product
+    // of its fields.
+    let sum = |scheme: &mut Session, name: &str, fields: &[Handle]| -> R<Handle> {
+        let mut parts = vec![scheme.make(|_| Value::fixnum(37))];
+        parts.extend_from_slice(fields);
+        let fields = scheme.call_global("%make-frozen", &parts).map_err(|e| FxError::at(Span::new(file, 0, 0), e.to_string()))?;
+        let (tag, name) = (scheme.make(|_| Value::fixnum(36)), scheme.make(|m| m.heap().intern(name)));
+        scheme.call_global("%make-frozen", &[tag, name, fields]).map_err(|e| FxError::at(Span::new(file, 0, 0), e.to_string()))
+    };
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
     // An identity, as the product `k-at` is.
     let identity = |scheme: &mut Session, (a, b, k): At| -> R<Handle> {
@@ -532,14 +546,26 @@ pub fn rust_facts(scheme: &mut Session, file: FileId, text: &str) -> R<Handle> {
     scheme.call_global(&format!("{READER_PREFIX}checked-reshapes!"), &[reshapes]).map_err(|e| fail(e.to_string()))?;
     let mut list = scheme.make(|_| Value::NULL);
     for (at, noted, value) in facts {
+        use crate::check::Datum;
         let at = identity(scheme, at)?;
-        // The `k-noted`: a sum of its constructor's name and the product of
-        // its fields.
-        let mut fields = vec![scheme.make(|_| Value::fixnum(37))];
-        fields.extend(value.map(|v| scheme.make(|_| Value::fixnum(v))));
-        let fields = scheme.call_global("%make-frozen", &fields).map_err(|e| fail(e.to_string()))?;
-        let (sum, name) = (scheme.make(|_| Value::fixnum(36)), scheme.make(|m| m.heap().intern(noted)));
-        let noted = scheme.call_global("%make-frozen", &[sum, name, fields]).map_err(|e| fail(e.to_string()))?;
+        let int = |scheme: &mut Session, n: i64| scheme.make(|_| Value::fixnum(n));
+        let fields = match value {
+            Noted::None => Vec::new(),
+            Noted::Int(n) => vec![int(scheme, n)],
+            // A `k-datum`, `parser-types.fx`'s.
+            Noted::Datum(d) => {
+                let (name, ns) = match d {
+                    Datum::Field(i) => ("datum-field", vec![i as i64]),
+                    Datum::BlobrefField(o) => ("datum-blobref-field", vec![o as i64]),
+                    Datum::Layout(code) => ("datum-layout", vec![code as i64]),
+                    Datum::Array { n, size } => ("datum-array", vec![n, size as i64]),
+                    Datum::Fits(size) => ("datum-fits", vec![size as i64]),
+                };
+                let ns: Vec<Handle> = ns.into_iter().map(|n| int(scheme, n)).collect();
+                vec![sum(scheme, name, &ns)?]
+            }
+        };
+        let noted = sum(scheme, noted, &fields)?;
         let tag = scheme.make(|_| Value::fixnum(37));
         let fact = scheme.call_global("%make-frozen", &[tag, at, noted]).map_err(|e| fail(e.to_string()))?;
         list = scheme.call_global("cons", &[fact, list]).map_err(|e| fail(e.to_string()))?;

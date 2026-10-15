@@ -2550,9 +2550,8 @@ generator reads, structured (step 6; today one string a clause,
   2026-10-15; `docs/research/loads-and-places.md`). Done (`DONE.md` §97):
   expressions' identities `(start end k)`, facts keyed by them and a
   datatype, no invented places, a load its key. Left:
-  - What an operation needs, within a fact (`n-datum`), still told apart
-    by the operation and by ranges: a blobref's field offset past `2^40`
-    (`check::BLOBREF_FIELD`), a flat array's `n << 32 | size`.
+  - A reshape's positions still tell a path from a position by range:
+    `2^40 + (k << 20) + j` (`check::RESHAPE_PATH`, `k-reshape-path`).
 - **More routines** a generator will want: allocating a bloblet, calling a
   primitive by name (its number is fixpt's own), making a closure.
 - **Calls do not use the convention their type says** (the user's

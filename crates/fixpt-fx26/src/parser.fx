@@ -756,6 +756,59 @@
 ;; it, the innermost first: a load of one of them is a cycle (`TODO.md`
 ;; §71).
 (define loading-keys (ref (listof (pairof string string rs) acyclic) rs) (new nil))
+;; A `case`'s data by halving (`TODO.md` §46): each datum's test, the
+;; value it sorts by, and its clause.
+(define-type case-entry (productof (1 exp) (2 int) (3 int)))
+(define-type case-entries (listof case-entry acyclic))
+;; The fewest data a `case` searches by halving, by kind (the Rust parser's
+;; `CASE_TREE_*`, measured): integers, strings, symbols; never characters.
+;; Where the leaves give an index for a second search (`direct` false),
+;; integers and symbols pay only from more.
+(define case-tree-from (subr pure (int bool) int)
+  (lambda (k direct)
+    (case k ((0) (if direct 8 32)) ((2) 16) ((3) (if direct 32 64)) (else 1000000000))))
+;; What datum `d`, of kind `k`, sorts by: the integer, or the runtime's hash.
+(define case-sort-key (subr (read @globals) (int syn) int)
+  (lambda (k d)
+    (let ((x (syn->datum d)))
+      (case k
+        ((0) (if (int? x) x 0))
+        ((2) (if (string? x) (string-hash x) 0))
+        (else (if (symbol? x) (symbol-name-hash x) 0))))))
+;; `e` into `sorted`, after those of no greater value: a stable sort.
+(define case-insert (subr (read @globals) (case-entry case-entries) case-entries)
+  (lambda (e sorted)
+    (if (or (null? sorted) (< (extract e 2) (extract (car sorted) 2)))
+        (the case-entries (cons e sorted))
+        (the case-entries (cons (car sorted) (case-insert e (cdr sorted)))))))
+(define case-sort (subr (read @globals) (case-entries case-entries) case-entries)
+  (lambda (es sorted) (if (null? es) sorted (case-sort (cdr es) (case-insert (car es) sorted)))))
+(define case-entries-length (subr (read @globals) (case-entries) int)
+  (lambda (es) (if (null? es) 0 (+ 1 (case-entries-length (cdr es))))))
+(define case-exps-length (subr (read @globals) (exp-list) int)
+  (lambda (es) (if (null? es) 0 (+ 1 (case-exps-length (cdr es))))))
+(define case-key-at (subr (maxeff (read @globals) spin) (case-entries int) int)
+  (lambda (es i) (if (= i 0) (extract (car es) 2) (case-key-at (cdr es) (- i 1)))))
+(define case-take (subr (read @globals) (case-entries int) case-entries)
+  (lambda (es k) (if (= k 0) nil (the case-entries (cons (car es) (case-take (cdr es) (- k 1)))))))
+(define case-drop (subr (read @globals) (case-entries int) case-entries)
+  (lambda (es k) (if (= k 0) es (case-drop (cdr es) (- k 1)))))
+;; Where to halve `n` sorted entries: nearest the middle, between unequal
+;; values (0 if none), as the Rust parser's `case_index`.
+(define case-mid-up (subr (maxeff (read @globals) spin) (case-entries int int) int)
+  (lambda (es mid n)
+    (if (and (< mid n) (> mid 0) (= (case-key-at es mid) (case-key-at es (- mid 1))))
+        (case-mid-up es (+ mid 1) n)
+        mid)))
+(define case-mid-down (subr (maxeff (read @globals) spin) (case-entries int) int)
+  (lambda (es mid)
+    (if (and (> mid 0) (= (case-key-at es mid) (case-key-at es (- mid 1))))
+        (case-mid-down es (- mid 1))
+        mid)))
+(define case-mid (subr (maxeff (read @globals) spin) (case-entries int) int)
+  (lambda (es n)
+    (let ((up (case-mid-up es (quotient n 2) n)))
+      (if (= up n) (case-mid-down es (quotient n 2)) up))))
 ;; Whether `key` names a `load-input`'s file.
 (define input-key? (subr pure (string) bool)
   (lambda (k) (and (> (string-length k) 6) (string=? (substring k 0 6) "input:"))))

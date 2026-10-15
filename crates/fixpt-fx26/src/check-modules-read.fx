@@ -224,7 +224,7 @@
           (let* ((t (k-parse-type ty)) (x (k-resolve-exp body))) (x-the t x a b abk)))
         (e-convention (c body a b abk)
           (let* ((cv (k-parse-conv c)) (x (k-resolve-exp body))) (x-convention cv x a b abk)))
-        (e-bloblet (op i args a b abk)
+        (e-bloblet (op i args got a b abk)
           (x-bloblet op i (k-label-const op args (k-resolve-all args)) a b abk))
         (e-product (fs a b abk) (x-product (k-resolve-fields fs nil a b) a b abk))
         (e-extract (body l got a b abk) (x-extract (k-resolve-exp body) l a b abk))

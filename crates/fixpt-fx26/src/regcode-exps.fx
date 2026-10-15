@@ -602,7 +602,7 @@
         (e-the (d body a b abk) (r-collects body e this tail))
         (e-convention (cnv body a b abk) (r-collects body e this tail))
         (e-extract (p l got a b abk) (r-collects p e this #f))
-        (e-bloblet (op i args a b abk)
+        (e-bloblet (op i args got a b abk)
           (if (r-bloblet-quiet? (symbol->string op)) (r-collects-all args e this) #t))
         (e-tagcase (s arms els got a b abk)
           (or (r-collects s e this #f)

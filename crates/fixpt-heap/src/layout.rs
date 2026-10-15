@@ -195,9 +195,28 @@ pub const FLAT_I32: i64 = 0;
 /// A flat array's length, as `blobref-index` is told it, when the array
 /// runs to the end of its owner's suffix (`TODO.md` §77): its length is
 /// what is left of the suffix, in elements, found when it is indexed.
-/// Below 2^28, so that `n << 32 | size` stays a fixnum; a literal length
-/// is below it.
+/// Below 2^28, so that an array's operand (`array_operand`) stays a
+/// fixnum; a literal length is below it.
 pub const FLAT_TO_THE_END: i64 = 0x0fff_ffff;
+
+/// A flat array's length `n` and element size, as one operand of the
+/// primitives that index it and say its length (`%fx26-suffix-ref-index`,
+/// `%fx26-suffix-ref-length`): `n << 32 | size`. Taken apart only by
+/// [`array_operand_parts`]; the front end written in FX-26 says the same
+/// (`parser-types.fx`, `k-array-operand`).
+pub const fn array_operand(n: i64, size: i64) -> i64 {
+    n << ARRAY_OPERAND_LENGTH_SHIFT | size
+}
+
+/// [`array_operand`]'s length and size.
+pub const fn array_operand_parts(operand: i64) -> (i64, i64) {
+    (operand >> ARRAY_OPERAND_LENGTH_SHIFT, operand & ((1 << ARRAY_OPERAND_SIZE_BITS) - 1))
+}
+
+/// Where in [`array_operand`] the length is, and how wide the size below
+/// it: what machine code that takes one apart reads (`direct.rs`).
+pub const ARRAY_OPERAND_LENGTH_SHIFT: u32 = 32;
+pub const ARRAY_OPERAND_SIZE_BITS: u32 = 32;
 pub const FLAT_U32: i64 = 1;
 pub const FLAT_I64: i64 = 2;
 pub const FLAT_U64: i64 = 3;

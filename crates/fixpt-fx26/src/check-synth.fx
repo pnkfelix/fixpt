@@ -67,7 +67,6 @@
       (include check-effects) (include check-mask) (include check-unions)
       (include check-terminate) (include check-holds) (include check-sub-env)
       (include check-subtype) (include check-calls) (include check-subst))
-(define k-blobref-field int 1099511627776)
 
 ;; The error that a `tagcase`, `x`, has no arm for the variants `rest`.
 (define k-fail-no-arm (subr (maxeff checks spin) (k-parts kx) void)
@@ -154,9 +153,12 @@
 (define k-region-form (subr pure (int) string)
   (lambda (k)
     (case k ((0) "letregion") ((1) "letrena") ((2) "letreap") (else "letfreeze"))))
-;; Note, for the compiler, that the `extract` `at` takes part `i`.
-(define k-note-extract (subr kstate (k-at int) unit)
-  (lambda (at i) (set k-extracts (cons (product (1 at) (2 (n-datum i))) (get k-extracts)))))
+;; Note, for the compiler, what the `extract` `at` takes, `d`; or its field,
+;; `i`, by position.
+(define k-note-extract (subr kstate (k-at k-datum) unit)
+  (lambda (at d) (set k-extracts (cons (product (1 at) (2 (n-datum d))) (get k-extracts)))))
+(define k-note-field (subr kstate (k-at int) unit)
+  (lambda (at i) (k-note-extract at (datum-field i))))
 ;; `inner`, under binders `bs`, with `m` for them, each within its bound and finite if need be.
 (define k-subst-checked (subr (maxeff checks spin) (k-binders k-map int int int) int)
   (lambda (bs m inner a b)
@@ -806,7 +808,7 @@
             (if (< (car fld) 0)
                 (k-fail (k-cat5 "a " (k-show-ty pt) " has no `" (symbol->string l) "` laid out")
                         a z)
-                (begin (k-note-extract (k-at-of x) (+ k-blobref-field (car fld)))
+                (begin (k-note-extract (k-at-of x) (datum-blobref-field (car fld)))
                        (k-te-masked x (k-blobref-of (car (car p)) (cdr fld)) (extract r 2)))))))))
 
 

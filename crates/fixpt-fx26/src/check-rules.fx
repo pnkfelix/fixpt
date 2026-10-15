@@ -220,7 +220,7 @@
                 (let ((t (k-part-find fs l)))
                   (if (< t 0)
                       (k-fail-no-part pt " has no " l a b)
-                      (begin (k-note-extract (k-at-of x) (k-part-index fs l 0))
+                      (begin (k-note-field (k-at-of x) (k-part-index fs l 0))
                              (k-te-masked x t (extract r 2))))))
               (else y (k-extract-blobref x pt e l r)))))
         (x-sum (l e a b abk)

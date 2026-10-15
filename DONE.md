@@ -2554,3 +2554,15 @@ Still open in `TODO.md` §97; done so far:
   took and the one written in FX-26 refused was "declined" and run another
   way, which hid the `load-input` bug; it is now an error saying the two
   disagree (`native_define_in`). No test program makes one.
+- **What an operation takes, a datatype too** (2026-10-15, the user's
+  rule: an encoding only behind an abstraction, never a bare integer whose
+  bits mean things): a `k-datum` (`parser-types.fx`: `datum-field`,
+  `datum-blobref-field`, `datum-layout`, `datum-array`, `datum-fits`) and
+  Rust's `check::Datum`, where an `extract`'s field past `2^40` meant a
+  blobref's offset and an array's length and size were `n << 32 | size`
+  (`BLOBREF_FIELD`, gone). Nodes hold theirs typed (`e-bloblet`,
+  `e-extract`, `e-tagcase`), `e-bloblet`'s field index no longer doubling
+  as it. The run time's array operand, still one integer, is made and
+  taken apart in one place each: `layout::array_operand`,
+  `array_operand_parts` and `ARRAY_OPERAND_LENGTH_SHIFT`/`SIZE_BITS`
+  (machine code's too), and `parser-types.fx`'s `k-array-operand`.
