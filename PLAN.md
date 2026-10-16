@@ -130,9 +130,10 @@ are in the last section, "Log: the glance's details", and in
   worked out and declined), `telemetry.md` (an `@telemetry` effect and
   fourteen operations), `async.md` (a scheduler over prompts, structured
   concurrency as region scoping). Each has open questions for the user.
-- **Kayak's requests of 2026-10-15** (`DONE.md` §98): the eager
-  reader's continuation-holding states apart from `syn`'s types, and the
-  parser loading no reader (`syn.fx`); and one-shot continuations,
+- **Kayak's requests of 2026-10-15 and -16** (`DONE.md` §98): the eager
+  reader's working state (its continuation-holding states and its
+  self-mentioning cursor) apart from `syn`'s types, and the parser
+  loading no reader (`syn.fx`); and one-shot continuations,
   `call-with-oneshot-continuation` and the `(oneshot T A D R)` type, the
   second resume a defined failure on every machine.
 

@@ -78,27 +78,27 @@
 "kind": "type"
 },
 "cursor": {
-"file": "eager-reader-types.fx",
-"var": "eager-reader-types",
-"load": "((proj (load-module \"fx26:eager-reader-types.fx\") @s @e @m @c))",
+"file": "eager-reader-states.fx",
+"var": "eager-reader-states",
+"load": "((proj (load-module \"fx26:eager-reader-states.fx\") @s @e @m @c))",
 "kind": "type"
 },
 "cursors": {
-"file": "eager-reader-types.fx",
-"var": "eager-reader-types",
-"load": "((proj (load-module \"fx26:eager-reader-types.fx\") @s @e @m @c))",
+"file": "eager-reader-states.fx",
+"var": "eager-reader-states",
+"load": "((proj (load-module \"fx26:eager-reader-states.fx\") @s @e @m @c))",
 "kind": "type"
 },
 "result": {
-"file": "eager-reader-types.fx",
-"var": "eager-reader-types",
-"load": "((proj (load-module \"fx26:eager-reader-types.fx\") @s @e @m @c))",
+"file": "eager-reader-states.fx",
+"var": "eager-reader-states",
+"load": "((proj (load-module \"fx26:eager-reader-states.fx\") @s @e @m @c))",
 "kind": "type"
 },
 "word": {
-"file": "eager-reader-types.fx",
-"var": "eager-reader-types",
-"load": "((proj (load-module \"fx26:eager-reader-types.fx\") @s @e @m @c))",
+"file": "eager-reader-states.fx",
+"var": "eager-reader-states",
+"load": "((proj (load-module \"fx26:eager-reader-states.fx\") @s @e @m @c))",
 "kind": "type"
 },
 "context": {
@@ -126,9 +126,9 @@
 "kind": "effect"
 },
 "atom-in": {
-"file": "eager-reader-types.fx",
-"var": "eager-reader-types",
-"load": "((proj (load-module \"fx26:eager-reader-types.fx\") @s @e @m @c))",
+"file": "eager-reader-states.fx",
+"var": "eager-reader-states",
+"load": "((proj (load-module \"fx26:eager-reader-states.fx\") @s @e @m @c))",
 "kind": "type"
 },
 "tree-builds": {

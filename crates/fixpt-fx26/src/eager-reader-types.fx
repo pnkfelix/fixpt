@@ -1,11 +1,12 @@
-;;; The eager reader's types, in FX-26: what it reads, its cursors, and
-;;; what its procedures may do. A module file of the reader's regions, as
+;;; The eager reader's types, in FX-26: what it reads, and what its
+;;; procedures may do. A module file of the reader's regions, as
 ;;; `eager-reader.fx` is, which loads it at its own: it holds no state, so
 ;;; any file may load it, and two loads are the same types, since FX-26's
 ;;; types are structural (the front end's modules, `TODO.md` §68). The
-;;; reader's own states, which hold its continuations, are in
-;;; `eager-reader-states.fx`, which only the reader loads, so that a client
-;;; that wants `syn` meets no continuation (kayak's request, 2026-10-15).
+;;; reader's own working state, its cursors and the states that hold its
+;;; continuations, is in `eager-reader-states.fx`, which only the reader
+;;; loads, so that a client that wants `syn` meets no continuation and no
+;;; recursive abbreviation (kayak's requests, 2026-10-15 and 2026-10-16).
 
 ;; The reader's regions: its data, its prompt tag, its mark key, and the
 ;; lists it hands back (`eager-reader.fx`).
@@ -36,28 +37,9 @@
   (vec (listof syn acyclic) datum int int))
 (define-type syns (listof syn acyclic))
 
-;; The lookahead character (none once a closing character is consumed), how
-;; many characters have been consumed, the top-level data, and — after `#`
-;; followed by something that is not a comment — the cursor after that
-;; something, which the datum reader takes up.
-(define-type cursor (pairof chars (pairof int (pairof syns (listof cursor acyclic) rs) rs) rs))
-(define-type cursors (listof cursor acyclic))
-
-;; What was read, and the cursor after it.
-(define-type result (pairof syn cursor rs))
-;; Some characters, and the cursor after them.
-(define-type word (pairof string cursor rs))
-
 ;; What a suspended parse is in the middle of, as its marks say, in the
 ;; caller's region `rc`; what is asked of it.
 (define-type context (listof datum rc))
 (define-type closers (listof char rc))
 (define-effect in-context (maxeff (read @globals) (read rc) (alloc rc) spin))
 (define-effect asks (maxeff in-context (read rs) (read rm)))
-
-;; Where an atom is being read: where it starts, the data read before it,
-;; and the text given ahead when it started, with where that starts. While
-;; the atom is all in that text (the origin unchanged, as any feed changes
-;; it), its text is taken from there at the end, with no list of its
-;; characters.
-(define-type atom-in (productof (start int) (data syns) (text string) (origin int)))

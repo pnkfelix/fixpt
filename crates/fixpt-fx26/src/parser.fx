@@ -18,7 +18,7 @@
 ;; The reader's types, and `syn->datum` (`syn.fx`), at these regions, and
 ;; what this file uses of them.
 (define reader-types ((proj (load-module "fx26:eager-reader-types.fx") rs re rm rc)))
-(import reader-types atom lst dotted vec (type syn result))
+(import reader-types atom lst dotted vec (type syn))
 (define syn-module ((proj (load-module "fx26:syn.fx") rs re rm rc)))
 (import syn-module syn->datum)
 ;; Its types, at these regions (`parser-types.fx`), and the names it uses

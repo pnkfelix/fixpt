@@ -42,10 +42,10 @@
 ;; (`eager-reader-states.fx`), and the names it uses of them.
 (define reader-types ((proj (load-module "fx26:eager-reader-types.fx") rs re rm rc)))
 (import reader-types atom lst dotted vec
-        (type chars data syn syns cursor cursors result word context closers atom-in)
+        (type chars data syn syns context closers)
         (effect own-data marks parsing reads inspects reading in-context asks))
 (define reader-states ((proj (load-module "fx26:eager-reader-states.fx") rs re rm rc)))
-(import reader-states (type state-rest state cont))
+(import reader-states (type cursor cursors result word atom-in state-rest state cont))
 (define syn-module ((proj (load-module "fx26:syn.fx") rs re rm rc)))
 (import syn-module syn->datum)
 

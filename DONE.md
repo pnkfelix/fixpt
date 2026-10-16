@@ -2658,7 +2658,7 @@ Still open in `TODO.md` §97; done so far:
   card; twenty thousand kept across collections; a size of -1 refused;
   on every machine and stressed (`a_bloblet_made_by_the_routine`).
 
-## 98. The reader's types apart, and one-shot continuations (kayak's requests, 2026-10-15)
+## 98. The reader's types apart, and one-shot continuations (kayak's requests, 2026-10-15 and -16)
 
 - **Request A: the reader's types split** (2026-10-15). Kayak's survey
   of the front end found 68 files stopping at `eager-reader-types.fx`,
@@ -2707,4 +2707,14 @@ Still open in `TODO.md` §97; done so far:
   as it resumes it once. The eager reader's stay composable: the line
   editor resumes a kept checkpoint again after an edit (`fixpt-scheme`'s
   `eager.rs`), so they are resumed more than once.
+- **Request C: the reader's working types apart** (2026-10-16). Rerun
+  after A, kayak's survey found the 70 files loading
+  `eager-reader-types.fx` stopping at `cursor`, a type abbreviation that
+  mentions itself: a recursive structural type, which KFX refuses (Rust
+  has no recursive aliases; KFX keeps recursion to datatypes). `cursor`,
+  `cursors`, `result`, `word` and `atom-in`, the reader's own working
+  state, are now in `eager-reader-states.fx` beside `state`; nothing
+  outside `eager-reader.fx` used them (the parser imported `result` and
+  did not use it). `eager-reader-types.fx` holds `syn`, `syns`, `chars`,
+  `data`, `context`, `closers` and the reader's effects. A refactor only.
 
