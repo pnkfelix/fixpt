@@ -845,9 +845,13 @@ impl Machine {
         if !self.nested || !crossing::crossed() {
             return Err(missing());
         }
+        // The tag too, which a collection there may move: the frames out
+        // from here are searched for its prompt by where it is after.
+        self.ds.push(tag);
         self.ds.push(proc_);
         self.safepoint(&mut rt.heap, r);
         let proc_ = self.ds.pop().expect("pushed");
+        let tag = self.ds.pop().expect("pushed");
         let from = nested_floor(&rt.heap, &self.rs, self.rs_floor);
         let own = self.capture(&mut rt.heap, r, from, 0, false);
         // Nothing allocated here collects, so `proc_` stays where it is.

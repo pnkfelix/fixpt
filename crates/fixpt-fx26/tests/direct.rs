@@ -1201,6 +1201,30 @@ fn run_native_collecting(rt: &mut fixpt_runtime::Runtime, closure: Value, fuel: 
     r
 }
 
+/// `run_native`, collecting at every safepoint while the native code runs.
+fn run_native_collecting_always(rt: &mut fixpt_runtime::Runtime, closure: Value, fuel: u64) -> fixpt_fx26::session::NativeRun {
+    let was = std::mem::replace(&mut rt.heap.gc_every, 1);
+    let r = run_native(rt, closure, fuel);
+    rt.heap.gc_every = was;
+    r
+}
+
+/// A capture in cellular code up to a prompt in the native frames out from
+/// it, collecting at every safepoint: the cellular machine kept the tag
+/// across the capture's safepoint, so a collection there that moved it
+/// left the frames out searched for where it had been, and found no
+/// prompt (`programs/native/capture-across-collecting.fx`).
+#[test]
+fn a_tag_moved_at_a_capture_across_machines_finds_its_prompt() {
+    let mut s = session(true);
+    s.native_runner = Some(run_native_collecting_always);
+    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/capture-across-collecting.fx")).expect("reads");
+    let (values, fell) = values_and_fallbacks(&mut s, &forms);
+    // Each `1 + 3d`, `d` the cellular frames between (`captures.fx`).
+    assert_eq!(values.last().map(String::as_str), Some("220"), "{values:?}");
+    assert_eq!(fell, ["grab-c", "climb-c"], "only those that stay cellular do");
+}
+
 /// Control on native frames (`docs/research/native-conventions.md`, step
 /// 5): prompts and aborts, whole and composable continuations taken and
 /// given values, throws out of regions, and marks, each program's last

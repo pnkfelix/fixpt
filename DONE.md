@@ -3052,3 +3052,21 @@ run alone. Test: `remainder_in_line_as_the_rust_machine_gives_it`
 (`programs/native/remainder.fx`: each sign, a constant divisor and not,
 the least fixnum by −1, a bignum, by zero). The 46 ports: the same
 answers and times (three use `remainder`, none in a hot loop).
+
+## 104. A prompt tag held across a collection at a capture across machines (found 2026-10-16)
+
+**Fixed (2026-10-16).** Found with §69: `deep_recursion_through_the_stack_cache`
+failed, `captures.fx`'s second list giving "no prompt for this tag", once
+§69's files changed what the front end, loaded into the same heap,
+allocated (the program's code was the same). A capture in cellular code
+whose prompt is in the frames of the native code out from it
+(`Machine::capture_across`) runs a safepoint first, and kept `proc_`
+across it on the data stack but the tag in a Rust local: a collection
+there that moved the tag (a major one, here) left the frames out, put
+back as the heap had kept them, holding it where it now was, and the
+search (`crossing::capture`) looking for where it had been. The tag is
+kept on the data stack too now. Test:
+`a_tag_moved_at_a_capture_across_machines_finds_its_prompt`
+(`programs/native/capture-across-collecting.fx`: such captures under 0
+to 3 cellular frames, collecting at every safepoint, so that some
+capture's safepoint is a major collection's; it gave "no prompt" before).
