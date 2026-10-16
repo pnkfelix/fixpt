@@ -559,6 +559,7 @@
         nil
         (let* ((x (car bs))
                (t (k-resolve-selects (extract x 2) a b))
+               (marked (k-arrow-star-as (extract x 2) t))
                (rest (k-letrec-selected (cdr bs) a b)))
           (cons (product (1 (extract x 1)) (2 t) (3 (extract x 3))) rest)))))
 ;; The first `select` of `found` from one of `params`, or none.

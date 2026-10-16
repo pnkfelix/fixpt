@@ -285,6 +285,9 @@ pub struct Checker {
     /// Whether the next type read may be `(->* (param …) result)`, under
     /// any `poly`s: a definition's signature, its effect found (`top.rs`).
     pub(crate) arrow_star: bool,
+    /// The types read from `->*`: a `letrec` or `define-rec` binding at one
+    /// has its effect found (`arrow_star_group`).
+    pub(crate) arrow_star_tys: HashSet<TyId>,
     /// The variables `acyclic?` has just found acyclic, in the branch where
     /// it did: each by name and by which binding it is (its place in `env`).
     pub(crate) certified: Vec<(Sym, usize)>,
@@ -739,6 +742,7 @@ impl Checker {
             lemmas: Vec::new(),
             pending_lemma: None,
             arrow_star: false,
+            arrow_star_tys: HashSet::new(),
             certified: Vec::new(),
             certified_nats: Vec::new(),
             certified_lengths: Vec::new(),
@@ -1391,7 +1395,8 @@ impl Checker {
         for (n, t, init) in bindings {
             resolved.push((*n, self.resolve_selects(*t, span)?, *init));
         }
-        self.letrec_with(e, &resolved, body, expected, true)
+        let marked: Vec<bool> = bindings.iter().map(|(_, t, _)| self.arrow_star_tys.contains(t)).collect();
+        self.letrec_with(e, &resolved, body, expected, true, &marked)
     }
 
     /// [`letrec`](Self::letrec), and if a procedure of the group does not
@@ -1399,7 +1404,15 @@ impl Checker {
     /// the globals each reads found, as `define*` finds them
     /// ([`letrec_found`](Self::letrec_found)); the first error if that
     /// finds nothing new.
-    fn letrec_with(&mut self, e: ExpId, bindings: &[(Sym, TyId, ExpId)], body: ExpId, expected: Option<TyId>, infer: bool) -> R<(TyId, Effect)> {
+    fn letrec_with(
+        &mut self,
+        e: ExpId,
+        bindings: &[(Sym, TyId, ExpId)],
+        body: ExpId,
+        expected: Option<TyId>,
+        infer: bool,
+        marked: &[bool],
+    ) -> R<(TyId, Effect)> {
         let depth = self.env.len();
         self.env.extend(bindings.iter().map(|(n, t, _)| (*n, *t)));
         self.known.extend(bindings.iter().enumerate().map(|(i, (n, _, _))| (*n, depth + i)));
@@ -1412,6 +1425,27 @@ impl Checker {
         }
         // A group whose every run ends needs no `spin`.
         self.note_termination(bindings);
+        // With `->*`, the group at the types found.
+        let found;
+        let (bindings, infer) = match marked.contains(&true) {
+            false => (bindings, infer),
+            true => match self.arrow_star_group(bindings, marked) {
+                Ok(f) => {
+                    for (i, (_, t, _)) in f.iter().enumerate() {
+                        self.env.set_ty(depth + i, *t);
+                    }
+                    self.recursive.truncate(rdepth);
+                    self.note_termination(&f);
+                    found = f;
+                    (&found[..], false)
+                }
+                Err(err) => {
+                    self.recursive.truncate(rdepth);
+                    self.truncate_env(depth);
+                    return Err(err);
+                }
+            },
+        };
         // An error, and whether a procedure of the group made it.
         let r = (|| {
             let mut eff = Effect::pure();
@@ -1432,7 +1466,7 @@ impl Checker {
         let (t, eff) = match r {
             Ok(r) => r,
             Err((err, true)) if infer => match self.letrec_found(bindings) {
-                Some(found) => return self.letrec_with(e, &found, body, expected, false),
+                Some(found) => return self.letrec_with(e, &found, body, expected, false, &[]),
                 None => return Err(err),
             },
             Err((err, _)) => return Err(err),
@@ -1483,6 +1517,59 @@ impl Checker {
             types = next;
         }
         None
+    }
+
+    /// A group with `->*` members (`marked`), bound at their types and its
+    /// termination noted, at the types found: each marked member's own
+    /// effect found from its `lambda` in one pass, the group's calls of
+    /// each other standing for nothing more; then each one's with the
+    /// effects of every member it reaches through the group's references
+    /// (but a polymorphic one's, which say its own binders), and `spin` if
+    /// that reads a member's global, as `no_reaching_itself` asks. The group
+    /// is checked again at these types, which refuses what they leave out.
+    pub(crate) fn arrow_star_group(&mut self, bindings: &[(Sym, TyId, ExpId)], marked: &[bool]) -> R<Vec<(Sym, TyId, ExpId)>> {
+        let mut own = Vec::new();
+        for ((_, t, x), m) in bindings.iter().zip(marked) {
+            own.push(match m {
+                false => self.latent_of(*t).unwrap_or_default(),
+                true if matches!(self.arena.exp_at(*x), Exp::Lambda { .. }) => self.arrow_star_latent(*t, *x)?,
+                true => return Err(FxError::at(self.arena.span_of(*x), "`->*` finds a procedure's effect from its `lambda`: define it as one")),
+            });
+        }
+        let names: Vec<Sym> = bindings.iter().map(|b| b.0).collect();
+        let poly: Vec<bool> = bindings.iter().map(|b| matches!(self.arena.get(self.arena.resolve(b.1)), Ty::Poly { .. })).collect();
+        let refs: Vec<Vec<usize>> = bindings
+            .iter()
+            .map(|(_, _, x)| {
+                let free = self.free_vars(*x);
+                (0..names.len()).filter(|j| free.contains(&names[*j])).collect()
+            })
+            .collect();
+        let mut out = Vec::new();
+        for (i, (n, t, x)) in bindings.iter().enumerate() {
+            if !marked[i] {
+                out.push((*n, *t, *x));
+                continue;
+            }
+            let (mut seen, mut stack, mut eff) = (vec![false; names.len()], vec![i], Effect::pure());
+            seen[i] = true;
+            while let Some(j) = stack.pop() {
+                if j == i || !poly[j] {
+                    eff = eff.union(&own[j]);
+                }
+                for &k in &refs[j] {
+                    if !seen[k] {
+                        seen[k] = true;
+                        stack.push(k);
+                    }
+                }
+            }
+            if names.iter().any(|m| eff.contains(Atom::Read(Region::Global(*m)))) {
+                eff = eff.union(&Effect::atom(Atom::Spin));
+            }
+            out.push((*n, self.with_latent(*t, &eff).expect("`->*` reads as a `subr`"), *x));
+        }
+        Ok(out)
     }
 
     /// The latent effect of `t`, a `subr` under any `poly`s.

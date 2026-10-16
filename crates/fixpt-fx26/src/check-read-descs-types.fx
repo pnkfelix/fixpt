@@ -42,6 +42,7 @@
                                spin)
                        (syn)
                        int))
+            (val k-written-arrow-star? (subr (maxeff (read @globals) (read @s) spin) (syn) bool))
             (val k-define-type
                  (subr (maxeff (alloc @t)
                                (goto @z)

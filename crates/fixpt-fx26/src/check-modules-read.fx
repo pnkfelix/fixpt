@@ -244,7 +244,8 @@
     (lambda (bs)
       (if (null? bs)
           nil
-          (let* ((t (k-parse-type (extract (car bs) 2)))
+          (let* ((star (set k-arrow-star (k-written-arrow-star? (extract (car bs) 2))))
+                 (t (k-parse-type (extract (car bs) 2)))
                  (x (k-resolve-exp (extract (car bs) 3)))
                  (rest (k-resolve-letrec (cdr bs))))
             (cons (product (1 (extract (car bs) 1)) (2 t) (3 x)) rest)))))

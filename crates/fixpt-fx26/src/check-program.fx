@@ -281,7 +281,10 @@
   (lambda (bs)
     (if (null? bs)
         nil
-        (let* ((t (k-select-syn (k-parse-type (extract (car bs) 2)) (extract (car bs) 2)))
+        (let* ((star (set k-arrow-star (k-written-arrow-star? (extract (car bs) 2))))
+               (t0 (k-parse-type (extract (car bs) 2)))
+               (t (k-select-syn t0 (extract (car bs) 2)))
+               (marked (k-arrow-star-as t0 t))
                (bound (k-bind-named-global (extract (car bs) 1) t))
                (noted (k-note-known (extract (car bs) 1) 0)))
           (cons t (k-rec-types (cdr bs)))))))
@@ -321,16 +324,35 @@
 (define k-group-free (subr kmakes (k-letrec-bs k-names) k-names)
   (lambda (g out)
     (if (null? g) out (k-group-free (cdr g) (k-free-into (extract (car g) 3) nil out)))))
+;; Each of `g`, bound again at its type there.
+(define k-rebind-each (subr (maxeff checks spin) (k-letrec-bs) unit)
+  (lambda (g)
+    (if (null? g)
+        #u
+        (begin (k-rebind-top (extract (car g) 1) (extract (car g) 2)) (k-rebind-each (cdr g))))))
+;; Note of the recursive group `g` whether it needs `spin`, and why.
+(define k-note-rec-ending (subr (maxeff checks spin) (k-letrec-bs) unit)
+  (lambda (g)
+    (let ((why (k-termination g)))
+      (if (string=? why "") #u (begin (k-note-recursive g) (k-note-why g why))))))
+;; Group `g`, with members typed `->*`, bound and its termination noted
+;; after `rsaved`: at the types found (`k-arrow-star-found`), bound again
+;; so and noted again.
+(define k-rec-found (subr (maxeff checks spin) (k-letrec-bs k-named) k-letrec-bs)
+  (lambda (g rsaved)
+    (let ((found (k-arrow-star-found k-synth-lambda-as g)))
+      (begin (k-rebind-each found) (set k-recursive rsaved) (k-note-rec-ending found) found))))
 ;; `(define-rec (name type lambda) …)`: every name in scope first, then each
 ;; lambda checked against its type. A line for each.
 (define k-define-rec (subr (maxeff checks spin) (k-rec-forms) k-out)
   (lambda (bs)
     (let* ((rsaved (get k-recursive))
-           (g (k-rec-lambdas bs (k-rec-types bs)))
-           (u (set k-last-uses (k-group-free g nil)))
+           (g0 (k-rec-lambdas bs (k-rec-types bs)))
+           (u (set k-last-uses (k-group-free g0 nil)))
            ;; A group whose every run ends needs no `spin`.
-           (why (k-termination g))
-           (noted (if (string=? why "") #u (begin (k-note-recursive g) (k-note-why g why))))
+           (noted (k-note-rec-ending g0))
+           ;; With `->*`, the group at the types found.
+           (g (if (k-any-arrow-star? g0) (k-rec-found g0 rsaved) g0))
            (lines (k-rec-check g)))
       (begin (set k-recursive rsaved) lines))))
 
@@ -463,16 +485,6 @@
     (let ((named (the k-named (cons (cons name t) nil))))
       (begin (k-check-proof l name x)
              (set k-lemmas (cons (k-lemma-as l named) (get k-lemmas)))))))
-;; Whether signature `s` is `(->* …)`, under any `poly`s.
-(define* k-written-arrow-star? (subr (maxeff (read @s) spin) (syn) bool)
-  (lambda (s)
-    (tagcase s
-      (lst (xs d a b)
-        (let ((head (k-symbol-head xs)))
-          (or (string=? head "->*")
-              (and (string=? head "poly") (= (k-length xs) 3)
-                   (k-written-arrow-star? (k-nth xs 2))))))
-      (else y #f))))
 ;; An error at `written` if `define*` (`star`) declares an `->*` (`arrow`).
 (define k-arrow-star-alone (subr checks (bool bool syn) unit)
   (lambda (star arrow written)
@@ -485,27 +497,11 @@
     (if (and arrow (not (tagcase x (x-lambda (ps body a b abk) #t) (else y #f))))
         (k-fail-at "`->*` finds a procedure's effect from its `lambda`: define it as one" x)
         #u)))
-;; The latent effect of `x`, a `lambda`, told the parameters and result of
-;; `t`, a `subr` under any `poly`s, whose binders are in scope.
-(define* k-arrow-star-latent (subr (maxeff checks spin) (int kx) k-eff)
-  (lambda (t x)
-    (tagcase (k-get (k-resolve t))
-      (ty-poly (bs body) (k-arrow-star-latent body x))
-      (ty-subr (e ps r cv) (begin (k-synth-lambda-as x ps r) (get k-last-latent)))
-      (else y (k-fail-at "`->*` reads as a `subr`" x)))))
-;; Whether effect `e` reads global `name`.
-(define k-reads-own? (subr (read @globals) (symbol k-eff) bool)
-  (lambda (name e)
-    (and (not (null? e))
-         (or (tagcase (car e)
-               (a-read (r) (tagcase r (r-global (g) (symbol=? g name)) (else y #f)))
-               (else y #f))
-             (k-reads-own? name (cdr e))))))
 ;; The effect `->*` finds for `name`, from its body's `e`: with `spin` if it
 ;; reads `name` itself, as a procedure that may reach itself through a
 ;; global must say (`k-no-reaching-itself`).
 (define* k-arrow-star-spins (subr (maxeff (read @t) (alloc @t) spin) (symbol k-eff) k-eff)
-  (lambda (name e) (if (k-reads-own? name e) (k-insert (a-spin) e) e)))
+  (lambda (name e) (if (k-reads-one-of? (cons name nil) e) (k-insert (a-spin) e) e)))
 ;; `(define name type init)`, or, if `star` is not empty,
 ;; `(define* name type init)`: its line.
 (define k-define-typed (subr (maxeff checks spin) (symbol syn syns-a exp) k-out)
@@ -547,7 +543,7 @@
            ;; its effect found, a call of itself standing for nothing more:
            ;; that effect already holds what such a call does, so it is the
            ;; least the procedure can have.
-           (e0 (if arrow (k-arrow-star-latent t x) (k-check-declared name tw x)))
+           (e0 (if arrow (k-arrow-star-latent k-synth-lambda-as t x) (k-check-declared name tw x)))
            ;; With `define*`, the globals the lambda read,
            ;; found, are its type's; and it is checked again
            ;; at that type, bound to it: one that fails is

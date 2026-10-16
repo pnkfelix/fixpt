@@ -287,6 +287,10 @@
    (val k-lemmas (ref (listof k-lemma acyclic) @t))
    (val k-pending-lemma (ref (listof k-lemma acyclic) @t))
    (val k-arrow-star (ref bool @t))
+   (val k-arrow-star-tys (ref k-ids @t))
+   (val k-arrow-star-ty? (subr (maxeff (read @globals) (read @t)) (int) bool))
+   (val k-arrow-star-as
+        (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t)) (int int) unit))
    (val k-nth (poly ((t type)) (subr (read @globals) ((listof t acyclic) int) t)))
    (val k-std (ref k-named @t))
    (val k-std-table

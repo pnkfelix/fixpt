@@ -810,19 +810,9 @@ impl Checker {
         }
     }
 
-    /// Whether signature `s` is `(->* …)`, under any `poly`s.
-    fn written_arrow_star(&self, s: &Syntax) -> bool {
-        let items = s.as_proper_list().unwrap_or(&[]);
-        match (self.head(items), items) {
-            (Some("->*"), _) => true,
-            (Some("poly"), [_, _, body]) => self.written_arrow_star(body),
-            _ => false,
-        }
-    }
-
     /// The latent effect of `e`, a `lambda`, told the parameters and result
     /// of `ty`, a `subr` under any `poly`s, whose binders are in scope.
-    fn arrow_star_latent(&mut self, ty: TyId, e: crate::ast::ExpId) -> R<Effect> {
+    pub(crate) fn arrow_star_latent(&mut self, ty: TyId, e: crate::ast::ExpId) -> R<Effect> {
         let mut t = self.arena.resolve(ty);
         while let crate::ast::Ty::Poly { body, .. } = self.arena.get(t) {
             t = self.arena.resolve(*body);
@@ -874,13 +864,16 @@ impl Checker {
         let rdepth = self.recursive.len();
         let r = (|| {
             let mut parts = Vec::new();
+            let mut marked = Vec::new();
             for b in &items[1..] {
                 let Some([name, ty, init]) = b.as_proper_list() else {
                     return Err(FxError::at(b.span, "a define-rec binding is `(name type lambda)`"));
                 };
                 let name = self.binder_name(name)?;
                 let span = ty.span;
+                self.arrow_star = self.written_arrow_star(ty);
                 let ty = self.parse_type(ty)?;
+                marked.push(self.arrow_star_tys.contains(&ty));
                 let ty = self.resolve_selects(ty, span)?;
                 self.push_global(name, ty);
                 self.known.insert((name, self.env.len() - 1));
@@ -903,6 +896,15 @@ impl Checker {
             }
             // A group whose every run ends needs no `spin`.
             self.note_termination(&bindings);
+            // With `->*`, the group at the types found.
+            if marked.contains(&true) {
+                bindings = self.arrow_star_group(&bindings, &marked)?;
+                for (i, (_, t, _)) in bindings.iter().enumerate() {
+                    self.env.set_ty(depth + i, *t);
+                }
+                self.recursive.truncate(rdepth);
+                self.note_termination(&bindings);
+            }
             for (name, ty, e) in &bindings {
                 self.check_declared(*name, *ty, *e)?;
             }

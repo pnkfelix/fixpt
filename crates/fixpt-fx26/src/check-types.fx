@@ -129,6 +129,17 @@
 
 ;;; ------------------------------------------------------------ the arena
 
+;; Whether `t` was read from `->*`.
+(define k-arrow-star-ty? (subr (maxeff (read @globals) (read @t)) (int) bool)
+  (lambda (t) (k-has-id? (get k-arrow-star-tys) t)))
+;; `to`, made from `from` (its `select`s resolved, say), read from `->*` if
+;; `from` was.
+(define k-arrow-star-as
+  (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t)) (int int) unit)
+  (lambda (from to)
+    (if (and (not (= from to)) (k-arrow-star-ty? from))
+        (set k-arrow-star-tys (cons to (get k-arrow-star-tys)))
+        #u)))
 (define k-tys (ref (arrayof k-ty @t) @t) (new (make-array 512 (ty-void))))
 (define k-ntys (ref int @t) (new 0))
 
@@ -339,6 +350,9 @@
 ;; Whether the next type read may be `(->* (param …) result)`, under any
 ;; `poly`s: a definition's signature, its effect found (`check-program.fx`).
 (define k-arrow-star (ref bool @t) (new #f))
+;; The types read from `->*`: a `letrec` or `define-rec` binding at one has
+;; its effect found (`check-letrec.fx`, `k-arrow-star-found`).
+(define k-arrow-star-tys (ref k-ids @t) (new nil))
 (define k-binder-has? (subr kreads (k-binders int) bool)
   (lambda (bs v) (and (not (null? bs)) (or (= (extract (car bs) 1) v) (k-binder-has? (cdr bs) v)))))
 ;; Whether one of generative types `gs` has `v` among its parameters.

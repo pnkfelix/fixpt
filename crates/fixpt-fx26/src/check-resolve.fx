@@ -290,6 +290,7 @@
     (begin
       (set k-extracts nil) (set k-effect-notes nil)
       (set k-ntys 0) (set k-links (+ (get k-links) 1)) (k-reset-regions) (k-reset-names)
+      (set k-arrow-star-tys nil)
       (set k-regions-memo (make-array 512 nil)) (set k-dscope nil)
       (set k-with-depth 0) (set k-with-fallbacks nil) (set k-with-apps nil)
       (set k-fresh 0) (set k-base nil) (set k-expanding 0) (set k-knots nil) (set k-spin-why nil)

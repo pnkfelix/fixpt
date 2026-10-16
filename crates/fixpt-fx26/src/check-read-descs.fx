@@ -126,7 +126,8 @@
   (lambda (s)
     (let* ((star (get k-arrow-star))
            (taken (set k-arrow-star #f))
-           (t (if star (k-parse-arrow-star s) (k-parse-type-node s))))
+           (t (if star (k-parse-arrow-star s) (k-parse-type-node s)))
+           (marked (if star (set k-arrow-star-tys (cons t (get k-arrow-star-tys))) #u)))
       (begin
         (if (and (not (syn-symbol? s)) (k-storage-head? (k-head (k-items s "a type"))))
             (k-no-knot t (syn-start s) (syn-end s))
@@ -300,6 +301,16 @@
       (begin
         (k-shape (= (k-length items) 4) "`(subr effect (param …) result)`" s)
         (k-subr-type (k-parse-effect (k-nth items 1)) (k-nth items 2) (k-nth items 3) cv)))))
+;; Whether signature `s` is `(->* …)`, under any `poly`s.
+(define* k-written-arrow-star? (subr (maxeff (read @s) spin) (syn) bool)
+  (lambda (s)
+    (tagcase s
+      (lst (xs d a b)
+        (let ((head (k-symbol-head xs)))
+          (or (string=? head "->*")
+              (and (string=? head "poly") (= (k-length xs) 3)
+                   (k-written-arrow-star? (k-nth xs 2))))))
+      (else y #f))))
 ;; A definition's signature that may be `(->* (param …) result)`, under any
 ;; `poly`s: read as `(subr pure (param …) result)`, the effect the
 ;; definition then finds standing in for its own (`check-program.fx`).

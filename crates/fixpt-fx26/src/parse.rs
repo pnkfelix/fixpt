@@ -60,7 +60,7 @@ pub enum FamilyArg {
 const ABS_CTOR_USAGE: &str = "an abstract type constructor is `(abs (f (name kind) …) type)`";
 
 /// Where `->*` is not a definition's signature.
-const ARROW_STAR_ONLY: &str = "`(->* (param …) result)` is only the type a `define` declares, `(define name (->* …) (lambda …))`, \
+const ARROW_STAR_ONLY: &str = "`(->* (param …) result)` is only the type a definition declares (`define`, `define-rec`, `letrec`), \
      its effect found from its `lambda`: here, write `->` or `subr`";
 
 const TYPE_FORMS: &[&str] = &[
@@ -484,7 +484,11 @@ impl Checker {
     // --------------------------------------------------------------- types
     pub fn parse_type(&mut self, s: &Syntax) -> R<TyId> {
         let t = match std::mem::take(&mut self.arrow_star) {
-            true => self.parse_arrow_star(s)?,
+            true => {
+                let t = self.parse_arrow_star(s)?;
+                self.arrow_star_tys.insert(t);
+                t
+            }
             false => self.parse_type_node(s)?,
         };
         // Storage written: a procedure kept there may not reach itself
@@ -493,6 +497,16 @@ impl Checker {
             self.no_knot(t, s.span)?;
         }
         Ok(t)
+    }
+
+    /// Whether signature `s` is `(->* …)`, under any `poly`s.
+    pub(crate) fn written_arrow_star(&self, s: &Syntax) -> bool {
+        let items = s.as_proper_list().unwrap_or(&[]);
+        match (self.head(items), items) {
+            (Some("->*"), _) => true,
+            (Some("poly"), [_, _, body]) => self.written_arrow_star(body),
+            _ => false,
+        }
     }
 
     /// A definition's signature that may be `(->* (param …) result)`, under
@@ -1541,6 +1555,7 @@ impl Checker {
                         return Err(FxError::at(b.span, "a letrec binding is `(name type expression)`"));
                     };
                     let name = name.as_symbol().ok_or_else(|| FxError::at(name.span, "a name"))?;
+                    self.arrow_star = self.written_arrow_star(ty);
                     out.push((name, self.parse_type(ty)?, self.parse_exp(init)?));
                 }
                 let body = self.parse_body(span, body)?;

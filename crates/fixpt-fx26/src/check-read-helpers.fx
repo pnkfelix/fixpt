@@ -44,8 +44,8 @@
   "an abstract component is a `type`, or a type constructor `(=> (kind …) type)`, for now")
 ;; Where `->*` is not a definition's signature.
 (define k-arrow-star-only string
-  (string-append "`(->* (param …) result)` is only the type a `define` declares, `(define name "
-                 "(->* …) (lambda …))`, its effect found from its `lambda`: "
+  (string-append "`(->* (param …) result)` is only the type a definition declares (`define`, "
+                 "`define-rec`, `letrec`), its effect found from its `lambda`: "
                  "here, write `->` or `subr`"))
 (define k-abs-ctor-usage string "an abstract type constructor is `(abs (f (name kind) …) type)`")
 ;; What a list headed `hd` is not, read as a type: `hd` applied, if a name.

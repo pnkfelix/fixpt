@@ -158,10 +158,9 @@
         (x-letrec (bs0 body a b abk)
           (let ((saved (k-mark)) (rsaved (get k-recursive)) (bs (k-letrec-selected bs0 a b)))
             (begin
-              ;; A group whose every run ends needs no `spin`.
-              (k-bind-group bs)
-              ;; The body's calls of the group are not recursion.
-              (let* ((ie (k-letrec-checked bs saved rsaved k-check k-check-letrec))
+              ;; The group bound and checked; the body's calls of it are not recursion.
+              (let* ((ie (k-letrec-checked bs saved rsaved k-check k-check-letrec
+                                           k-synth-lambda-as))
                      (restored (set k-recursive rsaved))
                      (rb (k-synth body)))
                 (begin
@@ -656,8 +655,8 @@
           (x-letrec (bs0 body xa xb xaxbk)
             (let ((saved (k-mark)) (rsaved (get k-recursive)) (bs (k-letrec-selected bs0 a b)))
               (begin
-                (k-bind-group bs)
-                (let* ((ie (k-letrec-checked bs saved rsaved k-check k-check-letrec))
+                (let* ((ie (k-letrec-checked bs saved rsaved k-check k-check-letrec
+                                             k-synth-lambda-as))
                        (restored (set k-recursive rsaved))
                        (e (k-check body expected)))
                   (begin (k-unbind-to saved) (k-mask x (k-union ie e) expected))))))

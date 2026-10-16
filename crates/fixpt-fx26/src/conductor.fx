@@ -178,7 +178,7 @@
          (check-letrec
           ((load-input "fx26:check-letrec.fx")
            check-types check-expect check-effects check-print
-           check-env check-terminate check-print-parts))
+           check-env check-terminate check-print-parts check-resolve))
          ;; The checker, facts: what the compiler is told.
          (check-facts
           ((load-input "fx26:check-facts.fx")

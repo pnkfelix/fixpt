@@ -265,12 +265,32 @@ fn an_arrow_star_finds_its_effect() {
     let err = rejects(include_str!("programs/arrows/star-passed-as-pure.fx"));
     assert!(err.starts_with("`->*` found `f` to be a (subr (maxeff spin (read (globals f twice))) (int) int)"), "{err}");
     for (program, says) in [
-        (include_str!("programs/arrows/star-as-parameter.fx"), "is only the type a `define` declares"),
-        (include_str!("programs/arrows/star-in-define-rec.fx"), "is only the type a `define` declares"),
+        (include_str!("programs/arrows/star-as-parameter.fx"), "is only the type a definition declares"),
         (include_str!("programs/arrows/star-not-lambda.fx"), "from its `lambda`: define it as one"),
+        (include_str!("programs/arrows/star-group-not-lambda.fx"), "from its `lambda`: define it as one"),
         (include_str!("programs/arrows/star-and-define-star.fx"), "each find what a procedure does"),
     ] {
         let err = rejects(program);
         assert!(err.contains(says), "{err}");
     }
+}
+
+/// `->*` in a group: each member's effect found once, then with those of
+/// the members it reaches through the group (a member it does not reach
+/// adds nothing), `spin` if it may not end, or at top level reads a
+/// member's global; then the group checked again at the types found.
+#[test]
+fn an_arrow_star_group_finds_each_effect() {
+    let mut c = Checker::new();
+    c.check_program(include_str!("programs/bidirectional/arrow-star-groups.fx")).unwrap_or_else(|e| panic!("does not check: {e}"));
+    let mut shown = |n: &str| {
+        let t = c.check_program(n).expect("a name");
+        c.show_ty(t.ty)
+    };
+    assert_eq!(shown("ev?"), "(subr (maxeff spin (read (globals ev? od?))) (nat) bool)");
+    assert_eq!(shown("total"), "(subr pure (nat) int)");
+    assert_eq!(shown("parts"), "(subr (read (globals inc twice)) (nat) int)");
+    assert_eq!(shown("loops"), "(subr spin (int) int)");
+    let err = rejects(include_str!("programs/arrows/star-group-passed-as-pure.fx"));
+    assert!(err.contains("argument 1 is a (subr (maxeff spin (read (globals twice))) (int) int)"), "{err}");
 }
