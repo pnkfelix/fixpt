@@ -14,13 +14,14 @@
 ;;; which file and where.
 
 (module-parameters ((rs region) (re region) (rm region) (rc region) (rp region)))
-;; The parser's first part at these regions, the reader in it, and what this
-;; file uses of them.
+;; The parser's first part at these regions, the reader's types in it, and
+;; what this file uses of them.
 (define parser-module ((proj (load-module "fx26:parser.fx") rs re rm rc rp)))
 (define forms-module ((proj (load-module "fx26:parser-forms.fx") rs re rm rc rp)))
 (import forms-module process-form processes)
-(define eager-reader-module (with parser-module eager-reader-module))
-(import eager-reader-module syn->datum atom lst dotted vec (type data syn))
+(define reader-types (with parser-module reader-types))
+(import reader-types atom lst dotted vec (type data syn))
+(define syn->datum (with parser-module syn->datum))
 (import parser-module parse-tag syn-start syn-end pfail pfail-at syn-symbol? syn-name syn-head
         syn-symbol syn-items len nth drop label keep arity big-literal mod-item-of with-includes
         any-include? hide-forms hide-form? hidden-marks item-in-includes datatype? expand-datatype

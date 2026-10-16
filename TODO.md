@@ -2640,3 +2640,22 @@ user):
   moves the field's value (as `fixpt-native/tests/code_exec.rs` does from
   Rust), run on every machine; the no-native-code branch run by a switch
   that turns native code off.
+
+## 98. The reader's types apart, and one-shot continuations (kayak's requests, 2026-10-15)
+
+Kayak's survey of how much of the front end KFX accepts as written found
+68 files stopping at `eager-reader-types.fx`, for the eager reader's
+coroutine states, whose composable continuations KFX refuses (KFX
+compiles to Rust, where a suspended computation resumes once). Request A,
+those types in a file of their own, is done (`DONE.md` §98). Left:
+- **Request B: one-shot composable continuations.** A standard way in
+  FX-26 to capture a composable continuation that may be resumed at most
+  once, a second resume failing with a defined error; the one-shot nature
+  in the type (KFX's checker and emitter must know at the capture that
+  the continuation becomes a Rust future), its run-time failure what
+  defines the meaning. At most once enforced statically is not asked
+  for. A test that resumes once and gets the answer, and resumes twice
+  and fails, on every machine; and our own code using it where each
+  continuation is resumed once (the scheduler, `processes.fx`; the eager
+  reader's states).
+

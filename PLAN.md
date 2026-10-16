@@ -132,6 +132,10 @@ are in the last section, "Log: the glance's details", and in
   concurrency as region scoping). Each has open questions for the user.
 
 **In progress**
+- **Kayak's requests of 2026-10-15** (`TODO.md` §98): A, the eager
+  reader's continuation-holding states apart from `syn`'s types, and the
+  parser loading no reader (`syn.fx`), done (`DONE.md` §98); B, one-shot
+  composable continuations, in the type, next.
 - **Concurrency, kayak's request** (2026-10-13, `TODO.md` §92,
   `docs/research/processes.md`): built, all three stages. Processes that
   share only immutable data (`spawn`, `(addr M R)`, `send`, `receive`,

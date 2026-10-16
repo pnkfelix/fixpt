@@ -4,14 +4,14 @@
 ;;; ------------------------------------------------------------- top level
 
 (module-parameters ((rs region) (re region) (rm region) (rc region) (rp region)))
-;; The parser's other parts at these regions, the reader in them, and what
-;; this file uses of them.
+;; The parser's other parts at these regions, the reader's types in them,
+;; and what this file uses of them.
 (define parser-exps-module ((proj (load-module "fx26:parser-exps.fx") rs re rm rc rp)))
 (define parser-ids-module ((proj (load-module "fx26:parser-ids.fx") rs re rm rc rp)))
 (define number-tops (with parser-ids-module number-tops))
 (define parser-module (with parser-exps-module parser-module))
-(define eager-reader-module (with parser-module eager-reader-module))
-(import eager-reader-module lst (type syn))
+(define reader-types (with parser-module reader-types))
+(import reader-types lst (type syn))
 (import parser-module parse-tag syn-start syn-end pfail syn-symbol? syn-symbol syn-items len nth
         keep mk-list form-head form-of? datatype? mk-pure-subr mk-poly expand-datatype import?
         expand-import e-var e-lambda t-define t-define-rec t-define-type t-define-effect

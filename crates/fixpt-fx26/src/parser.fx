@@ -8,15 +8,19 @@
 ;;; checker written in FX-26 (`check-*.fx`) reads them itself.
 ;;;
 ;;; A module file of the reader's regions and its own (`rp`), loading the
-;;; reader at those: `syn` is in the reader's region `rs`. The trees are
+;;; reader's types at those, not the reader: `syn` is in the reader's
+;;; region `rs`. The trees are
 ;;; `acyclic`: made by `cons` straight into the frozen region, never written,
 ;;; so a walk of one ends (`docs/fx26.md`, "Well-founded recursion"). A parse
 ;;; that fails aborts to a prompt in `rp`; it touches no other region, so
 ;;; `parse-program` is licensed as the reader's entry points are.
 (module-parameters ((rs region) (re region) (rm region) (rc region) (rp region)))
-;; The reader, at these regions, and what this file uses of it.
-(define eager-reader-module ((proj (load-module "fx26:eager-reader.fx") rs re rm rc)))
-(import eager-reader-module syn->datum atom lst dotted vec (type syn result))
+;; The reader's types, and `syn->datum` (`syn.fx`), at these regions, and
+;; what this file uses of them.
+(define reader-types ((proj (load-module "fx26:eager-reader-types.fx") rs re rm rc)))
+(import reader-types atom lst dotted vec (type syn result))
+(define syn-module ((proj (load-module "fx26:syn.fx") rs re rm rc)))
+(import syn-module syn->datum)
 ;; Its types, at these regions (`parser-types.fx`), and the names it uses
 ;; of them.
 (define parser-types ((proj (load-module "fx26:parser-types.fx") rs re rm rc rp)))

@@ -394,6 +394,15 @@ pub const TABLE_TYPES: &str = include_str!("table-types.fx");
 /// which the reader and any of its clients load (`TODO.md` §68).
 pub const EAGER_READER_TYPES: &str = include_str!("eager-reader-types.fx");
 
+/// The eager reader's states, which hold its continuations: a module file
+/// of no state, which only the reader loads, so that the types its clients
+/// load mention no continuation.
+pub const EAGER_READER_STATES: &str = include_str!("eager-reader-states.fx");
+
+/// `syn->datum`, apart from the reader: a module file of no state, which the
+/// reader and the parser load, so that the parser loads no reader.
+pub const SYN: &str = include_str!("syn.fx");
+
 pub const EAGER_READER: &str = include_str!("eager-reader.fx");
 
 /// The parser written in FX-26, which needs the reader's types: a module
@@ -502,8 +511,10 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 143] = [
+pub const FRONT_END_MODULES: [(&str, &str); 145] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
+    ("eager-reader-states.fx", EAGER_READER_STATES),
+    ("syn.fx", SYN),
     ("table-types.fx", TABLE_TYPES),
     ("table.fx", TABLE),
     ("check-module-rules-types.fx", CHECK_MODULE_RULES_TYPES),

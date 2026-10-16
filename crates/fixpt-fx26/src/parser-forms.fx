@@ -13,8 +13,8 @@
 ;;;   of the one ready (`select-form`).
 (module-parameters ((rs region) (re region) (rm region) (rc region) (rp region)))
 (define parser-module ((proj (load-module "fx26:parser.fx") rs re rm rc rp)))
-(define eager-reader-module (with parser-module eager-reader-module))
-(import eager-reader-module atom (type syn))
+(define reader-types (with parser-module reader-types))
+(import reader-types atom (type syn))
 (import parser-module syn-symbol? syn-head syn-start syn-end len nth drop (type syns-a exp)
         (effect parses))
 

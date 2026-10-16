@@ -1,8 +1,11 @@
-;;; The eager reader's types, in FX-26: what it reads, its states and
-;;; cursors, and what its procedures may do. A module file of the reader's
-;;; regions, as `eager-reader.fx` is, which loads it at its own: it holds no
-;;; state, so any file may load it, and two loads are the same types, since
-;;; FX-26's types are structural (the front end's modules, `TODO.md` §68).
+;;; The eager reader's types, in FX-26: what it reads, its cursors, and
+;;; what its procedures may do. A module file of the reader's regions, as
+;;; `eager-reader.fx` is, which loads it at its own: it holds no state, so
+;;; any file may load it, and two loads are the same types, since FX-26's
+;;; types are structural (the front end's modules, `TODO.md` §68). The
+;;; reader's own states, which hold its continuations, are in
+;;; `eager-reader-states.fx`, which only the reader loads, so that a client
+;;; that wants `syn` meets no continuation (kayak's request, 2026-10-15).
 
 ;; The reader's regions: its data, its prompt tag, its mark key, and the
 ;; lists it hands back (`eager-reader.fx`).
@@ -32,17 +35,6 @@
   (dotted (listof syn acyclic) syn datum int int)
   (vec (listof syn acyclic) datum int int))
 (define-type syns (listof syn acyclic))
-
-;; What a feed returns: waiting for a character, or stopped at an error.
-;; Fields: need?, the continuation (one, when waiting), and then, as a
-;; `state-rest`, the position, the complete top-level data (newest first),
-;; and the message.
-(define-type state-rest (pairof int (pairof syns string rs) rs))
-(define-type state
-  (dletrec ((st (pairof bool (pairof (listof k acyclic) state-rest rs) rs))
-            (k (composable char st (maxeff parsing spin) re)))
-    st))
-(define-type cont (composable char state (maxeff parsing spin) re))
 
 ;; The lookahead character (none once a closing character is consumed), how
 ;; many characters have been consumed, the top-level data, and — after `#`

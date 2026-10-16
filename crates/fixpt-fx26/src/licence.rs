@@ -74,12 +74,19 @@ pub const READER_ENTRY_POINTS: &[&str] = &[
     "eager-context",
     "eager-hole-closers",
     "eager-state-syntax",
-    "parse-program",
 ];
 
-/// The global the front end makes the reader from (`reader.fx`): the last
-/// of its module files, loaded, a `plambda` over the reader's regions.
-pub const READER_MAKER: &str = "make-reader";
+/// The parser's.
+pub const PARSER_ENTRY_POINTS: &[&str] = &["parse-program"];
+
+/// The globals the front end makes the reader and the parser from
+/// (`reader.fx`), each a module file loaded, a `plambda` over the reader's
+/// regions (the parser's, its own too), and the entry points each makes.
+/// Two, since the parser loads no reader, only its types (`syn.fx`).
+pub const READER_MAKERS: &[(&str, &[&str])] = &[
+    ("make-eager-reader", READER_ENTRY_POINTS),
+    ("make-reader", PARSER_ENTRY_POINTS),
+];
 
 /// The regions the front end makes the reader at (`reader.fx`), which its
 /// entry points, as the driver calls them, may touch.
@@ -165,14 +172,16 @@ impl Checker {
         }
     }
 
-    /// The eager reader's licence: what makes it, [`READER_MAKER`], makes
-    /// its entry points touching only the regions it is given
-    /// (`parametric_licence`); and as the driver calls them, made at
-    /// [`READER_REGIONS`], they touch only those.
+    /// The eager reader's licence: what makes it and the parser,
+    /// [`READER_MAKERS`], make their entry points touching only the regions
+    /// they are given (`parametric_licence`); and as the driver calls them,
+    /// made at [`READER_REGIONS`], they touch only those.
     pub fn reader_licence(&mut self) -> Result<(), String> {
-        self.parametric_licence(READER_MAKER, READER_ENTRY_POINTS)?;
+        for (maker, entry_points) in READER_MAKERS {
+            self.parametric_licence(maker, entry_points)?;
+        }
         let owned: Vec<Region> = READER_REGIONS.iter().map(|r| self.region_named(r)).collect();
-        for name in READER_ENTRY_POINTS {
+        for name in READER_ENTRY_POINTS.iter().chain(PARSER_ENTRY_POINTS) {
             self.licensed_call(name, &owned)?;
         }
         Ok(())

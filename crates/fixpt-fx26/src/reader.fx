@@ -24,7 +24,9 @@
 (define parser-top-module ((proj make-reader @s @e @m @c @p)))
 (define parser-exps-module (with parser-top-module parser-exps-module))
 (define parser-module (with parser-exps-module parser-module))
-(define eager-reader-module (with parser-module eager-reader-module))
+;; The eager reader, which the parser does not load (`syn.fx`).
+(define make-eager-reader (load-module "fx26:eager-reader.fx"))
+(define eager-reader-module ((proj make-eager-reader @s @e @m @c)))
 ;; From `eager-reader.fx`.
 (import eager-reader-module waiting advance need fail entry eager-feed eager-feed-string
         eager-state-kind eager-state-position eager-state-message eager-state-data

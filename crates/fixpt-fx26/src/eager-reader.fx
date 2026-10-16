@@ -38,20 +38,17 @@
 ;; lists it hands back. It touches no other (`licence.rs`), which is what
 ;; licenses running it on every keystroke.
 (module-parameters ((rs region) (re region) (rm region) (rc region)))
-;; Its types, made at its regions (`eager-reader-types.fx`), and the names
-;; it uses of them.
+;; Its types, made at its regions (`eager-reader-types.fx`), and its states
+;; (`eager-reader-states.fx`), and the names it uses of them.
 (define reader-types ((proj (load-module "fx26:eager-reader-types.fx") rs re rm rc)))
 (import reader-types atom lst dotted vec
-        (type chars data syn syns state-rest state cont cursor cursors result word context closers
-              atom-in) (effect own-data marks parsing reads inspects reading in-context asks))
+        (type chars data syn syns cursor cursors result word context closers atom-in)
+        (effect own-data marks parsing reads inspects reading in-context asks))
+(define reader-states ((proj (load-module "fx26:eager-reader-states.fx") rs re rm rc)))
+(import reader-states (type state-rest state cont))
+(define syn-module ((proj (load-module "fx26:syn.fx") rs re rm rc)))
+(import syn-module syn->datum)
 
-(define syn->datum (subr pure (syn) datum)
-  (lambda (s)
-    (tagcase s
-      (atom (d a b) d)
-      (lst (items d a b) d)
-      (dotted (items tail d a b) d)
-      (vec (items d a b) d))))
 (define syns->data (subr (maxeff (read @globals) (read rs) (alloc rs)) (syns) data)
   (lambda (xs) (if (null? xs) nil (cons (syn->datum (car xs)) (syns->data (cdr xs))))))
 

@@ -2657,3 +2657,26 @@ Still open in `TODO.md` §97; done so far:
   convention: `s` and `k` stored in the fields, each store marking its
   card; twenty thousand kept across collections; a size of -1 refused;
   on every machine and stressed (`a_bloblet_made_by_the_routine`).
+
+## 98. The reader's types apart, and one-shot continuations (kayak's requests, 2026-10-15)
+
+- **Request A: the reader's types split** (2026-10-15). Kayak's survey
+  of the front end found 68 files stopping at `eager-reader-types.fx`,
+  for `state`, `cont` and `state-rest`: the eager reader's coroutine
+  states, which hold composable continuations, which KFX refuses. They
+  are now in `eager-reader-states.fx`, which only `eager-reader.fx`
+  loads; `eager-reader-types.fx` (`syn` and its relatives, the cursors,
+  the reader's effects) mentions no continuation. Nothing else used them:
+  `reader.fx` takes `state` from the eager reader's module, and every
+  other file that loads the types checks and runs without them. Further,
+  so that kayak can use the parser as written with a reader of its own:
+  the parser loaded `eager-reader.fx` for `syn->datum` alone, which is
+  now in `syn.fx`; the parser loads the types and `syn.fx`, and no
+  reader. `reader.fx` loads the eager reader itself, so the reader's
+  licence names two makers, `make-eager-reader` and `make-reader`
+  (`licence.rs`, `READER_MAKERS`). What still reaches a composable
+  continuation, through its loads: the eager reader and `reader.fx`;
+  the evaluator written in FX-26 (`eval-types.fx` and the files loading
+  it, and `conductor.fx` through them), whose continuation values are
+  FX-26's own; and the scheduler, `processes.fx`.
+
