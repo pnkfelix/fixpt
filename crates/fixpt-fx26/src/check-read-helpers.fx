@@ -53,8 +53,8 @@
 ;; parameter's name.
 (define k-type-forms k-names
   (list 'arrayof 'narrayof 'bloblet 'composable 'dletrec 'icell 'listof 'mark-key 'moduleof 'mu
-        'nat 'nlist 'pairof 'place 'poly 'productof 'prompt-tag 'proves 'ref 'select 'subr 'sumof
-        'bool 'union))
+        'nat 'nlist 'oneshot 'pairof 'place 'poly 'productof 'prompt-tag 'proves 'ref 'select 'subr
+        'sumof 'bool 'union))
 ;; Whether `hd` heads a type form: not a name a `with` shadows.
 (define k-type-form? (subr (maxeff (read @globals) (read @t)) (symbol) bool)
   (lambda (hd) (k-has-name? k-type-forms hd)))
@@ -62,6 +62,7 @@
   (list 'lambda 'plambda 'proj 'if 'letrec 'let 'begin 'define 'define* 'define-type
         'define-generative 'subr 'poly 'ref 'pairof 'dletrec 'void 'pure 'maxeff 'read 'write
         'alloc 'goto 'comefrom 'region 'effect 'type 'prompt 'prompt-tag 'composable 'mark-key
+        'oneshot
         'listof 'cond 'else 'and 'or 'let* 'define-effect 'module-parameters 'the 'bloblet 'fields
         'frozen 'arrayof 'icell 'await 'define-rec 'letrena 'letreap 'rlambda 'quote 'productof
         'sumof 'product 'extract 'sum 'tagcase 'module 'moduleof 'with 'select 'load-module
@@ -306,7 +307,7 @@
       (ty-markkey (a r) (the k-ids (cons a nil)))
       (ty-pair (a d r nl) (k-ids-then (the k-ids (cons a nil)) d))
       (ty-tag (a h e r) (k-ids-then (the k-ids (cons a nil)) h))
-      (ty-comp (x a e r) (k-ids-then (the k-ids (cons x nil)) a))
+      (ty-comp (x a e r once) (k-ids-then (the k-ids (cons x nil)) a))
       (ty-product (ps) (k-parts-onto ps nil))
       (ty-sum (ps) (k-parts-onto ps nil))
       (ty-bloblet (fs z r) fs)

@@ -60,7 +60,7 @@ pub enum FamilyArg {
 const ABS_CTOR_USAGE: &str = "an abstract type constructor is `(abs (f (name kind) …) type)`";
 
 const TYPE_FORMS: &[&str] = &[
-    "arrayof", "narrayof", "bloblet", "composable", "dletrec", "icell", "listof", "mark-key", "moduleof", "mu", "nat", "nlist", "pairof", "place",
+    "arrayof", "narrayof", "bloblet", "composable", "dletrec", "icell", "listof", "mark-key", "moduleof", "mu", "nat", "nlist", "oneshot", "pairof", "place",
     "poly", "productof", "prompt-tag", "proves", "ref", "select", "subr", "sumof", "bool", "union",
 ];
 
@@ -737,15 +737,17 @@ impl Checker {
                 let region = self.parse_region(r)?;
                 Ok(self.arena.ty(Ty::PromptTag { answer, payload, effect, region }))
             }
-            "composable" => {
+            "composable" | "oneshot" => {
+                let once = self.head(&items) == Some("oneshot");
                 let [_, t, a, d, r] = &items[..] else {
-                    return Err(FxError::at(s.span, "`(composable argument answer effect region)`"));
+                    let head = if once { "oneshot" } else { "composable" };
+                    return Err(FxError::at(s.span, format!("`({head} argument answer effect region)`")));
                 };
                 let arg = self.parse_type(t)?;
                 let answer = self.parse_type(a)?;
                 let effect = self.parse_effect(d)?;
                 let region = self.parse_region(r)?;
-                Ok(self.arena.ty(Ty::Composable { arg, answer, effect, region }))
+                Ok(self.arena.ty(Ty::Composable { arg, answer, effect, region, once }))
             }
             "bloblet" => {
                 let [_, fields, r] = &items[..] else {

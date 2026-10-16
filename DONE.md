@@ -2679,4 +2679,32 @@ Still open in `TODO.md` §97; done so far:
   the evaluator written in FX-26 (`eval-types.fx` and the files loading
   it, and `conductor.fx` through them), whose continuation values are
   FX-26's own; and the scheduler, `processes.fx`.
+- **Request B: one-shot composable continuations** (2026-10-15).
+  `call-with-oneshot-continuation`, typed as the composable capture is,
+  gives a `(oneshot T A D R)`: resumed once, the rest of the prompt's body
+  as a composable one's; resumed twice, the failure "a one-shot
+  continuation resumed twice", the same on every machine, which defines
+  the meaning (`docs/fx26.md`, "Control, typed"). One-shot is in the type:
+  a flag on `Ty::Composable` (`once`) and on the checker written in
+  FX-26's `ty-comp`, read and printed as `oneshot`; neither it nor
+  `composable` stands for the other; a subroutine where one is wanted, as
+  a composable one is. Not checked statically (affine types). At run
+  time: routines `callone` and `ncallone` (the native convention's),
+  `callcomp`'s with the continuation they take marked `Shots::Once`,
+  where every machine checks it on a resume (`Heap::take_shot`): the Rust
+  word machine (the others call out to it), the native word machines'
+  `control.rs`, and the native convention's `direct.rs`, whose
+  continuation's data is now always eight values (`NATIVE_CONT_LEN`);
+  the Scheme lowering wraps the continuation in Scheme
+  (`%fx26-call/one`); the evaluator written in FX-26 keeps a flag of its
+  own beside the machine's one-shot continuation (`o-once`), so it fails
+  as it fails. Nothing captured is copied for it. Tests:
+  `run/oneshot-once.fx` (43) and `run/oneshot-twice.fx` on all nine
+  machines (`fixpt-cli/tests/one_shot.rs`) and through both compilers;
+  `control/oneshot-*.fx`, both checkers alike
+  (`a_one_shot_continuation_is_its_own_type`). Our own code: the
+  scheduler (`processes.fx`) takes a waiting task's continuation one-shot,
+  as it resumes it once. The eager reader's stay composable: the line
+  editor resumes a kept checkpoint again after an edit (`fixpt-scheme`'s
+  `eager.rs`), so they are resumed more than once.
 

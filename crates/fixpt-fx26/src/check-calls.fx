@@ -51,7 +51,7 @@
                (let ((p (the k-cpath (cons (cons t by) path))))
                  (tagcase (k-get t)
                    (ty-subr (e ps r cv) (or (k-cyclic-list? ps #t p) (k-cyclic-from? r #f p)))
-                   (ty-comp (x a e r) (or (k-cyclic-from? x #t p) (k-cyclic-from? a #f p)))
+                   (ty-comp (x a e r once) (or (k-cyclic-from? x #t p) (k-cyclic-from? a #f p)))
                    (ty-tag (a h e r) (or (k-cyclic-from? a #f p) (k-cyclic-from? h #f p)))
                    (ty-poly (bs x) (k-cyclic-from? x #f p))
                    (ty-ref (a r) (k-cyclic-from? a #f p))
@@ -100,7 +100,7 @@
                  (ty-subr (e ps r cv)
                    (or (and (not top) (k-mentions-any? t vs))
                        (k-calls-through-list? (k-ty-kids t) vs seen)))
-                 (ty-comp (x a e r)
+                 (ty-comp (x a e r once)
                    (or (k-mentions-any? t vs) (k-calls-through-list? (k-ty-kids t) vs seen)))
                  (ty-named (g ds)
                    (k-calls-through-list?

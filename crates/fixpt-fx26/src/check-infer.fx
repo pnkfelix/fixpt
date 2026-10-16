@@ -301,7 +301,7 @@
                   (ty-union (ms) (go (k-push-ids ms rest)))
                   (ty-tag (x y e r)
                     (or (reg r) (k-open-effect? e kinds solved) (go (cons x (cons y rest)))))
-                  (ty-comp (x y e r)
+                  (ty-comp (x y e r once)
                     (or (reg r) (k-open-effect? e kinds solved) (go (cons x (cons y rest)))))
                   (ty-named (g ds) (given ds rest))
                   (ty-app (g ds) (given ds (cons g rest)))
@@ -338,7 +338,7 @@
                   (ty-union (ms) (ws ms))
                   (ty-pair (a b r nl) (or (w a) (w b)))
                   (ty-tag (a b e r) (or (w a) (w b)))
-                  (ty-comp (a b e r) (or (w a) (w b)))
+                  (ty-comp (a b e r once) (or (w a) (w b)))
                   (ty-named (g ds) (ws (k-desc-kids ds)))
                   (ty-app (g ds) (or (w g) (ws (k-desc-kids ds))))
                   (ty-lam (bs body) (ws (k-desc-kids (the k-descs (cons body nil)))))
@@ -547,9 +547,9 @@
             (tagcase at
               (ty-tag (a2 h2 d2 r2) (begin (ur r1 r2) (u a1 a2) (u h1 h2) (ue d1 d2)))
               (else z #u)))
-          (ty-comp (h1 a1 d1 r1)
+          (ty-comp (h1 a1 d1 r1 o1)
             (tagcase at
-              (ty-comp (h2 a2 d2 r2) (begin (ur r1 r2) (u a1 a2) (u h1 h2) (ue d1 d2)))
+              (ty-comp (h2 a2 d2 r2 o2) (begin (ur r1 r2) (u a1 a2) (u h1 h2) (ue d1 d2)))
               (else z #u)))
           (ty-named (g xs)
             (tagcase at

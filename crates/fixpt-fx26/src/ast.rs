@@ -419,8 +419,10 @@ pub enum Ty {
     /// `(composable T A D R)`: a composable continuation captured up to a
     /// prompt for a tag of type `(prompt-tag A H D R)`, waiting for a `T`.
     /// It is a subroutine — see [`Ty::as_subr`] — and also a value whose marks
-    /// can be read.
-    Composable { arg: TyId, answer: TyId, effect: Effect, region: Region },
+    /// can be read. `once`: `(oneshot T A D R)`, one that may be resumed at
+    /// most once, a second resume failing (`call-with-oneshot-continuation`,
+    /// `TODO.md` §98); neither is the other's subtype.
+    Composable { arg: TyId, answer: TyId, effect: Effect, region: Region, once: bool },
     /// `(mark-key T R)`: a continuation-mark key in region `R` for marks of
     /// type `T`.
     MarkKey(TyId, Region),
@@ -536,7 +538,7 @@ impl Ty {
     pub fn as_subr(&self) -> Option<(Effect, Vec<TyId>, TyId)> {
         match self {
             Ty::Subr { effect, params, result, .. } => Some((effect.clone(), params.clone(), *result)),
-            Ty::Composable { arg, answer, effect, region } => {
+            Ty::Composable { arg, answer, effect, region, .. } => {
                 let mut e = effect.clone();
                 e.0.insert(Atom::Goto(*region));
                 e.0.insert(Atom::Comefrom(*region));

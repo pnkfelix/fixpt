@@ -142,6 +142,10 @@
       (sum o
         (tagcase o
           (o-cont (k) (k (ev-arg xs 0)))
+          (o-once (k spent)
+            (if (get spent)
+                (efail "a one-shot continuation resumed twice")
+                (begin (set spent #t) (k (ev-arg xs 0)))))
           (o-esc (k) (k (ev-arg xs 0)))
           (else y (efail "not a subroutine"))))
       (else (efail "not a subroutine")))))
@@ -270,6 +274,7 @@
       (o-bytes (b) (k-cat3 "#u8(" (show-bytes b (- (bytevector-length b) 1) "") ")"))
       (o-tag (t) "#<prompt-tag>")
       (o-cont (k) "#<continuation>")
+      (o-once (k s) "#<continuation>")
       (o-esc (k) "#<continuation>")
       (o-key (k) "#<mark-key>"))))
 

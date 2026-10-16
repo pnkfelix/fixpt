@@ -374,7 +374,7 @@
                         (k-below-one x (cdr ns) ea eb trail labels)))))))
   (k-sub-plain (subr (maxeff kstate spin) (int int k-ty k-ty k-benv k-benv k-strail k-labels) bool)
     (lambda (a b ta tb ea eb trail labels)
-      (if (and (tagcase ta (ty-comp (x y e r) #t) (else z #f))
+      (if (and (tagcase ta (ty-comp (x y e r once) #t) (else z #f))
                (tagcase tb (ty-subr (e ps r cv) #t) (else z #f)))
           (k-sub-callable a b ea eb trail labels)
           (tagcase ta
@@ -452,10 +452,10 @@
                        (k-eff=? (k-benv-effect ea d1) (k-benv-effect eb d2))
                        (k-inv a1 a2 ea eb trail labels) (k-inv h1 h2 ea eb trail labels)))
                 (else z #f)))
-            (ty-comp (t1 a1 d1 r1)
+            (ty-comp (t1 a1 d1 r1 o1)
               (tagcase tb
-                (ty-comp (t2 a2 d2 r2)
-                  (and (k-benv-region=? r1 r2 ea eb)
+                (ty-comp (t2 a2 d2 r2 o2)
+                  (and (bool=? o1 o2) (k-benv-region=? r1 r2 ea eb)
                        (k-within? (k-benv-effect ea d1) (k-benv-effect eb d2))
                        (k-sub t2 t1 eb ea trail labels) (k-sub a1 a2 ea eb trail labels)))
                 (else z #f)))

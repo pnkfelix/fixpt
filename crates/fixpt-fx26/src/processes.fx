@@ -91,8 +91,9 @@
   (define settle (subr any () unit) (lambda () (if (main?) (drain) #u)))
   ;; What resumes task `me` at `k`, as `me`, waiting no more (41); or, if
   ;; it was cancelled, ends it; or nothing, if it was ended already (`reap`,
-  ;; `alive` cleared), its number perhaps another task's now.
-  (define resumer (subr sched (int (composable unit unit sched @run) (ref bool @sched)) thunk)
+  ;; `alive` cleared), its number perhaps another task's now. `k` is
+  ;; one-shot (`TODO.md` §98): a task is resumed once from each wait.
+  (define resumer (subr sched (int (oneshot unit unit sched @run) (ref bool @sched)) thunk)
     (lambda (me k alive)
       (lambda ()
         (if (get alive)
@@ -111,8 +112,8 @@
       (let ((tag (the-tag)))
         (begin
           ((proj %sched unit unit unit) 33 #u #u)
-          (call-with-composable-continuation
-            (lambda ((k (composable unit unit sched @run)))
+          (call-with-oneshot-continuation
+            (lambda ((k (oneshot unit unit sched @run)))
               (let* ((me (task-current))
                      (alive (the (ref bool @sched) (new #t)))
                      (undo (register (resumer me k alive))))

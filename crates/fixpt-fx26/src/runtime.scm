@@ -58,6 +58,17 @@
 (define (%fx26-make-prompt-tag) (make-continuation-prompt-tag 'fx26))
 (define (%fx26-abort tag v) (abort-current-continuation tag v))
 (define (%fx26-call/comp proc tag) (call-with-composable-continuation proc tag))
+;; One-shot (`TODO.md` §98): the continuation given to `proc` fails if
+;; given a value a second time.
+(define (%fx26-call/one proc tag)
+  (call-with-composable-continuation
+    (lambda (k)
+      (let ((spent #f))
+        (proc (lambda (v)
+                (if spent
+                    (error "a one-shot continuation resumed twice")
+                    (begin (set! spent #t) (k v)))))))
+    tag))
 
 ;;; ---- continuation marks ----
 ;;; A key is any value compared with `eq?`, so a fresh pair makes one.

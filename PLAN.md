@@ -130,12 +130,13 @@ are in the last section, "Log: the glance's details", and in
   worked out and declined), `telemetry.md` (an `@telemetry` effect and
   fourteen operations), `async.md` (a scheduler over prompts, structured
   concurrency as region scoping). Each has open questions for the user.
+- **Kayak's requests of 2026-10-15** (`DONE.md` §98): the eager
+  reader's continuation-holding states apart from `syn`'s types, and the
+  parser loading no reader (`syn.fx`); and one-shot continuations,
+  `call-with-oneshot-continuation` and the `(oneshot T A D R)` type, the
+  second resume a defined failure on every machine.
 
 **In progress**
-- **Kayak's requests of 2026-10-15** (`TODO.md` §98): A, the eager
-  reader's continuation-holding states apart from `syn`'s types, and the
-  parser loading no reader (`syn.fx`), done (`DONE.md` §98); B, one-shot
-  composable continuations, in the type, next.
 - **Concurrency, kayak's request** (2026-10-13, `TODO.md` §92,
   `docs/research/processes.md`): built, all three stages. Processes that
   share only immutable data (`spawn`, `(addr M R)`, `send`, `receive`,

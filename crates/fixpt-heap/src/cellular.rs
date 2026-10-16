@@ -123,15 +123,61 @@ impl Heap {
 
     /// The saved frames of the native continuation `v` is: a native closure
     /// over one vector, marked first with `NATIVE_CONT_MARK`, which only the
-    /// native convention makes (`fixpt-native`): six values, or seven with
-    /// another machine's continuation inside it.
+    /// native convention makes (`fixpt-native`): `NATIVE_CONT_LEN` values,
+    /// another machine's continuation inside it at `NATIVE_CONT_INNER` (or
+    /// `#f`), its `Shots` at `NATIVE_CONT_SHOTS`.
     pub fn native_continuation_of(&self, v: Value) -> Option<Value> {
         use crate::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD};
         if !(v.is_bloblet() && self.bloblet_kind(v) == crate::layout::kind("native-closure")) || self.bloblet_head(v).fields <= CLOSURE_WORD {
             return None;
         }
         let data = self.bloblet_slot(v, CLOSURE_FREE0);
-        (self.obj_type(data) == Some(crate::ObjType::Vector) && (6..=7).contains(&self.obj_len(data)) && self.obj_ref(data, 0) == NATIVE_CONT_MARK).then_some(data)
+        (self.obj_type(data) == Some(crate::ObjType::Vector) && self.obj_len(data) == NATIVE_CONT_LEN && self.obj_ref(data, 0) == NATIVE_CONT_MARK).then_some(data)
+    }
+
+    /// Where continuation `v`'s `Shots` are, whatever machine took it: a
+    /// native one's element, or a cellular one's field.
+    fn shots_at(&self, v: Value) -> Option<(Value, Option<usize>)> {
+        if let Some(data) = self.native_continuation_of(v) {
+            return Some((data, Some(NATIVE_CONT_SHOTS)));
+        }
+        self.continuation_of(v).map(|k| (k, None))
+    }
+
+    fn shots(&self, v: Value) -> Option<Shots> {
+        let (at, i) = self.shots_at(v)?;
+        Some(Shots::of(match i {
+            Some(i) => self.obj_ref(at, i),
+            None => self.bloblet_slot(at, crate::layout::cellular::CONT_SHOTS),
+        }))
+    }
+
+    fn set_shots(&mut self, v: Value, s: Shots) {
+        let Some((at, i)) = self.shots_at(v) else { return };
+        match i {
+            Some(i) => self.obj_set(at, i, s.value()),
+            None => self.set_bloblet_slot(at, crate::layout::cellular::CONT_SHOTS, s.value()),
+        }
+    }
+
+    /// Continuation `v`, just taken, made one-shot (`callone`).
+    pub fn make_one_shot(&mut self, v: Value) {
+        debug_assert!(self.shots_at(v).is_some(), "a continuation");
+        self.set_shots(v, Shots::Once);
+    }
+
+    /// Continuation `v` about to be given a value: false if it is one-shot
+    /// and was given one already, which is then the caller's error to raise
+    /// (`ONE_SHOT_TWICE`); else true, and a one-shot one is spent.
+    pub fn take_shot(&mut self, v: Value) -> bool {
+        match self.shots(v) {
+            Some(Shots::Spent) => false,
+            Some(Shots::Once) => {
+                self.set_shots(v, Shots::Spent);
+                true
+            }
+            _ => true,
+        }
     }
 
     /// The continuation `v` is, or wraps: a closure over exactly one
@@ -177,3 +223,35 @@ impl Heap {
 /// What a native continuation's data holds first: a value no program can
 /// make (`UNBOUND` with a payload).
 pub const NATIVE_CONT_MARK: Value = Value(Value::UNBOUND.raw() + (3 << 8));
+
+/// How many times a continuation may be given a value (`TODO.md` §98): any
+/// number; once, not yet given one; once, and given it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Shots {
+    Many,
+    Once,
+    Spent,
+}
+
+impl Shots {
+    pub fn value(self) -> Value {
+        Value::fixnum(self as i64)
+    }
+
+    pub fn of(v: Value) -> Shots {
+        match v.is_fixnum().then(|| v.as_fixnum()) {
+            Some(1) => Shots::Once,
+            Some(2) => Shots::Spent,
+            _ => Shots::Many,
+        }
+    }
+}
+
+/// What a second resume of a one-shot continuation fails with.
+pub const ONE_SHOT_TWICE: &str = "a one-shot continuation resumed twice";
+
+/// A native continuation's data: its length, and where the continuation
+/// inside it and its `Shots` are (`native_continuation_of`).
+pub const NATIVE_CONT_LEN: usize = 8;
+pub const NATIVE_CONT_INNER: usize = 6;
+pub const NATIVE_CONT_SHOTS: usize = 7;

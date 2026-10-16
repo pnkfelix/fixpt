@@ -157,6 +157,10 @@
 ;; ( proc tag -- r ), callcomp, the continuation in the native convention
 (define routine-ncallcomp int 52)
 (define routine-ncallcc int 53)  ; ( proc -- r ), callcc, the continuation in the native convention
+;; ( proc tag -- r ), callcomp, the continuation resumed at most once
+(define routine-callone int 54)
+;; ( proc tag -- r ), callone, the continuation in the native convention
+(define routine-ncallone int 55)
 
 ;;; Register code's instructions by number, and how many registers it has.
 ;; 1: entered with n arguments in REG1…REGn; first, and only first (arities are static: nothing is

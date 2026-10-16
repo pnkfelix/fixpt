@@ -414,6 +414,11 @@ pub mod cellular {
         // the native convention, an adapter over the closure they give.
         ("ncallcomp", "( proc tag -- r ), callcomp, the continuation in the native convention"),
         ("ncallcc", "( proc -- r ), callcc, the continuation in the native convention"),
+        // `callcomp`, the continuation one-shot: given a value a second
+        // time, it fails (`call-with-oneshot-continuation`, `TODO.md` §98);
+        // and that in the native convention.
+        ("callone", "( proc tag -- r ), callcomp, the continuation resumed at most once"),
+        ("ncallone", "( proc tag -- r ), callone, the continuation in the native convention"),
     ];
     pub const PRIMITIVES: usize = ROUTINES.len();
 
@@ -466,7 +471,8 @@ pub mod cellular {
     /// in a run native code called, a whole continuation another run took
     /// is thrown past the native code, to that run; and the continuation of
     /// another machine's frames inside it, which it calls once its own are
-    /// back, or `#f` (`fixpt_runtime::crossing`).
+    /// back, or `#f` (`fixpt_runtime::crossing`); and how many times it may
+    /// be given a value (`Shots`, `TODO.md` §98).
     pub const CONT_DS: usize = 2;
     pub const CONT_RS: usize = 3;
     pub const CONT_CUR: usize = 4;
@@ -478,7 +484,8 @@ pub mod cellular {
     pub const CONT_REGIONS: usize = 10;
     pub const CONT_RUN: usize = 11;
     pub const CONT_INNER: usize = 12;
-    pub const CONT_FIELDS: usize = 11;
+    pub const CONT_SHOTS: usize = 13;
+    pub const CONT_FIELDS: usize = 12;
 
     pub const fn routine(name: &str) -> u64 {
         let mut i = 0;

@@ -454,6 +454,7 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("make-escape-tag", "%fx26-make-prompt-tag", false),
     ("escape", "%fx26-abort", false),
     ("call-with-composable-continuation", "%fx26-call/comp", false),
+    ("call-with-oneshot-continuation", "%fx26-call/one", false),
     ("make-continuation-mark-key", "%fx26-make-mark-key", false),
     ("%sched", "%fx26-sched", false),
     ("with-mark", "%fx26-with-mark", false),

@@ -57,6 +57,10 @@
   (o-bytes (bytevectorof @v))
   (o-tag (prompt-tag val val (maxeff runs spin) @x))
   (o-cont (composable val val (maxeff runs spin) @x))
+  ;; One taken one-shot, the machine's own (`TODO.md` §98), and whether
+  ;; it was resumed: the second resume fails here, as the evaluator fails,
+  ;; never reaching the machine's.
+  (o-once (oneshot val val (maxeff runs spin) @x) (ref bool @v))
   ;; A `cwcc` escape.
   (o-esc (subr (goto @x) (val) void))
   (o-key (mark-key val @x)))

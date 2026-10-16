@@ -303,6 +303,7 @@
             (val c-closure-routine (subr (maxeff (read @globals) (read @k)) () int))
             (val c-region-closure-prim (subr (maxeff (read @globals) (read @k)) () string))
             (val c-capture-routine (subr (maxeff (read @globals) (read @k)) (bool) int))
+            (val c-one-shot-routine (subr (maxeff (read @globals) (read @k)) () int))
             (val c-adapted
                  (subr (maxeff (alloc @k) (goto @y) (read @globals) (read @k) (read @t) (write @k))
                        (code)

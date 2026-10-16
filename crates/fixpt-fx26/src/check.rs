@@ -2343,7 +2343,7 @@ impl Checker {
                 self.regions_walk(b, seen, out);
             }
             Ty::PromptTag { answer: a, payload: b, effect, region: r }
-            | Ty::Composable { arg: b, answer: a, effect, region: r } => {
+            | Ty::Composable { arg: b, answer: a, effect, region: r, .. } => {
                 out.insert(r);
                 out.extend(effect.0.iter().filter_map(|x| x.region()));
                 self.regions_walk(a, seen, out);
@@ -2789,7 +2789,7 @@ impl Checker {
                 }
             }
             Ty::PromptTag { answer: a, payload: b, effect, region }
-            | Ty::Composable { arg: a, answer: b, effect, region } => {
+            | Ty::Composable { arg: a, answer: b, effect, region, .. } => {
                 reg(region, found);
                 eff(&effect, Variance::Inv, found);
                 self.polarity(a, v, Variance::Inv, seen, found);
@@ -3310,9 +3310,9 @@ impl Checker {
             // Called like a subroutine: contravariant in what it takes,
             // covariant in what it gives and does.
             (
-                Ty::Composable { arg: t1, answer: a1, effect: d1, region: r1 },
-                Ty::Composable { arg: t2, answer: a2, effect: d2, region: r2 },
-            ) => ra(r1) == rb(r2) && ea(&d1).within(&eb(&d2)) && self.sub(t2, t1, &flip, st) && self.sub(a1, a2, env, st),
+                Ty::Composable { arg: t1, answer: a1, effect: d1, region: r1, once: o1 },
+                Ty::Composable { arg: t2, answer: a2, effect: d2, region: r2, once: o2 },
+            ) => o1 == o2 && ra(r1) == rb(r2) && ea(&d1).within(&eb(&d2)) && self.sub(t2, t1, &flip, st) && self.sub(a1, a2, env, st),
             (Ty::MarkKey(x, r), Ty::MarkKey(y, s)) => ra(r) == rb(s) && self.sub(x, y, env, st) && self.sub(y, x, &flip, st),
             // A bloblet's fields are invariant, as a reference's contents
             // are, unless they are frozen, when nothing can store into them.
@@ -3626,11 +3626,12 @@ impl Checker {
                 effect: subst_effect(&effect, map, &self.arena),
                 region: region(r),
             },
-            Ty::Composable { arg, answer, effect, region: r } => Ty::Composable {
+            Ty::Composable { arg, answer, effect, region: r, once } => Ty::Composable {
                 arg: self.subst_memo(arg, map, memo),
                 answer: self.subst_memo(answer, map, memo),
                 effect: subst_effect(&effect, map, &self.arena),
                 region: region(r),
+                once,
             },
             Ty::MarkKey(t, r) => Ty::MarkKey(self.subst_memo(t, map, memo), region(r)),
             Ty::Product(parts) => Ty::Product(parts.iter().map(|(l, t)| (*l, self.subst_memo(*t, map, memo))).collect()),

@@ -476,6 +476,7 @@
             ((is "set" 2) (s-set))
             ((or (is "abort-current-continuation" 2) (is "escape" 2)) (s-cellular routine-abort))
             ((is "call-with-composable-continuation" 2) (s-cellular (c-capture-routine #f)))
+            ((is "call-with-oneshot-continuation" 2) (s-cellular (c-one-shot-routine)))
             ((is "cwcc" 1) (s-cellular (c-capture-routine #t)))
             ((is "with-mark" 3) (s-cellular routine-withmark))
             ((is "first-mark" 2) (s-cellular routine-firstmark))

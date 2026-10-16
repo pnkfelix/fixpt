@@ -367,7 +367,7 @@
       (("+" "-" "*" "<" ">" "<=" ">=" "=" "modulo" "quotient" "cons" "set-car!" "set-cdr!" "char=?"
         "string=?" "array-ref" "string-ref" "make-array"
         "abort-current-continuation" "escape" "set" "marks-of" "call-with-composable-continuation"
-        "first-mark")
+        "call-with-oneshot-continuation" "first-mark")
        2)
       (else
        (cond ((std-eq-name? n) 2)
@@ -412,6 +412,7 @@
        (begin (c-lit c (wcell-unit)) (c-prim c "%make-box" 1)))
       (("abort-current-continuation" "escape") (c-op c routine-abort))
       (("call-with-composable-continuation") (c-op c (c-capture-routine #f)))
+      (("call-with-oneshot-continuation") (c-op c (c-one-shot-routine)))
       (("cwcc") (c-op c (c-capture-routine #t)))
       (("with-mark") (c-op c routine-withmark))
       (("first-mark") (c-op c routine-firstmark))

@@ -197,7 +197,7 @@
   (lambda (v)
     (typecase v
       (procedure p #t)
-      (sum o (tagcase o (o-cont (k) #t) (o-esc (k) #t) (else y #f)))
+      (sum o (tagcase o (o-cont (k) #t) (o-once (k s) #t) (o-esc (k) #t) (else y #f)))
       (else #f))))
 
 (define* ev-array? (subr pure (val) bool)
@@ -527,6 +527,14 @@
       (call-with-composable-continuation
        (lambda (k) (apply1 f (o-cont k)))
        (as-tag (ev-arg xs 1))))))
+;; The same, one-shot: the machine's own one-shot continuation, which fails
+;; when resumed twice as the machine does.
+(define* ev-cone (subr (maxeff evals spin) (vals) val)
+  (lambda (xs)
+    (let ((f (ev-arg xs 0)))
+      (call-with-oneshot-continuation
+       (lambda (k) (apply1 f (o-once k (new #f))))
+       (as-tag (ev-arg xs 1))))))
 
 (define* ev-with-mark (subr (maxeff evals spin) (vals) val)
   (lambda (xs)
@@ -552,6 +560,7 @@
       (prim! 'abort-current-continuation
              (lambda (xs) (abort-current-continuation (as-tag (ev-arg xs 0)) (ev-arg xs 1))))
       (prim! 'call-with-composable-continuation (lambda (xs) (ev-ccc xs)))
+      (prim! 'call-with-oneshot-continuation (lambda (xs) (ev-cone xs)))
       (prim! 'cwcc (lambda (xs) (ev-cwcc (ev-arg xs 0))))
       (prim! 'make-continuation-mark-key (lambda (xs) (o-key (make-continuation-mark-key))))
       (prim! 'with-mark (lambda (xs) (ev-with-mark xs)))

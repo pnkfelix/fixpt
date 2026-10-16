@@ -20,7 +20,7 @@ mod regcode;
 mod sro;
 mod cellular;
 
-pub use cellular::NATIVE_CONT_MARK;
+pub use cellular::{Shots, NATIVE_CONT_INNER, NATIVE_CONT_LEN, NATIVE_CONT_MARK, NATIVE_CONT_SHOTS, ONE_SHOT_TWICE};
 pub use sro::{Referrer, Referrers, SroKind};
 pub mod value;
 

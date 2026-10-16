@@ -328,6 +328,10 @@
     (if (get c-native-program)
         (if whole routine-ncallcc routine-ncallcomp)
         (if whole routine-callcc routine-callcomp))))
+;; The routine that takes a delimited continuation one-shot (`TODO.md` §98):
+;; `callone`, or `ncallone` in a program whose convention is native.
+(define c-one-shot-routine (subr (maxeff (read @globals) (read @k)) () int)
+  (lambda () (if (get c-native-program) routine-ncallone routine-callone)))
 ;; The primitive a closure in a place is made by (an `rlambda`'s): in a
 ;; program whose convention is native, its adapter in the same place.
 (define c-region-closure-prim (subr (maxeff (read @globals) (read @k)) () string)

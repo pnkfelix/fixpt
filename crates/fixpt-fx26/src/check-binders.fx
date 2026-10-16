@@ -340,7 +340,7 @@
                 (ty-icell (x r) (k-size-walk x 0 v seen))
                 (ty-markkey (x r) (k-size-walk x 0 v seen))
                 (ty-tag (x y e r) (+ (k-size-walk x 0 v seen) (k-size-walk y 0 v seen)))
-                (ty-comp (x y e r) (+ (k-size-walk x 0 v seen) (k-size-walk y 0 v seen)))
+                (ty-comp (x y e r once) (+ (k-size-walk x 0 v seen) (k-size-walk y 0 v seen)))
                 (ty-module (abs ds vs)
                   (+ (k-size-walk-parts ds 0 v seen) (k-size-walk-parts vs pol v seen)))
                 (else y 0)))))))

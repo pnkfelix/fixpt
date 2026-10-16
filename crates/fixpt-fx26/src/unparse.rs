@@ -349,8 +349,9 @@ impl Checker {
                 self.show_effect(&effect),
                 self.show_region(region)
             ),
-            Ty::Composable { arg, answer, effect, region } => format!(
-                "(composable {} {} {} {})",
+            Ty::Composable { arg, answer, effect, region, once } => format!(
+                "({} {} {} {} {})",
+                if once { "oneshot" } else { "composable" },
                 self.show_ty_on(arg, path),
                 self.show_ty_on(answer, path),
                 self.show_effect(&effect),

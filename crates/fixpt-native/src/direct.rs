@@ -364,8 +364,9 @@ enum Callout {
     Abort,
     /// A continuation taken, whole (`cwcc`) or up to the innermost prompt
     /// for the tag (argument 1): a native closure over the frames it takes,
-    /// of the code in the state's `aux`, the continuation procedure.
-    Capture { whole: bool },
+    /// of the code in the state's `aux`, the continuation procedure; `once`,
+    /// one-shot (`callone`, `TODO.md` §98).
+    Capture { whole: bool, once: bool },
     /// A continuation (argument 1) given a value (argument 0): its frames
     /// put back, and resumed.
     Reinstate,
@@ -414,7 +415,7 @@ impl Callout {
     fn arity(self) -> usize {
         match self {
             Callout::Cons | Callout::Bloblet | Callout::FieldRef | Callout::Abort | Callout::Reinstate | Callout::FirstMark | Callout::MarksOf => 2,
-            Callout::Capture { whole } => if whole { 1 } else { 2 },
+            Callout::Capture { whole, .. } => if whole { 1 } else { 2 },
             Callout::CurrentMarks | Callout::Box { .. } | Callout::Unbox | Callout::BoxF64 => 1,
             Callout::Foreign | Callout::ClosureAny | Callout::Rest | Callout::Underflow | Callout::Overflow | Callout::Poll | Callout::PollDone | Callout::Failed => 0,
             Callout::Prim { n, .. } | Callout::Pure { n, .. } | Callout::Closure { n } | Callout::RegionClosure { n } => n,
@@ -2254,7 +2255,7 @@ impl Compiling<'_> {
                 // frame of its own around the thunk's call, which the frames'
                 // walk finds; the rest are call-outs, which walk the frames,
                 // and take and put back runs of them.
-                "cellular" if matches!(ROUTINES.get(k(o(0))).map(|r| r.0), Some("prompt" | "withmark" | "withmark-tail" | "abort" | "callcc" | "callcomp" | "ncallcc" | "ncallcomp" | "firstmark" | "currentmarks" | "marksof")) => {
+                "cellular" if matches!(ROUTINES.get(k(o(0))).map(|r| r.0), Some("prompt" | "withmark" | "withmark-tail" | "abort" | "callcc" | "callcomp" | "ncallcc" | "ncallcomp" | "callone" | "ncallone" | "firstmark" | "currentmarks" | "marksof")) => {
                     if frame.is_none() {
                         return decline("a call-out outside a frame".into());
                     }
@@ -2376,7 +2377,7 @@ impl Compiling<'_> {
                         // The continuation resumes where `f`'s call returns:
                         // it is taken, and `f` called with it; native here,
                         // so `ncallcc`'s too.
-                        r @ ("callcc" | "callcomp" | "ncallcc" | "ncallcomp") => {
+                        r @ ("callcc" | "callcomp" | "ncallcc" | "ncallcomp" | "callone" | "ncallone") => {
                             let after = a.label();
                             a.to(after, Fix::Adr(X9));
                             a.e(str(X9, ST, st_off(offset_of!(DState, ret_pc))));
@@ -2384,7 +2385,7 @@ impl Compiling<'_> {
                             let f = self.field(p, Field::Code(q));
                             ldr_field(&mut a, X9, f);
                             a.e(str(X9, ST, st_off(offset_of!(DState, aux))));
-                            callout(&mut a, &mut stubs, self.callouts, Callout::Capture { whole: r.ends_with("callcc") });
+                            callout(&mut a, &mut stubs, self.callouts, Callout::Capture { whole: r.ends_with("callcc"), once: r.ends_with("callone") });
                             a.e(mov(1, RESULT));
                             a.e(ldr(CLO, ST, args));
                             call_clo(&mut a, &mut foreign, 1, after);
@@ -4761,7 +4762,7 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
             st.words = rt.heap.words_address() as u64;
             r
         }
-        Callout::Capture { whole } => {
+        Callout::Capture { whole, once } => {
             // `f`, moved by a collection, where the code reads it.
             st.args[0] = args[0].raw();
             let k = if whole {
@@ -4770,7 +4771,12 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
                 capture_delimited(rt, st, args[1])
             };
             match k {
-                Some(k) => k.raw(),
+                Some(k) => {
+                    if once {
+                        rt.heap.make_one_shot(k);
+                    }
+                    k.raw()
+                }
                 None => failed(st, "call-with-composable-continuation: no prompt for this tag".into()),
             }
         }
@@ -5486,10 +5492,8 @@ fn is_tail_mark(lo: u64, hi: u64) -> bool {
 fn continuation(rt: &mut fixpt_runtime::Runtime, code: Value, p: Pos, words: u64, whole: bool, inner: Value) -> Value {
     let heap = &mut rt.heap;
     let regions = Value::fixnum(heap.live_regions() as i64);
-    let mut data = vec![CONT_MARK, p.frame, Value::fixnum(words as i64), Value::fixnum(p.pc as i64), regions, Value::boolean(whole)];
-    if inner != Value::FALSE {
-        data.push(inner);
-    }
+    let data = [CONT_MARK, p.frame, Value::fixnum(words as i64), Value::fixnum(p.pc as i64), regions, Value::boolean(whole), inner, fixpt_heap::Shots::Many.value()];
+    debug_assert_eq!(data.len(), fixpt_heap::NATIVE_CONT_LEN);
     let data = heap.vector_from(&data);
     native_closure(heap, code, &[data])
 }
@@ -5590,6 +5594,9 @@ fn region_words(frames: &[(u64, u64)]) -> u64 {
 /// native code, from them, where they called it, and they resume with
 /// what it returns.
 fn reinstate(rt: &mut fixpt_runtime::Runtime, st: &mut DState, k: Value, v: Value) -> u64 {
+    if !rt.heap.take_shot(k) {
+        return failed(st, fixpt_heap::ONE_SHOT_TWICE.into());
+    }
     let data = rt.heap.bloblet_slot(k, CLOSURE_FREE0);
     // A whole continuation is given its value by the bottom machine: from
     // a run another machine called, it is thrown out to it.
@@ -5597,7 +5604,7 @@ fn reinstate(rt: &mut fixpt_runtime::Runtime, st: &mut DState, k: Value, v: Valu
         THROWN.with(|t| t.set(Some((k, v))));
         return failed(st, "a whole continuation thrown out to the machine at the bottom".into());
     }
-    let inner = if rt.heap.obj_len(data) > 6 { rt.heap.obj_ref(data, 6) } else { Value::FALSE };
+    let inner = rt.heap.obj_ref(data, fixpt_heap::NATIVE_CONT_INNER);
     let out = put_continuation(rt, st, k, v);
     if inner == Value::FALSE || st.trap != 0 {
         return out;
@@ -5715,7 +5722,8 @@ fn chain_marks(heap: &Heap, p: Pos, key: Value) -> Vec<Value> {
 fn marks_of(heap: &Heap, k: Value, key: Value) -> Option<Vec<Value>> {
     if let Some(data) = heap.native_continuation_of(k) {
         // The marks of the continuation inside it first (`reinstate`).
-        let mut out = if heap.obj_len(data) > 6 { marks_of(heap, heap.obj_ref(data, 6), key)? } else { Vec::new() };
+        let inner = heap.obj_ref(data, fixpt_heap::NATIVE_CONT_INNER);
+        let mut out = if inner != Value::FALSE { marks_of(heap, inner, key)? } else { Vec::new() };
         out.extend(chain_marks(heap, continuation_pos(heap, data).0, key));
         return Some(out);
     }

@@ -112,7 +112,7 @@
                 (or (k-eff-writes-noting? e r) (k-writes-list ps r seen) (k-writes-in x r seen)))
               (ty-tag (a h e x)
                 (or (k-eff-writes-noting? e r) (k-writes-in a r seen) (k-writes-in h r seen)))
-              (ty-comp (b a e x)
+              (ty-comp (b a e x once)
                 (or (k-eff-writes-noting? e r) (k-writes-in a r seen) (k-writes-in b r seen)))
               (ty-poly (bs body) (k-writes-in body r seen))
               (ty-ref (a x) (k-writes-in a r seen))

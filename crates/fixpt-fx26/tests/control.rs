@@ -115,6 +115,26 @@ fn a_fixed_answer_type_rules_out_answer_type_modification() {
     );
 }
 
+/// A one-shot continuation (`TODO.md` §98) is a type of its own: called as
+/// a composable one is, and a subroutine where one is wanted, but neither
+/// it nor a composable one stands for the other. A rule that let a
+/// composable one stand for a one-shot one would let a second resume go
+/// unfailed; the other way, a procedure written to resume twice would be
+/// given one that fails.
+#[test]
+fn a_one_shot_continuation_is_its_own_type() {
+    let mut c = checker();
+    assert_eq!(check(&mut c, include_str!("programs/control/oneshot-called.fx")), "int ! pure");
+    assert_eq!(
+        check(&mut c, "called"),
+        "(subr (maxeff (goto @p) (comefrom @p)) ((oneshot int int pure @p)) int) ! (read (globals called))"
+    );
+    for program in [include_str!("programs/control/oneshot-not-composable.fx"), include_str!("programs/control/composable-not-oneshot.fx")] {
+        let err = rejects(&mut c, program);
+        assert!(err.contains("oneshot int int pure @p"), "{err}");
+    }
+}
+
 /// The bound: a tag's `D` is what a continuation captured up to one of its
 /// prompts is said to do when called, so a body may not do more. Without the
 /// check, a continuation's latent effect would be a lie.

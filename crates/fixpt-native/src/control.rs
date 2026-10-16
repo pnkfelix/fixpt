@@ -15,9 +15,9 @@
 use fixpt_engine::cellular::{prompt_height, prompt_regions, prompt_word, reinstated_prompt, MARK_MARK, PROMPT_MARK, Trap};
 use fixpt_heap::layout::kind;
 use fixpt_heap::layout::cellular::{
-    CLOSURE_WORD, CONT_BASE, CONT_CLO, CONT_CUR, CONT_DS, CONT_FIELDS, CONT_FP, CONT_K, CONT_INNER, CONT_RS, CONT_REGIONS, CONT_RUN, CONT_WHOLE, WORD_CELL0,
+    CLOSURE_WORD, CONT_BASE, CONT_CLO, CONT_CUR, CONT_DS, CONT_FIELDS, CONT_FP, CONT_K, CONT_INNER, CONT_RS, CONT_REGIONS, CONT_RUN, CONT_SHOTS, CONT_WHOLE, WORD_CELL0,
 };
-use fixpt_heap::{Heap, Value};
+use fixpt_heap::{Heap, Shots, Value};
 
 use crate::cellular::State;
 
@@ -218,6 +218,7 @@ fn capture(s: &Stacks, heap: &mut Heap, rs_from: usize, ds_from: usize, whole: b
         (CONT_RUN, Value::fixnum(0)),
         (CONT_REGIONS, Value::fixnum(heap.live_regions() as i64)),
         (CONT_INNER, Value::FALSE),
+        (CONT_SHOTS, Shots::Many.value()),
     ];
     for (f, v) in fields {
         heap.set_bloblet_slot(k, f, v);
@@ -229,6 +230,9 @@ fn capture(s: &Stacks, heap: &mut Heap, rs_from: usize, ds_from: usize, whole: b
 /// pointers and prompts' heights moved by the difference in depth; or,
 /// whole, replacing them.
 fn reinstate(s: &mut Stacks, heap: &mut Heap, k: Value, v: Value, tail: bool) -> Result<(), Trap> {
+    if !heap.take_shot(k) {
+        return Err(Trap::Prim(fixpt_heap::ONE_SHOT_TWICE.into()));
+    }
     let ds = heap.bloblet_slot(k, CONT_DS);
     let rs = heap.bloblet_slot(k, CONT_RS);
     let whole = heap.bloblet_slot(k, CONT_WHOLE) == Value::TRUE;
@@ -322,7 +326,7 @@ pub(crate) fn run(st: &mut State, heap: &mut Heap, name: &'static str, safepoint
         }
     }
     let r = match name {
-        "prompt" | "withmark" | "withmark-tail" | "abort" | "callcomp" | "callcc" | "firstmark" | "call" | "tailcall"
+        "prompt" | "withmark" | "withmark-tail" | "abort" | "callcomp" | "callcc" | "callone" | "firstmark" | "call" | "tailcall"
         | "tcall" | "ttailcall" | "resume" => {
             routine(st, heap, name, safepoint)
         }
@@ -405,10 +409,10 @@ fn routine(st: &mut State, heap: &mut Heap, name: &'static str, safepoint: fn(&m
             s.ds_push(handler)?;
             call(&mut s, heap, 1, false, name)
         }
-        "callcomp" | "callcc" => {
+        "callcomp" | "callcc" | "callone" => {
             let at = {
                 let mut s = Stacks { st: &mut *st };
-                if name == "callcomp" {
+                if name != "callcc" {
                     let tag = s.ds_pop(name)?;
                     let Some(at) = s.find_marked(PROMPT_MARK, tag) else {
                         return Err(Trap::Prim("call-with-composable-continuation: no prompt for this tag".into()));
@@ -429,6 +433,9 @@ fn routine(st: &mut State, heap: &mut Heap, name: &'static str, safepoint: fn(&m
                 }
                 None => capture(&s, heap, 0, 0, true),
             };
+            if name == "callone" {
+                heap.make_one_shot(k);
+            }
             // Given as a closure, so that everything callable is one.
             let k = heap.continuation_closure(k);
             s.ds_push(k)?;

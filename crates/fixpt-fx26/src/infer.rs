@@ -1614,7 +1614,7 @@ impl Checker {
                 }
                 Ty::Select(..) | Ty::ParamSel(..) => false,
                 Ty::PromptTag { answer: x, payload: y, effect: e, region: r }
-                | Ty::Composable { arg: x, answer: y, effect: e, region: r } => {
+                | Ty::Composable { arg: x, answer: y, effect: e, region: r, .. } => {
                     stack.extend([x, y]);
                     region(r) || effect(&e)
                 }
@@ -1859,8 +1859,8 @@ impl Checker {
                 Ty::PromptTag { answer: a2, payload: h2, effect: d2, region: r2 },
             )
             | (
-                Ty::Composable { arg: h1, answer: a1, effect: d1, region: r1 },
-                Ty::Composable { arg: h2, answer: a2, effect: d2, region: r2 },
+                Ty::Composable { arg: h1, answer: a1, effect: d1, region: r1, .. },
+                Ty::Composable { arg: h2, answer: a2, effect: d2, region: r2, .. },
             ) => {
                 self.unify_region(r1, r2, u);
                 self.unify(a1, a2, u, trail);

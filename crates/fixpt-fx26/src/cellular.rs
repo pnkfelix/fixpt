@@ -1694,7 +1694,7 @@ impl<'a> Compiler<'a> {
             "with-mark" | "array-set!" | "substring" => Some(3),
             "+" | "-" | "*" | "<" | ">" | "<=" | ">=" | "=" | "modulo" | "quotient" | "cons" | "set-car!" | "set-cdr!"
             | "set" | "char=?" | "string=?" | "symbol=?" | "wglobal=?" | "eq?" | "bool=?" | "array-ref" | "string-ref" | "make-array"
-            | "abort-current-continuation" | "escape" | "call-with-composable-continuation" | "first-mark" | "marks-of" => Some(2),
+            | "abort-current-continuation" | "escape" | "call-with-composable-continuation" | "call-with-oneshot-continuation" | "first-mark" | "marks-of" => Some(2),
             // The rest: the arity of the runtime primitive it runs as, if
             // that takes a fixed number (`char-downcase`).
             _ => standard_primitive(n).filter(|p| *p != "%fx26-identity").and_then(|p| {
@@ -1980,6 +1980,7 @@ impl<'a> Compiler<'a> {
             "abort-current-continuation" | "escape" => self.op(code, "abort"),
             // In the native convention, the continuation given in it.
             "call-with-composable-continuation" => self.op(code, if self.native_program() { "ncallcomp" } else { "callcomp" }),
+            "call-with-oneshot-continuation" => self.op(code, if self.native_program() { "ncallone" } else { "callone" }),
             "cwcc" => self.op(code, if self.native_program() { "ncallcc" } else { "callcc" }),
             "with-mark" => self.op(code, "withmark"),
             "first-mark" => self.op(code, "firstmark"),

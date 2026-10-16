@@ -358,12 +358,16 @@
            (let* ((a (k-parse-type (k-nth items 1))) (h (k-parse-type (k-nth items 2)))
                   (e (k-parse-effect (k-nth items 3))) (r (k-parse-region (k-nth items 4))))
              (k-ty-new (ty-tag a h e r)))))
-        ((composable)
-         (begin
-           (k-shape (= n 5) "`(composable argument answer effect region)`" s)
-           (let* ((t (k-parse-type (k-nth items 1))) (a (k-parse-type (k-nth items 2)))
-                  (e (k-parse-effect (k-nth items 3))) (r (k-parse-region (k-nth items 4))))
-             (k-ty-new (ty-comp t a e r)))))
+        ((composable oneshot)
+         (let ((once (symbol=? hd 'oneshot)))
+           (begin
+             (k-shape (= n 5) (if once
+                                  "`(oneshot argument answer effect region)`"
+                                  "`(composable argument answer effect region)`")
+                      s)
+             (let* ((t (k-parse-type (k-nth items 1))) (a (k-parse-type (k-nth items 2)))
+                    (e (k-parse-effect (k-nth items 3))) (r (k-parse-region (k-nth items 4))))
+               (k-ty-new (ty-comp t a e r once))))))
         ((bloblet)
          (begin
            (k-shape (= n 3) "`(bloblet (fields type …) region)`, or `(frozen type …)`" s)

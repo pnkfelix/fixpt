@@ -14,7 +14,8 @@
 //! The delimited-control operations are this project's (`docs/fx26.md`,
 //! "Control, typed"). They keep SRFI 226's names where they mean the same
 //! thing: `make-continuation-prompt-tag`, `abort-current-continuation`,
-//! `call-with-composable-continuation` and `make-continuation-mark-key`.
+//! `call-with-composable-continuation` and `make-continuation-mark-key`;
+//! `call-with-oneshot-continuation` is ours, as is the `oneshot` type.
 //! `with-mark` takes a thunk where Scheme's `with-continuation-mark` is
 //! syntax, and `first-mark`, `current-marks` and `marks-of` read marks.
 //! Delimiting is the `prompt` form, not a constant: see `Checker`'s rule for
@@ -541,6 +542,15 @@ pub const ENTRIES: &[(&str, &str)] = &[
         "(poly ((r region)) (poly ((a type) (h type) (d effect) (t type) (e effect))
            (subr (maxeff (comefrom r) e)
                  ((subr e ((composable t a d r)) t) (prompt-tag a h d r))
+                 t)))",
+    ),
+    // The same, the continuation resumed at most once: a second resume
+    // fails (`TODO.md` §98, kayak's request).
+    (
+        "call-with-oneshot-continuation",
+        "(poly ((r region)) (poly ((a type) (h type) (d effect) (t type) (e effect))
+           (subr (maxeff (comefrom r) e)
+                 ((subr e ((oneshot t a d r)) t) (prompt-tag a h d r))
                  t)))",
     ),
     ("make-continuation-mark-key", "(poly ((r region)) (poly ((t type)) (subr (alloc r) () (mark-key t r))))"),

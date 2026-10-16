@@ -23,10 +23,10 @@
 
 use fixpt_heap::layout::kind;
 use fixpt_heap::layout::cellular::{
-    CLOSURE_FREE0, CLOSURE_WORD, CONT_BASE, CONT_CLO, CONT_CUR, CONT_DS, CONT_FIELDS, CONT_FP, CONT_INNER, CONT_K, CONT_RS, CONT_REGIONS, CONT_RUN, CONT_WHOLE,
+    CLOSURE_FREE0, CLOSURE_WORD, CONT_BASE, CONT_CLO, CONT_CUR, CONT_DS, CONT_FIELDS, CONT_FP, CONT_INNER, CONT_K, CONT_RS, CONT_REGIONS, CONT_RUN, CONT_SHOTS, CONT_WHOLE,
     KIND, PRIMITIVES, ROUTINE_DOCOL, ROUTINES, WORD_CELL0, WORD_ENTRY, WORD_NAME, routine,
 };
-use fixpt_heap::{Heap, Value};
+use fixpt_heap::{Heap, Shots, Value};
 use fixpt_runtime::crossing::{self, Crossed, Crossing};
 use fixpt_runtime::{NativeExit, PrimKind, Runtime};
 
@@ -801,6 +801,7 @@ impl Machine {
             }
             let v = self.ds.pop().expect("counted");
             self.check_limits()?;
+            spend(heap, c)?;
             self.escape(heap, c, v)?;
             self.reinstate(heap, r, c, v, tail);
             return self.resume_inner(cx, r, c, routine);
@@ -837,7 +838,8 @@ impl Machine {
     /// in a run native code called, every frame of the run, and the frames
     /// of the machines out from it up to the prompt (`crossing`), given to
     /// `proc_`; else none to take.
-    fn capture_across(&mut self, cx: &mut Ctx, r: &mut Regs, tag: Value, proc_: Value, native: bool, name: &'static str) -> Result<(), Trap> {
+    #[allow(clippy::too_many_arguments)]
+    fn capture_across(&mut self, cx: &mut Ctx, r: &mut Regs, tag: Value, proc_: Value, native: bool, once: bool, name: &'static str) -> Result<(), Trap> {
         let missing = || Trap::Prim("call-with-composable-continuation: no prompt for this tag".into());
         let Ctx::Rt(rt) = cx else { return Err(missing()) };
         if !self.nested || !crossing::crossed() {
@@ -850,6 +852,9 @@ impl Machine {
         let own = self.capture(&mut rt.heap, r, from, 0, false);
         // Nothing allocated here collects, so `proc_` stays where it is.
         let k = crossing::capture(rt, tag, own).ok_or_else(missing)?;
+        if once {
+            rt.heap.make_one_shot(k);
+        }
         let k = if rt.heap.bloblet_kind(k) == const { kind("cellular-continuation") } { rt.heap.continuation_closure(k) } else { k };
         let k = if native { as_native(cx, k)? } else { k };
         self.ds.push(k);
@@ -927,6 +932,7 @@ impl Machine {
                 Err(Trap::Prim("a whole continuation of native code, given a value under cellular code it did not take".into()))
             }
             Err(NativeExit::Throw { k, v }) => {
+                spend(&mut rt.heap, k)?;
                 self.escape(&rt.heap, k, v)?;
                 self.reinstate(&mut rt.heap, r, k, v, true);
                 self.resume_inner(&mut Ctx::Rt(rt), r, k, "call")?;
@@ -1228,6 +1234,7 @@ impl Machine {
                     return Err(Trap::Type { routine: name });
                 }
                 self.check_limits()?;
+                spend(heap, k)?;
                 self.escape(heap, k, v)?;
                 self.reinstate(heap, r, k, v, true);
                 self.resume_inner(cx, r, k, name)?;
@@ -1300,14 +1307,16 @@ impl Machine {
                 self.abort(cx, r, tag, v, name)?;
             }
             // `ncallcomp` and `ncallcc`, in a program whose convention is
-            // native: the continuation given in it (`as_native`).
-            CALLCOMP | CALLCC | NCALLCOMP | NCALLCC => {
-                let native = matches!(n, NCALLCOMP | NCALLCC);
-                let (proc_, at) = if matches!(n, CALLCOMP | NCALLCOMP) {
+            // native: the continuation given in it (`as_native`); `callone`
+            // and `ncallone`, `callcomp`'s, one-shot (`TODO.md` §98).
+            CALLCOMP | CALLCC | NCALLCOMP | NCALLCC | CALLONE | NCALLONE => {
+                let native = matches!(n, NCALLCOMP | NCALLCC | NCALLONE);
+                let once = matches!(n, CALLONE | NCALLONE);
+                let (proc_, at) = if matches!(n, CALLCOMP | NCALLCOMP | CALLONE | NCALLONE) {
                     let tag = self.pop(name)?;
                     let proc_ = self.pop(name)?;
                     let Some(at) = Self::find_marked(&self.rs, self.rs_floor, PROMPT_MARK, tag) else {
-                        return self.capture_across(cx, r, tag, proc_, native, name).map(|()| Flow::Next);
+                        return self.capture_across(cx, r, tag, proc_, native, once, name).map(|()| Flow::Next);
                     };
                     (proc_, Some(at))
                 } else {
@@ -1338,6 +1347,9 @@ impl Machine {
                     }
                     None => self.capture(heap, r, self.rs_floor, 0, true),
                 };
+                if once {
+                    heap.make_one_shot(k);
+                }
                 // Given as a closure, so that everything callable is one.
                 let k = heap.continuation_closure(k);
                 let k = if native { as_native(cx, k)? } else { k };
@@ -1477,6 +1489,12 @@ fn nested_floor(heap: &Heap, rs: &[Value], floor: usize) -> usize {
     if exits { floor + 4 } else { floor }
 }
 
+/// Continuation `k` about to be given a value: an error if it is one-shot
+/// and was given one (`Heap::take_shot`).
+fn spend(heap: &mut Heap, k: Value) -> Result<(), Trap> {
+    if heap.take_shot(k) { Ok(()) } else { Err(Trap::Prim(fixpt_heap::ONE_SHOT_TWICE.into())) }
+}
+
 /// A delimited or whole continuation of these stacks' values and return
 /// entries, at `r`, the data stack's taken from height `base`; `inner`
 /// inside it (`crossing`), or `#f`.
@@ -1497,6 +1515,7 @@ fn continuation(heap: &mut Heap, ds: &[Value], rs: &[Value], r: &Regs, base: usi
         (CONT_REGIONS, Value::fixnum(heap.live_regions() as i64)),
         (CONT_RUN, Value::fixnum(run as i64)),
         (CONT_INNER, inner),
+        (CONT_SHOTS, Shots::Many.value()),
     ];
     for (f, v) in fields {
         heap.set_bloblet_slot(k, f, v);
@@ -1743,6 +1762,8 @@ const CLOSURE: i64 = routine("closure") as i64;
 const NCLOSURE: i64 = routine("nclosure") as i64;
 const NCALLCOMP: i64 = routine("ncallcomp") as i64;
 const NCALLCC: i64 = routine("ncallcc") as i64;
+const CALLONE: i64 = routine("callone") as i64;
+const NCALLONE: i64 = routine("ncallone") as i64;
 const CALL: i64 = routine("call") as i64;
 const TAILCALL: i64 = routine("tailcall") as i64;
 const PRIM: i64 = routine("prim") as i64;

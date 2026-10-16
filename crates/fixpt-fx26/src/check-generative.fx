@@ -80,7 +80,7 @@
                   ;; Immutable, as a sum: covariant in its members.
                   (ty-union (ms) (gos ms at))
                   (ty-tag (a h e r) (begin (reg r) (eff e 2) (go a 2) (go h 2)))
-                  (ty-comp (a h e r) (begin (reg r) (eff e 2) (go a 2) (go h 2)))
+                  (ty-comp (a h e r once) (begin (reg r) (eff e 2) (go a 2) (go h 2)))
                   (ty-place (r) (reg r))
                   (ty-named (g ds) (k-polarity-descs ds (extract (k-gen-of g) 3) v at seen found))
                   (ty-nlist (e z r) (begin (reg r) (go e at)))

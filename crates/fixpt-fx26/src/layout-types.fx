@@ -82,6 +82,8 @@
             (val routine-callcc int)
             (val routine-ncallcomp int)
             (val routine-ncallcc int)
+            (val routine-callone int)
+            (val routine-ncallone int)
             (val routine-withmark int)
             (val routine-firstmark int)
             (val routine-currentmarks int)

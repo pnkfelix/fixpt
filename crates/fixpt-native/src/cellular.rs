@@ -1098,7 +1098,7 @@ fn assemble_word_as(heap: &Heap, word: Value, far: [i64; 2], long: bool) -> Resu
 /// Routines whose call-out leaves the machine somewhere other than the next
 /// cell: after them, the machine goes on from wherever it is (`enter_cur`).
 pub const CONTROL_CALLOUTS: &[&str] = &[
-    "prompt", "abort", "callcomp", "callcc", "withmark", "withmark-tail", "call", "tailcall", "execute", "docol", "exit", "halt",
+    "prompt", "abort", "callcomp", "callcc", "callone", "withmark", "withmark-tail", "call", "tailcall", "execute", "docol", "exit", "halt",
     "return", "tcall", "ttailcall", "resume", "undefined",
 ];
 

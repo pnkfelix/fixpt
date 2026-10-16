@@ -91,7 +91,7 @@
   ;; answer, payload, bound, region
   (ty-tag int int k-eff k-region)
   ;; argument, answer, effect, region
-  (ty-comp int int k-eff k-region)
+  (ty-comp int int k-eff k-region bool)
   (ty-markkey int k-region)
   (ty-product k-parts)
   (ty-sum k-parts)

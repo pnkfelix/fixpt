@@ -449,6 +449,7 @@ impl Compiler<'_> {
             ("abort-current-continuation" | "escape", 2) => Some(Std::Cellular("abort")),
             // In the native convention, the continuation given in it.
             ("call-with-composable-continuation", 2) => Some(Std::Cellular(if self.native_program() { "ncallcomp" } else { "callcomp" })),
+            ("call-with-oneshot-continuation", 2) => Some(Std::Cellular(if self.native_program() { "ncallone" } else { "callone" })),
             ("cwcc", 1) => Some(Std::Cellular(if self.native_program() { "ncallcc" } else { "callcc" })),
             ("with-mark", 3) => Some(Std::Cellular("withmark")),
             ("first-mark", 2) => Some(Std::Cellular("firstmark")),
