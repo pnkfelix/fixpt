@@ -2237,6 +2237,25 @@ caught by it: the boxing around an overflow (the collector passes over
 raw bits outside every space) and before a call through a cell written
 since (no test program redefines such a global).
 
+**A slot that holds an `f64` and an `int` in turn, split** (2026-10-16,
+the user's: "the analysis fix for nbody"). `nbody` boxed about 60
+`f64`s a step, and not where `docs/research/raw-scalars.md` guessed
+(`put`'s `v`): `put` is inlined in `pairs`, and its `v` went into a frame
+slot that the loop's next `j`, an `int`, used too; a slot is raw only if
+every variable in it is an `f64`, so every `f64` stored there was boxed.
+`reps::split_slots` now gives such a slot's `f64` webs a slot of their
+own, past the frame's others, which `raw_slots` keeps raw (a frame of at
+most 64 slots), before the native compiler reads a procedure's register
+code (`register_cells`); register code itself, and both compilers that
+make it, unchanged. `nbody` natively, full size, alternated three times:
+1.29 → 0.67 s, 134.5 → 14.5 M words with start-up (the run alone about
+1.05 → 0.43 s, 130 → 10 M words). The other 45 ports the same answers,
+times and allocation (old and new binaries side by side). Tests:
+`reps::tests::a_slot_of_an_f64_and_an_int_is_split`; `raw-slots.fx`'s
+`reuse`, such a slot, now split. Found on the way, left (`TODO.md`
+§91): the run's remaining 10 M words are `advance` passing `dt` raw to
+`pairs`, made native a form before, so called through its cell.
+
 
 ## 92. Concurrency: processes and `par` (kayak's request, 2026-10-13)
 

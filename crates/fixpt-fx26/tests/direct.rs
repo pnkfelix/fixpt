@@ -1088,7 +1088,7 @@ fn deep_recursion_through_the_stack_cache() {
 /// live across a deep recursion, through a small stack cache's overflows
 /// and underflows, collecting every 7 words, so frames holding raw words
 /// are flushed into the heap, copied, collected and restored; and a slot
-/// that holds an `f64`, then an `int`, which must stay a value's. As the
+/// that holds an `f64`, then an `int`, split, the `int` a value's. As the
 /// Rust machine gives them, and through the heap many times over.
 #[test]
 fn raw_slots_through_the_stack_cache_and_collections() {

@@ -2,7 +2,8 @@
 ;;; recursive call, through the stack cache's overflows and underflows and
 ;;; the collections the allocation makes, so frames holding raw words are
 ;;; flushed, copied and restored; and a slot that holds an `f64`, then an
-;;; `int`, in turn (`reuse`), which must not be taken for raw.
+;;; `int`, in turn (`reuse`), split: the `f64` raw in a slot of its own,
+;;; the `int` a value (`reps::split_slots`).
 (define* deepf (subr (maxeff (alloc @heap) spin) (int f64) f64)
   (lambda (n x)
     (if (= n 0)

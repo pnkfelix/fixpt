@@ -1570,7 +1570,7 @@ impl Compiling<'_> {
         }
         let h = self.heap;
         let rw = self.procs[q].rw;
-        let cells: Vec<Value> = (WORD_CELL0..=h.bloblet_head(rw).fields).map(|k| h.bloblet_slot(rw, k)).collect();
+        let cells = register_cells(h, rw);
         let (mut starts, mut frame, mut i) = (Vec::new(), None, 0);
         while i < cells.len() {
             starts.push(i);
@@ -1591,8 +1591,7 @@ impl Compiling<'_> {
     fn procedure(&mut self, p: usize) -> Result<(), String> {
         let h = self.heap;
         let (word, rw) = (self.procs[p].word, self.procs[p].rw);
-        let fields = h.bloblet_head(rw).fields;
-        let cells: Vec<Value> = (WORD_CELL0..=fields).map(|k| h.bloblet_slot(rw, k)).collect();
+        let cells = register_cells(h, rw);
         let name = self.name(word);
         let decline = |what: String| Err(format!("`{name}`: {what}"));
         // Where each instruction starts, what a branch goes back to, and
@@ -4018,6 +4017,14 @@ fn bytes_set(a: &mut Asm, slow: Label, done: Label) {
     a.to(done, Fix::B);
 }
 
+/// Register word `rw`'s cells, as they are compiled: a frame slot that
+/// holds an `f64` and something else in turn split (`reps::split_slots`).
+fn register_cells(h: &Heap, rw: Value) -> Vec<Value> {
+    let cells: Vec<Value> = (WORD_CELL0..=h.bloblet_head(rw).fields).map(|k| h.bloblet_slot(rw, k)).collect();
+    let prim_name = |p: usize| fixpt_runtime::PRIMITIVES.get(p).map_or("?", |d| d.name);
+    reps::split_slots(cells, &prim_name)
+}
+
 /// `flatarray-set!` of the flat array in `x1` at `x2` to `x3`, as its
 /// layout keeps it: to `slow` (the call-out) for an index out of range, or
 /// a 64-bit integer that is a bignum; else unit into `RESULT`, and to `done`.
@@ -5836,4 +5843,5 @@ pub fn code_text(heap: &Heap, closure: Value) -> Option<String> {
     }
     Some(out)
 }
+
 

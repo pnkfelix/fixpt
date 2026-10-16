@@ -31,8 +31,8 @@ from the types; compare GHC's `Double#` and OCaml's layouts.
   conversion into an `f64` operation and out of it is free natively, where
   `reps` already keeps their operands raw.
 - **Before building, measure** (below): of the ported benchmarks only
-  `nbody` still boxes an `f64` argument, and an analysis-only fix may
-  take it. The kind pays for higher-order numeric code (a procedure
+  `nbody` still boxed `f64`s in its loop, and an analysis-only fix took
+  most of them. The kind pays for higher-order numeric code (a procedure
   passed a procedure over `f64`s) and for predictability; neither is in
   the ports yet.
 
@@ -49,10 +49,10 @@ where the compiler can see both ends:
 | a flat array's element | always (`flatarrayof`, `blobref`)                                                                | the type                                                                 |
 
 So raw passing depends on analysis at both ends and, for results, on a
-protocol at run time; a call through a procedure value passes boxes;
-and a parameter that only goes on to another call (`nbody`'s `put`, its
-`v` given to `flatarray-set!`) is taken as a value, 120 M words of
-boxes. The first version (6ec7f7e) passed a mask in `x9` to any callee
+protocol at run time; a call through a procedure value passes boxes,
+as does a call of a global made native a form before (`TODO.md` §91);
+and a parameter that only goes on to another call is taken as a value.
+The first version (6ec7f7e) passed a mask in `x9` to any callee
 and was dropped as complexity that would not pay (the user's,
 2026-10-13: no masks).
 
@@ -157,18 +157,22 @@ question 3.
 
 What the ports would gain is small and checkable before any of this:
 
-- `nbody`'s `put` takes its `v` boxed only because `flatarray-set!` is
-  `Demand::Any` in `reps::raw_params`. An `f64` flat array's element is
-  an `f64` demand; teaching `reps` that is an analysis change, no
-  language change, and should take most of the 120 M words. If it does,
-  no port needs `raw`.
+- `nbody`: measured (2026-10-16), the boxes were not `put`'s `v` (`put`
+  is inlined) but a frame slot shared by an `f64` and an `int`; fixed in
+  the native compiler (`reps::split_slots`, `DONE.md` §91), 1.29 → 0.67
+  s. What is left there (`advance` passing `dt` to `pairs`, compiled a
+  form before, through its cell) is an argument to a callee not known
+  where the call is compiled: what `raw` would settle by the type, and
+  what the native code could also settle by saying how its procedure
+  takes its arguments (`TODO.md` §91).
 - What would need `raw`: an `f64` argument or result through a procedure
   value. None of the 46 ports does that in a hot loop. A small program
   that does (an integrator given its integrand, Simpson's rule over a
   `(subr pure (f64) f64)`) would show the gap: boxed both ways today.
 
-So the order would be: the `reps` fix for `nbody`; the integrator
-written and measured; then `raw` if the gap is worth its rules.
+So the order would be: the `reps` fix for `nbody` (done); the
+integrator written and measured; then `raw` if the gap is worth its
+rules.
 
 ## Open questions for the user
 

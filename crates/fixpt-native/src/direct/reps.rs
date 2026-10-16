@@ -546,6 +546,15 @@ fn raw_slot(raw: &[bool], n: usize) -> bool {
     raw.get(n).copied().unwrap_or(false)
 }
 
+/// What `webs` finds: for each instruction that touches a frame slot, the
+/// slot and its web (an instruction's index standing for the web); and of
+/// each web, whether it is an `f64`'s and whether it is read.
+struct Webs {
+    web: Vec<Option<(usize, usize)>>,
+    f64_web: Vec<bool>,
+    used_web: Vec<bool>,
+}
+
 /// Which of the procedure's `slots` frame slots hold a raw `f64`
 /// (`TODO.md` §91). Register code may use a slot for one variable, then
 /// another, so a slot is taken apart into *webs*: its writes (`setstk`,
@@ -556,8 +565,83 @@ fn raw_slot(raw: &[bool], n: usize) -> bool {
 /// raw, so that nothing here rests on itself). A slot is raw if every web
 /// of it is an `f64`'s, or never read: what is stored there is unboxed,
 /// and a read used otherwise (a loop's `f64` total, returned at its end)
-/// boxes it there.
+/// boxes it there. A slot that holds an `f64` and something else in turn
+/// is first split (`split_slots`).
 pub(super) fn raw_slots(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str, slots: usize) -> Vec<bool> {
+    let w = webs(cells, starts, prim, slots);
+    let mut raw = vec![true; slots];
+    for &(slot, web) in w.web.iter().flatten() {
+        if slot < slots && w.used_web[web] && !w.f64_web[web] {
+            raw[slot] = false;
+        }
+    }
+    raw
+}
+
+/// `cells`, a procedure's register code, with each frame slot that holds
+/// an `f64` and, in turn, something else (a web of each, `webs`) split in
+/// two: its `f64` webs moved to a slot of their own, past the frame's
+/// others, which `raw_slots` then keeps raw; the frame (`save`, `pop`) that
+/// much larger. Register code reuses a slot for variables whose lives do
+/// not meet, of any type, so without this one `int` in a slot boxes every
+/// `f64` stored there (`nbody`'s `pairs`: the inlined `put`'s `v`, and the
+/// loop's next `j`). The same cells if nothing is split, or the frame
+/// would pass 64 slots.
+pub(super) fn split_slots(cells: Vec<Value>, prim: &dyn Fn(usize) -> &'static str) -> Vec<Value> {
+    let (mut starts, mut frames, mut i) = (Vec::new(), Vec::new(), 0);
+    while i < cells.len() {
+        starts.push(i);
+        let (op, n, _) = OPS[cells[i].as_fixnum() as usize];
+        if matches!(op, "save" | "pop") {
+            frames.push(cells[i + 1].as_fixnum() as usize);
+        }
+        i += 1 + n;
+    }
+    let Some(&m) = frames.first() else { return cells };
+    if frames.iter().any(|&f| f != m) {
+        return cells;
+    }
+    let w = webs(&cells, &starts, prim, m);
+    let mut f64s = vec![false; m];
+    let mut others = vec![false; m];
+    for &(slot, web) in w.web.iter().flatten() {
+        if slot < m && w.f64_web[web] {
+            f64s[slot] = true;
+        } else if slot < m && w.used_web[web] {
+            others[slot] = true;
+        }
+    }
+    // Each mixed slot's new place.
+    let mut moved = vec![None; m];
+    let mut next = m;
+    for slot in (0..m).filter(|&s| f64s[s] && others[s]) {
+        moved[slot] = Some(next);
+        next += 1;
+    }
+    if next == m || next > 64 {
+        return cells;
+    }
+    let mut out = cells;
+    for (si, &i) in starts.iter().enumerate() {
+        let op = OPS[out[i].as_fixnum() as usize].0;
+        match (op, w.web[si]) {
+            ("save" | "pop", _) => out[i + 1] = Value::fixnum(next as i64),
+            (_, Some((slot, web))) if w.f64_web[web] => {
+                if let Some(to) = moved[slot] {
+                    // The slot is the first operand of `stack` and `setstk`,
+                    // the second of `load` and `store`.
+                    let k = if matches!(op, "load" | "store") { i + 2 } else { i + 1 };
+                    out[k] = Value::fixnum(to as i64);
+                }
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// The webs of the procedure's `slots` frame slots (`raw_slots`).
+fn webs(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str, slots: usize) -> Webs {
     let ns = starts.len();
     let none = vec![false; slots];
     let (before, succ) = demands(cells, starts, prim, &none);
@@ -631,13 +715,59 @@ pub(super) fn raw_slots(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) 
             f64_web[w] = true;
         }
     }
-    let mut raw = vec![true; slots];
-    for si in 0..ns {
-        let Some((slot, _, _)) = access(si) else { continue };
-        let w = find(&mut parent, si);
-        if slot < slots && used_web[w] && !f64_web[w] {
-            raw[slot] = false;
+    let mut web = vec![None; ns];
+    for (si, w) in web.iter_mut().enumerate() {
+        if let Some((slot, _, _)) = access(si) {
+            *w = Some((slot, find(&mut parent, si)));
         }
     }
-    raw
+    Webs { web, f64_web, used_web }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fixpt_heap::layout::regcode::op;
+
+    /// A slot that holds an `f64`, then an `int` (as `nbody`'s `pairs`
+    /// reused one for an inlined `put`'s `v` and the loop's next `j`): its
+    /// `f64` web moved to a slot of its own, kept raw; the `int`'s left, a
+    /// value's; the frame one larger.
+    #[test]
+    fn a_slot_of_an_f64_and_an_int_is_split() {
+        let prim = |p: usize| fixpt_runtime::PRIMITIVES.get(p).map_or("?", |d| d.name);
+        let add = fixpt_runtime::PRIMITIVES.iter().position(|d| d.name == "%fx26-f64+").expect("f64+") as i64;
+        let c = |op_name: &str, args: &[i64]| -> Vec<Value> {
+            std::iter::once(Value::fixnum(op(op_name) as i64)).chain(args.iter().map(|&a| Value::fixnum(a))).collect()
+        };
+        let cells: Vec<Value> = [
+            c("args", &[1]),
+            c("save", &[1]),
+            c("reg", &[1]),
+            c("prim2", &[add, 1]),
+            c("setstk", &[0]), // the `f64`
+            c("stack", &[0]),
+            c("prim2", &[add, 1]),
+            c("setreg", &[1]),
+            c("const", &[5]),
+            c("setstk", &[0]), // the `int`
+            c("stack", &[0]),
+            c("pop", &[1]),
+            c("return", &[]),
+        ]
+        .concat();
+        let split = split_slots(cells.clone(), &prim);
+        let mut starts = Vec::new();
+        let mut i = 0;
+        while i < split.len() {
+            starts.push(i);
+            i += 1 + OPS[split[i].as_fixnum() as usize].1;
+        }
+        let operand = |k: usize| split[starts[k] + 1].as_fixnum();
+        assert_eq!((operand(1), operand(4), operand(5), operand(9), operand(10), operand(11)), (2, 1, 1, 0, 0, 2));
+        assert_eq!(raw_slots(&split, &starts, &prim, 2), [false, true]);
+        // Unsplit, the slot was a value's, and every `f64` stored there boxed.
+        assert_eq!(raw_slots(&cells, &starts, &prim, 1), [false]);
+    }
 }
