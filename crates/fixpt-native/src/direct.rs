@@ -400,7 +400,13 @@ enum Callout {
     Overflow,
     /// A time slice's end, at a poll (`poll_frame`): the next slice given,
     /// and in `aux` the scheduler's `preempt` if it would have another task
-    /// run, for the poll to call, else 0. No collection.
+    /// run, for the poll to call, else 0. And a collection, if one is due:
+    /// the poll's frame holds what is live (`emit_poll`, `common_poll`), as
+    /// a call's does. The safepoint a loop comes to that allocates only by
+    /// quiet call-outs (a box made past the nursery's end for a call
+    /// through a procedure value), which grew the heap without bound when
+    /// none collected (`TODO.md` §102): a slice is short enough
+    /// (`sched::SLICE` polls) that its end comes soon after.
     Poll,
     /// That call returned (`sched::preempt_done`). No collection.
     PollDone,
@@ -4721,7 +4727,7 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
     let mut code = [Value::from_raw(st.code)];
     // The frames walked only for a collection; none for a primitive that
     // never collects, whose caller's values are in registers.
-    let quiet = matches!(c, Callout::Pure { .. } | Callout::Box { .. } | Callout::Unbox | Callout::BoxF64 | Callout::Underflow | Callout::Overflow | Callout::Poll | Callout::PollDone | Callout::Failed);
+    let quiet = matches!(c, Callout::Pure { .. } | Callout::Box { .. } | Callout::Unbox | Callout::BoxF64 | Callout::Underflow | Callout::Overflow | Callout::PollDone | Callout::Failed);
     // A collection, Larceny's way (`docs/research/deep-recursion.md`): the
     // run's frames flushed into the heap first, so that the collector reads
     // no stack; then the innermost restored, where the code goes on.

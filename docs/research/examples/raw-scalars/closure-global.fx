@@ -1,8 +1,8 @@
 ;;; INTEGRATE (closure, kept in a global) -- as `closure.fx`, but the
 ;;; integrand, a closure over an `f64`, is made once and kept in the
-;;; global `g`. Natively the run makes 3 minor collections, the words in
-;;; use growing with `reps` (`TODO.md` §102), where `closure.fx`'s, made
-;;; afresh each rep, makes many and stays small.
+;;; global `g`. Natively the run made 3 minor collections, the words in
+;;; use growing with `reps`, where `closure.fx`'s, made afresh each rep,
+;;; made many and stayed small; fixed, a poll collects (`DONE.md` §102).
 
 (define four f64 4.)
 

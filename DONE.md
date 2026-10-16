@@ -3005,3 +3005,32 @@ to `->*`, then each that does not check put back.
   put back the definition the first error names; again). 21 files 40
   lines shorter, none longer; `regcode-core.fx`'s debt 1124 → 1122.
 
+## 102. A nursery not collected while native code calls a global closure (found 2026-10-16)
+
+**Fixed (2026-10-16): a poll collects.** Found measuring the integrator
+for `docs/research/raw-scalars.md` (`docs/research/examples/
+raw-scalars/`): with the integrand a closure kept in a global and passed
+as a value, the run made 3 minor collections and the words in use grew
+without bound (121.6 M words at 300 reps, about half the run's time in
+memory touched); made afresh each rep, 102.
+
+Why: native code collects only in a call-out that is not quiet, where
+the frames are walkable and the registers hold nothing live. Making a box
+past the nursery's end is a quiet call-out (`BoxF64`: at any
+instruction, live values in registers), and so is a poll's (`Poll`), so a
+loop whose only allocation is boxing for a call through a procedure value
+never collected; the closure made afresh supplied a call-out that did.
+
+Now `Callout::Poll` is not quiet: a poll that ends a time slice collects
+if a collection is due. Its frame already held what is live, mapped as a
+procedure's (`emit_poll`; `common_poll`, for code a program made), since
+it may call the scheduler's `preempt`, which may collect. Slices are
+`sched::SLICE` (65 536) polls, so the collection comes soon after the
+nursery fills. Tried and dropped: also ending the slice at once from a
+quiet call-out that found a collection wanted (the fuel back in the
+reserve, two instructions at every call-out): no faster (0.73 s against
+0.74). The integrator's `value` variant at 300 reps: 1.35 → 0.74 s, 3 →
+116 minor collections, 121.6 → 2.4 M words in use at most; `closure`
+0.80 → 0.73 s. The 46 ports: the same answers and times. Test:
+`programs/native/quiet-boxes.fx`, `quiet_boxes_are_collected_at_the_next_poll`
+(2 M boxes: 2 collections or more while it runs; 1 with a poll quiet).

@@ -1111,6 +1111,28 @@ fn raw_slots_through_the_stack_cache_and_collections() {
     assert!(after.overflows - before.overflows > 10 && after.frames_restored - before.frames_restored > 1000, "{before:?} {after:?}");
 }
 
+/// Boxes made where native code cannot collect (`TODO.md` §102,
+/// `programs/native/quiet-boxes.fx`): a loop whose only allocation is a
+/// quiet call-out's, each call boxing its `f64` argument for a procedure
+/// value, past the nursery's end. Its next poll collects: minor
+/// collections while it runs, where there were none, and the words in use
+/// growing with the loop.
+#[test]
+fn quiet_boxes_are_collected_at_the_next_poll() {
+    let mut s = session(true);
+    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/quiet-boxes.fx")).expect("reads");
+    let (defs, run) = forms.split_at(forms.len() - 1);
+    for o in s.run_forms(defs).expect("runs") {
+        assert!(o.is_ok_and(|o| !o.printed.contains("not in the native convention")), "defined natively");
+    }
+    let collections = |s: &mut Fx26Session| s.scheme.runtime_unrooted().heap.collections();
+    let before = collections(&mut s);
+    let out = s.run_forms(run).expect("runs").remove(0).expect("ran");
+    assert_eq!(out.value.transpose().map(|v| v.expect("a value")).as_deref(), Some("4000002000000"));
+    let made = collections(&mut s) - before;
+    assert!(made >= 2, "{made} collections while 2000000 boxes were made");
+}
+
 /// `f64`s returned raw (`TODO.md` §91): to callers that take them so and to
 /// callers that keep the value, from a polymorphic procedure that returns
 /// one boxed, a flat array's element, and through the stack cache's

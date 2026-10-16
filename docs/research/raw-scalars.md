@@ -179,7 +179,7 @@ What the ports would gain is small and checkable before any of this:
   raw, by the return address's mark): about half the time. So `raw`
   would make such a call about 1.9× faster, 4 ns. (`value.fx`, the
   integrand a global's closure passed as a value, took 1.110 s: not the
-  boxing but a nursery left uncollected, `TODO.md` §102.)
+  boxing but a nursery left uncollected, since fixed, `DONE.md` §102.)
 - What would need `raw`: an `f64` argument or result through a procedure
   value. None of the 46 ports does that in a hot loop; the integrator
   above does, and shows the gap.

@@ -2531,25 +2531,6 @@ average of 4 or more is taken again when the machine is quieter, before
 the commit, if waiting is possible; if not, the commit says so and is
 added here.
 
-## 102. A nursery not collected while native code calls a global closure (found 2026-10-16)
-
-Found measuring the integrator for `docs/research/raw-scalars.md`
-(`docs/research/examples/raw-scalars/`, `closure-global.fx` against
-`closure.fx`): Simpson's rule calling
-its integrand through a procedure value boxes one `f64` a call. With the
-integrand a closure made once and kept in a global, the run makes 3
-minor collections in all and the words in use grow without bound (at
-20 reps 9.6 M words; at 300, 121.6 M, about 1 GB touched, half the run's
-time); the same closure made afresh each rep, 102 minor collections and
-at most 2.6 M words, the native code otherwise the same. So something
-that triggers a minor collection in one runs only in the other: a guess,
-not checked, the inline allocator's slow path growing the nursery, the
-collection waiting for a call-out that the closure's making supplies.
-To do: find what decides a minor collection there, and why it does not
-come; a test that a loop allocating boxes through a global's closure
-stays within the nursery's bound. Not a soundness hole, but memory use
-without bound in a plain loop.
-
 ## 103. `remainder` by a constant not in line (found 2026-10-16)
 
 The same measurement: `(remainder i 2)` in the loop is a call-out
