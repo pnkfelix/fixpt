@@ -2657,9 +2657,9 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         self.lifetimes.truncate(lives);
         self.hidden = outer;
         let (params, items) = r.map_err(|e| at_file(e, self))?;
-        self.defined_twice(span, &items)?;
         // At the whole file: no other expression is there.
         let whole = fixpt_read::Span::new(file, 0, text.len() as u32);
+        self.defined_twice(whole, &items).map_err(|e| at_file(e, self))?;
         let e = self.arena.exp(whole, Exp::Module(items));
         self.loaded.insert(e, (path.to_string(), text.clone(), file));
         // A file of parameters, `(module-parameters ((name kind) …))` first:
