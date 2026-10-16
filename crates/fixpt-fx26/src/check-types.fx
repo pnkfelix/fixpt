@@ -43,6 +43,7 @@
         (type k-region k-atom k-eff k-vsub k-ids k-term k-prop k-props k-binders k-parts k-names
               k-strings k-conv k-terms k-size k-desc k-descs k-ty k-map k-ds kx kxs k-item k-items
               k-te k-result k-narrows k-pendings k-cert-len k-arrow-kind k-bounded k-nesting k-named
+              k-settleds
               k-gen k-hyps k-lemma k-regions k-step k-steps k-path-fact k-path-facts)
         (effect kstate checks kreads kbuilds))
 ;; The types it uses of the files before it.
@@ -353,6 +354,9 @@
 ;; The types read from `->*`: a `letrec` or `define-rec` binding at one has
 ;; its effect found (`check-letrec.fx`, `k-arrow-star-found`).
 (define k-arrow-star-tys (ref k-ids @t) (new nil))
+;; `lambda`s settled at the types `->*` found, by type and where each is
+;; (`check-letrec.fx`, `k-arrow-star-settle`).
+(define k-arrow-star-settled (ref k-settleds @t) (new nil))
 (define k-binder-has? (subr kreads (k-binders int) bool)
   (lambda (bs v) (and (not (null? bs)) (or (= (extract (car bs) 1) v) (k-binder-has? (cdr bs) v)))))
 ;; Whether one of generative types `gs` has `v` among its parameters.

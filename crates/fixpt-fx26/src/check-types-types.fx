@@ -48,6 +48,8 @@
 ;; A `vsubr`'s effect, element and result, in a list: one or none.
 (define-type k-vsub (listof (productof (1 k-eff) (2 int) (3 int)) acyclic))
 (define-type k-ids (listof int acyclic))
+;; `lambda`s settled at the types `->*` found: each type, and where it is.
+(define-type k-settleds (listof (productof (1 int) (2 int) (3 int)) acyclic))
 ;; Propositions about a procedure's arguments (`ty-proving`), each by its
 ;; parameter's number from 0: of a shape (`check-unions.fx`'s), or, the
 ;; flag, not; certifications, acyclic, a natural, of a length; a relation
@@ -288,6 +290,7 @@
    (val k-pending-lemma (ref (listof k-lemma acyclic) @t))
    (val k-arrow-star (ref bool @t))
    (val k-arrow-star-tys (ref k-ids @t))
+   (val k-arrow-star-settled (ref k-settleds @t))
    (val k-arrow-star-ty? (subr (maxeff (read @globals) (read @t)) (int) bool))
    (val k-arrow-star-as
         (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t)) (int int) unit))

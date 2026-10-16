@@ -556,6 +556,10 @@
                                (set k-recursive rsaved)
                                (k-note-alone name tf x rsaved))
                         #u))
+           ;; One that names not itself saw no placeholder: settled.
+           (settled (if (and arrow (not (k-has-name? (get k-last-uses) name)))
+                        (k-arrow-star-settle tf x)
+                        #u))
            (e (if (or star arrow) (k-star-checked (if star "`define*`" "`->*`") name tf x) e0))
            (frozen (k-note-frozen-define tf x))
            (closed (if (>= inside 0)

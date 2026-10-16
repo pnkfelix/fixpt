@@ -15,7 +15,8 @@
        (check-print-types (load-module "fx26:check-print-types.fx"))
        (check-print-parts-types (load-module "fx26:check-print-parts-types.fx"))
        (check-env-types (load-module "fx26:check-env-types.fx"))
-       (check-terminate-types (load-module "fx26:check-terminate-types.fx")))
+       (check-terminate-types (load-module "fx26:check-terminate-types.fx"))
+       (check-close-types (load-module "fx26:check-close-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-types (select check-types-types check-types-sig))
            (check-expect (select check-expect-types check-expect-sig))
@@ -24,7 +25,8 @@
            (check-env (select check-env-types check-env-sig))
            (check-terminate (select check-terminate-types check-terminate-sig))
            (check-print-parts (select check-print-parts-types check-print-parts-sig))
-           (check-resolve (select check-resolve-types check-resolve-sig)))
+           (check-resolve (select check-resolve-types check-resolve-sig))
+           (check-close (select check-close-types check-close-sig)))
     (module
 (hide (include check-letrec-types) (include check-types-types) (include check-synth-types)
       (include check-resolve-types))
@@ -33,6 +35,7 @@
 (hide (include check-types) (include check-expect) (include check-effects)
       (include check-print-parts) (include check-env) (include check-terminate))
 (import check-resolve k-end k-free-into k-start)
+(import check-close k-note-effect)
 
 ;; Note of the recursive group `bs` whether it needs `spin`, and why: `why`, "" if not.
 (define k-note-ending (subr (maxeff kstate spin) (k-letrec-bs string) unit)
@@ -319,20 +322,51 @@
                   (begin (k-arrow-star-retyped (k-nth ns i) old found) (array-set! ts i found)))
                 #u)
             (k-comp-found (cdr rest) comp owns marks polys ns ts))))))
-;; Each of components `comps` with a member typed `->*`, in order.
+;; `x`, a `lambda` whose effect `->*` found in a pass that saw no
+;; placeholder (it names no member typed `->*`, itself included), at type
+;; `t`: that pass was its check, so it is not checked again (`k-settled-or`).
+(define k-arrow-star-settle (subr (maxeff kstate spin) (int kx) unit)
+  (lambda (t x)
+    (set k-arrow-star-settled
+         (cons (product (1 t) (2 (k-start x)) (3 (k-end x))) (get k-arrow-star-settled)))))
+(define k-settled-has? (subr (maxeff (read @globals) (read @t)) (k-settleds int int int) bool)
+  (lambda (ss t a b)
+    (and (not (null? ss))
+         (or (and (= (extract (car ss) 1) t) (= (extract (car ss) 2) a) (= (extract (car ss) 3) b))
+             (k-settled-has? (cdr ss) t a b)))))
+;; The effect of checking `x` against `t` by `mode`, but of a `lambda`
+;; settled at `t` (`k-arrow-star-settle`), pure, noted so, and not checked
+;; again: as the Rust checker's `arrow_star_settled`.
+(define* k-settled-or (subr (maxeff checks spin) (kx int k-checker) k-eff)
+  (lambda (x t mode)
+    (if (k-settled-has? (get k-arrow-star-settled) t (k-start x) (k-end x))
+        (begin (k-note-effect x nil) (the k-eff nil))
+        (mode x t))))
+;; What checks `x` against `t` by `check`, but a settled `lambda`'s
+;; (`k-settled-or`): its type and its effect.
+(define k-settled-thunk (subr pure (kx int k-checker) k-thunk)
+  (lambda (x t check) (lambda () (k-te t (k-settled-or x t check)))))
+;; Each of components `comps` with a member typed `->*`, in order: one of
+;; one member that names not itself settled (`refs`).
 (define* k-comps-found
   (subr (maxeff checks spin)
-        (k-lambda-synth k-letrec-bs k-bools k-bools k-names (arrayof int @t) k-idss)
+        (k-lambda-synth k-letrec-bs k-bools k-bools k-names (arrayof int @t) k-idss k-idss)
         unit)
-  (lambda (synth bs marks polys ns ts comps)
+  (lambda (synth bs marks polys ns ts refs comps)
     (if (null? comps)
         #u
-        (begin
-          (if (k-comp-starred? (car comps) ts)
-              (let ((owns (k-comp-owns synth bs marks ts (car comps))))
-                (k-comp-found (car comps) (car comps) owns marks polys ns ts))
-              #u)
-          (k-comps-found synth bs marks polys ns ts (cdr comps))))))
+        (let ((comp (car comps)))
+          (begin
+            (if (k-comp-starred? comp ts)
+                (let ((owns (k-comp-owns synth bs marks ts comp)) (i (car comp)))
+                  (begin
+                    (k-comp-found comp comp owns marks polys ns ts)
+                    (if (and (null? (cdr comp)) (k-nth marks i)
+                             (not (k-has-id? (k-nth refs i) i)))
+                        (k-arrow-star-settle (array-ref ts i) (extract (k-nth bs i) 3))
+                        #u)))
+                #u)
+            (k-comps-found synth bs marks polys ns ts refs (cdr comps)))))))
 (define k-bs-marks (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-letrec-bs) k-bools)
   (lambda (bs)
     (if (null? bs)
@@ -371,9 +405,10 @@
       (k-arrow-star-lambdas bs)
       (let* ((ns (k-bs-names bs))
              (ts (the (arrayof int @t) (make-array (k-length bs) -1)))
-             (filled (k-bs-types bs ts 0)))
-        (begin (k-comps-found synth bs (k-bs-marks bs) (k-bs-polys bs) ns ts
-                              (k-components (k-group-refs bs ns)))
+             (filled (k-bs-types bs ts 0))
+             (refs (k-group-refs bs ns)))
+        (begin (k-comps-found synth bs (k-bs-marks bs) (k-bs-polys bs) ns ts refs
+                              (k-components refs))
                (k-bs-at bs ts 0))))))
 (define k-any-arrow-star? (subr (maxeff (read @globals) (read @t)) (k-letrec-bs) bool)
   (lambda (bs)

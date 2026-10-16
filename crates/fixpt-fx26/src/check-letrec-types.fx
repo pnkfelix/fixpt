@@ -20,6 +20,8 @@
 (define-type k-lambda-synth (subr (maxeff checks spin) (kx k-ids int) k-te))
 (define-type k-eff-list (listof k-eff acyclic))
 (define-type k-bools (listof bool acyclic))
+(hide (define check-terminate-types (load-module "fx26:check-terminate-types.fx")))
+(define-type k-thunk (select check-terminate-types k-thunk))
 ;; Tarjan's walk (`k-components`): each node's index and low link (-1 not
 ;; seen yet), whether it is on the stack, the stack, the next index, and
 ;; the components found, newest first.
@@ -106,4 +108,17 @@
                        (k-lambda-synth k-letrec-bs)
                        k-letrec-bs))
             (val k-reads-one-of? (subr (maxeff (read @globals) (read @t)) (k-names k-eff) bool))
-            (val k-any-arrow-star? (subr (maxeff (read @globals) (read @t)) (k-letrec-bs) bool))))
+            (val k-any-arrow-star? (subr (maxeff (read @globals) (read @t)) (k-letrec-bs) bool))
+            (val k-arrow-star-settle
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (int kx) unit))
+            (val k-settled-thunk (subr pure (kx int k-checker) k-thunk))
+            (val k-settled-or
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       (kx int k-checker)
+                       k-eff))))

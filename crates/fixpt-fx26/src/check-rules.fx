@@ -249,7 +249,7 @@
   ;; itself says so.
   (k-check-declared (subr (maxeff checks spin) (symbol int kx) k-eff)
     (lambda (n t init)
-      (let ((r (k-declaring (lambda () (k-te t (k-check init t))) (k-start init) (k-end init) n t)))
+      (let ((r (k-declaring (k-settled-thunk init t k-check) (k-start init) (k-end init) n t)))
         (extract r 2))))
   ;;; ------------------------------------------------------------ lambda
 
@@ -875,7 +875,7 @@
   ;; Lambda `init`, `n`'s, checked against `t`; a `define-rec` member's
   ;; error said as of its declared type.
   (k-mod-check-one (subr (maxeff checks spin) (symbol int kx bool) k-eff)
-    (lambda (n t init rec) (if rec (k-check-declared n t init) (k-check init t))))
+    (lambda (n t init rec) (if rec (k-check-declared n t init) (k-settled-or init t k-check))))
   ;; A module's `define*` `n`, its lambda `init`, of type `decl` as written:
   ;; checked at `w`, its type reading any global, then at the type with the
   ;; globals its body read, found, its binding given that type, as a
