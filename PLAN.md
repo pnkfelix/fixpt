@@ -302,6 +302,10 @@ weighed with the other items, not ahead of them.
   for a key, and `(io terminal)`: raw mode, back, the size. Found on the
   way, and fixed (`DONE.md` §96): the evaluator written in FX-26 ran each
   definition again with each later form.
+- **Benches taken on a busy machine** (the user's, 2026-10-16, `TODO.md`
+  §101): four commits' tables (load averages 5 to 7) taken again on a
+  quiet machine, the numbers in `DONE.md`; three borderline ones if the
+  load proves to have mattered.
 - S1. Done (2026-09-30): **the `acyclic?` gap**, F13: shown a
   use-after-free on every path, and fixed in both checkers with data at a
   place, `(t data p)` (`docs/research/shapes.md`, the framing: regions,
