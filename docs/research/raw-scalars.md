@@ -165,14 +165,28 @@ What the ports would gain is small and checkable before any of this:
   where the call is compiled: what `raw` would settle by the type, and
   what the native code could also settle by saying how its procedure
   takes its arguments (`TODO.md` §91).
+- The integrator, measured (2026-10-16,
+  `docs/research/examples/raw-scalars/`): Simpson's rule over 4/(1+x²),
+  60 M calls of the integrand, natively, the run alone, best of 3:
+
+  | integrand                              | time    | M words | ns a call |
+  | -------------------------------------- | ------: | ------: | --------: |
+  | a procedure value (`closure.fx`)       | 0.545 s |   119.6 |       9.1 |
+  | a global called by name (`known.fx`)   | 0.292 s |     0.0 |       4.9 |
+  | its body in the loop (`inlined.fx`)    | 0.266 s |     0.0 |       4.4 |
+
+  Through a value one box a call, the argument's (the result comes back
+  raw, by the return address's mark): about half the time. So `raw`
+  would make such a call about 1.9× faster, 4 ns. (`value.fx`, the
+  integrand a global's closure passed as a value, took 1.110 s: not the
+  boxing but a nursery left uncollected, `TODO.md` §102.)
 - What would need `raw`: an `f64` argument or result through a procedure
-  value. None of the 46 ports does that in a hot loop. A small program
-  that does (an integrator given its integrand, Simpson's rule over a
-  `(subr pure (f64) f64)`) would show the gap: boxed both ways today.
+  value. None of the 46 ports does that in a hot loop; the integrator
+  above does, and shows the gap.
 
 So the order would be: the `reps` fix for `nbody` (done); the
-integrator written and measured; then `raw` if the gap is worth its
-rules.
+integrator written and measured (done: about 1.9× on such a call); then
+`raw` if the gap is worth its rules.
 
 ## Open questions for the user
 
