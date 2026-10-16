@@ -48,7 +48,7 @@
   ;; `x`'s value into RESULT; in tail position, returned. A procedure
   ;; converted to a convention is made, then given to `%fx26-convert` with
   ;; what it is converted to.
-  (r-exp (subr rcompiles (rgen exp renv cenv bool) unit)
+  (r-exp (->* (rgen exp renv cenv bool) unit)
     (lambda (g x env te tail)
       (let ((k (c-conversion-at x)) (r (c-reshape-at x)))
         (cond ((>= k 0)
@@ -58,7 +58,7 @@
               ((not (null? r)) (r-reshape g x (car r) env te tail))
               (else (r-exp-as-is g x env te tail))))))
   ;; `x`'s value into RESULT; in tail position, returned.
-  (r-exp-as-is (subr rcompiles (rgen exp renv cenv bool) unit)
+  (r-exp-as-is (->* (rgen exp renv cenv bool) unit)
     (lambda (g x env te tail)
       (let ((k (r-known env x)))
         (if (not (null? k))
@@ -135,7 +135,7 @@
   ;; The region's name bound, as a `let`'s, to a region entered (never in a
   ;; leaf), and left with the body's value, which is so not in tail
   ;; position.
-  (r-letregion (subr rcompiles (rgen int symbol exp renv cenv bool) unit)
+  (r-letregion (->* (rgen int symbol exp renv cenv bool) unit)
     (lambda (g k r body env te tail)
       (if (extract g leaf)
           (r-decline)
@@ -151,14 +151,14 @@
                       (r-done g tail)))))
               (r-restore g regs slots))))))
   ;; A frozen value made, of layout `tag`: `args` its fields.
-  (r-make-frozen (subr rcompiles (rgen int rargs renv cenv) unit)
+  (r-make-frozen (->* (rgen int rargs renv cenv) unit)
     (lambda (g tag args env te)
       (r-prim g "%make-frozen" (the rargs (cons (a-v (wcell-int tag)) args)) env te)))
   ;; Code that goes to `label` if `x` is `when` (true: anything but #f), and
   ;; on if not: a test as jumps. `and` and `or` (`if`s, as the parser makes
   ;; them), `not` and constants make no boolean, and are tested no more than
   ;; once.
-  (r-branch-on (subr rcompiles (rgen exp bool int renv cenv) unit)
+  (r-branch-on (->* (rgen exp bool int renv cenv) unit)
   (lambda (g x when label env te)
     (tagcase x
       (e-the (d body a b abk) (r-branch-on g body when label env te))
@@ -185,7 +185,7 @@
       (else y (r-branch-plain g x when label env te)))))
   ;; Where test `t` is `sense`, on past the test of `x`, which goes to
   ;; `label` if `x` is `when`; else that test.
-  (r-branch-past (subr rcompiles (rgen exp bool exp bool int renv cenv) unit)
+  (r-branch-past (->* (rgen exp bool exp bool int renv cenv) unit)
     (lambda (g t sense x when label env te)
       (let ((skip (r-new-label g)))
         (begin (r-branch-on g t sense skip env te)
@@ -193,34 +193,34 @@
                (r-emit g (r-label skip))))))
   ;; The same for a test that is not `not` or an `if`: a constant decided
   ;; now, anything else made and branched on.
-  (r-branch-plain (subr rcompiles (rgen exp bool int renv cenv) unit)
+  (r-branch-plain (->* (rgen exp bool int renv cenv) unit)
   (lambda (g x when label env te)
     (let ((k (r-known env x)))
       (if (not (null? k))
           (if (r-holds? k when) (r-emit g (r-branch #f label)) #u)
           (let ((jump (if when (r-brancht label) (r-branch #t label))))
             (begin (r-exp g x env te #f) (r-emit g jump)))))))
-  (r-begin (subr rcompiles (rgen exps renv cenv bool) unit)
+  (r-begin (->* (rgen exps renv cenv bool) unit)
     (lambda (g es env te tail)
       (if (null? (cdr es))
           (r-exp g (car es) env te tail)
           (begin (r-exp g (car es) env te #f) (r-begin g (cdr es) env te tail)))))
   ;; Where `x`'s value is: a constant, as itself; anything else made, in
   ;; the scope outside, and kept, in a register if `reg`, else a frame slot.
-  (r-value-loc (subr rcompiles (rgen exp renv cenv bool) rloc)
+  (r-value-loc (->* (rgen exp renv cenv bool) rloc)
     (lambda (g x env te reg)
       (let ((k (r-known env x)))
         (if (null? k) (begin (r-exp g x env te #f) (r-keep g reg)) (rl-const (car k))))))
   ;; Each binding's value made, in the scope outside, and put where it
   ;; lives: a register in a leaf, else a frame slot. In order.
-  (r-let-bind (subr rcompiles (rgen exp-let-bs renv cenv bools) renv)
+  (r-let-bind (->* (rgen exp-let-bs renv cenv bools) renv)
     (lambda (g bs env te flags)
       (if (null? bs)
           nil
           (let ((l (r-value-loc g (extract (car bs) 2) env te (car flags))))
             (cons (cons (extract (car bs) 1) l) (r-let-bind g (cdr bs) env te (cdr flags)))))))
   ;;; ---------------------------------------------------------- applications
-  (r-app (subr rcompiles (rgen exp exps int int int renv cenv bool) unit)
+  (r-app (->* (rgen exp exps int int int renv cenv bool) unit)
     (lambda (g f args a b abk env te tail)
       (let ((n (c-count-exps args)))
         (cond ((not (null? (r-join-of env f))) (r-jump g (car (r-join-of env f)) args env te tail))
@@ -249,7 +249,7 @@
                             (r-exp g (car (r-identity-arg env name args)) env te tail))
                            (else (begin (r-standard-app g name args env te tail)
                                         (r-done g tail)))))))))))
-  (r-standard-app (subr rcompiles (rgen string exps renv cenv bool) unit)
+  (r-standard-app (->* (rgen string exps renv cenv bool) unit)
     (lambda (g name args env te tail)
       (tagcase (r-standard name (c-count-exps args))
         (s-op2 (r swap negate)
@@ -305,7 +305,7 @@
   ;; In tail position a mark replaces this frame's, as stack code's
   ;; `withmark-tail` does: the arguments made, the frame left, and the
   ;; call-out, which calls the thunk as a tail call.
-  (r-withmark-tail (subr rcompiles (rgen exps renv cenv) unit)
+  (r-withmark-tail (->* (rgen exps renv cenv) unit)
     (lambda (g args env te)
       (begin
         (r-exp-args-into g args env te)
@@ -318,7 +318,7 @@
   ;; procedure of one list, free value 0; that procedure, called with `xs`.
   ;; `f` and `xs` in order; `f`'s procedure kept in a slot while `xs` moves
   ;; to REG1.
-  (r-apply (subr rcompiles (rgen exps renv cenv bool bool) unit)
+  (r-apply (->* (rgen exps renv cenv bool bool) unit)
     (lambda (g args env te tail copy)
       (if (extract g leaf)
           (r-decline)
@@ -336,7 +336,7 @@
                        (r-opn g rop-stack s) (r-invoke g 1 tail rconv-fx)))
               (r-restore g regs slots))))))
   ;; A call: the arguments into REG1…REGn, the procedure in RESULT.
-  (r-call (subr rcompiles (rgen exp exps int int int renv cenv bool) unit)
+  (r-call (->* (rgen exp exps int int int renv cenv bool) unit)
     (lambda (g f args a b abk env te tail)
       (let ((n (c-count-exps args)))
         (cond ;; An inlined call: in a fast version, no call, so in a leaf too.
@@ -371,7 +371,7 @@
                  (r-invoke g n tail (r-conv-of f))))))))
   ;; The expressions `args` as a call's arguments, into REG1…REGn
   ;; (`r-args`), with no procedure.
-  (r-exp-args-into (subr rcompiles (rgen exps renv cenv) unit)
+  (r-exp-args-into (->* (rgen exps renv cenv) unit)
     (lambda (g args env te) (r-args g (r-exp-args args) env te (the maybe-exp nil))))
   ;; A call of a small global procedure, inlined: the arguments made and
   ;; kept (one that is a variable in the frame or the closure is used where
@@ -379,7 +379,7 @@
   ;; was compiled to, the body, in a scope of its own where the parameters
   ;; are the arguments and the globals those it saw; else the call. A
   ;; redefinition makes a new closure, of a new word: the call.
-  (r-inline (subr rcompiles (rgen c-inline wglobal exp exps renv cenv bool) unit)
+  (r-inline (->* (rgen c-inline wglobal exp exps renv cenv bool) unit)
     (lambda (g i cell f args env te tail)
       (let* ((regs (get (extract g nreg))) (slots (get (extract g nslot)))
              (bound (r-inline-args g (extract i 3) args env te))
@@ -414,7 +414,7 @@
   ;; them, as the body's cellular scope has them, and as the call's
   ;; arguments.
   (r-inline-args
-    (subr rcompiles (rgen exp-params exps renv cenv) (productof (1 renv) (2 cenv) (3 rargs)))
+    (->* (rgen exp-params exps renv cenv) (productof (1 renv) (2 cenv) (3 rargs)))
     (lambda (g ps args env te)
       (if (or (null? ps) (null? args))
           (product (1 (the renv nil)) (2 (the cenv nil)) (3 (the rargs nil)))
@@ -446,7 +446,7 @@
   ;; closure is made first; then the arguments, the lambda's closure among
   ;; them; then, if the global still holds a closure of the word the copy
   ;; was made from, the copy called, else the global.
-  (r-specialize (subr rcompiles (rgen c-special wglobal exp exps renv cenv bool) unit)
+  (r-specialize (->* (rgen c-special wglobal exp exps renv cenv bool) unit)
     (lambda (g sp cell lam args env te tail)
       (tagcase lam
         (e-lambda (lps lbody la lb lalbk)
@@ -457,7 +457,7 @@
                 (r-specialized-call g sp cell (extract (car found) 4) args env te tail))))
         (else y (r-decline)))))
   ;; The same, with the copy's word `copy`.
-  (r-specialized-call (subr rcompiles (rgen c-special wglobal tword exps renv cenv bool) unit)
+  (r-specialized-call (->* (rgen c-special wglobal tword exps renv cenv bool) unit)
     (lambda (g sp cell copy args env te tail)
       (let* ((regs (get (extract g nreg))) (slots (get (extract g nslot)))
              (s (r-slot g))
@@ -483,7 +483,7 @@
   ;; lambda is: the lambda's body, its parameters bound to the arguments and
   ;; the values its closure captured to those fields of the parameter's
   ;; value, where the globals are those it saw.
-  (r-spec-lambda (subr rcompiles (rgen exps renv cenv bool) unit)
+  (r-spec-lambda (->* (rgen exps renv cenv bool) unit)
     (lambda (g args env te tail)
       (let* ((sp (car (get c-spec-now))) (at (car (get r-spec-at))) (captured (extract sp 10))
              (regs (get (extract g nreg))) (slots (get (extract g nslot)))
@@ -506,7 +506,7 @@
           (r-restore g regs slots)))))
   ;; Each of the lambda's parameters bound to its argument, made and kept,
   ;; in order.
-  (r-spec-args (subr rcompiles (rgen exp-params exps renv cenv bools) rscope)
+  (r-spec-args (->* (rgen exp-params exps renv cenv bools) rscope)
     (lambda (g ps args env te flags)
       (if (or (null? ps) (null? args))
           (product (1 (the renv nil)) (2 (the cenv nil)))
@@ -520,7 +520,7 @@
   ;; been written since (it holds its own closure, or the one the copy was
   ;; made from), this procedure again, by its own entry, or in tail
   ;; position a loop back to `start`; else the global.
-  (r-self-guarded (subr rcompiles (rgen wglobal int exp exps renv cenv bool) unit)
+  (r-self-guarded (->* (rgen wglobal int exp exps renv cenv bool) unit)
     (lambda (g cell start f args env te tail)
       (let ((n (c-count-exps args)))
         ;; In a fast version, a call in tail position is a loop, in a leaf too.
@@ -556,7 +556,7 @@
                 (r-restore g regs slots)))))))
   ;; Each argument kept, in a register in a leaf, else a frame slot, in
   ;; order: where each is.
-  (r-self-temps (subr rcompiles (rgen exps int renv cenv) rlocs)
+  (r-self-temps (->* (rgen exps int renv cenv) rlocs)
     (lambda (g args i env te)
       (if (null? args)
           nil
@@ -564,7 +564,7 @@
                  (rest (r-self-temps g (cdr args) (+ i 1) env te)))
             (cons l rest)))))
   ;; RESULT := r(a, b), `a` evaluated first; a constant `b` an immediate.
-  (r-binary (subr rcompiles (rgen int exp exp renv cenv) unit)
+  (r-binary (->* (rgen int exp exp renv cenv) unit)
     (lambda (g r a b env te)
       (let ((o (r-operands g a b env te #t)))
         (cond ((not (null? (extract o 1))) (r-op2imm g r (car (extract o 1))))
@@ -572,7 +572,7 @@
               (else (r-decline))))))
   ;; RESULT := primitive p (one that never collects) of `a` and `b`, as
   ;; `r-binary`, by `prim2` or `prim2imm`.
-  (r-pure2 (subr rcompiles (rgen int exp exp renv cenv) unit)
+  (r-pure2 (->* (rgen int exp exp renv cenv) unit)
     (lambda (g p a b env te)
       (let ((o (r-operands g a b env te #t)))
         (cond ((not (null? (extract o 1))) (r-op2 g rop-prim2imm (wcell-int p) (car (extract o 1))))
@@ -581,7 +581,7 @@
   ;; RESULT := r(y, x), `x` evaluated first, as written: for an operation
   ;; whose operands trade places, where they may not run in the other
   ;; order. `x` is kept in a register, or the frame if `y` calls.
-  (r-binary-swapped (subr rcompiles (rgen int exp exp renv cenv) unit)
+  (r-binary-swapped (->* (rgen int exp exp renv cenv) unit)
     (lambda (g r x y env te)
       (let ((regs (get (extract g nreg))) (slots (get (extract g nslot))))
         (begin
@@ -598,7 +598,7 @@
   ;; `a` into RESULT and `b` into a register, `a` evaluated first; or, if
   ;; `imm` and `b` is a constant, `b` as an immediate. The register is free
   ;; again after: use it at once.
-  (r-operands (subr rcompiles (rgen exp exp renv cenv bool) roperands)
+  (r-operands (->* (rgen exp exp renv cenv bool) roperands)
     (lambda (g a b env te imm)
       (let* ((regs (get (extract g nreg))) (slots (get (extract g nslot)))
              (v (if imm (r-known-cell env b) (the wcells nil)))
@@ -629,7 +629,7 @@
         (begin (r-restore g regs slots) out))))
   ;; `x`'s value into REGk: straight from a register or the frame when it is
   ;; a variable there, else by way of RESULT.
-  (r-into (subr rcompiles (rgen exp int renv cenv) unit)
+  (r-into (->* (rgen exp int renv cenv) unit)
     (lambda (g x k env te)
       (let ((l (r-plain-var-loc env x)))
         (if (null? l)
@@ -645,7 +645,7 @@
   ;; and REG8 a list of the rest, made after every argument, by `cons`,
   ;; which may collect: so then an argument in a register is kept first,
   ;; like one that is not simple.
-  (r-args (subr rcompiles (rgen rargs renv cenv maybe-exp) unit)
+  (r-args (->* (rgen rargs renv cenv maybe-exp) unit)
     (lambda (g args env te f)
       (if (extract g leaf)
           (r-decline)
@@ -675,7 +675,7 @@
               (set (extract g nslot) slots))))))
   ;; For each argument: -1 if simple, made later; -2 if made into its
   ;; register now; else the frame slot it is kept in.
-  (r-args-hard (subr rcompiles (rgen rargs int int renv cenv bool) (listof int @k))
+  (r-args-hard (->* (rgen rargs int int renv cenv bool) (listof int @k))
     (lambda (g args i direct env te many)
       (if (null? args)
           nil
@@ -694,13 +694,13 @@
                   (cons k (r-args-hard g (cdr args) (+ i 1) direct env te many))))))))
   ;; A procedure of no arguments whose body is `body`: its closure into
   ;; RESULT.
-  (r-thunk (subr rcompiles (rgen exp renv cenv) unit)
+  (r-thunk (->* (rgen exp renv cenv) unit)
     (lambda (g body env te)
       (begin (r-lambda g (the exp-params nil) body env te (the syms nil) (the maybe-exp nil) #f)
              #u)))
   ;; The arguments from the `i`th, short of the `stop`th, each into its
   ;; register.
-  (r-args-into (subr rcompiles (rgen rargs (listof int @k) int int renv cenv) unit)
+  (r-args-into (->* (rgen rargs (listof int @k) int int renv cenv) unit)
     (lambda (g args kept i stop env te)
       (if (or (null? args) (= i stop))
           #u
@@ -709,7 +709,7 @@
             (r-args-into g (cdr args) (cdr kept) (+ i 1) stop env te)))))
   ;; Argument `a` into REGk: from the frame slot it was kept in, if it was
   ;; (-2: in its register already), else made there.
-  (r-arg-into (subr rcompiles (rgen rarg int int renv cenv) unit)
+  (r-arg-into (->* (rgen rarg int int renv cenv) unit)
     (lambda (g a kept k env te)
       (cond ((= kept -2) #u)
             ((>= kept 0) (r-opnn g rop-load k kept))
@@ -733,7 +733,7 @@
                          (else y (r-decline)))))))))))
   ;; The list of the arguments from the `i`th down to the eighth, onto the
   ;; list in RESULT, by `cons`.
-  (r-args-list (subr rcompiles (rgen rargs (listof int @k) int int renv cenv) unit)
+  (r-args-list (->* (rgen rargs (listof int @k) int int renv cenv) unit)
     (lambda (g args kept i from env te)
       (if (< i from)
           #u
@@ -745,7 +745,7 @@
   ;; `(list x …)`: every argument that is not simple, or is in a register,
   ;; made and kept first, in order, as for a list past `register-regs`; then
   ;; the pairs made from the last, onto `nil`.
-  (r-list (subr rcompiles (rgen exps renv cenv) unit)
+  (r-list (->* (rgen exps renv cenv) unit)
     (lambda (g args env te)
       (if (extract g leaf)
           (r-decline)
@@ -756,10 +756,10 @@
               (r-args-list g as kept (- (r-count-args as) 1) 0 env te)
               (set (extract g nslot) slots))))))
   ;; A call-out, `prim p n` or `cellular r n`, on `args` in REG1…REGn.
-  (r-call-out (subr rcompiles (rgen int int rargs renv cenv) unit)
+  (r-call-out (->* (rgen int int rargs renv cenv) unit)
     (lambda (g how what args env te)
       (begin (r-args g args env te (the maybe-exp nil)) (r-opnn g how what (r-count-args args)))))
-  (r-prim (subr rcompiles (rgen string rargs renv cenv) unit)
+  (r-prim (->* (rgen string rargs renv cenv) unit)
     (lambda (g name args env te)
       (if (r-prim-imm g name args env te r-exp) #u
           (r-call-out g rop-prim (runtime-primitive name) args env te))))
@@ -772,7 +772,7 @@
   ;; call-out, where the free space has no room, may collect, and then
   ;; nothing but the closure is used after. The lambda's word is one the
   ;; stack code made (`c-made-word`); register code makes none.
-  (r-lambda (subr rcompiles (rgen exp-params exp renv cenv syms maybe-exp bool) patches)
+  (r-lambda (->* (rgen exp-params exp renv cenv syms maybe-exp bool) patches)
     (lambda (g ps body env te own region tail)
       (if (and (extract g leaf) (not (and tail (null? region))))
           (begin (r-decline) (the patches nil))
@@ -781,7 +781,7 @@
                 (begin (r-decline) (the patches nil))
                 (r-lambda-made g (car m) env te region))))))
   ;; The closure of word and free values `made`.
-  (r-lambda-made (subr rcompiles (rgen (productof (1 tword) (2 syms)) renv cenv maybe-exp) patches)
+  (r-lambda-made (->* (rgen (productof (1 tword) (2 syms)) renv cenv maybe-exp) patches)
     (lambda (g made env te region)
       (let* ((w (extract made 1))
              (fv (extract made 2))
@@ -802,7 +802,7 @@
                 (r-prim g (c-region-closure-prim) (the rargs (cons (a-e (car region)) ops)) env te)
                 (extract pa 2)))))))
   ;; Arrays, and the tag and key makers: as the stack compiler does them.
-  (r-special (subr rcompiles (rgen string exps renv cenv) unit)
+  (r-special (->* (rgen string exps renv cenv) unit)
     (lambda (g what args env te)
       (case what
         (("array-ref")
@@ -831,7 +831,7 @@
   ;; `tagcase`: the scrutinee kept; each arm's tag compared, the last's not
   ;; when there is no `else` (a checked program covers every tag); the value,
   ;; or its product's members, bound.
-  (r-tagcase (subr rcompiles (rgen exp exp-arms exp-let-bs renv cenv bool) unit)
+  (r-tagcase (->* (rgen exp exp-arms exp-let-bs renv cenv bool) unit)
     (lambda (g s arms els env te tail)
       (let ((regs (get (extract g nreg))) (slots (get (extract g nslot))))
         (begin
@@ -845,7 +845,7 @@
                     (r-exp g (extract (car els) 2) (r-bind n sc env) (r-local te n) tail)))
               (r-emit g (r-label end))))
           (r-restore g regs slots)))))
-  (r-arms (subr rcompiles (rgen exp-arms bool rloc int renv cenv bool) unit)
+  (r-arms (->* (rgen exp-arms bool rloc int renv cenv bool) unit)
     (lambda (g arms no-else sc end env te tail)
       (if (null? arms)
           #u
@@ -869,7 +869,7 @@
               (r-arms g (cdr arms) no-else sc end env te tail))))))
   ;; A tail call of the procedure itself: the new arguments made, then put
   ;; where the parameters are, and back to the start.
-  (r-loop (subr rcompiles (rgen exps renv cenv) unit)
+  (r-loop (->* (rgen exps renv cenv) unit)
     (lambda (g args env te)
       (let* ((regs (get (extract g nreg)))
              (slots (get (extract g nslot)))
@@ -878,7 +878,7 @@
           (r-loop-move g made 0)
           (r-emit g (r-branch #f (extract g start)))
           (r-restore g regs slots)))))
-  (r-loop-make (subr rcompiles (rgen exps renv cenv) (listof int @k))
+  (r-loop-make (->* (rgen exps renv cenv) (listof int @k))
     (lambda (g args env te)
       (if (null? args)
           nil
@@ -888,7 +888,7 @@
               (cons m (r-loop-make g (cdr args) env te)))))))
   ;; `letrec`: each closure made into its slot, a placeholder for a sibling
   ;; not made yet; then each placeholder patched.
-  (r-letrec (subr rcompiles (rgen exp-letrec-bs exp renv cenv bool) unit)
+  (r-letrec (->* (rgen exp-letrec-bs exp renv cenv bool) unit)
     (lambda (g bs body env te tail)
       (let* ((slots (get (extract g nslot))) (regs (get (extract g nreg)))
              (joins (r-join-flags bs body tail))
@@ -905,7 +905,7 @@
           (r-restore g regs slots)))))
   ;; A `let`: each value made, in the scope outside, and kept in a register
   ;; where no call comes before the body is done with it (else the frame).
-  (r-let (subr rcompiles (rgen exp-let-bs exp renv cenv bool) unit)
+  (r-let (->* (rgen exp-let-bs exp renv cenv bool) unit)
   (lambda (g bs body env te tail)
     (let* ((regs (get (extract g nreg))) (slots (get (extract g nslot)))
            (body-collects (r-collects-here? g body (r-local-names te bs) tail))
@@ -917,7 +917,7 @@
   ;; A join point's call: each argument made and kept (a register in a
   ;; leaf, else a frame slot), then each into its parameter's place, and a
   ;; jump.
-  (r-jump (subr rcompiles (rgen rloc exps renv cenv bool) unit)
+  (r-jump (->* (rgen rloc exps renv cenv bool) unit)
     (lambda (g j args env te tail)
       (tagcase j
         (rl-join (params label)
@@ -931,7 +931,7 @@
                   (r-emit g (r-branch #f label))
                   (r-restore g regs slots)))))
         (else y (r-decline)))))
-  (r-jump-args (subr rcompiles (rgen exps renv cenv bools) rlocs)
+  (r-jump-args (->* (rgen exps renv cenv bools) rlocs)
     (lambda (g args env te flags)
       (if (null? args)
           nil
@@ -940,7 +940,7 @@
             (cons l rest)))))
   ;; Each join point's body, after the `letrec`'s, which ends every path
   ;; itself: where its calls go.
-  (r-join-bodies (subr rcompiles (rgen exp-letrec-bs rplaces renv cenv bool) unit)
+  (r-join-bodies (->* (rgen exp-letrec-bs rplaces renv cenv bool) unit)
     (lambda (g bs places env te tail)
       (if (null? bs)
           #u
@@ -957,8 +957,7 @@
                   (else y (r-decline))))
             (r-join-bodies g (cdr bs) (cdr places) env te tail)))))
   (r-letrec-make
-    (subr rcompiles (rgen exp-letrec-bs exp-letrec-bs rints int renv cenv bools)
-          (listof patches @k))
+    (->* (rgen exp-letrec-bs exp-letrec-bs rints int renv cenv bools) (listof patches @k))
     (lambda (g all bs at i env te joins)
       (cond
         ((null? bs) nil)
@@ -981,8 +980,7 @@
               (r-opn g rop-setstk (r-nth-int at i))
               (cons p (r-letrec-make g all (cdr bs) at (+ i 1) env te (cdr joins)))))))))
   (r-letrec-one
-    (subr rcompiles (rgen exp-letrec-bs rints int symbol exp-params exp maybe-exp renv cenv)
-          patches)
+    (->* (rgen exp-letrec-bs rints int symbol exp-params exp maybe-exp renv cenv) patches)
     (lambda (g all at i name ps lbody region env te)
       (let* ((n (c-count-params ps))
              (own (r-sibling-env all at i 0 lbody n env te))
@@ -995,7 +993,7 @@
   ;;; `regcode-modules.fx`.
   ;; Item `n`'s lambda `x`, naming items of `later` not made yet: those
   ;; captured as a `letrec`'s siblings are, to be given once made.
-  (r-module-closure (subr rcompiles (rgen symbol exp r-scopes c-mslots) patches)
+  (r-module-closure (->* (rgen symbol exp r-scopes c-mslots) patches)
     (lambda (g n x sc later)
       (let ((self (the syms (cons n nil))))
         (tagcase (car (c-lambda-of x))
@@ -1013,7 +1011,7 @@
   ;; (`DONE.md` §37): a typed lambda naming an item not made yet captures it
   ;; once it is made; `ws` the closures waiting, `vals` the values' slots so
   ;; far (newest first): all of them.
-  (r-module-make (subr rcompiles (rgen c-mvals r-scopes c-mslots c-waits rints) rints)
+  (r-module-make (->* (rgen c-mvals r-scopes c-mslots c-waits rints) rints)
     (lambda (g vs sc later ws vals)
       (if (null? vs)
           vals
@@ -1029,7 +1027,7 @@
                            (if (= (extract v 3) 0) vals (the rints (cons s vals))))))))
   ;; A module: its items made in frame slots in order, as its stack code
   ;; makes them; then the product of its values. Declined in a leaf.
-  (r-module (subr rcompiles (rgen mod-items renv cenv bool) unit)
+  (r-module (->* (rgen mod-items renv cenv bool) unit)
     (lambda (g items env te tail)
       (if (extract g leaf)
           (r-decline)
@@ -1043,7 +1041,7 @@
   ;; `with`: the module's values the body names, by position, each kept as
   ;; a `let`'s value is (in a leaf, in a register), or folded in a fast
   ;; version (`r-with-fields`); then the body. As the Rust compiler's `r_with`.
-  (r-with (subr rcompiles (rgen symbol exp int int int renv cenv bool) unit)
+  (r-with (->* (rgen symbol exp int int int renv cenv bool) unit)
     (lambda (g m body a b abk env te tail)
       (let ((ns (c-with-at a b abk)) (ps (c-with-places-at a b abk)))
         (if (or (null? ns) (null? ps))
@@ -1051,13 +1049,13 @@
             (let* ((regs (get (extract g nreg))) (slots (get (extract g nslot)))
                    (sc (r-with-fields g m env (car ns) (car ps) (the r-scopes (cons env te)))))
               (begin (r-exp g body (car sc) (cdr sc) tail) (r-restore g regs slots)))))))
-  (r-module-or-with (subr rcompiles (rgen exp renv cenv bool) unit)
+  (r-module-or-with (->* (rgen exp renv cenv bool) unit)
     (lambda (g x env te tail)
       (tagcase x
         (e-module (items a b abk) (r-module g items env te tail))
         (e-with (m body a b abk) (r-with g m body a b abk env te tail))
         (else y (r-decline)))))
-  (r-reshape (subr rcompiles (rgen exp k-picks renv cenv bool) unit)
+  (r-reshape (->* (rgen exp k-picks renv cenv bool) unit)
     (lambda (g x at env te tail)
       (if (extract g leaf)
           (r-decline)
@@ -1073,7 +1071,7 @@
   ;; the procedure into RESULT now if nothing after the moves uses RESULT,
   ;; else kept in a register; the moves; the simple arguments; the call.
   ;; Its own registers are above REG1…REGn.
-  (r-leaf-tail-call (subr rcompiles (rgen exp exps renv cenv) unit)
+  (r-leaf-tail-call (->* (rgen exp exps renv cenv) unit)
     (lambda (g f args env te)
       (let* ((nreg (extract g nreg))
              (regs (get nreg))
@@ -1103,7 +1101,7 @@
   ;; A leaf's tail call's arguments from REGk: one in a register moved from
   ;; there; a simple one left for after the moves; any other made now, in
   ;; order, into a register of its own, and moved from there.
-  (r-leaf-args (subr rcompiles (rgen exps renv cenv int) rleaf)
+  (r-leaf-args (->* (rgen exps renv cenv int) rleaf)
     (lambda (g args env te k)
       (if (null? args)
           (r-rleaf (the rmoves nil) (the rlate nil))
@@ -1116,7 +1114,7 @@
                    (let ((t (begin (r-exp g a env te #f) (r-keep-in-reg g))))
                      (r-leaf-move (r-leaf-args g (cdr args) env te (+ k 1)) t k))))))))
   ;; Each simple argument of `late` into its register.
-  (r-late-into (subr rcompiles (rgen rlate renv cenv) unit)
+  (r-late-into (->* (rgen rlate renv cenv) unit)
     (lambda (g late env te)
       (if (null? late)
           #u

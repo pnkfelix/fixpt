@@ -45,7 +45,7 @@
 (import check-effects k-atom-region k-has-region? k-insert k-region=?)
 (import check-read k-effect-selects k-with-effect-falls k-items)
 
-(define k-start (subr pure (kx) int)
+(define k-start (->* (kx) int)
   (lambda (x)
     (tagcase x
       (x-var (s a b abk) a) (x-const (t v a b abk) a) (x-lambda (ps e a b abk) a)
@@ -56,7 +56,7 @@
       (x-extract (e l a b abk) a) (x-sum (l e a b abk) a) (x-tagcase (e arms els a b abk) a)
       (x-letregion (k r i e a b abk) a) (x-rlambda (r l a b abk) a) (x-module (items a b abk) a)
       (x-with (m e a b abk) a))))
-(define k-end (subr pure (kx) int)
+(define k-end (->* (kx) int)
   (lambda (x)
     (tagcase x
       (x-var (s a b abk) b) (x-const (t v a b abk) b) (x-lambda (ps e a b abk) b)
@@ -67,7 +67,7 @@
       (x-extract (e l a b abk) b) (x-sum (l e a b abk) b) (x-tagcase (e arms els a b abk) b)
       (x-letregion (k r i e a b abk) b) (x-rlambda (r l a b abk) b) (x-module (items a b abk) b)
       (x-with (m e a b abk) b))))
-(define k-kth (subr pure (kx) int)
+(define k-kth (->* (kx) int)
   (lambda (x)
     (tagcase x
       (x-var (s a b abk) abk) (x-const (t v a b abk) abk) (x-lambda (ps e a b abk) abk)
@@ -79,12 +79,12 @@
       (x-tagcase (e arms els a b abk) abk) (x-letregion (k r i e a b abk) abk)
       (x-rlambda (r l a b abk) abk) (x-module (items a b abk) abk) (x-with (m e a b abk) abk))))
 ;; `x`'s identity.
-(define k-at-of (subr pure (kx) k-at)
+(define k-at-of (->* (kx) k-at)
   (lambda (x) (product (1 (k-start x)) (2 (k-end x)) (3 (k-kth x)))))
-(define k-same-span? (subr (read @globals) (kx int int) bool)
+(define k-same-span? (->* (kx int int) bool)
   (lambda (x a b) (and (= (k-start x) a) (= (k-end x) b))))
 
-(define k-resolve-params (subr (maxeff checks spin) (exp-params) k-typed-params)
+(define k-resolve-params (->* (exp-params) k-typed-params)
   (lambda (ps)
     (if (null? ps)
         nil
@@ -92,18 +92,18 @@
                (t (if (null? ty) (the k-ids nil) (the k-ids (cons (k-parse-type (car ty)) nil))))
                (rest (k-resolve-params (cdr ps))))
           (cons (product (1 (extract (car ps) 1)) (2 t)) rest)))))
-(define k-resolve-descs (subr (maxeff checks spin) (syns-a) k-descs)
+(define k-resolve-descs (->* (syns-a) k-descs)
   (lambda (ds)
     (if (null? ds)
         nil
         (let* ((d (k-parse-d (car ds))) (rest (k-resolve-descs (cdr ds))))
           (cons d rest)))))
-(define k-copy-names (subr (maxeff (read @globals) (alloc @t)) (names) k-names)
+(define k-copy-names (->* (names) k-names)
   (lambda (ns) (if (null? ns) nil (cons (car ns) (k-copy-names (cdr ns))))))
 
 ;; Where a parser's tree starts and ends, and which of the expressions there
 ;; it is.
-(define exp-start (subr pure (exp) int)
+(define exp-start (->* (exp) int)
   (lambda (e)
     (tagcase e
       (e-var (s a b abk) a) (e-int (n a b abk) a) (e-bool (v a b abk) a) (e-str (v a b abk) a)
@@ -115,7 +115,7 @@
       (e-product (fs a b abk) a) (e-extract (x l got a b abk) a) (e-sum (l x a b abk) a)
       (e-tagcase (x arms els got a b abk) a) (e-letregion (k r i x a b abk) a)
       (e-rlambda (r l a b abk) a) (e-module (items a b abk) a) (e-with (m x a b abk) a))))
-(define exp-end (subr pure (exp) int)
+(define exp-end (->* (exp) int)
   (lambda (e)
     (tagcase e
       (e-var (s a b abk) b) (e-int (n a b abk) b) (e-bool (v a b abk) b) (e-str (v a b abk) b)
@@ -127,7 +127,7 @@
       (e-product (fs a b abk) b) (e-extract (x l got a b abk) b) (e-sum (l x a b abk) b)
       (e-tagcase (x arms els got a b abk) b) (e-letregion (k r i x a b abk) b)
       (e-rlambda (r l a b abk) b) (e-module (items a b abk) b) (e-with (m x a b abk) b))))
-(define exp-kth (subr pure (exp) int)
+(define exp-kth (->* (exp) int)
   (lambda (e)
     (tagcase e
       (e-var (s a b abk) abk) (e-int (n a b abk) abk) (e-bool (v a b abk) abk)
@@ -141,12 +141,12 @@
       (e-tagcase (x arms els got a b abk) abk) (e-letregion (k r i x a b abk) abk)
       (e-rlambda (r l a b abk) abk) (e-module (items a b abk) abk) (e-with (m x a b abk) abk))))
 ;; `x`'s identity.
-(define exp-at (subr pure (exp) k-at)
+(define exp-at (->* (exp) k-at)
   (lambda (x) (product (1 (exp-start x)) (2 (exp-end x)) (3 (exp-kth x)))))
 
 ;; A `plambda`'s region and place binders: each won't outlive what is bound
 ;; around it (`lives`), and each is around what its body binds.
-(define k-order-binders (subr kstate (k-binders k-ids) unit)
+(define k-order-binders (->* (k-binders k-ids) unit)
   (lambda (bs lives)
     (if (null? bs)
         #u
@@ -158,7 +158,7 @@
             (k-order-binders (cdr bs) lives))))))
 
 ;; The place a `letfreeze` names: `heap`, or a place in scope.
-(define k-resolve-place (subr checks (symbol int int) k-region)
+(define k-resolve-place (->* (symbol int int) k-region)
   (lambda (n a b)
     (if (symbol=? n 'heap)
         (r-heap)
@@ -173,14 +173,14 @@
                 (else x (k-fail (k-cat3 "`" (symbol->string n) "` is not a region") a b))))))))
 ;; What a `letfreeze` into `place` freezes into: `(const p)` for its
 ;; place `p`, and for the heap, -1.
-(define* k-freeze-into (subr pure (k-region) k-region)
+(define k-freeze-into (->* (k-region) k-region)
   (lambda (place) (tagcase place (r-var (p) (r-frozen p #f)) (else y (r-frozen -1 #f)))))
 ;; What a `letfreeze` into `place` won't outlive: the place, and what it
 ;; won't.
-(define k-place-lives (subr kmakes (k-region) k-ids)
+(define k-place-lives (->* (k-region) k-ids)
   (lambda (place) (tagcase place (r-var (p) (cons p (k-outer-of p))) (else y nil))))
 
-(define k-as-subr (subr (maxeff kmakes spin) (int) (listof k-callable acyclic))
+(define k-as-subr (->* (int) (listof k-callable acyclic))
   (lambda (t)
     (tagcase (k-get t)
       (ty-subr (e ps r cv) (cons (product (1 e) (2 ps) (3 r)) nil))
@@ -190,11 +190,11 @@
       (else x nil))))
 ;; No `vsubr`; one, of latent effect `e`, arguments of type `a`, result `r`.
 (define k-vsub-none k-vsub nil)
-(define k-vsub-one (subr (alloc @t) (k-eff int int) k-vsub)
+(define k-vsub-one (->* (k-eff int int) k-vsub)
   (lambda (e a r) (cons (product (1 e) (2 a) (3 r)) nil)))
 ;; `vsubr`'s three descriptions, an effect and two types, as `k-vsubr-parts`
 ;; gives them.
-(define* k-vsubr-descs (subr (alloc @t) (k-desc k-desc k-desc) k-vsub)
+(define k-vsubr-descs (->* (k-desc k-desc k-desc) k-vsub)
   (lambda (e a r)
     (tagcase e
       (de (le)
@@ -204,7 +204,7 @@
       (else z k-vsub-none))))
 ;; A `vsubr` (generative type 0), taken apart: its latent effect, the type of
 ;; each argument, and the result's, in a list; none for any other type.
-(define k-vsubr-parts (subr (maxeff kmakes spin) (int) k-vsub)
+(define k-vsubr-parts (->* (int) k-vsub)
   (lambda (t)
     (tagcase (k-get t)
       (ty-named (g ds)
@@ -213,12 +213,12 @@
             k-vsub-none))
       (else y k-vsub-none))))
 ;; `n` copies of type `t`, onto `acc`.
-(define* k-repeat-id (subr (maxeff (alloc @t) spin) (int int k-ids) k-ids)
+(define k-repeat-id (->* (int int k-ids) k-ids)
   (lambda (t n acc) (if (<= n 0) acc (k-repeat-id t (- n 1) (cons t acc)))))
 ;; What `t` is called as, with `n` arguments: a subroutine; a `vsubr` (a
 ;; standard `list`), as one of `n` parameters, each of its argument type;
 ;; or none.
-(define k-callee-of (subr (maxeff kmakes spin) (int int) (listof k-callable acyclic))
+(define k-callee-of (->* (int int) (listof k-callable acyclic))
   (lambda (t n)
     (let ((v (k-vsubr-parts t)))
       (if (null? v)
@@ -228,20 +228,20 @@
 
 ;;; ------------------------------------------------------------ regions of types
 
-(define k-has-region-in? (subr (maxeff kreads spin) (k-regions k-region) bool)
+(define k-has-region-in? (->* (k-regions k-region) bool)
   (lambda (rs r)
     (cond ((null? rs) #f)
           ((k-region=? (car rs) r) #t)
           (else (k-has-region-in? (cdr rs) r)))))
-(define k-add-region (subr (maxeff kmakes spin) (k-regions k-region) k-regions)
+(define k-add-region (->* (k-regions k-region) k-regions)
   (lambda (rs r) (if (k-has-region-in? rs r) rs (cons r rs))))
 ;; `out` and each of `rs` that is not a generative type's parameter.
-(define k-add-non-gen (subr (maxeff kmakes spin) (k-regions k-regions) k-regions)
+(define k-add-non-gen (->* (k-regions k-regions) k-regions)
   (lambda (out rs)
     (cond ((null? rs) out)
           ((k-gen-region? (car rs)) (k-add-non-gen out (cdr rs)))
           (else (k-add-non-gen (k-add-region out (car rs)) (cdr rs))))))
-(define k-add-eff-regions (subr (maxeff kmakes spin) (k-regions k-eff) k-regions)
+(define k-add-eff-regions (->* (k-regions k-eff) k-regions)
   (lambda (rs e)
     (cond ((null? e) rs)
           ((k-has-region? (car e))
@@ -258,7 +258,7 @@
 (define k-runs (ref (listof k-run acyclic) @t) (new nil))
 ;; For `k-reset`: forget the description variables, and what is known of
 ;; the regions and places among them.
-(define k-reset-regions (subr kstate () unit)
+(define k-reset-regions (->* () unit)
   (lambda ()
     (begin
       (set k-dvars nil) (set k-ndvars 0) (set k-places nil) (set k-bounds nil) (set k-outers nil)
@@ -266,7 +266,7 @@
       (set k-lifetimes nil) (set k-freezing nil) (set k-written nil)
       (set k-arrow-vars nil) (set k-abstract-funs nil))))
 ;; Forget the names bound, and what is known of them.
-(define k-reset-names (subr kstate () unit)
+(define k-reset-names (->* () unit)
   (lambda ()
     (begin
       (set k-known (make-table symbol-hash symbol=?))
@@ -276,7 +276,7 @@
       (set k-std-table (make-table symbol-hash symbol=?))
       (set k-trail nil) (set k-depth 0))))
 ;; Forget the lemmas, and the facts learned of data and sizes.
-(define k-reset-facts (subr kstate () unit)
+(define k-reset-facts (->* () unit)
   (lambda ()
     (begin
       (set k-lemmas nil) (set k-pending-lemma nil) (set k-datas nil) (set k-certified nil)
@@ -285,7 +285,7 @@
       (set k-narrowed nil) (set k-path-narrowed nil) (set k-closure-depth 0)
       (set k-certified-lengths nil) (set k-certified-nats nil) (set k-size-facts nil)
       (set k-skolems nil))))
-(define k-reset (subr (maxeff kstate spin) () unit)
+(define k-reset (->* () unit)
   (lambda ()
     (begin
       (set k-extracts nil) (set k-effect-notes nil)
@@ -313,12 +313,12 @@
       ;; 19 and 20, last, so no type made before them moved (`TODO.md` §84).
       (k-basic "i8") (k-basic "u8")
       #u)))
-(define n-copy-memo (subr (maxeff kreads (write @t) spin) (k-region-lists k-region-lists int) unit)
+(define n-copy-memo (->* (k-region-lists k-region-lists int) unit)
   (lambda (from to i)
     (if (= i (array-length from))
         #u
         (begin (array-set! to i (array-ref from i)) (n-copy-memo from to (+ i 1))))))
-(define k-remember-regions (subr (maxeff kstate spin) (int k-regions) unit)
+(define k-remember-regions (->* (int k-regions) unit)
   (lambda (t rs)
     (begin
       (if (>= t (array-length (get k-regions-memo)))
@@ -327,11 +327,11 @@
           #u)
       (array-set! (get k-regions-memo) t (cons rs nil)))))
 ;; Add to `out` the regions of `e`'s atoms.
-(define k-note-eff-regions (subr (maxeff kstate spin) ((ref k-regions @t) k-eff) unit)
+(define k-note-eff-regions (->* ((ref k-regions @t) k-eff) unit)
   (lambda (out e) (set out (k-add-eff-regions (get out) e))))
 
 (define-rec
-  (k-regions-walk (subr (maxeff kstate spin) (int int (ref k-regions @t)) unit)
+  (k-regions-walk (->* (int int (ref k-regions @t)) unit)
     (lambda (t seen out)
       (let ((t (k-resolve t)))
         (if (k-visit? t seen)
@@ -374,7 +374,7 @@
                   (ty-app (g ds) (k-regions-descs ds seen out))
                   (ty-lam (bs body) (k-regions-descs (the k-descs (cons body nil)) seen out))
                   (else x #u))))))))
-  (k-regions-descs (subr (maxeff kstate spin) (k-descs int (ref k-regions @t)) unit)
+  (k-regions-descs (->* (k-descs int (ref k-regions @t)) unit)
     (lambda (ds seen out)
       (if (null? ds)
           #u
@@ -389,18 +389,18 @@
                        (ty-lam (bs body) (k-regions-descs (the k-descs (cons body nil)) seen out))
                        (else y #u))))
                  (k-regions-descs (cdr ds) seen out)))))
-  (k-regions-walks (subr (maxeff kstate spin) (k-ids int (ref k-regions @t)) unit)
+  (k-regions-walks (->* (k-ids int (ref k-regions @t)) unit)
     (lambda (ts seen out)
       (if (null? ts)
           #u
           (begin (k-regions-walk (car ts) seen out) (k-regions-walks (cdr ts) seen out)))))
-  (k-regions-parts (subr (maxeff kstate spin) (k-parts int (ref k-regions @t)) unit)
+  (k-regions-parts (->* (k-parts int (ref k-regions @t)) unit)
     (lambda (ps seen out)
       (if (null? ps)
           #u
           (begin (k-regions-walk (extract (car ps) 2) seen out)
                  (k-regions-parts (cdr ps) seen out))))))
-(define k-frozen-places (subr (maxeff kmakes spin) (k-regions k-regions) k-regions)
+(define k-frozen-places (->* (k-regions k-regions) k-regions)
   (lambda (rs out)
     (if (null? rs)
         out
@@ -408,7 +408,7 @@
                      (r-frozen (p f) (if (< p 0) out (k-add-region out (r-var p))))
                      (else y out))))
           (k-frozen-places (cdr rs) out)))))
-(define k-regions-in (subr (maxeff kstate spin) (int) k-regions)
+(define k-regions-in (->* (int) k-regions)
   (lambda (t)
     (let* ((t (k-resolve t)) (memo (get k-regions-memo)))
       (if (and (< t (array-length memo)) (not (null? (array-ref memo t))))
@@ -420,37 +420,37 @@
               (set out (k-frozen-places (get out) (get out)))
               (k-remember-regions t (get out))
               (get out)))))))
-(define k-note (subr kmakes (symbol k-names k-names) k-names)
+(define k-note (->* (symbol k-names k-names) k-names)
   (lambda (s bound out) (if (or (k-has-name? bound s) (k-has-name? out s)) out (cons s out))))
-(define k-names-onto (subr kmakes (k-names k-names) k-names)
+(define k-names-onto (->* (k-names k-names) k-names)
   (lambda (ns bound) (if (null? ns) bound (k-names-onto (cdr ns) (cons (car ns) bound)))))
 ;; `bound`, and the names `ps`, `bs` bind.
-(define k-param-names (subr kmakes (k-typed-params k-names) k-names)
+(define k-param-names (->* (k-typed-params k-names) k-names)
   (lambda (ps bound)
     (if (null? ps) bound (k-param-names (cdr ps) (cons (extract (car ps) 1) bound)))))
-(define k-letrec-names (subr kmakes (k-letrec-bs k-names) k-names)
+(define k-letrec-names (->* (k-letrec-bs k-names) k-names)
   (lambda (bs bound)
     (if (null? bs) bound (k-letrec-names (cdr bs) (cons (extract (car bs) 1) bound)))))
-(define k-let-names (subr kmakes (k-let-bs k-names) k-names)
+(define k-let-names (->* (k-let-bs k-names) k-names)
   (lambda (bs bound)
     (if (null? bs) bound (k-let-names (cdr bs) (cons (extract (car bs) 1) bound)))))
 
 ;; `up-t` and `down-t`, an abstract type `t`'s conversions, onto `bound`.
-(define k-conversion-name (subr (read @globals) (string symbol) symbol)
+(define k-conversion-name (->* (string symbol) symbol)
   (lambda (prefix n) (string->symbol (string-append prefix (symbol->string n)))))
-(define k-conversions-onto (subr kmakes (symbol k-names) k-names)
+(define k-conversions-onto (->* (symbol k-names) k-names)
   (lambda (n bound)
     (cons (k-conversion-name "down-" n) (cons (k-conversion-name "up-" n) bound))))
 ;; The names an item binds for those after it, onto `bound`: an abstract
 ;; type's conversions, a value's name, a group's.
-(define k-item-bound (subr kmakes (k-item k-names) k-names)
+(define k-item-bound (->* (k-item k-names) k-names)
   (lambda (it bound)
     (let ((k (extract it 1)) (ns (extract it 2)))
       (cond ((= k 0) (k-conversions-onto (car ns) bound))
             ((or (= k 1) (< k 0) (> k 3)) bound)
             (else (k-names-onto ns bound))))))
 ;; Every name `items` define, onto `bound`.
-(define k-items-bound (subr kmakes (k-items k-names) k-names)
+(define k-items-bound (->* (k-items k-names) k-names)
   (lambda (items bound)
     (if (null? items) bound (k-items-bound (cdr items) (k-item-bound (car items) bound)))))
 
@@ -458,7 +458,7 @@
 ;; `bound`: its module's values the body names, once checked; before, if
 ;; `m` is not bound inside, those of an earlier item of a module being
 ;; ordered whose value is a module as written (`k-hazard-mods`).
-(define k-with-bound (subr kreads (symbol int int int k-names) k-names)
+(define k-with-bound (->* (symbol int int int k-names) k-names)
   (lambda (m a b k bound)
     (let ((ns (k-with-names a b k)))
       (if (and (null? ns) (not (k-has-name? bound m)))
@@ -466,10 +466,10 @@
           ns))))
 
 (define-rec
-  (k-free-list (subr kmakes (kxs k-names k-names) k-names)
+  (k-free-list (->* (kxs k-names k-names) k-names)
     (lambda (xs bound out)
       (if (null? xs) out (k-free-list (cdr xs) bound (k-free-into (car xs) bound out)))))
-  (k-free-into (subr kmakes (kx k-names k-names) k-names)
+  (k-free-into (->* (kx k-names k-names) k-names)
     (lambda (x bound out)
       (tagcase x
         (x-var (s a b abk) (k-note s bound out))
@@ -510,24 +510,24 @@
                            (k-note m bound out)))))))
   ;; A module's free variables, onto `out`: each item's, every item's names
   ;; bound, as a `letrec*`'s (`check-modorder.fx`).
-  (k-free-module (subr kmakes (k-items k-names k-names) k-names)
+  (k-free-module (->* (k-items k-names k-names) k-names)
     (lambda (items bound out) (k-free-items items (k-items-bound items bound) out)))
-  (k-free-items (subr kmakes (k-items k-names k-names) k-names)
+  (k-free-items (->* (k-items k-names k-names) k-names)
     (lambda (items bound out)
       (if (null? items)
           out
           (k-free-items (cdr items) bound (k-free-list (extract (car items) 5) bound out)))))
-  (k-free-letrec (subr kmakes (k-letrec-bs k-names k-names) k-names)
+  (k-free-letrec (->* (k-letrec-bs k-names k-names) k-names)
     (lambda (bs bound out)
       (if (null? bs)
           out
           (k-free-letrec (cdr bs) bound (k-free-into (extract (car bs) 3) bound out)))))
-  (k-free-let (subr kmakes (k-let-bs k-names k-names) k-names)
+  (k-free-let (->* (k-let-bs k-names k-names) k-names)
     (lambda (bs bound out)
       (if (null? bs)
           out
           (k-free-let (cdr bs) bound (k-free-into (extract (car bs) 2) bound out)))))
-  (k-free-arms (subr kmakes (k-arms k-names k-names) k-names)
+  (k-free-arms (->* (k-arms k-names k-names) k-names)
     (lambda (arms bound out)
       (if (null? arms)
           out
@@ -535,7 +535,7 @@
             (k-free-arms (cdr arms) bound
                          (k-free-into (extract arm 4) (k-names-onto (extract arm 3) bound) out))))))
   ;; A `tagcase`'s `else` arm, if any: its body's, its variable bound.
-  (k-free-else (subr kmakes (k-let-bs k-names k-names) k-names)
+  (k-free-else (->* (k-let-bs k-names k-names) k-names)
     (lambda (els bound out)
       (if (null? els)
           out
@@ -543,12 +543,12 @@
 
 ;;; ------------------------------------------------------------ free variables
 
-(define k-free-vars (subr kmakes (kx) k-names)
+(define k-free-vars (->* (kx) k-names)
   (lambda (x) (k-free-into x nil nil)))
 
 ;;; ------------------------------------------------------------ substitution
 
-(define k-ty-rank (subr (maxeff kreads spin) (int) int)
+(define k-ty-rank (->* (int) int)
   (lambda (t)
     (tagcase (k-get t)
       (ty-base (s) 0) (ty-void () 1) (ty-var (v) 2) (ty-subr (e ps r cv) 3) (ty-poly (bs x) 4)
@@ -561,7 +561,7 @@
       (ty-proving (t e) 27) (ty-false () 28))))
 ;; Whether no instantiation of `pattern` could fit `actual`.
 ;; Whether a lemma's side `pat` could fit `t`, by their outermost shapes.
-(define k-lemma-head? (subr (maxeff kreads spin) (k-binders int int) bool)
+(define k-lemma-head? (->* (k-binders int int) bool)
   (lambda (bs pat t)
     (let ((p (k-resolve pat)))
       (tagcase (k-get p)
@@ -570,36 +570,36 @@
         (else z (= (k-ty-rank p) (k-ty-rank t)))))))
 ;; Whether lemma `l`'s two sides could fit `a` and `b`, by their outermost
 ;; shapes.
-(define k-lemma-heads? (subr (maxeff kreads spin) (k-lemma int int) bool)
+(define k-lemma-heads? (->* (k-lemma int int) bool)
   (lambda (l a b)
     (let ((bs (extract l 1)))
       (and (k-lemma-head? bs (extract l 2) a) (k-lemma-head? bs (extract l 3) b)))))
-(define k-lemma-may-apply? (subr (maxeff kreads spin) ((listof k-lemma acyclic) int int) bool)
+(define k-lemma-may-apply? (->* ((listof k-lemma acyclic) int int) bool)
   (lambda (ls a b)
     (and (not (null? ls))
          (or (k-lemma-heads? (car ls) a b)
              (k-lemma-may-apply? (cdr ls) a b)))))
-(define k-pair-seen? (subr kreads (k-pairs int int) bool)
+(define k-pair-seen? (->* (k-pairs int int) bool)
   (lambda (xs a b)
     (and (not (null? xs))
          (or (and (= (car (car xs)) a) (= (cdr (car xs)) b)) (k-pair-seen? (cdr xs) a b)))))
-(define k-all-bound? (subr kreads (k-binders k-map) bool)
+(define k-all-bound? (->* (k-binders k-map) bool)
   (lambda (bs m)
     (or (null? bs)
         (and (not (null? (k-map-find m (extract (car bs) 1)))) (k-all-bound? (cdr bs) m)))))
-(define k-subst-hyps (subr (maxeff kstate spin) (k-hyps k-map) k-hyps)
+(define k-subst-hyps (->* (k-hyps k-map) k-hyps)
   (lambda (hs m)
     (if (null? hs)
         nil
         (let* ((x (k-subst (car (car hs)) m)) (y (k-subst (cdr (car hs)) m)))
           (the k-hyps (cons (cons x y) (k-subst-hyps (cdr hs) m)))))))
 ;; The `g`th generative type's representation, for `ds`.
-(define k-unfold (subr (maxeff kstate spin) (int k-descs) int)
+(define k-unfold (->* (int k-descs) int)
   (lambda (g ds)
     (let ((gen (k-gen-of g))) (k-subst (extract gen 4) (k-gen-map (extract gen 2) ds)))))
 
 ;; `b`'s binders renamed to `a`'s, for comparing under them.
-(define k-rename (subr (maxeff kstate spin) (k-binders k-binders) k-map)
+(define k-rename (->* (k-binders k-binders) k-map)
   (lambda (bs as)
     (if (null? bs)
         nil
@@ -607,7 +607,7 @@
                (d (k-binder-desc k va))
                (rest (k-rename (cdr bs) (cdr as))))
           (cons (cons vb d) rest)))))
-(define k-same-kinds? (subr kreads (k-binders k-binders) bool)
+(define k-same-kinds? (->* (k-binders k-binders) bool)
   (lambda (xs ys)
     (cond ((null? xs) (null? ys))
           ((null? ys) #f)

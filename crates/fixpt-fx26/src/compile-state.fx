@@ -38,7 +38,7 @@
 
 ;; Each captured name's value, as the closure will hold it, free value `j`
 ;; on; a sibling not made yet is a placeholder, and one of the patches.
-(define c-push-all (subr (maxeff compiles spin) (syms cenv int int code) patches)
+(define c-push-all (->* (syms cenv int int code) patches)
   (lambda (xs e depth j c)
     (if (null? xs)
         nil
@@ -53,7 +53,7 @@
                (rest (c-push-all (cdr xs) e (+ depth 1) (+ j 1) c)))
           (if (< pending 0) rest (the patches (cons (cons j pending) rest)))))))
 
-(define c-self-call? (subr c-walks (exp exps cenv bool) bool)
+(define c-self-call? (->* (exp exps cenv bool) bool)
   (lambda (f args e tail)
     (and tail
          (>= (get c-this-params) 0)
@@ -68,11 +68,11 @@
 
 ;; Into the parameters' slots, from `i` down to `lo` (those below, a
 ;; lifting's, passed on as they are).
-(define c-loop-stores (subr c-emits (code int int) unit)
+(define c-loop-stores (->* (code int int) unit)
   (lambda (c i lo)
     (if (< i lo) #u (begin (c-op1 c routine-slot! (wcell-int i)) (c-loop-stores c (- i 1) lo)))))
 
-(define c-drops (subr c-emits (code int) unit)
+(define c-drops (->* (code int) unit)
   (lambda (c k) (if (<= k 0) #u (begin (c-op c routine-drop) (c-drops c (- k 1))))))
 
 ;; The top-level definition whose lambda is compiled next: its name, in a
@@ -107,7 +107,7 @@
 (define c-collecting (ref (listof c-inlinables @k) @k) (new nil))
 ;; Member `n` noted, its value `x` just compiled where `e` is in scope, if
 ;; it is a lambda naming no other member.
-(define c-note-member! (subr (maxeff c-walks (write @k)) (symbol exp cenv) unit)
+(define c-note-member! (->* (symbol exp cenv) unit)
   (lambda (n x e)
     (let ((ms (get c-collecting)) (l (c-lambda-of x)))
       (if (or (null? ms) (null? l))
@@ -130,7 +130,7 @@
 
 ;; Whether `x` is a lambda as the checkers say (`k-lambda?`): under type
 ;; abstractions and ascriptions.
-(define c-checked-lambda? (subr (read @globals) (exp) bool)
+(define c-checked-lambda? (->* (exp) bool)
   (lambda (x)
     (tagcase x
       (e-lambda (ps body a b abk) #t)
@@ -138,13 +138,13 @@
       (e-plambda (d body a b abk) (c-checked-lambda? body))
       (e-the (d body a b abk) (c-checked-lambda? body))
       (else y #f))))
-(define c-mv-onto (subr (alloc @k) (symbol exp int bool c-mvals) c-mvals)
+(define c-mv-onto (->* (symbol exp int bool c-mvals) c-mvals)
   (lambda (n x k l rest) (cons (product (1 n) (2 x) (3 k) (4 l)) rest)))
-(define c-mvals-group (subr (maxeff (read @globals) (alloc @k)) (names exps c-mvals) c-mvals)
+(define c-mvals-group (->* (names exps c-mvals) c-mvals)
   (lambda (ns xs rest)
     (if (null? ns) rest (c-mv-onto (car ns) (car xs) 3 #t (c-mvals-group (cdr ns) (cdr xs) rest)))))
 ;; The values `items` make, in order.
-(define c-module-values (subr (maxeff (read @globals) (alloc @k)) (mod-items) c-mvals)
+(define c-module-values (->* (mod-items) c-mvals)
   (lambda (items)
     (if (null? items)
         nil
@@ -158,18 +158,18 @@
                      (c-mv-onto (car ns) (car xs) 2 l rest)))
                   ((3) (c-mvals-group ns xs rest))
                   (else rest))))))
-(define c-module-slots (subr c-walks (c-mvals int) c-mslots)
+(define c-module-slots (->* (c-mvals int) c-mslots)
   (lambda (vs d)
     (if (null? vs)
         nil
         (cons (cons (extract (car vs) 1) d) (c-module-slots (cdr vs) (+ d 1))))))
-(define c-find-slot (subr c-walks (c-mslots symbol) c-mslots)
+(define c-find-slot (->* (c-mslots symbol) c-mslots)
   (lambda (ss n)
     (cond ((null? ss) nil)
           ((symbol=? (car (car ss)) n) ss)
           (else (c-find-slot (cdr ss) n)))))
 ;; Whether `x` names any of `later`'s.
-(define c-names-any? (subr c-walks (exp c-mslots) bool)
+(define c-names-any? (->* (exp c-mslots) bool)
   (lambda (x later)
     (letrec ((any (subr c-walks (syms) bool)
                   (lambda (ns)
@@ -178,7 +178,7 @@
       (any (c-free x nil nil)))))
 ;; Item `n`'s lambda's scope while it is made: each of `later` pending, and
 ;; itself a loop if it only calls itself in loops.
-(define c-module-own (subr c-walks (symbol cenv c-mslots exp int) cenv)
+(define c-module-own (->* (symbol cenv c-mslots exp int) cenv)
   (lambda (n e later body nps)
     (if (null? later)
         e
@@ -187,7 +187,7 @@
           (c-module-own n (c-extend m (if loops (at-loop 0) (at-pending (cdr (car later)))) e)
                         (cdr later) body nps)))))
 ;; `ws` and, after them, the patches `ps` of the closure in slot `d`.
-(define c-waits-onto (subr c-walks (c-waits int patches) c-waits)
+(define c-waits-onto (->* (c-waits int patches) c-waits)
   (lambda (ws d ps)
     (if (null? ps)
         ws
@@ -195,7 +195,7 @@
                                                              (3 (cdr (car ps)))))))
                       d (cdr ps)))))
 ;; Each closure of `ws` waiting for slot `d`, given it.
-(define c-give-waiting (subr (maxeff compiles spin) (c-waits int code) unit)
+(define c-give-waiting (->* (c-waits int code) unit)
   (lambda (ws d c)
     (if (null? ws)
         #u
@@ -223,12 +223,12 @@
 (define c-form-made (ref (listof c-made @k) @k) (new nil))
 
 ;; A lambda's own name, unless a parameter of the same name hides it.
-(define c-own-of (subr c-builds (c-params syms) syms)
+(define c-own-of (->* (c-params syms) syms)
   (lambda (ps own0) (if (or (null? own0) (c-has-param? ps (car own0))) (the syms nil) own0)))
 
 ;; Whether `m` is the word made for a lambda of `params` and `body`, its
 ;; own name `own`, capturing `fv`.
-(define c-made-for? (subr c-walks (c-made exp syms syms syms) bool)
+(define c-made-for? (->* (c-made exp syms syms syms) bool)
   (lambda (m body params own fv)
     (and (= (extract (extract m 1) 1) (exp-start body)) (= (extract (extract m 1) 2) (exp-end body))
          (= (extract (extract m 1) 3) (exp-kth body))
@@ -238,7 +238,7 @@
 ;; if it made one here, and the names it captures: the first made, of two
 ;; alike, as the Rust compiler finds it. By the body's identity: a module's
 ;; `up-` and `down-` conversions share a span, not an identity.
-(define c-made-word (subr c-walks (c-params exp cenv syms) (listof c-closing @k))
+(define c-made-word (->* (c-params exp cenv syms) (listof c-closing @k))
   (lambda (ps body e own0)
     (let ((fv (c-lambda-captured ps body e))
           (params (c-bind-params ps nil)) (own (c-own-of ps own0)))
@@ -267,7 +267,7 @@
 ;; values: the lifted procedures `e` binds (known everywhere inside, being
 ;; constants), and its own name `own`, unless it captures it: a loop, or a
 ;; top-level definition's global.
-(define c-own-scope (subr c-walks (syms syms cenv) cenv)
+(define c-own-scope (->* (syms syms cenv) cenv)
   (lambda (own fv e)
     (if (or (null? own) (c-member? fv (car own)))
         (c-lifted-entries e)
@@ -279,7 +279,7 @@
 ;; What register code knows of the procedure `own` names, if it names one:
 ;; its name, where `inner` binds it, its arity `n`, and how many of its
 ;; parameters a lifting added.
-(define c-this-of (subr c-walks (syms cenv int int) (listof c-this @k))
+(define c-this-of (->* (syms cenv int int) (listof c-this @k))
   (lambda (own inner n added)
     (if (null? own)
         nil
@@ -287,14 +287,14 @@
           (cons (the c-this (product (1 (car own)) (2 l) (3 n) (4 added))) nil)))))
 
 ;; The procedure being compiled, as `c-this-name` and the others say.
-(define c-this-saved (subr (maxeff (read @globals) (read @k)) () c-this)
+(define c-this-saved (->* () c-this)
   (lambda ()
     (product (1 (get c-this-name)) (2 (get c-this-loc))
              (3 (get c-this-params)) (4 (get c-this-added)))))
 
 ;; The procedure `me` made the one being compiled, its word starting at
 ;; label `start`.
-(define c-this-enter! (subr (maxeff (read @globals) (write @k)) (c-this int) unit)
+(define c-this-enter! (->* (c-this int) unit)
   (lambda (me start)
     (begin (set c-this-name (extract me 1)) (set c-this-loc (extract me 2))
            (set c-this-params (extract me 3)) (set c-this-start start)
@@ -304,7 +304,7 @@
 ;; has one (a global's); else for the definition it is in, and the name
 ;; it is bound to there (`own`, `letrec`'s, or `bound`, `let`'s), or
 ;; `lambda`: `k-check/walk`.
-(define c-word-base (subr c-emits ((listof string @k) syms (listof symbol @k)) string)
+(define c-word-base (->* ((listof string @k) syms (listof symbol @k)) string)
   (lambda (named own bound)
     (if (null? named)
         (let ((inner (cond ((not (null? own)) (symbol->string (car own)))
@@ -315,7 +315,7 @@
         (car named))))
 ;; A lambda's word's name: `named`'s, if it has one; else `base` and where
 ;; its body starts, so that a profile can say which.
-(define c-word-symbol (subr c-walks (string (listof string @k) exp) symbol)
+(define c-word-symbol (->* (string (listof string @k) exp) symbol)
   (lambda (base named body)
     (string->symbol
       (if (null? named)
@@ -332,7 +332,7 @@
 (define c-twins (ref (listof c-twin @k) @k) (new nil))
 ;; Twin `t` as a copy's, in context `ctx`, specialized as `spec` says, in
 ;; globals `genv`.
-(define c-copy-twin (subr c-builds (c-twin c-spec int int) c-twin)
+(define c-copy-twin (->* (c-twin c-spec int int) c-twin)
   (lambda (t spec ctx genv)
     (product (1 (extract t 1)) (2 (extract t 2)) (3 (extract t 3)) (4 (extract t 4))
              (5 (extract t 5)) (6 (extract t 6)) (7 (extract t 7))
@@ -340,7 +340,7 @@
 ;; Register code for the lambda of `ps` and `body` as word `w`'s twin, when
 ;; this compiler makes it (`c-registers`): made after its form's words.
 (define c-register-twin!
-  (subr (maxeff compiles spin) (tword c-params exp cenv (listof c-this @k) (listof symbol @k)) unit)
+  (->* (tword c-params exp cenv (listof c-this @k) (listof symbol @k)) unit)
   (lambda (w ps body inner this defining)
     (if (get c-registers)
         (set c-twins
@@ -350,13 +350,13 @@
         #u)))
 
 ;; A typed call of `n` arguments: in tail position, a tail call.
-(define c-typed-call (subr c-emits (code int bool) unit)
+(define c-typed-call (->* (code int bool) unit)
   (lambda (c n tail)
     (if tail (c-op1 c routine-ttailcall (wcell-int n)) (c-op1 c routine-tcall (wcell-int n)))))
 ;; A call of `n` arguments in convention `cv`: of a cellular closure, a
 ;; typed call; else the call that looks at the callee's kind (Rust's
 ;; `Compiler::app`).
-(define c-call-in (subr c-emits (code int bool k-conv) unit)
+(define c-call-in (->* (code int bool k-conv) unit)
   (lambda (c n tail cv)
     (tagcase cv
       (cv-cellular () (c-typed-call c n tail))
@@ -364,14 +364,14 @@
 
 ;; The name `(with m body)` is the standard binding of, if `m` is `#%fx`
 ;; (where nothing shadows it, the checker made it the plain name), else "".
-(define c-fx-name (subr (read @globals) (symbol exp) string)
+(define c-fx-name (->* (symbol exp) string)
   (lambda (m body)
     (tagcase body
       (e-var (n a b abk) (if (string=? (symbol->string m) "#%fx") (symbol->string n) ""))
       (else y ""))))
 ;; The standard operation `f` names, if it is a name bound nowhere else;
 ;; else "".
-(define c-standard-name (subr c-walks (exp cenv) string)
+(define c-standard-name (->* (exp cenv) string)
   (lambda (f e)
     (tagcase f
       (e-var (n a b abk) (if (null? (c-where e n)) (symbol->string n) ""))
@@ -381,7 +381,7 @@
 
 ;; Whether `f` names the standard `name`, as the quote rewrite writes it:
 ;; plainly, or through `#%fx`.
-(define c-quote-names? (subr (read @globals) (exp string) bool)
+(define c-quote-names? (->* (exp string) bool)
   (lambda (f name)
     (tagcase f
       (e-var (n a b abk) (string=? (symbol->string n) name))
@@ -394,7 +394,7 @@
 ;; or a vector in it, not yet: built as written. As the Rust compiler's
 ;; `quoted_value`. None, or one.
 (define c-quoted-cell
-  (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (exp) (listof wcell @k))
+  (->* (exp) (listof wcell @k))
   (lambda (x)
     (tagcase x
       (e-int (n a b abk) (cons (wcell-int n) nil))
@@ -415,27 +415,27 @@
 ;; it is all literals: the one object equal to it, at every copy of the
 ;; quote and every quote of it. As the Rust compiler's `quote_now`.
 (define c-quote-now
-  (subr (maxeff (read @globals) (read @k) (alloc @k) spin) (exp) (listof wcell @k))
+  (->* (exp) (listof wcell @k))
   (lambda (arg)
     (let ((made (c-quoted-cell arg)))
       (if (null? made) nil (cons (wcell-interned (car made)) nil)))))
 
 ;; The value `p` picks of the module pushed: its value `k`, or value `j` of
 ;; the module that is its value `k`.
-(define c-reshape-field (subr (maxeff compiles spin) (code k-pick) unit)
+(define c-reshape-field (->* (code k-pick) unit)
   (lambda (c p)
     (tagcase p
       (pick-value (k) (c-field c (+ k 2)))
       (pick-path (k j) (begin (c-field c (+ k 2)) (c-field c (+ j 2)))))))
 ;; The module in slot `depth`'s fields at positions `at`, pushed.
-(define c-reshape-fields (subr (maxeff compiles spin) (k-picks int code) unit)
+(define c-reshape-fields (->* (k-picks int code) unit)
   (lambda (at depth c)
     (if (null? at)
         #u
         (begin (c-op1 c routine-slot (wcell-int depth)) (c-reshape-field c (car at))
                (c-reshape-fields (cdr at) depth c)))))
 ;; Each slot of `ss`, newest first, pushed, the oldest first: how many.
-(define c-slots-load (subr (maxeff c-emits spin) ((listof int @k) code) int)
+(define c-slots-load (->* ((listof int @k) code) int)
   (lambda (ss c)
     (if (null? ss)
         0
@@ -443,7 +443,7 @@
           (begin (c-op1 c routine-slot (wcell-int (car ss))) (+ n 1))))))
 ;; A `with`'s module, at `l`, its values `ns` from field `i` on, each into
 ;; the next slot from `depth`: `e` with them bound.
-(define c-with-fields (subr (maxeff compiles spin) (syms k-ids loc cenv int int code) cenv)
+(define c-with-fields (->* (syms k-ids loc cenv int int code) cenv)
   (lambda (ns ps l e depth k c)
     (if (or (null? ns) (null? ps))
         e

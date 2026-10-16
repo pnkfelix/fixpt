@@ -27,29 +27,29 @@
 ;; What a type is shown as so far (`check-print-types.fx`).
 (define k-shown-none k-shown (product (1 (the k-strings nil)) (2 (the k-ids nil)) (3 0)))
 ;; `st`, then `s`.
-(define k-put (subr (read @globals) (string k-shown) k-shown)
+(define k-put (->* (string k-shown) k-shown)
   (lambda (s st)
     (product (1 (the k-strings (cons s (extract st 1)))) (2 (extract st 2))
              (3 (+ (extract st 3) 1)))))
 ;; `st`, its depths `ds`.
-(define k-shown-depths (subr pure (k-shown k-ids) k-shown)
+(define k-shown-depths (->* (k-shown k-ids) k-shown)
   (lambda (st ds) (product (1 (extract st 1)) (2 ds) (3 (extract st 3)))))
 ;; `ds` without `d`.
-(define k-ids-without (subr (read @globals) (k-ids int) k-ids)
+(define k-ids-without (->* (k-ids int) k-ids)
   (lambda (ds d)
     (cond ((null? ds) ds)
           ((= (car ds) d) (k-ids-without (cdr ds) d))
           (else (the k-ids (cons (car ds) (k-ids-without (cdr ds) d)))))))
 ;; The first `k` pieces of `xs`, then `mid`, then the rest: `(mu %d ` put
 ;; before a node's pieces once it is known to be met again below.
-(define k-pieces-before (subr (maxeff (read @globals) spin) (k-strings int string) k-strings)
+(define k-pieces-before (->* (k-strings int string) k-strings)
   (lambda (xs k mid)
     (if (or (<= k 0) (null? xs))
         (the k-strings (cons mid xs))
         (the k-strings (cons (car xs) (k-pieces-before (cdr xs) (- k 1) mid))))))
 ;; The pieces, the last first, joined: their characters gathered, last to
 ;; first, into one list in an arena of its own, made a string once.
-(define k-pieces-string (subr (maxeff (read @globals) (read @t)) (k-strings) string)
+(define k-pieces-string (->* (k-strings) string)
   (lambda (xs)
     (letrena r
       (letrec ((chars (subr (alloc r) (string int (listof char r)) (listof char r))
@@ -62,27 +62,27 @@
                        (all (cdr xs) (chars (car xs) (- (string-length (car xs)) 1) acc))))))
         (list->string (all xs nil))))))
 (define-rec
-  (k-show-on (subr kbuilds (int k-printing k-shown) k-shown)
+  (k-show-on (->* (int k-printing k-shown) k-shown)
     (lambda (t path st)
       (let* ((t (k-resolve t))
              (named (k-part-named (extract path 2) t))
              (name (if (null? named) (k-abbrev-by (extract path 3) t) named)))
         (if (null? name) (k-show-body t path st) (k-put (car name) st)))))
   ;; Each of `ts`, `sep` between each two.
-  (k-show-seq (subr kbuilds (k-ids k-printing string k-shown) k-shown)
+  (k-show-seq (->* (k-ids k-printing string k-shown) k-shown)
     (lambda (ts path sep st)
       (cond ((null? ts) st)
             ((null? (cdr ts)) (k-show-on (car ts) path st))
             (else (k-show-seq (cdr ts) path sep (k-put sep (k-show-on (car ts) path st)))))))
   ;; Each part's ` (label type)`.
-  (k-show-parts (subr kbuilds (k-parts k-printing k-shown) k-shown)
+  (k-show-parts (->* (k-parts k-printing k-shown) k-shown)
     (lambda (ps path st)
       (if (null? ps)
           st
           (let* ((st (k-put (k-cat3 " (" (symbol->string (extract (car ps) 1)) " ") st))
                  (st (k-put ")" (k-show-on (extract (car ps) 2) path st))))
             (k-show-parts (cdr ps) path st)))))
-  (k-show-desc (subr kbuilds (k-desc k-printing k-shown) k-shown)
+  (k-show-desc (->* (k-desc k-printing k-shown) k-shown)
     (lambda (d p st)
       (tagcase d
         (dt (t) (k-show-on t p st))
@@ -92,31 +92,31 @@
         (dc (c) (k-put (k-conv-show c) st))
         (df (f) (k-show-on f p st)))))
   ;; Each of `ds`, a space between each two.
-  (k-show-descs (subr kbuilds (k-descs k-printing k-shown) k-shown)
+  (k-show-descs (->* (k-descs k-printing k-shown) k-shown)
     (lambda (ds p st)
       (cond ((null? ds) st)
             ((null? (cdr ds)) (k-show-desc (car ds) p st))
             (else (k-show-descs (cdr ds) p (k-put " " (k-show-desc (car ds) p st)))))))
   ;; A `subr` type.
-  (k-show-subr (subr kbuilds (k-eff k-ids int k-conv k-printing k-shown) k-shown)
+  (k-show-subr (->* (k-eff k-ids int k-conv k-printing k-shown) k-shown)
     (lambda (e ps r cv p st)
       (let* ((st (k-put (k-cat5 "(subr " (k-conv-prefix cv) (k-show-effect e) " (" "") st))
              (st (k-put ") " (k-show-seq ps p " " st))))
         (k-put ")" (k-show-on r p st)))))
   ;; `(head a h e r)`: a prompt tag's type, or a composable continuation's.
-  (k-show-control (subr kbuilds (string int int k-eff k-region k-printing k-shown) k-shown)
+  (k-show-control (->* (string int int k-eff k-region k-printing k-shown) k-shown)
     (lambda (head a h e r p st)
       (let* ((st (k-put " " (k-show-on a p (k-put head st))))
              (st (k-show-on h p st)))
         (k-put (k-cat5 " " (k-show-effect e) " " (k-region-show r) ")") st))))
   ;; `(head a r)`.
-  (k-show-in-region (subr kbuilds (string int k-region k-printing k-shown) k-shown)
+  (k-show-in-region (->* (string int k-region k-printing k-shown) k-shown)
     (lambda (head a r p st)
       (k-put (k-cat3 " " (k-region-show r) ")") (k-show-on a p (k-put head st)))))
   ;; A node met again on the way down is a cycle: named by its depth, and
   ;; written `(mu %d …)` where the cycle starts, once its pieces are known
   ;; to name it.
-  (k-show-body (subr kbuilds (int k-printing k-shown) k-shown)
+  (k-show-body (->* (int k-printing k-shown) k-shown)
     (lambda (t path st)
       (let ((ids (extract path 1)))
         (if (k-has-id? ids t)
@@ -139,7 +139,7 @@
                   out))))))
   ;; What node `t` shows as, `p` the path to it from the root, newest
   ;; first.
-  (k-show-node (subr kbuilds (int k-printing k-shown) k-shown)
+  (k-show-node (->* (int k-printing k-shown) k-shown)
     (lambda (t p st)
       (tagcase (k-get t)
         (ty-base (s) (k-put (symbol->string s) st))
@@ -208,7 +208,7 @@
             (k-put ")" (k-show-desc body p (k-put head st))))))))
   ;; A module type's components of kind `what`: ` (what name type)` each.
   ;; A description's name naming it in the components after it.
-  (k-show-comps (subr kbuilds (string k-parts k-printing k-shown) k-shown)
+  (k-show-comps (->* (string k-parts k-printing k-shown) k-shown)
     (lambda (what ps p st)
       (if (null? ps)
           st
@@ -222,13 +222,13 @@
   ;; value's, `||`, no name): a `define-type` alias of it, `(select m n)`, is
   ;; named `n` too.
   ;; A family too (`(dlambda …)`), as the Rust checker shows one.
-  (k-show-comp (subr kbuilds (int k-printing symbol k-shown) k-shown)
+  (k-show-comp (->* (int k-printing symbol k-shown) k-shown)
     (lambda (t p n st)
       (tagcase (k-get t)
         (ty-lam (bs body)
           (if (null? bs) (k-show-desc body p st) (k-show-comp-named t p n st)))
         (else y (k-show-comp-named t p n st)))))
-  (k-show-comp-named (subr kbuilds (int k-printing symbol k-shown) k-shown)
+  (k-show-comp-named (->* (int k-printing symbol k-shown) k-shown)
     (lambda (t p n st)
       (let* ((r (k-resolve t))
              (named (k-part-named (extract p 2) r))
@@ -238,14 +238,14 @@
             (k-put (car name) st))))))
 
 ;; Each of `ts` shown, as printing `path` shows it.
-(define k-show-list (subr kbuilds (k-ids k-printing) k-strings)
+(define k-show-list (->* (k-ids k-printing) k-strings)
   (lambda (ts path)
     (if (null? ts)
         nil
         (cons (k-pieces-string (extract (k-show-on (car ts) path k-shown-none) 1))
               (k-show-list (cdr ts) path)))))
 ;; Whether type `t` is variable `v`.
-(define k-type-is-var? (subr (maxeff kreads spin) (int int) bool)
+(define k-type-is-var? (->* (int int) bool)
   (lambda (t v) (tagcase (k-get t) (ty-var (w) (= w v)) (else y #f))))
 ;; The tree of a scope's `define-type`s (`k-atree-of`), kept with the scope
 ;; it was made of and how many links had been made (`k-links`): made once
@@ -253,14 +253,14 @@
 ;; resolve to stays, not again for each line shown (`k-keep-atree!`).
 (define k-atree-kept (ref (listof k-atree-of-scope acyclic) @t) (new nil))
 ;; Whether `kept` is the tree of the scope now.
-(define k-atree-current? (subr kreads ((listof k-atree-of-scope acyclic)) bool)
+(define k-atree-current? (->* ((listof k-atree-of-scope acyclic)) bool)
   (lambda (kept)
     (and (not (null? kept))
          (eq? (extract (car kept) 1) (get k-dscope))
          (= (extract (car kept) 2) (get k-links)))))
 ;; For the driver of the top level, which may write: the tree of the scope
 ;; now, if the one kept is not of it.
-(define k-keep-atree! (subr (maxeff kreads (write @t) (alloc @t) spin) () unit)
+(define k-keep-atree! (->* () unit)
   (lambda ()
     (if (k-atree-current? (get k-atree-kept))
         #u
@@ -270,7 +270,7 @@
                       (list (product (1 ds) (2 (get k-links))
                                      (3 (k-atree-of ds 0 (a-leaf)))))))))))
 ;; The tree of the scope now: the one kept, if it is of it.
-(define k-atree-now (subr kbuilds () k-atree)
+(define k-atree-now (->* () k-atree)
   (lambda ()
     (let ((kept (get k-atree-kept)))
       (if (k-atree-current? kept)
@@ -278,7 +278,7 @@
           (k-atree-of (get k-dscope) 0 (a-leaf))))))
 ;; A type. One `define-type` named prints as its name; any other recursive
 ;; type as `(mu %d …)`, `%d` naming the cycle.
-(define k-show-ty (subr kbuilds (int) string)
+(define k-show-ty (->* (int) string)
   (lambda (t)
     (let* ((trs (the k-atrees (list (k-atree-now))))
            (p (product (1 (the k-ids nil)) (2 (the k-parts nil)) (3 trs))))

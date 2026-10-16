@@ -36,27 +36,27 @@
 
 ;; A flat sum's label as a word (`Compiler::flat_label`): a number as it is
 ;; where the key is numeric (`k`'s bit 3), else the symbol.
-(define c-flat-label (subr (maxeff (read @globals) (alloc @k) spin) (symbol int) wcell)
+(define c-flat-label (->* (symbol int) wcell)
   (lambda (l k)
     (if (= (modulo (quotient k 8) 2) 1)
         (wcell-int (c-digits-value (symbol->string l) 0 0))
         (wcell-symbol l))))
 ;; A label's number, from its digits (`TODO.md` §75: no `string->int` yet).
-(define c-digits-value (subr (maxeff (read @globals) spin) (string int int) int)
+(define c-digits-value (->* (string int int) int)
   (lambda (s i n)
     (if (= i (string-length s))
         n
         (c-digits-value s (+ i 1) (+ (* n 10) (- (char->integer (string-ref s i)) 48))))))
 
 (define-rec
-  (c-exps (subr (maxeff compiles spin) (exps cenv int code) int)
+  (c-exps (->* (exps cenv int code) int)
     (lambda (es e depth c)
       (if (null? es)
           0
           (begin (c-exp (car es) e depth c #f) (+ 1 (c-exps (cdr es) e (+ depth 1) c))))))
   ;; `x`'s code. A procedure converted to a convention is made, then given
   ;; to `%fx26-convert` with what it is converted to.
-  (c-exp (subr (maxeff compiles spin) (exp cenv int code bool) unit)
+  (c-exp (->* (exp cenv int code bool) unit)
     (lambda (x e depth c tail)
       (let ((k (c-conversion-at x)) (r (c-reshape-at x)))
         (cond ((>= k 0)
@@ -66,7 +66,7 @@
               (else (c-exp-as-is x e depth c tail))))))
   ;; A module reshaped (`k-reshape-at`): made, then a product of the values
   ;; the type wanted has, by position `at`.
-  (c-reshape (subr (maxeff compiles spin) (exp k-picks cenv int code bool) unit)
+  (c-reshape (->* (exp k-picks cenv int code bool) unit)
     (lambda (x at e depth c tail)
       (begin (c-exp-as-is x e depth c #f)
              (c-int c 37)
@@ -74,7 +74,7 @@
              (c-prim c "%make-frozen" (+ 1 (k-length at)))
              (c-unbind c depth 1 #f)
              (c-done c tail))))
-  (c-exp-as-is (subr (maxeff compiles spin) (exp cenv int code bool) unit)
+  (c-exp-as-is (->* (exp cenv int code bool) unit)
     (lambda (x e depth c tail)
       (tagcase x
         (e-var (n a b abk)
@@ -184,7 +184,7 @@
   ;; A module (`docs/research/first-class-modules.md`): its items made in
   ;; slots in order from `depth`, as a `letrec*`'s (`c-module-make`); then
   ;; the product of its values.
-  (c-module (subr (maxeff compiles spin) (mod-items cenv int code bool) unit)
+  (c-module (->* (mod-items cenv int code bool) unit)
     (lambda (items e depth c tail)
       (let* ((vs (c-module-values items))
              (made (c-module-make vs e depth (c-module-slots vs depth) nil nil c))
@@ -196,8 +196,8 @@
   ;; waiting, `vals` the values' slots (newest first): the next slot, and
   ;; the values' slots.
   (c-module-make
-    (subr (maxeff compiles spin) (c-mvals cenv int c-mslots c-waits (listof int @k) code)
-          (productof (1 int) (2 (listof int @k))))
+    (->* (c-mvals cenv int c-mslots c-waits (listof int @k) code)
+         (productof (1 int) (2 (listof int @k))))
     (lambda (vs e d later ws vals c)
       (if (null? vs)
           (product (1 d) (2 vals))
@@ -214,7 +214,7 @@
   ;; Item `n`'s lambda `x`, made in slot `d` in `e`, naming items of `later`
   ;; not made yet, itself among them: those captured as a `letrec`'s
   ;; siblings are, to be given once made. What it gives: as `c-lambda`'s.
-  (c-module-closure (subr (maxeff compiles spin) (symbol exp cenv c-mslots int code) patches)
+  (c-module-closure (->* (symbol exp cenv c-mslots int code) patches)
     (lambda (n x e later d c)
       (let ((own (the syms (cons n nil))))
         (tagcase (car (c-lambda-of x))
@@ -229,7 +229,7 @@
           (else y (c-fail "a module's typed lambda is a lambda"))))))
   ;; `with`: the module's values, by position, in slots from `depth`; then
   ;; the body.
-  (c-with (subr (maxeff compiles spin) (symbol exp int int int cenv int code bool) unit)
+  (c-with (->* (symbol exp int int int cenv int code bool) unit)
     (lambda (m body a b abk e depth c tail)
       (let ((ns (c-with-at a b abk)) (ps (c-with-places-at a b abk)) (l (c-where e m)))
         (cond ((not (string=? (c-fx-name m body) ""))
@@ -242,14 +242,14 @@
                (let ((inner (c-with-fields (car ns) (car ps) (car l) e depth 0 c)))
                  (begin (c-exp body inner (+ depth (c-length (car ns))) c tail)
                         (c-unbind c depth (c-length (car ns)) tail))))))))
-  (c-begin (subr (maxeff compiles spin) (exps cenv int code bool) unit)
+  (c-begin (->* (exps cenv int code bool) unit)
     (lambda (es e depth c tail)
       (cond ((null? es) (begin (c-lit c (wcell-unit)) (c-done c tail)))
             ((null? (cdr es)) (c-exp (car es) e depth c tail))
             (else (begin (c-exp (car es) e depth c #f) (c-op c routine-drop)
                          (c-begin (cdr es) e depth c tail))))))
   ;; Each value pushed, in the scope outside; the names are the slots.
-  (c-let-bind (subr (maxeff compiles spin) (c-binds cenv cenv int code) cenv)
+  (c-let-bind (->* (c-binds cenv cenv int code) cenv)
     (lambda (bs outer inner depth c)
       (if (null? bs)
           inner
@@ -258,7 +258,7 @@
                  (set c-bind-name nil)
                  (c-let-bind (cdr bs) outer (c-extend (extract (car bs) 1) (at-slot depth) inner)
                              (+ depth 1) c)))))
-  (c-letrec (subr (maxeff compiles spin) (c-recs exp cenv int code bool) unit)
+  (c-letrec (->* (c-recs exp cenv int code bool) unit)
     (lambda (bs body e depth c tail)
       (let* ((made (c-letrec-make bs bs e depth 0 c)) (n (c-count-letrec bs)))
         (begin
@@ -266,7 +266,7 @@
           (c-exp body (c-letrec-slots bs e depth) (+ depth n) c tail)
           (c-unbind c depth n tail)))))
   ;; A `let`: each value pushed, in the scope outside; the names are the slots.
-  (c-let (subr (maxeff compiles spin) (c-binds exp cenv int code bool) unit)
+  (c-let (->* (c-binds exp cenv int code bool) unit)
     (lambda (bs body e depth c tail)
       (let* ((inner (c-let-bind bs e e depth c)) (n (c-count-let bs)))
         (begin (c-exp body inner (+ depth n) c tail) (c-unbind c depth n tail)))))
@@ -274,7 +274,7 @@
   ;; time it is asked (by its stack code: its register code asks again, and
   ;; has the same answer and words): its members' `c-lifts` indices if so, in
   ;; a list of one, each member's word made, with the names it takes first.
-  (c-lift (subr (maxeff compiles spin) (c-recs exp int int int cenv bool) c-lifting)
+  (c-lift (->* (c-recs exp int int int cenv bool) c-lifting)
     (lambda (bs body a b abk e tail)
       (let ((key (c-span-key a b abk)))
         (if (table-has? (get c-lifted) key)
@@ -292,7 +292,7 @@
                       done))))))))
   ;; Each member's word, from the `i`th, into its closure: its added names
   ;; first, then its parameters; its tail calls of itself loops.
-  (c-lift-words (subr (maxeff compiles spin) (c-recs c-added (listof int @k) cenv int) unit)
+  (c-lift-words (->* (c-recs c-added (listof int @k) cenv int) unit)
     (lambda (bs added ks known i)
       (if (null? bs)
           #u
@@ -310,7 +310,7 @@
                   (c-lift-words (cdr bs) added (cdr ks) known (+ i 1)))))
             (else y (c-fail "a lifted binding is a lambda"))))))
   ;; A `letrec`, lifted if it may be (`c-lift`), else closures made.
-  (c-letrec-or-lift (subr (maxeff compiles spin) (c-recs exp int int int cenv int code bool) unit)
+  (c-letrec-or-lift (->* (c-recs exp int int int cenv int code bool) unit)
     (lambda (bs body a b abk e depth c tail)
       (let ((ks (c-lift bs body a b abk e tail)))
         (if (null? ks)
@@ -318,8 +318,7 @@
             (c-exp body (c-bind-lifted bs (car ks) e) depth c tail)))))
   ;; Each closure made, in order; what each must have patched.
   (c-letrec-make
-    (subr (maxeff compiles spin) (c-recs c-recs cenv int int code)
-          (listof patches @k))
+    (->* (c-recs c-recs cenv int int code) (listof patches @k))
     (lambda (all bs e depth i c)
       (if (null? bs)
           nil
@@ -340,7 +339,7 @@
   ;; Binding `i` of `all`, the lambda of `ps` and `body` bound to `name`
   ;; (in `region`, if an `rlambda`'s), made as a `letrec` makes it.
   (c-letrec-lambda
-    (subr (maxeff compiles spin) (c-recs c-params exp symbol cenv int int code c-region) patches)
+    (->* (c-recs c-params exp symbol cenv int int code c-region) patches)
     (lambda (all ps body name e depth i c region)
       (c-lambda ps body (c-letrec-own all e depth 0 i body (c-count-params ps)) (+ depth i) c
                 (the syms (cons name nil)) region)))
@@ -351,7 +350,7 @@
   ;; it gives: for each `letrec` sibling it captured before the sibling was
   ;; made, its free value's index and the slot the sibling will be in.
   ;; Outside a region, made in the program's convention (`c-closure-routine`).
-  (c-lambda (subr (maxeff compiles spin) (c-params exp cenv int code syms c-region) patches)
+  (c-lambda (->* (c-params exp cenv int code syms c-region) patches)
     (lambda (ps body e depth c own0 region)
       (let* ((made (begin (if (null? region) #u (c-exp (car region) e depth c #f))
                           (c-lambda-word ps body e own0)))
@@ -368,7 +367,7 @@
   ;; A lambda's word, and the names its closure captures, in order; with its
   ;; register code as its twin, when this compiler makes register code
   ;; (`c-registers`).
-  (c-lambda-word (subr (maxeff compiles spin) (c-params exp cenv syms) c-closing)
+  (c-lambda-word (->* (c-params exp cenv syms) c-closing)
     (lambda (ps body e own0)
       (let* ((outer (c-take c-made-now (the (listof c-made @k) nil)))
              (made (c-lambda-word-in ps body e own0)))
@@ -379,7 +378,7 @@
             (if (= (get c-twin-depth) 0) (set c-form-made (cons m (get c-form-made))) #u)
             made)))))
   ;; The same, with the words of the lambdas in it noted as made.
-  (c-lambda-word-in (subr (maxeff compiles spin) (c-params exp cenv syms) c-closing)
+  (c-lambda-word-in (->* (c-params exp cenv syms) c-closing)
     (lambda (ps body e own0)
       (let* ((named (c-take c-word-name (the (listof string @k) nil)))
              (bound (c-take c-bind-name (the (listof symbol @k) nil)))
@@ -413,7 +412,7 @@
               (set c-scope-name outer-scope)
               (product (1 w) (2 fv))))))))
   ;;; ------------------------------------------------------------ applications
-  (c-app (subr (maxeff compiles spin) (exp exp exps cenv int code bool) unit)
+  (c-app (->* (exp exp exps cenv int code bool) unit)
     (lambda (x f args e depth c tail)
       (if (c-self-call? f args e tail)
           ;; A loop: the arguments into the parameters' slots, the rest of
@@ -423,7 +422,7 @@
                  (c-drops c (- depth (get c-this-params)))
                  (c-emit c (i-branch (get c-this-start))))
           (c-app-other x f args e depth c tail))))
-  (c-app-other (subr (maxeff compiles spin) (exp exp exps cenv int code bool) unit)
+  (c-app-other (->* (exp exp exps cenv int code bool) unit)
     (lambda (x f args e depth c tail)
       (let ((k (c-lifted-at f e)) (standard (c-standard-name f e)))
         (cond ((>= k 0) (c-app-lifted k args e depth c tail))
@@ -445,7 +444,7 @@
               (else (begin (c-standard standard args e depth c) (c-done c tail)))))))
   ;; A lifted procedure's call: the names it would have captured, then the
   ;; arguments, then its closure.
-  (c-app-lifted (subr (maxeff compiles spin) (int exps cenv int code bool) unit)
+  (c-app-lifted (->* (int exps cenv int code bool) unit)
     (lambda (k args e depth c tail)
       (let* ((lift (c-lift-of k))
              (added (extract lift 2))
@@ -455,13 +454,13 @@
   ;; A standard operation, open-coded: a routine, or a runtime primitive, with
   ;; FX-26's conventions made plain (mutators give unit; arrays skip the
   ;; trailer's field).
-  (c-standard (subr (maxeff compiles spin) (string exps cenv int code) unit)
+  (c-standard (->* (string exps cenv int code) unit)
     (lambda (name args e depth c)
       (if (string=? name "make-array")
           ;; (%make-bloblet-filled 0 n fill): the 0 first, under the others.
           (begin (c-int c 0) (c-exps args e (+ depth 1) c) (c-prim c "%make-bloblet-filled" 3))
           (c-standard-on name (c-exps args e depth c) c))))
-  (c-bloblet (subr (maxeff compiles spin) (string int exps cenv int code) unit)
+  (c-bloblet (->* (string int exps cenv int code) unit)
     (lambda (op i args e depth c)
       (case op (("make-bloblet") (c-prim c "%make-bloblet" (c-exps args e depth c)))
                (("rmake-bloblet")
@@ -504,7 +503,7 @@
   ;; On a blobref to a flat sum, of layout code `k` (≥ 0, `TODO.md` §77): its
   ;; tag read once, as a label, into the slot after it.
   (c-tagcase
-    (subr (maxeff compiles spin) (exp c-cases c-binds cenv int code bool int) unit)
+    (->* (exp c-cases c-binds cenv int code bool int) unit)
     (lambda (s arms els e depth c tail k)
       (let ((end (c-fresh)))
         (begin
@@ -518,7 +517,7 @@
   ;; A flat sum's arms (`Compiler::flat_arms`): each name a blobref to its
   ;; variant, `k / 256` bytes along; no arm for the tag a failure.
   (c-flat-arms
-    (subr (maxeff compiles spin) (c-cases c-binds int cenv int code bool int) unit)
+    (->* (c-cases c-binds int cenv int code bool int) unit)
     (lambda (arms els k e depth c tail end)
       (if (null? arms)
           (begin
@@ -544,7 +543,7 @@
               (c-emit c (i-label next))
               (c-flat-arms (cdr arms) els k e depth c tail end))))))
   (c-arms
-    (subr (maxeff compiles spin) (c-cases c-binds cenv int code bool int) unit)
+    (->* (c-cases c-binds cenv int code bool int) unit)
     (lambda (arms els e depth c tail end)
       (if (null? arms)
           (if (null? els)

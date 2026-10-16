@@ -43,13 +43,13 @@
 (define k-newline string (char->string (integer->char 10)))
 ;; Run `f`, and if it fails at `a`..`b` with "a W is expected here, and
 ;; this is a G", fail instead with what `say` makes of W and G.
-(define k-expected-split (subr (maxeff (read @globals) spin) (string) string)
+(define k-expected-split (->* (string) string)
   (lambda (m) (if (= (string-search m "a " 0) 0) (substring m 2 (string-length m)) "")))
 (define k-sep string " is expected here, and this is a ")
 ;; "a W is expected here, and this is a G", of `w` and `g`.
-(define k-expected-here (subr (read @globals) (string string) string)
+(define k-expected-here (->* (string string) string)
   (lambda (w g) (k-cat4 "a " w k-sep g)))
-(define k-rewriting (subr (maxeff checks spin) (k-checking int int k-saying) k-te)
+(define k-rewriting (->* (k-checking int int k-saying) k-te)
   (lambda (f a b say)
     (let ((r (prompt k-tag (k-done (f)) (lambda (r) r))))
       (tagcase r
@@ -67,7 +67,7 @@
                 (k-fail m ea eb))))
         (k-ok (xs) (k-fail "k-ok inside" a b))))))
 ;; The same, for any error at `a`..`b`.
-(define k-prefixing (subr checks ((subr checks () k-te) int int (subr checks () string)) k-te)
+(define k-prefixing (->* ((subr checks () k-te) int int (subr checks () string)) k-te)
   (lambda (f a b prefix)
     (let ((r (prompt k-tag (k-done (f)) (lambda (r) r))))
       (tagcase r
@@ -79,7 +79,7 @@
 ;; The convention `want` asks of `got`, where a procedure differs from what
 ;; is expected only in its convention, so that a conversion makes it one
 ;; (`docs/research/native-conventions.md`).
-(define k-conversion (subr (maxeff checks spin) (int int) (listof k-conv acyclic))
+(define k-conversion (->* (int int) (listof k-conv acyclic))
   (lambda (got want)
     (tagcase (k-get (k-resolve got))
       (ty-subr (e ps r from)
@@ -91,7 +91,7 @@
           (else y nil)))
       (else y nil))))
 ;; Conversion `code` at `x`, among the facts `checked-extracts` gives.
-(define k-note-conversion (subr (maxeff checks spin) (kx int) unit)
+(define k-note-conversion (->* (kx int) unit)
   (lambda (x code)
     (let ((fact (product (1 (k-at-of x)) (2 (n-conversion code)))))
       (set k-extracts (cons fact (get k-extracts))))))
@@ -102,21 +102,21 @@
 ;; for that calls it. The compiler learns of it as a fact of `x`
 ;; (`n-conversion`): the arity times 4, plus 1 for `cellular` or 2 for
 ;; `native`.
-(define k-convert-at (subr (maxeff checks spin) (kx int k-conv) unit)
+(define k-convert-at (->* (kx int k-conv) unit)
   (lambda (x t to)
     (let ((n (tagcase (k-get (k-resolve t)) (ty-subr (e ps r cv) (* 4 (k-length ps))) (else y 0))))
       (tagcase to
         (cv-cellular () (k-note-conversion x (+ n 1)))
         (cv-native () (k-note-conversion x (+ n 2)))
         (else y #u)))))
-(define k-latent-of (subr (maxeff kstate spin) (int) k-effs)
+(define k-latent-of (->* (int) k-effs)
   (lambda (t)
     (tagcase (k-get (k-resolve t))
       (ty-poly (bs body) (k-latent-of body))
       (ty-subr (e ps r cv) (the k-effs (cons e nil)))
       (else y nil))))
 ;; The atoms of `g` that `w` does not cover.
-(define k-uncovered (subr (maxeff kstate spin) (k-eff k-eff) k-eff)
+(define k-uncovered (->* (k-eff k-eff) k-eff)
   (lambda (g w)
     (cond ((null? g) nil)
           ((k-within? (k-one (car g)) w) (k-uncovered (cdr g) w))
@@ -124,7 +124,7 @@
 ;; The second line of an "is expected here" message, where `got` and `want`
 ;; are procedures: the atoms of `got`'s latent effect that `want`'s does not
 ;; cover (`Checker::effect_delta`).
-(define* k-effect-delta (subr (maxeff kstate spin) (int int) string)
+(define k-effect-delta (->* (int int) string)
   (lambda (got want)
     (let ((g (k-latent-of got)) (w (k-latent-of want)))
       (if (or (null? g) (null? w))
@@ -134,7 +134,7 @@
                 ""
                 (k-cat3 k-newline "  beyond what is expected, it has " (k-show-effect beyond))))))))
 ;; `got ≤ want`, or an error at `x` saying so.
-(define k-expect (subr (maxeff checks spin) (kx int int) unit)
+(define k-expect (->* (kx int int) unit)
   (lambda (x got want)
     (if (k-subtype got want)
         #u
@@ -144,7 +144,7 @@
                 (else (k-fail (k-expected-apart got want) (k-start x) (k-end x))))))))
 ;; "a W is expected here, and this is a G", and the effect's delta, with two
 ;; variables of one name told apart (`k-show-apart`).
-(define k-expected-apart (subr (maxeff checks spin) (int int) string)
+(define k-expected-apart (->* (int int) string)
   (lambda (got want)
     (let* ((on (set k-show-marks #t))
            (w (k-show-ty want)) (g (k-show-ty got)) (d (k-effect-delta got want))
@@ -153,13 +153,13 @@
       (k-cat3 (k-expected-here (car ss) (car (cdr ss))) (car (cdr (cdr ss)))
               (car (cdr (cdr (cdr ss))))))))
 ;; Bind each, the first first.
-(define k-bind-all (subr (maxeff kstate spin) (k-bindings) unit)
+(define k-bind-all (->* (k-bindings) unit)
   (lambda (bs)
     (if (null? bs) #u (begin (k-bind (car (car bs)) (cdr (car bs))) (k-bind-all (cdr bs))))))
 ;; `t` for a variable being bound to it: a `nat` of no known size is given
 ;; one, a variable of its own named after the variable, so that tests of it
 ;; can teach facts; and a module's abstract types are named too.
-(define k-name-nat (subr (maxeff kstate spin) (symbol int) int)
+(define k-name-nat (->* (symbol int) int)
   (lambda (name t)
     (tagcase (k-get (k-resolve t))
       (ty-module (abs ds vs) (k-name-module name t))
@@ -193,13 +193,13 @@
           (else w t)))
       (else y t))))
 ;; Bind each, the first first, a `nat` of no known size given one.
-(define k-bind-named (subr (maxeff kstate spin) (k-bindings) unit)
+(define k-bind-named (->* (k-bindings) unit)
   (lambda (bs)
     (if (null? bs)
         #u
         (let ((n (car (car bs))) (t (cdr (car bs))))
           (begin (k-bind n (k-name-nat n t)) (k-bind-named (cdr bs)))))))
-(define k-note-letrec (subr (maxeff kstate spin) (k-letrec-bs bool) unit)
+(define k-note-letrec (->* (k-letrec-bs bool) unit)
   (lambda (bs spins)
     (if (null? bs)
         #u
@@ -212,19 +212,19 @@
 ;; Naming `s`: pure, but for a member of a recursive group that may not
 ;; end, named in the group. Called, the call says `spin`; given away,
 ;; whoever calls it could loop through it, so naming it does.
-(define k-naming-effect (subr (maxeff kmakes spin) (symbol int) k-eff)
+(define k-naming-effect (->* (symbol int) k-eff)
   (lambda (s t)
     (let ((spins (if (k-named-has? (get k-recursive) s t) (k-one (a-spin)) (the k-eff nil))))
       (if (and (get k-globals-effects) (k-global? s))
           (k-insert (a-read (r-global s)) spins)
           spins))))
-(define k-bind-letrec (subr (maxeff kstate spin) (k-letrec-bs) unit)
+(define k-bind-letrec (->* (k-letrec-bs) unit)
   (lambda (bs)
     (if (null? bs)
         #u
         (begin (k-bind (extract (car bs) 1) (extract (car bs) 2)) (k-bind-letrec (cdr bs))))))
 ;; Whether `x` is a lambda, under any type abstractions and ascriptions.
-(define k-lambda? (subr (read @globals) (kx) bool)
+(define k-lambda? (->* (kx) bool)
   (lambda (x)
     (tagcase x
       (x-lambda (ps body a b abk) #t)
@@ -233,7 +233,7 @@
       (x-the (t e a b abk) (k-lambda? e))
       (else y #f))))
 ;; How many of `ns` are `n`.
-(define k-count-name (subr (read @globals) (k-names symbol) int)
+(define k-count-name (->* (k-names symbol) int)
   (lambda (ns n)
     (cond ((null? ns) 0)
           ((symbol=? (car ns) n) (+ 1 (k-count-name (cdr ns) n)))
@@ -241,7 +241,7 @@
 ;; Note each `let` binding of a lambda as known, once bound: of several of
 ;; one name, each is as many from the innermost as come after it. The
 ;; names, in order.
-(define k-note-let-lambdas (subr (maxeff kstate spin) (k-let-bs) k-names)
+(define k-note-let-lambdas (->* (k-let-bs) k-names)
   (lambda (bs)
     (if (null? bs)
         nil
@@ -255,29 +255,29 @@
 ;; `plambda`s, whose effect only allocates. Making a closure makes no mutable
 ;; data a type could be generalized over: it holds only variables bound
 ;; outside.
-(define k-rlambda-under? (subr (read @globals) (kx) bool)
+(define k-rlambda-under? (->* (kx) bool)
   (lambda (x)
     (tagcase x
       (x-rlambda (r l a b abk) #t)
       (x-plambda (bs e a b abk) (k-rlambda-under? e))
       (x-the (t e a b abk) (k-rlambda-under? e))
       (else y #f))))
-(define k-only-alloc? (subr kreads (k-eff) bool)
+(define k-only-alloc? (->* (k-eff) bool)
   (lambda (e)
     (or (null? e) (and (tagcase (car e) (a-alloc (r) #t) (else y #f)) (k-only-alloc? (cdr e))))))
-(define k-generalizable? (subr kreads (kx k-eff) bool)
+(define k-generalizable? (->* (kx k-eff) bool)
   (lambda (x e) (or (null? e) (and (k-rlambda-under? x) (k-only-alloc? e)))))
-(define k-letrec-not-lambda (subr (read @globals) (symbol) string)
+(define k-letrec-not-lambda (->* (symbol) string)
   (lambda (n)
     (k-cat3 (k-quote (symbol->string n))
             " is bound recursively, so it must be a lambda: "
             "nothing may run before every binding exists")))
 
 ;; Binder `v`'s name, quoted.
-(define k-quote-dvar (subr kreads (int) string)
+(define k-quote-dvar (->* (int) string)
   (lambda (v) (k-quote (symbol->string (k-dvar-name v)))))
 ;; Effect `e`, its `select`s resolved: as a subroutine's latent effect.
-(define k-effect-resolved (subr (maxeff checks spin) (k-eff int int) k-eff)
+(define k-effect-resolved (->* (k-eff int int) k-eff)
   (lambda (e a b)
     (let ((t (k-resolve-selects (k-ty-new (ty-subr e nil k-unit (get k-conv-default))) a b)))
       (tagcase (k-get t) (ty-subr (r ps res cv) r) (else y e)))))
@@ -285,14 +285,14 @@
 ;; for a description function, resolved, and taken as one; a type given,
 ;; its `select`s resolved, as an annotation's are (a type a module
 ;; re-exports may be inside it); an effect, likewise (`(select m e)`).
-(define k-select-fun (subr (maxeff checks spin) (k-desc int int int) k-desc)
+(define k-select-fun (->* (k-desc int int int) k-desc)
   (lambda (d k a b)
     (let ((t (tagcase d (dt (x) x) (df (x) x) (else y -1))))
       (cond ((and (k-arrow-kind? k) (>= t 0) (tagcase (k-get t) (ty-select (m n) #t) (else y #f)))
              (df (k-resolve-selects t a b)))
             ((tagcase d (dt (x) #t) (else y #f)) (dt (k-resolve-selects t a b)))
             (else (tagcase d (de (e) (de (k-effect-resolved e a b))) (else y d)))))))
-(define k-proj-map (subr (maxeff checks spin) (k-binders k-descs int int) k-map)
+(define k-proj-map (->* (k-binders k-descs int int) k-map)
   (lambda (bs ds a b)
     (if (null? bs)
         nil
@@ -305,7 +305,7 @@
               (k-fail (k-cat4 (k-quote-dvar v) " is bound as a " (k-kind-word k)
                               ", and the description given is not one")
                       a b))))))
-(define k-param-types (subr checks (k-typed-params k-ids int int) k-bindings)
+(define k-param-types (->* (k-typed-params k-ids int int) k-bindings)
   (lambda (ps hint a b)
     (if (null? ps)
         nil
@@ -318,17 +318,17 @@
                                        a b))))
                (rest (k-param-types (cdr ps) (if (null? hint) hint (cdr hint)) a b)))
           (cons (cons n ty) rest)))))
-(define k-binding-types (subr kmakes (k-bindings) k-ids)
+(define k-binding-types (->* (k-bindings) k-ids)
   (lambda (bs) (if (null? bs) nil (cons (cdr (car bs)) (k-binding-types (cdr bs))))))
-(define k-some-untyped? (subr kreads (k-typed-params) bool)
+(define k-some-untyped? (->* (k-typed-params) bool)
   (lambda (ps)
     (cond ((null? ps) #f)
           ((null? (extract (car ps) 2)) #t)
           (else (k-some-untyped? (cdr ps))))))
 
-(define k-unannotated? (subr kreads (kx) bool)
+(define k-unannotated? (->* (kx) bool)
   (lambda (x) (tagcase x (x-lambda (ps body a b abk) (k-some-untyped? ps)) (else y #f))))
 ;; A `lambda` missing parameter types, or a thunk: better told than asked.
-(define k-needs-telling? (subr kreads (kx) bool)
+(define k-needs-telling? (->* (kx) bool)
   (lambda (x)
     (tagcase x (x-lambda (ps body a b abk) (or (null? ps) (k-some-untyped? ps))) (else y #f)))))))

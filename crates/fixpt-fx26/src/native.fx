@@ -57,22 +57,22 @@
 (define n-exit-common (ref int @k) (new 0))
 
 ;; Elements `i` on of `from` into `to`.
-(define n-copy-ints (subr n-writes (n-ints n-ints int) unit)
+(define n-copy-ints (->* (n-ints n-ints int) unit)
   (lambda (from to i)
     (if (= i (array-length from))
         #u
         (begin (array-set! to i (array-ref from i))
                (n-copy-ints from to (+ i 1))))))
-(define n-copy-bools (subr n-writes (n-bools n-bools int) unit)
+(define n-copy-bools (->* (n-bools n-bools int) unit)
   (lambda (from to i)
     (if (= i (array-length from))
         #u
         (begin (array-set! to i (array-ref from i))
                (n-copy-bools from to (+ i 1))))))
 
-(define n-here (subr (maxeff (read @globals) (read @k)) () int) (lambda () (get n-len)))
+(define n-here (->* () int) (lambda () (get n-len)))
 
-(define n-e (subr (maxeff assembles spin) (int) unit)
+(define n-e (->* (int) unit)
   (lambda (w)
     (let ((n (get n-len)))
       (begin
@@ -82,10 +82,10 @@
             #u)
         (array-set! (get n-code) n w)
         (set n-len (+ n 1))))))
-(define n-es (subr (maxeff assembles spin) ((listof int @k)) unit)
+(define n-es (->* ((listof int @k)) unit)
   (lambda (ws) (if (null? ws) #u (begin (n-e (car ws)) (n-es (cdr ws))))))
 
-(define n-label (subr (maxeff assembles spin) () int)
+(define n-label (->* () int)
   (lambda ()
     (let ((n (get n-nlabels)))
       (begin
@@ -98,27 +98,27 @@
         (array-set! (get n-bound) n #f)
         (set n-nlabels (+ n 1))
         n))))
-(define n-bind-at (subr assembles (int int) unit)
+(define n-bind-at (->* (int int) unit)
   (lambda (l at) (begin (array-set! (get n-labels) l at) (array-set! (get n-bound) l #t))))
-(define n-bind (subr assembles (int) unit) (lambda (l) (n-bind-at l (n-here))))
+(define n-bind (->* (int) unit) (lambda (l) (n-bind-at l (n-here))))
 
-(define n-fixup (subr (maxeff assembles spin) (n-fix) unit)
+(define n-fixup (->* (n-fix) unit)
   (lambda (f) (begin (set n-fixups (cons f (get n-fixups))) (n-e 0))))
-(define n-b (subr (maxeff assembles spin) (int) unit) (lambda (l) (n-fixup (fix-b (n-here) l))))
-(define n-b-cond (subr (maxeff assembles spin) (int int) unit)
+(define n-b (->* (int) unit) (lambda (l) (n-fixup (fix-b (n-here) l))))
+(define n-b-cond (->* (int int) unit)
   (lambda (c l) (n-fixup (fix-bcond (n-here) l c))))
-(define n-cbz (subr (maxeff assembles spin) (int int) unit)
+(define n-cbz (->* (int int) unit)
   (lambda (r l) (n-fixup (fix-cbz (n-here) l r))))
-(define n-cbnz (subr (maxeff assembles spin) (int int) unit)
+(define n-cbnz (->* (int int) unit)
   (lambda (r l) (n-fixup (fix-cbnz (n-here) l r))))
 
 ;; Trap with `code` and `detail` if condition `c` holds.
-(define n-trap-if (subr (maxeff assembles spin) (int int int) unit)
+(define n-trap-if (->* (int int int) unit)
   (lambda (c code detail)
     (let ((l (n-label)))
       (begin (n-b-cond c l)
              (set n-stubs (cons (product (1 l) (2 code) (3 detail)) (get n-stubs)))))))
-(define n-place-stubs (subr (maxeff assembles spin) (n-stub-list) unit)
+(define n-place-stubs (->* (n-stub-list) unit)
   (lambda (ss)
     (if (null? ss)
         #u
@@ -129,16 +129,16 @@
             (n-e (arm-movz n-x14 (extract st 3) 0))
             (n-b (get n-trap-common))
             (n-place-stubs (cdr ss)))))))
-(define n-flush-stubs (subr (maxeff assembles spin) () unit)
+(define n-flush-stubs (->* () unit)
   (lambda ()
     (let ((stubs (the n-stub-list (reverse (get n-stubs)))))
       (begin (set n-stubs nil) (n-place-stubs stubs)))))
 ;; From instruction `at` to label `l`, which must be bound: else an
 ;; impossible distance, which no encoder takes.
-(define n-dist (subr (maxeff (read @globals) (read @k)) (int int) int)
+(define n-dist (->* (int int) int)
   (lambda (at l)
     (if (array-ref (get n-bound) l) (- (array-ref (get n-labels) l) at) (* 4 67108864))))
-(define n-patch (subr (maxeff assembles spin) ((listof n-fix @k)) unit)
+(define n-patch (->* ((listof n-fix @k)) unit)
   (lambda (fs)
     (if (null? fs)
         #u
@@ -149,17 +149,17 @@
             (fix-cbz (at l r) (array-set! (get n-code) at (arm-cbz r (n-dist at l))))
             (fix-cbnz (at l r) (array-set! (get n-code) at (arm-cbnz r (n-dist at l)))))
           (n-patch (cdr fs))))))
-(define n-code-list (subr n-lists (int n-instrs) n-instrs)
+(define n-code-list (->* (int n-instrs) n-instrs)
   (lambda (i acc) (if (< i 0) acc (n-code-list (- i 1) (cons (array-ref (get n-code) i) acc)))))
 
 ;; The code, every branch patched.
-(define n-finish (subr (maxeff assembles spin) () (listof int @k))
+(define n-finish (->* () (listof int @k))
   (lambda ()
     (begin
       (n-patch (get n-fixups))
       (n-code-list (- (get n-len) 1) nil))))
 
-(define n-reset (subr (maxeff assembles spin) () unit)
+(define n-reset (->* () unit)
   (lambda ()
     (begin
       (set n-len 0) (set n-nlabels 0) (set n-fixups nil) (set n-stubs nil)
@@ -170,11 +170,11 @@
 ;;; ------------------------------------------------------------ machine sequences
 
 ;; Field `k` of the bloblet whose `suffix + 4` is in a register.
-(define n-field-off (subr pure (int) int) (lambda (k) (- 0 (+ 4 (* 8 k)))))
+(define n-field-off (->* (int) int) (lambda (k) (- 0 (+ 4 (* 8 k)))))
 ;; The write barrier after a value is stored at `[obj, #off]`, as the Rust
 ;; machine's `card_mark` makes it: that word's card marked in the card
 ;; table, whose biased address is the state's `cards`; `x13` and `x16` lost.
-(define n-card-mark (subr (maxeff assembles spin) (int int) unit)
+(define n-card-mark (->* (int int) unit)
   (lambda (obj off)
     (begin
       (n-e (if (< off 0) (arm-sub-imm n-x13 obj (- 0 off)) (arm-add-imm n-x13 obj off)))
@@ -185,7 +185,7 @@
       (n-e (arm-strb n-x13 n-x16)))))
 ;; One more write of the global cell in x11, for the guards
 ;; (`global-guard`): its count of writes, a fixnum, one more; `x16` lost.
-(define n-bump-writes (subr (maxeff assembles spin) () unit)
+(define n-bump-writes (->* () unit)
   (lambda ()
     (begin
       (n-e (arm-ldur n-x16 n-x11 (n-field-off global-writes)))
@@ -193,7 +193,7 @@
       (n-e (arm-stur n-x16 n-x11 (n-field-off global-writes))))))
 
 ;; Dispatch on the cell in x9: the tail of `NEXT`.
-(define n-run-word-in-w (subr (maxeff assembles spin) () unit)
+(define n-run-word-in-w (->* () unit)
   (lambda ()
     (begin
       (n-e (arm-add n-x11 n-base n-w))
@@ -201,7 +201,7 @@
       (n-e (arm-ldr-reg n-x10 n-table n-x10))
       (n-e (arm-br n-x10)))))
 
-(define n-next (subr (maxeff assembles spin) () unit)
+(define n-next (->* () unit)
   (lambda ()
     (begin
       (n-e (arm-ldr-post n-w n-ip -8))
@@ -212,11 +212,11 @@
       (n-run-word-in-w))))
 
 ;; On to the next cell of this word.
-(define n-cont-code (subr (maxeff assembles spin) () unit)
+(define n-cont-code (->* () unit)
   (lambda () (if (< (get n-cont) 0) (n-next) (n-b (get n-cont)))))
 
 ;; On from where CUR and the ip now are, `d` in `dreg`.
-(define n-enter-cur (subr (maxeff assembles spin) (int) unit)
+(define n-enter-cur (->* (int) unit)
   (lambda (dreg)
     (let ((cellular (n-label)))
       (begin
@@ -232,26 +232,26 @@
         (n-bind cellular)
         (n-next)))))
 
-(define n-fp-encode (subr (maxeff assembles spin) (int) unit)
+(define n-fp-encode (->* (int) unit)
   (lambda (reg)
     (begin
       (n-e (arm-ldr reg n-st n-st-ds-base))
       (n-e (arm-sub-imm reg reg 8))
       (n-e (arm-sub reg reg n-fp)))))
-(define n-fp-decode (subr (maxeff assembles spin) (int) unit)
+(define n-fp-decode (->* (int) unit)
   (lambda (reg)
     (begin
       (n-e (arm-ldr n-x16 n-st n-st-ds-base))
       (n-e (arm-sub-imm n-x16 n-x16 8))
       (n-e (arm-sub n-fp n-x16 reg)))))
 
-(define n-value (subr (maxeff assembles spin) (int int) unit)
+(define n-value (->* (int int) unit)
   (lambda (reg v) (n-es (arm-mov-imm64 reg v))))
 
 ;; A taken branch's new ip. In a compiled word it is made from the word,
 ;; not from the ip, so that a loop's iterations do not wait on one chain of
 ;; ip updates through them all.
-(define n-branch-ip (subr (maxeff assembles spin) () unit)
+(define n-branch-ip (->* () unit)
   (lambda ()
     (if (< (get n-target) 0)
         (n-e (arm-sub n-ip n-ip n-x13))
@@ -260,7 +260,7 @@
           (n-e (arm-add n-ip n-base n-cur))
           (n-e (arm-sub n-ip n-ip n-x13))))))
 
-(define n-push-return (subr (maxeff assembles spin) () unit)
+(define n-push-return (->* () unit)
   (lambda ()
     (begin
       (n-e (arm-add n-x13 n-base n-cur))
@@ -269,7 +269,7 @@
       (n-fp-encode n-x14)
       (n-e (arm-stp-pre n-x14 n-clo n-rsp -16))
       (n-e (arm-stp-pre n-cur n-x13 n-rsp -16)))))
-(define n-pass-mark (subr (maxeff assembles spin) (int int) unit)
+(define n-pass-mark (->* (int int) unit)
   (lambda (mark again)
     (let ((not-it (n-label)))
       (begin
@@ -280,7 +280,7 @@
         (n-b again)
         (n-bind not-it)))))
 
-(define n-pop-return (subr (maxeff assembles spin) () unit)
+(define n-pop-return (->* () unit)
   (lambda ()
     (let ((again (n-label)))
       (begin
@@ -299,7 +299,7 @@
         (n-fp-decode n-x14)
         (n-enter-cur n-x13)))))
 
-(define n-is-closure (subr (maxeff assembles spin) (int int) unit)
+(define n-is-closure (->* (int int) unit)
   (lambda (reg not-it)
     (begin
       (n-e (arm-and-low n-x13 reg 3))
@@ -316,7 +316,7 @@
       (n-e (arm-cmp-imm n-x14 n-kind-closure))
       (n-b-cond 1 not-it))))
 
-(define n-save (subr (maxeff assembles spin) () unit)
+(define n-save (->* () unit)
   (lambda ()
     (begin
       (n-e (arm-str n-cur n-st n-st-cur))
@@ -331,7 +331,7 @@
       (n-e (arm-str n-x13 n-st n-st-fp))
       (n-e (arm-str n-clo n-st n-st-clo)))))
 
-(define n-load (subr (maxeff assembles spin) () unit)
+(define n-load (->* () unit)
   (lambda ()
     (begin
       (n-e (arm-ldr n-base n-st n-st-base))
@@ -350,30 +350,30 @@
 
 ;; A poll, at a cell boundary: `CUR` and `IP` say where to go on, so that a
 ;; time slice's end leaves the machine (detail 0) and comes back there.
-(define n-fuel-check (subr (maxeff assembles spin) () unit)
+(define n-fuel-check (->* () unit)
   (lambda () (begin (n-e (arm-subs-imm n-fuel n-fuel 1)) (n-trap-if 0 n-trap-out-of-fuel 0))))
 ;; A call's poll, before anything is done: its cell, one before `IP`, is
 ;; where to go on (detail 1).
-(define n-fuel-call (subr (maxeff assembles spin) () unit)
+(define n-fuel-call (->* () unit)
   (lambda () (begin (n-e (arm-subs-imm n-fuel n-fuel 1)) (n-trap-if 0 n-trap-out-of-fuel 1))))
 ;; A taken branch's poll: only a backward one can make a loop, so a branch
 ;; known to go forward (in a compiled word) makes none.
-(define n-fuel-unless-forward (subr (maxeff assembles spin) () unit)
+(define n-fuel-unless-forward (->* () unit)
   (lambda () (if (> (get n-target-cell) (get n-at)) #u (n-fuel-check))))
-(define n-ds-limit (subr (maxeff assembles spin) () unit)
+(define n-ds-limit (->* () unit)
   (lambda ()
     (begin
       (n-e (arm-ldr n-x13 n-st n-st-ds-limit))
       (n-e (arm-cmp n-dsp n-x13))
       (n-trap-if 3 n-trap-stack-overflow 0))))
-(define n-rs-limit (subr (maxeff assembles spin) () unit)
+(define n-rs-limit (->* () unit)
   (lambda ()
     (begin
       (n-e (arm-ldr n-x13 n-st n-st-rs-limit))
       (n-e (arm-cmp n-rsp n-x13))
       (n-trap-if 9 n-trap-too-deep 0))))
 
-(define n-callout (subr (maxeff assembles spin) (int) unit)
+(define n-callout (->* (int) unit)
   (lambda (n)
     (begin
       (n-save)
@@ -385,7 +385,7 @@
       (n-load)
       (if (n-control? n) (n-enter-cur n-x13) (n-cont-code)))))
 
-(define n-two-fixnums (subr (maxeff assembles spin) (int) unit)
+(define n-two-fixnums (->* (int) unit)
   (lambda (n)
     (begin
       (n-e (arm-ldp n-x13 n-x14 n-dsp 0))
@@ -393,14 +393,14 @@
       (n-e (arm-tst-low n-x15 3))
       (n-trap-if 1 n-trap-type n))))
 
-(define n-check-tag (subr (maxeff assembles spin) (int int int int) unit)
+(define n-check-tag (->* (int int int int) unit)
   (lambda (reg tag code detail)
     (begin
       (n-e (arm-and-low n-x13 reg 3))
       (n-e (arm-cmp-imm n-x13 tag))
       (n-trap-if 1 code detail))))
 
-(define n-execute (subr (maxeff assembles spin) () unit)
+(define n-execute (->* () unit)
   (lambda ()
     (let ((is-ref (n-label)) (bad (n-label)))
       (begin
@@ -428,7 +428,7 @@
         (n-trap-if 1 n-trap-not-a-word 0)
         (n-run-word-in-w)))))
 
-(define n-field-ref (subr (maxeff assembles spin) (int) unit)
+(define n-field-ref (->* (int) unit)
   (lambda (n)
     (let ((slow (n-label)))
       (begin
@@ -453,7 +453,7 @@
         (n-bind slow)
         (n-callout n)))))
 
-(define n-free (subr (maxeff assembles spin) (int) unit)
+(define n-free (->* (int) unit)
   (lambda (n)
     (let ((bad (n-label)))
       (begin
@@ -477,7 +477,7 @@
 ;; (`tcall`), the callee's type says `cellular`, so it is a cellular closure:
 ;; nothing is checked (`TODO.md` §97); a typed tail call, which grows
 ;; neither stack, does not check them.
-(define n-call (subr (maxeff assembles spin) (int) unit)
+(define n-call (->* (int) unit)
   (lambda (n)
     (let ((other (n-label))
           (typed (or (= n routine-tcall) (= n routine-ttailcall)))
@@ -520,7 +520,7 @@
 ;;; ------------------------------------------------------------ routines
 
 ;; `x13` = top, `x14` = the one below; to `slow` unless both are fixnums.
-(define n-both-fixnums (subr (maxeff assembles spin) (int) unit)
+(define n-both-fixnums (->* (int) unit)
   (lambda (slow)
     (begin
       (n-e (arm-ldp n-x13 n-x14 n-dsp 0))
@@ -529,7 +529,7 @@
       (n-b-cond 1 slow))))
 ;; `int-add` or `int-sub` (routine `n`) on two fixnums; the Rust machine's on a bignum, or past a
 ;; fixnum.
-(define n-int-arith (subr (maxeff assembles spin) (int) unit)
+(define n-int-arith (->* (int) unit)
   (lambda (n)
     (let ((slow (n-label)))
       (begin
@@ -541,7 +541,7 @@
         (n-bind slow)
         (n-callout n)))))
 ;; `int-less` or `int-eq` (routine `n`) on two fixnums; the Rust machine's on a bignum.
-(define n-int-compare (subr (maxeff assembles spin) (int) unit)
+(define n-int-compare (->* (int) unit)
   (lambda (n)
     (let ((slow (n-label)))
       (begin
@@ -555,7 +555,7 @@
         (n-bind slow)
         (n-callout n)))))
 ;; Routine `n`'s code, going on to the next cell's.
-(define n-routine (subr (maxeff assembles spin) (int) unit)
+(define n-routine (->* (int) unit)
   (lambda (n)
     (cond
       ((= n routine-docol)
@@ -693,7 +693,7 @@
 ;; Where each instruction of `w`'s cells starts: for cell i, whether one
 ;; does, in an array, marked from cell `i` on: a loop, stepping from each
 ;; instruction to the next.
-(define n-mark-starts (subr n-writes (n-bools tword int int) unit)
+(define n-mark-starts (->* (n-bools tword int int) unit)
   (lambda (a w i n)
     (if (>= i n)
         #u
@@ -703,23 +703,23 @@
           (begin
             (array-set! a i #t)
             (n-mark-starts a w (+ i width) n))))))
-(define n-starts (subr (maxeff n-writes (alloc @k)) (tword int) n-bools)
+(define n-starts (->* (tword int) n-bools)
   (lambda (w n)
     (let ((a (the (arrayof bool @k) (make-array (+ n 1) #f))))
       (begin (n-mark-starts a w 0 n) a))))
-(define n-fill-labels (subr (maxeff assembles spin) ((arrayof int @k) int) unit)
+(define n-fill-labels (->* ((arrayof int @k) int) unit)
   (lambda (a i)
     (if (= i (array-length a))
         #u
         (begin (array-set! a i (n-label))
                (n-fill-labels a (+ i 1))))))
-(define n-labels-for (subr (maxeff assembles spin) (int) (arrayof int @k))
+(define n-labels-for (->* (int) (arrayof int @k))
   (lambda (n)
     (let ((a (the (arrayof int @k) (make-array n 0))))
       (begin (n-fill-labels a 0) a))))
 ;; Where each of cells 0 to `i` starts in the code, or -1, onto `acc`: a
 ;; loop, from the last cell down.
-(define n-starts-at (subr n-lists (int n-bools n-ints n-instrs) n-instrs)
+(define n-starts-at (->* (int n-bools n-ints n-instrs) n-instrs)
   (lambda (i starts labels acc)
     (if (< i 0)
         acc
@@ -727,10 +727,10 @@
           (n-starts-at (- i 1) starts labels (cons start acc))))))
 
 ;; The cell after `i` where an instruction starts, or `n`.
-(define n-next-start (subr (maxeff (read @globals) (read @k)) (int int (arrayof bool @k)) int)
+(define n-next-start (->* (int int (arrayof bool @k)) int)
   (lambda (i n starts) (if (or (>= i n) (array-ref starts i)) i (n-next-start (+ i 1) n starts))))
 
-(define n-cells (subr (maxeff assembles spin) (tword int int n-bools n-ints int) unit)
+(define n-cells (->* (tword int int n-bools n-ints int) unit)
   (lambda (w i n starts labels far-exit)
     (if (= i n)
         #u
@@ -771,7 +771,7 @@
 ;; `w`'s cells as machine code, for a place from which the machine's common
 ;; trap and exit are `far-trap` and `far-exit` instructions away: the code,
 ;; and where each cell's code starts, or -1. What `assemble_word` makes.
-(define native-assemble (subr (maxeff assembles spin) (tword int int) n-assembled)
+(define native-assemble (->* (tword int int) n-assembled)
   (lambda (w far-trap far-exit)
     (begin
       (n-reset)

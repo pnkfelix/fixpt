@@ -40,14 +40,14 @@
       (include check-subst))
 
 ;; `t` with each `(select $k n)` what `given` says it is.
-(define k-instantiate-params (subr (maxeff kstate spin) (int k-params-given) int)
+(define k-instantiate-params (->* (int k-params-given) int)
   (lambda (t given)
     (if (null? given)
         t
         (let ((outer (get k-param-map)))
           (begin (set k-param-map given)
                  (let ((r (k-subst t nil))) (begin (set k-param-map outer) r)))))))
-(define k-abs-given (subr (maxeff kstate spin) (int k-parts k-params-given k-map) k-given-back)
+(define k-abs-given (->* (int k-parts k-params-given k-map) k-given-back)
   (lambda (j abs given back)
     (if (null? abs)
         (product (1 given) (2 back))
@@ -61,7 +61,7 @@
 ;; What it names of an earlier one is, in the procedure's type, `(select $k
 ;; t)`; a type told it says it so, and is given the earlier parameter's.
 (define k-bind-dependent
-  (subr (maxeff checks spin) (k-bindings k-names int k-params-given k-map int int) k-dependent)
+  (->* (k-bindings k-names int k-params-given k-map int int) k-dependent)
   (lambda (typed names j given back a b)
     (if (null? typed)
         (product (1 (the k-bindings nil)) (2 given) (3 back))
@@ -79,13 +79,13 @@
           (product (1 (the k-bindings (cons (cons n t) (extract rest 1))))
                    (2 (extract rest 2)) (3 (extract rest 3)))))))
 ;; A `lambda`'s parameters `typed`, at `a`..`b`, bound so.
-(define k-bind-params (subr (maxeff checks spin) (k-bindings int int) k-dependent)
+(define k-bind-params (->* (k-bindings int int) k-dependent)
   (lambda (typed a b) (k-bind-dependent typed (k-binding-names typed) 0 nil nil a b)))
 ;; A lambda's result type `t`, as the procedure's type says it.
-(define k-result-back (subr (maxeff kstate spin) (int k-map) int)
+(define k-result-back (->* (int k-map) int)
   (lambda (t back) (if (null? back) t (k-subst t back))))
 
-(define k-abs-types (subr (maxeff kstate spin) (k-parts k-parts) k-parts)
+(define k-abs-types (->* (k-parts k-parts) k-parts)
   (lambda (abs ds)
     (if (null? abs)
         ds
@@ -93,14 +93,14 @@
               (k-abs-types (cdr abs) ds)))))
 ;; A module-typed binding's types, by component name: each abstract type as
 ;; named for the binding, then each transparent one.
-(define k-module-types (subr (maxeff kstate spin) (int) k-parts)
+(define k-module-types (->* (int) k-parts)
   (lambda (mt)
     (tagcase (k-get mt)
       (ty-module (abs ds vs) (k-abs-types abs ds))
       (else y nil))))
 ;; Each `(select $k x)` in `t`, as first met, onto `out`.
 (define-rec
-  (k-param-sels-from (subr (maxeff kstate spin) (int k-seen (ref k-params-given @t)) unit)
+  (k-param-sels-from (->* (int k-seen (ref k-params-given @t)) unit)
     (lambda (t seen out)
       (let ((t (k-resolve t)))
         (if (k-seen? seen t)
@@ -112,27 +112,27 @@
                       #u
                       (set out (cons (product (1 k) (2 x) (3 t)) (get out)))))
                 (else y (k-param-sels-each (k-ty-kids t) seen out))))))))
-  (k-param-sels-each (subr (maxeff kstate spin) (k-ids k-seen (ref k-params-given @t)) unit)
+  (k-param-sels-each (->* (k-ids k-seen (ref k-params-given @t)) unit)
     (lambda (ts seen out)
       (if (null? ts)
           #u
           (begin (k-param-sels-from (car ts) seen out) (k-param-sels-each (cdr ts) seen out))))))
 ;; `ps` reversed, onto `acc`.
 (define k-given-reversed
-  (subr (maxeff (read @globals) (alloc @t) spin) (k-params-given k-params-given) k-params-given)
+  (->* (k-params-given k-params-given) k-params-given)
   (lambda (ps acc) (if (null? ps) acc (k-given-reversed (cdr ps) (cons (car ps) acc)))))
 ;; What an argument a procedure's types depend on, not a name, says.
 (define k-by-name string
   (string-append " is a module the procedure's types depend on: "
                  "give it by name (bind it with `let` first)"))
-(define k-part-of-types (subr (maxeff kreads spin) (k-parts symbol) int)
+(define k-part-of-types (->* (k-parts symbol) int)
   (lambda (ps n)
     (cond ((null? ps) -1)
           ((symbol=? (extract (car ps) 1) n) (extract (car ps) 2))
           (else (k-part-of-types (cdr ps) n)))))
 ;; What each `(select $k x)` of `found` is for a call with `args`, at
 ;; `a`..`b`: the type `x` of the module the `k`th argument names, by name.
-(define k-args-given (subr (maxeff checks spin) (k-params-given kxs int int) k-params-given)
+(define k-args-given (->* (k-params-given kxs int int) k-params-given)
   (lambda (found args a b)
     (if (null? found)
         nil
@@ -150,13 +150,13 @@
                              t))))
                (rest (k-args-given (cdr found) args a b)))
           (cons (product (1 k) (2 x) (3 to)) rest)))))
-(define k-instantiate-all (subr (maxeff kstate spin) (k-ids k-params-given) k-ids)
+(define k-instantiate-all (->* (k-ids k-params-given) k-ids)
   (lambda (ts given)
     (if (null? ts)
         nil
         (let ((t (k-instantiate-params (car ts) given)))
           (cons t (k-instantiate-all (cdr ts) given))))))
-(define k-dependent-callee (subr (maxeff checks spin) (k-callables kxs int int) k-callables)
+(define k-dependent-callee (->* (k-callables kxs int int) k-callables)
   (lambda (c args a b)
     (if (null? c)
         c

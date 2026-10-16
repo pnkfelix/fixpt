@@ -23,10 +23,10 @@
 (hide (include check-env) (include check-test-facts) (include check-binders) (include check-calls))
 
   ;; Whether `x` is the literal boolean `v`.
-  (define k-bool-lit? (subr (read @globals) (kx bool) bool)
+  (define k-bool-lit? (->* (kx bool) bool)
     (lambda (x v)
       (tagcase x (x-const (t n a b abk) (and (= t k-bool) (= n (if v 1 0)))) (else y #f))))
-  (define k-facts-append (subr (read @globals) (k-fact-list k-fact-list) k-fact-list)
+  (define k-facts-append (->* (k-fact-list k-fact-list) k-fact-list)
     (lambda (xs ys)
       (if (null? xs) ys (the k-fact-list (cons (car xs) (k-facts-append (cdr xs) ys))))))
   ;; What `p` shows about sizes when it holds, and when not. `(null? xs)`,
@@ -37,7 +37,7 @@
   ;; holds what both show then; `(not x)` what `x` shows, swapped. Only these
   ;; conjunctions: what an `or` shows when it holds is a disjunction, which
   ;; facts cannot say (that waits on logical types, PLAN.md Q7).
-  (define k-test-facts (subr (maxeff kreads (alloc @t) spin) (kx) k-branch-facts)
+  (define k-test-facts (->* (kx) k-branch-facts)
     (lambda (p)
       (let ((none (k-branch-facts-of nil nil)))
         (tagcase p
@@ -57,6 +57,6 @@
           (else y none)))))
   ;; `fs`, in order, onto `acc`, newest first: as the Rust checker's
   ;; `size_facts.extend`.
-  (define k-with-facts (subr (read @globals) (k-fact-list k-fact-list) k-fact-list)
+  (define k-with-facts (->* (k-fact-list k-fact-list) k-fact-list)
     (lambda (fs acc)
       (if (null? fs) acc (k-with-facts (cdr fs) (the k-fact-list (cons (car fs) acc)))))))))

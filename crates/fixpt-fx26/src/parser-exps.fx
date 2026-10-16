@@ -42,28 +42,28 @@
         load-cycle in-loaded-as loading-keys input-items (type case-entry case-entries))
 ;;; ------------------------------------------------------------ expressions
 ;; Whether `s` mentions the name `n` anywhere, quoted or not.
-(define syn-mentions? (subr spin (symbol syn) bool)
+(define syn-mentions? (->* (symbol syn) bool)
   (lambda (n s)
     (tagcase s
       (atom (d a b) (and (symbol? d) (symbol=? d n)))
       (lst (items d a b) (syns-mention? n items))
       (dotted (items t d a b) (or (syns-mention? n items) (syn-mentions? n t)))
       (vec (items d a b) (syns-mention? n items)))))
-(define syns-mention? (subr spin (symbol syns-a) bool)
+(define syns-mention? (->* (symbol syns-a) bool)
   (lambda (n ss) (and (not (null? ss)) (or (syn-mentions? n (car ss)) (syns-mention? n (cdr ss))))))
 ;; A name for an expansion's own variable that `forms` never mention:
 ;; `base`, else `base1`, `base2` and so on. Its scope is within the form,
 ;; and nothing refers to a name it does not write, so it captures nothing
 ;; and nothing captures it.
-(define fresh-name (subr spin (string syns-a) symbol)
+(define fresh-name (->* (string syns-a) symbol)
   (lambda (base forms) (fresh-from base forms 0)))
-(define fresh-from (subr spin (string syns-a int) symbol)
+(define fresh-from (->* (string syns-a int) symbol)
   (lambda (base forms i)
     (let ((n (string->symbol (if (= i 0) base (string-append base (int->string i))))))
       (if (syns-mention? n forms) (fresh-from base forms (+ i 1)) n))))
 ;; The shapes `typecase` tests (`check.rs`'s `SHAPES`, those with a
 ;; standard predicate), and the predicate of each; `||` if not one.
-(define typecase-predicate (subr (read @globals) (symbol) symbol)
+(define typecase-predicate (->* (symbol) symbol)
   (lambda (s)
     (case s
       ((int) 'int?) ((char) 'char?) ((bool) 'bool?) ((nil) 'null?) ((pair) 'pair?)
@@ -81,7 +81,7 @@
                  "f64, f32, box, sum, product, vector, bytevector"))
 ;; A `case` datum's kind (`TODO.md` §46): 0 an integer, 1 a character, 2
 ;; a string, 3 a symbol, 4 a boolean, and -1 none of these.
-(define case-kind (subr (read @globals) (syn) int)
+(define case-kind (->* (syn) int)
   (lambda (s)
     (tagcase s
       (atom (d a b)
@@ -97,10 +97,10 @@
               (else -1)))
       (else x -1))))
 ;; A boolean datum's value, read as a literal or as `#t`.
-(define case-bool (subr (read @globals) (datum) bool)
+(define case-bool (->* (datum) bool)
   (lambda (d) (typecase d (bool b b) (symbol n (symbol=? n sym-true)) (else x #f))))
 ;; Whether two data of kind `k` are the same.
-(define case-same? (subr (read @globals) (int syn syn) bool)
+(define case-same? (->* (int syn syn) bool)
   (lambda (k s t)
     (let ((d (syn->datum s)) (e (syn->datum t)))
       (case k ((0) (and (int? d) (int? e) (= d e)))
@@ -108,12 +108,12 @@
               ((2) (and (string? d) (string? e) (string=? d e)))
               ((3) (and (symbol? d) (symbol? e) (symbol=? d e)))
               (else (bool=? (case-bool d) (case-bool e)))))))
-(define case-seen? (subr (read @globals) (int syn syns-a) bool)
+(define case-seen? (->* (int syn syns-a) bool)
   (lambda (k s seen)
     (and (not (null? seen)) (or (case-same? k s (car seen)) (case-seen? k s (cdr seen))))))
 ;; A clause's data, checked against those before it, `seen`, last first;
 ;; and `seen` with them.
-(define case-datums (subr parses (syns-a syns-a) syns-a)
+(define case-datums (->* (syns-a syns-a) syns-a)
   (lambda (data seen)
     (if (null? data)
         seen
@@ -129,7 +129,7 @@
           (if (case-seen? k d seen) (pfail "a datum appears twice in this `case`" d) #u)
           (case-datums (cdr data) (cons d seen))))))
 ;; The clauses before a `case`'s `else`, each `((datum …) expression …)`.
-(define case-clauses (subr parses (syns-a syns-a) unit)
+(define case-clauses (->* (syns-a syns-a) unit)
   (lambda (clauses seen)
     (if (null? (cdr clauses))
         #u
@@ -139,30 +139,30 @@
             (if (null? data) (pfail "a case clause has at least one datum" c) #u)
             (case-clauses (cdr clauses) (case-datums data seen)))))))
 ;; `(or t rest)`, spanning a clause.
-(define case-or (subr (read @globals) (exp exp int int) exp)
+(define case-or (->* (exp exp int int) exp)
   (lambda (t rest ca cb) (e-if t (e-bool #t ca cb 0) rest ca cb 0)))
 ;; The kind of the clauses' first datum, -1 if there is none.
-(define case-clauses-kind (subr (maxeff parses spin) (syns-a) int)
+(define case-clauses-kind (->* (syns-a) int)
   (lambda (clauses)
     (if (null? (cdr clauses))
         -1
         (case-kind (car (syn-items (car (syn-items (car clauses) "c")) "data"))))))
-(define case-data-count (subr (maxeff parses spin) (syns-a) int)
+(define case-data-count (->* (syns-a) int)
   (lambda (clauses)
     (if (null? (cdr clauses))
         0
         (+ (len (syn-items (car (syn-items (car clauses) "c")) "data"))
            (case-data-count (cdr clauses))))))
 ;; Whether every datum has a sort value: integers only if fixnums.
-(define case-all-keyed? (subr (maxeff parses spin) (int syns-a) bool)
+(define case-all-keyed? (->* (int syns-a) bool)
   (lambda (k clauses)
     (or (not (= k 0)) (null? (cdr clauses))
         (and (case-fixnums? (syn-items (car (syn-items (car clauses) "c")) "data"))
              (case-all-keyed? k (cdr clauses))))))
-(define case-fixnums? (subr (maxeff (read @globals) spin) (syns-a) bool)
+(define case-fixnums? (->* (syns-a) bool)
   (lambda (ds) (or (null? ds) (and (datum-int? (syn->datum (car ds))) (case-fixnums? (cdr ds))))))
 ;; A `case`'s `else` clause, if its body is one atom: in a list of one.
-(define case-atom-else (subr (maxeff parses spin) (syn) syns-a)
+(define case-atom-else (->* (syn) syns-a)
   (lambda (c)
     (let ((parts (cdr (syn-items c "a case clause"))))
       (if (and (not (null? parts)) (null? (cdr parts)))
@@ -170,7 +170,7 @@
           nil))))
 ;; The entries' tests in turn, each giving its clause (or, `bodies` given,
 ;; its body); `m` (or `els`) for none.
-(define case-leaf (subr (maxeff parses spin) (case-entries int exp-list exp int int) exp)
+(define case-leaf (->* (case-entries int exp-list exp int int) exp)
   (lambda (es m bodies els a b)
     (cond ((and (null? es) (null? bodies)) (e-int m a b 0))
           ((null? es) els)
@@ -181,7 +181,7 @@
              (e-if (extract (car es) 1) then (case-leaf (cdr es) m bodies els a b) a b 0))))))
 ;; The clause index of sorted entries, `by` halved against their values.
 (define case-index
-  (subr (maxeff parses spin) (exp case-entries int int exp-list exp int int) exp)
+  (->* (exp case-entries int int exp-list exp int int) exp)
   (lambda (by es n m bodies els a b)
     (if (<= n 3)
         (case-leaf es m bodies els a b)
@@ -193,7 +193,7 @@
                     (case-index by (case-drop es mid) (- n mid) m bodies els a b)
                     a b 0))))))
 ;; The body of index `lo`..`hi` that `i` names, by halving.
-(define case-pick (subr (maxeff parses spin) (exp exp-list int int int int) exp)
+(define case-pick (->* (exp exp-list int int int int) exp)
   (lambda (i bodies lo hi a b)
     (if (= lo hi)
         (case-body-at bodies lo)
@@ -202,34 +202,34 @@
                 (case-pick i bodies lo (- mid 1) a b)
                 (case-pick i bodies mid hi a b)
                 a b 0)))))
-(define case-body-at (subr (maxeff (read @globals) spin) (exp-list int) exp)
+(define case-body-at (->* (exp-list int) exp)
   (lambda (es i) (if (= i 0) (car es) (case-body-at (cdr es) (- i 1)))))
 ;; Whether a `case`, `xs` its key and clauses, compares its key as it is:
 ;; a variable (not `#t`, `#f` or `#u`), with a clause before the `else`.
-(define case-direct? (subr (read @globals) (syns-a) bool)
+(define case-direct? (->* (syns-a) bool)
   (lambda (xs)
     (and (syn-symbol? (car xs)) (not (null? (cdr (cdr xs))))
          (let ((n (syn-head (car xs))))
            (not (or (symbol=? n sym-true) (symbol=? n sym-false) (symbol=? n sym-unit)))))))
 ;; A `case`'s last clause, which must be `else`.
-(define case-else (subr parses (syn) unit)
+(define case-else (->* (syn) unit)
   (lambda (c)
     (let ((parts (syn-items c "a case clause")))
       (if (and (not (null? parts)) (symbol=? (syn-head (car parts)) 'else))
           #u
           (pfail "a `case` must end with an `else` clause: FX has no unspecified value" c)))))
-(define case-last (subr pure (syns-a) syn)
+(define case-last (->* (syns-a) syn)
   (lambda (xs) (if (null? (cdr xs)) (car xs) (case-last (cdr xs)))))
 (define-rec
-  (parse-exps (subr (maxeff parses spin) (syns-a) exp-list)
+  (parse-exps (->* (syns-a) exp-list)
     (lambda (xs) (if (null? xs) nil (cons (parse-exp (car xs)) (parse-exps (cdr xs))))))
   ;; One or more expressions, an implicit `begin` spanning `a`..`b`.
-  (parse-body (subr (maxeff parses spin) (syns-a int int) exp)
+  (parse-body (->* (syns-a int int) exp)
     (lambda (forms a b)
       (cond ((null? forms) (pfail-at "an empty body" a b))
             ((null? (cdr forms)) (parse-exp (car forms)))
             (else (e-begin (parse-exps forms) a b 0)))))
-  (parse-exp (subr (maxeff parses spin) (syn) exp)
+  (parse-exp (->* (syn) exp)
     (lambda (s)
       (tagcase s
         (atom (d a b)
@@ -251,7 +251,7 @@
               (pfail "not an expression in the FX-26 kernel" s)
               (parse-form s items (syn-head (car items)) a b)))
         (else x (pfail "not an expression in the FX-26 kernel" s)))))
-  (parse-form (subr (maxeff parses spin) (syn syns-a symbol int int) exp)
+  (parse-form (->* (syn syns-a symbol int int) exp)
     (lambda (s items head a b)
       (case head
         ((lambda)
@@ -388,14 +388,14 @@
                (else (let ((f (parse-exp (car items))))
                        (e-app f (parse-exps (cdr items)) a b 0))))))))
   ;; Item `i`, an expression.
-  (parse-nth (subr (maxeff parses spin) (syns-a int) exp)
+  (parse-nth (->* (syns-a int) exp)
     (lambda (items i) (parse-exp (nth items i))))
   ;; A `lambda` of the parameters at `i` and the body after them.
-  (parse-lambda-at (subr (maxeff parses spin) (syns-a int int int) exp)
+  (parse-lambda-at (->* (syns-a int int int) exp)
     (lambda (items i a b)
       (e-lambda (parse-params (nth items i)) (parse-body (drop items (+ i 1)) a b) a b 0)))
   ;; `(letregion name body …)` and the other region forms.
-  (parse-region-form (subr (maxeff parses spin) (syns-a symbol int int) exp)
+  (parse-region-form (->* (syns-a symbol int int) exp)
     (lambda (items head a b)
       (begin (at-least items 2 (string-append "`(" (symbol->string head) " name body …)`") a b)
              ;; `(letfreeze (r p) body …)` freezes into place `p`;
@@ -412,7 +412,7 @@
   ;; `(let ((tmp e)) (if (test tmp more …) (let ((x (cert tmp more …)))
   ;; body) else))`, `tmp` named `tmp-name`.
   (parse-confirm
-    (subr (maxeff parses spin) (syns-a int string string symbol symbol exp-list int int) exp)
+    (->* (syns-a int string string symbol symbol exp-list int int) exp)
     (lambda (items i usage tmp-name test cert more a b)
       (let* ((arm (syn-items (nth items i) usage))
              (shaped (if (= (len arm) 2) #u (pfail usage (nth items i))))
@@ -423,12 +423,12 @@
              (tmp (fresh-name tmp-name items))
              (then (e-let (one-let x (call-tmp cert tmp more a b)) body a b 0)))
         (e-let (one-let tmp e) (e-if (call-tmp test tmp more a b) then els a b 0) a b 0))))
-  (parse-letrec-bindings (subr (maxeff parses spin) (syns-a) letrec-list)
+  (parse-letrec-bindings (->* (syns-a) letrec-list)
     (lambda (bs)
       (parse-typed-bindings bs "a letrec binding" "a letrec binding is `(name type expression)`")))
   ;; Bindings `(name type expression)`, a `letrec`'s or a `define-rec`'s:
   ;; each `what`, and `usage` when one is not.
-  (parse-typed-bindings (subr (maxeff parses spin) (syns-a string string) letrec-list)
+  (parse-typed-bindings (->* (syns-a string string) letrec-list)
     (lambda (bs what usage)
       (if (null? bs)
           nil
@@ -440,7 +440,7 @@
                   (cons (product (1 name) (2 (nth parts 1)) (3 init)) rest))
                 (pfail usage (car bs)))))))
   ;; `(let ((name expression) …) …)`; `()` is no bindings.
-  (parse-let-bindings (subr (maxeff parses spin) (syns-a) let-list)
+  (parse-let-bindings (->* (syns-a) let-list)
     (lambda (bs)
       (if (null? bs)
           nil
@@ -450,7 +450,7 @@
                   (cons (product (1 name) (2 init)) (parse-let-bindings (cdr bs))))
                 (pfail "a let binding is `(name expression)`" (car bs)))))))
   ;; `let*`: nested one-binding `let`s, each spanning its binding.
-  (parse-let* (subr (maxeff parses spin) (syns-a exp) exp)
+  (parse-let* (->* (syns-a exp) exp)
     (lambda (bs body)
       (if (null? bs)
           body
@@ -462,7 +462,7 @@
                   (e-let (one-let name init) inner (syn-start (car bs)) (syn-end (car bs)) 0))
                 (pfail "a let* binding is `(name expression)`" (car bs)))))))
   ;; `(cond (test e …) … (else e …))`: nested `if`s, each spanning its clause.
-  (parse-cond (subr (maxeff parses spin) (syns-a int int) exp)
+  (parse-cond (->* (syns-a int int) exp)
     (lambda (clauses a b)
       (cond ((null? clauses) (pfail-at "a `cond` needs at least an `else` clause" a b))
             (else
@@ -476,20 +476,20 @@
                               (rest (parse-cond (cdr clauses) a b)))
                          (e-if test then rest (syn-start c) (syn-end c) 0)))))))))
   ;; A `cond`'s last clause, `c`, which must be `else`.
-  (parse-cond-else (subr (maxeff parses spin) (syn syns-a) exp)
+  (parse-cond-else (->* (syn syns-a) exp)
     (lambda (c parts)
       (if (symbol=? (syn-head (car parts)) 'else)
           (parse-body (cdr parts) (syn-start c) (syn-end c))
           (pfail "a `cond` must end with an `else` clause: FX has no unspecified value" c))))
   ;; `(and a b …)`: `(if a (and b …) #f)`, and `(and)` is `#t`.
-  (parse-and (subr (maxeff parses spin) (syns-a int int) exp)
+  (parse-and (->* (syns-a int int) exp)
     (lambda (xs a b)
       (cond ((null? xs) (e-bool #t a b 0))
             ((null? (cdr xs)) (parse-exp (car xs)))
             (else (let* ((x (parse-exp (car xs))) (rest (parse-and (cdr xs) a b)))
                     (e-if x rest (e-bool #f a b 0) a b 0))))))
   ;; `(or a b …)`: `(if a #t (or b …))`, and `(or)` is `#f`.
-  (parse-or (subr (maxeff parses spin) (syns-a int int) exp)
+  (parse-or (->* (syns-a int int) exp)
     (lambda (xs a b)
       (cond ((null? xs) (e-bool #f a b 0))
             ((null? (cdr xs)) (parse-exp (car xs)))
@@ -500,7 +500,7 @@
   ;; (int? %typecase-value) (let ((name %typecase-value)) body) … else))`,
   ;; each arm's test its shape's standard predicate, which narrows the value
   ;; for the arm and those after it. The `else` is required, as `case`'s is.
-  (parse-typecase (subr (maxeff parses spin) (syns-a int int) exp)
+  (parse-typecase (->* (syns-a int int) exp)
     (lambda (items a b)
       (cond ((< (len items) 2) (pfail-at typecase-usage a b))
             ((null? (cdr (cdr items))) (pfail-at typecase-needs-else a b))
@@ -511,7 +511,7 @@
             (else
              (let* ((e (parse-exp (nth items 1))) (tmp (fresh-name "%typecase-value" items)))
                (e-let (one-let tmp e) (parse-typecase-arms (drop items 2) tmp a b) a b 0))))))
-  (parse-typecase-arms (subr (maxeff parses spin) (syns-a symbol int int) exp)
+  (parse-typecase-arms (->* (syns-a symbol int int) exp)
     (lambda (arms tmp a b)
       (if (null? (cdr arms))
           ;; `(else body)`, or `(else name body)`, `name` the value as what
@@ -546,7 +546,7 @@
   ;; `(let ((%case-key key)) …)` and nested `if`s, each datum compared by
   ;; its kind's equality. The data are of one kind and distinct, and the
   ;; `else` is required, as `cond`'s is.
-  (parse-case (subr (maxeff parses spin) (syns-a int int) exp)
+  (parse-case (->* (syns-a int int) exp)
     (lambda (xs a b)
       (cond ((null? xs)
              (pfail-at "`(case key ((datum …) expression …) … (else expression …))`" a b))
@@ -564,7 +564,7 @@
                                    a b 0)))))))))
   ;; A chain of tests, or, for many data of a kind that pays (`case-tree-from`)
   ;; all with a sort value, two searches (`case-tree`): as the Rust parser's.
-  (parse-case-body (subr (maxeff parses spin) (exp syns-a int int) exp)
+  (parse-case-body (->* (exp syns-a int int) exp)
     (lambda (kv xs a b)
       (let* ((clauses (cdr xs)) (k (case-clauses-kind clauses)) (n (case-data-count clauses))
              (direct (and (not (null? (case-atom-else (case-last clauses))))
@@ -573,13 +573,13 @@
             (case-tree kv xs (case-entries kv k clauses 0) k a b)
             (parse-case-arms kv clauses)))))
   ;; Each datum of the clauses before the `else`: its test, sort value, clause.
-  (case-entries (subr (maxeff parses spin) (exp int syns-a int) case-entries)
+  (case-entries (->* (exp int syns-a int) case-entries)
     (lambda (kv k clauses c)
       (if (null? (cdr clauses))
           nil
           (case-entries-of kv k (syn-items (car (syn-items (car clauses) "c")) "data") c
                            (case-entries kv k (cdr clauses) (+ c 1))))))
-  (case-entries-of (subr (maxeff parses spin) (exp int syns-a int case-entries) case-entries)
+  (case-entries-of (->* (exp int syns-a int case-entries) case-entries)
     (lambda (kv k data c rest)
       (if (null? data)
           rest
@@ -589,7 +589,7 @@
                     (case-entries-of kv k (cdr data) c rest)))))))
   ;; The clause's index by halving the sorted data, then its body by halving
   ;; the indices (`case_tree` in the Rust parser).
-  (case-tree (subr (maxeff parses spin) (exp syns-a case-entries int int int) exp)
+  (case-tree (->* (exp syns-a case-entries int int int) exp)
     (lambda (kv xs es k a b)
       (let* ((sorted (case-sort es nil))
              (bodies (case-bodies (cdr xs)))
@@ -610,14 +610,14 @@
             (let ((op (if (= k 2) 'string-hash 'symbol-name-hash)))
               (e-let (one-let hash (e-app (standard-ref op a b) (list kv) a b 0)) tree a b 0))))))
   ;; Each clause's body, first to last, the `else`'s last.
-  (case-bodies (subr (maxeff parses spin) (syns-a) exp-list)
+  (case-bodies (->* (syns-a) exp-list)
     (lambda (clauses)
       (if (null? clauses)
           nil
           (let* ((c (car clauses)) (parts (syn-items c "a case clause"))
                  (body (parse-body (cdr parts) (syn-start c) (syn-end c))))
             (the exp-list (cons body (case-bodies (cdr clauses))))))))
-  (parse-case-arms (subr (maxeff parses spin) (exp syns-a) exp)
+  (parse-case-arms (->* (exp syns-a) exp)
     (lambda (k clauses)
       (let* ((c (car clauses)) (parts (syn-items c "a case clause"))
              (ca (syn-start c)) (cb (syn-end c)))
@@ -627,18 +627,18 @@
                    (then (parse-body (cdr parts) ca cb)))
               (e-if test then (parse-case-arms k (cdr clauses)) ca cb 0))))))
   ;; `(if d1 #t (if d2 #t … dn))`, each `di` the key compared with a datum.
-  (case-tests (subr (maxeff parses spin) (exp syns-a int int) exp)
+  (case-tests (->* (exp syns-a int int) exp)
     (lambda (key data ca cb)
       (let ((t (case-test key (car data))))
         (if (null? (cdr data)) t (case-or t (case-tests key (cdr data) ca cb) ca cb)))))
-  (case-test (subr (maxeff parses spin) (exp syn) exp)
+  (case-test (->* (exp syn) exp)
     (lambda (key d)
       (let* ((da (syn-start d)) (db (syn-end d)) (k (case-kind d))
              (eq (case k ((0) '=) ((1) 'char=?) ((2) 'string=?)
                          ((3) 'symbol=?) (else 'bool=?)))
              (lit (if (= k 3) (e-sym (syn-head d) da db 0) (parse-exp d))))
         (e-app (standard-ref eq da db) (list key lit) da db 0))))
-  (parse-bloblet (subr (maxeff parses spin) (symbol syns-a int int) exp)
+  (parse-bloblet (->* (symbol syns-a int int) exp)
     (lambda (op args a b)
       (let ((n (len args)))
         (cond ((and (symbol=? op 'make-bloblet) (>= n 1))
@@ -655,7 +655,7 @@
                  (e-bloblet op i (list x v) nil a b 0)))
               ((bloblet-untagged? op n) (e-bloblet op -1 (parse-exps args) nil a b 0))
               (else (pfail-at (string-append "`(" (symbol->string op) " …)`") a b))))))
-  (parse-fields (subr (maxeff parses spin) (syns-a) let-list)
+  (parse-fields (->* (syns-a) let-list)
     (lambda (ps)
       (if (null? ps)
           nil
@@ -665,7 +665,7 @@
                   (cons (product (1 l) (2 e)) (parse-fields (cdr ps))))
                 (pfail "`(product (label expression) …)`" (car ps)))))))
   ;; The arms of a `tagcase` other than `else`.
-  (parse-arms (subr (maxeff parses spin) (syns-a) arm-list)
+  (parse-arms (->* (syns-a) arm-list)
     (lambda (cs)
       (cond ((null? cs) nil)
             ((arm-else? (car cs))
@@ -684,10 +684,10 @@
                           (rest (parse-arms (cdr cs))))
                      (cons (product (1 tag) (2 fields) (3 ns) (4 body)) rest))))))))
   ;; An arm's body, `c`'s items after its first two.
-  (parse-arm-body (subr (maxeff parses spin) (syns-a syn) exp)
+  (parse-arm-body (->* (syns-a syn) exp)
     (lambda (parts c) (parse-body (drop parts 2) (syn-start c) (syn-end c))))
   ;; The `else` arm, as a list of none or one.
-  (parse-else (subr (maxeff parses spin) (syns-a) let-list)
+  (parse-else (->* (syns-a) let-list)
     (lambda (cs)
       (cond ((null? cs) nil)
             ((arm-else? (car cs))
@@ -701,11 +701,11 @@
             (else (parse-else (cdr cs))))))
   ;; A `module`'s items, in order.
   ;; A module's forms, its `define-datatype`s expanded.
-  (parse-module-items (subr (maxeff parses spin) (syns-a) mod-items)
+  (parse-module-items (->* (syns-a) mod-items)
     (lambda (fs) (with-includes (parse-module-items-in fs (any-include? fs) #f))))
   ;; The same, each item's values in `(with %include …)` if `inc?`, each
   ;; hidden if `hid?` (`hidden-marks`).
-  (parse-module-items-in (subr (maxeff parses spin) (syns-a bool bool) mod-items)
+  (parse-module-items-in (->* (syns-a bool bool) mod-items)
     (lambda (fs inc? hid?)
       (cond ((null? fs) nil)
             ;; A string: a comment, read past.
@@ -723,7 +723,7 @@
                     (if hid? (hidden-marks item (car fs) rest) (cons item rest)))))))
   ;; `(define-generative t T)`, `(define-type d T)`, `(define x e)`, `(define
   ;; x T e)` or `(define-rec (f T e) …)`.
-  (parse-module-item (subr (maxeff parses spin) (syn) mod-item)
+  (parse-module-item (->* (syn) mod-item)
     (lambda (f)
       (let* ((parts (syn-items f "a module's definition"))
              (n (len parts))
@@ -777,7 +777,7 @@
   ;; form that loads it (`shared-pending`); a `load-input`'s, its one item.
   ;; What it makes is the form's, at `a`..`b`; the file's module, the whole
   ;; file's.
-  (parse-loaded (subr (maxeff parses spin) (string bool bool int int) exp)
+  (parse-loaded (->* (string bool bool int int) exp)
     (lambda (path input? here? a b)
       (let ((f (loaded-next-at a)))
         (if (null? f)
@@ -809,7 +809,7 @@
   ;; mark (`loaded-made` of it, for a file of parameters; for a
   ;; `load-input`, `input?`, its one form, the item `input`); or why it
   ;; could not be read.
-  (parse-load-file (subr (maxeff parses spin) (loaded-file string bool int int) exp)
+  (parse-load-file (->* (loaded-file string bool int int) exp)
     (lambda (f path input? a b)
       (if (= (extract f 2) 0)
           (e-module (loaded-error (extract f 3)) a b 0)
@@ -840,7 +840,7 @@
                     (pfail-at m x y)))
               (p-ok (ts) (tagcase (car ts) (t-exp (x) x) (else y (e-module nil a b 0))))))))))
 ;; A `define-rec`'s bindings, as a `letrec`'s are.
-(define parse-rec-bindings (subr (maxeff parses spin) (syns-a) letrec-list)
+(define parse-rec-bindings (->* (syns-a) letrec-list)
   (lambda (bs)
     (let ((usage "a define-rec binding is `(name type lambda)`"))
       (parse-typed-bindings bs "a define-rec binding" usage))))

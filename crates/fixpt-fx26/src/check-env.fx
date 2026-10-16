@@ -32,12 +32,12 @@
 (define k-symbol int 6)
 (define k-void int 16)
 (define k-base (ref (listof (pairof symbol int @t) acyclic) @t) (new nil))
-(define k-basic (subr (maxeff kstate spin) (string) unit)
+(define k-basic (->* (string) unit)
   (lambda (name)
     (let* ((s (string->symbol name)) (t (k-ty-new (ty-base s))))
       (set k-base (cons (cons s t) (get k-base))))))
 
-(define k-find (subr (maxeff (read @globals) (read @t)) (k-bindings symbol) int)
+(define k-find (->* (k-bindings symbol) int)
   (lambda (bs s)
     (cond ((null? bs) -1) ((symbol=? (car (car bs)) s) (cdr (car bs))) (else (k-find (cdr bs) s)))))
 
@@ -63,17 +63,17 @@
 ;; globals its lambda reads are.
 (define k-last-latent (ref k-eff @t) (new nil))
 ;; For a driver: whether naming a global reads it.
-(define check-globals-effects! (subr (maxeff (read @globals) (write @t)) (bool) unit)
+(define check-globals-effects! (->* (bool) unit)
   (lambda (on) (set k-globals-effects on)))
 (define k-broken (ref (listof k-break acyclic) @t) (new nil))
 ;; How many bindings `s` has now.
-(define k-name-depth (subr (maxeff (read @globals) (read @t) spin) (symbol) int)
+(define k-name-depth (->* (symbol) int)
   (lambda (s) (k-length (table-ref (get k-env) s nil))))
 ;; Why `s`'s binding now is broken, if it is.
 ;; Whether `b` breaks the `d`th binding of `s`.
-(define k-breaks? (subr (read @globals) (k-break symbol int) bool)
+(define k-breaks? (->* (k-break symbol int) bool)
   (lambda (b s d) (and (symbol=? (extract b 1) s) (= (extract b 2) d))))
-(define k-broken-why (subr (maxeff kreads spin) (symbol) k-strings)
+(define k-broken-why (->* (symbol) k-strings)
   (lambda (s)
     (let ((d (k-name-depth s)))
       (letrec ((go (subr (read @globals) ((listof k-break acyclic)) k-strings)
@@ -95,9 +95,9 @@
 ;; For a driver (`Session::native_define` of a module file built in, given
 ;; as its text, `built_in_load`): while on, that text sees what a module
 ;; file built in sees.
-(define check-built-in! (subr (maxeff (read @globals) (read @t) (write @t)) (bool) unit)
+(define check-built-in! (->* (bool) unit)
   (lambda (on) (set k-in-built-in (+ (get k-in-built-in) (if on 1 -1)))))
-(define k-built-in-only? (subr pure (symbol) bool)
+(define k-built-in-only? (->* (symbol) bool)
   (lambda (s)
     (or (symbol=? s '%sched) (symbol=? s '%processes:spawn-process)
         (symbol=? s '%processes:send) (symbol=? s '%processes:receive)
@@ -109,18 +109,18 @@
         (symbol=? s '%processes:race2) (symbol=? s '%processes:self)
         (symbol=? s '%processes:spawn-monitored))))
 ;; Whether the innermost binding of `s` was made at depth `mark` or after.
-(define k-bound-since? (subr (maxeff (read @globals) (read @t) spin) (symbol int) bool)
+(define k-bound-since? (->* (symbol int) bool)
   (lambda (s mark)
     (let ((ds (table-ref (get k-depths) s nil))) (and (not (null? ds)) (>= (car ds) mark)))))
 ;; The type a test narrowed binding `d` of `s` to (the innermost), or `t`.
-(define k-narrowed-of (subr (read @globals) (k-narrows symbol int int) int)
+(define k-narrowed-of (->* (k-narrows symbol int int) int)
   (lambda (ns s d t)
     (cond ((null? ns) t)
           ((and (symbol=? (extract (car ns) 1) s) (= (extract (car ns) 2) d)) (extract (car ns) 3))
           (else (k-narrowed-of (cdr ns) s d t)))))
 ;; Whether `name` is the hidden global every load of a file is
 ;; (`parse-loaded`; `TODO.md` §68).
-(define k-shared-name? (subr (read @globals) (symbol) bool)
+(define k-shared-name? (->* (symbol) bool)
   (lambda (name)
     (let ((n (symbol->string name)))
       (and (>= (string-length n) 8) (string=? (substring n 0 8) "%shared:")))))
@@ -128,15 +128,15 @@
 ;; narrowed it; none, if that is broken. While a module read from a file is
 ;; checked, a binding made before it began only if it is a standard one, or
 ;; the hidden global of a file loaded (`k-shared-name?`).
-(define k-lookup (subr (maxeff (read @globals) (read @t) spin) (symbol) int)
+(define k-lookup (->* (symbol) int)
   (lambda (s)
     (let ((t (k-lookup-seen s)))
       (if (and (>= t 0) (k-hidden-standard? s t)) -1 t))))
 ;; Whether `s`, bound at `t`, is a standard name only the module files built
 ;; in may name, named elsewhere.
-(define k-hidden-standard? (subr (maxeff (read @globals) (read @t)) (symbol int) bool)
+(define k-hidden-standard? (->* (symbol int) bool)
   (lambda (s t) (and (k-built-in-only? s) (= (get k-in-built-in) 0) (= t (k-std-type s)))))
-(define k-lookup-seen (subr (maxeff (read @globals) (read @t) spin) (symbol) int)
+(define k-lookup-seen (->* (symbol) int)
   (lambda (s)
     (let ((st (table-ref (get k-env) s nil)) (mark (get k-hide-mark)))
       (cond ((or (null? st) (not (null? (k-broken-why s)))) -1)
@@ -145,47 +145,47 @@
              (k-narrowed-of (get k-narrowed) s (k-length st) (car st)))
             (else (k-std-type s))))))
 ;; The same, broken or not.
-(define k-lookup-raw (subr (maxeff (read @globals) (read @t) spin) (symbol) int)
+(define k-lookup-raw (->* (symbol) int)
   (lambda (s) (let ((st (table-ref (get k-env) s nil))) (if (null? st) -1 (car st)))))
 ;; What an unbound name's use says: why, if it is broken.
-(define k-unbound (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (symbol) string)
+(define k-unbound (->* (symbol) string)
   (lambda (s)
     (let ((why (k-broken-why s)) (n (symbol->string s)))
       (if (null? why)
           (k-cat3 "unbound variable `" n "`")
           (k-cat5 "`" n "` is broken, " (car why) ": define it again to use it")))))
 ;; Whether `at` is the identity `a`, `b`, `k`.
-(define k-at-is? (subr pure (k-at int int int) bool)
+(define k-at-is? (->* (k-at int int int) bool)
   (lambda (at a b k) (and (= (extract at 1) a) (= (extract at 2) b) (= (extract at 3) k))))
 (define k-no-operator k-op-mark (product (1 '||) (2 (product (1 -1) (2 -1) (3 -1)))))
 (define k-operator (ref k-op-mark @t) (new k-no-operator))
 ;; The standard operations a rule checks at each call, by their name there:
 ;; named only as a call's operator, so that no other name, and no procedure
 ;; given one, can call them unchecked.
-(define k-second-class? (subr pure (symbol) bool)
+(define k-second-class? (->* (symbol) bool)
   (lambda (s)
     (let ((n (symbol->string s)))
       (or (string=? n "cwcc") (string=? n "certify-length") (string=? n "certify-acyclic")
           (string=? n "certify-nat") (string=? n "native-procedure")))))
-(define k-operator? (subr (maxeff (read @globals) (read @t)) (symbol int int int) bool)
+(define k-operator? (->* (symbol int int int) bool)
   (lambda (s a b k)
     (let ((o (get k-operator)))
       (and (symbol=? (extract o 1) s) (k-at-is? (extract o 2) a b k)))))
-(define k-named-only (subr pure (symbol) string)
+(define k-named-only (->* (symbol) string)
   (lambda (s)
     (string-append "`" (symbol->string s)
                    "` is named only to call it: its calls are checked where it is named")))
 ;; Whether `m` is `#%fx`, the module of the standard bindings, which
 ;; nothing binds: `(with #%fx n)` is the standard `n` wherever it is,
 ;; shadowed or redefined (`TODO.md` §46).
-(define k-fx-module? (subr pure (symbol) bool)
+(define k-fx-module? (->* (symbol) bool)
   (lambda (m) (string=? (symbol->string m) "#%fx")))
 ;; The name a `(with #%fx n)`'s body names, `||` if none.
-(define k-fx-name (subr pure (kx) symbol)
+(define k-fx-name (->* (kx) symbol)
   (lambda (body) (tagcase body (x-var (n c d cdk) n) (else y '||))))
 ;; An operator's mark: its variable's name and identity, past `proj` and
 ;; `the`.
-(define k-operator-mark (subr spin (kx) k-op-mark)
+(define k-operator-mark (->* (kx) k-op-mark)
   (lambda (f)
     (tagcase f
       (x-var (s a b abk) (product (1 s) (2 (product (1 a) (2 b) (3 abk)))))
@@ -199,15 +199,15 @@
           (else y k-no-operator)))
       (else y k-no-operator))))
 ;; A flag, off, for a new innermost binding of `s`.
-(define k-push-flag (subr (maxeff kstate spin) (k-flags symbol) unit)
+(define k-push-flag (->* (k-flags symbol) unit)
   (lambda (flags s)
     (table-set! (get flags) s (the (listof bool acyclic) (cons #f (table-ref (get flags) s nil))))))
 ;; The depth of a new innermost binding of `s`, the next.
-(define k-push-depth (subr kstate (symbol) unit)
+(define k-push-depth (->* (symbol) unit)
   (lambda (s)
     (let ((ds (table-ref (get k-depths) s nil)))
       (table-set! (get k-depths) s (the k-stack (cons (get k-depth) ds))))))
-(define k-bind (subr (maxeff kstate spin) (symbol int) unit)
+(define k-bind (->* (symbol int) unit)
   (lambda (s t)
     (begin
       (table-set! (get k-env) s (cons t (table-ref (get k-env) s nil)))
@@ -217,11 +217,11 @@
       (k-push-flag k-fixed s)
       (set k-trail (cons s (get k-trail)))
       (set k-depth (+ (get k-depth) 1)))))
-(define k-mark (subr (maxeff (read @globals) (read @t)) () int) (lambda () (get k-depth)))
+(define k-mark (->* () int) (lambda () (get k-depth)))
 ;; `s`'s innermost binding, now of type `t`.
-(define k-rebind (subr (maxeff kstate spin) (symbol int) unit)
+(define k-rebind (->* (symbol int) unit)
   (lambda (s t) (table-set! (get k-env) s (cons t (cdr (table-ref (get k-env) s nil))))))
-(define k-unbind-to (subr (maxeff kstate spin) (int) unit)
+(define k-unbind-to (->* (int) unit)
   (lambda (m)
     (if (<= (get k-depth) m)
         #u
@@ -237,40 +237,40 @@
             (k-unbind-to m))))))
 
 ;; Note the binding of `n` that many from the innermost as known.
-(define k-set-nth-true (subr (read @globals) ((listof bool acyclic) int) (listof bool acyclic))
+(define k-set-nth-true (->* ((listof bool acyclic) int) (listof bool acyclic))
   (lambda (bs i)
     (cond ((null? bs) bs)
           ((= i 0) (the (listof bool acyclic) (cons #t (cdr bs))))
           (else (the (listof bool acyclic) (cons (car bs) (k-set-nth-true (cdr bs) (- i 1))))))))
-(define k-note-known (subr (maxeff kstate spin) (symbol int) unit)
+(define k-note-known (->* (symbol int) unit)
   (lambda (n i) (table-set! (get k-known) n (k-set-nth-true (table-ref (get k-known) n nil) i))))
 ;; Whether the binding `n` names is of a known procedure.
-(define k-known? (subr (maxeff (read @globals) (read @t) spin) (symbol) bool)
+(define k-known? (->* (symbol) bool)
   (lambda (n) (let ((st (table-ref (get k-known) n nil))) (and (not (null? st)) (car st)))))
 ;; Note the innermost binding of `n` as a global.
-(define k-note-global (subr (maxeff kstate spin) (symbol) unit)
+(define k-note-global (->* (symbol) unit)
   (lambda (n) (table-set! (get k-global) n (k-set-nth-true (table-ref (get k-global) n nil) 0))))
 ;; Bind `n`, at top level, to a value of type `t`: a global.
-(define k-bind-global (subr (maxeff kstate spin) (symbol int) unit)
+(define k-bind-global (->* (symbol int) unit)
   (lambda (n t) (begin (k-bind n t) (k-note-global n))))
 ;; Whether the binding `n` names is a global's.
-(define k-global? (subr (maxeff (read @globals) (read @t) spin) (symbol) bool)
+(define k-global? (->* (symbol) bool)
   (lambda (n) (let ((st (table-ref (get k-global) n nil))) (and (not (null? st)) (car st)))))
-(define k-note-fixed (subr (maxeff kstate spin) (symbol) unit)
+(define k-note-fixed (->* (symbol) unit)
   (lambda (n) (table-set! (get k-fixed) n (k-set-nth-true (table-ref (get k-fixed) n nil) 0))))
-(define k-fixed? (subr (maxeff (read @globals) (read @t) spin) (symbol) bool)
+(define k-fixed? (->* (symbol) bool)
   (lambda (n) (let ((st (table-ref (get k-fixed) n nil))) (and (not (null? st)) (car st)))))
 
 (define k-dscope (ref k-scope @t) (new nil))
-(define k-find-desc (subr (maxeff kreads (alloc @t)) (k-scope symbol) (listof k-ds acyclic))
+(define k-find-desc (->* (k-scope symbol) (listof k-ds acyclic))
   (lambda (ds s)
     (cond ((null? ds) nil)
           ((symbol=? (car (car ds)) s) (cons (cdr (car ds)) nil))
           (else (k-find-desc (cdr ds) s)))))
 ;; What `s` means as a description: none or one.
-(define k-lookup-desc (subr (maxeff kreads (alloc @t)) (symbol) (listof k-ds acyclic))
+(define k-lookup-desc (->* (symbol) (listof k-ds acyclic))
   (lambda (s) (k-find-desc (get k-dscope) s)))
-(define k-push-desc (subr kstate (symbol k-ds) unit)
+(define k-push-desc (->* (symbol k-ds) unit)
   (lambda (n d) (set k-dscope (cons (cons n d) (get k-dscope)))))
 
 ;; How many `with` bodies are being read (`k-with-mark`): where none is, no
@@ -279,7 +279,7 @@
 ;; In a `(with m …)` body, a mark in the description scope, `%with:m`, so
 ;; that a type name bound before it is `m`'s, if `m` gives it: `with`
 ;; shadows (FX-91 §2.3.19). `#%fx`'s are the standard's.
-(define k-with-mark (subr kstate (symbol) unit)
+(define k-with-mark (->* (symbol) unit)
   (lambda (m)
     (if (k-fx-module? m)
         #u
@@ -288,13 +288,13 @@
                             (ds-var -1 0))))))
 ;; The end of a `with` body that `k-with-mark` marked (its scope restored by
 ;; the caller).
-(define k-with-unmark (subr kstate (symbol) unit)
+(define k-with-unmark (->* (symbol) unit)
   (lambda (m)
     (if (k-fx-module? m) #u (set k-with-depth (- (get k-with-depth) 1)))))
 ;; The modules of the `with`s whose bodies `s` is read in since it was last
 ;; bound, innermost first: each shadows what `s` was before it. As
 ;; `parse.rs`'s `withs_over`.
-(define k-withs-over (subr (maxeff kreads (alloc @t)) (symbol) k-names)
+(define k-withs-over (->* (symbol) k-names)
   (lambda (s)
     (letrec ((walk (subr (maxeff kreads (alloc @t)) (k-scope) k-names)
                 (lambda (ds)
@@ -314,7 +314,7 @@
 ;; (innermost first): `(select m sym)` of the innermost, which, where `m`
 ;; does not give it, is the next's, and so on out to `outer`, what `sym`
 ;; means here otherwise, or -1. As `parse.rs`'s `with_selected`.
-(define k-with-selected (subr (maxeff kstate spin) (k-names symbol int) int)
+(define k-with-selected (->* (k-names symbol int) int)
   (lambda (withs sym outer)
     (if (null? withs)
         outer
@@ -326,7 +326,7 @@
 ;; which is what falls back (`k-with-applied`).
 (define k-with-apps (ref k-fallbacks @t) (new nil))
 ;; The entry of `fs` for node `node`, or `none`.
-(define k-fallback-in (subr kreads (k-fallbacks int int) int)
+(define k-fallback-in (->* (k-fallbacks int int) int)
   (lambda (fs node none)
     (letrec ((find (subr kreads (k-fallbacks) int)
                 (lambda (fs)
@@ -336,16 +336,16 @@
       (find fs))))
 ;; What `select` node `node`, a `with`'s, falls back to (`k-with-selected`):
 ;; a type, or -1 if nothing; -2 if it is not a `with`'s.
-(define k-with-fallback (subr kreads (int) int)
+(define k-with-fallback (->* (int) int)
   (lambda (node) (k-fallback-in (get k-with-fallbacks) node -2)))
 ;; The application whose `select` node, a `with`'s, is `node`, or -1
 ;; (`k-with-applied`).
-(define k-with-app-of (subr kreads (int) int)
+(define k-with-app-of (->* (int) int)
   (lambda (node) (k-fallback-in (get k-with-apps) node -1)))
 
 ;; How many fresh regions have been made, for naming the next.
 (define k-fresh (ref int @t) (new 0))
-(define k-fresh-region (subr kstate (string) k-region)
+(define k-fresh-region (->* (string) k-region)
   (lambda (base)
     (let ((n (+ (get k-fresh) 1)))
       (begin (set k-fresh n) (r-fresh n (k-cat3 base "." (int->string n)))))))
@@ -364,22 +364,22 @@
 ;; the same.
 (define k-effect-notes (ref k-facts @t) (new nil))
 ;; `notes` onto `acc`.
-(define k-add-effect-facts (subr (read @globals) (k-facts k-facts) k-facts)
+(define k-add-effect-facts (->* (k-facts k-facts) k-facts)
   (lambda (notes acc)
     (if (null? notes)
         acc
         (k-add-effect-facts (cdr notes) (the k-facts (cons (car notes) acc))))))
 ;; What checking found, for a compiler and the evaluator (`k-noted`): the
 ;; facts, and each expression's effect summary (`k-effect-notes`).
-(define checked-extracts (subr kreads () k-facts)
+(define checked-extracts (->* () k-facts)
   (lambda () (k-add-effect-facts (get k-effect-notes) (get k-extracts))))
-(define checked-effects (subr kreads () k-facts) (lambda () (get k-effect-notes)))
+(define checked-effects (->* () k-facts) (lambda () (get k-effect-notes)))
 ;; Whether `r` is a global's binding, or every global's.
-(define k-globals-region? (subr pure (k-region) bool)
+(define k-globals-region? (->* (k-region) bool)
   (lambda (r) (tagcase r (r-global (g) #t) (r-globals () #t) (else y #f))))
 ;; Whether `e` may keep its continuation for later, write a global, or do
 ;; what an effect variable stands for.
-(define k-disrupts? (subr (read @globals) (k-eff) bool)
+(define k-disrupts? (->* (k-eff) bool)
   (lambda (e)
     (and (not (null? e))
          (or (tagcase (car e)
@@ -390,11 +390,11 @@
                (else y #f))
              (k-disrupts? (cdr e))))))
 ;; Whether `a` reads.
-(define k-read-atom? (subr pure (k-atom) bool)
+(define k-read-atom? (->* (k-atom) bool)
   (lambda (a) (tagcase a (a-read (r) #t) (else y #f))))
-(define k-reads-only? (subr (read @globals) (k-eff) bool)
+(define k-reads-only? (->* (k-eff) bool)
   (lambda (e) (or (null? e) (and (k-read-atom? (car e)) (k-reads-only? (cdr e))))))
-(define k-summary (subr (read @globals) (k-eff) int)
+(define k-summary (->* (k-eff) int)
   (lambda (e) (cond ((null? e) 0) ((k-reads-only? e) 1) ((k-disrupts? e) 3) (else 2))))
 
 (define k-with-vals (ref k-with-list @t) (new nil))
@@ -403,39 +403,39 @@
 (define k-with-index (ref (table int k-with-list @t) @t)
   (new (make-table (lambda ((n int)) n) (lambda ((m int) (n int)) (= m n)))))
 (define k-with-names-in
-  (subr (maxeff (read @globals) (read @t)) (k-with-list int int int) k-names)
+  (->* (k-with-list int int int) k-names)
   (lambda (ws a b k)
     (cond ((null? ws) nil)
           ((k-at-is? (extract (car ws) 1) a b k) (extract (car ws) 2))
           (else (k-with-names-in (cdr ws) a b k)))))
-(define k-with-names (subr (maxeff (read @globals) (read @t)) (int int int) k-names)
+(define k-with-names (->* (int int int) k-names)
   (lambda (a b k) (k-with-names-in (table-ref (get k-with-index) a nil) a b k)))
 ;; Note `with` `w`, in the list and by where it starts.
-(define k-note-with (subr kstate (k-with-noted) unit)
+(define k-note-with (->* (k-with-noted) unit)
   (lambda (w)
     (let ((a (extract (extract w 1) 1)))
       (begin (set k-with-vals (the k-with-list (cons w (get k-with-vals))))
              (table-set! (get k-with-index) a
                          (the k-with-list (cons w (table-ref (get k-with-index) a nil))))))))
 ;; Forget the `with`s noted.
-(define k-forget-withs (subr (maxeff (read @globals) (write @t) (alloc @t)) () unit)
+(define k-forget-withs (->* () unit)
   (lambda ()
     (begin (set k-with-vals nil)
            (set k-with-index
                 (make-table (lambda ((n int)) n) (lambda ((m int) (n int)) (= m n)))))))
 (define k-hazard-mods (ref k-hazard-list @t) (new nil))
-(define k-hazard-names-in (subr (read @globals) (k-hazard-list symbol) k-names)
+(define k-hazard-names-in (->* (k-hazard-list symbol) k-names)
   (lambda (hs m)
     (cond ((null? hs) nil)
           ((symbol=? (extract (car hs) 1) m) (extract (car hs) 2))
           (else (k-hazard-names-in (cdr hs) m)))))
 (define k-reshapes (ref k-reshape-list @t) (new nil))
 ;; For a driver: the same as another checker found them.
-(define checked-reshapes! (subr (maxeff (read @globals) (write @t)) (k-reshape-list) unit)
+(define checked-reshapes! (->* (k-reshape-list) unit)
   (lambda (rs) (set k-reshapes rs)))
 ;; For a driver: what `with`s another checker saw, as `k-with-vals` keeps
 ;; them, for a compiler given that checker's facts.
-(define checked-withs! (subr (maxeff kstate spin) (k-with-list) unit)
+(define checked-withs! (->* (k-with-list) unit)
   (lambda (ws)
     (letrec ((each (subr kstate (k-with-list) unit)
                      (lambda (ws)
@@ -445,26 +445,26 @@
 ;; bound (`k-name-module`): not forgotten, but kept from leaving.
 (define k-module-vars (ref k-ids @t) (new nil))
 (define k-select-map (ref k-selects @t) (new nil))
-(define k-select-in (subr (maxeff (read @globals) (read @t)) (k-selects symbol symbol int) int)
+(define k-select-in (->* (k-selects symbol symbol int) int)
   (lambda (ss m n t)
     (cond ((null? ss) t)
           ((and (symbol=? (extract (car ss) 1) m) (symbol=? (extract (car ss) 2) n))
            (extract (car ss) 3))
           (else (k-select-in (cdr ss) m n t)))))
 ;; What `(select m n)`, node `t`, is while selects are resolved; else `t`.
-(define k-select-of (subr (maxeff (read @globals) (read @t)) (symbol symbol int) int)
+(define k-select-of (->* (symbol symbol int) int)
   (lambda (m n t) (k-select-in (get k-select-map) m n t)))
 (define k-param-map (ref k-params-given @t) (new nil))
-(define k-param-in (subr (maxeff (read @globals) (read @t)) (k-params-given int symbol int) int)
+(define k-param-in (->* (k-params-given int symbol int) int)
   (lambda (ps k n t)
     (cond ((null? ps) t)
           ((and (= (extract (car ps) 1) k) (symbol=? (extract (car ps) 2) n)) (extract (car ps) 3))
           (else (k-param-in (cdr ps) k n t)))))
 ;; What `(select $k n)`, node `t`, is while parameters are given; else `t`.
-(define k-param-sel-of (subr (maxeff (read @globals) (read @t)) (int symbol int) int)
+(define k-param-sel-of (->* (int symbol int) int)
   (lambda (k n t) (k-param-in (get k-param-map) k n t)))
 ;; `ts` but its last; and its last (-1 if none).
-(define k-ids-but-last (subr (maxeff (read @globals) (alloc @t) spin) (k-ids) k-ids)
+(define k-ids-but-last (->* (k-ids) k-ids)
   (lambda (ts) (if (or (null? ts) (null? (cdr ts))) nil (cons (car ts) (k-ids-but-last (cdr ts))))))
-(define k-ids-last (subr (maxeff (read @globals) spin) (k-ids) int)
+(define k-ids-last (->* (k-ids) int)
   (lambda (ts) (cond ((null? ts) -1) ((null? (cdr ts)) (car ts)) (else (k-ids-last (cdr ts)))))))))

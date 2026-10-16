@@ -32,11 +32,11 @@
       (include regcode-entry))
 
 ;; `cells` as word `w`'s register twin, unless there are none.
-(define c-twin! (subr c-emits (tword (listof wcell @k)) unit)
+(define c-twin! (->* (tword (listof wcell @k)) unit)
   (lambda (w cells) (if (null? cells) #u (begin (set-register-twin w cells) #u))))
 ;; Register code for twin `t`, made with the words its stack code made; a
 ;; copy's in its context.
-(define c-make-twin (subr (maxeff compiles spin) (c-twin) unit)
+(define c-make-twin (->* (c-twin) unit)
   (lambda (t)
     (let ((w (extract t 1)) (ps (extract t 2)) (body (extract t 3)) (defining (extract t 6))
           (copy (extract t 8))
@@ -64,16 +64,16 @@
                  (set c-spec-now outer-spec) (set c-genv outer-genv) (set c-r-plan-ctx outer-ctx)
                  (set c-made-reuse outer-reuse) (c-twin! w cells)))))))
 ;; Each of `ts`, last first, made in order.
-(define c-make-twins (subr (maxeff compiles spin) ((listof c-twin @k)) unit)
+(define c-make-twins (->* ((listof c-twin @k)) unit)
   (lambda (ts) (if (null? ts) #u (begin (c-make-twins (cdr ts)) (c-make-twin (car ts))))))
-(define c-make-standard-twins (subr (maxeff compiles spin) ((listof c-standard-twin @k)) unit)
+(define c-make-standard-twins (->* ((listof c-standard-twin @k)) unit)
   (lambda (ts)
     (if (null? ts) #u (begin (c-make-standard-twins (cdr ts)) (c-make-standard-twin (car ts))))))
 
 ;; A typed call of `n` arguments: in tail position, a tail call.
 ;; Word `w`'s register code as standard operation `op` of `n` arguments has
 ;; it as a value.
-(define c-make-standard-twin (subr (maxeff compiles spin) (c-standard-twin) unit)
+(define c-make-standard-twin (->* (c-standard-twin) unit)
   (lambda (t)
     (let ((cells (r-standard-word (extract t 2) (extract t 3))))
       (if (null? cells) #u (begin (set-register-twin (extract t 1) cells) #u)))))
@@ -81,7 +81,7 @@
 ;; the twins of all of them, in order (step 4): register code, a phase after
 ;; the stack code, which makes no word. (The standard operations' after the
 ;; lambdas': no register code depends on another's.)
-(define c-form-twins (subr (maxeff compiles spin) () unit)
+(define c-form-twins (->* () unit)
   (lambda ()
     (begin
       (if (get c-registers) (c-make-copies (get c-plan-copy-order)) #u)

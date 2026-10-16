@@ -76,7 +76,7 @@
 
 ;; The generative type `name` may see inside, as one of its conversions, or
 ;; -1; no longer, once asked.
-(define k-take-inside (subr kstate (symbol) int)
+(define k-take-inside (->* (symbol) int)
   (lambda (name)
     (letrec ((find (subr kreads (k-named) int)
                    (lambda (xs)
@@ -97,7 +97,7 @@
 ;;; word.
 (define k-conv-atoms string "a convention's clause holds names, integers and lists")
 ;; A name, not `#t`, `#f` or `#u`, which the Rust reader reads as no name.
-(define k-conv-name? (subr pure (syn) bool)
+(define k-conv-name? (->* (syn) bool)
   (lambda (s)
     (tagcase s
       (atom (d a b)
@@ -107,7 +107,7 @@
             #f))
       (else x #f))))
 ;; `s` printed canonically: atoms apart by one space, integers in decimal.
-(define k-conv-text (subr (maxeff checks spin) (syn) string)
+(define k-conv-text (->* (syn) string)
   (lambda (s)
     (tagcase s
       (atom (d a b)
@@ -116,19 +116,19 @@
             (if (k-conv-name? s) (symbol->string (k-name-of s "a name")) (k-sfail k-conv-atoms s))))
       (lst (items d a b) (string-append "(" (k-conv-texts items) ")"))
       (else x (k-sfail k-conv-atoms s)))))
-(define k-conv-texts (subr (maxeff checks spin) ((listof syn acyclic)) string)
+(define k-conv-texts (->* ((listof syn acyclic)) string)
   (lambda (xs)
     (cond ((null? xs) "")
           ((null? (cdr xs)) (k-conv-text (car xs)))
           (else (string-append (k-conv-text (car xs)) " " (k-conv-texts (cdr xs)))))))
 ;; A clause, by its role: `cs` sorted by role, `c` after any of its own.
-(define k-conv-insert (subr (maxeff checks spin) (k-clause k-clauses) k-clauses)
+(define k-conv-insert (->* (k-clause k-clauses) k-clauses)
   (lambda (c cs)
     (cond ((null? cs) (the k-clauses (cons c nil)))
           ((string<? (extract c 1) (extract (car cs) 1)) (the k-clauses (cons c cs)))
           (else (the k-clauses (cons (car cs) (k-conv-insert c (cdr cs))))))))
 ;; A program's clauses, each its role, its text and itself, sorted.
-(define k-conv-ours (subr (maxeff checks spin) ((listof syn acyclic) k-clauses) k-clauses)
+(define k-conv-ours (->* ((listof syn acyclic) k-clauses) k-clauses)
   (lambda (xs acc)
     (if (null? xs)
         acc
@@ -142,27 +142,27 @@
           (k-conv-ours (cdr xs)
                        (k-conv-insert (product (1 role) (2 (k-conv-text c)) (3 c)) acc))))))
 ;; Where a supported clause's role ends: at its first space or `)`.
-(define k-conv-role-end (subr spin (string int) int)
+(define k-conv-role-end (->* (string int) int)
   (lambda (t i)
     (cond ((= i (string-length t)) i)
           ((or (string=? (substring t i (+ i 1)) " ") (string=? (substring t i (+ i 1)) ")")) i)
           (else (k-conv-role-end t (+ i 1))))))
 ;; The supported clauses, sorted, `form` standing for where each is.
-(define k-conv-theirs (subr (maxeff checks spin) ((listof string @t) syn k-clauses) k-clauses)
+(define k-conv-theirs (->* ((listof string @t) syn k-clauses) k-clauses)
   (lambda (ts form acc)
     (if (null? ts)
         acc
         (let* ((t (car ts)) (role (substring t 1 (k-conv-role-end t 1))))
           (k-conv-theirs (cdr ts) form (k-conv-insert (product (1 role) (2 t) (3 form)) acc))))))
 ;; Two clauses of one role, the second.
-(define k-conv-twice (subr (maxeff checks spin) (k-clauses) unit)
+(define k-conv-twice (->* (k-clauses) unit)
   (lambda (cs)
     (cond ((or (null? cs) (null? (cdr cs))) #u)
           ((string=? (extract (car cs) 1) (extract (car (cdr cs)) 1))
            (k-sfail (string-append "`define-convention`: two `" (extract (car cs) 1) "` clauses")
                     (extract (car (cdr cs)) 3)))
           (else (k-conv-twice (cdr cs))))))
-(define k-conv-compare (subr (maxeff checks spin) (k-clauses k-clauses syn) unit)
+(define k-conv-compare (->* (k-clauses k-clauses syn) unit)
   (lambda (ours theirs form)
     (let ((extra (lambda ((o k-clause))
                    (k-sfail (string-append "`define-convention`: this implementation's convention "
@@ -183,15 +183,15 @@
                           (extract (car ours) 3))))
             ((string<? (extract (car ours) 1) (extract (car theirs) 1)) (extra (car ours)))
             (else (missing (car theirs)))))))
-(define k-check-convention (subr (maxeff checks spin) (syn) unit)
+(define k-check-convention (->* (syn) unit)
   (lambda (form)
     (let* ((ours (k-conv-ours (cdr (cdr (k-items form "a convention's declaration"))) nil))
            (theirs (k-conv-theirs (the (listof string @t) (native-convention)) form nil)))
       (begin (k-conv-twice ours) (k-conv-compare ours theirs form)))))
 ;; The symbol `prefix` then `n` spells.
-(define k-prefixed (subr (read @globals) (string string) symbol)
+(define k-prefixed (->* (string string) symbol)
   (lambda (prefix n) (string->symbol (string-append prefix n))))
-(define k-declare (subr (maxeff checks spin) (top) unit)
+(define k-declare (->* (top) unit)
   (lambda (form)
     (tagcase form
       (t-define-type (name def a b)
@@ -222,15 +222,15 @@
                               (cons (cons (k-prefixed "up-" n) g) (get k-inside))))))
       (else y #u))))
 
-(define k-declare-each (subr (maxeff checks spin) (k-tops) unit)
+(define k-declare-each (->* (k-tops) unit)
   (lambda (forms)
     (if (null? forms)
         #u
         (begin (k-declare (car forms)) (k-declare-each (cdr forms))))))
-(define k-names-reversed (subr (read @globals) (k-names k-names) k-names)
+(define k-names-reversed (->* (k-names k-names) k-names)
   (lambda (xs acc) (if (null? xs) acc (k-names-reversed (cdr xs) (cons (car xs) acc)))))
 ;; The names simple `define-type`s give, in order, each as often as given.
-(define k-ahead-names-of (subr (maxeff (read @globals) (read @s) spin) (k-tops k-names) k-names)
+(define k-ahead-names-of (->* (k-tops k-names) k-names)
   (lambda (forms acc)
     (if (null? forms)
         (k-names-reversed acc nil)
@@ -246,7 +246,7 @@
 ;; any order. Values cannot: a definition sees only those before it. Each
 ;; abbreviation defined once, by name, is in scope before any is read, and
 ;; checked grounded once all are.
-(define* k-ahead (subr (maxeff checks spin) (k-tops) unit)
+(define k-ahead (->* (k-tops) unit)
   (lambda (forms)
     (let ((names (k-ahead-names-of forms nil)))
       (begin
@@ -264,20 +264,20 @@
 ;; compile paths never read (`check-lines!`).
 (define k-show-lines (ref bool @t) (new #t))
 ;; The line for a form of type `t` and effect `e`; empty, if none are made.
-(define k-line (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (int k-eff) string)
+(define k-line (->* (int k-eff) string)
   (lambda (t e)
     (if (get k-show-lines) (k-cat3 (k-show-ty t) " ! " (k-show-effect e)) "")))
 ;; The line for a definition of `name`, of type `t` and effect `e`.
-(define k-define-line (subr (maxeff kreads (alloc @t) spin) (symbol int k-eff) string)
+(define k-define-line (->* (symbol int k-eff) string)
   (lambda (name t e)
     (if (get k-show-lines) (k-cat4 "define " (symbol->string name) " : " (k-line t e)) "")))
-(define k-push-lines (subr (maxeff kreads (alloc @t)) (k-out k-out) k-out)
+(define k-push-lines (->* (k-out k-out) k-out)
   (lambda (lines out) (if (null? lines) out (k-push-lines (cdr lines) (cons (car lines) out)))))
 ;; Bind `n`, at top level, to a value of type `t`: a global, a module's
 ;; abstract types named for it.
-(define k-bind-named-global (subr (maxeff kstate spin) (symbol int) unit)
+(define k-bind-named-global (->* (symbol int) unit)
   (lambda (n t) (begin (k-bind-global n (k-name-module n t)) (k-link-aliases n (get k-dscope)))))
-(define k-rec-types (subr (maxeff checks spin) (k-rec-forms) k-ids)
+(define k-rec-types (->* (k-rec-forms) k-ids)
   (lambda (bs)
     (if (null? bs)
         nil
@@ -289,7 +289,7 @@
                (noted (k-note-known (extract (car bs) 1) 0)))
           (cons t (k-rec-types (cdr bs)))))))
 ;; Each lambda, read under its signature: a lambda, or an error.
-(define k-rec-lambdas (subr (maxeff checks spin) (k-rec-forms k-ids) k-letrec-bs)
+(define k-rec-lambdas (->* (k-rec-forms k-ids) k-letrec-bs)
   (lambda (bs ts)
     (if (null? bs)
         nil
@@ -301,7 +301,7 @@
                (restored (set k-dscope saved))
                (checked (if (k-lambda? x) #u (k-fail-not-lambda name x))))
           (cons (product (1 name) (2 t) (3 x)) (k-rec-lambdas (cdr bs) (cdr ts)))))))
-(define k-rec-check (subr (maxeff checks spin) (k-letrec-bs) k-out)
+(define k-rec-check (->* (k-letrec-bs) k-out)
   (lambda (g)
     (if (null? g)
         nil
@@ -313,7 +313,7 @@
           (cons line rest)))))
 
 ;; Each of `g`, by name and type, noted as recursive.
-(define k-note-recursive (subr kstate (k-letrec-bs) unit)
+(define k-note-recursive (->* (k-letrec-bs) unit)
   (lambda (g)
     (if (null? g)
         #u
@@ -321,30 +321,30 @@
           (begin (set k-recursive (cons (cons (extract m 1) (extract m 2)) (get k-recursive)))
                  (k-note-recursive (cdr g)))))))
 ;; A `define-rec` group's free variables.
-(define k-group-free (subr kmakes (k-letrec-bs k-names) k-names)
+(define k-group-free (->* (k-letrec-bs k-names) k-names)
   (lambda (g out)
     (if (null? g) out (k-group-free (cdr g) (k-free-into (extract (car g) 3) nil out)))))
 ;; Each of `g`, bound again at its type there.
-(define k-rebind-each (subr (maxeff checks spin) (k-letrec-bs) unit)
+(define k-rebind-each (->* (k-letrec-bs) unit)
   (lambda (g)
     (if (null? g)
         #u
         (begin (k-rebind-top (extract (car g) 1) (extract (car g) 2)) (k-rebind-each (cdr g))))))
 ;; Note of the recursive group `g` whether it needs `spin`, and why.
-(define k-note-rec-ending (subr (maxeff checks spin) (k-letrec-bs) unit)
+(define k-note-rec-ending (->* (k-letrec-bs) unit)
   (lambda (g)
     (let ((why (k-termination g)))
       (if (string=? why "") #u (begin (k-note-recursive g) (k-note-why g why))))))
 ;; Group `g`, with members typed `->*`, bound and its termination noted
 ;; after `rsaved`: at the types found (`k-arrow-star-found`), bound again
 ;; so and noted again.
-(define k-rec-found (subr (maxeff checks spin) (k-letrec-bs k-named) k-letrec-bs)
+(define k-rec-found (->* (k-letrec-bs k-named) k-letrec-bs)
   (lambda (g rsaved)
     (let ((found (k-arrow-star-found k-synth-lambda-as g)))
       (begin (k-rebind-each found) (set k-recursive rsaved) (k-note-rec-ending found) found))))
 ;; `(define-rec (name type lambda) …)`: every name in scope first, then each
 ;; lambda checked against its type. A line for each.
-(define k-define-rec (subr (maxeff checks spin) (k-rec-forms) k-out)
+(define k-define-rec (->* (k-rec-forms) k-out)
   (lambda (bs)
     (let* ((rsaved (get k-recursive))
            (g0 (k-rec-lambdas bs (k-rec-types bs)))
@@ -365,55 +365,55 @@
 ;;; by the same rule; each that does not is broken. To keep a value as it
 ;;; was, a program binds it: `(define d (let ((g g)) …))`.
 
-(define k-rev-runs (subr (read @globals) (k-run-list k-run-list) k-run-list)
+(define k-rev-runs (->* (k-run-list k-run-list) k-run-list)
   (lambda (xs acc) (if (null? xs) acc (k-rev-runs (cdr xs) (the k-run-list (cons (car xs) acc))))))
 ;; For a driver: what the program checked runs, in order (`compile-checked`,
 ;; `run-checked`).
-(define checked-tops (subr (maxeff (read @globals) (read @t)) () (listof k-run acyclic))
+(define checked-tops (->* () (listof k-run acyclic))
   (lambda () (k-rev-runs (get k-runs) nil)))
-(define k-rev-defs (subr (read @globals) (k-def-list k-def-list) k-def-list)
+(define k-rev-defs (->* (k-def-list k-def-list) k-def-list)
   (lambda (xs acc) (if (null? xs) acc (k-rev-defs (cdr xs) (the k-def-list (cons (car xs) acc))))))
-(define k-rec-names (subr (read @globals) (k-rec-forms) k-names)
+(define k-rec-names (->* (k-rec-forms) k-names)
   (lambda (bs)
     (if (null? bs) nil (the k-names (cons (extract (car bs) 1) (k-rec-names (cdr bs)))))))
 ;; The names a form defines.
-(define k-top-names (subr (read @globals) (top) k-names)
+(define k-top-names (->* (top) k-names)
   (lambda (form)
     (tagcase form
       (t-define (name ty init a b) (the k-names (cons name nil)))
       (t-define-rec (bs a b) (k-rec-names bs))
       (else y (the k-names nil)))))
 ;; Whether `n` is a global a definition made.
-(define k-defined? (subr (maxeff (read @globals) (read @t)) (symbol) bool)
+(define k-defined? (->* (symbol) bool)
   (lambda (n)
     (letrec ((go (subr (maxeff (read @globals) (read @t)) (k-def-list) bool)
                (lambda (ds)
                  (and (not (null? ds)) (or (k-has-name? (extract (car ds) 1) n) (go (cdr ds)))))))
       (go (get k-defs)))))
-(define k-old-types (subr (maxeff (read @globals) (read @t) spin) (k-names) k-olds)
+(define k-old-types (->* (k-names) k-olds)
   (lambda (ns)
     (cond ((null? ns) nil)
           ((k-defined? (car ns))
            (the k-olds (cons (cons (car ns) (k-lookup-raw (car ns))) (k-old-types (cdr ns)))))
           (else (k-old-types (cdr ns))))))
 ;; Whether `o`'s global now has a type its old one's uses can take.
-(define k-fits-its-old? (subr (maxeff kstate spin) ((pairof symbol int acyclic)) bool)
+(define k-fits-its-old? (->* ((pairof symbol int acyclic)) bool)
   (lambda (o) (k-subtype (k-lookup-raw (car o)) (cdr o))))
 ;; Whether each of them now has a type its old one's uses can take.
-(define k-fits-old? (subr (maxeff kstate spin) (k-olds) bool)
+(define k-fits-old? (->* (k-olds) bool)
   (lambda (os) (or (null? os) (and (k-fits-its-old? (car os)) (k-fits-old? (cdr os))))))
-(define k-names-without (subr (maxeff (read @globals) (read @t)) (k-names k-names) k-names)
+(define k-names-without (->* (k-names k-names) k-names)
   (lambda (xs ns)
     (cond ((null? xs) xs)
           ((k-has-name? ns (car xs)) (k-names-without (cdr xs) ns))
           (else (the k-names (cons (car xs) (k-names-without (cdr xs) ns)))))))
-(define k-defs-without (subr kreads (k-def-list k-names) k-def-list)
+(define k-defs-without (->* (k-def-list k-names) k-def-list)
   (lambda (ds ns)
     (cond ((null? ds) ds)
           ((k-names-meet? (extract (car ds) 1) ns) (k-defs-without (cdr ds) ns))
           (else (the k-def-list (cons (car ds) (k-defs-without (cdr ds) ns)))))))
 ;; `form`, which defines `ns`, recorded as their definition now.
-(define k-record (subr kstate (top k-names) unit)
+(define k-record (->* (top k-names) unit)
   (lambda (form ns)
     (if (null? ns)
         #u
@@ -421,7 +421,7 @@
           (set k-defs (the k-def-list (cons def (k-defs-without (get k-defs) ns))))))))
 ;; The definitions that use `ns`, and those that use them, and so on,
 ;; oldest first.
-(define k-users-of (subr (maxeff kreads (alloc @t)) (k-names) k-def-list)
+(define k-users-of (->* (k-names) k-def-list)
   (lambda (ns)
     (letrec ((go (subr (maxeff kreads (alloc @t)) (k-def-list k-names) k-def-list)
                (lambda (ds used)
@@ -433,7 +433,7 @@
                        (else (go (cdr ds) used))))))
       (go (k-rev-defs (get k-defs) nil) ns))))
 ;; Names as a message shows them: `a`, `b`.
-(define k-shown (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-names) string)
+(define k-shown (->* (k-names) string)
   (lambda (ns)
     (letrec ((go (subr (maxeff (read @globals) (alloc @t)) (k-names) k-texts)
                (lambda (xs)
@@ -441,25 +441,25 @@
                      nil
                      (the k-texts (cons (k-quote (symbol->string (car xs))) (go (cdr xs))))))))
       (k-join (go ns) ", "))))
-(define k-break-all (subr (maxeff kstate spin) (k-names string) unit)
+(define k-break-all (->* (k-names string) unit)
   (lambda (ns why)
     (if (null? ns)
         #u
         (let ((b (product (1 (car ns)) (2 (k-name-depth (car ns))) (3 why))))
           (begin (set k-broken (the (listof k-break acyclic) (cons b (get k-broken))))
                  (k-break-all (cdr ns) why))))))
-(define k-lines-append (subr (read @globals) (k-out k-out) k-out)
+(define k-lines-append (->* (k-out k-out) k-out)
   (lambda (xs ys) (if (null? xs) ys (the k-out (cons (car xs) (k-lines-append (cdr xs) ys))))))
 ;; An error at `written` unless `tw`, the type `define*` checks at, is a
 ;; `subr` (≥ 0).
-(define k-star-subr (subr checks (int syn) unit)
+(define k-star-subr (->* (int syn) unit)
   (lambda (tw written)
     (if (< tw 0)
         (k-sfail "`define*` finds what a procedure reads: its type is a `subr`" written)
         #u)))
 ;; An error at `x` if `define*` (`star`) defines it, and it is not a
 ;; `lambda`.
-(define k-star-lambda (subr checks (bool kx) unit)
+(define k-star-lambda (->* (bool kx) unit)
   (lambda (star x)
     (if (and star (not (k-lambda? x)))
         (k-fail-at "`define*` defines a procedure: a `lambda`" x)
@@ -467,7 +467,7 @@
 ;; Note of `name`, the lambda `x` of type `t`, whether its runs may not
 ;; end, and if so why: then it is recursive, as a group of one, beside
 ;; those of `rsaved`.
-(define k-note-alone (subr (maxeff kstate spin) (symbol int kx k-named) unit)
+(define k-note-alone (->* (symbol int kx k-named) unit)
   (lambda (name t x rsaved)
     (let* ((g (the k-letrec-bs (cons (product (1 name) (2 t) (3 x)) nil)))
            (why (k-termination g)))
@@ -475,24 +475,24 @@
           #u
           (begin (set k-recursive (cons (cons name t) rsaved)) (k-note-why g why))))))
 ;; Lemma `l`, now of the names `named`.
-(define k-lemma-as (subr pure (k-lemma k-named) k-lemma)
+(define k-lemma-as (->* (k-lemma k-named) k-lemma)
   (lambda (l named)
     (product (1 (extract l 1)) (2 (extract l 2)) (3 (extract l 3)) (4 (extract l 4)) (5 named))))
 ;; `name`, of type `t`, defined as `x`, noted as a proof of `l`, once `x`
 ;; proves it.
-(define k-note-lemma (subr (maxeff checks spin) (k-lemma symbol int kx) unit)
+(define k-note-lemma (->* (k-lemma symbol int kx) unit)
   (lambda (l name t x)
     (let ((named (the k-named (cons (cons name t) nil))))
       (begin (k-check-proof l name x)
              (set k-lemmas (cons (k-lemma-as l named) (get k-lemmas)))))))
 ;; An error at `written` if `define*` (`star`) declares an `->*` (`arrow`).
-(define k-arrow-star-alone (subr checks (bool bool syn) unit)
+(define k-arrow-star-alone (->* (bool bool syn) unit)
   (lambda (star arrow written)
     (if (and star arrow)
         (k-sfail "`define*` and `->*` each find what a procedure does: write one" written)
         #u)))
 ;; An error at `x` if an `->*` (`arrow`) defines it, and it is not a `lambda`.
-(define k-arrow-star-lambda (subr checks (bool kx) unit)
+(define k-arrow-star-lambda (->* (bool kx) unit)
   (lambda (arrow x)
     (if (and arrow (not (tagcase x (x-lambda (ps body a b abk) #t) (else y #f))))
         (k-fail-at "`->*` finds a procedure's effect from its `lambda`: define it as one" x)
@@ -500,11 +500,11 @@
 ;; The effect `->*` finds for `name`, from its body's `e`: with `spin` if it
 ;; reads `name` itself, as a procedure that may reach itself through a
 ;; global must say (`k-no-reaching-itself`).
-(define* k-arrow-star-spins (subr (maxeff (read @t) (alloc @t) spin) (symbol k-eff) k-eff)
+(define k-arrow-star-spins (->* (symbol k-eff) k-eff)
   (lambda (name e) (if (k-reads-one-of? (cons name nil) e) (k-insert (a-spin) e) e)))
 ;; `(define name type init)`, or, if `star` is not empty,
 ;; `(define* name type init)`: its line.
-(define k-define-typed (subr (maxeff checks spin) (symbol syn syns-a exp) k-out)
+(define k-define-typed (->* (symbol syn syns-a exp) k-out)
   (lambda (name written star-syns init)
     ;; A lambda is in scope in itself, as a `letrec`
     ;; binding is; anything else is not.
@@ -571,7 +571,7 @@
            (after (if (k-lambda? x) #u (k-bind-named-global name tf))))
       (cons (k-define-line name tf e) nil))))
 ;; Whether effect `e` only reads globals.
-(define k-reads-globals-only? (subr (read @globals) (k-eff) bool)
+(define k-reads-globals-only? (->* (k-eff) bool)
   (lambda (e)
     (or (null? e)
         (and (tagcase (car e)
@@ -579,7 +579,7 @@
                (else y #f))
              (k-reads-globals-only? (cdr e))))))
 ;; The error that making a loaded file has effect `e`.
-(define k-shared-impure (subr (maxeff (read @globals) (read @t)) (k-eff) string)
+(define k-shared-impure (->* (k-eff) string)
   (lambda (e)
     (k-cat3 (string-append "a loaded file is one value for all its loads, made once, "
                            "so making it must be pure, and this one has ")
@@ -588,7 +588,7 @@
 ;; `(define name init)`, of no type written: its line. A loaded file's, made
 ;; once for all its loads, must be pure but for reading globals, and has
 ;; none; the definition is at `a`..`b`, the form that loads it.
-(define k-define-untyped (subr (maxeff checks spin) (symbol exp int int) k-out)
+(define k-define-untyped (->* (symbol exp int int) k-out)
   (lambda (name init a b)
     (let* ((x (k-resolve-exp init))
            (u (set k-last-uses (k-free-into x nil nil)))
@@ -604,7 +604,7 @@
                  nil
                  (cons (k-define-line name (extract r 1) (extract r 2)) nil))))))
 ;; One top-level form's lines: what each definition and expression is.
-(define k-top-lines (subr (maxeff checks spin) (top) k-out)
+(define k-top-lines (->* (top) k-out)
   (lambda (form)
     (the k-out (tagcase form
                  (t-define (name ty init a b)
@@ -616,41 +616,41 @@
                    (let* ((x (k-resolve-exp e)) (r (k-synth x)))
                      (cons (k-line (extract r 1) (extract r 2)) nil)))
                  (else y nil)))))
-(define k-lines-append-names (subr (read @globals) (k-names k-names) k-names)
+(define k-lines-append-names (->* (k-names k-names) k-names)
   (lambda (xs ys)
     (if (null? xs) ys (the k-names (cons (car xs) (k-lines-append-names (cdr xs) ys))))))
 ;; The names `defs` define, in order.
-(define k-defs-names (subr (maxeff kreads (alloc @t)) (k-def-list) k-names)
+(define k-defs-names (->* (k-def-list) k-names)
   (lambda (ds)
     (if (null? ds) nil (k-lines-append-names (extract (car ds) 1) (k-defs-names (cdr ds))))))
 ;; Those of `xs` that are in `ys`, in `xs`'s order.
-(define k-names-within (subr (maxeff (read @globals) (read @t)) (k-names k-names) k-names)
+(define k-names-within (->* (k-names k-names) k-names)
   (lambda (xs ys)
     (cond ((null? xs) xs)
           ((k-has-name? ys (car xs)) (the k-names (cons (car xs) (k-names-within (cdr xs) ys))))
           (else (k-names-within (cdr xs) ys)))))
 ;; Whether effect `e` has `spin`.
-(define k-has-spin? (subr (read @globals) (k-eff) bool)
+(define k-has-spin? (->* (k-eff) bool)
   (lambda (e)
     (and (not (null? e)) (or (tagcase (car e) (a-spin () #t) (else y #f)) (k-has-spin? (cdr e))))))
 ;; Whether `t` is a procedure whose calls may not end: `spin` in its latent
 ;; effect, under any `poly`.
-(define k-type-spins? (subr (maxeff (read @globals) (read @t) spin) (int) bool)
+(define k-type-spins? (->* (int) bool)
   (lambda (t)
     (tagcase (k-get (k-resolve t))
       (ty-poly (bs body) (k-type-spins? body))
       (ty-subr (e ps r cv) (k-has-spin? e))
       (else y #f))))
-(define k-names-spin? (subr (maxeff (read @globals) (read @t) spin) (k-names) bool)
+(define k-names-spin? (->* (k-names) bool)
   (lambda (ns)
     (and (not (null? ns)) (or (k-type-spins? (k-lookup-raw (car ns))) (k-names-spin? (cdr ns))))))
-(define k-top-start (subr pure (top) int)
+(define k-top-start (->* (top) int)
   (lambda (form)
     (tagcase form (t-define (name ty init a b) a) (t-define-rec (bs a b) a) (else y 0))))
-(define k-top-end (subr pure (top) int)
+(define k-top-end (->* (top) int)
   (lambda (form)
     (tagcase form (t-define (name ty init a b) b) (t-define-rec (bs a b) b) (else y 0))))
-(define k-atoms-globals (subr (maxeff (read @globals) (alloc @t)) (k-eff) k-regions)
+(define k-atoms-globals (->* (k-eff) k-regions)
   (lambda (e)
     (cond ((null? e) nil)
           ((k-globals-atom? (car e))
@@ -658,14 +658,14 @@
           (else (k-atoms-globals (cdr e))))))
 ;; The globals calling a value of type `t` reads: its latent effect's, under
 ;; any `poly`; none, if it is not a procedure.
-(define k-latent-globals (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (int) k-regions)
+(define k-latent-globals (->* (int) k-regions)
   (lambda (t)
     (tagcase (k-get (k-resolve t))
       (ty-poly (bs body) (k-latent-globals body))
       (ty-subr (e ps r cv) (k-atoms-globals e))
       (else y nil))))
 ;; The first of `ns` whose global `rs` has, if any.
-(define k-first-read (subr (maxeff kreads (alloc @t) spin) (k-regions k-names) k-names)
+(define k-first-read (->* (k-regions k-names) k-names)
   (lambda (rs ns)
     (cond ((null? ns) nil)
           ((k-has-region-in? rs (r-global (car ns))) (the k-names (cons (car ns) nil)))
@@ -673,19 +673,19 @@
 ;; What a procedure that may reach itself through a global must do.
 (define k-must-spin string "` may reach itself through a global: its type must say `spin`")
 ;; Why calling `name`, which reads the global `m`, may reach itself.
-(define k-reads-itself (subr (read @globals) (string string) string)
+(define k-reads-itself (->* (string string) string)
   (lambda (name m)
     (k-cat4 (k-cat5 "calling `" name "` reads `" m "`, so `") name k-must-spin
             " (or, to call itself directly, it binds itself with a local `letrec`)")))
 ;; Why calling `name`, which may read any global, may reach itself.
-(define k-reads-any (subr (read @globals) (string) string)
+(define k-reads-any (->* (string) string)
   (lambda (name)
     (let ((so (k-cat5 "calling `" name "` may read any global, `" name "` too, so `")))
       (k-cat3 so name k-must-spin))))
 ;; An error at `form` if calling the procedure `name`, of type `t`, may
 ;; reach itself through a global: if it reads one of `ns`, or, if
 ;; `redefining`, any global.
-(define k-not-reaching (subr (maxeff checks spin) (top string int k-names bool) unit)
+(define k-not-reaching (->* (top string int k-names bool) unit)
   (lambda (form name t ns redefining)
     (let* ((reads (k-latent-globals t))
            (m (k-first-read reads ns))
@@ -701,7 +701,7 @@
 ;; reads `f`; one that stays `pure` binds itself with a local `letrec`. A
 ;; group's members read each other so. Reading `@globals` may read `f` only
 ;; once `f` is a global (`top.rs`, `no_reaching_itself`).
-(define k-no-reaching-itself (subr (maxeff checks spin) (top k-names bool) unit)
+(define k-no-reaching-itself (->* (top k-names bool) unit)
   (lambda (form ns redefining)
     (letrec ((each (subr (maxeff checks spin) (k-names) unit)
                (lambda (ms)
@@ -715,12 +715,12 @@
       (each ns))))
 ;; Note that `form` runs, assigning the globals it defines (`assigns`) or
 ;; making them new.
-(define k-note-run (subr kstate (top bool) unit)
+(define k-note-run (->* (top bool) unit)
   (lambda (form assigns)
     (set k-runs (the k-run-list (cons (product (1 form) (2 assigns)) (get k-runs))))))
 ;; Each of `users` checked again after the redefinition of `ns`: defined
 ;; again if it checks, broken if not.
-(define k-rerun (subr (maxeff (read @globals) checks spin) (k-def-list k-names k-out) k-out)
+(define k-rerun (->* (k-def-list k-names k-out) k-out)
   (lambda (users ns lines)
     (if (null? users)
         lines
@@ -751,9 +751,9 @@
 (define k-defer-reruns (ref bool @t) (new #f))
 ;; For a driver: whether re-runs wait.
 ;; For a driver: whether a form's lines are made (`k-show-lines`).
-(define check-lines! (subr (maxeff (read @globals) (write @t)) (bool) unit)
+(define check-lines! (->* (bool) unit)
   (lambda (on) (set k-show-lines on)))
-(define check-defer-reruns! (subr (maxeff (read @globals) (write @t)) (bool) unit)
+(define check-defer-reruns! (->* (bool) unit)
   (lambda (on) (set k-defer-reruns on)))
 ;; The breaks as the last check began (`k-broken`, which only grows, newest
 ;; first); and, while they are held (`check-hold-breaks!`), those the check
@@ -762,22 +762,18 @@
 (define k-broken-held (ref (listof k-break acyclic) @t) (new nil))
 (define k-broken-under (ref (listof k-break acyclic) @t) (new nil))
 (define k-holding-breaks (ref bool @t) (new #f))
-(define k-breaks-count (subr (read @globals) ((listof k-break acyclic)) int)
+(define k-breaks-count (->* ((listof k-break acyclic)) int)
   (lambda (bs) (if (null? bs) 0 (+ 1 (k-breaks-count (cdr bs))))))
 ;; The first `n` of `bs`, onto `rest`.
 (define k-breaks-onto
-  (subr (maxeff (read @globals) (alloc @t))
-        ((listof k-break acyclic) int (listof k-break acyclic))
-        (listof k-break acyclic))
+  (->* ((listof k-break acyclic) int (listof k-break acyclic)) (listof k-break acyclic))
   (lambda (bs n rest)
     (if (= n 0)
         rest
         (the (listof k-break acyclic) (cons (car bs) (k-breaks-onto (cdr bs) (- n 1) rest))))))
 ;; The breaks made since `k-broken` was `under`, newest first.
 (define k-breaks-since
-  (subr (maxeff (read @globals) (read @t) (alloc @t))
-        ((listof k-break acyclic))
-        (listof k-break acyclic))
+  (->* ((listof k-break acyclic)) (listof k-break acyclic))
   (lambda (under)
     (let ((now (get k-broken)))
       (k-breaks-onto now (- (k-breaks-count now) (k-breaks-count under)) nil))))
@@ -787,7 +783,7 @@
 ;; the value's check sees the definitions it uses as the definition's did;
 ;; off, put back, after those the checks between made.
 (define check-hold-breaks!
-  (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t)) (bool) unit)
+  (->* (bool) unit)
   (lambda (on)
     (cond ((and on (not (get k-holding-breaks)))
            (let ((under (get k-broken-began)))
@@ -806,7 +802,7 @@
           (else #u))))
 ;; A top-level form, checked under redefinition: its lines, and those of
 ;; the definitions it has run again.
-(define k-defining (subr (maxeff checks spin) (top) k-out)
+(define k-defining (->* (top) k-out)
   (lambda (form)
     (let* ((ns (k-top-names form))
            (olds (k-old-types ns))
@@ -823,7 +819,7 @@
 
 ;; The second pass: definitions and expressions, in order, each under
 ;; redefinition (`k-defining`).
-(define k-forms (subr (maxeff checks spin) (k-tops k-out) k-out)
+(define k-forms (->* (k-tops k-out) k-out)
   (lambda (forms out)
     (if (null? forms)
         (reverse out)
@@ -832,7 +828,7 @@
 ;; The entry point: check a program's trees, in the initial environment
 ;; written `standard`. What each definition and expression is, in order,
 ;; or the first error.
-(define check-program (subr (maxeff (read @globals) checks spin) (syns-a k-tops) k-result)
+(define check-program (->* (syns-a k-tops) k-result)
   (lambda (standard forms)
     (prompt k-tag
       (begin (k-reset) (set k-broken-began (get k-broken)) (k-standard standard)
@@ -844,7 +840,7 @@
 ;; them: checked in the environment the forms before left, which
 ;; `check-program` began. The facts for the compiler are only the new
 ;; forms', whose positions are in their own text.
-(define check-more (subr (maxeff (read @globals) checks spin) (k-tops) k-result)
+(define check-more (->* (k-tops) k-result)
   (lambda (forms)
     (prompt k-tag
       (begin (set k-extracts nil)

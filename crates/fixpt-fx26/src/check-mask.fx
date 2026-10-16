@@ -39,17 +39,17 @@
 (define k-items (with check-read k-items))
 
 ;; Whether an atom is on `const`, the frozen region.
-(define k-frozen-atom? (subr (read @globals) (k-atom) bool)
+(define k-frozen-atom? (->* (k-atom) bool)
   (lambda (a) (and (k-has-region? a) (tagcase (k-atom-region a) (r-frozen (p f) #t) (else y #f)))))
 ;; Whether an atom is on data frozen into a place, other than a write: it is
 ;; masked as what is done to the place is
 ;; (`docs/research/soundness-findings.md`, F2).
-(define k-place-frozen-atom? (subr (read @globals) (k-atom) bool)
+(define k-place-frozen-atom? (->* (k-atom) bool)
   (lambda (a)
     (and (k-has-region? a) (not (= (k-atom-rank a) 1))
          (tagcase (k-atom-region a) (r-frozen (p f) (>= p 0)) (else y #f)))))
 ;; The region an atom is masked by: a place-frozen atom's place.
-(define k-mask-region (subr (read @globals) (k-atom) k-region)
+(define k-mask-region (->* (k-atom) k-region)
   (lambda (a)
     (if (k-place-frozen-atom? a)
         (tagcase (k-atom-region a) (r-frozen (p f) (r-var p)) (else y (k-atom-region a)))
@@ -57,20 +57,20 @@
 ;; Whether an atom stays because the result mentions its region: `alloc`,
 ;; `goto` and `comefrom` (ranks 2 to 4); only `alloc`, for a place-frozen
 ;; one.
-(define k-result-keeps? (subr (read @globals) (k-atom) bool)
+(define k-result-keeps? (->* (k-atom) bool)
   (lambda (a)
     (let ((rank (k-atom-rank a)))
       (if (k-place-frozen-atom? a) (= rank 2) (and (> rank 1) (< rank 5))))))
 ;; Whether an atom stays because the result, whose regions are
 ;; `in-result`, mentions its region.
-(define k-stays-for-result? (subr (maxeff kreads spin) (k-atom k-regions) bool)
+(define k-stays-for-result? (->* (k-atom k-regions) bool)
   (lambda (a in-result)
     (and (k-has-region-in? in-result (k-mask-region a)) (k-result-keeps? a))))
 ;; Whether an atom is on frozen data in no place: it is never masked.
-(define k-unplaced-frozen-atom? (subr (read @globals) (k-atom) bool)
+(define k-unplaced-frozen-atom? (->* (k-atom) bool)
   (lambda (a) (and (k-frozen-atom? a) (not (k-place-frozen-atom? a)))))
 ;; The regions of `e`'s atoms that stay only if a free variable sees them.
-(define k-sought (subr (maxeff kmakes spin) (k-eff k-regions k-regions) k-regions)
+(define k-sought (->* (k-eff k-regions k-regions) k-regions)
   (lambda (e in-result out)
     (if (null? e)
         out
@@ -81,7 +81,7 @@
                              (not (k-stays-for-result? a in-result)))
                         (k-add-region out (k-mask-region a))
                         out))))))
-(define k-drop-regions (subr (maxeff kmakes spin) (k-regions k-regions) k-regions)
+(define k-drop-regions (->* (k-regions k-regions) k-regions)
   (lambda (rs seen)
     (cond ((null? rs) nil)
           ((k-has-region-in? seen (car rs)) (k-drop-regions (cdr rs) seen))
@@ -90,12 +90,12 @@
 ;; Of the regions `rs`, those no variable free in `x` sees: a walk of `x`
 ;; as `k-free-into`'s, that stops once each has been seen, as most are.
 (define-rec
-  (k-unseen-list (subr (maxeff kstate spin) (kxs k-names k-regions) k-regions)
+  (k-unseen-list (->* (kxs k-names k-regions) k-regions)
     (lambda (xs bound rs)
       (if (or (null? xs) (null? rs))
           rs
           (k-unseen-list (cdr xs) bound (k-unseen (car xs) bound rs)))))
-  (k-unseen (subr (maxeff kstate spin) (kx k-names k-regions) k-regions)
+  (k-unseen (->* (kx k-names k-regions) k-regions)
     (lambda (x bound rs)
       (if (null? rs)
           rs
@@ -137,24 +137,24 @@
                     (k-unseen body (k-names-onto (k-with-names a b abk) bound) o))))))))
   ;; The same walk of a module's items, every item's names bound, as a
   ;; `letrec*`'s.
-  (k-unseen-module (subr (maxeff kstate spin) (k-items k-names k-regions) k-regions)
+  (k-unseen-module (->* (k-items k-names k-regions) k-regions)
     (lambda (items bound rs) (k-unseen-items items (k-items-bound items bound) rs)))
-  (k-unseen-items (subr (maxeff kstate spin) (k-items k-names k-regions) k-regions)
+  (k-unseen-items (->* (k-items k-names k-regions) k-regions)
     (lambda (items bound rs)
       (if (null? items)
           rs
           (k-unseen-items (cdr items) bound (k-unseen-list (extract (car items) 5) bound rs)))))
-  (k-unseen-letrec (subr (maxeff kstate spin) (k-letrec-bs k-names k-regions) k-regions)
+  (k-unseen-letrec (->* (k-letrec-bs k-names k-regions) k-regions)
     (lambda (bs bound rs)
       (if (null? bs)
           rs
           (k-unseen-letrec (cdr bs) bound (k-unseen (extract (car bs) 3) bound rs)))))
-  (k-unseen-let (subr (maxeff kstate spin) (k-let-bs k-names k-regions) k-regions)
+  (k-unseen-let (->* (k-let-bs k-names k-regions) k-regions)
     (lambda (bs bound rs)
       (if (null? bs)
           rs
           (k-unseen-let (cdr bs) bound (k-unseen (extract (car bs) 2) bound rs)))))
-  (k-unseen-arms (subr (maxeff kstate spin) (k-arms k-names k-regions) k-regions)
+  (k-unseen-arms (->* (k-arms k-names k-regions) k-regions)
     (lambda (arms bound rs)
       (if (null? arms)
           rs
@@ -162,14 +162,14 @@
             (k-unseen-arms (cdr arms) bound
                            (k-unseen (extract arm 4) (k-names-onto (extract arm 3) bound) rs))))))
   ;; A `tagcase`'s `else` arm, if any, its variable bound.
-  (k-unseen-else (subr (maxeff kstate spin) (k-let-bs k-names k-regions) k-regions)
+  (k-unseen-else (->* (k-let-bs k-names k-regions) k-regions)
     (lambda (els bound rs)
       (if (null? els)
           rs
           (k-unseen (extract (car els) 2) (cons (extract (car els) 1) bound) rs)))))
 
 ;; What stays of `e`: an atom on a region no free variable sees goes.
-(define k-keep (subr (maxeff kmakes spin) (k-eff k-regions k-regions) k-eff)
+(define k-keep (->* (k-eff k-regions k-regions) k-eff)
   (lambda (e unseen in-result)
     (if (null? e)
         nil
@@ -182,14 +182,14 @@
 
 ;; Note that region variable `v` is written, if a `letfreeze` is freezing
 ;; it.
-(define k-note-written (subr kstate (int) unit)
+(define k-note-written (->* (int) unit)
   (lambda (v)
     (if (and (k-has-id? (get k-freezing) v) (not (k-has-id? (get k-written) v)))
         (set k-written (cons v (get k-written)))
         #u)))
 ;; A write to a region a `letfreeze` is freezing, noted before masking could
 ;; hide it: that region's data may be cyclic.
-(define k-note-writes (subr kstate (k-eff) unit)
+(define k-note-writes (->* (k-eff) unit)
   (lambda (e)
     (if (null? e)
         #u
@@ -199,7 +199,7 @@
             (a-init (r) (tagcase r (r-var (v) (k-note-written v)) (else y #u)))
             (else x #u))
           (k-note-writes (cdr e))))))
-(define k-mask (subr (maxeff kstate spin) (kx k-eff int) k-eff)
+(define k-mask (->* (kx k-eff int) k-eff)
   (lambda (x e result)
     (if (begin (k-note-writes e) (null? e))
         e

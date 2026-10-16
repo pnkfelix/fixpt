@@ -16,17 +16,17 @@
 (hide (include check-types))
 
 ;; Booleans in order, false first.
-(define k-bool-cmp (subr (read @globals) (bool bool) int)
+(define k-bool-cmp (->* (bool bool) int)
   (lambda (f g) (k-int-cmp (if f 1 0) (if g 1 0))))
-(define k-region-rank (subr pure (k-region) int)
+(define k-region-rank (->* (k-region) int)
   (lambda (r)
     (tagcase r
       (r-const (n) 0) (r-fresh (i n) 1) (r-var (v) 2) (r-frozen (p f) 3) (r-heap () 4)
       (r-global (g) 5) (r-globals () 6))))
 ;; Two names in order: the same symbol at once, else by their text.
-(define k-name-cmp (subr pure (symbol symbol) int)
+(define k-name-cmp (->* (symbol symbol) int)
   (lambda (n m) (if (symbol=? n m) 0 (symbol-compare n m))))
-(define k-region-cmp (subr (maxeff (read @globals) spin) (k-region k-region) int)
+(define k-region-cmp (->* (k-region k-region) int)
   (lambda (r s)
     (let ((c (k-int-cmp (k-region-rank r) (k-region-rank s))))
       (if (= c 0)
@@ -44,7 +44,7 @@
           c))))
 ;; The same as `(= (k-region-cmp r s) 0)`, the names compared as symbols:
 ;; one comparison, where the order compares their names.
-(define k-region=? (subr (maxeff (read @globals) spin) (k-region k-region) bool)
+(define k-region=? (->* (k-region k-region) bool)
   (lambda (r s)
     (tagcase r
       (r-const (n) (tagcase s (r-const (m) (symbol=? n m)) (else y #f)))
@@ -55,7 +55,7 @@
       (r-global (g) (tagcase s (r-global (h) (symbol=? g h)) (else y #f)))
       (r-globals () (tagcase s (r-globals () #t) (else y #f))))))
 
-(define k-atom-rank (subr pure (k-atom) int)
+(define k-atom-rank (->* (k-atom) int)
   (lambda (a)
     (tagcase a
       (a-read (r) 0) (a-write (r) 1) (a-alloc (r) 2)
@@ -63,7 +63,7 @@
       (a-init (r) 6) (a-send (r) 7) (a-receive (r) 8)
       (a-spin () 9) (a-io (k) 9) (a-nondet () 9) (a-var (v) 10) (a-app (v ds) 11))))
 ;; The atom's region; a variable's is none, shown as a binder -1.
-(define k-atom-region (subr (read @globals) (k-atom) k-region)
+(define k-atom-region (->* (k-atom) k-region)
   (lambda (a)
     (tagcase a
       (a-read (r) r) (a-write (r) r) (a-alloc (r) r)
@@ -71,24 +71,24 @@
       (a-init (r) r) (a-send (r) r) (a-receive (r) r)
       (a-spin () (r-var -1)) (a-io (k) (r-var -1)) (a-nondet () (r-var -1)) (a-var (v) (r-var -1))
       (a-app (v ds) (r-var -1)))))
-(define k-has-region? (subr (read @globals) (k-atom) bool) (lambda (a) (< (k-atom-rank a) 9)))
+(define k-has-region? (->* (k-atom) bool) (lambda (a) (< (k-atom-rank a) 9)))
 ;; The effect variable an atom is, or -1.
-(define k-atom-var (subr pure (k-atom) int)
+(define k-atom-var (->* (k-atom) int)
   (lambda (a) (tagcase a (a-var (v) v) (else y -1))))
 ;; What orders two atoms of one rank with no region: a variable's number,
 ;; or an effect application's.
-(define k-atom-key (subr pure (k-atom) int)
+(define k-atom-key (->* (k-atom) int)
   (lambda (a) (tagcase a (a-var (v) v) (a-app (v ds) v) (else y -1))))
 ;; A convention as a number: one of FX-26's own, or its binder.
-(define k-conv-code (subr pure (k-conv) int)
+(define k-conv-code (->* (k-conv) int)
   (lambda (c) (tagcase c (cv-cellular () -1) (cv-native () -2) (cv-fx () -3) (cv-var (v) v))))
 ;; What an effect application was given; none for any other atom.
-(define k-atom-args (subr pure (k-atom) (listof k-desc acyclic))
+(define k-atom-args (->* (k-atom) (listof k-desc acyclic))
   (lambda (a) (tagcase a (a-app (v ds) ds) (else y nil))))
 ;; Descriptions given an effect function, ranked by kind.
-(define k-earg-rank (subr pure (k-desc) int)
+(define k-earg-rank (->* (k-desc) int)
   (lambda (d) (tagcase d (dr (r) 0) (de (e) 1) (dz (z) 2) (dc (c) 3) (else y 4))))
-(define k-terms-cmp (subr (maxeff (read @globals) spin) (k-terms k-terms) int)
+(define k-terms-cmp (->* (k-terms k-terms) int)
   (lambda (ts us)
     (cond ((null? ts) (if (null? us) 0 -1))
           ((null? us) 1)
@@ -99,7 +99,7 @@
                     (k-int-cmp (cdr (car ts)) (cdr (car us))))
                    (else (k-terms-cmp (cdr ts) (cdr us)))))))))
 ;; Sizes in order: `finite` first, then by constant and terms.
-(define k-size-cmp (subr (maxeff (read @globals) spin) (k-size k-size) int)
+(define k-size-cmp (->* (k-size k-size) int)
   (lambda (m n)
     (tagcase m
       (sz-finite () (tagcase n (sz-finite () 0) (else y -1)))
@@ -115,7 +115,7 @@
 ;; Names (constant regions, globals) tie here, and are ordered by their
 ;; hashes (`k-name-hash-cmp`): the order is not alphabetical, which only
 ;; showing an effect needs (`k-globals-shown`).
-(define k-region-ord (subr pure (k-region) int)
+(define k-region-ord (->* (k-region) int)
   (lambda (r)
     (tagcase r
       (r-const (n) 0)
@@ -125,7 +125,7 @@
       (r-heap () 18014398509481984)
       (r-global (g) 22517998136852480)
       (r-globals () 27021597764222976))))
-(define k-atom-ord (subr pure (k-atom) int)
+(define k-atom-ord (->* (k-atom) int)
   (lambda (a)
     (tagcase a
       (a-read (r) (k-region-ord r))
@@ -145,14 +145,14 @@
       (a-var (v) (+ 720575940379279360 (+ v 1099511627776)))
       (a-app (v ds) (+ 792633534417207296 (+ v 1099511627776))))))
 ;; Two names by their stored hashes; by their text only if those are equal.
-(define k-name-hash-cmp (subr pure (symbol symbol) int)
+(define k-name-hash-cmp (->* (symbol symbol) int)
   (lambda (n m)
     (if (symbol=? n m)
         0
         (let ((h (symbol-name-hash n)) (g (symbol-name-hash m)))
           (cond ((< h g) -1) ((< g h) 1) (else (symbol-compare n m)))))))
 ;; Two regions whose `k-region-ord` is the same: names by `k-name-hash-cmp`.
-(define k-region-tie (subr pure (k-region k-region) int)
+(define k-region-tie (->* (k-region k-region) int)
   (lambda (r s)
     (tagcase r
       (r-const (n) (tagcase s (r-const (m) (k-name-hash-cmp n m)) (else y 0)))
@@ -161,7 +161,7 @@
 ;; Atoms in order: by `k-atom-ord`, one comparison of integers; a tie, by the
 ;; names of their regions, or an effect application's by what it was given.
 (define-rec
-  (k-atom-cmp (subr (maxeff (read @globals) spin) (k-atom k-atom) int)
+  (k-atom-cmp (->* (k-atom k-atom) int)
     (lambda (a b)
       (let ((x (k-atom-ord a)) (y (k-atom-ord b)))
         (cond ((< x y) -1)
@@ -170,14 +170,14 @@
                (tagcase a
                  (a-app (v ds) (k-eargs-cmp ds (k-atom-args b)))
                  (else z (k-region-tie (k-atom-region a) (k-atom-region b)))))))))
-  (k-eargs-cmp (subr (maxeff (read @globals) spin) (k-descs k-descs) int)
+  (k-eargs-cmp (->* (k-descs k-descs) int)
     (lambda (xs ys)
       (cond ((null? xs) (if (null? ys) 0 -1))
             ((null? ys) 1)
             (else
              (let ((c (k-earg-cmp (car xs) (car ys))))
                (if (= c 0) (k-eargs-cmp (cdr xs) (cdr ys)) c))))))
-  (k-earg-cmp (subr (maxeff (read @globals) spin) (k-desc k-desc) int)
+  (k-earg-cmp (->* (k-desc k-desc) int)
     (lambda (x y)
       (let ((c (k-int-cmp (k-earg-rank x) (k-earg-rank y))))
         (if (not (= c 0))
@@ -188,14 +188,14 @@
               (dz (m) (tagcase y (dz (n) (k-size-cmp m n)) (else z 0)))
               (dc (a) (tagcase y (dc (b) (k-int-cmp (k-conv-code a) (k-conv-code b))) (else z 0)))
               (else z 0))))))
-  (k-effs-cmp (subr (maxeff (read @globals) spin) (k-eff k-eff) int)
+  (k-effs-cmp (->* (k-eff k-eff) int)
     (lambda (e f)
       (cond ((null? e) (if (null? f) 0 -1))
             ((null? f) 1)
             (else
              (let ((c (k-atom-cmp (car e) (car f))))
                (if (= c 0) (k-effs-cmp (cdr e) (cdr f)) c)))))))
-(define k-atom-with (subr (read @globals) (k-atom k-region) k-atom)
+(define k-atom-with (->* (k-atom k-region) k-atom)
   (lambda (a r)
     (tagcase a
       (a-read (x) (a-read r)) (a-write (x) (a-write r)) (a-alloc (x) (a-alloc r))
@@ -203,23 +203,23 @@
       (a-init (x) (a-init r)) (a-send (x) (a-send r)) (a-receive (x) (a-receive r))
       (a-spin () a) (a-io (k) a) (a-nondet () a) (a-var (v) a) (a-app (v ds) a))))
 ;; Whether `a` comes before `b`, and whether they are one atom.
-(define k-atom<? (subr (maxeff (read @globals) spin) (k-atom k-atom) bool)
+(define k-atom<? (->* (k-atom k-atom) bool)
   (lambda (a b) (< (k-atom-cmp a b) 0)))
-(define k-atom=? (subr (maxeff (read @globals) spin) (k-atom k-atom) bool)
+(define k-atom=? (->* (k-atom k-atom) bool)
   (lambda (a b) (= (k-atom-cmp a b) 0)))
 
-(define k-insert (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (k-atom k-eff) k-eff)
+(define k-insert (->* (k-atom k-eff) k-eff)
   (lambda (a e)
     (if (null? e)
         (cons a nil)
         (let ((c (k-atom-cmp a (car e))))
           (cond ((< c 0) (cons a e)) ((= c 0) e) (else (cons (car e) (k-insert a (cdr e)))))))))
-(define k-union-each (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (k-eff k-eff) k-eff)
+(define k-union-each (->* (k-eff k-eff) k-eff)
   (lambda (x y) (if (null? x) y (k-union-each (cdr x) (k-insert (car x) y)))))
-(define k-sorted? (subr (maxeff kreads spin) (k-eff) bool)
+(define k-sorted? (->* (k-eff) bool)
   (lambda (e)
     (or (null? e) (null? (cdr e)) (and (k-atom<? (car e) (car (cdr e))) (k-sorted? (cdr e))))))
-(define k-merge (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (k-eff k-eff) k-eff)
+(define k-merge (->* (k-eff k-eff) k-eff)
   (lambda (x y)
     (cond ((null? x) y)
           ((null? y) x)
@@ -230,13 +230,13 @@
                    (else (cons (car y) (k-merge x (cdr y))))))))))
 ;; `x` and `y` together, sorted as `k-insert` keeps an effect: a merge, when
 ;; `x` is sorted too (as effects made here are), else one atom at a time.
-(define k-union (subr (maxeff (read @globals) (read @t) (alloc @t) spin) (k-eff k-eff) k-eff)
+(define k-union (->* (k-eff k-eff) k-eff)
   (lambda (x y) (if (k-sorted? x) (k-merge x y) (k-union-each x y))))
-(define k-contains? (subr (maxeff kreads spin) (k-eff k-atom) bool)
+(define k-contains? (->* (k-eff k-atom) bool)
   (lambda (e a) (cond ((null? e) #f) ((k-atom=? (car e) a) #t) (else (k-contains? (cdr e) a)))))
 ;; Whether `a` is in `e`, or, reading or writing one global, `e` does so to
 ;; `@globals`.
-(define k-covered? (subr (maxeff (read @globals) (read @t) spin) (k-eff k-atom) bool)
+(define k-covered? (->* (k-eff k-atom) bool)
   (lambda (e a)
     (or (k-contains? e a)
         (tagcase a
@@ -245,11 +245,11 @@
           ;; An I-cell's fill is within writing its region.
           (a-init (r) (k-contains? e (a-write r)))
           (else y #f)))))
-(define k-within-each? (subr (maxeff (read @globals) (read @t) spin) (k-eff k-eff) bool)
+(define k-within-each? (->* (k-eff k-eff) bool)
   (lambda (x y) (or (null? x) (and (k-covered? y (car x)) (k-within-each? (cdr x) y)))))
 ;; `k-within?` of sorted effects, `rg` and `wg` whether `y` reads and writes
 ;; `@globals`, which cover reading and writing any one global.
-(define k-within-sorted? (subr (maxeff (read @globals) (read @t) spin) (k-eff k-eff bool bool) bool)
+(define k-within-sorted? (->* (k-eff k-eff bool bool) bool)
   (lambda (x y rg wg)
     (cond ((null? x) #t)
           ((tagcase (car x)
@@ -265,20 +265,20 @@
                    (else (k-within-sorted? x (cdr y) rg wg))))))))
 ;; Whether every atom of `x` is covered by `y` (`k-covered?`): both sorted,
 ;; as effects made here are, by one walk of the two; else atom by atom.
-(define k-within? (subr (maxeff (read @globals) (read @t) spin) (k-eff k-eff) bool)
+(define k-within? (->* (k-eff k-eff) bool)
   (lambda (x y)
     (if (and (k-sorted? x) (k-sorted? y) (not (k-has-init? x)))
         (let ((rg (k-contains? y (a-read (r-globals)))) (wg (k-contains? y (a-write (r-globals)))))
           (k-within-sorted? x y rg wg))
         (k-within-each? x y))))
 ;; Whether `e` fills an I-cell: what only `k-covered?` sees within a write.
-(define k-has-init? (subr (read @globals) (k-eff) bool)
+(define k-has-init? (->* (k-eff) bool)
   (lambda (e)
     (and (not (null? e)) (or (tagcase (car e) (a-init (r) #t) (else y #f)) (k-has-init? (cdr e))))))
-(define k-eff=? (subr (maxeff kreads spin) (k-eff k-eff) bool)
+(define k-eff=? (->* (k-eff k-eff) bool)
   (lambda (x y) (and (k-within? x y) (k-within? y x))))
-(define k-one (subr (alloc @t) (k-atom) k-eff) (lambda (a) (cons a nil)))
-(define k-allocates? (subr (maxeff (read @globals) (read @t)) (k-eff) bool)
+(define k-one (->* (k-atom) k-eff) (lambda (a) (cons a nil)))
+(define k-allocates? (->* (k-eff) bool)
   (lambda (e) (cond ((null? e) #f) ((= (k-atom-rank (car e)) 2) #t) (else (k-allocates? (cdr e))))))
 ;; The module, the lambda given its modules, and the loads, closed.
 )))

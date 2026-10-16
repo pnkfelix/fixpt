@@ -39,32 +39,32 @@
 ;; The global environment, newest first.
 (define genv (ref env @v) (new nil))
 
-(define* cell (subr (alloc @v) (val) vcell) (lambda (v) (new v)))
+(define cell (->* (val) vcell) (lambda (v) (new v)))
 
 ;; `e` with `n` bound to a new cell holding `v`.
-(define* bind1 (subr (alloc @v) (symbol val env) env)
+(define bind1 (->* (symbol val env) env)
   (lambda (n v e) (cons (cons n (cell v)) e)))
 
-(define* lookup (subr (maxeff evals spin) (env symbol) val)
+(define lookup (->* (env symbol) val)
   (lambda (e name)
     (cond ((null? e) (standard name))
           ((symbol=? (car (car e)) name) (get (cdr (car e))))
           (else (lookup (cdr e) name)))))
 
-(define* find-cell (subr (maxeff evals spin) (env symbol) vcell)
+(define find-cell (->* (env symbol) vcell)
   (lambda (e n)
     (cond ((null? e) (efail "no such local"))
           ((symbol=? (car (car e)) n) (cdr (car e)))
           (else (find-cell (cdr e) n)))))
 
 ;; A closure's parameters, bound to its arguments.
-(define* bind (subr (maxeff evals spin) (exp-params vals env) env)
+(define bind (->* (exp-params vals env) env)
   (lambda (ps xs e)
     (cond ((and (null? ps) (null? xs)) e)
           ((or (null? ps) (null? xs)) (efail "the wrong number of arguments"))
           (else (cons (cons (extract (car ps) 1) (cell (car xs))) (bind (cdr ps) (cdr xs) e))))))
 
-(define* field-of (subr (maxeff evals spin) (val symbol) val)
+(define field-of (->* (val symbol) val)
   (lambda (p l)
     (letrec ((find (subr (maxeff evals spin) (vfields) val)
                (lambda (fs)
@@ -74,7 +74,7 @@
       (find (as-fields p "a product")))))
 
 ;; An arm's names, bound to a product's fields in order.
-(define* bind-fields (subr (maxeff evals spin) (names val env) env)
+(define bind-fields (->* (names val env) env)
   (lambda (ns p e)
     (letrec ((go (subr evals (names vfields env) env)
                (lambda (ns fs e)
@@ -83,24 +83,24 @@
                        (else (go (cdr ns) (cdr fs) (bind1 (car ns) (cdr (car fs)) e)))))))
       (go ns (as-fields p "a product") e))))
 
-(define* nth-field (subr (maxeff evals spin) (vfields int) (pairof symbol val @v))
+(define nth-field (->* (vfields int) (pairof symbol val @v))
   (lambda (fs i)
     (cond ((null? fs) (efail "no such field"))
           ((= i 0) (car fs))
           (else (nth-field (cdr fs) (- i 1))))))
 
 ;; `fs` reversed, onto `acc`.
-(define* reverse-fields (subr (maxeff (read @v) (alloc @v) spin) (vfields vfields) vfields)
+(define reverse-fields (->* (vfields vfields) vfields)
   (lambda (fs acc) (if (null? fs) acc (reverse-fields (cdr fs) (cons (car fs) acc)))))
 
 ;; The modules to reshape (`k-reshapes`), as `run-checked` was given them.
 (define ev-reshapes (ref k-reshape-list @v) (new nil))
 
 ;; Whether `at` is the expression `a` `b` `k` (`k-at`).
-(define ev-at-is? (subr pure (k-at int int int) bool)
+(define ev-at-is? (->* (k-at int int int) bool)
   (lambda (at a b k) (and (= (extract at 1) a) (= (extract at 2) b) (= (extract at 3) k))))
 
-(define* ev-reshape-in (subr (maxeff (alloc @v) spin) (k-reshape-list int int int) ev-at)
+(define ev-reshape-in (->* (k-reshape-list int int int) ev-at)
   (lambda (rs a b k)
     (cond ((null? rs) nil)
           ((ev-at-is? (extract (car rs) 1) a b k) (the ev-at (cons (extract (car rs) 2) nil)))
@@ -115,7 +115,7 @@
 (define ev-facts (ref k-facts @v) (new nil))
 ;; What an operation `a` `b` `k` takes (`n-datum`), in a list of one; none
 ;; if nothing.
-(define* ev-fact-in (subr (maxeff (read @globals) (alloc @v) spin) (k-facts int int int) k-datums)
+(define ev-fact-in (->* (k-facts int int int) k-datums)
   (lambda (fs a b k)
     (cond ((null? fs) nil)
           ((ev-at-is? (extract (car fs) 1) a b k)
@@ -123,11 +123,11 @@
              (n-datum (d) (the k-datums (cons d nil)))
              (else y (ev-fact-in (cdr fs) a b k))))
           (else (ev-fact-in (cdr fs) a b k)))))
-(define* ev-fact-at (subr (maxeff (read @globals) (read @v) (alloc @v) spin) (int int int) k-datums)
+(define ev-fact-at (->* (int int int) k-datums)
   (lambda (a b k) (ev-fact-in (get ev-facts) a b k)))
 ;; `(extract v l)`, `a` `b` `k`: a product's field; or, of a blobref, one to
 ;; its field, at the offset the checker found.
-(define* ev-extract (subr (maxeff evals spin) (val symbol int int int) val)
+(define ev-extract (->* (val symbol int int int) val)
   (lambda (v l a b k)
     (let ((d (ev-fact-at a b k)))
       (if (and (not (null? d)) (tagcase (car d) (datum-blobref-field (o) #t) (else y #f)))
@@ -136,7 +136,7 @@
             (else y (efail-expected "a blobref")))
           (field-of v l)))))
 
-(define* ev-with-in (subr (maxeff (alloc @v) spin) (k-with-list int int int) ev-with-at)
+(define ev-with-in (->* (k-with-list int int int) ev-with-at)
   (lambda (ws a b k)
     (cond ((null? ws) nil)
           ((ev-at-is? (extract (car ws) 1) a b k)
@@ -146,17 +146,17 @@
 ;; The fields of `fs` at positions `ks`, in order.
 ;; The field `p` picks of `fs`: its `k`th, or the `j`th of the module that
 ;; is its `k`th.
-(define* pick-field (subr (maxeff evals spin) (vfields k-pick) (pairof symbol val @v))
+(define pick-field (->* (vfields k-pick) (pairof symbol val @v))
   (lambda (fs p)
     (tagcase p
       (pick-value (k) (nth-field fs k))
       (pick-path (k j) (nth-field (as-fields (cdr (nth-field fs k)) "a module") j)))))
-(define* pick-fields (subr (maxeff evals spin) (vfields k-picks) vfields)
+(define pick-fields (->* (vfields k-picks) vfields)
   (lambda (fs ks) (if (null? ks) nil (cons (pick-field fs (car ks)) (pick-fields fs (cdr ks))))))
 
 ;; Module `v` as `at` (in a list of one) reshapes it: its values at those
 ;; positions; as it is, if none.
-(define* reshape-val (subr (maxeff evals spin) (val ev-at) val)
+(define reshape-val (->* (val ev-at) val)
   (lambda (v at)
     (if (null? at)
         v
@@ -164,7 +164,7 @@
           (o-product (pick-fields fs (car at)))))))
 
 ;; `e` with each of module `m`'s values bound to its name, in order.
-(define* bind-module (subr (maxeff evals spin) (val env) env)
+(define bind-module (->* (val env) env)
   (lambda (m e)
     (letrec ((go (subr (maxeff (read @v) (alloc @v) spin) (vfields env) env)
                (lambda (fs e)
@@ -172,7 +172,7 @@
       (go (as-fields m "a module") e))))
 
 ;; Module `m`'s values at positions `ps`, bound in `e` by names `ns`.
-(define* bind-module-at (subr (maxeff evals spin) (val k-names k-ids env) env)
+(define bind-module-at (->* (val k-names k-ids env) env)
   (lambda (m ns ps e)
     (let ((fs (as-fields m "a module")))
       (letrec ((go (subr (maxeff evals spin) (k-names k-ids env) env)
@@ -184,13 +184,13 @@
         (go ns ps e)))))
 
 ;; An abstract type `n`'s conversions' names.
-(define* conversion-names (subr (read @globals) (string) names)
+(define conversion-names (->* (string) names)
   (lambda (n)
     (the names (list (string->symbol (string-append "up-" n))
                      (string->symbol (string-append "down-" n))))))
 
 ;; The names a module's items define, in order.
-(define* module-names (subr (maxeff (alloc @v) spin) (mod-items) names)
+(define module-names (->* (mod-items) names)
   (lambda (items)
     (if (null? items)
         nil
@@ -201,18 +201,18 @@
                   (else rest))))))
 
 ;; Each of `ns` bound in `e`, holding #u.
-(define* open-names (subr (maxeff (alloc @v) spin) (names env) env)
+(define open-names (->* (names env) env)
   (lambda (ns e) (if (null? ns) e (open-names (cdr ns) (bind1 (car ns) the-unit e)))))
 
 ;; The values of `ns`, in `e`, onto `vs`, newest first.
-(define* rec-values (subr (maxeff evals spin) (names env vfields) vfields)
+(define rec-values (->* (names env vfields) vfields)
   (lambda (ns e vs)
     (if (null? ns)
         vs
         (rec-values (cdr ns) e (cons (cons (car ns) (get (find-cell e (car ns)))) vs)))))
 
 ;; A module's values, from `e`, onto `vs`, newest first: its definitions'.
-(define* module-values (subr (maxeff evals spin) (mod-items env vfields) vfields)
+(define module-values (->* (mod-items env vfields) vfields)
   (lambda (items e vs)
     (if (null? items)
         vs
@@ -220,17 +220,17 @@
           (module-values (cdr items) e
                          (if (or (= k 2) (= k 3)) (rec-values (extract (car items) 2) e vs) vs))))))
 
-(define* open-letrec (subr (maxeff (alloc @v) spin) (exp-letrec-bs env) env)
+(define open-letrec (->* (exp-letrec-bs env) env)
   (lambda (bs e) (if (null? bs) e (open-letrec (cdr bs) (bind1 (extract (car bs) 1) the-unit e)))))
 
 (define-rec
-  (eval-all (subr (maxeff evals spin) ((listof exp acyclic) env) vals)
+  (eval-all (->* ((listof exp acyclic) env) vals)
     (lambda (es e)
       (if (null? es)
           nil
           (let ((v (eval (car es) e)))
             (cons v (eval-all (cdr es) e))))))
-  (eval-begin (subr (maxeff evals spin) ((listof exp acyclic) env) val)
+  (eval-begin (->* ((listof exp acyclic) env) val)
     (lambda (es e)
       (cond ((null? es) the-unit)
             ((null? (cdr es)) (eval (car es) e))
@@ -240,14 +240,14 @@
   ;; With none to reshape, `eval-node` is called last, so that the
   ;; program's tail calls are the evaluator's, and a loop runs in constant
   ;; space.
-  (eval (subr (maxeff evals spin) (exp env) val)
+  (eval (->* (exp env) val)
     (lambda (x e)
       (let ((rs (get ev-reshapes)))
         (if (null? rs)
             (eval-node x e)
             (reshape-val (eval-node x e)
                          (ev-reshape-in rs (exp-start x) (exp-end x) (exp-kth x)))))))
-  (eval-node (subr (maxeff evals spin) (exp env) val)
+  (eval-node (->* (exp env) val)
     (lambda (x e)
       (tagcase x
         (e-var (n a b abk) (lookup e n))
@@ -303,12 +303,12 @@
                                           e)))))))))
   ;; A module's items, as a `letrec*`'s (`DONE.md` §37): every name first,
   ;; holding #u; then each item's values, in order, in the scope of all.
-  (eval-module (subr (maxeff evals spin) (mod-items env) val)
+  (eval-module (->* (mod-items env) val)
     (lambda (items e)
       (let ((inner (open-names (module-names items) e)))
         (begin (fill-module items inner)
                (o-product (reverse-fields (module-values items inner nil) nil))))))
-  (fill-module (subr (maxeff evals spin) (mod-items env) unit)
+  (fill-module (->* (mod-items env) unit)
     (lambda (items e)
       (if (null? items)
           #u
@@ -319,39 +319,39 @@
                       (else #u))
               (fill-module (cdr items) e))))))
   ;; Each value of `xs`, into its name's cell in `e`.
-  (fill-cells (subr (maxeff evals spin) (names exp-list env) unit)
+  (fill-cells (->* (names exp-list env) unit)
     (lambda (ns xs e)
       (if (null? ns)
           #u
           (begin (set (find-cell e (car ns)) (eval (car xs) e))
                  (fill-cells (cdr ns) (cdr xs) e)))))
-  (eval-let (subr (maxeff evals spin) (exp-let-bs env env) env)
+  (eval-let (->* (exp-let-bs env env) env)
     (lambda (bs outer e)
       (if (null? bs)
           e
           (let ((v (eval (extract (car bs) 2) outer)))
             (eval-let (cdr bs) outer (bind1 (extract (car bs) 1) v e))))))
   ;; Every name first, holding #u; then each value, in the scope of all.
-  (eval-letrec (subr (maxeff evals spin) (exp-letrec-bs exp env) val)
+  (eval-letrec (->* (exp-letrec-bs exp env) val)
     (lambda (bs body e)
       (let ((inner (open-letrec bs e)))
         (begin (fill-letrec bs inner) (eval body inner)))))
   ;; Each binding's value, into its name's cell in `inner`.
-  (fill-letrec (subr (maxeff evals spin) (exp-letrec-bs env) unit)
+  (fill-letrec (->* (exp-letrec-bs env) unit)
     (lambda (bs inner)
       (if (null? bs)
           #u
           (let ((c (find-cell inner (extract (car bs) 1))))
             (begin (set c (eval (extract (car bs) 3) inner))
                    (fill-letrec (cdr bs) inner))))))
-  (eval-fields (subr (maxeff evals spin) (exp-let-bs env) vfields)
+  (eval-fields (->* (exp-let-bs env) vfields)
     (lambda (fs e)
       (if (null? fs)
           nil
           (let ((v (eval (extract (car fs) 2) e)))
             (cons (cons (extract (car fs) 1) v) (eval-fields (cdr fs) e))))))
   ;; The arm for sum `s`'s tag, its fields bound; else the `else`.
-  (eval-tagcase (subr (maxeff evals spin) (val exp-arms exp-let-bs env int) val)
+  (eval-tagcase (->* (val exp-arms exp-let-bs env int) val)
     (lambda (s arms els e k)
       (if (>= k 0)
           (eval-flat-tagcase s (ev-flat-tag s k) arms els e k)
@@ -373,7 +373,7 @@
         (else y (efail-expected "a sum"))))))
   ;; On a blobref to a flat sum, of layout `k` (`TODO.md` §77): the arm for
   ;; its tag, `t`, given a blobref to the variant; else the `else`.
-  (eval-flat-tagcase (subr (maxeff evals spin) (val val exp-arms exp-let-bs env int) val)
+  (eval-flat-tagcase (->* (val val exp-arms exp-let-bs env int) val)
     (lambda (s t arms els e k)
       (cond ((null? arms)
              (if (null? els)
@@ -389,39 +389,39 @@
 ;; assign their globals (`checked-tops`, under redefinition).
 (define ev-keep (ref (listof symbol acyclic) @v) (new nil))
 
-(define* ev-kept? (subr spin ((listof symbol acyclic) symbol) bool)
+(define ev-kept? (->* ((listof symbol acyclic) symbol) bool)
   (lambda (ks n) (and (not (null? ks)) (or (symbol=? (car ks) n) (ev-kept? (cdr ks) n)))))
 
-(define* ev-unkeep (subr spin ((listof symbol acyclic) symbol) (listof symbol acyclic))
+(define ev-unkeep (->* ((listof symbol acyclic) symbol) (listof symbol acyclic))
   (lambda (ks n)
     (cond ((null? ks) ks)
           ((symbol=? (car ks) n) (ev-unkeep (cdr ks) n))
           (else (the (listof symbol acyclic) (cons (car ks) (ev-unkeep (cdr ks) n)))))))
 
-(define* ev-new-global (subr stores (symbol) vcell)
+(define ev-new-global (->* (symbol) vcell)
   (lambda (n) (let ((c (cell the-unit))) (begin (set genv (cons (cons n c) (get genv))) c))))
 
 ;; The cell global `n` has; a new one, if it has none.
-(define* ev-cell-of (subr (maxeff stores spin) (env symbol) vcell)
+(define ev-cell-of (->* (env symbol) vcell)
   (lambda (e n)
     (cond ((null? e) (ev-new-global n))
           ((symbol=? (car (car e)) n) (cdr (car e)))
           (else (ev-cell-of (cdr e) n)))))
 
 ;; The cell a definition of `n` sets: the one it has, if kept; else new.
-(define* push-global (subr (maxeff stores spin) (symbol) vcell)
+(define push-global (->* (symbol) vcell)
   (lambda (n)
     (if (ev-kept? (get ev-keep) n)
         (begin (set ev-keep (ev-unkeep (get ev-keep) n)) (ev-cell-of (get genv) n))
         (ev-new-global n))))
 
-(define* rec-cells (subr (maxeff stores spin) (exp-letrec-bs) vcells)
+(define rec-cells (->* (exp-letrec-bs) vcells)
   (lambda (bs)
     (if (null? bs)
         nil
         (let ((c (push-global (extract (car bs) 1)))) (cons c (rec-cells (cdr bs)))))))
 
-(define* rec-fill (subr (maxeff evals spin) (exp-letrec-bs vcells) unit)
+(define rec-fill (->* (exp-letrec-bs vcells) unit)
   (lambda (bs cells)
     (if (null? bs)
         #u
@@ -429,7 +429,7 @@
                (rec-fill (cdr bs) (cdr cells))))))
 
 ;; Whether `x` is a lambda, under any type abstractions and ascriptions.
-(define* lambda-exp? (subr spin (exp) bool)
+(define lambda-exp? (->* (exp) bool)
   (lambda (x)
     (tagcase x
       (e-lambda (ps body a b abk) #t)
@@ -439,10 +439,10 @@
       (else y #f))))
 
 ;; Defines `n` as `x`'s value, run in the scope before it.
-(define* ev-define (subr (maxeff evals spin) (symbol exp) val)
+(define ev-define (->* (symbol exp) val)
   (lambda (n x) (let ((v (eval x (get genv)))) (begin (set (push-global n) v) the-unit))))
 
-(define* eval-top (subr (maxeff evals spin) (top) val)
+(define eval-top (->* (top) val)
   (lambda (t)
     (tagcase t
       (t-define (n ty x a b)
@@ -458,11 +458,11 @@
 
 ;; The value so far, after top-level form `t` gave `v`: `v` if `t` is an
 ;; expression, else `last`, as before.
-(define* ev-last (subr pure (top val val) val)
+(define ev-last (->* (top val val) val)
   (lambda (t v last) (tagcase t (t-exp (x) v) (else y last))))
 
 ;; The value of the last form, or the first error.
-(define* eval-program (subr (maxeff evals spin) ((listof top acyclic)) eresult)
+(define eval-program (->* ((listof top acyclic)) eresult)
   (lambda (tops)
     (prompt eval-tag
       (letrec ((go (subr (maxeff evals spin) ((listof top acyclic) val) val)
@@ -474,14 +474,14 @@
       (lambda (r) r))))
 
 ;; Name `n`, and a `define-rec`'s names, to keep their cells.
-(define* ev-keep! (subr (maxeff (read @v) (write @v) (alloc @v)) (symbol) unit)
+(define ev-keep! (->* (symbol) unit)
   (lambda (n) (set ev-keep (the (listof symbol acyclic) (cons n (get ev-keep))))))
 
-(define* ev-keep-all (subr (maxeff (read @v) (write @v) (alloc @v) spin) (exp-letrec-bs) unit)
+(define ev-keep-all (->* (exp-letrec-bs) unit)
   (lambda (bs) (if (null? bs) #u (begin (ev-keep! (extract (car bs) 1)) (ev-keep-all (cdr bs))))))
 
 ;; Before a run that assigns its names' globals: each keeps its cell.
-(define* ev-keep-names (subr (maxeff (read @v) (write @v) (alloc @v) spin) (top) unit)
+(define ev-keep-names (->* (top) unit)
   (lambda (t)
     (tagcase t
       (t-define (n ty x a b) (ev-keep! n))
@@ -490,7 +490,7 @@
 
 ;; What a checked program runs (`checked-tops`), each in turn: the value of
 ;; the last expression, or the first error.
-(define* eval-runs (subr (maxeff evals spin) ((listof k-run acyclic)) eresult)
+(define eval-runs (->* ((listof k-run acyclic)) eresult)
   (lambda (runs)
     (prompt eval-tag
       (letrec ((go (subr (maxeff evals spin) ((listof k-run acyclic) val) val)
@@ -505,7 +505,7 @@
       (lambda (r) r))))
 
 ;; A whole program begins with no globals, and no names kept.
-(define* ev-begin! (subr stores (k-reshape-list k-with-list k-facts) unit)
+(define ev-begin! (->* (k-reshape-list k-with-list k-facts) unit)
   (lambda (rs ws fs)
     (begin (set genv nil) (set ev-keep nil) (set ev-reshapes rs) (set ev-withs ws)
            (set ev-facts fs))))
@@ -513,7 +513,7 @@
 ;; The entry point for a program the checker written in FX-26 checked: what
 ;; it runs (`checked-tops`, under redefinition), run; its value shown, or
 ;; its error. A whole program, as each is.
-(define run-checked (subr (maxeff evals (read @t) spin) ((listof k-run acyclic)) string)
+(define run-checked (->* ((listof k-run acyclic)) string)
   (lambda (runs)
     (tagcase (begin (ev-begin! (get k-reshapes) (get k-with-vals) (get k-extracts))
                     (eval-runs runs))
@@ -525,7 +525,7 @@
 ;; checker said of its places beside what it said of theirs (a closure made
 ;; before may run now). Each form's positions are past every one's before
 ;; (`syn::eval_more_with_fx26_evaluator`), so no two places are one.
-(define run-checked-more (subr (maxeff evals (read @t) spin) ((listof k-run acyclic)) string)
+(define run-checked-more (->* ((listof k-run acyclic)) string)
   (lambda (runs)
     (begin
       (set ev-reshapes (append (get k-reshapes) (get ev-reshapes)))
@@ -536,7 +536,7 @@
         (ev-err (m) (string-append "!! " m))))))
 
 ;; The entry point: a program's trees, run; its value shown, or its error.
-(define run-program (subr (maxeff evals spin) ((listof top acyclic)) string)
+(define run-program (->* ((listof top acyclic)) string)
   (lambda (tops)
     (tagcase (begin (ev-begin! nil nil nil) (eval-program tops))
       (ev-ok (v) (show-val v))

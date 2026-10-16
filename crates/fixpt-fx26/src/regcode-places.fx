@@ -29,7 +29,7 @@
 
 ;; Each of `inits`' flags, onto `after`: set where nothing after it calls;
 ;; and whether nothing from the first init on calls.
-(define r-free-flags (subr rcompiles (exps cenv rthis bool bools) (pairof bools bool @k))
+(define r-free-flags (->* (exps cenv rthis bool bools) (pairof bools bool @k))
   (lambda (inits te this free after)
     (if (null? inits)
         (cons after free)
@@ -44,7 +44,7 @@
 ;; where nothing after it calls or calls out, which is all that clobbers
 ;; registers or collects; so many, at most, as leave half the registers
 ;; for the operations' temporaries.
-(define r-in-regs (subr rcompiles (rgen exps int cenv bool) bools)
+(define r-in-regs (->* (rgen exps int cenv bool) bools)
   (lambda (g inits m te body-collects)
     (if (extract g leaf)
         (r-repeat #t (+ (c-count-exps inits) m) nil)
@@ -53,18 +53,18 @@
           (r-budget (car flags) (get (extract g nreg)))))))
 
 ;; RESULT kept: in a register in a leaf, else in a frame slot.
-(define r-place-value (subr compiles (rgen) rloc)
+(define r-place-value (->* (rgen) rloc)
   (lambda (g) (r-keep g (extract g leaf))))
 
-(define r-get (subr compiles (rgen rloc) unit)
+(define r-get (->* (rgen rloc) unit)
   (lambda (g l)
     (tagcase l (rl-reg (r) (r-opn g rop-reg r)) (rl-slot (s) (r-opn g rop-stack s)) (else y #u))))
 
-(define r-reverse-env (subr rcompiles (renv renv) renv)
+(define r-reverse-env (->* (renv renv) renv)
   (lambda (xs acc) (if (null? xs) acc (r-reverse-env (cdr xs) (cons (car xs) acc)))))
 
 ;; A product's members, each kept, newest first.
-(define r-members (subr rcompiles (rgen rloc names int renv) renv)
+(define r-members (->* (rgen rloc names int renv) renv)
   (lambda (g sc xs j acc)
     (if (null? xs)
         acc
@@ -72,16 +72,16 @@
                (let ((l (r-place-value g)))
                  (r-members g sc (cdr xs) (+ j 1) (r-bind (car xs) l acc)))))))
 
-(define r-local-all (subr rcompiles (renv cenv) cenv)
+(define r-local-all (->* (renv cenv) cenv)
   (lambda (bound te)
     (if (null? bound) te (r-local-all (cdr bound) (r-local te (car (car bound)))))))
 
-(define r-bind-all (subr rcompiles (renv renv) renv)
+(define r-bind-all (->* (renv renv) renv)
   (lambda (bound env) (if (null? bound) env (r-bind-all (cdr bound) (cons (car bound) env)))))
 
 ;; Each value the lambda's closure captured, from the parameter's value at
 ;; `at`, field `j` on, kept, in order, onto `env` and `te`.
-(define r-spec-free (subr rcompiles (rgen rloc syms int renv cenv bools) rscope)
+(define r-spec-free (->* (rgen rloc syms int renv cenv bools) rscope)
   (lambda (g at fv j env te flags)
     (if (null? fv)
         (product (1 env) (2 te))
@@ -94,7 +94,7 @@
           (let ((l (r-keep g (car flags))) (n (car fv)))
             (r-spec-free g at (cdr fv) (+ j 1) (r-bind n l env) (r-local te n) (cdr flags)))))))
 
-(define r-loop-move (subr rcompiles (rgen (listof int @k) int) unit)
+(define r-loop-move (->* (rgen (listof int @k) int) unit)
   (lambda (g made i)
     (if (null? made)
         #u
@@ -105,13 +105,13 @@
                 (r-slot-move g (car made) to)))
           (r-loop-move g (cdr made) (+ i 1))))))
 
-(define r-field-args (subr rcompiles (exp-let-bs) rargs)
+(define r-field-args (->* (exp-let-bs) rargs)
   (lambda (fs) (if (null? fs) nil (cons (a-e (extract (car fs) 2)) (r-field-args (cdr fs))))))
 
 ;; Each sibling where the closure being made sees it: a loop, if it is this
 ;; one and only called so in its body; else the slot it will be in.
 (define r-sibling-env
-  (subr rcompiles (exp-letrec-bs (listof int @k) int int exp int renv cenv) rscope)
+  (->* (exp-letrec-bs (listof int @k) int int exp int renv cenv) rscope)
   (lambda (bs at i k lbody n env te)
     (if (null? bs)
         (product (1 env) (2 te))
@@ -122,15 +122,15 @@
                          (r-bind sib (if loops (rl-loop) (rl-pending s)) env)
                          (the cenv (cons (cons sib (if loops (at-loop 0) (at-pending s))) te)))))))
 
-(define r-append-arg (subr rcompiles (rargs rarg) rargs)
+(define r-append-arg (->* (rargs rarg) rargs)
   (lambda (xs x) (if (null? xs) (cons x nil) (cons (car xs) (r-append-arg (cdr xs) x)))))
 
 ;; `rest`, operand `x` first.
-(define r-arg-onto (subr rbuilds (rarg rarg-patches) rarg-patches)
+(define r-arg-onto (->* (rarg rarg-patches) rarg-patches)
   (lambda (x rest) (product (1 (the rargs (cons x (extract rest 1)))) (2 (extract rest 2)))))
 
 ;; The same, as a call-out's operands.
-(define r-free-args (subr rcompiles (syms renv int) rarg-patches)
+(define r-free-args (->* (syms renv int) rarg-patches)
   (lambda (fv env j)
     (if (null? fv)
         (product (1 (the rargs nil)) (2 (the patches nil)))
@@ -148,7 +148,7 @@
 
 ;; Each free value into REGj+1, as `lambda` wants them; a sibling not made
 ;; yet as `#f`, to be patched.
-(define r-free-regs (subr rcompiles (rgen syms renv int) patches)
+(define r-free-regs (->* (rgen syms renv int) patches)
   (lambda (g fv env j)
     (if (null? fv)
         nil
@@ -169,14 +169,14 @@
 
 ;; Whether a join point's parameters `ps` are kept in registers: where its
 ;; body makes no call (or in a leaf), so many as leave half of them.
-(define r-join-in-regs? (subr rcompiles (rgen exp-params exp cenv) bool)
+(define r-join-in-regs? (->* (rgen exp-params exp cenv) bool)
   (lambda (g ps lbody named)
     (or (extract g leaf)
         (and (not (r-collects lbody (r-local-params named ps) (extract g this) #t))
              (<= (+ (get (extract g nreg)) (c-count-params ps)) r-half-regs)))))
 
 ;; The place of the join point whose lambda is `lam`, in a list.
-(define r-join-place (subr rcompiles (rgen exp cenv) (listof rplace @k))
+(define r-join-place (->* (rgen exp cenv) (listof rplace @k))
   (lambda (g lam named)
     (tagcase lam
       (e-lambda (ps lbody la lb lalbk)
@@ -187,7 +187,7 @@
 
 ;; Each join point's place: its parameters' places and its label, in a
 ;; list; none for a binding that is not one.
-(define r-join-places (subr rcompiles (rgen exp-letrec-bs bools cenv) rplaces)
+(define r-join-places (->* (rgen exp-letrec-bs bools cenv) rplaces)
   (lambda (g bs joins named)
     (if (null? bs)
         nil
@@ -198,7 +198,7 @@
           (cons here rest)))))
 
 ;; The same to the cellular compiler: a join point a loop.
-(define r-letrec-te-j (subr rcompiles (exp-letrec-bs bools cenv) cenv)
+(define r-letrec-te-j (->* (exp-letrec-bs bools cenv) cenv)
   (lambda (bs joins te)
     (if (null? bs)
         te
@@ -206,7 +206,7 @@
                (inner (if (car joins) (r-local-loop te n) (r-local te n))))
           (r-letrec-te-j (cdr bs) (cdr joins) inner)))))
 
-(define r-patch-one (subr rcompiles (rgen patches int) unit)
+(define r-patch-one (->* (rgen patches int) unit)
   (lambda (g ps slot)
     (if (null? ps)
         #u
@@ -217,7 +217,7 @@
           (r-opnn g rop-setfield (+ cellular-closure-free0 (car (car ps))) 1)
           (r-patch-one g (cdr ps) slot)))))
 
-(define r-letrec-patch (subr rcompiles (rgen (listof patches @k) (listof int @k)) unit)
+(define r-letrec-patch (->* (rgen (listof patches @k) (listof int @k)) unit)
   (lambda (g made at)
     (if (null? made)
         #u
@@ -227,24 +227,24 @@
 
 ;; Where a `letrec`'s name is: a join point at its place (in a list), any
 ;; other in frame slot `s`.
-(define r-letrec-loc (subr rbuilds (int (listof rplace @k)) rloc)
+(define r-letrec-loc (->* (int (listof rplace @k)) rloc)
   (lambda (s place)
     (if (null? place) (rl-slot s) (rl-join (car (car place)) (cdr (car place))))))
 
 ;; The `letrec`'s names where its body sees them: a join point as itself,
 ;; any other in its slot.
-(define r-letrec-env-j (subr rcompiles (exp-letrec-bs (listof int @k) rplaces renv) renv)
+(define r-letrec-env-j (->* (exp-letrec-bs (listof int @k) rplaces renv) renv)
   (lambda (bs at places env)
     (if (null? bs)
         env
         (r-letrec-env-j (cdr bs) (cdr at) (cdr places)
                         (r-bind (extract (car bs) 1) (r-letrec-loc (car at) (car places)) env)))))
 
-(define r-letrec-env (subr rcompiles (exp-letrec-bs (listof int @k) renv) renv)
+(define r-letrec-env (->* (exp-letrec-bs (listof int @k) renv) renv)
   (lambda (bs at env)
     (if (null? bs)
         env
         (r-letrec-env (cdr bs) (cdr at) (r-bind (extract (car bs) 1) (rl-slot (car at)) env)))))
 
-(define r-letrec-te (subr rcompiles (exp-letrec-bs cenv) cenv)
+(define r-letrec-te (->* (exp-letrec-bs cenv) cenv)
   (lambda (bs te) (if (null? bs) te (r-letrec-te (cdr bs) (r-local te (extract (car bs) 1)))))))))

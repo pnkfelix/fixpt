@@ -30,48 +30,48 @@
 (define ev-prims (table symbol val @v) (make-table symbol-hash symbol=?))
 
 ;; Primitive `n` is `f`.
-(define* prim! (subr (maxeff stores spin) (symbol vproc) unit)
+(define prim! (->* (symbol vproc) unit)
   (lambda (n f) (table-set! ev-prims n f)))
 
-(define* int2 (subr (maxeff evals spin) (vals (subr pure (int int) int)) val)
+(define int2 (->* (vals (subr pure (int int) int)) val)
   (lambda (xs f) (f (as-int (ev-arg xs 0)) (as-int (ev-arg xs 1)))))
 
-(define* int-cmp (subr (maxeff evals spin) (vals (subr pure (int int) bool)) val)
+(define int-cmp (->* (vals (subr pure (int int) bool)) val)
   (lambda (xs f) (f (as-int (ev-arg xs 0)) (as-int (ev-arg xs 1)))))
 
-(define* char-cmp (subr (maxeff evals spin) (vals (subr pure (char char) bool)) val)
+(define char-cmp (->* (vals (subr pure (char char) bool)) val)
   (lambda (xs f) (f (as-char (ev-arg xs 0)) (as-char (ev-arg xs 1)))))
 
-(define* str-cmp (subr (maxeff evals spin) (vals (subr pure (string string) bool)) val)
+(define str-cmp (->* (vals (subr pure (string string) bool)) val)
   (lambda (xs f) (f (as-str (ev-arg xs 0)) (as-str (ev-arg xs 1)))))
 
-(define* f64-2 (subr (maxeff evals spin) (vals (subr pure (f64 f64) f64)) val)
+(define f64-2 (->* (vals (subr pure (f64 f64) f64)) val)
   (lambda (xs f) (f (as-f64 (ev-arg xs 0)) (as-f64 (ev-arg xs 1)))))
 
-(define* f64-1 (subr (maxeff evals spin) (vals (subr pure (f64) f64)) val)
+(define f64-1 (->* (vals (subr pure (f64) f64)) val)
   (lambda (xs f) (f (as-f64 (ev-arg xs 0)))))
 
-(define* f64-cmp (subr (maxeff evals spin) (vals (subr pure (f64 f64) bool)) val)
+(define f64-cmp (->* (vals (subr pure (f64 f64) bool)) val)
   (lambda (xs f) (f (as-f64 (ev-arg xs 0)) (as-f64 (ev-arg xs 1)))))
 
-(define* f64-test (subr (maxeff evals spin) (vals (subr pure (f64) bool)) val)
+(define f64-test (->* (vals (subr pure (f64) bool)) val)
   (lambda (xs f) (f (as-f64 (ev-arg xs 0)))))
 
-(define* f32-2 (subr (maxeff evals spin) (vals (subr pure (f32 f32) f32)) val)
+(define f32-2 (->* (vals (subr pure (f32 f32) f32)) val)
   (lambda (xs f) (f (as-f32 (ev-arg xs 0)) (as-f32 (ev-arg xs 1)))))
 
-(define* f32-1 (subr (maxeff evals spin) (vals (subr pure (f32) f32)) val)
+(define f32-1 (->* (vals (subr pure (f32) f32)) val)
   (lambda (xs f) (f (as-f32 (ev-arg xs 0)))))
 
-(define* f32-cmp (subr (maxeff evals spin) (vals (subr pure (f32 f32) bool)) val)
+(define f32-cmp (->* (vals (subr pure (f32 f32) bool)) val)
   (lambda (xs f) (f (as-f32 (ev-arg xs 0)) (as-f32 (ev-arg xs 1)))))
 
-(define* f32-test (subr (maxeff evals spin) (vals (subr pure (f32) bool)) val)
+(define f32-test (->* (vals (subr pure (f32) bool)) val)
   (lambda (xs f) (f (as-f32 (ev-arg xs 0)))))
 
 ;; `modulo`, `quotient` or `remainder` of `int`s; by zero, the program's
 ;; failure, as on the machines, not the evaluator's own.
-(define* int-div (subr (maxeff evals spin) (vals (subr pure (int int) int)) val)
+(define int-div (->* (vals (subr pure (int int) int)) val)
   (lambda (xs f) (if (zero? (as-int (ev-arg xs 1))) (efail "division by zero") (int2 xs f))))
 
 (define* ev-int-prims! (subr (maxeff stores spin) () unit)
@@ -99,32 +99,32 @@
       (prim! 'int->string (lambda (xs) (int->string (as-int (ev-arg xs 0))))))))
 
 ;; `x` wrapped to `bits` bits, two's complement if `signed` (`Width::wrap`).
-(define* fw-wrap (subr pure (int bool int) int)
+(define fw-wrap (->* (int bool int) int)
   (lambda (bits signed x)
     (let ((low (bitwise-and x (- (arithmetic-shift 1 bits) 1))))
       (if (and signed (>= low (arithmetic-shift 1 (- bits 1))))
           (- low (arithmetic-shift 1 bits))
           low))))
 
-(define* fw-2 (subr (maxeff evals spin) (vals int bool (subr pure (int int) int)) val)
+(define fw-2 (->* (vals int bool (subr pure (int int) int)) val)
   (lambda (xs bits signed f)
     (fw-wrap bits signed (f (as-int (ev-arg xs 0)) (as-int (ev-arg xs 1))))))
 
 ;; `quotient` or `remainder`, which truncate as the runtime's do; by zero, a
 ;; failure, as there.
-(define* fw-div (subr (maxeff evals spin) (vals int bool (subr pure (int int) int)) val)
+(define fw-div (->* (vals int bool (subr pure (int int) int)) val)
   (lambda (xs bits signed f)
     (if (zero? (as-int (ev-arg xs 1))) (efail "division by zero") (fw-2 xs bits signed f))))
 
 ;; A shift by the count's low bits; right, arithmetic (an unsigned value is
 ;; not negative, so logical too).
-(define* fw-shift (subr (maxeff evals spin) (vals int bool bool) val)
+(define fw-shift (->* (vals int bool bool) val)
   (lambda (xs bits signed left)
     (let ((x (as-int (ev-arg xs 0))) (k (bitwise-and (as-int (ev-arg xs 1)) (- bits 1))))
       (fw-wrap bits signed (arithmetic-shift x (if left k (- 0 k)))))))
 
 ;; The operation `op` of width `w`: `w` and `op` run together.
-(define* fw-name (subr (read @globals) (string string) symbol)
+(define fw-name (->* (string string) symbol)
   (lambda (w op) (string->symbol (string-append w op))))
 
 (define* ev-width-prims! (subr (maxeff stores spin) (string int bool) unit)
@@ -152,7 +152,7 @@
         (prim! (n "->int") (lambda (xs) (as-int (ev-arg xs 0))))))))
 
 ;; `string-append`: the strings `xs`, one after another.
-(define* ev-string-append (subr (maxeff evals spin) (vals) string)
+(define ev-string-append (->* (vals) string)
   (lambda (xs) (if (null? xs) "" (string-append (as-str (car xs)) (ev-string-append (cdr xs))))))
 (define* ev-text-prims! (subr (maxeff stores spin) () unit)
   (lambda ()
@@ -190,24 +190,24 @@
       (prim! 'error (lambda (xs) (efail (as-str (ev-arg xs 0)))))
       (prim! '%quote (lambda (xs) (ev-intern (ev-arg xs 0)))))))
 
-(define* ev-symbol? (subr pure (val) bool)
+(define ev-symbol? (->* (val) bool)
   (lambda (v) (typecase v (symbol s #t) (sum o (tagcase o (o-unit () #t) (else y #f))) (else #f))))
 
-(define* ev-procedure? (subr pure (val) bool)
+(define ev-procedure? (->* (val) bool)
   (lambda (v)
     (typecase v
       (procedure p #t)
       (sum o (tagcase o (o-cont (k) #t) (o-once (k s) #t) (o-esc (k) #t) (else y #f)))
       (else #f))))
 
-(define* ev-array? (subr pure (val) bool)
+(define ev-array? (->* (val) bool)
   (lambda (v)
     (typecase v (bloblet a #t) (sum o (tagcase o (o-blob (fs bs) #t) (else y #f))) (else #f))))
 
-(define* ev-sum? (subr pure (val) bool)
+(define ev-sum? (->* (val) bool)
   (lambda (v) (typecase v (sum o (tagcase o (o-sum (t x) #t) (else y #f))) (else #f))))
 
-(define* ev-product? (subr pure (val) bool)
+(define ev-product? (->* (val) bool)
   (lambda (v) (typecase v (sum o (tagcase o (o-product (fs) #t) (else y #f))) (else #f))))
 
 (define* ev-shape-prims! (subr (maxeff stores spin) () unit)
@@ -229,13 +229,13 @@
       (prim! 'product? (lambda (xs) (ev-product? (ev-arg xs 0)))))))
 
 ;; An i-cell, the machines' own.
-(define* as-icell (subr (maxeff evals spin) (val) (icell val @v))
+(define as-icell (->* (val) (icell val @v))
   (lambda (v)
     (tagcase (as-other v "an i-cell")
       (o-icell (c) c)
       (else y (efail-expected "an i-cell")))))
 
-(define* ev-make-icell (subr (maxeff (alloc @v) spin) () val)
+(define ev-make-icell (->* () val)
   (lambda () (o-icell (the (icell val @v) (make-icell)))))
 
 ;; What the scheduler (`fx26:processes.fx`, which a program's processes
@@ -243,7 +243,7 @@
 ;; `n`: given the machines' i-cell where one is taken, and the one sum an
 ;; operation makes, the scheduler's prompt tag or none, made one of the
 ;; program's.
-(define* ev-sched (subr (maxeff evals spin) (vals) val)
+(define ev-sched (->* (vals) val)
   (lambda (xs)
     (let ((n (as-int (ev-arg xs 0))) (a (ev-arg xs 1)) (b (ev-arg xs 2)))
       (cond ((and (= n 14) ((proj %sched (icell val @v) val bool) 10 (as-icell a) b))
@@ -257,17 +257,17 @@
                (none u (o-sum 'none the-unit))))
             (else ((proj %sched val val val) n a b))))))
 
-(define* ev-array-set! (subr (maxeff evals spin) (vals) val)
+(define ev-array-set! (->* (vals) val)
   (lambda (xs)
     (begin (array-set! (as-array (ev-arg xs 0)) (as-int (ev-arg xs 1)) (ev-arg xs 2)) the-unit)))
 
-(define* ev-set-car! (subr (maxeff evals spin) (vals) val)
+(define ev-set-car! (->* (vals) val)
   (lambda (xs) (begin (set-car! (as-pair (ev-arg xs 0)) (ev-arg xs 1)) the-unit)))
 
-(define* ev-set-cdr! (subr (maxeff evals spin) (vals) val)
+(define ev-set-cdr! (->* (vals) val)
   (lambda (xs) (begin (set-cdr! (as-pair (ev-arg xs 0)) (ev-arg xs 1)) the-unit)))
 
-(define* ev-make-array (subr (maxeff evals spin) (val val) val)
+(define ev-make-array (->* (val val) val)
   (lambda (n x) (the (arrayof val @v) (make-array (as-int n) x))))
 
 ;; Bytevectors (`TODO.md` §84), the machines' own, with the operations
@@ -300,7 +300,7 @@
 
 ;; `(sum failed e)`, `e` an `io-error`, as the evaluator's value: a
 ;; product of its kind and detail.
-(define* ev-io-failed (subr (maxeff stores spin) (io-error) val)
+(define ev-io-failed (->* (io-error) val)
   (lambda (e)
     (let ((kind (tagcase (extract e kind)
                   (not-found u 'not-found) (permission-denied u 'permission-denied)
@@ -313,11 +313,11 @@
                                 (cons 'detail (the val (extract e detail))))))))))
 ;; What an I/O primitive gave, as the evaluator's value: `(sum done #u)`,
 ;; or a failure.
-(define* ev-io-result (subr (maxeff stores spin) ((sumof (done unit) (failed io-error))) val)
+(define ev-io-result (->* ((sumof (done unit) (failed io-error))) val)
   (lambda (r) (tagcase r (done u (the val (o-sum 'done the-unit))) (failed e (ev-io-failed e)))))
 ;; What a terminal's primitive gave, as the evaluator's value.
-(define* ev-terminal-result
-  (subr (maxeff stores spin) ((sumof (done unit) (not-a-terminal unit) (failed io-error))) val)
+(define ev-terminal-result
+  (->* ((sumof (done unit) (not-a-terminal unit) (failed io-error))) val)
   (lambda (r)
     (tagcase r
       (done u (the val (o-sum 'done the-unit)))
@@ -325,11 +325,11 @@
       (failed e (ev-io-failed e)))))
 ;; A terminal's size, `(productof (rows int) (columns int))`, as the
 ;; evaluator's value.
-(define* ev-size (subr (maxeff stores spin) (int int) val)
+(define ev-size (->* (int int) val)
   (lambda (rows columns)
     (the val (o-product (list (cons 'rows (the val rows)) (cons 'columns (the val columns)))))))
 ;; Strings `ns`, as the evaluator's list of them.
-(define* ev-strings (subr (maxeff stores spin) ((listof string @v)) val)
+(define ev-strings (->* ((listof string @v)) val)
   (lambda (ns) (if (null? ns) nil (cons (car ns) (ev-strings (cdr ns))))))
 
 ;; The program's I/O (`TODO.md` §84), done by the primitives themselves.
@@ -395,16 +395,16 @@
                (ev-io-result (write-file (as-str (ev-arg xs 0)) (as-bytes (ev-arg xs 1)))))))))
 
 ;; `append`: the lists `xs`, all but the last copied, in front of it.
-(define* ev-append (subr (maxeff evals spin) (vals) val)
+(define ev-append (->* (vals) val)
   (lambda (xs)
     (cond ((null? xs) nil)
           ((null? (cdr xs)) (car xs))
           (else (ev-onto (car xs) (ev-append (cdr xs)))))))
 ;; List `v`'s elements, copied, in front of `tail`.
-(define* ev-onto (subr (maxeff evals spin) (val val) val)
+(define ev-onto (->* (val val) val)
   (lambda (v tail) (if (null? v) tail (cons (car (as-pair v)) (ev-onto (cdr (as-pair v)) tail)))))
 ;; How many pairs list `v` has, `n` so far: `length`'s and `list-length`'s.
-(define* ev-list-length (subr (maxeff evals spin) (val int) int)
+(define ev-list-length (->* (val int) int)
   (lambda (v n) (if (null? v) n (ev-list-length (cdr (as-pair v)) (+ n 1)))))
 (define* ev-data-prims! (subr (maxeff stores spin) () unit)
   (lambda ()
@@ -446,7 +446,7 @@
       (prim! 'f32-flat (lambda (xs) 4)) (prim! 'f64-flat (lambda (xs) 5)))))
 
 ;; `string->f64`'s: a list of the number, or none.
-(define* ev-string->f64 (subr (maxeff evals spin) (vals) val)
+(define ev-string->f64 (->* (vals) val)
   (lambda (xs)
     (let ((l (string->f64 (as-str (ev-arg xs 0)))))
       (if (null? l) nil (cons (the val (car l)) (the val nil))))))
@@ -517,11 +517,11 @@
       (prim! 'bits->f32 (lambda (xs) (bits->f32 (int->u32 (as-int (ev-arg xs 0)))))))))
 
 ;; `cwcc` of `f`, at @x, which nothing here would infer: the escape kept.
-(define* ev-cwcc (subr (maxeff evals spin) (val) val)
+(define ev-cwcc (->* (val) val)
   (lambda (f)
     ((proj (proj (proj cwcc @x) val) (maxeff evals spin)) (lambda (k) (apply1 f (o-esc k))))))
 
-(define* ev-ccc (subr (maxeff evals spin) (vals) val)
+(define ev-ccc (->* (vals) val)
   (lambda (xs)
     (let ((f (ev-arg xs 0)))
       (call-with-composable-continuation
@@ -529,21 +529,21 @@
        (as-tag (ev-arg xs 1))))))
 ;; The same, one-shot: the machine's own one-shot continuation, which fails
 ;; when resumed twice as the machine does.
-(define* ev-cone (subr (maxeff evals spin) (vals) val)
+(define ev-cone (->* (vals) val)
   (lambda (xs)
     (let ((f (ev-arg xs 0)))
       (call-with-oneshot-continuation
        (lambda (k) (apply1 f (o-once k (new #f))))
        (as-tag (ev-arg xs 1))))))
 
-(define* ev-with-mark (subr (maxeff evals spin) (vals) val)
+(define ev-with-mark (->* (vals) val)
   (lambda (xs)
     (let ((thunk (ev-arg xs 2)) (key (as-key (ev-arg xs 0))))
       (with-mark key (ev-arg xs 1) (lambda () (apply-val thunk (the vals nil)))))))
 
 ;; `apply`: `f` of the elements of a list value, which its procedure gets
 ;; as a list of its own (F11).
-(define* ev-apply (subr (maxeff evals spin) (vals) val)
+(define ev-apply (->* (vals) val)
   (lambda (xs) (apply-val (ev-arg xs 0) (val->vals (ev-arg xs 1)))))
 
 (define* ev-control-prims! (subr (maxeff stores spin) () unit)
@@ -570,16 +570,16 @@
              (lambda (xs) (list->val (marks-of (as-cont (ev-arg xs 0)) (as-key (ev-arg xs 1)))))))))
 
 ;; How many `xs` there are.
-(define* ev-vals-count (subr (maxeff (read @v) spin) (vals) int)
+(define ev-vals-count (->* (vals) int)
   (lambda (xs) (if (null? xs) 0 (+ 1 (ev-vals-count (cdr xs))))))
 
 ;; Elements `i` on of `a`, from `xs`.
-(define* ev-fill-array (subr (maxeff stores spin) ((arrayof val @v) vals int) unit)
+(define ev-fill-array (->* ((arrayof val @v) vals int) unit)
   (lambda (a xs i)
     (if (null? xs) #u (begin (array-set! a i (car xs)) (ev-fill-array a (cdr xs) (+ i 1))))))
 
 ;; A bloblet of `n` bytes, its fields `xs`.
-(define* ev-make-bloblet (subr (maxeff evals spin) (vals) val)
+(define ev-make-bloblet (->* (vals) val)
   (lambda (xs)
     (let* ((n (as-int (ev-arg xs 0))) (fields (cdr xs))
            (fs (the (arrayof val @v) (make-array (ev-vals-count fields) the-unit))))
@@ -588,7 +588,7 @@
 
 ;;; ------------------------------------------------------------ blobrefs
 ;; A blobref to byte `at` of `owner`'s suffix, checked to be one of it.
-(define* ev-bref (subr (maxeff evals spin) (val int) val)
+(define ev-bref (->* (val int) val)
   (lambda (owner at)
     (tagcase (as-other owner "a bloblet")
       (o-blob (fs bs)
@@ -598,14 +598,14 @@
       (else y (efail-expected "a bloblet")))))
 ;; New blobref `r`, back where its flat's `size` bytes lie in the suffix
 ;; (`Checker::note_fits`).
-(define* ev-fits (subr (maxeff evals spin) (val int) val)
+(define ev-fits (->* (val int) val)
   (lambda (r size)
     (let ((p (ev-bref-bytes r)))
       (if (<= (+ (cdr p) size) (array-length (car p)))
           r
           (efail "suffix ref: a flat runs past the end of the suffix")))))
 ;; Blobref `v`'s owner's suffix's bytes, and its offset.
-(define* ev-bref-bytes (subr (maxeff evals spin) (val) (pairof (arrayof int @v) int @v))
+(define ev-bref-bytes (->* (val) (pairof (arrayof int @v) int @v))
   (lambda (v)
     (tagcase (as-other v "a blobref")
       (o-bref (o at)
@@ -614,25 +614,24 @@
           (else y (efail "a bloblet"))))
       (else y (efail-expected "a blobref")))))
 ;; 256 to the `w`, times `acc`.
-(define* ev-pow256 (subr (maxeff (read @globals) spin) (int int) int)
+(define ev-pow256 (->* (int int) int)
   (lambda (w acc) (if (= w 0) acc (ev-pow256 (- w 1) (* 256 acc)))))
 ;; Bytes `at` to `at` + `k`, little-endian, after `acc`: the highest first.
-(define* ev-bytes-int (subr (maxeff (read @globals) (read @v) spin) ((arrayof int @v) int int int)
-                           int)
+(define ev-bytes-int (->* ((arrayof int @v) int int int) int)
   (lambda (bs at k acc)
     (if (< k 0) acc (ev-bytes-int bs at (- k 1) (+ (* acc 256) (array-ref bs (+ at k)))))))
 ;; `w` bytes from `at` := `n`, not negative, little-endian.
-(define* ev-int-bytes! (subr (maxeff stores spin) ((arrayof int @v) int int int) unit)
+(define ev-int-bytes! (->* ((arrayof int @v) int int int) unit)
   (lambda (bs at w n)
     (if (= w 0)
         #u
         (begin (array-set! bs at (modulo n 256))
                (ev-int-bytes! bs (+ at 1) (- w 1) (quotient n 256))))))
 ;; A scalar's width, by its layout (`fixpt_heap::layout::FLAT_*`).
-(define* ev-flat-width (subr (read @globals) (int) int)
+(define ev-flat-width (->* (int) int)
   (lambda (code) (if (or (= code 2) (= code 3) (= code 5)) 8 4)))
 ;; The scalar of layout `code` at byte `at` of `bs`, as a value.
-(define* ev-scalar-get (subr (maxeff evals spin) ((arrayof int @v) int int) val)
+(define ev-scalar-get (->* ((arrayof int @v) int int) val)
   (lambda (bs at code)
     (let ((w (ev-flat-width code)))
       (if (> (+ at w) (array-length bs))
@@ -645,7 +644,7 @@
               ((5) (bits->f64 (int->u64 u)))
               (else u)))))))
 ;; The scalar of layout `code` at byte `at` of `bs` := `v`.
-(define* ev-scalar-set! (subr (maxeff evals spin) ((arrayof int @v) int int val) unit)
+(define ev-scalar-set! (->* ((arrayof int @v) int int val) unit)
   (lambda (bs at code v)
     (let ((w (ev-flat-width code)))
       (if (> (+ at w) (array-length bs))
@@ -657,7 +656,7 @@
             (ev-int-bytes! bs at w (if (< n 0) (+ n (ev-pow256 w 1)) n)))))))
 ;; Blobref operation `op` on `xs`; `i` the layout the checker found: a
 ;; scalar's (`blobref-get`, `-set!`), or an array's `n << 32 | size`.
-(define* ev-blobref (subr (maxeff evals spin) (symbol int vals) val)
+(define ev-blobref (->* (symbol int vals) val)
   (lambda (op i xs)
     (if (symbol=? op 'blobref-at)
         (ev-fits (ev-bref (ev-arg xs 0) (as-int (ev-arg xs 1))) i)
@@ -685,7 +684,7 @@
 ;; to the end of the suffix (`n` 268435455, `FLAT_TO_THE_END`), the whole
 ;; elements of `size` bytes left of the suffix after blobref `r` (`TODO.md`
 ;; §77).
-(define* ev-flat-length (subr (maxeff evals spin) (val int int) int)
+(define ev-flat-length (->* (val int int) int)
   (lambda (r n size)
     (if (and (= n 268435455) (> size 0))
         (let ((p (ev-bref-bytes r))) (quotient (- (array-length (car p)) (cdr p)) size))
@@ -694,7 +693,7 @@
 ;; A flat sum's tag, of layout `k` (`TODO.md` §77): `w` bytes, a number as
 ;; it is if the key is numeric; else the owner's field it indexes, which
 ;; holds the label (`%fx26-flat-tag`).
-(define* ev-flat-tag (subr (maxeff evals spin) (val int) val)
+(define ev-flat-tag (->* (val int) val)
   (lambda (r k)
     (let* ((p (ev-bref-bytes r)) (bs (car p)) (at (cdr p)) (w (modulo k 8)))
       (if (> (+ at w) (array-length bs))
@@ -710,7 +709,7 @@
                   (else y (efail-expected "a bloblet")))))))))
 ;; Whether tag `t` is label `l` of a flat sum of layout `k`: its number, or
 ;; the symbol.
-(define* ev-label-is? (subr (read @globals) (val symbol int) bool)
+(define ev-label-is? (->* (val symbol int) bool)
   (lambda (t l k)
     (typecase t
       (int n (and (= (modulo (quotient k 8) 2) 1) (string=? (int->string n) (symbol->string l))))
@@ -719,7 +718,7 @@
 ;; `blobref-variant!` (`%fx26-flat-variant!`): the tag made `label`'s, a
 ;; number as it is, or else the first of the owner's fields holding it; a
 ;; blobref to the variant.
-(define* ev-flat-variant (subr (maxeff evals spin) (val int val) val)
+(define ev-flat-variant (->* (val int val) val)
   (lambda (r k label)
     (let* ((p (ev-bref-bytes r)) (bs (car p)) (at (cdr p)) (w (modulo k 8))
            (n (if (= (modulo (quotient k 8) 2) 1)
@@ -732,18 +731,18 @@
              (efail "suffix ref: the bloblet's suffix has no such byte"))
             (else (begin (ev-int-bytes! bs at w n)
                          (ev-bref (ev-bref-owner r) (+ at (quotient k 256)))))))))
-(define* ev-field-holding (subr (maxeff evals spin) ((arrayof val @v) val int) int)
+(define ev-field-holding (->* ((arrayof val @v) val int) int)
   (lambda (fs label i)
     (cond ((= i (array-length fs))
            (efail "blobref-variant!: no field of the owner holds the label"))
           ((ev-eq? (array-ref fs i) label) i)
           (else (ev-field-holding fs label (+ i 1))))))
-(define* ev-bref-owner (subr (maxeff evals spin) (val) val)
+(define ev-bref-owner (->* (val) val)
   (lambda (r)
     (tagcase (as-other r "a blobref") (o-bref (o at) o) (else y (efail-expected "a blobref")))))
 
 ;; Bloblet operation `op`, at field `i`, of `xs`.
-(define* ev-bloblet (subr (maxeff evals spin) (symbol int vals) val)
+(define ev-bloblet (->* (symbol int vals) val)
   (lambda (op i xs)
     (case op
       ((rmake-bloblet) (ev-make-bloblet (cdr xs)))
@@ -773,7 +772,7 @@
          (ev-width-prims! "i64" 64 #t) (ev-width-prims! "u64" 64 #f)))
 
 ;; A standard name's value: `nil`, or a primitive.
-(define* standard (subr (maxeff evals spin) (symbol) val)
+(define standard (->* (symbol) val)
   (lambda (name)
     (if (std-nil-name? (symbol->string name))
         nil

@@ -42,30 +42,30 @@
       (include check-env) (include check-subst) (include check-resolve) (include check-expect)
       (include check-effects) (include check-modules) (include tables))
 
-(define k-append-binders (subr kmakes (k-binders k-binders) k-binders)
+(define k-append-binders (->* (k-binders k-binders) k-binders)
   (lambda (xs ys) (if (null? xs) ys (cons (car xs) (k-append-binders (cdr xs) ys)))))
-(define k-binders-from (subr (maxeff kmakes spin) (int k-binders) k-bound-body)
+(define k-binders-from (->* (int k-binders) k-bound-body)
   (lambda (t acc)
     (tagcase (k-get t)
       (ty-poly (bs body) (k-binders-from (k-resolve body) (k-append-binders acc bs)))
       (else y (product (1 acc) (2 t))))))
 
 ;; The binders of `t` through every nested `poly`, and the type under them.
-(define k-binders-of (subr (maxeff kmakes spin) (int) k-bound-body)
+(define k-binders-of (->* (int) k-bound-body)
   (lambda (t) (k-binders-from (k-resolve t) nil)))
 
 ;; Whether `v` is one of the binders being solved.
-(define k-unknown? (subr kreads (k-binders int) bool)
+(define k-unknown? (->* (k-binders int) bool)
   (lambda (kinds v) (k-binder-has? kinds v)))
-(define k-open? (subr kreads (k-binders k-solved int) bool)
+(define k-open? (->* (k-binders k-solved int) bool)
   (lambda (kinds solved v) (and (k-unknown? kinds v) (null? (k-map-find (get solved) v)))))
-(define k-solve (subr kstate (k-solved int k-desc) unit)
+(define k-solve (->* (k-solved int k-desc) unit)
   (lambda (solved v d) (set solved (cons (cons v d) (get solved)))))
 
 ;; `a ≤ b`: region `a` won't outlive region `b`. The same; `b` a constant
 ;; (which never ends: `@name`, a fresh region, `const`); `b` bound around
 ;; `a`'s binder; or `a`'s bound won't outlive `b`.
-(define k-outlived? (subr (maxeff kmakes spin) (k-region k-region) bool)
+(define k-outlived? (->* (k-region k-region) bool)
   (lambda (a b)
     (or (k-region=? a b)
         (tagcase b
@@ -85,12 +85,12 @@
 ;; x y)`, with nothing else saying, allocates at `p`'s own region). A bounded
 ;; binder waits for its bound to be solved.
 ;; Whether binder `v`, of kind `k`, is a region binder not yet solved.
-(define k-unsolved-region? (subr kreads (int int k-solved) bool)
+(define k-unsolved-region? (->* (int int k-solved) bool)
   (lambda (k v solved) (and (= k 0) (null? (k-map-find (get solved) v)))))
 ;; A fresh region named after binder `v`.
-(define k-fresh-region-for (subr kstate (int) k-region)
+(define k-fresh-region-for (->* (int) k-region)
   (lambda (v) (k-fresh-region (string-append "@" (symbol->string (k-dvar-name v))))))
-(define k-default-bounded (subr kstate (k-binders k-binders k-solved) unit)
+(define k-default-bounded (->* (k-binders k-binders k-solved) unit)
   (lambda (all kinds solved)
     (if (null? kinds)
         #u
@@ -107,7 +107,7 @@
                   (else y (k-solve solved v (dr (car bd)))))
                 #u)
             (k-default-bounded all (cdr kinds) solved))))))
-(define k-default-free (subr kstate (k-binders k-binders k-solved) unit)
+(define k-default-free (->* (k-binders k-binders k-solved) unit)
   (lambda (all kinds solved)
     (if (null? kinds)
         #u
@@ -120,23 +120,23 @@
                 #u)
             (k-default-free all (cdr kinds) solved))))))
 
-(define k-default-regions (subr kstate (k-binders k-solved) unit)
+(define k-default-regions (->* (k-binders k-solved) unit)
   (lambda (kinds solved)
     (begin (k-default-bounded kinds kinds solved) (k-default-free kinds kinds solved))))
 
 ;; `t` with its frozen regions made acyclic: what data `acyclic?` has found
 ;; acyclic is.
-(define k-fin-region (subr (read @globals) (k-region) k-region)
+(define k-fin-region (->* (k-region) k-region)
   (lambda (r) (tagcase r (r-frozen (p f) (r-frozen p #t)) (else y r))))
 ;; Whether `k-finitize` rebuilds a node: a pair, product, sum, bloblet or
 ;; union.
-(define k-finitizes? (subr pure (k-ty) bool)
+(define k-finitizes? (->* (k-ty) bool)
   (lambda (n)
     (tagcase n
       (ty-pair (a b r nl) #t) (ty-product (ps) #t) (ty-sum (ps) #t) (ty-bloblet (fs z r) #t)
       (ty-union (ms) #t) (else y #f))))
 (define-rec
-  (k-finitize (subr (maxeff kstate spin) (int k-smemo) int)
+  (k-finitize (->* (int k-smemo) int)
     (lambda (t memo)
       (let* ((t (k-resolve t)) (done (table-ref memo t -1)))
         (cond ((>= done 0) done)
@@ -148,7 +148,7 @@
                    (let ((new (k-finitize-node t memo)))
                      (begin (k-set-link slot (k-ty-new new)) slot)))))))))
   ;; Node `t`, its parts made acyclic, and its region if frozen.
-  (k-finitize-node (subr (maxeff kstate spin) (int k-smemo) k-ty)
+  (k-finitize-node (->* (int k-smemo) k-ty)
     (lambda (t memo)
       (tagcase (k-get t)
         (ty-pair (a b r nl)
@@ -159,33 +159,33 @@
         (ty-bloblet (fs z r) (ty-bloblet (k-finitize-list fs memo) z (k-fin-region r)))
         (ty-union (ms) (ty-union (k-finitize-list ms memo)))
         (else y (k-get t)))))
-  (k-finitize-parts (subr (maxeff kstate spin) (k-parts k-smemo) k-parts)
+  (k-finitize-parts (->* (k-parts k-smemo) k-parts)
     (lambda (ps memo)
       (if (null? ps)
           nil
           (let* ((x (k-finitize (extract (car ps) 2) memo))
                  (rest (k-finitize-parts (cdr ps) memo)))
             (cons (product (1 (extract (car ps) 1)) (2 x)) rest)))))
-  (k-finitize-list (subr (maxeff kstate spin) (k-ids k-smemo) k-ids)
+  (k-finitize-list (->* (k-ids k-smemo) k-ids)
     (lambda (ts memo)
       (if (null? ts)
           nil
           (let* ((x (k-finitize (car ts) memo)) (rest (k-finitize-list (cdr ts) memo)))
             (cons x rest))))))
-(define k-finitized (subr (maxeff kstate spin) (int) int)
+(define k-finitized (->* (int) int)
   (lambda (t) (k-finitize t (k-new-smemo))))
 ;; Which binding of `s` is in scope: how deep its name's stack is.
-(define k-binding-depth (subr (maxeff kreads spin) (symbol) int)
+(define k-binding-depth (->* (symbol) int)
   (lambda (s) (k-length (table-ref (get k-env) s nil))))
 ;; Whether `s`, bound at depth `d`, is among the certified `cs`.
-(define k-certified-has? (subr kreads (k-named symbol int) bool)
+(define k-certified-has? (->* (k-named symbol int) bool)
   (lambda (cs s d) (k-named-has? cs s d)))
 ;; Whether `xs` is one argument.
-(define k-sc-one-arg? (subr (read @t) (kxs) bool)
+(define k-sc-one-arg? (->* (kxs) bool)
   (lambda (xs) (and (not (null? xs)) (null? (cdr xs)))))
 ;; Region binder `v`, as `m` solves it, won't outlive its bound, as solved;
 ;; or an error.
-(define k-check-bound (subr (maxeff checks spin) (int k-region k-map int int) unit)
+(define k-check-bound (->* (int k-region k-map int int) unit)
   (lambda (v bound m a b)
     (let ((r (k-subst-region (r-var v) m)) (c (k-subst-region bound m)))
       (if (k-outlived? r c)
@@ -197,30 +197,30 @@
 ;; binder so marked, in whose scope we are, or a `letregion`'s), or both are
 ;; constants, fresh, the heap or globals, and differ
 ;; (`Checker::regions_distinct`).
-(define k-regions-distinct? (subr (maxeff (read @globals) (read @t) spin) (k-region k-region) bool)
+(define k-regions-distinct? (->* (k-region k-region) bool)
   (lambda (p q)
     (and (not (k-region=? p q))
          (or (k-distinct-region? p) (k-distinct-region? q)
              (and (k-constant-region? p) (k-constant-region? q))))))
-(define k-distinct-region? (subr (maxeff (read @globals) (read @t)) (k-region) bool)
+(define k-distinct-region? (->* (k-region) bool)
   (lambda (r) (tagcase r (r-var (v) (k-distinct-var? v)) (else y #f))))
-(define k-constant-region? (subr pure (k-region) bool)
+(define k-constant-region? (->* (k-region) bool)
   (lambda (r)
     (tagcase r (r-const (n) #t) (r-fresh (i n) #t) (r-heap () #t) (r-global (g) #t) (else y #f))))
 ;; Each `distinct` region binder of `kinds`, as `m` instantiates it, given a
 ;; region known not to overlap any other binder's, nor any region `inner`
 ;; mentions besides its binders: Lucassen's rule, where it is asked for
 ;; (`Checker::check_distinct`).
-(define k-check-distinct (subr (maxeff checks spin) (k-binders k-map int int int) unit)
+(define k-check-distinct (->* (k-binders k-map int int int) unit)
   (lambda (kinds m inner a b)
     (if (k-any-distinct? kinds)
         (k-check-distinct-each kinds kinds m (k-regions-in inner) a b)
         #u)))
-(define k-any-distinct? (subr (maxeff (read @globals) (read @t) spin) (k-binders) bool)
+(define k-any-distinct? (->* (k-binders) bool)
   (lambda (ks)
     (and (not (null? ks)) (or (k-distinct-var? (extract (car ks) 1)) (k-any-distinct? (cdr ks))))))
 (define k-check-distinct-each
-  (subr (maxeff checks spin) (k-binders k-binders k-map k-regions int int) unit)
+  (->* (k-binders k-binders k-map k-regions int int) unit)
   (lambda (ks all m mentioned a b)
     (if (null? ks)
         #u
@@ -235,7 +235,7 @@
                 #u)
             (k-check-distinct-each (cdr ks) all m mentioned a b))))))
 (define k-distinct-from-binders
-  (subr (maxeff checks spin) (int k-region k-binders k-map int int) unit)
+  (->* (int k-region k-binders k-map int int) unit)
   (lambda (v p ws m a b)
     (if (null? ws)
         #u
@@ -253,7 +253,7 @@
                            a b)))
             (k-distinct-from-binders v p (cdr ws) m a b))))))
 (define k-distinct-from-mentioned
-  (subr (maxeff checks spin) (int k-region k-regions k-binders int int) unit)
+  (->* (int k-region k-regions k-binders int int) unit)
   (lambda (v p rs own a b)
     (cond ((null? rs) #u)
           ((or (k-own-region? (car rs) own)
@@ -265,11 +265,11 @@
                            (string-append (k-region-show p)
                                           " may be a region the procedure's type mentions"))
                    a b)))))
-(define k-own-region? (subr (maxeff (read @globals) spin) (k-region k-binders) bool)
+(define k-own-region? (->* (k-region k-binders) bool)
   (lambda (r own)
     (and (not (null? own))
          (or (k-region=? r (r-var (extract (car own) 1))) (k-own-region? r (cdr own))))))
-(define k-check-bounds (subr (maxeff checks spin) (k-binders k-map int int) unit)
+(define k-check-bounds (->* (k-binders k-map int int) unit)
   (lambda (kinds m a b)
     (if (null? kinds)
         #u
@@ -291,22 +291,22 @@
 ;; size. Polarity: 1 given back, -1 supplied by a caller, 0 both, as in
 ;; anything that can be written.
 ;; Whether a size's terms are one variable, once.
-(define k-one-var? (subr pure (k-terms) bool)
+(define k-one-var? (->* (k-terms) bool)
   (lambda (ts) (and (not (null? ts)) (null? (cdr ts)) (= (cdr (car ts)) 1))))
-(define* k-size-alone? (subr pure (k-size int) bool)
+(define k-size-alone? (->* (k-size int) bool)
   (lambda (z v)
     (tagcase z
       (sz-lin (k ts) (and (<= k 0) (k-one-var? ts) (= (car (car ts)) v)))
       (else y #f))))
 ;; Whether size `z` mentions variable `v`.
-(define k-size-mentions? (subr (read @globals) (k-size int) bool)
+(define k-size-mentions? (->* (k-size int) bool)
   (lambda (z v) (tagcase z (sz-lin (k ts) (not (= (k-coef-of ts v) 0))) (else y #f))))
-(define k-size-bad (subr (read @globals) (k-size int int) int)
+(define k-size-bad (->* (k-size int int) int)
   (lambda (z pol v) (if (and (not (= pol 1)) (k-size-mentions? z v)) 1 0)))
 ;; How many occurrences of size variable `v` in `t` a caller supplies or
 ;; can write.
 (define-rec
-  (k-size-walk (subr (maxeff kstate spin) (int int int k-seen-pol) int)
+  (k-size-walk (->* (int int int k-seen-pol) int)
     (lambda (t0 pol v seen)
       (let ((t (k-resolve t0)))
         (if (k-pair-seen? (get seen) t pol)
@@ -344,13 +344,13 @@
                 (ty-module (abs ds vs)
                   (+ (k-size-walk-parts ds 0 v seen) (k-size-walk-parts vs pol v seen)))
                 (else y 0)))))))
-  (k-size-walk-list (subr (maxeff kstate spin) (k-ids int int k-seen-pol) int)
+  (k-size-walk-list (->* (k-ids int int k-seen-pol) int)
     (lambda (ts pol v seen)
       (if (null? ts)
           0
           (let ((here (k-size-walk (car ts) pol v seen)))
             (+ here (k-size-walk-list (cdr ts) pol v seen))))))
-  (k-size-walk-parts (subr (maxeff kstate spin) (k-parts int int k-seen-pol) int)
+  (k-size-walk-parts (->* (k-parts int int k-seen-pol) int)
     (lambda (ps pol v seen)
       (if (null? ps)
           0
@@ -358,7 +358,7 @@
             (+ here (k-size-walk-parts (cdr ps) pol v seen))))))
   ;; Of a blobref's or flat array's descriptions: types at `tpol`, sizes at
   ;; `zpol`.
-  (k-size-walk-descs-at (subr (maxeff kstate spin) (k-descs int int int k-seen-pol) int)
+  (k-size-walk-descs-at (->* (k-descs int int int k-seen-pol) int)
     (lambda (ds tpol zpol v seen)
       (if (null? ds)
           0
@@ -367,7 +367,7 @@
                         (dt (x) (k-size-walk x tpol v seen))
                         (else y 0))))
             (+ here (k-size-walk-descs-at (cdr ds) tpol zpol v seen))))))
-  (k-size-walk-descs (subr (maxeff kstate spin) (k-descs int k-seen-pol) int)
+  (k-size-walk-descs (->* (k-descs int k-seen-pol) int)
     (lambda (ds v seen)
       (if (null? ds)
           0
@@ -377,10 +377,10 @@
                         (else y 0))))
             (+ here (k-size-walk-descs (cdr ds) v seen)))))))
 ;; Parameter `p`'s, as a whole.
-(define k-size-whole (subr (maxeff kstate spin) (int int k-seen-pol) k-counts)
+(define k-size-whole (->* (int int k-seen-pol) k-counts)
   (lambda (p v seen) (product (1 (k-size-walk p -1 v seen)) (2 0))))
 ;; Parameter `p`'s.
-(define k-size-param (subr (maxeff kstate spin) (int int k-seen-pol) k-counts)
+(define k-size-param (->* (int int k-seen-pol) k-counts)
   (lambda (p v seen)
     (tagcase (k-get p)
       (ty-nat (z) (if (k-size-alone? z v) (product (1 0) (2 1)) (k-size-whole p v seen)))
@@ -396,7 +396,7 @@
       (else y (k-size-whole p v seen)))))
 ;; Each parameter's count of such occurrences, and how many parameters are
 ;; sized by `v` alone.
-(define k-size-params (subr (maxeff kstate spin) (k-ids int k-seen-pol) k-counts)
+(define k-size-params (->* (k-ids int k-seen-pol) k-counts)
   (lambda (ps v seen)
     (if (null? ps)
         (product (1 0) (2 0))
@@ -404,7 +404,7 @@
                (rest (k-size-params (cdr ps) v seen)))
           (product (1 (+ (extract here 1) (extract rest 1)))
                    (2 (+ (extract here 2) (extract rest 2))))))))
-(define k-finite-size-ok? (subr (maxeff kstate spin) (int int) bool)
+(define k-finite-size-ok? (->* (int int) bool)
   (lambda (body v)
     (let ((seen (the k-seen-pol (new nil))))
       (tagcase (k-get (k-resolve body))
@@ -414,13 +414,13 @@
         (else y (= (k-size-walk body 1 v seen) 0))))))
 ;; The sizes of `vs` named since `saved`, its tail, onto `out`: oldest
 ;; first.
-(define k-named-since (subr (maxeff kstate spin) (k-ids k-ids k-ids) k-ids)
+(define k-named-since (->* (k-ids k-ids k-ids) k-ids)
   (lambda (saved vs out)
     (if (= (k-length vs) (k-length saved))
         out
         (k-named-since saved (cdr vs) (the k-ids (cons (car vs) out))))))
 ;; Each size of `vs` is given back by `t` only; or an error at `a`–`b`.
-(define k-check-forgettable (subr (maxeff checks spin) (int k-ids int int) unit)
+(define k-check-forgettable (->* (int k-ids int int) unit)
   (lambda (t vs a b)
     (cond ((null? vs) #u)
           ((> (k-size-walk t 1 (car vs) (the k-seen-pol (new nil))) 0)
@@ -431,7 +431,7 @@
                      a b)))
           (else (k-check-forgettable t (cdr vs) a b)))))
 ;; `m`, each of `vs` `finite`.
-(define k-finite-map (subr (maxeff kstate spin) (k-ids k-map) k-map)
+(define k-finite-map (->* (k-ids k-map) k-map)
   (lambda (vs m)
     (if (null? vs) m (k-finite-map (cdr vs) (cons (cons (car vs) (dz (sz-finite))) m)))))
 ;; `t` with the sizes named since `saved` forgotten, as `finite`: they mean
@@ -440,7 +440,7 @@
 ;; `t` gives it back: where a caller would supply something of that size,
 ;; forgetting it would let any size in (`docs/research/soundness-findings.md`,
 ;; F8), and that is an error at `a`–`b`.
-(define k-forget-nats (subr (maxeff checks spin) (k-ids int int int) int)
+(define k-forget-nats (->* (k-ids int int int) int)
   (lambda (saved t a b)
     (let ((vs (k-unescaped t (k-named-since saved (get k-skolems) nil) a b)))
       (begin (set k-skolems saved)

@@ -19,9 +19,9 @@
 
 ;; Whether `n` names the empty list: `nil`, or `no-pair`, the same value at
 ;; any pair type (`standard.rs`).
-(define std-nil-name? (subr pure (string) bool)
+(define std-nil-name? (->* (string) bool)
   (lambda (n) (or (string=? n "nil") (string=? n "no-pair"))))
-(define symbol-hash (subr pure (symbol) int) (lambda (s) (symbol-name-hash s)))
+(define symbol-hash (->* (symbol) int) (lambda (s) (symbol-name-hash s)))
 
 (define make-table
   (poly ((r region)) (poly ((k type) (v type))

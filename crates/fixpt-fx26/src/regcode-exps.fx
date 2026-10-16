@@ -41,24 +41,24 @@
 (define r-spec-at (ref rlocs @k) (new nil))
 (define r-spec-start (ref int @k) (new 0))
 ;; Whether two places for a value are the same register or frame slot.
-(define r-same-loc? (subr pure (rloc rloc) bool)
+(define r-same-loc? (->* (rloc rloc) bool)
   (lambda (a b)
     (tagcase a
       (rl-reg (i) (tagcase b (rl-reg (j) (= i j)) (else y #f)))
       (rl-slot (i) (tagcase b (rl-slot (j) (= i j)) (else y #f)))
       (else y #f))))
 ;; Whether a place, in a list, is there and is `at`.
-(define r-at? (subr rreads (rlocs rloc) bool)
+(define r-at? (->* (rlocs rloc) bool)
   (lambda (l at) (and (not (null? l)) (r-same-loc? (car l) at))))
 ;; The guard of an inlined or specialized call: to `call` unless the global
 ;; `cell` has not been written since.
-(define r-guard (subr (maxeff emits spin) (rgen wglobal int) unit)
+(define r-guard (->* (rgen wglobal int) unit)
   (lambda (g cell call)
     (r-emit g (r-guard-to (wcell-global cell) (wcell-int (c-writes-expected cell)) call))))
 ;; `n` arguments in registers, the procedure in RESULT: called, or in tail
 ;; position, the frame left first; `conv`, its convention by its type
 ;; (`r-conv-of`).
-(define r-invoke (subr emits (rgen int bool int) unit)
+(define r-invoke (->* (rgen int bool int) unit)
   (lambda (g n tail conv)
     (if tail
         (begin (r-leave g) (r-opnn g rop-tailinvoke n conv))
@@ -67,31 +67,30 @@
 ;; its callee's type says (`c-call-conv`). A call this compiler makes (a
 ;; lifted procedure's, `apply`'s, a specialized copy's) is `rconv-fx`, which
 ;; looks.
-(define r-conv-of (subr (maxeff (read @globals) (read @k)) (exp) int)
+(define r-conv-of (->* (exp) int)
   (lambda (f)
     (tagcase (c-call-conv f)
       (cv-cellular () rconv-cellular) (cv-native () rconv-native) (else y rconv-fx))))
 ;; RESULT kept in a new register, or a new frame slot: which.
-(define r-keep-in-reg (subr emits (rgen) int)
+(define r-keep-in-reg (->* (rgen) int)
   (lambda (g) (let ((r (r-reg g))) (begin (r-opn g rop-setreg r) r))))
-(define r-keep-in-slot (subr emits (rgen) int)
+(define r-keep-in-slot (->* (rgen) int)
   (lambda (g) (let ((s (r-slot g))) (begin (r-opn g rop-setstk s) s))))
 ;; RESULT kept where a `let` keeps a value: a register (`reg`), else a
 ;; frame slot.
-(define r-keep (subr emits (rgen bool) rloc)
+(define r-keep (->* (rgen bool) rloc)
   (lambda (g reg) (if reg (rl-reg (r-keep-in-reg g)) (rl-slot (r-keep-in-slot g)))))
 ;; Frame slot `from`'s value into frame slot `to`, by way of RESULT.
-(define r-slot-move (subr emits (rgen int int) unit)
+(define r-slot-move (->* (rgen int int) unit)
   (lambda (g from to) (begin (r-opn g rop-stack from) (r-opn g rop-setstk to))))
 ;; Constant `w`, or free value `i` of the closure running, into REGk.
-(define r-const-into (subr emits (rgen wcell int) unit)
+(define r-const-into (->* (rgen wcell int) unit)
   (lambda (g w k) (begin (r-op1 g rop-const w) (r-opn g rop-setreg k))))
-(define r-lexical-into (subr emits (rgen int int) unit)
+(define r-lexical-into (->* (rgen int int) unit)
   (lambda (g i k) (begin (r-opn g rop-lexical i) (r-opn g rop-setreg k))))
 ;; The one of `c-specials` that `n`, taking `k` arguments, names, if any.
 (define r-special-named
-  (subr (maxeff rreads (alloc @k)) ((listof c-special acyclic) symbol int int)
-        (listof c-special @k))
+  (->* ((listof c-special acyclic) symbol int int) (listof c-special @k))
   (lambda (xs n k lim)
     (cond ((null? xs) nil)
           ((and (symbol=? (extract (car xs) 1) n) (= (c-count-params (extract (car xs) 3)) k)
@@ -99,15 +98,15 @@
            (the (listof c-special @k) (cons (car xs) nil)))
           (else (r-special-named (cdr xs) n k lim)))))
 ;; Parameter `k` of `ps`.
-(define r-nth-param (subr (read @globals) (exp-params int) symbol)
+(define r-nth-param (->* (exp-params int) symbol)
   (lambda (ps k) (if (= k 0) (extract (car ps) 1) (r-nth-param (cdr ps) (- k 1)))))
 ;; Whether `body` is small enough to inline (`c-inline-limit`).
-(define r-inlinable? (subr (maxeff (read @globals) spin) (exp) bool)
+(define r-inlinable? (->* (exp) bool)
   (lambda (body) (>= (c-inline-room body c-inline-limit) 0)))
 ;; `sp`, its global `cell`, and the lambda argument, in a list, when the
 ;; argument at its parameter is a lambda small enough to inline, taking as
 ;; many arguments as it is called with.
-(define r-special-lambda (subr rbuilds (c-special wglobal exps) (listof rspecial @k))
+(define r-special-lambda (->* (c-special wglobal exps) (listof rspecial @k))
   (lambda (sp cell args)
     (let ((lam (c-nth args (extract sp 6))))
       (tagcase lam
@@ -120,7 +119,7 @@
 ;; names one of them and the argument at its parameter is a lambda small
 ;; enough to inline, taking as many arguments as it is called with; not
 ;; while a procedure is being specialized.
-(define r-specialized (subr rbuilds (renv exp exps) (listof rspecial @k))
+(define r-specialized (->* (renv exp exps) (listof rspecial @k))
   (lambda (env f args)
     (if (not (null? (get c-spec-now)))
         nil
@@ -138,7 +137,7 @@
           (else y nil)))))
 ;; Whether `x` is the parameter a procedure being specialized has the lambda
 ;; at, where it is.
-(define r-spec-param? (subr rbuilds (renv exp) bool)
+(define r-spec-param? (->* (renv exp) bool)
   (lambda (env x)
     (and (not (null? (get c-spec-now)))
          (and (not (null? (get r-spec-at)))
@@ -149,7 +148,7 @@
                 (else y #f))))))
 ;; Whether `f` is, in a procedure being specialized, its own global: in an
 ;; inlined body, or the lambda's, the parameter is not in scope.
-(define r-spec-self? (subr rbuilds (renv exp exps) bool)
+(define r-spec-self? (->* (renv exp exps) bool)
   (lambda (env f args)
     (and (not (null? (get c-spec-now)))
          (and (not (null? (get r-spec-at)))
@@ -161,47 +160,47 @@
                      (and (= (c-count-exps args) (extract sp 6))
                           (r-spec-param? env (c-nth args (extract sp 4))))))))))
 ;; Each of `made` into parameter slot `i` on.
-(define r-spec-moves (subr (maxeff emits spin) (rgen (listof int @k) int) unit)
+(define r-spec-moves (->* (rgen (listof int @k) int) unit)
   (lambda (g made i)
     (if (null? made)
         #u
         (begin (r-slot-move g (car made) i) (r-spec-moves g (cdr made) (+ i 1))))))
 ;; Frame slots as call-out operands.
-(define r-slot-args (subr rbuilds ((listof int @k)) rargs)
+(define r-slot-args (->* ((listof int @k)) rargs)
   (lambda (ss)
     (if (null? ss) nil (the rargs (cons (a-slot (car ss)) (r-slot-args (cdr ss)))))))
 ;; `n` of `b`, onto `acc`.
-(define r-repeat (subr (maxeff (read @globals) (alloc @k) spin) (bool int bools) bools)
+(define r-repeat (->* (bool int bools) bools)
   (lambda (b n acc) (if (= n 0) acc (r-repeat b (- n 1) (cons b acc)))))
 ;; Half the registers: the most that values are kept in where a call may
 ;; come after, leaving the rest for the operations' temporaries.
 (define r-half-regs int (quotient register-regs 2))
 ;; Those flagged, while fewer than half the registers are taken from `next`.
-(define r-budget (subr (maxeff rreads (alloc @k)) (bools int) bools)
+(define r-budget (->* (bools int) bools)
   (lambda (fs next)
     (cond ((null? fs) nil)
           ((and (car fs) (< next r-half-regs)) (cons #t (r-budget (cdr fs) (+ next 1))))
           (else (cons #f (r-budget (cdr fs) next))))))
 ;; `te` with each of `bs`' names bound, as `let`s are to the cellular
 ;; compiler.
-(define r-local-names (subr (maxeff (read @globals) (alloc @k)) (cenv exp-let-bs) cenv)
+(define r-local-names (->* (cenv exp-let-bs) cenv)
   (lambda (te bs) (if (null? bs) te (r-local-names (r-local te (extract (car bs) 1)) (cdr bs)))))
 ;; A `let`'s inits, in order.
-(define r-let-inits (subr (maxeff (read @globals) (alloc @k) spin) (exp-let-bs) exps)
+(define r-let-inits (->* (exp-let-bs) exps)
   (lambda (bs) (if (null? bs) nil (the exps (cons (extract (car bs) 2) (r-let-inits (cdr bs)))))))
 ;; `te` with parameters, or names, bound as `let`s are.
-(define r-local-params (subr (maxeff (read @globals) (alloc @k)) (cenv exp-params) cenv)
+(define r-local-params (->* (cenv exp-params) cenv)
   (lambda (te ps) (if (null? ps) te (r-local-params (r-local te (extract (car ps) 1)) (cdr ps)))))
-(define r-local-syms (subr (maxeff rreads (alloc @k)) (cenv syms) cenv)
+(define r-local-syms (->* (cenv syms) cenv)
   (lambda (te ns) (if (null? ns) te (r-local-syms (r-local te (car ns)) (cdr ns)))))
 ;; `fs` without its first `n`.
-(define r-drop-bools (subr rreads (bools int) bools)
+(define r-drop-bools (->* (bools int) bools)
   (lambda (fs n) (if (= n 0) fs (r-drop-bools (cdr fs) (- n 1)))))
 (define r-own-now (ref (listof rown @k) @k) (new nil))
 ;; The global `f` names, in a list, when it is the procedure's own, called
 ;; with its arity, and not from an inlined body, whose names may be an
 ;; older global's.
-(define r-own-self (subr rbuilds (renv exp exps) (listof wglobal @k))
+(define r-own-self (->* (renv exp exps) (listof wglobal @k))
   (lambda (env f args)
     (if (or (null? (get r-own-now)) (not (null? (get c-inlining))))
         nil
@@ -212,26 +211,26 @@
                 (e-var (m a b abk) (if (symbol=? m (extract o 1)) (r-var-global env f) nil))
                 (else y nil)))))))
 ;; The flags from `rest`, the `i`th binding of `bs` on.
-(define r-join-flags-from (subr rbuilds (exp-letrec-bs exp-letrec-bs exp bool int) bools)
+(define r-join-flags-from (->* (exp-letrec-bs exp-letrec-bs exp bool int) bools)
   (lambda (bs rest body tail i)
     (if (null? rest)
         nil
         (let ((join (and tail (c-join-ok? bs body i))))
           (cons join (r-join-flags-from bs (cdr rest) body tail (+ i 1)))))))
-(define r-binding-names (subr (maxeff (read @globals) (alloc @k)) (exp-letrec-bs) syms)
+(define r-binding-names (->* (exp-letrec-bs) syms)
   (lambda (bs) (if (null? bs) nil (cons (extract (car bs) 1) (r-binding-names (cdr bs))))))
-(define r-same-syms? (subr rreads (syms syms) bool)
+(define r-same-syms? (->* (syms syms) bool)
   (lambda (a b)
     (cond ((null? a) (null? b))
           ((null? b) #f)
           (else (and (symbol=? (car a) (car b)) (r-same-syms? (cdr a) (cdr b)))))))
 ;; `flags` remembered for the `letrec` of `names` whose body is `body`.
-(define r-join-remember (subr (maxeff emits spin) (exp syms bools) unit)
+(define r-join-remember (->* (exp syms bools) unit)
   (lambda (body names flags)
     (table-set! (get c-join-memo) (exp-at body) (the c-join-answer (product (1 names) (2 flags))))))
 ;; Each binding of `bs`: whether it is a join point (in tail position).
 ;; Remembered per `letrec` (`c-join-memo`), where it is in tail position.
-(define r-join-flags (subr (maxeff emits spin) (exp-letrec-bs exp bool) bools)
+(define r-join-flags (->* (exp-letrec-bs exp bool) bools)
   (lambda (bs body tail)
     (if (not tail)
         (r-join-flags-from bs bs body tail 0)
@@ -244,34 +243,34 @@
               (extract known 2)
               (let ((flags (r-join-flags-from bs bs body tail 0)))
                 (begin (r-join-remember body names flags) flags)))))))
-(define r-all? (subr rreads (bools) bool)
+(define r-all? (->* (bools) bool)
   (lambda (fs) (or (null? fs) (and (car fs) (r-all? (cdr fs))))))
 ;; `te` with `n` a loop, as a join point is to the cellular compiler.
-(define r-local-loop (subr (maxeff (read @globals) (alloc @k)) (cenv symbol) cenv)
+(define r-local-loop (->* (cenv symbol) cenv)
   (lambda (te n) (the cenv (cons (cons n (at-loop 0)) te))))
 ;; `te` with each of `bs`' names a loop, as join points' are.
-(define r-loop-names (subr (maxeff (read @globals) (alloc @k)) (cenv exp-letrec-bs) cenv)
+(define r-loop-names (->* (cenv exp-letrec-bs) cenv)
   (lambda (te bs)
     (if (null? bs) te (r-loop-names (r-local-loop te (extract (car bs) 1)) (cdr bs)))))
 ;; Where local `n` is, in a list; none if it is not a local.
-(define r-local-loc (subr rbuilds (renv symbol) rlocs)
+(define r-local-loc (->* (renv symbol) rlocs)
   (lambda (env n)
     (cond ((null? env) nil)
           ((symbol=? (car (car env)) n) (the rlocs (cons (cdr (car env)) nil)))
           (else (r-local-loc (cdr env) n)))))
 ;; The join point `f` names, in a list, if it names one: a local, so only
 ;; the locals are searched, not the globals, which every call would search.
-(define r-join-of (subr rbuilds (renv exp) rlocs)
+(define r-join-of (->* (renv exp) rlocs)
   (lambda (env f)
     (tagcase f
       (e-var (m a b abk)
         (let ((l (r-local-loc env m)))
           (if (null? l) nil (tagcase (car l) (rl-join (ps label) l) (else y nil)))))
       (else y nil))))
-(define c-length-locs (subr rscans (rlocs) int)
+(define c-length-locs (->* (rlocs) int)
   (lambda (xs) (if (null? xs) 0 (+ 1 (c-length-locs (cdr xs))))))
 ;; Each value made for a jump into its parameter's place.
-(define r-jump-moves (subr (maxeff emits spin) (rgen rlocs rlocs) unit)
+(define r-jump-moves (->* (rgen rlocs rlocs) unit)
   (lambda (g made params)
     (if (or (null? made) (null? params))
         #u
@@ -290,20 +289,20 @@
             (else y (r-decline)))
           (r-jump-moves g (cdr made) (cdr params))))))
 ;; A join point's parameters' places: registers in a leaf, else frame slots.
-(define r-param-places (subr (maxeff emits spin) (rgen exp-params bool) rlocs)
+(define r-param-places (->* (rgen exp-params bool) rlocs)
   (lambda (g ps regs)
     (if (null? ps)
         nil
         (let ((l (if regs (rl-reg (r-reg g)) (rl-slot (r-slot g)))))
           (cons l (r-param-places g (cdr ps) regs))))))
 ;; `env` with each parameter at its place.
-(define r-bind-places (subr rbuilds (renv exp-params rlocs) renv)
+(define r-bind-places (->* (renv exp-params rlocs) renv)
   (lambda (env ps ls)
     (if (or (null? ps) (null? ls))
         env
         (r-bind-places (r-bind (extract (car ps) 1) (car ls) env) (cdr ps) (cdr ls)))))
 ;; A frame slot for each binding that is no join point; -1 for one that is.
-(define r-letrec-slots-j (subr (maxeff emits spin) (rgen bools) (listof int @k))
+(define r-letrec-slots-j (->* (rgen bools) (listof int @k))
   (lambda (g joins)
     (if (null? joins)
         nil
@@ -318,41 +317,41 @@
 (define r-looped (ref bool @k) (new #f))
 (define r-assumed (ref r-assumptions @k) (new nil))
 (define c-writes (ref c-write-table @k) (new (make-table symbol-hash symbol=?)))
-(define c-writes-of (subr rreads (wglobal) (listof c-write @k))
+(define c-writes-of (->* (wglobal) (listof c-write @k))
   (lambda (g) (table-ref (get c-writes) (wglobal-name g) (the (listof c-write @k) nil))))
 (define c-form-writes (ref c-globals @k) (new nil))
-(define c-writes-in (subr rscans ((listof c-write @k) wglobal) int)
+(define c-writes-in (->* ((listof c-write @k) wglobal) int)
   (lambda (xs g)
     (cond ((null? xs) (wglobal-writes g))
           ((wglobal=? (car (car xs)) g) (cdr (car xs)))
           (else (c-writes-in (cdr xs) g)))))
-(define c-count-in (subr rscans (c-globals wglobal int) int)
+(define c-count-in (->* (c-globals wglobal int) int)
   (lambda (xs g n) (if (null? xs) n (c-count-in (cdr xs) g (if (wglobal=? (car xs) g) (+ n 1) n)))))
 ;; What a `global-guard` of `g` made now expects: how many times `g` has
 ;; been written once the form being compiled has run, its own writes too.
 ;; As the Rust compiler's `writes_expected`.
-(define c-writes-expected (subr rscans (wglobal) int)
+(define c-writes-expected (->* (wglobal) int)
   (lambda (g) (c-count-in (get c-form-writes) g (c-writes-in (c-writes-of g) g))))
-(define c-without-one (subr rbuilds (c-globals wglobal) c-globals)
+(define c-without-one (->* (c-globals wglobal) c-globals)
   (lambda (xs g)
     (cond ((null? xs) xs)
           ((wglobal=? (car xs) g) (cdr xs))
           (else (the c-globals (cons (car xs) (c-without-one (cdr xs) g)))))))
 ;; A `global!` of `g` emitted: once it runs, `g` written once more.
-(define c-wrote! (subr (maxeff emits spin) (wglobal) unit)
+(define c-wrote! (->* (wglobal) unit)
   (lambda (g)
     (let* ((ws (c-writes-of g)) (n (+ (c-writes-in ws g) 1)))
       (begin
         (table-set! (get c-writes) (wglobal-name g)
                     (the (listof c-write @k) (cons (the c-write (cons g n)) ws)))
         (set c-form-writes (c-without-one (get c-form-writes) g))))))
-(define r-assumed-has? (subr rreads (r-assumptions wglobal) bool)
+(define r-assumed-has? (->* (r-assumptions wglobal) bool)
   (lambda (xs cell)
     (and (not (null? xs)) (or (wglobal=? (car xs) cell) (r-assumed-has? (cdr xs) cell)))))
 ;; Whether the body being compiled is its fast version, which assumes what
 ;; the guard would test: if so, the assumption noted, for its guard at the
 ;; start.
-(define r-assume (subr emits (wglobal) bool)
+(define r-assume (->* (wglobal) bool)
   (lambda (cell)
     (if (get r-assuming)
         (begin (if (r-assumed-has? (get r-assumed) cell)
@@ -361,13 +360,13 @@
                #t)
         #f)))
 (define r-own-name (ref (listof rown-name @k) @k) (new nil))
-(define r-own-is? (subr rreads (symbol int) bool)
+(define r-own-is? (->* (symbol int) bool)
   (lambda (name n)
     (and (not (null? (get r-own-name)))
          (and (symbol=? (car (car (get r-own-name))) name) (= (cdr (car (get r-own-name))) n)))))
 ;; Each value made for a jump back to the start into its parameter's place:
 ;; a register's into REGi+1, a slot's into slot i.
-(define r-self-moves (subr (maxeff emits spin) (rgen rlocs int) unit)
+(define r-self-moves (->* (rgen rlocs int) unit)
   (lambda (g made i)
     (if (null? made)
         #u
@@ -378,25 +377,25 @@
             (else y (r-decline)))
           (r-self-moves g (cdr made) (+ i 1))))))
 ;; A frame slot as a call-out operand; anything else, declined.
-(define r-slot-arg (subr emits (rloc) rarg)
+(define r-slot-arg (->* (rloc) rarg)
   (lambda (l) (tagcase l (rl-slot (s) (a-slot s)) (else y (begin (r-decline) (a-slot 0))))))
 ;; Frame slots as call-out operands; anything else, declined.
-(define r-slot-args-of (subr (maxeff emits spin) (rlocs) rargs)
+(define r-slot-args-of (->* (rlocs) rargs)
   (lambda (ls)
     (if (null? ls) nil (the rargs (cons (r-slot-arg (car ls)) (r-slot-args-of (cdr ls)))))))
 ;; A list of cells' length, and two appended.
-(define r-cells-length (subr rscans (wcells int) int)
+(define r-cells-length (->* (wcells int) int)
   (lambda (cs n) (if (null? cs) n (r-cells-length (cdr cs) (+ n 1)))))
-(define r-rev-cells (subr rbuilds (wcells wcells) wcells)
+(define r-rev-cells (->* (wcells wcells) wcells)
   (lambda (cs acc) (if (null? cs) acc (r-rev-cells (cdr cs) (cons (car cs) acc)))))
-(define r-rev-assumptions (subr rbuilds (r-assumptions r-assumptions) r-assumptions)
+(define r-rev-assumptions (->* (r-assumptions r-assumptions) r-assumptions)
   (lambda (xs acc)
     (if (null? xs) acc (r-rev-assumptions (cdr xs) (the r-assumptions (cons (car xs) acc))))))
-(define r-assumptions-length (subr rscans (r-assumptions int) int)
+(define r-assumptions-length (->* (r-assumptions int) int)
   (lambda (xs n) (if (null? xs) n (r-assumptions-length (cdr xs) (+ n 1)))))
 ;; The guards, in order, from cell `at`, each to `plain-at` where it fails,
 ;; onto `rest`.
-(define r-guard-cells (subr rbuilds (r-assumptions int int wcells) wcells)
+(define r-guard-cells (->* (r-assumptions int int wcells) wcells)
   (lambda (xs at plain-at rest)
     (if (null? xs)
         rest
@@ -406,12 +405,12 @@
               (n (wcell-int (c-writes-expected (car xs)))))
           (the wcells (cons (wcell-int rop-global-guard) (cons c (cons n rest))))))))
 ;; The names `e` binds, in order.
-(define r-cenv-names (subr rbuilds (cenv) syms)
+(define r-cenv-names (->* (cenv) syms)
   (lambda (e) (if (null? e) nil (cons (car (car e)) (r-cenv-names (cdr e))))))
 ;; The constant globals `body` names, in its free names' order (`c-free`),
 ;; each cell and value: what a fast version folds, assuming each holds its
 ;; value still. As the Rust compiler's `r_consts_named`.
-(define r-consts-named (subr rbuilds (exp cenv) r-const-list)
+(define r-consts-named (->* (exp cenv) r-const-list)
   (lambda (body inner)
     (letrec ((go (subr rbuilds (syms r-const-list) r-const-list)
                    (lambda (ns acc)
@@ -429,19 +428,18 @@
                                              (the r-const-list (cons (cons g (car k)) acc)))))
                                      (else y acc)))))))))
       (go (c-free body (r-cenv-names inner) nil) nil))))
-(define r-rev-consts-list (subr rbuilds (r-const-list r-const-list) r-const-list)
+(define r-rev-consts-list (->* (r-const-list r-const-list) r-const-list)
   (lambda (xs acc)
     (if (null? xs) acc (r-rev-consts-list (cdr xs) (the r-const-list (cons (car xs) acc))))))
 ;; Constants `cs` as assumptions, newest first: onto `acc`, the last first.
-(define r-consts-assumed (subr rbuilds (r-const-list r-assumptions) r-assumptions)
+(define r-consts-assumed (->* (r-const-list r-assumptions) r-assumptions)
   (lambda (cs acc)
     (if (null? cs)
         acc
         (r-consts-assumed (cdr cs) (the r-assumptions (cons (car (car cs)) acc))))))
 ;; The one of `c-inlines` that `n`, taking `k` arguments, names, if any.
 (define r-inline-named
-  (subr (maxeff rreads (alloc @k)) ((listof c-inline acyclic) symbol int int)
-        (listof c-inline acyclic))
+  (->* ((listof c-inline acyclic) symbol int int) (listof c-inline acyclic))
   (lambda (xs n k lim)
     (cond ((null? xs) nil)
           ((and (symbol=? (extract (car xs) 1) n) (= (c-count-params (extract (car xs) 3)) k)
@@ -452,7 +450,7 @@
 ;; the stack code made for it (`c-standard-word`), and that word's
 ;; register code. A leaf makes it only in tail position. A `vsubr`'s is
 ;; then given to `%fx26-vlambda`, a call-out: never in a leaf.
-(define r-standard-value (subr rcompiles (rgen string bool) unit)
+(define r-standard-value (->* (rgen string bool) unit)
   (lambda (g name tail)
     (let ((found (c-standard-word-of name)))
       (if (or (null? found) (and (extract g leaf) (or (not tail) (c-vsubr? name))))
@@ -465,11 +463,11 @@
                 #u))))))
 ;; Whether `n`, not bound in `e`, is a standard operation as a value: a
 ;; closure made.
-(define r-standard-value? (subr rcompiles (cenv symbol) bool)
+(define r-standard-value? (->* (cenv symbol) bool)
   (lambda (e n) (and (null? (c-where e n)) (c-has-standard-value? (symbol->string n)))))
 ;; Which of `c-inlines`, and its global, when `f` names one of them, taking
 ;; `k` arguments, whose body is not being inlined already.
-(define r-inlined (subr rbuilds (renv exp int) (listof rinline @k))
+(define r-inlined (->* (renv exp int) (listof rinline @k))
   (lambda (env f k)
     (tagcase f
       (e-var (n a b abk)
@@ -483,7 +481,7 @@
                 (else y nil)))))
       (else y nil))))
 ;; The global `f` names here, in a list; none if it names none.
-(define r-global-of (subr rbuilds (renv exp) (listof wglobal @k))
+(define r-global-of (->* (renv exp) (listof wglobal @k))
   (lambda (env f)
     (tagcase f
       (e-var (n fa fb fafbk)
@@ -497,7 +495,7 @@
 ;; Call `f` at `a`-`b`: the small procedure it is inlined as, and its
 ;; global, as the plan decided (step 3), in a planned lambda's own code;
 ;; else as `r-inlined` decides here, in an inlined body or a copy.
-(define r-inline-of (subr rbuilds (int int int renv exp int) (listof rinline @k))
+(define r-inline-of (->* (int int int renv exp int) (listof rinline @k))
   (lambda (a b abk env f k)
     (let ((p (c-planned-call a b abk)))
       (if (null? p)
@@ -507,7 +505,7 @@
                 nil
                 (the (listof rinline @k) (cons (cons (car i) (car g)) nil))))))))
 ;; The same for the procedure it is specialized as, with the lambda.
-(define r-special-of (subr rbuilds (int int int renv exp exps) (listof rspecial @k))
+(define r-special-of (->* (int int int renv exp exps) (listof rspecial @k))
   (lambda (a b abk env f args)
     (let ((p (c-planned-call a b abk)))
       (if (null? p)
@@ -520,7 +518,7 @@
                            nil))))))))
 ;; Whether `f`, applied to `args`, is the procedure itself: its own name, or
 ;; a loop's.
-(define r-self-call? (subr rcompiles (exp exps cenv rthis) bool)
+(define r-self-call? (->* (exp exps cenv rthis) bool)
   (lambda (f args e this)
     (tagcase f
       (e-var (n a b abk)
@@ -529,7 +527,7 @@
       (else y #f))))
 ;; Whether `f`, applied to `args`, is a standard operation done in line,
 ;; with no call-out.
-(define r-inline-op? (subr rcompiles (exp exps cenv) bool)
+(define r-inline-op? (->* (exp exps cenv) bool)
   (lambda (f args e)
     (tagcase (r-operator f)
       (e-var (n a b abk)
@@ -540,7 +538,7 @@
       (else y #f))))
 ;; Whether `name` is a global in `e`, and not one whose body is being
 ;; inlined.
-(define r-global-callee? (subr rcompiles (cenv symbol) bool)
+(define r-global-callee? (->* (cenv symbol) bool)
   (lambda (e name)
     (let ((l (c-where e name)))
       (and (not (null? l))
@@ -550,7 +548,7 @@
 ;; Whether a call of `f` with `n` arguments is a plain `invoke`: not a
 ;; standard operation, an inlined or specialized global's, or a lifted
 ;; procedure's, each compiled its own way. As `r_plain_callee`.
-(define r-plain-callee? (subr rcompiles (exp int cenv) bool)
+(define r-plain-callee? (->* (exp int cenv) bool)
   (lambda (f n e)
     (tagcase f
       (e-var (name a b abk)
@@ -568,7 +566,7 @@
 ;; Whether bloblet form `op` itself never calls out: a field's read; a
 ;; blobref's read, write, element or variant, in line (`prim2imm`,
 ;; `prim3imm`).
-(define r-bloblet-quiet? (subr pure (string) bool)
+(define r-bloblet-quiet? (->* (string) bool)
   (lambda (op)
     (case op
       (("bloblet-ref" "blobref-get" "blobref-set!" "blobref-index" "blobref-variant!") #t)
@@ -577,12 +575,12 @@
 (define-rec
   ;; Whether evaluating `x` may call or call out, and so collect: a
   ;; conversion calls out.
-  (r-collects (subr rcompiles (exp cenv rthis bool) bool)
+  (r-collects (->* (exp cenv rthis bool) bool)
     (lambda (x e this tail)
       (or (c-changed? x) (r-collects-as-is x e this tail))))
   ;; Whether evaluating `x` may call or call out, and so collect. Loops do
   ;; not; declined forms are said to, which does not matter.
-  (r-collects-as-is (subr rcompiles (exp cenv rthis bool) bool)
+  (r-collects-as-is (->* (exp cenv rthis bool) bool)
     (lambda (x e this tail)
       (tagcase x
         (e-var (n a b abk)
@@ -641,27 +639,27 @@
                 (r-collects body (if (null? ns) e (r-local-syms e (car ns))) this tail)
                 (and (c-has-standard-value? n) (or (not tail) (c-vsubr? n))))))
         (else y #t))))
-  (r-collects-all (subr rcompiles (exps cenv rthis) bool)
+  (r-collects-all (->* (exps cenv rthis) bool)
     (lambda (es e this)
       (and (not (null? es)) (or (r-collects (car es) e this #f) (r-collects-all (cdr es) e this)))))
-  (r-collects-begin (subr rcompiles (exps cenv rthis bool) bool)
+  (r-collects-begin (->* (exps cenv rthis bool) bool)
     (lambda (es e this tail)
       (cond ((null? es) #f)
             ((null? (cdr es)) (r-collects (car es) e this tail))
             (else (or (r-collects (car es) e this #f) (r-collects-begin (cdr es) e this tail))))))
-  (r-collects-arms (subr rcompiles (exp-arms cenv rthis bool) bool)
+  (r-collects-arms (->* (exp-arms cenv rthis bool) bool)
     (lambda (arms e this tail)
       (and (not (null? arms))
            (let ((body (extract (car arms) 4)))
              (or (r-collects body e this tail) (r-collects-arms (cdr arms) e this tail))))))
-  (r-collects-else (subr rcompiles (exp-let-bs cenv rthis bool) bool)
+  (r-collects-else (->* (exp-let-bs cenv rthis bool) bool)
     (lambda (els e this tail)
       (and (not (null? els)) (r-collects (extract (car els) 2) e this tail))))
   ;; Whether a call of global `f` with `n` arguments, in a body's fast
   ;; version (`r-register-code`), is no call: its own in tail position, a
   ;; loop; or one inlined, whose body makes none. As the Rust compiler's
   ;; `r_call_is_free`.
-  (r-call-is-free? (subr rcompiles (exp int cenv bool) bool)
+  (r-call-is-free? (->* (exp int cenv bool) bool)
     (lambda (f n e tail)
       (and (get r-assuming)
            (tagcase f
@@ -674,7 +672,7 @@
   ;; Whether the body of `i`, inlined procedure `name`, calls or calls out,
   ;; compiled where `r-inline` compiles it: with the globals it saw, and
   ;; itself being inlined.
-  (r-inlined-collects? (subr rcompiles (c-inline symbol bool) bool)
+  (r-inlined-collects? (->* (c-inline symbol bool) bool)
     (lambda (i name tail)
       (let ((outer-genv (get c-genv)) (outer-inlining (get c-inlining)))
         (begin
@@ -685,14 +683,14 @@
             (begin (set c-inlining outer-inlining) (set c-genv outer-genv) collects))))))
   ;; Whether lambda `l`'s body, its parameters bound in `e`, calls or calls
   ;; out; anything but a lambda is said to.
-  (r-body-collects? (subr rcompiles (exp cenv rthis) bool)
+  (r-body-collects? (->* (exp cenv rthis) bool)
     (lambda (l e this)
       (tagcase l
         (e-lambda (ps lbody la lb lalbk) (r-collects lbody (r-local-params e ps) this #t))
         (else y #t))))
   ;; Whether any of `bs`' lambdas' bodies, their parameters bound in `e`,
   ;; calls or calls out.
-  (r-collects-joins (subr rcompiles (exp-letrec-bs cenv rthis) bool)
+  (r-collects-joins (->* (exp-letrec-bs cenv rthis) bool)
     (lambda (bs e this)
       (and (not (null? bs))
            (or (let ((lam (c-lambda-of (extract (car bs) 3))))

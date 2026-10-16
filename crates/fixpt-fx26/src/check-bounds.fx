@@ -29,34 +29,33 @@
 (define k-no-bound k-bound (product (1 -1) (2 -1) (3 -1)))
 
 ;; A new solution, with bounds kept for it.
-(define* k-new-bounded-solved (subr (maxeff (read @t) (write @t) (alloc @t)) () (ref k-map @t))
+(define k-new-bounded-solved (->* () (ref k-map @t))
   (lambda ()
     (let ((s (the (ref k-map @t) (new nil))))
       (begin (set k-bounds-stack (cons (cons s (the k-bound-map (new nil))) (get k-bounds-stack)))
              s))))
 ;; `x`, the bounds of `solved` dropped, and of any left inside it.
-(define* k-drop-bounds (subr (maxeff (read @t) (write @t) spin) ((ref k-map @t) int) int)
+(define k-drop-bounds (->* ((ref k-map @t) int) int)
   (lambda (solved x)
     (let ((st (get k-bounds-stack)))
       (if (null? st)
           x
           (begin (set k-bounds-stack (cdr st))
                  (if (eq? (car (car st)) solved) x (k-drop-bounds solved x)))))))
-(define* k-bounds-in (subr (maxeff (read @t) (alloc @t) spin)
-                           ((ref k-map @t) (listof k-bound-entry @t)) k-maybe-bounds)
+(define k-bounds-in (->* ((ref k-map @t) (listof k-bound-entry @t)) k-maybe-bounds)
   (lambda (solved st)
     (cond ((null? st) nil)
           ((eq? (car (car st)) solved) (the k-maybe-bounds (cons (cdr (car st)) nil)))
           (else (k-bounds-in solved (cdr st))))))
-(define* k-bounds-of (subr (maxeff (read @t) (alloc @t) spin) ((ref k-map @t)) k-maybe-bounds)
+(define k-bounds-of (->* ((ref k-map @t)) k-maybe-bounds)
   (lambda (solved) (k-bounds-in solved (get k-bounds-stack))))
-(define* k-bound-get (subr (maxeff (read @t) spin) (k-bound-map int) k-bound)
+(define k-bound-get (->* (k-bound-map int) k-bound)
   (lambda (m v)
     (letrec ((go (subr (maxeff (read @t) spin) ((listof (pairof int k-bound @t) @t)) k-bound)
                (lambda (bs) (cond ((null? bs) k-no-bound) ((= (car (car bs)) v) (cdr (car bs)))
                                   (else (go (cdr bs)))))))
       (go (get m)))))
-(define* k-unsettled (subr (maxeff kstate spin) ((ref k-map @t) int) k-maybe-bound)
+(define k-unsettled (->* ((ref k-map @t) int) k-maybe-bound)
   (lambda (solved v)
     (let ((m (k-bounds-of solved)))
       (if (null? m)
@@ -68,7 +67,7 @@
                 (the k-maybe-bound (cons b nil))))))))
 ;; `solved`'s solutions, but none of binders whose bounds have not met; or,
 ;; if `uppers`, those of them that have an upper bound at it.
-(define* k-map-unsettled (subr (maxeff kstate spin) ((ref k-map @t) k-map bool) k-map)
+(define k-map-unsettled (->* ((ref k-map @t) k-map bool) k-map)
   (lambda (solved m uppers)
     (if (null? m)
         m
@@ -79,25 +78,25 @@
                 ((< (extract (car b) 2) 0) (the k-map (cons (car m) rest)))
                 (else (the k-map (cons (cons (car (car m)) (dt (extract (car b) 2))) rest))))))))
 
-(define* k-exactly (subr (maxeff kstate spin) (k-unifying) unit)
+(define k-exactly (->* (k-unifying) unit)
   (lambda (f)
     (let ((outer (get k-unify-exact)))
       (begin (set k-unify-exact #t) (f) (set k-unify-exact outer)))))
-(define* k-from-above (subr (maxeff kstate spin) (k-unifying) unit)
+(define k-from-above (->* (k-unifying) unit)
   (lambda (f)
     (let ((outer (get k-unify-upper)))
       (begin (set k-unify-upper #t) (f) (set k-unify-upper outer)))))
-(define* k-flipped (subr (maxeff kstate spin) (k-unifying) unit)
+(define k-flipped (->* (k-unifying) unit)
   (lambda (f)
     (let ((outer (get k-unify-upper)))
       (begin (set k-unify-upper (not outer)) (f) (set k-unify-upper outer)))))
 
 ;; Whether `a` and `b` are the one below the other.
-(define* k-related? (subr (maxeff kstate spin) (int int) bool)
+(define k-related? (->* (int int) bool)
   (lambda (a b) (or (k-subtype a b) (k-subtype b a))))
 ;; Bounds `b`, and what `a` says, as `k-unify` says it: exactly, from above,
 ;; or from below.
-(define* k-bound-with (subr (maxeff kstate spin) (k-bound int) k-bound)
+(define k-bound-with (->* (k-bound int) k-bound)
   (lambda (b a)
     (let ((lo (extract b 1)) (up (extract b 2)) (ex (extract b 3)))
       (cond ((get k-unify-exact)
@@ -111,13 +110,13 @@
             (else
              (product (1 (if (and (>= lo 0) (or (k-subtype a lo) (not (k-subtype lo a)))) lo a))
                       (2 up) (3 ex)))))))
-(define* k-bound-set! (subr (maxeff (read @t) (write @t) (alloc @t)) (k-bound-map int k-bound) unit)
+(define k-bound-set! (->* (k-bound-map int k-bound) unit)
   (lambda (m v b) (set m (cons (cons v b) (get m)))))
 ;; What type binder `v` of `solved`, solved as `was` so far (-1: not), is
 ;; now that `a` has been said of it; -1 if it stays as it was. Where no
 ;; bounds are kept (a hint's matching), the larger, or in a pair's
 ;; contents what it meets.
-(define* k-bound-solution (subr (maxeff kstate spin) ((ref k-map @t) int int int) int)
+(define k-bound-solution (->* ((ref k-map @t) int int int) int)
   (lambda (solved v a was)
     (let ((m (k-bounds-of solved)))
       (if (null? m)

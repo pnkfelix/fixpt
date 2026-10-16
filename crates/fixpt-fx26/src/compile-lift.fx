@@ -35,26 +35,26 @@
 
 ;; The index in `c-lifts` of the procedure `n` names in `e`, if a lifted
 ;; one; else -1.
-(define c-lifted-index (subr c-walks (symbol cenv) int)
+(define c-lifted-index (->* (symbol cenv) int)
   (lambda (n e)
     (let ((l (c-find e n)))
       (if (null? l) -1 (tagcase (car l) (at-lifted (k) k) (else y -1))))))
 
-(define c-lifted-at (subr c-walks (exp cenv) int)
+(define c-lifted-at (->* (exp cenv) int)
   (lambda (f e) (tagcase f (e-var (n a b abk) (c-lifted-index n e)) (else y -1))))
 
 ;; Lifted procedure `k`, from `c-lifts`.
-(define c-lift-of (subr (maxeff (read @globals) (read @k)) (int) c-lift)
+(define c-lift-of (->* (int) c-lift)
   (lambda (k)
     (table-ref (get c-lifts) k (the c-lift (product (1 (wcell-nil)) (2 (the syms nil)))))))
 
 ;; A lifted procedure's added names.
-(define c-lift-added (subr (maxeff (read @globals) (read @k)) (int) syms)
+(define c-lift-added (->* (int) syms)
   (lambda (k) (extract (c-lift-of k) 2)))
 
 ;; The lifted procedures `e` binds, as it binds them: known everywhere
 ;; inside a lambda, being constants.
-(define c-lifted-entries (subr c-walks (cenv) cenv)
+(define c-lifted-entries (->* (cenv) cenv)
   (lambda (e)
     (cond ((null? e) nil)
           ((c-lifted? (cdr (car e))) (the cenv (cons (car e) (c-lifted-entries (cdr e)))))
@@ -74,14 +74,14 @@
 ;; Whether the register code being made is a planned lambda's, of the form
 ;; being compiled (step 3): its call sites are the plan's.
 (define c-r-in-plan (ref bool @k) (new #f))
-(define c-planned-in (subr c-walks (c-planneds syms) c-planneds)
+(define c-planned-in (->* (c-planneds syms) c-planneds)
   (lambda (ps names)
     (cond ((null? ps) nil)
           ((k-syms=? (extract (car ps) 1) names) (the c-planneds (cons (car ps) nil)))
           (else (c-planned-in (cdr ps) names)))))
 ;; What the lambda of `ps` and `body` captures, as planned, in a list; none
 ;; where it was not planned, or in register code.
-(define c-planned-fv (subr c-walks (c-params exp) (listof syms @k))
+(define c-planned-fv (->* (c-params exp) (listof syms @k))
   (lambda (ps body)
     (if (or (not (get c-planning)) (> (get c-twin-depth) 0))
         nil
@@ -93,7 +93,7 @@
 ;; Whether the `letrec` at `a`-`b` is lifted, as planned, in a list: of what
 ;; `c-lift-plan` would give; none where it was not planned, or in register
 ;; code.
-(define c-planned-lift (subr c-walks (int int int) (listof (listof c-added @k) @k))
+(define c-planned-lift (->* (int int int) (listof (listof c-added @k) @k))
   (lambda (a b abk)
     (let ((key (c-span-key a b abk)))
       (if (or (not (get c-planning)) (> (get c-twin-depth) 0)
@@ -103,7 +103,7 @@
                (cons (table-ref (get c-plan-lifts) key (the (listof c-added @k) nil)) nil))))))
 
 ;; Each of `ns`' values pushed, from where `e` has it.
-(define c-load-names (subr (maxeff compiles spin) (syms cenv code) unit)
+(define c-load-names (->* (syms cenv code) unit)
   (lambda (ns e c)
     (if (null? ns)
         #u
@@ -113,18 +113,18 @@
                      (c-load c (car l)))
                  (c-load-names (cdr ns) e c))))))
 
-(define c-snoc (subr c-walks (syms symbol) syms)
+(define c-snoc (->* (syms symbol) syms)
   (lambda (xs n) (if (null? xs) (cons n nil) (cons (car xs) (c-snoc (cdr xs) n)))))
 
 ;; `acc` with each of `ns` in neither it nor `params` after it, in order.
-(define c-append-new (subr c-walks (syms syms syms) syms)
+(define c-append-new (->* (syms syms syms) syms)
   (lambda (ns acc params)
     (cond ((null? ns) acc)
           ((or (c-member? acc (car ns)) (c-member? params (car ns)))
            (c-append-new (cdr ns) acc params))
           (else (c-append-new (cdr ns) (c-snoc acc (car ns)) params)))))
 
-(define c-lifted-names-onto (subr c-walks (syms syms syms cenv) syms)
+(define c-lifted-names-onto (->* (syms syms syms cenv) syms)
   (lambda (xs acc params e)
     (if (null? xs)
         acc
@@ -134,17 +134,17 @@
 
 ;; `free` with, for each lifted procedure in it, the names its calls pass
 ;; (not `params`) after: code that calls one needs them too.
-(define c-with-lifted-names (subr c-walks (syms syms cenv) syms)
+(define c-with-lifted-names (->* (syms syms cenv) syms)
   (lambda (free params e) (c-lifted-names-onto free free params e)))
 
 ;; Whether every binding of `bs`, from the `i`th, is a join point.
-(define c-all-join? (subr c-walks (c-recs exp int) bool)
+(define c-all-join? (->* (c-recs exp int) bool)
   (lambda (bs body i)
     (or (>= i (c-count-letrec bs)) (and (c-join-ok? bs body i) (c-all-join? bs body (+ i 1))))))
 
 ;; Whether each member of `bs` is a plain lambda, only ever called, with
 ;; its arity, in `body` and in every binding of `all`.
-(define c-liftable? (subr c-walks (c-recs c-recs exp) bool)
+(define c-liftable? (->* (c-recs c-recs exp) bool)
   (lambda (all bs body)
     (or (null? bs)
         (let ((lam (c-lambda-of (extract (car bs) 3))))
@@ -160,7 +160,7 @@
 ;; The locals of `free` (not `names`, the siblings) a member would capture,
 ;; onto `acc`, in a list of one; none if one is a sibling not made yet or a
 ;; loop, which cannot be passed.
-(define c-lift-locals (subr c-walks (syms syms cenv syms) (listof syms @k))
+(define c-lift-locals (->* (syms syms cenv syms) (listof syms @k))
   (lambda (free names e acc)
     (cond ((null? free) (the (listof syms @k) (cons acc nil)))
           ((c-member? names (car free)) (c-lift-locals (cdr free) names e acc))
@@ -177,7 +177,7 @@
 
 ;; The indices of the bindings of `bs`, from the `k`th, whose names are in
 ;; `free`: the siblings a member calls.
-(define c-sibling-indices (subr c-walks (syms c-recs int) (listof int @k))
+(define c-sibling-indices (->* (syms c-recs int) (listof int @k))
   (lambda (free bs k)
     (cond ((null? bs) nil)
           ((c-member? free (extract (car bs) 1)) (cons k (c-sibling-indices free (cdr bs) (+ k 1))))
@@ -186,7 +186,7 @@
 ;; Each member's locals into `added`, the siblings it calls into `calls`,
 ;; from the `i`th of `bs`; whether every member's could be.
 (define c-lift-direct
-  (subr (maxeff c-emits spin) (c-recs c-recs int syms cenv c-added c-calls) bool)
+  (->* (c-recs c-recs int syms cenv c-added c-calls) bool)
   (lambda (all bs i names e added calls)
     (or (null? bs)
         (tagcase (car (c-lambda-of (extract (car bs) 3)))
@@ -200,12 +200,12 @@
                           (c-lift-direct all (cdr bs) (+ i 1) names e added calls)))))
           (else y #f)))))
 
-(define c-union-into (subr c-walks (syms syms) syms)
+(define c-union-into (->* (syms syms) syms)
   (lambda (xs ys) (if (null? ys) xs (c-union-into (c-adjoin xs (car ys)) (cdr ys)))))
 
 ;; Member `i` takes what the siblings `js` it calls take too; whether it
 ;; took more than it had (`more`).
-(define c-lift-from (subr (maxeff c-emits spin) (c-added int (listof int @k) bool) bool)
+(define c-lift-from (->* (c-added int (listof int @k) bool) bool)
   (lambda (added i js more)
     (if (null? js)
         more
@@ -215,7 +215,7 @@
           (begin (array-set! added i now)
                  (c-lift-from added i (cdr js) (or more grew)))))))
 
-(define c-lift-round (subr (maxeff c-emits spin) (c-added c-calls int int bool) bool)
+(define c-lift-round (->* (c-added c-calls int int bool) bool)
   (lambda (added calls i n more)
     (if (>= i n)
         more
@@ -224,27 +224,27 @@
 ;; Twobit's flow equations (`compute-added-arguments`), to their fixed
 ;; point: each member takes its locals, and what each sibling it calls
 ;; takes.
-(define c-lift-flow (subr (maxeff c-emits spin) (c-added c-calls int) unit)
+(define c-lift-flow (->* (c-added c-calls int) unit)
   (lambda (added calls n) (if (c-lift-round added calls 0 n #f) (c-lift-flow added calls n) #u)))
 
 ;; Where `n` is bound in `e`, counting from the innermost.
-(define c-env-pos (subr (maxeff (read @globals) (read @k) spin) (cenv symbol int) int)
+(define c-env-pos (->* (cenv symbol int) int)
   (lambda (e n k)
     (cond ((null? e) k)
           ((symbol=? (car (car e)) n) k)
           (else (c-env-pos (cdr e) n (+ k 1))))))
 
-(define c-insert-outer (subr c-walks (symbol syms cenv) syms)
+(define c-insert-outer (->* (symbol syms cenv) syms)
   (lambda (x ys e)
     (cond ((null? ys) (cons x nil))
           ((> (c-env-pos e x 0) (c-env-pos e (car ys) 0)) (cons x ys))
           (else (cons (car ys) (c-insert-outer x (cdr ys) e))))))
 
 ;; `xs`, outermost binding first.
-(define c-sort-outer (subr c-walks (syms cenv) syms)
+(define c-sort-outer (->* (syms cenv) syms)
   (lambda (xs e) (if (null? xs) nil (c-insert-outer (car xs) (c-sort-outer (cdr xs) e) e))))
 
-(define c-lift-sort (subr (maxeff c-emits spin) (c-added cenv int int) unit)
+(define c-lift-sort (->* (c-added cenv int int) unit)
   (lambda (added e i n)
     (if (>= i n)
         #u
@@ -253,7 +253,7 @@
 
 ;; Whether each member, from the `i`th of `bs`, takes fewer than 6 names
 ;; more, and no more than `register-regs` arguments in all.
-(define c-lift-fits? (subr c-walks (c-recs c-added int) bool)
+(define c-lift-fits? (->* (c-recs c-added int) bool)
   (lambda (bs added i)
     (or (null? bs)
         (tagcase (car (c-lambda-of (extract (car bs) 3)))
@@ -274,8 +274,7 @@
 ;; capture, and those of each sibling it calls (Twobit's flow equations);
 ;; outermost first.
 (define c-lift-plan
-  (subr (maxeff c-emits spin)
-        (c-recs exp cenv bool) (listof c-added @k))
+  (->* (c-recs exp cenv bool) (listof c-added @k))
   (lambda (bs body e tail)
     (if (or (and tail (c-all-join? bs body 0)) (not (c-liftable? bs bs body)))
         nil
@@ -290,14 +289,14 @@
                 (if (c-lift-fits? bs added 0) (the (listof c-added @k) (cons added nil)) nil)))))))
 
 ;; `bs`' names bound to the lifted procedures `ks`, onto `e`.
-(define c-bind-lifted (subr c-walks (c-recs (listof int @k) cenv) cenv)
+(define c-bind-lifted (->* (c-recs (listof int @k) cenv) cenv)
   (lambda (bs ks e)
     (if (null? bs)
         e
         (c-bind-lifted (cdr bs) (cdr ks) (c-extend (extract (car bs) 1) (at-lifted (car ks)) e)))))
 
 ;; The names `added` as parameters (with no type), then `ps`.
-(define c-added-params (subr c-walks (syms c-params) c-params)
+(define c-added-params (->* (syms c-params) c-params)
   (lambda (added ps)
     (if (null? added)
         ps
@@ -305,7 +304,7 @@
 
 ;; A closure over nothing for each member, from the `i`th, its word to
 ;; come, in `c-lifts` with what it takes: their indices.
-(define c-lift-closures (subr (maxeff c-emits spin) (c-recs c-added int) (listof int @k))
+(define c-lift-closures (->* (c-recs c-added int) (listof int @k))
   (lambda (bs added i)
     (if (null? bs)
         nil
@@ -316,7 +315,7 @@
             (set c-lift-count (+ k 1))
             (cons k (c-lift-closures (cdr bs) added (+ i 1))))))))
 
-(define c-param-env (subr (maxeff (read @globals) (alloc @k)) (c-params int cenv) cenv)
+(define c-param-env (->* (c-params int cenv) cenv)
   (lambda (ps i acc)
     (if (null? ps)
         acc
@@ -326,12 +325,12 @@
 ;; closure captures: a loop, which is not a value; or a global or a lifted
 ;; procedure, a constant (a definition's own global, in its body's names,
 ;; is still a global).
-(define c-not-captured? (subr (maxeff (read @globals) (read @k)) (c-found) bool)
+(define c-not-captured? (->* (c-found) bool)
   (lambda (l) (or (null? l) (c-loop? (car l)) (c-global? (car l)) (c-lifted? (car l)))))
 
 ;; The free names that are locals here, not globals or standard names, nor
 ;; a loop, which is not a value.
-(define c-captured (subr c-walks (syms cenv) syms)
+(define c-captured (->* (syms cenv) syms)
   (lambda (xs e)
     (cond ((null? xs) nil)
           ((c-not-captured? (c-find e (car xs))) (c-captured (cdr xs) e))
@@ -340,13 +339,13 @@
 ;; The names a lambda of `ps` and `body` captures in `e`, as the Rust
 ;; compiler's `captured` finds them: its free locals, and the names the
 ;; lifted procedures it calls take.
-(define c-lambda-captured (subr c-walks (c-params exp cenv) syms)
+(define c-lambda-captured (->* (c-params exp cenv) syms)
   (lambda (ps body e)
     (let ((params (c-bind-params ps nil)))
       (c-captured (c-with-lifted-names (c-free body params nil) params e) e))))
 
 ;; Free value `i` for each captured name, boxed if it was boxed outside.
-(define c-inner-env (subr c-walks (syms cenv cenv int) cenv)
+(define c-inner-env (->* (syms cenv cenv int) cenv)
   (lambda (xs outer acc i)
     (if (null? xs)
         acc
@@ -355,7 +354,7 @@
 ;;; -------------------------------------------------- standard operations
 
 ;; How many arguments a standard operation takes, or -1 if it is not one.
-(define c-arity (subr (read (globals standard-primitive std-eq-name?)) (string) int)
+(define c-arity (->* (string) int)
   (lambda (n)
     (case n
       (("make-continuation-prompt-tag" "make-escape-tag" "make-continuation-mark-key")
@@ -378,15 +377,15 @@
                     (runtime-primitive-arity p)))))))))
 
 ;; The boolean on top negated.
-(define c-not (subr c-emits (code) unit)
+(define c-not (->* (code) unit)
   (lambda (c) (begin (c-lit c (wcell-bool #f)) (c-op c routine-eq))))
 
 ;; The index on top made the field it is in an array, whose elements are
 ;; its fields from 2 on.
-(define c-array-index (subr c-emits (code) unit)
+(define c-array-index (->* (code) unit)
   (lambda (c) (begin (c-int c 2) (c-op c routine-int-add))))
 
-(define c-standard-on (subr compiles (string int code) unit)
+(define c-standard-on (->* (string int code) unit)
   (lambda (name n c)
     (case name
       (("+") (c-op c routine-int-add))
@@ -443,24 +442,24 @@
 ;; The standard `vsubr`s, `list`, `append` and `string-append`, each with
 ;; the operation of one list that its value applies; "" for the rest (the
 ;; Rust compiler's `vsubr_list_op`).
-(define c-vsubr-list-op (subr pure (string) string)
+(define c-vsubr-list-op (->* (string) string)
   (lambda (n)
     (cond ((string=? n "list") "datum-list")
           ((string=? n "append") "%append-list")
           ((string=? n "string-append") "%string-append-list")
           (else ""))))
-(define* c-vsubr? (subr pure (string) bool)
+(define c-vsubr? (->* (string) bool)
   (lambda (n) (not (string=? (c-vsubr-list-op n) ""))))
 ;; Whether a standard name has a value: an operation of an arity, or a
 ;; `vsubr` (`c-vsubr-list-op`).
-(define* c-has-standard-value? (subr pure (string) bool)
+(define c-has-standard-value? (->* (string) bool)
   (lambda (n) (or (c-vsubr? n) (>= (c-arity n) 0))))
 
 (define c-standard-twins (ref (listof c-standard-twin @k) @k) (new nil))
 ;; Word `w`, with register code as standard operation `op` of `n` arguments
 ;; has it as a value, for the native compiler to start from: made with its
 ;; form's other twins.
-(define c-register-twin (subr (maxeff compiles spin) (tword string int) tword)
+(define c-register-twin (->* (tword string int) tword)
   (lambda (w op n)
     (begin
       (if (get c-registers)
@@ -470,7 +469,7 @@
 
 ;; `body` assembled as the word `name`, with register code as standard
 ;; operation `op` of `n` arguments has it, to be.
-(define c-standard-assembled (subr (maxeff compiles spin) (code string string int) tword)
+(define c-standard-assembled (->* (code string string int) tword)
   (lambda (body name op n) (c-register-twin (c-assemble body (string->symbol name)) op n)))
 ;; A standard operation's word as a value: a procedure of its arity that
 ;; applies it to its parameters. A `vsubr`'s is of one list, its
@@ -478,7 +477,7 @@
 ;; that operation's. `list`'s copies it, as `datum-list` does: a copy, not
 ;; the list itself, as `apply` gives a list at `acyclic` as it is (F11),
 ;; and `list` may give it at any region, one that can be written.
-(define c-standard-word-made (subr (maxeff compiles spin) (string) tword)
+(define c-standard-word-made (->* (string) tword)
   (lambda (name)
     (let ((n (c-arity name)) (body (the code (new nil))))
       (cond ((c-vsubr? name)
@@ -503,7 +502,7 @@
                (c-standard-assembled body name name n)))))))
 ;; The word of standard operation `name` as a value, made already, in a
 ;; list; none if it is not.
-(define c-standard-word-of (subr c-walks (string) (listof tword @k))
+(define c-standard-word-of (->* (string) (listof tword @k))
   (lambda (name)
     (letrec ((find (subr c-walks ((listof c-standard-word @k)) (listof tword @k))
                (lambda (ws)
@@ -513,7 +512,7 @@
                        (else (find (cdr ws)))))))
       (find (get c-standard-words)))))
 ;; The same, made unless it is made already.
-(define c-standard-word (subr (maxeff compiles spin) (string) tword)
+(define c-standard-word (->* (string) tword)
   (lambda (name)
     (let ((found (c-standard-word-of name)))
       (if (null? found)
@@ -524,17 +523,17 @@
 ;; A standard operation as a value: a closure of its word (`c-standard-word`),
 ;; over no values, in the program's convention; a `vsubr`'s given to
 ;; `%fx26-vlambda`.
-(define c-standard-value (subr (maxeff compiles spin) (string code) unit)
+(define c-standard-value (->* (string code) unit)
   (lambda (name c)
     (let ((w (c-standard-word name)))
       (begin (c-op1 c (c-closure-routine) (wcell-word w)) (c-emit c (i-cell (wcell-int 0)))
              (if (c-vsubr? name) (c-prim c "%fx26-vlambda" 1) #u)))))
 
-(define c-count-names (subr (read @globals) (names) int)
+(define c-count-names (->* (names) int)
   (lambda (ns) (if (null? ns) 0 (+ 1 (c-count-names (cdr ns))))))
 
 ;; A product's members, from the slot after the sum's, each a slot.
-(define c-members (subr compiles (names cenv int int int code) cenv)
+(define c-members (->* (names cenv int int int code) cenv)
   (lambda (ns e sum-slot slot j c)
     (if (null? ns)
         e
@@ -545,7 +544,7 @@
 ;; Kinds of runtime primitive, for register code (`r-never-collects?`).
 ;; Whether runtime primitive `name` is one of the fixed-width integers', `f64`'s or `f32`'s
 ;; operations (`%fx26-u32*`, `%fx26-int->i64`, `%fx26-f64+`).
-(define r-fixed-width-op? (subr pure (string) bool)
+(define r-fixed-width-op? (->* (string) bool)
   (lambda (name)
     (let ((starts (lambda ((s string)) (= (string-search name s 0) 0))))
       (or (or (or (starts "%fx26-i8") (starts "%fx26-u8"))
@@ -553,7 +552,7 @@
           (or (or (starts "%fx26-i64") (starts "%fx26-u64"))
               (or (or (starts "%fx26-f64") (starts "%fx26-f32")) (starts "%fx26-int->")))))))
 ;; Whether `name` is an eqtable's operation of one or two arguments.
-(define r-eqtable-quick? (subr pure (string) bool)
+(define r-eqtable-quick? (->* (string) bool)
   (lambda (name)
     (or (string=? name "%fx26-eqtable-has?")
         (or (string=? name "%fx26-eqtable-count") (string=? name "%fx26-eqtable-delete!"))))))))

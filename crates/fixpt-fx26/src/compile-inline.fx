@@ -29,19 +29,19 @@
 
 ;; Two arities found: the same one, or -2 if they differ or either failed;
 ;; -1 is none found yet.
-(define c-arity-merge (subr pure (int int) int)
+(define c-arity-merge (->* (int int) int)
   (lambda (a b) (cond ((or (= a -2) (= b -2)) -2) ((= a -1) b) ((= b -1) a) ((= a b) a) (else -2))))
 
 ;; Whether `ns` has `n`.
-(define c-names-have? (subr (read @globals) (names symbol) bool)
+(define c-names-have? (->* (names symbol) bool)
   (lambda (ns n) (and (not (null? ns)) (or (symbol=? (car ns) n) (c-names-have? (cdr ns) n)))))
 
 ;; Whether `x` is `p` or `f`.
-(define c-either? (subr (read @globals) (symbol symbol symbol) bool)
+(define c-either? (->* (symbol symbol symbol) bool)
   (lambda (x p f) (or (symbol=? x p) (symbol=? x f))))
 
 ;; Whether `x` is the variable `p`.
-(define c-var-is? (subr (read @globals) (exp symbol) bool)
+(define c-var-is? (->* (exp symbol) bool)
   (lambda (x p) (tagcase x (e-var (q qa qb qaqbk) (symbol=? q p)) (else y #f))))
 
 ;; Whether `p` is, in `x`, only called, or passed as itself as argument `k`
@@ -49,7 +49,7 @@
 ;; compiler's `call_only` says: the arity it is called with (every call the
 ;; same), -1 if it is not called, or -2 if not so.
 (define-rec
-  (c-call-only (subr (maxeff (read @globals) spin) (exp symbol symbol int int) int)
+  (c-call-only (->* (exp symbol symbol int int) int)
     (lambda (x p f k n)
       (tagcase x
         (e-var (m a b abk) (if (symbol=? m p) -2 -1))
@@ -85,39 +85,39 @@
         (e-module (items a b abk) -2)
         (e-with (m body a b abk) -2)
         (else y -1))))
-  (c-call-only-all (subr (maxeff (read @globals) spin) (exps symbol symbol int int) int)
+  (c-call-only-all (->* (exps symbol symbol int int) int)
     (lambda (es p f k n)
       (if (null? es)
           -1
           (c-arity-merge (c-call-only (car es) p f k n) (c-call-only-all (cdr es) p f k n)))))
   ;; Every argument but the `k`th; `i` counts.
-  (c-call-only-but (subr (maxeff (read @globals) spin) (exps symbol symbol int int int) int)
+  (c-call-only-but (->* (exps symbol symbol int int int) int)
     (lambda (es p f k n i)
       (cond ((null? es) -1)
             ((= i k) (c-call-only-but (cdr es) p f k n (+ i 1)))
             (else (c-arity-merge (c-call-only (car es) p f k n)
                                  (c-call-only-but (cdr es) p f k n (+ i 1)))))))
-  (c-call-only-let (subr (maxeff (read @globals) spin) (c-binds symbol symbol int int) int)
+  (c-call-only-let (->* (c-binds symbol symbol int int) int)
     (lambda (bs p f k n)
       (cond ((null? bs) -1)
             ((c-either? (extract (car bs) 1) p f) -2)
             (else (c-arity-merge (c-call-only (extract (car bs) 2) p f k n)
                                  (c-call-only-let (cdr bs) p f k n))))))
-  (c-call-only-fields (subr (maxeff (read @globals) spin) (c-binds symbol symbol int int) int)
+  (c-call-only-fields (->* (c-binds symbol symbol int int) int)
     (lambda (fs p f k n)
       (if (null? fs)
           -1
           (c-arity-merge (c-call-only (extract (car fs) 2) p f k n)
                          (c-call-only-fields (cdr fs) p f k n)))))
   (c-call-only-arms
-    (subr (maxeff (read @globals) spin) (c-cases symbol symbol int int) int)
+    (->* (c-cases symbol symbol int int) int)
     (lambda (arms p f k n)
       (cond ((null? arms) -1)
             ((or (c-names-have? (extract (car arms) 3) p) (c-names-have? (extract (car arms) 3) f))
              -2)
             (else (c-arity-merge (c-call-only (extract (car arms) 4) p f k n)
                                  (c-call-only-arms (cdr arms) p f k n))))))
-  (c-call-only-else (subr (maxeff (read @globals) spin) (c-binds symbol symbol int int) int)
+  (c-call-only-else (->* (c-binds symbol symbol int int) int)
     (lambda (els p f k n)
       (cond ((null? els) -1)
             ((c-either? (extract (car els) 1) p f) -2)
@@ -126,8 +126,7 @@
 ;; The first parameter from the `k`th of `ps` that `body` only calls, as
 ;; `c-call-only` says, and its arity; none if none is.
 (define c-first-call-only
-  (subr (maxeff (read @globals) (alloc @k) spin) (c-params exp symbol int int)
-        (listof (pairof int int @k) @k))
+  (->* (c-params exp symbol int int) (listof (pairof int int @k) @k))
   (lambda (ps body f k n)
     (if (null? ps)
         nil
@@ -141,7 +140,7 @@
 ;; checker gives its compilers (`Arena::replace`, `TODO.md` §46). Only the
 ;; forms of a program that has such a fact are walked.
 (define-rec
-  (c-plain-fx (subr c-walks (exp) exp)
+  (c-plain-fx (->* (exp) exp)
     (lambda (x)
       (tagcase x
         (e-with (m body a b abk)
@@ -170,17 +169,17 @@
         (e-tagcase (s arms els got a b abk)
           (e-tagcase (c-plain-fx s) (c-plain-arms arms) (c-plain-named els) got a b abk))
         (else y x))))
-  (c-plain-all (subr c-walks (exps) exps)
+  (c-plain-all (->* (exps) exps)
     (lambda (es)
       (if (null? es) es (the exps (cons (c-plain-fx (car es)) (c-plain-all (cdr es)))))))
-  (c-plain-named (subr c-walks (c-binds) c-binds)
+  (c-plain-named (->* (c-binds) c-binds)
     (lambda (bs)
       (if (null? bs)
           bs
           (let ((x (c-plain-fx (extract (car bs) 2))))
             (the c-binds
               (cons (product (1 (extract (car bs) 1)) (2 x)) (c-plain-named (cdr bs))))))))
-  (c-plain-recs (subr c-walks (c-recs) c-recs)
+  (c-plain-recs (->* (c-recs) c-recs)
     (lambda (bs)
       (if (null? bs)
           bs
@@ -188,7 +187,7 @@
             (the c-recs
               (cons (product (1 (extract b 1)) (2 (extract b 2)) (3 (c-plain-fx (extract b 3))))
                     (c-plain-recs (cdr bs))))))))
-  (c-plain-items (subr c-walks (mod-items) mod-items)
+  (c-plain-items (->* (mod-items) mod-items)
     (lambda (items)
       (if (null? items)
           items
@@ -197,7 +196,7 @@
               (cons (product (1 (extract it 1)) (2 (extract it 2)) (3 (extract it 3))
                              (4 (c-plain-all (extract it 4))))
                     (c-plain-items (cdr items))))))))
-  (c-plain-arms (subr c-walks (c-cases) c-cases)
+  (c-plain-arms (->* (c-cases) c-cases)
     (lambda (arms)
       (if (null? arms)
           arms
@@ -208,7 +207,7 @@
                     (c-plain-arms (cdr arms)))))))))
 
 ;; A top-level form, as `c-plain-fx` makes its expressions.
-(define c-plain-top (subr c-walks (top) top)
+(define c-plain-top (->* (top) top)
   (lambda (t)
     (if (= (table-count (get c-plain-table)) 0)
         t
@@ -225,7 +224,7 @@
 ;; be inlined or specialized in a later form, whose facts, keyed by its own
 ;; form's expressions, are gone by then.
 (define-rec
-  (c-resolve-extracts (subr c-walks (exp) exp)
+  (c-resolve-extracts (->* (exp) exp)
     (lambda (x)
       (tagcase x
         (e-lambda (ps body a b abk) (e-lambda ps (c-resolve-extracts body) a b abk))
@@ -261,17 +260,17 @@
           (e-tagcase (c-resolve-extracts s) (c-resolve-arms arms) (c-resolve-named els)
                      (c-datum-of got a b abk) a b abk))
         (else y x))))
-  (c-resolve-all (subr c-walks (exps) exps)
+  (c-resolve-all (->* (exps) exps)
     (lambda (es)
       (if (null? es) es (the exps (cons (c-resolve-extracts (car es)) (c-resolve-all (cdr es)))))))
-  (c-resolve-named (subr c-walks (c-binds) c-binds)
+  (c-resolve-named (->* (c-binds) c-binds)
     (lambda (bs)
       (if (null? bs)
           bs
           (let ((x (c-resolve-extracts (extract (car bs) 2))))
             (the c-binds
               (cons (product (1 (extract (car bs) 1)) (2 x)) (c-resolve-named (cdr bs))))))))
-  (c-resolve-letrec (subr c-walks (c-recs) c-recs)
+  (c-resolve-letrec (->* (c-recs) c-recs)
     (lambda (bs)
       (if (null? bs)
           bs
@@ -279,7 +278,7 @@
             (the c-recs
               (cons (product (1 (extract (car bs) 1)) (2 (extract (car bs) 2)) (3 x))
                     (c-resolve-letrec (cdr bs))))))))
-  (c-resolve-arms (subr c-walks (c-cases) c-cases)
+  (c-resolve-arms (->* (c-cases) c-cases)
     (lambda (arms)
       (if (null? arms)
           arms
@@ -290,12 +289,12 @@
 
 ;; `n`'s definition, of `ps` and `body`, the word compiled last: to be
 ;; inlined, as it sees the globals seen now.
-(define c-inline-of (subr c-builds (symbol c-params exp) c-inline)
+(define c-inline-of (->* (symbol c-params exp) c-inline)
   (lambda (n ps body) (product (1 n) (2 (car (get c-last-word))) (3 ps) (4 body) (5 (c-genv-now)))))
 
 ;; The same, to be specialized: `found` is the place of the parameter it
 ;; only calls, and its arity.
-(define c-special-of (subr c-builds (symbol c-params exp (pairof int int @k)) c-special)
+(define c-special-of (->* (symbol c-params exp (pairof int int @k)) c-special)
   (lambda (n ps body found)
     (product (1 n) (2 (car (get c-last-word))) (3 ps) (4 body) (5 (c-genv-now))
              (6 (car found)) (7 (cdr found)))))
@@ -305,7 +304,7 @@
 ;; only calls, specialized where it is called with a lambda there. Neither
 ;; if it calls `stay-cellular`.
 (define c-record-inline
-  (subr (maxeff c-emits spin) (symbol c-params exp) unit)
+  (->* (symbol c-params exp) unit)
   (lambda (n ps unresolved)
     (let ((body (c-resolve-extracts unresolved)))
       (cond ((null? (get c-last-word)) #u)
@@ -324,7 +323,7 @@
       (c-note-unroll! n ps body))))
 ;; Small and calling itself: unrolled where called with a constant list, as
 ;; the Rust compiler's `unrolls` (`TODO.md` §44).
-(define c-note-unroll! (subr (maxeff c-emits spin) (symbol c-params exp) unit)
+(define c-note-unroll! (->* (symbol c-params exp) unit)
   (lambda (n ps body)
     (if (and (not (null? (get c-last-word)))
              (and (c-mentions? body n)
@@ -341,7 +340,7 @@
 ;; native convention), right after compiling `(lambda () init)`: if `init`
 ;; is a lambda, `n`'s definition as `c-tops` would note it, to be inlined
 ;; where it is called. Its word is the one compiled before the thunk's.
-(define compile-note-inline! (subr (maxeff c-emits spin) (symbol) unit)
+(define compile-note-inline! (->* (symbol) unit)
   (lambda (n)
     (let ((x (get c-last-exp)) (w (get c-prev-word)))
       (if (null? x)

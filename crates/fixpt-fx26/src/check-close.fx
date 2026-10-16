@@ -40,7 +40,7 @@
 ;; closed: its value
 ;; may not mention `r`, and no continuation captured in it may outlive it;
 ;; what it does to `r` is masked, as nothing outside can name `r`.
-(define k-close-region (subr (maxeff checks spin) (kx string int int k-eff int int) k-te)
+(define k-close-region (->* (kx string int int k-eff int int) k-te)
   (lambda (x form r t e a b)
     (let ((name (k-cat3 form " " (symbol->string (k-dvar-name r)))))
       (if (k-has-region-in? (k-regions-in t) (r-var r))
@@ -56,11 +56,11 @@
                 (k-te t masked)))))))
 
 ;; Whether atom `a` writes region `r`: a write, or an I-cell's fill.
-(define k-atom-writes? (subr (maxeff kreads spin) (k-atom k-region) bool)
+(define k-atom-writes? (->* (k-atom k-region) bool)
   (lambda (a r)
     (tagcase a (a-write (x) (k-region=? x r)) (a-init (x) (k-region=? x r)) (else y #f))))
 ;; Whether an effect writes region `r`.
-(define k-eff-writes? (subr (maxeff kreads spin) (k-eff k-region) bool)
+(define k-eff-writes? (->* (k-eff k-region) bool)
   (lambda (e r)
     (and (not (null? e))
          (or (k-atom-writes? (car e) r)
@@ -71,7 +71,7 @@
 ;; given the region.
 (define k-wrote-param (ref bool @t) (new #f))
 (define k-given (ref bool @t) (new #f))
-(define k-eff-writes-param? (subr kreads (k-eff) bool)
+(define k-eff-writes-param? (->* (k-eff) bool)
   (lambda (e)
     (and (not (null? e))
          (or (tagcase (car e)
@@ -80,14 +80,14 @@
                (a-var (v) (k-gen-param? v))
                (else y #f))
              (k-eff-writes-param? (cdr e))))))
-(define k-eff-writes-noting? (subr (maxeff kstate spin) (k-eff k-region) bool)
+(define k-eff-writes-noting? (->* (k-eff k-region) bool)
   (lambda (e r)
     (begin
       (if (k-eff-writes-param? e) (set k-wrote-param #t) #u)
       (k-eff-writes? e r))))
 ;; Whether description `d` writes `r`: is it, writes it, or is a function
 ;; whose body does.
-(define k-d-writes? (subr (maxeff kreads spin) (k-desc k-region) bool)
+(define k-d-writes? (->* (k-desc k-region) bool)
   (lambda (d r)
     (tagcase d
       (dr (x) (k-region=? x r))
@@ -95,14 +95,14 @@
       (df (f) (tagcase (k-get f) (ty-lam (bs body) (k-d-writes? body r)) (else y #f)))
       (else y #f))))
 ;; Whether any of `ds` writes `r`.
-(define k-ds-write? (subr (maxeff kreads spin) (k-descs k-region) bool)
+(define k-ds-write? (->* (k-descs k-region) bool)
   (lambda (ds r) (and (not (null? ds)) (or (k-d-writes? (car ds) r) (k-ds-write? (cdr ds) r)))))
-(define k-note-given (subr (maxeff kstate spin) (k-descs k-region) unit)
+(define k-note-given (->* (k-descs k-region) unit)
   (lambda (ds r) (if (k-ds-write? ds r) (set k-given #t) #u)))
 ;; Whether a latent effect anywhere in `t` writes `r`: what a `letfreeze`'s
 ;; value may not do to its region.
 (define-rec
-  (k-writes-in (subr (maxeff kstate spin) (int k-region int) bool)
+  (k-writes-in (->* (int k-region int) bool)
     (lambda (t r seen)
       (let ((t (k-resolve t)))
         (if (k-visit? t seen)
@@ -135,32 +135,32 @@
                 (begin (if (k-ds-write? ds r) (begin (set k-given #t) (set k-wrote-param #t)) #u)
                        (k-writes-list (k-ds-types ds) r seen)))
               (else x #f))))))
-  (k-writes-list (subr (maxeff kstate spin) (k-ids k-region int) bool)
+  (k-writes-list (->* (k-ids k-region int) bool)
     (lambda (ts r seen)
       (and (not (null? ts)) (or (k-writes-in (car ts) r seen) (k-writes-list (cdr ts) r seen)))))
-  (k-writes-parts (subr (maxeff kstate spin) (k-parts k-region int) bool)
+  (k-writes-parts (->* (k-parts k-region int) bool)
     (lambda (ps r seen)
       (and (not (null? ps))
            (or (k-writes-in (extract (car ps) 2) r seen) (k-writes-parts (cdr ps) r seen))))))
 
-(define k-any-frozen? (subr kreads (k-eff) bool)
+(define k-any-frozen? (->* (k-eff) bool)
   (lambda (e) (and (not (null? e)) (or (k-frozen-atom? (car e)) (k-any-frozen? (cdr e))))))
 ;; Whether an atom of rank `k` writes: a write, or an I-cell's fill.
-(define k-writing-rank? (subr pure (int) bool) (lambda (k) (or (= k 1) (= k 6))))
-(define k-writes-frozen? (subr kreads (k-eff) bool)
+(define k-writing-rank? (->* (int) bool) (lambda (k) (or (= k 1) (= k 6))))
+(define k-writes-frozen? (->* (k-eff) bool)
   (lambda (e)
     (and (not (null? e))
          (or (and (k-frozen-atom? (car e)) (k-writing-rank? (k-atom-rank (car e))))
              (k-writes-frozen? (cdr e))))))
 ;; Whether an atom reads, allocates or awaits data frozen in the heap,
 ;; which never ends: that is pure.
-(define k-pure-on-const? (subr (read @globals) (k-atom) bool)
+(define k-pure-on-const? (->* (k-atom) bool)
   (lambda (a)
     (and (k-frozen-atom? a)
          (let ((k (k-atom-rank a))) (or (= k 0) (or (= k 2) (= k 5))))
          (tagcase (k-atom-region a) (r-frozen (p f) (< p 0)) (else y #f)))))
 ;; `e` without its reads, allocations and awaits on `const`, which are pure.
-(define k-drop-frozen (subr kmakes (k-eff) k-eff)
+(define k-drop-frozen (->* (k-eff) k-eff)
   (lambda (e)
     (cond ((null? e) nil)
           ;; Only data frozen in the heap, which never ends; what is done to
@@ -168,13 +168,13 @@
           ((k-pure-on-const? (car e)) (k-drop-frozen (cdr e)))
           (else (cons (car e) (k-drop-frozen (cdr e)))))))
 ;; `x`'s effect `e`, noted.
-(define k-note-effect (subr kstate (kx k-eff) unit)
+(define k-note-effect (->* (kx k-eff) unit)
   (lambda (x e)
     (let ((fact (product (1 (k-at-of x)) (2 (n-summary (k-summary e))))))
       (set k-effect-notes (the k-facts (cons fact (get k-effect-notes)))))))
 ;; `e`, the effect of `x`, with what it does to frozen data taken out; or an
 ;; error, if it writes it.
-(define k-frozen (subr checks (kx k-eff) k-eff)
+(define k-frozen (->* (kx k-eff) k-eff)
   (lambda (x e)
     (cond ((not (k-any-frozen? e)) e)
           ((k-writes-frozen? e)
@@ -183,7 +183,7 @@
 
 ;; A `letfreeze r`'s value, of type `t`, as it leaves: `r` made `const`,
 ;; unless something in it could still write `r`.
-(define k-frozen-result (subr (maxeff checks spin) (int k-region bool int int int) int)
+(define k-frozen-result (->* (int k-region bool int int int) int)
   (lambda (r into written t a b)
     (if (begin (set k-wrote-param #f) (set k-given #f)
                (or (k-writes-in t (r-var r) (k-new-epoch)) (and (get k-wrote-param) (get k-given))))

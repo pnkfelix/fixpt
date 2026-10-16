@@ -59,79 +59,79 @@
 (define r-module-consts (ref (listof r-module-const @k) @k) (new nil))
 (define r-consts-now (ref r-const-list @k) (new nil))
 ;; Global `g`'s constant in `cs`, in a list; none if it has none.
-(define r-const-in (subr rbuilds (r-const-list wglobal) rconsts)
+(define r-const-in (->* (r-const-list wglobal) rconsts)
   (lambda (cs g)
     (cond ((null? cs) nil)
           ((wglobal=? (car (car cs)) g) (the rconsts (cons (cdr (car cs)) nil)))
           (else (r-const-in (cdr cs) g)))))
-(define r-module-consts-of (subr rbuilds ((listof r-module-const @k) wglobal) r-members-at)
+(define r-module-consts-of (->* ((listof r-module-const @k) wglobal) r-members-at)
   (lambda (ms g)
     (cond ((null? ms) nil)
           ((wglobal=? (car (car ms)) g) (the r-members-at (cons (cdr (car ms)) nil)))
           (else (r-module-consts-of (cdr ms) g)))))
 ;; Member `f`'s literal of `cs`, in a list; none if it is not one.
-(define r-member-in (subr rbuilds ((listof r-member-const @k) symbol) rconsts)
+(define r-member-in (->* ((listof r-member-const @k) symbol) rconsts)
   (lambda (cs f)
     (cond ((null? cs) nil)
           ((symbol=? (car (car cs)) f) (the rconsts (cons (cdr (car cs)) nil)))
           (else (r-member-in (cdr cs) f)))))
 ;; Member `f`'s literal of the module global `g` holds, in a list; none if
 ;; it has none.
-(define r-member-const (subr rbuilds (wglobal symbol) rconsts)
+(define r-member-const (->* (wglobal symbol) rconsts)
   (lambda (g f)
     (let ((cs (r-module-consts-of (get r-module-consts) g)))
       (if (null? cs) nil (r-member-in (car cs) f)))))
 
 ;; Whether the register code being made has been declined.
 (define r-declined (ref bool @k) (new #f))
-(define r-decline (subr (maxeff (read @globals) (write @k)) () unit)
+(define r-decline (->* () unit)
   (lambda () (set r-declined #t)))
 
-(define r-emit (subr (maxeff (read @k) (write @k) (alloc @k)) (rgen ritem) unit)
+(define r-emit (->* (rgen ritem) unit)
   (lambda (g i) (let ((items (extract g items))) (set items (cons i (get items))))))
-(define r-op0 (subr emits (rgen int) unit)
+(define r-op0 (->* (rgen int) unit)
   (lambda (g op) (r-emit g (r-cell (wcell-int op)))))
-(define r-op1 (subr emits (rgen int wcell) unit)
+(define r-op1 (->* (rgen int wcell) unit)
   (lambda (g op x) (begin (r-op0 g op) (r-emit g (r-cell x)))))
-(define r-op2 (subr emits (rgen int wcell wcell) unit)
+(define r-op2 (->* (rgen int wcell wcell) unit)
   (lambda (g op x y) (begin (r-op1 g op x) (r-emit g (r-cell y)))))
-(define r-opn (subr emits (rgen int int) unit)
+(define r-opn (->* (rgen int int) unit)
   (lambda (g op n) (r-op1 g op (wcell-int n))))
-(define r-opnn (subr emits (rgen int int int) unit)
+(define r-opnn (->* (rgen int int int) unit)
   (lambda (g op n m) (r-op2 g op (wcell-int n) (wcell-int m))))
 ;; RESULT := a closure of word `w` over REG1…REGn (`lambda`), made on a
 ;; cellular machine as the stack code's are (`c-closure-routine`).
-(define r-lambda-op (subr emits (rgen wcell int) unit)
+(define r-lambda-op (->* (rgen wcell int) unit)
   (lambda (g w n)
     (begin (r-op2 g rop-lambda w (wcell-int n))
            (r-emit g (r-cell (wcell-int (c-closure-routine)))))))
 ;; RESULT := the closure in RESULT, made by `lambda` for a patch: in a
 ;; program whose convention is native, the cellular closure its adapter
 ;; calls (`%fx26-adapted`; natively, nothing).
-(define r-adapted (subr emits (rgen) unit)
+(define r-adapted (->* (rgen) unit)
   (lambda (g)
     (if (get c-native-program)
         (r-op1 g rop-prim1 (wcell-int (runtime-primitive "%fx26-adapted")))
         #u)))
-(define r-new-label (subr (maxeff (read @k) (write @k)) (rgen) int)
+(define r-new-label (->* (rgen) int)
   (lambda (g) (let* ((l (extract g labels)) (n (get l))) (begin (set l (+ n 1)) n))))
-(define r-reg (subr (maxeff (read @globals) (read @k) (write @k)) (rgen) int)
+(define r-reg (->* (rgen) int)
   (lambda (g)
     (let* ((r (extract g nreg)) (n (+ (get r) 1)))
       (begin (set r n) (if (> n register-regs) (r-decline) #u) n))))
-(define r-slot (subr (maxeff (read @k) (write @k)) (rgen) int)
+(define r-slot (->* (rgen) int)
   (lambda (g)
     (let* ((s (extract g nslot)) (n (get s)) (m (extract g mslot)))
       (begin (set s (+ n 1)) (if (> (+ n 1) (get m)) (set m (+ n 1)) #u) n))))
 ;; Pop the frame, if there is one, before leaving.
-(define r-leave (subr emits (rgen) unit)
+(define r-leave (->* (rgen) unit)
   (lambda (g) (if (extract g leaf) #u (begin (r-op0 g rop-pop) (r-emit g (r-frame))))))
-(define r-done (subr emits (rgen bool) unit)
+(define r-done (->* (rgen bool) unit)
   (lambda (g tail) (if tail (begin (r-leave g) (r-op0 g rop-return)) #u)))
 
-(define r-reverse (subr rbuilds (ritems ritems) ritems)
+(define r-reverse (->* (ritems ritems) ritems)
   (lambda (xs acc) (if (null? xs) acc (r-reverse (cdr xs) (cons (car xs) acc)))))
-(define r-size (subr pure (ritem) int)
+(define r-size (->* (ritem) int)
   (lambda (i)
     (tagcase i
       (r-cell (x) 1)
@@ -140,7 +140,7 @@
       (r-brancht (n) 2)
       (r-frame () 1)
       (r-guard-to (c w n) 4))))
-(define r-place (subr (maxeff rscans (write @k)) (ritems (arrayof int @k) int) int)
+(define r-place (->* (ritems (arrayof int @k) int) int)
   (lambda (xs at pos)
     (if (null? xs)
         pos
@@ -148,11 +148,11 @@
                (r-place (cdr xs) at (+ pos (r-size (car xs))))))))
 ;; The offset to label `n`, placed at `at`, from the cell after an item of
 ;; `size` cells at `pos`, as a cell.
-(define r-offset (subr rreads ((arrayof int @k) int int int) wcell)
+(define r-offset (->* ((arrayof int @k) int int int) wcell)
   (lambda (at n pos size) (wcell-int (- (array-ref at n) (+ pos size)))))
 ;; Item `i`'s cells, at `pos`, onto `acc`: a branch's offset resolved, the
 ;; frame's size in place.
-(define r-item-cells (subr rbuilds (ritem (arrayof int @k) int int wcells) wcells)
+(define r-item-cells (->* (ritem (arrayof int @k) int int wcells) wcells)
   (lambda (i at pos frame acc)
     (tagcase i
       (r-cell (x) (cons x acc))
@@ -166,13 +166,13 @@
 ;; The cells, branches resolved (an offset counts from the cell after it),
 ;; and the frame's size in place: from the items newest first, each ending
 ;; at `end`, onto those after it, in a loop, however long the code.
-(define r-cells (subr rbuilds (ritems (arrayof int @k) int int wcells) wcells)
+(define r-cells (->* (ritems (arrayof int @k) int int wcells) wcells)
   (lambda (xs at end frame acc)
     (if (null? xs)
         acc
         (let ((pos (- end (r-size (car xs)))))
           (r-cells (cdr xs) at pos frame (r-item-cells (car xs) at pos frame acc))))))
-(define r-assemble (subr (maxeff emits spin) (rgen) wcells)
+(define r-assemble (->* (rgen) wcells)
   (lambda (g)
     (let* ((items (get (extract g items)))
            (at (the (arrayof int @k) (make-array (+ 1 (get (extract g labels))) 0)))
@@ -182,7 +182,7 @@
 ;;; ------------------------------------------------------------- variables
 
 ;; Where global `n` is, in a list; none if it is no global.
-(define r-global-loc (subr rbuilds (symbol) rlocs)
+(define r-global-loc (->* (symbol) rlocs)
   (lambda (n)
     (let ((l (c-where (the cenv nil) n)))
       (if (null? l)
@@ -193,23 +193,23 @@
               (let ((k (r-const-in (get r-consts-now) g)))
                 (the rlocs (cons (if (null? k) (rl-global g) (rl-const (car k))) nil))))
             (else y nil))))))
-(define r-where (subr rbuilds (renv symbol) rlocs)
+(define r-where (->* (renv symbol) rlocs)
   (lambda (env n)
     (cond ((null? env) (r-global-loc n))
           ((symbol=? (car (car env)) n) (the rlocs (cons (cdr (car env)) nil)))
           (else (r-where (cdr env) n)))))
 ;; `env` with `n` at `l`.
-(define r-bind (subr (maxeff (read @globals) (alloc @k)) (symbol rloc renv) renv)
+(define r-bind (->* (symbol rloc renv) renv)
   (lambda (n l env) (the renv (cons (cons n l) env))))
 ;; Where the variable `f` is, in a list; none if `f` is no variable, or
 ;; not bound.
-(define r-var-loc (subr rbuilds (renv exp) rlocs)
+(define r-var-loc (->* (renv exp) rlocs)
   (lambda (env f) (tagcase f (e-var (n a b abk) (r-where env n)) (else y nil))))
 ;; The same, if `f` is not converted either.
-(define r-plain-var-loc (subr rbuilds (renv exp) rlocs)
+(define r-plain-var-loc (->* (renv exp) rlocs)
   (lambda (env f) (if (c-changed? f) nil (r-var-loc env f))))
 ;; The global the variable `f` is, in a list; none if it is no global.
-(define r-var-global (subr rbuilds (renv exp) (listof wglobal @k))
+(define r-var-global (->* (renv exp) (listof wglobal @k))
   (lambda (env f)
     (let ((l (r-var-loc env f)))
       (if (null? l)
@@ -217,13 +217,13 @@
           (tagcase (car l) (rl-global (c) (the (listof wglobal @k) (cons c nil))) (else y nil))))))
 
 ;; A let-bound name in the cellular environment: a local, captured as such.
-(define r-local (subr (maxeff (read @globals) (alloc @k)) (cenv symbol) cenv)
+(define r-local (->* (cenv symbol) cenv)
   (lambda (te n) (the cenv (cons (cons n (at-slot -1)) te))))
 
 ;; Whether `x` needs no register code of its own to be had: a constant, or
 ;; a variable not named as a standard operation is (which may be one made a
 ;; value, a closure); and not converted.
-(define r-simple? (subr rreads (exp) bool)
+(define r-simple? (->* (exp) bool)
   (lambda (x)
     (and (not (c-changed? x))
          (tagcase x
@@ -234,7 +234,7 @@
            (else y #f)))))
 
 ;; A constant's cell.
-(define r-const-cell (subr spin (rconst) wcell)
+(define r-const-cell (->* (rconst) wcell)
   (lambda (c)
     (tagcase c
       (rc-int (n) (wcell-int n))
@@ -245,95 +245,95 @@
       (rc-sym (s) (wcell-symbol s))
       (rc-pair (a d) (wcell-pair (r-const-cell a) (r-const-cell d))))))
 ;; Constants' cells, in order.
-(define r-const-cells (subr rbuilds (rconsts) wcells)
+(define r-const-cells (->* (rconsts) wcells)
   (lambda (cs) (if (null? cs) nil (cons (r-const-cell (car cs)) (r-const-cells (cdr cs))))))
 ;; Constant `c`, known: in a list of one.
-(define r-known-as (subr (alloc @k) (rconst) rconsts)
+(define r-known-as (->* (rconst) rconsts)
   (lambda (c) (the rconsts (cons c nil))))
 ;; Whether a constant is #f.
-(define r-const-false? (subr pure (rconst) bool)
+(define r-const-false? (->* (rconst) bool)
   (lambda (c) (tagcase c (rc-bool (v) (not v)) (else y #f))))
 ;; Whether integer `n` is under 2^30 in size.
-(define r-small? (subr pure (int) bool)
+(define r-small? (->* (int) bool)
   (lambda (n) (and (< n 1073741824) (> n -1073741824))))
 ;; An integer under 2^30 in size, in a list, if `c` is one.
-(define r-const-small (subr (maxeff (read @globals) (alloc @k)) (rconst) (listof int @k))
+(define r-const-small (->* (rconst) (listof int @k))
   (lambda (c)
     (tagcase c
       (rc-int (n) (if (r-small? n) (the (listof int @k) (cons n nil)) nil))
       (else y nil))))
 ;; Whether constant `c` (in a list) is `when` (true: anything but #f).
-(define r-holds? (subr rreads (rconsts bool) bool)
+(define r-holds? (->* (rconsts bool) bool)
   (lambda (c when) (if (r-const-false? (car c)) (not when) when)))
 
-(define r-this-name? (subr (read @k) (rthis symbol int) bool)
+(define r-this-name? (->* (rthis symbol int) bool)
   (lambda (this n nargs)
     (and (not (null? this))
          (let ((t (car this)))
            (and (symbol=? n (extract t 1)) (= (+ (extract t 4) nargs) (extract t 3)))))))
 ;; How many of the running procedure's parameters, first, a lifting added.
-(define r-this-added (subr (read @k) (rgen) int)
+(define r-this-added (->* (rgen) int)
   (lambda (g) (let ((this (extract g this))) (if (null? this) 0 (extract (car this) 4)))))
 ;; The members' `c-lifts` indices, in a list of one, if the `letrec` at
 ;; `a`–`b` was lifted by its stack code (`c-lift`); none if not, or if it
 ;; is in a body inlined or specialized here, which another program's text
 ;; may have spans in common with.
-(define r-lifted (subr rreads (int int int) (listof (listof int @k) @k))
+(define r-lifted (->* (int int int) (listof (listof int @k) @k))
   (lambda (a b abk)
     (if (and (null? (get c-inlining)) (null? (get c-spec-now)))
         (table-ref (get c-lifted) (c-span-key a b abk) (the (listof (listof int @k) @k) nil))
         nil)))
 ;; `bs`' names bound to the lifted procedures `ks`, onto `env`.
-(define r-bind-lifted (subr rbuilds (exp-letrec-bs (listof int @k) renv) renv)
+(define r-bind-lifted (->* (exp-letrec-bs (listof int @k) renv) renv)
   (lambda (bs ks env)
     (if (null? bs)
         env
         (r-bind-lifted (cdr bs) (cdr ks) (r-bind (extract (car bs) 1) (rl-lifted (car ks)) env)))))
 ;; The index in `c-lifts` of the procedure `f` names, if a lifted one; else -1.
-(define r-lifted-at (subr rbuilds (renv exp) int)
+(define r-lifted-at (->* (renv exp) int)
   (lambda (env f)
     (let ((l (r-var-loc env f)))
       (if (null? l) -1 (tagcase (car l) (rl-lifted (k) k) (else y -1))))))
 ;; `names` as arguments, their values wherever they are, then `rest`.
-(define r-name-args (subr rbuilds (syms rargs) rargs)
+(define r-name-args (->* (syms rargs) rargs)
   (lambda (names rest)
     (if (null? names) rest (the rargs (cons (a-name (car names)) (r-name-args (cdr names) rest))))))
 ;; Whether a move of `ms` but the `k`th reads register `d`.
-(define r-read-by-other? (subr rscans (rmoves int int int) bool)
+(define r-read-by-other? (->* (rmoves int int int) bool)
   (lambda (ms d k i)
     (cond ((null? ms) #f)
           ((and (not (= i k)) (= (car (car ms)) d)) #t)
           (else (r-read-by-other? (cdr ms) d k (+ i 1))))))
 ;; The index of the first move of `ms` (from the `k`th of `all`) whose
 ;; destination no other move reads; -1 if none.
-(define r-free-move (subr rscans (rmoves rmoves int) int)
+(define r-free-move (->* (rmoves rmoves int) int)
   (lambda (all ms k)
     (cond ((null? ms) -1)
           ((r-read-by-other? all (cdr (car ms)) k 0) (r-free-move all (cdr ms) (+ k 1)))
           (else k))))
-(define r-nth-move (subr rscans (rmoves int) rmove)
+(define r-nth-move (->* (rmoves int) rmove)
   (lambda (ms k) (if (= k 0) (car ms) (r-nth-move (cdr ms) (- k 1)))))
-(define r-drop-move (subr rbuilds (rmoves int int) rmoves)
+(define r-drop-move (->* (rmoves int int) rmoves)
   (lambda (ms k i)
     (cond ((null? ms) nil)
           ((= i k) (cdr ms))
           (else (cons (car ms) (r-drop-move (cdr ms) k (+ i 1)))))))
 ;; `ms`, those reading register `d` reading RESULT instead.
-(define r-reread (subr rbuilds (rmoves int) rmoves)
+(define r-reread (->* (rmoves int) rmoves)
   (lambda (ms d)
     (if (null? ms)
         nil
         (let ((m (car ms)))
           (cons (if (= (car m) d) (the rmove (cons 0 (cdr m))) m) (r-reread (cdr ms) d))))))
 ;; Move `m` made: its source register, or RESULT, into its destination.
-(define r-move (subr emits (rgen rmove) unit)
+(define r-move (->* (rgen rmove) unit)
   (lambda (g m)
     (if (= (car m) 0) (r-opn g rop-setreg (cdr m)) (r-opnn g rop-movereg (car m) (cdr m)))))
 ;; Register moves made so that none overwrites what another has yet to
 ;; read, as the Rust compiler's `r_par_moves`: the first whose destination
 ;; no other reads, in order; else, the rest a cycle, the first's
 ;; destination kept in RESULT, and read from there.
-(define r-par-moves (subr (maxeff emits spin) (rgen rmoves) unit)
+(define r-par-moves (->* (rgen rmoves) unit)
   (lambda (g ms)
     (if (null? ms)
         #u
@@ -345,7 +345,7 @@
                 (begin (r-opn g rop-reg d) (r-par-moves g (r-reread ms d)))))))))
 ;; The moves of each free value of `fv` (from the `j`th) in a register into
 ;; REGj+1, where it is not there already.
-(define r-reg-moves (subr rbuilds (syms renv int) rmoves)
+(define r-reg-moves (->* (syms renv int) rmoves)
   (lambda (fv env j)
     (if (null? fv)
         nil
@@ -357,32 +357,32 @@
                 (else y rest)))))))
 
 ;; A leaf's tail call's arguments, sorted.
-(define r-rleaf (subr (read @globals) (rmoves rlate) rleaf)
+(define r-rleaf (->* (rmoves rlate) rleaf)
   (lambda (ms late) (product (moves ms) (late late))))
 ;; `rest` with the move of `s` to REGk first, or the simple argument `a`.
-(define r-leaf-move (subr (maxeff (read @globals) (alloc @k)) (rleaf int int) rleaf)
+(define r-leaf-move (->* (rleaf int int) rleaf)
   (lambda (rest s k)
     (let ((m (the rmove (cons s k)))) (r-rleaf (cons m (extract rest moves)) (extract rest late)))))
-(define r-leaf-late (subr (maxeff (read @globals) (alloc @k)) (rleaf int exp) rleaf)
+(define r-leaf-late (->* (rleaf int exp) rleaf)
   (lambda (rest k a) (r-rleaf (extract rest moves) (cons (cons k a) (extract rest late)))))
 ;; The register `l` is, or 0 if it is none.
-(define r-reg-of (subr rreads (rlocs) int)
+(define r-reg-of (->* (rlocs) int)
   (lambda (l) (if (null? l) 0 (tagcase (car l) (rl-reg (r) r) (else y 0)))))
 ;; Whether register moves form a cycle: some left when every move whose
 ;; destination no other reads is taken away. As `r_moves_cycle`.
-(define r-moves-cycle? (subr rbuilds (rmoves) bool)
+(define r-moves-cycle? (->* (rmoves) bool)
   (lambda (ms)
     (and (not (null? ms))
          (let ((k (r-free-move ms ms 0)))
            (or (< k 0) (r-moves-cycle? (r-drop-move ms k 0)))))))
 ;; Whether a move of `ms`, or a simple argument of `late`, writes REGk.
-(define r-written? (subr rscans (int rmoves rlate) bool)
+(define r-written? (->* (int rmoves rlate) bool)
   (lambda (k ms late)
     (cond ((not (null? ms)) (or (= (cdr (car ms)) k) (r-written? k (cdr ms) late)))
           ((null? late) #f)
           (else (or (= (car (car late)) k) (r-written? k ms (cdr late)))))))
 ;; `ms` with the move of `s` to `d` last.
-(define r-moves-snoc (subr rbuilds (rmoves int int) rmoves)
+(define r-moves-snoc (->* (rmoves int int) rmoves)
   (lambda (ms s d)
     (if (null? ms)
         (the rmoves (cons (the rmove (cons s d)) nil))
@@ -390,7 +390,7 @@
 
 ;; Whether `f` is the procedure running, called with its arity: its own
 ;; name, still bound where the procedure knows itself to be.
-(define r-self-known? (subr rbuilds (rgen exp int cenv) bool)
+(define r-self-known? (->* (rgen exp int cenv) bool)
   (lambda (g f nargs te)
     (tagcase f
       (e-var (n a b abk)
@@ -406,7 +406,7 @@
 ;; array's element and length, a blobref's read, owner, offset, step, fit and length and a
 ;; flat sum's tag (`TODO.md` §77), and an eqtable's operations of one or two, which register
 ;; code calls with its values in registers.
-(define r-never-collects? (subr (read (globals r-eqtable-quick? r-fixed-width-op?)) (string) bool)
+(define r-never-collects? (->* (string) bool)
   (lambda (name)
     (case name
       (("%fx26-mul" "%fx26-quotient" "modulo" "%fx26-arithmetic-shift" "%bloblet-fields"
@@ -425,7 +425,7 @@
       (else (or (r-eqtable-quick? name) (r-fixed-width-op? name))))))
 ;; Runtime primitive `name` as a call-out, when it is one and `n` = `k`; in line, if it never
 ;; collects and takes one or two.
-(define r-prim-std (subr (read @globals) (string int int) rstd)
+(define r-prim-std (->* (string int int) rstd)
   (lambda (name n k)
     (let ((p (runtime-primitive name)))
       (cond ((not (and (>= p 0) (= n k))) (s-none))
@@ -433,15 +433,15 @@
             (else (s-prim p))))))
 
 ;; Whether `name` is an equality `op2 eq` does (`std-eq-name?`).
-(define r-eq-name? (subr (read @globals) (string) bool) (lambda (name) (std-eq-name? name)))
+(define r-eq-name? (->* (string) bool) (lambda (name) (std-eq-name? name)))
 ;; Whether `name` makes a box: a prompt tag (an escape-only one too) or a mark key.
-(define r-box-name? (subr (read @globals) (string) bool)
+(define r-box-name? (->* (string) bool)
   (lambda (name)
     (or (or (string=? name "make-continuation-prompt-tag") (string=? name "make-escape-tag"))
         (string=? name "make-continuation-mark-key"))))
 ;; Whether `name` is a runtime primitive of that name to the cellular
 ;; compiler, one register code calls out to as well.
-(define r-prim-name? (subr (read @globals) (string) bool)
+(define r-prim-name? (->* (string) bool)
   (lambda (name)
     (or (string=? name "modulo")
         (string=? name "char->integer") (string=? name "integer->char")
@@ -450,13 +450,13 @@
         (string=? name "string=?") (string=? name "string->symbol")
         (string=? name "symbol->string"))))
 ;; Whether `name` is `+` or `-`.
-(define r-add-name? (subr (read @globals) (string) bool)
+(define r-add-name? (->* (string) bool)
   (lambda (name) (or (string=? name "+") (string=? name "-"))))
 
 ;; Whether `name`, applied to `n` arguments, is a standard operation register
 ;; code does, and how: as the Rust compiler's `r_standard`, whose last case
 ;; is what the cellular compiler does with one runtime primitive.
-(define r-standard (subr (maxeff rreads (alloc @k)) (string int) rstd)
+(define r-standard (->* (string int) rstd)
   (lambda (name n)
     (let ((is (lambda ((s string) (k int)) (and (string=? name s) (= n k)))))
       (cond ((is "+" 2) (s-op2 routine-int-add #f #f))
@@ -503,7 +503,7 @@
 ;; The operator under the type abstractions, projections, ascriptions and
 ;; conversions, which compile to nothing: `((proj car @r) xs)` is `car`
 ;; applied.
-(define r-operator (subr rscans (exp) exp)
+(define r-operator (->* (exp) exp)
   (lambda (f)
     (tagcase f
       (e-plambda (d body a b abk) (r-operator body))
@@ -511,26 +511,26 @@
       (e-the (d body a b abk) (r-operator body))
       (e-convention (cnv body a b abk) (r-operator body))
       (else y y))))
-(define r-standard-name (subr rbuilds (renv exp) string)
+(define r-standard-name (->* (renv exp) string)
   (lambda (env f)
     (tagcase (r-operator f)
       (e-var (n a b abk) (if (null? (r-where env n)) (symbol->string n) ""))
       (e-with (m body a b abk) (c-fx-name m body))
       (else y ""))))
 ;; Whether `e` is a `+` or `-` of two.
-(define r-adds? (subr rbuilds (renv exp) bool)
+(define r-adds? (->* (renv exp) bool)
   (lambda (env e)
     (tagcase e
       (e-app (f args a b abk)
         (and (= (c-count-exps args) 2) (r-add-name? (r-standard-name env f))))
       (else y #f))))
-(define r-rev-consts (subr rbuilds (rconsts rconsts) rconsts)
+(define r-rev-consts (->* (rconsts rconsts) rconsts)
   (lambda (xs acc) (if (null? xs) acc (r-rev-consts (cdr xs) (cons (car xs) acc)))))
-(define c-length-consts (subr rscans (rconsts) int)
+(define c-length-consts (->* (rconsts) int)
   (lambda (xs) (if (null? xs) 0 (+ 1 (c-length-consts (cdr xs))))))
 ;; Whether constant `c` is an integer that fits the fixed-width type `name` converts to
 ;; (`int->u32`, and so on): then it is its own conversion, the type's value the fixnum.
-(define r-fits-fixed? (subr pure (string rconst) bool)
+(define r-fits-fixed? (->* (string rconst) bool)
   (lambda (name c)
     (tagcase c
       (rc-int (n)
@@ -544,7 +544,7 @@
       (else y #f))))
 ;; Standard operation `name` on constants `vs`, folded, if it is one that
 ;; folds.
-(define r-fold (subr (maxeff rreads (alloc @k)) (string rconsts) rconsts)
+(define r-fold (->* (string rconsts) rconsts)
   (lambda (name vs)
     (let* ((two (and (not (null? vs)) (and (not (null? (cdr vs))) (null? (cdr (cdr vs))))))
            (one (and (not (null? vs)) (null? (cdr vs))))
@@ -584,7 +584,7 @@
   ;; integers under 2^30 in size, which cannot overflow; comparisons; `not`;
   ;; `null?`; `char=?`; `int->u32` and its kin of an integer that fits), or a
   ;; sum or product of constants, made now, once.
-  (r-known (subr rbuilds (renv exp) rconsts)
+  (r-known (->* (renv exp) rconsts)
     (lambda (env x)
       (tagcase x
         (e-int (n a b abk) (r-known-as (rc-int n)))
@@ -624,7 +624,7 @@
   ;; Test `x`'s value, where an `if` around has decided it (`r-knowing`),
   ;; as a constant: compared with each test decided, by name and operands.
   ;; As the Rust compiler's `r_known_test`.
-  (r-known-test (subr rbuilds (renv exp) rconsts)
+  (r-known-test (->* (renv exp) rconsts)
     (lambda (env x)
       (if (not (r-tests-in? env))
           nil
@@ -633,7 +633,7 @@
   ;; What test `x` is, to know it again: its comparison's name and each
   ;; operand, a place (a register, frame slot or free value) or literal
   ;; constant, in a list; none if it is not such a test.
-  (r-test-desc (subr rbuilds (renv exp) (listof rtest @k))
+  (r-test-desc (->* (renv exp) (listof rtest @k))
     (lambda (env x)
       (tagcase x
         (e-app (f args a b abk)
@@ -645,13 +645,13 @@
         (else y nil))))
   ;; Each operand's place or constant, in order, in a list; none if one is
   ;; neither.
-  (r-test-operands (subr rbuilds (renv exps) (listof rlocs @k))
+  (r-test-operands (->* (renv exps) (listof rlocs @k))
     (lambda (env args)
       (if (null? args)
           (cons (the rlocs nil) nil)
           (let ((one (r-test-operand env (car args))) (rest (r-test-operands env (cdr args))))
             (if (or (null? one) (null? rest)) nil (cons (cons (car one) (car rest)) nil))))))
-  (r-test-operand (subr rbuilds (renv exp) rlocs)
+  (r-test-operand (->* (renv exp) rlocs)
     (lambda (env a)
       (let ((k (r-known env a)))
         (if (null? k)
@@ -667,14 +667,14 @@
               (else y (cons (rl-const (car k)) nil)))))))
   ;; Each of `es`' constants, in order, onto `acc` reversed, in a list; none
   ;; if one is not a constant.
-  (r-knowns (subr rbuilds (renv exps rconsts) (listof rconsts @k))
+  (r-knowns (->* (renv exps rconsts) (listof rconsts @k))
     (lambda (env es acc)
       (if (null? es)
           (the (listof rconsts @k) (cons (r-rev-consts acc nil) nil))
           (let ((c (r-known env (car es))))
             (if (null? c) nil (r-knowns env (cdr es) (cons (car c) acc)))))))
   ;; The same for a product's fields.
-  (r-known-fields (subr rbuilds (renv exp-let-bs rconsts) (listof rconsts @k))
+  (r-known-fields (->* (renv exp-let-bs rconsts) (listof rconsts @k))
     (lambda (env fs acc)
       (if (null? fs)
           (the (listof rconsts @k) (cons (r-rev-consts acc nil) nil))
@@ -682,12 +682,12 @@
             (if (null? c) nil (r-known-fields env (cdr fs) (cons (car c) acc))))))))
 
 ;; Whether a test an `if` decided is in scope in `env`.
-(define r-tests-in? (subr rscans (renv) bool)
+(define r-tests-in? (->* (renv) bool)
   (lambda (env)
     (and (not (null? env))
          (or (tagcase (cdr (car env)) (rl-test (n o v) #t) (else y #f)) (r-tests-in? (cdr env))))))
 ;; The value of the test `d` describes, if one in `env` is it, the newest.
-(define r-decided (subr rbuilds (renv rtest) rconsts)
+(define r-decided (->* (renv rtest) rconsts)
   (lambda (env d)
     (if (null? env)
         nil
@@ -697,12 +697,12 @@
                 (r-known-as (rc-bool v))
                 (r-decided (cdr env) d)))
           (else y (r-decided (cdr env) d))))))
-(define r-same-operands? (subr rscans (rlocs rlocs) bool)
+(define r-same-operands? (->* (rlocs rlocs) bool)
   (lambda (xs ys)
     (cond ((null? xs) (null? ys))
           ((null? ys) #f)
           (else (and (r-same-operand? (car xs) (car ys)) (r-same-operands? (cdr xs) (cdr ys)))))))
-(define r-same-operand? (subr pure (rloc rloc) bool)
+(define r-same-operand? (->* (rloc rloc) bool)
   (lambda (x y)
     (tagcase x
       (rl-reg (i) (tagcase y (rl-reg (j) (= i j)) (else z #f)))
@@ -710,7 +710,7 @@
       (rl-free (i) (tagcase y (rl-free (j) (= i j)) (else z #f)))
       (rl-const (c) (tagcase y (rl-const (d) (r-same-const? c d)) (else z #f)))
       (else z #f))))
-(define r-same-const? (subr pure (rconst rconst) bool)
+(define r-same-const? (->* (rconst rconst) bool)
   (lambda (c d)
     (tagcase c
       (rc-int (n) (tagcase d (rc-int (m) (= n m)) (else z #f)))
@@ -720,7 +720,7 @@
       (rc-sym (v) (tagcase d (rc-sym (w) (symbol=? v w)) (else z #f)))
       (else z #f))))
 ;; Whether `name` is a comparison a test's key may be of.
-(define r-test-name? (subr pure (string) bool)
+(define r-test-name? (->* (string) bool)
   (lambda (name)
     (or (or (or (string=? name "<") (string=? name ">"))
             (or (string=? name "<=") (string=? name ">=")))
@@ -728,32 +728,32 @@
             (or (or (string=? name "symbol=?") (string=? name "char=?"))
                 (or (string=? name "null?") (string=? name "pair?")))))))
 ;; Whether `a` and `b` are the same expression: their identities.
-(define r-same-exp? (subr (read (globals exp-end exp-start exp-kth)) (exp exp) bool)
+(define r-same-exp? (->* (exp exp) bool)
   (lambda (a b)
     (and (= (exp-start a) (exp-start b)) (= (exp-end a) (exp-end b)) (= (exp-kth a) (exp-kth b)))))
 ;;; ---------------------------------------------------------------- lists
 
-(define r-count-args (subr rscans (rargs) int)
+(define r-count-args (->* (rargs) int)
   (lambda (xs) (if (null? xs) 0 (+ 1 (r-count-args (cdr xs))))))
-(define r-exp-args (subr (maxeff (read @globals) (alloc @k)) (exps) rargs)
+(define r-exp-args (->* (exps) rargs)
   (lambda (es) (if (null? es) nil (cons (a-e (car es)) (r-exp-args (cdr es))))))
-(define r-arg-simple? (subr rreads (rarg) bool)
+(define r-arg-simple? (->* (rarg) bool)
   (lambda (a) (tagcase a (a-e (x) (r-simple? x)) (a-thunk (b) #f) (a-as-is (x) #f) (else y #t))))
 ;; The last argument that is not simple, or -1.
-(define r-last-hard (subr rscans (rargs int int) int)
+(define r-last-hard (->* (rargs int int) int)
   (lambda (xs i found)
     (if (null? xs) found (r-last-hard (cdr xs) (+ i 1) (if (r-arg-simple? (car xs)) found i)))))
-(define r-nth-arg (subr rscans (rargs int) rarg)
+(define r-nth-arg (->* (rargs int) rarg)
   (lambda (xs i) (if (= i 0) (car xs) (r-nth-arg (cdr xs) (- i 1)))))
-(define r-in-reg? (subr (read @k) (rlocs) bool)
+(define r-in-reg? (->* (rlocs) bool)
   (lambda (l) (and (not (null? l)) (tagcase (car l) (rl-reg (r) #t) (else y #f)))))
 ;; Whether `x` is a variable, not converted, whose value is in a register.
-(define r-var-in-reg? (subr rbuilds (renv exp) bool)
+(define r-var-in-reg? (->* (renv exp) bool)
   (lambda (env x) (r-in-reg? (r-plain-var-loc env x))))
 ;; Whether an argument may wait until its value is needed, as
 ;; `r-arg-simple?` says; past `register-regs`, a list of the rest is made
 ;; first, which may collect, so then not one in a register.
-(define r-arg-simple-here? (subr rbuilds (rarg renv bool) bool)
+(define r-arg-simple-here? (->* (rarg renv bool) bool)
   (lambda (a env many)
     (and (r-arg-simple? a)
          (or (not many)
@@ -762,7 +762,7 @@
                (a-name (n) (not (r-in-reg? (r-where env n))))
                (else y #t))))))
 ;; A lifted procedure's added name's value into RESULT: a value in a place.
-(define r-name (subr rcompiles (rgen symbol renv) unit)
+(define r-name (->* (rgen symbol renv) unit)
   (lambda (g n env)
     (let ((l (r-where env n)))
       (if (null? l)
@@ -773,7 +773,7 @@
             (rl-free (j) (r-opn g rop-lexical j))
             (rl-const (c) (r-op1 g rop-const (r-const-cell c)))
             (else y (r-decline)))))))
-(define r-nth-int (subr rscans ((listof int @k) int) int)
+(define r-nth-int (->* ((listof int @k) int) int)
   (lambda (xs i) (if (= i 0) (car xs) (r-nth-int (cdr xs) (- i 1)))))
-(define r-nth-exp (subr (read @globals) (exps int) exp)
+(define r-nth-exp (->* (exps int) exp)
   (lambda (es i) (if (= i 0) (car es) (r-nth-exp (cdr es) (- i 1))))))))

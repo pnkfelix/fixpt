@@ -49,7 +49,7 @@
 (define syn-module ((proj (load-module "fx26:syn.fx") rs re rm rc)))
 (import syn-module syn->datum)
 
-(define syns->data (subr (maxeff (read @globals) (read rs) (alloc rs)) (syns) data)
+(define syns->data (->* (syns) data)
   (lambda (xs) (if (null? xs) nil (cons (syn->datum (car xs)) (syns->data (cdr xs))))))
 
 (define eager-tag (prompt-tag state state (maxeff parsing spin) re) (make-continuation-prompt-tag))
@@ -61,20 +61,20 @@
 ;; argument: it is set once, around the whole parse, and a checkpoint carries
 ;; it along, since the marks of a captured continuation are part of it.
 (define dialect-key (mark-key bool rm) (make-continuation-mark-key))
-(define fx26? (subr reads () bool) (lambda () (first-mark dialect-key #f)))
+(define fx26? (->* () bool) (lambda () (first-mark dialect-key #f)))
 
 ;;; ------------------------------------------------------------- the states
 
-(define make-state (subr (alloc rs) (bool (listof cont acyclic) int syns string) state)
+(define make-state (->* (bool (listof cont acyclic) int syns string) state)
   (lambda (need ks pos data message) (cons need (cons ks (cons pos (cons data message))))))
 ;; The state that waits for a character, to go on in `k`.
-(define waiting (subr (maxeff (alloc rs) (read (globals make-state))) (cont int syns) state)
+(define waiting (->* (cont int syns) state)
   (lambda (k pos data) (make-state #t (cons k nil) pos data "")))
-(define state-need? (subr (read rs) (state) bool) (lambda (st) (car st)))
-(define state-ks (subr (read rs) (state) (listof cont acyclic)) (lambda (st) (car (cdr st))))
-(define state-position (subr (read rs) (state) int) (lambda (st) (car (cdr (cdr st)))))
-(define state-data (subr (read rs) (state) syns) (lambda (st) (car (cdr (cdr (cdr st))))))
-(define state-message (subr (read rs) (state) string) (lambda (st) (cdr (cdr (cdr (cdr st))))))
+(define state-need? (->* (state) bool) (lambda (st) (car st)))
+(define state-ks (->* (state) (listof cont acyclic)) (lambda (st) (car (cdr st))))
+(define state-position (->* (state) int) (lambda (st) (car (cdr (cdr st)))))
+(define state-data (->* (state) syns) (lambda (st) (car (cdr (cdr (cdr st))))))
+(define state-message (->* (state) string) (lambda (st) (cdr (cdr (cdr (cdr st))))))
 
 ;; Input given ahead (`eager-feed-string`): a string, and where in it the
 ;; next character is. While there is some, the reader takes its characters
@@ -91,7 +91,7 @@
 
 ;; The next character: the next one given ahead, or, if there is none,
 ;; suspend for it.
-(define next-char (subr reads (int syns) char)
+(define next-char (->* (int syns) char)
   (lambda (pos data)
     (let ((i (get ahead-at)) (text (get ahead-text)))
       (if (< i (string-length text))
@@ -100,89 +100,89 @@
            (lambda (k) (abort-current-continuation eager-tag (waiting k pos data)))
            eager-tag)))))
 
-(define eager-run (subr reading ((subr reading () state)) state)
+(define eager-run (->* ((subr reading () state)) state)
   (lambda (thunk) (prompt eager-tag (thunk) (lambda (st) st))))
 
 ;;; ------------------------------------------------------------ the cursors
 
-(define make-cursor (subr (alloc rs) (chars int syns (listof cursor acyclic)) cursor)
+(define make-cursor (->* (chars int syns (listof cursor acyclic)) cursor)
   (lambda (look pos data pending) (cons look (cons pos (cons data pending)))))
-(define cur-look (subr (read rs) (cursor) chars) (lambda (cur) (car cur)))
-(define cur-char (subr (read rs) (cursor) char) (lambda (cur) (car (car cur))))
-(define cur-pos (subr (read rs) (cursor) int) (lambda (cur) (car (cdr cur))))
-(define cur-data (subr (read rs) (cursor) syns) (lambda (cur) (car (cdr (cdr cur)))))
-(define cur-pending (subr (read rs) (cursor) cursors) (lambda (cur) (cdr (cdr (cdr cur)))))
-(define hash-pending? (subr inspects (cursor) bool) (lambda (cur) (not (null? (cur-pending cur)))))
+(define cur-look (->* (cursor) chars) (lambda (cur) (car cur)))
+(define cur-char (->* (cursor) char) (lambda (cur) (car (car cur))))
+(define cur-pos (->* (cursor) int) (lambda (cur) (car (cdr cur))))
+(define cur-data (->* (cursor) syns) (lambda (cur) (car (cdr (cdr cur)))))
+(define cur-pending (->* (cursor) cursors) (lambda (cur) (cdr (cdr (cdr cur)))))
+(define hash-pending? (->* (cursor) bool) (lambda (cur) (not (null? (cur-pending cur)))))
 ;; An atom `d` read from `start` to `cur`, and `cur`.
-(define atom-at (subr (maxeff (read @globals) (read rs) (alloc rs)) (datum int cursor) result)
+(define atom-at (->* (datum int cursor) result)
   (lambda (d start cur) (cons (atom d start (cur-pos cur)) cur)))
 
 ;; A cursor with `c` in hand at `pos`: what a loop that reads characters
 ;; itself, keeping only the last and where it is, makes when it is done,
 ;; one for a token rather than one for each character.
-(define cursor-at (subr (maxeff (alloc rs) (read (globals make-cursor))) (char int syns) cursor)
+(define cursor-at (->* (char int syns) cursor)
   (lambda (c pos data) (make-cursor (cons c nil) pos data nil)))
 ;; The cursor at the character after `pos`, read.
-(define next-at (subr reads (int syns) cursor)
+(define next-at (->* (int syns) cursor)
   (lambda (pos data) (cursor-at (next-char (+ pos 1) data) (+ pos 1) data)))
-(define advance (subr reads (cursor) cursor)
+(define advance (->* (cursor) cursor)
   (lambda (cur)
     (let ((pos (+ (cur-pos cur) 1)) (data (cur-data cur)))
       (cursor-at (next-char pos data) pos data))))
 
-(define consumed (subr reads (cursor) cursor)
+(define consumed (->* (cursor) cursor)
   (lambda (cur) (make-cursor nil (+ (cur-pos cur) 1) (cur-data cur) nil)))
 
-(define need (subr reads (cursor) cursor)
+(define need (->* (cursor) cursor)
   (lambda (cur)
     (if (null? (cur-look cur))
         (cursor-at (next-char (cur-pos cur) (cur-data cur)) (cur-pos cur) (cur-data cur))
         cur)))
 ;; The characters of `text` from `i` to `j`, newest first: an atom's so far,
 ;; listed once it cannot be taken whole.
-(define chars-back (subr (maxeff (read @globals) (alloc rs)) (string int int) chars)
+(define chars-back (->* (string int int) chars)
   (lambda (text i j) (the chars (reverse (the chars (string->list (substring text i j)))))))
 ;; Past whitespace, the character at `pos` one: the cursor at the first
 ;; that is not.
-(define skip-white (subr reading (int syns) cursor)
+(define skip-white (->* (int syns) cursor)
   (lambda (pos data)
     (let ((c (next-char (+ pos 1) data)))
       (if (char-whitespace? c) (skip-white (+ pos 1) data) (cursor-at c (+ pos 1) data)))))
 
-(define fail-at (subr reads (cursor int string) void)
+(define fail-at (->* (cursor int string) void)
   (lambda (cur pos message)
     (abort-current-continuation eager-tag (make-state #f nil pos (cur-data cur) message))))
-(define fail (subr reads (cursor string) void)
+(define fail (->* (cursor string) void)
   (lambda (cur message) (fail-at cur (cur-pos cur) message)))
 
 ;;; ------------------------------------------------------------------ marks
 ;;; Each construct marks what it is reading, as data: `(list start close
 ;;; items)` and the rest, as the Scheme version's marks are.
 
-(define marking (poly ((t type)) (subr reading (datum (subr reading () t)) t))
+(define marking (poly ((t type)) (->* (datum (subr reading () t)) t))
   (lambda (what body) (with-mark eager-key what body)))
 
 (define no-data datum nil)
 ;; A datum list of two, three or four.
-(define datum-list2 (subr (read @globals) (datum datum) datum)
+(define datum-list2 (->* (datum datum) datum)
   (lambda (a b) (cons a (cons b no-data))))
-(define datum-list3 (subr (read @globals) (datum datum datum) datum)
+(define datum-list3 (->* (datum datum datum) datum)
   (lambda (a b c) (cons a (datum-list2 b c))))
-(define datum-list4 (subr (read @globals) (datum datum datum datum) datum)
+(define datum-list4 (->* (datum datum datum datum) datum)
   (lambda (a b c d) (cons a (datum-list3 b c d))))
-(define entry (subr (read @globals) (datum int) datum)
+(define entry (->* (datum int) datum)
   (lambda (name start) (datum-list2 name start)))
-(define top-entry (subr (read @globals) () datum)
+(define top-entry (->* () datum)
   (lambda () (cons 'top no-data)))
-(define abbrev-entry (subr (read @globals) (int string) datum)
+(define abbrev-entry (->* (int string) datum)
   (lambda (start name) (datum-list3 'abbrev start (string->symbol name))))
 ;; A list's mark: its items so far, newest first, as a datum the reader
 ;; builds a pair at a time as it reads them, not copied at each.
-(define list-entry (subr (read @globals) (datum int char datum) datum)
+(define list-entry (->* (datum int char datum) datum)
   (lambda (name start close items)
     (datum-list4 name start close items)))
 ;; `items`, newest first, in order, onto `done`.
-(define datum-reverse-onto (subr (read @globals) (datum datum) datum)
+(define datum-reverse-onto (->* (datum datum) datum)
   (lambda (items done)
     (if (null? items)
         done
@@ -201,32 +201,32 @@
 
 ;;; -------------------------------------------------------------- strings
 
-(define char-string (subr pure (char) string) (lambda (c) (char->string c)))
+(define char-string (->* (char) string) (lambda (c) (char->string c)))
 
-(define delimiter? (subr pure (char) bool)
+(define delimiter? (->* (char) bool)
   (lambda (c) (or (char-whitespace? c) (char-in? c "()[]\";'`,"))))
 
 ;; Whether an atom starting so may be a number: only then is it parsed as one.
-(define number-start? (subr pure (char) bool)
+(define number-start? (->* (char) bool)
   (lambda (c) (or (char-numeric? c) (char-in? c "+-.#"))))
 
-(define hex-digit? (subr pure (char) bool)
+(define hex-digit? (->* (char) bool)
   (lambda (c) (or (char-numeric? c) (char-in? (char-downcase c) "abcdef"))))
 ;; Whether `s` is `a` or `b`.
-(define either? (subr pure (string string string) bool)
+(define either? (->* (string string string) bool)
   (lambda (s a b) (or (string=? s a) (string=? s b))))
 ;; A space or a tab.
-(define blank? (subr pure (char) bool)
+(define blank? (->* (char) bool)
   (lambda (c) (or (char=? c #\space) (char=? c (integer->char 9)))))
 ;; What was listed, newest first, as a string.
-(define acc->string (subr (read @globals) (chars) string)
+(define acc->string (->* (chars) string)
   (lambda (acc) (list->string (the chars (reverse acc)))))
 ;; Whether `i` is a position in `text`.
-(define in-text? (subr pure (int string) bool)
+(define in-text? (->* (int string) bool)
   (lambda (i text) (and (>= i 0) (< i (string-length text)))))
 
 ;; Feed one character to a waiting state, giving the next state.
-(define eager-feed (subr reading (state char) state)
+(define eager-feed (->* (state char) state)
   (lambda (st ch)
     (if (state-need? st)
         (begin (set ahead-text "") (set ahead-at 0)
@@ -237,7 +237,7 @@
 ;; The same as feeding each of `text`'s characters in turn, but the reader
 ;; suspends only when it has read them all, not after each: for text that
 ;; is all there, such as a file's.
-(define eager-feed-string (subr reading (state string) state)
+(define eager-feed-string (->* (state string) state)
   (lambda (st text)
     (if (or (not (state-need? st)) (= (string-length text) 0))
         st
@@ -248,48 +248,48 @@
           (let ((after (eager-run (lambda () ((car (state-ks st)) (string-ref text 0))))))
             (begin (set ahead-text "") (set ahead-at 0) (set ahead-origin -1) after))))))
 
-(define eager-state-kind (subr inspects (state) datum)
+(define eager-state-kind (->* (state) datum)
   (lambda (st) (if (state-need? st) 'need 'error)))
-(define eager-state-position (subr inspects (state) int) (lambda (st) (state-position st)))
-(define eager-state-message (subr inspects (state) string) (lambda (st) (state-message st)))
+(define eager-state-position (->* (state) int) (lambda (st) (state-position st)))
+(define eager-state-message (->* (state) string) (lambda (st) (state-message st)))
 ;; The complete top-level data read so far, in order.
-(define eager-state-data (subr (maxeff (read @globals) (read rs) (alloc rs)) (state) data)
+(define eager-state-data (->* (state) data)
   (lambda (st) (syns->data (the syns (reverse (state-data st))))))
 ;; The same, with where each piece is.
-(define eager-state-syntax (subr (maxeff (read @globals) (read rs) (alloc rs)) (state) syns)
+(define eager-state-syntax (->* (state) syns)
   (lambda (st) (the syns (reverse (state-data st)))))
 
 ;; What the suspended parse is in the middle of, innermost first.
-(define eager-context (subr (maxeff inspects (read rm) (alloc rc)) (state) context)
+(define eager-context (->* (state) context)
   (lambda (st)
     (if (state-need? st)
         (marks-of (car (state-ks st)) eager-key)
         nil)))
 
-(define entry-name (subr pure (datum) string)
+(define entry-name (->* (datum) string)
   (lambda (e)
     (typecase (car e)
       (symbol s (symbol->string s))
       (else x (error "an entry is named by a symbol")))))
-(define entry-ref (subr (read @globals) (datum int) datum)
+(define entry-ref (->* (datum int) datum)
   (lambda (e i) (if (= i 0) (car e) (entry-ref (cdr e) (- i 1)))))
 
-(define settled? (subr (maxeff (read @globals) (read rc) spin) (context) bool)
+(define settled? (->* (context) bool)
   (lambda (ctx)
     (or (null? ctx)
         (and (either? (entry-name (car ctx)) "top" "comment")
              (settled? (cdr ctx))))))
 
 ;; `complete`, `incomplete` or `error`.
-(define eager-status (subr asks (state) symbol)
+(define eager-status (->* (state) symbol)
   (lambda (st)
     (cond ((not (state-need? st)) 'error)
           ((settled? (the context (eager-context st))) 'complete)
           (else 'incomplete))))
 
 ;; `help` and `?`: what a `,help` hole may say.
-(define help-name? (subr (read @globals) (string) bool) (lambda (n) (either? n "help" "?")))
-(define hole? (subr (read @globals) (datum) bool)
+(define help-name? (->* (string) bool) (lambda (n) (either? n "help" "?")))
+(define hole? (->* (datum) bool)
   (lambda (d)
     (and (pair? d)
          (symbol? (car d))
@@ -299,7 +299,7 @@
          (help-name? (symbol->string (car (cdr d))))
          (null? (cdr (cdr d))))))
 
-(define closing (subr in-context (context closers) datum)
+(define closing (->* (context closers) datum)
   (lambda (ctx acc)
     (if (null? ctx)
         #f
@@ -313,20 +313,20 @@
                 (else #f))))))
 
 ;; Whether the newest item a list's mark `e` holds is a `,help` hole.
-(define ends-in-hole? (subr (read @globals) (datum) bool)
+(define ends-in-hole? (->* (datum) bool)
   (lambda (e)
     (let ((items (entry-ref e 3))) (and (pair? items) (hole? (car items))))))
 
 ;; If the newest thing read in the innermost open list is a `,help` hole,
 ;; the characters that would close every open list; otherwise #f.
-(define eager-hole-closers (subr asks (state) datum)
+(define eager-hole-closers (->* (state) datum)
   (lambda (st)
     (let ((ctx (the context (eager-context st))))
       (if (and (not (null? ctx)) (string=? (entry-name (car ctx)) "list") (ends-in-hole? (car ctx)))
           (closing ctx nil)
           #f))))
 
-(define line-comment (subr reading (cursor) cursor)
+(define line-comment (->* (cursor) cursor)
   (lambda (cur)
     (marking (entry m-comment (cur-pos cur))
       (lambda ()
@@ -339,7 +339,7 @@
             (loop (next-char (+ (cur-pos cur) 1) data) (+ (cur-pos cur) 1))))))))
 
 ;; `#| … |#`, nesting.
-(define block-comment (subr reading (cursor int int) cursor)
+(define block-comment (->* (cursor int int) cursor)
   (lambda (cur start depth)
     (marking (entry m-block-comment start)
       (lambda ()
@@ -361,7 +361,7 @@
 ;;; ----------------------------------------------------------------- strings
 
 ;; The character a string's escape `\e` stands for, as a code, or -1.
-(define escape-code (subr pure (char) int)
+(define escape-code (->* (char) int)
   (lambda (e)
     (case e ((#\n) 10)
             ((#\t) 9)
@@ -370,7 +370,7 @@
             ((#\b) 8)
             ((#\0) 0)
             (else -1))))
-(define read-string (subr reading (cursor int) result)
+(define read-string (->* (cursor int) result)
   (lambda (cur start)
     (marking (entry m-string start)
       (lambda ()
@@ -418,13 +418,13 @@
             (loop cur nil)))))))
 
 ;; A proper list of exact integers in 0..=255.
-(define bytes? (subr (read @globals) (datum) bool)
+(define bytes? (->* (datum) bool)
   (lambda (d)
     (or (null? d)
         (and (pair? d) (datum-byte? (car d)) (bytes? (cdr d))))))
 
 ;; The characters up to the next delimiter.
-(define read-word (subr reading (cursor) word)
+(define read-word (->* (cursor) word)
   (lambda (cur)
     (letrec ((loop (subr reading (cursor chars) word)
                (lambda (cur acc)
@@ -434,7 +434,7 @@
       (loop cur nil))))
 
 ;; The character a name stands for, as a code, or -1.
-(define char-name (subr pure (string) int)
+(define char-name (->* (string) int)
   (lambda (n)
     (case n (("space") 32)
             (("newline" "linefeed" "nl") 10)
@@ -447,13 +447,13 @@
             (("escape" "altmode" "esc") 27)
             (else -1))))
 ;; The error that `#\name` is a `what` character name.
-(define char-name-fail (subr reads (cursor int string string) void)
+(define char-name-fail (->* (cursor int string string) void)
   (lambda (cur start what name)
     (fail-at cur start (string-append what " character name `#\\" name "`"))))
 
 ;; `#\c`, `#\space`, `#\x41`. The first character is taken whatever it is,
 ;; and anything after it up to a delimiter makes a name.
-(define read-char (subr reading (cursor int) result)
+(define read-char (->* (cursor int) result)
   (lambda (cur start)
     (marking (entry m-char start)
       (lambda ()
@@ -481,26 +481,26 @@
 
 ;; The atom's characters from its start to `pos`, newest first, from the
 ;; text given ahead.
-(define atom-so-far (subr (maxeff (read @globals) (alloc rs)) (atom-in int) chars)
+(define atom-so-far (->* (atom-in int) chars)
   (lambda (in pos)
     (let ((origin (extract in origin)))
       (chars-back (extract in text) (- (extract in start) origin) (- pos origin)))))
 ;; What an atom's loop has listed up to `pos`, in `mode` (`atom-loop`).
-(define atom-listed (subr (maxeff (read @globals) (alloc rs)) (atom-in int chars int) chars)
+(define atom-listed (->* (atom-in int chars int) chars)
   (lambda (in pos acc mode) (if (= mode 0) (atom-so-far in pos) acc)))
 ;; The atom's text, up to `pos`.
-(define atom-text (subr (maxeff (read @globals) (alloc rs)) (atom-in int chars int) string)
+(define atom-text (->* (atom-in int chars int) string)
   (lambda (in pos acc mode)
     (if (= mode 0)
         (let ((origin (extract in origin)))
           (substring (extract in text) (- (extract in start) origin) (- pos origin)))
         (acc->string acc))))
 ;; The number `text` reads as, if it may be one and is not escaped; else none.
-(define as-number (subr (read @globals) (string bool) data)
+(define as-number (->* (string bool) data)
   (lambda (text escaped)
     (if (or escaped (not (number-start? (string-ref text 0)))) nil (parse-number text 10))))
 ;; The atom that ends as `text`, `c` in hand at `cur`: a symbol, or a number.
-(define atom-finish (subr reads (atom-in cursor string bool char) result)
+(define atom-finish (->* (atom-in cursor string bool char) result)
   (lambda (in cur text escaped c)
     (if (and (string=? text "") (not escaped))
         (fail cur (string-append "unexpected `" (char-string c) "`"))
@@ -513,7 +513,7 @@
   ;; Each has the character `c` at `pos` in hand, and reads the next itself.
   ;; `mode`: 0, taken whole at the end; 1, listed in `acc`, newest first; 2,
   ;; listed, with an escape.
-  (atom-loop (subr reading (atom-in char int chars int) result)
+  (atom-loop (->* (atom-in char int chars int) result)
     (lambda (in c pos acc mode)
       (let ((data (extract in data)))
         (cond ((and (= mode 0) (not (= (get ahead-origin) (extract in origin))))
@@ -530,7 +530,7 @@
                (let ((acc (if (= mode 0) acc (the chars (cons c acc)))))
                  (atom-loop in (next-char (+ pos 1) data) (+ pos 1) acc mode)))))))
   ;; Inside `|…|`.
-  (atom-bar (subr reading (atom-in char int chars) result)
+  (atom-bar (->* (atom-in char int chars) result)
     (lambda (in b pos acc)
       (marking (entry m-symbol (extract in start))
         (lambda ()
@@ -541,7 +541,7 @@
                        (atom-bar in (next-char (+ pos 2) data) (+ pos 2) (cons e acc))))
                     (else (atom-bar in (next-char (+ pos 1) data) (+ pos 1) (cons b acc))))))))))
 
-(define read-atom-from (subr reading (cursor int string) result)
+(define read-atom-from (->* (cursor int string) result)
   (lambda (cur start prefix)
     (marking (entry m-atom start)
       (lambda ()
@@ -555,7 +555,7 @@
 
 ;; A list read: its items (newest first) `syns` and `items-d`, closed at
 ;; `cur`.
-(define closed-list (subr reads (syns datum int cursor) result)
+(define closed-list (->* (syns datum int cursor) result)
   (lambda (syns items-d start cur)
     (cons (lst (the syns (reverse syns))
                (datum-reverse-onto items-d no-data)
@@ -564,7 +564,7 @@
           (consumed cur))))
 ;; A dotted list read: its items (newest first) `syns` and `items`, and its
 ;; tail `r`'s, closed at `cur`.
-(define closed-dotted (subr reads (syns result data int cursor) result)
+(define closed-dotted (->* (syns result data int cursor) result)
   (lambda (syns r items start cur)
     (cons (dotted (the syns (reverse syns))
                   (car r)
@@ -573,35 +573,35 @@
                   (+ (cur-pos cur) 1))
           (consumed cur))))
 ;; Whether `cur` is at `close`, not at a `#` whose datum is pending.
-(define closes? (subr inspects (cursor char) bool)
+(define closes? (->* (cursor char) bool)
   (lambda (cur close) (and (not (hash-pending? cur)) (char=? (cur-char cur) close))))
 ;; The error that `close` was expected: `what` says what came instead.
-(define fail-expected (subr reads (cursor char string) void)
+(define fail-expected (->* (cursor char string) void)
   (lambda (cur close what) (fail cur (string-append "expected `" (char-string close) what))))
 ;; What was found instead of it, `c`.
-(define found-instead (subr (read @globals) (char) string)
+(define found-instead (->* (char) string)
   (lambda (c) (string-append "` but found `" (char-string c) "`")))
 ;; That `c` closes nothing.
-(define unbalanced-message (subr (read @globals) (char) string)
+(define unbalanced-message (->* (char) string)
   (lambda (c) (string-append "unbalanced `" (char-string c) "`")))
 ;; That `c` is reserved in FX-26.
-(define reserved-message (subr (read @globals) (char) string)
+(define reserved-message (->* (char) string)
   (lambda (c) (string-append "`" (char-string c) "` is reserved: it has no meaning yet")))
 ;; The error of unknown `#` syntax, `#what`, at `start`.
-(define unknown-hash (subr reads (cursor int string) void)
+(define unknown-hash (->* (cursor int string) void)
   (lambda (cur start what) (fail-at cur start (string-append "unknown `#` syntax: `#" what "`"))))
 (define bytes-message string "bytevector elements must be exact integers in 0..=255")
 
 ;; FX-26's `#%fx`, the module of the standard bindings, `cur` at the `%`;
 ;; no other `#%` spelling reads.
-(define read-fx-module (subr reading (cursor int) result)
+(define read-fx-module (->* (cursor int) result)
   (lambda (cur start)
     (let* ((w (read-word cur)) (word (car w)))
       (if (string=? word "%fx")
           (atom-at (string->symbol "#%fx") start (cdr w))
           (unknown-hash (cdr w) start word)))))
 ;; `#t`, `#true`, `#f` or `#false`, `cur` at the letter.
-(define read-bool (subr reading (cursor int) result)
+(define read-bool (->* (cursor int) result)
   (lambda (cur start)
     (let* ((w (read-word cur)) (word (car w)) (lower (string-downcase word)))
       (cond ((either? lower "t" "true") (atom-at #t start (cdr w)))
@@ -611,7 +611,7 @@
 ;;; -------------------------------------------------------------- atmosphere
 
 (define-rec
-  (skip-atmosphere (subr reading (cursor) cursor)
+  (skip-atmosphere (->* (cursor) cursor)
     (lambda (cur)
       (let* ((cur (need cur)) (c (cur-char cur)))
         (cond ((char-whitespace? c) (skip-atmosphere (skip-white (cur-pos cur) (cur-data cur))))
@@ -628,7 +628,7 @@
                          (else (make-cursor (cons #\# nil) start (cur-data cur) (cons next nil))))))
               (else cur)))))
   ;;; ------------------------------------------------------------------ datum
-  (read-datum (subr reading (cursor) result)
+  (read-datum (->* (cursor) result)
     (lambda (cur)
       (let ((cur (need cur)))
         (if (hash-pending? cur)
@@ -649,7 +649,7 @@
                            (read-abbrev (advance next) start "unquote-splicing")
                            (read-abbrev next start "unquote"))))
                     (else (read-atom-from cur start ""))))))))
-  (read-abbrev (subr reading (cursor int string) result)
+  (read-abbrev (->* (cursor int string) result)
     (lambda (cur start name)
       (marking (abbrev-entry start name)
         (lambda ()
@@ -659,7 +659,7 @@
                        start
                        (cur-pos (cdr r)))
                   (cdr r)))))))
-  (read-list (subr reading (cursor int char) result)
+  (read-list (->* (cursor int char) result)
     (lambda (cur start close)
       (letrec ((loop (subr reading (cursor data datum syns) result)
                  (lambda (cur items items-d syns)
@@ -690,7 +690,7 @@
                          (read-dotted next start close items items-d syns (cur-pos cur))
                          (more (read-atom-from next (cur-pos cur) ".") items items-d syns))))))
         (loop cur nil no-data nil))))
-    (read-dotted (subr reading (cursor int char data datum syns int) result)
+    (read-dotted (->* (cursor int char data datum syns int) result)
       (lambda (cur start close items items-d syns dot)
         (marking (list-entry m-dotted start close items-d)
           (lambda ()
@@ -705,7 +705,7 @@
                             (fail-expected cur close "` after the tail of a dotted list"))))))))))
   ;;; --------------------------------------------------------------- `#` syntax
   ;;; `start` is where the `#` was; `cur` is at the character after it.
-  (read-hash (subr reading (int cursor) result)
+  (read-hash (->* (int cursor) result)
     (lambda (start cur)
       (marking (entry m-hash start)
         (lambda ()
@@ -726,7 +726,7 @@
                       (fail-at cur start "datum labels are not supported by the eager reader"))
                      (else (unknown-hash cur start (char-string c)))))))))))
   ;; `#u8(…)`, or FX-26's `#u`: `cur` at the `u`.
-  (read-bytes (subr reading (int cursor) result)
+  (read-bytes (->* (int cursor) result)
     (lambda (start cur)
       (let* ((w (read-word cur)) (word (car w)) (cur (cdr w)))
         (cond ((and (string-ci=? word "u") (fx26?))
@@ -745,9 +745,9 @@
 ;;; ------------------------------------------------------------- the driver
 
 ;; The cursor `after`, with `s` added to the top-level data.
-(define with-datum (subr (maxeff (read @globals) (read rs) (alloc rs)) (cursor syn) cursor)
+(define with-datum (->* (cursor syn) cursor)
   (lambda (after s) (make-cursor (cur-look after) (cur-pos after) (cons s (cur-data after)) nil)))
-(define read-top (subr reading (cursor) void)
+(define read-top (->* (cursor) void)
   (lambda (cur)
     (letrec ((loop (subr reading (cursor) void)
                (lambda (cur)
@@ -760,15 +760,15 @@
 ;; A reader with nothing read yet, for Scheme or for FX-26.
 ;; Reading from position `at`: 0 for a program, or a loaded file's base,
 ;; so that its positions are already its own (`read-text-at`).
-(define start-reading-at (subr reading (bool int) state)
+(define start-reading-at (->* (bool int) state)
   (lambda (fx26 at)
     (eager-run
      (lambda ()
        (with-mark dialect-key fx26
          (lambda () (read-top (make-cursor (cons (next-char at nil) nil) at nil nil))))))))
-(define start-reading (subr reading (bool) state) (lambda (fx26) (start-reading-at fx26 0)))
-(define eager-start (subr reading () state) (lambda () (start-reading #f)))
-(define eager-start-fx26 (subr reading () state) (lambda () (start-reading #t)))
+(define start-reading (->* (bool) state) (lambda (fx26) (start-reading-at fx26 0)))
+(define eager-start (->* () state) (lambda () (start-reading #f)))
+(define eager-start-fx26 (->* () state) (lambda () (start-reading #t)))
 
 ;; For a driver: every form of `text`, as the reader reads it with a newline
 ;; after, or nothing if it does not read to the end (the driver says where,
@@ -776,12 +776,12 @@
 ;; end run as register code reads as register code (`read_to_syns`). Its
 ;; positions from `at`: a loaded file's base, its positions its own.
 (define read-text-at
-  (subr (maxeff reading asks (read rs) (alloc rs)) (string int) (listof syns acyclic))
+  (->* (string int) (listof syns acyclic))
   (lambda (text at)
     (let ((st (eager-feed (eager-feed-string (start-reading-at #t at) text) (integer->char 10))))
       (if (string=? (symbol->string (eager-status st)) "complete")
           (list (eager-state-syntax st))
           nil))))
 ;; The same, from position 0.
-(define read-text (subr (maxeff reading asks (read rs) (alloc rs)) (string) (listof syns acyclic))
+(define read-text (->* (string) (listof syns acyclic))
   (lambda (text) (read-text-at text 0)))

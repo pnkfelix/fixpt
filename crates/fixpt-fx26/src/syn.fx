@@ -8,7 +8,7 @@
 (hide (define reader-types ((proj (load-module "fx26:eager-reader-types.fx") rs re rm rc))))
 (import reader-types (type syn))
 
-(define syn->datum (subr pure (syn) datum)
+(define syn->datum (->* (syn) datum)
   (lambda (s)
     (tagcase s
       (atom (d a b) d)

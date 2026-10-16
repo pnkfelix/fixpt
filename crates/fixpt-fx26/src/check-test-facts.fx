@@ -32,28 +32,28 @@
 (hide (include check-binders) (include check-types) (include check-env) (include check-sc-graphs)
       (include check-print-parts) (include check-calls))
 
-(define k-branch-facts-of (subr pure (k-fact-list k-fact-list) k-branch-facts)
+(define k-branch-facts-of (->* (k-fact-list k-fact-list) k-branch-facts)
   (lambda (yes no) (the k-branch-facts (cons yes no))))
 ;; The fact `lin ≥ 0`, or `lin = 0`, alone.
-(define k-ge-fact (subr pure (k-size) k-fact-list)
+(define k-ge-fact (->* (k-size) k-fact-list)
   (lambda (lin) (the k-fact-list (cons (product (1 lin) (2 #f)) nil))))
-(define k-eq-fact (subr pure (k-size) k-fact-list)
+(define k-eq-fact (->* (k-size) k-fact-list)
   (lambda (lin) (the k-fact-list (cons (product (1 lin) (2 #t)) nil))))
 ;; `x < y`, as `y - x - 1 ≥ 0`; `x ≤ y`, as `y - x ≥ 0`.
-(define k-lt-fact (subr (read @globals) (k-size k-size) k-fact-list)
+(define k-lt-fact (->* (k-size k-size) k-fact-list)
   (lambda (x y) (k-ge-fact (k-size-plus (k-size-add-scaled y x -1) -1))))
-(define k-le-fact (subr (read @globals) (k-size k-size) k-fact-list)
+(define k-le-fact (->* (k-size k-size) k-fact-list)
   (lambda (x y) (k-ge-fact (k-size-add-scaled y x -1))))
 ;; Whether `z` is no size in particular: a plain `nat`'s.
-(define k-size-any? (subr pure (k-size) bool)
+(define k-size-any? (->* (k-size) bool)
   (lambda (z) (tagcase z (sz-finite () #t) (else w #f))))
-(define k-one-size (subr pure (k-size) k-maybe-size) (lambda (z) (the k-maybe-size (cons z nil))))
+(define k-one-size (->* (k-size) k-maybe-size) (lambda (z) (the k-maybe-size (cons z nil))))
 ;; The size of a natural of type `t`, if it is one (none or one).
-(define k-nat-ty-size (subr (maxeff kreads spin) (int) k-maybe-size)
+(define k-nat-ty-size (->* (int) k-maybe-size)
   (lambda (t) (tagcase (k-get (k-resolve t)) (ty-nat (z) (k-one-size z)) (else y nil))))
 ;; The size an argument is, when a natural literal or a variable of type
 ;; `(nat s)` (none or one).
-(define k-nat-size (subr (maxeff kreads spin) (kx) k-maybe-size)
+(define k-nat-size (->* (kx) k-maybe-size)
   (lambda (x)
     (tagcase x
       (x-const (ty k a b abk) (if (and (= ty k-int) (>= k 0)) (k-one-size (k-size-lit k)) nil))
@@ -79,7 +79,7 @@
       (else y nil))))
 ;; The length of an array of type `t`, where it is not `finite` (none or
 ;; one).
-(define k-array-size (subr (maxeff kreads spin) (int) k-maybe-size)
+(define k-array-size (->* (int) k-maybe-size)
   (lambda (t)
     (tagcase (k-get (k-resolve t))
       (ty-array (e z r) (tagcase z (sz-finite () nil) (else y (k-one-size z))))
@@ -87,13 +87,13 @@
 ;; Call `op` on `args`, its type and effect `te`, as arrays' lengths say
 ;; (`Checker::array_sized`): a `make-array` of a natural's length is an
 ;; array of that length.
-(define k-array-sized (subr (maxeff kstate spin) (string kxs k-te) k-te)
+(define k-array-sized (->* (string kxs k-te) k-te)
   (lambda (op args te)
     (cond ((and (string=? op "make-array") (= (k-length args) 2)) (k-array-of-length (car args) te))
           ((and (string=? op "rmake-array") (= (k-length args) 3))
            (k-array-of-length (car (cdr args)) te))
           (else te))))
-(define k-array-of-length (subr (maxeff kstate spin) (kx k-te) k-te)
+(define k-array-of-length (->* (kx k-te) k-te)
   (lambda (n te)
     (let ((z (k-nat-size n)))
       (if (null? z)
@@ -108,14 +108,14 @@
 ;; call, and of `(the t x)`, which keeps a `make-array`'s length. And a
 ;; call of `native-procedure` (`TODO.md` §97), which makes a native
 ;; closure: the type stated is of the native convention, or `fx`.
-(define k-sized (subr (maxeff checks spin) (kx k-te) k-te)
+(define k-sized (->* (kx k-te) k-te)
   (lambda (x te)
     (tagcase x
       (x-app (f args a b abk)
         (let ((op (k-std-op f)))
           (if (string=? op "native-procedure") (k-made-native te a b) (k-array-sized op args te))))
       (else y te))))
-(define k-made-native (subr (maxeff checks spin) (k-te int int) k-te)
+(define k-made-native (->* (k-te int int) k-te)
   (lambda (te a b)
     (tagcase (k-get (extract te 1))
       (ty-subr (e ps res cv)
@@ -130,7 +130,7 @@
                       a b)))))
 ;; The length of the flat array a blobref of type `t` points to (generative
 ;; types 5 and 6), where it is one array's, not `finite` (none or one).
-(define k-blobref-array-size (subr (maxeff kreads spin) (int) k-maybe-size)
+(define k-blobref-array-size (->* (int) k-maybe-size)
   (lambda (t)
     (tagcase (k-get (k-resolve t))
       (ty-named (g ds)
@@ -148,7 +148,7 @@
               (else y nil))
             nil))
       (else y nil))))
-(define k-latent-props (subr (maxeff kmakes spin) (kx) k-latent)
+(define k-latent-props (->* (kx) k-latent)
   (lambda (p)
     (tagcase p
       (x-app (f args a b abk)
@@ -167,19 +167,19 @@
                 (else y nil)))))
       (else y nil))))
 ;; Argument `i` of `args` (none or one).
-(define k-arg-at (subr (read @globals) (kxs int) kxs)
+(define k-arg-at (->* (kxs int) kxs)
   (lambda (args i)
     (cond ((null? args) nil)
           ((= i 0) (the kxs (cons (car args) nil)))
           (else (k-arg-at (cdr args) (- i 1))))))
 ;; The type of argument `i` of `args`, if a variable, or -1.
-(define k-arg-type (subr (maxeff kreads spin) (kxs int) int)
+(define k-arg-type (->* (kxs int) int)
   (lambda (args i)
     (let ((x (k-arg-at args i)))
       (if (null? x) -1 (tagcase (car x) (x-var (v va vb vavbk) (k-lookup v)) (else y -1))))))
 ;; A term's size, of `args`, if known and not just `finite` (none or one):
 ;; an argument's as a natural, its `nlist`'s length, a natural.
-(define k-term-size (subr (maxeff kreads (alloc @t) spin) (k-term kxs) k-maybe-size)
+(define k-term-size (->* (k-term kxs) k-maybe-size)
   (lambda (t args)
     (let ((z (tagcase t
                (tm-lit (k) (k-one-size (k-size-lit k)))
@@ -194,12 +194,12 @@
                          (ty-nlist (e z r) (k-one-size z))
                          (else y (the k-maybe-size nil)))))))))
       (if (or (null? z) (k-size-any? (car z))) nil z))))
-(define k-facts-then (subr (read @globals) (k-fact-list k-fact-list) k-fact-list)
+(define k-facts-then (->* (k-fact-list k-fact-list) k-fact-list)
   (lambda (xs ys) (if (null? xs) ys (the k-fact-list (cons (car xs) (k-facts-then (cdr xs) ys))))))
 ;; The fact relation `o` of sizes `xs` and `ys` is, if both are known:
 ;; `x < y`, `x ≤ y`, `x = y`, or `x ≠ y` of a natural and 0.
 (define k-rel-fact
-  (subr (maxeff kreads (alloc @t) spin) (int k-maybe-size k-maybe-size) k-fact-list)
+  (->* (int k-maybe-size k-maybe-size) k-fact-list)
   (lambda (o xs ys)
     (if (or (null? xs) (null? ys))
         nil
@@ -212,7 +212,7 @@
                         ((= (k-size-as-lit x) 0) (k-ge-fact (k-size-plus y -1)))
                         (else nil))))))))
 ;; The size facts relations `props` are, of `args` (`sizes.rs`'s `rel_facts`).
-(define k-rel-facts (subr (maxeff kreads (alloc @t) spin) (k-props kxs) k-fact-list)
+(define k-rel-facts (->* (k-props kxs) k-fact-list)
   (lambda (props args)
     (if (null? props)
         nil
@@ -222,7 +222,7 @@
           (k-facts-then here (k-rel-facts (cdr props) args))))))
 ;; What `p` shows of sizes where it holds and where not, as its callee's
 ;; type says.
-(define k-latent-facts (subr (maxeff kmakes spin) (kx) k-branch-facts)
+(define k-latent-facts (->* (kx) k-branch-facts)
   (lambda (p)
     (let ((l (k-latent-props p)))
       (if (null? l)
@@ -231,7 +231,7 @@
             (k-branch-facts-of (k-rel-facts (extract x 1) args)
                                (k-rel-facts (extract x 2) args)))))))
 ;; Argument `i` of `args`, if a variable, as the binding it is (none or one).
-(define k-arg-binding (subr (maxeff kreads (alloc @t) spin) (kxs int) k-named)
+(define k-arg-binding (->* (kxs int) k-named)
   (lambda (args i)
     (let ((x (k-arg-at args i)))
       (if (null? x)
@@ -239,7 +239,7 @@
           (tagcase (car x)
             (x-var (v va vb vavbk) (the k-named (cons (cons v (k-binding-depth v)) nil)))
             (else y nil))))))
-(define k-cert-in (subr (maxeff kreads (alloc @t) spin) (k-props int kxs) k-named)
+(define k-cert-in (->* (k-props int kxs) k-named)
   (lambda (ps which args)
     (if (null? ps)
         nil
@@ -251,14 +251,14 @@
           (if (null? v) (k-cert-in (cdr ps) which args) v)))))
 ;; What `p` certifies where it holds, as its callee's type says: the first
 ;; `(acyclic i)` (`which` 0) or `(nat i)` (1) of its, as the binding it is.
-(define k-latent-cert (subr (maxeff kmakes spin) (kx int) k-named)
+(define k-latent-cert (->* (kx int) k-named)
   (lambda (p which)
     (let ((l (k-latent-props p)))
       (if (null? l) nil (k-cert-in (extract (car l) 1) which (extract (car l) 3))))))
 ;; `v` and `k` of `(length-is? v k)` or `(certify-length v k)`: the
 ;; variable, its binding, and the length, a natural literal or a variable
 ;; of type `(nat s)` (none or one).
-(define k-length-arg (subr (maxeff kreads (alloc @t) spin) (kx kx) k-cert-lens)
+(define k-length-arg (->* (kx kx) k-cert-lens)
   (lambda (a n)
     (tagcase a
       (x-var (v va vb vavbk)
@@ -270,16 +270,16 @@
             nil))
       (else y nil))))
 ;; Whether `c` and `d` confirm the same.
-(define k-cert-len=? (subr kreads (k-cert-len k-cert-len) bool)
+(define k-cert-len=? (->* (k-cert-len k-cert-len) bool)
   (lambda (c d)
     (and (symbol=? (extract c 1) (extract d 1))
          (= (extract c 2) (extract d 2))
          (k-size=? (extract c 3) (extract d 3)))))
-(define k-cert-len-has? (subr kreads (k-cert-lens k-cert-len) bool)
+(define k-cert-len-has? (->* (k-cert-lens k-cert-len) bool)
   (lambda (cs c)
     (and (not (null? cs))
          (or (k-cert-len=? (car cs) c) (k-cert-len-has? (cdr cs) c)))))
-(define k-length-in (subr (maxeff kreads (alloc @t) spin) (k-props kxs) k-cert-lens)
+(define k-length-in (->* (k-props kxs) k-cert-lens)
   (lambda (ps args)
     (if (null? ps)
         nil
@@ -294,19 +294,19 @@
 ;; What `p` certifies of a length where it holds, as its callee's type
 ;; says (`(length i j)`, `length-is?`): the variable, its binding, and the
 ;; length (none or one).
-(define k-length-test (subr (maxeff kmakes spin) (kx) k-cert-lens)
+(define k-length-test (->* (kx) k-cert-lens)
   (lambda (p)
     (let ((l (k-latent-props p)))
       (if (null? l) nil (k-length-in (extract (car l) 1) (extract (car l) 3))))))
 ;; Whether operation `n` may give a natural of a size by itself: `+`, `-` or a length.
-(define k-sizing-op? (subr (read @globals) (string) bool)
+(define k-sizing-op? (->* (string) bool)
   (lambda (n)
     (or (k-op-either? n "+" "-")
         (string=? n "length")
         (k-op-either? n "string-length" "array-length"))))
 ;; Whether `x` may be a natural of a size without being told what it is: an
 ;; integer literal, a variable, or a `+`, `-` or `length`.
-(define k-natural-by-itself? (subr (maxeff (read @globals) (read @t) spin) (kx) bool)
+(define k-natural-by-itself? (->* (kx) bool)
   (lambda (x)
     (tagcase x
       (x-const (ty k a b abk) (= ty k-int))
@@ -315,7 +315,7 @@
       (else y #f))))
 ;; The size an operand of `+` or `-` of type `t` is: a natural literal's,
 ;; or a `(nat s)`'s (none or one).
-(define k-operand-size (subr (maxeff kreads spin) (kx int) k-maybe-size)
+(define k-operand-size (->* (kx int) k-maybe-size)
   (lambda (x t)
     (let ((lit (tagcase x
                  (x-const (ty k a b abk) (if (and (= ty k-int) (>= k 0)) k -1))
@@ -323,7 +323,7 @@
       (if (>= lit 0) (k-one-size (k-size-lit lit)) (k-nat-ty-size t)))))
 ;; `(+ a b)` and `(- a b)` of naturals of sizes `za` and `zb`, where known: the sum, and the
 ;; difference where the facts show it no less than 0 (none or one).
-(define k-nat-arith-size (subr kreads (string k-maybe-size k-maybe-size) k-maybe-size)
+(define k-nat-arith-size (->* (string k-maybe-size k-maybe-size) k-maybe-size)
   (lambda (op za zb)
     (if (or (null? za) (null? zb))
         nil

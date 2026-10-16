@@ -51,12 +51,12 @@
         k-parse-binders k-parse-place k-parse-region k-region-constant k-sfail k-symbol-head)
 (import check-effects k-one k-union)
 
-(define k-effects (subr (maxeff checks spin) (k-syns) k-eff)
+(define k-effects (->* (k-syns) k-eff)
   (lambda (xs)
     (if (null? xs)
         nil
         (let* ((e (k-parse-effect (car xs))) (rest (k-effects (cdr xs)))) (k-union e rest)))))
-(define k-parse-effect (subr (maxeff checks spin) (syn) k-eff)
+(define k-parse-effect (->* (syn) k-eff)
   (lambda (s)
     (if (syn-symbol? s)
         (k-effect-named s)
@@ -79,7 +79,7 @@
                      (k-sfail (k-cat3 "`(" head " region)`") s)))
                 (else (k-sfail "expected an effect" s)))))))
 ;; `(io k)`, `k` a kind of the fixed family (`TODO.md` §84).
-(define k-io-atom (subr (maxeff checks spin) (syn k-syns) k-eff)
+(define k-io-atom (->* (syn k-syns) k-eff)
   (lambda (s items)
     (if (= (k-length items) 2)
         (let* ((x (k-nth items 1)) (k (if (syn-symbol? x) (k-io-kind-code (syn-name x)) -1)))
@@ -89,7 +89,7 @@
         (k-sfail (string-append "`(io kind)`, the kind one of " k-io-kinds-shown) s))))
 ;; Whether `s` is written as a size, not a region (`Checker::size_written`):
 ;; a natural literal, `finite`, a size variable or value, `(+ …)`, `(- …)`.
-(define k-size-written? (subr (maxeff checks spin) (syn) bool)
+(define k-size-written? (->* (syn) bool)
   (lambda (s)
     (cond ((>= (syn-int s) 0) #t)
           ((syn-symbol? s)
@@ -103,12 +103,12 @@
                           (else x (the k-syns nil)))))
              (and (not (null? items)) (syn-symbol? (car items))
                   (case (syn-name (car items)) (("+" "-") #t) (else #f))))))))
-(define k-parse-types (subr (maxeff checks spin) (k-syns) k-ids)
+(define k-parse-types (->* (k-syns) k-ids)
   (lambda (xs)
     (if (null? xs)
         nil
         (let* ((t (k-parse-type (car xs))) (rest (k-parse-types (cdr xs)))) (cons t rest)))))
-(define k-parse-parts (subr (maxeff checks spin) (k-syns k-parts) k-parts)
+(define k-parse-parts (->* (k-syns k-parts) k-parts)
   (lambda (ps done)
     (if (null? ps)
         (reverse done)
@@ -122,7 +122,7 @@
               (k-sfail "`(label type)`" (car ps)))))))
 ;; Storage written: a procedure kept there may not reach itself unsaid
 ;; (`spin`).
-(define k-parse-type (subr (maxeff checks spin) (syn) int)
+(define k-parse-type (->* (syn) int)
   (lambda (s)
     (let* ((star (get k-arrow-star))
            (taken (set k-arrow-star #f))
@@ -135,7 +135,7 @@
         t))))
 ;; What `(proves prop)` states: the type of its proof, with the lemma kept
 ;; pending for the definition it declares.
-(define k-parse-proves (subr (maxeff checks spin) (syn string) int)
+(define k-parse-proves (->* (syn string) int)
   (lambda (prop usage)
     (let* ((items (k-items prop "a proposition"))
            (head (k-symbol-head items))
@@ -153,18 +153,18 @@
       (begin
         (set k-pending-lemma (cons (k-stated-lemma bs conc hyps) nil))
         t))))
-(define k-le (subr (maxeff checks spin) (syn) (pairof int int @t))
+(define k-le (->* (syn) (pairof int int @t))
   (lambda (s)
     (let ((items (k-items s "a proposition")))
       (if (and (= (k-length items) 3) (string=? (k-symbol-head items) "<="))
           (let* ((a (k-parse-type (k-nth items 1))) (b (k-parse-type (k-nth items 2))))
             (cons a b))
           (k-sfail "a proposition is `(<= type type)`" s)))))
-(define k-les (subr (maxeff checks spin) (k-syns) k-hyps)
+(define k-les (->* (k-syns) k-hyps)
   (lambda (xs)
     (if (null? xs) nil (let* ((h (k-le (car xs))) (rest (k-les (cdr xs)))) (cons h rest)))))
 ;; `(name d …)` for the `g`th generative type: a node, never expanded.
-(define k-apply-gen (subr (maxeff checks spin) (syn int k-syns) int)
+(define k-apply-gen (->* (syn int k-syns) int)
   (lambda (s g args)
     (let* ((gen (k-gen-of g)) (ps (extract gen 2)))
       (if (not (= (k-length args) (k-length ps)))
@@ -172,7 +172,7 @@
           (let ((t (k-ty-new (ty-named g (k-gen-args ps args)))))
             ;; What it holds may keep a procedure that reaches itself.
             (begin (k-no-knot t (syn-start s) (syn-end s)) t))))))
-(define k-gen-args (subr (maxeff checks spin) (k-binders k-syns) k-descs)
+(define k-gen-args (->* (k-binders k-syns) k-descs)
   (lambda (ps args)
     (if (null? ps)
         nil
@@ -191,13 +191,13 @@
 ;; `k-include-mark`), the modules included's, found when they are typed (`TODO.md`
 ;; §69), as `parse.rs`; else what `no` says.
 (define k-type-unknown
-  (subr (maxeff checks spin) (symbol syn (subr (maxeff checks spin) () string)) int)
+  (->* (symbol syn (subr (maxeff checks spin) () string)) int)
   (lambda (sym s no)
     (if (not (null? (k-lookup-desc '%include-scope)))
         (k-ty-new (ty-select '%include sym))
         (k-sfail (no) s))))
 ;; The type a name stands for.
-(define k-type-named (subr (maxeff checks spin) (syn) int)
+(define k-type-named (->* (syn) int)
   (lambda (s)
     (let* ((n (syn-name s)) (sym (string->symbol n)) (base (k-find (get k-base) sym)))
       (cond ((string=? n "void") k-void)
@@ -222,7 +222,7 @@
                          -1)))))))))
 ;; Type name `n`, `sym`, written `s`, as the description scope and
 ;; `include`s say.
-(define k-type-name-read (subr (maxeff checks spin) (syn string symbol) int)
+(define k-type-name-read (->* (syn string symbol) int)
   (lambda (s n sym)
     (let ((d (k-lookup-desc sym))
           (no (lambda () (string-append (k-quote n) " is not a type"))))
@@ -239,7 +239,7 @@
             (ds-rec (t) (if (k-flat-var-type? t) (k-sfail (k-flat-not-type n) s) t))
             (ds-gen (g) (k-apply-gen s g nil))
             (else x (k-sfail (no) s)))))))
-(define k-parse-type-node (subr (maxeff checks spin) (syn) int)
+(define k-parse-type-node (->* (syn) int)
   (lambda (s)
     (if (syn-symbol? s)
         (k-type-named s)
@@ -251,7 +251,7 @@
                 ((null? (k-lookup-desc hd)) (k-with-applied withs hd (cdr items) -1))
                 (else (k-with-applied withs hd (cdr items) (k-parse-type-list s items hd))))))))
 ;; Type `s`, `(hd …)`, of `items`, as the description scope says.
-(define k-parse-type-list (subr (maxeff checks spin) (syn k-syns symbol) int)
+(define k-parse-type-list (->* (syn k-syns symbol) int)
   (lambda (s items hd)
     (let* ((abbrev (if (symbol=? hd '|()|)
                        (the (listof k-ds acyclic) nil)
@@ -275,7 +275,7 @@
 ;; which, where `m` does not give `f`, is the next's, and so on out to
 ;; `outer`, what it means here otherwise, or -1. As `parse.rs`'s
 ;; `with_applied`.
-(define k-with-applied (subr (maxeff checks spin) (k-names symbol k-syns int) int)
+(define k-with-applied (->* (k-names symbol k-syns int) int)
   (lambda (withs f args outer)
     (if (null? withs)
         outer
@@ -287,13 +287,13 @@
                  app)))))
 ;; A procedure type's parameters and result, after its effect, with its
 ;; convention: `(subr …)`'s and `(-> …)`'s.
-(define k-subr-type (subr (maxeff checks spin) (k-eff syn syn k-conv) int)
+(define k-subr-type (->* (k-eff syn syn k-conv) int)
   (lambda (e params result cv)
     (let ((ts (k-read-params (k-items-or-nil params "parameter types") result)))
       (k-ty-new (ty-subr e (k-ids-but-last ts) (k-ids-last ts) cv)))))
 ;; `(subr effect (param …) result)`, or with a convention first, `(subr
 ;; (conv C) effect (param …) result)`; left out, it is the program's.
-(define k-parse-subr (subr (maxeff checks spin) (syn k-syns) int)
+(define k-parse-subr (->* (syn k-syns) int)
   (lambda (s items)
     (let* ((conv? (and (= (k-length items) 5) (string=? (k-list-head (k-nth items 1)) "conv")))
            (cv (if conv? (k-parse-conv-form (k-nth items 1)) (get k-conv-default)))
@@ -302,7 +302,7 @@
         (k-shape (= (k-length items) 4) "`(subr effect (param …) result)`" s)
         (k-subr-type (k-parse-effect (k-nth items 1)) (k-nth items 2) (k-nth items 3) cv)))))
 ;; Whether signature `s` is `(->* …)`, under any `poly`s.
-(define* k-written-arrow-star? (subr (maxeff (read @s) spin) (syn) bool)
+(define k-written-arrow-star? (->* (syn) bool)
   (lambda (s)
     (tagcase s
       (lst (xs d a b)
@@ -314,7 +314,7 @@
 ;; A definition's signature that may be `(->* (param …) result)`, under any
 ;; `poly`s: read as `(subr pure (param …) result)`, the effect the
 ;; definition then finds standing in for its own (`check-program.fx`).
-(define k-parse-arrow-star (subr (maxeff checks spin) (syn) int)
+(define k-parse-arrow-star (->* (syn) int)
   (lambda (s)
     (let* ((items (k-items s "a type")) (head (k-symbol-head items)))
       (cond ((string=? head "->*")
@@ -326,13 +326,13 @@
                     (let ((t (k-parse-type-node s))) (begin (set k-arrow-star #f) t))))
             (else (k-parse-type-node s))))))
 ;; `(-> (param …) result)`: `(subr pure (param …) result)`.
-(define k-parse-arrow (subr (maxeff checks spin) (syn k-syns) int)
+(define k-parse-arrow (->* (syn k-syns) int)
   (lambda (s items)
     (begin
       (k-shape (= (k-length items) 3) "`(-> (param …) result)`" s)
       (k-subr-type nil (k-nth items 1) (k-nth items 2) (get k-conv-default)))))
 ;; `(proves prop)`.
-(define k-parse-proves-type (subr (maxeff checks spin) (syn k-syns) int)
+(define k-parse-proves-type (->* (syn k-syns) int)
   (lambda (s items)
     (let ((usage (string-append "`(proves (<= type type))` or `(proves (poly ((name kind) …) "
                                 "(<= type type) (<= type type) …))`")))
@@ -341,7 +341,7 @@
         (let* ((saved (get k-dscope)) (t (k-parse-proves (k-nth items 1) usage)))
           (begin (set k-dscope saved) t))))))
 ;; A type written as a form, `(hd …)`, `hd` no family's name.
-(define k-parse-type-form (subr (maxeff checks spin) (syn k-syns symbol) int)
+(define k-parse-type-form (->* (syn k-syns symbol) int)
   (lambda (s items hd)
     (let ((n (k-length items)))
       (case hd
@@ -461,7 +461,7 @@
                (else (k-sfail (k-not-type-list hd) s))))))))
 ;; `(dletrec ((name type) …) type)`: each name gets a forwarding slot
 ;; before any body is read, so the bodies can refer to it and each other.
-(define k-parse-dletrec (subr (maxeff checks spin) (syn k-syns) int)
+(define k-parse-dletrec (->* (syn k-syns) int)
   (lambda (s items)
     (begin
       (k-shape (= (k-length items) 3) "`(dletrec ((name type) …) type)`" s)
@@ -476,12 +476,12 @@
 ;; ((name type)) name)`.
 ;; A union of members of disjoint shapes at run time
 ;; (`docs/research/logical-types.md`, L1), normalized.
-(define k-parse-union (subr (maxeff checks spin) (syn k-syns) int)
+(define k-parse-union (->* (syn k-syns) int)
   (lambda (s items)
     (begin
       (k-shape (>= (k-length items) 3) "`(union type type …)`" s)
       (k-union-of (k-parse-types (cdr items)) (syn-start s) (syn-end s)))))
-(define k-parse-mu (subr (maxeff checks spin) (syn k-syns) int)
+(define k-parse-mu (->* (syn k-syns) int)
   (lambda (s items)
     (begin
       (k-shape (= (k-length items) 3) "`(mu name type)`" s)
@@ -494,7 +494,7 @@
              (filled (k-set-link slot t))
              (grounded (k-grounded slot (syn-start s) (syn-end s))))
         slot))))
-(define k-dletrec-fill (subr (maxeff checks spin) (k-slots) unit)
+(define k-dletrec-fill (->* (k-slots) unit)
   (lambda (ss)
     (if (null? ss)
         #u
@@ -502,7 +502,7 @@
           (begin (k-set-link (car (car ss)) t) (k-dletrec-fill (cdr ss)))))))
 ;; A use of a parametric abbreviation: its body, read with each parameter
 ;; bound to the description given for it.
-(define k-expand-abbrev (subr (maxeff checks spin) (syn symbol k-params syn k-syns) int)
+(define k-expand-abbrev (->* (syn symbol k-params syn k-syns) int)
   (lambda (s name ps body args)
     (cond
       ((not (= (k-length args) (k-length ps)))
@@ -512,7 +512,7 @@
 ;; The family `name`'s body, read with its parameters bound as `bound`
 ;; says: a use inside with the same descriptions is the slot its type
 ;; will fill, a knot.
-(define k-expand-bound (subr (maxeff checks spin) (syn symbol syn k-scope) int)
+(define k-expand-bound (->* (syn symbol syn k-scope) int)
   (lambda (s name body bound)
     (let ((knot (k-knot-of (get k-knots) name bound)))
       (if (>= knot 0)
@@ -529,7 +529,7 @@
                        (k-set-link slot t)
                        (k-grounded slot (syn-start s) (syn-end s))
                        slot))))))))
-(define k-abbrev-args (subr (maxeff checks spin) (k-params k-syns) k-scope)
+(define k-abbrev-args (->* (k-params k-syns) k-scope)
   (lambda (ps args)
     (if (null? ps)
         nil
@@ -544,7 +544,7 @@
                         (else (ds-eff (k-parse-effect (car args))))))
                (rest (k-abbrev-args (cdr ps) (cdr args))))
           (cons (cons (extract (car ps) 1) d) rest)))))
-(define* k-define-type (subr (maxeff checks spin) (symbol syn int int) int)
+(define k-define-type (->* (symbol syn int int) int)
   (lambda (name def a b)
     (let ((ahead (k-ahead-take name)))
       (if (>= ahead 0)
@@ -560,12 +560,12 @@
               (let ((t (k-parse-type def)))
                 (begin (k-set-link slot t) (k-grounded slot a b) (k-note-closed slot)))))))))
 ;; Name or `dlambda` `s`, a description function.
-(define k-fun-d (subr (maxeff checks spin) (syn) k-desc)
+(define k-fun-d (->* (syn) k-desc)
   (lambda (s) (df (k-parse-fun s -1))))
 ;; A `proj` argument: which kind it is shows in its shape, or, for a bare
 ;; name, in how the name is bound.
 ;; A convention, if name `s` is one of FX-26's own; else a type.
-(define k-parse-conv-or-type (subr (maxeff checks spin) (syn) k-desc)
+(define k-parse-conv-or-type (->* (syn) k-desc)
   (lambda (s)
     (let ((n (syn-name s)))
       (if (or (string=? n "cellular") (string=? n "native") (string=? n "fx"))
@@ -573,7 +573,7 @@
           (dt (k-parse-type s))))))
 ;; What name `s`, meaning `d` (none or one), is as a `proj` argument: by how
 ;; it is bound; if it is not bound as a description, a convention or a type.
-(define k-parse-d-bound (subr (maxeff checks spin) (syn (listof k-ds acyclic)) k-desc)
+(define k-parse-d-bound (->* (syn (listof k-ds acyclic)) k-desc)
   (lambda (s d)
     (if (null? d)
         (if (null? (k-ctor-params (syn-name s))) (k-parse-conv-or-type s) (k-fun-d s))
@@ -595,7 +595,7 @@
           (ds-conv (c) (dc c))
           (else x (k-parse-conv-or-type s))))))
 ;; A `proj` argument that is a name.
-(define k-parse-d-name (subr (maxeff checks spin) (syn) k-desc)
+(define k-parse-d-name (->* (syn) k-desc)
   (lambda (s)
     (let* ((n (syn-name s)) (sym (string->symbol n)))
       (cond ((k-at-name? n) (dr (k-region-constant sym)))
@@ -607,7 +607,7 @@
             ((string=? n "finite") (dz (sz-finite)))
             ((string=? n "heap") (dr (r-heap)))
             (else (k-parse-d-bound s (k-lookup-desc sym)))))))
-(define k-parse-d (subr (maxeff checks spin) (syn) k-desc)
+(define k-parse-d (->* (syn) k-desc)
   (lambda (s)
     (cond ((tagcase s (atom (d a b) (datum-int? d)) (else x #f))
            ;; A natural number can only be a size.
@@ -620,7 +620,7 @@
                    ((or (string=? hd "+") (string=? hd "-")) (dz (k-parse-size s)))
                    (else (dt (k-parse-type s)))))))))
 ;; A description of kind `k`, as written.
-(define k-parse-desc-at (subr (maxeff checks spin) (syn int) k-desc)
+(define k-parse-desc-at (->* (syn int) k-desc)
   (lambda (s k)
     (cond ((k-type-kind? k) (dt (k-parse-type s)))
           ((= k 7) (dt (k-parse-flat s)))
@@ -631,18 +631,18 @@
           ((= k 6) (dc (k-parse-conv s)))
           (else (df (k-parse-fun s k))))))
 ;; Descriptions `xs`, each of its kind in `ks`.
-(define k-parse-descs-at (subr (maxeff checks spin) (k-syns k-ids) k-descs)
+(define k-parse-descs-at (->* (k-syns k-ids) k-descs)
   (lambda (xs ks)
     (if (null? xs)
         nil
         (let ((d (k-parse-desc-at (car xs) (car ks))))
           (cons d (k-parse-descs-at (cdr xs) (cdr ks)))))))
 ;; Description `s`, of kind `k` if that is known (not -1).
-(define k-parse-desc-of (subr (maxeff checks spin) (syn int) k-desc)
+(define k-parse-desc-of (->* (syn int) k-desc)
   (lambda (s k) (if (>= k 0) (k-parse-desc-at s k) (k-parse-d s))))
 ;; A description function, as written where one of kind `want` (-1 if not
 ;; known) is wanted.
-(define k-parse-fun (subr (maxeff checks spin) (syn int) int)
+(define k-parse-fun (->* (syn int) int)
   (lambda (s want)
     (let* ((f (k-parse-fun-node s want)) (got (k-fun-kind f)))
       (if (and (>= want 0) (>= got 0) (not (= got want)))
@@ -650,7 +650,7 @@
                            " is wanted, and this is of kind " (k-kind-text got))
                    s)
           f))))
-(define k-parse-fun-node (subr (maxeff checks spin) (syn int) int)
+(define k-parse-fun-node (->* (syn int) int)
   (lambda (s want)
     (if (syn-symbol? s)
         (k-fun-named s)
@@ -666,7 +666,7 @@
                                 (else (k-sfail usage s)))))))
             (else x (k-sfail usage s)))))))
 ;; `(dlambda ((x k) …) d)`.
-(define k-parse-dlambda (subr (maxeff checks spin) (syn k-syns int) int)
+(define k-parse-dlambda (->* (syn k-syns int) int)
   (lambda (s items want)
     (if (not (= (k-length items) 3))
         (k-sfail "`(dlambda ((name kind) …) description)`" s)
@@ -677,7 +677,7 @@
                (body (k-parse-desc-of (k-nth items 2) result)))
           (begin (set k-dscope saved) (k-lam bs body))))))
 ;; `(g d …)`, where `g` gives a description function.
-(define k-parse-fun-app (subr (maxeff checks spin) (syn k-syns) int)
+(define k-parse-fun-app (->* (syn k-syns) int)
   (lambda (s items)
     (let* ((g (k-parse-fun (car items) -1))
            (shown (k-quote (k-show-ty g)))
@@ -690,7 +690,7 @@
              (let ((d (k-apply-fun g (k-parse-descs-at (cdr items) (car (car parts))))))
                (tagcase d (df (f) f) (else y (k-sfail no s)))))))))
 ;; A description function named.
-(define k-fun-named (subr (maxeff checks spin) (syn) int)
+(define k-fun-named (->* (syn) int)
   (lambda (s)
     (let* ((n (syn-name s)) (sym (string->symbol n)) (d (k-lookup-desc sym))
            (no (k-cat3 (k-quote n) " is not a description function" "")))
@@ -706,7 +706,7 @@
                 (if (null? ps) (k-sfail no s) (k-gen-eta g ps))))
             (else x (k-sfail no s)))))))
 ;; A type family as a description function: `(dlambda ((p k) …) (name p …))`.
-(define k-abbrev-eta (subr (maxeff checks spin) (syn symbol k-params syn) int)
+(define k-abbrev-eta (->* (syn symbol k-params syn) int)
   (lambda (s name ps body)
     (let* ((bs (k-fresh-named (k-params-names ps) (k-params-kinds ps)))
            (t (if (> (get k-expanding) 64)
@@ -717,7 +717,7 @@
 ;; kinds it takes; reduced, if it is a `dlambda`. Where `f`'s kind is not
 ;; known yet (a `select`), what it is given is read by its shape, and
 ;; checked once it is resolved.
-(define k-parse-app (subr (maxeff checks spin) (syn int k-syns) int)
+(define k-parse-app (->* (syn int k-syns) int)
   (lambda (s f args)
     (let ((parts (k-arrow-parts (k-fun-kind f))))
       (if (null? parts)
@@ -730,13 +730,13 @@
                    (tagcase (k-apply-fun f (k-parse-descs-at args ps))
                      (dt (t) t)
                      (else y (k-not-giving f "a type" s))))))))))
-(define k-parse-ds (subr (maxeff checks spin) (k-syns) k-descs)
+(define k-parse-ds (->* (k-syns) k-descs)
   (lambda (xs)
     (if (null? xs) nil (let ((d (k-parse-d (car xs)))) (cons d (k-parse-ds (cdr xs)))))))
 ;; `(e d …)` in an effect, where `e` is a description function to an
 ;; effect: its effect, reduced if it is a `dlambda`; none if `items` are
 ;; no such application.
-(define k-parse-effect-app (subr (maxeff checks spin) (syn k-syns) (listof k-eff acyclic))
+(define k-parse-effect-app (->* (syn k-syns) (listof k-eff acyclic))
   (lambda (s items)
     (let ((f (if (null? items)
                  -1
@@ -760,7 +760,7 @@
 ;; A `moduleof`'s description `what` of `name`, in scope in what follows it:
 ;; `(desc e E)`, an effect, as a module's `define-effect` gives; a description
 ;; function; or a type.
-(define k-moduleof-desc (subr (maxeff checks spin) (symbol syn) int)
+(define k-moduleof-desc (->* (symbol syn) int)
   (lambda (name what)
     (cond ((k-effect-shaped? what)
            (let* ((e (k-parse-effect what)) (d (k-effect-desc e)))
@@ -772,7 +772,7 @@
 ;; and `vs` (newest first), their names `seen` (types and effects) and `vseen`
 ;; (values): a value may have a type's name.
 (define k-moduleof-comps
-  (subr (maxeff checks spin) (k-syns k-parts k-parts k-parts k-names k-names) int)
+  (->* (k-syns k-parts k-parts k-parts k-names k-names) int)
   (lambda (cs abs ds vs seen vseen)
     (if (null? cs)
         (let ((ds (k-parts-reversed ds nil)) (vs (k-parts-reversed vs nil)))
@@ -801,13 +801,13 @@
             (else (k-sfail k-moduleof-usage (car parts))))))))
 ;; `(moduleof …)`, each abstract type a binder in scope in what follows it;
 ;; or `(select m t)`.
-(define k-read-module-type (subr (maxeff checks spin) (syn k-syns symbol) int)
+(define k-read-module-type (->* (syn k-syns symbol) int)
   (lambda (s items hd)
     (if (symbol=? hd 'select)
         (k-parse-select s items)
         (let* ((saved (get k-dscope)) (t (k-moduleof-comps (cdr items) nil nil nil nil nil)))
           (begin (set k-dscope saved) t)))))
-(define k-selects-from (subr (maxeff kstate spin) (int k-seen (ref k-selects @t)) unit)
+(define k-selects-from (->* (int k-seen (ref k-selects @t)) unit)
   (lambda (t seen out)
     (let ((t (k-resolve t)))
       (if (k-seen? seen t)
@@ -816,20 +816,20 @@
             (tagcase (k-get t)
               (ty-select (m n) (set out (cons (product (1 m) (2 n) (3 t)) (get out))))
               (else y (k-selects-each (k-ty-kids t) seen out))))))))
-(define k-selects-each (subr (maxeff kstate spin) (k-ids k-seen (ref k-selects @t)) unit)
+(define k-selects-each (->* (k-ids k-seen (ref k-selects @t)) unit)
   (lambda (ts seen out)
     (if (null? ts)
         #u
         (begin (k-selects-from (car ts) seen out) (k-selects-each (cdr ts) seen out)))))
 ;; The `select`s in `t`, in the order first met.
-(define k-selects-in (subr (maxeff kstate spin) (int) k-selects)
+(define k-selects-in (->* (int) k-selects)
   (lambda (t)
     (let ((out (the (ref k-selects @t) (new nil))))
       (begin (k-selects-from t (k-new-seen) out)
              (k-selects-reversed (get out) nil)))))
 ;; `t` with each `(select m x)` of a parameter named before it, the `k`th,
 ;; made `(select $k x)`.
-(define k-select-params (subr (maxeff kstate spin) (int k-names) int)
+(define k-select-params (->* (int k-names) int)
   (lambda (t names)
     (let ((sel (if (k-all-unnamed? names)
                    (the k-selects nil)
@@ -841,7 +841,7 @@
                    (let ((r (k-subst t nil))) (begin (set k-select-map outer) r))))))))
 ;; A `subr` type's parameters `ps` (from those named `names`) and its
 ;; result `r`, read: their types, the result last.
-(define k-read-params-from (subr (maxeff checks spin) (k-syns syn k-names) k-ids)
+(define k-read-params-from (->* (k-syns syn k-names) k-ids)
   (lambda (ps r names)
     (if (null? ps)
         ;; A test's result, `(bool …)`: here, and only here.
@@ -855,5 +855,5 @@
                (name (if (null? named) k-no-name (car named)))
                (rest (k-read-params-from (cdr ps) r (k-names-snoc names name))))
           (cons t rest)))))
-(define k-read-params (subr (maxeff checks spin) (k-syns syn) k-ids)
+(define k-read-params (->* (k-syns syn) k-ids)
   (lambda (ps r) (k-read-params-from ps r nil))))))

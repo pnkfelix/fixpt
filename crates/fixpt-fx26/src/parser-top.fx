@@ -20,7 +20,7 @@
 (import parser-exps-module parse-exp parse-rec-bindings)
 ;; `(define name type expression)` or `(define name expression)`; for a
 ;; `define*` (`star?`), the type's list holds the head too.
-(define parse-define (subr (maxeff parses spin) (syn bool) top)
+(define parse-define (->* (syn bool) top)
   (lambda (s star?)
     (let* ((items (syn-items s "a definition")) (n (len items)) (a (syn-start s)) (b (syn-end s)))
       (case n ((4)
@@ -32,7 +32,7 @@
                (let ((name (syn-symbol (nth items 1))))
                  (t-define name (the syns-a nil) (parse-exp (nth items 2)) a b)))
               (else (pfail "`(define name type expression)` or `(define name expression)`" s))))))
-(define parse-top (subr (maxeff parses spin) (syn) top)
+(define parse-top (->* (syn) top)
   (lambda (s)
     (let ((head (form-head s)))
       (case head ((define) (parse-define s #f))
@@ -61,38 +61,38 @@
                         (pfail "`(define-convention name clause …)`" s))))
                  (else (t-exp (parse-exp s)))))))
 
-(define append-tops (subr (read @globals) (top-list top-list) top-list)
+(define append-tops (->* (top-list top-list) top-list)
   (lambda (xs ys) (if (null? xs) ys (cons (car xs) (append-tops (cdr xs) ys)))))
 
 ;; `(define-generative head rep)`: the form, and its two conversions, each
 ;; the identity: `(define up-name (poly (param …) (subr pure (rep) (name p
 ;; …))) (lambda (x) x))`, and `down-name` the other way.
-(define generative? (subr (maxeff (read @globals) (read rs)) (syn) bool)
+(define generative? (->* (syn) bool)
   (lambda (s) (form-of? s 'define-generative)))
 ;; A parameter as a binder, its variance left out.
-(define gen-binder (subr parses (syn int int) syn)
+(define gen-binder (->* (syn int int) syn)
   (lambda (param a b)
     (let ((p (syn-items param "a parameter")))
       (if (>= (len p) 2)
           (mk-list (list (car p) (nth p 1)) a b)
           (pfail "a parameter is `(name kind)`, `(name kind +)` or `(name kind -)`" param)))))
 ;; The parameters as binders, and their names.
-(define gen-binders (subr parses (syns-a int int) syns-a)
+(define gen-binders (->* (syns-a int int) syns-a)
   (lambda (ps a b)
     (if (null? ps)
         nil
         (let ((binder (gen-binder (car ps) a b)))
           (cons binder (gen-binders (cdr ps) a b))))))
-(define gen-names (subr parses (syns-a) syns-a)
+(define gen-names (->* (syns-a) syns-a)
   (lambda (bs)
     (if (null? bs)
         nil
         (cons (car (syn-items (car bs) "a parameter")) (gen-names (cdr bs))))))
 ;; A conversion, `prefix` and the name `n`, of type `ty`: the identity.
-(define gen-conversion (subr (read @globals) (string string syn exp int int) top)
+(define gen-conversion (->* (string string syn exp int int) top)
   (lambda (prefix n ty identity a b)
     (t-define (string->symbol (string-append prefix n)) (the syns-a (cons ty nil)) identity a b)))
-(define parse-generative (subr parses (syn) top-list)
+(define parse-generative (->* (syn) top-list)
   (lambda (s)
     (let* ((items (syn-items s "a generative type")) (a (syn-start s)) (b (syn-end s))
            (usage (string-append "`(define-generative name type)` or "
@@ -117,18 +117,18 @@
             (list (t-define-generative head rep a b) up down))))))
 
 ;; Each of `xs`, parsed as a top-level form.
-(define parse-each-top (subr (maxeff parses spin) (syns-a) top-list)
+(define parse-each-top (->* (syns-a) top-list)
   (lambda (xs) (if (null? xs) nil (cons (parse-top (car xs)) (parse-each-top (cdr xs))))))
 ;; What top-level form `x` makes: a generative type's or a datatype's
 ;; several forms, or one.
-(define parse-made (subr (maxeff parses spin) (syn) top-list)
+(define parse-made (->* (syn) top-list)
   (lambda (x)
     (cond ((generative? x) (parse-generative x))
           ((datatype? x) (parse-each-top (expand-datatype x)))
           ((import? x) (parse-each-top (expand-import x)))
           (else (the top-list (cons (parse-top x) nil))))))
 
-(define parse-tops (subr (maxeff parses spin) (syns-a) top-list)
+(define parse-tops (->* (syns-a) top-list)
   (lambda (xs)
     (if (null? xs)
         nil
@@ -142,7 +142,7 @@
 ;; prompt catches every failure, but its tag is a global whose type names
 ;; `rp`, so the control effect stays in the type, as the reader's on `re` do;
 ;; `rp` is one of the regions this module is given, so that is still licensed.
-(define parse-program (subr (maxeff (read @globals) parses spin) (syns-a) presult)
+(define parse-program (->* (syns-a) presult)
   (lambda (forms)
     (begin (shared-reset!)
            (prompt parse-tag (p-ok (number-tops (parse-tops forms))) (lambda (r) r)))))

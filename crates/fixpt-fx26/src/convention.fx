@@ -24,23 +24,23 @@
 ;;; ------------------------------------------------------------ reading
 
 ;; The character at `i` of `t`, as a string.
-(define cv-ch (subr pure (string int) string) (lambda (t i) (substring t i (+ i 1))))
+(define cv-ch (->* (string int) string) (lambda (t i) (substring t i (+ i 1))))
 ;; Where the atom from `i` of `t` ends: at a space, a parenthesis or the end.
-(define cv-atom-end (subr cvr (string int) int)
+(define cv-atom-end (->* (string int) int)
   (lambda (t i)
     (if (or (>= i (string-length t)) (string=? (cv-ch t i) " ") (string=? (cv-ch t i) "(")
             (string=? (cv-ch t i) ")"))
         i
         (cv-atom-end t (+ i 1)))))
 ;; The decimal digits of `s` from `i`, after `acc`; -1 if one is no digit.
-(define cv-digits (subr cvr (string int int) int)
+(define cv-digits (->* (string int int) int)
   (lambda (s i acc)
     (cond ((= i (string-length s)) acc)
           ((char-numeric? (string-ref s i))
            (cv-digits s (+ i 1) (+ (* acc 10) (- (char->integer (string-ref s i)) 48))))
           (else -1))))
 ;; An atom: an integer, in decimal, perhaps negative; else a name.
-(define cv-atom (subr cvr (string) cv-sx)
+(define cv-atom (->* (string) cv-sx)
   (lambda (a)
     (let* ((neg (and (> (string-length a) 1) (string=? (substring a 0 1) "-")))
            (n (if (= (string-length a) 0) -1 (cv-digits a (if neg 1 0) 0))))
@@ -49,7 +49,7 @@
             (else (cx-int n))))))
 (define-rec
   ;; What is at `i` of `t`, and where it ends.
-  (cv-read-at (subr cvr (string int) cv-at)
+  (cv-read-at (->* (string int) cv-at)
     (lambda (t i)
       (cond ((>= i (string-length t)) (product (x (cx-list nil)) (at i)))
             ((string=? (cv-ch t i) "(")
@@ -58,7 +58,7 @@
             (else (let ((e (cv-atom-end t i)))
                     (product (x (cv-atom (substring t i e))) (at e)))))))
   ;; The items from `i` of `t` to the `)` that ends them, and the place past it.
-  (cv-read-items (subr cvr (string int) cv-sxs-at)
+  (cv-read-items (->* (string int) cv-sxs-at)
     (lambda (t i)
       (cond ((>= i (string-length t)) (product (xs nil) (at i)))
             ((string=? (cv-ch t i) ")") (product (xs nil) (at (+ i 1))))
@@ -70,49 +70,49 @@
 ;;; ------------------------------------------------------------ looking up
 
 ;; A list's items; none of anything else.
-(define cx-items (subr pure (cv-sx) cv-sxs)
+(define cx-items (->* (cv-sx) cv-sxs)
   (lambda (x) (tagcase x (cx-list (xs) xs) (else y nil))))
 ;; A name, or "".
-(define cx-name-of (subr pure (cv-sx) string)
+(define cx-name-of (->* (cv-sx) string)
   (lambda (x) (tagcase x (cx-name (n) n) (else y ""))))
 ;; An integer, or 0.
-(define cx-int-of (subr pure (cv-sx) int)
+(define cx-int-of (->* (cv-sx) int)
   (lambda (x) (tagcase x (cx-int (n) n) (else y 0))))
 ;; A clause's role: the name it begins with.
-(define cx-role (subr cvr (cv-sx) string)
+(define cx-role (->* (cv-sx) string)
   (lambda (x) (let ((xs (cx-items x))) (if (null? xs) "" (cx-name-of (car xs))))))
 ;; What follows `role` in the first of `xs` that is `(role …)`; none if none is.
-(define cx-get (subr cvr (cv-sxs string) cv-sxs)
+(define cx-get (->* (cv-sxs string) cv-sxs)
   (lambda (xs role)
     (cond ((null? xs) nil)
           ((string=? (cx-role (car xs)) role) (cdr (cx-items (car xs))))
           (else (cx-get (cdr xs) role)))))
 ;; Whether one of `xs` is `(role …)`.
-(define cx-has? (subr cvr (cv-sxs string) bool)
+(define cx-has? (->* (cv-sxs string) bool)
   (lambda (xs role)
     (cond ((null? xs) #f) ((string=? (cx-role (car xs)) role) #t) (else (cx-has? (cdr xs) role)))))
 ;; The `k`th of `xs`, from 0; an empty list past the end.
-(define cx-nth (subr cvr (cv-sxs int) cv-sx)
+(define cx-nth (->* (cv-sxs int) cv-sx)
   (lambda (xs k)
     (cond ((null? xs) (cx-list nil)) ((= k 0) (car xs)) (else (cx-nth (cdr xs) (- k 1))))))
 ;; In `xs`, `(role n …)`'s `n`; `(role a n …)`'s.
-(define cx-int-at (subr cvr (cv-sxs string) int)
+(define cx-int-at (->* (cv-sxs string) int)
   (lambda (xs role) (cx-int-of (cx-nth (cx-get xs role) 0))))
-(define cx-int2-at (subr cvr (cv-sxs string) int)
+(define cx-int2-at (->* (cv-sxs string) int)
   (lambda (xs role) (cx-int-of (cx-nth (cx-get xs role) 1))))
 ;; A register's number: `xN` N, `sp` 31; -1 for anything else.
-(define cx-reg (subr cvr (cv-sx) int)
+(define cx-reg (->* (cv-sx) int)
   (lambda (x)
     (let ((n (cx-name-of x)))
       (cond ((string=? n "sp") 31)
             ((and (> (string-length n) 1) (string=? (substring n 0 1) "x")) (cv-digits n 1 0))
             (else -1)))))
-(define cx-reg-at (subr cvr (cv-sxs string) int)
+(define cx-reg-at (->* (cv-sxs string) int)
   (lambda (xs role) (cx-reg (cx-nth (cx-get xs role) 0))))
-(define cx-regs (subr cvr (cv-sxs) cv-ints)
+(define cx-regs (->* (cv-sxs) cv-ints)
   (lambda (xs) (if (null? xs) nil (the cv-ints (cons (cx-reg (car xs)) (cx-regs (cdr xs)))))))
 ;; `((name n) …)`, each name and its number; `((n name) …)`, a trap's kinds.
-(define cx-names (subr cvr (cv-sxs) cv-names)
+(define cx-names (->* (cv-sxs) cv-names)
   (lambda (xs)
     (if (null? xs)
         nil
@@ -120,7 +120,7 @@
           (the cv-names
                (cons (product (name (cx-name-of (cx-nth i 0))) (number (cx-int-of (cx-nth i 1))))
                               (cx-names (cdr xs))))))))
-(define cx-numbered (subr cvr (cv-sxs) cv-names)
+(define cx-numbered (->* (cv-sxs) cv-names)
   (lambda (xs)
     (if (null? xs)
         nil
@@ -129,7 +129,7 @@
                (cons (product (name (cx-name-of (cx-nth i 1))) (number (cx-int-of (cx-nth i 0))))
                               (cx-numbered (cdr xs))))))))
 ;; `((name at width) …)`: a header's fields.
-(define cx-bits (subr cvr (cv-sxs) cv-bits)
+(define cx-bits (->* (cv-sxs) cv-bits)
   (lambda (xs)
     (if (null? xs)
         nil
@@ -138,7 +138,7 @@
                                       (width (cx-int-of (cx-nth i 2))))
                              (cx-bits (cdr xs))))))))
 ;; `((role register …) …)`: a routine's inputs.
-(define cx-in (subr cvr (cv-sxs) cv-regs)
+(define cx-in (->* (cv-sxs) cv-regs)
   (lambda (xs)
     (if (null? xs)
         nil
@@ -146,12 +146,12 @@
           (the cv-regs (cons (product (name (cx-name-of (car i))) (registers (cx-regs (cdr i))))
                              (cx-in (cdr xs))))))))
 ;; The offset of the state's field that `(role state field …)` in `xs` names.
-(define cx-state-at (subr cvr (cv-sxs string cv-sxs) int)
+(define cx-state-at (->* (cv-sxs string cv-sxs) int)
   (lambda (xs role st) (cx-int-at st (cx-name-of (cx-nth (cx-get xs role) 1)))))
 
 ;;; ------------------------------------------------------------ the clauses
 
-(define cv-registers-of (subr cvr (cv-sxs) cv-registers)
+(define cv-registers-of (->* (cv-sxs) cv-registers)
   (lambda (rg)
     (let ((pin (cx-get rg "pinned")))
       (product (arguments (cx-regs (cx-get rg "arguments"))) (rest-in (cx-reg-at rg "rest-in"))
@@ -160,7 +160,7 @@
                (frame (cx-reg-at rg "frame")) (state (cx-reg-at pin "state"))
                (fuel (cx-reg-at pin "fuel")) (stack-limit (cx-reg-at pin "stack-limit"))
                (code-distance (cx-reg-at pin "code-distance"))))))
-(define cv-values-of (subr cvr (cv-sxs) cv-values)
+(define cv-values-of (->* (cv-sxs) cv-values)
   (lambda (vs)
     (let ((fx (cx-get vs "fixnum")) (ch (cx-get vs "character")) (pr (cx-get vs "pair"))
           (bl (cx-get vs "bloblet")))
@@ -172,13 +172,13 @@
                (bloblet-past-suffix (cx-int2-at bl "reference"))
                (field-k-before-suffix (cx-int-at bl "field-k-before-suffix"))
                (header (cx-bits (cx-get vs "header"))) (kinds (cx-names (cx-get vs "kinds")))))))
-(define cv-closures-of (subr cvr (cv-sxs cv-sxs) cv-closures)
+(define cv-closures-of (->* (cv-sxs cv-sxs) cv-closures)
   (lambda (cl st)
     (product (kind (cx-int-at cl "kind")) (code-field (cx-int-at cl "code-field"))
              (first-free-field (cx-int-at cl "first-free-field"))
              (native-when-code-at-least
               (cx-int-at st (cx-name-of (cx-nth (cx-get cl "native-when-code-at-least") 0)))))))
-(define cv-frames-of (subr cvr (cv-sxs) cv-frames)
+(define cv-frames-of (->* (cv-sxs) cv-frames)
   (lambda (fr)
     (let ((m (cx-get fr "map")))
       (product (align (cx-int-at fr "align")) (header (cx-int2-at fr "header"))
@@ -187,7 +187,7 @@
                (live-below (cx-int-at m "live-slots-below"))
                (fields-above (cx-int-at m "fields-above"))
                (stub (cx-int-at fr "stub"))))))
-(define cv-state-of (subr cvr (cv-sxs) cv-state)
+(define cv-state-of (->* (cv-sxs) cv-state)
   (lambda (st)
     (let ((at (lambda ((n string)) (cx-int-at st n))))
       (product (fuel (at "fuel")) (reserve (at "reserve")) (trap (at "trap")) (pc (at "pc"))
@@ -199,12 +199,12 @@
                (foreign (at "foreign")) (closure (at "closure")) (cards (at "cards"))
                (stack-limit (at "stack-limit")) (overflow (at "overflow")) (poll (at "poll"))
                (cons (at "cons")) (bloblet (at "bloblet"))))))
-(define cv-routine-of (subr cvr (cv-sxs cv-sxs) cv-routine)
+(define cv-routine-of (->* (cv-sxs cv-sxs) cv-routine)
   (lambda (r st)
     (product (entry (cx-state-at r "entry" st)) (in (cx-in (cx-get r "in")))
              (out (if (cx-has? r "out") (cx-reg-at r "out") -1))
              (may-collect (cx-has? r "may-collect")))))
-(define cv-overflow-of (subr cvr (cv-sxs cv-sxs) cv-overflow)
+(define cv-overflow-of (->* (cv-sxs cv-sxs) cv-overflow)
   (lambda (o st)
     (let* ((in (cx-get o "in")) (info (cx-get in "info")) (held (cx-get info "arguments-held")))
       (product (entry (cx-state-at o "entry" st)) (code (cx-reg-at in "code"))
@@ -212,7 +212,7 @@
                (held-width (cx-int-of (cx-nth held 1)))
                (closure-read (cx-int-at info "closure-read"))
                (variadic (cx-int-at info "variadic")) (keeps (cx-regs (cx-get o "keeps")))))))
-(define cv-routines-of (subr cvr (cv-sxs cv-sxs) cv-routines)
+(define cv-routines-of (->* (cv-sxs cv-sxs) cv-routines)
   (lambda (rt st)
     (let ((t (cx-get rt "trap")))
       (product (foreign (cv-routine-of (cx-get rt "foreign") st))
@@ -224,7 +224,7 @@
                               (kind (cx-reg-at (cx-get t "in") "kind"))
                               (kinds (cx-numbered (cx-get t "kinds")))))))))
 ;; A declaration's clauses, read.
-(define cv-of (subr cvr (cv-sxs) convention)
+(define cv-of (->* (cv-sxs) convention)
   (lambda (cs)
     (let ((st (cx-get cs "state")) (fu (cx-get cs "fuel")) (ba (cx-get cs "barrier")))
       (product (target (cx-name-of (cx-nth (cx-get cs "target") 0)))
@@ -244,28 +244,28 @@
 ;;; ------------------------------------------------------------ printing
 
 ;; `xs` apart by one space.
-(define cv-cat (subr cvr (cv-strs) string)
+(define cv-cat (->* (cv-strs) string)
   (lambda (xs)
     (cond ((null? xs) "")
           ((null? (cdr xs)) (car xs))
           (else (string-append (car xs) " " (cv-cat (cdr xs)))))))
 ;; `(role part …)`; `(role n)`.
-(define cv-par (subr cvr (string cv-strs) string)
+(define cv-par (->* (string cv-strs) string)
   (lambda (role parts) (string-append "(" (cv-cat (the cv-strs (cons role parts))) ")")))
-(define cv-kv (subr cvr (string int) string)
+(define cv-kv (->* (string int) string)
   (lambda (role n) (cv-par role (list (int->string n)))))
-(define cv-reg (subr pure (int) string)
+(define cv-reg (->* (int) string)
   (lambda (r) (if (= r 31) "sp" (string-append "x" (int->string r)))))
-(define cv-pr-regs (subr cvr (cv-ints) cv-strs)
+(define cv-pr-regs (->* (cv-ints) cv-strs)
   (lambda (rs) (if (null? rs) nil (the cv-strs (cons (cv-reg (car rs)) (cv-pr-regs (cdr rs)))))))
-(define cv-pr-names (subr cvr (cv-names) cv-strs)
+(define cv-pr-names (->* (cv-names) cv-strs)
   (lambda (ns)
     (if (null? ns)
         nil
         (the cv-strs
              (cons (cv-kv (extract (car ns) name) (extract (car ns) number))
                    (cv-pr-names (cdr ns)))))))
-(define cv-pr-numbered (subr cvr (cv-names) cv-strs)
+(define cv-pr-numbered (->* (cv-names) cv-strs)
   (lambda (ns)
     (if (null? ns)
         nil
@@ -273,7 +273,7 @@
              (cons (cv-par (int->string (extract (car ns) number)) (list (extract (car ns) name)))
                            (cv-pr-numbered (cdr ns)))))))
 ;; The state's fields, each its name and offset, in the declaration's order.
-(define cv-state-names (subr cvr (cv-state) cv-names)
+(define cv-state-names (->* (cv-state) cv-names)
   (lambda (s)
     (let ((f (lambda ((n string) (k int)) (product (name n) (number k)))))
       (list (f "fuel" (extract s fuel)) (f "reserve" (extract s reserve))
@@ -290,13 +290,13 @@
             (f "overflow" (extract s overflow)) (f "poll" (extract s poll))
             (f "cons" (extract s cons)) (f "bloblet" (extract s bloblet))))))
 ;; The name of the field at `k` in `ns`; "" if none is.
-(define cv-name-at (subr cvr (cv-names int) string)
+(define cv-name-at (->* (cv-names int) string)
   (lambda (ns k)
     (cond ((null? ns) "")
           ((= (extract (car ns) number) k) (extract (car ns) name))
           (else (cv-name-at (cdr ns) k)))))
 
-(define cv-pr-registers (subr cvr (cv-registers) string)
+(define cv-pr-registers (->* (cv-registers) string)
   (lambda (r)
     (let ((one (lambda ((role string) (n int)) (cv-par role (list (cv-reg n))))))
       (cv-par "registers"
@@ -310,7 +310,7 @@
                                            (one "stack-limit" (extract r stack-limit))
                                            (one "code-distance" (extract r code-distance))))
                     "(lost-across-calls all-but-pinned)")))))
-(define cv-pr-bits (subr cvr (cv-bits) cv-strs)
+(define cv-pr-bits (->* (cv-bits) cv-strs)
   (lambda (bs)
     (if (null? bs)
         nil
@@ -318,7 +318,7 @@
           (the cv-strs (cons (cv-par (extract b name) (list (int->string (extract b at))
                                                             (int->string (extract b width))))
                              (cv-pr-bits (cdr bs))))))))
-(define cv-pr-values (subr cvr (cv-values) string)
+(define cv-pr-values (->* (cv-values) string)
   (lambda (v)
     (cv-par "values"
             (list (cv-par "tags" (cv-pr-names (extract v tags)))
@@ -335,7 +335,7 @@
                                 (cv-kv "field-k-before-suffix" (extract v field-k-before-suffix))))
                   (cv-par "header" (cv-pr-bits (extract v header)))
                   (cv-par "kinds" (cv-pr-names (extract v kinds)))))))
-(define cv-pr-frames (subr cvr (cv-frames int int) string)
+(define cv-pr-frames (->* (cv-frames int int) string)
   (lambda (f fp lr)
     (let ((at (lambda ((role string) (k int)) (cv-par role (list (cv-reg fp) (int->string k))))))
       (cv-par "frames"
@@ -353,9 +353,9 @@
                                          "sp" (int->string (- 0 (extract f header)))))
                     (cv-kv "stub" (extract f stub)))))))
 ;; `(entry state field)`, the field's name from its offset.
-(define cv-pr-entry (subr cvr (cv-names int) string)
+(define cv-pr-entry (->* (cv-names int) string)
   (lambda (sn k) (cv-par "entry" (list "state" (cv-name-at sn k)))))
-(define cv-pr-in (subr cvr (cv-regs) cv-strs)
+(define cv-pr-in (->* (cv-regs) cv-strs)
   (lambda (rs)
     (if (null? rs)
         nil
@@ -363,7 +363,7 @@
              (cons (cv-par (extract (car rs) name) (cv-pr-regs (extract (car rs) registers)))
                            (cv-pr-in (cdr rs)))))))
 ;; A routine, `more` after what every routine says.
-(define cv-pr-routine (subr cvr (string cv-routine cv-names cv-strs) string)
+(define cv-pr-routine (->* (string cv-routine cv-names cv-strs) string)
   (lambda (name r sn more)
     (let* ((tail (if (extract r may-collect) (the cv-strs (cons "(may-collect)" more)) more))
            (tail (if (< (extract r out) 0)
@@ -371,7 +371,7 @@
                      (the cv-strs (cons (cv-par "out" (list (cv-reg (extract r out)))) tail)))))
       (cv-par name (the cv-strs (cons (cv-pr-entry sn (extract r entry))
                                       (cons (cv-par "in" (cv-pr-in (extract r in))) tail)))))))
-(define cv-pr-overflow (subr cvr (cv-overflow cv-names int int) string)
+(define cv-pr-overflow (->* (cv-overflow cv-names int int) string)
   (lambda (o sn limit lr)
     (cv-par "overflow"
             (list (cv-par "when" (list "sp" "below" (cv-reg limit) "after-frame-made"))
@@ -386,7 +386,7 @@
                                               (cv-kv "closure-read" (extract o closure-read))
                                               (cv-kv "variadic" (extract o variadic))))))
                   (cv-par "keeps" (cv-pr-regs (extract o keeps)))))))
-(define cv-pr-routines (subr cvr (convention) string)
+(define cv-pr-routines (->* (convention) string)
   (lambda (c)
     (let ((rs (extract c routines)) (sn (cv-state-names (extract c state)))
           (rg (extract c registers)))
@@ -406,7 +406,7 @@
                                             (list (cv-par "kind" (list (cv-reg (extract t kind))))))
                                     (cv-par "kinds" (cv-pr-numbered (extract t kinds)))))))))))
 ;; A convention's clauses, as a declaration says them, in fixpt's order.
-(define cv-print (subr cvr (convention) cv-strs)
+(define cv-print (->* (convention) cv-strs)
   (lambda (c)
     (let ((rg (extract c registers)) (cl (extract c closures))
           (sn (cv-state-names (extract c state))) (fu (extract c fuel)) (ba (extract c barrier)))
@@ -438,16 +438,16 @@
 ;;; ------------------------------------------------------------ reading back
 
 ;; A clause's role, from its text: up to its first space or `)`.
-(define cv-role-of (subr cvr (string) string)
+(define cv-role-of (->* (string) string)
   (lambda (t) (substring t 1 (cv-atom-end t 1))))
 ;; The clause of `ts` whose role is `role`; "" if none is.
-(define cv-clause (subr cvr (cv-strs string) string)
+(define cv-clause (->* (cv-strs string) string)
   (lambda (ts role)
     (cond ((null? ts) "")
           ((string=? (cv-role-of (car ts)) role) (car ts))
           (else (cv-clause (cdr ts) role)))))
 ;; Why `ts`, declared, is not `back`, printed: "" if it is.
-(define cv-differs (subr cvr (cv-strs cv-strs) string)
+(define cv-differs (->* (cv-strs cv-strs) string)
   (lambda (ts back)
     (if (null? back)
         ""
@@ -457,24 +457,24 @@
                 (else (string-append "the `" role "` clause is not one a convention holds: "
                                      t)))))))
 ;; A clause of `ts` none of `back` has the role of: "" if none.
-(define cv-extra (subr cvr (cv-strs cv-strs) string)
+(define cv-extra (->* (cv-strs cv-strs) string)
   (lambda (ts back)
     (cond ((null? ts) "")
           ((string=? (cv-clause back (cv-role-of (car ts))) "")
            (string-append "a `" (cv-role-of (car ts))
                           "` clause, which a convention has no room for"))
           (else (cv-extra (cdr ts) back)))))
-(define cv-parse-all (subr cvr (cv-strs) cv-sxs)
+(define cv-parse-all (->* (cv-strs) cv-sxs)
   (lambda (ts)
     (if (null? ts)
         nil
         (the cv-sxs (cons (extract (cv-read-at (car ts) 0) x) (cv-parse-all (cdr ts)))))))
 ;; A declaration's clauses, read: the convention, or why not.
-(define cv-read-clauses (subr cvr (cv-strs) cv-read)
+(define cv-read-clauses (->* (cv-strs) cv-read)
   (lambda (ts)
     (let* ((c (cv-of (cv-parse-all ts))) (back (cv-print c))
            (why (let ((d (cv-differs ts back))) (if (string=? d "") (cv-extra ts back) d))))
       (if (string=? why "") (sum ok c) (sum refused why)))))
 ;; fixpt's own native convention, read.
-(define cv-native (subr cvr () cv-read)
+(define cv-native (->* () cv-read)
   (lambda () (cv-read-clauses (the cv-strs (native-convention)))))))

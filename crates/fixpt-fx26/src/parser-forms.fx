@@ -22,12 +22,12 @@
 ;; of `parser.fx` is not the caller's, and its prompt tag no prompt's.
 (define-type fails (subr parses (string int int) void))
 ;; `items` as long as `n`, or at least `n`; else `shape` said, through `fail`.
-(define arity (subr parses (fails syns-a int string int int) unit)
+(define arity (->* (fails syns-a int string int int) unit)
   (lambda (fail items n shape a b) (if (= (len items) n) #u (fail shape a b))))
-(define at-least (subr parses (fails syns-a int string int int) unit)
+(define at-least (->* (fails syns-a int string int int) unit)
   (lambda (fail items n shape a b) (if (< (len items) n) (fail shape a b) #u)))
 ;; `message`, said of `s`, through `fail`.
-(define fail-at-syn (subr parses (fails string syn) void)
+(define fail-at-syn (->* (fails string syn) void)
   (lambda (fail message s) (fail message (syn-start s) (syn-end s))))
 (import parser-module mk-symbol mk-list mk-int)
 
@@ -35,7 +35,7 @@
 (define processes string "fx26:processes.fx")
 ;; Form `items`, as a call through the scheduler's load,
 ;; `load` (its hidden global), at `a`..`b`.
-(define process-form (subr (maxeff parses spin) (fails syns-a exp int int) syn)
+(define process-form (->* (fails syns-a exp int int) syn)
   (lambda (fail items load a b)
     (let* ((lib (tagcase load (e-var (n c d cdk) n) (else y '%none)))
            (call (lambda ((name string) (args syns-a))
@@ -63,7 +63,7 @@
 (define-type calls (subr (maxeff parses spin) (string syns-a) syn))
 ;; `(spawn-monitored w f (box M r) body …)`: `((with lib spawn-monitored) w
 ;; f (plambda …))`, the body as `spawn`'s (`spawn-body`).
-(define spawn-monitored-form (subr (maxeff parses spin) (fails syns-a calls int int) syn)
+(define spawn-monitored-form (->* (fails syns-a calls int int) syn)
   (lambda (fail items call a b)
     (let ((usage "`(spawn-monitored watcher on-failure (mailbox message-type place) body …)`"))
       (begin
@@ -72,15 +72,15 @@
               (the syns-a (list (nth items 1) (nth items 2)
                                 (spawn-body fail (cons (car items) (drop items 3)) a b))))))))
 ;; `(x y)`, at `a`..`b`.
-(define pair-syn (subr (maxeff (read @globals) (read rs)) (syn syn int int) syn)
+(define pair-syn (->* (syn syn int int) syn)
   (lambda (x y a b) (mk-list (the syns-a (list x y)) a b)))
 ;; A list's items, or none.
-(define items-of (subr (read @globals) (syn) syns-a)
+(define items-of (->* (syn) syns-a)
   (lambda (s) (tagcase s (lst (xs d c e) xs) (else y nil))))
 
 ;; `(spawn (box M r) body …)`'s body: `(plambda ((r place)) (lambda ((box
 ;; (inbox M r)) (r (place r))) body … #u))`.
-(define spawn-body (subr (maxeff parses spin) (fails syns-a int int) syn)
+(define spawn-body (->* (fails syns-a int int) syn)
   (lambda (fail items a b)
     (let ((usage "`(spawn (mailbox message-type place) body …)`"))
       (begin
@@ -99,7 +99,7 @@
                      (binder (mk-list (the syns-a (list (pair-syn r place a b))) a b)))
                 (mk-list (the syns-a (list (mk-symbol "plambda" a b) binder lam)) a b))
               (fail usage a b)))))))
-(define snoc (subr (maxeff (read @globals) (read rs)) (syns-a syn) syns-a)
+(define snoc (->* (syns-a syn) syns-a)
   (lambda (xs x) (if (null? xs) (the syns-a (list x)) (cons (car xs) (snoc (cdr xs) x)))))
 
 ;; `(par ((x1 e1) … (xn en)) body …)`: `(let ((%par tree)) (let ((x1
@@ -108,7 +108,7 @@
 ;; `par2`s (`par-tree`). What is made for a binding (its thunk, its
 ;; `extract`s) is at the binding; the rest at the form (the Rust parser's
 ;; `par_expansion`).
-(define par-form (subr (maxeff parses spin) (fails syns-a symbol int int) syn)
+(define par-form (->* (fails syns-a symbol int int) syn)
   (lambda (fail items lib a b)
     (let ((usage "`(par ((name expression) …) body …)`"))
       (begin
@@ -124,7 +124,7 @@
 ;; What `par` is short of, said.
 (define par-two string "`par` runs two branches or more: `(par ((name expression) …) body …)`")
 ;; Each binding `(name expression)`.
-(define par-check (subr parses (fails syns-a) unit)
+(define par-check (->* (fails syns-a) unit)
   (lambda (fail bs)
     (if (null? bs)
         #u
@@ -133,11 +133,11 @@
               (par-check fail (cdr bs))
               (fail-at-syn fail "a `par` binding is `(name expression)`" (car bs)))))))
 ;; A binding's name, and its expression.
-(define par-name (subr parses (syn) syn) (lambda (bnd) (car (items-of bnd))))
-(define par-exp (subr parses (syn) syn) (lambda (bnd) (nth (items-of bnd) 1)))
+(define par-name (->* (syn) syn) (lambda (bnd) (car (items-of bnd))))
+(define par-exp (->* (syn) syn) (lambda (bnd) (nth (items-of bnd) 1)))
 ;; The branches of `bs` as `((with lib par2) (lambda () e1) rest)`, `rest`
 ;; the thunk of the last's expression, or of the rest's tree.
-(define par-tree (subr (maxeff parses spin) (syns-a symbol int int) syn)
+(define par-tree (->* (syns-a symbol int int) syn)
   (lambda (bs lib a b)
     (let* ((bnd (car bs)) (sa (syn-start bnd)) (sb (syn-end bnd)))
       (if (null? (cdr bs))
@@ -150,15 +150,15 @@
                            (thunk-syn (par-tree (cdr bs) lib a b) a b))))
             (mk-list (the syns-a (list op (thunk-syn (par-exp bnd) sa sb) rest)) a b))))))
 ;; `(lambda () x)`, at `a`..`b`.
-(define thunk-syn (subr (maxeff (read @globals) (read rs)) (syn int int) syn)
+(define thunk-syn (->* (syn int int) syn)
   (lambda (x a b) (mk-list (the syns-a (list (mk-symbol "lambda" a b) (mk-list nil a b) x)) a b)))
 ;; `(extract p k)`, at `a`..`b`.
-(define extract-syn (subr (maxeff (read @globals) (read rs)) (syn int int int) syn)
+(define extract-syn (->* (syn int int int) syn)
   (lambda (p k a b)
     (mk-list (the syns-a (list (mk-symbol "extract" a b) p (mk-int k a b))) a b)))
 ;; The `let`s binding each branch's value from `p`, the innermost the last
 ;; two's, around `body`.
-(define par-lets (subr (maxeff parses spin) (syns-a syn syns-a int int) syn)
+(define par-lets (->* (syns-a syn syns-a int int) syn)
   (lambda (bs p body a b)
     (let* ((bnd (car bs)) (sa (syn-start bnd)) (sb (syn-end bnd))
            (mine (pair-syn (par-name bnd) (extract-syn p 1 sa sb) a b))
@@ -174,13 +174,13 @@
 ;; `(race e1 … en)`: `((with lib race2) (lambda () e1) (lambda () ((with
 ;; lib race2) (lambda () e2) … (lambda () en))))`: a branch's thunk at its
 ;; expression, the rest at the form (the Rust parser's `race_expansion`).
-(define race-form (subr (maxeff parses spin) (fails syns-a symbol int int) syn)
+(define race-form (->* (fails syns-a symbol int int) syn)
   (lambda (fail items lib a b)
     (begin
       (at-least fail items 3 "`(race expression expression …)`" a b)
       (race-tree (cdr items) lib a b))))
 ;; The branches `es` as nested `race2`s.
-(define race-tree (subr (maxeff parses spin) (syns-a symbol int int) syn)
+(define race-tree (->* (syns-a symbol int int) syn)
   (lambda (es lib a b)
     (let* ((e (car es)) (sa (syn-start e)) (sb (syn-end e)))
       (if (null? (cdr es))
@@ -202,7 +202,7 @@
 ;; `(stdin-event %sel-i)`, through `lib`. An arm's event, test and `let` at
 ;; the arm, its `W` at the `W`; the rest at the form (the Rust parser's
 ;; `select_expansion`).
-(define select-form (subr (maxeff parses spin) (fails syns-a symbol int int) syn)
+(define select-form (->* (fails syns-a symbol int int) syn)
   (lambda (fail items lib a b)
     (let ((arms (cdr items)))
       (begin
@@ -228,7 +228,7 @@
                  "`((receive mailbox) name body …)`, `((sleep-until time) name body …)` "
                  "or `((read-byte) name body …)`"))
 ;; The event of a `pselect` arm whose wait is named `w`, or "" if none.
-(define wait-event (subr pure (symbol) string)
+(define wait-event (->* (symbol) string)
   (lambda (w)
     (cond ((symbol=? w 'icell-get) "cell-event")
           ((symbol=? w 'receive) "mailbox-event")
@@ -236,10 +236,10 @@
           ((symbol=? w 'read-byte) "stdin-event")
           (else ""))))
 ;; How many items a `pselect` arm's wait named `w` has: `(read-byte)` one.
-(define wait-length (subr pure (symbol) int) (lambda (w) (if (symbol=? w 'read-byte) 1 2)))
+(define wait-length (->* (symbol) int) (lambda (w) (if (symbol=? w 'read-byte) 1 2)))
 ;; Each arm `(W x body …)`, `W` `(icell-get c)`, `(receive box)`,
 ;; `(sleep-until t)` or `(read-byte)`.
-(define select-check (subr parses (fails syns-a) unit)
+(define select-check (->* (fails syns-a) unit)
   (lambda (fail arms)
     (if (null? arms)
         #u
@@ -251,32 +251,32 @@
               (select-check fail (cdr arms))
               (fail-at-syn fail select-arm-usage (car arms)))))))
 ;; An arm's `W`, and its `W`'s items.
-(define arm-wait (subr parses (syn) syn) (lambda (arm) (car (items-of arm))))
-(define arm-wait-items (subr parses (syn) syns-a) (lambda (arm) (items-of (arm-wait arm))))
+(define arm-wait (->* (syn) syn) (lambda (arm) (car (items-of arm))))
+(define arm-wait-items (->* (syn) syns-a) (lambda (arm) (items-of (arm-wait arm))))
 ;; An arm's `c`: its `W`'s operand, or, `(read-byte)` having none, `#u` at
 ;; its `W`.
-(define arm-operand (subr parses (syn) syn)
+(define arm-operand (->* (syn) syn)
   (lambda (arm)
     (let ((w (arm-wait-items arm)))
       (if (null? (cdr w))
           (mk-symbol "#u" (syn-start (arm-wait arm)) (syn-end (arm-wait arm)))
           (nth w 1)))))
 ;; `%sel-i`, at `a`..`b`.
-(define sel-name (subr (maxeff (read @globals) (read rs)) (int int int) syn)
+(define sel-name (->* (int int int) syn)
   (lambda (i a b) (mk-symbol (string-append "%sel-" (int->string i)) a b)))
 ;; `(with lib name)`, at `a`..`b`.
-(define lib-op (subr (maxeff (read @globals) (read rs)) (symbol string int int) syn)
+(define lib-op (->* (symbol string int int) syn)
   (lambda (lib name a b)
     (mk-list (the syns-a (list (mk-symbol "with" a b) (atom lib a b) (mk-symbol name a b))) a b)))
 ;; `((%sel-i c) …)`'s items, from arm `i` of `arms`.
-(define select-binds (subr (maxeff parses spin) (syns-a int int int) syns-a)
+(define select-binds (->* (syns-a int int int) syns-a)
   (lambda (arms i a b)
     (if (null? arms)
         nil
         (cons (pair-syn (sel-name i a b) (arm-operand (car arms)) a b)
               (select-binds (cdr arms) (+ i 1) a b)))))
 ;; The events of `arms`, from arm `i`, joined by `or-event`s.
-(define select-events (subr (maxeff parses spin) (syns-a int symbol int int) syn)
+(define select-events (->* (syns-a int symbol int int) syn)
   (lambda (arms i lib a b)
     (let* ((arm (car arms)) (sa (syn-start arm)) (sb (syn-end arm))
            (op (wait-event (syn-head (car (arm-wait-items arm)))))
@@ -287,7 +287,7 @@
                                      (select-events (cdr arms) (+ i 1) lib a b)))
                    a b)))))
 ;; The arms of `arms`, from arm `i`, each chosen when `sel` is its number.
-(define select-arms (subr (maxeff parses spin) (syns-a int syn int int) syn)
+(define select-arms (->* (syns-a int syn int int) syn)
   (lambda (arms i sel a b)
     (let* ((arm (car arms)) (sa (syn-start arm)) (sb (syn-end arm)) (x (items-of arm))
            (w (arm-wait arm))

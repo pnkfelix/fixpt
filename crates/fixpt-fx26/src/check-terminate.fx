@@ -42,16 +42,16 @@
 (hide (include check-types) (include check-resolve) (include check-holds) (include check-env)
       (include check-expect) (include check-sc-graphs) (include check-print) (include tables))
 
-(define k-sc-compose-one (subr kstate (k-edge k-graph k-graph) k-graph)
+(define k-sc-compose-one (->* (k-edge k-graph k-graph) k-graph)
   (lambda (e b out)
     (cond ((null? b) out)
           ((= (extract e 2) (extract (car b) 1))
            (let* ((d (car b)) (strict (or (extract e 3) (extract d 3))))
              (k-sc-compose-one e (cdr b) (k-sc-add out (extract e 1) (extract d 2) strict))))
           (else (k-sc-compose-one e (cdr b) out)))))
-(define k-sc-compose (subr kstate (k-graph k-graph k-graph) k-graph)
+(define k-sc-compose (->* (k-graph k-graph k-graph) k-graph)
   (lambda (a b out) (if (null? a) out (k-sc-compose (cdr a) b (k-sc-compose-one (car a) b out)))))
-(define k-sc-same? (subr (maxeff (read @globals) (read @t)) (k-graph k-graph) bool)
+(define k-sc-same? (->* (k-graph k-graph) bool)
   (lambda (a b)
     (if (null? a)
         (null? b)
@@ -61,27 +61,27 @@
              (if (extract (car a) 3) (extract (car b) 3) (not (extract (car b) 3)))
              (k-sc-same? (cdr a) (cdr b))))))
 ;; Whether `c` and `d` are the same call: from and to the same members, of the same graph.
-(define k-sc-call=? (subr kreads (k-call k-call) bool)
+(define k-sc-call=? (->* (k-call k-call) bool)
   (lambda (c d)
     (and (= (extract c 1) (extract d 1))
          (= (extract c 2) (extract d 2))
          (k-sc-same? (extract c 3) (extract d 3)))))
-(define k-sc-has? (subr kreads (k-calls k-call) bool)
+(define k-sc-has? (->* (k-calls k-call) bool)
   (lambda (cs c) (and (not (null? cs)) (or (k-sc-call=? (car cs) c) (k-sc-has? (cdr cs) c)))))
 ;; A call's members, from and to, as one key.
-(define k-sc-key (subr (read @globals) (k-call) int)
+(define k-sc-key (->* (k-call) int)
   (lambda (c) (+ (* (extract c 1) 65536) (extract c 2))))
 ;; Whether `c` is among the calls in `seen` (by `k-sc-key`); if not, it is now.
-(define k-sc-seen? (subr kstate ((table int k-calls @t) k-call) bool)
+(define k-sc-seen? (->* ((table int k-calls @t) k-call) bool)
   (lambda (seen c)
     (let ((here (table-ref seen (k-sc-key c) nil)))
       (if (k-sc-has? here c) #t (begin (table-set! seen (k-sc-key c) (cons c here)) #f)))))
-(define k-sc-seen-all (subr kstate ((table int k-calls @t) k-calls) (table int k-calls @t))
+(define k-sc-seen-all (->* ((table int k-calls @t) k-calls) (table int k-calls @t))
   (lambda (seen cs)
     (if (null? cs) seen (begin (k-sc-seen? seen (car cs)) (k-sc-seen-all seen (cdr cs))))))
 ;; `cs` without repeats, onto `out` in reverse: each call compared only with
 ;; those of the same members (by `seen`, from and to), not every one kept.
-(define k-sc-dedup-in (subr kstate (k-calls k-calls (table int k-calls @t)) k-calls)
+(define k-sc-dedup-in (->* (k-calls k-calls (table int k-calls @t)) k-calls)
   (lambda (cs out seen)
     (if (null? cs)
         out
@@ -90,16 +90,16 @@
               (k-sc-dedup-in (cdr cs) out seen)
               (begin (table-set! seen key (cons c here))
                      (k-sc-dedup-in (cdr cs) (cons c out) seen)))))))
-(define k-sc-dedup (subr kstate (k-calls k-calls) k-calls)
+(define k-sc-dedup (->* (k-calls k-calls) k-calls)
   (lambda (cs out) (k-sc-dedup-in cs out (make-table k-id-hash k-id=?))))
 ;; Whether `e` is a strict edge from a slot to itself.
-(define k-sc-strict-self? (subr (read @globals) (k-edge) bool)
+(define k-sc-strict-self? (->* (k-edge) bool)
   (lambda (e) (and (= (extract e 1) (extract e 2)) (extract e 3))))
-(define k-sc-strict-loop? (subr (maxeff (read @globals) (read @t)) (k-graph) bool)
+(define k-sc-strict-loop? (->* (k-graph) bool)
   (lambda (g) (and (not (null? g)) (or (k-sc-strict-self? (car g)) (k-sc-strict-loop? (cdr g))))))
 ;; Whether every graph from a member to itself that is its own composition
 ;; has a strict loop.
-(define k-sc-ok? (subr kstate (k-calls) bool)
+(define k-sc-ok? (->* (k-calls) bool)
   (lambda (cs)
     (or (null? cs)
         (let ((c (car cs)))
@@ -111,14 +111,14 @@
 (define k-sc-most int 4000)
 (define-rec
   ;; `seen`: `all`, by `k-sc-key`, for whether a call is new.
-  (k-sc-close (subr kstate (k-calls k-calls int (table int k-calls @t)) bool)
+  (k-sc-close (->* (k-calls k-calls int (table int k-calls @t)) bool)
     (lambda (todo all n seen)
       (if (null? todo)
           (k-sc-ok? all)
           (let ((c (car todo)) (calls (get k-sc-calls)))
             (k-sc-extend (extract c 1) (extract c 2) (extract c 3) calls (cdr todo) all n seen)))))
   (k-sc-extend
-    (subr kstate (int int k-graph k-calls k-calls k-calls int (table int k-calls @t)) bool)
+    (->* (int int k-graph k-calls k-calls k-calls int (table int k-calls @t)) bool)
     (lambda (f g a calls todo all n seen)
       (cond ((null? calls) (k-sc-close todo all n seen))
             ((not (= (extract (car calls) 1) g)) (k-sc-extend f g a (cdr calls) todo all n seen))
@@ -131,7 +131,7 @@
                       (k-sc-extend f g a rest (cons new todo) (cons new all) (+ n 1) seen)))))))))
 
 ;; A binding's lambda, under `plambda`, `the` and `rlambda`.
-(define k-sc-lambda-of (subr (read @globals) (kx) kx)
+(define k-sc-lambda-of (->* (kx) kx)
   (lambda (x)
     (tagcase x
       (x-plambda (bs body a b abk) (k-sc-lambda-of body))
@@ -139,25 +139,25 @@
       (x-rlambda (r l a b abk) (k-sc-lambda-of l))
       (else y y))))
 ;; The parameter types of a declared type, under its binders.
-(define k-sc-param-types (subr (maxeff (read @globals) (read @t) spin) (int) k-ids)
+(define k-sc-param-types (->* (int) k-ids)
   (lambda (t)
     (tagcase (k-get t)
       (ty-poly (bs body) (k-sc-param-types body))
       (ty-subr (e ps r cv) ps)
       (else y nil))))
 ;; Whether `s` names the standard binding of that name.
-(define k-std? (subr (maxeff kreads spin) (symbol) bool)
+(define k-std? (->* (symbol) bool)
   (lambda (s) (k-std-binding? s (k-lookup s))))
 ;; Whether `t` is a natural, of a size or not.
-(define k-nat-ty? (subr (maxeff kreads spin) (int) bool)
+(define k-nat-ty? (->* (int) bool)
   (lambda (t) (tagcase (k-get (k-resolve t)) (ty-nat (z) #t) (else y #f))))
 ;; What is known of parameter `j`, of type `t`, on entry: itself, and a count if an integer.
-(define k-sc-param-knows (subr (maxeff kstate spin) (int int bool) k-trs)
+(define k-sc-param-knows (->* (int int bool) k-trs)
   (lambda (j t natural)
     (let ((count (or natural (= (k-resolve t) (k-resolve k-int)))))
       (the k-trs (cons (tr-part j #f t) (if count (the k-trs (cons (tr-int j 0) nil)) nil))))))
 ;; The parameters `ps`, the `j`th on, each known as itself.
-(define k-sc-param-scope (subr (maxeff kstate spin) (k-typed-params k-ids int k-tscope) k-tscope)
+(define k-sc-param-scope (->* (k-typed-params k-ids int k-tscope) k-tscope)
   (lambda (ps ts j sc)
     (if (null? ps)
         sc
@@ -166,7 +166,7 @@
                (noted (if natural (set k-sc-naturals (cons j (get k-sc-naturals))) #u))
                (ks (k-sc-param-knows j t natural)))
           (k-sc-param-scope (cdr ps) (cdr ts) (+ j 1) (k-sc-bind (extract (car ps) 1) ks sc))))))
-(define k-sc-walk-members (subr (maxeff kstate spin) (k-letrec-bs int) bool)
+(define k-sc-walk-members (->* (k-letrec-bs int) bool)
   (lambda (bs i)
     (or (null? bs)
         (tagcase (k-sc-lambda-of (extract (car bs) 3))
@@ -178,15 +178,15 @@
                           (k-sc-walk body (k-sc-param-scope ps ts 0 nil) nil)
                           (and (null? (get k-sc-escapes)) (k-sc-walk-members (cdr bs) (+ i 1)))))))
           (else y #f)))))
-(define k-sc-names (subr kstate (k-letrec-bs) k-names)
+(define k-sc-names (->* (k-letrec-bs) k-names)
   (lambda (bs) (if (null? bs) nil (the k-names (cons (extract (car bs) 1) (k-sc-names (cdr bs)))))))
-(define k-sc-upto (subr kstate (int int) k-ids)
+(define k-sc-upto (->* (int int) k-ids)
   (lambda (j n)
     (letrec ((down (subr kstate (int k-ids) k-ids)
                    (lambda (i acc) (if (< i j) acc (down (- i 1) (the k-ids (cons i acc)))))))
       (down (- n 1) nil))))
 ;; Every (member . parameter) of the group, the `i`th member on.
-(define k-sc-all-params (subr kstate (k-letrec-bs int k-guards) k-guards)
+(define k-sc-all-params (->* (k-letrec-bs int k-guards) k-guards)
   (lambda (bs i out)
     (if (null? bs)
         out
@@ -194,38 +194,38 @@
           (tagcase (k-sc-lambda-of (extract (car bs) 3))
             (x-lambda (ps body a b abk) (k-sc-with i (k-sc-upto 0 (k-length ps)) out))
             (else y out))))))
-(define k-sc-drop (subr kstate (k-guards int int) k-guards)
+(define k-sc-drop (->* (k-guards int int) k-guards)
   (lambda (gs i j)
     (cond ((null? gs) gs)
           ((and (= (car (car gs)) i) (= (cdr (car gs)) j)) (k-sc-drop (cdr gs) i j))
           (else (the k-guards (cons (car gs) (k-sc-drop (cdr gs) i j)))))))
 ;; `inv` less what the call from `from` to `to` passing `args` changes.
-(define k-sc-keep-args (subr kstate (k-guards int int k-ids int) k-guards)
+(define k-sc-keep-args (->* (k-guards int int k-ids int) k-guards)
   (lambda (inv from to args j)
     (if (null? args)
         inv
         (let* ((p (car args))
                (kept (if (and (>= p 0) (k-sc-guarded? inv from p)) inv (k-sc-drop inv to j))))
           (k-sc-keep-args kept from to (cdr args) (+ j 1))))))
-(define k-sc-keep-all (subr kstate (k-guards k-passed) k-guards)
+(define k-sc-keep-all (->* (k-guards k-passed) k-guards)
   (lambda (inv ps)
     (if (null? ps)
         inv
         (let* ((c (car ps)) (kept (k-sc-keep-args inv (extract c 1) (extract c 2) (extract c 3) 0)))
           (k-sc-keep-all kept (cdr ps))))))
 ;; The invariant parameters: the greatest set every call keeps.
-(define k-sc-invariants (subr (maxeff kstate spin) (k-guards) k-guards)
+(define k-sc-invariants (->* (k-guards) k-guards)
   (lambda (inv)
     (let ((next (k-sc-keep-all inv (get k-sc-passed))))
       (if (= (k-length next) (k-length inv)) inv (k-sc-invariants next)))))
-(define k-sc-member-name (subr (maxeff (read @globals) (read @t)) (int) string)
+(define k-sc-member-name (->* (int) string)
   (lambda (i) (symbol->string (k-nth (get k-sc-members) i))))
-(define k-sc-strict-any? (subr (read @globals) (k-graph) bool)
+(define k-sc-strict-any? (->* (k-graph) bool)
   (lambda (g) (and (not (null? g)) (or (extract (car g) 3) (k-sc-strict-any? (cdr g))))))
-(define k-sc-has-string? (subr (read @globals) (k-texts string) bool)
+(define k-sc-has-string? (->* (k-texts string) bool)
   (lambda (xs s) (and (not (null? xs)) (or (string=? (car xs) s) (k-sc-has-string? (cdr xs) s)))))
 ;; The call `c`, in words.
-(define k-sc-call-words (subr kreads (k-call) string)
+(define k-sc-call-words (->* (k-call) string)
   (lambda (c)
     (let ((callee (k-sc-member-name (extract c 2))) (caller (k-sc-member-name (extract c 1))))
       (k-cat5 "the call of `" callee "` in `" caller "`"))))
@@ -233,7 +233,7 @@
 ;; either nothing related to the caller's parameters or with a hint why;
 ;; each once, in words (newest first). One passing its caller's parameters
 ;; on unchanged is harmless.
-(define k-sc-flat (subr kstate (k-calls k-texts k-texts) k-texts)
+(define k-sc-flat (->* (k-calls k-texts k-texts) k-texts)
   (lambda (cs hs out)
     (if (null? cs)
         out
@@ -246,14 +246,14 @@
                              (k-sc-has-string? out s))
                          out
                          (the k-texts (cons s out))))))))
-(define k-sc-escape-why (subr (maxeff (read @globals) (read @t)) () string)
+(define k-sc-escape-why (->* () string)
   (lambda ()
     (let* ((e (car (get k-sc-escapes))) (escapes (k-sc-member-name (cdr e)))
            (named (k-cat4 "`" escapes "` is named in `" (k-sc-member-name (car e)))))
       (k-cat3 named "` other than as a call's operator: "
               "whoever is given it may call it again, with anything"))))
 ;; Why the walked calls, not too many, may not end: those that pass nothing smaller, in words.
-(define k-sc-shrinks-why (subr kstate () string)
+(define k-sc-shrinks-why (->* () string)
   (lambda ()
     (let* ((calls (the k-calls (reverse (get k-sc-calls))))
            (hints (the k-texts (reverse (get k-sc-hints))))
@@ -262,7 +262,7 @@
           "no argument keeps shrinking around every loop of calls"
           (string-append "nothing smaller, or related, is passed by " (k-join flat ", "))))))
 ;; Why the walked calls may not end.
-(define k-sc-calls-why (subr kstate () string)
+(define k-sc-calls-why (->* () string)
   (lambda ()
     (let ((all (k-sc-dedup (get k-sc-calls) nil)))
       (cond ((k-sc-close all all (k-length all) (k-sc-seen-all (make-table k-id-hash k-id=?) all))
@@ -273,7 +273,7 @@
 ;; not say `spin`: "" if so, and otherwise why not, in words for an error.
 ;; Walked twice: first to learn which parameters every call passes on
 ;; unchanged, then with them as bounds.
-(define k-termination (subr (maxeff kstate spin) (k-letrec-bs) string)
+(define k-termination (->* (k-letrec-bs) string)
   (lambda (bs)
     (begin
       (set k-sc-members (k-sc-names bs))
@@ -300,27 +300,27 @@
                                ((not again) "it is not a lambda")
                                (else (k-sc-calls-why)))))))))))))
 ;; Note why each of `g` may not end.
-(define k-note-why (subr kstate (k-letrec-bs string) unit)
+(define k-note-why (->* (k-letrec-bs string) unit)
   (lambda (g why)
     (if (null? g)
         #u
         (let ((w (product (1 (extract (car g) 1)) (2 (extract (car g) 2)) (3 why))))
           (begin (set k-spin-why (cons w (get k-spin-why)))
                  (k-note-why (cdr g) why))))))
-(define k-why-of (subr kreads (k-whys symbol int) string)
+(define k-why-of (->* (k-whys symbol int) string)
   (lambda (ws n t)
     (cond ((null? ws) "")
           ((and (symbol=? (extract (car ws) 1) n) (= (extract (car ws) 2) t)) (extract (car ws) 3))
           (else (k-why-of (cdr ws) n t)))))
 ;; Whether `needle` is in `hay` at `i`.
-(define k-text-at? (subr (read @globals) (string string int) bool)
+(define k-text-at? (->* (string string int) bool)
   (lambda (hay needle i) (string=? (substring hay i (+ i (string-length needle))) needle)))
-(define k-text-has? (subr (maxeff (read @globals) spin) (string string int) bool)
+(define k-text-has? (->* (string string int) bool)
   (lambda (hay needle i)
     (and (<= (+ i (string-length needle)) (string-length hay))
          (or (k-text-at? hay needle i) (k-text-has? hay needle (+ i 1))))))
 ;; Error `m` where `n`, declared `t`, is defined: saying so, and, if about `spin`, why.
-(define k-declared-error (subr (maxeff kreads (alloc @t) spin) (string symbol int) string)
+(define k-declared-error (->* (string symbol int) string)
   (lambda (m n t)
     (let* ((why (k-why-of (get k-spin-why) n t))
            (spins (and (not (string=? why "")) (k-text-has? m "spin" 0)))
@@ -329,7 +329,7 @@
       (k-cat4 declared m tail ""))))
 ;; `f`, checking what `n` is declared `t`; an error at `a`..`b` itself says
 ;; so, and, if it is about `spin` and `n`'s group may not end, why not.
-(define k-declaring (subr (maxeff (read @globals) checks spin) (k-thunk int int symbol int) k-te)
+(define k-declaring (->* (k-thunk int int symbol int) k-te)
   (lambda (f a b n t)
     (let ((r (prompt k-tag (k-done (f)) (lambda (r) r))))
       (tagcase r
@@ -341,10 +341,10 @@
         (k-ok (xs) (k-fail "k-ok inside" a b))))))
 
 ;; The error for `n`, bound in a recursive group to `x`, which is not a lambda.
-(define k-fail-not-lambda (subr checks (symbol kx) void)
+(define k-fail-not-lambda (->* (symbol kx) void)
   (lambda (n x) (k-fail (k-letrec-not-lambda n) (k-start x) (k-end x))))
 ;; Every binding of a `letrec` a lambda, or an error at the first that is not.
-(define k-letrec-lambdas (subr checks (k-letrec-bs) unit)
+(define k-letrec-lambdas (->* (k-letrec-bs) unit)
   (lambda (bs)
     (cond ((null? bs) #u)
           ((k-lambda? (extract (car bs) 3)) (k-letrec-lambdas (cdr bs)))

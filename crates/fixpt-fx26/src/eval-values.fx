@@ -41,7 +41,7 @@
 (define eval-tag (prompt-tag eresult eresult (maxeff runs spin) @x)
   (make-continuation-prompt-tag))
 
-(define* efail (subr evals (string) void)
+(define efail (->* (string) void)
   (lambda (message)
     ;; A task of a monitored process: the failure its watcher's, the task
     ;; left by an abort to the scheduler's prompt (`TASK_FAILED`).
@@ -53,89 +53,89 @@
       (else (abort-current-continuation eval-tag (ev-err message))))))
 
 ;; Fails: `what` is expected.
-(define* efail-expected (subr evals (string) void)
+(define efail-expected (->* (string) void)
   (lambda (what) (efail (string-append what " is expected"))))
 
 ;; `v`, a bytevector; or fails.
-(define* as-bytes (subr evals (val) (bytevectorof @v))
+(define as-bytes (->* (val) (bytevectorof @v))
   (lambda (v)
     (tagcase (as-other v "a bytevector") (o-bytes (b) b) (else y (efail-expected "a bytevector")))))
 
 ;; `v`, an `other`; or fails, `what` being expected.
-(define* as-other (subr evals (val string) other)
+(define as-other (->* (val string) other)
   (lambda (v what) (typecase v (sum o o) (else (efail-expected what)))))
 
-(define* as-int (subr evals (val) int)
+(define as-int (->* (val) int)
   (lambda (v) (if (int? v) v (efail-expected "an int"))))
 
-(define* as-bool (subr evals (val) bool)
+(define as-bool (->* (val) bool)
   (lambda (v) (if (bool? v) v (efail-expected "a bool"))))
 
-(define* as-str (subr evals (val) string)
+(define as-str (->* (val) string)
   (lambda (v) (if (string? v) v (efail-expected "a string"))))
 
-(define* as-char (subr evals (val) char)
+(define as-char (->* (val) char)
   (lambda (v) (if (char? v) v (efail-expected "a char"))))
 
-(define* as-f64 (subr evals (val) f64)
+(define as-f64 (->* (val) f64)
   (lambda (v) (if (f64? v) v (efail-expected "an f64"))))
 
-(define* as-sym (subr evals (val) symbol)
+(define as-sym (->* (val) symbol)
   (lambda (v) (if (symbol? v) v (efail-expected "a symbol"))))
 
-(define* as-pair (subr evals (val) (pairof val val @v))
+(define as-pair (->* (val) (pairof val val @v))
   (lambda (v) (if (pair? v) v (efail-expected "a pair"))))
 
-(define* as-array (subr evals (val) (arrayof val @v))
+(define as-array (->* (val) (arrayof val @v))
   (lambda (v) (if (array? v) v (efail-expected "an array"))))
 
-(define* as-f32 (subr evals (val) f32)
+(define as-f32 (->* (val) f32)
   (lambda (v) (if (f32? v) v (efail-expected "an f32"))))
 
-(define* as-ref (subr evals (val) vcell)
+(define as-ref (->* (val) vcell)
   (lambda (v) (if (ref? v) v (efail-expected "a reference"))))
 
-(define* as-tag (subr (maxeff evals spin) (val) vtag)
+(define as-tag (->* (val) vtag)
   (lambda (v)
     (tagcase (as-other v "a prompt tag") (o-tag (t) t) (else y (efail-expected "a prompt tag")))))
 
-(define* as-key (subr (maxeff evals spin) (val) (mark-key val @x))
+(define as-key (->* (val) (mark-key val @x))
   (lambda (v)
     (tagcase (as-other v "a mark key") (o-key (k) k) (else y (efail-expected "a mark key")))))
 
-(define* as-cont (subr (maxeff evals spin) (val) vcont)
+(define as-cont (->* (val) vcont)
   (lambda (v)
     (let ((what "a composable continuation"))
       (tagcase (as-other v what) (o-cont (k) k) (else y (efail-expected what))))))
 
 ;; A product's fields, by label.
-(define* as-fields (subr (maxeff evals spin) (val string) vfields)
+(define as-fields (->* (val string) vfields)
   (lambda (v what)
     (tagcase (as-other v what) (o-product (fs) fs) (else y (efail-expected what)))))
 
 ;; The arguments of a call, as the list value a `vlambda` is given.
-(define* vals->val (subr (maxeff (read @globals) (read @v) (alloc @v) spin) (vals) val)
+(define vals->val (->* (vals) val)
   (lambda (xs) (if (null? xs) nil (cons (car xs) (vals->val (cdr xs))))))
 
-(define* list->val (subr (maxeff (read @globals) (read @x) (alloc @v) spin) ((listof val @x)) val)
+(define list->val (->* ((listof val @x)) val)
   (lambda (xs) (if (null? xs) nil (cons (car xs) (list->val (cdr xs))))))
 
 ;; A list value's elements, as the arguments `apply` gives: a list of its
 ;; own, which nothing else can write (F11), as the machines copy it. With
 ;; no `eq?` to find a cycle by, a cyclic list is not ended: the machines'
 ;; is an error (`programs/native/apply-cyclic.fx`, which this never runs).
-(define* val->vals (subr (maxeff (read @globals) (read @v) (alloc @v) spin) (val) vals)
+(define val->vals (->* (val) vals)
   (lambda (v) (if (pair? v) (cons (car v) (val->vals (cdr v))) nil)))
 
 ;; Argument `i` of `xs`.
-(define* ev-arg (subr (maxeff evals spin) (vals int) val)
+(define ev-arg (->* (vals int) val)
   (lambda (xs i)
     (cond ((null? xs) (efail "too few arguments"))
           ((= i 0) (car xs))
           (else (ev-arg (cdr xs) (- i 1))))))
 
 ;; `f` applied to `xs`: a procedure called; a continuation resumed.
-(define* apply-val (subr (maxeff evals spin) (val vals) val)
+(define apply-val (->* (val vals) val)
   (lambda (f xs)
     (typecase f
       (procedure p (p xs))
@@ -150,11 +150,11 @@
           (else y (efail "not a subroutine"))))
       (else (efail "not a subroutine")))))
 
-(define* apply1 (subr (maxeff evals spin) (val val) val)
+(define apply1 (->* (val val) val)
   (lambda (f x) (apply-val f (the vals (cons x nil)))))
 
 ;; Whether `o` and `p` are the same bloblet, a blobref's owner.
-(define* ev-same-blob? (subr pure (val val) bool)
+(define ev-same-blob? (->* (val val) bool)
   (lambda (o p)
     (typecase o
       (sum x
@@ -168,7 +168,7 @@
 ;; `eq?` of two `other`s: unit is unit, and a mutable one is itself; any
 ;; other (a product, a sum, the control) #f, which `eq?` allows of
 ;; immutable data.
-(define* ev-other-eq? (subr pure (other other) bool)
+(define ev-other-eq? (->* (other other) bool)
   (lambda (a b)
     (tagcase a
       (o-unit () (tagcase b (o-unit () #t) (else y #f)))
@@ -181,7 +181,7 @@
 
 ;; `eq?` of two values, as the machines have it: the same mutable object;
 ;; atoms the same word; not a procedure, an `f64` or an `f32`.
-(define* ev-eq? (subr pure (val val) bool)
+(define ev-eq? (->* (val val) bool)
   (lambda (a b)
     (typecase a
       (procedure f #f) (f64 x #f) (f32 x #f)
@@ -194,12 +194,12 @@
 ;; (`ev-sched`). And how many applications until the next poll.
 (define ev-preempt (ref val @v) (new #f))
 (define ev-ticks (ref int @v) (new 0))
-(define* ev-preempt-set! (subr (maxeff (write @v) (read @globals)) (val) unit)
+(define ev-preempt-set! (->* (val) unit)
   (lambda (f) (set ev-preempt f)))
 ;; A poll, at each application: every 4096th, the program's `preempt`
 ;; called, if the runtime says the scheduler would have another task run
 ;; (`fixpt_runtime::sched`, operation 31).
-(define* ev-poll (subr (maxeff evals spin) () unit)
+(define ev-poll (->* () unit)
   (lambda ()
     (let ((t (- (get ev-ticks) 1)))
       (if (> t 0)
@@ -216,7 +216,7 @@
 (define ev-interned (ref vals @v) (new nil))
 
 ;; Whether `a`, interned, is what `b`, its parts interned, is.
-(define* ev-same-datum? (subr (maxeff (read @v) (alloc @v)) (val val) bool)
+(define ev-same-datum? (->* (val val) bool)
   (lambda (a b)
     (cond ((pair? a)
            (and (pair? b) (ev-eq? (car a) (car b)) (ev-eq? (cdr a) (cdr b))))
@@ -224,19 +224,19 @@
           (else #f))))
 
 ;; The interned value of `is` that `c` is, or none.
-(define* ev-interned-as (subr (maxeff (read @globals) (read @v) (alloc @v) spin) (vals val) vals)
+(define ev-interned-as (->* (vals val) vals)
   (lambda (is c)
     (cond ((null? is) nil)
           ((ev-same-datum? (car is) c) (the vals (cons (car is) nil)))
           (else (ev-interned-as (cdr is) c)))))
 
 ;; `c` interned: the value equal to it, or it, interned from now on.
-(define* ev-intern-as (subr (maxeff stores spin) (val) val)
+(define ev-intern-as (->* (val) val)
   (lambda (c)
     (let ((found (ev-interned-as (get ev-interned) c)))
       (if (null? found) (begin (set ev-interned (cons c (get ev-interned))) c) (car found)))))
 
-(define* ev-intern (subr (maxeff stores spin) (val) val)
+(define ev-intern (->* (val) val)
   (lambda (v)
     (cond ((pair? v)
            (let ((a (ev-intern (car v))) (d (ev-intern (cdr v))))
@@ -245,13 +245,13 @@
           (else v))))
 
 ;; How many fields `fs` has.
-(define* ev-count (subr (maxeff (read @v) spin) (vfields) int)
+(define ev-count (->* (vfields) int)
   (lambda (fs) (if (null? fs) 0 (+ 1 (ev-count (cdr fs))))))
 
 ;; A bytevector's bytes up to `i`, space-separated as Scheme writes them,
 ;; before `acc`, those after.
-(define* show-bytes
-  (subr (maxeff (read @globals) (read @v) spin) ((bytevectorof @v) int string) string)
+(define show-bytes
+  (->* ((bytevectorof @v) int string) string)
   (lambda (b i acc)
     (if (< i 0)
         acc
@@ -259,10 +259,10 @@
           (show-bytes b (- i 1) (if (string=? acc "") x (k-cat3 x " " acc)))))))
 
 ;; How Scheme writes a bloblet of `n` fields and `m` bytes.
-(define* show-bloblet (subr (read @globals) (int int) string)
+(define show-bloblet (->* (int int) string)
   (lambda (n m) (k-cat5 "#<bloblet " (int->string n) " fields " (int->string m) " bytes>")))
 
-(define* show-other (subr (maxeff (read @globals) (read @v) spin) (other) string)
+(define show-other (->* (other) string)
   (lambda (o)
     (tagcase o
       (o-unit () "#u")
@@ -282,9 +282,9 @@
 ;; `set-cdr!`), so the walk has fuel: past it, `…`. The car of a pair gets
 ;; half what is left, so a cycle through cars and cdrs alike stays bounded.
 (define-rec
-  (show-val (subr (maxeff (read @globals) (read @v) (alloc @v) spin) (val) string)
+  (show-val (->* (val) string)
     (lambda (v) (show-val-in v 10000)))
-  (show-val-in (subr (maxeff (read @globals) (read @v) (alloc @v) spin) (val int) string)
+  (show-val-in (->* (val int) string)
     (lambda (v fuel)
       (typecase v
         (int n (int->string n))
@@ -302,8 +302,7 @@
         (sum o (show-other o))
         (else "?"))))
   ;; A list's elements, space-separated, and a dotted tail.
-  (show-items (subr (maxeff (read @globals) (read @v) (alloc @v) spin) ((pairof val val @v) int)
-                    string)
+  (show-items (->* ((pairof val val @v) int) string)
     (lambda (p fuel)
       (let ((head (show-val-in (car p) (quotient fuel 2))) (tail (cdr p)))
         (cond ((null? tail) head)

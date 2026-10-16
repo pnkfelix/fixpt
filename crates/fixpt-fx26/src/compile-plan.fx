@@ -54,21 +54,21 @@
 ;; by `c-note-inline!` and `c-forget-inline!`.
 (define c-inlines-by-name (ref (table symbol c-inlinables @k) @k)
   (new (make-table symbol-hash symbol=?)))
-(define c-inlines-of (subr (maxeff (read @globals) (read @k)) (symbol) c-inlinables)
+(define c-inlines-of (->* (symbol) c-inlinables)
   (lambda (n) (table-ref (get c-inlines-by-name) n nil)))
-(define c-note-inline! (subr c-emits (c-inline) unit)
+(define c-note-inline! (->* (c-inline) unit)
   (lambda (i)
     (let ((n (extract i 1)))
       (begin (set c-inlines (the c-inlinables (cons i (get c-inlines))))
              (table-set! (get c-inlines-by-name) n (the c-inlinables (cons i (c-inlines-of n))))))))
-(define c-forget-inline! (subr c-emits (symbol) unit)
+(define c-forget-inline! (->* (symbol) unit)
   (lambda (n)
     (begin (set c-inlines (c-drop-inline (get c-inlines) n))
            (table-set! (get c-inlines-by-name) n nil))))
 ;; Small global procedures that call themselves: unrolled where called with
 ;; a constant list (`r-unrolled`, `TODO.md` §44); by name, as a call asks.
 (define c-unrolls (ref (table symbol c-inlinables @k) @k) (new (make-table symbol-hash symbol=?)))
-(define c-unrolls-of (subr (maxeff (read @globals) (read @k)) (symbol) c-inlinables)
+(define c-unrolls-of (->* (symbol) c-inlinables)
   (lambda (n) (table-ref (get c-unrolls) n nil)))
 
 ;; The globals whose bodies are being inlined, which are not again.
@@ -77,10 +77,10 @@
 ;; Whether a procedure noted to be inlined or specialized when the globals
 ;; were `at` long is the one its name means where they are seen as `lim`
 ;; long (`c-genv`; -1, all of them): as the Rust compiler's `sees`.
-(define c-sees? (subr pure (int int) bool) (lambda (lim at) (or (< lim 0) (<= at lim))))
+(define c-sees? (->* (int int) bool) (lambda (lim at) (or (< lim 0) (<= at lim))))
 
 ;; `xs` without `n`'s.
-(define c-drop-inline (subr c-builds (c-inlinables symbol) c-inlinables)
+(define c-drop-inline (->* (c-inlinables symbol) c-inlinables)
   (lambda (xs n)
     (cond ((null? xs) xs)
           ((symbol=? (extract (car xs) 1) n) (c-drop-inline (cdr xs) n))
@@ -93,14 +93,14 @@
 (define c-specials (ref c-specializables @k) (new nil))
 
 ;; `xs` without `n`'s.
-(define c-drop-special (subr c-builds (c-specializables symbol) c-specializables)
+(define c-drop-special (->* (c-specializables symbol) c-specializables)
   (lambda (xs n)
     (cond ((null? xs) xs)
           ((symbol=? (extract (car xs) 1) n) (c-drop-special (cdr xs) n))
           (else (the c-specializables (cons (car xs) (c-drop-special (cdr xs) n)))))))
 
 ;; The `k`th of `es`.
-(define c-nth (subr (read @globals) (exps int) exp)
+(define c-nth (->* (exps int) exp)
   (lambda (es k) (if (= k 0) (car es) (c-nth (cdr es) (- k 1)))))
 
 ;; How many of `n` parser-tree nodes are left once `x`'s are counted, as the
@@ -112,7 +112,7 @@
 ;; word that the stack code of a form inlining the body would not have made
 ;; (`c-standard-word`), so none.
 (define-rec
-  (c-room (subr (maxeff (read @globals) spin) (exp int bool) int)
+  (c-room (->* (exp int bool) int)
     (lambda (x n0 w)
       (let ((n (- n0 1)))
         (if (< n 0)
@@ -143,24 +143,24 @@
                 (c-room-else els (c-room-arms arms (c-room s n w) w) w))
               (else y n))))))
   ;; `x`'s nodes counted from `n`, unless none are left.
-  (c-room-if (subr (maxeff (read @globals) spin) (exp int bool) int)
+  (c-room-if (->* (exp int bool) int)
     (lambda (x n w) (if (< n 0) n (c-room x n w))))
-  (c-room-all (subr (maxeff (read @globals) spin) (exps int bool) int)
+  (c-room-all (->* (exps int bool) int)
     (lambda (es n w)
       (if (or (null? es) (< n 0)) n (c-room-all (cdr es) (c-room (car es) n w) w))))
-  (c-room-let (subr (maxeff (read @globals) spin) (c-binds int bool) int)
+  (c-room-let (->* (c-binds int bool) int)
     (lambda (bs n w)
       (if (or (null? bs) (< n 0))
           n
           (c-room-let (cdr bs) (c-room (extract (car bs) 2) n w) w))))
-  (c-room-arms (subr (maxeff (read @globals) spin) (c-cases int bool) int)
+  (c-room-arms (->* (c-cases int bool) int)
     (lambda (arms n w)
       (if (or (null? arms) (< n 0))
           n
           (c-room-arms (cdr arms) (c-room (extract (car arms) 4) n w) w))))
-  (c-room-else (subr (maxeff (read @globals) spin) (c-binds int bool) int)
+  (c-room-else (->* (c-binds int bool) int)
     (lambda (els n w) (if (or (null? els) (< n 0)) n (c-room (extract (car els) 2) n w)))))
-(define c-inline-room (subr (maxeff (read @globals) spin) (exp int) int)
+(define c-inline-room (->* (exp int) int)
   (lambda (x n) (c-room x n #f)))
 
 (define c-plan-calls (ref (table int c-calls-at @k) @k) (new (make-table c-int-hash c-int=?)))
@@ -178,17 +178,17 @@
 (define c-plan-now (ref int @k) (new 0))
 (define c-plan-inlining (ref syms @k) (new nil))
 ;; The context `xs` lists for `n` and `k`, or -1.
-(define c-plan-find (subr c-walks (c-inlined-at symbol int) int)
+(define c-plan-find (->* (c-inlined-at symbol int) int)
   (lambda (xs n k)
     (cond ((null? xs) -1)
           ((and (symbol=? (extract (car xs) 1) n) (= (extract (car xs) 2) k)) (extract (car xs) 3))
           (else (c-plan-find (cdr xs) n k)))))
 ;; Context `c`'s for the body of `n` taking `k` arguments, or -1.
-(define c-plan-child (subr c-walks (int symbol int) int)
+(define c-plan-child (->* (int symbol int) int)
   (lambda (c n k) (c-plan-find (table-ref (get c-plan-inlined) c (the c-inlined-at nil)) n k)))
 ;; The context `xs` lists for the copy of `n` for the lambda whose body is
 ;; `key`, or -1.
-(define c-copy-find (subr c-walks (c-copied-at symbol k-at) int)
+(define c-copy-find (->* (c-copied-at symbol k-at) int)
   (lambda (xs n key)
     (cond ((null? xs) -1)
           ((and (symbol=? (extract (car xs) 1) n) (c-at=? (extract (car xs) 2) key))
@@ -196,16 +196,16 @@
           (else (c-copy-find (cdr xs) n key)))))
 ;; Context `c`'s for the copy of `n` made for the lambda whose body is
 ;; `key`, or -1.
-(define c-plan-copy (subr c-walks (int symbol k-at) int)
+(define c-plan-copy (->* (int symbol k-at) int)
   (lambda (c n key) (c-copy-find (table-ref (get c-plan-copies) c (the c-copied-at nil)) n key)))
 ;; Lambda `lam`'s body.
-(define c-lambda-key (subr c-walks (exp) k-at)
+(define c-lambda-key (->* (exp) k-at)
   (lambda (lam)
     (tagcase lam
       (e-lambda (ps body a b abk) (exp-at body))
       (else y (c-span-key -1 -1 -1)))))
 ;; Call `a`-`b` noted as planned, in the context the plan is in.
-(define p-note-call (subr (maxeff c-emits spin) (int int int c-called) unit)
+(define p-note-call (->* (int int int c-called) unit)
   (lambda (a b abk called)
     (let ((c (get c-plan-now)))
       (begin
@@ -215,8 +215,7 @@
         (table-set! (table-ref (get c-plan-calls) c (get c-no-calls)) (c-span-key a b abk)
                     called)))))
 ;; The one of `xs` that `n`, taking `k` arguments, names, if any.
-(define p-inline-named (subr (maxeff (read @globals) (alloc @k)) (c-inlinables symbol int int)
-                            (listof c-inline acyclic))
+(define p-inline-named (->* (c-inlinables symbol int int) (listof c-inline acyclic))
   (lambda (xs n k lim)
     (cond ((null? xs) nil)
           ((and (symbol=? (extract (car xs) 1) n) (= (c-count-params (extract (car xs) 3)) k)
@@ -224,8 +223,7 @@
            (the (listof c-inline acyclic) (cons (car xs) nil)))
           (else (p-inline-named (cdr xs) n k lim)))))
 (define p-special-named
-  (subr (maxeff (read @globals) (alloc @k)) (c-specializables symbol int int)
-        (listof c-special acyclic))
+  (->* (c-specializables symbol int int) (listof c-special acyclic))
   (lambda (xs n k lim)
     (cond ((null? xs) nil)
           ((and (symbol=? (extract (car xs) 1) n) (= (c-count-params (extract (car xs) 3)) k)
@@ -235,7 +233,7 @@
 ;; `sp` and the lambda argument at its parameter, in a list, when that is a
 ;; lambda small enough to inline, taking as many arguments as it is called
 ;; with.
-(define p-special-lambda (subr (maxeff c-builds spin) (c-special exps) c-spec-calls)
+(define p-special-lambda (->* (c-special exps) c-spec-calls)
   (lambda (sp args)
     (let ((lam (c-nth args (extract sp 6))))
       (tagcase lam
@@ -249,7 +247,7 @@
 ;; a planned lambda's register code, or an inlined body's or a copy's in it;
 ;; a call of no global, planned as neither. None elsewhere, where register
 ;; code decides.
-(define c-planned-call (subr c-builds (int int int) (listof c-called @k))
+(define c-planned-call (->* (int int int) (listof c-called @k))
   (lambda (a b abk)
     (let ((c (if (null? (get c-r-plan-ctx)) 0 (car (get c-r-plan-ctx)))))
       (if (or (not (get c-r-in-plan)) (< c 0))
@@ -261,13 +259,13 @@
                      nil))))))
 
 ;; The names `ns` bound in slots, onto `e`: only their kind counts.
-(define p-slots (subr (maxeff (read @globals) (alloc @k)) (syms cenv) cenv)
+(define p-slots (->* (syms cenv) cenv)
   (lambda (ns e) (if (null? ns) e (p-slots (cdr ns) (c-extend (car ns) (at-slot 0) e)))))
-(define p-let-names (subr (maxeff (read @globals) (alloc @k)) (c-binds) syms)
+(define p-let-names (->* (c-binds) syms)
   (lambda (bs) (if (null? bs) nil (cons (extract (car bs) 1) (p-let-names (cdr bs))))))
 ;; Lambda `ps` `body`'s plan noted: its parameters' names, and what it
 ;; captures.
-(define p-note (subr (maxeff c-emits spin) (c-params exp syms) unit)
+(define p-note (->* (c-params exp syms) unit)
   (lambda (ps body fv)
     (let ((key (exp-at body)))
       (table-set! (get c-plan-procs) key
@@ -275,11 +273,11 @@
                         (table-ref (get c-plan-procs) key (the c-planneds nil)))))))
 
 (define-rec
-  (p-exps (subr (maxeff compiles spin) (exps cenv) unit)
+  (p-exps (->* (exps cenv) unit)
     (lambda (xs e) (if (null? xs) #u (begin (p-exp (car xs) e #f) (p-exps (cdr xs) e)))))
   ;; As `c-exp`: a conversion or a reshaping makes the value as it is, not
   ;; in tail position.
-  (p-exp (subr (maxeff compiles spin) (exp cenv bool) unit)
+  (p-exp (->* (exp cenv bool) unit)
     (lambda (x e tail0)
       (let ((tail (and tail0 (< (c-conversion-at x) 0) (null? (c-reshape-at x)))))
         (tagcase x
@@ -328,7 +326,7 @@
   ;; Call `f` `args` at `a`-`b`, in `e`, planned: as the Rust compiler's
   ;; `plan_call`, and register code's `r-inlined` and `r-specialized`; a body
   ;; it inlines, or a copy it makes, planned too, once in each context.
-  (p-call (subr (maxeff compiles spin) (exp exps int int int cenv) unit)
+  (p-call (->* (exp exps int int int cenv) unit)
     (lambda (f args a b abk e)
       (tagcase f
         (e-var (n fa fb fafbk)
@@ -351,7 +349,7 @@
         (else y #u))))
   ;; Call `s`'s copy, of `n`, at global `l`, planned unless it is in this
   ;; context.
-  (p-copy-once (subr (maxeff compiles spin) (c-spec-call symbol loc cenv) unit)
+  (p-copy-once (->* (c-spec-call symbol loc cenv) unit)
     (lambda (s n l e)
       (if (>= (c-plan-copy (get c-plan-now) n (c-lambda-key (extract s 2))) 0)
           #u
@@ -365,7 +363,7 @@
   ;; captures local, in the globals it sees here. Neither makes a closure
   ;; (`c-inline-room`), nor so has a lambda to specialize at.
   ;; In the form's own context, it is noted to be made (`c-form-copies`).
-  (p-copy (subr (maxeff compiles spin) (c-special exp wglobal cenv) unit)
+  (p-copy (->* (c-special exp wglobal cenv) unit)
     (lambda (sp lam cell e)
       (tagcase lam
         (e-lambda (lps lbody la lb lalbk)
@@ -394,7 +392,7 @@
   ;; The body of `i`, taking `k` arguments, planned as `r-inline` compiles
   ;; it: its parameters local, in the globals it saw, its name not inlined in
   ;; it again. (An inlined body makes no closure: `c-inline-room`.)
-  (p-inlined (subr (maxeff compiles spin) (c-inline int) unit)
+  (p-inlined (->* (c-inline int) unit)
     (lambda (i k)
       (let ((c (get c-plan-contexts)) (outer (get c-plan-now))
             (outer-inlining (get c-plan-inlining)) (outer-genv (get c-genv)))
@@ -410,15 +408,15 @@
           (set c-genv outer-genv)
           (set c-plan-inlining outer-inlining)
           (set c-plan-now outer)))))
-  (p-begin (subr (maxeff compiles spin) (exps cenv bool) unit)
+  (p-begin (->* (exps cenv bool) unit)
     (lambda (es e tail)
       (cond ((null? es) #u)
             ((null? (cdr es)) (p-exp (car es) e tail))
             (else (begin (p-exp (car es) e #f) (p-begin (cdr es) e tail))))))
-  (p-let (subr (maxeff compiles spin) (c-binds exp cenv bool) unit)
+  (p-let (->* (c-binds exp cenv bool) unit)
     (lambda (bs body e tail)
       (begin (p-exps (c-bound-exps bs) e) (p-exp body (p-slots (p-let-names bs) e) tail))))
-  (p-arms (subr (maxeff compiles spin) (c-cases c-binds cenv bool) unit)
+  (p-arms (->* (c-cases c-binds cenv bool) unit)
     (lambda (arms els e tail)
       (if (null? arms)
           (if (null? els)
@@ -435,7 +433,7 @@
   ;; As `c-letrec-or-lift`: lifted, each member's lambda in what it knows
   ;; (the lifted procedures), taking its added names first; else each
   ;; closure made with its siblings pending.
-  (p-letrec (subr (maxeff compiles spin) (c-recs exp int int int cenv bool) unit)
+  (p-letrec (->* (c-recs exp int int int cenv bool) unit)
     (lambda (bs body a b abk e tail)
       (let ((plan (c-lift-plan bs body e tail)))
         (begin
@@ -445,7 +443,7 @@
               (let ((ks (c-lift-closures bs (car plan) 0)))
                 (begin (p-lifted bs (car plan) ks (c-bind-lifted bs ks (c-lifted-entries e)) 0)
                        (p-exp body (c-bind-lifted bs ks e) tail))))))))
-  (p-rec-lambdas (subr (maxeff compiles spin) (c-recs c-recs cenv int) unit)
+  (p-rec-lambdas (->* (c-recs c-recs cenv int) unit)
     (lambda (all bs e i)
       (if (null? bs)
           #u
@@ -463,7 +461,7 @@
                   (else y #u)))
               (else y #u))
             (p-rec-lambdas all (cdr bs) e (+ i 1))))))
-  (p-lifted (subr (maxeff compiles spin) (c-recs c-added (listof int @k) cenv int) unit)
+  (p-lifted (->* (c-recs c-added (listof int @k) cenv int) unit)
     (lambda (bs added ks known i)
       (if (null? bs)
           #u
@@ -479,7 +477,7 @@
             (p-lifted (cdr bs) added (cdr ks) known (+ i 1))))))
   ;; As `c-module-make`: each value made in order, a lambda naming an item
   ;; not made yet capturing it as a `letrec`'s sibling is.
-  (p-module (subr (maxeff compiles spin) (c-mvals cenv c-mslots) unit)
+  (p-module (->* (c-mvals cenv c-mslots) unit)
     (lambda (vs e later)
       (if (null? vs)
           #u
@@ -489,7 +487,7 @@
                   (p-module-lambda n x e later)
                   (p-exp x e #f))
               (p-module (cdr vs) (c-extend n (at-slot 0) e) (cdr later)))))))
-  (p-module-lambda (subr (maxeff compiles spin) (symbol exp cenv c-mslots) unit)
+  (p-module-lambda (->* (symbol exp cenv c-mslots) unit)
     (lambda (n x e later)
       (tagcase (car (c-lambda-of x))
         (e-lambda (ps body a b abk)
@@ -504,7 +502,7 @@
         (else y #u))))
   ;; As `c-lambda-word-in`: what its closure captures in `e`, noted; then
   ;; its body, in the scope its word has, in tail position.
-  (p-lambda (subr (maxeff compiles spin) (c-params exp cenv syms) unit)
+  (p-lambda (->* (c-params exp cenv syms) unit)
     (lambda (ps body e own0)
       (let* ((fv (c-lambda-captured ps body e))
              (own (c-own-of ps own0)))
@@ -515,7 +513,7 @@
 ;; The plan of top-level form `x`, compiled next, in no scope. The lifted
 ;; procedures it would make are counted as the compile will make them, and
 ;; forgotten after. Not in register code, whatever a failed compile left.
-(define c-plan-top (subr (maxeff compiles spin) (exp) unit)
+(define c-plan-top (->* (exp) unit)
   (lambda (x)
     (let ((count (get c-lift-count)))
       (begin (set c-plan-procs (make-table c-at-hash c-at=?))
@@ -537,11 +535,11 @@
              (p-exp x (the cenv nil) #f)
              (set c-lift-count count)))))
 ;; The `k`th of parameters `ps`' names.
-(define p-nth-param (subr (read @globals) (c-params int) symbol)
+(define p-nth-param (->* (c-params int) symbol)
   (lambda (ps k) (if (= k 0) (extract (car ps) 1) (p-nth-param (cdr ps) (- k 1)))))
 ;; The one of `cs` made of procedure word `w` for a lambda capturing `fv` in
 ;; globals `genv`, in a list; none if none was.
-(define c-spec-copy-find (subr c-walks (c-spec-copies tword syms int) c-spec-copies)
+(define c-spec-copy-find (->* (c-spec-copies tword syms int) c-spec-copies)
   (lambda (cs w fv genv)
     (cond ((null? cs) nil)
           ((let ((c (car cs)))
@@ -552,7 +550,7 @@
 ;; procedure's body compiled again, in the globals it saw, and named for the
 ;; procedure and the lambda; its twin, made with the others, is the
 ;; specialized one, in the copy's context (step 4).
-(define c-make-copy (subr (maxeff compiles spin) (c-copy-at) unit)
+(define c-make-copy (->* (c-copy-at) unit)
   (lambda (c)
     (let ((sp (extract c 1)))
       (tagcase (extract c 2)
@@ -564,7 +562,7 @@
                 #u)))
         (else y #u)))))
 (define c-make-copy-of
-  (subr (maxeff compiles spin) (c-copy-at c-special c-params exp k-at c-spec-copies) unit)
+  (->* (c-copy-at c-special c-params exp k-at c-spec-copies) unit)
   (lambda (c sp lps lbody key cs)
     (let ((spec (the c-spec
                   (product (1 (extract sp 1)) (2 (extract c 3)) (3 (extract sp 2))
@@ -597,5 +595,5 @@
                                        (4 (extract made 1)) (5 (extract made 2)))
                               cs))))))))
 ;; Each of `cs`, last first, made in order.
-(define c-make-copies (subr (maxeff compiles spin) ((listof c-copy-at @k)) unit)
+(define c-make-copies (->* ((listof c-copy-at @k)) unit)
   (lambda (cs) (if (null? cs) #u (begin (c-make-copies (cdr cs)) (c-make-copy (car cs)))))))))

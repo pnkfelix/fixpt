@@ -104,11 +104,11 @@
 (define k-part-find (with check-sub-env k-part-find))
 
 (define-rec
-  (k-synth (subr (maxeff checks spin) (kx) k-te)
+  (k-synth (->* (kx) k-te)
     (lambda (x)
       (let* ((r (k-synth-node x)) (e (k-frozen x (extract r 2))))
         (begin (k-note-effect x e) (k-kill-paths e) (k-path-te x (k-te (extract r 1) e))))))
-  (k-synth-node (subr (maxeff checks spin) (kx) k-te)
+  (k-synth-node (->* (kx) k-te)
     (lambda (x)
       (tagcase x
         (x-var (s a b abk)
@@ -214,13 +214,13 @@
         (x-begin (xs a b abk) (k-masked x (k-synth-seq xs k-unit nil)))
         (x-module (items a b abk) (k-module-rule x))
         (x-with (m body a b abk) (k-module-rule x)))))
-  (k-synth-seq (subr (maxeff checks spin) (kxs int k-eff) k-te)
+  (k-synth-seq (->* (kxs int k-eff) k-te)
     (lambda (xs last e)
       (if (null? xs)
           (k-te last e)
           (let ((r (k-synth (car xs))))
             (k-synth-seq (cdr xs) (extract r 1) (k-union e (extract r 2)))))))
-  (k-synth-fields (subr (maxeff checks spin) (k-let-bs) (productof (1 k-parts) (2 k-eff)))
+  (k-synth-fields (->* (k-let-bs) (productof (1 k-parts) (2 k-eff)))
     (lambda (fs)
       (if (null? fs)
           (product (1 nil) (2 nil))
@@ -228,14 +228,14 @@
                  (part (product (1 (extract (car fs) 1)) (2 (extract r 1)))))
             (product (1 (cons part (extract rest 1)))
                      (2 (k-union (extract r 2) (extract rest 2))))))))
-  (k-synth-lets (subr (maxeff checks spin) (k-let-bs) (productof (1 k-bindings) (2 k-eff)))
+  (k-synth-lets (->* (k-let-bs) (productof (1 k-bindings) (2 k-eff)))
     (lambda (bs)
       (if (null? bs)
           (product (1 nil) (2 nil))
           (let* ((r (k-synth (extract (car bs) 2))) (rest (k-synth-lets (cdr bs))))
             (product (1 (cons (cons (extract (car bs) 1) (extract r 1)) (extract rest 1)))
                      (2 (k-union (extract r 2) (extract rest 2))))))))
-  (k-check-letrec (subr (maxeff checks spin) (k-letrec-bs) k-eff)
+  (k-check-letrec (->* (k-letrec-bs) k-eff)
     (lambda (bs)
       (if (null? bs)
           nil
@@ -247,7 +247,7 @@
             (k-union e rest)))))
   ;; Check `init` against `t`, the type `n` is declared; an error at `init`
   ;; itself says so.
-  (k-check-declared (subr (maxeff checks spin) (symbol int kx) k-eff)
+  (k-check-declared (->* (symbol int kx) k-eff)
     (lambda (n t init)
       (let ((r (k-declaring (k-settled-thunk init t k-check) (k-start init) (k-end init) n t)))
         (extract r 2))))
@@ -255,7 +255,7 @@
 
   ;; A `lambda`'s type. `hint` supplies the types of parameters the program
   ;; left out; `result`, when not -1, is what the body is checked against.
-  (k-synth-lambda-as (subr (maxeff checks spin) (kx k-ids int) k-te)
+  (k-synth-lambda-as (->* (kx k-ids int) k-te)
     (lambda (x hint result)
       (tagcase x
         (x-lambda (ps body a b abk)
@@ -280,7 +280,7 @@
   ;; result types if it is a subroutine's, with `(read R)` in its latent
   ;; effect, since calling it reads the closure; making it allocates in `R`,
   ;; the region `r` names.
-  (k-synth-rlambda (subr (maxeff checks spin) (kx kx kx int) k-te)
+  (k-synth-rlambda (->* (kx kx kx int) k-te)
     (lambda (x r l expected)
       (let* ((rr (k-synth r))
              (rt (extract rr 1))
@@ -298,7 +298,7 @@
              (e (k-insert (a-alloc g) (extract rr 2))))
         (k-te-masked x t e))))
   ;;; ------------------------------------------------------------ application
-  (k-synth-app (subr (maxeff checks spin) (kx kx kxs int) k-te)
+  (k-synth-app (->* (kx kx kxs int) k-te)
     (lambda (x f args expected)
       (let ((op (begin (k-note-fx-plain-op (k-under f)) (k-std-op f))) (lop (k-library-op f args)))
         (cond
@@ -317,7 +317,7 @@
   ;; `+` and `-` of naturals: a natural, of a size when both are known. Only
   ;; what has a type of its own is asked for it; anything else is told it
   ;; is an int, as for any call.
-  (k-nat-arith (subr (maxeff checks spin) (kx string kxs) k-te)
+  (k-nat-arith (->* (kx string kxs) k-te)
     (lambda (x op args)
       (let* ((ra (k-nat-operand (car args)))
              (rb (k-nat-operand (car (cdr args))))
@@ -325,7 +325,7 @@
              (sz (k-nat-arith-size op za zb))
              (t (if (null? sz) k-int (k-ty-new (ty-nat (car sz))))))
         (k-te t (k-union (extract ra 1) (extract rb 1))))))
-  (k-nat-operand (subr (maxeff checks spin) (kx) (productof (1 k-eff) (2 k-maybe-size)))
+  (k-nat-operand (->* (kx) (productof (1 k-eff) (2 k-maybe-size)))
     (lambda (x)
       (if (not (k-natural-by-itself? x))
           (product (1 (k-check x k-int)) (2 (the k-maybe-size nil)))
@@ -333,7 +333,7 @@
             (begin (k-expect x t k-int) (product (1 (extract r 2)) (2 (k-operand-size x t))))))))
   ;; `(certify-length v k)`: `v`'s value as a `(nlist T k)`, where `length-is?`
   ;; has just found it so; nowhere else.
-  (k-certify-length (subr (maxeff checks spin) (kx kxs) k-te)
+  (k-certify-length (->* (kx kxs) k-te)
     (lambda (x args)
       (let* ((none (the k-cert-lens nil))
              (found (if (k-sc-two? args) (k-length-arg (car args) (car (cdr args))) none))
@@ -354,7 +354,7 @@
   ;; `cons` onto a `nlist`: one more element. Where a `nlist` is expected, the
   ;; tail is checked as one shorter; otherwise, a tail that is a variable of
   ;; `nlist` type gives a `nlist` one longer. None if neither.
-  (k-nlist-cons (subr (maxeff checks spin) (kx kxs int) (listof k-te acyclic))
+  (k-nlist-cons (->* (kx kxs int) (listof k-te acyclic))
     (lambda (x args expected)
       (if (not (k-sc-two? args))
           nil
@@ -369,7 +369,7 @@
                              (te (k-check tl tail-ty)))
                         (the (listof k-te acyclic) (cons (k-te expected (k-union xe te)) nil)))))
                 (else y (k-nlist-cons-tail hd tl))))))))
-  (k-nlist-cons-tail (subr (maxeff checks spin) (kx kx) (listof k-te acyclic))
+  (k-nlist-cons-tail (->* (kx kx) (listof k-te acyclic))
     (lambda (hd tl)
       (tagcase tl
         (x-var (v va vb vavbk)
@@ -386,7 +386,7 @@
         (else y nil))))
   ;; `(certify-acyclic v)`: `v`'s value at `acyclic`, where `acyclic?` has
   ;; just found `v` acyclic; nowhere else.
-  (k-certify (subr (maxeff checks spin) (kx kxs) k-te)
+  (k-certify (->* (kx kxs) k-te)
     (lambda (x args)
       (if (not (k-certified-arg? (get k-certified) args))
           (k-fail-at "`certify-acyclic` takes only a variable `acyclic?` has just found acyclic" x)
@@ -394,12 +394,12 @@
             (if (k-is-data? t) (k-te (k-finitized t) (extract r 2)) (k-fail-not-data t x))))))
   ;; An application's operator, where a second-class standard operation may
   ;; be named.
-  (k-synth-operator (subr (maxeff checks spin) (kx) k-te)
+  (k-synth-operator (->* (kx) k-te)
     (lambda (f)
       (let ((outer (get k-operator)))
         (begin (set k-operator (k-operator-mark f))
                (let ((r (k-synth f))) (begin (set k-operator outer) r))))))
-  (k-synth-app-plain (subr (maxeff checks spin) (kx kx kxs int) k-te)
+  (k-synth-app-plain (->* (kx kx kxs int) k-te)
     (lambda (x f args expected)
       (let* ((a (k-start x)) (b (k-end x))
              (rf (k-synth-operator f))
@@ -431,12 +431,12 @@
   ;; A call's type and effect, once its arguments have effect `e`: its
   ;; callee's latent effect too, `spin` where the call may loop, and what
   ;; the call masks; its result, of type `result`.
-  (k-app-result (subr (maxeff checks spin) (kx kx int kxs k-eff k-eff int) k-te)
+  (k-app-result (->* (kx kx int kxs k-eff k-eff int) k-te)
     (lambda (x f ft args e latent result)
       (let* ((e (k-union e latent))
              (e (if (k-may-spin? f ft args) (k-insert (a-spin) e) e)))
         (k-te-masked x result e))))
-  (k-app-args (subr (maxeff checks spin) (kxs k-ids int k-done k-eff) k-eff)
+  (k-app-args (->* (kxs k-ids int k-done k-eff) k-eff)
     (lambda (args params i done e)
       (if (null? args)
           e
@@ -445,7 +445,7 @@
             (k-app-args (cdr args) (cdr params) (+ i 1) done (k-union e ae))))))
   ;; Argument `i`, `arg`, for a parameter of type `p`: its effect. Where it was found a `t` (≥ 0)
   ;; of effect `e`, that, converted if need be; checked against `p` where not.
-  (k-app-arg (subr (maxeff checks spin) (kx int int int k-eff) k-eff)
+  (k-app-arg (->* (kx int int int k-eff) k-eff)
     (lambda (arg p i t e)
       (cond ((< t 0) (k-check-argument arg p i))
             ((k-subtype t p) e)
@@ -455,18 +455,18 @@
                    (k-fail-at (k-argument-error i (k-show-ty t) (k-show-ty p)) arg)
                    (begin (k-convert-at arg t (car c)) e)))))))
   ;; A `vsubr` call's arguments, each checked as its element type `t`.
-  (k-vapp-args (subr (maxeff checks spin) (kxs int int k-eff) k-eff)
+  (k-vapp-args (->* (kxs int int k-eff) k-eff)
     (lambda (args t i e)
       (if (null? args)
           e
           (k-vapp-args (cdr args) t (+ i 1) (k-union e (k-check-argument (car args) t i))))))
   ;; An argument that failed to check is reported as that argument.
-  (k-check-argument (subr (maxeff checks spin) (kx int int) k-eff)
+  (k-check-argument (->* (kx int int) k-eff)
     (lambda (arg p i)
       (let ((r (k-rewriting (lambda () (k-te p (k-check arg p))) (k-start arg) (k-end arg)
                             (lambda (m want got) (k-argument-error i got want)))))
         (extract r 2))))
-  (k-instantiate (subr (maxeff checks spin) (int kxs int int int k-done kx) int)
+  (k-instantiate (->* (int kxs int int int k-done kx) int)
     (lambda (ft args expected a b done f)
       (let* ((bo (k-binders-of ft)) (kinds (extract bo 1)) (inner (extract bo 2))
              (callee (k-callee-of inner (k-length args))))
@@ -490,7 +490,7 @@
                     (if (< expected 0) (k-widen-nil-tail result kinds solved) #u)
                     (k-solved-instance kinds solved a b ft inner))))))))
   ;; What the arguments are, except the ones that need to be told.
-  (k-inst-asked (subr (maxeff checks spin) (kxs k-ids int k-binders k-solved k-done) unit)
+  (k-inst-asked (->* (kxs k-ids int k-binders k-solved k-done) unit)
     (lambda (args params i kinds solved done)
       (if (null? args)
           #u
@@ -507,7 +507,7 @@
             (k-inst-asked (cdr args) (cdr params) (+ i 1) kinds solved done)))))
   ;; The arguments that needed telling: each is checked against its parameter
   ;; as solved so far, and what it turns out to be solves more.
-  (k-inst-told (subr (maxeff checks spin) (kxs k-ids int k-binders k-solved k-done) unit)
+  (k-inst-told (->* (kxs k-ids int k-binders k-solved k-done) unit)
     (lambda (args params i kinds solved done)
       (if (null? args)
           #u
@@ -542,11 +542,11 @@
                            (k-arg-unified (car params) kinds solved done i (car pv))))))))
             (k-inst-told (cdr args) (cdr params) (+ i 1) kinds solved done)))))
   ;;; ------------------------------------------------------------ check mode
-  (k-check (subr (maxeff checks spin) (kx int) k-eff)
+  (k-check (->* (kx int) k-eff)
     (lambda (x expected)
       (let ((e (k-frozen x (k-check-mode x expected))))
         (begin (k-note-effect x e) (k-kill-paths e) e))))
-  (k-check-mode (subr (maxeff checks spin) (kx int) k-eff)
+  (k-check-mode (->* (kx int) k-eff)
     (lambda (x expected)
       (let* ((et (k-get expected))
              (poly? (tagcase et (ty-poly (bs body) #t) (else y #f)))
@@ -579,7 +579,7 @@
                  (else y nil)))
              (else y nil)))
           (else (k-check-node x expected et))))))
-  (k-check-node (subr (maxeff checks spin) (kx int k-ty) k-eff)
+  (k-check-node (->* (kx int k-ty) k-eff)
     (lambda (x expected et)
       (letrec ((otherwise (subr (maxeff (read @globals) checks spin) () k-eff)
                            (lambda () (k-as-expected x (k-synth x) expected))))
@@ -670,13 +670,13 @@
                          (set k-skolems named)
                          (k-mask x (k-union (extract inits 2) e) expected))))))
           (else y (otherwise))))))))
-  (k-check-seq (subr (maxeff checks spin) (kxs int k-eff) k-eff)
+  (k-check-seq (->* (kxs int k-eff) k-eff)
     (lambda (xs expected e)
       (if (null? (cdr xs))
           (k-union e (k-check (car xs) expected))
           (let ((r (k-synth (car xs))))
             (k-check-seq (cdr xs) expected (k-union e (extract r 2)))))))
-  (k-check-fields (subr (maxeff checks spin) (k-let-bs k-parts) k-eff)
+  (k-check-fields (->* (k-let-bs k-parts) k-eff)
     (lambda (fs ps)
       (if (null? fs)
           nil
@@ -684,10 +684,10 @@
                  (rest (k-check-fields (cdr fs) (cdr ps))))
             (k-union e rest)))))
   ;; `body`'s type and effect: checked against `expected` if that is given (≥ 0), found if not.
-  (k-synth-as (subr (maxeff checks spin) (kx int) k-te)
+  (k-synth-as (->* (kx int) k-te)
     (lambda (body expected)
       (if (>= expected 0) (k-te expected (k-check body expected)) (k-synth body))))
-  (k-synth-tagcase (subr (maxeff checks spin) (kx kx k-arms k-let-bs int) k-te)
+  (k-synth-tagcase (->* (kx kx k-arms k-let-bs int) k-te)
     (lambda (x s arms els expected)
       (let* ((r0 (k-synth s)) (rs (k-flat-view (k-at-of x) r0)) (st (extract rs 1)))
         (tagcase (k-get st)
@@ -703,7 +703,7 @@
   ;; A `tagcase`'s arms' types and effect, `armed`, with its `else`, `els`, if any, for the
   ;; variants `rest` not named; an error at `x` if it has none, and some are not named.
   (k-tagcase-else
-    (subr (maxeff checks spin) (kx k-types-eff k-parts k-let-bs int int) k-types-eff)
+    (->* (kx k-types-eff k-parts k-let-bs int int) k-types-eff)
     (lambda (x armed rest els expected st)
       (if (null? els)
           (if (null? rest) armed (k-fail-no-arm rest x))
@@ -713,7 +713,7 @@
             (product (1 (k-push-ids (extract armed 1) (cons (extract r 1) nil)))
                      (2 (k-union (extract armed 2) (extract r 2))))))))
   ;; Each arm: its type and the effects of all.
-  (k-tagcase-arms (subr (maxeff checks spin) (k-arms k-parts int int) k-types-eff)
+  (k-tagcase-arms (->* (k-arms k-parts int int) k-types-eff)
     (lambda (arms variants st expected)
       (if (null? arms)
           (product (1 nil) (2 nil))
@@ -737,7 +737,7 @@
                        (rest (k-tagcase-arms (cdr arms) variants st expected)))
                   (k-te-onto r rest)))))))
   ;;; ------------------------------------------------------------ bloblets
-  (k-synth-bloblet (subr (maxeff checks spin) (kx symbol int kxs int) k-te)
+  (k-synth-bloblet (->* (kx symbol int kxs int) k-te)
     (lambda (x op i args expected)
       (let ((name (symbol->string op)))
         (if (k-op-either? name "make-bloblet" "rmake-bloblet")
@@ -748,7 +748,7 @@
                 (k-blobref-op x name args expected k-synth k-check)
                 (k-bloblet-op x name i args k-synth k-check))))))
   ;; `(make-bloblet n f …)`, or, if `rm`, `(rmake-bloblet r n f …)`.
-  (k-make-bloblet (subr (maxeff checks spin) (kx bool kxs int) k-te)
+  (k-make-bloblet (->* (kx bool kxs int) k-te)
     (lambda (x rm args expected)
       (let* ((a (k-start x)) (b (k-end x))
              (gr (if rm (k-synth (car args)) (k-te k-unit (the k-eff nil))))
@@ -769,13 +769,13 @@
              (t (k-ty-new (ty-bloblet (extract made 1) #f region)))
              (unknotted (k-no-knot t a b)))
         (k-te-masked x t e))))
-  (k-synth-each (subr (maxeff checks spin) (kxs) k-types-eff)
+  (k-synth-each (->* (kxs) k-types-eff)
     (lambda (xs)
       (if (null? xs)
           (product (1 nil) (2 nil))
           (let* ((r (k-synth (car xs))) (rest (k-synth-each (cdr xs))))
             (k-te-onto r rest)))))
-  (k-check-each (subr (maxeff checks spin) (kxs k-ids) k-eff)
+  (k-check-each (->* (kxs k-ids) k-eff)
     (lambda (xs ts)
       (if (null? xs)
           nil
@@ -786,7 +786,7 @@
   ;;; be within the tag's bound apart from control on its region. Then the
   ;;; prompt delimits: that control is removed, if the body can reach no other
   ;;; tag in the region.
-  (k-synth-prompt (subr (maxeff checks spin) (kx kx kx kx) k-te)
+  (k-synth-prompt (->* (kx kx kx kx) k-te)
     (lambda (x tag body handler)
       (let* ((rt (k-synth tag)) (tt (extract rt 1)) (parts (k-tag-parts tt)))
         (if (null? parts)
@@ -804,7 +804,7 @@
                          (e (k-union (extract rh 2) (k-union (extract c 1) delimited))))
                     (k-te-masked x answer (k-union (extract rt 2) e)))))))))
   ;; A prompt's body's effect, checked as an `answer`, the type the tag's prompts deliver.
-  (k-prompt-body (subr (maxeff checks spin) (kx int) k-eff)
+  (k-prompt-body (->* (kx int) k-eff)
     (lambda (body answer)
       (let ((r (k-rewriting (lambda () (k-te answer (k-check body answer)))
                             (k-start body) (k-end body)
@@ -812,7 +812,7 @@
         (extract r 2))))
   ;; A handler written as a `lambda` of one parameter is told what it takes
   ;; and gives.
-  (k-synth-handler (subr (maxeff checks spin) (kx int int) k-te)
+  (k-synth-handler (->* (kx int int) k-te)
     (lambda (h payload answer)
       (tagcase h
         (x-lambda (ps hbody a b abk)
@@ -825,7 +825,7 @@
   ;;; ----------------------------------------------- `module` and `with`
   ;; The effect of `name`, the lambda `x` of `define*` or `->*` (`how`),
   ;; checked again at `tf`, the type found.
-  (k-star-checked (subr (maxeff checks spin) (string symbol int kx) k-eff)
+  (k-star-checked (->* (string symbol int kx) k-eff)
     (lambda (how name tf x)
       (let ((r (k-saying (lambda () (k-te tf (k-check-declared name tf x)))
                          (lambda (m) (k-star-mistake how name tf m)))))
@@ -835,7 +835,7 @@
   ;; closure is, checked on its representation and bound at `t`. A type
   ;; constructor's representation is a `dlambda` of its parameters: its
   ;; conversions are polymorphic in them, as FX-91's at a higher kind.
-  (k-module-abs (subr (maxeff checks spin) (k-item int int k-made) k-made)
+  (k-module-abs (->* (k-item int int k-made) k-made)
     (lambda (it a b made)
       (let* ((n (car (extract it 2)))
              (v (extract it 3))
@@ -861,7 +861,7 @@
                      (extract made 4))))))
   ;; A value: checked against its type, if it has one, or found; bound, its
   ;; sizes and abstract types named for it, for the items after it.
-  (k-module-val (subr (maxeff checks spin) (k-item int int k-made) k-made)
+  (k-module-val (->* (k-item int int k-made) k-made)
     (lambda (it a b made)
       (let* ((n (car (extract it 2)))
              (ts (extract it 4))
@@ -874,7 +874,7 @@
                    (k-union (extract made 4) (extract r 2))))))
   ;; Lambda `init`, `n`'s, checked against `t`; a `define-rec` member's
   ;; error said as of its declared type.
-  (k-mod-check-one (subr (maxeff checks spin) (symbol int kx bool) k-eff)
+  (k-mod-check-one (->* (symbol int kx bool) k-eff)
     (lambda (n t init rec) (if rec (k-check-declared n t init) (k-settled-or init t k-check))))
   ;; A module's `define*` `n`, its lambda `init`, of type `decl` as written:
   ;; checked at `w`, its type reading any global, then at the type with the
@@ -882,7 +882,7 @@
   ;; top-level `define*` is. Only in a group of one (itself, if it calls
   ;; itself), as at the top level, where a `define*` is in no `define-rec`.
   ;; The effect, and the type found.
-  (k-mod-star (subr (maxeff checks spin) (symbol int kx int k-letrec-bs string) k-eff-ty)
+  (k-mod-star (->* (symbol int kx int k-letrec-bs string) k-eff-ty)
     (lambda (n w init decl group why)
       (let ((other (k-other-member group n)))
         (if (not (null? other))
@@ -907,7 +907,7 @@
                    (back (set k-recursive rsaved)))
               (product (1 e) (2 f)))))))
   (k-mod-check-lambdas
-    (subr (maxeff checks spin) (k-letrec-bs k-mlams k-groups k-ends k-ids) k-mod-checked)
+    (->* (k-letrec-bs k-mlams k-groups k-ends k-ids) k-mod-checked)
     (lambda (bs ls gs ws ds)
       (if (null? bs)
           (product (1 (the k-eff nil)) (2 (the k-letrec-bs nil)))
@@ -928,7 +928,7 @@
                                                (extract rest 2)))))))))
   ;; Items `items` but typed lambdas, each in the scope of those before it
   ;; and of the typed lambdas.
-  (k-module-items (subr (maxeff checks spin) (k-items int int k-made) k-made)
+  (k-module-items (->* (k-items int int k-made) k-made)
     (lambda (items a b made)
       (if (null? items)
           made
@@ -953,7 +953,7 @@
   ;; order, in the scope of those and the items before it; then the lambdas,
   ;; in the scope of everything. The module's type, its abstract types bound
   ;; in it.
-  (k-synth-module-here (subr (maxeff checks spin) (kx k-items int int) k-te)
+  (k-synth-module-here (->* (kx k-items int int) k-te)
     (lambda (x items a b)
       (let* ((saved (k-mark))
              (named (get k-skolems))
@@ -984,7 +984,7 @@
         (k-te-masked x t (k-union (extract made 4) le)))))
   ;; The same; a module read from a file (`load-module`, M7) seeing only the
   ;; standard environment, what is wrong in it said where it is read.
-  (k-synth-module (subr (maxeff checks spin) (kx k-items int int) k-te)
+  (k-synth-module (->* (kx k-items int int) k-te)
     (lambda (x items a b)
       (let ((k (if (null? items) 0 (extract (car items) 1))))
         (if (< k 4)
@@ -996,7 +996,7 @@
                      (get got)))))))
   ;; `(with m body)`: the body with `m`'s values in scope, by name, at their
   ;; types for `m`; checked against `expected` if given (≥ 0).
-  (k-synth-with (subr (maxeff checks spin) (kx symbol kx int int int) k-te)
+  (k-synth-with (->* (kx symbol kx int int int) k-te)
     (lambda (x m body a b expected)
       (let ((mt (k-lookup m)) (shown (symbol->string m)) (lt (k-library-type m body)))
         (if (k-fx-module? m)
@@ -1016,7 +1016,7 @@
                                             a b (k-start body) (k-end body))))
                   (k-te-masked x (extract r 1) (k-union naming (extract r 2)))))
               (else y (k-fail (k-with-not-module shown (k-show-ty mt)) a b)))))))))
-  (k-module-rule (subr (maxeff checks spin) (kx) k-te)
+  (k-module-rule (->* (kx) k-te)
     (lambda (x)
       (tagcase x
         (x-module (items a b abk) (k-synth-module x items a b))

@@ -39,9 +39,9 @@
       (include check-env) (include check-read-descs) (include check-subst) (include parser))
 
 ;; A module item as `x-module` has it.
-(define k-item-of (subr (maxeff (read @globals) (alloc @t)) (int names int k-ids kxs) k-item)
+(define k-item-of (->* (int names int k-ids kxs) k-item)
   (lambda (k ns v ts xs) (product (1 k) (2 (k-copy-names ns)) (3 v) (4 ts) (5 xs))))
-(define k-push-binders (subr kstate (k-binders) unit)
+(define k-push-binders (->* (k-binders) unit)
   (lambda (bs)
     (if (null? bs)
         #u
@@ -50,7 +50,7 @@
                  (k-push-binders (cdr bs)))))))
 ;; The names a module's items give type abbreviations: each `define-type`
 ;; of a name, but of a `dlambda` or an effect.
-(define k-module-type-names (subr (maxeff (read @globals) (read @s) (alloc @t)) (mod-items) k-names)
+(define k-module-type-names (->* (mod-items) k-names)
   (lambda (items)
     (if (null? items)
         nil
@@ -62,14 +62,14 @@
 ;; Whether the file read at `base` is built in (`fx26:…`): while one is
 ;; checked, the standard names only it may name are seen
 ;; (`k-built-in-only?`).
-(define k-built-in-at? (subr (maxeff checks spin) (loaded-files int) bool)
+(define k-built-in-at? (->* (loaded-files int) bool)
   (lambda (fs base)
     (cond ((null? fs) #f)
           ((= (extract (car fs) 2) base)
            (let ((p (extract (car fs) 4)))
              (and (>= (string-length p) 5) (string=? (substring p 0 5) "fx26:"))))
           (else (k-built-in-at? (cdr fs) base)))))
-(define k-in-loaded (subr (maxeff checks spin) (k-thunk-unit int int int) unit)
+(define k-in-loaded (->* (k-thunk-unit int int int) unit)
   (lambda (f base a b)
     (let* ((n (if (k-built-in-at? (get loaded) base) 1 0))
            (in (set k-in-built-in (+ (get k-in-built-in) n)))
@@ -83,18 +83,18 @@
         (else y #u)))))
 ;; Error `m` at `at`, in a file read, said in each file on the way out to
 ;; the program (`loaded-placed`), there.
-(define k-fail-placed (subr (maxeff checks spin) (string int) void)
+(define k-fail-placed (->* (string int) void)
   (lambda (m at)
     (let ((p (loaded-placed (get loaded) m at)))
       (k-fail (extract p 1) (extract p 2) (extract p 2)))))
 ;; What a module's first item says of where it was read: from its file, at
 ;; a base (> 3); not, and why (-1); or not from a file (0 to 3).
-(define k-items-kind (subr pure (mod-items) int)
+(define k-items-kind (->* (mod-items) int)
   (lambda (items) (if (null? items) 0 (extract (car items) 1))))
 ;; The names a module's item defines as descriptions (`types`), or as values:
 ;; a generative type's name is one, its two conversions values; as the Rust
 ;; checker's `defined_twice` counts them.
-(define k-item-names (subr (maxeff (read @globals) (alloc @t)) (mod-item bool) k-names)
+(define k-item-names (->* (mod-item bool) k-names)
   (lambda (it types)
     (let ((k (extract it 1)))
       (case k ((0)
@@ -109,7 +109,7 @@
 ;; description (`seen`) or as a value (`vseen`): a module defining a name
 ;; twice has no type (`moduleof` refuses it), and which definition a use got
 ;; would depend on the path that ran it. A value may have a type's name.
-(define k-defined-twice (subr (maxeff kreads (alloc @t)) (mod-items k-names k-names) k-names)
+(define k-defined-twice (->* (mod-items k-names k-names) k-names)
   (lambda (items seen vseen)
     (letrec ((first (subr (maxeff (read @globals) (read @t)) (k-names k-names) k-names)
                (lambda (ns seen)
@@ -128,25 +128,25 @@
 ;; A `blobref-variant!`'s operands resolved, `xs`, from `args`: its label, a
 ;; quoted name, kept as a constant whose type holds the name and whose value
 ;; is -1 (`check-read-helpers.fx`'s `k-variant-label`).
-(define k-label-const (subr (maxeff kstate spin) (symbol exp-list kxs) kxs)
+(define k-label-const (->* (symbol exp-list kxs) kxs)
   (lambda (op args xs)
     (if (and (symbol=? op 'blobref-variant!) (= (k-length xs) 2))
         (tagcase (car (cdr args))
           (e-sym (v a b abk) (list (car xs) (x-const (k-ty-new (ty-base v)) -1 a b abk)))
           (else y xs))
         xs)))
-(define k-syns-count (subr (read @globals) (k-syns) int)
+(define k-syns-count (->* (k-syns) int)
   (lambda (xs) (if (null? xs) 0 (+ 1 (k-syns-count (cdr xs))))))
 ;; The newest `n` of scope `s` onto `onto`: a module's file's parameters,
 ;; bound by the `plambda` around it, which it sees.
-(define k-scope-newest (subr (maxeff (read @globals) (alloc @t)) (int k-scope k-scope) k-scope)
+(define k-scope-newest (->* (int k-scope k-scope) k-scope)
   (lambda (n s onto)
     (if (or (<= n 0) (null? s)) onto (cons (car s) (k-scope-newest (- n 1) (cdr s) onto)))))
 ;; In a module with `include`s (its first item `%include`), a mark in the
 ;; description scope, `%include-scope`, so that a type name nothing else
 ;; defines is the modules included's (`k-type-unknown`, `TODO.md` §69); gone
 ;; with the module's scope.
-(define k-include-mark (subr kstate (mod-items) unit)
+(define k-include-mark (->* (mod-items) unit)
   (lambda (items)
     (if (and (not (null? items)) (symbol=? (car (extract (car items) 2)) '%include))
         (k-push-desc '%include-scope (ds-var -1 0))
@@ -154,13 +154,13 @@
 ;; Reading expressions (`check-resolve.fx`'s walk) and modules' items, one
 ;; recursive group: a module is an expression, and its items hold them.
 (define-rec
-  (k-resolve-all (subr (maxeff checks spin) ((listof exp acyclic)) kxs)
+  (k-resolve-all (->* ((listof exp acyclic)) kxs)
     (lambda (es)
       (if (null? es)
           nil
           (let* ((x (k-resolve-exp (car es))) (rest (k-resolve-all (cdr es))))
             (cons x rest)))))
-  (k-resolve-exp (subr (maxeff checks spin) (exp) kx)
+  (k-resolve-exp (->* (exp) kx)
     (lambda (e)
       (tagcase e
         (e-var (s a b abk) (x-var s a b abk))
@@ -240,7 +240,7 @@
         (e-with (m body a b abk)
           (let* ((saved (get k-dscope)) (marked (k-with-mark m)) (x (k-resolve-exp body)))
             (begin (set k-dscope saved) (k-with-unmark m) (x-with m x a b abk)))))))
-  (k-resolve-letrec (subr (maxeff checks spin) (exp-letrec-bs) k-letrec-bs)
+  (k-resolve-letrec (->* (exp-letrec-bs) k-letrec-bs)
     (lambda (bs)
       (if (null? bs)
           nil
@@ -249,13 +249,13 @@
                  (x (k-resolve-exp (extract (car bs) 3)))
                  (rest (k-resolve-letrec (cdr bs))))
             (cons (product (1 (extract (car bs) 1)) (2 t) (3 x)) rest)))))
-  (k-resolve-let (subr (maxeff checks spin) (exp-let-bs) k-let-bs)
+  (k-resolve-let (->* (exp-let-bs) k-let-bs)
     (lambda (bs)
       (if (null? bs)
           nil
           (let* ((x (k-resolve-exp (extract (car bs) 2))) (rest (k-resolve-let (cdr bs))))
             (cons (product (1 (extract (car bs) 1)) (2 x)) rest)))))
-  (k-resolve-fields (subr (maxeff checks spin) (exp-let-bs k-names int int) k-let-bs)
+  (k-resolve-fields (->* (exp-let-bs k-names int int) k-let-bs)
     (lambda (fs seen a b)
       (if (null? fs)
           nil
@@ -265,7 +265,7 @@
                 (let* ((x (k-resolve-exp (extract (car fs) 2)))
                        (rest (k-resolve-fields (cdr fs) (cons l seen) a b)))
                   (cons (product (1 l) (2 x)) rest)))))))
-  (k-resolve-arms (subr (maxeff checks spin) (exp-arms k-names) k-arms)
+  (k-resolve-arms (->* (exp-arms k-names) k-arms)
     (lambda (arms seen)
       (if (null? arms)
           nil
@@ -277,7 +277,7 @@
                        (rest (k-resolve-arms (cdr arms) (cons tag seen)))
                        (names (k-copy-names (extract arm 3))))
                   (cons (product (1 tag) (2 (extract arm 2)) (3 names) (4 x)) rest)))))))
-  (k-resolve-rec-items (subr (maxeff checks spin) (syns-a exp-list) k-rec-read)
+  (k-resolve-rec-items (->* (syns-a exp-list) k-rec-read)
     (lambda (ts xs)
       (if (null? ts)
           (product (1 (the k-ids nil)) (2 (the kxs nil)))
@@ -292,7 +292,7 @@
   ;; (its head after its representation in `ts`), a type constructor: its
   ;; parameters read, then it, a variable of an arrow kind, and its
   ;; representation a `dlambda` of them (`check-kinds.fx`).
-  (k-resolve-abstract (subr (maxeff checks spin) (k-names syns-a exp-list) k-item)
+  (k-resolve-abstract (->* (k-names syns-a exp-list) k-item)
     (lambda (ns ts xs)
       (if (null? (cdr ts))
           (let* ((v (k-new-dvar-of (car ns) 2))
@@ -315,7 +315,7 @@
             (k-item-of 0 ns v (the k-ids (cons lam nil)) (k-resolve-all xs))))))
   ;; One item: an abstract type a type variable in scope from here (with
   ;; its representation read in that scope), and a transparent one an alias.
-  (k-resolve-item (subr (maxeff checks spin) (mod-item) k-item)
+  (k-resolve-item (->* (mod-item) k-item)
     (lambda (it)
       (let ((k (extract it 1)) (ns (extract it 2)) (ts (extract it 3)) (xs (extract it 4)))
         (cond ((or (< k 0) (> k 3)) (k-item-of k ns -1 nil nil))
@@ -349,7 +349,7 @@
               (else
                (let ((r (k-resolve-rec-items ts xs)))
                  (k-item-of k ns -1 (extract r 1) (extract r 2))))))))
-  (k-resolve-items (subr (maxeff checks spin) (mod-items) k-items)
+  (k-resolve-items (->* (mod-items) k-items)
     (lambda (items)
       (if (null? items)
           nil
@@ -359,7 +359,7 @@
   ;; are (`k-ahead`): each defined once, by name, in scope before any is
   ;; read, so that they may name each other, and themselves, in any order;
   ;; each checked grounded once all are.
-  (k-resolve-items-ahead (subr (maxeff checks spin) (mod-items) k-items)
+  (k-resolve-items-ahead (->* (mod-items) k-items)
     (lambda (items)
       (let* ((outer-names (get k-ahead-names)) (outer-filled (get k-ahead-filled))
              (names (k-module-type-names items))
@@ -380,7 +380,7 @@
   ;; `(module item …)`: each item read in the scope of the descriptions
   ;; before it; read from a file, of the standard ones only, and its
   ;; parameters (`(module-parameters …)`), the `plambda` around it binds.
-  (k-resolve-module-items (subr (maxeff checks spin) (mod-items int int int) kx)
+  (k-resolve-module-items (->* (mod-items int int int) kx)
     (lambda (items a b abk)
       (let ((k (k-items-kind items)) (saved (get k-dscope)))
         (cond

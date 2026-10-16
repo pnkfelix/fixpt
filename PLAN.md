@@ -141,7 +141,7 @@ are in the last section, "Log: the glance's details", and in
   T)` a pure procedure's type; `(->* (T…) T)` a definition's (`define`,
   `define-rec`, `letrec`, a module's lambdas), its effect found from its
   `lambda` in one pass, a group's components callees first, in both
-  checkers. Using it on our own code is `TODO.md` §100.
+  checkers. Our own code uses it (`DONE.md` §100).
 
 **In progress**
 - **Concurrency, kayak's request** (2026-10-13, `TODO.md` §92,

@@ -45,20 +45,19 @@
 ;; For a driver: a whole program from here, which sees none of the globals
 ;; made before it, as its checker begins again.
 (define compile-forget-globals!
-  (subr (maxeff (read (globals c-genv-index c-reuse make-table symbol-hash)) (write @k) (alloc @k))
-        () unit)
+  (->* () unit)
   (lambda ()
     (begin (set c-genv-index (make-table symbol-hash symbol=?)) (set c-reuse nil))))
 
 ;; The global kept for `n`, if any.
-(define c-kept (subr (read @globals) (c-kept-globals symbol) (listof wglobal acyclic))
+(define c-kept (->* (c-kept-globals symbol) (listof wglobal acyclic))
   (lambda (ks n)
     (cond ((null? ks) nil)
           ((symbol=? (car (car ks)) n) (the (listof wglobal acyclic) (cons (cdr (car ks)) nil)))
           (else (c-kept (cdr ks) n)))))
 
 ;; `ks` without `n`'s.
-(define c-unkeep (subr (read @globals) (c-kept-globals symbol) c-kept-globals)
+(define c-unkeep (->* (c-kept-globals symbol) c-kept-globals)
   (lambda (ks n)
     (cond ((null? ks) ks)
           ((symbol=? (car (car ks)) n) (c-unkeep (cdr ks) n))
@@ -68,17 +67,17 @@
 ;; specialized (`ys`), saw when they were written: the limits a lookup of a
 ;; global may be made at (`c-global-find`) as definitions are made, when no
 ;; inlining or specialization is under way.
-(define c-inline-limits (subr c-builds (c-inlinables) (listof int acyclic))
+(define c-inline-limits (->* (c-inlinables) (listof int acyclic))
   (lambda (xs) (if (null? xs) nil (cons (extract (car xs) 5) (c-inline-limits (cdr xs))))))
-(define c-special-limits (subr c-builds (c-specializables) (listof int acyclic))
+(define c-special-limits (->* (c-specializables) (listof int acyclic))
   (lambda (ys) (if (null? ys) nil (cons (extract (car ys) 5) (c-special-limits (cdr ys))))))
 ;; `xs` before `ys`.
-(define c-ints-onto (subr c-builds ((listof int acyclic) (listof int acyclic)) (listof int acyclic))
+(define c-ints-onto (->* ((listof int acyclic) (listof int acyclic)) (listof int acyclic))
   (lambda (xs ys) (if (null? xs) ys (cons (car xs) (c-ints-onto (cdr xs) ys)))))
-(define c-genv-limits (subr c-builds () (listof int acyclic))
+(define c-genv-limits (->* () (listof int acyclic))
   (lambda () (c-ints-onto (c-inline-limits (get c-inlines)) (c-special-limits (get c-specials)))))
 ;; Whether one of `limits` is past `lo` and no more than `hi`.
-(define c-limit-in? (subr c-builds ((listof int acyclic) int int) bool)
+(define c-limit-in? (->* ((listof int acyclic) int int) bool)
   (lambda (limits lo hi)
     (and (not (null? limits))
          (or (and (< lo (car limits)) (<= (car limits) hi)) (c-limit-in? (cdr limits) lo hi)))))
@@ -87,20 +86,20 @@
 ;; limit L finds the newest made before L, so a global made `i`th is found
 ;; only by a limit past `i` and no more than the next newer one's: kept,
 ;; any other would hold its value, and what that reaches, for good.
-(define c-genv-needed (subr c-builds (c-globals-made int (listof int acyclic)) c-globals-made)
+(define c-genv-needed (->* (c-globals-made int (listof int acyclic)) c-globals-made)
   (lambda (es upper limits)
     (if (null? es)
         nil
         (let ((i (car (car es))) (rest (c-genv-needed (cdr es) (car (car es)) limits)))
           (if (c-limit-in? limits i upper) (the c-globals-made (cons (car es) rest)) rest)))))
 ;; `n`'s globals, before its `i`th is made: those no lookup can find let go.
-(define c-genv-prune! (subr c-emits (symbol int) unit)
+(define c-genv-prune! (->* (symbol int) unit)
   (lambda (n i)
     (let ((made (table-ref (get c-genv-index) n nil)))
       (table-set! (get c-genv-index) n (c-genv-needed made i (c-genv-limits))))))
 ;; `n`'s global for a definition of it: the one kept for it, if one was;
 ;; else a new one, which later uses of `n` refer to.
-(define c-push-global (subr c-emits (symbol) wglobal)
+(define c-push-global (->* (symbol) wglobal)
   (lambda (n)
     (let ((kept (begin (c-forget-inline! n)
                        (table-set! (get c-unrolls) n nil)
@@ -116,7 +115,7 @@
 
 ;; For a driver: `n`'s next definition keeps the global `n` has now, so
 ;; that every use of `n`, before it and after, sees the new value.
-(define compile-keep-global! (subr (maxeff c-emits spin) (symbol) unit)
+(define compile-keep-global! (->* (symbol) unit)
   (lambda (n)
     (let ((l (c-global-find n -1)))
       (if (null? l)
@@ -128,12 +127,12 @@
 ;; For a driver that computes a definition's value itself (the REPL, in the
 ;; native convention): `n`'s global from now on, made, for the driver to
 ;; fill.
-(define compile-new-global (subr c-emits (symbol) wglobal)
+(define compile-new-global (->* (symbol) wglobal)
   (lambda (n) (c-push-global n)))
 
 ;; For a driver that makes a global's value native code (the REPL, in the
 ;; native convention): `n`'s global, in a list, if it is one.
-(define compile-global-cell (subr c-walks (symbol) (listof wglobal @k))
+(define compile-global-cell (->* (symbol) (listof wglobal @k))
   (lambda (n)
     (let ((l (c-global-find n -1)))
       (if (null? l)
@@ -144,7 +143,7 @@
 
 ;; A literal, under ascriptions, in a list: what a module's member may be
 ;; to be folded (`TODO.md` §42).
-(define c-literal-of (subr c-lists (exp) rconsts)
+(define c-literal-of (->* (exp) rconsts)
   (lambda (x)
     (tagcase x
       (e-int (n a b abk) (the rconsts (cons (rc-int n) nil)))
@@ -156,7 +155,7 @@
       (else y nil))))
 ;; Module `m`'s member `f`'s literal, in a list; none if it has none: by
 ;; the global `m` names, whose module's members were noted.
-(define c-member-const (subr (maxeff compiles spin) (symbol symbol) rconsts)
+(define c-member-const (->* (symbol symbol) rconsts)
   (lambda (m f)
     (let ((l (c-where (the cenv nil) m)))
       (if (null? l)
@@ -167,7 +166,7 @@
 ;; The constant a top-level definition's expression is, in a list: a
 ;; literal; a constant global; a re-export of a module's literal member. As
 ;; the Rust compiler's `const_of`.
-(define c-const-of (subr (maxeff compiles spin) (exp) rconsts)
+(define c-const-of (->* (exp) rconsts)
   (lambda (x)
     (let ((lit (c-literal-of x)))
       (cond
@@ -191,20 +190,20 @@
 ;; global that is such a list, or a call of a small procedure noted to be
 ;; inlined (`c-inlines`) whose body makes one from its arguments. As the
 ;; Rust compiler's `const_list`.
-(define c-const-list (subr (maxeff compiles spin) (exp) rconsts)
+(define c-const-list (->* (exp) rconsts)
   (lambda (x)
     (let ((v (c-const-value x (the c-const-env nil) 0)))
       (if (and (not (null? v)) (tagcase (car v) (rc-pair (a d) #t) (rc-nil () #t) (else y #f)))
           v
           nil))))
-(define c-const-in (subr c-lists (c-const-env symbol) rconsts)
+(define c-const-in (->* (c-const-env symbol) rconsts)
   (lambda (e n)
     (cond ((null? e) nil)
           ((symbol=? (car (car e)) n) (the rconsts (cons (cdr (car e)) nil)))
           (else (c-const-in (cdr e) n)))))
 ;; What `x` is, as constant data, where its names are `env`'s: as the Rust
 ;; compiler's `const_value`, at most 16 calls deep.
-(define c-const-value (subr (maxeff compiles spin) (exp c-const-env int) rconsts)
+(define c-const-value (->* (exp c-const-env int) rconsts)
   (lambda (x env depth)
     (let ((lit (c-literal-of x)))
       (if (not (null? lit))
@@ -238,14 +237,14 @@
             (else y nil))))))
 ;; Each of `es`' constants, in order, in a list; none if one is not one.
 (define c-const-values
-  (subr (maxeff compiles spin) (exps c-const-env int rconsts) (listof rconsts @k))
+  (->* (exps c-const-env int rconsts) (listof rconsts @k))
   (lambda (es env depth acc)
     (if (null? es)
         (the (listof rconsts @k) (cons (r-rev-consts acc nil) nil))
         (let ((v (c-const-value (car es) env depth)))
           (if (null? v) nil (c-const-values (cdr es) env depth (cons (car v) acc)))))))
 ;; `list` or `cons` of constants `vs`.
-(define c-const-standard (subr (maxeff compiles spin) (symbol rconsts) rconsts)
+(define c-const-standard (->* (symbol rconsts) rconsts)
   (lambda (f vs)
     (cond ((string=? (symbol->string f) "list") (the rconsts (cons (c-const-list-of vs) nil)))
           ((and (string=? (symbol->string f) "cons") (= (c-length-consts vs) 2))
@@ -254,11 +253,11 @@
              (rc-nil () (the rconsts (cons (rc-pair (car vs) (car (cdr vs))) nil)))
              (else y nil)))
           (else nil))))
-(define c-const-list-of (subr (maxeff compiles spin) (rconsts) rconst)
+(define c-const-list-of (->* (rconsts) rconst)
   (lambda (vs) (if (null? vs) (rc-nil) (rc-pair (car vs) (c-const-list-of (cdr vs))))))
 ;; A call of a small procedure noted to be inlined, on constants `vs`: its
 ;; body, its parameters the arguments, in the globals it saw.
-(define c-const-call (subr (maxeff compiles spin) (symbol rconsts int) rconsts)
+(define c-const-call (->* (symbol rconsts int) rconsts)
   (lambda (f vs depth)
     (let ((i (r-inline-named (c-inlines-of f) f (c-length-consts vs) (get c-genv))))
       (if (or (null? i) (>= depth 16))
@@ -268,35 +267,35 @@
                  (set-genv (set c-genv (extract (car i) 5)))
                  (v (c-const-value (extract (car i) 4) inner (+ depth 1))))
             (begin (set c-genv outer) v))))))
-(define c-const-bind (subr (maxeff compiles spin) (c-params rconsts) c-const-env)
+(define c-const-bind (->* (c-params rconsts) c-const-env)
   (lambda (ps vs)
     (if (or (null? ps) (null? vs))
         nil
         (the c-const-env
           (cons (cons (extract (car ps) 1) (car vs)) (c-const-bind (cdr ps) (cdr vs)))))))
 ;; `cs` without global `g`'s.
-(define c-consts-without (subr c-lists (r-const-list wglobal) r-const-list)
+(define c-consts-without (->* (r-const-list wglobal) r-const-list)
   (lambda (cs g)
     (cond ((null? cs) cs)
           ((wglobal=? (car (car cs)) g) (c-consts-without (cdr cs) g))
           (else (the r-const-list (cons (car cs) (c-consts-without (cdr cs) g)))))))
-(define c-note-const-list! (subr (maxeff compiles spin) (wglobal rconst) unit)
+(define c-note-const-list! (->* (wglobal rconst) unit)
   (lambda (g c)
     (let ((n (wglobal-name g)))
       (table-set! (get r-const-lists) n
                   (the r-const-list (cons (cons g c) (table-ref (get r-const-lists) n nil)))))))
-(define c-forget-const-list! (subr (maxeff compiles spin) (wglobal) unit)
+(define c-forget-const-list! (->* (wglobal) unit)
   (lambda (g)
     (let ((n (wglobal-name g)))
       (table-set! (get r-const-lists) n
                   (c-consts-without (table-ref (get r-const-lists) n nil) g)))))
-(define c-modules-consts-without (subr c-lists (c-mconsts wglobal) c-mconsts)
+(define c-modules-consts-without (->* (c-mconsts wglobal) c-mconsts)
   (lambda (ms g)
     (cond ((null? ms) ms)
           ((wglobal=? (car (car ms)) g) (c-modules-consts-without (cdr ms) g))
           (else (the c-mconsts (cons (car ms) (c-modules-consts-without (cdr ms) g)))))))
 ;; A module's values' literals, in order.
-(define c-mvals-literal (subr c-lists (c-mvals) c-members)
+(define c-mvals-literal (->* (c-mvals) c-members)
   (lambda (vs)
     (if (null? vs)
         nil
@@ -307,7 +306,7 @@
 ;; After a top-level definition of `x` set global `g`: whether `g` is a
 ;; constant now, and, if `x` is a module, its literal members. As the Rust
 ;; compiler's `note_constant`.
-(define c-note-constant! (subr (maxeff compiles spin) (wglobal exp) unit)
+(define c-note-constant! (->* (wglobal exp) unit)
   (lambda (g x)
     (let ((k (c-const-of x)))
       (begin
@@ -325,26 +324,26 @@
             (set r-module-consts
                  (cons (cons g (c-mvals-literal (c-module-values items))) (get r-module-consts))))
           (else y #u))))))
-(define c-note-constants! (subr (maxeff compiles spin) (c-recs (listof wglobal @k)) unit)
+(define c-note-constants! (->* (c-recs (listof wglobal @k)) unit)
   (lambda (bs gs)
     (if (or (null? bs) (null? gs))
         #u
         (begin (c-note-constant! (car gs) (extract (car bs) 3))
                (c-note-constants! (cdr bs) (cdr gs))))))
-(define c-rec-globals (subr c-emits (c-recs) (listof wglobal @k))
+(define c-rec-globals (->* (c-recs) (listof wglobal @k))
   (lambda (bs)
     (if (null? bs)
         nil
         (let ((g (c-push-global (extract (car bs) 1)))) (cons g (c-rec-globals (cdr bs)))))))
 
 ;; The next lambda's word named for global `n`.
-(define c-name-word! (subr c-emits (symbol) unit)
+(define c-name-word! (->* (symbol) unit)
   (lambda (n) (set c-word-name (the (listof string @k) (cons (symbol->string n) nil)))))
 ;; The next lambda's word named for global `n`, when `x`, its definition, is
 ;; a lambda, rather than for where its body starts: so that a profile, a
 ;; disassembly or a fault says which procedure. As the Rust compiler's
 ;; `name_word_for`.
-(define c-name-for! (subr c-emits (symbol exp) unit)
+(define c-name-for! (->* (symbol exp) unit)
   (lambda (n x)
     (let ((l (c-lambda-of x)))
       (if (null? l)
@@ -352,7 +351,7 @@
           (tagcase (car l)
             (e-lambda (ps body a b abk) (c-name-word! n))
             (else y #u))))))
-(define c-rec-fill (subr (maxeff compiles spin) (c-recs (listof wglobal @k) code) unit)
+(define c-rec-fill (->* (c-recs (listof wglobal @k) code) unit)
   (lambda (bs gs c)
     (if (null? bs)
         #u
@@ -366,7 +365,7 @@
 
 ;; The lambda of `ps` and `body` that top-level definition `n` is, made at
 ;; the top level, and noted to be inlined or specialized.
-(define c-define-lambda (subr (maxeff compiles spin) (symbol c-params exp code) unit)
+(define c-define-lambda (->* (symbol c-params exp code) unit)
   (lambda (n ps body c)
     (begin (set c-defining (the (listof symbol @k) (cons n nil)))
            (c-name-word! n)
@@ -376,16 +375,16 @@
            (c-record-inline n ps body))))
 
 (define c-modules (ref c-module-list @k) (new nil))
-(define c-modules-without (subr c-builds (c-module-list symbol) c-module-list)
+(define c-modules-without (->* (c-module-list symbol) c-module-list)
   (lambda (ms m)
     (cond ((null? ms) ms)
           ((symbol=? (extract (car ms) 1) m) (c-modules-without (cdr ms) m))
           (else (the c-module-list (cons (car ms) (c-modules-without (cdr ms) m)))))))
 ;; Whether `x` is a `module` form.
-(define c-module? (subr (read @globals) (exp) bool)
+(define c-module? (->* (exp) bool)
   (lambda (x) (tagcase x (e-module (items a b abk) #t) (else y #f))))
 ;; After `(define m (module …))` is compiled: its members noted, kept by `m`.
-(define c-keep-module! (subr c-emits (symbol) unit)
+(define c-keep-module! (->* (symbol) unit)
   (lambda (m)
     (let ((ms (get c-module-members)))
       (begin (set c-module-members nil)
@@ -394,14 +393,14 @@
                  (let ((entry (product (1 m) (2 (car ms)))))
                    (set c-modules (the c-module-list (cons entry (get c-modules))))))))))
 ;; The members `m`, a top-level module, has noted, or none.
-(define c-members-of (subr c-builds (c-module-list symbol) c-inlinables)
+(define c-members-of (->* (c-module-list symbol) c-inlinables)
   (lambda (ms m)
     (cond ((null? ms) nil)
           ((symbol=? (extract (car ms) 1) m) (extract (car ms) 2))
           (else (c-members-of (cdr ms) m)))))
 ;; `n`, a re-export of member `f` of `ms`: inlined where called as `f` is,
 ;; if small, not calling itself and not staying cellular.
-(define c-alias-inline! (subr (maxeff c-emits spin) (symbol symbol c-inlinables) unit)
+(define c-alias-inline! (->* (symbol symbol c-inlinables) unit)
   (lambda (n f ms)
     (cond ((null? ms) #u)
           ((symbol=? (extract (car ms) 1) f)
@@ -417,7 +416,7 @@
 ;; `(define n (with m f))`, `m` a top-level module whose member `f` is a
 ;; lambda naming no other member: `n` inlined where called, as the Rust
 ;; compiler's `reexport_inline`.
-(define c-reexport-inline! (subr (maxeff c-emits spin) (symbol exp) unit)
+(define c-reexport-inline! (->* (symbol exp) unit)
   (lambda (n x)
     (tagcase x
       (e-with (m body a b abk)
@@ -426,7 +425,7 @@
           (else y #u)))
       (else y #u))))
 ;; Each form in turn; the last expression's value is left on the stack.
-(define c-tops (subr (maxeff compiles spin) ((listof top acyclic) code bool) bool)
+(define c-tops (->* ((listof top acyclic) code bool) bool)
   (lambda (ts c has-value)
     (if (null? ts)
         has-value
@@ -485,7 +484,7 @@
           (else y (c-tops (cdr ts) c has-value))))))
 
 ;; Each of `bs`' names' next definition keeps the global it has.
-(define c-keep-rec-names (subr (maxeff c-emits spin) (c-recs) unit)
+(define c-keep-rec-names (->* (c-recs) unit)
   (lambda (bs)
     (if (null? bs)
         #u
@@ -493,7 +492,7 @@
 
 ;; Before a run that assigns its names' globals (`checked-tops`): each
 ;; name's next definition keeps the global it has.
-(define c-keep-names (subr (maxeff c-emits spin) (top) unit)
+(define c-keep-names (->* (top) unit)
   (lambda (t)
     (tagcase t
       (t-define (n ty x a b) (compile-keep-global! n))
@@ -502,7 +501,7 @@
 
 ;; What a checked program runs (`checked-tops`), each in turn: whether the
 ;; last was an expression, whose value stays.
-(define c-runs (subr (maxeff compiles spin) ((listof k-run acyclic) code bool) bool)
+(define c-runs (->* ((listof k-run acyclic) code bool) bool)
   (lambda (rs c has-value)
     (if (null? rs)
         has-value
@@ -515,8 +514,7 @@
 ;; it is given, saying whether the last form was an expression; `facts`,
 ;; what checking found.
 (define c-program
-  (subr (maxeff compiles (comefrom @y) spin) ((subr (maxeff compiles spin) (code) bool) k-facts)
-        cresult)
+  (->* ((subr (maxeff compiles spin) (code) bool) k-facts) cresult)
   (lambda (forms facts)
     (prompt c-tag
       (let ((c (the code (new nil))))
@@ -542,10 +540,10 @@
 ;; The entry point for a program the checker written in FX-26 checked: what
 ;; it runs (`checked-tops`, under redefinition), and what checking found.
 (define compile-checked
-  (subr (maxeff compiles (comefrom @y) spin) ((listof k-run acyclic) k-facts) cresult)
+  (->* ((listof k-run acyclic) k-facts) cresult)
   (lambda (runs facts) (c-program (lambda (c) (c-runs runs c #f)) facts)))
 
 ;; The entry point: a checked program's trees, and what checking found.
 (define compile-program
-  (subr (maxeff compiles (comefrom @y) spin) ((listof top acyclic) k-facts) cresult)
+  (->* ((listof top acyclic) k-facts) cresult)
   (lambda (tops facts) (c-program (lambda (c) (c-tops tops c #f)) facts))))))

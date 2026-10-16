@@ -39,11 +39,11 @@
 (import check-resolve k-conversion-name k-free-vars)
 
 ;; Whether item `it` is a definition of a lambda with a written type.
-(define k-lambda-item? (subr (read @globals) (k-item) bool)
+(define k-lambda-item? (->* (k-item) bool)
   (lambda (it)
     (and (= (extract it 1) 2) (not (null? (extract it 4))) (k-lambda? (car (extract it 5))))))
 ;; A `define-rec`'s members, item `i`, onto `out` (newest first).
-(define k-mlams-of-group (subr kallocs (k-names k-ids kxs int k-mlams) k-mlams)
+(define k-mlams-of-group (->* (k-names k-ids kxs int k-mlams) k-mlams)
   (lambda (ns ts xs i out)
     (if (null? ns)
         out
@@ -52,7 +52,7 @@
                                                       (4 i) (5 #t) (6 #f))
                                              out))))))
 ;; The typed lambdas of `items`, from item `i`, onto `out` (newest first).
-(define k-mlams-from (subr kallocs (k-items int k-mlams) k-mlams)
+(define k-mlams-from (->* (k-items int k-mlams) k-mlams)
   (lambda (items i out)
     (if (null? items)
         out
@@ -69,16 +69,16 @@
                            (else out))))
           (k-mlams-from (cdr items) (+ i 1) more)))))
 ;; The typed lambdas of `items`, in written order.
-(define k-mod-lambdas (subr kallocs (k-items) k-mlams)
+(define k-mod-lambdas (->* (k-items) k-mlams)
   (lambda (items) (reverse (k-mlams-from items 0 nil))))
 ;; The lambda of `ls` named `n`, or none.
-(define k-mlam-named (subr (read @globals) (k-mlams symbol) k-mlams)
+(define k-mlam-named (->* (k-mlams symbol) k-mlams)
   (lambda (ls n)
     (cond ((null? ls) nil)
           ((symbol=? (extract (car ls) 1) n) ls)
           (else (k-mlam-named (cdr ls) n)))))
 ;; Each `define-rec` member a `lambda`, or an error at the first that is not.
-(define k-mod-recs-lambdas (subr checks (k-mlams) unit)
+(define k-mod-recs-lambdas (->* (k-mlams) unit)
   (lambda (ls)
     (cond ((null? ls) #u)
           ((or (not (extract (car ls) 5)) (k-lambda? (extract (car ls) 3)))
@@ -88,7 +88,7 @@
                            (extract (car ls) 3))))))
 
 ;; A `define*` that is not a `lambda`, from `items`: an error at the first.
-(define k-mod-define-star-lambdas (subr checks (k-items) unit)
+(define k-mod-define-star-lambdas (->* (k-items) unit)
   (lambda (items)
     (cond ((null? items) #u)
           ((and (= (extract (car items) 1) 2) (= (extract (car items) 3) -2)
@@ -97,7 +97,7 @@
           (else (k-mod-define-star-lambdas (cdr items))))))
 ;; A value typed `->*` that is not a `lambda`, from `items`: an error at the
 ;; first.
-(define k-mod-arrow-star-lambdas (subr checks (k-items) unit)
+(define k-mod-arrow-star-lambdas (->* (k-items) unit)
   (lambda (items)
     (let ((it (if (null? items) nil (the k-items (cons (car items) nil)))))
       (cond ((null? it) #u)
@@ -108,18 +108,18 @@
                         (car (extract (car it) 5))))
             (else (k-mod-arrow-star-lambdas (cdr items)))))))
 ;; Those two errors, in that order.
-(define k-mod-star-lambdas (subr checks (k-items) unit)
+(define k-mod-star-lambdas (->* (k-items) unit)
   (lambda (items) (begin (k-mod-define-star-lambdas items) (k-mod-arrow-star-lambdas items))))
 
 ;;; ------------------------------------------------------------ places
 
 ;; Names `ns`, each at item `i`, onto `out` (newest first).
-(define k-places-onto (subr kallocs (k-names int k-places) k-places)
+(define k-places-onto (->* (k-names int k-places) k-places)
   (lambda (ns i out)
     (if (null? ns)
         out
         (k-places-onto (cdr ns) i (the k-places (cons (product (1 (car ns)) (2 i)) out))))))
-(define k-places-from (subr kallocs (k-items int k-places) k-places)
+(define k-places-from (->* (k-items int k-places) k-places)
   (lambda (items i out)
     (if (null? items)
         out
@@ -133,23 +133,23 @@
                              (else out))))
           (k-places-from (cdr items) (+ i 1) more)))))
 ;; Each name `items` define, and the item defining it, in written order.
-(define k-mod-places (subr kallocs (k-items) k-places)
+(define k-mod-places (->* (k-items) k-places)
   (lambda (items) (reverse (k-places-from items 0 nil))))
 ;; The item defining `n`, or -1.
-(define k-place-of (subr (read @globals) (k-places symbol) int)
+(define k-place-of (->* (k-places symbol) int)
   (lambda (ps n)
     (cond ((null? ps) -1)
           ((symbol=? (extract (car ps) 1) n) (extract (car ps) 2))
           (else (k-place-of (cdr ps) n)))))
 ;; The names of `ps` among `free`, in written order.
-(define k-places-among (subr (maxeff kreads (alloc @t)) (k-places k-names) k-names)
+(define k-places-among (->* (k-places k-names) k-names)
   (lambda (ps free)
     (cond ((null? ps) nil)
           ((k-has-name? free (extract (car ps) 1))
            (the k-names (cons (extract (car ps) 1) (k-places-among (cdr ps) free))))
           (else (k-places-among (cdr ps) free)))))
 ;; The names free in `x` the module defines, in written order.
-(define k-mod-names-in (subr kmakes (kx k-places) k-names)
+(define k-mod-names-in (->* (kx k-places) k-names)
   (lambda (x ps) (k-places-among ps (k-free-vars x))))
 
 ;;; ------------------------------------------------------------ modules as written
@@ -159,7 +159,7 @@
 ;; an earlier such item, of `early`, or a file loaded (`k-shared-name?`); or
 ;; a value of one, `(with m y)`. As
 ;; the Rust checker's `written_module`.
-(define k-written-module? (subr (maxeff kreads spin) (kx k-names) bool)
+(define k-written-module? (->* (kx k-names) bool)
   (lambda (x early)
     (tagcase x
       (x-module (items a b abk) #t)
@@ -174,18 +174,18 @@
       (else y #f))))
 ;; The names the module (its places `ps`) defines that a module as written
 ;; `x` names: of `(with m y)`, `m` only, `y` being `m`'s.
-(define k-early-names-in (subr kmakes (kx k-places) k-names)
+(define k-early-names-in (->* (kx k-places) k-names)
   (lambda (x ps)
     (tagcase x
       (x-with (m body a b abk) (if (< (k-place-of ps m) 0) nil (the k-names (cons m nil))))
       (else y (k-mod-names-in x ps)))))
 ;; Whether each of `ns` is one of `ks`.
-(define k-all-named? (subr kreads (k-names k-names) bool)
+(define k-all-named? (->* (k-names k-names) bool)
   (lambda (ns ks) (or (null? ns) (and (k-has-name? ks (car ns)) (k-all-named? (cdr ns) ks)))))
 ;; The items checked before a module's typed lambdas are bound, from the
 ;; first, onto `early` (newest first): each with no type written whose value
 ;; is a module as written naming no item of the module but earlier such ones.
-(define k-early-from (subr (maxeff kmakes spin) (k-items k-places k-names) k-names)
+(define k-early-from (->* (k-items k-places k-names) k-names)
   (lambda (items ps early)
     (if (null? items)
         early
@@ -198,42 +198,42 @@
 ;; Those items' names, in written order. Checked first, a module's values'
 ;; names are known to a `with` of it not checked yet (`k-hazard-mods`). As
 ;; the Rust checker's `early_modules`.
-(define k-early-modules (subr (maxeff kmakes spin) (k-items) k-names)
+(define k-early-modules (->* (k-items) k-names)
   (lambda (items) (reverse (k-early-from items (k-mod-places items) nil))))
 
-(define k-reached-has? (subr (read @globals) (k-reached symbol) bool)
+(define k-reached-has? (->* (k-reached symbol) bool)
   (lambda (rs n) (and (not (null? rs)) (or (symbol=? (extract (car rs) 1) n)
                                            (k-reached-has? (cdr rs) n)))))
-(define k-reached-of (subr (read @globals) (k-reached symbol) k-reached)
+(define k-reached-of (->* (k-reached symbol) k-reached)
   (lambda (rs n)
     (cond ((null? rs) nil)
           ((symbol=? (extract (car rs) 1) n) rs)
           (else (k-reached-of (cdr rs) n)))))
 ;; Names `ns` not reached yet, each from `from` (`has`), onto `rs`.
-(define k-reach-new (subr kallocs (k-names symbol bool k-reached) k-reached)
+(define k-reach-new (->* (k-names symbol bool k-reached) k-reached)
   (lambda (ns from has rs)
     (cond ((null? ns) rs)
           ((k-reached-has? rs (car ns)) (k-reach-new (cdr ns) from has rs))
           (else (k-reach-new (cdr ns) from has
                              (the k-reached (cons (product (1 (car ns)) (2 from) (3 has)) rs)))))))
 ;; The chain to `n`, from the value's first name it was reached through.
-(define k-chain-to (subr (maxeff kallocs spin) (k-reached symbol k-names) k-names)
+(define k-chain-to (->* (k-reached symbol k-names) k-names)
   (lambda (rs n out)
     (let ((r (car (k-reached-of rs n))))
       (if (extract r 3)
           (k-chain-to rs (extract r 2) (the k-names (cons n out)))
           (the k-names (cons n out))))))
 ;; `n`, quoted.
-(define k-quote-name (subr (read @globals) (symbol) string)
+(define k-quote-name (->* (symbol) string)
   (lambda (n) (k-quote (symbol->string n))))
 ;; What is said of `x`, whose value reaches `chain`'s last name, not made
 ;; yet, through the lambdas before it: as the Rust checker's `too_soon`.
-(define k-chain-rest (subr (read @globals) (k-names) string)
+(define k-chain-rest (->* (k-names) string)
   (lambda (ns)
     (if (null? ns)
         ""
         (k-cat3 ", which uses " (k-quote-name (car ns)) (k-chain-rest (cdr ns))))))
-(define k-too-soon (subr (read @globals) (symbol k-names) string)
+(define k-too-soon (->* (symbol k-names) string)
   (lambda (x chain)
     (let* ((last (car (reverse chain)))
            ;; Of `%include` (the modules a module includes), what an
@@ -253,19 +253,19 @@
 ;; §72); not one of the modules checked first (`k-hazard-mods`), the
 ;; module's own as bound. In a list of one, or none. As the Rust checker's
 ;; `captured`.
-(define k-captured (subr (maxeff checks spin) (k-names k-places int) k-names)
+(define k-captured (->* (k-names k-places int) k-names)
   (lambda (ns ps i)
     (cond ((null? ns) nil)
           ((and (>= (k-place-of ps (car ns)) i) (>= (k-lookup (car ns)) 0)
                 (not (k-hazard-mod? (get k-hazard-mods) (car ns))))
            (the k-names (cons (car ns) nil)))
           (else (k-captured (cdr ns) ps i)))))
-(define k-hazard-mod? (subr (read @globals) (k-hazard-list symbol) bool)
+(define k-hazard-mod? (->* (k-hazard-list symbol) bool)
   (lambda (hs n)
     (and (not (null? hs)) (or (symbol=? (extract (car hs) 1) n) (k-hazard-mod? (cdr hs) n)))))
 ;; What is said where `x`'s value names `c`, the module's own item, not
 ;; made yet, and bound outside it too: as the Rust checker's `capture_said`.
-(define k-capture-said (subr (maxeff (read @globals) (alloc @t)) (symbol symbol) string)
+(define k-capture-said (->* (symbol symbol) string)
   (lambda (x c)
     (let ((when (cond ((symbol=? x '%include) "made after the modules included")
                       ((symbol=? x c) "this one")
@@ -273,7 +273,7 @@
       (k-cat4 (k-quote-name c) " here is the module's own item, " when
               (k-cat3 ", not the " (k-quote-name c) " bound outside it")))))
 ;; Names `ns` not reached yet, in order.
-(define k-not-reached (subr kallocs (k-names k-reached) k-names)
+(define k-not-reached (->* (k-names k-reached) k-names)
   (lambda (ns rs)
     (cond ((null? ns) nil)
           ((k-reached-has? rs (car ns)) (k-not-reached (cdr ns) rs))
@@ -281,7 +281,7 @@
 ;; Breadth first from `todo` (names reached, in order), every name reached
 ;; in `rs`: an error at the value of `h`'s item at the first reached not
 ;; made before it.
-(define k-hazard-walk (subr (maxeff checks spin) (k-names k-reached k-hz) unit)
+(define k-hazard-walk (->* (k-names k-reached k-hz) unit)
   (lambda (todo rs h)
     (if (null? todo)
         #u
@@ -301,7 +301,7 @@
 ;; Refused: an item, from `i`, that is not a typed lambda whose value may
 ;; reach, when it is made, an item not made yet (itself included).
 ;; The first of `names` a lambda of `ls` typed `->*`, if any.
-(define k-arrow-star-among (subr (maxeff (read @globals) (read @t)) (k-names k-mlams) k-names)
+(define k-arrow-star-among (->* (k-names k-mlams) k-names)
   (lambda (names ls)
     (cond ((null? names) nil)
           ((let ((l (k-mlam-named ls (car names))))
@@ -310,7 +310,7 @@
           (else (k-arrow-star-among (cdr names) ls)))))
 ;; An error at `init`, value `x`'s, if of `names` it names a lambda of `ls`
 ;; typed `->*`, which is bound at its placeholder until every value is made.
-(define k-arrow-star-named (subr checks (symbol kx k-names k-mlams) unit)
+(define k-arrow-star-named (->* (symbol kx k-names k-mlams) unit)
   (lambda (x init names ls)
     (let ((f (k-arrow-star-among names ls)))
       (if (null? f)
@@ -321,7 +321,7 @@
                         (k-cat5 f "`'s effect only after the module's values are made: write `" f
                                 "`'s effect, with `->` or `subr`" ""))
                        init))))))
-(define k-hazards-from (subr (maxeff checks spin) (k-items int k-places k-mlams) unit)
+(define k-hazards-from (->* (k-items int k-places k-mlams) unit)
   (lambda (items i ps ls)
     (if (null? items)
         #u
@@ -337,24 +337,24 @@
                 #u)
             (k-hazards-from (cdr items) (+ i 1) ps ls))))))
 ;; The names of parts `ps`, in order.
-(define k-part-names (subr kallocs (k-parts) k-names)
+(define k-part-names (->* (k-parts) k-names)
   (lambda (ps) (if (null? ps) nil (cons (extract (car ps) 1) (k-part-names (cdr ps))))))
 ;; Names `ns`, onto `out`.
-(define k-names-onto (subr kallocs (k-names k-names) k-names)
+(define k-names-onto (->* (k-names k-names) k-names)
   (lambda (ns out) (if (null? ns) out (k-names-onto (cdr ns) (cons (car ns) out)))))
 ;; The names free in `xs`, onto `out`.
-(define k-exps-free (subr (maxeff kmakes spin) (kxs k-names) k-names)
+(define k-exps-free (->* (kxs k-names) k-names)
   (lambda (xs out)
     (if (null? xs) out (k-exps-free (cdr xs) (k-names-onto (k-free-vars (car xs)) out)))))
 ;; The names free in `items`' values, then `out`'s.
-(define k-items-free (subr (maxeff kmakes spin) (k-items k-names) k-names)
+(define k-items-free (->* (k-items k-names) k-names)
   (lambda (items out)
     (if (null? items) out (k-items-free (cdr items) (k-exps-free (extract (car items) 5) out)))))
 ;; Of names `ns`, those the items (`ps`) do not define that are modules in
 ;; scope (a `lambda`'s parameter, the module a converted file is given),
 ;; each with its values' names, onto `acc`: a `with` of one binds them (the
 ;; Rust checker's `hazard_items`).
-(define k-outer-mods (subr (maxeff checks spin) (k-names k-places k-hazard-list) k-hazard-list)
+(define k-outer-mods (->* (k-names k-places k-hazard-list) k-hazard-list)
   (lambda (ns ps acc)
     (if (null? ns)
         acc
@@ -368,7 +368,7 @@
 ;; `with` of it not checked yet (`k-with-bound`), so that `(define x (with m
 ;; x))` re-exports `m`'s `x`; and so does each module in scope the items name
 ;; and do not define (`k-outer-mods`).
-(define k-mod-hazards (subr (maxeff checks spin) (k-items k-mlams k-hazard-list) unit)
+(define k-mod-hazards (->* (k-items k-mlams k-hazard-list) unit)
   (lambda (items ls known)
     (let* ((outer (get k-hazard-mods))
            (ps (k-mod-places items))
@@ -380,13 +380,13 @@
 ;;; ------------------------------------------------------------ groups
 
 ;; The lambdas of `ls` named in `names`.
-(define k-mlam-names-among (subr (maxeff kreads (alloc @t)) (k-mlams k-names) k-names)
+(define k-mlam-names-among (->* (k-mlams k-names) k-names)
   (lambda (ls names)
     (cond ((null? ls) nil)
           ((k-has-name? names (extract (car ls) 1))
            (the k-names (cons (extract (car ls) 1) (k-mlam-names-among (cdr ls) names))))
           (else (k-mlam-names-among (cdr ls) names)))))
-(define k-mod-edges (subr kmakes (k-mlams k-mlams) k-edges)
+(define k-mod-edges (->* (k-mlams k-mlams) k-edges)
   (lambda (ls all)
     (if (null? ls)
         nil
@@ -400,19 +400,19 @@
 (define k-scc-stack (ref k-names @t) (new nil))
 (define k-scc-count (ref int @t) (new 0))
 (define k-scc-comps (ref int @t) (new 0))
-(define k-scc-get (subr (maxeff (read @globals) (read @t)) ((ref k-scc-ints @t) symbol) int)
+(define k-scc-get (->* ((ref k-scc-ints @t) symbol) int)
   (lambda (t n) (table-ref (get t) n -1)))
-(define k-scc-low-to (subr kstate (symbol int) unit)
+(define k-scc-low-to (->* (symbol int) unit)
   (lambda (v x) (if (< x (k-scc-get k-scc-low v)) (table-set! (get k-scc-low) v x) #u)))
 ;; The stack popped down to `v`, each lambda popped in component `c`.
-(define k-scc-pop (subr (maxeff kstate spin) (symbol int) unit)
+(define k-scc-pop (->* (symbol int) unit)
   (lambda (v c)
     (let ((w (car (get k-scc-stack))))
       (begin (set k-scc-stack (cdr (get k-scc-stack)))
              (table-set! (get k-scc-comp) w c)
              (if (symbol=? w v) #u (k-scc-pop v c))))))
 (define-rec
-  (k-scc-visit (subr (maxeff kstate spin) (symbol) unit)
+  (k-scc-visit (->* (symbol) unit)
     (lambda (v)
       (let ((i (get k-scc-count)))
         (begin (table-set! (get k-scc-index) v i)
@@ -423,7 +423,7 @@
                (if (= (k-scc-get k-scc-low v) i)
                    (let ((c (get k-scc-comps))) (begin (set k-scc-comps (+ c 1)) (k-scc-pop v c)))
                    #u)))))
-  (k-scc-succs (subr (maxeff kstate spin) (symbol k-names) unit)
+  (k-scc-succs (->* (symbol k-names) unit)
     (lambda (v ws)
       (if (null? ws)
           #u
@@ -435,7 +435,7 @@
                     (else #u))
               (k-scc-succs v (cdr ws))))))))
 ;; Each lambda of `es` walked, in order, from a fresh start.
-(define k-scc-walk (subr (maxeff kstate spin) (k-edges) unit)
+(define k-scc-walk (->* (k-edges) unit)
   (lambda (es)
     (if (null? es)
         #u
@@ -443,13 +443,13 @@
                    (k-scc-visit (extract (car es) 1))
                    #u)
                (k-scc-walk (cdr es))))))
-(define k-scc-note-edges (subr kstate (k-edges) unit)
+(define k-scc-note-edges (->* (k-edges) unit)
   (lambda (es)
     (if (null? es)
         #u
         (begin (table-set! (get k-scc-edges) (extract (car es) 1) (extract (car es) 2))
                (k-scc-note-edges (cdr es))))))
-(define k-scc-start (subr kstate (k-edges) unit)
+(define k-scc-start (->* (k-edges) unit)
   (lambda (es)
     (begin (set k-scc-edges (make-table symbol-hash symbol=?))
            (set k-scc-index (make-table symbol-hash symbol=?))
@@ -459,7 +459,7 @@
            (k-scc-note-edges es))))
 ;; Whether lambda `a` is on a cycle: it names itself, or another is in its
 ;; component (of `bs`).
-(define k-scc-cyclic? (subr (maxeff (read @globals) (read @t)) (symbol k-letrec-bs) bool)
+(define k-scc-cyclic? (->* (symbol k-letrec-bs) bool)
   (lambda (a bs)
     (or (k-has-name? (table-ref (get k-scc-edges) a (the k-names nil)) a)
         (letrec ((other (subr (maxeff (read @globals) (read @t)) (k-letrec-bs) bool)
@@ -473,7 +473,7 @@
 ;; The recursive group of the lambda named `a`, in written order, its
 ;; bindings from `bs`: those in its component, if it is on a cycle; none if
 ;; it is in none.
-(define k-mod-group (subr (maxeff kreads (alloc @t)) (symbol k-letrec-bs) k-letrec-bs)
+(define k-mod-group (->* (symbol k-letrec-bs) k-letrec-bs)
   (lambda (a bs)
     (let ((c (k-scc-get k-scc-comp a)))
       (letrec ((members (subr (maxeff kreads (alloc @t)) (k-letrec-bs) k-letrec-bs)
@@ -483,11 +483,11 @@
                           (the k-letrec-bs (cons (car bs) (members (cdr bs)))))
                          (else (members (cdr bs)))))))
         (if (k-scc-cyclic? a bs) (members bs) (the k-letrec-bs nil))))))
-(define k-groups-of (subr (maxeff kreads (alloc @t)) (k-letrec-bs k-letrec-bs) k-groups)
+(define k-groups-of (->* (k-letrec-bs k-letrec-bs) k-groups)
   (lambda (ls all)
     (if (null? ls)
         nil
         (the k-groups (cons (k-mod-group (extract (car ls) 1) all) (k-groups-of (cdr ls) all))))))
 ;; The same, of the lambdas' edges `es`.
-(define k-mod-groups (subr (maxeff kstate spin) (k-edges k-letrec-bs k-letrec-bs) k-groups)
+(define k-mod-groups (->* (k-edges k-letrec-bs k-letrec-bs) k-groups)
   (lambda (es ls all) (begin (k-scc-start es) (k-scc-walk es) (k-groups-of ls all)))))))

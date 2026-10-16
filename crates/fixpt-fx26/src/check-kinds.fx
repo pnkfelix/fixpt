@@ -35,7 +35,7 @@
 
 ;; Whether description `d` is of kind `k`, as a binder of that kind takes; a
 ;; function whose kind is not known yet, a `select`, is let through.
-(define k-desc-of-kind? (subr (maxeff kstate spin) (k-desc int) bool)
+(define k-desc-of-kind? (->* (k-desc int) bool)
   (lambda (d k)
     (tagcase d
       (dr (r) (or (= k 0) (and (= k 3) (k-place? r))))
@@ -46,7 +46,7 @@
       (df (f) (and (k-arrow-kind? k) (let ((g (k-fun-kind f))) (or (< g 0) (= g k))))))))
 
 ;; Binders `ps` made again: fresh variables of the same names and kinds.
-(define k-fresh-binders (subr (maxeff kstate spin) (k-binders) k-binders)
+(define k-fresh-binders (->* (k-binders) k-binders)
   (lambda (ps)
     (if (null? ps)
         nil
@@ -56,7 +56,7 @@
           (the k-binders (cons (product (1 w) (2 k)) rest))))))
 ;; The `g`th generative type as a description function of kind `want`,
 ;; `(dlambda ((p k) …) (name p …))`; -1 if it is not of that kind.
-(define k-generative-fun (subr (maxeff kstate spin) (int int) int)
+(define k-generative-fun (->* (int int) int)
   (lambda (g want)
     (let ((ps (extract (k-gen-of g) 2)))
       (if (not (= (k-arrow (k-binder-kinds ps) 2) want))

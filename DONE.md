@@ -2718,3 +2718,35 @@ Still open in `TODO.md` §97; done so far:
   did not use it). `eager-reader-types.fx` holds `syn`, `syns`, `chars`,
   `data`, `context`, `closers` and the reader's effects. A refactor only.
 
+## 100. Our own FX-26 code in `->*` (the user's, 2026-10-16)
+
+`(->* (T…) T)` (`docs/fx26.md`, the kernel's table) was tried on the whole
+front end, then done (the user's, 2026-10-16): every definition typed `(subr EFFECT …)`
+whose value is a `lambda` (3,259 of them, `define*` among them) rewritten
+to `->*`, then each that does not check put back.
+
+- **What it found.** 16 put back, all values a module makes by calling
+  its own lambda (`ev-prims-made` calling `ev-int-prims!`, say), which
+  `->*` refuses. Of 3,946 module lambdas, 2,160 kept their effect; 1,639
+  were found narrower: `(read @globals)` became the globals read, 1,139
+  times; `spin` dropped 383 times (procedures the termination checker
+  shows end); and region atoms (`alloc`, `read`, `write` of `@t`, `rs`,
+  `rm`, `@k`) dropped where a broad name (`checks`, `kstate`) was written
+  as a signature. 147 read more globals precisely than `define*` found.
+- **Not to convert:** `processes.fx` and `conditions.fx`. `%sched` and
+  `%processes:` say nothing of what the tasks they run do (a program
+  cannot name them, `check::built_in_only`), so what `->*` finds there is
+  too small; the effects written (`sched`, `any`) are the truth.
+- **What it costs.** The compiled front end runs no faster or slower
+  (`fixpt bench`'s compile table, back to back). Checking it costs more:
+  loading it without the cache 0.95 → 1.10 s (+16%, Rust), the bootstrap
+  tests 72.5 → 86.2 s serially (+19%), from finding what each procedure
+  does and proving more of them end. (Before 07861e28 and cc9a7c33, +54%
+  and +40%.)
+- **Found and fixed on the way:** 43d00eef (a tried form left `->*` ids
+  behind; a module's `->*` type lost its mark where its imports are
+  resolved), e1b8e5af (a module's group noted once per member).
+- **Done:** converted mechanically (`(subr E P R)` to `(->* P R)`; load;
+  put back the definition the first error names; again). 21 files 40
+  lines shorter, none longer; `regcode-core.fx`'s debt 1124 → 1122.
+

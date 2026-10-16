@@ -25,19 +25,19 @@
 (hide (include regcode) (include compile) (include layout) (include regcode-exps))
 
 ;; `vals`, newest first, onto `acc` the oldest first: as operands.
-(define r-slots-oldest (subr rbuilds (rints rargs) rargs)
+(define r-slots-oldest (->* (rints rargs) rargs)
   (lambda (vals acc)
     (if (null? vals) acc (r-slots-oldest (cdr vals) (the rargs (cons (a-slot (car vals)) acc))))))
 
 ;; A frame slot for each of `vs`, in order, by name.
-(define r-module-slots (subr (maxeff emits spin) (rgen c-mvals) c-mslots)
+(define r-module-slots (->* (rgen c-mvals) c-mslots)
   (lambda (g vs)
     (if (null? vs)
         nil
         (let ((s (r-slot g))) (cons (cons (extract (car vs) 1) s) (r-module-slots g (cdr vs)))))))
 ;; Item `n`'s lambda's scopes while it is made: each of `later` pending, and
 ;; itself a loop if it only calls itself in loops.
-(define r-module-own (subr rcompiles (symbol r-scopes c-mslots exp int) r-scopes)
+(define r-module-own (->* (symbol r-scopes c-mslots exp int) r-scopes)
   (lambda (n sc later lbody nps)
     (if (null? later)
         sc
@@ -47,7 +47,7 @@
                (te (the cenv (cons (cons m (if loops (at-loop 0) (at-pending s))) (cdr sc)))))
           (r-module-own n (the r-scopes (cons env te)) (cdr later) lbody nps)))))
 ;; Each closure of `ws` waiting for slot `s`, given it.
-(define r-give-waiting (subr rcompiles (rgen c-waits int) unit)
+(define r-give-waiting (->* (rgen c-waits int) unit)
   (lambda (g ws s)
     (if (null? ws)
         #u
@@ -62,7 +62,7 @@
             (r-give-waiting g (cdr ws) s))))))
 ;; Module `m`'s value into RESULT, from where `env` has it; declined if it
 ;; is not in a place.
-(define r-module-value (subr rcompiles (rgen symbol renv) unit)
+(define r-module-value (->* (rgen symbol renv) unit)
   (lambda (g m env)
     (let ((l (r-where env m)))
       (if (null? l)
@@ -75,7 +75,7 @@
             (else y (r-decline)))))))
 ;; Module `m`'s values `ns`, at positions `ps`, each into its slot of `at`:
 ;; the scopes with them.
-(define r-with-fields (subr rcompiles (rgen symbol renv syms k-ids r-scopes) r-scopes)
+(define r-with-fields (->* (rgen symbol renv syms k-ids r-scopes) r-scopes)
   (lambda (g m env ns ps sc)
     (if (or (null? ns) (null? ps))
         sc
@@ -91,7 +91,7 @@
 ;; In a fast version, member `n` of module `m`, a global's whose literal
 ;; members were noted: its literal, in a list, the global assumed; else
 ;; none (`TODO.md` §42).
-(define r-with-folded (subr rcompiles (symbol renv symbol) rconsts)
+(define r-with-folded (->* (symbol renv symbol) rconsts)
   (lambda (m env n)
     (let ((l (r-where env m)))
       (if (null? l)
@@ -103,7 +103,7 @@
             (else y nil))))))
 
 ;; `args` reversed, onto `acc`.
-(define r-args-reversed (subr rbuilds (rargs rargs) rargs)
+(define r-args-reversed (->* (rargs rargs) rargs)
   (lambda (args acc)
     (if (null? args) acc (r-args-reversed (cdr args) (the rargs (cons (car args) acc))))))
 ;; A module reshaped (`k-reshape-at`): kept in a slot, its values the type
@@ -111,12 +111,12 @@
 ;; in a leaf.
 ;; The value `p` picks of the module in the accumulator: its value `k`, or
 ;; value `j` of the module that is its value `k`.
-(define r-reshape-field (subr rcompiles (rgen k-pick) unit)
+(define r-reshape-field (->* (rgen k-pick) unit)
   (lambda (g p)
     (tagcase p
       (pick-value (k) (r-opn g rop-field (+ k 2)))
       (pick-path (k j) (begin (r-opn g rop-field (+ k 2)) (r-opn g rop-field (+ j 2)))))))
-(define r-reshape-fields (subr rcompiles (rgen int k-picks rargs) rargs)
+(define r-reshape-fields (->* (rgen int k-picks rargs) rargs)
   (lambda (g m at args)
     (if (null? at)
         args
