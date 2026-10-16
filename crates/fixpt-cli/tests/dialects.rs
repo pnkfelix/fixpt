@@ -455,7 +455,7 @@ fn on_every_machine(program: &str) -> Vec<(&'static [&'static str], String)> {
             let mut child = Command::new(FIXPT)
                 .args(["--dialect", "fx26"])
                 .args(*m)
-                .args(["eval", "-"])
+                .args(["--dialect", "fx26", "eval", "-"])
                 .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::piped())
@@ -632,4 +632,28 @@ fn compile_writes_literals_in_full_when_asked() {
     assert!(ok && !full.contains("…"), "{full}");
     assert!(full.contains("lit \"a string longer than sixty characters, with \\x22;quotes\\x22; in it\""), "{full}");
     assert!(full.contains("#f64x3fb999999999999a"), "{full}");
+}
+
+/// A type a whole program defines twice (`TODO.md` §34): warned of, by both
+/// checkers alike, and on `eval`'s standard error at the second definition;
+/// not refused, since every value sees the last, and no use mistakes one
+/// for the other.
+#[test]
+fn a_type_defined_twice_is_warned_of() {
+    let program = "(define-type t int)\n(define-type t bool)\n(define v (the t #t))\nv";
+    let warning = "warning: `t` is defined as a type more than once; every value sees the last";
+    let (ok, out) = fixpt(&["check", "-"], program);
+    assert!(ok && out.starts_with(&format!("{warning}\n")) && out.ends_with("; both checkers agree\n"), "{out}");
+    let mut child = Command::new(FIXPT)
+        .args(["--dialect", "fx26", "eval", "-"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("fixpt starts");
+    std::io::Write::write_all(&mut child.stdin.take().expect("piped"), program.as_bytes()).expect("can write");
+    let out = child.wait_with_output().expect("fixpt finishes");
+    let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    assert!(out.status.success() && stdout.contains("#t : t"), "{stdout}\n{stderr}");
+    assert_eq!(stderr, format!("fixpt: <stdin>:2:1: {warning}\n"));
 }

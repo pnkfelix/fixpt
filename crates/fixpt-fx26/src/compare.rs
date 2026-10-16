@@ -14,7 +14,7 @@ use fixpt_read::FileId;
 pub fn check_with_rust_checker(c: &mut Checker, text: &str) -> Checked26 {
     let forms = c.read_in(FileId(0), text)?;
     let done = c.declare_ahead(&forms)?;
-    let mut out = Vec::new();
+    let mut out: Vec<String> = c.types_defined_again(&forms).into_iter().map(|(n, _)| crate::top::type_again_warning(c.interner.name(n))).collect();
     for (f, done) in forms.iter().zip(done) {
         if done {
             continue;

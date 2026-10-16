@@ -41,6 +41,15 @@ fn located(name: &str, text: &str, e: &fixpt_fx26::FxError) -> String {
     format!("{name}:{line}:{col}: {}", e.message)
 }
 
+/// A warning, on the standard error, for each type a whole program defines
+/// more than once (`TODO.md` §34), at its second definition.
+fn warn_types_again(session: &Fx26Session, name: &str, text: &str, forms: &[Syntax]) {
+    for (n, span) in session.checker.types_defined_again(forms) {
+        let (line, col) = line_col(text, span.start as usize);
+        eprintln!("fixpt: {name}:{line}:{col}: {}", fixpt_fx26::top::type_again_warning(session.checker.interner.name(n)));
+    }
+}
+
 /// What checking found, as the REPL prints it after the value.
 fn report(c: &Checker, top: &Top) -> String {
     match top {
@@ -598,6 +607,7 @@ pub fn run_files(backend: Backend, files: &[String]) -> i32 {
             }
         };
         // A file is a whole program: its definitions may come in any order.
+        warn_types_again(&session, f, &text, &forms);
         let outs = match session.run_forms(&forms) {
             Ok(outs) => outs,
             Err(e) => {
@@ -888,6 +898,7 @@ fn eval_program_in(session: &mut Fx26Session, name: &str, text: &str, raw: bool)
             return 1;
         }
     };
+    warn_types_again(session, name, text, &forms);
     let outs = match session.run_forms(&forms) {
         Ok(outs) => outs,
         Err(e) => {

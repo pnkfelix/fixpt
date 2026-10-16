@@ -989,19 +989,11 @@ impl Checker {
     pub fn declare_ahead(&mut self, forms: &[Syntax]) -> R<Vec<bool>> {
         // Each type abbreviation defined once, by name, is in scope before
         // any is read, so that types may name each other in any order.
+        let twice: Vec<Sym> = self.types_defined_again(forms).into_iter().map(|(n, _)| n).collect();
         let mut names: Vec<Sym> = Vec::new();
-        let mut twice: Vec<Sym> = Vec::new();
-        for f in forms {
-            let items = f.as_proper_list().unwrap_or(&[]);
-            // A description function, `(define-type f (dlambda …))`, is no
-            // type to declare: it is read where it is defined.
-            let dlambda = |d: &Syntax| d.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| self.interner.name(h) == "dlambda");
-            if let [h, n, d] = items
-                && h.as_symbol().is_some_and(|h| self.interner.name(h) == "define-type")
-                && let Some(n) = n.as_symbol()
-                && !dlambda(d)
-            {
-                if names.contains(&n) { twice.push(n) } else { names.push(n) }
+        for (n, _) in self.type_abbreviations(forms) {
+            if !names.contains(&n) {
+                names.push(n);
             }
         }
         self.ahead.clear();
@@ -1020,6 +1012,44 @@ impl Checker {
             self.note_closed(slot);
         }
         Ok(done)
+    }
+
+    /// The simple type abbreviations `forms` define, `(define-type NAME
+    /// TYPE)`, by name, in order, each as often as defined.
+    fn type_abbreviations(&self, forms: &[Syntax]) -> Vec<(Sym, Span)> {
+        let mut out = Vec::new();
+        for f in forms {
+            let items = f.as_proper_list().unwrap_or(&[]);
+            // A description function, `(define-type f (dlambda …))`, is no
+            // type to declare: it is read where it is defined.
+            let dlambda = |d: &Syntax| d.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()).is_some_and(|h| self.interner.name(h) == "dlambda");
+            if let [h, n, d] = items
+                && h.as_symbol().is_some_and(|h| self.interner.name(h) == "define-type")
+                && let Some(n) = n.as_symbol()
+                && !dlambda(d)
+            {
+                out.push((n, f.span));
+            }
+        }
+        out
+    }
+
+    /// The type abbreviations a whole program's `forms` define more than
+    /// once, each once, at its second definition, in that order. Not an
+    /// error (`TODO.md` §34): the program's values see only the last
+    /// definition, as a module's could not, and `fixpt` warns of it
+    /// ([`type_again_warning`](crate::top::type_again_warning)).
+    pub fn types_defined_again(&self, forms: &[Syntax]) -> Vec<(Sym, Span)> {
+        let mut seen = Vec::new();
+        let mut again: Vec<(Sym, Span)> = Vec::new();
+        for (n, span) in self.type_abbreviations(forms) {
+            if !seen.contains(&n) {
+                seen.push(n);
+            } else if !again.iter().any(|(m, _)| *m == n) {
+                again.push((n, span));
+            }
+        }
+        again
     }
 
     /// The type names `forms`, checked together as a program's types are,
@@ -1308,3 +1338,10 @@ pub const KEYWORDS: &[&str] = &[
     "blobref-at", "blobref+", "blobref-owner", "blobref-offset", "blobref-get", "blobref-set!", "blobref-index", "blobref-length", "blobref-variant!",
 ];
 
+/// What `fixpt` says of type abbreviation `name`, which a whole program
+/// defines more than once (`Checker::types_defined_again`): a line of
+/// `fixpt check`'s, both checkers', and on the standard error of `run` and
+/// `eval`.
+pub fn type_again_warning(name: &str) -> String {
+    format!("warning: `{name}` is defined as a type more than once; every value sees the last")
+}

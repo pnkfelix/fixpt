@@ -706,17 +706,6 @@ is checked.
 Deferred because: the user's, to think through before designing; it bears
 on Q8's generic operations and on shapes' syntax, both open.
 
-## 34. A second `define-type` of a name, taken silently (found 2026-10-05)
-
-What is left of §34 (the rest, and the question it began with, are in
-`DONE.md` §34). A second top-level `(define-type t …)` of a name already
-a type is taken as a redefinition, silently: `(define-type t int)
-(define-type t bool) (the t #t)` checks, in both checkers, `t` the
-second. At the REPL that is redefinition, as for values; in a file it
-is more likely a mistake, whose uses then fail later and far away (found
-as `k-whys`, moving the front end into modules). To decide: refuse it in
-a file, or say so (a warning line), keeping the REPL's rule.
-
 ## 35. Provenance in the names of our code (the user's, 2026-10-05)
 
 `FIXPT_SYMBOLS` names (`docs/performance.md`, "Profiling with `sample`")

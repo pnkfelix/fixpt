@@ -242,6 +242,30 @@
                  (cons (string->symbol (syn-name name)) acc)
                  acc))
            (else y acc))))))
+;; Whether `ns` has `n`.
+(define k-name-among? (->* (symbol k-names) bool)
+  (lambda (n ns) (and (not (null? ns)) (or (symbol=? n (car ns)) (k-name-among? n (cdr ns))))))
+;; The names `ns` gives more than once, each once, in the order each is
+;; given a second time.
+(define k-given-again (->* (k-names k-names k-names) k-names)
+  (lambda (ns seen again)
+    (cond ((null? ns) (k-names-reversed again nil))
+          ((not (k-name-among? (car ns) seen)) (k-given-again (cdr ns) (cons (car ns) seen) again))
+          ((k-name-among? (car ns) again) (k-given-again (cdr ns) seen again))
+          (else (k-given-again (cdr ns) seen (cons (car ns) again))))))
+;; A warning for each type a whole program defines more than once
+;; (`TODO.md` §34): not an error, but its values see only the last.
+(define k-again-lines (->* (k-names) k-out)
+  (lambda (ns)
+    (if (null? ns)
+        nil
+        (cons (k-cat3 "warning: `" (symbol->string (car ns))
+                      "` is defined as a type more than once; every value sees the last")
+              (k-again-lines (cdr ns))))))
+;; Those warnings, as `k-forms` keeps lines: the first last.
+(define k-types-again (->* (k-tops) k-out)
+  (lambda (forms)
+    (k-push-lines (k-again-lines (k-given-again (k-ahead-names-of forms nil) nil nil)) nil)))
 ;; The first pass: abbreviations, so that types can refer to each other in
 ;; any order. Values cannot: a definition sees only those before it. Each
 ;; abbreviation defined once, by name, is in scope before any is read, and
@@ -833,7 +857,8 @@
     (prompt k-tag
       (begin (k-reset) (set k-broken-began (get k-broken)) (k-standard standard)
              (set k-std-dscope (get k-dscope))
-             (k-ahead forms) (k-ok (k-forms forms nil)))
+             (k-ahead forms)
+             (k-ok (k-forms forms (k-types-again forms))))
       (lambda (r) r))))
 
 ;; The entry point for more of a program, form by form, as the REPL gives

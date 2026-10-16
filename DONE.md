@@ -554,8 +554,31 @@ regions. So no file can share a region with the reader's and observe it.
 Of the items found moving the front end into modules, below: a module's
 type and value of one name are now kept apart (`(define-type x int)
 (define x int 1)` in a module checks); `layout.fx` and its kin are module
-files the conductor loads. Left, in `TODO.md` §34: a second top-level
-`define-type` of a name, taken silently.
+files the conductor loads. The last of them, a second top-level
+`define-type` of a name, taken silently, is below.
+
+**A second `define-type` of a name (found 2026-10-05; done 2026-10-16):
+warned of, not refused (the user's).** It miscompiles nothing, and
+recompiles nothing: a whole program's name defined twice is not declared
+ahead, each type sees the definition before it, and every value the
+last, in both checkers and every compiler alike, so a use cannot take
+one for the other; the REPL's redefinition keeps the old meaning for
+what was checked under it (`f` taking an `int` still does after `t`
+becomes `bool`). What it costs is a refusal far away, with a message
+naming `t` that means the second. So `fixpt` warns, at the second
+definition: `check` a line, both checkers' (`types_defined_again`,
+`k-types-again`), and `run` and `eval` on the standard error,
+`` warning: `t` is defined as a type more than once; every value sees
+the last `` (`dialects.rs`, `a_type_defined_twice_is_warned_of`). The
+REPL's rule is unchanged; a module, a form or a file, refuses it as
+before.
+
+Found checking that: a module file defining a name twice was refused by
+both checkers at different places, neither in the file (the Rust one at
+the `load-module`, the FX-26 one at a position in the file taken for one
+in the program). Both now say it as the file's other errors, at the
+load, `` in `m.fx`, 1:1: … ``, the file being the module, as a `module`
+form's is said at the form (`modules/load-defined-twice.fx`).
 
 The question as it was asked:
 
