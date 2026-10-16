@@ -618,3 +618,18 @@ fn an_arrow_star_over_imported_types_checks_alike() {
     let out = String::from_utf8_lossy(&out.stdout).into_owned();
     assert!(out.contains("(val f (subr (maxeff (read @r) spin)") && out.ends_with("; both checkers agree\n"), "{out}");
 }
+
+/// `compile --full-literals` (kayak's request, 2026-10-16): every literal
+/// in full, read back exactly (`docs/fx26.md`, "The compile listing's
+/// literals"), where the listing otherwise cuts one short.
+#[test]
+fn compile_writes_literals_in_full_when_asked() {
+    let program = "(define s string \"a string longer than sixty characters, with \\\"quotes\\\" in it\")\n\
+                   (define f f64 0.1)\n(string-length s)";
+    let (ok, short) = fixpt(&["--fx26-machine", "fx-cells-rsinterp", "compile", "-"], program);
+    assert!(ok && short.contains("…"), "{short}");
+    let (ok, full) = fixpt(&["--fx26-machine", "fx-cells-rsinterp", "compile", "--full-literals", "-"], program);
+    assert!(ok && !full.contains("…"), "{full}");
+    assert!(full.contains("lit \"a string longer than sixty characters, with \\x22;quotes\\x22; in it\""), "{full}");
+    assert!(full.contains("#f64x3fb999999999999a"), "{full}");
+}

@@ -45,6 +45,9 @@ usage:
   fixpt compile INPUT            FX-26: both compilers, with register code;
                                  the code, and where the compilers disagree
                                  (`--eval`, `--check` and `--compile` too)
+  fixpt compile --full-literals INPUT
+                                 the same, every literal in full, in a form
+                                 read back exactly (docs/fx26.md)
   fixpt dump-heap -o OUT FILE... run FILE... and write the resulting heap image
   fixpt build -o PROG FILE...    the same, as a standalone executable
   fixpt run-image FILE [ARG...]  run a heap image's entry point
@@ -394,9 +397,11 @@ fn run(args: &[String]) -> i32 {
                 eprintln!("fixpt {cmd}: needs a file, `-` or a program");
                 return 2;
             }
-            match fx26::input(&rest[1..]) {
+            // `compile --full-literals`: every literal in full, read back exactly.
+            let full = cmd == "compile" && rest[1] == "--full-literals";
+            match fx26::input(&rest[1 + full as usize..]) {
                 Ok((name, text)) if cmd == "check" => fx26::check(backend, &name, &text),
-                Ok((name, text)) => fx26::compile(backend, &name, &text),
+                Ok((name, text)) => fx26::compile(backend, &name, &text, full),
                 Err(e) => {
                     eprintln!("fixpt: {e}");
                     1

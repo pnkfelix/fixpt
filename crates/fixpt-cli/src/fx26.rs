@@ -705,14 +705,16 @@ pub fn check(backend: Backend, name: &str, text: &str) -> i32 {
 
 /// `fixpt compile`: both compilers on a program, with register code; the
 /// code the FX-26 one made, and whether the Rust one made the same (both,
-/// if not, and then 1).
-pub fn compile(backend: Backend, name: &str, text: &str) -> i32 {
+/// if not, and then 1). With `full` (`--full-literals`), every literal in
+/// full, in a form read back exactly (`docs/fx26.md`, "The compile
+/// listing's literals").
+pub fn compile(backend: Backend, name: &str, text: &str, full: bool) -> i32 {
     let mut session = match start(backend) {
         Ok(s) => s,
         Err(code) => return code,
     };
     session.checker.base_dir = std::path::Path::new(name).parent().map(|d| d.to_path_buf());
-    let (fx26, rust, declined) = match fixpt_fx26::compare::both_compilers_declining(&mut session, text) {
+    let (fx26, rust, declined) = match fixpt_fx26::compare::both_compilers_declining(&mut session, text, full) {
         Ok(both) => both,
         Err(e) => {
             eprintln!("fixpt: {}", located(name, text, &e));

@@ -18,6 +18,7 @@ pub mod crossing;
 pub mod disasm;
 pub mod eqtable;
 pub mod equal;
+pub mod literal;
 pub mod error;
 pub mod num;
 pub mod port;

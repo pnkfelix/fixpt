@@ -43,7 +43,7 @@ pub fn native_source(heap: &Heap, v: Value) -> Option<String> {
         let fields = heap.bloblet_head(twin).fields;
         if heap.is_register_word(twin) {
             let _ = writeln!(out, "\nprocedure {} ({} cells of register code):", name_of(heap, w), fields + 1 - WORD_CELL0);
-            register_lines(heap, twin, &mut out, &mut todo);
+            register_lines(heap, twin, &mut out, &mut todo, &mut Shown::Short);
         }
     }
     Some(out)
@@ -94,6 +94,42 @@ pub fn inlines_global(heap: &Heap, v: Value, cell: Value) -> bool {
 /// The same, with each word's machine code as `asm` shows it, after its
 /// cells and after its register code's (`,disassemble-asm`).
 pub fn disassemble_with(heap: &Heap, v: Value, asm: Option<crate::runtime::MachineCode>) -> String {
+    listing(heap, v, asm, &mut Shown::Short)
+}
+
+/// The same, every literal written in full, exactly, a label for each
+/// object reached more than once anywhere in it (`crate::literal`): seen
+/// in one walk of the listing, written in a second.
+pub fn disassemble_full(heap: &Heap, v: Value, asm: Option<crate::runtime::MachineCode>) -> String {
+    let mut lits = crate::literal::Literals::default();
+    listing(heap, v, asm, &mut Shown::Seeing(&mut lits));
+    listing(heap, v, asm, &mut Shown::Writing(&mut lits))
+}
+
+/// How a listing shows its literals.
+pub enum Shown<'a> {
+    /// As written, cut short.
+    Short,
+    /// Not yet: each noted, for the labels.
+    Seeing(&'a mut crate::literal::Literals),
+    /// In full.
+    Writing(&'a mut crate::literal::Literals),
+}
+
+impl Shown<'_> {
+    fn show(&mut self, heap: &Heap, v: Value) -> String {
+        match self {
+            Shown::Short => short(heap, v),
+            Shown::Seeing(l) => {
+                l.seen(heap, v);
+                String::new()
+            }
+            Shown::Writing(l) => l.written(heap, v),
+        }
+    }
+}
+
+fn listing(heap: &Heap, v: Value, asm: Option<crate::runtime::MachineCode>, shown: &mut Shown) -> String {
     let closure = const { kind("cellular-closure") };
     let mut out = String::new();
     if let Some(k) = heap.continuation_of(v) {
@@ -102,7 +138,7 @@ pub fn disassemble_with(heap: &Heap, v: Value, asm: Option<crate::runtime::Machi
         while let Some(w) = todo.pop() {
             if !seen.contains(&w.raw()) {
                 seen.push(w.raw());
-                word(heap, w, &mut out, &mut todo, asm);
+                word(heap, w, &mut out, &mut todo, asm, shown);
             }
         }
         return out;
@@ -111,13 +147,13 @@ pub fn disassemble_with(heap: &Heap, v: Value, asm: Option<crate::runtime::Machi
         let free = (heap.bloblet_head(v).fields + 1).saturating_sub(CLOSURE_FREE0);
         let _ = writeln!(out, "a closure over {free} value(s):");
         for i in 0..free {
-            let _ = writeln!(out, "  free {i}: {}", short(heap, heap.bloblet_slot(v, CLOSURE_FREE0 + i)));
+            let _ = writeln!(out, "  free {i}: {}", shown.show(heap, heap.bloblet_slot(v, CLOSURE_FREE0 + i)));
         }
         heap.bloblet_slot(v, CLOSURE_WORD)
     } else if heap.is_cellular_word(v) {
         v
     } else {
-        return format!("not cellular code: {}\n", short(heap, v));
+        return format!("not cellular code: {}\n", shown.show(heap, v));
     };
     let (mut todo, mut seen) = (vec![start], Vec::new());
     while let Some(w) = todo.pop() {
@@ -125,7 +161,7 @@ pub fn disassemble_with(heap: &Heap, v: Value, asm: Option<crate::runtime::Machi
             continue;
         }
         seen.push(w.raw());
-        word(heap, w, &mut out, &mut todo, asm);
+        word(heap, w, &mut out, &mut todo, asm, shown);
     }
     out
 }
@@ -193,7 +229,7 @@ fn name_of(heap: &Heap, w: Value) -> String {
 }
 
 /// One word: its name, how it is entered, and a line per instruction.
-fn word(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>, asm: Option<crate::runtime::MachineCode>) {
+fn word(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>, asm: Option<crate::runtime::MachineCode>, shown: &mut Shown) {
     let closure = const { kind("cellular-closure") };
     let fields = heap.bloblet_head(w).fields;
     let entry = heap.bloblet_slot(w, WORD_ENTRY).as_fixnum();
@@ -212,7 +248,7 @@ fn word(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>, asm: Opt
                 todo.push(cell);
                 let _ = writeln!(out, "  {at:>4}: word {}", name_of(heap, cell));
             } else {
-                let _ = writeln!(out, "  {at:>4}: {}", short(heap, cell));
+                let _ = writeln!(out, "  {at:>4}: {}", shown.show(heap, cell));
             }
             k += 1;
             continue;
@@ -242,7 +278,7 @@ fn word(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>, asm: Opt
                         todo.push(heap.bloblet_slot(*v, CLOSURE_WORD));
                         format!("closure of {}", name_of(heap, heap.bloblet_slot(*v, CLOSURE_WORD)))
                     } else {
-                        short(heap, *v)
+                        shown.show(heap, *v)
                     }
                 })
                 .collect(),
@@ -255,7 +291,7 @@ fn word(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>, asm: Opt
     }
     let twin = heap.bloblet_slot(w, WORD_TWIN);
     if heap.is_register_word(twin) {
-        register_word(heap, twin, out, todo);
+        register_word(heap, twin, out, todo, shown);
         if let Some(text) = asm.and_then(|f| f(heap, twin)) {
             machine_code(out, &format!("its register code's {text}"));
         }
@@ -270,16 +306,16 @@ fn machine_code(out: &mut String, text: &str) {
 }
 
 /// A word's register code (PLAN.md 13h′): a line per instruction.
-fn register_word(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>) {
+fn register_word(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>, shown: &mut Shown) {
     let fields = heap.bloblet_head(w).fields;
     let entry = heap.bloblet_slot(w, WORD_ENTRY).as_fixnum();
     let how = if entry == 0 { "not compiled".to_string() } else { format!("native slot {entry}") };
     let _ = writeln!(out, "  its register code ({} cells, {how}):", fields + 1 - WORD_CELL0);
-    register_lines(heap, w, out, todo);
+    register_lines(heap, w, out, todo, shown);
 }
 
 /// A word's register code, a line per instruction.
-fn register_lines(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>) {
+fn register_lines(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>, shown: &mut Shown) {
     use fixpt_heap::layout::regcode::OPS;
     let fields = heap.bloblet_head(w).fields;
     let mut k = WORD_CELL0;
@@ -292,21 +328,21 @@ fn register_lines(heap: &Heap, w: Value, out: &mut String, todo: &mut Vec<Value>
             "branch" | "branchf" | "brancht" => vec![format!("→ {}", at as i64 + 2 + ops[0].as_fixnum())],
             "global-guard" => vec![global(heap, ops[0]), format!("written {}", ops[1].as_fixnum()), format!("else → {}", at as i64 + 4 + ops[2].as_fixnum())],
             "global" | "setglbl" => vec![global(heap, ops[0])],
-            "op1" | "cellular" => std::iter::once(routine(ops[0])).chain(ops[1..].iter().map(|v| short(heap, *v))).collect(),
-            "op2" | "op2imm" => vec![routine(ops[0]), short(heap, ops[1])],
+            "op1" | "cellular" => std::iter::once(routine(ops[0])).chain(ops[1..].iter().map(|v| shown.show(heap, *v))).collect(),
+            "op2" | "op2imm" => vec![routine(ops[0]), shown.show(heap, ops[1])],
             "prim" => {
                 let pname = crate::PRIMITIVES.get(ops[0].as_fixnum() as usize).map_or("?", |d| d.name);
                 vec![pname.to_string(), ops[1].as_fixnum().to_string()]
             }
             "prim1" | "prim2" | "prim2imm" | "prim3imm" => {
                 let pname = crate::PRIMITIVES.get(ops[0].as_fixnum() as usize).map_or("?", |d| d.name);
-                std::iter::once(pname.to_string()).chain(ops[1..].iter().map(|v| short(heap, *v))).collect()
+                std::iter::once(pname.to_string()).chain(ops[1..].iter().map(|v| shown.show(heap, *v))).collect()
             }
             "lambda" => {
                 todo.push(ops[0]);
                 vec![format!("word {}", name_of(heap, ops[0])), format!("over {}", ops[1].as_fixnum())]
             }
-            _ => ops.iter().map(|v| short(heap, *v)).collect(),
+            _ => ops.iter().map(|v| shown.show(heap, *v)).collect(),
         };
         let _ = writeln!(out, "  {at:>6}: {name}{}{}", if shown.is_empty() { "" } else { " " }, shown.join(" "));
         k += 1 + n;
