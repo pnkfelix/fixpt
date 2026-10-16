@@ -294,3 +294,20 @@ fn an_arrow_star_group_finds_each_effect() {
     let err = rejects(include_str!("programs/arrows/star-group-passed-as-pure.fx"));
     assert!(err.contains("argument 1 is a (subr (maxeff spin (read (globals twice))) (int) int)"), "{err}");
 }
+
+/// `->*` in a module: every such lambda's effect found before any of the
+/// module's lambdas is checked; a value made by calling one is refused, as
+/// the lambda is still at its placeholder then.
+#[test]
+fn an_arrow_star_in_a_module_finds_its_effect() {
+    assert_eq!(
+        check(include_str!("programs/bidirectional/arrow-star-module.fx")),
+        "int ! (maxeff (read @h) (write @h) (read (globals counter)))"
+    );
+    let err = rejects(include_str!("programs/arrows/star-module-value.fx"));
+    assert!(err.contains("`y` names `f` as it is made"), "{err}");
+    let err = rejects(include_str!("programs/arrows/star-module-not-lambda.fx"));
+    assert!(err.contains("from its `lambda`: define it as one"), "{err}");
+    let err = rejects(include_str!("programs/arrows/star-module-define-star.fx"));
+    assert!(err.contains("each find what a procedure does"), "{err}");
+}

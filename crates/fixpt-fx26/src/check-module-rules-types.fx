@@ -25,6 +25,13 @@
 ;; far may not, `ds` the types written; and the bindings, a `define*`'s at
 ;; the type found.
 (define-type k-mod-checked (productof (1 k-eff) (2 k-letrec-bs)))
+;; A module's lambdas, those typed `->*` at the types found, and their
+;; recursive groups (`k-mod-groups`) at those types.
+(hide (define check-modorder-types0 (load-module "fx26:check-modorder-types.fx")))
+(define-type k-mod-found
+  (productof (1 k-letrec-bs) (2 (select check-modorder-types0 k-groups))))
+(hide (define check-letrec-types (load-module "fx26:check-letrec-types.fx")))
+(define-type k-lambda-synth (select check-letrec-types k-lambda-synth))
 
 ;;; ------------------------------------------------------------ signatures
 
@@ -42,7 +49,17 @@
 (hide (define check-terminate-types (load-module "fx26:check-terminate-types.fx")))
 (define-type k-thunk (select check-terminate-types k-thunk))
 (define-type check-module-rules-sig
-  (moduleof (val k-rebind-top
+  (moduleof (val k-mod-star-groups
+                 (subr (maxeff (alloc @t)
+                               (goto @z)
+                               (read @globals)
+                               (read @s)
+                               (read @t)
+                               (write @t)
+                               spin)
+                       ((select check-modorder-types k-edges) k-letrec-bs k-lambda-synth)
+                       k-mod-found))
+            (val k-rebind-top
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (symbol int)
                        unit))

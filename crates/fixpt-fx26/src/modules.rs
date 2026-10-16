@@ -327,6 +327,12 @@ impl Checker {
         }) {
             return Err(FxError::at(self.arena.span_of(init), "`define*` defines a procedure: a `lambda`"));
         }
+        if let Some(init) = items.iter().find_map(|it| match it {
+            ModItem::Val { ty: Some(t), init, .. } if self.arrow_star_tys.contains(t) && !self.is_lambda(*init) => Some(*init),
+            _ => None,
+        }) {
+            return Err(FxError::at(self.arena.span_of(init), "`->*` finds a procedure's effect from its `lambda`: define it as one"));
+        }
         if let Some((n, _, init, _)) = lambdas.iter().find(|(_, _, init, i)| matches!(items[*i], ModItem::Rec(_)) && !self.is_lambda(*init)) {
             return Err(FxError::at(self.arena.span_of(*init), format!("`{}`, in a `define-rec`, is a `lambda`", self.interner.name(*n))));
         }
@@ -366,6 +372,7 @@ impl Checker {
         // A `define*`'s type as written, and the type it is checked at first,
         // reading any global: what it reads is then found from its body.
         let star = |i: usize| matches!(items[i], ModItem::Val { infer: true, .. });
+        let marked: Vec<bool> = lambdas.iter().map(|l| self.arrow_star_tys.contains(&l.1)).collect();
         let mut declared = Vec::new();
         for l in lambdas.iter_mut() {
             l.1 = self.resolve_selects(l.1, span)?;
@@ -442,6 +449,27 @@ impl Checker {
             }
         }
         let groups = self.module_groups(&lambdas);
+        // With `->*`, every such lambda's effect found before any lambda is
+        // checked, each recursive group with one noted as `define-rec`'s is
+        // (`arrow_star_group`).
+        if marked.contains(&true) {
+            let rdepth = self.recursive.len();
+            for g in &groups {
+                if g.iter().any(|m| marked[*m]) {
+                    let group: Vec<(Sym, TyId, ExpId)> = g.iter().map(|m| (lambdas[*m].0, lambdas[*m].1, lambdas[*m].2)).collect();
+                    self.note_termination(&group);
+                }
+            }
+            let all: Vec<(Sym, TyId, ExpId)> = lambdas.iter().map(|l| (l.0, l.1, l.2)).collect();
+            let found = self.arrow_star_group(&all, &marked);
+            self.recursive.truncate(rdepth);
+            for (k, (_, t, _)) in found?.into_iter().enumerate() {
+                if marked[k] {
+                    lambdas[k].1 = t;
+                    self.env.set_ty(base + k, t);
+                }
+            }
+        }
         // Whether each group may not end, and why: found once, for its first
         // member (the group being the same for each of its members).
         let mut ends: Vec<Option<Result<(), String>>> = vec![None; lambdas.len()];

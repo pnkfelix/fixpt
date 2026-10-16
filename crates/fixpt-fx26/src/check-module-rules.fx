@@ -67,6 +67,39 @@
 ;; `n`'s innermost binding, now of type `t`.
 (define k-rebind-top (subr (maxeff kstate spin) (symbol int) unit)
   (lambda (n t) (table-set! (get k-env) n (cons t (cdr (table-ref (get k-env) n nil))))))
+;; Each of `bs` bound again at its type there.
+(define k-rebind-all (subr (maxeff kstate spin) (k-letrec-bs) unit)
+  (lambda (bs)
+    (if (null? bs)
+        #u
+        (begin (k-rebind-top (extract (car bs) 1) (extract (car bs) 2)) (k-rebind-all (cdr bs))))))
+;; Note of each recursive group of `gs` with a member typed `->*` whether it
+;; needs `spin`, as a `define-rec`'s.
+(define* k-note-star-groups (subr (maxeff checks spin) (k-groups) unit)
+  (lambda (gs)
+    (if (null? gs)
+        #u
+        (begin (if (and (not (null? (car gs))) (k-any-arrow-star? (car gs)))
+                   (k-note-ending (car gs) (k-termination (car gs)))
+                   #u)
+               (k-note-star-groups (cdr gs))))))
+;; A module's lambdas `bs`, bound, with edges `es`, and their recursive
+;; groups: with members typed `->*`, every such member's effect found
+;; before any lambda is checked, each recursive group with one noted as a
+;; `define-rec`'s is (`k-arrow-star-found`, `synth` telling each `lambda`),
+;; and they bound again at the types found; then the groups at those types.
+(define* k-mod-star-groups
+  (subr (maxeff checks spin) (k-edges k-letrec-bs k-lambda-synth) k-mod-found)
+  (lambda (es bs synth)
+    (let ((gs (k-mod-groups es bs bs)))
+      (if (not (k-any-arrow-star? bs))
+          (product (1 bs) (2 gs))
+          (let* ((rsaved (get k-recursive))
+                 (noted (k-note-star-groups gs))
+                 (found (k-arrow-star-found synth bs))
+                 (back (set k-recursive rsaved))
+                 (rebound (k-rebind-all found)))
+            (product (1 found) (2 (k-mod-groups es found found))))))))
 ;; `f`'s value, or, if it fails, the error `say` makes of its message.
 (define k-saying (subr (maxeff (read @globals) checks spin) (k-thunk k-say) k-te)
   (lambda (f say)

@@ -2945,6 +2945,11 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                 (Some(d @ ("define" | "define*")), [_, n, t, init]) => {
                     let infer = d == "define*";
                     let (name, _) = name_of(self, n)?;
+                    self.arrow_star = self.written_arrow_star(t);
+                    if infer && self.arrow_star {
+                        self.arrow_star = false;
+                        return Err(FxError::at(t.span, "`define*` and `->*` each find what a procedure does: write one"));
+                    }
                     let ty = self.parse_type(t)?;
                     out.push(ModItem::Val { name, ty: Some(ty), init: self.parse_exp(init)?, infer });
                 }
@@ -2962,6 +2967,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                             return Err(FxError::at(b.span, "`(define-rec (name type expression) …)`"));
                         };
                         let (name, _) = name_of(self, n)?;
+                        self.arrow_star = self.written_arrow_star(t);
                         let ty = self.parse_type(t)?;
                         group.push((name, ty, self.parse_exp(init)?));
                     }

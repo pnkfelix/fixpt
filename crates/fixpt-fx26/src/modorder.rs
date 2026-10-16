@@ -118,6 +118,16 @@ impl Checker {
             if lambda(*name).is_some_and(|k| lambdas[k].3 == i) {
                 continue;
             }
+            // A lambda typed `->*` is bound at its placeholder until every
+            // value is made: one named as a value is made is refused.
+            let star = |n: &Sym| lambda(*n).is_some_and(|k| self.arrow_star_tys.contains(&lambdas[k].1));
+            if let Some(f) = self.module_names_in(*init, &places).into_iter().find(star) {
+                let (x, f) = (self.interner.name(*name), self.interner.name(f));
+                return Err(FxError::at(
+                    self.arena.span_of(*init),
+                    format!("`{x}` names `{f}` as it is made, and `->*` finds `{f}`'s effect only after the module's values are made: write `{f}`'s effect, with `->` or `subr`"),
+                ));
+            }
             // Breadth first from the value's names, through lambdas, each
             // name with the one it was reached from.
             let mut seen: Vec<(Sym, Option<usize>)> = Vec::new();

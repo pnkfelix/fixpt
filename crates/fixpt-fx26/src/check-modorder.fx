@@ -88,13 +88,28 @@
                            (extract (car ls) 3))))))
 
 ;; A `define*` that is not a `lambda`, from `items`: an error at the first.
-(define k-mod-star-lambdas (subr checks (k-items) unit)
+(define k-mod-define-star-lambdas (subr checks (k-items) unit)
   (lambda (items)
     (cond ((null? items) #u)
           ((and (= (extract (car items) 1) 2) (= (extract (car items) 3) -2)
                 (not (k-lambda? (car (extract (car items) 5)))))
            (k-fail-at "`define*` defines a procedure: a `lambda`" (car (extract (car items) 5))))
-          (else (k-mod-star-lambdas (cdr items))))))
+          (else (k-mod-define-star-lambdas (cdr items))))))
+;; A value typed `->*` that is not a `lambda`, from `items`: an error at the
+;; first.
+(define k-mod-arrow-star-lambdas (subr checks (k-items) unit)
+  (lambda (items)
+    (let ((it (if (null? items) nil (the k-items (cons (car items) nil)))))
+      (cond ((null? it) #u)
+            ((and (= (extract (car it) 1) 2) (not (null? (extract (car it) 4)))
+                  (k-arrow-star-ty? (car (extract (car it) 4)))
+                  (not (k-lambda? (car (extract (car it) 5)))))
+             (k-fail-at "`->*` finds a procedure's effect from its `lambda`: define it as one"
+                        (car (extract (car it) 5))))
+            (else (k-mod-arrow-star-lambdas (cdr items)))))))
+;; Those two errors, in that order.
+(define k-mod-star-lambdas (subr checks (k-items) unit)
+  (lambda (items) (begin (k-mod-define-star-lambdas items) (k-mod-arrow-star-lambdas items))))
 
 ;;; ------------------------------------------------------------ places
 
@@ -285,6 +300,27 @@
                       (k-hazard-walk next (k-reach-new fresh n #t rs) h)))))))))
 ;; Refused: an item, from `i`, that is not a typed lambda whose value may
 ;; reach, when it is made, an item not made yet (itself included).
+;; The first of `names` a lambda of `ls` typed `->*`, if any.
+(define k-arrow-star-among (subr (maxeff (read @globals) (read @t)) (k-names k-mlams) k-names)
+  (lambda (names ls)
+    (cond ((null? names) nil)
+          ((let ((l (k-mlam-named ls (car names))))
+             (and (not (null? l)) (k-arrow-star-ty? (extract (car l) 2))))
+           (the k-names (cons (car names) nil)))
+          (else (k-arrow-star-among (cdr names) ls)))))
+;; An error at `init`, value `x`'s, if of `names` it names a lambda of `ls`
+;; typed `->*`, which is bound at its placeholder until every value is made.
+(define k-arrow-star-named (subr checks (symbol kx k-names k-mlams) unit)
+  (lambda (x init names ls)
+    (let ((f (k-arrow-star-among names ls)))
+      (if (null? f)
+          #u
+          (let ((x (symbol->string x)) (f (symbol->string (car f))))
+            (k-fail-at (string-append
+                        (k-cat5 "`" x "` names `" f "` as it is made, and `->*` finds `")
+                        (k-cat5 f "`'s effect only after the module's values are made: write `" f
+                                "`'s effect, with `->` or `subr`" ""))
+                       init))))))
 (define k-hazards-from (subr (maxeff checks spin) (k-items int k-places k-mlams) unit)
   (lambda (items i ps ls)
     (if (null? items)
@@ -294,7 +330,8 @@
             (if (and (= (extract it 1) 2) (not (k-lambda-item? it)))
                 (let* ((x (car (extract it 2)))
                        (init (car (extract it 5)))
-                       (names (k-mod-names-in init ps)))
+                       (names (k-mod-names-in init ps))
+                       (early (k-arrow-star-named x init names ls)))
                   (k-hazard-walk names (k-reach-new names x #f nil)
                                  (product (1 ps) (2 ls) (3 i) (4 x) (5 init))))
                 #u)

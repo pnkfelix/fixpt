@@ -281,7 +281,8 @@
     (lambda (ts xs)
       (if (null? ts)
           (product (1 (the k-ids nil)) (2 (the kxs nil)))
-          (let* ((t (k-parse-type (car ts)))
+          (let* ((star (set k-arrow-star (k-written-arrow-star? (car ts))))
+                 (t (k-parse-type (car ts)))
                  (x (k-resolve-exp (car xs)))
                  (rest (k-resolve-rec-items (cdr ts) (cdr xs))))
             (product (1 (the k-ids (cons t (extract rest 1))))
@@ -334,10 +335,16 @@
                  (k-item-of k ns -1 (the k-ids (cons t nil)) nil)))
               ;; A `define*`'s types its type and a mark: its variable -2.
               ((and (= k 2) (not (null? ts)) (not (null? (cdr ts))))
-               (let* ((t (k-parse-types (the syns-a (cons (car ts) nil)))) (x (k-resolve-all xs)))
+               (let* ((both (if (k-written-arrow-star? (car ts))
+                                (k-sfail (string-append "`define*` and `->*` each find what a "
+                                                        "procedure does: write one")
+                                         (car ts))
+                                #u))
+                      (t (k-parse-types (the syns-a (cons (car ts) nil)))) (x (k-resolve-all xs)))
                  (k-item-of k ns -2 t x)))
               ((= k 2)
-               (let* ((t (if (null? ts) (the k-ids nil) (k-parse-types ts))) (x (k-resolve-all xs)))
+               (let* ((star (if (null? ts) #u (set k-arrow-star (k-written-arrow-star? (car ts)))))
+                      (t (if (null? ts) (the k-ids nil) (k-parse-types ts))) (x (k-resolve-all xs)))
                  (k-item-of k ns -1 t x)))
               (else
                (let ((r (k-resolve-rec-items ts xs)))
