@@ -136,11 +136,22 @@ fn every_test_program() {
         for path in names {
             let program = std::fs::read_to_string(&path).unwrap();
             let name = format!("{sub}/{}", path.file_name().unwrap().to_string_lossy());
-            let Some(ours) = fx26_check(&program) else {
+            // A `load-module`'s path is from the program's directory, as
+            // `fixpt check`'s is: else every load is "cannot read" in both,
+            // and the files loaded are never compared.
+            let dir = path.parent().map(|d| d.to_path_buf());
+            let Some(ours) = common::with_own(|s| {
+                let outer = std::mem::replace(&mut s.checker.base_dir, dir.clone());
+                let r = fx26_check_in(s, &program);
+                s.checker.base_dir = outer;
+                r
+            }) else {
                 unparsed.push(name);
                 continue;
             };
-            let (ours, rust) = (canon(ours), canon(rust_check(&program)));
+            let mut c = Checker::new();
+            c.base_dir = dir;
+            let (ours, rust) = (canon(ours), canon(rust_check_in(c, &program)));
             if ours == rust {
                 agreed += 1;
             } else {

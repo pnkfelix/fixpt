@@ -808,11 +808,13 @@
   ;; File `f`, loaded at `a`..`b` as `path`: the module, its items after its
   ;; mark (`loaded-made` of it, for a file of parameters; for a
   ;; `load-input`, `input?`, its one form, the item `input`); or why it
-  ;; could not be read.
+  ;; could not be read. An error in the file, said with where in it, is at
+  ;; the load's start, as Rust's `said_in` places it; one about reading it,
+  ;; its text none, at the whole load.
   (parse-load-file (->* (loaded-file string bool int int) exp)
     (lambda (f path input? a b)
       (if (= (extract f 2) 0)
-          (e-module (loaded-error (extract f 3)) a b 0)
+          (e-module (loaded-error (extract f 3)) a (if (string=? (extract f 6) "") b a) 0)
           (let* ((base (extract f 2))
                  (forms (extract f 5))
                  ;; The whole file, where no other expression is.
@@ -836,7 +838,7 @@
             (tagcase r
               (p-err (m x y)
                 (if (>= x base)
-                    (e-module (loaded-error (in-loaded-as (get loaded) base path m x)) a b 0)
+                    (e-module (loaded-error (in-loaded-as (get loaded) base path m x)) a a 0)
                     (pfail-at m x y)))
               (p-ok (ts) (tagcase (car ts) (t-exp (x) x) (else y (e-module nil a b 0))))))))))
 ;; A `define-rec`'s bindings, as a `letrec`'s are.
