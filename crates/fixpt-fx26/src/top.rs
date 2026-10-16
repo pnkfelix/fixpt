@@ -1143,6 +1143,8 @@ impl Checker {
         self.truncate_env(env);
         self.dscope.truncate(dscope);
         self.facts.forget_from(arena.exps());
+        // A type read from `->*` goes with the rest: its id may be another's.
+        self.arrow_star_tys.retain(|t| arena.has_ty(*t));
         self.arena.reset(arena);
         self.regions_memo.borrow_mut().clear();
         out

@@ -160,6 +160,7 @@
     (if (null? ls)
         (product (1 (the k-letrec-bs nil)) (2 (the k-ids nil)))
         (let* ((t (k-resolve-selects (extract (car ls) 2) a b))
+               (marked (k-arrow-star-as (extract (car ls) 2) t))
                (w (k-mod-first-type (car ls) t))
                (rest (k-mod-bindings (cdr ls) a b)))
           (product (1 (the k-letrec-bs (cons (product (1 (extract (car ls) 1)) (2 w)

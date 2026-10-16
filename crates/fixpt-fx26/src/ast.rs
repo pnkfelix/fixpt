@@ -987,4 +987,9 @@ impl ArenaMark {
     pub fn exps(&self) -> u32 {
         self.exps as u32
     }
+    /// Whether type `t` was made before the mark, and so outlives a reset
+    /// to it.
+    pub fn has_ty(&self, t: TyId) -> bool {
+        (t.0 as usize) < self.tys
+    }
 }

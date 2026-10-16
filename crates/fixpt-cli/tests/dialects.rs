@@ -596,3 +596,25 @@ fn fx26_machines_by_name() {
         assert_eq!(out.status.code(), Some(2), "{args:?}");
     }
 }
+
+/// A module file's lambda typed `->*` whose type names what the file
+/// imports: both checkers find its effect alike, where the type is made
+/// again with the imports resolved.
+#[test]
+fn an_arrow_star_over_imported_types_checks_alike() {
+    use std::io::Write as _;
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../fixpt-fx26/tests/programs/module-files");
+    let mut child = Command::new(FIXPT)
+        .args(["check", "-"])
+        .current_dir(dir)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("fixpt starts");
+    let program = "(define b ((proj (load-module \"arrow-star-uses.fx\") @r)))\n((with b f) (lambda (y) y) 1)";
+    child.stdin.take().expect("stdin is piped").write_all(program.as_bytes()).expect("can write");
+    let out = child.wait_with_output().expect("fixpt finishes");
+    let out = String::from_utf8_lossy(&out.stdout).into_owned();
+    assert!(out.contains("(val f (subr (maxeff (read @r) spin)") && out.ends_with("; both checkers agree\n"), "{out}");
+}

@@ -85,3 +85,15 @@ fn the_argument_a_subroutine_wants() {
     // Only what the other arguments determine is filled in.
     assert_eq!(c.describe_argument(&items(&forms[1]), 2).as_deref(), Some("t2"));
 }
+
+/// A form tried leaves no `->*` behind either: a type read from `->*` in
+/// the try, its id then given to another type, does not make that one's
+/// effect found instead of taken as written.
+#[test]
+fn trying_an_arrow_star_leaves_nothing_behind() {
+    let mut c = Checker::new();
+    let tried = c.read_in(FileId(0), "(letrec ((g (->* (int) int) (lambda (x) x))) (g 1))").expect("reads");
+    assert!(c.try_top(&tried[0], |_, r| r.is_ok()));
+    let written = "(letrec ((g (subr pure (int) int) (the (subr pure (int) int) (lambda (x) x)))) (g 1))";
+    assert_eq!(ty_of(&mut c, written), "int ! pure");
+}
