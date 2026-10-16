@@ -541,6 +541,26 @@ fn ints_are_bignums_natively() {
     assert_eq!(run(defs, "q", &[-(1 << 60), -1], FUEL).direct, Ok("1152921504606846976".into()));
 }
 
+/// `remainder` in line (`TODO.md` §103), a `prim2`, as `quotient` and
+/// `modulo` are: of each sign of each operand, by a constant and not, the
+/// least fixnum by −1, and a bignum (the primitive's), as the Rust machine
+/// gives them; by zero, said.
+#[test]
+fn remainder_in_line_as_the_rust_machine_gives_it() {
+    let defs = &program("native/remainder");
+    for (a, b) in [(17, 5), (-17, 5), (17, -5), (-17, -5), (15, 5), (-15, 5), (0, 3), (-(1 << 60), -1), ((1 << 60) - 1, 7)] {
+        let r = run(defs, "r", &[a, b], FUEL);
+        assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "(remainder {a} {b}): {:?} against {}\n{}", r.direct, r.rust, r.code);
+    }
+    for a in [20, -20, 21, -21] {
+        let r = run(defs, "r7", &[a], FUEL);
+        assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "(remainder {a} -7): {:?} against {}", r.direct, r.rust);
+    }
+    let r = run(defs, "big", &[-123456789, 1000003], FUEL);
+    assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "a bignum's: {:?} against {}", r.direct, r.rust);
+    assert!(matches!(&run(defs, "r", &[7, 0], FUEL).direct, Err(m) if m.contains("zero")));
+}
+
 /// An array's element, by `field@`: inline in range, and out of range
 /// the call-out says so, as the Rust machine does.
 #[test]

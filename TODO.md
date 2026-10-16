@@ -2530,11 +2530,3 @@ and are not listed. From now on, a bench taken with a 1-minute load
 average of 4 or more is taken again when the machine is quieter, before
 the commit, if waiting is possible; if not, the commit says so and is
 added here.
-
-## 103. `remainder` by a constant not in line (found 2026-10-16)
-
-The same measurement: `(remainder i 2)` in the loop is a call-out
-(`prim %fx26-remainder`), about 20 ns an iteration, more than everything
-else in the loop together. A constant divisor, a power of two above all,
-could be done in line natively, as `quotient` by one may be; to check
-what `quotient`, `modulo` and `remainder` do now.

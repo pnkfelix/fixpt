@@ -4444,8 +4444,9 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
         return true;
     }
     // A quotient past a fixnum (the least one's by −1) is the primitive's;
-    // a remainder is `modulo`'s when it has the divisor's sign, or is 0.
-    if name == "%fx26-quotient" || name == "modulo" {
+    // a remainder (`remainder`, the dividend's sign, always a fixnum) is
+    // `modulo`'s when it has the divisor's sign, or is 0.
+    if name == "%fx26-quotient" || name == "modulo" || name == "%fx26-remainder" {
         fixnums(a);
         nonzero(a);
         a.e(sdiv(X13, x, y));
@@ -4454,6 +4455,8 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
             a.e(asr_imm(X15, X14, 3));
             a.e(cmp(X15, X13));
             a.to(slow, Fix::If(Cond::Ne));
+        } else if name == "%fx26-remainder" {
+            a.e(msub(X14, X13, y, x));
         } else {
             let signed = a.label();
             a.e(msub(X14, X13, y, x));

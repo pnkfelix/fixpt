@@ -3034,3 +3034,21 @@ reserve, two instructions at every call-out): no faster (0.73 s against
 0.80 → 0.73 s. The 46 ports: the same answers and times. Test:
 `programs/native/quiet-boxes.fx`, `quiet_boxes_are_collected_at_the_next_poll`
 (2 M boxes: 2 collections or more while it runs; 1 with a poll quiet).
+
+## 103. `remainder` by a constant not in line (found 2026-10-16)
+
+**Fixed (2026-10-16).** Found with §102, measuring the integrator:
+`(remainder i 2)` in a loop was a call-out, `prim %fx26-remainder`, which
+saved the frame and called the runtime, about 20 ns an iteration, more
+than the rest of the loop; `quotient` and `modulo` were already
+`prim2imm`, in line natively. `%fx26-remainder` now never collects
+(`fixpt_runtime::never_collects`, and the FX-26 compiler's
+`r-never-collects?`, so both make `prim2` and `prim2imm` alike), and
+native code does it in line as `quotient`: of two fixnums, a divisor not
+zero, `sdiv` then `msub`, the remainder always a fixnum (the least by −1
+too); else the primitive's, a bignum's or zero's. The integrator's first
+version, which picked its weight so, 20 reps: about 0.16 → 0.07 s the
+run alone. Test: `remainder_in_line_as_the_rust_machine_gives_it`
+(`programs/native/remainder.fx`: each sign, a constant divisor and not,
+the least fixnum by −1, a bignum, by zero). The 46 ports: the same
+answers and times (three use `remainder`, none in a hot loop).

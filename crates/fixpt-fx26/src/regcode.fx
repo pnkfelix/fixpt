@@ -402,15 +402,15 @@
 ;;; ------------------------------------------------------ standard names
 
 ;; Whether runtime primitive `name` never collects (`fixpt_runtime::never_collects`): FX-26's
-;; `*`, `quotient` and `modulo`, the fixed-width integers' and floats' operations, and a flat
-;; array's element and length, a blobref's read, owner, offset, step, fit and length and a
-;; flat sum's tag (`TODO.md` §77), and an eqtable's operations of one or two, which register
-;; code calls with its values in registers.
+;; `*`, `quotient`, `remainder` and `modulo`, the fixed-width integers' and floats' operations,
+;; and a flat array's element and length, a blobref's read, owner, offset, step, fit and length
+;; and a flat sum's tag (`TODO.md` §77), and an eqtable's operations of one or two, which
+;; register code calls with its values in registers.
 (define r-never-collects? (->* (string) bool)
   (lambda (name)
     (case name
       (("%fx26-mul" "%fx26-quotient" "modulo" "%fx26-arithmetic-shift" "%bloblet-fields"
-        "%fx26-string->f64"
+        "%fx26-string->f64" "%fx26-remainder"
         "%fx26-flatarray-ref"
         "%fx26-flatarray-length" "char->integer" "integer->char" "string-length" "string-ref"
         "%string-hash" "%symbol-hash" "%fx26-string-compare" "%fx26-symbol-compare"
