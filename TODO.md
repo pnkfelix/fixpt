@@ -2303,7 +2303,10 @@ frame slots, as the suffix. Left:
   question (2026-10-13): unboxed floats as a kind of their own that no
   type variable ranges over, as `flat` is, so that every call agrees from
   the types; a design to write up and decide (GHC's `Double#`, OCaml's
-  layouts).
+  layouts). Written up (2026-10-16): `docs/research/raw-scalars.md`, a
+  kind `raw` of types `(raw F)`, conversions inserted by the checker;
+  its open questions are the user's, and it suggests measuring first
+  (`nbody`'s `put`, an analysis fix; an integrator over a procedure).
 - **Last, `f64`s in floating-point registers in the abstract register
   machine**: only once the `fmov`s between `x` and `d` registers show in a
   disassembly, and once register code keeps values in registers across
