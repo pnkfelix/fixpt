@@ -13,7 +13,7 @@ const MACHINES: [&str; 5] = ["rs-scheme-vm", "fx-ast-eval", "fx-cells-rsinterp",
 /// `program` run on `machine`: its status, standard output and error.
 fn run(machine: &str, program: &str) -> (Option<i32>, String, String) {
     let path = format!("{}/tests/programs/io/{program}", env!("CARGO_MANIFEST_DIR"));
-    let out = Command::new(FIXPT).args(["--fx26-machine", machine, "run", &path]).stdin(Stdio::null()).output().expect("fixpt runs");
+    let out = output(Command::new(FIXPT).args(["--fx26-machine", machine, "run", &path]).stdin(Stdio::null()));
     (out.status.code(), String::from_utf8_lossy(&out.stdout).into_owned(), String::from_utf8_lossy(&out.stderr).into_owned())
 }
 
@@ -58,13 +58,7 @@ fn a_failed_run_exits_70() {
 fn a_failed_write_is_a_value() {
     for m in MACHINES {
         let path = format!("{}/tests/programs/io/broken-pipe.fx", env!("CARGO_MANIFEST_DIR"));
-        let mut child = Command::new(FIXPT)
-            .args(["--fx26-machine", m, "run", &path])
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("fixpt runs");
+        let mut child = spawned(Command::new(FIXPT).args(["--fx26-machine", m, "run", &path]).stdin(Stdio::null()));
         drop(child.stdout.take());
         let out = child.wait_with_output().expect("ends");
         let err = String::from_utf8_lossy(&out.stderr);
@@ -83,7 +77,7 @@ fn files_written_listed_and_read() {
         let dir = std::env::temp_dir().join(format!("fixpt-io-files-{m}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("a directory");
-        let out = Command::new(FIXPT).args(["--fx26-machine", m, "run", &path]).current_dir(&dir).stdin(Stdio::null()).output().expect("fixpt runs");
+        let out = output(Command::new(FIXPT).args(["--fx26-machine", m, "run", &path]).current_dir(&dir).stdin(Stdio::null()));
         let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
         assert_eq!((out.status.code(), stdout.as_ref()), (Some(5), "a.txt\nb.txt\nbee, again\n"), "{m}: {stderr}");
         let mut left: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().into_string().unwrap()).collect();
@@ -102,7 +96,7 @@ fn arguments_and_the_clock() {
         .iter()
         .map(|m| {
             let path = path.clone();
-            (*m, std::thread::spawn(move || Command::new(FIXPT).args(["--fx26-machine", m, "run", &path, "--", "one", "two words", ""]).output().expect("fixpt runs")))
+            (*m, std::thread::spawn(move || output(Command::new(FIXPT).args(["--fx26-machine", m, "run", &path, "--", "one", "two words", ""]))))
         })
         .collect();
     for (m, t) in runs {
@@ -120,13 +114,7 @@ fn the_standard_input_read_by_lines() {
     use std::io::Write as _;
     let path = format!("{}/tests/programs/io/echo.fx", env!("CARGO_MANIFEST_DIR"));
     for m in MACHINES {
-        let mut child = Command::new(FIXPT)
-            .args(["--fx26-machine", m, "run", &path])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .expect("fixpt runs");
+        let mut child = spawned(Command::new(FIXPT).args(["--fx26-machine", m, "run", &path]).stdin(Stdio::piped()));
         child.stdin.take().expect("piped").write_all(b"one\r\ntwo\n\xff\xfe\nlast").expect("written");
         let out = child.wait_with_output().expect("ends");
         let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
@@ -138,16 +126,28 @@ fn the_standard_input_read_by_lines() {
 /// after `delay`, then closed, or, `input` none, held open until it ends,
 /// however long it takes to start:
 /// its status, and its standard output and error.
+/// Held while a child is made (`TODO.md` §99): on macOS a pipe is made and
+/// only then marked close-on-exec, so a child another thread makes between
+/// the two inherits it, and holds it open: a child whose input it is sees
+/// no end until that one ends (a wait for a key then ended at its
+/// deadline), one whose output it is no broken pipe.
+static SPAWN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// `c` started, its output and errors piped, no other child made meanwhile.
+fn spawned(c: &mut Command) -> std::process::Child {
+    let _making = SPAWN.lock().unwrap_or_else(|e| e.into_inner());
+    c.stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().expect("fixpt runs")
+}
+
+/// `c` run to its end, as `Command::output` runs it, made as `spawned`.
+fn output(c: &mut Command) -> std::process::Output {
+    spawned(c).wait_with_output().expect("ends")
+}
+
 fn run_fed(machine: &str, program: &str, input: Option<&'static [u8]>, delay: std::time::Duration) -> (Option<i32>, String, String) {
     use std::io::Write as _;
     let path = format!("{}/tests/programs/io/{program}", env!("CARGO_MANIFEST_DIR"));
-    let mut child = Command::new(FIXPT)
-        .args(["--fx26-machine", machine, "run", &path])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("fixpt runs");
+    let mut child = spawned(Command::new(FIXPT).args(["--fx26-machine", machine, "run", &path]).stdin(Stdio::piped()));
     let mut stdin = child.stdin.take().expect("piped");
     // Fed, then closed; or, no input, held open here until the run ends.
     let (feeder, held) = match input {

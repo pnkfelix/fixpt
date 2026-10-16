@@ -2718,6 +2718,24 @@ Still open in `TODO.md` §97; done so far:
   did not use it). `eager-reader-types.fx` holds `syn`, `syns`, `chars`,
   `data`, `context`, `closers` and the reader's effects. A refactor only.
 
+## 99. A wait for a key sometimes ends at its deadline (found 2026-10-15)
+
+Not fixpt's: the test's. `a_process_waits_for_a_key` starts its 27 runs
+from 27 threads, and on macOS Rust's `Command` makes a child's pipes and
+only then marks them close-on-exec, so a child another thread starts in
+between inherits them. The input-end case's pipe, so inherited by the
+no-input case's child (which lives a second, to its deadline), stayed
+open after the feeder closed it, and the program saw no end before its
+own deadline: exit 1, nothing on stderr. Traced: the scheduler waits for
+the input and the deadline together, and `poll` reports a closed pipe at
+once; on `fx-regs-rsjit-cellcc` the program starts about 300 ms in, as
+the input is closed, the window. Fixed in `fixpt-cli/tests/io.rs`: every
+child is made under one lock (`spawned`, `output`), which also keeps a
+broken pipe broken (`a_failed_write_is_a_value`). Before, 2 runs in 15
+and 2 in 20 failed; after, none in 60. Other test binaries pipe to
+children their tests make in parallel too; there an inherited pipe only
+delays an end, which no test there times.
+
 ## 100. Our own FX-26 code in `->*` (the user's, 2026-10-16)
 
 `(->* (T…) T)` (`docs/fx26.md`, the kernel's table) was tried on the whole

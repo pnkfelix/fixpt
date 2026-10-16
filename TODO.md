@@ -2640,12 +2640,3 @@ user):
   moves the field's value (as `fixpt-native/tests/code_exec.rs` does from
   Rust), run on every machine; the no-native-code branch run by a switch
   that turns native code off.
-
-## 99. A wait for a key sometimes ends at its deadline (found 2026-10-15)
-
-`fixpt-cli/tests/io.rs`, `a_process_waits_for_a_key`, the input's end
-case: on `fx-regs-rsjit-cellcc`, now and then the program exits 1, the
-deadline's answer, where the end of its input should give 255, with
-nothing on stderr. Two runs in eight at `c0d9df7d`, before §98's one-shot
-continuations, so not theirs. A wakeup lost, or the end seen late, on
-that machine; not yet looked into.
