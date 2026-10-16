@@ -288,6 +288,7 @@ fn an_arrow_star_group_finds_each_effect() {
         c.show_ty(t.ty)
     };
     assert_eq!(shown("ev?"), "(subr (maxeff spin (read (globals ev? od?))) (nat) bool)");
+    assert_eq!(shown("get-noisy"), "(subr (maxeff spin (read (globals noisy))) () (subr (read (globals inc)) (int) int))");
     assert_eq!(shown("total"), "(subr pure (nat) int)");
     assert_eq!(shown("parts"), "(subr (read (globals inc twice)) (nat) int)");
     assert_eq!(shown("loops"), "(subr spin (int) int)");

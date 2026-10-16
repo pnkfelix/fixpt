@@ -1424,19 +1424,21 @@ impl Checker {
             return Err(FxError::at(self.arena.span_of(*init), letrec_not_lambda(self.interner.name(*n))));
         }
         // A group whose every run ends needs no `spin`.
-        self.note_termination(bindings);
+        let ends = self.note_termination(bindings);
         // With `->*`, the group at the types found.
         let found;
+        let mut settled = Vec::new();
         let (bindings, infer) = match marked.contains(&true) {
             false => (bindings, infer),
-            true => match self.arrow_star_group(bindings, marked) {
-                Ok(f) => {
+            true => match self.arrow_star_group(bindings, marked, depth) {
+                Ok((f, s)) => {
                     for (i, (_, t, _)) in f.iter().enumerate() {
                         self.env.set_ty(depth + i, *t);
                     }
                     self.recursive.truncate(rdepth);
-                    self.note_termination(&f);
+                    self.note_ending(&f, &ends);
                     found = f;
+                    settled = s;
                     (&found[..], false)
                 }
                 Err(err) => {
@@ -1449,8 +1451,12 @@ impl Checker {
         // An error, and whether a procedure of the group made it.
         let r = (|| {
             let mut eff = Effect::pure();
-            for (n, t, init) in bindings {
-                let ie = self.check(*init, *t).map_err(|err| (self.declared_error(*n, *t, *init, err), true))?;
+            for (i, (n, t, init)) in bindings.iter().enumerate() {
+                let ie = match settled.get(i) {
+                    Some(Some(lt)) => self.arrow_star_settled(*init, *lt, *t),
+                    _ => self.check(*init, *t),
+                };
+                let ie = ie.map_err(|err| (self.declared_error(*n, *t, *init, err), true))?;
                 eff = eff.union(&ie);
             }
             // The body's calls of the group are not recursion.
@@ -1489,7 +1495,7 @@ impl Checker {
             self.known.extend(bindings.iter().enumerate().map(|(i, (n, _, _))| (*n, depth + i)));
             let rdepth = self.recursive.len();
             let group: Vec<(Sym, TyId, ExpId)> = bindings.iter().zip(&types).map(|((n, _, x), t)| (*n, *t, *x)).collect();
-            self.note_termination(&group);
+            let _ = self.note_termination(&group);
             let mut next = Vec::new();
             let mut ok = true;
             for (i, (_, declared, init)) in bindings.iter().enumerate() {
@@ -1519,22 +1525,29 @@ impl Checker {
         None
     }
 
-    /// A group with `->*` members (`marked`), bound at their types and its
-    /// termination noted, at the types found: each marked member's own
-    /// effect found from its `lambda` in one pass, the group's calls of
+    /// A group with `->*` members (`marked`), bound at their types from env
+    /// slot `base` and its termination noted, at the types found. Its
+    /// strongly connected components (by the members each names) are taken
+    /// callees first (`components`), so that each is told the types found
+    /// of the members it names outside itself: each `->*` member's own
+    /// effect found from its `lambda` in one pass, its component's calls of
     /// each other standing for nothing more; then each one's with the
-    /// effects of every member it reaches through the group's references
-    /// (but a polymorphic one's, which say its own binders), and `spin` if
-    /// that reads a member's global, as `no_reaching_itself` asks. The group
-    /// is checked again at these types, which refuses what they leave out.
-    pub(crate) fn arrow_star_group(&mut self, bindings: &[(Sym, TyId, ExpId)], marked: &[bool]) -> R<Vec<(Sym, TyId, ExpId)>> {
-        let mut own = Vec::new();
-        for ((_, t, x), m) in bindings.iter().zip(marked) {
-            own.push(match m {
-                false => self.latent_of(*t).unwrap_or_default(),
-                true if matches!(self.arena.exp_at(*x), Exp::Lambda { .. }) => self.arrow_star_latent(*t, *x)?,
-                true => return Err(FxError::at(self.arena.span_of(*x), "`->*` finds a procedure's effect from its `lambda`: define it as one")),
-            });
+    /// effects of the rest of its component (but a polymorphic one's, which
+    /// say its own binders), and `spin` if that reads a member's global, as
+    /// `no_reaching_itself` asks; and its binding given the type found, a
+    /// call of it still recursion where the group's is. A component of one
+    /// that names not itself saw no placeholder, so that pass was its check
+    /// (`settled`, its `lambda`'s type); the others are checked again at
+    /// the types found, which refuses what they leave out.
+    #[allow(clippy::type_complexity)]
+    pub(crate) fn arrow_star_group(
+        &mut self,
+        bindings: &[(Sym, TyId, ExpId)],
+        marked: &[bool],
+        base: usize,
+    ) -> R<(Vec<(Sym, TyId, ExpId)>, Vec<Option<TyId>>)> {
+        if let Some((_, _, x)) = bindings.iter().zip(marked).find(|((_, _, x), m)| **m && !matches!(self.arena.exp_at(*x), Exp::Lambda { .. })).map(|(b, _)| b) {
+            return Err(FxError::at(self.arena.span_of(*x), "`->*` finds a procedure's effect from its `lambda`: define it as one"));
         }
         let names: Vec<Sym> = bindings.iter().map(|b| b.0).collect();
         let poly: Vec<bool> = bindings.iter().map(|b| matches!(self.arena.get(self.arena.resolve(b.1)), Ty::Poly { .. })).collect();
@@ -1545,31 +1558,53 @@ impl Checker {
                 (0..names.len()).filter(|j| free.contains(&names[*j])).collect()
             })
             .collect();
-        let mut out = Vec::new();
-        for (i, (n, t, x)) in bindings.iter().enumerate() {
-            if !marked[i] {
-                out.push((*n, *t, *x));
+        let mut out: Vec<(Sym, TyId, ExpId)> = bindings.to_vec();
+        let mut settled = vec![None; names.len()];
+        for comp in components(&refs) {
+            if !comp.iter().any(|i| marked[*i]) {
                 continue;
             }
-            let (mut seen, mut stack, mut eff) = (vec![false; names.len()], vec![i], Effect::pure());
-            seen[i] = true;
-            while let Some(j) = stack.pop() {
-                if j == i || !poly[j] {
-                    eff = eff.union(&own[j]);
+            let (mut own, mut lts) = (Vec::new(), Vec::new());
+            for &i in &comp {
+                let (o, lt) = match marked[i] {
+                    false => (self.latent_of(out[i].1).unwrap_or_default(), None),
+                    true => {
+                        let (lt, o) = self.arrow_star_latent(out[i].1, out[i].2)?;
+                        (o, Some(lt))
+                    }
+                };
+                own.push(o);
+                lts.push(lt);
+            }
+            let alone = comp.len() == 1 && !refs[comp[0]].contains(&comp[0]);
+            for (k, &i) in comp.iter().enumerate() {
+                if !marked[i] {
+                    continue;
                 }
-                for &k in &refs[j] {
-                    if !seen[k] {
-                        seen[k] = true;
-                        stack.push(k);
+                let mut eff = Effect::pure();
+                for (l, &j) in comp.iter().enumerate() {
+                    if j == i || !poly[j] {
+                        eff = eff.union(&own[l]);
                     }
                 }
+                if names.iter().any(|m| eff.contains(Atom::Read(Region::Global(*m)))) {
+                    eff = eff.union(&Effect::atom(Atom::Spin));
+                }
+                let (old, found) = (out[i].1, self.with_latent(out[i].1, &eff).expect("`->*` reads as a `subr`"));
+                self.env.set_ty(base + i, found);
+                for r in self.recursive.iter_mut().filter(|r| **r == (names[i], old)) {
+                    r.1 = found;
+                }
+                for w in self.spin_why.iter_mut().filter(|w| w.0 == (names[i], old)) {
+                    w.0.1 = found;
+                }
+                out[i].1 = found;
+                if alone && self.holes.is_none() {
+                    settled[i] = lts[k];
+                }
             }
-            if names.iter().any(|m| eff.contains(Atom::Read(Region::Global(*m)))) {
-                eff = eff.union(&Effect::atom(Atom::Spin));
-            }
-            out.push((*n, self.with_latent(*t, &eff).expect("`->*` reads as a `subr`"), *x));
         }
-        Ok(out)
+        Ok((out, settled))
     }
 
     /// The latent effect of `t`, a `subr` under any `poly`s.
@@ -2083,8 +2118,17 @@ impl Checker {
 
     /// Whether the group `bindings` ends; if not, its members are recursion
     /// that says `spin`, and why is kept for an error.
-    pub(crate) fn note_termination(&mut self, bindings: &[(Sym, TyId, ExpId)]) {
-        if let Err(why) = self.termination(bindings) {
+    pub(crate) fn note_termination(&mut self, bindings: &[(Sym, TyId, ExpId)]) -> Result<(), String> {
+        let ends = self.termination(bindings);
+        self.note_ending(bindings, &ends);
+        ends
+    }
+
+    /// The group `bindings` noted as [`note_termination`](Self::note_termination)
+    /// notes it, whether it ends found already (`ends`): at other types of
+    /// the same procedures, as `->*` and `define*` find them, it is the same.
+    pub(crate) fn note_ending(&mut self, bindings: &[(Sym, TyId, ExpId)], ends: &Result<(), String>) {
+        if let Err(why) = ends {
             for (n, t, _) in bindings {
                 self.recursive.push((*n, *t));
                 self.spin_why.push(((*n, *t), why.clone()));
@@ -4539,4 +4583,58 @@ impl std::ops::Deref for Bindings {
     fn deref(&self) -> &[(Sym, TyId)] {
         &self.list
     }
+}
+
+/// The strongly connected components of the graph `refs` (each node's
+/// successors), each sorted, callees first: Tarjan's, from each node in
+/// order, its successors in order. As the checker written in FX-26's
+/// `k-components`.
+pub(crate) fn components(refs: &[Vec<usize>]) -> Vec<Vec<usize>> {
+    struct Walk<'a> {
+        refs: &'a [Vec<usize>],
+        index: Vec<Option<usize>>,
+        low: Vec<usize>,
+        on: Vec<bool>,
+        stack: Vec<usize>,
+        next: usize,
+        out: Vec<Vec<usize>>,
+    }
+    fn go(w: &mut Walk, v: usize) {
+        w.index[v] = Some(w.next);
+        w.low[v] = w.next;
+        w.next += 1;
+        w.stack.push(v);
+        w.on[v] = true;
+        for k in 0..w.refs[v].len() {
+            let u = w.refs[v][k];
+            match w.index[u] {
+                None => {
+                    go(w, u);
+                    w.low[v] = w.low[v].min(w.low[u]);
+                }
+                Some(iu) if w.on[u] => w.low[v] = w.low[v].min(iu),
+                Some(_) => {}
+            }
+        }
+        if w.index[v] == Some(w.low[v]) {
+            let mut comp = Vec::new();
+            while let Some(u) = w.stack.pop() {
+                w.on[u] = false;
+                comp.push(u);
+                if u == v {
+                    break;
+                }
+            }
+            comp.sort_unstable();
+            w.out.push(comp);
+        }
+    }
+    let n = refs.len();
+    let mut w = Walk { refs, index: vec![None; n], low: vec![0; n], on: vec![false; n], stack: Vec::new(), next: 0, out: Vec::new() };
+    for v in 0..n {
+        if w.index[v].is_none() {
+            go(&mut w, v);
+        }
+    }
+    w.out
 }

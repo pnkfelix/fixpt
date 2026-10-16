@@ -106,6 +106,8 @@
    (val k-shared-name? (subr (read @globals) (symbol) bool))
    (val k-lookup-raw (subr (maxeff (read @globals) (read @t) spin) (symbol) int))
    (val k-mark (subr (maxeff (read @globals) (read @t)) () int))
+   (val k-rebind
+        (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (symbol int) unit))
    (val k-unbind-to
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (int) unit))
    (val k-note-known

@@ -20,6 +20,16 @@
 (define-type k-lambda-synth (subr (maxeff checks spin) (kx k-ids int) k-te))
 (define-type k-eff-list (listof k-eff acyclic))
 (define-type k-bools (listof bool acyclic))
+;; Tarjan's walk (`k-components`): each node's index and low link (-1 not
+;; seen yet), whether it is on the stack, the stack, the next index, and
+;; the components found, newest first.
+(define-type k-walk
+  (productof (1 (arrayof int @t)) (2 (arrayof int @t)) (3 (arrayof bool @t)) (4 (ref k-ids @t))
+             (5 (ref int @t)) (6 (ref k-idss @t))))
+;; What the walk does.
+(define-effect k-walks (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin))
+;; Why each group noted may not end (`k-spin-why`).
+(define-type k-whys (listof (productof (1 symbol) (2 int) (3 string)) acyclic))
 
 ;;; ------------------------------------------------------------ signatures
 

@@ -141,23 +141,16 @@
                (a-read (r) (tagcase r (r-global (g) (k-has-name? ns g)) (else y #f)))
                (else y #f))
              (k-reads-one-of? ns (cdr e))))))
-;; Each of `bs`'s own effect: one typed `->*`, found from its `lambda` by
-;; `synth`, the group's calls of each other standing for nothing more;
-;; another's, its type's.
-(define* k-arrow-star-owns (subr (maxeff checks spin) (k-lambda-synth k-letrec-bs) k-eff-list)
-  (lambda (synth bs)
-    (if (null? bs)
-        nil
-        (let* ((t (extract (car bs) 2))
-               (x (extract (car bs) 3))
-               (own (cond ((not (k-arrow-star-ty? t))
-                           (let ((l (k-latent-of t))) (if (null? l) (the k-eff nil) (car l))))
-                          ((tagcase x (x-lambda (ps body a b abk) #t) (else y #f))
-                           (k-arrow-star-latent synth t x))
-                          (else (k-fail (string-append "`->*` finds a procedure's effect from its "
-                                                       "`lambda`: define it as one")
-                                        (k-start x) (k-end x))))))
-          (the k-eff-list (cons own (k-arrow-star-owns synth (cdr bs))))))))
+;; An error at the first of `bs` typed `->*` that is not a `lambda`.
+(define k-arrow-star-lambdas (subr checks (k-letrec-bs) unit)
+  (lambda (bs)
+    (cond ((null? bs) #u)
+          ((and (k-arrow-star-ty? (extract (car bs) 2))
+                (not (tagcase (extract (car bs) 3) (x-lambda (ps body a b abk) #t) (else y #f))))
+           (k-fail (string-append "`->*` finds a procedure's effect from its `lambda`: "
+                                  "define it as one")
+                   (k-start (extract (car bs) 3)) (k-end (extract (car bs) 3))))
+          (else (k-arrow-star-lambdas (cdr bs))))))
 (define k-bs-names (subr (read @globals) (k-letrec-bs) k-names)
   (lambda (bs) (if (null? bs) nil (the k-names (cons (extract (car bs) 1) (k-bs-names (cdr bs)))))))
 ;; Whether each of `bs` is polymorphic: its effect says its own binders.
@@ -182,51 +175,197 @@
         nil
         (the k-idss (cons (k-indexes-in ns (k-free-into (extract (car bs) 3) nil nil) 0)
                           (k-group-refs (cdr bs) ns))))))
-(define k-ids-onto (subr (read @globals) (k-ids k-ids) k-ids)
-  (lambda (xs ys) (if (null? xs) ys (the k-ids (cons (car xs) (k-ids-onto (cdr xs) ys))))))
-;; The members reached from `todo` through `refs`, onto `seen`.
-(define* k-reach (subr (maxeff (read @t) spin) (k-idss k-ids k-ids) k-ids)
-  (lambda (refs todo seen)
-    (cond ((null? todo) seen)
-          ((k-has-id? seen (car todo)) (k-reach refs (cdr todo) seen))
-          (else (k-reach refs (k-ids-onto (k-nth refs (car todo)) (cdr todo))
-                         (the k-ids (cons (car todo) seen)))))))
-;; The effects of the members `js`, `i` itself and those not polymorphic.
-(define* k-reached-effect (subr (maxeff kstate spin) (k-eff-list k-bools k-ids int) k-eff)
-  (lambda (owns polys js i)
-    (cond ((null? js) nil)
-          ((or (= (car js) i) (not (k-nth polys (car js))))
-           (k-union (k-nth owns (car js)) (k-reached-effect owns polys (cdr js) i)))
-          (else (k-reached-effect owns polys (cdr js) i)))))
-;; Each of `bs`, from the `i`th, at its type found: one typed `->*`, with
-;; the effects of the members it reaches, and `spin` if that reads one's
-;; global.
-(define* k-arrow-star-each
-  (subr (maxeff kstate spin) (k-letrec-bs k-eff-list k-idss k-bools k-names int) k-letrec-bs)
-  (lambda (bs owns refs polys ns i)
+
+;; The strongly connected components of the graph `refs` (each node's
+;; successors), each sorted, callees first: Tarjan's, from each node in
+;; order, its successors in order, as the Rust checker's `components`.
+(define* k-components (subr k-walks (k-idss) k-idss)
+  (lambda (refs)
+    (let* ((n (k-length refs))
+           (w (product (1 (the (arrayof int @t) (make-array n -1)))
+                       (2 (the (arrayof int @t) (make-array n 0)))
+                       (3 (the (arrayof bool @t) (make-array n #f)))
+                       (4 (the (ref k-ids @t) (new nil)))
+                       (5 (the (ref int @t) (new 0)))
+                       (6 (the (ref k-idss @t) (new nil))))))
+      (begin (k-components-from refs w 0 n) (k-idss-reversed (get (extract w 6)) nil)))))
+(define* k-components-from (subr k-walks (k-idss k-walk int int) unit)
+  (lambda (refs w v n)
+    (if (>= v n)
+        #u
+        (begin (if (< (array-ref (extract w 1) v) 0) (k-tarjan refs w v) #u)
+               (k-components-from refs w (+ v 1) n)))))
+(define-rec
+  (k-tarjan (subr k-walks (k-idss k-walk int) unit)
+    (lambda (refs w v)
+      (let ((next (extract w 5)) (stack (extract w 4)))
+        (begin
+          (array-set! (extract w 1) v (get next))
+          (array-set! (extract w 2) v (get next))
+          (set next (+ (get next) 1))
+          (set stack (the k-ids (cons v (get stack))))
+          (array-set! (extract w 3) v #t)
+          (k-tarjan-next refs w v (k-nth refs v))
+          (if (= (array-ref (extract w 1) v) (array-ref (extract w 2) v))
+              (set (extract w 6)
+                   (the k-idss (cons (k-ids-sorted (k-tarjan-pop w v nil) nil)
+                                     (get (extract w 6)))))
+              #u)))))
+  (k-tarjan-next (subr k-walks (k-idss k-walk int k-ids) unit)
+    (lambda (refs w v us)
+      (if (null? us)
+          #u
+          (let ((u (car us)) (low (extract w 2)))
+            (begin
+              (cond ((< (array-ref (extract w 1) u) 0)
+                     (begin (k-tarjan refs w u)
+                            (array-set! low v (min (array-ref low v) (array-ref low u)))))
+                    ((array-ref (extract w 3) u)
+                     (array-set! low v (min (array-ref low v) (array-ref (extract w 1) u))))
+                    (else #u))
+              (k-tarjan-next refs w v (cdr us))))))))
+;; The stack of `w` popped down to `v`, onto `acc`.
+(define* k-tarjan-pop (subr k-walks (k-walk int k-ids) k-ids)
+  (lambda (w v acc)
+    (let* ((stack (extract w 4)) (u (car (get stack))))
+      (begin (set stack (cdr (get stack)))
+             (array-set! (extract w 3) u #f)
+             (if (= u v) (the k-ids (cons u acc)) (k-tarjan-pop w v (the k-ids (cons u acc))))))))
+;; `xs` sorted, onto `acc` (sorted).
+(define k-ids-sorted (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-ids k-ids) k-ids)
+  (lambda (xs acc) (if (null? xs) acc (k-ids-sorted (cdr xs) (k-id-inserted (car xs) acc)))))
+(define k-id-inserted (subr (maxeff (read @globals) (read @t) (alloc @t)) (int k-ids) k-ids)
+  (lambda (x xs)
+    (if (or (null? xs) (<= x (car xs)))
+        (the k-ids (cons x xs))
+        (the k-ids (cons (car xs) (k-id-inserted x (cdr xs)))))))
+(define k-idss-reversed (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-idss k-idss) k-idss)
+  (lambda (xs acc) (if (null? xs) acc (k-idss-reversed (cdr xs) (the k-idss (cons (car xs) acc))))))
+
+;; `ns` with each `(n . old)` `(n . new)`.
+(define k-named-retyped (subr (maxeff kreads (alloc @t)) (k-named symbol int int) k-named)
+  (lambda (ns n old new)
+    (cond ((null? ns) ns)
+          ((and (symbol=? (car (car ns)) n) (= (cdr (car ns)) old))
+           (the k-named (cons (cons n new) (k-named-retyped (cdr ns) n old new))))
+          (else (the k-named (cons (car ns) (k-named-retyped (cdr ns) n old new)))))))
+(define k-whys-retyped (subr (maxeff kreads (alloc @t)) (k-whys symbol int int) k-whys)
+  (lambda (ws n old new)
+    (cond ((null? ws) ws)
+          ((and (symbol=? (extract (car ws) 1) n) (= (extract (car ws) 2) old))
+           (the k-whys (cons (product (1 n) (2 new) (3 (extract (car ws) 3)))
+                             (k-whys-retyped (cdr ws) n old new))))
+          (else (the k-whys (cons (car ws) (k-whys-retyped (cdr ws) n old new)))))))
+;; Member `n`, of type `old`, given type `new`: bound so, and a call of it
+;; still recursion where its group's is.
+(define k-arrow-star-retyped (subr (maxeff kstate spin) (symbol int int) unit)
+  (lambda (n old new)
+    (begin (k-rebind n new)
+           (set k-recursive (k-named-retyped (get k-recursive) n old new))
+           (set k-spin-why (k-whys-retyped (get k-spin-why) n old new)))))
+
+;; Whether any of the members `comp` is typed `->*`, `ts` their types.
+(define k-comp-starred? (subr (maxeff (read @globals) (read @t)) (k-ids (arrayof int @t)) bool)
+  (lambda (comp ts)
+    (and (not (null? comp))
+         (or (k-arrow-star-ty? (array-ref ts (car comp))) (k-comp-starred? (cdr comp) ts)))))
+;; Each of the members `comp`'s own effect: one typed `->*` (`marks`),
+;; found from its `lambda` by `synth` at its type in `ts`; another's, its
+;; type's.
+(define* k-comp-owns
+  (subr (maxeff checks spin) (k-lambda-synth k-letrec-bs k-bools (arrayof int @t) k-ids) k-eff-list)
+  (lambda (synth bs marks ts comp)
+    (if (null? comp)
+        nil
+        (let* ((i (car comp))
+               (t (array-ref ts i))
+               (own (if (k-nth marks i)
+                        (k-arrow-star-latent synth t (extract (k-nth bs i) 3))
+                        (let ((l (k-latent-of t))) (if (null? l) (the k-eff nil) (car l)))))
+               (rest (k-comp-owns synth bs marks ts (cdr comp))))
+          (the k-eff-list (cons own rest))))))
+;; The effects `owns` of members `comp`: `i`'s and those of the others not
+;; polymorphic (`polys`).
+(define* k-comp-effect (subr (maxeff kstate spin) (k-ids k-eff-list k-bools int) k-eff)
+  (lambda (comp owns polys i)
+    (cond ((null? comp) nil)
+          ((or (= (car comp) i) (not (k-nth polys (car comp))))
+           (k-union (car owns) (k-comp-effect (cdr comp) (cdr owns) polys i)))
+          (else (k-comp-effect (cdr comp) (cdr owns) polys i)))))
+;; Each of the members `rest` of `comp` typed `->*` given its type found:
+;; the effects of its component, and `spin` if that reads a member's
+;; global (of `ns`).
+(define* k-comp-found
+  (subr (maxeff kstate spin) (k-ids k-ids k-eff-list k-bools k-bools k-names (arrayof int @t)) unit)
+  (lambda (rest comp owns marks polys ns ts)
+    (if (null? rest)
+        #u
+        (let ((i (car rest)))
+          (begin
+            (if (k-nth marks i)
+                (let* ((e (k-comp-effect comp owns polys i))
+                       (e (if (k-reads-one-of? ns e) (k-insert (a-spin) e) e))
+                       (old (array-ref ts i))
+                       (found (k-with-latent old e)))
+                  (begin (k-arrow-star-retyped (k-nth ns i) old found) (array-set! ts i found)))
+                #u)
+            (k-comp-found (cdr rest) comp owns marks polys ns ts))))))
+;; Each of components `comps` with a member typed `->*`, in order.
+(define* k-comps-found
+  (subr (maxeff checks spin)
+        (k-lambda-synth k-letrec-bs k-bools k-bools k-names (arrayof int @t) k-idss)
+        unit)
+  (lambda (synth bs marks polys ns ts comps)
+    (if (null? comps)
+        #u
+        (begin
+          (if (k-comp-starred? (car comps) ts)
+              (let ((owns (k-comp-owns synth bs marks ts (car comps))))
+                (k-comp-found (car comps) (car comps) owns marks polys ns ts))
+              #u)
+          (k-comps-found synth bs marks polys ns ts (cdr comps))))))
+(define k-bs-marks (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-letrec-bs) k-bools)
+  (lambda (bs)
     (if (null? bs)
         nil
-        (let* ((b (car bs))
-               (t (extract b 2))
-               (found (if (k-arrow-star-ty? t)
-                          (let* ((e (k-reached-effect owns polys (k-reach refs (cons i nil) nil) i))
-                                 (e (if (k-reads-one-of? ns e) (k-insert (a-spin) e) e)))
-                            (k-with-latent t e))
-                          t))
-               (rest (k-arrow-star-each (cdr bs) owns refs polys ns (+ i 1))))
-          (the k-letrec-bs (cons (product (1 (extract b 1)) (2 found) (3 (extract b 3))) rest))))))
+        (the k-bools (cons (k-arrow-star-ty? (extract (car bs) 2)) (k-bs-marks (cdr bs)))))))
+;; The types of `bs` into `ts`, from `i`.
+(define k-bs-types
+  (subr (maxeff (read @globals) (read @t) (write @t)) (k-letrec-bs (arrayof int @t) int) unit)
+  (lambda (bs ts i)
+    (if (null? bs)
+        #u
+        (begin (array-set! ts i (extract (car bs) 2)) (k-bs-types (cdr bs) ts (+ i 1))))))
+;; `bs`, from the `i`th, at the types `ts`.
+(define k-bs-at
+  (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-letrec-bs (arrayof int @t) int)
+        k-letrec-bs)
+  (lambda (bs ts i)
+    (if (null? bs)
+        nil
+        (let ((b (car bs)))
+          (the k-letrec-bs (cons (product (1 (extract b 1)) (2 (array-ref ts i)) (3 (extract b 3)))
+                                 (k-bs-at (cdr bs) ts (+ i 1))))))))
 ;; Group `bs`, with members typed `->*`, bound and its termination noted,
-;; at the types found: each such member's own effect found from its
-;; `lambda` in one pass (`synth`), the group's calls of each other standing
-;; for nothing more; then each one's with the effects of every member it
-;; reaches through the group's references (but a polymorphic one's, which
-;; say its own binders), and `spin` if that reads a member's global, as
-;; `k-no-reaching-itself` asks. The group is checked again at these types,
-;; which refuses what they leave out.
+;; at the types found, as the Rust checker's `arrow_star_group`: its
+;; components taken callees first (`k-components`), each such member's
+;; own effect found from its `lambda` in one pass (`synth`), told the types
+;; found of the members it names outside its component, its component's
+;; calls of each other standing for nothing more; then each one's with the
+;; effects of the rest of its component (but a polymorphic one's), and
+;; `spin` if that reads a member's global; its binding given the type
+;; found, a call of it still recursion where the group's is. The group is
+;; checked again at these types, which refuses what they leave out.
 (define* k-arrow-star-found (subr (maxeff checks spin) (k-lambda-synth k-letrec-bs) k-letrec-bs)
   (lambda (synth bs)
-    (let* ((owns (k-arrow-star-owns synth bs)) (ns (k-bs-names bs)))
-      (k-arrow-star-each bs owns (k-group-refs bs ns) (k-bs-polys bs) ns 0))))
+    (begin
+      (k-arrow-star-lambdas bs)
+      (let* ((ns (k-bs-names bs))
+             (ts (the (arrayof int @t) (make-array (k-length bs) -1)))
+             (filled (k-bs-types bs ts 0)))
+        (begin (k-comps-found synth bs (k-bs-marks bs) (k-bs-polys bs) ns ts
+                              (k-components (k-group-refs bs ns)))
+               (k-bs-at bs ts 0))))))
 (define k-any-arrow-star? (subr (maxeff (read @globals) (read @t)) (k-letrec-bs) bool)
   (lambda (bs)
     (and (not (null? bs))

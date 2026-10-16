@@ -724,9 +724,7 @@ impl Checker {
                 }
                 // A lambda whose every run ends needs no `spin`.
                 let rdepth = self.recursive.len();
-                if recursive {
-                    self.note_termination(&[(name, ty, e)]);
-                }
+                let ends = if recursive { self.note_termination(&[(name, ty, e)]) } else { Ok(()) };
                 // A generative type's own `up-` and `down-` see inside it.
                 let inside = self.inside.iter().position(|(n, _)| *n == name).map(|i| self.inside.remove(i).1);
                 if let Some(g) = inside {
@@ -736,9 +734,13 @@ impl Checker {
                 // and its effect found, with a call of itself standing for
                 // nothing more: that effect already holds what such a call
                 // does, so it is the least the procedure can have.
+                let mut lt = None;
                 let checked = match star {
                     false => self.check_declared(name, ty, e),
-                    true => self.arrow_star_latent(ty, e),
+                    true => self.arrow_star_latent(ty, e).map(|(t, latent)| {
+                        lt = Some(t);
+                        latent
+                    }),
                 };
                 // With `define*`, the globals the body read, found, are its
                 // type's; and it is checked again at that type, bound to it,
@@ -753,8 +755,14 @@ impl Checker {
                         let at = self.env.len() - 1;
                         self.env.set_ty(at, found);
                         self.recursive.truncate(rdepth);
-                        self.note_termination(&[(name, found, e)]);
-                        let again = self.check_declared(name, found, e).map_err(|err| {
+                        self.note_ending(&[(name, found, e)], &ends);
+                        // One that names not itself saw no placeholder.
+                        let settled = lt.filter(|_| self.holes.is_none() && !self.free_vars(e).contains(&name));
+                        let again = match settled {
+                            Some(lt) => self.arrow_star_settled(e, lt, found),
+                            None => self.check_declared(name, found, e),
+                        };
+                        let again = again.map_err(|err| {
                             let shown = self.show_ty(found);
                             let how = if star { "`->*`" } else { "`define*`" };
                             FxError::at(err.span, format!("{how} found `{}` to be a {shown}: {}", self.interner.name(name), err.message))
@@ -812,17 +820,34 @@ impl Checker {
 
     /// The latent effect of `e`, a `lambda`, told the parameters and result
     /// of `ty`, a `subr` under any `poly`s, whose binders are in scope.
-    pub(crate) fn arrow_star_latent(&mut self, ty: TyId, e: crate::ast::ExpId) -> R<Effect> {
-        let mut t = self.arena.resolve(ty);
-        while let crate::ast::Ty::Poly { body, .. } = self.arena.get(t) {
-            t = self.arena.resolve(*body);
-        }
+    pub(crate) fn arrow_star_latent(&mut self, ty: TyId, e: crate::ast::ExpId) -> R<(TyId, Effect)> {
+        let t = self.under_polys(ty);
         let crate::ast::Ty::Subr { params, result, .. } = self.arena.get(t).clone() else { unreachable!("`->*` reads as a `subr`") };
         let (lt, _) = self.synth_lambda_as(e, Some(&params), Some(result))?;
         match self.arena.get(self.arena.resolve(lt)) {
-            crate::ast::Ty::Subr { effect, .. } => Ok(effect.clone()),
+            crate::ast::Ty::Subr { effect, .. } => Ok((lt, effect.clone())),
             _ => unreachable!("a `lambda`'s type"),
         }
+    }
+
+    /// `t` under any `poly`s.
+    fn under_polys(&self, t: TyId) -> TyId {
+        let mut t = self.arena.resolve(t);
+        while let crate::ast::Ty::Poly { body, .. } = self.arena.get(t) {
+            t = self.arena.resolve(*body);
+        }
+        t
+    }
+
+    /// `e`, a `lambda` of type `lt` whose effect `->*` found in a pass that
+    /// saw no placeholder (it names no member typed `->*`, itself
+    /// included), checked at `found`: that pass was its check, so what a
+    /// check of it notes is noted, and nothing is checked again.
+    pub(crate) fn arrow_star_settled(&mut self, e: crate::ast::ExpId, lt: TyId, found: TyId) -> R<Effect> {
+        let want = self.under_polys(found);
+        self.expect(e, lt, want)?;
+        self.facts.effects.insert(e, Effect::pure());
+        Ok(Effect::pure())
     }
 
     /// `t`, a `subr` under any `poly`s, with `extra` in its latent effect;
@@ -895,18 +920,22 @@ impl Checker {
                 bindings.push((name, ty, e));
             }
             // A group whose every run ends needs no `spin`.
-            self.note_termination(&bindings);
+            let ends = self.note_termination(&bindings);
             // With `->*`, the group at the types found.
+            let mut settled = Vec::new();
             if marked.contains(&true) {
-                bindings = self.arrow_star_group(&bindings, &marked)?;
+                (bindings, settled) = self.arrow_star_group(&bindings, &marked, depth)?;
                 for (i, (_, t, _)) in bindings.iter().enumerate() {
                     self.env.set_ty(depth + i, *t);
                 }
                 self.recursive.truncate(rdepth);
-                self.note_termination(&bindings);
+                self.note_ending(&bindings, &ends);
             }
-            for (name, ty, e) in &bindings {
-                self.check_declared(*name, *ty, *e)?;
+            for (i, (name, ty, e)) in bindings.iter().enumerate() {
+                match settled.get(i) {
+                    Some(Some(lt)) => self.arrow_star_settled(*e, *lt, *ty).map_err(|err| self.declared_error(*name, *ty, *e, err))?,
+                    _ => self.check_declared(*name, *ty, *e)?,
+                };
             }
             Ok(Top::DefineRec { bindings, assigns: false })
         })();

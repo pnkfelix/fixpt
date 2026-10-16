@@ -218,6 +218,9 @@
       (set k-trail (cons s (get k-trail)))
       (set k-depth (+ (get k-depth) 1)))))
 (define k-mark (subr (maxeff (read @globals) (read @t)) () int) (lambda () (get k-depth)))
+;; `s`'s innermost binding, now of type `t`.
+(define k-rebind (subr (maxeff kstate spin) (symbol int) unit)
+  (lambda (s t) (table-set! (get k-env) s (cons t (cdr (table-ref (get k-env) s nil))))))
 (define k-unbind-to (subr (maxeff kstate spin) (int) unit)
   (lambda (m)
     (if (<= (get k-depth) m)

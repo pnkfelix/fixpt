@@ -452,27 +452,30 @@ impl Checker {
         // With `->*`, every such lambda's effect found before any lambda is
         // checked, each recursive group with one noted as `define-rec`'s is
         // (`arrow_star_group`).
+        // Whether each group may not end, and why: found once, for its first
+        // member (the group being the same for each of its members).
+        let mut ends: Vec<Option<Result<(), String>>> = vec![None; lambdas.len()];
+        let mut settled = Vec::new();
         if marked.contains(&true) {
             let rdepth = self.recursive.len();
-            for g in &groups {
-                if g.iter().any(|m| marked[*m]) {
-                    let group: Vec<(Sym, TyId, ExpId)> = g.iter().map(|m| (lambdas[*m].0, lambdas[*m].1, lambdas[*m].2)).collect();
-                    self.note_termination(&group);
+            for k in 0..lambdas.len() {
+                if groups[k].first() == Some(&k) && groups[k].iter().any(|m| marked[*m]) {
+                    let group: Vec<(Sym, TyId, ExpId)> = groups[k].iter().map(|m| (lambdas[*m].0, lambdas[*m].1, lambdas[*m].2)).collect();
+                    ends[k] = Some(self.note_termination(&group));
                 }
             }
             let all: Vec<(Sym, TyId, ExpId)> = lambdas.iter().map(|l| (l.0, l.1, l.2)).collect();
-            let found = self.arrow_star_group(&all, &marked);
+            let found = self.arrow_star_group(&all, &marked, base);
             self.recursive.truncate(rdepth);
-            for (k, (_, t, _)) in found?.into_iter().enumerate() {
+            let (found, s) = found?;
+            settled = s;
+            for (k, (_, t, _)) in found.into_iter().enumerate() {
                 if marked[k] {
                     lambdas[k].1 = t;
                     self.env.set_ty(base + k, t);
                 }
             }
         }
-        // Whether each group may not end, and why: found once, for its first
-        // member (the group being the same for each of its members).
-        let mut ends: Vec<Option<Result<(), String>>> = vec![None; lambdas.len()];
         for k in 0..lambdas.len() {
             let (n, t, init, i) = lambdas[k];
             let group: Vec<(Sym, TyId, ExpId)> = groups[k].iter().map(|g| (lambdas[*g].0, lambdas[*g].1, lambdas[*g].2)).collect();
@@ -495,10 +498,12 @@ impl Checker {
                     }
                 }
             }
-            let r = match items[i] {
-                ModItem::Rec(_) => self.check(init, t).map_err(|err| self.declared_error(n, t, init, err)),
+            let rec = matches!(items[i], ModItem::Rec(_));
+            let r = match settled.get(k) {
+                Some(Some(lt)) => self.arrow_star_settled(init, *lt, t),
                 _ => self.check(init, t),
             };
+            let r = if rec { r.map_err(|err| self.declared_error(n, t, init, err)) } else { r };
             self.recursive.truncate(rdepth);
             eff = eff.union(&r?);
             typed.push((i, n, t));

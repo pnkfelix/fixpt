@@ -5,6 +5,11 @@
 (define inc (-> (int) int) (lambda (x) (+ x 1)))
 (define-rec (ev? (->* (nat) bool) (lambda (n) (if (= n 0) #t (od? (- n 1)))))
             (od? (->* (nat) bool) (lambda (n) (if (= n 0) #f (ev? (- n 1))))))
+; `get-noisy` names `noisy` but does not call it: it takes `noisy`'s type
+; found, not its effect (which says what calling it does), and reads the
+; global, a member's, so `spin`.
+(define-rec (noisy (->* (int) int) (lambda (k) (inc k)))
+            (get-noisy (->* () (subr (read (globals inc)) (int) int)) (lambda () noisy)))
 ; Ends, and calls no global: pure.
 (define total (->* (nat) int)
   (lambda (n)
@@ -26,4 +31,4 @@
 ; May not end: `spin`.
 (define loops (->* (int) int)
   (lambda (n) (letrec ((on (->* (int) int) (lambda (k) (if (= k 0) 0 (on (+ k 1)))))) (on n))))
-(+ (if (ev? 4) (total 4) 0) (parts 3))
+(+ (if (ev? 4) (total 4) 0) (+ (parts 3) ((get-noisy) 0)))
