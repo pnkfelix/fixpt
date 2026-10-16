@@ -1588,9 +1588,9 @@ impl<'a> Compiler<'a> {
     /// position in `%include`, to be bound once where the module is made,
     /// after `%include`, as an import line's were; and those `with`s, which
     /// then bind nothing, so that a lambda captures the names it uses rather
-    /// than loading each from `%include` at every call. A `with` whose
-    /// lambda has a parameter of a name it binds keeps its own: there the
-    /// `with`, inside, wins.
+    /// than loading each from `%include` at every call. A parameter of the
+    /// item's lambda shadows them, and its `with` binds none of its names
+    /// (`Checker::with_as`).
     fn included_names(&self, items: &[ModItem]) -> (Vec<(Sym, usize)>, Vec<ExpId>) {
         let (mut names, mut withs): (Vec<(Sym, usize)>, Vec<ExpId>) = (Vec::new(), Vec::new());
         let Some(ModItem::Val { name: inc, .. }) = items.first() else { return (names, withs) };
@@ -1604,11 +1604,8 @@ impl<'a> Compiler<'a> {
                 ModItem::Abs { .. } | ModItem::Desc { .. } => Vec::new(),
             };
             for x in inits {
-                let Some((w, params)) = self.include_with(x, *inc, &[]) else { continue };
+                let Some(w) = self.include_with(x, *inc) else { continue };
                 let Some(used) = self.c.facts.with_vals.get(&w) else { continue };
-                if used.iter().any(|(n, _)| params.contains(n)) {
-                    continue;
-                }
                 for u in used {
                     if !names.iter().any(|(n, _)| *n == u.0) {
                         names.push(*u);
@@ -1620,16 +1617,13 @@ impl<'a> Compiler<'a> {
         (names, withs)
     }
 
-    /// The `(with inc …)` `with_includes` put in item value `x`, and the
-    /// parameters of the lambda it is the body of.
-    fn include_with(&self, x: ExpId, inc: Sym, params: &[Sym]) -> Option<(ExpId, Vec<Sym>)> {
+    /// The `(with inc …)` `with_includes` put in item value `x`.
+    fn include_with(&self, x: ExpId, inc: Sym) -> Option<ExpId> {
         match *self.exp_at(x) {
-            Exp::With { module, .. } if module == inc => Some((x, params.to_vec())),
-            Exp::Lambda { ref params, body } => {
-                let ps: Vec<Sym> = params.iter().map(|(n, _)| *n).collect();
-                self.include_with(body, inc, &ps)
+            Exp::With { module, .. } if module == inc => Some(x),
+            Exp::Lambda { body, .. } | Exp::PLambda { body, .. } | Exp::The { exp: body, .. } | Exp::RLambda { lambda: body, .. } => {
+                self.include_with(body, inc)
             }
-            Exp::PLambda { body, .. } | Exp::The { exp: body, .. } | Exp::RLambda { lambda: body, .. } => self.include_with(body, inc, params),
             _ => None,
         }
     }

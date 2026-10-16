@@ -1633,9 +1633,7 @@ FX-26 compiler's `c-note-included!`, `c-included?`): in the cellular
 code, the register code and the plan, of both compilers, which make the
 same words. From outside an item (`%include` bound there) such a `with`
 still reads as one that binds its names, so a walk for free names needs
-no list of them. An item whose lambda has a parameter of an included
-name keeps its own `with`, which there binds over the parameter (as
-before: a bug, `TODO.md` §69). Measured side by side, best of 3, three
+no list of them. Measured side by side, best of 3, three
 rounds alternated, load averages about 2: peval's `fx check` 20.5 →
 19.8 ms, `fx words` 12.9 → 12.1; the front end checking itself, on the
 same input (the old Rust compiler with the new FX-26 files), `fx check`
@@ -1644,6 +1642,20 @@ such modules: each name a lambda captures is looked up in its
 environment, a list, past the module's items; so against the old files
 too, the front end's `fx words` 702 → 706 (and `fx check` 2550 → 2500).
 Found with it: `DONE.md` §104. Test: `modules/include-bound-once.fx`.
+**A parameter shadows an included name** (2026-10-16, found with the
+last). `(define f T (lambda (x) (+ x y)))`, in a module including one
+with a value `x`, added the included `x`, not its argument: the item's
+`(with %include …)` is inside its lambda (`with_includes`, so that the
+item stays a lambda), where it bound over the parameter, in both
+checkers, so on every machine; a parameter of another type was refused.
+An included value is the module's, as its own items are (a name both
+give is an error), so the parameter wins: a `with` of `%include` binds
+none of the names bound since `%include` was (`Checker::with_as`,
+`k-include-free`), so its facts leave them out and every compiler binds
+the parameter. The compilers no longer leave such an item's `with` alone
+(`included_names`, `c-include-with`). Tests:
+`modules/include-bound-once.fx` (1366, not 367),
+`include-param-shadows.fx`.
 
 ## 71. A load cycle is an error, not a hang (2026-10-10)
 

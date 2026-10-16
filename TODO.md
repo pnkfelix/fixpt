@@ -1745,17 +1745,6 @@ is). Left:
 - Done (2026-10-11): an included type family applied in a declared
   type (`DONE.md` §69). Left: the front end's files that kept
   table-types's import lines for it could now include it.
-- An included name shadows a parameter of the same name (found
-  2026-10-16): `(define f T (lambda (x) (+ x y)))` in a module that
-  includes one with a value `x` adds the included `x`, not its argument,
-  since `with_includes` puts the item's `(with %include …)` inside the
-  lambda, where it binds over the parameter; both checkers type it so,
-  and every machine runs it so (`modules/include-bound-once.fx` records
-  it: 21, not 1020). An included value is the module's, as its own items
-  are, so the parameter should win: the `with` binding only the names no
-  parameter has (in both checkers' `with` facts and both parsers), after
-  which such an item's names can be bound at the module as the others'
-  are (`included_names`, which leaves its `with` alone for now).
 
 If `extend` is ever n-ary, `(extend m1 m2 m3)` should be a left fold (the
 later wins), not "all at once", which would blur it and `include` together:

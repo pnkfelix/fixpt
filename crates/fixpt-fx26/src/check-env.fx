@@ -112,6 +112,21 @@
 (define k-bound-since? (->* (symbol int) bool)
   (lambda (s mark)
     (let ((ds (table-ref (get k-depths) s nil))) (and (not (null? ds)) (>= (car ds) mark)))))
+;; Of names `ns`, those whose innermost binding is older than `mark`.
+(define k-bound-before (->* (k-names int) k-names)
+  (lambda (ns mark)
+    (cond ((null? ns) nil)
+          ((k-bound-since? (car ns) mark) (k-bound-before (cdr ns) mark))
+          (else (the k-names (cons (car ns) (k-bound-before (cdr ns) mark)))))))
+;; `free`, the names a `(with m …)`'s body uses, less those bound since `m`
+;; is, where `m` is `%include`: an include's names are the module's own,
+;; and the item's lambda's parameter shadows them (`TODO.md` §69).
+(define k-include-free (->* (symbol k-names) k-names)
+  (lambda (m free)
+    (let ((ds (table-ref (get k-depths) m nil)))
+      (if (or (null? ds) (not (symbol=? m '%include)))
+          free
+          (k-bound-before free (+ (car ds) 1))))))
 ;; The type a test narrowed binding `d` of `s` to (the innermost), or `t`.
 (define k-narrowed-of (->* (k-narrows symbol int int) int)
   (lambda (ns s d t)

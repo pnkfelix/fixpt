@@ -145,6 +145,7 @@
    (val k-operator-mark (subr spin (kx) k-op-mark))
    (val k-fresh-region
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t)) (string) k-region))
+   (val k-include-free (subr (maxeff (read @t) (read @globals)) (symbol k-names) k-names))
    (val k-note-with
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t)) (k-with-noted) unit))
    (val k-env

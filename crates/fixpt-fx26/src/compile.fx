@@ -597,24 +597,20 @@
 (define c-included-index (ref c-with-table @k) (new (make-table c-int-hash c-int=?)))
 (define c-included? (->* (int int int) bool)
   (lambda (a b k) (not (null? (c-with-in (table-ref (get c-included-index) a nil) a b k)))))
-(define c-any-member? (->* (syms syms) bool)
-  (lambda (xs ns) (and (not (null? ns)) (or (c-member? xs (car ns)) (c-any-member? xs (cdr ns))))))
-;; Item value `x`'s `(with %include …)` (`with_includes`), in a list of one,
-;; if its module may bind the names it binds: none if a parameter of its
-;; lambda, `ps`, has one of them (the `with`, inside, wins there).
-(define c-include-with (->* (exp syms) exps)
-  (lambda (x ps)
+;; Item value `x`'s `(with %include …)` (`with_includes`), in a list of one.
+;; A parameter of its lambda shadows the included names, and the `with`
+;; binds none of its (`k-include-free`).
+(define c-include-with (->* (exp) exps)
+  (lambda (x)
     (tagcase x
       (e-with (m body a b abk)
-        (let ((ns (c-with-at a b abk)))
-          (if (and (string=? (symbol->string m) "%include")
-                   (and (not (null? ns)) (not (c-any-member? ps (car ns)))))
-              (the exps (cons x nil))
-              nil)))
-      (e-lambda (qs body a b abk) (c-include-with body (c-bind-params qs nil)))
-      (e-plambda (d body a b abk) (c-include-with body ps))
-      (e-the (d body a b abk) (c-include-with body ps))
-      (e-rlambda (r l a b abk) (c-include-with l ps))
+        (if (and (string=? (symbol->string m) "%include") (not (null? (c-with-at a b abk))))
+            (the exps (cons x nil))
+            nil))
+      (e-lambda (qs body a b abk) (c-include-with body))
+      (e-plambda (d body a b abk) (c-include-with body))
+      (e-the (d body a b abk) (c-include-with body))
+      (e-rlambda (r l a b abk) (c-include-with l))
       (else y nil))))
 ;; Names `ns` at positions `ps` onto `names` and `places`, newest first,
 ;; each not `seen` yet (by position: a name has one).
@@ -630,7 +626,7 @@
   (lambda (xs acc seen)
     (if (null? xs)
         acc
-        (let ((w (c-include-with (car xs) nil)))
+        (let ((w (c-include-with (car xs))))
           (c-included-exps
            (cdr xs)
            (if (null? w)

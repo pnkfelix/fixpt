@@ -608,7 +608,15 @@ impl Checker {
             };
             return Err(FxError::at(span, msg));
         };
-        let free = self.free_vars(body);
+        let mut free = self.free_vars(body);
+        // An include's names are the module's own, bound where `%include`
+        // is: one bound since (the item's lambda's parameter) shadows them
+        // (`TODO.md` §69).
+        if self.interner.name(m) == "%include"
+            && let Some(at) = self.env.rpos(m)
+        {
+            free.retain(|n| self.env.rpos(*n).is_none_or(|i| i < at));
+        }
         let used: Vec<(usize, (Sym, TyId))> = vals.iter().copied().enumerate().filter(|(_, (n, _))| free.contains(n)).collect();
         self.facts.with_vals.insert(e, used.iter().map(|(i, (n, _))| (*n, *i)).collect());
         let vals: Vec<(Sym, TyId)> = used.into_iter().map(|(_, v)| v).collect();

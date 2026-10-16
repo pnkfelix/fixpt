@@ -1,10 +1,9 @@
-;; => 367
+;; => 1366
 ;; The names a module's items use of the modules it includes, bound once
 ;; where it is made, after them (`TODO.md` §69): `g`'s lambdas capture `x`
 ;; and `double`; `inner` binds its own include's `x`, and the `y` it uses is
-;; the outer module's. Where a parameter has an included name (`f`'s `x`),
-;; the item keeps its own `with`, which names the included one: today the
-;; included `x` wins there (21, not 1020; `TODO.md` §69, to fix).
+;; the outer module's. A parameter of an included name (`f`'s `x`) shadows
+;; it (1020, not 21: `DONE.md` §69).
 (define a (module (define x int 1) (define y int 20)
                   (define double (subr pure (int) int) (lambda (n) (* 2 n)))))
 (define m
