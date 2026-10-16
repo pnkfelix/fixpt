@@ -2293,20 +2293,6 @@ frame slots, as the suffix. Left:
   A restore of adjacent frames by one copy needs them adjacent, which
   only the dropped run copy kept them. A trailer where a frame has a word
   to align it would not help `merge` (its frames have none).
-- **Raw `f64` arguments to a procedure compiled before** (found
-  2026-10-16, fixing `nbody`'s slots, `DONE.md` §91). A call passes raw
-  only to a callee known where it is compiled, and a global's procedure is
-  known only while its value is still cellular (`global_value`,
-  `closure_parts`): one a form before made native already is called
-  through its cell, its raw arguments boxed first. At the REPL and in
-  `eval`, each definition is made native as it is defined, so every call
-  from one top-level procedure to another defined earlier boxes its raw
-  `f64` arguments. In `nbody`, `advance` passing `dt` to `pairs`: about
-  10 M words of the run's remaining 10, and 0.08 s of 0.67. To know such
-  a callee, the native code would say which parameters it takes raw and
-  where its raw entry is; where that is kept (in the code bloblet, or by
-  compiling the callee again from its register word in the caller's
-  unit, as a cellular global is) is to decide.
 - **Raw `f64`s at more calls** (known calls done, `DONE.md` §91; the
   user's, 2026-10-13: no masks). A call passes `f64`s raw only to a
   procedure known where it is compiled; and a procedure takes a parameter
@@ -2544,3 +2530,4 @@ and are not listed. From now on, a bench taken with a 1-minute load
 average of 4 or more is taken again when the machine is quieter, before
 the commit, if waiting is possible; if not, the commit says so and is
 added here.
+

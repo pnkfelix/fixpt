@@ -2256,6 +2256,32 @@ times and allocation (old and new binaries side by side). Tests:
 §91): the run's remaining 10 M words are `advance` passing `dt` raw to
 `pairs`, made native a form before, so called through its cell.
 
+**Raw `f64` arguments to a procedure made native a form before**
+(2026-10-16, found fixing `nbody`'s slots). A call passed raw only to a
+callee known where it is compiled, and a global's procedure was known
+only while its value was still cellular; one an earlier compile had made
+native was called through its cell, its raw arguments boxed. Now such a
+global, if its code takes some parameters raw, is bound as a procedure
+compiled here is: under the global's count of writes, the native closure
+the cell holds is entered past its unboxing, the arguments raw; written
+since, through the cell, boxed, as before. What it takes raw comes from
+the code itself (`Compiling::native_params`): its field 2 is the cellular
+word it was compiled from (`CODE_SOURCE`), whose register code gives the
+mask its own compile found (`register_params`); code a program sealed
+(`seal-code`, its suffix frozen) is never taken for it. A callee that
+takes nothing raw stays called through its cell: binding every native
+global cost `tailfib` and both `boyer`s 5–20% (the guard's loads on
+every call, and the mask found again at every call site before it was
+kept per compile). Natively, full sizes, old and new alternated, best of
+3: `nbody` 0.68 → 0.63 s, 14.5 → 4.5 M words (the run's own: none);
+`mandelbrot` 0.98 → 0.59 s, 87.5 → 3.7 M words (`loop2` calling
+`loop3`, a form before: the 83.9 M words of 6ec7f7e's note had come back
+with each definition made native as defined). The other 44 ports the
+same answers and times. Test: `programs/native/raw-args-across-forms.fx`
+(raw to a procedure made a form before; that procedure redefined to take
+fewer raw, the same call then through the cell; a caller compiled after,
+binding the new one), in `native_session_adapters_aborts_and_stack_maps`.
+
 
 ## 92. Concurrency: processes and `par` (kayak's request, 2026-10-13)
 

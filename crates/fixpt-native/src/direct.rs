@@ -45,7 +45,7 @@
 
 use crate::arm64::*;
 use crate::codespace::{CodeSpace, Offset};
-use fixpt_heap::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD, GLOBAL_FIELDS, GLOBAL_WRITES, ROUTINES, WORD_CELL0, WORD_TWIN};
+use fixpt_heap::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD, CODE_SOURCE, GLOBAL_FIELDS, GLOBAL_WRITES, ROUTINES, WORD_CELL0, WORD_TWIN};
 use fixpt_heap::layout::regcode::OPS;
 use fixpt_heap::{Heap, Value};
 use std::collections::HashMap;
@@ -917,7 +917,7 @@ impl DirectMachine {
         // not native code, and the rest compiled again without it.
         let mut refused = std::collections::HashSet::new();
         let (procs, first, free) = loop {
-            let mut c = Compiling { heap: &*heap, procs: Vec::new(), by_word: HashMap::new(), queue: Vec::new(), callouts: &mut self.callouts, resume: None, refused };
+            let mut c = Compiling { heap: &*heap, procs: Vec::new(), by_word: HashMap::new(), queue: Vec::new(), callouts: &mut self.callouts, resume: None, refused, native_masks: HashMap::new() };
             let (word, free) = c.closure_parts(closure).ok_or("not a closure of cellular code")?;
             let first = c.proc_of(word)?;
             let mut failed = None;
@@ -1463,6 +1463,9 @@ struct Compiling<'h> {
     /// Globals' procedures that could not be compiled (a word's raw
     /// value): called through their cells, as what is not native code.
     refused: std::collections::HashSet<u64>,
+    /// What `native_params` found of each native closure's code, by the
+    /// code bloblet: once a compile, not at every call.
+    native_masks: HashMap<u64, Option<u8>>,
 }
 
 impl Compiling<'_> {
@@ -1558,6 +1561,14 @@ impl Compiling<'_> {
                 false => Field::Closure(q, free),
             });
         }
+        // Made native by an earlier compile (a definition a form before),
+        // taking some parameters raw: bound as it is, its raw parameters
+        // known (`native_params`), so a call passes them raw, as to a
+        // procedure compiled here. One that takes none is called through
+        // the cell, which costs less than the guard.
+        if self.heap.bloblet_head(cell).fields >= GLOBAL_FIELDS && self.native_params(v).is_some_and(|m| m != 0) {
+            return Ok(Field::Const(v));
+        }
         Ok(Field::Cell(cell))
     }
 
@@ -1568,23 +1579,43 @@ impl Compiling<'_> {
         if let Some(m) = self.procs[q].params {
             return m;
         }
-        let h = self.heap;
-        let rw = self.procs[q].rw;
-        let cells = register_cells(h, rw);
-        let (mut starts, mut frame, mut i) = (Vec::new(), None, 0);
-        while i < cells.len() {
-            starts.push(i);
-            let (op, n, _) = OPS[cells[i].as_fixnum() as usize];
-            if op == "save" {
-                frame = Some(cells[i + 1].as_fixnum() as usize);
-            }
-            i += 1 + n;
-        }
-        let prim_name = |p: usize| fixpt_runtime::PRIMITIVES.get(p).map_or("?", |d| d.name);
-        let raw = frame.map_or(Vec::new(), |m| reps::raw_slots(&cells, &starts, &prim_name, m));
-        let m = reps::raw_params(&cells, &starts, &prim_name, &raw);
+        let m = register_params(self.heap, self.procs[q].rw);
         self.procs[q].params = Some(m);
         m
+    }
+
+    /// If `v` is a native closure of code this compiler made from register
+    /// code (in an earlier compile: a global defined a form before), the
+    /// parameters that code takes raw, as its own compile found them
+    /// (`register_params` of its source's register word, the same each
+    /// time). Its code's field 1 is itself and field 2 its cellular word
+    /// (`CODE_SOURCE`), whose twin is register code; and its suffix is not
+    /// frozen, as code a program sealed (`seal-code`) is, whose fields say
+    /// nothing of how it takes its arguments.
+    fn native_params(&mut self, v: Value) -> Option<u8> {
+        let h = self.heap;
+        if !v.is_bloblet() || h.bloblet_kind(v) != const { fixpt_heap::layout::kind("native-closure") } {
+            return None;
+        }
+        let code = h.bloblet_slot(v, CLOSURE_WORD);
+        if let Some(&m) = self.native_masks.get(&code.raw()) {
+            return m;
+        }
+        let m = Self::code_params(h, code);
+        self.native_masks.insert(code.raw(), m);
+        m
+    }
+
+    /// `native_params` of code bloblet `code`.
+    fn code_params(h: &Heap, code: Value) -> Option<u8> {
+        if !h.is_code_bloblet(code) || h.bloblet_head(code).suffix_frozen || h.bloblet_head(code).fields < CODE_SOURCE || h.bloblet_slot(code, 1) != code {
+            return None;
+        }
+        let word = h.bloblet_slot(code, CODE_SOURCE);
+        if !h.is_cellular_word(word) || !h.is_register_word(h.bloblet_slot(word, WORD_TWIN)) {
+            return None;
+        }
+        Some(register_params(h, h.bloblet_slot(word, WORD_TWIN)))
     }
 
     /// One procedure's code, from its register word.
@@ -1675,6 +1706,11 @@ impl Compiling<'_> {
             let q = match op_at(j) {
                 "global" => match self.global_value(cells[j + 1]).map_err(|e| format!("`{name}` calls {e}"))? {
                     Field::Code(q) => Some(q),
+                    Field::Const(v) => {
+                        let si = starts.iter().position(|&s| s == c).expect("an instruction");
+                        callees[si] = self.native_params(v).unwrap_or(0);
+                        None
+                    }
                     _ => None,
                 },
                 "const" => match self.closure_parts(cells[j + 1]) {
@@ -2991,6 +3027,15 @@ impl Compiling<'_> {
                                     a.e(add_imm(X16, X16, raw_entry_skip(raws.len())));
                                 }
                             }
+                            // Another compile's native code (`native_params`),
+                            // what the cell holds while the guard holds:
+                            // entered past its unboxing of what it takes raw.
+                            Some(Field::Const(_)) => {
+                                a.e(ldur(X16, CLO, field_off(CLOSURE_WORD)));
+                                if !raws.is_empty() {
+                                    a.e(add_imm(X16, X16, raw_entry_skip(raws.len())));
+                                }
+                            }
                             Some(g) => {
                                 let f = self.field(p, g);
                                 ldr_field(&mut a, CLO, f);
@@ -4015,6 +4060,24 @@ fn bytes_set(a: &mut Asm, slow: Label, done: Label) {
     a.e(strb(X13, X11));
     a.es(&mov_imm64(RESULT, Value::UNIT.raw()));
     a.to(done, Fix::B);
+}
+
+/// The parameters register word `rw`'s procedure takes raw
+/// (`reps::raw_params`), its slots as compiled (`register_cells`).
+fn register_params(h: &Heap, rw: Value) -> u8 {
+    let cells = register_cells(h, rw);
+    let (mut starts, mut frame, mut i) = (Vec::new(), None, 0);
+    while i < cells.len() {
+        starts.push(i);
+        let (op, n, _) = OPS[cells[i].as_fixnum() as usize];
+        if op == "save" {
+            frame = Some(cells[i + 1].as_fixnum() as usize);
+        }
+        i += 1 + n;
+    }
+    let prim_name = |p: usize| fixpt_runtime::PRIMITIVES.get(p).map_or("?", |d| d.name);
+    let raw = frame.map_or(Vec::new(), |m| reps::raw_slots(&cells, &starts, &prim_name, m));
+    reps::raw_params(&cells, &starts, &prim_name, &raw)
 }
 
 /// Register word `rw`'s cells, as they are compiled: a frame slot that

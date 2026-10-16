@@ -1025,6 +1025,11 @@ fn native_session_adapters_aborts_and_stack_maps() {
     let forms = s.checker.read_in(FileId(0), include_str!("programs/native/variadic.fx")).expect("reads");
     let (values, fell) = values_and_fallbacks(&mut s, &forms);
     assert_eq!((values, fell), (vec!["60".into(), "1019".into(), "4140000".into()], vec![]), "variadic");
+    // `f64`s passed raw to a procedure made native a form before, and,
+    // once it is redefined, boxed through its cell (`TODO.md` §91).
+    let forms = s.checker.read_in(FileId(0), include_str!("programs/native/raw-args-across-forms.fx")).expect("reads");
+    let (values, fell) = values_and_fallbacks(&mut s, &forms);
+    assert_eq!((values, fell), (vec!["250250".into(), "1000".into(), "500".into()], vec![]), "raw args across forms");
     // `list`, called and as a value, likewise.
     let forms = s.checker.read_in(FileId(0), include_str!("programs/run/list.fx")).expect("reads");
     assert_eq!(values_and_fallbacks(&mut s, &forms), (vec!["5539".to_string()], vec![]), "list");
