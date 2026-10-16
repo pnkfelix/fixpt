@@ -54,13 +54,13 @@
 (define k-type-forms k-names
   (list 'arrayof 'narrayof 'bloblet 'composable 'dletrec 'icell 'listof 'mark-key 'moduleof 'mu
         'nat 'nlist 'oneshot 'pairof 'place 'poly 'productof 'prompt-tag 'proves 'ref 'select 'subr
-        'sumof 'bool 'union))
+        'sumof 'bool 'union '->))
 ;; Whether `hd` heads a type form: not a name a `with` shadows.
 (define k-type-form? (subr (maxeff (read @globals) (read @t)) (symbol) bool)
   (lambda (hd) (k-has-name? k-type-forms hd)))
 (define k-keywords k-names
   (list 'lambda 'plambda 'proj 'if 'letrec 'let 'begin 'define 'define* 'define-type
-        'define-generative 'subr 'poly 'ref 'pairof 'dletrec 'void 'pure 'maxeff 'read 'write
+        'define-generative 'subr '-> 'poly 'ref 'pairof 'dletrec 'void 'pure 'maxeff 'read 'write
         'alloc 'goto 'comefrom 'region 'effect 'type 'prompt 'prompt-tag 'composable 'mark-key
         'oneshot
         'listof 'cond 'else 'and 'or 'let* 'define-effect 'module-parameters 'the 'bloblet 'fields

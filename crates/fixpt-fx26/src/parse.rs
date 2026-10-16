@@ -61,7 +61,7 @@ const ABS_CTOR_USAGE: &str = "an abstract type constructor is `(abs (f (name kin
 
 const TYPE_FORMS: &[&str] = &[
     "arrayof", "narrayof", "bloblet", "composable", "dletrec", "icell", "listof", "mark-key", "moduleof", "mu", "nat", "nlist", "oneshot", "pairof", "place",
-    "poly", "productof", "prompt-tag", "proves", "ref", "select", "subr", "sumof", "bool", "union",
+    "poly", "productof", "prompt-tag", "proves", "ref", "select", "subr", "sumof", "bool", "union", "->",
 ];
 
 impl Checker {
@@ -332,6 +332,35 @@ impl Checker {
         Ok(r)
     }
 
+    /// A procedure type's parameters and result, after its convention and
+    /// effect: `(subr …)`'s and `(-> …)`'s.
+    fn parse_subr_type(&mut self, conv: Conv, effect: Effect, params: &Syntax, result: &Syntax) -> R<TyId> {
+        let ps = match &params.datum {
+            Datum::Nil => Vec::new(),
+            _ => self.items(params, "parameter types")?.to_vec(),
+        };
+        // A parameter may be named, `(name type)`, for the types after
+        // it to select from: a dependent procedure (M5).
+        let mut names: Vec<Option<Sym>> = Vec::new();
+        let mut params = Vec::new();
+        for p in &ps {
+            let (name, t) = match self.named_param(p) {
+                Some((n, t)) => (Some(n), t),
+                None => (None, p.clone()),
+            };
+            let t = self.parse_type(&t)?;
+            params.push(self.select_params(t, &names));
+            names.push(name);
+        }
+        // A test's result, `(bool …)`: here, and only here.
+        let result = match result.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()) {
+            Some(h) if self.name(h) == "bool" => self.parse_proving(result, params.len())?,
+            _ => self.parse_type(result)?,
+        };
+        let result = self.select_params(result, &names);
+        Ok(self.arena.ty(Ty::Subr { conv, effect, params, result }))
+    }
+
     // ------------------------------------------------------------- effects
     pub(crate) fn parse_effect(&mut self, s: &Syntax) -> R<Effect> {
         if let Some(sym) = s.as_symbol() {
@@ -574,30 +603,14 @@ impl Checker {
                     return Err(FxError::at(s.span, "`(subr effect (param …) result)`"));
                 };
                 let effect = self.parse_effect(effect)?;
-                let ps = match &params.datum {
-                    Datum::Nil => Vec::new(),
-                    _ => self.items(params, "parameter types")?.to_vec(),
+                self.parse_subr_type(conv, effect, params, result)
+            }
+            // `(-> (param …) result)`: `(subr pure (param …) result)`.
+            "->" => {
+                let [_, params, result] = &items[..] else {
+                    return Err(FxError::at(s.span, "`(-> (param …) result)`"));
                 };
-                // A parameter may be named, `(name type)`, for the types after
-                // it to select from: a dependent procedure (M5).
-                let mut names: Vec<Option<Sym>> = Vec::new();
-                let mut params = Vec::new();
-                for p in &ps {
-                    let (name, t) = match self.named_param(p) {
-                        Some((n, t)) => (Some(n), t),
-                        None => (None, p.clone()),
-                    };
-                    let t = self.parse_type(&t)?;
-                    params.push(self.select_params(t, &names));
-                    names.push(name);
-                }
-                // A test's result, `(bool …)`: here, and only here.
-                let result = match result.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()) {
-                    Some(h) if self.name(h) == "bool" => self.parse_proving(result, params.len())?,
-                    _ => self.parse_type(result)?,
-                };
-                let result = self.select_params(result, &names);
-                Ok(self.arena.ty(Ty::Subr { conv, effect, params, result }))
+                self.parse_subr_type(self.conv_default, Effect::pure(), params, result)
             }
             "bool" => Err(FxError::at(s.span, "`(bool …)` is a procedure's result, and only that")),
             // `(proves (<= A B))`, or `(proves (poly (binder …) (<= A B)

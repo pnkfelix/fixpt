@@ -282,6 +282,12 @@
           (begin (set k-with-fallbacks (cons (product (1 fun) (2 t)) (get k-with-fallbacks)))
                  (set k-with-apps (cons (product (1 fun) (2 app)) (get k-with-apps)))
                  app)))))
+;; A procedure type's parameters and result, after its effect, with its
+;; convention: `(subr …)`'s and `(-> …)`'s.
+(define k-subr-type (subr (maxeff checks spin) (k-eff syn syn k-conv) int)
+  (lambda (e params result cv)
+    (let ((ts (k-read-params (k-items-or-nil params "parameter types") result)))
+      (k-ty-new (ty-subr e (k-ids-but-last ts) (k-ids-last ts) cv)))))
 ;; `(subr effect (param …) result)`, or with a convention first, `(subr
 ;; (conv C) effect (param …) result)`; left out, it is the program's.
 (define k-parse-subr (subr (maxeff checks spin) (syn k-syns) int)
@@ -291,10 +297,13 @@
            (items (if conv? (the k-syns (cons (car items) (cdr (cdr items)))) items)))
       (begin
         (k-shape (= (k-length items) 4) "`(subr effect (param …) result)`" s)
-        (let* ((e (k-parse-effect (k-nth items 1)))
-               (ts (k-read-params (k-items-or-nil (k-nth items 2) "parameter types")
-                                         (k-nth items 3))))
-          (k-ty-new (ty-subr e (k-ids-but-last ts) (k-ids-last ts) cv)))))))
+        (k-subr-type (k-parse-effect (k-nth items 1)) (k-nth items 2) (k-nth items 3) cv)))))
+;; `(-> (param …) result)`: `(subr pure (param …) result)`.
+(define k-parse-arrow (subr (maxeff checks spin) (syn k-syns) int)
+  (lambda (s items)
+    (begin
+      (k-shape (= (k-length items) 3) "`(-> (param …) result)`" s)
+      (k-subr-type nil (k-nth items 1) (k-nth items 2) (get k-conv-default)))))
 ;; `(proves prop)`.
 (define k-parse-proves-type (subr (maxeff checks spin) (syn k-syns) int)
   (lambda (s items)
@@ -310,6 +319,7 @@
     (let ((n (k-length items)))
       (case hd
         ((subr) (k-parse-subr s items))
+        ((->) (k-parse-arrow s items))
         ((proves) (k-parse-proves-type s items))
         ((bool) (k-sfail "`(bool …)` is a procedure's result, and only that" s))
         ((poly)

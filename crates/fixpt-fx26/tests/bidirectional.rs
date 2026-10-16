@@ -225,3 +225,22 @@ fn literals_check_against_any_fixed_width() {
     // A sum written out is no literal, past a fixnum or not.
     assert!(rejects("(define y i64 (+ 1 2))").contains("a i64 is expected here, and this is a (nat 3)"));
 }
+
+// ----------------------------------------------------------------- arrows
+
+/// `(-> (param …) result)` is `(subr pure (param …) result)`, wherever a
+/// type is written, and so is as strict: one that may not end, or that
+/// calls a global (which reads it), is refused.
+#[test]
+fn an_arrow_is_a_pure_subroutine() {
+    assert_eq!(
+        check(include_str!("programs/bidirectional/arrow.fx")),
+        "int ! (read (globals adder inc pick same twice))"
+    );
+    assert_eq!(check("(the (-> ((-> (int) int)) (-> () int)) (lambda (f) (lambda () (f 1))))"), "(subr pure ((subr pure (int) int)) (subr pure () int)) ! pure");
+    let err = rejects(include_str!("programs/terminate/arrow-spins.fx"));
+    assert!(err.contains("it may not end"), "{err}");
+    let err = rejects(include_str!("programs/terminate/arrow-reads-globals.fx"));
+    assert!(err.contains("it has (read (globals inc))"), "{err}");
+    assert!(rejects("(the (-> (int)) 0)").contains("`(-> (param …) result)`"));
+}
