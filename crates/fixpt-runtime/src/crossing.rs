@@ -52,6 +52,58 @@ thread_local! {
     static BOUNDARIES: RefCell<Vec<Boundary>> = const { RefCell::new(Vec::new()) };
 }
 
+/// What a call between machines must leave of the thread's Rust stack: a
+/// machine run, and a collection, below the call.
+const STACK_MARGIN: usize = 256 << 10;
+
+thread_local! {
+    /// The lowest address of this thread's stack; 0 where unknown.
+    static STACK_LOW: usize = stack_low();
+}
+
+/// The lowest address of the running thread's stack, 0 if it is not known.
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+fn stack_low() -> usize {
+    // SAFETY: of the thread running; both only read its attributes.
+    unsafe {
+        let me = libc::pthread_self();
+        libc::pthread_get_stackaddr_np(me) as usize - libc::pthread_get_stacksize_np(me)
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[allow(unsafe_code)]
+fn stack_low() -> usize {
+    // SAFETY: the attributes of the thread running, read into `attr`, then
+    // freed.
+    unsafe {
+        let mut attr: libc::pthread_attr_t = std::mem::zeroed();
+        if libc::pthread_getattr_np(libc::pthread_self(), &mut attr) != 0 {
+            return 0;
+        }
+        let (mut addr, mut size) = (std::ptr::null_mut(), 0);
+        let ok = libc::pthread_attr_getstack(&attr, &mut addr, &mut size) == 0;
+        libc::pthread_attr_destroy(&mut attr);
+        if ok { addr as usize } else { 0 }
+    }
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn stack_low() -> usize {
+    0
+}
+
+/// Whether the Rust stack has room for another call between machines
+/// (`TODO.md` §93): each nests a few Rust frames, so calls alternating
+/// between them run out of it long before either machine's own stack. A
+/// machine refuses the call, a stack overflow, where it has not.
+pub fn room() -> bool {
+    let here = 0u8;
+    let at = std::ptr::addr_of!(here) as usize;
+    STACK_LOW.with(|low| *low == 0 || at > low + STACK_MARGIN)
+}
+
 /// A boundary entered, for the length of the call that `f` makes.
 pub fn across<T>(b: Boundary, f: impl FnOnce() -> T) -> T {
     BOUNDARIES.with(|v| v.borrow_mut().push(b));

@@ -904,6 +904,9 @@ impl Machine {
     fn call_native(&mut self, rt: &mut Runtime, r: &mut Regs, n: usize, tail: bool, routine: &'static str) -> Result<Back, Trap> {
         let Some(call) = rt.call_native else { return Err(Trap::Type { routine }) };
         self.check_limits()?;
+        if !crossing::room() {
+            return Err(Trap::StackOverflow);
+        }
         let c = self.ds.pop().expect("counted");
         let args = self.ds.split_off(self.ds.len() - n);
         let (nd, nr) = (self.ds.len(), self.rs.len());

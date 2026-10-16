@@ -2652,6 +2652,20 @@ skipped as the return into its `exit`; now skipped only when it is
 waits for ever) and `allocating-cellular.fx` (each machine, every 7th
 poll), and the tiny-slice sweep (slices 3, 7 and 13) over every process,
 monitor and preemption program on every machine.
+**Calls between the machines too deep, a stack overflow** (2026-10-16,
+`TODO.md` §93). Each call between native and cellular code nests a few
+Rust frames on the thread's stack, so recursion alternating between them
+a few million deep (on the CLI's 256 MB thread) crashed the process,
+"thread has overflowed its stack", where recursion within one machine
+fails as a program does or goes on through the heap. Now each call
+between them first asks whether the Rust stack has 256 KiB left
+(`crossing::room`, from the thread's stack bounds by `pthread`), and if
+not fails it, a stack overflow: in the Rust machine's `call_native` and
+native code's `call_foreign`. The session goes on after. The evaluator
+written in FX-26, which recurses on its own machine's stack, already
+failed so (`captures.fx`'s 20 000-deep case: "cellular word: stack
+overflow"). Test: `programs/native/crossing-overflow.fx`, on a thread of
+16 MB, in release and checked builds.
 
 ## 94. Process monitors (kayak's request, 2026-10-14)
 

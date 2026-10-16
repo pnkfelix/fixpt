@@ -274,7 +274,9 @@ weighed with the other items, not ahead of them.
   included names bound once at the module, not loaded at each call
   (`DONE.md` §69); found with it, and fixed, a prompt tag held across a
   collection (§104), and a parameter now shadows an included name (it
-  was the other way, a bug). Left in §69: hidden abstract types.
+  was the other way, a bug). Left in §69: hidden abstract types. Then
+  (2026-10-16, the user's): §93's crash, calls between the machines too
+  deep for Rust's stack, now a stack overflow (`DONE.md` §93); next §85.
   §77, suffix refs (tag `010`, interior pointers into bloblet suffixes):
   done (`DONE.md` §77), the runtime, the `flat` kind, `(blobref B F)`,
   flat products, arrays and sums, in every machine; natively in line

@@ -4903,6 +4903,11 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
 /// where they resume with the value; or, `resume` given, the frames are a
 /// continuation's just put back (`reinstate`), resuming there.
 fn call_foreign(rt: &mut fixpt_runtime::Runtime, st: &mut DState, f: Value, args: &[Value], resume: Option<u64>) -> u64 {
+    if !fixpt_runtime::crossing::room() {
+        LAST_MESSAGE.with(|c| *c.borrow_mut() = Some(fixpt_engine::cellular::Trap::StackOverflow.to_string()));
+        st.trap = PRIM_FAILED as u64;
+        return 0;
+    }
     let held: Vec<Value> = native_frames(st).iter().flat_map(|s| s.iter().copied()).collect();
     let kept = rt.heap.vector_from(&held);
     let at = rt.heap.push_root(kept);

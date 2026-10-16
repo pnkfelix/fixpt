@@ -2370,13 +2370,12 @@ recovered (`DONE.md` §93). Left:
   a variadic definition's call makes the list of its arguments, where a
   built-in primitive takes them as they are; and every machine would load
   and compile it.
-- **Calls between the machines nest on Rust's stack**: each crossing is a
-  few Rust frames, so recursion that alternates between native and
-  cellular code a few thousand deep overflows the thread's stack (a crash,
-  not an error) where recursion within one machine goes a million deep:
-  `whole-captures.fx` crosses 200 deep, as a test thread's stack allows.
-  And the evaluator written in FX-26 recurses on the host's stack too, so
-  `programs/native/captures.fx`'s 20 000-deep case overflows it.
+- **Calls between the machines nest on Rust's stack**: recursion that
+  alternates between native and cellular code is bounded by the thread's
+  Rust stack, a few million deep on the CLI's, then a stack overflow
+  (`DONE.md` §93; it crashed before), where native recursion goes on
+  through the heap. Unbounded would need the calls not to nest:
+  each machine resuming the other from a loop, not calling it.
 
 ## 97. Code bloblets a program makes and runs (kayak's request, 2026-10-14)
 

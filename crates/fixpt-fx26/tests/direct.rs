@@ -1109,6 +1109,22 @@ fn deep_recursion_through_the_stack_cache() {
     fixpt_native::direct::with_machine(|m| m.set_stack_words(1 << 20, 1 << 28)).expect("a machine");
 }
 
+/// Recursion alternating between native and cellular code, too deep for
+/// the thread's Rust stack, on which each call between them nests (`DONE.md`
+/// §93, `programs/native/crossing-overflow.fx`): a stack overflow, not a
+/// crash, and the session goes on. On a thread of a known stack.
+#[test]
+fn crossings_too_deep_for_the_rust_stack_overflow() {
+    let run = std::thread::Builder::new().stack_size(16 << 20).spawn(|| {
+        let mut s = session(true);
+        let forms = s.checker.read_in(FileId(0), include_str!("programs/native/crossing-overflow.fx")).expect("reads");
+        values_and_fallbacks(&mut s, &forms)
+    });
+    let (values, fell) = run.expect("spawns").join().expect("no crash");
+    assert_eq!(values, ["1000", "error: stack overflow", "1001"], "crossing overflow");
+    assert_eq!(fell, ["deep-c"], "only the one that stays cellular does");
+}
+
 /// `f64`s in raw frame slots (`TODO.md` §91, `programs/native/raw-slots.fx`):
 /// live across a deep recursion, through a small stack cache's overflows
 /// and underflows, collecting every 7 words, so frames holding raw words
