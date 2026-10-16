@@ -42,6 +42,11 @@
 (define k-moduleof-usage string "`(moduleof (abs t type) … (desc d type) … (val x type) …)`")
 (define k-abs-usage string
   "an abstract component is a `type`, or a type constructor `(=> (kind …) type)`, for now")
+;; Where `->*` is not a definition's signature.
+(define k-arrow-star-only string
+  (string-append "`(->* (param …) result)` is only the type a `define` declares, `(define name "
+                 "(->* …) (lambda …))`, its effect found from its `lambda`: "
+                 "here, write `->` or `subr`"))
 (define k-abs-ctor-usage string "an abstract type constructor is `(abs (f (name kind) …) type)`")
 ;; What a list headed `hd` is not, read as a type: `hd` applied, if a name.
 (define k-not-type-list (subr (read @globals) (symbol) string)
@@ -54,7 +59,7 @@
 (define k-type-forms k-names
   (list 'arrayof 'narrayof 'bloblet 'composable 'dletrec 'icell 'listof 'mark-key 'moduleof 'mu
         'nat 'nlist 'oneshot 'pairof 'place 'poly 'productof 'prompt-tag 'proves 'ref 'select 'subr
-        'sumof 'bool 'union '->))
+        'sumof 'bool 'union '-> '->*))
 ;; Whether `hd` heads a type form: not a name a `with` shadows.
 (define k-type-form? (subr (maxeff (read @globals) (read @t)) (symbol) bool)
   (lambda (hd) (k-has-name? k-type-forms hd)))
@@ -62,7 +67,7 @@
   (list 'lambda 'plambda 'proj 'if 'letrec 'let 'begin 'define 'define* 'define-type
         'define-generative 'subr '-> 'poly 'ref 'pairof 'dletrec 'void 'pure 'maxeff 'read 'write
         'alloc 'goto 'comefrom 'region 'effect 'type 'prompt 'prompt-tag 'composable 'mark-key
-        'oneshot
+        'oneshot '->*
         'listof 'cond 'else 'and 'or 'let* 'define-effect 'module-parameters 'the 'bloblet 'fields
         'frozen 'arrayof 'icell 'await 'define-rec 'letrena 'letreap 'rlambda 'quote 'productof
         'sumof 'product 'extract 'sum 'tagcase 'module 'moduleof 'with 'select 'load-module

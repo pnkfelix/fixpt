@@ -47,6 +47,7 @@
             (val k-moduleof-usage string)
             (val k-abs-usage string)
             (val k-abs-ctor-usage string)
+            (val k-arrow-star-only string)
             (val k-not-type-list (subr (read @globals) (symbol) string))
             (val k-type-form? (subr (maxeff (read @globals) (read @t)) (symbol) bool))
             (val k-no-name symbol)

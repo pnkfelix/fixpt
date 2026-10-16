@@ -124,7 +124,9 @@
 ;; (`spin`).
 (define k-parse-type (subr (maxeff checks spin) (syn) int)
   (lambda (s)
-    (let ((t (k-parse-type-node s)))
+    (let* ((star (get k-arrow-star))
+           (taken (set k-arrow-star #f))
+           (t (if star (k-parse-arrow-star s) (k-parse-type-node s))))
       (begin
         (if (and (not (syn-symbol? s)) (k-storage-head? (k-head (k-items s "a type"))))
             (k-no-knot t (syn-start s) (syn-end s))
@@ -298,6 +300,20 @@
       (begin
         (k-shape (= (k-length items) 4) "`(subr effect (param …) result)`" s)
         (k-subr-type (k-parse-effect (k-nth items 1)) (k-nth items 2) (k-nth items 3) cv)))))
+;; A definition's signature that may be `(->* (param …) result)`, under any
+;; `poly`s: read as `(subr pure (param …) result)`, the effect the
+;; definition then finds standing in for its own (`check-program.fx`).
+(define k-parse-arrow-star (subr (maxeff checks spin) (syn) int)
+  (lambda (s)
+    (let* ((items (k-items s "a type")) (head (k-symbol-head items)))
+      (cond ((string=? head "->*")
+             (begin
+               (k-shape (= (k-length items) 3) "`(->* (param …) result)`" s)
+               (k-subr-type nil (k-nth items 1) (k-nth items 2) (get k-conv-default))))
+            ((string=? head "poly")
+             (begin (set k-arrow-star #t)
+                    (let ((t (k-parse-type-node s))) (begin (set k-arrow-star #f) t))))
+            (else (k-parse-type-node s))))))
 ;; `(-> (param …) result)`: `(subr pure (param …) result)`.
 (define k-parse-arrow (subr (maxeff checks spin) (syn k-syns) int)
   (lambda (s items)
@@ -320,6 +336,7 @@
       (case hd
         ((subr) (k-parse-subr s items))
         ((->) (k-parse-arrow s items))
+        ((->*) (k-sfail k-arrow-star-only s))
         ((proves) (k-parse-proves-type s items))
         ((bool) (k-sfail "`(bool …)` is a procedure's result, and only that" s))
         ((poly)

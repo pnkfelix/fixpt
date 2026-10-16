@@ -69,9 +69,9 @@
       (include check-print) (include check-letrec) (include check-expect) (include check-modules)
       (include check-modules-read) (include check-subst) (include check-synth)
       (include check-module-rules) (include check-subtype) (include parser))
-(import check-effects k-atom-region k-one)
+(import check-effects k-atom-region k-one k-insert)
 (import check-resolve k-defs k-free-into k-has-region-in? k-last-uses k-reset k-runs)
-(import check-read k-items k-name-of k-sfail)
+(import check-read k-items k-name-of k-sfail k-symbol-head)
 (define k-names-onto (with check-modorder k-names-onto))
 
 ;; The generative type `name` may see inside, as one of its conversions, or
@@ -463,6 +463,49 @@
     (let ((named (the k-named (cons (cons name t) nil))))
       (begin (k-check-proof l name x)
              (set k-lemmas (cons (k-lemma-as l named) (get k-lemmas)))))))
+;; Whether signature `s` is `(->* …)`, under any `poly`s.
+(define* k-written-arrow-star? (subr (maxeff (read @s) spin) (syn) bool)
+  (lambda (s)
+    (tagcase s
+      (lst (xs d a b)
+        (let ((head (k-symbol-head xs)))
+          (or (string=? head "->*")
+              (and (string=? head "poly") (= (k-length xs) 3)
+                   (k-written-arrow-star? (k-nth xs 2))))))
+      (else y #f))))
+;; An error at `written` if `define*` (`star`) declares an `->*` (`arrow`).
+(define k-arrow-star-alone (subr checks (bool bool syn) unit)
+  (lambda (star arrow written)
+    (if (and star arrow)
+        (k-sfail "`define*` and `->*` each find what a procedure does: write one" written)
+        #u)))
+;; An error at `x` if an `->*` (`arrow`) defines it, and it is not a `lambda`.
+(define k-arrow-star-lambda (subr checks (bool kx) unit)
+  (lambda (arrow x)
+    (if (and arrow (not (tagcase x (x-lambda (ps body a b abk) #t) (else y #f))))
+        (k-fail-at "`->*` finds a procedure's effect from its `lambda`: define it as one" x)
+        #u)))
+;; The latent effect of `x`, a `lambda`, told the parameters and result of
+;; `t`, a `subr` under any `poly`s, whose binders are in scope.
+(define* k-arrow-star-latent (subr (maxeff checks spin) (int kx) k-eff)
+  (lambda (t x)
+    (tagcase (k-get (k-resolve t))
+      (ty-poly (bs body) (k-arrow-star-latent body x))
+      (ty-subr (e ps r cv) (begin (k-synth-lambda-as x ps r) (get k-last-latent)))
+      (else y (k-fail-at "`->*` reads as a `subr`" x)))))
+;; Whether effect `e` reads global `name`.
+(define k-reads-own? (subr (read @globals) (symbol k-eff) bool)
+  (lambda (name e)
+    (and (not (null? e))
+         (or (tagcase (car e)
+               (a-read (r) (tagcase r (r-global (g) (symbol=? g name)) (else y #f)))
+               (else y #f))
+             (k-reads-own? name (cdr e))))))
+;; The effect `->*` finds for `name`, from its body's `e`: with `spin` if it
+;; reads `name` itself, as a procedure that may reach itself through a
+;; global must say (`k-no-reaching-itself`).
+(define* k-arrow-star-spins (subr (maxeff (read @t) (alloc @t) spin) (symbol k-eff) k-eff)
+  (lambda (name e) (if (k-reads-own? name e) (k-insert (a-spin) e) e)))
 ;; `(define name type init)`, or, if `star` is not empty,
 ;; `(define* name type init)`: its line.
 (define k-define-typed (subr (maxeff checks spin) (symbol syn syns-a exp) k-out)
@@ -470,10 +513,14 @@
     ;; A lambda is in scope in itself, as a `letrec`
     ;; binding is; anything else is not.
     (let* ((reset (set k-pending-lemma nil))
+           ;; `(->* (param …) result)`: its effect found from its body.
+           (arrow (k-written-arrow-star? written))
+           (star (not (null? star-syns)))
+           (both (k-arrow-star-alone star arrow written))
+           (allowed (set k-arrow-star arrow))
            (t (k-select-syn (k-parse-type written) written))
            ;; `define*`: checked as though its type read
            ;; `@globals`, which finds what it reads.
-           (star (not (null? star-syns)))
            (tw (if star (k-with-latent t (k-one (a-read (r-globals)))) t))
            (subr-ok (k-star-subr tw written))
            ;; A `proves` type: a lemma, once the body proves it.
@@ -483,6 +530,7 @@
            (signed (k-bind-signature t))
            (x (k-resolve-exp init))
            (lambda-ok (k-star-lambda star x))
+           (arrow-ok (k-arrow-star-lambda arrow x))
            (u (set k-last-uses (k-free-into x nil nil)))
            (restored (set k-dscope saved))
            (bound (if (k-lambda? x) (k-bind-named-global name t) #u))
@@ -495,18 +543,24 @@
            ;; inside it.
            (inside (k-take-inside name))
            (opened (if (>= inside 0) (set k-transparent (cons inside (get k-transparent))) #u))
-           (e0 (k-check-declared name tw x))
+           ;; With `->*`, the `lambda` told its parameters and result and
+           ;; its effect found, a call of itself standing for nothing more:
+           ;; that effect already holds what such a call does, so it is the
+           ;; least the procedure can have.
+           (e0 (if arrow (k-arrow-star-latent t x) (k-check-declared name tw x)))
            ;; With `define*`, the globals the lambda read,
            ;; found, are its type's; and it is checked again
            ;; at that type, bound to it: one that fails is
            ;; the checker's mistake, not the program's.
-           (tf (if star (k-with-latent t (k-globals-of (get k-last-latent))) tw))
-           (refound (if star
+           (tf (cond (star (k-with-latent t (k-globals-of (get k-last-latent))))
+                     (arrow (k-with-latent t (k-arrow-star-spins name e0)))
+                     (else tw)))
+           (refound (if (or star arrow)
                         (begin (k-rebind-top name tf)
                                (set k-recursive rsaved)
                                (k-note-alone name tf x rsaved))
                         #u))
-           (e (if star (k-star-checked name tf x) e0))
+           (e (if (or star arrow) (k-star-checked (if star "`define*`" "`->*`") name tf x) e0))
            (frozen (k-note-frozen-define tf x))
            (closed (if (>= inside 0)
                        (begin (set k-transparent (cdr (get k-transparent)))

@@ -280,6 +280,7 @@
   (lambda ()
     (begin
       (set k-lemmas nil) (set k-pending-lemma nil) (set k-datas nil) (set k-certified nil)
+      (set k-arrow-star #f)
       (set k-flats nil)
       (set k-narrowed nil) (set k-path-narrowed nil) (set k-closure-depth 0)
       (set k-certified-lengths nil) (set k-certified-nats nil) (set k-size-facts nil)

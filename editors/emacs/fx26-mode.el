@@ -95,7 +95,7 @@ Keep \"--emacs\".  Another machine is \"--fx26-machine\" NAME before
   '("subr" "vsubr" "poly" "ref" "icell" "pairof" "listof" "arrayof" "mark-key"
     "prompt-tag" "composable" "bloblet" "fields" "frozen" "productof" "sumof"
     "dletrec" "mu" "nat" "nlist" "place" "moduleof" "abs" "desc" "val" "select"
-    "proves" "conv" "flatarrayof" "eqtable" "=>" "->")
+    "proves" "conv" "flatarrayof" "eqtable" "=>" "->" "->*")
   "Heads of types, and their parts.")
 
 (defconst fx26--base-types

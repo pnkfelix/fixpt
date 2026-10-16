@@ -336,6 +336,9 @@
 (define k-conversions (ref k-named @t) (new nil))
 (define k-lemmas (ref (listof k-lemma acyclic) @t) (new nil))
 (define k-pending-lemma (ref (listof k-lemma acyclic) @t) (new nil))
+;; Whether the next type read may be `(->* (param …) result)`, under any
+;; `poly`s: a definition's signature, its effect found (`check-program.fx`).
+(define k-arrow-star (ref bool @t) (new #f))
 (define k-binder-has? (subr kreads (k-binders int) bool)
   (lambda (bs v) (and (not (null? bs)) (or (= (extract (car bs) 1) v) (k-binder-has? (cdr bs) v)))))
 ;; Whether one of generative types `gs` has `v` among its parameters.

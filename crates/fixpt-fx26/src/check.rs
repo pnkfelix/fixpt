@@ -282,6 +282,9 @@ pub struct Checker {
     /// The lemma a `proves` type being read states, for the definition it
     /// declares.
     pub(crate) pending_lemma: Option<crate::lemma::Lemma>,
+    /// Whether the next type read may be `(->* (param …) result)`, under
+    /// any `poly`s: a definition's signature, its effect found (`top.rs`).
+    pub(crate) arrow_star: bool,
     /// The variables `acyclic?` has just found acyclic, in the branch where
     /// it did: each by name and by which binding it is (its place in `env`).
     pub(crate) certified: Vec<(Sym, usize)>,
@@ -735,6 +738,7 @@ impl Checker {
             conversions: Vec::new(),
             lemmas: Vec::new(),
             pending_lemma: None,
+            arrow_star: false,
             certified: Vec::new(),
             certified_nats: Vec::new(),
             certified_lengths: Vec::new(),

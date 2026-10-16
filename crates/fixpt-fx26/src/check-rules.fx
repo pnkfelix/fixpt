@@ -824,12 +824,12 @@
               (k-synth h)))
         (else y (k-synth h)))))
   ;;; ----------------------------------------------- `module` and `with`
-  ;; The effect of `name`, the lambda `x` of `define*`, checked again at `tf`,
-  ;; the type found.
-  (k-star-checked (subr (maxeff checks spin) (symbol int kx) k-eff)
-    (lambda (name tf x)
+  ;; The effect of `name`, the lambda `x` of `define*` or `->*` (`how`),
+  ;; checked again at `tf`, the type found.
+  (k-star-checked (subr (maxeff checks spin) (string symbol int kx) k-eff)
+    (lambda (how name tf x)
       (let ((r (k-saying (lambda () (k-te tf (k-check-declared name tf x)))
-                         (lambda (m) (k-star-mistake name tf m)))))
+                         (lambda (m) (k-star-mistake how name tf m)))))
         (extract r 2))))
   ;; An abstract type `t`, its representation seen only through its own
   ;; conversions, which stay inside the module: each the identity, made as a
@@ -904,7 +904,7 @@
                    (rebound (k-rebind-top n f))
                    (again (the k-letrec-bs (cons (product (1 n) (2 f) (3 init)) nil)))
                    (renoted (if (null? group) #u (k-note-ending again why)))
-                   (e (k-star-checked n f init))
+                   (e (k-star-checked "`define*`" n f init))
                    (back (set k-recursive rsaved)))
               (product (1 e) (2 f)))))))
   (k-mod-check-lambdas

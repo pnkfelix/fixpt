@@ -244,3 +244,33 @@ fn an_arrow_is_a_pure_subroutine() {
     assert!(err.contains("it has (read (globals inc))"), "{err}");
     assert!(rejects("(the (-> (int)) 0)").contains("`(-> (param …) result)`"));
 }
+
+/// `(->* (param …) result)` finds its effect from its `lambda`, once: a
+/// call of itself stands for nothing more while the body is checked, since
+/// the effect found already holds what such a call does; then it is checked
+/// again at the type found, which refuses what that type does not allow.
+#[test]
+fn an_arrow_star_finds_its_effect() {
+    let mut c = Checker::new();
+    let program = include_str!("programs/bidirectional/arrow-star.fx");
+    c.check_program(program).unwrap_or_else(|e| panic!("does not check: {e}"));
+    let shown = |c: &mut Checker, n: &str| {
+        let t = c.check_program(n).expect("a name");
+        c.show_ty(t.ty)
+    };
+    assert_eq!(shown(&mut c, "inc2"), "(subr (read (globals inc)) (int) int)");
+    assert_eq!(shown(&mut c, "count"), "(subr (maxeff spin (read (globals count))) (int) int)");
+    assert_eq!(shown(&mut c, "mk"), "(subr (alloc @h) (int) (listof int @h))");
+    assert_eq!(shown(&mut c, "ap"), "(poly ((t type)) (subr pure ((subr pure (t) t) t) t))");
+    let err = rejects(include_str!("programs/arrows/star-passed-as-pure.fx"));
+    assert!(err.starts_with("`->*` found `f` to be a (subr (maxeff spin (read (globals f twice))) (int) int)"), "{err}");
+    for (program, says) in [
+        (include_str!("programs/arrows/star-as-parameter.fx"), "is only the type a `define` declares"),
+        (include_str!("programs/arrows/star-in-define-rec.fx"), "is only the type a `define` declares"),
+        (include_str!("programs/arrows/star-not-lambda.fx"), "from its `lambda`: define it as one"),
+        (include_str!("programs/arrows/star-and-define-star.fx"), "each find what a procedure does"),
+    ] {
+        let err = rejects(program);
+        assert!(err.contains(says), "{err}");
+    }
+}

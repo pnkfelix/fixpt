@@ -59,9 +59,13 @@ pub enum FamilyArg {
 /// What `(abs (f (name kind) …) type)` is, when it is not.
 const ABS_CTOR_USAGE: &str = "an abstract type constructor is `(abs (f (name kind) …) type)`";
 
+/// Where `->*` is not a definition's signature.
+const ARROW_STAR_ONLY: &str = "`(->* (param …) result)` is only the type a `define` declares, `(define name (->* …) (lambda …))`, \
+     its effect found from its `lambda`: here, write `->` or `subr`";
+
 const TYPE_FORMS: &[&str] = &[
     "arrayof", "narrayof", "bloblet", "composable", "dletrec", "icell", "listof", "mark-key", "moduleof", "mu", "nat", "nlist", "oneshot", "pairof", "place",
-    "poly", "productof", "prompt-tag", "proves", "ref", "select", "subr", "sumof", "bool", "union", "->",
+    "poly", "productof", "prompt-tag", "proves", "ref", "select", "subr", "sumof", "bool", "union", "->", "->*",
 ];
 
 impl Checker {
@@ -162,7 +166,7 @@ impl Checker {
         }
     }
 
-    fn head(&self, items: &[Syntax]) -> Option<&str> {
+    pub(crate) fn head(&self, items: &[Syntax]) -> Option<&str> {
         items.first().and_then(|h| h.as_symbol()).map(|h| self.name(h))
     }
 
@@ -479,13 +483,34 @@ impl Checker {
 
     // --------------------------------------------------------------- types
     pub fn parse_type(&mut self, s: &Syntax) -> R<TyId> {
-        let t = self.parse_type_node(s)?;
+        let t = match std::mem::take(&mut self.arrow_star) {
+            true => self.parse_arrow_star(s)?,
+            false => self.parse_type_node(s)?,
+        };
         // Storage written: a procedure kept there may not reach itself
         // unsaid (`spin`).
         if matches!(self.head(self.items(s, "a type").unwrap_or(&[])), Some("ref" | "icell" | "pairof" | "listof" | "union" | "bloblet" | "arrayof" | "mark-key" | "mu")) {
             self.no_knot(t, s.span)?;
         }
         Ok(t)
+    }
+
+    /// A definition's signature that may be `(->* (param …) result)`, under
+    /// any `poly`s: read as `(subr pure (param …) result)`, the effect the
+    /// definition then finds standing in for its own (`top.rs`).
+    fn parse_arrow_star(&mut self, s: &Syntax) -> R<TyId> {
+        let items = self.items(s, "a type")?.to_vec();
+        match (self.head(&items), &items[..]) {
+            (Some("->*"), [_, params, result]) => self.parse_subr_type(self.conv_default, Effect::pure(), params, result),
+            (Some("->*"), _) => Err(FxError::at(s.span, "`(->* (param …) result)`")),
+            (Some("poly"), _) => {
+                self.arrow_star = true;
+                let t = self.parse_type_node(s);
+                self.arrow_star = false;
+                t
+            }
+            _ => self.parse_type_node(s),
+        }
     }
 
     fn parse_type_node(&mut self, s: &Syntax) -> R<TyId> {
@@ -605,6 +630,7 @@ impl Checker {
                 let effect = self.parse_effect(effect)?;
                 self.parse_subr_type(conv, effect, params, result)
             }
+            "->*" => Err(FxError::at(s.span, ARROW_STAR_ONLY)),
             // `(-> (param …) result)`: `(subr pure (param …) result)`.
             "->" => {
                 let [_, params, result] = &items[..] else {

@@ -78,10 +78,10 @@
 ;; What `define*` says when `name`, found to be a `tf`, does not check at
 ;; it, as `m` says: the program's error, since only that check sees a call
 ;; of `name` as recursion.
-(define k-star-mistake (subr (maxeff kreads (alloc @t) spin) (symbol int string) string)
-  (lambda (name tf m)
-    (k-cat5 (k-cat3 "`define*` found `" (symbol->string name) "` to be a ") (k-show-ty tf)
-            ": " m "")))
+(define k-star-mistake (subr (maxeff kreads (alloc @t) spin) (string symbol int string) string)
+  (lambda (how name tf m)
+    (k-cat5 (k-cat3 how " found `" (symbol->string name)) "` to be a " (k-show-ty tf)
+            ": " m)))
 
 (define k-made-of (subr (alloc @t) (k-parts k-parts k-parts k-eff) k-made)
   (lambda (abs ds vs e) (product (1 abs) (2 ds) (3 vs) (4 e))))

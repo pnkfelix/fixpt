@@ -81,6 +81,17 @@ pub struct Defining {
     pub broken: Vec<(Vec<Sym>, String)>,
 }
 
+/// The effect `->*` finds for `name`, from its body's `latent`: with `spin`
+/// if it reads `name` itself, as a procedure that may reach itself through
+/// a global must say (`no_reaching_itself`).
+fn arrow_star_spins(name: Sym, latent: Effect) -> Effect {
+    use crate::ast::Atom;
+    match latent.contains(Atom::Read(Region::Global(name))) {
+        true => latent.union(&Effect::atom(Atom::Spin)),
+        false => latent,
+    }
+}
+
 fn set_assigns(top: &mut Top, to: bool) {
     if let Top::Define { assigns, .. } | Top::DefineRec { assigns, .. } = top {
         *assigns = to;
@@ -668,6 +679,12 @@ impl Checker {
                 let name = self.binder_name(name)?;
                 self.pending_lemma = None;
                 let written = ty;
+                // `(->* (param …) result)`: its effect found from its body.
+                let star = self.written_arrow_star(ty);
+                if star && infer {
+                    return Err(FxError::at(written.span, "`define*` and `->*` each find what a procedure does: write one"));
+                }
+                self.arrow_star = star;
                 let ty = self.parse_type(ty)?;
                 let ty = self.resolve_selects(ty, written.span)?;
                 // Checked as though it said it read any globals; what it
@@ -692,6 +709,9 @@ impl Checker {
                 if infer && !self.is_lambda(e) {
                     return Err(FxError::at(self.arena.span_of(e), "`define*` defines a procedure: a `lambda`"));
                 }
+                if star && !matches!(self.arena.exp_at(e), crate::ast::Exp::Lambda { .. }) {
+                    return Err(FxError::at(self.arena.span_of(e), "`->*` finds a procedure's effect from its `lambda`: define it as one"));
+                }
                 // A lambda is in scope in itself, as a `letrec` binding is:
                 // making it runs nothing, so nothing sees it unmade. With
                 // `define*`, at its type as written: the globals it reads
@@ -712,16 +732,23 @@ impl Checker {
                 if let Some(g) = inside {
                     self.transparent.push(g);
                 }
-                let checked = self.check_declared(name, ty, e);
+                // With `->*`, the `lambda` is told its parameters and result
+                // and its effect found, with a call of itself standing for
+                // nothing more: that effect already holds what such a call
+                // does, so it is the least the procedure can have.
+                let checked = match star {
+                    false => self.check_declared(name, ty, e),
+                    true => self.arrow_star_latent(ty, e),
+                };
                 // With `define*`, the globals the body read, found, are its
                 // type's; and it is checked again at that type, bound to it,
                 // so that what is kept is a check at the type it has. That
                 // check is the one that sees a call of the procedure itself
                 // as recursion, so one that fails is the program's: a loop
                 // with no `spin`, say.
-                let (checked, ty) = match (infer, checked) {
-                    (true, Ok(_)) => {
-                        let reads = self.globals_read_by(e);
+                let (checked, ty) = match (infer || star, checked) {
+                    (true, Ok(latent)) => {
+                        let reads = if star { arrow_star_spins(name, latent) } else { self.globals_read_by(e) };
                         let found = self.with_latent(declared, &reads).expect("a subr");
                         let at = self.env.len() - 1;
                         self.env.set_ty(at, found);
@@ -729,7 +756,8 @@ impl Checker {
                         self.note_termination(&[(name, found, e)]);
                         let again = self.check_declared(name, found, e).map_err(|err| {
                             let shown = self.show_ty(found);
-                            FxError::at(err.span, format!("`define*` found `{}` to be a {shown}: {}", self.interner.name(name), err.message))
+                            let how = if star { "`->*`" } else { "`define*`" };
+                            FxError::at(err.span, format!("{how} found `{}` to be a {shown}: {}", self.interner.name(name), err.message))
                         });
                         (again, found)
                     }
@@ -779,6 +807,31 @@ impl Checker {
                 Ok(Top::Define { name, ty, effect, exp: e, typed: false, inferred: false, recursive: false, assigns: false })
             }
             _ => Err(FxError::at(span, "`(define name type expression)` or `(define name expression)`")),
+        }
+    }
+
+    /// Whether signature `s` is `(->* …)`, under any `poly`s.
+    fn written_arrow_star(&self, s: &Syntax) -> bool {
+        let items = s.as_proper_list().unwrap_or(&[]);
+        match (self.head(items), items) {
+            (Some("->*"), _) => true,
+            (Some("poly"), [_, _, body]) => self.written_arrow_star(body),
+            _ => false,
+        }
+    }
+
+    /// The latent effect of `e`, a `lambda`, told the parameters and result
+    /// of `ty`, a `subr` under any `poly`s, whose binders are in scope.
+    fn arrow_star_latent(&mut self, ty: TyId, e: crate::ast::ExpId) -> R<Effect> {
+        let mut t = self.arena.resolve(ty);
+        while let crate::ast::Ty::Poly { body, .. } = self.arena.get(t) {
+            t = self.arena.resolve(*body);
+        }
+        let crate::ast::Ty::Subr { params, result, .. } = self.arena.get(t).clone() else { unreachable!("`->*` reads as a `subr`") };
+        let (lt, _) = self.synth_lambda_as(e, Some(&params), Some(result))?;
+        match self.arena.get(self.arena.resolve(lt)) {
+            crate::ast::Ty::Subr { effect, .. } => Ok(effect.clone()),
+            _ => unreachable!("a `lambda`'s type"),
         }
     }
 
@@ -1213,7 +1266,7 @@ impl Checker {
 /// The words FX-26 reserves: syntax, and the parts of descriptions.
 pub const KEYWORDS: &[&str] = &[
     "lambda", "plambda", "proj", "if", "letrec", "let", "begin", "define", "define*", "define-type", "define-generative",
-    "subr", "->", "poly", "ref", "pairof", "dletrec", "void", "pure", "maxeff", "read", "write",
+    "subr", "->", "->*", "poly", "ref", "pairof", "dletrec", "void", "pure", "maxeff", "read", "write",
     "alloc", "goto", "comefrom", "region", "effect", "type", "prompt", "prompt-tag",
     "composable", "oneshot", "mark-key", "listof", "cond", "case", "else", "and", "or", "let*", "define-effect", "define-convention", "module-parameters", "the",
     "bloblet", "fields", "frozen", "arrayof", "icell", "await", "define-rec", "letrena", "letreap", "rlambda", "quote", "productof", "sumof", "product", "extract", "sum", "tagcase", "module", "moduleof", "with", "select", "load-module", "import",
