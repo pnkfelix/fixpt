@@ -706,154 +706,16 @@ is checked.
 Deferred because: the user's, to think through before designing; it bears
 on Q8's generic operations and on shapes' syntax, both open.
 
-## 34. Private regions shared by two files: is the licence still sound? (the user's, 2026-10-05)
+## 34. A second `define-type` of a name, taken silently (found 2026-10-05)
 
-Since `DONE.md` §30, a region declared private again stands for the one
-the program already has, so that a file loaded again is the same program.
-But two different files loaded into one REPL that both declare `@q`
-private now share it. `private-regions` is what the licence (`licence.rs`;
-`docs/fx26.md`, "A licence is masking relative to an observer") rests on:
-what a program does to its own regions is masked from everything outside
-it, by construction, since nothing else can name them. That is what lets
-the REPL run the eager reader's entry points speculatively, as each
-character is typed. With `@q` shared, the second file's code can read what
-the first's wrote, which the first's licence called unobservable.
-
-To check:
-- whether anything relies on it beyond the speculation driver (masking of
-  private regions' effects in types; effect summaries; the compilers);
-- whether a counterexample exists: a licensed expression of file A whose
-  run, speculative, is observed by file B through a shared `@q`;
-- if so, the fix: key a private region by the file that declares it (its
-  path, or its `load-module` identity), so that the same file loaded again
-  gets its regions back and another file gets its own; or refuse a second
-  file's declaration of a name already private.
-
-Deferred because: the user's question, to answer before the REPL relies
-on reloads of more than one file.
-
-**Where it is going (2026-10-05, with the user).** The fix is to move the
-front end's files, and programs like `okasaki.fx`, into modules, a file at
-a time, with only the program that assembles them declaring private
-regions. Two ways for a module to reach the regions its state is in were
-weighed, both working today:
-- **Regions as parameters**: the file a `plambda` over its regions whose
-  body is a thunk building the module, `(plambda ((t region)) (lambda ()
-  (module …)))`, instantiated by the program with its own (checked: both
-  checkers, both paths). Any number of instances; loadable with
-  `load-module`, which sees only the standard environment; an interface
-  that stands alone, as separate compilation (Q9) wants. The cost: `@t`
-  becomes `t` in the file's text.
-- **Regions as program-wide names**: one top-level `(private-regions @t
-  …)` ahead of the files, each an inline `(define m (module …))` that names
-  `@t` directly. No change to the files' text beyond the wrapper; one
-  instance; not loadable by `load-module` (`@t` is unbound there).
-
-**Chosen first: program-wide names** (the user's). **A wart to keep in
-mind**: modules depend on ambient region names, so they cannot be
-loaded, instantiated twice or compiled apart; and KFX26
-(`docs/research/kfx26.md`, "Decisions to make first", 1) renders a
-phase's state as one `&mut State`, which a region parameter is and an
-ambient region is not (a `static`, in Rust). KFX26's plan may well decide
-for parameters; revisit then, a file at a time.
-
-The other blockers to moving files into modules, found surveying the
-front end (`fixpt front-end-files`): `define-datatype` in `module` forms
-(25 in 8 files); `define-effect` in modules, and effect abbreviations
-exported (31 in 9); `define*` in modules (33 in 13); top-level `(set hook
-impl)` forward references between files (16 in 7). A first pilot,
-`table.fx`, needs none of them.
-
-**The pilot, done (2026-10-05): `table.fx` is a module.** Its six type
-abbreviations stay at the top level, where it and other files name them;
-its procedures are `(define tables (module …))`; the seven names other
-files (and `tests/table.rs`) use are re-exported, `(define table-ref
-(with tables table-ref))`, and its helpers stay inside. No other file
-changed. Both checkers, both compilers, the bootstrap fixpoints and the
-register-code cache all hold; the native REPL's 20 reloads of
-`okasaki.fx` print the same. The self-compile, three runs each, the
-module against the file as it was: check 1.214–1.221 s against
-1.213–1.236 s, compile 0.360–0.364 s against 0.369–0.376 s, so no cost
-measurable. What it found:
-- a module's `define` did not see its own name: fixed, a module's values
-  now see each other as a `letrec*`'s (`DONE.md` §37);
-- a parameterised type re-exported, `(define-type (table (k type) …)
-  ((select tables table) k v r))`, failed when used, "`r` is not a type",
-  in both checkers: a region parameter bound while a family expands was
-  not read as a region where the head was a `select`. Fixed (2026-10-05),
-  and `(define-type table (select tables table))` now names the family
-  itself, applied as the `select` is (`parse_type_node`, `k-select-alias`;
-  tests `modules/family-alias.fx`, `modules/family-region-param.fx`). The
-  types can move into the module.
-
-**The pilot, again (2026-10-05).** `table.fx`'s six types are now inside
-`tables`, its three one-member `define-rec`s plain `define`s (§37), and
-the one type other files name re-exported, `(define-type table (select
-tables table))`. The self-compile as register code, back to back, three
-runs before and six after (`tests/bootstrap.rs`, `comparison`): check
-1.21–1.22 s against 1.23–1.24 s, about 1.5% slower; compile 0.15 s both.
-Probably each use of `(table …)` elsewhere now going through a `select`
-resolved at its use; not looked into.
-
-**First of the files that need nothing new (2026-10-05): `check-facts.fx`**,
-four procedures in `(define test-facts (module …))`, the two
-`check-synth.fx` calls re-exported (neither inlined: both name
-themselves). Back to back, new, old, new, three runs each: check
-1.20–1.23 s, 1.22–1.23 s, 1.23 s; compile 0.15 s throughout. No cost
-measurable; but its procedures are called once a test, not in the
-checker's inner loops, so a hotter file is the real test of re-exports
-(§38's remainder). Items are indented two spaces under `(define m
-(module`, so a file's lines stay within 100 columns. The other files that
-need nothing new: `check-args`, `check-generative`, `check-mask`,
-`check-errors`, `check-calls`, `check-close`, `check-synth`, `layout`,
-`standard`, `compile-exps`, `compile-programs`, `regcode-core`,
-`native-layout`.
-
-**The rest of them (2026-10-05)**, one commit each, each timed new, old,
-new against the commit before (`tests/bootstrap.rs`, `comparison`):
-`check-synth`, `check-args`, `check-generative`, `check-mask`,
-`check-errors`, `check-calls`, `check-close`, `compile-exps`,
-`compile-programs`, `regcode-core`. Items unindented between `(define
-<file>-module (module` and `))`, so no line grows. Compile stayed 0.15 s
-throughout: the re-exports cost nothing measurable at run time. Check did
-not: 1.24 s before `compile-exps`, 1.65 s after `regcode-core` (+5%,
-+12%, +6% for those three; the checker files' modules cost nothing
-measurable). Checking a large module grows faster than its size: to look
-into before more files move. Found, profiling (`docs/performance.md`,
-"Printing a type was quadratic"): not the module code, but printing a
-type, quadratic in the type names in scope at each node, a module's type
-being large; fixed, check 0.99 s. Found on the way, each fixed or set
-aside:
-- each lambda's recursive group was checked to end once per member
-  (fixed, `c71bbc2`: check 2.65 s → 1.31 s with `compile-exps`);
-- a module counts a type and a value of one name as defined twice, where
-  the top level keeps them apart (`c-mval`; renamed): to decide;
-- a second top-level `define-type` of a name already a type is taken
-  silently, its uses failing later and far away (`k-whys`): to refuse or
-  say;
-- a type re-exported from a module cannot be named by an earlier file,
-  though types are otherwise declared ahead (`c-inline`; moved to its
-  first user);
-- `define*` in a module (done, `41796d6`), then the files it alone
-  blocked: `check-data`, `check-letrec`, `check-print`, `check-subtype`,
-  `check-infer`, `check-program`, `compile-lift` (check 0.97 s to 1.06 s
-  over the nine; compile 0.15–0.16 s). A file's `define-type`s now stay at
-  top level, before its module, as they are declared ahead and named
-  before their definitions; earlier files' modules keep theirs inside.
-  `check-syntax.fx` and `regcode-exps.fx` would pass 1000 lines with the
-  wrapper and their re-exports: each to be split first. Loading the
-  lowered front end now counts against no step limit (`7c7d276`): found
-  when `check-program.fx`'s module passed a test's 100,000;
-- with a module's types declared ahead (`43483dd`), the files' types are
-  back inside their modules, re-exported by `select` where later files
-  name them; a type an earlier file names (`k-seen-pol`) moved to it.
-  `check-print.fx`'s second half is `check-holds.fx`. Cost found and
-  fixed: resolving a `select` rebuilt the whole type (`docs/
-  performance.md`); check 0.91 s;
-- `layout.fx`, `standard.fx` and `native-layout.fx` are generated from
-  Rust tables (`tests/layout.rs`): their generators would write modules;
-  set aside, and mostly constants, which want checking that a re-exported
-  constant stays one to the compilers.
+What is left of §34 (the rest, and the question it began with, are in
+`DONE.md` §34). A second top-level `(define-type t …)` of a name already
+a type is taken as a redefinition, silently: `(define-type t int)
+(define-type t bool) (the t #t)` checks, in both checkers, `t` the
+second. At the REPL that is redefinition, as for values; in a file it
+is more likely a mistake, whose uses then fail later and far away (found
+as `k-whys`, moving the front end into modules). To decide: refuse it in
+a file, or say so (a warning line), keeping the REPL's rule.
 
 ## 35. Provenance in the names of our code (the user's, 2026-10-05)
 

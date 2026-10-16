@@ -353,7 +353,7 @@ weighed with the other items, not ahead of them.
   continuation gap probed (done: real in the statement, harmless,
   `soundness.md` §4.6, `control/frames-hold-private-state.fx`); O16 (done:
   a soundness hole, now a static error); O15's three disagreements and
-  `load-module` from a loaded file (done); then `TODO.md` §34: the front
+  `load-module` from a loaded file (done); then `DONE.md` §34: the front
   end into modules a file at a time, regions as program-wide names first
   (the user's choice; a wart, regions as parameters being what KFX26's
   `&mut State` would be), `table.fx` the pilot (done: a module, at no
@@ -385,7 +385,7 @@ weighed with the other items, not ahead of them.
   loaded again keeps its private regions.
   O15–O18, found documenting the grammar: the checkers disagree in three
   corners, and a module may define a name twice.
-- M. **The front end into modules** (`TODO.md` §34, 2026-10-06): all 52
+- M. **The front end into modules** (`DONE.md` §34, 2026-10-06): all 52
   files are modules, the three generated ones by their generators; no
   hooks are left between files (the compilers' by a middle phase,
   `TODO.md` §41; the checker's by regrouping each knot into one file or
