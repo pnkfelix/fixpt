@@ -1622,6 +1622,29 @@ phases' allocation 274.9 → 228.7 M words. `hide`'s marks looked up in sets too
 are typed, as a type's name already was; in both checkers (`parse.rs`'s
 type-list fallback, `check-read-descs.fx`'s `k-parse-type-form`). Tests:
 `modules/include-family.fx`, `include-family-missing.fx`.
+**An include's names bound once, at the module** (2026-10-16, `TODO.md`
+§69's cost). Each item's value was `(with %include …)` inside its lambda
+(`with_includes`), so every call loaded each included name it uses from
+`%include` into a slot (or, in a leaf, a register). Now the module binds
+the names its items' `with`s use once, after `%include` is made, and those
+`with`s bind nothing, so each lambda captures the names it uses, as the
+import lines' were (`Compiler::included_names`, `note_included`; the
+FX-26 compiler's `c-note-included!`, `c-included?`): in the cellular
+code, the register code and the plan, of both compilers, which make the
+same words. From outside an item (`%include` bound there) such a `with`
+still reads as one that binds its names, so a walk for free names needs
+no list of them. An item whose lambda has a parameter of an included
+name keeps its own `with`, which there binds over the parameter (as
+before: a bug, `TODO.md` §69). Measured side by side, best of 3, three
+rounds alternated, load averages about 2: peval's `fx check` 20.5 →
+19.8 ms, `fx words` 12.9 → 12.1; the front end checking itself, on the
+same input (the old Rust compiler with the new FX-26 files), `fx check`
+2580 → 2510, `fx words` 725 → 709. The FX-26 compiler has more to do in
+such modules: each name a lambda captures is looked up in its
+environment, a list, past the module's items; so against the old files
+too, the front end's `fx words` 702 → 706 (and `fx check` 2550 → 2500).
+Found with it: `DONE.md` §104. Test: `modules/include-bound-once.fx`.
+
 ## 71. A load cycle is an error, not a hang (2026-10-10)
 
 Found 2026-10-09 (`TODO.md` §68 phase 2): two types files loading each

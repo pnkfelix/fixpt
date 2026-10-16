@@ -1207,6 +1207,18 @@ impl Compiler<'_> {
                 self.r_adapted(g)?;
                 g.op("setfield", &[Value::fixnum((super::CLOSURE_FREE0 + j) as i64), Gen::n(1)]);
             }
+            // The included names, once `%include`, the first item, is made,
+            // each into a slot of its own (`Compiler::included_names`).
+            if k == 0 {
+                for (n, i) in self.note_included(items) {
+                    let s = g.slot();
+                    g.op("stack", &[Gen::n(at)]);
+                    g.op("field", &[Value::fixnum(i as i64 + 2)]);
+                    g.op("setstk", &[Gen::n(s)]);
+                    env.push((n, RLoc::Slot(s)));
+                    te.push((n, Loc::Slot(usize::MAX)));
+                }
+            }
         }
         self.r_prim(g, "%make-frozen", &vals, env, te)?;
         env.truncate(depth);
@@ -1224,6 +1236,9 @@ impl Compiler<'_> {
     /// constant, assumed behind a `global-guard` of the module's global: a
     /// module is not changed, only another defined (`TODO.md` §42).
     fn r_with(&mut self, g: &mut Gen, x: ExpId, module: Sym, body: ExpId, env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
+        if self.included_withs.contains(&x) {
+            return self.r_exp(g, body, env, te, tail);
+        }
         let names = self.c.facts.with_vals.get(&x)?.clone();
         let (depth, tdepth, regs, slots) = (env.len(), te.len(), g.next_reg, g.next_slot);
         let place = self.r_where(env, module)?;

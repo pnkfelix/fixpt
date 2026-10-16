@@ -187,18 +187,25 @@
   (c-module (->* (mod-items cenv int code bool) unit)
     (lambda (items e depth c tail)
       (let* ((vs (c-module-values items))
-             (made (c-module-make vs e depth (c-module-slots vs depth) nil nil c))
+             ;; The included names, in slots after `%include`'s.
+             (inc (c-note-included! items))
+             (np (c-length (extract inc 1)))
+             (slots (if (null? vs)
+                        (the c-mslots nil)
+                        (the c-mslots (cons (cons (extract (car vs) 1) depth)
+                                            (c-module-slots (cdr vs) (+ (+ depth 1) np))))))
+             (made (c-module-make vs e depth slots nil nil inc c))
              (n (begin (c-int c 37) (c-slots-load (extract made 2) c))))
         (begin (c-prim c "%make-frozen" (+ 1 n))
                (c-done c tail)
                (c-unbind c depth (- (extract made 1) depth) tail)))))
   ;; Values `vs` made in slots from `d`, `later` theirs, `ws` the closures
-  ;; waiting, `vals` the values' slots (newest first): the next slot, and
-  ;; the values' slots.
+  ;; waiting, `vals` the values' slots (newest first), `inc` the included
+  ;; names, made after the first: the next slot, and the values' slots.
   (c-module-make
-    (->* (c-mvals cenv int c-mslots c-waits (listof int @k) code)
+    (->* (c-mvals cenv int c-mslots c-waits (listof int @k) c-included code)
          (productof (1 int) (2 (listof int @k))))
-    (lambda (vs e d later ws vals c)
+    (lambda (vs e d later ws vals inc c)
       (if (null? vs)
           (product (1 d) (2 vals))
           (let* ((v (car vs)) (n (extract v 1)) (x (extract v 2)) (k (extract v 3))
@@ -208,9 +215,13 @@
                                 (if (= k 2) (c-note-member! n x e) #u)
                                 (the patches nil))))
                  (waits (c-waits-onto ws d ps))
-                 (given (c-give-waiting waits d c)))
-            (c-module-make (cdr vs) (c-extend n (at-slot d) e) (+ d 1) (cdr later) waits
-                           (if (= k 0) vals (cons d vals)) c)))))
+                 (given (c-give-waiting waits d c))
+                 (np (c-length (extract inc 1)))
+                 (inner (c-with-fields (extract inc 1) (extract inc 2) (at-slot d)
+                                       (c-extend n (at-slot d) e) (+ d 1) 0 c)))
+            (c-module-make (cdr vs) inner (+ (+ d 1) np) (cdr later) waits
+                           (if (= k 0) vals (cons d vals))
+                           (the c-included (product (1 nil) (2 nil) (3 nil))) c)))))
   ;; Item `n`'s lambda `x`, made in slot `d` in `e`, naming items of `later`
   ;; not made yet, itself among them: those captured as a `letrec`'s
   ;; siblings are, to be given once made. What it gives: as `c-lambda`'s.
@@ -236,6 +247,8 @@
                (let ((n (c-fx-name m body)))
                  (begin (if (std-nil-name? n) (c-lit c (wcell-nil)) (c-standard-value n c))
                         (c-done c tail))))
+              ;; A module's included names, bound where it is made.
+              ((c-included? a b abk) (c-exp body e depth c tail))
               ((or (null? ns) (null? ps)) (c-fail "a `with` the checker did not see"))
               ((null? l) (c-fail "a `with` of an unbound module"))
               (else

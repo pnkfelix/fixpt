@@ -1728,9 +1728,9 @@ is). Left:
   the compiler (peval's `fx` phases): about 3 % slower, `fx check` and
   `fx words`; an item's lambda's body is `(with %include …)`, so each
   call loads the included names it uses from the bucket, where an import
-  bound them once. A `with` of a bucket of hidden includes could be made
-  once, at the module (each name bound as the import line did), not per
-  call. Checking the front end itself, much more: `check` 575 → 762 ms,
+  bound them once. Done (2026-10-16, `DONE.md` §69): the names bound once,
+  at the module, as the import lines did. Checking the front end itself,
+  much more: `check` 575 → 762 ms,
   `fx check` 1295 → 2127, 223.6 → 273.9 M words. Mostly the bucket made
   quadratically, each name looked for in a list of those so far, in both
   checkers; fixed (`DONE.md` §69): `check` 555, `fx check` 1475, 228.7 M
@@ -1745,6 +1745,17 @@ is). Left:
 - Done (2026-10-11): an included type family applied in a declared
   type (`DONE.md` §69). Left: the front end's files that kept
   table-types's import lines for it could now include it.
+- An included name shadows a parameter of the same name (found
+  2026-10-16): `(define f T (lambda (x) (+ x y)))` in a module that
+  includes one with a value `x` adds the included `x`, not its argument,
+  since `with_includes` puts the item's `(with %include …)` inside the
+  lambda, where it binds over the parameter; both checkers type it so,
+  and every machine runs it so (`modules/include-bound-once.fx` records
+  it: 21, not 1020). An included value is the module's, as its own items
+  are, so the parameter should win: the `with` binding only the names no
+  parameter has (in both checkers' `with` facts and both parsers), after
+  which such an item's names can be bound at the module as the others'
+  are (`included_names`, which leaves its `with` alone for now).
 
 If `extend` is ever n-ary, `(extend m1 m2 m3)` should be a left fold (the
 later wins), not "all at once", which would blur it and `include` together:

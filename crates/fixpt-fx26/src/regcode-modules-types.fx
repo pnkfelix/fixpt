@@ -18,6 +18,7 @@
 (import compile-exps-types (type c-mslots c-mvals c-waits))
 (hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type exp (select parser-types exp))
+(define-type mod-items (select parser-types mod-items))
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type k-ids (select check-types-types k-ids))
 (hide (define check-env-types (load-module "fx26:check-env-types.fx")))
@@ -53,6 +54,20 @@
                                spin)
                        (rgen c-waits int)
                        unit))
+            (val r-module-made
+                 (subr (maxeff (alloc @k)
+                               (goto @y)
+                               (read @globals)
+                               (read @k)
+                               (read @t)
+                               (write @k)
+                               spin)
+                       (rgen c-waits int mod-items r-scopes)
+                       r-scopes))
+            (val r-with-places
+                 (subr (maxeff (alloc @k) (read @globals) (read @k))
+                       (int int int)
+                       (listof k-ids @k)))
             (val r-with-fields
                  (subr (maxeff (alloc @k)
                                (goto @y)

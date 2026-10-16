@@ -542,6 +542,7 @@
       (set c-lifted (make-table c-at-hash c-at=?))
       (set c-with-index (make-table c-int-hash c-int=?))
       (c-index-withs! (get k-with-vals))
+      (set c-included-index (make-table c-int-hash c-int=?))
       (set c-reshape-index (make-table c-int-hash c-int=?))
       (c-index-reshapes! (get k-reshapes))
       (c-fill-facts fs))))
@@ -590,6 +591,115 @@
 (define c-rec-exps (->* (c-recs) exps)
   (lambda (bs) (if (null? bs) nil (cons (extract (car bs) 3) (c-rec-exps (cdr bs))))))
 
+;; The `(with %include …)`s of modules' items whose names the module binds
+;; once, where it is made (`c-note-included!`): they bind nothing. As the
+;; Rust compiler's `included_withs`.
+(define c-included-index (ref c-with-table @k) (new (make-table c-int-hash c-int=?)))
+(define c-included? (->* (int int int) bool)
+  (lambda (a b k) (not (null? (c-with-in (table-ref (get c-included-index) a nil) a b k)))))
+(define c-any-member? (->* (syms syms) bool)
+  (lambda (xs ns) (and (not (null? ns)) (or (c-member? xs (car ns)) (c-any-member? xs (cdr ns))))))
+;; Item value `x`'s `(with %include …)` (`with_includes`), in a list of one,
+;; if its module may bind the names it binds: none if a parameter of its
+;; lambda, `ps`, has one of them (the `with`, inside, wins there).
+(define c-include-with (->* (exp syms) exps)
+  (lambda (x ps)
+    (tagcase x
+      (e-with (m body a b abk)
+        (let ((ns (c-with-at a b abk)))
+          (if (and (string=? (symbol->string m) "%include")
+                   (and (not (null? ns)) (not (c-any-member? ps (car ns)))))
+              (the exps (cons x nil))
+              nil)))
+      (e-lambda (qs body a b abk) (c-include-with body (c-bind-params qs nil)))
+      (e-plambda (d body a b abk) (c-include-with body ps))
+      (e-the (d body a b abk) (c-include-with body ps))
+      (e-rlambda (r l a b abk) (c-include-with l ps))
+      (else y nil))))
+;; Names `ns` at positions `ps` onto `names` and `places`, newest first,
+;; each not `seen` yet (by position: a name has one).
+(define c-included-add
+  (->* (syms k-ids syms k-ids (table int bool @k)) (productof (1 syms) (2 k-ids)))
+  (lambda (ns ps names places seen)
+    (cond ((or (null? ns) (null? ps)) (product (1 names) (2 places)))
+          ((table-ref seen (car ps) #f) (c-included-add (cdr ns) (cdr ps) names places seen))
+          (else (begin (table-set! seen (car ps) #t)
+                       (c-included-add (cdr ns) (cdr ps) (the syms (cons (car ns) names))
+                                       (the k-ids (cons (car ps) places)) seen))))))
+(define c-included-exps (->* (exps c-included (table int bool @k)) c-included)
+  (lambda (xs acc seen)
+    (if (null? xs)
+        acc
+        (let ((w (c-include-with (car xs) nil)))
+          (c-included-exps
+           (cdr xs)
+           (if (null? w)
+               acc
+               (tagcase (car w)
+                 (e-with (m body a b abk)
+                   (let ((more (c-included-add (car (c-with-at a b abk))
+                                               (car (c-with-places-at a b abk))
+                                               (extract acc 1) (extract acc 2) seen)))
+                     (product (1 (extract more 1)) (2 (extract more 2))
+                              (3 (the exps (cons (car w) (extract acc 3)))))))
+                 (else y acc)))
+           seen)))))
+(define c-included-items (->* (mod-items c-included (table int bool @k)) c-included)
+  (lambda (items acc seen)
+    (if (null? items)
+        acc
+        (let* ((it (car items)) (k (extract it 1)) (xs (extract it 4)))
+          (c-included-items (cdr items)
+                            (cond ((= k 2) (c-included-exps (the exps (list (car xs))) acc seen))
+                                  ((= k 3) (c-included-exps xs acc seen))
+                                  (else acc))
+                            seen)))))
+;; Names `ns` and positions `ps`, newest first, onto `os` and `qs`, the
+;; oldest first.
+(define c-included-oldest (->* (syms k-ids syms k-ids) (productof (1 syms) (2 k-ids)))
+  (lambda (ns ps os qs)
+    (if (or (null? ns) (null? ps))
+        (product (1 os) (2 qs))
+        (c-included-oldest (cdr ns) (cdr ps) (the syms (cons (car ns) os))
+                           (the k-ids (cons (car ps) qs))))))
+;; A module's included values (`TODO.md` §69): the names its items'
+;; `(with %include …)`s use, in order, each with its position in
+;; `%include`, to be bound once where the module is made, after `%include`,
+;; as an import line's were; and those `with`s, which then bind nothing,
+;; so that a lambda captures the names it uses rather than loading each
+;; from `%include` at every call. As the Rust compiler's `included_names`.
+(define c-included-names (->* (mod-items) c-included)
+  (lambda (items)
+    (let ((none (the c-included (product (1 nil) (2 nil) (3 nil)))))
+      (if (or (null? items)
+              (not (= (extract (car items) 1) 2))
+              (not (string=? (symbol->string (car (extract (car items) 2))) "%include")))
+          none
+          (let* ((inc (c-included-items (cdr items) none (make-table c-int-hash c-int=?)))
+                 (old (c-included-oldest (extract inc 1) (extract inc 2) nil nil)))
+            (product (1 (extract old 1)) (2 (extract old 2)) (3 (extract inc 3))))))))
+(define c-note-withs! (->* (exps) unit)
+  (lambda (ws)
+    (if (null? ws)
+        #u
+        (begin
+          (tagcase (car ws)
+            (e-with (m body a b abk)
+              (if (c-included? a b abk)
+                  #u
+                  (let ((at (c-with-in (table-ref (get c-with-index) a nil) a b abk)))
+                    (if (null? at)
+                        #u
+                        (table-set! (get c-included-index) a
+                                    (the k-with-list
+                                      (cons (car at) (table-ref (get c-included-index) a nil))))))))
+            (else y #u))
+          (c-note-withs! (cdr ws))))))
+;; `c-included-names`, its `with`s noted as binding nothing.
+(define c-note-included! (->* (mod-items) c-included)
+  (lambda (items)
+    (let ((inc (c-included-names items))) (begin (c-note-withs! (extract inc 3)) inc))))
+
 (define-rec
   (c-free-all (->* (exps syms syms) syms)
     (lambda (es bound acc)
@@ -624,10 +734,14 @@
         (e-module (items a b abk) (c-free-items items (c-module-bound items bound) acc))
         ;; The module, then the body, the module's values bound in it.
         (e-with (m body a b abk)
-          (if (string=? (symbol->string m) "#%fx")
-              acc
-              (let ((ns (c-with-at a b abk)) (acc (if (c-member? bound m) acc (c-adjoin acc m))))
-                (c-free body (if (null? ns) bound (c-names (car ns) bound)) acc))))
+          (cond ((string=? (symbol->string m) "#%fx") acc)
+                ;; A module's included names, bound where it is made, from
+                ;; inside the item (outside, `%include` is bound, and the
+                ;; names bound in it are as good).
+                ((and (c-included? a b abk) (not (c-member? bound m))) (c-free body bound acc))
+                (else
+                 (let ((ns (c-with-at a b abk)) (acc (if (c-member? bound m) acc (c-adjoin acc m))))
+                   (c-free body (if (null? ns) bound (c-names (car ns) bound)) acc)))))
         (else y acc))))
   (c-free-items (->* (mod-items syms syms) syms)
     (lambda (items bound acc)

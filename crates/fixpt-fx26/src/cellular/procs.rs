@@ -202,6 +202,7 @@ impl Compiler<'_> {
                 }
             }
             Exp::Module(items) => self.plan_module(&items, e, plan),
+            Exp::With { body, .. } if self.included_withs.contains(&x) => self.plan_exp(body, e, tail, plan),
             Exp::With { module: _, body } => {
                 let names = self.c.facts.with_vals.get(&x).cloned().unwrap_or_default();
                 let mut inner = e.clone();
@@ -393,6 +394,10 @@ impl Compiler<'_> {
                 ModItem::Rec(group) => slots.extend(group.iter().map(|(n, _, _)| (*n, 0))),
             }
         }
+        let pre = self.note_included(items);
+        if !pre.is_empty() {
+            slots.splice(1..1, pre.iter().map(|(n, _)| (*n, 0)));
+        }
         let (mut inner, mut made) = (e.clone(), 0);
         for (i, item) in items.iter().enumerate() {
             let made_here: Vec<(Sym, ExpId)> = match item {
@@ -420,6 +425,10 @@ impl Compiler<'_> {
                 }
                 inner.push((n, SLOT));
                 made += 1;
+            }
+            if i == 0 {
+                inner.extend(pre.iter().map(|(n, _)| (*n, SLOT)));
+                made += pre.len();
             }
         }
     }

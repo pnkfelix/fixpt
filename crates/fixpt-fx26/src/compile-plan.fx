@@ -318,10 +318,13 @@
           (e-sum (t v a b abk) (p-exp v e #f))
           (e-tagcase (s arms els got a b abk) (begin (p-exp s e #f) (p-arms arms els e tail)))
           (e-module (items a b abk)
-            (let ((vs (c-module-values items))) (p-module vs e (c-module-slots vs 0))))
+            (let ((vs (c-module-values items)))
+              (p-module vs e (c-module-slots vs 0) (extract (c-note-included! items) 1))))
           (e-with (m body a b abk)
             (let ((ns (c-with-at a b abk)))
-              (if (null? ns) #u (p-exp body (p-slots (car ns) e) tail))))
+              (cond ((c-included? a b abk) (p-exp body e tail))
+                    ((null? ns) #u)
+                    (else (p-exp body (p-slots (car ns) e) tail)))))
           (else y #u)))))
   ;; Call `f` `args` at `a`-`b`, in `e`, planned: as the Rust compiler's
   ;; `plan_call`, and register code's `r-inlined` and `r-specialized`; a body
@@ -476,9 +479,10 @@
               (else y #u))
             (p-lifted (cdr bs) added (cdr ks) known (+ i 1))))))
   ;; As `c-module-make`: each value made in order, a lambda naming an item
-  ;; not made yet capturing it as a `letrec`'s sibling is.
-  (p-module (->* (c-mvals cenv c-mslots) unit)
-    (lambda (vs e later)
+  ;; not made yet capturing it as a `letrec`'s sibling is; the included
+  ;; names, `inc`, after the first.
+  (p-module (->* (c-mvals cenv c-mslots syms) unit)
+    (lambda (vs e later inc)
       (if (null? vs)
           #u
           (let* ((v (car vs)) (n (extract v 1)) (x (extract v 2)))
@@ -486,7 +490,8 @@
               (if (and (extract v 4) (c-names-any? x later))
                   (p-module-lambda n x e later)
                   (p-exp x e #f))
-              (p-module (cdr vs) (c-extend n (at-slot 0) e) (cdr later)))))))
+              (p-module (cdr vs) (p-slots inc (c-extend n (at-slot 0) e)) (cdr later)
+                        (the syms nil)))))))
   (p-module-lambda (->* (symbol exp cenv c-mslots) unit)
     (lambda (n x e later)
       (tagcase (car (c-lambda-of x))

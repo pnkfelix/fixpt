@@ -270,7 +270,11 @@ weighed with the other items, not ahead of them.
   what code, what runs it and the calling convention, the fastest
   (`fx-regs-rsjit-nativecc`) the default; it showed §81, no register code
   to machine code written in FX-26. Next, the user's order (2026-10-11):
-  §69's rest, then §77's native follow-ups.
+  §69's rest, then §77's native follow-ups. Done (2026-10-16): §69's
+  included names bound once at the module, not loaded at each call
+  (`DONE.md` §69); found with it, and fixed, a prompt tag held across a
+  collection (§104). Left in §69: an included name shadows a parameter of
+  its name (a bug), and hidden abstract types.
   §77, suffix refs (tag `010`, interior pointers into bloblet suffixes):
   done (`DONE.md` §77), the runtime, the `flat` kind, `(blobref B F)`,
   flat products, arrays and sums, in every machine; natively in line

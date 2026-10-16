@@ -4,7 +4,7 @@
 
 ;; The types these use, from the files that define them.
 (hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
-(import parser-types (type exp k-datum k-datums names syn syns-a))
+(import parser-types (type exp k-datum k-datums mod-items names syn syns-a))
 (hide (define check-env-types (load-module "fx26:check-env-types.fx")))
 (import check-env-types (type k-with-list k-with-noted k-reshaped k-pick k-picks k-reshape-list))
 (hide (define table-types (load-module "fx26:table-types.fx")))
@@ -125,6 +125,9 @@
 ;; The types it names, from the files that define them.
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (define-type k-ids (select check-types-types k-ids))
+;; A module's included names, their positions, and the `with`s that bind
+;; them (`c-included-names`).
+(define-type c-included (productof (1 syms) (2 k-ids) (3 exps)))
 (define-type compile-sig
   (moduleof (val c-frozen-define-at
                  (subr (maxeff (read @globals) (read @k)) (int int int) bool))
@@ -205,6 +208,11 @@
             (val c-apply-shares-at (subr (maxeff (read @globals) (read @k)) (int int int) bool))
             (val c-with-at
                  (subr (maxeff (alloc @k) (read @globals) (read @k)) (int int int) c-with-names))
+            (val c-included? (subr (maxeff (read @globals) (read @k)) (int int int) bool))
+            (val c-note-included!
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                       (mod-items)
+                       c-included))
             (val c-with-places-at
                  (subr (maxeff (alloc @k) (read @globals) (read @k))
                        (int int int)

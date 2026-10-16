@@ -233,6 +233,9 @@ pub struct Compiler<'a> {
     /// position, its arguments collecting nothing, counts as no call
     /// (`regcode::r_leaf_tail_call`).
     tail_calls_leave: bool,
+    /// The `(with %include …)`s of modules' items whose names the module
+    /// binds once, where it is made (`included_names`): they bind nothing.
+    included_withs: std::collections::HashSet<ExpId>,
 }
 
 /// A global procedure whose parameter `param` is only called (with
@@ -350,6 +353,7 @@ impl<'a> Compiler<'a> {
             summaries: None,
             own_now: None,
             tail_calls_leave: false,
+            included_withs: std::collections::HashSet::new(),
         }
     }
 
@@ -503,6 +507,10 @@ impl<'a> Compiler<'a> {
             }
             // `(with #%fx n)`, the standard `n`: nothing free.
             Exp::With { module, .. } if self.c.is_fx_module(module) => {}
+            // A module's included names, bound where it is made, from inside
+            // the item (outside, `%include` is bound, and the names bound in
+            // it are as good).
+            Exp::With { module, body } if self.included_withs.contains(&x) && !bound.contains(&module) => self.free(body, bound, acc),
             // The module, then the body, the module's values bound in it.
             Exp::With { module, body } => {
                 if !bound.contains(&module) {
@@ -773,15 +781,20 @@ impl<'a> Compiler<'a> {
                 let mut members = self.module_members.take();
                 let lambdas = self.c.module_lambdas(&items);
                 let is_lambda = |n: Sym, i: usize| lambdas.iter().any(|(m, _, _, at)| *m == n && *at == i);
+                // The included names, in slots after `%include`'s.
+                let pre = self.note_included(&items);
                 // Each name's slot, in written order.
                 let mut slots: Vec<(Sym, usize)> = Vec::new();
-                for item in &items {
+                for (i, item) in items.iter().enumerate() {
                     let d = depth + slots.len();
                     match item {
                         crate::ast::ModItem::Desc { .. } => {}
                         crate::ast::ModItem::Abs { up, down, .. } => slots.extend([(*up, d), (*down, d + 1)]),
                         crate::ast::ModItem::Val { name, .. } => slots.push((*name, d)),
                         crate::ast::ModItem::Rec(group) => slots.extend(group.iter().enumerate().map(|(k, (n, _, _))| (*n, d + k))),
+                    }
+                    if i == 0 {
+                        slots.extend(pre.iter().enumerate().map(|(k, (n, _))| (*n, d + 1 + k)));
                     }
                 }
                 let (mut inner, mut made, mut vals) = (e.clone(), 0, Vec::new());
@@ -827,6 +840,14 @@ impl<'a> Compiler<'a> {
                             self.op(code, "field!");
                         }
                     }
+                    if i == 0 {
+                        for (n, k) in &pre {
+                            self.op1(code, "slot", Value::fixnum(depth as i64));
+                            self.field(code, *k as i64 + 2);
+                            inner.push((*n, Loc::Slot(depth + made)));
+                            made += 1;
+                        }
+                    }
                 }
                 self.int(code, 37);
                 for s in &vals {
@@ -839,6 +860,7 @@ impl<'a> Compiler<'a> {
             }
             // `with`: the module's values the body names, by position, in
             // slots.
+            Exp::With { body, .. } if self.included_withs.contains(&x) => self.exp(body, e, depth, code, tail)?,
             Exp::With { module, body } => {
                 let names = self.c.facts.with_vals.get(&x).cloned().ok_or("a `with` the checker did not see")?;
                 let m = self.where_is(e, module).ok_or("a `with` of an unbound module")?;
@@ -1559,6 +1581,64 @@ impl<'a> Compiler<'a> {
         let mut free = Vec::new();
         self.free(x, &[], &mut free);
         free.iter().any(|m| later.iter().any(|(l, _)| l == m))
+    }
+
+    /// A module's included values (`TODO.md` §69): the names its items'
+    /// `(with %include …)`s use (`Checker::with_includes`), each with its
+    /// position in `%include`, to be bound once where the module is made,
+    /// after `%include`, as an import line's were; and those `with`s, which
+    /// then bind nothing, so that a lambda captures the names it uses rather
+    /// than loading each from `%include` at every call. A `with` whose
+    /// lambda has a parameter of a name it binds keeps its own: there the
+    /// `with`, inside, wins.
+    fn included_names(&self, items: &[ModItem]) -> (Vec<(Sym, usize)>, Vec<ExpId>) {
+        let (mut names, mut withs): (Vec<(Sym, usize)>, Vec<ExpId>) = (Vec::new(), Vec::new());
+        let Some(ModItem::Val { name: inc, .. }) = items.first() else { return (names, withs) };
+        if self.name(*inc) != "%include" {
+            return (names, withs);
+        }
+        for item in &items[1..] {
+            let inits: Vec<ExpId> = match item {
+                ModItem::Val { init, .. } => vec![*init],
+                ModItem::Rec(group) => group.iter().map(|(_, _, x)| *x).collect(),
+                ModItem::Abs { .. } | ModItem::Desc { .. } => Vec::new(),
+            };
+            for x in inits {
+                let Some((w, params)) = self.include_with(x, *inc, &[]) else { continue };
+                let Some(used) = self.c.facts.with_vals.get(&w) else { continue };
+                if used.iter().any(|(n, _)| params.contains(n)) {
+                    continue;
+                }
+                for u in used {
+                    if !names.iter().any(|(n, _)| *n == u.0) {
+                        names.push(*u);
+                    }
+                }
+                withs.push(w);
+            }
+        }
+        (names, withs)
+    }
+
+    /// The `(with inc …)` `with_includes` put in item value `x`, and the
+    /// parameters of the lambda it is the body of.
+    fn include_with(&self, x: ExpId, inc: Sym, params: &[Sym]) -> Option<(ExpId, Vec<Sym>)> {
+        match *self.exp_at(x) {
+            Exp::With { module, .. } if module == inc => Some((x, params.to_vec())),
+            Exp::Lambda { ref params, body } => {
+                let ps: Vec<Sym> = params.iter().map(|(n, _)| *n).collect();
+                self.include_with(body, inc, &ps)
+            }
+            Exp::PLambda { body, .. } | Exp::The { exp: body, .. } | Exp::RLambda { lambda: body, .. } => self.include_with(body, inc, params),
+            _ => None,
+        }
+    }
+
+    /// `included_names`, its `with`s noted as binding nothing.
+    pub(crate) fn note_included(&mut self, items: &[ModItem]) -> Vec<(Sym, usize)> {
+        let (names, withs) = self.included_names(items);
+        self.included_withs.extend(withs);
+        names
     }
 
     /// Module item `n`'s lambda `x`, made at `depth` in `e`, naming items

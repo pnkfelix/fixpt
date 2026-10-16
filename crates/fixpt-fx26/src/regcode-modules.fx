@@ -60,6 +60,33 @@
                        (r-opnn g rop-setfield (+ cellular-closure-free0 (extract w 2)) 1))
                 #u)
             (r-give-waiting g (cdr ws) s))))))
+;; Each closure of `ws` waiting for slot `s` given it; then, if `items`, the
+;; module's whose first item, `%include`, is in slot `s`, the included names
+;; (`c-note-included!`), each into a slot of its own: scopes `sc` with them.
+;; As the Rust compiler's `r_module`.
+(define r-module-made (->* (rgen c-waits int mod-items r-scopes) r-scopes)
+  (lambda (g ws s items sc)
+    (begin (r-give-waiting g ws s)
+           (if (null? items)
+               sc
+               (let ((inc (c-note-included! items)))
+                 (r-included-fields g (extract inc 1) (extract inc 2) s sc))))))
+(define r-included-fields (->* (rgen syms k-ids int r-scopes) r-scopes)
+  (lambda (g ns ps s sc)
+    (if (or (null? ns) (null? ps))
+        sc
+        (let ((t (r-slot g)))
+          (begin (r-opn g rop-stack s)
+                 (r-opn g rop-field (+ (car ps) 2))
+                 (r-opn g rop-setstk t)
+                 (r-included-fields g (cdr ns) (cdr ps) s
+                                    (the r-scopes (cons (r-bind (car ns) (rl-slot t) (car sc))
+                                                        (r-local (cdr sc) (car ns))))))))))
+;; The positions of the values the `with` at `a`-`b` binds: none of one
+;; whose names its module bound (`c-included?`).
+(define r-with-places (->* (int int int) (listof k-ids @k))
+  (lambda (a b k)
+    (if (c-included? a b k) (the (listof k-ids @k) (list nil)) (c-with-places-at a b k))))
 ;; Module `m`'s value into RESULT, from where `env` has it; declined if it
 ;; is not in a place.
 (define r-module-value (->* (rgen symbol renv) unit)

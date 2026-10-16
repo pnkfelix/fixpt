@@ -1010,9 +1010,9 @@
   ;; Values `vs` made in their slots, `later`, in order, as a `letrec*`'s
   ;; (`DONE.md` §37): a typed lambda naming an item not made yet captures it
   ;; once it is made; `ws` the closures waiting, `vals` the values' slots so
-  ;; far (newest first): all of them.
-  (r-module-make (->* (rgen c-mvals r-scopes c-mslots c-waits rints) rints)
-    (lambda (g vs sc later ws vals)
+  ;; far (newest first), `items` the module's until its first is made: all of them.
+  (r-module-make (->* (rgen c-mvals r-scopes c-mslots c-waits rints mod-items) rints)
+    (lambda (g vs sc later ws vals items)
       (if (null? vs)
           vals
           (let* ((v (car vs)) (n (extract v 1)) (x (extract v 2)) (s (cdr (car later)))
@@ -1022,9 +1022,9 @@
                  (kept (r-opn g rop-setstk s))
                  (inner (the r-scopes (cons (r-bind n (rl-slot s) (car sc)) (r-local (cdr sc) n))))
                  (waits (c-waits-onto ws s ps))
-                 (given (r-give-waiting g waits s)))
-            (r-module-make g (cdr vs) inner (cdr later) waits
-                           (if (= (extract v 3) 0) vals (the rints (cons s vals))))))))
+                 (made (r-module-made g waits s items inner)))
+            (r-module-make g (cdr vs) made (cdr later) waits
+                           (if (= (extract v 3) 0) vals (the rints (cons s vals))) nil)))))
   ;; A module: its items made in frame slots in order, as its stack code
   ;; makes them; then the product of its values. Declined in a leaf.
   (r-module (->* (rgen mod-items renv cenv bool) unit)
@@ -1034,7 +1034,7 @@
           (let* ((slots (get (extract g nslot)))
                  (vs (c-module-values items))
                  (later (r-module-slots g vs))
-                 (vals (r-module-make g vs (the r-scopes (cons env te)) later nil nil)))
+                 (vals (r-module-make g vs (the r-scopes (cons env te)) later nil nil items)))
             (begin (r-make-frozen g 37 (r-slots-oldest vals nil) env te)
                    (set (extract g nslot) slots)
                    (r-done g tail))))))
@@ -1043,7 +1043,7 @@
   ;; version (`r-with-fields`); then the body. As the Rust compiler's `r_with`.
   (r-with (->* (rgen symbol exp int int int renv cenv bool) unit)
     (lambda (g m body a b abk env te tail)
-      (let ((ns (c-with-at a b abk)) (ps (c-with-places-at a b abk)))
+      (let ((ns (c-with-at a b abk)) (ps (r-with-places a b abk)))
         (if (or (null? ns) (null? ps))
             (r-fx-value g m body tail)
             (let* ((regs (get (extract g nreg))) (slots (get (extract g nslot)))
