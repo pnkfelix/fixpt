@@ -242,27 +242,36 @@
 (define k-idss-reversed (subr (maxeff (read @globals) (read @t) (alloc @t)) (k-idss k-idss) k-idss)
   (lambda (xs acc) (if (null? xs) acc (k-idss-reversed (cdr xs) (the k-idss (cons (car xs) acc))))))
 
-;; `ns` with each `(n . old)` `(n . new)`.
-(define k-named-retyped (subr (maxeff kreads (alloc @t)) (k-named symbol int int) k-named)
-  (lambda (ns n old new)
-    (cond ((null? ns) ns)
+;; `ns` with each `(n . old)` `(n . new)`, reversed onto `acc`; a list as
+;; long as the recursion noted, walked in a loop.
+(define k-named-retyped (subr (maxeff kreads (alloc @t)) (k-named symbol int int k-named) k-named)
+  (lambda (ns n old new acc)
+    (cond ((null? ns) acc)
           ((and (symbol=? (car (car ns)) n) (= (cdr (car ns)) old))
-           (the k-named (cons (cons n new) (k-named-retyped (cdr ns) n old new))))
-          (else (the k-named (cons (car ns) (k-named-retyped (cdr ns) n old new)))))))
-(define k-whys-retyped (subr (maxeff kreads (alloc @t)) (k-whys symbol int int) k-whys)
-  (lambda (ws n old new)
-    (cond ((null? ws) ws)
+           (k-named-retyped (cdr ns) n old new (the k-named (cons (cons n new) acc))))
+          (else (k-named-retyped (cdr ns) n old new (the k-named (cons (car ns) acc)))))))
+(define k-whys-retyped (subr (maxeff kreads (alloc @t)) (k-whys symbol int int k-whys) k-whys)
+  (lambda (ws n old new acc)
+    (cond ((null? ws) acc)
           ((and (symbol=? (extract (car ws) 1) n) (= (extract (car ws) 2) old))
-           (the k-whys (cons (product (1 n) (2 new) (3 (extract (car ws) 3)))
-                             (k-whys-retyped (cdr ws) n old new))))
-          (else (the k-whys (cons (car ws) (k-whys-retyped (cdr ws) n old new)))))))
+           (let ((w (product (1 n) (2 new) (3 (extract (car ws) 3)))))
+             (k-whys-retyped (cdr ws) n old new (the k-whys (cons w acc)))))
+          (else (k-whys-retyped (cdr ws) n old new (the k-whys (cons (car ws) acc)))))))
+(define k-named-reversed (subr (maxeff (read @globals) (alloc @t)) (k-named k-named) k-named)
+  (lambda (ns acc)
+    (if (null? ns) acc (k-named-reversed (cdr ns) (the k-named (cons (car ns) acc))))))
+(define k-whys-reversed (subr (maxeff (read @globals) (alloc @t)) (k-whys k-whys) k-whys)
+  (lambda (ws acc)
+    (if (null? ws) acc (k-whys-reversed (cdr ws) (the k-whys (cons (car ws) acc))))))
 ;; Member `n`, of type `old`, given type `new`: bound so, and a call of it
 ;; still recursion where its group's is.
 (define k-arrow-star-retyped (subr (maxeff kstate spin) (symbol int int) unit)
   (lambda (n old new)
     (begin (k-rebind n new)
-           (set k-recursive (k-named-retyped (get k-recursive) n old new))
-           (set k-spin-why (k-whys-retyped (get k-spin-why) n old new)))))
+           (set k-recursive
+                (k-named-reversed (k-named-retyped (get k-recursive) n old new nil) nil))
+           (set k-spin-why
+                (k-whys-reversed (k-whys-retyped (get k-spin-why) n old new nil) nil)))))
 
 ;; Whether any of the members `comp` is typed `->*`, `ts` their types.
 (define k-comp-starred? (subr (maxeff (read @globals) (read @t)) (k-ids (arrayof int @t)) bool)

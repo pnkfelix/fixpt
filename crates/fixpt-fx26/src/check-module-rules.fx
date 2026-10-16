@@ -75,14 +75,18 @@
         (begin (k-rebind-top (extract (car bs) 1) (extract (car bs) 2)) (k-rebind-all (cdr bs))))))
 ;; Note of each recursive group of `gs` with a member typed `->*` whether it
 ;; needs `spin`, as a `define-rec`'s.
-(define* k-note-star-groups (subr (maxeff checks spin) (k-groups) unit)
-  (lambda (gs)
-    (if (null? gs)
-        #u
-        (begin (if (and (not (null? (car gs))) (k-any-arrow-star? (car gs)))
-                   (k-note-ending (car gs) (k-termination (car gs)))
-                   #u)
-               (k-note-star-groups (cdr gs))))))
+(define* k-note-star-groups (subr (maxeff checks spin) (k-groups k-names) unit)
+  (lambda (gs noted)
+    (cond ((null? gs) #u)
+          ((and (not (null? (car gs))) (k-any-arrow-star? (car gs))
+                (not (k-has-name? noted (extract (car (car gs)) 1))))
+           (begin (k-note-ending (car gs) (k-termination (car gs)))
+                  (k-note-star-groups (cdr gs) (k-bs-names-onto (car gs) noted))))
+          (else (k-note-star-groups (cdr gs) noted)))))
+;; The names of `bs`, onto `ns`.
+(define k-bs-names-onto (subr (maxeff (read @globals) (alloc @t)) (k-letrec-bs k-names) k-names)
+  (lambda (bs ns)
+    (if (null? bs) ns (k-bs-names-onto (cdr bs) (the k-names (cons (extract (car bs) 1) ns))))))
 ;; A module's lambdas `bs`, bound, with edges `es`, and their recursive
 ;; groups: with members typed `->*`, every such member's effect found
 ;; before any lambda is checked, each recursive group with one noted as a
@@ -95,7 +99,7 @@
       (if (not (k-any-arrow-star? bs))
           (product (1 bs) (2 gs))
           (let* ((rsaved (get k-recursive))
-                 (noted (k-note-star-groups gs))
+                 (noted (k-note-star-groups gs nil))
                  (found (k-arrow-star-found synth bs))
                  (back (set k-recursive rsaved))
                  (rebound (k-rebind-all found)))
