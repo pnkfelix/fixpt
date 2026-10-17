@@ -80,15 +80,6 @@ thread_local! {
 
 /// `f` with this thread's session for the pieces written in FX-26, made
 /// on first use.
-/// A failure as every machine words it: the lowering says an `error`'s
-/// failure as `error: …`, the others as `…` (`TODO.md` §85).
-pub fn one_wording(out: &str) -> String {
-    match out.strip_prefix("!! error: ") {
-        Some(rest) => format!("!! {rest}"),
-        None => out.to_string(),
-    }
-}
-
 pub fn with_own<R>(f: impl FnOnce(&mut fixpt_fx26::session::Fx26Session) -> R) -> R {
     OWN.with(|s| {
         let mut s = s.borrow_mut();

@@ -1325,13 +1325,11 @@ fn every_test_program_runs_natively_as_cellular() {
                 } else if g.as_ref().is_ok_and(|v| v.is_some()) || g.is_err() {
                     native += 1;
                 }
-                // The same error, said as each machine says it.
-                let same_error = matches!((w, g), (Err(a), Err(b)) if a.contains(b.as_str()) || b.contains(a.as_str()));
                 // A procedure prints as the closure each makes, of either
                 // kind, and perhaps an adapter: compared as a procedure.
                 let procedure = |v: String| if v.starts_with("#<native-closure") || v.starts_with("#<cellular-closure") { "#<procedure>".into() } else { v };
                 let kindless = |v: &Result<Option<String>, String>| v.clone().map(|v| v.map(procedure));
-                if kindless(w) != kindless(g) && !same_error {
+                if kindless(w) != kindless(g) {
                     report.push(format!("{} form {i}: native {g:?}, cellular {w:?}", path.display()));
                 }
             }

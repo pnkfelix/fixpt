@@ -264,6 +264,14 @@ fn load_lowered(scheme: &mut Session, text: &str) -> Result<(), String> {
     r
 }
 
+/// A failure of the lowered Scheme, said as the other machines say it
+/// (`DONE.md` §85): its message alone (`Session::bare_failures`), and a
+/// `car` or `cdr` of a non-pair, the one Scheme type check an FX-26
+/// program can fail, in their words.
+fn lowered_failure(m: String) -> String {
+    if m == "expected a pair" { "car or cdr of a non-pair".into() } else { m }
+}
+
 /// Where the front end's register code is cached, if anywhere, and the key
 /// its file must start with: a heap image in the user's cache directory, one
 /// file for each executable, named by a hash of its path, and the key a hash
@@ -939,11 +947,14 @@ impl Fx26Session {
         let (printed, value) = self.scheme.scope(|s| {
             // The lowered Scheme's own compiling, quick, is counted as run.
             let start = std::time::Instant::now();
+            s.bare_failures = true;
             let (printed, result) = s.eval_capturing("<fx26>", &code);
+            s.bare_failures = false;
             s.runtime_unrooted().run_nanos += start.elapsed().as_nanos() as u64;
             let value = match result {
                 Ok(_) if is_define => Ok(None),
                 Ok(v) => Ok(Some(s.write(v))),
+                Err(fixpt_scheme::SessionError::Raised(m)) => Err(lowered_failure(m)),
                 Err(e) => Err(e.to_string()),
             };
             (printed, value)

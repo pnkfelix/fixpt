@@ -89,8 +89,15 @@ pub fn eval_more_with_fx26_evaluator(scheme: &mut Session, standard: Option<Hand
             return Ok(format!("!! check: {m}"));
         }
         let runs = s.call_global(&format!("{READER_PREFIX}checked-tops"), &[]).map_err(|e| fail(e.to_string()))?;
-        let out = s.call_global(&format!("{READER_PREFIX}{entry}"), &[runs]).map_err(|e| fail(e.to_string()))?;
-        Ok(s.view(|v| v.get(out).string().unwrap_or_default()))
+        // A primitive the evaluator calls may fail, as the program's own
+        // failure (`DONE.md` §85).
+        s.bare_failures = true;
+        let out = s.call_global(&format!("{READER_PREFIX}{entry}"), &[runs]);
+        s.bare_failures = false;
+        match out {
+            Ok(out) => Ok(s.view(|v| v.get(out).string().unwrap_or_default())),
+            Err(e) => Ok(format!("!! {}", run_failure(&e.to_string()))),
+        }
     })
 }
 
@@ -164,15 +171,17 @@ pub fn compile_with_fx26_compiler_showing(
         s.runtime_unrooted().word_fuel = u64::MAX;
         match run {
             Ok(v) => Ok((s.write(v), words)),
-            Err(e) => {
-                let why = e.to_string();
-                let why = why.trim_start_matches("error: cellular word: ");
-                // As the lowered form says it, whichever machine ran out.
-                let why = if why.contains("step limit") { "evaluation step limit exceeded" } else { why };
-                Ok((format!("!! {why}"), words))
-            }
+            Err(e) => Ok((format!("!! {}", run_failure(&e.to_string())), words)),
         }
     })
+}
+
+/// A run's failure, `why`, as the program's own (`DONE.md` §85): not the
+/// word's that ran it, and a step limit as the lowered form says it,
+/// whichever machine ran out.
+fn run_failure(why: &str) -> &str {
+    let why = why.trim_start_matches("error: ").trim_start_matches("cellular word: ");
+    if why.contains("step limit") { "evaluation step limit exceeded" } else { why }
 }
 
 /// When the runtime places code made elsewhere (its `place_code`): every

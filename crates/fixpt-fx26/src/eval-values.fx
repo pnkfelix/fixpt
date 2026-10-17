@@ -83,8 +83,10 @@
 (define as-sym (->* (val) symbol)
   (lambda (v) (if (symbol? v) v (efail-expected "a symbol"))))
 
+;; `v`, a pair; or fails, as the machines say a `car` or `cdr` of a
+;; non-pair does (`DONE.md` §85).
 (define as-pair (->* (val) (pairof val val @v))
-  (lambda (v) (if (pair? v) v (efail-expected "a pair"))))
+  (lambda (v) (if (pair? v) v (efail "car or cdr of a non-pair"))))
 
 (define as-array (->* (val) (arrayof val @v))
   (lambda (v) (if (array? v) v (efail-expected "an array"))))

@@ -186,7 +186,7 @@ fn run_word_by(rt: &mut Runtime, a: &[Value], run: Option<crate::RunWord>) -> Ou
         eprintln!("run-word: {:.6} s", t.elapsed().as_secs_f64());
     }
     // A failure as the program's own, not the word's that ran it
-    // (`TODO.md` §85).
+    // (`DONE.md` §85).
     match out {
         Ok(v) => Ok(v),
         Err(e) => rt.fail(&format!("cellular word: {e}"), &[]),

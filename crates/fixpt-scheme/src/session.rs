@@ -110,6 +110,9 @@ pub struct Session {
     /// root, not a Rust field, because the continuation in it must survive
     /// collections between inputs.
     hole_root: usize,
+    /// Whether a failure says its message alone, without its irritants:
+    /// as FX-26's machines say a failure (`DONE.md` §85).
+    pub bare_failures: bool,
 }
 
 mod handles;
@@ -151,6 +154,7 @@ impl Session {
             parts: Some(parts),
             profile: SyntaxProfile::SCHEME,
             hole_root,
+            bare_failures: false,
         }
     }
 
@@ -461,7 +465,7 @@ impl Session {
             let msg = display_value(&self.rt.heap, self.rt.heap.obj_ref(obj, 1));
             let irritants = self.rt.heap.obj_ref(obj, 2);
             let list = self.rt.heap.list_to_vec(irritants).unwrap_or_default();
-            if list.is_empty() {
+            if list.is_empty() || self.bare_failures {
                 return msg;
             }
             let rendered: Vec<String> = list

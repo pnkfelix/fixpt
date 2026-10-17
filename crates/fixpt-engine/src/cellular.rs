@@ -70,7 +70,7 @@ pub enum Trap {
     Prim(String),
 }
 
-/// A trap as a program's failure is said (`TODO.md` §85): in the native
+/// A trap as a program's failure is said (`DONE.md` §85): in the native
 /// machine's words where it has the same trap, not Rust's debug form.
 impl std::fmt::Display for Trap {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

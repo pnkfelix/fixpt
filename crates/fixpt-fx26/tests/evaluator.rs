@@ -62,7 +62,7 @@ fn test_programs() {
 fn errors_stop_the_program() {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     let out = s.eval_with_own_evaluator("(car (the (listof int @l) nil))").expect("parses");
-    assert!(out.starts_with("!! a pair is expected"), "{out}");
+    assert_eq!(out, "!! car or cdr of a non-pair", "as every machine says it (`DONE.md` §85)");
 }
 
 /// Programs that do enough work that the evaluator, itself run by the
@@ -103,7 +103,7 @@ fn every_program(wanted: impl Fn(&str) -> bool) {
                 Err(_) => continue, // written to be rejected
             };
             let ours = common::with_own(|s| s.eval_with_own_evaluator(&program)).map_err(|e| e.to_string());
-            if ours.as_deref().map(common::one_wording) != Ok(common::one_wording(&scheme)) {
+            if ours.as_deref() != Ok(scheme.as_str()) {
                 report.push(format!("{name}: evaluator {ours:?}, Scheme {scheme:?}"));
             }
         }

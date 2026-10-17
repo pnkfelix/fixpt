@@ -325,7 +325,7 @@ fn car_of_nil_traps_on_every_machine() {
 }
 
 /// A call that fails fails on every machine, its value used or not
-/// (`TODO.md` §85): the lowering once claimed `(pure)` of a `begin`'s
+/// (`DONE.md` §85): the lowering once claimed `(pure)` of a `begin`'s
 /// `(error …)`, `(quotient 1 0)` and `(car nil)`, and the bytecode compiler
 /// dropped them, so `rs-scheme-vm` gave 3 where the others failed.
 #[test]

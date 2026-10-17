@@ -2013,7 +2013,7 @@ standard input, or bytes a test gives. Tests: `tests/programs/io/io-stdin.fx`,
 `fixpt-cli/tests/io.rs`'s `the_standard_input_read_by_lines` (five
 machines).
 
-## 85. Machines that disagree on a failure: the part done (2026-10-12)
+## 85. Machines that disagree on a failure (2026-10-12, 2026-10-16)
 
 What is left (one wording for each failure) is in `TODO.md` §85.
 
@@ -2034,6 +2034,25 @@ or drops code that may fail across an `io` effect or anywhere. And the
 evaluator written in FX-26 fails the program on an `int` division by
 zero, as the machines do, where it failed itself (`int-div`). Test:
 `an_unused_failing_call_still_fails_on_every_machine` (six machines).
+**One wording** (2026-10-16, the rest). A failure now says the same
+on every machine, as native code says it. The lowering (`rs-scheme-vm`)
+said Scheme's `error: message: irritants`: now its message alone
+(`Session::bare_failures`, on while a lowered program or the evaluator
+runs, so the front end's own failures keep theirs), and a `car` or `cdr`
+of a non-pair, the one Scheme type check an FX-26 program can fail,
+"car or cdr of a non-pair" (`lowered_failure`), not "expected a pair:
+()". The evaluator written in FX-26 said "a pair is expected" (now
+`as-pair` says the machines' words), and a primitive it calls that
+failed (`string-ref`, `substring`, `integer->char`) failed the front end,
+`fixpt: … error: cellular word: …`, not the program: now the program's
+failure (`run_failure`, shared with the compiled run). The tests no
+longer make the wordings one (`one_wording` gone, and the native sweep's
+"one contains the other") but compare them as they are. Not a wording:
+recursion too deep fails as a stack overflow on the cellular machines
+and the evaluator, a step limit on native code and the lowering, which
+have no stack limit of their own. Tests: `programs/run/fails-*.fx`
+(`car`, `quotient`, `string-ref`, `substring`, `integer->char`, `error`),
+on every machine, the evaluator and natively.
 
 ## 86. Failure as proof debt: stage 1, measured (2026-10-12)
 

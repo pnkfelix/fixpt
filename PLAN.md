@@ -276,7 +276,8 @@ weighed with the other items, not ahead of them.
   collection (§104), and a parameter now shadows an included name (it
   was the other way, a bug). Left in §69: hidden abstract types. Then
   (2026-10-16, the user's): §93's crash, calls between the machines too
-  deep for Rust's stack, now a stack overflow (`DONE.md` §93); next §85.
+  deep for Rust's stack, now a stack overflow (`DONE.md` §93); and §85,
+  one wording for each failure on every machine (`DONE.md` §85).
   §77, suffix refs (tag `010`, interior pointers into bloblet suffixes):
   done (`DONE.md` §77), the runtime, the `flat` kind, `(blobref B F)`,
   flat products, arrays and sums, in every machine; natively in line

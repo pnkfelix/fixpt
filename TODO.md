@@ -2148,17 +2148,6 @@ the standard input. Left:
   built, `DONE.md` §95); each a new kind of `(io k)` under
   the same ordering rule.
 
-## 85. Machines that disagree on a failure: one wording (found 2026-10-12)
-
-Found making `fixpt run`'s exit status (§84). The dropped failing call is
-fixed (`DONE.md` §85); whether `error` becomes an effect is §86, stage 2.
-Left: `(car nil)` says "car or cdr of a non-pair" natively and on the
-cellular machines (whose traps say themselves in the native machine's
-words since 2026-10-12, not Rust's debug form), but "error: expected a
-pair: ()" on `rs-scheme-vm` (the Scheme primitive's own message, which
-Scheme code shares) and "a pair is expected" in the evaluator written in
-FX-26. One wording for each.
-
 ## 86. Failure as proof debt (the user's, 2026-10-12)
 
 From `docs/research/failure-and-blame.md`: "may fail" read as a debt the

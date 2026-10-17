@@ -37,7 +37,7 @@ use fixpt_read::Sym;
 use std::collections::HashMap;
 
 /// Whether standard operation `name` cannot fail, whatever its arguments
-/// of their types (`TODO.md` §85): arithmetic on `int` (a bignum, so no
+/// of their types (`DONE.md` §85): arithmetic on `int` (a bignum, so no
 /// overflow), comparisons, the shape predicates, `cons`; the fixed widths'
 /// operations and the floats', but for a division or remainder (by zero)
 /// and a conversion to `int` (of a float not integral). Not `car`, `cdr`,
@@ -896,7 +896,7 @@ impl Lowerer<'_> {
     /// Whether evaluating `e` cannot fail, conservatively: a variable, a
     /// constant, a closure made, or an application of a standard
     /// operation that is total (`total_operation`) to such. Anything else,
-    /// a call of a program's own procedure among them, may (`TODO.md` §85;
+    /// a call of a program's own procedure among them, may (`DONE.md` §85;
     /// §86 would make this precise, by the debts types discharge).
     fn cannot_fail(&self, e: ExpId) -> bool {
         match self.c.arena.exp_at(e) {
@@ -927,7 +927,7 @@ impl Lowerer<'_> {
         let effect = facts.effects.get(&e);
         // `pure` licenses dropping the call when its value is unused, which
         // is sound only if it cannot fail: dropping `(car nil)` turns a run
-        // that fails into one that does not (`TODO.md` §85). So only an
+        // that fails into one that does not (`DONE.md` §85). So only an
         // application that cannot fail, its arguments included, is claimed.
         if is_app && effect.is_some_and(|x| x.is_pure()) && self.cannot_fail(e) {
             claims.push("(pure)".into());

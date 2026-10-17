@@ -85,7 +85,7 @@ fn every_program_compiled() {
             let compiled = common::with_own(|s| s.compile_with_own_compiler(&program)).map_err(|e| e.to_string());
             ran += 1;
             let name = path.file_name().unwrap().to_string_lossy().to_string();
-            if compiled.as_deref().map(common::one_wording) != Ok(common::one_wording(&lowered)) {
+            if compiled.as_deref() != Ok(lowered.as_str()) {
                 report.push(format!("{sub}/{name}: compiled {compiled:?}, lowered {lowered:?}"));
             }
         }
@@ -139,7 +139,7 @@ fn every_program_on_every_machine() {
             };
             for ((name, ..), s) in machines.iter().zip(&mut sessions) {
                 let compiled = s.compile_with_own_compiler(&program).map_err(|e| e.to_string());
-                if compiled.as_deref().map(common::one_wording) != Ok(common::one_wording(&lowered)) {
+                if compiled.as_deref() != Ok(lowered.as_str()) {
                     let file = path.file_name().unwrap().to_string_lossy().to_string();
                     report.push(format!("{name} {sub}/{file}: {compiled:?}, lowered {lowered:?}"));
                 }
