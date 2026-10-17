@@ -836,3 +836,38 @@ off on x86_64 until step 2 re-ports it; the push is the user's).
    `native` way, elsewhere, its lowered run); `made_code`'s that run the
    arm64 code a program writes are arm64's (`ignore` elsewhere), the rest
    expecting each program's fallback.
+6. **The native convention re-ported onto main's frames (step 2)**:
+   `direct/x64.rs` was `direct.rs` step for step as it was; main changed
+   the frames under it (`TODO.md` §91: a header word below the link, frames
+   as bloblets, raw `f64` slots after the values) and much besides. Ported
+   as before, step for step:
+   - **A frame's region is S bytes, as arm64's, and the word the `call`
+     pushed is its top one**: `push_frame_ret` pops the return address, takes
+     S, and stores it as the frame's second word; `pop_frame_ret` puts the
+     second word (which a restore may have made the underflow) back where it
+     was, for `ret` or a tail call's callee. Stubs' frames (32), control
+     frames (64) and polls' (208) the same.
+   - **A raw `f64` return's mark is an eight-byte `nop` whose displacement
+     nothing else emits** (`0f 1f 84 00 4f f6 4f f6`), and the jump after it
+     skipped: 13 bytes past the return address, where arm64's is 8.
+   - **A raw entry's length by the parameters' mask** (`raw_entry_skip`),
+     not by their count: unboxing REG1 to REG3 differs in length from REG4
+     to REG8, which are in the state.
+   - **A poll's frame holds REG4…REG8 too**, copied from the state and back,
+     so that a collection there sees and moves them.
+   - The polls, the common poll, cons and bloblet, the trap's `Failed`
+     call-out, calls by the callee's convention, `ncallcc` and `callone`,
+     `%fx26-adapted`, and main's new fast paths (`remainder`,
+     bytevectors, the 8-bit widths, `suffix-fits`, `blobref-length`).
+     Every test of `tests/direct.rs` passes on x86_64; the every-program
+     report runs 731 programs, 470 expressions as machine code, its only
+     differences 4 forms where the cellular machine runs out of stack or
+     steps and native code does not (`deep.fx`, `deep-control.fx`,
+     `quiet-boxes.fx`), as on arm64.
+   - **`native-code?` and `seal-code` say no off arm64**: the code a
+     program makes is arm64's (`programs/made-code/`), and the convention
+     `native-convention` declares is arm64's, so on x86_64 each program
+     takes its fallback rather than run arm64 bytes.
+   - `fast` on x86_64 stays register code: the native convention is fastest
+     there on every program of `fixpt bench` but `captures` (42.8 ms
+     against 36.9), as before the rebase.

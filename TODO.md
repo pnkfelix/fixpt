@@ -2540,6 +2540,11 @@ reaches its fixpoint on all three. Left, in the order they would pay:
    `captures` (22 against register code's 18 ms, continuations), so `fast`
    stays register code for now; and the native convention's `ret` against
    arm64's `br` (CLAUDES_CHOICES.md, "Native profiling" 6), unmeasured.
+   Re-ported onto main's frames when rebased (2026-10-17, CLAUDES_CHOICES.md
+   "The x86_64 back end rebased onto main"). Left of that: code a program
+   makes (§97) is arm64's, so on x86_64 `native-code?` is false;
+   an x86_64 convention `native-convention` can declare, and programs that
+   make x86_64 code, would let it run there.
 3. ~~**Stencils**~~ (done: CLAUDES_CHOICES.md "Stencils on x86_64"; the
    routines in `preserve_none`, all eight arguments in registers;
    branches checked in LLVM's assembly; 1.06–1.55 of the hand-encoded

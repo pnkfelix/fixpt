@@ -94,7 +94,7 @@ fn a_knot_through_a_kept_procedure_is_refused() {
 /// in FX-26 keeping every lambda made, or every global ever made for a
 /// name) grow with the number of redefinitions.
 #[test]
-#[cfg_attr(not(target_arch = "aarch64"), ignore = "runs arm64 machine code")]
+#[cfg_attr(not(any(target_arch = "aarch64", target_arch = "x86_64")), ignore = "runs arm64 or x86_64 machine code")]
 fn redefining_lets_the_old_definitions_die() {
     use fixpt_heap::{SroKind, layout::cellular::KIND};
     let mut s = session();

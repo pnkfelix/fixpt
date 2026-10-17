@@ -1420,15 +1420,19 @@ fn continuation_code(n: usize) -> Vec<u32> {
     a.finish().expect("placed")
 }
 
+/// `continuation_code`, in bytes, for this instruction set.
+fn continuation_bytes(n: usize) -> Vec<u8> {
+    if X86 { x64::continuation_code(n) } else { crate::arm64::bytes(&continuation_code(n)) }
+}
+
 /// The continuation procedure as a code bloblet of its own, for a
 /// continuation taken where no code gave it one: at a call of what is not
 /// native code (`capture_foreign`).
 fn continuation_bloblet(heap: &mut Heap) -> Value {
-    let code = continuation_code(REINSTATE);
-    let blob = heap.make_code_bloblet(const { fixpt_heap::layout::kind("bloblet") }, 2, 4 * code.len(), false);
+    let bytes = continuation_bytes(REINSTATE);
+    let blob = heap.make_code_bloblet(const { fixpt_heap::layout::kind("bloblet") }, 2, bytes.len(), false);
     heap.set_bloblet_slot(blob, 1, blob);
     heap.set_bloblet_slot(blob, 2, Value::FALSE);
-    let bytes: Vec<u8> = code.iter().flat_map(|i| i.to_le_bytes()).collect();
     heap.set_bloblet_bytes(blob, 0, &bytes).expect("room for its code");
     heap.flush_code(blob);
     blob
@@ -1484,10 +1488,7 @@ impl Compiling<'_> {
         if let Some(q) = self.resume {
             return q;
         }
-        if X86 {
-            return self.resume_proc_x64();
-        }
-        let code = crate::arm64::bytes(&continuation_code(REINSTATE));
+        let code = continuation_bytes(REINSTATE);
         let q = self.procs.len();
         self.procs.push(Proc { word: Value::FALSE, rw: Value::FALSE, name: "continuation".into(), arity: 1, fields: vec![Field::Myself, Field::Const(Value::FALSE)], len: code.len(), code, global: false, params: Some(0) });
         self.resume = Some(q);

@@ -674,6 +674,14 @@ fn bloblet(rt: &mut Runtime, v: Value) -> Outcome<Value> {
     if v.is_bloblet() { Ok(v) } else { rt.type_error("a bloblet", v) }
 }
 
+/// Whether native code a program makes runs here (`seal-code`,
+/// `native-code?`): the code programs make is arm64's, its convention
+/// what `native-convention` says, so only there, where native code runs at
+/// all.
+fn runs_made_code(rt: &Runtime) -> bool {
+    rt.call_native.is_some() && cfg!(target_arch = "aarch64")
+}
+
 /// A bloblet of kind `bloblet`: one the program made, so one it may change.
 fn plain_bloblet(rt: &mut Runtime, v: Value) -> Outcome<Value> {
     if v.is_bloblet() && rt.heap.bloblet_kind(v) == PLAIN_BLOBLET {
@@ -1350,8 +1358,8 @@ prims! {
     // machine calls as it calls native code; and whether this one can.
     "%fx26-seal-code", 1, Some(1), simple!(|rt, a| {
         let b = plain_bloblet(rt, a[0])?;
-        if rt.call_native.is_none() {
-            return rt.fail("seal-code: this machine runs no native code", &[]);
+        if !runs_made_code(rt) {
+            return rt.fail("seal-code: this machine runs no native code a program makes", &[]);
         }
         if rt.heap.bloblet_head(b).pre != 0 {
             return rt.fail("seal-code: too many fields for code", &[]);
@@ -1370,7 +1378,7 @@ prims! {
         rt.heap.set_bloblet_slot(c, fixpt_heap::layout::cellular::CLOSURE_WORD, b);
         Ok(c)
     });
-    "%fx26-native-code?", 0, Some(0), simple!(|rt, _a| Ok(Value::boolean(rt.call_native.is_some())));
+    "%fx26-native-code?", 0, Some(0), simple!(|rt, _a| Ok(Value::boolean(runs_made_code(rt))));
     "%fx26-native-convention", 0, Some(0), simple!(|rt, _a| {
         let mut list = Value::NULL;
         for line in crate::NATIVE_CONVENTION.lines().rev() {

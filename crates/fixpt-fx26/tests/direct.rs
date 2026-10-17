@@ -3,9 +3,8 @@
 //! their register code, called by `bl`, on native frames, give what the
 //! Rust machine gives; what they cannot do they decline.
 //!
-//! Only where code in the native convention runs (arm64; x86_64's is not
-//! yet ported onto the frames of `TODO.md` §91): every test here runs some.
-#![cfg(target_arch = "aarch64")]
+//! Only where arm64 or x86_64 code runs: every test here runs some.
+#![cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 
 use fixpt_engine::Backend;
 use fixpt_fx26::session::Fx26Session;

@@ -35,8 +35,8 @@
 //! called instead.
 
 use super::{
-    overflow_info, Callout, Compiling, DState, Field, Proc, CONTROL_FRAME, MARK_MARK, NOT_A_PAIR, OUT_OF_FUEL, PRIM_FAILED, PROMPT_MARK, STACK_OVERFLOW,
-    STACK_SLACK, TRAPS,
+    overflow_info, Callout, Compiling, DState, Field, BLOBLET, CONS, CONTROL_FRAME, FAILED, MAP_BITS, MARK_MARK, NOT_A_PAIR, OUT_OF_FUEL, POLL, POLL_DONE,
+    PRIM_FAILED, PROMPT_MARK, STACK_OVERFLOW, STACK_SLACK, STUB_FRAME, TRAPS,
 };
 use super::reps::{self, Convert, Rep};
 use crate::x86_64::*;
@@ -410,29 +410,64 @@ pub(super) fn common_overflow(n: usize) -> Vec<u8> {
 }
 
 /// The common trap: the kind (in `X9`) recorded, and where (the return
-/// address, one past its site's stub, a `call`), then back to Rust.
+/// address, one past its site's stub, a `call`); then, for a task of a
+/// monitored process, its failure an abort to the scheduler's prompt
+/// (`Callout::Failed`), on from there; else back to Rust.
 pub(super) fn common_trap() -> Vec<u8> {
     let mut a = Asm::new();
     a.e(store(st(offset_of!(DState, trap)), X9));
     a.e(pop(X9));
     a.e(sub_imm(X9, 5));
     a.e(store(st(offset_of!(DState, pc)), X9));
+    call_out(&mut a, FAILED);
+    let gone = a.label();
+    a.e(alu_mi(Alu::Cmp, st(offset_of!(DState, aux)), 0));
+    a.jcc(Cond::E, gone);
+    resume(&mut a);
+    a.bind(gone);
     leave(&mut a);
-    a.finish().expect("no labels")
+    a.finish().expect("labels bound")
 }
 
-/// A frame of its own, with nothing in it, under the return address a
-/// `call` (or, in a tail call, the caller's) left: the link below it.
-fn small_frame(a: &mut Asm) {
-    a.e(sub_imm(SP, 8));
-    a.e(store(m(SP, 0), FRAME));
-    a.e(mov(FRAME, SP));
+/// A frame of `size` bytes pushed below the stack's top, as
+/// `super::push_frame`: its link and `second` stored, `fp` at its link, its
+/// header word below.
+fn push_frame(a: &mut Asm, second: Reg, size: u64) {
+    a.e(sub_imm(SP, size as i32));
+    a.e(store(m(SP, 8), FRAME));
+    a.e(store(m(SP, 16), second));
+    a.e(lea(FRAME, m(SP, 8)));
 }
 
-/// That frame left, and back.
-fn small_return(a: &mut Asm) {
-    a.e(load(FRAME, m(SP, 0)));
-    a.e(add_imm(SP, 8));
+/// A frame of `size` bytes pushed under the return address a `call` (or,
+/// in a tail call, the caller's) left on top: that address its second
+/// word, the word it was in the frame's top one. Uses `X11`.
+fn push_frame_ret(a: &mut Asm, size: u64) {
+    a.e(pop(X11));
+    push_frame(a, X11, size);
+}
+
+/// The frame of `size` bytes on top popped, `fp` its link again and its
+/// second word in `X11`, the stack's top where the frame ended.
+fn pop_frame(a: &mut Asm, size: u64) {
+    a.e(load(X11, m(SP, 16)));
+    a.e(load(FRAME, m(SP, 8)));
+    a.e(add_imm(SP, size as i32));
+}
+
+/// The frame of `size` bytes on top popped, its second word (its return
+/// address, or the underflow a restore made it) on the stack's top again,
+/// for a `ret`, or a tail call's callee. Uses `X11`.
+fn pop_frame_ret(a: &mut Asm, size: u64) {
+    a.e(load(X11, m(SP, 16)));
+    a.e(load(FRAME, m(SP, 8)));
+    a.e(add_imm(SP, size as i32 - 8));
+    a.e(store(m(SP, 0), X11));
+}
+
+/// That frame popped, and back.
+fn stub_return(a: &mut Asm) {
+    pop_frame_ret(a, STUB_FRAME);
     a.e(ret());
 }
 
@@ -441,7 +476,7 @@ fn small_return(a: &mut Asm) {
 /// a tail call, a `jmp` (the return address on the stack either way).
 pub(super) fn common_foreign(n: usize) -> Vec<u8> {
     let mut a = Asm::new();
-    small_frame(&mut a);
+    push_frame_ret(&mut a, STUB_FRAME);
     a.e(store(st(offset_of!(DState, nargs)), X9));
     a.e(store(st(offset_of!(DState, aux)), CLO));
     a.regs_to_args(8);
@@ -451,7 +486,7 @@ pub(super) fn common_foreign(n: usize) -> Vec<u8> {
     // Back with an abort to a prompt in these frames: resumed there.
     a.e(alu_mi(Alu::Cmp, st(offset_of!(DState, foreign_resume)), 0));
     a.jcc(Cond::Ne, resumed);
-    small_return(&mut a);
+    stub_return(&mut a);
     a.bind(resumed);
     a.e(store_imm(st(offset_of!(DState, foreign_resume)), 0));
     resume(&mut a);
@@ -464,32 +499,94 @@ pub(super) fn common_foreign(n: usize) -> Vec<u8> {
 /// the count of free values (in REG1…REGn) in `X9`, the code in `X17`.
 pub(super) fn common_closure(n: usize) -> Vec<u8> {
     let mut a = Asm::new();
-    small_frame(&mut a);
+    push_frame_ret(&mut a, STUB_FRAME);
     a.e(store(st(offset_of!(DState, nargs)), X9));
     a.e(store(st(offset_of!(DState, aux)), X17));
     a.regs_to_args(8);
     call_out(&mut a, n);
     let failed = a.label();
     trapped(&mut a, failed);
-    small_return(&mut a);
+    stub_return(&mut a);
+    a.bind(failed);
+    fail_here(&mut a, PRIM_FAILED);
+    a.finish().expect("labels bound")
+}
+
+/// The common poll, for code a program made, as `super::common_poll`: from
+/// where its fuel ran out, by a `call`, every value it keeps in its frame.
+/// A stub's frame; the next slice taken, or, with none left, the trap for
+/// fuel spent, its site the poll's call; the scheduler's `preempt` called
+/// if it would have another task run; and back, every register but the
+/// pinned ones lost.
+pub(super) fn common_poll() -> Vec<u8> {
+    let mut a = Asm::new();
+    let spent = a.label();
+    a.e(alu_mi(Alu::Cmp, st(offset_of!(DState, reserve)), 0));
+    a.jcc(Cond::E, spent);
+    push_frame_ret(&mut a, STUB_FRAME);
+    call_out(&mut a, POLL);
+    preempt(&mut a);
+    stub_return(&mut a);
+    a.bind(spent);
+    a.imm(X9, OUT_OF_FUEL as u64);
+    a.e(jmp_m(st(offset_of!(DState, trap_stub))));
+    a.finish().expect("labels bound")
+}
+
+/// After call-out `POLL`: the scheduler's `preempt`, if it gave it (in
+/// `aux`), called, and call-out `POLL_DONE` after it.
+fn preempt(a: &mut Asm) {
+    let back = a.label();
+    a.e(load(CLO, st(offset_of!(DState, aux))));
+    a.e(test(CLO, CLO));
+    a.jcc(Cond::E, back);
+    a.e(load(X16, fld(CLO, CLOSURE_WORD)));
+    a.e(alu_rm(Alu::Add, X16, st(offset_of!(DState, delta))));
+    a.imm(X9, 0);
+    a.e(call_r(X16));
+    call_out(a, POLL_DONE);
+    a.bind(back);
+}
+
+/// The common cons, for code a program made, as `super::common_cons`: the
+/// car in REG1 and the cdr in REG2, from a `call`; the pair in `RESULT`.
+pub(super) fn common_cons() -> Vec<u8> {
+    let mut a = Asm::new();
+    push_frame_ret(&mut a, STUB_FRAME);
+    a.regs_to_args(2);
+    call_out(&mut a, CONS);
+    stub_return(&mut a);
+    a.finish().expect("labels bound")
+}
+
+/// The common bloblet, for code a program made, as `super::common_bloblet`:
+/// the suffix's bytes in REG1 and the count of fields in REG2, fixnums,
+/// from a `call`; a plain bloblet in `RESULT`, or the trap.
+pub(super) fn common_bloblet() -> Vec<u8> {
+    let mut a = Asm::new();
+    push_frame_ret(&mut a, STUB_FRAME);
+    a.regs_to_args(2);
+    call_out(&mut a, BLOBLET);
+    let failed = a.label();
+    trapped(&mut a, failed);
+    stub_return(&mut a);
     a.bind(failed);
     fail_here(&mut a, PRIM_FAILED);
     a.finish().expect("labels bound")
 }
 
 /// Where a thunk a mark in tail position called returns: its mark's frame
-/// popped, and back to that frame's return address.
+/// popped, and back to that frame's second word.
 pub(super) fn mark_ret() -> Vec<u8> {
     let mut a = Asm::new();
-    a.e(load(X11, m(SP, 8)));
-    a.e(load(FRAME, m(SP, 0)));
-    a.e(add_imm(SP, CONTROL_FRAME as i32));
+    pop_frame(&mut a, CONTROL_FRAME);
     a.e(jmp_r(X11));
     a.finish().expect("no labels")
 }
 
 /// `super::adapt`'s code: the closure called now `f`, its free value 0,
-/// called as what is not native code, in a tail call.
+/// called as what is not native code, in a tail call, the count as its
+/// caller passed it.
 pub(super) fn adapter() -> Vec<u8> {
     let mut a = Asm::new();
     a.e(load(CLO, fld(CLO, CLOSURE_FREE0)));
@@ -497,50 +594,31 @@ pub(super) fn adapter() -> Vec<u8> {
     a.finish().expect("no labels")
 }
 
-/// `common_poll`, `common_cons` and `common_bloblet`: not yet ported to
-/// x86_64 (the native convention is off there until it is re-ported onto
-/// the frames of `TODO.md` §91); a trap if reached.
-pub(super) fn common_poll() -> Vec<u8> {
-    vec![0x0f, 0x0b]
-}
-pub(super) fn common_cons() -> Vec<u8> {
-    vec![0x0f, 0x0b]
-}
-pub(super) fn common_bloblet() -> Vec<u8> {
-    vec![0x0f, 0x0b]
+/// The continuation procedure's code, as `super::continuation_code`:
+/// given the value (in REG1), the closure in `CLO`, in a frame of its own
+/// it calls out (`n`, its `Callout::Reinstate`) to put the continuation's
+/// frames back, and goes where they resume.
+pub(super) fn continuation_code(n: usize) -> Vec<u8> {
+    let mut a = Asm::new();
+    push_frame_ret(&mut a, STUB_FRAME);
+    let args = offset_of!(DState, args);
+    a.store_reg(st(args), 1, X11);
+    a.e(store(st(args + 8), CLO));
+    call_out(&mut a, n);
+    let failed = a.label();
+    trapped(&mut a, failed);
+    resume(&mut a);
+    a.bind(failed);
+    leave(&mut a);
+    a.finish().expect("placed")
 }
 
 impl Compiling<'_> {
-    /// The continuation procedure, as `resume_proc`: given the value (in
-    /// REG1), the closure in `CLO`, in a frame of its own it calls out to
-    /// put the continuation's frames back, and goes where they resume.
-    pub(super) fn resume_proc_x64(&mut self) -> usize {
-        let mut a = Asm::new();
-        small_frame(&mut a);
-        let args = offset_of!(DState, args);
-        a.store_reg(st(args), 1, X11);
-        a.e(store(st(args + 8), CLO));
-        let n = self.callouts.len();
-        self.callouts.push(Callout::Reinstate);
-        call_out(&mut a, n);
-        let failed = a.label();
-        trapped(&mut a, failed);
-        resume(&mut a);
-        a.bind(failed);
-        leave(&mut a);
-        let code = a.finish().expect("placed");
-        let q = self.procs.len();
-        self.procs.push(Proc { word: Value::FALSE, rw: Value::FALSE, name: "continuation".into(), arity: 1, fields: vec![Field::Myself, Field::Const(Value::FALSE)], len: code.len(), code, global: false, params: Some(0) });
-        self.resume = Some(q);
-        q
-    }
-
     /// One procedure's code, from its register word, as `procedure`.
     pub(super) fn procedure_x64(&mut self, p: usize) -> Result<(), String> {
         let h = self.heap;
         let (word, rw) = (self.procs[p].word, self.procs[p].rw);
-        let fields = h.bloblet_head(rw).fields;
-        let cells: Vec<Value> = (fixpt_heap::layout::cellular::WORD_CELL0..=fields).map(|k| h.bloblet_slot(rw, k)).collect();
+        let cells = super::register_cells(h, rw);
         let name = self.name(word);
         let decline = |what: String| Err(format!("`{name}`: {what}"));
         // Where each instruction starts, what a branch goes back to, and
@@ -599,13 +677,74 @@ impl Compiling<'_> {
             let at = starts.iter().position(|&s| s == j).expect("an instruction");
             starts[at + 1..].iter().copied().find(|&c| op_at(c) != "pop").filter(|&c| matches!(op_at(c), "invoke" | "tailinvoke"))
         };
-        if frame.is_some_and(|m| 24 + 8 * (m + 2) > 4080) {
+        // The frame, as `procedure` lays it out: the header, the link and
+        // the second word, the stack map, the values, this code bloblet and
+        // the closure, then the raw `f64` slots.
+        if frame.is_some_and(|m| 32 + 8 * (m + 2) > 4080) {
             return decline("a frame too large".into());
         }
-        let unmapped = frame.is_some_and(|m| m + 2 > 60);
-        let size = frame.map(|m| (24 + 8 * (m as u32 + 2)).div_ceil(16) as i32 * 16);
-        let self_slot = frame.map(|m| 24 + 8 * m as i32);
-        let clo_slot = frame.map(|m| 24 + 8 * (m as i32 + 1));
+        let prim_name = |p: usize| fixpt_runtime::PRIMITIVES.get(p).map_or("?", |d| d.name);
+        let raw = frame.map_or(Vec::new(), |m| reps::raw_slots(&cells, &starts, &prim_name, m));
+        let values = raw.iter().filter(|r| !**r).count() as i32;
+        // The parameters it takes raw, and each known callee's (`procedure`).
+        let params = self.params_of(p);
+        let mut callees = vec![0u8; starts.len()];
+        for &j in &starts {
+            let Some(c) = called(j) else { continue };
+            let q = match op_at(j) {
+                "global" => match self.global_value(cells[j + 1]).map_err(|e| format!("`{name}` calls {e}"))? {
+                    Field::Code(q) => Some(q),
+                    Field::Const(v) => {
+                        let si = starts.iter().position(|&s| s == c).expect("an instruction");
+                        callees[si] = self.native_params(v).unwrap_or(0);
+                        None
+                    }
+                    _ => None,
+                },
+                "const" => match self.closure_parts(cells[j + 1]) {
+                    Some((word, free)) if !h.is_cellular_word(cells[j + 1]) && free.is_empty() && self.name(word) != "undefined" => {
+                        Some(self.proc_of(word).map_err(|e| format!("`{name}` calls {e}"))?)
+                    }
+                    _ => None,
+                },
+                _ => None,
+            };
+            if let Some(q) = q {
+                let si = starts.iter().position(|&s| s == c).expect("an instruction");
+                callees[si] = self.params_of(q);
+            }
+        }
+        let (slot_off, value_index) = {
+            let (mut v, mut r) = (0i32, 0i32);
+            let mut offs = Vec::new();
+            let mut index = Vec::new();
+            for &is_raw in &raw {
+                if is_raw {
+                    offs.push(24 + 8 * (values + 2 + r));
+                    index.push(None);
+                    r += 1;
+                } else {
+                    offs.push(24 + 8 * v);
+                    index.push(Some(v));
+                    v += 1;
+                }
+            }
+            (offs, index)
+        };
+        let unmapped = frame.is_some() && values as u32 + 2 > MAP_BITS;
+        let fields = values as u64 + 5;
+        let size = frame.map(|m| (32 + 8 * (m as u64 + 2)).div_ceil(16) * 16);
+        let self_slot = frame.map(|_| 24 + 8 * values);
+        let clo_slot = frame.map(|_| 24 + 8 * (values + 1));
+        let value_mask = |mask: u64| (0..raw.len()).filter(|&k| k < 64 && mask & (1 << k) != 0).filter_map(|k| value_index[k]).fold(0u64, |m, v| m | 1 << v);
+        // The stack map for a site whose live slots are `live`.
+        let map_word = |live: u64| -> i64 {
+            if unmapped {
+                -(fields as i64)
+            } else {
+                (value_mask(live) | 1 << values | if captures { 1 << (values + 1) } else { 0 } | fields << MAP_BITS) as i64
+            }
+        };
         // Which slots are live after each instruction (`procedure`'s pass).
         let live_out = {
             let at_of: HashMap<usize, usize> = starts.iter().enumerate().map(|(si, &i)| (i, si)).collect();
@@ -646,36 +785,44 @@ impl Compiling<'_> {
                 }
             }
         };
-        let prim_name = |p: usize| fixpt_runtime::PRIMITIVES.get(p).map_or("?", |d| d.name);
-        let raw_refs = reps::raw_refs(&cells, &starts, &prim_name, &[]);
-        let mut map_stored: Option<u64>;
+        let raw_refs = reps::raw_refs(&cells, &starts, &prim_name, &raw);
+        let mut map_stored: Option<i64>;
         let mut a = Asm::new();
         let entry = a.label();
         let labels: Vec<Label> = (0..=cells.len()).map(|_| a.label()).collect();
         let mut stubs: Vec<(Label, u32)> = Vec::new();
         let mut foreign: Vec<(Label, Label, usize, bool)> = Vec::new();
-        let mut overflows: Vec<(Label, Label)> = Vec::new();
-        let mut cell_slows: Vec<(Label, Label, Label)> = Vec::new();
+        // The polls' ways out at a time slice's end (`emit_poll`).
+        let mut polls: Vec<NPoll> = Vec::new();
+        let mut overflows: Vec<(Label, Label, Vec<usize>)> = Vec::new();
+        let mut cell_slows: Vec<(Label, Label, Label, Vec<usize>)> = Vec::new();
         let (resume_at, mut uses_resume) = (a.label(), false);
         let trap = |a: &mut Asm, stubs: &mut Vec<(Label, u32)>, code: u32, c: Cond| {
             let l = a.label();
             stubs.push((l, code));
             a.jcc(c, l);
         };
-        let fuel = |a: &mut Asm, stubs: &mut Vec<(Label, u32)>| {
-            a.e(alu_mi(Alu::Sub, st(offset_of!(DState, fuel)), 1));
-            trap(a, stubs, OUT_OF_FUEL, Cond::B);
-        };
         a.bind(entry);
+        raw_entry(&mut a, params);
+        let entry_checked = a.label();
+        a.bind(entry_checked);
         if calls || frame.is_some() {
-            fuel(&mut a, &mut stubs);
+            // The arguments live (all, for a variadic procedure, whose
+            // count is in X9, which the poll keeps too), raw or not.
+            let n = if op_at(starts[0]) == "args" { (cells[starts[0] + 1].as_fixnum() as usize).min(8) } else { 8 };
+            let (raws, values): (Vec<usize>, Vec<usize>) = (1..=n).partition(|&r| reps::raw_param(params, r));
+            let (out, back) = (a.label(), a.label());
+            a.e(alu_mi(Alu::Sub, st(offset_of!(DState, fuel)), 1));
+            a.jcc(Cond::B, out);
+            a.bind(back);
+            polls.push(NPoll { out, back, values, raws, clo: captures, map: None });
         }
         let sets_first = |j: usize| matches!(op_at(j), "const" | "reg" | "stack" | "global" | "lexical");
         let ignores = |j: usize| sets_first(j) || matches!(op_at(j), "invokeself");
         let joinable = |si: usize| starts.get(si + 1).copied().filter(|&j| !target[j]);
         let si_at: HashMap<usize, usize> = starts.iter().enumerate().map(|(si, &i)| (i, si)).collect();
         let has_int = starts.iter().any(|&i| matches!(op_at(i), "op2" | "op2imm") && reps::int_routine(cells[i + 1].as_fixnum() as usize));
-        let live = reps::live_in(&cells, &starts, &prim_name, &[]);
+        let live = reps::live_in(&cells, &starts, &prim_name, &raw);
         let labels_g = labels;
         let labels_f: Vec<Label> = (0..=cells.len()).map(|_| a.label()).collect();
         let versions: &[bool] = if has_int { &[true, false] } else { &[false] };
@@ -683,7 +830,7 @@ impl Compiling<'_> {
         let mut int_slows: Vec<IntSlow> = Vec::new();
         for &fast in versions {
         let labels = if fast { &labels_f } else { &labels_g };
-        let (reps_in, reps_out) = reps::reps_of(&cells, &starts, &prim_name, fast, &[], 0, &vec![0; starts.len()]);
+        let (reps_in, reps_out) = reps::reps_of(&cells, &starts, &prim_name, fast, &raw, params, &callees);
         let mut src = RESULT;
         let mut pending: Option<Field> = None;
         let mut bound: Option<(Value, Value)> = None;
@@ -725,7 +872,8 @@ impl Compiling<'_> {
             {
                 let o = |j: usize| cells[i + 1 + j];
                 let mut reps = reps_in[si - 1];
-                let first = reps::step(op, &o, &prim_name, raw_refs[si - 1], fast, &[], reps::Calls { own: 0, callee: 0 }, &mut reps);
+                let calls = reps::Calls { own: params, callee: callees[si - 1] };
+                let first = reps::step(op, &o, &prim_name, raw_refs[si - 1], fast, &raw, calls, &mut reps);
                 // `RESULT`, where a `reg` just before left it in its register
                 // (`src`), is tested there.
                 convert(&mut a, self.callouts, &first, labels_g[i], src);
@@ -735,13 +883,13 @@ impl Compiling<'_> {
             }
             // Before what may collect, in a frame: the slots live after it,
             // the code bloblet's, and the closure's if the code reads it.
-            if let Some(fm) = frame
+            if frame.is_some()
                 && framed[i]
                 && matches!(op, "prim" | "cellular" | "lambda" | "invokeself" | "invoke")
             {
-                let map = if unmapped { u64::MAX } else { live_out[si - 1] | 1 << fm | if captures { 1 << (fm + 1) } else { 0 } };
+                let map = map_word(live_out[si - 1]);
                 if map_stored != Some(map) {
-                    a.imm(X16, Value::fixnum(if unmapped { -1 } else { map as i64 }).raw());
+                    a.imm(X16, Value::fixnum(map).raw());
                     a.e(store(m(FRAME, 16), X16));
                     map_stored = Some(map);
                 }
@@ -858,31 +1006,28 @@ impl Compiling<'_> {
                     a.put(k(o(1)), r);
                 }
                 // The frame made, as `procedure` makes it, the return
-                // address `call` pushed (now the frame's top word) moved to
-                // its second.
+                // address `call` pushed (where the frame's top word is)
+                // moved to its second.
                 "save" => {
                     let size = size.expect("a frame");
-                    a.e(sub_imm(SP, size - 8));
-                    a.e(load(X11, m(SP, size - 8)));
-                    a.e(store(m(SP, 8), X11));
-                    a.e(store(m(SP, 0), FRAME));
-                    a.e(mov(FRAME, SP));
+                    push_frame_ret(&mut a, size);
                     // Past the stack cache's limit: the rest flushed into
                     // the heap, and this frame moved to the cache's top.
                     a.e(alu_rm(Alu::Cmp, SP, st(offset_of!(DState, stack_limit))));
                     let (over, back) = (a.label(), a.label());
                     a.jcc(Cond::B, over);
                     a.bind(back);
-                    overflows.push((over, back));
+                    let raws = (1..=8).filter(|&r| reps_in[si - 1][r] == Rep::F64).collect();
+                    overflows.push((over, back, raws));
                     map_stored = None;
                     if unmapped {
-                        for off in (24..size).step_by(8) {
+                        for off in (24..size as i32 - 8).step_by(8) {
                             a.e(store_imm(m(FRAME, off), 0));
                         }
                     } else {
                         let unwritten = live_out[si - 1];
-                        for k in (0..64).filter(|k| unwritten & (1 << k) != 0) {
-                            a.e(store_imm(m(FRAME, 24 + 8 * k), 0));
+                        for k in (0..raw.len()).filter(|&k| k < 64 && unwritten & (1 << k) != 0 && !raw[k]) {
+                            a.e(store_imm(m(FRAME, slot_off[k]), 0));
                         }
                     }
                     a.field(X9, 1);
@@ -891,19 +1036,13 @@ impl Compiling<'_> {
                         a.e(store(m(FRAME, clo_slot.expect("a frame")), CLO));
                     }
                 }
-                // The frame popped, its return address pushed again.
-                "pop" => {
-                    let size = size.expect("a frame");
-                    a.e(load(X11, m(SP, 8)));
-                    a.e(load(FRAME, m(SP, 0)));
-                    a.e(add_imm(SP, size));
-                    a.e(push(X11));
-                }
-                "stack" => a.e(load(RESULT, m(FRAME, 24 + 8 * k(o(0)) as i32))),
-                "setstk" => a.e(store(m(FRAME, 24 + 8 * k(o(0)) as i32), RESULT)),
-                "load" => a.load_reg(k(o(0)), m(FRAME, 24 + 8 * k(o(1)) as i32), X11),
+                // The frame popped, its return address on top again.
+                "pop" => pop_frame_ret(&mut a, size.expect("a frame")),
+                "stack" => a.e(load(RESULT, m(FRAME, slot_off[k(o(0))]))),
+                "setstk" => a.e(store(m(FRAME, slot_off[k(o(0))]), RESULT)),
+                "load" => a.load_reg(k(o(0)), m(FRAME, slot_off[k(o(1))]), X11),
                 "store" => {
-                    a.store_reg(m(FRAME, 24 + 8 * k(o(1)) as i32), k(o(0)), X11);
+                    a.store_reg(m(FRAME, slot_off[k(o(1))]), k(o(0)), X11);
                     // Its slot read back at once: the register is still it.
                     if let Some(j) = joinable(si - 1)
                         && op_at(j) == "stack"
@@ -1055,23 +1194,24 @@ impl Compiling<'_> {
                     }
                     a.bind(back);
                 }
+                // A displacement reaches any field `procedure` reaches.
                 "field" => {
                     let off = super::field_off(k(o(0)));
-                    if off < -256 {
+                    if off < -4095 {
                         return decline("a field too far".into());
                     }
                     a.e(load(RESULT, m(RESULT, off as i32)));
                 }
                 "setfield" => {
                     let off = super::field_off(k(o(0)));
-                    if off < -256 {
+                    if off < -4095 {
                         return decline("a field too far".into());
                     }
                     a.store_reg(m(RESULT, off as i32), k(o(1)), X11);
                     a.es(&card_mark(RESULT, off as i32, ST, offset_of!(DState, cards) as i32, X16, X17));
                 }
                 // Control, on the native stack, as `procedure` does it.
-                "cellular" if matches!(ROUTINES.get(k(o(0))).map(|r| r.0), Some("prompt" | "withmark" | "withmark-tail" | "abort" | "callcc" | "callcomp" | "firstmark" | "currentmarks" | "marksof")) => {
+                "cellular" if matches!(ROUTINES.get(k(o(0))).map(|r| r.0), Some("prompt" | "withmark" | "withmark-tail" | "abort" | "callcc" | "callcomp" | "ncallcc" | "ncallcomp" | "callone" | "ncallone" | "firstmark" | "currentmarks" | "marksof")) => {
                     if frame.is_none() {
                         return decline("a call-out outside a frame".into());
                     }
@@ -1096,17 +1236,17 @@ impl Compiling<'_> {
                         a.e(alu_mi(Alu::Cmp, st(offset_of!(DState, trap)), 0));
                         trap(a, stubs, PRIM_FAILED, Cond::Ne);
                     };
-                    // A control frame: the link, `second` (the landing, the
-                    // return address, or nothing), the marker, REG1 and
-                    // REG2, and `last`.
+                    // A control frame: its header, the link, `second` (the
+                    // landing, the return address, or nothing), the marker,
+                    // REG1 and REG2, and `last`.
                     let control_frame = |a: &mut Asm, stubs: &mut Vec<(Label, u32)>, second: Option<Reg>, marker: Value, last: Option<usize>| {
                         a.e(sub_imm(SP, CONTROL_FRAME as i32));
-                        a.e(store(m(SP, 0), FRAME));
+                        a.e(store(m(SP, 8), FRAME));
                         match second {
-                            Some(r) => a.e(store(m(SP, 8), r)),
-                            None => a.e(store_imm(m(SP, 8), 0)),
+                            Some(r) => a.e(store(m(SP, 16), r)),
+                            None => a.e(store_imm(m(SP, 16), 0)),
                         }
-                        a.e(mov(FRAME, SP));
+                        a.e(lea(FRAME, m(SP, 8)));
                         // A control frame may pass the cache's limit by
                         // half the slack: the next procedure's frame
                         // flushes it with the rest.
@@ -1126,7 +1266,7 @@ impl Compiling<'_> {
                         }
                     };
                     let pop_control = |a: &mut Asm| {
-                        a.e(load(FRAME, m(SP, 0)));
+                        a.e(load(FRAME, m(SP, 8)));
                         a.e(add_imm(SP, CONTROL_FRAME as i32));
                     };
                     match ROUTINES[k(o(0))].0 {
@@ -1143,7 +1283,7 @@ impl Compiling<'_> {
                             a.jmp(done);
                             a.bind(land);
                             a.e(mov(IN_REGS[1], RESULT));
-                            a.e(load(CLO, m(SP, 32)));
+                            a.e(load(CLO, m(SP, 40)));
                             pop_control(&mut a);
                             call_clo(&mut a, &mut foreign, 1, handled);
                             a.bind(done);
@@ -1165,10 +1305,10 @@ impl Compiling<'_> {
                             a.e(load(X9, st(offset_of!(DState, mark_ret))));
                             a.e(alu_rm(Alu::Cmp, X9, m(SP, 0)));
                             a.jcc(Cond::Ne, push_);
-                            a.e(load(X16, m(SP, 8 + 24)));
+                            a.e(load(X16, m(SP, 8 + 32)));
                             a.e(cmp(X16, IN_REGS[1]));
                             a.jcc(Cond::Ne, push_);
-                            a.e(store(m(SP, 8 + 32), IN_REGS[2]));
+                            a.e(store(m(SP, 8 + 40), IN_REGS[2]));
                             a.jmp(call);
                             a.bind(push_);
                             a.e(pop(X11));
@@ -1189,7 +1329,8 @@ impl Compiling<'_> {
                             uses_resume = true;
                             a.jmp(resume_at);
                         }
-                        r @ ("callcc" | "callcomp") => {
+                        // Native here, so `ncallcc`'s too.
+                        r @ ("callcc" | "callcomp" | "ncallcc" | "ncallcomp" | "callone" | "ncallone") => {
                             let after = a.label();
                             a.lea_l(X9, after);
                             a.e(store(st(offset_of!(DState, ret_pc)), X9));
@@ -1197,7 +1338,7 @@ impl Compiling<'_> {
                             let f = self.field(p, Field::Code(q));
                             a.field(X9, f);
                             a.e(store(st(offset_of!(DState, aux)), X9));
-                            callout(&mut a, &mut stubs, self.callouts, Callout::Capture { whole: r == "callcc", once: false });
+                            callout(&mut a, &mut stubs, self.callouts, Callout::Capture { whole: r.ends_with("callcc"), once: r.ends_with("callone") });
                             a.e(mov(IN_REGS[1], RESULT));
                             a.e(load(CLO, st(args)));
                             call_clo(&mut a, &mut foreign, 1, after);
@@ -1220,18 +1361,39 @@ impl Compiling<'_> {
                     if !sse41() && ["floor", "ceiling", "truncate", "round"].iter().any(|w| pname.ends_with(w)) {
                         return decline(format!("`{pname}` needs SSE4.1, which this processor lacks"));
                     }
-                    // An element only `f64` operations use: its bits.
-                    if pname == "%fx26-flatarray-ref" && raw_refs[si - 1] {
-                        let y = a.get(k(o(1)), X17);
-                        let y = if op == "prim2" && y != RESULT {
-                            y
-                        } else if op == "prim2" {
+                    // What an `nclosure` made: here, the closure itself.
+                    if pname == "%fx26-adapted" {
+                        continue;
+                    }
+                    // A flat array's index, apart from `RESULT`: `REGk`'s
+                    // register, or `X17`.
+                    let index = |a: &mut Asm| match op {
+                        "prim2" if k(o(1)) == 0 => {
                             a.e(mov(X17, RESULT));
                             X17
-                        } else {
+                        }
+                        "prim2" => a.get(k(o(1)), X17),
+                        _ => {
                             a.imm(X17, o(1).raw());
                             X17
-                        };
+                        }
+                    };
+                    // An element returned: an `f64`'s bits returned raw,
+                    // where the caller takes them so (`raw_return`); any
+                    // other, or a read that fails, as below.
+                    if pname == "%fx26-flatarray-ref" && starts.get(si).is_some_and(|&j| op_at(j) == "return") {
+                        let y = index(&mut a);
+                        let generic = a.label();
+                        flat_element(&mut a, RESULT, y, generic);
+                        a.e(cmp_imm(X16, (fixpt_heap::layout::FLAT_F64 << 3) as i32));
+                        a.jcc(Cond::Ne, generic);
+                        a.e(load(RESULT, mi(X15, X14, 8, 0)));
+                        raw_return(&mut a, self.callouts);
+                        a.bind(generic);
+                    }
+                    // An element only `f64` operations use: its bits.
+                    if pname == "%fx26-flatarray-ref" && raw_refs[si - 1] {
+                        let y = index(&mut a);
                         let (slow, done) = (a.label(), a.label());
                         flat_element(&mut a, RESULT, y, slow);
                         a.e(load(RESULT, mi(X15, X14, 8, 0)));
@@ -1268,12 +1430,18 @@ impl Compiling<'_> {
                     let step = pname == "%suffix-ref+" && o(1).is_fixnum() && (0..1 << 24).contains(&o(1).as_fixnum());
                     let tag = pname == "%fx26-flat-tag" && o(1).is_fixnum();
                     let at = pname == "%suffix-ref" && o(1).is_fixnum() && (0..1 << 26).contains(&o(1).as_fixnum());
-                    if op == "prim2imm" && (step || tag || at) {
+                    let fits = pname == "%fx26-suffix-fits" && o(1).is_fixnum() && (0..1 << 24).contains(&o(1).as_fixnum());
+                    let length = pname == "%fx26-suffix-ref-length" && o(1).is_fixnum() && fixpt_heap::layout::array_operand_parts(o(1).as_fixnum()).1 > 0;
+                    if op == "prim2imm" && (step || tag || at || fits || length) {
                         let (slow, done) = (a.label(), a.label());
                         if step {
                             suffix_step(&mut a, o(1).as_fixnum(), slow);
                         } else if tag {
                             flat_tag(&mut a, o(1).as_fixnum(), slow);
+                        } else if fits {
+                            suffix_fits(&mut a, o(1).as_fixnum(), slow);
+                        } else if length {
+                            suffix_length(&mut a, o(1).as_fixnum(), slow);
                         } else {
                             blobref_at(&mut a, o(1).as_fixnum(), slow);
                         }
@@ -1452,7 +1620,8 @@ impl Compiling<'_> {
                         ("cellular", Some("rest")) if k(o(1)) == 0 => Callout::Rest,
                         ("cellular", Some("field@")) if k(o(1)) == 2 => Callout::FieldRef,
                         ("prim", _) => match fixpt_runtime::PRIMITIVES.get(k(o(0))) {
-                            Some(d) if d.name == "%region-closure" => Callout::RegionClosure { n: k(o(1)) },
+                            // `%region-nclosure`'s, natively: the same.
+                            Some(d) if matches!(d.name, "%region-closure" | "%region-nclosure") => Callout::RegionClosure { n: k(o(1)) },
                             Some(d) if d.name == "%stay-cellular" => return decline("it calls `stay-cellular`".into()),
                             Some(d) if matches!(d.kind, fixpt_runtime::PrimKind::Simple(_)) && d.accepts(k(o(1))) => {
                                 Callout::Prim { p: k(o(0)), n: k(o(1)) }
@@ -1508,6 +1677,9 @@ impl Compiling<'_> {
                     let raw_store = reps_in[si - 1][3] == Rep::F64;
                     if prim_is("%fx26-flatarray-set!", 3) {
                         flat_set(&mut a, slow, done, raw_store);
+                    }
+                    if prim_is("%fx26-bytevector-u8-set!", 3) {
+                        bytes_set(&mut a, slow, done);
                     }
                     if prim_is("%fx26-suffix-ref-set!", 3) {
                         suffix_set(&mut a, slow, done);
@@ -1670,15 +1842,14 @@ impl Compiling<'_> {
                     if let (Callout::Closure { n }, Some(f)) = (c, code_field) {
                         if leaf_closure {
                             // A frame for the collector to walk, with
-                            // nothing in it, under the return address.
-                            small_frame(&mut a);
+                            // nothing in it, the return address its second.
+                            push_frame_ret(&mut a, STUB_FRAME);
                         }
                         a.field(X17, f);
                         a.imm(X9, n as u64);
                         a.e(call_m(st(offset_of!(DState, closure))));
                         if leaf_closure {
-                            a.e(load(FRAME, m(SP, 0)));
-                            a.e(add_imm(SP, 8));
+                            pop_frame_ret(&mut a, STUB_FRAME);
                         }
                     } else {
                         let n = self.callouts.len();
@@ -1692,14 +1863,35 @@ impl Compiling<'_> {
                 }
                 // A call, as `procedure` makes it: `call` in place of `blr`,
                 // `jmp` of `br`, the return address already on top for a
-                // tail call (the frame popped pushed it back).
+                // tail call (the frame popped put it back). A procedure
+                // known here that takes some arguments raw: given them so,
+                // entered past its unboxing of them.
                 "invoke" | "tailinvoke" => {
                     let tail = op == "tailinvoke";
+                    let callee = callees[si - 1];
+                    let raws: Vec<usize> = (1..=8).filter(|&r| reps::raw_param(callee, r)).collect();
+                    let skip = raw_entry_skip(callee);
                     let (stub, after) = (a.label(), a.label());
+                    // The callee's convention, by its type, as `procedure`
+                    // reads it: native, no look; cellular, called out; fx,
+                    // looked at.
+                    use fixpt_heap::layout::regcode::conv;
+                    let cv = k(o(1));
                     let not_native = |a: &mut Asm| {
+                        if cv == conv("cellular") {
+                            a.jmp(stub);
+                            return;
+                        }
                         a.e(load(X16, fld(CLO, CLOSURE_WORD)));
-                        a.e(alu_rm(Alu::Cmp, X16, st(offset_of!(DState, code_lo))));
-                        a.jcc(Cond::B, stub);
+                        if cv == conv("fx") {
+                            a.e(alu_rm(Alu::Cmp, X16, st(offset_of!(DState, code_lo))));
+                            a.jcc(Cond::B, stub);
+                        }
+                    };
+                    let past_raw = |a: &mut Asm| {
+                        if skip > 0 {
+                            a.e(add_imm(X16, skip));
+                        }
                     };
                     if let Some((cell, writes)) = bound.take() {
                         let (slow, join) = (a.label(), a.label());
@@ -1714,6 +1906,13 @@ impl Compiling<'_> {
                             Some(Field::Code(q)) => {
                                 let f = self.field(p, Field::Code(q));
                                 a.field(X16, f);
+                                past_raw(&mut a);
+                            }
+                            // Another compile's native code, what the cell
+                            // holds while the guard holds.
+                            Some(Field::Const(_)) => {
+                                a.e(load(X16, fld(CLO, CLOSURE_WORD)));
+                                past_raw(&mut a);
                             }
                             Some(g) => {
                                 let f = self.field(p, g);
@@ -1723,20 +1922,23 @@ impl Compiling<'_> {
                             None => unreachable!("a global bound is called"),
                         }
                         a.bind(join);
-                        cell_slows.push((slow, join, stub));
+                        cell_slows.push((slow, join, stub, raws));
                         foreign.push((stub, after, k(o(0)), tail));
                     } else {
                         match pending.take() {
                             Some(Field::Code(q)) => {
                                 let f = self.field(p, Field::Code(q));
                                 a.field(X16, f);
+                                past_raw(&mut a);
                             }
                             Some(Field::Cell(c)) => {
                                 let f = self.field(p, Field::Cell(c));
                                 a.field(X9, f);
                                 a.e(load(CLO, fld(X9, 2)));
                                 not_native(&mut a);
-                                foreign.push((stub, after, k(o(0)), tail));
+                                if cv != conv("native") {
+                                    foreign.push((stub, after, k(o(0)), tail));
+                                }
                             }
                             Some(g) => {
                                 let f = self.field(p, g);
@@ -1746,7 +1948,9 @@ impl Compiling<'_> {
                             None => {
                                 a.e(mov(CLO, RESULT));
                                 not_native(&mut a);
-                                foreign.push((stub, after, k(o(0)), tail));
+                                if cv != conv("native") {
+                                    foreign.push((stub, after, k(o(0)), tail));
+                                }
                             }
                         }
                     }
@@ -1755,13 +1959,20 @@ impl Compiling<'_> {
                     a.e(alu_rm(Alu::Add, X16, st(offset_of!(DState, delta))));
                     a.e(if tail { jmp_r(X16) } else { call_r(X16) });
                     a.bind(after);
+                    if !tail && raw_refs[si - 1] {
+                        take_raw_f64(&mut a);
+                    }
                 }
                 "invokeself" => {
                     if let Some(s) = clo_slot.filter(|_| captures) {
                         a.e(load(CLO, m(FRAME, s)));
                     }
-                    a.call_l(entry);
+                    a.call_l(entry_checked);
+                    if raw_refs[si - 1] {
+                        take_raw_f64(&mut a);
+                    }
                 }
+                "return" if reps_in[si - 1][0] == Rep::F64 => raw_return(&mut a, self.callouts),
                 "return" => a.e(ret()),
                 "branch" | "branchf" | "brancht" => {
                     let to = (i as i64 + 2 + o(0).as_fixnum()) as usize;
@@ -1771,7 +1982,21 @@ impl Compiling<'_> {
                         a.jcc(if op == "branchf" { Cond::E } else { Cond::Ne }, l);
                     } else {
                         if back_to[to] {
-                            fuel(&mut a, &mut stubs);
+                            // What the loop's head reads, kept as it is
+                            // here, raw or not; the frame's map for here.
+                            let t = si_at[&to];
+                            let rep = reps_in[si - 1];
+                            let kept = |r: usize| live[t][r] && !matches!(rep[r], Rep::Undefined);
+                            let raw_r = |r: usize| matches!(rep[r], Rep::F64 | Rep::Raw { .. });
+                            let vals: Vec<usize> = (0..=8).filter(|&r| kept(r) && !raw_r(r)).collect();
+                            let raws: Vec<usize> = (0..=8).filter(|&r| kept(r) && raw_r(r)).collect();
+                            let map = (frame.is_some() && framed[i]).then(|| map_word(live_out[si - 1]));
+                            let (out, back) = (a.label(), a.label());
+                            a.e(alu_mi(Alu::Sub, st(offset_of!(DState, fuel)), 1));
+                            a.jcc(Cond::B, out);
+                            a.bind(back);
+                            polls.push(NPoll { out, back, values: vals, raws, clo: captures && !framed[i], map });
+                            map_stored = None;
                         }
                         a.jmp(l);
                     }
@@ -1798,8 +2023,12 @@ impl Compiling<'_> {
             a.jmp(to);
         }
         let own = a.here();
-        for (slow, join, stub) in &cell_slows {
+        for (slow, join, stub, raws) in &cell_slows {
             a.bind(*slow);
+            // Not the procedure known: what it holds takes values.
+            for &r in raws {
+                in_place(&mut a, r, |a, x| box_f64(a, self.callouts, x));
+            }
             a.e(load(X16, fld(CLO, CLOSURE_WORD)));
             a.e(alu_rm(Alu::Cmp, X16, st(offset_of!(DState, code_lo))));
             a.jcc(Cond::B, *stub);
@@ -1820,12 +2049,22 @@ impl Compiling<'_> {
             resume(&mut a);
         }
         let info = overflow_info(self.procs[p].arity, captures);
-        for (over, back) in &overflows {
+        for (over, back, raws) in &overflows {
             a.bind(*over);
+            // The arguments it keeps are values: those raw boxed around it.
+            for &r in raws {
+                in_place(&mut a, r, |a, x| box_f64(a, self.callouts, x));
+            }
             a.field(X16, 1);
             a.imm(X17, info);
             a.e(call_m(st(offset_of!(DState, overflow))));
+            for &r in raws {
+                in_place(&mut a, r, unbox_f64);
+            }
             a.jmp(*back);
+        }
+        for poll in std::mem::take(&mut polls) {
+            emit_poll(&mut a, &poll, &mut stubs);
         }
         // The traps, out of the way: a stub per site, calling its kind's
         // stub, which goes to the machine's common trap.
@@ -1845,6 +2084,84 @@ impl Compiling<'_> {
         self.procs[p].code = a.finish()?;
         self.procs[p].len = own;
         Ok(())
+    }
+}
+
+/// A poll whose slice is spent, as `super::NPoll`: where its way out is,
+/// and where the procedure goes on; which of `RESULT` and REG1…REG8 hold
+/// values to keep, and which raw bits; whether the closure lives only in
+/// `CLO`; and the procedure's map for here, if it has its frame.
+struct NPoll {
+    out: Label,
+    back: Label,
+    values: Vec<usize>,
+    raws: Vec<usize>,
+    clo: bool,
+    map: Option<i64>,
+}
+
+/// A poll's way out at a time slice's end, as `super::emit_poll`: out of
+/// fuel if the reserve is spent; else a frame of its own, mapped as a
+/// procedure's, holding what is live (REG4…REG8 from the state too), the
+/// call-out that gives the next slice, the scheduler's `preempt` if it
+/// would have another task run, and back. With the procedure's frame, to
+/// `back` by the poll frame's second word (which a restore may have made
+/// the underflow); without, its return address the poll frame's second,
+/// put back on top, and on by a jump.
+fn emit_poll(a: &mut Asm, p: &NPoll, stubs: &mut Vec<(Label, u32)>) {
+    use super::{POLL_FIELDS, POLL_FRAME, POLL_RAW0};
+    a.bind(p.out);
+    a.e(alu_mi(Alu::Cmp, st(offset_of!(DState, reserve)), 0));
+    let spent = a.label();
+    stubs.push((spent, OUT_OF_FUEL));
+    a.jcc(Cond::E, spent);
+    if let Some(mw) = p.map {
+        a.imm(X16, Value::fixnum(mw).raw());
+        a.e(store(m(FRAME, 16), X16));
+        a.lea_l(X17, p.back);
+        push_frame(a, X17, POLL_FRAME);
+    } else {
+        push_frame_ret(a, POLL_FRAME);
+    }
+    let mut mask = 1u64 << 10;
+    for &r in &p.values {
+        mask |= 1 << r;
+    }
+    if p.clo {
+        mask |= 1 << 9;
+    }
+    a.imm(X16, Value::fixnum((POLL_FIELDS << MAP_BITS | mask) as i64).raw());
+    a.e(store(m(FRAME, 16), X16));
+    for &r in &p.values {
+        a.store_reg(m(FRAME, 24 + 8 * r as i32), r, X16);
+    }
+    if p.clo {
+        a.e(store(m(FRAME, 24 + 8 * 9), CLO));
+    }
+    a.field(X16, 1);
+    a.e(store(m(FRAME, 24 + 8 * 10), X16));
+    for &r in &p.raws {
+        a.store_reg(m(FRAME, POLL_RAW0 as i32 + 8 * r as i32), r, X16);
+    }
+    a.e(store(m(FRAME, POLL_RAW0 as i32 + 8 * 9), X9));
+    call_out(a, POLL);
+    preempt(a);
+    for &r in &p.values {
+        a.load_reg(r, m(FRAME, 24 + 8 * r as i32), X16);
+    }
+    if p.clo {
+        a.e(load(CLO, m(FRAME, 24 + 8 * 9)));
+    }
+    for &r in &p.raws {
+        a.load_reg(r, m(FRAME, POLL_RAW0 as i32 + 8 * r as i32), X16);
+    }
+    a.e(load(X9, m(FRAME, POLL_RAW0 as i32 + 8 * 9)));
+    if p.map.is_some() {
+        pop_frame(a, POLL_FRAME);
+        a.e(jmp_r(X11));
+    } else {
+        pop_frame_ret(a, POLL_FRAME);
+        a.jmp(p.back);
     }
 }
 
@@ -2048,8 +2365,17 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
             a.e(mov(RESULT, X13));
         }
         // The raw values' quotient is the quotient's value, their
-        // remainder the remainder's raw value. `idiv` takes `RESULT`, kept
+        // remainder the remainder's raw value (`remainder`'s, the
+        // dividend's sign, always a fixnum). `idiv` takes `RESULT`, kept
         // in `X16` for the slow path.
+        "%fx26-remainder" => {
+            fixnums(a);
+            a.e(test(y, y));
+            a.jcc(Cond::E, slow);
+            a.e(cqo());
+            a.e(idiv(y));
+            a.e(mov(RESULT, RDX));
+        }
         "%fx26-quotient" | "modulo" => {
             fixnums(a);
             a.e(test(y, y));
@@ -2111,6 +2437,26 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
             a.e(shl_imm(X14, 3));
             a.e(mov(RESULT, X14));
             a.bind(done);
+        }
+        // A bytevector, all suffix: its length the word before the bytes, a
+        // byte at its index. The type says it is one; an index past it, or
+        // not a fixnum, is the primitive's to refuse.
+        "bytevector-length" => {
+            a.e(load(X13, m(x, -4)));
+            a.e(shl_imm(X13, 3));
+            a.e(mov(RESULT, X13));
+        }
+        "bytevector-u8-ref" => {
+            a.e(test_imm(y, 7));
+            a.jcc(Cond::Ne, slow);
+            a.e(load(X14, m(x, -4)));
+            a.e(mov(X15, y));
+            a.e(sar_imm(X15, 3));
+            a.e(cmp(X15, X14));
+            a.jcc(Cond::Ae, slow);
+            a.e(load8(X16, mi(x, X15, 1, 4)));
+            a.e(shl_imm(X16, 3));
+            a.e(mov(RESULT, X16));
         }
         "%fx26-flatarray-length" => {
             flat_count(a, x, X13);
@@ -2251,6 +2597,65 @@ fn unbox_f64(a: &mut Asm, r: Reg) {
     a.bind(other);
     a.imm(r, 0);
     a.bind(done);
+}
+
+/// The parameters in `params` (`reps::raw_param`) unboxed, at a
+/// procedure's entry: what a call that knows the procedure, passing them
+/// raw, enters past (`raw_entry_skip`).
+fn raw_entry(a: &mut Asm, params: u8) {
+    for r in (1..=8).filter(|&r| reps::raw_param(params, r)) {
+        in_place(a, r, unbox_f64);
+    }
+}
+
+/// Bytes from a procedure's entry past its unboxing of the parameters in
+/// `params` (`raw_entry`), as `super::raw_entry_skip`: on x86_64 a
+/// register's unboxing is not every other's length.
+fn raw_entry_skip(params: u8) -> i32 {
+    let mut a = Asm::new();
+    raw_entry(&mut a, params);
+    // An instruction after it, where its last label is placed.
+    a.e(ret());
+    a.finish().expect("placed").len() as i32 - 1
+}
+
+/// What a call that takes an `f64` value raw puts where the callee returns
+/// to, as `super::raw_f64_mark`: an eight-byte `nop` whose displacement
+/// nothing else emits.
+const RAW_F64_MARK: [u8; 8] = [0x0F, 0x1F, 0x84, 0x00, 0x4F, 0xF6, 0x4F, 0xF6];
+/// Where past its return address a callee returning an `f64` raw returns:
+/// past the mark and the jump after it (`take_raw_f64`).
+const RAW_F64_SKIP: i32 = 8 + 5;
+
+/// After a call whose value only `f64` operations use, as
+/// `super::take_raw_f64`: the value raw in `RESULT`. A callee returning one
+/// raw returns past the mark and the jump to unboxing; any other return
+/// comes to the mark, which does nothing, and the value is unboxed.
+fn take_raw_f64(a: &mut Asm) {
+    let (boxed, join) = (a.label(), a.label());
+    a.es(&RAW_F64_MARK);
+    a.jmp(boxed);
+    a.jmp(join);
+    a.bind(boxed);
+    unbox_f64(a, RESULT);
+    a.bind(join);
+}
+
+/// A return of the raw `f64` in `RESULT`, as `super::raw_return`: as it
+/// is, `RAW_F64_SKIP` past the return address, where the caller takes it
+/// so; else boxed, to the return address.
+fn raw_return(a: &mut Asm, callouts: &mut Vec<Callout>) {
+    let boxed = a.label();
+    a.e(load(X16, m(SP, 0)));
+    a.e(load(X16, m(X16, 0)));
+    a.imm(X17, u64::from_le_bytes(RAW_F64_MARK));
+    a.e(cmp(X16, X17));
+    a.jcc(Cond::Ne, boxed);
+    a.e(alu_mi(Alu::Add, m(SP, 0), RAW_F64_SKIP));
+    a.e(ret());
+    a.bind(boxed);
+    box_f64(a, callouts, RESULT);
+    a.e(ret());
 }
 
 /// Register `r`'s raw `f64` boxed, in place: a flonum from the free space
@@ -2462,11 +2867,13 @@ fn f32_fast(a: &mut Asm, what: &str, y: Reg) -> bool {
     true
 }
 
-/// `RESULT`, the fixnum of an integer, wrapped to a 32-bit type's range:
-/// its bits 3 to 34 kept, sign-extended if the type is signed.
-fn wrap32(a: &mut Asm, signed: bool) {
-    a.e(shl_imm(RESULT, 29));
-    a.e(if signed { sar_imm(RESULT, 29) } else { shr_imm(RESULT, 29) });
+/// `RESULT`, the fixnum of an integer, wrapped to the range of a type of
+/// `bits` bits (8 or 32): its bits 3 to `bits` + 2 kept, sign-extended if
+/// the type is signed.
+fn wrap_small(a: &mut Asm, signed: bool, bits: u32) {
+    let k = (61 - bits) as u8;
+    a.e(shl_imm(RESULT, k));
+    a.e(if signed { sar_imm(RESULT, k) } else { shr_imm(RESULT, k) });
 }
 
 /// An `i64` (signed) or `u64` operation `what` on raw `RESULT` and `y`
@@ -2732,11 +3139,11 @@ fn suffix_store(a: &mut Asm, code: i64, v: Reg, raw: bool, slow: Label) {
     a.imm(RESULT, Value::UNIT.raw());
 }
 
-/// `blobref-index` of the suffix ref in `RESULT` at `i`, of layout `code`,
-/// `n << 32 | size`, into `RESULT`.
+/// `blobref-index` of the suffix ref in `RESULT` at `i`, of layout `code`
+/// (`layout::array_operand`), into `RESULT`.
 fn blobref_index(a: &mut Asm, code: i64, i: Reg, slow: Label) {
     use fixpt_heap::value::SUFFIX_OFFSET_SHIFT;
-    let (n, size) = (code >> 32, code & 0xffff_ffff);
+    let (n, size) = fixpt_heap::layout::array_operand_parts(code);
     a.e(test_imm(i, 7));
     a.jcc(Cond::Ne, slow);
     suffix_owner(a, RESULT, slow);
@@ -2871,9 +3278,43 @@ fn suffix_step(a: &mut Asm, d: i64, slow: Label) {
     a.e(add(RESULT, X9));
 }
 
+/// A new blobref (`%fx26-suffix-fits`), as `super::suffix_fits`: the
+/// suffix ref in `RESULT` left there, to `slow` unless `size` bytes from it
+/// lie in its owner's suffix.
+fn suffix_fits(a: &mut Asm, size: i64, slow: Label) {
+    suffix_owner(a, RESULT, slow);
+    a.imm(X9, size as u64);
+    a.e(add(X9, X15));
+    a.e(cmp(X9, X13));
+    a.jcc(Cond::A, slow);
+}
+
+/// `blobref-length` (`%fx26-suffix-ref-length`) of the suffix ref in
+/// `RESULT`, of the layout `code`, into `RESULT`, as `super::suffix_length`.
+fn suffix_length(a: &mut Asm, code: i64, slow: Label) {
+    let (n, size) = fixpt_heap::layout::array_operand_parts(code);
+    if n != fixpt_heap::layout::FLAT_TO_THE_END {
+        a.e(mov(X16, RESULT));
+        a.e(and_imm(X16, 7));
+        a.e(cmp_imm(X16, fixpt_heap::value::TAG_SUFFIX_REF as i32));
+        a.jcc(Cond::Ne, slow);
+        a.imm(RESULT, Value::fixnum(n).raw());
+        return;
+    }
+    suffix_owner(a, RESULT, slow);
+    a.e(mov(RAX, X13));
+    a.e(sub(RAX, X15));
+    a.imm(X17, size as u64);
+    a.imm(RDX, 0);
+    a.e(div(X17));
+    a.e(shl_imm(RAX, 3));
+}
+
 /// `blobref-index` (`%fx26-suffix-ref-index`) of the suffix ref in REG1,
-/// at REG2, of the layout in REG3, into `RESULT`.
+/// at REG2, of the layout in REG3 (`layout::array_operand`), into `RESULT`:
+/// the whole element within the suffix, as `super::suffix_index`.
 fn suffix_index(a: &mut Asm, slow: Label) {
+    use fixpt_heap::layout::{ARRAY_OPERAND_LENGTH_SHIFT, ARRAY_OPERAND_SIZE_BITS};
     use fixpt_heap::value::SUFFIX_OFFSET_SHIFT;
     let (r1, r2, r3) = (IN_REGS[1], IN_REGS[2], IN_REGS[3]);
     a.e(test_imm(r2, 7));
@@ -2882,14 +3323,15 @@ fn suffix_index(a: &mut Asm, slow: Label) {
     a.e(mov(X9, r2));
     a.e(sar_imm(X9, 3));
     a.e(mov(X17, r3));
-    a.e(shr_imm(X17, 35));
+    a.e(shr_imm(X17, (3 + ARRAY_OPERAND_LENGTH_SHIFT) as u8));
     a.e(cmp(X9, X17));
     a.jcc(Cond::Ae, slow);
-    ubfx(a, X17, r3, 3, 32);
+    ubfx(a, X17, r3, 3, ARRAY_OPERAND_SIZE_BITS);
     a.e(imul(X9, X17));
     a.e(lea(X16, mi(X15, X9, 1, 0)));
+    a.e(add(X16, X17));
     a.e(cmp(X16, X13));
-    a.jcc(Cond::Ae, slow);
+    a.jcc(Cond::A, slow);
     a.e(shl_imm(X9, SUFFIX_OFFSET_SHIFT as u8));
     a.e(lea(RESULT, mi(r1, X9, 1, 0)));
 }
@@ -3035,6 +3477,25 @@ fn suffix_set(a: &mut Asm, slow: Label, done: Label) {
     a.jmp(done);
 }
 
+/// `bytevector-u8-set!` of the bytevector in REG1 at REG2 to the `u8` in
+/// REG3, as `super::bytes_set`: its byte stored; an index that is no
+/// fixnum, or out of range, to `slow`. Unit into `RESULT`, and to `done`.
+fn bytes_set(a: &mut Asm, slow: Label, done: Label) {
+    let (bv, i, v) = (IN_REGS[1], IN_REGS[2], IN_REGS[3]);
+    a.e(test_imm(i, 7));
+    a.jcc(Cond::Ne, slow);
+    a.e(mov(X15, i));
+    a.e(sar_imm(X15, 3));
+    a.e(load(X14, m(bv, -4)));
+    a.e(cmp(X15, X14));
+    a.jcc(Cond::Ae, slow);
+    a.e(mov(X13, v));
+    a.e(shr_imm(X13, 3));
+    a.e(store8(mi(bv, X15, 1, 4), X13));
+    a.imm(RESULT, Value::UNIT.raw());
+    a.jmp(done);
+}
+
 /// `flatarray-set!` of the flat array in REG1 at REG2 to REG3, as
 /// `procedure`'s `flat_set`; `raw`: the value is an `f64`'s bits.
 fn flat_set(a: &mut Asm, slow: Label, done: Label, raw: bool) {
@@ -3084,27 +3545,36 @@ fn flat_set(a: &mut Asm, slow: Label, done: Label, raw: bool) {
 }
 
 /// The rest of `pure_fast`, as `procedure`'s: `f32` operations, and the
-/// 32-bit integers', each the fixnum of its value, so their arithmetic is
-/// the fixnums' then wrapped.
+/// 8- and 32-bit integers', each the fixnum of its value, so their
+/// arithmetic is the fixnums' then wrapped.
 fn narrow_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
     let x = RESULT;
     let Some(rest) = name.strip_prefix("%fx26-") else { return false };
     if let Some(what) = rest.strip_prefix("f32") {
         return f32_fast(a, what, y);
     }
-    let signed = |t: &str| match t {
-        "i32" => Some(true),
-        "u32" => Some(false),
+    // The fixnum-shaped widths: whether signed, and their bits.
+    let width = |t: &str| match t {
+        "i8" => Some((true, 8)),
+        "u8" => Some((false, 8)),
+        "i32" => Some((true, 32)),
+        "u32" => Some((false, 32)),
         _ => None,
     };
-    if let Some(s) = rest.strip_prefix("int->").and_then(signed) {
+    if let Some((s, bits)) = rest.strip_prefix("int->").and_then(width) {
         a.e(test_imm(x, 7));
         a.jcc(Cond::Ne, slow);
-        wrap32(a, s);
+        wrap_small(a, s, bits);
         return true;
     }
-    let Some(s) = rest.get(..3).and_then(signed) else { return false };
-    let compare = match &rest[3..] {
+    let Some((s, bits, op)) = ["i8", "u8", "i32", "u32"]
+        .iter()
+        .find_map(|t| rest.strip_prefix(t).filter(|op| !op.starts_with(|c: char| c.is_ascii_digit())).and_then(|op| width(t).map(|(s, b)| (s, b, op))))
+    else {
+        return false;
+    };
+    let wrap32 = |a: &mut Asm, s: bool| wrap_small(a, s, bits);
+    let compare = match op {
         "<" => Some(Cond::L),
         "<=" => Some(Cond::Le),
         ">" => Some(Cond::G),
@@ -3121,7 +3591,7 @@ fn narrow_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
         a.e(test(y, y));
         a.jcc(Cond::E, slow);
     };
-    match &rest[3..] {
+    match op {
         "->int" => {}
         "+" => {
             a.e(add(RESULT, y));
@@ -3167,8 +3637,8 @@ fn narrow_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
             a.jcc(Cond::Ne, slow);
             a.e(mov(RCX, y));
             a.e(shr_imm(RCX, 3));
-            a.e(and_imm(RCX, 31));
-            if &rest[3..] == "-shl" {
+            a.e(and_imm(RCX, bits as i32 - 1));
+            if op == "-shl" {
                 a.e(shift_cl(Shift::Shl, RESULT));
                 wrap32(a, s);
             } else {
