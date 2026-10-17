@@ -146,6 +146,54 @@ impl Asm {
             self.e(load(X14, m(X14, 7)));
         }
     }
+    /// A poll in register code, as `regcode`'s `poll_regs`: a time slice's
+    /// end leaves the machine as a cellular poll does, detail 2, and comes
+    /// back at the resume point field `f` names, first pushing the
+    /// registers `live` says (bit 0 `RESULT`, bit `k` `REGk`) on the data
+    /// stack, and a leaf's link, moved there from the machine stack, which
+    /// the machine's exit leaves (it reads as a fixnum: return points are
+    /// 8-aligned); there, putting them back, and on.
+    fn poll_regs(&mut self, live: u16, f: usize, resume_at: &mut Vec<(usize, Label)>) {
+        self.e(alu_mi(Alu::Sub, st(offset_of!(State, fuel)), 1));
+        let (out, back, again) = (self.label(), self.label(), self.label());
+        self.jcc(Cond::E, out);
+        self.bind(back);
+        resume_at.push((f, again));
+        self.polls.push(Poll { out, back, again, live, f, leaf: self.link_pushed });
+    }
+    /// The polls' code out of line (`poll_regs`).
+    fn flush_polls(&mut self) {
+        for p in std::mem::take(&mut self.polls) {
+            let regs: Vec<usize> = (0..=REGS).filter(|&k| p.live & (1 << k) != 0).collect();
+            self.bind(p.out);
+            for &k in &regs {
+                let r = if k == 0 { RESULT } else { self.get(k, X16) };
+                self.push_ds(r);
+            }
+            if p.leaf {
+                self.e(pop(X16));
+                self.push_ds(X16);
+            }
+            self.ip_at(p.f);
+            let (code, _) = Trap::OutOfFuel.code();
+            self.trap(code, 2);
+            // Back, by the resume table, the machine's registers loaded.
+            self.bind(p.again);
+            if p.leaf {
+                self.pop_ds(X16);
+                self.e(push(X16));
+            }
+            for &k in regs.iter().rev() {
+                if k == 0 {
+                    self.pop_ds(RESULT);
+                } else {
+                    self.pop_ds(X16);
+                    self.put(k, X16);
+                }
+            }
+            self.jmp(p.back);
+        }
+    }
     /// A call-out to routine `n` with the ip at field `f`: on, whatever
     /// the routine, to the code after it, or, for control, to the resume
     /// point `f` names.
@@ -517,16 +565,6 @@ impl Asm {
                 self.field_at(r1, 2, 2);
                 self.bloblet_done(2);
             }
-            // `rmake-icell`: two fields, both `#f`, in the region in `REG1`.
-            "ricell" => {
-                self.bump_words(4, true, slow);
-                self.e(mov_imm(T, make_header(const { kind("bloblet") }, 3, 0)));
-                self.bloblet_at(3);
-                self.value(RCX, Value::FALSE);
-                self.field_at(RCX, 2, 3);
-                self.field_at(RCX, 3, 3);
-                self.bloblet_done(3);
-            }
             // Field `REG2` (8k, a fixnum) of the bloblet in `REG1`, whose
             // trailer says how many it has: 2 ≤ k ≤ F, else the call-out
             // reports it.
@@ -793,16 +831,38 @@ pub fn assemble_register_word(heap: &Heap, rw: Value) -> Result<(Vec<u8>, Vec<i6
     let fields = heap.bloblet_head(rw).fields;
     let cells: Vec<Value> = (WORD_CELL0..=fields).map(|k| heap.bloblet_slot(rw, k)).collect();
     let mut a = Asm::new();
+    a.in_regcode = true;
     let labels: Vec<Label> = (0..=cells.len()).map(|_| a.label()).collect();
     let mut resume = vec![-1i64; cells.len()];
+    // Polls' resume points: each field, and its code's label.
+    let mut resume_at: Vec<(usize, Label)> = Vec::new();
     // Whether the link is on the machine stack where each branch arrives,
     // as the branches say: `None` where none has yet.
     let mut pushed_at: Vec<Option<bool>> = vec![None; cells.len() + 1];
-    // The register entry: called, the link on the machine stack.
+    // What each loop's poll keeps: only a word with a loop needs it.
+    let looped = {
+        let mut i = 0;
+        let mut any = false;
+        while i < cells.len() && !any {
+            let (name, n, _) = OPS[cells[i].as_fixnum() as usize];
+            any = name == "branch" && cells[i + 1].as_fixnum() < -1;
+            i += 1 + n;
+        }
+        any
+    };
+    let live = if looped { crate::cellular::regcode::liveness(&cells, &[]) } else { Vec::new() };
+    // The register entry: called, the link on the machine stack. Its poll
+    // keeps the arguments, REG1…REGn, unless they are counted (`vargs`).
     let entry = a.label();
     a.bind(entry);
     a.link_pushed = true;
-    a.fuel();
+    match OPS[cells[0].as_fixnum() as usize].0 {
+        "args" => {
+            let n = cells[1].as_fixnum() as usize;
+            a.poll_regs((1u16 << (n.min(REGS) + 1)) - 2, WORD_CELL0 + 1, &mut resume_at);
+        }
+        _ => a.fuel(),
+    }
     a.rs_limit();
     // Where a backward branch goes: a loop's head, 16-aligned, so that the
     // loop's speed does not depend on where the word lands.
@@ -1017,7 +1077,9 @@ pub fn assemble_register_word(heap: &Heap, rw: Value) -> Result<(Vec<u8>, Vec<i6
             "prim" | "lambda" | "cellular" => {
                 let (count, routine_n, at) = match name {
                     "prim" => (k(o(1)), const { routine("prim") }, f(0)),
-                    "lambda" => (k(o(1)), const { routine("closure") }, f(0)),
+                    // The routine its closure is made by, `closure` or
+                    // `nclosure`, which only the call-out does.
+                    "lambda" => (k(o(1)), k(o(2)) as u64, f(0)),
                     _ => (k(o(1)), k(o(0)) as u64, WORD_CELL0 + next),
                 };
                 // Some are done here, when they can be: the call-out is then
@@ -1057,11 +1119,10 @@ pub fn assemble_register_word(heap: &Heap, rw: Value) -> Result<(Vec<u8>, Vec<i6
                     ("prim", 2) if prim_named(k(o(0)), "modulo") => Some("modulo"),
                     ("prim", 1) if prim_named(k(o(0)), "%make-box") => Some("box"),
                     ("prim", 2) if prim_named(k(o(0)), "%region-new") => Some("rnew"),
-                    ("prim", 1) if prim_named(k(o(0)), "%region-make-icell") => Some("ricell"),
                     ("prim", c) if c >= 2 && c <= REGS && prim_named(k(o(0)), "%region-closure") => Some("region-closure"),
                     ("prim", c) if c >= 1 && prim_named(k(o(0)), "%make-frozen") => Some("frozen"),
                     ("prim", c) if c >= 1 && prim_named(k(o(0)), "%make-bloblet") => Some("bloblet"),
-                    ("lambda", _) => Some("closure"),
+                    ("lambda", _) if routine_n == const { routine("closure") } => Some("closure"),
                     _ => None,
                 };
                 if let Some(what) = inline.filter(|_| count <= REGS) {
@@ -1092,7 +1153,17 @@ pub fn assemble_register_word(heap: &Heap, rw: Value) -> Result<(Vec<u8>, Vec<i6
                 if tail != a.link_pushed {
                     return Err(format!("cell {i}: `{name}` with the link {}", if tail { "in a frame" } else { "on the stack" }));
                 }
-                let cellular = a.label();
+                let (cellular, native) = (a.label(), a.label());
+                // Its code in the code area (`code_lo`): a native closure
+                // (`TODO.md` §97), which the Rust machine calls. A callee
+                // whose type says `cellular` is a cellular closure: not
+                // looked at.
+                let typed = k(o(1)) == const { fixpt_heap::layout::regcode::conv("cellular") };
+                if !typed {
+                    a.e(load(X16, field(RESULT, CLOSURE_WORD)));
+                    a.e(alu_rm(Alu::Cmp, X16, st(offset_of!(State, code_lo))));
+                    a.jcc(Cond::Ae, native);
+                }
                 // Register code: the arguments stay where they are. A call
                 // pushes a return entry marked as one `call` made (its `8k`
                 // negated), so that the callee returns by `ret`, with the
@@ -1120,6 +1191,21 @@ pub fn assemble_register_word(heap: &Heap, rw: Value) -> Result<(Vec<u8>, Vec<i6
                     a.align_return(call.len());
                     a.e(call);
                     a.jmp(back);
+                }
+                // A native closure: the arguments and it on the data stack,
+                // and the call's routine, which the Rust machine runs
+                // (`control::run` declines it), returning the stack's way;
+                // in a tail call, the link this procedure was called with
+                // no use to it.
+                if !typed {
+                    a.bind(native);
+                    if tail {
+                        a.unmark_return();
+                        a.e(add_imm(RSP_, 8));
+                    }
+                    a.push_regs(count);
+                    a.push_ds(RESULT);
+                    a.r_callout(if tail { const { routine("tailcall") } } else { const { routine("call") } }, f(0));
                 }
                 // Stack code: the arguments as its frame. It returns the
                 // stack's way.
@@ -1151,8 +1237,12 @@ pub fn assemble_register_word(heap: &Heap, rw: Value) -> Result<(Vec<u8>, Vec<i6
                     falls = false;
                 } else {
                     // Returned to the stack's way (the resume table), the
-                    // value on the data stack; or by `ret`, in `RESULT`.
+                    // value on the data stack; or by `ret`, in `RESULT`. The
+                    // native closure's call-out (`call`) reads one operand,
+                    // the count, and returns to the cell after it: the
+                    // same point.
                     resume[next] = a.here() as i64;
+                    resume[next - 1] = a.here() as i64;
                     a.pop_ds(RESULT);
                     a.bind(back);
                 }
@@ -1204,8 +1294,11 @@ pub fn assemble_register_word(heap: &Heap, rw: Value) -> Result<(Vec<u8>, Vec<i6
                     a.cmp_value(RESULT, Value::FALSE);
                     a.jcc(if name == "branchf" { Cond::E } else { Cond::Ne }, labels[to]);
                 } else {
+                    // A loop's poll keeps what the loop's head reads; its
+                    // resume point the branch's operand, where nothing
+                    // returns.
                     if to <= i {
-                        a.fuel();
+                        a.poll_regs(live[to], f(0), &mut resume_at);
                     }
                     a.jmp(labels[to]);
                     falls = false;
@@ -1227,7 +1320,9 @@ pub fn assemble_register_word(heap: &Heap, rw: Value) -> Result<(Vec<u8>, Vec<i6
         i = next;
     }
     a.bind(labels[cells.len()]);
-    // Out of the way of the code that runs: the traps.
+    // Out of the way of the code that runs: the polls' ways out and back,
+    // and the traps.
+    a.flush_polls();
     a.flush_stubs();
     // The machine's common trap and exit, through the state, as a word's
     // (`assemble_word`): no branch leaves this code.
@@ -1236,6 +1331,9 @@ pub fn assemble_register_word(heap: &Heap, rw: Value) -> Result<(Vec<u8>, Vec<i6
     a.e(jmp_m(st(offset_of!(State, trap))));
     a.bind(ec);
     a.e(jmp_m(st(offset_of!(State, exit))));
+    for (f, l) in resume_at {
+        resume[f - WORD_CELL0] = a.labels[l.0].expect("bound") as i64;
+    }
     Ok((a.finish(), resume))
 }
 
@@ -1285,7 +1383,7 @@ const NAMED_PRIMITIVES: &[&str] = &[
     "%symbol-hash", "%fx26-fixnum?", "char?", "boolean?", "symbol?", "string?", "pair?", "null?", "%fx26-bitwise-and",
     "%fx26-bitwise-ior", "%fx26-bitwise-xor", "%fx26-bitwise-not", "exact-integer?", "%fx26-array?", "%fx26-f32?",
     "%fx26-box?", "%fx26-sum?", "%fx26-product?", "%fx26-procedure?", "%fx26-char-in?", "string=?", "modulo",
-    "%make-box", "%region-new", "%region-make-icell", "%region-closure", "%make-frozen", "%make-bloblet",
+    "%make-box", "%region-new", "%region-closure", "%make-frozen", "%make-bloblet",
     "%fx26-quotient", "%fx26-mul", "%fx26-arithmetic-shift", "%fx26-add", "%fx26-sub", "%fx26-int-less", "%fx26-int-eq",
 ];
 
@@ -1313,7 +1411,7 @@ pub fn fx26_regs_module() -> String {
     for (name, o) in [
         ("r-st-regs", offset_of!(State, regs)), ("r-st-leaf-link", offset_of!(State, leaf_link)), ("r-st-pure", offset_of!(State, pure)),
         ("r-st-top", offset_of!(State, top)), ("r-st-alloc-limit", offset_of!(State, alloc_limit)), ("r-st-words", offset_of!(State, words)),
-        ("r-st-regions", offset_of!(State, regions)),
+        ("r-st-regions", offset_of!(State, regions)), ("r-st-reserve", offset_of!(State, reserve)), ("r-st-slice", offset_of!(State, slice)),
     ] {
         c(name, o as i64, "a State field's offset");
     }

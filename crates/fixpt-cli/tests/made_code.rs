@@ -10,7 +10,8 @@ use std::process::Command;
 const FIXPT: &str = env!("CARGO_BIN_EXE_fixpt");
 
 /// The machines, the stencils only where this build found a nightly
-/// compiler; and whether each runs native code.
+/// compiler; and whether each runs the native code a program makes, which
+/// is arm64's: elsewhere none does, and each takes the program's fallback.
 fn machines() -> Vec<(&'static str, bool)> {
     let stencils = !fixpt_native::stencil::opt_levels().is_empty();
     [
@@ -26,6 +27,8 @@ fn machines() -> Vec<(&'static str, bool)> {
     ]
     .into_iter()
     .filter(|(m, _)| stencils || !m.contains("stencils"))
+    .filter(|(m, _)| fixpt_native::NATIVE_CONVENTION_AVAILABLE || !m.ends_with("nativecc"))
+    .map(|(m, native)| (m, native && fixpt_native::AVAILABLE))
     .collect()
 }
 
@@ -88,6 +91,7 @@ fn typed_calls_of_a_made_procedure() {
 /// small stack cache, where the made code's own entry passes the stack's
 /// limit (`overflow`).
 #[test]
+#[cfg_attr(not(target_arch = "aarch64"), ignore = "runs the arm64 machine code a program makes")]
 fn code_with_a_frame_made_and_run() {
     let runs: Vec<_> = machines().into_iter().map(|(m, _)| (m, std::thread::spawn(move || values(m, "frames.fx", 2)))).collect();
     for (m, t) in runs {
@@ -110,6 +114,7 @@ fn code_with_a_frame_made_and_run() {
 /// the declaration read as a `convention`. It is word for word the code
 /// `frames.fx` writes out, and runs as that does.
 #[test]
+#[cfg_attr(not(target_arch = "aarch64"), ignore = "runs the arm64 machine code a program makes")]
 fn code_made_from_the_convention_read_as_data() {
     let runs: Vec<_> = machines().into_iter().map(|(m, _)| (m, std::thread::spawn(move || values(m, "generated.fx", 2)))).collect();
     for (m, t) in runs {
@@ -145,6 +150,7 @@ fn code_made_from_the_convention_read_as_data() {
 /// code called that out of the machine's reach ("a call of what is not a
 /// procedure"); a simple primitive now runs as it is.
 #[test]
+#[cfg_attr(not(target_arch = "aarch64"), ignore = "runs the arm64 machine code a program makes")]
 fn a_primitive_reached_through_a_field() {
     let want = ["49", "333338333350000", "48"];
     let runs: Vec<_> = machines().into_iter().filter(|(m, _)| *m != "rs-scheme-vm").map(|(m, _)| (m, std::thread::spawn(move || values(m, "linked.fx", 3)))).collect();
@@ -168,6 +174,7 @@ fn a_primitive_reached_through_a_field() {
 /// kept across the collections their making makes, and a size it refuses,
 /// the trap.
 #[test]
+#[cfg_attr(not(target_arch = "aarch64"), ignore = "runs the arm64 machine code a program makes")]
 fn a_bloblet_made_by_the_routine() {
     let want = ["\"made 24 24\"", "1000000"];
     let refused = "no bloblet of -1 bytes and 2 fields";

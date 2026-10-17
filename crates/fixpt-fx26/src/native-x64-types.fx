@@ -17,6 +17,10 @@
 ;; Traps raised in the code being emitted, placed after it: label, code,
 ;; detail; newest first.
 (define-type x-stub-list (listof (productof (1 int) (2 int) (3 int)) @k))
+;; Register code's polls that may leave the machine (`native-x64-regs.fx`):
+;; each one's way out, where it goes on, its code back, the registers it
+;; keeps, its resume point's field, and whether it keeps a leaf's link (1).
+(define-type x-poll-list (listof (productof (1 int) (2 int) (3 int) (4 int) (5 int) (6 int)) @k))
 
 ;;; ------------------------------------------------------------ signatures
 
@@ -56,6 +60,7 @@
             (val n-st-trap int)
             (val n-st-exit int)
             (val n-st-cards int)
+            (val n-st-code-lo int)
             (val n-false int)
             (val n-true int)
             (val n-prompt-mark int)
@@ -116,7 +121,9 @@
             (val x-to (subr (maxeff x-assembles spin) (int x-out) unit))
             (val x-jmp (subr (maxeff x-assembles spin) (int) unit))
             (val x-jcc (subr (maxeff x-assembles spin) (int int) unit))
+            (val x-trap (subr (maxeff x-assembles spin) (int int) unit))
             (val x-trap-if (subr (maxeff x-assembles spin) (int int int) unit))
+            (val x-label-at (subr (maxeff (read @globals) (read @k)) (int) int))
             (val x-flush-stubs (subr (maxeff x-assembles spin) () unit))
             (val x-finish (subr (maxeff x-assembles spin) () x-out))
             (val x-reset (subr (maxeff x-assembles spin) () unit))
@@ -164,6 +171,8 @@
             (val r-st-alloc-limit int)
             (val r-st-words int)
             (val r-st-regions int)
+            (val r-st-reserve int)
+            (val r-st-slice int)
             (val r-null int)
             (val r-unspecified int)
             (val r-char0 int)

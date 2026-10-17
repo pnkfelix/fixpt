@@ -10,13 +10,15 @@
 (define r-rdx int 2)  ; a register
 (define r-t int 14)  ; a register
 (define r-sp int 4)  ; a register
-(define r-st-regs int 760)  ; a State field's offset
-(define r-st-leaf-link int 744)  ; a State field's offset
-(define r-st-pure int 752)  ; a State field's offset
+(define r-st-regs int 776)  ; a State field's offset
+(define r-st-leaf-link int 752)  ; a State field's offset
+(define r-st-pure int 760)  ; a State field's offset
 (define r-st-top int 176)  ; a State field's offset
 (define r-st-alloc-limit int 184)  ; a State field's offset
 (define r-st-words int 192)  ; a State field's offset
 (define r-st-regions int 200)  ; a State field's offset
+(define r-st-reserve int 768)  ; a State field's offset
+(define r-st-slice int 856)  ; a State field's offset
 (define r-null int 19)  ; a Value's bits
 (define r-unspecified int 43)  ; a Value's bits
 (define r-char0 int 67)  ; a Value's bits
@@ -51,9 +53,9 @@
       ((17) 1)  ; field
       ((18) 2)  ; setfield
       ((19) 2)  ; prim
-      ((20) 2)  ; lambda
-      ((21) 1)  ; invoke
-      ((22) 1)  ; tailinvoke
+      ((20) 3)  ; lambda
+      ((21) 2)  ; invoke
+      ((22) 2)  ; tailinvoke
       ((24) 1)  ; branch
       ((25) 1)  ; branchf
       ((26) 2)  ; cellular
@@ -83,35 +85,34 @@
       ((69) "string-length")
       ((70) "string-ref")
       ((78) "string=?")
-      ((132) "%make-bloblet")
-      ((134) "%fx26-char-in?")
-      ((242) "%fx26-bitwise-and")
-      ((243) "%fx26-bitwise-ior")
-      ((244) "%fx26-bitwise-xor")
-      ((245) "%fx26-bitwise-not")
-      ((246) "%fx26-arithmetic-shift")
-      ((300) "%fx26-add")
-      ((301) "%fx26-sub")
-      ((302) "%fx26-mul")
-      ((303) "%fx26-quotient")
-      ((304) "%fx26-int-less")
-      ((305) "%fx26-int-eq")
-      ((326) "%fx26-fixnum?")
-      ((329) "%fx26-procedure?")
-      ((330) "%fx26-array?")
-      ((331) "%fx26-f32?")
-      ((332) "%fx26-box?")
-      ((333) "%fx26-sum?")
-      ((334) "%fx26-product?")
-      ((362) "%make-frozen")
-      ((375) "%bloblet-fields")
-      ((378) "%bloblet-set!")
-      ((403) "%make-box")
-      ((426) "%region-cons")
-      ((427) "%region-new")
-      ((429) "%region-make-icell")
-      ((430) "%region-closure")
-      ((432) "%symbol-hash")
+      ((159) "%make-bloblet")
+      ((161) "%fx26-char-in?")
+      ((305) "%fx26-bitwise-and")
+      ((306) "%fx26-bitwise-ior")
+      ((307) "%fx26-bitwise-xor")
+      ((308) "%fx26-bitwise-not")
+      ((309) "%fx26-arithmetic-shift")
+      ((363) "%fx26-add")
+      ((364) "%fx26-sub")
+      ((365) "%fx26-mul")
+      ((366) "%fx26-quotient")
+      ((367) "%fx26-int-less")
+      ((368) "%fx26-int-eq")
+      ((390) "%fx26-fixnum?")
+      ((393) "%fx26-procedure?")
+      ((394) "%fx26-array?")
+      ((395) "%fx26-f32?")
+      ((396) "%fx26-box?")
+      ((397) "%fx26-sum?")
+      ((398) "%fx26-product?")
+      ((428) "%make-frozen")
+      ((441) "%bloblet-fields")
+      ((444) "%bloblet-set!")
+      ((471) "%make-box")
+      ((494) "%region-cons")
+      ((495) "%region-new")
+      ((498) "%region-closure")
+      ((501) "%symbol-hash")
       (else ""))))
 
 ;; The number of the runtime primitive register code names `name`.
@@ -120,46 +121,45 @@
     (case name
       (("string-length") 69)
       (("string-ref") 70)
-      (("%region-cons") 426)
-      (("%bloblet-fields") 375)
-      (("%bloblet-set!") 378)
+      (("%region-cons") 494)
+      (("%bloblet-fields") 441)
+      (("%bloblet-set!") 444)
       (("char-whitespace?") 66)
       (("char-numeric?") 65)
-      (("%symbol-hash") 432)
-      (("%fx26-fixnum?") 326)
+      (("%symbol-hash") 501)
+      (("%fx26-fixnum?") 390)
       (("char?") 9)
       (("boolean?") 6)
       (("symbol?") 7)
       (("string?") 8)
       (("pair?") 4)
       (("null?") 5)
-      (("%fx26-bitwise-and") 242)
-      (("%fx26-bitwise-ior") 243)
-      (("%fx26-bitwise-xor") 244)
-      (("%fx26-bitwise-not") 245)
+      (("%fx26-bitwise-and") 305)
+      (("%fx26-bitwise-ior") 306)
+      (("%fx26-bitwise-xor") 307)
+      (("%fx26-bitwise-not") 308)
       (("exact-integer?") 21)
-      (("%fx26-array?") 330)
-      (("%fx26-f32?") 331)
-      (("%fx26-box?") 332)
-      (("%fx26-sum?") 333)
-      (("%fx26-product?") 334)
-      (("%fx26-procedure?") 329)
-      (("%fx26-char-in?") 134)
+      (("%fx26-array?") 394)
+      (("%fx26-f32?") 395)
+      (("%fx26-box?") 396)
+      (("%fx26-sum?") 397)
+      (("%fx26-product?") 398)
+      (("%fx26-procedure?") 393)
+      (("%fx26-char-in?") 161)
       (("string=?") 78)
       (("modulo") 34)
-      (("%make-box") 403)
-      (("%region-new") 427)
-      (("%region-make-icell") 429)
-      (("%region-closure") 430)
-      (("%make-frozen") 362)
-      (("%make-bloblet") 132)
-      (("%fx26-quotient") 303)
-      (("%fx26-mul") 302)
-      (("%fx26-arithmetic-shift") 246)
-      (("%fx26-add") 300)
-      (("%fx26-sub") 301)
-      (("%fx26-int-less") 304)
-      (("%fx26-int-eq") 305)
+      (("%make-box") 471)
+      (("%region-new") 495)
+      (("%region-closure") 498)
+      (("%make-frozen") 428)
+      (("%make-bloblet") 159)
+      (("%fx26-quotient") 366)
+      (("%fx26-mul") 365)
+      (("%fx26-arithmetic-shift") 309)
+      (("%fx26-add") 363)
+      (("%fx26-sub") 364)
+      (("%fx26-int-less") 367)
+      (("%fx26-int-eq") 368)
       (else -1))))
 
 ;; Whether runtime primitive `p` never collects (`fixpt_runtime::never_collects`).
@@ -178,178 +178,220 @@
       ((61) #t)  ; integer->char
       ((69) #t)  ; string-length
       ((70) #t)  ; string-ref
-      ((135) #t)  ; %fx26-f64+
-      ((136) #t)  ; %fx26-f64-
-      ((137) #t)  ; %fx26-f64*
-      ((138) #t)  ; %fx26-f64/
-      ((139) #t)  ; %fx26-f64-min
-      ((140) #t)  ; %fx26-f64-max
-      ((141) #t)  ; %fx26-f64-atan2
-      ((142) #t)  ; %fx26-f64-expt
-      ((143) #t)  ; %fx26-f64<
-      ((144) #t)  ; %fx26-f64<=
-      ((145) #t)  ; %fx26-f64>
-      ((146) #t)  ; %fx26-f64>=
-      ((147) #t)  ; %fx26-f64=
-      ((148) #t)  ; %fx26-f64-abs
-      ((149) #t)  ; %fx26-f64-neg
-      ((150) #t)  ; %fx26-f64-sqrt
-      ((151) #t)  ; %fx26-f64-floor
-      ((152) #t)  ; %fx26-f64-ceiling
-      ((153) #t)  ; %fx26-f64-truncate
-      ((154) #t)  ; %fx26-f64-round
-      ((155) #t)  ; %fx26-f64-exp
-      ((156) #t)  ; %fx26-f64-log
-      ((157) #t)  ; %fx26-f64-sin
-      ((158) #t)  ; %fx26-f64-cos
-      ((159) #t)  ; %fx26-f64-tan
-      ((160) #t)  ; %fx26-f64-asin
-      ((161) #t)  ; %fx26-f64-acos
-      ((162) #t)  ; %fx26-f64-atan
-      ((163) #t)  ; %fx26-f64-nan?
-      ((164) #t)  ; %fx26-f64-infinite?
-      ((165) #t)  ; %fx26-f64-finite?
-      ((166) #t)  ; %fx26-f64->string
-      ((167) #t)  ; %fx26-f64->int
-      ((168) #t)  ; %fx26-int->f64
-      ((169) #t)  ; %fx26-string->f64
-      ((170) #t)  ; %fx26-f32+
-      ((171) #t)  ; %fx26-f32-
-      ((172) #t)  ; %fx26-f32*
-      ((173) #t)  ; %fx26-f32/
-      ((174) #t)  ; %fx26-f32-min
-      ((175) #t)  ; %fx26-f32-max
-      ((176) #t)  ; %fx26-f32<
-      ((177) #t)  ; %fx26-f32<=
-      ((178) #t)  ; %fx26-f32>
-      ((179) #t)  ; %fx26-f32>=
-      ((180) #t)  ; %fx26-f32=
-      ((181) #t)  ; %fx26-f32-abs
-      ((182) #t)  ; %fx26-f32-neg
-      ((183) #t)  ; %fx26-f32-sqrt
-      ((184) #t)  ; %fx26-f32-floor
-      ((185) #t)  ; %fx26-f32-ceiling
-      ((186) #t)  ; %fx26-f32-truncate
-      ((187) #t)  ; %fx26-f32-round
-      ((188) #t)  ; %fx26-f32-nan?
-      ((189) #t)  ; %fx26-f32-infinite?
-      ((190) #t)  ; %fx26-f32-finite?
-      ((191) #t)  ; %fx26-f32->string
-      ((192) #t)  ; %fx26-f32->int
-      ((193) #t)  ; %fx26-f32->f64
-      ((194) #t)  ; %fx26-f64->f32
-      ((195) #t)  ; %fx26-f64->bits
-      ((197) #t)  ; %fx26-f32->bits
-      ((199) #t)  ; %fx26-int->f32
-      ((207) #t)  ; %fx26-flatarray-ref
-      ((209) #t)  ; %fx26-flatarray-length
-      ((213) #t)  ; %fx26-eqtable-has?
-      ((214) #t)  ; %fx26-eqtable-count
-      ((216) #t)  ; %fx26-eqtable-delete!
-      ((219) #t)  ; %fx26-i32+
-      ((220) #t)  ; %fx26-i32-
-      ((221) #t)  ; %fx26-i32*
-      ((222) #t)  ; %fx26-i32-quotient
-      ((223) #t)  ; %fx26-i32-remainder
-      ((224) #t)  ; %fx26-i32-and
-      ((225) #t)  ; %fx26-i32-or
-      ((226) #t)  ; %fx26-i32-xor
-      ((227) #t)  ; %fx26-i32<
-      ((228) #t)  ; %fx26-i32<=
-      ((229) #t)  ; %fx26-i32>
-      ((230) #t)  ; %fx26-i32>=
-      ((231) #t)  ; %fx26-i32=
-      ((232) #t)  ; %fx26-i32-shl
-      ((233) #t)  ; %fx26-i32-shr
-      ((234) #t)  ; %fx26-i32-not
-      ((235) #t)  ; %fx26-int->i32
-      ((236) #t)  ; %fx26-i32->int
-      ((237) #t)  ; %fx26-u32+
-      ((238) #t)  ; %fx26-u32-
-      ((239) #t)  ; %fx26-u32*
-      ((240) #t)  ; %fx26-u32-quotient
-      ((241) #t)  ; %fx26-u32-remainder
-      ((246) #t)  ; %fx26-arithmetic-shift
-      ((247) #t)  ; %fx26-u32-and
-      ((248) #t)  ; %fx26-u32-or
-      ((249) #t)  ; %fx26-u32-xor
-      ((250) #t)  ; %fx26-u32<
-      ((251) #t)  ; %fx26-u32<=
-      ((252) #t)  ; %fx26-u32>
-      ((253) #t)  ; %fx26-u32>=
-      ((254) #t)  ; %fx26-u32=
-      ((255) #t)  ; %fx26-u32-shl
-      ((256) #t)  ; %fx26-u32-shr
-      ((257) #t)  ; %fx26-u32-not
-      ((258) #t)  ; %fx26-int->u32
-      ((259) #t)  ; %fx26-u32->int
-      ((260) #t)  ; %fx26-i64+
-      ((261) #t)  ; %fx26-i64-
-      ((262) #t)  ; %fx26-i64*
-      ((263) #t)  ; %fx26-i64-quotient
-      ((264) #t)  ; %fx26-i64-remainder
-      ((265) #t)  ; %fx26-i64-and
-      ((266) #t)  ; %fx26-i64-or
-      ((267) #t)  ; %fx26-i64-xor
-      ((268) #t)  ; %fx26-i64<
-      ((269) #t)  ; %fx26-i64<=
-      ((270) #t)  ; %fx26-i64>
-      ((271) #t)  ; %fx26-i64>=
-      ((272) #t)  ; %fx26-i64=
-      ((273) #t)  ; %fx26-i64-shl
-      ((274) #t)  ; %fx26-i64-shr
-      ((275) #t)  ; %fx26-i64-not
-      ((276) #t)  ; %fx26-int->i64
-      ((277) #t)  ; %fx26-i64->int
-      ((278) #t)  ; %fx26-u64+
-      ((279) #t)  ; %fx26-u64-
-      ((280) #t)  ; %fx26-u64*
-      ((281) #t)  ; %fx26-u64-quotient
-      ((282) #t)  ; %fx26-u64-remainder
-      ((283) #t)  ; %fx26-u64-and
-      ((284) #t)  ; %fx26-u64-or
-      ((285) #t)  ; %fx26-u64-xor
-      ((286) #t)  ; %fx26-u64<
-      ((287) #t)  ; %fx26-u64<=
-      ((288) #t)  ; %fx26-u64>
-      ((289) #t)  ; %fx26-u64>=
-      ((290) #t)  ; %fx26-u64=
-      ((291) #t)  ; %fx26-u64-shl
-      ((292) #t)  ; %fx26-u64-shr
-      ((293) #t)  ; %fx26-u64-not
-      ((294) #t)  ; %fx26-int->u64
-      ((295) #t)  ; %fx26-u64->int
-      ((297) #t)  ; %fx26-string-compare
-      ((298) #t)  ; %fx26-symbol-compare
-      ((302) #t)  ; %fx26-mul
-      ((303) #t)  ; %fx26-quotient
-      ((310) #t)  ; %fx26-char<?
-      ((311) #t)  ; %fx26-char<=?
-      ((312) #t)  ; %fx26-char>?
-      ((313) #t)  ; %fx26-char>=?
-      ((314) #t)  ; %fx26-string<?
-      ((315) #t)  ; %fx26-string<=?
-      ((316) #t)  ; %fx26-string>?
-      ((317) #t)  ; %fx26-string>=?
-      ((329) #t)  ; %fx26-procedure?
-      ((330) #t)  ; %fx26-array?
-      ((331) #t)  ; %fx26-f32?
-      ((332) #t)  ; %fx26-box?
-      ((333) #t)  ; %fx26-sum?
-      ((334) #t)  ; %fx26-product?
-      ((361) #t)  ; %string-hash
-      ((375) #t)  ; %bloblet-fields
-      ((383) #t)  ; %suffix-ref
-      ((385) #t)  ; %suffix-ref+
-      ((386) #t)  ; %suffix-ref-owner
-      ((387) #t)  ; %suffix-ref-offset
-      ((392) #t)  ; %fx26-suffix-ref-get
-      ((394) #t)  ; %fx26-blobref-index
-      ((395) #t)  ; %fx26-suffix-ref-set!
-      ((396) #t)  ; %fx26-flat-tag
-      ((397) #t)  ; %fx26-flat-variant!
-      ((398) #t)  ; %fx26-flat-no-arm
-      ((432) #t)  ; %symbol-hash
+      ((93) #t)  ; bytevector-length
+      ((94) #t)  ; bytevector-u8-ref
+      ((162) #t)  ; %fx26-f64+
+      ((163) #t)  ; %fx26-f64-
+      ((164) #t)  ; %fx26-f64*
+      ((165) #t)  ; %fx26-f64/
+      ((166) #t)  ; %fx26-f64-min
+      ((167) #t)  ; %fx26-f64-max
+      ((168) #t)  ; %fx26-f64-atan2
+      ((169) #t)  ; %fx26-f64-expt
+      ((170) #t)  ; %fx26-f64<
+      ((171) #t)  ; %fx26-f64<=
+      ((172) #t)  ; %fx26-f64>
+      ((173) #t)  ; %fx26-f64>=
+      ((174) #t)  ; %fx26-f64=
+      ((175) #t)  ; %fx26-f64-abs
+      ((176) #t)  ; %fx26-f64-neg
+      ((177) #t)  ; %fx26-f64-sqrt
+      ((178) #t)  ; %fx26-f64-floor
+      ((179) #t)  ; %fx26-f64-ceiling
+      ((180) #t)  ; %fx26-f64-truncate
+      ((181) #t)  ; %fx26-f64-round
+      ((182) #t)  ; %fx26-f64-exp
+      ((183) #t)  ; %fx26-f64-log
+      ((184) #t)  ; %fx26-f64-sin
+      ((185) #t)  ; %fx26-f64-cos
+      ((186) #t)  ; %fx26-f64-tan
+      ((187) #t)  ; %fx26-f64-asin
+      ((188) #t)  ; %fx26-f64-acos
+      ((189) #t)  ; %fx26-f64-atan
+      ((190) #t)  ; %fx26-f64-nan?
+      ((191) #t)  ; %fx26-f64-infinite?
+      ((192) #t)  ; %fx26-f64-finite?
+      ((193) #t)  ; %fx26-f64->string
+      ((194) #t)  ; %fx26-f64->int
+      ((195) #t)  ; %fx26-int->f64
+      ((196) #t)  ; %fx26-string->f64
+      ((197) #t)  ; %fx26-f32+
+      ((198) #t)  ; %fx26-f32-
+      ((199) #t)  ; %fx26-f32*
+      ((200) #t)  ; %fx26-f32/
+      ((201) #t)  ; %fx26-f32-min
+      ((202) #t)  ; %fx26-f32-max
+      ((203) #t)  ; %fx26-f32<
+      ((204) #t)  ; %fx26-f32<=
+      ((205) #t)  ; %fx26-f32>
+      ((206) #t)  ; %fx26-f32>=
+      ((207) #t)  ; %fx26-f32=
+      ((208) #t)  ; %fx26-f32-abs
+      ((209) #t)  ; %fx26-f32-neg
+      ((210) #t)  ; %fx26-f32-sqrt
+      ((211) #t)  ; %fx26-f32-floor
+      ((212) #t)  ; %fx26-f32-ceiling
+      ((213) #t)  ; %fx26-f32-truncate
+      ((214) #t)  ; %fx26-f32-round
+      ((215) #t)  ; %fx26-f32-nan?
+      ((216) #t)  ; %fx26-f32-infinite?
+      ((217) #t)  ; %fx26-f32-finite?
+      ((218) #t)  ; %fx26-f32->string
+      ((219) #t)  ; %fx26-f32->int
+      ((220) #t)  ; %fx26-f32->f64
+      ((221) #t)  ; %fx26-f64->f32
+      ((222) #t)  ; %fx26-f64->bits
+      ((224) #t)  ; %fx26-f32->bits
+      ((226) #t)  ; %fx26-int->f32
+      ((234) #t)  ; %fx26-flatarray-ref
+      ((236) #t)  ; %fx26-flatarray-length
+      ((240) #t)  ; %fx26-eqtable-has?
+      ((241) #t)  ; %fx26-eqtable-count
+      ((243) #t)  ; %fx26-eqtable-delete!
+      ((246) #t)  ; %fx26-i8+
+      ((247) #t)  ; %fx26-i8-
+      ((248) #t)  ; %fx26-i8*
+      ((249) #t)  ; %fx26-i8-quotient
+      ((250) #t)  ; %fx26-i8-remainder
+      ((251) #t)  ; %fx26-i8-and
+      ((252) #t)  ; %fx26-i8-or
+      ((253) #t)  ; %fx26-i8-xor
+      ((254) #t)  ; %fx26-i8<
+      ((255) #t)  ; %fx26-i8<=
+      ((256) #t)  ; %fx26-i8>
+      ((257) #t)  ; %fx26-i8>=
+      ((258) #t)  ; %fx26-i8=
+      ((259) #t)  ; %fx26-i8-shl
+      ((260) #t)  ; %fx26-i8-shr
+      ((261) #t)  ; %fx26-i8-not
+      ((262) #t)  ; %fx26-int->i8
+      ((263) #t)  ; %fx26-i8->int
+      ((264) #t)  ; %fx26-u8+
+      ((265) #t)  ; %fx26-u8-
+      ((266) #t)  ; %fx26-u8*
+      ((267) #t)  ; %fx26-u8-quotient
+      ((268) #t)  ; %fx26-u8-remainder
+      ((269) #t)  ; %fx26-u8-and
+      ((270) #t)  ; %fx26-u8-or
+      ((271) #t)  ; %fx26-u8-xor
+      ((272) #t)  ; %fx26-u8<
+      ((273) #t)  ; %fx26-u8<=
+      ((274) #t)  ; %fx26-u8>
+      ((275) #t)  ; %fx26-u8>=
+      ((276) #t)  ; %fx26-u8=
+      ((277) #t)  ; %fx26-u8-shl
+      ((278) #t)  ; %fx26-u8-shr
+      ((279) #t)  ; %fx26-u8-not
+      ((280) #t)  ; %fx26-int->u8
+      ((281) #t)  ; %fx26-u8->int
+      ((282) #t)  ; %fx26-i32+
+      ((283) #t)  ; %fx26-i32-
+      ((284) #t)  ; %fx26-i32*
+      ((285) #t)  ; %fx26-i32-quotient
+      ((286) #t)  ; %fx26-i32-remainder
+      ((287) #t)  ; %fx26-i32-and
+      ((288) #t)  ; %fx26-i32-or
+      ((289) #t)  ; %fx26-i32-xor
+      ((290) #t)  ; %fx26-i32<
+      ((291) #t)  ; %fx26-i32<=
+      ((292) #t)  ; %fx26-i32>
+      ((293) #t)  ; %fx26-i32>=
+      ((294) #t)  ; %fx26-i32=
+      ((295) #t)  ; %fx26-i32-shl
+      ((296) #t)  ; %fx26-i32-shr
+      ((297) #t)  ; %fx26-i32-not
+      ((298) #t)  ; %fx26-int->i32
+      ((299) #t)  ; %fx26-i32->int
+      ((300) #t)  ; %fx26-u32+
+      ((301) #t)  ; %fx26-u32-
+      ((302) #t)  ; %fx26-u32*
+      ((303) #t)  ; %fx26-u32-quotient
+      ((304) #t)  ; %fx26-u32-remainder
+      ((309) #t)  ; %fx26-arithmetic-shift
+      ((310) #t)  ; %fx26-u32-and
+      ((311) #t)  ; %fx26-u32-or
+      ((312) #t)  ; %fx26-u32-xor
+      ((313) #t)  ; %fx26-u32<
+      ((314) #t)  ; %fx26-u32<=
+      ((315) #t)  ; %fx26-u32>
+      ((316) #t)  ; %fx26-u32>=
+      ((317) #t)  ; %fx26-u32=
+      ((318) #t)  ; %fx26-u32-shl
+      ((319) #t)  ; %fx26-u32-shr
+      ((320) #t)  ; %fx26-u32-not
+      ((321) #t)  ; %fx26-int->u32
+      ((322) #t)  ; %fx26-u32->int
+      ((323) #t)  ; %fx26-i64+
+      ((324) #t)  ; %fx26-i64-
+      ((325) #t)  ; %fx26-i64*
+      ((326) #t)  ; %fx26-i64-quotient
+      ((327) #t)  ; %fx26-i64-remainder
+      ((328) #t)  ; %fx26-i64-and
+      ((329) #t)  ; %fx26-i64-or
+      ((330) #t)  ; %fx26-i64-xor
+      ((331) #t)  ; %fx26-i64<
+      ((332) #t)  ; %fx26-i64<=
+      ((333) #t)  ; %fx26-i64>
+      ((334) #t)  ; %fx26-i64>=
+      ((335) #t)  ; %fx26-i64=
+      ((336) #t)  ; %fx26-i64-shl
+      ((337) #t)  ; %fx26-i64-shr
+      ((338) #t)  ; %fx26-i64-not
+      ((339) #t)  ; %fx26-int->i64
+      ((340) #t)  ; %fx26-i64->int
+      ((341) #t)  ; %fx26-u64+
+      ((342) #t)  ; %fx26-u64-
+      ((343) #t)  ; %fx26-u64*
+      ((344) #t)  ; %fx26-u64-quotient
+      ((345) #t)  ; %fx26-u64-remainder
+      ((346) #t)  ; %fx26-u64-and
+      ((347) #t)  ; %fx26-u64-or
+      ((348) #t)  ; %fx26-u64-xor
+      ((349) #t)  ; %fx26-u64<
+      ((350) #t)  ; %fx26-u64<=
+      ((351) #t)  ; %fx26-u64>
+      ((352) #t)  ; %fx26-u64>=
+      ((353) #t)  ; %fx26-u64=
+      ((354) #t)  ; %fx26-u64-shl
+      ((355) #t)  ; %fx26-u64-shr
+      ((356) #t)  ; %fx26-u64-not
+      ((357) #t)  ; %fx26-int->u64
+      ((358) #t)  ; %fx26-u64->int
+      ((360) #t)  ; %fx26-string-compare
+      ((361) #t)  ; %fx26-symbol-compare
+      ((365) #t)  ; %fx26-mul
+      ((366) #t)  ; %fx26-quotient
+      ((369) #t)  ; %fx26-remainder
+      ((373) #t)  ; %fx26-char<?
+      ((374) #t)  ; %fx26-char<=?
+      ((375) #t)  ; %fx26-char>?
+      ((376) #t)  ; %fx26-char>=?
+      ((377) #t)  ; %fx26-string<?
+      ((378) #t)  ; %fx26-string<=?
+      ((379) #t)  ; %fx26-string>?
+      ((380) #t)  ; %fx26-string>=?
+      ((393) #t)  ; %fx26-procedure?
+      ((394) #t)  ; %fx26-array?
+      ((395) #t)  ; %fx26-f32?
+      ((396) #t)  ; %fx26-box?
+      ((397) #t)  ; %fx26-sum?
+      ((398) #t)  ; %fx26-product?
+      ((403) #t)  ; %fx26-adapted
+      ((427) #t)  ; %string-hash
+      ((441) #t)  ; %bloblet-fields
+      ((449) #t)  ; %suffix-ref
+      ((450) #t)  ; %fx26-suffix-fits
+      ((452) #t)  ; %suffix-ref+
+      ((453) #t)  ; %suffix-ref-owner
+      ((454) #t)  ; %suffix-ref-offset
+      ((459) #t)  ; %fx26-suffix-ref-length
+      ((460) #t)  ; %fx26-suffix-ref-get
+      ((462) #t)  ; %fx26-blobref-index
+      ((463) #t)  ; %fx26-suffix-ref-set!
+      ((464) #t)  ; %fx26-flat-tag
+      ((465) #t)  ; %fx26-flat-variant!
+      ((466) #t)  ; %fx26-flat-no-arm
+      ((501) #t)  ; %symbol-hash
       (else #f))))
 
 ;; The `i`th kind shape test `name` takes a bloblet of (`shape_test`), or -1.

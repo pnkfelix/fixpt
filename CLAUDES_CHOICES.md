@@ -803,3 +803,36 @@ The user: "Go for it" (TODO §105's next item, `direct.rs`).
    adapters for every count; every test program runs alike on the machine
    (`tests/compiler.rs`). Where Rust returns an error, FX-26 notes the
    first and returns it.
+
+## The x86_64 back end rebased onto main (2026-10-17)
+
+The user: "I suspect we need to rebase our branch atop main", then "lets
+move with steps 1 2" (step 1: each commit building, the native convention
+off on x86_64 until step 2 re-ports it; the push is the user's).
+
+1. **Our section of `TODO.md` renumbered §84 → §105**: main's §84 is I/O.
+   Our fix of `knot-spin.fx` under the native convention dropped: main
+   fixed it its own way (`check-hold-breaks!`, `DONE.md` §90).
+2. **The x86_64 cellular machine, register code and their FX-26 ports
+   follow main's arm64 ones** (time slices, preemption, `TODO.md` §92,
+   §93, §97): the entry goes on from the state when `start` is 0; a word's
+   poll at its first cell, a call's before anything (detail 1); register
+   code takes its next slice in line, and its entry's and loops' polls may
+   leave the machine (detail 2), keeping the live registers on the data
+   stack (`regcode::liveness`, ported to FX-26 too); a leaf's link, on the
+   machine stack, which the machine's exit leaves, moves there with them;
+   a call of a native closure goes to the Rust machine's `call`; a
+   `lambda`'s routine may be `nclosure`. `ricell` is no longer done in
+   line: an I-cell is not two `#f` fields now (`TODO.md` §92).
+3. **The slice in the state (`State::slice`)**, which x86_64's register
+   code reads as it takes its next one, where arm64's moves it as a
+   constant: `FIXPT_SLICE` sets it at run time, and the compiler written in
+   FX-26 must make the same bytes as Rust's whatever it says.
+4. **`NATIVE_CONVENTION_AVAILABLE`**, the one gate for the native
+   convention on a machine (`DirectMachine::new`, the CLI's refusal,
+   `fixpt bench`, the tests); off on x86_64 until step 2.
+5. **Main's new tests on x86_64**: those of `io`, `one_shot`, `preempt` and
+   `processes` run the native convention where it runs (`processes`'s
+   `native` way, elsewhere, its lowered run); `made_code`'s that run the
+   arm64 code a program writes are arm64's (`ignore` elsewhere), the rest
+   expecting each program's fallback.

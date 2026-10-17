@@ -1672,6 +1672,7 @@ impl Stacks {
             reserve: 0,
             regs: [0; 9],
             machine_sp: 0,
+            slice: fixpt_runtime::sched::slice(),
         }
     }
 

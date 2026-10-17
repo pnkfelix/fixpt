@@ -45,6 +45,15 @@
 (define rg-pushed-at (ref x-ints @k) (new (make-array 1 0)))
 (define rg-heads (ref x-bools @k) (new (make-array 1 #f)))
 
+;; Register code's next slices taken in line (`refills`): each stub, and
+;; where it goes back to; its polls that may leave the machine (`polls`);
+;; their resume points (`resume_at`): each field, and its code's label; and
+;; what each loop's poll keeps (`regcode::liveness`), by cell.
+(define rg-refills (ref x-fix-list @k) (new nil))
+(define rg-polls (ref x-poll-list @k) (new nil))
+(define rg-resume-at (ref x-fix-list @k) (new nil))
+(define rg-live (ref x-ints @k) (new (make-array 1 0)))
+
 (define rg-fail (subr (maxeff (read @globals) (read @k) (write @k)) (string) unit)
   (lambda (m) (if (string=? (get rg-err) "") (set rg-err m) #u)))
 
@@ -140,6 +149,205 @@
       (x-trap-if x-c-ne r-trap-prim 0))))
 (define rg-pure-call (subr (maxeff x-assembles spin) (int int) unit)
   (lambda (p y) (rg-pure-call3 p y -1)))
+
+;;; ------------------------------------------------------------ polls
+
+;; A poll, at a cell boundary, in register code (`fuel`): the next slice
+;; taken in line, from a stub (`rg-place-refills`).
+(define rg-fuel (subr (maxeff x-assembles spin) () unit)
+  (lambda ()
+    (let ((refill (x-label)) (back (x-label)))
+      (begin
+        (x-e (x86-alu-mi x-sub n-st n-st-fuel 1))
+        (x-jcc x-c-e refill)
+        (x-bind back)
+        (set rg-refills (cons (product (1 refill) (2 back)) (get rg-refills)))))))
+;; The next slices' stubs: out of fuel if the reserve is spent.
+(define rg-place-refills (subr (maxeff x-assembles spin) (x-fix-list) unit)
+  (lambda (rs)
+    (if (null? rs)
+        #u
+        (let ((out (x-label)))
+          (begin
+            (x-bind (extract (car rs) 1))
+            (x-load n-x13 n-st r-st-reserve)
+            (x-e (x86-test n-x13 n-x13))
+            (x-jcc x-c-e out)
+            (x-load n-x14 n-st r-st-slice)
+            (x-alu x-cmp n-x13 n-x14)
+            (x-e (x86-cmov x-c-b n-x14 n-x13))
+            (x-alu x-sub n-x13 n-x14)
+            (x-store n-st r-st-reserve n-x13)
+            (x-store n-st n-st-fuel n-x14)
+            (x-jmp (extract (car rs) 2))
+            (x-bind out)
+            (x-trap n-trap-out-of-fuel 0)
+            (rg-place-refills (cdr rs)))))))
+
+;; A poll that may leave the machine (`poll_regs`), keeping the registers
+;; `live` says (bit 0 `RESULT`, bit `k` `REGk`), back at the resume point
+;; field `f` names.
+(define rg-poll-regs (subr (maxeff x-assembles spin) (int int) unit)
+  (lambda (live f)
+    (let ((out (x-label)) (back (x-label)) (again (x-label)))
+      (begin
+        (x-e (x86-alu-mi x-sub n-st n-st-fuel 1))
+        (x-jcc x-c-e out)
+        (x-bind back)
+        (set rg-resume-at (cons (product (1 f) (2 again)) (get rg-resume-at)))
+        (set rg-polls (cons (product (1 out) (2 back) (3 again) (4 live) (5 f)
+                                     (6 (if (get rg-pushed) 1 0)))
+                            (get rg-polls)))))))
+(define rg-live? (subr pure (int int) bool)
+  (lambda (live k) (not (= (bitwise-and live (arithmetic-shift 1 k)) 0))))
+;; The registers `live` says, from `k` up, onto the data stack; and back
+;; off it, from `k` down.
+(define rg-push-live (subr (maxeff x-assembles spin) (int int) unit)
+  (lambda (live k)
+    (if (> k r-regs)
+        #u
+        (begin
+          (if (rg-live? live k) (x-push-ds (if (= k 0) r-result (rg-get k n-x16))) #u)
+          (rg-push-live live (+ k 1))))))
+(define rg-pop-live (subr (maxeff x-assembles spin) (int int) unit)
+  (lambda (live k)
+    (if (< k 0)
+        #u
+        (begin
+          (cond ((not (rg-live? live k)) #u)
+                ((= k 0) (x-pop-ds r-result))
+                (else (begin (x-pop-ds n-x16) (rg-put k n-x16))))
+          (rg-pop-live live (- k 1))))))
+;; The polls' code out of line (`flush_polls`).
+(define rg-place-polls (subr (maxeff x-assembles spin) (x-poll-list) unit)
+  (lambda (ps)
+    (if (null? ps)
+        #u
+        (let* ((p (car ps)) (live (extract p 4)) (leaf (= (extract p 6) 1)))
+          (begin
+            (x-bind (extract p 1))
+            (rg-push-live live 0)
+            (if leaf (begin (x-e (x86-pop n-x16)) (x-push-ds n-x16)) #u)
+            (rg-ip-at (extract p 5))
+            (x-trap n-trap-out-of-fuel 2)
+            ;; Back, by the resume table, the machine's registers loaded.
+            (x-bind (extract p 3))
+            (if leaf (begin (x-pop-ds n-x16) (x-e (x86-push n-x16))) #u)
+            (rg-pop-live live r-regs)
+            (x-jmp (extract p 2))
+            (rg-place-polls (cdr ps)))))))
+;; Each poll's resume point, from its label.
+(define rg-place-resume-at (subr (maxeff x-assembles spin) (x-fix-list) unit)
+  (lambda (rs)
+    (if (null? rs)
+        #u
+        (begin
+          (array-set! (get rg-resume) (- (extract (car rs) 1) n-word-cell0)
+                      (x-label-at (extract (car rs) 2)))
+          (rg-place-resume-at (cdr rs))))))
+
+;; Which registers each instruction may read before writing, as it begins,
+;; as a mask (`regcode::liveness`): bit 0 `RESULT`, bit `k` `REGk`. What may
+;; collect is taken to write REG1…REG8 all. Each instruction's uses, defs,
+;; and successors (-1 for none), by cell; the instructions, last first.
+(define rg-l-uses (ref x-ints @k) (new (make-array 1 0)))
+(define rg-l-defs (ref x-ints @k) (new (make-array 1 0)))
+(define rg-l-fall (ref x-ints @k) (new (make-array 1 0)))
+(define rg-l-jump (ref x-ints @k) (new (make-array 1 0)))
+(define rg-l-starts (ref x-out @k) (new nil))
+(define rg-upto (subr pure (int) int)
+  (lambda (n) (- (arithmetic-shift 1 (+ (min n r-regs) 1)) 2)))
+(define rg-bit (subr pure (int) int)
+  (lambda (k) (if (or (= k 0) (> k r-regs)) 0 (arithmetic-shift 1 k))))
+(define rg-l-note (subr (maxeff x-assembles spin) (int int int int int) unit)
+  (lambda (i uses defs fall jump)
+    (begin
+      (array-set! (get rg-l-uses) i uses)
+      (array-set! (get rg-l-defs) i defs)
+      (array-set! (get rg-l-fall) i fall)
+      (array-set! (get rg-l-jump) i jump)
+      (set rg-l-starts (cons i (get rg-l-starts))))))
+(define rg-l-info (subr (maxeff x-assembles spin) (tword int int) unit)
+  (lambda (rw i n)
+    (if (>= i n)
+        #u
+        (let* ((op (rg-op rw i))
+               (next (+ i (+ 1 (r-operands op))))
+               (all 510)
+               (fall (if (or (= op rop-return) (= op rop-tailinvoke) (= op rop-branch)) -1 next))
+               (jump (cond ((or (= op rop-branch) (= op rop-branchf) (= op rop-brancht))
+                            (+ i (+ 2 (rg-k rw i 0))))
+                           ((= op rop-global-guard) (+ i (+ 4 (rg-k rw i 2))))
+                           (else -1))))
+          (begin
+            (cond
+              ((= op rop-args) (rg-l-note i 0 (rg-upto (rg-k rw i 0)) fall jump))
+              ((= op rop-vargs) (rg-l-note i 0 all fall jump))
+              ((or (= op rop-const) (= op rop-global) (= op rop-lexical) (= op rop-stack))
+               (rg-l-note i 0 1 fall jump))
+              ((or (= op rop-setglbl) (= op rop-setstk) (= op rop-branchf) (= op rop-brancht)
+                   (= op rop-return))
+               (rg-l-note i 1 0 fall jump))
+              ((= op rop-reg) (rg-l-note i (rg-bit (rg-k rw i 0)) 1 fall jump))
+              ((= op rop-setreg) (rg-l-note i 1 (rg-bit (rg-k rw i 0)) fall jump))
+              ((= op rop-movereg)
+               (rg-l-note i (rg-bit (rg-k rw i 0)) (rg-bit (rg-k rw i 1)) fall jump))
+              ((= op rop-load) (rg-l-note i 0 (rg-bit (rg-k rw i 0)) fall jump))
+              ((= op rop-store) (rg-l-note i (rg-bit (rg-k rw i 0)) 0 fall jump))
+              ((or (= op rop-op1) (= op rop-op2imm) (= op rop-field) (= op rop-prim1)
+                   (= op rop-prim2imm))
+               (rg-l-note i 1 1 fall jump))
+              ((or (= op rop-op2) (= op rop-prim2) (= op rop-setfield))
+               (rg-l-note i (bitwise-ior 1 (rg-bit (rg-k rw i 1))) (if (= op rop-setfield) 0 1)
+                          fall jump))
+              ((= op rop-prim3imm) (rg-l-note i (bitwise-ior 1 (rg-bit (rg-k rw i 2))) 1 fall jump))
+              ((or (= op rop-prim) (= op rop-lambda) (= op rop-cellular))
+               (rg-l-note i (rg-upto (rg-k rw i 1)) (bitwise-ior 1 all) fall jump))
+              ((or (= op rop-invoke) (= op rop-invokeself))
+               (rg-l-note i (bitwise-ior (rg-upto (rg-k rw i 0)) (if (= op rop-invoke) 1 0))
+                          (bitwise-ior 1 all) fall jump))
+              ((= op rop-tailinvoke)
+               (rg-l-note i (bitwise-ior 1 (rg-upto (rg-k rw i 0))) 0 fall jump))
+              (else (rg-l-note i 0 0 fall jump)))
+            (rg-l-info rw next n))))))
+(define rg-l-at (subr (maxeff (read @globals) (read @k)) (int) int)
+  (lambda (s) (if (< s 0) 0 (array-ref (get rg-live) s))))
+;; One pass, the instructions last first: whether any changed.
+(define rg-l-pass (subr (maxeff x-assembles spin) (x-out bool) bool)
+  (lambda (is changed)
+    (if (null? is)
+        changed
+        (let* ((i (car is))
+               (inn (bitwise-ior (array-ref (get rg-l-uses) i)
+                                 (bitwise-and (bitwise-ior (rg-l-at (array-ref (get rg-l-fall) i))
+                                                           (rg-l-at (array-ref (get rg-l-jump) i)))
+                                              (bitwise-not (array-ref (get rg-l-defs) i))))))
+          (if (= inn (array-ref (get rg-live) i))
+              (rg-l-pass (cdr is) changed)
+              (begin (array-set! (get rg-live) i inn) (rg-l-pass (cdr is) #t)))))))
+(define rg-l-settle (subr (maxeff x-assembles spin) () unit)
+  (lambda () (if (rg-l-pass (get rg-l-starts) #f) (rg-l-settle) #u)))
+(define rg-liveness (subr (maxeff x-assembles spin) (tword int) unit)
+  (lambda (rw n)
+    (begin
+      (set rg-live (the x-ints (make-array (+ n 1) 0)))
+      (set rg-l-uses (the x-ints (make-array (+ n 1) 0)))
+      (set rg-l-defs (the x-ints (make-array (+ n 1) 0)))
+      (set rg-l-fall (the x-ints (make-array (+ n 1) -1)))
+      (set rg-l-jump (the x-ints (make-array (+ n 1) -1)))
+      (set rg-l-starts nil)
+      (rg-l-info rw 0 n)
+      (rg-l-settle))))
+;; Whether the word has a loop: a backward `branch`, which only such a
+;; word's polls need `rg-live` for.
+(define rg-looped? (subr (maxeff (read @globals) (read @k) spin) (tword int int) bool)
+  (lambda (rw i n)
+    (if (>= i n)
+        #f
+        (let ((op (rg-op rw i)))
+          (if (and (= op rop-branch) (< (rg-k rw i 0) -1))
+              #t
+              (rg-looped? rw (+ i (+ 1 (r-operands op))) n))))))
 
 ;;; ------------------------------------------------------------ fast paths
 
@@ -286,13 +494,17 @@
   (lambda (rw i op next)
     (let* ((k0 (rg-k rw i 0))
            (count (rg-k rw i 1))
+           ;; The routine a `lambda`'s closure is made by, `closure` or
+           ;; `nclosure`, which only the call-out does.
            (routine-n (cond ((= op rop-prim) routine-prim)
-                            ((= op rop-lambda) routine-closure)
+                            ((= op rop-lambda) (rg-k rw i 2))
                             (else k0)))
            (at (if (= op rop-cellular) (+ n-word-cell0 next) (rg-f i 0)))
            (slow (x-label))
            (done (x-label))
-           (what (rg-inline-name op k0 count))
+           (what (if (and (= op rop-lambda) (not (= routine-n routine-closure)))
+                     ""
+                     (rg-inline-name op k0 count)))
            (leaf (get rg-pushed)))
       (begin
         (if (and (not (string=? what "")) (<= count r-regs))
@@ -313,8 +525,17 @@
     (let ((tail (= op rop-tailinvoke)) (count (rg-k rw i 0)))
       (if (not (eq? tail (get rg-pushed)))
           (rg-fail "an invoke with the link elsewhere")
-          (let ((cellular (x-label)) (back (x-label)))
+          (let ((cellular (x-label)) (native (x-label)) (back (x-label))
+                (typed (= (rg-k rw i 1) rconv-cellular)))
             (begin
+              ;; Its code in the code area: a native closure, which the
+              ;; Rust machine calls. A callee typed `cellular`: no look.
+              (if typed
+                  #u
+                  (begin
+                    (x-load n-x16 r-result (x-field n-closure-word))
+                    (x-e (x86-alu-rm x-cmp n-x16 n-st n-st-code-lo))
+                    (x-jcc x-c-ae native)))
               (if tail #u (begin (rg-ip-at (+ n-word-cell0 next)) (rg-push-return-marked)))
               ;; The callee, its word (in `T`), and the word's twin.
               (x-load r-t r-result (x-field n-closure-word))
@@ -330,10 +551,20 @@
                   (x-e (x86-jmp-m n-table n-x16 1 0))
                   (let ((call (x86-call-m-ix n-table n-x16 1 0)))
                     (begin (rg-align-return (rg-length call)) (x-e call) (x-jmp back))))
+              ;; A native closure: the arguments and it on the data stack, and
+              ;; the call's routine, returning the stack's way.
+              (if typed
+                  #u
+                  (begin
+                    (x-bind native)
+                    (if tail (begin (rg-unmark-return) (x-alu-imm x-add r-sp 8)) #u)
+                    (rg-push-regs count)
+                    (x-push-ds r-result)
+                    (rg-callout (if tail routine-tailcall routine-call) (rg-f i 0))))
               ;; Stack code: the arguments as its frame.
               (x-bind cellular)
               (if tail #u (x-e (x86-neg-m n-rsp 8)))
-              (x-fuel)
+              (rg-fuel)
               (rg-push-regs count)
               (x-ds-limit)
               (x-rs-limit)
@@ -347,7 +578,10 @@
               (if tail
                   (set rg-falls #f)
                   (begin
+                    ;; The native closure's call-out returns to the cell
+                    ;; after the count: the same point.
                     (array-set! (get rg-resume) next (x-here))
+                    (array-set! (get rg-resume) (- next 1) (x-here))
                     (x-pop-ds r-result)
                     (x-bind back)))))))))
 
@@ -447,7 +681,8 @@
            (rg-branch-to to)
            (if (= op rop-branch)
                (begin
-                 (if (<= to i) (x-fuel) #u)
+                 ;; A loop's poll keeps what the loop's head reads.
+                 (if (<= to i) (rg-poll-regs (array-ref (get rg-live) to) (rg-f i 0)) #u)
                  (x-jmp (array-ref (get rg-labels) to))
                  (set rg-falls #f))
                (begin
@@ -524,12 +759,19 @@
         (set rg-resume (the x-ints (make-array n -1)))
         (set rg-pushed-at (the x-ints (make-array (+ n 1) -1)))
         (set rg-heads (the x-bools (make-array (+ n 1) #f)))
-        ;; The register entry: called, the link on the machine stack.
+        (set rg-refills nil)
+        (set rg-polls nil)
+        (set rg-resume-at nil)
+        (if (rg-looped? rw 0 n) (rg-liveness rw n) #u)
+        ;; The register entry: called, the link on the machine stack. Its
+        ;; poll keeps the arguments, unless they are counted (`vargs`).
         (let ((entry (x-label)))
           (begin
             (x-bind entry)
             (set rg-pushed #t)
-            (x-fuel)
+            (if (= (rg-op rw 0) rop-args)
+                (rg-poll-regs (rg-upto (rg-k rw 0 0)) (+ n-word-cell0 1))
+                (rg-fuel))
             (x-rs-limit)
             (rg-mark-heads rw 0 n)
             (set rg-falls #t)
@@ -538,15 +780,20 @@
             (product (1 (the x-out nil)) (2 (the x-out nil)) (3 (get rg-err)))
             (begin
               (x-bind (array-ref (get rg-labels) n))
-              ;; Out of the way of the code that runs: the traps; then the
+              ;; Out of the way of the code that runs: the polls' ways out and
+              ;; back, the next slices' stubs, and the traps; then the
               ;; machine's common trap and exit, through the state.
+              (rg-place-polls (the x-poll-list (reverse (get rg-polls))))
+              (rg-place-refills (the x-fix-list (reverse (get rg-refills))))
               (x-flush-stubs)
               (x-bind (get x-trap-common))
               (x-e (x86-jmp-m n-st -1 1 n-st-trap))
               (x-bind (get x-exit-common))
               (x-e (x86-jmp-m n-st -1 1 n-st-exit))
               (let ((code (x-finish)))
-                (product (1 code) (2 (rg-array-list (get rg-resume) (- n 1) nil)) (3 "")))))))))
+                (begin
+                  (rg-place-resume-at (get rg-resume-at))
+                  (product (1 code) (2 (rg-array-list (get rg-resume) (- n 1) nil)) (3 ""))))))))))
 
 ;; The `n` arguments from a stack-code caller's frame into registers.
 (define rg-adapter-args (subr (maxeff x-assembles spin) (int int) unit)

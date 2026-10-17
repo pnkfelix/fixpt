@@ -104,6 +104,25 @@ struct Asm {
     /// has made it, and whether the link is on the machine stack here.
     link: Option<usize>,
     link_pushed: bool,
+    /// Register code, whose polls take their next time slice in line
+    /// (`fuel`), from these stubs: each, and where it goes back to.
+    in_regcode: bool,
+    refills: Vec<(Label, Label)>,
+    /// Register code's polls that may leave the machine (`poll_regs`).
+    polls: Vec<Poll>,
+}
+
+/// A poll in register code, as `cellular::Poll`: its way out, where it goes
+/// on, the code that comes back by the resume table, the registers it
+/// keeps, its resume point's field, and whether the link is on the machine
+/// stack there (a leaf's), which it keeps too.
+struct Poll {
+    out: Label,
+    back: Label,
+    again: Label,
+    live: u16,
+    f: usize,
+    leaf: bool,
 }
 
 impl Asm {
@@ -121,6 +140,9 @@ impl Asm {
             at: 0,
             link: None,
             link_pushed: false,
+            in_regcode: false,
+            refills: Vec::new(),
+            polls: Vec::new(),
         };
         a.trap_common = a.label();
         a.exit_common = a.label();
@@ -170,6 +192,24 @@ impl Asm {
         self.stubs.push((l, code, aux));
     }
     fn flush_stubs(&mut self) {
+        // Register code's next slice: out of fuel if the reserve is spent.
+        for (refill, back) in std::mem::take(&mut self.refills) {
+            self.bind(refill);
+            let out = self.label();
+            self.e(load(X13, st(offset_of!(State, reserve))));
+            self.e(test(X13, X13));
+            self.jcc(Cond::E, out);
+            self.e(load(X14, st(offset_of!(State, slice))));
+            self.e(cmp(X13, X14));
+            self.e(cmov(Cond::B, X14, X13));
+            self.e(sub(X13, X14));
+            self.e(store(st(offset_of!(State, reserve)), X13));
+            self.e(store(st(offset_of!(State, fuel)), X14));
+            self.jmp(back);
+            self.bind(out);
+            let (code, aux) = Trap::OutOfFuel.code();
+            self.trap(code, aux);
+        }
         for (l, code, aux) in std::mem::take(&mut self.stubs) {
             self.bind(l);
             self.trap(code, aux);
@@ -450,9 +490,30 @@ impl Asm {
         self.fp_decode(X14);
     }
 
+    /// A poll, at a cell boundary: `CUR` and `IP` say where to go on, as a
+    /// return entry would, so that a time slice's end leaves the machine
+    /// (as running out of fuel, detail 0) and comes back there. In register
+    /// code, which keeps values in registers, the next slice is taken from
+    /// the reserve here instead (`refills`).
     fn fuel(&mut self) {
         self.e(alu_mi(Alu::Sub, st(offset_of!(State, fuel)), 1));
-        self.trap_if(Cond::E, Trap::OutOfFuel);
+        if self.in_regcode {
+            let (refill, back) = (self.label(), self.label());
+            self.jcc(Cond::E, refill);
+            self.bind(back);
+            self.refills.push((refill, back));
+        } else {
+            self.trap_if(Cond::E, Trap::OutOfFuel);
+        }
+    }
+
+    /// A call's poll, before anything is done: its cell, one before `IP`,
+    /// is where to go on (detail 1).
+    fn fuel_call(&mut self) {
+        self.e(alu_mi(Alu::Sub, st(offset_of!(State, fuel)), 1));
+        let l = self.label();
+        self.jcc(Cond::E, l);
+        self.stubs.push((l, Trap::OutOfFuel.code().0, 1));
     }
 
     /// A taken branch's poll: only a backward one can make a loop, so a
@@ -532,8 +593,15 @@ pub(super) fn generate() -> (Vec<u8>, usize, Vec<usize>, [usize; 2]) {
     a.e(mov(ST, RDI));
     a.e(store(st(offset_of!(State, machine_sp)), RSP_));
     a.load();
+    // `start` 0: going on where the state says, as after a control
+    // call-out (a time slice's end, `NativeMachine::run_in_runtime`).
+    let resume = a.label();
     a.e(load(W, st(offset_of!(State, start))));
+    a.e(test(W, W));
+    a.jcc(Cond::E, resume);
     a.run_word_in_w();
+    a.bind(resume);
+    a.enter_cur(X13);
 
     // A trap: code in X13 and detail in X14; then the common exit.
     let (tc, ec) = (a.trap_common, a.exit_common);
@@ -569,13 +637,14 @@ const RSP_: Reg = crate::x86_64::RSP;
 fn routine_body(a: &mut Asm, n: usize, name: &'static str) {
     match name {
         "docol" => {
-            // W is the word and X11 its suffix + 4.
-            a.fuel();
+            // W is the word and X11 its suffix + 4. The poll once the word
+            // is entered, at its first cell: a cell boundary (`fuel`).
             a.ds_limit();
             a.rs_limit();
             a.push_return();
             a.e(mov(CUR, W));
             a.e(lea(IP, m(X11, -((4 + 8 * WORD_CELL0) as i32))));
+            a.fuel();
             a.next();
         }
         "exit" => a.pop_return(),
@@ -827,11 +896,12 @@ fn routine_body(a: &mut Asm, n: usize, name: &'static str) {
         }
         "call" | "tailcall" | "tcall" | "ttailcall" => {
             // A cellular closure on top: its word, over a frame of the n
-            // values below it. Anything else (a continuation, or not a
-            // procedure) goes the Rust machine's way. A typed call's callee
-            // is a closure (the checker says so), so it is not tested; and
-            // a tail call grows neither stack, so a typed one does not
-            // check them either.
+            // values below it. Untyped, anything else (a continuation, not
+            // a procedure, or a native closure) goes the Rust machine's
+            // way, which calls native code. Typed (`tcall`), the callee's
+            // type says `cellular`, so it is a cellular closure: nothing
+            // is checked (`TODO.md` §97). A tail call grows neither stack,
+            // so a typed one does not check them.
             let typed = matches!(name, "tcall" | "ttailcall");
             let name = if typed { &name[1..] } else { name };
             let other = a.label();
@@ -839,7 +909,7 @@ fn routine_body(a: &mut Asm, n: usize, name: &'static str) {
             if !typed {
                 a.is_closure(W, other);
             }
-            a.fuel();
+            a.fuel_call();
             if !(typed && name == "tailcall") {
                 a.ds_limit();
                 a.rs_limit();
@@ -875,8 +945,8 @@ fn routine_body(a: &mut Asm, n: usize, name: &'static str) {
             a.e(lea(IP, m(CUR, -((4 + 8 * WORD_CELL0) as i32))));
             a.e(mov_imm(X13, (8 * WORD_CELL0) as u64));
             a.enter_cur(X13);
-            a.bind(other);
             if !typed {
+                a.bind(other);
                 a.callout(n as u64);
             }
         }
@@ -912,12 +982,12 @@ pub fn assemble_word(heap: &Heap, word: Value) -> Result<(Vec<u8>, Vec<i64>), St
     let mut a = Asm::new();
     let labels: Vec<Label> = (0..=cells.len()).map(|_| a.label()).collect();
     // As a cell: `docol`'s work, then the first cell.
-    a.fuel();
     a.ds_limit();
     a.rs_limit();
     a.push_return();
     a.e(mov(CUR, W));
     a.e(lea(IP, m(X11, -((4 + 8 * WORD_CELL0) as i32))));
+    a.fuel();
     a.jmp(labels[0]);
     for (i, cell) in cells.iter().enumerate() {
         if !starts[i] {

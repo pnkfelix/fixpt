@@ -38,7 +38,7 @@ fn run(machine: &str, path: &str, slice: Option<u64>, limit: Duration) -> Option
 }
 
 /// The machines, the stencils only where this build found a nightly
-/// compiler.
+/// compiler, the native convention only where it runs.
 fn machines() -> Vec<&'static str> {
     let stencils = !fixpt_native::stencil::opt_levels().is_empty();
     [
@@ -54,6 +54,7 @@ fn machines() -> Vec<&'static str> {
     ]
     .into_iter()
     .filter(|m| stencils || !m.contains("stencils"))
+    .filter(|m| fixpt_native::NATIVE_CONVENTION_AVAILABLE || !m.ends_with("nativecc"))
     .collect()
 }
 

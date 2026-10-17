@@ -58,6 +58,7 @@ fn every_instruction_as_the_rust_encoder_makes_it() {
             add("x86-call-m", vec![b as i64, 88], x::call_m(m(b, 88)));
             add("x86-cmov-m", vec![Cond::L as i64, d as i64, b as i64, 56], x::cmov_m(Cond::L, d, m(b, 56)));
             add("x86-cmov-m", vec![Cond::E as i64, d as i64, b as i64, 0], x::cmov_m(Cond::E, d, m(b, 0)));
+            add("x86-cmov", vec![Cond::B as i64, d as i64, b as i64], x::cmov(Cond::B, d, b));
         }
         for op in alus {
             for imm in IMMS.into_iter().chain([0x1000, -0x12345]) {

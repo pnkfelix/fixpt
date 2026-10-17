@@ -388,15 +388,6 @@
            (rg-bloblet-at 2)
            (rg-field-at (if region? r-rsi r-rdi) 2 2)
            (rg-bloblet-done 2))))
-      ((string=? what "ricell")
-       (begin
-         (rg-bump-words 4 #t slow)
-         (x-e (x86-mov-imm r-t (rg-header kind-bloblet 3)))
-         (rg-bloblet-at 3)
-         (rg-value r-rcx n-false)
-         (rg-field-at r-rcx 2 3)
-         (rg-field-at r-rcx 3 3)
-         (rg-bloblet-done 3)))
       ((string=? what "field@")
        (begin
          (rg-field-check slow)
@@ -595,7 +586,6 @@
                   ((string=? p "%fx26-product?") "product?")
                   ((string=? p "%fx26-procedure?") "procedure?")
                   ((string=? p "%make-box") "box")
-                  ((string=? p "%region-make-icell") "ricell")
                   ((string=? p "%make-frozen") "frozen")
                   ((string=? p "%make-bloblet") "bloblet")
                   (else "")))

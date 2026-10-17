@@ -85,4 +85,9 @@ pub struct State {
     /// The machine stack pointer the x86_64 machine's entry left, to which
     /// its exit returns: register code may leave with a link pushed.
     pub machine_sp: u64,
+    /// The time slice (`fixpt_runtime::sched::slice`), which x86_64's
+    /// register code reads as it takes its next one, rather than having
+    /// it as a constant, so that the compiler written in FX-26 makes the
+    /// same code whatever `FIXPT_SLICE` says.
+    pub slice: u64,
 }

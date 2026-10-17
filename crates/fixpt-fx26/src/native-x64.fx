@@ -152,6 +152,10 @@
 (define x-jcc (subr (maxeff x-assembles spin) (int int) unit)
   (lambda (c l) (x-to l (x86-jcc c 0))))
 
+;; Where label `l` is bound, in bytes from the code's start.
+(define x-label-at (subr (maxeff (read @globals) (read @k)) (int) int)
+  (lambda (l) (array-ref (get x-labels) l)))
+
 ;; To the common trap with `code` and `detail`.
 (define x-trap (subr (maxeff x-assembles spin) (int int) unit)
   (lambda (code detail)
@@ -418,11 +422,20 @@
       (x-load n-x14 n-st n-st-fp)
       (x-fp-decode n-x14))))
 
+;; A poll, at a cell boundary: `CUR` and `IP` say where to go on, so that a
+;; time slice's end leaves the machine (detail 0) and comes back there.
 (define x-fuel (subr (maxeff x-assembles spin) () unit)
   (lambda ()
     (begin
       (x-e (x86-alu-mi x-sub n-st n-st-fuel 1))
       (x-trap-if x-c-e n-trap-out-of-fuel 0))))
+;; A call's poll, before anything is done: its cell, one before `IP`, is
+;; where to go on (detail 1).
+(define x-fuel-call (subr (maxeff x-assembles spin) () unit)
+  (lambda ()
+    (begin
+      (x-e (x86-alu-mi x-sub n-st n-st-fuel 1))
+      (x-trap-if x-c-e n-trap-out-of-fuel 1))))
 ;; A taken branch's poll: only a backward one can make a loop, so a branch
 ;; known to go forward (in a compiled word) makes none.
 (define x-fuel-unless-forward (subr (maxeff x-assembles spin) () unit)
@@ -556,8 +569,11 @@
         (x-bind bad)
         (x-trap n-trap-field n)))))
 
-;; A typed call's callee is a closure, so it is not tested; and a typed
-;; tail call, which grows neither stack, does not check them.
+;; Untyped, a callee not a cellular closure (a continuation, not a
+;; procedure, or a native closure) goes the Rust machine's way. Typed
+;; (`tcall`), the callee's type says `cellular`, so it is a cellular closure:
+;; nothing is checked (`TODO.md` §97); a typed tail call, which grows
+;; neither stack, does not check them.
 (define x-call (subr (maxeff x-assembles spin) (int) unit)
   (lambda (n)
     (let ((other (x-label))
@@ -566,7 +582,7 @@
       (begin
         (x-load n-w n-dsp 0)
         (if typed #u (x-is-closure n-w other))
-        (x-fuel)
+        (x-fuel-call)
         (if (and typed tail) #u (begin (x-ds-limit) (x-rs-limit)))
         (x-operand n-x10)
         (x-alu-imm x-add n-dsp 8)
@@ -595,8 +611,7 @@
         (x-lea n-ip n-cur (- 0 (+ 4 (* 8 n-word-cell0))))
         (x-e (x86-mov-imm n-x13 (* 8 n-word-cell0)))
         (x-enter-cur n-x13)
-        (x-bind other)
-        (if typed #u (x-callout n))))))
+        (if typed #u (begin (x-bind other) (x-callout n)))))))
 
 ;; `int-add` or `int-sub` (routine `n`) on two fixnums; the Rust machine's
 ;; on a bignum, or past a fixnum.
@@ -633,9 +648,10 @@
     (cond
       ((= n routine-docol)
        (begin
-         (x-fuel) (x-ds-limit) (x-rs-limit) (x-push-return)
+         (x-ds-limit) (x-rs-limit) (x-push-return)
          (x-mov n-cur n-w)
          (x-lea n-ip n-x11 (- 0 (+ 4 (* 8 n-word-cell0))))
+         (x-fuel)
          (x-next)))
       ((= n routine-exit) (x-pop-return))
       ((= n routine-halt) (x-jmp (get x-exit-common)))
@@ -837,9 +853,10 @@
              (labels (x-labels-for (+ cells 1))))
         (begin
           ;; As a cell: `docol`'s work, then the first cell.
-          (x-fuel) (x-ds-limit) (x-rs-limit) (x-push-return)
+          (x-ds-limit) (x-rs-limit) (x-push-return)
           (x-mov n-cur n-w)
           (x-lea n-ip n-x11 (- 0 (+ 4 (* 8 n-word-cell0))))
+          (x-fuel)
           (x-jmp (array-ref labels 0))
           (x-cells w 0 cells starts labels)
           ;; The traps, after all the cells, so that each cell's code runs

@@ -106,6 +106,7 @@
           ((and (>= imm -2147483648) (< imm 2147483648))
            (append (x86-op-rr 1 (x86-b1 199) 0 d) (x86-le 4 imm)))
           (else (append (x86-rex 1 0 0 d) (cons (+ 184 (x86-lo d)) (x86-le8 imm)))))))
+(define x86-cmov x86-op3 (lambda (c d s) (x86-op-rr 1 (x86-b2 15 (+ 64 c)) d s)))
 (define x86-cmov-m x86-op4
   (lambda (c d base disp) (x86-op-rm 1 (x86-b2 15 (+ 64 c)) d base -1 1 disp)))
 

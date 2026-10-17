@@ -34,6 +34,7 @@
             (val x86-alu-mi x86-op4)
             (val x86-test x86-op2)
             (val x86-test-imm x86-op2)
+            (val x86-cmov x86-op3)
             (val x86-cmov-m x86-op4)
             (val x86-shift-imm x86-op3)
             (val x86-jmp x86-op1)
