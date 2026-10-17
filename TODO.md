@@ -2482,39 +2482,3 @@ user):
   moves the field's value (as `fixpt-native/tests/code_exec.rs` does from
   Rust), run on every machine; the no-native-code branch run by a switch
   that turns native code off.
-
-## 101. Benches taken on a busy machine, taken again (the user's, 2026-10-16)
-
-Some commits' `fixpt bench` tables were measured while other work loaded
-the machine, so their times run high (`26fad166`'s about a tenth over the
-commit before it). For each, bench the commit and its parent again when
-the machine is quiet (1-minute load average below 2), built side by side
-in scratch worktrees and alternated, as for a regression (re-measured
-back to back, best of several). Then record the quiet numbers. The
-commits may already be pushed, so their messages stay as they are: the
-numbers go in `DONE.md` §101, one line per commit, saying whether any
-change in time was real.
-
-Busy (a load average of 5 or more in the commit's message):
-
-| commit     | subject                                                                  | load averages before, after    |
-| ---------- | ------------------------------------------------------------------------ | ------------------------------ |
-| `38df01e2` | `(->* (T…) T)`: a `define`'s type, its effect found from its `lambda`    | 5.94 5.70 4.29, 5.60 5.63 4.30 |
-| `093e036c` | `->*` in `letrec` and `define-rec` groups                                | 4.71 5.78 5.51, 4.40 5.62 5.46 |
-| `cf95f5cb` | `->*` in modules: every such lambda's effect found before any is checked | 3.11 5.86 6.04, 3.02 5.71 5.98 |
-| `26fad166` | An error in a file loaded, said at the load's start by both checkers     | 4.21 6.38 7.55, 3.80 6.10 7.42 |
-
-Borderline (a load average of 4 or more), to take again if the others
-show the load mattered:
-
-| commit     | subject                                                                       | load averages before, after    |
-| ---------- | ----------------------------------------------------------------------------- | ------------------------------ |
-| `fd7c4751` | Primitives reached through fields, not numbers (TODO §97)                     | 2.85 4.60 3.05, 2.56 4.41 3.02 |
-| `cc9a7c33` | `->*` in the checker written in FX-26: a lone member not checked again        | 2.66 4.14 3.77, 2.37 4.00 3.72 |
-| `4b592b9b` | A module file defining a name twice: said in the file, alike by both checkers | 4.25 3.08 2.02, 3.93 3.07 2.04 |
-
-Commits from before load averages were recorded have none to judge by,
-and are not listed. From now on, a bench taken with a 1-minute load
-average of 4 or more is taken again when the machine is quieter, before
-the commit, if waiting is possible; if not, the commit says so and is
-added here.

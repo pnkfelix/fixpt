@@ -3073,6 +3073,49 @@ to `->*`, then each that does not check put back.
   put back the definition the first error names; again). 21 files 40
   lines shorter, none longer; `regcode-core.fx`'s debt 1124 → 1122.
 
+## 101. Benches taken on a busy machine, taken again (the user's, 2026-10-16)
+
+**Done (2026-10-17): no change in time was real.** Each commit and its
+parent built side by side in scratch worktrees, then `fixpt bench` (best
+of 3) three times over in rounds, the commits in order so each ran next
+to its parent; every run began with a 1-minute load average below 2
+(1.24 to 1.94), and each column is the best of the three rounds. The
+commits' messages stay as they are; their quiet numbers are here.
+
+Sums over the eight programs (the run table, ms) and over the nine
+(`check`, `fx check`, s), parent → commit:
+
+| commit     | `rs-regs-rsjit-nativecc` | `rs-cells-rsjit-cellcc` | `check`       | `fx check`    | real?                    |
+| ---------- | ------------------------ | ----------------------- | ------------- | ------------- | ------------------------ |
+| `38df01e2` | 54.7 → 54.4              | 297.6 → 293.6           | 14.58 → 14.36 | 31.98 → 31.75 | no                       |
+| `093e036c` | 54.4 → 54.4              | 293.6 → 297.0           | 14.36 → 14.38 | 31.75 → 31.84 | no                       |
+| `cf95f5cb` | 54.4 → 55.0              | 297.0 → 303.1           | 14.38 → 14.47 | 31.84 → 32.20 | no (each within 2 %)     |
+| `26fad166` | 55.1 → 55.0              | 364.6 → 362.4           | 14.40 → 14.45 | 31.97 → 32.13 | no: not "a tenth over"   |
+| `fd7c4751` | 53.7 → 54.0              | 286.6 → 286.2           | 13.92 → 13.99 | 30.70 → 30.85 | no                       |
+| `cc9a7c33` | 54.2 → 54.1              | 288.1 → 288.4           | 13.83 → 13.87 | 30.74 → 30.96 | no                       |
+| `4b592b9b` | 54.4 → 54.4              | 287.6 → 292.5           | 14.02 → 13.94 | 30.76 → 30.79 | no                       |
+
+Every other column moves as little, but `rs-cells-stencils-cellcc`,
+whose sum varies by up to a fifth from round to round of one build (417
+to 509 for `38df01e2`): noise, there.
+
+What the load did. Against these, the tables in the messages of the
+commits benched at a 1-minute load of 4 or more (`38df01e2`, `093e036c`,
+`26fad166`) run 10 to 17 % high in every column; those at about 3
+(`cf95f5cb`, whose 5- and 15-minute loads were 6, and the three
+borderline ones), 3 to 8 % high, as are their parents', so each
+message's comparison with its parent was fair. The 1-minute load is the
+one that counts, and even 3 costs a few percent.
+
+Found on the way, not chased (interpreted machines' constant factors,
+not native speed): `rs-cells-asminterp` and `rs-cells-rsjit-cellcc` on
+the programs that allocate are bimodal across unrelated commits, `lists`
+53 or 84 ms on `asminterp`, `closures` 72 or 93, the same words
+allocated and collections made: `4b592b9b`'s fast, `595df377`'s (a checker
+and CLI change only) slow, today's fast again. A layout of the Rust
+side of the cellular machines' allocation, most likely; register code
+and native code do not move.
+
 ## 102. A nursery not collected while native code calls a global closure (found 2026-10-16)
 
 **Fixed (2026-10-16): a poll collects.** Found measuring the integrator

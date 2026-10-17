@@ -1,6 +1,6 @@
 # `fixpt` — a Rust Scheme engine with FX-87 and FX-91 front ends
 
-## At a glance (kept current; last updated 2026-10-16)
+## At a glance (kept current; last updated 2026-10-17)
 
 Where things stand. Below it is the plan as it grew, oldest first (the
 contents are at the end of this section); the details behind this summary
@@ -309,10 +309,10 @@ weighed with the other items, not ahead of them.
   for a key, and `(io terminal)`: raw mode, back, the size. Found on the
   way, and fixed (`DONE.md` §96): the evaluator written in FX-26 ran each
   definition again with each later form.
-- **Benches taken on a busy machine** (the user's, 2026-10-16, `TODO.md`
-  §101): four commits' tables (load averages 5 to 7) taken again on a
-  quiet machine, the numbers in `DONE.md`; three borderline ones if the
-  load proves to have mattered.
+- **Benches taken on a busy machine** (the user's, 2026-10-16): done
+  (2026-10-17, `DONE.md` §101), the four busy commits and the three
+  borderline ones benched again, quiet: no change in time was real; a
+  1-minute load of 4 or more had put their tables 10 to 17 % high.
 - S1. Done (2026-09-30): **the `acyclic?` gap**, F13: shown a
   use-after-free on every path, and fixed in both checkers with data at a
   place, `(t data p)` (`docs/research/shapes.md`, the framing: regions,
