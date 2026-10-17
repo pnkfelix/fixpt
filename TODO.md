@@ -2518,3 +2518,44 @@ and are not listed. From now on, a bench taken with a 1-minute load
 average of 4 or more is taken again when the machine is quieter, before
 the commit, if waiting is possible; if not, the commit says so and is
 added here.
+
+## 105. x86_64: what is left of the native back end (the user's, 2026-10-11)
+
+The user's: "a native backend for x86_64 Linux, to eventually be in FX26
+itself". Done (CLAUDES_CHOICES.md, the two x86_64 entries): the
+hand-encoded cellular machine (`cellular::x64`), the words Rust compiles
+into it, and the same compiled by FX-26 (`native-x64.fx` over
+`x86_64.fx`), each byte for byte against its oracle; the bootstrap
+reaches its fixpoint on all three. `fast` on x86_64 is
+`fx-cells-rsjit-cellcc`. Left, in the order they would pay:
+
+1. **Register code** (`regcode.rs`, `--cellular-machine registers`): the
+   front end's machine on arm64, and the next speed-up here. The decision
+   first: arm64 keeps `RESULT`, `REG0`–`REG8` and seven machine registers
+   in seventeen registers; x86_64 has fifteen, and the machine's scratch
+   besides. Larceny's x86 back ends kept REG1–REG4 (or so) in hardware and
+   the rest in memory beside the state; `REGS` is fixed at 8 by the IR
+   (`layout::regcode::REGS`). Which `REG`s go to memory is best chosen
+   from counts of their uses in the front end's register code. Then the
+   link: no `x30`; a call's return address is pushed on the machine
+   stack, so `save n`'s link slot is filled from it (`pop`), and a leaf
+   keeps it there (no `leaf_link`). Return points still need 8-byte
+   alignment, so that a saved link reads as a fixnum (byte-granular
+   `nop`s before the `call`).
+2. **The native convention** (`direct.rs`, `fx-regs-rsjit-nativecc`, the
+   arm64 default): about 4 000 lines of emission. Keep the frame's layout
+   (`[fp]` link, `[fp+8]` return address, `[fp+16]` map) so that the
+   stack cache, the stack maps and the continuations (all ISA-neutral)
+   carry over; the prologue moves the return address `call` pushed into
+   the frame. `ret` against `jmp` is the return-stack-predictor question
+   CLAUDES_CHOICES.md's "Native profiling" item 6 settled for arm64.
+3. **Stencils** on x86_64: `build.rs` reads x86_64 ELF (`EM_X86_64`),
+   refuses relocations, and needs its own check of branches in range;
+   SysV passes six integer arguments in registers, the stencils' routines
+   take eight, so their signature changes or two go on the stack.
+4. **In FX-26**, as for arm64 (§81): register code and the native
+   convention after their Rust forms settle.
+5. **Smaller:** a 32-bit jump that could be 8 (relaxation) would shrink
+   compiled words by about a fifth; `,disassemble-asm` for x86_64 shows
+   bytes with the disassembler's text, which knows only the forms the
+   encoder makes.
