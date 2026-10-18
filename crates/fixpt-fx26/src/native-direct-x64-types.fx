@@ -130,8 +130,8 @@
 ;; representation (`Rep`) is a number: `nr-undefined` 0, `nr-value` 1,
 ;; `nr-raw-signed` 2, `nr-raw-unsigned` 3, `nr-f64` 4, `nr-fix` 5; those of
 ;; `RESULT` and REG1…REG8 (`Reps`) one int, three bits each, `RESULT`'s
-;; lowest. A conversion (`Convert`) is 64 times its kind (box 0, unbox 1,
-;; check 2), plus 8 times its register, plus its representation. Masks of
+;; lowest. A conversion (`Convert`) is 128 times its kind (box 0, unbox 1,
+;; check 2), plus 8 times its register (0 to 8), plus its representation. Masks of
 ;; registers and parameters are ints, bit `r` for register `r` (bit 0 for
 ;; REG1 in a mask of parameters, as `raw_param` has it). Instructions are
 ;; numbered by where they are in `starts`, as `reps.rs` numbers them.
