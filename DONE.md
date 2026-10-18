@@ -3094,6 +3094,8 @@ Sums over the eight programs (the run table, ms) and over the nine
 | `fd7c4751` | 53.7 → 54.0              | 286.6 → 286.2           | 13.92 → 13.99 | 30.70 → 30.85 | no                       |
 | `cc9a7c33` | 54.2 → 54.1              | 288.1 → 288.4           | 13.83 → 13.87 | 30.74 → 30.96 | no                       |
 | `4b592b9b` | 54.4 → 54.4              | 287.6 → 292.5           | 14.02 → 13.94 | 30.76 → 30.79 | no                       |
+| `ba534007` | 53.6 → 53.8              | 349.4 → 352.0           | 14.32 → 13.87 | 31.51 → 30.74 | no                       |
+| `bb3f5709` | 53.9 → 53.9              | 288.2 → 290.6           | 13.98 → 13.82 | 29.83 → 29.97 | no                       |
 
 Every other column moves as little, but `rs-cells-stencils-cellcc`,
 whose sum varies by up to a fifth from round to round of one build (417
@@ -3106,6 +3108,15 @@ commits benched at a 1-minute load of 4 or more (`38df01e2`, `093e036c`,
 borderline ones), 3 to 8 % high, as are their parents', so each
 message's comparison with its parent was fair. The 1-minute load is the
 one that counts, and even 3 costs a few percent.
+
+The last two rows (2026-10-17, evening), the threshold to bench again
+lowered to a 1-minute load of 3 (the user's): `ba534007` and `bb3f5709`,
+benched at 2.95 to 3.13, taken again likewise, every run begun below 2.
+`ba534007`'s compile phases a few percent lower are its parent's rounds
+varying (`check` 14.33 to 15.06). Its message's table ran 10 to 15 %
+high, its parent's 2 to 3 %, so read side by side they show a slowdown of
+about a tenth that is not there; `bb3f5709`'s ran 2 to 12 % high, its
+parent's 2 to 10 %.
 
 Found on the way, not chased (interpreted machines' constant factors,
 not native speed): `rs-cells-asminterp` and `rs-cells-rsjit-cellcc` on
