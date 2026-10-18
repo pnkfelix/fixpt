@@ -99,6 +99,9 @@
             (val da-pop-frame-ret (subr da-assembles (int) unit))
             (val da-stub-return (subr da-assembles () unit))
             (val da-preempt (subr da-assembles () unit))
+            (val da-args1 (subr da-assembles (int) da-bytes))
+            (val da-args2 (subr da-assembles (int int) da-bytes))
+            (val da-args3 (subr da-assembles (int int int) da-bytes))
             (val da-pure-call (subr da-assembles (int da-bytes int) unit))
             (val da-in-place (subr da-assembles (int da-on-reg) unit))
             (val da-ubfx (subr da-assembles (int int int int) unit))
@@ -151,7 +154,8 @@
             (val nr-checks (subr da-assembles (int int int) da-bytes))
             (val nr-raw-op (subr da-assembles (string) nr-raw-op))
             (val nr-is-f64-set? (subr da-reads (nr-cells int) bool))
-            (val nr-step (subr da-assembles (nr-cells int bool bool da-bools int int int) nr-stepped))
+            (val nr-step
+                 (subr da-assembles (nr-cells int bool bool da-bools int int int) nr-stepped))
             (val nr-int-routine? (subr pure (int) bool))
             (val nr-starts (subr da-assembles (nr-cells) da-ints))
             (val nr-reps-of
@@ -227,3 +231,142 @@
             (val df-bytes-set (subr da-assembles (int int) unit))
             (val df-flat-set (subr da-assembles (int int bool) unit))
             (val df-shape-fast (subr da-assembles (string int) bool))))
+
+;;; ------------------------------------------------------------ the procedure
+
+;; What `procedure_x64` places after the code: a way in that unboxes or
+;; tests (its label, the unboxings and tests, and where it goes in the
+;; version and in the general one); a poll's way out (`NPoll`: out, back,
+;; the registers of values and of raw bits as masks, whether the closure
+;; lives only in `CLO`, whether it has a map, and the map); an overflow's
+;; (over, back, the raw registers); a call through a cell whose global was
+;; written (slow, join, stub, the raw registers); and a call of what is
+;; not native code (stub, after, the count, whether a tail call).
+(define-type dp-edge (productof (1 int) (2 da-bytes) (3 da-bytes) (4 int) (5 int)))
+(define-type dp-edge-list (listof dp-edge @k))
+(define-type dp-int-slow-list (listof dr-int-slow @k))
+(define-type dp-poll (productof (1 int) (2 int) (3 int) (4 int) (5 bool) (6 bool) (7 int)))
+(define-type dp-poll-list (listof dp-poll @k))
+(define-type dp-overflow-list (listof (productof (1 int) (2 int) (3 int)) @k))
+(define-type dp-cell-slow-list (listof (productof (1 int) (2 int) (3 int) (4 int)) @k))
+(define-type dp-foreign-list (listof (productof (1 int) (2 int) (3 int) (4 bool)) @k))
+
+;; The procedure being compiled, its analysis, its fields and the version
+;; being made (`native-direct-x64-proc.fx`), as its other files use it.
+(define-type native-direct-x64-proc-sig
+  (moduleof (val dp-errors (ref da-strings @k))
+            (val dp-kind (ref da-ints @k))
+            (val dp-a (ref da-ints @k))
+            (val dp-b (ref da-ints @k))
+            (val dp-c (ref da-ints @k))
+            (val dp-info-captures (ref int @k))
+            (val dp-info (ref int @k))
+            (val dp-sse41 (ref bool @k))
+            (val dp-cells (ref nr-cells @k))
+            (val dp-n (ref int @k))
+            (val dp-starts (ref da-ints @k))
+            (val dp-si-of (subr da-reads (int) int))
+            (val dp-ns (subr da-reads () int))
+            (val dp-start (subr da-reads (int) int))
+            (val dp-fix (subr da-reads (int) int))
+            (val dp-fix? (subr da-reads (int) bool))
+            (val dp-op (subr da-reads (int) int))
+            (val dp-o (subr da-reads (int int) int))
+            (val dp-ob (subr da-reads (int int) int))
+            (val dp-oid (subr da-reads (int int) int))
+            (val dp-ofix? (subr da-reads (int int) bool))
+            (val dp-oimm? (subr da-reads (int int) bool))
+            (val dp-branch-to (subr da-reads (int) int))
+            (val dp-branch? (subr pure (int) bool))
+            (val dp-bit? (subr pure (int int) bool))
+            (val dp-bit (subr pure (int) int))
+            (val dp-decline (subr da-assembles (string) unit))
+            (val dp-frame (ref int @k))
+            (val dp-calls (ref bool @k))
+            (val dp-captures (ref bool @k))
+            (val dp-back-to (ref da-bools @k))
+            (val dp-target (ref da-bools @k))
+            (val dp-framed (ref da-bools @k))
+            (val dp-raw (ref da-bools @k))
+            (val dp-values (ref int @k))
+            (val dp-params (ref int @k))
+            (val dp-callees (ref da-ints @k))
+            (val dp-slot-off (ref da-ints @k))
+            (val dp-unmapped (ref bool @k))
+            (val dp-size (ref int @k))
+            (val dp-self-slot (ref int @k))
+            (val dp-clo-slot (ref int @k))
+            (val dp-live-out (ref da-ints @k))
+            (val dp-raw-refs (ref da-bools @k))
+            (val dp-live (ref da-ints @k))
+            (val dp-has-int (ref bool @k))
+            (val dp-map-word (subr da-reads (int) int))
+            (val dp-fields (ref da-bytes @k))
+            (val dp-field (subr da-assembles (int) int))
+            (val dp-myself int)
+            (val dp-code-of (subr pure (int) int))
+            (val dp-const-of (subr pure (int) int))
+            (val dp-cell-of (subr pure (int) int))
+            (val dp-closure-of (subr pure (int int) int))
+            (val dp-labels-g (ref da-ints @k))
+            (val dp-labels-f (ref da-ints @k))
+            (val dp-fast (ref bool @k))
+            (val dp-reps-in (ref da-ints @k))
+            (val dp-reps-out (ref da-ints @k))
+            (val dp-src (ref int @k))
+            (val dp-pending (ref int @k))
+            (val dp-bound-cell (ref int @k))
+            (val dp-bound-writes (ref int @k))
+            (val dp-map-stored? (ref bool @k))
+            (val dp-map-stored (ref int @k))
+            (val dp-si (ref int @k))
+            (val dp-entry-checked (ref int @k))
+            (val dp-resume-at (ref int @k))
+            (val dp-uses-resume (ref bool @k))
+            (val dp-label (subr da-reads (int) int))
+            (val dp-label-g (subr da-reads (int) int))
+            (val dp-in (subr da-reads (int) int))
+            (val dp-out (subr da-reads (int) int))
+            (val dp-edges (ref dp-edge-list @k))
+            (val dp-int-slows (ref dp-int-slow-list @k))
+            (val dp-polls (ref dp-poll-list @k))
+            (val dp-overflows (ref dp-overflow-list @k))
+            (val dp-cell-slows (ref dp-cell-slow-list @k))
+            (val dp-foreign (ref dp-foreign-list @k))
+            (val dp-begin (subr da-assembles (string (listof da-bytes @k) da-strings) unit))
+            (val dp-analyse (subr da-assembles () unit))))
+
+;; The instructions that are not primitives' or call-outs'
+;; (`native-direct-x64-ops.fx`), each of its cell.
+(define-type native-direct-x64-ops-sig
+  (moduleof (val do-slot (subr da-reads (int) int))
+            (val do-const (subr da-assembles (int) unit))
+            (val do-global (subr da-assembles (int) unit))
+            (val do-global-guard (subr da-assembles (int) unit))
+            (val do-setglbl (subr da-assembles (int) unit))
+            (val do-lexical (subr da-assembles (int) unit))
+            (val do-reg (subr da-assembles (int) unit))
+            (val do-movereg (subr da-assembles (int) unit))
+            (val do-save (subr da-assembles (int) unit))
+            (val do-store (subr da-assembles (int) unit))
+            (val do-op2 (subr da-assembles (int int) unit))
+            (val do-invoke (subr da-assembles (int int) unit))
+            (val do-invokeself (subr da-assembles (int) unit))
+            (val do-branch (subr da-assembles (int int) unit))))
+
+;; The primitives', control's and call-outs' (`native-direct-x64-prims.fx`).
+(define-type native-direct-x64-prims-sig
+  (moduleof (val dq-control (subr da-assembles (int) unit))
+            (val dq-prim12 (subr da-assembles (int int) unit))
+            (val dq-prim3 (subr da-assembles (int) unit))
+            (val dq-callouts (subr da-assembles (int int) unit))))
+
+;; A procedure's code (`native-compile-x64-proc`): its bytes, how many are
+;; its own, its code bloblet's fields, the call-outs it numbered, and why
+;; it cannot be compiled ("" if it can).
+(define-type dx-made (productof (1 da-bytes) (2 int) (3 da-bytes) (4 da-bytes) (5 string)))
+
+;; What the conductor names of the compiler, for Rust.
+(define-type native-direct-x64-sig
+  (moduleof (val native-compile-x64-proc
+                 (subr da-assembles (string (listof da-bytes @k) da-strings) dx-made))))

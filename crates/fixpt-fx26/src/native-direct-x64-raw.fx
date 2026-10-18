@@ -70,7 +70,7 @@
               (da-e (x86-shift-imm da-shl r 3))))
         (da-jmp done)
         (da-bind slow)
-        (da-pure-call (da-co d-co-box (dr-bit signed) 0) (cons r nil) r)
+        (da-pure-call (da-co d-co-box (dr-bit signed) 0) (da-args1 r) r)
         (da-bind done)))))
 
 ;; Register `r`'s exact integer unboxed, in place: its low 64 bits.
@@ -83,7 +83,7 @@
         (da-e (x86-shift-imm da-sar r 3))
         (da-jmp done)
         (da-bind slow)
-        (da-pure-call (da-co d-co-unbox 0 0) (cons r nil) r)
+        (da-pure-call (da-co d-co-unbox 0 0) (da-args1 r) r)
         (da-bind done)))))
 
 ;; Register `r`'s flonum unboxed, in place: its double's bits; anything but
@@ -158,7 +158,7 @@
         (da-e (x86-lea r d-x11 (+ 8 d-tag-bloblet)))
         (da-jmp done)
         (da-bind slow)
-        (da-pure-call (da-co d-co-box-f64 0 0) (cons r nil) r)
+        (da-pure-call (da-co d-co-box-f64 0 0) (da-args1 r) r)
         (da-bind done)))))
 
 ;; A return of the raw `f64` in `RESULT`: as it is, past the mark, where
@@ -234,7 +234,7 @@
         (da-e (x86-movq-from-xmm d-result 0))
         (da-jmp done)
         (da-bind slow)
-        (da-pure-call (da-co d-co-pure p 1) (cons d-result nil) d-result)
+        (da-pure-call (da-co d-co-pure p 1) (da-args1 d-result) d-result)
         (dr-unbox-f64 d-result)
         (da-bind done)))))
 
@@ -259,7 +259,7 @@
         (da-jmp done)
         (da-bind slow)
         (dr-box-f64 d-result)
-        (da-pure-call (da-co d-co-pure p 1) (cons d-result nil) d-result)
+        (da-pure-call (da-co d-co-pure p 1) (da-args1 d-result) d-result)
         (da-trap-set)
         (da-bind done)))))
 
@@ -523,7 +523,7 @@
                   #u)))
         (da-bind (extract s 1))
         (let ((y2 (if (< y 0) (begin (da-imm d-x16 imm) d-x16) y)))
-          (da-pure-call (da-co d-co-pure (extract s 8) 2) (cons x (cons y2 nil)) into))
+          (da-pure-call (da-co d-co-pure (extract s 8) 2) (da-args2 x y2) into))
         (da-trap-set)
         (if (< branch 0)
             #u

@@ -46,12 +46,7 @@ const WRAPPERS: &[Wrapper] = &[
 /// The FX-26 program: the modules, as the conductor makes them; what the
 /// wrappers use of them; and the wrappers.
 fn program() -> String {
-    let mut p = String::from(
-        "(define x86-64 (load-input \"fx26:x86_64.fx\"))\n\
-         (define dl (load-module \"fx26:native-direct-x64-layout.fx\"))\n\
-         (define asm ((load-input \"fx26:native-direct-x64-asm.fx\") x86-64 dl))\n\
-         (define raw ((load-input \"fx26:native-direct-x64-raw.fx\") x86-64 dl asm))\n",
-    );
+    let mut p = String::from(include_str!("native-direct/raw-modules.fx"));
     for n in ["da-reset", "da-label", "da-bind", "da-e", "da-place-stubs", "da-finish", "da-callouts"] {
         p.push_str(&format!("(define {n} (with asm {n}))\n"));
     }
@@ -64,16 +59,7 @@ fn program() -> String {
     }
     // The labels `ls` bound, the stubs placed: the call-outs' count, the
     // call-outs, `pre`, and the bytes.
-    p.push_str(&format!(
-        "(define t-bind (subr {EFF} ((listof int @k)) unit)\n  \
-           (lambda (ls) (if (null? ls) #u (begin (da-bind (car ls)) (t-bind (cdr ls))))))\n\
-         (define t-out (subr {EFF} ((listof int @k) (listof int @k)) (listof int @k))\n  \
-           (lambda (pre ls)\n    \
-             (begin (t-bind ls) (da-e (cons 15 (cons 11 nil))) (da-place-stubs)\n      \
-               (let* ((cs (da-callouts)) (code (da-finish)))\n        \
-                 (cons (list-length cs) (append cs (append pre code)))))))\n\
-         (define t-bit (subr pure (bool) int) (lambda (b) (if b 1 0)))\n"
-    ));
+    p.push_str(&include_str!("native-direct/raw-out.fx").replace("{EFF}", EFF));
     let labels = |n: usize| (0..n).map(|k| format!("(l{k} (da-label))")).collect::<Vec<_>>().join(" ");
     let list = |n: usize| (0..n).rev().fold("nil".to_string(), |acc, k| format!("(cons l{k} {acc})"));
     for (name, params, n, call) in WRAPPERS {
@@ -88,27 +74,7 @@ fn program() -> String {
     }
     // Those that answer whether they did something, and those of their
     // own shapes.
-    p.push_str(&format!(
-        "(define t-raw-entry-skip (subr {EFF} (int) (listof int @k))\n  \
-           (lambda (p) (begin (da-reset 0)\n    \
-             (let ((n (dr-raw-entry-skip p))) (t-out (cons (modulo n 256) (cons (quotient n 256) nil)) nil)))))\n\
-         (define t-float-test (subr {EFF} (bool string) (listof int @k))\n  \
-           (lambda (d w) (begin (da-reset 0) (let ((b (dr-float-test d w))) (t-out (cons (t-bit b) nil) nil)))))\n\
-         (define t-f32-fast (subr {EFF} (int string) (listof int @k))\n  \
-           (lambda (y w) (begin (da-reset 0) (let ((b (dr-f32-fast w y))) (t-out (cons (t-bit b) nil) nil)))))\n\
-         (define t-narrow-fast (subr {EFF} (int string) (listof int @k))\n  \
-           (lambda (y w) (begin (da-reset 0)\n    \
-             (let* ((l0 (da-label)) (b (dr-narrow-fast w y l0))) (t-out (cons (t-bit b) nil) (cons l0 nil))))))\n\
-         (define t-int-slow (subr {EFF} (bool int int int int int bool bool bool) (listof int @k))\n  \
-           (lambda (ov x y imm into prim sub br when)\n    \
-             (begin (da-reset 0)\n      \
-               (let* ((entry (da-label)) (o (if ov (da-label) -1)) (back (da-label))\n             \
-                      (b (if br (da-label) -1)))\n        \
-                 (begin\n          \
-                   (dr-int-slow (product (1 entry) (2 o) (3 back) (4 x) (5 y) (6 imm) (7 into) (8 prim)\n                                \
-                                         (9 sub) (10 b) (11 when)))\n          \
-                   (t-out nil (if br (cons back (cons b nil)) (cons back nil))))))))\n"
-    ));
+    p.push_str(&include_str!("native-direct/raw-shapes.fx").replace("{EFF}", EFF));
     p
 }
 

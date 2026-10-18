@@ -56,7 +56,7 @@ mod declare;
 pub use declare::native_convention;
 mod x64;
 mod fx;
-pub use fx::{fx_abandon, FxCompile, FxEmitted, FxRequest};
+pub use fx::{describe, fx_abandon, Each, FxCompile, FxEmitted, FxRequest};
 pub use x64::{fx26_direct_module, fx26_direct_module_sig, oracle as oracle_x64};
 pub use reps::oracle as reps_oracle;
 use reps::{Convert, RawOp, Rep};

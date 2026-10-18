@@ -514,6 +514,7 @@ is its REPL. The older flags still work, and pick the same machines:
 | `fx-cells-fxjit-cellcc`             | `--cellular-machine fx-compiled`                                   | FX-26          | FX-26 (`native.fx`)    | the hand machine, as arm64      |
 | `fx-regs-rsjit-cellcc`              | `--cellular-machine registers`                                     | FX-26          | Rust (register code)   | the hand machine, as arm64      |
 | `fx-regs-fxjit-cellcc`              | `--cellular-machine fx-registers`                                  | FX-26          | FX-26 (`native-x64-regs.fx`) | the hand machine, as x86_64 only |
+| `fx-regs-fxjit-nativecc`            | `--cellular-machine registers --calling-convention fx-native`      | FX-26          | FX-26 (`native-direct-x64.fx`) | x86_64 only, the native convention |
 
 And the other commands:
 
@@ -524,8 +525,12 @@ And the other commands:
 | `fixpt check INPUT`                          | none           | none                   | both checkers, compared    |
 | `fixpt compile INPUT`                        | both, compared | none                   | nothing: the code is shown |
 
-There is no `fx-regs-fxjit-…`: register code to arm64 has no compiler
-written in FX-26 (TODO §81).
+On arm64 there is no `fx-regs-fxjit-…`: register code to arm64 has no
+compiler written in FX-26 (TODO §81). On x86_64 there are both:
+`fx-regs-fxjit-cellcc`, inside the cellular machine, and
+`fx-regs-fxjit-nativecc`, native procedures, FX all the way down to the
+machine code the REPL runs (Rust keeps finding what to compile and placing
+it, as for the others).
 
 The rest of the detail:
 

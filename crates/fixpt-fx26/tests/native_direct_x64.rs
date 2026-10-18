@@ -44,3 +44,12 @@ fn the_continuation_procedure_as_the_rust_compiler_makes_it() {
         assert_eq!(got, want, "continuation code {n}: FX-26 {got:02x?}, Rust {want:02x?}");
     }
 }
+
+/// The whole compiler's modules, applied as the conductor applies them:
+/// that they check.
+#[test]
+fn the_compiler_checks() {
+    if let Err(e) = fixpt_fx26::session::compile_program(include_str!("native-direct/compiler.fx")) {
+        panic!("checks: {e}");
+    }
+}

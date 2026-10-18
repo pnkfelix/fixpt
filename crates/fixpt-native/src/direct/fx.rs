@@ -18,7 +18,8 @@
 //!
 //! The values the driver holds are not rooted, and running FX-26 may
 //! collect: collection is held off from [`DirectMachine::fx_begin`] to
-//! [`DirectMachine::fx_finish`] (or [`fx_abandon`]).
+//! [`DirectMachine::fx_finish`] (or [`fx_abandon`]), but while FX-26
+//! makes a procedure, when they are rooted ([`DirectMachine::fx_park`]).
 
 use super::{Callout, Compiled, Compiling, DirectMachine, Field, Proc, GLOBAL_WRITES, OPS, ROUTINES};
 use fixpt_heap::{Heap, Value};
@@ -32,6 +33,8 @@ pub struct FxCompile {
     queue: Vec<usize>,
     resume: Option<usize>,
     refused: std::collections::HashSet<u64>,
+    /// The words refused, as values, for `fx_park` to keep.
+    refused_words: Vec<Value>,
     native_masks: HashMap<u64, Option<u8>>,
     closure: Value,
     first: usize,
@@ -44,6 +47,15 @@ pub struct FxCompile {
     frees: Vec<Vec<Value>>,
     /// The procedure FX-26 is making.
     current: Option<usize>,
+    /// For the oracle (`fx_begin_each`): each procedure that failed, and
+    /// why, the compile going on past it.
+    failures: Option<HashMap<usize, String>>,
+    /// While parked (`fx_park`): where its values are among the heap's roots.
+    parked: Option<usize>,
+    /// For the oracle: only the closure's own procedure, and whether it
+    /// has been asked for.
+    one: bool,
+    asked: bool,
 }
 
 /// One procedure for FX-26 to make: its name; `head`, what it is given of
@@ -188,6 +200,26 @@ fn driving<T>(heap: &Heap, callouts: &mut Vec<Callout>, c: &mut FxCompile, f: im
 }
 
 impl FxCompile {
+    /// Every value the driver holds, in one order (`fx_park`).
+    fn values_mut(&mut self) -> impl Iterator<Item = &mut Value> {
+        let procs = self.procs.iter_mut().flat_map(|p| {
+            let fields = p.fields.iter_mut().flat_map(|f| -> Box<dyn Iterator<Item = &mut Value>> {
+                match f {
+                    Field::Const(v) | Field::Cell(v) => Box::new(std::iter::once(v)),
+                    Field::Closure(_, free) => Box::new(free.iter_mut()),
+                    Field::Myself | Field::Code(_) => Box::new(std::iter::empty()),
+                }
+            });
+            [&mut p.word, &mut p.rw].into_iter().chain(fields)
+        });
+        std::iter::once(&mut self.closure)
+            .chain(self.free.iter_mut())
+            .chain(self.values.iter_mut())
+            .chain(self.frees.iter_mut().flatten())
+            .chain(self.refused_words.iter_mut())
+            .chain(procs)
+    }
+
     /// The driver as `compile` starts it, refusing `refused`.
     fn start(&mut self, heap: &Heap, callouts: &mut Vec<Callout>) -> Result<(), String> {
         let closure = self.closure;
@@ -212,6 +244,7 @@ impl DirectMachine {
             queue: Vec::new(),
             resume: None,
             refused: std::collections::HashSet::new(),
+            refused_words: Vec::new(),
             native_masks: HashMap::new(),
             closure,
             first: 0,
@@ -220,6 +253,10 @@ impl DirectMachine {
             value_ids: HashMap::new(),
             frees: vec![Vec::new()],
             current: None,
+            failures: None,
+            parked: None,
+            one: false,
+            asked: false,
         };
         if let Err(e) = c.start(heap, &mut self.callouts) {
             heap.allow_collection();
@@ -232,7 +269,11 @@ impl DirectMachine {
     /// An error ends the compile ([`fx_abandon`] it).
     pub fn fx_next(&mut self, heap: &Heap, c: &mut FxCompile) -> Result<Option<FxRequest>, String> {
         loop {
+            if c.one && c.asked {
+                return Ok(None);
+            }
             let Some(p) = c.queue.pop() else { return Ok(None) };
+            c.asked = true;
             c.current = Some(p);
             let prepared = {
                 let mut ids = std::mem::take(&mut c.values);
@@ -250,7 +291,12 @@ impl DirectMachine {
                     return Ok(Some(r));
                 }
                 // As `procedure_x64` failing before it made any code.
-                Err(e) => self.fx_refuse(heap, c, p, e)?,
+                Err(e) => match c.failures.as_mut() {
+                    Some(f) => {
+                        f.insert(p, e);
+                    }
+                    None => self.fx_refuse(heap, c, p, e)?,
+                },
             }
         }
     }
@@ -263,6 +309,10 @@ impl DirectMachine {
             self.callouts.push(callout_of(k)?);
         }
         if !out.err.is_empty() {
+            if let Some(f) = c.failures.as_mut() {
+                f.insert(p, out.err);
+                return Ok(());
+            }
             return self.fx_refuse(heap, c, p, out.err);
         }
         let fields = out.fields.iter().map(|&f| field_of(c, f)).collect::<Result<Vec<Field>, String>>()?;
@@ -271,6 +321,38 @@ impl DirectMachine {
         proc_.code = out.code;
         proc_.len = out.len;
         Ok(())
+    }
+
+    /// Between the procedures, while FX-26 makes one: the driver's values
+    /// rooted, and collection allowed, so that FX-26 runs as it always
+    /// does (with collection held off, each of its allocations would call
+    /// in, and keep its garbage until the compile ends). `fx_unpark` takes
+    /// them back, where the collection moved them.
+    pub fn fx_park(&mut self, heap: &mut Heap, c: &mut FxCompile) {
+        // One list of them, one root: the heap's roots are the session's
+        // handles' too, made while FX-26 runs, so none is popped, but
+        // cleared (`fx_unpark`), the session releasing it with its own.
+        let values: Vec<Value> = c.values_mut().map(|v| *v).collect();
+        let list = heap.list_from(&values);
+        c.parked = Some(heap.push_root(list));
+        heap.allow_collection();
+    }
+
+    /// Collection held off again, and the driver's values as the roots now
+    /// have them; what is keyed by a value's bits made again.
+    pub fn fx_unpark(&mut self, heap: &mut Heap, c: &mut FxCompile) {
+        heap.inhibit_collection();
+        let Some(at) = c.parked.take() else { return };
+        let mut list = heap.root_at(at);
+        heap.set_root_at(at, Value::FALSE);
+        for v in c.values_mut() {
+            *v = heap.car(list);
+            list = heap.cdr(list);
+        }
+        c.by_word = c.procs.iter().enumerate().filter(|(_, p)| p.word != Value::FALSE).map(|(k, p)| (p.word.raw(), k)).collect();
+        c.refused = c.refused_words.iter().map(|w| w.raw()).collect();
+        c.value_ids = c.values.iter().enumerate().map(|(k, v)| (v.raw(), k)).collect();
+        c.native_masks.clear();
     }
 
     /// Procedure `p` could not be compiled, for `why`: as in `compile`, the
@@ -282,6 +364,7 @@ impl DirectMachine {
         }
         let mut refused = std::mem::take(&mut c.refused);
         refused.insert(c.procs[p].word.raw());
+        c.refused_words.push(c.procs[p].word);
         (c.procs, c.by_word, c.queue, c.resume, c.native_masks) = (Vec::new(), HashMap::new(), Vec::new(), None, HashMap::new());
         c.refused = refused;
         c.start(heap, &mut self.callouts)
@@ -364,6 +447,12 @@ impl Compiling<'_> {
             i += 1 + OPS[cells[i].as_fixnum() as usize].1;
         }
         let op_at = |j: usize| OPS[cells[j].as_fixnum() as usize].0;
+        // A frame too large, as `procedure_x64` declines it, before it asks
+        // anything.
+        let frame = starts.iter().filter(|&&j| op_at(j) == "save").map(|&j| cells[j + 1].as_fixnum() as usize).last();
+        if frame.is_some_and(|m| 32 + 8 * (m + 2) > 4080) {
+            return Err(format!("`{name}`: a frame too large"));
+        }
         let called = |j: usize| {
             let at = starts.iter().position(|&s| s == j).expect("an instruction");
             starts[at + 1..].iter().copied().find(|&c| op_at(c) != "pop").filter(|&c| matches!(op_at(c), "invoke" | "tailinvoke"))
@@ -452,5 +541,131 @@ impl Compiling<'_> {
         r.head[FxRequest::INFO] = super::overflow_info(arity, false) as i64;
         r.head[FxRequest::SSE41] = super::x64::sse41() as i64;
         Ok(r)
+    }
+}
+
+/// A compile, as the oracle of `fx-regs-fxjit-nativecc` compares the Rust
+/// compiler's with FX-26's (`FIXPT_FX_NATIVE_ORACLE`, the CLI's
+/// `compile_by_fx26`): each procedure's name, its own length and its
+/// bytes, and each field of its code bloblet by what it is: a procedure's
+/// code (by its index among them), a native closure of one over values
+/// (their bits), or any other value's bits. Two compiles of the same
+/// closure are the same so, wherever their code was placed.
+#[doc(hidden)]
+pub fn describe(heap: &Heap, procs: &[(String, Compiled)]) -> Vec<String> {
+    use fixpt_heap::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD};
+    let blobs: Vec<Value> = procs.iter().map(|(_, c)| c.code).collect();
+    let code_of = |v: Value| blobs.iter().position(|&b| b == v);
+    procs
+        .iter()
+        .map(|(name, c)| {
+            let bytes: String = (0..heap.bloblet_head(c.code).bytes).map(|k| format!("{:02x}", heap.bloblet_byte(c.code, k).unwrap_or(0))).collect();
+            let fields: Vec<String> = (1..=heap.bloblet_head(c.code).fields)
+                .map(|k| {
+                    let v = heap.bloblet_slot(c.code, k);
+                    if let Some(j) = code_of(v) {
+                        return format!("code {j}");
+                    }
+                    if v.is_bloblet() && heap.bloblet_kind(v) == const { fixpt_heap::layout::kind("native-closure") } {
+                        if let Some(j) = code_of(heap.bloblet_slot(v, CLOSURE_WORD)) {
+                            let free: Vec<String> = (CLOSURE_FREE0..=heap.bloblet_head(v).fields).map(|f| format!("{:#x}", heap.bloblet_slot(v, f).raw())).collect();
+                            return format!("closure of {j} over [{}]", free.join(" "));
+                        }
+                    }
+                    format!("{:#x}", v.raw())
+                })
+                .collect();
+            format!("{name}: {} of {} bytes {bytes}; fields {}", c.len, bytes.len() / 2, fields.join(", "))
+        })
+        .collect()
+}
+
+impl DirectMachine {
+    /// Every call-out this machine's code makes, as `callout_code` numbers
+    /// them: for the oracle to compare two machines that compiled alike.
+    #[doc(hidden)]
+    pub fn callout_codes(&self) -> Vec<i64> {
+        self.callouts.iter().map(|&c| callout_code(c)).collect()
+    }
+}
+
+/// A procedure as the oracle compares it (`compile_each`): its name, and
+/// its code, how much of it is its own, and its fields by what they are
+/// (`Code` and `Closure` by the procedure's index) and the values they
+/// hold (for the oracle to hold while a collection may move them, and
+/// show after); or why it failed.
+pub type Each = (String, Result<(Vec<u8>, usize, Vec<(String, Vec<Value>)>), String>);
+
+fn field_parts(f: &Field) -> (String, Vec<Value>) {
+    match f {
+        Field::Myself => ("myself".into(), Vec::new()),
+        Field::Code(q) => (format!("code {q}"), Vec::new()),
+        Field::Const(v) => ("const".into(), vec![*v]),
+        Field::Cell(v) => ("cell".into(), vec![*v]),
+        Field::Closure(q, free) => (format!("closure of {q}"), free.clone()),
+    }
+}
+
+fn each_of(procs: &[Proc], failures: &HashMap<usize, String>) -> Vec<Each> {
+    procs
+        .iter()
+        .enumerate()
+        .map(|(k, p)| {
+            (
+                p.name.clone(),
+                match failures.get(&k) {
+                    Some(why) => Err(why.clone()),
+                    None => Ok((p.code.clone(), p.len, p.fields.iter().map(field_parts).collect())),
+                },
+            )
+        })
+        .collect()
+}
+
+impl DirectMachine {
+    /// The oracle's compile of `closure`, by the Rust compiler: as
+    /// `compile`, but a procedure that fails noted and passed by, the
+    /// rest compiled; nothing placed. For comparing every procedure a
+    /// closure reaches with FX-26's (`fx_begin_each`), whatever fails.
+    #[doc(hidden)]
+    /// With `one`, only the closure's own procedure.
+    pub fn compile_each(&mut self, heap: &Heap, closure: Value, one: bool) -> Result<Vec<Each>, String> {
+        let mut c = Compiling { heap, procs: Vec::new(), by_word: HashMap::new(), queue: Vec::new(), callouts: &mut self.callouts, resume: None, refused: std::collections::HashSet::new(), native_masks: HashMap::new() };
+        let (word, _) = c.closure_parts(closure).ok_or("not a closure of cellular code")?;
+        c.proc_of(word)?;
+        let mut failures = HashMap::new();
+        while let Some(p) = c.queue.pop() {
+            // What FX-26's driver asks first (`prepare_x64`), so that both
+            // queue the same procedures, whichever fails where.
+            if let Err(e) = c.prepare_x64(p, &mut |_| 0, &mut |_| 0) {
+                failures.insert(p, e);
+                continue;
+            }
+            if let Err(e) = c.procedure(p) {
+                failures.insert(p, e);
+            }
+            if one {
+                break;
+            }
+        }
+        Ok(each_of(&c.procs, &failures))
+    }
+
+    /// The same by FX-26: `fx_begin`, but a procedure that fails noted and
+    /// passed by (`fx_each` gives the lot). Collection is held off until
+    /// `fx_each`.
+    #[doc(hidden)]
+    pub fn fx_begin_each(&mut self, heap: &mut Heap, closure: Value, one: bool) -> Result<FxCompile, String> {
+        let mut c = self.fx_begin(heap, closure)?;
+        c.failures = Some(HashMap::new());
+        c.one = one;
+        Ok(c)
+    }
+
+    /// What `fx_begin_each`'s compile made, and collection allowed again.
+    #[doc(hidden)]
+    pub fn fx_each(&mut self, heap: &mut Heap, c: FxCompile) -> Vec<Each> {
+        heap.allow_collection();
+        each_of(&c.procs, c.failures.as_ref().expect("an oracle's compile"))
     }
 }

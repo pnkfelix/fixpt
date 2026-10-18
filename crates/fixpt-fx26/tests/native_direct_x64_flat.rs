@@ -29,112 +29,12 @@ const SHAPES: [&str; 14] = [
 
 /// A raw values' module that does only what these pieces need of it,
 /// `box_bits` (`direct/x64.rs`'s, as `native-direct-x64-raw.fx` is to do it).
-const RAW_STAND_IN: &str = r#"
-(define raw
-  (module
-    (hide (include direct-types))
-    (hide (include x86-64) (include dl) (include asm))
-    (define dr-box-reg (subr da-assembles (int bool) unit) (lambda (r s) #u))
-    (define dr-unbox-reg (subr da-assembles (int) unit) (lambda (r) #u))
-    (define dr-unbox-f64 (subr da-assembles (int) unit) (lambda (r) #u))
-    (define dr-raw-entry (subr da-assembles (int) unit) (lambda (p) #u))
-    (define dr-raw-entry-skip (subr da-assembles (int) int) (lambda (p) 0))
-    (define dr-take-raw-f64 (subr da-assembles () unit) (lambda () #u))
-    (define dr-raw-return (subr da-assembles () unit) (lambda () #u))
-    (define dr-box-f64 (subr da-assembles (int) unit) (lambda (r) #u))
-    (define dr-box-bits (subr da-assembles (int) unit)
-      (lambda (slow)
-        (begin
-          (da-ld d-x13 d-st d-st-top)
-          (da-ld d-x14 d-x13 0)
-          (da-e (x86-lea d-x16 d-x14 2))
-          (da-e (x86-alu-rm da-cmp d-x16 d-st d-st-alloc-limit))
-          (da-jcc da-c-a slow)
-          (da-ld d-x17 d-st d-st-words)
-          (da-e (x86-lea-ix d-x11 d-x17 d-x14 8 0))
-          (da-imm d-x17 (da-header d-flonum 0 8))
-          (da-sto d-x11 0 d-x17)
-          (da-sto d-x11 8 d-x9)
-          (da-sto d-x13 0 d-x16)
-          (da-e (x86-lea d-result d-x11 (+ 8 d-tag-bloblet))))))
-    (define dr-unbox-to (subr da-assembles (int int) unit) (lambda (r rep) #u))
-    (define dr-convert (subr da-assembles (da-bytes int int) unit) (lambda (cs g r) #u))
-    (define dr-f64-of-int (subr da-assembles (int) unit) (lambda (p) #u))
-    (define dr-int-of-f64 (subr da-assembles (int) unit) (lambda (p) #u))
-    (define dr-float-test (subr da-assembles (bool string) bool) (lambda (d w) #f))
-    (define dr-f64-fast (subr da-assembles (string int) unit) (lambda (w y) #u))
-    (define dr-f32-fast (subr da-assembles (string int) bool) (lambda (w y) #f))
-    (define dr-wrap-small (subr da-assembles (bool int) unit) (lambda (s b) #u))
-    (define dr-raw-fast (subr da-assembles (bool string int) unit) (lambda (s w y) #u))
-    (define dr-narrow-fast (subr da-assembles (string int int) bool) (lambda (n y s) #f))
-    (define dr-int-slow (subr da-assembles (dr-int-slow) unit) (lambda (s) #u))))
-"#;
+const RAW_STAND_IN: &str = include_str!("native-direct/flat-raw-stand-in.fx");
 
 /// Each piece as the oracle runs it: the assembler reset, `slow` and the
 /// other label (`done` or `wide`) made, the piece, both bound, an `int3`,
 /// the bytes.
-const WRAPPERS: &str = r#"
-(define tests
-  (module
-    (hide (include direct-types))
-    (hide (include asm) (include flat))
-    (define t-run (subr da-assembles ((subr da-assembles (int int) unit)) da-bytes)
-      (lambda (f)
-        (let* ((ignored (da-reset 0)) (slow (da-label)) (other (da-label)))
-          (begin (f slow other) (da-bind slow) (da-bind other) (da-e (cons 204 nil))
-                 (da-finish)))))
-    (define t-flat-count (subr da-assembles (int int) da-bytes)
-      (lambda (arr out) (t-run (lambda (slow other) (df-flat-count arr out)))))
-    (define t-flat-element (subr da-assembles (int int) da-bytes)
-      (lambda (arr y) (t-run (lambda (slow other) (df-flat-element arr y slow)))))
-    (define t-flat-ref (subr da-assembles (int) da-bytes)
-      (lambda (y) (t-run (lambda (slow other) (df-flat-ref y slow)))))
-    (define t-suffix-owner (subr da-assembles (int) da-bytes)
-      (lambda (r) (t-run (lambda (slow other) (df-suffix-owner r slow)))))
-    (define t-suffix-writable (subr da-assembles (int) da-bytes)
-      (lambda (r) (t-run (lambda (slow other) (df-suffix-writable r slow)))))
-    (define t-suffix-store (subr da-assembles (int int int) da-bytes)
-      (lambda (code v raw) (t-run (lambda (slow other) (df-suffix-store code v (= raw 1) slow)))))
-    (define t-blobref-index (subr da-assembles (int int) da-bytes)
-      (lambda (code i) (t-run (lambda (slow other) (df-blobref-index code i slow)))))
-    (define t-flat-variant (subr da-assembles (int int) da-bytes)
-      (lambda (code l) (t-run (lambda (slow other) (df-flat-variant code l slow)))))
-    (define t-blobref-at (subr da-assembles (int) da-bytes)
-      (lambda (d) (t-run (lambda (slow other) (df-blobref-at d slow)))))
-    (define t-suffix-step (subr da-assembles (int) da-bytes)
-      (lambda (d) (t-run (lambda (slow other) (df-suffix-step d slow)))))
-    (define t-suffix-fits (subr da-assembles (int) da-bytes)
-      (lambda (size) (t-run (lambda (slow other) (df-suffix-fits size slow)))))
-    (define t-suffix-length (subr da-assembles (int) da-bytes)
-      (lambda (code) (t-run (lambda (slow other) (df-suffix-length code slow)))))
-    (define t-suffix-index (subr da-assembles () da-bytes)
-      (lambda () (t-run (lambda (slow other) (df-suffix-index slow)))))
-    (define t-flat-tag (subr da-assembles (int) da-bytes)
-      (lambda (code) (t-run (lambda (slow other) (df-flat-tag code slow)))))
-    (define t-suffix-get (subr da-assembles (int int) da-bytes)
-      (lambda (code raw) (t-run (lambda (slow other) (df-suffix-get code (= raw 1) slow)))))
-    (define t-wide-layout (subr da-assembles (int) da-bytes)
-      (lambda (c) (t-run (lambda (slow other) (df-wide-layout c other)))))
-    (define t-suffix-set (subr da-assembles () da-bytes)
-      (lambda () (t-run (lambda (slow other) (df-suffix-set slow other)))))
-    (define t-bytes-set (subr da-assembles () da-bytes)
-      (lambda () (t-run (lambda (slow other) (df-bytes-set slow other)))))
-    (define t-flat-set (subr da-assembles (int) da-bytes)
-      (lambda (raw) (t-run (lambda (slow other) (df-flat-set slow other (= raw 1))))))
-    (define t-shape-name (subr pure (int) string)
-      (lambda (k)
-        (case k
-          ((0) "null?") ((1) "pair?") ((2) "char?") ((3) "%fx26-f32?") ((4) "boolean?")
-          ((5) "exact-integer?") ((6) "symbol?") ((7) "string?") ((8) "%fx26-array?")
-          ((9) "%fx26-box?") ((10) "%fx26-sum?") ((11) "%fx26-product?")
-          ((12) "%fx26-procedure?") (else "%fx26-nothing-in-line?"))))
-    ;; The bytes, then 1 if the shape was known, else 0.
-    (define t-shape-fast (subr da-assembles (int) da-bytes)
-      (lambda (k)
-        (let ((known (the (ref bool @k) (new #f))))
-          (let ((bytes (t-run (lambda (slow other) (set known (df-shape-fast (t-shape-name k) slow))))))
-            (append bytes (cons (if (get known) 1 0) nil))))))))
-"#;
+const WRAPPERS: &str = include_str!("native-direct/flat-wrappers.fx");
 
 /// The pieces, `t-` and the oracle's name.
 const PIECES: [&str; 20] = [
@@ -161,12 +61,7 @@ const PIECES: [&str; 20] = [
 ];
 
 fn session() -> fixpt_scheme::Session {
-    let mut program = String::from(
-        "(define direct-types (load-module \"fx26:native-direct-x64-types.fx\"))\n\
-         (define x86-64 (load-input \"fx26:x86_64.fx\"))\n\
-         (define dl (load-module \"fx26:native-direct-x64-layout.fx\"))\n\
-         (define asm ((load-input \"fx26:native-direct-x64-asm.fx\") x86-64 dl))\n",
-    );
+    let mut program = String::from(include_str!("native-direct/flat-modules.fx"));
     program.push_str(RAW_STAND_IN);
     program.push_str("(define flat ((load-input \"fx26:native-direct-x64-flat.fx\") x86-64 dl asm raw))\n");
     program.push_str(WRAPPERS);

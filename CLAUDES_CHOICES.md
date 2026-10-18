@@ -871,3 +871,65 @@ off on x86_64 until step 2 re-ports it; the push is the user's).
    - `fast` on x86_64 stays register code: the native convention is fastest
      there on every program of `fixpt bench` but `captures` (42.8 ms
      against 36.9), as before the rebase.
+
+## The native convention compiled by FX-26 on x86_64 (2026-10-18)
+
+The user: "Can you add x86_64 support for fx-regs-fxjit-native? You can
+make an appropriately named branch for it" (branch `x86_64-fxjit-nativecc`;
+TODO §105, item 4).
+
+1. **Rust keeps the driver, FX-26 makes each procedure's code**, as for
+   register code (`syn::assemble_reachable_by_fx26`): `compile`'s finding
+   of the procedures a closure reaches, the binding of their globals
+   (`global_value`), refusals, and the code bloblets (`install`) stay
+   Rust's; `procedure_x64` is FX-26's (`native-direct-x64.fx` and the files
+   beside it). The trampoline and common routines are the machine's, in
+   Rust, as the cellular machine's are.
+2. **The protocol** (`direct/fx.rs`): before each procedure the driver asks
+   what `procedure_x64` asks it as it goes (`prepare_x64`: the callees'
+   raw parameters, then, instruction by instruction, the procedure each
+   `const` of a word or closure, each `global` and each `lambda` names, and
+   the continuation procedure), in the same order, so that every procedure
+   has the same number; an error after the first code is noted at its
+   instruction, for FX-26 to stop there, its message as Rust's. FX-26 is
+   given the cells as integers (bits, and the number of each heap value
+   among them), and gives back bytes, the fields (by those numbers) and
+   the call-outs it numbered from the machine's count, those before a
+   failure too.
+3. **What FX-26 knows of the machine, generated**
+   (`native-direct-x64-layout.fx` and its signature, `fx26_direct_layout`):
+   registers, the state's fields, frames, traps, tags, kinds, the
+   call-outs' kinds, and the primitives, routines and instructions by
+   number. The encoder written in FX-26 gained what the native convention
+   uses (`rip`-relative, narrow and indexed memory, `div`, `not`, SSE),
+   each against the Rust encoder.
+4. **Seven files, each the Rust's step for step**: the assembler and shared
+   sequences (`-asm`), where raw values are kept (`native-reps.fx`, of no
+   machine's: `reps.rs`), raw values' pieces (`-raw`), the heap's fast
+   paths (`-flat`), the procedure's state and analysis (`-proc`), its
+   instructions (`-ops`, `-prims`) and the loop (`native-direct-x64.fx`).
+   The pieces were ported in parallel and each checked against its Rust
+   piece by name (`direct::oracle_x64`, `reps_oracle`; the tests
+   `native_direct_x64*.rs`, `native_reps.rs`); a conversion is
+   `128 kind + 8 r + rep` (64 collided at REG8).
+5. **Collection held off across a compile, but while FX-26 runs**: the
+   driver's values are unrooted; between procedures they are parked in one
+   heap list under one root (`fx_park`) and taken back where a collection
+   moved them (`fx_unpark`), what is keyed by bits made again. The heap's
+   roots are the session's handles too, so the root is cleared, not
+   popped. (Held off throughout, each allocation FX-26 made called in, and
+   its garbage stayed until the compile ended.)
+6. **The machine, `fx-regs-fxjit-nativecc`**: `--calling-convention
+   fx-native`, x86_64 only. The session's hook `native_fx`, the CLI's
+   `compile_by_fx26`, compiles the native runner's thunks and each global's
+   procedure; what it declines runs as cellular code, said so as under
+   Rust (an adapter, `nclosure`'s, is a decline: it runs cellular code).
+7. **Checked byte for byte**: with `FIXPT_FX_NATIVE_ORACLE`, every closure
+   is compiled by the Rust compiler too, on a machine of its own, and the
+   two described alike (`direct::describe`) after; `fixpt-cli`'s
+   `fx_native.rs` runs every test program (698) on both machines: the same
+   output, and no difference the oracle sees (a one-byte change in the
+   FX-26 code makes 504 differ). `tests/native_x64.rs` compares every
+   register word of the front end, each as a closure, its own procedure
+   only (`compile_each`, `fx_begin_each`): 4,892 procedures, 11.3 MB, the
+   same (77 refused by both).

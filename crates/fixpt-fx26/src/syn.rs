@@ -366,6 +366,7 @@ pub fn with_last_value<T>(
     standard: Option<Handle>,
     file: FileId,
     text: &str,
+    native: Option<crate::session::NativeFx>,
     f: impl FnOnce(&mut fixpt_runtime::Runtime, Value) -> T,
 ) -> R<Result<T, String>> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
@@ -389,6 +390,13 @@ pub fn with_last_value<T>(
         let v = match s.call_global("%run-word", &[word, no_args]) {
             Ok(v) => v,
             Err(e) => return Ok(Err(e.to_string())),
+        };
+        // Compiled to native code by the compiler written in FX-26, if it
+        // is to be (`Fx26Session::native_fx`): what declines is given as it
+        // is, the compiler having kept why for the runner.
+        let v = match native {
+            Some(compile) => compile(s, v).unwrap_or(v),
+            None => v,
         };
         let mut value = Value::NULL;
         s.make(|m| {

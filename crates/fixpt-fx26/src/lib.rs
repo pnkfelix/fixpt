@@ -532,6 +532,19 @@ pub const NATIVE_DIRECT_X64_RAW: &str = include_str!("native-direct-x64-raw.fx")
 /// Flat arrays, suffix refs, bytevectors and shapes, in line.
 pub const NATIVE_DIRECT_X64_FLAT: &str = include_str!("native-direct-x64-flat.fx");
 
+/// The procedure being compiled: what Rust gave of it, its analysis, its
+/// fields and the version being made.
+pub const NATIVE_DIRECT_X64_PROC: &str = include_str!("native-direct-x64-proc.fx");
+
+/// Its instructions: moves, frames, globals, `int` operations, calls and
+/// branches; and primitives, control and call-outs.
+pub const NATIVE_DIRECT_X64_OPS: &str = include_str!("native-direct-x64-ops.fx");
+pub const NATIVE_DIRECT_X64_PRIMS: &str = include_str!("native-direct-x64-prims.fx");
+
+/// The loop over the instructions, what is placed after them, and the
+/// entry Rust calls.
+pub const NATIVE_DIRECT_X64: &str = include_str!("native-direct-x64.fx");
+
 /// What the compiler to machine code written in FX-26 knows of the
 /// hand-encoded machine, generated from it: a module file, which the
 /// conductor loads.
@@ -565,7 +578,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 160] = [
+pub const FRONT_END_MODULES: [(&str, &str); 164] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("eager-reader-states.fx", EAGER_READER_STATES),
     ("syn.fx", SYN),
@@ -636,6 +649,10 @@ pub const FRONT_END_MODULES: [(&str, &str); 160] = [
     ("native-reps.fx", NATIVE_REPS),
     ("native-direct-x64-raw.fx", NATIVE_DIRECT_X64_RAW),
     ("native-direct-x64-flat.fx", NATIVE_DIRECT_X64_FLAT),
+    ("native-direct-x64-proc.fx", NATIVE_DIRECT_X64_PROC),
+    ("native-direct-x64-ops.fx", NATIVE_DIRECT_X64_OPS),
+    ("native-direct-x64-prims.fx", NATIVE_DIRECT_X64_PRIMS),
+    ("native-direct-x64.fx", NATIVE_DIRECT_X64),
     ("native-x64-regs-ops.fx", NATIVE_X64_REGS_OPS),
     ("native-x64-regs.fx", NATIVE_X64_REGS),
     ("native.fx", NATIVE),

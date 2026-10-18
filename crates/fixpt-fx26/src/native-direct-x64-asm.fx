@@ -448,6 +448,14 @@
         (da-call-out d-poll-done)
         (da-bind back)))))
 
+;; A call-out's arguments, registers, as `da-pure-call` takes them.
+(define da-args1 (subr da-assembles (int) da-bytes) (lambda (a) (cons a nil)))
+(define da-args2 (subr da-assembles (int int) da-bytes)
+  ;; cons-chain: in `@k`, the assembler's region, which `list` would not be
+  (lambda (a b) (cons a (cons b nil))))
+(define da-args3 (subr da-assembles (int int int) da-bytes)
+  ;; cons-chain: in `@k`, the assembler's region, which `list` would not be
+  (lambda (a b c) (cons a (cons b (cons c nil)))))
 ;; Call-out `code`, which never collects, on `args` (registers, put in the
 ;; state), its value into `into`: `RESULT` and REG1…REG3 kept around it.
 (define da-pure-call (subr da-assembles (int da-bytes int) unit)
