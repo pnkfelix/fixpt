@@ -725,6 +725,9 @@ fn webs(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str,
 }
 
 
+#[doc(hidden)]
+pub mod oracle;
+
 #[cfg(test)]
 mod tests {
     use super::*;

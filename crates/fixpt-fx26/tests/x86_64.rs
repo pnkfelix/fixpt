@@ -110,6 +110,54 @@ fn every_instruction_as_the_rust_encoder_makes_it() {
     }
     add("x86-cqo", vec![], x::cqo());
     add("x86-ret", vec![], x::ret());
+    // The native convention's (`native-direct-x64.fx`).
+    for d in 0..16u8 {
+        for disp in [0i32, -8, 300, -0x1234] {
+            add("x86-load-rip", vec![d as i64, disp as i64], x::load_rip(d, disp));
+            add("x86-lea-rip", vec![d as i64, disp as i64], x::lea_rip(d, disp));
+        }
+        add("x86-div", vec![d as i64], x::div(d));
+        add("x86-not", vec![d as i64], x::not(d));
+        add("x86-call-r", vec![d as i64], x::call_r(d));
+        for b in 0..16u8 {
+            for (ix, scale, disp) in [(-1i64, 1u8, 0i32), (-1, 1, -4), (-1, 1, 200), (0, 1, 0), (6, 8, -16), (12, 4, 4), (13, 2, 0)] {
+                let mem = if ix < 0 { m(b, disp) } else { mi(b, ix as u8, scale, disp) };
+                let a = |first: i64| vec![first, b as i64, ix, scale as i64, disp as i64];
+                let s = |last: i64| vec![b as i64, ix, scale as i64, disp as i64, last];
+                add("x86-store-ix", s(d as i64), x::store(mem, d));
+                add("x86-store32-ix", s(d as i64), x::store32(mem, d));
+                add("x86-store8-ix", s(d as i64), x::store8(mem, d));
+                add("x86-store16-ix", s(d as i64), x::store16(mem, d));
+                add("x86-load32s-ix", a(d as i64), x::load32s(d, mem));
+                add("x86-load8-ix", a(d as i64), x::load8(d, mem));
+                add("x86-load16-ix", a(d as i64), x::load16(d, mem));
+                if d == 0 {
+                    for imm in [0, 1, -1, 0x1234_5678] {
+                        add("x86-store-imm", s(imm as i64), x::store_imm(mem, imm));
+                    }
+                }
+            }
+        }
+    }
+    for xr in 0..16u8 {
+        for r in 0..16u8 {
+            add("x86-movq-to-xmm", vec![xr as i64, r as i64], x::movq_to_xmm(xr, r));
+            add("x86-movq-from-xmm", vec![r as i64, xr as i64], x::movq_from_xmm(r, xr));
+            add("x86-movd-to-xmm", vec![xr as i64, r as i64], x::movd_to_xmm(xr, r));
+            add("x86-movd-from-xmm", vec![r as i64, xr as i64], x::movd_from_xmm(r, xr));
+            add("x86-cvtsi2sd", vec![xr as i64, r as i64], x::cvtsi2sd(xr, r));
+            add("x86-cvttsd2si", vec![r as i64, xr as i64], x::cvttsd2si(r, xr));
+            for double in [false, true] {
+                add("x86-ucomis", vec![double as i64, xr as i64, r as i64], x::ucomis(double, xr, r));
+                for op in [x::Fop::Sqrt, x::Fop::Add, x::Fop::Mul, x::Fop::Sub, x::Fop::Div] {
+                    add("x86-fop", vec![double as i64, op as i64, xr as i64, r as i64], x::fop(double, op, xr, r));
+                }
+                for mode in 0..4u8 {
+                    add("x86-round", vec![double as i64, xr as i64, r as i64, mode as i64], x::round(double, xr, r, mode));
+                }
+            }
+        }
+    }
 
     for rel in [0i32, -5, 100, -0x8000_0000, 0x7fff_ffff] {
         add("x86-jmp", vec![rel as i64], x::jmp(rel));

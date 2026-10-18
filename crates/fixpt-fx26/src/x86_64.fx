@@ -203,4 +203,69 @@
           ((> n 9) (x86-nops-after (- n 9) (append acc (x86-nop 9))))
           (else (append acc (x86-nop n))))))
 (define x86-nops x86-op1 (lambda (n) (x86-nops-after n nil)))
+;;; ------------------------------------------------------------ the native convention's
+;;; What the native convention's compiler (`native-direct-x64.fx`) uses
+;;; besides: `rip`-relative operands, narrower and indexed memory, `div`,
+;;; `not`, `call` of a register, and scalar floating point (SSE). Flags of
+;;; one bit (`double`) are 1 or 0.
+
+;; `[rip + disp]` in ModRM's `rm`, `disp` from the instruction's end.
+(define x86-op-rip (subr x86-encodes (int x86-bytes int int) x86-bytes)
+  (lambda (w op field disp)
+    (append (x86-rex w field 0 0)
+            (append op (cons (+ (* 8 (x86-lo field)) 5) (x86-le 4 disp))))))
+(define x86-load-rip x86-op2 (lambda (d disp) (x86-op-rip 1 (x86-b1 139) d disp)))
+(define x86-lea-rip x86-op2 (lambda (d disp) (x86-op-rip 1 (x86-b1 141) d disp)))
+(define x86-store-ix x86-op5
+  (lambda (base index scale disp s) (x86-op-rm 1 (x86-b1 137) s base index scale disp)))
+;; `mov qword [mem], imm`, sign-extended.
+(define x86-store-imm x86-op5
+  (lambda (base index scale disp imm)
+    (append (x86-op-rm 1 (x86-b1 199) 0 base index scale disp) (x86-le 4 imm))))
+(define x86-store32-ix x86-op5
+  (lambda (base index scale disp s) (x86-op-rm 0 (x86-b1 137) s base index scale disp)))
+;; `movsxd d, dword [mem]`.
+(define x86-load32s-ix x86-op5
+  (lambda (d base index scale disp) (x86-op-rm 1 (x86-b1 99) d base index scale disp)))
+;; `movzx d, byte [mem]`, and of a word.
+(define x86-load8-ix x86-op5
+  (lambda (d base index scale disp) (x86-op-rm 0 (x86-b2 15 182) d base index scale disp)))
+(define x86-load16-ix x86-op5
+  (lambda (d base index scale disp) (x86-op-rm 0 (x86-b2 15 183) d base index scale disp)))
+;; `mov byte [mem], s8`: a REX prefix for `spl` … `dil` too.
+(define x86-store8-ix x86-op5
+  (lambda (base index scale disp s)
+    (let ((v (+ 64 (+ (* 4 (x86-hi s))
+                      (+ (* 2 (x86-hi (if (< index 0) 0 index))) (x86-hi base))))))
+      (append (if (or (not (= v 64)) (and (>= s 4) (< s 8))) (x86-b1 v) nil)
+              (cons 136 (x86-modrm-mem s base index scale disp))))))
+(define x86-store16-ix x86-op5
+  (lambda (base index scale disp s)
+    (cons 102 (x86-op-rm 0 (x86-b1 137) s base index scale disp))))
+(define x86-div x86-op1 (lambda (s) (x86-op-rr 1 (x86-b1 247) 6 s)))
+(define x86-not x86-op1 (lambda (d) (x86-op-rr 1 (x86-b1 247) 2 d)))
+(define x86-call-r x86-op1 (lambda (s) (x86-op-rr 0 (x86-b1 255) 2 s)))
+;; An SSE instruction on two registers: `prefix` (0 for none), REX, 0F and
+;; `op`, `field` in ModRM's `reg`, `rm` in its `rm`.
+(define x86-sse (subr x86-encodes (int int x86-bytes int int) x86-bytes)
+  (lambda (prefix w op field rm)
+    (append (if (= prefix 0) nil (x86-b1 prefix))
+            (append (x86-rex w field 0 rm)
+                    (cons 15 (append op (x86-b1 (+ (+ 192 (* 8 (x86-lo field))) (x86-lo rm)))))))))
+(define x86-movq-to-xmm x86-op2 (lambda (x r) (x86-sse 102 1 (x86-b1 110) x r)))
+(define x86-movq-from-xmm x86-op2 (lambda (r x) (x86-sse 102 1 (x86-b1 126) x r)))
+(define x86-movd-to-xmm x86-op2 (lambda (x r) (x86-sse 102 0 (x86-b1 110) x r)))
+(define x86-movd-from-xmm x86-op2 (lambda (r x) (x86-sse 102 0 (x86-b1 126) x r)))
+;; `{op}sd d, s` (`double`) or `{op}ss`; `op` sqrt 81, add 88, mul 89,
+;; sub 92, div 94.
+(define x86-fop x86-op4
+  (lambda (double op d s) (x86-sse (if (= double 1) 242 243) 0 (x86-b1 op) d s)))
+(define x86-ucomis x86-op3
+  (lambda (double a b) (x86-sse (if (= double 1) 102 0) 0 (x86-b1 46) a b)))
+(define x86-cvtsi2sd x86-op2 (lambda (x r) (x86-sse 242 1 (x86-b1 42) x r)))
+(define x86-cvttsd2si x86-op2 (lambda (r x) (x86-sse 242 1 (x86-b1 44) r x)))
+;; `roundsd d, s, mode` (`double`) or `roundss` (SSE4.1).
+(define x86-round x86-op4
+  (lambda (double d s mode)
+    (append (x86-sse 102 0 (x86-b2 58 (if (= double 1) 11 10)) d s) (x86-b1 mode))))
 ))

@@ -55,6 +55,10 @@ mod reps;
 mod declare;
 pub use declare::native_convention;
 mod x64;
+mod fx;
+pub use fx::{fx_abandon, FxCompile, FxEmitted, FxRequest};
+pub use x64::{fx26_direct_module, fx26_direct_module_sig, oracle as oracle_x64};
+pub use reps::oracle as reps_oracle;
 use reps::{Convert, RawOp, Rep};
 
 /// Whether the machine is x86_64's (`x64`): every other code is arm64's.
@@ -937,36 +941,44 @@ impl DirectMachine {
                 }
             }
         };
-        // Every bloblet first, then their fields, which refer to each other.
-        // Nothing here collects, so the values held do not move.
-        let blobs: Vec<Value> =
-            procs.iter().map(|p| heap.make_code_bloblet(const { fixpt_heap::layout::kind("bloblet") }, p.fields.len(), p.code.len(), false)).collect();
-        for (p, &blob) in procs.iter().zip(&blobs) {
-            for (k, f) in p.fields.iter().enumerate() {
-                let v = match f {
-                    Field::Myself => blob,
-                    Field::Code(q) => blobs[*q],
-                    Field::Const(v) | Field::Cell(v) => *v,
-                    Field::Closure(q, free) => native_closure(heap, blobs[*q], free),
-                };
-                heap.set_bloblet_slot(blob, k + 1, v);
-            }
-            let bytes = &p.code;
-            heap.set_bloblet_bytes(blob, 0, bytes).map_err(|e| format!("{e:?}"))?;
-            heap.flush_code(blob);
-            if crate::symbols::enabled() {
-                crate::symbols::note(heap.code_exec_address(blob), bytes.len(), &format!("native {}", p.name));
-            }
-        }
-        let entry = native_closure(heap, blobs[first], &free);
-        Ok(procs
-            .iter()
-            .zip(&blobs)
-            .enumerate()
-            .map(|(i, (p, &code))| (p.name.clone(), Compiled { code, len: p.len, arity: p.arity, closure: if i == first { entry } else { Value::FALSE } }))
-            .collect())
+        install(heap, &procs, first, &free)
     }
+}
 
+/// `procs`, compiled, each in a code bloblet of its own: what they are,
+/// the first (`first`) as a native closure over `free`.
+fn install(heap: &mut Heap, procs: &[Proc], first: usize, free: &[Value]) -> Result<Vec<(String, Compiled)>, String> {
+    // Every bloblet first, then their fields, which refer to each other.
+    // Nothing here collects, so the values held do not move.
+    let blobs: Vec<Value> =
+        procs.iter().map(|p| heap.make_code_bloblet(const { fixpt_heap::layout::kind("bloblet") }, p.fields.len(), p.code.len(), false)).collect();
+    for (p, &blob) in procs.iter().zip(&blobs) {
+        for (k, f) in p.fields.iter().enumerate() {
+            let v = match f {
+                Field::Myself => blob,
+                Field::Code(q) => blobs[*q],
+                Field::Const(v) | Field::Cell(v) => *v,
+                Field::Closure(q, free) => native_closure(heap, blobs[*q], free),
+            };
+            heap.set_bloblet_slot(blob, k + 1, v);
+        }
+        let bytes = &p.code;
+        heap.set_bloblet_bytes(blob, 0, bytes).map_err(|e| format!("{e:?}"))?;
+        heap.flush_code(blob);
+        if crate::symbols::enabled() {
+            crate::symbols::note(heap.code_exec_address(blob), bytes.len(), &format!("native {}", p.name));
+        }
+    }
+    let entry = native_closure(heap, blobs[first], free);
+    Ok(procs
+        .iter()
+        .zip(&blobs)
+        .enumerate()
+        .map(|(i, (p, &code))| (p.name.clone(), Compiled { code, len: p.len, arity: p.arity, closure: if i == first { entry } else { Value::FALSE } }))
+        .collect())
+}
+
+impl DirectMachine {
     /// A native closure, as what it runs: its code, all of it, and the
     /// closure; its arity is not recorded, so a call of it is not checked.
     pub fn compiled_of(heap: &Heap, closure: Value) -> Option<Compiled> {
