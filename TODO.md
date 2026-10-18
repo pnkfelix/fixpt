@@ -496,6 +496,10 @@ What was measured and found (2026-09-30), for when it is built:
 - **Stack depth.** A naive recursive `append` recurses as deep as the list
   is long; library procedures that build lists should use an accumulator
   and reverse, so that a long list cannot overflow the native stack.
+- **Sorting**, wanted by an editor (2026-10-18): `list-sort` and
+  `vector-sort`, stable, taking the order as a procedure; none exists.
+  The Larceny prototype (`~/Dev/Emacs/yank`) sorts in 48 places
+  (completions, buffer lists, the analysis's results).
 
 ## 23. What trailers cost fields-only bloblets: measure, someday (the user's, 2026-09-30)
 
@@ -779,6 +783,9 @@ Two parts, in both checkers (they must agree on what they print):
   it, an occasional copying pass from the session's roots, renumbering.
 
 Done first: the ids are checked (`DONE.md` §39).
+- **An editor makes this urgent** (2026-10-18): with user code run in the
+  editor's own session (§105), every `M-:` and `C-x C-e` grows the
+  arena, in a session meant to run all day.
 
 ## 40. A call graph from the code, not from names (the user's, 2026-10-06)
 
@@ -1608,6 +1615,10 @@ and so its entry, alive. That is what ephemerons are for (Hayes, OOPSLA
 - Then, if wanted: guardians (or argument-only cleanups, as Go's
   `AddCleanup`) for what no region owns, the poll an effect; and regions
   that own resources (custodians) with the async work (`async.md` §5).
+- **An editor needs it** (2026-10-18): a buffer's marks move with its
+  changes, so the buffer must reach them; one held only by the buffer
+  should die, or every mark a command makes and drops lives as long as
+  its buffer (the prototype keeps a list of them, and leaks so).
 
 ## 60. Type-family applications kept, unfolded on demand (the user's, 2026-10-08)
 
@@ -1792,6 +1803,8 @@ int false)`, or a `sumof`). What `number` is depends on §76; until then
 `string->int`, and `string->f64` beside it, are what can be typed. A
 candidate for §22's library written in FX-26, no Rust at all (the
 user's): digits to an `int` is a loop over `string-ref` and `*`/`+`.
+- **An editor needs `string->int`** (2026-10-18): `goto-line`'s line, a
+  prefix argument typed in the minibuffer, a number in a user's setting.
 
 ## 76. Scheme's numeric tower, perhaps by module functors (the user's, 2026-10-10)
 
@@ -2147,6 +2160,18 @@ the standard input. Left:
   sockets, signals (terminal modes and bytes from the standard input are
   built, `DONE.md` §95); each a new kind of `(io k)` under
   the same ordering rule.
+- **What an editor needs of them** (2026-10-18): subprocesses with pipes
+  whose output is read through `pselect` beside the keyboard (`M-x shell`,
+  `compile`, `grep`); and signals: `SIGWINCH` (the terminal resized,
+  redisplay at the new size) and `SIGTSTP`/`SIGCONT` (`C-z`, then the
+  terminal's modes set again).
+- **Files: what is missing** (2026-10-18): whether a file exists; its kind
+  (a directory?), size and modification time (a file changed on disk
+  since it was visited); rename (saving by writing a new file and
+  renaming it over the old); delete; the current directory. There are
+  `read-file`, `write-file` and `list-dir`.
+- **The environment** (2026-10-18): `getenv`, for `HOME` (the init file),
+  `TERM`, `SHELL`, `EDITOR`; a new `(io k)` kind, or `(io args)`'s.
 
 ## 86. Failure as proof debt (the user's, 2026-10-12)
 
@@ -2251,6 +2276,9 @@ instantiation are written today; or syntax for `handle` and
 `with-handler`, if that proves the better way); condition types grown as
 programs need them; the front end's `k-sfail` moved onto it; a panic
 caught at a task's boundary, once there are tasks.
+- **An editor needs `condition-case`** (2026-10-18): a command that fails
+  ends with its message in the echo area and the editor going on; §106
+  is the rest of that.
 
 ## 91. Each native stack frame a bloblet (the user's, 2026-10-12)
 
@@ -2482,3 +2510,85 @@ user):
   moves the field's value (as `fixpt-native/tests/code_exec.rs` does from
   Rust), run on every machine; the no-native-code branch run by a switch
   that turns native code off.
+
+## 105. A program's own code at run time: the editor as the session (the user's editor, 2026-10-18)
+
+The user is writing an Emacs-like editor in FX-26, extended in FX-26;
+its prototype, in Larceny Scheme, is `~/Dev/Emacs/yank`. Its extension
+is `eval` in Larceny's interaction environment: the init file, `M-:`,
+`C-x C-e`, and `define-command` at run time, all seeing the editor's own
+definitions. A running FX-26 program has nothing like it: no procedure
+that reads, checks, compiles and runs new code against the program's
+globals and types. Two ways, to decide with the user:
+- **(a) The editor is the session** (recommended): as Emacs is an image,
+  the program asks the session that runs it to take a form, which is
+  checked, compiled and run as a REPL form is, with redefinition's
+  rules (`docs/fx26.md`, "Redefinition"), and gets back its value or its
+  failure. Wanted: that request (an `(io session)` effect, perhaps), and
+  a say in which of the editor's globals user code sees.
+- **(b) The front end as a library in the program**: it is FX-26
+  modules already (`reader.fx`, `conductor.fx`) and §97 runs made code;
+  the hard part is the code checked against the program's own globals
+  and types, which rebuilds (a) by hand.
+Either way, the type user code is checked against: a command's effect
+fixed (an editor effect beside `(io terminal)`), so hooks and keymaps
+are lists and tables of procedures of one type. §39's arena growth
+matters more once this exists.
+
+## 106. A failing command, and `C-g` (the user's editor, 2026-10-18)
+
+An editor goes on when a command fails, and stops a command on `C-g`.
+- **Failure**: `error` is a panic (§86), ending the run unless a
+  monitored task group catches it (`docs/fx26.md`, "Monitors"). Each
+  command run as such a task may be enough; to try, with a stack
+  overflow and the step limit failures caught the same way (both end a
+  run today). §89's conditions for what handles a failure in place.
+- **`C-g`**: a key arriving cancels the running command. `race` cancels
+  the branch that loses, so a race of the command and a wait for `C-g`
+  may say it; but the wait must not take the keys typed ahead, so it
+  needs a look at the input that leaves it there. To try.
+
+## 107. Unwind protection for programs (the user's editor, 2026-10-18)
+
+`dynamic-wind` is used inside the compiler (a region's exit, `lower.rs`)
+but no program can name it. An editor needs it: `save-excursion` and
+`save-window-excursion` put back point and the windows on any exit, and
+the terminal's modes must be put back on every way out of the editor,
+a panic included. The prototype uses it 19 times. Its interplay with
+one-shot and composable continuations is the design question (what the
+after thunk means when a continuation re-enters).
+
+## 108. Per-buffer settings, typed (the user's editor, 2026-10-18)
+
+An Emacs-like editor keeps settings by name, with a default and a value
+per buffer (`tab-width`, `fill-column`, a mode's own), and hooks as such
+settings holding lists of procedures; each has its own type. FX-26 has
+no type of every value. Proposed: a setting is a typed key, as a
+continuation mark's key is, `(define-setting tab-width int 8)` making a
+key of `int`, and a buffer's settings a table from keys to values whose
+lookups are typed by the key. Dynamic binding of settings (Emacs's `let`
+of a special variable; the prototype's `parameterize`, 15 places) is a
+mark with that key. To decide with the user against a type of every
+value taken apart by `typecase`.
+
+## 109. Text that changes: a buffer's characters, and building strings (the user's editor, 2026-10-18)
+
+FX-26's strings do not change (no `make-string`, `string-set!`,
+`string-copy!`), and there is no way to build one by pieces but a list.
+An editor's buffer is a gap buffer of characters, and its redisplay
+builds each frame's output in one buffer written once. Wanted:
+- A flat array of characters that changes (an `array` of `char` boxes
+  each one: a bloblet's suffix, or `u32` code points), with slices to a
+  string and a string copied in.
+- A string builder (the prototype's `open-output-string`, 19 places):
+  appends of characters and strings, then the string, or its UTF-8
+  bytes for `write-out`.
+
+## 110. Tables keyed by structure (the user's editor, 2026-10-18)
+
+There is `eqtable`, keyed by identity, and `string-hash`. An editor keys
+by strings (buffer names, file names, completion candidates) and by
+structured values (the prototype's analysis: addresses of several
+parts); the prototype makes 54 hashtables, equal- and string-keyed.
+Wanted: a table keyed by equality, its hash and equality derived from
+the key's type (`docs/research/polytypic.md`), or given.

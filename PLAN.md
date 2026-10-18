@@ -1,6 +1,6 @@
 # `fixpt` — a Rust Scheme engine with FX-87 and FX-91 front ends
 
-## At a glance (kept current; last updated 2026-10-17)
+## At a glance (kept current; last updated 2026-10-18)
 
 Where things stand. Below it is the plan as it grew, oldest first (the
 contents are at the end of this section); the details behind this summary
@@ -309,6 +309,15 @@ weighed with the other items, not ahead of them.
   for a key, and `(io terminal)`: raw mode, back, the size. Found on the
   way, and fixed (`DONE.md` §96): the evaluator written in FX-26 ran each
   definition again with each later form.
+- **An Emacs-like editor in FX-26** (the user's, 2026-10-18; its
+  prototype in Larceny, `~/Dev/Emacs/yank`): what the language lacks for
+  it, filed. To decide first, `TODO.md` §105: user code run in the
+  editor's own session (recommended) or the front end as a library in
+  it. Then §106, a failing command caught and `C-g`; §107, unwind
+  protection; §108, per-buffer settings by typed keys; §109, text that
+  changes and a string builder; §110, tables keyed by structure. Added
+  to §22 (sorting), §39, §59, §75, §84 (subprocesses, signals, files,
+  `getenv`) and §89.
 - **Benches taken on a busy machine** (the user's, 2026-10-16): done
   (2026-10-17, `DONE.md` §101), the four busy commits and the three
   borderline ones benched again, quiet: no change in time was real; a
