@@ -315,8 +315,9 @@ weighed with the other items, not ahead of them.
   editor's own session (recommended) or the front end as a library in
   it. Then §106, a failing command caught and `C-g`; §107, unwind
   protection; §108, per-buffer settings by typed keys; §109, text that
-  changes and a string builder; §110, tables keyed by structure. Added
-  to §22 (sorting), §39, §59, §75, §84 (subprocesses, signals, files,
+  changes and a string builder; §110, tables keyed by structure; §111,
+  optional parameters and `case-lambda`, not blocking. Added
+  to §22 (sorting), §59, §75, §84 (subprocesses, signals, files,
   `getenv`) and §89.
 - **Benches taken on a busy machine** (the user's, 2026-10-16): done
   (2026-10-17, `DONE.md` §101), the four busy commits and the three

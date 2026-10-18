@@ -783,9 +783,6 @@ Two parts, in both checkers (they must agree on what they print):
   it, an occasional copying pass from the session's roots, renumbering.
 
 Done first: the ids are checked (`DONE.md` §39).
-- **An editor makes this urgent** (2026-10-18): with user code run in the
-  editor's own session (§105), every `M-:` and `C-x C-e` grows the
-  arena, in a session meant to run all day.
 
 ## 40. A call graph from the code, not from names (the user's, 2026-10-06)
 
@@ -2532,8 +2529,7 @@ globals and types. Two ways, to decide with the user:
   and types, which rebuilds (a) by hand.
 Either way, the type user code is checked against: a command's effect
 fixed (an editor effect beside `(io terminal)`), so hooks and keymaps
-are lists and tables of procedures of one type. §39's arena growth
-matters more once this exists.
+are lists and tables of procedures of one type.
 
 ## 106. A failing command, and `C-g` (the user's editor, 2026-10-18)
 
@@ -2592,3 +2588,16 @@ structured values (the prototype's analysis: addresses of several
 parts); the prototype makes 54 hashtables, equal- and string-keyed.
 Wanted: a table keyed by equality, its hash and equality derived from
 the key's type (`docs/research/polytypic.md`), or given.
+
+## 111. Optional parameters and `case-lambda` (the user's editor, 2026-10-18)
+
+FX-26 has `vsubr` (any number of arguments of one type) and `apply` for
+it, but no optional parameters and no `case-lambda`. An Emacs-like API
+leans on them: commands taking a prefix argument or not, `insert` and
+`goto-char` with optional parts, helpers with defaults; the Larceny
+prototype uses `case-lambda` in 15 places. Its type is an intersection
+of `subr` types, §79's `overload`, but with each arm's own body, which
+§79 says the compilers would need; optional parameters could be the
+special case whose arms differ only in the defaults filled in. Not
+blocking: code can do without (separate names, every argument written),
+so after §105–110.
