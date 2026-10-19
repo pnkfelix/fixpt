@@ -1,9 +1,13 @@
 ;;; The types of `convention.fx`: a native convention as data a generator
 ;;; reads (`TODO.md` §97, `docs/research/declared-conventions.md`, step 6).
-;;; A register is its number, `x0` 0 to `x30` 30, `sp` 31; an offset in the
-;;; state is in bytes from the state's register; a frame's are from the
-;;; frame's register. A module file of no state, which `convention.fx`
-;;; loads, and so may its clients, to name the types.
+;;; A place is a register's number: arm64's `x0` 0 to `x30` 30, `sp` 31;
+;;; x86_64's as the hardware numbers them, `rax` 0 to `r15` 15 (`rsp` 4);
+;;; or, where a machine keeps it in the state, `cv-in-state` (4096) plus
+;;; the offset of the state's field; or -2, `pushed`, a return address on
+;;; the stack's top. An offset in the state is in bytes from the state's
+;;; register; a frame's are from the frame's register. A module file of no
+;;; state, which `convention.fx` loads, and so may its clients, to name the
+;;; types.
 
 ;; A text read: a name, an integer, or a list of them.
 (define-datatype cv-sx (cx-name string) (cx-int int) (cx-list (listof cv-sx acyclic)))
@@ -19,13 +23,14 @@
 (define-type cv-names (listof (productof (name string) (number int)) acyclic))
 (define-type cv-ints (listof int acyclic))
 (define-type cv-strs (listof string acyclic))
-;; Roles and their registers: a routine's inputs.
+;; Roles and their places: a routine's inputs.
 (define-type cv-regs (listof (productof (name string) (registers cv-ints)) acyclic))
 
 (define-type cv-registers
   (productof (arguments cv-ints) (rest-in int) (count int) (result int) (closure int)
              (link int) (frame int)
-             ;; Pinned: never changed by code, but fuel as `cv-fuel` says.
+             ;; Pinned (or in the state, x86_64's but `state`): never
+             ;; changed by code, but fuel as `cv-fuel` says.
              (state int) (fuel int) (stack-limit int) (code-distance int)))
 
 ;; A header's field: its first bit and its width.
@@ -57,21 +62,24 @@
   (productof (align int) (header int) (link int) (return int) (map int) (values-from int)
              (live-below int) (fields-above int) (stub int)))
 
-;; The state's fields that code reads or writes, by offset.
+;; The state's fields that code reads or writes, by offset; `reg4` is
+;; x86_64's REG4, REG5 … REG8 the four words after it, 0 where a machine
+;; has none (arm64, whose are registers).
 (define-type cv-state
   (productof (fuel int) (reserve int) (trap int) (pc int) (args int) (nargs int) (aux int)
              (callout int) (rust-sp int) (native-sp int) (fp int) (top int) (words int)
              (alloc-limit int) (code int) (clo int) (delta int) (code-lo int) (trap-stub int)
              (foreign int) (closure int) (cards int) (stack-limit int) (overflow int) (poll int)
-             (cons int) (bloblet int)))
+             (cons int) (bloblet int) (reg4 int)))
 
-;; A routine: its entry's offset in the state, called by `blr`; its inputs,
-;; each a role and its registers; its output's register, -1 for none; whether
-;; it may collect.
+;; A routine: its entry's offset in the state, called by `blr` (by `call`
+;; on x86_64); its inputs, each a role and its places; its output's place,
+;; -1 for none; whether it may collect.
 (define-type cv-routine
   (productof (entry int) (in cv-regs) (out int) (may-collect bool)))
-;; `overflow`, when `sp` is below the stack limit's register once a frame is
-;; made: its entry called with the return in `x30`, the code bloblet in
+;; `overflow`, when `sp` is below the stack's limit once a frame is made:
+;; its entry called with the return in `x30` (pushed, on x86_64), the code
+;; bloblet in
 ;; `code`, in `info` the arguments held (`held-width` bits from `held-at`),
 ;; whether the closure was read and whether the procedure is variadic (bits
 ;; `closure-read`, `variadic`). It keeps the registers in `keeps`.
@@ -84,8 +92,8 @@
   (productof (foreign cv-routine) (overflow cv-overflow) (poll cv-routine) (cons cv-routine)
              (bloblet cv-routine) (trap cv-trap)))
 
-;; Fuel: in `register`, less `subtract` on entry and on a back edge; at
-;; zero, a call of `poll`.
+;; Fuel: in the place `register`, less `subtract` on entry and on a back
+;; edge; below zero, a call of `poll`.
 (define-type cv-fuel (productof (register int) (subtract int)))
 ;; A store of a value marks `mark` at the card table (at `cards` in the
 ;; state) plus the address shifted right by `card-shift`.
@@ -95,6 +103,10 @@
   (productof (target string) (registers cv-registers) (values cv-values)
              (closures cv-closures) (code cv-code) (frames cv-frames) (state cv-state)
              (routines cv-routines) (fuel cv-fuel) (barrier cv-barrier)))
+
+;; How a convention names its places, as printed: x86_64's or arm64's
+;; registers, and the state's fields, each its name and offset.
+(define-type cv-nm (productof (x86 bool) (sn cv-names)))
 
 ;; A declaration read: the convention, or why not.
 (define-type cv-read (sumof (ok convention) (refused string)))

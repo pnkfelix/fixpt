@@ -103,6 +103,7 @@ version = "0.1.0"
 dependencies = [
  "fixpt-engine",
  "fixpt-heap",
+ "fixpt-memmgmt",
  "fixpt-runtime",
  "libc",
 ]

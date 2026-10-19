@@ -8,7 +8,9 @@ const FIXPT: &str = env!("CARGO_BIN_EXE_fixpt");
 
 /// One machine of each kind: the lowering's, the evaluator written in
 /// FX-26, a cellular interpreter, register code, and native code.
-const MACHINES: [&str; 5] = ["rs-scheme-vm", "fx-ast-eval", "fx-cells-rsinterp", "fx-regs-rsjit-cellcc", "fx-regs-rsjit-nativecc"];
+const ALL_MACHINES: [&str; 5] = ["rs-scheme-vm", "fx-ast-eval", "fx-cells-rsinterp", "fx-regs-rsjit-cellcc", "fx-regs-rsjit-nativecc"];
+/// The native convention's only where it runs.
+const MACHINES: &[&str] = if fixpt_native::NATIVE_CONVENTION_AVAILABLE { &ALL_MACHINES } else { ALL_MACHINES.split_at(4).0 };
 
 /// `program` run on `machine`: its status, standard output and error.
 fn run(machine: &str, program: &str) -> (Option<i32>, String, String) {

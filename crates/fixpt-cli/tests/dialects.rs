@@ -150,7 +150,16 @@ fn fx26_runs_cellular_on_each_machine() {
     // stencils only where this build found a nightly compiler.
     let src = "(letrec ((f (subr spin (int) int) (lambda (n) (if (< n 2) n (+ (f (- n 1)) (f (- n 2))))))) (f 15))";
     let stencils = !fixpt_native::stencil::opt_levels().is_empty();
-    for machine in ["rust", "native", "stencils"].into_iter().filter(|m| stencils || *m != "stencils") {
+    // Only the Rust one where the hand-encoded machine cannot run.
+    let native = fixpt_native::CELLULAR_AVAILABLE;
+    // FX-26's register code where it compiles some: x86_64.
+    let fx_registers = cfg!(target_arch = "x86_64");
+    for machine in ["rust", "native", "native-compiled", "registers", "stencils", "fx-registers"]
+        .into_iter()
+        .filter(|m| stencils || *m != "stencils")
+        .filter(|m| fx_registers || *m != "fx-registers")
+        .filter(|m| native || *m == "rust")
+    {
         let out = Command::new(FIXPT)
             .args(["--dialect", "fx26", "--fx26-run", "cellular", "--cellular-machine", machine, "eval", src])
             .output()
@@ -160,6 +169,13 @@ fn fx26_runs_cellular_on_each_machine() {
     }
     let out = Command::new(FIXPT).args(["--cellular-machine", "forth", "eval", "1"]).output().expect("fixpt runs");
     assert!(!out.status.success(), "an unknown machine is refused");
+    // Where no machine code runs (neither arm64 nor x86_64), a machine of
+    // it is refused.
+    if !fixpt_native::CELLULAR_AVAILABLE {
+        let out = Command::new(FIXPT).args(["--cellular-machine", "stencils", "eval", "1"]).output().expect("fixpt runs");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(out.status.code() == Some(2) && err.contains("arm64"), "a machine that cannot run here is refused: {err}");
+    }
 }
 
 #[test]
@@ -216,6 +232,7 @@ fn the_fx26_repl_disassembles_a_polymorphic_value_projected() {
 /// say otherwise, and `,native` shows a procedure's code in that convention
 /// and calls it; what it cannot compile yet it says.
 #[test]
+#[cfg_attr(not(target_arch = "aarch64"), ignore = "runs arm64 machine code")]
 fn the_fx26_repl_compiles_in_the_native_convention() {
     use std::io::Write as _;
     let mut child = Command::new(FIXPT)
@@ -449,8 +466,18 @@ fn on_every_machine(program: &str) -> Vec<(&'static [&'static str], String)> {
         &["--fx26-run", "cellular", "--cellular-machine", "registers"],
         &["--fx26-run", "cellular", "--calling-convention", "native"],
     ];
+    // Where no machine code runs, only the first two; where the native
+    // convention does not (x86_64), all but the last.
+    let here = if fixpt_native::NATIVE_CONVENTION_AVAILABLE {
+        machines.len()
+    } else if fixpt_native::CELLULAR_AVAILABLE {
+        machines.len() - 1
+    } else {
+        2
+    };
     let children: Vec<_> = machines
         .iter()
+        .take(here)
         .map(|m| {
             let mut child = Command::new(FIXPT)
                 .args(["--dialect", "fx26"])
@@ -507,6 +534,7 @@ fn the_fx26_repl_for_emacs_places_errors_where_forms_were_sent_from() {
 /// an int again, it runs again, and `h` sees it. In the native convention,
 /// so that both checkers defer.
 #[test]
+#[cfg_attr(not(target_arch = "aarch64"), ignore = "runs arm64 machine code")]
 fn the_fx26_repl_reruns_outdated_definitions_when_asked() {
     use std::io::Write as _;
     let mut child = Command::new(FIXPT)
@@ -537,6 +565,7 @@ fn the_fx26_repl_reruns_outdated_definitions_when_asked() {
 /// not fit 19 signed bits". Such a word is assembled again with long
 /// branches; native code too long is refused and runs as cellular code.
 #[test]
+#[cfg_attr(not(target_arch = "aarch64"), ignore = "runs arm64 machine code")]
 fn a_word_too_long_for_its_branches_runs() {
     let boyer = concat!(env!("CARGO_MANIFEST_DIR"), "/../../mllang-bench/fx/ocaml/boyer.fx");
     for convention in ["cellular", "native"] {
@@ -585,10 +614,20 @@ fn fx26_machines_by_name() {
         let out = child.wait_with_output().expect("finishes");
         String::from_utf8_lossy(&out.stdout).lines().find(|l| l.contains("Machine:")).unwrap_or("").to_string()
     };
-    assert!(banner(&["fx26"]).contains("Machine: fx-regs-rsjit-nativecc;"));
-    assert!(banner(&["--dialect", "fx26", "repl"]).contains("Machine: fx-regs-rsjit-nativecc;"));
-    assert!(banner(&["--dialect", "fx26", "--fx26-machine", "fast", "repl"]).contains("Machine: fx-regs-rsjit-nativecc;"));
-    assert!(banner(&["--dialect", "fx26", "--fx26-machine", "fx-cells-fxjit-cellcc", "repl"]).contains("Machine: fx-cells-fxjit-cellcc;"));
+    // Where arm64 code cannot run, the fastest that can.
+    let fast = if fixpt_native::AVAILABLE {
+        "Machine: fx-regs-rsjit-nativecc;"
+    } else if fixpt_native::CELLULAR_AVAILABLE {
+        "Machine: fx-regs-rsjit-cellcc;"
+    } else {
+        "Machine: fx-cells-rsinterp;"
+    };
+    assert!(banner(&["fx26"]).contains(fast));
+    assert!(banner(&["--dialect", "fx26", "repl"]).contains(fast));
+    assert!(banner(&["--dialect", "fx26", "--fx26-machine", "fast", "repl"]).contains(fast));
+    if fixpt_native::AVAILABLE {
+        assert!(banner(&["--dialect", "fx26", "--fx26-machine", "fx-cells-fxjit-cellcc", "repl"]).contains("Machine: fx-cells-fxjit-cellcc;"));
+    }
     assert!(banner(&["--dialect", "fx26", "--fx26-run", "cellular", "repl"]).contains("Machine: fx-cells-rsinterp;"));
     assert!(banner(&["--dialect", "fx26", "--fx26-run", "lower", "repl"]).contains("Machine: rs-scheme-vm;"));
     for args in [&["--fx26-machine", "nope", "eval", "1"][..], &["--fx26-machine", "fast", "--fx26-run", "lower", "eval", "1"]] {

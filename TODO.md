@@ -2403,6 +2403,11 @@ constants, both checkers comparing a program's with it
 (`programs/made-code/declared.fx`). And step 5: code that is not a leaf, with `poll` and `cons` routines
 (`programs/made-code/frames.fx`). And step 6: the declaration as data a
 generator reads (`fx26:convention.fx`, `programs/made-code/generated.fx`).
+And on x86_64 (kayak's request, 2026-10-18; CLAUDES_CHOICES.md "Code a
+program makes, on x86_64"): its own declaration, `native-x86_64.conv`,
+which `native-convention` gives there and both checkers compare with, and
+each program above twinned in `programs/made-code-x86_64/`, made by
+`fx26:x86_64.fx`.
 Left:
 - **Native code cannot call back the bytecode VM's procedures**: a
   primitive cannot run the VM again, so on `rs-scheme-vm` a made procedure
@@ -2601,3 +2606,86 @@ of `subr` types, §79's `overload`, but with each arm's own body, which
 special case whose arms differ only in the defaults filled in. Not
 blocking: code can do without (separate names, every argument written),
 so after §105–110.
+
+## 112. x86_64: what is left of the native back end (the user's, 2026-10-11)
+
+The user's: "a native backend for x86_64 Linux, to eventually be in FX26
+itself". Done (CLAUDES_CHOICES.md, the two x86_64 entries): the
+hand-encoded cellular machine (`cellular::x64`), the words Rust compiles
+into it, and the same compiled by FX-26 (`native-x64.fx` over
+`x86_64.fx`), each byte for byte against its oracle; the bootstrap
+reaches its fixpoint on all three. Left, in the order they would pay:
+
+1. ~~**Register code**~~ (done: `cellular::x64::regcode`, CLAUDES_CHOICES.md
+   "Register code on x86_64"; REG1–REG3 in registers, the rest in the
+   state; `fast` on x86_64 is now `fx-regs-rsjit-cellcc`). Left of it:
+   `ret` measured against `pop`/`jmp` for deep recursions, as arm64's
+   `br` was.
+2. ~~**The native convention**~~ (done: `direct/x64.rs`, CLAUDES_CHOICES.md
+   "The native convention on x86_64"; the same frames, so the Rust side is
+   shared). Left of it: whether `fast` should name it on x86_64, as on
+   arm64: it is the fastest there on all of `fixpt bench`'s programs but
+   `captures` (22 against register code's 18 ms, continuations), so `fast`
+   stays register code for now; and the native convention's `ret` against
+   arm64's `br` (CLAUDES_CHOICES.md, "Native profiling" 6), unmeasured.
+   Re-ported onto main's frames when rebased (2026-10-17, CLAUDES_CHOICES.md
+   "The x86_64 back end rebased onto main"). ~~Left of that: code a
+   program makes (§97) is arm64's, so on x86_64 `native-code?` is false~~
+   (done, kayak's request, 2026-10-18: `native-x86_64.conv`, the
+   programs of `programs/made-code-x86_64/`, CLAUDES_CHOICES.md "Code a
+   program makes, on x86_64").
+3. ~~**Stencils**~~ (done: CLAUDES_CHOICES.md "Stencils on x86_64"; the
+   routines in `preserve_none`, all eight arguments in registers;
+   branches checked in LLVM's assembly; 1.06–1.55 of the hand-encoded
+   machine, as on arm64).
+4. ~~**In FX-26**~~, as for arm64 (§81): register code and the native
+   convention. Register code is done (`native-x64-regs.fx`, CLAUDES_CHOICES.md
+   "Register code compiled by FX-26 on x86_64"; every register word of the
+   front end, about 4,000 of them, the same bytes as Rust's;
+   `fx-regs-fxjit-cellcc`). So is the native convention
+   (`native-direct-x64.fx` and the files beside it, CLAUDES_CHOICES.md
+   "The native convention compiled by FX-26 on x86_64";
+   `fx-regs-fxjit-nativecc`; every test program's procedures the same as
+   Rust's). Left of it: the driver (`compile`'s finding of procedures and
+   binding of globals) is still Rust's, as `syn.rs`'s is for register
+   code; and arm64's `direct.rs` has no FX-26 twin (§81), though
+   `native-reps.fx` is of no machine's and would serve it.
+5. **Smaller:** a 32-bit jump that could be 8 (relaxation) would shrink
+   compiled words by about a fifth; `,disassemble-asm` for x86_64 shows
+   bytes with the disassembler's text, which knows only the forms the
+   encoder makes.
+
+## 113. A memory test of the x86_64 box (the user's, 2026-10-17)
+
+One `fixpt` run in about 8,000 fails on the x86_64 box (a Threadripper
+3990X), most likely a hardware fault, not `fixpt`'s. It was found as one
+failure of `modules.rs`'s `module_programs_run_alike_in_every_mode`,
+then hunted with `fixpt --fx26-run cellular eval load-input.fx` (in
+`crates/fixpt-fx26/tests/programs/modules`) run some 40,000 times. Each
+failure is a word that is right but for one high bit set:
+- three fixnum cells of a register word, which `assemble_register_word`
+  reads as 5 + 2^57, 5 + 2^54 and 17 + 2^57;
+- a code-space offset with bit 63 set, in `install_bytes`;
+- the first failure, a `char` that is no character, which fits a high
+  bit set in a byte of a Rust string.
+
+Why the hardware:
+- the one failure recorded by `rr record --chaos` does not replay: `rr`
+  says the replay diverged. All 25 passing recordings replayed;
+- nothing in the heap, the compilers or the code they make sets single
+  bits in a word's top bits;
+- address randomization is not needed: one failure in 5,000 runs came
+  with it off (`setarch -R`).
+
+Against it: bit 57 of a fixnum came twice. And every failure came while
+other work loaded the box (load averages 150 to 600, memory nearly full,
+swap in use).
+
+To do, with the box idle: MemTest86+ booted from USB, or `memtester`
+over most of its memory. See whether the memory runs at a factory
+overclock (XMP/EXPO). The kernel has no EDAC memory controller here
+(no `/sys/devices/system/edac/mc/mc0`), so corrected or single-bit
+errors are not logged. If the memory passes, the next step is in
+software: check a word's cells when the front end writes them, and
+again when `assemble_register_word` reads them, to see whether the bit
+is set at the write or after it.

@@ -8,7 +8,7 @@ use std::process::Command;
 const FIXPT: &str = env!("CARGO_BIN_EXE_fixpt");
 
 /// The machines, the stencils only where this build found a nightly
-/// compiler.
+/// compiler, the native convention only where it runs.
 fn machines() -> Vec<&'static str> {
     let stencils = !fixpt_native::stencil::opt_levels().is_empty();
     [
@@ -24,6 +24,7 @@ fn machines() -> Vec<&'static str> {
     ]
     .into_iter()
     .filter(|m| stencils || !m.contains("stencils"))
+    .filter(|m| fixpt_native::NATIVE_CONVENTION_AVAILABLE || !m.ends_with("nativecc"))
     .collect()
 }
 

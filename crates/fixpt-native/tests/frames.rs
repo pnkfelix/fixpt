@@ -2,6 +2,10 @@
 //! globals, the runtime's primitives) on every machine: the Rust one, the
 //! hand-encoded one, and the stencils at each level, the same results and
 //! traps.
+//!
+//! Only where the hand-encoded machine runs, arm64 or x86_64: every test
+//! here runs it.
+#![cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 #![allow(unsafe_code)]
 
 use fixpt_engine::cellular::{Machine, Trap, WordBuilder};

@@ -334,12 +334,60 @@
          ;; The assembler, of the encoders and the generated layouts.
          (native
           ((load-input "fx26:native.fx")
-           (load-input "fx26:arm64.fx") layout (load-module "fx26:native-layout.fx"))))
+           (load-input "fx26:arm64.fx") layout (load-module "fx26:native-layout.fx")))
+         ;; The same for x86_64.
+         (native-x64
+          ((load-input "fx26:native-x64.fx")
+           (load-input "fx26:x86_64.fx") layout (load-module "fx26:native-x64-layout.fx")))
+         ;; And register code to x86_64, over that assembler: its fast
+         ;; paths, then the rest.
+         (native-x64-regs-ops
+          ((load-input "fx26:native-x64-regs-ops.fx")
+           (load-input "fx26:x86_64.fx") layout (load-module "fx26:native-x64-layout.fx")
+           (load-module "fx26:native-x64-regs-layout.fx") native-x64))
+         (native-x64-regs
+          ((load-input "fx26:native-x64-regs.fx")
+           (load-input "fx26:x86_64.fx") layout (load-module "fx26:native-x64-layout.fx")
+           (load-module "fx26:native-x64-regs-layout.fx") native-x64 native-x64-regs-ops))
+         ;; The native convention's procedures to x86_64: what the
+         ;; convention is, the assembler, where raw values are kept, the
+         ;; pieces of raw values and of the heap, the procedure, its
+         ;; instructions, and the loop over them.
+         (native-direct-layout (load-module "fx26:native-direct-x64-layout.fx"))
+         (native-direct-asm
+          ((load-input "fx26:native-direct-x64-asm.fx")
+           (load-input "fx26:x86_64.fx") native-direct-layout))
+         (native-reps ((load-input "fx26:native-reps.fx") native-direct-layout layout))
+         (native-direct-raw
+          ((load-input "fx26:native-direct-x64-raw.fx")
+           (load-input "fx26:x86_64.fx") native-direct-layout native-direct-asm))
+         (native-direct-flat
+          ((load-input "fx26:native-direct-x64-flat.fx")
+           (load-input "fx26:x86_64.fx") native-direct-layout native-direct-asm native-direct-raw))
+         (native-direct-proc
+          ((load-input "fx26:native-direct-x64-proc.fx")
+           native-direct-layout layout native-direct-asm native-reps))
+         (native-direct-ops
+          ((load-input "fx26:native-direct-x64-ops.fx")
+           (load-input "fx26:x86_64.fx") native-direct-layout layout native-direct-asm native-reps
+           native-direct-raw native-direct-proc))
+         (native-direct-prims
+          ((load-input "fx26:native-direct-x64-prims.fx")
+           (load-input "fx26:x86_64.fx") native-direct-layout layout native-direct-asm native-reps
+           native-direct-raw native-direct-flat native-direct-proc))
+         (native-direct
+          ((load-input "fx26:native-direct-x64.fx")
+           (load-input "fx26:x86_64.fx") native-direct-layout layout native-direct-asm native-reps
+           native-direct-raw native-direct-proc native-direct-ops native-direct-prims)))
     ;; What Rust and `bootstrap.fx` call of them (`syn.rs`, `session.rs`).
     (product (run-checked (with eval-core run-checked))
              (run-checked-more (with eval-core run-checked-more))
              (run-program (with eval-core run-program))
              (native-assemble (with native native-assemble))
+             (native-assemble-x64 (with native-x64 native-assemble-x64))
+             (native-assemble-x64-regs (with native-x64-regs native-assemble-x64-regs))
+             (native-adapter-x64 (with native-x64-regs native-adapter-x64))
+             (native-compile-x64-proc (with native-direct native-compile-x64-proc))
              (compile-forget-globals! (with compile-programs compile-forget-globals!))
              (compile-keep-global! (with compile-programs compile-keep-global!))
              (compile-new-global (with compile-programs compile-new-global))
@@ -370,6 +418,10 @@
 (define run-checked-more (extract front-end-entries run-checked-more))
 (define run-program (extract front-end-entries run-program))
 (define native-assemble (extract front-end-entries native-assemble))
+(define native-assemble-x64 (extract front-end-entries native-assemble-x64))
+(define native-assemble-x64-regs (extract front-end-entries native-assemble-x64-regs))
+(define native-adapter-x64 (extract front-end-entries native-adapter-x64))
+(define native-compile-x64-proc (extract front-end-entries native-compile-x64-proc))
 (define compile-forget-globals! (extract front-end-entries compile-forget-globals!))
 (define compile-keep-global! (extract front-end-entries compile-keep-global!))
 (define compile-new-global (extract front-end-entries compile-new-global))

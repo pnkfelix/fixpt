@@ -7,12 +7,19 @@
 
 pub mod cmarks;
 
-/// fixpt's native convention, declared (`TODO.md` §97, `docs/research/
-/// declared-conventions.md`): its clauses, one to a line, canonical, as
-/// `fixpt_native::direct::native_convention` makes them (a test there
-/// says so). Both checkers compare a program's `define-convention` with
-/// it, and `native-convention` gives it to a program.
-pub const NATIVE_CONVENTION: &str = include_str!("native-arm64.conv");
+/// fixpt's native convention on the machine this is, declared (`TODO.md`
+/// §97, `docs/research/declared-conventions.md`): its clauses, one to a
+/// line, canonical, as `fixpt_native::direct::native_convention_of` makes
+/// them (a test there says so). Both checkers compare a program's
+/// `define-convention` with it, and `native-convention` gives it to a
+/// program: x86_64's on x86_64, arm64's everywhere else.
+#[cfg(target_arch = "x86_64")]
+pub const NATIVE_CONVENTION: &str = NATIVE_CONVENTION_X86_64;
+#[cfg(not(target_arch = "x86_64"))]
+pub const NATIVE_CONVENTION: &str = NATIVE_CONVENTION_ARM64;
+/// Each machine's, whichever this is.
+pub const NATIVE_CONVENTION_ARM64: &str = include_str!("native-arm64.conv");
+pub const NATIVE_CONVENTION_X86_64: &str = include_str!("native-x86_64.conv");
 
 pub mod crossing;
 pub mod disasm;

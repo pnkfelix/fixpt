@@ -14,6 +14,25 @@ See [`PLAN.md`](PLAN.md) for the design and the milestone list,
 [`docs/divergences.md`](docs/divergences.md) for every intentional difference
 from the references.
 
+## Platforms
+
+It builds and runs on macOS and Linux. The machines that run machine code
+(`fixpt-native`) make arm64 code, so they run on arm64, macOS or Linux, and
+x86_64 code, so they run on x86_64 Linux, every one. The x86_64 forms
+are `fixpt_native::cellular::x64` (the hand-encoded cellular machine, its
+compiled words, and register code), `native-x64.fx` (the words compiled
+by the compiler written in FX-26), `fixpt_native::direct::x64` (the
+native convention, `--calling-convention native`), and the stencils
+(`--cellular-machine stencils`), compiled for x86_64 by the build script
+in LLVM's `preserve_none` convention. The stencils need a nightly
+compiler on either machine; a build without one refuses them, saying
+why, and `fixpt bench` leaves their column out. `fast`, the default, names `fx-regs-rsjit-cellcc` there, register
+code, which runs the front end. Elsewhere
+FX-26 runs lowered, by the evaluator, or on the cellular machine written in
+Rust. The encoders' tests assemble with the system's `as`: on macOS for arm64,
+and with binutils on Linux (`aarch64-linux-gnu-as` for arm64 on another
+machine, `x86_64-linux-gnu-as` for x86_64).
+
 ## Reading a `fixpt bench` table
 
 Commit messages carry two tables from `fixpt bench`: how long FX-26
@@ -494,6 +513,8 @@ is its REPL. The older flags still work, and pick the same machines:
 | `fx-cells-rsjit-cellcc`             | `--cellular-machine native-compiled`                               | FX-26          | Rust (`assemble_word`) | the hand machine, as arm64      |
 | `fx-cells-fxjit-cellcc`             | `--cellular-machine fx-compiled`                                   | FX-26          | FX-26 (`native.fx`)    | the hand machine, as arm64      |
 | `fx-regs-rsjit-cellcc`              | `--cellular-machine registers`                                     | FX-26          | Rust (register code)   | the hand machine, as arm64      |
+| `fx-regs-fxjit-cellcc`              | `--cellular-machine fx-registers`                                  | FX-26          | FX-26 (`native-x64-regs.fx`) | the hand machine, as x86_64 only |
+| `fx-regs-fxjit-nativecc`            | `--cellular-machine registers --calling-convention fx-native`      | FX-26          | FX-26 (`native-direct-x64.fx`) | x86_64 only, the native convention |
 
 And the other commands:
 
@@ -504,8 +525,12 @@ And the other commands:
 | `fixpt check INPUT`                          | none           | none                   | both checkers, compared    |
 | `fixpt compile INPUT`                        | both, compared | none                   | nothing: the code is shown |
 
-There is no `fx-regs-fxjit-…`: register code to arm64 has no compiler
-written in FX-26 (TODO §81).
+On arm64 there is no `fx-regs-fxjit-…`: register code to arm64 has no
+compiler written in FX-26 (TODO §81). On x86_64 there are both:
+`fx-regs-fxjit-cellcc`, inside the cellular machine, and
+`fx-regs-fxjit-nativecc`, native procedures, FX all the way down to the
+machine code the REPL runs (Rust keeps finding what to compile and placing
+it, as for the others).
 
 The rest of the detail:
 

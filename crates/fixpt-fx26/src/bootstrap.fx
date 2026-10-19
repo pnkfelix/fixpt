@@ -51,4 +51,4 @@
 
 (product (1 bootstrap) (2 b-read) (3 parse-program) (4 check-program)
          (5 compile-program) (6 checked-extracts) (7 native-assemble) (8 compile-registers!)
-         (9 loaded-files!))
+         (9 loaded-files!) (10 native-assemble-x64))

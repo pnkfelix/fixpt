@@ -1490,11 +1490,19 @@ impl NativeMachine {
             self.compile_word(heap, word)?;
             return Ok(true);
         }
-        let (code, _) = assemble_register_word(heap, rw, [0, 0])?;
-        let (at, far) = self.reserve_collecting(heap, code.len())?;
-        let (code, resume) = assemble_register_word(heap, rw, far)?;
-        dump(heap, rw, at, &code);
-        self.install(heap, rw, at, &code, &resume)?;
+        let x86 = cfg!(target_arch = "x86_64");
+        if x86 {
+            let (code, resume) = super::x64::assemble_register_word(heap, rw)?;
+            let at = self.reserve_bytes_collecting(heap, code.len())?;
+            super::x64::dump(heap, rw, at, &code);
+            self.install_bytes(heap, rw, at, &code, &resume)?;
+        } else {
+            let (code, _) = assemble_register_word(heap, rw, [0, 0])?;
+            let (at, far) = self.reserve_collecting(heap, code.len())?;
+            let (code, resume) = assemble_register_word(heap, rw, far)?;
+            dump(heap, rw, at, &code);
+            self.install(heap, rw, at, &code, &resume)?;
+        }
         let slot = heap.bloblet_slot(rw, WORD_ENTRY).as_fixnum() as usize;
         let n = heap.bloblet_slot(rw, WORD_CELL0 + 1).as_fixnum() as usize;
         // Past `REGS` arguments stack code runs the word as stack code:
@@ -1503,12 +1511,18 @@ impl NativeMachine {
             self.compile_word(heap, word)?;
             return Ok(true);
         }
-        let adapter = assemble_adapter(n, slot);
-        let (at, _) = self.reserve_collecting(heap, adapter.len())?;
         let cells = heap.bloblet_head(word).fields + 1 - WORD_CELL0;
         let mut starts = vec![-1i64; cells];
         starts[0] = 0;
-        self.install(heap, word, at, &adapter, &starts)?;
+        if x86 {
+            let adapter = super::x64::assemble_adapter(n, slot);
+            let at = self.reserve_bytes_collecting(heap, adapter.len())?;
+            self.install_bytes(heap, word, at, &adapter, &starts)?;
+        } else {
+            let adapter = assemble_adapter(n, slot);
+            let (at, _) = self.reserve_collecting(heap, adapter.len())?;
+            self.install(heap, word, at, &adapter, &starts)?;
+        }
         Ok(true)
     }
 }

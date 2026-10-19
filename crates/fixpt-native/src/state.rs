@@ -79,4 +79,15 @@ pub struct State {
     /// (`NativeMachine::run_in_runtime`); register code, whose polls are no
     /// cell boundaries, takes the next slice itself.
     pub reserve: u64,
+    /// x86_64's register code (`cellular::x64::regcode`) keeps `REG4`…`REG8`
+    /// here, by number: that machine has registers for only three.
+    pub regs: [u64; 9],
+    /// The machine stack pointer the x86_64 machine's entry left, to which
+    /// its exit returns: register code may leave with a link pushed.
+    pub machine_sp: u64,
+    /// The time slice (`fixpt_runtime::sched::slice`), which x86_64's
+    /// register code reads as it takes its next one, rather than having
+    /// it as a constant, so that the compiler written in FX-26 makes the
+    /// same code whatever `FIXPT_SLICE` says.
+    pub slice: u64,
 }

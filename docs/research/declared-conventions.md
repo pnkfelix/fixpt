@@ -188,7 +188,9 @@ fixpt's declaration is generated from the implementation's own tables
 `offset_of!`; `direct.rs`'s registers, frame constants and routines; the
 card shift), as `standard.fx` is generated from `lower.rs`'s table, into a
 file, `crates/fixpt-runtime/src/native-arm64.conv` (one clause to a line,
-canonical; `fixpt_runtime::NATIVE_CONVENTION`), and a test
+canonical; `fixpt_runtime::NATIVE_CONVENTION`; on x86_64,
+`native-x86_64.conv`, the same roles, its registers and places in the
+state x86_64's, 2026-10-18), and a test
 (`fixpt-native/tests/convention.rs`) compares the file with what the
 tables say now (`FIXPT_BLESS=1` to
 rewrite). Both checkers compare a program's declaration with it: the Rust

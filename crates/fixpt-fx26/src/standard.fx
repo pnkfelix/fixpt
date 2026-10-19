@@ -281,6 +281,7 @@
          (("make-icell") "%fx26-make-icell")
          (("icell-put!") "%fx26-icell-put!")
          (("tword-int?") "%tword-fixnum?")
+         (("tword-bits") "%tword-bits")
          (("wcell-bool") "%fx26-identity")
          (("wcell-char") "%fx26-identity")
          (("wcell-unit") "%fx26-unit-cell")

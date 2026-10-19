@@ -126,7 +126,7 @@ fn runs_as_lowered(gc_every: Option<u64>) {
                     comp.registers = true;
                     comp.program(&tops).expect("compiles")
                 });
-                sc.runtime_unrooted().run_word = Some(fixpt_native::cellular::run_word_registers);
+                sc.runtime_unrooted().run_word = Some(registers());
                 if let Some(n) = gc_every {
                     sc.set_gc_every(n);
                 }
@@ -170,7 +170,7 @@ fn run_in_registers_counting(program: &str, gc_every: Option<u64>) -> (String, u
             comp.registers = true;
             comp.program(&tops).expect("compiles")
         });
-        sc.runtime_unrooted().run_word = Some(fixpt_native::cellular::run_word_registers);
+        sc.runtime_unrooted().run_word = Some(registers());
         if let Some(n) = gc_every {
             sc.set_gc_every(n);
         }
@@ -532,4 +532,10 @@ fn constants_are_folded_behind_global_guards() {
     for want in ["global-guard flag written 1", "global-guard k written 1", "op2imm int-add 3", "global k"] {
         assert!(step.contains(want), "{want}:\n{step}");
     }
+}
+
+/// The machine that runs register code; where neither arm64 nor x86_64
+/// code can run, the Rust machine, running the same words' cells.
+fn registers() -> fixpt_runtime::RunWord {
+    if fixpt_native::CELLULAR_AVAILABLE { fixpt_native::cellular::run_word_registers } else { fixpt_engine::cellular::run_word }
 }

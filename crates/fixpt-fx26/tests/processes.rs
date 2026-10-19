@@ -80,6 +80,11 @@ fn run_native(rt: &mut fixpt_runtime::Runtime, closure: Value, fuel: u64) -> Nat
 /// A program run form by form in the native convention, as the REPL runs
 /// it: its last value, or the first error.
 fn native(text: &str) -> Result<String, String> {
+    // Where the native convention does not run, the program run lowered,
+    // which every way must agree with anyway.
+    if !fixpt_native::NATIVE_CONVENTION_AVAILABLE {
+        return lowered(text, None);
+    }
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     s.strategy = Strategy::Cellular;
     s.set_native_convention(true);

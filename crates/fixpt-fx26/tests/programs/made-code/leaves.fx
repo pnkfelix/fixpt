@@ -1,7 +1,14 @@
 ;;; Code a program makes and runs (`TODO.md` §97, `docs/research/
 ;;; declared-conventions.md`): a bloblet whose suffix is arm64 machine code,
 ;;; sealed into the code area, made a native procedure at a stated type.
-;;; Where this machine runs no native code, the answers it would give.
+;;; Where this machine runs no native code, or runs another machine's
+;;; (`made-code-x86_64/leaves.fx` is this on x86_64), the answers it would
+;;; give.
+
+;; Whether the code this makes runs here: native code, arm64's.
+(define here bool
+  (and (native-code?) (string=? (car (the (listof string @heap) (native-convention)))
+                                "(target arm64)")))
 
 ;; Instruction `w` at byte `at` of `b`'s suffix, little-endian.
 (define* put4 (subr (write @heap) ((bloblet (fields) @heap) int int) unit)
@@ -38,8 +45,8 @@
     (if (= n 0) (list-length acc) (churn (- n 1) (if (= (modulo n 1000) 0) nil (cons n acc))))))
 
 (native-code?)
-(if (native-code?) ((adder) 20 22) 42)
-(if (native-code?)
+(if here ((adder) 20 22) 42)
+(if here
     (let ((h (holder (cons 41 1))))
       (let ((read (the (subr (conv native) (read @heap) () (pairof int int @heap))
                        (native-procedure h))))

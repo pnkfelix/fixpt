@@ -98,13 +98,15 @@ use common::same_code;
 #[test]
 #[cfg_attr(not(optimized), ignore = "4 s in release, 7 minutes in debug: run with --release, or --ignored")]
 fn fixpoint() {
-    fixpoint_on(fixpt_native::cellular::run_word);
+    // Where no machine code runs, on the machine written in Rust.
+    fixpoint_on(if fixpt_native::CELLULAR_AVAILABLE { fixpt_native::cellular::run_word } else { fixpt_engine::cellular::run_word });
 }
 
 /// The same, with stage 2's words compiled to machine code (step 11a) as
 /// they run: it must make the same code.
 #[test]
-#[cfg_attr(not(optimized), ignore = "4 s in release, 7 minutes in debug: run with --release, or --ignored")]
+#[cfg_attr(all(not(optimized), any(target_arch = "aarch64", target_arch = "x86_64")), ignore = "4 s in release, 7 minutes in debug: run with --release, or --ignored")]
+#[cfg_attr(not(any(target_arch = "aarch64", target_arch = "x86_64")), ignore = "runs machine code")]
 fn fixpoint_with_words_compiled() {
     fixpoint_on(fixpt_native::cellular::run_word_compiled);
 }
@@ -118,7 +120,9 @@ fn fixpoint_as_register_code() {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     load_eager_reader(&mut s.scheme).expect("loads");
     s.scheme.engine.set_step_limit(None);
-    s.scheme.runtime_unrooted().run_word = Some(fixpt_native::cellular::run_word_registers);
+    // Where no machine code runs, register code on the machine written in Rust.
+    s.scheme.runtime_unrooted().run_word =
+        Some(if fixpt_native::CELLULAR_AVAILABLE { fixpt_native::cellular::run_word_registers } else { fixpt_engine::cellular::run_word });
     if let Some(n) = std::env::var("FIXPT_GC_EVERY").ok().and_then(|n| n.parse().ok()) {
         s.scheme.set_gc_every(n);
     }
@@ -473,7 +477,8 @@ fn probe_read() {
 /// compiled and running on the native machine: stage 2 runs on code that
 /// FX-26 made, placed by the Rust side and nothing more (step 11c).
 #[test]
-#[cfg_attr(not(optimized), ignore = "seconds in release, minutes in debug: run with --release, or --ignored")]
+#[cfg_attr(all(not(optimized), any(target_arch = "aarch64", target_arch = "x86_64")), ignore = "seconds in release, minutes in debug: run with --release, or --ignored")]
+#[cfg_attr(not(any(target_arch = "aarch64", target_arch = "x86_64")), ignore = "runs machine code")]
 fn fixpoint_with_words_compiled_by_fx26() {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     load_eager_reader(&mut s.scheme).expect("loads");
@@ -488,7 +493,9 @@ fn fixpoint_with_words_compiled_by_fx26() {
         let stage1 = fixpt_fx26::syn::compile_to_word(sc, FileId(0), &text, facts).expect("parses").expect("compiles");
         let none = sc.make(|_| Value::NULL);
         let pieces = sc.call_global("%run-word", &[stage1, none]).expect("the front end runs");
-        let assemble = sc.make(|m| { let p = m.get(pieces); m.heap().bloblet_slot(p, 8) });
+        // On x86_64, `native-x64.fx`'s compiler, the tenth of the pieces.
+        let x64 = cfg!(target_arch = "x86_64");
+        let assemble = sc.make(|m| { let p = m.get(pieces); m.heap().bloblet_slot(p, if x64 { 11 } else { 8 }) });
         lap("stage 1, run: the compiler to machine code, compiled");
         // Every word stage 1 reaches, rooted.
         let mut raw = Vec::new();
@@ -503,7 +510,7 @@ fn fixpoint_with_words_compiled_by_fx26() {
             let code = |sc: &mut fixpt_scheme::Session, far: [i64; 2]| {
                 sc.scope(|one| {
                     let (ft, fe) = (one.make(|_| Value::fixnum(far[0])), one.make(|_| Value::fixnum(far[1])));
-                    let args = one.call_global("list", &[*w, ft, fe]).expect("a list");
+                    let args = if x64 { one.call_global("list", &[*w]) } else { one.call_global("list", &[*w, ft, fe]) }.expect("a list");
                     let r = one.call_global("%run-word", &[assemble, args]).unwrap_or_else(|e| {
                         // Which word, and how large, for a failure to say.
                         let mut shown = String::new();
@@ -522,6 +529,22 @@ fn fixpoint_with_words_compiled_by_fx26() {
                     })
                 })
             };
+            if x64 {
+                let (bytes, starts) = code(sc, [0, 0]);
+                assert!(bytes.iter().all(|x| (0..256).contains(x)), "a byte that is not one");
+                let bytes: Vec<u8> = bytes.into_iter().map(|x| x as u8).collect();
+                instructions += bytes.len();
+                sc.make(|m| {
+                    let v = m.get(*w);
+                    fixpt_native::cellular::with_machine(|n| {
+                        let at = n.reserve_bytes(bytes.len())?;
+                        n.install_bytes(m.heap(), v, at, &bytes, &starts)
+                    })
+                    .expect("installs");
+                    Value::NULL
+                });
+                continue;
+            }
             // Once for the size, then for the place it goes.
             let (sized, _) = code(sc, [0, 0]);
             let (at, far) = fixpt_native::cellular::with_machine(|m| m.reserve(sized.len())).expect("room");
@@ -535,7 +558,7 @@ fn fixpoint_with_words_compiled_by_fx26() {
                 Value::NULL
             });
         }
-        lap(&format!("{} words, {instructions} instructions, compiled by FX-26 and placed", words.len()));
+        lap(&format!("{} words, {instructions} {}, compiled by FX-26 and placed", words.len(), if x64 { "bytes" } else { "instructions" }));
         let driver = sc.make(|m| { let p = m.get(pieces); m.heap().bloblet_slot(p, 2) });
         supply_loaded(sc, pieces, &text);
         let (std, prog) = (sc.make(|m| m.heap().make_string(&standard)), sc.make(|m| m.heap().make_string(&text)));

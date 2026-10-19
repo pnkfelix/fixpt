@@ -238,7 +238,10 @@ fn the_front_end_compiled_checks_alike() {
     let programs = ["run/recursion.fx", "sizes/solved-by-test.fx", "sizes/solved-negative.fx", "native/many-values.fx"];
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     s.front_end_compiled = true;
-    s.scheme.runtime_unrooted().front_end_run_word = Some(fixpt_native::cellular::run_word_registers);
+    // On the hand register machine; where no machine code runs, on the
+    // Rust one.
+    s.scheme.runtime_unrooted().front_end_run_word =
+        Some(if fixpt_native::CELLULAR_AVAILABLE { fixpt_native::cellular::run_word_registers } else { fixpt_engine::cellular::run_word });
     for p in programs {
         let text = std::fs::read_to_string(format!("{dir}/{p}")).unwrap();
         let compiled = canon(fx26_check_in(&mut s, &text).expect("parses"));
@@ -520,11 +523,20 @@ fn probe_file() {
 fn every_program_meant_to_run_checks() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
     let mut report = Vec::new();
-    for sub in ["run", "bench", "bidirectional", "native", "groups", "made-code"] {
+    // A program that declares the other machine's convention is refused
+    // here, at its `define-convention`, as it is meant to be.
+    let other = if cfg!(target_arch = "x86_64") { "(target arm64)" } else { "(target x86_64)" };
+    for sub in ["run", "bench", "bidirectional", "native", "groups", "made-code", "made-code-x86_64"] {
         let mut names: Vec<_> = std::fs::read_dir(format!("{dir}/{sub}")).unwrap().map(|e| e.unwrap().path()).collect();
         names.sort();
         for path in names {
             let program = std::fs::read_to_string(&path).unwrap();
+            if program.lines().any(|l| l.trim() == other) {
+                if !rust_check(&program).is_err_and(|(m, _, _)| m.contains("is not this implementation's")) {
+                    report.push(format!("{sub}/{}: declares {other}, and checks", path.file_name().unwrap().to_string_lossy()));
+                }
+                continue;
+            }
             if let Err((m, a, _)) = rust_check(&program) {
                 report.push(format!("{sub}/{}: at {a}: {m}", path.file_name().unwrap().to_string_lossy()));
             }
@@ -631,13 +643,17 @@ fn declared_conventions_alike() {
         f(&mut cs);
         cs
     };
-    refused(with(&|cs| cs[1] = cs[1].replace("(link x30)", "(link x29)")), "the `registers` clause is not this implementation's");
+    refused(with(&|cs| cs[1] = cs[1].replace("(lost-across-calls all-but-pinned)", "(lost-across-calls all)")), "the `registers` clause is not this implementation's");
     refused(with(&|cs| cs.retain(|c| !c.starts_with("(barrier"))), "no `barrier` clause, which this implementation's convention has");
     refused(with(&|cs| cs.push("(colour blue)".into())), "has no `colour` clause");
     refused(with(&|cs| cs.push("(target arm64)".into())), "two `target` clauses");
     refused(with(&|cs| cs[0] = "(target \"arm64\")".into()), "holds names, integers and lists");
     refused(with(&|cs| cs[0] = "(target #t)".into()), "holds names, integers and lists");
     refused(with(&|cs| cs[0] = "target".into()), "a convention's clause is `(role …)`");
+    // The other machine's declaration: its first clause by role that
+    // differs, `code`'s (where the code distance is).
+    let other = if cfg!(target_arch = "x86_64") { fixpt_runtime::NATIVE_CONVENTION_ARM64 } else { fixpt_runtime::NATIVE_CONVENTION_X86_64 };
+    refused(other.lines().map(String::from).collect(), "the `code` clause is not this implementation's");
 }
 
 /// `native-procedure` (`TODO.md` §97) makes a native closure: its stated

@@ -227,13 +227,18 @@ pub fn cell_words_reachable(heap: &fixpt_heap::Heap, word: Value) -> Vec<Value> 
 }
 
 /// Every word made of cells that `word` reaches
-/// ([`cell_words_reachable`]), compiled to machine code by the compiler
-/// written in FX-26 (`native.fx`'s `native-assemble`) and given to `place`
-/// with the heap: its instructions, and where each cell's start.
+/// ([`cell_words_reachable`]), compiled to machine code for the machine
+/// this runs on by the compiler written in FX-26 (`native.fx`'s
+/// `native-assemble` for arm64, `native-x64.fx`'s `native-assemble-x64`
+/// for x86_64) and given to `place` with the heap: its bytes, and where
+/// each cell's code starts in them. On x86_64, a word with register code
+/// (its twin, `layout::regcode`) has that compiled instead
+/// (`native-x64-regs.fx`), and its entry is the adapter into it, as
+/// `fixpt_native`'s `compile_register_word` does them.
 pub fn assemble_reachable_by_fx26(
     s: &mut Session,
     word: Handle,
-    place: &mut dyn FnMut(&mut fixpt_heap::Heap, Value, &[u32], &[i64]) -> Result<(), String>,
+    place: &mut dyn FnMut(&mut fixpt_heap::Heap, Value, &[u8], &[i64]) -> Result<(), String>,
 ) -> Result<(), String> {
     // Found where nothing can collect, then rooted: running the compiler
     // may collect.
@@ -247,27 +252,109 @@ pub fn assemble_reachable_by_fx26(
     // The code reaches the machine's common trap and exit through the
     // state, so where it goes does not change it.
     let far = s.make(|_| Value::fixnum(0));
+    let x64 = cfg!(target_arch = "x86_64");
     for w in words {
-        let assembled = s.call_global(&format!("{READER_PREFIX}native-assemble"), &[w, far, far]);
+        if x64 && assemble_twin_by_fx26(s, w, place)? {
+            continue;
+        }
+        let assembled = if x64 {
+            s.call_global(&format!("{READER_PREFIX}native-assemble-x64"), &[w])
+        } else {
+            s.call_global(&format!("{READER_PREFIX}native-assemble"), &[w, far, far])
+        };
         let assembled = assembled.map_err(|e| e.to_string())?;
         let (code, starts) = s.view(|v| {
             let r = v.get(assembled);
-            let ints = |l: Option<Local>| -> Vec<i64> {
-                let l = l.and_then(|l| l.list()).unwrap_or_default();
-                l.iter().filter_map(|x| x.fixnum()).collect()
-            };
-            (ints(r.field(2)), ints(r.field(3)))
+            (ints_of(r.field(2)), ints_of(r.field(3)))
         });
-        let code: Vec<u32> = code.into_iter().map(|x| x as u32).collect();
-        let mut placed = Ok(());
-        s.make(|m| {
-            let w = m.get(w);
-            placed = place(m.heap(), w, &code, &starts);
-            Value::NULL
-        });
-        placed?;
+        // arm64's instructions are words of 4 bytes, little-endian.
+        let (code, starts): (Vec<u8>, Vec<i64>) = if x64 {
+            (code.into_iter().map(|x| x as u8).collect(), starts)
+        } else {
+            (code.into_iter().flat_map(|x| (x as u32).to_le_bytes()).collect(), starts.into_iter().map(|s| if s < 0 { s } else { 4 * s }).collect())
+        };
+        place_in(s, w, &code, &starts, place)?;
     }
     Ok(())
+}
+
+/// A list of ints, or none.
+fn ints_of(l: Option<Local>) -> Vec<i64> {
+    l.and_then(|l| l.list()).unwrap_or_default().iter().filter_map(|x| x.fixnum()).collect()
+}
+
+/// `code` given to `place` as word `w`'s, with where its cells start.
+fn place_in(
+    s: &mut Session,
+    w: Handle,
+    code: &[u8],
+    starts: &[i64],
+    place: &mut dyn FnMut(&mut fixpt_heap::Heap, Value, &[u8], &[i64]) -> Result<(), String>,
+) -> Result<(), String> {
+    let mut placed = Ok(());
+    s.make(|m| {
+        let w = m.get(w);
+        placed = place(m.heap(), w, code, starts);
+        Value::NULL
+    });
+    placed
+}
+
+/// Word `w`'s register code, if it has some not yet compiled, compiled
+/// to x86_64 by `native-x64-regs.fx` and placed, and the adapter into it
+/// as `w`'s entry: whether it was. Not a variadic procedure's, which is
+/// for native code, nor, past `REGS` arguments, the adapter, which would
+/// have to make a list of the rest: `w` stays stack code then.
+fn assemble_twin_by_fx26(
+    s: &mut Session,
+    w: Handle,
+    place: &mut dyn FnMut(&mut fixpt_heap::Heap, Value, &[u8], &[i64]) -> Result<(), String>,
+) -> Result<bool, String> {
+    use fixpt_heap::layout::cellular::{WORD_CELL0, WORD_ENTRY, WORD_TWIN};
+    let mut twin = None;
+    s.make(|m| {
+        let w = m.get(w);
+        let heap = m.heap();
+        let rw = heap.bloblet_slot(w, WORD_TWIN);
+        if heap.is_register_word(rw)
+            && heap.bloblet_slot(rw, WORD_ENTRY).as_fixnum() == 0
+            && heap.bloblet_slot(rw, WORD_CELL0).as_fixnum() as usize != const { fixpt_heap::layout::regcode::op("vargs") }
+        {
+            twin = Some(rw);
+        }
+        Value::NULL
+    });
+    let Some(rw) = twin else { return Ok(false) };
+    let rw = s.make(|_| rw);
+    let assembled = s.call_global(&format!("{READER_PREFIX}native-assemble-x64-regs"), &[rw]).map_err(|e| e.to_string())?;
+    let (code, resume, err) = s.view(|v| {
+        let r = v.get(assembled);
+        (ints_of(r.field(2)), ints_of(r.field(3)), r.field(4).and_then(|e| e.string()).unwrap_or_default())
+    });
+    if !err.is_empty() {
+        return Err(format!("register code: {err}"));
+    }
+    let code: Vec<u8> = code.into_iter().map(|x| x as u8).collect();
+    place_in(s, rw, &code, &resume, place)?;
+    let (mut slot, mut n, mut cells) = (0, 0, 0);
+    s.make(|m| {
+        let (rw, w) = (m.get(rw), m.get(w));
+        let heap = m.heap();
+        slot = heap.bloblet_slot(rw, WORD_ENTRY).as_fixnum();
+        n = heap.bloblet_slot(rw, WORD_CELL0 + 1).as_fixnum();
+        cells = heap.bloblet_head(w).fields + 1 - WORD_CELL0;
+        Value::NULL
+    });
+    if n as usize > fixpt_heap::layout::regcode::REGS {
+        return Ok(false);
+    }
+    let (n, slot) = (s.make(|_| Value::fixnum(n)), s.make(|_| Value::fixnum(slot)));
+    let adapter = s.call_global(&format!("{READER_PREFIX}native-adapter-x64"), &[n, slot]).map_err(|e| e.to_string())?;
+    let adapter: Vec<u8> = s.view(|v| ints_of(Some(v.get(adapter)))).into_iter().map(|x| x as u8).collect();
+    let mut starts = vec![-1i64; cells];
+    starts[0] = 0;
+    place_in(s, w, &adapter, &starts, place)?;
+    Ok(true)
 }
 
 /// Check, compile and run `text`, a program whose last form names a global,
@@ -279,6 +366,7 @@ pub fn with_last_value<T>(
     standard: Option<Handle>,
     file: FileId,
     text: &str,
+    native: Option<crate::session::NativeFx>,
     f: impl FnOnce(&mut fixpt_runtime::Runtime, Value) -> T,
 ) -> R<Result<T, String>> {
     let fail = |m: String| FxError::at(Span::new(file, 0, 0), m);
@@ -302,6 +390,13 @@ pub fn with_last_value<T>(
         let v = match s.call_global("%run-word", &[word, no_args]) {
             Ok(v) => v,
             Err(e) => return Ok(Err(e.to_string())),
+        };
+        // Compiled to native code by the compiler written in FX-26, if it
+        // is to be (`Fx26Session::native_fx`): what declines is given as it
+        // is, the compiler having kept why for the runner.
+        let v = match native {
+            Some(compile) => compile(s, v).unwrap_or(v),
+            None => v,
         };
         let mut value = Value::NULL;
         s.make(|m| {

@@ -60,6 +60,9 @@ pub const ARM64_TYPES: &str = include_str!("arm64-types.fx");
 /// The types of `convention.fx`: a module file of no state (`TODO.md` §97).
 pub const CONVENTION_TYPES: &str = include_str!("convention-types.fx");
 
+/// The types of `x86_64.fx`: a module file of no state (`TODO.md` §68).
+pub const X86_64_TYPES: &str = include_str!("x86_64-types.fx");
+
 /// The types of `native.fx`: a module file of no state (`TODO.md` §68).
 pub const NATIVE_TYPES: &str = include_str!("native-types.fx");
 
@@ -478,6 +481,70 @@ pub const ARM64: &str = include_str!("arm64.fx");
 /// (`TODO.md` §97): a `load-input` file, its module of no state.
 pub const CONVENTION: &str = include_str!("convention.fx");
 
+/// The types of `native-x64.fx`, and the signature of what it is given of
+/// the x86_64 machine: a module file of no state (`TODO.md` §68).
+pub const NATIVE_X64_TYPES: &str = include_str!("native-x64-types.fx");
+
+/// Words compiled to x86_64 machine code, in FX-26: the x86_64 machine's
+/// `assemble_word`, over [`X86_64`], as [`NATIVE`] is for arm64.
+pub const NATIVE_X64: &str = include_str!("native-x64.fx");
+
+/// The x86_64 encoder written in FX-26, the Rust one its oracle, as
+/// [`ARM64`] is for arm64.
+pub const X86_64: &str = include_str!("x86_64.fx");
+
+/// What the compiler to x86_64 written in FX-26 knows of the x86_64
+/// machine, generated from it, as [`NATIVE_LAYOUT`] is for arm64.
+pub const NATIVE_X64_LAYOUT: &str = include_str!("native-x64-layout.fx");
+
+/// Register code compiled to x86_64 machine code, in FX-26: the x86_64
+/// machine's `assemble_register_word`, over [`NATIVE_X64`]'s assembler.
+pub const NATIVE_X64_REGS: &str = include_str!("native-x64-regs.fx");
+
+/// Its fast paths and what it does inline, and the helpers they share.
+pub const NATIVE_X64_REGS_OPS: &str = include_str!("native-x64-regs-ops.fx");
+
+/// What [`NATIVE_X64_REGS`] knows of the x86_64 machine's register code
+/// beyond [`NATIVE_X64_LAYOUT`], generated from it.
+pub const NATIVE_X64_REGS_LAYOUT: &str = include_str!("native-x64-regs-layout.fx");
+
+/// The native convention's procedures compiled to x86_64, in FX-26:
+/// `fixpt-native/src/direct/x64.rs`'s `procedure_x64`, in the files below,
+/// as [`NATIVE_X64_REGS`] is for register code. Their types, and the
+/// signatures of their modules as each other use them.
+pub const NATIVE_DIRECT_X64_TYPES: &str = include_str!("native-direct-x64-types.fx");
+
+/// What they know of the native convention on x86_64, generated from it,
+/// and its signature, generated beside it.
+pub const NATIVE_DIRECT_X64_LAYOUT: &str = include_str!("native-direct-x64-layout.fx");
+pub const NATIVE_DIRECT_X64_LAYOUT_TYPES: &str = include_str!("native-direct-x64-layout-types.fx");
+
+/// Their assembler, and the machine sequences they share.
+pub const NATIVE_DIRECT_X64_ASM: &str = include_str!("native-direct-x64-asm.fx");
+
+/// Where native code keeps raw values (`fixpt-native/src/direct/reps.rs`),
+/// in FX-26: the analysis, of no machine's.
+pub const NATIVE_REPS: &str = include_str!("native-reps.fx");
+
+/// Raw values, and the operations on them native code does in line.
+pub const NATIVE_DIRECT_X64_RAW: &str = include_str!("native-direct-x64-raw.fx");
+
+/// Flat arrays, suffix refs, bytevectors and shapes, in line.
+pub const NATIVE_DIRECT_X64_FLAT: &str = include_str!("native-direct-x64-flat.fx");
+
+/// The procedure being compiled: what Rust gave of it, its analysis, its
+/// fields and the version being made.
+pub const NATIVE_DIRECT_X64_PROC: &str = include_str!("native-direct-x64-proc.fx");
+
+/// Its instructions: moves, frames, globals, `int` operations, calls and
+/// branches; and primitives, control and call-outs.
+pub const NATIVE_DIRECT_X64_OPS: &str = include_str!("native-direct-x64-ops.fx");
+pub const NATIVE_DIRECT_X64_PRIMS: &str = include_str!("native-direct-x64-prims.fx");
+
+/// The loop over the instructions, what is placed after them, and the
+/// entry Rust calls.
+pub const NATIVE_DIRECT_X64: &str = include_str!("native-direct-x64.fx");
+
 /// What the compiler to machine code written in FX-26 knows of the
 /// hand-encoded machine, generated from it: a module file, which the
 /// conductor loads.
@@ -511,7 +578,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 145] = [
+pub const FRONT_END_MODULES: [(&str, &str); 164] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("eager-reader-states.fx", EAGER_READER_STATES),
     ("syn.fx", SYN),
@@ -543,6 +610,8 @@ pub const FRONT_END_MODULES: [(&str, &str); 145] = [
     ("native-types.fx", NATIVE_TYPES),
     ("arm64-types.fx", ARM64_TYPES),
     ("convention-types.fx", CONVENTION_TYPES),
+    ("x86_64-types.fx", X86_64_TYPES),
+    ("native-x64-types.fx", NATIVE_X64_TYPES),
     ("layout-types.fx", LAYOUT_TYPES),
     ("native-layout-types.fx", NATIVE_LAYOUT_TYPES),
     ("check-resolve-types.fx", CHECK_RESOLVE_TYPES),
@@ -569,6 +638,23 @@ pub const FRONT_END_MODULES: [(&str, &str); 145] = [
     ("native-layout.fx", NATIVE_LAYOUT),
     ("arm64.fx", ARM64),
     ("convention.fx", CONVENTION),
+    ("x86_64.fx", X86_64),
+    ("native-x64-layout.fx", NATIVE_X64_LAYOUT),
+    ("native-x64.fx", NATIVE_X64),
+    ("native-x64-regs-layout.fx", NATIVE_X64_REGS_LAYOUT),
+    ("native-direct-x64-types.fx", NATIVE_DIRECT_X64_TYPES),
+    ("native-direct-x64-layout.fx", NATIVE_DIRECT_X64_LAYOUT),
+    ("native-direct-x64-layout-types.fx", NATIVE_DIRECT_X64_LAYOUT_TYPES),
+    ("native-direct-x64-asm.fx", NATIVE_DIRECT_X64_ASM),
+    ("native-reps.fx", NATIVE_REPS),
+    ("native-direct-x64-raw.fx", NATIVE_DIRECT_X64_RAW),
+    ("native-direct-x64-flat.fx", NATIVE_DIRECT_X64_FLAT),
+    ("native-direct-x64-proc.fx", NATIVE_DIRECT_X64_PROC),
+    ("native-direct-x64-ops.fx", NATIVE_DIRECT_X64_OPS),
+    ("native-direct-x64-prims.fx", NATIVE_DIRECT_X64_PRIMS),
+    ("native-direct-x64.fx", NATIVE_DIRECT_X64),
+    ("native-x64-regs-ops.fx", NATIVE_X64_REGS_OPS),
+    ("native-x64-regs.fx", NATIVE_X64_REGS),
     ("native.fx", NATIVE),
     ("compile-twins-types.fx", COMPILE_TWINS_TYPES),
     ("compile-inline-types.fx", COMPILE_INLINE_TYPES),

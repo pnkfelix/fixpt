@@ -78,8 +78,9 @@ pub type RunWord = fn(&mut Runtime, Value, &[Value]) -> Result<Value, String>;
 
 /// Place `code`, a word's machine code, in a machine's code space, and make
 /// the word's entry name it; `starts[i]` is where cell `i`'s code starts,
-/// in instructions, or -1.
-pub type PlaceCode = fn(&mut Heap, Value, &[u32], &[i64]) -> Result<(), String>;
+/// in bytes, or -1. Bytes, since instructions are 4 bytes on arm64 and of
+/// any length on x86_64.
+pub type PlaceCode = fn(&mut Heap, Value, &[u8], &[i64]) -> Result<(), String>;
 
 /// Call native closure `closure` with `args`: its value, or how it left.
 /// Every value the caller holds must be rooted, since the call may collect.

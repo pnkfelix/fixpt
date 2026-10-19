@@ -1,18 +1,28 @@
 //! Code a program makes and runs (`TODO.md` §97, `docs/research/
-//! declared-conventions.md`), on each machine FX-26 runs on: arm64 machine
-//! code a program wrote into a bloblet, sealed into the code area and made
-//! a native procedure, called from every machine that runs native code; and
+//! declared-conventions.md`), on each machine FX-26 runs on: machine code a
+//! program wrote into a bloblet, sealed into the code area and made a
+//! native procedure, called from every machine that runs native code; and
 //! on the one that runs none (the evaluator written in FX-26), the program's
-//! own fallback (`programs/made-code/`).
+//! own fallback. arm64's programs are `programs/made-code/`, x86_64's
+//! `programs/made-code-x86_64/`, each the other's twin, to the convention
+//! of its machine (`native-arm64.conv`, `native-x86_64.conv`).
 
 use std::process::Command;
 
 const FIXPT: &str = env!("CARGO_BIN_EXE_fixpt");
 
+/// The programs' directory: this machine's twins.
+const DIR: &str = if cfg!(target_arch = "x86_64") { "made-code-x86_64" } else { "made-code" };
+/// The `target` clause of this machine's convention.
+const TARGET: &str = if cfg!(target_arch = "x86_64") { "\"(target x86_64)\"" } else { "\"(target arm64)\"" };
+
 /// The machines, the stencils only where this build found a nightly
-/// compiler; and whether each runs native code.
+/// compiler, and x86_64's own; and whether each runs the native code a
+/// program makes, which is arm64's or x86_64's: elsewhere none does, and
+/// each takes the program's fallback.
 fn machines() -> Vec<(&'static str, bool)> {
     let stencils = !fixpt_native::stencil::opt_levels().is_empty();
+    let x86 = cfg!(target_arch = "x86_64");
     [
         ("rs-scheme-vm", true),
         ("fx-ast-eval", false),
@@ -23,13 +33,18 @@ fn machines() -> Vec<(&'static str, bool)> {
         ("fx-cells-stencils-cellcc", true),
         ("fx-regs-rsjit-cellcc", true),
         ("fx-regs-rsjit-nativecc", true),
+        ("fx-regs-fxjit-cellcc", true),
+        ("fx-regs-fxjit-nativecc", true),
     ]
     .into_iter()
     .filter(|(m, _)| stencils || !m.contains("stencils"))
+    .filter(|(m, _)| fixpt_native::NATIVE_CONVENTION_AVAILABLE || !m.ends_with("nativecc"))
+    .filter(|(m, _)| x86 || !m.starts_with("fx-regs-fxjit"))
+    .map(|(m, native)| (m, native && fixpt_native::NATIVE_CONVENTION_AVAILABLE))
     .collect()
 }
 
-/// `fixpt --fx26-machine machine eval` of `programs/made-code/name`: the
+/// `fixpt --fx26-machine machine eval` of `programs/DIR/name`: the
 /// values of its last `n` forms, each as its line begins.
 fn values(machine: &str, name: &str, n: usize) -> Vec<String> {
     values_with(machine, name, n, &[])
@@ -37,7 +52,7 @@ fn values(machine: &str, name: &str, n: usize) -> Vec<String> {
 
 /// The same, with these variables in the environment.
 fn values_with(machine: &str, name: &str, n: usize, vars: &[(&str, &str)]) -> Vec<String> {
-    let path = format!("{}/../fixpt-fx26/tests/programs/made-code/{name}", env!("CARGO_MANIFEST_DIR"));
+    let path = format!("{}/../fixpt-fx26/tests/programs/{DIR}/{name}", env!("CARGO_MANIFEST_DIR"));
     let out = Command::new(FIXPT).args(["--fx26-machine", machine, "eval", &path]).envs(vars.iter().copied()).output().expect("fixpt runs");
     let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
     let lines: Vec<&str> = text.lines().collect();
@@ -63,7 +78,7 @@ fn leaves_made_and_run() {
 fn code_made_to_a_declared_convention() {
     let runs: Vec<_> = machines().into_iter().map(|(m, _)| (m, std::thread::spawn(move || values(m, "declared.fx", 2)))).collect();
     for (m, t) in runs {
-        assert_eq!(t.join().expect("ran"), ["\"(target arm64)\"", "42"], "{m}");
+        assert_eq!(t.join().expect("ran"), [TARGET, "42"], "{m}");
     }
 }
 
@@ -107,8 +122,8 @@ fn code_with_a_frame_made_and_run() {
 /// Code made by a generator that reads the convention as data
 /// (`programs/made-code/generated.fx`, `fx26:convention.fx`): `frames.fx`'s
 /// procedure, every register, offset, tag and routine's entry taken from
-/// the declaration read as a `convention`. It is word for word the code
-/// `frames.fx` writes out, and runs as that does.
+/// the declaration read as a `convention`. It is word for word (on x86_64,
+/// byte for byte) the code `frames.fx` writes out, and runs as that does.
 #[test]
 fn code_made_from_the_convention_read_as_data() {
     let runs: Vec<_> = machines().into_iter().map(|(m, _)| (m, std::thread::spawn(move || values(m, "generated.fx", 2)))).collect();
@@ -120,15 +135,22 @@ fn code_made_from_the_convention_read_as_data() {
         }
         assert_eq!(got, ["500000500000", "165055"], "{m}");
     }
-    let dir = format!("{}/../fixpt-fx26/tests/programs/made-code", env!("CARGO_MANIFEST_DIR"));
+    let dir = format!("{}/../fixpt-fx26/tests/programs/{DIR}", env!("CARGO_MANIFEST_DIR"));
     let frames = std::fs::read_to_string(format!("{dir}/frames.fx")).expect("reads");
-    let written: Vec<&str> = frames.lines().skip_while(|l| !l.trim_end().ends_with("(list")).skip(1)
-        .map_while(|l| l.split_whitespace().next().map(|w| w.trim_end_matches(')')).filter(|w| w.parse::<u32>().is_ok()))
+    // Each line's words (or bytes) before its comment, to the list's end.
+    let written: Vec<&str> = frames
+        .lines()
+        .skip_while(|l| !l.trim_end().ends_with("(list"))
+        .skip(1)
+        .map(|l| l.split(';').next().unwrap_or("").split_whitespace().map(|w| w.trim_end_matches(')')).filter(|w| w.parse::<u32>().is_ok()).collect::<Vec<_>>())
+        .take_while(|ws| !ws.is_empty())
+        .flatten()
         .collect();
-    assert_eq!(written.len(), 51);
+    assert_eq!(written.len(), if cfg!(target_arch = "x86_64") { 235 } else { 51 });
     let generated = std::fs::read_to_string(format!("{dir}/generated.fx")).expect("reads");
     let path = format!("{}/generated-words.fx", env!("CARGO_TARGET_TMPDIR"));
-    std::fs::write(&path, format!("{generated}\n(build-code conv)\n")).expect("writes");
+    let made = if cfg!(target_arch = "x86_64") { "(code-bytes conv)" } else { "(build-code conv)" };
+    std::fs::write(&path, format!("{generated}\n{made}\n")).expect("writes");
     let out = Command::new(FIXPT).args(["--fx26-machine", "fx-regs-rsjit-nativecc", "eval", &path]).output().expect("fixpt runs");
     let text = String::from_utf8_lossy(&out.stdout);
     let last = text.lines().last().unwrap_or("");
@@ -182,5 +204,26 @@ fn a_bloblet_made_by_the_routine() {
         let got = values_with(m, "allocated.fx", 4, &stress);
         assert_eq!(got[..2], want, "{m}, stressed");
         assert!(got[3].contains(refused), "{m}, stressed: {got:?}");
+    }
+}
+
+/// Both machines' declarations, read as data (`fx26:convention.fx`) on
+/// this one and printed back clause for clause: arm64's registers and
+/// x86_64's, and x86_64's places in the state (`(state reg4)`, `(state
+/// fuel)`, …) and its `pushed` return address.
+#[test]
+fn both_declarations_read_as_data() {
+    for target in ["arm64", "x86_64"] {
+        let conv = std::fs::read_to_string(format!("{}/../fixpt-runtime/src/native-{target}.conv", env!("CARGO_MANIFEST_DIR"))).expect("reads");
+        let lines: Vec<String> = conv.lines().map(|l| format!("{l:?}")).collect();
+        let program = format!(
+            "(define cv (load-input \"fx26:convention.fx\"))\n(define ts (listof string acyclic) (the (listof string acyclic) (list {})))\n(tagcase ((with cv cv-read-clauses) ts) (ok c (extract c target)) (refused w w))\n",
+            lines.join(" ")
+        );
+        let path = format!("{}/read-{target}.fx", env!("CARGO_TARGET_TMPDIR"));
+        std::fs::write(&path, program).expect("writes");
+        let out = Command::new(FIXPT).args(["--fx26-machine", "fx-cells-rsinterp", "eval", &path]).output().expect("fixpt runs");
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(text.lines().last().is_some_and(|l| l.starts_with(&format!("{target:?} :"))), "{target}: {text}{}", String::from_utf8_lossy(&out.stderr));
     }
 }

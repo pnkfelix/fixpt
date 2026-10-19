@@ -107,21 +107,29 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
         s.set_native_convention(true);
         s.native_runner = Some(run_native);
         s.native_compiler = Some(fixpt_native::direct::compile_closure);
+        // Each procedure's code made by the compiler written in FX-26.
+        if crate::NATIVE_BY_FX26.get().copied().unwrap_or(false) {
+            s.native_fx = Some(compile_by_fx26);
+            s.native_runner = Some(run_native_fx);
+        }
         // What the native convention's compiler starts from.
         s.register_code = true;
         s.scheme.runtime_unrooted().native_code = Some(fixpt_native::direct::code_text);
     }
     // Cellular code calls native code (what the native compiler did not
     // decline, or an adapter), and a conversion makes adapters.
-    s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
-    s.scheme.runtime_unrooted().adapt = Some(fixpt_native::direct::adapt);
+    if fixpt_native::NATIVE_CONVENTION_AVAILABLE {
+        s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
+        s.scheme.runtime_unrooted().adapt = Some(fixpt_native::direct::adapt);
+    }
     crate::apply_gc_policy(&mut s.scheme);
     if let Some(l) = crate::STEP_LIMIT.get() {
         s.set_step_limit(*l);
     }
     // The front end's checker and compilers as register code, on the hand
-    // register machine, whatever machine runs the program.
-    s.scheme.runtime_unrooted().front_end_run_word = Some(fixpt_native::cellular::run_word_registers);
+    // register machine, whatever machine runs the program. Where there is no
+    // native machine (not arm64), on the cellular machine written in Rust.
+    s.scheme.runtime_unrooted().front_end_run_word = Some(crate::register_machine());
     s.front_end_compiled = std::env::var_os("FIXPT_FRONT_END_LOWERED").is_none();
     if let Some(l) = crate::SPECULATION_STEP_LIMIT.get() {
         s.speculation_limit = *l;
@@ -1581,12 +1589,244 @@ fn listing(m: &fixpt_native::direct::DirectMachine, heap: &fixpt_heap::Heap, pro
     let mut out = String::new();
     for (i, (n, p)) in procs.iter().enumerate() {
         let n = if i == 0 { format!("{name} ({n})") } else { n.clone() };
-        out.push_str(&format!("; {n}, {} instructions:\n", p.len));
-        for (i, w) in m.instructions(heap, *p).iter().enumerate() {
-            out.push_str(&format!(";   {i:>4}  {}\n", fixpt_native::arm64::disasm::disassemble(*w, i as i64)));
+        let lines = m.lines(heap, *p);
+        out.push_str(&format!("; {n}, {} instructions:\n", lines.len()));
+        for l in lines {
+            out.push_str(&format!(";   {l}\n"));
         }
     }
     out
+}
+
+thread_local! {
+    /// Why the compiler written in FX-26 last declined a thunk
+    /// (`compile_by_fx26`), for its runner to say (`run_native_fx`).
+    static FX_DECLINED: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// A cellular closure compiled in the native convention, each procedure's
+/// code made by the compiler written in FX-26 (`native-direct-x64.fx`):
+/// `fixpt_native::direct`'s driver asks for each procedure
+/// (`DirectMachine::fx_next`), FX-26 makes its code
+/// (`native-compile-x64-proc`), and the driver takes it
+/// (`fx_emitted`) and places the lot (`fx_finish`). A native closure
+/// already (not an adapter) is itself. Why not, if not, kept for the
+/// runner too.
+///
+/// With `FIXPT_FX_NATIVE_ORACLE` set, each closure is compiled by the Rust
+/// compiler too, on a machine of its own that compiles all this one does
+/// (so that the call-outs are numbered alike), and the two compiles
+/// compared (`fixpt_native::direct::describe`): what differs is said on
+/// stderr, after `fx-native oracle:`.
+pub(crate) fn compile_by_fx26(s: &mut fixpt_scheme::Session, closure: fixpt_scheme::Handle) -> Result<fixpt_scheme::Handle, String> {
+    let oracle = std::env::var_os("FIXPT_FX_NATIVE_ORACLE").is_some();
+    let want = oracle.then(|| oracle_compile(s, closure));
+    let mut got = Vec::new();
+    let r = compile_by_fx26_in(s, closure, oracle.then_some(&mut got));
+    if let Some(want) = want {
+        let codes = fixpt_native::direct::with_machine(|m| m.callout_codes()).unwrap_or_default();
+        // Both described where they are now, a collection having moved
+        // what either refers to since.
+        let want = want.map(|(procs, wcodes)| (describe_held(s, &procs), wcodes));
+        let got = describe_held(s, &got);
+        match (&want, &r) {
+            (Ok((w, wcodes)), Ok(_)) => {
+                if let Some(k) = w.iter().zip(&got).position(|(a, b)| a != b).or((w.len() != got.len()).then(|| w.len().min(got.len()))) {
+                    eprintln!("fx-native oracle: procedure {k} differs:\n  Rust  {}\n  FX-26 {}", w.get(k).map_or("none", |x| x), got.get(k).map_or("none", |x| x));
+                } else if *wcodes != codes {
+                    eprintln!("fx-native oracle: the call-outs differ: Rust {wcodes:?}, FX-26 {codes:?}");
+                }
+            }
+            (Err(a), Err(b)) if a == b => {}
+            (Err(a), Err(b)) => eprintln!("fx-native oracle: both decline, Rust: {a}; FX-26: {b}"),
+            (Ok(_), Err(b)) => eprintln!("fx-native oracle: FX-26 declines what Rust compiles: {b}"),
+            (Err(a), Ok(_)) => eprintln!("fx-native oracle: FX-26 compiles what Rust declines: {a}"),
+        }
+    }
+    if let Err(why) = &r {
+        FX_DECLINED.with(|d| *d.borrow_mut() = Some(why.clone()));
+    }
+    r
+}
+
+/// A compile's procedures, held by handles while a collection may move
+/// them: each one's name, its code bloblet, how much is its own, and its
+/// closure (`#f` but for the first).
+type Held = Vec<(String, fixpt_scheme::Handle, usize, fixpt_scheme::Handle)>;
+
+fn hold(s: &mut fixpt_scheme::Session, procs: &[(String, fixpt_native::direct::Compiled)]) -> Held {
+    procs.iter().map(|(n, c)| (n.clone(), s.make(|_| c.code), c.len, s.make(|_| c.closure))).collect()
+}
+
+/// What `fixpt_native::direct::describe` says of held procedures.
+fn describe_held(s: &mut fixpt_scheme::Session, held: &Held) -> Vec<String> {
+    let mut out = Vec::new();
+    s.make(|m| {
+        let procs: Vec<(String, fixpt_native::direct::Compiled)> = held
+            .iter()
+            .map(|(n, code, len, closure)| (n.clone(), fixpt_native::direct::Compiled { code: m.get(*code), len: *len, arity: 0, closure: m.get(*closure) }))
+            .collect();
+        out = fixpt_native::direct::describe(m.heap(), &procs);
+        fixpt_heap::Value::NULL
+    });
+    out
+}
+
+thread_local! {
+    /// The oracle's machine (`compile_by_fx26`).
+    static ORACLE: std::cell::RefCell<Option<fixpt_native::direct::DirectMachine>> = const { std::cell::RefCell::new(None) };
+}
+
+/// `closure` compiled by the Rust compiler on the oracle's machine: its
+/// procedures, held, and the machine's call-outs after it.
+fn oracle_compile(s: &mut fixpt_scheme::Session, closure: fixpt_scheme::Handle) -> Result<(Held, Vec<i64>), String> {
+    let mut r = Err(String::new());
+    s.make(|m| {
+        let v = m.get(closure);
+        let heap = m.heap();
+        r = ORACLE.with(|o| {
+            let mut o = o.borrow_mut();
+            if o.is_none() {
+                *o = Some(fixpt_native::direct::DirectMachine::new()?);
+            }
+            let dm = o.as_mut().expect("made");
+            if fixpt_native::direct::DirectMachine::compiled_of(heap, v).is_some() && heap.adapted(v).is_none() {
+                return Ok((Vec::new(), dm.callout_codes()));
+            }
+            let procs = dm.compile(heap, v)?;
+            Ok((procs, dm.callout_codes()))
+        });
+        fixpt_heap::Value::NULL
+    });
+    r.map(|(procs, codes)| (hold(s, &procs), codes))
+}
+
+fn compile_by_fx26_in(s: &mut fixpt_scheme::Session, closure: fixpt_scheme::Handle, described: Option<&mut Held>) -> Result<fixpt_scheme::Handle, String> {
+    use fixpt_native::direct::{with_machine, DirectMachine, FxEmitted};
+    let mut begun = None;
+    let mut native = false;
+    s.make(|m| {
+        let v = m.get(closure);
+        let heap = m.heap();
+        if DirectMachine::compiled_of(heap, v).is_some() && heap.adapted(v).is_none() {
+            native = true;
+        } else {
+            begun = Some(with_machine(|dm| dm.fx_begin(heap, v)));
+        }
+        fixpt_heap::Value::NULL
+    });
+    if native {
+        return Ok(closure);
+    }
+    let mut c = begun.expect("begun").and_then(|r| r)?;
+    let abandon = |s: &mut fixpt_scheme::Session, c: fixpt_native::direct::FxCompile| {
+        s.make(|m| {
+            fixpt_native::direct::fx_abandon(m.heap(), c);
+            fixpt_heap::Value::NULL
+        });
+    };
+    loop {
+        let mut next = Ok(None);
+        s.make(|m| {
+            let heap = m.heap();
+            next = with_machine(|dm| dm.fx_next(heap, &mut c)).and_then(|r| r);
+            fixpt_heap::Value::NULL
+        });
+        let req = match next {
+            Ok(Some(r)) => r,
+            Ok(None) => break,
+            Err(why) => {
+                abandon(s, c);
+                return Err(why);
+            }
+        };
+        // What FX-26 is given: its name, its lists, and the messages.
+        let name = s.make(|m| m.heap().make_string(&req.name));
+        let lists = s.make(|m| {
+            let heap = m.heap();
+            let lists: Vec<fixpt_heap::Value> = [&req.head, &req.hi, &req.lo, &req.ids, &req.kind, &req.a, &req.b, &req.c_hi, &req.c_lo]
+                .iter()
+                .map(|l| {
+                    let items: Vec<fixpt_heap::Value> = l.iter().map(|&x| fixpt_heap::Value::fixnum(x)).collect();
+                    heap.list_from(&items)
+                })
+                .collect();
+            heap.list_from(&lists)
+        });
+        let errors = s.make(|m| {
+            let heap = m.heap();
+            let items: Vec<fixpt_heap::Value> = req.errors.iter().map(|e| heap.make_string(e)).collect();
+            heap.list_from(&items)
+        });
+        // FX-26 runs with collection allowed, the driver's values rooted.
+        s.make(|m| {
+            let heap = m.heap();
+            let _ = with_machine(|dm| dm.fx_park(heap, &mut c));
+            fixpt_heap::Value::NULL
+        });
+        let made = s.call_global(&format!("{}native-compile-x64-proc", fixpt_fx26::session::READER_PREFIX), &[name, lists, errors]);
+        s.make(|m| {
+            let heap = m.heap();
+            let _ = with_machine(|dm| dm.fx_unpark(heap, &mut c));
+            fixpt_heap::Value::NULL
+        });
+        let made = match made {
+            Ok(h) => h,
+            Err(e) => {
+                abandon(s, c);
+                return Err(format!("native-direct-x64.fx: {e}"));
+            }
+        };
+        let out = s.view(|v| {
+            let r = v.get(made);
+            let ints = |k: usize| r.field(k).and_then(|l| l.list()).unwrap_or_default().iter().filter_map(|x| x.fixnum()).collect::<Vec<i64>>();
+            // Product field `k` is the bloblet's `k + 1` (as `syn.rs` reads them).
+            FxEmitted {
+                code: ints(2).into_iter().map(|b| b as u8).collect(),
+                len: r.field(3).and_then(|l| l.fixnum()).unwrap_or(0) as usize,
+                fields: ints(4),
+                callouts: ints(5),
+                err: r.field(6).and_then(|e| e.string()).unwrap_or_default(),
+            }
+        });
+        let mut taken = Ok(());
+        s.make(|m| {
+            let heap = m.heap();
+            taken = with_machine(|dm| dm.fx_emitted(heap, &mut c, out)).and_then(|r| r);
+            fixpt_heap::Value::NULL
+        });
+        if let Err(why) = taken {
+            abandon(s, c);
+            return Err(why);
+        }
+    }
+    let mut finished = Err(String::new());
+    let h = s.make(|m| {
+        let heap = m.heap();
+        finished = with_machine(|dm| dm.fx_finish(heap, c)).and_then(|r| r);
+        match &finished {
+            Ok(procs) => procs[0].1.closure,
+            Err(_) => fixpt_heap::Value::FALSE,
+        }
+    });
+    if let (Some(d), Ok(procs)) = (described, &finished) {
+        *d = hold(s, procs);
+    }
+    finished.map(|_| h)
+}
+
+/// How `fx-regs-fxjit-nativecc` runs an expression: the thunk, compiled by
+/// FX-26 already (`compile_by_fx26`), run; one it declined, said so.
+fn run_native_fx(rt: &mut fixpt_runtime::Runtime, closure: fixpt_heap::Value, fuel: u64) -> fixpt_fx26::session::NativeRun {
+    use fixpt_fx26::session::NativeRun;
+    // Not compiled: a cellular closure, or an adapter of one (`nclosure`),
+    // which is a native closure that runs it as cellular code.
+    let compiled = fixpt_native::direct::DirectMachine::compiled_of(&rt.heap, closure).filter(|_| rt.heap.adapted(closure).is_none());
+    let Some(p) = compiled else {
+        let why = FX_DECLINED.with(|d| d.borrow_mut().take()).unwrap_or_else(|| "not compiled by native-direct-x64.fx".into());
+        return NativeRun::Declined(why);
+    };
+    fixpt_native::direct::with_machine(|m| NativeRun::Ran(m.call(rt, p, &[], fuel).map_err(|t| t.what))).unwrap_or_else(|e| NativeRun::Ran(Err(e)))
 }
 
 /// The session's runner for the native convention (`--calling-convention

@@ -595,3 +595,444 @@ than a word unless its name says so.
    - Not done, for the user: whether a failing `pure` call may be dropped
      (`rs-scheme-vm` drops `(error …)` when its value is unused; native
      code does not): TODO §85.
+
+## An x86_64 back end: the hand-encoded cellular machine first (2026-10-11)
+
+The user's: "work autonomously on a native backend for x86_64 Linux, to
+eventually be in FX26 itself".
+
+1. **The hand-encoded cellular machine first**, and the words Rust compiles
+   into it (`cellular::x64`: `generate`, `routine_body`, `assemble_word`),
+   over register code or the native convention: its only contract is
+   `State` and the `callout` hook, all control is already Rust's
+   (`control.rs`, `round_trip`), and the differential tests
+   (`tests/cellular.rs`, `frames.rs`, `code_gc.rs`) check it against the
+   Rust machine unchanged. `native.fx` compiles for this machine, so it is
+   also the one an FX-26 port follows.
+2. **A module beside the arm64 code, not a trait over both.** The arm64
+   routines are written in its idioms (post-increment loads, `stp`, `csel`,
+   `cbz`); a trait of ~60 operations would have meant rewriting upstream's
+   most-edited file. The x86_64 routines follow the arm64 ones in order and
+   in the names of their steps (`save`, `push_return`, `enter_cur`, …), so
+   a change to one is made to the other by reading them side by side.
+3. **No BASE register; the fuel in the state.** BASE is always 0 (values
+   are addresses); x86_64 has 15 registers to the 19 the arm64 machine
+   names, and `sub qword [st + fuel], 1` costs about what `subs` does.
+   Only `ST` (r15) must survive a call into Rust; the rest are saved and
+   loaded as on arm64.
+4. **`#t`/`#f` from the state** (`cmov` from `[st + tru]`), which already
+   held them, rather than 10-byte immediates.
+5. **Every branch to a label 32 bits**, and a jump to the next instruction
+   dropped when its label is bound: no `long_branches` retry, no
+   relaxation. Trap stubs go after the whole word, so each cell's code
+   falls into the next.
+6. **Code counted in bytes in `NativeMachine`**: `install_bytes` and
+   `reserve_bytes`, with `install` and `reserve` kept for arm64's `u32`s
+   (the FX-26 compiler's `place_code`, tests), so no caller changed.
+7. **Encodings checked as arm64's are**, against GNU `as`
+   (`tests/x86_64.rs`), each instruction assembled alone (a symbol per
+   line, so lengths come from `nm`), and the disassembler reading each back;
+   chosen to be the assembler's own encodings (the `rax` short forms, REX
+   only where needed), so that the test needs no exceptions.
+8. **What "available" means is split**: `AVAILABLE` stays "every machine
+   here" (arm64), and `CELLULAR_AVAILABLE` is the hand-encoded machine and
+   its compiled words (arm64 or x86_64). `DirectMachine::new` now refuses
+   off arm64 itself, since a code space can be made on x86_64.
+9. **`fast` on x86_64 is `fx-cells-rsjit-cellcc`**, the fastest there on
+   every program `fixpt bench` times (fib 254 → 27 ms against the Rust
+   interpreter, tak 87 → 10), and the front end runs on it too.
+
+## x86_64 in FX-26: `x86_64.fx` and `native-x64.fx` (2026-10-11)
+
+1. **The cellular compiler first**, as for arm64 (`native.fx`, step 11c):
+   `native-x64.fx` makes exactly the bytes `cellular::x64::assemble_word`
+   does, over `x86_64.fx`, which makes exactly `x86_64.rs`'s; each tested
+   against its Rust oracle (`tests/x86_64.rs`: 15 061 encodings;
+   `tests/native_x64.rs`: every word of the front end). Register code and
+   the native convention in FX-26 wait on TODO §81, as for arm64.
+2. **A file beside `native.fx`, not one over both instruction sets**, for
+   the reason the Rust machine is (above, item 2); and since `native.fx`
+   is upstream's and still moving. The two share `layout.fx` and the
+   generator of their layouts (`fx26_module_of`).
+3. **Both compilers in the front end**, the conductor applying each, and
+   Rust choosing by the machine it runs on (`syn::assemble_reachable_by_fx26`):
+   the front end cannot know which machine runs it, and one more module
+   costs it little beside the 135 it has.
+4. **A complete layout for x86_64** (`native-x64-layout.fx`, generated
+   with the arm64 one's shared part), not the arm64 one plus registers:
+   both define `n-ip` and the rest, and a module cannot include both.
+5. **`place_code` takes bytes** (`PlaceCode`, starts in bytes): arm64's
+   words become bytes where FX-26's ints are read (`syn.rs`), so
+   `place_word` serves both machines.
+6. **Lists of bytes, not ints of instructions**: each encoder gives its
+   instruction's bytes as a list (`x86-bytes`), made with `cons` at the
+   encoders' region; `(list …)` would make one at a region of its own.
+
+## Register code on x86_64 (2026-10-11)
+
+The user, asked which `REG`s should live in memory: "go right ahead"
+(to choose them from counts).
+
+1. **REG1–REG3 in registers, REG4–REG8 in the state** (`State::regs`).
+   `fixpt regcode-survey --front-end` now counts each `REG`'s uses as an
+   operand: of the front end's 129 801, REG1 has 61 289, REG2 48 724,
+   REG3 9 137, REG4 4 608, and REG5–REG8 fewer than 3 000 each, so three
+   in registers keep 92% of them there. Larceny's x86 back ends kept about
+   four. `RESULT` is `rax`, `REG0` stays `CLO`.
+2. **No pool pointer.** arm64 keeps `IP` at the word's last field because
+   its loads reach only 32 KB up; a 32-bit displacement from `CUR`
+   reaches every field, so `IP`'s register (`r14`) is a fourth scratch
+   register, beside `rcx`, `rdx` and `r11`, and the machine's other
+   registers keep their roles. That is what lets the code share the
+   hand-encoded machine's sequences (`save`, `load`, the return stack).
+3. **The link on the machine stack, at most one deep.** A call is a
+   `call`; `save` pops its return address into the frame's link slot
+   (where arm64 stores `x30`), `pop` pushes it back, and `return` is
+   `ret`; a leaf keeps it on the machine stack, and in `leaf_link` around
+   a call-out, as arm64 keeps `x30`. Return points are 8-aligned (no-ops
+   before the `call`) so a link in a frame reads as a fixnum, as on
+   arm64; the adapter pushes 0. The assembler checks that every path
+   agrees on where the link is, and refuses code where they do not.
+4. **The machine's exit restores `rsp`** from the state (`machine_sp`,
+   stored by its entry), so a trap or an exit with a link pushed leaves
+   cleanly.
+5. **`ret`, for now.** arm64 returns by `br`, since a deep recursion
+   overflows the return predictor (CLAUDES_CHOICES, "Native profiling").
+   On x86 `call` pushes onto the predictor anyway, so `ret` keeps calls
+   and returns paired; not yet measured against `pop`/`jmp`.
+6. **`fast` on x86_64 is register code** (`fx-regs-rsjit-cellcc`); the
+   front end runs on it (`register_machine`), and the bootstrap reaches
+   its fixpoint so. Against the compiled cellular words, in ms: fib 27.5 →
+   12.5, tak 10.0 → 3.6, loop 76.6 → 26.0, helpers 123.1 → 14.9,
+   lists-region 129.2 → 13.4, closures 123.4 → 29.7, captures 23.1 → 18.4.
+
+## The native convention on x86_64 (2026-10-11)
+
+The user: "Go for it" (TODO §112's next item, `direct.rs`).
+
+1. **A file of its own, `direct/x64.rs`, step for step**, as the cellular
+   machine's and register code's x86 forms are: the trampoline, the common
+   routines and `procedure`, each beside its arm64 original's name. The
+   Rust side (call-outs, the stack cache, continuations, stack maps,
+   `place`, `restore`) is shared unchanged, since the frames are laid out
+   alike. `direct.rs` now keeps code as bytes (`Proc::code`,
+   `Compiled::len`), and chooses by `X86`.
+2. **The same frame**: `[fp]` the link, `[fp + 8]` the return address,
+   `[fp + 16]` the map, slots from `[fp + 24]`, the same sizes. `save`
+   moves the return address `call` pushed (the frame's top word) to
+   `[fp + 8]`; `pop` pushes it back, so `return` is `ret` and a tail
+   call's callee finds it where a `call` leaves it; a leaf keeps it where
+   the `call` left it. Calls and returns stay paired for the return
+   predictor.
+3. **REG1–REG3 in registers, REG4–REG8 in the state**, as register code
+   has them (the same counts decide), and the eight scratch registers
+   named for arm64's (`X9`, `X11`–`X17`), so that each helper reads as its
+   original. Fuel, the stack's limit and code's run address, pinned on
+   arm64, are the state's (`sub qword [st + fuel], 1`; `cmp rsp, [st +
+   stack_limit]`; `add r9, [st + delta]`): x86 has the memory operands, and
+   not the registers.
+4. **A code bloblet's fields `rip`-relatively** (`mov r, [rip + d]`), as
+   arm64 reads them `pc`-relatively; every label a 32-bit displacement, so
+   no code is too long (arm64's `too_far` has no counterpart).
+5. **Raw `f64`s in `xmm0`/`xmm1`**, `ucomisd` read so that a NaN compares
+   false as arm64's `fcmp` conditions do (`<` and `<=` the other way
+   round, `=` without parity); rounding by SSE4.1's `roundsd` (a procedure
+   that rounds declines on a processor without it); `abs` and `neg` on the
+   bits. `i64::MIN / -1` is itself, as `sdiv` has it (`idiv` would fault).
+6. **Where a REG in the state meets a helper that uses every scratch
+   register** (a blobref's element, write or variant in `prim3imm`), the
+   primitive is called instead: arm64 never meets it, its REGs being
+   registers.
+
+## Stencils on x86_64 (2026-10-12)
+
+1. **The routines in LLVM's `preserve_none` convention** (`extern
+   "rust-preserve-none"`, nightly's `rust_preserve_none_cc`), not SysV's
+   C: C passes six integer arguments in registers, the routines take
+   eight, and keeps five registers for the caller, which every stencil
+   then pushes and pops. `preserve_none` passes all eight in registers
+   and keeps none: `-O2`'s `dup` is a load, a store and the inlined
+   dispatch. Rejected: two of the machine's registers moved into the
+   state (a load and store more in most routines, and the two machines'
+   sources would differ beyond a signature).
+2. **`st_start` stays C, and calls the first routine** where arm64's
+   `become`s it: its prologue keeps the host's registers, which no
+   routine keeps, and a routine that returns (a trap, the end) returns
+   through it, as on arm64 it returns to the host.
+3. **Branches checked in the assembly LLVM writes beside the object**
+   (`--emit obj=…,asm=…`), not in the bytes: an x86 instruction's length
+   needs a decoder of every form LLVM may use, and the assembly names each
+   branch's target, a label inside the stencil or an indirect one. The
+   relocation check is the same ELF reader's, for `EM_X86_64`.
+4. Measured (ms, `fixpt bench`): within 1.06–1.55 of the hand-encoded
+   machine (`fib` 52.7 against 36.7, 1.44; arm64's README has 21.8
+   against 16.1, 1.35), as on arm64 the cost of Rust's code for the same
+   routines.
+
+## Register code compiled by FX-26 on x86_64 (2026-10-12)
+
+1. **`native-x64-regs.fx`, a module of its own over `native-x64.fx`'s
+   assembler** (its bytes, labels, trap stubs and the machine sequences
+   the two share, through `native-x64-asm-sig`), not more of
+   `native-x64.fx`: that file would pass the thousand lines `fx_size`
+   allows, and the two compilers share the assembler as the Rust ones share
+   `Asm`. It is two files for the same reason: `native-x64-regs-ops.fx`, of
+   no state, its fast paths and what it does inline (`int_fast`,
+   `shape_test`, `bump_words`, `inline_op`) and the helpers they share;
+   `native-x64-regs.fx`, the rest, with the compile's state. Its steps are
+   `regcode.rs`'s, named `rg-` and the Rust name.
+2. **What it knows of the machine, generated**
+   (`native-x64-regs-layout.fx`, `fx26_regs_module`, kept so by
+   `tests/layout.rs`): its registers, the state's fields, each
+   instruction's operand count, the primitives register code names (by
+   number and by name), which never collect, and the kinds a shape test
+   takes. FX-26 compares primitives by name, as the Rust compiler does.
+3. **A primitive, `tword-bits`, and the `tword-…` ones taking register
+   words**: a constant operand goes in an instruction as its bits, which
+   only fixnums could be read as before.
+4. **Placed where `fx-compiled` places words** (`syn::assemble_reachable_by_fx26`):
+   a word with register code has it compiled by FX-26 and placed, and the
+   adapter into it, also FX-26's, as its entry, as `compile_register_word`
+   does; a variadic one, or one of more than `REGS` arguments, stays
+   stack code. The machine is `--cellular-machine fx-registers`,
+   `fx-regs-fxjit-cellcc`, x86_64 only (refused on arm64, which has no
+   FX-26 compiler of register code yet, §81).
+5. **Checked byte for byte** (`tests/native_x64.rs`): every register word
+   of the front end compiled with register code, 4,014 words and 18 MB,
+   the same bytes and resume points as `assemble_register_word`, and the
+   adapters for every count; every test program runs alike on the machine
+   (`tests/compiler.rs`). Where Rust returns an error, FX-26 notes the
+   first and returns it.
+
+## The x86_64 back end rebased onto main (2026-10-17)
+
+The user: "I suspect we need to rebase our branch atop main", then "lets
+move with steps 1 2" (step 1: each commit building, the native convention
+off on x86_64 until step 2 re-ports it; the push is the user's).
+
+1. **Our section of `TODO.md` renumbered §84 → §105**: main's §84 is I/O.
+   (Renumbered again on 2026-10-19 to §112, and the memory test §106 to
+   §113: main had filed its own §105–111 by then.)
+   Our fix of `knot-spin.fx` under the native convention dropped: main
+   fixed it its own way (`check-hold-breaks!`, `DONE.md` §90).
+2. **The x86_64 cellular machine, register code and their FX-26 ports
+   follow main's arm64 ones** (time slices, preemption, `TODO.md` §92,
+   §93, §97): the entry goes on from the state when `start` is 0; a word's
+   poll at its first cell, a call's before anything (detail 1); register
+   code takes its next slice in line, and its entry's and loops' polls may
+   leave the machine (detail 2), keeping the live registers on the data
+   stack (`regcode::liveness`, ported to FX-26 too); a leaf's link, on the
+   machine stack, which the machine's exit leaves, moves there with them;
+   a call of a native closure goes to the Rust machine's `call`; a
+   `lambda`'s routine may be `nclosure`. `ricell` is no longer done in
+   line: an I-cell is not two `#f` fields now (`TODO.md` §92).
+3. **The slice in the state (`State::slice`)**, which x86_64's register
+   code reads as it takes its next one, where arm64's moves it as a
+   constant: `FIXPT_SLICE` sets it at run time, and the compiler written in
+   FX-26 must make the same bytes as Rust's whatever it says.
+4. **`NATIVE_CONVENTION_AVAILABLE`**, the one gate for the native
+   convention on a machine (`DirectMachine::new`, the CLI's refusal,
+   `fixpt bench`, the tests); off on x86_64 until step 2.
+5. **Main's new tests on x86_64**: those of `io`, `one_shot`, `preempt` and
+   `processes` run the native convention where it runs (`processes`'s
+   `native` way, elsewhere, its lowered run); `made_code`'s that run the
+   arm64 code a program writes are arm64's (`ignore` elsewhere), the rest
+   expecting each program's fallback.
+6. **The native convention re-ported onto main's frames (step 2)**:
+   `direct/x64.rs` was `direct.rs` step for step as it was; main changed
+   the frames under it (`TODO.md` §91: a header word below the link, frames
+   as bloblets, raw `f64` slots after the values) and much besides. Ported
+   as before, step for step:
+   - **A frame's region is S bytes, as arm64's, and the word the `call`
+     pushed is its top one**: `push_frame_ret` pops the return address, takes
+     S, and stores it as the frame's second word; `pop_frame_ret` puts the
+     second word (which a restore may have made the underflow) back where it
+     was, for `ret` or a tail call's callee. Stubs' frames (32), control
+     frames (64) and polls' (208) the same.
+   - **A raw `f64` return's mark is an eight-byte `nop` whose displacement
+     nothing else emits** (`0f 1f 84 00 4f f6 4f f6`), and the jump after it
+     skipped: 13 bytes past the return address, where arm64's is 8.
+   - **A raw entry's length by the parameters' mask** (`raw_entry_skip`),
+     not by their count: unboxing REG1 to REG3 differs in length from REG4
+     to REG8, which are in the state.
+   - **A poll's frame holds REG4…REG8 too**, copied from the state and back,
+     so that a collection there sees and moves them.
+   - The polls, the common poll, cons and bloblet, the trap's `Failed`
+     call-out, calls by the callee's convention, `ncallcc` and `callone`,
+     `%fx26-adapted`, and main's new fast paths (`remainder`,
+     bytevectors, the 8-bit widths, `suffix-fits`, `blobref-length`).
+     Every test of `tests/direct.rs` passes on x86_64; the every-program
+     report runs 731 programs, 470 expressions as machine code, its only
+     differences 4 forms where the cellular machine runs out of stack or
+     steps and native code does not (`deep.fx`, `deep-control.fx`,
+     `quiet-boxes.fx`), as on arm64.
+   - **`native-code?` and `seal-code` say no off arm64**: the code a
+     program makes is arm64's (`programs/made-code/`), and the convention
+     `native-convention` declares is arm64's, so on x86_64 each program
+     takes its fallback rather than run arm64 bytes. (No longer: "Code a
+     program makes, on x86_64", 2026-10-18.)
+   - `fast` on x86_64 stays register code: the native convention is fastest
+     there on every program of `fixpt bench` but `captures` (42.8 ms
+     against 36.9), as before the rebase.
+
+## The native convention compiled by FX-26 on x86_64 (2026-10-18)
+
+The user: "Can you add x86_64 support for fx-regs-fxjit-native? You can
+make an appropriately named branch for it" (branch `x86_64-fxjit-nativecc`;
+TODO §112, item 4).
+
+1. **Rust keeps the driver, FX-26 makes each procedure's code**, as for
+   register code (`syn::assemble_reachable_by_fx26`): `compile`'s finding
+   of the procedures a closure reaches, the binding of their globals
+   (`global_value`), refusals, and the code bloblets (`install`) stay
+   Rust's; `procedure_x64` is FX-26's (`native-direct-x64.fx` and the files
+   beside it). The trampoline and common routines are the machine's, in
+   Rust, as the cellular machine's are.
+2. **The protocol** (`direct/fx.rs`): before each procedure the driver asks
+   what `procedure_x64` asks it as it goes (`prepare_x64`: the callees'
+   raw parameters, then, instruction by instruction, the procedure each
+   `const` of a word or closure, each `global` and each `lambda` names, and
+   the continuation procedure), in the same order, so that every procedure
+   has the same number; an error after the first code is noted at its
+   instruction, for FX-26 to stop there, its message as Rust's. FX-26 is
+   given the cells as integers (bits, and the number of each heap value
+   among them), and gives back bytes, the fields (by those numbers) and
+   the call-outs it numbered from the machine's count, those before a
+   failure too.
+3. **What FX-26 knows of the machine, generated**
+   (`native-direct-x64-layout.fx` and its signature, `fx26_direct_layout`):
+   registers, the state's fields, frames, traps, tags, kinds, the
+   call-outs' kinds, and the primitives, routines and instructions by
+   number. The encoder written in FX-26 gained what the native convention
+   uses (`rip`-relative, narrow and indexed memory, `div`, `not`, SSE),
+   each against the Rust encoder.
+4. **Seven files, each the Rust's step for step**: the assembler and shared
+   sequences (`-asm`), where raw values are kept (`native-reps.fx`, of no
+   machine's: `reps.rs`), raw values' pieces (`-raw`), the heap's fast
+   paths (`-flat`), the procedure's state and analysis (`-proc`), its
+   instructions (`-ops`, `-prims`) and the loop (`native-direct-x64.fx`).
+   The pieces were ported in parallel and each checked against its Rust
+   piece by name (`direct::oracle_x64`, `reps_oracle`; the tests
+   `native_direct_x64*.rs`, `native_reps.rs`); a conversion is
+   `128 kind + 8 r + rep` (64 collided at REG8).
+5. **Collection held off across a compile, but while FX-26 runs**: the
+   driver's values are unrooted; between procedures they are parked in one
+   heap list under one root (`fx_park`) and taken back where a collection
+   moved them (`fx_unpark`), what is keyed by bits made again. The heap's
+   roots are the session's handles too, so the root is cleared, not
+   popped. (Held off throughout, each allocation FX-26 made called in, and
+   its garbage stayed until the compile ended.)
+6. **The machine, `fx-regs-fxjit-nativecc`**: `--calling-convention
+   fx-native`, x86_64 only. The session's hook `native_fx`, the CLI's
+   `compile_by_fx26`, compiles the native runner's thunks and each global's
+   procedure; what it declines runs as cellular code, said so as under
+   Rust (an adapter, `nclosure`'s, is a decline: it runs cellular code).
+7. **Checked byte for byte**: with `FIXPT_FX_NATIVE_ORACLE`, every closure
+   is compiled by the Rust compiler too, on a machine of its own, and the
+   two described alike (`direct::describe`) after; `fixpt-cli`'s
+   `fx_native.rs` runs every test program (698) on both machines: the same
+   output, and no difference the oracle sees (a one-byte change in the
+   FX-26 code makes 504 differ). `tests/native_x64.rs` compares every
+   register word of the front end, each as a closure, its own procedure
+   only (`compile_each`, `fx_begin_each`): 4,892 procedures, 11.3 MB, the
+   same (77 refused by both).
+
+## Code a program makes, on x86_64 (2026-10-18)
+
+kayak's request: §97 (`seal-code`, `native-procedure`, `native-code?`,
+`native-convention`, `define-convention`) on x86_64 Linux. The machinery
+needed nothing new: x86_64's native convention (`direct/x64.rs`) already
+had a trampoline and every routine the declaration names (`foreign`,
+`overflow`, `poll`, `cons`, `bloblet` and the trap), and every machine
+there already called native closures. What was missing was the contract
+and the programs. `native-x86_64.conv` is the contract, generated like
+arm64's (`declare.rs`, from `x64.rs`'s constants and `DState`'s offsets),
+and the same test checks both files (`fixpt-native/tests/convention.rs`).
+`native-arm64.conv` is byte for byte what it was: no clause it shares
+had to change.
+
+1. **The same roles, in the same order, with x86_64's places.** Every
+   clause of arm64's is there, with the same sub-clauses where the
+   machine allows. `values`, `closures` and `barrier` are word for word
+   the same, and so is every `state` offset, because the state is the one
+   `DState`. Where they differ, the difference is the machine's.
+2. **Registers are `x64.rs`'s, by their names**: `result` rax, `closure`
+   rbx, `frame` rbp, `count` r10 (arm64's x9), state r15. Arguments are
+   rdi, rsi and r8, then `(state reg4)` … `(state reg8)`, because `x64.rs`
+   keeps REG4–REG8 in the state (`DState::regs`). For that, the `state`
+   clause gains `reg4`…`reg8` (616–648) after arm64's fields. `rest-in`
+   is `(state reg8)`. The overflow routine takes the code in r9 and the
+   info in r14, `x64.rs`'s X16 and X17. The made programs use r11, r9
+   and r14 as scratch.
+3. **Of the four registers arm64 pins, x86_64 pins only the state**
+   (r15). The fuel, the stack's limit and the code distance are words of
+   the state, `(state fuel)`, `(state stack-limit)` and `(state delta)`,
+   as `x64.rs` keeps them; `cellular/x64.rs` keeps fuel there too. x86_64
+   has no callee-saved register to spare for them. So
+   `(pinned (state r15) (fuel (state fuel)) …)`, `(code (runs-at reference
+   plus (state delta)) …)`, `(overflow (when rsp below (state
+   stack-limit) after-frame-made) …)`. The `fuel` clause says
+   `(fuel (state fuel) …)` where arm64's says `(register x28)`: a place,
+   not a register.
+4. **The return address is `pushed`**, on the stack's top as a routine
+   or procedure is entered, where arm64 has it in `x30`: `(link pushed)`.
+   Every routine is entered by `call [r15 + entry]`, and `overflow` says
+   `by call` where arm64's says `by x30`. A frame is made as
+   `push_frame_ret` makes one: the return popped into r11, `sub rsp`, the
+   link and return stored at `[rsp+8]` and `[rsp+16]`, `lea rbp,
+   [rsp+8]`. The `made` clause spells that out. The frame then reads as
+   arm64's (header `rbp -8`, link `rbp 0`, return `rbp 8`, map `rbp 16`,
+   values from `rbp 24`). It is undone in reverse, with the return pushed
+   back for `ret`. The trap's stub is entered by `jmp` with the site's
+   return address on the stack, as the machine's own code does; arm64's
+   declaration says nothing of how its trap is entered, so neither does
+   this one.
+5. **`target` is `x86_64`**, as `fx26:x86_64.fx` and the Rust target
+   name spell it, and the program's convention name is `x86_64-native`.
+6. **`native-convention` gives the declaration of the machine it runs
+   on** (`fixpt_runtime::NATIVE_CONVENTION`, chosen by `cfg`; both files
+   are also there by name). Both checkers compare with it, so a program
+   that declares the other machine's convention is refused at its
+   `define-convention`, on its first differing clause by role, `code`
+   (`tests/checker.rs`). `runs_made_code` is now true on x86_64 too,
+   wherever the machine calls native code.
+7. **The programs are twins**, in `programs/made-code-x86_64/`, rather
+   than one program per test picking its encoding from `target`. Five of
+   the seven declare their convention, and a declaration is checked
+   against the machine's before the program runs, so an arm64 program
+   with one cannot even check on x86_64. Twins keep arm64's programs
+   unchanged too. The two that declare nothing (`leaves.fx`,
+   `typed-calls.fx`) now test `target` (a `here` beside `native-code?`)
+   on both machines, because `native-code?` is true on both and neither
+   should run the other's bytes. `frames.fx`'s bytes are written one
+   instruction to a line, with the instruction beside them. They were made
+   by `generated.fx`, which reads the declaration and encodes with
+   `fx26:x86_64.fx`, and checked with `objdump`. The test says the two
+   agree byte for byte, as on arm64. x86_64's jumps are all rel32, so
+   the generators place the instructions in a first pass and make them
+   again with each displacement. The checker's sweep reads both
+   directories and expects the other machine's declared programs to be
+   refused. `modules/convention-read.fx` now says "a register" where it
+   said `x10`, so that it holds on both machines.
+8. **`fx26:convention.fx` reads both.** A place is a register's number
+   (arm64's `xN`, x86_64's as the hardware numbers them), `cv-in-state`
+   (4096) plus a field's offset for `(state field)`, or -2 for `pushed`.
+   The reader accepts either machine's names; the printer uses
+   `target`'s. A declaration that mixes them does not print back, so it
+   is refused. `cv-state` gains `reg4`, 0 on arm64. A test reads both
+   files on whichever machine runs it (`made_code.rs`,
+   `both_declarations_read_as_data`).
+9. **Failures unwind as on arm64; panics do not unwind on either.** A
+   trap (a refused bloblet, `car` of `'()` or division by zero in a
+   procedure made code calls, even 5,000 made frames deep) goes through
+   the common trap, and back to Rust by the saved stack pointer. The REPL
+   then goes on, made code and all. A Rust panic in a call-out aborts on
+   both machines, because the call-out is `extern "C"`. That is not new,
+   and not x86_64's.
+
+Tested on x86_64: `made_code.rs`, all eight tests (the four arm64-only
+ones no longer ignored there), on every machine. That means 11 machines:
+x86_64 adds `fx-regs-fxjit-cellcc` and `fx-regs-fxjit-nativecc`, and the
+stencils run where the build found nightly. They include the stressed
+runs, with time slices of 3, a 4 KB nursery and a 1 KB stack cache.
+

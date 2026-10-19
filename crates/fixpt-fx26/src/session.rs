@@ -59,6 +59,11 @@ pub struct Fx26Session {
     /// to a native closure of the same code: for the definitions the native
     /// runner declines, and `define-rec`'s.
     pub native_compiler: Option<NativeCompiler>,
+    /// The same by the compiler written in FX-26, in place of
+    /// `native_compiler`'s, and before `native_runner` runs an expression
+    /// (which it then gives the native closure, or, if this declined, the
+    /// cellular one): `fx-regs-fxjit-nativecc`.
+    pub native_fx: Option<NativeFx>,
     /// Under `Strategy::Cellular`: whether the checker written in FX-26 has
     /// begun this session's program, so that each form is checked after the
     /// ones before (`check-more`), and compiled alone against the globals
@@ -383,6 +388,13 @@ pub enum NativeRun {
 /// much fuel. The CLI's is `fixpt_native::direct`'s.
 pub type NativeRunner = fn(&mut fixpt_runtime::Runtime, fixpt_heap::Value, u64) -> NativeRun;
 
+/// A cellular closure compiled in the native convention by the compiler
+/// written in FX-26 (`native-direct-x64.fx`), the driver's (`fixpt_native::
+/// direct`'s `fx_begin` …) being the CLI's: a native closure of the same
+/// code over the same values, or why not. It runs FX-26, so it is given
+/// the Scheme session, and the closure rooted.
+pub type NativeFx = fn(&mut fixpt_scheme::Session, fixpt_scheme::Handle) -> Result<fixpt_scheme::Handle, String>;
+
 /// A cellular closure compiled in the native convention: a native closure
 /// of the same code over the same values, or why not.
 pub type NativeCompiler = fn(&mut fixpt_heap::Heap, fixpt_heap::Value) -> Result<fixpt_heap::Value, String>;
@@ -438,6 +450,7 @@ impl Fx26Session {
             native_convention: false,
             native_runner: None,
             native_compiler: None,
+            native_fx: None,
             globals_effects: true,
             defer_reruns: false,
             breaks_held: false,
@@ -591,7 +604,7 @@ impl Fx26Session {
                 NativeRun::Ran(v) => Ok(v.map(|v| fixpt_runtime::write_value(&rt.heap, v))),
                 NativeRun::Declined(why) => Err(why),
             };
-            if let Ok(Ok(value)) = self.with_thunk(text, written)? {
+            if let Ok(Ok(value)) = self.with_native_thunk(text, written)? {
                 return Ok(value);
             }
         }
@@ -853,7 +866,7 @@ impl Fx26Session {
                         NativeRun::Declined(why) => Err(why),
                     }
                 };
-                match self.with_thunk(&form_text, written)? {
+                match self.with_native_thunk(&form_text, written)? {
                     Ok(Ok(value)) => {
                         return Ok(Outcome { top, code: String::new(), printed: String::new(), value: value.map(Some) });
                     }
@@ -1096,11 +1109,12 @@ impl Fx26Session {
 
     /// The front end's entry points the Rust side calls by name
     /// (`READER_PREFIX`), each rebound by [`Self::front_end_as_register_code`].
-    pub const FRONT_ENTRIES: [&'static str; 27] = [
+    pub const FRONT_ENTRIES: [&'static str; 31] = [
         "read-text-at", "check-program", "check-more", "checked-tops", "checked-extracts", "checked-effects", "check-conv-native!", "checked-withs!", "checked-reshapes!",
         "check-globals-effects!", "check-defer-reruns!", "check-hold-breaks!", "check-lines!", "parse-program", "loaded-files!", "run-checked", "run-checked-more", "compile-program", "compile-checked", "compile-registers!", "compile-conv-native!",
         "compile-global-cell", "compile-new-global", "compile-keep-global!", "compile-note-inline!", "native-assemble",
         "check-built-in!",
+        "native-assemble-x64", "native-assemble-x64-regs", "native-adapter-x64", "native-compile-x64-proc",
     ];
 
     /// The front end's checker and compilers run as register code, not as
@@ -1223,13 +1237,19 @@ impl Fx26Session {
     /// compiled by the compiler written in FX-26 with register code: given
     /// to `f`, with the runtime (see [`crate::syn::with_last_value`]).
     pub fn with_global_value<T>(&mut self, name: &str, f: impl FnOnce(&mut fixpt_runtime::Runtime, fixpt_heap::Value) -> T) -> R<Result<T, String>> {
-        self.with_last_value(&format!("{name}\n"), f)
+        self.with_last_value(&format!("{name}\n"), None, f)
     }
 
     /// The same for the value of expression `exp` (text) as a procedure of
     /// no arguments that computes it.
     pub fn with_thunk<T>(&mut self, exp: &str, f: impl FnOnce(&mut fixpt_runtime::Runtime, fixpt_heap::Value) -> T) -> R<Result<T, String>> {
-        self.with_last_value(&format!("(lambda () {exp})\n"), f)
+        self.with_last_value(&format!("(lambda () {exp})\n"), None, f)
+    }
+
+    /// The same, for the native runner: the thunk compiled first by the
+    /// compiler written in FX-26, if it compiles them (`native_fx`).
+    fn with_native_thunk<T>(&mut self, exp: &str, f: impl FnOnce(&mut fixpt_runtime::Runtime, fixpt_heap::Value) -> T) -> R<Result<T, String>> {
+        self.with_last_value(&format!("(lambda () {exp})\n"), self.native_fx, f)
     }
 
     /// `form` (text), a definition of `name` whose value is `init` (text),
@@ -1280,7 +1300,7 @@ impl Fx26Session {
             c
         });
         let fuel = self.step_limit.unwrap_or(u64::MAX >> 1);
-        let r = self.with_thunk(init, |rt, clo| match {
+        let r = self.with_native_thunk(init, |rt, clo| match {
             let (start, compiled) = (std::time::Instant::now(), rt.compile_nanos);
             let ran = run(rt, clo, fuel);
             rt.run_nanos += (start.elapsed().as_nanos() as u64).saturating_sub(rt.compile_nanos - compiled);
@@ -1361,7 +1381,7 @@ impl Fx26Session {
         let text = s.checker.interner.name(name).to_string();
         let sym = s.scheme.make(|m| m.heap().intern(&text));
         let cells = s.scheme.call_global(&format!("{READER_PREFIX}compile-global-cell"), &[sym]).map_err(fail)?;
-        let (mut r, mut nanos) = (Ok(()), 0);
+        let (mut r, mut nanos, mut fx) = (Ok(()), 0, None);
         s.scheme.make(|m| {
             let cells = m.get(cells);
             if !cells.is_pair() {
@@ -1376,7 +1396,12 @@ impl Fx26Session {
             // (`nclosure`), which the compiler sees through (any other
             // native closure it gives back as it is).
             let kind = |k| v.is_bloblet() && heap.bloblet_kind(v) == fixpt_heap::layout::kind(k);
-            if kind("cellular-closure") || kind("native-closure") {
+            if !(kind("cellular-closure") || kind("native-closure")) {
+            } else if s.native_fx.is_some() {
+                // By the compiler written in FX-26, below: the global and
+                // its value rooted while it runs.
+                fx = Some((g, v));
+            } else {
                 let start = std::time::Instant::now();
                 let compiled = compile(heap, v);
                 nanos = start.elapsed().as_nanos() as u64;
@@ -1390,6 +1415,22 @@ impl Fx26Session {
             }
             fixpt_heap::Value::FALSE
         });
+        if let (Some(compile_fx), Some((g, v))) = (s.native_fx, fx) {
+            let (g, v) = (s.scheme.make(|_| g), s.scheme.make(|_| v));
+            let start = std::time::Instant::now();
+            let compiled = compile_fx(&mut s.scheme, v);
+            nanos = start.elapsed().as_nanos() as u64;
+            match compiled {
+                Ok(native) => {
+                    s.scheme.make(|m| {
+                        let (g, native) = (m.get(g), m.get(native));
+                        m.heap().set_bloblet_slot(g, 2, native);
+                        fixpt_heap::Value::FALSE
+                    });
+                }
+                Err(why) => r = Err(why),
+            }
+        }
         s.scheme.runtime_unrooted().compile_nanos += nanos;
         Ok(r)
         })
@@ -1408,7 +1449,7 @@ impl Fx26Session {
 
     /// `text` checked and compiled as the next form of this session's
     /// program, and run: its value, to `f`.
-    fn with_last_value<T>(&mut self, text: &str, f: impl FnOnce(&mut fixpt_runtime::Runtime, fixpt_heap::Value) -> T) -> R<Result<T, String>> {
+    fn with_last_value<T>(&mut self, text: &str, native: Option<NativeFx>, f: impl FnOnce(&mut fixpt_runtime::Runtime, fixpt_heap::Value) -> T) -> R<Result<T, String>> {
         self.own_pieces()?;
         self.scheme.engine.set_step_limit(None);
         let standard = self.next_standard()?;
@@ -1416,7 +1457,7 @@ impl Fx26Session {
         let on = s.scheme.make(|_| fixpt_heap::Value::TRUE);
         let fail = |e: fixpt_scheme::SessionError| FxError::at(Span::new(FileId(0), 0, 0), e.to_string());
         s.scheme.call_global(&format!("{READER_PREFIX}compile-registers!"), &[on]).map_err(fail)?;
-        let r = crate::syn::with_last_value(&mut s.scheme, standard, FileId(0), text, f);
+        let r = crate::syn::with_last_value(&mut s.scheme, standard, FileId(0), text, native, f);
         s.own_begun |= !matches!(&r, Ok(Err(m)) if m.starts_with("check:"));
         let off = s.scheme.make(|_| fixpt_heap::Value::boolean(s.register_code));
         s.scheme.call_global(&format!("{READER_PREFIX}compile-registers!"), &[off]).map_err(fail)?;
