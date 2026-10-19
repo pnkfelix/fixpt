@@ -708,7 +708,7 @@ The user, asked which `REG`s should live in memory: "go right ahead"
 
 ## The native convention on x86_64 (2026-10-11)
 
-The user: "Go for it" (TODO §105's next item, `direct.rs`).
+The user: "Go for it" (TODO §112's next item, `direct.rs`).
 
 1. **A file of its own, `direct/x64.rs`, step for step**, as the cellular
    machine's and register code's x86 forms are: the trampoline, the common
@@ -811,6 +811,8 @@ move with steps 1 2" (step 1: each commit building, the native convention
 off on x86_64 until step 2 re-ports it; the push is the user's).
 
 1. **Our section of `TODO.md` renumbered §84 → §105**: main's §84 is I/O.
+   (Renumbered again on 2026-10-19 to §112, and the memory test §106 to
+   §113: main had filed its own §105–111 by then.)
    Our fix of `knot-spin.fx` under the native convention dropped: main
    fixed it its own way (`check-hold-breaks!`, `DONE.md` §90).
 2. **The x86_64 cellular machine, register code and their FX-26 ports
@@ -877,7 +879,7 @@ off on x86_64 until step 2 re-ports it; the push is the user's).
 
 The user: "Can you add x86_64 support for fx-regs-fxjit-native? You can
 make an appropriately named branch for it" (branch `x86_64-fxjit-nativecc`;
-TODO §105, item 4).
+TODO §112, item 4).
 
 1. **Rust keeps the driver, FX-26 makes each procedure's code**, as for
    register code (`syn::assemble_reachable_by_fx26`): `compile`'s finding

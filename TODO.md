@@ -2524,7 +2524,7 @@ average of 4 or more is taken again when the machine is quieter, before
 the commit, if waiting is possible; if not, the commit says so and is
 added here.
 
-## 105. x86_64: what is left of the native back end (the user's, 2026-10-11)
+## 112. x86_64: what is left of the native back end (the user's, 2026-10-11)
 
 The user's: "a native backend for x86_64 Linux, to eventually be in FX26
 itself". Done (CLAUDES_CHOICES.md, the two x86_64 entries): the
@@ -2572,7 +2572,7 @@ reaches its fixpoint on all three. Left, in the order they would pay:
    bytes with the disassembler's text, which knows only the forms the
    encoder makes.
 
-## 106. A memory test of the x86_64 box (the user's, 2026-10-17)
+## 113. A memory test of the x86_64 box (the user's, 2026-10-17)
 
 One `fixpt` run in about 8,000 fails on the x86_64 box (a Threadripper
 3990X), most likely a hardware fault, not `fixpt`'s. It was found as one
