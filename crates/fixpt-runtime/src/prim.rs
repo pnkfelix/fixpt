@@ -675,11 +675,10 @@ fn bloblet(rt: &mut Runtime, v: Value) -> Outcome<Value> {
 }
 
 /// Whether native code a program makes runs here (`seal-code`,
-/// `native-code?`): the code programs make is arm64's, its convention
-/// what `native-convention` says, so only there, where native code runs at
-/// all.
+/// `native-code?`): wherever native code runs at all, on arm64 and on
+/// x86_64, the code to the convention `native-convention` says.
 fn runs_made_code(rt: &Runtime) -> bool {
-    rt.call_native.is_some() && cfg!(target_arch = "aarch64")
+    rt.call_native.is_some() && cfg!(any(target_arch = "aarch64", target_arch = "x86_64"))
 }
 
 /// A bloblet of kind `bloblet`: one the program made, so one it may change.

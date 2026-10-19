@@ -46,24 +46,24 @@ use fixpt_heap::Value;
 use std::collections::HashMap;
 use std::mem::offset_of;
 
-const RESULT: Reg = RAX;
+pub(super) const RESULT: Reg = RAX;
 /// The closure called, as the call enters it.
-const CLO: Reg = RBX;
-const ST: Reg = R15;
-const FRAME: Reg = RBP;
-const SP: Reg = RSP;
+pub(super) const CLO: Reg = RBX;
+pub(super) const ST: Reg = R15;
+pub(super) const FRAME: Reg = RBP;
+pub(super) const SP: Reg = RSP;
 // Scratch, named for the arm64 registers they stand for.
-const X9: Reg = R10;
+pub(super) const X9: Reg = R10;
 const X11: Reg = R11;
 const X12: Reg = R12;
 const X13: Reg = RCX;
 const X14: Reg = RDX;
 const X15: Reg = R13;
-const X16: Reg = R9;
-const X17: Reg = R14;
+pub(super) const X16: Reg = R9;
+pub(super) const X17: Reg = R14;
 /// The registers `RESULT` and REG1…REG3 live in (register code's `REG0`
 /// is `RESULT` here, as on arm64, where it is `x0`).
-const IN_REGS: [Reg; 4] = [RESULT, RDI, RSI, R8];
+pub(super) const IN_REGS: [Reg; 4] = [RESULT, RDI, RSI, R8];
 
 /// A field of the state, as an operand.
 fn st(f: usize) -> Mem {

@@ -867,7 +867,8 @@ off on x86_64 until step 2 re-ports it; the push is the user's).
    - **`native-code?` and `seal-code` say no off arm64**: the code a
      program makes is arm64's (`programs/made-code/`), and the convention
      `native-convention` declares is arm64's, so on x86_64 each program
-     takes its fallback rather than run arm64 bytes.
+     takes its fallback rather than run arm64 bytes. (No longer: "Code a
+     program makes, on x86_64", 2026-10-18.)
    - `fast` on x86_64 stays register code: the native convention is fastest
      there on every program of `fixpt bench` but `captures` (42.8 ms
      against 36.9), as before the rebase.
@@ -933,3 +934,103 @@ TODO §105, item 4).
    register word of the front end, each as a closure, its own procedure
    only (`compile_each`, `fx_begin_each`): 4,892 procedures, 11.3 MB, the
    same (77 refused by both).
+
+## Code a program makes, on x86_64 (2026-10-18)
+
+kayak's request: §97 (`seal-code`, `native-procedure`, `native-code?`,
+`native-convention`, `define-convention`) on x86_64 Linux. The machinery
+needed nothing new: x86_64's native convention (`direct/x64.rs`) already
+had a trampoline and every routine the declaration names (`foreign`,
+`overflow`, `poll`, `cons`, `bloblet` and the trap), and every machine
+there already called native closures. What was missing was the contract
+and the programs. `native-x86_64.conv` is the contract, generated like
+arm64's (`declare.rs`, from `x64.rs`'s constants and `DState`'s offsets),
+and the same test checks both files (`fixpt-native/tests/convention.rs`).
+`native-arm64.conv` is byte for byte what it was: no clause it shares
+had to change.
+
+1. **The same roles, in the same order, with x86_64's places.** Every
+   clause of arm64's is there, with the same sub-clauses where the
+   machine allows. `values`, `closures` and `barrier` are word for word
+   the same, and so is every `state` offset, because the state is the one
+   `DState`. Where they differ, the difference is the machine's.
+2. **Registers are `x64.rs`'s, by their names**: `result` rax, `closure`
+   rbx, `frame` rbp, `count` r10 (arm64's x9), state r15. Arguments are
+   rdi, rsi and r8, then `(state reg4)` … `(state reg8)`, because `x64.rs`
+   keeps REG4–REG8 in the state (`DState::regs`). For that, the `state`
+   clause gains `reg4`…`reg8` (616–648) after arm64's fields. `rest-in`
+   is `(state reg8)`. The overflow routine takes the code in r9 and the
+   info in r14, `x64.rs`'s X16 and X17. The made programs use r11, r9
+   and r14 as scratch.
+3. **Of the four registers arm64 pins, x86_64 pins only the state**
+   (r15). The fuel, the stack's limit and the code distance are words of
+   the state, `(state fuel)`, `(state stack-limit)` and `(state delta)`,
+   as `x64.rs` keeps them; `cellular/x64.rs` keeps fuel there too. x86_64
+   has no callee-saved register to spare for them. So
+   `(pinned (state r15) (fuel (state fuel)) …)`, `(code (runs-at reference
+   plus (state delta)) …)`, `(overflow (when rsp below (state
+   stack-limit) after-frame-made) …)`. The `fuel` clause says
+   `(fuel (state fuel) …)` where arm64's says `(register x28)`: a place,
+   not a register.
+4. **The return address is `pushed`**, on the stack's top as a routine
+   or procedure is entered, where arm64 has it in `x30`: `(link pushed)`.
+   Every routine is entered by `call [r15 + entry]`, and `overflow` says
+   `by call` where arm64's says `by x30`. A frame is made as
+   `push_frame_ret` makes one: the return popped into r11, `sub rsp`, the
+   link and return stored at `[rsp+8]` and `[rsp+16]`, `lea rbp,
+   [rsp+8]`. The `made` clause spells that out. The frame then reads as
+   arm64's (header `rbp -8`, link `rbp 0`, return `rbp 8`, map `rbp 16`,
+   values from `rbp 24`). It is undone in reverse, with the return pushed
+   back for `ret`. The trap's stub is entered by `jmp` with the site's
+   return address on the stack, as the machine's own code does; arm64's
+   declaration says nothing of how its trap is entered, so neither does
+   this one.
+5. **`target` is `x86_64`**, as `fx26:x86_64.fx` and the Rust target
+   name spell it, and the program's convention name is `x86_64-native`.
+6. **`native-convention` gives the declaration of the machine it runs
+   on** (`fixpt_runtime::NATIVE_CONVENTION`, chosen by `cfg`; both files
+   are also there by name). Both checkers compare with it, so a program
+   that declares the other machine's convention is refused at its
+   `define-convention`, on its first differing clause by role, `code`
+   (`tests/checker.rs`). `runs_made_code` is now true on x86_64 too,
+   wherever the machine calls native code.
+7. **The programs are twins**, in `programs/made-code-x86_64/`, rather
+   than one program per test picking its encoding from `target`. Five of
+   the seven declare their convention, and a declaration is checked
+   against the machine's before the program runs, so an arm64 program
+   with one cannot even check on x86_64. Twins keep arm64's programs
+   unchanged too. The two that declare nothing (`leaves.fx`,
+   `typed-calls.fx`) now test `target` (a `here` beside `native-code?`)
+   on both machines, because `native-code?` is true on both and neither
+   should run the other's bytes. `frames.fx`'s bytes are written one
+   instruction to a line, with the instruction beside them. They were made
+   by `generated.fx`, which reads the declaration and encodes with
+   `fx26:x86_64.fx`, and checked with `objdump`. The test says the two
+   agree byte for byte, as on arm64. x86_64's jumps are all rel32, so
+   the generators place the instructions in a first pass and make them
+   again with each displacement. The checker's sweep reads both
+   directories and expects the other machine's declared programs to be
+   refused. `modules/convention-read.fx` now says "a register" where it
+   said `x10`, so that it holds on both machines.
+8. **`fx26:convention.fx` reads both.** A place is a register's number
+   (arm64's `xN`, x86_64's as the hardware numbers them), `cv-in-state`
+   (4096) plus a field's offset for `(state field)`, or -2 for `pushed`.
+   The reader accepts either machine's names; the printer uses
+   `target`'s. A declaration that mixes them does not print back, so it
+   is refused. `cv-state` gains `reg4`, 0 on arm64. A test reads both
+   files on whichever machine runs it (`made_code.rs`,
+   `both_declarations_read_as_data`).
+9. **Failures unwind as on arm64; panics do not unwind on either.** A
+   trap (a refused bloblet, `car` of `'()` or division by zero in a
+   procedure made code calls, even 5,000 made frames deep) goes through
+   the common trap, and back to Rust by the saved stack pointer. The REPL
+   then goes on, made code and all. A Rust panic in a call-out aborts on
+   both machines, because the call-out is `extern "C"`. That is not new,
+   and not x86_64's.
+
+Tested on x86_64: `made_code.rs`, all eight tests (the four arm64-only
+ones no longer ignored there), on every machine. That means 11 machines:
+x86_64 adds `fx-regs-fxjit-cellcc` and `fx-regs-fxjit-nativecc`, and the
+stencils run where the build found nightly. They include the stressed
+runs, with time slices of 3, a 4 KB nursery and a 1 KB stack cache.
+

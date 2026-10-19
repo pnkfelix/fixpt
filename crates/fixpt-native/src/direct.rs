@@ -53,7 +53,7 @@ use std::mem::offset_of;
 
 mod reps;
 mod declare;
-pub use declare::native_convention;
+pub use declare::{native_convention, native_convention_of};
 mod x64;
 mod fx;
 pub use fx::{describe, fx_abandon, Each, FxCompile, FxEmitted, FxRequest};

@@ -1,14 +1,15 @@
-;; => "x10 at 296; refused as said: #t #t #t"
+;; => "a register, at 296; refused as said: #t #t #t"
 ;; A native convention's declaration read as data (`fx26:convention.fx`,
-;; `TODO.md` §97): fixpt's, whose closure register and `closure` routine's
-;; state field a generator reads; and three it refuses, a clause missing,
-;; one it has no room for, one it cannot hold, each as it says.
+;; `TODO.md` §97): fixpt's on this machine, whose closure register (`x10`
+;; on arm64, `rbx` on x86_64) and `closure` routine's state field a
+;; generator reads; and three it refuses, a clause missing, one it has no
+;; room for, one it cannot hold, each as it says.
 (define cv (load-input "fx26:convention.fx"))
 (define why (subr (maxeff (read @globals) spin) ((listof string acyclic)) string)
   (lambda (ts)
     (tagcase ((with cv cv-read-clauses) ts)
-      (ok c (string-append "x" (int->string (extract (extract c registers) closure)) " at "
-                           (int->string (extract (extract c state) closure))))
+      (ok c (string-append (if (< (extract (extract c registers) closure) 32) "a register" "?")
+                           ", at " (int->string (extract (extract c state) closure))))
       (refused w w))))
 (define says (subr (maxeff (read @globals) spin) ((listof string acyclic) string) string)
   (lambda (ts want) (if (string=? (why ts) want) "#t" (why ts))))

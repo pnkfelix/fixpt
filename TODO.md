@@ -2378,6 +2378,11 @@ constants, both checkers comparing a program's with it
 (`programs/made-code/declared.fx`). And step 5: code that is not a leaf, with `poll` and `cons` routines
 (`programs/made-code/frames.fx`). And step 6: the declaration as data a
 generator reads (`fx26:convention.fx`, `programs/made-code/generated.fx`).
+And on x86_64 (kayak's request, 2026-10-18; CLAUDES_CHOICES.md "Code a
+program makes, on x86_64"): its own declaration, `native-x86_64.conv`,
+which `native-convention` gives there and both checkers compare with, and
+each program above twinned in `programs/made-code-x86_64/`, made by
+`fx26:x86_64.fx`.
 Left:
 - **Native code cannot call back the bytecode VM's procedures**: a
   primitive cannot run the VM again, so on `rs-scheme-vm` a made procedure
@@ -2541,10 +2546,11 @@ reaches its fixpoint on all three. Left, in the order they would pay:
    stays register code for now; and the native convention's `ret` against
    arm64's `br` (CLAUDES_CHOICES.md, "Native profiling" 6), unmeasured.
    Re-ported onto main's frames when rebased (2026-10-17, CLAUDES_CHOICES.md
-   "The x86_64 back end rebased onto main"). Left of that: code a program
-   makes (§97) is arm64's, so on x86_64 `native-code?` is false;
-   an x86_64 convention `native-convention` can declare, and programs that
-   make x86_64 code, would let it run there.
+   "The x86_64 back end rebased onto main"). ~~Left of that: code a
+   program makes (§97) is arm64's, so on x86_64 `native-code?` is false~~
+   (done, kayak's request, 2026-10-18: `native-x86_64.conv`, the
+   programs of `programs/made-code-x86_64/`, CLAUDES_CHOICES.md "Code a
+   program makes, on x86_64").
 3. ~~**Stencils**~~ (done: CLAUDES_CHOICES.md "Stencils on x86_64"; the
    routines in `preserve_none`, all eight arguments in registers;
    branches checked in LLVM's assembly; 1.06–1.55 of the hand-encoded

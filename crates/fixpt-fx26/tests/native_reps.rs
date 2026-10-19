@@ -229,13 +229,12 @@ fn a_slot_of_an_f64_and_an_int_is_split() {
         c("return", &[]),
     ]
     .concat();
-    let mut s = pieces();
     let list = cells.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(" ");
     let program = format!(
         "{PROGRAM}\n(define t-case (subr t-does () t-list)\n  (lambda ()\n    (let* ((l (the t-list (list {list})))\n           (n (t-count l))\n           (fix (t-array l n))\n           (is (the t-bools (make-array n #t)))\n           (c (nr-split-slots (product (1 fix) (2 is))))\n           (s (nr-starts c)))\n      (append (t-ints (extract c 1)) (t-bools (nr-raw-slots c s 2))))))\n"
     );
     let compiled = fixpt_fx26::session::compile_program(&program).unwrap_or_else(|e| panic!("checks: {e}"));
-    s = fixpt_scheme::Session::with_backend(Backend::Bytecode);
+    let mut s = fixpt_scheme::Session::with_backend(Backend::Bytecode);
     compiled.load_into(&mut s).expect("loads");
     let got = call_ints(&mut s, "t-case", &[]);
     let (split, raw) = got.split_at(cells.len());
