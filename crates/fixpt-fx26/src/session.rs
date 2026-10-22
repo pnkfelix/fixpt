@@ -1186,10 +1186,13 @@ impl Fx26Session {
         });
         self.scheme.engine.set_step_limit(limit);
         pieces.map_err(fail)?;
-        for name in Self::FRONT_ENTRIES {
-            let define = format!("(define (fx26-reader:{name} . args) (%run-front-end fx26-native:{name} args))");
-            self.scheme.eval_str("<front end>", &define).map_err(|e| fail(e.to_string()))?;
-        }
+        // In one text: each text run analyses all the session's Scheme
+        // again, some 50 ms, so one for each would cost a second and a half.
+        let defines: String = Self::FRONT_ENTRIES
+            .iter()
+            .map(|name| format!("(define (fx26-reader:{name} . args) (%run-front-end fx26-native:{name} args))\n"))
+            .collect();
+        self.scheme.eval_str("<front end>", &defines).map_err(|e| fail(e.to_string()))?;
         Ok(())
     }
 
