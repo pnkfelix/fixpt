@@ -3192,3 +3192,41 @@ kept on the data stack too now. Test:
 (`programs/native/capture-across-collecting.fx`: such captures under 0
 to 3 cellular frames, collecting at every safepoint, so that some
 capture's safepoint is a major collection's; it gave "no prompt" before).
+
+## 114. `webs` is quadratic in a procedure's instructions (found 2026-10-22)
+
+**Fixed (2026-10-22).** The native convention's representation pass
+splits each frame slot into webs: its writes and reads, joined where a
+write reaches a read. Both versions, Rust's `webs`
+(`fixpt_native::direct::reps`) and FX-26's `nr-webs` (`native-reps.fx`),
+searched back from each read with a fresh `seen` array as long as the
+procedure: O(reads × instructions). They now go a slot at a time over
+the procedure's basic blocks. Where a slot is live and some write of it
+has been, every write that reaches there reaches a read, so one web
+holds them: the blocks where the slot is live (back from the blocks that
+read it first, through blocks that do not touch it), those of them a
+write reaches, and a union-find of each block's start and the slot's own
+reads and writes. A slot's work is its own accesses and the blocks where
+it is live. The FX-26 version is in a file of its own,
+`native-reps-webs.fx`, as `native-reps.fx` would have passed 1000 lines.
+
+Done by instruction, not block, a slot at a time was slower than the
+search: the front end's largest register words are module bodies, one
+block of 7,000–8,100 instructions with 600–800 slots, some 255 slots
+live at each instruction. By block, on the largest (8,102 instructions,
+795 slots), the FX-26 split (`nr-split-slots`, `webs` with the
+`demands` and `reps_of` it runs) lowered on the bytecode VM: 40.8 s →
+4.1 s. `native_reps`, the pass as register code, every word: 92 → 32 s,
+with the webs now compared too.
+
+Test: `native_reps` compares the two versions' webs on every register
+word of the front end (`Facts::webs`, `nr-web-names`: by instruction,
+the first instruction of its web, whether an `f64`'s, whether read).
+Before, it compared only what webs decide (raw slots, the split), and
+the front end has few `f64`s, so the webs themselves went mostly
+unchecked; a wrong partition now fails it. While the change was made,
+`webs` also ran the old search and asserted the same partition: on all
+the front end's words (168,576 accesses joined), the native tests, and
+the four `f64` benchmarks (`nbody`, `spectralnorm2`, `matrix-multiply`,
+`mandelbrot`) on `fx-regs-rsjit-nativecc` and `fx-regs-fxjit-nativecc`.
+

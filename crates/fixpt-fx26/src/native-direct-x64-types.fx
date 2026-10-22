@@ -165,6 +165,7 @@
             (val nr-raw-params (subr da-assembles (nr-cells da-ints da-bools) int))
             (val nr-live-in (subr da-assembles (nr-cells da-ints da-bools) da-ints))
             (val nr-raw-slots (subr da-assembles (nr-cells da-ints int) da-bools))
+            (val nr-web-names (subr da-assembles (nr-cells da-ints int) da-ints))
             (val nr-split-slots (subr da-assembles (nr-cells) nr-cells))))
 
 ;;; ------------------------------------------------------------ raw values

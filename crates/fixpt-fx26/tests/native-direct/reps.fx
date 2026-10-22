@@ -14,6 +14,7 @@
 (define nr-raw-params (with reps nr-raw-params))
 (define nr-raw-refs (with reps nr-raw-refs))
 (define nr-live-in (with reps nr-live-in))
+(define nr-web-names (with reps nr-web-names))
 (define nr-reps-of (with reps nr-reps-of))
 (define nr-step (with reps nr-step))
 (define nr-join (with reps nr-join))
@@ -127,7 +128,7 @@
         (append (t-ints (extract io 1)) (append (t-ints (extract io 2)) (steps 0)))))))
 ;; Everything of a word at once, each part ended by -1000000007: the cells split,
 ;; the starts, the raw slots, the raw parameters, the raw references, what
-;; is live, then the four versions (fixnum then general, each with no
+;; is live, the webs, then the four versions (fixnum then general, each with no
 ;; callee known, then with them).
 (define t-all (subr t-does (tword int) t-list)
   (lambda (rw slots)
@@ -146,9 +147,11 @@
                      (end (cons params nil)
                           (end (t-bools refs)
                                (end (t-ints (nr-live-in c s raw))
-                                    (end (v #t #f)
-                                         (end (v #t #t)
-                                              (end (v #f #f) (end (v #f #t) nil))))))))))))))
+                                    (end (if (< slots 0) nil (t-ints (nr-web-names c s slots)))
+                                         (end (v #t #f)
+                                              (end (v #t #t)
+                                                   (end (v #f #f)
+                                                        (end (v #f #t) nil)))))))))))))))
 (define t-raw-op (subr t-does (string) string)
   (lambda (name)
     (let ((r (nr-raw-op name)))

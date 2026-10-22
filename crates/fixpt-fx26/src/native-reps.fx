@@ -30,6 +30,7 @@
 ;;; module, which the conductor applies to the layouts.
 
 (let* ((direct-types (load-module "fx26:native-direct-x64-types.fx"))
+       (webs (load-module "fx26:native-reps-webs.fx"))
        (dl-types (load-module "fx26:native-direct-x64-layout-types.fx"))
        (layout-types (load-module "fx26:layout-types.fx")))
   (lambda ((dl (select dl-types native-direct-x64-layout-sig))
@@ -37,6 +38,8 @@
     (module
 (hide (include direct-types))
 (hide (include dl) (include layout))
+(hide (define nr-find (with webs nr-find)) (define nr-blocks (with webs nr-blocks))
+      (define nr-slot-webs (with webs nr-slot-webs)))
 
 ;; What `webs` finds: by instruction, the frame slot it touches (-1 for
 ;; none) and its web; by web, whether an `f64`'s and whether read.
@@ -663,19 +666,6 @@
             ((= op rop-store) (product (1 (nr-k c i 1)) (2 #f) (3 k0)))
             (else (product (1 -1) (2 #f) (3 0)))))))
 
-;; The union-find's representative of `x`, the way there shortened.
-(define nr-find (subr da-assembles (da-ints int) int)
-  (lambda (parent x)
-    (letrec ((root (subr da-reads (int) int)
-               (lambda (r) (if (= (array-ref parent r) r) r (root (array-ref parent r)))))
-             (shorten (subr da-assembles (int int) unit)
-               (lambda (y r)
-                 (if (= (array-ref parent y) r)
-                     #u
-                     (let ((next (array-ref parent y)))
-                       (begin (array-set! parent y r) (shorten next r)))))))
-      (let ((r (root x))) (begin (shorten x r) r)))))
-
 ;; The webs of the procedure's `slots` frame slots (`webs`): register code
 ;; may use a slot for one variable, then another, so a slot is taken apart
 ;; into webs, its writes and reads joined where a write reaches a read. A
@@ -695,68 +685,46 @@
            (none (the da-bools (make-array slots #f)))
            (ds (nr-demands c starts none))
            (ins (extract (nr-reps-of c starts #f none 0 (the da-ints (make-array ns 0))) 1))
-           (preds (nr-preds (extract ds 2)))
+           (succ (extract ds 2))
+           (sl (the da-ints (make-array ns -1)))
+           (rd (the da-bools (make-array ns #f)))
            (parent (the da-ints (make-array ns 0)))
            (w (nr-new-webs ns)))
-      (letrec ((each (subr da-assembles (int) unit)
-                 (lambda (si)
+      (letrec ((each (subr da-assembles (int int) int)
+                 (lambda (si top)
                    (if (= si ns)
-                       #u
-                       (begin (array-set! parent si si) (each (+ si 1))))))
-               (join (subr da-assembles (int) unit)
-                 (lambda (si)
-                   (if (= si ns)
-                       #u
+                       top
                        (let ((a (nr-access c starts si)))
                          (begin
-                           (if (and (>= (extract a 1) 0) (extract a 2))
-                               (nr-search c starts preds parent (the da-bools (make-array ns #f))
-                                          (array-ref preds si) (extract a 1) si)
-                               #u)
-                           (join (+ si 1)))))))
+                           (array-set! parent si si)
+                           (array-set! sl si (extract a 1))
+                           (array-set! rd si (extract a 2))
+                           (each (+ si 1) (if (> (extract a 1) top) (extract a 1) top)))))))
                (show (subr da-assembles (int) unit)
                  (lambda (si)
                    (if (= si ns)
                        #u
                        (begin (nr-show c starts ds ins parent w si) (show (+ si 1)))))))
-        (begin (each 0) (join 0) (show 0) (nr-name-webs parent w 0) w)))))
-
-;; Each instruction's predecessors.
-(define nr-preds (subr da-assembles ((arrayof da-bytes @k)) (arrayof da-bytes @k))
-  (lambda (succ)
-    (let* ((ns (array-length succ)) (preds (the (arrayof da-bytes @k) (make-array ns nil))))
-      (letrec ((add (subr da-assembles (int da-bytes) unit)
-                 (lambda (si ts)
-                   (if (null? ts)
-                       #u
-                       (begin (array-set! preds (car ts) (cons si (array-ref preds (car ts))))
-                              (add si (cdr ts))))))
-               (go (subr da-assembles (int) unit)
-                 (lambda (si)
-                   (if (= si ns) #u (begin (add si (array-ref succ si)) (go (+ si 1)))))))
-        (begin (go 0) preds)))))
-
-;; The writes of `slot` that reach the read at `si`: back from it, each
-;; joined to its web; past any other instruction, on back.
-(define nr-search
-  (subr da-assembles (nr-cells da-ints (arrayof da-bytes @k) da-ints da-bools da-bytes int int)
-        unit)
-  (lambda (c starts preds parent seen work slot si)
-    (if (null? work)
-        #u
-        (let ((p (car work)))
-          (if (array-ref seen p)
-              (nr-search c starts preds parent seen (cdr work) slot si)
-              (let ((a (nr-access c starts p)))
-                (begin
-                  (array-set! seen p #t)
-                  (if (and (= (extract a 1) slot) (not (extract a 2)))
-                      (let* ((x (nr-find parent p)) (y (nr-find parent si)))
-                        (begin
-                          (array-set! parent x y)
-                          (nr-search c starts preds parent seen (cdr work) slot si)))
-                      (nr-search c starts preds parent seen
-                                 (append (array-ref preds p) (cdr work)) slot si)))))))))
+        (let* ((by (the (arrayof da-bytes @k) (make-array (+ (each 0 -1) 1) nil)))
+               (bl (nr-blocks succ sl by))
+               (nb (array-length (extract bl 2)))
+               (marks (product (1 (the da-ints (make-array nb -1)))
+                               (2 (the da-bools (make-array nb #f)))
+                               (3 (the da-ints (make-array nb -1)))
+                               (4 (the da-ints (make-array nb -1)))
+                               (5 (the da-ints (make-array nb -1)))
+                               (6 (the da-ints (make-array (+ ns nb) -1)))
+                               (7 (the da-ints (make-array (+ ns nb) 0))))))
+          (letrec ((join (subr da-assembles (int) unit)
+                     (lambda (s)
+                       (if (= s (array-length by))
+                           #u
+                           (begin
+                             (if (null? (array-ref by s))
+                                 #u
+                                 (nr-slot-webs sl rd succ bl marks parent (array-ref by s) s))
+                             (join (+ s 1)))))))
+            (begin (join 0) (show 0) (nr-name-webs parent w 0) w)))))))
 
 ;; What instruction `si` shows of its web, and its web and slot named.
 (define nr-show
@@ -790,6 +758,30 @@
         (begin
           (array-set! (extract w 2) si (nr-find parent si))
           (nr-name-webs parent w (+ si 1))))))
+
+;; The webs as `tests/native_reps.rs` compares them (the oracle's
+;; `webs`): by instruction, -1 if it touches no slot, else 4 times the
+;; first instruction of its web, plus 2 if an `f64`'s, plus 1 if read.
+(define nr-web-names (subr da-assembles (nr-cells da-ints int) da-ints)
+  (lambda (c starts slots)
+    (let* ((w (nr-webs c starts slots)) (ns (array-length starts))
+           (first (the da-ints (make-array ns -1))) (out (the da-ints (make-array ns -1))))
+      (letrec ((go (subr da-assembles (int) unit)
+                 (lambda (si)
+                   (if (= si ns)
+                       #u
+                       (let ((web (array-ref (extract w 2) si)))
+                         (begin
+                           (if (< (array-ref (extract w 1) si) 0)
+                               #u
+                               (begin
+                                 (if (< (array-ref first web) 0) (array-set! first web si) #u)
+                                 (array-set! out si
+                                             (+ (* 4 (array-ref first web))
+                                                (+ (if (array-ref (extract w 3) web) 2 0)
+                                                   (if (array-ref (extract w 4) web) 1 0))))))
+                           (go (+ si 1))))))))
+        (begin (go 0) out)))))
 
 ;; Which of the procedure's `slots` frame slots hold a raw `f64`
 ;; (`raw_slots`): a slot is raw if every web of it is an `f64`'s, or never

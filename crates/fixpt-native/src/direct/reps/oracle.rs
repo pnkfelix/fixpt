@@ -75,6 +75,10 @@ pub struct Facts {
     pub params: i64,
     pub raw_refs: Vec<bool>,
     pub live: Vec<i64>,
+    /// The frame's webs (`webs`), none without a frame: by instruction, -1
+    /// if it touches no slot, else 4 times the first instruction of its
+    /// web, plus 2 if an `f64`'s, plus 1 if read.
+    pub webs: Vec<i64>,
     pub versions: Vec<Version>,
 }
 
@@ -97,6 +101,23 @@ pub fn facts(h: &Heap, rw: Value) -> Facts {
     let params = super::raw_params(&cells, &starts, &prim, &raw);
     let raw_refs = super::raw_refs(&cells, &starts, &prim, &raw);
     let live = super::live_in(&cells, &starts, &prim, &raw).iter().map(|l| (0..9).filter(|&r| l[r]).map(|r| 1 << r).sum()).collect();
+    let webs = frame.map_or(Vec::new(), |m| {
+        let w = super::webs(&cells, &starts, &prim, m);
+        let mut first = vec![usize::MAX; starts.len()];
+        w.web
+            .iter()
+            .enumerate()
+            .map(|(si, sw)| match *sw {
+                None => -1,
+                Some((_, web)) => {
+                    if first[web] == usize::MAX {
+                        first[web] = si;
+                    }
+                    4 * first[web] as i64 + 2 * w.f64_web[web] as i64 + w.used_web[web] as i64
+                }
+            })
+            .collect()
+    });
     let op_at = |j: usize| OPS[cells[j].as_fixnum() as usize].0;
     let mut versions = Vec::new();
     for fast in [true, false] {
@@ -124,6 +145,7 @@ pub fn facts(h: &Heap, rw: Value) -> Facts {
         params: params as i64,
         raw_refs,
         live,
+        webs,
         versions,
     }
 }

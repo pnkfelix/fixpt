@@ -664,7 +664,8 @@ fn webs(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str,
             _ => None,
         }
     };
-    // Webs: a union-find over the instructions that touch a slot.
+    // Webs: a union-find over the instructions that touch a slot, each
+    // access's parent the access that stands for its web.
     let mut parent: Vec<usize> = (0..ns).collect();
     fn find(parent: &mut [usize], x: usize) -> usize {
         let mut r = x;
@@ -679,22 +680,141 @@ fn webs(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str,
         }
         r
     }
-    for si in 0..ns {
-        let Some((slot, true, _)) = access(si) else { continue };
-        // The writes of `slot` that reach this read: back from it.
-        let mut seen = vec![false; ns];
-        let mut work: Vec<usize> = preds[si].clone();
-        while let Some(p) = work.pop() {
-            if std::mem::replace(&mut seen[p], true) {
+    // A slot at a time, not a search back from each read (`TODO.md` §114):
+    // where the slot is live (a read of it comes before any write) and
+    // some write of it has been, every write that reaches there reaches a
+    // read, so one web holds them. A frame may have hundreds of slots, and
+    // a module's body thousands of instructions and no branch, so this is
+    // done by basic block: each slot's work its own reads and writes, and
+    // the blocks where it is live. A block's chain of instructions, each
+    // but the first its one predecessor's one successor (and a loop of
+    // those, unreachable, cut).
+    let leader = |t: usize| t == 0 || preds[t].len() != 1 || succ[preds[t][0]].len() != 1;
+    let (mut block, mut order, mut lasts) = (vec![usize::MAX; ns], Vec::with_capacity(ns), Vec::new());
+    for cut in [false, true] {
+        for l in 0..ns {
+            if block[l] != usize::MAX || !(cut || leader(l)) {
                 continue;
             }
-            match access(p) {
-                Some((s2, false, _)) if s2 == slot => {
-                    let (a, b) = (find(&mut parent, p), find(&mut parent, si));
-                    parent[a] = b;
+            let mut t = l;
+            loop {
+                block[t] = lasts.len();
+                order.push(t);
+                match succ[t][..] {
+                    [n] if !leader(n) && block[n] == usize::MAX => t = n,
+                    _ => break,
                 }
-                _ => work.extend(preds[p].iter().copied()),
             }
+            lasts.push(t);
+        }
+    }
+    let nb = lasts.len();
+    let mut bpreds: Vec<Vec<usize>> = vec![Vec::new(); nb];
+    for (b, &l) in lasts.iter().enumerate() {
+        for &t in &succ[l] {
+            bpreds[block[t]].push(b);
+        }
+    }
+    // Each slot's reads and writes, block by block, each block's in order.
+    let mut by_slot: Vec<Vec<usize>> = Vec::new();
+    for &si in &order {
+        if let Some((slot, _, _)) = access(si) {
+            if by_slot.len() <= slot {
+                by_slot.resize(slot + 1, Vec::new());
+            }
+            by_slot[slot].push(si);
+        }
+    }
+    // By block, for which slot it was last touched (and then whether its
+    // first access reads, its last write), live and reached. The union-find
+    // has a node for each instruction and one for each block's start
+    // (`ns + b`), and says for which slot each was set.
+    let (mut touched, mut first_reads, mut last_write) = (vec![usize::MAX; nb], vec![false; nb], vec![usize::MAX; nb]);
+    let (mut live, mut reached) = (vec![usize::MAX; nb], vec![usize::MAX; nb]);
+    let (mut own, mut own_of) = (vec![0; ns + nb], vec![usize::MAX; ns + nb]);
+    for (slot, touches) in by_slot.iter().enumerate() {
+        let writes = |si: usize| matches!(access(si), Some((s, false, _)) if s == slot);
+        let mut blocks = Vec::new();
+        for &si in touches {
+            let b = block[si];
+            if touched[b] != slot {
+                (touched[b], first_reads[b], last_write[b]) = (slot, !writes(si), usize::MAX);
+                blocks.push(b);
+            }
+            if writes(si) {
+                last_write[b] = si;
+            }
+        }
+        // Live where a block reads the slot first, and back from there
+        // through blocks that do not touch it.
+        let mut work: Vec<usize> = blocks.iter().copied().filter(|&b| first_reads[b]).collect();
+        for &b in &work {
+            live[b] = slot;
+        }
+        let mut region = work.clone();
+        while let Some(c) = work.pop() {
+            for &p in &bpreds[c] {
+                if live[p] != slot && touched[p] != slot {
+                    live[p] = slot;
+                    region.push(p);
+                    work.push(p);
+                }
+            }
+        }
+        // Reached, where live: on from each block that writes it.
+        let mut work: Vec<usize> = blocks.iter().copied().filter(|&b| last_write[b] != usize::MAX).collect();
+        while let Some(p) = work.pop() {
+            for &t in &succ[lasts[p]] {
+                let c = block[t];
+                if live[c] == slot && reached[c] != slot {
+                    reached[c] = slot;
+                    work.push(c);
+                }
+            }
+        }
+        // A web's root an access where it has one.
+        let mut union = |x: usize, y: usize| {
+            for z in [x, y] {
+                if own_of[z] != slot {
+                    (own_of[z], own[z]) = (slot, z);
+                }
+            }
+            let (a, b) = (find(&mut own, x), find(&mut own, y));
+            if a < ns {
+                own[b] = a;
+            } else {
+                own[a] = b;
+            }
+        };
+        // In a block, a read joined to the write before it, or to the
+        // block's start; and each block's start where live and reached to
+        // the end of each block before it, its last write or its start.
+        let mut at = (usize::MAX, usize::MAX);
+        for &si in touches {
+            let b = block[si];
+            if at.0 != b {
+                at = (b, if reached[b] == slot { ns + b } else { usize::MAX });
+            }
+            if writes(si) {
+                at.1 = si;
+            } else if at.1 != usize::MAX {
+                union(si, at.1);
+            }
+        }
+        for &c in region.iter().filter(|&&c| reached[c] == slot) {
+            for &p in &bpreds[c] {
+                if touched[p] == slot && last_write[p] != usize::MAX {
+                    union(ns + c, last_write[p]);
+                } else if reached[p] == slot {
+                    union(ns + c, ns + p);
+                }
+            }
+        }
+        for &si in touches {
+            if own_of[si] != slot {
+                (own_of[si], own[si]) = (slot, si);
+            }
+            parent[si] = find(&mut own, si);
         }
     }
     // What each web shows: an `f64`'s, and whether it is read (used).

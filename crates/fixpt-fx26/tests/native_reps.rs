@@ -3,9 +3,9 @@
 //! `reps.rs`), its oracle (`fixpt_native::direct::reps_oracle`): for every
 //! register word of the front end compiled with register code, the cells
 //! split, where instructions start, the raw slots and parameters, the raw
-//! references, what is live, and in each version (fixnum and general, with
-//! and without callees known) every instruction's representations and the
-//! conversions before it, the same. And the pieces of no word: joins,
+//! references, what is live, the frame's webs, and in each version (fixnum
+//! and general, with and without callees known) every instruction's
+//! representations and the conversions before it, the same. And the pieces of no word: joins,
 //! unboxings, checks, and every primitive's raw operation.
 
 mod common;
@@ -109,6 +109,7 @@ fn compare(limit: usize) {
                 ("raw params".into(), vec![f.params]),
                 ("raw refs".into(), bits(&f.raw_refs)),
                 ("live".into(), f.live.clone()),
+                ("webs".into(), f.webs.clone()),
             ];
             for v in &f.versions {
                 let known = v.callees.iter().any(|&c| c != 0);

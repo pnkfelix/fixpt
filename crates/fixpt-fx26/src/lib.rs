@@ -526,6 +526,10 @@ pub const NATIVE_DIRECT_X64_ASM: &str = include_str!("native-direct-x64-asm.fx")
 /// in FX-26: the analysis, of no machine's.
 pub const NATIVE_REPS: &str = include_str!("native-reps.fx");
 
+/// Its webs: a frame slot's writes and reads, joined where a write reaches
+/// a read, by basic block.
+pub const NATIVE_REPS_WEBS: &str = include_str!("native-reps-webs.fx");
+
 /// Raw values, and the operations on them native code does in line.
 pub const NATIVE_DIRECT_X64_RAW: &str = include_str!("native-direct-x64-raw.fx");
 
@@ -578,7 +582,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 164] = [
+pub const FRONT_END_MODULES: [(&str, &str); 165] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("eager-reader-states.fx", EAGER_READER_STATES),
     ("syn.fx", SYN),
@@ -646,6 +650,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 164] = [
     ("native-direct-x64-layout.fx", NATIVE_DIRECT_X64_LAYOUT),
     ("native-direct-x64-layout-types.fx", NATIVE_DIRECT_X64_LAYOUT_TYPES),
     ("native-direct-x64-asm.fx", NATIVE_DIRECT_X64_ASM),
+    ("native-reps-webs.fx", NATIVE_REPS_WEBS),
     ("native-reps.fx", NATIVE_REPS),
     ("native-direct-x64-raw.fx", NATIVE_DIRECT_X64_RAW),
     ("native-direct-x64-flat.fx", NATIVE_DIRECT_X64_FLAT),

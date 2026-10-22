@@ -1145,4 +1145,35 @@ end grew 22–28%, as the front end did (40.8k → 51.1k lines).
    instruction-long array and search back. On register code the whole
    of `native_reps`, every one of the front end's 4,898 register words
    included, takes 84 s, so it is filed (`TODO.md` §114), not changed
-   with this.
+   with this. (Since done, the same day: "`webs` by basic block", below.)
+
+## `webs` by basic block (2026-10-22)
+
+The user: "Can you address that quadratic algorithm?" (`TODO.md` §114,
+now `DONE.md` §114).
+
+1. **The same webs, not better ones.** The representation pass could
+   find webs some other way (SSA, or not splitting a slot at all), but
+   what it decides from them, which slots are raw and which are split,
+   is compared word for word between the Rust and FX-26 versions, and
+   the native code made from it is tested. So the change keeps the
+   partition exactly, and was checked against the old search on every
+   word before the search was removed.
+2. **By basic block, not by instruction.** Done by instruction, a slot
+   at a time costs the slot's live range, and the front end's module
+   bodies are 8,000 straight instructions with hundreds of slots live
+   at once: lowered, 120 s for one word, three times the search. By
+   block, a straight body is one block, and a slot costs its own
+   accesses.
+3. **The FX-26 version in a file of its own**, `native-reps-webs.fx`, a
+   module file of no state that `native-reps.fx` loads, as
+   `native-reps.fx` would have passed 1000 lines. It has the blocks
+   (`nr-blocks`), a slot's webs (`nr-slot-webs`) and the union-find
+   (`nr-find`).
+4. **`native_reps` compares the webs themselves** (`Facts::webs`,
+   `nr-web-names`, exported for it). What it compared before rests on
+   webs only where a slot holds an `f64` and something else, which the
+   front end rarely does. The webs are named canonically (the first
+   instruction of each), as the two versions' union-finds pick
+   different roots.
+
