@@ -205,12 +205,12 @@ fn overview(h: &dyn Helpful) {
         rows.push((",returns TYPE", "what produces one"));
     }
     if h.dialect() == "FX-26" {
-        rows.push((",disassemble E", "E's cellular code (under --fx26-run cellular); polymorphic, projected first"));
+        rows.push((",disassemble E", "E's cellular code (not on rs-scheme-vm or fx-ast-eval); polymorphic, projected first"));
         rows.push((",disassemble-asm E", "the same, and each word's machine code (or its stencils' source)"));
         rows.push((",inliners NAME", "the globals whose register code inlines NAME's calls"));
         rows.push((",list-outdated", "the definitions out of date: using a global since defined again at another type"));
         rows.push((",load FILE", "run the file's forms here, as `fixpt eval` does, re-runs waiting (`,rerun-outdated`)"));
-        rows.push((",native NAME [ARG…]", "NAME's procedure in the native convention: its machine code, and called on ARGs (under --fx26-run cellular)"));
+        rows.push((",native NAME [ARG…]", "NAME's procedure in the native convention: its machine code, and called on ARGs (not on rs-scheme-vm or fx-ast-eval)"));
         rows.push((",pending [clear]", "the entries of types waiting on types not defined yet, or drop them"));
         rows.push((",rerun-outdated", "run the definitions out of date again, oldest first"));
         rows.push((",redefine b|r", "whether the next redefinition that would break definitions breaks them or is refused"));

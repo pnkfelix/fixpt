@@ -3,7 +3,7 @@
 //! A form is checked, lowered to Scheme that carries what the checker proved
 //! (`fixpt_fx26::lower`), and run. The REPL prints what FX-87's did — the
 //! value, then ` : <type> ! <effect>` — and `,code` shows the lowered Scheme
-//! (under `--fx26-run cellular`, the words each form makes).
+//! (on a machine that compiles to cellular words, the words each form makes).
 //!
 //! Definitions persist between inputs: `(define name type expression)`,
 //! `(define name expression)` and `(define-type name type)`.
@@ -147,7 +147,7 @@ pub fn repl(backend: Backend) -> i32 {
         Backend::Bytecode => "bytecode engine",
     };
     println!("fixpt {} — FX-26, {engine}", env!("CARGO_PKG_VERSION"));
-    // Say what runs each form: `--fx26-run` chooses.
+    // Say what runs each form: the machine chooses.
     let machine = crate::CELLULAR_MACHINE_NAME.get().copied().unwrap_or("the cellular machine written in Rust");
     let how = match session.strategy {
         Strategy::Lower => format!("lowered to Scheme and run on the {engine}"),
@@ -158,7 +158,7 @@ pub fn repl(backend: Backend) -> i32 {
         Strategy::Cellular => format!("compiled to cellular words by the compiler written in FX-26, and run on {machine}"),
     };
     println!("(each form is checked, {how}.");
-    println!(" Machine: {}; `fixpt help` lists the others.", crate::FX26_MACHINE_NAME.get().map(String::as_str).unwrap_or("rs-scheme-vm"));
+    println!(" Machine: {}; `fixpt machines` lists the others.", crate::FX26_MACHINE_NAME.get().map(String::as_str).unwrap_or("rs-scheme-vm"));
     match session.strategy {
         Strategy::Lower => println!(" `,help` for commands, `,code` to show the lowered Scheme. ^D leaves.)"),
         Strategy::Cellular => println!(" `,help` for commands, `,code` to show the words each form makes. ^D leaves.)"),
@@ -354,16 +354,16 @@ pub fn repl(backend: Backend) -> i32 {
             if crate::CELLULAR_MACHINE_CODE.get().copied().flatten().is_none() {
                 println!("; {name} interprets the cells: it has no machine code for a word to show.");
                 if name.contains("hand-encoded") {
-                    println!(";   `--cellular-machine native-compiled`, `fx-compiled` or `registers` compiles each word.");
+                    println!(";   `--machine fx-cells-rsjit-cellcc`, `fx-cells-fxjit-cellcc` or `fx-regs-rsjit-cellcc` compiles each word.");
                 }
             }
         }
         // `,disassemble E`: E's cellular code, shown, as `disassemble` gives
-        // it (under `--fx26-run cellular`; lowered, there is none).
+        // it (lowered to Scheme, there is none).
         let text = match text.trim().strip_prefix(",disassemble") {
             Some(e) if !e.trim().is_empty() && session.strategy == Strategy::Lower => {
                 println!("; lowered to Scheme, `{}` is a Scheme procedure, with no cellular code:", e.trim());
-                println!(";   `,code` shows a form's lowering; run with `--fx26-run cellular` to disassemble.");
+                println!(";   `,code` shows a form's lowering; run on another machine (`fixpt machines`) to disassemble.");
                 continue;
             }
             Some(e) if !e.trim().is_empty() => {
@@ -1510,7 +1510,7 @@ fn a_kind(kind: &str) -> String {
 /// What the compiler cannot do yet it says.
 fn native(session: &mut Fx26Session, rest: &str) {
     if session.strategy != Strategy::Cellular {
-        println!("; `,native` compiles what the compiler written in FX-26 makes: run with `--fx26-run cellular`.");
+        println!("; `,native` compiles what the compiler written in FX-26 makes: run on another machine (`fixpt machines`).");
         return;
     }
     // `,native (E)`: E, as a procedure of no arguments, compiled and run.
@@ -1829,8 +1829,8 @@ fn run_native_fx(rt: &mut fixpt_runtime::Runtime, closure: fixpt_heap::Value, fu
     fixpt_native::direct::with_machine(|m| NativeRun::Ran(m.call(rt, p, &[], fuel).map_err(|t| t.what))).unwrap_or_else(|e| NativeRun::Ran(Err(e)))
 }
 
-/// The session's runner for the native convention (`--calling-convention
-/// native`): the expression's procedure compiled (`fixpt_native::direct`)
+/// The session's runner for the native convention (a `nativecc`
+/// machine): the expression's procedure compiled (`fixpt_native::direct`)
 /// and called.
 fn run_native(rt: &mut fixpt_runtime::Runtime, closure: fixpt_heap::Value, fuel: u64) -> fixpt_fx26::session::NativeRun {
     use fixpt_fx26::session::NativeRun;

@@ -37,8 +37,7 @@ checked against a source while writing; this note was written offline.
 A program that recurses five frames and then loops, run as
 
 ```
-fixpt --dialect fx26 --fx26-run cellular --cellular-machine registers \
-      --calling-convention native --step-limit none eval spin.fx
+fixpt --machine fx-regs-rsjit-nativecc --step-limit none eval spin.fx
 ```
 
 and attached to with `lldb -p PID -o "thread backtrace all"`:

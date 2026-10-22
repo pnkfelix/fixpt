@@ -87,8 +87,8 @@ fn a_knot_through_a_kept_procedure_is_refused() {
 }
 
 /// Redefining a procedure over and over at the REPL, as reloading a file
-/// does, compiled to native code as `fixpt --fx26-run cellular
-/// --cellular-machine registers --calling-convention native repl` runs it:
+/// does, compiled to native code as `fixpt --machine
+/// fx-regs-rsjit-nativecc` runs it:
 /// what the old definitions made dies. Neither the session's explicit roots
 /// (handles a form made and kept) nor the live words (the compiler written
 /// in FX-26 keeping every lambda made, or every global ever made for a

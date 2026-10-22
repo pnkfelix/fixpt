@@ -7,9 +7,10 @@ subsumes several of M13's remaining items.
 ## Where we are, and why change it
 
 FX-26 compiles each `lambda` to a cellular[^cellular] word: cells, run by an inner
-interpreter. Five machines run them (`--cellular-machine`): `rust`,
-`native` and `stencils` interpret the cells, and `native-compiled` and
-`registers` compile them to machine code. The compiled forms keep the
+interpreter. Five machines run them (`fixpt machines`): `fx-cells-rsinterp`,
+`fx-cells-asminterp` and `fx-cells-stencils-cellcc` interpret the cells,
+and `fx-cells-rsjit-cellcc` and `fx-regs-rsjit-cellcc` compile them to
+machine code. The compiled forms keep the
 interpreter's shape, which came from the Forth models M12 and M13 took
 (`docs/research/cellular-compilers.md`):
 
@@ -236,7 +237,7 @@ its code in one.
    when there is room), which may collect: the frames are walked by their
    links, every word of each after the link and return address a value,
    so no stack maps are needed yet; globals bound when compiling.
-   In the REPL, `--calling-convention native` makes the program's
+   In the REPL, a `nativecc` machine makes the program's
    convention native in both checkers, and `,native NAME [ARG…]` shows a
    procedure's code in it and calls it; top-level forms stay cellular): the stack segment, the calling
    convention, traps and callouts, and a native compiler for code without
@@ -264,7 +265,7 @@ its code in one.
    delta to the code area's run address, and traps if it is not code in
    the code area; each frame keeps its own code bloblet, and its closure if
    it reads it, so no return-address index is needed. In the REPL, with
-   `--calling-convention native`, every form is compiled so and run:
+   a `nativecc` machine, every form is compiled so and run:
    an expression as a procedure of no arguments; a definition likewise,
    its value put in the global the compiler written in FX-26 makes for it
    (`compile-new-global`); forms compiled alone, as Larceny's REPL

@@ -22,19 +22,18 @@ use fixpt_heap::image;
 use fixpt_scheme::Session;
 
 const USAGE: &str = "\
-fixpt — a Scheme engine with FX-87 and FX-91 front ends
+fixpt — FX-26, and Scheme, FX-87 and FX-91
 
 usage:
-  fixpt repl                     start a read-eval-print loop
-  fixpt fx26                     the FX-26 REPL: `fixpt --dialect fx26 repl`
+  fixpt                          the FX-26 REPL, on the fastest machine here
+  fixpt FILE [ARG...]            run a program: `fixpt run FILE -- ARG...`
   fixpt run FILE... [-- ARG...]  run each file in one session; FX-26: then
                                  `main`, if defined, its integer result the
                                  exit status (70 if the run fails); `args`
                                  gives the ARGs
-  fixpt eval EXPR                evaluate one expression and print it; in
-                                 FX-26, EXPR may be a file (a whole program,
-                                 and a `.fx` one needs no --dialect) or `-`
-                                 for the standard input
+  fixpt eval EXPR                evaluate one expression and print it; EXPR
+                                 may be a file (a whole program) or `-` for
+                                 the standard input
   fixpt eval --raw INPUT         FX-26: print only the last form's value, a
                                  string, as its characters (no quotes,
                                  escapes, type or effect); exit 1 if it is
@@ -48,79 +47,29 @@ usage:
   fixpt compile --full-literals INPUT
                                  the same, every literal in full, in a form
                                  read back exactly (docs/fx26.md)
-  fixpt dump-heap -o OUT FILE... run FILE... and write the resulting heap image
+  fixpt machines                 the machines FX-26 runs on, and which run here
+  fixpt bench [FILE...]          time FX-26 programs on each machine (`fixpt bench --help`)
+  fixpt repl                     the REPL of the language (`fixpt fx26` too)
+  fixpt scheme                   the Scheme REPL: `fixpt --dialect scheme repl`
+  fixpt dump-heap -o OUT FILE... Scheme: run FILE... and write the resulting
+                                 heap image
   fixpt build -o PROG FILE...    the same, as a standalone executable
   fixpt run-image FILE [ARG...]  run a heap image's entry point
   fixpt image info FILE          describe a heap image
   fixpt image verify FILE        load a heap image and check its invariants
-  fixpt bench [FILE...]          time FX-26 programs on each machine (`fixpt bench --help`)
   fixpt front-end-files          the FX-26 front end's files: its module files
                                  built in, then the rest in the order it joins
                                  them: lines (of the text built in) and path
   fixpt help                     show this
 
-options:
-  --dialect scheme|fx87|fx91|fx26  source language (default: scheme)
-  --engine bytecode|ast          execution engine (default: bytecode)
-  --main NAME                    an image's entry point (default: main)
-  --reader scheme|fx26           the Scheme REPL's eager reader (default: scheme)
-  --fx26-machine NAME            how FX-26 runs, once checked. A name says who
-                                 generates the code (rs Rust, fx FX-26), what
-                                 code (scheme, the checked ast, cellular words
-                                 or register code), what runs it, and, where
-                                 the code is compiled to arm64, the calling
-                                 convention (cellcc: inside the cellular
-                                 machine; nativecc: native procedures):
-    fx-regs-rsjit-nativecc       the default, also `fast`: register code,
-                                 compiled to arm64 by Rust (direct.rs); on
-                                 x86_64, fx-regs-rsjit-cellcc
-    rs-scheme-vm                 lowered to Scheme by Rust, on the bytecode VM
-    fx-ast-eval                  the evaluator written in FX-26
-    fx-cells-rsinterp            cellular words, interpreted by Rust
-    fx-cells-asminterp           cellular words, interpreted by hand-written
-                                 arm64
-    fx-cells-rsjit-cellcc        cellular words, compiled to arm64 by Rust
-    fx-cells-fxjit-cellcc        cellular words, compiled to arm64 by
-                                 native.fx (FX-26)
-    fx-cells-stencils-cellcc     cellular words, copy-and-patch (nightly)
-    fx-regs-rsjit-cellcc         register code, compiled to arm64 by Rust
-    fx-regs-fxjit-cellcc         register code, compiled to x86_64 by
-                                 native-x64-regs.fx (FX-26); x86_64 only
-    fx-regs-fxjit-nativecc       register code, compiled to x86_64 by
-                                 native-direct-x64.fx (FX-26), native calls;
-                                 x86_64 only
-                                 The others are references the tests compare
-                                 against. The three options below pick the
-                                 parts one by one, as before; given any, the
-                                 rest default as for rs-scheme-vm
-  --fx26-run lower|evaluate|cellular
-                                 how FX-26 runs, once checked: lowered to Scheme
-                                 (the default with this option), by the
-                                 evaluator written in FX-26, or compiled to
-                                 cellular words by the compiler written in FX-26
-                                 and run on the cellular machine
-  --cellular-machine rust|native|native-compiled|fx-compiled|stencils|registers|fx-registers
-                                 which cellular machine runs compiled words: the
-                                 one written in Rust (default); the hand-encoded
-                                 arm64 one, running the cells (native), or with
-                                 each word compiled to machine code first, by
-                                 the compiler written in Rust (native-compiled)
-                                 or by the one written in FX-26, native.fx
-                                 (fx-compiled); the stencils (built with
-                                 nightly); or the hand-encoded one running each
-                                 lambda's register code, which the compiler then
-                                 makes, compiled by Rust (registers) or, on
-                                 x86_64, by native-x64-regs.fx (fx-registers)
-  --calling-convention cellular|native|fx-native
-                                 FX-26's default calling convention: what a
-                                 procedure type that names none has, and how
-                                 procedures are made (default: cellular); native
-                                 procedures are shown and called by `,native`;
-                                 fx-native is native, its procedures compiled
-                                 by native-direct-x64.fx (FX-26), x86_64 only
-  --gc-every N                   also collect at every Nth safepoint, moving every
-                                 object each time, to shake out rooting bugs
-                                 (default: 0, only when the heap is full)
+options (before or after the command; after `--`, the program's):
+  --machine NAME                 how FX-26 runs (default: fast, the fastest
+                                 here); `fixpt machines` lists them. Also
+                                 spelled --fx26-machine
+  --dialect fx26|scheme|fx87|fx91
+                                 the language (default: fx26; Scheme for a
+                                 `.scm` or `.ss` file, and for dump-heap and
+                                 build)
   --step-limit N|none            how many evaluation steps a form may take before
                                  it is stopped, or no limit (default: 20000000
                                  for FX-87, FX-91 and FX-26; none for Scheme)
@@ -132,13 +81,17 @@ options:
                                  the same for the FX-26 REPL's run of a form as it
                                  is typed (default: 200000); with none, typing a
                                  loop can hang the editor
+  --engine bytecode|ast          the Scheme engine (default: bytecode)
+  --reader scheme|fx26           the Scheme REPL's eager reader (default: scheme)
+  --main NAME                    an image's entry point (default: main)
+  --gc-every N                   also collect at every Nth safepoint, moving every
+                                 object each time, to shake out rooting bugs
+                                 (default: 0, only when the heap is full)
 
 `--dialect fx87` and `--dialect fx91` select a *language*, not merely its
 reader: a form is type- and effect-checked, erased to Scheme and run on the same
 engine. Each REPL reports in its own reference's layout — FX-91 puts the type
-and effect above the value, FX-87 after it. `--dialect fx26` reports as FX-87
-does; its lowered Scheme carries what the checker proved, as `%fx-note`
-claims the compiler acts on.
+and effect above the value, FX-87 after it. FX-26 reports as FX-87 does.
 
 `--reader fx26` reads the Scheme REPL's input with the eager reader written in
 FX-26 rather than the one written in Scheme. It runs on every keystroke, so it
@@ -150,6 +103,13 @@ heap, needs no `fixpt` on the target, and runs its entry point when invoked.
 `run-image` accepts either kind of file, and picks the engine the image was
 made with rather than being told.
 ";
+
+/// The commands, as the first word: a word that is none of them but names
+/// a file runs it (`fixpt FILE`).
+const COMMANDS: [&str; 17] = [
+    "repl", "fx26", "scheme", "run", "eval", "check", "compile", "machines", "bench", "dump-heap", "build", "run-image", "image",
+    "front-end-files", "help", "regcode-survey", "--help",
+];
 
 fn main() {
     // A binary that carries an image *is* that program: it owns its whole
@@ -192,52 +152,56 @@ fn run(args: &[String]) -> i32 {
     if args.first().is_some_and(|a| a == "regcode-survey") {
         return survey::command(&args[1..]);
     }
-    let (mut flags, mut rest) = split_flags(args);
+    let (mut flags, mut rest) = match split_flags(args) {
+        Ok(split) => split,
+        Err(e) => {
+            eprintln!("fixpt: {e}\n(`fixpt help` lists the commands and options)");
+            return 2;
+        }
+    };
     // `--eval INPUT` and its kin are the commands `eval INPUT`, and so on.
     if let Some(cmd) = rest.first().and_then(|a| a.strip_prefix("--")).filter(|c| ["eval", "check", "compile"].contains(c)) {
         rest[0] = cmd.to_string();
     }
-    // `fixpt fx26`: the FX-26 REPL.
-    if rest.first().is_some_and(|a| a == "fx26") && flags.dialect.as_deref().is_none_or(|d| d == "fx26") {
-        flags.dialect = Some("fx26".into());
-        rest[0] = "repl".into();
-    }
-    // `--fx26-machine NAME`, or none of the parts' options: a machine by its
-    // name, the fastest unless another is named (`TODO.md` §78); the parts,
-    // given one by one, keep their old defaults.
-    let parts_given = flags.fx26_run.is_some() || flags.cellular_machine.is_some() || flags.calling_convention.is_some();
-    let named = match (flags.fx26_machine.as_deref(), parts_given) {
-        (Some(m), true) => {
-            eprintln!("fixpt: --fx26-machine {m} names all of how FX-26 runs: give it, or --fx26-run, --cellular-machine and --calling-convention, not both");
-            return 2;
+    // `fixpt fx26` and `fixpt scheme`: that language's REPL.
+    for (cmd, dialect) in [("fx26", "fx26"), ("scheme", "scheme")] {
+        if rest.first().is_some_and(|a| a == cmd) && flags.dialect.as_deref().is_none_or(|d| d == dialect) {
+            flags.dialect = Some(dialect.into());
+            rest[0] = "repl".into();
         }
-        (Some(m), false) => Some(m.to_string()),
-        (None, true) => None,
-        (None, false) => Some("fast".to_string()),
-    };
-    if let Some(m) = named {
-        let Some((run, machine, convention)) = FX26_MACHINES.iter().find(|(n, ..)| *n == m || (m == "fast" && *n == FASTEST)).map(|(_, r, c, v, _)| (*r, *c, *v))
-        else {
-            let names: Vec<&str> = FX26_MACHINES.iter().map(|(n, ..)| *n).collect();
-            eprintln!("fixpt: unknown --fx26-machine `{m}` (want fast, or one of {})", names.join(", "));
-            return 2;
-        };
-        flags.fx26_run = Some(run.into());
-        flags.cellular_machine = machine.map(Into::into);
-        flags.calling_convention = convention.map(Into::into);
     }
-    // Only FX-26 has `check` and `compile`; and a `.fx` file is FX-26.
-    let fx26_implied = match rest.first().map(String::as_str) {
-        Some("check" | "compile") => true,
-        Some("eval" | "run") => rest.get(1).is_some_and(|f| f.ends_with(".fx") && std::path::Path::new(f).is_file()),
+    // `fixpt FILE [ARG...]`: `fixpt run FILE -- ARG...` (`split_flags`
+    // put the `--` in).
+    if rest.first().is_some_and(|f| !COMMANDS.contains(&f.as_str()) && std::path::Path::new(f).is_file()) {
+        rest.insert(0, "run".into());
+    }
+    // A machine by its name, the fastest unless another is named
+    // (`TODO.md` §78), and the parts it stands for.
+    let m = flags.fx26_machine.clone().unwrap_or_else(|| "fast".into());
+    let Some((run, machine, convention)) = FX26_MACHINES.iter().find(|(n, ..)| *n == m || (m == "fast" && *n == FASTEST)).map(|(_, r, c, v, _)| (*r, *c, *v))
+    else {
+        eprintln!("fixpt: unknown machine `{m}`; `fixpt machines` lists them{}", did_you_mean(&m, FX26_MACHINES.iter().map(|(n, ..)| *n)));
+        return 2;
+    };
+    flags.fx26_run = Some(run.into());
+    flags.cellular_machine = machine.map(Into::into);
+    flags.calling_convention = convention.map(Into::into);
+    // FX-26 unless said otherwise, or the files are Scheme's (`.scm`,
+    // `.ss`), or the command is Scheme's alone.
+    let scheme_file = |f: &String| f.ends_with(".scm") || f.ends_with(".ss");
+    let scheme_implied = match rest.first().map(String::as_str) {
+        Some("dump-heap" | "build") => true,
+        Some("run") => rest[1..].iter().take_while(|a| *a != "--").all(scheme_file) && rest.len() > 1,
+        Some("eval") => rest.len() == 2 && scheme_file(&rest[1]) && std::path::Path::new(&rest[1]).is_file(),
         _ => false,
     };
     // The dialect picks a *language*, which is a front end, not just a set of
     // lexical rules: FX-91 forms go through the checker and the code generator
     // before any of this runs them.
     let dialect = match flags.dialect.as_deref() {
-        None if fx26_implied => Dialect::Fx26,
-        None | Some("scheme") => Dialect::Scheme,
+        None if scheme_implied => Dialect::Scheme,
+        None => Dialect::Fx26,
+        Some("scheme") => Dialect::Scheme,
         Some("fx91") => Dialect::Fx91,
         Some("fx87") => Dialect::Fx87,
         Some("fx26") => Dialect::Fx26,
@@ -261,41 +225,13 @@ fn run(args: &[String]) -> i32 {
         None | Some("lower") => fixpt_fx26::session::Strategy::Lower,
         Some("evaluate") => fixpt_fx26::session::Strategy::Evaluate,
         Some("cellular") => fixpt_fx26::session::Strategy::Cellular,
-        Some(name) => {
-            eprintln!("fixpt: unknown --fx26-run `{name}` (want lower, evaluate or cellular)");
-            return 2;
-        }
+        Some(name) => unreachable!("a machine's parts: {name}"),
     };
     let _ = FX26_RUN.set(strategy);
-    let parts = (flags.fx26_run.as_deref().unwrap_or("lower"), flags.cellular_machine.as_deref(), flags.calling_convention.as_deref());
-    let _ = FX26_MACHINE_NAME.set(
-        match FX26_MACHINES.iter().find(|(_, r, c, v, _)| {
-            (*r, c.unwrap_or("rust"), v.unwrap_or("cellular"))
-                == (parts.0, parts.1.unwrap_or("rust"), parts.2.unwrap_or("cellular"))
-                && (*r == "cellular" || parts.1.is_none())
-        }) {
-            Some((n, ..)) => n.to_string(),
-            None => format!("--fx26-run {} --cellular-machine {} --calling-convention {}", parts.0, parts.1.unwrap_or("rust"), parts.2.unwrap_or("cellular")),
-        },
-    );
-    // The machines that run arm64 code, refused where that cannot run: all
-    // but the hand-encoded one, the words compiled into it, register code
-    // and the stencils, which run on x86_64 too (`fixpt_native::cellular::x64`;
-    // the stencils where the build made them, below).
-    if !fixpt_native::AVAILABLE {
-        let cellular = |m: &str| fixpt_native::CELLULAR_AVAILABLE && matches!(m, "native" | "native-compiled" | "fx-compiled" | "registers" | "stencils" | "fx-registers");
-        let machine = flags.cellular_machine.as_deref().filter(|m| *m != "rust" && !cellular(m)).map(|m| ("--cellular-machine", m));
-        let convention = flags
-            .calling_convention
-            .as_deref()
-            .filter(|c| matches!(*c, "native" | "fx-native") && !fixpt_native::NATIVE_CONVENTION_AVAILABLE)
-            .map(|c| ("--calling-convention", c));
-        if let Some((flag, value)) = machine.or(convention)
-            && ["native", "native-compiled", "fx-compiled", "stencils", "registers", "fx-registers", "fx-native"].contains(&value)
-        {
-            eprintln!("fixpt: `{flag} {value}`: {}", fixpt_native::UNAVAILABLE);
-            return 2;
-        }
+    let _ = FX26_MACHINE_NAME.set(if m == "fast" { FASTEST.to_string() } else { m });
+    if let Some(why) = unavailable(flags.cellular_machine.as_deref(), flags.calling_convention.as_deref()) {
+        eprintln!("fixpt: machine `{}`: {why}", FX26_MACHINE_NAME.get().map(String::as_str).unwrap_or(""));
+        return 2;
     }
     let machine: fixpt_runtime::RunWord = match flags.cellular_machine.as_deref() {
         None | Some("rust") => fixpt_engine::cellular::run_word,
@@ -305,21 +241,10 @@ fn run(args: &[String]) -> i32 {
         Some("fx-compiled") => fixpt_native::cellular::run_word_as_is,
         // Register code compiled before the run, by `native-x64-regs.fx`:
         // only for x86_64 so far (`TODO.md` §81 for arm64).
-        Some("fx-registers") if !cfg!(target_arch = "x86_64") => {
-            eprintln!("fixpt: `--cellular-machine fx-registers`: FX-26 compiles register code for x86_64 only (TODO.md §81)");
-            return 2;
-        }
         Some("fx-registers") => fixpt_native::cellular::run_word_as_is,
-        Some("stencils") if fixpt_native::stencil::opt_levels().is_empty() => {
-            eprintln!("fixpt: this build has no stencils (it found no nightly compiler)");
-            return 2;
-        }
         Some("stencils") => fixpt_native::stencil::run_word,
         Some("registers") => fixpt_native::cellular::run_word_registers,
-        Some(name) => {
-            eprintln!("fixpt: unknown --cellular-machine `{name}` (want rust, native, native-compiled, fx-compiled, stencils, registers or fx-registers)");
-            return 2;
-        }
+        Some(name) => unreachable!("a machine's parts: {name}"),
     };
     let _ = CELLULAR_MACHINE.set(machine);
     let _ = CELLULAR_PLACE_CODE.set(match flags.cellular_machine.as_deref() {
@@ -327,20 +252,11 @@ fn run(args: &[String]) -> i32 {
         _ => None,
     });
     let _ = EMACS.set(flags.emacs);
-    // The compiler written in FX-26 makes x86_64's native code only
-    // (`TODO.md` §81 for arm64's).
-    if flags.calling_convention.as_deref() == Some("fx-native") && !cfg!(target_arch = "x86_64") {
-        eprintln!("fixpt: `--calling-convention fx-native`: FX-26 compiles the native convention for x86_64 only (TODO.md §81)");
-        return 2;
-    }
     let _ = NATIVE_BY_FX26.set(flags.calling_convention.as_deref() == Some("fx-native"));
     let _ = NATIVE_CONVENTION.set(match flags.calling_convention.as_deref() {
         None | Some("cellular") => false,
         Some("native" | "fx-native") => true,
-        Some(name) => {
-            eprintln!("fixpt: unknown --calling-convention `{name}` (want cellular, native or fx-native)");
-            return 2;
-        }
+        Some(name) => unreachable!("a machine's parts: {name}"),
     });
     let _ = CELLULAR_MACHINE_CODE.set(match flags.cellular_machine.as_deref() {
         Some("native-compiled" | "fx-compiled" | "registers" | "fx-registers") => Some(fixpt_native::cellular::machine_code_text as fixpt_runtime::MachineCode),
@@ -385,8 +301,12 @@ fn run(args: &[String]) -> i32 {
     }
 
     match rest.first().map(String::as_str) {
-        None | Some("help") | Some("-h") | Some("--help") => {
+        Some("help") | Some("-h") | Some("--help") => {
             print!("{USAGE}");
+            0
+        }
+        Some("machines") => {
+            print!("{}", machines_listing());
             0
         }
         // The FX-26 front end's files, in order, as `wc -l` prints them:
@@ -407,7 +327,7 @@ fn run(args: &[String]) -> i32 {
             let _ = listed.and_then(|()| writeln!(out, "{:>6} {dir}/bootstrap.fx (the bootstrap's driver, after them)", fixpt_fx26::BOOTSTRAP.lines().count()));
             0
         }
-        Some("repl") => match dialect {
+        None | Some("repl") => match dialect {
             Dialect::Scheme => repl(profile, backend, flags.reader.as_deref() == Some("fx26")),
             Dialect::Fx87 => fx87::repl(backend),
             Dialect::Fx91 => fx91::repl(backend),
@@ -418,11 +338,14 @@ fn run(args: &[String]) -> i32 {
                 eprintln!("fixpt run: needs at least one file");
                 return 2;
             }
+            // Only FX-26 gives a program its arguments: the others take the
+            // files before a `--`.
+            let files: Vec<String> = rest[1..].iter().take_while(|a| *a != "--").cloned().collect();
             match dialect {
-                Dialect::Fx87 => fx87::run_files(backend, &rest[1..]),
-                Dialect::Fx91 => fx91::run_files(backend, &rest[1..]),
+                Dialect::Fx87 => fx87::run_files(backend, &files),
+                Dialect::Fx91 => fx91::run_files(backend, &files),
                 Dialect::Fx26 => fx26::run_files(backend, &rest[1..]),
-                Dialect::Scheme => match run_files(profile, backend, &rest[1..]) {
+                Dialect::Scheme => match run_files(profile, backend, &files) {
                     Ok(_) => 0,
                     Err(e) => {
                         eprintln!("fixpt: {e}");
@@ -519,7 +442,7 @@ fn run(args: &[String]) -> i32 {
         }
         Some("image") => image_command(&rest[1..]),
         Some(other) => {
-            eprintln!("fixpt: unknown command `{other}`\n\n{USAGE}");
+            eprintln!("fixpt: unknown command `{other}`, and no such file{}\n(`fixpt help` lists the commands)", did_you_mean(other, COMMANDS.into_iter()));
             2
         }
     }
@@ -550,21 +473,36 @@ struct Flags {
     emacs: bool,
 }
 
-/// The FX-26 machines by name (`--fx26-machine`, `TODO.md` §78): who
+/// The FX-26 machines by name (`--machine`, `TODO.md` §78): who
 /// generates the code (`rs` Rust, `fx` FX-26), what code (Scheme, the
-/// checked tree, cellular words, register code), and what runs it; then
-/// the parts' options they stand for, and what each is, for the help and
-/// the REPL. `fast` is `FASTEST`.
-pub(crate) const FX26_MACHINES: [(&str, &str, Option<&str>, Option<&str>, &str); 11] = [
+/// checked tree, cellular words, register code), what runs it, and, where
+/// it is machine code, the calling convention (`cellcc`, inside the
+/// cellular machine; `nativecc`, native procedures); then the parts they
+/// stand for, and what each is, for `fixpt machines` and the REPL. `fast`
+/// is `FASTEST`.
+pub(crate) const FX26_MACHINES: [(&str, &str, Option<&str>, Option<&str>, &str); 12] = [
     ("rs-scheme-vm", "lower", None, None, "lowered to Scheme by Rust, run on the bytecode VM"),
     ("fx-ast-eval", "evaluate", None, None, "run by the evaluator written in FX-26"),
     ("fx-cells-rsinterp", "cellular", Some("rust"), None, "cellular words by the FX-26 compiler, interpreted by Rust"),
-    ("fx-cells-asminterp", "cellular", Some("native"), None, "cellular words, interpreted by hand-written arm64"),
-    ("fx-cells-rsjit-cellcc", "cellular", Some("native-compiled"), None, "cellular words, compiled to arm64 by Rust"),
-    ("fx-cells-fxjit-cellcc", "cellular", Some("fx-compiled"), None, "cellular words, compiled to arm64 by native.fx (FX-26)"),
-    ("fx-cells-stencils-cellcc", "cellular", Some("stencils"), None, "cellular words, by copy-and-patch stencils (nightly)"),
-    ("fx-regs-rsjit-cellcc", "cellular", Some("registers"), None, "register code, compiled to arm64 by Rust, cellular calls"),
-    ("fx-regs-fxjit-cellcc", "cellular", Some("fx-registers"), None, "register code, compiled to x86_64 by native-x64-regs.fx (FX-26), cellular calls"),
+    (
+        "fx-cells-rsinterp-nativecc",
+        "cellular",
+        Some("rust"),
+        Some("native"),
+        "the same, its procedures compiled by Rust to native ones where it can",
+    ),
+    ("fx-cells-asminterp", "cellular", Some("native"), None, "cellular words, interpreted by hand-written machine code"),
+    ("fx-cells-rsjit-cellcc", "cellular", Some("native-compiled"), None, "cellular words, compiled to machine code by Rust"),
+    (
+        "fx-cells-fxjit-cellcc",
+        "cellular",
+        Some("fx-compiled"),
+        None,
+        "cellular words, compiled to machine code by FX-26 (native.fx; native-x64.fx on x86_64)",
+    ),
+    ("fx-cells-stencils-cellcc", "cellular", Some("stencils"), None, "cellular words, by copy-and-patch stencils (built with nightly)"),
+    ("fx-regs-rsjit-cellcc", "cellular", Some("registers"), None, "register code, compiled to machine code by Rust"),
+    ("fx-regs-fxjit-cellcc", "cellular", Some("fx-registers"), None, "register code, compiled to x86_64 by native-x64-regs.fx (FX-26)"),
     (
         "fx-regs-fxjit-nativecc",
         "cellular",
@@ -577,9 +515,76 @@ pub(crate) const FX26_MACHINES: [(&str, &str, Option<&str>, Option<&str>, &str);
         "cellular",
         Some("registers"),
         Some("native"),
-        "register code, compiled to arm64 by Rust's direct.rs, native calls",
+        "register code, compiled to machine code by Rust's direct.rs, native calls",
     ),
 ];
+
+/// Why a machine of these parts cannot run here, or `None`.
+fn unavailable(machine: Option<&str>, convention: Option<&str>) -> Option<String> {
+    // Where neither arm64 nor x86_64 code runs, only the machine written in
+    // Rust, with neither native convention.
+    let native_machine = machine.is_some_and(|m| m != "rust");
+    if !fixpt_native::AVAILABLE
+        && ((native_machine && !fixpt_native::CELLULAR_AVAILABLE)
+            || (matches!(convention, Some("native" | "fx-native")) && !fixpt_native::NATIVE_CONVENTION_AVAILABLE))
+    {
+        return Some(fixpt_native::UNAVAILABLE.to_string());
+    }
+    // FX-26 compiles register code and the native convention for x86_64
+    // only (`TODO.md` §81 for arm64).
+    if (machine == Some("fx-registers") || convention == Some("fx-native")) && !cfg!(target_arch = "x86_64") {
+        return Some("FX-26 compiles it for x86_64 only (TODO.md §81)".into());
+    }
+    if machine == Some("stencils") && fixpt_native::stencil::opt_levels().is_empty() {
+        return Some("this build has no stencils (it found no nightly compiler)".into());
+    }
+    None
+}
+
+/// `fixpt machines`: each machine, which is the default, and which cannot
+/// run here, and why.
+fn machines_listing() -> String {
+    let mut out = String::from("FX-26's machines (`--machine NAME`; the default, `fast`, marked *):\n");
+    for (name, _, machine, convention, what) in FX26_MACHINES {
+        let mark = if name == FASTEST { "*" } else { " " };
+        out.push_str(&format!("{mark} {name:<27} {what}\n"));
+        if let Some(why) = unavailable(machine, convention) {
+            out.push_str(&format!("  {:<27} (not here: {why})\n", ""));
+        }
+    }
+    out.push_str(
+        "\nA name says who generates the code (rs Rust, fx FX-26), what code (scheme,\n\
+         the checked ast, cellular words or register code), what runs it, and,\n\
+         for machine code, the calling convention (cellcc: inside the cellular\n\
+         machine; nativecc: native procedures). All but the default are\n\
+         references the tests compare against.\n",
+    );
+    out
+}
+
+/// `, did you mean NAME?` for the name of `names` nearest `word`, if near.
+fn did_you_mean<'a>(word: &str, names: impl Iterator<Item = &'a str>) -> String {
+    // Edit distance, by one row at a time.
+    let distance = |a: &str, b: &str| {
+        let b: Vec<char> = b.chars().collect();
+        let mut row: Vec<usize> = (0..=b.len()).collect();
+        for (i, ca) in a.chars().enumerate() {
+            let mut prev = row[0];
+            row[0] = i + 1;
+            for (j, cb) in b.iter().enumerate() {
+                let next = (prev + (ca != *cb) as usize).min(row[j] + 1).min(row[j + 1] + 1);
+                prev = row[j + 1];
+                row[j + 1] = next;
+            }
+        }
+        row[b.len()]
+    };
+    match names.map(|n| (distance(word, n), n)).min() {
+        // Near: 2 edits, more in a longer word, and fewer than half its letters.
+        Some((d, n)) if d <= 2.max(word.len() / 5) && 2 * d < word.chars().count() => format!("; did you mean `{n}`?"),
+        _ => String::new(),
+    }
+}
 /// The machine `fast` names: `fx-regs-rsjit-nativecc`; where arm64 code
 /// cannot run, but the hand-encoded machine can (x86_64),
 /// `fx-regs-rsjit-cellcc`, register code, the fastest there on each of
@@ -596,9 +601,10 @@ pub(crate) const FASTEST: &str = if fixpt_native::AVAILABLE {
 /// parts given one by one where they name none.
 pub(crate) static FX26_MACHINE_NAME: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
-/// `--fx26-run`, for every FX-26 session this process starts.
+/// How the machine runs FX-26, for every FX-26 session this process starts.
 pub(crate) static FX26_RUN: std::sync::OnceLock<fixpt_fx26::session::Strategy> = std::sync::OnceLock::new();
-/// `--cellular-machine`, for every FX-26 session this process starts.
+/// The machine's cellular machine, for every FX-26 session this process
+/// starts.
 pub(crate) static CELLULAR_MACHINE: std::sync::OnceLock<fixpt_runtime::RunWord> = std::sync::OnceLock::new();
 /// How words' machine code made by `native.fx` (or `native-x64.fx` and
 /// `native-x64-regs.fx`) is placed: `fx-compiled` and `fx-registers` only.
@@ -608,8 +614,6 @@ pub(crate) static CELLULAR_PLACE_CODE: std::sync::OnceLock<Option<fixpt_runtime:
 pub(crate) static CELLULAR_MACHINE_CODE: std::sync::OnceLock<Option<fixpt_runtime::MachineCode>> = std::sync::OnceLock::new();
 /// Which machine that is, for the REPL to say.
 pub(crate) static CELLULAR_MACHINE_NAME: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
-/// `--calling-convention native`, for every FX-26 session this process
-/// starts.
 /// The machine for register code, where the front end runs: the hand
 /// register machine (arm64 or x86_64); where that cannot run, the cellular
 /// machine written in Rust.
@@ -621,8 +625,10 @@ pub(crate) fn register_machine() -> fixpt_runtime::RunWord {
     }
 }
 
+/// Whether the machine's convention is native (`nativecc`), for every FX-26
+/// session this process starts.
 pub(crate) static NATIVE_CONVENTION: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-/// `--calling-convention fx-native`: the native convention, each
+/// `fx-regs-fxjit-nativecc`: the native convention, each
 /// procedure's code made by the compiler written in FX-26
 /// (`fx26::compile_by_fx26`).
 pub(crate) static NATIVE_BY_FX26: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -656,7 +662,12 @@ pub(crate) fn apply_gc_policy(session: &mut Session) {
     session.runtime_unrooted().heap.trace = std::env::var_os("FIXPT_GC_TRACE").is_some();
 }
 
-fn split_flags(args: &[String]) -> (Flags, Vec<String>) {
+/// The options a command takes after it, left for it to read.
+const COMMAND_OPTIONS: [&str; 7] = ["--raw", "--full-literals", "--eval", "--check", "--compile", "--help", "-h"];
+
+/// The options, read from anywhere before a `--`; the rest of the words,
+/// in order, with the `--` and all after it. Or why not: an unknown option.
+fn split_flags(args: &[String]) -> Result<(Flags, Vec<String>), String> {
     let mut flags = Flags {
         dialect: None,
         engine: None,
@@ -676,13 +687,11 @@ fn split_flags(args: &[String]) -> (Flags, Vec<String>) {
     let mut i = 0;
     // Each flag takes a value, spelled either `--flag v` or `--flag=v`.
     type Setter = fn(&mut Flags, String);
-    let named: [(&str, Setter); 12] = [
-        ("--calling-convention", |f, v| f.calling_convention = Some(v)),
+    let named: [(&str, Setter); 10] = [
+        ("--machine", |f, v| f.fx26_machine = Some(v)),
         ("--fx26-machine", |f, v| f.fx26_machine = Some(v)),
         ("--speculation-step-limit", |f, v| f.speculation_step_limit = Some(v)),
         ("--step-limit", |f, v| f.step_limit = Some(v)),
-        ("--cellular-machine", |f, v| f.cellular_machine = Some(v)),
-        ("--fx26-run", |f, v| f.fx26_run = Some(v)),
         ("--gc-every", |f, v| f.gc_every = Some(v)),
         ("--dialect", |f, v| f.dialect = Some(v)),
         ("--reader", |f, v| f.reader = Some(v)),
@@ -691,6 +700,18 @@ fn split_flags(args: &[String]) -> (Flags, Vec<String>) {
         ("-o", |f, v| f.out = Some(v)),
     ];
     'outer: while i < args.len() {
+        // After `--`, the program's arguments; after a first word that
+        // names a file (`fixpt FILE ARG...`), too.
+        if args[i] == "--" {
+            rest.extend(args[i..].iter().cloned());
+            break;
+        }
+        if rest.is_empty() && !args[i].starts_with('-') && !COMMANDS.contains(&args[i].as_str()) && std::path::Path::new(&args[i]).is_file() {
+            rest.push(args[i].clone());
+            rest.push("--".into());
+            rest.extend(args[i + 1..].iter().cloned());
+            break;
+        }
         // Flags that take no value.
         if args[i] == "--emacs" {
             flags.emacs = true;
@@ -698,8 +719,9 @@ fn split_flags(args: &[String]) -> (Flags, Vec<String>) {
             continue;
         }
         for (name, set) in named {
-            if args[i] == name && i + 1 < args.len() {
-                set(&mut flags, args[i + 1].clone());
+            if args[i] == name {
+                let Some(v) = args.get(i + 1) else { return Err(format!("`{name}` needs a value")) };
+                set(&mut flags, v.clone());
                 i += 2;
                 continue 'outer;
             }
@@ -710,10 +732,18 @@ fn split_flags(args: &[String]) -> (Flags, Vec<String>) {
                 continue 'outer;
             }
         }
+        let word = args[i].split('=').next().unwrap_or("");
+        if ["--fx26-run", "--cellular-machine", "--calling-convention"].contains(&word) {
+            return Err(format!("`{word}` is gone: a machine is chosen by its name, `--machine NAME` (`fixpt machines` lists them)"));
+        }
+        if word.starts_with("--") && !COMMAND_OPTIONS.contains(&word) {
+            let known = named.iter().map(|(n, _)| *n).chain(["--emacs"]).chain(COMMAND_OPTIONS);
+            return Err(format!("unknown option `{word}`{}", did_you_mean(word, known)));
+        }
         rest.push(args[i].clone());
         i += 1;
     }
-    (flags, rest)
+    Ok((flags, rest))
 }
 
 fn run_files(

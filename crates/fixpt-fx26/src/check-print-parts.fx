@@ -198,7 +198,7 @@
       (cv-var (v) (k-dvar-string v)))))
 ;; The program's convention: what a subroutine type that names none has,
 ;; and what a convention nothing solves defaults to. Cellular, unless a
-;; driver says otherwise (`--calling-convention`).
+;; driver says otherwise (a `nativecc` machine).
 (define k-conv-default (ref k-conv @t) (new (cv-cellular)))
 ;; For a driver: whether the program's convention is native.
 (define check-conv-native! (->* (bool) unit)

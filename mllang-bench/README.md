@@ -22,7 +22,7 @@ the hash of the `.reference` file.
 To run one as machine code:
 
 ```
-fixpt eval --step-limit none --fx26-run cellular --calling-convention native mllang-bench/fx/mlton/NAME.fx
+fixpt eval --step-limit none mllang-bench/fx/mlton/NAME.fx   # on the fastest machine here
 ```
 
 ## Ported: 46

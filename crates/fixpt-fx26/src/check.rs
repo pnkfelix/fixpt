@@ -661,7 +661,7 @@ impl Checker {
 
     /// A checker whose program's convention is `conv`: every subroutine
     /// type that names none has it, the standard environment's included
-    /// (`--calling-convention`).
+    /// (a `nativecc` machine's).
     pub fn with_convention(conv: Conv) -> Checker {
         let mut interner = Interner::new();
         let mut arena = Arena::default();

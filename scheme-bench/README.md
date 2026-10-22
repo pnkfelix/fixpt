@@ -10,7 +10,7 @@ says what its port changed and why.
 To run one as machine code:
 
 ```
-fixpt eval --step-limit none --fx26-run cellular --calling-convention native scheme-bench/NAME.fx
+fixpt eval --step-limit none scheme-bench/NAME.fx   # on the fastest machine here
 ```
 
 ## Ported: 53 of 75

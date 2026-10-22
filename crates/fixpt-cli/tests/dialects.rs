@@ -154,25 +154,25 @@ fn fx26_runs_cellular_on_each_machine() {
     let native = fixpt_native::CELLULAR_AVAILABLE;
     // FX-26's register code where it compiles some: x86_64.
     let fx_registers = cfg!(target_arch = "x86_64");
-    for machine in ["rust", "native", "native-compiled", "registers", "stencils", "fx-registers"]
+    for machine in ["fx-cells-rsinterp", "fx-cells-asminterp", "fx-cells-rsjit-cellcc", "fx-regs-rsjit-cellcc", "fx-cells-stencils-cellcc", "fx-regs-fxjit-cellcc"]
         .into_iter()
-        .filter(|m| stencils || *m != "stencils")
-        .filter(|m| fx_registers || *m != "fx-registers")
-        .filter(|m| native || *m == "rust")
+        .filter(|m| stencils || *m != "fx-cells-stencils-cellcc")
+        .filter(|m| fx_registers || *m != "fx-regs-fxjit-cellcc")
+        .filter(|m| native || *m == "fx-cells-rsinterp")
     {
         let out = Command::new(FIXPT)
-            .args(["--dialect", "fx26", "--fx26-run", "cellular", "--cellular-machine", machine, "eval", src])
+            .args(["--machine", machine, "eval", src])
             .output()
             .expect("fixpt runs");
         let stdout = String::from_utf8_lossy(&out.stdout);
         assert!(stdout.contains("610 : int"), "{machine}: {stdout}{}", String::from_utf8_lossy(&out.stderr));
     }
-    let out = Command::new(FIXPT).args(["--cellular-machine", "forth", "eval", "1"]).output().expect("fixpt runs");
+    let out = Command::new(FIXPT).args(["--machine", "forth", "eval", "1"]).output().expect("fixpt runs");
     assert!(!out.status.success(), "an unknown machine is refused");
     // Where no machine code runs (neither arm64 nor x86_64), a machine of
     // it is refused.
     if !fixpt_native::CELLULAR_AVAILABLE {
-        let out = Command::new(FIXPT).args(["--cellular-machine", "stencils", "eval", "1"]).output().expect("fixpt runs");
+        let out = Command::new(FIXPT).args(["--machine", "fx-cells-stencils-cellcc", "eval", "1"]).output().expect("fixpt runs");
         let err = String::from_utf8_lossy(&out.stderr);
         assert!(out.status.code() == Some(2) && err.contains("arm64"), "a machine that cannot run here is refused: {err}");
     }
@@ -182,7 +182,7 @@ fn fx26_runs_cellular_on_each_machine() {
 fn the_fx26_repl_shows_cellular_code() {
     use std::io::Write as _;
     let mut child = Command::new(FIXPT)
-        .args(["--dialect", "fx26", "--fx26-run", "cellular", "repl"])
+        .args(["--machine", "fx-cells-rsinterp", "repl"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -205,7 +205,7 @@ fn the_fx26_repl_shows_cellular_code() {
 fn the_fx26_repl_disassembles_a_polymorphic_value_projected() {
     use std::io::Write as _;
     let mut child = Command::new(FIXPT)
-        .args(["--dialect", "fx26", "--fx26-run", "cellular", "repl"])
+        .args(["--machine", "fx-cells-rsinterp", "repl"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -228,7 +228,7 @@ fn the_fx26_repl_disassembles_a_polymorphic_value_projected() {
     }
 }
 
-/// `--calling-convention native`: procedure types are native unless they
+/// A `nativecc` machine: procedure types are native unless they
 /// say otherwise, and `,native` shows a procedure's code in that convention
 /// and calls it; what it cannot compile yet it says.
 #[test]
@@ -236,7 +236,7 @@ fn the_fx26_repl_disassembles_a_polymorphic_value_projected() {
 fn the_fx26_repl_compiles_in_the_native_convention() {
     use std::io::Write as _;
     let mut child = Command::new(FIXPT)
-        .args(["--dialect", "fx26", "--fx26-run", "cellular", "--calling-convention", "native", "repl"])
+        .args(["--machine", "fx-cells-rsinterp-nativecc", "repl"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -275,8 +275,10 @@ fn the_fx26_repl_compiles_in_the_native_convention() {
     // A cellular procedure is called from native code, and a native one
     // given where a cellular one is expected is converted: an adapter.
     assert!(out.contains("2001 : int"), "{out}");
-    let out = Command::new(FIXPT).args(["--calling-convention", "fast", "eval", "1"]).output().expect("fixpt runs");
-    assert!(!out.status.success(), "an unknown convention is refused");
+    // The parts' options are gone, and say so.
+    let out = Command::new(FIXPT).args(["--calling-convention", "native", "eval", "1"]).output().expect("fixpt runs");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.code() == Some(2) && err.contains("--machine NAME"), "{err}");
 }
 
 /// `--step-limit`: a count stops a long run, `none` lets it finish, and
@@ -327,7 +329,7 @@ fn fx26_checks_compiles_and_evaluates_a_file_or_text() {
     // A `.fx` file is FX-26, and a whole program.
     let (ok, out) = fixpt(&["eval", file], "");
     assert!(ok && out.contains("3 : int"), "{out}");
-    let (ok, out) = fixpt(&["--dialect", "fx26", "--fx26-run", "cellular", "--eval", "(+ 1 2)"], "");
+    let (ok, out) = fixpt(&["--machine", "fx-cells-rsinterp", "--eval", "(+ 1 2)"], "");
     assert!(ok && out.contains("3 : "), "{out}");
 }
 
@@ -460,11 +462,11 @@ fn bitwise_on_every_machine() {
 fn on_every_machine(program: &str) -> Vec<(&'static [&'static str], String)> {
     let machines: [&'static [&'static str]; 6] = [
         &["--fx26-machine", "rs-scheme-vm"],
-        &["--fx26-run", "cellular"],
-        &["--fx26-run", "cellular", "--cellular-machine", "native"],
-        &["--fx26-run", "cellular", "--cellular-machine", "native-compiled"],
-        &["--fx26-run", "cellular", "--cellular-machine", "registers"],
-        &["--fx26-run", "cellular", "--calling-convention", "native"],
+        &["--fx26-machine", "fx-cells-rsinterp"],
+        &["--fx26-machine", "fx-cells-asminterp"],
+        &["--fx26-machine", "fx-cells-rsjit-cellcc"],
+        &["--fx26-machine", "fx-regs-rsjit-cellcc"],
+        &["--fx26-machine", "fx-cells-rsinterp-nativecc"],
     ];
     // Where no machine code runs, only the first two; where the native
     // convention does not (x86_64), all but the last.
@@ -538,7 +540,7 @@ fn the_fx26_repl_for_emacs_places_errors_where_forms_were_sent_from() {
 fn the_fx26_repl_reruns_outdated_definitions_when_asked() {
     use std::io::Write as _;
     let mut child = Command::new(FIXPT)
-        .args(["--dialect", "fx26", "--fx26-run", "cellular", "--cellular-machine", "registers", "--calling-convention", "native", "repl"])
+        .args(["--machine", "fx-regs-rsjit-nativecc", "repl"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -568,9 +570,9 @@ fn the_fx26_repl_reruns_outdated_definitions_when_asked() {
 #[cfg_attr(not(target_arch = "aarch64"), ignore = "runs arm64 machine code")]
 fn a_word_too_long_for_its_branches_runs() {
     let boyer = concat!(env!("CARGO_MANIFEST_DIR"), "/../../mllang-bench/fx/ocaml/boyer.fx");
-    for convention in ["cellular", "native"] {
+    for convention in ["cellcc", "nativecc"] {
         let out = Command::new(FIXPT)
-            .args(["--dialect", "fx26", "--step-limit", "none", "--fx26-run", "cellular", "--cellular-machine", "registers", "--calling-convention", convention, "eval", boyer])
+            .args(["--step-limit", "none", "--machine", &format!("fx-regs-rsjit-{convention}"), "eval", boyer])
             .output()
             .expect("fixpt runs");
         let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
@@ -596,9 +598,9 @@ fn front_end_files_lists_what_the_front_end_is_made_of() {
 }
 
 /// The FX-26 machines by name (`TODO.md` §78): with none named, the
-/// fastest, `fx-regs-rsjit-nativecc` (`fast`); `fixpt fx26` is the FX-26
-/// REPL; a name and the parts' options together, or an unknown name, are
-/// refused; the parts given alone keep their old defaults.
+/// fastest, `fx-regs-rsjit-nativecc` (`fast`); a bare `fixpt`, and `fixpt
+/// fx26`, are the FX-26 REPL; an unknown name, and the parts' options that
+/// are gone, are refused.
 #[test]
 fn fx26_machines_by_name() {
     let banner = |args: &[&str]| {
@@ -628,12 +630,38 @@ fn fx26_machines_by_name() {
     if fixpt_native::AVAILABLE {
         assert!(banner(&["--dialect", "fx26", "--fx26-machine", "fx-cells-fxjit-cellcc", "repl"]).contains("Machine: fx-cells-fxjit-cellcc;"));
     }
-    assert!(banner(&["--dialect", "fx26", "--fx26-run", "cellular", "repl"]).contains("Machine: fx-cells-rsinterp;"));
-    assert!(banner(&["--dialect", "fx26", "--fx26-run", "lower", "repl"]).contains("Machine: rs-scheme-vm;"));
+    assert!(banner(&[]).contains(fast), "a bare `fixpt` is the FX-26 REPL");
+    assert!(banner(&["--machine", "fx-cells-rsinterp"]).contains("Machine: fx-cells-rsinterp;"));
+    assert!(banner(&["--machine", "rs-scheme-vm", "repl"]).contains("Machine: rs-scheme-vm;"));
     for args in [&["--fx26-machine", "nope", "eval", "1"][..], &["--fx26-machine", "fast", "--fx26-run", "lower", "eval", "1"]] {
         let out = Command::new(FIXPT).args(args).output().expect("runs");
         assert_eq!(out.status.code(), Some(2), "{args:?}");
-    }
+    }    // `fixpt machines` lists them all, the default marked.
+    let out = Command::new(FIXPT).arg("machines").output().expect("runs");
+    let list = String::from_utf8_lossy(&out.stdout);
+    assert!(list.lines().any(|l| l.starts_with('*') && fast.contains(l[1..].split_whitespace().next().unwrap_or("?"))), "{list}");
+    assert!(list.contains("rs-scheme-vm") && list.contains("fx-cells-rsinterp-nativecc"), "{list}");
+    // A misspelt option is refused, with the one meant.
+    let out = Command::new(FIXPT).args(["--fix26-machine", "rs-scheme-vm", "eval", "1"]).output().expect("runs");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.code() == Some(2) && err.contains("did you mean `--fx26-machine`?"), "{err}");
+}
+
+/// `fixpt FILE ARG...` runs FILE as `fixpt run FILE -- ARG...` does; a
+/// `.fx` file is FX-26, a `.scm` file Scheme, with no `--dialect`.
+#[test]
+fn a_file_runs_by_its_name_alone() {
+    let dir = std::env::temp_dir().join(format!("fixpt-file-alone-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("a directory");
+    // Its arguments its own, an option's look-alike too.
+    let fx = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs/io/args-clock.fx");
+    let out = Command::new(FIXPT).args([fx, "a", "--b"]).output().expect("runs");
+    assert!(out.status.success() && String::from_utf8_lossy(&out.stdout) == "a;--b;", "{out:?}");
+    let scm = dir.join("hello.scm");
+    std::fs::write(&scm, "(display (+ 1 2))\n").expect("writes");
+    let out = Command::new(FIXPT).arg(&scm).output().expect("runs");
+    assert_eq!(String::from_utf8_lossy(&out.stdout), "3", "{}", String::from_utf8_lossy(&out.stderr));
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 /// A module file's lambda typed `->*` whose type names what the file

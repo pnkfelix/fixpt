@@ -92,7 +92,7 @@ Every command under a time limit (`/private/tmp/claude-501/m12/t SECONDS`):
 
 ```
 target/release/fixpt check scheme-bench/NAME.fx      # both checkers; errors start with `!`
-target/release/fixpt eval --step-limit none --fx26-run cellular --calling-convention native scheme-bench/NAME.fx
+target/release/fixpt eval --step-limit none scheme-bench/NAME.fx
 ```
 
 The second runs it as machine code; its last line is the answer and its

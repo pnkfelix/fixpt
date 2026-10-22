@@ -68,7 +68,7 @@ fn time_reports_each_phase() {
 
 #[test]
 fn every_dialect_lists_its_commands() {
-    for d in [None, Some("fx87"), Some("fx91")] {
+    for d in [Some("scheme"), Some("fx87"), Some("fx91")] {
         let out = repl(d, ",help\n");
         assert!(out.contains(",apropos"), "{d:?} has no overview:\n{out}");
         assert!(out.contains(",fits"), "{d:?}:\n{out}");
@@ -77,14 +77,14 @@ fn every_dialect_lists_its_commands() {
 
 #[test]
 fn scheme_reports_arities() {
-    let out = repl(None, ",help vector-ref\n,help map\n");
+    let out = repl(Some("scheme"), ",help vector-ref\n,help map\n");
     assert!(out.contains("a primitive, 2 argument(s)"), "{out}");
     assert!(out.contains("2 or more arguments"), "{out}");
 }
 
 #[test]
 fn apropos_finds_names_in_every_dialect() {
-    assert!(repl(None, ",apropos string->\n").contains("string->number"));
+    assert!(repl(Some("scheme"), ",apropos string->\n").contains("string->number"));
     assert!(repl(Some("fx87"), ",apropos vector\n").contains("vector-ref"));
     assert!(repl(Some("fx91"), ",apropos stream\n").contains("open-input-stream"));
 }
@@ -127,14 +127,14 @@ fn universally_applicable_bindings_are_summarised_not_listed() {
 /// "no results" and "I cannot ask that" are different.
 #[test]
 fn a_dialect_without_types_declines_rather_than_finding_nothing() {
-    let out = repl(None, ",fits int\n");
+    let out = repl(Some("scheme"), ",fits int\n");
     assert!(out.contains("cannot answer"), "{out}");
     assert!(out.contains("fx87"), "it should say where the answer lives:\n{out}");
 }
 
 #[test]
 fn an_unknown_name_is_reported_as_such() {
-    for d in [None, Some("fx87"), Some("fx91")] {
+    for d in [Some("scheme"), Some("fx87"), Some("fx91")] {
         let out = repl(d, ",help definitely-not-bound\n");
         assert!(out.contains("nothing named"), "{d:?}:\n{out}");
     }
@@ -144,7 +144,7 @@ fn an_unknown_name_is_reported_as_such() {
 /// command — `,x` is unquote-splicing's cousin and must not be swallowed.
 #[test]
 fn only_real_commands_are_intercepted() {
-    let out = repl(None, "(define x 5)\n`(1 ,x)\n");
+    let out = repl(Some("scheme"), "(define x 5)\n`(1 ,x)\n");
     assert!(out.contains("(1 5)"), "unquote was swallowed:\n{out}");
 }
 
@@ -196,7 +196,7 @@ fn the_overview_advertises_only_what_works() {
     assert!(fx87.contains(",fits TYPE"), "FX-87 can search by type:\n{fx87}");
     assert!(fx87.contains("inside a form"), "and answer holes:\n{fx87}");
 
-    for d in [None, Some("fx91")] {
+    for d in [Some("scheme"), Some("fx91")] {
         let out = repl(d, ",help\n");
         assert!(!out.contains(",fits TYPE "), "{d:?} cannot do this:\n{out}");
         assert!(
@@ -247,7 +247,7 @@ fn a_comma_help_inside_a_string_is_just_text() {
 #[test]
 fn scheme_answers_a_hole_with_values() {
     for engine in ["ast", "bytecode"] {
-        let out = repl_engine(None, engine, "(vector-ref (make-vector 3 0) ,help)\n");
+        let out = repl_engine(Some("scheme"), engine, "(vector-ref (make-vector 3 0) ,help)\n");
         assert!(out.contains("argument 2 of 2"), "{engine}:\n{out}");
         assert!(out.contains("vector-ref"), "{engine}:\n{out}");
         // The point: a *value*, not a type.
@@ -259,7 +259,7 @@ fn scheme_answers_a_hole_with_values() {
 /// a context that never existed.
 #[test]
 fn scheme_reports_a_hole_that_is_never_reached() {
-    let out = repl(None, "(if #f ,help 7)\n");
+    let out = repl(Some("scheme"), "(if #f ,help 7)\n");
     assert!(out.contains("never reached"), "{out}");
     assert!(out.contains('7'), "{out}");
 }
@@ -274,7 +274,7 @@ fn scheme_reports_a_hole_that_is_never_reached() {
 fn both_engines_segment_nested_calls_the_same_way() {
     let src = "(define (f a b) (+ a b))\n(f 1 (f 2 ,help))\n";
     for engine in ["ast", "bytecode"] {
-        let out = repl_engine(None, engine, src);
+        let out = repl_engine(Some("scheme"), engine, src);
         assert!(out.contains("argument 2 of 2"), "{engine}:\n{out}");
         // The inner call's argument, not the outer one's: reporting `1` here
         // would mean the operand stack had been read as a single flat call.
@@ -289,7 +289,7 @@ fn both_engines_segment_nested_calls_the_same_way() {
 /// such a call — and the report follows the run.
 #[test]
 fn a_binding_clause_is_not_reported_as_a_call() {
-    let out = repl(None, "(let ((a 1) (b ,help)) a)\n");
+    let out = repl(Some("scheme"), "(let ((a 1) (b ,help)) a)\n");
     assert!(
         out.contains("not an application") || out.contains("initialiser 2 of 2"),
         "{out}"
@@ -332,7 +332,7 @@ fn fx_will_not_run_an_argument_that_writes() {
 fn scheme_resumes_a_hole_with_a_value_more_than_once() {
     for engine in ["ast", "bytecode"] {
         let out = repl_engine(
-            None,
+            Some("scheme"),
             engine,
             "(list 'got (vector-ref (vector 10 20 30) ,help))\n,resume 0\n,resume 2\n",
         );
@@ -346,7 +346,7 @@ fn scheme_resumes_a_hole_with_a_value_more_than_once() {
 #[test]
 fn a_resumed_value_can_itself_ask() {
     let out = repl(
-        None,
+        Some("scheme"),
         "(list 'got (vector-ref (vector 10 20 30) ,help))\n,resume (+ 1 ,help)\n,resume 1\n",
     );
     assert!(out.contains("argument 1 evaluated to 1"), "{out}");
@@ -355,14 +355,14 @@ fn a_resumed_value_can_itself_ask() {
 
 #[test]
 fn where_repeats_the_held_hole_and_says_when_there_is_none() {
-    let out = repl(None, ",where\n(+ 1 ,help)\n,where\n");
+    let out = repl(Some("scheme"), ",where\n(+ 1 ,help)\n,where\n");
     assert!(out.contains("no hole is held"), "{out}");
     assert_eq!(out.matches("argument 1 evaluated to 1").count(), 2, "{out}");
 }
 
 #[test]
 fn only_scheme_advertises_resume() {
-    assert!(repl(None, ",help\n").contains(",resume"));
+    assert!(repl(Some("scheme"), ",help\n").contains(",resume"));
     for d in ["fx87", "fx91"] {
         assert!(!repl(Some(d), ",help\n").contains(",resume"), "{d}");
     }
@@ -376,7 +376,7 @@ fn only_scheme_advertises_resume() {
 /// carry on typing.
 #[test]
 fn a_hole_can_be_asked_about_before_the_form_is_finished() {
-    let out = repl(None, "(define v (vector 10 20 30))\n(list 'got (vector-ref v ,help\n2))\n");
+    let out = repl(Some("scheme"), "(define v (vector 10 20 30))\n(list 'got (vector-ref v ,help\n2))\n");
     assert!(out.contains("argument 1 evaluated to #(10 20 30)"), "{out}");
     assert!(out.contains("carry on typing"), "{out}");
     assert!(out.contains("(got 30)"), "{out}");

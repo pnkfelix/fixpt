@@ -1036,6 +1036,64 @@ x86_64 adds `fx-regs-fxjit-cellcc` and `fx-regs-fxjit-nativecc`, and the
 stencils run where the build found nightly. They include the stressed
 runs, with time slices of 3, a 4 KB nursery and a 1 KB stack cache.
 
+
+## The command line, FX-26 first (2026-10-22)
+
+The user: "I clearly never remember the right commands, and in any case
+its too awkward to have to pass so many parameters to get into the
+default mode that I actually care about." Their shell history showed
+`cargo run --bin fixpt -- --dialect fx26 --fx26-machine NAME repl`,
+`--fix26-machine` misspelt (refused as an unknown command, with the
+whole help after it), and a bare `cargo run` failing on three binaries.
+Asked, the user chose FX-26 as the default language, and the three part
+options removed, not hidden.
+
+1. **A bare `fixpt` is the FX-26 REPL on `fast`.** FX-26 is the default
+   language everywhere. Scheme is said with `--dialect scheme`, `fixpt
+   scheme` (its REPL, as `fixpt fx26` was FX-26's), a `.scm` or `.ss`
+   file given to `run` or `eval`, or the Scheme-only `dump-heap` and
+   `build`. Inferring from the file's name was not asked for; it keeps
+   `fixpt run greet.scm` (the README's) working without a flag.
+2. **`cargo run` finds one binary.** `sexp-edit` and `fixpt-symbolize`
+   moved from `fixpt-tidy` to a crate of their own, `fixpt-tools`, which
+   `default-members` leaves out. The other way, `default-run`, does not
+   apply in a virtual workspace, and `required-features` on the two
+   binaries still leaves them in `cargo run`'s choice (tried). The tools
+   have no tests, so a bare `cargo test` runs all it ran before; `cargo
+   run -p fixpt-tools --bin sexp-edit` runs one.
+3. **A machine only by its name**, `--machine NAME` (`--fx26-machine` is
+   kept, the same option). `--fx26-run`, `--cellular-machine` and
+   `--calling-convention` are refused, saying to name the machine. Given
+   alone, a part had reset the others to `rs-scheme-vm`'s, so
+   `--cellular-machine fx-registers` alone ran the lowered Scheme: the
+   pause the user felt was in fact the default's, its first form loading
+   the front end (fixed apart, `4caffc2e`). One combination the tests
+   used had no name: cellular words interpreted by Rust, procedures in
+   the native convention. It is now `fx-cells-rsinterp-nativecc`, so the
+   tests keep it.
+4. **`fixpt machines`** lists the machines, marks the default, and says
+   which cannot run here and why (the same check that refuses them, now
+   one function, `unavailable`). The main help names none of them. Their
+   descriptions say "machine code" where they said "arm64" but compile
+   for x86_64 too.
+5. **An unknown option is refused with the nearest known one**:
+   "unknown option `--fix26-machine`; did you mean `--fx26-machine`?".
+   Before, an unknown option fell through as a command. Options are read
+   from anywhere before a `--`; after it, the words are the program's,
+   so `fixpt run p.fx -- --step-limit` gives the program `--step-limit`.
+   An unknown command says so in two lines, not with the whole help.
+6. **`fixpt FILE [ARG...]`** runs a file, as `fixpt run FILE -- ARG...`
+   does, when the first word is no command and names a file; every word
+   after it is the program's, one that looks like an option too. Not
+   asked for; added because `run`'s `--` was one more thing to remember.
+   Scheme, FX-87 and FX-91 take no arguments, so they are given the
+   files before a `--`.
+
+The dated records (`DONE.md`, `PLAN.md`, `TODO.md`, the measurements in
+`docs/performance.md`) keep the part options as they were run. The
+README, the benches' READMEs, the debugging recipe and the native
+conventions' notes now name machines.
+
 ## The suite's time, back down (2026-10-22)
 
 The user: "it seems clear that something has regressed terribly here.

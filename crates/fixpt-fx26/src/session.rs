@@ -39,7 +39,7 @@ pub struct Fx26Session {
     /// code (`front_end_as_register_code`), made so when first loaded; the
     /// runtime's `front_end_run_word` must be a machine for register code.
     pub front_end_compiled: bool,
-    /// Whether the program's convention is native (`--calling-convention`;
+    /// Whether the program's convention is native (a `nativecc` machine;
     /// set by [`set_native_convention`](Fx26Session::set_native_convention)).
     native_convention: bool,
     /// Whether naming a global reads it (`set_globals_effects`).
@@ -1367,7 +1367,7 @@ impl Fx26Session {
     /// calling it. Nothing need be compiled again; it is for knowing.
     pub fn inliners(&mut self, name: &str) -> R<Result<Vec<String>, String>> {
         if self.strategy != Strategy::Cellular {
-            return Ok(Err("only compiled code inlines: `--fx26-run cellular`".into()));
+            return Ok(Err("only compiled code inlines: not on rs-scheme-vm or fx-ast-eval".into()));
         }
         self.own_pieces()?;
         let fail = |e: fixpt_scheme::SessionError| FxError::at(Span::new(FileId(0), 0, 0), e.to_string());

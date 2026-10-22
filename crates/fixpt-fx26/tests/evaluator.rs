@@ -111,7 +111,7 @@ fn every_program(wanted: impl Fn(&str) -> bool) {
     assert!(report.is_empty(), "disagreements:\n{}", report.join("\n"));
 }
 
-/// Form by form, as the REPL and `fixpt eval --fx26-run evaluate` run a
+/// Form by form, as the REPL and `fixpt eval --machine fx-ast-eval` run a
 /// program: the evaluator keeps no state between forms, so a write in one
 /// must be replayed before the next (DONE.md §18).
 #[test]

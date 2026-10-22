@@ -307,8 +307,8 @@ fn size_programs_as_they_say() {
     assert!(wrong.is_empty(), "not as their first line says: {wrong:?}");
 }
 
-/// With `native` the program's convention (`--calling-convention
-/// native`), the two checkers agree on the conventions' programs too.
+/// With `native` the program's convention (a `nativecc` machine), the
+/// two checkers agree on the conventions' programs too.
 #[test]
 fn conventions_agree_when_native() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs/conventions");

@@ -34,7 +34,8 @@ piece of machine code it places, and where a code collection moves it, as
 `START LEN NAME` lines (`fixpt_native::symbols`): the cellular machine's
 routines by name, each compiled word (`word k-check`, `register word
 k-check`), the native convention's procedures (`native k-check`) and
-stubs. `fixpt-symbolize FILE… -- OUT` (in `fixpt-tidy`) then names those
+stubs. `fixpt-symbolize FILE… -- OUT` (`cargo run -p fixpt-tools --bin
+fixpt-symbolize`) then names those
 frames, `k-check  (in fixpt code) + 644`, and adds a summary of the samples
 at the top of the stack by name, with waiting threads set apart. A global
 defined as a lambda gives its word its own name in both compilers

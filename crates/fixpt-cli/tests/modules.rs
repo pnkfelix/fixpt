@@ -24,31 +24,33 @@ const AT_THE_REPL: [&str; 4] = ["load", "functor-max", "load-input", "load-input
 /// Each run mode, as options.
 const MODES: [&[&str]; 11] = [
     &[],
-    &["--fx26-run", "evaluate"],
-    &["--fx26-run", "cellular"],
-    &["--fx26-run", "cellular", "--cellular-machine", "native"],
-    &["--fx26-run", "cellular", "--cellular-machine", "native-compiled"],
-    &["--fx26-run", "cellular", "--cellular-machine", "fx-compiled"],
-    &["--fx26-run", "cellular", "--cellular-machine", "registers"],
-    &["--fx26-run", "cellular", "--cellular-machine", "stencils"],
-    &["--fx26-run", "cellular", "--cellular-machine", "fx-registers"],
-    &["--fx26-run", "cellular", "--calling-convention", "native"],
-    &["--fx26-run", "cellular", "--cellular-machine", "registers", "--calling-convention", "native"],
+    &["--machine", "fx-ast-eval"],
+    &["--machine", "fx-cells-rsinterp"],
+    &["--machine", "fx-cells-asminterp"],
+    &["--machine", "fx-cells-rsjit-cellcc"],
+    &["--machine", "fx-cells-fxjit-cellcc"],
+    &["--machine", "fx-regs-rsjit-cellcc"],
+    &["--machine", "fx-cells-stencils-cellcc"],
+    &["--machine", "fx-regs-fxjit-cellcc"],
+    &["--machine", "fx-cells-rsinterp-nativecc"],
+    &["--machine", "fx-regs-rsjit-nativecc"],
 ];
 
 /// Whether a mode's machine runs here: every one on arm64 and x86_64 (the
 /// stencils where the build made them, `stencils_built`; FX-26's register
 /// code on x86_64 only); elsewhere only those of no machine code.
 fn runs_here(mode: &[&str]) -> bool {
-    if mode.contains(&"fx-registers") {
+    let name = mode.last().copied().unwrap_or("fast");
+    if name == "fx-regs-fxjit-cellcc" {
         return cfg!(target_arch = "x86_64");
     }
-    if fixpt_native::AVAILABLE {
+    if fixpt_native::AVAILABLE || matches!(name, "fast" | "fx-ast-eval" | "fx-cells-rsinterp") {
         return true;
     }
-    let cellular = |m: &&str| fixpt_native::CELLULAR_AVAILABLE && matches!(*m, "native" | "native-compiled" | "fx-compiled" | "registers" | "stencils");
-    let machine = mode.iter().skip_while(|a| **a != "--cellular-machine").nth(1);
-    (fixpt_native::NATIVE_CONVENTION_AVAILABLE || mode.windows(2).all(|w| w != ["--calling-convention", "native"])) && machine.is_none_or(cellular)
+    if name.ends_with("nativecc") {
+        return fixpt_native::NATIVE_CONVENTION_AVAILABLE;
+    }
+    fixpt_native::CELLULAR_AVAILABLE
 }
 
 fn dir() -> std::path::PathBuf {
@@ -75,7 +77,7 @@ fn fixpt(args: &[&str], stdin: &str, cwd: &std::path::Path) -> Result<String, St
 
 /// Whether this build runs the stencils machine (it needs nightly).
 fn stencils_built() -> bool {
-    fixpt(&["--dialect", "fx26", "--fx26-run", "cellular", "--cellular-machine", "stencils", "eval", "(+ 1 2)"], "", &dir()).is_ok()
+    fixpt(&["--machine", "fx-cells-stencils-cellcc", "eval", "(+ 1 2)"], "", &dir()).is_ok()
 }
 
 #[test]
@@ -87,7 +89,7 @@ fn module_programs_run_alike_in_every_mode() {
         let want = text.lines().next().and_then(|l| l.strip_prefix(";; => ")).expect("a program that runs").to_string();
         let forms: String = text.lines().filter(|l| !l.starts_with(";;")).collect::<Vec<_>>().join("\n") + "\n";
         for mode in MODES {
-            if mode.contains(&"stencils") && !stencils {
+            if mode.contains(&"fx-cells-stencils-cellcc") && !stencils {
                 continue;
             }
             if !runs_here(mode) {
@@ -123,6 +125,6 @@ fn module_programs_run_alike_in_every_mode() {
             .collect();
         handles.into_iter().flat_map(|h| h.join().expect("a run")).collect()
     });
-    assert!(runs.len() >= PROGRAMS.len() * MODES.iter().filter(|m| runs_here(m) && !m.contains(&"stencils")).count(), "only {} runs", runs.len());
+    assert!(runs.len() >= PROGRAMS.len() * MODES.iter().filter(|m| runs_here(m) && !m.contains(&"fx-cells-stencils-cellcc")).count(), "only {} runs", runs.len());
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }

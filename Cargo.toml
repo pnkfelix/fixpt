@@ -14,6 +14,26 @@ members = [
     "crates/fixpt-fx87",
     "crates/fixpt-fx26",
     "crates/fixpt-tidy",
+    "crates/fixpt-tools",
+    "crates/fixpt-native",
+]
+# All but the tools' binaries, which have no tests: so that `cargo run`
+# finds one binary, `fixpt`, and starts the FX-26 REPL. The tools are
+# `cargo run -p fixpt-tools --bin sexp-edit` (or `fixpt-symbolize`).
+default-members = [
+    "crates/fixpt-memmgmt",
+    "crates/fixpt-heap",
+    "crates/fixpt-read",
+    "crates/fixpt-core",
+    "crates/fixpt-runtime",
+    "crates/fixpt-scheme",
+    "crates/fixpt-engine",
+    "crates/fixpt-cli",
+    "crates/fixpt-conform",
+    "crates/fixpt-fx91",
+    "crates/fixpt-fx87",
+    "crates/fixpt-fx26",
+    "crates/fixpt-tidy",
     "crates/fixpt-native",
 ]
 
