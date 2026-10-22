@@ -85,7 +85,7 @@ fn native(text: &str) -> Result<String, String> {
     if !fixpt_native::NATIVE_CONVENTION_AVAILABLE {
         return lowered(text, None);
     }
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let mut s = common::session();
     s.strategy = Strategy::Cellular;
     s.set_native_convention(true);
     s.native_runner = Some(run_native);

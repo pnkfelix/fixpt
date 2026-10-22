@@ -78,12 +78,37 @@ thread_local! {
     static OWN: std::cell::RefCell<Option<fixpt_fx26::session::Fx26Session>> = const { std::cell::RefCell::new(None) };
 }
 
-/// `f` with this thread's session for the pieces written in FX-26, made
-/// on first use.
+/// A session whose pieces written in FX-26 (checker, compilers, and what
+/// else the front end has) run as register code on the hand register
+/// machine, as the REPL's do, read back from their cache once made. The
+/// reader stays lowered. Lowered, on the bytecode VM, they are some 30
+/// times as slow: the tests that run them on every program, or every word
+/// of the front end, took most of the suite's time.
+/// (`the_front_end_compiled_checks_alike` compares the two.)
+pub fn session() -> fixpt_fx26::session::Fx26Session {
+    let mut s = fixpt_fx26::session::Fx26Session::with_backend(fixpt_engine::Backend::Bytecode).expect("starts");
+    // Where no machine code runs, on the cellular machine written in Rust.
+    s.scheme.runtime_unrooted().front_end_run_word =
+        Some(if fixpt_native::CELLULAR_AVAILABLE { fixpt_native::cellular::run_word_registers } else { fixpt_engine::cellular::run_word });
+    s.front_end_compiled = true;
+    s
+}
+
+/// [`session`], its front end loaded, and no step limit: for a test that
+/// calls the front end's compilers itself.
+pub fn front_end_session() -> fixpt_fx26::session::Fx26Session {
+    let mut s = session();
+    s.load_own_pieces().expect("loads");
+    s.scheme.engine.set_step_limit(None);
+    s
+}
+
+/// `f` with this thread's session for the pieces written in FX-26
+/// (`session`), made on first use.
 pub fn with_own<R>(f: impl FnOnce(&mut fixpt_fx26::session::Fx26Session) -> R) -> R {
     OWN.with(|s| {
         let mut s = s.borrow_mut();
-        let s = s.get_or_insert_with(|| fixpt_fx26::session::Fx26Session::with_backend(fixpt_engine::Backend::Bytecode).expect("starts"));
+        let s = s.get_or_insert_with(session);
         f(s)
     })
 }

@@ -5,8 +5,9 @@
 //! code starts, as `tests/native.rs` checks `native.fx` for arm64. Any
 //! machine compiles for x86_64; none runs the code here.
 
-use fixpt_engine::Backend;
-use fixpt_fx26::session::{Fx26Session, READER_PREFIX, load_eager_reader};
+mod common;
+
+use fixpt_fx26::session::READER_PREFIX;
 use fixpt_heap::layout::kind;
 use fixpt_heap::layout::cellular::{CLOSURE_WORD, WORD_CELL0};
 use fixpt_heap::{Heap, Value};
@@ -37,9 +38,7 @@ fn reachable(heap: &Heap, word: Value) -> Vec<Value> {
 /// The same instructions from both compilers, for every word of the front
 /// end compiled: `limit` words, or all of them.
 fn compare(limit: usize) {
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-    load_eager_reader(&mut s.scheme).expect("loads");
-    s.scheme.engine.set_step_limit(None);
+    let mut s = common::front_end_session();
     let text = fixpt_fx26::bootstrap_program();
     let (mut wrong, mut compared, mut bytes) = (Vec::new(), 0, 0);
     s.scheme.scope(|sc| {
@@ -109,9 +108,7 @@ fn every_word_of_the_front_end_as_the_rust_compiler_compiles_it() {
 /// adapters, for every count of arguments.
 fn compare_registers(limit: usize) {
     use fixpt_heap::layout::cellular::WORD_TWIN;
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-    load_eager_reader(&mut s.scheme).expect("loads");
-    s.scheme.engine.set_step_limit(None);
+    let mut s = common::front_end_session();
     let text = fixpt_fx26::bootstrap_program();
     let (mut wrong, mut compared, mut refused, mut bytes) = (Vec::new(), 0, 0, 0);
     s.scheme.scope(|sc| {
@@ -202,9 +199,7 @@ fn every_register_word_of_the_front_end_as_the_rust_compiler_compiles_it() {
 fn compare_direct(limit: usize) {
     use fixpt_heap::layout::cellular::{CLOSURE_WORD, WORD_TWIN};
     use fixpt_native::direct::DirectMachine;
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-    load_eager_reader(&mut s.scheme).expect("loads");
-    s.scheme.engine.set_step_limit(None);
+    let mut s = common::front_end_session();
     let text = fixpt_fx26::bootstrap_program();
     let (mut wrong, mut compared, mut refused, mut bytes) = (Vec::new(), 0, 0, 0);
     s.scheme.scope(|sc| {

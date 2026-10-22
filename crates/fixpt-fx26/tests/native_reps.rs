@@ -8,8 +8,9 @@
 //! conversions before it, the same. And the pieces of no word: joins,
 //! unboxings, checks, and every primitive's raw operation.
 
+mod common;
+
 use fixpt_engine::Backend;
-use fixpt_fx26::session::{Fx26Session, load_eager_reader};
 use fixpt_heap::layout::cellular::{CLOSURE_WORD, WORD_CELL0, WORD_TWIN};
 use fixpt_heap::layout::kind;
 use fixpt_heap::{Heap, Value};
@@ -68,11 +69,9 @@ fn bits(v: &[bool]) -> Vec<i64> {
 
 /// The pass on `limit` register words of the front end, or all of them.
 fn compare(limit: usize) {
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-    load_eager_reader(&mut s.scheme).expect("loads");
-    s.scheme.engine.set_step_limit(None);
-    let compiled = fixpt_fx26::session::compile_program(PROGRAM).unwrap_or_else(|e| panic!("checks: {e}"));
-    compiled.load_into(&mut s.scheme).expect("loads");
+    let mut s = common::front_end_session();
+    // The pass as register code too: lowered, some words took minutes.
+    s.program_as_register_code(PROGRAM, &["t-all"], "fx").unwrap_or_else(|e| panic!("compiles: {e}"));
     let text = fixpt_fx26::bootstrap_program();
     let (mut wrong, mut compared, mut instructions, mut split) = (Vec::new(), 0, 0, 0);
     s.scheme.scope(|sc| {

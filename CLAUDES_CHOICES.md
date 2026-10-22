@@ -1036,3 +1036,55 @@ x86_64 adds `fx-regs-fxjit-cellcc` and `fx-regs-fxjit-nativecc`, and the
 stencils run where the build found nightly. They include the stressed
 runs, with time slices of 3, a 4 KB nursery and a 1 KB stack cache.
 
+## The suite's time, back down (2026-10-22)
+
+The user: "it seems clear that something has regressed terribly here.
+Either we have added too much test load, or one or more of the tests has
+become unbearably slow", and, of the two targets found: "see about
+addressing both". The checked suite took 6,400 s on x86_64, with
+`native_reps` killed after 36 minutes. Baselines before the x86_64 work
+(`3e1229fe`) and before its FX-26 native convention (`35c59a35`) showed
+where. `native_x64` (2,039 s) and `native_reps` (hours) are the FX-26
+native convention's. `compiler`'s 688 s came from
+`every_program_on_every_machine`, which ran on arm64 already and was
+turned on for x86_64 (`3376646c`). The tests that compile the whole front
+end grew 22–28%, as the front end did (40.8k → 51.1k lines).
+
+1. **The tests run the front end as register code, as the REPL does.**
+   They ran it lowered, on the bytecode VM. In `native_reps`, compiling
+   the front end alone took 186 s before a word was compared. The FX-26
+   pass's words came after: one word ran past 100 s. `tests/common` makes
+   the session (`session`, `front_end_session`): the front end as
+   register code on the hand register machine, read back from its cache.
+   `with_own`, the sessions that call the FX-26 compilers, and the
+   bootstrap's stages now use it. Lowered, the front end is still run by
+   `the_front_end_compiled_checks_alike` (which compares the two), by
+   `FIXPT_FRONT_END_LOWERED=1`, and by the bootstrap's timing report,
+   which times each machine's stage 1 on purpose. Stage 1 is the FX-26
+   compiler's output however that compiler runs, so the fixpoint means
+   what it did.
+2. **A program as register code** (`Fx26Session::program_as_register_code`):
+   what the front end does for itself, for any program and entries,
+   uncached. `native_reps` runs its pass (`tests/native-direct/reps.fx`)
+   so. The front end's own loading is now the same code.
+3. **`compile-forget-globals!` was missing from `FRONT_ENTRIES`.** The
+   session calls it for a whole program (`compile_with_own_compiler`)
+   since `b544769b` (2026-10-04), so the register-code front end could
+   not compile a whole program. Nothing ran that way until now.
+4. **Native slots are no longer lost.** Each thread has one native
+   machine, which outlives the sessions that compile into it. Its code
+   collection kept every word of a heap other than the current one, so a
+   dropped session's words stayed installed, and the 65,536 slot numbers
+   ran out after a few sessions. The heap keeps the serials of the heaps
+   alive (`Heap::serial_live`); the collection lets go of words whose heap
+   is gone; a dropped machine gives its slots back to the process. And
+   `NATIVE_SLOTS` is 2^18: `every_program_on_every_machine` keeps six
+   sessions alive on one thread, each with the front end installed. Slot
+   numbers already reach the code by register or a 32-bit displacement,
+   past 16 bits, on both machines.
+5. **`webs` is left quadratic.** For each slot read, both the Rust pass
+   (`reps.rs`) and the FX-26 one (`native-reps.fx`) clear an
+   instruction-long array and search back. On register code the whole
+   of `native_reps`, every one of the front end's 4,898 register words
+   included, takes 84 s, so it is filed (`TODO.md` §114), not changed
+   with this.

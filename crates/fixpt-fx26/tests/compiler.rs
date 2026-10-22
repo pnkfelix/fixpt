@@ -55,7 +55,7 @@ fn test_programs() {
 /// reported as one.
 #[test]
 fn extract_and_errors() {
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let mut s = common::session();
     let out = s.compile_with_own_compiler("(extract (product (a 1) (b \"two\") (c #t)) b)").expect("parses");
     assert_eq!(out, "\"two\"");
     let out = s.compile_with_own_compiler("(extract (product (a 1)) b)").expect("parses");
@@ -131,7 +131,7 @@ fn every_program_on_every_machine() {
     let mut sessions: Vec<Fx26Session> = machines
         .iter()
         .map(|(_, run, registers, place)| {
-            let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+            let mut s = common::session();
             s.scheme.runtime_unrooted().run_word = Some(*run);
             s.scheme.runtime_unrooted().place_code = *place;
             s.register_code = *registers;

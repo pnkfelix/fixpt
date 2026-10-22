@@ -1698,8 +1698,15 @@ impl Stacks {
 /// Entry numbers from `PRIMITIVES` up name words compiled to machine code,
 /// numbered across every machine in the process, so that no two words share
 /// one. A machine that has no code for a word's number runs its cells.
-pub const NATIVE_SLOTS: usize = 1 << 16;
+/// A session's front end as register code takes some ten thousand; a
+/// test may keep half a dozen sessions at once on one thread's machine.
+pub const NATIVE_SLOTS: usize = 1 << 18;
 static NEXT_SLOT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(PRIMITIVES);
+/// Slots of machines dropped, for any machine to take again: a process
+/// that makes machine after machine (the tests: each session that runs
+/// the front end as register code installs thousands of words) would
+/// otherwise run out. No word of a dropped machine's heap runs again.
+static DROPPED_SLOTS: std::sync::Mutex<Vec<usize>> = std::sync::Mutex::new(Vec::new());
 
 /// Each installed code's machine code, by native slot: where it runs, and
 /// how many bytes. For showing it (`,disassemble-asm`), which is
@@ -1800,6 +1807,9 @@ impl Drop for NativeMachine {
         for s in &self.slots {
             code.remove(s);
         }
+        let mut dropped = DROPPED_SLOTS.lock().expect("not poisoned");
+        dropped.append(&mut self.slots);
+        dropped.append(&mut self.free_slots);
     }
 }
 
@@ -1916,9 +1926,16 @@ impl NativeMachine {
         }
         let mut code_of = CODE_OF_SLOT.lock().expect("not poisoned");
         let mut kept = Vec::with_capacity(self.installed.len());
+        // A word is let go if it died, or its heap did: a thread's machine
+        // outlives the sessions that compile into it.
+        let mut live = std::collections::HashMap::new();
         for w in std::mem::take(&mut self.installed) {
-            if w.heap == heap.serial() && heap.weak_get(w.weak).is_none() {
-                heap.weak_release(w.weak);
+            let mine = w.heap == heap.serial();
+            let heap_gone = !mine && !*live.entry(w.heap).or_insert_with(|| Heap::serial_live(w.heap));
+            if heap_gone || (mine && heap.weak_get(w.weak).is_none()) {
+                if mine {
+                    heap.weak_release(w.weak);
+                }
                 self.table[w.slot] = docol;
                 self.resume[w.slot] = 0;
                 code_of.remove(&w.slot);
@@ -2046,7 +2063,7 @@ impl NativeMachine {
             let v = if byte < 0 { 0 } else { self.space.exec_addr(at + byte as usize) as u64 };
             self.space.write_u64(rt_at + 8 * k, v);
         }
-        let slot = match self.free_slots.pop() {
+        let slot = match self.free_slots.pop().or_else(|| DROPPED_SLOTS.lock().expect("not poisoned").pop()) {
             Some(s) => s,
             None => NEXT_SLOT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
         };

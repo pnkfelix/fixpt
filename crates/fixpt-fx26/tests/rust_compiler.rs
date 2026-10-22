@@ -5,7 +5,7 @@
 //! M13 step 13a).
 
 use fixpt_engine::Backend;
-use fixpt_fx26::session::{Fx26Session, load_eager_reader};
+use fixpt_fx26::session::Fx26Session;
 use fixpt_fx26::{Checker, Top};
 use fixpt_heap::Value;
 use fixpt_read::FileId;
@@ -108,9 +108,7 @@ fn programs() -> Vec<(String, String)> {
 
 #[test]
 fn every_test_program_compiles_the_same() {
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-    load_eager_reader(&mut s.scheme).expect("loads");
-    s.scheme.engine.set_step_limit(None);
+    let mut s = common::front_end_session();
     let (mut report, mut same) = (Vec::new(), 0);
     for (name, text) in programs() {
         match compare(&mut s, &text) {
@@ -128,9 +126,7 @@ fn every_test_program_compiles_the_same() {
 /// (`regcode.fx`) makes each lambda's twin as the Rust one does.
 #[test]
 fn every_test_program_has_the_same_register_code() {
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-    load_eager_reader(&mut s.scheme).expect("loads");
-    s.scheme.engine.set_step_limit(None);
+    let mut s = common::front_end_session();
     let (mut report, mut same) = (Vec::new(), 0);
     for (name, text) in programs() {
         match compare_with(&mut s, &text, true) {
@@ -188,9 +184,7 @@ fn the_rust_compilers_words_run_as_lowered() {
 #[test]
 #[cfg_attr(not(optimized), ignore = "seconds in release: run with --release")]
 fn the_bootstrap_program_compiles_the_same() {
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-    load_eager_reader(&mut s.scheme).expect("loads");
-    s.scheme.engine.set_step_limit(None);
+    let mut s = common::front_end_session();
     let text = fixpt_fx26::bootstrap_program();
     assert_eq!(compare(&mut s, &text), Some(Ok(())));
 }

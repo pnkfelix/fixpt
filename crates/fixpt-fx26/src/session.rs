@@ -1109,10 +1109,10 @@ impl Fx26Session {
 
     /// The front end's entry points the Rust side calls by name
     /// (`READER_PREFIX`), each rebound by [`Self::front_end_as_register_code`].
-    pub const FRONT_ENTRIES: [&'static str; 31] = [
+    pub const FRONT_ENTRIES: [&'static str; 32] = [
         "read-text-at", "check-program", "check-more", "checked-tops", "checked-extracts", "checked-effects", "check-conv-native!", "checked-withs!", "checked-reshapes!",
         "check-globals-effects!", "check-defer-reruns!", "check-hold-breaks!", "check-lines!", "parse-program", "loaded-files!", "run-checked", "run-checked-more", "compile-program", "compile-checked", "compile-registers!", "compile-conv-native!",
-        "compile-global-cell", "compile-new-global", "compile-keep-global!", "compile-note-inline!", "native-assemble",
+        "compile-global-cell", "compile-new-global", "compile-keep-global!", "compile-note-inline!", "compile-forget-globals!", "native-assemble",
         "check-built-in!",
         "native-assemble-x64", "native-assemble-x64-regs", "native-adapter-x64", "native-compile-x64-proc",
     ];
@@ -1125,12 +1125,41 @@ impl Fx26Session {
     /// `front_end_run_word`, which the caller installs: a machine that
     /// runs register code). The reader stays lowered, and loaded as ever.
     fn front_end_as_register_code(&mut self) -> R<()> {
-        let fail = crate::front_end_failure;
-        let fields: Vec<String> = Self::FRONT_ENTRIES.iter().enumerate().map(|(i, n)| format!("({} {n})", i + 1)).collect();
-        let text = format!("{}\n(product {})\n", crate::front_end(), fields.join(" "));
         // Checked and compiled once for this executable and this front end,
         // then kept (`front_end_cache`); read back from there after.
-        let cache = front_end_cache(&text);
+        self.as_register_code("the front end", &crate::front_end(), &Self::FRONT_ENTRIES, "fx26-native:", "fx26-reader:", true, crate::front_end_error)
+            .map_err(crate::front_end_failure)
+    }
+
+    /// Program `text` compiled by the Rust compiler, with register code, and
+    /// run once, as the front end is (`front_end_as_register_code`): each of
+    /// its globals `entries`, a procedure, then called by `PREFIX:NAME` from
+    /// Scheme, run on the runtime's `front_end_run_word`. For a test that
+    /// calls a program written in FX-26 many times (lowered, on the
+    /// bytecode VM, some 30 times as slow). Not kept between runs.
+    pub fn program_as_register_code(&mut self, text: &str, entries: &[&str], prefix: &str) -> R<()> {
+        let fail = |m: String| FxError::at(Span::new(FileId(0), 0, 0), m);
+        self.as_register_code("the program", text, entries, &format!("{prefix}-native:"), &format!("{prefix}:"), false, |e| e).map_err(fail)
+    }
+
+    /// The two above: `text` (`what`) and its `entries` as a product, checked
+    /// (its errors said by `read_error`), compiled, kept in the cache if
+    /// `keep`, and run; each entry in global `{native}{name}`, and called by
+    /// `{prefix}{name}`.
+    #[allow(clippy::too_many_arguments)]
+    fn as_register_code(
+        &mut self,
+        what: &str,
+        text: &str,
+        entries: &[&str],
+        native: &str,
+        prefix: &str,
+        keep: bool,
+        read_error: fn(FxError) -> FxError,
+    ) -> Result<(), String> {
+        let fields: Vec<String> = entries.iter().enumerate().map(|(i, n)| format!("({} {n})", i + 1)).collect();
+        let text = format!("{text}\n(product {})\n", fields.join(" "));
+        let cache = if keep { front_end_cache(&text) } else { None };
         let cached = cache.as_ref().and_then(|(p, key)| {
             let b = std::fs::read(p).ok()?;
             (b.get(..8)? == key.to_le_bytes()).then(|| fixpt_heap::image::load(&b[8..]).ok())?
@@ -1138,20 +1167,19 @@ impl Fx26Session {
         let mut checked = None;
         if cached.is_none() {
             let mut c = Checker::new();
-            // An error here is the front end's, said so, where in its files.
-            let forms = c.read_in(FileId(0), &text).map_err(crate::front_end_error)?;
-            let done = c.declare_ahead(&forms).map_err(crate::front_end_error)?;
+            let forms = c.read_in(FileId(0), &text).map_err(|e| read_error(e).message)?;
+            let done = c.declare_ahead(&forms).map_err(|e| read_error(e).message)?;
             let mut tops = Vec::new();
             for (f, done) in forms.iter().zip(done) {
                 if !done {
-                    tops.extend(c.top_all(f).map_err(crate::front_end_error)?);
+                    tops.extend(c.top_all(f).map_err(|e| read_error(e).message)?);
                 }
             }
             checked = Some((c, tops));
         }
         let limit = self.step_limit();
         self.scheme.engine.set_step_limit(None);
-        let pieces = self.scheme.scope(|sc| {
+        let pieces: Result<(), String> = self.scheme.scope(|sc| {
             let mut compiled = Err(String::new());
             let word = sc.make(|m| {
                 if let Some(from) = &cached {
@@ -1166,17 +1194,17 @@ impl Fx26Session {
                 }
                 compiled.clone().unwrap_or(fixpt_heap::Value::FALSE)
             });
-            compiled.map_err(|e| format!("the front end as register code: {e}"))?;
+            compiled.map_err(|e| format!("{what} as register code: {e}"))?;
             let none = sc.make(|_| fixpt_heap::Value::NULL);
             let pieces = sc.call_global("%run-front-end", &[word, none]).map_err(|e| e.to_string())?;
             // Each entry point in a global of its own, and the name the Rust
             // side calls made to call it.
             sc.make(|m| {
                 let p = m.get(pieces);
-                for (i, name) in Self::FRONT_ENTRIES.iter().enumerate() {
+                for (i, name) in entries.iter().enumerate() {
                     // Field `i + 1` of the product, its slot `i + 2`.
                     let piece = m.heap().bloblet_slot(p, 2 + i);
-                    let sym = m.heap().intern(&format!("fx26-native:{name}"));
+                    let sym = m.heap().intern(&format!("{native}{name}"));
                     let slot = m.heap().symbol_global_slot(sym);
                     m.heap().set_global(slot, piece);
                 }
@@ -1185,14 +1213,12 @@ impl Fx26Session {
             Ok(())
         });
         self.scheme.engine.set_step_limit(limit);
-        pieces.map_err(fail)?;
+        pieces?;
         // In one text: each text run analyses all the session's Scheme
         // again, some 50 ms, so one for each would cost a second and a half.
-        let defines: String = Self::FRONT_ENTRIES
-            .iter()
-            .map(|name| format!("(define (fx26-reader:{name} . args) (%run-front-end fx26-native:{name} args))\n"))
-            .collect();
-        self.scheme.eval_str("<front end>", &defines).map_err(|e| fail(e.to_string()))?;
+        let defines: String =
+            entries.iter().map(|name| format!("(define ({prefix}{name} . args) (%run-front-end {native}{name} args))\n")).collect();
+        self.scheme.eval_str("<register code>", &defines).map_err(|e| e.to_string())?;
         Ok(())
     }
 

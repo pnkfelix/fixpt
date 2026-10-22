@@ -23,9 +23,7 @@ fn supply_loaded(sc: &mut fixpt_scheme::Session, pieces: fixpt_scheme::Handle, t
 /// FX-26 (run lowered to Scheme), with the Rust checker's facts.
 #[test]
 fn the_compiler_compiles_the_front_end() {
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-    load_eager_reader(&mut s.scheme).expect("loads");
-    s.scheme.engine.set_step_limit(None);
+    let mut s = common::front_end_session();
     let text = fixpt_fx26::front_end();
     let t = std::time::Instant::now();
     let r = s.scheme.scope(|sc| {
@@ -117,9 +115,7 @@ fn fixpoint_with_words_compiled() {
 #[test]
 #[cfg_attr(not(optimized), ignore = "seconds in release: run with --release, or --ignored")]
 fn fixpoint_as_register_code() {
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-    load_eager_reader(&mut s.scheme).expect("loads");
-    s.scheme.engine.set_step_limit(None);
+    let mut s = common::front_end_session();
     // Where no machine code runs, register code on the machine written in Rust.
     s.scheme.runtime_unrooted().run_word =
         Some(if fixpt_native::CELLULAR_AVAILABLE { fixpt_native::cellular::run_word_registers } else { fixpt_engine::cellular::run_word });
@@ -190,9 +186,7 @@ fn fixpoint_as_register_code() {
 }
 
 fn fixpoint_on(machine: fixpt_runtime::RunWord) {
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-    load_eager_reader(&mut s.scheme).expect("loads");
-    s.scheme.engine.set_step_limit(None);
+    let mut s = common::front_end_session();
     s.scheme.runtime_unrooted().run_word = Some(machine);
     let text = fixpt_fx26::bootstrap_program();
     let standard = fixpt_fx26::standard::standard_text();
@@ -239,9 +233,7 @@ fn fixpoint_on(machine: fixpt_runtime::RunWord) {
 #[test]
 #[ignore = "a probe: FIXPT_CALLOUTS=1 cargo test -p fixpt-fx26 --test bootstrap probe_stage2 -- --ignored --nocapture"]
 fn probe_stage2() {
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-    load_eager_reader(&mut s.scheme).expect("loads");
-    s.scheme.engine.set_step_limit(None);
+    let mut s = common::front_end_session();
     s.scheme.runtime_unrooted().run_word = Some(fixpt_native::cellular::run_word);
     let text = fixpt_fx26::bootstrap_program();
     let target = match std::env::var("PROBE_FILE") {
@@ -436,9 +428,7 @@ fn comparison() {
 #[test]
 #[ignore = "a probe: cargo test --release -p fixpt-fx26 --test bootstrap probe_read -- --ignored --nocapture"]
 fn probe_read() {
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-    load_eager_reader(&mut s.scheme).expect("loads");
-    s.scheme.engine.set_step_limit(None);
+    let mut s = common::front_end_session();
     s.scheme.runtime_unrooted().run_word = Some(fixpt_native::cellular::run_word_registers);
     let text = fixpt_fx26::bootstrap_program();
     s.scheme.scope(|sc| {
@@ -480,9 +470,7 @@ fn probe_read() {
 #[cfg_attr(all(not(optimized), any(target_arch = "aarch64", target_arch = "x86_64")), ignore = "seconds in release, minutes in debug: run with --release, or --ignored")]
 #[cfg_attr(not(any(target_arch = "aarch64", target_arch = "x86_64")), ignore = "runs machine code")]
 fn fixpoint_with_words_compiled_by_fx26() {
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-    load_eager_reader(&mut s.scheme).expect("loads");
-    s.scheme.engine.set_step_limit(None);
+    let mut s = common::front_end_session();
     s.scheme.runtime_unrooted().run_word = Some(fixpt_native::cellular::run_word_as_is);
     let text = fixpt_fx26::bootstrap_program();
     let standard = fixpt_fx26::standard::standard_text();
@@ -662,9 +650,7 @@ fn locate_char(text: &str, at: usize) -> String {
 #[test]
 #[ignore = "a probe: cargo test --release -p fixpt-fx26 --test bootstrap probe_profile_check -- --ignored --nocapture"]
 fn probe_profile_check() {
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-    load_eager_reader(&mut s.scheme).expect("loads");
-    s.scheme.engine.set_step_limit(None);
+    let mut s = common::front_end_session();
     s.scheme.runtime_unrooted().run_word = Some(fixpt_native::cellular::run_word_as_is);
     let text = fixpt_fx26::bootstrap_program();
     let standard = fixpt_fx26::standard::standard_text();
@@ -714,9 +700,7 @@ fn probe_profile_check() {
 #[test]
 #[ignore = "a probe: cargo test --release -p fixpt-fx26 --test bootstrap probe_phases_as_register_code -- --ignored --nocapture"]
 fn probe_phases_as_register_code() {
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-    load_eager_reader(&mut s.scheme).expect("loads");
-    s.scheme.engine.set_step_limit(None);
+    let mut s = common::front_end_session();
     s.scheme.runtime_unrooted().run_word = Some(fixpt_native::cellular::run_word_registers);
     let text = fixpt_fx26::bootstrap_program();
     let standard = fixpt_fx26::standard::standard_text();

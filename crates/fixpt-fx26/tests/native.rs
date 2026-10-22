@@ -4,8 +4,9 @@
 //! compiled, the same instructions and the same places where each cell's
 //! code starts (`PLAN.md` §11, 11c).
 
-use fixpt_engine::Backend;
-use fixpt_fx26::session::{Fx26Session, READER_PREFIX, load_eager_reader};
+mod common;
+
+use fixpt_fx26::session::READER_PREFIX;
 use fixpt_heap::layout::kind;
 use fixpt_heap::layout::cellular::{CLOSURE_WORD, WORD_CELL0};
 use fixpt_heap::{Heap, Value};
@@ -36,9 +37,7 @@ fn reachable(heap: &Heap, word: Value) -> Vec<Value> {
 /// The same instructions from both compilers, for every word of the front
 /// end compiled: `limit` words, or all of them.
 fn compare(limit: usize) {
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-    load_eager_reader(&mut s.scheme).expect("loads");
-    s.scheme.engine.set_step_limit(None);
+    let mut s = common::front_end_session();
     let text = fixpt_fx26::bootstrap_program();
     let far = [-5000i64, -6000];
     let (mut wrong, mut compared, mut instructions) = (Vec::new(), 0, 0);

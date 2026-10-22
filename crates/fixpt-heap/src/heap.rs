@@ -89,6 +89,10 @@ fn read_head(mem: &[u64], at: usize) -> Head {
 /// its target: where the main header went, relative to to-space.
 /// The next heap's [`serial`](Heap::serial).
 static NEXT_SERIAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+/// The serials of the heaps not yet dropped: for what is kept outside a
+/// heap for it (a native machine's code for its words) to be let go when
+/// it is gone ([`Heap::serial_live`]).
+static LIVE_SERIALS: std::sync::Mutex<Vec<u64>> = std::sync::Mutex::new(Vec::new());
 
 /// What a weak reference to an object that died becomes.
 pub const WEAK_DEAD: Value = Value::fixnum_wrapping(-1);
@@ -376,7 +380,11 @@ impl Heap {
             roots: Vec::new(),
             weak: Vec::new(),
             weak_free: Vec::new(),
-            serial: NEXT_SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            serial: {
+                let s = NEXT_SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                LIVE_SERIALS.lock().expect("not poisoned").push(s);
+                s
+            },
             inhibited: 0,
             globals: Vec::new(),
             symbols: Vec::new(),
@@ -1825,6 +1833,11 @@ impl Heap {
         self.serial
     }
 
+    /// Whether the heap of serial `s` is still alive (not dropped).
+    pub fn serial_live(s: u64) -> bool {
+        LIVE_SERIALS.lock().expect("not poisoned").contains(&s)
+    }
+
     /// A weak pair: `car` held weakly (no collection keeps it alive for the
     /// pair's sake; one that finds it dead clears it to [`WEAK_DEAD`]),
     /// `cdr` as a pair holds it. A bloblet of kind `weak-pair`
@@ -2610,5 +2623,13 @@ impl std::hash::Hasher for WordHasher {
     }
     fn write_u64(&mut self, x: u64) {
         self.0 = (self.0 ^ x).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    }
+}
+
+impl Drop for Heap {
+    fn drop(&mut self) {
+        if let Ok(mut live) = LIVE_SERIALS.lock() {
+            live.retain(|s| *s != self.serial);
+        }
     }
 }

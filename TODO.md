@@ -2689,3 +2689,22 @@ errors are not logged. If the memory passes, the next step is in
 software: check a word's cells when the front end writes them, and
 again when `assemble_register_word` reads them, to see whether the bit
 is set at the write or after it.
+
+## 114. `webs` is quadratic in a procedure's instructions (found 2026-10-22)
+
+The native convention's representation pass splits each frame slot into
+webs: a slot's writes and reads joined where a write reaches a read.
+Both versions, Rust's `webs` (`fixpt_native::direct::reps`) and FX-26's
+`nr-webs` (`native-reps.fx`), search back from each read, with a fresh
+`seen` array as long as the procedure. That is O(reads × instructions).
+In Rust it is not noticed. In FX-26, run lowered on the bytecode VM, one
+of the front end's register words took over 100 s, and `native_reps`
+took hours, until its tests ran the pass as register code (84 s for the
+whole target, CLAUDES_CHOICES.md "The suite's time, back down"). The
+compiler written in FX-26 (`fx-regs-fxjit-nativecc`) runs it on every
+procedure it compiles, so a large procedure is slow to compile there.
+
+The fix keeps the same webs: per slot, reaching writes by a forward
+pass over the flow graph (a union-find root per slot, joined where a
+slot is live into a join), in both versions alike, checked against each
+other by `native_reps` as now.
