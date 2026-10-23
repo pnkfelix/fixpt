@@ -50,7 +50,7 @@
               (else
                (let ((p (the k-cpath (cons (cons t by) path))))
                  (tagcase (k-get t)
-                   (ty-subr (e ps r cv) (or (k-cyclic-list? ps #t p) (k-cyclic-from? r #f p)))
+                   (ty-subr (e ps r cv spc) (or (k-cyclic-list? ps #t p) (k-cyclic-from? r #f p)))
                    (ty-comp (x a e r once) (or (k-cyclic-from? x #t p) (k-cyclic-from? a #f p)))
                    (ty-tag (a h e r) (or (k-cyclic-from? a #f p) (k-cyclic-from? h #f p)))
                    (ty-poly (bs x) (k-cyclic-from? x #f p))
@@ -97,7 +97,7 @@
              (begin
                (set seen (cons t (get seen)))
                (tagcase (k-get t)
-                 (ty-subr (e ps r cv)
+                 (ty-subr (e ps r cv spc)
                    (or (and (not top) (k-mentions-any? t vs))
                        (k-calls-through-list? (k-ty-kids t) vs seen)))
                  (ty-comp (x a e r once)
@@ -123,7 +123,7 @@
       (let* ((t (k-resolve t)) (old (k-spun-of (get done) t)))
         (cond ((>= old 0) old)
               ((not (tagcase (k-get t)
-                      (ty-subr (e ps r cv) #t) (ty-poly (bs x) #t)
+                      (ty-subr (e ps r cv spc) #t) (ty-poly (bs x) #t)
                       (ty-product (ps) #t) (ty-sum (ps) #t) (else y #f)))
                t)
               (else
@@ -136,7 +136,7 @@
   (k-spin-node (->* (int (ref k-spun @t)) k-ty)
     (lambda (t done)
       (tagcase (k-get t)
-        (ty-subr (e ps r cv) (ty-subr (k-insert (a-spin) e) ps (k-spin-positive r done) cv))
+        (ty-subr (e ps r cv spc) (ty-subr (k-insert (a-spin) e) ps (k-spin-positive r done) cv spc))
         (ty-poly (bs x) (ty-poly bs (k-spin-positive x done)))
         (ty-product (ps) (ty-product (k-spin-parts ps done)))
         (ty-sum (ps) (ty-sum (k-spin-parts ps done)))

@@ -325,7 +325,7 @@
                       (k-size-walk-descs ds v seen)))
                 ;; What a description function is given, it may use either way.
                 (ty-app (f ds) (k-size-walk-descs ds v seen))
-                (ty-subr (e ps r cv)
+                (ty-subr (e ps r cv spc)
                   (+ (k-size-walk-list ps (- 0 pol) v seen) (k-size-walk r pol v seen)))
                 (ty-poly (bs body) (k-size-walk body pol v seen))
                 (ty-pair (x y r nl)
@@ -408,7 +408,7 @@
   (lambda (body v)
     (let ((seen (the k-seen-pol (new nil))))
       (tagcase (k-get (k-resolve body))
-        (ty-subr (e ps r cv)
+        (ty-subr (e ps r cv spc)
           (let* ((counts (k-size-params ps v seen)) (res (k-size-walk r 1 v seen)))
             (and (= (+ (extract counts 1) res) 0) (<= (extract counts 2) 1))))
         (else y (= (k-size-walk body 1 v seen) 0))))))

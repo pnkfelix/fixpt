@@ -57,7 +57,7 @@
 (import check-types-types (type k-desc k-names k-parts k-region k-size))
 (hide (define check-infer-types (load-module "fx26:check-infer-types.fx")))
 (define-type k-solved (select check-infer-types k-solved))
-(import check-types-types (type k-te kxs))
+(import check-types-types (type k-specs k-te kxs))
 ;; The checker's knot, as `check-synth.fx`'s forms are given it.
 (define-type k-synther
   (subr (maxeff (alloc @t) (goto @z) (read @globals) (read @s) (read @t) (write @t) spin)
@@ -67,8 +67,17 @@
   (subr (maxeff (alloc @t) (goto @z) (read @globals) (read @s) (read @t) (write @t) spin)
         (kx int)
         k-eff))
+;; `k-synth-lambda-as`, as the knot gives it.
+(define-type k-lambda-as
+  (subr (maxeff (alloc @t) (goto @z) (read @globals) (read @s) (read @t) (write @t) spin)
+        (kx k-ids int k-specs)
+        k-te))
 (define-type check-synth-sig
-  (moduleof (val k-note-frozen-define
+  (moduleof (val k-synth-rlambda-by
+                 (subr (maxeff (alloc @t) (goto @z) (read @globals) (read @s) (read @t) (write @t)
+                               spin)
+                       (kx kx kx int k-specs k-synther k-lambda-as)
+                       k-te)) (val k-note-frozen-define
                  (subr (maxeff (alloc @t)
                                (goto @z)
                                (read @globals)
@@ -143,6 +152,10 @@
             (val k-new-subr
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (k-eff k-ids int)
+                       int))
+            (val k-new-subr-spec
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (k-eff k-ids int k-specs)
                        int))
             (val k-nlist-te
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)

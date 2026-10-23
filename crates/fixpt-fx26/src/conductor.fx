@@ -21,10 +21,14 @@
          (check-print-parts
           ((load-input "fx26:check-print-parts.fx")
            check-types check-effects check-env))
+         ;; Specifications' propositions: shown, compared, proved.
+         (check-logic
+          ((load-input "fx26:check-logic.fx")
+           check-types check-print-parts))
          ;; Types and effects shown as the Rust checker shows them.
          (check-print
           ((load-input "fx26:check-print.fx")
-           check-types check-print-parts check-env))
+           check-types check-print-parts check-env check-logic))
          ;; Unions.
          (check-unions
           ((load-input "fx26:check-unions.fx")
@@ -61,12 +65,18 @@
            check-types check-read check-env check-subst
            check-print check-syntax check-effects parser-module
            check-print-parts))
+         ;; Specifications in procedure types, read.
+         (check-specs
+          ((load-input "fx26:check-specs.fx")
+           check-types check-env check-read check-syntax check-read-helpers
+           parser-module))
          ;; Reading types, one knot.
          (check-read-descs
           ((load-input "fx26:check-read-descs.fx")
            check-types check-read-helpers check-syntax check-read
            check-subst check-env check-print check-holds
-           check-proving check-effects check-unions parser-module check-print-parts))
+           check-proving check-effects check-unions parser-module check-print-parts
+           check-specs))
          ;; Define-generative, read.
          (check-generative
           ((load-input "fx26:check-generative.fx")
@@ -113,13 +123,13 @@
           ((load-input "fx26:check-subtype.fx")
            check-types check-resolve check-sub-env check-env
            check-print check-effects check-proving check-subst
-           check-modules check-print-parts check-read-helpers))
+           check-modules check-print-parts check-read-helpers check-logic))
          ;; The checker, expected types: checking against what is wanted.
          (check-expect
           ((load-input "fx26:check-expect.fx")
            check-types check-env check-subtype check-print
            check-kinds check-resolve check-effects check-modules check-print-parts
-           check-read-helpers))
+           check-read-helpers check-logic))
          ;; The checker, calls: which may reach their own caller.
          (check-calls
           ((load-input "fx26:check-calls.fx")
@@ -227,7 +237,8 @@
            check-effects check-data check-read check-mask
            check-calls check-bounds check-holds check-subtype
            check-subst check-sc-graphs check-binders check-sub-env
-           check-modules-read check-read-helpers check-print-parts check-processes))
+           check-modules-read check-read-helpers check-print-parts check-processes
+           check-logic))
          ;; The checker, its proofs: lemmas proved.
          (check-proofs
           ((load-input "fx26:check-proofs.fx")

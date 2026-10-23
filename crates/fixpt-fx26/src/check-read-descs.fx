@@ -21,7 +21,8 @@
        (check-proving-types (load-module "fx26:check-proving-types.fx"))
        (check-effects-types (load-module "fx26:check-effects-types.fx"))
        (check-unions-types (load-module "fx26:check-unions-types.fx"))
-       (reader-types (load-module "fx26:reader-types.fx")))
+       (reader-types (load-module "fx26:reader-types.fx"))
+       (check-specs-types (load-module "fx26:check-specs-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-types (select check-types-types check-types-sig))
            (check-read-helpers (select check-read-helpers-types check-read-helpers-sig))
@@ -35,7 +36,8 @@
            (check-effects (select check-effects-types check-effects-sig))
            (check-unions (select check-unions-types check-unions-sig))
            (parser (select reader-types parser-sig))
-           (check-print-parts (select check-print-parts-types check-print-parts-sig)))
+           (check-print-parts (select check-print-parts-types check-print-parts-sig))
+           (check-specs (select check-specs-types check-specs-sig)))
     (module
 
 ;; The types it uses of the files before it.
@@ -50,6 +52,7 @@
         k-effect-selected k-frozen-into k-head k-items k-items-or-nil k-name-of k-not-applied
         k-parse-binders k-parse-place k-parse-region k-region-constant k-sfail k-symbol-head)
 (import check-effects k-one k-union)
+(import check-specs k-spec-clause? k-specified)
 
 (define k-effects (->* (k-syns) k-eff)
   (lambda (xs)
@@ -148,7 +151,7 @@
            (hyps (if poly? (k-les (cdr (cdr (cdr items)))) (the k-hyps nil)))
            (spin (k-one (a-spin)))
            (params (k-hyp-coercions hyps spin (the k-ids (cons (car conc) nil))))
-           (body (k-ty-new (ty-subr spin params (cdr conc) (get k-conv-default))))
+           (body (k-ty-new (ty-subr spin params (cdr conc) (get k-conv-default) nil)))
            (t (if (null? bs) body (k-ty-new (ty-poly bs body)))))
       (begin
         (set k-pending-lemma (cons (k-stated-lemma bs conc hyps) nil))
@@ -290,7 +293,7 @@
 (define k-subr-type (->* (k-eff syn syn k-conv) int)
   (lambda (e params result cv)
     (let ((ts (k-read-params (k-items-or-nil params "parameter types") result)))
-      (k-ty-new (ty-subr e (k-ids-but-last ts) (k-ids-last ts) cv)))))
+      (k-ty-new (ty-subr e (k-ids-but-last ts) (k-ids-last ts) cv nil)))))
 ;; `(subr effect (param …) result)`, or with a convention first, `(subr
 ;; (conv C) effect (param …) result)`; left out, it is the program's.
 (define k-parse-subr (->* (syn k-syns) int)
@@ -301,6 +304,33 @@
       (begin
         (k-shape (= (k-length items) 4) "`(subr effect (param …) result)`" s)
         (k-subr-type (k-parse-effect (k-nth items 1)) (k-nth items 2) (k-nth items 3) cv)))))
+;; Whether `(subr …)` or `(-> …)`, `items`, ends in a specification.
+(define k-specified? (->* (k-syns) bool)
+  (lambda (items)
+    (and (> (k-length items) 3) (k-spec-clause? (k-nth items (- (k-length items) 1))))))
+;; How many of `items` from the last are a specification's clauses.
+(define k-clauses-ending (->* (k-syns) int)
+  (lambda (items)
+    (k-clauses-count (the k-syns (reverse items)) 0)))
+(define k-clauses-count (->* (k-syns int) int)
+  (lambda (xs n)
+    (if (and (not (null? xs)) (k-spec-clause? (car xs))) (k-clauses-count (cdr xs) (+ n 1)) n)))
+(define k-syns-take (->* (k-syns int) k-syns)
+  (lambda (xs n) (if (= n 0) nil (the k-syns (cons (car xs) (k-syns-take (cdr xs) (- n 1)))))))
+(define k-syns-drop (->* (k-syns int) k-syns)
+  (lambda (xs n) (if (= n 0) xs (k-syns-drop (cdr xs) (- n 1)))))
+;; `(subr …)` or `(-> …)` with a specification after its result: the type
+;; without it, read as written, then the clauses against its parameters
+;; (second to last, in either form).
+(define k-parse-specified (->* (syn k-syns) int)
+  (lambda (s items)
+    (let* ((k (- (k-length items) (k-clauses-ending items)))
+           (plain (k-syns-take items k))
+           (whole (tagcase s (lst (xs d a b) (lst plain d a b)) (else y s)))
+           (t (if (string=? (syn-name (car items)) "subr")
+                  (k-parse-subr whole plain)
+                  (k-parse-arrow whole plain))))
+      (k-specified t (k-nth plain (- k 2)) (k-syns-drop items k)))))
 ;; Whether signature `s` is `(->* …)`, under any `poly`s.
 (define k-written-arrow-star? (->* (syn) bool)
   (lambda (s)
@@ -345,8 +375,8 @@
   (lambda (s items hd)
     (let ((n (k-length items)))
       (case hd
-        ((subr) (k-parse-subr s items))
-        ((->) (k-parse-arrow s items))
+        ((subr) (if (k-specified? items) (k-parse-specified s items) (k-parse-subr s items)))
+        ((->) (if (k-specified? items) (k-parse-specified s items) (k-parse-arrow s items)))
         ((->*) (k-sfail k-arrow-star-only s))
         ((proves) (k-parse-proves-type s items))
         ((bool) (k-sfail "`(bool …)` is a procedure's result, and only that" s))

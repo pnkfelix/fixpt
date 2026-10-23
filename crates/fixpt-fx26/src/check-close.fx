@@ -108,7 +108,7 @@
         (if (k-visit? t seen)
             #f
             (tagcase (k-get t)
-              (ty-subr (e ps x cv)
+              (ty-subr (e ps x cv spc)
                 (or (k-eff-writes-noting? e r) (k-writes-list ps r seen) (k-writes-in x r seen)))
               (ty-tag (a h e x)
                 (or (k-eff-writes-noting? e r) (k-writes-in a r seen) (k-writes-in h r seen)))

@@ -41,7 +41,8 @@
        (check-bounds-types (load-module "fx26:check-bounds-types.fx"))
        (check-holds-types (load-module "fx26:check-holds-types.fx"))
        (check-subst-types (load-module "fx26:check-subst-types.fx"))
-       (check-processes-types (load-module "fx26:check-processes-types.fx")))
+       (check-processes-types (load-module "fx26:check-processes-types.fx"))
+       (check-logic-types (load-module "fx26:check-logic-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-types (select check-types-types check-types-sig))
            (check-infer (select check-infer-types check-infer-sig))
@@ -77,7 +78,8 @@
            (check-modules-read (select check-modules-read-types check-modules-read-sig))
            (check-read-helpers (select check-read-helpers-types check-read-helpers-sig))
            (check-print-parts (select check-print-parts-types check-print-parts-sig))
-           (check-processes (select check-processes-types check-processes-sig)))
+           (check-processes (select check-processes-types check-processes-sig))
+           (check-logic (select check-logic-types check-logic-sig)))
     (module
 
 ;; The types it uses of the files before it.
@@ -96,6 +98,7 @@
       (include check-holds) (include check-subtype) (include check-subst) (include check-processes))
 (import check-resolve k-as-subr k-callee-of k-conversion-name k-end k-free-vars k-rename k-start
         k-at-of k-vsubr-parts)
+(import check-logic k-spec-of k-spec-delta)
 (import check-modorder k-early-modules k-lambda-item? k-mod-edges k-mod-groups k-mod-hazards
         k-mod-lambdas k-mod-recs-lambdas k-mod-star-lambdas)
 (import check-effects k-insert k-one k-union)
@@ -117,23 +120,23 @@
               (let ((t (k-lookup s)))
                 (if (< t 0) (k-fail (k-unbound s) a b) (k-te t (k-naming-effect s t))))))
         (x-const (t v a b abk) (k-te t nil))
-        (x-lambda (ps body a b abk) (k-synth-lambda-as x nil -1))
+        (x-lambda (ps body a b abk) (k-synth-lambda-as x nil -1 nil))
         (x-app (f args a b abk) (k-synth-app x f args -1))
         (x-the (t0 e a b abk)
           (let ((t (k-resolve-selects t0 a b))) (k-sized e (k-te t (k-check e t)))))
         (x-convention (c e a b abk)
           (let* ((r (k-synth e)) (t (k-resolve (extract r 1))))
             (tagcase (k-get t)
-              (ty-subr (fe ps res from)
+              (ty-subr (fe ps res from spc)
                 (begin (if (k-conv=? from c) #u (k-convert-at x t c))
-                       (k-te (k-ty-new (ty-subr fe ps res c)) (extract r 2))))
+                       (k-te (k-ty-new (ty-subr fe ps res c spc)) (extract r 2))))
               (else y (k-fail-ty "`convention` takes a procedure, and this is a " t a b)))))
         (x-plambda (bs body a b abk)
           (let ((r (k-synth body)))
             (if (k-generalizable? body (extract r 2))
                 (k-te (k-ty-new (ty-poly bs (extract r 1))) (extract r 2))
                 (k-fail-impure-plambda (extract r 2) a b))))
-        (x-rlambda (r l a b abk) (k-synth-rlambda x r l -1))
+        (x-rlambda (r l a b abk) (k-synth-rlambda-by x r l -1 nil k-synth k-synth-lambda-as))
         (x-proj (body ds a b abk)
           (let* ((r (k-synth body)) (t (extract r 1)))
             (tagcase (k-get t)
@@ -254,9 +257,10 @@
   ;;; ------------------------------------------------------------ lambda
 
   ;; A `lambda`'s type. `hint` supplies the types of parameters the program
-  ;; left out; `result`, when not -1, is what the body is checked against.
-  (k-synth-lambda-as (->* (kx k-ids int) k-te)
-    (lambda (x hint result)
+  ;; left out; `result`, when not -1, is what the body is checked against;
+  ;; `sp`, the specification its type has, which the cells' verifier proves.
+  (k-synth-lambda-as (->* (kx k-ids int k-specs) k-te)
+    (lambda (x hint result sp)
       (tagcase x
         (x-lambda (ps body a b abk)
           (let* ((given (k-param-types ps hint a b))
@@ -274,29 +278,8 @@
                 (k-unbind-to saved) (set k-closure-depth (- (get k-closure-depth) 1))
                 (set k-last-latent (extract r 2))
                 (let ((res (k-forget-nats named (k-result-back (extract r 1) (extract dep 3)) a b)))
-                  (k-te (k-new-subr (extract r 2) (k-binding-types typed) res) nil))))))
+                  (k-te (k-new-subr-spec (extract r 2) (k-binding-types typed) res sp) nil))))))
         (else y (k-fail-at "a lambda" x)))))
-  ;; An `rlambda`'s type: its `lambda`'s, told `expected`'s parameter and
-  ;; result types if it is a subroutine's, with `(read R)` in its latent
-  ;; effect, since calling it reads the closure; making it allocates in `R`,
-  ;; the region `r` names.
-  (k-synth-rlambda (->* (kx kx kx int) k-te)
-    (lambda (x r l expected)
-      (let* ((rr (k-synth r))
-             (rt (extract rr 1))
-             (g (k-place-region rt (k-start r) (k-end r)))
-             (c (if (< expected 0) (the (listof k-callable acyclic) nil) (k-as-subr expected)))
-             (n (tagcase l (x-lambda (ps body a b abk) (k-length ps)) (else y 0)))
-             (lt (cond
-                   ((null? c) (k-synth-lambda-as l nil -1))
-                   ((not (= (k-length (extract (car c) 2)) n))
-                    (k-fail-arity (k-length (extract (car c) 2)) "rlambda" n (k-start x) (k-end x)))
-                   (else (k-synth-lambda-as l (extract (car c) 2) (extract (car c) 3)))))
-             (t (tagcase (k-get (extract lt 1))
-                  (ty-subr (e ps res cv) (k-ty-new (ty-subr (k-insert (a-read g) e) ps res cv)))
-                  (else y (k-fail-at "a lambda" x))))
-             (e (k-insert (a-alloc g) (extract rr 2))))
-        (k-te-masked x t e))))
   ;;; ------------------------------------------------------------ application
   (k-synth-app (->* (kx kx kxs int) k-te)
     (lambda (x f args expected)
@@ -452,7 +435,9 @@
             (else
              (let ((c (k-conversion t p)))
                (if (null? c)
-                   (k-fail-at (k-argument-error i (k-show-ty t) (k-show-ty p)) arg)
+                   (k-fail-at (string-append (k-argument-error i (k-show-ty t) (k-show-ty p))
+                                             (k-spec-delta t p))
+                              arg)
                    (begin (k-convert-at arg t (car c)) e)))))))
   ;; A `vsubr` call's arguments, each checked as its element type `t`.
   (k-vapp-args (->* (kxs int int k-eff) k-eff)
@@ -528,7 +513,8 @@
                            (k-fail-not-known arg i p)
                            (let* ((res (extract (car c) 3))
                                   (known (if (k-mentions-unknown-type? res kinds solved) -1 res))
-                                  (r (k-synth-lambda-as arg (extract (car c) 2) known)))
+                                  (sp (k-spec-of p))
+                                  (r (k-synth-lambda-as arg (extract (car c) 2) known sp)))
                              (k-arg-unified (car params) kinds solved done i r)))))
                     ((k-mentions-unknown-type? p kinds solved)
                      (k-nil-told arg i p (car params) kinds solved done))
@@ -592,13 +578,17 @@
                  (let ((want (extract (car c) 2)))
                    (if (not (= (k-length want) (k-length ps)))
                        (k-fail-arity (k-length want) "lambda" (k-length ps) a b)
-                       (k-as-expected x (k-synth-lambda-as x want (extract (car c) 3)) expected))))
+                       (let* ((sp (k-spec-of expected))
+                              (r (k-synth-lambda-as x want (extract (car c) 3) sp)))
+                         (k-as-expected x r expected)))))
                 ((k-some-untyped? ps) (k-fail-ty "a `lambda` cannot be a " expected a b))
                 (else (otherwise)))))
           (x-rlambda (r l xa xb xaxbk)
             (if (null? (k-as-subr expected))
                 (otherwise)
-                (k-as-expected x (k-synth-rlambda x r l expected) expected)))
+                (let ((sp (k-spec-of expected)))
+                  (k-as-expected x (k-synth-rlambda-by x r l expected sp k-synth k-synth-lambda-as)
+                                 expected))))
           (x-app (f args xa xb xaxbk)
             (k-as-expected-call x (k-synth-app x f args expected) expected))
           (x-bloblet (op i args xa xb xaxbk)
@@ -817,7 +807,7 @@
       (tagcase h
         (x-lambda (ps hbody a b abk)
           (if (= (k-length ps) 1)
-              (k-rewriting (lambda () (k-synth-lambda-as h (cons payload nil) answer))
+              (k-rewriting (lambda () (k-synth-lambda-as h (cons payload nil) answer nil))
                            (k-start hbody) (k-end hbody)
                            (lambda (m want got) (k-handler-gives payload answer got)))
               (k-synth h)))

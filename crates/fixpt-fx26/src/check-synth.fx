@@ -99,7 +99,7 @@
 (define k-note-call (->* (kx kx int k-ids) unit)
   (lambda (x f ft params)
     (begin (tagcase (k-get (k-resolve ft))
-             (ty-subr (e ps r cv)
+             (ty-subr (e ps r cv spc)
                (set k-extracts (cons (product (1 (k-at-of f)) (2 (n-call cv))) (get k-extracts))))
              (else y #u))
            (k-note-apply-shares x f params))))
@@ -149,9 +149,12 @@
 ;; The effect `r` says `x` has, once the type it says is found one `expected` takes.
 (define k-as-expected (->* (kx k-te int) k-eff)
   (lambda (x r expected) (begin (k-expect x (extract r 1) expected) (extract r 2))))
-;; A new `subr` type, of the default convention.
+;; A new `subr` type, of the default convention; and one with a
+;; specification, none or one.
 (define k-new-subr (->* (k-eff k-ids int) int)
-  (lambda (e ps res) (k-ty-new (ty-subr e ps res (get k-conv-default)))))
+  (lambda (e ps res) (k-ty-new (ty-subr e ps res (get k-conv-default) nil))))
+(define k-new-subr-spec (->* (k-eff k-ids int k-specs) int)
+  (lambda (e ps res sp) (k-ty-new (ty-subr e ps res (get k-conv-default) sp))))
 ;; A `(nlist e k R)`, `R` the region `rg` made finite, and effect `eff`.
 (define k-nlist-te (->* (int k-size k-region k-eff) k-te)
   (lambda (e k rg eff) (k-te (k-ty-new (ty-nlist e k (k-fin-region rg))) eff)))
@@ -862,4 +865,27 @@
                   (extract rx 2)
                   (k-union (extract rx 2) (check (car (cdr args)) want)))))
       (k-masked x (k-blobref-result x name xt e expected args)))))
+;; An `rlambda`'s type: its `lambda`'s, told `expected`'s parameter and
+;; result types if it is a subroutine's, and its specification `sp`, with
+;; `(read R)` in its latent effect, since calling it reads the closure;
+;; making it allocates in `R`, the region `r` names. `synth` and
+;; `lambda-as` are the checker's knot's (`check-rules.fx`).
+(define k-synth-rlambda-by (->* (kx kx kx int k-specs k-synther k-lambda-as) k-te)
+  (lambda (x r l expected sp synth lambda-as)
+    (let* ((rr (synth r))
+           (rt (extract rr 1))
+           (g (k-place-region rt (k-start r) (k-end r)))
+           (c (if (< expected 0) (the (listof k-callable acyclic) nil) (k-as-subr expected)))
+           (n (tagcase l (x-lambda (ps body a b abk) (k-length ps)) (else y 0)))
+           (lt (cond
+                 ((null? c) (lambda-as l nil -1 nil))
+                 ((not (= (k-length (extract (car c) 2)) n))
+                  (k-fail-arity (k-length (extract (car c) 2)) "rlambda" n (k-start x) (k-end x)))
+                 (else (lambda-as l (extract (car c) 2) (extract (car c) 3) sp))))
+           (t (tagcase (k-get (extract lt 1))
+                (ty-subr (e ps res cv spc)
+                  (k-ty-new (ty-subr (k-insert (a-read g) e) ps res cv spc)))
+                (else y (k-fail-at "a lambda" x))))
+           (e (k-insert (a-alloc g) (extract rr 2))))
+      (k-te-masked x t e))))
 )))

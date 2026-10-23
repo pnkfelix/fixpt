@@ -18,7 +18,8 @@
        (check-effects-types (load-module "fx26:check-effects-types.fx"))
        (check-proving-types (load-module "fx26:check-proving-types.fx"))
        (check-modules-types (load-module "fx26:check-modules-types.fx"))
-       (check-read-helpers-types (load-module "fx26:check-read-helpers-types.fx")))
+       (check-read-helpers-types (load-module "fx26:check-read-helpers-types.fx"))
+       (check-logic-types (load-module "fx26:check-logic-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-types (select check-types-types check-types-sig))
            (check-resolve (select check-resolve-types check-resolve-sig))
@@ -30,7 +31,8 @@
            (check-subst (select check-subst-types check-subst-sig))
            (check-modules (select check-modules-types check-modules-sig))
            (check-print-parts (select check-print-parts-types check-print-parts-sig))
-           (check-read-helpers (select check-read-helpers-types check-read-helpers-sig)))
+           (check-read-helpers (select check-read-helpers-types check-read-helpers-sig))
+           (check-logic (select check-logic-types check-logic-sig)))
     (module
 (hide (include check-subtype-types) (include check-types-types) (include check-subst-types)
       (include check-env-types))
@@ -40,6 +42,7 @@
       (include check-print-parts) (include check-effects) (include check-proving)
       (include check-subst) (include check-modules))
 (import check-read-helpers k-unsized-length k-with-unsized-length)
+(import check-logic k-specs=? k-spec-within?)
 ;; A blobref's (generative 5) arguments `xs`, to an array that runs to the
 ;; end of the suffix, its length named where it was bound, as one of
 ;; length `finite`, which means just that, where `ys`'s is (`TODO.md` §77).
@@ -260,10 +263,11 @@
             (ty-product (ps)
               (tagcase tt (ty-product (qs) (k-match-parts l ps qs m seen)) (else z (same))))
             (ty-sum (ps) (tagcase tt (ty-sum (qs) (k-match-parts l ps qs m seen)) (else z (same))))
-            (ty-subr (e1 p1 r1 c1)
+            (ty-subr (e1 p1 r1 c1 s1)
               (tagcase tt
-                (ty-subr (e2 p2 r2 c2)
-                  (and (k-conv=? c1 c2) (k-eff=? e1 e2) (= (k-length p1) (k-length p2))
+                (ty-subr (e2 p2 r2 c2 s2)
+                  (and (k-conv=? c1 c2) (k-eff=? e1 e2) (k-specs=? s1 s2)
+                       (= (k-length p1) (k-length p2))
                        (k-match-list l p1 p2 m seen) (mt r1 r2)))
                 (else z (same))))
             (else z (same)))))))
@@ -374,9 +378,12 @@
                         (k-below-one x (cdr ns) ea eb trail labels)))))))
   (k-sub-plain (->* (int int k-ty k-ty k-benv k-benv k-strail k-labels) bool)
     (lambda (a b ta tb ea eb trail labels)
+      ;; A composable continuation where a subroutine is wanted: one that
+      ;; ensures nothing.
       (if (and (tagcase ta (ty-comp (x y e r once) #t) (else z #f))
-               (tagcase tb (ty-subr (e ps r cv) #t) (else z #f)))
-          (k-sub-callable a b ea eb trail labels)
+               (tagcase tb (ty-subr (e ps r cv spc) #t) (else z #f)))
+          (and (k-sub-callable a b ea eb trail labels)
+               (tagcase tb (ty-subr (e ps r cv spc) (k-spec-within? nil spc)) (else z #f)))
           (tagcase ta
             (ty-void () #t)
             ;; `false` is `#f`, a `bool`.
@@ -403,10 +410,12 @@
                 (ty-nat (n) (k-size-le? m n))
                 (else z #f)))
             (ty-var (x) (tagcase tb (ty-var (y) (k-benv-var=? x y ea eb)) (else z #f)))
-            (ty-subr (e ps r cv)
+            ;; Behavioural subtyping, last (`logic::spec_within`).
+            (ty-subr (e ps r cv s1)
               (tagcase tb
-                (ty-subr (e2 ps2 r2 cv2)
-                  (and (k-conv-sub? cv cv2 ea eb) (k-sub-callable a b ea eb trail labels)))
+                (ty-subr (e2 ps2 r2 cv2 s2)
+                  (and (k-conv-sub? cv cv2 ea eb) (k-sub-callable a b ea eb trail labels)
+                       (k-spec-within? s1 s2)))
                 (else z #f)))
             (ty-ref (x r)
               (tagcase tb

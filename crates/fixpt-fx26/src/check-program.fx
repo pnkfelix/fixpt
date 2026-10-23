@@ -663,7 +663,7 @@
   (lambda (t)
     (tagcase (k-get (k-resolve t))
       (ty-poly (bs body) (k-type-spins? body))
-      (ty-subr (e ps r cv) (k-has-spin? e))
+      (ty-subr (e ps r cv spc) (k-has-spin? e))
       (else y #f))))
 (define k-names-spin? (->* (k-names) bool)
   (lambda (ns)
@@ -686,7 +686,7 @@
   (lambda (t)
     (tagcase (k-get (k-resolve t))
       (ty-poly (bs body) (k-latent-globals body))
-      (ty-subr (e ps r cv) (k-atoms-globals e))
+      (ty-subr (e ps r cv spc) (k-atoms-globals e))
       (else y nil))))
 ;; The first of `ns` whose global `rs` has, if any.
 (define k-first-read (->* (k-regions k-names) k-names)

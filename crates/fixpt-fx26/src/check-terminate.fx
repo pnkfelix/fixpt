@@ -143,7 +143,7 @@
   (lambda (t)
     (tagcase (k-get t)
       (ty-poly (bs body) (k-sc-param-types body))
-      (ty-subr (e ps r cv) ps)
+      (ty-subr (e ps r cv spc) ps)
       (else y nil))))
 ;; Whether `s` names the standard binding of that name.
 (define k-std? (->* (symbol) bool)

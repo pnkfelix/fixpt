@@ -304,7 +304,7 @@
 (define k-ty-kids (->* (int) k-ids)
   (lambda (t)
     (tagcase (k-get t)
-      (ty-subr (e ps r cv) (k-ids-then ps r))
+      (ty-subr (e ps r cv spc) (k-ids-then ps r))
       (ty-poly (bs x) (the k-ids (cons x nil)))
       (ty-ref (a r) (the k-ids (cons a nil)))
       (ty-array (a nz r) (the k-ids (cons a nil)))

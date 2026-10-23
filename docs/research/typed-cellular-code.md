@@ -435,9 +435,13 @@ next"): §8's specifications, in the Rust checker and the verifier.
   case, Fourier–Motzkin for each case (the checkers' own, moved there). A
   VC it cannot show is open, written out as an implication in §2's
   syntax.
-- `tests/programs/specs`: 19 programs, each verified, left open, or
+- `tests/programs/specs`: 31 programs, each verified, left open, or
   refused as its first line says; mutants of specified words (an `int-add`
   made an `int-sub`, and back) all refused.
+- The FX-26 checker reads, prints and compares specifications as the
+  Rust one does (`check-specs.fx`; `check-logic.fx`, the prover, step for
+  step), so the two agree on every spec program, and `fixpt run` takes
+  them.
 
 ## 11. Open questions (the user's)
 

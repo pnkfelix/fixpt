@@ -13,16 +13,19 @@
        (eager-reader-types ((proj (load-module "fx26:eager-reader-types.fx") @s @e @m @c)))
        (check-types-types (load-module "fx26:check-types-types.fx"))
        (check-print-parts-types (load-module "fx26:check-print-parts-types.fx"))
-       (check-env-types (load-module "fx26:check-env-types.fx")))
+       (check-env-types (load-module "fx26:check-env-types.fx"))
+       (check-logic-types (load-module "fx26:check-logic-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-types (select check-types-types check-types-sig))
            (check-print-parts (select check-print-parts-types check-print-parts-sig))
-           (check-env (select check-env-types check-env-sig)))
+           (check-env (select check-env-types check-env-sig))
+           (check-logic (select check-logic-types check-logic-sig)))
     (module
 (hide (include check-print-types) (include eager-reader-types) (include check-types-types))
 ;; The types it uses of the files before it.
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-print-parts) (include check-env))
+(import check-logic k-show-spec)
 
 ;; What a type is shown as so far (`check-print-types.fx`).
 (define k-shown-none k-shown (product (1 (the k-strings nil)) (2 (the k-ids nil)) (3 0)))
@@ -97,12 +100,27 @@
       (cond ((null? ds) st)
             ((null? (cdr ds)) (k-show-desc (car ds) p st))
             (else (k-show-descs (cdr ds) p (k-put " " (k-show-desc (car ds) p st)))))))
-  ;; A `subr` type.
-  (k-show-subr (->* (k-eff k-ids int k-conv k-printing k-shown) k-shown)
-    (lambda (e ps r cv p st)
+  ;; A `subr` type; with a specification, its parameters by their names,
+  ;; and its clauses after the result.
+  (k-show-subr (->* (k-eff k-ids int k-conv k-specs k-printing k-shown) k-shown)
+    (lambda (e ps r cv sp p st)
       (let* ((st (k-put (k-cat5 "(subr " (k-conv-prefix cv) (k-show-effect e) " (" "") st))
-             (st (k-put ") " (k-show-seq ps p " " st))))
-        (k-put ")" (k-show-on r p st)))))
+             (st (k-put ") " (if (null? sp)
+                                 (k-show-seq ps p " " st)
+                                 (k-show-named ps (extract (car sp) 1) p st)))))
+        (k-put (if (null? sp) ")" (string-append (k-show-spec (car sp)) ")")) (k-show-on r p st)))))
+  ;; Parameters `ps`, each `(name T)` where `names` names it, a space between
+  ;; each two.
+  (k-show-named (->* (k-ids k-names k-printing k-shown) k-shown)
+    (lambda (ps names p st)
+      (if (null? ps)
+          st
+          (let* ((n (if (null? names) '|| (car names)))
+                 (st (if (symbol=? n '||) st (k-put (k-cat3 "(" (symbol->string n) " ") st)))
+                 (st (k-show-on (car ps) p st))
+                 (st (if (symbol=? n '||) st (k-put ")" st)))
+                 (st (if (null? (cdr ps)) st (k-put " " st))))
+            (k-show-named (cdr ps) (if (null? names) names (cdr names)) p st)))))
   ;; `(head a h e r)`: a prompt tag's type, or a composable continuation's.
   (k-show-control (->* (string int int k-eff k-region k-printing k-shown) k-shown)
     (lambda (head a h e r p st)
@@ -151,7 +169,7 @@
           (k-put (k-cat5 "(bool " (k-show-props "then" t) " " (k-show-props "else" e) ")") st))
         (ty-var (v) (k-put (k-dvar-string v) st))
         (ty-link (x) (k-put "?" st))
-        (ty-subr (e ps r cv) (k-show-subr e ps r cv p st))
+        (ty-subr (e ps r cv spc) (k-show-subr e ps r cv spc p st))
         (ty-poly (bs body)
           (let ((binders (k-join (k-show-binders bs) " ")))
             (k-put ")" (k-show-on body p (k-put (k-cat3 "(poly (" binders ") ") st)))))

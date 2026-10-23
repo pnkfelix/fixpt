@@ -1332,5 +1332,19 @@ The user: "let's attack requires and ensures next" (the design note's
    stays as it is; an `ensures` of a `bool` result says the same with
    `implies` (`predicate.fx`). Making one the other's sugar is next.
 10. **Spec programs in `tests/programs/specs`**, each saying on its first
-    line `; Verified`, `; Unverified` or `; Refused`, outside the two
-    checkers' comparison until the FX-26 checker reads specifications.
+    line `; Verified`, `; Unverified` or `; Refused`; in the two checkers'
+    comparison once the FX-26 checker read specifications (the same day).
+11. **The FX-26 checker's prover is `logic.rs`'s step for step**
+    (`check-logic.fx`): atoms numbered as met, the first formula that
+    does not split taken each time, splits on the first left, so that the
+    two checkers decide behavioural subtyping alike, even where a budget
+    runs out. `ty-subr` got a fifth field, the specification (none or
+    one), and each place that makes one keeps it or not as the Rust one
+    does.
+12. **A composable continuation ensures nothing.** Porting showed the
+    Rust rule letting one stand where any `subr` is wanted, a specified
+    one too; both checkers now ask that the wanted one ensure nothing.
+13. **`k-synth-rlambda` moved out of `check-rules.fx`** (to
+    `check-synth.fx`, given the knot's `k-synth` and `k-synth-lambda-as`)
+    so that the file, over its line limit already, ends shorter than it
+    was; its debt lowered to match.

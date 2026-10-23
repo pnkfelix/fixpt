@@ -3468,14 +3468,15 @@ impl Checker {
             }
         }
         // A composable continuation can be called, so it can stand where a
-        // subroutine is wanted.
-        if let (Ty::Composable { .. }, Ty::Subr { .. }) = (&ta, &tb) {
+        // subroutine is wanted: one that ensures nothing.
+        if let (Ty::Composable { .. }, Ty::Subr { spec, .. }) = (&ta, &tb) {
             let (xa, pa, qa) = ta.as_subr().expect("callable");
             let (xb, pb, qb) = tb.as_subr().expect("callable");
             return pa.len() == pb.len()
                 && ea(&xa).within(&eb(&xb))
                 && pa.iter().zip(&pb).all(|(x, y)| self.sub(*y, *x, &flip, st))
-                && self.sub(qa, qb, env, st);
+                && self.sub(qa, qb, env, st)
+                && crate::logic::spec_within(None, spec.as_deref());
         }
         // A union is below what each of its members is; a type is below a
         // union if below a member, or, a pair that may be `nil`, if `nil`

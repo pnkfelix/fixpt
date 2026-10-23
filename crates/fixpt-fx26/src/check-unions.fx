@@ -70,7 +70,7 @@
         (ty-false () 16)
         (ty-pair (a b r nl) (if nl 96 64))
         (ty-nlist (e z r) 96)
-        (ty-subr (e ps r cv) 512)
+        (ty-subr (e ps r cv spc) 512)
         (ty-comp (a h e r once) 512)
         ;; An array is a bloblet as `(bloblet …)` is, of the same kind.
         (ty-array (a nz r) 1024)

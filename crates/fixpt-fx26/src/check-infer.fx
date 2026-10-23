@@ -285,7 +285,7 @@
                                     (go (k-push-ids (k-desc-kids ds) xs))))))
                 (tagcase (k-get t)
                   (ty-var (v) (or (k-open? kinds solved v) (go rest)))
-                  (ty-subr (e ps r cv)
+                  (ty-subr (e ps r cv spc)
                     (or (k-open-effect? e kinds solved) (k-open-conv? cv kinds solved)
                         (go (k-push-ids ps (cons r rest)))))
                   (ty-poly (bs body) (go (cons body rest)))
@@ -326,7 +326,7 @@
               (begin
                 (tagcase (k-get t)
                   (ty-var (v) (k-open? kinds solved v))
-                  (ty-subr (e ps r cv) (or (ws ps) (w r)))
+                  (ty-subr (e ps r cv spc) (or (ws ps) (w r)))
                   (ty-poly (bs body) (w body))
                   (ty-ref (a r) (w a))
                   (ty-markkey (a r) (w a))
@@ -481,13 +481,15 @@
                    (lambda (x y) (k-exactly (lambda () (k-unify x y kinds solved trail))))))
         (tagcase pt
           (ty-var (v) (k-unify-var v a kinds solved))
-          (ty-subr (pe pp pr pc)
+          (ty-subr (pe pp pr pc spc)
             (let ((c (k-as-subr a)))
               (if (null? c)
                   #u
                   (begin
                    ;; A convention binder takes the actual's convention.
-                   (tagcase at (ty-subr (e ps r ac) (k-unify-conv pc ac kinds solved)) (else y #u))
+                   (tagcase at
+                     (ty-subr (e ps r ac spc) (k-unify-conv pc ac kinds solved))
+                     (else y #u))
                    (let ((ap (extract (car c) 2)))
                      (if (not (= (k-length pp) (k-length ap)))
                          #u

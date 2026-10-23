@@ -50,7 +50,7 @@
     (tagcase (k-get (k-resolve t))
       (ty-poly (bs body)
         (let ((b (k-with-latent body extra))) (if (< b 0) -1 (k-ty-new (ty-poly bs b)))))
-      (ty-subr (e ps r cv) (k-ty-new (ty-subr (k-union e extra) ps r cv)))
+      (ty-subr (e ps r cv spc) (k-ty-new (ty-subr (k-union e extra) ps r cv spc)))
       (else y -1))))
 ;; The atoms of `e` on globals.
 (define k-globals-of (->* (k-eff) k-eff)
@@ -133,7 +133,7 @@
   (lambda (synth t x)
     (tagcase (k-get (k-resolve t))
       (ty-poly (bs body) (k-arrow-star-latent synth body x))
-      (ty-subr (e ps r cv) (begin (synth x ps r) (get k-last-latent)))
+      (ty-subr (e ps r cv spc) (begin (synth x ps r spc) (get k-last-latent)))
       (else y (k-fail "`->*` reads as a `subr`" (k-start x) (k-end x))))))
 ;; Whether effect `e` reads the global of one of `ns`.
 (define k-reads-one-of? (->* (k-names k-eff) bool)

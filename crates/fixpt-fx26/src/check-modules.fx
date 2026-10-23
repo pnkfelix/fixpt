@@ -350,7 +350,7 @@
             #u
             (begin
               (tagcase (k-get t)
-                (ty-subr (e ps r cv) (k-esels-note e out))
+                (ty-subr (e ps r cv spc) (k-esels-note e out))
                 (ty-tag (a h e r) (k-esels-note e out))
                 (ty-comp (a h e r once) (k-esels-note e out))
                 (ty-lam (bs d) (k-esels-descs (the k-descs (list d)) out))
@@ -471,7 +471,7 @@
     (tagcase (k-get n)
       (ty-select (m s) #t)
       (ty-param (k s) #t)
-      (ty-subr (e ps r cv) (k-eff-given? e given))
+      (ty-subr (e ps r cv spc) (k-eff-given? e given))
       (ty-tag (a h e r) (k-eff-given? e given))
       (ty-comp (a h e r once) (k-eff-given? e given))
       (ty-lam (bs d) (k-descs-given? (the k-descs (list d)) given))

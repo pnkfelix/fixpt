@@ -18,7 +18,8 @@
        (check-kinds-types (load-module "fx26:check-kinds-types.fx"))
        (check-effects-types (load-module "fx26:check-effects-types.fx"))
        (check-modules-types (load-module "fx26:check-modules-types.fx"))
-       (check-read-helpers-types (load-module "fx26:check-read-helpers-types.fx")))
+       (check-read-helpers-types (load-module "fx26:check-read-helpers-types.fx"))
+       (check-logic-types (load-module "fx26:check-logic-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-types (select check-types-types check-types-sig))
            (check-env (select check-env-types check-env-sig))
@@ -29,7 +30,8 @@
            (check-effects (select check-effects-types check-effects-sig))
            (check-modules (select check-modules-types check-modules-sig))
            (check-print-parts (select check-print-parts-types check-print-parts-sig))
-           (check-read-helpers (select check-read-helpers-types check-read-helpers-sig)))
+           (check-read-helpers (select check-read-helpers-types check-read-helpers-sig))
+           (check-logic (select check-logic-types check-logic-sig)))
     (module
 
 ;; The types it uses of the files before it.
@@ -39,6 +41,7 @@
 (hide (include check-types) (include check-env) (include check-subtype)
       (include check-print-parts) (include check-print) (include check-kinds)
       (include check-resolve) (include check-effects) (include check-modules))
+(import check-logic k-spec-delta)
 
 (define k-newline string (char->string (integer->char 10)))
 ;; Run `f`, and if it fails at `a`..`b` with "a W is expected here, and
@@ -82,10 +85,10 @@
 (define k-conversion (->* (int int) (listof k-conv acyclic))
   (lambda (got want)
     (tagcase (k-get (k-resolve got))
-      (ty-subr (e ps r from)
+      (ty-subr (e ps r from spc)
         (tagcase (k-get (k-resolve want))
-          (ty-subr (e2 ps2 r2 to)
-            (if (and (not (k-conv=? from to)) (k-subtype (k-ty-new (ty-subr e ps r to)) want))
+          (ty-subr (e2 ps2 r2 to spc)
+            (if (and (not (k-conv=? from to)) (k-subtype (k-ty-new (ty-subr e ps r to spc)) want))
                 (cons to nil)
                 nil))
           (else y nil)))
@@ -104,7 +107,9 @@
 ;; `native`.
 (define k-convert-at (->* (kx int k-conv) unit)
   (lambda (x t to)
-    (let ((n (tagcase (k-get (k-resolve t)) (ty-subr (e ps r cv) (* 4 (k-length ps))) (else y 0))))
+    (let ((n (tagcase (k-get (k-resolve t))
+               (ty-subr (e ps r cv spc) (* 4 (k-length ps)))
+               (else y 0))))
       (tagcase to
         (cv-cellular () (k-note-conversion x (+ n 1)))
         (cv-native () (k-note-conversion x (+ n 2)))
@@ -113,7 +118,7 @@
   (lambda (t)
     (tagcase (k-get (k-resolve t))
       (ty-poly (bs body) (k-latent-of body))
-      (ty-subr (e ps r cv) (the k-effs (cons e nil)))
+      (ty-subr (e ps r cv spc) (the k-effs (cons e nil)))
       (else y nil))))
 ;; The atoms of `g` that `w` does not cover.
 (define k-uncovered (->* (k-eff k-eff) k-eff)
@@ -131,7 +136,7 @@
           ""
           (let ((beyond (k-uncovered (car g) (car w))))
             (if (null? beyond)
-                ""
+                (k-spec-delta got want)
                 (k-cat3 k-newline "  beyond what is expected, it has " (k-show-effect beyond))))))))
 ;; `got ≤ want`, or an error at `x` saying so.
 (define k-expect (->* (kx int int) unit)
@@ -279,8 +284,8 @@
 ;; Effect `e`, its `select`s resolved: as a subroutine's latent effect.
 (define k-effect-resolved (->* (k-eff int int) k-eff)
   (lambda (e a b)
-    (let ((t (k-resolve-selects (k-ty-new (ty-subr e nil k-unit (get k-conv-default))) a b)))
-      (tagcase (k-get t) (ty-subr (r ps res cv) r) (else y e)))))
+    (let ((t (k-resolve-selects (k-ty-new (ty-subr e nil k-unit (get k-conv-default) nil)) a b)))
+      (tagcase (k-get t) (ty-subr (r ps res cv spc) r) (else y e)))))
 ;; Description `d`, given where one of kind `k` is wanted: a `select` given
 ;; for a description function, resolved, and taken as one; a type given,
 ;; its `select`s resolved, as an annotation's are (a type a module

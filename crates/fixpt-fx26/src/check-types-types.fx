@@ -60,6 +60,25 @@
   (pr-shape int int bool) (pr-acyclic int) (pr-nat int) (pr-length int int)
   (pr-rel int k-term k-term))
 (define-type k-props (listof k-prop acyclic))
+;; A specification's integer (`logic.rs`'s `Expr`, its atoms `ast::Named`):
+;; a parameter, by number from 0; the result; a literal; a sum, a
+;; difference, a product.
+(define-datatype k-sx
+  (sx-param int) (sx-result) (sx-lit int)
+  (sx-add k-sx k-sx) (sx-sub k-sx k-sx) (sx-mul k-sx k-sx))
+(define-type k-sxs (listof k-sx acyclic))
+;; A specification's proposition (`logic.rs`'s `Formula`): a relation, 0
+;; `<`, 1 `<=`, 2 `=`, 3 not `=`; a `bool` named (`sx-param`, `sx-result`)
+;; holding; the connectives.
+(define-datatype k-sf
+  (sf-true) (sf-false) (sf-rel int k-sx k-sx) (sf-holds k-sx) (sf-not k-sf)
+  (sf-and (listof k-sf acyclic)) (sf-or (listof k-sf acyclic)) (sf-implies k-sf k-sf))
+(define-type k-sfs (listof k-sf acyclic))
+;; A procedure's specification (`ast::Spec`): its parameters' names (`||`
+;; for one not named), its result's, its `requires`, its `ensures`.
+(define-type k-spec (productof (1 (listof symbol acyclic)) (2 symbol) (3 k-sf) (4 k-sf)))
+;; None or one.
+(define-type k-specs (listof k-spec acyclic))
 ;; A binder: a description variable and its kind, 0 region, 1 effect, 2 type.
 (define-type k-binders (listof (productof (1 int) (2 int)) acyclic))
 (define-type k-parts (listof (productof (1 symbol) (2 int)) acyclic))
@@ -83,8 +102,8 @@
   (ty-base symbol)
   (ty-void)
   (ty-var int)
-  ;; effect, parameters, result, convention
-  (ty-subr k-eff k-ids int k-conv)
+  ;; effect, parameters, result, convention, specification (none or one)
+  (ty-subr k-eff k-ids int k-conv k-specs)
   (ty-poly k-binders int)
   (ty-ref int k-region)
   ;; head, tail, region, and whether it may be `nil` (`(union nil (pairof

@@ -311,7 +311,7 @@
 ;; from `a` to `b`, of effect `spin`.
 (define k-coercion (->* ((pairof int int @t) k-eff) int)
   (lambda (h spin)
-    (k-ty-new (ty-subr spin (the k-ids (cons (car h) nil)) (cdr h) (get k-conv-default)))))
+    (k-ty-new (ty-subr spin (the k-ids (cons (car h) nil)) (cdr h) (get k-conv-default) nil))))
 ;; What a use of `name` with `have` descriptions, not `want`, says.
 (define k-arity-message (->* (symbol int int) string)
   (lambda (name want have)

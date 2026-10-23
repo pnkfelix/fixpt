@@ -71,7 +71,7 @@
                 (ty-markkey (a r) (begin (add r) (walk a)))
                 (ty-pair (a b r nl) (begin (if (k-frozen? r) #u (add r)) (walk a) (walk b)))
                 (ty-bloblet (fs z r) (begin (if z #u (add r)) (walks fs)))
-                (ty-subr (e ps r cv) (begin (walks ps) (walk r)))
+                (ty-subr (e ps r cv spc) (begin (walks ps) (walk r)))
                 (ty-poly (bs body) (walk body))
                 (ty-product (ps) (k-storage-parts ps seen out))
                 (ty-sum (ps) (k-storage-parts ps seen out))
@@ -171,7 +171,7 @@
                 (ty-poly (bs body) (k-knot-in body kept seen))
                 ;; A procedure: kept where it is, it may not read there
                 ;; unsaid; what it takes and gives is kept nowhere yet.
-                (ty-subr (e ps r cv)
+                (ty-subr (e ps r cv spc)
                   (let ((found (k-reads-kept e kept)))
                     (if (null? found)
                         (k-knot-then (k-knot-list ps nil seen) r nil seen)

@@ -135,7 +135,7 @@
                         a b)))))))
 ;; `(subr pure (string) msg)`: what makes a watcher's message of a failure's.
 (define k-on-fail-type (->* (int) int)
-  (lambda (msg) (k-ty-new (ty-subr nil (list (k-string-type)) msg (get k-conv-default)))))
+  (lambda (msg) (k-ty-new (ty-subr nil (list (k-string-type)) msg (get k-conv-default) nil))))
 (define k-string-type (->* () int) (lambda () (k-ty-new (ty-base 'string))))
 (define k-watcher-usage string "a watcher is a process's address, `(addr M R)`, and this is a ")
 ;; An address type's message type and region, in a list of one; none if
@@ -196,7 +196,7 @@
               (tagcase (k-get (extract pt 1))
                 (ty-poly (pbs inner)
                   (tagcase (k-get inner)
-                    (ty-subr (e ps res cv)
+                    (ty-subr (e ps res cv spc)
                       (tagcase (k-get (car ps))
                         (ty-named (w ds)
                           (if (and (= w k-inbox-index) (= (k-length ds) 2)
@@ -274,9 +274,9 @@
     (let* ((noted (synth op)) (ft (synth (car args))) (gt (synth (car (cdr args))))
            (usage "`(par ((name expression) …) body …)`") (a (k-start x)) (b (k-end x)))
       (tagcase (k-get (extract ft 1))
-        (ty-subr (e1 ps1 r1 c1)
+        (ty-subr (e1 ps1 r1 c1 spc)
           (tagcase (k-get (extract gt 1))
-            (ty-subr (e2 ps2 r2 c2)
+            (ty-subr (e2 ps2 r2 c2 spc)
               (if (or (not (null? ps1)) (not (null? ps2)))
                   (k-fail usage a b)
                   (begin
@@ -307,9 +307,9 @@
     (let* ((noted (synth op)) (ft (synth (car args))) (gt (synth (car (cdr args))))
            (usage "`(race expression expression …)`") (a (k-start x)) (b (k-end x)))
       (tagcase (k-get (extract ft 1))
-        (ty-subr (e1 ps1 r1 c1)
+        (ty-subr (e1 ps1 r1 c1 spc)
           (tagcase (k-get (extract gt 1))
-            (ty-subr (e2 ps2 r2 c2)
+            (ty-subr (e2 ps2 r2 c2 spc)
               (if (or (not (null? ps1)) (not (null? ps2)))
                   (k-fail usage a b)
                   (begin

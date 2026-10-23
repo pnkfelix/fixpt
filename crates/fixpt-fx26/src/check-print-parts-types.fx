@@ -18,6 +18,7 @@
 (define-type k-printing (select check-print-types k-printing))
 (import check-types-types (type k-region k-size))
 (define-type k-size-fact (select check-print-types k-size-fact))
+(define-type k-lins (select check-print-types k-lins))
 (define-type k-terms (select check-types-types k-terms))
 ;; The types it names, from the files that define them.
 (import check-print-types (type k-atree k-atrees))
@@ -85,4 +86,8 @@
             (val k-show-props
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
                        (string k-props)
-                       string))))
+                       string))
+            (val k-unit-terms (subr (read @globals) (k-terms) k-terms))
+            (val k-lins-vars (subr (maxeff (alloc @t) (read @globals)) (k-lins k-ids) k-ids))
+            (val k-fm-eliminate (subr (maxeff (alloc @t) (read @globals)) (k-lins k-ids) bool))
+            (val k-terms-gcd (subr (read @globals) (k-terms int) int))))

@@ -2778,14 +2778,10 @@ trusting one an effect (`(trust A)`; the note's §7).
 ## 116. `requires` and `ensures`: what is left (the user's, 2026-10-23)
 
 `docs/research/typed-cellular-code.md` §8 and §10: specifications in
-procedure types, carried by the Rust checker, proved of the cells by the
-verifier, one prover for both (`logic.rs`). `tests/programs/specs`.
-Left:
-- **The FX-26 checker reads them**: `ty-subr` with its specification,
-  read, printed, compared by behavioural subtyping (Fourier–Motzkin is
-  there already), a `lambda` checked against one keeping it. Until then
-  the two checkers disagree on such a program and `fixpt run` refuses it;
-  the spec programs then join `every_test_program`.
+procedure types, carried by both checkers (the FX-26 one's `check-specs.fx`
+reads them, `check-logic.fx` is `logic.rs`'s prover step for step), proved
+of the cells by the verifier. `tests/programs/specs`, which both checkers
+agree on (`every_test_program`). Left:
 - Latent propositions as an `ensures` of a `bool` result, sugar
   (`(bool (then …) (else …))`), so that the verifier's narrowing by a
   predicate is the call rule, and the checker's too.

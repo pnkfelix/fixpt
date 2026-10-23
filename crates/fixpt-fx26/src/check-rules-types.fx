@@ -6,7 +6,7 @@
 ;; What its clients use of it (`check-program.fx`).
 ;; The types it names, from the files that define them.
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
-(import check-types-types (type k-eff k-te kx k-ids))
+(import check-types-types (type k-eff k-te kx k-ids k-specs))
 (define-type check-rules-sig
   (moduleof (val k-synth
                  (subr (maxeff (alloc @t)
@@ -46,5 +46,5 @@
                                (read @t)
                                (write @t)
                                spin)
-                       (kx k-ids int)
+                       (kx k-ids int k-specs)
                        k-te))))

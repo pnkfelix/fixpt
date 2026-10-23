@@ -66,7 +66,7 @@
                 (set seen (cons (cons t at) (get seen)))
                 (tagcase (k-get t)
                   (ty-var (x) (if (= x v) (push at) #u))
-                  (ty-subr (e ps r cv) (begin (eff e at) (gos ps (k-flip at)) (go r at)))
+                  (ty-subr (e ps r cv spc) (begin (eff e at) (gos ps (k-flip at)) (go r at)))
                   (ty-poly (bs body) (go body at))
                   (ty-ref (a r) (begin (reg r) (go a 2)))
                   (ty-array (a nz r) (begin (reg r) (go a 2)))

@@ -152,7 +152,7 @@
                              (lambda () (k-ids-untransmissible fs seen bound))))
                 (ty-icell (x r) (k-untransmissible x seen bound))
                 (ty-named (w ds) (k-named-untransmissible w ds t bound))
-                (ty-subr (e ps res cv)
+                (ty-subr (e ps res cv spc)
                   (let ((bad (k-crossing-bad e bound)))
                     (if (null? bad)
                         (k-ids-untransmissible (k-snoc ps res) seen bound)

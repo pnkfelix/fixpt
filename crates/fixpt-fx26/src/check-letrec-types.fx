@@ -16,8 +16,8 @@
 (define-type k-idss (listof k-ids acyclic))
 ;; What types a `lambda` told its parameters and result: `k-synth-lambda-as`,
 ;; given by `check-rules.fx`.
-(import check-types-types (type k-te))
-(define-type k-lambda-synth (subr (maxeff checks spin) (kx k-ids int) k-te))
+(import check-types-types (type k-specs k-te))
+(define-type k-lambda-synth (subr (maxeff checks spin) (kx k-ids int k-specs) k-te))
 (define-type k-eff-list (listof k-eff acyclic))
 (define-type k-bools (listof bool acyclic))
 (hide (define check-terminate-types (load-module "fx26:check-terminate-types.fx")))

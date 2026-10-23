@@ -118,7 +118,7 @@
 (define k-made-native (->* (k-te int int) k-te)
   (lambda (te a b)
     (tagcase (k-get (extract te 1))
-      (ty-subr (e ps res cv)
+      (ty-subr (e ps res cv spc)
         (tagcase cv
           (cv-native () te)
           (cv-fx () te)
@@ -159,7 +159,7 @@
           (if (< t 0)
               nil
               (tagcase (k-get (extract (k-binders-of t) 2))
-                (ty-subr (e ps r cv)
+                (ty-subr (e ps r cv spc)
                   (tagcase (k-get r)
                     (ty-proving (th el)
                       (the k-latent (cons (product (1 th) (2 el) (3 args)) nil)))
