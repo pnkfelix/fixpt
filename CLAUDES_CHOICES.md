@@ -1434,3 +1434,32 @@ The user: "let's attack requires and ensures next" (the design note's
    !` and those their own test files expect), fragments whose test binds
    their free variables, module files meant to be loaded, and arm64's
    conventions on x86_64.
+
+## Masking inside a word, in the verifier (2026-10-23)
+
+1. **The certificate says where, not what.** For each expression whose
+   effect `Checker::mask` changed (`Facts::masked`), the compiler marks
+   its cells (`Item::Mask`, `Cert::masks`), as region scopes are. It does
+   not say what was masked: the verifier finds what the cells are given
+   from outside (a slot below where they start, a free value, a global)
+   and what they give (the value they leave; the word's result where they
+   return; the parameters at the loop back to the start), and masks by
+   `Checker::mask_keeps`, the filter factored out of `mask`, which the
+   word's boundary uses too.
+2. **A range the verifier cannot trust is ignored, not refused**: one
+   entered other than at its start, left other than at its end (but by a
+   `return`, a tail call or the loop back), with a `slot!` below its
+   start, a step that takes it below where it started, or one straddling
+   its end. Ignoring one only masks less.
+3. **Applied after, per atom.** The word's effect is computed as before
+   (regions' scopes, `plambda` bodies); an atom of it is then dropped if
+   every step that did it lies in a valid range whose mask drops it.
+   Masks are per-atom filters, so their order does not matter, and an
+   atom no step noted is kept.
+4. **The test of it**: each verified word's latent effect made one atom
+   smaller must not verify for the ranges alone (it verifies only if it
+   also does without them). The latent effect is what the checker's
+   masking kept, so a range masking it would be the verifier masking
+   more. It found the older gaps of §117 too, which it does not assert
+   on: global reads, `spin`, the scheduler's private regions.
+

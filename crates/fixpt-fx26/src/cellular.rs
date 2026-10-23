@@ -46,6 +46,10 @@ enum Item {
     /// For typed cellular code: a `plambda`'s body, `Compiler::gens[k]`'s
     /// binders, starts here (`true`) or has just ended, its value made.
     Gen(usize, bool),
+    /// For typed cellular code: the cells of an expression whose effect
+    /// checking masked (`Facts::masked`), the `k`th, start here (`true`)
+    /// or have just ended.
+    Mask(usize, bool),
 }
 
 /// Where a variable is.
@@ -238,6 +242,10 @@ pub struct Compiler<'a> {
     opens: Vec<(usize, TyId, Vec<crate::ast::DVar>)>,
     last_opens: Vec<(usize, usize, TyId, Vec<crate::ast::DVar>)>,
     last_regions: Vec<(usize, usize, crate::ast::RegionForm, crate::ast::DVar)>,
+    /// The masked expressions' cells of the word last assembled, each from
+    /// where to where (`Item::Mask`); and how many have been marked.
+    last_masks: Vec<(usize, usize)>,
+    masks_made: usize,
     last_gens: Vec<(usize, usize, Vec<(crate::ast::DVar, crate::ast::Kind)>)>,
     /// The name of the lambda whose body is compiled, without where it
     /// starts: an inner lambda's word is named within it, `outer/inner@N`.
@@ -390,6 +398,8 @@ impl<'a> Compiler<'a> {
             last_packs: Vec::new(),
             regions: Vec::new(),
             last_regions: Vec::new(),
+            last_masks: Vec::new(),
+            masks_made: 0,
             opens: Vec::new(),
             last_opens: Vec::new(),
             scope_name: None,
@@ -459,7 +469,7 @@ impl<'a> Compiler<'a> {
     fn assemble(&mut self, items: &[Item], name: &str) -> R<Value> {
         let size = |i: &Item| match i {
             Item::Cell(_) => 1,
-            Item::Label(_) | Item::Note(_) | Item::Op(_) | Item::Gen(..) | Item::Pack(_) | Item::Region(..) | Item::Open(_) => 0,
+            Item::Label(_) | Item::Note(_) | Item::Op(_) | Item::Gen(..) | Item::Pack(_) | Item::Region(..) | Item::Open(_) | Item::Mask(..) => 0,
             Item::Branch(_) | Item::ZBranch(_) => 2,
         };
         let mut at = vec![0i64; self.labels];
@@ -478,6 +488,8 @@ impl<'a> Compiler<'a> {
         self.last_packs.clear();
         self.last_regions.clear();
         self.last_opens.clear();
+        self.last_masks.clear();
+        let mut mask_starts: HashMap<usize, usize> = HashMap::new();
         let mut gen_starts: HashMap<usize, usize> = HashMap::new();
         let mut region_starts: HashMap<usize, usize> = HashMap::new();
         for i in items {
@@ -501,6 +513,14 @@ impl<'a> Compiler<'a> {
                     if let Some(start) = region_starts.remove(k) {
                         let (form, r) = self.regions[*k];
                         self.last_regions.push((start, pos as usize, form, r));
+                    }
+                }
+                Item::Mask(k, true) => {
+                    mask_starts.insert(*k, pos as usize);
+                }
+                Item::Mask(k, false) => {
+                    if let Some(start) = mask_starts.remove(k) {
+                        self.last_masks.push((start, pos as usize));
                     }
                 }
                 Item::Gen(k, true) => {
@@ -704,6 +724,20 @@ impl<'a> Compiler<'a> {
     }
 
     fn exp(&mut self, x: ExpId, e: &Env, depth: usize, code: &mut Vec<Item>, tail: bool) -> R<()> {
+        // An expression whose effect checking masked: its cells marked.
+        let mask = (self.certs.is_some() && self.c.facts.masked.contains(&x)).then(|| {
+            self.masks_made += 1;
+            code.push(Item::Mask(self.masks_made, true));
+            self.masks_made
+        });
+        self.exp_noted(x, e, depth, code, tail)?;
+        if let Some(k) = mask {
+            code.push(Item::Mask(k, false));
+        }
+        Ok(())
+    }
+
+    fn exp_noted(&mut self, x: ExpId, e: &Env, depth: usize, code: &mut Vec<Item>, tail: bool) -> R<()> {
         let start = code.len();
         self.exp_unnoted(x, e, depth, code, tail)?;
         // A procedure of the built-in scheduler, through its form
@@ -2119,7 +2153,7 @@ impl<'a> Compiler<'a> {
             ops: self.last_ops.clone(),
             gens: self.last_gens.clone(),
             packs: self.last_packs.clone(),
-            regions: self.last_regions.clone(), opens: self.last_opens.clone(),
+            regions: self.last_regions.clone(), opens: self.last_opens.clone(), masks: self.last_masks.clone(),
             own_ops: self.last_ops.iter().map(|(k, _, _)| *k).collect(),
             ..Default::default()
         };
@@ -2747,7 +2781,7 @@ impl<'a> Compiler<'a> {
             ops: self.last_ops.clone(),
             gens: self.last_gens.clone(),
             packs: self.last_packs.clone(),
-            regions: self.last_regions.clone(), opens: self.last_opens.clone(),
+            regions: self.last_regions.clone(), opens: self.last_opens.clone(), masks: self.last_masks.clone(),
             conversion,
             own_ops: Vec::new(),
             vsubr: None,
@@ -3114,7 +3148,7 @@ impl<'a> Compiler<'a> {
         }
         let w = self.assemble(&code, "program")?;
         if let Some(certs) = &mut self.certs {
-            certs.words.insert(w.raw(), crate::typed_cells::Cert { notes: self.last_notes.clone(), ops: self.last_ops.clone(), gens: self.last_gens.clone(), packs: self.last_packs.clone(), regions: self.last_regions.clone(), opens: self.last_opens.clone(), ..Default::default() });
+            certs.words.insert(w.raw(), crate::typed_cells::Cert { notes: self.last_notes.clone(), ops: self.last_ops.clone(), gens: self.last_gens.clone(), packs: self.last_packs.clone(), regions: self.last_regions.clone(), opens: self.last_opens.clone(), masks: self.last_masks.clone(), ..Default::default() });
         }
         Ok(w)
     }

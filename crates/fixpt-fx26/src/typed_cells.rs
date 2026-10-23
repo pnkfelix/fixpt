@@ -103,6 +103,10 @@ pub struct Cert {
     /// its variable. Closed, its effects on it are masked and its value
     /// must not mention it (`letfreeze`: frozen).
     pub regions: Vec<(usize, usize, crate::ast::RegionForm, crate::ast::DVar)>,
+    /// The cells of expressions whose effect checking masked, each from
+    /// where to where: the verifier masks what they do as it finds them
+    /// seen (`Verifier::masked`).
+    pub masks: Vec<(usize, usize)>,
     /// Before which cell a `let`'s binding, in which slot, is opened as
     /// checking bound it (an array's length named): its type then, and the
     /// variables opened, fresh.
@@ -352,12 +356,30 @@ fn marker(op: &str) -> bool {
 
 /// Verify `word` against its certificate in `certs`.
 pub fn verify(c: &mut Checker, heap: &Heap, certs: &Certs, word: Value) -> Outcome {
-    let mut v = Verifier { c, heap, certs, out: Outcome::default(), made: 0, effect: Effect::pure(), proving: Vec::new(), latent_sizes: Vec::new(), joined: Vec::new(), path_reads: Vec::new(), gen_effects: Vec::new(), frames: Vec::new(), region_closures: Vec::new(), relations: Vec::new(), nats: Vec::new() };
+    let mut v = Verifier { c, heap, certs, out: Outcome::default(), made: 0, effect: Effect::pure(), proving: Vec::new(), latent_sizes: Vec::new(), joined: Vec::new(), path_reads: Vec::new(), masking: Vec::new(), contributed: Vec::new(), gen_effects: Vec::new(), frames: Vec::new(), region_closures: Vec::new(), relations: Vec::new(), nats: Vec::new() };
     match certs.words.get(&word.raw()) {
         Some(cert) => v.word(word, cert),
         None => v.out.stopped = Some("no certificate".into()),
     }
     v.out
+}
+
+/// A masked expression's cells, from `start` to `end` (`Cert::masks`): the
+/// stack's height where they start, and the regions seen from outside them,
+/// in the types of what they read that was made before them (a slot below
+/// that height, a free value, a global), and in their result's (the value
+/// they leave, or the word's, where they return). Not `valid` if they
+/// could be entered other than at their start, left other than at their
+/// end, by a `return` or by the loop back to the word's start, or reach
+/// below where they start (a `slot!` there, the stack lower): then nothing
+/// is masked by them.
+struct Masking {
+    start: usize,
+    end: usize,
+    base: Option<usize>,
+    visible: std::collections::HashSet<crate::ast::Region>,
+    in_result: std::collections::HashSet<crate::ast::Region>,
+    valid: bool,
 }
 
 struct Verifier<'a> {
@@ -382,6 +404,12 @@ struct Verifier<'a> {
     /// The paths read (`(car x)`, …, from a value), each one's term, the
     /// regions it reads through, and the type it was read at.
     path_reads: Vec<(Term, Vec<crate::ast::Region>, TyId)>,
+    /// The masked expressions' cells (`Cert::masks`), as the walk finds
+    /// what each is given and gives.
+    masking: Vec<Masking>,
+    /// What each step did: the cells it took, the first and the last, and
+    /// its effect.
+    contributed: Vec<(usize, usize, Effect)>,
     /// The effect so far where each `plambda` body being verified started:
     /// the body's own is what is added since, which must be none.
     gen_effects: Vec<Effect>,
@@ -622,6 +650,16 @@ impl Verifier<'_> {
         for v in entry.stack.clone() {
             self.note_nat(&v);
         }
+        self.masking = cert.masks.iter().map(|(start, end)| Masking { start: *start, end: *end, base: None, visible: Default::default(), in_result: Default::default(), valid: true }).collect();
+        for ins in code.iter().filter(|ins| matches!(ins.name, Some("branch" | "0branch"))) {
+            let to = (ins.at as i64 + 2 + ins.ops[0].as_fixnum()) as usize;
+            for m in &mut self.masking {
+                let inside = m.start <= ins.at && ins.at < m.end;
+                if (!inside && m.start < to && to < m.end) || (inside && !(m.start..=m.end).contains(&to) && to != 0) {
+                    m.valid = false;
+                }
+            }
+        }
         let notes: HashMap<usize, &Vec<Prop>> = cert.notes.iter().map(|(k, p)| (*k, p)).collect();
         // The states waiting at each later cell, from branches to it.
         let mut waiting: HashMap<usize, Vec<State>> = HashMap::new();
@@ -674,12 +712,14 @@ impl Verifier<'_> {
                 self.out.stopped = Some("a word run as a cell".into());
                 return;
             };
+            self.mask_cell(&code, i - 1, &s, cert, &slot_types);
             let before = std::mem::replace(&mut self.effect, Effect::pure());
             let done = self.idiom(&code[i - 1..], cert, &mut s, &at, &waiting);
             let eff = std::mem::replace(&mut self.effect, before);
             self.effect = self.effect.union(&eff);
             match done {
                 Some(Ok(n)) => {
+                    self.contribute(ins.at, code[i + n - 2].at, eff.clone(), s.stack.len(), false);
                     self.forget_paths(&mut s, &eff);
                     i += n - 1;
                     cur = Some(s);
@@ -694,6 +734,7 @@ impl Verifier<'_> {
             self.effect = self.effect.union(&eff);
             match done {
                 Some(Ok(n)) => {
+                    self.contribute(ins.at, code[i + n - 2].at, eff.clone(), s.stack.len(), false);
                     self.forget_paths(&mut s, &eff);
                     i += n - 1;
                     cur = Some(s);
@@ -710,6 +751,8 @@ impl Verifier<'_> {
             let done = std::mem::replace(&mut self.effect, before);
             self.effect = self.effect.union(&done);
             self.c.size_facts = outer;
+            let exits = matches!(name, "return" | "exit" | "tailcall" | "ttailcall");
+            self.contribute(ins.at, ins.at, done.clone(), s.stack.len(), exits);
             match stepped {
                 Ok(Some(mut next)) => {
                     self.forget_paths(&mut next, &done);
@@ -730,6 +773,7 @@ impl Verifier<'_> {
         }
         if let Some(latent) = &cert.effect {
             let effect = self.masked(&code, cert, &slot_types);
+            let effect = self.masked_within(effect);
             if !effect.within(latent) {
                 let msg = format!("effect {} is not within the latent {}", self.c.show_effect(&effect), self.c.show_effect(latent));
                 self.out.open.push(msg);
@@ -744,7 +788,6 @@ impl Verifier<'_> {
     /// type, only allocation and control; otherwise nothing outside can
     /// tell, and it is dropped.
     fn masked(&mut self, code: &[Ins], cert: &Cert, slot_types: &[TyId]) -> Effect {
-        use crate::ast::{Atom, Region};
         let mut seen: Vec<TyId> = slot_types.iter().chain(&cert.frees).copied().collect();
         for ins in code {
             if matches!(ins.name, Some("global" | "global!"))
@@ -761,22 +804,85 @@ impl Verifier<'_> {
         if let Some(r) = cert.result {
             self.c.regions_in(r, &mut in_result);
         }
-        let kept = self
-            .effect
+        Effect(self.effect.0.iter().copied().filter(|a| Checker::mask_keeps(*a, &visible, &in_result)).collect())
+    }
+
+    /// At the cell `code[k]`, with state `s` there: each masked
+    /// expression's cells that start here, what they are given from
+    /// outside, by the cells they have (`Masking`); each that ends here,
+    /// the value it leaves.
+    fn mask_cell(&mut self, code: &[Ins], k: usize, s: &State, cert: &Cert, slot_types: &[TyId]) {
+        let at = code[k].at;
+        let mut masking = std::mem::take(&mut self.masking);
+        for m in masking.iter_mut().filter(|m| m.valid && m.end == at && m.base.is_some()) {
+            if let Some(t) = s.stack.last().and_then(|v| v.ty) {
+                self.c.regions_in(t, &mut m.in_result);
+            }
+        }
+        for m in masking.iter_mut().filter(|m| m.valid && m.start == at) {
+            let base = s.stack.len();
+            m.base = Some(base);
+            for ins in code[k..].iter().take_while(|ins| ins.at < m.end) {
+                let n = ins.ops.first().filter(|o| o.is_fixnum()).map_or(usize::MAX, |o| o.as_fixnum() as usize);
+                let given = match ins.name {
+                    Some("slot") if n < base => s.stack[n].ty,
+                    Some("slot!") if n < base => {
+                        m.valid = false;
+                        None
+                    }
+                    Some("free") => cert.frees.get(n).copied(),
+                    Some("global" | "global!") => self.certs.globals.get(&ins.ops[0].raw()).copied(),
+                    _ => None,
+                };
+                if let Some(t) = given {
+                    self.c.regions_in(t, &mut m.visible);
+                }
+                // Left by a `return` (or a tail call): the word's result;
+                // by the loop back to the start, its parameters, again.
+                if matches!(ins.name, Some("return" | "tailcall" | "ttailcall"))
+                    && let Some(r) = cert.result
+                {
+                    self.c.regions_in(r, &mut m.in_result);
+                }
+                if matches!(ins.name, Some("branch" | "0branch")) && ins.at as i64 + 2 + ins.ops[0].as_fixnum() == 0 {
+                    for t in slot_types {
+                        self.c.regions_in(*t, &mut m.visible);
+                    }
+                }
+            }
+        }
+        self.masking = masking;
+    }
+
+    /// A step's effect, of the cells from `first` to `last`, the stack
+    /// left at `height`: noted, and any masked expression's cells it reaches
+    /// below the start of made not valid (unless it left them: `exits`).
+    fn contribute(&mut self, first: usize, last: usize, eff: Effect, height: usize, exits: bool) {
+        for m in &mut self.masking {
+            if m.start <= first && first < m.end && (last >= m.end || (!exits && m.base.is_some_and(|b| height < b))) {
+                m.valid = false;
+            }
+        }
+        if !eff.is_pure() {
+            self.contributed.push((first, last, eff));
+        }
+    }
+
+    /// The word's effect `effect` with what masked expressions' cells did
+    /// masked: an atom kept if some step that did it is in no valid such
+    /// cells whose mask drops it (`Checker::mask_keeps`), or if no step
+    /// noted did it.
+    fn masked_within(&self, effect: Effect) -> Effect {
+        let kept = effect
             .0
             .iter()
             .copied()
-            .filter(|a| match a.region() {
-                None => true,
-                Some(r @ Region::Frozen(Some(p), _)) if !matches!(a, Atom::Write(_)) => {
-                    let place = Region::Var(p);
-                    visible.contains(&r) || visible.contains(&place) || ((in_result.contains(&r) || in_result.contains(&place)) && matches!(a, Atom::Alloc(_)))
-                }
-                Some(Region::Frozen(..)) => true,
-                Some(Region::Global(_) | Region::Globals) => true,
-                Some(r) if visible.contains(&r) => true,
-                Some(r) if in_result.contains(&r) => matches!(a, Atom::Alloc(_) | Atom::Goto(_) | Atom::Comefrom(_)),
-                Some(_) => false,
+            .filter(|a| {
+                let mut doing = self.contributed.iter().filter(|(_, _, e)| e.0.contains(a)).peekable();
+                doing.peek().is_none()
+                    || doing.any(|(first, last, _)| {
+                        self.masking.iter().filter(|m| m.valid && m.base.is_some() && m.start <= *first && *last < m.end).all(|m| Checker::mask_keeps(*a, &m.visible, &m.in_result))
+                    })
             })
             .collect();
         Effect(kept)

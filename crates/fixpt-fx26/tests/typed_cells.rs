@@ -204,6 +204,82 @@ fn a_verified_word_changed_is_refused() {
     assert!(kept.is_empty(), "mutants verified:\n{}", kept.join("\n"));
 }
 
+/// Each verified word's latent effect made smaller by one atom, in turn:
+/// how many were, those that still verified, and those that verified only
+/// for the masked expressions' cells (`Cert::masks`) the certificate
+/// marks, which would be the verifier masking more than the checker did.
+fn weakened(s: &mut Fx26Session, name: &str, text: &str) -> (usize, Vec<String>, Vec<String>) {
+    let Ok((mut c, tops)) = checked_in(text, base_of(name)) else { return (0, Vec::new(), Vec::new()) };
+    fixpt_fx26::syn::set_load_base(Some(base_of(name)));
+    let (mut made, mut kept, mut by_masks) = (0, Vec::new(), Vec::new());
+    s.scheme.scope(|sc| {
+        sc.make(|m| {
+            let mut certs = {
+                let mut comp = fixpt_fx26::cellular::Compiler::new(m.heap(), &c, text);
+                comp.certs = Some(Certs::default());
+                if comp.program(&tops).is_err() {
+                    return Value::NULL;
+                }
+                comp.certs.take().expect("made")
+            };
+            certs.settle(&mut c).expect("settled");
+            let words: Vec<u64> = certs.words.keys().copied().collect();
+            for raw in words {
+                let w = Value::from_raw(raw);
+                let Some(latent) = certs.words[&raw].effect.clone() else { continue };
+                if !verify(&mut c, m.heap(), &certs, w).verified() {
+                    continue;
+                }
+                for a in latent.0.iter() {
+                    let mut less = latent.clone();
+                    less.0.remove(a);
+                    certs.words.get_mut(&raw).expect("there").effect = Some(less);
+                    made += 1;
+                    if verify(&mut c, m.heap(), &certs, w).verified() {
+                        let what = format!("{name}: {a:?} of {}", c.show_effect(&latent));
+                        let masks = std::mem::take(&mut certs.words.get_mut(&raw).expect("there").masks);
+                        if !verify(&mut c, m.heap(), &certs, w).verified() {
+                            by_masks.push(what.clone());
+                        }
+                        certs.words.get_mut(&raw).expect("there").masks = masks;
+                        kept.push(what);
+                    }
+                }
+                certs.words.get_mut(&raw).expect("there").effect = Some(latent);
+            }
+            Value::NULL
+        });
+    });
+    (made, kept, by_masks)
+}
+
+/// A latent effect made smaller is not verified for what the verifier
+/// masks of expressions inside a word: it masks no more than the checker,
+/// whose latent effect keeps only what its masking did not drop. (Some
+/// still verify, for what the verifier does not yet compute: a global's
+/// read, `spin`, and what the scheduler's procedures, trusted at their
+/// forms' types, do to its private regions; `TODO.md` §117. `ALL` lists
+/// them.)
+#[test]
+fn a_latent_effect_weakened_is_not_masked_away() {
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let (mut made, mut kept, mut by_masks) = (0, Vec::new(), Vec::new());
+    for (name, text) in programs() {
+        let (m, k, b) = weakened(&mut s, &name, &text);
+        made += m;
+        kept.extend(k);
+        by_masks.extend(b);
+    }
+    eprintln!("{made} latent effects weakened, {} verified still, {} for the masks alone", kept.len(), by_masks.len());
+    if std::env::var_os("ALL").is_some() {
+        for k in &kept {
+            eprintln!("  {k}");
+        }
+    }
+    assert!(made > 10000, "too few weakened: {made}");
+    assert!(by_masks.is_empty(), "weakened, and verified for the masks alone:\n{}", by_masks.join("\n"));
+}
+
 /// Every test program, by directory, but `specs`, whose programs say
 /// whether they verify (`specifications_as_they_say`).
 fn programs() -> Vec<(String, String)> {
@@ -317,13 +393,11 @@ fn every_directory_surveyed() {
 /// The words not yet verified, each a rule the certificate does not yet
 /// carry what it needs for (`TODO.md` §117): a prompt's own transfers of
 /// control that the checker drops where nothing but its tag's variable
-/// reaches the tag (`given`); effects the checker masks at an expression
-/// within a word, not at its boundary (`reuse`); a global redefined at
-/// another type, which the certificate gives one type (`f` and `h`, and
-/// the program's own word).
+/// reaches the tag (`given`); a global redefined at another type, which
+/// the certificate gives one type (`f` and `h`, and the program's own
+/// word).
 const KNOWN_GAPS: &[&str] = &[
     "native/raw-args.fx `given`",
-    "native/raw-slots.fx `reuse`",
     "redefine/knot-spin.fx `f`",
     "redefine/knot-spin.fx `h`",
     "redefine/rerun-chain.fx `program`",

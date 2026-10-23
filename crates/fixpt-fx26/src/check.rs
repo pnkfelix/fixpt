@@ -600,6 +600,9 @@ pub struct NodeFacts {
     /// `(convention C e)`: the convention each is converted to, and how
     /// many arguments the procedure takes.
     pub converted: HashMap<ExpId, (Conv, usize)>,
+    /// The expressions whose effect masking changed (`Checker::mask`): the
+    /// compilers say where each one's cells are, for the cells' verifier.
+    pub masked: HashSet<ExpId>,
     /// Applications of `apply` whose list is at `acyclic`: the variadic
     /// procedure may have that list itself, since nothing can write it.
     /// Every other `apply` copies its list.
@@ -698,6 +701,7 @@ impl NodeFacts {
         self.with_vals.retain(|e, _| e.0 < first);
         self.reshaped.retain(|e, _| e.0 < first);
         self.converted.retain(|e, _| e.0 < first);
+        self.masked.retain(|e| e.0 < first);
         self.apply_shares.retain(|e| e.0 < first);
         self.call_convs.retain(|e, _| e.0 < first);
         self.frozen_defines.retain(|e| e.0 < first);
@@ -2320,34 +2324,12 @@ impl Checker {
         }
         let mut in_result = HashSet::new();
         self.regions_in(result, &mut in_result);
-        let kept = effect
-            .0
-            .iter()
-            .copied()
-            .filter(|a| match a.region() {
-                None => true,
-                // Reading data frozen into a place, or awaiting it, is
-                // masked as what is done to the place is: where nothing
-                // outside sees the place.
-                Some(r @ Region::Frozen(Some(p), _)) if !matches!(a, Atom::Write(_)) => {
-                    let place = Region::Var(p);
-                    visible.contains(&r)
-                        || visible.contains(&place)
-                        || ((in_result.contains(&r) || in_result.contains(&place)) && matches!(a, Atom::Alloc(_)))
-                }
-                // What else is done to frozen data is never masked: writing
-                // it is an error wherever it happens (`frozen`).
-                Some(Region::Frozen(..)) => true,
-                // Globals' bindings are seen everywhere: never masked.
-                Some(Region::Global(_) | Region::Globals) => true,
-                Some(r) if visible.contains(&r) => true,
-                Some(r) if in_result.contains(&r) => {
-                    matches!(a, Atom::Alloc(_) | Atom::Goto(_) | Atom::Comefrom(_))
-                }
-                Some(_) => false,
-            })
-            .collect();
-        let kept = Effect(kept);
+        let kept = Effect(effect.0.iter().copied().filter(|a| Self::mask_keeps(*a, &visible, &in_result)).collect());
+        // Where masking dropped something, noted for the cells' verifier,
+        // which masks the expression's cells as it finds them seen.
+        if self.record_types && kept.0.len() < effect.0.len() {
+            self.facts.masked.insert(e);
+        }
         let allocates = |x: &Effect| x.0.iter().any(|a| matches!(a, Atom::Alloc(_)));
         // Masking alone does not show the allocation dead: a closure in
         // the value may hold it, its type saying nothing of the region
@@ -2357,6 +2339,31 @@ impl Checker {
             self.facts.no_escape.insert(e);
         }
         kept
+    }
+
+    /// Whether masking keeps atom `a` of an expression's effect: its region
+    /// is seen from outside, `visible` (in the types of what the expression
+    /// is given), or, for allocation and control alone, in its result's
+    /// type, `in_result` (`mask`; the cells' verifier's too).
+    pub(crate) fn mask_keeps(a: Atom, visible: &HashSet<Region>, in_result: &HashSet<Region>) -> bool {
+        match a.region() {
+            None => true,
+            // Reading data frozen into a place, or awaiting it, is masked as
+            // what is done to the place is: where nothing outside sees the
+            // place.
+            Some(r @ Region::Frozen(Some(p), _)) if !matches!(a, Atom::Write(_)) => {
+                let place = Region::Var(p);
+                visible.contains(&r) || visible.contains(&place) || ((in_result.contains(&r) || in_result.contains(&place)) && matches!(a, Atom::Alloc(_)))
+            }
+            // What else is done to frozen data is never masked: writing it
+            // is an error wherever it happens (`frozen`).
+            Some(Region::Frozen(..)) => true,
+            // Globals' bindings are seen everywhere: never masked.
+            Some(Region::Global(_) | Region::Globals) => true,
+            Some(r) if visible.contains(&r) => true,
+            Some(r) if in_result.contains(&r) => matches!(a, Atom::Alloc(_) | Atom::Goto(_) | Atom::Comefrom(_)),
+            Some(_) => false,
+        }
     }
 
     /// Whether a value of type `t` reaches only storage its type names:
