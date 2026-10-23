@@ -34,6 +34,9 @@ enum Item {
     /// For typed cellular code: the next cell runs standard operation
     /// `Compiler::ops[k]`, instantiated as it says.
     Op(usize),
+    /// For typed cellular code: a `plambda`'s body, `Compiler::gens[k]`'s
+    /// binders, starts here (`true`) or has just ended, its value made.
+    Gen(usize, bool),
 }
 
 /// Where a variable is.
@@ -219,6 +222,8 @@ pub struct Compiler<'a> {
     last_notes: Vec<(usize, Vec<crate::typed_cells::Prop>)>,
     ops: Vec<(String, Vec<crate::ast::D>)>,
     last_ops: Vec<(usize, String, Vec<crate::ast::D>)>,
+    gens: Vec<Vec<(crate::ast::DVar, crate::ast::Kind)>>,
+    last_gens: Vec<(usize, usize, Vec<(crate::ast::DVar, crate::ast::Kind)>)>,
     /// The name of the lambda whose body is compiled, without where it
     /// starts: an inner lambda's word is named within it, `outer/inner@N`.
     scope_name: Option<String>,
@@ -364,6 +369,8 @@ impl<'a> Compiler<'a> {
             last_notes: Vec::new(),
             ops: Vec::new(),
             last_ops: Vec::new(),
+            gens: Vec::new(),
+            last_gens: Vec::new(),
             scope_name: None,
             bind_name: None,
             defining: None,
@@ -431,7 +438,7 @@ impl<'a> Compiler<'a> {
     fn assemble(&mut self, items: &[Item], name: &str) -> R<Value> {
         let size = |i: &Item| match i {
             Item::Cell(_) => 1,
-            Item::Label(_) | Item::Note(_) | Item::Op(_) => 0,
+            Item::Label(_) | Item::Note(_) | Item::Op(_) | Item::Gen(..) => 0,
             Item::Branch(_) | Item::ZBranch(_) => 2,
         };
         let mut at = vec![0i64; self.labels];
@@ -446,6 +453,8 @@ impl<'a> Compiler<'a> {
         let mut pos = 0;
         self.last_notes.clear();
         self.last_ops.clear();
+        self.last_gens.clear();
+        let mut gen_starts: HashMap<usize, usize> = HashMap::new();
         for i in items {
             match i {
                 Item::Cell(x) => cells.push(*x),
@@ -454,6 +463,14 @@ impl<'a> Compiler<'a> {
                 Item::Op(k) => {
                     let (name, inst) = self.ops[*k].clone();
                     self.last_ops.push((pos as usize, name, inst));
+                }
+                Item::Gen(k, true) => {
+                    gen_starts.insert(*k, pos as usize);
+                }
+                Item::Gen(k, false) => {
+                    if let Some(start) = gen_starts.remove(k) {
+                        self.last_gens.push((start, pos as usize, self.gens[*k].clone()));
+                    }
                 }
                 Item::Branch(n) | Item::ZBranch(n) => {
                     let r = if matches!(i, Item::Branch(_)) { "branch" } else { "0branch" };
@@ -771,6 +788,15 @@ impl<'a> Compiler<'a> {
                 self.let_(&bindings, lbody, e, depth, code, tail)?;
             }
             Exp::App { fun, args } => self.app(x, fun, &args, e, depth, code, tail)?,
+            // A `plambda`'s value, made purely, is polymorphic: where it is
+            // made, said for the verifier.
+            Exp::PLambda { body, binders } if self.certs.is_some() && !tail => {
+                self.gens.push(binders);
+                let k = self.gens.len() - 1;
+                code.push(Item::Gen(k, true));
+                self.exp(body, e, depth, code, tail)?;
+                code.push(Item::Gen(k, false));
+            }
             Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::Convention { exp: body, .. } => {
                 self.exp(body, e, depth, code, tail)?
             }
@@ -2411,10 +2437,20 @@ impl<'a> Compiler<'a> {
         // `%include`); its type as another lambda saw it, or a global's.
         // The certificate is not trusted, so a wrong guess only fails.
         let c = self.c;
+        // A name a module's item uses from what the module includes: the
+        // lambda's body is `(with %include …)`, its free variable
+        // `%include`, whose module type has the name among its values
+        // (`Compiler::included_names` captures them).
+        let included = |n: &Sym| {
+            sig.frees.iter().filter(|(m, _)| c.interner.name(*m) == "%include").find_map(|(_, t)| match c.arena.get(c.arena.resolve(*t)) {
+                crate::ast::Ty::Module { vals, .. } => vals.iter().find(|(v, _)| v == n).map(|(_, t)| *t),
+                _ => None,
+            })
+        };
         let elsewhere = |n: &Sym| {
             c.facts.lambdas.values().flat_map(|s| s.params.iter().chain(&s.frees)).find(|(m, _)| m == n).map(|(_, t)| *t).or_else(|| c.global_type(*n))
         };
-        let by_name = |n: &Sym| sig.params.iter().rev().chain(sig.frees.iter()).find(|(m, _)| m == n).map(|(_, t)| *t).or_else(|| elsewhere(n));
+        let by_name = |n: &Sym| sig.params.iter().rev().chain(sig.frees.iter()).find(|(m, _)| m == n).map(|(_, t)| *t).or_else(|| included(n)).or_else(|| elsewhere(n));
         let (Some(ps), Some(fs)) = (params.iter().map(by_name).collect::<Option<Vec<_>>>(), fv.iter().map(by_name).collect::<Option<Vec<_>>>()) else { return };
         let poly = self.c.facts.generalized.get(&body).cloned().unwrap_or_default();
         let conversion = self.c.facts.conversions.get(&body).copied();
@@ -2426,6 +2462,7 @@ impl<'a> Compiler<'a> {
             effect: Some(sig.effect.clone()),
             notes: self.last_notes.clone(),
             ops: self.last_ops.clone(),
+            gens: self.last_gens.clone(),
             conversion,
         };
         certs.words.insert(w.raw(), cert);
@@ -2789,7 +2826,7 @@ impl<'a> Compiler<'a> {
         }
         let w = self.assemble(&code, "program")?;
         if let Some(certs) = &mut self.certs {
-            certs.words.insert(w.raw(), crate::typed_cells::Cert { notes: self.last_notes.clone(), ops: self.last_ops.clone(), ..Default::default() });
+            certs.words.insert(w.raw(), crate::typed_cells::Cert { notes: self.last_notes.clone(), ops: self.last_ops.clone(), gens: self.last_gens.clone(), ..Default::default() });
         }
         Ok(w)
     }

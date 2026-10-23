@@ -78,6 +78,10 @@ pub struct Cert {
     /// signature is the representation's identity. Checked (`conversion`),
     /// not trusted.
     pub conversion: Option<TyId>,
+    /// Where a `plambda`'s body is, by its first cell and the cell after
+    /// its last, and its binders: the value it makes there, if made purely,
+    /// is of the `poly` type over them (`generalize`).
+    pub gens: Vec<(usize, usize, Vec<(crate::ast::DVar, crate::ast::Kind)>)>,
 }
 
 /// The certificates a compilation made: each word's, and each global cell's
@@ -174,7 +178,7 @@ struct Ins {
 
 /// Verify `word` against its certificate in `certs`.
 pub fn verify(c: &mut Checker, heap: &Heap, certs: &Certs, word: Value) -> Outcome {
-    let mut v = Verifier { c, heap, certs, out: Outcome::default(), made: 0, effect: Effect::pure(), proving: Vec::new() };
+    let mut v = Verifier { c, heap, certs, out: Outcome::default(), made: 0, effect: Effect::pure(), proving: Vec::new(), gen_effects: Vec::new() };
     match certs.words.get(&word.raw()) {
         Some(cert) => v.word(word, cert),
         None => v.out.stopped = Some("no certificate".into()),
@@ -194,6 +198,9 @@ struct Verifier<'a> {
     /// where false, and the call's arguments' terms, by position. Its
     /// `ensures`, assumed where a branch tests it (`narrow`).
     proving: Vec<(Term, Vec<crate::ast::Prop>, Vec<crate::ast::Prop>, Vec<Term>)>,
+    /// The effect so far where each `plambda` body being verified started:
+    /// the body's own is what is added since, which must be none.
+    gen_effects: Vec<Effect>,
 }
 
 impl Verifier<'_> {
@@ -359,6 +366,9 @@ impl Verifier<'_> {
                     None => return,
                 },
             };
+            if self.generalize(cert, ins.at, &mut s, &at).is_err() {
+                return;
+            }
             let Some(name) = ins.name else {
                 self.out.stopped = Some("a word run as a cell".into());
                 return;
@@ -387,6 +397,50 @@ impl Verifier<'_> {
             let msg = format!("effect {} is not within the latent {}", self.c.show_effect(&self.effect), self.c.show_effect(latent));
             self.out.open.push(msg);
         }
+    }
+
+    /// The `plambda` bodies that end before cell `at`, innermost first: the
+    /// value each made, on top, generalized over its binders, where it was
+    /// made purely (its effect nothing: a `plambda` body must be pure, so
+    /// that nothing depends on the binders' instances); then those that
+    /// start there.
+    fn generalize(&mut self, cert: &Cert, at_cell: usize, s: &mut State, at: &str) -> Result<(), ()> {
+        let mut ends: Vec<&(usize, usize, Vec<(crate::ast::DVar, crate::ast::Kind)>)> = cert.gens.iter().filter(|(_, e, _)| *e == at_cell).collect();
+        ends.sort_by_key(|(start, _, _)| std::cmp::Reverse(*start));
+        for (_, _, binders) in ends {
+            let Some(before) = self.gen_effects.pop() else {
+                self.out.failed.push(format!("{at}: a `plambda` body ends that did not start"));
+                return Err(());
+            };
+            if !self.effect.0.is_empty() {
+                let msg = format!("{at}: a `plambda` body with effect {}", self.c.show_effect(&self.effect));
+                self.out.failed.push(msg);
+                return Err(());
+            }
+            self.effect = before;
+            let Some(v) = s.stack.last_mut() else {
+                self.out.failed.push(format!("{at}: a `plambda` body that made no value"));
+                return Err(());
+            };
+            // Unless already over them: a lambda's word under the chain of
+            // `plambda`s it is the body of (`Cert::poly`).
+            if let Some(t) = v.ty {
+                let mut under = self.c.arena.resolve(t);
+                let mut already = false;
+                while let Ty::Poly { binders: bs, body } = self.c.arena.get(under).clone() {
+                    already |= bs == *binders;
+                    under = self.c.arena.resolve(body);
+                }
+                if !already {
+                    v.ty = Some(self.c.arena.ty(Ty::Poly { binders: binders.clone(), body: t }));
+                    v.made = v.ty;
+                }
+            }
+        }
+        for _ in cert.gens.iter().filter(|(start, _, _)| *start == at_cell) {
+            self.gen_effects.push(std::mem::replace(&mut self.effect, Effect::pure()));
+        }
+        Ok(())
     }
 
     /// A standard operation compiled as an idiom, several routines, where
@@ -716,6 +770,36 @@ impl Verifier<'_> {
                         let f = if name == "pair-car" { "car" } else { "cdr" };
                         self.push_made(s, Some(if name == "pair-car" { a } else { b }), Some(Term::App(f, vec![p.term])));
                     }
+                    // A list of a known length: a pair if longer than none.
+                    Some(Ty::NList { elem, size, region }) => {
+                        if size.as_lit().is_none_or(|n| n <= 0) {
+                            self.out.debts.push(format!("{at}: (not (eq {:?} nil))", p.term));
+                        }
+                        self.reads(region);
+                        let ty = if name == "pair-car" {
+                            elem
+                        } else {
+                            match size.as_lit() {
+                                Some(n) if n > 0 => self.c.arena.ty(Ty::NList { elem, size: Size::lit(n - 1), region }),
+                                _ => self.c.arena.ty(Ty::NList { elem, size: Size::Finite, region }),
+                            }
+                        };
+                        let f = if name == "pair-car" { "car" } else { "cdr" };
+                        self.push_made(s, Some(ty), Some(Term::App(f, vec![p.term])));
+                    }
+                    // A union with a pair in it (a `datum`): that pair's
+                    // parts, the pair a debt, as the machine checks it.
+                    Some(Ty::Union(ms)) if ms.iter().filter(|m| matches!(self.c.arena.get(self.c.arena.resolve(**m)), Ty::Pair(..))).count() == 1 => {
+                        let pair = ms.iter().find_map(|m| match self.c.arena.get(self.c.arena.resolve(*m)) {
+                            Ty::Pair(a, b, r, _) => Some((*a, *b, *r)),
+                            _ => None,
+                        });
+                        let (a, b, r) = pair.expect("one pair");
+                        self.out.debts.push(format!("{at}: (shape {:?} pair)", p.term));
+                        self.reads(r);
+                        let f = if name == "pair-car" { "car" } else { "cdr" };
+                        self.push_made(s, Some(if name == "pair-car" { a } else { b }), Some(Term::App(f, vec![p.term])));
+                    }
                     // `nil` itself: the machine's test fails, safely, as the
                     // program means (a debt sure to fail).
                     Some(Ty::Nil) => {
@@ -780,6 +864,12 @@ impl Verifier<'_> {
                 }
                 args.reverse();
                 let (params, result, effect) = match self.ty_of(&f) {
+                    // A `vsubr`: as many values as it is called with, each
+                    // its element type.
+                    Some(Ty::Named { which: 0, args: ds }) if matches!(&ds[..], [crate::ast::D::Effect(_), crate::ast::D::Type(_), crate::ast::D::Type(_)]) => {
+                        let [crate::ast::D::Effect(e), crate::ast::D::Type(elem), crate::ast::D::Type(r)] = &ds[..] else { unreachable!() };
+                        (vec![*elem; n], *r, e.clone())
+                    }
                     Some(t) if t.as_subr().is_some() => {
                         let (effect, params, result) = t.as_subr().expect("a subroutine");
                         (params, result, effect)
