@@ -1177,3 +1177,27 @@ now `DONE.md` §114).
    instruction of each), as the two versions' union-finds pick
    different roots.
 
+
+## `fast` on x86_64 is native (2026-10-22)
+
+The user: "Go ahead and make fx-regs-rsjit-native the default", after
+the 46 ports were timed on x86_64, one run each, alone, with
+`eval --step-limit none` (wall clock, start-up included):
+
+- `fx-regs-rsjit-nativecc` 91 s in all, `fx-regs-rsjit-cellcc` (the
+  default since 2026-10-11, choice 6 of "Register code on x86_64") 206 s,
+  `fx-regs-fxjit-nativecc` 94 s, over the 44 ports both ran.
+- The `f64` ports 15–20 times as fast (`nbody` 22.3 → 1.5 s,
+  `spectralnorm2` 31.1 → 2.6 s); `fib`, `tak`, `even-odd` about twice.
+- `merge` and `sieve` fail on `fx-regs-rsjit-cellcc` (a stack overflow)
+  and run natively.
+- Slower natively on 15 of the 44, most `boyer` (1.45 → 1.97 s, both
+  ports) and `string-concat` (1.67 → 2.45 s); then `merge`, `mpuz`,
+  `logic`, `hamming`, `sorts`, `fannkuchredux` by 10–30%. Not looked
+  into yet.
+- At the REPL, alike: a form 0.55 s on each, start-up included.
+
+1. **`FASTEST` is `fx-regs-rsjit-nativecc` wherever the native
+   convention runs** (`NATIVE_CONVENTION_AVAILABLE`), so arm64 and
+   x86_64 alike; `fx-regs-rsjit-cellcc` where only the hand cellular
+   machine would run, which is nowhere today.

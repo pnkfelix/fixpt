@@ -26,8 +26,8 @@ native convention, `fx-regs-rsjit-nativecc`), and the stencils
 (`fx-cells-stencils-cellcc`), compiled for x86_64 by the build script
 in LLVM's `preserve_none` convention. The stencils need a nightly
 compiler on either machine; a build without one refuses them, saying
-why, and `fixpt bench` leaves their column out. `fast`, the default, names `fx-regs-rsjit-cellcc` there, register
-code, which runs the front end. Elsewhere
+why, and `fixpt bench` leaves their column out. `fast`, the default, names `fx-regs-rsjit-nativecc` there, as on
+arm64; the front end runs as register code. Elsewhere
 FX-26 runs lowered, by the evaluator, or on the cellular machine written in
 Rust. The encoders' tests assemble with the system's `as`: on macOS for arm64,
 and with binutils on Linux (`aarch64-linux-gnu-as` for arm64 on another
@@ -503,8 +503,8 @@ generates the code (`rs` Rust, `fx` FX-26), what code, what runs it,
 and, where the code is machine code, the calling convention (`cellcc`:
 inside the cellular machine; `nativecc`: native procedures). With no
 machine named, FX-26 runs on the fastest here (`fast`):
-`fx-regs-rsjit-nativecc` on arm64, `fx-regs-rsjit-cellcc` on x86_64. A
-bare `fixpt` is its REPL.
+`fx-regs-rsjit-nativecc`, on arm64 and x86_64. A bare `fixpt` is its
+REPL.
 
 | `--machine`                         | stage A        | stage B                | runs on                         |
 | ----------------------------------- | -------------- | ---------------------- | ------------------------------- |

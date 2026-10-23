@@ -585,12 +585,13 @@ fn did_you_mean<'a>(word: &str, names: impl Iterator<Item = &'a str>) -> String 
         _ => String::new(),
     }
 }
-/// The machine `fast` names: `fx-regs-rsjit-nativecc`; where arm64 code
-/// cannot run, but the hand-encoded machine can (x86_64),
-/// `fx-regs-rsjit-cellcc`, register code, the fastest there on each of
-/// `fixpt bench`'s programs (2026-10-11); and elsewhere
-/// `fx-cells-rsinterp`, faster than `rs-scheme-vm` on each of them.
-pub(crate) const FASTEST: &str = if fixpt_native::AVAILABLE {
+/// The machine `fast` names: `fx-regs-rsjit-nativecc`, on arm64 and on
+/// x86_64 (there since 2026-10-22: the 46 ports in 91 s against 206 s on
+/// `fx-regs-rsjit-cellcc`, CLAUDES_CHOICES.md "`fast` on x86_64 is
+/// native"); where only the hand-encoded cellular machine runs,
+/// `fx-regs-rsjit-cellcc`; and elsewhere `fx-cells-rsinterp`, faster than
+/// `rs-scheme-vm` on each of `fixpt bench`'s programs.
+pub(crate) const FASTEST: &str = if fixpt_native::NATIVE_CONVENTION_AVAILABLE {
     "fx-regs-rsjit-nativecc"
 } else if fixpt_native::CELLULAR_AVAILABLE {
     "fx-regs-rsjit-cellcc"

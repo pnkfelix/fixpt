@@ -616,8 +616,8 @@ fn fx26_machines_by_name() {
         let out = child.wait_with_output().expect("finishes");
         String::from_utf8_lossy(&out.stdout).lines().find(|l| l.contains("Machine:")).unwrap_or("").to_string()
     };
-    // Where arm64 code cannot run, the fastest that can.
-    let fast = if fixpt_native::AVAILABLE {
+    // Where native code cannot run, the fastest that can.
+    let fast = if fixpt_native::NATIVE_CONVENTION_AVAILABLE {
         "Machine: fx-regs-rsjit-nativecc;"
     } else if fixpt_native::CELLULAR_AVAILABLE {
         "Machine: fx-regs-rsjit-cellcc;"
