@@ -381,10 +381,22 @@ checker:
   Literals are looked at. A `car` of a list that may be `nil` is a debt:
   the machine checks it, failing safely (`TODO.md` §86).
 
-Over the test programs (`tests/typed_cells.rs`): 625 of 1,069 words
-verify, discharging 6,248 VCs. 243 mutants of verified words (an
-`int-add` made a `pair-car`, and the reverse) are all refused. Where the
-rest stop is `TODO.md` §115.
+Over the test programs (`tests/typed_cells.rs`), first: 625 of 1,069
+words verified, 243 mutants refused. Then, closing the type VCs class by
+class (the user: finish the types first): 976 of 1,094 words verify,
+discharging 8,758 VCs; 349 mutants of verified words (an `int-add` made a
+`pair-car`, and the reverse) are all refused; 37 type VCs fail, each
+pinned with its cause. What is left is `TODO.md` §115.
+
+Rules added since, each in `typed_cells.rs`: conversions checked (an
+identity word at a type between a representation and its abstract
+type); a `letrec`'s placeholders owed and given; nested `poly`s, and a
+`plambda`'s value generalized where its cells add no effect; the
+checker's instantiations at calls, at values used at an instance, at a
+`proj`; data made against the type the certificate names; idioms;
+narrowing by a predicate's latent propositions (the call rule with an
+`ensures`), by a value tested, by a sum's tag both ways; unreachable
+states (a sum with no arm left); control's operations and prompts.
 
 ## 11. Open questions (the user's)
 

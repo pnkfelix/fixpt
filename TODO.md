@@ -2724,35 +2724,45 @@ is set at the write or after it.
 ## 115. Typed cellular code: what is left (the user's, 2026-10-22)
 
 `docs/research/typed-cellular-code.md`: certificates for the Rust
-compiler's words, and a verifier, as Hoare logic. 625 of 1,069 test
-program words verify (`tests/typed_cells.rs`). What stops the rest, most
-first, with what each needs:
-1. **Data made** (`prim %make-frozen`, 122 words; `%make-bloblet`,
-   `%make-box`): products, sums, modules and bloblets. A triple for each
-   idiom, the certificate naming the type made.
-2. **Closures over words with no certificate** (119): lambdas whose
-   signature the checker does not keep yet (some module members, lambdas
-   checked through paths other than `synth_lambda_as`).
-3. **Calls of polymorphic values** (46): the call's instantiation in the
-   certificate, as standard operations' are.
-4. **`letrec` and definitions in groups** (`field!`, 42; the failures
-   "`bool` is not within (subr …)"): a closure made over a placeholder,
-   patched once its siblings are. Needs an initialization rule: the
-   placeholder's slot is not read until patched.
-5. **Generative types and sealed modules**: `up-`/`down-` and a module's
-   abstract types are the identity at run time; the words inside see
-   the representation. The certificate says which words are inside.
-6. **Facts beyond types** (TC5): `(- n 1)` is a `nat` after `(< 0 n)`.
-   Keep `0branch`'s facts as propositions and give the linear ones to
-   Fourier–Motzkin (`sizes.rs`'s `refuted_below`). First, as it is what
-   the next step needs: `requires` and `ensures` in procedure types,
-   latent propositions their special case (the note's §8, decided with
-   the user 2026-10-22).
-7. **Nested `poly`s**, sized lists (`nlist`), `datum`, regions and
-   private effects masked (`letregion`, `letfreeze`), control (prompts,
-   marks, continuations), arrays (`field@`), flat data.
-Then TC6: the certificate kept in the word, the FX-26 compiler making
-the same, and fragments verified on loading, under the loader's policy
-for open VCs, trusting one an effect (`(trust A)`; the note's §7,
-decided with the user 2026-10-22).
+compiler's words, and a verifier, as Hoare logic. The goal of this stage
+(the user's): every word of every program the checker accepts verifies,
+by type assertions, before propositions beyond types are built on it.
+976 of 1,094 test program words verify (`tests/typed_cells.rs`); 349
+mutants of verified words are all refused; 37 type VCs fail, in 19
+programs, each pinned with its cause (`KNOWN_FAILURES`), none a fault of
+the checker's or the compiler's found so far.
 
+Done (2026-10-22): data made (products, sums, modules, bloblets: the
+certificate names the type, the values are checked against it); calls
+and uses of polymorphic values (the checker's instantiations given);
+`letrec`'s placeholders (owed free values); generative types' and
+modules' conversions (checked, not trusted); nested `poly`s and a
+`plambda`'s value generalized where made purely; a dependent procedure's
+selects; standard operations as values; idioms (`array-ref` and kin);
+narrowing by predicates' latent propositions (shape, length, nat), by a
+value tested, by a sum's tag both ways, a `tagcase`'s dead end; control
+(prompts, marks, continuations); `car` of what may not be a pair, a debt.
+
+Left, most first, with what each needs:
+1. **Modules that include another** (24 words stopped; most of the
+   failing modules): the module holds the one included, and its type
+   lists that one's values, reached by a path (`Pick::Path`, `with_vals`).
+   The certificate would carry the layout, or the verifier follow it.
+   And a module repacked with a witness (`counter..t` taken as an
+   abstract `t`): an existential's introduction, the witness given.
+2. **Regions** (TC4: `%region-enter`, `%reap-enter`, `%region-closure`;
+   and 8 failing VCs, `letfreeze`, `acyclic`: a list made in `r` taken as
+   `const`): regions entered and left as capabilities, private effects
+   masked, a region frozen.
+3. **Flat data** (`%suffix-ref` and kin, about 20 words; 3 failing VCs, a
+   `blobref` under a size binder the checker relates in scope).
+4. **Facts beyond types** (6 failing VCs: `(- n 1)` a `nat` after
+   `(< 0 n)`): keep `0branch`'s facts as propositions, the linear ones to
+   Fourier–Motzkin (`sizes.rs`'s `refuted_below`).
+5. A few words still without certificates (a `vsubr`'s `list`, some
+   lambdas), `certify-length`'s instantiation.
+Then the next stage: `requires` and `ensures` in procedure types, latent
+propositions their special case (the note's §8); and TC6: the
+certificate kept in the word, the FX-26 compiler making the same, and
+fragments verified on loading, under the loader's policy for open VCs,
+trusting one an effect (`(trust A)`; the note's §7).
