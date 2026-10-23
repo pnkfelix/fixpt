@@ -69,6 +69,34 @@ pub fn register_words(h: &Heap, w: Value, seen: &mut std::collections::HashSet<u
     own + (2..=h.bloblet_head(w).fields).map(|i| register_words(h, h.bloblet_slot(w, i), seen)).sum::<usize>()
 }
 
+/// How far a long sweep has got, said on the terminal as it goes: at most
+/// every 30 s, so a sweep that is quick says nothing. Written to `stderr`
+/// itself, not by `eprintln!`, which the test harness holds until the test
+/// ends.
+pub struct Progress {
+    what: String,
+    total: usize,
+    start: std::time::Instant,
+    last: std::time::Instant,
+}
+
+impl Progress {
+    pub fn new(what: impl Into<String>, total: usize) -> Progress {
+        let now = std::time::Instant::now();
+        Progress { what: what.into(), total, start: now, last: now }
+    }
+
+    /// `done` of the total are done.
+    pub fn at(&mut self, done: usize) {
+        if self.last.elapsed() >= std::time::Duration::from_secs(30) {
+            self.last = std::time::Instant::now();
+            use std::io::Write;
+            let line = format!("    {}: {done} of {} ({:.0?})\n", self.what, self.total, self.start.elapsed());
+            let _ = std::io::stderr().write_all(line.as_bytes());
+        }
+    }
+}
+
 thread_local! {
     /// This thread's session for the pieces written in FX-26: loading them
     /// is most of a check's or a compile's cost (1.3 s, against a few ms for

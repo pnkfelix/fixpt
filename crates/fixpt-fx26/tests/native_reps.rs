@@ -84,7 +84,9 @@ fn compare(limit: usize) {
             Value::NULL
         });
         let rws: Vec<Handle> = found.into_iter().take(limit).map(|w| sc.make(|_| w)).collect();
+        let mut progress = common::Progress::new("register words compared", rws.len());
         for rw in rws {
+            progress.at(compared);
             let mut f = None;
             let mut raw_cells = Vec::new();
             sc.make(|m| {

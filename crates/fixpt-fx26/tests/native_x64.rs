@@ -54,7 +54,9 @@ fn compare(limit: usize) {
             Value::NULL
         });
         let words: Vec<Handle> = words.into_iter().take(limit).map(|w| sc.make(|_| w)).collect();
-        for w in words {
+        let mut progress = common::Progress::new("words compiled", words.len());
+        for (k, w) in words.into_iter().enumerate() {
+            progress.at(k);
             let mut want = (Vec::new(), Vec::new());
             sc.make(|m| {
                 let v = m.get(w);
@@ -122,7 +124,9 @@ fn compare_registers(limit: usize) {
             Value::NULL
         });
         let twins: Vec<Handle> = twins.into_iter().take(limit).map(|w| sc.make(|_| w)).collect();
-        for rw in twins {
+        let mut progress = common::Progress::new("register words compiled", twins.len());
+        for (k, rw) in twins.into_iter().enumerate() {
+            progress.at(k);
             let mut want = Err(String::new());
             sc.make(|m| {
                 let v = m.get(rw);
@@ -214,7 +218,9 @@ fn compare_direct(limit: usize) {
         });
         let words: Vec<Handle> = words.into_iter().take(limit).map(|w| sc.make(|_| w)).collect();
         let (mut rust, mut fx) = (DirectMachine::new().expect("a machine"), DirectMachine::new().expect("a machine"));
-        for w in words {
+        let mut progress = common::Progress::new("procedures compiled", words.len());
+        for (k, w) in words.into_iter().enumerate() {
+            progress.at(k);
             let clo = sc.make(|m| {
                 let w = m.get(w);
                 let h = m.heap();

@@ -236,19 +236,17 @@ fn messages_have_a_usable_first_line() {
 fn the_front_end_compiled_checks_alike() {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
     let programs = ["run/recursion.fx", "sizes/solved-by-test.fx", "sizes/solved-negative.fx", "native/many-values.fx"];
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-    s.front_end_compiled = true;
-    // On the hand register machine; where no machine code runs, on the
-    // Rust one.
-    s.scheme.runtime_unrooted().front_end_run_word =
-        Some(if fixpt_native::CELLULAR_AVAILABLE { fixpt_native::cellular::run_word_registers } else { fixpt_engine::cellular::run_word });
+    let mut s = common::session();
+    // Lowered, as every session was before `common::session`.
+    let mut low = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     for p in programs {
         let text = std::fs::read_to_string(format!("{dir}/{p}")).unwrap();
         let compiled = canon(fx26_check_in(&mut s, &text).expect("parses"));
-        let lowered = canon(fx26_check(&text).expect("parses"));
+        let lowered = canon(fx26_check_in(&mut low, &text).expect("parses"));
         assert_eq!(compiled, lowered, "{p}");
     }
     assert!(s.scheme.is_bound("fx26-native:check-program"), "the compiled front end was used");
+    assert!(!low.scheme.is_bound("fx26-native:check-program"), "the lowered one was");
 }
 
 /// `cwcc` and the `certify-*` operations, whose rules are checked at each
@@ -315,7 +313,7 @@ fn conventions_agree_when_native() {
     let mut names: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
     names.sort();
     let mut report = Vec::new();
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let mut s = common::session();
     s.set_native_convention(true);
     for path in names {
         let program = std::fs::read_to_string(&path).unwrap();
@@ -336,7 +334,7 @@ fn globals_agree_when_read() {
     let mut names: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
     names.sort();
     let mut report = Vec::new();
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let mut s = common::session();
     s.set_globals_effects(true);
     for path in names {
         let program = std::fs::read_to_string(&path).unwrap();
@@ -417,7 +415,7 @@ fn every_program_in_the_tests_compiled() {
             }
         }
     }
-    let mut compiler = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let mut compiler = common::session();
     let (mut report, mut ran) = (Vec::new(), 0);
     for p in &programs {
         let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
@@ -466,7 +464,7 @@ fn every_program_in_the_tests() {
             }
         }
     }
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let mut s = common::session();
     let (mut report, mut unparsed, mut agreed, mut rejected) = (Vec::new(), 0, 0, 0);
     for p in &programs {
         let Some(ours) = fx26_check_in(&mut s, p) else {
@@ -553,7 +551,7 @@ fn every_program_meant_to_run_checks() {
 fn effect_summaries_agree() {
     use std::collections::HashMap;
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
-    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let mut s = common::session();
     let (mut report, mut both, mut only_fx, mut only_rust) = (Vec::new(), 0, 0, 0);
     let mut programs = Vec::new();
     for sub in ["run", "bench", "bidirectional", "control", "pldi89", "datum", "modules", "higher-kinds"] {

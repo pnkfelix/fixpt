@@ -20,7 +20,8 @@ fn supply_loaded(sc: &mut fixpt_scheme::Session, pieces: fixpt_scheme::Handle, t
 }
 
 /// The front end, compiled to one cellular word by the compiler written in
-/// FX-26 (run lowered to Scheme), with the Rust checker's facts.
+/// FX-26 (run as register code, `common::front_end_session`), with the
+/// Rust checker's facts.
 #[test]
 fn the_compiler_compiles_the_front_end() {
     let mut s = common::front_end_session();
@@ -90,7 +91,7 @@ mod common;
 use common::same_code;
 
 /// The fixpoint: the front end, compiled by the compiler written in FX-26
-/// run lowered to Scheme (stage 1), is run on the native machine, and
+/// run as register code (stage 1), is run on the native machine, and
 /// compiles the front end again (stage 2), reading, parsing and checking
 /// it itself. The two words must be the same code.
 #[test]
@@ -195,7 +196,7 @@ fn fixpoint_on(machine: fixpt_runtime::RunWord) {
     s.scheme.scope(|sc| {
         let facts = fixpt_fx26::syn::rust_facts(sc, FileId(0), &text).expect("checks");
         let stage1 = fixpt_fx26::syn::compile_to_word(sc, FileId(0), &text, facts).expect("parses").expect("compiles");
-        lap("stage 1 compiled, by the compiler run lowered");
+        lap("stage 1 compiled, by the compiler run as register code");
         let none = sc.make(|_| Value::NULL);
         let pieces = sc.call_global("%run-word", &[stage1, none]).expect("the front end runs");
         let driver = sc.make(|m| { let p = m.get(pieces); m.heap().bloblet_slot(p, 2) });
