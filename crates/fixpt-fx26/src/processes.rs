@@ -402,7 +402,7 @@ impl Checker {
             }
         };
         let string = self.base[&self.interner.intern("string")];
-        let want = self.arena.ty(Ty::Subr { effect: Effect::pure(), params: vec![string], result: msg, conv: self.conv_default });
+        let want = self.arena.ty(Ty::Subr { effect: Effect::pure(), params: vec![string], result: msg, conv: self.conv_default, spec: None });
         let (ft, fe) = self.synth(f)?;
         if !self.subtype(ft, want) {
             return Err(FxError::at(

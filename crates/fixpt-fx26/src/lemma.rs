@@ -331,9 +331,10 @@ impl Checker {
                 ps.len() == qs.len()
                     && ps.iter().zip(&qs).all(|((a, x), (b, y))| a == b && self.match_ty(l, *x, *y, map, seen))
             }
-            (Ty::Subr { conv: c1, effect: e1, params: p1, result: r1 }, Ty::Subr { conv: c2, effect: e2, params: p2, result: r2 }) => {
+            (Ty::Subr { conv: c1, effect: e1, params: p1, result: r1, spec: s1 }, Ty::Subr { conv: c2, effect: e2, params: p2, result: r2, spec: s2 }) => {
                 c1 == c2
                     && e1 == e2
+                    && s1 == s2
                     && p1.len() == p2.len()
                     && p1.iter().zip(&p2).all(|(x, y)| self.match_ty(l, *x, *y, map, seen))
                     && self.match_ty(l, r1, r2, map, seen)

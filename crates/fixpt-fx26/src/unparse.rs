@@ -178,6 +178,24 @@ impl Checker {
     /// `pure`, a single atom, or `(maxeff …)`.
     /// Reads, or writes, of several globals are one atom: `(read (globals f
     /// g))`.
+    /// A specification's clauses, each after a space, as a `subr` type
+    /// writes them: `(requires p)`, `(ensures r q)`, those not `true`.
+    pub fn show_spec(&self, spec: &crate::ast::Spec) -> String {
+        use crate::ast::Named;
+        let name = |n: &Named| match n {
+            Named::Param(i) => spec.params.get(*i).copied().flatten().map_or(format!("${i}"), |s| self.interner.name(s).to_string()),
+            Named::Result => spec.result.map_or("result".to_string(), |s| self.interner.name(s).to_string()),
+        };
+        let mut out = String::new();
+        if !spec.requires.trivial() {
+            out += &format!(" (requires {})", crate::logic::show(&spec.requires, &name));
+        }
+        if !spec.ensures.trivial() {
+            out += &format!(" (ensures {} {})", name(&Named::Result), crate::logic::show(&spec.ensures, &name));
+        }
+        out
+    }
+
     pub fn show_effect(&self, e: &Effect) -> String {
         let mut atoms: Vec<String> = Vec::new();
         let (mut reads, mut writes) = (Vec::new(), Vec::new());
@@ -272,11 +290,22 @@ impl Checker {
             Ty::Var(v) => self.dvar_text(v, 'f'),
             Ty::Link(None) => "?".into(),
             Ty::Link(Some(_)) => unreachable!("resolved"),
-            Ty::Subr { conv, effect, params, result } => {
-                let ps: Vec<String> = params.iter().map(|p| self.show_ty_on(*p, path)).collect();
+            Ty::Subr { conv, effect, params, result, spec } => {
+                let mut ps: Vec<String> = params.iter().map(|p| self.show_ty_on(*p, path)).collect();
                 // The convention only where it is not the program's.
                 let c = if conv == self.conv_default { String::new() } else { format!("(conv {}) ", self.show_conv(conv)) };
-                format!("(subr {c}{} ({}) {})", self.show_effect(&effect), ps.join(" "), self.show_ty_on(result, path))
+                // A specification's parameters by their names, and its
+                // clauses after the result.
+                let mut clauses = String::new();
+                if let Some(spec) = &spec {
+                    for (p, n) in ps.iter_mut().zip(&spec.params) {
+                        if let Some(n) = n {
+                            *p = format!("({} {p})", self.interner.name(*n));
+                        }
+                    }
+                    clauses = self.show_spec(spec);
+                }
+                format!("(subr {c}{} ({}) {}{clauses})", self.show_effect(&effect), ps.join(" "), self.show_ty_on(result, path))
             }
             Ty::Poly { binders, body } => {
                 let bs: Vec<String> = binders

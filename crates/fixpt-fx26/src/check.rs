@@ -518,6 +518,9 @@ pub struct LambdaSig {
     /// size named, an array's length, a module's abstract types), with the
     /// variables that opened, fresh.
     pub inside: Vec<(TyId, Vec<DVar>)>,
+    /// The specification it was checked against, if any: for the
+    /// verifier to prove of its word.
+    pub spec: Option<std::rc::Rc<crate::ast::Spec>>,
 }
 
 /// What checking proved about expressions, keyed by expression. Lowering
@@ -1756,7 +1759,7 @@ impl Checker {
     pub(crate) fn effect_delta(&self, got: TyId, want: TyId) -> String {
         let (Some(g), Some(w)) = (self.latent_of(got), self.latent_of(want)) else { return String::new() };
         let beyond = Effect(g.0.into_iter().filter(|a| !Effect::atom(*a).within(&w)).collect());
-        if beyond.is_pure() { String::new() } else { format!("\n  beyond what is expected, it has {}", self.show_effect(&beyond)) }
+        if beyond.is_pure() { self.spec_delta(got, want).to_string() } else { format!("\n  beyond what is expected, it has {}", self.show_effect(&beyond)) }
     }
 
     /// `eff` with what it does to data frozen in the heap taken out, since
@@ -1924,13 +1927,13 @@ impl Checker {
             Exp::Convention { conv, exp } => {
                 let (t, eff) = self.synth(exp)?;
                 let t = self.arena.resolve(t);
-                let Ty::Subr { conv: from, effect, params, result } = self.arena.get(t).clone() else {
+                let Ty::Subr { conv: from, effect, params, result, spec } = self.arena.get(t).clone() else {
                     return Err(FxError::at(span, format!("`convention` takes a procedure, and this is a {}", self.show_ty(t))));
                 };
                 if from != conv {
                     self.convert_at(e, conv, params.len());
                 }
-                Ok((self.arena.ty(Ty::Subr { conv, effect, params, result }), eff))
+                Ok((self.arena.ty(Ty::Subr { conv, effect, params, result, spec }), eff))
             }
             Exp::PLambda { binders, body } => {
                 self.note_generalized(e, &binders, false);
@@ -1963,7 +1966,7 @@ impl Checker {
                         // re-exports, `(select m e)`, may be in it.
                         D::Effect(x) => {
                             let unit = self.unit;
-                            let carrier = self.arena.ty(Ty::Subr { conv: self.conv_default, effect: x, params: Vec::new(), result: unit });
+                            let carrier = self.arena.ty(Ty::Subr { conv: self.conv_default, effect: x, params: Vec::new(), result: unit, spec: None });
                             let resolved = self.resolve_selects(carrier, span)?;
                             match self.arena.get(resolved).as_subr() {
                                 Some((x, _, _)) => D::Effect(x),
@@ -2221,13 +2224,14 @@ impl Checker {
                     let span = self.arena.span_of(e);
                     return Err(FxError::at(span, format!("a subroutine of {} parameter(s) is expected, and this `rlambda` has {}", want.len(), params.len())));
                 }
-                self.synth_lambda_as(lambda, Some(&want), Some(result))?
+                let spec = expected.and_then(|t| self.spec_of(t));
+                self.synth_lambda_as(lambda, Some(&want), Some(result), spec)?
             }
             None => self.synth_lambda(lambda, None)?,
         };
-        let Ty::Subr { conv, mut effect, params, result } = self.arena.get(lt).clone() else { unreachable!("a lambda's type") };
+        let Ty::Subr { conv, mut effect, params, result, spec } = self.arena.get(lt).clone() else { unreachable!("a lambda's type") };
         effect.0.insert(Atom::Read(g));
-        let t = self.arena.ty(Ty::Subr { conv, effect, params, result });
+        let t = self.arena.ty(Ty::Subr { conv, effect, params, result, spec });
         let eff = reff.union(&Effect::atom(Atom::Alloc(g)));
         let eff = self.mask(e, &eff, t);
         Ok((t, eff))
@@ -3174,9 +3178,9 @@ impl Checker {
         done.insert(t, slot);
         let mut spin = |c: &mut Self, x: TyId| c.spin_positive(x, done);
         let made = match self.arena.get(t).clone() {
-            Ty::Subr { conv, mut effect, params, result } => {
+            Ty::Subr { conv, mut effect, params, result, spec } => {
                 effect.0.insert(Atom::Spin);
-                Ty::Subr { conv, effect, params, result: spin(self, result) }
+                Ty::Subr { conv, effect, params, result: spin(self, result), spec }
             }
             Ty::Poly { binders, body } => Ty::Poly { binders, body: spin(self, body) },
             Ty::Product(ps) => Ty::Product(ps.into_iter().map(|(l, x)| (l, spin(self, x))).collect()),
@@ -3529,8 +3533,8 @@ impl Checker {
             (Ty::Nat(m), Ty::Nat(n)) => self.size_le(&m, &n),
             (Ty::Var(x), Ty::Var(y)) => env.var(&env.a, x) == env.var(&env.b, y),
             (
-                Ty::Subr { conv: ca, effect: xa, params: pa, result: qa },
-                Ty::Subr { conv: cb, effect: xb, params: pb, result: qb },
+                Ty::Subr { conv: ca, effect: xa, params: pa, result: qa, spec: sa },
+                Ty::Subr { conv: cb, effect: xb, params: pb, result: qb, spec: sb },
             ) => {
                 // Conventions: the same, or any of FX-26's own as `fx`;
                 // variables by the binders they stand for.
@@ -3543,6 +3547,7 @@ impl Checker {
                     && ea(&xa).within(&eb(&xb))
                     && pa.iter().zip(&pb).all(|(x, y)| self.sub(*y, *x, &flip, st))
                     && self.sub(qa, qb, env, st)
+                    && crate::logic::spec_within(sa.as_deref(), sb.as_deref())
             }
             // References and pairs are mutable, so their contents are
             // invariant: FX-87's `ref` rule, and its pairs.
@@ -3876,7 +3881,7 @@ impl Checker {
         memo.insert(t, slot);
         let region = |r: Region| subst_region(r, map);
         let new = match ty {
-            Ty::Subr { conv, effect, params, result } => {
+            Ty::Subr { conv, effect, params, result, spec } => {
                 let conv = match conv {
                     Conv::Var(v) => match map.get(&v) {
                         Some(D::Conv(c)) => *c,
@@ -3887,7 +3892,7 @@ impl Checker {
                 let effect = subst_effect(&effect, map, &self.arena);
                 let params = params.iter().map(|p| self.subst_memo(*p, map, memo)).collect();
                 let result = self.subst_memo(result, map, memo);
-                Ty::Subr { conv, effect, params, result }
+                Ty::Subr { conv, effect, params, result, spec }
             }
             Ty::Poly { binders, body } => Ty::Poly { binders, body: self.subst_memo(body, map, memo) },
             Ty::Ref(a, r) => Ty::Ref(self.subst_memo(a, map, memo), region(r)),
@@ -4516,7 +4521,7 @@ impl Checker {
         // A handler written as a `lambda` is told what it takes and gives.
         let (ht, he) = if matches!(self.arena.exp_at(handler), Exp::Lambda { params, .. } if params.len() == 1) {
             let Exp::Lambda { body: hbody, .. } = self.arena.exp_at(handler).clone() else { unreachable!() };
-            self.synth_lambda_as(handler, Some(&[payload]), Some(answer)).map_err(|err| match expected_and_found(&err.message) {
+            self.synth_lambda_as(handler, Some(&[payload]), Some(answer), None).map_err(|err| match expected_and_found(&err.message) {
                 Some((_, got, delta)) if err.span == self.arena.span_of(hbody) => FxError::at(
                     err.span,
                     format!("the handler must take a {} to a {}, and this gives a {got}{delta}", self.show_ty(payload), self.show_ty(answer)),

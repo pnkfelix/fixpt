@@ -69,7 +69,7 @@ const TYPE_FORMS: &[&str] = &[
 ];
 
 impl Checker {
-    fn name(&self, s: Sym) -> &str {
+    pub(crate) fn name(&self, s: Sym) -> &str {
         self.interner.name(s)
     }
 
@@ -362,7 +362,7 @@ impl Checker {
             _ => self.parse_type(result)?,
         };
         let result = self.select_params(result, &names);
-        Ok(self.arena.ty(Ty::Subr { conv, effect, params, result }))
+        Ok(self.arena.ty(Ty::Subr { conv, effect, params, result, spec: None }))
     }
 
     // ------------------------------------------------------------- effects
@@ -630,6 +630,17 @@ impl Checker {
             // `(subr effect (param …) result)`, or with a convention first,
             // `(subr (conv C) effect (param …) result)`; left out, it is the
             // program's (`docs/research/native-conventions.md`).
+            "subr" | "->" if items.len() > 3 && crate::specs::clause(self, items.last().expect("items")) => {
+                // A specification after the result: the type without it,
+                // then the clauses read against its parameters.
+                let n = items.iter().rev().take_while(|c| crate::specs::clause(self, c)).count();
+                let (plain, clauses) = items.split_at(items.len() - n);
+                // (The parameters are second to last, in either form.)
+                let params = plain[plain.len() - 2].clone();
+                let plain = Syntax { datum: Datum::List { items: plain.to_vec(), tail: None }, span: s.span };
+                let t = self.parse_type_list(&plain)?;
+                self.specified(t, &params, clauses)
+            }
             "subr" => {
                 let (conv, rest) = match &items[..] {
                     [_, c, rest @ ..] if rest.len() == 3 && self.head(&self.items(c, "a convention").unwrap_or_default()) == Some("conv") => {
@@ -1181,9 +1192,9 @@ impl Checker {
         }
         let spin = Effect::atom(Atom::Spin);
         let mut params: Vec<TyId> =
-            hs.iter().map(|(x, y)| self.arena.ty(Ty::Subr { conv: self.conv_default, effect: spin.clone(), params: vec![*x], result: *y })).collect();
+            hs.iter().map(|(x, y)| self.arena.ty(Ty::Subr { conv: self.conv_default, effect: spin.clone(), params: vec![*x], result: *y, spec: None })).collect();
         params.push(lhs);
-        let body = self.arena.ty(Ty::Subr { conv: self.conv_default, effect: spin, params, result: rhs });
+        let body = self.arena.ty(Ty::Subr { conv: self.conv_default, effect: spin, params, result: rhs, spec: None });
         let t = if binders.is_empty() { body } else { self.arena.ty(Ty::Poly { binders: binders.clone(), body }) };
         self.pending_lemma = Some(crate::lemma::Lemma { binders, lhs, rhs, hyps: hs, by: None });
         Ok(t)
@@ -2386,7 +2397,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     /// `define-datatype` numbers a variant's members.
     /// A procedure type's parameter written `(name type)`: its name and
     /// type, where `name` names no type or type form.
-    fn named_param(&self, p: &Syntax) -> Option<(Sym, Syntax)> {
+    pub(crate) fn named_param(&self, p: &Syntax) -> Option<(Sym, Syntax)> {
         let [n, t] = p.as_proper_list()? else { return None };
         let n = n.as_symbol()?;
         let name = self.name(n);

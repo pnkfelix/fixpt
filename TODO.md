@@ -2770,7 +2770,29 @@ Done (2026-10-23):
   (`%copy`), and `certify-length`, from the `nlist` narrowing found.
 
 Then the next stage: `requires` and `ensures` in procedure types, latent
-propositions their special case (the note's §8); and TC6: the
+propositions their special case (the note's §8; begun, §116); and TC6: the
 certificate kept in the word, the FX-26 compiler making the same, and
 fragments verified on loading, under the loader's policy for open VCs,
 trusting one an effect (`(trust A)`; the note's §7).
+
+## 116. `requires` and `ensures`: what is left (the user's, 2026-10-23)
+
+`docs/research/typed-cellular-code.md` §8 and §10: specifications in
+procedure types, carried by the Rust checker, proved of the cells by the
+verifier, one prover for both (`logic.rs`). `tests/programs/specs`.
+Left:
+- **The FX-26 checker reads them**: `ty-subr` with its specification,
+  read, printed, compared by behavioural subtyping (Fourier–Motzkin is
+  there already), a `lambda` checked against one keeping it. Until then
+  the two checkers disagree on such a program and `fixpt run` refuses it;
+  the spec programs then join `every_test_program`.
+- Latent propositions as an `ensures` of a `bool` result, sugar
+  (`(bool (then …) (else …))`), so that the verifier's narrowing by a
+  predicate is the call rule, and the checker's too.
+- Terms of more than integers: `(length xs)` of lists and arrays, a
+  sum's tag; `old` for what refs and arrays held (§8, point 3).
+- Open VCs written for a prover outside (SMT-LIB 2; the note's open
+  question 3), and the loader's policy for them (§7).
+- Total correctness: termination, by the size-change check or a ranking
+  function in the certificate.
+

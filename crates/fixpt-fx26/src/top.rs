@@ -823,7 +823,8 @@ impl Checker {
     pub(crate) fn arrow_star_latent(&mut self, ty: TyId, e: crate::ast::ExpId) -> R<(TyId, Effect)> {
         let t = self.under_polys(ty);
         let crate::ast::Ty::Subr { params, result, .. } = self.arena.get(t).clone() else { unreachable!("`->*` reads as a `subr`") };
-        let (lt, _) = self.synth_lambda_as(e, Some(&params), Some(result))?;
+        let spec = self.spec_of(t);
+        let (lt, _) = self.synth_lambda_as(e, Some(&params), Some(result), spec)?;
         match self.arena.get(self.arena.resolve(lt)) {
             crate::ast::Ty::Subr { effect, .. } => Ok((lt, effect.clone())),
             _ => unreachable!("a `lambda`'s type"),
@@ -859,8 +860,8 @@ impl Checker {
                 let body = self.with_latent(body, extra)?;
                 Some(self.arena.ty(crate::ast::Ty::Poly { binders, body }))
             }
-            crate::ast::Ty::Subr { conv, effect, params, result } => {
-                Some(self.arena.ty(crate::ast::Ty::Subr { conv, effect: effect.union(extra), params, result }))
+            crate::ast::Ty::Subr { conv, effect, params, result, spec } => {
+                Some(self.arena.ty(crate::ast::Ty::Subr { conv, effect: effect.union(extra), params, result, spec }))
             }
             _ => None,
         }

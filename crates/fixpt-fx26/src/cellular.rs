@@ -2675,7 +2675,7 @@ impl<'a> Compiler<'a> {
             Some(sig) => sig,
             None if params.is_empty() => {
                 let (Some(&result), Some(effect)) = (self.c.facts.types.get(&body), self.c.facts.effects.get(&body)) else { return };
-                thunk = crate::check::LambdaSig { params: Vec::new(), frees: Vec::new(), result, effect: effect.clone(), inside: Vec::new() };
+                thunk = crate::check::LambdaSig { params: Vec::new(), frees: Vec::new(), result, effect: effect.clone(), inside: Vec::new(), spec: None };
                 &thunk
             }
             None => return,
@@ -2717,6 +2717,23 @@ impl<'a> Compiler<'a> {
         // one's, as declared.
         let inside: Vec<Option<(TyId, Vec<crate::ast::DVar>)>> =
             params.iter().map(|p| sig.params.iter().position(|(m, _)| m == p).and_then(|k| sig.inside.get(k).cloned())).collect();
+        // Its specification, each parameter it names by its slot in the
+        // word (a lifted procedure's added parameters among them).
+        use crate::logic::{Expr, Formula};
+        let spec = sig.spec.as_ref().and_then(|spec| {
+            let slots: Option<Vec<usize>> = sig.params.iter().map(|(n, _)| params.iter().position(|p| p == n)).collect();
+            let slots = slots?;
+            let at = |n: &crate::ast::Named| match n {
+                crate::ast::Named::Param(i) => crate::ast::Named::Param(slots[*i]),
+                r => *r,
+            };
+            let mut names = vec![None; params.len()];
+            for (i, k) in slots.iter().enumerate() {
+                names[*k] = spec.params.get(i).copied().flatten();
+            }
+            let (requires, ensures) = (spec.requires.subst(&|n| Expr::Atom(at(n)), &|n| Formula::Holds(at(n))), spec.ensures.subst(&|n| Expr::Atom(at(n)), &|n| Formula::Holds(at(n))));
+            Some(std::rc::Rc::new(crate::ast::Spec { params: names, result: spec.result, requires, ensures }))
+        });
         let cert = crate::typed_cells::Cert {
             poly,
             inside,
@@ -2732,6 +2749,7 @@ impl<'a> Compiler<'a> {
             conversion,
             own_ops: Vec::new(),
             vsubr: None,
+            spec,
         };
         certs.words.insert(w.raw(), cert);
     }

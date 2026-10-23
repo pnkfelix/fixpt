@@ -85,10 +85,12 @@ fn verify_program(s: &mut Fx26Session, name: &str, text: &str, t: &mut Tally) {
 }
 
 /// Each word of `text` that verifies, mutated one way at a time where it
-/// can be: an `int-add` made a `pair-car` (an int taken for a pair), and a
-/// `pair-car` made an `int-add` (a pair added). Each mutant must be refused.
+/// can be, each routine `swaps` names made the other it names (an
+/// `int-add` made a `pair-car`, an int taken for a pair). Each mutant must
+/// be refused: a VC failed or, with `open` refusing (of a word with a
+/// specification), left open.
 /// Returns how many mutants were made, and those not refused.
-fn mutants(s: &mut Fx26Session, name: &str, text: &str) -> (usize, Vec<String>) {
+fn mutants(s: &mut Fx26Session, name: &str, text: &str, swaps: &[(&str, &str)], open: bool) -> (usize, Vec<String>) {
     use fixpt_heap::layout::cellular::{operands, routine, ROUTINES, PRIMITIVES, WORD_CELL0};
     let Ok((mut c, tops)) = checked(text) else { return (0, Vec::new()) };
     fixpt_fx26::syn::set_load_base(Some(modules_dir()));
@@ -107,7 +109,9 @@ fn mutants(s: &mut Fx26Session, name: &str, text: &str) -> (usize, Vec<String>) 
             certs.settle(&mut c).expect("settled");
             for raw in certs.words.keys() {
                 let w = Value::from_raw(*raw);
-                if !verify(&mut c, m.heap(), &certs, w).verified() {
+                // (With `open`, only a specified word: another promises
+                // nothing its arithmetic could break.)
+                if !verify(&mut c, m.heap(), &certs, w).verified() || open && certs.words[raw].spec.is_none() {
                     continue;
                 }
                 // Each instruction's cell, operands skipped.
@@ -116,16 +120,12 @@ fn mutants(s: &mut Fx26Session, name: &str, text: &str) -> (usize, Vec<String>) 
                 while k <= n {
                     let cell = m.heap().bloblet_slot(w, k);
                     let r = cell.is_fixnum().then(|| cell.as_fixnum() as usize).filter(|r| *r < PRIMITIVES).map(|r| ROUTINES[r].0);
-                    let swap = match r {
-                        Some("int-add") => Some("pair-car"),
-                        Some("pair-car") => Some("int-add"),
-                        _ => None,
-                    };
+                    let swap = swaps.iter().find(|(from, _)| r == Some(*from)).map(|(_, to)| *to);
                     if let Some(to) = swap {
                         m.heap().set_bloblet_slot(w, k, Value::fixnum(routine(to) as i64));
                         made += 1;
                         let o = verify(&mut c, m.heap(), &certs, w);
-                        if o.verified() || o.failed.is_empty() && o.stopped.is_none() {
+                        if o.verified() || o.failed.is_empty() && o.stopped.is_none() && !(open && !o.open.is_empty()) {
                             kept.push(format!("{name}: {} at cell {} made {to}", r.unwrap_or("?"), k - WORD_CELL0));
                         }
                         m.heap().set_bloblet_slot(w, k, cell);
@@ -146,7 +146,7 @@ fn a_verified_word_changed_is_refused() {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     let (mut made, mut kept) = (0, Vec::new());
     for (name, text) in programs() {
-        let (m, k) = mutants(&mut s, &name, &text);
+        let (m, k) = mutants(&mut s, &name, &text, &[("int-add", "pair-car"), ("pair-car", "int-add")], false);
         made += m;
         kept.extend(k);
     }
@@ -196,4 +196,72 @@ fn every_test_programs_words_verified() {
     assert!(t.open == 0, "VCs left open: {}", t.open);
     assert!(t.stopped.is_empty(), "words stopped in: {:?}", t.stopped);
     assert!(t.verified == t.words && t.words > 1000, "{} of {} words verified", t.verified, t.words);
+}
+
+/// Programs that state propositions (`requires`, `ensures`; the note's
+/// §8): each says on its first line whether its words verify. One marked
+/// `; Verified` must, every VC discharged; one marked `; Unverified` must
+/// leave a VC open (a proposition the prover cannot show, which is what a
+/// false one is to it), and fail none of its types; one marked `; Refused`
+/// the checker refuses (a specification not within another, or not well
+/// formed).
+#[test]
+fn specifications_as_they_say() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs/specs");
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let mut names: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
+    names.sort();
+    let mut wrong = Vec::new();
+    for p in names {
+        let text = std::fs::read_to_string(&p).unwrap();
+        let name = format!("specs/{}", p.file_name().unwrap().to_string_lossy());
+        let mut t = Tally::default();
+        t.open_examples.clear();
+        verify_program(&mut s, &name, &text, &mut t);
+        let said = text.lines().next().unwrap_or("");
+        let ok = match said {
+            "; Refused" => checked(&text).is_err(),
+            "; Verified" => t.verified == t.words && t.words > 0,
+            "; Unverified" => t.failed.is_empty() && t.stopped.is_empty() && t.open > 0,
+            _ => false,
+        };
+        eprintln!("{name}: {} of {} words verified, {} VCs discharged, {} open", t.verified, t.words, t.discharged, t.open);
+        for o in &t.open_examples {
+            eprintln!("  open: {o}");
+        }
+        for f in &t.failed {
+            eprintln!("  FAILED {f}");
+        }
+        for (why, n) in &t.stopped {
+            eprintln!("  stopped {n}: {why}");
+        }
+        if !ok {
+            wrong.push(name);
+        }
+    }
+    assert!(wrong.is_empty(), "not as their first line says: {wrong:?}");
+}
+
+/// A word that verifies against its specification, its arithmetic
+/// changed (an `int-add` made an `int-sub`, and the reverse), is refused:
+/// what it ensures is not shown of what it now computes. (Correctness is
+/// partial: a loop made endless still ensures what it would if it ended,
+/// so the specifications here say exactly what is computed.)
+#[test]
+fn a_specified_word_changed_is_refused() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs/specs");
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    let (mut made, mut kept) = (0, Vec::new());
+    let mut names: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().path()).collect();
+    names.sort();
+    for p in names {
+        let text = std::fs::read_to_string(&p).unwrap();
+        let name = format!("specs/{}", p.file_name().unwrap().to_string_lossy());
+        let (m, k) = mutants(&mut s, &name, &text, &[("int-add", "int-sub"), ("int-sub", "int-add")], true);
+        made += m;
+        kept.extend(k);
+    }
+    eprintln!("{made} mutants, {} not refused", kept.len());
+    assert!(made >= 5, "too few mutants: {made}");
+    assert!(kept.is_empty(), "mutants verified:\n{}", kept.join("\n"));
 }

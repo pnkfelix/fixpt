@@ -13,6 +13,7 @@
 use crate::ast::{Effect, Size, Ty, TyId};
 use fixpt_read::Sym;
 use crate::check::Checker;
+use crate::logic::{Expr, Formula};
 use fixpt_heap::layout::cellular::{operands, CLOSURE_FREE0, CLOSURE_WORD, GLOBAL_VALUE, PRIMITIVES, ROUTINES, WORD_CELL0};
 use fixpt_heap::{Heap, ObjType, Value};
 use std::collections::HashMap;
@@ -110,6 +111,9 @@ pub struct Cert {
     /// one list this type, `(vsubr e t r)`, applies, `(subr e ((listof t
     /// acyclic)) r)`; filled in by `Certs::settle`.
     pub vsubr: Option<TyId>,
+    /// Its specification (`requires`, `ensures`), its parameters by slot:
+    /// assumed at entry, proved at each `return` (§8 of the note).
+    pub spec: Option<std::rc::Rc<crate::ast::Spec>>,
 }
 
 /// The certificates a compilation made: each word's, and each global cell's
@@ -222,6 +226,9 @@ struct State {
     /// Blobrefs to a flat sum, each with the variant the tests the ways
     /// here passed found its tag to name.
     variants: Vec<(Term, Sym)>,
+    /// What else is known here, of the terms: the word's `requires`, each
+    /// branch's condition, each call's `ensures` (§8 of the note).
+    props: Vec<Formula<Term>>,
 }
 
 /// One instruction: where its cell is, its routine's name (or `None`, a
@@ -250,6 +257,80 @@ fn constant(t: &Term) -> Option<i128> {
     }
 }
 
+/// `t` as an integer of the logic: arithmetic taken apart, any other term
+/// an atom.
+fn expr_of(t: &Term) -> Expr<Term> {
+    match t {
+        Term::Lit(k) if k.is_fixnum() => Expr::Lit(k.as_fixnum()),
+        Term::App(f @ ("+" | "-" | "*"), xs) if xs.len() == 2 => {
+            let (a, b) = (Box::new(expr_of(&xs[0])), Box::new(expr_of(&xs[1])));
+            match *f {
+                "+" => Expr::Add(a, b),
+                "-" => Expr::Sub(a, b),
+                _ => Expr::Mul(a, b),
+            }
+        }
+        _ => Expr::Atom(t.clone()),
+    }
+}
+
+/// `t`, a boolean, as a proposition: an integer test the relation it
+/// tested, a test of `#f` its denial, any other term an atom.
+fn prop_of(t: &Term) -> Formula<Term> {
+    use crate::ast::Rel;
+    match t {
+        Term::Lit(v) if v.is_false() => Formula::False,
+        Term::Lit(v) if *v == Value::TRUE => Formula::True,
+        Term::App(f @ ("<" | "="), xs) if xs.len() == 2 => Formula::Rel(if *f == "<" { Rel::Lt } else { Rel::Eq }, expr_of(&xs[0]), expr_of(&xs[1])),
+        Term::App("eq", xs) if xs.len() == 2 && matches!(xs[1], Term::Lit(f) if f.is_false()) => Formula::Not(Box::new(prop_of(&xs[0]))),
+        _ => Formula::Holds(t.clone()),
+    }
+}
+
+/// A specification's proposition, of a word or a call: each parameter the
+/// term given for it, and the result `r`.
+fn instance(f: &Formula<crate::ast::Named>, args: &[Term], r: Option<&Term>) -> Formula<Term> {
+    use crate::ast::Named;
+    let term = |n: &Named| {
+        let t = match n {
+            Named::Param(i) => args.get(*i),
+            Named::Result => r,
+        };
+        t.cloned().unwrap_or(Term::App("unnamed", Vec::new()))
+    };
+    f.subst(&|n| expr_of(&term(n)), &|n| prop_of(&term(n)))
+}
+
+/// A size as an integer of the logic, each size variable an atom
+/// (`(size v)`); none for `finite`.
+fn size_expr(n: &Size) -> Option<Expr<Term>> {
+    let Size::Lin { k, terms } = n else { return None };
+    let var = |v: &crate::ast::DVar| Expr::Atom(Term::App("size", vec![Term::Lit(Value::fixnum(v.0 as i64))]));
+    Some(terms.iter().fold(Expr::Lit(*k), |e, (v, c)| Expr::Add(Box::new(e), Box::new(Expr::Mul(Box::new(Expr::Lit(*c)), Box::new(var(v)))))))
+}
+
+/// A term written as an open VC writes it.
+fn show_term(t: &Term) -> String {
+    match t {
+        Term::Slot(i) => format!("(slot {i})"),
+        Term::Free(i) => format!("(free {i})"),
+        Term::Lit(v) if v.is_false() => "#f".into(),
+        Term::Lit(v) if *v == Value::TRUE => "#t".into(),
+        Term::Lit(v) => format!("{v:?}"),
+        Term::Made(k) => format!("v{k}"),
+        Term::App(f, xs) => format!("({f}{})", xs.iter().map(|x| format!(" {}", show_term(x))).collect::<String>()),
+    }
+}
+
+/// Whether the ensures of a callee of latent effect `e` may be assumed
+/// after its call: not if it may capture its continuation or jump past
+/// it (or might, an effect variable), for then the call may return again,
+/// with a value its `return` never saw (§8 of the note, point 4).
+fn returns_once(e: &Effect) -> bool {
+    use crate::ast::Atom;
+    !e.0.iter().any(|a| matches!(a, Atom::Goto(_) | Atom::Comefrom(_) | Atom::Var(_)))
+}
+
 /// Whether a certificate's operation note is an instantiation's (of a
 /// callee, a value, a `proj`), not a standard operation's.
 fn marker(op: &str) -> bool {
@@ -258,7 +339,7 @@ fn marker(op: &str) -> bool {
 
 /// Verify `word` against its certificate in `certs`.
 pub fn verify(c: &mut Checker, heap: &Heap, certs: &Certs, word: Value) -> Outcome {
-    let mut v = Verifier { c, heap, certs, out: Outcome::default(), made: 0, effect: Effect::pure(), proving: Vec::new(), gen_effects: Vec::new(), frames: Vec::new(), region_closures: Vec::new(), relations: Vec::new() };
+    let mut v = Verifier { c, heap, certs, out: Outcome::default(), made: 0, effect: Effect::pure(), proving: Vec::new(), gen_effects: Vec::new(), frames: Vec::new(), region_closures: Vec::new(), relations: Vec::new(), nats: Vec::new() };
     match certs.words.get(&word.raw()) {
         Some(cert) => v.word(word, cert),
         None => v.out.stopped = Some("no certificate".into()),
@@ -292,6 +373,9 @@ struct Verifier<'a> {
     /// term, and the sizes it compared (`(= a b)`, `(< a b)`), for what a
     /// branch on it then knows.
     relations: Vec<(Term, crate::ast::Rel, Size, Size)>,
+    /// The terms known to be naturals, from their types, with their sizes:
+    /// no less than 0, and their size, wherever they are.
+    nats: Vec<(Term, Size)>,
 }
 
 impl Verifier<'_> {
@@ -418,7 +502,7 @@ impl Verifier<'_> {
         }
         let (result, effect) = (cert.result?, cert.effect.clone()?);
         let conv = self.c.conv_default;
-        let subr = self.c.arena.ty(Ty::Subr { conv, effect, params: cert.params.clone(), result });
+        let subr = self.c.arena.ty(Ty::Subr { conv, effect, params: cert.params.clone(), result, spec: cert.spec.clone() });
         // Under each level's binders, the innermost first.
         let mut t = subr;
         for level in cert.poly.iter().rev() {
@@ -490,7 +574,16 @@ impl Verifier<'_> {
             pending: Vec::new(),
             facts: Vec::new(),
             variants: Vec::new(),
+            props: Vec::new(),
         };
+        let mut entry = entry;
+        let slots: Vec<Term> = (0..slot_types.len()).map(Term::Slot).collect();
+        if let Some(spec) = &cert.spec {
+            entry.props.push(instance(&spec.requires, &slots, None));
+        }
+        for v in entry.stack.clone() {
+            self.note_nat(&v);
+        }
         let notes: HashMap<usize, &Vec<Prop>> = cert.notes.iter().map(|(k, p)| (*k, p)).collect();
         // The states waiting at each later cell, from branches to it.
         let mut waiting: HashMap<usize, Vec<State>> = HashMap::new();
@@ -1205,7 +1298,8 @@ impl Verifier<'_> {
         // The facts every way in has.
         let facts = first.facts.iter().filter(|f| arriving.iter().all(|s| s.facts.iter().any(|g| g.eq == f.eq && g.lin == f.lin))).cloned().collect();
         let variants = first.variants.iter().filter(|v| arriving.iter().all(|s| s.variants.contains(v))).cloned().collect();
-        Some(State { stack, pending: first.pending.clone(), facts, variants })
+        let props = first.props.iter().filter(|p| arriving.iter().all(|s| s.props.contains(p))).cloned().collect();
+        Some(State { stack, pending: first.pending.clone(), facts, variants, props })
     }
 
     /// The state at a cell with an assertion: each way in must establish
@@ -1230,15 +1324,41 @@ impl Verifier<'_> {
         // The named slots replaced by what is asserted, so that the ways'
         // values there need not agree.
         let mut ways: Vec<State> = arriving.to_vec();
+        let mut made = Vec::new();
         for (i, t) in &named {
             let fresh = self.fresh();
+            made.push((*i, *t, fresh.clone()));
             for s in &mut ways {
                 if let Some(v) = s.stack.get_mut(*i) {
                     *v = V::new(fresh.clone(), Some(*t));
                 }
             }
         }
-        self.join(&ways, at).unwrap_or(State { stack: Vec::new(), pending: Vec::new(), facts: Vec::new(), variants: Vec::new() })
+        let mut joined = self.join(&ways, at).unwrap_or(State { stack: Vec::new(), pending: Vec::new(), facts: Vec::new(), variants: Vec::new(), props: Vec::new() });
+        // What each way knew of its value, an integer's or a boolean's, a
+        // case each: the strongest postcondition of the join, not a least
+        // upper bound found (which would be inference).
+        let cases: Vec<Formula<Term>> = arriving
+            .iter()
+            .map(|w| {
+                let mut conj: Vec<Formula<Term>> = w.props.iter().filter(|p| !joined.props.contains(p)).cloned().collect();
+                for (i, t, fresh) in &made {
+                    let Some(v) = w.stack.get(*i) else { continue };
+                    if self.c.is_int(*t) {
+                        conj.push(Formula::Rel(crate::ast::Rel::Eq, Expr::Atom(fresh.clone()), expr_of(&v.term)));
+                    } else if self.c.is_bool(*t) {
+                        let (h, p) = (Formula::Holds(fresh.clone()), prop_of(&v.term));
+                        conj.push(Formula::Implies(Box::new(h.clone()), Box::new(p.clone())));
+                        conj.push(Formula::Implies(Box::new(p), Box::new(h)));
+                    }
+                }
+                Formula::And(conj)
+            })
+            .collect();
+        if cases.iter().any(|c| !c.trivial()) {
+            joined.props.push(Formula::Or(cases));
+        }
+        joined
     }
 
     fn pop(&mut self, s: &mut State, at: &str) -> Result<V, ()> {
@@ -1247,7 +1367,66 @@ impl Verifier<'_> {
 
     fn push_made(&mut self, s: &mut State, ty: Option<TyId>, term: Option<Term>) {
         let term = term.unwrap_or_else(|| self.fresh());
-        s.stack.push(V::new(term, ty));
+        let v = V::new(term, ty);
+        self.note_nat(&v);
+        s.stack.push(v);
+    }
+
+    /// `v`'s term noted a natural, if its type says so.
+    fn note_nat(&mut self, v: &V) {
+        if let Some(Ty::Nat(n)) = self.ty_of(v)
+            && !matches!(v.term, Term::Lit(_))
+            && !self.nats.iter().any(|(t, m)| *t == v.term && *m == n)
+        {
+            self.nats.push((v.term.clone(), n));
+        }
+    }
+
+    /// A VC beyond types: what is known at `s` entails `goal`. Discharged
+    /// by the logic's prover (`crate::logic::entails`), or left open,
+    /// written out for a prover outside, as an implication.
+    fn prove(&mut self, s: &State, goal: &Formula<Term>, what: &str) {
+        if goal.trivial() {
+            return;
+        }
+        let mut hyps = s.props.clone();
+        // Each natural that the goal or what is known mentions: at least
+        // 0, and its size where it is known. (Those on the stack, as
+        // narrowed here, too.) Then what is known here of sizes, as the
+        // checkers keep it: their facts and the propositions meet.
+        let mut nats = self.nats.clone();
+        nats.extend(s.stack.iter().filter_map(|v| match self.ty_of(v) {
+            Some(Ty::Nat(n)) => Some((v.term.clone(), n)),
+            _ => None,
+        }));
+        let mut known = Vec::new();
+        for (t, n) in nats {
+            let named = |f: &Formula<Term>| f.mentions(&|a| *a == t);
+            if !(named(goal) || hyps.iter().any(named)) {
+                continue;
+            }
+            known.push(Formula::Rel(crate::ast::Rel::Le, Expr::Lit(0), expr_of(&t)));
+            if let Some(z) = size_expr(&n) {
+                known.push(Formula::Rel(crate::ast::Rel::Eq, expr_of(&t), z));
+            }
+        }
+        for f in &s.facts {
+            if let Some(z) = size_expr(&f.lin) {
+                let r = if f.eq { crate::ast::Rel::Eq } else { crate::ast::Rel::Le };
+                known.push(Formula::Rel(r, Expr::Lit(0), z));
+            }
+        }
+        for k in known {
+            if !hyps.contains(&k) {
+                hyps.push(k);
+            }
+        }
+        if crate::logic::entails(&hyps, goal) {
+            self.out.discharged += 1;
+        } else {
+            let vc = Formula::Implies(Box::new(Formula::And(hyps)), Box::new(goal.clone()));
+            self.out.open.push(format!("{what}: {}", crate::logic::show(&vc, &show_term)));
+        }
     }
 
     /// `v`'s size, if it is a natural of a known one, or a literal.
@@ -1509,7 +1688,7 @@ impl Verifier<'_> {
                 args.reverse();
                 // A polymorphic callee, instantiated as the certificate says:
                 // its binders, outermost first, substituted.
-                let callee = match (self.ty_of(&f), cert.ops.iter().find(|(k, op, _)| *k == here && op == "%call")) {
+                let callee: Option<Ty> = match (self.ty_of(&f), cert.ops.iter().find(|(k, op, _)| *k == here && op == "%call")) {
                     (Some(Ty::Poly { .. }), Some((_, _, inst))) => {
                         let t = f.ty.expect("known");
                         let (kinds, inner) = self.c.binders_of(t);
@@ -1522,6 +1701,12 @@ impl Verifier<'_> {
                         Some(self.c.arena.get(self.c.arena.resolve(t)).clone())
                     }
                     (t, _) => t,
+                };
+                // Its specification: its `requires` owed here, its `ensures`
+                // known after (§8 of the note).
+                let spec = match &callee {
+                    Some(Ty::Subr { spec, .. }) => spec.clone(),
+                    _ => None,
                 };
                 let (params, result, effect) = match callee {
                     // A `vsubr`: as many values as it is called with, each
@@ -1566,15 +1751,31 @@ impl Verifier<'_> {
                     self.holds(a, *p, at);
                 }
                 self.effect = self.effect.union(&effect);
+                let terms: Vec<Term> = args.iter().map(|a| a.term.clone()).collect();
+                let made = self.fresh();
+                let mut after = s.clone();
+                if let Some(spec) = &spec {
+                    self.prove(s, &instance(&spec.requires, &terms, None), &format!("{at}: the callee's requires"));
+                    if returns_once(&effect) {
+                        after.props.push(instance(&spec.ensures, &terms, Some(&made)));
+                    }
+                }
                 if name.ends_with("tailcall") {
-                    let called = self.returned(&V::new(Term::App("call", vec![f.term]), Some(result)), at)?;
+                    let called = self.returned(&V::new(made.clone(), Some(result)), at)?;
                     match cert.result {
                         Some(want) => self.holds(&called, want, at),
                         None => self.out.failed.push(format!("{at}: a tail call from a word with no result")),
                     }
+                    // Its result is the word's: what is known after the
+                    // call must entail the word's `ensures`.
+                    if let Some(own) = &cert.spec {
+                        let slots: Vec<Term> = (0..entry.stack.len()).map(Term::Slot).collect();
+                        self.prove(&after, &instance(&own.ensures, &slots, Some(&made)), &format!("{at}: the ensures, by a tail call"));
+                    }
                     return Ok(None);
                 }
-                self.push_made(s, Some(result), None);
+                *s = after;
+                self.push_made(s, Some(result), Some(made));
             }
             "return" => {
                 let r = self.pop(s, at)?;
@@ -1582,6 +1783,10 @@ impl Verifier<'_> {
                 match cert.result {
                     Some(want) => self.holds(&r, want, at),
                     None => self.out.failed.push(format!("{at}: a return from a word with no result")),
+                }
+                if let Some(spec) = &cert.spec {
+                    let slots: Vec<Term> = (0..entry.stack.len()).map(Term::Slot).collect();
+                    self.prove(s, &instance(&spec.ensures, &slots, Some(&r.term)), &format!("{at}: the ensures"));
                 }
                 return Ok(None);
             }
@@ -1627,6 +1832,10 @@ impl Verifier<'_> {
                     let (mut no, mut yes) = (s.clone(), s.clone());
                     self.narrow(&flag.term, false, &mut no);
                     self.narrow(&flag.term, true, &mut yes);
+                    // Each way knows its condition (taken: the flag `#f`).
+                    let cond = prop_of(&flag.term);
+                    no.props.push(Formula::Not(Box::new(cond.clone())));
+                    yes.props.push(cond);
                     (no, Some(yes))
                 };
                 if to <= here {
@@ -1638,6 +1847,18 @@ impl Verifier<'_> {
                     }
                     for (v, t) in taken.stack.iter().zip(&cert.params) {
                         self.holds(v, *t, at);
+                    }
+                    // A self tail call, made a jump: its `requires`, of the
+                    // values it passes, and its `ensures`, of them, entailing
+                    // the word's, of any result (Hoare's loop rule).
+                    if let Some(spec) = &cert.spec {
+                        let args: Vec<Term> = taken.stack.iter().map(|v| v.term.clone()).collect();
+                        self.prove(&taken, &instance(&spec.requires, &args, None), &format!("{at}: the loop's requires"));
+                        let r = self.fresh();
+                        let mut after = taken.clone();
+                        after.props.push(instance(&spec.ensures, &args, Some(&r)));
+                        let slots: Vec<Term> = (0..entry.stack.len()).map(Term::Slot).collect();
+                        self.prove(&after, &instance(&spec.ensures, &slots, Some(&r)), &format!("{at}: the loop's ensures"));
                     }
                 } else {
                     waiting.entry(to).or_default().push(taken);
@@ -1844,7 +2065,8 @@ impl Verifier<'_> {
                     return Ok(None);
                 }
                 let terms: Vec<Term> = args.into_iter().map(|a| a.term).collect();
-                let made = self.fresh();
+                // A product, a term of the logic's.
+                let made = if op == "*" && terms.len() == 2 { Term::App("*", terms.clone()) } else { self.fresh() };
                 if let Ty::Proving { then, els } = self.c.arena.get(self.c.arena.resolve(result)).clone() {
                     self.proving.push((made.clone(), then, els, terms));
                 }

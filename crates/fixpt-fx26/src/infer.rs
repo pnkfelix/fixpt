@@ -211,7 +211,8 @@ impl Checker {
                 if want.len() != params.len() {
                     return Err(FxError::at(span, format!("a subroutine of {} parameter(s) is expected, and this `lambda` has {}", want.len(), params.len())));
                 }
-                let (t, eff) = self.synth_lambda_as(e, Some(&want), Some(result))?;
+                let spec = self.spec_of(expected);
+                let (t, eff) = self.synth_lambda_as(e, Some(&want), Some(result), spec)?;
                 self.expect(e, t, expected)?;
                 Ok(eff)
             }
@@ -427,14 +428,14 @@ impl Checker {
     /// it one (`docs/research/native-conventions.md`); and its arity.
     fn conversion(&mut self, got: TyId, want: TyId) -> Option<(Conv, usize)> {
         let (g, w) = (self.arena.resolve(got), self.arena.resolve(want));
-        let (Ty::Subr { conv: from, effect, params, result }, Ty::Subr { conv: to, .. }) = (self.arena.get(g).clone(), self.arena.get(w).clone()) else {
+        let (Ty::Subr { conv: from, effect, params, result, spec }, Ty::Subr { conv: to, .. }) = (self.arena.get(g).clone(), self.arena.get(w).clone()) else {
             return None;
         };
         if from == to {
             return None;
         }
         let n = params.len();
-        let t = self.arena.ty(Ty::Subr { conv: to, effect, params, result });
+        let t = self.arena.ty(Ty::Subr { conv: to, effect, params, result, spec });
         self.subtype(t, want).then_some((to, n))
     }
 
@@ -452,11 +453,14 @@ impl Checker {
     /// A `lambda`'s type. `hint` supplies the types of parameters the
     /// program left out; without it, every parameter must have one.
     pub(crate) fn synth_lambda(&mut self, e: ExpId, hint: Option<&[TyId]>) -> R<(TyId, Effect)> {
-        self.synth_lambda_as(e, hint, None)
+        self.synth_lambda_as(e, hint, None, None)
     }
 
-    /// The same, with the body checked against `result` when it is known.
-    pub(crate) fn synth_lambda_as(&mut self, e: ExpId, hint: Option<&[TyId]>, result: Option<TyId>) -> R<(TyId, Effect)> {
+    /// The same, with the body checked against `result` when it is known;
+    /// with `spec`, the procedure's type has that specification, which the
+    /// cells' verifier proves of the body (`docs/research/typed-cellular-code.md`,
+    /// §8), not checking.
+    pub(crate) fn synth_lambda_as(&mut self, e: ExpId, hint: Option<&[TyId]>, result: Option<TyId>, spec: Option<std::rc::Rc<crate::ast::Spec>>) -> R<(TyId, Effect)> {
         let Exp::Lambda { params, body } = self.arena.exp_at(e).clone() else { unreachable!() };
         let mut typed = Vec::new();
         for (i, (n, t)) in params.iter().enumerate() {
@@ -533,10 +537,10 @@ impl Checker {
             // is checked: a name a `with` in it binds is not free
             // (`NodeFacts::with_vals`).
             let frees = self.free_vars(e).into_iter().filter_map(|s| Some((s, self.lookup(s)?))).collect();
-            let sig = crate::check::LambdaSig { params: typed.clone(), frees, result, effect: latent.clone(), inside };
+            let sig = crate::check::LambdaSig { params: typed.clone(), frees, result, effect: latent.clone(), inside, spec: spec.clone() };
             self.facts.lambdas.insert(body, sig);
         }
-        let t = self.arena.ty(Ty::Subr { conv: self.conv_default, effect: latent, params: typed.iter().map(|(_, t)| *t).collect(), result });
+        let t = self.arena.ty(Ty::Subr { conv: self.conv_default, effect: latent, params: typed.iter().map(|(_, t)| *t).collect(), result, spec });
         Ok((t, Effect::pure()))
     }
 
@@ -799,7 +803,7 @@ impl Checker {
                         let Some((c, n)) = self.conversion(t, *p) else {
                             return Err(FxError::at(
                                 self.arena.span_of(*a),
-                                format!("argument {} is a {}, where a {} is expected", i + 1, self.show_ty(t), self.show_ty(*p)),
+                                format!("argument {} is a {}, where a {} is expected{}", i + 1, self.show_ty(t), self.show_ty(*p), self.spec_delta(t, *p)),
                             ));
                         };
                         self.convert_at(*a, c, n);
@@ -1108,7 +1112,8 @@ impl Checker {
                     return Err(not_known(self, p));
                 }
                 let res = (!self.mentions_unknown_type(res, &u)).then_some(res);
-                let (t, eff) = self.synth_lambda_as(*a, Some(&ps), res)?;
+                let spec = self.spec_of(p);
+                let (t, eff) = self.synth_lambda_as(*a, Some(&ps), res, spec)?;
                 self.unify(params[i], t, &mut u, &mut HashSet::new());
                 done[i] = Some((t, eff));
             } else if self.mentions_unknown_type(p, &u)
@@ -1621,7 +1626,7 @@ impl Checker {
             }
             let hit = match self.arena.get(t).clone() {
                 Ty::Var(v) => open(v),
-                Ty::Subr { conv, effect: e, params, result } => {
+                Ty::Subr { conv, effect: e, params, result, .. } => {
                     stack.extend(params);
                     stack.push(result);
                     effect(&e) || matches!(conv, Conv::Var(v) if open(v))
@@ -1839,7 +1844,7 @@ impl Checker {
                     self.unify(p, *y, u, trail);
                 }
             }
-            (Ty::Subr { conv: pc, effect: pe, params: pp, result: pr }, at) => {
+            (Ty::Subr { conv: pc, effect: pe, params: pp, result: pr, .. }, at) => {
                 let Some((ae, ap, ar)) = at.as_subr() else { return };
                 if let Ty::Subr { conv: ac, .. } = at {
                     self.unify_conv(pc, ac, u);

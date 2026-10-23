@@ -17,6 +17,7 @@
 //! does says where from.
 
 pub mod typed_cells;
+pub mod logic;
 pub mod ast;
 
 /// The eager reader, written in FX-26: see the file's own header. A module
@@ -843,6 +844,7 @@ pub mod licence;
 pub mod lemma;
 pub mod lower;
 mod sizes;
+mod specs;
 mod modules;
 mod modorder;
 mod processes;

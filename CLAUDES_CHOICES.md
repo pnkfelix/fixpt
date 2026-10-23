@@ -1276,3 +1276,61 @@ VC." The last classes, and what was chosen in them:
 8. **The test now requires every word**, not a count: a word that stops,
    a VC failing or open, fails it. The scheduler's 13 assumptions stay
    assumptions (the note's §7), said, not refused.
+
+## `requires` and `ensures` (2026-10-23)
+
+The user: "let's attack requires and ensures next" (the design note's
+§8, decided with the user 2026-10-22). What was chosen in building it:
+
+1. **The result is named in its clause, `(ensures r q)`**, not as the
+   note sketched it, `(subr E (…) (r int) …)`: a result written `(r
+   int)` reads as a type applied, `(listof int)`. `(requires p)` comes
+   first, each clause at most once; `->` takes them too.
+2. **The checker carries specifications; the verifier proves them.** The
+   checker reads a specification, sees that it speaks of the procedure's
+   own `int`s, `nat`s and `bool`s, keeps it in the `subr` type (and in a
+   lambda's signature, for the certificate), and compares two. Whether a
+   body ensures what it says, and whether a call establishes what its
+   callee requires, is the cells' verifier's: Hoare logic once, on the
+   code that runs, as the note's design has it. A program whose
+   specification does not hold checks, runs, and has words that do not
+   verify, each with its VC left open.
+3. **Behavioural subtyping by the same prover.** One procedure type is
+   within another when its own `subr` rule holds and the other's
+   `requires` entails its own, and, with that, its `ensures` entails the
+   other's (Liskov and Wing). What the prover cannot show is not within:
+   conservative. No specification is `true` on both sides, so a
+   procedure with none does not fit where one ensuring something is
+   expected.
+4. **The proposition language**: linear integer relations (`<`, `<=`,
+   `=`, `>`, `>=`) over literals, `+`, `-`, `*`, of names of `int`s and
+   `nat`s; names of `bool`s; `not`, `and`, `or`, `implies`, `#t`, `#f`.
+   A product of two unknowns is allowed and opaque to the prover (an atom
+   of its own): `square.fx` is true and left open, for a prover outside.
+5. **One prover, `logic.rs`**, generic in its atoms: the connectives
+   taken apart, a disjunction case by case, each case's integers by
+   Fourier–Motzkin. The FM is `sizes.rs`'s, moved there and generalized
+   (equalities rewritten away first, for the verifier's), and kept step
+   for step with the FX-26 checker's for what `sizes.rs` asks: no
+   tightening of the constraints given, only of the sums.
+6. **No control-effect rule in the checker.** The note's point 4
+   suggested a procedure with a specification have no control effect.
+   Instead the verifier does not assume a callee's `ensures` after a call
+   whose latent effect may `goto`, `comefrom`, or is a variable: such a
+   call may return again, with a value its `return` never saw. A body's
+   own `ensures` is proved on every way to a `return`, whatever it calls.
+7. **A join keeps each way's case.** The note's join keeps only the
+   propositions every way has. A value made on the ways (an `if`'s, at an
+   assertion of the certificate's) now also gets the disjunction of the
+   ways: its value there and what that way alone knew. That is the
+   strongest postcondition, not a least upper bound found, so not
+   inference; without it, `(+ 1 (if …))` cannot be specified.
+8. **No `old`.** A specification speaks of parameters, which are values;
+   a slot reassigned is a new term, and the entry's term is what `ensures`
+   names. `old` waits for propositions about what refs and arrays hold.
+9. **Latent propositions not yet folded in.** `(bool (then …) (else …))`
+   stays as it is; an `ensures` of a `bool` result says the same with
+   `implies` (`predicate.fx`). Making one the other's sugar is next.
+10. **Spec programs in `tests/programs/specs`**, each saying on its first
+    line `; Verified`, `; Unverified` or `; Refused`, outside the two
+    checkers' comparison until the FX-26 checker reads specifications.

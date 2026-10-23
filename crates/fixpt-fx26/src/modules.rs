@@ -454,11 +454,11 @@ impl Checker {
                         let args = binders.iter().map(|(v, k)| self.var_d(*v, *k)).collect();
                         self.arena.ty(Ty::App { fun: f, args })
                     };
-                    let identity = self.arena.ty(Ty::Subr { conv: self.conv_default, effect: Effect::pure(), params: vec![rep], result: rep });
+                    let identity = self.arena.ty(Ty::Subr { conv: self.conv_default, effect: Effect::pure(), params: vec![rep], result: rep, spec: None });
                     self.check(up_fn, identity)?;
                     self.check(down_fn, identity)?;
-                    let up_t = self.arena.ty(Ty::Subr { conv: self.conv_default, effect: Effect::pure(), params: vec![rep], result: t });
-                    let down_t = self.arena.ty(Ty::Subr { conv: self.conv_default, effect: Effect::pure(), params: vec![t], result: rep });
+                    let up_t = self.arena.ty(Ty::Subr { conv: self.conv_default, effect: Effect::pure(), params: vec![rep], result: t, spec: None });
+                    let down_t = self.arena.ty(Ty::Subr { conv: self.conv_default, effect: Effect::pure(), params: vec![t], result: rep, spec: None });
                     let (up_t, down_t) = if binders.is_empty() {
                         (up_t, down_t)
                     } else {

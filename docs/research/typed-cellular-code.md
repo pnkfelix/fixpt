@@ -412,6 +412,33 @@ instantiations; each is checked, not trusted. What the stage leaves for
 TC5: the facts kept are the checkers' (types, sizes, a flat sum's
 variant); propositions beyond them are §8's `requires` and `ensures`.
 
+TC5 begun (2026-10-23, the user: "let's attack requires and ensures
+next"): §8's specifications, in the Rust checker and the verifier.
+- Written `(subr E ((x int) …) Q (requires p) (ensures r q))`, the
+  result named in its clause (a result written `(r int)` would read as a
+  type applied). Propositions: linear relations of the procedure's `int`s
+  and `nat`s (`+`, `-`, `*` by a literal; a product of unknowns opaque),
+  its `bool`s, and the connectives.
+- The checker carries a specification in the `subr` type and compares
+  two by behavioural subtyping (§8, point 2); it proves nothing of a
+  body. The certificate carries a word's.
+- The verifier (§5) keeps propositions: the `requires` at entry, each
+  `0branch`'s condition (an integer test the relation it tested), each
+  call's `ensures`, and at a join each way's case for a value made on the
+  ways. Its VCs: the `ensures` at each `return`; a callee's `requires` at
+  each call; at a tail call, the callee's `ensures` entailing the word's;
+  at a loop's jump back, the `requires` of the values passed, and the
+  `ensures` of them entailing the word's (Hoare's rule). A callee's
+  `ensures` is not assumed after a call that may capture or jump past its
+  continuation (point 4, without restricting the language).
+- One prover for both (`logic.rs`): the connectives, disjunctions case by
+  case, Fourier–Motzkin for each case (the checkers' own, moved there). A
+  VC it cannot show is open, written out as an implication in §2's
+  syntax.
+- `tests/programs/specs`: 19 programs, each verified, left open, or
+  refused as its first line says; mutants of specified words (an `int-add`
+  made an `int-sub`, and back) all refused.
+
 ## 11. Open questions (the user's)
 
 1. ~~**Where propositions come from in a program.**~~ From `requires`

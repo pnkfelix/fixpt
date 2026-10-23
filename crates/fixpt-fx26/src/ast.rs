@@ -405,7 +405,11 @@ pub enum Ty {
     /// type is `bool`; what it proves narrows the arguments it names.
     Proving { then: Vec<Prop>, els: Vec<Prop> },
     Var(DVar),
-    Subr { conv: Conv, effect: Effect, params: Vec<TyId>, result: TyId },
+    /// `(subr E (P …) Q (requires p) (ensures r q))`: with a specification
+    /// (`spec`), Hoare logic's for procedures, which the cells' verifier
+    /// proves of the body and of each call (`docs/research/typed-cellular-code.md`,
+    /// §8).
+    Subr { conv: Conv, effect: Effect, params: Vec<TyId>, result: TyId, spec: Option<std::rc::Rc<Spec>> },
     Poly { binders: Vec<(DVar, Kind)>, body: TyId },
     Ref(TyId, Region),
     /// `(pairof A B R)`, a pair, when the last is false; when it is true,
@@ -489,6 +493,25 @@ pub enum Ty {
     /// abstract type constructor), or a `select` not yet resolved. Equal
     /// only to an application of the same `f` to equal descriptions.
     App { fun: TyId, args: Vec<D> },
+}
+
+/// What a specification's propositions name: a parameter, by number from
+/// 0, or the result.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Named {
+    Param(usize),
+    Result,
+}
+
+/// A procedure's specification: what it requires of its arguments, and
+/// what it ensures of them and its result, each `true` if not said. The
+/// names are for printing it; a type's identity is its propositions'.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Spec {
+    pub params: Vec<Option<Sym>>,
+    pub result: Option<Sym>,
+    pub requires: crate::logic::Formula<Named>,
+    pub ensures: crate::logic::Formula<Named>,
 }
 
 /// A list's length, as far as it is known: some number (`finite`), or a
