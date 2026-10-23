@@ -244,9 +244,10 @@ pub fn load_eager_reader(scheme: &mut Session) -> Result<(), String> {
 
 /// The reader and parser alone (the front end's first files, which need
 /// none after them), lowered and loaded: all a session whose checker and
-/// compilers run as register code runs lowered. A tenth of the front end,
-/// and of its loading, which is most of a session's start.
-fn load_reader_alone(scheme: &mut Session) -> Result<(), String> {
+/// compilers run as register code runs lowered, and all an eager reader
+/// needs. A tenth of the front end, and of its loading, which is most of a
+/// session's start (3.6 s for the whole, lowered, on x86_64).
+pub fn load_reader_alone(scheme: &mut Session) -> Result<(), String> {
     let parser = crate::FRONT_END_FILES.iter().position(|(n, _)| *n == "reader.fx").expect("listed");
     let text = crate::FRONT_END_FILES[..=parser].iter().map(|(_, t)| *t).collect::<Vec<_>>().join("\n");
     load_lowered(scheme, &text)
@@ -1220,6 +1221,18 @@ impl Fx26Session {
             entries.iter().map(|name| format!("(define ({prefix}{name} . args) (%run-front-end {native}{name} args))\n")).collect();
         self.scheme.eval_str("<register code>", &defines).map_err(|e| e.to_string())?;
         Ok(())
+    }
+
+    /// The reader written in FX-26, for an eager reader to attach to: the
+    /// reader alone if the checker and compilers run as register code (they
+    /// are loaded at the first form), else the whole front end lowered, as
+    /// the session will run it. Not again if it is loaded.
+    pub fn load_own_reader(&mut self) -> R<()> {
+        if self.scheme.is_bound(&format!("{READER_PREFIX}eager-start-fx26")) {
+            return Ok(());
+        }
+        let load = if self.front_end_compiled { load_reader_alone } else { load_eager_reader };
+        load(&mut self.scheme).map_err(crate::front_end_failure)
     }
 
     /// The pieces written in FX-26 (reader, checker, compilers), loaded if

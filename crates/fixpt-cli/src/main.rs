@@ -1005,7 +1005,7 @@ fn hole_report(raised: &str) -> String {
 /// keystroke, so every entry point's effect must stay within the regions the
 /// reader owns — allocation, and its own state, prompt and marks.
 fn load_fx26_reader(session: &mut Session) -> Result<fixpt_scheme::eager::EagerReader, String> {
-    fixpt_fx26::session::load_eager_reader(session)?;
+    fixpt_fx26::session::load_reader_alone(session)?;
     fixpt_scheme::eager::EagerReader::attach(session, fixpt_fx26::session::READER_PREFIX).map_err(|e| e.to_string())
 }
 

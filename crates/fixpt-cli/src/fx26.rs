@@ -167,7 +167,7 @@ pub fn repl(backend: Backend) -> i32 {
 
     // FX-26 code reads FX-26 input: the eager reader written in FX-26, once
     // its licence is checked. Without it, the Rust reader.
-    let mut eager = match fixpt_fx26::session::load_eager_reader(&mut session.scheme).and_then(|()| {
+    let mut eager = match session.load_own_reader().map_err(|e| e.message).and_then(|()| {
         fixpt_scheme::eager::EagerReader::attach_starting(
             &mut session.scheme,
             fixpt_fx26::session::READER_PREFIX,
