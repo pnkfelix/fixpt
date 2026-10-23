@@ -14,7 +14,7 @@ use crate::ast::{Effect, Size, Ty, TyId};
 use fixpt_read::Sym;
 use crate::check::Checker;
 use crate::logic::{Expr, Formula};
-use fixpt_heap::layout::cellular::{operands, CLOSURE_FREE0, CLOSURE_WORD, GLOBAL_VALUE, PRIMITIVES, ROUTINES, WORD_CELL0};
+use fixpt_heap::layout::cellular::{operands, CLOSURE_FREE0, CLOSURE_WORD, GLOBAL_NAME, GLOBAL_VALUE, PRIMITIVES, ROUTINES, WORD_CELL0};
 use fixpt_heap::{Heap, ObjType, Value};
 use std::collections::HashMap;
 
@@ -1726,6 +1726,19 @@ impl Verifier<'_> {
                 s.stack.push(V::new(Term::Free(i), ty));
             }
             "global" => {
+                // Reading a global of the program's: `(read (globals g))`,
+                // as the checkers have naming it (`Checker::naming_effect`);
+                // not the scheduler's, whose procedures the forms call
+                // (`Checker::library_type`).
+                let named = self.heap.bloblet_slot(ops[0], GLOBAL_NAME);
+                if self.c.globals_effects
+                    && self.heap.is_a(named, ObjType::Symbol)
+                    && let Some(g) = self.c.interner.get(&self.heap.symbol_name(named))
+                    && self.c.global_type(g).is_some()
+                    && self.c.shared_loads.get(crate::check::PROCESSES) != Some(&g)
+                {
+                    self.effect = self.effect.union(&Effect::atom(crate::ast::Atom::Read(crate::ast::Region::Global(g))));
+                }
                 let ty = self.certs.globals.get(&ops[0].raw()).copied();
                 let term = Term::App("global", vec![Term::Lit(ops[0])]);
                 // A global known while compiling to hold a word's closure.

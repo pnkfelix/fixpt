@@ -233,6 +233,11 @@ fn weakened(s: &mut Fx26Session, name: &str, text: &str) -> (usize, Vec<String>,
                 for a in latent.0.iter() {
                     let mut less = latent.clone();
                     less.0.remove(a);
+                    // Still said by the rest (`(read @globals)` says every
+                    // global's read): no weaker.
+                    if fixpt_fx26::ast::Effect(std::iter::once(*a).collect()).within(&less) {
+                        continue;
+                    }
                     certs.words.get_mut(&raw).expect("there").effect = Some(less);
                     made += 1;
                     if verify(&mut c, m.heap(), &certs, w).verified() {
@@ -255,11 +260,11 @@ fn weakened(s: &mut Fx26Session, name: &str, text: &str) -> (usize, Vec<String>,
 
 /// A latent effect made smaller is not verified for what the verifier
 /// masks of expressions inside a word: it masks no more than the checker,
-/// whose latent effect keeps only what its masking did not drop. (Some
-/// still verify, for what the verifier does not yet compute: a global's
-/// read, `spin`, and what the scheduler's procedures, trusted at their
-/// forms' types, do to its private regions; `TODO.md` §117. `ALL` lists
-/// them.)
+/// whose latent effect keeps only what its masking did not drop; and a
+/// global's read is never left out unseen. (Some still verify, for what
+/// the verifier does not yet compute: `spin`, and what the scheduler's
+/// procedures, trusted at their forms' types, do to its private regions;
+/// `TODO.md` §117. `ALL` lists them.)
 #[test]
 fn a_latent_effect_weakened_is_not_masked_away() {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
@@ -278,6 +283,8 @@ fn a_latent_effect_weakened_is_not_masked_away() {
     }
     assert!(made > 10000, "too few weakened: {made}");
     assert!(by_masks.is_empty(), "weakened, and verified for the masks alone:\n{}", by_masks.join("\n"));
+    let reads: Vec<&String> = kept.iter().filter(|k| k.contains(": Read(Global(")).collect();
+    assert!(reads.is_empty(), "a global's read left out, and verified:\n{reads:?}");
 }
 
 /// Every test program, by directory, but `specs`, whose programs say

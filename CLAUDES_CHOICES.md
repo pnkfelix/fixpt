@@ -1463,3 +1463,14 @@ The user: "let's attack requires and ensures next" (the design note's
    more. It found the older gaps of §117 too, which it does not assert
    on: global reads, `spin`, the scheduler's private regions.
 
+## Global reads in the verifier (2026-10-23)
+
+1. **`global` notes `(read (globals g))`**, of a global of the program's
+   (one the checker holds a global, and not the built-in scheduler's,
+   whose procedures the forms call through `Checker::library_type` and
+   which no latent effect names). A load's hidden global is noted: the
+   checker names those in latent effects.
+2. **The weakening test skips an atom the rest of the effect still says**
+   (`(read @globals)` says each global's read): removing it weakens
+   nothing. It asserts that no global's read is left out unseen.
+

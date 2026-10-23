@@ -2829,10 +2829,15 @@ left (`KNOWN_GAPS`) each want more of the certificate:
   the global had there.
 - What the verifier does not compute of a word's effect, so that a
   certificate claiming less of it is not refused
-  (`a_latent_effect_weakened_is_not_masked_away`: of 19,132 latent effects
-  made one atom smaller, 2,153 still verify): a global's read, `(read
-  (globals g))` (494); `spin` (55), termination not being verified; and
-  what the scheduler's procedures, trusted at their forms' types, do to
-  its private regions (`@sched`, most of the rest). The first is cells'
-  `global` reads to note; the second waits on total correctness (§116).
+  (`a_latent_effect_weakened_is_not_masked_away`: of 18,879 latent effects
+  made one atom smaller, an atom the rest does not still say, 1,659 still
+  verify): `spin` (55), termination not being verified (§116); what the
+  scheduler's procedures, trusted at their forms' types, do to its private
+  regions (`@sched`, most of them); and about 25 others, each an atom the
+  checker's latent effect has that the verifier never sees the cells do
+  (reading an `rlambda`'s or a reap's region, `native/whole-captures.fx`'s
+  `@g` and its tag's control, a mark key's `comefrom`, `(read @globals)`
+  of `modules/linked.fx`), to look at one by one. A global's read, which
+  the verifier did not note at first (494 of them), it now does, and the
+  test asserts it.
 
