@@ -193,6 +193,10 @@ struct State {
     /// and the type it must be given (by `field!`) before the closure is
     /// used.
     pending: Vec<(Term, usize, TyId)>,
+    /// What is known of sizes here, as the checkers keep it
+    /// (`crate::sizes::SizeFact`: `lin = 0` or `lin ≥ 0`): learned from the
+    /// tests the ways here passed.
+    facts: Vec<crate::sizes::SizeFact>,
 }
 
 /// One instruction: where its cell is, its routine's name (or `None`, a
@@ -211,7 +215,7 @@ fn marker(op: &str) -> bool {
 
 /// Verify `word` against its certificate in `certs`.
 pub fn verify(c: &mut Checker, heap: &Heap, certs: &Certs, word: Value) -> Outcome {
-    let mut v = Verifier { c, heap, certs, out: Outcome::default(), made: 0, effect: Effect::pure(), proving: Vec::new(), gen_effects: Vec::new(), frames: Vec::new(), region_closures: Vec::new() };
+    let mut v = Verifier { c, heap, certs, out: Outcome::default(), made: 0, effect: Effect::pure(), proving: Vec::new(), gen_effects: Vec::new(), frames: Vec::new(), region_closures: Vec::new(), relations: Vec::new() };
     match certs.words.get(&word.raw()) {
         Some(cert) => v.word(word, cert),
         None => v.out.stopped = Some("no certificate".into()),
@@ -241,6 +245,10 @@ struct Verifier<'a> {
     /// body that makes one may allocate, and be generalized still
     /// (`Checker::generalizable`).
     region_closures: Vec<Term>,
+    /// The integer tests made (`int-eq`, `int-less`): each one's flag's
+    /// term, and the sizes it compared (`(= a b)`, `(< a b)`), for what a
+    /// branch on it then knows.
+    relations: Vec<(Term, crate::ast::Rel, Size, Size)>,
 }
 
 impl Verifier<'_> {
@@ -423,6 +431,7 @@ impl Verifier<'_> {
         let entry = State {
             stack: slot_types.iter().enumerate().map(|(i, t)| V::new(Term::Slot(i), Some(*t))).collect(),
             pending: Vec::new(),
+            facts: Vec::new(),
         };
         let notes: HashMap<usize, &Vec<Prop>> = cert.notes.iter().map(|(k, p)| (*k, p)).collect();
         // The states waiting at each later cell, from branches to it.
@@ -932,7 +941,9 @@ impl Verifier<'_> {
                 return None;
             }
         }
-        Some(State { stack, pending: first.pending.clone() })
+        // The facts every way in has.
+        let facts = first.facts.iter().filter(|f| arriving.iter().all(|s| s.facts.iter().any(|g| g.eq == f.eq && g.lin == f.lin))).cloned().collect();
+        Some(State { stack, pending: first.pending.clone(), facts })
     }
 
     /// The state at a cell with an assertion: each way in must establish
@@ -965,7 +976,7 @@ impl Verifier<'_> {
                 }
             }
         }
-        self.join(&ways, at).unwrap_or(State { stack: Vec::new(), pending: Vec::new() })
+        self.join(&ways, at).unwrap_or(State { stack: Vec::new(), pending: Vec::new(), facts: Vec::new() })
     }
 
     fn pop(&mut self, s: &mut State, at: &str) -> Result<V, ()> {
@@ -975,6 +986,30 @@ impl Verifier<'_> {
     fn push_made(&mut self, s: &mut State, ty: Option<TyId>, term: Option<Term>) {
         let term = term.unwrap_or_else(|| self.fresh());
         s.stack.push(V::new(term, ty));
+    }
+
+    /// `v`'s size, if it is a natural of a known one, or a literal.
+    fn size_of(&self, v: &V) -> Option<Size> {
+        if let Term::Lit(k) = v.term
+            && k.is_fixnum()
+            && k.as_fixnum() >= 0
+        {
+            return Some(Size::lit(k.as_fixnum()));
+        }
+        match self.ty_of(v) {
+            Some(Ty::Nat(s)) if !matches!(s, Size::Finite) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// `f` asked of the checker with `facts` as what it knows of sizes: its
+    /// own procedures for them (`size_nonneg`, Fourier–Motzkin), on the
+    /// facts the ways here learned.
+    fn with_facts<T>(&mut self, facts: &[crate::sizes::SizeFact], f: impl FnOnce(&mut Checker) -> T) -> T {
+        let outer = std::mem::replace(&mut self.c.size_facts, facts.to_vec());
+        let r = f(self.c);
+        self.c.size_facts = outer;
+        r
     }
 
     /// The resolved type of `v`, if known.
@@ -1076,8 +1111,13 @@ impl Verifier<'_> {
                 let f = if name == "int-add" { "+" } else { "-" };
                 // Naturals added are a natural, their sizes added, as the
                 // checkers' `+` types them.
-                let ty = match (self.ty_of(&a), self.ty_of(&b), name) {
-                    (Some(Ty::Nat(x)), Some(Ty::Nat(y)), "int-add") => Some(self.c.arena.ty(Ty::Nat(x.add_scaled(&y, 1)))),
+                // as `nat_arith` does, a difference only where what is known
+                // here shows it no less than 0.
+                let ty = match (self.size_of(&a), self.size_of(&b)) {
+                    (Some(x), Some(y)) => match self.with_facts(&s.facts, |c| c.nat_arith(f, &x, &y)) {
+                        Some(n) => Some(self.c.arena.ty(Ty::Nat(n))),
+                        None => Some(int),
+                    },
                     _ => Some(int),
                 };
                 self.push_made(s, ty, Some(Term::App(f, vec![a.term, b.term])));
@@ -1087,7 +1127,12 @@ impl Verifier<'_> {
                 self.holds(&a, int, at);
                 self.holds(&b, int, at);
                 let f = if name == "int-less" { "<" } else { "=" };
-                self.push_made(s, Some(bool_), Some(Term::App(f, vec![a.term, b.term])));
+                let flag = Term::App(f, vec![a.term.clone(), b.term.clone()]);
+                if let (Some(x), Some(y)) = (self.size_of(&a), self.size_of(&b)) {
+                    let rel = if name == "int-less" { crate::ast::Rel::Lt } else { crate::ast::Rel::Eq };
+                    self.relations.push((flag.clone(), rel, x, y));
+                }
+                self.push_made(s, Some(bool_), Some(flag));
             }
             "eq" => {
                 let (b, a) = (self.pop(s, at)?, self.pop(s, at)?);
@@ -1701,6 +1746,27 @@ impl Verifier<'_> {
     /// What a branch on `flag` tells the way where it is true (`yes`) or
     /// false: narrowing, from what the flag's term says it tested.
     fn narrow(&mut self, flag: &Term, yes: bool, s: &mut State) {
+        // An integer test of sizes: what it holding, or not, says of them,
+        // as the checkers' facts (`sizes.rs`'s `rel_facts`).
+        if let Some((_, rel, a, b)) = self.relations.iter().find(|(t, ..)| t == flag).cloned() {
+            use crate::ast::Rel;
+            let ge = |lin: Size| crate::sizes::SizeFact { lin, eq: false };
+            let learned: Vec<crate::sizes::SizeFact> = match (rel, yes) {
+                (Rel::Eq, true) => vec![crate::sizes::SizeFact { lin: a.add_scaled(&b, -1), eq: true }],
+                // Not equal, a natural and 0: the natural at least 1.
+                (Rel::Eq, false) if b == Size::lit(0) => vec![ge(a.plus(-1))],
+                (Rel::Eq, false) if a == Size::lit(0) => vec![ge(b.plus(-1))],
+                (Rel::Eq, false) => Vec::new(),
+                (Rel::Lt, true) => vec![ge(b.add_scaled(&a, -1).plus(-1))],
+                (Rel::Lt, false) => vec![ge(a.add_scaled(&b, -1))],
+                (Rel::Le, true) => vec![ge(b.add_scaled(&a, -1))],
+                (Rel::Le, false) => vec![ge(a.add_scaled(&b, -1).plus(-1))],
+                // (The verifier's tests make no `≠`; `int-eq` false is it.)
+                (Rel::Ne, _) => Vec::new(),
+            };
+            s.facts.extend(learned.into_iter().filter(|f| !matches!(f.lin, Size::Finite)));
+            return;
+        }
         // A predicate's result: what it proves of its arguments, where true
         // and where false, as its type says (the call rule's `ensures`).
         if let Some((_, then, els, args)) = self.proving.iter().find(|(t, ..)| t == flag).cloned() {

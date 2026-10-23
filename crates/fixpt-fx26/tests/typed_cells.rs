@@ -166,8 +166,6 @@ fn a_verified_word_changed_is_refused() {
 /// free name the body reaches through `(with %include …)`, recorded at
 /// the binding outside (the standard `get`); a functor's result.
 const KNOWN_FAILURES: &[(&str, usize)] = &[
-    ("bidirectional/arrow-star-groups.fx", 4),
-    ("bidirectional/arrow-star-module.fx", 2),
     ("bloblet/flat-bounds.fx", 1),
     ("bloblet/flat-unsized.fx", 2),
     ("modules/include-abstract.fx", 1),
@@ -209,7 +207,7 @@ fn every_test_programs_words_verified() {
     }
     // A ratchet: what verifies now, as the verifier grows; and no failure
     // outside those the verifier's missing rules explain.
-    assert!(t.verified >= 1043, "fewer words verify: {}", t.verified);
+    assert!(t.verified >= 1049, "fewer words verify: {}", t.verified);
     let mut by: BTreeMap<&str, usize> = BTreeMap::new();
     for f in &t.failed {
         *by.entry(f.split(':').next().unwrap_or("")).or_default() += 1;

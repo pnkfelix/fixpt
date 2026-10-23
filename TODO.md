@@ -2727,9 +2727,9 @@ is set at the write or after it.
 compiler's words, and a verifier, as Hoare logic. The goal of this stage
 (the user's): every word of every program the checker accepts verifies,
 by type assertions, before propositions beyond types are built on it.
-1,043 of 1,094 test program words verify (`tests/typed_cells.rs`), none
-with a VC open, 13 relative to named assumptions; 403 mutants of
-verified words are all refused; 10 type VCs fail, in 5 programs, each
+1,049 of 1,094 test program words verify (`tests/typed_cells.rs`), none
+with a VC open, 13 relative to named assumptions; 404 mutants of
+verified words are all refused; 4 type VCs fail, in 3 programs, each
 pinned with its cause (`KNOWN_FAILURES`), none a fault of the checker's
 or the compiler's found so far.
 
@@ -2765,9 +2765,12 @@ Left, most first, with what each needs:
    13), not proved: its private regions are its own by trust.
 3. **Flat data** (`%suffix-ref` and kin, about 20 words; 3 failing VCs, a
    `blobref` under a size binder the checker relates in scope).
-4. **Facts beyond types** (6 failing VCs: `(- n 1)` a `nat` after
-   `(< 0 n)`): keep `0branch`'s facts as propositions, the linear ones to
-   Fourier–Motzkin (`sizes.rs`'s `refuted_below`).
+4. ~~**Size facts**~~ (done 2026-10-22): the verifier's state keeps the
+   checkers' size facts, learned at a `0branch` on `int-eq` or
+   `int-less` of sizes, joined as every way in has them, and asked of the
+   checker's own procedures (`nat_arith`, `size_nonneg`, Fourier–Motzkin)
+   with the state's facts in place. Propositions beyond the checkers'
+   facts are the next stage (`requires`, `ensures`).
 5. A few words still without certificates (a `vsubr`'s `list`, some
    lambdas), `certify-length`'s instantiation.
 Then the next stage: `requires` and `ensures` in procedure types, latent
