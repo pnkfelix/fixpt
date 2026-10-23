@@ -12,7 +12,7 @@
 
 use crate::ast::{Effect, Size, Ty, TyId};
 use crate::check::Checker;
-use fixpt_heap::layout::cellular::{operands, CLOSURE_WORD, GLOBAL_VALUE, PRIMITIVES, ROUTINES, WORD_CELL0};
+use fixpt_heap::layout::cellular::{operands, CLOSURE_FREE0, CLOSURE_WORD, GLOBAL_VALUE, PRIMITIVES, ROUTINES, WORD_CELL0};
 use fixpt_heap::{Heap, ObjType, Value};
 use std::collections::HashMap;
 
@@ -63,7 +63,7 @@ pub enum Prop {
 pub struct Cert {
     /// The binders of a polymorphic value's word (a `plambda`'s): its
     /// types are under them, and a closure over it is of a `poly` type.
-    pub poly: Vec<(crate::ast::DVar, crate::ast::Kind)>,
+    pub poly: Vec<Vec<(crate::ast::DVar, crate::ast::Kind)>>,
     pub params: Vec<TyId>,
     pub frees: Vec<TyId>,
     pub result: Option<TyId>,
@@ -157,6 +157,11 @@ impl V {
 #[derive(Clone, Debug)]
 struct State {
     stack: Vec<V>,
+    /// Closures made with a placeholder for a free value (a `letrec`'s, `#f`
+    /// for a sibling not made yet): each closure's term, the free value,
+    /// and the type it must be given (by `field!`) before the closure is
+    /// used.
+    pending: Vec<(Term, usize, TyId)>,
 }
 
 /// One instruction: where its cell is, its routine's name (or `None`, a
@@ -199,11 +204,23 @@ impl Verifier<'_> {
     /// A VC: `v` is of type `t`. A literal is looked at; anything else is
     /// within `t` by subtyping.
     fn holds(&mut self, v: &V, t: TyId, what: &str) {
+        match self.fits(v, t) {
+            Some(true) => self.out.discharged += 1,
+            Some(false) => {
+                let msg = format!("{what}: {} is not within {}", self.show(v.ty.expect("known")), self.show(t));
+                self.out.failed.push(msg);
+            }
+            None => self.out.open.push(format!("{what}: (: {:?} {})", v.term, self.show(t))),
+        }
+    }
+
+    /// Whether `v` is of type `t`: a literal looked at, anything else by
+    /// subtyping; none if `v`'s type is not known.
+    fn fits(&mut self, v: &V, t: TyId) -> Option<bool> {
         if let Term::Lit(x) = v.term
             && self.inhabits(x, t)
         {
-            self.out.discharged += 1;
-            return;
+            return Some(true);
         }
         // A `poly`'s value, made of a value checked against its body with
         // its binders held abstract (no `plambda`): of the body's type.
@@ -212,14 +229,7 @@ impl Verifier<'_> {
             Ty::Poly { body, .. } if !is_poly(self, v.ty) => body,
             _ => t,
         };
-        match v.ty {
-            Some(s) if self.c.subtype(s, t) => self.out.discharged += 1,
-            Some(s) => {
-                let msg = format!("{what}: {} is not within {}", self.show(s), self.show(t));
-                self.out.failed.push(msg);
-            }
-            None => self.out.open.push(format!("{what}: (: {:?} {})", v.term, self.show(t))),
-        }
+        v.ty.map(|s| self.c.subtype(s, t))
     }
 
     /// Whether literal `x` is of type `t`, by looking at it.
@@ -283,10 +293,12 @@ impl Verifier<'_> {
         let (result, effect) = (cert.result?, cert.effect.clone()?);
         let conv = self.c.conv_default;
         let subr = self.c.arena.ty(Ty::Subr { conv, effect, params: cert.params.clone(), result });
-        Some(match cert.poly.is_empty() {
-            true => subr,
-            false => self.c.arena.ty(Ty::Poly { binders: cert.poly.clone(), body: subr }),
-        })
+        // Under each level's binders, the innermost first.
+        let mut t = subr;
+        for level in cert.poly.iter().rev() {
+            t = self.c.arena.ty(Ty::Poly { binders: level.clone(), body: t });
+        }
+        Some(t)
     }
 
     fn decode(&mut self, word: Value) -> Vec<Ins> {
@@ -315,6 +327,7 @@ impl Verifier<'_> {
         }
         let entry = State {
             stack: cert.params.iter().enumerate().map(|(i, t)| V::new(Term::Slot(i), Some(*t))).collect(),
+            pending: Vec::new(),
         };
         let notes: HashMap<usize, &Vec<Prop>> = cert.notes.iter().map(|(k, p)| (*k, p)).collect();
         // The states waiting at each later cell, from branches to it.
@@ -420,6 +433,10 @@ impl Verifier<'_> {
             self.out.failed.push(format!("{at}: the ways in leave the stack at different heights"));
             return None;
         }
+        if arriving.iter().any(|s| s.pending != first.pending) {
+            self.out.failed.push(format!("{at}: the ways in leave different closures unfinished"));
+            return None;
+        }
         let mut stack = Vec::new();
         for (i, v) in first.stack.iter().enumerate() {
             if arriving.iter().all(|s| s.stack[i] == *v) {
@@ -431,7 +448,7 @@ impl Verifier<'_> {
                 return None;
             }
         }
-        Some(State { stack })
+        Some(State { stack, pending: first.pending.clone() })
     }
 
     /// The state at a cell with an assertion: each way in must establish
@@ -464,7 +481,7 @@ impl Verifier<'_> {
                 }
             }
         }
-        self.join(&ways, at).unwrap_or(State { stack: Vec::new() })
+        self.join(&ways, at).unwrap_or(State { stack: Vec::new(), pending: Vec::new() })
     }
 
     fn pop(&mut self, s: &mut State, at: &str) -> Result<V, ()> {
@@ -494,6 +511,13 @@ impl Verifier<'_> {
     fn step(&mut self, name: &'static str, ops: &[Value], s: &mut State, cert: &Cert, at: &str, entry: &State, here: usize, waiting: &mut HashMap<usize, Vec<State>>) -> Result<Option<State>, ()> {
         let int = self.c.int;
         let bool_ = self.c.bool_;
+        // While a closure is unfinished, only what finishes a `letrec`'s
+        // group: no closure may run, or be kept anywhere it could be found,
+        // with a free value still owed.
+        if !s.pending.is_empty() && !matches!(name, "slot" | "lit" | "drop" | "closure" | "field!") {
+            self.out.failed.push(format!("{at}: a closure is used before its free values are all given"));
+            return Err(());
+        }
         match name {
             "lit" => {
                 let ty = self.lit_type(ops[0]);
@@ -628,15 +652,22 @@ impl Verifier<'_> {
                     vals.push(self.pop(s, at)?);
                 }
                 vals.reverse();
-                for (v, t) in vals.iter().zip(&callee.frees) {
-                    self.holds(v, *t, at);
-                }
                 if name == "nclosure" {
                     self.out.stopped = Some("nclosure (the native convention)".into());
                     return Err(());
                 }
+                let made = self.fresh();
+                for (j, (v, t)) in vals.iter().zip(&callee.frees).enumerate() {
+                    // A placeholder, `#f` where it does not fit: the free
+                    // value is owed, to be given before the closure is used.
+                    if v.term == Term::Lit(Value::FALSE) && self.fits(v, *t) != Some(true) {
+                        s.pending.push((made.clone(), j, *t));
+                    } else {
+                        self.holds(v, *t, at);
+                    }
+                }
                 let ty = self.subr_of(&callee);
-                self.push_made(s, ty, None);
+                self.push_made(s, ty, Some(made));
             }
             "call" | "tcall" | "tailcall" | "ttailcall" => {
                 let n = ops[0].as_fixnum() as usize;
@@ -720,6 +751,35 @@ impl Verifier<'_> {
                     waiting.entry(to).or_default().push(taken);
                 }
                 return Ok(rest);
+            }
+            "field!" => {
+                // ( x obj k -- ), `k` a literal.
+                let (k, o, x) = (self.pop(s, at)?, self.pop(s, at)?, self.pop(s, at)?);
+                let Term::Lit(k) = k.term else {
+                    self.out.stopped = Some("field! at a field not known".into());
+                    return Err(());
+                };
+                let k = k.as_fixnum() as usize;
+                // A closure's free value owed: given.
+                if let Some(i) = s.pending.iter().position(|(c, j, _)| *c == o.term && CLOSURE_FREE0 + *j == k) {
+                    let (_, _, t) = s.pending.remove(i);
+                    self.holds(&x, t, at);
+                    return Ok(Some(s.clone()));
+                }
+                match self.ty_of(&o) {
+                    Some(Ty::Ref(t, r)) if k == 2 => {
+                        self.holds(&x, t, at);
+                        self.effect = self.effect.union(&Effect::atom(crate::ast::Atom::Write(r)));
+                    }
+                    Some(Ty::Bloblet { fields, frozen: false, region }) if k >= 2 && k - 2 < fields.len() => {
+                        self.holds(&x, fields[k - 2], at);
+                        self.effect = self.effect.union(&Effect::atom(crate::ast::Atom::Write(region)));
+                    }
+                    _ => {
+                        self.out.stopped = Some("field! of what it does not know".into());
+                        return Err(());
+                    }
+                }
             }
             "prim" | "cons" if cert.ops.iter().any(|(k, _, _)| *k == here) => {
                 let (_, op, inst) = cert.ops.iter().find(|(k, _, _)| *k == here).expect("found").clone();
@@ -839,6 +899,26 @@ impl Verifier<'_> {
     /// What a branch on `flag` tells the way where it is true (`yes`) or
     /// false: narrowing, from what the flag's term says it tested.
     fn narrow(&mut self, flag: &Term, yes: bool, s: &mut State) {
+        // A value tested itself: not `#f`, where true.
+        if !matches!(flag, Term::App("eq", _)) {
+            for v in s.stack.iter_mut().filter(|v| v.term == *flag) {
+                let Some(ty) = v.ty else { continue };
+                if let Ty::Union(ms) = self.c.arena.get(self.c.arena.resolve(ty)).clone() {
+                    let is_false = |me: &Self, m: &TyId| matches!(me.c.arena.get(me.c.arena.resolve(*m)), Ty::False);
+                    let (f, rest): (Vec<TyId>, Vec<TyId>) = ms.into_iter().partition(|m| is_false(self, m));
+                    let narrowed = match (yes, &rest[..], f.is_empty()) {
+                        (true, [one], _) => Some(*one),
+                        (true, _, _) => Some(self.c.arena.ty(Ty::Union(rest.clone()))),
+                        (false, _, false) => Some(self.c.arena.ty(Ty::False)),
+                        _ => None,
+                    };
+                    if let Some(n) = narrowed {
+                        v.ty = Some(n);
+                    }
+                }
+            }
+            return;
+        }
         let Term::App("eq", args) = flag else { return };
         let [a, b] = &args[..] else { return };
         match (a, b) {

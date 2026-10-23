@@ -468,6 +468,9 @@ pub struct Checker {
     /// each lambda's free variables' (`NodeFacts::frees`), for typed
     /// cellular code's certificates; off, as it costs every check.
     pub record_types: bool,
+    /// While a chain of `plambda`s (or `poly`s) is checked, with
+    /// `record_types`: the binder levels the next in it is under.
+    pub(crate) poly_chain: HashMap<ExpId, Vec<Vec<(DVar, Kind)>>>,
     /// Where in `env` the globals are: the bindings top-level definitions
     /// made.
     pub(crate) global_slots: HashSet<usize>,
@@ -507,8 +510,9 @@ pub struct NodeFacts {
     pub lambdas: HashMap<ExpId, LambdaSig>,
     /// Each lambda that is a polymorphic value (a `plambda`'s, or one
     /// checked against a `poly`), by its body: the binders its signature's
-    /// types are under. With `record_types`.
-    pub generalized: HashMap<ExpId, Vec<(DVar, Kind)>>,
+    /// types are under, a level for each `poly`, outermost first. With
+    /// `record_types`.
+    pub generalized: HashMap<ExpId, Vec<Vec<(DVar, Kind)>>>,
     /// Each call of a polymorphic operator: what its binders were
     /// instantiated at, in order (`Checker::binders_of`), as checking found
     /// them. With `record_types`.
@@ -833,6 +837,7 @@ impl Checker {
             globals_effects: true,
             record_operands: false,
             record_types: false,
+            poly_chain: HashMap::new(),
             global_slots: HashSet::new(),
             fixed_slots: HashSet::new(),
         };
@@ -1398,13 +1403,36 @@ impl Checker {
         self.broken.retain(|_, (i, _)| *i < mark);
     }
 
-    /// With `record_types`: that `e`, if a lambda, is a polymorphic value,
-    /// its signature under `binders` (`NodeFacts::generalized`).
-    pub(crate) fn note_generalized(&mut self, e: ExpId, binders: &[(DVar, Kind)]) {
-        if self.record_types
-            && let Exp::Lambda { body, .. } = self.arena.exp_at(e)
-        {
-            self.facts.generalized.insert(*body, binders.to_vec());
+    /// With `record_types`: that `owner`, a `plambda` or a value checked
+    /// against a `poly`, binds `binders` over what it makes, a lambda's
+    /// signature (`NodeFacts::generalized`), within the levels its own
+    /// `plambda` or `poly` (`poly_chain`) gave it, outermost first. `deeper`:
+    /// a value checked against a `poly` whose body is another, which it is
+    /// checked against next. Each level hands the chain on to the next, so
+    /// a lambda checked twice is given its levels once.
+    pub(crate) fn note_generalized(&mut self, owner: ExpId, binders: &[(DVar, Kind)], deeper: bool) {
+        if !self.record_types {
+            return;
+        }
+        let mut levels = self.poly_chain.remove(&owner).unwrap_or_default();
+        levels.push(binders.to_vec());
+        match self.arena.exp_at(owner).clone() {
+            Exp::PLambda { body, .. } => match self.arena.exp_at(body).clone() {
+                Exp::PLambda { .. } => {
+                    self.poly_chain.insert(body, levels);
+                }
+                Exp::Lambda { body: b, .. } => {
+                    self.facts.generalized.insert(b, levels);
+                }
+                _ => {}
+            },
+            Exp::Lambda { .. } if deeper => {
+                self.poly_chain.insert(owner, levels);
+            }
+            Exp::Lambda { body: b, .. } => {
+                self.facts.generalized.insert(b, levels);
+            }
+            _ => {}
         }
     }
 
@@ -1852,7 +1880,7 @@ impl Checker {
                 Ok((self.arena.ty(Ty::Subr { conv, effect, params, result }), eff))
             }
             Exp::PLambda { binders, body } => {
-                self.note_generalized(body, &binders);
+                self.note_generalized(e, &binders, false);
                 let (t, eff) = self.synth(body)?;
                 if !self.generalizable(body, &eff) {
                     return Err(FxError::at(span, format!("a `plambda` body must be pure, and this one has {}", self.show_effect(&eff))));

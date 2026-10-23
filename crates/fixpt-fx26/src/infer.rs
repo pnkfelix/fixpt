@@ -161,7 +161,8 @@ impl Checker {
             // body must.
             _ if matches!(expected_ty, Ty::Poly { .. }) && !matches!(self.arena.exp_at(e), Exp::PLambda { .. } | Exp::Let { .. }) => {
                 let Ty::Poly { binders, body } = expected_ty else { unreachable!() };
-                self.note_generalized(e, &binders);
+                let deeper = matches!(self.arena.get(self.arena.resolve(body)), Ty::Poly { .. });
+                self.note_generalized(e, &binders, deeper);
                 let eff = self.check(e, body)?;
                 if !self.generalizable(e, &eff) {
                     return Err(FxError::at(span, format!("a polymorphic value must be pure, and this has {}", self.show_effect(&eff))));
@@ -192,7 +193,7 @@ impl Checker {
                     })
                     .collect();
                 let want = self.subst(want, &map);
-                self.note_generalized(body, &binders);
+                self.note_generalized(e, &binders, false);
                 let eff = self.check(body, want)?;
                 if !self.generalizable(body, &eff) {
                     return Err(FxError::at(span, format!("a `plambda` body must be pure, and this one has {}", self.show_effect(&eff))));
