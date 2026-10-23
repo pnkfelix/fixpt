@@ -363,9 +363,14 @@ impl Checker {
                 }
                 let depth = self.env.len();
                 let named = self.skolems.len();
-                for (n, t) in bound {
-                    let t = self.name_nat(n, t);
-                    self.env.push((n, t));
+                for ((n, t), (_, init)) in bound.into_iter().zip(bindings.iter()) {
+                    let opened_from = self.skolems.len();
+                    let opened = self.name_nat(n, t);
+                    if self.record_types && opened != t {
+                        let vars = self.skolems[opened_from..].to_vec();
+                        self.facts.let_opened.insert(*init, (opened, vars));
+                    }
+                    self.env.push((n, opened));
                 }
                 let r = self.check(body, expected);
                 self.truncate_env(depth);
@@ -476,6 +481,8 @@ impl Checker {
         let span = self.arena.span_of(e);
         let names: Vec<Sym> = params.iter().map(|(n, _)| *n).collect();
         let depth = self.env.len();
+        // Each parameter as bound in the body: `name_nat`'s opening of it.
+        let mut inside: Vec<(TyId, Vec<DVar>)> = Vec::new();
         let named = self.skolems.len();
         let (mut given, mut back): (HashMap<(usize, Sym), TyId>, HashMap<DVar, D>) = (HashMap::new(), HashMap::new());
         for (j, (n, t)) in typed.iter_mut().enumerate() {
@@ -488,7 +495,9 @@ impl Checker {
                 }
             };
             let resolved = self.instantiate_params(resolved, &given);
+            let opened_from = self.skolems.len();
             let bound = self.name_nat(*n, resolved);
+            inside.push((bound, self.skolems[opened_from..].to_vec()));
             self.env.push((*n, bound));
             *t = if back.is_empty() { resolved } else { self.subst(resolved, &back) };
             if let Ty::Module { abs, .. } = self.arena.get(self.arena.resolve(bound)).clone() {
@@ -518,7 +527,7 @@ impl Checker {
         self.skolems.truncate(named);
         let (result, latent) = r?;
         if self.record_types {
-            let sig = crate::check::LambdaSig { params: typed.clone(), frees, result, effect: latent.clone() };
+            let sig = crate::check::LambdaSig { params: typed.clone(), frees, result, effect: latent.clone(), inside };
             self.facts.lambdas.insert(body, sig);
         }
         let t = self.arena.ty(Ty::Subr { conv: self.conv_default, effect: latent, params: typed.iter().map(|(_, t)| *t).collect(), result });

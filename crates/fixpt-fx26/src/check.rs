@@ -494,6 +494,10 @@ pub struct LambdaSig {
     pub frees: Vec<(Sym, TyId)>,
     pub result: TyId,
     pub effect: Effect,
+    /// Each parameter's type as bound in the body (`name_nat`: a `nat`'s
+    /// size named, an array's length, a module's abstract types), with the
+    /// variables that opened, fresh.
+    pub inside: Vec<(TyId, Vec<DVar>)>,
 }
 
 /// What checking proved about expressions, keyed by expression. Lowering
@@ -541,6 +545,10 @@ pub struct NodeFacts {
     /// given has them, which is within the type wanted (`Checker::reshape`).
     /// With `record_types`.
     pub reshape_chosen: HashMap<ExpId, TyId>,
+    /// Each `let` binding opened as it is bound (`name_nat`: an array's
+    /// length named, a module's abstract types), by its init: its type as
+    /// bound, and the variables opened. With `record_types`.
+    pub let_opened: HashMap<ExpId, (TyId, Vec<DVar>)>,
     /// A module's abstract type's conversions, `up-t` and `down-t`, each
     /// the identity on the representation, by its lambda's body: the type
     /// it is bound at, from the representation to the abstract type or
@@ -2029,9 +2037,14 @@ impl Checker {
                 }
                 let depth = self.env.len();
                 let named = self.skolems.len();
-                for (n, t) in bound {
-                    let t = self.name_nat(n, t);
-                    self.env.push((n, t));
+                for ((n, t), (_, init)) in bound.into_iter().zip(bindings.iter()) {
+                    let opened_from = self.skolems.len();
+                    let opened = self.name_nat(n, t);
+                    if self.record_types && opened != t {
+                        let vars = self.skolems[opened_from..].to_vec();
+                        self.facts.let_opened.insert(*init, (opened, vars));
+                    }
+                    self.env.push((n, opened));
                 }
                 let r = self.synth(body);
                 self.truncate_env(depth);

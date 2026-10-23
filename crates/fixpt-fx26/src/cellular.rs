@@ -34,6 +34,12 @@ enum Item {
     /// For typed cellular code: the next cell runs standard operation
     /// `Compiler::ops[k]`, instantiated as it says.
     Op(usize),
+    /// For typed cellular code: before the next cell, slot `Compiler::opens[k]`
+    /// is opened as checking bound it.
+    Open(usize),
+    /// For typed cellular code: a region's scope, `Compiler::regions[k]`'s
+    /// form and variable, starts here (`true`) or has just ended.
+    Region(usize, bool),
     /// For typed cellular code: the data the next cell makes packs abstract
     /// types with witnesses, `Compiler::packs[k]`.
     Pack(usize),
@@ -228,6 +234,10 @@ pub struct Compiler<'a> {
     gens: Vec<Vec<(crate::ast::DVar, crate::ast::Kind)>>,
     packs: Vec<Vec<(crate::ast::DVar, TyId)>>,
     last_packs: Vec<(usize, Vec<(crate::ast::DVar, TyId)>)>,
+    regions: Vec<(crate::ast::RegionForm, crate::ast::DVar)>,
+    opens: Vec<(usize, TyId, Vec<crate::ast::DVar>)>,
+    last_opens: Vec<(usize, usize, TyId, Vec<crate::ast::DVar>)>,
+    last_regions: Vec<(usize, usize, crate::ast::RegionForm, crate::ast::DVar)>,
     last_gens: Vec<(usize, usize, Vec<(crate::ast::DVar, crate::ast::Kind)>)>,
     /// The name of the lambda whose body is compiled, without where it
     /// starts: an inner lambda's word is named within it, `outer/inner@N`.
@@ -378,6 +388,10 @@ impl<'a> Compiler<'a> {
             last_gens: Vec::new(),
             packs: Vec::new(),
             last_packs: Vec::new(),
+            regions: Vec::new(),
+            last_regions: Vec::new(),
+            opens: Vec::new(),
+            last_opens: Vec::new(),
             scope_name: None,
             bind_name: None,
             defining: None,
@@ -445,7 +459,7 @@ impl<'a> Compiler<'a> {
     fn assemble(&mut self, items: &[Item], name: &str) -> R<Value> {
         let size = |i: &Item| match i {
             Item::Cell(_) => 1,
-            Item::Label(_) | Item::Note(_) | Item::Op(_) | Item::Gen(..) | Item::Pack(_) => 0,
+            Item::Label(_) | Item::Note(_) | Item::Op(_) | Item::Gen(..) | Item::Pack(_) | Item::Region(..) | Item::Open(_) => 0,
             Item::Branch(_) | Item::ZBranch(_) => 2,
         };
         let mut at = vec![0i64; self.labels];
@@ -462,7 +476,10 @@ impl<'a> Compiler<'a> {
         self.last_ops.clear();
         self.last_gens.clear();
         self.last_packs.clear();
+        self.last_regions.clear();
+        self.last_opens.clear();
         let mut gen_starts: HashMap<usize, usize> = HashMap::new();
+        let mut region_starts: HashMap<usize, usize> = HashMap::new();
         for i in items {
             match i {
                 Item::Cell(x) => cells.push(*x),
@@ -473,6 +490,19 @@ impl<'a> Compiler<'a> {
                     self.last_ops.push((pos as usize, name, inst));
                 }
                 Item::Pack(k) => self.last_packs.push((pos as usize, self.packs[*k].clone())),
+                Item::Open(k) => {
+                    let (slot, t, vars) = self.opens[*k].clone();
+                    self.last_opens.push((pos as usize, slot, t, vars));
+                }
+                Item::Region(k, true) => {
+                    region_starts.insert(*k, pos as usize);
+                }
+                Item::Region(k, false) => {
+                    if let Some(start) = region_starts.remove(k) {
+                        let (form, r) = self.regions[*k];
+                        self.last_regions.push((start, pos as usize, form, r));
+                    }
+                }
                 Item::Gen(k, true) => {
                     gen_starts.insert(*k, pos as usize);
                 }
@@ -830,15 +860,30 @@ impl<'a> Compiler<'a> {
             // entered (an arena, or a reap), and left with the body's value,
             // which is so not in tail position.
             Exp::LetRegion { form, region, body } => {
+                // Where its scope is, for the verifier.
+                let k = self.certs.is_some().then(|| {
+                    self.regions.push((form, region));
+                    self.regions.len() - 1
+                });
+                if let Some(k) = k {
+                    code.push(Item::Region(k, true));
+                }
                 let Some(enter) = form.enter() else {
                     // A region for analysis only: nothing at run time.
-                    return self.exp(body, e, depth, code, tail);
+                    self.exp(body, e, depth, code, tail)?;
+                    if let Some(k) = k {
+                        code.push(Item::Region(k, false));
+                    }
+                    return Ok(());
                 };
                 let mut inner = e.clone();
                 inner.push((self.c.arena.dvar_name(region), Loc::Slot(depth)));
                 self.prim(code, enter, 0)?;
                 self.exp(body, &inner, depth + 1, code, false)?;
                 self.prim(code, "%region-exit", 2)?;
+                if let Some(k) = k {
+                    code.push(Item::Region(k, false));
+                }
                 self.done(code, tail);
             }
             Exp::If { test, then, els } => {
@@ -1766,6 +1811,15 @@ impl<'a> Compiler<'a> {
             inner.push((*n, Loc::Slot(depth + i)));
         }
         let n = bindings.len();
+        // Each binding opened as checking bound it, said for the verifier.
+        if self.certs.is_some() {
+            for (i, (_, init)) in bindings.iter().enumerate() {
+                if let Some((t, vars)) = self.c.facts.let_opened.get(init).cloned() {
+                    self.opens.push((depth + i, t, vars));
+                    code.push(Item::Open(self.opens.len() - 1));
+                }
+            }
+        }
         self.exp(body, &inner, depth + n, code, tail)?;
         self.unbind(code, depth, n, tail);
         Ok(())
@@ -1998,6 +2052,7 @@ impl<'a> Compiler<'a> {
             ops: self.last_ops.clone(),
             gens: self.last_gens.clone(),
             packs: self.last_packs.clone(),
+            regions: self.last_regions.clone(), opens: self.last_opens.clone(),
             own_ops: self.last_ops.iter().map(|(k, _, _)| *k).collect(),
             ..Default::default()
         };
@@ -2571,8 +2626,13 @@ impl<'a> Compiler<'a> {
         let (Some(ps), Some(fs)) = (params.iter().map(by_name).collect::<Option<Vec<_>>>(), fv.iter().map(by_name).collect::<Option<Vec<_>>>()) else { return };
         let poly = self.c.facts.generalized.get(&body).cloned().unwrap_or_default();
         let conversion = self.c.facts.conversions.get(&body).copied();
+        // Each of the lambda's own parameters as bound inside it; an added
+        // one's, as declared.
+        let inside: Vec<Option<(TyId, Vec<crate::ast::DVar>)>> =
+            params.iter().map(|p| sig.params.iter().position(|(m, _)| m == p).and_then(|k| sig.inside.get(k).cloned())).collect();
         let cert = crate::typed_cells::Cert {
             poly,
+            inside,
             params: ps,
             frees: fs,
             result: Some(sig.result),
@@ -2581,6 +2641,7 @@ impl<'a> Compiler<'a> {
             ops: self.last_ops.clone(),
             gens: self.last_gens.clone(),
             packs: self.last_packs.clone(),
+            regions: self.last_regions.clone(), opens: self.last_opens.clone(),
             conversion,
             own_ops: Vec::new(),
         };
@@ -2945,7 +3006,7 @@ impl<'a> Compiler<'a> {
         }
         let w = self.assemble(&code, "program")?;
         if let Some(certs) = &mut self.certs {
-            certs.words.insert(w.raw(), crate::typed_cells::Cert { notes: self.last_notes.clone(), ops: self.last_ops.clone(), gens: self.last_gens.clone(), packs: self.last_packs.clone(), ..Default::default() });
+            certs.words.insert(w.raw(), crate::typed_cells::Cert { notes: self.last_notes.clone(), ops: self.last_ops.clone(), gens: self.last_gens.clone(), packs: self.last_packs.clone(), regions: self.last_regions.clone(), opens: self.last_opens.clone(), ..Default::default() });
         }
         Ok(w)
     }

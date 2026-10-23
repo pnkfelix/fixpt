@@ -168,13 +168,7 @@ const KNOWN_FAILURES: &[(&str, usize)] = &[
     ("bidirectional/arrow-star-module.fx", 2),
     ("bloblet/flat-bounds.fx", 1),
     ("bloblet/flat-unsized.fx", 2),
-    ("datum/acyclic.fx", 3),
-    ("datum/confirm-length.fx", 1),
     ("modules/include-abstract.fx", 1),
-    ("modules/stack-by-functor.fx", 1),
-    ("run/acyclic-lists.fx", 2),
-    ("run/letfreeze.fx", 1),
-    ("run/well-founded.fx", 1),
 ];
 
 fn programs() -> Vec<(String, String)> {
@@ -213,7 +207,7 @@ fn every_test_programs_words_verified() {
     }
     // A ratchet: what verifies now, as the verifier grows; and no failure
     // outside those the verifier's missing rules explain.
-    assert!(t.verified >= 1007, "fewer words verify: {}", t.verified);
+    assert!(t.verified >= 1028, "fewer words verify: {}", t.verified);
     let mut by: BTreeMap<&str, usize> = BTreeMap::new();
     for f in &t.failed {
         *by.entry(f.split(':').next().unwrap_or("")).or_default() += 1;

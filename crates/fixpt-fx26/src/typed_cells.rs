@@ -65,6 +65,11 @@ pub struct Cert {
     /// types are under them, and a closure over it is of a `poly` type.
     pub poly: Vec<Vec<(crate::ast::DVar, crate::ast::Kind)>>,
     pub params: Vec<TyId>,
+    /// Each parameter as bound inside the word, if not as declared: the
+    /// declared type opened (a `nat`'s size named, an array's length, a
+    /// module's abstract types), with the variables opened, which must be
+    /// fresh: in no other type of the signature.
+    pub inside: Vec<Option<(TyId, Vec<crate::ast::DVar>)>>,
     pub frees: Vec<TyId>,
     pub result: Option<TyId>,
     pub effect: Option<Effect>,
@@ -91,6 +96,15 @@ pub struct Cert {
     /// checked with each witness in its type's place; the data made has the
     /// type with them abstract.
     pub packs: Vec<(usize, Vec<(crate::ast::DVar, TyId)>)>,
+    /// Each region's scope (`letregion`, `letfreeze`, `letrena`,
+    /// `letreap`): its first cell, the cell after its last, its form and
+    /// its variable. Closed, its effects on it are masked and its value
+    /// must not mention it (`letfreeze`: frozen).
+    pub regions: Vec<(usize, usize, crate::ast::RegionForm, crate::ast::DVar)>,
+    /// Before which cell a `let`'s binding, in which slot, is opened as
+    /// checking bound it (an array's length named): its type then, and the
+    /// variables opened, fresh.
+    pub opens: Vec<(usize, usize, TyId, Vec<crate::ast::DVar>)>,
 }
 
 /// The certificates a compilation made: each word's, and each global cell's
@@ -193,7 +207,7 @@ fn marker(op: &str) -> bool {
 
 /// Verify `word` against its certificate in `certs`.
 pub fn verify(c: &mut Checker, heap: &Heap, certs: &Certs, word: Value) -> Outcome {
-    let mut v = Verifier { c, heap, certs, out: Outcome::default(), made: 0, effect: Effect::pure(), proving: Vec::new(), gen_effects: Vec::new() };
+    let mut v = Verifier { c, heap, certs, out: Outcome::default(), made: 0, effect: Effect::pure(), proving: Vec::new(), gen_effects: Vec::new(), frames: Vec::new() };
     match certs.words.get(&word.raw()) {
         Some(cert) => v.word(word, cert),
         None => v.out.stopped = Some("no certificate".into()),
@@ -216,6 +230,9 @@ struct Verifier<'a> {
     /// The effect so far where each `plambda` body being verified started:
     /// the body's own is what is added since, which must be none.
     gen_effects: Vec<Effect>,
+    /// The regions open, innermost last: each one's variable, form, and the
+    /// effect so far where it opened (what is added since is its own).
+    frames: Vec<(crate::ast::DVar, crate::ast::RegionForm, Effect)>,
 }
 
 impl Verifier<'_> {
@@ -364,15 +381,39 @@ impl Verifier<'_> {
         // A dependent procedure's (`(select $k t)`, the abstract type `t` of
         // parameter `k`, a module): seen from inside, each such type is that
         // module's own abstract type, as its body was checked.
-        let given = self.selects(&cert.params);
+        // (Through each parameter as bound inside: a module parameter's
+        // abstract types named for it, `o..t`, as the body was checked.)
+        let bound: Vec<TyId> = cert.params.iter().enumerate().map(|(i, p)| cert.inside.get(i).and_then(|o| o.as_ref()).map_or(*p, |(t, _)| *t)).collect();
+        let given = self.selects(&bound);
+        // The signature as written, before its selects are filled in: what
+        // an opened variable must not be in.
+        let written: Vec<TyId> = cert.params.iter().chain(&cert.frees).chain(cert.result.iter()).copied().collect();
         let mut cert = cert.clone();
         for p in &mut cert.params {
             *p = self.c.instantiate_params(*p, &given);
         }
         cert.result = cert.result.map(|r| self.c.instantiate_params(r, &given));
         let cert = &cert;
+        // Each parameter opened as the body binds it: within its declared
+        // type, the variables opened fresh.
+        let mut slot_types = cert.params.clone();
+        for (i, opened) in cert.inside.iter().enumerate() {
+            let Some((inner, vars)) = opened else { continue };
+            let declared = cert.params[i];
+            let inner = self.c.instantiate_params(*inner, &given);
+            if vars.iter().any(|v| written.iter().any(|t| self.c.mentions_var(*t, *v))) {
+                self.out.failed.push(format!("parameter {i} opened at a variable not fresh"));
+                return;
+            }
+            if !self.c.subtype(inner, declared) {
+                let msg = format!("parameter {i} opened as {}, not within {}", self.show(inner), self.show(declared));
+                self.out.failed.push(msg);
+                return;
+            }
+            slot_types[i] = inner;
+        }
         let entry = State {
-            stack: cert.params.iter().enumerate().map(|(i, t)| V::new(Term::Slot(i), Some(*t))).collect(),
+            stack: slot_types.iter().enumerate().map(|(i, t)| V::new(Term::Slot(i), Some(*t))).collect(),
             pending: Vec::new(),
         };
         let notes: HashMap<usize, &Vec<Prop>> = cert.notes.iter().map(|(k, p)| (*k, p)).collect();
@@ -383,6 +424,11 @@ impl Verifier<'_> {
         while i < code.len() {
             let ins = &code[i];
             i += 1;
+            // The regions that close here: the way out of their bodies.
+            cur = match self.close_regions(cert, ins.at, cur) {
+                Ok(c) => c,
+                Err(()) => return,
+            };
             let mut arriving: Vec<State> = waiting.remove(&ins.at).unwrap_or_default();
             if let Some(s) = cur.take() {
                 arriving.push(s);
@@ -400,8 +446,18 @@ impl Verifier<'_> {
                     None => return,
                 },
             };
-            if self.generalize(cert, ins.at, &mut s, &at).is_err() || self.instances(cert, ins.at, &mut s, &at).is_err() {
+            if self.generalize(cert, ins.at, &mut s, &at).is_err() || self.instances(cert, ins.at, &mut s, &at).is_err() || self.opens(cert, ins.at, &mut s, &at).is_err() {
                 return;
+            }
+            // The regions that open here, the outermost first.
+            // (Among those of one start and end, the certificate lists the
+            // inner first, as their ends are met.)
+            let mut opening: Vec<(usize, &(usize, usize, crate::ast::RegionForm, crate::ast::DVar))> =
+                cert.regions.iter().enumerate().filter(|(_, (start, ..))| *start == ins.at).collect();
+            opening.sort_by_key(|(k, (_, end, ..))| (std::cmp::Reverse(*end), std::cmp::Reverse(*k)));
+            for (_, (_, _, form, r)) in opening {
+                let before = std::mem::replace(&mut self.effect, Effect::pure());
+                self.frames.push((*r, *form, before));
             }
             // A value of a sum with no arm left (every tag tested, and none
             // was it): no way reaches here, so nothing here runs.
@@ -427,6 +483,12 @@ impl Verifier<'_> {
                 Err(()) => return,
             }
         }
+        // Regions whose bodies left by `return` only, closing past the last
+        // cell: their effects masked.
+        let past = code.last().map_or(0, |ins| ins.at + 1 + ins.ops.len());
+        if self.close_regions(cert, past, None).is_err() {
+            return;
+        }
         if cur.is_some() {
             self.out.failed.push("the last cell falls through".into());
         }
@@ -436,6 +498,86 @@ impl Verifier<'_> {
             let msg = format!("effect {} is not within the latent {}", self.c.show_effect(&self.effect), self.c.show_effect(latent));
             self.out.open.push(msg);
         }
+    }
+
+    /// The regions whose scopes end before cell `at`, innermost first, closed
+    /// on `cur`, the way out of their bodies: each one's own effect, its
+    /// atoms on it masked (none may be `comefrom`: no continuation is
+    /// captured into a region that is gone), joined to the effect outside;
+    /// the value its body made closed (`close_value`).
+    fn close_regions(&mut self, cert: &Cert, at_cell: usize, mut cur: Option<State>) -> Result<Option<State>, ()> {
+        let mut ending: Vec<(usize, &(usize, usize, crate::ast::RegionForm, crate::ast::DVar))> =
+            cert.regions.iter().enumerate().filter(|(_, (_, end, ..))| *end == at_cell).collect();
+        ending.sort_by_key(|(k, (start, ..))| (std::cmp::Reverse(*start), *k));
+        for (_, (_, _, _, r)) in ending {
+            let at = format!("cell {at_cell}");
+            let Some((fr, form, before)) = self.frames.pop() else {
+                self.out.failed.push(format!("{at}: a region closes that did not open"));
+                return Err(());
+            };
+            if fr != *r {
+                self.out.failed.push(format!("{at}: regions close out of order"));
+                return Err(());
+            }
+            let own = std::mem::replace(&mut self.effect, before);
+            let region = crate::ast::Region::Var(*r);
+            if own.0.contains(&crate::ast::Atom::Comefrom(region)) {
+                self.out.failed.push(format!("{at}: a continuation captured into a region that closes"));
+                return Err(());
+            }
+            let written = own.0.iter().any(|a| matches!(a, crate::ast::Atom::Write(g) | crate::ast::Atom::Init(g) if *g == region));
+            let masked = Effect(own.0.iter().copied().filter(|a| a.region() != Some(region)).collect());
+            self.effect = self.effect.union(&masked);
+            if let Some(s) = cur.as_mut()
+                && let Some(v) = s.stack.last_mut()
+                && let Some(t) = v.ty
+            {
+                let t = self.close_value(t, *r, form, written, &at)?;
+                v.ty = Some(t);
+                v.made = Some(t);
+            }
+        }
+        Ok(cur)
+    }
+
+    /// A value leaving region `r`'s scope: of a type that does not mention
+    /// it; from a `letfreeze`, one that cannot still write it, `r` frozen
+    /// (`acyclic` if the body wrote nothing in it).
+    fn close_value(&mut self, t: TyId, r: crate::ast::DVar, form: crate::ast::RegionForm, written: bool, at: &str) -> Result<TyId, ()> {
+        let region = crate::ast::Region::Var(r);
+        if let crate::ast::RegionForm::Freeze(into) = form {
+            if self.c.writes_in(t, region) {
+                let msg = format!("{at}: a `letfreeze`'s value that could still write its region: {}", self.show(t));
+                self.out.failed.push(msg);
+                return Err(());
+            }
+            let map = HashMap::from([(r, crate::ast::D::Region(crate::ast::Region::Frozen(into, !written)))]);
+            return Ok(self.c.subst(t, &map));
+        }
+        let mut in_t = std::collections::HashSet::new();
+        self.c.regions_in(t, &mut in_t);
+        if in_t.contains(&region) {
+            let msg = format!("{at}: a value of {} leaves its region's scope", self.show(t));
+            self.out.failed.push(msg);
+            return Err(());
+        }
+        Ok(t)
+    }
+
+    /// A value returned from inside regions still open: closed through
+    /// each, the innermost first, as if their scopes ended here.
+    fn returned(&mut self, v: &V, at: &str) -> Result<V, ()> {
+        let mut v = v.clone();
+        for k in (0..self.frames.len()).rev() {
+            let (r, form, _) = self.frames[k].clone();
+            let region = crate::ast::Region::Var(r);
+            let inside = self.frames[k + 1..].iter().fold(self.effect.clone(), |e, (_, _, b)| e.union(b));
+            let written = inside.0.iter().any(|a| matches!(a, crate::ast::Atom::Write(g) | crate::ast::Atom::Init(g) if *g == region));
+            if let Some(t) = v.ty {
+                v.ty = Some(self.close_value(t, r, form, written, at)?);
+            }
+        }
+        Ok(v)
     }
 
     /// The `plambda` bodies that end before cell `at`, innermost first: the
@@ -478,6 +620,33 @@ impl Verifier<'_> {
         }
         for _ in cert.gens.iter().filter(|(start, _, _)| *start == at_cell) {
             self.gen_effects.push(std::mem::replace(&mut self.effect, Effect::pure()));
+        }
+        Ok(())
+    }
+
+    /// The `let` bindings opened before cell `at`: each slot's value of a
+    /// type with sizes not known (an array's length) taken as one with them
+    /// named, fresh: in no type the signature or the state has. Its type,
+    /// those named `finite`, must hold the value.
+    fn opens(&mut self, cert: &Cert, at_cell: usize, s: &mut State, at: &str) -> Result<(), ()> {
+        for (_, slot, opened, vars) in cert.opens.iter().filter(|(k, ..)| *k == at_cell) {
+            let Some(v) = s.stack.get(*slot).cloned() else {
+                self.out.failed.push(format!("{at}: no slot {slot} to open"));
+                return Err(());
+            };
+            let mut elsewhere: Vec<TyId> = cert.params.iter().chain(&cert.frees).chain(cert.result.iter()).copied().collect();
+            elsewhere.extend(s.stack.iter().filter_map(|w| w.ty));
+            if vars.iter().any(|x| elsewhere.iter().any(|t| self.c.mentions_var(*t, *x))) {
+                self.out.failed.push(format!("{at}: slot {slot} opened at a variable not fresh"));
+                return Err(());
+            }
+            let unnamed: HashMap<crate::ast::DVar, crate::ast::D> = vars.iter().map(|x| (*x, crate::ast::D::Size(Size::Finite))).collect();
+            let unopened = self.c.subst(*opened, &unnamed);
+            self.holds(&v, unopened, at);
+            for w in s.stack.iter_mut().filter(|w| w.term == v.term) {
+                w.ty = Some(*opened);
+                w.made = Some(*opened);
+            }
         }
         Ok(())
     }
@@ -1021,8 +1190,9 @@ impl Verifier<'_> {
                 }
                 self.effect = self.effect.union(&effect);
                 if name.ends_with("tailcall") {
+                    let called = self.returned(&V::new(Term::App("call", vec![f.term]), Some(result)), at)?;
                     match cert.result {
-                        Some(want) => self.holds(&V::new(Term::App("call", vec![f.term]), Some(result)), want, at),
+                        Some(want) => self.holds(&called, want, at),
                         None => self.out.failed.push(format!("{at}: a tail call from a word with no result")),
                     }
                     return Ok(None);
@@ -1031,6 +1201,7 @@ impl Verifier<'_> {
             }
             "return" => {
                 let r = self.pop(s, at)?;
+                let r = self.returned(&r, at)?;
                 match cert.result {
                     Some(want) => self.holds(&r, want, at),
                     None => self.out.failed.push(format!("{at}: a return from a word with no result")),
@@ -1274,8 +1445,35 @@ impl Verifier<'_> {
             "prim" => {
                 let p = ops[0].as_fixnum() as usize;
                 let pname = fixpt_runtime::PRIMITIVES.get(p).map_or("?", |d| d.name);
-                self.out.stopped = Some(format!("prim {pname}"));
-                return Err(());
+                match pname {
+                    // An arena or a reap entered: its place, the region
+                    // open innermost.
+                    "%region-enter" | "%reap-enter" => match self.frames.last() {
+                        Some((r, form, _)) if form.enter() == Some(pname) => {
+                            let place = self.c.arena.ty(Ty::Place(crate::ast::Region::Var(*r)));
+                            self.push_made(s, Some(place), None);
+                        }
+                        _ => {
+                            self.out.failed.push(format!("{at}: {pname} where no such region opens"));
+                            return Err(());
+                        }
+                    },
+                    // `( v place -- v )`: left, keeping the body's value.
+                    "%region-exit" => {
+                        let (v, place) = (self.pop(s, at)?, self.pop(s, at)?);
+                        match (self.ty_of(&place), self.frames.last()) {
+                            (Some(Ty::Place(crate::ast::Region::Var(g))), Some((r, _, _))) if g == *r => s.stack.push(v),
+                            _ => {
+                                self.out.failed.push(format!("{at}: %region-exit of no region open"));
+                                return Err(());
+                            }
+                        }
+                    }
+                    _ => {
+                        self.out.stopped = Some(format!("prim {pname}"));
+                        return Err(());
+                    }
+                }
             }
             other => {
                 self.out.stopped = Some(other.to_string());
@@ -1410,6 +1608,18 @@ impl Verifier<'_> {
                         let Some(ty) = v.ty else { continue };
                         if let Ty::Pair(elem, _, region, true) = self.c.arena.get(self.c.arena.resolve(ty)).clone() {
                             v.ty = Some(self.c.arena.ty(Ty::NList { elem, size: size.clone(), region }));
+                        }
+                    }
+                    continue;
+                }
+                // `(acyclic i)`: argument `i`'s frozen data has no cycle, its
+                // regions acyclic (what `certify-acyclic` then says).
+                if let crate::ast::Prop::Acyclic(i) = p
+                    && let Some(x) = args.get(i).cloned()
+                {
+                    for v in s.stack.iter_mut().filter(|v| v.term == x) {
+                        if let Some(t) = v.ty {
+                            v.ty = Some(self.c.finitized(t));
                         }
                     }
                     continue;
