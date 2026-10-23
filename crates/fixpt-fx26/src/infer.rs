@@ -594,6 +594,15 @@ impl Checker {
         }
     }
 
+    /// `cons` at `e` onto a `nlist`, by its own rule: what `cons` is then
+    /// instantiated at, for the cells' verifier (`Facts::insts`), which
+    /// makes the pair a `nlist` one longer.
+    fn note_nlist_cons(&mut self, e: ExpId, elem: TyId, tail: TyId, region: Region) {
+        if self.record_types {
+            self.facts.insts.insert(e, vec![D::Region(region), D::Type(elem), D::Type(tail)]);
+        }
+    }
+
     fn synth_app_of(&mut self, e: ExpId, fun: ExpId, args: &[ExpId], expected: Option<TyId>) -> R<(TyId, Effect)> {
         // The operator `(with #%fx n)` noted plain where it is, by this rule
         // whether or not the rules below look at the operator itself.
@@ -683,6 +692,7 @@ impl Checker {
                 let tail_ty = self.arena.ty(Ty::NList { elem, size: size.plus(-1), region });
                 let xe = self.check(*x, elem)?;
                 let te = self.check(*tail, tail_ty)?;
+                self.note_nlist_cons(e, elem, tail_ty, region);
                 return Ok((expected.expect("an nlist"), xe.union(&te)));
             }
             if let Exp::Var(v) = self.arena.exp_at(*tail)
@@ -691,6 +701,7 @@ impl Checker {
             {
                 let xe = self.check(*x, elem)?;
                 let (_, te) = self.synth(*tail)?;
+                self.note_nlist_cons(e, elem, t, region);
                 let t = self.arena.ty(Ty::NList { elem, size: size.plus(1), region });
                 return Ok((t, xe.union(&te)));
             }

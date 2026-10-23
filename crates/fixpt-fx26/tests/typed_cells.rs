@@ -14,10 +14,22 @@ fn modules_dir() -> std::path::PathBuf {
     std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs/modules"))
 }
 
+/// The directory a test program named `sub/file.fx` loads files from: its
+/// own.
+fn base_of(name: &str) -> std::path::PathBuf {
+    let sub = name.split('/').next().unwrap_or("modules");
+    std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs")).join(sub)
+}
+
 /// The Rust checker's forms for `text`, its types kept, or why not.
 fn checked(text: &str) -> Result<(Checker, Vec<Top>), String> {
+    checked_in(text, modules_dir())
+}
+
+/// The same, `text` loading files from `base`.
+fn checked_in(text: &str, base: std::path::PathBuf) -> Result<(Checker, Vec<Top>), String> {
     let mut c = Checker::new();
-    c.base_dir = Some(modules_dir());
+    c.base_dir = Some(base);
     c.record_types = true;
     let forms = c.read_in(FileId(0), text).map_err(|e| e.message)?;
     let done = c.declare_ahead(&forms).map_err(|e| e.message)?;
@@ -41,21 +53,46 @@ struct Tally {
     assumed: usize,
     failed: Vec<String>,
     open_examples: Vec<String>,
+    /// Programs the checker refused, and those the compiler did not
+    /// compile, whose words were not verified.
+    refused: usize,
+    uncompiled: usize,
+    /// The words not verified, `program `word``; what of the open VCs and
+    /// stops is theirs, of `KNOWN_GAPS`.
+    unverified: Vec<String>,
+    open_gaps: usize,
+    stopped_gaps: Vec<String>,
+    /// Time spent checking, compiling (with certificates), and verifying.
+    check_time: std::time::Duration,
+    compile_time: std::time::Duration,
+    verify_time: std::time::Duration,
 }
 
 fn verify_program(s: &mut Fx26Session, name: &str, text: &str, t: &mut Tally) {
-    let Ok((mut c, tops)) = checked(text) else { return };
-    fixpt_fx26::syn::set_load_base(Some(modules_dir()));
+    use std::time::Instant;
+    let start = Instant::now();
+    let checked = checked_in(text, base_of(name));
+    t.check_time += start.elapsed();
+    let Ok((mut c, tops)) = checked else {
+        t.refused += 1;
+        return;
+    };
+    fixpt_fx26::syn::set_load_base(Some(base_of(name)));
     s.scheme.scope(|sc| {
         sc.make(|m| {
+            let start = Instant::now();
             let certs = {
                 let mut comp = fixpt_fx26::cellular::Compiler::new(m.heap(), &c, text);
                 comp.certs = Some(Certs::default());
                 if comp.program(&tops).is_err() {
+                    t.uncompiled += 1;
+                    t.compile_time += start.elapsed();
                     return Value::NULL;
                 }
                 comp.certs.take().expect("made")
             };
+            t.compile_time += start.elapsed();
+            let start = Instant::now();
             let mut certs = certs;
             if let Err(why) = certs.settle(&mut c) {
                 t.failed.push(format!("{name}: {why}"));
@@ -63,6 +100,17 @@ fn verify_program(s: &mut Fx26Session, name: &str, text: &str, t: &mut Tally) {
             let heap: &fixpt_heap::Heap = m.heap();
             for raw in certs.words.keys() {
                 let o = verify(&mut c, heap, &certs, Value::from_raw(*raw));
+                // The word, by its name, in what is said of it.
+                let named = heap.bloblet_slot(Value::from_raw(*raw), fixpt_heap::layout::cellular::WORD_NAME);
+                let word = if heap.is_a(named, fixpt_heap::ObjType::Symbol) { heap.symbol_name(named).to_string() } else { "?".into() };
+                let name = &format!("{name} `{word}`");
+                if !o.verified() {
+                    t.unverified.push(name.clone());
+                    if KNOWN_GAPS.contains(&name.as_str()) {
+                        t.open_gaps += o.open.len();
+                        t.stopped_gaps.extend(o.stopped.clone());
+                    }
+                }
                 t.words += 1;
                 t.discharged += o.discharged;
                 t.verified += o.verified() as usize;
@@ -79,6 +127,7 @@ fn verify_program(s: &mut Fx26Session, name: &str, text: &str, t: &mut Tally) {
                 }
                 t.failed.extend(o.failed.iter().map(|f| format!("{name}: {f}")));
             }
+            t.verify_time += start.elapsed();
             Value::NULL
         });
     });
@@ -92,8 +141,8 @@ fn verify_program(s: &mut Fx26Session, name: &str, text: &str, t: &mut Tally) {
 /// Returns how many mutants were made, and those not refused.
 fn mutants(s: &mut Fx26Session, name: &str, text: &str, swaps: &[(&str, &str)], open: bool) -> (usize, Vec<String>) {
     use fixpt_heap::layout::cellular::{operands, routine, ROUTINES, PRIMITIVES, WORD_CELL0};
-    let Ok((mut c, tops)) = checked(text) else { return (0, Vec::new()) };
-    fixpt_fx26::syn::set_load_base(Some(modules_dir()));
+    let Ok((mut c, tops)) = checked_in(text, base_of(name)) else { return (0, Vec::new()) };
+    fixpt_fx26::syn::set_load_base(Some(base_of(name)));
     let (mut made, mut kept) = (0, Vec::new());
     s.scheme.scope(|sc| {
         sc.make(|m| {
@@ -155,11 +204,15 @@ fn a_verified_word_changed_is_refused() {
     assert!(kept.is_empty(), "mutants verified:\n{}", kept.join("\n"));
 }
 
+/// Every test program, by directory, but `specs`, whose programs say
+/// whether they verify (`specifications_as_they_say`).
 fn programs() -> Vec<(String, String)> {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
+    let mut subs: Vec<String> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap()).filter(|e| e.path().is_dir()).map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+    subs.sort();
     let mut out = Vec::new();
-    for sub in ["bidirectional", "bloblet", "control", "run", "pldi89", "datum", "modules"] {
-        let mut names: Vec<_> = std::fs::read_dir(format!("{dir}/{sub}")).unwrap().map(|e| e.unwrap().path()).collect();
+    for sub in subs.iter().filter(|d| *d != "specs") {
+        let mut names: Vec<_> = std::fs::read_dir(format!("{dir}/{sub}")).unwrap().map(|e| e.unwrap().path()).filter(|p| p.extension().is_some_and(|x| x == "fx")).collect();
         names.sort();
         for p in names {
             out.push((format!("{sub}/{}", p.file_name().unwrap().to_string_lossy()), std::fs::read_to_string(&p).unwrap()));
@@ -168,11 +221,120 @@ fn programs() -> Vec<(String, String)> {
     out
 }
 
+/// Every directory of test programs, verified, a survey: per directory,
+/// what verified, stopped, failed or was left open, and the time each
+/// phase took; then the programs slowest to verify. Ignored by default;
+/// `DIRS=a,b` limits it to some, and `FILES=p,q` verifies those files
+/// instead, each word's failures in full.
+#[test]
+#[ignore]
+fn every_directory_surveyed() {
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
+    let only: Option<Vec<String>> = std::env::var("DIRS").ok().map(|d| d.split(',').map(String::from).collect());
+    let mut subs: Vec<String> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap()).filter(|e| e.path().is_dir()).map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+    subs.sort();
+    let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    if let Ok(files) = std::env::var("FILES") {
+        for f in files.split(',') {
+            let mut t = Tally::default();
+            verify_program(&mut s, &format!("modules/{f}"), &std::fs::read_to_string(f).unwrap(), &mut t);
+            eprintln!("{f}: {} of {} words verified, {} open, refused {}", t.verified, t.words, t.open, t.refused);
+            for x in t.failed.iter().chain(&t.open_examples).chain(t.stopped.keys()) {
+                eprintln!("  {x}");
+            }
+        }
+        return;
+    }
+    let mut slow: Vec<(std::time::Duration, std::time::Duration, std::time::Duration, String, usize)> = Vec::new();
+    let mut all = Tally::default();
+    for sub in subs.iter().filter(|d| only.as_ref().is_none_or(|o| o.contains(d))) {
+        let mut names: Vec<_> = std::fs::read_dir(format!("{dir}/{sub}")).unwrap().map(|e| e.unwrap().path()).filter(|p| p.extension().is_some_and(|x| x == "fx")).collect();
+        names.sort();
+        let mut t = Tally::default();
+        for p in &names {
+            let name = format!("{sub}/{}", p.file_name().unwrap().to_string_lossy());
+            let text = std::fs::read_to_string(p).unwrap();
+            let mut one = Tally::default();
+            verify_program(&mut s, &name, &text, &mut one);
+            // A refusal the program does not say it expects: the harness's,
+            // or the checker's own.
+            if one.refused > 0 && !text.starts_with("; Rejected") && !text.starts_with("; Refused") {
+                eprintln!("  refused, unexpectedly: {name}: {}", checked_in(&text, base_of(&name)).err().unwrap_or_default().lines().next().unwrap_or(""));
+            }
+            slow.push((one.verify_time, one.compile_time, one.check_time, name, one.words));
+            t.words += one.words;
+            t.verified += one.verified;
+            t.discharged += one.discharged;
+            t.open += one.open;
+            t.assumed += one.assumed;
+            t.refused += one.refused;
+            t.uncompiled += one.uncompiled;
+            t.check_time += one.check_time;
+            t.compile_time += one.compile_time;
+            t.verify_time += one.verify_time;
+            for (why, n) in one.stopped {
+                *t.stopped.entry(why).or_default() += n;
+            }
+            t.failed.extend(one.failed);
+            t.open_examples.extend(one.open_examples.into_iter().take(1));
+        }
+        eprintln!(
+            "{sub}: {} programs ({} refused, {} not compiled); {} words, {} verified, {} open, {} failed, {} stopped; check {:.2}s, compile {:.2}s, verify {:.2}s",
+            names.len(),
+            t.refused,
+            t.uncompiled,
+            t.words,
+            t.verified,
+            t.open,
+            t.failed.len(),
+            t.stopped.values().sum::<usize>(),
+            t.check_time.as_secs_f64(),
+            t.compile_time.as_secs_f64(),
+            t.verify_time.as_secs_f64()
+        );
+        for (why, n) in &t.stopped {
+            eprintln!("  stopped {n:5}: {why}");
+        }
+        for o in t.open_examples.iter().take(3) {
+            eprintln!("  open: {o}");
+        }
+        for f in t.failed.iter().take(5) {
+            eprintln!("  FAILED {f}");
+        }
+        all.words += t.words;
+        all.verified += t.verified;
+        all.check_time += t.check_time;
+        all.compile_time += t.compile_time;
+        all.verify_time += t.verify_time;
+    }
+    eprintln!("all: {} words, {} verified; check {:.2}s, compile {:.2}s, verify {:.2}s", all.words, all.verified, all.check_time.as_secs_f64(), all.compile_time.as_secs_f64(), all.verify_time.as_secs_f64());
+    slow.sort_by(|a, b| b.0.cmp(&a.0));
+    for (v, c, k, name, words) in slow.iter().take(15) {
+        eprintln!("  slowest: {name}: verify {:.3}s ({words} words), compile {:.3}s, check {:.3}s", v.as_secs_f64(), c.as_secs_f64(), k.as_secs_f64());
+    }
+}
+
+/// The words not yet verified, each a rule the certificate does not yet
+/// carry what it needs for (`TODO.md` §117): a prompt's own transfers of
+/// control that the checker drops where nothing but its tag's variable
+/// reaches the tag (`given`); effects the checker masks at an expression
+/// within a word, not at its boundary (`reuse`); a global redefined at
+/// another type, which the certificate gives one type (`f` and `h`, and
+/// the program's own word).
+const KNOWN_GAPS: &[&str] = &[
+    "native/raw-args.fx `given`",
+    "native/raw-slots.fx `reuse`",
+    "redefine/knot-spin.fx `f`",
+    "redefine/knot-spin.fx `h`",
+    "redefine/rerun-chain.fx `program`",
+];
+
 /// Every word of every test program, verified: each must verify. The
 /// checker accepted these programs, so a VC that fails is the verifier's
 /// mistake or the compiler's; one left open, or a word the verifier stops
 /// in, a rule it lacks. What is assumed (the scheduler's procedures at
-/// their forms' types) is said, not refused.
+/// their forms' types) is said, not refused. The words of `KNOWN_GAPS`, and
+/// only those, do not verify yet.
 #[test]
 fn every_test_programs_words_verified() {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
@@ -180,6 +342,13 @@ fn every_test_programs_words_verified() {
     for (name, text) in programs() {
         verify_program(&mut s, &name, &text, &mut t);
     }
+    t.unverified.sort();
+    assert_eq!(t.unverified, KNOWN_GAPS, "the words not verified are not the known gaps");
+    let gap = |x: &String| KNOWN_GAPS.iter().any(|g| x.starts_with(g));
+    t.failed.retain(|f| !gap(f));
+    t.open_examples.retain(|f| !gap(f));
+    t.open -= t.open_gaps;
+    t.stopped.retain(|why, _| !t.stopped_gaps.contains(why));
     eprintln!("{} words: {} verified, {} VCs discharged, {} open, {} assumed", t.words, t.verified, t.discharged, t.open, t.assumed);
     for (why, n) in &t.stopped {
         eprintln!("  stopped {n:5}: {why}");
@@ -195,7 +364,7 @@ fn every_test_programs_words_verified() {
     assert!(t.failed.is_empty(), "type VCs failed: {}", t.failed.len());
     assert!(t.open == 0, "VCs left open: {}", t.open);
     assert!(t.stopped.is_empty(), "words stopped in: {:?}", t.stopped);
-    assert!(t.verified == t.words && t.words > 1000, "{} of {} words verified", t.verified, t.words);
+    assert!(t.verified + KNOWN_GAPS.len() == t.words && t.words > 5000, "{} of {} words verified", t.verified, t.words);
 }
 
 /// Programs that state propositions (`requires`, `ensures`; the note's

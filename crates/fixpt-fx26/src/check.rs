@@ -1366,33 +1366,30 @@ impl Checker {
         if self.path_narrowed.iter().all(|f| f.dead) {
             return;
         }
-        let may_alias = |w: &Region, r: &Region| !self.regions_distinct(*w, *r) && (w == r || matches!(w, Region::Var(_)) || matches!(r, Region::Var(_)));
         // A closure's body, checked deeper, runs only when it is called,
         // which is the call's effect, out here.
         let depth = self.closure_depth;
-        let killed: Vec<bool> = self
-            .path_narrowed
-            .iter()
-            .map(|f| {
-                if f.dead || f.depth != depth {
-                    return false;
-                }
-                let open: Vec<&Region> = f.regions.iter().filter(|r| !matches!(r, Region::Frozen(..))).collect();
-                !open.is_empty()
-                    && eff.0.iter().any(|a| match a {
-                        Atom::Write(w) | Atom::Init(w) => open.iter().any(|r| may_alias(w, r)),
-                        Atom::Goto(_) | Atom::Comefrom(_) | Atom::Await(_) | Atom::Var(_) | Atom::App(_) => true,
-                        // A process waits at each.
-                        Atom::Send(_) | Atom::Receive(_) => true,
-                        _ => false,
-                    })
-            })
-            .collect();
+        let killed: Vec<bool> = self.path_narrowed.iter().map(|f| !f.dead && f.depth == depth && self.path_killed(&f.regions, eff)).collect();
         for (f, k) in self.path_narrowed.iter_mut().zip(killed) {
             if k {
                 f.dead = true;
             }
         }
+    }
+
+    /// Whether effect `eff` ends a path's fact, the path reading through
+    /// `regions` (`kill_paths`; the cells' verifier's too).
+    pub(crate) fn path_killed(&self, regions: &[Region], eff: &Effect) -> bool {
+        let may_alias = |w: &Region, r: &Region| !self.regions_distinct(*w, *r) && (w == r || matches!(w, Region::Var(_)) || matches!(r, Region::Var(_)));
+        let open: Vec<&Region> = regions.iter().filter(|r| !matches!(r, Region::Frozen(..))).collect();
+        !open.is_empty()
+            && eff.0.iter().any(|a| match a {
+                Atom::Write(w) | Atom::Init(w) => open.iter().any(|r| may_alias(w, r)),
+                Atom::Goto(_) | Atom::Comefrom(_) | Atom::Await(_) | Atom::Var(_) | Atom::App(_) => true,
+                // A process waits at each.
+                Atom::Send(_) | Atom::Receive(_) => true,
+                _ => false,
+            })
     }
 
     /// Type `t` where a value of it is found of one of the shapes in `mask`,

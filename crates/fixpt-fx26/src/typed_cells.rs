@@ -229,6 +229,11 @@ struct State {
     /// What else is known here, of the terms: the word's `requires`, each
     /// branch's condition, each call's `ensures` (§8 of the note).
     props: Vec<Formula<Term>>,
+    /// Paths a test narrowed (`(car x)`, a product's field, from a value):
+    /// each one's term and type, until a step's effect may write a region
+    /// it reads through (`Checker::path_killed`), as the checkers keep
+    /// them.
+    paths: Vec<(Term, TyId)>,
 }
 
 /// One instruction: where its cell is, its routine's name (or `None`, a
@@ -347,7 +352,7 @@ fn marker(op: &str) -> bool {
 
 /// Verify `word` against its certificate in `certs`.
 pub fn verify(c: &mut Checker, heap: &Heap, certs: &Certs, word: Value) -> Outcome {
-    let mut v = Verifier { c, heap, certs, out: Outcome::default(), made: 0, effect: Effect::pure(), proving: Vec::new(), latent_sizes: Vec::new(), gen_effects: Vec::new(), frames: Vec::new(), region_closures: Vec::new(), relations: Vec::new(), nats: Vec::new() };
+    let mut v = Verifier { c, heap, certs, out: Outcome::default(), made: 0, effect: Effect::pure(), proving: Vec::new(), latent_sizes: Vec::new(), joined: Vec::new(), path_reads: Vec::new(), gen_effects: Vec::new(), frames: Vec::new(), region_closures: Vec::new(), relations: Vec::new(), nats: Vec::new() };
     match certs.words.get(&word.raw()) {
         Some(cert) => v.word(word, cert),
         None => v.out.stopped = Some("no certificate".into()),
@@ -370,6 +375,13 @@ struct Verifier<'a> {
     /// Of those, the size facts its relations are, where true and where
     /// false, of its arguments' sizes at the call.
     latent_sizes: Vec<(Term, Vec<crate::sizes::SizeFact>, Vec<crate::sizes::SizeFact>)>,
+    /// The values made where ways join (at an assertion): each one's term,
+    /// and each way's state and value there, for what a branch on it
+    /// learns (`and`'s and `or`'s, as the checkers' rules have it).
+    joined: Vec<(Term, Vec<(State, Term)>)>,
+    /// The paths read (`(car x)`, …, from a value), each one's term, the
+    /// regions it reads through, and the type it was read at.
+    path_reads: Vec<(Term, Vec<crate::ast::Region>, TyId)>,
     /// The effect so far where each `plambda` body being verified started:
     /// the body's own is what is added since, which must be none.
     gen_effects: Vec<Effect>,
@@ -434,11 +446,25 @@ impl Verifier<'_> {
             Ty::Poly { body, .. } if !is_poly(self, v.ty) => body,
             _ => t,
         };
+        let (mut s, mut t) = (v.ty?, t);
+        // A process's body, given the scheduler (`spawn`'s): what it does
+        // to its own place is its own, the rest within the process type's
+        // effect (`Checker::process_effect`), its type the one the process
+        // type stands for.
+        if let Ty::Named { which: crate::check::PROCESS_INDEX, args } = self.c.arena.get(self.c.arena.resolve(t)).clone()
+            && let Ty::Poly { binders, body } = self.c.arena.get(self.c.arena.resolve(s)).clone()
+            && let [(r, crate::ast::Kind::Place)] = binders[..]
+            && let Ty::Subr { conv, effect, params, result, spec } = self.c.arena.get(self.c.arena.resolve(body)).clone()
+        {
+            let effect = self.c.process_effect(crate::ast::Region::Var(r), &effect);
+            let body = self.c.arena.ty(Ty::Subr { conv, effect, params, result, spec });
+            s = self.c.arena.ty(Ty::Poly { binders, body });
+            t = self.c.unfold(crate::check::PROCESS_INDEX, &args);
+        }
         // Two `poly`s over binders of the same kinds (a value checked
         // against the `poly` it is stored as): their bodies compared, the
         // second's binders renamed to the first's, as the checker checks a
         // `plambda` against its signature.
-        let (mut s, mut t) = (v.ty?, t);
         loop {
             match (self.c.arena.get(self.c.arena.resolve(s)).clone(), self.c.arena.get(self.c.arena.resolve(t)).clone()) {
                 (Ty::Poly { binders: a, body: x }, Ty::Poly { binders: b, body: y })
@@ -586,6 +612,7 @@ impl Verifier<'_> {
             facts: Vec::new(),
             variants: Vec::new(),
             props: Vec::new(),
+            paths: Vec::new(),
         };
         let mut entry = entry;
         let slots: Vec<Term> = (0..slot_types.len()).map(Term::Slot).collect();
@@ -647,8 +674,13 @@ impl Verifier<'_> {
                 self.out.stopped = Some("a word run as a cell".into());
                 return;
             };
-            match self.idiom(&code[i - 1..], cert, &mut s, &at, &waiting) {
+            let before = std::mem::replace(&mut self.effect, Effect::pure());
+            let done = self.idiom(&code[i - 1..], cert, &mut s, &at, &waiting);
+            let eff = std::mem::replace(&mut self.effect, before);
+            self.effect = self.effect.union(&eff);
+            match done {
                 Some(Ok(n)) => {
+                    self.forget_paths(&mut s, &eff);
                     i += n - 1;
                     cur = Some(s);
                     continue;
@@ -656,8 +688,13 @@ impl Verifier<'_> {
                 Some(Err(())) => return,
                 None => {}
             }
-            match self.flat(&code[i - 1..], cert, &mut s, &at, &waiting) {
+            let before = std::mem::replace(&mut self.effect, Effect::pure());
+            let done = self.flat(&code[i - 1..], cert, &mut s, &at, &waiting);
+            let eff = std::mem::replace(&mut self.effect, before);
+            self.effect = self.effect.union(&eff);
+            match done {
                 Some(Ok(n)) => {
+                    self.forget_paths(&mut s, &eff);
                     i += n - 1;
                     cur = Some(s);
                     continue;
@@ -665,8 +702,19 @@ impl Verifier<'_> {
                 Some(Err(())) => return,
                 None => {}
             }
-            match self.step(name, &ins.ops, &mut s, cert, &at, &entry, ins.at, &mut waiting) {
-                Ok(Some(next)) => cur = Some(next),
+            // What is known of sizes here, the checker's for what it is
+            // asked (subtyping, a tail's size).
+            let outer = std::mem::replace(&mut self.c.size_facts, s.facts.clone());
+            let before = std::mem::replace(&mut self.effect, Effect::pure());
+            let stepped = self.step(name, &ins.ops, &mut s, cert, &at, &entry, ins.at, &mut waiting);
+            let done = std::mem::replace(&mut self.effect, before);
+            self.effect = self.effect.union(&done);
+            self.c.size_facts = outer;
+            match stepped {
+                Ok(Some(mut next)) => {
+                    self.forget_paths(&mut next, &done);
+                    cur = Some(next)
+                }
                 Ok(None) => {}
                 Err(()) => return,
             }
@@ -929,7 +977,10 @@ impl Verifier<'_> {
                 return Err(());
             }
             let map: HashMap<crate::ast::DVar, crate::ast::D> = kinds.iter().map(|(v, _)| *v).zip(ds.iter().cloned()).collect();
+            // At a cyclic type, what calls through it says `spin`, as the
+            // checkers instantiate (`Checker::spin_for_cyclic`).
             let inst = self.c.subst(inner, &map);
+            let inst = self.c.spin_for_cyclic(inner, inst, &map);
             let top = s.stack.last_mut().expect("there");
             top.ty = Some(inst);
             top.made = Some(inst);
@@ -1301,6 +1352,10 @@ impl Verifier<'_> {
                 stack.push(v.clone());
             } else if arriving.iter().all(|s| s.stack[i].term == v.term && s.stack[i].made == v.made) {
                 stack.push(V { term: v.term.clone(), ty: v.made, made: v.made });
+            } else if let Some(t) = self.widest(arriving.iter().map(|s| &s.stack[i]), &v.term) {
+                // One value, narrowed on some ways: of the type that holds
+                // it on all.
+                stack.push(V::new(v.term.clone(), Some(t)));
             } else {
                 self.out.failed.push(format!("{at}: slot {i} differs on the ways in, and no assertion says what it is"));
                 return None;
@@ -1310,7 +1365,24 @@ impl Verifier<'_> {
         let facts = first.facts.iter().filter(|f| arriving.iter().all(|s| s.facts.iter().any(|g| g.eq == f.eq && g.lin == f.lin))).cloned().collect();
         let variants = first.variants.iter().filter(|v| arriving.iter().all(|s| s.variants.contains(v))).cloned().collect();
         let props = first.props.iter().filter(|p| arriving.iter().all(|s| s.props.contains(p))).cloned().collect();
-        Some(State { stack, pending: first.pending.clone(), facts, variants, props })
+        let paths = first.paths.iter().filter(|p| arriving.iter().all(|s| s.paths.contains(p))).cloned().collect();
+        Some(State { stack, pending: first.pending.clone(), facts, variants, props, paths })
+    }
+
+    /// Of values `vs`, each of term `term`: the type of one that every
+    /// other's is within, if there is one.
+    fn widest<'v>(&mut self, vs: impl Iterator<Item = &'v V>, term: &Term) -> Option<TyId> {
+        let mut widest: Option<TyId> = None;
+        for v in vs {
+            let t = v.ty.filter(|_| v.term == *term)?;
+            widest = match widest {
+                None => Some(t),
+                Some(w) if self.c.subtype(t, w) => Some(w),
+                Some(w) if self.c.subtype(w, t) => Some(t),
+                Some(_) => return None,
+            };
+        }
+        widest
     }
 
     /// The state at a cell with an assertion: each way in must establish
@@ -1325,12 +1397,14 @@ impl Verifier<'_> {
             }
         }
         for s in arriving {
+            let outer = std::mem::replace(&mut self.c.size_facts, s.facts.clone());
             for (i, t) in &named {
                 match s.stack.get(*i).cloned() {
                     Some(v) => self.holds(&v, *t, at),
                     None => self.out.failed.push(format!("{at}: no slot {i}")),
                 }
             }
+            self.c.size_facts = outer;
         }
         // The named slots replaced by what is asserted, so that the ways'
         // values there need not agree.
@@ -1345,7 +1419,13 @@ impl Verifier<'_> {
                 }
             }
         }
-        let mut joined = self.join(&ways, at).unwrap_or(State { stack: Vec::new(), pending: Vec::new(), facts: Vec::new(), variants: Vec::new(), props: Vec::new() });
+        for (i, _, fresh) in &made {
+            let each: Option<Vec<(State, Term)>> = arriving.iter().map(|w| Some((w.clone(), w.stack.get(*i)?.term.clone()))).collect();
+            if let Some(each) = each {
+                self.joined.push((fresh.clone(), each));
+            }
+        }
+        let mut joined = self.join(&ways, at).unwrap_or(State { stack: Vec::new(), pending: Vec::new(), facts: Vec::new(), variants: Vec::new(), props: Vec::new(), paths: Vec::new() });
         // What each way knew of its value, an integer's or a boolean's, a
         // case each: the strongest postcondition of the join, not a least
         // upper bound found (which would be inference).
@@ -1599,21 +1679,23 @@ impl Verifier<'_> {
                         }
                         self.reads(r);
                         let f = if name == "pair-car" { "car" } else { "cdr" };
-                        self.push_made(s, Some(if name == "pair-car" { a } else { b }), Some(Term::App(f, vec![p.term])));
+                        let term = Term::App(f, vec![p.term.clone()]);
+                        let ty = self.read_path(s, &p, &term, Some(if name == "pair-car" { a } else { b }), Some(r));
+                        self.push_made(s, ty, Some(term));
                     }
                     // A list of a known length: a pair if longer than none.
+                    // Its tail one shorter where what is known here shows it
+                    // no shorter than 1 (`Checker::tail_size`).
                     Some(Ty::NList { elem, size, region }) => {
-                        if size.as_lit().is_none_or(|n| n <= 0) {
+                        if matches!(size, Size::Finite) || !self.c.size_nonneg(&size.plus(-1)) {
                             self.out.debts.push(format!("{at}: (not (eq {:?} nil))", p.term));
                         }
                         self.reads(region);
                         let ty = if name == "pair-car" {
                             elem
                         } else {
-                            match size.as_lit() {
-                                Some(n) if n > 0 => self.c.arena.ty(Ty::NList { elem, size: Size::lit(n - 1), region }),
-                                _ => self.c.arena.ty(Ty::NList { elem, size: Size::Finite, region }),
-                            }
+                            let size = self.c.tail_size(&size);
+                            self.c.arena.ty(Ty::NList { elem, size, region })
                         };
                         let f = if name == "pair-car" { "car" } else { "cdr" };
                         self.push_made(s, Some(ty), Some(Term::App(f, vec![p.term])));
@@ -1652,7 +1734,13 @@ impl Verifier<'_> {
                 let k = ops[0].as_fixnum() as usize;
                 let o = self.pop(s, at)?;
                 let ty = self.field_type(&o, k, at)?;
-                self.push_made(s, ty, Some(Term::App("field", vec![Term::Lit(Value::fixnum(k as i64)), o.term])));
+                let term = Term::App("field", vec![Term::Lit(Value::fixnum(k as i64)), o.term.clone()]);
+                // A product's field, a path: nothing writes it.
+                let ty = match self.ty_of(&o) {
+                    Some(Ty::Product(_)) => self.read_path(s, &o, &term, ty, None),
+                    _ => ty,
+                };
+                self.push_made(s, ty, Some(term));
             }
             "closure" | "nclosure" => {
                 let (w, n) = (ops[0], ops[1].as_fixnum() as usize);
@@ -1709,6 +1797,7 @@ impl Verifier<'_> {
                         }
                         let map: HashMap<crate::ast::DVar, crate::ast::D> = kinds.iter().map(|(v, _)| *v).zip(inst.iter().cloned()).collect();
                         let t = self.c.subst(inner, &map);
+                        let t = self.c.spin_for_cyclic(inner, t, &map);
                         Some(self.c.arena.get(self.c.arena.resolve(t)).clone())
                     }
                     (t, _) => t,
@@ -1808,10 +1897,10 @@ impl Verifier<'_> {
                 let (thunk, handler, tag) = (self.pop(s, at)?, self.pop(s, at)?, self.pop(s, at)?);
                 // A `prompt-tag`'s bound on what the body does; an escape-only
                 // tag's, none (`ESCAPE_TAG`), as `synth_prompt` has them.
-                let (answer, payload, effect) = match self.ty_of(&tag) {
-                    Some(Ty::PromptTag { answer, payload, effect, .. }) => (answer, payload, effect),
+                let (answer, payload, bound) = match self.ty_of(&tag) {
+                    Some(Ty::PromptTag { answer, payload, effect, region }) => (answer, payload, Some((effect, region))),
                     Some(Ty::Named { which: crate::check::ESCAPE_TAG_INDEX, args }) => match args[..] {
-                        [crate::ast::D::Type(a), crate::ast::D::Type(h), _] => (a, h, Effect::pure()),
+                        [crate::ast::D::Type(a), crate::ast::D::Type(h), _] => (a, h, None),
                         _ => unreachable!("an escape tag's three descriptions"),
                     },
                     _ => {
@@ -1826,7 +1915,20 @@ impl Verifier<'_> {
                             self.holds(&V::new(Term::App("result", Vec::new()), Some(r)), answer, &format!("{at}: {what}"));
                         }
                         self.holds(&V::new(Term::App("payload", Vec::new()), Some(payload)), hps[0], &format!("{at}: the handler's parameter"));
-                        self.effect = self.effect.union(&te).union(&he).union(&effect);
+                        // What the body does, within the tag's bound and its
+                        // own transfers of control, as `synth_prompt` checks
+                        // it; the prompt's effect, the body's and the
+                        // handler's (its own transfers kept: the checker
+                        // drops them only where nothing else reaches the
+                        // tag).
+                        if let Some((bound, r)) = &bound {
+                            let own = Effect([crate::ast::Atom::Goto(*r), crate::ast::Atom::Comefrom(*r)].into_iter().collect());
+                            let beyond = Effect(te.0.iter().copied().filter(|a| !Effect::atom(*a).within(bound) && !own.0.contains(a)).collect());
+                            if !beyond.is_pure() {
+                                self.out.failed.push(format!("{at}: the prompt's body does {}, beyond its tag's {}", self.c.show_effect(&beyond), self.c.show_effect(bound)));
+                            }
+                        }
+                        self.effect = self.effect.union(&te).union(&he);
                     }
                     _ => {
                         self.out.failed.push(format!("{at}: a prompt's thunk or handler is no procedure of the arity it must be"));
@@ -1935,6 +2037,19 @@ impl Verifier<'_> {
                     });
                 }
                 let kind = vals.remove(0);
+                // Made where a union was expected: as its one member of the
+                // shape made, a product or a sum (members' shapes differ).
+                let own = match self.c.arena.get(self.c.arena.resolve(own)).clone() {
+                    Ty::Union(ms) => {
+                        let shaped = |me: &Self, m: &TyId| match (&kind.term, me.c.arena.get(me.c.arena.resolve(*m))) {
+                            (Term::Lit(k), Ty::Product(_)) => *k == Value::fixnum(37),
+                            (Term::Lit(k), Ty::Sum(_)) => *k == Value::fixnum(36),
+                            _ => false,
+                        };
+                        ms.iter().copied().find(|m| shaped(self, m)).unwrap_or(own)
+                    }
+                    _ => own,
+                };
                 let fields: Option<Vec<TyId>> = match (&kind.term, self.c.arena.get(self.c.arena.resolve(own)).clone()) {
                     (Term::Lit(k), Ty::Product(labels)) if *k == Value::fixnum(37) => Some(labels.iter().map(|(_, t)| *t).collect()),
                     // A module's values, as the type made lists them: its
@@ -2077,6 +2192,15 @@ impl Verifier<'_> {
                     return Ok(None);
                 }
                 let terms: Vec<Term> = args.iter().map(|a| a.term.clone()).collect();
+                // `cons` onto a `nlist` (instantiated so by the checkers' rule
+                // for it): a `nlist` one longer.
+                let result = match self.c.arena.get(self.c.arena.resolve(result)).clone() {
+                    Ty::Pair(a, b, r, _) if op == "cons" => match self.c.arena.get(self.c.arena.resolve(b)).clone() {
+                        Ty::NList { elem, size, region } if region == r && elem == a => self.c.arena.ty(Ty::NList { elem, size: size.plus(1), region }),
+                        _ => result,
+                    },
+                    _ => result,
+                };
                 let vals = args;
                 // A product, a term of the logic's.
                 let made = if op == "*" && terms.len() == 2 { Term::App("*", terms.clone()) } else { self.fresh() };
@@ -2106,6 +2230,31 @@ impl Verifier<'_> {
                             return Err(());
                         }
                     },
+                    // A procedure converted to a convention (`( p k -- p' )`,
+                    // `k` its arity times 4, and 1 for `cellular`, 2 for
+                    // `native`): the same procedure in that convention, as
+                    // `Checker::conversion` types it.
+                    "%fx26-convert" => {
+                        let (k, f) = (self.pop(s, at)?, self.pop(s, at)?);
+                        let to = match constant(&k.term).map(|k| (k / 4, k % 4)) {
+                            Some((n, 1)) => (n, crate::ast::Conv::Cellular),
+                            Some((n, 2)) => (n, crate::ast::Conv::Native),
+                            _ => {
+                                self.out.failed.push(format!("{at}: a conversion to no convention"));
+                                return Err(());
+                            }
+                        };
+                        match self.ty_of(&f) {
+                            Some(Ty::Subr { effect, params, result, spec, .. }) if params.len() as i128 == to.0 => {
+                                let t = self.c.arena.ty(Ty::Subr { conv: to.1, effect, params, result, spec });
+                                self.push_made(s, Some(t), None);
+                            }
+                            _ => {
+                                self.out.failed.push(format!("{at}: a conversion of no procedure of {} arguments", to.0));
+                                return Err(());
+                            }
+                        }
+                    }
                     // An `rlambda`'s closure, made in a place: `( place fv … w
                     // -- c )`, as `closure`'s, its type's latent effect
                     // reading the place's region (calling it reads the
@@ -2201,6 +2350,39 @@ impl Verifier<'_> {
                         }
                         self.push_made(s, Some(want), None);
                     }
+                    // `append`'s and `string-append`'s operations, of the list
+                    // of their arguments: the lists' elements in one list,
+                    // in the lists' region, each list but the last copied
+                    // there; the strings', one string.
+                    "%fx26-append-list" | "%fx26-string-append-list" => {
+                        let v = self.pop(s, at)?;
+                        let elem = |me: &Self, t: TyId| match me.c.arena.get(me.c.arena.resolve(t)).clone() {
+                            Ty::Pair(e, _, r, true) | Ty::NList { elem: e, region: r, .. } => Some((Some(e), r)),
+                            Ty::Nil => Some((None, crate::ast::Region::Frozen(None, true))),
+                            _ => None,
+                        };
+                        let Some((each, q)) = v.ty.and_then(|t| elem(self, t)) else {
+                            self.out.failed.push(format!("{at}: {pname} of no list"));
+                            return Err(());
+                        };
+                        self.reads(q);
+                        let string = self.c.string;
+                        let made = if pname == "%fx26-string-append-list" {
+                            if let Some(e) = each {
+                                self.holds(&V::new(Term::App("element", vec![v.term.clone()]), Some(e)), string, at);
+                            }
+                            string
+                        } else {
+                            let Some((Some(_), r)) = each.and_then(|e| elem(self, e)) else {
+                                self.out.failed.push(format!("{at}: {pname} of no list of lists"));
+                                return Err(());
+                            };
+                            self.reads(r);
+                            self.effect = self.effect.union(&Effect::atom(crate::ast::Atom::Alloc(r)));
+                            each.expect("a list")
+                        };
+                        self.push_made(s, Some(made), None);
+                    }
                     // A procedure of one list made a `vsubr`, which gives it
                     // the list of its arguments: `(vsubr e t r)` is
                     // `(subr e ((listof t acyclic)) r)`.
@@ -2255,32 +2437,73 @@ impl Verifier<'_> {
         if then.is_empty() && els.is_empty() {
             return;
         }
-        let sizes = |v: &Self, props: &[crate::ast::Prop]| -> Vec<crate::sizes::SizeFact> {
-            use crate::ast::{Prop, Term as T};
-            let size = |t: &T| -> Option<Size> {
-                let s = match t {
-                    T::Param(i) => v.size_of(args.get(*i)?)?,
-                    T::Lit(k) => Size::lit(*k),
-                    T::Length(i) => match v.ty_of(args.get(*i)?)? {
-                        Ty::NList { size, .. } => size,
-                        _ => return None,
-                    },
-                };
-                matches!(s, Size::Lin { .. }).then_some(s)
-            };
-            props
-                .iter()
-                .filter_map(|p| match p {
-                    Prop::Rel { op, a, b } => crate::sizes::rel_fact(*op, &size(a)?, &size(b)?),
-                    _ => None,
-                })
-                .collect()
-        };
-        let (yes, no) = (sizes(self, &then), sizes(self, &els));
+        let (yes, no) = (self.latent_sizes_of(&then, args), self.latent_sizes_of(&els, args));
         if !yes.is_empty() || !no.is_empty() {
             self.latent_sizes.push((made.clone(), yes, no));
         }
         self.proving.push((made.clone(), then, els, args.iter().map(|a| a.term.clone()).collect()));
+    }
+
+    /// The paths' facts of `s` that effect `eff`, a step's, may end.
+    fn forget_paths(&self, s: &mut State, eff: &Effect) {
+        let reads = &self.path_reads;
+        s.paths.retain(|(t, _)| reads.iter().find(|(p, ..)| p == t).is_some_and(|(_, regions, _)| !self.c.path_killed(regions, eff)));
+    }
+
+    /// Path `term`, read from `base` (through region `own`, a pair's) at
+    /// type `ty`: noted a path if `base` is a value read from a slot, or a
+    /// path; its type as a test there narrowed it, if one did.
+    fn read_path(&mut self, s: &State, base: &V, term: &Term, ty: Option<TyId>, own: Option<crate::ast::Region>) -> Option<TyId> {
+        let mut regions = match &base.term {
+            Term::Slot(_) => Vec::new(),
+            t => match self.path_reads.iter().find(|(p, ..)| p == t) {
+                Some((_, regions, _)) => regions.clone(),
+                None => return ty,
+            },
+        };
+        regions.extend(own);
+        if let Some(t) = ty
+            && !self.path_reads.iter().any(|(p, ..)| p == term)
+        {
+            self.path_reads.push((term.clone(), regions, t));
+        }
+        s.paths.iter().find(|(p, _)| p == term).map(|(_, t)| *t).or(ty)
+    }
+
+    /// Path `term`'s fact in `s`, if it is a path, narrowed by `f`.
+    fn narrow_path(&mut self, s: &mut State, term: &Term, f: impl Fn(&mut Checker, TyId) -> Option<TyId>) {
+        let Some((_, _, made)) = self.path_reads.iter().find(|(p, ..)| p == term).cloned() else { return };
+        let k = s.paths.iter().position(|(p, _)| p == term);
+        let now = k.map_or(made, |k| s.paths[k].1);
+        let Some(t) = f(self.c, now) else { return };
+        match k {
+            Some(k) => s.paths[k].1 = t,
+            None => s.paths.push((term.clone(), t)),
+        }
+    }
+
+    /// The size facts the relations among `props` are, of `args`' sizes
+    /// (`sizes::rel_fact`): a natural's, a `nlist`'s length, a literal.
+    fn latent_sizes_of(&self, props: &[crate::ast::Prop], args: &[V]) -> Vec<crate::sizes::SizeFact> {
+        use crate::ast::{Prop, Term as T};
+        let size = |t: &T| -> Option<Size> {
+            let s = match t {
+                T::Param(i) => self.size_of(args.get(*i)?)?,
+                T::Lit(k) => Size::lit(*k),
+                T::Length(i) => match self.ty_of(args.get(*i)?)? {
+                    Ty::NList { size, .. } => size,
+                    _ => return None,
+                },
+            };
+            matches!(s, Size::Lin { .. }).then_some(s)
+        };
+        props
+            .iter()
+            .filter_map(|p| match p {
+                Prop::Rel { op, a, b } => crate::sizes::rel_fact(*op, &size(a)?, &size(b)?),
+                _ => None,
+            })
+            .collect()
     }
 
     /// Standard operation `op`'s specification, if it has one.
@@ -2301,7 +2524,8 @@ impl Verifier<'_> {
             _ if own => inner,
             k if k == inst.len() => {
                 let map: HashMap<crate::ast::DVar, crate::ast::D> = kinds.iter().map(|(v, _)| *v).zip(inst.iter().cloned()).collect();
-                self.c.subst(inner, &map)
+                let t = self.c.subst(inner, &map);
+                self.c.spin_for_cyclic(inner, t, &map)
             }
             _ => return None,
         };
@@ -2396,6 +2620,33 @@ impl Verifier<'_> {
     /// What a branch on `flag` tells the way where it is true (`yes`) or
     /// false: narrowing, from what the flag's term says it tested.
     fn narrow(&mut self, flag: &Term, yes: bool, s: &mut State) {
+        // A value the ways joined to make: what every way that may have made
+        // it true (`yes`), or false, learned of it there.
+        if let Some((_, ways)) = self.joined.iter().find(|(t, _)| t == flag).cloned() {
+            let mut learned = Vec::new();
+            for (mut w, v) in ways {
+                if matches!(v, Term::Lit(x) if x.is_false() == yes) {
+                    continue;
+                }
+                self.narrow(&v, yes, &mut w);
+                learned.push(w);
+            }
+            let Some(first) = learned.first() else { return };
+            let has = |w: &State, f: &crate::sizes::SizeFact| w.facts.iter().any(|g| g.eq == f.eq && g.lin == f.lin);
+            let facts: Vec<crate::sizes::SizeFact> = first.facts.iter().filter(|f| learned.iter().all(|w| has(w, f)) && !has(s, f)).cloned().collect();
+            s.facts.extend(facts);
+            for v in s.stack.iter_mut() {
+                let tys: Option<Vec<TyId>> = learned.iter().map(|w| w.stack.iter().find(|x| x.term == v.term).and_then(|x| x.ty)).collect();
+                if let (Some(tys), Some(now)) = (tys, v.ty)
+                    && tys.iter().all(|t| *t == tys[0])
+                    && tys[0] != now
+                    && self.c.subtype(tys[0], now)
+                {
+                    v.ty = Some(tys[0]);
+                }
+            }
+            return;
+        }
         // An integer test of sizes: what it holding, or not, says of them,
         // as the checkers' facts (`sizes.rs`'s `rel_facts`).
         if let Some((_, rel, a, b)) = self.relations.iter().find(|(t, ..)| t == flag).cloned() {
@@ -2469,6 +2720,10 @@ impl Verifier<'_> {
                 }
                 let crate::ast::Prop::Shape { param, shape, negated } = p else { continue };
                 let Some(arg) = args.get(param) else { continue };
+                self.narrow_path(s, arg, |c, t| {
+                    let (y, n) = c.narrowed_by(t, 1u32 << shape);
+                    if negated { n } else { y }
+                });
                 for v in s.stack.iter_mut().filter(|v| v.term == *arg) {
                     let Some(ty) = v.ty else { continue };
                     let (y, n) = self.c.narrowed_by(ty, 1u32 << shape);
@@ -2505,9 +2760,18 @@ impl Verifier<'_> {
             // `not`, and the tests that end in one.
             (t, Term::Lit(f)) if f.is_false() => self.narrow(t, !yes, s),
             // `null?`: `nil` where true, and what else it may be where false,
-            // by shape, as the checkers narrow (`narrowed_by`).
+            // by shape, as the checkers narrow (`narrowed_by`); of a `nlist`,
+            // its size 0, or at least 1, as `null?`'s type says.
             (t, Term::Lit(n)) if n.is_null() => {
+                if let (Some(spec), Some(v)) = (self.op_spec("null?"), s.stack.iter().find(|v| v.term == *t).cloned()) {
+                    let props = crate::specs::latent_facts(&spec.ensures, yes);
+                    s.facts.extend(self.latent_sizes_of(&props, &[v]));
+                }
                 let nil = crate::check::SHAPES.iter().position(|(n, _)| *n == "nil").map_or(0, |i| 1u32 << i);
+                self.narrow_path(s, t, |c, ty| {
+                    let (y, n) = c.narrowed_by(ty, nil);
+                    if yes { y } else { n }
+                });
                 for v in s.stack.iter_mut().filter(|v| v.term == *t) {
                     let Some(ty) = v.ty else { continue };
                     let (y, n) = self.c.narrowed_by(ty, nil);

@@ -2803,3 +2803,28 @@ agree on (`every_test_program`). Left:
 - Total correctness: termination, by the size-change check or a ranking
   function in the certificate.
 
+
+## 117. The verifier over every test directory: what is left (the user's, 2026-10-23)
+
+`every_test_programs_words_verified` now verifies every directory's
+programs but `specs` (which has its own test): 5,864 words, 5,859
+verified; 1,700 mutants, all refused. `every_directory_surveyed`
+(ignored; `DIRS=`, `FILES=`) reports each directory, and the time each
+phase takes: the whole corpus checks in about 1.7 s, compiles in 0.1 s
+and verifies in 0.3 s, no program above 0.04 s to verify. The five words
+left (`KNOWN_GAPS`) each want more of the certificate:
+- A prompt's own `goto` and `comefrom` on its tag's region, which the
+  checker drops where nothing but the tag's variable reaches the tag
+  (`reaches_only`), the verifier keeps (`native/raw-args.fx`'s `given`).
+  The certificate could say the prompt delimits them, with what the
+  verifier can check of it (the body's closure's free values' types).
+- Effects the checker masks at an expression inside a word (a `let` whose
+  free variables see no `@heap`), the verifier masks only at the word's
+  boundary, where a global's type may show the region
+  (`native/raw-slots.fx`'s `reuse`). The certificate could carry each
+  masked expression's cells and what it sees, each cell's effect masked
+  by every range around it.
+- A global redefined at another type (`redefine/`): the certificate gives
+  each global cell one type, the last, so a word that stored or read it at
+  the type before fails. Each `global!` and `global` could carry the type
+  the global had there.

@@ -860,10 +860,13 @@ impl<'a> Compiler<'a> {
             }
             // A `proj`, its value's outermost binders instantiated at its
             // arguments: said for the verifier.
-            Exp::Proj { body, args } if self.certs.is_some() && !tail => {
-                self.exp(body, e, depth, code, tail)?;
+            // In tail position too, of a value, not a call: the value, the
+            // note, then the return.
+            Exp::Proj { body, args } if self.certs.is_some() && (!tail || !matches!(self.exp_at(body), Exp::App { .. })) => {
+                self.exp(body, e, depth, code, false)?;
                 self.ops.push(("%proj".to_string(), args));
                 code.push(Item::Op(self.ops.len() - 1));
+                self.done(code, tail);
             }
             Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::Convention { exp: body, .. } => {
                 self.exp(body, e, depth, code, tail)?
@@ -2023,10 +2026,10 @@ impl<'a> Compiler<'a> {
         if let Some(op) = Self::vsubr_list_op(name) {
             let mut body = Vec::new();
             self.op1(&mut body, "slot", Value::fixnum(0));
-            // `list`'s: its copy is the list it gives; its signature its
-            // type's, the `vsubr` unfolded.
-            let signed = if name == "list" { self.standard_vsubr(name) } else { None };
-            if let Some(cert) = &signed
+            // Its signature its type's, the `vsubr` unfolded; `list`'s copy
+            // is the list it gives.
+            let signed = self.standard_vsubr(name);
+            if let Some(cert) = signed.as_ref().filter(|_| name == "list")
                 && let Some(crate::ast::Ty::Named { args, .. }) = cert.vsubr.map(|t| self.c.arena.get(self.c.arena.resolve(t)))
                 && let [_, _, crate::ast::D::Type(r)] = args[..]
             {

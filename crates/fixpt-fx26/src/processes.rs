@@ -364,6 +364,19 @@ impl Checker {
     /// region that is no place (a constant, or the heap), which is the
     /// heap's memory. Not allocating at a region that could be a place: a
     /// process outliving the place would allocate in memory given back.
+    /// What a process's body of latent effect `effect` does beyond its own
+    /// place `own`, which is the process's alone: the rest, with `nondet`
+    /// if it does I/O, which may interleave with another's (the process
+    /// type's effect, `(process M e)`; `spawn`'s, and the cells' verifier's
+    /// of a body passed to the scheduler).
+    pub(crate) fn process_effect(&self, own: Region, effect: &Effect) -> Effect {
+        let mut seen = Effect(effect.0.iter().copied().filter(|a| a.region() != Some(own)).collect());
+        if seen.0.iter().any(|a| matches!(a, Atom::Io(_))) {
+            seen.0.insert(Atom::Nondet);
+        }
+        seen
+    }
+
     pub(crate) fn crossing_atom(&self, a: Atom) -> bool {
         match a {
             Atom::Send(_) | Atom::Init(_) | Atom::Await(_) | Atom::Io(_) | Atom::Spin | Atom::Nondet => true,
@@ -411,6 +424,10 @@ impl Checker {
             ));
         }
         let (t, eff) = self.synth_spawn(e, fun, body, expected)?;
+        if let Some(mut inst) = self.facts.insts.remove(&e) {
+            inst.extend([D::Type(msg), D::Region(at)]);
+            self.note_library_inst(e, inst);
+        }
         Ok((t, eff.union(&we).union(&fe).union(&Effect::atom(Atom::Send(at)))))
     }
 
@@ -452,8 +469,7 @@ impl Checker {
         if let Some(why) = self.untransmissible(msg) {
             return Err(FxError::at(span, format!("a process's messages are copied to it, so they must be transmissible, and a {} is not: {why}", self.show_ty(msg))));
         }
-        let own = Region::Var(r);
-        let mut seen = Effect(effect.0.iter().copied().filter(|a| a.region() != Some(own)).collect());
+        let mut seen = self.process_effect(Region::Var(r), &effect);
         if let Some(a) = seen.0.iter().copied().find(|a| !self.crossing_atom(*a)) {
             return Err(FxError::at(
                 span,
@@ -462,9 +478,6 @@ impl Checker {
                     self.show_effect(&Effect::atom(a))
                 ),
             ));
-        }
-        if seen.0.iter().any(|a| matches!(a, Atom::Io(_))) {
-            seen.0.insert(Atom::Nondet);
         }
         // The address's region: as expected, or one of its own.
         let wanted = expected.and_then(|x| match self.arena.get(self.arena.resolve(x)).clone() {
@@ -483,6 +496,9 @@ impl Checker {
             self.with_as(fun, module, body, None)?;
         }
         let addr = self.arena.ty(Ty::Named { which: ADDR_INDEX, args: vec![D::Type(msg), D::Region(at)] });
+        // The scheduler's `spawn-process` at what this rule found, for the
+        // cells' verifier (`Facts::insts`).
+        self.note_library_inst(e, vec![D::Type(msg), D::Region(at), D::Effect(seen.clone())]);
         seen.0.insert(Atom::Alloc(at));
         Ok((addr, seen))
     }
@@ -529,7 +545,17 @@ impl Checker {
         let one = self.interner.intern("1");
         let two = self.interner.intern("2");
         let t = self.arena.ty(Ty::Product(vec![(one, a), (two, b)]));
+        self.note_library_inst(e, vec![D::Type(a), D::Type(b), D::Effect(e1.clone()), D::Effect(e2.clone())]);
         Ok((t, fe.union(&ge).union(&e1).union(&e2)))
+    }
+
+    /// What the scheduler's procedure called at `e` is instantiated at, by
+    /// the rule that checked the call rather than by instantiation: for the
+    /// cells' verifier, as an ordinary call's is (`Facts::insts`).
+    fn note_library_inst(&mut self, e: ExpId, inst: Vec<D>) {
+        if self.record_types {
+            self.facts.insts.insert(e, inst);
+        }
     }
 
     /// `((with … race2) (lambda () e1) (lambda () e2))`, as `race` makes
@@ -592,6 +618,7 @@ impl Checker {
         if let Exp::With { module, body } = *self.arena.exp_at(fun) {
             self.with_as(fun, module, body, None)?;
         }
+        self.note_library_inst(e, vec![D::Type(t), D::Effect(e1.clone()), D::Effect(e2.clone())]);
         Ok((t, fe.union(&ge).union(&e1).union(&e2).union(&Effect::atom(Atom::Nondet))))
     }
 

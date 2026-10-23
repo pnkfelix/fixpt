@@ -1397,3 +1397,40 @@ The user: "let's attack requires and ensures next" (the design note's
    `k-latents` and `k-ensures-latent`. `check-test-facts.fx` is given
    `check-logic` by the conductor.
 
+
+## The verifier over every test directory (2026-10-23)
+
+1. **The corpus test takes every directory but `specs`**, with a list of
+   the words known not to verify (`KNOWN_GAPS`), which must be exactly
+   the words that do not: one fixed fails the test until it is taken off.
+   The survey test is kept, ignored by default, for timings and for a
+   directory or file at a time.
+2. **Rules added to the verifier, each the checkers' own, shared where
+   the checker has it as a function:** the scheduler's forms (`spawn`,
+   `spawn-monitored`, `par`, `race`) record what they instantiate its
+   procedures at, and a process's body passed to it is within its type
+   with its own place's effects its own (`Checker::process_effect`, which
+   `spawn`'s rule now uses too); a boolean made where ways join narrows a
+   branch on it by what each way that may have made it so learned (`and`,
+   `or`); the size facts in force are the checker's while a cell is
+   verified, so subtyping and a list's tail's size see them; `null?` of a
+   `nlist` gives its size facts, read from `null?`'s type; `cons` onto a
+   `nlist` by the checker's rule is instantiated so, and a `nlist` one
+   longer; a value narrowed on some ways joins at the type holding it on
+   all; paths (`(car x)`, a product's field) keep a test's narrowing until
+   a step's effect may write what they read (`Checker::path_killed`,
+   factored out of `kill_paths`); data made where a union was expected is
+   made as its member of that shape; `%fx26-convert`; `append`'s and
+   `string-append`'s words, signed as `list`'s is, and their operations;
+   `spin` at a cyclic instantiation (`Checker::spin_for_cyclic`); a
+   `prompt`'s effect its body's and handler's, the body checked within
+   its tag's bound, as `synth_prompt` has it (it had added the bound).
+3. **A `proj` of a value in tail position is noted too**: compiled as the
+   value, the note, then the return, the same cells; a `proj` of a call
+   in tail position stays a tail call, unnoted.
+4. **The harness reads each program's loads from its own directory**, so
+   `module-files/` programs load their siblings.
+5. **Refusals are not counted as gaps**: error tests (`; Rejected`, `;;
+   !` and those their own test files expect), fragments whose test binds
+   their free variables, module files meant to be loaded, and arm64's
+   conventions on x86_64.
