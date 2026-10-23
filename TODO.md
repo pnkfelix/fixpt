@@ -2720,3 +2720,34 @@ errors are not logged. If the memory passes, the next step is in
 software: check a word's cells when the front end writes them, and
 again when `assemble_register_word` reads them, to see whether the bit
 is set at the write or after it.
+
+## 115. Typed cellular code: what is left (the user's, 2026-10-22)
+
+`docs/research/typed-cellular-code.md`: certificates for the Rust
+compiler's words, and a verifier, as Hoare logic. 625 of 1,069 test
+program words verify (`tests/typed_cells.rs`). What stops the rest, most
+first, with what each needs:
+1. **Data made** (`prim %make-frozen`, 122 words; `%make-bloblet`,
+   `%make-box`): products, sums, modules and bloblets. A triple for each
+   idiom, the certificate naming the type made.
+2. **Closures over words with no certificate** (119): lambdas whose
+   signature the checker does not keep yet (some module members, lambdas
+   checked through paths other than `synth_lambda_as`).
+3. **Calls of polymorphic values** (46): the call's instantiation in the
+   certificate, as standard operations' are.
+4. **`letrec` and definitions in groups** (`field!`, 42; the failures
+   "`bool` is not within (subr …)"): a closure made over a placeholder,
+   patched once its siblings are. Needs an initialization rule: the
+   placeholder's slot is not read until patched.
+5. **Generative types and sealed modules**: `up-`/`down-` and a module's
+   abstract types are the identity at run time; the words inside see
+   the representation. The certificate says which words are inside.
+6. **Facts beyond types** (TC5): `(- n 1)` is a `nat` after `(< 0 n)`.
+   Keep `0branch`'s facts as propositions and give the linear ones to
+   Fourier–Motzkin (`sizes.rs`'s `refuted_below`).
+7. **Nested `poly`s**, sized lists (`nlist`), `datum`, regions and
+   private effects masked (`letregion`, `letfreeze`), control (prompts,
+   marks, continuations), arrays (`field@`), flat data.
+Then TC6: the certificate kept in the word, the FX-26 compiler making
+the same, and fragments verified on loading.
+

@@ -16,6 +16,7 @@
 //! algorithms — regions, subtyping, masking — by reading them; each place that
 //! does says where from.
 
+pub mod typed_cells;
 pub mod ast;
 
 /// The eager reader, written in FX-26: see the file's own header. A module

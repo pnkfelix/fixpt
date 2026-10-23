@@ -132,6 +132,9 @@ impl Checker {
         let eff = self.check_node(e, expected)?;
         let eff = self.frozen(e, eff)?;
         self.facts.effects.insert(e, eff.clone());
+        if self.record_types {
+            self.facts.types.insert(e, expected);
+        }
         self.kill_paths(&eff);
         Ok(eff)
     }
@@ -157,7 +160,8 @@ impl Checker {
             // `plambda` binding them — so it must be pure, as a `plambda`
             // body must.
             _ if matches!(expected_ty, Ty::Poly { .. }) && !matches!(self.arena.exp_at(e), Exp::PLambda { .. } | Exp::Let { .. }) => {
-                let Ty::Poly { body, .. } = expected_ty else { unreachable!() };
+                let Ty::Poly { binders, body } = expected_ty else { unreachable!() };
+                self.note_generalized(e, &binders);
                 let eff = self.check(e, body)?;
                 if !self.generalizable(e, &eff) {
                     return Err(FxError::at(span, format!("a polymorphic value must be pure, and this has {}", self.show_effect(&eff))));
@@ -188,6 +192,7 @@ impl Checker {
                     })
                     .collect();
                 let want = self.subst(want, &map);
+                self.note_generalized(body, &binders);
                 let eff = self.check(body, want)?;
                 if !self.generalizable(body, &eff) {
                     return Err(FxError::at(span, format!("a `plambda` body must be pure, and this one has {}", self.show_effect(&eff))));
@@ -435,6 +440,10 @@ impl Checker {
     /// The same, with the body checked against `result` when it is known.
     pub(crate) fn synth_lambda_as(&mut self, e: ExpId, hint: Option<&[TyId]>, result: Option<TyId>) -> R<(TyId, Effect)> {
         let Exp::Lambda { params, body } = self.arena.exp_at(e).clone() else { unreachable!() };
+        let frees: Vec<(Sym, TyId)> = match self.record_types {
+            true => self.free_vars(e).into_iter().filter_map(|s| Some((s, self.lookup(s)?))).collect(),
+            false => Vec::new(),
+        };
         let mut typed = Vec::new();
         for (i, (n, t)) in params.iter().enumerate() {
             match (t, hint.and_then(|h| h.get(i))) {
@@ -501,6 +510,10 @@ impl Checker {
         let r = r.and_then(|(t, latent)| Ok((self.forget_nats(named, t, span)?, latent)));
         self.skolems.truncate(named);
         let (result, latent) = r?;
+        if self.record_types {
+            let sig = crate::check::LambdaSig { params: typed.clone(), frees, result, effect: latent.clone() };
+            self.facts.lambdas.insert(body, sig);
+        }
         let t = self.arena.ty(Ty::Subr { conv: self.conv_default, effect: latent, params: typed.iter().map(|(_, t)| *t).collect(), result });
         Ok((t, Effect::pure()))
     }
@@ -1116,6 +1129,11 @@ impl Checker {
         self.check_bounds(&u.kinds, &map, span)?;
         self.check_distinct(&u.kinds, &map, inner, span)?;
         self.check_finite_sizes(&u.kinds, &map, inner, span)?;
+        if self.record_types
+            && let Some(ds) = u.kinds.iter().map(|(v, _)| map.get(v).cloned()).collect::<Option<Vec<D>>>()
+        {
+            self.facts.insts.insert(e, ds);
+        }
         let inst = self.subst(inner, &map);
         let inst = self.spin_for_cyclic(inner, inst, &map);
         Ok((inst, done))

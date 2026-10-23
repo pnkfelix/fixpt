@@ -21,13 +21,19 @@ mod regcode;
 use fixpt_heap::{Heap, Value};
 use fixpt_read::Sym;
 
-/// One item of a word being built: a cell, a label, or a branch to one.
+/// One item of a word being built: a cell, a label, or a branch to one;
+/// or, for typed cellular code, an assertion before the next cell (by its
+/// number in `Compiler::notes`).
 #[derive(Clone, Copy)]
 enum Item {
     Cell(Value),
     Label(usize),
     Branch(usize),
     ZBranch(usize),
+    Note(usize),
+    /// For typed cellular code: the next cell runs standard operation
+    /// `Compiler::ops[k]`, instantiated as it says.
+    Op(usize),
 }
 
 /// Where a variable is.
@@ -203,6 +209,16 @@ pub struct Compiler<'a> {
     twins: Vec<Twin>,
     /// The name the next lambda's word gets, if not where its body starts.
     word_name: Option<String>,
+    /// With certificates wanted (`docs/research/typed-cellular-code.md`):
+    /// each word's, and each global cell's type, made as compiling goes.
+    /// The checker must have kept its types (`Checker::record_types`).
+    pub certs: Option<crate::typed_cells::Certs>,
+    /// The assertions `Item::Note`s name; and those of the word assembled
+    /// last, by cell.
+    notes: Vec<Vec<crate::typed_cells::Prop>>,
+    last_notes: Vec<(usize, Vec<crate::typed_cells::Prop>)>,
+    ops: Vec<(String, Vec<crate::ast::D>)>,
+    last_ops: Vec<(usize, String, Vec<crate::ast::D>)>,
     /// The name of the lambda whose body is compiled, without where it
     /// starts: an inner lambda's word is named within it, `outer/inner@N`.
     scope_name: Option<String>,
@@ -343,6 +359,11 @@ impl<'a> Compiler<'a> {
             module_consts: HashMap::new(),
             consts_now: Vec::new(),
             word_name: None,
+            certs: None,
+            notes: Vec::new(),
+            last_notes: Vec::new(),
+            ops: Vec::new(),
+            last_ops: Vec::new(),
             scope_name: None,
             bind_name: None,
             defining: None,
@@ -410,7 +431,7 @@ impl<'a> Compiler<'a> {
     fn assemble(&mut self, items: &[Item], name: &str) -> R<Value> {
         let size = |i: &Item| match i {
             Item::Cell(_) => 1,
-            Item::Label(_) => 0,
+            Item::Label(_) | Item::Note(_) | Item::Op(_) => 0,
             Item::Branch(_) | Item::ZBranch(_) => 2,
         };
         let mut at = vec![0i64; self.labels];
@@ -423,10 +444,17 @@ impl<'a> Compiler<'a> {
         }
         let mut cells = Vec::new();
         let mut pos = 0;
+        self.last_notes.clear();
+        self.last_ops.clear();
         for i in items {
             match i {
                 Item::Cell(x) => cells.push(*x),
                 Item::Label(_) => {}
+                Item::Note(k) => self.last_notes.push((pos as usize, self.notes[*k].clone())),
+                Item::Op(k) => {
+                    let (name, inst) = self.ops[*k].clone();
+                    self.last_ops.push((pos as usize, name, inst));
+                }
                 Item::Branch(n) | Item::ZBranch(n) => {
                     let r = if matches!(i, Item::Branch(_)) { "branch" } else { "0branch" };
                     cells.push(Value::fixnum(routine(r) as i64));
@@ -620,6 +648,22 @@ impl<'a> Compiler<'a> {
     }
 
     fn exp(&mut self, x: ExpId, e: &Env, depth: usize, code: &mut Vec<Item>, tail: bool) -> R<()> {
+        let start = code.len();
+        self.exp_unnoted(x, e, depth, code, tail)?;
+        // Where ways join inside it, its value's type, asserted where it
+        // ends: what the verifier's join rule cannot give.
+        if self.certs.is_some()
+            && !tail
+            && code[start..].iter().any(|i| matches!(i, Item::Label(_)))
+            && let Some(&t) = self.c.facts.types.get(&x)
+        {
+            self.notes.push(vec![crate::typed_cells::Prop::Has(crate::typed_cells::Term::Slot(depth), t)]);
+            code.push(Item::Note(self.notes.len() - 1));
+        }
+        Ok(())
+    }
+
+    fn exp_unnoted(&mut self, x: ExpId, e: &Env, depth: usize, code: &mut Vec<Item>, tail: bool) -> R<()> {
         // A procedure converted to a convention: made, then given to
         // `%fx26-convert` with what it is converted to.
         if let Some(k) = self.c.facts.conversion_code(x) {
@@ -1150,6 +1194,7 @@ impl<'a> Compiler<'a> {
             _ => format!("{base}@{}:{}", span.file.0, self.loaded_char_at(span)),
         });
         let w = self.assemble(&body_code, &name)?;
+        self.certify_lambda(w, params, body, &fv);
         // For bisecting a fault: with `FIXPT_REG_RANGE=lo-hi,…`, only the
         // lambdas whose bodies start in those character ranges get register
         // code; a body in a module's file (`load-module`) at its file number
@@ -1752,7 +1797,7 @@ impl<'a> Compiler<'a> {
                 self.done(code, tail);
             }
             Some(s) => {
-                self.standard(&s, args, e, depth, code)?;
+                self.standard(x, &s, args, e, depth, code)?;
                 self.done(code, tail);
             }
         }
@@ -1981,7 +2026,7 @@ impl<'a> Compiler<'a> {
         Ok(())
     }
 
-    fn standard(&mut self, name: &str, args: &[ExpId], e: &Env, depth: usize, code: &mut Vec<Item>) -> R<()> {
+    fn standard(&mut self, x: ExpId, name: &str, args: &[ExpId], e: &Env, depth: usize, code: &mut Vec<Item>) -> R<()> {
         if name == "make-array" {
             // (%make-bloblet-filled 0 n fill): the 0 first, under the others.
             self.int(code, 0);
@@ -1989,6 +2034,11 @@ impl<'a> Compiler<'a> {
             return self.prim(code, "%make-bloblet-filled", 3);
         }
         let n = self.exps(args, e, depth, code)?;
+        if self.certs.is_some() {
+            let inst = self.c.facts.insts.get(&x).cloned().unwrap_or_default();
+            self.ops.push((name.to_string(), inst));
+            code.push(Item::Op(self.ops.len() - 1));
+        }
         self.standard_on(name, n, code)
     }
 
@@ -2334,7 +2384,34 @@ impl<'a> Compiler<'a> {
         self.heap.set_bloblet_slot(g, GLOBAL_WRITES, Value::fixnum(0));
         self.genv_index.entry(n).or_default().push((self.genv.len(), Loc::Global(g)));
         self.genv.push((n, Loc::Global(g)));
+        if let Some(certs) = &mut self.certs
+            && let Some(t) = self.c.global_type(n)
+        {
+            certs.globals.insert(g.raw(), t);
+        }
         g
+    }
+
+    /// With certificates wanted: word `w`'s, made from its lambda's
+    /// signature, which the checker kept by its body; each parameter's and
+    /// free value's type by name (a lifted procedure's added parameters are
+    /// the free variables it would have captured).
+    fn certify_lambda(&mut self, w: Value, params: &[Sym], body: ExpId, fv: &[Sym]) {
+        let Some(certs) = &mut self.certs else { return };
+        let Some(sig) = self.c.facts.lambdas.get(&body) else { return };
+        // A name its lambda does not bind or see: a lifted procedure's added
+        // parameter (free in a sibling), or a module's member (seen through
+        // `%include`); its type as another lambda saw it, or a global's.
+        // The certificate is not trusted, so a wrong guess only fails.
+        let c = self.c;
+        let elsewhere = |n: &Sym| {
+            c.facts.lambdas.values().flat_map(|s| s.params.iter().chain(&s.frees)).find(|(m, _)| m == n).map(|(_, t)| *t).or_else(|| c.global_type(*n))
+        };
+        let by_name = |n: &Sym| sig.params.iter().rev().chain(sig.frees.iter()).find(|(m, _)| m == n).map(|(_, t)| *t).or_else(|| elsewhere(n));
+        let (Some(ps), Some(fs)) = (params.iter().map(by_name).collect::<Option<Vec<_>>>(), fv.iter().map(by_name).collect::<Option<Vec<_>>>()) else { return };
+        let poly = self.c.facts.generalized.get(&body).cloned().unwrap_or_default();
+        let cert = crate::typed_cells::Cert { poly, params: ps, frees: fs, result: Some(sig.result), effect: Some(sig.effect.clone()), notes: self.last_notes.clone(), ops: self.last_ops.clone() };
+        certs.words.insert(w.raw(), cert);
     }
 
     /// A literal, under ascriptions: what a module's member may be to be
@@ -2693,13 +2770,17 @@ impl<'a> Compiler<'a> {
             }
             eprintln!("PLAN checked {}, {} differ", self.plan_checks, self.plan_mismatches.len());
         }
-        self.assemble(&code, "program")
+        let w = self.assemble(&code, "program")?;
+        if let Some(certs) = &mut self.certs {
+            certs.words.insert(w.raw(), crate::typed_cells::Cert { notes: self.last_notes.clone(), ops: self.last_ops.clone(), ..Default::default() });
+        }
+        Ok(w)
     }
 }
 
 /// The runtime primitive a standard operation runs as: as `standard.fx`
 /// says, from the lowering's table.
-fn standard_primitive(name: &str) -> Option<&'static str> {
+pub(crate) fn standard_primitive(name: &str) -> Option<&'static str> {
     crate::lower::STANDARD.iter().find(|(fx, _, _)| *fx == name).and_then(|(_, scheme, _)| {
         (*scheme == "%fx26-identity" || fixpt_engine::cellular::runtime_primitive(scheme).is_some()).then_some(*scheme)
     })

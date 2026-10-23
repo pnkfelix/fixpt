@@ -232,11 +232,11 @@ pub struct Checker {
     pub(crate) void: TyId,
     pub(crate) int: TyId,
     pub(crate) bool_: TyId,
-    string: TyId,
+    pub(crate) string: TyId,
     pub(crate) unit: TyId,
-    char_: TyId,
-    f64_: TyId,
-    symbol: TyId,
+    pub(crate) char_: TyId,
+    pub(crate) f64_: TyId,
+    pub(crate) symbol: TyId,
     /// Each type a `define-type` (or `define-datatype`) named that mentions
     /// no variable (`closed_data`): substitution leaves it itself, so that it
     /// keeps its name in what is shown. `datum` is one.
@@ -464,6 +464,10 @@ pub struct Checker {
     /// instantiated (`NodeFacts::operand_types`): for measuring what types
     /// discharge (`crate::debts`); off, as it costs every check.
     pub record_operands: bool,
+    /// Whether to keep each expression's type (`NodeFacts::types`) and
+    /// each lambda's free variables' (`NodeFacts::frees`), for typed
+    /// cellular code's certificates; off, as it costs every check.
+    pub record_types: bool,
     /// Where in `env` the globals are: the bindings top-level definitions
     /// made.
     pub(crate) global_slots: HashSet<usize>,
@@ -474,12 +478,41 @@ pub struct Checker {
     pub(crate) fixed_slots: HashSet<usize>,
 }
 
+/// A lambda's signature, for typed cellular code
+/// (`docs/research/typed-cellular-code.md`): its parameters and its free
+/// variables by name, with their types (a free variable's where the lambda
+/// is made, narrowings included), its result's type and its latent effect.
+#[derive(Clone, Debug)]
+pub struct LambdaSig {
+    pub params: Vec<(Sym, TyId)>,
+    pub frees: Vec<(Sym, TyId)>,
+    pub result: TyId,
+    pub effect: Effect,
+}
+
 /// What checking proved about expressions, keyed by expression. Lowering
 /// turns these into `%fx-note` claims (`crate::lower`).
 #[derive(Clone, Debug, Default)]
 pub struct NodeFacts {
     /// Each expression's effect, after masking.
     pub effects: HashMap<ExpId, Effect>,
+    /// Each expression's type: what it synthesised, or what it was checked
+    /// against. For typed cellular code's certificates
+    /// (`docs/research/typed-cellular-code.md`): a word's signature, and
+    /// the assertions at its branch targets. With `record_types`.
+    pub types: HashMap<ExpId, TyId>,
+    /// Each lambda's signature, by its body (as the compilers make its word
+    /// from its body): its word's precondition and postcondition. With
+    /// `record_types`.
+    pub lambdas: HashMap<ExpId, LambdaSig>,
+    /// Each lambda that is a polymorphic value (a `plambda`'s, or one
+    /// checked against a `poly`), by its body: the binders its signature's
+    /// types are under. With `record_types`.
+    pub generalized: HashMap<ExpId, Vec<(DVar, Kind)>>,
+    /// Each call of a polymorphic operator: what its binders were
+    /// instantiated at, in order (`Checker::binders_of`), as checking found
+    /// them. With `record_types`.
+    pub insts: HashMap<ExpId, Vec<D>>,
     /// With `record_operands`, each application of a polymorphic standard
     /// operation: its arguments' types where instantiating it synthesised
     /// them (`crate::debts`, `TODO.md` §86).
@@ -794,6 +827,7 @@ impl Checker {
             outdated: Vec::new(),
             globals_effects: true,
             record_operands: false,
+            record_types: false,
             global_slots: HashSet::new(),
             fixed_slots: HashSet::new(),
         };
@@ -1359,6 +1393,16 @@ impl Checker {
         self.broken.retain(|_, (i, _)| *i < mark);
     }
 
+    /// With `record_types`: that `e`, if a lambda, is a polymorphic value,
+    /// its signature under `binders` (`NodeFacts::generalized`).
+    pub(crate) fn note_generalized(&mut self, e: ExpId, binders: &[(DVar, Kind)]) {
+        if self.record_types
+            && let Exp::Lambda { body, .. } = self.arena.exp_at(e)
+        {
+            self.facts.generalized.insert(*body, binders.to_vec());
+        }
+    }
+
     /// The global `s`, as defined now, broken: a use of it is an error
     /// saying `why`, until it is defined again.
     pub fn break_global(&mut self, s: Sym, why: String) {
@@ -1383,7 +1427,11 @@ impl Checker {
         let eff = self.frozen(e, eff)?;
         self.facts.effects.insert(e, eff.clone());
         self.kill_paths(&eff);
-        Ok((self.path_typed(e, t), eff))
+        let t = self.path_typed(e, t);
+        if self.record_types {
+            self.facts.types.insert(e, t);
+        }
+        Ok((t, eff))
     }
 
     /// A `letrec`: its group checked at the types declared, then its body,
@@ -1799,6 +1847,7 @@ impl Checker {
                 Ok((self.arena.ty(Ty::Subr { conv, effect, params, result }), eff))
             }
             Exp::PLambda { binders, body } => {
+                self.note_generalized(body, &binders);
                 let (t, eff) = self.synth(body)?;
                 if !self.generalizable(body, &eff) {
                     return Err(FxError::at(span, format!("a `plambda` body must be pure, and this one has {}", self.show_effect(&eff))));

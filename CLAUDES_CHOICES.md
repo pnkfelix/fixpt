@@ -1201,3 +1201,40 @@ the 46 ports were timed on x86_64, one run each, alone, with
    convention runs** (`NATIVE_CONVENTION_AVAILABLE`), so arm64 and
    x86_64 alike; `fx-regs-rsjit-cellcc` where only the hand cellular
    machine would run, which is nowhere today.
+
+## Typed cellular code, begun (2026-10-22)
+
+The user: "See about making a typed cellular code. Try to make it capable
+of be fed into a Hoare logic system (ie I'd like it's propositions to
+start with type assertions as the baseline, but be extensible to include
+more general expressions)." The design is
+`docs/research/typed-cellular-code.md`, after
+`type-and-effect-directions.md` §4(b).
+
+1. **Assertions over places, propositions over terms.** A certificate's
+   assertions name the machine's places at a cell boundary (`(slot i)`,
+   `(free i)`); the verifier's terms also name values it made and the
+   logic's functions applied (`(car t)`, `(+ a b)`). `Prop` has the
+   general forms now (relations, `not`, `and`, `or`, `implies`), though
+   only `(: t T)` is stated by the compilers yet, so that what comes
+   later is an addition, not a change of form.
+2. **The join rule does no inference.** Where ways meet, a place keeps
+   what every way agrees on, or its term at the type it was made with;
+   a place made since they parted needs the certificate's assertion. No
+   least upper bound is computed.
+3. **Instantiations given, not found.** The checker keeps each call's
+   instantiation of a polymorphic operator binder by binder; the
+   verifier substitutes. A `plambda`'s word carries its binders, so a
+   closure over it is of a `poly` type.
+4. **The certificate is not trusted.** Where the compiler cannot find a
+   free value's or added parameter's type by its lambda, it takes one by
+   name from elsewhere: a wrong guess can only make a word fail.
+5. **A `car` of a list that may be `nil` is a debt, not a failure.** The
+   checker accepts it, and every machine checks the pair's tag and fails
+   safely (`regcode.rs`'s `trap_if`), so it is a precondition checked at
+   run time (`TODO.md` §86), counted apart.
+6. **The Rust compiler first.** It makes the same words as `compile.fx`
+   (PLAN 13a), and the verifier needs the checker's types, which the
+   Rust checker has at hand; the FX-26 compiler's certificates are TC6.
+7. **Recording is off unless asked** (`Checker::record_types`,
+   `Compiler::certs`): it costs every check, as `record_operands` does.
