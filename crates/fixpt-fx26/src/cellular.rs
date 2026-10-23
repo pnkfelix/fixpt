@@ -706,6 +706,18 @@ impl<'a> Compiler<'a> {
     fn exp(&mut self, x: ExpId, e: &Env, depth: usize, code: &mut Vec<Item>, tail: bool) -> R<()> {
         let start = code.len();
         self.exp_unnoted(x, e, depth, code, tail)?;
+        // A procedure of the built-in scheduler, through its form
+        // (`library_type`): at the form's type, which says nothing of the
+        // scheduler's private regions. Trusted, not proved: an assumption
+        // the verifier names.
+        if self.certs.is_some()
+            && !tail
+            && let Exp::With { module, body } = *self.exp_at(x)
+            && let Some(t) = self.c.library_type(module, body)
+        {
+            self.ops.push(("%trust".to_string(), vec![crate::ast::D::Type(t)]));
+            code.push(Item::Op(self.ops.len() - 1));
+        }
         // A polymorphic value used at an instance (not called): what
         // checking instantiated it at, applied to it where it is made.
         if self.certs.is_some()

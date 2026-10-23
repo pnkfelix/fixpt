@@ -38,6 +38,7 @@ struct Tally {
     discharged: usize,
     stopped: BTreeMap<String, usize>,
     open: usize,
+    assumed: usize,
     failed: Vec<String>,
     open_examples: Vec<String>,
 }
@@ -72,6 +73,7 @@ fn verify_program(s: &mut Fx26Session, name: &str, text: &str, t: &mut Tally) {
                     }
                 }
                 t.open += o.open.len();
+                t.assumed += o.assumed.len();
                 if t.open_examples.len() < 12 {
                     t.open_examples.extend(o.open.iter().take(1).map(|x| format!("{name}: {x}")));
                 }
@@ -195,7 +197,7 @@ fn every_test_programs_words_verified() {
     for (name, text) in programs() {
         verify_program(&mut s, &name, &text, &mut t);
     }
-    eprintln!("{} words: {} verified, {} VCs discharged, {} open", t.words, t.verified, t.discharged, t.open);
+    eprintln!("{} words: {} verified, {} VCs discharged, {} open, {} assumed", t.words, t.verified, t.discharged, t.open, t.assumed);
     for (why, n) in &t.stopped {
         eprintln!("  stopped {n:5}: {why}");
     }
@@ -207,7 +209,7 @@ fn every_test_programs_words_verified() {
     }
     // A ratchet: what verifies now, as the verifier grows; and no failure
     // outside those the verifier's missing rules explain.
-    assert!(t.verified >= 1028, "fewer words verify: {}", t.verified);
+    assert!(t.verified >= 1043, "fewer words verify: {}", t.verified);
     let mut by: BTreeMap<&str, usize> = BTreeMap::new();
     for f in &t.failed {
         *by.entry(f.split(':').next().unwrap_or("")).or_default() += 1;

@@ -155,6 +155,10 @@ pub struct Outcome {
     pub failed: Vec<String>,
     pub open: Vec<String>,
     pub debts: Vec<String>,
+    /// What the certificate claimed and the verifier took, unproved: the
+    /// built-in scheduler's procedures at their forms' types. The word is
+    /// verified relative to these (the design note's §7: trusted).
+    pub assumed: Vec<String>,
     pub stopped: Option<String>,
 }
 
@@ -202,12 +206,12 @@ struct Ins {
 /// Whether a certificate's operation note is an instantiation's (of a
 /// callee, a value, a `proj`), not a standard operation's.
 fn marker(op: &str) -> bool {
-    matches!(op, "%call" | "%inst" | "%proj" | "%make")
+    matches!(op, "%call" | "%inst" | "%proj" | "%make" | "%trust")
 }
 
 /// Verify `word` against its certificate in `certs`.
 pub fn verify(c: &mut Checker, heap: &Heap, certs: &Certs, word: Value) -> Outcome {
-    let mut v = Verifier { c, heap, certs, out: Outcome::default(), made: 0, effect: Effect::pure(), proving: Vec::new(), gen_effects: Vec::new(), frames: Vec::new() };
+    let mut v = Verifier { c, heap, certs, out: Outcome::default(), made: 0, effect: Effect::pure(), proving: Vec::new(), gen_effects: Vec::new(), frames: Vec::new(), region_closures: Vec::new() };
     match certs.words.get(&word.raw()) {
         Some(cert) => v.word(word, cert),
         None => v.out.stopped = Some("no certificate".into()),
@@ -233,6 +237,10 @@ struct Verifier<'a> {
     /// The regions open, innermost last: each one's variable, form, and the
     /// effect so far where it opened (what is added since is its own).
     frames: Vec<(crate::ast::DVar, crate::ast::RegionForm, Effect)>,
+    /// The closures `%region-closure` made (an `rlambda`'s): a `plambda`
+    /// body that makes one may allocate, and be generalized still
+    /// (`Checker::generalizable`).
+    region_closures: Vec<Term>,
 }
 
 impl Verifier<'_> {
@@ -492,12 +500,58 @@ impl Verifier<'_> {
         if cur.is_some() {
             self.out.failed.push("the last cell falls through".into());
         }
-        if let Some(latent) = &cert.effect
-            && !self.effect.within(latent)
-        {
-            let msg = format!("effect {} is not within the latent {}", self.c.show_effect(&self.effect), self.c.show_effect(latent));
-            self.out.open.push(msg);
+        if let Some(latent) = &cert.effect {
+            let effect = self.masked(&code, cert, &slot_types);
+            if !effect.within(latent) {
+                let msg = format!("effect {} is not within the latent {}", self.c.show_effect(&effect), self.c.show_effect(latent));
+                self.out.open.push(msg);
+            }
         }
+    }
+
+    /// The word's effect, masked as the checkers mask a lambda's body
+    /// (`Checker::mask`): an atom kept if its region is seen from outside,
+    /// in the type of something the word is given (a parameter, a free
+    /// value, a global its cells name) or a global's own; in its result's
+    /// type, only allocation and control; otherwise nothing outside can
+    /// tell, and it is dropped.
+    fn masked(&mut self, code: &[Ins], cert: &Cert, slot_types: &[TyId]) -> Effect {
+        use crate::ast::{Atom, Region};
+        let mut seen: Vec<TyId> = slot_types.iter().chain(&cert.frees).copied().collect();
+        for ins in code {
+            if matches!(ins.name, Some("global" | "global!"))
+                && let Some(t) = self.certs.globals.get(&ins.ops[0].raw())
+            {
+                seen.push(*t);
+            }
+        }
+        let mut visible = std::collections::HashSet::new();
+        for t in seen {
+            self.c.regions_in(t, &mut visible);
+        }
+        let mut in_result = std::collections::HashSet::new();
+        if let Some(r) = cert.result {
+            self.c.regions_in(r, &mut in_result);
+        }
+        let kept = self
+            .effect
+            .0
+            .iter()
+            .copied()
+            .filter(|a| match a.region() {
+                None => true,
+                Some(r @ Region::Frozen(Some(p), _)) if !matches!(a, Atom::Write(_)) => {
+                    let place = Region::Var(p);
+                    visible.contains(&r) || visible.contains(&place) || ((in_result.contains(&r) || in_result.contains(&place)) && matches!(a, Atom::Alloc(_)))
+                }
+                Some(Region::Frozen(..)) => true,
+                Some(Region::Global(_) | Region::Globals) => true,
+                Some(r) if visible.contains(&r) => true,
+                Some(r) if in_result.contains(&r) => matches!(a, Atom::Alloc(_) | Atom::Goto(_) | Atom::Comefrom(_)),
+                Some(_) => false,
+            })
+            .collect();
+        Effect(kept)
     }
 
     /// The regions whose scopes end before cell `at`, innermost first, closed
@@ -593,7 +647,11 @@ impl Verifier<'_> {
                 self.out.failed.push(format!("{at}: a `plambda` body ends that did not start"));
                 return Err(());
             };
-            if !self.effect.0.is_empty() {
+            // Pure, as the value restriction has it; or an `rlambda`'s
+            // closure, made by allocating only: it holds nothing mutable.
+            let rlambda = s.stack.last().is_some_and(|v| self.region_closures.contains(&v.term))
+                && self.effect.0.iter().all(|a| matches!(a, crate::ast::Atom::Alloc(_)));
+            if !self.effect.0.is_empty() && !rlambda {
                 let msg = format!("{at}: a `plambda` body with effect {}", self.c.show_effect(&self.effect));
                 self.out.failed.push(msg);
                 return Err(());
@@ -655,6 +713,18 @@ impl Verifier<'_> {
     /// `%inst`, every binder (outermost first, as checking found them);
     /// `%proj`, the outermost level's, at its arguments.
     fn instances(&mut self, cert: &Cert, at_cell: usize, s: &mut State, at: &str) -> Result<(), ()> {
+        // A trusted claim: the value on top taken at the type it names, an
+        // assumption.
+        for (_, _, ds) in cert.ops.iter().filter(|(k, op, _)| *k == at_cell && op == "%trust") {
+            let ([crate::ast::D::Type(t)], Some(top)) = (&ds[..], s.stack.last_mut()) else {
+                self.out.failed.push(format!("{at}: a trusted claim of nothing"));
+                return Err(());
+            };
+            top.ty = Some(*t);
+            top.made = Some(*t);
+            let msg = format!("{at}: the scheduler's procedure at its form's type, {}", self.show(*t));
+            self.out.assumed.push(msg);
+        }
         for (_, op, ds) in cert.ops.iter().filter(|(k, op, _)| *k == at_cell && (op == "%inst" || op == "%proj")) {
             let Some(v) = s.stack.last().cloned() else {
                 self.out.failed.push(format!("{at}: an instance of nothing"));
@@ -1458,6 +1528,50 @@ impl Verifier<'_> {
                             return Err(());
                         }
                     },
+                    // An `rlambda`'s closure, made in a place: `( place fv … w
+                    // -- c )`, as `closure`'s, its type's latent effect
+                    // reading the place's region (calling it reads the
+                    // closure), making it allocating there.
+                    "%region-closure" => {
+                        let n = ops[1].as_fixnum() as usize;
+                        let w = self.pop(s, at)?;
+                        let Term::Lit(word) = w.term else {
+                            self.out.failed.push(format!("{at}: a region closure over no word"));
+                            return Err(());
+                        };
+                        let Some(callee) = self.certs.words.get(&word.raw()).cloned() else {
+                            self.out.stopped = Some("a closure over a word with no certificate".into());
+                            return Err(());
+                        };
+                        let mut vals = Vec::new();
+                        for _ in 0..n.saturating_sub(2) {
+                            vals.push(self.pop(s, at)?);
+                        }
+                        vals.reverse();
+                        let place = self.pop(s, at)?;
+                        let Some(Ty::Place(region)) = self.ty_of(&place) else {
+                            self.out.failed.push(format!("{at}: a region closure made in no place"));
+                            return Err(());
+                        };
+                        if callee.frees.len() != vals.len() {
+                            self.out.failed.push(format!("{at}: a closure over {} values, of a word that has {}", vals.len(), callee.frees.len()));
+                            return Err(());
+                        }
+                        let made = self.fresh();
+                        for (j, (v, t)) in vals.iter().zip(&callee.frees).enumerate() {
+                            if v.term == Term::Lit(Value::FALSE) && self.fits(v, *t) != Some(true) {
+                                s.pending.push((made.clone(), j, *t));
+                            } else {
+                                self.holds(v, *t, at);
+                            }
+                        }
+                        let mut cert = callee.clone();
+                        cert.effect = cert.effect.map(|e| e.union(&Effect::atom(crate::ast::Atom::Read(region))));
+                        let ty = self.subr_of(&cert);
+                        self.effect = self.effect.union(&Effect::atom(crate::ast::Atom::Alloc(region)));
+                        self.region_closures.push(made.clone());
+                        self.push_made(s, ty, Some(made));
+                    }
                     // `( v place -- v )`: left, keeping the body's value.
                     "%region-exit" => {
                         let (v, place) = (self.pop(s, at)?, self.pop(s, at)?);

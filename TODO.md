@@ -2727,10 +2727,11 @@ is set at the write or after it.
 compiler's words, and a verifier, as Hoare logic. The goal of this stage
 (the user's): every word of every program the checker accepts verifies,
 by type assertions, before propositions beyond types are built on it.
-1,007 of 1,094 test program words verify (`tests/typed_cells.rs`); 380
-mutants of verified words are all refused; 19 type VCs fail, in 11
-programs, each pinned with its cause (`KNOWN_FAILURES`), none a fault of
-the checker's or the compiler's found so far.
+1,043 of 1,094 test program words verify (`tests/typed_cells.rs`), none
+with a VC open, 13 relative to named assumptions; 403 mutants of
+verified words are all refused; 10 type VCs fail, in 5 programs, each
+pinned with its cause (`KNOWN_FAILURES`), none a fault of the checker's
+or the compiler's found so far.
 
 Done (2026-10-22): data made (products, sums, modules, bloblets: the
 certificate names the type, the values are checked against it); calls
@@ -2754,10 +2755,14 @@ Left, most first, with what each needs:
    is recorded at the binding outside (the standard `get`): record a
    lambda's free variables after its body, leaving out what a `with` in
    it binds (`with_vals`); and a functor's result.
-2. **Regions** (TC4: `%region-enter`, `%reap-enter`, `%region-closure`;
-   and 8 failing VCs, `letfreeze`, `acyclic`: a list made in `r` taken as
-   `const`): regions entered and left as capabilities, private effects
-   masked, a region frozen.
+2. ~~**Regions**~~ (done 2026-10-22): each region's scope in the
+   certificate, its own effects masked as it closes and its value closed
+   (not mentioning it, or frozen); places entered and left; `rlambda`
+   closures; bindings opened as the checker binds them (`name_nat`); a
+   word's effect masked at its boundary as `Checker::mask` masks a body.
+   The built-in scheduler's procedures, seen through their forms' types
+   (`library_type`), are taken as named assumptions (`Outcome::assumed`,
+   13), not proved: its private regions are its own by trust.
 3. **Flat data** (`%suffix-ref` and kin, about 20 words; 3 failing VCs, a
    `blobref` under a size binder the checker relates in scope).
 4. **Facts beyond types** (6 failing VCs: `(- n 1)` a `nat` after
