@@ -2031,15 +2031,22 @@ impl<'a> Compiler<'a> {
             // (%make-bloblet-filled 0 n fill): the 0 first, under the others.
             self.int(code, 0);
             self.exps(args, e, depth + 1, code)?;
+            self.note_op(x, name, code);
             return self.prim(code, "%make-bloblet-filled", 3);
         }
         let n = self.exps(args, e, depth, code)?;
+        self.note_op(x, name, code);
+        self.standard_on(name, n, code)
+    }
+
+    /// With certificates wanted: that the next cell runs standard operation
+    /// `name`, at the instantiation application `x` was checked at.
+    fn note_op(&mut self, x: ExpId, name: &str, code: &mut Vec<Item>) {
         if self.certs.is_some() {
             let inst = self.c.facts.insts.get(&x).cloned().unwrap_or_default();
             self.ops.push((name.to_string(), inst));
             code.push(Item::Op(self.ops.len() - 1));
         }
-        self.standard_on(name, n, code)
     }
 
     /// A standard operation, open-coded: a routine, or a runtime primitive,

@@ -161,31 +161,20 @@ fn a_verified_word_changed_is_refused() {
 /// facts); `datum` and a union by a type test; `car` of `nil`, which is
 /// certain to fail, in a program that means to (`fails-car.fx`).
 const KNOWN_FAILURES: &[(&str, usize)] = &[
-    ("bidirectional/arrow.fx", 1),
     ("bidirectional/arrow-star-groups.fx", 4),
     ("bidirectional/arrow-star-module.fx", 2),
-    ("bidirectional/bounds.fx", 1),
-    ("bloblet/array-sum.fx", 1),
     ("bloblet/flat-bounds.fx", 1),
     ("bloblet/flat-unsized.fx", 2),
     ("datum/acyclic.fx", 3),
     ("datum/confirm-length.fx", 2),
-    ("datum/quasiquote.fx", 1),
-    ("datum/quote.fx", 1),
-    ("datum/quote-identity.fx", 1),
-    ("datum/quote-shadowed.fx", 1),
     ("datum/type-tests.fx", 1),
-    ("datum/union.fx", 1),
     ("modules/functor-abstract.fx", 2),
     ("modules/functor-max.fx", 2),
     ("modules/include-param-shadows.fx", 1),
     ("modules/load-parameters.fx", 1),
     ("run/acyclic-in-a-place.fx", 1),
     ("run/acyclic-lists.fx", 2),
-    ("run/fails-car.fx", 1),
-    ("run/icells.fx", 2),
     ("run/letfreeze.fx", 1),
-    ("run/region-allocators.fx", 2),
     ("run/variadic.fx", 1),
     ("run/well-founded.fx", 1),
 ];
@@ -226,7 +215,7 @@ fn every_test_programs_words_verified() {
     }
     // A ratchet: what verifies now, as the verifier grows; and no failure
     // outside those the verifier's missing rules explain.
-    assert!(t.verified >= 655, "fewer words verify: {}", t.verified);
+    assert!(t.verified >= 672, "fewer words verify: {}", t.verified);
     let mut by: BTreeMap<&str, usize> = BTreeMap::new();
     for f in &t.failed {
         *by.entry(f.split(':').next().unwrap_or("")).or_default() += 1;

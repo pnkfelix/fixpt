@@ -174,7 +174,7 @@ struct Ins {
 
 /// Verify `word` against its certificate in `certs`.
 pub fn verify(c: &mut Checker, heap: &Heap, certs: &Certs, word: Value) -> Outcome {
-    let mut v = Verifier { c, heap, certs, out: Outcome::default(), made: 0, effect: Effect::pure() };
+    let mut v = Verifier { c, heap, certs, out: Outcome::default(), made: 0, effect: Effect::pure(), proving: Vec::new() };
     match certs.words.get(&word.raw()) {
         Some(cert) => v.word(word, cert),
         None => v.out.stopped = Some("no certificate".into()),
@@ -189,6 +189,11 @@ struct Verifier<'a> {
     out: Outcome,
     made: u32,
     effect: Effect,
+    /// The values a call made that prove something (a predicate's result,
+    /// `(bool (then …) (else …))`): its term, what holds where it is true and
+    /// where false, and the call's arguments' terms, by position. Its
+    /// `ensures`, assumed where a branch tests it (`narrow`).
+    proving: Vec<(Term, Vec<crate::ast::Prop>, Vec<crate::ast::Prop>, Vec<Term>)>,
 }
 
 impl Verifier<'_> {
@@ -333,7 +338,10 @@ impl Verifier<'_> {
         // The states waiting at each later cell, from branches to it.
         let mut waiting: HashMap<usize, Vec<State>> = HashMap::new();
         let mut cur = Some(entry.clone());
-        for ins in &code {
+        let mut i = 0;
+        while i < code.len() {
+            let ins = &code[i];
+            i += 1;
             let mut arriving: Vec<State> = waiting.remove(&ins.at).unwrap_or_default();
             if let Some(s) = cur.take() {
                 arriving.push(s);
@@ -355,6 +363,15 @@ impl Verifier<'_> {
                 self.out.stopped = Some("a word run as a cell".into());
                 return;
             };
+            match self.idiom(&code[i - 1..], cert, &mut s, &at, &waiting) {
+                Some(Ok(n)) => {
+                    i += n - 1;
+                    cur = Some(s);
+                    continue;
+                }
+                Some(Err(())) => return,
+                None => {}
+            }
             match self.step(name, &ins.ops, &mut s, cert, &at, &entry, ins.at, &mut waiting) {
                 Ok(Some(next)) => cur = Some(next),
                 Ok(None) => {}
@@ -370,6 +387,85 @@ impl Verifier<'_> {
             let msg = format!("effect {} is not within the latent {}", self.c.show_effect(&self.effect), self.c.show_effect(latent));
             self.out.open.push(msg);
         }
+    }
+
+    /// A standard operation compiled as an idiom, several routines, where
+    /// the certificate says the operation runs at `code`'s first cell and
+    /// the cells are the idiom's, as the compilers make it
+    /// (`Compiler::standard_on`), no branch landing inside: the operation's
+    /// triple, applied to the whole, and how many instructions it is.
+    fn idiom(&mut self, code: &[Ins], cert: &Cert, s: &mut State, at: &str, waiting: &HashMap<usize, Vec<State>>) -> Option<Result<usize, ()>> {
+        let (_, op, inst) = cert.ops.iter().find(|(k, _, _)| *k == code[0].at)?.clone();
+        let lit = |v: i64| move |ins: &Ins| ins.name == Some("lit") && ins.ops[0] == Value::fixnum(v);
+        let named = |r: &'static str| move |ins: &Ins| ins.name == Some(r);
+        let prim = |p: &'static str, n: i64| {
+            move |ins: &Ins| ins.name == Some("prim") && ins.ops[1].as_fixnum() == n && fixpt_runtime::PRIMITIVES.get(ins.ops[0].as_fixnum() as usize).is_some_and(|d| d.name == p)
+        };
+        let heap = self.heap;
+        let unit = move |ins: &Ins| ins.name == Some("lit") && heap.is_a(ins.ops[0], ObjType::Symbol) && heap.symbol_name(ins.ops[0]) == "#u";
+        type Is<'a> = Box<dyn Fn(&Ins) -> bool + 'a>;
+        // Each idiom's cells, and how many values the operation takes off
+        // the stack beyond its arguments (`make-array`'s 0, pushed first).
+        let (cells, extra): (Vec<Is>, usize) = match op.as_str() {
+            "array-ref" => (vec![Box::new(lit(2)), Box::new(named("int-add")), Box::new(named("field@"))], 0),
+            "array-length" => (vec![Box::new(prim("%bloblet-fields", 1)), Box::new(lit(1)), Box::new(named("int-sub"))], 0),
+            "array-set!" => (
+                vec![
+                    Box::new(named("swap")),
+                    Box::new(lit(2)),
+                    Box::new(named("int-add")),
+                    Box::new(named("swap")),
+                    Box::new(prim("%bloblet-set!", 3)),
+                    Box::new(named("drop")),
+                    Box::new(unit),
+                ],
+                0,
+            ),
+            "make-array" => (vec![Box::new(prim("%make-bloblet-filled", 3))], 1),
+            _ => return None,
+        };
+        let n = cells.len();
+        if code.len() < n || !cells.iter().zip(code).all(|(is, ins)| is(ins)) || code[1..n].iter().any(|ins| waiting.contains_key(&ins.at)) {
+            return None;
+        }
+        let Some((params, result, effect)) = self.op_type(&op, &inst, 0) else {
+            self.out.stopped = Some(format!("`{op}`: its type, instantiated"));
+            return Some(Err(()));
+        };
+        let mut args = Vec::new();
+        for _ in 0..params.len() {
+            args.push(self.pop(s, at).ok()?);
+        }
+        args.reverse();
+        for _ in 0..extra {
+            match self.pop(s, at) {
+                Ok(v) if v.term == Term::Lit(Value::fixnum(0)) => {}
+                _ => {
+                    self.out.failed.push(format!("{at}: `{op}` without its 0"));
+                    return Some(Err(()));
+                }
+            }
+        }
+        for (a, p) in args.iter().zip(&params) {
+            self.holds(a, *p, at);
+        }
+        self.effect = self.effect.union(&effect);
+        // An array made is as long as its first argument says, where its
+        // type knows (`Checker::array_sized`).
+        let result = match (op.as_str(), self.c.arena.get(self.c.arena.resolve(result)).clone()) {
+            ("make-array", Ty::Array(t, _, r)) => {
+                let size = match (&args[0].term, self.ty_of(&args[0])) {
+                    (Term::Lit(k), _) if k.is_fixnum() && k.as_fixnum() >= 0 => Some(Size::lit(k.as_fixnum())),
+                    (_, Some(Ty::Nat(s))) => Some(s),
+                    _ => None,
+                };
+                size.map_or(result, |n| self.c.arena.ty(Ty::Array(t, n, r)))
+            }
+            _ => result,
+        };
+        let terms = args.into_iter().map(|a| a.term).collect();
+        self.push_made(s, Some(result), Some(Term::App("op", terms)));
+        Some(Ok(n))
     }
 
     /// Whether `code` is a conversion between a representation and its
@@ -620,6 +716,12 @@ impl Verifier<'_> {
                         let f = if name == "pair-car" { "car" } else { "cdr" };
                         self.push_made(s, Some(if name == "pair-car" { a } else { b }), Some(Term::App(f, vec![p.term])));
                     }
+                    // `nil` itself: the machine's test fails, safely, as the
+                    // program means (a debt sure to fail).
+                    Some(Ty::Nil) => {
+                        self.out.debts.push(format!("{at}: (not (eq {:?} nil)), false", p.term));
+                        return Ok(None);
+                    }
                     Some(_) => {
                         let msg = format!("{at}: {name} of {}, not a pair", self.show(p.ty.expect("known")));
                         self.out.failed.push(msg);
@@ -815,8 +917,12 @@ impl Verifier<'_> {
                     self.holds(a, *p, at);
                 }
                 self.effect = self.effect.union(&effect);
-                let terms = args.into_iter().map(|a| a.term).collect();
-                self.push_made(s, Some(result), Some(Term::App("op", terms)));
+                let terms: Vec<Term> = args.into_iter().map(|a| a.term).collect();
+                let made = self.fresh();
+                if let Ty::Proving { then, els } = self.c.arena.get(self.c.arena.resolve(result)).clone() {
+                    self.proving.push((made.clone(), then, els, terms));
+                }
+                self.push_made(s, Some(result), Some(made));
             }
             "prim" => {
                 let p = ops[0].as_fixnum() as usize;
@@ -899,6 +1005,22 @@ impl Verifier<'_> {
     /// What a branch on `flag` tells the way where it is true (`yes`) or
     /// false: narrowing, from what the flag's term says it tested.
     fn narrow(&mut self, flag: &Term, yes: bool, s: &mut State) {
+        // A predicate's result: what it proves of its arguments, where true
+        // and where false, as its type says (the call rule's `ensures`).
+        if let Some((_, then, els, args)) = self.proving.iter().find(|(t, ..)| t == flag).cloned() {
+            for p in if yes { then } else { els } {
+                let crate::ast::Prop::Shape { param, shape, negated } = p else { continue };
+                let Some(arg) = args.get(param) else { continue };
+                for v in s.stack.iter_mut().filter(|v| v.term == *arg) {
+                    let Some(ty) = v.ty else { continue };
+                    let (y, n) = self.c.narrowed_by(ty, 1u32 << shape);
+                    if let Some(t) = if negated { n } else { y } {
+                        v.ty = Some(t);
+                    }
+                }
+            }
+            return;
+        }
         // A value tested itself: not `#f`, where true.
         if !matches!(flag, Term::App("eq", _)) {
             for v in s.stack.iter_mut().filter(|v| v.term == *flag) {
@@ -924,12 +1046,15 @@ impl Verifier<'_> {
         match (a, b) {
             // `not`, and the tests that end in one.
             (t, Term::Lit(f)) if f.is_false() => self.narrow(t, !yes, s),
-            // `null?`: a list not `nil`, where false.
+            // `null?`: `nil` where true, and what else it may be where false,
+            // by shape, as the checkers narrow (`narrowed_by`).
             (t, Term::Lit(n)) if n.is_null() => {
+                let nil = crate::check::SHAPES.iter().position(|(n, _)| *n == "nil").map_or(0, |i| 1u32 << i);
                 for v in s.stack.iter_mut().filter(|v| v.term == *t) {
                     let Some(ty) = v.ty else { continue };
-                    if let Ty::Pair(x, y, r, true) = self.c.arena.get(self.c.arena.resolve(ty)).clone() {
-                        v.ty = Some(if yes { self.c.arena.ty(Ty::Nil) } else { self.c.arena.ty(Ty::Pair(x, y, r, false)) });
+                    let (y, n) = self.c.narrowed_by(ty, nil);
+                    if let Some(t) = if yes { y } else { n } {
+                        v.ty = Some(t);
                     }
                 }
             }
