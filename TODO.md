@@ -2749,5 +2749,7 @@ first, with what each needs:
    private effects masked (`letregion`, `letfreeze`), control (prompts,
    marks, continuations), arrays (`field@`), flat data.
 Then TC6: the certificate kept in the word, the FX-26 compiler making
-the same, and fragments verified on loading.
+the same, and fragments verified on loading, under the loader's policy
+for open VCs, trusting one an effect (`(trust A)`; the note's §7,
+decided with the user 2026-10-22).
 

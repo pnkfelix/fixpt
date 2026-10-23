@@ -160,9 +160,67 @@ The verifier, each routine's triple, each primitive's type, and the
 provers that discharge VCs. Not the checkers or the compilers: a wrong
 word is refused, not run. Machine code and register code are made from
 verified cells, so they are trusted as their compilers are; register
-code typed in its own right is later (`directions` §4(c), C12).
+code typed in its own right is later (`directions` §4(c), C12). Beyond
+that, only what a loader's policy trusts (§7), and that shows in types.
 
-## 7. Stages
+## 7. Loading under a policy, and trust as an effect
+
+Decided with the user (2026-10-22): the code that loads a fragment says
+how its open VCs are handled, and trusting one is an effect.
+
+**When.** Verification runs at load and link time, before anything of
+the fragment runs: everything the verifier discharges is settled then,
+once, and so is everything that speaks only of what linking fixes (an
+import's type in the host against the type the fragment assumed). What
+is left open is the policy's to decide.
+
+**The policy** is the loader's argument: a table by kind of VC, or a
+procedure given each open VC as data, in §2's syntax. Its answers:
+- `proved`: by a prover the caller supplies (an SMT solver, a proof
+  database). Unless the prover returns a certificate the verifier checks
+  (a proof term; a solver's proof), this is a `trust` (below): the
+  prover joins what the program rests on, as a lemma's proof does.
+- `guard`: the VC made a check at its cell, run as the code runs, failing
+  safely where it does not hold: a *debt* (`TODO.md` §86). Only a VC a
+  check can decide on the values at hand: a tag (a pair, `nil`, a sum's
+  arm), an integer relation, `eq`. Some guards the machines make already
+  (`pair-car` checks the pair's tag); others the loader would insert.
+- `contract`: for a VC about behaviour (a closure's type, its effect),
+  the value wrapped and each use checked as it happens (Findler and
+  Felleisen's higher-order contracts), a violation found late and
+  blamed.
+- `trust`: the VC assumed.
+- `refuse`: the fragment not loaded.
+An answer that cannot be had (a `guard` of a VC no check decides, that a
+closure ends) is not given: the policy is told, and goes on to its next
+rule.
+
+**Trust is an effect.** Every answer but `trust` keeps the program
+safe: each checks, or refuses. `trust` gives the load an effect atom,
+`(trust A)`, `A` naming what was assumed. So whatever relies on assumed
+code says so in its type, as it says what it reads and writes:
+- it propagates as any effect does, and masking cannot hide it: nothing
+  private makes an unproven assumption hold;
+- a licence asks it: the eager reader's (`licence.rs`), run on every
+  keystroke, can refuse what was loaded under `trust`;
+- a procedure may be **polymorphic in its trust**, `(poly ((t effect))
+  (subr (maxeff t …) …))`: a library that loads plug-ins, say, is as
+  trusting as the policy its caller gives it, and a caller that gives a
+  policy that never trusts gets a procedure whose type has no `trust` in
+  it. The policy's own type carries the effect: one that may answer
+  `trust` is a `(subr (trust A) (vc) answer)`.
+
+**What a fragment reports.** Loaded, a fragment says what it rests on:
+each VC discharged, proved (and by whom), guarded, wrapped, or trusted.
+A program, or a later link, can look at those assumptions rather than
+only inherit them.
+
+**To decide:** what `A` in `(trust A)` ranges over (a fragment, a
+prover, each VC); whether a later proof can discharge it (a
+`certify`-like operation, as `certify-nat` refines a binding today);
+and how `contract` blame is said.
+
+## 8. Stages
 
 1. **TC1. The certificate, made.** The Rust checker records each
    expression's type; the Rust cellular compiler (`cellular.rs`) gives
@@ -180,12 +238,12 @@ code typed in its own right is later (`directions` §4(c), C12).
    regions masked, capabilities (C8).
 5. **TC5. Propositions beyond types**: the post of each triple kept
    (`(= r (+ a b))`), linear VCs to Fourier–Motzkin, open VCs written
-   out; then programs that state propositions (§8).
+   out; then programs that state propositions (§10).
 6. **TC6. Kept and loaded**: the certificate in the word (`WORD_TYPE`,
    C2), the FX-26 compiler making the same certificates, fragments
-   verified on loading (C10).
+   verified on loading (C10), under the loader's policy (§7).
 
-## 8. Where it stands (2026-10-22)
+## 9. Where it stands (2026-10-22)
 
 TC1 and the start of TC2, over the Rust compiler (`cellular.rs`) and
 checker:
@@ -214,16 +272,16 @@ verify, discharging 6,248 VCs. 243 mutants of verified words (an
 `int-add` made a `pair-car`, and the reverse) are all refused. Where the
 rest stop is `TODO.md` §115.
 
-## 9. Open questions (the user's)
+## 10. Open questions (the user's)
 
 1. **Where propositions come from in a program.** Today only the checker
    makes them. A program could state them: preconditions and
    postconditions on a `subr` type (`(subr E ((x int)) (r int) (requires
    (< 0 x)) (ensures (< x r)))`), loop invariants, `(assert P)`. Which,
    and in what syntax?
-2. **What an open VC means at run time.** Refuse the word? Run it, the
-   VC a check made at run time (a "debt", `TODO.md` §86)? Run it, the VC
-   trusted, as a lemma is?
+2. ~~**What an open VC means at run time.**~~ The loader's policy says,
+   and trusting is an effect (§7, decided 2026-10-22); what is left of
+   it is §7's "to decide".
 3. **Which prover outside.** An SMT solver (SMT-LIB 2 is the natural
    form to write VCs in), a proof assistant, or none yet.
 4. **The logic's functions.** `car`, `field`, `length`, `+` are partial;
