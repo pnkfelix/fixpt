@@ -210,15 +210,40 @@ code says so in its type, as it says what it reads and writes:
   it. The policy's own type carries the effect: one that may answer
   `trust` is a `(subr (trust A) (vc) answer)`.
 
+**What may be trusted, and how far it reaches** (decided with the user,
+2026-10-22). The policy may trust a fragment (all its open VCs), a
+prover (whatever it says it proved), or a VC alone, a semi-local axiom
+(Boogie's `assume`, F*'s `admit`, Lean's axioms). These are one thing at
+three grains: a set of VCs assumed, each named by its proposition and the
+facts it was asked under, hashed, so that `(trust A)` names the set and
+the fragment's report holds each in full; one alone can be discharged
+later by proof, the rest still assumed.
+
+The grain says *what* is assumed, not how far it reaches. An assumption
+is stated at one cell; what follows from it is not kept there: a false
+`(: x T)` lets the word store `x` where code that never runs the word,
+and whose type says no trust, reads it at `T`. A false assumption can
+break memory safety, and then nothing in the process is safe from it.
+So the effect is the load's, whatever the grain, and covers what runs
+after it: for now, the whole process. Finer grains buy a smaller set to
+audit and to prove, not containment.
+
+Containment needs isolation, not bookkeeping: trusted code in a heap of
+its own (an FX-26 process: nothing shared, only sendable, first-order
+data across, which a guard can check), where `(trust A)` could be masked
+at the boundary, the one place masking it is honest. Not planned (the
+user: no isolation within a process for now). Tracking a trusted word's
+consequences through the regions it writes (taint) was considered and
+left: it needs a soundness argument of its own.
+
 **What a fragment reports.** Loaded, a fragment says what it rests on:
 each VC discharged, proved (and by whom), guarded, wrapped, or trusted.
 A program, or a later link, can look at those assumptions rather than
 only inherit them.
 
-**To decide:** what `A` in `(trust A)` ranges over (a fragment, a
-prover, each VC); whether a later proof can discharge it (a
-`certify`-like operation, as `certify-nat` refines a binding today);
-and how `contract` blame is said.
+**To decide:** whether a later proof can discharge an assumption while
+the program runs (a `certify`-like operation, as `certify-nat` refines
+a binding today), and how `contract` blame is said.
 
 ## 8. Stages
 
