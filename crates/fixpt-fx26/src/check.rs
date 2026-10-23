@@ -524,6 +524,10 @@ pub struct NodeFacts {
     /// what its binders were instantiated at, by the expression. With
     /// `record_types`.
     pub value_insts: HashMap<ExpId, Vec<D>>,
+    /// Each module made: its own type, every value it makes and its own
+    /// abstract types, before it is taken as any other. With
+    /// `record_types`.
+    pub module_own: HashMap<ExpId, TyId>,
     /// A module's abstract type's conversions, `up-t` and `down-t`, each
     /// the identity on the representation, by its lambda's body: the type
     /// it is bound at, from the representation to the abstract type or

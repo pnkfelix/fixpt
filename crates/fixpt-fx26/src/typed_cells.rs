@@ -179,7 +179,7 @@ struct Ins {
 /// Whether a certificate's operation note is an instantiation's (of a
 /// callee, a value, a `proj`), not a standard operation's.
 fn marker(op: &str) -> bool {
-    matches!(op, "%call" | "%inst" | "%proj")
+    matches!(op, "%call" | "%inst" | "%proj" | "%make")
 }
 
 /// Verify `word` against its certificate in `certs`.
@@ -640,9 +640,13 @@ impl Verifier<'_> {
     fn selects(&mut self, types: &[TyId]) -> HashMap<(usize, fixpt_read::Sym), TyId> {
         let mut given = HashMap::new();
         for (k, t) in types.iter().enumerate() {
-            if let Ty::Module { abs, .. } = self.c.arena.get(self.c.arena.resolve(*t)).clone() {
+            if let Ty::Module { abs, descs, .. } = self.c.arena.get(self.c.arena.resolve(*t)).clone() {
                 for (a, w) in abs {
                     given.insert((k, a), self.c.arena.ty(Ty::Var(w)));
+                }
+                // A type it names, transparently: that type.
+                for (a, d) in descs {
+                    given.entry((k, a)).or_insert(d);
                 }
             }
         }
@@ -1070,6 +1074,81 @@ impl Verifier<'_> {
                     }
                 }
             }
+            "prim" if cert.ops.iter().any(|(k, op, _)| *k == here && op == "%make") => {
+                let Some((_, _, ds)) = cert.ops.iter().find(|(k, op, _)| *k == here && op == "%make") else { unreachable!() };
+                // Made as `own` (a module's own type), taken as `t`.
+                let (t, own) = match &ds[..] {
+                    [crate::ast::D::Type(t)] => (*t, *t),
+                    [crate::ast::D::Type(t), crate::ast::D::Type(own)] => (*t, *own),
+                    _ => {
+                        self.out.failed.push(format!("{at}: data made of no type"));
+                        return Err(());
+                    }
+                };
+                let pname = fixpt_runtime::PRIMITIVES.get(ops[0].as_fixnum() as usize).map_or("?", |d| d.name);
+                let n = ops[1].as_fixnum() as usize;
+                if pname != "%make-frozen" || n == 0 {
+                    self.out.failed.push(format!("{at}: data said made by {pname}"));
+                    return Err(());
+                }
+                let mut vals = Vec::new();
+                for _ in 0..n {
+                    vals.push(self.pop(s, at)?);
+                }
+                vals.reverse();
+                let kind = vals.remove(0);
+                let fields: Option<Vec<TyId>> = match (&kind.term, self.c.arena.get(self.c.arena.resolve(own)).clone()) {
+                    (Term::Lit(k), Ty::Product(labels)) if *k == Value::fixnum(37) => Some(labels.iter().map(|(_, t)| *t).collect()),
+                    // A module's values, as its own type lists them, unless
+                    // it includes another: then its product holds the module
+                    // included, and its type that module's values, reached
+                    // by a path (`Pick::Path`), which this does not follow.
+                    (Term::Lit(k), Ty::Module { vals: vs, descs, .. }) if *k == Value::fixnum(37) => {
+                        if descs.iter().any(|(d, _)| self.c.interner.name(*d).starts_with("%hidden")) || vs.len() != vals.len() {
+                            self.out.stopped = Some("a module that includes another (its values laid out apart from its type)".into());
+                            return Err(());
+                        }
+                        Some(vs.iter().map(|(_, t)| *t).collect())
+                    }
+                    // A sum: its tag, a literal symbol, names an arm, whose
+                    // type the value must be.
+                    (Term::Lit(k), Ty::Sum(arms)) if *k == Value::fixnum(36) && vals.len() == 2 => match vals[0].term {
+                        Term::Lit(tag) if self.heap.is_a(tag, ObjType::Symbol) => {
+                            let name = self.heap.symbol_name(tag);
+                            arms.iter().find(|(l, _)| self.c.interner.name(*l) == name).map(|(_, a)| vec![self.c.symbol, *a])
+                        }
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                let Some(fields) = fields.filter(|f| f.len() == vals.len()) else {
+                    let msg = format!("{at}: {} values made a {}", vals.len(), self.show(own));
+                    self.out.failed.push(msg);
+                    return Err(());
+                };
+                for (v, f) in vals.iter().zip(&fields) {
+                    self.holds(v, *f, at);
+                }
+                if own != t {
+                    // Packing a module's abstract types with a witness (its
+                    // values typed by another module's, `counter..t`, taken as
+                    // the abstract `t`): a rule this does not have yet.
+                    let abs_of = |me: &Self, t: TyId| match me.c.arena.get(me.c.arena.resolve(t)) {
+                        Ty::Module { abs, .. } => abs.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
+                        _ => Vec::new(),
+                    };
+                    let (mine, claimed) = (abs_of(self, own), abs_of(self, t));
+                    if claimed.iter().any(|n| !mine.contains(n)) {
+                        self.out.stopped = Some("a module packed with a witness for an abstract type".into());
+                        return Err(());
+                    }
+                    let made = V::new(Term::Made(0), Some(own));
+                    self.holds(&made, t, at);
+                }
+                // Kept as its own type, which is within the one it is taken
+                // as, and is its values' layout.
+                self.push_made(s, Some(own), None);
+            }
             "prim" | "cons" if cert.ops.iter().any(|(k, op, _)| *k == here && !marker(op)) => {
                 let (_, op, inst) = cert.ops.iter().find(|(k, op, _)| *k == here && !marker(op)).expect("found").clone();
                 let pname = match name {
@@ -1180,6 +1259,12 @@ impl Verifier<'_> {
                     self.reads(region);
                 }
                 Ok(Some(fields[k - 2]))
+            }
+            // A module that includes another holds that module, which its
+            // type's values are reached through: not followed here.
+            Ty::Module { descs, .. } if descs.iter().any(|(d, _)| self.c.interner.name(*d).starts_with("%hidden")) => {
+                self.out.stopped = Some("a field of a module that includes another".into());
+                Err(())
             }
             Ty::Module { vals, .. } if k >= 2 && k - 2 < vals.len() => Ok(Some(vals[k - 2].1)),
             _ => {

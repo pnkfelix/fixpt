@@ -33,6 +33,16 @@ impl Checker {
     }
 
     fn synth_module_here(&mut self, e: ExpId, items: &[ModItem]) -> R<(TyId, Effect)> {
+        let r = self.synth_module_made(e, items);
+        if self.record_types
+            && let Ok((t, _)) = &r
+        {
+            self.facts.module_own.insert(e, *t);
+        }
+        r
+    }
+
+    fn synth_module_made(&mut self, e: ExpId, items: &[ModItem]) -> R<(TyId, Effect)> {
         let span = self.arena.span_of(e);
         let (depth, named) = (self.env.len(), self.skolems.len());
         let r = self.synth_module_items(items, span);

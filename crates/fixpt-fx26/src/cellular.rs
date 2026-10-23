@@ -713,6 +713,7 @@ impl<'a> Compiler<'a> {
                     self.field(code, j as i64 + 2);
                 }
             }
+            self.note_made(x, code);
             self.prim(code, "%make-frozen", 1 + at.len())?;
             self.unbind(code, depth, 1, false);
             self.done(code, tail);
@@ -939,6 +940,7 @@ impl<'a> Compiler<'a> {
                 for s in &vals {
                     self.op1(code, "slot", Value::fixnum(*s as i64));
                 }
+                self.note_made(x, code);
                 self.prim(code, "%make-frozen", 1 + vals.len())?;
                 self.done(code, tail);
                 self.unbind(code, depth, made, tail);
@@ -976,6 +978,7 @@ impl<'a> Compiler<'a> {
                 for (i, (_, f)) in fields.iter().enumerate() {
                     self.exp(*f, e, depth + 1 + i, code, false)?;
                 }
+                self.note_made(x, code);
                 self.prim(code, "%make-frozen", 1 + fields.len())?;
                 self.done(code, tail);
             }
@@ -998,6 +1001,7 @@ impl<'a> Compiler<'a> {
                 let sym = self.heap.intern(self.c.interner.name(t));
                 self.lit(code, sym);
                 self.exp(v, e, depth + 2, code, false)?;
+                self.note_made(x, code);
                 self.prim(code, "%make-frozen", 3)?;
                 self.done(code, tail);
             }
@@ -2086,6 +2090,24 @@ impl<'a> Compiler<'a> {
         let n = self.exps(args, e, depth, code)?;
         self.note_op(x, name, code);
         self.standard_on(name, n, code)
+    }
+
+    /// With certificates wanted: that the next cell makes the data `x` is
+    /// (a product, a sum, a module), of the type checking gave it, which
+    /// the verifier checks the values against.
+    fn note_made(&mut self, x: ExpId, code: &mut Vec<Item>) {
+        if self.certs.is_some()
+            && let Some(&t) = self.c.facts.types.get(&x)
+        {
+            // A module: made as its own type, and taken as the one it was
+            // checked as.
+            let made = match self.c.facts.module_own.get(&x) {
+                Some(&own) => vec![crate::ast::D::Type(t), crate::ast::D::Type(own)],
+                None => vec![crate::ast::D::Type(t)],
+            };
+            self.ops.push(("%make".to_string(), made));
+            code.push(Item::Op(self.ops.len() - 1));
+        }
     }
 
     /// With certificates wanted: that the next cell runs standard operation
