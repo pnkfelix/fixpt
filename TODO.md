@@ -2727,8 +2727,8 @@ is set at the write or after it.
 compiler's words, and a verifier, as Hoare logic. The goal of this stage
 (the user's): every word of every program the checker accepts verifies,
 by type assertions, before propositions beyond types are built on it.
-976 of 1,094 test program words verify (`tests/typed_cells.rs`); 349
-mutants of verified words are all refused; 37 type VCs fail, in 19
+1,007 of 1,094 test program words verify (`tests/typed_cells.rs`); 380
+mutants of verified words are all refused; 19 type VCs fail, in 11
 programs, each pinned with its cause (`KNOWN_FAILURES`), none a fault of
 the checker's or the compiler's found so far.
 
@@ -2744,12 +2744,16 @@ value tested, by a sum's tag both ways, a `tagcase`'s dead end; control
 (prompts, marks, continuations); `car` of what may not be a pair, a debt.
 
 Left, most first, with what each needs:
-1. **Modules that include another** (24 words stopped; most of the
-   failing modules): the module holds the one included, and its type
-   lists that one's values, reached by a path (`Pick::Path`, `with_vals`).
-   The certificate would carry the layout, or the verifier follow it.
-   And a module repacked with a witness (`counter..t` taken as an
-   abstract `t`): an existential's introduction, the witness given.
+1. **Modules, two left** (done 2026-10-22, with the user's ask that the
+   checker's module logic be reused, not rebuilt: the checker's layout
+   decisions, kept as data, checked by the verifier, not trusted: the
+   items' product's type, `module_raw`; the type picked to,
+   `reshape_chosen`; each abstract type taken in with its witness,
+   `packs`; module subtyping packs the rest). Left: a module item's
+   lambda whose free name the body reaches through `(with %include …)`
+   is recorded at the binding outside (the standard `get`): record a
+   lambda's free variables after its body, leaving out what a `with` in
+   it binds (`with_vals`); and a functor's result.
 2. **Regions** (TC4: `%region-enter`, `%reap-enter`, `%region-closure`;
    and 8 failing VCs, `letfreeze`, `acyclic`: a list made in `r` taken as
    `const`): regions entered and left as capabilities, private effects

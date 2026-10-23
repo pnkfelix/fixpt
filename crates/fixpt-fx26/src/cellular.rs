@@ -34,6 +34,9 @@ enum Item {
     /// For typed cellular code: the next cell runs standard operation
     /// `Compiler::ops[k]`, instantiated as it says.
     Op(usize),
+    /// For typed cellular code: the data the next cell makes packs abstract
+    /// types with witnesses, `Compiler::packs[k]`.
+    Pack(usize),
     /// For typed cellular code: a `plambda`'s body, `Compiler::gens[k]`'s
     /// binders, starts here (`true`) or has just ended, its value made.
     Gen(usize, bool),
@@ -223,6 +226,8 @@ pub struct Compiler<'a> {
     ops: Vec<(String, Vec<crate::ast::D>)>,
     last_ops: Vec<(usize, String, Vec<crate::ast::D>)>,
     gens: Vec<Vec<(crate::ast::DVar, crate::ast::Kind)>>,
+    packs: Vec<Vec<(crate::ast::DVar, TyId)>>,
+    last_packs: Vec<(usize, Vec<(crate::ast::DVar, TyId)>)>,
     last_gens: Vec<(usize, usize, Vec<(crate::ast::DVar, crate::ast::Kind)>)>,
     /// The name of the lambda whose body is compiled, without where it
     /// starts: an inner lambda's word is named within it, `outer/inner@N`.
@@ -371,6 +376,8 @@ impl<'a> Compiler<'a> {
             last_ops: Vec::new(),
             gens: Vec::new(),
             last_gens: Vec::new(),
+            packs: Vec::new(),
+            last_packs: Vec::new(),
             scope_name: None,
             bind_name: None,
             defining: None,
@@ -438,7 +445,7 @@ impl<'a> Compiler<'a> {
     fn assemble(&mut self, items: &[Item], name: &str) -> R<Value> {
         let size = |i: &Item| match i {
             Item::Cell(_) => 1,
-            Item::Label(_) | Item::Note(_) | Item::Op(_) | Item::Gen(..) => 0,
+            Item::Label(_) | Item::Note(_) | Item::Op(_) | Item::Gen(..) | Item::Pack(_) => 0,
             Item::Branch(_) | Item::ZBranch(_) => 2,
         };
         let mut at = vec![0i64; self.labels];
@@ -454,6 +461,7 @@ impl<'a> Compiler<'a> {
         self.last_notes.clear();
         self.last_ops.clear();
         self.last_gens.clear();
+        self.last_packs.clear();
         let mut gen_starts: HashMap<usize, usize> = HashMap::new();
         for i in items {
             match i {
@@ -464,6 +472,7 @@ impl<'a> Compiler<'a> {
                     let (name, inst) = self.ops[*k].clone();
                     self.last_ops.push((pos as usize, name, inst));
                 }
+                Item::Pack(k) => self.last_packs.push((pos as usize, self.packs[*k].clone())),
                 Item::Gen(k, true) => {
                     gen_starts.insert(*k, pos as usize);
                 }
@@ -940,7 +949,14 @@ impl<'a> Compiler<'a> {
                 for s in &vals {
                     self.op1(code, "slot", Value::fixnum(*s as i64));
                 }
-                self.note_made(x, code);
+                // The items' product, of the type checking gave it; the
+                // module's own, picked from it, follows (`reshaped`).
+                if self.certs.is_some()
+                    && let Some(&raw) = self.c.facts.module_raw.get(&x)
+                {
+                    self.ops.push(("%make".to_string(), vec![crate::ast::D::Type(raw)]));
+                    code.push(Item::Op(self.ops.len() - 1));
+                }
                 self.prim(code, "%make-frozen", 1 + vals.len())?;
                 self.done(code, tail);
                 self.unbind(code, depth, made, tail);
@@ -1981,6 +1997,7 @@ impl<'a> Compiler<'a> {
             notes: self.last_notes.clone(),
             ops: self.last_ops.clone(),
             gens: self.last_gens.clone(),
+            packs: self.last_packs.clone(),
             own_ops: self.last_ops.iter().map(|(k, _, _)| *k).collect(),
             ..Default::default()
         };
@@ -2134,12 +2151,18 @@ impl<'a> Compiler<'a> {
         {
             // A module: made as its own type, and taken as the one it was
             // checked as.
-            let made = match self.c.facts.module_own.get(&x) {
+            // Picked to a type wanted (`reshape`): made as the values picked
+            // are; else a module: made as its own type.
+            let made = match self.c.facts.reshape_chosen.get(&x).or(self.c.facts.module_own.get(&x)) {
                 Some(&own) => vec![crate::ast::D::Type(t), crate::ast::D::Type(own)],
                 None => vec![crate::ast::D::Type(t)],
             };
             self.ops.push(("%make".to_string(), made));
             code.push(Item::Op(self.ops.len() - 1));
+            if let Some(packs) = self.c.facts.packs.get(&x) {
+                self.packs.push(packs.clone());
+                code.push(Item::Pack(self.packs.len() - 1));
+            }
         }
     }
 
@@ -2530,8 +2553,19 @@ impl<'a> Compiler<'a> {
                 _ => None,
             })
         };
+        // Else as a reference to it in the body was checked: the binding the
+        // body saw (a parameter that hides it is found first, above).
+        let span = c.arena.span_of(body);
+        let referred = |n: &Sym| {
+            c.facts.types.iter().find_map(|(e, t)| {
+                let at = c.arena.span_of(*e);
+                (at.file == span.file && at.start >= span.start && at.end <= span.end && matches!(c.arena.exp_at(*e), Exp::Var(m) if m == n)).then_some(*t)
+            })
+        };
         let elsewhere = |n: &Sym| {
-            c.facts.lambdas.values().flat_map(|s| s.params.iter().chain(&s.frees)).find(|(m, _)| m == n).map(|(_, t)| *t).or_else(|| c.global_type(*n))
+            referred(n)
+                .or_else(|| c.facts.lambdas.values().flat_map(|s| s.params.iter().chain(&s.frees)).find(|(m, _)| m == n).map(|(_, t)| *t))
+                .or_else(|| c.global_type(*n))
         };
         let by_name = |n: &Sym| sig.params.iter().rev().chain(sig.frees.iter()).find(|(m, _)| m == n).map(|(_, t)| *t).or_else(|| included(n)).or_else(|| elsewhere(n));
         let (Some(ps), Some(fs)) = (params.iter().map(by_name).collect::<Option<Vec<_>>>(), fv.iter().map(by_name).collect::<Option<Vec<_>>>()) else { return };
@@ -2546,6 +2580,7 @@ impl<'a> Compiler<'a> {
             notes: self.last_notes.clone(),
             ops: self.last_ops.clone(),
             gens: self.last_gens.clone(),
+            packs: self.last_packs.clone(),
             conversion,
             own_ops: Vec::new(),
         };
@@ -2910,7 +2945,7 @@ impl<'a> Compiler<'a> {
         }
         let w = self.assemble(&code, "program")?;
         if let Some(certs) = &mut self.certs {
-            certs.words.insert(w.raw(), crate::typed_cells::Cert { notes: self.last_notes.clone(), ops: self.last_ops.clone(), gens: self.last_gens.clone(), ..Default::default() });
+            certs.words.insert(w.raw(), crate::typed_cells::Cert { notes: self.last_notes.clone(), ops: self.last_ops.clone(), gens: self.last_gens.clone(), packs: self.last_packs.clone(), ..Default::default() });
         }
         Ok(w)
     }

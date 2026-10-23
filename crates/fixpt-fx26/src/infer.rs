@@ -395,7 +395,10 @@ impl Checker {
             self.convert_at(e, c, n);
             return Ok(());
         }
-        if let Some(at) = self.reshape(got, want) {
+        if let Some((at, chosen)) = self.reshape(got, want) {
+            if self.record_types {
+                self.facts.reshape_chosen.insert(e, chosen);
+            }
             // Made already of another's values (`extend`): the two at once.
             let at = match self.facts.reshaped.get(&e) {
                 Some(inner) => at.iter().map(|i| inner[*i]).collect(),

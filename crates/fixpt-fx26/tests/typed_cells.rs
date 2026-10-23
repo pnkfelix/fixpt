@@ -160,10 +160,9 @@ fn a_verified_word_changed_is_refused() {
 /// Their causes: regions frozen or certified (`letfreeze`, `acyclic`: a
 /// list made in `r` taken as `const`); a natural after a test (size
 /// facts); a flat `blobref` under a size binder, which the checker
-/// relates while the binder is in scope; and modules: one that includes
-/// another holds it, its type's values reached by a path the verifier
-/// does not follow (reshaped, or read by `with`), and a module repacked
-/// with a witness (`counter..t` taken as an abstract `t`).
+/// relates while the binder is in scope; a module item's lambda whose
+/// free name the body reaches through `(with %include …)`, recorded at
+/// the binding outside (the standard `get`); a functor's result.
 const KNOWN_FAILURES: &[(&str, usize)] = &[
     ("bidirectional/arrow-star-groups.fx", 4),
     ("bidirectional/arrow-star-module.fx", 2),
@@ -171,16 +170,8 @@ const KNOWN_FAILURES: &[(&str, usize)] = &[
     ("bloblet/flat-unsized.fx", 2),
     ("datum/acyclic.fx", 3),
     ("datum/confirm-length.fx", 1),
-    ("modules/dependent-later.fx", 1),
-    ("modules/extend-sees-types.fx", 3),
-    ("modules/include-family.fx", 2),
-    ("modules/include-types.fx", 4),
-    ("modules/include-types-inside.fx", 2),
-    ("modules/mismatch.fx", 1),
-    ("modules/region-parameter.fx", 1),
-    ("modules/reorder.fx", 3),
+    ("modules/include-abstract.fx", 1),
     ("modules/stack-by-functor.fx", 1),
-    ("modules/width.fx", 2),
     ("run/acyclic-lists.fx", 2),
     ("run/letfreeze.fx", 1),
     ("run/well-founded.fx", 1),
@@ -222,7 +213,7 @@ fn every_test_programs_words_verified() {
     }
     // A ratchet: what verifies now, as the verifier grows; and no failure
     // outside those the verifier's missing rules explain.
-    assert!(t.verified >= 976, "fewer words verify: {}", t.verified);
+    assert!(t.verified >= 1007, "fewer words verify: {}", t.verified);
     let mut by: BTreeMap<&str, usize> = BTreeMap::new();
     for f in &t.failed {
         *by.entry(f.split(':').next().unwrap_or("")).or_default() += 1;

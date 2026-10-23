@@ -48,6 +48,13 @@ impl Checker {
         let r = self.synth_module_items(items, span);
         self.truncate_env(depth);
         let r = r.and_then(|(abs, descs, vals, eff)| {
+            // The product its items make, one value each (an `include` the
+            // module included), before its type is made of it: what the
+            // paths of `reshaped` are into.
+            if self.record_types {
+                let raw = self.arena.ty(Ty::Module { abs: abs.clone(), descs: descs.clone(), vals: vals.clone() });
+                self.facts.module_raw.insert(e, raw);
+            }
             // A component's module, bound inside, has abstract types no one
             // outside can name.
             let inner: Vec<DVar> = self.skolems[named..].to_vec();
@@ -213,6 +220,7 @@ impl Checker {
             }
         }
         self.facts.reshaped.insert(e, path);
+        self.note_packs(e, &map);
         let (descs, vals) = if map.is_empty() {
             (descs, out)
         } else {
@@ -249,6 +257,28 @@ impl Checker {
             own.push((*a, w));
         }
         (aliases, own)
+    }
+
+    /// With `record_types`: module `e`'s abstract types taken in from
+    /// others (`abs_taken`'s `map`, each module's own to a fresh one), each
+    /// fresh one packed with the module's own as its witness
+    /// (`NodeFacts::packs`).
+    fn note_packs(&mut self, e: ExpId, map: &HashMap<DVar, D>) {
+        if !self.record_types {
+            return;
+        }
+        let pairs: Vec<(DVar, DVar)> = map
+            .iter()
+            .filter_map(|(v, d)| match d {
+                D::Type(w) | D::Fun(w) => match self.arena.get(self.arena.resolve(*w)) {
+                    Ty::Var(w) => Some((*w, *v)),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+        let packs: Vec<(DVar, TyId)> = pairs.into_iter().map(|(w, v)| (w, self.arena.ty(Ty::Var(v)))).collect();
+        self.facts.packs.entry(e).or_default().extend(packs);
     }
 
     /// Whether a module is an `(extend e0 e1)`, as the parser makes one.
@@ -309,6 +339,7 @@ impl Checker {
             }
         }
         self.facts.reshaped.insert(e, at);
+        self.note_packs(e, &map);
         let descs: Vec<(Sym, TyId)> = descs.iter().map(|(d, x)| (*d, self.subst(*x, &map))).collect();
         let out: Vec<(Sym, TyId)> = out.iter().map(|(x, y)| (*x, self.subst(*y, &map))).collect();
         for (n, t) in out.iter().chain(&descs) {
@@ -1098,7 +1129,7 @@ impl Checker {
     /// A module of type `got` made one of type `want`, which has fewer of
     /// its values or the same in another order: each of `want`'s values'
     /// position in `got`, if `got`'s values so chosen fit `want`.
-    pub(crate) fn reshape(&mut self, got: TyId, want: TyId) -> Option<Vec<usize>> {
+    pub(crate) fn reshape(&mut self, got: TyId, want: TyId) -> Option<(Vec<usize>, TyId)> {
         let (Ty::Module { abs, descs, vals }, Ty::Module { vals: wanted, .. }) =
             (self.arena.get(self.arena.resolve(got)).clone(), self.arena.get(self.arena.resolve(want)).clone())
         else {
@@ -1110,7 +1141,7 @@ impl Checker {
         }
         let chosen = at.iter().map(|k| vals[*k]).collect();
         let t = self.arena.ty(Ty::Module { abs, descs, vals: chosen });
-        self.subtype(t, want).then_some(at)
+        self.subtype(t, want).then_some((at, t))
     }
 
     /// A module-typed binding's types, by component name: each abstract

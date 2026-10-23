@@ -528,6 +528,19 @@ pub struct NodeFacts {
     /// abstract types, before it is taken as any other. With
     /// `record_types`.
     pub module_own: HashMap<ExpId, TyId>,
+    /// Each module made: the type of the product its items make, a value
+    /// each (an `include`'s, the module included), which its own type's
+    /// values are picked from (`reshaped`'s paths). With `record_types`.
+    pub module_raw: HashMap<ExpId, TyId>,
+    /// Each module whose type takes in another's abstract types (`include`,
+    /// `extend`): each fresh abstract type, with the type it is packed with,
+    /// its witness. With `record_types`.
+    pub packs: HashMap<ExpId, Vec<(DVar, TyId)>>,
+    /// Each module given where a type of fewer values, or another order, is
+    /// wanted (`reshaped`): the type of the values picked, as the module
+    /// given has them, which is within the type wanted (`Checker::reshape`).
+    /// With `record_types`.
+    pub reshape_chosen: HashMap<ExpId, TyId>,
     /// A module's abstract type's conversions, `up-t` and `down-t`, each
     /// the identity on the representation, by its lambda's body: the type
     /// it is bound at, from the representation to the abstract type or
