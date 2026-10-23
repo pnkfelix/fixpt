@@ -47,6 +47,10 @@ usage:
                                  drawn from its parameters' types (100);
                                  the first counterexample of each; exit 1 if
                                  one is found
+  fixpt verify INPUT [NAME…]     FX-26: compile the program with certificates
+                                 and verify each word (or each NAME) against
+                                 its own: what fails or is left open, and
+                                 why; exit 1 if a word is not verified
   fixpt compile INPUT            FX-26: both compilers, with register code;
                                  the code, and where the compilers disagree
                                  (`--eval`, `--check` and `--compile` too)
@@ -112,8 +116,8 @@ made with rather than being told.
 
 /// The commands, as the first word: a word that is none of them but names
 /// a file runs it (`fixpt FILE`).
-const COMMANDS: [&str; 18] = [
-    "repl", "fx26", "scheme", "run", "eval", "check", "test", "compile", "machines", "bench", "dump-heap", "build", "run-image", "image",
+const COMMANDS: [&str; 19] = [
+    "repl", "fx26", "scheme", "run", "eval", "check", "test", "verify", "compile", "machines", "bench", "dump-heap", "build", "run-image", "image",
     "front-end-files", "help", "regcode-survey", "--help",
 ];
 
@@ -401,6 +405,23 @@ fn run(args: &[String]) -> i32 {
                 }
                 None => {
                     eprintln!("fixpt test: needs a file, `-` or a program");
+                    2
+                }
+            }
+        }
+        Some("verify") => {
+            if dialect != Dialect::Fx26 {
+                eprintln!("fixpt verify: FX-26 only");
+                return 2;
+            }
+            match rest.get(1).map(|f| fx26::input(std::slice::from_ref(f))) {
+                Some(Ok((name, text))) => fx26::verify(backend, &name, &text, &rest[2..]),
+                Some(Err(e)) => {
+                    eprintln!("fixpt: {e}");
+                    1
+                }
+                None => {
+                    eprintln!("fixpt verify: needs a file, `-` or a program");
                     2
                 }
             }

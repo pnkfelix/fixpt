@@ -1502,3 +1502,19 @@ The user: "let's attack requires and ensures next" (the design note's
 5. **Inputs drawn the same way each time**: 13 edge integers first, then
    a fixed-seed generator in [-100, 100]; lists of up to 5.
 
+## `fixpt verify` and the REPL's `,verify` (2026-10-23)
+
+1. **The Rust compiler's words are what is verified**, not the words the
+   REPL runs: only the Rust compiler makes certificates. `,verify` replays
+   what was defined (each form the checker took, as typed, and each file
+   `,load` ran whole) as one program through the Rust checker and
+   compiler, then verifies its words: what is verified is the program,
+   not the REPL's machine code. Entries held pending, waiting on types,
+   are not replayed.
+2. **A command, not a mode**: nothing is verified unless asked, so that
+   the REPL is as fast as it was; `,verify NAME …` narrows what is said,
+   not what is compiled.
+3. **"Open", not "false"**: the verifier cannot tell a false obligation
+   from one beyond it, so the report says open and points at `fixpt test`.
+4. **One driver** (`fixpt_fx26::verifying`) for the CLI, the REPL and the
+   tests' survey, which now calls it in place of its own copy.

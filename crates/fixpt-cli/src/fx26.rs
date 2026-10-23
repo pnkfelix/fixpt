@@ -197,6 +197,9 @@ pub fn repl(backend: Backend) -> i32 {
     // so that a load does not run again what it will define again.
     session.set_defer_reruns(true);
     let mut outdated_said = Vec::new();
+    // The forms the checker took, as typed, and the files loaded: the
+    // program `,verify` verifies.
+    let mut program = String::new();
     loop {
         // Said when what is out of date changes.
         let outdated = session.outdated();
@@ -314,10 +317,30 @@ pub fn repl(backend: Backend) -> i32 {
                 Ok(t) => {
                     let dir = std::path::Path::new(path).parent().map(|d| d.to_path_buf());
                     let outer = std::mem::replace(&mut session.checker.base_dir, dir);
-                    eval_program_in(&mut session, path, &t, false);
+                    if eval_program_in(&mut session, path, &t, false) == 0 {
+                        program += &t;
+                        program.push('\n');
+                    }
                     session.checker.base_dir = outer;
                 }
                 Err(e) => println!("; cannot read `{path}`: {e}"),
+            }
+            continue;
+        }
+        // `,verify [NAME …]`: the forms typed so far, compiled with
+        // certificates, each word verified (or only those named).
+        if let Some(arg) = text.trim().strip_prefix(",verify")
+            && (arg.is_empty() || arg.starts_with(char::is_whitespace))
+        {
+            if program.trim().is_empty() {
+                println!("; nothing to verify yet: `,verify` verifies what has been defined here");
+                continue;
+            }
+            let only: Vec<String> = arg.split_whitespace().map(String::from).collect();
+            let base = session.checker.base_dir.clone();
+            match fixpt_fx26::verifying::report(&mut session.scheme, &program, base, &only) {
+                Ok((lines, _)) => lines.iter().for_each(|l| println!("; {l}")),
+                Err(e) => println!("; {e}"),
             }
             continue;
         }
@@ -461,6 +484,10 @@ pub fn repl(backend: Backend) -> i32 {
             if let Some(b) = before {
                 GcStats::of(&mut session).form_since(&b);
                 GcStats::end_form(&mut session, &b);
+            }
+            if ran.is_ok() {
+                program += &text[form.span.start as usize..form.span.end as usize];
+                program.push('\n');
             }
             match ran {
                 Ok(out) if disassembling => match &out.value {
@@ -686,6 +713,28 @@ pub fn input(args: &[String]) -> Result<(String, String), String> {
 
 /// `fixpt check`: both checkers on a program, each form's type and effect;
 /// said once where they agree, both where they do not (and then 1).
+/// `fixpt verify`: the program's words verified against their
+/// certificates (`fixpt_fx26::verifying`), or only those `only` names.
+pub fn verify(backend: Backend, name: &str, text: &str, only: &[String]) -> i32 {
+    let mut session = match start(backend) {
+        Ok(s) => s,
+        Err(code) => return code,
+    };
+    let base = std::path::Path::new(name).parent().map(|d| d.to_path_buf());
+    match fixpt_fx26::verifying::report(&mut session.scheme, text, base, only) {
+        Ok((lines, all)) => {
+            for l in lines {
+                println!("{l}");
+            }
+            if all { 0 } else { 1 }
+        }
+        Err(e) => {
+            eprintln!("fixpt verify: {e}");
+            1
+        }
+    }
+}
+
 /// `fixpt test`: the program run, then its specified procedures and
 /// harnesses tested on drawn inputs (`fixpt_fx26::spec_tests`).
 pub fn test(backend: Backend, name: &str, text: &str, runs: usize) -> i32 {

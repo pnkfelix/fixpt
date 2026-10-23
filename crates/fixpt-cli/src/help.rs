@@ -214,6 +214,7 @@ fn overview(h: &dyn Helpful) {
         rows.push((",pending [clear]", "the entries of types waiting on types not defined yet, or drop them"));
         rows.push((",rerun-outdated", "run the definitions out of date again, oldest first"));
         rows.push((",redefine b|r", "whether the next redefinition that would break definitions breaks them or is refused"));
+        rows.push((",verify [NAME …]", "verify the words of what was defined here against their certificates, or NAME's: what fails or is left open"));
         rows.push((",step-limit [N|none]", "show or set how many steps a form may take"));
         rows.push((",time E", "run E, then how long it took to check, generate code for and run, and its collections"));
     }

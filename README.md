@@ -453,6 +453,10 @@ input, or program text:
   drawn from its parameters' types, and prints the first counterexample
   to a specification or an `assert` each one meets (`docs/fx26.md`,
   "Specifications").
+- `fixpt verify INPUT [NAME …]` compiles the program with certificates and
+  verifies each word against its own, printing the obligations that fail
+  or are left open; `,verify [NAME …]` in the REPL does the same for what
+  has been defined there.
 
 The eager reader (see "The REPL" above) has been ported to FX-26
 (`crates/fixpt-fx26/src/eager-reader.fx`). It is checked, lowered and run

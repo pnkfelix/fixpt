@@ -4,10 +4,10 @@
 
 use fixpt_engine::Backend;
 use fixpt_fx26::session::Fx26Session;
-use fixpt_fx26::typed_cells::{verify, Certs};
+use fixpt_fx26::typed_cells::verify;
+use fixpt_fx26::verifying::certified;
 use fixpt_fx26::{Checker, Top};
 use fixpt_heap::Value;
-use fixpt_read::FileId;
 use std::collections::BTreeMap;
 
 fn modules_dir() -> std::path::PathBuf {
@@ -28,18 +28,7 @@ fn checked(text: &str) -> Result<(Checker, Vec<Top>), String> {
 
 /// The same, `text` loading files from `base`.
 fn checked_in(text: &str, base: std::path::PathBuf) -> Result<(Checker, Vec<Top>), String> {
-    let mut c = Checker::new();
-    c.base_dir = Some(base);
-    c.record_types = true;
-    let forms = c.read_in(FileId(0), text).map_err(|e| e.message)?;
-    let done = c.declare_ahead(&forms).map_err(|e| e.message)?;
-    let mut tops = Vec::new();
-    for (f, done) in forms.iter().zip(done) {
-        if !done {
-            tops.extend(c.top_all(f).map_err(|e| e.message)?);
-        }
-    }
-    Ok((c, tops))
+    fixpt_fx26::verifying::checked_in(text, Some(base))
 }
 
 /// What verifying a program's words found.
@@ -77,60 +66,41 @@ fn verify_program(s: &mut Fx26Session, name: &str, text: &str, t: &mut Tally) {
         t.refused += 1;
         return;
     };
-    fixpt_fx26::syn::set_load_base(Some(base_of(name)));
-    s.scheme.scope(|sc| {
-        sc.make(|m| {
-            let start = Instant::now();
-            let certs = {
-                let mut comp = fixpt_fx26::cellular::Compiler::new(m.heap(), &c, text);
-                comp.certs = Some(Certs::default());
-                if comp.program(&tops).is_err() {
-                    t.uncompiled += 1;
-                    t.compile_time += start.elapsed();
-                    return Value::NULL;
-                }
-                comp.certs.take().expect("made")
-            };
-            t.compile_time += start.elapsed();
-            let start = Instant::now();
-            let mut certs = certs;
-            if let Err(why) = certs.settle(&mut c) {
-                t.failed.push(format!("{name}: {why}"));
+    let Ok(v) = fixpt_fx26::verifying::verify_program(&mut s.scheme, &mut c, text, &tops, Some(base_of(name))) else {
+        t.uncompiled += 1;
+        return;
+    };
+    t.compile_time += v.compile_time;
+    t.verify_time += v.verify_time;
+    if let Some(why) = &v.unsettled {
+        t.failed.push(format!("{name}: {why}"));
+    }
+    for (word, o) in &v.words {
+        // The word, by its name, in what is said of it.
+        let name = &format!("{name} `{}`", word.as_deref().unwrap_or("?"));
+        if !o.verified() {
+            t.unverified.push(name.clone());
+            if KNOWN_GAPS.contains(&name.as_str()) {
+                t.open_gaps += o.open.len();
+                t.stopped_gaps.extend(o.stopped.clone());
             }
-            let heap: &fixpt_heap::Heap = m.heap();
-            for raw in certs.words.keys() {
-                let o = verify(&mut c, heap, &certs, Value::from_raw(*raw));
-                // The word, by its name, in what is said of it.
-                let named = heap.bloblet_slot(Value::from_raw(*raw), fixpt_heap::layout::cellular::WORD_NAME);
-                let word = if heap.is_a(named, fixpt_heap::ObjType::Symbol) { heap.symbol_name(named).to_string() } else { "?".into() };
-                let name = &format!("{name} `{word}`");
-                if !o.verified() {
-                    t.unverified.push(name.clone());
-                    if KNOWN_GAPS.contains(&name.as_str()) {
-                        t.open_gaps += o.open.len();
-                        t.stopped_gaps.extend(o.stopped.clone());
-                    }
-                }
-                t.words += 1;
-                t.discharged += o.discharged;
-                t.verified += o.verified() as usize;
-                if let Some(why) = &o.stopped {
-                    *t.stopped.entry(why.clone()).or_default() += 1;
-                    if std::env::var("WHY").is_ok_and(|w| why.contains(&w)) {
-                        eprintln!("  STOP {name}: {why}");
-                    }
-                }
-                t.open += o.open.len();
-                t.assumed += o.assumed.len();
-                if t.open_examples.len() < 12 {
-                    t.open_examples.extend(o.open.iter().take(1).map(|x| format!("{name}: {x}")));
-                }
-                t.failed.extend(o.failed.iter().map(|f| format!("{name}: {f}")));
+        }
+        t.words += 1;
+        t.discharged += o.discharged;
+        t.verified += o.verified() as usize;
+        if let Some(why) = &o.stopped {
+            *t.stopped.entry(why.clone()).or_default() += 1;
+            if std::env::var("WHY").is_ok_and(|w| why.contains(&w)) {
+                eprintln!("  STOP {name}: {why}");
             }
-            t.verify_time += start.elapsed();
-            Value::NULL
-        });
-    });
+        }
+        t.open += o.open.len();
+        t.assumed += o.assumed.len();
+        if t.open_examples.len() < 12 {
+            t.open_examples.extend(o.open.iter().take(1).map(|x| format!("{name}: {x}")));
+        }
+        t.failed.extend(o.failed.iter().map(|f| format!("{name}: {f}")));
+    }
 }
 
 /// Each word of `text` that verifies, mutated one way at a time where it
@@ -146,16 +116,8 @@ fn mutants(s: &mut Fx26Session, name: &str, text: &str, swaps: &[(&str, &str)], 
     let (mut made, mut kept) = (0, Vec::new());
     s.scheme.scope(|sc| {
         sc.make(|m| {
-            let certs = {
-                let mut comp = fixpt_fx26::cellular::Compiler::new(m.heap(), &c, text);
-                comp.certs = Some(Certs::default());
-                if comp.program(&tops).is_err() {
-                    return Value::NULL;
-                }
-                comp.certs.take().expect("made")
-            };
-            let mut certs = certs;
-            certs.settle(&mut c).expect("settled");
+            let Ok((certs, unsettled)) = certified(m.heap(), &mut c, text, &tops) else { return Value::NULL };
+            assert!(unsettled.is_none(), "not settled: {unsettled:?}");
             for raw in certs.words.keys() {
                 let w = Value::from_raw(*raw);
                 // (With `open`, only a specified word: another promises
@@ -214,15 +176,8 @@ fn weakened(s: &mut Fx26Session, name: &str, text: &str) -> (usize, Vec<String>,
     let (mut made, mut kept, mut by_masks) = (0, Vec::new(), Vec::new());
     s.scheme.scope(|sc| {
         sc.make(|m| {
-            let mut certs = {
-                let mut comp = fixpt_fx26::cellular::Compiler::new(m.heap(), &c, text);
-                comp.certs = Some(Certs::default());
-                if comp.program(&tops).is_err() {
-                    return Value::NULL;
-                }
-                comp.certs.take().expect("made")
-            };
-            certs.settle(&mut c).expect("settled");
+            let Ok((mut certs, unsettled)) = certified(m.heap(), &mut c, text, &tops) else { return Value::NULL };
+            assert!(unsettled.is_none(), "not settled: {unsettled:?}");
             let words: Vec<u64> = certs.words.keys().copied().collect();
             for raw in words {
                 let w = Value::from_raw(raw);

@@ -875,6 +875,7 @@ pub mod debts;
 pub mod standard;
 pub mod top;
 pub mod unparse;
+pub mod verifying;
 
 pub use check::{Checker, Checked};
 pub use top::Top;

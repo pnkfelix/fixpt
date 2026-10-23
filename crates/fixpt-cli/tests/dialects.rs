@@ -300,6 +300,23 @@ fn the_step_limit_can_be_set_or_lifted() {
     assert!(out.contains("step limit: 20000000") && out.contains("step limit: none"), "{out}");
 }
 
+/// `fixpt verify` and the REPL's `,verify`: a word whose `ensures` does not
+/// hold is not verified, its obligation said; one that does is.
+#[test]
+fn verify_says_which_words_verify() {
+    let bad = "(define bad (-> ((x int)) int (ensures r (<= 0 r))) (lambda (x) (if (< x 0) x (- 0 x))))";
+    let good = "(define good (-> ((x int)) int (ensures r (<= 0 r))) (lambda (x) (if (< x 0) (- 0 x) x)))";
+    let out = Command::new(FIXPT).args(["--dialect", "fx26", "verify", &format!("{bad} {good}")]).output().expect("runs");
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.code() == Some(1), "{said}");
+    assert!(said.contains("`bad`: not verified") && said.contains("the ensures") && said.contains("`good`: verified"), "{said}");
+    let out = Command::new(FIXPT).args(["--dialect", "fx26", "verify", good]).output().expect("runs");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stdout));
+    let (_, out, _) = fx91(&["repl", "--dialect", "fx26"], &format!(",verify\n{bad}\n{good}\n,verify good\n,verify bad\n"));
+    assert!(out.contains("nothing to verify yet"), "{out}");
+    assert!(out.contains("; `good`: verified") && out.contains("; `bad`: not verified"), "{out}");
+}
+
 /// `fixpt ARGS` with `stdin`, no dialect given: whether it succeeded, and
 /// its standard output.
 fn fixpt(args: &[&str], stdin: &str) -> (bool, String) {
