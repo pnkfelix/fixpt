@@ -357,7 +357,7 @@ checker needs the same at source level, to check a body against its
    C2), the FX-26 compiler making the same certificates, fragments
    verified on loading (C10), under the loader's policy (§7).
 
-## 10. Where it stands (2026-10-22)
+## 10. Where it stands (2026-10-23)
 
 TC1 and the start of TC2, over the Rust compiler (`cellular.rs`) and
 checker:
@@ -397,6 +397,20 @@ checker's instantiations at calls, at values used at an instance, at a
 narrowing by a predicate's latent propositions (the call rule with an
 `ensures`), by a value tested, by a sum's tag both ways; unreachable
 states (a sum with no arm left); control's operations and prompts.
+
+TC2 to TC4 are met for the types (2026-10-23): every one of the 1,109
+words of the test programs verifies, no VC failing or left open, 13
+relative to named assumptions (the built-in scheduler's procedures at
+their forms' types, §7's trust); 437 mutants are all refused; and
+`tests/typed_cells.rs` now requires it. Where the checker has a rule the
+verifier needs, it is the checker's, shared, not copied: module layout
+as data, size facts asked of `nat_arith`, `Checker::renamed` for two
+`poly`s, `Checker::blobref_rule` for flat data. The certificate carries
+what checking chose freely and the cells cannot show: a new blobref's
+flat (`%flat`), a list copy's type (`%copy`), as it carries
+instantiations; each is checked, not trusted. What the stage leaves for
+TC5: the facts kept are the checkers' (types, sizes, a flat sum's
+variant); propositions beyond them are §8's `requires` and `ensures`.
 
 ## 11. Open questions (the user's)
 

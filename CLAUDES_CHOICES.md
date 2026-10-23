@@ -1238,3 +1238,41 @@ more general expressions)." The design is
    Rust checker has at hand; the FX-26 compiler's certificates are TC6.
 7. **Recording is off unless asked** (`Checker::record_types`,
    `Compiler::certs`): it costs every check, as `record_operands` does.
+
+## Typed cellular code, every word verified (2026-10-23)
+
+The user: finish the type VCs first ("a system we believe to be sound
+and complete"), and "If you get stuck, switch to a different class of
+VC." The last classes, and what was chosen in them:
+
+1. **The checker's rule, shared.** Where the verifier needs a typing rule
+   the checker has, the checker's is made a function of types and both
+   call it: `Checker::renamed` (one `poly`'s body under another's
+   binders), `Checker::blobref_rule` (flat data). `synth_blobref` keeps
+   its error messages, each with which part it blames (`Blame`).
+2. **What checking chose freely, the certificate says, and it is
+   checked.** A new blobref's flat comes from the type it was checked
+   against, which no cell shows: the certificate says it (`%flat`) and
+   the rule checks it, as it checks a `%make`'s type. Likewise the list
+   type `apply`'s or `list`'s copy is made at (`%copy`).
+3. **A new blobref's fit is checked at run time, and the verifier
+   requires the check.** Its bytes must lie in the suffix; the compiler
+   follows it with `%fx26-suffix-fits`, and the verifier takes the two
+   as one, refusing it without the check or with a branch between.
+4. **A flat sum's variant is a fact of the way, not a narrowed type.** A
+   `tagcase` on a flat sum tests a tag read from the suffix; the way
+   where it names a variant keeps that as a fact about the blobref's
+   term (`State::variants`, joined as every way in has it), because
+   narrowing the sum's type would change its layout.
+5. **`%fx26-flat-no-arm` gives nothing.** It fails at run time; its
+   result is typed `void`, so the way after it is unreachable. A tag no
+   arm has is a safe failure, as `car` of `nil` is.
+6. **Thunks the compiler makes are signed by their body.** A `prompt`'s
+   body becomes a word of no parameters that checking never saw as a
+   lambda: its signature is the body's type and effect as checked.
+7. **A `vsubr`'s word is signed by its type unfolded**, in
+   `Certs::settle`, which now takes the checker mutably to make the
+   unfolding: the compiler holds the checker immutably.
+8. **The test now requires every word**, not a count: a word that stops,
+   a VC failing or open, fails it. The scheduler's 13 assumptions stay
+   assumptions (the note's §7), said, not refused.

@@ -11,6 +11,7 @@
 //! prover outside.
 
 use crate::ast::{Effect, Size, Ty, TyId};
+use fixpt_read::Sym;
 use crate::check::Checker;
 use fixpt_heap::layout::cellular::{operands, CLOSURE_FREE0, CLOSURE_WORD, GLOBAL_VALUE, PRIMITIVES, ROUTINES, WORD_CELL0};
 use fixpt_heap::{Heap, ObjType, Value};
@@ -105,6 +106,10 @@ pub struct Cert {
     /// checking bound it (an array's length named): its type then, and the
     /// variables opened, fresh.
     pub opens: Vec<(usize, usize, TyId, Vec<crate::ast::DVar>)>,
+    /// A standard `vsubr`'s word (`list`'s): its signature the procedure of
+    /// one list this type, `(vsubr e t r)`, applies, `(subr e ((listof t
+    /// acyclic)) r)`; filled in by `Certs::settle`.
+    pub vsubr: Option<TyId>,
 }
 
 /// The certificates a compilation made: each word's, and each global cell's
@@ -125,7 +130,15 @@ impl Certs {
     /// it is bound at names the variable. Two conversions of one variable at
     /// different representations are an error: the certificates would let a
     /// value of one be taken for the other.
-    pub fn settle(&mut self, c: &Checker) -> Result<(), String> {
+    /// And each standard `vsubr`'s word's signature, its type unfolded.
+    pub fn settle(&mut self, c: &mut Checker) -> Result<(), String> {
+        for cert in self.words.values_mut() {
+            let Some(t) = cert.vsubr else { continue };
+            let Some((effect, params, result)) = unfolded(c, t).and_then(|s| c.arena.get(s).as_subr()) else {
+                return Err(format!("a vsubr's word signed {}", c.show_ty(t)));
+            };
+            (cert.params, cert.result, cert.effect) = (params, Some(result), Some(effect));
+        }
         for cert in self.words.values() {
             let (Some(t), [rep]) = (cert.conversion, &cert.params[..]) else { continue };
             let Some((_, ps, r)) = c.arena.get(c.arena.resolve(t)).as_subr() else { continue };
@@ -141,6 +154,15 @@ impl Certs {
             }
         }
         Ok(())
+    }
+}
+
+/// `vsubr` type `t`, unfolded: `(vsubr e t r)` is `(subr e ((listof t
+/// acyclic)) r)`.
+fn unfolded(c: &mut Checker, t: TyId) -> Option<TyId> {
+    match c.arena.get(c.arena.resolve(t)).clone() {
+        Ty::Named { which: 0, args } => Some(c.unfold(0, &args)),
+        _ => None,
     }
 }
 
@@ -197,6 +219,9 @@ struct State {
     /// (`crate::sizes::SizeFact`: `lin = 0` or `lin ≥ 0`): learned from the
     /// tests the ways here passed.
     facts: Vec<crate::sizes::SizeFact>,
+    /// Blobrefs to a flat sum, each with the variant the tests the ways
+    /// here passed found its tag to name.
+    variants: Vec<(Term, Sym)>,
 }
 
 /// One instruction: where its cell is, its routine's name (or `None`, a
@@ -207,10 +232,28 @@ struct Ins {
     ops: Vec<Value>,
 }
 
+/// The integer `t` is, if it is literals' sum, difference or product: the
+/// value a literal written past a fixnum's range (`Checker::big_literal`),
+/// or a negative one, is compiled to compute.
+fn constant(t: &Term) -> Option<i128> {
+    match t {
+        Term::Lit(k) if k.is_fixnum() => Some(k.as_fixnum() as i128),
+        Term::App(f @ ("+" | "-" | "*"), xs) if xs.len() == 2 => {
+            let (a, b) = (constant(&xs[0])?, constant(&xs[1])?);
+            match *f {
+                "+" => a.checked_add(b),
+                "-" => a.checked_sub(b),
+                _ => a.checked_mul(b),
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Whether a certificate's operation note is an instantiation's (of a
 /// callee, a value, a `proj`), not a standard operation's.
 fn marker(op: &str) -> bool {
-    matches!(op, "%call" | "%inst" | "%proj" | "%make" | "%trust")
+    matches!(op, "%call" | "%inst" | "%proj" | "%make" | "%trust" | "%flat" | "%copy")
 }
 
 /// Verify `word` against its certificate in `certs`.
@@ -282,6 +325,13 @@ impl Verifier<'_> {
         {
             return Some(true);
         }
+        // An integer known here, of a fixed-width type: in its range, as a
+        // literal checked against one is (`Checker::literal_in_range`).
+        if let (Some((lo, hi)), Some(k)) = (self.c.fixed_expected(t), constant(&v.term))
+            && (lo..=hi).contains(&k)
+        {
+            return Some(true);
+        }
         // A `poly`'s value, made of a value checked against its body with
         // its binders held abstract (no `plambda`): of the body's type.
         let is_poly = |me: &Self, t: Option<TyId>| t.is_some_and(|t| matches!(me.c.arena.get(me.c.arena.resolve(t)), Ty::Poly { .. }));
@@ -289,12 +339,18 @@ impl Verifier<'_> {
             Ty::Poly { body, .. } if !is_poly(self, v.ty) => body,
             _ => t,
         };
-        // Two `poly`s over the very same binders (a value checked against
-        // the `poly` it is stored as): their bodies compared.
+        // Two `poly`s over binders of the same kinds (a value checked
+        // against the `poly` it is stored as): their bodies compared, the
+        // second's binders renamed to the first's, as the checker checks a
+        // `plambda` against its signature.
         let (mut s, mut t) = (v.ty?, t);
         loop {
             match (self.c.arena.get(self.c.arena.resolve(s)).clone(), self.c.arena.get(self.c.arena.resolve(t)).clone()) {
-                (Ty::Poly { binders: a, body: x }, Ty::Poly { binders: b, body: y }) if a == b => (s, t) = (x, y),
+                (Ty::Poly { binders: a, body: x }, Ty::Poly { binders: b, body: y })
+                    if a.len() == b.len() && a.iter().zip(&b).all(|((_, j), (_, k))| j == k) =>
+                {
+                    (s, t) = (x, self.c.renamed(y, &b, &a));
+                }
                 _ => break,
             }
         }
@@ -313,7 +369,8 @@ impl Verifier<'_> {
             Ty::Pair(a, b, _, nil) => (nil && x.is_null()) || (x.is_pair() && self.inhabits(self.heap.car(x), a) && self.inhabits(self.heap.cdr(x), b)),
             _ if t == self.c.int => x.is_fixnum(),
             _ if t == self.c.string => self.heap.is_a(x, ObjType::String),
-            _ if t == self.c.f64_ => self.heap.is_a(x, ObjType::Flonum),
+            // A scalar by its name: `f64` the flat names is the base type.
+            Ty::Base(b) if self.c.interner.name(b) == "f64" => self.heap.is_a(x, ObjType::Flonum),
             _ if t == self.c.bool_ => x.is_boolean(),
             _ if t == self.c.char_ => x.is_char(),
             _ if t == self.c.unit => self.symbol_named(x, "#u"),
@@ -432,6 +489,7 @@ impl Verifier<'_> {
             stack: slot_types.iter().enumerate().map(|(i, t)| V::new(Term::Slot(i), Some(*t))).collect(),
             pending: Vec::new(),
             facts: Vec::new(),
+            variants: Vec::new(),
         };
         let notes: HashMap<usize, &Vec<Prop>> = cert.notes.iter().map(|(k, p)| (*k, p)).collect();
         // The states waiting at each later cell, from branches to it.
@@ -486,6 +544,15 @@ impl Verifier<'_> {
                 return;
             };
             match self.idiom(&code[i - 1..], cert, &mut s, &at, &waiting) {
+                Some(Ok(n)) => {
+                    i += n - 1;
+                    cur = Some(s);
+                    continue;
+                }
+                Some(Err(())) => return,
+                None => {}
+            }
+            match self.flat(&code[i - 1..], cert, &mut s, &at, &waiting) {
                 Some(Ok(n)) => {
                     i += n - 1;
                     cur = Some(s);
@@ -847,6 +914,200 @@ impl Verifier<'_> {
         Some(Ok(n))
     }
 
+    /// A bloblet's suffix or a blobref read, written or moved (`TODO.md`
+    /// §77), as the compiler runs it (`Compiler::bloblet`): the checker's
+    /// own rule for the form (`Checker::blobref_rule`), on the operands'
+    /// types, and the operand the compiler gives the primitive for the
+    /// layout the same as the rule's. A new blobref's flat is the one the
+    /// certificate says (`%flat`), which the type it was checked against
+    /// said; its bytes checked to lie in the suffix, at run time, by the
+    /// cells after it (`%fx26-suffix-fits`), no branch landing between. How
+    /// many instructions it is, or none if the first is no such primitive.
+    fn flat(&mut self, code: &[Ins], cert: &Cert, s: &mut State, at: &str, waiting: &HashMap<usize, Vec<State>>) -> Option<Result<usize, ()>> {
+        use crate::ast::{Atom, BlobletOp};
+        use crate::check::Datum;
+        let ins = &code[0];
+        if ins.name != Some("prim") {
+            return None;
+        }
+        let pname = fixpt_runtime::PRIMITIVES.get(ins.ops[0].as_fixnum() as usize).map(|d| d.name)?;
+        let n = ins.ops[1].as_fixnum() as usize;
+        let op = match (pname, n) {
+            ("%suffix-ref", 2) => BlobletOp::RefAt,
+            ("%suffix-ref+", 2) => BlobletOp::RefAdd,
+            ("%suffix-ref-owner", 1) => BlobletOp::RefOwner,
+            ("%suffix-ref-offset", 1) => BlobletOp::RefOffset,
+            ("%fx26-suffix-ref-index", 3) => BlobletOp::RefIndex,
+            ("%fx26-suffix-ref-length", 2) => BlobletOp::RefLength,
+            ("%fx26-suffix-ref-get", 2) => BlobletOp::RefGet,
+            ("%fx26-suffix-ref-set!", 3) => BlobletOp::RefSet,
+            ("%fx26-flat-variant!", 3) => BlobletOp::RefVariant,
+            ("%bloblet-byte", 2) => BlobletOp::Byte,
+            ("%bloblet-set-byte!", 3) => BlobletOp::SetByte,
+            ("%bloblet-bytes", 1) => BlobletOp::Bytes,
+            ("%bloblet-set!", 3) => BlobletOp::Set(0),
+            ("%fx26-flat-tag", 2) => return Some(self.flat_tag(s, at).map(|()| 1)),
+            // A flat sum's tag that no arm has: an error at run time.
+            ("%fx26-flat-no-arm", 1) => {
+                let _ = self.pop(s, at).ok()?;
+                let void = self.c.void;
+                self.push_made(s, Some(void), None);
+                return Some(Ok(1));
+            }
+            _ => return None,
+        };
+        let int = self.c.int;
+        let mut vals = Vec::new();
+        for _ in 0..n {
+            vals.push(self.pop(s, at).ok()?);
+        }
+        vals.reverse();
+        let fail = |me: &mut Self, why: String| {
+            me.out.failed.push(format!("{at}: {why}"));
+            Some(Err(()))
+        };
+        // A bloblet's own: its suffix's bytes, or a field written.
+        if matches!(op, BlobletOp::Byte | BlobletOp::SetByte | BlobletOp::Bytes | BlobletOp::Set(_)) {
+            let Some(Ty::Bloblet { fields, frozen, region }) = self.ty_of(&vals[0]) else {
+                return fail(self, format!("{pname} of no bloblet"));
+            };
+            let result = match op {
+                BlobletOp::Bytes => Some(int),
+                BlobletOp::Byte => {
+                    self.holds(&vals[1], int, at);
+                    self.effect = self.effect.union(&Effect::atom(Atom::Read(region)));
+                    Some(int)
+                }
+                BlobletOp::SetByte => {
+                    self.holds(&vals[1], int, at);
+                    self.holds(&vals[2], int, at);
+                    self.effect = self.effect.union(&Effect::atom(Atom::Write(region)));
+                    None
+                }
+                _ => {
+                    let field = match vals[1].term {
+                        Term::Lit(k) if k.is_fixnum() && k.as_fixnum() >= 2 => fields.get(k.as_fixnum() as usize - 2).copied(),
+                        _ => None,
+                    };
+                    let Some(t) = field.filter(|_| !frozen) else {
+                        return fail(self, "a bloblet's field written, of no field it has, or frozen".into());
+                    };
+                    self.holds(&vals[2], t, at);
+                    self.effect = self.effect.union(&Effect::atom(Atom::Write(region)));
+                    None
+                }
+            };
+            // What a mutator gives is dropped (`unit_after`): of no type.
+            self.push_made(s, result, None);
+            return Some(Ok(1));
+        }
+        let Some(xt) = vals[0].ty else {
+            return fail(self, format!("{pname} of a value of no known type"));
+        };
+        // A blobref moved by a literal, with no flat said: to a flat
+        // product's field at that offset, or to the variant of a flat sum
+        // the tag was found to be (`tagcase`).
+        let wanted = cert.ops.iter().find(|(k, op, _)| *k == ins.at && op == "%flat").map(|(_, _, ds)| ds.clone());
+        if op == BlobletOp::RefAdd && wanted.is_none() {
+            let (Some((b, f)), Term::Lit(k)) = (self.c.blobref_parts(xt), &vals[1].term) else {
+                return fail(self, "a blobref moved, to no flat said".into());
+            };
+            let k = k.as_fixnum();
+            let g = match self.c.arena.get(self.c.arena.resolve(f)).clone() {
+                Ty::Product(ps) => ps.iter().find_map(|(l, _)| self.c.flat_field(f, *l).filter(|(o, _)| *o as i64 == k).map(|(_, g)| g)),
+                _ => match (self.c.flat_sum_layout(f), s.variants.iter().find(|(t, _)| *t == vals[0].term)) {
+                    (Some((code, _, _, variants)), Some((_, l))) if code >> 8 == k => variants.iter().find(|(m, _)| m == l).map(|(_, g)| *g),
+                    _ => None,
+                },
+            };
+            let Some(g) = g else {
+                return fail(self, format!("a {} moved {k} bytes, to no field or variant known", self.show(xt)));
+            };
+            let t = self.c.blobref_of(b, g);
+            self.push_made(s, Some(t), None);
+            return Some(Ok(1));
+        }
+        let wanted = match wanted.as_deref() {
+            Some([crate::ast::D::Type(t)]) => self.c.blobref_parts(*t).map(|(_, f)| f),
+            _ => None,
+        };
+        // A variant's label, and whether it is a number.
+        let label = match (op, &vals.get(2).map(|v| &v.term)) {
+            (BlobletOp::RefVariant, Some(Term::Lit(l))) if self.heap.is_a(*l, ObjType::Symbol) => Some((self.c.interner.intern(&self.heap.symbol_name(*l)), false)),
+            (BlobletOp::RefVariant, Some(Term::Lit(l))) if l.is_fixnum() => Some((self.c.interner.intern(&l.as_fixnum().to_string()), true)),
+            _ => None,
+        };
+        let rule = match self.c.blobref_rule(op, xt, wanted, label) {
+            Ok(r) => r,
+            Err((_, why)) => return fail(self, why),
+        };
+        // The operands after the first: the layout's, which the compiler
+        // gives after the index and before the rest (`Compiler::bloblet`),
+        // and the form's own; a variant's label is the form's, not a value
+        // of a type.
+        let (given, rest): (Option<&V>, Vec<&V>) = match op {
+            BlobletOp::RefIndex => (Some(&vals[2]), vec![&vals[1]]),
+            BlobletOp::RefLength | BlobletOp::RefGet | BlobletOp::RefVariant => (Some(&vals[1]), Vec::new()),
+            BlobletOp::RefSet => (Some(&vals[1]), vec![&vals[2]]),
+            _ => (None, vals[1..].iter().collect()),
+        };
+        if let Some(d) = rule.datum.filter(|d| !matches!(d, Datum::Fits(_)))
+            && given.map(|v| &v.term) != Some(&Term::Lit(Value::fixnum(d.operand())))
+        {
+            return fail(self, format!("{pname} given another layout than its, {}", d.operand()));
+        }
+        if rest.len() != rule.rest.len() {
+            return fail(self, format!("{pname} with {} values", n));
+        }
+        for (v, t) in rest.into_iter().zip(&rule.rest) {
+            self.holds(v, *t, at);
+        }
+        for a in &rule.effect {
+            self.effect = self.effect.union(&Effect::atom(a.clone()));
+        }
+        self.push_made(s, Some(rule.result), None);
+        // A new blobref's bytes checked to lie in the suffix, where it
+        // takes more than the one its offset already does.
+        match rule.datum {
+            Some(Datum::Fits(size)) if size > 1 => {
+                let fits = |ins: &Ins| {
+                    ins.name == Some("prim")
+                        && ins.ops[1].as_fixnum() == 2
+                        && fixpt_runtime::PRIMITIVES.get(ins.ops[0].as_fixnum() as usize).is_some_and(|d| d.name == "%fx26-suffix-fits")
+                };
+                let checked = matches!(code, [_, k, f, ..] if k.name == Some("lit") && k.ops[0] == Value::fixnum(size as i64) && fits(f))
+                    && code[1..3].iter().all(|ins| !waiting.contains_key(&ins.at));
+                if !checked {
+                    return fail(self, format!("a new blobref of {size} bytes, not checked to fit"));
+                }
+                Some(Ok(3))
+            }
+            _ => Some(Ok(1)),
+        }
+    }
+
+    /// `( r k -- tag )`: a flat sum's tag, read from the blobref `r` to it
+    /// by the layout's code `k` (`Checker::flat_sum_layout`), of the
+    /// owner's region; a test of it teaches which variant `r` points to
+    /// (`narrow`).
+    fn flat_tag(&mut self, s: &mut State, at: &str) -> Result<(), ()> {
+        let (k, r) = (self.pop(s, at)?, self.pop(s, at)?);
+        let layout = r.ty.and_then(|t| self.c.blobref_parts(t)).and_then(|(b, f)| Some((b, self.c.flat_sum_layout(f)?.0)));
+        let Some((b, _)) = layout.filter(|(_, code)| k.term == Term::Lit(Value::fixnum(*code))) else {
+            self.out.failed.push(format!("{at}: a flat sum's tag, of no flat sum, or by another layout"));
+            return Err(());
+        };
+        match self.c.arena.get(self.c.arena.resolve(b)).clone() {
+            Ty::Bloblet { region, .. } => self.reads(region),
+            _ => {
+                self.out.failed.push(format!("{at}: a flat sum's tag, of an owner of no region known"));
+                return Err(());
+            }
+        }
+        s.stack.push(V::new(Term::App("flat-tag", vec![r.term]), None));
+        Ok(())
+    }
+
     /// Whether `code` is a conversion between a representation and its
     /// abstract type, and is certified as one rightly (a VC discharged, or
     /// failed); false if it is not one, to be verified as any word is.
@@ -943,7 +1204,8 @@ impl Verifier<'_> {
         }
         // The facts every way in has.
         let facts = first.facts.iter().filter(|f| arriving.iter().all(|s| s.facts.iter().any(|g| g.eq == f.eq && g.lin == f.lin))).cloned().collect();
-        Some(State { stack, pending: first.pending.clone(), facts })
+        let variants = first.variants.iter().filter(|v| arriving.iter().all(|s| s.variants.contains(v))).cloned().collect();
+        Some(State { stack, pending: first.pending.clone(), facts, variants })
     }
 
     /// The state at a cell with an assertion: each way in must establish
@@ -976,7 +1238,7 @@ impl Verifier<'_> {
                 }
             }
         }
-        self.join(&ways, at).unwrap_or(State { stack: Vec::new(), pending: Vec::new(), facts: Vec::new() })
+        self.join(&ways, at).unwrap_or(State { stack: Vec::new(), pending: Vec::new(), facts: Vec::new(), variants: Vec::new() })
     }
 
     fn pop(&mut self, s: &mut State, at: &str) -> Result<V, ()> {
@@ -1327,9 +1589,18 @@ impl Verifier<'_> {
             // `( tag handler thunk -- r )`: the tag's type says the rest.
             "prompt" => {
                 let (thunk, handler, tag) = (self.pop(s, at)?, self.pop(s, at)?, self.pop(s, at)?);
-                let Some(Ty::PromptTag { answer, payload, effect, .. }) = self.ty_of(&tag) else {
-                    self.out.stopped = Some("a prompt whose tag's type is not known".into());
-                    return Err(());
+                // A `prompt-tag`'s bound on what the body does; an escape-only
+                // tag's, none (`ESCAPE_TAG`), as `synth_prompt` has them.
+                let (answer, payload, effect) = match self.ty_of(&tag) {
+                    Some(Ty::PromptTag { answer, payload, effect, .. }) => (answer, payload, effect),
+                    Some(Ty::Named { which: crate::check::ESCAPE_TAG_INDEX, args }) => match args[..] {
+                        [crate::ast::D::Type(a), crate::ast::D::Type(h), _] => (a, h, Effect::pure()),
+                        _ => unreachable!("an escape tag's three descriptions"),
+                    },
+                    _ => {
+                        self.out.stopped = Some("a prompt whose tag's type is not known".into());
+                        return Err(());
+                    }
                 };
                 let subr = |me: &Self, v: &V| v.ty.and_then(|t| me.c.arena.get(me.c.arena.resolve(t)).as_subr());
                 match (subr(self, &thunk), subr(self, &handler)) {
@@ -1525,6 +1796,28 @@ impl Verifier<'_> {
                         None => 0,
                     },
                 };
+                // `(certify-length v k)`: `v` as the `nlist` of length `k` a
+                // test of its length has just found it (`narrow`'s
+                // `Prop::Length`), its region acyclic, as the checker types it
+                // (`synth_app`); at run time, `v`.
+                if op == "certify-length" && n == 2 {
+                    let (k, v) = (self.pop(s, at)?, self.pop(s, at)?);
+                    let found = match (self.ty_of(&v), self.size_of(&k)) {
+                        (Some(Ty::NList { elem, size, region }), Some(n)) if size == n => Some((elem, size, region)),
+                        _ => None,
+                    };
+                    let Some((elem, size, region)) = found else {
+                        self.out.failed.push(format!("{at}: a length certified that no test found"));
+                        return Err(());
+                    };
+                    let region = match region {
+                        crate::ast::Region::Frozen(p, _) => crate::ast::Region::Frozen(p, true),
+                        r => r,
+                    };
+                    let t = self.c.arena.ty(Ty::NList { elem, size, region });
+                    self.push_made(s, Some(t), Some(v.term));
+                    return Ok(Some(s.clone()));
+                }
                 let Some((params, result, effect)) = self.op_type(&op, &inst, n, cert.own_ops.contains(&here)) else {
                     self.out.stopped = Some(format!("`{op}`: its type, instantiated"));
                     return Err(());
@@ -1627,6 +1920,76 @@ impl Verifier<'_> {
                                 return Err(());
                             }
                         }
+                    }
+                    // A list copied (`list`'s, `apply`'s): fresh, so of any
+                    // region, and of elements of any type the original's
+                    // are within, as the certificate says (`%copy`); the
+                    // original read. A cyclic one is an error at run time.
+                    "%fx26-list-copy" => {
+                        let v = self.pop(s, at)?;
+                        // Said as a list type, or as the `vsubr` it is given
+                        // to, by its descriptions (`apply`'s): the list that
+                        // one takes.
+                        let said = cert.ops.iter().find(|(k, op, _)| *k == here && op == "%copy").map(|(_, _, ds)| ds.clone());
+                        let want = match said.as_deref() {
+                            Some([crate::ast::D::Type(t)]) => Some(*t),
+                            Some(ds @ [_, _, _]) => {
+                                let vsubr = self.c.arena.ty(Ty::Named { which: 0, args: ds.to_vec() });
+                                unfolded(self.c, vsubr).and_then(|u| self.c.arena.get(u).as_subr()).and_then(|(_, ps, _)| ps.first().copied())
+                            }
+                            _ => None,
+                        };
+                        let parts = |me: &Self, t: TyId| match me.c.arena.get(me.c.arena.resolve(t)).clone() {
+                            Ty::Pair(e, _, r, true) | Ty::NList { elem: e, region: r, .. } => Some((Some(e), r)),
+                            Ty::Nil => Some((None, crate::ast::Region::Frozen(None, true))),
+                            _ => None,
+                        };
+                        let (Some(want), Some((from, g))) = (want, v.ty.and_then(|t| parts(self, t))) else {
+                            self.out.failed.push(format!("{at}: a list copied, of no list, or to no list type said"));
+                            return Err(());
+                        };
+                        let Some((Some(to), r)) = parts(self, want) else {
+                            self.out.failed.push(format!("{at}: a list copied to a {}", self.show(want)));
+                            return Err(());
+                        };
+                        if let Some(from) = from {
+                            self.holds(&V::new(Term::App("element", vec![v.term.clone()]), Some(from)), to, at);
+                        }
+                        self.reads(g);
+                        if !r.is_frozen() {
+                            self.effect = self.effect.union(&Effect::atom(crate::ast::Atom::Alloc(r)));
+                        }
+                        self.push_made(s, Some(want), None);
+                    }
+                    // A procedure of one list made a `vsubr`, which gives it
+                    // the list of its arguments: `(vsubr e t r)` is
+                    // `(subr e ((listof t acyclic)) r)`.
+                    "%fx26-vlambda" => {
+                        let v = self.pop(s, at)?;
+                        // Over a polymorphic word (`list`'s): a `vsubr` under
+                        // the same binders.
+                        let mut levels = Vec::new();
+                        let mut inner = v.ty;
+                        while let Some(Ty::Poly { binders, body }) = inner.map(|t| self.c.arena.get(self.c.arena.resolve(t)).clone()) {
+                            levels.push(binders);
+                            inner = Some(body);
+                        }
+                        let parts = inner.and_then(|t| self.c.arena.get(self.c.arena.resolve(t)).as_subr()).and_then(|(e, ps, r)| match ps[..] {
+                            [l] => match self.c.arena.get(self.c.arena.resolve(l)) {
+                                Ty::Pair(t, ..) => Some((e, *t, r)),
+                                _ => None,
+                            },
+                            _ => None,
+                        });
+                        let Some((e, t, r)) = parts else {
+                            self.out.failed.push(format!("{at}: a vsubr made of no procedure of a list"));
+                            return Err(());
+                        };
+                        let vsubr = self.c.arena.ty(Ty::Named { which: 0, args: vec![crate::ast::D::Effect(e), crate::ast::D::Type(t), crate::ast::D::Type(r)] });
+                        let as_subr = unfolded(self.c, vsubr).expect("a vsubr");
+                        self.holds(&V::new(v.term.clone(), inner), as_subr, at);
+                        let made = levels.into_iter().rev().fold(vsubr, |body, binders| self.c.arena.ty(Ty::Poly { binders, body }));
+                        self.push_made(s, Some(made), None);
                     }
                     _ => {
                         self.out.stopped = Some(format!("prim {pname}"));
@@ -1736,6 +2099,9 @@ impl Verifier<'_> {
                 Ok(Some(fields[k - 2]))
             }
             Ty::Module { vals, .. } if k >= 2 && k - 2 < vals.len() => Ok(Some(vals[k - 2].1)),
+            // A `vsubr`, `%vlambda`'s closure: its free value the procedure
+            // of one list it applies (`apply`'s idiom).
+            Ty::Named { which: 0, .. } if k == CLOSURE_FREE0 => Ok(unfolded(self.c, o.ty.expect("known"))),
             _ => {
                 fail(self);
                 Err(())
@@ -1861,6 +2227,16 @@ impl Verifier<'_> {
                         v.ty = Some(t);
                     }
                 }
+            }
+            // A flat sum's tag: the variant named, where true.
+            (Term::App("flat-tag", r), Term::Lit(l)) if yes => {
+                let label = match *l {
+                    l if l.is_fixnum() => l.as_fixnum().to_string(),
+                    l if self.heap.is_a(l, ObjType::Symbol) => self.heap.symbol_name(l).to_string(),
+                    _ => return,
+                };
+                let label = self.c.interner.intern(&label);
+                s.variants.push((r[0].clone(), label));
             }
             // A sum's tag: that arm, where true; the others, where false.
             (Term::App("field", f), Term::Lit(tag)) if f.first() == Some(&Term::Lit(Value::fixnum(2))) && self.heap.is_a(*tag, ObjType::Symbol) => {

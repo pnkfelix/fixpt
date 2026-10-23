@@ -2727,11 +2727,11 @@ is set at the write or after it.
 compiler's words, and a verifier, as Hoare logic. The goal of this stage
 (the user's): every word of every program the checker accepts verifies,
 by type assertions, before propositions beyond types are built on it.
-1,049 of 1,094 test program words verify (`tests/typed_cells.rs`), none
-with a VC open, 13 relative to named assumptions; 404 mutants of
-verified words are all refused; 4 type VCs fail, in 3 programs, each
-pinned with its cause (`KNOWN_FAILURES`), none a fault of the checker's
-or the compiler's found so far.
+Met (2026-10-23): all 1,109 test program words verify
+(`tests/typed_cells.rs`, which now requires it), none with a VC failing
+or open, 13 relative to named assumptions (the built-in scheduler's
+procedures at their forms' types, `library_type`); 437 mutants of
+verified words are all refused.
 
 Done (2026-10-22): data made (products, sums, modules, bloblets: the
 certificate names the type, the values are checked against it); calls
@@ -2743,36 +2743,32 @@ selects; standard operations as values; idioms (`array-ref` and kin);
 narrowing by predicates' latent propositions (shape, length, nat), by a
 value tested, by a sum's tag both ways, a `tagcase`'s dead end; control
 (prompts, marks, continuations); `car` of what may not be a pair, a debt.
+Modules, by the checker's layout decisions kept as data (`module_raw`,
+`reshape_chosen`, `packs`); regions' scopes, places, `rlambda`s and
+bindings opened as the checker binds them; effects masked at a word's
+boundary; size facts learned at branches and asked of the checker's own
+procedures (`nat_arith`, `size_nonneg`, Fourier–Motzkin).
 
-Left, most first, with what each needs:
-1. **Modules, two left** (done 2026-10-22, with the user's ask that the
-   checker's module logic be reused, not rebuilt: the checker's layout
-   decisions, kept as data, checked by the verifier, not trusted: the
-   items' product's type, `module_raw`; the type picked to,
-   `reshape_chosen`; each abstract type taken in with its witness,
-   `packs`; module subtyping packs the rest). Left: a module item's
-   lambda whose free name the body reaches through `(with %include …)`
-   is recorded at the binding outside (the standard `get`): record a
-   lambda's free variables after its body, leaving out what a `with` in
-   it binds (`with_vals`); and a functor's result.
-2. ~~**Regions**~~ (done 2026-10-22): each region's scope in the
-   certificate, its own effects masked as it closes and its value closed
-   (not mentioning it, or frozen); places entered and left; `rlambda`
-   closures; bindings opened as the checker binds them (`name_nat`); a
-   word's effect masked at its boundary as `Checker::mask` masks a body.
-   The built-in scheduler's procedures, seen through their forms' types
-   (`library_type`), are taken as named assumptions (`Outcome::assumed`,
-   13), not proved: its private regions are its own by trust.
-3. **Flat data** (`%suffix-ref` and kin, about 20 words; 3 failing VCs, a
-   `blobref` under a size binder the checker relates in scope).
-4. ~~**Size facts**~~ (done 2026-10-22): the verifier's state keeps the
-   checkers' size facts, learned at a `0branch` on `int-eq` or
-   `int-less` of sizes, joined as every way in has them, and asked of the
-   checker's own procedures (`nat_arith`, `size_nonneg`, Fourier–Motzkin)
-   with the state's facts in place. Propositions beyond the checkers'
-   facts are the next stage (`requires`, `ensures`).
-5. A few words still without certificates (a `vsubr`'s `list`, some
-   lambdas), `certify-length`'s instantiation.
+Done (2026-10-23):
+- Two `poly`s compared with one's binders renamed to the other's
+  (`Checker::renamed`, shared with checking a `plambda` against its
+  signature): a flat array's length under a size binder.
+- A lambda's free variables recorded after its body is checked, so a
+  name a `with` in it binds is not taken from outside (`include`).
+- Flat data by the checker's own rule, of types alone
+  (`Checker::blobref_rule`, which `synth_blobref` now uses too): a new
+  blobref's flat as the certificate says (`%flat`), its bytes checked to
+  fit by the cells after it; the layout operand the compiler gives
+  checked against the rule's; a flat product's field, and a flat sum's
+  variant by the tag a `tagcase` tested (`State::variants`); a bloblet's
+  bytes and fields. A literal, or literals' arithmetic, at a fixed-width
+  integer type, in range.
+- `prompt` bodies, which the compiler makes thunks, certified by the
+  body's type and effect; escape-only tags.
+- `list` as a value (a `vsubr`: `%fx26-vlambda` over a word signed with
+  the `vsubr` unfolded, `Certs::settle`), `apply`'s copy of its list
+  (`%copy`), and `certify-length`, from the `nlist` narrowing found.
+
 Then the next stage: `requires` and `ensures` in procedure types, latent
 propositions their special case (the note's §8); and TC6: the
 certificate kept in the word, the FX-26 compiler making the same, and

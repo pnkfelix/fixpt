@@ -1928,6 +1928,17 @@ impl<'a> Compiler<'a> {
             // must be one nothing else can write.
             Some(s) if s == "apply" && !self.c.facts.apply_shares.contains(&x) => {
                 self.exps(args, e, depth, code)?;
+                // With certificates wanted: the copy is the list the
+                // procedure takes, `(listof t acyclic)`, as its `vsubr`
+                // type, `(vsubr e t r)`, says: `apply` instantiated at `e`,
+                // `t`, `r` (and the list's region).
+                if self.certs.is_some()
+                    && let Some(inst) = self.c.facts.insts.get(&x)
+                    && inst.len() == 4
+                {
+                    self.ops.push(("%copy".to_string(), inst[..3].to_vec()));
+                    code.push(Item::Op(self.ops.len() - 1));
+                }
                 self.prim(code, "%fx26-list-copy", 1)?;
                 self.standard_on("apply", 2, code)?;
                 self.done(code, tail);
@@ -2012,9 +2023,22 @@ impl<'a> Compiler<'a> {
         if let Some(op) = Self::vsubr_list_op(name) {
             let mut body = Vec::new();
             self.op1(&mut body, "slot", Value::fixnum(0));
+            // `list`'s: its copy is the list it gives; its signature its
+            // type's, the `vsubr` unfolded.
+            let signed = if name == "list" { self.standard_vsubr(name) } else { None };
+            if let Some(cert) = &signed
+                && let Some(crate::ast::Ty::Named { args, .. }) = cert.vsubr.map(|t| self.c.arena.get(self.c.arena.resolve(t)))
+                && let [_, _, crate::ast::D::Type(r)] = args[..]
+            {
+                self.note_copy(r, &mut body);
+            }
             self.standard_on(op, 1, &mut body)?;
             self.op(&mut body, "return");
             let w = self.assemble(&body, name)?;
+            if let (Some(cert), Some(certs)) = (signed, &mut self.certs) {
+                let cert = crate::typed_cells::Cert { ops: self.last_ops.clone(), ..cert };
+                certs.words.insert(w.raw(), cert);
+            }
             self.register_twin(w, name, op, 1)?;
             return Ok(w);
         }
@@ -2041,6 +2065,32 @@ impl<'a> Compiler<'a> {
         self.certify_standard(w, name);
         self.register_twin(w, name, name, n)?;
         Ok(w)
+    }
+
+    /// With certificates wanted: a standard `vsubr`'s signature, under its
+    /// type's binders: the procedure of one list its value applies, the
+    /// `vsubr` unfolded (`Cert::vsubr`).
+    fn standard_vsubr(&mut self, name: &str) -> Option<crate::typed_cells::Cert> {
+        self.certs.as_ref()?;
+        let t = self.c.interner.get(name).and_then(|s| self.c.standard_type(s))?;
+        let (mut levels, mut inner) = (Vec::new(), self.c.arena.resolve(t));
+        while let crate::ast::Ty::Poly { binders, body } = self.c.arena.get(inner) {
+            levels.push(binders.clone());
+            inner = self.c.arena.resolve(*body);
+        }
+        if !matches!(self.c.arena.get(inner), crate::ast::Ty::Named { which: 0, .. }) {
+            return None;
+        }
+        Some(crate::typed_cells::Cert { poly: levels, vsubr: Some(inner), ..Default::default() })
+    }
+
+    /// With certificates wanted: that the next cell's list copied is of
+    /// list type `t` (`%fx26-list-copy`).
+    fn note_copy(&mut self, t: TyId, code: &mut Vec<Item>) {
+        if self.certs.is_some() {
+            self.ops.push(("%copy".to_string(), vec![crate::ast::D::Type(t)]));
+            code.push(Item::Op(self.ops.len() - 1));
+        }
     }
 
     /// With certificates wanted: a standard operation's word as a value,
@@ -2233,6 +2283,17 @@ impl<'a> Compiler<'a> {
         }
     }
 
+    /// With certificates wanted: the flat new blobref `x` points to, as the
+    /// type it was checked against said (`Checker::blobref_rule`).
+    fn note_flat(&mut self, x: ExpId, code: &mut Vec<Item>) {
+        if self.certs.is_some()
+            && let Some(&t) = self.c.facts.types.get(&x)
+        {
+            self.ops.push(("%flat".to_string(), vec![crate::ast::D::Type(t)]));
+            code.push(Item::Op(self.ops.len() - 1));
+        }
+    }
+
     /// With certificates wanted: that the next cell runs standard operation
     /// `name`, at the instantiation application `x` was checked at.
     fn note_op(&mut self, x: ExpId, name: &str, code: &mut Vec<Item>) {
@@ -2406,6 +2467,9 @@ impl<'a> Compiler<'a> {
                     BlobletOp::RefOwner => "%suffix-ref-owner",
                     _ => "%suffix-ref-offset",
                 };
+                if matches!(op, BlobletOp::RefAt | BlobletOp::RefAdd) {
+                    self.note_flat(x, code);
+                }
                 self.prim(code, name, n)?;
                 // A new blobref's flat's bytes checked in the suffix.
                 if let Some(Datum::Fits(size)) = self.c.facts.datum.get(&x).copied()
@@ -2604,7 +2668,18 @@ impl<'a> Compiler<'a> {
     /// the free variables it would have captured).
     fn certify_lambda(&mut self, w: Value, params: &[Sym], body: ExpId, fv: &[Sym]) {
         let Some(certs) = &mut self.certs else { return };
-        let Some(sig) = self.c.facts.lambdas.get(&body) else { return };
+        // A `prompt`'s body, which the compiler makes a thunk: of the type
+        // and effect checking found the body of.
+        let thunk;
+        let sig = match self.c.facts.lambdas.get(&body) {
+            Some(sig) => sig,
+            None if params.is_empty() => {
+                let (Some(&result), Some(effect)) = (self.c.facts.types.get(&body), self.c.facts.effects.get(&body)) else { return };
+                thunk = crate::check::LambdaSig { params: Vec::new(), frees: Vec::new(), result, effect: effect.clone(), inside: Vec::new() };
+                &thunk
+            }
+            None => return,
+        };
         // A name its lambda does not bind or see: a lifted procedure's added
         // parameter (free in a sibling), or a module's member (seen through
         // `%include`); its type as another lambda saw it, or a global's.
@@ -2656,6 +2731,7 @@ impl<'a> Compiler<'a> {
             regions: self.last_regions.clone(), opens: self.last_opens.clone(),
             conversion,
             own_ops: Vec::new(),
+            vsubr: None,
         };
         certs.words.insert(w.raw(), cert);
     }

@@ -194,6 +194,26 @@ pub(crate) fn flat_code(name: &str) -> Option<i64> {
     })
 }
 
+/// Which part of a form a typing rule's complaint is of: the form, its
+/// first operand, or its second (`Checker::blobref_rule`).
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum Blame {
+    Op,
+    First,
+    Second,
+}
+
+/// What a `blobref` form is, by its typing rule (`Checker::blobref_rule`):
+/// the types its operands after the first must have, its result's, the
+/// effects it has, and what the compilers are told.
+#[derive(Clone, Debug)]
+pub(crate) struct BlobrefRule {
+    pub rest: Vec<TyId>,
+    pub result: TyId,
+    pub effect: Vec<Atom>,
+    pub datum: Option<Datum>,
+}
+
 /// A `define-generative`: its name, parameters, their variance, and the
 /// representation, a type over the parameters.
 #[derive(Clone, Debug)]
@@ -4048,7 +4068,7 @@ impl Checker {
         let flat = self.blobref_parts(st).and_then(|(b, f)| Some((b, self.flat_sum_layout(f)?)));
         let variants = match &flat {
             Some((b, (code, _, _, vs))) => {
-                let region = self.owner_region(span, st, *b)?;
+                let region = self.owner_region(st, *b).map_err(|(_, why)| FxError::at(span, why))?;
                 eff.0.insert(Atom::Read(region));
                 self.facts.datum.insert(e, Datum::Layout(*code as usize));
                 vs.iter().map(|(l, g)| (*l, self.blobref_of(*b, *g))).collect()
@@ -4271,109 +4291,131 @@ impl Checker {
     /// layout the compilers are told (`Facts::datum`).
     fn synth_blobref(&mut self, e: ExpId, op: BlobletOp, args: &[ExpId], expected: Option<TyId>) -> R<(TyId, Effect)> {
         let span = self.arena.span_of(e);
-        let int = self.int;
-        // The flat the type checked against says.
-        let wanted = |c: &Self| -> R<TyId> {
-            expected.and_then(|t| c.blobref_parts(t)).map(|(_, f)| f).ok_or_else(|| {
-                FxError::at(span, "which flat a new `blobref` points to is said by the type it is checked against: `(the (blobref B F) …)`")
-            })
-        };
         let (x, rest) = args.split_first().expect("parsed");
         let (xt, mut eff) = self.synth(*x)?;
+        // The flat the type checked against says.
+        let wanted = expected.and_then(|t| self.blobref_parts(t)).map(|(_, f)| f);
+        // A variant named by a literal.
+        let label = match (op, rest.first().map(|r| self.arena.exp_at(*r))) {
+            (BlobletOp::RefVariant, Some(Exp::Symbol(l))) => Some((*l, false)),
+            (BlobletOp::RefVariant, Some(Exp::Int(n))) => Some((self.interner.intern(&n.to_string()), true)),
+            _ => None,
+        };
+        let rule = self.blobref_rule(op, xt, wanted, label).map_err(|(blame, why)| {
+            let at = match blame {
+                Blame::Op => span,
+                Blame::First => self.arena.span_of(*x),
+                Blame::Second => self.arena.span_of(rest[0]),
+            };
+            FxError::at(at, why)
+        })?;
+        for (r, t) in rest.iter().zip(&rule.rest) {
+            eff = eff.union(&self.check(*r, *t)?);
+        }
+        eff.0.extend(rule.effect);
+        if let Some(d) = rule.datum {
+            self.facts.datum.insert(e, d);
+        }
+        // An index shown within the length by the facts in scope: a
+        // natural `i` with `n - (i + 1) >= 0`, `n` a literal or a named
+        // length, never `finite`, which is no one array's.
+        if op == BlobletOp::RefIndex
+            && let Some((_, f)) = self.blobref_parts(xt)
+            && let Some((_, n)) = self.flat_array_parts(f)
+            && let Some(i) = self.nat_size(rest[0])
+            && !matches!(n, Size::Finite)
+            && self.size_nonneg(&n.add_scaled(&i.plus(1), -1))
+        {
+            self.facts.in_bounds.insert(e);
+        }
+        let eff = self.mask(e, &eff, rule.result);
+        Ok((rule.result, eff))
+    }
+
+    /// The `blobref` forms' typing rule (`TODO.md` §77), of types alone, as
+    /// the checker and the typed cells' verifier (`typed_cells`) both use
+    /// it: operation `op` on a first operand of type `xt`, a new blobref's
+    /// flat `wanted` (said by the type it is checked against), a variant's
+    /// `label` (and whether it is a number). A new one's flat must leave
+    /// no length to be named; reading or writing one is of its owner's
+    /// region, and gives or takes a value of its scalar's type, whose
+    /// layout the compilers are told (`Datum`); an array's length and
+    /// element's size are told them likewise, the index checked at run
+    /// time. A length not a literal runs to the end of the suffix
+    /// (`FLAT_TO_THE_END`).
+    pub(crate) fn blobref_rule(&mut self, op: BlobletOp, xt: TyId, wanted: Option<TyId>, label: Option<(Sym, bool)>) -> Result<BlobrefRule, (Blame, String)> {
+        let int = self.int;
+        let wanted = || -> Result<TyId, (Blame, String)> {
+            wanted.ok_or_else(|| (Blame::Op, "which flat a new `blobref` points to is said by the type it is checked against: `(the (blobref B F) …)`".to_string()))
+        };
+        let rule = |rest: Vec<TyId>, result: TyId, effect: Vec<Atom>, datum: Option<Datum>| Ok(BlobrefRule { rest, result, effect, datum });
+        // A new one: the bytes its flat takes, told the compilers, lie in
+        // the suffix from where it points, checked at run time
+        // (`%fx26-suffix-fits`), so that what its type says of the flat, an
+        // array's length above all, holds of the suffix.
+        let fresh = |c: &mut Self, b: TyId| -> Result<BlobrefRule, (Blame, String)> {
+            let f = wanted()?;
+            c.unsized_new(f).map_err(|why| (Blame::Op, why))?;
+            let Some(size) = c.flat_least_size(f) else {
+                return Err((Blame::Op, format!("the layout of a {} is not known", c.show_ty(f))));
+            };
+            let t = c.blobref_of(b, f);
+            rule(vec![int], t, Vec::new(), Some(Datum::Fits(size)))
+        };
         if op == BlobletOp::RefAt {
             if !matches!(self.arena.get(self.arena.resolve(xt)), Ty::Bloblet { .. }) {
-                return Err(FxError::at(self.arena.span_of(*x), format!("a bloblet is expected here, and this is a {}", self.show_ty(xt))));
+                return Err((Blame::First, format!("a bloblet is expected here, and this is a {}", self.show_ty(xt))));
             }
-            eff = eff.union(&self.check(rest[0], int)?);
-            let f = wanted(self)?;
-            self.unsized_new(span, f)?;
-            self.note_fits(e, span, f)?;
-            let t = self.blobref_of(xt, f);
-            let eff = self.mask(e, &eff, t);
-            return Ok((t, eff));
+            return fresh(self, xt);
         }
         let Some((b, f)) = self.blobref_parts(xt) else {
-            return Err(FxError::at(self.arena.span_of(*x), format!("a blobref is expected here, and this is a {}", self.show_ty(xt))));
+            return Err((Blame::First, format!("a blobref is expected here, and this is a {}", self.show_ty(xt))));
         };
-        let t = match op {
-            BlobletOp::RefAdd => {
-                eff = eff.union(&self.check(rest[0], int)?);
-                let f = wanted(self)?;
-                self.unsized_new(span, f)?;
-                self.note_fits(e, span, f)?;
-                self.blobref_of(b, f)
-            }
-            BlobletOp::RefOwner => b,
-            BlobletOp::RefOffset => int,
-            // An element of a flat array: its length and element's size
-            // told the compilers (`Datum::Array`), checked at run time. A
-            // length not a literal runs to the end of the suffix
-            // (`FLAT_TO_THE_END`, `TODO.md` §77).
+        let array = |c: &Self| -> Result<(TyId, Size, usize, i64), (Blame, String)> {
+            let Some((g, n)) = c.flat_array_parts(f) else {
+                return Err((Blame::First, format!("a blobref to a flat array is expected here, and this is a {}", c.show_ty(xt))));
+            };
+            let Some((size, _)) = c.flat_layout(g) else {
+                return Err((Blame::Op, format!("the layout of a {} is not known", c.show_ty(g))));
+            };
+            let k = match n {
+                Size::Lin { k, ref terms } if terms.is_empty() => k,
+                _ => fixpt_heap::layout::FLAT_TO_THE_END,
+            };
+            Ok((g, n, size, k))
+        };
+        match op {
+            BlobletOp::RefAdd => fresh(self, b),
+            BlobletOp::RefOwner => rule(Vec::new(), b, Vec::new(), None),
+            BlobletOp::RefOffset => rule(Vec::new(), int, Vec::new(), None),
             BlobletOp::RefIndex => {
-                let Some((g, n)) = self.flat_array_parts(f) else {
-                    return Err(FxError::at(self.arena.span_of(*x), format!("a blobref to a flat array is expected here, and this is a {}", self.show_ty(xt))));
-                };
-                eff = eff.union(&self.check(rest[0], int)?);
-                let Some((size, _)) = self.flat_layout(g) else {
-                    return Err(FxError::at(span, format!("the layout of a {} is not known", self.show_ty(g))));
-                };
-                // Shown within the length by the facts in scope: a natural
-                // `i` with `n - (i + 1) >= 0`, `n` a literal or a named
-                // length, never `finite`, which is no one array's.
-                if let Some(i) = self.nat_size(rest[0])
-                    && !matches!(n, Size::Finite)
-                    && self.size_nonneg(&n.add_scaled(&i.plus(1), -1))
-                {
-                    self.facts.in_bounds.insert(e);
-                }
-                let n = match n {
-                    Size::Lin { k, terms } if terms.is_empty() => k as usize,
-                    _ => fixpt_heap::layout::FLAT_TO_THE_END as usize,
-                };
-                self.facts.datum.insert(e, Datum::Array { n: n as i64, size });
-                self.blobref_of(b, g)
+                let (g, _, size, n) = array(self)?;
+                let t = self.blobref_of(b, g);
+                rule(vec![int], t, Vec::new(), Some(Datum::Array { n, size }))
             }
-            // A flat array's length, a `(nat n)` of its length `n`: told the
-            // compilers as `blobref-index`'s is.
+            // A flat array's length, a `(nat n)` of its length `n`.
             BlobletOp::RefLength => {
-                let Some((g, n)) = self.flat_array_parts(f) else {
-                    return Err(FxError::at(self.arena.span_of(*x), format!("a blobref to a flat array is expected here, and this is a {}", self.show_ty(xt))));
-                };
-                let Some((size, _)) = self.flat_layout(g) else {
-                    return Err(FxError::at(span, format!("the layout of a {} is not known", self.show_ty(g))));
-                };
-                let k = match n {
-                    Size::Lin { k, ref terms } if terms.is_empty() => k as usize,
-                    _ => fixpt_heap::layout::FLAT_TO_THE_END as usize,
-                };
-                self.facts.datum.insert(e, Datum::Array { n: k as i64, size });
-                self.arena.ty(Ty::Nat(n))
+                let (_, n, size, k) = array(self)?;
+                let t = self.arena.ty(Ty::Nat(n));
+                rule(Vec::new(), t, Vec::new(), Some(Datum::Array { n: k, size }))
             }
             // A flat sum made a variant, named by a literal: its layout's
-            // code told the compilers (`Checker::flat_sum_layout`). Without
-            // a key, the tag found among the owner's fields at run time.
+            // code told the compilers (`Checker::flat_sum_layout`).
             BlobletOp::RefVariant => {
                 let Some((code, _, _, variants)) = self.flat_sum_layout(f) else {
-                    return Err(FxError::at(self.arena.span_of(*x), format!("a blobref to a flat sum is expected here, and this is a {}", self.show_ty(xt))));
+                    return Err((Blame::First, format!("a blobref to a flat sum is expected here, and this is a {}", self.show_ty(xt))));
                 };
-                let label = match self.arena.exp_at(rest[0]) {
-                    Exp::Symbol(l) if code & 8 == 0 => Some(*l),
-                    Exp::Int(n) if code & 8 != 0 => Some(self.interner.intern(&n.to_string())),
-                    _ => None,
-                };
-                let Some(label) = label else {
-                    return Err(FxError::at(self.arena.span_of(rest[0]), "a variant is named by a literal: `'label`, or a number where the sum has a key"));
+                let Some(label) = label.filter(|(_, numeric)| *numeric == (code & 8 != 0)).map(|(l, _)| l) else {
+                    return Err((Blame::Second, "a variant is named by a literal: `'label`, or a number where the sum has a key".to_string()));
                 };
                 let Some(&(_, g)) = variants.iter().find(|(l, _)| *l == label) else {
-                    return Err(FxError::at(self.arena.span_of(rest[0]), format!("a {} has no variant `{}`", self.show_ty(f), self.interner.name(label))));
+                    return Err((Blame::Second, format!("a {} has no variant `{}`", self.show_ty(f), self.interner.name(label))));
                 };
-                let region = self.owner_region(span, xt, b)?;
-                eff.0.insert(Atom::Read(region));
-                eff.0.insert(Atom::Write(region));
-                self.facts.datum.insert(e, Datum::Layout(code as usize));
-                self.blobref_of(b, g)
+                let region = self.owner_region(xt, b)?;
+                let t = self.blobref_of(b, g);
+                rule(Vec::new(), t, vec![Atom::Read(region), Atom::Write(region)], Some(Datum::Layout(code as usize)))
             }
-            _ => {
+            BlobletOp::RefGet | BlobletOp::RefSet => {
                 // A scalar, whose bytes are read as the type of its name, of
                 // the owner's region.
                 let code = match self.arena.get(self.arena.resolve(f)) {
@@ -4381,28 +4423,23 @@ impl Checker {
                     _ => None,
                 };
                 let Some(code) = code else {
-                    return Err(FxError::at(span, format!("only a scalar's bytes are read or written, and this points to a {}", self.show_ty(f))));
+                    return Err((Blame::Op, format!("only a scalar's bytes are read or written, and this points to a {}", self.show_ty(f))));
                 };
-                let region = self.owner_region(span, xt, b)?;
-                self.facts.datum.insert(e, Datum::Layout(code as usize));
-                if op == BlobletOp::RefGet {
-                    eff.0.insert(Atom::Read(region));
-                    f
-                } else {
-                    eff = eff.union(&self.check(rest[0], f)?);
-                    eff.0.insert(Atom::Write(region));
-                    self.unit
+                let region = self.owner_region(xt, b)?;
+                let datum = Some(Datum::Layout(code as usize));
+                match op {
+                    BlobletOp::RefGet => rule(Vec::new(), f, vec![Atom::Read(region)], datum),
+                    _ => rule(vec![f], self.unit, vec![Atom::Write(region)], datum),
                 }
             }
-        };
-        let eff = self.mask(e, &eff, t);
-        Ok((t, eff))
+            _ => unreachable!("a blobref form"),
+        }
     }
 
     /// The region of blobref type `xt`'s owner, `b`.
-    fn owner_region(&self, span: fixpt_read::Span, xt: TyId, b: TyId) -> R<Region> {
+    fn owner_region(&self, xt: TyId, b: TyId) -> Result<Region, (Blame, String)> {
         let Ty::Bloblet { region, .. } = self.arena.get(self.arena.resolve(b)).clone() else {
-            return Err(FxError::at(span, format!("the region of a {}'s owner is not known", self.show_ty(xt))));
+            return Err((Blame::Op, format!("the region of a {}'s owner is not known", self.show_ty(xt))));
         };
         Ok(region)
     }
@@ -4411,27 +4448,12 @@ impl Checker {
     /// with a length other than `finite` (`TODO.md` §77): a length is named
     /// where the blobref is bound, one for each, so that what is learned of
     /// it is of that blobref's array; a new one could claim another's.
-    /// The bytes a new blobref's flat `f` takes, told the compilers: that
-    /// many lie in the suffix from where it points, checked at run time
-    /// (`%fx26-suffix-fits`), so that what its type says of the flat, an
-    /// array's length above all, holds of the suffix.
-    fn note_fits(&mut self, e: ExpId, span: fixpt_read::Span, f: TyId) -> R<()> {
-        let Some(size) = self.flat_least_size(f) else {
-            return Err(FxError::at(span, format!("the layout of a {} is not known", self.show_ty(f))));
-        };
-        self.facts.datum.insert(e, Datum::Fits(size));
-        Ok(())
-    }
-
-    fn unsized_new(&self, span: fixpt_read::Span, f: TyId) -> R<()> {
+    pub(crate) fn unsized_new(&self, f: TyId) -> Result<(), String> {
         match self.unsized_length(f) {
             Some(Size::Finite) | None => Ok(()),
-            Some(_) => Err(FxError::at(
-                span,
-                format!(
-                    "a new blobref's array of a length not literal is of length `finite`, not a {}: the length is named where the blobref is bound",
-                    self.show_ty(f)
-                ),
+            Some(_) => Err(format!(
+                "a new blobref's array of a length not literal is of length `finite`, not a {}: the length is named where the blobref is bound",
+                self.show_ty(f)
             )),
         }
     }

@@ -140,6 +140,27 @@ impl Checker {
     }
 
     /// Whether `t` is `false`, or a union with it.
+    /// `t`, under binders `from`, with each renamed to its fellow in `to`
+    /// (of the same kinds): a `poly`'s body seen under another's binders.
+    pub(crate) fn renamed(&mut self, t: TyId, from: &[(DVar, Kind)], to: &[(DVar, Kind)]) -> TyId {
+        let map: HashMap<DVar, D> = from
+            .iter()
+            .zip(to)
+            .map(|((vb, k), (va, _))| {
+                let d = match k {
+                    Kind::Region | Kind::Place => D::Region(Region::Var(*va)),
+                    Kind::Effect => D::Effect(Effect::atom(Atom::Var(*va))),
+                    Kind::Type | Kind::Data | Kind::Sendable | Kind::Flat => D::Type(self.arena.ty(Ty::Var(*va))),
+                    Kind::Size => D::Size(Size::var(*va)),
+                    Kind::Conv => D::Conv(crate::ast::Conv::Var(*va)),
+                    Kind::Arrow(_) => D::Fun(self.arena.ty(Ty::Var(*va))),
+                };
+                (*vb, d)
+            })
+            .collect();
+        self.subst(t, &map)
+    }
+
     fn false_expected(&self, t: TyId) -> bool {
         let is = |c: &Self, t: TyId| matches!(c.arena.get(c.arena.resolve(t)), Ty::False);
         match self.arena.get(self.arena.resolve(t)) {
@@ -177,22 +198,7 @@ impl Checker {
                     && bs.iter().zip(&binders).all(|((_, a), (_, b))| a == b)) =>
             {
                 let Ty::Poly { binders: bs, body: want } = expected_ty else { unreachable!() };
-                let map: HashMap<DVar, D> = bs
-                    .iter()
-                    .zip(&binders)
-                    .map(|((vb, k), (va, _))| {
-                        let d = match k {
-                            Kind::Region | Kind::Place => D::Region(Region::Var(*va)),
-                            Kind::Effect => D::Effect(Effect::atom(Atom::Var(*va))),
-                            Kind::Type | Kind::Data | Kind::Sendable | Kind::Flat => D::Type(self.arena.ty(Ty::Var(*va))),
-                            Kind::Size => D::Size(Size::var(*va)),
-                            Kind::Conv => D::Conv(crate::ast::Conv::Var(*va)),
-                            Kind::Arrow(_) => D::Fun(self.arena.ty(Ty::Var(*va))),
-                        };
-                        (*vb, d)
-                    })
-                    .collect();
-                let want = self.subst(want, &map);
+                let want = self.renamed(want, &bs, &binders);
                 self.note_generalized(e, &binders, false);
                 let eff = self.check(body, want)?;
                 if !self.generalizable(body, &eff) {
@@ -452,10 +458,6 @@ impl Checker {
     /// The same, with the body checked against `result` when it is known.
     pub(crate) fn synth_lambda_as(&mut self, e: ExpId, hint: Option<&[TyId]>, result: Option<TyId>) -> R<(TyId, Effect)> {
         let Exp::Lambda { params, body } = self.arena.exp_at(e).clone() else { unreachable!() };
-        let frees: Vec<(Sym, TyId)> = match self.record_types {
-            true => self.free_vars(e).into_iter().filter_map(|s| Some((s, self.lookup(s)?))).collect(),
-            false => Vec::new(),
-        };
         let mut typed = Vec::new();
         for (i, (n, t)) in params.iter().enumerate() {
             match (t, hint.and_then(|h| h.get(i))) {
@@ -527,6 +529,10 @@ impl Checker {
         self.skolems.truncate(named);
         let (result, latent) = r?;
         if self.record_types {
+            // Its free variables as bound where it is, found once its body
+            // is checked: a name a `with` in it binds is not free
+            // (`NodeFacts::with_vals`).
+            let frees = self.free_vars(e).into_iter().filter_map(|s| Some((s, self.lookup(s)?))).collect();
             let sig = crate::check::LambdaSig { params: typed.clone(), frees, result, effect: latent.clone(), inside };
             self.facts.lambdas.insert(body, sig);
         }

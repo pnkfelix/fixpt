@@ -57,7 +57,7 @@ fn verify_program(s: &mut Fx26Session, name: &str, text: &str, t: &mut Tally) {
                 comp.certs.take().expect("made")
             };
             let mut certs = certs;
-            if let Err(why) = certs.settle(&c) {
+            if let Err(why) = certs.settle(&mut c) {
                 t.failed.push(format!("{name}: {why}"));
             }
             let heap: &fixpt_heap::Heap = m.heap();
@@ -104,7 +104,7 @@ fn mutants(s: &mut Fx26Session, name: &str, text: &str) -> (usize, Vec<String>) 
                 comp.certs.take().expect("made")
             };
             let mut certs = certs;
-            certs.settle(&c).expect("settled");
+            certs.settle(&mut c).expect("settled");
             for raw in certs.words.keys() {
                 let w = Value::from_raw(*raw);
                 if !verify(&mut c, m.heap(), &certs, w).verified() {
@@ -155,22 +155,6 @@ fn a_verified_word_changed_is_refused() {
     assert!(kept.is_empty(), "mutants verified:\n{}", kept.join("\n"));
 }
 
-/// The test programs some of whose type VCs fail, and how many: each a
-/// rule the verifier does not have yet (`TODO.md` §115), not a fault of
-/// the checker's or the compiler's. A failure in a program not here, or
-/// more than its count, fails the test; fewer is to be written here.
-/// Their causes: regions frozen or certified (`letfreeze`, `acyclic`: a
-/// list made in `r` taken as `const`); a natural after a test (size
-/// facts); a flat `blobref` under a size binder, which the checker
-/// relates while the binder is in scope; a module item's lambda whose
-/// free name the body reaches through `(with %include …)`, recorded at
-/// the binding outside (the standard `get`); a functor's result.
-const KNOWN_FAILURES: &[(&str, usize)] = &[
-    ("bloblet/flat-bounds.fx", 1),
-    ("bloblet/flat-unsized.fx", 2),
-    ("modules/include-abstract.fx", 1),
-];
-
 fn programs() -> Vec<(String, String)> {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
     let mut out = Vec::new();
@@ -184,10 +168,11 @@ fn programs() -> Vec<(String, String)> {
     out
 }
 
-/// Every word of every test program, verified: how many verify, where the
-/// verifier stops for want of a rule, and which VCs it leaves open. None
-/// may fail: the checker accepted these programs, so a failure is the
-/// verifier's mistake or the compiler's.
+/// Every word of every test program, verified: each must verify. The
+/// checker accepted these programs, so a VC that fails is the verifier's
+/// mistake or the compiler's; one left open, or a word the verifier stops
+/// in, a rule it lacks. What is assumed (the scheduler's procedures at
+/// their forms' types) is said, not refused.
 #[test]
 fn every_test_programs_words_verified() {
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
@@ -205,18 +190,10 @@ fn every_test_programs_words_verified() {
     for f in t.failed.iter().take(if std::env::var_os("ALL").is_some() { usize::MAX } else { 30 }) {
         eprintln!("  FAILED {f}");
     }
-    // A ratchet: what verifies now, as the verifier grows; and no failure
-    // outside those the verifier's missing rules explain.
-    assert!(t.verified >= 1049, "fewer words verify: {}", t.verified);
-    let mut by: BTreeMap<&str, usize> = BTreeMap::new();
-    for f in &t.failed {
-        *by.entry(f.split(':').next().unwrap_or("")).or_default() += 1;
-    }
-    let known: BTreeMap<&str, usize> = KNOWN_FAILURES.iter().copied().collect();
-    let worse: Vec<String> = by.iter().filter(|(p, n)| **n > known.get(*p).copied().unwrap_or(0)).map(|(p, n)| format!("{p}: {n}")).collect();
-    let better: Vec<String> = known.iter().filter(|(p, n)| by.get(*p).copied().unwrap_or(0) < **n).map(|(p, n)| format!("{p}: {} (was {n})", by.get(*p).copied().unwrap_or(0))).collect();
-    if !better.is_empty() {
-        eprintln!("fewer failures than KNOWN_FAILURES says, to write there: {better:?}");
-    }
-    assert!(worse.is_empty(), "type VCs failing beyond those known: {worse:?}");
+    // Every word, every VC discharged: none failing, none left open, and
+    // no word the verifier stops in for want of a rule.
+    assert!(t.failed.is_empty(), "type VCs failed: {}", t.failed.len());
+    assert!(t.open == 0, "VCs left open: {}", t.open);
+    assert!(t.stopped.is_empty(), "words stopped in: {:?}", t.stopped);
+    assert!(t.verified == t.words && t.words > 1000, "{} of {} words verified", t.verified, t.words);
 }

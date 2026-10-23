@@ -755,7 +755,7 @@ impl Lowerer<'_> {
                     BlobletOp::SetByte => format!("(%fx26-bloblet-set-byte! {} {} {})", a[0], a[1], a[2]),
                     BlobletOp::Bytes => format!("(%bloblet-bytes {})", a[0]),
                     // A new blobref, its flat's bytes checked in the suffix
-                    // (`Checker::note_fits`): one byte already is.
+                    // (`Checker::blobref_rule`): one byte already is.
                     BlobletOp::RefAt | BlobletOp::RefAdd => {
                         let name = if op == BlobletOp::RefAt { "%suffix-ref" } else { "%suffix-ref+" };
                         let r = format!("({name} {} {})", a[0], a[1]);
