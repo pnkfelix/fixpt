@@ -82,6 +82,10 @@ pub struct Cert {
     /// its last, and its binders: the value it makes there, if made purely,
     /// is of the `poly` type over them (`generalize`).
     pub gens: Vec<(usize, usize, Vec<(crate::ast::DVar, crate::ast::Kind)>)>,
+    /// The cells whose standard operation runs at its own binders, not
+    /// instantiated: a standard operation's word as a value, verified
+    /// generically.
+    pub own_ops: Vec<usize>,
 }
 
 /// The certificates a compilation made: each word's, and each global cell's
@@ -543,7 +547,7 @@ impl Verifier<'_> {
         if code.len() < n || !cells.iter().zip(code).all(|(is, ins)| is(ins)) || code[1..n].iter().any(|ins| waiting.contains_key(&ins.at)) {
             return None;
         }
-        let Some((params, result, effect)) = self.op_type(&op, &inst, 0) else {
+        let Some((params, result, effect)) = self.op_type(&op, &inst, 0, cert.own_ops.contains(&code[0].at)) else {
             self.out.stopped = Some(format!("`{op}`: its type, instantiated"));
             return Some(Err(()));
         };
@@ -905,7 +909,10 @@ impl Verifier<'_> {
             "closure" | "nclosure" => {
                 let (w, n) = (ops[0], ops[1].as_fixnum() as usize);
                 let Some(callee) = self.certs.words.get(&w.raw()).cloned() else {
-                    self.out.stopped = Some("a closure over a word with no certificate".into());
+                    let named = self.heap.bloblet_slot(w, fixpt_heap::layout::cellular::WORD_NAME);
+                    let name = if self.heap.is_a(named, ObjType::Symbol) { self.heap.symbol_name(named) } else { "?".into() };
+                    let name: String = name.chars().take_while(|c| *c != '@').collect();
+                    self.out.stopped = Some(format!("a closure over a word with no certificate ({name})"));
                     return Err(());
                 };
                 if callee.frees.len() != n {
@@ -1166,7 +1173,7 @@ impl Verifier<'_> {
                     return Err(());
                 }
                 let n = if name == "prim" { ops[1].as_fixnum() as usize } else { 2 };
-                let Some((params, result, effect)) = self.op_type(&op, &inst, n) else {
+                let Some((params, result, effect)) = self.op_type(&op, &inst, n, cert.own_ops.contains(&here)) else {
                     self.out.stopped = Some(format!("`{op}`: its type, instantiated"));
                     return Err(());
                 };
@@ -1206,12 +1213,14 @@ impl Verifier<'_> {
 
     /// Standard operation `op`'s type, its binders instantiated at `inst`,
     /// for a call of `n` values: its parameters, result and effect.
-    fn op_type(&mut self, op: &str, inst: &[crate::ast::D], n: usize) -> Option<(Vec<TyId>, TyId, Effect)> {
+    fn op_type(&mut self, op: &str, inst: &[crate::ast::D], n: usize, own: bool) -> Option<(Vec<TyId>, TyId, Effect)> {
         let sym = self.c.interner.intern(op);
         let t = self.c.standard_type(sym)?;
         let (kinds, inner) = self.c.binders_of(t);
+        // At its own binders, abstract (a standard operation's word as a
+        // value, verified generically).
         let inner = match kinds.len() {
-            0 => inner,
+            _ if own => inner,
             k if k == inst.len() => {
                 let map: HashMap<crate::ast::DVar, crate::ast::D> = kinds.iter().map(|(v, _)| *v).zip(inst.iter().cloned()).collect();
                 self.c.subst(inner, &map)
@@ -1281,6 +1290,36 @@ impl Verifier<'_> {
         // and where false, as its type says (the call rule's `ensures`).
         if let Some((_, then, els, args)) = self.proving.iter().find(|(t, ..)| t == flag).cloned() {
             for p in if yes { then } else { els } {
+                // `(length i j)`: argument `i`, a list, is as long as `j`
+                // says, an `nlist` (what `certify-length` of it then says);
+                // `(nat i)`: argument `i` is a natural.
+                if let crate::ast::Prop::Length(i, j) = p
+                    && let (Some(list), Some(len)) = (args.get(i).cloned(), args.get(j).cloned())
+                {
+                    let size = match &len {
+                        Term::Lit(k) if k.is_fixnum() && k.as_fixnum() >= 0 => Size::lit(k.as_fixnum()),
+                        _ => s.stack.iter().find(|v| v.term == len).and_then(|v| self.ty_of(v)).and_then(|t| match t {
+                            Ty::Nat(n) => Some(n),
+                            _ => None,
+                        }).unwrap_or(Size::Finite),
+                    };
+                    for v in s.stack.iter_mut().filter(|v| v.term == list) {
+                        let Some(ty) = v.ty else { continue };
+                        if let Ty::Pair(elem, _, region, true) = self.c.arena.get(self.c.arena.resolve(ty)).clone() {
+                            v.ty = Some(self.c.arena.ty(Ty::NList { elem, size: size.clone(), region }));
+                        }
+                    }
+                    continue;
+                }
+                if let crate::ast::Prop::Nat(i) = p
+                    && let Some(x) = args.get(i).cloned()
+                {
+                    let nat = self.c.arena.ty(Ty::Nat(Size::Finite));
+                    for v in s.stack.iter_mut().filter(|v| v.term == x) {
+                        v.ty = Some(nat);
+                    }
+                    continue;
+                }
                 let crate::ast::Prop::Shape { param, shape, negated } = p else { continue };
                 let Some(arg) = args.get(param) else { continue };
                 for v in s.stack.iter_mut().filter(|v| v.term == *arg) {

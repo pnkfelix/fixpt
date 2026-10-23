@@ -1943,6 +1943,11 @@ impl<'a> Compiler<'a> {
         for i in 0..n {
             self.op1(&mut body, "slot", Value::fixnum(i as i64));
         }
+        // The operation, at its own binders (an instantiation of none).
+        if self.certs.is_some() {
+            self.ops.push((name.to_string(), Vec::new()));
+            body.push(Item::Op(self.ops.len() - 1));
+        }
         if name == "make-array" {
             self.prim(&mut body, "%make-bloblet-filled", 3)?;
         } else {
@@ -1950,8 +1955,35 @@ impl<'a> Compiler<'a> {
         }
         self.op(&mut body, "return");
         let w = self.assemble(&body, name)?;
+        self.certify_standard(w, name);
         self.register_twin(w, name, name, n)?;
         Ok(w)
+    }
+
+    /// With certificates wanted: a standard operation's word as a value,
+    /// signed with the operation's own type, its binders one level.
+    fn certify_standard(&mut self, w: Value, name: &str) {
+        let Some(certs) = &mut self.certs else { return };
+        let Some(t) = self.c.interner.get(name).and_then(|s| self.c.standard_type(s)) else { return };
+        // Its levels of binders, as the type has them: a `proj` takes one.
+        let (mut levels, mut inner) = (Vec::new(), self.c.arena.resolve(t));
+        while let crate::ast::Ty::Poly { binders, body } = self.c.arena.get(inner) {
+            levels.push(binders.clone());
+            inner = self.c.arena.resolve(*body);
+        }
+        let Some((effect, params, result)) = self.c.arena.get(inner).as_subr() else { return };
+        let cert = crate::typed_cells::Cert {
+            poly: levels,
+            params,
+            result: Some(result),
+            effect: Some(effect),
+            notes: self.last_notes.clone(),
+            ops: self.last_ops.clone(),
+            gens: self.last_gens.clone(),
+            own_ops: self.last_ops.iter().map(|(k, _, _)| *k).collect(),
+            ..Default::default()
+        };
+        certs.words.insert(w.raw(), cert);
     }
 
     /// Register code for word `w`, named `name`, as standard operation `op`
@@ -2113,7 +2145,10 @@ impl<'a> Compiler<'a> {
     /// With certificates wanted: that the next cell runs standard operation
     /// `name`, at the instantiation application `x` was checked at.
     fn note_op(&mut self, x: ExpId, name: &str, code: &mut Vec<Item>) {
-        if self.certs.is_some() {
+        // One that compiles to no cell (a certification, the identity at
+        // run time) has none to note: what it says of its argument's type
+        // the verifier has from the test that allowed it.
+        if self.certs.is_some() && standard_primitive(name) != Some("%fx26-identity") {
             let inst = self.c.facts.insts.get(&x).cloned().unwrap_or_default();
             self.ops.push((name.to_string(), inst));
             code.push(Item::Op(self.ops.len() - 1));
@@ -2509,6 +2544,7 @@ impl<'a> Compiler<'a> {
             ops: self.last_ops.clone(),
             gens: self.last_gens.clone(),
             conversion,
+            own_ops: Vec::new(),
         };
         certs.words.insert(w.raw(), cert);
     }
