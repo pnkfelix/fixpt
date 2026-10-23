@@ -151,7 +151,7 @@ each place a term, and a set of propositions about the terms).
 
 This is the extensibility the user asked for. Today every VC the
 compilers' code raises is a type VC, or (from `sizes.rs`) a linear one.
-A program that asserts more (§7) raises more, and the same verifier
+A program that asserts more (§8) raises more, and the same verifier
 passes them on.
 
 ## 6. What is trusted
@@ -245,7 +245,96 @@ only inherit them.
 the program runs (a `certify`-like operation, as `certify-nat` refines
 a binding today), and how `contract` blame is said.
 
-## 8. Stages
+## 8. Specifications in procedure types
+
+Decided with the user (2026-10-22): propositions come into a program as
+preconditions and postconditions on procedure types. Hoare logic for
+procedures (Hoare, "Procedures and parameters: an axiomatic approach",
+1971), as design by contract and Dafny, Why3 and Boogie have it:
+
+```
+(subr E ((x int) (y int)) (r int)
+  (requires (< 0 y))
+  (ensures (and (<= 0 r) (< r y))))
+```
+
+The parameters and the result are named, so that the propositions can
+speak of them; otherwise it is the `subr` type it is now.
+
+**The rules.**
+- *Body*: a procedure is verified once, assuming its `requires` at entry;
+  its `ensures` is a VC at each `return`.
+- *Call*: the callee's `requires`, its parameters the arguments, is a VC
+  at the call; after it, its `ensures` is assumed, the result named.
+- *Tail call*: the callee's `ensures` must entail the caller's.
+- *Recursion*: a body is verified assuming its own specification at its
+  recursive calls: partial correctness, what holds if it returns. Total
+  correctness is termination as well, which FX-26 has as `spin` and the
+  size-change check, and `TODO.md` §21 would make checkable (ranking
+  functions as certificates).
+- *Loops*: FX-26's loops are tail recursion, compiled to a jump back to
+  the word's start, so a loop's invariant is its procedure's `requires`.
+  No syntax of its own: the jump back is a tail call, and the rule for
+  it is Hoare's loop rule.
+
+**Latent propositions become a special case.** Occurrence typing's
+`(bool (then P …) (else Q …))` (`logical-types.md`, L1; `Ty::Proving`)
+is a postcondition:
+
+```
+(ensures (and (implies r (and P …)) (implies (not r) (and Q …))))
+```
+
+The checkers' narrowing after a test (`latent_props`, `props_narrow`) is
+the call rule (assume the callee's `ensures`, read from its type, not
+its name) with the branch rule (each way knows `r` or `(not r)`).
+Subtyping one `Proving` under another when it proves at least as much
+(`check.rs`'s `sub`) is the covariant half of behavioural subtyping.
+`Prop` (`ast.rs`) is already a language of propositions over parameters
+(shape, acyclic, nat, length, integer relations on `Param(i)`,
+`Length(i)` and literals). What the general form adds:
+- postconditions of any result, and of the result itself (`(< x r)`),
+  not only of a `bool`'s, about the arguments;
+- preconditions;
+- connectives and richer terms (§2): implication, disjunction, the
+  result, the logic's functions;
+- **bodies checked against them.** Today only the standard predicates
+  have latent propositions: axioms of the primitives, by L1's stage 1
+  (no latent propositions on user procedures, its question 5). A
+  program's own `ensures` is a VC to verify of its body.
+`(bool (then …) (else …))` stays, as sugar for the `ensures` it means,
+and the cells' verifier narrows at `0branch` by the callee's
+`ensures`, not by the patterns it knows now (`null?`, a sum's tag).
+
+**What FX-26 must settle.**
+1. *Effects are the frame.* Hoare logic must say what a call leaves
+   alone (Dafny's `modifies`). FX-26's effects say which regions a call
+   may write: a fact about any other region survives the call, as the
+   checker already lets facts survive (`kill_paths`). The frame rule,
+   nearly for nothing.
+2. *Behavioural subtyping.* A procedure is a value and its specification
+   is in its type, so a closure carries its contract. One fits where
+   another is expected if it requires no more and ensures no less
+   (Liskov and Wing): contravariant `requires`, covariant `ensures`.
+   Subtyping then raises VCs, implications between propositions, not
+   only structure to compare. This is refinement typing (Liquid
+   Haskell's) by another road.
+3. *State before.* Most FX-26 data is immutable; refs and arrays are
+   not. An `ensures` of their contents needs to name what they held at
+   entry: Dafny's `old(e)`.
+4. *Control effects pass `return` by.* An abort, an escape, a
+   continuation resumed leave without the postcondition. Either they
+   have their own (JML's `signals`: an `ensures` for each way out), or,
+   first, a procedure with a specification may have no control effect.
+
+**What it needs first:** the verifier's state keeping facts (§9's TC5):
+each triple's postcondition kept (`(= r (+ a b))`), each branch's
+condition, the facts every way in holds kept at a join, linear facts to
+Fourier–Motzkin, and the rest open to the loader's policy (§7). The
+checker needs the same at source level, to check a body against its
+`ensures`.
+
+## 9. Stages
 
 1. **TC1. The certificate, made.** The Rust checker records each
    expression's type; the Rust cellular compiler (`cellular.rs`) gives
@@ -263,12 +352,12 @@ a binding today), and how `contract` blame is said.
    regions masked, capabilities (C8).
 5. **TC5. Propositions beyond types**: the post of each triple kept
    (`(= r (+ a b))`), linear VCs to Fourier–Motzkin, open VCs written
-   out; then programs that state propositions (§10).
+   out; then programs that state propositions (§8).
 6. **TC6. Kept and loaded**: the certificate in the word (`WORD_TYPE`,
    C2), the FX-26 compiler making the same certificates, fragments
    verified on loading (C10), under the loader's policy (§7).
 
-## 9. Where it stands (2026-10-22)
+## 10. Where it stands (2026-10-22)
 
 TC1 and the start of TC2, over the Rust compiler (`cellular.rs`) and
 checker:
@@ -297,13 +386,12 @@ verify, discharging 6,248 VCs. 243 mutants of verified words (an
 `int-add` made a `pair-car`, and the reverse) are all refused. Where the
 rest stop is `TODO.md` §115.
 
-## 10. Open questions (the user's)
+## 11. Open questions (the user's)
 
-1. **Where propositions come from in a program.** Today only the checker
-   makes them. A program could state them: preconditions and
-   postconditions on a `subr` type (`(subr E ((x int)) (r int) (requires
-   (< 0 x)) (ensures (< x r)))`), loop invariants, `(assert P)`. Which,
-   and in what syntax?
+1. ~~**Where propositions come from in a program.**~~ From `requires`
+   and `ensures` in procedure types, loop invariants being `requires`
+   (§8, decided 2026-10-22). Left: §8's four points, and whether
+   `(assert P)` within a body is wanted too.
 2. ~~**What an open VC means at run time.**~~ The loader's policy says,
    and trusting is an effect (§7, decided 2026-10-22); what is left of
    it is §7's "to decide".

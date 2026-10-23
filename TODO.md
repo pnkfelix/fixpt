@@ -2744,7 +2744,10 @@ first, with what each needs:
    the representation. The certificate says which words are inside.
 6. **Facts beyond types** (TC5): `(- n 1)` is a `nat` after `(< 0 n)`.
    Keep `0branch`'s facts as propositions and give the linear ones to
-   Fourier–Motzkin (`sizes.rs`'s `refuted_below`).
+   Fourier–Motzkin (`sizes.rs`'s `refuted_below`). First, as it is what
+   the next step needs: `requires` and `ensures` in procedure types,
+   latent propositions their special case (the note's §8, decided with
+   the user 2026-10-22).
 7. **Nested `poly`s**, sized lists (`nlist`), `datum`, regions and
    private effects masked (`letregion`, `letfreeze`), control (prompts,
    marks, continuations), arrays (`field@`), flat data.
