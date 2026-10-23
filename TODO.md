@@ -449,6 +449,37 @@ it.
    ranking from each group that passes, over the test programs, the front
    end and the benchmark ports, and report those it cannot.
 
+**Measured (2026-10-22, x86_64, release): where checking goes.** The
+Rust checker on the whole front end takes 1.85 s; loading it lowered
+takes 1.85 s more to check, 0.13 s to lower, 1.6 s to load the Scheme.
+By phase, each phase's own time (timed at its entry, 2.0 s with the
+timers):
+
+| phase | share |
+| --- | --- |
+| synth and check, the rest | 37% |
+| subtyping | 12% |
+| parse (syntax to AST, types included) | 11% |
+| cyclic types (`cyclic`) | 9% |
+| regions (`regions_in`) | 8% |
+| knots (`no_knot`) | 7% |
+| module selects (`resolve_selects`) | 7% |
+| substitution (`subst_memo`) | 6% |
+| termination (size-change) | 1.3% |
+| effect inference (`->*`, `define*`) | 1.3% |
+| unification (instantiating at calls) | 1.0% |
+| recording uses, for redefinition | 0.5% |
+
+Inference proper (effects found, instantiation, the termination search)
+is under 4%: the front end writes its types. A verifier of an
+elaborated source form would redo most of the rest, so would save
+little; what would save the 1.85 s, and the 1.6 s of loading, is a
+verified *compiled* form (item 1), whose types are resolved and whose
+selects, subtyping and regions are already settled. Apart from that,
+the checker spends much in hashing (`RandomState`, SipHash: 8% hashing
+`DVar`s, 5% cloning `SubState`'s assumptions in `sub`); a faster hash
+and an assumption set not cloned per branch would be a cheap gain.
+
 What is built: `DONE.md` §21.
 
 ## 22. A prelude, and a standard library in FX-26, after modules (the user's, 2026-09-30)
