@@ -513,6 +513,11 @@ pub struct NodeFacts {
     /// instantiated at, in order (`Checker::binders_of`), as checking found
     /// them. With `record_types`.
     pub insts: HashMap<ExpId, Vec<D>>,
+    /// A module's abstract type's conversions, `up-t` and `down-t`, each
+    /// the identity on the representation, by its lambda's body: the type
+    /// it is bound at, from the representation to the abstract type or
+    /// back. With `record_types`.
+    pub conversions: HashMap<ExpId, TyId>,
     /// With `record_operands`, each application of a polymorphic standard
     /// operation: its arguments' types where instantiating it synthesised
     /// them (`crate::debts`, `TODO.md` §86).

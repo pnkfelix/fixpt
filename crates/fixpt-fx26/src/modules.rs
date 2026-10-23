@@ -426,6 +426,13 @@ impl Checker {
                             self.arena.ty(Ty::Poly { binders, body: down_t }),
                         )
                     };
+                    if self.record_types {
+                        for (f, t) in [(up_fn, up_t), (down_fn, down_t)] {
+                            if let crate::ast::Exp::Lambda { body, .. } = self.arena.exp_at(f) {
+                                self.facts.conversions.insert(*body, t);
+                            }
+                        }
+                    }
                     self.env.push((up, up_t));
                     self.env.push((down, down_t));
                     abs.push((name, var));

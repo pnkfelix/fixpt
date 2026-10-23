@@ -73,6 +73,11 @@ pub struct Cert {
     /// and what its type's binders are instantiated at (checking found it;
     /// the verifier substitutes, and does not search).
     pub ops: Vec<(usize, String, Vec<crate::ast::D>)>,
+    /// A conversion's: the type it is bound at, between a representation
+    /// and its abstract type (a module's `up-t`, `down-t`), where its
+    /// signature is the representation's identity. Checked (`conversion`),
+    /// not trusted.
+    pub conversion: Option<TyId>,
 }
 
 /// The certificates a compilation made: each word's, and each global cell's
@@ -81,6 +86,35 @@ pub struct Cert {
 pub struct Certs {
     pub words: HashMap<u64, Cert>,
     pub globals: HashMap<u64, TyId>,
+    /// Each module's abstract type, by its variable: the representation its
+    /// conversions are certified at. Made by `Certs::settle`, which refuses
+    /// two that differ.
+    pub reps: HashMap<crate::ast::DVar, TyId>,
+}
+
+impl Certs {
+    /// The abstract types' representations, from the conversions'
+    /// certificates: each conversion's signature is `(R) -> R`, and the type
+    /// it is bound at names the variable. Two conversions of one variable at
+    /// different representations are an error: the certificates would let a
+    /// value of one be taken for the other.
+    pub fn settle(&mut self, c: &Checker) -> Result<(), String> {
+        for cert in self.words.values() {
+            let (Some(t), [rep]) = (cert.conversion, &cert.params[..]) else { continue };
+            let Some((_, ps, r)) = c.arena.get(c.arena.resolve(t)).as_subr() else { continue };
+            for side in [ps.first().copied(), Some(r)].into_iter().flatten() {
+                if let Ty::Var(v) = c.arena.get(c.arena.resolve(side)) {
+                    match self.reps.insert(*v, *rep) {
+                        Some(old) if c.arena.resolve(old) != c.arena.resolve(*rep) => {
+                            return Err(format!("two representations certified for {}", c.show_ty(side)));
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
 }
 
 /// What verifying a word found: how many VCs it discharged, those that
@@ -240,8 +274,12 @@ impl Verifier<'_> {
         }
     }
 
-    /// The procedure type a word's signature gives a closure over it.
+    /// The procedure type a word's signature gives a closure over it: a
+    /// conversion's, the type it is bound at.
     fn subr_of(&mut self, cert: &Cert) -> Option<TyId> {
+        if let Some(t) = cert.conversion {
+            return Some(t);
+        }
         let (result, effect) = (cert.result?, cert.effect.clone()?);
         let conv = self.c.conv_default;
         let subr = self.c.arena.ty(Ty::Subr { conv, effect, params: cert.params.clone(), result });
@@ -272,6 +310,9 @@ impl Verifier<'_> {
 
     fn word(&mut self, word: Value, cert: &Cert) {
         let code = self.decode(word);
+        if self.conversion(&code, cert) {
+            return;
+        }
         let entry = State {
             stack: cert.params.iter().enumerate().map(|(i, t)| V::new(Term::Slot(i), Some(*t))).collect(),
         };
@@ -289,7 +330,7 @@ impl Verifier<'_> {
                 // that nothing branches to. Not run, so not verified.
                 continue;
             }
-            let at = format!("cell {}", ins.at);
+            let at = format!("cell {} ({})", ins.at, ins.name.unwrap_or("a word"));
             let mut s = match notes.get(&ins.at) {
                 Some(note) => self.assume(&arriving, note, &at),
                 None => match self.join(&arriving, &at) {
@@ -316,6 +357,58 @@ impl Verifier<'_> {
             let msg = format!("effect {} is not within the latent {}", self.c.show_effect(&self.effect), self.c.show_effect(latent));
             self.out.open.push(msg);
         }
+    }
+
+    /// Whether `code` is a conversion between a representation and its
+    /// abstract type, and is certified as one rightly (a VC discharged, or
+    /// failed); false if it is not one, to be verified as any word is.
+    /// A conversion is the identity, `slot 0; return`, of one parameter.
+    /// Certified at `(A) -> B`, one of `A` and `B` must be the other's
+    /// representation:
+    /// - a generative type (`define-generative`) and its unfolding;
+    /// - a module's abstract type, a variable, and the representation its
+    ///   conversions are certified at, each of them the same (`conversion`
+    ///   on the module's `up-t` and `down-t`, signed `(R) -> R`).
+    fn conversion(&mut self, code: &[Ins], cert: &Cert) -> bool {
+        let identity = matches!(&code[..], [a, b] if a.name == Some("slot") && a.ops[0].as_fixnum() == 0 && b.name == Some("return"));
+        if !identity || cert.params.len() != 1 {
+            return false;
+        }
+        let (from, to) = match cert.conversion {
+            Some(t) => match self.c.arena.get(self.c.arena.resolve(t)).as_subr() {
+                Some((_, ps, r)) if ps.len() == 1 => (ps[0], r),
+                _ => return false,
+            },
+            None => match cert.result {
+                Some(r) => (cert.params[0], r),
+                None => return false,
+            },
+        };
+        let rep_of = |me: &mut Self, t: TyId| -> Option<TyId> {
+            match me.c.arena.get(me.c.arena.resolve(t)).clone() {
+                Ty::Named { which, args } if (which as usize) < me.c.generatives.len() => Some(me.c.unfold(which, &args)),
+                Ty::Var(v) => me.certs.reps.get(&v).copied(),
+                _ => None,
+            }
+        };
+        let same = |me: &mut Self, a: TyId, b: TyId| me.c.subtype(a, b) && me.c.subtype(b, a);
+        let ok = match (rep_of(self, to), rep_of(self, from)) {
+            (Some(r), _) if same(self, r, from) => true,
+            (_, Some(r)) if same(self, r, to) => true,
+            _ => false,
+        };
+        if !ok {
+            if cert.conversion.is_none() && self.c.subtype(from, to) {
+                // The identity at a type it is: no conversion, verified as
+                // any word is.
+                return false;
+            }
+            let msg = format!("cell 0: a conversion from {} to {}, neither the other's representation", self.show(from), self.show(to));
+            self.out.failed.push(msg);
+        } else {
+            self.out.discharged += 1;
+        }
+        true
     }
 
     /// The state at a cell the ways in `arriving` reach, joined: each place

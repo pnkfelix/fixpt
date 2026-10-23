@@ -55,6 +55,10 @@ fn verify_program(s: &mut Fx26Session, name: &str, text: &str, t: &mut Tally) {
                 }
                 comp.certs.take().expect("made")
             };
+            let mut certs = certs;
+            if let Err(why) = certs.settle(&c) {
+                t.failed.push(format!("{name}: {why}"));
+            }
             let heap: &fixpt_heap::Heap = m.heap();
             for raw in certs.words.keys() {
                 let o = verify(&mut c, heap, &certs, Value::from_raw(*raw));
@@ -94,6 +98,8 @@ fn mutants(s: &mut Fx26Session, name: &str, text: &str) -> (usize, Vec<String>) 
                 }
                 comp.certs.take().expect("made")
             };
+            let mut certs = certs;
+            certs.settle(&c).expect("settled");
             for raw in certs.words.keys() {
                 let w = Value::from_raw(*raw);
                 if !verify(&mut c, m.heap(), &certs, w).verified() {
@@ -144,6 +150,55 @@ fn a_verified_word_changed_is_refused() {
     assert!(kept.is_empty(), "mutants verified:\n{}", kept.join("\n"));
 }
 
+/// The test programs some of whose type VCs fail, and how many: each a
+/// rule the verifier does not have yet (`TODO.md` §115), not a fault of
+/// the checker's or the compiler's. A failure in a program not here, or
+/// more than its count, fails the test; fewer is to be written here.
+/// Their causes: placeholders (`letrec`, `define-rec`, a forward
+/// definition: `#f` where a value goes until patched); a functor's
+/// `(select $1 t)`; nested `poly`s and a place's binders; regions frozen
+/// or certified (`letfreeze`, `acyclic`); a natural after a test (size
+/// facts); `datum` and a union by a type test; `car` of `nil`, which is
+/// certain to fail, in a program that means to (`fails-car.fx`).
+const KNOWN_FAILURES: &[(&str, usize)] = &[
+    ("bidirectional/arrow.fx", 1),
+    ("bidirectional/arrow-star-groups.fx", 7),
+    ("bidirectional/arrow-star-module.fx", 3),
+    ("bidirectional/bounds.fx", 1),
+    ("bidirectional/twice.fx", 1),
+    ("bloblet/array-sum.fx", 1),
+    ("bloblet/flat-bounds.fx", 1),
+    ("bloblet/flat-unsized.fx", 2),
+    ("datum/acyclic.fx", 3),
+    ("datum/confirm-length.fx", 2),
+    ("datum/quasiquote.fx", 2),
+    ("datum/quote.fx", 2),
+    ("datum/quote-identity.fx", 1),
+    ("datum/quote-shadowed.fx", 2),
+    ("datum/type-tests.fx", 1),
+    ("datum/union.fx", 2),
+    ("modules/forward.fx", 1),
+    ("modules/functor-abstract.fx", 2),
+    ("modules/functor-max.fx", 2),
+    ("modules/include-param-shadows.fx", 1),
+    ("modules/linked.fx", 1),
+    ("modules/load-parameters.fx", 1),
+    ("modules/mutual.fx", 1),
+    ("modules/own-name.fx", 1),
+    ("modules/rec.fx", 1),
+    ("modules/star-self.fx", 1),
+    ("run/acyclic-in-a-place.fx", 1),
+    ("run/acyclic-lists.fx", 2),
+    ("run/fails-car.fx", 1),
+    ("run/generative.fx", 1),
+    ("run/icells.fx", 4),
+    ("run/letfreeze.fx", 1),
+    ("run/loops.fx", 1),
+    ("run/region-allocators.fx", 4),
+    ("run/variadic.fx", 1),
+    ("run/well-founded.fx", 2),
+];
+
 fn programs() -> Vec<(String, String)> {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
     let mut out = Vec::new();
@@ -175,11 +230,21 @@ fn every_test_programs_words_verified() {
     for o in &t.open_examples {
         eprintln!("  open: {o}");
     }
-    for f in t.failed.iter().take(30) {
+    for f in t.failed.iter().take(if std::env::var_os("ALL").is_some() { usize::MAX } else { 30 }) {
         eprintln!("  FAILED {f}");
     }
     // A ratchet: what verifies now, as the verifier grows; and no failure
-    // outside those the verifier's missing rules explain (none yet of
-    // the checker's or the compiler's).
-    assert!(t.verified >= 620, "fewer words verify: {}", t.verified);
+    // outside those the verifier's missing rules explain.
+    assert!(t.verified >= 629, "fewer words verify: {}", t.verified);
+    let mut by: BTreeMap<&str, usize> = BTreeMap::new();
+    for f in &t.failed {
+        *by.entry(f.split(':').next().unwrap_or("")).or_default() += 1;
+    }
+    let known: BTreeMap<&str, usize> = KNOWN_FAILURES.iter().copied().collect();
+    let worse: Vec<String> = by.iter().filter(|(p, n)| **n > known.get(*p).copied().unwrap_or(0)).map(|(p, n)| format!("{p}: {n}")).collect();
+    let better: Vec<String> = known.iter().filter(|(p, n)| by.get(*p).copied().unwrap_or(0) < **n).map(|(p, n)| format!("{p}: {} (was {n})", by.get(*p).copied().unwrap_or(0))).collect();
+    if !better.is_empty() {
+        eprintln!("fewer failures than KNOWN_FAILURES says, to write there: {better:?}");
+    }
+    assert!(worse.is_empty(), "type VCs failing beyond those known: {worse:?}");
 }

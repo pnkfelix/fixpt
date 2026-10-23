@@ -2410,7 +2410,17 @@ impl<'a> Compiler<'a> {
         let by_name = |n: &Sym| sig.params.iter().rev().chain(sig.frees.iter()).find(|(m, _)| m == n).map(|(_, t)| *t).or_else(|| elsewhere(n));
         let (Some(ps), Some(fs)) = (params.iter().map(by_name).collect::<Option<Vec<_>>>(), fv.iter().map(by_name).collect::<Option<Vec<_>>>()) else { return };
         let poly = self.c.facts.generalized.get(&body).cloned().unwrap_or_default();
-        let cert = crate::typed_cells::Cert { poly, params: ps, frees: fs, result: Some(sig.result), effect: Some(sig.effect.clone()), notes: self.last_notes.clone(), ops: self.last_ops.clone() };
+        let conversion = self.c.facts.conversions.get(&body).copied();
+        let cert = crate::typed_cells::Cert {
+            poly,
+            params: ps,
+            frees: fs,
+            result: Some(sig.result),
+            effect: Some(sig.effect.clone()),
+            notes: self.last_notes.clone(),
+            ops: self.last_ops.clone(),
+            conversion,
+        };
         certs.words.insert(w.raw(), cert);
     }
 
