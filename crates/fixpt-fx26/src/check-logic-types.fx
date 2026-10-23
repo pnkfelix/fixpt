@@ -7,7 +7,7 @@
 ;; `check-specs.fx`).
 ;; The types it names, from the files that define them.
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
-(import check-types-types (type k-sf k-sfs k-spec k-specs))
+(import check-types-types (type k-sf k-sfs k-spec k-specs k-props k-latents))
 (define-type check-logic-sig
   (moduleof (val k-specs=? (subr (maxeff (read @globals) spin) (k-specs k-specs) bool))
             (val k-show-spec
@@ -19,6 +19,10 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (k-specs k-specs)
                        bool))
+            (val k-latent-split
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (k-sf) k-latents))
+            (val k-ensures-latent
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (k-sf bool) k-props))
             (val k-spec-of (subr (maxeff (read @globals) (read @t) spin) (int) k-specs))
             (val k-spec-delta
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (int int)

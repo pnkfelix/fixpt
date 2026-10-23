@@ -248,10 +248,6 @@
                 (else z (same))))
             (ty-nil () (tagcase tt (ty-nil () #t) (else z (same))))
             (ty-false () (tagcase tt (ty-false () #t) (else z (same))))
-            (ty-proving (t1 e1)
-              (tagcase tt
-                (ty-proving (t2 e2) (and (k-props=? t1 t2) (k-props=? e1 e2)))
-                (else z (same))))
             (ty-union (xs)
               (tagcase tt
                 (ty-union (ys) (and (= (k-length xs) (k-length ys)) (k-match-list l xs ys m seen)))
@@ -396,13 +392,6 @@
                 (ty-nlist (y n s) (k-size-le? (k-size-lit 0) n))
                 (else z #f)))
             (ty-base (x) (tagcase tb (ty-base (y) (k-base-below? x y)) (else z #f)))
-            ;; What proves something is a `bool`; and what proves more is
-            ;; below what proves less.
-            (ty-proving (t1 e1)
-              (tagcase tb
-                (ty-base (y) (= b k-bool))
-                (ty-proving (t2 e2) (and (k-props-within? t2 t1) (k-props-within? e2 e1)))
-                (else z #f)))
             ;; A natural is an integer; one of a known size, a natural.
             (ty-nat (m)
               (tagcase tb

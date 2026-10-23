@@ -66,7 +66,6 @@
         (ty-base (s) (k-shape-bit (k-base-shape s)))
         (ty-nat (z) 1)
         (ty-nil () 32)
-        (ty-proving (t e) 16)
         (ty-false () 16)
         (ty-pair (a b r nl) (if nl 96 64))
         (ty-nlist (e z r) 96)

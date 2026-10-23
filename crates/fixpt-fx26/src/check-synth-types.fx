@@ -153,6 +153,11 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (k-eff k-ids int)
                        int))
+            (val k-claims-proved
+                 (subr (maxeff (alloc @t) (goto @z) (read @globals) (read @s) (read @t) (write @t)
+                               spin)
+                       (k-specs kx)
+                       unit))
             (val k-new-subr-spec
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (k-eff k-ids int k-specs)

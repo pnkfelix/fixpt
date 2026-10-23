@@ -1348,3 +1348,52 @@ The user: "let's attack requires and ensures next" (the design note's
     `check-synth.fx`, given the knot's `k-synth` and `k-synth-lambda-as`)
     so that the file, over its line limit already, ends shorter than it
     was; its debt lowered to match.
+
+## The `(bool …)` result as an `ensures` (2026-10-23)
+
+1. **One representation.** `Ty::Proving` (`ty-proving`) is removed: the
+   shorthand reads as a plain `bool` result and an `ensures`, `(and
+   (implies r (and P …)) (implies (not r) (and Q …)))`. The shapes and
+   certifications became atoms of the specification's logic
+   (`ast::Named`'s `Shape`, `Acyclic`, `Nat`, `LengthIs`, and `Length` for
+   `(length i)`), booleans the prover treats as opaque; size relations
+   became its integer relations.
+2. **Narrowing reads any `ensures`, syntactically.** What a branch on a
+   call learns is each `(implies r p)` (`(implies (not r) p)` where false)
+   conjunct's propositions, each that is one of the old forms, wherever
+   the `ensures` came from. So an alias of `<` at a written-out `ensures`
+   narrows as one at the shorthand does (`specs/latent-ensures.fx`).
+   Other forms, `(or (not r) p)`, are not narrowed by.
+3. **No `lambda` may claim them.** The rule that refused a `lambda` at a
+   `(bool …)` result now refuses one whose `ensures` has such conjuncts,
+   with its own message. `specs/predicate.fx` from the day before, a
+   `lambda` with `(implies r (< 0 x))`, would have been trusted by the
+   checker unproved; it now says `(or (not r) (< 0 x))`, which the
+   verifier proves and uses as before, and `specs/predicate-claim.fx`
+   shows the refusal.
+4. **Printed back as written.** An `ensures` that is the shorthand's
+   form (alone, or first of two conjuncts with a written `ensures`)
+   prints as `(bool …)`, with the rest as its clause; a parameter's name
+   is printed only where a clause remains to use it, so the types printed
+   before are printed alike.
+5. **Both written.** `(subr … (bool (then …) (else …)) (ensures r q))`
+   conjoins the two, the shorthand's first.
+6. **Subtyping by the prover.** Two tests' types compare by behavioural
+   subtyping like any specifications, which subsumes the old rule (each
+   proposition of the wanted one among the given one's) and goes past it:
+   `(< i n)` where true fits where `(<= i n)` is wanted.
+7. **The verifier: a standard operation's `ensures` is assumed after a
+   call of it**, as a word's is (the call rule), and its word as a value
+   is certified with its specification, which its own call then shows.
+   A call of a word, not only of an operation, now narrows by what its
+   `ensures` says a branch on it learns: types, and the size facts its
+   relations are, of the arguments' sizes at the call (`sizes::rel_fact`,
+   the one rule `Checker::rel_facts` uses too). Before, an alias of `<`
+   called as a global narrowed nothing in the cells, which no verified
+   program had shown, since `sizes/` is not among the directories the
+   verification test covers.
+8. **Names in the FX-26 port.** `k-sides` and `k-latent-facts` were taken
+   (`check-unions.fx`, `check-test-facts.fx`), so the new ones are
+   `k-latents` and `k-ensures-latent`. `check-test-facts.fx` is given
+   `check-logic` by the conductor.
+

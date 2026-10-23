@@ -6,7 +6,7 @@
 //! What a body or a call owes them, the cells' verifier proves
 //! (`crate::typed_cells`).
 
-use crate::ast::{Named, Rel, Spec, Ty, TyId};
+use crate::ast::{Named, Prop, Rel, Spec, Term, Ty, TyId};
 use crate::check::Checker;
 use crate::error::{FxError, R};
 use crate::logic::{Expr, Formula};
@@ -45,7 +45,7 @@ impl Checker {
     /// `t`, a `subr` type just read from `params` (its parameters as
     /// written) and `clauses`, with the specification they say.
     pub(crate) fn specified(&mut self, t: TyId, params: &Syntax, clauses: &[Syntax]) -> R<TyId> {
-        let Ty::Subr { conv, effect, params: ps, result, .. } = self.arena.get(t).clone() else { unreachable!("a subr just read") };
+        let Ty::Subr { conv, effect, params: ps, result, spec: latent } = self.arena.get(t).clone() else { unreachable!("a subr just read") };
         let written: Vec<Syntax> = match &params.datum {
             Datum::Nil => Vec::new(),
             _ => params.as_proper_list().map(|l| l.to_vec()).unwrap_or_default(),
@@ -70,7 +70,13 @@ impl Checker {
                 _ => return Err(FxError::at(c.span, "a specification is `(requires proposition)`, then `(ensures name proposition)`, each at most once")),
             }
         }
-        let spec = Spec { params: pnames, result: rname, requires: requires.unwrap_or(Formula::True), ensures: ensures.unwrap_or(Formula::True) };
+        // What a `(bool …)` result proves, first.
+        let ensures = match (latent, ensures) {
+            (Some(l), Some(e)) => Formula::And(vec![l.ensures.clone(), e]),
+            (Some(l), None) => l.ensures.clone(),
+            (None, e) => e.unwrap_or(Formula::True),
+        };
+        let spec = Spec { params: pnames, result: rname, requires: requires.unwrap_or(Formula::True), ensures };
         Ok(self.arena.ty(Ty::Subr { conv, effect, params: ps, result, spec: Some(Rc::new(spec)) }))
     }
 
@@ -81,7 +87,7 @@ impl Checker {
 
     pub(crate) fn is_bool(&self, t: TyId) -> bool {
         let t = self.arena.resolve(t);
-        t == self.bool_ || matches!(self.arena.get(t), Ty::Proving { .. })
+        t == self.bool_
     }
 
     /// A proposition: `(< a b)`, `(<= a b)`, `(= a b)`, `(> a b)`, `(>=
@@ -162,4 +168,94 @@ impl Checker {
             _ => Err(FxError::at(s.span, usage)),
         }
     }
+}
+
+/// What a test proves, `(bool (then P …) (else Q …))`, as an `ensures` of
+/// its result: `(and (implies r (and P …)) (implies (not r) (and Q …)))`.
+pub(crate) fn latent(then: &[Prop], els: &[Prop]) -> Formula<Named> {
+    let all = |ps: &[Prop]| Formula::And(ps.iter().map(prop_formula).collect());
+    let r = Formula::Holds(Named::Result);
+    Formula::And(vec![Formula::Implies(Box::new(r.clone()), Box::new(all(then))), Formula::Implies(Box::new(Formula::Not(Box::new(r))), Box::new(all(els)))])
+}
+
+/// An `ensures` as `latent` writes one, alone or the first of two
+/// conjuncts: what it proves where true and where false, and the rest,
+/// `true` if none.
+pub(crate) fn latent_split(f: &Formula<Named>) -> Option<(Vec<Prop>, Vec<Prop>, Formula<Named>)> {
+    let (l, rest) = match f {
+        Formula::And(ps) if ps.len() == 2 && matches!(&ps[0], Formula::And(_)) => (&ps[0], ps[1].clone()),
+        _ => (f, Formula::True),
+    };
+    let Formula::And(sides) = l else { return None };
+    let [Formula::Implies(r, then), Formula::Implies(nr, els)] = &sides[..] else { return None };
+    let props = |f: &Formula<Named>| match f {
+        Formula::And(ps) => ps.iter().map(formula_prop).collect::<Option<Vec<Prop>>>(),
+        _ => None,
+    };
+    let is_r = |f: &Formula<Named>| *f == Formula::Holds(Named::Result);
+    if !is_r(r) || !matches!(&**nr, Formula::Not(x) if is_r(x)) {
+        return None;
+    }
+    Some((props(then)?, props(els)?, rest))
+}
+
+/// What an `ensures` proves of the arguments where its result is true
+/// (`yes`) or false: the propositions of each conjunct `(implies r p)`
+/// (`(implies (not r) p)`), as a test's narrowing takes them (the call
+/// rule's `ensures`, at a branch on the result).
+pub(crate) fn latent_facts(f: &Formula<Named>, yes: bool) -> Vec<Prop> {
+    fn conjuncts(f: &Formula<Named>, out: &mut Vec<Prop>) {
+        match f {
+            Formula::And(ps) => ps.iter().for_each(|p| conjuncts(p, out)),
+            f => out.extend(formula_prop(f)),
+        }
+    }
+    let mut out = Vec::new();
+    match f {
+        Formula::And(ps) => ps.iter().for_each(|p| out.extend(latent_facts(p, yes))),
+        Formula::Implies(r, q) if yes && **r == Formula::Holds(Named::Result) => conjuncts(q, &mut out),
+        Formula::Implies(r, q) if !yes && matches!(&**r, Formula::Not(x) if **x == Formula::Holds(Named::Result)) => conjuncts(q, &mut out),
+        _ => {}
+    }
+    out
+}
+
+fn prop_formula(p: &Prop) -> Formula<Named> {
+    let term = |t: &Term| match t {
+        Term::Param(i) => Expr::Atom(Named::Param(*i)),
+        Term::Length(i) => Expr::Atom(Named::Length(*i)),
+        Term::Lit(k) => Expr::Lit(*k),
+    };
+    match p {
+        Prop::Shape { param, shape, negated: false } => Formula::Holds(Named::Shape(*param, *shape)),
+        Prop::Shape { param, shape, negated: true } => Formula::Not(Box::new(Formula::Holds(Named::Shape(*param, *shape)))),
+        Prop::Acyclic(i) => Formula::Holds(Named::Acyclic(*i)),
+        Prop::Nat(i) => Formula::Holds(Named::Nat(*i)),
+        Prop::Length(i, j) => Formula::Holds(Named::LengthIs(*i, *j)),
+        Prop::Rel { op, a, b } => Formula::Rel(*op, term(a), term(b)),
+    }
+}
+
+/// A proposition `prop_formula` makes, as the `Prop` it is; `(not (= a
+/// b))` too.
+fn formula_prop(f: &Formula<Named>) -> Option<Prop> {
+    let term = |e: &Expr<Named>| match e {
+        Expr::Atom(Named::Param(i)) => Some(Term::Param(*i)),
+        Expr::Atom(Named::Length(i)) => Some(Term::Length(*i)),
+        Expr::Lit(k) => Some(Term::Lit(*k)),
+        _ => None,
+    };
+    Some(match f {
+        Formula::Holds(Named::Shape(param, shape)) => Prop::Shape { param: *param, shape: *shape, negated: false },
+        Formula::Not(x) => match &**x {
+            Formula::Holds(Named::Shape(param, shape)) => Prop::Shape { param: *param, shape: *shape, negated: true },
+            Formula::Rel(Rel::Eq, a, b) => Prop::Rel { op: Rel::Ne, a: term(a)?, b: term(b)? },
+            _ => return None,
+        },
+        Formula::Holds(Named::Acyclic(i)) => Prop::Acyclic(*i),
+        Formula::Holds(Named::Nat(i)) => Prop::Nat(*i),
+        Formula::Holds(Named::LengthIs(i, j)) => Prop::Length(*i, *j),
+        Formula::Rel(op, a, b) => Prop::Rel { op: *op, a: term(a)?, b: term(b)? },
+        _ => return None,
+    })
 }

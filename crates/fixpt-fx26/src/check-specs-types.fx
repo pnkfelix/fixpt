@@ -11,6 +11,9 @@
 (define-type syn (select parser-types syn))
 (define-type check-specs-sig
   (moduleof (val k-spec-clause? (subr (read @globals) (syn) bool))
+            (val k-spec-pnames (subr (maxeff (alloc @t) (read @globals) (read @s) (read @t) spin)
+                                     (k-syns)
+                                     (listof symbol acyclic)))
             (val k-specified
                  (subr (maxeff (alloc @t) (goto @z) (read @globals) (read @s) (read @t) (write @t)
                                spin)

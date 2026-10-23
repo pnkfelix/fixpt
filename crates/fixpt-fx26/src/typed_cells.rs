@@ -291,10 +291,18 @@ fn prop_of(t: &Term) -> Formula<Term> {
 /// term given for it, and the result `r`.
 fn instance(f: &Formula<crate::ast::Named>, args: &[Term], r: Option<&Term>) -> Formula<Term> {
     use crate::ast::Named;
+    let arg = |i: usize| args.get(i).cloned().unwrap_or(Term::App("unnamed", Vec::new()));
     let term = |n: &Named| {
         let t = match n {
             Named::Param(i) => args.get(*i),
             Named::Result => r,
+            // What a test proves of its arguments: a term of each, the
+            // prover's atom.
+            Named::Length(i) => return Term::App("length", vec![arg(*i)]),
+            Named::Shape(i, k) => return Term::App("shape", vec![Term::Lit(Value::fixnum(*k as i64)), arg(*i)]),
+            Named::Acyclic(i) => return Term::App("acyclic", vec![arg(*i)]),
+            Named::Nat(i) => return Term::App("nat", vec![arg(*i)]),
+            Named::LengthIs(i, j) => return Term::App("length-is", vec![arg(*i), arg(*j)]),
         };
         t.cloned().unwrap_or(Term::App("unnamed", Vec::new()))
     };
@@ -339,7 +347,7 @@ fn marker(op: &str) -> bool {
 
 /// Verify `word` against its certificate in `certs`.
 pub fn verify(c: &mut Checker, heap: &Heap, certs: &Certs, word: Value) -> Outcome {
-    let mut v = Verifier { c, heap, certs, out: Outcome::default(), made: 0, effect: Effect::pure(), proving: Vec::new(), gen_effects: Vec::new(), frames: Vec::new(), region_closures: Vec::new(), relations: Vec::new(), nats: Vec::new() };
+    let mut v = Verifier { c, heap, certs, out: Outcome::default(), made: 0, effect: Effect::pure(), proving: Vec::new(), latent_sizes: Vec::new(), gen_effects: Vec::new(), frames: Vec::new(), region_closures: Vec::new(), relations: Vec::new(), nats: Vec::new() };
     match certs.words.get(&word.raw()) {
         Some(cert) => v.word(word, cert),
         None => v.out.stopped = Some("no certificate".into()),
@@ -359,6 +367,9 @@ struct Verifier<'a> {
     /// where false, and the call's arguments' terms, by position. Its
     /// `ensures`, assumed where a branch tests it (`narrow`).
     proving: Vec<(Term, Vec<crate::ast::Prop>, Vec<crate::ast::Prop>, Vec<Term>)>,
+    /// Of those, the size facts its relations are, where true and where
+    /// false, of its arguments' sizes at the call.
+    latent_sizes: Vec<(Term, Vec<crate::sizes::SizeFact>, Vec<crate::sizes::SizeFact>)>,
     /// The effect so far where each `plambda` body being verified started:
     /// the body's own is what is added since, which must be none.
     gen_effects: Vec<Effect>,
@@ -1759,6 +1770,7 @@ impl Verifier<'_> {
                     if returns_once(&effect) {
                         after.props.push(instance(&spec.ensures, &terms, Some(&made)));
                     }
+                    self.latent(&made, spec, &args);
                 }
                 if name.ends_with("tailcall") {
                     let called = self.returned(&V::new(made.clone(), Some(result)), at)?;
@@ -2064,11 +2076,17 @@ impl Verifier<'_> {
                     }
                     return Ok(None);
                 }
-                let terms: Vec<Term> = args.into_iter().map(|a| a.term).collect();
+                let terms: Vec<Term> = args.iter().map(|a| a.term.clone()).collect();
+                let vals = args;
                 // A product, a term of the logic's.
                 let made = if op == "*" && terms.len() == 2 { Term::App("*", terms.clone()) } else { self.fresh() };
-                if let Ty::Proving { then, els } = self.c.arena.get(self.c.arena.resolve(result)).clone() {
-                    self.proving.push((made.clone(), then, els, terms));
+                // Its `ensures`, assumed after it (the call rule), and what a
+                // branch on it learns.
+                if let Some(spec) = self.op_spec(&op) {
+                    if returns_once(&effect) {
+                        s.props.push(instance(&spec.ensures, &terms, Some(&made)));
+                    }
+                    self.latent(&made, &spec, &vals);
                 }
                 self.push_made(s, Some(result), Some(made));
             }
@@ -2229,6 +2247,50 @@ impl Verifier<'_> {
 
     /// Standard operation `op`'s type, its binders instantiated at `inst`,
     /// for a call of `n` values: its parameters, result and effect.
+    /// What a branch on `made`, a call's result, learns of its arguments
+    /// `args`, as the callee's `ensures` says (`specs::latent_facts`):
+    /// narrowings, and size facts of the sizes they have here.
+    fn latent(&mut self, made: &Term, spec: &crate::ast::Spec, args: &[V]) {
+        let (then, els) = (crate::specs::latent_facts(&spec.ensures, true), crate::specs::latent_facts(&spec.ensures, false));
+        if then.is_empty() && els.is_empty() {
+            return;
+        }
+        let sizes = |v: &Self, props: &[crate::ast::Prop]| -> Vec<crate::sizes::SizeFact> {
+            use crate::ast::{Prop, Term as T};
+            let size = |t: &T| -> Option<Size> {
+                let s = match t {
+                    T::Param(i) => v.size_of(args.get(*i)?)?,
+                    T::Lit(k) => Size::lit(*k),
+                    T::Length(i) => match v.ty_of(args.get(*i)?)? {
+                        Ty::NList { size, .. } => size,
+                        _ => return None,
+                    },
+                };
+                matches!(s, Size::Lin { .. }).then_some(s)
+            };
+            props
+                .iter()
+                .filter_map(|p| match p {
+                    Prop::Rel { op, a, b } => crate::sizes::rel_fact(*op, &size(a)?, &size(b)?),
+                    _ => None,
+                })
+                .collect()
+        };
+        let (yes, no) = (sizes(self, &then), sizes(self, &els));
+        if !yes.is_empty() || !no.is_empty() {
+            self.latent_sizes.push((made.clone(), yes, no));
+        }
+        self.proving.push((made.clone(), then, els, args.iter().map(|a| a.term.clone()).collect()));
+    }
+
+    /// Standard operation `op`'s specification, if it has one.
+    fn op_spec(&mut self, op: &str) -> Option<std::rc::Rc<crate::ast::Spec>> {
+        let sym = self.c.interner.intern(op);
+        let t = self.c.standard_type(sym)?;
+        let (_, inner) = self.c.binders_of(t);
+        self.c.spec_of(inner)
+    }
+
     fn op_type(&mut self, op: &str, inst: &[crate::ast::D], n: usize, own: bool) -> Option<(Vec<TyId>, TyId, Effect)> {
         let sym = self.c.interner.intern(op);
         let t = self.c.standard_type(sym)?;
@@ -2354,6 +2416,10 @@ impl Verifier<'_> {
             };
             s.facts.extend(learned.into_iter().filter(|f| !matches!(f.lin, Size::Finite)));
             return;
+        }
+        // A test's result: the size facts its relations are.
+        if let Some((_, t, e)) = self.latent_sizes.iter().find(|(t, ..)| t == flag).cloned() {
+            s.facts.extend(if yes { t } else { e });
         }
         // A predicate's result: what it proves of its arguments, where true
         // and where false, as its type says (the call rule's `ensures`).

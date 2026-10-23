@@ -25,7 +25,7 @@
 ;; The types it uses of the files before it.
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-types) (include check-print-parts) (include check-env))
-(import check-logic k-show-spec)
+(import check-logic k-show-spec k-latent-split)
 
 ;; What a type is shown as so far (`check-print-types.fx`).
 (define k-shown-none k-shown (product (1 (the k-strings nil)) (2 (the k-ids nil)) (3 0)))
@@ -102,13 +102,30 @@
             (else (k-show-descs (cdr ds) p (k-put " " (k-show-desc (car ds) p st)))))))
   ;; A `subr` type; with a specification, its parameters by their names,
   ;; and its clauses after the result.
+  ;; What a `bool` result proves, `(bool (then …) (else …))`, as written;
+  ;; a specification's parameters by their names, where it has clauses, and
+  ;; its clauses after the result.
   (k-show-subr (->* (k-eff k-ids int k-conv k-specs k-printing k-shown) k-shown)
     (lambda (e ps r cv sp p st)
-      (let* ((st (k-put (k-cat5 "(subr " (k-conv-prefix cv) (k-show-effect e) " (" "") st))
-             (st (k-put ") " (if (null? sp)
+      (let* ((split (if (null? sp) nil (k-latent-split (extract (car sp) 4))))
+             (clauses
+              (cond ((null? sp) "")
+                    ((null? split) (k-show-spec (car sp)))
+                    (else (let ((s (car sp)))
+                            (k-show-spec (product (1 (extract s 1)) (2 (extract s 2))
+                                                  (3 (extract s 3))
+                                                  (4 (extract (car split) 3))))))))
+             (st (k-put (k-cat5 "(subr " (k-conv-prefix cv) (k-show-effect e) " (" "") st))
+             (st (k-put ") " (if (string=? clauses "")
                                  (k-show-seq ps p " " st)
-                                 (k-show-named ps (extract (car sp) 1) p st)))))
-        (k-put (if (null? sp) ")" (string-append (k-show-spec (car sp)) ")")) (k-show-on r p st)))))
+                                 (k-show-named ps (extract (car sp) 1) p st))))
+             (st (if (null? split)
+                     (k-show-on r p st)
+                     (let ((l (car split)))
+                       (k-put (k-cat5 "(bool " (k-show-props "then" (extract l 1)) " "
+                                      (k-show-props "else" (extract l 2)) ")")
+                              st)))))
+        (k-put (string-append clauses ")") st))))
   ;; Parameters `ps`, each `(name T)` where `names` names it, a space between
   ;; each two.
   (k-show-named (->* (k-ids k-names k-printing k-shown) k-shown)
@@ -165,8 +182,6 @@
         (ty-nil () (k-put "nil" st))
         (ty-false () (k-put "false" st))
         (ty-union (ms) (k-put ")" (k-show-seq ms p " " (k-put "(union " st))))
-        (ty-proving (t e)
-          (k-put (k-cat5 "(bool " (k-show-props "then" t) " " (k-show-props "else" e) ")") st))
         (ty-var (v) (k-put (k-dvar-string v) st))
         (ty-link (x) (k-put "?" st))
         (ty-subr (e ps r cv spc) (k-show-subr e ps r cv spc p st))

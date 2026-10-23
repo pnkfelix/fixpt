@@ -50,8 +50,9 @@
 (define-type k-ids (listof int acyclic))
 ;; `lambda`s settled at the types `->*` found: each type, and where it is.
 (define-type k-settleds (listof (productof (1 int) (2 int) (3 int)) acyclic))
-;; Propositions about a procedure's arguments (`ty-proving`), each by its
-;; parameter's number from 0: of a shape (`check-unions.fx`'s), or, the
+;; Propositions about a procedure's arguments, what a test proves of them
+;; (`(bool (then P …) (else Q …))`, an `ensures`), each by its parameter's
+;; number from 0: of a shape (`check-unions.fx`'s), or, the
 ;; flag, not; certifications, acyclic, a natural, of a length; a relation
 ;; of sizes, 0 `<`, 1 `<=`, 2 `=`, 3 not `=`, of terms: argument `i` as a
 ;; natural, the length of its `nlist`, or a natural (`sizes.rs`).
@@ -62,10 +63,13 @@
 (define-type k-props (listof k-prop acyclic))
 ;; A specification's integer (`logic.rs`'s `Expr`, its atoms `ast::Named`):
 ;; a parameter, by number from 0; the result; a literal; a sum, a
-;; difference, a product.
+;; difference, a product. And of what a test proves: a parameter's
+;; `nlist`'s length; booleans, a parameter of a shape, acyclic, a natural,
+;; a list of another's length.
 (define-datatype k-sx
   (sx-param int) (sx-result) (sx-lit int)
-  (sx-add k-sx k-sx) (sx-sub k-sx k-sx) (sx-mul k-sx k-sx))
+  (sx-add k-sx k-sx) (sx-sub k-sx k-sx) (sx-mul k-sx k-sx)
+  (sx-length int) (sx-shape int int) (sx-acyclic int) (sx-nat int) (sx-length-is int int))
 (define-type k-sxs (listof k-sx acyclic))
 ;; A specification's proposition (`logic.rs`'s `Formula`): a relation, 0
 ;; `<`, 1 `<=`, 2 `=`, 3 not `=`; a `bool` named (`sx-param`, `sx-result`)
@@ -79,6 +83,9 @@
 (define-type k-spec (productof (1 (listof symbol acyclic)) (2 symbol) (3 k-sf) (4 k-sf)))
 ;; None or one.
 (define-type k-specs (listof k-spec acyclic))
+;; What an `ensures` says a test proves where true and where false, and the
+;; rest of it (`specs::latent_split`): none or one.
+(define-type k-latents (listof (productof (1 k-props) (2 k-props) (3 k-sf)) acyclic))
 ;; A binder: a description variable and its kind, 0 region, 1 effect, 2 type.
 (define-type k-binders (listof (productof (1 int) (2 int)) acyclic))
 (define-type k-parts (listof (productof (1 symbol) (2 int)) acyclic))
@@ -154,10 +161,6 @@
   ;; that differ at run time (`k-shape`; `logical-types.md`, L1).
   (ty-nil)
   (ty-union k-ids)
-  ;; `(bool (then P …) (else Q …))`: a `bool` that proves the `P`s of its
-  ;; procedure's arguments where true, the `Q`s where false; a procedure's
-  ;; result only. A call's own type is `bool` (`k-call-te`).
-  (ty-proving k-props k-props)
   ;; `false`: `#f` alone, below `bool`, of `bool`'s shape.
   (ty-false))
 (define-type k-map (listof (pairof int k-desc @t) acyclic))

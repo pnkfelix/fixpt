@@ -308,7 +308,7 @@ impl Checker {
             }
         };
         match self.arena.get(t).clone() {
-            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Nil | Ty::False | Ty::Proving { .. } => None,
+            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Nil | Ty::False => None,
             Ty::Var(v) if bound.contains(&v) || self.arena.dvar_kind_known(v) == Some(Kind::Sendable) => None,
             Ty::Var(v) if self.arena.is_data_var(v) && self.arena.bound(v).is_none_or(|p| p == Region::Heap) => None,
             Ty::Var(v) => Some(format!("a `{}`, which could be anything", self.interner.name(self.arena.dvar_name(v)))),

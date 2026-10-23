@@ -276,7 +276,7 @@
                           (k-masked body (k-synth body)))))
               (begin
                 (k-unbind-to saved) (set k-closure-depth (- (get k-closure-depth) 1))
-                (set k-last-latent (extract r 2))
+                (set k-last-latent (extract r 2)) (k-claims-proved sp body)
                 (let ((res (k-forget-nats named (k-result-back (extract r 1) (extract dep 3)) a b)))
                   (k-te (k-new-subr-spec (extract r 2) (k-binding-types typed) res sp) nil))))))
         (else y (k-fail-at "a lambda" x)))))
@@ -296,7 +296,7 @@
           (("cons")
            (let ((r (k-nlist-cons x args expected)))
              (if (null? r) (k-synth-app-plain x f args expected) (car r))))
-          (else (k-call-te (k-path-te x (k-sized x (k-synth-app-plain x f args expected)))))))))))
+          (else (k-path-te x (k-sized x (k-synth-app-plain x f args expected))))))))))
   ;; `+` and `-` of naturals: a natural, of a size when both are known. Only
   ;; what has a type of its own is asked for it; anything else is told it
   ;; is an int, as for any call.

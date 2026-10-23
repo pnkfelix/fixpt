@@ -532,6 +532,16 @@ impl Checker {
         let r = r.and_then(|(t, latent)| Ok((self.forget_nats(named, t, span)?, latent)));
         self.skolems.truncate(named);
         let (result, latent) = r?;
+        // What a test proves of its arguments the checker trusts at a branch
+        // on it (`Checker::narrowings`), and does not prove of a body.
+        if let Some(spec) = &spec {
+            let (then, els) = (crate::specs::latent_facts(&spec.ensures, true), crate::specs::latent_facts(&spec.ensures, false));
+            if !then.is_empty() || !els.is_empty() {
+                let side = |c: &Self, which: &str, ps: &[crate::ast::Prop]| format!("({which}{})", ps.iter().map(|p| format!(" {}", c.show_prop(p))).collect::<String>());
+                let says = format!("{} {}", side(self, "then", &then), side(self, "else", &els));
+                return Err(FxError::at(self.arena.span_of(body), format!("what a test proves, {says}, a `lambda` is not checked to prove")));
+            }
+        }
         if self.record_types {
             // Its free variables as bound where it is, found once its body
             // is checked: a name a `with` in it binds is not free
@@ -571,12 +581,6 @@ impl Checker {
         };
         // A path a fact in force narrows (`(car x)` …), its type there.
         let t = self.path_typed(e, t);
-        // A test's call is a `bool`: what the test's type says it proves is
-        // of these arguments, here (`Checker::narrowings`), and nowhere else.
-        let t = match self.arena.get(self.arena.resolve(t)) {
-            Ty::Proving { .. } => self.bool_,
-            _ => t,
-        };
         Ok((t, eff))
     }
 
@@ -1589,8 +1593,8 @@ impl Checker {
             // A `nlist` is a list; a list at `acyclic`, a `nlist`.
             (Ty::Pair(..), Ty::NList { .. }) => false,
             (Ty::NList { .. }, Ty::Pair(_, _, Region::Frozen(_, true), _)) => false,
-            // A `nat` is an `int`; a test's result, a `bool`.
-            (Ty::Base(_), Ty::Nat(_) | Ty::Proving { .. }) => false,
+            // A `nat` is an `int`.
+            (Ty::Base(_), Ty::Nat(_)) => false,
             _ => std::mem::discriminant(&p) != std::mem::discriminant(&a),
         }
     }
@@ -1670,7 +1674,7 @@ impl Checker {
                     stack.extend([x, y]);
                     region(r) || effect(&e)
                 }
-                Ty::Base(_) | Ty::Void | Ty::Nil | Ty::False | Ty::Proving { .. } | Ty::Link(_) => false,
+                Ty::Base(_) | Ty::Void | Ty::Nil | Ty::False | Ty::Link(_) => false,
                 Ty::Nat(size) => matches!(&size, Size::Lin { terms, .. } if terms.iter().any(|(v, _)| open(*v))),
                 Ty::NList { elem, size, region: r } => {
                     stack.push(elem);
@@ -1775,7 +1779,7 @@ impl Checker {
             Ty::Pair(a, b, _, _)
             | Ty::PromptTag { answer: a, payload: b, .. }
             | Ty::Composable { arg: a, answer: b, .. } => self.walk_vars(a, seen, hit) || self.walk_vars(b, seen, hit),
-            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Nil | Ty::False | Ty::Proving { .. } | Ty::Link(_) | Ty::Place(_) | Ty::Select(..) | Ty::ParamSel(..) => false,
+            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Nil | Ty::False | Ty::Link(_) | Ty::Place(_) | Ty::Select(..) | Ty::ParamSel(..) => false,
             Ty::Module { descs, vals, .. } => descs.iter().chain(&vals).any(|(_, t)| self.walk_vars(*t, seen, hit)),
             Ty::Named { args, .. } => args.iter().any(|d| matches!(d, D::Type(x) | D::Fun(x) if self.walk_vars(*x, seen, hit))),
             Ty::App { fun, args } => {

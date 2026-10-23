@@ -1,6 +1,6 @@
-;;; The checker, in FX-26: what a test proves (`ty-proving`), as `parse.rs`
-;;; and `check.rs` have it: reading `(bool (then P …) (else Q …))`, a
-;;; procedure's result, and the call's own type, a `bool`. After
+;;; The checker, in FX-26: what a test proves, as `parse.rs` and `specs.rs`
+;;; have it: reading `(bool (then P …) (else Q …))`, a procedure's result,
+;;; an `ensures` of it. After
 ;;; `check-subst.fx`, before the types' reader, which reads with it; part of
 ;;; the checker, `check-types.fx` first.
 
@@ -115,8 +115,8 @@
                  usage s)
         (k-parse-prop-list (cdr items) n)))))
 ;; `(bool (then P …) (else Q …))`, the result of a procedure of `n`
-;; parameters.
-(define k-parse-proving (->* (syn int) int)
+;; parameters: what it ensures (`specs::latent`).
+(define k-parse-proving (->* (syn int) k-sf)
   (lambda (s n)
     (let* ((usage "`(bool (then proposition …) (else proposition …))`")
            (items (k-items s usage)))
@@ -124,40 +124,29 @@
         (k-shape (= (k-length items) 3) usage s)
         (let* ((then (k-parse-props (k-nth items 1) "then" n))
                (els (k-parse-props (k-nth items 2) "else" n)))
-          (k-ty-new (ty-proving then els)))))))
+          (k-latent then els))))))
+;; What a test proves, `(bool (then P …) (else Q …))`, as an `ensures` of
+;; its result: `(and (implies r (and P …)) (implies (not r) (and Q …)))`.
+(define k-latent (->* (k-props k-props) k-sf)
+  (lambda (then els)
+    (let ((r (sf-holds (sx-result))))
+      (sf-and (list (sf-implies r (sf-and (k-props-sfs then)))
+                    (sf-implies (sf-not r) (sf-and (k-props-sfs els))))))))
+(define k-props-sfs (->* (k-props) k-sfs)
+  (lambda (ps) (if (null? ps) nil (cons (k-prop-sf (car ps)) (k-props-sfs (cdr ps))))))
+(define k-term-sx (->* (k-term) k-sx)
+  (lambda (t)
+    (tagcase t (tm-param (i) (sx-param i)) (tm-length (i) (sx-length i)) (tm-lit (k) (sx-lit k)))))
+(define k-prop-sf (->* (k-prop) k-sf)
+  (lambda (p)
+    (tagcase p
+      (pr-shape (i k f) (if f (sf-not (sf-holds (sx-shape i k))) (sf-holds (sx-shape i k))))
+      (pr-acyclic (i) (sf-holds (sx-acyclic i)))
+      (pr-nat (i) (sf-holds (sx-nat i)))
+      (pr-length (i j) (sf-holds (sx-length-is i j)))
+      (pr-rel (o a b) (sf-rel o (k-term-sx a) (k-term-sx b))))))
 ;; `names` with `n` last.
 (define k-names-snoc (->* (k-names symbol) k-names)
   (lambda (ns n) (if (null? ns) (cons n nil) (cons (car ns) (k-names-snoc (cdr ns) n)))))
-;; Whether proposition lists are equal; whether each of `ps` is one of `qs`.
-(define k-term=? (->* (k-term k-term) bool)
-  (lambda (s u)
-    (tagcase s
-      (tm-param (i) (tagcase u (tm-param (j) (= i j)) (else y #f)))
-      (tm-length (i) (tagcase u (tm-length (j) (= i j)) (else y #f)))
-      (tm-lit (i) (tagcase u (tm-lit (j) (= i j)) (else y #f))))))
-(define k-prop=? (->* (k-prop k-prop) bool)
-  (lambda (p q)
-    (tagcase p
-      (pr-shape (i k f)
-        (tagcase q (pr-shape (j l g) (and (= i j) (= k l) (bool=? f g))) (else y #f)))
-      (pr-acyclic (i) (tagcase q (pr-acyclic (j) (= i j)) (else y #f)))
-      (pr-nat (i) (tagcase q (pr-nat (j) (= i j)) (else y #f)))
-      (pr-length (i k) (tagcase q (pr-length (j l) (and (= i j) (= k l))) (else y #f)))
-      (pr-rel (o a b) (tagcase q (pr-rel (r c d) (and (= o r) (k-term=? a c) (k-term=? b d)))
-                               (else y #f))))))
-(define k-prop-in? (->* (k-prop k-props) bool)
-  (lambda (p qs) (and (not (null? qs)) (or (k-prop=? p (car qs)) (k-prop-in? p (cdr qs))))))
-(define k-props-within? (->* (k-props k-props) bool)
-  (lambda (ps qs) (or (null? ps) (and (k-prop-in? (car ps) qs) (k-props-within? (cdr ps) qs)))))
-(define k-props=? (->* (k-props k-props) bool)
-  (lambda (ps qs)
-    (if (null? ps)
-        (null? qs)
-        (and (not (null? qs)) (k-prop=? (car ps) (car qs)) (k-props=? (cdr ps) (cdr qs))))))
-;; A call's type and effect: a test's result, `bool`; what it proves is of
-;; the call's arguments, there (`k-latent-narrowing`), and nowhere else.
-(define k-call-te (->* (k-te) k-te)
-  (lambda (te)
-    (tagcase (k-get (extract te 1)) (ty-proving (t e) (k-te k-bool (extract te 2))) (else y te))))
 ;; The module, the lambda given its modules, and the loads, closed.
 )))

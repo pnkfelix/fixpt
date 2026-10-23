@@ -14,7 +14,8 @@
        (check-sc-graphs-types (load-module "fx26:check-sc-graphs-types.fx"))
        (check-print-types (load-module "fx26:check-print-types.fx"))
        (check-print-parts-types (load-module "fx26:check-print-parts-types.fx"))
-       (check-calls-types (load-module "fx26:check-calls-types.fx")))
+       (check-calls-types (load-module "fx26:check-calls-types.fx"))
+       (check-logic-types (load-module "fx26:check-logic-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-infer (select check-infer-types check-infer-sig))
            (check-types (select check-types-types check-types-sig))
@@ -24,13 +25,14 @@
            (check-calls (select check-calls-types check-calls-sig))
            (check-sc-graphs (select check-sc-graphs-types check-sc-graphs-sig))
            (check-binders (select check-binders-types check-binders-sig))
-           (check-print-parts (select check-print-parts-types check-print-parts-sig)))
+           (check-print-parts (select check-print-parts-types check-print-parts-sig))
+           (check-logic (select check-logic-types check-logic-sig)))
     (module
 (hide (include check-test-facts-types) (include check-types-types) (include check-subst-types))
 ;; The types it uses of the files before it.
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-binders) (include check-types) (include check-env) (include check-sc-graphs)
-      (include check-print-parts) (include check-calls))
+      (include check-print-parts) (include check-calls) (include check-logic))
 
 (define k-branch-facts-of (->* (k-fact-list k-fact-list) k-branch-facts)
   (lambda (yes no) (the k-branch-facts (cons yes no))))
@@ -148,6 +150,19 @@
               (else y nil))
             nil))
       (else y nil))))
+;; What a specification says a test proves, which a branch on it trusts:
+;; why a `lambda`, whose body is not checked to prove it, may not claim it,
+;; or nothing.
+(define k-claimed (->* (k-specs) string)
+  (lambda (sp)
+    (if (null? sp)
+        ""
+        (let* ((ens (extract (car sp) 4))
+               (th (k-ensures-latent ens #t)) (el (k-ensures-latent ens #f)))
+          (if (and (null? th) (null? el))
+              ""
+              (k-cat5 "what a test proves, " (k-show-props "then" th) " "
+                      (k-show-props "else" el) ", a `lambda` is not checked to prove"))))))
 (define k-latent-props (->* (kx) k-latent)
   (lambda (p)
     (tagcase p
@@ -160,10 +175,13 @@
               nil
               (tagcase (k-get (extract (k-binders-of t) 2))
                 (ty-subr (e ps r cv spc)
-                  (tagcase (k-get r)
-                    (ty-proving (th el)
-                      (the k-latent (cons (product (1 th) (2 el) (3 args)) nil)))
-                    (else y nil)))
+                  (if (null? spc)
+                      nil
+                      (let* ((ens (extract (car spc) 4))
+                             (th (k-ensures-latent ens #t)) (el (k-ensures-latent ens #f)))
+                        (if (and (null? th) (null? el))
+                            nil
+                            (the k-latent (cons (product (1 th) (2 el) (3 args)) nil))))))
                 (else y nil)))))
       (else y nil))))
 ;; Argument `i` of `args` (none or one).

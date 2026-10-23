@@ -66,8 +66,7 @@
     (let ((r (k-resolve t))) (or (= r k-int) (tagcase (k-get r) (ty-nat (n) #t) (else y #f))))))
 (define k-spec-bool? (->* (int) bool)
   (lambda (t)
-    (let ((r (k-resolve t)))
-      (or (= r k-bool) (tagcase (k-get r) (ty-proving (p q) #t) (else y #f))))))
+    (= (k-resolve t) k-bool)))
 ;; The first of `names` named `x`, or none.
 (define k-sname-find (->* (k-snames symbol) k-snames)
   (lambda (ns x)
@@ -239,8 +238,12 @@
       (ty-subr (e ps r cv sp)
         (let* ((pnames (k-spec-pnames (k-items-or-nil params "parameter types")))
                (got (k-spec-clauses clauses (k-spec-snames pnames ps 0) r nil nil k-no-name))
+               ;; What a `(bool …)` result proves, first.
+               (ens (cond ((null? sp) (k-sf-one (extract got 2)))
+                          ((null? (extract got 2)) (extract (car sp) 4))
+                          (else (sf-and (list (extract (car sp) 4) (car (extract got 2)))))))
                (spec (product (1 pnames) (2 (extract got 3)) (3 (k-sf-one (extract got 1)))
-                              (4 (k-sf-one (extract got 2))))))
+                              (4 ens))))
           (k-ty-new (ty-subr e ps r cv (cons spec nil)))))
       (else y t))))
 ;; The module, the lambda given its modules, and the loads, closed.

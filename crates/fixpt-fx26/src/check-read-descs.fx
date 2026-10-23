@@ -52,7 +52,7 @@
         k-effect-selected k-frozen-into k-head k-items k-items-or-nil k-name-of k-not-applied
         k-parse-binders k-parse-place k-parse-region k-region-constant k-sfail k-symbol-head)
 (import check-effects k-one k-union)
-(import check-specs k-spec-clause? k-specified)
+(import check-specs k-spec-clause? k-specified k-spec-pnames)
 
 (define k-effects (->* (k-syns) k-eff)
   (lambda (xs)
@@ -289,11 +289,18 @@
                  (set k-with-apps (cons (product (1 fun) (2 app)) (get k-with-apps)))
                  app)))))
 ;; A procedure type's parameters and result, after its effect, with its
-;; convention: `(subr …)`'s and `(-> …)`'s.
+;; convention: `(subr …)`'s and `(-> …)`'s. A test's result, `(bool …)`, a
+;; `bool` and what it proves, an `ensures` of it.
 (define k-subr-type (->* (k-eff syn syn k-conv) int)
   (lambda (e params result cv)
-    (let ((ts (k-read-params (k-items-or-nil params "parameter types") result)))
-      (k-ty-new (ty-subr e (k-ids-but-last ts) (k-ids-last ts) cv nil)))))
+    (let* ((written (k-items-or-nil params "parameter types"))
+           (ts (k-read-params written result))
+           (spec (if (string=? (k-list-head result) "bool")
+                     (the k-specs
+                          (list (product (1 (k-spec-pnames written)) (2 k-no-name) (3 (sf-true))
+                                         (4 (k-parse-proving result (k-length written))))))
+                     nil)))
+      (k-ty-new (ty-subr e (k-ids-but-last ts) (k-ids-last ts) cv spec)))))
 ;; `(subr effect (param …) result)`, or with a convention first, `(subr
 ;; (conv C) effect (param …) result)`; left out, it is the program's.
 (define k-parse-subr (->* (syn k-syns) int)
@@ -874,10 +881,9 @@
 (define k-read-params-from (->* (k-syns syn k-names) k-ids)
   (lambda (ps r names)
     (if (null? ps)
-        ;; A test's result, `(bool …)`: here, and only here.
-        (let ((t (if (string=? (k-list-head r) "bool")
-                     (k-parse-proving r (k-length names))
-                     (k-parse-type r))))
+        ;; A test's result, `(bool …)`: here, and only here, a `bool`
+        ;; (`k-subr-type` reads what it proves).
+        (let ((t (if (string=? (k-list-head r) "bool") k-bool (k-parse-type r))))
           (cons (k-select-params t names) nil))
         (let* ((named (k-param-name (car ps)))
                (written (if (null? named) (car ps) (k-nth (k-items (car ps) "a parameter") 1)))

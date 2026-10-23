@@ -36,7 +36,7 @@
         cv-fx cv-var sz-finite sz-lin dr de dt dz dc df ty-base ty-void ty-var ty-subr ty-poly
         ty-ref ty-pair ty-tag ty-comp ty-markkey ty-product ty-sum ty-array ty-icell ty-place
         ty-bloblet ty-link ty-named ty-nlist ty-nat ty-module ty-select ty-param ty-lam ty-app
-        ty-nil ty-union ty-proving ty-false ds-gen ds-size ds-var ds-rec ds-abbrev ds-region ds-eff
+        ty-nil ty-union ty-false ds-gen ds-size ds-var ds-rec ds-abbrev ds-region ds-eff
         ds-conv ds-fun x-var x-const x-lambda x-app x-plambda x-letregion x-rlambda x-proj x-if
         x-letrec x-let x-begin x-prompt x-the x-convention x-bloblet x-product x-extract x-sum
         x-tagcase x-module x-with k-ok k-err k-done st-car st-cdr st-field

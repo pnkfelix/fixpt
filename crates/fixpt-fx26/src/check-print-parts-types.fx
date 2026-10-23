@@ -83,6 +83,7 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
                        (k-parts int)
                        k-strings))
+            (val k-shape-name (subr (read @globals) (int) string))
             (val k-show-props
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
                        (string k-props)

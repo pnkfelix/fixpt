@@ -2105,11 +2105,13 @@ impl<'a> Compiler<'a> {
             inner = self.c.arena.resolve(*body);
         }
         let Some((effect, params, result)) = self.c.arena.get(inner).as_subr() else { return };
+        let spec = self.c.spec_of(inner);
         let cert = crate::typed_cells::Cert {
             poly: levels,
             params,
             result: Some(result),
             effect: Some(effect),
+            spec,
             notes: self.last_notes.clone(),
             ops: self.last_ops.clone(),
             gens: self.last_gens.clone(),
@@ -2723,10 +2725,7 @@ impl<'a> Compiler<'a> {
         let spec = sig.spec.as_ref().and_then(|spec| {
             let slots: Option<Vec<usize>> = sig.params.iter().map(|(n, _)| params.iter().position(|p| p == n)).collect();
             let slots = slots?;
-            let at = |n: &crate::ast::Named| match n {
-                crate::ast::Named::Param(i) => crate::ast::Named::Param(slots[*i]),
-                r => *r,
-            };
+            let at = |n: &crate::ast::Named| n.renumbered(|i| slots[i]);
             let mut names = vec![None; params.len()];
             for (i, k) in slots.iter().enumerate() {
                 names[*k] = spec.params.get(i).copied().flatten();

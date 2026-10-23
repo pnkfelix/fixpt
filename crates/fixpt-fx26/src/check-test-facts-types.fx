@@ -4,7 +4,7 @@
 
 ;; The types these use, from the files that define them.
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
-(import check-types-types (type k-cert-len k-props k-size kxs k-te))
+(import check-types-types (type k-cert-len k-props k-size kxs k-te k-specs))
 (hide (define check-print-types (load-module "fx26:check-print-types.fx")))
 (define-type k-size-fact (select check-print-types k-size-fact))
 ;; What a test shows when it holds, and when not.
@@ -53,6 +53,8 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (kx int) k-named))
             (val k-length-test
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (kx) k-cert-lens))
+            (val k-claimed
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (k-specs) string))
             (val k-branch-facts-of (subr pure (k-fact-list k-fact-list) k-branch-facts))
             (val k-latent-facts
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin)

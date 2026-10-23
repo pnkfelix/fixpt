@@ -339,8 +339,11 @@ pub enum Step {
     Field(Sym),
 }
 
-/// A proposition about a procedure's arguments (`Ty::Proving`), each named
-/// by its parameter's number from 0.
+/// A proposition about a procedure's arguments, each named by its
+/// parameter's number from 0: what a test proves of them, where true or
+/// where false (`(bool (then P …) (else Q …))`, Typed Racket's latent
+/// propositions, `docs/research/logical-types.md`, L1), an `ensures` of
+/// its result (`crate::specs::latent`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Prop {
     /// `(shape i S)`: argument `i` is of shape `S` (`check::SHAPES`'s
@@ -398,12 +401,6 @@ pub enum Ty {
     /// Kept normalized: no member a union, and `nil` with a pair that is not
     /// `nil` made the pair that may be (`Checker::union_of`).
     Union(Vec<TyId>),
-    /// `(bool (then P …) (else Q …))`: a `bool` that proves the `P`s of
-    /// its procedure's arguments where it is true and the `Q`s where false,
-    /// as a procedure's result only (Typed Racket's latent propositions;
-    /// `docs/research/logical-types.md`, L1; `TODO.md` §54). A call's own
-    /// type is `bool`; what it proves narrows the arguments it names.
-    Proving { then: Vec<Prop>, els: Vec<Prop> },
     Var(DVar),
     /// `(subr E (P …) Q (requires p) (ensures r q))`: with a specification
     /// (`spec`), Hoare logic's for procedures, which the cells' verifier
@@ -496,11 +493,35 @@ pub enum Ty {
 }
 
 /// What a specification's propositions name: a parameter, by number from
-/// 0, or the result.
+/// 0, or the result; and, of a latent proposition (`(bool (then …) (else
+/// …))`, `crate::specs::latent`), the length of a parameter's `nlist`, an
+/// integer, and what a test certifies of its parameters, each a boolean
+/// the prover knows nothing of but itself: of a shape (`check::SHAPES`'s
+/// number), acyclic, a natural, a list of another's length (`Prop`'s).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Named {
     Param(usize),
     Result,
+    Length(usize),
+    Shape(usize, usize),
+    Acyclic(usize),
+    Nat(usize),
+    LengthIs(usize, usize),
+}
+
+impl Named {
+    /// Each parameter's number as `f` renumbers it.
+    pub fn renumbered(self, f: impl Fn(usize) -> usize) -> Named {
+        match self {
+            Named::Param(i) => Named::Param(f(i)),
+            Named::Result => Named::Result,
+            Named::Length(i) => Named::Length(f(i)),
+            Named::Shape(i, k) => Named::Shape(f(i), k),
+            Named::Acyclic(i) => Named::Acyclic(f(i)),
+            Named::Nat(i) => Named::Nat(f(i)),
+            Named::LengthIs(i, j) => Named::LengthIs(f(i), f(j)),
+        }
+    }
 }
 
 /// A procedure's specification: what it requires of its arguments, and

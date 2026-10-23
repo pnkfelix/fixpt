@@ -29,7 +29,12 @@
       (sx-lit (i) (tagcase b (sx-lit (j) (= i j)) (else z #f)))
       (sx-add (x y) (tagcase b (sx-add (u v) (and (k-sx=? x u) (k-sx=? y v))) (else z #f)))
       (sx-sub (x y) (tagcase b (sx-sub (u v) (and (k-sx=? x u) (k-sx=? y v))) (else z #f)))
-      (sx-mul (x y) (tagcase b (sx-mul (u v) (and (k-sx=? x u) (k-sx=? y v))) (else z #f))))))
+      (sx-mul (x y) (tagcase b (sx-mul (u v) (and (k-sx=? x u) (k-sx=? y v))) (else z #f)))
+      (sx-length (i) (tagcase b (sx-length (j) (= i j)) (else z #f)))
+      (sx-shape (i k) (tagcase b (sx-shape (j l) (and (= i j) (= k l))) (else z #f)))
+      (sx-acyclic (i) (tagcase b (sx-acyclic (j) (= i j)) (else z #f)))
+      (sx-nat (i) (tagcase b (sx-nat (j) (= i j)) (else z #f)))
+      (sx-length-is (i k) (tagcase b (sx-length-is (j l) (and (= i j) (= k l))) (else z #f))))))
 (define k-sf=? (->* (k-sf k-sf) bool)
   (lambda (p q)
     (tagcase p
@@ -72,13 +77,23 @@
 
 ;;; ------------------------------------------------------------ shown
 
-;; A parameter's or the result's name: as named, else `$i`, `result`.
+;; A parameter's name: as named, else `$i`.
+(define k-spec-param (->* (k-spec int) string)
+  (lambda (spec i)
+    (let ((n (if (< i (k-length (extract spec 1))) (k-nth (extract spec 1) i) '||)))
+      (if (symbol=? n '||) (string-append "$" (int->string i)) (symbol->string n)))))
+;; An atom's name: a parameter's, the result's (as named, else `result`),
+;; or what a test proves, of parameters named.
 (define k-spec-name (->* (k-spec k-sx) string)
   (lambda (spec a)
     (tagcase a
-      (sx-param (i)
-        (let ((n (if (< i (k-length (extract spec 1))) (k-nth (extract spec 1) i) '||)))
-          (if (symbol=? n '||) (string-append "$" (int->string i)) (symbol->string n))))
+      (sx-param (i) (k-spec-param spec i))
+      (sx-length (i) (k-cat3 "(length " (k-spec-param spec i) ")"))
+      (sx-shape (i k) (k-cat5 "(shape " (k-spec-param spec i) " " (k-shape-name k) ")"))
+      (sx-acyclic (i) (k-cat3 "(acyclic " (k-spec-param spec i) ")"))
+      (sx-nat (i) (k-cat3 "(nat " (k-spec-param spec i) ")"))
+      (sx-length-is (i j)
+        (k-cat5 "(length-is " (k-spec-param spec i) " " (k-spec-param spec j) ")"))
       (else z
         (if (symbol=? (extract spec 2) '||) "result" (symbol->string (extract spec 2)))))))
 (define k-show-sx (->* (k-spec k-sx) string)
@@ -122,6 +137,105 @@
                    (k-cat5 " (ensures " (k-spec-name spec (sx-result)) " "
                            (k-show-sf spec (extract spec 4)) ")"))))
       (string-append req ens))))
+
+;;; ------------------------------------------------------------ latent
+
+;; What a test proves (`check-proving.fx`'s `k-latent`), read back
+;; (`specs.rs`). A proposition of a test's, as the `k-prop` it is; `(not (=
+;; a b))` too: none or one.
+(define k-sx-term (->* (k-sx) (listof k-term acyclic))
+  (lambda (x)
+    (tagcase x
+      (sx-param (i) (list (tm-param i)))
+      (sx-length (i) (list (tm-length i)))
+      (sx-lit (k) (list (tm-lit k)))
+      (else z nil))))
+(define k-rel-prop (->* (int k-sx k-sx) k-props)
+  (lambda (o a b)
+    (let ((x (k-sx-term a)) (y (k-sx-term b)))
+      (if (or (null? x) (null? y)) nil (list (pr-rel o (car x) (car y)))))))
+(define k-sf-prop (->* (k-sf) k-props)
+  (lambda (f)
+    (tagcase f
+      (sf-holds (a)
+        (tagcase a
+          (sx-shape (i k) (list (pr-shape i k #f)))
+          (sx-acyclic (i) (list (pr-acyclic i)))
+          (sx-nat (i) (list (pr-nat i)))
+          (sx-length-is (i j) (list (pr-length i j)))
+          (else z nil)))
+      (sf-not (g)
+        (tagcase g
+          (sf-holds (a) (tagcase a (sx-shape (i k) (list (pr-shape i k #t))) (else z nil)))
+          (sf-rel (r x y) (if (= r 2) (k-rel-prop 3 x y) nil))
+          (else z nil)))
+      (sf-rel (r x y) (k-rel-prop r x y))
+      (else z nil))))
+;; Each of `fs` as a `k-prop`, if each is one (none or one list).
+(define k-sfs-props (->* (k-sfs) (listof k-props acyclic))
+  (lambda (fs)
+    (if (null? fs)
+        (list nil)
+        (let ((p (k-sf-prop (car fs))) (rest (k-sfs-props (cdr fs))))
+          (if (or (null? p) (null? rest)) nil (list (cons (car p) (car rest))))))))
+(define k-sf-result? (->* (k-sf) bool)
+  (lambda (f) (tagcase f (sf-holds (a) (tagcase a (sx-result () #t) (else z #f))) (else z #f))))
+(define k-sf-not-result? (->* (k-sf) bool)
+  (lambda (f) (tagcase f (sf-not (g) (k-sf-result? g)) (else z #f))))
+;; A conjunction's propositions, if each is one (none or one list).
+(define k-and-props (->* (k-sf) (listof k-props acyclic))
+  (lambda (f) (tagcase f (sf-and (ps) (k-sfs-props ps)) (else z nil))))
+;; An `ensures` as `k-latent` writes one, alone or the first of two
+;; conjuncts: what it proves where true and where false, and the rest
+;; (`specs::latent_split`).
+(define k-latent-split (->* (k-sf) k-latents)
+  (lambda (f)
+    (let* ((two (tagcase f
+                  (sf-and (ps)
+                    (and (= (k-length ps) 2) (tagcase (car ps) (sf-and (qs) #t) (else z #f))))
+                  (else z #f)))
+           (l (if two (tagcase f (sf-and (ps) (car ps)) (else z f)) f))
+           (rest (if two (tagcase f (sf-and (ps) (k-nth ps 1)) (else z f)) (sf-true))))
+      (tagcase l
+        (sf-and (sides)
+          (if (= (k-length sides) 2)
+              (tagcase (car sides)
+                (sf-implies (r then)
+                  (tagcase (k-nth sides 1)
+                    (sf-implies (nr els)
+                      (let ((t (k-and-props then)) (e (k-and-props els)))
+                        (if (and (k-sf-result? r) (k-sf-not-result? nr)
+                                 (not (null? t)) (not (null? e)))
+                            (list (product (1 (car t)) (2 (car e)) (3 rest)))
+                            nil)))
+                    (else z nil)))
+                (else z nil))
+              nil))
+        (else z nil)))))
+;; What an `ensures` proves of the arguments where its result is true
+;; (`yes`) or false: the propositions of each conjunct `(implies r p)`
+;; (`(implies (not r) p)`) (`specs::latent_facts`).
+(define k-ensures-latent (->* (k-sf bool) k-props)
+  (lambda (f yes)
+    (tagcase f
+      (sf-and (ps) (k-ensures-latent-each ps yes))
+      (sf-implies (r q)
+        (if (if yes (k-sf-result? r) (k-sf-not-result? r)) (k-conjunct-props q) nil))
+      (else z nil))))
+(define k-ensures-latent-each (->* (k-sfs bool) k-props)
+  (lambda (ps yes)
+    (if (null? ps)
+        nil
+        (k-props-append (k-ensures-latent (car ps) yes) (k-ensures-latent-each (cdr ps) yes)))))
+(define k-conjunct-props (->* (k-sf) k-props)
+  (lambda (q) (tagcase q (sf-and (ps) (k-conjuncts-props ps)) (else z (k-sf-prop q)))))
+(define k-conjuncts-props (->* (k-sfs) k-props)
+  (lambda (ps)
+    (if (null? ps)
+        nil
+        (k-props-append (k-conjunct-props (car ps)) (k-conjuncts-props (cdr ps))))))
+(define k-props-append (->* (k-props k-props) k-props)
+  (lambda (a b) (if (null? a) b (cons (car a) (k-props-append (cdr a) b)))))
 
 ;;; ------------------------------------------------------------ the prover
 

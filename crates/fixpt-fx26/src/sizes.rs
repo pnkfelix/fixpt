@@ -257,7 +257,7 @@ impl Checker {
     /// relation of a size not known (not a natural's, not a `nlist`'s)
     /// says nothing.
     fn rel_facts(&self, props: &[crate::ast::Prop], args: &[ExpId]) -> Vec<SizeFact> {
-        use crate::ast::{Prop, Rel, Term};
+        use crate::ast::{Prop, Term};
         let term = |t: &Term| -> Option<Size> {
             let s = match t {
                 Term::Param(i) => self.nat_size(*args.get(*i)?)?,
@@ -272,23 +272,13 @@ impl Checker {
             };
             matches!(s, Size::Lin { .. }).then_some(s)
         };
-        let ge = |lin: Size| SizeFact { lin, eq: false };
-        let mut out = Vec::new();
-        for p in props {
-            let Prop::Rel { op, a, b } = p else { continue };
-            let (Some(x), Some(y)) = (term(a), term(b)) else { continue };
-            match op {
-                Rel::Lt => out.push(ge(y.add_scaled(&x, -1).plus(-1))),
-                Rel::Le => out.push(ge(y.add_scaled(&x, -1))),
-                Rel::Eq => out.push(SizeFact { lin: x.add_scaled(&y, -1), eq: true }),
-                Rel::Ne => match (x.as_lit(), y.as_lit()) {
-                    (_, Some(0)) => out.push(ge(x.plus(-1))),
-                    (Some(0), _) => out.push(ge(y.plus(-1))),
-                    _ => {}
-                },
-            }
-        }
-        out
+        props
+            .iter()
+            .filter_map(|p| match p {
+                Prop::Rel { op, a, b } => rel_fact(*op, &term(a)?, &term(b)?),
+                _ => None,
+            })
+            .collect()
     }
 
     /// `(+ a b)` and `(- a b)` of naturals: a natural of the sum, and of the
@@ -511,7 +501,7 @@ impl Checker {
                 self.size_walk(x, Polarity::Inv, v, bad, seen);
                 self.size_walk(y, Polarity::Inv, v, bad, seen);
             }
-            Ty::Base(_) | Ty::Void | Ty::Nil | Ty::False | Ty::Proving { .. } | Ty::Var(_) | Ty::Place(_) | Ty::Link(_) => {}
+            Ty::Base(_) | Ty::Void | Ty::Nil | Ty::False | Ty::Var(_) | Ty::Place(_) | Ty::Link(_) => {}
         }
     }
 
@@ -587,5 +577,24 @@ impl Checker {
         }
         let map: std::collections::HashMap<DVar, D> = named.into_iter().map(|v| (v, D::Size(Size::Finite))).collect();
         Ok(self.subst(t, &map))
+    }
+}
+
+/// The size fact relation `op` of sizes `x` and `y` is (`Checker::rel_facts`,
+/// and the cells' verifier's): `x < y` is `y - x - 1 ≥ 0`; `x ≤ y`, `y - x
+/// ≥ 0`; `x = y`, `x - y = 0`; `x ≠ y`, of a natural and 0, the other's `-
+/// 1 ≥ 0`, and of others none.
+pub(crate) fn rel_fact(op: crate::ast::Rel, x: &Size, y: &Size) -> Option<SizeFact> {
+    use crate::ast::Rel;
+    let ge = |lin: Size| SizeFact { lin, eq: false };
+    match op {
+        Rel::Lt => Some(ge(y.add_scaled(x, -1).plus(-1))),
+        Rel::Le => Some(ge(y.add_scaled(x, -1))),
+        Rel::Eq => Some(SizeFact { lin: x.add_scaled(y, -1), eq: true }),
+        Rel::Ne => match (x.as_lit(), y.as_lit()) {
+            (_, Some(0)) => Some(ge(x.plus(-1))),
+            (Some(0), _) => Some(ge(y.plus(-1))),
+            _ => None,
+        },
     }
 }

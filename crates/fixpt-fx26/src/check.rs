@@ -1081,7 +1081,7 @@ impl Checker {
             },
             Ty::Nat(_) => bit("int"),
             Ty::Nil => bit("nil"),
-            Ty::Proving { .. } | Ty::False => bit("bool"),
+            Ty::False => bit("bool"),
             Ty::Pair(_, _, _, nil) => Some(bit("pair")? | if *nil { bit("nil")? } else { 0 }),
             Ty::NList { .. } => Some(bit("pair")? | bit("nil")?),
             Ty::Subr { .. } | Ty::Composable { .. } => bit("procedure"),
@@ -1215,7 +1215,7 @@ impl Checker {
             let (t, e) = self.narrowings(x);
             return (e, t);
         }
-        // A test: what its callee's type says it proves (`Ty::Proving`), of
+        // A test: what its callee's type says it proves (its `ensures`), of
         // those of its arguments that are variables.
         let Some((then, els, args)) = self.latent_props(test) else {
             return none;
@@ -1238,11 +1238,9 @@ impl Checker {
             None => self.callee_binding(f)?.1,
         };
         let (_, inner) = self.binders_of(t);
-        let Ty::Subr { result, .. } = self.arena.get(self.arena.resolve(inner)) else { return None };
-        match self.arena.get(self.arena.resolve(*result)) {
-            Ty::Proving { then, els } => Some((then.clone(), els.clone(), args.clone())),
-            _ => None,
-        }
+        let Ty::Subr { spec: Some(spec), .. } = self.arena.get(self.arena.resolve(inner)) else { return None };
+        let (then, els) = (crate::specs::latent_facts(&spec.ensures, true), crate::specs::latent_facts(&spec.ensures, false));
+        (!then.is_empty() || !els.is_empty()).then(|| (then, els, args.clone()))
     }
 
     /// The variables and paths among `args` narrowed by `props`, a
@@ -2572,7 +2570,7 @@ impl Checker {
             return;
         }
         match self.arena.get(t).clone() {
-            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Nil | Ty::False | Ty::Proving { .. } | Ty::Var(_) | Ty::Select(..) | Ty::ParamSel(..) => {}
+            Ty::Base(_) | Ty::Nat(_) | Ty::Void | Ty::Nil | Ty::False | Ty::Var(_) | Ty::Select(..) | Ty::ParamSel(..) => {}
             Ty::Link(None) => self.regions_open.set(true),
             Ty::Union(ms) => {
                 for m in ms {
@@ -3522,12 +3520,6 @@ impl Checker {
             // wanted, `direct/reps.rs`).
             (Ty::Base(x), Ty::Base(y)) => {
                 x == y || (matches!(self.interner.name(x), "i8" | "u8" | "i32" | "u32" | "i64" | "u64") && self.interner.name(y) == "int")
-            }
-            // What proves something is a `bool`; and what proves more is
-            // below what proves less.
-            (Ty::Proving { .. }, Ty::Base(_)) => b == self.bool_,
-            (Ty::Proving { then: t1, els: e1 }, Ty::Proving { then: t2, els: e2 }) => {
-                t2.iter().all(|p| t1.contains(p)) && e2.iter().all(|p| e1.contains(p))
             }
             // A natural is an integer; one of a known size, a natural.
             (Ty::Nat(_), Ty::Base(_)) => b == self.int,

@@ -149,6 +149,10 @@
 ;; The effect `r` says `x` has, once the type it says is found one `expected` takes.
 (define k-as-expected (->* (kx k-te int) k-eff)
   (lambda (x r expected) (begin (k-expect x (extract r 1) expected) (extract r 2))))
+;; A `lambda`'s body, `x`, checked: if its specification `sp` says what a
+;; test proves, an error (`k-claimed`).
+(define k-claims-proved (->* (k-specs kx) unit)
+  (lambda (sp x) (let ((m (k-claimed sp))) (if (string=? m "") #u (k-fail-at m x)))))
 ;; A new `subr` type, of the default convention; and one with a
 ;; specification, none or one.
 (define k-new-subr (->* (k-eff k-ids int) int)
@@ -375,7 +379,7 @@
                       (k-props-narrow
                        (cdr props) args
                        (if (< to 0) out (k-nars-put out n d steps (extract (car tr) 2) to)))))))))))
-;; A test: what its callee's type says it proves (`ty-proving`), of those of
+;; A test: what its callee's type says it proves (its `ensures`), of those of
 ;; its arguments that are variables or paths, where it holds and where not.
 (define k-latent-narrowing (->* (kx) k-narrowing)
   (lambda (p)

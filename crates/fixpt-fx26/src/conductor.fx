@@ -183,7 +183,8 @@
          (check-test-facts
           ((load-input "fx26:check-test-facts.fx")
            check-infer check-types check-env check-terminate
-           check-print check-calls check-sc-graphs check-binders check-print-parts))
+           check-print check-calls check-sc-graphs check-binders check-print-parts
+           check-logic))
          ;; The checker, letrec: a group's types found and checked.
          (check-letrec
           ((load-input "fx26:check-letrec.fx")

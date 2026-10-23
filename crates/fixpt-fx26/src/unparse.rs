@@ -182,9 +182,15 @@ impl Checker {
     /// writes them: `(requires p)`, `(ensures r q)`, those not `true`.
     pub fn show_spec(&self, spec: &crate::ast::Spec) -> String {
         use crate::ast::Named;
-        let name = |n: &Named| match n {
-            Named::Param(i) => spec.params.get(*i).copied().flatten().map_or(format!("${i}"), |s| self.interner.name(s).to_string()),
+        let param = |i: usize| spec.params.get(i).copied().flatten().map_or(format!("${i}"), |s| self.interner.name(s).to_string());
+        let name = |n: &Named| match *n {
+            Named::Param(i) => param(i),
             Named::Result => spec.result.map_or("result".to_string(), |s| self.interner.name(s).to_string()),
+            Named::Length(i) => format!("(length {})", param(i)),
+            Named::Shape(i, k) => format!("(shape {} {})", param(i), crate::check::SHAPES[k].0),
+            Named::Acyclic(i) => format!("(acyclic {})", param(i)),
+            Named::Nat(i) => format!("(nat {})", param(i)),
+            Named::LengthIs(i, j) => format!("(length-is {} {})", param(i), param(j)),
         };
         let mut out = String::new();
         if !spec.requires.trivial() {
@@ -276,13 +282,6 @@ impl Checker {
             Ty::Void => "void".into(),
             Ty::Nil => "nil".into(),
             Ty::False => "false".into(),
-            Ty::Proving { then, els } => {
-                let side = |c: &Self, which: &str, ps: &[crate::ast::Prop]| {
-                    let ps: Vec<String> = ps.iter().map(|p| c.show_prop(p)).collect();
-                    format!("({which}{})", ps.iter().map(|p| format!(" {p}")).collect::<String>())
-                };
-                format!("(bool {} {})", side(self, "then", &then), side(self, "else", &els))
-            }
             Ty::Union(ms) => {
                 let ms: Vec<String> = ms.iter().map(|m| self.show_ty_on(*m, path)).collect();
                 format!("(union {})", ms.join(" "))
@@ -294,18 +293,28 @@ impl Checker {
                 let mut ps: Vec<String> = params.iter().map(|p| self.show_ty_on(*p, path)).collect();
                 // The convention only where it is not the program's.
                 let c = if conv == self.conv_default { String::new() } else { format!("(conv {}) ", self.show_conv(conv)) };
-                // A specification's parameters by their names, and its
-                // clauses after the result.
+                // What a `bool` result proves, `(bool (then …) (else …))`,
+                // as written; a specification's parameters by their names,
+                // where it has clauses, and its clauses after the result.
                 let mut clauses = String::new();
+                let mut shown = self.show_ty_on(result, path);
                 if let Some(spec) = &spec {
-                    for (p, n) in ps.iter_mut().zip(&spec.params) {
-                        if let Some(n) = n {
-                            *p = format!("({} {p})", self.interner.name(*n));
+                    let mut spec = (**spec).clone();
+                    if let Some((then, els, rest)) = crate::specs::latent_split(&spec.ensures) {
+                        let side = |c: &Self, which: &str, ps: &[crate::ast::Prop]| format!("({which}{})", ps.iter().map(|p| format!(" {}", c.show_prop(p))).collect::<String>());
+                        shown = format!("(bool {} {})", side(self, "then", &then), side(self, "else", &els));
+                        spec.ensures = rest;
+                    }
+                    clauses = self.show_spec(&spec);
+                    if !clauses.is_empty() {
+                        for (p, n) in ps.iter_mut().zip(&spec.params) {
+                            if let Some(n) = n {
+                                *p = format!("({} {p})", self.interner.name(*n));
+                            }
                         }
                     }
-                    clauses = self.show_spec(spec);
                 }
-                format!("(subr {c}{} ({}) {}{clauses})", self.show_effect(&effect), ps.join(" "), self.show_ty_on(result, path))
+                format!("(subr {c}{} ({}) {shown}{clauses})", self.show_effect(&effect), ps.join(" "))
             }
             Ty::Poly { binders, body } => {
                 let bs: Vec<String> = binders

@@ -1607,6 +1607,8 @@ do as they do). Left: checking a `lambda` against such a type (until then
 refused, its body a `bool`). Paths done too (2026-10-08, below).
 Checking a `lambda` against such a type waits on a concrete motivation, a
 program that needs its own predicate to narrow (the user's, 2026-10-08).
+Since 2026-10-23 the form is an `ensures` (§116); the rule against a
+`lambda` claiming it covers an `ensures`'s `(implies r …)` conjuncts too.
 
 ## 58. `sum` cannot be a keyword (the user's, 2026-10-08)
 
@@ -2782,9 +2784,18 @@ procedure types, carried by both checkers (the FX-26 one's `check-specs.fx`
 reads them, `check-logic.fx` is `logic.rs`'s prover step for step), proved
 of the cells by the verifier. `tests/programs/specs`, which both checkers
 agree on (`every_test_program`). Left:
-- Latent propositions as an `ensures` of a `bool` result, sugar
+- ~~Latent propositions as an `ensures` of a `bool` result, sugar
   (`(bool (then …) (else …))`), so that the verifier's narrowing by a
-  predicate is the call rule, and the checker's too.
+  predicate is the call rule, and the checker's too.~~ Done (2026-10-23,
+  the user: "making the existing `(bool (then …) (else …))` result type
+  shorthand for an ensures"): `Ty::Proving` (`ty-proving`) is gone; the
+  shorthand reads as a `bool` result and an `ensures` (`specs::latent`),
+  prints back as written, and both checkers narrow by an `ensures`'s
+  `(implies r …)` conjuncts however written. A `lambda` still may not
+  claim them (§54): checking one against its claim is the verifier's,
+  and the checkers' narrowing would trust it unproved. Left: the checkers
+  trusting a claim the verifier has proved (a certificate's word), or
+  checking a simple one themselves (a body that is a test of its own).
 - Terms of more than integers: `(length xs)` of lists and arrays, a
   sum's tag; `old` for what refs and arrays held (§8, point 3).
 - Open VCs written for a prover outside (SMT-LIB 2; the note's open

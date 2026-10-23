@@ -356,13 +356,18 @@ impl Checker {
             params.push(self.select_params(t, &names));
             names.push(name);
         }
-        // A test's result, `(bool …)`: here, and only here.
-        let result = match result.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()) {
-            Some(h) if self.name(h) == "bool" => self.parse_proving(result, params.len())?,
-            _ => self.parse_type(result)?,
+        // A test's result, `(bool …)`: here, and only here, a `bool` and
+        // what it proves, an `ensures` of it.
+        let (result, spec) = match result.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()) {
+            Some(h) if self.name(h) == "bool" => {
+                let ensures = self.parse_proving(result, params.len())?;
+                let spec = crate::ast::Spec { params: names.clone(), result: None, requires: crate::logic::Formula::True, ensures };
+                (self.bool_, Some(std::rc::Rc::new(spec)))
+            }
+            _ => (self.parse_type(result)?, None),
         };
         let result = self.select_params(result, &names);
-        Ok(self.arena.ty(Ty::Subr { conv, effect, params, result, spec: None }))
+        Ok(self.arena.ty(Ty::Subr { conv, effect, params, result, spec }))
     }
 
     // ------------------------------------------------------------- effects
@@ -2019,9 +2024,10 @@ impl Checker {
 
     /// `(bool (then P …) (else Q …))`, the result of a procedure of `n`
     /// parameters: a `bool` that proves each `P` of its arguments where it is
-    /// true, each `Q` where false (`Ty::Proving`), a proposition `(shape i
-    /// shape)` or `(not (shape i shape))`, `i` a parameter's number from 0.
-    fn parse_proving(&mut self, s: &Syntax, n: usize) -> R<TyId> {
+    /// true, each `Q` where false, a proposition `(shape i shape)` or `(not
+    /// (shape i shape))`, `i` a parameter's number from 0; what it ensures
+    /// (`crate::specs::latent`).
+    fn parse_proving(&mut self, s: &Syntax, n: usize) -> R<crate::logic::Formula<crate::ast::Named>> {
         let usage = "`(bool (then proposition …) (else proposition …))`";
         let items = self.items(s, usage)?.to_vec();
         let [_, then, els] = &items[..] else {
@@ -2029,7 +2035,7 @@ impl Checker {
         };
         let then = self.parse_props(then, "then", n)?;
         let els = self.parse_props(els, "else", n)?;
-        Ok(self.arena.ty(Ty::Proving { then, els }))
+        Ok(crate::specs::latent(&then, &els))
     }
 
     fn parse_props(&mut self, s: &Syntax, which: &str, n: usize) -> R<Vec<crate::ast::Prop>> {

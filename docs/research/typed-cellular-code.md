@@ -442,6 +442,17 @@ next"): §8's specifications, in the Rust checker and the verifier.
   Rust one does (`check-specs.fx`; `check-logic.fx`, the prover, step for
   step), so the two agree on every spec program, and `fixpt run` takes
   them.
+- What a test proves, `(bool (then P …) (else Q …))` (`TODO.md` §54), is
+  an `ensures` of its result (the same day): `(and (implies r (and P …))
+  (implies (not r) (and Q …)))`, the shapes and certifications booleans
+  of the parameters the prover knows nothing of but themselves. `ensures`
+  is then the one place a type says what a test proves: both checkers
+  narrow at a branch on a call by its `(implies r …)` and `(implies (not
+  r) …)` conjuncts, written either way, and compare two tests' types by
+  behavioural subtyping; the verifier narrows by them as the call rule's
+  `ensures`, a standard operation's as a word's. Since the checkers narrow by them unproved, a `lambda` may
+  not claim them (§54's rule, kept); one written otherwise, `(or (not r)
+  p)`, the verifier proves and uses, the checkers carry.
 
 ## 11. Open questions (the user's)
 

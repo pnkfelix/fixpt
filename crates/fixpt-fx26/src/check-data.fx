@@ -130,7 +130,6 @@
             (let ((seen (the k-ids (cons t seen))))
               (tagcase (k-get t)
                 (ty-base (s) "") (ty-void () "") (ty-nil () "") (ty-nat (z) "") (ty-false () "")
-                (ty-proving (p q) "")
                 (ty-var (v) (k-var-untransmissible v bound))
                 (ty-product (ps) (k-parts-untransmissible ps seen bound))
                 (ty-sum (ps) (k-parts-untransmissible ps seen bound))
