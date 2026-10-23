@@ -1518,3 +1518,23 @@ The user: "let's attack requires and ensures next" (the design note's
    from one beyond it, so the report says open and points at `fixpt test`.
 4. **One driver** (`fixpt_fx26::verifying`) for the CLI, the REPL and the
    tests' survey, which now calls it in place of its own copy.
+
+## Open VCs given to an SMT solver (S2, 2026-10-23)
+
+1. **z3 as a process, SMT-LIB 2 over a pipe**, one per VC with a
+   2-second limit; `FIXPT_SMT` names another. No library binding, so no
+   build dependency; without a solver, the report says so and keeps
+   "open".
+2. **Every term a constant of its own**, an `Int` or a `Bool` by where
+   it stands. Sound for proofs; a model may then be one no run gives,
+   which the replay shows ("the proof does not know what the run does").
+3. **Only the report asks the solver**, not `typed_cells::verify`: the
+   tests and the corpus stay independent of an external program, and
+   what z3 proved is said as such ("N by the SMT solver").
+4. **Replayed in a session of its own**, made when first needed, so that
+   `,verify` does not redefine the REPL's globals.
+5. **"Not inductive" names a global's call**, any (not only a specified
+   one): every call's result is recorded with its arguments' terms
+   (`Outcome::calls`), and the call is written as source from the
+   input's values and the calls before it, then run for its real value.
+

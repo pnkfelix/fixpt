@@ -456,7 +456,9 @@ input, or program text:
 - `fixpt verify INPUT [NAME …]` compiles the program with certificates and
   verifies each word against its own, printing the obligations that fail
   or are left open; `,verify [NAME …]` in the REPL does the same for what
-  has been defined there.
+  has been defined there. With z3 installed, each open obligation is
+  given to it, and said proved, false (with an input), not inductive
+  (with the call the proof misjudged) or beyond the prover.
 
 The eager reader (see "The REPL" above) has been ported to FX-26
 (`crates/fixpt-fx26/src/eager-reader.fx`). It is checked, lowered and run

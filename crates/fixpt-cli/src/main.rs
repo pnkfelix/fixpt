@@ -50,7 +50,11 @@ usage:
   fixpt verify INPUT [NAME…]     FX-26: compile the program with certificates
                                  and verify each word (or each NAME) against
                                  its own: what fails or is left open, and
-                                 why; exit 1 if a word is not verified
+                                 why, each open obligation given to z3 if
+                                 there is one (`FIXPT_SMT`) and sorted:
+                                 proved, false (an input), not inductive
+                                 or beyond it; exit 1 if a word is not
+                                 verified
   fixpt compile INPUT            FX-26: both compilers, with register code;
                                  the code, and where the compilers disagree
                                  (`--eval`, `--check` and `--compile` too)

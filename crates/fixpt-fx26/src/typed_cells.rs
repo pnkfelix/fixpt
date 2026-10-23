@@ -190,6 +190,15 @@ pub struct Outcome {
     /// verified relative to these (the design note's §7: trusted).
     pub assumed: Vec<String>,
     pub stopped: Option<String>,
+    /// Of `open`, those beyond types, as formulas for a prover outside
+    /// (`crate::smt`): each one's index in `open`, where it is owed, and
+    /// its VC.
+    pub vcs: Vec<(usize, String, Formula<Term>)>,
+    /// The values a global's call made, which the VCs after it assume to be
+    /// what its type and `ensures` say: each one's term, the callee's
+    /// name, and its arguments' terms (`crate::verifying`'s replay, §8 of
+    /// `docs/research/specs-and-counterexamples.md`).
+    pub calls: Vec<(Term, String, Vec<Term>)>,
 }
 
 impl Outcome {
@@ -327,7 +336,7 @@ fn size_expr(n: &Size) -> Option<Expr<Term>> {
 }
 
 /// A term written as an open VC writes it.
-fn show_term(t: &Term) -> String {
+pub fn show_term(t: &Term) -> String {
     match t {
         Term::Slot(i) => format!("(slot {i})"),
         Term::Free(i) => format!("(free {i})"),
@@ -1623,6 +1632,7 @@ impl Verifier<'_> {
         } else {
             let vc = Formula::Implies(Box::new(Formula::And(hyps)), Box::new(goal.clone()));
             self.out.open.push(format!("{what}: {}", crate::logic::show(&vc, &show_term)));
+            self.out.vcs.push((self.out.open.len() - 1, what.to_string(), vc));
         }
     }
 
@@ -1973,6 +1983,14 @@ impl Verifier<'_> {
                 let terms: Vec<Term> = args.iter().map(|a| a.term.clone()).collect();
                 let made = self.fresh();
                 let mut after = s.clone();
+                // A global's call, by its name (its cell's).
+                if let Term::App("global", g) = &f.term
+                    && let [Term::Lit(g)] = &g[..]
+                    && let named = self.heap.bloblet_slot(*g, GLOBAL_NAME)
+                    && self.heap.is_a(named, ObjType::Symbol)
+                {
+                    self.out.calls.push((made.clone(), self.heap.symbol_name(named).to_string(), terms.clone()));
+                }
                 if let Some(spec) = &spec {
                     self.prove(s, &instance(&spec.requires, &terms, None), &format!("{at}: the callee's requires"));
                     if returns_once(&effect) {

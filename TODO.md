@@ -2798,8 +2798,9 @@ agree on (`every_test_program`). Left:
   checking a simple one themselves (a body that is a test of its own).
 - Terms of more than integers: `(length xs)` of lists and arrays, a
   sum's tag; `old` for what refs and arrays held (§8, point 3).
-- Open VCs written for a prover outside (SMT-LIB 2; the note's open
-  question 3), and the loader's policy for them (§7).
+- ~~Open VCs written for a prover outside (SMT-LIB 2; the note's open
+  question 3)~~, done for `fixpt verify` (§119); the loader's policy for
+  them (§7) is not.
 - Total correctness: termination, by the size-change check or a ranking
   function in the certificate.
 
@@ -2854,4 +2855,26 @@ left (`KNOWN_GAPS`) each want more of the certificate:
 - The instrumented body checks its `ensures` after the body's value is
   had, so a tail call in it is no longer one: a deep recursion tested may
   run out of stack where the program would not.
+
+## 119. Open VCs given to an SMT solver: what is left (the user's, 2026-10-23)
+
+`docs/research/specs-and-counterexamples.md`'s S2, done for `fixpt verify`
+and `,verify` (`fixpt_fx26::smt`, `verifying::sort`): each open VC is
+asked of z3; proved, it is discharged; refuted, the solver's values of the
+word's parameters are run, its specifications checked, and it is said
+*false* (a specification broke, with the input) or *not inductive* (the
+run keeps it, and the proof took a global's call to give what, run, it
+does not, which is named). Not yet:
+- The verifier's own runs (the tests, a loader) do not ask the solver:
+  only the report does. A word verified by it is not marked so in its
+  certificate.
+- Terms are constants of their own, so the solver knows nothing of
+  `(car x)`, `eq`, sizes' functions or datatypes (S4): a model may be
+  one no run gives, said "open: the SMT solver refutes it …".
+- Only a word that is a top-level procedure of drawable parameters is
+  replayed; a VC of a `lambda` inside one, or of a list parameter the
+  solver gave no value, is run at its first drawn value or not at all.
+  A word named as a global is taken to be its `lambda`.
+- The places are cells, not source positions (§8's "at source places").
+- One solver process per VC; z3's 2-second limit fixed.
 

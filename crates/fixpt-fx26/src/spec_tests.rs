@@ -304,6 +304,116 @@ fn run(session: &mut Fx26Session, text: &str) -> Result<Ran, String> {
     })
 }
 
+/// How a call on an input went: it kept every specification, giving
+/// this; it was passed over; it did not end in time; a specification or
+/// an `assert` did not hold, said with the input (`shown`); it failed
+/// otherwise.
+pub enum Tried {
+    Kept(String),
+    PassedOver,
+    Unfinished,
+    Broken(String),
+    Failed(String),
+}
+
+/// `name` called on `args`, in a session running its program
+/// `instrumented`.
+fn tried(session: &mut Fx26Session, name: &str, args: &[String], shown: &str) -> Result<Tried, String> {
+    let call = |f: &str| format!("({f} {})", args.join(" ")).replace(" )", ")");
+    Ok(match run(session, &call(name))? {
+        Ran::Value(v) => Tried::Kept(v),
+        Ran::PassedOver => Tried::PassedOver,
+        Ran::Unfinished => Tried::Unfinished,
+        Ran::Asserted => Tried::Broken(format!("an `assert` does not hold, for {shown}")),
+        // A specification that does not hold: its own `ensures`, shown
+        // with the result its copy that does not check gives; or what it
+        // calls, said by whose.
+        Ran::Failed(e) if e.contains(&format!("the ensures of {name} does not hold")) => {
+            let r = match run(session, &call(&format!("{PLAIN}{name}")))? {
+                Ran::Value(v) => format!(": the result is {v}"),
+                _ => String::new(),
+            };
+            Tried::Broken(format!("its ensures does not hold, for {shown}{r}"))
+        }
+        Ran::Failed(e) if e.contains("does not hold") => {
+            let what = e.rsplit_once("the ").map_or(e.as_str(), |(_, w)| w).trim_end_matches(" does not hold");
+            Tried::Broken(format!("the {what} does not hold, for {shown}"))
+        }
+        Ran::Failed(e) => Tried::Failed(format!("fails for {shown}: {e}")),
+    })
+}
+
+/// A procedure's parameters' names (its specification's, else its
+/// `lambda`'s) and draws, by its name in a session running its program
+/// `instrumented` (`replaying`); none if it cannot be called on drawn
+/// values.
+fn callable(session: &Fx26Session, name: &str, params: &[String]) -> Option<(Vec<String>, Vec<Draw>, Option<Spec>)> {
+    let n = session.checker.interner.get(name)?;
+    let (draws, spec) = testable(session, session.checker.global_type(n)?)?;
+    let names = (0..draws.len())
+        .map(|i| match spec.as_ref().and_then(|s| s.params.get(i).copied().flatten()) {
+            Some(n) => session.checker.interner.name(n).to_string(),
+            None => params.get(i).cloned().unwrap_or(format!("%p{i}")),
+        })
+        .collect();
+    Some((names, draws, spec))
+}
+
+/// Program `text`, run in `session` with its specifications checked as it
+/// runs, its definitions only: for calls to replay (`replay`). The names
+/// it defines, each with its `lambda`'s parameters.
+pub fn replaying(session: &mut Fx26Session, text: &str) -> Result<Vec<(String, Vec<String>)>, String> {
+    let (checked, defined) = instrumented(session, text)?;
+    let forms = session.checker.read_in(FileId(0), &checked).map_err(|e| e.message)?;
+    let defines = |f: &fixpt_read::Syntax| match &f.datum {
+        Datum::List { items, .. } => items.first().and_then(|h| h.as_symbol()).is_some_and(|h| session.checker.interner.name(h).starts_with("define")),
+        _ => false,
+    };
+    let defs: String = forms.iter().filter(|f| defines(f)).map(|f| format!("{}\n", &checked[f.span.start as usize..f.span.end as usize])).collect();
+    if let Err(e) = session.run_program(&defs).map_err(|e| e.message)? {
+        return Err(format!("the program's definitions fail: {e}"));
+    }
+    Ok(defined)
+}
+
+/// `name`, of a program `replaying` ran, called on the values `given`
+/// some of its parameters, by position (as written: `5`, `#t`), the rest
+/// their first drawn value: how it went, the input said, and its values
+/// as written. None if it cannot be called so.
+pub fn replay(session: &mut Fx26Session, defined: &[(String, Vec<String>)], name: &str, given: &[(usize, String)]) -> Result<Option<(Tried, String, Vec<String>)>, String> {
+    let params = defined.iter().find(|(n, _)| n == name).map(|(_, ps)| ps.clone()).unwrap_or_default();
+    let Some((names, draws, spec)) = callable(session, name, &params) else { return Ok(None) };
+    let mut seq = Seq(0x5eed);
+    let args: Vec<String> = draws.iter().enumerate().map(|(j, d)| given.iter().find(|(i, _)| *i == j).map_or_else(|| value(d, 0, j, &mut seq), |(_, v)| v.clone())).collect();
+    // Not an input of its own `requires`: passed over.
+    let bound = names.iter().zip(&args).map(|(n, a)| format!("({n} {a})")).collect::<Vec<_>>().join(" ");
+    if let Some(s) = &spec
+        && !s.requires.trivial()
+        && matches!(run(session, &format!("(let ({bound}) {})", source(&s.requires, &names)))?, Ran::Value(v) if v == "#f")
+    {
+        return Ok(Some((Tried::PassedOver, bound, args)));
+    }
+    let shown = if args.is_empty() { "no input".to_string() } else { names.iter().zip(&args).map(|(n, a)| format!("{n} = {a}")).collect::<Vec<_>>().join(", ") };
+    tried(session, name, &args, &shown).map(|t| Some((t, shown, args)))
+}
+
+/// Expression `e`'s value, as written, in a session running a program
+/// `replaying` ran; none if it does not give one.
+pub fn evaluated(session: &mut Fx26Session, e: &str) -> Option<String> {
+    match run(session, e) {
+        Ok(Ran::Value(v)) => Some(v),
+        _ => None,
+    }
+}
+
+/// A value of the logic's as FX-26 writes it.
+pub fn written(v: &crate::smt::Val) -> String {
+    match v {
+        crate::smt::Val::Int(k) => k.to_string(),
+        crate::smt::Val::Bool(b) => if *b { "#t" } else { "#f" }.to_string(),
+    }
+}
+
 fn test_one(session: &mut Fx26Session, name: &str, params: &[String], draws: &[Draw], spec: Option<&Spec>, runs: usize) -> Result<Tested, String> {
     // Each parameter by its specification's name, else its `lambda`'s.
     let names: Vec<String> = (0..draws.len())
@@ -328,33 +438,16 @@ fn test_one(session: &mut Fx26Session, name: &str, params: &[String], draws: &[D
             t.passed_over += 1;
             continue;
         }
-        let call = |f: &str| format!("({f} {})", args.join(" ")).replace(" )", ")");
-        match run(session, &call(name))? {
-            Ran::Value(_) => {}
-            Ran::PassedOver => t.passed_over += 1,
-            Ran::Unfinished => t.unfinished += 1,
-            Ran::Asserted => {
-                t.counterexample = Some(format!("an `assert` does not hold, for {shown}"));
+        match tried(session, name, &args, &shown)? {
+            Tried::Kept(_) => {}
+            Tried::PassedOver => t.passed_over += 1,
+            Tried::Unfinished => t.unfinished += 1,
+            Tried::Broken(c) => {
+                t.counterexample = Some(c);
                 break;
             }
-            // A specification that does not hold: its own `ensures`,
-            // shown with the result its copy that does not check gives; or
-            // what it calls, said by whose.
-            Ran::Failed(e) if e.contains(&format!("the ensures of {name} does not hold")) => {
-                let r = match run(session, &call(&format!("{PLAIN}{name}")))? {
-                    Ran::Value(v) => format!(": the result is {v}"),
-                    _ => String::new(),
-                };
-                t.counterexample = Some(format!("its ensures does not hold, for {shown}{r}"));
-                break;
-            }
-            Ran::Failed(e) if e.contains("does not hold") => {
-                let what = e.rsplit_once("the ").map_or(e.as_str(), |(_, w)| w).trim_end_matches(" does not hold");
-                t.counterexample = Some(format!("the {what} does not hold, for {shown}"));
-                break;
-            }
-            Ran::Failed(e) => {
-                t.failure.get_or_insert(format!("fails for {shown}: {e}"));
+            Tried::Failed(f) => {
+                t.failure.get_or_insert(f);
             }
         }
     }

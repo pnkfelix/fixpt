@@ -293,6 +293,12 @@ Two ways they could serve fixpt:
   in any case). See `docs/fx26.md`, "Specifications".
 - **S2.** SMT-LIB output for open VCs (`TODO.md` §116), with models read
   back, mapped to source, and replayed (§8): the three classes reported.
+  Done (2026-10-23), but source places (cells are named): `fixpt verify`
+  and the REPL's `,verify` ask z3 of each open VC (`fixpt_fx26::smt`);
+  a refuted one is run on the solver's values of the parameters, and
+  said false, with the input, or not inductive, with the call whose
+  value the proof took wrongly beside the real one; one neither proved
+  nor refuted, beyond the prover. `TODO.md` §119 has what is left.
 - **S3.** Bounded mode (§7), with unwinding checks.
 - **S4.** Logic functions (§5) and terms over datatypes in
   specifications.
