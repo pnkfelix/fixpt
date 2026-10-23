@@ -1033,6 +1033,29 @@ impl Verifier<'_> {
                 return Ok(None);
             }
             "exit" => return Ok(None),
+            // `( tag handler thunk -- r )`: the tag's type says the rest.
+            "prompt" => {
+                let (thunk, handler, tag) = (self.pop(s, at)?, self.pop(s, at)?, self.pop(s, at)?);
+                let Some(Ty::PromptTag { answer, payload, effect, .. }) = self.ty_of(&tag) else {
+                    self.out.stopped = Some("a prompt whose tag's type is not known".into());
+                    return Err(());
+                };
+                let subr = |me: &Self, v: &V| v.ty.and_then(|t| me.c.arena.get(me.c.arena.resolve(t)).as_subr());
+                match (subr(self, &thunk), subr(self, &handler)) {
+                    (Some((te, tps, tr)), Some((he, hps, hr))) if tps.is_empty() && hps.len() == 1 => {
+                        for (r, what) in [(tr, "the prompt's thunk's result"), (hr, "its handler's result")] {
+                            self.holds(&V::new(Term::App("result", Vec::new()), Some(r)), answer, &format!("{at}: {what}"));
+                        }
+                        self.holds(&V::new(Term::App("payload", Vec::new()), Some(payload)), hps[0], &format!("{at}: the handler's parameter"));
+                        self.effect = self.effect.union(&te).union(&he).union(&effect);
+                    }
+                    _ => {
+                        self.out.failed.push(format!("{at}: a prompt's thunk or handler is no procedure of the arity it must be"));
+                        return Err(());
+                    }
+                }
+                self.push_made(s, Some(answer), None);
+            }
             "branch" | "0branch" => {
                 let to = (here as i64 + 2 + ops[0].as_fixnum()) as usize;
                 let (taken, rest) = if name == "branch" {
@@ -1169,23 +1192,47 @@ impl Verifier<'_> {
                 // as, and is its values' layout.
                 self.push_made(s, Some(own), None);
             }
-            "prim" | "cons" if cert.ops.iter().any(|(k, op, _)| *k == here && !marker(op)) => {
+            "prim" | "cons" | "abort" | "callcc" | "callcomp" | "callone" | "withmark" | "withmark-tail" | "firstmark" | "currentmarks" | "marksof"
+                if cert.ops.iter().any(|(k, op, _)| *k == here && !marker(op)) =>
+            {
                 let (_, op, inst) = cert.ops.iter().find(|(k, op, _)| *k == here && !marker(op)).expect("found").clone();
                 let pname = match name {
                     "prim" => fixpt_runtime::PRIMITIVES.get(ops[0].as_fixnum() as usize).map_or("?", |d| d.name),
-                    _ => "cons",
+                    other => other,
                 };
                 // The cell must run the operation, as the compilers' table
-                // has it (`lower::STANDARD`, and the few the compiler runs
-                // by their own names).
+                // has it (`lower::STANDARD`; the few the compiler runs by
+                // their own names; and control, each its routine,
+                // `Compiler::standard_on`).
                 let runs = pname == op
                     || crate::cellular::standard_primitive(&op) == Some(pname)
-                    || matches!((op.as_str(), pname), ("new", "%make-box") | ("char->string", "string"));
+                    || matches!(
+                        (op.as_str(), pname),
+                        ("new", "%make-box")
+                            | ("char->string", "string")
+                            | ("abort-current-continuation" | "escape", "abort")
+                            | ("cwcc", "callcc")
+                            | ("call-with-composable-continuation", "callcomp")
+                            | ("call-with-oneshot-continuation", "callone")
+                            | ("with-mark", "withmark" | "withmark-tail")
+                            | ("first-mark", "firstmark")
+                            | ("current-marks", "currentmarks")
+                            | ("marks-of", "marksof")
+                    );
                 if !runs {
                     self.out.failed.push(format!("{at}: said to run `{op}`, and runs {pname}"));
                     return Err(());
                 }
-                let n = if name == "prim" { ops[1].as_fixnum() as usize } else { 2 };
+                // A routine takes as many values as the operation has
+                // parameters; `prim` says how many, `cons` two.
+                let n = match name {
+                    "prim" => ops[1].as_fixnum() as usize,
+                    "cons" => 2,
+                    _ => match self.op_type(&op, &inst, 0, cert.own_ops.contains(&here)) {
+                        Some((params, _, _)) => params.len(),
+                        None => 0,
+                    },
+                };
                 let Some((params, result, effect)) = self.op_type(&op, &inst, n, cert.own_ops.contains(&here)) else {
                     self.out.stopped = Some(format!("`{op}`: its type, instantiated"));
                     return Err(());
@@ -1203,6 +1250,14 @@ impl Verifier<'_> {
                     self.holds(a, *p, at);
                 }
                 self.effect = self.effect.union(&effect);
+                // In tail position: its result is the word's.
+                if name == "withmark-tail" {
+                    match cert.result {
+                        Some(want) => self.holds(&V::new(Term::App("with-mark", Vec::new()), Some(result)), want, at),
+                        None => self.out.failed.push(format!("{at}: a tail call from a word with no result")),
+                    }
+                    return Ok(None);
+                }
                 let terms: Vec<Term> = args.into_iter().map(|a| a.term).collect();
                 let made = self.fresh();
                 if let Ty::Proving { then, els } = self.c.arena.get(self.c.arena.resolve(result)).clone() {

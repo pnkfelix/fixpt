@@ -1838,6 +1838,7 @@ impl<'a> Compiler<'a> {
             // marks each iteration runs in constant space.
             Some(s) if tail && s == "with-mark" => {
                 self.exps(args, e, depth, code)?;
+                self.note_op(x, "with-mark", code);
                 self.op(code, "withmark-tail");
             }
             // `apply` copies its list, unless the checker found it at
