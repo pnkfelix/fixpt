@@ -2267,10 +2267,12 @@ impl<'a> Compiler<'a> {
         match op {
             BlobletOp::Make => {
                 let n = self.exps(args, e, depth, code)?;
+                self.note_made(x, code);
                 self.prim(code, "%make-bloblet", n)?;
             }
             BlobletOp::RMake => {
                 let n = self.exps(args, e, depth, code)?;
+                self.note_made(x, code);
                 self.prim(code, "%region-make-bloblet", n)?;
             }
             BlobletOp::Ref(i) => {

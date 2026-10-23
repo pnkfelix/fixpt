@@ -398,6 +398,11 @@ impl Verifier<'_> {
             if self.generalize(cert, ins.at, &mut s, &at).is_err() || self.instances(cert, ins.at, &mut s, &at).is_err() {
                 return;
             }
+            // A value of a sum with no arm left (every tag tested, and none
+            // was it): no way reaches here, so nothing here runs.
+            if s.stack.iter().any(|v| v.ty.is_some_and(|t| matches!(self.c.arena.get(self.c.arena.resolve(t)), Ty::Sum(arms) if arms.is_empty()))) {
+                continue;
+            }
             let Some(name) = ins.name else {
                 self.out.stopped = Some("a word run as a cell".into());
                 return;
@@ -541,6 +546,8 @@ impl Verifier<'_> {
                 0,
             ),
             "make-array" => (vec![Box::new(prim("%make-bloblet-filled", 3))], 1),
+            // A tag or a key: a new box, of unit.
+            "make-continuation-prompt-tag" | "make-escape-tag" | "make-continuation-mark-key" => (vec![Box::new(unit), Box::new(prim("%make-box", 1))], 0),
             _ => return None,
         };
         let n = cells.len();
@@ -1094,7 +1101,7 @@ impl Verifier<'_> {
                 };
                 let pname = fixpt_runtime::PRIMITIVES.get(ops[0].as_fixnum() as usize).map_or("?", |d| d.name);
                 let n = ops[1].as_fixnum() as usize;
-                if pname != "%make-frozen" || n == 0 {
+                if !matches!(pname, "%make-frozen" | "%make-bloblet" | "%region-make-bloblet") || n == 0 {
                     self.out.failed.push(format!("{at}: data said made by {pname}"));
                     return Err(());
                 }
@@ -1103,6 +1110,12 @@ impl Verifier<'_> {
                     vals.push(self.pop(s, at)?);
                 }
                 vals.reverse();
+                if matches!(self.c.arena.get(self.c.arena.resolve(own)), Ty::Bloblet { .. }) {
+                    return self.bloblet_made(&vals, own, at).map(|()| {
+                        self.push_made(s, Some(own), None);
+                        Some(s.clone())
+                    });
+                }
                 let kind = vals.remove(0);
                 let fields: Option<Vec<TyId>> = match (&kind.term, self.c.arena.get(self.c.arena.resolve(own)).clone()) {
                     (Term::Lit(k), Ty::Product(labels)) if *k == Value::fixnum(37) => Some(labels.iter().map(|(_, t)| *t).collect()),
@@ -1238,6 +1251,41 @@ impl Verifier<'_> {
         }
     }
 
+    /// A bloblet made, of type `t`, from `vals`: `make-bloblet`'s, its
+    /// suffix's bytes then its fields; `rmake-bloblet`'s, a place first,
+    /// whose region is the bloblet's.
+    fn bloblet_made(&mut self, vals: &[V], t: TyId, at: &str) -> Result<(), ()> {
+        let Ty::Bloblet { fields, frozen: false, region } = self.c.arena.get(self.c.arena.resolve(t)).clone() else {
+            self.out.failed.push(format!("{at}: a bloblet made frozen"));
+            return Err(());
+        };
+        let rest = match vals.len().checked_sub(fields.len()) {
+            Some(1) => vals,
+            Some(2) => {
+                match self.ty_of(&vals[0]) {
+                    Some(Ty::Place(r)) if r == region => {}
+                    _ => {
+                        self.out.failed.push(format!("{at}: a bloblet made in a place not its region's"));
+                        return Err(());
+                    }
+                }
+                &vals[1..]
+            }
+            _ => {
+                let msg = format!("{at}: {} values made a {}", vals.len(), self.show(t));
+                self.out.failed.push(msg);
+                return Err(());
+            }
+        };
+        let int = self.c.int;
+        self.holds(&rest[0], int, at);
+        for (v, f) in rest[1..].iter().zip(&fields) {
+            self.holds(v, *f, at);
+        }
+        self.effect = self.effect.union(&Effect::atom(crate::ast::Atom::Alloc(region)));
+        Ok(())
+    }
+
     /// Field `k` of `o`'s value: its type, by `o`'s.
     fn field_type(&mut self, o: &V, k: usize, at: &str) -> Result<Option<TyId>, ()> {
         let Some(t) = self.ty_of(o) else {
@@ -1369,14 +1417,14 @@ impl Verifier<'_> {
                     }
                 }
             }
-            // A sum's tag: the arm, where true.
-            (Term::App("field", f), Term::Lit(tag)) if yes && f.first() == Some(&Term::Lit(Value::fixnum(2))) => {
+            // A sum's tag: that arm, where true; the others, where false.
+            (Term::App("field", f), Term::Lit(tag)) if f.first() == Some(&Term::Lit(Value::fixnum(2))) && self.heap.is_a(*tag, ObjType::Symbol) => {
                 let scrutinee = &f[1];
+                let name = self.heap.symbol_name(*tag);
                 for v in s.stack.iter_mut().filter(|v| v.term == *scrutinee) {
                     let Some(ty) = v.ty else { continue };
                     if let Ty::Sum(arms) = self.c.arena.get(self.c.arena.resolve(ty)).clone() {
-                        let name = self.heap.symbol_name(*tag);
-                        let arm: Vec<_> = arms.into_iter().filter(|(l, _)| self.c.interner.name(*l) == name).collect();
+                        let arm: Vec<_> = arms.into_iter().filter(|(l, _)| (self.c.interner.name(*l) == name) == yes).collect();
                         v.ty = Some(self.c.arena.ty(Ty::Sum(arm)));
                     }
                 }
