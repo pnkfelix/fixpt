@@ -471,6 +471,9 @@ pub struct Checker {
     /// While a chain of `plambda`s (or `poly`s) is checked, with
     /// `record_types`: the binder levels the next in it is under.
     pub(crate) poly_chain: HashMap<ExpId, Vec<Vec<(DVar, Kind)>>>,
+    /// The expression `instantiate_against` is about to instantiate, for
+    /// `NodeFacts::value_insts`.
+    pub(crate) inst_for: Option<ExpId>,
     /// Where in `env` the globals are: the bindings top-level definitions
     /// made.
     pub(crate) global_slots: HashSet<usize>,
@@ -517,6 +520,10 @@ pub struct NodeFacts {
     /// instantiated at, in order (`Checker::binders_of`), as checking found
     /// them. With `record_types`.
     pub insts: HashMap<ExpId, Vec<D>>,
+    /// Each polymorphic value used, not called, at a type of no binders:
+    /// what its binders were instantiated at, by the expression. With
+    /// `record_types`.
+    pub value_insts: HashMap<ExpId, Vec<D>>,
     /// A module's abstract type's conversions, `up-t` and `down-t`, each
     /// the identity on the representation, by its lambda's body: the type
     /// it is bound at, from the representation to the abstract type or
@@ -838,6 +845,7 @@ impl Checker {
             record_operands: false,
             record_types: false,
             poly_chain: HashMap::new(),
+            inst_for: None,
             global_slots: HashSet::new(),
             fixed_slots: HashSet::new(),
         };

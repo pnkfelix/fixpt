@@ -176,6 +176,12 @@ struct Ins {
     ops: Vec<Value>,
 }
 
+/// Whether a certificate's operation note is an instantiation's (of a
+/// callee, a value, a `proj`), not a standard operation's.
+fn marker(op: &str) -> bool {
+    matches!(op, "%call" | "%inst" | "%proj")
+}
+
 /// Verify `word` against its certificate in `certs`.
 pub fn verify(c: &mut Checker, heap: &Heap, certs: &Certs, word: Value) -> Outcome {
     let mut v = Verifier { c, heap, certs, out: Outcome::default(), made: 0, effect: Effect::pure(), proving: Vec::new(), gen_effects: Vec::new() };
@@ -241,7 +247,16 @@ impl Verifier<'_> {
             Ty::Poly { body, .. } if !is_poly(self, v.ty) => body,
             _ => t,
         };
-        v.ty.map(|s| self.c.subtype(s, t))
+        // Two `poly`s over the very same binders (a value checked against
+        // the `poly` it is stored as): their bodies compared.
+        let (mut s, mut t) = (v.ty?, t);
+        loop {
+            match (self.c.arena.get(self.c.arena.resolve(s)).clone(), self.c.arena.get(self.c.arena.resolve(t)).clone()) {
+                (Ty::Poly { binders: a, body: x }, Ty::Poly { binders: b, body: y }) if a == b => (s, t) = (x, y),
+                _ => break,
+            }
+        }
+        Some(self.c.subtype(s, t))
     }
 
     /// Whether literal `x` is of type `t`, by looking at it.
@@ -337,6 +352,16 @@ impl Verifier<'_> {
         if self.conversion(&code, cert) {
             return;
         }
+        // A dependent procedure's (`(select $k t)`, the abstract type `t` of
+        // parameter `k`, a module): seen from inside, each such type is that
+        // module's own abstract type, as its body was checked.
+        let given = self.selects(&cert.params);
+        let mut cert = cert.clone();
+        for p in &mut cert.params {
+            *p = self.c.instantiate_params(*p, &given);
+        }
+        cert.result = cert.result.map(|r| self.c.instantiate_params(r, &given));
+        let cert = &cert;
         let entry = State {
             stack: cert.params.iter().enumerate().map(|(i, t)| V::new(Term::Slot(i), Some(*t))).collect(),
             pending: Vec::new(),
@@ -366,7 +391,7 @@ impl Verifier<'_> {
                     None => return,
                 },
             };
-            if self.generalize(cert, ins.at, &mut s, &at).is_err() {
+            if self.generalize(cert, ins.at, &mut s, &at).is_err() || self.instances(cert, ins.at, &mut s, &at).is_err() {
                 return;
             }
             let Some(name) = ins.name else {
@@ -443,13 +468,49 @@ impl Verifier<'_> {
         Ok(())
     }
 
+    /// The values instantiated before cell `at`, on top, in the order made:
+    /// `%inst`, every binder (outermost first, as checking found them);
+    /// `%proj`, the outermost level's, at its arguments.
+    fn instances(&mut self, cert: &Cert, at_cell: usize, s: &mut State, at: &str) -> Result<(), ()> {
+        for (_, op, ds) in cert.ops.iter().filter(|(k, op, _)| *k == at_cell && (op == "%inst" || op == "%proj")) {
+            let Some(v) = s.stack.last().cloned() else {
+                self.out.failed.push(format!("{at}: an instance of nothing"));
+                return Err(());
+            };
+            let Some(t) = v.ty else { continue };
+            let (kinds, inner) = match op.as_str() {
+                "%inst" => self.c.binders_of(t),
+                _ => match self.c.arena.get(self.c.arena.resolve(t)).clone() {
+                    Ty::Poly { binders, body } => (binders, body),
+                    _ => (Vec::new(), t),
+                },
+            };
+            // Already of no binders (a literal, `nil`, of its exact type):
+            // nothing to instantiate.
+            if kinds.is_empty() {
+                continue;
+            }
+            if kinds.len() != ds.len() {
+                let msg = format!("{at}: {} instantiated at {} descriptions", self.show(t), ds.len());
+                self.out.failed.push(msg);
+                return Err(());
+            }
+            let map: HashMap<crate::ast::DVar, crate::ast::D> = kinds.iter().map(|(v, _)| *v).zip(ds.iter().cloned()).collect();
+            let inst = self.c.subst(inner, &map);
+            let top = s.stack.last_mut().expect("there");
+            top.ty = Some(inst);
+            top.made = Some(inst);
+        }
+        Ok(())
+    }
+
     /// A standard operation compiled as an idiom, several routines, where
     /// the certificate says the operation runs at `code`'s first cell and
     /// the cells are the idiom's, as the compilers make it
     /// (`Compiler::standard_on`), no branch landing inside: the operation's
     /// triple, applied to the whole, and how many instructions it is.
     fn idiom(&mut self, code: &[Ins], cert: &Cert, s: &mut State, at: &str, waiting: &HashMap<usize, Vec<State>>) -> Option<Result<usize, ()>> {
-        let (_, op, inst) = cert.ops.iter().find(|(k, _, _)| *k == code[0].at)?.clone();
+        let (_, op, inst) = cert.ops.iter().find(|(k, op, _)| *k == code[0].at && !marker(op))?.clone();
         let lit = |v: i64| move |ins: &Ins| ins.name == Some("lit") && ins.ops[0] == Value::fixnum(v);
         let named = |r: &'static str| move |ins: &Ins| ins.name == Some(r);
         let prim = |p: &'static str, n: i64| {
@@ -572,6 +633,20 @@ impl Verifier<'_> {
             self.out.discharged += 1;
         }
         true
+    }
+
+    /// What `(select $k t)` stands for, given values of `types` by
+    /// position: for each that is a module, its abstract types, by name.
+    fn selects(&mut self, types: &[TyId]) -> HashMap<(usize, fixpt_read::Sym), TyId> {
+        let mut given = HashMap::new();
+        for (k, t) in types.iter().enumerate() {
+            if let Ty::Module { abs, .. } = self.c.arena.get(self.c.arena.resolve(*t)).clone() {
+                for (a, w) in abs {
+                    given.insert((k, a), self.c.arena.ty(Ty::Var(w)));
+                }
+            }
+        }
+        given
     }
 
     /// The state at a cell the ways in `arriving` reach, joined: each place
@@ -863,7 +938,23 @@ impl Verifier<'_> {
                     args.push(self.pop(s, at)?);
                 }
                 args.reverse();
-                let (params, result, effect) = match self.ty_of(&f) {
+                // A polymorphic callee, instantiated as the certificate says:
+                // its binders, outermost first, substituted.
+                let callee = match (self.ty_of(&f), cert.ops.iter().find(|(k, op, _)| *k == here && op == "%call")) {
+                    (Some(Ty::Poly { .. }), Some((_, _, inst))) => {
+                        let t = f.ty.expect("known");
+                        let (kinds, inner) = self.c.binders_of(t);
+                        if kinds.len() != inst.len() {
+                            self.out.failed.push(format!("{at}: a callee of {} binders, instantiated at {}", kinds.len(), inst.len()));
+                            return Err(());
+                        }
+                        let map: HashMap<crate::ast::DVar, crate::ast::D> = kinds.iter().map(|(v, _)| *v).zip(inst.iter().cloned()).collect();
+                        let t = self.c.subst(inner, &map);
+                        Some(self.c.arena.get(self.c.arena.resolve(t)).clone())
+                    }
+                    (t, _) => t,
+                };
+                let (params, result, effect) = match callee {
                     // A `vsubr`: as many values as it is called with, each
                     // its element type.
                     Some(Ty::Named { which: 0, args: ds }) if matches!(&ds[..], [crate::ast::D::Effect(_), crate::ast::D::Type(_), crate::ast::D::Type(_)]) => {
@@ -896,6 +987,12 @@ impl Verifier<'_> {
                     self.out.failed.push(format!("{at}: {n} arguments to a procedure of {}", params.len()));
                     return Err(());
                 }
+                // A dependent procedure's: each `(select $k t)` the abstract
+                // type of argument `k`'s module.
+                let arg_types: Vec<TyId> = args.iter().map(|a| a.ty.unwrap_or(self.c.void)).collect();
+                let given = self.selects(&arg_types);
+                let params: Vec<TyId> = params.iter().map(|p| self.c.instantiate_params(*p, &given)).collect();
+                let result = self.c.instantiate_params(result, &given);
                 for (a, p) in args.iter().zip(&params) {
                     self.holds(a, *p, at);
                 }
@@ -973,8 +1070,8 @@ impl Verifier<'_> {
                     }
                 }
             }
-            "prim" | "cons" if cert.ops.iter().any(|(k, _, _)| *k == here) => {
-                let (_, op, inst) = cert.ops.iter().find(|(k, _, _)| *k == here).expect("found").clone();
+            "prim" | "cons" if cert.ops.iter().any(|(k, op, _)| *k == here && !marker(op)) => {
+                let (_, op, inst) = cert.ops.iter().find(|(k, op, _)| *k == here && !marker(op)).expect("found").clone();
                 let pname = match name {
                     "prim" => fixpt_runtime::PRIMITIVES.get(ops[0].as_fixnum() as usize).map_or("?", |d| d.name),
                     _ => "cons",

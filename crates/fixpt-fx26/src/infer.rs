@@ -273,6 +273,7 @@ impl Checker {
             // nil)`), instantiated as the plain name is (`TODO.md` §46).
             Exp::With { module, body } if self.fx_poly(module, body).is_some() => {
                 let t = self.fx_poly(module, body).expect("matched");
+                self.inst_for = Some(e);
                 let inst = self.instantiate_against(t, expected, span)?;
                 self.expect(e, inst, expected)?;
                 self.plain_fx(e);
@@ -282,6 +283,7 @@ impl Checker {
             // it (`library_type`).
             Exp::With { module, body } if self.library_type(module, body).is_some() => {
                 let t = self.library_type(module, body).expect("matched");
+                self.inst_for = Some(e);
                 let inst = if matches!(self.arena.get(t), Ty::Poly { .. }) { self.instantiate_against(t, expected, span)? } else { t };
                 self.expect(e, inst, expected)?;
                 self.with_as(e, module, body, None)?;
@@ -293,6 +295,7 @@ impl Checker {
             Exp::With { module, body } if !self.is_fx_module(module) => Ok(self.with_as(e, module, body, Some(expected))?.1),
             Exp::Var(s) if self.lookup(s).is_some_and(|t| matches!(self.arena.get(t), Ty::Poly { .. })) => {
                 let t = self.lookup(s).expect("bound");
+                self.inst_for = Some(e);
                 let inst = self.instantiate_against(t, expected, span)?;
                 self.expect(e, inst, expected)?;
                 Ok(self.naming_effect(s, t))
@@ -1111,6 +1114,7 @@ impl Checker {
                 // A variable of a polymorphic type: instantiated at the
                 // parameter, and what it turns out to be solves more
                 // (`(apply list xs)`: `apply`'s effect).
+                self.inst_for = Some(*a);
                 let inst = self.instantiate_against(t, p, self.arena.span_of(*a))?;
                 self.unify(params[i], inst, &mut u, &mut HashSet::new());
                 done[i] = Some((inst, self.naming_effect(s, t)));
@@ -1196,6 +1200,12 @@ impl Checker {
         self.check_bounds(&u.kinds, &map, span)?;
         self.check_distinct(&u.kinds, &map, inner, span)?;
         self.check_finite_sizes(&u.kinds, &map, inner, span)?;
+        if let Some(at) = self.inst_for.take()
+            && self.record_types
+            && let Some(ds) = u.kinds.iter().map(|(v, _)| map.get(v).cloned()).collect::<Option<Vec<D>>>()
+        {
+            self.facts.value_insts.insert(at, ds);
+        }
         let inst = self.subst(inner, &map);
         let inst = self.spin_for_cyclic(inner, inst, &map);
         self.no_knot(inst, span)?;

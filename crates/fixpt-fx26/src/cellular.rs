@@ -667,6 +667,15 @@ impl<'a> Compiler<'a> {
     fn exp(&mut self, x: ExpId, e: &Env, depth: usize, code: &mut Vec<Item>, tail: bool) -> R<()> {
         let start = code.len();
         self.exp_unnoted(x, e, depth, code, tail)?;
+        // A polymorphic value used at an instance (not called): what
+        // checking instantiated it at, applied to it where it is made.
+        if self.certs.is_some()
+            && !tail
+            && let Some(inst) = self.c.facts.value_insts.get(&x).cloned()
+        {
+            self.ops.push(("%inst".to_string(), inst));
+            code.push(Item::Op(self.ops.len() - 1));
+        }
         // Where ways join inside it, its value's type, asserted where it
         // ends: what the verifier's join rule cannot give.
         if self.certs.is_some()
@@ -796,6 +805,13 @@ impl<'a> Compiler<'a> {
                 code.push(Item::Gen(k, true));
                 self.exp(body, e, depth, code, tail)?;
                 code.push(Item::Gen(k, false));
+            }
+            // A `proj`, its value's outermost binders instantiated at its
+            // arguments: said for the verifier.
+            Exp::Proj { body, args } if self.certs.is_some() && !tail => {
+                self.exp(body, e, depth, code, tail)?;
+                self.ops.push(("%proj".to_string(), args));
+                code.push(Item::Op(self.ops.len() - 1));
             }
             Exp::PLambda { body, .. } | Exp::Proj { body, .. } | Exp::The { exp: body, .. } | Exp::Convention { exp: body, .. } => {
                 self.exp(body, e, depth, code, tail)?
@@ -1790,6 +1806,13 @@ impl<'a> Compiler<'a> {
             None => {
                 let n = self.exps(args, e, depth, code)?;
                 self.exp(f, e, depth + n, code, false)?;
+                // A polymorphic callee: what checking instantiated it at.
+                if self.certs.is_some()
+                    && let Some(inst) = self.c.facts.insts.get(&x).cloned()
+                {
+                    self.ops.push(("%call".to_string(), inst));
+                    code.push(Item::Op(self.ops.len() - 1));
+                }
                 // In the callee's convention, as its type says
                 // (`NodeFacts::call_conv`): a cellular closure, called as one;
                 // anything else, by the call that looks at the callee's kind.
