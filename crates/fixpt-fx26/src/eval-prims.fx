@@ -188,6 +188,9 @@
       (prim! 'symbol-name-hash (lambda (xs) (symbol-name-hash (as-sym (ev-arg xs 0)))))
       (prim! 'eq? (lambda (xs) (ev-eq? (ev-arg xs 0) (ev-arg xs 1))))
       (prim! 'error (lambda (xs) (efail (as-str (ev-arg xs 0)))))
+      (prim! 'assert (lambda (xs) (if (as-bool (ev-arg xs 0)) the-unit (efail "assertion failed"))))
+      (prim! 'assume
+             (lambda (xs) (if (as-bool (ev-arg xs 0)) the-unit (efail "assumption not met"))))
       (prim! '%quote (lambda (xs) (ev-intern (ev-arg xs 0)))))))
 
 (define ev-symbol? (->* (val) bool)

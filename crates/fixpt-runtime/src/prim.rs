@@ -2689,6 +2689,12 @@ prims! {
     // procedure calling it runs as cellular code, whatever that compiler
     // learns to do: a test's way to have some.
     "%stay-cellular", 1, Some(1), simple!(|_rt, a| Ok(a[0]));
+    // FX-26's `assert` and `assume` (`docs/research/specs-and-counterexamples.md`
+    // §4): `#u` where their argument is true, and otherwise a failure each
+    // its own, so that a harness's runner can tell an assertion that does
+    // not hold from an input that a harness does not take.
+    "%fx26-assert", 1, Some(1), simple!(|rt, a| if a[0].is_false() { rt.fail("assertion failed", &[]) } else { Ok(rt.heap.intern_static("#u")) });
+    "%fx26-assume", 1, Some(1), simple!(|rt, a| if a[0].is_false() { rt.fail("assumption not met", &[]) } else { Ok(rt.heap.intern_static("#u")) });
 }
 
 /// Promise states. `[state, payload]`.

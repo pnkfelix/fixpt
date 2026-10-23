@@ -282,7 +282,15 @@ Two ways they could serve fixpt:
 
 - **S1.** `assert`, `assume`, `any` with its effect; runtime checking of
   specifications; a test runner drawing harnesses' inputs from datatypes.
-  Counterexamples for false claims, with no solver.
+  Counterexamples for false claims, with no solver. Done (2026-10-23),
+  but `any`, and inputs of datatypes: `assert` and `assume` standard
+  procedures whose specifications say what the verifier makes of them;
+  `fixpt test`, which runs the program with each specified `lambda`
+  checking its specification and calls each procedure it can on inputs
+  drawn from its parameters' types (`int`, `nat`, `bool`, lists of
+  those). A harness's parameters are its arbitrary values, so `any` and
+  its effect are not needed (types are not there at run time to draw by
+  in any case). See `docs/fx26.md`, "Specifications".
 - **S2.** SMT-LIB output for open VCs (`TODO.md` §116), with models read
   back, mapped to source, and replayed (§8): the three classes reported.
 - **S3.** Bounded mode (§7), with unwinding checks.

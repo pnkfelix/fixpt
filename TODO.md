@@ -2841,3 +2841,17 @@ left (`KNOWN_GAPS`) each want more of the certificate:
   the verifier did not note at first (494 of them), it now does, and the
   test asserts it.
 
+## 118. Specifications tested by running: what is left (the user's, 2026-10-23)
+
+`docs/research/specs-and-counterexamples.md`'s S1, done but for these:
+- Inputs of more types: `define-datatype`'s sums and products, strings,
+  pairs; a value drawn of a type given by the program (a harness's
+  parameter of a procedure type has none).
+- Specifications checked as they run outside `fixpt test` (the loader's
+  `guard` and `contract`, `typed-cellular-code.md` §7), and of a
+  specified `lambda` that is not a top-level definition's.
+- A counterexample made smaller (shrinking), and the path it took.
+- The instrumented body checks its `ensures` after the body's value is
+  had, so a tail call in it is no longer one: a deep recursion tested may
+  run out of stack where the program would not.
+

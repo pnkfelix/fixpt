@@ -2326,6 +2326,8 @@ impl Verifier<'_> {
                 // Its `ensures`, assumed after it (the call rule), and what a
                 // branch on it learns.
                 if let Some(spec) = self.op_spec(&op) {
+                    // Its `requires` owed here (`assert`'s), then its `ensures`.
+                    self.prove(s, &instance(&spec.requires, &terms, None), &format!("{at}: `{op}`'s requires"));
                     if returns_once(&effect) {
                         s.props.push(instance(&spec.ensures, &terms, Some(&made)));
                     }

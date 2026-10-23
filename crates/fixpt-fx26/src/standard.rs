@@ -393,6 +393,13 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("string>=?", "(subr pure (string string) bool)"),
     // The run fails, saying why; it returns to no one.
     ("error", "(subr pure (string) void)"),
+    // What a program says holds, and what a harness takes only where it
+    // holds (`docs/research/specs-and-counterexamples.md` §4): each fails
+    // where its argument is false, so that the code after runs only where
+    // it is true. Proved where it is said: an `assert`'s argument a VC, by
+    // its `requires`; an `assume`'s assumed after, by its `ensures`.
+    ("assert", "(subr pure ((p bool)) unit (requires p))"),
+    ("assume", "(subr pure ((p bool)) unit (ensures r p))"),
     ("append", "(poly ((r region)) (poly ((t type)) (vsubr (maxeff (read r) (alloc r)) (listof t r) (listof t r))))"),
     // A list's length at any region; a cycle is an error.
     ("list-length", "(poly ((r region)) (poly ((t type)) (subr (read r) ((listof t r)) nat)))"),

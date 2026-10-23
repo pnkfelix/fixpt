@@ -1474,3 +1474,31 @@ The user: "let's attack requires and ensures next" (the design note's
    (`(read @globals)` says each global's read): removing it weakens
    nothing. It asserts that no global's read is left out unseen.
 
+## `assert`, `assume` and `fixpt test` (2026-10-23)
+
+1. **Standard procedures, not forms.** `assert` and `assume` are
+   `(subr pure ((p bool)) unit …)`, the first `(requires p)`, the second
+   `(ensures r p)`: their specifications are what the verifier makes of
+   them, by the call rule, so it needs nothing of its own for them but
+   proving a standard operation's `requires`, which it now does (none had
+   one). Both checkers read them from the standard table; each compiler
+   lowers them to a primitive (`%fx26-assert`, `%fx26-assume`), appended
+   to the runtime's table so that no primitive's number changes.
+2. **No `any`.** The note's `(any T)` would draw a value of a type, but
+   types are not there at run time; a harness's parameters, drawn by the
+   runner from their types, are the arbitrary values instead, and the
+   verifier already treats parameters as arbitrary. So no effect for it
+   either (the note's open question 1).
+3. **Every procedure the runner can call is tested**, specified or not:
+   a call it makes may break a callee's specification
+   (`wrong-requires.fx`'s `f`). Not one whose effect another run could
+   see (writes, I/O, control).
+4. **Specifications checked by rewriting the program's text**, only for
+   `fixpt test`: each specified top-level `lambda`'s body checks its
+   `requires` and `ensures`, failing with a message that names whose; a
+   copy as written, `%plain-NAME`, gives a counterexample's result. The
+   program's own expressions are run each apart, after its definitions,
+   so that one that breaks a specification is a counterexample too.
+5. **Inputs drawn the same way each time**: 13 edge integers first, then
+   a fixed-seed generator in [-100, 100]; lists of up to 5.
+

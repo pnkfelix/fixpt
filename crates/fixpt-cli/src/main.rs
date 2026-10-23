@@ -41,6 +41,12 @@ usage:
   fixpt check INPUT              FX-26: both checkers (Rust and FX-26) on a
                                  file, `-` or program text; each form's type
                                  and effect, and where the checkers disagree
+  fixpt test INPUT [RUNS]        FX-26: run the program, then each procedure
+                                 with a specification, and each harness (a
+                                 procedure of `unit` result), on RUNS inputs
+                                 drawn from its parameters' types (100);
+                                 the first counterexample of each; exit 1 if
+                                 one is found
   fixpt compile INPUT            FX-26: both compilers, with register code;
                                  the code, and where the compilers disagree
                                  (`--eval`, `--check` and `--compile` too)
@@ -106,8 +112,8 @@ made with rather than being told.
 
 /// The commands, as the first word: a word that is none of them but names
 /// a file runs it (`fixpt FILE`).
-const COMMANDS: [&str; 17] = [
-    "repl", "fx26", "scheme", "run", "eval", "check", "compile", "machines", "bench", "dump-heap", "build", "run-image", "image",
+const COMMANDS: [&str; 18] = [
+    "repl", "fx26", "scheme", "run", "eval", "check", "test", "compile", "machines", "bench", "dump-heap", "build", "run-image", "image",
     "front-end-files", "help", "regcode-survey", "--help",
 ];
 
@@ -371,6 +377,31 @@ fn run(args: &[String]) -> i32 {
                 Err(e) => {
                     eprintln!("fixpt: {e}");
                     1
+                }
+            }
+        }
+        Some("test") => {
+            if dialect != Dialect::Fx26 {
+                eprintln!("fixpt test: FX-26 only");
+                return 2;
+            }
+            let runs = match rest.get(2).map(|r| r.parse::<usize>()) {
+                None => 100,
+                Some(Ok(n)) => n,
+                Some(Err(_)) => {
+                    eprintln!("fixpt test: RUNS is a number");
+                    return 2;
+                }
+            };
+            match rest.get(1).map(|f| fx26::input(std::slice::from_ref(f))) {
+                Some(Ok((name, text))) => fx26::test(backend, &name, &text, runs),
+                Some(Err(e)) => {
+                    eprintln!("fixpt: {e}");
+                    1
+                }
+                None => {
+                    eprintln!("fixpt test: needs a file, `-` or a program");
+                    2
                 }
             }
         }

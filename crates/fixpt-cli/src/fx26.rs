@@ -686,6 +686,55 @@ pub fn input(args: &[String]) -> Result<(String, String), String> {
 
 /// `fixpt check`: both checkers on a program, each form's type and effect;
 /// said once where they agree, both where they do not (and then 1).
+/// `fixpt test`: the program run, then its specified procedures and
+/// harnesses tested on drawn inputs (`fixpt_fx26::spec_tests`).
+pub fn test(backend: Backend, name: &str, text: &str, runs: usize) -> i32 {
+    let mut session = match start(backend) {
+        Ok(s) => s,
+        Err(code) => return code,
+    };
+    session.checker.base_dir = std::path::Path::new(name).parent().map(|d| d.to_path_buf());
+    let tested = match fixpt_fx26::spec_tests::test_program(&mut session, text, runs) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("fixpt test: {e}");
+            return 1;
+        }
+    };
+    let mut found = false;
+    for t in &tested {
+        if t.expression {
+            match (&t.counterexample, &t.failure) {
+                (Some(c), _) => {
+                    found = true;
+                    println!("{}: a counterexample: {c}", t.name);
+                }
+                (None, Some(f)) => println!("{}: {f}", t.name),
+                (None, None) => {}
+            }
+            continue;
+        }
+        let taken = t.runs - t.passed_over - t.unfinished;
+        let mut line = format!("{}: {} inputs, {taken} taken", t.name, t.runs);
+        if t.unfinished > 0 {
+            line += &format!(", {} not finished", t.unfinished);
+        }
+        match (&t.counterexample, &t.failure) {
+            (Some(c), _) => {
+                found = true;
+                line += &format!("; a counterexample: {c}");
+            }
+            (None, Some(f)) => line += &format!("; {f}"),
+            (None, None) => line += "; no counterexample",
+        }
+        println!("{line}");
+    }
+    if tested.is_empty() {
+        println!("; nothing to test: no procedure with a specification, nor a harness");
+    }
+    i32::from(found)
+}
+
 pub fn check(backend: Backend, name: &str, text: &str) -> i32 {
     let mut session = match start(backend) {
         Ok(s) => s,

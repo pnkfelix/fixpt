@@ -866,6 +866,7 @@ mod modorder;
 mod processes;
 pub mod parse;
 pub mod session;
+pub mod spec_tests;
 pub mod sexp;
 pub mod syn;
 mod terminate;

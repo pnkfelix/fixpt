@@ -148,6 +148,8 @@
          (("bool=?") "eq?")
          (("char<?") "%fx26-char<?")
          (("char>?") "%fx26-char>?")
+         (("assert") "%fx26-assert")
+         (("assume") "%fx26-assume")
          (("append") "append")
          (("%sched") "%fx26-sched")
          (else "")))

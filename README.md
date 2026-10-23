@@ -448,6 +448,11 @@ input, or program text:
   FX-26, and prints what they found. Where they disagree, it prints both.
 - `fixpt compile INPUT` runs both compilers and shows the code, register
   code included, and says whether the two made the same.
+- `fixpt test INPUT [RUNS]` runs the program with its specifications
+  checked as it runs, then calls each procedure it can on RUNS inputs (100)
+  drawn from its parameters' types, and prints the first counterexample
+  to a specification or an `assert` each one meets (`docs/fx26.md`,
+  "Specifications").
 
 The eager reader (see "The REPL" above) has been ported to FX-26
 (`crates/fixpt-fx26/src/eager-reader.fx`). It is checked, lowered and run
