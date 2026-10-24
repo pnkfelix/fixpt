@@ -2991,6 +2991,22 @@ kayak's check no longer waits for it once kayak passes that machine.
   code in line beside it, then a boolean made and tested (`cmov`, `cmp
   3`), about 15 instructions where a compare and a branch would do; and
   each operation's slow path in line, jumped over.
+- **Memory traffic, measured** (the user's question, 2026-10-24): per
+  stage 0 run, before and after the slots held, 40.1G and 38.25G loads,
+  18.7G stores either way, and 11.05G and 10.7G loads served by store
+  forwarding (Zen 2's `ls_stlf`). So a quarter of all loads still read a
+  slot just stored: in `first-fact`, the `car` stored to a slot and read
+  again two field chains later, each having used `rax`. Not REG4…REG8:
+  the hot procedures read REG4 once, at entry. Why the loads removed
+  bought little here: on this machine (a Threadripper 3990X, Zen 2) a
+  store and then a load through the same `rbp` offset costs no more than
+  a register move (memory renaming); through `rsp` one cycle more,
+  through another register three. On a processor without it (Zen 3,
+  most of Intel's) each would be a forward's few cycles, which this
+  machine can't show. `ls_stlf` is not sampled precisely, and IBS wants
+  `perf_event_paranoid` 0, so where they are is from the code, not a
+  profile. Keeping slots in registers beyond `RESULT` and REG1…REG3
+  wants scratch registers: all 16 are given out, 8 of them scratch.
 - **`fast` on x86_64**: right again for this program. Whether one decline
   still sinks a module (or any definition) whole is the question left:
   a member the compiler declines could be adapted alone.
