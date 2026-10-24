@@ -237,8 +237,16 @@ const _: () = assert!(MEM_WORDS < 1 << crate::value::SUFFIX_OWNER_BITS);
 /// 1M words up the times were about the same.
 const DEFAULT_NURSERY_WORDS: usize = 1 << 20;
 
-/// Collect when the active semispace is at least this full at a safepoint.
-const COLLECT_THRESHOLD: f64 = 0.75;
+/// Collect when the active semispace is at least this full at a safepoint:
+/// three quarters, as a fraction, so that the test needs no float.
+const COLLECT_THRESHOLD: (usize, usize) = (3, 4);
+
+/// Whether `words` reach `COLLECT_THRESHOLD` of `semi`: in integers, as
+/// every safepoint asks it (a native call-out's among them).
+#[inline(always)]
+fn past_threshold(words: usize, semi: usize) -> bool {
+    COLLECT_THRESHOLD.1 * words >= COLLECT_THRESHOLD.0 * semi
+}
 /// A semispace is kept at least this many times the data live after a
 /// collection.
 const LIVE_RATIO: usize = 3;
@@ -1850,9 +1858,9 @@ impl Heap {
         if self.inhibited > 0 {
             return false;
         }
-        let full = (self.top - self.active) as f64 >= self.semi as f64 * COLLECT_THRESHOLD
-            || self.regions.reap_taken as f64 >= self.semi as f64 * COLLECT_THRESHOLD
-            || self.code.taken as f64 >= self.semi as f64 * COLLECT_THRESHOLD;
+        let full = past_threshold(self.top - self.active, self.semi)
+            || past_threshold(self.regions.reap_taken, self.semi)
+            || past_threshold(self.code.taken, self.semi);
         self.safepoints += 1;
         let policy = self.gc_every > 0 && self.safepoints.is_multiple_of(self.gc_every);
         let nursery_full = self.generational && self.nursery_top - NURSERY_BASE >= self.nursery_words;
@@ -2168,7 +2176,7 @@ impl Heap {
         } else if self.generational {
             NURSERY_BASE + self.nursery_words
         } else {
-            self.active + (self.semi as f64 * COLLECT_THRESHOLD) as usize
+            self.active + COLLECT_THRESHOLD.0 * self.semi / COLLECT_THRESHOLD.1
         }
     }
 

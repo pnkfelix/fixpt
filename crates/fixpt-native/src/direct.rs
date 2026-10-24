@@ -4902,23 +4902,39 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
     let rt = unsafe { &mut *(st.rt as *mut fixpt_runtime::Runtime) };
     let c = unsafe { *(st.table as *const Callout).add(which as usize) };
     let n = if let Callout::Foreign | Callout::ClosureAny | Callout::Rest = c { st.nargs as usize } else { c.arity() };
-    // Past 8, the eighth is a list of the rest (Larceny's convention). The
-    // vector kept from the last call-out, not a new one each time: making
-    // and freeing it was a fifth of a run that calls out often (`mlton/
-    // peek`). A call-out within this one takes an empty one.
-    let mut args: Vec<Value> = CALLOUT_ARGS.take();
-    args.clear();
-    args.extend(st.args[..n.min(8)].iter().map(|a| Value::from_raw(*a)));
-    if n > 8 {
-        let mut rest = args.pop().expect("eight");
-        while args.len() < n {
-            args.push(rt.heap.car(rest));
+    // The arguments, and a foreign call's callee after them: on the stack
+    // for eight or fewer, no vector at all (`TODO.md` §126: 18M call-outs
+    // in kayak's stage 0). Past 8, the eighth is a list of the rest
+    // (Larceny's convention), into the vector kept from the last such
+    // call-out, not a new one each time: making and freeing it was a fifth
+    // of a run that calls out often (`mlton/peek`). A call-out within this
+    // one takes an empty one.
+    let mut buf = [Value::NULL; 9];
+    let mut spill: Vec<Value> = Vec::new();
+    let args: &mut [Value] = if n <= 8 {
+        for (b, a) in buf.iter_mut().zip(&st.args[..n]) {
+            *b = Value::from_raw(*a);
+        }
+        let mut k = n;
+        if let Callout::Foreign = c {
+            buf[k] = Value::from_raw(st.aux);
+            k += 1;
+        }
+        &mut buf[..k]
+    } else {
+        spill = CALLOUT_ARGS.take();
+        spill.clear();
+        spill.extend(st.args[..8].iter().map(|a| Value::from_raw(*a)));
+        let mut rest = spill.pop().expect("eight");
+        while spill.len() < n {
+            spill.push(rt.heap.car(rest));
             rest = rt.heap.cdr(rest);
         }
-    }
-    if let Callout::Foreign = c {
-        args.push(Value::from_raw(st.aux));
-    }
+        if let Callout::Foreign = c {
+            spill.push(Value::from_raw(st.aux));
+        }
+        &mut spill[..]
+    };
     let mut code = [Value::from_raw(st.code)];
     // The frames walked only for a collection; none for a primitive that
     // never collects, whose caller's values are in registers.
@@ -4929,7 +4945,7 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
     if !quiet && rt.heap.collection_due() {
         flush_all(&mut rt.heap, st);
         let mut cont = [Value::from_raw(st.cont)];
-        rt.heap.collect_due(&mut [&mut args, &mut code, &mut cont]);
+        rt.heap.collect_due(&mut [&mut *args, &mut code, &mut cont]);
         st.cont = cont[0].raw();
         match restore(&rt.heap, st, cont_pos(st), st.cont_words) {
             Ok((lo, _)) => (st.fp, st.native_sp) = (lo + R_LINK, lo),
@@ -4953,7 +4969,7 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
         }
         Callout::Unbox => fixpt_runtime::low_64_bits(rt, args[0]),
         Callout::BoxF64 => rt.heap.make_flonum(f64::from_bits(args[0].raw())).raw(),
-        Callout::Closure { .. } | Callout::ClosureAny => native_closure(&mut rt.heap, Value::from_raw(st.aux), &args).raw(),
+        Callout::Closure { .. } | Callout::ClosureAny => native_closure(&mut rt.heap, Value::from_raw(st.aux), args).raw(),
         Callout::RegionClosure { n } => {
             let h = if args[0].is_fixnum() { args[0].as_fixnum() as usize } else { usize::MAX };
             let (free, code) = (&args[1..n - 1], args[n - 1]);
@@ -5052,7 +5068,7 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
             }
         }
         Callout::Reinstate => reinstate(rt, st, args[1], args[0]),
-        Callout::Rest => rt.heap.list_from(&args).raw(),
+        Callout::Rest => rt.heap.list_from(args).raw(),
         Callout::FirstMark => all_marks(rt, st, args[0]).first().copied().unwrap_or(args[1]).raw(),
         Callout::CurrentMarks => {
             let marks = all_marks(rt, st, args[0]);
@@ -5065,7 +5081,7 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
         Callout::Prim { p, .. } | Callout::Pure { p, .. } => {
             let def = &fixpt_runtime::PRIMITIVES[p];
             let fixpt_runtime::PrimKind::Simple(f) = def.kind else { unreachable!("checked when compiled") };
-            match f(rt, &mut args) {
+            match f(rt, args) {
                 Ok(v) => v.raw(),
                 Err(t) => {
                     let m = fixpt_engine::cellular::describe(rt, t.obj);
@@ -5081,7 +5097,9 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
     st.words = rt.heap.words_address() as u64;
     st.alloc_limit = rt.heap.inline_limit() as u64;
     st.regions = Value::fixnum(rt.heap.live_regions() as i64).raw();
-    CALLOUT_ARGS.set(args);
+    if n > 8 {
+        CALLOUT_ARGS.set(spill);
+    }
     out
 }
 
