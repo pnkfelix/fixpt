@@ -2111,8 +2111,12 @@ impl NativeMachine {
             // are the arguments, data, though they may be words.
             let fields = heap.bloblet_head(w).fields;
             if w == word && heap.symbol_name(heap.bloblet_slot(w, WORD_NAME)) == fixpt_runtime::prim::CALL_CLOSURE {
-                // `… lit closure call n exit`
-                todo.push(heap.bloblet_slot(heap.bloblet_slot(w, fields - 3), CLOSURE_WORD));
+                // `… lit closure call n exit`; a native closure's code is
+                // made already (the front end's, `TODO.md` §126).
+                let c = heap.bloblet_slot(w, fields - 3);
+                if heap.bloblet_kind(c) == closure {
+                    todo.push(heap.bloblet_slot(c, CLOSURE_WORD));
+                }
                 continue;
             }
             for k in WORD_CELL0..=fields {

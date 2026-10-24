@@ -159,7 +159,8 @@ fn run_word_by(rt: &mut Runtime, a: &[Value], run: Option<crate::RunWord>) -> Ou
     // `lit a1 … lit an lit closure call n exit`. A word's frame starts
     // above what it is run on, so the arguments are the word's to push.
     // Allocation does not collect here.
-    let (word, args) = if a[0].is_bloblet() && rt.heap.bloblet_kind(a[0]) == const { fixpt_heap::layout::kind("cellular-closure") } {
+    let closure = [const { fixpt_heap::layout::kind("cellular-closure") }, const { fixpt_heap::layout::kind("native-closure") }];
+    let (word, args) = if a[0].is_bloblet() && closure.contains(&rt.heap.bloblet_kind(a[0])) {
         use fixpt_heap::layout::cellular::routine;
         let f = |n: u64| Value::fixnum(n as i64);
         let mut cells = Vec::with_capacity(2 * args.len() + 5);

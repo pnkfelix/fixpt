@@ -1740,3 +1740,28 @@ time, the bloblet's header read for each.
   first that does not refused, the same errors in the same order.
 - Fixed cost 20.6G cycles to 18.1G; stage 0 29.5G to 27.1G (68.4G
   instructions to 60.8G); output the same.
+
+## The front end in the native convention (2026-10-24)
+
+The user: "Native front end sounds good" (`TODO.md` §126: the front
+end's register words were 37% of loading kayak's compiler).
+- **Where**: only on a native-convention machine whose native code the
+  compiler written in Rust makes (`front_end_native`, set by the CLI
+  with `compile_when_adapting`). Where FX-26's own compiler makes each
+  procedure's code, the front end is that compiler, so it stays
+  register code; sessions made otherwise (the tests) keep it so too.
+- **How**: the front end checked in the native convention, so the
+  closures it makes as it runs are native procedures, compiled as they
+  are made (`adapt`); its entry points are native closures, which
+  `%run-front-end` calls by the same word it makes for a cellular one,
+  and whose code `compile_reachable_as` no longer follows as a word.
+- **Its cache apart**: the native one keyed by the convention too, so
+  both may be kept for one executable.
+- **Not kept: its native code.** Compiling it is now part of every run
+  (about 2.9G cycles of the tiny program's, some 5,000 procedures),
+  which eats most of what running it natively saves (about 4.2G on
+  kayak's compiler, measured with both built fresh). Loading kayak's
+  compiler: 17.9G cycles to 17.05G; stage 0 27.0G to 26.35G. Keeping
+  the native code between runs would save the rest: images carry no
+  code area yet, and code numbers its call-outs into its machine's
+  table, which would have to be kept with it.

@@ -39,6 +39,10 @@ pub struct Fx26Session {
     /// code (`front_end_as_register_code`), made so when first loaded; the
     /// runtime's `front_end_run_word` must be a machine for register code.
     pub front_end_compiled: bool,
+    /// Whether that register code is the native convention's
+    /// (`front_end_as_register_code`): checked so, its closures made native
+    /// as they are made, by the runtime's `adapt`, which must compile them.
+    pub front_end_native: bool,
     /// Whether the program's convention is native (a `nativecc` machine;
     /// set by [`set_native_convention`](Fx26Session::set_native_convention)).
     native_convention: bool,
@@ -284,7 +288,7 @@ fn lowered_failure(m: String) -> String {
 /// of the front end's text and of the executable's size and time, so that a
 /// rebuilt compiler never reads what an older one made, but replaces it.
 /// `FIXPT_NO_CACHE` turns it off.
-fn front_end_cache(text: &str) -> Option<(std::path::PathBuf, u64)> {
+fn front_end_cache(text: &str, native: bool) -> Option<(std::path::PathBuf, u64)> {
     use std::hash::{Hash, Hasher};
     if std::env::var_os("FIXPT_NO_CACHE").is_some() {
         return None;
@@ -292,7 +296,7 @@ fn front_end_cache(text: &str) -> Option<(std::path::PathBuf, u64)> {
     let exe = std::env::current_exe().ok()?;
     let meta = std::fs::metadata(&exe).ok()?;
     let mut name = std::collections::hash_map::DefaultHasher::new();
-    exe.hash(&mut name);
+    (exe, native).hash(&mut name);
     let mut key = std::collections::hash_map::DefaultHasher::new();
     (text, meta.len(), meta.modified().ok()).hash(&mut key);
     let home = std::env::var_os("HOME")?;
@@ -448,6 +452,7 @@ impl Fx26Session {
             strategy: Strategy::Lower,
             register_code: false,
             front_end_compiled: false,
+            front_end_native: false,
             native_convention: false,
             native_runner: None,
             native_compiler: None,
@@ -1135,6 +1140,9 @@ impl Fx26Session {
     /// calls then calls its entry point by `%run-front-end` (the runtime's
     /// `front_end_run_word`, which the caller installs: a machine that
     /// runs register code). The reader stays lowered, and loaded as ever.
+    /// Where `front_end_native`, checked in the native convention, so that
+    /// the closures it makes are native procedures, compiled as they are
+    /// made (`TODO.md` §126).
     fn front_end_as_register_code(&mut self) -> R<()> {
         // Checked and compiled once for this executable and this front end,
         // then kept (`front_end_cache`); read back from there after.
@@ -1170,14 +1178,17 @@ impl Fx26Session {
     ) -> Result<(), String> {
         let fields: Vec<String> = entries.iter().enumerate().map(|(i, n)| format!("({} {n})", i + 1)).collect();
         let text = format!("{text}\n(product {})\n", fields.join(" "));
-        let cache = if keep { front_end_cache(&text) } else { None };
+        // The front end in the native convention where its closures are
+        // made native code, kept apart from the cellular one.
+        let as_native = keep && self.front_end_native;
+        let cache = if keep { front_end_cache(&text, as_native) } else { None };
         let cached = cache.as_ref().and_then(|(p, key)| {
             let b = std::fs::read(p).ok()?;
             (b.get(..8)? == key.to_le_bytes()).then(|| fixpt_heap::image::load(&b[8..]).ok())?
         });
         let mut checked = None;
         if cached.is_none() {
-            let mut c = Checker::new();
+            let mut c = if as_native { Checker::with_convention(crate::ast::Conv::Native) } else { Checker::new() };
             let forms = c.read_in(FileId(0), &text).map_err(|e| read_error(e).message)?;
             let done = c.declare_ahead(&forms).map_err(|e| read_error(e).message)?;
             let mut tops = Vec::new();

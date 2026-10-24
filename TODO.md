@@ -3144,5 +3144,16 @@ alike to 0.1%. Take the runs after it.
   and `demands` some six times: since done once and three times);
   call-outs 6%; hashing 5%; the Rust
   checker 5%. The front end as native code, not register code, is the
-  largest lead; its tables in line, a smaller one. Who mallocs is not
+  largest lead; its tables in line, a smaller one.
+- ~~**The front end native**~~ (the user's, 2026-10-24): checked in the
+  native convention where Rust compiles native code
+  (CLAUDES_CHOICES.md, "The front end in the native convention"), and
+  `reps_of`'s successors found once: loading 17.9G cycles to 16.8G,
+  stage 0 27.0G to 26.1G (pinned, a busier machine than the figures
+  above). Compiling the front end natively is now in every run, about
+  2.9G cycles. **Next**: keep its native code in the cache (the image
+  given the code area; the call-outs' table kept with the code, or the
+  code's call-out numbers made the machine's own on loading), worth
+  about 3G more; or the native compiler faster (some 580K cycles a
+  procedure), which serves kayak's compile too. Who mallocs is not
   seen (glibc has no frame pointers): a DWARF call graph would say.

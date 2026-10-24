@@ -113,6 +113,10 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
         // (`TODO.md` §121).
         let by_fx26 = crate::NATIVE_BY_FX26.get().copied().unwrap_or(false);
         fixpt_native::direct::compile_when_adapting(!by_fx26);
+        // The front end native too, where the compiler written in Rust
+        // makes its code: about 3% of loading kayak's compiler (`TODO.md`
+        // §126); not where its own compiler makes each procedure's.
+        s.front_end_native = !by_fx26;
         // Each procedure's code made by the compiler written in FX-26.
         if by_fx26 {
             s.native_fx = Some(compile_by_fx26);
