@@ -392,19 +392,7 @@ pub(super) fn int_routine(n: usize) -> bool {
 
 pub(super) fn reps_of(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str, fast: bool, raw: &[bool], raw_refs: &[bool], own: u8, callees: &[u8]) -> (Vec<Reps>, Vec<Reps>) {
     let ns = starts.len();
-    let at: std::collections::HashMap<usize, usize> = starts.iter().enumerate().map(|(si, &i)| (i, si)).collect();
-    let succ = |si: usize| -> Vec<usize> {
-        let i = starts[si];
-        let (op, n, _) = OPS[cells[i].as_fixnum() as usize];
-        let to = || at.get(&((i as i64 + 1 + n as i64 + cells[i + n].as_fixnum()) as usize)).copied();
-        let next = (si + 1 < ns).then_some(si + 1);
-        match op {
-            "return" | "tailinvoke" => vec![],
-            "branch" => to().into_iter().collect(),
-            "branchf" | "brancht" | "global-guard" => next.into_iter().chain(to()).collect(),
-            _ => next.into_iter().collect(),
-        }
-    };
+    let succ = successors(cells, starts);
     let mut ins: Vec<Option<Reps>> = vec![None; ns];
     let mut outs = vec![[Rep::Undefined; 9]; ns];
     if ns > 0 {
@@ -418,7 +406,7 @@ pub(super) fn reps_of(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) ->
             let o = |j: usize| cells[i + 1 + j];
             step(OPS[cells[i].as_fixnum() as usize].0, &o, prim, raw_refs[si], fast, raw, Calls { own, callee: callees[si] }, &mut reps);
             outs[si] = reps;
-            for t in succ(si) {
+            for &t in &succ[si] {
                 let new = match &ins[t] {
                     Some(old) => join(old, &reps),
                     None => reps,
@@ -439,12 +427,16 @@ pub(super) fn reps_of(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) ->
 /// Successors of each instruction, by index into `starts`.
 fn successors(cells: &[Value], starts: &[usize]) -> Vec<Vec<usize>> {
     let ns = starts.len();
-    let at: std::collections::HashMap<usize, usize> = starts.iter().enumerate().map(|(si, &i)| (i, si)).collect();
+    // Each instruction's index, by the cell it starts at.
+    let mut at = vec![usize::MAX; cells.len() + 1];
+    for (si, &i) in starts.iter().enumerate() {
+        at[i] = si;
+    }
     (0..ns)
         .map(|si| {
             let i = starts[si];
             let (op, n, _) = OPS[cells[i].as_fixnum() as usize];
-            let to = || at.get(&((i as i64 + 1 + n as i64 + cells[i + n].as_fixnum()) as usize)).copied();
+            let to = || at.get((i as i64 + 1 + n as i64 + cells[i + n].as_fixnum()) as usize).copied().filter(|&t| t != usize::MAX);
             let next = (si + 1 < ns).then_some(si + 1);
             match op {
                 "return" | "tailinvoke" => vec![],
