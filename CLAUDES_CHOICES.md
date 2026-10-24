@@ -1556,3 +1556,30 @@ The user: "let's attack requires and ensures next" (the design note's
    little of a call. It holds for …; but for all the proof knows, (f …)
    could be #f, where it is #t.`
 
+## Logic functions in specifications, first step (S4, 2026-10-23)
+
+1. **Admissible: a global, `pure`, of a `bool`, `int` or `nat` result.**
+   `pure` gives ending and dependence on the arguments alone (no region
+   read), so congruence holds; a result of no identity of its own
+   (`eq?`), so equal calls are equal values. A recursive one is written
+   as a local `letrec` over unwritten lists, which the checkers already
+   show ends; recursion through the global says `spin`, and is refused.
+2. **`Named::Call(Sym, Rc<Vec<Expr<Named>>>)`**, so `Named` is `Clone`,
+   no longer `Copy`; in FX-26, `(sx-call symbol k-sxs)`. A call is an
+   atom of the logic, compared structurally, in both checkers' provers.
+3. **Arguments' types not checked as read**, in either checker, as the
+   one written in FX-26 reads specifications before it has subtyping:
+   sound, as a call is uninterpreted; a mistake shows when `fixpt test`
+   checks the instrumented program.
+4. **A call in the cells of a logic function gets the call's term**
+   (`Term::Call`), not a fresh one: that is what links `(assert (sorted?
+   (insert e xs)))` to `insert`'s `ensures`.
+5. **Runtime checks bind the functions they call**: `fixpt test`'s
+   instrumented body is `(let ((sorted? sorted?)) (letrec ((insert T
+   (lambda …))) insert))`, so the check reads no global the procedure's
+   effect does not say; its body's value is `(the RESULT …)`, so that
+   branches still join at the declared type.
+6. **z3: uninterpreted functions over `Int`**, a non-integer value a
+   constant all the same; its values are passed to a replay only for an
+   integer or boolean parameter.
+

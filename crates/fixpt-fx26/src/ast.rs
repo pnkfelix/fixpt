@@ -498,7 +498,10 @@ pub enum Ty {
 /// integer, and what a test certifies of its parameters, each a boolean
 /// the prover knows nothing of but itself: of a shape (`check::SHAPES`'s
 /// number), acyclic, a natural, a list of another's length (`Prop`'s).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// And a call of a *logic function* (`docs/research/specs-and-counterexamples.md`,
+/// §5): a global, `pure`, of an `int`, `nat` or `bool` result, applied to
+/// arguments named or integers, its value at them (`specs::spec_call`).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Named {
     Param(usize),
     Result,
@@ -507,19 +510,21 @@ pub enum Named {
     Acyclic(usize),
     Nat(usize),
     LengthIs(usize, usize),
+    Call(Sym, std::rc::Rc<Vec<crate::logic::Expr<Named>>>),
 }
 
 impl Named {
     /// Each parameter's number as `f` renumbers it.
-    pub fn renumbered(self, f: impl Fn(usize) -> usize) -> Named {
+    pub fn renumbered(&self, f: &impl Fn(usize) -> usize) -> Named {
         match self {
-            Named::Param(i) => Named::Param(f(i)),
+            Named::Param(i) => Named::Param(f(*i)),
             Named::Result => Named::Result,
-            Named::Length(i) => Named::Length(f(i)),
-            Named::Shape(i, k) => Named::Shape(f(i), k),
-            Named::Acyclic(i) => Named::Acyclic(f(i)),
-            Named::Nat(i) => Named::Nat(f(i)),
-            Named::LengthIs(i, j) => Named::LengthIs(f(i), f(j)),
+            Named::Length(i) => Named::Length(f(*i)),
+            Named::Shape(i, k) => Named::Shape(f(*i), *k),
+            Named::Acyclic(i) => Named::Acyclic(f(*i)),
+            Named::Nat(i) => Named::Nat(f(*i)),
+            Named::LengthIs(i, j) => Named::LengthIs(f(*i), f(*j)),
+            Named::Call(g, args) => Named::Call(*g, std::rc::Rc::new(args.iter().map(|a| a.subst(&|n: &Named| crate::logic::Expr::Atom(n.renumbered(f)))).collect())),
         }
     }
 }

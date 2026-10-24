@@ -183,15 +183,24 @@ impl Checker {
     pub fn show_spec(&self, spec: &crate::ast::Spec) -> String {
         use crate::ast::Named;
         let param = |i: usize| spec.params.get(i).copied().flatten().map_or(format!("${i}"), |s| self.interner.name(s).to_string());
-        let name = |n: &Named| match *n {
+        fn name(u: &Checker, spec: &crate::ast::Spec, n: &Named) -> String {
+            let param = |i: usize| spec.params.get(i).copied().flatten().map_or(format!("${i}"), |s| u.interner.name(s).to_string());
+            match *n {
             Named::Param(i) => param(i),
-            Named::Result => spec.result.map_or("result".to_string(), |s| self.interner.name(s).to_string()),
+            Named::Result => spec.result.map_or("result".to_string(), |s| u.interner.name(s).to_string()),
             Named::Length(i) => format!("(length {})", param(i)),
             Named::Shape(i, k) => format!("(shape {} {})", param(i), crate::check::SHAPES[k].0),
             Named::Acyclic(i) => format!("(acyclic {})", param(i)),
             Named::Nat(i) => format!("(nat {})", param(i)),
             Named::LengthIs(i, j) => format!("(length-is {} {})", param(i), param(j)),
-        };
+            Named::Call(g, ref xs) => {
+                let xs: String = xs.iter().map(|x| format!(" {}", crate::logic::show_expr(x, &|n: &Named| name(u, spec, n)))).collect();
+                format!("({}{xs})", u.interner.name(g))
+            }
+            }
+        }
+        let _ = param;
+        let name = |n: &Named| name(self, spec, n);
         let mut out = String::new();
         if !spec.requires.trivial() {
             out += &format!(" (requires {})", crate::logic::show(&spec.requires, &name));

@@ -29,6 +29,9 @@ pub enum Term {
     Lit(Value),
     Made(u32),
     App(&'static str, Vec<Term>),
+    /// A logic function's value at its arguments (`ast::Named::Call`): a
+    /// call of it in the cells, or in a specification, by its name.
+    Call(std::rc::Rc<str>, Vec<Term>),
 }
 
 /// An integer relation.
@@ -285,7 +288,7 @@ fn constant(t: &Term) -> Option<i128> {
 
 /// `t` as an integer of the logic: arithmetic taken apart, any other term
 /// an atom.
-fn expr_of(t: &Term) -> Expr<Term> {
+pub(crate) fn expr_of(t: &Term) -> Expr<Term> {
     match t {
         Term::Lit(k) if k.is_fixnum() => Expr::Lit(k.as_fixnum()),
         Term::App(f @ ("+" | "-" | "*"), xs) if xs.len() == 2 => {
@@ -315,10 +318,11 @@ fn prop_of(t: &Term) -> Formula<Term> {
 
 /// A specification's proposition, of a word or a call: each parameter the
 /// term given for it, and the result `r`.
-fn instance(f: &Formula<crate::ast::Named>, args: &[Term], r: Option<&Term>) -> Formula<Term> {
+fn instance(c: &Checker, f: &Formula<crate::ast::Named>, args: &[Term], r: Option<&Term>) -> Formula<Term> {
     use crate::ast::Named;
     let arg = |i: usize| args.get(i).cloned().unwrap_or(Term::App("unnamed", Vec::new()));
-    let term = |n: &Named| {
+    fn term(c: &Checker, n: &Named, args: &[Term], r: Option<&Term>) -> Term {
+        let arg = |i: usize| args.get(i).cloned().unwrap_or(Term::App("unnamed", Vec::new()));
         let t = match n {
             Named::Param(i) => args.get(*i),
             Named::Result => r,
@@ -329,10 +333,30 @@ fn instance(f: &Formula<crate::ast::Named>, args: &[Term], r: Option<&Term>) -> 
             Named::Acyclic(i) => return Term::App("acyclic", vec![arg(*i)]),
             Named::Nat(i) => return Term::App("nat", vec![arg(*i)]),
             Named::LengthIs(i, j) => return Term::App("length-is", vec![arg(*i), arg(*j)]),
+            // A logic function's call: its arguments' terms (an integer's,
+            // arithmetic of the logic).
+            Named::Call(g, xs) => {
+                let xs = xs.iter().map(|x| term_of(&x.subst(&|n: &Named| Expr::Atom(term(c, n, args, r))))).collect();
+                return Term::Call(c.name(*g).into(), xs);
+            }
         };
         t.cloned().unwrap_or(Term::App("unnamed", Vec::new()))
-    };
-    f.subst(&|n| expr_of(&term(n)), &|n| prop_of(&term(n)))
+    }
+    let _ = arg;
+    f.subst(&|n| expr_of(&term(c, n, args, r)), &|n| prop_of(&term(c, n, args, r)))
+}
+
+/// An integer of the logic as a term: arithmetic as `expr_of` takes it
+/// apart.
+fn term_of(e: &Expr<Term>) -> Term {
+    let app = |f: &'static str, x: &Expr<Term>, y: &Expr<Term>| Term::App(f, vec![term_of(x), term_of(y)]);
+    match e {
+        Expr::Atom(t) => t.clone(),
+        Expr::Lit(k) => Term::Lit(Value::fixnum(*k)),
+        Expr::Add(x, y) => app("+", x, y),
+        Expr::Sub(x, y) => app("-", x, y),
+        Expr::Mul(x, y) => app("*", x, y),
+    }
 }
 
 /// A size as an integer of the logic, each size variable an atom
@@ -353,6 +377,7 @@ pub fn show_term(t: &Term) -> String {
         Term::Lit(v) => format!("{v:?}"),
         Term::Made(k) => format!("v{k}"),
         Term::App(f, xs) => format!("({f}{})", xs.iter().map(|x| format!(" {}", show_term(x))).collect::<String>()),
+        Term::Call(f, xs) => format!("({f}{})", xs.iter().map(|x| format!(" {}", show_term(x))).collect::<String>()),
     }
 }
 
@@ -672,7 +697,7 @@ impl Verifier<'_> {
         let mut entry = entry;
         let slots: Vec<Term> = (0..slot_types.len()).map(Term::Slot).collect();
         if let Some(spec) = &cert.spec {
-            entry.props.push(instance(&spec.requires, &slots, None));
+            entry.props.push(instance(self.c, &spec.requires, &slots, None));
         }
         for v in entry.stack.clone() {
             self.note_nat(&v);
@@ -2001,20 +2026,31 @@ impl Verifier<'_> {
                 }
                 self.effect = self.effect.union(&effect);
                 let terms: Vec<Term> = args.iter().map(|a| a.term.clone()).collect();
-                let made = self.fresh();
+                // A global's call, by its name (its cell's). Of a logic
+                // function (`pure`, of an `int`, `nat` or `bool`: what a
+                // specification may call, `specs::spec_call`), its value is
+                // the term a specification names it by, so that what is
+                // known of one is known of the other.
+                let global = match &f.term {
+                    Term::App("global", g) => match &g[..] {
+                        [Term::Lit(g)] => Some(self.heap.bloblet_slot(*g, GLOBAL_NAME)).filter(|n| self.heap.is_a(*n, ObjType::Symbol)).map(|n| self.heap.symbol_name(n).to_string()),
+                        _ => None,
+                    },
+                    _ => None,
+                };
+                let logical = effect.is_pure() && (self.c.is_bool(result) || self.c.is_int(result));
+                let made = match &global {
+                    Some(g) if logical => Term::Call(g.as_str().into(), terms.clone()),
+                    _ => self.fresh(),
+                };
                 let mut after = s.clone();
-                // A global's call, by its name (its cell's).
-                if let Term::App("global", g) = &f.term
-                    && let [Term::Lit(g)] = &g[..]
-                    && let named = self.heap.bloblet_slot(*g, GLOBAL_NAME)
-                    && self.heap.is_a(named, ObjType::Symbol)
-                {
-                    self.out.calls.push((made.clone(), self.heap.symbol_name(named).to_string(), terms.clone()));
+                if let Some(g) = &global {
+                    self.out.calls.push((made.clone(), g.clone(), terms.clone()));
                 }
                 if let Some(spec) = &spec {
-                    self.prove(s, &instance(&spec.requires, &terms, None), &format!("{at}: the callee's requires"));
+                    self.prove(s, &instance(self.c, &spec.requires, &terms, None), &format!("{at}: the callee's requires"));
                     if returns_once(&effect) {
-                        after.props.push(instance(&spec.ensures, &terms, Some(&made)));
+                        after.props.push(instance(self.c, &spec.ensures, &terms, Some(&made)));
                     }
                     self.latent(&made, spec, &args);
                 }
@@ -2028,7 +2064,7 @@ impl Verifier<'_> {
                     // call must entail the word's `ensures`.
                     if let Some(own) = &cert.spec {
                         let slots: Vec<Term> = (0..entry.stack.len()).map(Term::Slot).collect();
-                        self.prove(&after, &instance(&own.ensures, &slots, Some(&made)), &format!("{at}: the ensures, by a tail call"));
+                        self.prove(&after, &instance(self.c, &own.ensures, &slots, Some(&made)), &format!("{at}: the ensures, by a tail call"));
                     }
                     return Ok(None);
                 }
@@ -2044,7 +2080,7 @@ impl Verifier<'_> {
                 }
                 if let Some(spec) = &cert.spec {
                     let slots: Vec<Term> = (0..entry.stack.len()).map(Term::Slot).collect();
-                    self.prove(s, &instance(&spec.ensures, &slots, Some(&r.term)), &format!("{at}: the ensures"));
+                    self.prove(s, &instance(self.c, &spec.ensures, &slots, Some(&r.term)), &format!("{at}: the ensures"));
                 }
                 return Ok(None);
             }
@@ -2124,12 +2160,12 @@ impl Verifier<'_> {
                     // the word's, of any result (Hoare's loop rule).
                     if let Some(spec) = &cert.spec {
                         let args: Vec<Term> = taken.stack.iter().map(|v| v.term.clone()).collect();
-                        self.prove(&taken, &instance(&spec.requires, &args, None), &format!("{at}: the loop's requires"));
+                        self.prove(&taken, &instance(self.c, &spec.requires, &args, None), &format!("{at}: the loop's requires"));
                         let r = self.fresh();
                         let mut after = taken.clone();
-                        after.props.push(instance(&spec.ensures, &args, Some(&r)));
+                        after.props.push(instance(self.c, &spec.ensures, &args, Some(&r)));
                         let slots: Vec<Term> = (0..entry.stack.len()).map(Term::Slot).collect();
-                        self.prove(&after, &instance(&spec.ensures, &slots, Some(&r)), &format!("{at}: the loop's ensures"));
+                        self.prove(&after, &instance(self.c, &spec.ensures, &slots, Some(&r)), &format!("{at}: the loop's ensures"));
                     }
                 } else {
                     waiting.entry(to).or_default().push(taken);
@@ -2365,9 +2401,9 @@ impl Verifier<'_> {
                 // branch on it learns.
                 if let Some(spec) = self.op_spec(&op) {
                     // Its `requires` owed here (`assert`'s), then its `ensures`.
-                    self.prove(s, &instance(&spec.requires, &terms, None), &format!("{at}: `{op}`'s requires"));
+                    self.prove(s, &instance(self.c, &spec.requires, &terms, None), &format!("{at}: `{op}`'s requires"));
                     if returns_once(&effect) {
-                        s.props.push(instance(&spec.ensures, &terms, Some(&made)));
+                        s.props.push(instance(self.c, &spec.ensures, &terms, Some(&made)));
                     }
                     self.latent(&made, &spec, &vals);
                 }

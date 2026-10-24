@@ -116,6 +116,8 @@
              (cond ((null? found) (k-sname-missing s))
                    ((k-spec-int? (extract (car found) 3)) (extract (car found) 2))
                    (else (k-sfail (k-cat3 "`" (syn-name s) "` is not an `int`") s)))))
+          ((k-spec-calls? (k-spec-items s k-sexpr-usage))
+           (k-spec-call s (k-spec-items s k-sexpr-usage) names #f))
           (else
            (let* ((items (k-spec-items s k-sexpr-usage)) (hd (k-spec-head items))
                   (args (k-spec-exprs (if (null? items) nil (cdr items)) names))
@@ -175,7 +177,63 @@
                       (let* ((p (k-spec-prop (car args) names))
                              (q (k-spec-prop (k-nth args 1) names)))
                         (sf-implies p q))))
+                   ((k-spec-callee? items) (sf-holds (k-spec-call s items names #t)))
                    (else (k-sfail k-sprop-usage s))))))))
+;; Of an integer's `(f a …)`, whether it is a call: `f` no arithmetic.
+(define k-spec-calls? (->* (k-syns) bool)
+  (lambda (items)
+    (let ((hd (k-spec-head items)))
+      (and (not (string=? hd "+")) (not (string=? hd "-")) (not (string=? hd "*"))
+           (k-spec-callee? items)))))
+;; Of `(f a …)`, whether `f`'s innermost binding is a global's (a top-level
+;; definition's) (`Checker::spec_callee`).
+(define k-spec-callee? (->* (k-syns) bool)
+  (lambda (items)
+    (and (not (null? items)) (syn-symbol? (car items)) (not (k-syn-literal-symbol? (car items)))
+         (>= (k-lookup-raw (syn-head (car items))) 0) (k-global? (syn-head (car items))))))
+;; `(f a …)`, a logic function's value at its arguments (`Checker::spec_call`):
+;; `f` a global procedure, `pure`, of a `bool` result (`want-bool`) or an
+;; `int`'s or `nat`'s; each argument an integer, where `f` takes one, or else
+;; a parameter or the result, named.
+(define k-spec-call (->* (syn k-syns k-snames bool) k-sx)
+  (lambda (s items names want-bool)
+    (let* ((f (syn-head (car items))) (fname (symbol->string f)) (args (cdr items)))
+      (tagcase (k-get (k-resolve (k-lookup-raw f)))
+        (ty-subr (e ps r cv sp)
+          (begin
+            (k-shape (null? e)
+                     (k-cat3 "`" fname "` is called in a specification, so must be `pure`") s)
+            (if want-bool
+                (k-shape (k-spec-bool? r)
+                         (k-cat3 "`" fname "` gives no `bool`, so is no proposition") s)
+                (k-shape (k-spec-int? r)
+                         (k-cat3 "`" fname "` gives no `int` or `nat`, so is no integer") s))
+            (k-shape (= (k-length ps) (k-length args))
+                     (k-cat5 "`" fname "` takes " (int->string (k-length ps))
+                             (string-append " arguments, not " (int->string (k-length args))))
+                     s)
+            (sx-call f (k-spec-args args ps names fname))))
+        (else y
+          (k-sfail (k-cat3 "`" fname "` is called in a specification, and is no procedure") s))))))
+(define k-spec-args (->* (k-syns k-ids k-snames string) k-sxs)
+  (lambda (xs ps names fname)
+    (if (null? xs)
+        nil
+        (let* ((x (k-spec-arg (car xs) (car ps) names fname))
+               (rest (k-spec-args (cdr xs) (cdr ps) names fname)))
+          (cons x rest)))))
+(define k-spec-arg (->* (syn int k-snames string) k-sx)
+  (lambda (a p names fname)
+    (if (k-spec-int? p)
+        (k-spec-expr a names)
+        (let ((found (if (and (syn-symbol? a) (not (k-syn-literal-symbol? a)))
+                         (k-sname-find names (syn-head a))
+                         nil)))
+          (if (null? found)
+              (k-sfail (k-cat3 "an argument of `" fname
+                               "` in a specification: a parameter or the result, named")
+                       a)
+              (extract (car found) 2))))))
 (define k-spec-props (->* (k-syns k-snames) k-sfs)
   (lambda (ps names)
     (if (null? ps)

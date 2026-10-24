@@ -166,14 +166,33 @@ fn instrumented(session: &Fx26Session, text: &str) -> Result<(String, Vec<(Strin
             continue;
         }
         let (first, last) = (body[0].span.start as usize, body[body.len() - 1].span.end as usize);
-        let checks = |which: &str, f: &Formula<Named>| format!("(if {} #u (error \"the {which} of {name} does not hold\"))", source(f, &ps));
+        let checks = |which: &str, f: &Formula<Named>| format!("(if {} #u (error \"the {which} of {name} does not hold\"))", source(&c, f, &ps));
+        // The body's value at the result's type, as the type had it there.
+        let result = match c.arena.get(c.arena.resolve(c.global_type(n).expect("typed"))) {
+            crate::ast::Ty::Subr { result, .. } => c.show_ty(*result),
+            _ => continue,
+        };
         let wrapped = format!(
-            "(begin {} (let ((%r (begin {}))) (begin {} %r)))",
+            "(begin {} (let ((%r (the {result} (begin {})))) (begin {} %r)))",
             checks("requires", &spec.requires),
             &text[first..last],
             checks("ensures", &spec.ensures)
         );
         edits.push((first, last, wrapped));
+        // The logic functions the specification calls, bound around the
+        // `lambda`, so that checking it reads no global the procedure's
+        // effect does not say; the procedure itself a local `letrec`'s
+        // inside, so that it still calls itself (a `define` of no `lambda`
+        // binds its name only once made).
+        let mut called = Vec::new();
+        calls_in(&spec.requires, &mut called);
+        calls_in(&spec.ensures, &mut called);
+        if let (false, [_, _, ty, _]) = (called.is_empty(), &items[..]) {
+            let bound: String = called.iter().map(|g| format!("({0} {0})", c.interner.name(*g))).collect::<Vec<_>>().join(" ");
+            let ty = &text[ty.span.start as usize..ty.span.end as usize];
+            edits.push((lambda.span.start as usize, lambda.span.start as usize, format!("(let ({bound}) (letrec (({name} {ty} ")));
+            edits.push((lambda.span.end as usize, lambda.span.end as usize, format!(")) {name}))")));
+        }
         let end = f.span.end as usize;
         let plain = format!("\n({head} {PLAIN}{name}{}", &text[items[1].span.end as usize..end]);
         edits.push((end, end, plain));
@@ -184,6 +203,44 @@ fn instrumented(session: &Fx26Session, text: &str) -> Result<(String, Vec<(Strin
         out.replace_range(a..b, &r);
     }
     Ok((out, names))
+}
+
+/// The logic functions `f` calls (`Named::Call`), each once, onto `out`.
+fn calls_in(f: &Formula<Named>, out: &mut Vec<fixpt_read::Sym>) {
+    fn named(n: &Named, out: &mut Vec<fixpt_read::Sym>) {
+        if let Named::Call(g, xs) = n {
+            if !out.contains(g) {
+                out.push(*g);
+            }
+            for x in xs.iter() {
+                atoms(x, out);
+            }
+        }
+    }
+    fn atoms(e: &Expr<Named>, out: &mut Vec<fixpt_read::Sym>) {
+        match e {
+            Expr::Atom(n) => named(n, out),
+            Expr::Lit(_) => {}
+            Expr::Add(x, y) | Expr::Sub(x, y) | Expr::Mul(x, y) => {
+                atoms(x, out);
+                atoms(y, out);
+            }
+        }
+    }
+    match f {
+        Formula::True | Formula::False => {}
+        Formula::Rel(_, x, y) => {
+            atoms(x, out);
+            atoms(y, out);
+        }
+        Formula::Holds(n) => named(n, out),
+        Formula::Not(p) => calls_in(p, out),
+        Formula::And(ps) | Formula::Or(ps) => ps.iter().for_each(|p| calls_in(p, out)),
+        Formula::Implies(p, q) => {
+            calls_in(p, out);
+            calls_in(q, out);
+        }
+    }
 }
 
 /// What `t`, a global's type, is tested as, if it is a specified
@@ -246,8 +303,8 @@ fn value(d: &Draw, k: usize, j: usize, seq: &mut Seq) -> String {
 
 /// A proposition of a specification as an expression of FX-26, each
 /// parameter by `names`, the result `%r`.
-fn source(f: &Formula<Named>, names: &[String]) -> String {
-    let atom = |n: &Named| -> String {
+fn source(c: &crate::Checker, f: &Formula<Named>, names: &[String]) -> String {
+    fn atom(c: &crate::Checker, n: &Named, names: &[String]) -> String {
         let p = |i: usize| names.get(i).cloned().unwrap_or_else(|| "?".into());
         match *n {
             Named::Param(i) => p(i),
@@ -257,10 +314,16 @@ fn source(f: &Formula<Named>, names: &[String]) -> String {
             Named::Acyclic(i) => format!("(acyclic? {})", p(i)),
             Named::Nat(i) => format!("(nat? {})", p(i)),
             Named::LengthIs(i, j) => format!("(length-is? {} {})", p(i), p(j)),
+            // A logic function's call, as written: the global called.
+            Named::Call(g, ref xs) => {
+                let xs: String = xs.iter().map(|x| format!(" {}", crate::logic::show_expr(x, &|n: &Named| atom(c, n, names)))).collect();
+                format!("({}{xs})", c.name(g))
+            }
         }
-    };
+    }
+    let atom = |n: &Named| atom(c, n, names);
     let expr = |e: &Expr<Named>| crate::logic::show_expr(e, &atom);
-    let all = |ps: &[Formula<Named>]| ps.iter().map(|p| format!(" {}", source(p, names))).collect::<String>();
+    let all = |ps: &[Formula<Named>]| ps.iter().map(|p| format!(" {}", source(c, p, names))).collect::<String>();
     match f {
         Formula::True => "#t".into(),
         Formula::False => "#f".into(),
@@ -274,12 +337,12 @@ fn source(f: &Formula<Named>, names: &[String]) -> String {
             }
         }
         Formula::Holds(n) => atom(n),
-        Formula::Not(p) => format!("(not {})", source(p, names)),
+        Formula::Not(p) => format!("(not {})", source(c, p, names)),
         Formula::And(ps) if ps.is_empty() => "#t".into(),
         Formula::And(ps) => format!("(and{})", all(ps)),
         Formula::Or(ps) if ps.is_empty() => "#f".into(),
         Formula::Or(ps) => format!("(or{})", all(ps)),
-        Formula::Implies(p, q) => format!("(or (not {}) {})", source(p, names), source(q, names)),
+        Formula::Implies(p, q) => format!("(or (not {}) {})", source(c, p, names), source(c, q, names)),
     }
 }
 
@@ -400,12 +463,19 @@ pub fn replay(session: &mut Fx26Session, defined: &[(String, Vec<String>)], name
     let params = defined.iter().find(|(n, _)| n == name).map(|(_, ps)| ps.clone()).unwrap_or_default();
     let Some((names, draws, spec)) = callable(session, name, &params) else { return Ok(None) };
     let mut seq = Seq(0x5eed);
-    let args: Vec<String> = draws.iter().enumerate().map(|(j, d)| given.iter().find(|(i, _)| *i == j).map_or_else(|| value(d, 0, j, &mut seq), |(_, v)| v.clone())).collect();
+    // A value given for an integer or a boolean only: the logic's values
+    // of others are no values of theirs (`smt`'s constants).
+    let scalar = |d: &Draw| !matches!(d, Draw::List(..));
+    let args: Vec<String> = draws
+        .iter()
+        .enumerate()
+        .map(|(j, d)| given.iter().find(|(i, _)| *i == j && scalar(d)).map_or_else(|| value(d, 0, j, &mut seq), |(_, v)| v.clone()))
+        .collect();
     // Not an input of its own `requires`: passed over.
     let bound = names.iter().zip(&args).map(|(n, a)| format!("({n} {a})")).collect::<Vec<_>>().join(" ");
     if let Some(s) = &spec
         && !s.requires.trivial()
-        && matches!(run(session, &format!("(let ({bound}) {})", source(&s.requires, &names)))?, Ran::Value(v) if v == "#f")
+        && matches!(run(session, &format!("(let ({bound}) {})", source(&session.checker, &s.requires, &names)))?, Ran::Value(v) if v == "#f")
     {
         return Ok(Some((Tried::PassedOver, bound, args)));
     }
@@ -449,7 +519,7 @@ fn test_one(session: &mut Fx26Session, name: &str, params: &[String], draws: &[D
         // Not an input of its own `requires`.
         if let Some(s) = spec
             && !s.requires.trivial()
-            && matches!(run(session, &format!("(let ({bound}) {})", source(&s.requires, &names)))?, Ran::Value(v) if v == "#f")
+            && matches!(run(session, &format!("(let ({bound}) {})", source(&session.checker, &s.requires, &names)))?, Ran::Value(v) if v == "#f")
         {
             t.passed_over += 1;
             continue;

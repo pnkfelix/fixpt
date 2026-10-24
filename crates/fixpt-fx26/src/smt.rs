@@ -10,6 +10,10 @@
 //! it, a boolean where a proposition does (`Holds`). Two terms the solver
 //! does not know equal may then be given different values, which only
 //! loses proofs: sound. Integers are the logic's, unbounded, as FX-26's.
+//! A logic function's call (`Term::Call`) is an uninterpreted function
+//! applied, of a `Bool` or an `Int` by where it stands, its arguments
+//! integers (a value not an integer is a constant all the same: the
+//! solver compares, and nothing else, as congruence asks).
 //!
 //! The solver is z3, run as `z3 -in`, or what `FIXPT_SMT` names; none, and
 //! nothing is asked.
@@ -58,6 +62,9 @@ pub fn solve(solver: &str, vc: &Formula<Term>) -> Solved {
     for (i, _) in w.bools.iter().enumerate() {
         q += &format!("(declare-const b{i} Bool)\n");
     }
+    for (i, (_, n, b)) in w.funs.iter().enumerate() {
+        q += &format!("(declare-fun f{i} ({}) {})\n", vec!["Int"; *n].join(" "), if *b { "Bool" } else { "Int" });
+    }
     q += &format!("(assert {denied})\n(check-sat)\n");
     let names: Vec<String> = (0..w.ints.len()).map(|i| format!("i{i}")).chain((0..w.bools.len()).map(|i| format!("b{i}"))).collect();
     if !names.is_empty() {
@@ -103,6 +110,9 @@ fn ask(solver: &str, q: &str) -> Result<String, String> {
 struct Writer {
     ints: Vec<Term>,
     bools: Vec<Term>,
+    /// The functions called: each one's name, how many arguments, and
+    /// whether of a `Bool`.
+    funs: Vec<(std::rc::Rc<str>, usize, bool)>,
 }
 
 impl Writer {
@@ -113,9 +123,23 @@ impl Writer {
         })
     }
 
+    /// `f` applied to `xs`, of a `Bool` (`b`) or an `Int`.
+    fn call(&mut self, f: &std::rc::Rc<str>, xs: &[Term], b: bool) -> String {
+        let k = self.funs.iter().position(|(g, n, c)| g == f && *n == xs.len() && *c == b).unwrap_or_else(|| {
+            self.funs.push((f.clone(), xs.len(), b));
+            self.funs.len() - 1
+        });
+        if xs.is_empty() {
+            return format!("f{k}");
+        }
+        let xs: Vec<String> = xs.iter().map(|x| self.expr(&crate::typed_cells::expr_of(x))).collect();
+        format!("(f{k} {})", xs.join(" "))
+    }
+
     fn expr(&mut self, e: &Expr<Term>) -> String {
         match e {
             Expr::Atom(Term::Lit(v)) if v.is_fixnum() => int(v.as_fixnum() as i128),
+            Expr::Atom(Term::Call(f, xs)) => self.call(f, xs, false),
             Expr::Atom(t) => format!("i{}", Self::named(&mut self.ints, t)),
             Expr::Lit(k) => int(*k as i128),
             Expr::Add(x, y) => format!("(+ {} {})", self.expr(x), self.expr(y)),
@@ -145,6 +169,7 @@ impl Writer {
             }
             Formula::Holds(Term::Lit(v)) if v.is_false() => "false".into(),
             Formula::Holds(Term::Lit(v)) if *v == fixpt_heap::Value::TRUE => "true".into(),
+            Formula::Holds(Term::Call(f, xs)) => self.call(f, xs, true),
             Formula::Holds(t) => format!("b{}", Self::named(&mut self.bools, t)),
             Formula::Not(p) => format!("(not {})", self.formula(p)),
             Formula::And(ps) => all(self, "and", "true", ps),

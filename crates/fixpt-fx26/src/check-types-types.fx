@@ -65,11 +65,13 @@
 ;; a parameter, by number from 0; the result; a literal; a sum, a
 ;; difference, a product. And of what a test proves: a parameter's
 ;; `nlist`'s length; booleans, a parameter of a shape, acyclic, a natural,
-;; a list of another's length.
+;; a list of another's length. And a logic function's value at its
+;; arguments: a global named, `pure` (`specs::spec_call`).
 (define-datatype k-sx
   (sx-param int) (sx-result) (sx-lit int)
   (sx-add k-sx k-sx) (sx-sub k-sx k-sx) (sx-mul k-sx k-sx)
-  (sx-length int) (sx-shape int int) (sx-acyclic int) (sx-nat int) (sx-length-is int int))
+  (sx-length int) (sx-shape int int) (sx-acyclic int) (sx-nat int) (sx-length-is int int)
+  (sx-call symbol (listof k-sx acyclic)))
 (define-type k-sxs (listof k-sx acyclic))
 ;; A specification's proposition (`logic.rs`'s `Formula`): a relation, 0
 ;; `<`, 1 `<=`, 2 `=`, 3 not `=`; a `bool` named (`sx-param`, `sx-result`)

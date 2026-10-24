@@ -2881,3 +2881,24 @@ does not, which is named). Not yet:
   expression alone (its program is the entries replayed).
 - One solver process per VC; z3's 2-second limit fixed.
 
+## 120. Logic functions in specifications: what is left (the user's, 2026-10-23)
+
+`docs/research/specs-and-counterexamples.md`'s S4, begun: a specification
+may call a `pure` global of a `bool`, `int` or `nat` result (both
+checkers, `specs::spec_call`, `check-specs.fx`'s `k-spec-call`); the
+verifier gives a call of one in the cells the same term (`Term::Call`),
+and z3 an uninterpreted function. Not yet:
+- **Definitions.** The provers know nothing of what a logic function
+  computes, so `logic-harness.fx`'s `insert` is not proved: its body as
+  equations for z3 (`define-fun-rec`), and lists and `define-datatype`'s
+  sums and products as SMT datatypes, so that a model gives list values
+  to replay (now a list parameter is run at `nil`).
+- **Totality**: `(car xs)` where `xs` may be `nil` in a logic function
+  (§86's debts) is not refused; harmless while calls are uninterpreted,
+  not once definitions are used.
+- **Argument types** are not checked as the specification is read (the
+  checker written in FX-26 has no subtyping there yet), only by a run.
+- A logic function's own word is its `letrec`'s (`s@159`), not the
+  global's name: the verifier links a call in the cells by the global's
+  name, which a redefinition at another type would mislead (§117).
+

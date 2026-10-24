@@ -34,7 +34,14 @@
       (sx-shape (i k) (tagcase b (sx-shape (j l) (and (= i j) (= k l))) (else z #f)))
       (sx-acyclic (i) (tagcase b (sx-acyclic (j) (= i j)) (else z #f)))
       (sx-nat (i) (tagcase b (sx-nat (j) (= i j)) (else z #f)))
-      (sx-length-is (i k) (tagcase b (sx-length-is (j l) (and (= i j) (= k l))) (else z #f))))))
+      (sx-length-is (i k) (tagcase b (sx-length-is (j l) (and (= i j) (= k l))) (else z #f)))
+      (sx-call (f xs)
+        (tagcase b (sx-call (g ys) (and (symbol=? f g) (k-sxs=? xs ys))) (else z #f))))))
+(define k-sxs=? (->* (k-sxs k-sxs) bool)
+  (lambda (xs ys)
+    (if (null? xs)
+        (null? ys)
+        (and (not (null? ys)) (k-sx=? (car xs) (car ys)) (k-sxs=? (cdr xs) (cdr ys))))))
 (define k-sf=? (->* (k-sf k-sf) bool)
   (lambda (p q)
     (tagcase p
@@ -94,6 +101,7 @@
       (sx-nat (i) (k-cat3 "(nat " (k-spec-param spec i) ")"))
       (sx-length-is (i j)
         (k-cat5 "(length-is " (k-spec-param spec i) " " (k-spec-param spec j) ")"))
+      (sx-call (f xs) (k-cat3 "(" (symbol->string f) (string-append (k-show-args spec xs) ")")))
       (else z
         (if (symbol=? (extract spec 2) '||) "result" (symbol->string (extract spec 2)))))))
 (define k-show-sx (->* (k-spec k-sx) string)
@@ -104,6 +112,12 @@
       (sx-sub (a b) (k-show-op spec "- " a b))
       (sx-mul (a b) (k-show-op spec "* " a b))
       (else z (k-spec-name spec x)))))
+;; Each of `xs`, after a space.
+(define k-show-args (->* (k-spec k-sxs) string)
+  (lambda (spec xs)
+    (if (null? xs)
+        ""
+        (k-cat3 " " (k-show-sx spec (car xs)) (k-show-args spec (cdr xs))))))
 (define k-show-op (->* (k-spec string k-sx k-sx) string)
   (lambda (spec op a b)
     (k-cat5 "(" op (k-show-sx spec a) " " (string-append (k-show-sx spec b) ")"))))

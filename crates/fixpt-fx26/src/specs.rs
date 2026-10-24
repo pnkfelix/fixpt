@@ -100,7 +100,7 @@ impl Checker {
             Datum::Bool(false) => return Ok(Formula::False),
             Datum::Symbol(x) => {
                 return match names.iter().find(|(n, ..)| n == x) {
-                    Some((_, named, t)) if self.is_bool(*t) => Ok(Formula::Holds(*named)),
+                    Some((_, named, t)) if self.is_bool(*t) => Ok(Formula::Holds(named.clone())),
                     Some(_) => Err(FxError::at(s.span, format!("`{}` is not a `bool`, so not a proposition", self.name(*x)))),
                     None => Err(FxError::at(s.span, format!("`{}` names no parameter or result here", self.name(*x)))),
                 };
@@ -133,8 +133,60 @@ impl Checker {
                 [p, q] => Ok(Formula::Implies(Box::new(self.spec_prop(p, names)?), Box::new(self.spec_prop(q, names)?))),
                 _ => Err(FxError::at(s.span, "`(implies p q)`")),
             },
+            _ if self.spec_callee(&items).is_some() => Ok(Formula::Holds(self.spec_call(s, &items, names, true)?)),
             _ => Err(FxError::at(s.span, usage)),
         }
+    }
+
+    /// Of `(f a …)`, `f`, if its innermost binding is a global's (a
+    /// top-level definition's).
+    fn spec_callee(&self, items: &[Syntax]) -> Option<Sym> {
+        let f = items.first()?.as_symbol()?;
+        self.env.rpos(f).is_some_and(|i| self.global_slots.contains(&i)).then_some(f)
+    }
+
+    /// `(f a …)`, a logic function's value at its arguments
+    /// (`docs/research/specs-and-counterexamples.md`, §5): `f` a global
+    /// procedure, `pure` (so ending, and of nothing but its arguments), of
+    /// a `bool` result (`bool`) or an `int`'s or `nat`'s; each argument an
+    /// integer, where `f` takes one, or else a parameter or the result,
+    /// named. (Whether that is of the type `f` takes is not asked here, as
+    /// the checker written in FX-26 reads specifications before it has
+    /// subtyping: a call is a function of the logic's whatever it is
+    /// given, and a run checking it says.)
+    fn spec_call(&mut self, s: &Syntax, items: &[Syntax], names: &Names, bool: bool) -> R<Named> {
+        let f = self.spec_callee(items).expect("a global");
+        let fname = self.name(f).to_string();
+        let t = self.env[self.env.rpos(f).expect("bound")].1;
+        let Ty::Subr { effect, params, result, .. } = self.arena.get(self.arena.resolve(t)).clone() else {
+            return Err(FxError::at(s.span, format!("`{fname}` is called in a specification, and is no procedure")));
+        };
+        if !effect.is_pure() {
+            return Err(FxError::at(s.span, format!("`{fname}` is called in a specification, so must be `pure`")));
+        }
+        if bool && !self.is_bool(result) {
+            return Err(FxError::at(s.span, format!("`{fname}` gives no `bool`, so is no proposition")));
+        }
+        if !bool && !self.is_int(result) {
+            return Err(FxError::at(s.span, format!("`{fname}` gives no `int` or `nat`, so is no integer")));
+        }
+        let args = &items[1..];
+        if args.len() != params.len() {
+            return Err(FxError::at(s.span, format!("`{fname}` takes {} arguments, not {}", params.len(), args.len())));
+        }
+        let mut xs = Vec::new();
+        for (a, p) in args.iter().zip(&params) {
+            if self.is_int(*p) {
+                xs.push(self.spec_expr(a, names)?);
+                continue;
+            }
+            let found = a.as_symbol().and_then(|x| names.iter().find(|(n, ..)| *n == x));
+            let Some((_, named, _)) = found.cloned() else {
+                return Err(FxError::at(a.span, format!("an argument of `{fname}` in a specification: a parameter or the result, named")));
+            };
+            xs.push(Expr::Atom(named));
+        }
+        Ok(Named::Call(f, Rc::new(xs)))
     }
 
     /// An integer: a literal, a name of an `int` or a `nat`, `(+ a …)`,
@@ -145,7 +197,7 @@ impl Checker {
             Datum::Number(fixpt_read::Num::Int(k)) => return Ok(Expr::Lit(*k)),
             Datum::Symbol(x) => {
                 return match names.iter().find(|(n, ..)| n == x) {
-                    Some((_, named, t)) if self.is_int(*t) => Ok(Expr::Atom(*named)),
+                    Some((_, named, t)) if self.is_int(*t) => Ok(Expr::Atom(named.clone())),
                     Some(_) => Err(FxError::at(s.span, format!("`{}` is not an `int`", self.name(*x)))),
                     None => Err(FxError::at(s.span, format!("`{}` names no parameter or result here", self.name(*x)))),
                 };
@@ -154,6 +206,9 @@ impl Checker {
         }
         let items = s.as_proper_list().ok_or_else(|| FxError::at(s.span, usage))?.to_vec();
         let head = items.first().and_then(|h| h.as_symbol()).map(|h| self.name(h).to_string()).unwrap_or_default();
+        if !matches!(head.as_str(), "+" | "-" | "*") && self.spec_callee(&items).is_some() {
+            return Ok(Expr::Atom(self.spec_call(s, &items, names, false)?));
+        }
         let args = items.get(1..).unwrap_or_default().iter().map(|a| self.spec_expr(a, names)).collect::<R<Vec<_>>>()?;
         let fold = |args: Vec<Expr<Named>>, f: fn(Box<Expr<Named>>, Box<Expr<Named>>) -> Expr<Named>| {
             let mut it = args.into_iter();

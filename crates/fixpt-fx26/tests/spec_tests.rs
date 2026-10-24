@@ -8,7 +8,7 @@ use fixpt_engine::Backend;
 use fixpt_fx26::session::Fx26Session;
 
 /// The programs a counterexample shows false.
-const FALSE: [&str; 3] = ["harness-insert-wrong.fx", "wrong-ensures.fx", "wrong-requires.fx"];
+const FALSE: [&str; 4] = ["harness-insert-wrong.fx", "logic-harness-wrong.fx", "wrong-ensures.fx", "wrong-requires.fx"];
 
 #[test]
 fn specifications_tested_by_running() {

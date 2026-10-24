@@ -2791,7 +2791,7 @@ impl<'a> Compiler<'a> {
         let spec = sig.spec.as_ref().and_then(|spec| {
             let slots: Option<Vec<usize>> = sig.params.iter().map(|(n, _)| params.iter().position(|p| p == n)).collect();
             let slots = slots?;
-            let at = |n: &crate::ast::Named| n.renumbered(|i| slots[i]);
+            let at = |n: &crate::ast::Named| n.renumbered(&|i| slots[i]);
             let mut names = vec![None; params.len()];
             for (i, k) in slots.iter().enumerate() {
                 names[*k] = spec.params.get(i).copied().flatten();

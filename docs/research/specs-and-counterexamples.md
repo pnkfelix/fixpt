@@ -301,7 +301,10 @@ Two ways they could serve fixpt:
   nor refuted, beyond the prover. `TODO.md` §119 has what is left.
 - **S3.** Bounded mode (§7), with unwinding checks.
 - **S4.** Logic functions (§5) and terms over datatypes in
-  specifications.
+  specifications. Begun (2026-10-23): a specification calls `pure`
+  globals of a `bool`, `int` or `nat` result, known to the provers as
+  functions only; their definitions and datatypes for the solver are
+  `TODO.md` §120.
 - **S5.** An inductive prover for what S2 and S3 leave (§6, 3).
 - Beside these, at any time: Kani on kayak's output (§9), as an
   experiment.

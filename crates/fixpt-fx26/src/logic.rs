@@ -19,7 +19,7 @@ use crate::ast::Rel;
 use std::collections::BTreeMap;
 
 /// An integer expression.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Expr<A> {
     Atom(A),
     Lit(i64),
