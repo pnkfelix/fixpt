@@ -2943,6 +2943,11 @@ counts (loading is about 1%). In order:
   first a shorter run (`tests/kfx/loaded-select.kfx` is the fixed cost
   only). Kayak's pin, `4caffc2`, is 39 commits behind main, none of them
   about speed.
+- **Every procedure a frame, as a switch**, if a profile needs it: a
+  leaf in the native convention has none, so perf's `--call-graph fp`
+  misses its caller. Both native compilers (Rust's and `native-direct-
+  x64.fx`), or their oracle off while it is on. Stacks are otherwise
+  walked (`docs/performance.md`, "Profiling with Linux's `perf`").
 - **A top-level expression's thunk** is still named for where its body
   starts (`lambda@11`), in the native convention: a run's last form,
   kayak's call of its compiler, would show so in a profile.

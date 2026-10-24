@@ -69,8 +69,16 @@ value is computed by `native define count`; a top-level expression's
 thunk is still named for where its body starts (`lambda@11`). The map is
 left in `/tmp`, as perf's convention is, one per process. Code collected
 has its room used again, and perf knows no time of a name, so an address
-reused shows one of its names. Call stacks through our code are not
-walked: register code calls register code with no frame `perf` follows.
+reused shows one of its names.
+
+Call stacks are walked through the native convention's code with
+`--call-graph fp`: its frames are linked by `rbp`, the return address at
+`[rbp + 8]`, as perf's walker reads them (`trampoline` → `native run` →
+`native deriv` → `native map-deriv`). What breaks a stack: a leaf, which
+has no frame, so its caller is missed (its caller's caller is seen); a
+tail call, which replaces its caller's frame; Rust's own code, built
+without frame pointers unless `RUSTFLAGS="-C force-frame-pointers=yes"`;
+and cellular code, not yet looked at.
 
 `sample` cannot say who called a word: register code calls register code
 with no native frame, so every stack of ours ends in `run_in_runtime`.
