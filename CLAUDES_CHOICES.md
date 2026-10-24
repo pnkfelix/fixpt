@@ -1626,3 +1626,23 @@ The user asked why only lists of `int`s were the solver's, and to lift it.
 - The nested test is of a function counting empty lists, not of
   `flatten` by `len` and `sizes`: a logic function calling another reads
   a global, so is not `pure` to the checkers (TODO §120).
+
+## A perf map, and native definitions named (2026-10-24)
+
+The user asked for perf map support first, for kayak's stage 0
+(`docs/kayak-stage0-workload.md`, TODO §121).
+- **Beside `FIXPT_SYMBOLS`, not in place of it**: the same notes
+  (`symbols::note`) go to both, the perf map's lengths in hex. One switch,
+  `FIXPT_PERF_MAP` set to anything, for the path is perf's to choose
+  (`/tmp/perf-PID.map`), and the file is left there, as perf expects.
+- **The names were the larger gap.** In the native convention a
+  definition's value is compiled alone, in a thunk, so its procedure was
+  named `lambda@11`, for where its body starts in the thunk's text: every
+  procedure of kayak's would be. Now `native_define` queues two names for
+  the FX-26 compiler (`compile-name-word!`): the thunk's, `define NAME`,
+  and the procedure's, `NAME`. `c-word-name` became a queue, taken one
+  per lambda (`c-take-name`); the Rust compiler sets only one, so the two
+  compilers still agree.
+- **Only a plain `lambda`** (through `the` or a convention) is named so,
+  as the compilers' own rule (`name_word_for`, `c-name-for!`).
+

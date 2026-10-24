@@ -877,7 +877,7 @@ impl Fx26Session {
             }
             // A definition, in the native convention: its global made, and
             // filled with its value, computed as an expression is.
-            if let (Some(run), Top::Define { name, assigns, .. }, Strategy::Cellular) = (self.native_runner, &top, self.strategy)
+            if let (Some(run), Top::Define { name, assigns, exp, .. }, Strategy::Cellular) = (self.native_runner, &top, self.strategy)
                 && let Some((ty, init)) = definition_init(form, &self.checker, *name)
             {
                 if *assigns {
@@ -896,7 +896,8 @@ impl Fx26Session {
                 if built_in.is_some() {
                     self.check_built_in(true)?;
                 }
-                let defined = self.native_define(&name, &format!("{form_text}\n"), &init, run);
+                let lambda = Self::names_its_word(&self.checker, *exp);
+                let defined = self.native_define(&name, &format!("{form_text}\n"), &init, lambda, run);
                 if built_in.is_some() {
                     self.check_built_in(false)?;
                 }
@@ -1110,10 +1111,10 @@ impl Fx26Session {
 
     /// The front end's entry points the Rust side calls by name
     /// (`READER_PREFIX`), each rebound by [`Self::front_end_as_register_code`].
-    pub const FRONT_ENTRIES: [&'static str; 32] = [
+    pub const FRONT_ENTRIES: [&'static str; 33] = [
         "read-text-at", "check-program", "check-more", "checked-tops", "checked-extracts", "checked-effects", "check-conv-native!", "checked-withs!", "checked-reshapes!",
         "check-globals-effects!", "check-defer-reruns!", "check-hold-breaks!", "check-lines!", "parse-program", "loaded-files!", "run-checked", "run-checked-more", "compile-program", "compile-checked", "compile-registers!", "compile-conv-native!",
-        "compile-global-cell", "compile-new-global", "compile-keep-global!", "compile-note-inline!", "compile-forget-globals!", "native-assemble",
+        "compile-global-cell", "compile-new-global", "compile-name-word!", "compile-keep-global!", "compile-note-inline!", "compile-forget-globals!", "native-assemble",
         "check-built-in!",
         "native-assemble-x64", "native-assemble-x64-regs", "native-adapter-x64", "native-compile-x64-proc",
     ];
@@ -1294,19 +1295,33 @@ impl Fx26Session {
         self.with_last_value(&format!("(lambda () {exp})\n"), self.native_fx, f)
     }
 
-    /// `form` (text), a definition of `name` whose value is `init` (text),
+    /// Whether a definition of `x` names its word for its global, as the
+/// compilers do (`name_word_for`, `c-name-for!`): a `lambda`, through a
+/// `the` or a convention, not a region's.
+fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
+    use crate::ast::Exp;
+    loop {
+        match c.arena.exp_at(x) {
+            Exp::PLambda { body, .. } | Exp::The { exp: body, .. } | Exp::Convention { exp: body, .. } => x = *body,
+            Exp::Lambda { .. } => return true,
+            _ => return false,
+        }
+    }
+}
+
+/// `form` (text), a definition of `name` whose value is `init` (text),
     /// in the native convention: checked, as the next form; `name`'s global
     /// made by the compiler written in FX-26; `init` run as a procedure of
     /// no arguments, by `run`; and its value put in the global. What `run`
     /// did instead, if anything else.
-    fn native_define(&mut self, name: &str, form: &str, init: &str, run: NativeRunner) -> R<Result<(), NativeRun>> {
+    fn native_define(&mut self, name: &str, form: &str, init: &str, lambda: bool, run: NativeRunner) -> R<Result<(), NativeRun>> {
         self.own_pieces()?;
         let standard = self.next_standard()?;
         // What is loaded is loaded, above; the handles below are this
         // definition's, released at its end: kept, the global's cell would
         // keep each old definition alive, its code with it.
         let mark = self.scheme.root_mark();
-        let r = self.native_define_in(standard, name, form, init, run);
+        let r = self.native_define_in(standard, name, form, init, lambda, run);
         self.scheme.release_to(mark);
         r
     }
@@ -1317,6 +1332,7 @@ impl Fx26Session {
         name: &str,
         form: &str,
         init: &str,
+        lambda: bool,
         run: NativeRunner,
     ) -> R<Result<(), NativeRun>> {
         // The Rust checker took the form: the checker written in FX-26
@@ -1342,6 +1358,27 @@ impl Fx26Session {
             c
         });
         let fuel = self.step_limit.unwrap_or(u64::MAX >> 1);
+        // A lambda's word named for the global, as a definition compiled
+        // is (`c-define-lambda`), not for where it is in the thunk: so that
+        // a profile, a disassembly or a fault says which procedure. The
+        // thunk's, compiled first, `define NAME`. The names let go after,
+        // if nothing took them.
+        let name_word = |s: &mut Self, named: bool| {
+            let ns = s.scheme.make(|m| {
+                let h = m.heap();
+                if named {
+                    let (thunk, n) = (h.intern(&format!("define {name}")), h.intern(name));
+                    let tail = h.cons(n, fixpt_heap::Value::NULL);
+                    h.cons(thunk, tail)
+                } else {
+                    fixpt_heap::Value::NULL
+                }
+            });
+            s.scheme.call_global(&format!("{READER_PREFIX}compile-name-word!"), &[ns]).map(|_| ())
+        };
+        if lambda {
+            name_word(self, true).map_err(fail)?;
+        }
         let r = self.with_native_thunk(init, |rt, clo| match {
             let (start, compiled) = (std::time::Instant::now(), rt.compile_nanos);
             let ran = run(rt, clo, fuel);
@@ -1361,6 +1398,9 @@ impl Fx26Session {
             other => Err(other),
         });
         self.scheme.runtime_unrooted().heap.pop_roots_to(at);
+        if lambda {
+            name_word(self, false).map_err(fail)?;
+        }
         if matches!(r, Ok(Ok(Ok(())))) {
             // A lambda, noted for inlining, as a definition compiled is.
             let sym = self.scheme.make(|m| m.heap().intern(name));

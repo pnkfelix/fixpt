@@ -339,6 +339,17 @@
 ;; The next lambda's word named for global `n`.
 (define c-name-word! (->* (symbol) unit)
   (lambda (n) (set c-word-name (the (listof string @k) (cons (symbol->string n) nil)))))
+;; The next lambdas' words named `ns`, one each, in order, and those after
+;; for where their bodies start (none: no longer named): for the Rust side,
+;; which compiles a definition's value on its own, in a thunk, in the
+;; native convention (`native_define`).
+(define compile-name-word! (->* ((listof symbol @k)) unit)
+  (lambda (ns) (set c-word-name (c-strings-of (c-strings-of-rev ns nil) nil))))
+(define c-strings-of-rev (->* ((listof symbol @k) (listof string @k)) (listof string @k))
+  (lambda (ns acc)
+    (if (null? ns) acc (c-strings-of-rev (cdr ns) (cons (symbol->string (car ns)) acc)))))
+(define c-strings-of (->* ((listof string @k) (listof string @k)) (listof string @k))
+  (lambda (xs acc) (if (null? xs) acc (c-strings-of (cdr xs) (cons (car xs) acc)))))
 ;; The next lambda's word named for global `n`, when `x`, its definition, is
 ;; a lambda, rather than for where its body starts: so that a profile, a
 ;; disassembly or a fault says which procedure. As the Rust compiler's

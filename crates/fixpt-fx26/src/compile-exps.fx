@@ -393,7 +393,7 @@
   ;; The same, with the words of the lambdas in it noted as made.
   (c-lambda-word-in (->* (c-params exp cenv syms) c-closing)
     (lambda (ps body e own0)
-      (let* ((named (c-take c-word-name (the (listof string @k) nil)))
+      (let* ((named (c-take-name))
              (bound (c-take c-bind-name (the (listof symbol @k) nil)))
              (defining (c-take c-defining (the (listof symbol @k) nil)))
              ;; What it captures, as the middle phase planned (`compile-plan.fx`);

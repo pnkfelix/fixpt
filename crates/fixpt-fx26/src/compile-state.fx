@@ -82,8 +82,17 @@
 
 (define c-own-now (ref (listof (productof (1 symbol) (2 tword)) @k) @k) (new nil))
 
-;; The name the next lambda's word gets, if not where its body starts.
+;; The names the next lambdas' words get, one each, in order, if not where
+;; their bodies start: one, as a rule (the Rust compiler's `word_name`).
 (define c-word-name (ref (listof string @k) @k) (new nil))
+;; The name the next lambda's word gets, taken (none, or one), the rest
+;; left for the lambdas after.
+(define c-take-name (->* () (listof string @k))
+  (lambda ()
+    (let ((ns (get c-word-name)))
+      (if (null? ns)
+          ns
+          (begin (set c-word-name (cdr ns)) (the (listof string @k) (cons (car ns) nil)))))))
 ;; The name of the lambda whose body is compiled, without where it starts:
 ;; an inner lambda's word is named within it, `outer/inner@N`.
 (define c-scope-name (ref (listof string @k) @k) (new nil))

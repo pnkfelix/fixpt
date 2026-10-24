@@ -2914,3 +2914,35 @@ and z3 an uninterpreted function. Not yet:
   global's name: the verifier links a call in the cells by the global's
   name, which a redefinition at another type would mislead (§117).
 
+
+## 121. Kayak's stage 0, to run faster (the user's, 2026-10-24: high priority)
+
+`docs/kayak-stage0-workload.md`: kayak's compiler compiling itself under
+`fixpt run` (`fx-regs-rsjit-nativecc`) takes about 610 s, and kayak's
+check waits for it; the target is 490 s or less. Only execution speed
+counts (loading is about 1%). In order:
+- ~~**A perf map**~~ Done 2026-10-24: `FIXPT_PERF_MAP` writes
+  `/tmp/perf-PID.map` (`fixpt_native::symbols`; `docs/performance.md`,
+  "Profiling with Linux's `perf`"), and a definition in the native
+  convention names its procedure for its global, as kayak's are
+  (`(define cv-where (subr …) (lambda …))`), not `lambda@11`. Next: the
+  profile of the plain run, and every later step measured by one.
+- **`tagcase` loads only the fields its arm uses.** It loads each into a
+  register (`cellular/regcode.rs`, `ArmBind::Fields`), so a leaf, with 8,
+  runs out past 6 fields and the whole word is cellular code. That is
+  the 13 words kayak's run reports as having no register code, all
+  accessors of 11-field records (`cv-where`, `prep-name`, …); a 7-field
+  accessor reproduces it.
+- **A leaf out of registers made again with a frame**, its values in
+  stack slots, not declined: `register_body_in` retries so only a leaf
+  made of tail calls.
+- **A reason for each decline.** Running out of registers in a leaf
+  (`Gen::reg` returning none) records none, so the report says "?".
+- **Measured**: the stage 0 run, three at once, by kayak's
+  `scripts/fixpoint.sh`, its output still `boot/src/kfx/` byte for byte;
+  first a shorter run (`tests/kfx/loaded-select.kfx` is the fixed cost
+  only). Kayak's pin, `4caffc2`, is 39 commits behind main, none of them
+  about speed.
+- **A top-level expression's thunk** is still named for where its body
+  starts (`lambda@11`), in the native convention: a run's last form,
+  kayak's call of its compiler, would show so in a profile.

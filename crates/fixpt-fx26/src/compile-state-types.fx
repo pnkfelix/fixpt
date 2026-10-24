@@ -27,6 +27,10 @@
   (moduleof (val c-defining (ref (listof symbol @k) @k))
             (val c-own-now (ref (listof (productof (1 symbol) (2 tword)) @k) @k))
             (val c-word-name (ref (listof string @k) @k))
+            (val c-take-name
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                       ()
+                       (listof string @k)))
             (val c-last-word (ref (listof tword @k) @k))
             (val c-prev-word (ref (listof tword @k) @k))
             (val c-module-members (ref (listof c-inlinables @k) @k))

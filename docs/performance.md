@@ -52,6 +52,26 @@ fixpt-symbolize /tmp/syms.* -- /tmp/s.txt | less
 Take the pid of the process started (`$!`), never one found by name: the
 user's own REPL, under Emacs, has the same name.
 
+**Profiling with Linux's `perf`** (2026-10-24). With `FIXPT_PERF_MAP` set
+(to anything), the same names go to `/tmp/perf-PID.map`, the file `perf
+report` reads for code made at run time, so it names our code beside the
+Rust frames:
+
+```text
+FIXPT_PERF_MAP=1 perf record -F 2000 -o perf.data fixpt --fx26-machine fx-regs-rsjit-nativecc run prog.fx
+perf report -i perf.data --sort sym
+```
+
+On `scheme-bench/deriv.fx`, `native deriv` 20%, `native map-quotient`
+16%, then the checker's own Rust. A definition in the native convention
+names its procedure for its global (`native count`), and the thunk its
+value is computed by `native define count`; a top-level expression's
+thunk is still named for where its body starts (`lambda@11`). The map is
+left in `/tmp`, as perf's convention is, one per process. Code collected
+has its room used again, and perf knows no time of a name, so an address
+reused shows one of its names. Call stacks through our code are not
+walked: register code calls register code with no frame `perf` follows.
+
 `sample` cannot say who called a word: register code calls register code
 with no native frame, so every stack of ours ends in `run_in_runtime`.
 For callers, the cell profile (`FIXPT_PROFILE_PHASE=check` on
