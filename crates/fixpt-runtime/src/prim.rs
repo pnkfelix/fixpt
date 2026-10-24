@@ -1030,11 +1030,16 @@ prims! {
         for v in front.into_iter().rev() { acc = rt.heap.cons(v, acc); }
         Ok(acc)
     });
+    // Consed as it is walked, no vector between (`TODO.md` §126).
     "reverse", 1, Some(1), simple!(|rt, a| {
-        match rt.heap.list_to_vec(a[0]) {
-            Some(v) => { let mut acc = Value::NULL; for x in v { acc = rt.heap.cons(x, acc); } Ok(acc) }
-            None => rt.type_error("a proper list", a[0]),
+        // A proper list first, a cyclic one refused (`list_len`).
+        if rt.heap.list_len(a[0]).is_none() { return rt.type_error("a proper list", a[0]); }
+        let (mut acc, mut l) = (Value::NULL, a[0]);
+        while l.is_pair() {
+            acc = rt.heap.cons(rt.heap.car(l), acc);
+            l = rt.heap.cdr(l);
         }
+        Ok(acc)
     });
 
     // ---- symbols ----
@@ -1045,8 +1050,8 @@ prims! {
         Ok(rt.heap.string_append(&[name]))
     });
     "string->symbol", 1, Some(1), simple!(|rt, a| {
-        let s = get_string(rt, a[0])?;
-        Ok(rt.heap.intern(&s))
+        if !rt.heap.is_a(a[0], ObjType::String) { return rt.type_error("a string", a[0]); }
+        Ok(rt.heap.intern_string(a[0]))
     });
 
     // ---- characters ----
@@ -1093,9 +1098,8 @@ prims! {
         Ok(rt.heap.string_from_chars(&chars))
     });
     "string", 0, None, simple!(|rt, a| {
-        let mut chars = Vec::with_capacity(a.len());
-        for v in a.iter().copied() { chars.push(get_char(rt, v)?); }
-        Ok(rt.heap.string_from_chars(&chars))
+        for v in a.iter().copied() { get_char(rt, v)?; }
+        Ok(rt.heap.string_with(a.len(), |_, k| a[k].as_char() as u32))
     });
     // In time for the part taken, not the whole string: a reader takes
     // each atom of a file's text so.
@@ -1106,8 +1110,7 @@ prims! {
         if start < 0 || end < start || end as usize > n {
             return rt.fail("substring range out of bounds", &[a[1], a[2]]);
         }
-        let chars: Vec<char> = (start as usize..end as usize).map(|i| rt.heap.string_ref(a[0], i)).collect();
-        Ok(rt.heap.string_from_chars(&chars))
+        Ok(rt.heap.substring(a[0], start as usize, end as usize))
     });
     "string-append", 0, None, simple!(|rt, a| {
         // Straight from the heap into the one string made.
@@ -1116,16 +1119,31 @@ prims! {
         }
         Ok(rt.heap.string_append(a))
     });
+    // Each from the other in place, no vector between (`TODO.md` §126).
     "string->list", 1, Some(1), simple!(|rt, a| {
-        let s = get_string(rt, a[0])?;
-        let items: Vec<Value> = s.chars().map(Value::char).collect();
-        Ok(rt.heap.list_from(&items))
+        if !rt.heap.is_a(a[0], ObjType::String) { return rt.type_error("a string", a[0]); }
+        let mut acc = Value::NULL;
+        for i in (0..rt.heap.string_len(a[0])).rev() {
+            let c = rt.heap.string_ref(a[0], i);
+            acc = rt.heap.cons(Value::char(c), acc);
+        }
+        Ok(acc)
     });
     "list->string", 1, Some(1), simple!(|rt, a| {
-        let items = match rt.heap.list_to_vec(a[0]) { Some(v) => v, None => return rt.type_error("a proper list", a[0]) };
-        let mut chars = Vec::with_capacity(items.len());
-        for v in items { chars.push(get_char(rt, v)?); }
-        Ok(rt.heap.string_from_chars(&chars))
+        // A proper list first (a cyclic one refused, `list_len`), then of
+        // characters, as the errors were.
+        let Some(n) = rt.heap.list_len(a[0]) else { return rt.type_error("a proper list", a[0]) };
+        let mut l = a[0];
+        while l.is_pair() {
+            get_char(rt, rt.heap.car(l))?;
+            l = rt.heap.cdr(l);
+        }
+        let mut at = a[0];
+        Ok(rt.heap.string_with(n, |h, _| {
+            let c = h.car(at);
+            at = h.cdr(at);
+            c.as_char() as u32
+        }))
     });
     "string=?", 1, None, simple!(|rt, a| string_chain(rt, a, |o| o == std::cmp::Ordering::Equal));
     "string<?", 1, None, simple!(|rt, a| string_chain(rt, a, |o| o == std::cmp::Ordering::Less));
@@ -1915,9 +1933,13 @@ prims! {
     // FX-26's `string-search`: where `a[1]` first occurs in `a[0]` at or
     // after character `a[2]`, in characters; or -1.
     "%fx26-string-search", 3, Some(3), simple!(|rt, a| {
-        let (s, sub, from) = (get_string(rt, a[0])?, get_string(rt, a[1])?, int(rt, a[2])?);
-        let Some((start, _)) = s.char_indices().chain(std::iter::once((s.len(), ' '))).nth(from.max(0) as usize) else { return Ok(Value::fixnum(-1)) };
-        Ok(Value::fixnum(s[start..].find(&sub).map_or(-1, |b| from.max(0) + s[start..start + b].chars().count() as i64)))
+        // In place, code point by code point (`TODO.md` §126).
+        for v in [a[0], a[1]] {
+            if !rt.heap.is_a(v, ObjType::String) { return rt.type_error("a string", v); }
+        }
+        let from = int(rt, a[2])?.max(0);
+        let at = usize::try_from(from).ok().and_then(|f| rt.heap.string_search(a[0], a[1], f));
+        Ok(Value::fixnum(at.map_or(-1, |i| i as i64)))
     });
     // FX-26's `+`, `-`, `*` and `quotient`: `int` is an exact integer, a
     // bignum past a fixnum, on every machine (PLAN.md, Q2).
