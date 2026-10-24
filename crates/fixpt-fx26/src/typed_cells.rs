@@ -107,6 +107,10 @@ pub struct Cert {
     /// where to where: the verifier masks what they do as it finds them
     /// seen (`Verifier::masked`).
     pub masks: Vec<(usize, usize)>,
+    /// The cells of each expression compiled, from where to where, and its
+    /// span in the program's text: where what is said of a cell is, in
+    /// the source (the innermost expression's whose cells it is among).
+    pub sources: Vec<(usize, usize, fixpt_read::Span)>,
     /// Before which cell a `let`'s binding, in which slot, is opened as
     /// checking bound it (an array's length named): its type then, and the
     /// variables opened, fresh.
@@ -199,6 +203,10 @@ pub struct Outcome {
     /// name, and its arguments' terms (`crate::verifying`'s replay, §8 of
     /// `docs/research/specs-and-counterexamples.md`).
     pub calls: Vec<(Term, String, Vec<Term>)>,
+    /// The cell each of `open` and `failed` is said of, by position, if
+    /// one is (for `Cert::sources`).
+    pub open_at: Vec<Option<usize>>,
+    pub failed_at: Vec<Option<usize>>,
 }
 
 impl Outcome {
@@ -365,11 +373,12 @@ fn marker(op: &str) -> bool {
 
 /// Verify `word` against its certificate in `certs`.
 pub fn verify(c: &mut Checker, heap: &Heap, certs: &Certs, word: Value) -> Outcome {
-    let mut v = Verifier { c, heap, certs, out: Outcome::default(), made: 0, effect: Effect::pure(), proving: Vec::new(), latent_sizes: Vec::new(), joined: Vec::new(), path_reads: Vec::new(), masking: Vec::new(), contributed: Vec::new(), gen_effects: Vec::new(), frames: Vec::new(), region_closures: Vec::new(), relations: Vec::new(), nats: Vec::new() };
+    let mut v = Verifier { c, heap, certs, out: Outcome::default(), made: 0, effect: Effect::pure(), proving: Vec::new(), latent_sizes: Vec::new(), joined: Vec::new(), path_reads: Vec::new(), masking: Vec::new(), contributed: Vec::new(), gen_effects: Vec::new(), frames: Vec::new(), region_closures: Vec::new(), relations: Vec::new(), nats: Vec::new(), cell: None };
     match certs.words.get(&word.raw()) {
         Some(cert) => v.word(word, cert),
         None => v.out.stopped = Some("no certificate".into()),
     }
+    v.place();
     v.out
 }
 
@@ -393,6 +402,8 @@ struct Masking {
 
 struct Verifier<'a> {
     c: &'a mut Checker,
+    /// The cell being verified, if one is: what is said is said of it.
+    cell: Option<usize>,
     heap: &'a Heap,
     certs: &'a Certs,
     out: Outcome,
@@ -439,6 +450,13 @@ struct Verifier<'a> {
 }
 
 impl Verifier<'_> {
+    /// What was said since the last cell, said of it.
+    fn place(&mut self) {
+        let o = &mut self.out;
+        o.open_at.resize(o.open.len(), self.cell);
+        o.failed_at.resize(o.failed.len(), self.cell);
+    }
+
     fn fresh(&mut self) -> Term {
         self.made += 1;
         Term::Made(self.made)
@@ -677,6 +695,8 @@ impl Verifier<'_> {
         while i < code.len() {
             let ins = &code[i];
             i += 1;
+            self.place();
+            self.cell = Some(ins.at);
             // The regions that close here: the way out of their bodies.
             cur = match self.close_regions(cert, ins.at, cur) {
                 Ok(c) => c,

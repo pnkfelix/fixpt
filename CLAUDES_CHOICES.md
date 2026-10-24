@@ -1538,3 +1538,21 @@ The user: "let's attack requires and ensures next" (the design note's
    (`Outcome::calls`), and the call is written as source from the
    input's values and the calls before it, then run for its real value.
 
+## Source places in `fixpt verify` (2026-10-23)
+
+1. **Each expression's cells, from where to where, with its span**, in
+   the certificate (`Cert::sources`, `Item::Source` in the compiler, as
+   `Item::Mask` is): a cell's place is the innermost expression's whose
+   cells it is among (the fewest cells, then the shortest span). A
+   `return` is its returned expression's, so an `ensures` broken is said
+   at what is returned (`x`, `(- 0 x)`).
+2. **The verifier notes the cell each message is said at** (`open_at`,
+   `failed_at`), filled as it moves from cell to cell, rather than
+   changing each of its messages.
+3. **Said as `FILE:LINE:COLUMN, `expression``**, the expression's text
+   shortened to 48 characters; in the REPL, the expression alone.
+4. **The verdicts reworded** (the user found them hard to read): `false:
+   with x = -1, the result is -1`; `not proved, as the proof knows too
+   little of a call. It holds for …; but for all the proof knows, (f …)
+   could be #f, where it is #t.`
+

@@ -306,14 +306,30 @@ fn run(session: &mut Fx26Session, text: &str) -> Result<Ran, String> {
 
 /// How a call on an input went: it kept every specification, giving
 /// this; it was passed over; it did not end in time; a specification or
-/// an `assert` did not hold, said with the input (`shown`); it failed
-/// otherwise.
+/// an `assert` did not hold (`Broken`); it failed otherwise.
 pub enum Tried {
     Kept(String),
     PassedOver,
     Unfinished,
-    Broken(String),
+    Broken(Broken),
     Failed(String),
+}
+
+/// A specification that did not hold in a run: whose it was (`its
+/// ensures`, `the requires of clamp`, `an `assert``), the input said, and,
+/// of its own `ensures`, the result.
+pub struct Broken {
+    pub what: String,
+    pub input: String,
+    pub result: Option<String>,
+}
+
+impl Broken {
+    /// As `fixpt test` says it.
+    pub fn said(&self) -> String {
+        let r = self.result.as_ref().map_or(String::new(), |r| format!(": the result is {r}"));
+        format!("{} does not hold, for {}{r}", self.what, self.input)
+    }
 }
 
 /// `name` called on `args`, in a session running its program
@@ -324,20 +340,20 @@ fn tried(session: &mut Fx26Session, name: &str, args: &[String], shown: &str) ->
         Ran::Value(v) => Tried::Kept(v),
         Ran::PassedOver => Tried::PassedOver,
         Ran::Unfinished => Tried::Unfinished,
-        Ran::Asserted => Tried::Broken(format!("an `assert` does not hold, for {shown}")),
+        Ran::Asserted => Tried::Broken(Broken { what: "an `assert`".into(), input: shown.into(), result: None }),
         // A specification that does not hold: its own `ensures`, shown
         // with the result its copy that does not check gives; or what it
         // calls, said by whose.
         Ran::Failed(e) if e.contains(&format!("the ensures of {name} does not hold")) => {
-            let r = match run(session, &call(&format!("{PLAIN}{name}")))? {
-                Ran::Value(v) => format!(": the result is {v}"),
-                _ => String::new(),
+            let result = match run(session, &call(&format!("{PLAIN}{name}")))? {
+                Ran::Value(v) => Some(v),
+                _ => None,
             };
-            Tried::Broken(format!("its ensures does not hold, for {shown}{r}"))
+            Tried::Broken(Broken { what: "its ensures".into(), input: shown.into(), result })
         }
         Ran::Failed(e) if e.contains("does not hold") => {
             let what = e.rsplit_once("the ").map_or(e.as_str(), |(_, w)| w).trim_end_matches(" does not hold");
-            Tried::Broken(format!("the {what} does not hold, for {shown}"))
+            Tried::Broken(Broken { what: format!("the {what}"), input: shown.into(), result: None })
         }
         Ran::Failed(e) => Tried::Failed(format!("fails for {shown}: {e}")),
     })
@@ -442,8 +458,8 @@ fn test_one(session: &mut Fx26Session, name: &str, params: &[String], draws: &[D
             Tried::Kept(_) => {}
             Tried::PassedOver => t.passed_over += 1,
             Tried::Unfinished => t.unfinished += 1,
-            Tried::Broken(c) => {
-                t.counterexample = Some(c);
+            Tried::Broken(b) => {
+                t.counterexample = Some(b.said());
                 break;
             }
             Tried::Failed(f) => {

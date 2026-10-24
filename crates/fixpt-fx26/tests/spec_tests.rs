@@ -56,16 +56,16 @@ fn open_obligations_sorted_by_a_solver() {
         }
         let name = p.file_name().unwrap().to_string_lossy().into_owned();
         let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-        let (lines, _) = fixpt_fx26::verifying::report(&mut s.scheme, &text, Some(dir.into()), &[]).unwrap_or_else(|e| panic!("{name}: {e}"));
+        let (lines, _) = fixpt_fx26::verifying::report(&mut s.scheme, &text, Some(&name), Some(dir.into()), &[]).unwrap_or_else(|e| panic!("{name}: {e}"));
         said.insert(name, lines.join("\n"));
     }
     for (name, lines) in &said {
-        assert!(!lines.contains("  false: ") || FALSE.contains(&name.as_str()), "{name} said false:\n{lines}");
+        assert!(!lines.contains(": false: ") || FALSE.contains(&name.as_str()), "{name} said false:\n{lines}");
     }
     let has = |name: &str, what: &str| said[name].contains(what);
     assert!(has("square.fx", "`square`: verified") && has("square.fx", "by the SMT solver"), "{}", said["square.fx"]);
-    assert!(has("wrong-ensures.fx", "false: cell") && has("wrong-ensures.fx", "for x = "), "{}", said["wrong-ensures.fx"]);
-    assert!(has("wrong-requires.fx", "false: cell") && has("wrong-requires.fx", "the requires of clamp"), "{}", said["wrong-requires.fx"]);
-    let insert = "not inductive: cell 22 (prim): `assert`'s requires: it holds for e = 0, xs = (the ints nil), but the proof took (sorted? (insert 0 (the ints nil))) to be #f; it is #t";
+    assert!(has("wrong-ensures.fx", "at wrong-ensures.fx:5:27, `x`: the ensures: false: with x = -1, the result is -1"), "{}", said["wrong-ensures.fx"]);
+    assert!(has("wrong-requires.fx", "`(clamp x 0 5)`: the callee's requires: false: with x = 1, the requires of clamp does not hold"), "{}", said["wrong-requires.fx"]);
+    let insert = "at harness-insert.fx:20:47, `(assert (sorted? (insert e xs)))`: `assert`'s requires: not proved, as the proof knows too little of a call. It holds for e = 0, xs = (the ints nil); but for all the proof knows, (sorted? (insert 0 (the ints nil))) could be #f, where it is #t.";
     assert!(has("harness-insert.fx", insert), "{}", said["harness-insert.fx"]);
 }

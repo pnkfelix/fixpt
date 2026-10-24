@@ -338,7 +338,7 @@ pub fn repl(backend: Backend) -> i32 {
             }
             let only: Vec<String> = arg.split_whitespace().map(String::from).collect();
             let base = session.checker.base_dir.clone();
-            match fixpt_fx26::verifying::report(&mut session.scheme, &program, base, &only) {
+            match fixpt_fx26::verifying::report(&mut session.scheme, &program, None, base, &only) {
                 Ok((lines, _)) => lines.iter().for_each(|l| println!("; {l}")),
                 Err(e) => println!("; {e}"),
             }
@@ -721,7 +721,9 @@ pub fn verify(backend: Backend, name: &str, text: &str, only: &[String]) -> i32 
         Err(code) => return code,
     };
     let base = std::path::Path::new(name).parent().map(|d| d.to_path_buf());
-    match fixpt_fx26::verifying::report(&mut session.scheme, text, base, only) {
+    // A program given as text, not a file, has no name to say places by.
+    let file = std::path::Path::new(name).is_file().then_some(name);
+    match fixpt_fx26::verifying::report(&mut session.scheme, text, file, base, only) {
         Ok((lines, all)) => {
             for l in lines {
                 println!("{l}");

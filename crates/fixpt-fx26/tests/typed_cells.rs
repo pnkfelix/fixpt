@@ -75,7 +75,7 @@ fn verify_program(s: &mut Fx26Session, name: &str, text: &str, t: &mut Tally) {
     if let Some(why) = &v.unsettled {
         t.failed.push(format!("{name}: {why}"));
     }
-    for (word, o) in &v.words {
+    for (word, o, _) in &v.words {
         // The word, by its name, in what is said of it.
         let name = &format!("{name} `{}`", word.as_deref().unwrap_or("?"));
         if !o.verified() {

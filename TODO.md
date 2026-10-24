@@ -2875,6 +2875,9 @@ does not, which is named). Not yet:
   replayed; a VC of a `lambda` inside one, or of a list parameter the
   solver gave no value, is run at its first drawn value or not at all.
   A word named as a global is taken to be its `lambda`.
-- The places are cells, not source positions (§8's "at source places").
+- ~~The places are cells, not source positions~~: done the same day
+  (`Cert::sources`, each expression's cells and span). A place in a
+  loaded module is said only to be one, and the REPL's are the
+  expression alone (its program is the entries replayed).
 - One solver process per VC; z3's 2-second limit fixed.
 
