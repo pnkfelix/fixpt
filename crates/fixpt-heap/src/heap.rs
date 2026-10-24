@@ -304,6 +304,9 @@ pub struct Heap {
     /// Rust-side name lookup. Keys are plain `String`s, so a collection cannot
     /// invalidate them.
     symbol_index: HashMap<String, u32, std::hash::BuildHasherDefault<WordHasher>>,
+    /// A heap string's name, gathered to look it up (`intern_string`):
+    /// kept, so that a symbol found costs no allocation.
+    name_buf: String,
     /// `intern_static`'s: each name's address, and its symbol's index.
     static_symbols: Vec<(usize, u32)>,
     /// The global slot holding the native adapters' shared code, once one
@@ -397,6 +400,7 @@ impl Heap {
             globals: Vec::new(),
             symbols: Vec::new(),
             symbol_index: HashMap::default(),
+            name_buf: String::new(),
             static_symbols: Vec::new(),
             adapter_slot: None,
             gc_count: 0,
@@ -837,6 +841,24 @@ impl Heap {
     /// Collect a proper list into a `Vec`. Returns `None` for an improper list.
     /// A proper list's elements, or `None` if it is improper or cyclic (the
     /// hare, `v`, meets the tortoise, which moves every other step).
+    /// The length of `v` if it is a proper list: none for one that ends
+    /// otherwise, or is cyclic (found as `list_to_vec` finds it), with
+    /// nothing made.
+    pub fn list_len(&self, mut v: Value) -> Option<usize> {
+        let (mut n, mut slow) = (0, v);
+        while v.is_pair() {
+            n += 1;
+            v = self.cdr(v);
+            if n % 2 == 0 {
+                slow = self.cdr(slow);
+                if slow == v && v.is_pair() {
+                    return None;
+                }
+            }
+        }
+        v.is_null().then_some(n)
+    }
+
     pub fn list_to_vec(&self, mut v: Value) -> Option<Vec<Value>> {
         let mut out = Vec::new();
         let mut slow = v;
@@ -866,13 +888,52 @@ impl Heap {
     /// Strings are UTF-32 internally, two code points per word, so `string-ref`
     /// is O(1). UTF-8 would make the obvious character loop quadratic.
     pub fn make_string(&mut self, s: &str) -> Value {
-        let chars: Vec<char> = s.chars().collect();
-        self.string_from_chars(&chars)
+        let mut cs = s.chars();
+        self.string_with(s.chars().count(), |_, _| cs.next().expect("counted") as u32)
     }
 
     pub fn string_from_chars(&mut self, chars: &[char]) -> Value {
-        let points: Vec<u32> = chars.iter().map(|c| *c as u32).collect();
-        self.string_from_points(&points)
+        self.string_with(chars.len(), |_, k| chars[k] as u32)
+    }
+
+    /// A string of `n` code points, the `k`th `point(heap, k)`, asked in
+    /// order, written two to a word: nothing gathered first (`TODO.md`
+    /// §126: strings through Rust's vectors were a fifth of the
+    /// allocations loading kayak's compiler). `point` may read the heap;
+    /// allocation never collects, so what it reads stays where it is.
+    pub fn string_with(&mut self, n: usize, mut point: impl FnMut(&Heap, usize) -> u32) -> Value {
+        let o = self.alloc(ObjType::String, 1 + n.div_ceil(2), Value::fixnum(0));
+        let base = self.payload_base(o);
+        self.set_word(base, n as u64);
+        for k in 0..n.div_ceil(2) {
+            let lo = point(self, 2 * k) as u64;
+            let hi = if 2 * k + 1 < n { (point(self, 2 * k + 1) as u64) << 32 } else { 0 };
+            self.set_word(base + 1 + k, lo | hi);
+        }
+        o
+    }
+
+    /// Code point `i` of string `o`.
+    #[inline]
+    pub fn string_point(&self, o: Value, i: usize) -> u32 {
+        let w = self.obj_word(o, 1 + i / 2);
+        if i.is_multiple_of(2) { w as u32 } else { (w >> 32) as u32 }
+    }
+
+    /// Code points `start` to `end` of string `o`, a new string.
+    pub fn substring(&mut self, o: Value, start: usize, end: usize) -> Value {
+        self.string_with(end - start, |h, k| h.string_point(o, start + k))
+    }
+
+    /// Where string `sub` is first found in string `s` at or past code
+    /// point `from`, as a code point's index, or none (`from` past the end
+    /// of `s` finds nothing; an empty `sub` is found at `from`).
+    pub fn string_search(&self, s: Value, sub: Value, from: usize) -> Option<usize> {
+        let (n, m) = (self.string_len(s), self.string_len(sub));
+        if from > n {
+            return None;
+        }
+        (from..=n.checked_sub(m)?).find(|&i| (0..m).all(|k| self.string_point(s, i + k) == self.string_point(sub, k)))
     }
 
     /// A string of code points `ps`, written a word, two of them, at a time,
@@ -1014,9 +1075,18 @@ impl Heap {
     }
 
     pub fn string_to_rust(&self, o: Value) -> String {
-        let mut ps = Vec::new();
-        self.string_points_into(o, &mut ps);
-        ps.into_iter().map(|c| char::from_u32(c).expect("string holds valid code points")).collect()
+        let mut out = String::new();
+        self.string_into(o, &mut out);
+        out
+    }
+
+    /// String `o`'s characters, after what `out` holds.
+    pub fn string_into(&self, o: Value, out: &mut String) {
+        let n = self.string_len(o);
+        out.reserve(n);
+        for i in 0..n {
+            out.push(char::from_u32(self.string_point(o, i)).expect("string holds valid code points"));
+        }
     }
 
     pub fn make_bytevector(&mut self, bytes: &[u8]) -> Value {
@@ -1685,6 +1755,17 @@ impl Heap {
 
     /// Symbol payload: `[name:String, hash, global-slot]`. The global slot is
     /// allocated eagerly so a global reference is one array index, not a lookup.
+    /// `intern` of the name heap string `s` holds: found without making a
+    /// string of Rust's, if it is interned already.
+    pub fn intern_string(&mut self, s: Value) -> Value {
+        let mut name = std::mem::take(&mut self.name_buf);
+        name.clear();
+        self.string_into(s, &mut name);
+        let sym = self.intern(&name);
+        self.name_buf = name;
+        sym
+    }
+
     pub fn intern(&mut self, name: &str) -> Value {
         if let Some(&i) = self.symbol_index.get(name) {
             return self.symbols[i as usize];
