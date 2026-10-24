@@ -43,6 +43,10 @@ pub struct Fx26Session {
     /// (`front_end_as_register_code`): checked so, its closures made native
     /// as they are made, by the runtime's `adapt`, which must compile them.
     pub front_end_native: bool,
+    /// With it, the native front end is kept in its cache once run, native
+    /// code and all, not compiled again at each loading
+    /// (`FrontEndKept::NativeRun`).
+    pub native_keeping: Option<NativeKeeping>,
     /// Whether the program's convention is native (a `nativecc` machine;
     /// set by [`set_native_convention`](Fx26Session::set_native_convention)).
     native_convention: bool,
@@ -288,7 +292,7 @@ fn lowered_failure(m: String) -> String {
 /// of the front end's text and of the executable's size and time, so that a
 /// rebuilt compiler never reads what an older one made, but replaces it.
 /// `FIXPT_NO_CACHE` turns it off.
-fn front_end_cache(text: &str, native: bool) -> Option<(std::path::PathBuf, u64)> {
+fn front_end_cache(text: &str, kind: FrontEndKept) -> Option<(std::path::PathBuf, u64)> {
     use std::hash::{Hash, Hasher};
     if std::env::var_os("FIXPT_NO_CACHE").is_some() {
         return None;
@@ -296,7 +300,7 @@ fn front_end_cache(text: &str, native: bool) -> Option<(std::path::PathBuf, u64)
     let exe = std::env::current_exe().ok()?;
     let meta = std::fs::metadata(&exe).ok()?;
     let mut name = std::collections::hash_map::DefaultHasher::new();
-    (exe, native).hash(&mut name);
+    (exe, kind as u8).hash(&mut name);
     let mut key = std::collections::hash_map::DefaultHasher::new();
     (text, meta.len(), meta.modified().ok()).hash(&mut key);
     let home = std::env::var_os("HOME")?;
@@ -318,8 +322,90 @@ fn save_front_end(heap: &fixpt_heap::Heap, w: fixpt_heap::Value, path: &std::pat
     let mut alone = fixpt_heap::Heap::new();
     let copy = alone.copy_graph_from(heap, w);
     alone.push_root(copy);
+    write_front_end(&alone, path, key);
+}
+
+/// What a front end's cache keeps (`front_end_cache`, `as_register_code`).
+#[derive(Clone, Copy, PartialEq)]
+enum FrontEndKept {
+    /// Its compiled word, which is run at each loading.
+    Word,
+    /// The same, checked in the native convention.
+    NativeWord,
+    /// The native front end as it is once run: its entry points and all
+    /// they reach, native code too (`save_native_front_end`).
+    NativeRun,
+}
+
+/// What keeps the native front end once run (`FrontEndKept::NativeRun`):
+/// the native machine's call-outs, as numbers, and the taking on of some
+/// kept with code, if the machine's are where they begin
+/// (`fixpt_native::direct::callout_codes`, `adopt_callouts`); and a code
+/// bloblet's procedure's name, and the naming of one loaded
+/// (`code_name`, `note_code`), for a profile.
+#[derive(Clone, Copy)]
+pub struct NativeKeeping {
+    pub callouts: fn() -> Result<Vec<i64>, String>,
+    pub adopt: fn(&[i64]) -> Result<bool, String>,
+    pub name_of: fn(fixpt_heap::Value) -> Option<String>,
+    pub note: fn(&fixpt_heap::Heap, fixpt_heap::Value, &str),
+}
+
+/// The native front end once run, `pieces` its entry points' product, its
+/// code numbering its call-outs as `callouts`, copied out of `heap` into a
+/// heap of its own and written to `path` after `key`, as `save_front_end`
+/// writes: its root the list of the copy; the code bloblets among what it
+/// reaches (in the copy, which is all ordinary bloblets: an image has no
+/// code area), and their procedures' names (`name_of`, a string or `#f`);
+/// the copy of the heap's adapter code if it reaches it
+/// (`Heap::adapter_code`, else `#f`); and the call-outs (`kept_front_end`
+/// reads it).
+fn save_native_front_end(
+    heap: &fixpt_heap::Heap,
+    pieces: fixpt_heap::Value,
+    callouts: &[i64],
+    name_of: fn(fixpt_heap::Value) -> Option<String>,
+    path: &std::path::Path,
+    key: u64,
+) {
+    use fixpt_heap::Value;
+    let mut alone = fixpt_heap::Heap::new();
+    let (copy, made) = alone.copy_graph_mapped(heap, pieces, &|_| false, &[]);
+    let code: Vec<(Value, Value)> = made.iter().map(|(&k, &v)| (Value::from_raw(k), v)).filter(|&(k, _)| heap.is_code_bloblet(k)).collect();
+    let names: Vec<Value> = code.iter().map(|&(k, _)| name_of(k).map_or(Value::FALSE, |n| alone.make_string(&n))).collect();
+    let adapter = heap.adapter_code().and_then(|a| made.get(&a.raw()).copied()).unwrap_or(Value::FALSE);
+    let list = |h: &mut fixpt_heap::Heap, xs: &[Value]| xs.iter().rev().fold(Value::NULL, |l, &x| h.cons(x, l));
+    let codes = list(&mut alone, &code.iter().map(|&(_, v)| v).collect::<Vec<_>>());
+    let names = list(&mut alone, &names);
+    let callouts = list(&mut alone, &callouts.iter().map(|&c| Value::fixnum(c)).collect::<Vec<_>>());
+    let root = list(&mut alone, &[copy, codes, names, adapter, callouts]);
+    alone.push_root(root);
+    write_front_end(&alone, path, key);
+}
+
+/// `save_native_front_end`'s root, read from image `from`.
+struct KeptFrontEnd {
+    pieces: fixpt_heap::Value,
+    codes: Vec<fixpt_heap::Value>,
+    names: Vec<Option<String>>,
+    adapter: fixpt_heap::Value,
+    callouts: Vec<i64>,
+}
+
+/// The root image `from` has if `save_native_front_end` wrote it.
+fn kept_front_end(from: &fixpt_heap::Heap) -> Option<KeptFrontEnd> {
+    let parts = from.list_to_vec(*from.roots_slice().first()?)?;
+    let [pieces, codes, names, adapter, callouts] = parts[..] else { return None };
+    let callouts = from.list_to_vec(callouts)?.iter().map(|c| c.is_fixnum().then(|| c.as_fixnum())).collect::<Option<_>>()?;
+    let names = from.list_to_vec(names)?.iter().map(|&n| (!n.is_false()).then(|| from.string_to_rust(n))).collect();
+    Some(KeptFrontEnd { pieces, codes: from.list_to_vec(codes)?, names, adapter, callouts })
+}
+
+/// Image heap `alone`, written to `path` after `key`, as `save_front_end`
+/// says.
+fn write_front_end(alone: &fixpt_heap::Heap, path: &std::path::Path, key: u64) {
     let mut bytes = key.to_le_bytes().to_vec();
-    bytes.extend(fixpt_heap::image::dump(&alone));
+    bytes.extend(fixpt_heap::image::dump(alone));
     let Some(dir) = path.parent() else { return };
     if std::fs::create_dir_all(dir).is_err() {
         return;
@@ -453,6 +539,7 @@ impl Fx26Session {
             register_code: false,
             front_end_compiled: false,
             front_end_native: false,
+            native_keeping: None,
             native_convention: false,
             native_runner: None,
             native_compiler: None,
@@ -1181,10 +1268,20 @@ impl Fx26Session {
         // The front end in the native convention where its closures are
         // made native code, kept apart from the cellular one.
         let as_native = keep && self.front_end_native;
-        let cache = if keep { front_end_cache(&text, as_native) } else { None };
+        let keeping = self.native_keeping;
+        let kind = match (as_native, keeping) {
+            (true, Some(_)) => FrontEndKept::NativeRun,
+            (true, None) => FrontEndKept::NativeWord,
+            (false, _) => FrontEndKept::Word,
+        };
+        let cache = if keep { front_end_cache(&text, kind) } else { None };
         let cached = cache.as_ref().and_then(|(p, key)| {
             let b = std::fs::read(p).ok()?;
             (b.get(..8)? == key.to_le_bytes()).then(|| fixpt_heap::image::load(&b[8..]).ok())?
+        });
+        // Kept once run: used if its code's call-outs can be this machine's.
+        let cached = cached.filter(|from| {
+            kind != FrontEndKept::NativeRun || kept_front_end(from).is_some_and(|k| keeping.is_some_and(|n| (n.adopt)(&k.callouts) == Ok(true)))
         });
         let mut checked = None;
         if cached.is_none() {
@@ -1202,23 +1299,60 @@ impl Fx26Session {
         let limit = self.step_limit();
         self.scheme.engine.set_step_limit(None);
         let pieces: Result<(), String> = self.scheme.scope(|sc| {
-            let mut compiled = Err(String::new());
-            let word = sc.make(|m| {
-                if let Some(from) = &cached {
-                    compiled = Ok(m.heap().copy_graph_from(from, from.roots_slice()[0]));
-                } else if let Some((c, tops)) = &checked {
-                    let mut comp = crate::cellular::Compiler::new(m.heap(), c, &text);
-                    comp.registers = true;
-                    compiled = comp.program(tops);
-                    if let (Ok(w), Some((path, key))) = (&compiled, &cache) {
-                        save_front_end(m.heap(), *w, path, *key);
+            // Kept once run: copied in, its code into the code area, its
+            // adapter code the heap's; and run no more.
+            let kept = match (&cached, kind) {
+                (Some(from), FrontEndKept::NativeRun) => Some(sc.make(|m| {
+                    let k = kept_front_end(from).expect("checked above");
+                    let note = keeping.expect("kept so").note;
+                    let codes: std::collections::HashSet<u64> = k.codes.iter().map(|c| c.raw()).collect();
+                    let heap = m.heap();
+                    let adapter = k.adapter;
+                    let seeds: Vec<_> = heap.adapter_code().filter(|_| !adapter.is_false()).map(|a| (adapter, a)).into_iter().collect();
+                    let (copy, made) = heap.copy_graph_mapped(from, k.pieces, &|v| codes.contains(&v.raw()), &seeds);
+                    if let (false, None, Some(&a)) = (adapter.is_false(), heap.adapter_code(), made.get(&adapter.raw())) {
+                        heap.set_adapter_code(a);
                     }
+                    for (c, name) in k.codes.iter().zip(&k.names) {
+                        if let (Some(&c), Some(name)) = (made.get(&c.raw()), name) {
+                            note(heap, c, name);
+                        }
+                    }
+                    copy
+                })),
+                _ => None,
+            };
+            let pieces = match kept {
+                Some(p) => p,
+                None => {
+                    let mut compiled = Err(String::new());
+                    let word = sc.make(|m| {
+                        if let Some(from) = &cached {
+                            compiled = Ok(m.heap().copy_graph_from(from, from.roots_slice()[0]));
+                        } else if let Some((c, tops)) = &checked {
+                            let mut comp = crate::cellular::Compiler::new(m.heap(), c, &text);
+                            comp.registers = true;
+                            compiled = comp.program(tops);
+                            if let (Ok(w), Some((path, key)), false) = (&compiled, &cache, kind == FrontEndKept::NativeRun) {
+                                save_front_end(m.heap(), *w, path, *key);
+                            }
+                        }
+                        compiled.clone().unwrap_or(fixpt_heap::Value::FALSE)
+                    });
+                    compiled.map_err(|e| format!("{what} as register code: {e}"))?;
+                    let none = sc.make(|_| fixpt_heap::Value::NULL);
+                    let pieces = sc.call_global("%run-front-end", &[word, none]).map_err(|e| e.to_string())?;
+                    if let (Some((path, key)), FrontEndKept::NativeRun, Some(n)) = (&cache, kind, keeping) {
+                        let callouts = (n.callouts)()?;
+                        sc.make(|m| {
+                            let p = m.get(pieces);
+                            save_native_front_end(m.heap(), p, &callouts, n.name_of, path, *key);
+                            p
+                        });
+                    }
+                    pieces
                 }
-                compiled.clone().unwrap_or(fixpt_heap::Value::FALSE)
-            });
-            compiled.map_err(|e| format!("{what} as register code: {e}"))?;
-            let none = sc.make(|_| fixpt_heap::Value::NULL);
-            let pieces = sc.call_global("%run-front-end", &[word, none]).map_err(|e| e.to_string())?;
+            };
             // Each entry point in a global of its own, and the name the Rust
             // side calls made to call it.
             sc.make(|m| {

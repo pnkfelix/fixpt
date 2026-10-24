@@ -1443,12 +1443,24 @@ impl Heap {
     /// they are, frozen flags too; an interned symbol is this heap's symbol
     /// of the same name. For carrying compiled code between heaps (a cache
     /// of it in an image of its own). Nothing collects meanwhile: allocation
-    /// never does. Code in a code area is not carried; its reference, if
-    /// any, would be, and must be none.
+    /// never does. Code in a code area is carried as an ordinary bloblet
+    /// (`copy_graph_mapped` puts it back).
     pub fn copy_graph_from(&mut self, from: &Heap, root: Value) -> Value {
+        self.copy_graph_mapped(from, root, &|_| false, &[]).0
+    }
+
+    /// `copy_graph_from`, with each object that `code` says of (by its
+    /// reference in `from`) made in this heap's code area, its code made
+    /// runnable (`flush_code`); and each object `seeds` names, by its
+    /// reference in `from`, copied as this heap's object it is paired with,
+    /// not copied. A table keyed by identity is copied to be rehashed at its
+    /// next use (`fixpt_runtime::eqtable`: its stamp, field 1, a count of
+    /// collections no heap has), its keys' addresses being new. Gives the
+    /// copy of `root`, and each object's copy by its reference in `from`.
+    pub fn copy_graph_mapped(&mut self, from: &Heap, root: Value, code: &dyn Fn(Value) -> bool, seeds: &[(Value, Value)]) -> (Value, HashMap<u64, Value>) {
         use std::collections::hash_map::Entry;
         // First every object is made, empty; then the fields are filled in.
-        let mut made: HashMap<u64, Value> = HashMap::new();
+        let mut made: HashMap<u64, Value> = seeds.iter().map(|&(f, t)| (f.raw(), t)).collect();
         let mut order: Vec<Value> = Vec::new();
         let mut todo = vec![root];
         while let Some(v) = todo.pop() {
@@ -1474,7 +1486,8 @@ impl Heap {
             }
             let head = from.bloblet_head(v);
             let trailer = from.bloblet_has_trailer(v);
-            let copy = self.make_bloblet(head.kind, head.fields - trailer as usize, head.bytes, trailer);
+            let fields = head.fields - trailer as usize;
+            let copy = if code(v) { self.make_code_bloblet(head.kind, fields, head.bytes, trailer) } else { self.make_bloblet(head.kind, fields, head.bytes, trailer) };
             slot.insert(copy);
             order.push(v);
             for k in (1 + trailer as usize)..=head.fields {
@@ -1501,16 +1514,23 @@ impl Heap {
                 let x = map(from.slot(from.ix(v) - k));
                 self.set_bloblet_slot(copy, k, x);
             }
+            if head.kind == const { layout::kind("eqtable") } {
+                self.set_bloblet_slot(copy, 1, Value::fixnum(-1));
+            }
             for j in 0..head.bytes.div_ceil(8) {
                 let w = from.word(from.ix(v) + j);
                 let at = self.ix(copy) + j;
                 self.set_word(at, w);
             }
+            if self.is_code_bloblet(copy) {
+                self.flush_code(copy);
+            }
             if head.fields_frozen || head.suffix_frozen {
                 self.freeze_bloblet(copy, head.fields_frozen, head.suffix_frozen);
             }
         }
-        map(root)
+        let root = map(root);
+        (root, made)
     }
 
     /// A copy of what `root` reaches in this heap, but for what `share`

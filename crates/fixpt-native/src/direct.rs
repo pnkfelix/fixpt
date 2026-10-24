@@ -525,6 +525,53 @@ pub fn with_machine<T>(f: impl FnOnce(&mut DirectMachine) -> T) -> Result<T, Str
     })
 }
 
+thread_local! {
+    /// Each code bloblet `install` made, by its reference (code does not
+    /// move), its procedure's name: for code kept and loaded again
+    /// (`code_name`, `note_code`), which is not compiled where it runs. A
+    /// bloblet freed and its room reused is named again when it is.
+    static CODE_NAMES: std::cell::RefCell<HashMap<u64, String>> = std::cell::RefCell::new(HashMap::new());
+}
+
+/// The name of the procedure code bloblet `code` holds, if `install` made
+/// it on this thread.
+pub fn code_name(code: Value) -> Option<String> {
+    CODE_NAMES.with(|n| n.borrow().get(&code.raw()).cloned())
+}
+
+/// Code bloblet `code`, loaded, not compiled here, named `name` as
+/// `install` names what it makes, and `(kept)`: in the perf map, if one is
+/// written.
+pub fn note_code(heap: &Heap, code: Value, name: &str) {
+    if crate::symbols::enabled() {
+        crate::symbols::note(heap.code_exec_address(code), heap.bloblet_head(code).bytes, &format!("native {name} (kept)"));
+    }
+    CODE_NAMES.with(|n| n.borrow_mut().insert(code.raw(), name.to_string()));
+}
+
+/// This thread's machine's call-outs, by number, each as `fx::callout_code`
+/// has it: what code it compiled numbers its call-outs by, kept with the
+/// code where the code is kept (the front end's, `TODO.md` §126).
+pub fn callout_codes() -> Result<Vec<i64>, String> {
+    with_machine(|m| m.callouts.iter().map(|&c| fx::callout_code(c)).collect())
+}
+
+/// Call-outs `saved` (`callout_codes`) as this thread's machine's, so that
+/// code kept with them runs as it did where they were taken: if the
+/// machine's are where they begin (code compiled since would number its
+/// own otherwise). Whether it took them.
+pub fn adopt_callouts(saved: &[i64]) -> Result<bool, String> {
+    let saved: Vec<Callout> = saved.iter().map(|&c| fx::callout_of(c)).collect::<Result<_, _>>()?;
+    with_machine(|m| {
+        let n = m.callouts.len();
+        let fits = n <= saved.len() && m.callouts.iter().zip(&saved).all(|(&a, &b)| fx::callout_code(a) == fx::callout_code(b));
+        if fits {
+            m.callouts.extend_from_slice(&saved[n..]);
+        }
+        fits
+    })
+}
+
 /// A cellular closure compiled on this thread's machine: a native closure
 /// of the same code over the same values, or why not. So too an adapter
 /// cellular code made (`nclosure`): what it calls, compiled. Any other
@@ -1065,6 +1112,7 @@ fn install(heap: &mut Heap, procs: &[Proc], first: usize, free: &[Value]) -> Res
         if crate::symbols::enabled() {
             crate::symbols::note(heap.code_exec_address(blob), bytes.len(), &format!("native {}", p.name));
         }
+        CODE_NAMES.with(|n| n.borrow_mut().insert(blob.raw(), p.name.clone()));
     }
     let entry = native_closure(heap, blobs[first], free);
     Ok(procs

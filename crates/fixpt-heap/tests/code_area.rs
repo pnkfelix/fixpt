@@ -150,3 +150,44 @@ fn a_weak_reference_to_code_dies_with_it() {
     collect(&mut heap);
     assert_eq!(heap.weak_get(wk), None);
 }
+
+/// Code carried through an image, as the native front end's cache carries
+/// it (`copy_graph_mapped`, `TODO.md` §126): copied out as an ordinary
+/// bloblet (an image has no code area), dumped and loaded, and copied in
+/// again into the code area, its suffix and fields as they were, itself
+/// still its own field; an object named a seed copied as the one given; a
+/// table keyed by identity copied to be rehashed.
+#[test]
+fn code_carried_through_an_image_is_code_again() {
+    let mut heap = Heap::new();
+    let c = code(&mut heap, 12);
+    let pair = heap.cons(Value::fixnum(1), Value::fixnum(2));
+    heap.set_bloblet_slot(c, 1, pair);
+    heap.set_bloblet_slot(c, 2, c);
+    heap.set_bloblet_bytes(c, 0, b"twelve bytes").unwrap();
+    let table = heap.make_bloblet(layout::kind("eqtable"), 3, 0, false);
+    heap.set_bloblet_slot(table, 1, Value::fixnum(heap.collections() as i64));
+    let shared = heap.make_bloblet(raw(), 1, 0, false);
+    let root = [c, table, shared].iter().rev().fold(Value::NULL, |l, &x| heap.cons(x, l));
+    let mut alone = Heap::new();
+    let (copy, made) = alone.copy_graph_mapped(&heap, root, &|_| false, &[]);
+    assert!(!alone.is_code_bloblet(made[&c.raw()]), "carried as an ordinary bloblet");
+    alone.push_root(copy);
+    let image = fixpt_heap::image::load(&fixpt_heap::image::dump(&alone)).expect("loads");
+    let from = image.roots_slice()[0];
+    let parts = image.list_to_vec(from).unwrap();
+    let mut into = Heap::new();
+    let mine = into.make_bloblet(raw(), 1, 0, false);
+    let (back, made) = into.copy_graph_mapped(&image, from, &|v| v == parts[0], &[(parts[2], mine)]);
+    let back = into.list_to_vec(back).unwrap();
+    assert!(into.is_code_bloblet(back[0]) && made[&parts[0].raw()] == back[0]);
+    assert_eq!(into.bloblet_bytes(back[0]), b"twelve bytes");
+    assert_eq!(into.bloblet_slot(back[0], 2), back[0], "itself its own field");
+    let p = into.bloblet_slot(back[0], 1);
+    assert_eq!((into.car(p), into.cdr(p)), (Value::fixnum(1), Value::fixnum(2)));
+    assert_eq!(into.bloblet_slot(back[1], 1), Value::fixnum(-1), "the table to be rehashed");
+    assert_eq!(back[2], mine, "the seed is the one given");
+    into.push_root(back[0]);
+    collect(&mut into);
+    assert_eq!(into.bloblet_bytes(back[0]), b"twelve bytes");
+}

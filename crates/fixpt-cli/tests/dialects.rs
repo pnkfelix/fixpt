@@ -741,3 +741,48 @@ fn a_type_defined_twice_is_warned_of() {
     assert!(out.status.success() && stdout.contains("#t : t"), "{stdout}\n{stderr}");
     assert_eq!(stderr, format!("fixpt: <stdin>:2:1: {warning}\n"));
 }
+
+/// The front end native and kept once run (`TODO.md` §126,
+/// `FrontEndKept::NativeRun`): with a cache of its own, a program's first
+/// run makes it and keeps it, native code and all; its second loads it and
+/// runs nothing of it; each prints and ends as the other did.
+#[test]
+fn the_native_front_end_kept_runs_as_made() {
+    let cache = std::env::temp_dir().join(format!("fixpt-kept-front-end-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&cache);
+    let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
+    // What it printed and how it ended; and how many of the front end's
+    // procedures (named for a file it loads, `@10NN:`) it compiled natively,
+    // and how many it loaded kept (`(kept)`), from its perf map
+    // (`FIXPT_PERF_MAP`).
+    let run = |file: &str| {
+        let child = Command::new(FIXPT)
+            .args(["--dialect", "fx26", "--fx26-machine", "fx-regs-rsjit-nativecc", "run", &format!("{dir}/{file}")])
+            .env("XDG_CACHE_HOME", &cache)
+            .env("FIXPT_PERF_MAP", "1")
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("runs");
+        let map = format!("/tmp/perf-{}.map", child.id());
+        let out = child.wait_with_output().expect("ends");
+        let text = std::fs::read_to_string(&map).unwrap_or_default();
+        let _ = std::fs::remove_file(&map);
+        let front = |l: &str| l.split('@').skip(1).any(|p| p.len() > 4 && p.starts_with("10") && p[..4].bytes().all(|b| b.is_ascii_digit()) && p[4..].starts_with(':'));
+        let native = || text.lines().filter(|l| l.contains(" native ") && front(l));
+        let (kept, compiled) = (native().filter(|l| l.ends_with(" (kept)")).count(), native().filter(|l| !l.ends_with(" (kept)")).count());
+        ((out.status.code(), String::from_utf8_lossy(&out.stdout).into_owned(), String::from_utf8_lossy(&out.stderr).into_owned()), compiled, kept)
+    };
+    // `standard-values.fx` ends with an error: a failure's way out alike too.
+    for (i, file) in ["bitwise.fx", "fixed-width.fx", "unions.fx", "quote-identity.fx", "standard-values.fx"].into_iter().enumerate() {
+        let (made, compiled, _) = run(file);
+        let kept = std::fs::read_dir(cache.join("fixpt")).map(|d| d.count()).unwrap_or(0);
+        assert!(kept >= 1, "{file}: no front end kept");
+        assert!(i > 0 || (made.0 == Some(0) && compiled > 1000), "{file}: {made:?}, {compiled} compiled");
+        let (loaded, again, kept) = run(file);
+        assert_eq!(made, loaded, "{file}: as made, then as loaded");
+        assert_eq!(again, 0, "{file}: the front end compiled again");
+        assert!(kept > 1000, "{file}: {kept} kept procedures named");
+    }
+    let _ = std::fs::remove_dir_all(&cache);
+}

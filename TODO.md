@@ -3151,9 +3151,11 @@ alike to 0.1%. Take the runs after it.
   `reps_of`'s successors found once: loading 17.9G cycles to 16.8G,
   stage 0 27.0G to 26.1G (pinned, a busier machine than the figures
   above). Compiling the front end natively is now in every run, about
-  2.9G cycles. **Next**: keep its native code in the cache (the image
-  given the code area; the call-outs' table kept with the code, or the
-  code's call-out numbers made the machine's own on loading), worth
-  about 3G more; or the native compiler faster (some 580K cycles a
-  procedure), which serves kayak's compile too. Who mallocs is not
+  2.9G cycles.
+- ~~**Its native code kept**~~ (the user's, 2026-10-24): the front end
+  kept once run, native code and all (CLAUDES_CHOICES.md, "The native
+  front end kept once run"): loading 16.4G cycles to 13.1G, stage 0
+  25.6G to 22.3G. **Next**: profile again (kept code is named
+  `native NAME (kept)`); the native compiler faster (some 580K cycles a
+  procedure) for kayak's own procedures. Who mallocs is not
   seen (glibc has no frame pointers): a DWARF call graph would say.

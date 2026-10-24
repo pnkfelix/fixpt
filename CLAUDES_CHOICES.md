@@ -1765,3 +1765,32 @@ end's register words were 37% of loading kayak's compiler).
   the native code between runs would save the rest: images carry no
   code area yet, and code numbers its call-outs into its machine's
   table, which would have to be kept with it.
+
+## The native front end kept once run, native code and all (2026-10-24)
+
+The user: "lets cache the front end's native code too then."
+- **Kept once run, not run again**: the code natively compiled holds
+  what its callees' globals held when it was compiled (`global_value`:
+  a closure and its free values, module state among them, as constants).
+  Kept beside a word run again at each loading, that code would read the
+  old run's state, the new closures the new one's. So the cache holds
+  the front end as running it left it: its entry points' product and
+  all it reaches, cells, closures, state and code, one graph; loading
+  copies it in and runs nothing (`FrontEndKept::NativeRun`). What a run
+  leaves outside the heap graph would be lost; nothing in the tests or
+  stage 0 shows any.
+- **No new image format**: code is carried as ordinary bloblets, the
+  root listing which were code, and `copy_graph_mapped` makes those in
+  the code area again and makes them runnable. The adapters' code, known
+  by identity, is mapped onto the heap's (`seeds`). A table keyed by
+  identity is copied stale, to be rehashed (its stamp could match the new
+  heap's count of collections).
+- **Call-outs**: code numbers them into its machine's table, so the table
+  as the run left it is kept too, and a loading takes it only if this
+  machine's is where it begins (`adopt_callouts`); else the front end is
+  made afresh. The front end loads first, so the two agree.
+- **Names kept** (`code_name`, `note_code`), so that a profile names the
+  loaded code: `native NAME (kept)`.
+- **Its own cache file** (`FrontEndKept` in the name's hash).
+- Loading kayak's compiler (pinned) 16.4G cycles to 13.1G; kayak's stage
+  0 25.6G to 22.3G; a program's start from 0.63 s to 0.38 s.
