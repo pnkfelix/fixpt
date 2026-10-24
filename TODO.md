@@ -2969,6 +2969,19 @@ kayak's check no longer waits for it once kayak passes that machine.
   `char-whitespace?`, `char->integer`), each under 2%. Stage 0: 26.9 s
   to 17.4 s alone (three runs each, alternating, this machine busier than
   for the 22 s above), 17.5 s three at once; every output the same.
+- **What is left, profiled at 17 s**: 43% of the run in three of kayak's
+  own procedures, each a walk of the checker's whole list of facts for
+  one (file, pos), for every name the emitter asks of (`first-fact`
+  14%, `facts-at-place` 14%, `any?` over facts with a lambda 19%; and
+  `find-bind` 4%). Kayak's to change (an index of its facts, by place),
+  not ours; nothing of its compiler is declined now, and call-outs are
+  1%. Ours in those loops: every value goes through a frame slot, stored
+  and loaded again at once (`mov %rax,0x30(%rbp)` then `mov
+  0x30(%rbp),%rdi`), and an `i64` field is unboxed with a call-out
+  beside it. Values kept in registers across a procedure's straight-line
+  code would help every program, at most by some tens of percent here;
+  the samples fall mostly on the loads of the list's cells and the
+  facts' fields.
 - **`fast` on x86_64**: right again for this program. Whether one decline
   still sinks a module (or any definition) whole is the question left:
   a member the compiler declines could be adapted alone.
