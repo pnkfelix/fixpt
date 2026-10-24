@@ -1766,6 +1766,14 @@ impl Compiling<'_> {
                         string_eq(&mut a, r1, r2);
                         a.jmp(done);
                     }
+                    if prim_is("char-whitespace?", 1) {
+                        char_whitespace(&mut a, r1, slow);
+                        a.jmp(done);
+                    }
+                    if prim_is("%fx26-char-in?", 2) {
+                        char_in(&mut a, r1, r2);
+                        a.jmp(done);
+                    }
                     if prim_is("%fx26-suffix-ref-index", 3) {
                         suffix_index(&mut a, slow);
                         a.jmp(done);
@@ -2325,6 +2333,95 @@ fn string_eq(a: &mut Asm, x: Reg, y: Reg) {
     a.bind(end);
 }
 
+/// `%fx26-string<?` of the strings in `x` and `y`, into `RESULT`: the
+/// first code point that differs, unsigned, else the shorter
+/// (`Heap::string_cmp`). `x` and `y` kept until `RESULT` is written.
+fn string_lt(a: &mut Asm, x: Reg, y: Reg) {
+    let (again, differ, end) = (a.label(), a.label(), a.label());
+    a.e(load(X13, m(x, -4)));
+    a.e(load(X14, m(y, -4)));
+    a.e(mov(X15, X13));
+    a.e(cmp(X14, X15));
+    a.e(cmov(Cond::B, X15, X14));
+    a.imm(X16, 0);
+    a.bind(again);
+    a.e(cmp(X16, X15));
+    a.jcc(Cond::Ae, end);
+    a.e(load32(X9, mi(x, X16, 4, 4)));
+    a.e(load32(X11, mi(y, X16, 4, 4)));
+    a.e(cmp(X9, X11));
+    a.jcc(Cond::Ne, differ);
+    a.e(add_imm(X16, 1));
+    a.jmp(again);
+    a.bind(differ);
+    a.flag(Cond::B, X12);
+    let out = a.label();
+    a.jmp(out);
+    a.bind(end);
+    a.e(cmp(X13, X14));
+    a.flag(Cond::B, X12);
+    a.bind(out);
+}
+
+/// The code point of the character in `x`, into `into`; to `slow` if `x`
+/// is not a character.
+fn char_point(a: &mut Asm, x: Reg, into: Reg, slow: Label) {
+    a.e(mov(into, x));
+    a.e(and_imm(into, 0xff));
+    a.e(cmp_imm(into, Value::char('\0').raw() as i32));
+    a.jcc(Cond::Ne, slow);
+    a.e(mov(into, x));
+    a.e(shr_imm(into, 8));
+}
+
+/// `char-whitespace?` of the character in `x`, into `RESULT`: of ASCII
+/// here (tab, line feed, line tabulation, form feed, carriage return and
+/// space); of the rest, Unicode's, the primitive's, at `slow`, as of
+/// anything not a character.
+fn char_whitespace(a: &mut Asm, x: Reg, slow: Label) {
+    let (no, end) = (a.label(), a.label());
+    char_point(a, x, X13, slow);
+    a.e(cmp_imm(X13, 0x80));
+    a.jcc(Cond::Ae, slow);
+    a.e(cmp_imm(X13, 32));
+    a.jcc(Cond::A, no);
+    a.imm(X14, 1 << 32 | 0x3e00);
+    a.e(shift_cl(Shift::Shr, X14));
+    a.e(test_imm(X14, 1));
+    a.jcc(Cond::E, no);
+    a.imm(RESULT, Value::TRUE.raw());
+    a.jmp(end);
+    a.bind(no);
+    a.imm(RESULT, Value::FALSE.raw());
+    a.bind(end);
+}
+
+/// `%fx26-char-in?` of the character in `c` and the string in `s`, into
+/// `RESULT`: each of its characters, 32 bits, compared with the code point
+/// (the types say they are a character and a string).
+fn char_in(a: &mut Asm, c: Reg, s: Reg) {
+    let (again, yes, no, end) = (a.label(), a.label(), a.label(), a.label());
+    a.e(load(X13, m(s, -4)));
+    a.e(mov(X14, s));
+    a.e(mov(X15, c));
+    a.e(shr_imm(X15, 8));
+    a.bind(again);
+    a.e(test(X13, X13));
+    a.jcc(Cond::E, no);
+    a.e(load32(X16, m(X14, 4)));
+    a.e(cmp(X16, X15));
+    a.jcc(Cond::E, yes);
+    a.e(add_imm(X14, 4));
+    a.e(sub_imm(X13, 1));
+    a.jmp(again);
+    a.bind(yes);
+    a.imm(RESULT, Value::TRUE.raw());
+    a.jmp(end);
+    a.bind(no);
+    a.imm(RESULT, Value::FALSE.raw());
+    a.bind(end);
+}
+
 /// `REGr` (r ≥ 1) tested for a fixnum, to `general` if it is not one.
 fn check_fixnum(a: &mut Asm, r: usize, general: Label) {
     let r = a.get(r, X16);
@@ -2570,6 +2667,17 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
             a.e(shl_imm(X16, 3));
             a.e(mov(RESULT, X16));
         }
+        // A character's code point, from its bits; the tag tested, as the
+        // primitive's own refusal is the slow path's.
+        "char->integer" => {
+            char_point(a, x, X13, slow);
+            a.e(shl_imm(X13, 3));
+            a.e(mov(RESULT, X13));
+        }
+        // A symbol's hash, its first field as `intern` keeps it (the type
+        // says it is a symbol: fields after the header, then a trailer).
+        "%symbol-hash" => a.e(load(RESULT, m(x, super::field_off(3) as i32))),
+        "%fx26-string<?" => string_lt(a, x, y),
         "string-ref" => {
             a.e(test_imm(y, 7));
             a.jcc(Cond::Ne, slow);

@@ -92,6 +92,13 @@
         ((string=? name "%fx26-arithmetic-shift") (begin (dq-shift y slow) #t))
         ((or (string=? name "bytevector-length") (string=? name "string-length"))
          (begin (da-ld d-x13 x -4) (dq-fixnum-of d-x13) #t))
+        ;; A character's code point, from its bits, the tag tested; a symbol's
+        ;; hash, its first field; two strings' order.
+        ((string=? name "char->integer")
+         (begin (dq-char-point x d-x13 slow) (da-e (x86-shift-imm da-shl d-x13 3))
+                (da-mov d-result d-x13) #t))
+        ((string=? name "%symbol-hash") (begin (da-ld d-result x (dq-fld 3)) #t))
+        ((string=? name "%fx26-string<?") (begin (dq-string-lt x y) #t))
         ;; A string's character at its index, 32 bits each after its length.
         ((string=? name "string-ref")
          (begin
@@ -683,6 +690,10 @@
         (if (dq-prim-is? c "%fx26-bytevector-u8-set!" 3) (df-bytes-set slow done) #u)
         (if (dq-prim-is? c "%fx26-suffix-ref-set!" 3) (df-suffix-set slow done) #u)
         (if (dq-prim-is? c "string=?" 2) (begin (dq-string-eq r1 r2) (da-jmp done)) #u)
+        (if (dq-prim-is? c "char-whitespace?" 1)
+            (begin (dq-char-whitespace r1 slow) (da-jmp done))
+            #u)
+        (if (dq-prim-is? c "%fx26-char-in?" 2) (begin (dq-char-in r1 r2) (da-jmp done)) #u)
         (if (dq-prim-is? c "%fx26-suffix-ref-index" 3)
             (begin (df-suffix-index slow) (da-jmp done))
             #u)
@@ -752,6 +763,96 @@
         (da-jcc da-c-ne no)
         (da-e (x86-alu-imm da-add d-x14 4))
         (da-e (x86-alu-imm da-add d-x15 4))
+        (da-e (x86-alu-imm da-sub d-x13 1))
+        (da-jmp again)
+        (da-bind yes)
+        (da-imm d-result d-true)
+        (da-jmp end)
+        (da-bind no)
+        (da-imm d-result d-false)
+        (da-bind end)))))
+
+;; `%fx26-string<?` of the strings in `x` and `y`, into `RESULT`: the
+;; first code point that differs, unsigned, else the shorter
+;; (`Heap::string_cmp`); `x` and `y` kept until `RESULT` is written.
+(define dq-string-lt (subr da-assembles (int int) unit)
+  (lambda (x y)
+    (let ((again (da-label)) (differ (da-label)) (end (da-label)) (out (da-label)))
+      (begin
+        (da-ld d-x13 x -4)
+        (da-ld d-x14 y -4)
+        (da-mov d-x15 d-x13)
+        (da-e (x86-alu da-cmp d-x14 d-x15))
+        (da-e (x86-cmov da-c-b d-x15 d-x14))
+        (da-imm d-x16 0)
+        (da-bind again)
+        (da-e (x86-alu da-cmp d-x16 d-x15))
+        (da-jcc da-c-ae end)
+        (da-e (x86-load32-ix d-x9 x d-x16 4 4))
+        (da-e (x86-load32-ix d-x11 y d-x16 4 4))
+        (da-e (x86-alu da-cmp d-x9 d-x11))
+        (da-jcc da-c-ne differ)
+        (da-e (x86-alu-imm da-add d-x16 1))
+        (da-jmp again)
+        (da-bind differ)
+        (da-flag da-c-b d-x12)
+        (da-jmp out)
+        (da-bind end)
+        (da-e (x86-alu da-cmp d-x13 d-x14))
+        (da-flag da-c-b d-x12)
+        (da-bind out)))))
+
+;; The code point of the character in `x`, into `into`; to `slow` if `x` is
+;; not a character.
+(define dq-char-point (subr da-assembles (int int int) unit)
+  (lambda (x into slow)
+    (begin
+      (da-mov into x)
+      (da-e (x86-alu-imm da-and into 255))
+      (da-e (x86-alu-imm da-cmp into d-char0))
+      (da-jcc da-c-ne slow)
+      (da-mov into x)
+      (da-e (x86-shift-imm da-shr into 8)))))
+
+;; `char-whitespace?` of the character in `x`, into `RESULT`: of ASCII here
+;; (tab, line feed, line tabulation, form feed, carriage return, space); of
+;; the rest, Unicode's, the primitive's at `slow`, as of what is not one.
+(define dq-char-whitespace (subr da-assembles (int int) unit)
+  (lambda (x slow)
+    (let ((no (da-label)) (end (da-label)))
+      (begin
+        (dq-char-point x d-x13 slow)
+        (da-e (x86-alu-imm da-cmp d-x13 128))
+        (da-jcc da-c-ae slow)
+        (da-e (x86-alu-imm da-cmp d-x13 32))
+        (da-jcc da-c-a no)
+        (da-imm d-x14 (+ (arithmetic-shift 1 32) 15872))
+        (da-e (x86-shift-cl da-shr d-x14))
+        (da-e (x86-test-imm d-x14 1))
+        (da-jcc da-c-e no)
+        (da-imm d-result d-true)
+        (da-jmp end)
+        (da-bind no)
+        (da-imm d-result d-false)
+        (da-bind end)))))
+
+;; `%fx26-char-in?` of the character in `c` and the string in `s`, into
+;; `RESULT`: each of its characters, 32 bits, compared with the code point.
+(define dq-char-in (subr da-assembles (int int) unit)
+  (lambda (c s)
+    (let ((again (da-label)) (yes (da-label)) (no (da-label)) (end (da-label)))
+      (begin
+        (da-ld d-x13 s -4)
+        (da-mov d-x14 s)
+        (da-mov d-x15 c)
+        (da-e (x86-shift-imm da-shr d-x15 8))
+        (da-bind again)
+        (da-e (x86-test d-x13 d-x13))
+        (da-jcc da-c-e no)
+        (da-e (x86-load32-ix d-x16 d-x14 -1 1 4))
+        (da-e (x86-alu da-cmp d-x16 d-x15))
+        (da-jcc da-c-e yes)
+        (da-e (x86-alu-imm da-add d-x14 4))
         (da-e (x86-alu-imm da-sub d-x13 1))
         (da-jmp again)
         (da-bind yes)

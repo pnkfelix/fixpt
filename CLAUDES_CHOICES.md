@@ -1794,3 +1794,21 @@ The user: "lets cache the front end's native code too then."
 - **Its own cache file** (`FrontEndKept` in the name's hash).
 - Loading kayak's compiler (pinned) 16.4G cycles to 13.1G; kayak's stage
   0 25.6G to 22.3G; a program's start from 0.63 s to 0.38 s.
+
+## Characters, symbols and strings read in line, native convention on x86_64 (2026-10-24)
+
+The user, of kayak's stage 0's 18M call-outs: "1 then 2". Five
+primitives in line in both compilers (`pure_fast` and the call-out
+path; `dq-pure-fast`, `dq-callouts`), some 10M of the call-outs:
+`char->integer`, `%symbol-hash`, `%fx26-string<?`; `char-whitespace?`,
+`%fx26-char-in?`.
+- **A character's tag tested, a string's or a symbol's not**: as
+  `string=?` and `string-ref` already are, the types say what a string
+  or a symbol is; a character's bits are tested (one `and` and a `cmp`),
+  and anything else is the primitive's to refuse, at the slow path.
+- **`char-whitespace?` of ASCII only**: tab to carriage return and space,
+  by a mask; a code point past 0x7F is Unicode's, by the primitive
+  (`char::is_whitespace`), which the test's `far-spaces` exercises.
+- **`string<?` as `Heap::string_cmp`**: code points compared unsigned,
+  then the lengths; the other three orders left to the call-out.
+- Stage 0 22.2G cycles to 21.1G, 49.7G instructions to 46.6G.
