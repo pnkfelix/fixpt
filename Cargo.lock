@@ -18,6 +18,7 @@ dependencies = [
  "fixpt-fx87",
  "fixpt-fx91",
  "fixpt-heap",
+ "fixpt-memmgmt",
  "fixpt-native",
  "fixpt-read",
  "fixpt-runtime",

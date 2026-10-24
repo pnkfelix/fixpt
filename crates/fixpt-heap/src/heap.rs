@@ -1736,6 +1736,13 @@ impl Heap {
         debug_assert!(self.is_a(sym, ObjType::Symbol));
         self.string_to_rust(self.fixed(sym, 3, 0))
     }
+    /// The string that is symbol `sym`'s name, itself: the symbol's, not
+    /// to be written (`symbol->string` copies it).
+    #[inline]
+    pub fn symbol_name_string(&self, sym: Value) -> Value {
+        debug_assert!(self.is_a(sym, ObjType::Symbol));
+        self.fixed(sym, 3, 0)
+    }
     #[inline]
     pub fn symbol_global_slot(&self, sym: Value) -> usize {
         debug_assert!(self.is_a(sym, ObjType::Symbol));

@@ -125,7 +125,12 @@ const COMMANDS: [&str; 19] = [
     "front-end-files", "help", "regcode-survey", "--help",
 ];
 
+/// Rust's allocations, counted, and sampled with `FIXPT_ALLOC_PROFILE`.
+#[global_allocator]
+static ALLOCATOR: fixpt_memmgmt::alloc_profile::Counting = fixpt_memmgmt::alloc_profile::Counting;
+
 fn main() {
+    fixpt_memmgmt::alloc_profile::start();
     // A binary that carries an image *is* that program: it owns its whole
     // command line, and never looks like the driver that built it.
     if let Some(heap) = image_run::embedded_in_self() {
@@ -151,6 +156,7 @@ fn main() {
     // it, however it ended (`TODO.md` §95).
     let _ = fixpt_runtime::tty::restore();
     let code = code.unwrap_or_else(|e| std::panic::resume_unwind(e));
+    fixpt_memmgmt::alloc_profile::report();
     std::process::exit(code);
 }
 

@@ -425,7 +425,43 @@ pub(super) fn reps_of(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) ->
 }
 
 /// Successors of each instruction, by index into `starts`.
-fn successors(cells: &[Value], starts: &[usize]) -> Vec<Vec<usize>> {
+/// An instruction's successors, by index into `starts`: none, one or two
+/// (a branch's fall-through and its target), in place, not a vector each
+/// (`TODO.md` §126: a vector each was the commonest of Rust's allocations
+/// loading kayak's compiler). A slice of them, as it derefs.
+#[derive(Clone, Copy, Default)]
+struct Succ {
+    n: u8,
+    t: [usize; 2],
+}
+
+impl Succ {
+    fn of(ts: impl IntoIterator<Item = usize>) -> Succ {
+        let mut s = Succ::default();
+        for t in ts {
+            s.t[s.n as usize] = t;
+            s.n += 1;
+        }
+        s
+    }
+}
+
+impl std::ops::Deref for Succ {
+    type Target = [usize];
+    fn deref(&self) -> &[usize] {
+        &self.t[..self.n as usize]
+    }
+}
+
+impl<'a> IntoIterator for &'a Succ {
+    type Item = &'a usize;
+    type IntoIter = std::slice::Iter<'a, usize>;
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+fn successors(cells: &[Value], starts: &[usize]) -> Vec<Succ> {
     let ns = starts.len();
     // Each instruction's index, by the cell it starts at.
     let mut at = vec![usize::MAX; cells.len() + 1];
@@ -439,10 +475,10 @@ fn successors(cells: &[Value], starts: &[usize]) -> Vec<Vec<usize>> {
             let to = || at.get((i as i64 + 1 + n as i64 + cells[i + n].as_fixnum()) as usize).copied().filter(|&t| t != usize::MAX);
             let next = (si + 1 < ns).then_some(si + 1);
             match op {
-                "return" | "tailinvoke" => vec![],
-                "branch" => to().into_iter().collect(),
-                "branchf" | "brancht" | "global-guard" => next.into_iter().chain(to()).collect(),
-                _ => next.into_iter().collect(),
+                "return" | "tailinvoke" => Succ::default(),
+                "branch" => Succ::of(to()),
+                "branchf" | "brancht" | "global-guard" => Succ::of(next.into_iter().chain(to())),
+                _ => Succ::of(next),
             }
         })
         .collect()
@@ -466,7 +502,7 @@ pub(super) fn refs_and_live(cells: &[Value], starts: &[usize], prim: &dyn Fn(usi
 
 /// `raw_refs`, from the demands as each instruction starts and the ways
 /// out of each.
-fn refs_of(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str, before: &[Demands], succ: &[Vec<usize>]) -> Vec<bool> {
+fn refs_of(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str, before: &[Demands], succ: &[Succ]) -> Vec<bool> {
     let ns = starts.len();
     (0..ns)
         .map(|si| {
@@ -517,7 +553,7 @@ pub(super) fn live_in(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) ->
 
 /// What each instruction asks of the registers as it starts (the backward
 /// fixpoint of `demand_step`), and each instruction's successors.
-fn demands(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str, raw: &[bool]) -> (Vec<Demands>, Vec<Vec<usize>>) {
+fn demands(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str, raw: &[bool]) -> (Vec<Demands>, Vec<Succ>) {
     let ns = starts.len();
     let succ = successors(cells, starts);
     let mut before = vec![[Demand::None; 9]; ns];

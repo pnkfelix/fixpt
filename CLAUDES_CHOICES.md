@@ -1812,3 +1812,28 @@ path; `dq-pure-fast`, `dq-callouts`), some 10M of the call-outs:
 - **`string<?` as `Heap::string_cmp`**: code points compared unsigned,
   then the lengths; the other three orders left to the call-out.
 - Stage 0 22.2G cycles to 21.1G, 49.7G instructions to 46.6G.
+
+## Who allocates in Rust: a sampling global allocator (2026-10-24)
+
+The user: "we should figure out how to profile more effectively; *we*
+are the one's malloc'ing, right?"
+- **The global allocator wrapped, in `fixpt-memmgmt`**: an allocator is
+  `unsafe` to write, and the CLI denies `unsafe`; `fixpt-memmgmt` is
+  where the workspace keeps memory from the system, and allows it. The
+  CLI installs it (`#[global_allocator]`); off, it costs a load and a
+  test each allocation.
+- **Sampled, by the standard library's `Backtrace`**: every `N`th
+  allocation's stack, resolved only at the end, so that a run of 10M
+  allocations at one in 1,000 takes 10,000 stacks; no crate added. A
+  thread-local flag keeps the sampler's own allocations out.
+- **Grouped by the first three frames in Fixpt's crates**, past the
+  allocator's and the standard library's: where in our code, which is
+  what a fix needs.
+- Its first findings fixed with it: `reps::successors`' vector for each
+  instruction (now none, two in place) and `symbol->string`'s round trip
+  through Rust's strings (now a copy in the heap): 14.4M allocations to
+  10.3M loading kayak's compiler; that loading 12.45G cycles to 11.93G,
+  stage 0 21.05G to 20.6G.
+- With them, the call-out's arguments on the stack, not a vector, and
+  `collection_due`'s thresholds in integers (three quarters as a
+  fraction, the same test): some 0.5% of stage 0.
