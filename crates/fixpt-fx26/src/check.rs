@@ -2399,8 +2399,10 @@ impl Checker {
     }
 
     pub(crate) fn free_into(&self, e: ExpId, bound: &mut Vec<Sym>, out: &mut Vec<Sym>) {
-        match self.arena.exp_at(e).clone() {
-            Exp::Var(s) => {
+        // The node by reference, not cloned (`TODO.md` §126: its clone
+        // was a tenth of the checker's allocations loading kayak's compiler).
+        match self.arena.exp_at(e) {
+            &Exp::Var(s) => {
                 if !bound.contains(&s) && !out.contains(&s) {
                     out.push(s);
                 }
@@ -2409,43 +2411,43 @@ impl Checker {
             Exp::Lambda { params, body } => {
                 let depth = bound.len();
                 bound.extend(params.iter().map(|(n, _)| *n));
-                self.free_into(body, bound, out);
+                self.free_into(*body, bound, out);
                 bound.truncate(depth);
             }
             Exp::App { fun, args } => {
-                self.free_into(fun, bound, out);
+                self.free_into(*fun, bound, out);
                 for a in args {
-                    self.free_into(a, bound, out);
+                    self.free_into(*a, bound, out);
                 }
             }
-            Exp::PLambda { body, .. } | Exp::Proj { body, .. } => self.free_into(body, bound, out),
+            Exp::PLambda { body, .. } | Exp::Proj { body, .. } => self.free_into(*body, bound, out),
             Exp::RLambda { region, lambda } => {
-                self.free_into(region, bound, out);
-                self.free_into(lambda, bound, out);
+                self.free_into(*region, bound, out);
+                self.free_into(*lambda, bound, out);
             }
-            Exp::LetRegion { region, body, .. } => {
+            &Exp::LetRegion { region, body, .. } => {
                 bound.push(self.arena.dvar_name(region));
                 self.free_into(body, bound, out);
                 bound.pop();
             }
             Exp::If { test, then, els } => {
                 for x in [test, then, els] {
-                    self.free_into(x, bound, out);
+                    self.free_into(*x, bound, out);
                 }
             }
             Exp::Letrec { bindings, body } => {
                 let depth = bound.len();
                 bound.extend(bindings.iter().map(|(n, _, _)| *n));
-                for (_, _, init) in &bindings {
+                for (_, _, init) in bindings.iter() {
                     self.free_into(*init, bound, out);
                 }
-                self.free_into(body, bound, out);
+                self.free_into(*body, bound, out);
                 bound.truncate(depth);
             }
             // Every item sees every name, as a `letrec*`'s (`crate::modorder`).
             Exp::Module(items) => {
                 let depth = bound.len();
-                for item in &items {
+                for item in items.iter() {
                     match item {
                         crate::ast::ModItem::Abs { up, down, .. } => bound.extend([*up, *down]),
                         crate::ast::ModItem::Desc { .. } => {}
@@ -2453,7 +2455,7 @@ impl Checker {
                         crate::ast::ModItem::Rec(group) => bound.extend(group.iter().map(|(n, _, _)| *n)),
                     }
                 }
-                for item in &items {
+                for item in items.iter() {
                     match item {
                         crate::ast::ModItem::Val { init, .. } => self.free_into(*init, bound, out),
                         crate::ast::ModItem::Rec(group) => {
@@ -2471,8 +2473,8 @@ impl Checker {
             // module is an earlier item of one being ordered, a module as
             // written (`hazard_modules`).
             // The standard `n`: nothing free.
-            Exp::With { module, .. } if self.is_fx_module(module) => {}
-            Exp::With { module, body } => {
+            &Exp::With { module, .. } if self.is_fx_module(module) => {}
+            &Exp::With { module, body } => {
                 let unbound = !bound.contains(&module);
                 if unbound && !out.contains(&module) {
                     out.push(module);
@@ -2498,47 +2500,47 @@ impl Checker {
                 bound.truncate(depth);
             }
             Exp::Let { bindings, body } => {
-                for (_, init) in &bindings {
+                for (_, init) in bindings.iter() {
                     self.free_into(*init, bound, out);
                 }
                 let depth = bound.len();
                 bound.extend(bindings.iter().map(|(n, _)| *n));
-                self.free_into(body, bound, out);
+                self.free_into(*body, bound, out);
                 bound.truncate(depth);
             }
             Exp::Begin(items) => {
                 for i in items {
-                    self.free_into(i, bound, out);
+                    self.free_into(*i, bound, out);
                 }
             }
             Exp::Prompt { tag, body, handler } => {
                 for x in [tag, body, handler] {
-                    self.free_into(x, bound, out);
+                    self.free_into(*x, bound, out);
                 }
             }
-            Exp::The { exp, .. } | Exp::Convention { exp, .. } => self.free_into(exp, bound, out),
+            Exp::The { exp, .. } | Exp::Convention { exp, .. } => self.free_into(*exp, bound, out),
             Exp::Bloblet { args, .. } => {
                 for a in args {
-                    self.free_into(a, bound, out);
+                    self.free_into(*a, bound, out);
                 }
             }
             Exp::Product(fields) => {
                 for (_, x) in fields {
-                    self.free_into(x, bound, out);
+                    self.free_into(*x, bound, out);
                 }
             }
-            Exp::Extract(x, _) | Exp::Sum(_, x) => self.free_into(x, bound, out),
+            Exp::Extract(x, _) | Exp::Sum(_, x) => self.free_into(*x, bound, out),
             Exp::TagCase { scrutinee, arms, els } => {
-                self.free_into(scrutinee, bound, out);
-                for arm in &arms {
+                self.free_into(*scrutinee, bound, out);
+                for arm in arms.iter() {
                     let depth = bound.len();
                     bound.extend(arm.names());
                     self.free_into(arm.body, bound, out);
                     bound.truncate(depth);
                 }
                 if let Some((y, body)) = els {
-                    bound.push(y);
-                    self.free_into(body, bound, out);
+                    bound.push(*y);
+                    self.free_into(*body, bound, out);
                     bound.pop();
                 }
             }

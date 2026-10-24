@@ -2824,8 +2824,9 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         // `define-rec`'s, each binding's), for `with_includes`.
         let (mut includes, mut spans): (Vec<(fixpt_read::Span, ExpId, bool)>, Vec<Vec<fixpt_read::Span>>) = (Vec::new(), Vec::new());
         // The forms to read, the first last, each hidden or not (`(hide
-        // item …)`, `TODO.md` §69).
-        let work: Vec<(Syntax, bool)> = forms.iter().rev().map(|f| (f.clone(), false)).collect();
+        // item …)`, `TODO.md` §69): the module's own borrowed, not copied
+        // (`TODO.md` §126), and what a `hide` expands to owned.
+        let work: Vec<(std::borrow::Cow<'_, Syntax>, bool)> = forms.iter().rev().map(|f| (std::borrow::Cow::Borrowed(f), false)).collect();
         // A module with `include`s, in a `hide` or not: their types are in
         // scope in its items (`include_scope`).
         let includes_here = forms.iter().any(|f| self.includes_in(f));
@@ -2854,19 +2855,19 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     #[allow(clippy::type_complexity)]
     fn module_items_from(
         &mut self,
-        mut work: Vec<(Syntax, bool)>,
+        mut work: Vec<(std::borrow::Cow<'_, Syntax>, bool)>,
         out: &mut Vec<ModItem>,
         includes: &mut Vec<(fixpt_read::Span, ExpId, bool)>,
         spans: &mut Vec<Vec<fixpt_read::Span>>,
     ) -> R<()> {
         while let Some((f, hidden)) = work.pop() {
-            let f = &f;
+            let f: &Syntax = &f;
             // A string: a comment, read past (in a `hide` too, and among a
             // module file's forms).
             if f.as_str().is_some() {
                 continue;
             }
-            let parts = self.items(f, "a module's definition")?.to_vec();
+            let parts = self.items(f, "a module's definition")?;
             // `(hide item …)`: its items, their `define-datatype`s expanded,
             // each hidden.
             if self.head(&parts) == Some("hide") {
@@ -2874,7 +2875,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                 for item in &parts[1..] {
                     self.expand_datatype(item.clone(), &mut inner)?;
                 }
-                work.extend(inner.into_iter().rev().map(|item| (item, true)));
+                work.extend(inner.into_iter().rev().map(|item| (std::borrow::Cow::Owned(item), true)));
                 continue;
             }
             let before = out.len();

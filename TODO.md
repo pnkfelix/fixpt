@@ -3159,5 +3159,17 @@ alike to 0.1%. Take the runs after it.
   0.55M, the Rust checker's `cyclic::walk` 0.44M and `Exp::clone` 0.4M,
   `procedure_x64` 0.36M, `ty_kids` 0.34M, the reader's `read_atom`
   0.3M; strings between Rust and the heap (`string_points_into`,
-  `String::from_iter`) some 0.8M more. Who mallocs is not
+  `String::from_iter`) some 0.8M more.
+- ~~**Loading's allocations**~~ (the user's, 2026-10-24): 10.3M to 5.8M
+  (CLAUDES_CHOICES.md, "Fewer of Rust's allocations loading"): loading
+  11.97G cycles to 11.26G, stage 0 20.65G to 19.4G. **Left**, by the
+  profile (`FIXPT_ALLOC_DEPTH`, each function where first met): the
+  reader's `read_atom` (unescaped atoms now slices; the rest) and its
+  lists' growth; each form read twice by the Rust reader, once to find
+  its loads (`syn::supply_loaded_in`) and again for its syntax (a text
+  test to skip the first cannot know the forms that load implicitly,
+  `spawn`, `send`, `self` among them: tried, and wrong); `Lowerer::go`'s
+  strings; `Datum::clone` in `top_defining` and `record` (a form kept
+  twice; an `Rc` would share it); `Ty::clone` in `regions_walk` and
+  `knot_in`; `param_sels`' set. Who mallocs is not
   seen (glibc has no frame pointers): a DWARF call graph would say.
