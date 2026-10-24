@@ -132,3 +132,21 @@ fn a_hole_in_the_middle_is_reused() {
     assert!(heap.code_words().1 > span, "no hole left for another: {e:?} goes past the end");
     heap.pop_roots_to(ra);
 }
+
+/// A weak reference to a code bloblet: kept while the bloblet lives, which
+/// never moves; dead once a collection frees it (not left pointing at the
+/// room it was in, which the area gives again).
+#[test]
+fn a_weak_reference_to_code_dies_with_it() {
+    let mut heap = Heap::new();
+    let kept = code(&mut heap, 32);
+    let dropped = code(&mut heap, 32);
+    let (wk, wd) = (heap.weak_add(kept), heap.weak_add(dropped));
+    let root = heap.push_root(kept);
+    collect(&mut heap);
+    assert_eq!(heap.weak_get(wk), Some(kept), "the live one, where it was");
+    assert_eq!(heap.weak_get(wd), None, "the freed one, dead");
+    heap.pop_roots_to(root);
+    collect(&mut heap);
+    assert_eq!(heap.weak_get(wk), None);
+}

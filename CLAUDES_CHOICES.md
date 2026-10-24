@@ -1649,13 +1649,24 @@ The user asked for perf map support first, for kayak's stage 0
 ## Kayak's stage 0: what kept it from native code (2026-10-24)
 
 The user: "Do 1 and 2 please. I suspect we have a big performance gap and
-we shouldn't be asking kayak to work around it." About 610 s → 26 s.
+we shouldn't be asking kayak to work around it." About 610 s → 22 s,
+by the first two below.
 - **`tagcase` loads only the fields its arm uses**, in both register
   compilers, rather than a leaf retried with a frame: the narrower change,
   and the one that makes an accessor of any width a leaf. The retry stays
   in TODO §121.
 - **No closure size limit on x86_64**, in both of its native compilers:
   the limit was arm64's (`ldur`, 9 bits) copied over. Arm64 still has it.
+- **A cellular closure compiled natively as it is made** (`adapt`), not
+  the call-out made cheaper: a call then costs a native call's, and
+  nothing crosses. Compiled once per word, cached by weak references to
+  the word and its code. Weak references into the code area now die
+  when a major collection frees what they refer to: they were kept as
+  if alive, the area never moving. Only where the thread's own machine
+  runs the code (`compile_when_adapting`, which the CLI's native sessions
+  set): compiled code names its call-outs by their number in the machine
+  that compiled it, and a test or bench that makes a machine of its own
+  would run it on the wrong one.
 - **A decline's note is kept** when the pass that compiles a definition's
   procedures after compiles none (a module), and replaced by that pass's
   own when it fails; cleared only when it succeeds, as before.

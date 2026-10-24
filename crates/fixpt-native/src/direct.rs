@@ -550,10 +550,27 @@ pub fn compile_closure(heap: &mut Heap, closure: Value) -> Result<Value, String>
 /// ldr  x16, [x24, #foreign]
 /// br   x16
 /// ```
+///
+/// A cellular closure whose code the native compiler takes is not adapted
+/// but made again natively, over the same values (a native closure has them
+/// where a cellular one does, so a `letrec`'s patch finds them): native code
+/// then calls it as it calls its own, not out to a cellular machine. Its
+/// code is compiled once for its word (`native_code_of`), on this thread's
+/// machine, so only where that machine runs it (`compile_when_adapting`):
+/// compiled code names its call-outs by their number in the machine that
+/// compiled it.
 pub fn adapt(rt: &mut fixpt_runtime::Runtime, f: Value, arity: usize, native: bool) -> Result<Value, String> {
     let heap = &mut rt.heap;
     if !native {
         return Ok(fixpt_engine::cellular::cellular_adapter(heap, f, arity));
+    }
+    if COMPILE_ADAPTED.get()
+        && heap.bloblet_kind(f) == const { fixpt_heap::layout::kind("cellular-closure") }
+        && let Some(code) = native_code_of(heap, f)
+    {
+        let fields = heap.bloblet_head(f).fields;
+        let free: Vec<Value> = (CLOSURE_FREE0..=fields).map(|k| heap.bloblet_slot(f, k)).collect();
+        return Ok(native_closure(heap, code, &free));
     }
     // The code, made once and shared (`Heap::adapter_code`), so that an
     // adapter is known by it (`Heap::adapted`).
@@ -571,6 +588,76 @@ pub fn adapt(rt: &mut fixpt_runtime::Runtime, f: Value, arity: usize, native: bo
         }
     };
     Ok(native_closure(heap, blob, &[f]))
+}
+
+thread_local! {
+    /// Whether `adapt` compiles what it is given (`compile_when_adapting`).
+    static COMPILE_ADAPTED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// Each cellular word `adapt` compiled, by its reference when compiled:
+    /// the word's weak reference, and its code's, or none if the compiler
+    /// declined it. An entry is the word's only while its weak reference
+    /// still finds it there; one whose word moved or died is let go.
+    static NATIVE_OF_WORD: std::cell::RefCell<(HashMap<u64, (usize, Option<usize>)>, usize)> = std::cell::RefCell::new((HashMap::new(), 64));
+}
+
+/// The native code of cellular closure `f`'s word, compiled the first time
+/// it is asked for; none if the compiler declines it, or cannot compile now
+/// (its machine running: a closure made by cellular code native code
+/// called), which is asked again next time.
+fn native_code_of(heap: &mut Heap, f: Value) -> Option<Value> {
+    let word = heap.bloblet_slot(f, CLOSURE_WORD);
+    let known = NATIVE_OF_WORD.with(|t| t.borrow().0.get(&word.raw()).copied());
+    match known {
+        Some((w, code)) if heap.weak_get(w) == Some(word) => match code.map(|c| heap.weak_get(c)) {
+            Some(Some(code)) => return Some(code),
+            None => return None,
+            // Its code collected: compiled again.
+            Some(None) => forget_word(heap, word.raw()),
+        },
+        Some(_) => forget_word(heap, word.raw()),
+        None => {}
+    }
+    let busy = MACHINE.with(|m| m.try_borrow_mut().is_err());
+    if busy {
+        return None;
+    }
+    let code = compile_closure(heap, f).ok().map(|c| heap.bloblet_slot(c, CLOSURE_WORD));
+    let entry = (heap.weak_add(word), code.map(|c| heap.weak_add(c)));
+    NATIVE_OF_WORD.with(|t| {
+        let mut t = t.borrow_mut();
+        t.0.insert(word.raw(), entry);
+        // Entries whose words moved or died, let go now and then.
+        if t.0.len() > t.1 {
+            let stale: Vec<u64> = t.0.iter().filter(|(k, (w, _))| heap.weak_get(*w).map(|v| v.raw()) != Some(**k)).map(|(k, _)| *k).collect();
+            for k in stale {
+                let (w, c) = t.0.remove(&k).expect("listed");
+                heap.weak_release(w);
+                if let Some(c) = c {
+                    heap.weak_release(c);
+                }
+            }
+            t.1 = 2 * t.0.len().max(32);
+        }
+    });
+    code
+}
+
+/// Whether `adapt` compiles a cellular closure natively where it can, on
+/// this thread: for a session whose native code all runs on this thread's
+/// machine (`with_machine`), as the CLI's does; not one that runs it on a
+/// machine of its own.
+pub fn compile_when_adapting(on: bool) {
+    COMPILE_ADAPTED.set(on);
+}
+
+/// The entry for the word at `raw`, let go.
+fn forget_word(heap: &mut Heap, raw: u64) {
+    if let Some((w, c)) = NATIVE_OF_WORD.with(|t| t.borrow_mut().0.remove(&raw)) {
+        heap.weak_release(w);
+        if let Some(c) = c {
+            heap.weak_release(c);
+        }
+    }
 }
 
 /// The native adapter's code (`adapt`), the same for every adapter.
@@ -918,6 +1005,12 @@ impl DirectMachine {
     /// bloblet of its own: what it compiled, the first first; or why it
     /// could not.
     pub fn compile(&mut self, heap: &mut Heap, closure: Value) -> Result<Vec<(String, Compiled)>, String> {
+        // Native already (`adapt` made it so): itself.
+        if let Some(c) = Self::compiled_of(heap, closure)
+            && heap.adapted(closure).is_none()
+        {
+            return Ok(vec![(String::new(), c)]);
+        }
         // A global's procedure that cannot be compiled is called as what is
         // not native code, and the rest compiled again without it.
         let mut refused = std::collections::HashSet::new();

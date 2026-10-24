@@ -2019,6 +2019,17 @@ impl Heap {
         }
         update_weak(mem, self.base, &mut self.weak, from, false);
         update_weak_pairs(mem, self.base, &c.weak_pairs, from, false);
+        // The code area's bloblets never move, so the update above keeps a
+        // weak reference to one; one not found live is swept just below.
+        for w in self.weak.iter_mut() {
+            if w.is_bloblet()
+                && !w.is_suffix_ref()
+                && code::in_code_area(w.index() - self.base)
+                && find_main(mem, w.index() - self.base).is_ok_and(|main| !c.code_marks.contains(&main))
+            {
+                *w = WEAK_DEAD;
+            }
+        }
         let Copier { free, new, marked, code_marks, .. } = c;
         self.sweep_code(&code_marks);
         // Ended reaps' chunks no reference was found into may be reused;

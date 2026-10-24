@@ -2935,8 +2935,8 @@ and 2.9 billion cells in 200 s; an inner lambda called 66 million times,
 run takes **37 s at kayak's pin, 39 s on main**, its output the same, so
 kayak's check no longer waits for it once kayak passes that machine.
 
-**Fixed the same day: 26 s on `fx-regs-rsjit-nativecc`** (from about
-610 s; every output the same). What was wrong:
+**Fixed the same day: 22 s on `fx-regs-rsjit-nativecc`** (from about
+610 s; three at once, 23 s; every output the same). What was wrong:
 - ~~**Why the emitter's members are not native.**~~ A definition's value
   is compiled natively whole, or not at all: `emitter`'s, a module, was
   declined for one accessor of a 9-field record with no register code
@@ -2946,11 +2946,17 @@ kayak's check no longer waits for it once kayak passes that machine.
   The reason was said nowhere: the note of the decline was overwritten by
   the pass that compiles the definition's procedures after, which lets a
   module be. Now kept when that pass compiles nothing.
-- **`call_value` on the Rust interpreter.** Native code calling a
-  cellular closure runs it on Rust's inner interpreter, building a word
-  and a machine for each call, and copying every native frame
-  (`call_foreign`): about 3 µs a call, on a member of a module held
-  cellular. Kayak's no longer meets it.
+- ~~**`call_value` on the Rust interpreter.**~~ A cellular closure made
+  in a native program (`nclosure`) is compiled natively as it is made,
+  where the compiler takes it, its code once per word (`direct::adapt`,
+  `native_code_of`; weak references, which now die with code the code
+  area frees): native code calls it with no call-out. 3 µs a call to 40
+  ns, on a member of a module held cellular. Only on `rsjit` machines:
+  the compiler written in FX-26 (`fxjit`) does not yet compile at `adapt`
+  (its oracle compares the call-outs each compiler made). Not yet: a
+  closure made while the native machine runs (cellular code native code
+  called) is adapted still, its machine busy; and a call-out that is made
+  still builds a word and copies every native frame (`call_foreign`).
 - **`fast` on x86_64**: right again for this program. Whether one decline
   still sinks a module (or any definition) whole is the question left:
   a member the compiler declines could be adapted alone.

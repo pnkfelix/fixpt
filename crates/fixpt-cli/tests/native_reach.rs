@@ -1,6 +1,6 @@
 //! What reaches the native convention (`fx-regs-rsjit-nativecc`), as the
 //! code `FIXPT_SYMBOLS` names shows: kayak's compiler ran 25 times slower
-//! for want of it (`TODO.md` §121).
+//! for want of each (`TODO.md` §121).
 
 #![cfg(target_arch = "x86_64")]
 
@@ -38,4 +38,15 @@ fn a_wide_records_accessor_is_native() {
     assert!(out.contains("8 : int"), "{out}");
     assert!(!out.contains("not in the native convention"), "{out}");
     assert!(has_native(&names, "big-8"), "no native `big-8`:\n{names}");
+}
+
+/// A closure cellular code makes, where no native code is running (a
+/// definition held cellular by `stay-cellular`), is compiled natively as it
+/// is made, not adapted: native code calls it with no call-out to a
+/// cellular machine.
+#[test]
+fn a_closure_cellular_code_makes_is_native() {
+    let (out, names) = run("made", include_str!("programs/native-reach/made-closure.fx"));
+    assert!(out.contains("5000 : int"), "{out}");
+    assert!(has_native(&names, "adder@"), "no native `adder`:\n{names}");
 }

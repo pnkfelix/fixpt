@@ -107,8 +107,14 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
         s.set_native_convention(true);
         s.native_runner = Some(run_native);
         s.native_compiler = Some(fixpt_native::direct::compile_closure);
+        // What cellular code makes, compiled natively where it can be, on
+        // the machine `run_native` runs on: by the compiler written in Rust,
+        // so not where the one written in FX-26 makes each procedure's code
+        // (`TODO.md` §121).
+        let by_fx26 = crate::NATIVE_BY_FX26.get().copied().unwrap_or(false);
+        fixpt_native::direct::compile_when_adapting(!by_fx26);
         // Each procedure's code made by the compiler written in FX-26.
-        if crate::NATIVE_BY_FX26.get().copied().unwrap_or(false) {
+        if by_fx26 {
             s.native_fx = Some(compile_by_fx26);
             s.native_runner = Some(run_native_fx);
         }
