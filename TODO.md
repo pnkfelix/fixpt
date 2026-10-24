@@ -3053,3 +3053,47 @@ The leads before the profile, in order:
 - **A top-level expression's thunk** is still named for where its body
   starts (`lambda@11`), in the native convention: a run's last form,
   kayak's call of its compiler, would show so in a profile.
+
+## 122. A list's cells near what they hold, where the collector copies them (2026-10-24)
+
+Stage 0 waits on data cache misses (§121, "Instruction selection,
+tried"): a walk of kayak's facts reads, for each, a pair, a fact record,
+and a string's header, mostly on lines of their own. A collector that
+copies a pair's `car` (and its fields) just after the pair, depth first
+along `cdr`, would put a walk's reads on fewer lines, for any program
+that walks a list. First measure: the lines a fact costs now (the
+distance between a pair, its `car` and the `car`'s fields, from a dump
+of the heap after a collection), and the misses per fact visited
+(`l2_cache_req_stat.ls_rd_blk_c` over the walks' iterations).
+
+## 123. Kayak's facts indexed by place (kayak's, to propose; 2026-10-24)
+
+78% of stage 0's L2 misses are in `any?`'s lambda, `facts-at-place`,
+`first-fact` and `find-bind` (§121): linear walks of every fact, at
+every name the emitter asks about. An index by file and position (a
+hash table, or the facts sorted) would remove the walks. Kayak's code
+(`kfx/emit.kfx`), not ours: to propose to kayak, not to edit there
+unasked.
+
+## 124. Frame slots in more registers, native convention on x86_64 (2026-10-24)
+
+The slot cache (CLAUDES_CHOICES.md, "Frame slots held in registers")
+has only `RESULT` and REG1…REG3: all 16 registers are given out, 8 as
+scratch (`X9`, `X11`–`X17`). A quarter of stage 0's loads read a slot
+just stored (§121, "Memory traffic, measured"). Zen 2 renames those
+through `rbp` at no latency, so this machine shows little; on one
+without (Zen 3, most of Intel's) each is a store forward's few cycles.
+Wants: the helpers that use every scratch register found and made to
+use fewer, then free scratch registers holding slots across straight
+line code. Measure on a processor without memory renaming, if one is
+to hand.
+
+## 125. Slow paths out of line, native convention on x86_64 (2026-10-24)
+
+Each operation's slow path (an unboxing's call-out, about 20
+instructions; `int_slows` already are out of line) sits in line, jumped
+over by the fast path (`test`, `jne`, `sar`, `jmp`). Out of line, the
+fast path falls through and the code is denser in the instruction
+cache. Stage 0's instruction fetches miss L2 0.27G times a run against
+1.66G data reads (§121), so expect little there; measure on a program
+whose hot code is larger than the instruction cache.
