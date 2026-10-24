@@ -966,29 +966,39 @@ impl Checker {
                 return true;
             }
             path.push((t, by_param));
-            let kids: Vec<(TyId, bool)> = match c.arena.get(t) {
-                Ty::Subr { params, result, .. } => params.iter().map(|p| (*p, true)).chain([(*result, false)]).collect(),
-                Ty::Composable { arg, answer, .. } => vec![(*arg, true), (*answer, false)],
-                Ty::PromptTag { answer, payload, .. } => vec![(*answer, false), (*payload, false)],
-                Ty::Poly { body, .. } => vec![(*body, false)],
-                Ty::Ref(a, _) | Ty::Array(a, _, _) | Ty::ICell(a, _) | Ty::MarkKey(a, _) => vec![(*a, false)],
-                Ty::Pair(a, b, _, _) => vec![(*a, false), (*b, false)],
-                Ty::Bloblet { fields, .. } => fields.iter().map(|f| (*f, false)).collect(),
-                Ty::Product(ps) | Ty::Sum(ps) => ps.iter().map(|(_, t)| (*t, false)).collect(),
-                Ty::Union(ms) => ms.iter().map(|t| (*t, false)).collect(),
-                Ty::NList { elem, .. } => vec![(*elem, false)],
+            // Each kid walked in turn, and none after one that may loop: no
+            // vector of them made (`TODO.md` §126).
+            let mut r = false;
+            let mut go = |k: TyId, p: bool| {
+                if !r {
+                    r = walk(c, k, p, path);
+                }
+            };
+            match c.arena.get(t) {
+                Ty::Subr { params, result, .. } => {
+                    params.iter().for_each(|p| go(*p, true));
+                    go(*result, false);
+                }
+                Ty::Composable { arg, answer, .. } => [(*arg, true), (*answer, false)].into_iter().for_each(|(k, p)| go(k, p)),
+                Ty::PromptTag { answer, payload, .. } => [*answer, *payload].into_iter().for_each(|k| go(k, false)),
+                Ty::Poly { body, .. } => go(*body, false),
+                Ty::Ref(a, _) | Ty::Array(a, _, _) | Ty::ICell(a, _) | Ty::MarkKey(a, _) => go(*a, false),
+                Ty::Pair(a, b, _, _) => [*a, *b].into_iter().for_each(|k| go(k, false)),
+                Ty::Bloblet { fields, .. } => fields.iter().for_each(|f| go(*f, false)),
+                Ty::Product(ps) | Ty::Sum(ps) => ps.iter().for_each(|(_, t)| go(*t, false)),
+                Ty::Union(ms) => ms.iter().for_each(|t| go(*t, false)),
+                Ty::NList { elem, .. } => go(*elem, false),
                 // Through its representation; what it was given, cautiously,
                 // as if taken as a parameter.
-                Ty::Named { which, args } => [(c.generatives[*which as usize].rep, false)]
-                    .into_iter()
-                    .chain(args.iter().flat_map(|d| c.d_types(d)).map(|x| (x, true)))
-                    .collect(),
+                Ty::Named { which, args } => {
+                    go(c.generatives[*which as usize].rep, false);
+                    args.iter().flat_map(|d| c.d_types(d)).for_each(|x| go(x, true));
+                }
                 // A description function applied, unseen: what it was
                 // given, cautiously, as if taken as a parameter.
-                Ty::App { args, .. } => args.iter().flat_map(|d| c.d_types(d)).map(|x| (x, true)).collect(),
-                _ => vec![],
-            };
-            let r = kids.into_iter().any(|(k, p)| walk(c, k, p, path));
+                Ty::App { args, .. } => args.iter().flat_map(|d| c.d_types(d)).for_each(|x| go(x, true)),
+                _ => {}
+            }
             path.pop();
             r
         }

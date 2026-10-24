@@ -624,6 +624,21 @@ impl<'a> Reader<'a> {
     /// symbol again.
     fn read_atom(&mut self) -> ReadResult<Syntax> {
         let start = self.pos;
+        // The common atom, with no `|…|` and no `\c`: its text a slice of
+        // the source, no string made (`TODO.md` §126: a string for each
+        // atom was a fortieth of Rust's allocations loading kayak's
+        // compiler). Read as the loop below reads it.
+        let src: &'a str = self.src;
+        let end = src[start..].find(|c: char| self.is_delimiter(c) || c == '|' || c == '\\').map_or(src.len(), |k| start + k);
+        if end > start && !matches!(src[end..].chars().next(), Some('|' | '\\')) {
+            self.pos = end;
+            let (text, span) = (&src[start..end], self.span_from(start));
+            if let Some(n) = parse_number(text, 10, None) {
+                return Ok(Syntax::new(span, Datum::Number(n)));
+            }
+            let s = if self.profile.case_fold { self.interner.intern(&text.to_lowercase()) } else { self.interner.intern(text) };
+            return Ok(Syntax::symbol(span, s));
+        }
         let mut text = String::new();
         // `escaped` records whether any part was written `|…|` or `\c`, which
         // suppresses case folding and forces a symbol interpretation.

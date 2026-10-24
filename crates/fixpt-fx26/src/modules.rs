@@ -869,7 +869,7 @@ impl Checker {
                 continue;
             }
             nodes.push(n);
-            stack.extend(self.ty_kids(n).into_iter().map(|k| self.arena.resolve(k)));
+            self.each_ty_kid(n, |k| stack.push(self.arena.resolve(k)));
         }
         let names_given = |e: &Effect| e.0.iter().any(|a| matches!(a, Atom::Var(v) if given.contains_key(v)));
         let mut dirty: HashSet<TyId> = nodes
@@ -1013,7 +1013,7 @@ impl Checker {
                 }
                 _ => {}
             }
-            stack.extend(self.ty_kids(t));
+            self.each_ty_kid(t, |k| stack.push(k));
         }
         out
     }
@@ -1049,7 +1049,7 @@ impl Checker {
                     None => {}
                 }
             }
-            stack.extend(self.ty_kids(t));
+            self.each_ty_kid(t, |k| stack.push(k));
         }
         Ok(())
     }
@@ -1082,9 +1082,7 @@ impl Checker {
             out.push((*m, *n, t));
             return;
         }
-        for k in self.ty_kids(t) {
-            self.selects_in(k, seen, out);
-        }
+        self.each_ty_kid(t, |k| self.selects_in(k, seen, out));
     }
 
     /// Whether type variable `v` is somewhere in `t`.
@@ -1099,30 +1097,40 @@ impl Checker {
             if matches!(self.arena.get(t), Ty::Var(w) if *w == v) {
                 return true;
             }
-            stack.extend(self.ty_kids(t));
+            self.each_ty_kid(t, |k| stack.push(k));
         }
         false
     }
 
     /// The types `t` is made of, one level down.
     pub(crate) fn ty_kids(&self, t: TyId) -> Vec<TyId> {
+        let mut out = Vec::new();
+        self.each_ty_kid(t, |k| out.push(k));
+        out
+    }
+
+    /// `f` of each of the types `t` is made of, one level down, in
+    /// `ty_kids`'s order: no vector made (`TODO.md` §126: `ty_kids`'
+    /// vectors were the commonest of the checker's allocations loading
+    /// kayak's compiler).
+    pub(crate) fn each_ty_kid(&self, t: TyId, mut f: impl FnMut(TyId)) {
+        let arg = |d: &D| if let D::Type(x) | D::Fun(x) = d { Some(*x) } else { None };
         match self.arena.get(self.arena.resolve(t)) {
-            Ty::Base(_) | Ty::Void | Ty::Nil | Ty::False | Ty::Var(_) | Ty::Nat(_) | Ty::Place(_) | Ty::Select(..) | Ty::ParamSel(..) | Ty::Link(_) => Vec::new(),
-            Ty::Union(ms) => ms.clone(),
-            Ty::Subr { params, result, .. } => params.iter().copied().chain([*result]).collect(),
-            Ty::Poly { body, .. } => vec![*body],
-            Ty::Ref(a, _) | Ty::Array(a, _, _) | Ty::ICell(a, _) | Ty::MarkKey(a, _) => vec![*a],
-            Ty::Pair(a, b, _, _) => vec![*a, *b],
-            Ty::PromptTag { answer, payload, .. } => vec![*answer, *payload],
-            Ty::Composable { arg, answer, .. } => vec![*arg, *answer],
-            Ty::Product(ps) | Ty::Sum(ps) => ps.iter().map(|(_, x)| *x).collect(),
-            Ty::Bloblet { fields, .. } => fields.clone(),
-            Ty::Named { args, .. } => args.iter().filter_map(|d| if let D::Type(x) | D::Fun(x) = d { Some(*x) } else { None }).collect(),
-            Ty::App { fun, args } => [*fun].into_iter().chain(args.iter().filter_map(|d| if let D::Type(x) | D::Fun(x) = d { Some(*x) } else { None })).collect(),
-            Ty::Lam { body: D::Type(x) | D::Fun(x), .. } => vec![*x],
-            Ty::Lam { .. } => Vec::new(),
-            Ty::NList { elem, .. } => vec![*elem],
-            Ty::Module { descs, vals, .. } => descs.iter().chain(vals).map(|(_, x)| *x).collect(),
+            Ty::Base(_) | Ty::Void | Ty::Nil | Ty::False | Ty::Var(_) | Ty::Nat(_) | Ty::Place(_) | Ty::Select(..) | Ty::ParamSel(..) | Ty::Link(_) => {}
+            Ty::Union(ms) | Ty::Bloblet { fields: ms, .. } => ms.iter().copied().for_each(f),
+            Ty::Subr { params, result, .. } => params.iter().copied().chain([*result]).for_each(f),
+            Ty::Poly { body, .. } => f(*body),
+            Ty::Ref(a, _) | Ty::Array(a, _, _) | Ty::ICell(a, _) | Ty::MarkKey(a, _) => f(*a),
+            Ty::Pair(a, b, _, _) => [*a, *b].into_iter().for_each(f),
+            Ty::PromptTag { answer, payload, .. } => [*answer, *payload].into_iter().for_each(f),
+            Ty::Composable { arg, answer, .. } => [*arg, *answer].into_iter().for_each(f),
+            Ty::Product(ps) | Ty::Sum(ps) => ps.iter().map(|(_, x)| *x).for_each(f),
+            Ty::Named { args, .. } => args.iter().filter_map(arg).for_each(f),
+            Ty::App { fun, args } => [*fun].into_iter().chain(args.iter().filter_map(arg)).for_each(f),
+            Ty::Lam { body: D::Type(x) | D::Fun(x), .. } => f(*x),
+            Ty::Lam { .. } => {}
+            Ty::NList { elem, .. } => f(*elem),
+            Ty::Module { descs, vals, .. } => descs.iter().chain(vals).map(|(_, x)| *x).for_each(f),
         }
     }
 
@@ -1179,9 +1187,7 @@ impl Checker {
             }
             return;
         }
-        for k in self.ty_kids(t) {
-            self.param_sels(k, seen, out);
-        }
+        self.each_ty_kid(t, |k| self.param_sels(k, seen, out));
     }
 
     /// A dependent procedure's parameter and result types for a call with

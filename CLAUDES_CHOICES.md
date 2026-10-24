@@ -1837,3 +1837,37 @@ are the one's malloc'ing, right?"
 - With them, the call-out's arguments on the stack, not a vector, and
   `collection_due`'s thresholds in integers (three quarters as a
   fraction, the same test): some 0.5% of stage 0.
+
+## Fewer of Rust's allocations loading (2026-10-24)
+
+The user: "see what you can do about all those allocations during
+loading". 10.3M to 5.8M loading kayak's compiler, by the sampling
+allocator's report, each fix where it pointed:
+- **Strings in the heap, not through Rust's**: `string_with` makes a
+  string of `n` code points from a function of each, nothing gathered
+  first; `make_string`, `string_from_chars`, `substring`,
+  `string_search` (code point by code point, as `str::find` found by
+  characters), `string`, `list->string`, `string->list` and `reverse`
+  (consed as walked) on it; `string->symbol` interns through a buffer the
+  heap keeps (`intern_string`). The errors are the old ones, in the old
+  order; a cyclic list is still refused (`list_len`, Floyd's, as
+  `list_to_vec`'s), which the suite caught missing at first, and which
+  `cyclic-list-string.fx` now tests.
+- **The native compiler**: `webs`' lists by key in two vectors each
+  (`Grouped`), its work lists kept from one slot to the next, a block's
+  leader from a count of predecessors; `procedure_x64`'s successors in
+  place (`reps::Succ`).
+- **The Rust checker**: `each_ty_kid` in place of `ty_kids`' vector where
+  a caller only walks them; `cyclic`'s walk of each kid in turn, none
+  after one that may loop, as `any` was; `free_into` matching its node by
+  reference, not a clone.
+- **The parser and reader**: a module's forms borrowed, not copied, onto
+  its work list (a `Cow`, what a `hide` expands to owned); an atom with
+  no escape read as a slice of the source.
+- **Tried and dropped**: skipping `supply_loaded_in`'s reading of a text
+  that names no load: forms load implicitly (`spawn`, `send`, `self`, …,
+  for the processes' module), so a test of the text is wrong, as the
+  suite showed, and for names that short, would rarely skip.
+- The report itself: each function counted where first met in a stack,
+  so that a recursion of any shape is one frame; `FIXPT_ALLOC_DEPTH` for
+  more than three.
