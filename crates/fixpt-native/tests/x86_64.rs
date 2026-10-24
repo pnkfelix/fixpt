@@ -2,8 +2,8 @@
 //! checks the arm64 one: each instruction written out as assembly text (in
 //! the assembler's Intel syntax), assembled by `as`, and its bytes compared
 //! with the encoder's; and the disassembler reading the encoder's bytes back
-//! as that text. On a machine that is not x86_64, binutils for it
-//! (`x86_64-linux-gnu-as`), which macOS's `as` is not.
+//! as that text. On macOS, its own `as` (LLVM's), for x86_64; on another
+//! machine that is not x86_64, binutils for it (`x86_64-linux-gnu-as`).
 
 use fixpt_native::x86_64::disasm::disassemble;
 use fixpt_native::x86_64::*;
@@ -19,27 +19,42 @@ fn assemble(lines: &[String]) -> Vec<Vec<u8>> {
     // a symbol table gives where each starts.
     let mut text = String::from(".intel_syntax noprefix\n.text\n");
     for (i, l) in lines.iter().enumerate() {
+        // LLVM's assembler, macOS's, takes no `.` in an Intel operand: the
+        // line's own label is where it starts.
+        let l = if cfg!(target_os = "macos") { l.replace(" .+", &format!(" i{i}+")).replace(" .-", &format!(" i{i}-")) } else { l.clone() };
         text += &format!("i{i}:\n{l}\n");
     }
     text += &format!("i{}:\n", lines.len());
     let (src, obj, bin) = (dir.join("t.s"), dir.join("t.o"), dir.join("t.bin"));
     std::fs::write(&src, text).expect("writes");
-    let prefix = if cfg!(target_arch = "x86_64") { "" } else { "x86_64-linux-gnu-" };
+    // On macOS its own assembler, for x86_64, and the text read back by
+    // `otool`, as `tests/arm64.rs` does; elsewhere GNU binutils.
+    let macos = cfg!(target_os = "macos");
+    let prefix = if macos || cfg!(target_arch = "x86_64") { "" } else { "x86_64-linux-gnu-" };
     let out = std::process::Command::new(format!("{prefix}as"))
+        .args(if macos { &["-arch", "x86_64"][..] } else { &[] })
         .arg("-o")
         .arg(&obj)
         .arg(&src)
         .output()
         .unwrap_or_else(|e| panic!("runs {prefix}as (binutils for x86_64): {e}"));
     assert!(out.status.success(), "{prefix}as failed: {}", String::from_utf8_lossy(&out.stderr));
-    let out = std::process::Command::new(format!("{prefix}objcopy"))
-        .args(["-O", "binary", "--only-section=.text"])
-        .arg(&obj)
-        .arg(&bin)
-        .output()
-        .unwrap_or_else(|e| panic!("runs {prefix}objcopy: {e}"));
-    assert!(out.status.success(), "{prefix}objcopy failed: {}", String::from_utf8_lossy(&out.stderr));
-    let bytes = std::fs::read(&bin).expect("reads");
+    let bytes = if macos {
+        let dump = std::process::Command::new("otool").args(["-t", "-X"]).arg(&obj).output().expect("runs otool");
+        String::from_utf8_lossy(&dump.stdout)
+            .lines()
+            .flat_map(|l| l.split_whitespace().skip(1).map(|b| u8::from_str_radix(b, 16).expect("hex byte")).collect::<Vec<_>>())
+            .collect()
+    } else {
+        let out = std::process::Command::new(format!("{prefix}objcopy"))
+            .args(["-O", "binary", "--only-section=.text"])
+            .arg(&obj)
+            .arg(&bin)
+            .output()
+            .unwrap_or_else(|e| panic!("runs {prefix}objcopy: {e}"));
+        assert!(out.status.success(), "{prefix}objcopy failed: {}", String::from_utf8_lossy(&out.stderr));
+        std::fs::read(&bin).expect("reads")
+    };
     let nm = std::process::Command::new(format!("{prefix}nm")).arg(&obj).output().expect("runs nm");
     let mut at = vec![0usize; lines.len() + 1];
     for l in String::from_utf8_lossy(&nm.stdout).lines() {

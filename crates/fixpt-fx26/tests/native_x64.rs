@@ -344,12 +344,14 @@ fn compare_one(sc: &mut fixpt_scheme::Session, clo: Handle, rust: &mut fixpt_nat
 }
 
 #[test]
+#[cfg_attr(not(target_arch = "x86_64"), ignore = "the Rust oracle's native convention compiles for this machine only")]
 fn some_procedures_as_the_rust_compiler_compiles_them() {
     compare_direct(60);
 }
 
 #[test]
-#[cfg_attr(not(optimized), ignore = "every procedure of the front end: run with --release")]
+#[cfg_attr(not(target_arch = "x86_64"), ignore = "the Rust oracle's native convention compiles for this machine only")]
+#[cfg_attr(all(not(optimized), target_arch = "x86_64"), ignore = "every procedure of the front end: run with --release")]
 fn every_procedure_of_the_front_end_as_the_rust_compiler_compiles_it() {
     compare_direct(usize::MAX);
 }
