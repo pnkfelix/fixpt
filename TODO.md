@@ -2688,41 +2688,6 @@ reaches its fixpoint on all three. Left, in the order they would pay:
    bytes with the disassembler's text, which knows only the forms the
    encoder makes.
 
-## 113. A memory test of the x86_64 box (the user's, 2026-10-17)
-
-One `fixpt` run in about 8,000 fails on the x86_64 box (a Threadripper
-3990X), most likely a hardware fault, not `fixpt`'s. It was found as one
-failure of `modules.rs`'s `module_programs_run_alike_in_every_mode`,
-then hunted with `fixpt --fx26-run cellular eval load-input.fx` (in
-`crates/fixpt-fx26/tests/programs/modules`) run some 40,000 times. Each
-failure is a word that is right but for one high bit set:
-- three fixnum cells of a register word, which `assemble_register_word`
-  reads as 5 + 2^57, 5 + 2^54 and 17 + 2^57;
-- a code-space offset with bit 63 set, in `install_bytes`;
-- the first failure, a `char` that is no character, which fits a high
-  bit set in a byte of a Rust string.
-
-Why the hardware:
-- the one failure recorded by `rr record --chaos` does not replay: `rr`
-  says the replay diverged. All 25 passing recordings replayed;
-- nothing in the heap, the compilers or the code they make sets single
-  bits in a word's top bits;
-- address randomization is not needed: one failure in 5,000 runs came
-  with it off (`setarch -R`).
-
-Against it: bit 57 of a fixnum came twice. And every failure came while
-other work loaded the box (load averages 150 to 600, memory nearly full,
-swap in use).
-
-To do, with the box idle: MemTest86+ booted from USB, or `memtester`
-over most of its memory. See whether the memory runs at a factory
-overclock (XMP/EXPO). The kernel has no EDAC memory controller here
-(no `/sys/devices/system/edac/mc/mc0`), so corrected or single-bit
-errors are not logged. If the memory passes, the next step is in
-software: check a word's cells when the front end writes them, and
-again when `assemble_register_word` reads them, to see whether the bit
-is set at the write or after it.
-
 ## 115. Typed cellular code: what is left (the user's, 2026-10-22)
 
 `docs/research/typed-cellular-code.md`: certificates for the Rust

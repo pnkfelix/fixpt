@@ -3193,6 +3193,58 @@ kept on the data stack too now. Test:
 to 3 cellular frames, collecting at every safepoint, so that some
 capture's safepoint is a major collection's; it gave "no prompt" before).
 
+## 113. A memory test of the x86_64 box (the user's, 2026-10-17; settled 2026-10-24: the memory)
+
+One `fixpt` run in about 8,000 fails on the x86_64 box (a Threadripper
+3990X), most likely a hardware fault, not `fixpt`'s. It was found as one
+failure of `modules.rs`'s `module_programs_run_alike_in_every_mode`,
+then hunted with `fixpt --fx26-run cellular eval load-input.fx` (in
+`crates/fixpt-fx26/tests/programs/modules`) run some 40,000 times. Each
+failure is a word that is right but for one high bit set:
+- three fixnum cells of a register word, which `assemble_register_word`
+  reads as 5 + 2^57, 5 + 2^54 and 17 + 2^57;
+- a code-space offset with bit 63 set, in `install_bytes`;
+- the first failure, a `char` that is no character, which fits a high
+  bit set in a byte of a Rust string.
+
+Why the hardware:
+- the one failure recorded by `rr record --chaos` does not replay: `rr`
+  says the replay diverged. All 25 passing recordings replayed;
+- nothing in the heap, the compilers or the code they make sets single
+  bits in a word's top bits;
+- address randomization is not needed: one failure in 5,000 runs came
+  with it off (`setarch -R`).
+
+Against it: bit 57 of a fixnum came twice. And every failure came while
+other work loaded the box (load averages 150 to 600, memory nearly full,
+swap in use).
+
+For it, on the arm64 Mac (2026-10-23, an M-series with 18 cores, the
+commit after f6ffaaf4): the same program run 40,000 times, 14 at a time,
+with no failure. 30,000 on `fx-regs-rsjit-cellcc` (register code, whose
+`assemble_register_word` read the bad cells) and 10,000 on the default
+`fx-regs-rsjit-nativecc`, each from `crates/fixpt-fx26/tests/programs/modules`
+as `fixpt --machine M eval load-input.fx` (the command line since
+2026-10-22; `--fx26-run` is gone), its output compared with a first
+run's. At the box's one in 8,000, five failures were to be expected;
+none comes by chance less than 1% of the time (e^-5). So a `fixpt` fault
+would have to be one of x86_64's code alone.
+
+Settled (2026-10-24, the user's): the box's memory was faulty over that
+time. Left open only were the next steps, now not needed: the memory
+test with the box idle, and in software, checking a word's cells when
+the front end writes them and again when `assemble_register_word` reads
+them. What had been planned for them:
+
+To do, with the box idle: MemTest86+ booted from USB, or `memtester`
+over most of its memory. See whether the memory runs at a factory
+overclock (XMP/EXPO). The kernel has no EDAC memory controller here
+(no `/sys/devices/system/edac/mc/mc0`), so corrected or single-bit
+errors are not logged. If the memory passes, the next step is in
+software: check a word's cells when the front end writes them, and
+again when `assemble_register_word` reads them, to see whether the bit
+is set at the write or after it.
+
 ## 114. `webs` is quadratic in a procedure's instructions (found 2026-10-22)
 
 **Fixed (2026-10-22).** The native convention's representation pass
