@@ -786,7 +786,7 @@ impl Compiling<'_> {
                 }
             }
         };
-        let raw_refs = reps::raw_refs(&cells, &starts, &prim_name, &raw);
+        let (raw_refs, live) = reps::refs_and_live(&cells, &starts, &prim_name, &raw);
         let mut map_stored: Option<i64>;
         let mut a = Asm::new();
         let entry = a.label();
@@ -823,7 +823,6 @@ impl Compiling<'_> {
         let joinable = |si: usize| starts.get(si + 1).copied().filter(|&j| !target[j]);
         let si_at: HashMap<usize, usize> = starts.iter().enumerate().map(|(si, &i)| (i, si)).collect();
         let has_int = starts.iter().any(|&i| matches!(op_at(i), "op2" | "op2imm") && reps::int_routine(cells[i + 1].as_fixnum() as usize));
-        let live = reps::live_in(&cells, &starts, &prim_name, &raw);
         // The branch just after the instruction at index `si`, and where it
         // goes, where nothing after it reads the boolean that instruction
         // makes: a test there branches on the flags.
@@ -840,7 +839,7 @@ impl Compiling<'_> {
         let mut int_slows: Vec<IntSlow> = Vec::new();
         for &fast in versions {
         let labels = if fast { &labels_f } else { &labels_g };
-        let (reps_in, reps_out) = reps::reps_of(&cells, &starts, &prim_name, fast, &raw, params, &callees);
+        let (reps_in, reps_out) = reps::reps_of(&cells, &starts, &prim_name, fast, &raw, &raw_refs, params, &callees);
         let mut src = RESULT;
         let mut pending: Option<Field> = None;
         let mut bound: Option<(Value, Value)> = None;

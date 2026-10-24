@@ -1978,14 +1978,13 @@ impl Compiling<'_> {
         // Where `i64` and `u64` values are raw (`reps`): the registers as
         // each instruction starts, and ends; the ways into an instruction
         // that must unbox some first, each a stub of its own.
-        let raw_refs = reps::raw_refs(&cells, &starts, &prim_name, &raw);
+        let (raw_refs, live) = reps::refs_and_live(&cells, &starts, &prim_name, &raw);
         let si_at: HashMap<usize, usize> = starts.iter().enumerate().map(|(si, &i)| (i, si)).collect();
         // A procedure with `int` operations gets a fixnum version first, where
         // a value tested once stays known (`reps`, `Rep::Fix`), and whose
         // tests and overflows go over to the general version, at the same
         // instruction: the registers and frame are the same in both there.
         let has_int = starts.iter().any(|&i| matches!(op_at(i), "op2" | "op2imm") && reps::int_routine(cells[i + 1].as_fixnum() as usize));
-        let live = reps::live_in(&cells, &starts, &prim_name, &raw);
         let labels_g = labels;
         let labels_f: Vec<Label> = (0..=cells.len()).map(|_| a.label()).collect();
         let versions: &[bool] = if has_int { &[true, false] } else { &[false] };
@@ -1993,7 +1992,7 @@ impl Compiling<'_> {
         let mut int_slows: Vec<IntSlow> = Vec::new();
         for &fast in versions {
         let labels = if fast { &labels_f } else { &labels_g };
-        let (reps_in, reps_out) = reps::reps_of(&cells, &starts, &prim_name, fast, &raw, params, &callees);
+        let (reps_in, reps_out) = reps::reps_of(&cells, &starts, &prim_name, fast, &raw, &raw_refs, params, &callees);
         let mut src = RESULT;
         let mut pending: Option<Field> = None;
         // The global the pending call was bound to as compiled: its cell,
@@ -4219,7 +4218,7 @@ pub(super) fn slot_facts(memo: &mut SlotMemo, h: &Heap, rw: Value) -> std::rc::R
         return f.clone();
     }
     let prim_name = |p: usize| fixpt_runtime::PRIMITIVES.get(p).map_or("?", |d| d.name);
-    let cells = reps::split_slots(cells, &prim_name);
+    let (cells, found) = reps::split_slots_raw(cells, &prim_name);
     let (mut starts, mut frame, mut i) = (Vec::new(), None, 0);
     while i < cells.len() {
         starts.push(i);
@@ -4229,7 +4228,10 @@ pub(super) fn slot_facts(memo: &mut SlotMemo, h: &Heap, rw: Value) -> std::rc::R
         }
         i += 1 + n;
     }
-    let raw = frame.map_or(Vec::new(), |m| reps::raw_slots(&cells, &starts, &prim_name, m));
+    let raw = match (frame, found) {
+        (Some(m), Some((n, raw))) if m == n => raw,
+        _ => frame.map_or(Vec::new(), |m| reps::raw_slots(&cells, &starts, &prim_name, m)),
+    };
     let params = reps::raw_params(&cells, &starts, &prim_name, &raw);
     let f = std::rc::Rc::new(SlotFacts { cells, raw, params });
     memo.insert(key, f.clone());

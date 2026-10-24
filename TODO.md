@@ -3133,11 +3133,16 @@ alike to 0.1%. Take the runs after it.
   by a register word's cells, across compiles; and code installed a
   word at a time (CLAUDES_CHOICES.md, "Slot facts kept across
   compiles"). Fixed cost 20.6G cycles to 18.1G, stage 0 29.5G to 27.1G.
+  Then `webs` once where `split_slots` splits nothing (its webs give
+  `raw_slots` too), and one `demands` for `raw_refs` and `live_in`, which
+  `reps_of` takes rather than finds again: 17.0G, and 26.0G.
 - **Next, by self time** (frame pointers, after the above): the front
   end's register words 37% (its generic tables, `table.fx`, some 7%:
   `bucket-of`, `table-entry`, `table-ref`, `bucket-find`, each a call
   and a closure's); the heap 16%; malloc and free 10%; the compiler 9%
   (each procedure's own `webs` twice, in `split_slots` and `raw_slots`,
-  and `demands` some six times); call-outs 6%; hashing 5%; the Rust
+  and `demands` some six times: since done once and three times);
+  call-outs 6%; hashing 5%; the Rust
   checker 5%. The front end as native code, not register code, is the
-  largest lead; its tables in line, a smaller one.
+  largest lead; its tables in line, a smaller one. Who mallocs is not
+  seen (glibc has no frame pointers): a DWARF call graph would say.

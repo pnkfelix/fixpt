@@ -390,8 +390,7 @@ pub(super) fn int_routine(n: usize) -> bool {
     matches!(ROUTINES.get(n).map(|r| r.0), Some("int-add" | "int-sub" | "int-less" | "int-eq"))
 }
 
-pub(super) fn reps_of(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str, fast: bool, raw: &[bool], own: u8, callees: &[u8]) -> (Vec<Reps>, Vec<Reps>) {
-    let raw_refs = raw_refs(cells, starts, prim, raw);
+pub(super) fn reps_of(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str, fast: bool, raw: &[bool], raw_refs: &[bool], own: u8, callees: &[u8]) -> (Vec<Reps>, Vec<Reps>) {
     let ns = starts.len();
     let at: std::collections::HashMap<usize, usize> = starts.iter().enumerate().map(|(si, &i)| (i, si)).collect();
     let succ = |si: usize| -> Vec<usize> {
@@ -463,6 +462,19 @@ fn successors(cells: &[Value], starts: &[usize]) -> Vec<Vec<usize>> {
 /// the ways out of each instruction.
 pub(super) fn raw_refs(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str, raw: &[bool]) -> Vec<bool> {
     let (before, succ) = demands(cells, starts, prim, raw);
+    refs_of(cells, starts, prim, &before, &succ)
+}
+
+/// `raw_refs` and `live_in`, from one `demands`.
+pub(super) fn refs_and_live(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str, raw: &[bool]) -> (Vec<bool>, Vec<[bool; 9]>) {
+    let (before, succ) = demands(cells, starts, prim, raw);
+    let refs = refs_of(cells, starts, prim, &before, &succ);
+    (refs, before.iter().map(|d| std::array::from_fn(|r| d[r] != Demand::None)).collect())
+}
+
+/// `raw_refs`, from the demands as each instruction starts and the ways
+/// out of each.
+fn refs_of(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str, before: &[Demands], succ: &[Vec<usize>]) -> Vec<bool> {
     let ns = starts.len();
     (0..ns)
         .map(|si| {
@@ -568,7 +580,11 @@ struct Webs {
 /// boxes it there. A slot that holds an `f64` and something else in turn
 /// is first split (`split_slots`).
 pub(super) fn raw_slots(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str, slots: usize) -> Vec<bool> {
-    let w = webs(cells, starts, prim, slots);
+    raw_of(&webs(cells, starts, prim, slots), slots)
+}
+
+/// `raw_slots`, from the webs.
+fn raw_of(w: &Webs, slots: usize) -> Vec<bool> {
     let mut raw = vec![true; slots];
     for &(slot, web) in w.web.iter().flatten() {
         if slot < slots && w.used_web[web] && !w.f64_web[web] {
@@ -588,6 +604,12 @@ pub(super) fn raw_slots(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) 
 /// loop's next `j`). The same cells if nothing is split, or the frame
 /// would pass 64 slots.
 pub(super) fn split_slots(cells: Vec<Value>, prim: &dyn Fn(usize) -> &'static str) -> Vec<Value> {
+    split_slots_raw(cells, prim).0
+}
+
+/// `split_slots`, and where it split nothing but found the webs, the
+/// frame's size and its `raw_slots`, from the same webs.
+pub(super) fn split_slots_raw(cells: Vec<Value>, prim: &dyn Fn(usize) -> &'static str) -> (Vec<Value>, Option<(usize, Vec<bool>)>) {
     let (mut starts, mut frames, mut i) = (Vec::new(), Vec::new(), 0);
     while i < cells.len() {
         starts.push(i);
@@ -597,9 +619,9 @@ pub(super) fn split_slots(cells: Vec<Value>, prim: &dyn Fn(usize) -> &'static st
         }
         i += 1 + n;
     }
-    let Some(&m) = frames.first() else { return cells };
+    let Some(&m) = frames.first() else { return (cells, None) };
     if frames.iter().any(|&f| f != m) {
-        return cells;
+        return (cells, None);
     }
     let w = webs(&cells, &starts, prim, m);
     let mut f64s = vec![false; m];
@@ -619,7 +641,7 @@ pub(super) fn split_slots(cells: Vec<Value>, prim: &dyn Fn(usize) -> &'static st
         next += 1;
     }
     if next == m || next > 64 {
-        return cells;
+        return (cells, Some((m, raw_of(&w, m))));
     }
     let mut out = cells;
     for (si, &i) in starts.iter().enumerate() {
@@ -637,7 +659,7 @@ pub(super) fn split_slots(cells: Vec<Value>, prim: &dyn Fn(usize) -> &'static st
             _ => {}
         }
     }
-    out
+    (out, None)
 }
 
 /// The webs of the procedure's `slots` frame slots (`raw_slots`).
@@ -645,7 +667,8 @@ fn webs(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str,
     let ns = starts.len();
     let none = vec![false; slots];
     let (before, succ) = demands(cells, starts, prim, &none);
-    let (ins, _) = reps_of(cells, starts, prim, false, &none, 0, &vec![0; starts.len()]);
+    let refs = refs_of(cells, starts, prim, &before, &succ);
+    let (ins, _) = reps_of(cells, starts, prim, false, &none, &refs, 0, &vec![0; starts.len()]);
     let mut preds: Vec<Vec<usize>> = vec![Vec::new(); ns];
     for (si, ts) in succ.iter().enumerate() {
         for &t in ts {

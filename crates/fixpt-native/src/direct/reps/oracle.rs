@@ -123,7 +123,7 @@ pub fn facts(h: &Heap, rw: Value) -> Facts {
     for fast in [true, false] {
         for known in [false, true] {
             let callees: Vec<u8> = starts.iter().map(|&j| if known && matches!(op_at(j), "invoke" | "tailinvoke") { 0b101 } else { 0 }).collect();
-            let (ins, outs) = super::reps_of(&cells, &starts, &prim, fast, &raw, params, &callees);
+            let (ins, outs) = super::reps_of(&cells, &starts, &prim, fast, &raw, &raw_refs, params, &callees);
             let steps = starts
                 .iter()
                 .enumerate()
