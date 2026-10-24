@@ -17,10 +17,11 @@
 //! solver compares, and nothing else, as congruence asks).
 //!
 //! Where the word writes nothing (`Context::lists`), a term the VC uses
-//! as a list is one of the theory's lists: `(car x)` its head, `(cdr x)`
-//! its tail, `(eq x nil)` its being `nil`, and what `cons` made, the pair
-//! of its parts. (Where a pair may be written, what was read of it is not
-//! what it holds, and these say nothing.)
+//! as a list is one of the theory's lists, of the sort its type gives
+//! (`Context::finite`): `(car x)` its head, `(cdr x)` its tail, `(eq x
+//! nil)` its being `nil`, and what `cons` made, the pair of its parts.
+//! (Where a pair may be written, what was read of it is not what it
+//! holds, and these say nothing.)
 //!
 //! The solver is z3, run as `z3 -in`, or what `FIXPT_SMT` names; none, and
 //! nothing is asked.
@@ -37,7 +38,18 @@ use std::rc::Rc;
 pub enum Val {
     Int(i128),
     Bool(bool),
-    List(Vec<i128>),
+    List(Vec<Val>),
+}
+
+impl Val {
+    /// As a run prints it: `5`, `#t`, `(1 (2) ())`.
+    pub fn printed(&self) -> String {
+        match self {
+            Val::Int(k) => k.to_string(),
+            Val::Bool(b) => if *b { "#t" } else { "#f" }.into(),
+            Val::List(xs) => format!("({})", xs.iter().map(Val::printed).collect::<Vec<_>>().join(" ")),
+        }
+    }
 }
 
 /// What the solver said of a VC.
@@ -58,9 +70,10 @@ pub struct Context<'a> {
     pub theory: Option<&'a Theory>,
     pub lists: bool,
     pub conses: &'a [(Term, Term, Term)],
-    /// The terms of finite lists (`Outcome::finite`): only these, their
-    /// tails and `nil` are the theory's lists, which are all finite.
-    pub finite: &'a [Term],
+    /// The terms of finite lists (`Outcome::finite`), each with its sort:
+    /// only these, their tails, the lists their elements are, and `nil`
+    /// are the theory's lists, which are all finite.
+    pub finite: &'a [(Term, Sort)],
 }
 
 impl Context<'_> {
@@ -91,8 +104,12 @@ pub fn solve(solver: &str, vc: &Formula<Term>, cx: Context) -> Solved {
     // The pairs made, of those the VC has as lists, each its parts.
     let mut made = Vec::new();
     for (m, a, d) in cx.conses {
-        if w.list.contains(m) {
-            made.push(format!("(assert (= {} (cons {} {})))", w.list_term(m), w.expr(&crate::typed_cells::expr_of(a)), w.list_term(d)));
+        if let Some(l) = w.sort_in(m)
+            && let Some(h) = w.element(a, l.elem().expect("a list's"))
+            && w.fits(d, &l)
+        {
+            let (m, d) = (w.list_term(m, &l), w.list_term(d, &l));
+            made.push(format!("(assert (= {m} (cons {h} {d})))"));
         }
     }
     let mut q = String::from("(set-option :produce-models true)\n(set-logic ALL)\n");
@@ -107,8 +124,8 @@ pub fn solve(solver: &str, vc: &Formula<Term>, cx: Context) -> Solved {
     for (i, _) in w.bools.iter().enumerate() {
         q += &format!("(declare-const b{i} Bool)\n");
     }
-    for (i, _) in w.lists.iter().enumerate() {
-        q += &format!("(declare-const l{i} L)\n");
+    for (i, (_, l)) in w.lists.iter().enumerate() {
+        q += &format!("(declare-const l{i} {})\n", l.name());
     }
     for (i, (_, n, b)) in w.funs.iter().enumerate() {
         q += &format!("(declare-fun f{i} ({}) {})\n", vec!["Int"; *n].join(" "), if *b { "Bool" } else { "Int" });
@@ -136,7 +153,7 @@ pub fn solve(solver: &str, vc: &Formula<Term>, cx: Context) -> Solved {
                 let t = match &n[..1] {
                     "i" => w.ints.get(k),
                     "b" => w.bools.get(k),
-                    _ => w.lists.get(k),
+                    _ => w.lists.get(k).map(|(t, _)| t),
                 };
                 Some((t?.clone(), v))
             });
@@ -167,11 +184,11 @@ struct Writer<'a> {
     cx: Context<'a>,
     ints: Vec<Term>,
     bools: Vec<Term>,
-    lists: Vec<Term>,
+    lists: Vec<(Term, Sort)>,
     /// The functions called with no definition: each one's name, how many
     /// arguments, and whether of a `Bool`.
     funs: Vec<(Rc<str>, usize, bool)>,
-    list: Vec<Term>,
+    list: Vec<(Term, Sort)>,
 }
 
 /// Whether `t` is `nil`.
@@ -189,7 +206,8 @@ impl Writer<'_> {
 
     /// The terms `vc` uses as lists, and what they are made of: a `car`'s
     /// or a `cdr`'s, one tested `nil`, a list argument of a function
-    /// defined, a pair `cons` made and its tail; until no more are found.
+    /// defined, a pair `cons` made and its parts; until no more are found.
+    /// Each of the sort its type gives, or a list's tail, or its element.
     fn lists_of(&mut self, vc: &Formula<Term>) {
         let mut terms = Vec::new();
         formula_terms(vc, &mut terms);
@@ -199,20 +217,27 @@ impl Writer<'_> {
             for t in &terms {
                 list_uses(t, &self.cx, &mut found);
             }
-            for (m, _, d) in self.cx.conses {
-                if self.list.contains(m) || found.contains(m) {
-                    found.push(m.clone());
-                    found.push(d.clone());
-                    terms.push(d.clone());
+            // What a pair is made of: its tail a list of its sort, its head
+            // of its elements'.
+            let mut parts = Vec::new();
+            for (m, a, d) in self.cx.conses {
+                let Some(l) = self.sort_in(m).or_else(|| self.finite(m)) else { continue };
+                found.push(m.clone());
+                parts.push((d.clone(), l.clone()));
+                if let Some(e @ Sort::List(_)) = l.elem() {
+                    parts.push((a.clone(), e.clone()));
                 }
+                terms.push(d.clone());
             }
             // Of a finite list only: the solver's are finite, and would
             // prove of a cycle what does not hold of it.
             for f in found {
-                let finite = self.cx.finite.contains(&f) || matches!(&f, Term::App("cdr", xs) if xs.len() == 1 && self.list.contains(&xs[0]));
-                if finite && !self.list.contains(&f) && !is_nil(&f) {
-                    self.list.push(f);
+                if let Some(l) = self.finite(&f).or_else(|| self.part(&f)) {
+                    self.note(f, l);
                 }
+            }
+            for (f, l) in parts {
+                self.note(f, l);
             }
             if self.list.len() == before {
                 break;
@@ -220,12 +245,70 @@ impl Writer<'_> {
         }
     }
 
-    /// `t`, a list: `nil`, a tail, or a constant.
-    fn list_term(&mut self, t: &Term) -> String {
+    /// `t` noted a list of sort `l`, unless it is `nil` or is already.
+    fn note(&mut self, t: Term, l: Sort) {
+        if !is_nil(&t) && self.sort_in(&t).is_none() {
+            self.list.push((t, l));
+        }
+    }
+
+    /// `t`'s sort, if its type says it is a finite list.
+    fn finite(&self, t: &Term) -> Option<Sort> {
+        self.cx.finite.iter().find(|(f, _)| f == t).map(|(_, l)| l.clone())
+    }
+
+    /// `t`'s sort, if it is noted a list.
+    fn sort_in(&self, t: &Term) -> Option<Sort> {
+        self.list.iter().find(|(f, _)| f == t).map(|(_, l)| l.clone())
+    }
+
+    /// `t`'s sort, if it is a part of a list noted one: its tail (of its
+    /// sort), its head (of its elements', if a list's).
+    fn part(&self, t: &Term) -> Option<Sort> {
         match t {
-            _ if is_nil(t) => "nil".into(),
-            Term::App("cdr", xs) if xs.len() == 1 && self.list.contains(&xs[0]) => format!("(tl {})", self.list_term(&xs[0])),
-            _ => format!("l{}", Self::named(&mut self.lists, t)),
+            Term::App("cdr", xs) if xs.len() == 1 => self.sort_in(&xs[0]),
+            Term::App("car", xs) if xs.len() == 1 => self.sort_in(&xs[0])?.elem().filter(|e| e.elem().is_some()).cloned(),
+            _ => None,
+        }
+    }
+
+    /// Whether `t` is a list of sort `l` (or `nil`, of any).
+    fn fits(&self, t: &Term, l: &Sort) -> bool {
+        is_nil(t) || self.sort_in(t).as_ref() == Some(l)
+    }
+
+    /// `t`, a list of sort `l` (`fits`): `nil`, a tail, a head, or a
+    /// constant.
+    fn list_term(&mut self, t: &Term, l: &Sort) -> String {
+        match t {
+            _ if is_nil(t) => l.nil(),
+            Term::App(f @ ("car" | "cdr"), xs) if xs.len() == 1 && let Some(m) = self.sort_in(&xs[0]) => {
+                format!("({} {})", if *f == "car" { "hd" } else { "tl" }, self.list_term(&xs[0], &m))
+            }
+            _ => match self.lists.iter().position(|(n, _)| n == t) {
+                Some(k) => format!("l{k}"),
+                None => {
+                    self.lists.push((t.clone(), l.clone()));
+                    format!("l{}", self.lists.len() - 1)
+                }
+            },
+        }
+    }
+
+    /// `t` as an element of sort `e`, if it can be one.
+    fn element(&mut self, t: &Term, e: &Sort) -> Option<String> {
+        match e {
+            Sort::Int => Some(self.expr(&crate::typed_cells::expr_of(t))),
+            Sort::Bool => Some(self.formula(&Formula::Holds(t.clone()))),
+            Sort::List(_) => self.fits(t, e).then(|| self.list_term(t, e)),
+        }
+    }
+
+    /// `(car x)`, of a list noted one whose elements are of sort `e`.
+    fn head(&self, t: &Term, e: &Sort) -> Option<Term> {
+        match t {
+            Term::App("car", xs) if xs.len() == 1 && self.sort_in(&xs[0]).as_ref().and_then(|l| l.elem()) == Some(e) => Some(xs[0].clone()),
+            _ => None,
         }
     }
 
@@ -235,18 +318,10 @@ impl Writer<'_> {
         if let Some((ps, r)) = self.cx.signature(f)
             && ps.len() == xs.len()
             && (r == Sort::Bool) == b
-            && ps.iter().zip(xs).all(|(p, x)| *p != Sort::List || self.list.contains(x) || is_nil(x))
+            && ps.iter().zip(xs).all(|(p, x)| p.elem().is_none() || self.fits(x, p))
         {
             let ps = ps.to_vec();
-            let xs: Vec<String> = ps
-                .iter()
-                .zip(xs)
-                .map(|(p, x)| match p {
-                    Sort::List => self.list_term(x),
-                    Sort::Bool => self.formula(&Formula::Holds(x.clone())),
-                    Sort::Int => self.expr(&crate::typed_cells::expr_of(x)),
-                })
-                .collect();
+            let xs: Vec<String> = ps.iter().zip(xs).map(|(p, x)| self.element(x, p).expect("fits")).collect();
             return if xs.is_empty() { format!("|{f}|") } else { format!("(|{f}| {})", xs.join(" ")) };
         }
         let k = self.funs.iter().position(|(g, n, c)| g == f && *n == xs.len() && *c == b).unwrap_or_else(|| {
@@ -264,7 +339,10 @@ impl Writer<'_> {
         match e {
             Expr::Atom(Term::Lit(v)) if v.is_fixnum() => int(v.as_fixnum() as i128),
             Expr::Atom(Term::Call(f, xs)) => self.call(f, xs, false),
-            Expr::Atom(Term::App("car", xs)) if xs.len() == 1 && self.list.contains(&xs[0]) => format!("(hd {})", self.list_term(&xs[0])),
+            Expr::Atom(t) if let Some(l) = self.head(t, &Sort::Int) => {
+                let l = self.sort_in(&l).map(|s| self.list_term(&l, &s)).expect("noted");
+                format!("(hd {l})")
+            }
             Expr::Atom(t) => format!("i{}", Self::named(&mut self.ints, t)),
             Expr::Lit(k) => int(*k as i128),
             Expr::Add(x, y) => format!("(+ {} {})", self.expr(x), self.expr(y)),
@@ -296,8 +374,16 @@ impl Writer<'_> {
             Formula::Holds(Term::Lit(v)) if *v == fixpt_heap::Value::TRUE => "true".into(),
             Formula::Holds(Term::Call(f, xs)) => self.call(f, xs, true),
             // Two lists the same: the same list, while nothing writes.
-            Formula::Holds(Term::App("eq", xs)) if xs.len() == 2 && xs.iter().any(|x| self.list.contains(x)) => {
-                format!("(= {} {})", self.list_term(&xs[0]), self.list_term(&xs[1]))
+            Formula::Holds(Term::App("eq", xs))
+                if xs.len() == 2
+                    && let Some(l) = self.sort_in(&xs[0]).or_else(|| self.sort_in(&xs[1]))
+                    && xs.iter().all(|x| self.fits(x, &l)) =>
+            {
+                format!("(= {} {})", self.list_term(&xs[0], &l), self.list_term(&xs[1], &l))
+            }
+            Formula::Holds(t) if let Some(l) = self.head(t, &Sort::Bool) => {
+                let l = self.sort_in(&l).map(|s| self.list_term(&l, &s)).expect("noted");
+                format!("(hd {l})")
             }
             Formula::Holds(t) => format!("b{}", Self::named(&mut self.bools, t)),
             Formula::Not(p) => format!("(not {})", self.formula(p)),
@@ -358,7 +444,7 @@ fn list_uses(t: &Term, th: &Context, out: &mut Vec<Term>) {
         Term::Call(f, xs) => {
             if let Some((ps, _)) = th.signature(f) {
                 for (p, x) in ps.iter().zip(xs) {
-                    if *p == Sort::List {
+                    if p.elem().is_some() {
                         out.push(x.clone());
                     }
                 }
@@ -403,7 +489,7 @@ fn read_sxs(toks: &[String], i: &mut usize) -> Vec<Sx> {
 }
 
 /// `x` as a value: an integer (`5`, `(- 3)`), a boolean, a list (`nil`,
-/// `(cons 1 (cons 2 nil))`).
+/// `(as nil (List Int))`, `(cons 1 (cons 2 nil))`) of values.
 fn value(x: &Sx) -> Option<Val> {
     fn integer(x: &Sx) -> Option<i128> {
         match x {
@@ -414,13 +500,14 @@ fn value(x: &Sx) -> Option<Val> {
             },
         }
     }
-    fn list(x: &Sx) -> Option<Vec<i128>> {
+    fn list(x: &Sx) -> Option<Vec<Val>> {
         match x {
             Sx::Atom(n) if n == "nil" => Some(Vec::new()),
             Sx::List(xs) => match &xs[..] {
+                [Sx::Atom(a), Sx::Atom(n), _] if a == "as" && n == "nil" => Some(Vec::new()),
                 [Sx::Atom(c), h, t] if c == "cons" => {
                     let mut rest = list(t)?;
-                    rest.insert(0, integer(h)?);
+                    rest.insert(0, value(h)?);
                     Some(rest)
                 }
                 _ => None,
@@ -472,10 +559,15 @@ mod tests {
                 ("i0".into(), Val::Int(5)),
                 ("i1".into(), Val::Int(-3)),
                 ("b0".into(), Val::Bool(true)),
-                ("l0".into(), Val::List(vec![1, -2])),
+                ("l0".into(), Val::List(vec![Val::Int(1), Val::Int(-2)])),
                 ("l1".into(), Val::List(vec![]))
             ]
         );
+        // A list of lists, its `nil`s of their sorts; of booleans.
+        let v = values("((l0 (cons (as nil (List Int)) (cons (cons 3 (as nil (List Int))) (as nil (List (List Int)))))) (l1 (cons true (as nil (List Bool)))))");
+        let ints = |xs: &[i128]| Val::List(xs.iter().map(|x| Val::Int(*x)).collect());
+        assert_eq!(v, vec![("l0".into(), Val::List(vec![ints(&[]), ints(&[3])])), ("l1".into(), Val::List(vec![Val::Bool(true)]))]);
+        assert_eq!(v[0].1.printed(), "(() (3))");
     }
 
     /// With a solver, a true VC proved, a false one refuted by values that

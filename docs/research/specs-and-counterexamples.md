@@ -303,7 +303,8 @@ Two ways they could serve fixpt:
 - **S4.** Logic functions (§5) and terms over datatypes in
   specifications. Begun (2026-10-23): a specification calls `pure`
   globals of a `bool`, `int` or `nat` result; the solver is given their
-  definitions over integers, booleans and finite lists of integers, so
+  definitions over integers, booleans and finite lists of these (and of
+  lists so, 2026-10-24), so
   `insert` is proved to keep a sorted list sorted where its `ensures` is
   inductive (`specs/logic-insert.fx`). What is left is `TODO.md` §120.
 - **S5.** An inductive prover for what S2 and S3 leave (§6, 3).

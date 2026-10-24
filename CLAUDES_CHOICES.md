@@ -1603,3 +1603,26 @@ The user: "let's attack requires and ensures next" (the design note's
 5. **What `cons` made is its pair** (`Outcome::conses`), asserted for the
    pairs the VC has as lists: true of data never written.
 
+## Lists of any element sort for the solver (S4, 2026-10-24)
+
+The user asked why only lists of `int`s were the solver's, and to lift it.
+- **One datatype of a parameter**, `(List T)`, not one declared for each
+  element type: z3 takes `par`, and the sorts are then a tree
+  (`Sort::List(Rc<Sort>)`). `nil` is written `(as nil S)`, so the
+  translator of a definition is told the sort it wants where it knows it
+  (a parameter's, `cons`'s tail, an `if`'s other branch); a `nil` of no
+  known sort leaves the function undefined.
+- **A list term's sort is its type's**, noted with it in
+  `Outcome::finite` (`note_finite`, by `smt_theory::sort_of`), or that of
+  a list it is the tail or (a list of lists') head of. Before, any term a
+  VC used as a list was one; now a use alone does not make one, as its
+  sort would be unknown.
+- **No lists of `nat`s**: the solver's `Int` would give a list with a
+  negative element, a counterexample of no value of the type. Refused
+  (left undefined) rather than asserted, for now (TODO §120).
+- **A non-empty pair** (`Ty::Pair(…, false)`, what `cons` gives) whose
+  tail is a list is a list of that sort; without it `insert`'s result was
+  none, and its proof lost.
+- The nested test is of a function counting empty lists, not of
+  `flatten` by `len` and `sizes`: a logic function calling another reads
+  a global, so is not `pure` to the checkers (TODO §120).

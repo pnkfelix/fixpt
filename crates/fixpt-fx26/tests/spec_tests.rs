@@ -8,7 +8,14 @@ use fixpt_engine::Backend;
 use fixpt_fx26::session::Fx26Session;
 
 /// The programs a counterexample shows false.
-const FALSE: [&str; 4] = ["harness-insert-wrong.fx", "logic-harness-wrong.fx", "wrong-ensures.fx", "wrong-requires.fx"];
+const FALSE: [&str; 6] = [
+    "harness-insert-wrong.fx",
+    "logic-bools-wrong.fx",
+    "logic-harness-wrong.fx",
+    "logic-nested-wrong.fx",
+    "wrong-ensures.fx",
+    "wrong-requires.fx",
+];
 
 #[test]
 fn specifications_tested_by_running() {
@@ -76,4 +83,10 @@ fn open_obligations_sorted_by_a_solver() {
     let weak = "not proved, as the proof knows too little of a call. It holds for e = ";
     assert!(has("logic-harness.fx", weak) && has("logic-harness.fx", "but for all the proof knows, (insert "), "{}", said["logic-harness.fx"]);
     assert!(has("logic-harness-wrong.fx", "the ensures: false: with e = ") && has("logic-harness-wrong.fx", "xs = (the ints (list "), "{}", said["logic-harness-wrong.fx"]);
+    // Of lists of other sorts: of `bool`s, of lists of `int`s.
+    for ok in ["logic-bools.fx", "logic-nested.fx"] {
+        assert!(has(ok, "by the SMT solver") && !has(ok, "not verified"), "{}", said[ok]);
+    }
+    assert!(has("logic-bools-wrong.fx", "the ensures: false: with xs = (the bools (list #t))"), "{}", said["logic-bools-wrong.fx"]);
+    assert!(has("logic-nested-wrong.fx", "the ensures: false: with xss = (the intss (list nil))"), "{}", said["logic-nested-wrong.fx"]);
 }

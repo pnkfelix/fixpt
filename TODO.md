@@ -2894,9 +2894,17 @@ and z3 an uninterpreted function. Not yet:
   `Int`, `Bool` and finite lists of integers (`L`); in a word that writes
   nothing, the VC's finite lists are `L`'s, what `cons` made its pair, and
   a model's lists are replayed. `logic-insert.fx`'s `insert` is proved.
-  Still not: lists of other elements, `define-datatype`'s sums and
-  products, a body of `let`, `tagcase` or anything else (left undefined,
-  a function only), and the verifier's own prover unfolding none.
+  ~~Lists of other elements.~~ Done 2026-10-24: `(List T)`, a datatype of
+  a parameter, for lists of `int`s, `bool`s and lists so
+  (`logic-bools.fx`, `logic-nested.fx`). Still not: lists of `nat`s (the
+  solver's `Int` is any integer; an assertion that every element is
+  one is wanted), `define-datatype`'s sums and products, a body of `let`,
+  `tagcase` or anything else (left undefined, a function only), and the
+  verifier's own prover unfolding none.
+- **A logic function calling another** is translated, but the checkers
+  refuse it: reading a global is no `pure` effect (`(read (globals
+  len))`), even a global never assigned. Wanted: a read of a global no
+  `set!` reaches counted pure, or logic functions' effects so.
 - **Totality** of a logic function is not asked of the checkers; the
   solver is given a definition only where every `car` and `cdr` is of a
   list a test showed a pair, so it is total where it is used.

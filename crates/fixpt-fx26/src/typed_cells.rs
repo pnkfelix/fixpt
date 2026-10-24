@@ -216,8 +216,9 @@ pub struct Outcome {
     /// known), says whether that is so (`crate::smt`'s datatypes).
     pub conses: Vec<(Term, Term, Term)>,
     pub writes: bool,
-    /// The terms of values of finite lists, never written (`note_finite`).
-    pub finite: Vec<Term>,
+    /// The terms of values of finite lists, never written, each with its
+    /// sort (`note_finite`).
+    pub finite: Vec<(Term, crate::smt_theory::Sort)>,
 }
 
 impl Outcome {
@@ -1641,17 +1642,13 @@ impl Verifier<'_> {
     }
 
     /// `v`'s term noted a finite list, never written, if its type says so
-    /// (a `(listof T acyclic)`'s, `Region::Frozen(_, true)`): what the
-    /// solver may take for one of its lists (`crate::smt`).
+    /// (a `(listof T acyclic)`'s, `Region::Frozen(_, true)`), with its sort:
+    /// what the solver may take for one of its lists (`crate::smt`).
     fn note_finite(&mut self, v: &V) {
-        let finite = |r: &crate::ast::Region| matches!(r, crate::ast::Region::Frozen(_, true));
-        let is = match self.ty_of(v) {
-            Some(Ty::Pair(_, _, r, _)) => finite(&r),
-            Some(Ty::NList { region, .. }) => finite(&region),
-            _ => false,
-        };
-        if is && !self.out.finite.contains(&v.term) {
-            self.out.finite.push(v.term.clone());
+        if let Some(l @ crate::smt_theory::Sort::List(_)) = v.ty.and_then(|t| crate::smt_theory::sort_of(self.c, t))
+            && !self.out.finite.iter().any(|(t, _)| *t == v.term)
+        {
+            self.out.finite.push((v.term.clone(), l));
         }
     }
 

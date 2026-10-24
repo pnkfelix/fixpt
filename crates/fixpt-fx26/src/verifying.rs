@@ -298,11 +298,8 @@ fn sort(solver: &str, cx: crate::smt::Context, r: &mut Replayer, word: Option<&s
             for (made, _, _) in &o.calls {
                 let Some((_, assumed)) = model.iter().find(|(m, _)| m == made) else { continue };
                 let Some(call) = source(made, &args, &o.calls) else { continue };
-                // A list as a run prints it, to be compared.
-                let printed = match assumed {
-                    crate::smt::Val::List(xs) => format!("({})", xs.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(" ")),
-                    v => written(v),
-                };
+                // As a run prints it, to be compared.
+                let printed = assumed.printed();
                 match r.evaluated(&call) {
                     Some(v) if v != printed => took.push(format!("{call} could be {printed}, where it is {v}")),
                     Some(_) => {}

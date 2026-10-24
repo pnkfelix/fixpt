@@ -504,7 +504,7 @@ pub fn written(v: &crate::smt::Val) -> String {
         crate::smt::Val::Int(k) => k.to_string(),
         crate::smt::Val::Bool(b) => if *b { "#t" } else { "#f" }.to_string(),
         crate::smt::Val::List(xs) if xs.is_empty() => "nil".into(),
-        crate::smt::Val::List(xs) => format!("(list{})", xs.iter().map(|x| format!(" {x}")).collect::<String>()),
+        crate::smt::Val::List(xs) => format!("(list{})", xs.iter().map(|x| format!(" {}", written(x))).collect::<String>()),
     }
 }
 
