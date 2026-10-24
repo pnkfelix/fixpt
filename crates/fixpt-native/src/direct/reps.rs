@@ -430,13 +430,13 @@ pub(super) fn reps_of(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) ->
 /// (`TODO.md` §126: a vector each was the commonest of Rust's allocations
 /// loading kayak's compiler). A slice of them, as it derefs.
 #[derive(Clone, Copy, Default)]
-struct Succ {
+pub(super) struct Succ {
     n: u8,
     t: [usize; 2],
 }
 
 impl Succ {
-    fn of(ts: impl IntoIterator<Item = usize>) -> Succ {
+    pub(super) fn of(ts: impl IntoIterator<Item = usize>) -> Succ {
         let mut s = Succ::default();
         for t in ts {
             s.t[s.n as usize] = t;
@@ -690,6 +690,38 @@ pub(super) fn split_slots_raw(cells: Vec<Value>, prim: &dyn Fn(usize) -> &'stati
     (out, None)
 }
 
+/// Lists of items by key, `0..n`, in two vectors in all (`webs`'s blocks'
+/// predecessors and slots' accesses), not one for each key: each key's
+/// items in the order given.
+struct Grouped {
+    start: Vec<usize>,
+    items: Vec<usize>,
+}
+
+impl Grouped {
+    /// Of `(key, item)` pairs, each key below `n`; asked twice.
+    fn of<I: Iterator<Item = (usize, usize)> + Clone>(n: usize, pairs: I) -> Grouped {
+        let mut start = vec![0; n + 1];
+        for (k, _) in pairs.clone() {
+            start[k + 1] += 1;
+        }
+        for k in 0..n {
+            start[k + 1] += start[k];
+        }
+        let mut fill = start.clone();
+        let mut items = vec![0; start[n]];
+        for (k, x) in pairs {
+            items[fill[k]] = x;
+            fill[k] += 1;
+        }
+        Grouped { start, items }
+    }
+
+    fn get(&self, k: usize) -> &[usize] {
+        &self.items[self.start[k]..self.start[k + 1]]
+    }
+}
+
 /// The webs of the procedure's `slots` frame slots (`raw_slots`).
 fn webs(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str, slots: usize) -> Webs {
     let ns = starts.len();
@@ -697,10 +729,15 @@ fn webs(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str,
     let (before, succ) = demands(cells, starts, prim, &none);
     let refs = refs_of(cells, starts, prim, &before, &succ);
     let (ins, _) = reps_of(cells, starts, prim, false, &none, &refs, 0, &vec![0; starts.len()]);
-    let mut preds: Vec<Vec<usize>> = vec![Vec::new(); ns];
+    // How many predecessors each instruction has, and its first: all a
+    // block's leader asks of them.
+    let (mut npreds, mut pred0) = (vec![0u32; ns], vec![usize::MAX; ns]);
     for (si, ts) in succ.iter().enumerate() {
         for &t in ts {
-            preds[t].push(si);
+            if npreds[t] == 0 {
+                pred0[t] = si;
+            }
+            npreds[t] += 1;
         }
     }
     // Each instruction's slot access: (slot, read?, register).
@@ -740,7 +777,7 @@ fn webs(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str,
     // the blocks where it is live. A block's chain of instructions, each
     // but the first its one predecessor's one successor (and a loop of
     // those, unreachable, cut).
-    let leader = |t: usize| t == 0 || preds[t].len() != 1 || succ[preds[t][0]].len() != 1;
+    let leader = |t: usize| t == 0 || npreds[t] != 1 || succ[pred0[t]].len() != 1;
     let (mut block, mut order, mut lasts) = (vec![usize::MAX; ns], Vec::with_capacity(ns), Vec::new());
     for cut in [false, true] {
         for l in 0..ns {
@@ -760,22 +797,11 @@ fn webs(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str,
         }
     }
     let nb = lasts.len();
-    let mut bpreds: Vec<Vec<usize>> = vec![Vec::new(); nb];
-    for (b, &l) in lasts.iter().enumerate() {
-        for &t in &succ[l] {
-            bpreds[block[t]].push(b);
-        }
-    }
+    let block_of = &block;
+    let bpreds = Grouped::of(nb, lasts.iter().enumerate().flat_map(|(b, &l)| succ[l].iter().map(move |&t| (block_of[t], b))));
     // Each slot's reads and writes, block by block, each block's in order.
-    let mut by_slot: Vec<Vec<usize>> = Vec::new();
-    for &si in &order {
-        if let Some((slot, _, _)) = access(si) {
-            if by_slot.len() <= slot {
-                by_slot.resize(slot + 1, Vec::new());
-            }
-            by_slot[slot].push(si);
-        }
-    }
+    let slots_touched = order.iter().filter_map(|&si| access(si)).map(|(slot, _, _)| slot + 1).max().unwrap_or(0);
+    let by_slot = Grouped::of(slots_touched, order.iter().filter_map(|&si| access(si).map(|(slot, _, _)| (slot, si))));
     // By block, for which slot it was last touched (and then whether its
     // first access reads, its last write), live and reached. The union-find
     // has a node for each instruction and one for each block's start
@@ -783,9 +809,12 @@ fn webs(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str,
     let (mut touched, mut first_reads, mut last_write) = (vec![usize::MAX; nb], vec![false; nb], vec![usize::MAX; nb]);
     let (mut live, mut reached) = (vec![usize::MAX; nb], vec![usize::MAX; nb]);
     let (mut own, mut own_of) = (vec![0; ns + nb], vec![usize::MAX; ns + nb]);
-    for (slot, touches) in by_slot.iter().enumerate() {
+    // Each slot's work lists, kept from one slot to the next.
+    let (mut blocks, mut work, mut region) = (Vec::new(), Vec::new(), Vec::new());
+    for slot in 0..slots_touched {
+        let touches = by_slot.get(slot);
         let writes = |si: usize| matches!(access(si), Some((s, false, _)) if s == slot);
-        let mut blocks = Vec::new();
+        blocks.clear();
         for &si in touches {
             let b = block[si];
             if touched[b] != slot {
@@ -798,13 +827,15 @@ fn webs(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str,
         }
         // Live where a block reads the slot first, and back from there
         // through blocks that do not touch it.
-        let mut work: Vec<usize> = blocks.iter().copied().filter(|&b| first_reads[b]).collect();
+        work.clear();
+        work.extend(blocks.iter().copied().filter(|&b| first_reads[b]));
         for &b in &work {
             live[b] = slot;
         }
-        let mut region = work.clone();
+        region.clear();
+        region.extend_from_slice(&work);
         while let Some(c) = work.pop() {
-            for &p in &bpreds[c] {
+            for &p in bpreds.get(c) {
                 if live[p] != slot && touched[p] != slot {
                     live[p] = slot;
                     region.push(p);
@@ -813,7 +844,8 @@ fn webs(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str,
             }
         }
         // Reached, where live: on from each block that writes it.
-        let mut work: Vec<usize> = blocks.iter().copied().filter(|&b| last_write[b] != usize::MAX).collect();
+        work.clear();
+        work.extend(blocks.iter().copied().filter(|&b| last_write[b] != usize::MAX));
         while let Some(p) = work.pop() {
             for &t in &succ[lasts[p]] {
                 let c = block[t];
@@ -853,7 +885,7 @@ fn webs(cells: &[Value], starts: &[usize], prim: &dyn Fn(usize) -> &'static str,
             }
         }
         for &c in region.iter().filter(|&&c| reached[c] == slot) {
-            for &p in &bpreds[c] {
+            for &p in bpreds.get(c) {
                 if touched[p] == slot && last_write[p] != usize::MAX {
                     union(ns + c, last_write[p]);
                 } else if reached[p] == slot {

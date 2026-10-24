@@ -751,7 +751,7 @@ impl Compiling<'_> {
             let at_of: HashMap<usize, usize> = starts.iter().enumerate().map(|(si, &i)| (i, si)).collect();
             let ns = starts.len();
             let (mut uses, mut defs) = (vec![0u64; ns], vec![0u64; ns]);
-            let mut succ: Vec<Vec<usize>> = vec![Vec::new(); ns];
+            let mut succ = vec![reps::Succ::default(); ns];
             for (si, &i) in starts.iter().enumerate() {
                 let (op, n, _) = OPS[cells[i].as_fixnum() as usize];
                 let bit = |j: usize| 1u64.checked_shl(cells[i + 1 + j].as_fixnum() as u32).unwrap_or(0);
@@ -765,9 +765,9 @@ impl Compiling<'_> {
                 let to = || at_of[&((i as i64 + 1 + n as i64 + cells[i + n].as_fixnum()) as usize)];
                 match op {
                     "return" | "tailinvoke" => {}
-                    "branch" => succ[si].push(to()),
-                    "branchf" | "brancht" | "global-guard" => succ[si].extend([si + 1, to()]),
-                    _ if si + 1 < ns => succ[si].push(si + 1),
+                    "branch" => succ[si] = reps::Succ::of([to()]),
+                    "branchf" | "brancht" | "global-guard" => succ[si] = reps::Succ::of([si + 1, to()]),
+                    _ if si + 1 < ns => succ[si] = reps::Succ::of([si + 1]),
                     _ => {}
                 }
             }
