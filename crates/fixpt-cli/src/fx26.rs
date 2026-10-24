@@ -628,7 +628,8 @@ fn exited(session: &mut Fx26Session) -> Option<i32> {
 /// program's own arguments, which `args` gives. The status is `main`'s
 /// result's low byte if that is an integer, else 0; 70 if the run fails
 /// (`failed_status`); `exit`'s, if it is called; 1 if a file cannot be
-/// read or the program is refused.
+/// read or the program is refused. With `FIXPT_GC_SUMMARY`, what the heap
+/// did, at its end, as `eval_program` says it.
 pub fn run_files(backend: Backend, files: &[String]) -> i32 {
     let (files, args) = match files.iter().position(|a| a == "--") {
         Some(i) => (&files[..i], &files[i + 1..]),
@@ -638,6 +639,17 @@ pub fn run_files(backend: Backend, files: &[String]) -> i32 {
         Ok(s) => s,
         Err(code) => return code,
     };
+    let report = std::env::var_os("FIXPT_GC_SUMMARY").is_some() || std::env::var_os("FIXPT_GC_REPORT").is_some();
+    let before = GcStats::of(&mut session);
+    let code = run_files_in(&mut session, files, args);
+    if report {
+        GcStats::of(&mut session).since(&before);
+    }
+    code
+}
+
+/// `run_files`, in `session`: the files, then `main`.
+fn run_files_in(session: &mut Fx26Session, files: &[String], args: &[String]) -> i32 {
     session.scheme.runtime_unrooted().world.args = args.to_vec();
     // A program run whole has no budget, as the REPL's forms do, unless
     // one is asked for (`TODO.md` §84): it ends when it ends.
@@ -673,11 +685,11 @@ pub fn run_files(backend: Backend, files: &[String]) -> i32 {
                 Ok(out) => {
                     print!("{}", out.printed);
                     if let Err(e) = out.value {
-                        return failed_status(&mut session, || e);
+                        return failed_status(session, || e);
                     }
                 }
                 Err(e) => {
-                    if let Some(status) = exited(&mut session) {
+                    if let Some(status) = exited(session) {
                         return status;
                     }
                     eprintln!("fixpt: {}", located(f, &text, &e));
@@ -702,10 +714,10 @@ pub fn run_files(backend: Backend, files: &[String]) -> i32 {
             print!("{}", out.printed);
             match out.value {
                 Ok(v) => v.and_then(|v| v.trim().parse::<i128>().ok()).map_or(0, |n| n.rem_euclid(256) as i32),
-                Err(e) => failed_status(&mut session, || e),
+                Err(e) => failed_status(session, || e),
             }
         }
-        Err(e) => exited(&mut session).unwrap_or_else(|| {
+        Err(e) => exited(session).unwrap_or_else(|| {
             eprintln!("fixpt: `main`: {}", e.message);
             1
         }),
