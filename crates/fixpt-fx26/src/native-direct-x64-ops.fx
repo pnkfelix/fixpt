@@ -36,12 +36,6 @@
 ;; `REGk`'s register, if it has one (`hw`), else -1.
 (define do-hw (subr pure (int) int) (lambda (k) (da-in-reg k)))
 
-;; The next instruction if no branch goes to it (`joinable`), else -1.
-(define do-joinable (subr da-reads (int) int)
-  (lambda (si)
-    (if (>= (+ si 1) (dp-ns))
-        -1
-        (let ((j (dp-start (+ si 1)))) (if (array-ref (get dp-target) j) -1 j)))))
 ;; Whether the instruction at `j` sets `RESULT` before it reads anything
 ;; (`sets_first`), or ignores it (`ignores`).
 (define do-sets-first? (subr da-reads (int) bool)
@@ -70,25 +64,6 @@
                         (dp-start si))
                        (else -1)))))
       (from (+ (dp-si-of j) 1)))))
-
-;; The way from instruction `from` to cell `to` (`edge`): its label, or a
-;; stub's that first unboxes what is raw there and, in the fixnum version,
-;; tests what is known there.
-(define do-edge (subr da-assembles (int int) int)
-  (lambda (from to)
-    (let ((t (dp-si-of to)))
-      (let ((unbox (if (< t 0) (the da-bytes nil) (nr-unboxes (dp-out from) (dp-in t))))
-            (check (if (or (< t 0) (not (get dp-fast)))
-                       (the da-bytes nil)
-                       (nr-checks (dp-out from) (dp-in t) (array-ref (get dp-live) t)))))
-        (if (and (null? unbox) (null? check))
-            (dp-label to)
-            (let ((l (da-label)))
-              (begin
-                (set dp-edges (cons (product (1 l) (2 unbox) (3 check) (4 (dp-label to))
-                                             (5 (dp-label-g to)))
-                                    (get dp-edges)))
-                l)))))))
 
 ;; The procedure's error at cell `i` (`FxRequest::errors`), as it was.
 (define do-error-at (subr da-assembles (int) unit)
@@ -162,7 +137,7 @@
         (da-ld d-x11 d-x9 (do-fld d-global-writes))
         (da-imm d-x16 (dp-ob i 1))
         (da-e (x86-alu da-cmp d-x11 d-x16))
-        (da-jcc da-c-ne (do-edge (- (get dp-si) 1) to))))))
+        (da-jcc da-c-ne (dp-edge (- (get dp-si) 1) to))))))
 
 (define do-setglbl (subr da-assembles (int) unit)
   (lambda (i)
@@ -192,7 +167,7 @@
 (define do-reg (subr da-assembles (int) unit)
   (lambda (i)
     (let* ((k (dp-o i 0))
-           (j (do-joinable (- (get dp-si) 1)))
+           (j (dp-joinable (- (get dp-si) 1)))
            (r (do-hw k)))
       (if (and (>= j 0) (>= r 0) (do-op2? j)
                (not (do-raw-int? (nr-rep (dp-in (- (get dp-si) 1)) (min k 8)))))
@@ -299,7 +274,7 @@
                      (or (= op rop-prim2) (or (= op rop-prim2imm) (= op rop-prim3imm)))))
              (do-hold! 0 -1))
             ((or (= op rop-op2) (= op rop-op2imm))
-             (let ((j (do-joinable (- (get dp-si) 1))))
+             (let ((j (dp-joinable (- (get dp-si) 1))))
                (begin (do-hold! 0 -1)
                       (if (and (>= j 0) (= (dp-op j) rop-setreg))
                           (do-hold! (dp-fix (+ j 1)) -1)
@@ -337,12 +312,12 @@
         (da-store-reg d-frame (do-slot slot) k d-x11)
         (do-forget-slot! slot)
         (do-hold! k slot)
-        (let ((j (do-joinable (- (get dp-si) 1))))
+        (let ((j (dp-joinable (- (get dp-si) 1))))
           (if (and (>= j 0) (= (dp-op j) rop-stack) (dp-fix? (+ j 1)) (= (dp-fix (+ j 1)) slot))
               (begin
                 (da-bind (dp-label j))
                 (set dp-si (+ (get dp-si) 1))
-                (let ((n (do-joinable (- (get dp-si) 1))) (r (do-hw k)))
+                (let ((n (dp-joinable (- (get dp-si) 1))) (r (do-hw k)))
                   (if (and (>= n 0) (>= r 0) (do-op2? n))
                       (set dp-src r)
                       (let ((g (da-get k d-result)))
@@ -378,7 +353,7 @@
 (define do-op2-made
   (subr da-assembles (int int int bool int int int bool bool) unit)
   (lambda (i op x imm? small other r fast-int add-sub)
-    (let* ((j (do-joinable (- (get dp-si) 1)))
+    (let* ((j (dp-joinable (- (get dp-si) 1)))
            (d (if (and add-sub (>= j 0) (= (dp-op j) rop-setreg) (>= (do-hw (dp-o j 0)) 0)
                        (>= (+ (get dp-si) 1) 0) (< (+ (get dp-si) 1) (dp-ns))
                        (do-ignores? (dp-start (+ (get dp-si) 1))))
@@ -441,17 +416,14 @@
 ;; with the branch's label (-1 for none) and whether it is taken when true.
 (define do-op2-test (subr da-assembles (int (subr da-assembles (int bool) unit)) unit)
   (lambda (cond noted)
-    (let ((j (do-joinable (- (get dp-si) 1))))
-      (if (and (>= j 0)
-               (or (= (dp-op j) rop-branchf) (= (dp-op j) rop-brancht))
-               (or (>= (+ (get dp-si) 1) (dp-ns)) (do-sets-first? (dp-start (+ (get dp-si) 1))))
-               (do-sets-first? (+ j (+ 2 (dp-o j 0)))))
-          (let* ((to (+ j (+ 2 (dp-o j 0))))
+    (let ((j (dp-branch-on (- (get dp-si) 1))))
+      (if (>= j 0)
+          (let* ((to (dp-branch-to j))
                  (taken-if-true (= (dp-op j) rop-brancht))
                  (c (cond (taken-if-true cond) ((= cond da-c-e) da-c-ne) (else da-c-ge))))
             (begin
               (da-bind (dp-label j))
-              (let ((l (do-edge (get dp-si) to)))
+              (let ((l (dp-edge (get dp-si) to)))
                 (begin (da-jcc c l) (noted l taken-if-true)))
               (set dp-si (+ (get dp-si) 1))))
           (begin (da-flag cond d-x9) (noted -1 #f))))))
@@ -562,7 +534,7 @@
 ;; head reads, raw or not, with the frame's map for here.
 (define do-branch (subr da-assembles (int int) unit)
   (lambda (i op)
-    (let* ((to (+ i (+ 2 (dp-o i 0)))) (l (do-edge (- (get dp-si) 1) to)))
+    (let* ((to (+ i (+ 2 (dp-o i 0)))) (l (dp-edge (- (get dp-si) 1) to)))
       (cond ((= op rop-branchf) (begin (da-cmp-k d-result d-false) (da-jcc da-c-e l)))
             ((= op rop-brancht) (begin (da-cmp-k d-result d-false) (da-jcc da-c-ne l)))
             (else

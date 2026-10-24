@@ -348,7 +348,18 @@
                                      (if count (dq-count-of) (dr-unbox-reg d-x17)))))
                        d-x17))
                     (else d-x17))))
-      (if (string=? what "->int") (dr-box-reg d-result signed) (dr-raw-fast signed what y)))))
+      (let ((c (dr-compare what signed))
+            (j (dp-branch-on (- (get dp-si) 1))))
+        (cond ((string=? what "->int") (dr-box-reg d-result signed))
+              ;; A test that only a branch reads, as `op2`'s.
+              ((and (>= c 0) (>= j 0))
+               (begin
+                 (da-e (x86-alu da-cmp d-result y))
+                 (da-bind (dp-label j))
+                 (da-jcc (if (= (dp-op j) rop-brancht) c (bitwise-xor c 1))
+                         (dp-edge (get dp-si) (dp-branch-to j)))
+                 (set dp-si (+ (get dp-si) 1))))
+              (else (dr-raw-fast signed what y)))))))
 
 ;; Any other: its fast path in line, else, and when that fails, the call-out.
 (define dq-general (subr da-assembles (int int int string) unit)

@@ -398,6 +398,23 @@ fn slots_read_again_from_their_registers() {
     assert!(reread.is_none(), "{reread:?} in\n{code}");
 }
 
+/// `i64` and `u64` comparisons only a branch reads, branched on the flags
+/// (`TODO.md` §121, `programs/native/raw-tests.fx`): no boolean made of
+/// them; and the program's value as the Rust machine gives it, collecting
+/// often too.
+#[test]
+fn raw_tests_branch_on_the_flags() {
+    let defs = program("native/raw-tests");
+    for gc_every in [None, Some(3)] {
+        let r = run_collecting(&defs, "raw-tests", &[1000], FUEL, gc_every);
+        assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "collecting every {gc_every:?}: {:?} against {}", r.direct, r.rust);
+    }
+    for name in ["signed-tests", "unsigned-tests"] {
+        let code = code_only(&defs, name);
+        assert!(!code.contains("cmov"), "{name}:\n{code}");
+    }
+}
+
 /// Mutable bloblets made and written in line (`TODO.md` §57,
 /// `programs/native/bloblet-tree.fx`): a tree built, its leaves replaced by
 /// younger nodes, summed; as the Rust machine gives it, collecting often too.

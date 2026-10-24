@@ -1693,3 +1693,24 @@ cycles (58.9G to 57.4G).
   written into a register dead until its next read (more instructions,
   more cycles: 123.7G and 57.7G against 119.9G and 56.6G). The copy also
   needed joins to unbox only live registers.
+
+## Raw comparisons branched on the flags, native convention on x86_64 (2026-10-24)
+
+The user, of instruction selection: "finish the fusion work", after it
+measured no fewer cycles on kayak's stage 0 (120.9G instructions to
+117.5G; pinned to a core, 69.9G cycles before, 70.2G after: stage 0
+waits on data cache misses, `TODO.md` §121).
+- **Liveness, not "sets `RESULT` first"**: the boolean is dropped where
+  `RESULT` is dead on both ways out of the branch (`reps::live_in`), so
+  a branch whose next instruction loads an argument for a call (kayak's
+  `(and (i64= fp pos) (string=? ff file))`) fuses too. What `RESULT`
+  then holds is the raw operand; nothing reads it, and no collection
+  traces a dead register (frames by liveness, REG1…REG8 by the entry).
+- **`op2`'s test the same**: `branch_on` (`dp-branch-on`) is shared, so
+  an `int` comparison fuses where it did before and also where the next
+  instruction does not set `RESULT`, in both compilers.
+- **`f64` comparisons left as they were**: a NaN's unordered result
+  wants a second branch (`ucomis` sets PF), not one condition.
+- **`dp-joinable` and `dp-edge` moved** from `-ops.fx` to `-proc.fx`
+  (`do-joinable`, `do-edge` before), so that `-prims.fx`, which cannot
+  see `-ops.fx`, branches as `-ops.fx` does.

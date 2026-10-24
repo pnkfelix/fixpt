@@ -418,6 +418,46 @@
 (define dp-cell-slows (ref dp-cell-slow-list @k) (new nil))
 (define dp-foreign (ref dp-foreign-list @k) (new nil))
 
+;; The next instruction if no branch goes to it (`joinable`), else -1.
+(define dp-joinable (subr da-reads (int) int)
+  (lambda (si)
+    (if (>= (+ si 1) (dp-ns))
+        -1
+        (let ((j (dp-start (+ si 1)))) (if (array-ref (get dp-target) j) -1 j)))))
+;; The way from instruction `from` to cell `to` (`edge`): its label, or a
+;; stub's that first unboxes what is raw there and, in the fixnum version,
+;; tests what is known there.
+(define dp-edge (subr da-assembles (int int) int)
+  (lambda (from to)
+    (let ((t (dp-si-of to)))
+      (let ((unbox (if (< t 0) (the da-bytes nil) (nr-unboxes (dp-out from) (dp-in t))))
+            (check (if (or (< t 0) (not (get dp-fast)))
+                       (the da-bytes nil)
+                       (nr-checks (dp-out from) (dp-in t) (array-ref (get dp-live) t)))))
+        (if (and (null? unbox) (null? check))
+            (dp-label to)
+            (let ((l (da-label)))
+              (begin
+                (set dp-edges (cons (product (1 l) (2 unbox) (3 check) (4 (dp-label to))
+                                             (5 (dp-label-g to)))
+                                    (get dp-edges)))
+                l)))))))
+
+;; The branch just after the instruction at index `si`, where nothing
+;; after it reads the boolean that instruction makes (`branch_on`): its
+;; cell, or -1. A test there branches on the flags.
+(define dp-result-live? (subr da-reads (int) bool)
+  (lambda (si) (= (bitwise-and (array-ref (get dp-live) si) 1) 1)))
+(define dp-branch-on (subr da-reads (int) int)
+  (lambda (si)
+    (let ((j (dp-joinable si)))
+      (if (and (>= j 0)
+               (or (= (dp-op j) rop-branchf) (= (dp-op j) rop-brancht))
+               (or (>= (+ si 2) (dp-ns)) (not (dp-result-live? (+ si 2))))
+               (not (dp-result-live? (dp-si-of (dp-branch-to j)))))
+          j
+          -1))))
+
 ;; Element `k` of `l`.
 (define dp-nth (subr da-reads ((listof da-bytes @k) int) da-bytes)
   (lambda (l k) (if (= k 0) (car l) (dp-nth (cdr l) (- k 1)))))

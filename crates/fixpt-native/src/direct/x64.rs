@@ -823,6 +823,15 @@ impl Compiling<'_> {
         let si_at: HashMap<usize, usize> = starts.iter().enumerate().map(|(si, &i)| (i, si)).collect();
         let has_int = starts.iter().any(|&i| matches!(op_at(i), "op2" | "op2imm") && reps::int_routine(cells[i + 1].as_fixnum() as usize));
         let live = reps::live_in(&cells, &starts, &prim_name, &raw);
+        // The branch just after the instruction at index `si`, and where it
+        // goes, where nothing after it reads the boolean that instruction
+        // makes: a test there branches on the flags.
+        let branch_on = |si: usize| {
+            joinable(si)
+                .filter(|&j| matches!(op_at(j), "branchf" | "brancht") && live.get(si + 2).is_none_or(|l| !l[0]))
+                .map(|j| (j, (j as i64 + 2 + cells[j + 1].as_fixnum()) as usize))
+                .filter(|&(_, to)| !live[si_at[&to]][0])
+        };
         let labels_g = labels;
         let labels_f: Vec<Label> = (0..=cells.len()).map(|_| a.label()).collect();
         let versions: &[bool] = if has_int { &[true, false] } else { &[false] };
@@ -1227,14 +1236,9 @@ impl Compiling<'_> {
                         }
                         // A test that only a branch reads: the branch on the
                         // flags, with no boolean made.
-                        _ => match joinable(si - 1) {
-                            Some(j)
-                                if matches!(op_at(j), "branchf" | "brancht")
-                                    && starts.get(si + 1).is_none_or(|&f| sets_first(f))
-                                    && sets_first((j as i64 + 2 + cells[j + 1].as_fixnum()) as usize) =>
-                            {
+                        _ => match branch_on(si - 1) {
+                            Some((j, to)) => {
                                 a.bind(labels[j]);
-                                let to = (j as i64 + 2 + cells[j + 1].as_fixnum()) as usize;
                                 let taken_if_true = op_at(j) == "brancht";
                                 let cond = match (taken_if_true, cond) {
                                     (false, Cond::E) => Cond::Ne,
@@ -1578,6 +1582,15 @@ impl Compiling<'_> {
                         };
                         if what == "->int" {
                             box_reg(&mut a, self.callouts, RESULT, signed);
+                        } else if let Some(c) = raw_compare(signed, what)
+                            && let Some((j, to)) = branch_on(si - 1)
+                        {
+                            // A test that only a branch reads, as `op2`'s.
+                            a.e(cmp(RESULT, y));
+                            a.bind(labels[j]);
+                            let l = edge(&mut a, si, to);
+                            a.jcc(if op_at(j) == "brancht" { c } else { c.not() }, l);
+                            si += 1;
                         } else {
                             raw_fast(&mut a, &mut stubs, signed, what, y);
                         }
@@ -2988,14 +3001,9 @@ fn wrap_small(a: &mut Asm, signed: bool, bits: u32) {
     a.e(if signed { sar_imm(RESULT, k) } else { shr_imm(RESULT, k) });
 }
 
-/// An `i64` (signed) or `u64` operation `what` on raw `RESULT` and `y`
-/// (raw, or a shift's count, a fixnum), into `RESULT`: raw, or a
-/// comparison's boolean. Its arithmetic wraps, as the machine's does;
-/// division by zero traps, and the least `i64` by −1 is itself, as
-/// arm64's `sdiv` has it. `y` is not `RESULT`, `RCX` or `RDX`.
-fn raw_fast(a: &mut Asm, stubs: &mut Vec<(Label, u32)>, signed: bool, what: &str, y: Reg) {
-    let x = RESULT;
-    let compare = match (what, signed) {
+/// The condition an `i64` (signed) or `u64` comparison `what` holds on.
+fn raw_compare(signed: bool, what: &str) -> Option<Cond> {
+    match (what, signed) {
         ("<", true) => Some(Cond::L),
         ("<=", true) => Some(Cond::Le),
         (">", true) => Some(Cond::G),
@@ -3006,8 +3014,17 @@ fn raw_fast(a: &mut Asm, stubs: &mut Vec<(Label, u32)>, signed: bool, what: &str
         (">=", false) => Some(Cond::Ae),
         ("=", _) => Some(Cond::E),
         _ => None,
-    };
-    if let Some(c) = compare {
+    }
+}
+
+/// An `i64` (signed) or `u64` operation `what` on raw `RESULT` and `y`
+/// (raw, or a shift's count, a fixnum), into `RESULT`: raw, or a
+/// comparison's boolean. Its arithmetic wraps, as the machine's does;
+/// division by zero traps, and the least `i64` by −1 is itself, as
+/// arm64's `sdiv` has it. `y` is not `RESULT`, `RCX` or `RDX`.
+fn raw_fast(a: &mut Asm, stubs: &mut Vec<(Label, u32)>, signed: bool, what: &str, y: Reg) {
+    let x = RESULT;
+    if let Some(c) = raw_compare(signed, what) {
         a.e(cmp(x, y));
         a.flag(c, X13);
         return;

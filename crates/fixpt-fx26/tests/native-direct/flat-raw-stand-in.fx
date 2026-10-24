@@ -35,6 +35,7 @@
     (define dr-f64-fast (subr da-assembles (string int) unit) (lambda (w y) #u))
     (define dr-f32-fast (subr da-assembles (string int) bool) (lambda (w y) #f))
     (define dr-wrap-small (subr da-assembles (bool int) unit) (lambda (s b) #u))
+    (define dr-compare (subr pure (string bool) int) (lambda (w s) -1))
     (define dr-raw-fast (subr da-assembles (bool string int) unit) (lambda (s w y) #u))
     (define dr-narrow-fast (subr da-assembles (string int int) bool) (lambda (n y s) #f))
     (define dr-int-slow (subr da-assembles (dr-int-slow) unit) (lambda (s) #u))))
