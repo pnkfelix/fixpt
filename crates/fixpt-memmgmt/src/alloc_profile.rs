@@ -75,7 +75,9 @@ unsafe impl GlobalAlloc for Counting {
 }
 
 /// The samples, told on the standard error, if any were taken: each
-/// stack's first three frames in Fixpt's crates (`fixpt`), past the
+/// stack's first three frames in Fixpt's crates (`fixpt`, each function
+/// only where it is first met, so that a recursion is one; as many as
+/// `FIXPT_ALLOC_DEPTH` says, if it is set), past the
 /// allocator's and the standard library's, with how many allocations and
 /// bytes they stand for (the samples times the period).
 pub fn report() {
@@ -85,14 +87,18 @@ pub fn report() {
     }
     BUSY.with(|b| b.set(true));
     let samples = std::mem::take(&mut *SAMPLES.lock().expect("not poisoned"));
+    let depth = std::env::var("FIXPT_ALLOC_DEPTH").ok().and_then(|n| n.parse::<usize>().ok()).unwrap_or(3);
     let mut by: HashMap<String, (u64, u64)> = HashMap::new();
     for (stack, size) in &samples {
         let text = stack.to_string();
+        // A recursion's frames as one: each function where it is first met.
+        let mut seen = std::collections::HashSet::new();
         let frames: Vec<&str> = text
             .lines()
             .filter_map(|l| l.trim_start().split_once(": ").filter(|(n, _)| n.bytes().all(|b| b.is_ascii_digit())).map(|(_, f)| f))
             .filter(|f| f.contains("fixpt") && !f.contains("alloc_profile"))
-            .take(3)
+            .filter(|f| seen.insert(*f))
+            .take(depth)
             .collect();
         let e = by.entry(frames.join("\n    <- ")).or_default();
         e.0 += period;
