@@ -3067,7 +3067,17 @@ distance between a pair, its `car` and the `car`'s fields, from a dump
 of the heap after a collection), and the misses per fact visited
 (`l2_cache_req_stat.ls_rd_blk_c` over the walks' iterations).
 
-## 123. Kayak's facts indexed by place (kayak's, to propose; 2026-10-24)
+## 123. ~~Kayak's facts indexed by place~~ (kayak's; done there, C143, 2026-10-24)
+
+Done by kayak at `abecd81` (C143): a balanced tree of the facts by
+position (`fidx`, `kfx/emit.kfx`). Stage 0 on it, Fixpt at `df3c90b7`:
+29.5G cycles and 68.4G instructions (from about 57.5G and 117.5G), data
+reads missing L2 0.36G times (from 1.66G); about 7.9 s. Left of the
+same kind there: `find-bind` (`kfx/check-exprs.kfx`), the innermost
+binding by a walk of every binding, 10.5% of stage 0's cycles; kayak's
+to change, if anything.
+
+What was here:
 
 78% of stage 0's L2 misses are in `any?`'s lambda, `facts-at-place`,
 `first-fact` and `find-bind` (§121): linear walks of every fact, at
@@ -3098,3 +3108,22 @@ fast path falls through and the code is denser in the instruction
 cache. Stage 0's instruction fetches miss L2 0.27G times a run against
 1.66G data reads (§121), so expect little there; measure on a program
 whose hot code is larger than the instruction cache.
+
+## 126. Stage 0's fixed cost: Fixpt loading kayak's compiler (2026-10-24)
+
+With kayak's facts indexed (§123), loading is most of stage 0, where it
+was about 1% at 610 s: `tests/kfx/loaded-select.kfx` in place of
+`kfx/kfx.unit OUT_DIR` (`docs/kayak-stage0-workload.md`) takes 20.7G of
+the whole run's 29.5G cycles, 70%. Of the fixed cost (`perf`, cycles,
+`df3c90b7`): register words 30%, the FX-26 checker written in FX-26
+(`check-subst.fx`, `check-syntax.fx` and the rest) checking kfx.fx, not
+native; the heap 18% (`bloblet_main`, `collect_minor`); the native
+convention's compiler 13% (`reps::demands`, `webs`, `reps_of`,
+`procedure_x64`); malloc and free 11%; hashing 5%; call-outs 5%; the
+Rust front end 4%; native code 2%. Leads: the checker's words native;
+the compiler's analyses cheaper, or done only for what runs often; what
+mallocs.
+
+Measuring: the first run of a new binary, or of a new input, does more
+(88.3G instructions against 68.4G after, run to run alike to 0.1%):
+something kept between runs is made then. Take the runs after it.
