@@ -197,10 +197,15 @@
       (if (and (>= j 0) (>= r 0) (do-op2? j)
                (not (do-raw-int? (nr-rep (dp-in (- (get dp-si) 1)) (min k 8)))))
           (set dp-src r)
-          (let ((g (da-get k d-result))) (if (= g d-result) #u (da-mov d-result g)))))))
+          (let ((g (da-get k d-result)))
+            (begin (if (= g d-result) #u (da-mov d-result g)) (do-hold! 0 (do-held k))))))))
 
+(define do-setreg (subr da-assembles (int) unit)
+  (lambda (i) (let ((k (dp-o i 0))) (begin (da-put k d-result) (do-hold! k (do-held 0))))))
 (define do-movereg (subr da-assembles (int) unit)
-  (lambda (i) (da-put (dp-o i 1) (da-get (dp-o i 0) d-x16))))
+  (lambda (i)
+    (begin (da-put (dp-o i 1) (da-get (dp-o i 0) d-x16))
+           (do-hold! (dp-o i 1) (do-held (dp-o i 0))))))
 
 ;; The frame made, the return address `call` pushed moved to its second;
 ;; past the stack cache's limit, the rest flushed into the heap.
@@ -243,12 +248,95 @@
 ;; A slot's place in the frame.
 (define do-slot (subr da-reads (int) int) (lambda (k) (array-ref (get dp-slot-off) k)))
 
+;;; ------------------------------------------------------------ what registers hold
+
+;; What `RESULT` or REGk holds of the frame (`held`): a slot, or -1; none
+;; past REG3.
+(define do-held (subr da-reads (int) int)
+  (lambda (k) (if (<= k 3) (array-ref (get dp-held) k) -1)))
+(define do-hold! (subr da-assembles (int int) unit)
+  (lambda (k slot) (if (<= k 3) (array-set! (get dp-held) k slot) #u)))
+(define do-forget-all! (subr da-assembles () unit)
+  (lambda () (begin (do-hold! 0 -1) (do-hold! 1 -1) (do-hold! 2 -1) (do-hold! 3 -1))))
+;; Slot `n`, written: held nowhere.
+(define do-forget-slot! (subr da-assembles (int) unit)
+  (lambda (n)
+    (letrec ((go (subr da-assembles (int) unit)
+               (lambda (r)
+                 (if (> r 3) #u (begin (if (= (do-held r) n) (do-hold! r -1) #u) (go (+ r 1)))))))
+      (go 0))))
+;; The first of `RESULT` and REG1…REG3 that holds slot `n`, or -1.
+(define do-held-by (subr da-reads (int) int)
+  (lambda (n)
+    (letrec ((go (subr da-reads (int) int)
+               (lambda (r) (cond ((> r 3) -1) ((= (do-held r) n) r) (else (go (+ r 1)))))))
+      (go 0))))
+;; A version begun: nothing held; in the general one, the labels the
+;; fixnum version goes to.
+(define do-held-version (subr da-assembles (bool) unit)
+  (lambda (fast)
+    (begin (do-forget-all!)
+           (set dp-entered (if fast (the da-bools (make-array 1 #f)) (da-targets))))))
+(define do-entered? (subr da-reads (int) bool)
+  (lambda (l) (and (< l (array-length (get dp-entered))) (array-ref (get dp-entered) l))))
+;; Before instruction `i`, `op`, its code from `at`: nothing held where
+;; ways meet, where a way from the fixnum version comes in, or where its
+;; conversions made registers over; then what it makes over forgotten.
+(define do-held-step (subr da-assembles (int int int) unit)
+  (lambda (i op at)
+    (begin
+      (if (or (array-ref (get dp-target) i) (not (= (da-here) at)) (do-entered? (dp-label-g i)))
+          (do-forget-all!)
+          #u)
+      (cond ((or (or (or (= op rop-stack) (= op rop-setstk)) (or (= op rop-load) (= op rop-store)))
+                 (or (or (= op rop-reg) (= op rop-setreg)) (or (= op rop-movereg) (= op rop-args)))
+                 (or (or (= op rop-setglbl) (= op rop-setfield))
+                     (or (= op rop-branchf) (or (= op rop-brancht) (= op rop-global-guard)))))
+             #u)
+            ((or (or (or (= op rop-const) (= op rop-global))
+                     (or (= op rop-lexical) (= op rop-field)))
+                 (or (or (= op rop-op1) (= op rop-prim1))
+                     (or (= op rop-prim2) (or (= op rop-prim2imm) (= op rop-prim3imm)))))
+             (do-hold! 0 -1))
+            ((or (= op rop-op2) (= op rop-op2imm))
+             (let ((j (do-joinable (- (get dp-si) 1))))
+               (begin (do-hold! 0 -1)
+                      (if (and (>= j 0) (= (dp-op j) rop-setreg))
+                          (do-hold! (dp-fix (+ j 1)) -1)
+                          #u))))
+            (else (do-forget-all!))))))
+
+;; `stack`: `RESULT` := slot `n`, moved from a register that holds it.
+(define do-stack (subr da-assembles (int) unit)
+  (lambda (i)
+    (let* ((n (dp-o i 0)) (r (do-held-by n)))
+      (begin
+        (cond ((= r 0) #u)
+              ((> r 0) (da-mov d-result (da-in-reg r)))
+              (else (da-ld d-result d-frame (do-slot n))))
+        (do-hold! 0 n)))))
+(define do-setstk (subr da-assembles (int) unit)
+  (lambda (i)
+    (let ((n (dp-o i 0)))
+      (begin (da-sto d-frame (do-slot n) d-result) (do-forget-slot! n) (do-hold! 0 n)))))
+;; `load`: REGk := slot `n`, from a register that holds it.
+(define do-load (subr da-assembles (int) unit)
+  (lambda (i)
+    (let* ((k (dp-o i 0)) (n (dp-o i 1)) (f (do-held-by n)))
+      (begin
+        (cond ((and (>= f 0) (= (da-in-reg f) (da-in-reg k))) #u)
+              ((>= f 0) (da-put k (da-in-reg f)))
+              (else (da-load-reg k d-frame (do-slot n) d-x11)))
+        (do-hold! k n)))))
+
 ;; `store`, and its slot read back at once: the register is still it.
 (define do-store (subr da-assembles (int) unit)
   (lambda (i)
     (let ((k (dp-o i 0)) (slot (dp-o i 1)))
       (begin
         (da-store-reg d-frame (do-slot slot) k d-x11)
+        (do-forget-slot! slot)
+        (do-hold! k slot)
         (let ((j (do-joinable (- (get dp-si) 1))))
           (if (and (>= j 0) (= (dp-op j) rop-stack) (dp-fix? (+ j 1)) (= (dp-fix (+ j 1)) slot))
               (begin
@@ -257,7 +345,8 @@
                 (let ((n (do-joinable (- (get dp-si) 1))) (r (do-hw k)))
                   (if (and (>= n 0) (>= r 0) (do-op2? n))
                       (set dp-src r)
-                      (let ((g (da-get k d-result))) (if (= g d-result) #u (da-mov d-result g))))))
+                      (let ((g (da-get k d-result)))
+                        (begin (if (= g d-result) #u (da-mov d-result g)) (do-hold! 0 slot))))))
               #u))))))
 
 ;;; ------------------------------------------------------------ `int` operations

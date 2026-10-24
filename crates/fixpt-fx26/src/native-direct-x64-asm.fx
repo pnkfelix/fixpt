@@ -140,6 +140,16 @@
       (set da-last-jump -1)
       (array-set! (get da-labels) l (get da-len)))))
 
+;; Which labels a branch so far goes to, each `#t`.
+(define da-targets (subr da-assembles () da-bools)
+  (lambda ()
+    (let ((to (the da-bools (make-array (+ 1 (get da-nlabels)) #f))))
+      (letrec ((mark (subr da-assembles (da-pairs) unit)
+                 (lambda (fs)
+                   (if (null? fs)
+                       #u
+                       (begin (array-set! to (extract (car fs) 2) #t) (mark (cdr fs)))))))
+        (begin (mark (get da-fixups)) to)))))
 ;; Whether a branch so far goes to `l`.
 (define da-used-in? (subr da-reads (da-pairs int) bool)
   (lambda (fs l)

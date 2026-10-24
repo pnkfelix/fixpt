@@ -835,6 +835,14 @@ impl Compiling<'_> {
         let mut pending: Option<Field> = None;
         let mut bound: Option<(Value, Value)> = None;
         map_stored = None;
+        // What `RESULT` and REG1…REG3 hold of the frame (`TODO.md` §121):
+        // `held[r]`, a slot whose bits the register has, written there or
+        // read from it since, in straight-line code; none where ways meet
+        // (a branch's target, or a way in from the fixnum version), where
+        // registers are made over (a conversion, a fused instruction) or
+        // anything may collect. A read of the slot is then a move.
+        let mut held: [Option<usize>; 4] = [None; 4];
+        let entered: std::collections::HashSet<usize> = if fast { Default::default() } else { a.fixups.iter().map(|&(_, l)| l).collect() };
         let mut edge = |a: &mut Asm, from: usize, to: usize| -> Label {
             let (unbox, check) = match si_at.get(&to) {
                 Some(&t) => (
@@ -853,6 +861,7 @@ impl Compiling<'_> {
         let mut si = 0;
         while si < starts.len() {
             let i = starts[si];
+            let at = a.here();
             // Falling in from the instruction before, the registers it
             // leaves as values that are raw here unboxed; in the fixnum
             // version, those it leaves unknown that are known here tested.
@@ -880,6 +889,23 @@ impl Compiling<'_> {
             }
             if target[i] {
                 map_stored = None;
+            }
+            if target[i] || a.here() != at || entered.contains(&labels_g[i].0) {
+                held = [None; 4];
+            }
+            match op {
+                "stack" | "setstk" | "load" | "store" | "reg" | "setreg" | "movereg" | "args" | "setglbl" | "setfield" | "branchf" | "brancht" | "global-guard" => {}
+                "const" | "global" | "lexical" | "field" | "op1" | "prim1" | "prim2" | "prim2imm" | "prim3imm" => held[0] = None,
+                "op2" | "op2imm" => {
+                    held[0] = None;
+                    if let Some(j) = joinable(si - 1)
+                        && op_at(j) == "setreg"
+                        && let Some(h) = held.get_mut(cells[j + 1].as_fixnum() as usize)
+                    {
+                        *h = None;
+                    }
+                }
+                _ => held = [None; 4],
             }
             // Before what may collect, in a frame: the slots live after it,
             // the code bloblet's, and the closure's if the code reads it.
@@ -997,12 +1023,23 @@ impl Compiling<'_> {
                         if r != RESULT {
                             a.e(mov(RESULT, r));
                         }
+                        held[0] = held.get(k(o(0))).copied().flatten();
                     }
                 },
-                "setreg" => a.put(k(o(0)), RESULT),
+                "setreg" => {
+                    a.put(k(o(0)), RESULT);
+                    let from = held[0];
+                    if let Some(h) = held.get_mut(k(o(0))) {
+                        *h = from;
+                    }
+                }
                 "movereg" => {
                     let r = a.get(k(o(0)), X16);
                     a.put(k(o(1)), r);
+                    let from = held.get(k(o(0))).copied().flatten();
+                    if let Some(h) = held.get_mut(k(o(1))) {
+                        *h = from;
+                    }
                 }
                 // The frame made, as `procedure` makes it, the return
                 // address `call` pushed (where the frame's top word is)
@@ -1037,11 +1074,39 @@ impl Compiling<'_> {
                 }
                 // The frame popped, its return address on top again.
                 "pop" => pop_frame_ret(&mut a, size.expect("a frame")),
-                "stack" => a.e(load(RESULT, m(FRAME, slot_off[k(o(0))]))),
-                "setstk" => a.e(store(m(FRAME, slot_off[k(o(0))]), RESULT)),
-                "load" => a.load_reg(k(o(0)), m(FRAME, slot_off[k(o(1))]), X11),
+                "stack" => {
+                    let n = k(o(0));
+                    match held.iter().position(|&h| h == Some(n)) {
+                        Some(0) => {}
+                        Some(r) => a.e(mov(RESULT, IN_REGS[r])),
+                        None => a.e(load(RESULT, m(FRAME, slot_off[n]))),
+                    }
+                    held[0] = Some(n);
+                }
+                "setstk" => {
+                    let n = k(o(0));
+                    a.e(store(m(FRAME, slot_off[n]), RESULT));
+                    held = held.map(|h| h.filter(|&s| s != n));
+                    held[0] = Some(n);
+                }
+                "load" => {
+                    let (r, n) = (k(o(0)), k(o(1)));
+                    match (held.iter().position(|&h| h == Some(n)), loc(r)) {
+                        (Some(f), Loc::R(d)) if IN_REGS[f] == d => {}
+                        (Some(f), _) => a.put(r, IN_REGS[f]),
+                        (None, _) => a.load_reg(r, m(FRAME, slot_off[n]), X11),
+                    }
+                    if let Some(h) = held.get_mut(r) {
+                        *h = Some(n);
+                    }
+                }
                 "store" => {
                     a.store_reg(m(FRAME, slot_off[k(o(1))]), k(o(0)), X11);
+                    let n = k(o(1));
+                    held = held.map(|h| h.filter(|&s| s != n));
+                    if let Some(h) = held.get_mut(k(o(0))) {
+                        *h = Some(n);
+                    }
                     // Its slot read back at once: the register is still it.
                     if let Some(j) = joinable(si - 1)
                         && op_at(j) == "stack"
@@ -1056,6 +1121,7 @@ impl Compiling<'_> {
                                 if r != RESULT {
                                     a.e(mov(RESULT, r));
                                 }
+                                held[0] = Some(n);
                             }
                         }
                     }

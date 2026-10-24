@@ -2982,6 +2982,15 @@ kayak's check no longer waits for it once kayak passes that machine.
   code would help every program, at most by some tens of percent here;
   the samples fall mostly on the loads of the list's cells and the
   facts' fields.
+- ~~**Frame slots kept in registers**~~ (the user's, 2026-10-24) in
+  straight-line code, by both x86_64 native compilers: a slot read is a
+  move, or nothing, while `RESULT` or REG1…REG3 still hold it (`held`,
+  `do-held-step`). About 3% of stage 0's cycles (CLAUDES_CHOICES.md,
+  "Frame slots held in registers"). What costs more, in kayak's loops
+  (`first-fact`): an `i64=` of two fields, each unboxed with a call-out's
+  code in line beside it, then a boolean made and tested (`cmov`, `cmp
+  3`), about 15 instructions where a compare and a branch would do; and
+  each operation's slow path in line, jumped over.
 - **`fast` on x86_64**: right again for this program. Whether one decline
   still sinks a module (or any definition) whole is the question left:
   a member the compiler declines could be adapted alone.

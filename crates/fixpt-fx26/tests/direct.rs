@@ -57,6 +57,15 @@ fn direct_only(defs: &str, name: &str, args: &[i64], fuel: u64) -> Ran {
 }
 
 fn direct_in(defs: &str, name: &str, args: &[i64], fuel: u64, gc_every: Option<u64>, stack: Option<(u64, u64)>) -> Ran {
+    direct_made(defs, name, args, fuel, gc_every, stack, std::env::var("SHOW_FILE").is_err())
+}
+
+/// `name`'s native code only, not run.
+fn code_only(defs: &str, name: &str) -> String {
+    direct_made(defs, name, &[], 0, None, None, false).code
+}
+
+fn direct_made(defs: &str, name: &str, args: &[i64], fuel: u64, gc_every: Option<u64>, stack: Option<(u64, u64)>, run: bool) -> Ran {
     let rust = String::new();
     let text = format!("{defs}\n{name}");
     // Run natively, so typed so: its calls compiled as their types say.
@@ -103,7 +112,7 @@ fn direct_in(defs: &str, name: &str, args: &[i64], fuel: u64, gc_every: Option<u
             eprintln!("{code}");
         }
         // Compiled only, not run (`show_code`: its arguments are made up).
-        if std::env::var("SHOW_FILE").is_ok() {
+        if !run {
             return Ran { direct: Err("not run".into()), rust, code, collections: (0, 0), code_words: (0, 0) };
         }
         let vals: Vec<Value> = args.iter().map(|a| Value::fixnum(*a)).collect();
@@ -365,6 +374,28 @@ fn string_reads_in_line() {
         let r = run(defs, "past", &[i], FUEL);
         assert!(matches!(&r.direct, Err(m) if m.contains("out of range")), "{i}: {:?}", r.direct);
     }
+}
+
+/// A slot written and read again in straight-line code, while `RESULT` or
+/// REG1…REG3 still hold it, is read from the register, not the frame
+/// (`TODO.md` §121, `programs/native/held-slots.fx`): no store of a
+/// register to a slot followed by a load of the same slot into it; and the
+/// program's value as the Rust machine gives it, collecting often too.
+#[test]
+fn slots_read_again_from_their_registers() {
+    let defs = program("native/held-slots");
+    for gc_every in [None, Some(3)] {
+        let r = run_collecting(&defs, "held-slots", &[1000], FUEL, gc_every);
+        assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "collecting every {gc_every:?}: {:?} against {}", r.direct, r.rust);
+    }
+    let code = code_only(&defs, "first-fact");
+    let lines: Vec<&str> = code.lines().collect();
+    let reread = lines.windows(2).find(|w| {
+        let stored = w[0].strip_prefix("mov [rbp+").and_then(|t| t.split_once("], "));
+        let loaded = w[1].strip_prefix("mov ").and_then(|t| t.split_once(", [rbp+"));
+        matches!((stored, loaded), (Some((at, r)), Some((d, from))) if r == d && from.trim_end_matches(']') == at)
+    });
+    assert!(reread.is_none(), "{reread:?} in\n{code}");
 }
 
 /// Mutable bloblets made and written in line (`TODO.md` §57,

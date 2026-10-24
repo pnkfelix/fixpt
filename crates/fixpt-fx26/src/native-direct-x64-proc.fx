@@ -383,6 +383,11 @@
 ;; The map last stored in the frame (`map_stored`), if one is.
 (define dp-map-stored? (ref bool @k) (new #f))
 (define dp-map-stored (ref int @k) (new 0))
+;; What `RESULT` and REG1…REG3 hold of the frame (`held`, `TODO.md` §121):
+;; a slot each, or -1; and which labels a way from the fixnum version goes
+;; to (`entered`).
+(define dp-held (ref da-ints @k) (new (make-array 4 -1)))
+(define dp-entered (ref da-bools @k) (new (make-array 1 #f)))
 ;; The instruction being compiled, by index, which a join may move on.
 (define dp-si (ref int @k) (new 0))
 ;; The entry, past its unboxing of raw parameters (`entry_checked`), and

@@ -1671,3 +1671,25 @@ by the first two below.
   procedures after compiles none (a module), and replaced by that pass's
   own when it fails; cleared only when it succeeds, as before.
 
+
+## Frame slots held in registers, native convention on x86_64 (2026-10-24)
+
+The user: "We should absolutely try to keep values in registers in
+straight line code." Measured on kayak's stage 0 (`perf stat`, four
+alternating runs each): 121.6G instructions to 120.1G, about 3% fewer
+cycles (58.9G to 57.4G).
+- **A write-through cache, not an allocator**: every slot is still
+  stored, so the frame, its stack maps and the collector are as they
+  were; a slot's read is a move, or nothing, where `RESULT` or REG1…REG3
+  still hold it. REG4…REG8 are words of the state, not registers, and
+  scratch registers are any helper's, so those four are all it uses.
+- **Forgotten wherever it might be wrong**: at every branch's target and
+  every way in from the fixnum version, where an instruction's
+  conversions emitted code, and at any instruction but the moves, the
+  slot reads and writes, the branches that fall through, and those that
+  only make `RESULT` over.
+- **Tried and dropped**: carried across a forward branch to a target
+  with no other way in (no measurable change); and a copy of a slot just
+  written into a register dead until its next read (more instructions,
+  more cycles: 123.7G and 57.7G against 119.9G and 56.6G). The copy also
+  needed joins to unbox only live registers.
