@@ -71,6 +71,27 @@ left in `/tmp`, as perf's convention is, one per process. Code collected
 has its room used again, and perf knows no time of a name, so an address
 reused shows one of its names.
 
+**Who allocates in Rust** (2026-10-24). The heap FX-26 programs run on
+never calls `malloc`: it allocates in memory it reserved, by bumping a
+pointer. What does call it is Fixpt's Rust (the compilers' and the
+checker's vectors, maps and strings; the call-outs' conversions), all
+through the one global allocator, which the CLI wraps
+(`fixpt_memmgmt::alloc_profile`). With `FIXPT_ALLOC_PROFILE=N` it takes
+the stack of every `N`th allocation or reallocation, and at the end says
+on the standard error how many allocations each place stands for, by its
+first three frames in Fixpt's crates:
+
+```text
+FIXPT_ALLOC_PROFILE=1000 fixpt --fx26-machine fx-regs-rsjit-nativecc run prog.fx 2> allocs.txt
+```
+
+A `perf` call graph cannot say this: glibc's `malloc` keeps no frame
+pointers, and here unwinds by DWARF no better. Loading kayak's compiler,
+it found 14.4M allocations, the first 1.6M a vector for each
+instruction's successors (`reps::successors`) and some 2M of
+`symbol->string`'s, the name through Rust's strings and back; both gone
+since (10.3M). A program that ends by `exit` is not told.
+
 Call stacks are walked through the native convention's code with
 `--call-graph fp`: its frames are linked by `rbp`, the return address at
 `[rbp + 8]`, as perf's walker reads them (`trampoline` → `native run` →

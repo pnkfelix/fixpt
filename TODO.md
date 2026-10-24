@@ -3148,5 +3148,16 @@ alike to 0.1%. Take the runs after it.
   `char-in?` loops as `string=?`'s), some 10M call-outs; the dispatch
   cheaper (integer thresholds, no vector for a primitive's arguments);
   who mallocs, still unseen (glibc unwinds by neither frame pointers nor
-  DWARF here). Who mallocs is not
+  DWARF here).
+- ~~**Those leads taken**~~ (the user's, 2026-10-24): the five in line
+  (CLAUDES_CHOICES.md, "Characters, symbols and strings read in line"),
+  stage 0 22.2G cycles to 21.1G; the dispatch's vector and floats gone,
+  some 0.5%; and who mallocs, by a sampling allocator
+  (`FIXPT_ALLOC_PROFILE`, `docs/performance.md`), whose first two finds
+  are fixed: stage 0 20.6G, loading 11.9G. **Next**, by its report on
+  loading (10.3M allocations): `Datum::clone` 0.65M (88 MB), `reps::webs`
+  0.55M, the Rust checker's `cyclic::walk` 0.44M and `Exp::clone` 0.4M,
+  `procedure_x64` 0.36M, `ty_kids` 0.34M, the reader's `read_atom`
+  0.3M; strings between Rust and the heap (`string_points_into`,
+  `String::from_iter`) some 0.8M more. Who mallocs is not
   seen (glibc has no frame pointers): a DWARF call graph would say.
