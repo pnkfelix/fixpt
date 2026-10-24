@@ -1583,3 +1583,23 @@ The user: "let's attack requires and ensures next" (the design note's
    constant all the same; its values are passed to a replay only for an
    integer or boolean parameter.
 
+## Logic functions' definitions for the solver (S4, 2026-10-23)
+
+1. **Translated from the checker's expressions** (`smt_theory`), not from
+   the cells: the body of a `lambda`, or of `(letrec ((s T (lambda …)))
+   s)`, as `define-fun-rec`. Anything not translated leaves the function
+   undefined, uninterpreted as before: never a partial definition.
+2. **Totality by the translation**: `car` and `cdr` only of a list a test
+   on the way showed a pair (`null?` false, `pair?` true, `not` of
+   either), so each equation is what a run gives.
+3. **One datatype, finite lists of `Int`**, as the first case; a list
+   parameter of another element type leaves the function undefined.
+4. **Lists in a VC only of finite, unwritten lists, in a word that
+   writes nothing**: the verifier notes each term whose type is a
+   `Frozen(_, true)` list (`Outcome::finite`) and whether the word's
+   steps write (`Outcome::writes`, before masking); only those terms,
+   their tails and `nil` are `L`'s. A cyclic or written list would make
+   the solver's well-founded lists prove what does not hold.
+5. **What `cons` made is its pair** (`Outcome::conses`), asserted for the
+   pairs the VC has as lists: true of data never written.
+

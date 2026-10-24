@@ -68,4 +68,12 @@ fn open_obligations_sorted_by_a_solver() {
     assert!(has("wrong-requires.fx", "`(clamp x 0 5)`: the callee's requires: false: with x = 1, the requires of clamp does not hold"), "{}", said["wrong-requires.fx"]);
     let insert = "at harness-insert.fx:20:47, `(assert (sorted? (insert e xs)))`: `assert`'s requires: not proved, as the proof knows too little of a call. It holds for e = 0, xs = (the ints nil); but for all the proof knows, (sorted? (insert 0 (the ints nil))) could be #f, where it is #t.";
     assert!(has("harness-insert.fx", insert), "{}", said["harness-insert.fx"]);
+    // Logic functions, defined for the solver (`smt_theory`): `insert`'s
+    // inductive `ensures` proved; the one too weak to be, the recursive
+    // call's value named; the wrong `insert` false, of lists the solver
+    // found.
+    assert!(has("logic-insert.fx", "`insert`: verified") && has("logic-insert.fx", "by the SMT solver"), "{}", said["logic-insert.fx"]);
+    let weak = "not proved, as the proof knows too little of a call. It holds for e = ";
+    assert!(has("logic-harness.fx", weak) && has("logic-harness.fx", "but for all the proof knows, (insert "), "{}", said["logic-harness.fx"]);
+    assert!(has("logic-harness-wrong.fx", "the ensures: false: with e = ") && has("logic-harness-wrong.fx", "xs = (the ints (list "), "{}", said["logic-harness-wrong.fx"]);
 }

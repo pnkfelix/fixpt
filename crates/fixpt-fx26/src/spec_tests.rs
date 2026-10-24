@@ -463,14 +463,20 @@ pub fn replay(session: &mut Fx26Session, defined: &[(String, Vec<String>)], name
     let params = defined.iter().find(|(n, _)| n == name).map(|(_, ps)| ps.clone()).unwrap_or_default();
     let Some((names, draws, spec)) = callable(session, name, &params) else { return Ok(None) };
     let mut seq = Seq(0x5eed);
-    // A value given for an integer or a boolean only: the logic's values
-    // of others are no values of theirs (`smt`'s constants).
-    let scalar = |d: &Draw| !matches!(d, Draw::List(..));
-    let args: Vec<String> = draws
-        .iter()
-        .enumerate()
-        .map(|(j, d)| given.iter().find(|(i, _)| *i == j && scalar(d)).map_or_else(|| value(d, 0, j, &mut seq), |(_, v)| v.clone()))
-        .collect();
+    // A value given of the parameter's kind only: a list's a list (`nil`,
+    // `(list …)`), at the parameter's type; an integer the logic gives a
+    // list (`smt`'s constants) is none of its values.
+    let given_for = |j: usize, d: &Draw| {
+        let (_, v) = given.iter().find(|(i, _)| *i == j)?;
+        let list = v == "nil" || v.starts_with("(list");
+        match d {
+            Draw::List(_, t) if list => Some(format!("(the {t} {v})")),
+            Draw::List(..) => None,
+            _ if list => None,
+            _ => Some(v.clone()),
+        }
+    };
+    let args: Vec<String> = draws.iter().enumerate().map(|(j, d)| given_for(j, d).unwrap_or_else(|| value(d, 0, j, &mut seq))).collect();
     // Not an input of its own `requires`: passed over.
     let bound = names.iter().zip(&args).map(|(n, a)| format!("({n} {a})")).collect::<Vec<_>>().join(" ");
     if let Some(s) = &spec
@@ -497,6 +503,8 @@ pub fn written(v: &crate::smt::Val) -> String {
     match v {
         crate::smt::Val::Int(k) => k.to_string(),
         crate::smt::Val::Bool(b) => if *b { "#t" } else { "#f" }.to_string(),
+        crate::smt::Val::List(xs) if xs.is_empty() => "nil".into(),
+        crate::smt::Val::List(xs) => format!("(list{})", xs.iter().map(|x| format!(" {x}")).collect::<String>()),
     }
 }
 

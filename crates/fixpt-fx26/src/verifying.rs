@@ -140,6 +140,7 @@ pub fn report(scheme: &mut fixpt_scheme::Session, text: &str, file: Option<&str>
         lines.push(format!("`{want}`: no word of that name"));
     }
     let solver = crate::smt::solver();
+    let theory = crate::smt_theory::Theory::of(&c, &tops);
     let mut replayer = Replayer { text, base, session: None };
     let (mut verified, mut unsorted) = (0, false);
     for (n, o, sources) in &words {
@@ -149,7 +150,10 @@ pub fn report(scheme: &mut fixpt_scheme::Session, text: &str, file: Option<&str>
             None => format!("  {said}"),
         };
         let sorted: Vec<(usize, Sorted)> = match &solver {
-            Some(z) => o.vcs.iter().map(|(i, what, vc)| (*i, sort(z, &mut replayer, n.as_deref(), o, what, vc))).collect(),
+            Some(z) => {
+                let cx = crate::smt::Context { theory: Some(&theory), lists: !o.writes, conses: &o.conses, finite: &o.finite };
+                o.vcs.iter().map(|(i, what, vc)| (*i, sort(z, cx, &mut replayer, n.as_deref(), o, what, vc))).collect()
+            }
             None => Vec::new(),
         };
         let proved = |i: usize| sorted.iter().any(|(j, s)| *j == i && matches!(s, Sorted::Proved));
@@ -252,11 +256,11 @@ impl Replayer<'_> {
 /// VC `vc` of `word`, which its outcome `o` left open: asked of `solver`;
 /// if refuted, its counterexample's parameters run, to tell a false
 /// specification from a proof that took a call to give what it does not.
-fn sort(solver: &str, r: &mut Replayer, word: Option<&str>, o: &Outcome, _what: &str, vc: &crate::logic::Formula<crate::typed_cells::Term>) -> Sorted {
+fn sort(solver: &str, cx: crate::smt::Context, r: &mut Replayer, word: Option<&str>, o: &Outcome, _what: &str, vc: &crate::logic::Formula<crate::typed_cells::Term>) -> Sorted {
     use crate::smt::Solved;
     use crate::spec_tests::{written, Tried};
     use crate::typed_cells::{show_term, Term};
-    let model = match crate::smt::solve(solver, vc) {
+    let model = match crate::smt::solve(solver, vc, cx) {
         Solved::Proved => return Sorted::Proved,
         Solved::Unknown(why) => return Sorted::Beyond(format!("the SMT solver says {why}")),
         Solved::Refuted(m) => m,
@@ -281,6 +285,7 @@ fn sort(solver: &str, r: &mut Replayer, word: Option<&str>, o: &Outcome, _what: 
                     Term::Lit(k) if *k == fixpt_heap::Value::TRUE => Some("#t".into()),
                     Term::Lit(k) if k.is_false() => Some("#f".into()),
                     Term::Slot(i) => args.get(*i).cloned(),
+                    Term::App(f @ ("car" | "cdr"), xs) if xs.len() == 1 => Some(format!("({f} {})", source(&xs[0], args, calls)?)),
                     Term::Made(_) => {
                         let (_, f, xs) = calls.iter().find(|(m, _, _)| m == t)?;
                         let xs = xs.iter().map(|x| source(x, args, calls)).collect::<Option<Vec<_>>>()?;
@@ -293,10 +298,15 @@ fn sort(solver: &str, r: &mut Replayer, word: Option<&str>, o: &Outcome, _what: 
             for (made, _, _) in &o.calls {
                 let Some((_, assumed)) = model.iter().find(|(m, _)| m == made) else { continue };
                 let Some(call) = source(made, &args, &o.calls) else { continue };
+                // A list as a run prints it, to be compared.
+                let printed = match assumed {
+                    crate::smt::Val::List(xs) => format!("({})", xs.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(" ")),
+                    v => written(v),
+                };
                 match r.evaluated(&call) {
-                    Some(v) if v != written(assumed) => took.push(format!("{call} could be {}, where it is {v}", written(assumed))),
+                    Some(v) if v != printed => took.push(format!("{call} could be {printed}, where it is {v}")),
                     Some(_) => {}
-                    None => took.push(format!("{call} could be {}", written(assumed))),
+                    None => took.push(format!("{call} could be {printed}")),
                 }
             }
             if took.is_empty() {

@@ -210,6 +210,14 @@ pub struct Outcome {
     /// one is (for `Cert::sources`).
     pub open_at: Vec<Option<usize>>,
     pub failed_at: Vec<Option<usize>>,
+    /// The pairs `cons` made: each one's term, and its parts'. What a pair
+    /// holds is what it was made of only while nothing writes pairs:
+    /// `writes`, whether the word's effect may write anything (or is not
+    /// known), says whether that is so (`crate::smt`'s datatypes).
+    pub conses: Vec<(Term, Term, Term)>,
+    pub writes: bool,
+    /// The terms of values of finite lists, never written (`note_finite`).
+    pub finite: Vec<Term>,
 }
 
 impl Outcome {
@@ -404,6 +412,11 @@ pub fn verify(c: &mut Checker, heap: &Heap, certs: &Certs, word: Value) -> Outco
         None => v.out.stopped = Some("no certificate".into()),
     }
     v.place();
+    use crate::ast::Atom;
+    // Of each step, as it was before any masking (a write to a region
+    // that is gone is still a write to the pairs in it while it was not).
+    let writes = |e: &Effect| e.0.iter().any(|a| matches!(a, Atom::Write(_) | Atom::Init(_) | Atom::Var(_) | Atom::App(_)));
+    v.out.writes = writes(&v.effect) || v.contributed.iter().any(|(_, _, e)| writes(e));
     v.out
 }
 
@@ -695,6 +708,9 @@ impl Verifier<'_> {
             paths: Vec::new(),
         };
         let mut entry = entry;
+        for v in entry.stack.clone() {
+            self.note_finite(&v);
+        }
         let slots: Vec<Term> = (0..slot_types.len()).map(Term::Slot).collect();
         if let Some(spec) = &cert.spec {
             entry.props.push(instance(self.c, &spec.requires, &slots, None));
@@ -1620,7 +1636,23 @@ impl Verifier<'_> {
         let term = term.unwrap_or_else(|| self.fresh());
         let v = V::new(term, ty);
         self.note_nat(&v);
+        self.note_finite(&v);
         s.stack.push(v);
+    }
+
+    /// `v`'s term noted a finite list, never written, if its type says so
+    /// (a `(listof T acyclic)`'s, `Region::Frozen(_, true)`): what the
+    /// solver may take for one of its lists (`crate::smt`).
+    fn note_finite(&mut self, v: &V) {
+        let finite = |r: &crate::ast::Region| matches!(r, crate::ast::Region::Frozen(_, true));
+        let is = match self.ty_of(v) {
+            Some(Ty::Pair(_, _, r, _)) => finite(&r),
+            Some(Ty::NList { region, .. }) => finite(&region),
+            _ => false,
+        };
+        if is && !self.out.finite.contains(&v.term) {
+            self.out.finite.push(v.term.clone());
+        }
     }
 
     /// `v`'s term noted a natural, if its type says so.
@@ -2397,6 +2429,9 @@ impl Verifier<'_> {
                 let vals = args;
                 // A product, a term of the logic's.
                 let made = if op == "*" && terms.len() == 2 { Term::App("*", terms.clone()) } else { self.fresh() };
+                if op == "cons" && terms.len() == 2 {
+                    self.out.conses.push((made.clone(), terms[0].clone(), terms[1].clone()));
+                }
                 // Its `ensures`, assumed after it (the call rule), and what a
                 // branch on it learns.
                 if let Some(spec) = self.op_spec(&op) {

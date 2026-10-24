@@ -2888,14 +2888,18 @@ may call a `pure` global of a `bool`, `int` or `nat` result (both
 checkers, `specs::spec_call`, `check-specs.fx`'s `k-spec-call`); the
 verifier gives a call of one in the cells the same term (`Term::Call`),
 and z3 an uninterpreted function. Not yet:
-- **Definitions.** The provers know nothing of what a logic function
-  computes, so `logic-harness.fx`'s `insert` is not proved: its body as
-  equations for z3 (`define-fun-rec`), and lists and `define-datatype`'s
-  sums and products as SMT datatypes, so that a model gives list values
-  to replay (now a list parameter is run at `nil`).
-- **Totality**: `(car xs)` where `xs` may be `nil` in a logic function
-  (§86's debts) is not refused; harmless while calls are uninterpreted,
-  not once definitions are used.
+- ~~**Definitions.**~~ Done the same day, for z3 (`smt_theory`): a body
+  of `if`, `null?`, `pair?`, guarded `car` and `cdr`, `cons`, arithmetic,
+  comparisons and logic functions' calls is a `define-fun-rec` over
+  `Int`, `Bool` and finite lists of integers (`L`); in a word that writes
+  nothing, the VC's finite lists are `L`'s, what `cons` made its pair, and
+  a model's lists are replayed. `logic-insert.fx`'s `insert` is proved.
+  Still not: lists of other elements, `define-datatype`'s sums and
+  products, a body of `let`, `tagcase` or anything else (left undefined,
+  a function only), and the verifier's own prover unfolding none.
+- **Totality** of a logic function is not asked of the checkers; the
+  solver is given a definition only where every `car` and `cdr` is of a
+  list a test showed a pair, so it is total where it is used.
 - **Argument types** are not checked as the specification is read (the
   checker written in FX-26 has no subtyping there yet), only by a run.
 - A logic function's own word is its `letrec`'s (`s@159`), not the
