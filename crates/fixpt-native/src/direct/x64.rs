@@ -618,7 +618,8 @@ impl Compiling<'_> {
     pub(super) fn procedure_x64(&mut self, p: usize) -> Result<(), String> {
         let h = self.heap;
         let (word, rw) = (self.procs[p].word, self.procs[p].rw);
-        let cells = super::register_cells(h, rw);
+        let facts = super::slot_facts(self.slot_facts, h, rw);
+        let cells: &[Value] = &facts.cells;
         let name = self.name(word);
         let decline = |what: String| Err(format!("`{name}`: {what}"));
         // Where each instruction starts, what a branch goes back to, and
@@ -684,7 +685,7 @@ impl Compiling<'_> {
             return decline("a frame too large".into());
         }
         let prim_name = |p: usize| fixpt_runtime::PRIMITIVES.get(p).map_or("?", |d| d.name);
-        let raw = frame.map_or(Vec::new(), |m| reps::raw_slots(&cells, &starts, &prim_name, m));
+        let raw = facts.raw.clone();
         let values = raw.iter().filter(|r| !**r).count() as i32;
         // The parameters it takes raw, and each known callee's (`procedure`).
         let params = self.params_of(p);

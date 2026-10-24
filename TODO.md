@@ -3124,6 +3124,20 @@ Rust front end 4%; native code 2%. Leads: the checker's words native;
 the compiler's analyses cheaper, or done only for what runs often; what
 mallocs.
 
-Measuring: the first run of a new binary, or of a new input, does more
-(88.3G instructions against 68.4G after, run to run alike to 0.1%):
-something kept between runs is made then. Take the runs after it.
+Measuring: the first run of a new binary checks and compiles the front
+end to register code and keeps it (`front_end_cache`, `as_register_code`
+in `session.rs`): 88.3G instructions against 68.4G after, run to run
+alike to 0.1%. Take the runs after it.
+
+- ~~**The compiler's analyses found once**~~ (2026-10-24): `slot_facts`,
+  by a register word's cells, across compiles; and code installed a
+  word at a time (CLAUDES_CHOICES.md, "Slot facts kept across
+  compiles"). Fixed cost 20.6G cycles to 18.1G, stage 0 29.5G to 27.1G.
+- **Next, by self time** (frame pointers, after the above): the front
+  end's register words 37% (its generic tables, `table.fx`, some 7%:
+  `bucket-of`, `table-entry`, `table-ref`, `bucket-find`, each a call
+  and a closure's); the heap 16%; malloc and free 10%; the compiler 9%
+  (each procedure's own `webs` twice, in `split_slots` and `raw_slots`,
+  and `demands` some six times); call-outs 6%; hashing 5%; the Rust
+  checker 5%. The front end as native code, not register code, is the
+  largest lead; its tables in line, a smaller one.

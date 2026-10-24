@@ -885,6 +885,9 @@ pub struct DirectMachine {
     max_words: u64,
     /// What each call-out any compiled code makes does, by number.
     callouts: Vec<Callout>,
+    /// What each register word's slots come to (`slot_facts`), by its
+    /// cells: once, not at every compile that calls it.
+    slot_facts: SlotMemo,
 }
 
 /// A run that trapped: what, and where: the address of the stub its site
@@ -990,6 +993,7 @@ impl DirectMachine {
             cache_words,
             max_words,
             callouts,
+            slot_facts: HashMap::new(),
         })
     }
 
@@ -1015,7 +1019,7 @@ impl DirectMachine {
         // not native code, and the rest compiled again without it.
         let mut refused = std::collections::HashSet::new();
         let (procs, first, free) = loop {
-            let mut c = Compiling { heap: &*heap, procs: Vec::new(), by_word: HashMap::new(), queue: Vec::new(), callouts: &mut self.callouts, resume: None, refused, native_masks: HashMap::new() };
+            let mut c = Compiling { heap: &*heap, procs: Vec::new(), by_word: HashMap::new(), queue: Vec::new(), callouts: &mut self.callouts, resume: None, refused, native_masks: HashMap::new(), slot_facts: &mut self.slot_facts };
             let (word, free) = c.closure_parts(closure).ok_or("not a closure of cellular code")?;
             let first = c.proc_of(word)?;
             let mut failed = None;
@@ -1582,6 +1586,8 @@ struct Compiling<'h> {
     /// What `native_params` found of each native closure's code, by the
     /// code bloblet: once a compile, not at every call.
     native_masks: HashMap<u64, Option<u8>>,
+    /// The machine's `slot_facts`, which this compile adds to.
+    slot_facts: &'h mut SlotMemo,
 }
 
 impl Compiling<'_> {
@@ -1695,7 +1701,7 @@ impl Compiling<'_> {
         if let Some(m) = self.procs[q].params {
             return m;
         }
-        let m = register_params(self.heap, self.procs[q].rw);
+        let m = slot_facts(self.slot_facts, self.heap, self.procs[q].rw).params;
         self.procs[q].params = Some(m);
         m
     }
@@ -1703,7 +1709,7 @@ impl Compiling<'_> {
     /// If `v` is a native closure of code this compiler made from register
     /// code (in an earlier compile: a global defined a form before), the
     /// parameters that code takes raw, as its own compile found them
-    /// (`register_params` of its source's register word, the same each
+    /// (`slot_facts` of its source's register word, the same each
     /// time). Its code's field 1 is itself and field 2 its cellular word
     /// (`CODE_SOURCE`), whose twin is register code; and its suffix is not
     /// frozen, as code a program sealed (`seal-code`) is, whose fields say
@@ -1717,13 +1723,13 @@ impl Compiling<'_> {
         if let Some(&m) = self.native_masks.get(&code.raw()) {
             return m;
         }
-        let m = Self::code_params(h, code);
+        let m = Self::code_params(self.slot_facts, h, code);
         self.native_masks.insert(code.raw(), m);
         m
     }
 
     /// `native_params` of code bloblet `code`.
-    fn code_params(h: &Heap, code: Value) -> Option<u8> {
+    fn code_params(memo: &mut SlotMemo, h: &Heap, code: Value) -> Option<u8> {
         if !h.is_code_bloblet(code) || h.bloblet_head(code).suffix_frozen || h.bloblet_head(code).fields < CODE_SOURCE || h.bloblet_slot(code, 1) != code {
             return None;
         }
@@ -1731,7 +1737,7 @@ impl Compiling<'_> {
         if !h.is_cellular_word(word) || !h.is_register_word(h.bloblet_slot(word, WORD_TWIN)) {
             return None;
         }
-        Some(register_params(h, h.bloblet_slot(word, WORD_TWIN)))
+        Some(slot_facts(memo, h, h.bloblet_slot(word, WORD_TWIN)).params)
     }
 
     /// One procedure's code, from its register word.
@@ -1741,7 +1747,8 @@ impl Compiling<'_> {
         }
         let h = self.heap;
         let (word, rw) = (self.procs[p].word, self.procs[p].rw);
-        let cells = register_cells(h, rw);
+        let facts = slot_facts(self.slot_facts, h, rw);
+        let cells: &[Value] = &facts.cells;
         let name = self.name(word);
         let decline = |what: String| Err(format!("`{name}`: {what}"));
         // Where each instruction starts, what a branch goes back to, and
@@ -1812,7 +1819,7 @@ impl Compiling<'_> {
         // the code bloblet and the closure, as its bloblet's suffix, which
         // no collection traces. Each slot's place, from `x29`.
         let prim_name = |p: usize| fixpt_runtime::PRIMITIVES.get(p).map_or("?", |d| d.name);
-        let raw = frame.map_or(Vec::new(), |m| reps::raw_slots(&cells, &starts, &prim_name, m));
+        let raw = facts.raw.clone();
         let values = raw.iter().filter(|r| !**r).count() as u32;
         // The parameters it takes raw (`reps::raw_params`): unboxed at its
         // entry, past which a call that knows this procedure comes, with
@@ -4181,10 +4188,38 @@ fn bytes_set(a: &mut Asm, slow: Label, done: Label) {
     a.to(done, Fix::B);
 }
 
-/// The parameters register word `rw`'s procedure takes raw
-/// (`reps::raw_params`), its slots as compiled (`register_cells`).
-fn register_params(h: &Heap, rw: Value) -> u8 {
-    let cells = register_cells(h, rw);
+/// Register word `rw`'s cells, as they are compiled: a frame slot that
+/// holds an `f64` and something else in turn split (`reps::split_slots`).
+fn register_cells(h: &Heap, rw: Value) -> Vec<Value> {
+    let cells: Vec<Value> = (WORD_CELL0..=h.bloblet_head(rw).fields).map(|k| h.bloblet_slot(rw, k)).collect();
+    let prim_name = |p: usize| fixpt_runtime::PRIMITIVES.get(p).map_or("?", |d| d.name);
+    reps::split_slots(cells, &prim_name)
+}
+
+/// What a register word's frame slots come to, as it is compiled: its
+/// cells, a slot that holds an `f64` and something else in turn split
+/// (`reps::split_slots`); which slots hold raw `f64`s (`reps::raw_slots`);
+/// and the parameters it takes raw (`reps::raw_params`).
+pub(super) struct SlotFacts {
+    pub(super) cells: Vec<Value>,
+    pub(super) raw: Vec<bool>,
+    pub(super) params: u8,
+}
+
+/// `SlotFacts` by the register code's cells, raw: the same cells give the
+/// same facts, so a collection that moves a constant they name makes one
+/// found again, never one wrong.
+pub(super) type SlotMemo = HashMap<Vec<u64>, std::rc::Rc<SlotFacts>>;
+
+/// Register word `rw`'s `SlotFacts`, from `memo` or found and kept there.
+pub(super) fn slot_facts(memo: &mut SlotMemo, h: &Heap, rw: Value) -> std::rc::Rc<SlotFacts> {
+    let cells: Vec<Value> = (WORD_CELL0..=h.bloblet_head(rw).fields).map(|k| h.bloblet_slot(rw, k)).collect();
+    let key: Vec<u64> = cells.iter().map(|c| c.raw()).collect();
+    if let Some(f) = memo.get(&key) {
+        return f.clone();
+    }
+    let prim_name = |p: usize| fixpt_runtime::PRIMITIVES.get(p).map_or("?", |d| d.name);
+    let cells = reps::split_slots(cells, &prim_name);
     let (mut starts, mut frame, mut i) = (Vec::new(), None, 0);
     while i < cells.len() {
         starts.push(i);
@@ -4194,17 +4229,11 @@ fn register_params(h: &Heap, rw: Value) -> u8 {
         }
         i += 1 + n;
     }
-    let prim_name = |p: usize| fixpt_runtime::PRIMITIVES.get(p).map_or("?", |d| d.name);
     let raw = frame.map_or(Vec::new(), |m| reps::raw_slots(&cells, &starts, &prim_name, m));
-    reps::raw_params(&cells, &starts, &prim_name, &raw)
-}
-
-/// Register word `rw`'s cells, as they are compiled: a frame slot that
-/// holds an `f64` and something else in turn split (`reps::split_slots`).
-fn register_cells(h: &Heap, rw: Value) -> Vec<Value> {
-    let cells: Vec<Value> = (WORD_CELL0..=h.bloblet_head(rw).fields).map(|k| h.bloblet_slot(rw, k)).collect();
-    let prim_name = |p: usize| fixpt_runtime::PRIMITIVES.get(p).map_or("?", |d| d.name);
-    reps::split_slots(cells, &prim_name)
+    let params = reps::raw_params(&cells, &starts, &prim_name, &raw);
+    let f = std::rc::Rc::new(SlotFacts { cells, raw, params });
+    memo.insert(key, f.clone());
+    f
 }
 
 /// `flatarray-set!` of the flat array in `x1` at `x2` to `x3`, as its

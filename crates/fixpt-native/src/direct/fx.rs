@@ -36,6 +36,7 @@ pub struct FxCompile {
     /// The words refused, as values, for `fx_park` to keep.
     refused_words: Vec<Value>,
     native_masks: HashMap<u64, Option<u8>>,
+    slot_facts: super::SlotMemo,
     closure: Value,
     first: usize,
     free: Vec<Value>,
@@ -184,6 +185,7 @@ pub fn callout_code(c: Callout) -> i64 {
 
 /// `f` on a `Compiling` of `c`'s driver, put back after.
 fn driving<T>(heap: &Heap, callouts: &mut Vec<Callout>, c: &mut FxCompile, f: impl FnOnce(&mut Compiling<'_>) -> T) -> T {
+    let mut memo = std::mem::take(&mut c.slot_facts);
     let mut k = Compiling {
         heap,
         procs: std::mem::take(&mut c.procs),
@@ -193,9 +195,11 @@ fn driving<T>(heap: &Heap, callouts: &mut Vec<Callout>, c: &mut FxCompile, f: im
         resume: c.resume,
         refused: std::mem::take(&mut c.refused),
         native_masks: std::mem::take(&mut c.native_masks),
+        slot_facts: &mut memo,
     };
     let r = f(&mut k);
     (c.procs, c.by_word, c.queue, c.resume, c.refused, c.native_masks) = (k.procs, k.by_word, k.queue, k.resume, k.refused, k.native_masks);
+    c.slot_facts = memo;
     r
 }
 
@@ -246,6 +250,7 @@ impl DirectMachine {
             refused: std::collections::HashSet::new(),
             refused_words: Vec::new(),
             native_masks: HashMap::new(),
+            slot_facts: HashMap::new(),
             closure,
             first: 0,
             free: Vec::new(),
@@ -630,7 +635,7 @@ impl DirectMachine {
     #[doc(hidden)]
     /// With `one`, only the closure's own procedure.
     pub fn compile_each(&mut self, heap: &Heap, closure: Value, one: bool) -> Result<Vec<Each>, String> {
-        let mut c = Compiling { heap, procs: Vec::new(), by_word: HashMap::new(), queue: Vec::new(), callouts: &mut self.callouts, resume: None, refused: std::collections::HashSet::new(), native_masks: HashMap::new() };
+        let mut c = Compiling { heap, procs: Vec::new(), by_word: HashMap::new(), queue: Vec::new(), callouts: &mut self.callouts, resume: None, refused: std::collections::HashSet::new(), native_masks: HashMap::new(), slot_facts: &mut HashMap::new() };
         let (word, _) = c.closure_parts(closure).ok_or("not a closure of cellular code")?;
         c.proc_of(word)?;
         let mut failures = HashMap::new();

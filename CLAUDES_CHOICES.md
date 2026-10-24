@@ -1714,3 +1714,29 @@ waits on data cache misses, `TODO.md` §121).
 - **`dp-joinable` and `dp-edge` moved** from `-ops.fx` to `-proc.fx`
   (`do-joinable`, `do-edge` before), so that `-prims.fx`, which cannot
   see `-ops.fx`, branches as `-ops.fx` does.
+
+## Slot facts kept across compiles; code installed a word at a time (2026-10-24)
+
+The user asked to dig into stage 0's fixed cost (`TODO.md` §126). Of
+it, the native convention's compiler was 20% (`perf`, frame pointers):
+8% finding again, at every compile that calls a procedure, which of its
+parameters it takes raw (`register_params`: `split_slots` and
+`raw_slots`, each a `webs`); 3% `install` writing the code a byte at a
+time, the bloblet's header read for each.
+- **Kept by the cells, not by the word**: `slot_facts` keeps a register
+  word's split cells, raw slots and raw parameters in the
+  `DirectMachine`, keyed by its cells' raw values. The facts are a
+  function of the cells alone, so a collection that moves a constant
+  they name costs a miss, never a wrong answer; nothing need be traced
+  or forgotten. About 11 MB more at stage 0's peak (395 MB to 406 MB).
+  The register word itself as the key would want it kept still or
+  traced.
+- **Both procedure compilers** (`procedure`, `procedure_x64`) take
+  their own cells and raw slots from it too, so a procedure's analysis
+  is done once whether it is compiled or called first. FX-26's driver
+  (`direct/fx.rs`) keeps its own, across its procedures.
+- **`set_bloblet_bytes`** writes a word at a time, as
+  `set_bloblet_byte` of each byte would: the bytes that fit, then the
+  first that does not refused, the same errors in the same order.
+- Fixed cost 20.6G cycles to 18.1G; stage 0 29.5G to 27.1G (68.4G
+  instructions to 60.8G); output the same.

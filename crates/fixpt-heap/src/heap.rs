@@ -1281,8 +1281,25 @@ impl Heap {
 
     /// Write `bytes` into the suffix starting at byte `at`.
     pub fn set_bloblet_bytes(&mut self, v: Value, at: usize, bytes: &[u8]) -> Result<(), BlobletError> {
-        for (i, b) in bytes.iter().enumerate() {
-            self.set_bloblet_byte(v, at + i, *b)?;
+        // As `set_bloblet_byte` of each in turn: those that fit written,
+        // then the first that does not refused; a word at a time.
+        let head = self.bloblet_head(v);
+        if head.suffix_frozen && !bytes.is_empty() {
+            return Err(if at < head.bytes { BlobletError::SuffixFrozen } else { BlobletError::NoSuchByte(at) });
+        }
+        let fit = bytes.len().min(head.bytes.saturating_sub(at));
+        let base = self.ix(v);
+        let mut i = 0;
+        while i < fit {
+            let (wi, off) = (base + (at + i) / 8, (at + i) % 8);
+            let n = (8 - off).min(fit - i);
+            let mut w = self.word(wi).to_le_bytes();
+            w[off..off + n].copy_from_slice(&bytes[i..i + n]);
+            self.set_word(wi, u64::from_le_bytes(w));
+            i += n;
+        }
+        if fit < bytes.len() {
+            return Err(BlobletError::NoSuchByte(at + fit));
         }
         Ok(())
     }

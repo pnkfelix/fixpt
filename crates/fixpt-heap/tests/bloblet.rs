@@ -248,3 +248,32 @@ fn a_graph_copied_between_heaps() {
     assert_eq!(to.string_to_rust(to.obj_ref(v, 0)), "abc");
     assert_eq!((to.flonum_value(to.obj_ref(v, 2)), to.obj_ref(v, 3)), (2.5, there));
 }
+
+/// `set_bloblet_bytes`, a word at a time, as `set_bloblet_byte` of each
+/// byte in turn: at every offset and length in and past a suffix whose
+/// fields sit beside it, the bytes and the fields after, and the error.
+#[test]
+fn bytes_set_together_as_one_at_a_time() {
+    let src: Vec<u8> = (1..=40).collect();
+    for at in 0..20 {
+        for len in 0..=20 {
+            let mut h = Heap::new();
+            let (b, one) = (h.make_bloblet(KIND, 2, 21, false), h.make_bloblet(KIND, 2, 21, false));
+            for v in [b, one] {
+                h.set_bloblet_field(v, 1, Value::fixnum(7)).unwrap();
+                h.set_bloblet_bytes(v, 0, &[0xee; 21]).unwrap();
+            }
+            let together = h.set_bloblet_bytes(b, at, &src[..len]);
+            let each = src[..len].iter().enumerate().try_for_each(|(i, &x)| h.set_bloblet_byte(one, at + i, x));
+            assert_eq!(together, each, "at {at}, {len} bytes");
+            assert_eq!(h.bloblet_bytes(b), h.bloblet_bytes(one), "at {at}, {len} bytes");
+            assert_eq!(h.bloblet_field(b, 1), Ok(Value::fixnum(7)));
+        }
+    }
+    let mut h = Heap::new();
+    let b = h.make_bloblet(KIND, 1, 4, false);
+    h.freeze_bloblet(b, false, true);
+    assert_eq!(h.set_bloblet_bytes(b, 0, b"ab"), Err(BlobletError::SuffixFrozen));
+    assert_eq!(h.set_bloblet_bytes(b, 4, b"ab"), Err(BlobletError::NoSuchByte(4)));
+    assert_eq!(h.set_bloblet_bytes(b, 0, b""), Ok(()));
+}
