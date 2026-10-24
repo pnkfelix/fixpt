@@ -3157,5 +3157,25 @@ alike to 0.1%. Take the runs after it.
   front end kept once run"): loading 16.4G cycles to 13.1G, stage 0
   25.6G to 22.3G. **Next**: profile again (kept code is named
   `native NAME (kept)`); the native compiler faster (some 580K cycles a
-  procedure) for kayak's own procedures. Who mallocs is not
+  procedure) for kayak's own procedures.
+- **The runtime's share, measured** (2026-10-24, kayak `abecd81`,
+  pinned): stage 0 22.0G cycles. Collections are not it: 228 minor
+  (426 ms) and 3 major (90 ms) of a 9.3 s run (`FIXPT_GC_SUMMARY`, now
+  for `fixpt run` too), 244M words allocated, 13% surviving a minor; a
+  nursery of 2M to 8M words changes nothing (about 1%). The rest of the
+  heap's 18% is objects read from Rust. Native code calls out about 18M
+  times a run: `char-whitespace?` 3.0M, `%symbol-hash` 2.7M,
+  `%fx26-string<?` 2.3M, `%fx26-char-in?` 1.3M, `string-append` 1.25M,
+  `string` 1.0M, unbox 0.8M, `char->integer` 0.8M, a closure of any size
+  0.6M. The dispatch (`direct::callout`) is 5.5% of the run, about 65
+  cycles a call before the primitive; `collection_due`'s `f64`
+  thresholds some 13% of that. Made quiet (`never_collects`), the
+  non-allocating ones (`char-whitespace?`, `%fx26-char-in?`, `set-car!`,
+  `set-cdr!`) cost the same: tried and not kept. Leads: those five in
+  line, in both compilers (`pure_fast`, `dq-pure-fast`: `char->integer`,
+  `char-whitespace?` for ASCII, `%symbol-hash` a field, `string<?` and
+  `char-in?` loops as `string=?`'s), some 10M call-outs; the dispatch
+  cheaper (integer thresholds, no vector for a primitive's arguments);
+  who mallocs, still unseen (glibc unwinds by neither frame pointers nor
+  DWARF here). Who mallocs is not
   seen (glibc has no frame pointers): a DWARF call graph would say.
