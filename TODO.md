@@ -2920,7 +2920,35 @@ and z3 an uninterpreted function. Not yet:
 `docs/kayak-stage0-workload.md`: kayak's compiler compiling itself under
 `fixpt run` (`fx-regs-rsjit-nativecc`) takes about 610 s, and kayak's
 check waits for it; the target is 490 s or less. Only execution speed
-counts (loading is about 1%). In order:
+counts (loading is about 1%).
+
+**Profiled 2026-10-24** (`perf`, `--call-graph fp`, main at `4738986d`):
+86% of the run is native code calling out (`common foreign call`,
+`call_foreign`) to cellular closures, which `call_value` runs on Rust's
+inner interpreter (`Machine::run_in`, `Machine::prim`), building a word
+and a machine for each call (`make_cellular_word` 9%, malloc and free
+8%). They are kayak's emitter's: `emitter` and `writing` are `(module
+…)`s, and their members (`put-stmts`, a closure of 16 values, 332 calls
+and 2.9 billion cells in 200 s; an inner lambda called 66 million times,
+24 cells each) are not native, through `any?`, `put-sep` and `map`. The
+13 cellular accessors are not seen. On `fx-regs-rsjit-cellcc` the same
+run takes **37 s at kayak's pin, 39 s on main**, its output the same, so
+kayak's check no longer waits for it once kayak passes that machine.
+What is left:
+- **Why the emitter's members are not native.** A small module's are
+  (`native lambda/count@212`); kayak's are not, and nothing says why.
+- **`call_value` on the Rust interpreter.** Native code calling a
+  cellular closure should run it as register code, as the `cellcc`
+  machines do, and not build a word each call.
+- **`fast` on x86_64** (`fx-regs-rsjit-nativecc` since `d752ffe3`) is 17
+  times slower than `fx-regs-rsjit-cellcc` on this, closure-heavy code
+  the native compiler declines; until the two above, it is the wrong
+  default for such a program.
+- **Names**: a module member's word is named `lambda/NAME@N`, not for its
+  module; and `@N` in the native convention counts from the start of the
+  definition's thunk, not of the file, so it finds nothing.
+
+The leads before the profile, in order:
 - ~~**A perf map**~~ Done 2026-10-24: `FIXPT_PERF_MAP` writes
   `/tmp/perf-PID.map` (`fixpt_native::symbols`; `docs/performance.md`,
   "Profiling with Linux's `perf`"), and a definition in the native
