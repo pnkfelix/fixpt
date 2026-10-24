@@ -350,6 +350,23 @@ fn bytevector_reads_in_line() {
     }
 }
 
+/// A string's length and characters read, and two strings compared, in
+/// line (`TODO.md` §121, `programs/native/string-reads.fx`), as the Rust
+/// machine gives them, collecting often too; and a read past the end
+/// refused as the primitive refuses it.
+#[test]
+fn string_reads_in_line() {
+    for gc_every in [None, Some(7)] {
+        let r = run_collecting(&program("native/string-reads"), "string-reads", &[1000], FUEL, gc_every);
+        assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "collecting every {gc_every:?}: {:?} against {}", r.direct, r.rust);
+    }
+    let defs = "(define* past (subr (maxeff spin) (int) int) (lambda (i) (char->integer (string-ref \"abc\" i))))";
+    for i in [3, -1] {
+        let r = run(defs, "past", &[i], FUEL);
+        assert!(matches!(&r.direct, Err(m) if m.contains("out of range")), "{i}: {:?}", r.direct);
+    }
+}
+
 /// Mutable bloblets made and written in line (`TODO.md` §57,
 /// `programs/native/bloblet-tree.fx`): a tree built, its leaves replaced by
 /// younger nodes, summed; as the Rust machine gives it, collecting often too.

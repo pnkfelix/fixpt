@@ -2957,6 +2957,18 @@ kayak's check no longer waits for it once kayak passes that machine.
   closure made while the native machine runs (cellular code native code
   called) is adapted still, its machine busy; and a call-out that is made
   still builds a word and copies every native frame (`call_foreign`).
+- ~~**Strings called out for.**~~ Profiled again at 22 s: 13% of the run
+  in `direct::callout` itself, and as much in the primitives it ran. Of
+  200 million call-outs, 151 million were `string=?`, 27 million
+  `string-ref`, 13 million `string-length` (kayak's checker and emitter
+  compare names). Register code did all three in line; the native
+  convention on x86_64 called out. Now in line in both its compilers
+  (`pure_fast`, `string_eq`; `dq-pure-fast`, `dq-string-eq`). Not yet on
+  arm64's native convention (`direct.rs`), which cannot be run here. The
+  rest, about 9 million (`%fx26-string<?`, `string-append`,
+  `char-whitespace?`, `char->integer`), each under 2%. Stage 0: 26.9 s
+  to 17.4 s alone (three runs each, alternating, this machine busier than
+  for the 22 s above), 17.5 s three at once; every output the same.
 - **`fast` on x86_64**: right again for this program. Whether one decline
   still sinks a module (or any definition) whole is the question left:
   a member the compiler declines could be adapted alone.

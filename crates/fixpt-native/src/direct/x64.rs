@@ -1683,6 +1683,10 @@ impl Compiling<'_> {
                     if prim_is("%fx26-suffix-ref-set!", 3) {
                         suffix_set(&mut a, slow, done);
                     }
+                    if prim_is("string=?", 2) {
+                        string_eq(&mut a, r1, r2);
+                        a.jmp(done);
+                    }
                     if prim_is("%fx26-suffix-ref-index", 3) {
                         suffix_index(&mut a, slow);
                         a.jmp(done);
@@ -2213,6 +2217,35 @@ impl IntSlow {
     }
 }
 
+/// `string=?` of the strings in `x` and `y`, into `RESULT`: their lengths,
+/// then their characters, 32 bits each, as register code's. Uses X9 and
+/// X13 to X16.
+fn string_eq(a: &mut Asm, x: Reg, y: Reg) {
+    let (again, yes, no, end) = (a.label(), a.label(), a.label(), a.label());
+    a.e(load(X13, m(x, -4)));
+    a.e(alu_rm(Alu::Cmp, X13, m(y, -4)));
+    a.jcc(Cond::Ne, no);
+    a.e(mov(X14, x));
+    a.e(mov(X15, y));
+    a.bind(again);
+    a.e(test(X13, X13));
+    a.jcc(Cond::E, yes);
+    a.e(load32(X16, m(X14, 4)));
+    a.e(load32(X9, m(X15, 4)));
+    a.e(cmp(X16, X9));
+    a.jcc(Cond::Ne, no);
+    a.e(add_imm(X14, 4));
+    a.e(add_imm(X15, 4));
+    a.e(sub_imm(X13, 1));
+    a.jmp(again);
+    a.bind(yes);
+    a.imm(RESULT, Value::TRUE.raw());
+    a.jmp(end);
+    a.bind(no);
+    a.imm(RESULT, Value::FALSE.raw());
+    a.bind(end);
+}
+
 /// `REGr` (r ≥ 1) tested for a fixnum, to `general` if it is not one.
 fn check_fixnum(a: &mut Asm, r: usize, general: Label) {
     let r = a.get(r, X16);
@@ -2437,10 +2470,11 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
             a.e(mov(RESULT, X14));
             a.bind(done);
         }
-        // A bytevector, all suffix: its length the word before the bytes, a
-        // byte at its index. The type says it is one; an index past it, or
-        // not a fixnum, is the primitive's to refuse.
-        "bytevector-length" => {
+        // A bytevector or a string, all suffix: its length the word before
+        // the bytes or the characters (32 bits each), a byte or character
+        // at its index. The type says it is one; an index past it, or not a
+        // fixnum, is the primitive's to refuse.
+        "bytevector-length" | "string-length" => {
             a.e(load(X13, m(x, -4)));
             a.e(shl_imm(X13, 3));
             a.e(mov(RESULT, X13));
@@ -2455,6 +2489,19 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
             a.jcc(Cond::Ae, slow);
             a.e(load8(X16, mi(x, X15, 1, 4)));
             a.e(shl_imm(X16, 3));
+            a.e(mov(RESULT, X16));
+        }
+        "string-ref" => {
+            a.e(test_imm(y, 7));
+            a.jcc(Cond::Ne, slow);
+            a.e(load(X14, m(x, -4)));
+            a.e(mov(X15, y));
+            a.e(sar_imm(X15, 3));
+            a.e(cmp(X15, X14));
+            a.jcc(Cond::Ae, slow);
+            a.e(load32(X16, mi(x, X15, 4, 4)));
+            a.e(shl_imm(X16, 8));
+            a.e(add_imm(X16, Value::char('\0').raw() as i32));
             a.e(mov(RESULT, X16));
         }
         "%fx26-flatarray-length" => {
