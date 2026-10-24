@@ -3028,7 +3028,11 @@ impl Compiler<'_> {
                     te.push((*x, Loc::Slot(usize::MAX)));
                 }
                 crate::ast::ArmBind::Fields(xs) => {
-                    for (j, x) in xs.iter().enumerate() {
+                    // Only the fields the arm uses: a leaf's registers are
+                    // few, and a record of many fields would take them all.
+                    let mut used = Vec::new();
+                    self.free(arm.body, &[], &mut used);
+                    for (j, x) in xs.iter().enumerate().filter(|(_, x)| used.contains(x)) {
                         get(g, sc);
                         g.op("field", &[Value::fixnum(3)]);
                         g.op("field", &[Value::fixnum(j as i64 + 2)]);

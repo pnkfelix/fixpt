@@ -64,13 +64,16 @@
   (lambda (xs acc) (if (null? xs) acc (r-reverse-env (cdr xs) (cons (car xs) acc)))))
 
 ;; A product's members, each kept, newest first.
-(define r-members (->* (rgen rloc names int renv) renv)
-  (lambda (g sc xs j acc)
-    (if (null? xs)
-        acc
-        (begin (r-get g sc) (r-opn g rop-field 3) (r-opn g rop-field (+ j 2))
-               (let ((l (r-place-value g)))
-                 (r-members g sc (cdr xs) (+ j 1) (r-bind (car xs) l acc)))))))
+(define r-members (->* (rgen rloc names int exp renv) renv)
+  (lambda (g sc xs j body acc)
+    (cond ((null? xs) acc)
+          ;; Only the fields the arm's body uses: a leaf's registers are few,
+          ;; and a record of many fields would take them all.
+          ((not (c-mentions? body (car xs))) (r-members g sc (cdr xs) (+ j 1) body acc))
+          (else
+           (begin (r-get g sc) (r-opn g rop-field 3) (r-opn g rop-field (+ j 2))
+                  (let ((l (r-place-value g)))
+                    (r-members g sc (cdr xs) (+ j 1) body (r-bind (car xs) l acc))))))))
 
 (define r-local-all (->* (renv cenv) cenv)
   (lambda (bound te)

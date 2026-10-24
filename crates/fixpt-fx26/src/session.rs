@@ -945,13 +945,22 @@ impl Fx26Session {
                 _ => Vec::new(),
             };
             if let (Some(compile), Ok(_), false) = (self.native_compiler, &value, names.is_empty()) {
-                let mut why = Vec::new();
+                let (mut why, mut compiled) = (Vec::new(), false);
                 for n in names {
-                    if let Err(w) = self.compile_global_natively(n, compile)? {
-                        why.push(format!("`{}` runs as cellular code: {w}", self.checker.interner.name(n)));
+                    match self.compile_global_natively(n, compile)? {
+                        Ok(c) => compiled |= c,
+                        Err(w) => why.push(format!("`{}` runs as cellular code: {w}", self.checker.interner.name(n))),
                     }
                 }
-                note = if why.is_empty() { String::new() } else { format!("; not in the native convention yet, so {}\n", why.join("; ")) };
+                // Why its procedures stay cellular code, if they do: why they
+                // were not compiled after; else why the definition ran so,
+                // unless its procedure was compiled after (a module's
+                // members, which nothing compiles after, stay so).
+                if !why.is_empty() {
+                    note = format!("; not in the native convention yet, so {}\n", why.join("; "));
+                } else if compiled {
+                    note.clear();
+                }
             }
             return Ok(Outcome { top, code, printed: note, value });
         }
@@ -1457,13 +1466,16 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
         Ok(Ok(out))
     }
 
-    fn compile_global_natively(&mut self, name: Sym, compile: NativeCompiler) -> R<Result<(), String>> {
+    /// Global `name`'s procedure compiled natively, if it holds one:
+    /// whether it did (a value of no procedure, such as a module, is let be),
+    /// or why it could not be.
+    fn compile_global_natively(&mut self, name: Sym, compile: NativeCompiler) -> R<Result<bool, String>> {
         self.released(|s| {
         let fail = |e: fixpt_scheme::SessionError| FxError::at(Span::new(FileId(0), 0, 0), e.to_string());
         let text = s.checker.interner.name(name).to_string();
         let sym = s.scheme.make(|m| m.heap().intern(&text));
         let cells = s.scheme.call_global(&format!("{READER_PREFIX}compile-global-cell"), &[sym]).map_err(fail)?;
-        let (mut r, mut nanos, mut fx) = (Ok(()), 0, None);
+        let (mut r, mut nanos, mut fx) = (Ok(false), 0, None);
         s.scheme.make(|m| {
             let cells = m.get(cells);
             if !cells.is_pair() {
@@ -1491,7 +1503,10 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
                 // as a write, so that what was compiled assuming the global
                 // holds it still holds (`global-guard`).
                 match compiled {
-                    Ok(native) => heap.set_bloblet_slot(g, 2, native),
+                    Ok(native) => {
+                        heap.set_bloblet_slot(g, 2, native);
+                        r = Ok(true);
+                    }
                     Err(why) => r = Err(why),
                 }
             }
@@ -1509,6 +1524,7 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
                         m.heap().set_bloblet_slot(g, 2, native);
                         fixpt_heap::Value::FALSE
                     });
+                    r = Ok(true);
                 }
                 Err(why) => r = Err(why),
             }

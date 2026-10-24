@@ -2934,16 +2934,26 @@ and 2.9 billion cells in 200 s; an inner lambda called 66 million times,
 13 cellular accessors are not seen. On `fx-regs-rsjit-cellcc` the same
 run takes **37 s at kayak's pin, 39 s on main**, its output the same, so
 kayak's check no longer waits for it once kayak passes that machine.
-What is left:
-- **Why the emitter's members are not native.** A small module's are
-  (`native lambda/count@212`); kayak's are not, and nothing says why.
+
+**Fixed the same day: 26 s on `fx-regs-rsjit-nativecc`** (from about
+610 s; every output the same). What was wrong:
+- ~~**Why the emitter's members are not native.**~~ A definition's value
+  is compiled natively whole, or not at all: `emitter`'s, a module, was
+  declined for one accessor of a 9-field record with no register code
+  (`ctx-effects`, the `tagcase` below), and `expressions`' for one
+  closure of more than 32 values ("a closure too large", arm64's `ldur`
+  limit, copied to x86_64, whose loads reach any distance). Both fixed.
+  The reason was said nowhere: the note of the decline was overwritten by
+  the pass that compiles the definition's procedures after, which lets a
+  module be. Now kept when that pass compiles nothing.
 - **`call_value` on the Rust interpreter.** Native code calling a
-  cellular closure should run it as register code, as the `cellcc`
-  machines do, and not build a word each call.
-- **`fast` on x86_64** (`fx-regs-rsjit-nativecc` since `d752ffe3`) is 17
-  times slower than `fx-regs-rsjit-cellcc` on this, closure-heavy code
-  the native compiler declines; until the two above, it is the wrong
-  default for such a program.
+  cellular closure runs it on Rust's inner interpreter, building a word
+  and a machine for each call, and copying every native frame
+  (`call_foreign`): about 3 µs a call, on a member of a module held
+  cellular. Kayak's no longer meets it.
+- **`fast` on x86_64**: right again for this program. Whether one decline
+  still sinks a module (or any definition) whole is the question left:
+  a member the compiler declines could be adapted alone.
 - **Names**: a module member's word is named `lambda/NAME@N`, not for its
   module; and `@N` in the native convention counts from the start of the
   definition's thunk, not of the file, so it finds nothing.
@@ -2955,12 +2965,9 @@ The leads before the profile, in order:
   convention names its procedure for its global, as kayak's are
   (`(define cv-where (subr …) (lambda …))`), not `lambda@11`. Next: the
   profile of the plain run, and every later step measured by one.
-- **`tagcase` loads only the fields its arm uses.** It loads each into a
-  register (`cellular/regcode.rs`, `ArmBind::Fields`), so a leaf, with 8,
-  runs out past 6 fields and the whole word is cellular code. That is
-  the 13 words kayak's run reports as having no register code, all
-  accessors of 11-field records (`cv-where`, `prep-name`, …); a 7-field
-  accessor reproduces it.
+- ~~**`tagcase` loads only the fields its arm uses.**~~ Done 2026-10-24,
+  in both register compilers (`ArmBind::Fields`, `r-members`): the 13
+  words have register code, and are native.
 - **A leaf out of registers made again with a frame**, its values in
   stack slots, not declined: `register_body_in` retries so only a leaf
   made of tail calls.

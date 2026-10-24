@@ -69,7 +69,7 @@
                                (read @t)
                                (write @k)
                                spin)
-                       (rgen rloc names int renv)
+                       (rgen rloc names int exp renv)
                        renv))
             (val r-local-all
                  (subr (maxeff (alloc @k)

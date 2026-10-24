@@ -858,7 +858,7 @@
                          (r-op2imm g routine-eq (wcell-symbol (extract arm 1)))
                          (r-emit g (r-branch #t next))))
               (let* ((bound (if (extract arm 2)
-                                (r-members g sc (extract arm 3) 0 (the renv nil))
+                                (r-members g sc (extract arm 3) 0 (extract arm 4) (the renv nil))
                                 (begin (r-get g sc) (r-opn g rop-field 3)
                                        (r-bind (car (extract arm 3)) (r-place-value g) nil))))
                      (in-order (r-reverse-env bound nil)))

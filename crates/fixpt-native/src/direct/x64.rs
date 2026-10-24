@@ -982,10 +982,9 @@ impl Compiling<'_> {
                         }
                         None => CLO,
                     };
+                    // Any distance: an x86 load's displacement is 32 bits
+                    // (arm64's `ldur`, 9, limits it there).
                     let off = super::field_off(CLOSURE_FREE0 + k(o(0)));
-                    if off < -256 {
-                        return decline("a closure too large".into());
-                    }
                     a.e(load(RESULT, m(from, off as i32)));
                 }
                 "reg" => match (joinable(si - 1), hw(k(o(0)))) {

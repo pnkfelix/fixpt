@@ -179,9 +179,9 @@
                     (begin (da-ld d-x9 d-frame (get dp-clo-slot)) d-x9)
                     d-clo))
           (off (do-fld (+ d-closure-free0 (dp-o i 0)))))
-      (if (< off -256)
-          (dp-decline "a closure too large")
-          (da-ld d-result from off)))))
+      ;; Any distance: an x86 load's displacement is 32 bits (arm64's
+      ;; `ldur`, 9, limits it there).
+      (da-ld d-result from off))))
 
 ;;; ------------------------------------------------------------ registers and slots
 

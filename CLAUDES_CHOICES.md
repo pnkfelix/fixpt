@@ -1646,3 +1646,17 @@ The user asked for perf map support first, for kayak's stage 0
 - **Only a plain `lambda`** (through `the` or a convention) is named so,
   as the compilers' own rule (`name_word_for`, `c-name-for!`).
 
+## Kayak's stage 0: what kept it from native code (2026-10-24)
+
+The user: "Do 1 and 2 please. I suspect we have a big performance gap and
+we shouldn't be asking kayak to work around it." About 610 s → 26 s.
+- **`tagcase` loads only the fields its arm uses**, in both register
+  compilers, rather than a leaf retried with a frame: the narrower change,
+  and the one that makes an accessor of any width a leaf. The retry stays
+  in TODO §121.
+- **No closure size limit on x86_64**, in both of its native compilers:
+  the limit was arm64's (`ldur`, 9 bits) copied over. Arm64 still has it.
+- **A decline's note is kept** when the pass that compiles a definition's
+  procedures after compiles none (a module), and replaced by that pass's
+  own when it fails; cleared only when it succeeds, as before.
+
