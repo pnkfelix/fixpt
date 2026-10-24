@@ -3007,6 +3007,17 @@ kayak's check no longer waits for it once kayak passes that machine.
   `perf_event_paranoid` 0, so where they are is from the code, not a
   profile. Keeping slots in registers beyond `RESULT` and REG1…REG3
   wants scratch registers: all 16 are given out, 8 of them scratch.
+- **Instruction selection, tried** (2026-10-24): a raw `i64` comparison
+  only a branch reads, branched on the flags (`cmp`, `jne`) in place of
+  `cmov`, `cmp 3`, `je`, with `RESULT` dead after rather than set first
+  as the test for `op2`'s has it: 120.9G instructions to 117.5G, and no
+  fewer cycles (pinned to a core, 69.9G before, 70.2G after). Not kept,
+  nor ported. Stage 0 waits on memory: 1.66G data reads per run miss L2
+  (0.27G instruction fetches do), 78% of all misses in the walks of the
+  facts (`any?`'s lambda 27%, `facts-at-place` 22%, `first-fact` 20%,
+  `find-bind` 8%), each fact a pair, a record and a string's header.
+  Kayak's index of its facts by place is the remedy; ours, if any, is
+  where the collector puts a list's cells and what they hold.
 - **`fast` on x86_64**: right again for this program. Whether one decline
   still sinks a module (or any definition) whole is the question left:
   a member the compiler declines could be adapted alone.
