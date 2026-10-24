@@ -1828,3 +1828,21 @@ cost a 6-line program 0.3 s of its 0.55 s, compiled again in every run.
 - **x86_64 not run here.** Its code reads its fields RIP-relatively and
   the code area's place from the state too, so it should read back alike;
   `FIXPT_NO_CACHE=1` turns the cache off.
+
+## Characters, symbols and strings read in line, native convention on x86_64 (2026-10-24)
+
+The user, of kayak's stage 0's 18M call-outs: "1 then 2". Five
+primitives in line in both compilers (`pure_fast` and the call-out
+path; `dq-pure-fast`, `dq-callouts`), some 10M of the call-outs:
+`char->integer`, `%symbol-hash`, `%fx26-string<?`; `char-whitespace?`,
+`%fx26-char-in?`.
+- **A character's tag tested, a string's or a symbol's not**: as
+  `string=?` and `string-ref` already are, the types say what a string
+  or a symbol is; a character's bits are tested (one `and` and a `cmp`),
+  and anything else is the primitive's to refuse, at the slow path.
+- **`char-whitespace?` of ASCII only**: tab to carriage return and space,
+  by a mask; a code point past 0x7F is Unicode's, by the primitive
+  (`char::is_whitespace`), which the test's `far-spaces` exercises.
+- **`string<?` as `Heap::string_cmp`**: code points compared unsigned,
+  then the lengths; the other three orders left to the call-out.
+- Stage 0 22.2G cycles to 21.1G, 49.7G instructions to 46.6G.

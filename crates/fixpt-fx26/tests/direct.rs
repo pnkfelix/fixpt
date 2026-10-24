@@ -385,6 +385,26 @@ fn string_reads_in_line() {
     }
 }
 
+/// Characters, symbols and strings read in line (`TODO.md` §126,
+/// `programs/native/char-reads.fx`): `char-whitespace?`, `char->integer`,
+/// `char-in?`, `string<?` and `symbol-name-hash` as the Rust machine gives
+/// them, collecting often too; ASCII's whitespace by its mask, `string<?`
+/// by its loop, and `char->integer` by the character's tag.
+#[test]
+fn chars_symbols_and_strings_read_in_line() {
+    let defs = program("native/char-reads");
+    for gc_every in [None, Some(7)] {
+        let r = run_collecting(&defs, "char-reads", &[1000], FUEL, gc_every);
+        assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "collecting every {gc_every:?}: {:?} against {}", r.direct, r.rust);
+    }
+    if cfg!(target_arch = "x86_64") {
+        let (spaces, below, points) = (code_only(&defs, "spaces"), code_only(&defs, "below"), code_only(&defs, "points"));
+        assert!(spaces.contains("0x100003e00"), "{spaces}");
+        assert!(below.contains("cmovb"), "{below}");
+        assert!(points.contains("cmp rcx, 67"), "{points}");
+    }
+}
+
 /// A slot written and read again in straight-line code, while `RESULT` or
 /// REG1…REG3 still hold it, is read from the register, not the frame
 /// (`TODO.md` §121, `programs/native/held-slots.fx`): no store of a
