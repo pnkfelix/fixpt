@@ -374,6 +374,15 @@ fn string_reads_in_line() {
         let r = run(defs, "past", &[i], FUEL);
         assert!(matches!(&r.direct, Err(m) if m.contains("out of range")), "{i}: {:?}", r.direct);
     }
+    // On arm64, characters read in line: 32-bit loads, which nothing
+    // else here makes.
+    if cfg!(target_arch = "aarch64") {
+        let defs = program("native/string-reads");
+        for name in ["equals", "char-sum"] {
+            let code = code_only(&defs, name);
+            assert!(code.contains("ldur w"), "{name}:\n{code}");
+        }
+    }
 }
 
 /// A slot written and read again in straight-line code, while `RESULT` or
@@ -1465,3 +1474,4 @@ fn inlined_calls_see_a_redefinition() {
         assert_eq!(s.inliners("map1").expect("asks"), Ok(vec!["test".to_string()]), "native {native}");
     }
 }
+

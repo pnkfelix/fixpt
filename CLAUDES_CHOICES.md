@@ -1785,3 +1785,9 @@ native compiler arm64 has (no FX-26 one, as `native-direct-x64*.fx` is).
   old, stricter test (the next instruction and the target each set
   `RESULT` first). `Cond::not` added for `branchf`. Kayak's stage 0 on
   the Mac, alternating builds: about 5.55 s to 5.4 s.
+- **Strings read in line**: `string-length` and `string-ref` in
+  `pure_fast`, an index past the end or not a fixnum still the
+  primitive's to refuse; `string=?` of two in the call-out's path
+  (`string_eq`), lengths then characters. The instructions are arm64
+  register code's (`regcode.rs`), which already did all three. Kayak's
+  stage 0 on the Mac: about 5.4 s to 2.9 s.

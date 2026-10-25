@@ -2899,6 +2899,12 @@ impl Compiling<'_> {
                         suffix_index(&mut a, slow);
                         a.to(done, Fix::B);
                     }
+                    if let Callout::Prim { p, n: 2 } = c
+                        && fixpt_runtime::PRIMITIVES[p].name == "string=?"
+                    {
+                        string_eq(&mut a, 1, 2);
+                        a.to(done, Fix::B);
+                    }
                     // `int`'s bit operations of fixnums (`TODO.md` §56): of
                     // two, `and`, `ior` and `xor` are one; `not` of one, its
                     // tag's bits cleared. A bignum calls out.
@@ -4394,6 +4400,36 @@ fn f64_fast(a: &mut Asm, what: &str, y: Reg) {
     a.e(fmov_from_d(RESULT, D16));
 }
 
+/// `string=?` of the strings in `x` and `y`, into `RESULT`: their lengths,
+/// then their characters, 32 bits each, as register code's. Uses X9 and
+/// X13 to X16.
+fn string_eq(a: &mut Asm, x: Reg, y: Reg) {
+    let (again, yes, no, end) = (a.label(), a.label(), a.label(), a.label());
+    a.e(ldur(X15, x, -4));
+    a.e(ldur(X16, y, -4));
+    a.e(cmp(X15, X16));
+    a.to(no, Fix::If(Cond::Ne));
+    a.e(mov(X13, x));
+    a.e(mov(X14, y));
+    a.bind(again);
+    a.e(cmp_imm(X15, 0));
+    a.to(yes, Fix::If(Cond::Eq));
+    a.e(ldur_w(X9, X13, 4));
+    a.e(ldur_w(X16, X14, 4));
+    a.e(cmp(X9, X16));
+    a.to(no, Fix::If(Cond::Ne));
+    a.e(add_imm(X13, X13, 4));
+    a.e(add_imm(X14, X14, 4));
+    a.e(sub_imm(X15, X15, 1));
+    a.to(again, Fix::B);
+    a.bind(yes);
+    a.es(&mov_imm64(RESULT, Value::TRUE.raw()));
+    a.to(end, Fix::B);
+    a.bind(no);
+    a.es(&mov_imm64(RESULT, Value::FALSE.raw()));
+    a.bind(end);
+}
+
 /// The condition an `i64` (signed) or `u64` comparison `what` holds on.
 fn raw_compare(signed: bool, what: &str) -> Option<Cond> {
     match (what, signed) {
@@ -4695,6 +4731,25 @@ fn pure_fast(a: &mut Asm, name: &str, y: Reg, slow: Label) -> bool {
         a.e(add(X13, x, X15));
         a.e(ldurb(X16, X13, 4));
         a.e(lsl_imm(RESULT, X16, 3));
+        return true;
+    }
+    // A string, likewise: its length the word before its characters, 32
+    // bits each (`TODO.md` §121; register code's, `regcode.rs`).
+    if name == "string-length" {
+        a.e(ldur(X13, x, -4));
+        a.e(lsl_imm(RESULT, X13, 3));
+        return true;
+    }
+    if name == "string-ref" {
+        fixnum(a, y);
+        a.e(ldur(X14, x, -4));
+        a.e(asr_imm(X15, y, 3));
+        a.e(cmp(X15, X14));
+        a.to(slow, Fix::If(Cond::Hs));
+        a.e(add_lsl(X13, x, X15, 2));
+        a.e(ldur_w(X16, X13, 4));
+        a.es(&mov_imm64(X14, Value::char('\0').raw()));
+        a.e(add_lsl(RESULT, X14, X16, 8));
         return true;
     }
     if name == "%fx26-flatarray-length" {
