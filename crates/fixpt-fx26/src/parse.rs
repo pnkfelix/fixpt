@@ -1483,7 +1483,7 @@ impl Checker {
             Datum::List { .. } => {}
             _ => return Err(FxError::at(span, "not an expression in the FX-26 kernel")),
         }
-        let items = self.items(s, "an expression")?.to_vec();
+        let items = self.items(s, "an expression")?;
         match self.head(&items).unwrap_or("") {
             "lambda" => {
                 let [_, params, body @ ..] = &items[..] else {
@@ -1565,8 +1565,8 @@ impl Checker {
                     return Err(FxError::at(span, "`(letrec ((name type expression) …) body …)`"));
                 };
                 let mut out = Vec::new();
-                for b in self.items(bindings, "letrec bindings")?.to_vec() {
-                    let parts = self.items(&b, "a letrec binding")?.to_vec();
+                for b in self.items(bindings, "letrec bindings")? {
+                    let parts = self.items(b, "a letrec binding")?;
                     let [name, ty, init] = &parts[..] else {
                         return Err(FxError::at(b.span, "a letrec binding is `(name type expression)`"));
                     };
@@ -1583,11 +1583,11 @@ impl Checker {
                 };
                 let mut out = Vec::new();
                 let bs = match &bindings.datum {
-                    Datum::Nil => Vec::new(),
-                    _ => self.items(bindings, "let bindings")?.to_vec(),
+                    Datum::Nil => &[][..],
+                    _ => self.items(bindings, "let bindings")?,
                 };
                 for b in bs {
-                    let parts = self.items(&b, "a let binding")?.to_vec();
+                    let parts = self.items(b, "a let binding")?;
                     let [name, init] = &parts[..] else {
                         return Err(FxError::at(b.span, "a let binding is `(name expression)`"));
                     };
@@ -1717,12 +1717,12 @@ impl Checker {
                     return Err(FxError::at(span, "`(let* ((name expression) …) body …)`"));
                 };
                 let bs = match &bindings.datum {
-                    Datum::Nil => Vec::new(),
-                    _ => self.items(bindings, "let* bindings")?.to_vec(),
+                    Datum::Nil => &[][..],
+                    _ => self.items(bindings, "let* bindings")?,
                 };
                 let mut parsed = Vec::new();
-                for b in &bs {
-                    let parts = self.items(b, "a let* binding")?.to_vec();
+                for b in bs {
+                    let parts = self.items(b, "a let* binding")?;
                     let [name, init] = &parts[..] else {
                         return Err(FxError::at(b.span, "a let* binding is `(name expression)`"));
                     };

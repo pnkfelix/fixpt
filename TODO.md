@@ -3202,3 +3202,16 @@ alike to 0.1%. Take the runs after it.
   twice; an `Rc` would share it); `Ty::clone` in `regions_walk` and
   `knot_in`; `param_sels`' set. Who mallocs is not
   seen (glibc has no frame pointers): a DWARF call graph would say.
+- ~~**Loading, by `perf` again**~~ (the user's "keep going", 2026-10-24):
+  the reader lowered only for an eager reader, and an instruction's
+  index by binary search in the native compilers, not a linear search
+  for each (CLAUDES_CHOICES.md, "Loading: the reader lowered only when
+  wanted"); and the checker's whole copies of forms (`top_defining`'s
+  two now one `Rc`). Loading 11.25G cycles to 10.18G, stage 0 19.16G to
+  18.21G. **Left**, by self time: the front end's native code some 39%;
+  the heap's collections some 12% (5 majors, 136 ms, copying the live
+  data again as it grows, a major copying 5.0M words to free 1.4M; 133
+  minors, 229 ms, each scanning the code area and regions whole, 1.5M
+  words, some 0.4 ms); the native compiler 7.5% (`demands` a fixpoint
+  of every instruction, op names matched as strings, each pass);
+  hashing some 4.5%, SipHash, over many maps.

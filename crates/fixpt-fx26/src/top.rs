@@ -23,6 +23,7 @@ use crate::ast::{Effect, Region, TyId};
 use crate::check::{Checked, Checker};
 use crate::error::{FxError, R};
 use fixpt_read::{FileId, Reader, Span, Sym, Syntax, SyntaxProfile};
+use std::rc::Rc;
 
 /// What one top-level form did.
 #[derive(Clone, Debug)]
@@ -59,7 +60,7 @@ pub enum Top {
 #[derive(Clone, Debug)]
 pub struct Definition {
     pub names: Vec<Sym>,
-    pub form: Syntax,
+    pub form: Rc<Syntax>,
     pub uses: Vec<Sym>,
 }
 
@@ -72,10 +73,10 @@ pub struct Defining {
     /// take, each earlier definition that uses the name and still checks,
     /// defined again. With each, whether it assigns the globals its names
     /// have (a redefinition every use can take) rather than making new ones.
-    pub run: Vec<(Top, Syntax)>,
+    pub run: Vec<(Top, Rc<Syntax>)>,
     /// What runs before all that: the hidden globals of the files the form
     /// loads for the first time (`parse_load`), each defined.
-    pub hoisted: Vec<(Top, Syntax)>,
+    pub hoisted: Vec<(Top, Rc<Syntax>)>,
     /// The earlier definitions that no longer check, and why: broken, a use
     /// of one an error, until they are defined again.
     pub broken: Vec<(Vec<Sym>, String)>,
@@ -121,8 +122,10 @@ impl Checker {
         let mut top = top?;
         let assigns = !olds.is_empty() && self.fits_old(&top, &olds);
         set_assigns(&mut top, assigns);
-        self.record(form, &top);
-        let mut done = Defining { run: vec![(top, form.clone())], hoisted, broken: Vec::new() };
+        // One copy of the form, for both what runs and the definition kept.
+        let form = Rc::new(form.clone());
+        self.record(&form, &top);
+        let mut done = Defining { run: vec![(top, form)], hoisted, broken: Vec::new() };
         if olds.is_empty() || assigns {
             return Ok(done);
         }
@@ -293,7 +296,7 @@ impl Checker {
     /// The definitions out of date (`defer_reruns`), oldest first: each
     /// one's names, the names it uses that were defined again since, and
     /// its form, to run again.
-    pub fn outdated(&self) -> Vec<(Vec<Sym>, Vec<Sym>, Syntax)> {
+    pub fn outdated(&self) -> Vec<(Vec<Sym>, Vec<Sym>, Rc<Syntax>)> {
         self.defs
             .iter()
             .filter_map(|d| {
@@ -304,7 +307,7 @@ impl Checker {
     }
 
     /// `form`, checked as `top`, recorded as the definition of its names now.
-    fn record(&mut self, form: &Syntax, top: &Top) {
+    fn record(&mut self, form: &Rc<Syntax>, top: &Top) {
         let (names, exps): (Vec<Sym>, Vec<crate::ast::ExpId>) = match top {
             Top::Define { name, exp, .. } => (vec![*name], vec![*exp]),
             Top::DefineRec { bindings, .. } => bindings.iter().map(|(n, _, e)| (*n, *e)).unzip(),
@@ -404,7 +407,7 @@ impl Checker {
     /// `(define up-name (poly (param …) (subr pure (rep) (name p …))) (lambda (x) x))`
     /// and `down-name` the other way. `false` if `form` is something else.
     fn expand_generative(&mut self, form: &Syntax, out: &mut Vec<Syntax>) -> R<bool> {
-        let items = form.as_proper_list().unwrap_or(&[]).to_vec();
+        let items = form.as_proper_list().unwrap_or(&[]);
         if items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h)) != Some("define-generative") {
             return Ok(false);
         }
@@ -469,14 +472,16 @@ impl Checker {
     /// family, which its variants may mention with the same parameters, and
     /// constructors polymorphic in them.
     pub(crate) fn expand_datatype(&mut self, form: Syntax, out: &mut Vec<Syntax>) -> R<()> {
+        let head = form.as_proper_list().and_then(|items| items.first()?.as_symbol());
+        match head.map(|h| self.interner.name(h)) {
+            Some("import") => return self.expand_import(&form, out),
+            Some("define-datatype") => {}
+            _ => {
+                out.push(form);
+                return Ok(());
+            }
+        }
         let items = form.as_proper_list().unwrap_or(&[]).to_vec();
-        if items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h)) == Some("import") {
-            return self.expand_import(&form, out);
-        }
-        if items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h)) != Some("define-datatype") {
-            out.push(form);
-            return Ok(());
-        }
         let span = form.span;
         let [_, name, variants @ ..] = &items[..] else {
             return Err(FxError::at(span, "`(define-datatype name (tag type …) …)`"));
