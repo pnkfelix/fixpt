@@ -27,7 +27,7 @@
 //! nothing is asked.
 
 use crate::logic::{Expr, Formula};
-use crate::smt_theory::{Sort, Theory};
+use crate::smt_theory::{Sort, Theory, symbol};
 use crate::typed_cells::Term;
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -322,7 +322,7 @@ impl Writer<'_> {
         {
             let ps = ps.to_vec();
             let xs: Vec<String> = ps.iter().zip(xs).map(|(p, x)| self.element(x, p).expect("fits")).collect();
-            return if xs.is_empty() { format!("|{f}|") } else { format!("(|{f}| {})", xs.join(" ")) };
+            return if xs.is_empty() { symbol(f) } else { format!("({} {})", symbol(f), xs.join(" ")) };
         }
         let k = self.funs.iter().position(|(g, n, c)| g == f && *n == xs.len() && *c == b).unwrap_or_else(|| {
             self.funs.push((f.clone(), xs.len(), b));

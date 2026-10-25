@@ -54,6 +54,13 @@ impl Sort {
 /// The lists, as the solver has them: of a sort `T`, for any `T`.
 pub const LISTS: &str = "(declare-datatypes ((List 1)) ((par (T) ((nil) (cons (hd T) (tl (List T)))))))";
 
+/// A logic function's name, as the solver has it: apart from the solver's
+/// own, which `|…|` alone does not keep it from (`|abs|` is `abs`, a
+/// built-in of z3 5.3.1, and declaring it again an error).
+pub fn symbol(name: &str) -> String {
+    format!("|fx.{name}|")
+}
+
 /// The logic functions defined: each one's name, its parameters' sorts and
 /// its result's; and their definitions, in order.
 #[derive(Clone, Debug, Default)]
@@ -113,7 +120,7 @@ impl Theory {
         match tr.exp(body, Some(&result), &[]) {
             Some((b, s)) if s == result => {
                 let ps: Vec<String> = sorts.iter().enumerate().map(|(i, s)| format!("(p{i} {})", s.name())).collect();
-                Some(format!("(define-fun-rec |{fname}| ({}) {} {b})", ps.join(" "), result.name()))
+                Some(format!("(define-fun-rec {} ({}) {} {b})", symbol(&fname), ps.join(" "), result.name()))
             }
             _ => {
                 self.defined.pop();
@@ -231,7 +238,7 @@ impl Translator<'_> {
                         }
                         xs.push(x);
                     }
-                    return Some((format!("(|{g}| {})", xs.join(" ")), r));
+                    return Some((format!("({} {})", symbol(&g), xs.join(" ")), r));
                 }
                 // `cons`'s tail, a list of its head's sort.
                 let mut xs: Vec<(String, Sort)> = Vec::new();
