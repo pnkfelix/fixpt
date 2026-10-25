@@ -25,6 +25,22 @@ impl Words {
         (p != libc::MAP_FAILED).then_some(Words { base: p as *mut u64, len })
     }
 
+    /// Ask the system to commit these words in huge pages (2 MiB on
+    /// x86_64) where it can: a page first written costs one fault for 512
+    /// of the usual size, and its translation one TLB entry. On Linux, where
+    /// transparent huge pages are on for those that ask (`madvise`, as a
+    /// rule); elsewhere, or if the system declines, nothing changes. Memory
+    /// is committed 2 MiB at a time, so for a heap's words, written
+    /// densely, not for a sparse table.
+    pub fn prefer_huge_pages(&mut self) {
+        #[cfg(target_os = "linux")]
+        // SAFETY: advice on this mapping, which stays mapped and readable;
+        // its contents are unchanged.
+        unsafe {
+            libc::madvise(self.base as *mut libc::c_void, self.len * 8, libc::MADV_HUGEPAGE)
+        };
+    }
+
     #[inline]
     pub fn len(&self) -> usize {
         self.len

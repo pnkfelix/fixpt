@@ -395,7 +395,11 @@ impl Heap {
 
     pub fn with_semispace(semi: usize) -> Heap {
         let semi = semi.max(1024);
-        let mem = fixpt_memmgmt::Words::new(MEM_WORDS).expect("address space for the heap");
+        let mut mem = fixpt_memmgmt::Words::new(MEM_WORDS).expect("address space for the heap");
+        // Each page of the semispaces is written as a collection first
+        // copies there: in 4 KiB pages, a tenth of the front end's loading
+        // was the system's faults (`docs/performance.md`).
+        mem.prefer_huge_pages();
         let base = mem.words().as_ptr() as usize / 8;
         // A nursery of `DEFAULT_NURSERY_WORDS`, or of `FIXPT_NURSERY` words if
         // that is set; none if it is 0.
