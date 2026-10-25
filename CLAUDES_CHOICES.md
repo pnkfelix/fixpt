@@ -1896,3 +1896,61 @@ The user: "keep going", after the allocations. By `perf` on loading:
   its head; `parse_exp` each list's items; `top_defining` the form twice,
   for what runs and for the definition kept, now one `Rc` for both.
   Fewer allocations (5.57M to 5.19M), little time.
+
+## The major collections' budget, across every space they reclaim (2026-10-24)
+
+The user: "you need to have your total heap be at least a multiple of
+your current live storage, and it's often simplest to have it be a
+multiple of your peak live storage"; "make sure you're including the size
+of the code space in your heap growth calculations; even though it's a
+separate space, it contributes to the so called mark/cons ratio". Then:
+"Go for it".
+
+What it was, traced on loading kayak's compiler (five majors): the old
+space measured alone, from 64K words, grown to 3 times what one found
+live; the heap's code area's allocation measured against a *semispace*
+(the first major, the front end's 1M words of code against 64K); and
+the cellular machine's code space forcing a major of the whole heap
+whenever 8 MB more than was live had been installed (the last two,
+copying 5.0M and 6.8M words to let go some 0.5 MB of code each).
+
+What it is:
+- **One budget** (`Heap::major_budget`, `major_due`): a major when
+  `LIVE_RATIO - 1` (2) times the most one has found live has been
+  allocated since the last, across the old space (promoted, or
+  allocated there), the code area, the reaps' chunks and the cellular
+  machines' code for the heap (`note_outside_code`, `set_outside_code`).
+  Live is the old space, the code area and that code. The peak, so the
+  heap never shrinks under it, as the semispace never did.
+- **At least 4M words** (32 MB), `MIN_MAJOR_BUDGET`: a session's start
+  loads some 2.4M words of front end, code and data. A choice; the
+  semispaces start at 8M words to hold it (only what is written is
+  committed: a small run's peak memory is as it was, 18.6 MB).
+- **The old space sized past the budget**, and a nursery's promotion,
+  so that its threshold (three quarters) is a backstop, for heaps made
+  small; an image loaded counts as live (`budget_from`). A minor that
+  overflows the old space leaves room for the next.
+- **The cellular machine's code collected after a heap major**, whose
+  weak references are fresh, when worth it: `LIVE_RATIO - 1` times what
+  was live installed since (it was once what was live), the heap's ratio. A major
+  of its own only when its space is half full. Collecting the code at
+  any point between runs was already safe (a word's weak reference is
+  cleared only by a collection that found it dead).
+- **Crowding alone collects the code**, the space past half full with
+  8 MB installed since it was last collected, whatever the ratio says:
+  the suite (`every_program_on_every_machine`, many sessions compiling
+  into one thread's machine) filled the 256 MB space when crowding also
+  had to be worth it by the ratio, live code being large.
+- `code_gc.rs`'s test of placed code now asks that placed code forces
+  no major short of the heap's budget, and one past it;
+  `code_area.rs`'s bound is the budget and what is live, over three
+  majors; `a_letreap_is_collected_as_it_runs` runs `reap.fx` for 8,000
+  rounds, not 300 (16M words through the reap, not 600K): it asked for
+  ten collections of a reap in a heap of 64K words, and a reap's chunks
+  count toward the budget as the heap's allocation does. `reap.fx`
+  itself is unchanged, run by every machine's sweep.
+
+Loading 10.30G cycles to 10.04G (two majors, 45 ms, from five, 136 ms;
+one code collection, from two); stage 0 18.32G to 18.0G (three majors,
+86 ms, from five, 134 ms), output the same, peak memory the same (398
+MB).

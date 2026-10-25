@@ -225,8 +225,10 @@ impl Heap {
         let free = c.free;
         self.top = old_top + free;
         assert!(self.top - self.active <= MAX_SEMI_WORDS, "the old space is full");
+        // Past the semispace (one made small): room for the next nursery's
+        // promotion too, not just this one's.
         if self.top - self.active > self.semi {
-            self.grow(self.top - self.active);
+            self.grow(self.top - self.active + self.nursery_words);
         }
         self.nursery_top = NURSERY_BASE;
         self.minor_count += 1;

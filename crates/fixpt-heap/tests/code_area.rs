@@ -76,19 +76,24 @@ fn liveness_runs_through_the_heap_into_the_code_area() {
 }
 
 /// Generating code bloblets and dropping them, over and over, takes no more
-/// room than is live at a time: the area does not grow with the rounds.
+/// room than a major collection's budget (code counts toward it) and what
+/// is live at a time: the area does not grow with the rounds, over three
+/// major collections and more.
 #[test]
 fn code_dropped_over_and_over_takes_bounded_room() {
     let mut heap = Heap::new();
     let mut widest = 0;
-    for round in 0..20_000 {
+    let mut round = 0;
+    while heap.gc_count < 3 {
         let c = code(&mut heap, 8 * (1 + round % 97));
         heap.set_bloblet_slot(c, 1, Value::fixnum(round as i64));
         heap.maybe_collect(&mut []);
         widest = widest.max(heap.code_words().1);
+        round += 1;
     }
     // Some fragmentation is allowed; growth with the rounds is not.
-    assert!(widest < 200_000, "the code area spread to {widest} words over 20,000 rounds");
+    let bound = heap.major_budget() + 200_000;
+    assert!(widest < bound, "the code area spread to {widest} words over {round} rounds, past {bound}");
 }
 
 /// The same, collecting at every safepoint, as the bug-finding policy does.

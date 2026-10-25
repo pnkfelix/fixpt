@@ -157,16 +157,21 @@ fn run_in_registers(program: &str, gc_every: Option<u64>) -> (String, u64, usize
 
 /// The same, and how many collections there were.
 fn run_in_registers_counting(program: &str, gc_every: Option<u64>) -> (String, u64, usize, u64) {
-    use fixpt_heap::Value;
     let text = std::fs::read_to_string(format!("{}/tests/programs/run/{program}", env!("CARGO_MANIFEST_DIR"))).unwrap();
+    run_text_in_registers_counting(&text, gc_every)
+}
+
+/// The same, of program `text`.
+fn run_text_in_registers_counting(text: &str, gc_every: Option<u64>) -> (String, u64, usize, u64) {
+    use fixpt_heap::Value;
     let mut c = Checker::new();
-    let forms = c.read_in(FileId(0), &text).expect("reads");
+    let forms = c.read_in(FileId(0), text).expect("reads");
     let done = c.declare_ahead(&forms).expect("declares");
     let tops: Vec<_> = forms.iter().zip(done).filter(|(_, d)| !d).flat_map(|(f, _)| c.top_all(f).expect("checks")).collect();
     let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
     s.scheme.scope(|sc| {
         let w = sc.make(|m| {
-            let mut comp = fixpt_fx26::cellular::Compiler::new(m.heap(), &c, &text);
+            let mut comp = fixpt_fx26::cellular::Compiler::new(m.heap(), &c, text);
             comp.registers = true;
             comp.program(&tops).expect("compiles")
         });
@@ -232,16 +237,21 @@ fn a_throw_ends_the_regions_it_leaves() {
     }
 }
 
-/// A `letreap` is collected while its body runs: 300,000 pairs go
+/// A `letreap` is collected while its body runs: 8,000,000 pairs go
 /// through it, though it holds a thousand live at a time; and it ends.
+/// `reap.fx` run longer than the 300 rounds it makes everywhere: what a
+/// reap takes counts toward a major collection's budget (at least 4M
+/// words), as what the heap takes does, and 300 rounds take 600K.
 #[test]
 fn a_letreap_is_collected_as_it_runs() {
+    let text = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs/run/reap.fx")).unwrap();
+    let text = text.replace("(churn 300)", "(churn 8000)");
     for gc_every in [None, Some(1000)] {
-        let (got, words, live, collections) = run_in_registers_counting("reap.fx", gc_every);
+        let (got, words, live, collections) = run_text_in_registers_counting(&text, gc_every);
         assert_eq!(got, "500500");
-        assert!(words >= 300 * 1000 * 2, "{words}");
+        assert!(words >= 8000 * 1000 * 2, "{words}");
         assert_eq!(live, 0);
-        assert!(collections >= 10, "what the reap takes starts collections: {collections}");
+        assert!(collections >= 3, "what the reap takes starts collections: {collections}");
     }
 }
 
