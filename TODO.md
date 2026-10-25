@@ -3194,3 +3194,10 @@ alike to 0.1%. Take the runs after it.
   to 18.0G. **Left**: the minors, 135 loading (240 ms), each scanning
   the code area and regions whole (1.5M words): stores into them
   remembered, or code made since the last minor alone scanned.
+- ~~**The code area scanned by its cards**~~ (the user's, 2026-10-25):
+  the Rust barrier marks the code area's cards as the machines' already
+  did, and a minor traces only the fields on its dirty cards, finding
+  the objects there by a sorted list of their starts: loading's minors
+  237 ms to 174 ms, its cycles 9.82G to 9.57G. **Left**: the regions,
+  still scanned whole (none live when loading); machine code fills what
+  it allocates there without marking cards.

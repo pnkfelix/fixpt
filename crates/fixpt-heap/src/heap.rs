@@ -486,11 +486,16 @@ impl Heap {
         Value(self.word(rel))
     }
     /// A value stored into word `rel` of an object: the write barrier
-    /// marks its card when it puts a young reference into the old space.
+    /// marks its card when it puts a young reference into the old space or
+    /// the code area.
     #[inline]
     pub fn set_slot(&mut self, rel: usize, v: Value) {
         self.set_word(rel, v.raw());
-        if self.generational && v.is_ref() && young::is_young(self.ref_ix(v)) && rel < 2 * MAX_SEMI_WORDS {
+        if self.generational
+            && v.is_ref()
+            && young::is_young(self.ref_ix(v))
+            && (rel < 2 * MAX_SEMI_WORDS || code::in_code_area(rel))
+        {
             self.mark_card(rel);
         }
     }

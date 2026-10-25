@@ -21,6 +21,10 @@ pub(super) struct CodeArea {
     pub(super) top: usize,
     /// Free blocks, `(start, words)`, in address order.
     pub(super) free: Vec<(usize, usize)>,
+    /// Where each object starts, in address order: so that a minor
+    /// collection finds the objects on a dirty card without walking the
+    /// area.
+    pub(super) starts: Vec<usize>,
     /// Words in objects: all that is not free.
     pub(super) used: usize,
     /// Words allocated since the last collection, which counts toward the
@@ -104,11 +108,14 @@ impl Heap {
             } else {
                 self.code.free.remove(k);
             }
+            let k = self.code.starts.partition_point(|&s| s < start);
+            self.code.starts.insert(k, start);
             return start;
         }
         let at = self.code.top;
         assert!(at + n <= CODE_BASE + CODE_WORDS, "the code area is full: {n} words more, past {} in use", self.code.used - n);
         self.code.top = at + n;
+        self.code.starts.push(at);
         at
     }
 
@@ -161,6 +168,7 @@ impl Heap {
         }
         let (mut at, top) = (CODE_BASE, self.code.top);
         let mut free = Vec::new();
+        let mut starts = Vec::new();
         let mut used = 0;
         let mut run: Option<usize> = None;
         while at < top {
@@ -172,6 +180,7 @@ impl Heap {
                 if let Some(start) = run.take() {
                     free.push((start, at - start));
                 }
+                starts.push(at);
                 used += size;
             } else if run.is_none() {
                 run = Some(at);
@@ -187,6 +196,7 @@ impl Heap {
             self.mem.release(start..top);
         }
         self.code.free = free;
+        self.code.starts = starts;
         self.code.used = used;
         self.code.taken = 0;
     }

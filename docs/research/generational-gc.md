@@ -85,8 +85,8 @@ the nursery's top and limit. Regions and the code area are unchanged.
   the nursery at once: each object is copied to the end of the old
   semispace, and the copies are scanned there, Cheney's way. Its roots are
   the usual ones (explicit roots, globals, symbols, the machine's), what
-  the arenas and live reaps hold (scanned whole), the code area's
-  bloblets, and the remembered set. Afterwards the nursery is empty, so
+  the arenas and live reaps hold (scanned whole), and the remembered set,
+  of the old space and the code area. Afterwards the nursery is empty, so
   no old object points into it, and the remembered set is cleared.
 - **A major collection** is today's `collect`, with the nursery a second
   from-space. It runs when twice the most found live by one (at least 4M
@@ -144,8 +144,14 @@ that already exists:
 
 A store that initialises an object just made in the nursery needs none
 (the heap's constructors write its words directly). A store into an
-arena, a reap or the code area needs none, since those are scanned whole
-at a minor collection.
+arena or a reap needs none, since those are scanned whole at a minor
+collection. A store into the code area needs one, as into the old space:
+the code area is scanned only by its dirty cards, its objects on a card
+found by a list of where each starts (`CodeArea::starts`), since walking
+the area header to header reads one line of memory for each object, some
+0.45 ms for its 6,000 when loading kayak's compiler. Its bloblets are
+made by the heap's constructors, outside the nursery, so the barrier marks
+even the stores that fill one.
 
 ## Testing
 
