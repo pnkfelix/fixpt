@@ -1775,15 +1775,20 @@ pub struct NativeMachine {
     free_slots: Vec<usize>,
     /// Bytes of code installed since the code was last collected, and the
     /// bytes live after that collection: when the first passes both
-    /// [`CODE_COLLECT_BYTES`] and the second, the code is collected again
-    /// (as Larceny's code space is: `0524c5d6` in its repository).
+    /// [`CODE_COLLECT_BYTES`] and twice the second, collecting the code again
+    /// is worth it (as Larceny's code space is: `0524c5d6` in its repository),
+    /// once its heap has had a major collection since (`code_collection_due`).
     since_collect: usize,
     live_after: usize,
+    /// The heap (by serial) whose weak references the code was last
+    /// collected by, and how many major collections it had made then.
+    collected_at: (u64, u64),
     /// Words compiled into this machine so far.
     compiled: usize,
 }
 
-/// Code installed past which, and past what was live, the code is collected.
+/// Code installed past which, and past `LIVE_RATIO - 1` times what was live, the code
+/// is worth collecting.
 pub const CODE_COLLECT_BYTES: usize = 8 << 20;
 
 /// A word compiled into a machine: its slot, a weak reference to it in its
@@ -1849,6 +1854,7 @@ impl NativeMachine {
             free_slots: Vec::new(),
             since_collect: 0,
             live_after: 0,
+            collected_at: (u64::MAX, 0),
             compiled: 0,
         };
         m.note_machine();
@@ -1872,10 +1878,34 @@ impl NativeMachine {
         }
     }
 
-    /// Whether so much code has been installed since the code was last
-    /// collected that it should be again.
-    pub fn code_collection_due(&self) -> bool {
-        self.since_collect > CODE_COLLECT_BYTES.max(self.live_after)
+    /// Whether the code should be collected now: so much installed since
+    /// it last was that it is worth it, and `heap` has made a major
+    /// collection since, whose weak references say which words died. A
+    /// major collection of its own it would not be worth: one of a large
+    /// heap copies far more than the code it lets go (kayak's compiler,
+    /// loading, two of 5.0M and 6.8M words, for 0.5 MB of code each). The
+    /// code installed counts toward the heap's next one instead
+    /// ([`Heap::note_outside_code`]). Or, past half the space, now.
+    pub fn code_collection_due(&self, heap: &Heap) -> bool {
+        let major_since = heap.gc_count > 0 && self.collected_at != (heap.serial(), heap.gc_count);
+        (self.code_worth_collecting() && major_since) || self.code_crowded()
+    }
+
+    /// So much code installed since the code was last collected, past
+    /// [`CODE_COLLECT_BYTES`] and past `LIVE_RATIO - 1` times what was live
+    /// then, that collecting it is worth it: copying what is live costs at
+    /// most half a byte per byte installed, as the heap's collections do
+    /// (`fixpt_heap::heap::LIVE_RATIO`).
+    fn code_worth_collecting(&self) -> bool {
+        self.since_collect > CODE_COLLECT_BYTES.max((fixpt_heap::heap::LIVE_RATIO - 1) * self.live_after)
+    }
+
+    /// The code space past half full, and [`CODE_COLLECT_BYTES`] installed
+    /// since the code was last collected: the code collected, the heap
+    /// first, whatever their budgets say. (Not with less installed: a space
+    /// mostly live would be collected at every run.)
+    fn code_crowded(&self) -> bool {
+        self.space.used() > CODE_SPACE / 2 && self.since_collect > CODE_COLLECT_BYTES
     }
 
     /// Bytes of code space in use.
@@ -1929,6 +1959,7 @@ impl NativeMachine {
         // A word is let go if it died, or its heap did: a thread's machine
         // outlives the sessions that compile into it.
         let mut live = std::collections::HashMap::new();
+        let mut mine_kept = 0;
         for w in std::mem::take(&mut self.installed) {
             let mine = w.heap == heap.serial();
             let heap_gone = !mine && !*live.entry(w.heap).or_insert_with(|| Heap::serial_live(w.heap));
@@ -1955,6 +1986,9 @@ impl NativeMachine {
             self.resume[w.slot] = old_exec(&new, rt_at);
             code_of.insert(w.slot, (new.exec_addr(at), w.code.1));
             crate::faults::note(new.exec_addr(at), w.code.1, w.name.clone());
+            if mine {
+                mine_kept += w.code.1 + w.resume.1;
+            }
             kept.push(Installed { code: (at, w.code.1), resume: (rt_at, w.resume.1), ..w });
         }
         drop(code_of);
@@ -1964,6 +1998,8 @@ impl NativeMachine {
         self.note_machine();
         self.since_collect = 0;
         self.live_after = self.space.used();
+        self.collected_at = (heap.serial(), heap.gc_count);
+        heap.set_outside_code(mine_kept / 8);
         if std::env::var_os("FIXPT_CODE_TRACE").is_some() {
             eprintln!(
                 "; code collected: {} words of {} kept, {} KB of {} KB, in {:.1} ms",
@@ -2079,6 +2115,7 @@ impl NativeMachine {
         self.compiled += 1;
         self.installed.push(Installed { seq: self.compiled, slot, heap: heap.serial(), weak, code: (at, code.len()), resume: (rt_at, 8 * table_len), name: what });
         self.since_collect += code.len() + 8 * table_len;
+        heap.note_outside_code((code.len() + 8 * table_len) / 8);
         Ok(())
     }
 
@@ -2092,7 +2129,7 @@ impl NativeMachine {
     /// has register code (PLAN.md 13h′) run as register code when
     /// `registers`, and everything its register code reaches compiled too.
     pub fn compile_reachable_as(&mut self, heap: &mut Heap, word: Value, registers: bool) -> Result<usize, String> {
-        if self.code_collection_due() {
+        if self.code_collection_due(heap) {
             self.collect_code(heap)?;
         }
         let closure = const { kind("cellular-closure") };
@@ -2327,18 +2364,25 @@ pub fn run_word_as(rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value],
     })
 }
 
-/// Before running in `m`: if its code is due to be collected, first the
-/// heap, so that the words that died are known to be dead (`word` and
-/// `args` rooted, and moved on), then the code, here and not only as
-/// compiling begins: a run that compiles nothing, of code placed from
-/// elsewhere (`install`), would otherwise find it due at every run, and
-/// collect the heap every time. Between runs of `m`, so no return address
-/// points into its code. A heap whose collection is held off is left alone.
+/// Before running in `m`: the heap collected if its major collection is
+/// due (code installed counts toward it, and a run that only installs code
+/// may reach no safepoint), or the code space is crowded (`word` and `args`
+/// rooted, and moved on); then the code, if it is due
+/// (`code_collection_due`), here and not only as compiling begins: a run
+/// that compiles nothing, of code placed from elsewhere (`install`), would
+/// otherwise find it due at every run. Between runs of `m`, so no return
+/// address points into its code. A heap whose collection is held off is
+/// left alone.
 fn collect_for_code(m: &mut NativeMachine, rt: &mut fixpt_runtime::Runtime, word: Value, args: &[Value]) -> Result<(Value, Vec<Value>), String> {
     let mut word = [word];
     let mut args = args.to_vec();
-    if m.code_collection_due() && !rt.heap.collection_inhibited() {
+    if rt.heap.collection_inhibited() {
+        return Ok((word[0], args));
+    }
+    if rt.heap.major_due() || m.code_crowded() {
         rt.heap.collect(&mut [&mut word, &mut args]);
+    }
+    if m.code_collection_due(&rt.heap) {
         m.collect_code(&mut rt.heap)?;
     }
     Ok((word[0], args))

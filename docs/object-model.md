@@ -457,8 +457,13 @@ or the table, so a collection copies each word still alive into a fresh
 space and rewrites only what points at it: its slot's entry in the table
 and its table of where to resume. Which words are alive, the heap says by
 weak references (`Heap::weak_add`), which each collection moves on or
-clears. Code is collected when 8 MB, and more than was live after the last
-time, has been installed since; or when a word does not fit.
+clears. Code is collected when 8 MB, and twice what was live after the
+last time, has been installed since, and the heap has made a major
+collection since then, whose weak references are fresh; or when the space
+is half full, or a word does not fit. The code installed counts toward the
+heap's next major collection (`Heap::note_outside_code`), so that it never
+forces one of its own: one of a large heap copied far more than the code
+it let go (2026-10-24).
 
 ## The header
 

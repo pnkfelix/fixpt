@@ -89,8 +89,11 @@ the nursery's top and limit. Regions and the code area are unchanged.
   bloblets, and the remembered set. Afterwards the nursery is empty, so
   no old object points into it, and the remembered set is cleared.
 - **A major collection** is today's `collect`, with the nursery a second
-  from-space. It runs when the old semispace passes its threshold, as
-  now.
+  from-space. It runs when twice the most found live by one (at least 4M
+  words) has been allocated since the last, across every space it
+  reclaims: promoted into the old space, the code area, the reaps' chunks,
+  and the cellular machines' code (`Heap::major_budget`, `major_due`,
+  2026-10-24); the old space sized past that, its threshold a backstop.
 
 Promoting everything at once keeps the old space a plain Cheney space,
 with no ages to keep. An object that dies just after its promotion costs

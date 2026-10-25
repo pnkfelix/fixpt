@@ -3186,3 +3186,11 @@ alike to 0.1%. Take the runs after it.
   words, some 0.4 ms); the native compiler 7.5% (`demands` a fixpoint
   of every instruction, op names matched as strings, each pass);
   hashing some 4.5%, SipHash, over many maps.
+- ~~**The heap's growth, every space counted**~~ (the user's, 2026-10-24):
+  a major collection's budget twice the peak live, across the old space,
+  the code area, the reaps and the cellular machines' code, which no
+  longer forces majors of its own (CLAUDES_CHOICES.md, "The major
+  collections' budget"): loading 10.30G cycles to 10.04G, stage 0 18.32G
+  to 18.0G. **Left**: the minors, 135 loading (240 ms), each scanning
+  the code area and regions whole (1.5M words): stores into them
+  remembered, or code made since the last minor alone scanned.

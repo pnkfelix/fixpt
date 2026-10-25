@@ -201,8 +201,12 @@ impl std::fmt::Display for BlobletError {
     }
 }
 
-/// Words in each semispace at startup. Grows on demand; never shrinks.
-const DEFAULT_SEMI_WORDS: usize = 1 << 16;
+/// Words in each semispace at startup: enough that the old space holds the
+/// first major collection's budget ([`MIN_MAJOR_BUDGET`]) and a nursery's
+/// promotion short of `COLLECT_THRESHOLD`, so that the threshold, a backstop,
+/// does not come first. Only what is written is committed. Grows on demand;
+/// never shrinks.
+const DEFAULT_SEMI_WORDS: usize = 1 << 23;
 /// The most words a semispace may grow to: each has this much address space
 /// of its own, reserved when the heap is made, so it grows in place.
 const MAX_SEMI_WORDS: usize = 1 << 31;
@@ -247,9 +251,18 @@ const COLLECT_THRESHOLD: (usize, usize) = (3, 4);
 fn past_threshold(words: usize, semi: usize) -> bool {
     COLLECT_THRESHOLD.1 * words >= COLLECT_THRESHOLD.0 * semi
 }
-/// A semispace is kept at least this many times the data live after a
-/// collection.
-const LIVE_RATIO: usize = 3;
+/// The heap is kept at least this many times the peak of what is live
+/// after a major collection, counting every space a major collection
+/// reclaims: the old space, the code area, and code a machine keeps outside
+/// the heap for it ([`Heap::note_outside_code`]). So a major collection
+/// comes after `LIVE_RATIO - 1` times that is allocated across them
+/// ([`Heap::major_due`]), and marking and copying cost at most half a word
+/// per word allocated.
+pub const LIVE_RATIO: usize = 3;
+/// The least a major collection waits for, in words allocated across those
+/// spaces: 32 MB, while little is live (a session's start, loading the
+/// front end's code and data, is some 2.4M words).
+const MIN_MAJOR_BUDGET: usize = 1 << 22;
 
 pub struct Heap {
     /// The two semispaces, `MAX_SEMI_WORDS` apart, and the regions' area
@@ -326,6 +339,14 @@ pub struct Heap {
     pub gc_nanos: u64,
     pub words_allocated: u64,
     top_after_gc: usize,
+    /// For the major collections' budget (`major_due`): `top` after the
+    /// last; the most found live by one, across its spaces; and the code a
+    /// machine keeps outside the heap for it, live as last known, and
+    /// installed since the last major collection, in words.
+    top_after_major: usize,
+    peak_live: usize,
+    outside_code: usize,
+    outside_taken: usize,
 
     /// The nursery (`young`, `docs/research/generational-gc.md`): whether
     /// there is one; its next free word; and how many words it takes
@@ -410,6 +431,10 @@ impl Heap {
             gc_nanos: 0,
             words_allocated: 0,
             top_after_gc: 0,
+            top_after_major: 0,
+            peak_live: 0,
+            outside_code: 0,
+            outside_taken: 0,
             generational: nursery_words > 0,
             nursery_top: NURSERY_BASE,
             nursery_words: nursery_words.max(1024),
@@ -521,6 +546,22 @@ impl Heap {
         let at = self.top;
         self.top += n;
         at
+    }
+
+    /// The next major collection's budget from here, `old` words live in
+    /// the old space: the most found live, across the spaces a major
+    /// collection reclaims, with this; and the old space room for the
+    /// budget and a nursery's promotion before its threshold, so that the
+    /// threshold, a backstop, does not come first.
+    fn budget_from(&mut self, old: usize) {
+        self.peak_live = self.peak_live.max(old + self.code.used + self.outside_code);
+        self.top_after_major = self.top;
+        let nursery = if self.generational { self.nursery_words } else { 0 };
+        let need = old + self.major_budget() + nursery;
+        let semi = need * COLLECT_THRESHOLD.1 / COLLECT_THRESHOLD.0 + 1;
+        if semi > self.semi {
+            self.grow(semi);
+        }
     }
 
     /// Grow both semispaces to hold at least `need` words: in place, since
@@ -1946,9 +1987,7 @@ impl Heap {
         if self.inhibited > 0 {
             return false;
         }
-        let full = past_threshold(self.top - self.active, self.semi)
-            || past_threshold(self.regions.reap_taken, self.semi)
-            || past_threshold(self.code.taken, self.semi);
+        let full = self.major_due();
         self.safepoints += 1;
         let policy = self.gc_every > 0 && self.safepoints.is_multiple_of(self.gc_every);
         let nursery_full = self.generational && self.nursery_top - NURSERY_BASE >= self.nursery_words;
@@ -1959,6 +1998,36 @@ impl Heap {
         }
         self.due_major = full || (policy && (!self.generational || self.policy_count.is_multiple_of(4)));
         full || policy || nursery_full
+    }
+
+    /// Words a major collection waits for, allocated across the spaces it
+    /// reclaims: `LIVE_RATIO - 1` times the most it has found live, or
+    /// [`MIN_MAJOR_BUDGET`].
+    pub fn major_budget(&self) -> usize {
+        ((LIVE_RATIO - 1) * self.peak_live).max(MIN_MAJOR_BUDGET)
+    }
+
+    /// Whether a major collection is due: the budget allocated since the
+    /// last, in the old space (promoted, or allocated there), the code area,
+    /// the reaps' chunks and code outside the heap; or, as a backstop, the
+    /// old space at `COLLECT_THRESHOLD` of its semispace (one made small).
+    pub fn major_due(&self) -> bool {
+        let taken = (self.top - self.top_after_major) + self.code.taken + self.regions.reap_taken + self.outside_taken;
+        taken >= self.major_budget() || past_threshold(self.top - self.active, self.semi)
+    }
+
+    /// `words` of code installed outside the heap by a machine for it
+    /// (`fixpt-native`'s cellular machine's code space), which its major
+    /// collections let go, by its weak references: allocation the budget
+    /// counts, and live until the machine says otherwise.
+    pub fn note_outside_code(&mut self, words: usize) {
+        self.outside_taken += words;
+        self.outside_code += words;
+    }
+
+    /// The machine's code for this heap, live after it was collected.
+    pub fn set_outside_code(&mut self, words: usize) {
+        self.outside_code = words;
     }
 
     /// Which heap this is, among those this process has made.
@@ -2212,16 +2281,14 @@ impl Heap {
         self.nursery_top = NURSERY_BASE;
         self.clear_cards(to, to + free);
 
-        // Keep headroom in proportion to what is live: a semispace at least
-        // three times it, so that the next collection comes after at least
-        // 1.25 times the live data is allocated, and copying costs less than
-        // a word per word allocated. Growing only when the live data was
-        // three quarters of the space collected again after a sliver of it,
-        // copying everything each time.
-        if free * LIVE_RATIO > self.semi {
-            self.grow(free * LIVE_RATIO);
-        }
+        // The next major collection after `major_budget` is allocated, in
+        // proportion to the most found live across the spaces it reclaims
+        // (the code area swept above; code outside the heap as last known):
+        // the old space room for that and a nursery's promotion before its
+        // threshold, so that the threshold does not come first.
+        self.outside_taken = 0;
         self.top_after_gc = self.top;
+        self.budget_from(free);
         let nanos = started.elapsed().as_nanos() as u64;
         self.gc_nanos += nanos;
         self.max_major_nanos = self.max_major_nanos.max(nanos);
@@ -2498,6 +2565,8 @@ impl Heap {
         heap.mem.words_mut()[..words.len()].copy_from_slice(words);
         map_refs(&mut heap.mem.words_mut()[..words.len()], relocate);
         heap.top = words.len();
+        // What the image holds counts as live, not as allocated.
+        heap.budget_from(words.len());
         heap.cross_all(0, words.len());
         heap.globals = globals.into_iter().map(relocate).collect();
         heap.symbols = symbols.into_iter().map(relocate).collect();

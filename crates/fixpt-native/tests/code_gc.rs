@@ -45,20 +45,20 @@ fn generated_code_that_is_dropped_is_reclaimed() {
 
 /// Code placed from elsewhere (`install`, as the compiler written in FX-26
 /// places what it assembles), then words run as they are, compiling
-/// nothing: once the code is due to be collected, the first run collects
-/// the heap and the code, and the runs after it neither. It was the heap
-/// alone, at every run, the code staying due: a major collection per run,
-/// which made the bootstrap test take six minutes (TODO §31).
+/// nothing: past the code collection's threshold (8 MB), but not the heap's
+/// budget for a major collection, no run collects the heap, nor the code,
+/// which waits for the heap's next major collection. It was the heap at
+/// every run once (TODO §31), then the heap at the first: a major
+/// collection of the whole heap for the code's sake.
 #[test]
-fn running_placed_code_does_not_collect_at_every_run() {
+fn placed_code_waits_for_the_heaps_major_collection() {
     let mut rt = Runtime::new();
-    // More than the code collection's threshold (8 MB), placed.
     let mut placed = 0;
     while placed < 9 << 20 {
         let w = fresh_word(&mut rt, 0, 2000);
         placed += place(&mut rt, w);
     }
-    assert!(fixpt_native::cellular::with_machine(|m| m.code_collection_due()));
+    assert!(!rt.heap.major_due());
     let w = fresh_word(&mut rt, 7, 1);
     place(&mut rt, w);
     let at = rt.heap.push_root(w);
@@ -67,8 +67,31 @@ fn running_placed_code_does_not_collect_at_every_run() {
         let w = rt.heap.root_at(at);
         assert_eq!(fixpt_native::cellular::run_word_as_is(&mut rt, w, &[]), Ok(Value::fixnum(7)));
     }
-    assert!(rt.heap.gc_count - before <= 1, "{} major collections in 100 runs", rt.heap.gc_count - before);
-    assert!(!fixpt_native::cellular::with_machine(|m| m.code_collection_due()));
+    assert_eq!(rt.heap.gc_count, before, "a major collection for the code's sake");
+}
+
+/// Code placed past the heap's budget for a major collection, as it counts
+/// code installed outside it: the first run collects the heap and the
+/// code, and the runs after it neither.
+#[test]
+fn placed_code_past_the_heaps_budget_collects_once() {
+    let mut rt = Runtime::new();
+    let mut placed = 0;
+    while placed < 8 * rt.heap.major_budget() + (1 << 20) {
+        let w = fresh_word(&mut rt, 0, 2000);
+        placed += place(&mut rt, w);
+    }
+    assert!(rt.heap.major_due());
+    let w = fresh_word(&mut rt, 7, 1);
+    place(&mut rt, w);
+    let at = rt.heap.push_root(w);
+    let before = rt.heap.gc_count;
+    for _ in 0..100 {
+        let w = rt.heap.root_at(at);
+        assert_eq!(fixpt_native::cellular::run_word_as_is(&mut rt, w, &[]), Ok(Value::fixnum(7)));
+    }
+    assert_eq!(rt.heap.gc_count - before, 1, "major collections in 100 runs");
+    assert!(!fixpt_native::cellular::with_machine(|m| m.code_collection_due(&rt.heap)));
 }
 
 /// Place word `w`'s code, assembled apart, in the machine `run_word` uses,
