@@ -2000,3 +2000,20 @@ round.
   procedure's own global, written once.
 
 Stage 0 17.62G cycles to 16.70G, loading unchanged, output the same.
+
+## The heap in huge pages (2026-10-25)
+
+After the user moved the baseline to kayak `d5840ee` and asked to go on;
+`docs/performance.md`, "The heap in huge pages".
+
+- **The whole heap mapping asks**, semispaces, regions, nursery and code
+  area alike, not each part: one call where the mapping is made. The code
+  area's pages are replaced by a shared mapping when first used (its
+  execute view), which the advice does not reach, and needs none.
+- **Not the card table or crossing map**: sparse, so a huge page would
+  commit 2 MiB for each byte written apart.
+- **Peak memory up some 20 MB** (4%) for 5.6% fewer cycles: accepted
+  without asking, as a size the heap's growth already allows; tell me if
+  memory matters more.
+- The measurement scripts now report kernel cycles beside user cycles:
+  this cost had been invisible in `cycles:u` alone.

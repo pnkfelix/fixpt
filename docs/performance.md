@@ -2941,3 +2941,30 @@ hashtable0` asks it in every loop. It never collects, so register code
 calls it with `prim1` now (both register compilers make a never-collecting
 primitive of one operand so), and natively it is the trailer's distance,
 in line: `hashtable0` 1.08 → 0.71 s.
+
+## The heap in huge pages (2026-10-25)
+
+Loading kayak's compiler (`tests/kfx/loaded-select.kfx`, kayak `d5840ee`)
+took 12.37G cycles in user mode and 1.40G more in the kernel, a tenth of
+the whole: 118,000 page faults, of 4 KiB each, at some 12,000 cycles a
+fault. Measured by `cycles:u` alone, as before, they were not seen. By
+`perf record -e page-faults` with frame pointers, 43% were the
+collections writing pages of the old semispace for the first time (minor
+34%, major 9%), each promoted or copied word on a page never written; the
+rest the front end's image read and copied in (16%), the cellular
+machine's code space (14%), and malloc.
+
+The heap's memory now asks for transparent huge pages
+(`Words::prefer_huge_pages`, `madvise(MADV_HUGEPAGE)`; Linux, where they
+are on for those that ask, as here): a page first written faults once for
+2 MiB. Loading: faults 118K to 58K, kernel cycles 1.40G to 0.86G, user
+cycles 12.37G to 12.15G (fewer TLB misses); peak memory 371 MB to 391 MB.
+Stage 0 (`kfx/kfx.unit`): user and kernel cycles 21.2G to 20.0G, peak
+memory 506 MB to 525 MB, output the same. The card table and crossing map
+keep small pages: they are sparse, and a huge page commits 2 MiB for one
+byte written.
+
+Left: the image of the kept front end read into a buffer and then copied
+into the heap (`image::load`), which a mapping of the file could do with
+neither; and the cellular machine's code space, collected by copying into
+pages first written then.

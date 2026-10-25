@@ -3246,3 +3246,13 @@ alike to 0.1%. Take the runs after it.
   leaf: `string=?`'s slow path calls out); a frame map word stored before
   each `string=?`, which only the slow path reads; `string=?`'s loop a
   character at a time.
+- **Measured now against kayak `d5840ee`** (C176, kayak's index of its
+  checker's bindings, after the Fixpt team's proposal; the user's word,
+  2026-10-25): stage 0 24.65G cycles at its parent to 19.4G, L2 misses
+  0.62G to 0.12G; `find-bind` gone from the profile. Loading is 12.4G of
+  it, 64%. And the kernel's share, which `cycles:u` had not shown: 1.4G
+  in loading, page faults.
+- ~~**The heap in huge pages**~~ (2026-10-25; `docs/performance.md`, "The
+  heap in huge pages"): stage 0 21.2G cycles (user and kernel) to 20.0G.
+  **Left**: the kept front end's image read and copied (`image::load`,
+  16% of the faults left); the cellular code space's copying collection.
