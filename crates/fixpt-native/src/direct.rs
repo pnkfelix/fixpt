@@ -429,6 +429,72 @@ enum Callout {
 }
 
 impl Callout {
+    /// As a number, for a cache to keep (`TODO.md` §126): its variant in
+    /// the low byte, a primitive's number or the flags above it, a count
+    /// above them.
+    fn encode(self) -> u64 {
+        let (v, a, n): (u64, u64, u64) = match self {
+            Callout::Cons => (0, 0, 0),
+            Callout::Bloblet => (1, 0, 0),
+            Callout::Prim { p, n } => (2, p as u64, n as u64),
+            Callout::Closure { n } => (3, 0, n as u64),
+            Callout::ClosureAny => (4, 0, 0),
+            Callout::RegionClosure { n } => (5, 0, n as u64),
+            Callout::FieldRef => (6, 0, 0),
+            Callout::Foreign => (7, 0, 0),
+            Callout::Abort => (8, 0, 0),
+            Callout::Capture { whole, once } => (9, whole as u64 | (once as u64) << 1, 0),
+            Callout::Reinstate => (10, 0, 0),
+            Callout::FirstMark => (11, 0, 0),
+            Callout::CurrentMarks => (12, 0, 0),
+            Callout::MarksOf => (13, 0, 0),
+            Callout::Rest => (14, 0, 0),
+            Callout::Pure { p, n } => (15, p as u64, n as u64),
+            Callout::Box { signed } => (16, signed as u64, 0),
+            Callout::Unbox => (17, 0, 0),
+            Callout::BoxF64 => (18, 0, 0),
+            Callout::Underflow => (19, 0, 0),
+            Callout::Overflow => (20, 0, 0),
+            Callout::Poll => (21, 0, 0),
+            Callout::PollDone => (22, 0, 0),
+            Callout::Failed => (23, 0, 0),
+        };
+        v | a << 8 | n << 32
+    }
+
+    /// What [`encode`](Callout::encode) made of one, if it made `x`.
+    fn decode(x: u64) -> Option<Callout> {
+        let (a, n) = (((x >> 8) & 0xFF_FFFF) as usize, (x >> 32) as usize);
+        let prim = |p: usize| (p < fixpt_runtime::PRIMITIVES.len()).then_some(p);
+        Some(match x & 0xFF {
+            0 => Callout::Cons,
+            1 => Callout::Bloblet,
+            2 => Callout::Prim { p: prim(a)?, n },
+            3 => Callout::Closure { n },
+            4 => Callout::ClosureAny,
+            5 => Callout::RegionClosure { n },
+            6 => Callout::FieldRef,
+            7 => Callout::Foreign,
+            8 => Callout::Abort,
+            9 => Callout::Capture { whole: a & 1 != 0, once: a & 2 != 0 },
+            10 => Callout::Reinstate,
+            11 => Callout::FirstMark,
+            12 => Callout::CurrentMarks,
+            13 => Callout::MarksOf,
+            14 => Callout::Rest,
+            15 => Callout::Pure { p: prim(a)?, n },
+            16 => Callout::Box { signed: a != 0 },
+            17 => Callout::Unbox,
+            18 => Callout::BoxF64,
+            19 => Callout::Underflow,
+            20 => Callout::Overflow,
+            21 => Callout::Poll,
+            22 => Callout::PollDone,
+            23 => Callout::Failed,
+            _ => return None,
+        })
+    }
+
     fn arity(self) -> usize {
         match self {
             Callout::Cons | Callout::Bloblet | Callout::FieldRef | Callout::Abort | Callout::Reinstate | Callout::FirstMark | Callout::MarksOf => 2,
@@ -572,22 +638,65 @@ pub fn adapt(rt: &mut fixpt_runtime::Runtime, f: Value, arity: usize, native: bo
         let free: Vec<Value> = (CLOSURE_FREE0..=fields).map(|k| heap.bloblet_slot(f, k)).collect();
         return Ok(native_closure(heap, code, &free));
     }
-    // The code, made once and shared (`Heap::adapter_code`), so that an
-    // adapter is known by it (`Heap::adapted`).
-    let blob = match heap.adapter_code() {
-        Some(b) => b,
-        None => {
-            let bytes = if X86 { x64::adapter() } else { crate::arm64::bytes(&adapter_code()) };
-            let blob = heap.make_code_bloblet(const { fixpt_heap::layout::kind("bloblet") }, 1, bytes.len(), false);
-            heap.set_bloblet_slot(blob, 1, blob);
-            heap.set_bloblet_bytes(blob, 0, &bytes).map_err(|e| format!("{e:?}"))?;
-            heap.flush_code(blob);
-            crate::symbols::note(heap.code_exec_address(blob), bytes.len(), "native convention: an adapter");
-            heap.set_adapter_code(blob);
-            blob
-        }
-    };
+    let blob = native_adapter_code(heap)?;
     Ok(native_closure(heap, blob, &[f]))
+}
+
+/// The native adapter's code (`adapt`), made once and shared
+/// (`Heap::adapter_code`), so that an adapter is known by it
+/// (`Heap::adapted`).
+pub fn native_adapter_code(heap: &mut Heap) -> Result<Value, String> {
+    if let Some(b) = heap.adapter_code() {
+        return Ok(b);
+    }
+    let bytes = if X86 { x64::adapter() } else { crate::arm64::bytes(&adapter_code()) };
+    let blob = heap.make_code_bloblet(const { fixpt_heap::layout::kind("bloblet") }, 1, bytes.len(), false);
+    heap.set_bloblet_slot(blob, 1, blob);
+    heap.set_bloblet_bytes(blob, 0, &bytes).map_err(|e| format!("{e:?}"))?;
+    heap.flush_code(blob);
+    crate::symbols::note(heap.code_exec_address(blob), bytes.len(), "native convention: an adapter");
+    heap.set_adapter_code(blob);
+    Ok(blob)
+}
+
+/// The call-outs this thread's machine numbers past its own, encoded: for
+/// a cache of the native code that calls them by those numbers (`TODO.md`
+/// §126), with [`restore_callouts`].
+pub fn callouts_past_own() -> Result<Vec<u64>, String> {
+    with_machine(|m| m.callouts[OWN_CALLOUTS..].iter().map(|c| c.encode()).collect())
+}
+
+/// This thread's machine given call-outs `codes` past its own, in order, so
+/// that code a cache kept calls them by the numbers it was compiled with:
+/// only where it has none past its own yet (nothing compiled on it); else,
+/// or if one is not a call-out, false, and the machine as it was.
+pub fn restore_callouts(codes: &[u64]) -> Result<bool, String> {
+    let Some(cs) = codes.iter().map(|&x| Callout::decode(x)).collect::<Option<Vec<_>>>() else { return Ok(false) };
+    with_machine(|m| {
+        if m.callouts.len() != OWN_CALLOUTS {
+            return false;
+        }
+        m.callouts.extend(cs);
+        true
+    })
+}
+
+/// Code bloblets a cache gave back, named as compiled code is for
+/// `FIXPT_SYMBOLS` and perf (`symbols`): by the cellular word each compiled
+/// (field 2, `CODE_SOURCE`), where it has one.
+pub fn note_cached_code(heap: &Heap, codes: &[Value]) {
+    if !crate::symbols::enabled() {
+        return;
+    }
+    for &c in codes {
+        let source = heap.bloblet_slot(c, CODE_SOURCE);
+        let name = if source.is_bloblet() && heap.is_cellular_word(source) {
+            heap.symbol_name(heap.bloblet_slot(source, fixpt_heap::layout::cellular::WORD_NAME))
+        } else {
+            "?".into()
+        };
+        crate::symbols::note(heap.code_exec_address(c), heap.bloblet_head(c).bytes, &format!("native {name}"));
+    }
 }
 
 thread_local! {
@@ -857,6 +966,10 @@ struct Proc {
     params: Option<u8>,
 }
 
+/// How many call-outs a machine numbers for itself (`DirectMachine::new`),
+/// before any code's.
+const OWN_CALLOUTS: usize = 10;
+
 /// Compiles procedures and runs them.
 pub struct DirectMachine {
     space: CodeSpace,
@@ -930,7 +1043,7 @@ impl DirectMachine {
         // continuation given a value (`REINSTATE`); 8: a pair made, for
         // code a program made (`common_cons`, `CONS`); 9: a bloblet made,
         // for it too (`common_bloblet`, `BLOBLET`).
-        let callouts = vec![
+        let callouts: Vec<Callout> = vec![
             Callout::Foreign,
             Callout::ClosureAny,
             Callout::Underflow,

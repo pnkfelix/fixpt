@@ -1443,12 +1443,23 @@ impl Heap {
     /// they are, frozen flags too; an interned symbol is this heap's symbol
     /// of the same name. For carrying compiled code between heaps (a cache
     /// of it in an image of its own). Nothing collects meanwhile: allocation
-    /// never does. Code in a code area is not carried; its reference, if
-    /// any, would be, and must be none.
+    /// never does. A code bloblet of `from`'s is copied as an ordinary one:
+    /// [`copy_graph_with`](Heap::copy_graph_with) makes code of it again.
     pub fn copy_graph_from(&mut self, from: &Heap, root: Value) -> Value {
+        self.copy_graph_with(from, root, |_| false, &HashMap::new()).0
+    }
+
+    /// The same, but each bloblet of `from`'s that `as_code` says made a
+    /// code bloblet here, its code flushed to run; and each object of
+    /// `from`'s that `given` maps (by its raw bits) this heap's object
+    /// instead, not copied, nor what it reaches. With every object copied
+    /// or given, by its raw bits in `from`. For native code kept in a cache
+    /// (`TODO.md` §126).
+    pub fn copy_graph_with(&mut self, from: &Heap, root: Value, as_code: impl Fn(Value) -> bool, given: &HashMap<u64, Value>) -> (Value, HashMap<u64, Value>) {
         use std::collections::hash_map::Entry;
         // First every object is made, empty; then the fields are filled in.
-        let mut made: HashMap<u64, Value> = HashMap::new();
+        let mut made: HashMap<u64, Value> = given.clone();
+        let mut code: Vec<Value> = Vec::new();
         let mut order: Vec<Value> = Vec::new();
         let mut todo = vec![root];
         while let Some(v) = todo.pop() {
@@ -1474,7 +1485,13 @@ impl Heap {
             }
             let head = from.bloblet_head(v);
             let trailer = from.bloblet_has_trailer(v);
-            let copy = self.make_bloblet(head.kind, head.fields - trailer as usize, head.bytes, trailer);
+            let copy = if as_code(v) {
+                let c = self.make_code_bloblet(head.kind, head.fields - trailer as usize, head.bytes, trailer);
+                code.push(c);
+                c
+            } else {
+                self.make_bloblet(head.kind, head.fields - trailer as usize, head.bytes, trailer)
+            };
             slot.insert(copy);
             order.push(v);
             for k in (1 + trailer as usize)..=head.fields {
@@ -1510,7 +1527,10 @@ impl Heap {
                 self.freeze_bloblet(copy, head.fields_frozen, head.suffix_frozen);
             }
         }
-        map(root)
+        for c in code {
+            self.flush_code(c);
+        }
+        (map(root), made)
     }
 
     /// A copy of what `root` reaches in this heap, but for what `share`

@@ -572,7 +572,11 @@ The rest of the detail:
 - **The front end** (the reader, checker and compilers written in FX-26)
   runs as register code, compiled by the Rust compiler and made arm64 by
   the Rust register-code assembler, whatever the machine. It
-  is kept in `~/Library/Caches/fixpt/` once made. So on `fx-cells-fxjit-cellcc`
+  is kept in `~/Library/Caches/fixpt/` once made. On the `rsjit`
+  `nativecc` machines it runs as native code, compiled by `direct.rs` as
+  its closures are made, and the cache keeps it as its first run left it,
+  native code and all, so later runs neither check, compile nor run it
+  again (`TODO.md` §126). So on `fx-cells-fxjit-cellcc`
   the compiler that makes the machine code is written in FX-26, but it was
   itself compiled by Rust. (`FIXPT_FRONT_END_LOWERED=1` runs the front end
   lowered instead, on the Scheme VM.)

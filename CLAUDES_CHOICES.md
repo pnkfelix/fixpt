@@ -1798,3 +1798,33 @@ native compiler arm64 has (no FX-26 one, as `native-direct-x64*.fx` is).
   59.91G instructions to 59.83G, 12.31G cycles to 12.13G (about 1.4%);
   little to remove, as arm64's register code keeps more in its eight
   registers and stores and reloads fewer slots.
+
+## The front end's native code kept in the cache (2026-10-24)
+
+The user, of `TODO.md` §126's next step, keeping the front end's native
+code between runs: "Let's do it". On the arm64 Mac the native front end
+cost a 6-line program 0.3 s of its 0.55 s, compiled again in every run.
+- **What is kept: the front end after its first run**, not its word with
+  its code beside it: what `%run-front-end` gave (its entry points, native
+  closures) and all they reach, saved just after it. Compiling a native
+  closure compiles all it calls and makes closures of, so by then the
+  front end is native code; read back, it is neither checked, compiled
+  nor run (faster than the cellular cache, which runs it every time).
+- **Code as ordinary bloblets in the image**, named in a list, made code
+  bloblets again as they are copied in (`Heap::copy_graph_with`): the
+  image format and the code area are as they were. The code needs no
+  relocating: it reads its fields PC-relatively, and the code area's
+  place and the heap's from the state.
+- **The native adapter's code shared, not copied**: `Heap::adapted` knows
+  an adapter by it.
+- **The call-outs' table kept with the code**, encoded, and given back
+  to a machine that has numbered none of its own (`restore_callouts`);
+  where it has, the front end is compiled and run as ever. Not the code's
+  numbers patched on reading: the machine is fresh when the front end is
+  read, in every session the CLI makes.
+- **Hooks, not a dependency**: `fixpt-fx26` reaches `fixpt-native` only
+  in its tests; the CLI gives the session `NativeKeeping`, as it gives it
+  the native runner.
+- **x86_64 not run here.** Its code reads its fields RIP-relatively and
+  the code area's place from the state too, so it should read back alike;
+  `FIXPT_NO_CACHE=1` turns the cache off.

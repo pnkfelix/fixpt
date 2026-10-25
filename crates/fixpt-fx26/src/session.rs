@@ -43,6 +43,10 @@ pub struct Fx26Session {
     /// (`front_end_as_register_code`): checked so, its closures made native
     /// as they are made, by the runtime's `adapt`, which must compile them.
     pub front_end_native: bool,
+    /// How that native code is kept in the cache, after the front end's
+    /// first run, and read back (`TODO.md` §126); without it, the front end
+    /// is compiled and run natively in every session, its word kept.
+    pub native_keeping: Option<NativeKeeping>,
     /// Whether the program's convention is native (a `nativecc` machine;
     /// set by [`set_native_convention`](Fx26Session::set_native_convention)).
     native_convention: bool,
@@ -282,7 +286,8 @@ fn lowered_failure(m: String) -> String {
     if m == "expected a pair" { "car or cdr of a non-pair".into() } else { m }
 }
 
-/// Where the front end's register code is cached, if anywhere, and the key
+/// Where the front end's register code is cached, if anywhere (native, the
+/// front end after its first run: `save_native_front_end`), and the key
 /// its file must start with: a heap image in the user's cache directory, one
 /// file for each executable, named by a hash of its path, and the key a hash
 /// of the front end's text and of the executable's size and time, so that a
@@ -318,8 +323,81 @@ fn save_front_end(heap: &fixpt_heap::Heap, w: fixpt_heap::Value, path: &std::pat
     let mut alone = fixpt_heap::Heap::new();
     let copy = alone.copy_graph_from(heap, w);
     alone.push_root(copy);
+    save_image(&alone, path, key);
+}
+
+/// The front end in the native convention after its first run (`TODO.md`
+/// §126): what it gave (`pieces`, its entry points, native closures) and
+/// all they reach, copied out of `heap` and written to `path` as an image
+/// after `key`, as [`save_front_end`] writes its word. Its native code is
+/// kept too, as ordinary bloblets, named in a list: the image's root is
+/// `(pieces codes adapter . callouts)`, `adapter` the heap's native
+/// adapter's code if they reach it (shared, not copied, when read back),
+/// `callouts` the machine's call-outs that code calls by number, encoded
+/// (`NativeKeeping::callouts`).
+fn save_native_front_end(k: &NativeKeeping, heap: &fixpt_heap::Heap, pieces: fixpt_heap::Value, path: &std::path::Path, key: u64) {
+    use fixpt_heap::Value;
+    let Ok(callouts) = (k.callouts)() else { return };
+    let mut alone = fixpt_heap::Heap::new();
+    let (copy, made) = alone.copy_graph_with(heap, pieces, |_| false, &Default::default());
+    let adapter = heap.adapter_code().filter(|a| made.contains_key(&a.raw()));
+    let mut codes = Value::NULL;
+    for (&k, &c) in &made {
+        let v = Value::from_raw(k);
+        if heap.is_code_bloblet(v) && Some(v) != adapter {
+            codes = alone.cons(c, codes);
+        }
+    }
+    let mut outs = Value::NULL;
+    for &c in callouts.iter().rev() {
+        outs = alone.cons(Value::fixnum(c as i64), outs);
+    }
+    let adapter = adapter.map_or(Value::FALSE, |a| made[&a.raw()]);
+    let rest = alone.cons(adapter, outs);
+    let rest = alone.cons(codes, rest);
+    let root = alone.cons(copy, rest);
+    alone.push_root(root);
+    save_image(&alone, path, key);
+}
+
+/// What [`save_native_front_end`] kept, copied into `heap`, its code made
+/// code again and the machine given its call-outs: the pieces; none if
+/// the machine has numbered call-outs of its own already (or the image is
+/// not one), when the front end is compiled and run as ever.
+fn load_native_front_end(k: &NativeKeeping, heap: &mut fixpt_heap::Heap, from: &fixpt_heap::Heap) -> Option<fixpt_heap::Value> {
+    use fixpt_heap::Value;
+    let root = *from.roots_slice().first()?;
+    let list = |mut l: Value| {
+        let mut out = Vec::new();
+        while l.is_pair() {
+            out.push(from.car(l));
+            l = from.cdr(l);
+        }
+        out
+    };
+    if !root.is_pair() || !from.cdr(root).is_pair() || !from.cdr(from.cdr(root)).is_pair() {
+        return None;
+    }
+    let (pieces, codes, adapter, outs) = (from.car(root), from.car(from.cdr(root)), from.car(from.cdr(from.cdr(root))), from.cdr(from.cdr(from.cdr(root))));
+    let callouts: Vec<u64> = list(outs).iter().map(|c| c.as_fixnum() as u64).collect();
+    if !(k.restore_callouts)(&callouts).ok()? {
+        return None;
+    }
+    let mut given = std::collections::HashMap::new();
+    if adapter != Value::FALSE {
+        given.insert(adapter.raw(), (k.adapter_code)(heap).ok()?);
+    }
+    let code: std::collections::HashSet<u64> = list(codes).iter().map(|c| c.raw()).collect();
+    let (copy, made) = heap.copy_graph_with(from, pieces, |v| code.contains(&v.raw()), &given);
+    let made_code: Vec<Value> = code.iter().filter_map(|k| made.get(k).copied()).collect();
+    (k.note_code)(heap, &made_code);
+    Some(copy)
+}
+
+/// `heap`, all of it, written to `path` as an image after `key`.
+fn save_image(alone: &fixpt_heap::Heap, path: &std::path::Path, key: u64) {
     let mut bytes = key.to_le_bytes().to_vec();
-    bytes.extend(fixpt_heap::image::dump(&alone));
+    bytes.extend(fixpt_heap::image::dump(alone));
     let Some(dir) = path.parent() else { return };
     if std::fs::create_dir_all(dir).is_err() {
         return;
@@ -334,6 +412,17 @@ fn save_front_end(heap: &fixpt_heap::Heap, w: fixpt_heap::Value, path: &std::pat
         if age.is_some_and(|a| a > month) && e.file_name().to_string_lossy().starts_with("front-end-") {
             let _ = std::fs::remove_file(e.path());
         }
+    }
+}
+
+/// Each entry point in the product `pieces` (field `i + 1` its `i`th, in
+/// slot `i + 2`) in a global of its own, `{native}{name}`.
+fn set_entries(heap: &mut fixpt_heap::Heap, pieces: fixpt_heap::Value, entries: &[&str], native: &str) {
+    for (i, name) in entries.iter().enumerate() {
+        let piece = heap.bloblet_slot(pieces, 2 + i);
+        let sym = heap.intern(&format!("{native}{name}"));
+        let slot = heap.symbol_global_slot(sym);
+        heap.set_global(slot, piece);
     }
 }
 
@@ -400,6 +489,20 @@ pub type NativeRunner = fn(&mut fixpt_runtime::Runtime, fixpt_heap::Value, u64) 
 /// the Scheme session, and the closure rooted.
 pub type NativeFx = fn(&mut fixpt_scheme::Session, fixpt_scheme::Handle) -> Result<fixpt_scheme::Handle, String>;
 
+/// How the front end's native code is kept in the cache and read back
+/// (`TODO.md` §126). The CLI's are `fixpt_native::direct`'s.
+#[derive(Clone, Copy)]
+pub struct NativeKeeping {
+    /// The call-outs the machine numbers past its own, encoded.
+    pub callouts: fn() -> Result<Vec<u64>, String>,
+    /// The machine given them, if it has none of its own yet.
+    pub restore_callouts: fn(&[u64]) -> Result<bool, String>,
+    /// The heap's native adapter's code, shared.
+    pub adapter_code: fn(&mut fixpt_heap::Heap) -> Result<fixpt_heap::Value, String>,
+    /// Code read back, named for `FIXPT_SYMBOLS` and perf.
+    pub note_code: fn(&fixpt_heap::Heap, &[fixpt_heap::Value]),
+}
+
 /// A cellular closure compiled in the native convention: a native closure
 /// of the same code over the same values, or why not.
 pub type NativeCompiler = fn(&mut fixpt_heap::Heap, fixpt_heap::Value) -> Result<fixpt_heap::Value, String>;
@@ -453,6 +556,7 @@ impl Fx26Session {
             register_code: false,
             front_end_compiled: false,
             front_end_native: false,
+            native_keeping: None,
             native_convention: false,
             native_runner: None,
             native_compiler: None,
@@ -1182,10 +1286,30 @@ impl Fx26Session {
         // made native code, kept apart from the cellular one.
         let as_native = keep && self.front_end_native;
         let cache = if keep { front_end_cache(&text, as_native) } else { None };
-        let cached = cache.as_ref().and_then(|(p, key)| {
+        let image = cache.as_ref().and_then(|(p, key)| {
             let b = std::fs::read(p).ok()?;
             (b.get(..8)? == key.to_le_bytes()).then(|| fixpt_heap::image::load(&b[8..]).ok())?
         });
+        // Native, the cache keeps the front end as its first run left it,
+        // native code and all (`TODO.md` §126): neither checked, compiled
+        // nor run again, where it can be read back.
+        let keeping = self.native_keeping.filter(|_| as_native);
+        let (cached, kept) = if keeping.is_some() { (None, image) } else { (image, None) };
+        if let (Some(from), Some(k)) = (&kept, &keeping) {
+            let mut loaded = false;
+            self.scheme.scope(|sc| {
+                sc.make(|m| {
+                    if let Some(p) = load_native_front_end(k, m.heap(), from) {
+                        set_entries(m.heap(), p, entries, native);
+                        loaded = true;
+                    }
+                    fixpt_heap::Value::NULL
+                })
+            });
+            if loaded {
+                return self.define_entries(entries, native, prefix);
+            }
+        }
         let mut checked = None;
         if cached.is_none() {
             let mut c = if as_native { Checker::with_convention(crate::ast::Conv::Native) } else { Checker::new() };
@@ -1210,7 +1334,7 @@ impl Fx26Session {
                     let mut comp = crate::cellular::Compiler::new(m.heap(), c, &text);
                     comp.registers = true;
                     compiled = comp.program(tops);
-                    if let (Ok(w), Some((path, key))) = (&compiled, &cache) {
+                    if let (Ok(w), Some((path, key)), None) = (&compiled, &cache, keeping) {
                         save_front_end(m.heap(), *w, path, *key);
                     }
                 }
@@ -1219,16 +1343,11 @@ impl Fx26Session {
             compiled.map_err(|e| format!("{what} as register code: {e}"))?;
             let none = sc.make(|_| fixpt_heap::Value::NULL);
             let pieces = sc.call_global("%run-front-end", &[word, none]).map_err(|e| e.to_string())?;
-            // Each entry point in a global of its own, and the name the Rust
-            // side calls made to call it.
             sc.make(|m| {
                 let p = m.get(pieces);
-                for (i, name) in entries.iter().enumerate() {
-                    // Field `i + 1` of the product, its slot `i + 2`.
-                    let piece = m.heap().bloblet_slot(p, 2 + i);
-                    let sym = m.heap().intern(&format!("{native}{name}"));
-                    let slot = m.heap().symbol_global_slot(sym);
-                    m.heap().set_global(slot, piece);
+                set_entries(m.heap(), p, entries, native);
+                if let (Some((path, key)), Some(k)) = (&cache, &keeping) {
+                    save_native_front_end(k, m.heap(), p, path, *key);
                 }
                 fixpt_heap::Value::NULL
             });
@@ -1236,6 +1355,12 @@ impl Fx26Session {
         });
         self.scheme.engine.set_step_limit(limit);
         pieces?;
+        self.define_entries(entries, native, prefix)
+    }
+
+    /// The names the Rust side calls, `{prefix}{name}`, made to call each
+    /// entry point in its global (`set_entries`).
+    fn define_entries(&mut self, entries: &[&str], native: &str, prefix: &str) -> Result<(), String> {
         // In one text: each text run analyses all the session's Scheme
         // again, some 50 ms, so one for each would cost a second and a half.
         let defines: String =
