@@ -1853,7 +1853,7 @@ impl Compiling<'_> {
         // What each `global` is for: a call just after it (a tail call's
         // frame popped between), or its value.
         let called = |j: usize| {
-            let at = starts.iter().position(|&s| s == j).expect("an instruction");
+            let at = starts.binary_search(&j).expect("an instruction");
             starts[at + 1..].iter().copied().find(|&c| op_at(c) != "pop").filter(|&c| matches!(op_at(c), "invoke" | "tailinvoke"))
         };
         // The frame: the link and return address, its stack map (a header,
@@ -1881,7 +1881,7 @@ impl Compiling<'_> {
                 "global" => match self.global_value(cells[j + 1]).map_err(|e| format!("`{name}` calls {e}"))? {
                     Field::Code(q) => Some(q),
                     Field::Const(v) => {
-                        let si = starts.iter().position(|&s| s == c).expect("an instruction");
+                        let si = starts.binary_search(&c).expect("an instruction");
                         callees[si] = self.native_params(v).unwrap_or(0);
                         None
                     }
@@ -1896,7 +1896,7 @@ impl Compiling<'_> {
                 _ => None,
             };
             if let Some(q) = q {
-                let si = starts.iter().position(|&s| s == c).expect("an instruction");
+                let si = starts.binary_search(&c).expect("an instruction");
                 callees[si] = self.params_of(q);
             }
         }
@@ -1934,7 +1934,6 @@ impl Compiling<'_> {
         // `store` write one), for the stack map a frame stores before each
         // call and call-out (`docs/research/generational-gc.md`).
         let live_out = {
-            let at_of: HashMap<usize, usize> = starts.iter().enumerate().map(|(si, &i)| (i, si)).collect();
             let ns = starts.len();
             let (mut uses, mut defs) = (vec![0u64; ns], vec![0u64; ns]);
             let mut succ: Vec<Vec<usize>> = vec![Vec::new(); ns];
@@ -1948,7 +1947,7 @@ impl Compiling<'_> {
                     "store" => defs[si] |= bit(1),
                     _ => {}
                 }
-                let to = || at_of[&((i as i64 + 1 + n as i64 + cells[i + n].as_fixnum()) as usize)];
+                let to = || starts.binary_search(&((i as i64 + 1 + n as i64 + cells[i + n].as_fixnum()) as usize)).expect("an instruction");
                 match op {
                     "return" | "tailinvoke" => {}
                     "branch" => succ[si].push(to()),
@@ -2027,7 +2026,8 @@ impl Compiling<'_> {
         // each instruction starts, and ends; the ways into an instruction
         // that must unbox some first, each a stub of its own.
         let (raw_refs, live) = reps::refs_and_live(&cells, &starts, &prim_name, &raw);
-        let si_at: HashMap<usize, usize> = starts.iter().enumerate().map(|(si, &i)| (i, si)).collect();
+        // Which instruction starts at a cell, if one does.
+        let si_at = |at: usize| starts.binary_search(&at).ok();
         // A procedure with `int` operations gets a fixnum version first, where
         // a value tested once stays known (`reps`, `Rep::Fix`), and whose
         // tests and overflows go over to the general version, at the same
@@ -2048,8 +2048,8 @@ impl Compiling<'_> {
         let mut bound: Option<(Value, Value)> = None;
         map_stored = None;
         let mut edge = |a: &mut Asm, from: usize, to: usize| -> Label {
-            let (unbox, check) = match si_at.get(&to) {
-                Some(&t) => (
+            let (unbox, check) = match si_at(to) {
+                Some(t) => (
                     reps::unboxes(&reps_out[from], &reps_in[t]),
                     if fast { reps::checks(&reps_out[from], &reps_in[t], &live[t]) } else { vec![] },
                 ),
@@ -3285,7 +3285,7 @@ impl Compiling<'_> {
                         if back_to[to] {
                             // What the loop's head reads, kept as it is
                             // here, raw or not; the frame's map for here.
-                            let t = si_at[&to];
+                            let t = si_at(to).expect("an instruction");
                             let rep = reps_in[si - 1];
                             let kept = |r: usize| live[t][r] && !matches!(rep[r], Rep::Undefined);
                             let raw_r = |r: usize| matches!(rep[r], Rep::F64 | Rep::Raw { .. });
