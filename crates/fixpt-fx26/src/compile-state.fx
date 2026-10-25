@@ -79,6 +79,19 @@
 ;; list; and, for the register compiler, the lambda being so compiled: its
 ;; name and word.
 (define c-defining (ref (listof symbol @k) @k) (new nil))
+;; For a driver that compiles a definition's value on its own, in a thunk
+;; (`compile-defining!`): the definition's name, in a list, until the lambda
+;; whose word is named for it (`c-word-name`) takes it, as `c-defining`.
+(define c-defining-named (ref (listof symbol @k) @k) (new nil))
+;; The definition whose lambda is compiled now, taken: `c-defining`'s, or
+;; for a lambda whose word is named `named` (in a list), `c-defining-named`'s.
+(define c-take-defining (->* ((listof string @k)) (listof symbol @k))
+  (lambda (named)
+    (let ((d (c-take c-defining (the (listof symbol @k) nil))) (n (get c-defining-named)))
+      (if (and (null? d) (not (null? n)) (not (null? named))
+               (string=? (car named) (symbol->string (car n))))
+          (begin (set c-defining-named (the (listof symbol @k) nil)) n)
+          d))))
 
 (define c-own-now (ref (listof (productof (1 symbol) (2 tword)) @k) @k) (new nil))
 

@@ -2011,3 +2011,26 @@ whole.
 Loading 9.82G cycles to 9.57G (minors 237 ms to 174 ms); stage 0 18.2G
 to 17.6G, output the same. The suite passes with `FIXPT_VERIFY_BARRIER=1`,
 whose check now covers the code area too.
+
+## A definition compiled on its own knows itself (2026-10-25)
+
+The user's "go for it", after a profile of stage 0's native code found
+kayak's `find-bind` making a full tail call through its global each time
+round.
+
+- **The fix in the driver's protocol, not in either register compiler**:
+  a new entry, `compile-defining!`, which `native_define` calls beside
+  `compile-name-word!`. The lambda whose word is named for the definition
+  takes it as `c-defining` (`c-take-defining`), and the thunk's program
+  counts the one write the driver makes after it runs (`c-defined-writes`,
+  into `c-form-writes`), so each guard expects what the global will hold.
+  The alternative, compiling such a definition whole through
+  `c-define-lambda`, would change who writes the global and when, which
+  the native convention's driver relies on.
+- **Matched by name**, the word's name against the definition's: the
+  thunk's own lambda (`define NAME`) is compiled first and must not take
+  it. `names_its_word` already decides when the lambda is so named.
+- Tested by the REPL's `,disassemble` (`native_reach.rs`): a guard of the
+  procedure's own global, written once.
+
+Stage 0 17.62G cycles to 16.70G, loading unchanged, output the same.

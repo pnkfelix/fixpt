@@ -3201,3 +3201,19 @@ alike to 0.1%. Take the runs after it.
   237 ms to 174 ms, its cycles 9.82G to 9.57G. **Left**: the regions,
   still scanned whole (none live when loading); machine code fills what
   it allocates there without marking cards.
+- ~~**Self tail calls lost one form at a time**~~ (the user's "go for
+  it", 2026-10-25, from a profile of stage 0's native code, 55% of it): a
+  definition `fixpt run` or the REPL compiles on its own, in a thunk
+  (`native_define`), had register code with no fast version, so its tail
+  calls of itself went through the global, a frame torn down and made
+  again each time round: `find-bind` alone was 16% of stage 0, some 40%
+  of it that call. The lambda named for the definition is now its own
+  (`compile-defining!`), whose global the driver writes once after, as a
+  definition compiled whole is: a loop behind `global-guard`. Stage 0
+  17.62G cycles to 16.70G (pinned, two runs each), loading unchanged
+  (9.6G), output the
+  same. **Left** in `find-bind`'s loop, its fast version: the list and
+  name stored to frame slots and read again each time round (not a
+  leaf: `string=?`'s slow path calls out); a frame map word stored before
+  each `string=?`, which only the slow path reads; `string=?`'s loop a
+  character at a time.

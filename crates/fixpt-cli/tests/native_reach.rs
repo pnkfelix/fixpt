@@ -92,3 +92,23 @@ fn a_wide_closure_is_native() {
     assert!(!out.contains("not in the native convention"), "{out}");
     assert!(has_native(&names, "far-sum/g/f@"), "no native closure:\n{names}");
 }
+
+/// A top-level procedure calling itself in tail position, defined one form
+/// at a time: in register code a loop, behind a guard that its global holds
+/// it still, not a call through the global each time round.
+#[test]
+fn a_definition_calling_itself_in_tail_position_loops() {
+    use std::io::Write as _;
+    let mut child = Command::new(FIXPT)
+        .args(["--fx26-machine", "fx-regs-rsjit-nativecc", "repl"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("fixpt starts");
+    let input = include_str!("programs/native-reach/self-loop.fx");
+    child.stdin.take().expect("piped").write_all(input.as_bytes()).expect("writes");
+    let out = String::from_utf8_lossy(&child.wait_with_output().expect("finishes").stdout).into_owned();
+    assert!(out.contains("#t"), "{out}");
+    assert!(out.contains("global-guard find written 1"), "no guard of its own global:\n{out}");
+}

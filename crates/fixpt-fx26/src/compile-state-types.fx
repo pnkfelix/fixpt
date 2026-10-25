@@ -25,6 +25,11 @@
 (define-type loc (select compile-types loc))
 (define-type compile-state-sig
   (moduleof (val c-defining (ref (listof symbol @k) @k))
+            (val c-defining-named (ref (listof symbol @k) @k))
+            (val c-take-defining
+                 (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))
+                       ((listof string @k))
+                       (listof symbol @k)))
             (val c-own-now (ref (listof (productof (1 symbol) (2 tword)) @k) @k))
             (val c-word-name (ref (listof string @k) @k))
             (val c-take-name

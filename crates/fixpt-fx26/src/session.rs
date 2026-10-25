@@ -1235,10 +1235,10 @@ impl Fx26Session {
 
     /// The front end's entry points the Rust side calls by name
     /// (`READER_PREFIX`), each rebound by [`Self::front_end_as_register_code`].
-    pub const FRONT_ENTRIES: [&'static str; 33] = [
+    pub const FRONT_ENTRIES: [&'static str; 34] = [
         "read-text-at", "check-program", "check-more", "checked-tops", "checked-extracts", "checked-effects", "check-conv-native!", "checked-withs!", "checked-reshapes!",
         "check-globals-effects!", "check-defer-reruns!", "check-hold-breaks!", "check-lines!", "parse-program", "loaded-files!", "run-checked", "run-checked-more", "compile-program", "compile-checked", "compile-registers!", "compile-conv-native!",
-        "compile-global-cell", "compile-new-global", "compile-name-word!", "compile-keep-global!", "compile-note-inline!", "compile-forget-globals!", "native-assemble",
+        "compile-global-cell", "compile-new-global", "compile-name-word!", "compile-defining!", "compile-keep-global!", "compile-note-inline!", "compile-forget-globals!", "native-assemble",
         "check-built-in!",
         "native-assemble-x64", "native-assemble-x64-regs", "native-adapter-x64", "native-compile-x64-proc",
     ];
@@ -1516,7 +1516,10 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
         // is (`c-define-lambda`), not for where it is in the thunk: so that
         // a profile, a disassembly or a fault says which procedure. The
         // thunk's, compiled first, `define NAME`. The names let go after,
-        // if nothing took them.
+        // if nothing took them. The lambda so named is the definition's
+        // (`compile-defining!`), whose global is written once after: so its
+        // calls of itself in tail position loop, as they do in a definition
+        // compiled whole.
         let name_word = |s: &mut Self, named: bool| {
             let ns = s.scheme.make(|m| {
                 let h = m.heap();
@@ -1528,7 +1531,17 @@ fn names_its_word(c: &Checker, mut x: crate::ast::ExpId) -> bool {
                     fixpt_heap::Value::NULL
                 }
             });
-            s.scheme.call_global(&format!("{READER_PREFIX}compile-name-word!"), &[ns]).map(|_| ())
+            s.scheme.call_global(&format!("{READER_PREFIX}compile-name-word!"), &[ns])?;
+            let defining = s.scheme.make(|m| {
+                let h = m.heap();
+                if named {
+                    let n = h.intern(name);
+                    h.cons(n, fixpt_heap::Value::NULL)
+                } else {
+                    fixpt_heap::Value::NULL
+                }
+            });
+            s.scheme.call_global(&format!("{READER_PREFIX}compile-defining!"), &[defining]).map(|_| ())
         };
         if lambda {
             name_word(self, true).map_err(fail)?;
