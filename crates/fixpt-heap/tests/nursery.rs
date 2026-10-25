@@ -123,3 +123,29 @@ fn the_peak_and_the_longest_pauses_are_kept() {
     }
     assert_eq!(sum(&h, roots[0]), 500500);
 }
+
+/// A young reference stored into the code area is found by its card, as
+/// one in the old space is: in a field on a later card than the bloblet's
+/// header, and in a bloblet allocated into a hole the collector left.
+#[test]
+fn young_references_in_code_bloblets_are_found_by_their_cards() {
+    let mut h = heap();
+    let raw = fixpt_heap::layout::kind("bloblet");
+    let long = h.make_code_bloblet(raw, 100, 8, false);
+    let _gap = h.make_code_bloblet(raw, 2, 64, false);
+    let end = h.make_code_bloblet(raw, 2, 8, false);
+    let mut root = [long, end];
+    h.collect(&mut [&mut root]);
+    let hole = h.make_code_bloblet(raw, 2, 8, false);
+    let fields = [(long, 1), (end, 1), (hole, 2)];
+    for (b, k) in fields {
+        let l = list(&mut h, 10);
+        h.set_bloblet_slot(b, k, l);
+    }
+    h.collect_young(&mut [&mut root]);
+    assert_eq!(h.nursery_used(), 0);
+    for (b, k) in fields {
+        assert_eq!(sum(&h, h.bloblet_slot(b, k)), 55, "field {k} of {b:?}");
+    }
+    h.verify().unwrap();
+}

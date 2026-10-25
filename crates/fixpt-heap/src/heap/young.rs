@@ -5,12 +5,12 @@
 //! A generational heap allocates everything in the nursery. A minor
 //! collection copies what is live there to the end of the old semispace
 //! (the active one), Cheney's way, and empties it: everything live is
-//! promoted at once. Its roots are the usual ones, what the regions and the
-//! code area hold (scanned whole), and the old space's dirty cards: a store
-//! that puts a young reference into the old space marks the card of the
+//! promoted at once. Its roots are the usual ones, what the regions hold
+//! (scanned whole), and the dirty cards of the old space and the code area:
+//! a store that puts a young reference into either marks the card of the
 //! word written (`Heap::set_slot`, and each machine's own stores).
 
-use super::{Copier, Heap, MAX_SEMI_WORDS, MEM_WORDS, NURSERY_BASE, NURSERY_MAX, read_head};
+use super::{CODE_BASE, Copier, Heap, MAX_SEMI_WORDS, MEM_WORDS, NURSERY_BASE, NURSERY_MAX, read_head};
 use crate::layout;
 use crate::value::{Value, is_extension, is_header};
 use std::collections::{HashMap, HashSet};
@@ -101,7 +101,8 @@ impl Heap {
     /// Collect the nursery alone: everything live in it copied to the end
     /// of the old space, which is then scanned; the nursery emptied, and
     /// every card clean. The roots are `extra_roots` and the heap's own, the
-    /// regions' and code area's objects, and the old space's dirty cards.
+    /// regions' objects, and the dirty cards of the old space and the code
+    /// area.
     pub(super) fn collect_minor(&mut self, extra_roots: &mut [&mut [Value]]) {
         let started = std::time::Instant::now();
         let before = self.used();
@@ -113,7 +114,6 @@ impl Heap {
         self.words_allocated += young as u64;
         let (lo, old_top) = (self.active, self.top);
         let regions: Vec<(usize, usize)> = self.regions.ranges().collect();
-        let code = (super::CODE_BASE, self.code.top);
         // The first object promoted starts the card of the old top's last
         // word only if none starts there already.
         let last_card = match old_top > lo {
@@ -151,14 +151,15 @@ impl Heap {
                 *v = fwd!(*v);
             }
         }
-        // What the regions and the code area hold: scanned whole, since
-        // their stores are not remembered.
-        for (from, to) in regions.into_iter().chain(std::iter::once(code)) {
+        // What the regions hold: scanned whole, since machine code fills
+        // what it allocates there without marking cards.
+        for (from, to) in regions {
             let mut at = from;
             while at < to {
                 at += Self::scan_one(mem, at, &mut c);
             }
         }
+        scan_code_cards(&mut self.cards, mem, &mut c, &self.code.starts);
         // The old space's dirty cards, each cleaned as it is scanned; the
         // table read a word (eight cards) at a time, a clean word skipped
         // whole, so that a large old space with few dirty cards costs little.
@@ -242,12 +243,20 @@ impl Heap {
         self.traced("minor", self.minor_count, nanos, free, before);
     }
 
-    /// That every young reference in the old space is on a dirty card: what
-    /// the write barrier promises a minor collection. It walks the whole old
-    /// space; for tests.
+    /// That every young reference in the old space and the code area is on a
+    /// dirty card: what the write barrier promises a minor collection. It
+    /// walks both whole; for tests.
     pub fn verify_remembered(&self) -> Result<(), String> {
-        let mut at = self.active;
-        while at < self.top {
+        let code = (CODE_BASE, self.code.top.max(CODE_BASE));
+        for (lo, hi) in [(self.active, self.top), code] {
+            self.verify_remembered_in(lo, hi)?;
+        }
+        Ok(())
+    }
+
+    fn verify_remembered_in(&self, lo: usize, hi: usize) -> Result<(), String> {
+        let mut at = lo;
+        while at < hi {
             let w = self.word(at);
             let (fields, n) = if is_header(w) {
                 let main = at + is_extension(w) as usize;
@@ -265,6 +274,42 @@ impl Heap {
             at += n;
         }
         Ok(())
+    }
+}
+
+/// In a minor collection: the code area's dirty cards, each cleaned, and
+/// the fields on it traced, of the objects `starts` (the area's, in address
+/// order) finds there. Only ordinary headers, and no weak pair: the area
+/// holds only bloblets (`Heap::make_code_bloblet`).
+fn scan_code_cards(cards: &mut fixpt_memmgmt::Words, mem: &mut [u64], c: &mut Copier, starts: &[usize]) {
+    let Some(&last) = starts.last() else { return };
+    let (first, end) = (CODE_BASE >> CARD_SHIFT, (last + read_head(mem, last).size()).div_ceil(CARD_WORDS));
+    let mut card = first;
+    while card < end {
+        if card % 8 == 0 && card + 8 <= end && cards.words()[card >> 3] == 0 {
+            card += 8;
+            continue;
+        }
+        let this = card;
+        card += 1;
+        if byte(cards, this) == 0 {
+            continue;
+        }
+        set_byte(cards, this, 0);
+        let (clo, chi) = (this << CARD_SHIFT, (this + 1) << CARD_SHIFT);
+        // From the last object that starts at or before the card.
+        let mut k = starts.partition_point(|&s| s <= clo).saturating_sub(1);
+        while k < starts.len() && starts[k] < chi {
+            let at = starts[k];
+            let fields = at + 1..at + 1 + read_head(mem, at).fields;
+            for f in fields.start.max(clo)..fields.end.min(chi) {
+                let v = Value(mem[f]);
+                if v.is_ref() {
+                    mem[f] = Heap::copy_out(mem, c, v).raw();
+                }
+            }
+            k += 1;
+        }
     }
 }
 

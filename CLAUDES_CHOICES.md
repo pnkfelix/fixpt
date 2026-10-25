@@ -1954,3 +1954,26 @@ Loading 10.30G cycles to 10.04G (two majors, 45 ms, from five, 136 ms;
 one code collection, from two); stage 0 18.32G to 18.0G (three majors,
 86 ms, from five, 134 ms), output the same, peak memory the same (398
 MB).
+
+## The code area remembered by its cards (2026-10-25)
+
+The user's "look into that" (2026-10-25), of minors scanning the code area
+whole.
+
+- **Cards, as the old space has**, not a list of slots: machine code
+  already marked the code area's cards (`card_mark` has no range check),
+  so only `Heap::set_slot` needed widening, and one remembered set
+  serves both.
+- **A sorted list of object starts** (`CodeArea::starts`) to find the
+  objects on a dirty card, not a crossing map: the area allocates first
+  fit into holes, out of address order, which the crossing map's
+  encoding assumes away; and it holds few objects (6,000 when loading),
+  so an insertion's shift is cheap. Walking the area header to header
+  instead, only when a card is dirty, was tried first: 56 of loading's
+  135 minors walked, some 0.45 ms each, a cache miss for each header.
+- **The regions still scanned whole**: machine code fills what it
+  allocates there without marking, and loading has none live.
+
+Loading 9.82G cycles to 9.57G (minors 237 ms to 174 ms); stage 0 18.2G
+to 17.6G, output the same. The suite passes with `FIXPT_VERIFY_BARRIER=1`,
+whose check now covers the code area too.
