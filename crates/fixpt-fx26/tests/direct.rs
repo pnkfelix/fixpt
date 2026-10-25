@@ -399,10 +399,17 @@ fn slots_read_again_from_their_registers() {
     }
     let code = code_only(&defs, "first-fact");
     let lines: Vec<&str> = code.lines().collect();
+    // A store, then a load of the same slot into the same register:
+    // `mov [rbp+N], r` then `mov r, [rbp+N]`; on arm64, `str xR, [x29, #N]`
+    // then `ldr xR, [x29, #N]`.
     let reread = lines.windows(2).find(|w| {
-        let stored = w[0].strip_prefix("mov [rbp+").and_then(|t| t.split_once("], "));
-        let loaded = w[1].strip_prefix("mov ").and_then(|t| t.split_once(", [rbp+"));
-        matches!((stored, loaded), (Some((at, r)), Some((d, from))) if r == d && from.trim_end_matches(']') == at)
+        if cfg!(target_arch = "x86_64") {
+            let stored = w[0].strip_prefix("mov [rbp+").and_then(|t| t.split_once("], "));
+            let loaded = w[1].strip_prefix("mov ").and_then(|t| t.split_once(", [rbp+"));
+            matches!((stored, loaded), (Some((at, r)), Some((d, from))) if r == d && from.trim_end_matches(']') == at)
+        } else {
+            w[0].strip_prefix("str ").is_some_and(|t| t.contains("[x29, ") && w[1].strip_prefix("ldr ") == Some(t))
+        }
     });
     assert!(reread.is_none(), "{reread:?} in\n{code}");
 }

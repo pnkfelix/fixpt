@@ -1791,3 +1791,10 @@ native compiler arm64 has (no FX-26 one, as `native-direct-x64*.fx` is).
   (`string_eq`), lengths then characters. The instructions are arm64
   register code's (`regcode.rs`), which already did all three. Kayak's
   stage 0 on the Mac: about 5.4 s to 2.9 s.
+- **Frame slots held in registers**, as x86_64's write-through cache,
+  forgotten at the same places: but over `RESULT` and all of REG1…REG8,
+  which are registers on arm64 (x86_64's REG4…REG8 are words of the
+  state). Measured by `/usr/bin/time -l`, three runs each alternating:
+  59.91G instructions to 59.83G, 12.31G cycles to 12.13G (about 1.4%);
+  little to remove, as arm64's register code keeps more in its eight
+  registers and stores and reloads fewer slots.
