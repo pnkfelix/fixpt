@@ -2169,11 +2169,19 @@ impl Compiling<'_> {
                         }
                         None => CLO,
                     };
+                    // Past `ldur`'s reach (32 values), through its address
+                    // in X16, as "field" does; past one `sub`'s, by the
+                    // offset in X16. No size limit, as on x86_64.
                     let off = field_off(CLOSURE_FREE0 + k(o(0)));
-                    if off < -256 {
-                        return decline("a closure too large".into());
+                    if off >= -256 {
+                        a.e(ldur(RESULT, from, off));
+                    } else if off >= -4095 {
+                        a.e(sub_imm(X16, from, off.unsigned_abs() as u32));
+                        a.e(ldur(RESULT, X16, 0));
+                    } else {
+                        a.es(&mov_imm64(X16, off as u64));
+                        a.e(ldr_reg(RESULT, from, X16));
                     }
-                    a.e(ldur(RESULT, from, off));
                 }
                 "reg" => match joinable(si - 1) {
                     Some(j) if matches!(op_at(j), "op2" | "op2imm") && !matches!(reps_in[si - 1][k(o(0)).min(8)], Rep::Raw { .. }) => {

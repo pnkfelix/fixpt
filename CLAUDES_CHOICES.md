@@ -1656,7 +1656,8 @@ by the first two below.
   and the one that makes an accessor of any width a leaf. The retry stays
   in TODO §121.
 - **No closure size limit on x86_64**, in both of its native compilers:
-  the limit was arm64's (`ldur`, 9 bits) copied over. Arm64 still has it.
+  the limit was arm64's (`ldur`, 9 bits) copied over. Arm64's went the
+  same day (below).
 - **A cellular closure compiled natively as it is made** (`adapt`), not
   the call-out made cheaper: a call then costs a native call's, and
   nothing crosses. Compiled once per word, cached by weak references to
@@ -1765,3 +1766,16 @@ end's register words were 37% of loading kayak's compiler).
   the native code between runs would save the rest: images carry no
   code area yet, and code numbers its call-outs into its machine's
   table, which would have to be kept with it.
+
+## Kayak's x86_64 gains, ported to arm64 (2026-10-24)
+
+The user, of the four found not to apply to arm64 (measured on the arm64
+Mac, alternating builds: run times the same, only the native compiler
+faster): "do them all. work autonously." Each in `direct.rs`, the one
+native compiler arm64 has (no FX-26 one, as `native-direct-x64*.fx` is).
+- **No closure size limit on arm64.** A closure's value past `ldur`'s
+  reach (32 values) is read through its address, `sub` into X16 as
+  `"field"` does; past one `sub`'s (about 510), by its offset in X16
+  (`ldr` of a register offset). `native_reach.rs` now runs on arm64 too,
+  with closures of 40 and 520 values (two procedures' values: a frame
+  holds about 500).
