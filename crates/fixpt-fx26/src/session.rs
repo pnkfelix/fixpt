@@ -261,6 +261,14 @@ pub fn load_reader_alone(scheme: &mut Session) -> Result<(), String> {
     load_lowered(scheme, &text)
 }
 
+/// Each of `entries`, called by `{prefix}{name}` from Scheme, run as the
+/// register code in global `{native}{name}`. In one text: each text run
+/// analyses all the session's Scheme again, some 50 ms, so one for each
+/// would cost a second and a half.
+fn entry_defines(entries: &[&str], native: &str, prefix: &str) -> String {
+    entries.iter().map(|name| format!("(define ({prefix}{name} . args) (%run-front-end {native}{name} args))\n")).collect()
+}
+
 /// `text`, the front end or its first files, checked, licensed as the
 /// reader, lowered and loaded.
 fn load_lowered(scheme: &mut Session, text: &str) -> Result<(), String> {
@@ -1100,9 +1108,7 @@ impl Fx26Session {
     /// whole file is long work for it, so it reads with no step limit: it
     /// is licensed code, and a text ends.
     pub fn read_with_own_reader(&mut self, text: &str) -> R<Vec<Syntax>> {
-        if !self.scheme.is_bound(&format!("{READER_PREFIX}eager-start-fx26")) {
-            load_eager_reader(&mut self.scheme).map_err(crate::front_end_failure)?;
-        }
+        self.load_own_reader()?;
         self.scheme.engine.set_step_limit(None);
         let forms = crate::syn::read_with_fx26_reader(&mut self.scheme, &mut self.checker.interner, FileId(0), text);
         self.scheme.engine.set_step_limit(self.step_limit);
@@ -1243,7 +1249,8 @@ impl Fx26Session {
     /// to give its entry points; each `READER_PREFIX` global the Rust side
     /// calls then calls its entry point by `%run-front-end` (the runtime's
     /// `front_end_run_word`, which the caller installs: a machine that
-    /// runs register code). The reader stays lowered, and loaded as ever.
+    /// runs register code). The reader lowered is loaded only for an eager
+    /// reader (`load_own_reader`).
     /// Where `front_end_native`, checked in the native convention, so that
     /// the closures it makes are native procedures, compiled as they are
     /// made (`TODO.md` §126).
@@ -1361,11 +1368,7 @@ impl Fx26Session {
     /// The names the Rust side calls, `{prefix}{name}`, made to call each
     /// entry point in its global (`set_entries`).
     fn define_entries(&mut self, entries: &[&str], native: &str, prefix: &str) -> Result<(), String> {
-        // In one text: each text run analyses all the session's Scheme
-        // again, some 50 ms, so one for each would cost a second and a half.
-        let defines: String =
-            entries.iter().map(|name| format!("(define ({prefix}{name} . args) (%run-front-end {native}{name} args))\n")).collect();
-        self.scheme.eval_str("<register code>", &defines).map_err(|e| e.to_string())?;
+        self.scheme.eval_str("<register code>", &entry_defines(entries, native, prefix)).map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -1378,7 +1381,14 @@ impl Fx26Session {
             return Ok(());
         }
         let load = if self.front_end_compiled { load_reader_alone } else { load_eager_reader };
-        load(&mut self.scheme).map_err(crate::front_end_failure)
+        load(&mut self.scheme).map_err(crate::front_end_failure)?;
+        // Loaded after the front end's register code, whose entries it
+        // shares names with (`read-text-at`, `parse-program`): theirs again.
+        if self.front_end_compiled && self.scheme.is_bound("fx26-native:check-program") {
+            let defines = entry_defines(&Self::FRONT_ENTRIES, "fx26-native:", READER_PREFIX);
+            self.scheme.eval_str("<register code>", &defines).map_err(|e| crate::front_end_failure(e.to_string()))?;
+        }
+        Ok(())
     }
 
     /// The pieces written in FX-26 (reader, checker, compilers), loaded if
@@ -1394,10 +1404,9 @@ impl Fx26Session {
         // A `load-module`'s path is from where the Rust checker's is.
         crate::syn::set_load_base(self.checker.base_dir.clone());
         crate::syn::set_shared_made(self.shared_made.clone());
+        // The reader lowered is the eager reader's alone, loaded when it is
+        // wanted (`load_own_reader`): the register code reads.
         if self.front_end_compiled {
-            if !self.scheme.is_bound(&format!("{READER_PREFIX}eager-start-fx26")) {
-                load_reader_alone(&mut self.scheme).map_err(fail)?;
-            }
             if !self.scheme.is_bound("fx26-native:check-program") {
                 self.front_end_as_register_code()?;
             }

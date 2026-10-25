@@ -422,7 +422,7 @@ pub struct Checker {
     /// The hidden globals' definitions made since the form being checked
     /// began, to run before it (`top_defining`; a driver calling `top`
     /// takes them).
-    pub hoisted: Vec<(crate::top::Top, Syntax)>,
+    pub hoisted: Vec<(crate::top::Top, std::rc::Rc<Syntax>)>,
     /// Modules read from files: each one's path and text, and the file id
     /// its spans have.
     pub(crate) loaded: HashMap<ExpId, (String, String, fixpt_read::FileId)>,

@@ -1905,3 +1905,28 @@ allocator's report, each fix where it pointed:
 - The report itself: each function counted where first met in a stack,
   so that a recursion of any shape is one frame; `FIXPT_ALLOC_DEPTH` for
   more than three.
+
+## Loading: the reader lowered only when wanted, and no linear searches (2026-10-24)
+
+The user: "keep going", after the allocations. By `perf` on loading:
+- **The reader lowered, loaded only for the eager reader**: where the
+  front end runs as register code, every session also checked, lowered
+  and loaded the reader alone as Scheme (`load_reader_alone`), 4.5% of
+  loading, though nothing a batch run does calls it: its globals that
+  the register code also gives (`read-text-at`, `parse-program`) were
+  replaced by the register code's at once. Now `load_own_reader` loads
+  it when an eager reader (the REPL's, `read_with_own_reader`) wants it;
+  loaded after the register code, it gives those globals back to the
+  register code (`entry_defines`), so that which was loaded first
+  changes nothing.
+- **An instruction's index by binary search**: `procedure_x64` (and
+  `direct.rs`'s, and `prepare_x64`'s) found the index of each
+  instruction's start in `starts` by a linear search, for every
+  instruction: quadratic in a procedure's length, 3% of loading. `starts`
+  is sorted, so `binary_search`; and the two `HashMap`s from a start to
+  its index, the same way.
+- **The checker's copies of forms**: `expand_generative` and
+  `expand_datatype` copied each top-level form whole before looking at
+  its head; `parse_exp` each list's items; `top_defining` the form twice,
+  for what runs and for the definition kept, now one `Rc` for both.
+  Fewer allocations (5.57M to 5.19M), little time.
