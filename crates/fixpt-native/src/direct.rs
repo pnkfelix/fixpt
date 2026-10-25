@@ -1980,6 +1980,15 @@ impl Compiling<'_> {
         // that must unbox some first, each a stub of its own.
         let (raw_refs, live) = reps::refs_and_live(&cells, &starts, &prim_name, &raw);
         let si_at: HashMap<usize, usize> = starts.iter().enumerate().map(|(si, &i)| (i, si)).collect();
+        // The branch just after the instruction at index `si`, and where it
+        // goes, where nothing after it reads the boolean that instruction
+        // makes: a test there branches on the flags.
+        let branch_on = |si: usize| {
+            joinable(si)
+                .filter(|&j| matches!(op_at(j), "branchf" | "brancht") && live.get(si + 2).is_none_or(|l| !l[0]))
+                .map(|j| (j, (j as i64 + 2 + cells[j + 1].as_fixnum()) as usize))
+                .filter(|&(_, to)| !live[si_at[&to]][0])
+        };
         // A procedure with `int` operations gets a fixnum version first, where
         // a value tested once stays known (`reps`, `Rep::Fix`), and whose
         // tests and overflows go over to the general version, at the same
@@ -2354,14 +2363,9 @@ impl Compiling<'_> {
                         // A test that only a branch reads: the branch on the
                         // flags, with no boolean made (on the slow path, on
                         // the boolean the call made).
-                        _ => match joinable(si - 1) {
-                            Some(j)
-                                if matches!(op_at(j), "branchf" | "brancht")
-                                    && starts.get(si + 1).is_none_or(|&f| sets_first(f))
-                                    && sets_first((j as i64 + 2 + cells[j + 1].as_fixnum()) as usize) =>
-                            {
+                        _ => match branch_on(si - 1) {
+                            Some((j, to)) => {
                                 a.bind(labels[j]);
-                                let to = (j as i64 + 2 + cells[j + 1].as_fixnum()) as usize;
                                 // `branchf` goes where the test fails; `brancht`
                                 // where it holds.
                                 let taken_if_true = op_at(j) == "brancht";
@@ -2713,6 +2717,15 @@ impl Compiling<'_> {
                         };
                         if what == "->int" {
                             box_reg(&mut a, self.callouts, RESULT, signed);
+                        } else if let Some(c) = raw_compare(signed, what)
+                            && let Some((j, to)) = branch_on(si - 1)
+                        {
+                            // A test that only a branch reads, as `op2`'s.
+                            a.e(cmp(RESULT, y));
+                            a.bind(labels[j]);
+                            let l = edge(&mut a, si, to);
+                            a.to(l, Fix::If(if op_at(j) == "brancht" { c } else { c.not() }));
+                            si += 1;
                         } else {
                             raw_fast(&mut a, &mut stubs, signed, what, y);
                         }
@@ -4381,6 +4394,22 @@ fn f64_fast(a: &mut Asm, what: &str, y: Reg) {
     a.e(fmov_from_d(RESULT, D16));
 }
 
+/// The condition an `i64` (signed) or `u64` comparison `what` holds on.
+fn raw_compare(signed: bool, what: &str) -> Option<Cond> {
+    match (what, signed) {
+        ("<", true) => Some(Cond::Lt),
+        ("<=", true) => Some(Cond::Le),
+        (">", true) => Some(Cond::Gt),
+        (">=", true) => Some(Cond::Ge),
+        ("<", false) => Some(Cond::Lo),
+        ("<=", false) => Some(Cond::Ls),
+        (">", false) => Some(Cond::Hi),
+        (">=", false) => Some(Cond::Hs),
+        ("=", _) => Some(Cond::Eq),
+        _ => None,
+    }
+}
+
 /// An `i64` (signed) or `u64` operation `what` (as `reps::raw_op` names
 /// it) on raw `RESULT` and `y` (raw, or a shift's count, a fixnum), into
 /// `RESULT`: raw, or a comparison's boolean (`T->int` is a boxing,
@@ -4388,26 +4417,11 @@ fn f64_fast(a: &mut Asm, what: &str, y: Reg) {
 /// X16.
 fn raw_fast(a: &mut Asm, stubs: &mut Vec<(Label, u32)>, signed: bool, what: &str, y: Reg) {
     let x = RESULT;
-    let compare = |c: Cond| match (c, signed) {
-        (Cond::Lt, false) => Cond::Lo,
-        (Cond::Le, false) => Cond::Ls,
-        (Cond::Gt, false) => Cond::Hi,
-        (Cond::Ge, false) => Cond::Hs,
-        (c, _) => c,
-    };
-    let test = match what {
-        "<" => Some(Cond::Lt),
-        "<=" => Some(Cond::Le),
-        ">" => Some(Cond::Gt),
-        ">=" => Some(Cond::Ge),
-        "=" => Some(Cond::Eq),
-        _ => None,
-    };
-    if let Some(c) = test {
+    if let Some(c) = raw_compare(signed, what) {
         a.e(cmp(x, y));
         a.es(&mov_imm64(X13, Value::TRUE.raw()));
         a.es(&mov_imm64(X14, Value::FALSE.raw()));
-        a.e(csel(RESULT, X13, X14, compare(c)));
+        a.e(csel(RESULT, X13, X14, c));
         return;
     }
     let nonzero = |a: &mut Asm, stubs: &mut Vec<(Label, u32)>| {

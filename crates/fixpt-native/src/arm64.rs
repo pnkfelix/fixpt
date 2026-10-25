@@ -37,6 +37,28 @@ pub enum Cond {
     Le = 13,
 }
 
+impl Cond {
+    /// The condition that holds where this one does not. (`Mi`'s, `pl`,
+    /// is not one of these.)
+    pub fn not(self) -> Cond {
+        match self {
+            Cond::Eq => Cond::Ne,
+            Cond::Ne => Cond::Eq,
+            Cond::Hs => Cond::Lo,
+            Cond::Lo => Cond::Hs,
+            Cond::Vs => Cond::Vc,
+            Cond::Vc => Cond::Vs,
+            Cond::Hi => Cond::Ls,
+            Cond::Ls => Cond::Hi,
+            Cond::Lt => Cond::Ge,
+            Cond::Ge => Cond::Lt,
+            Cond::Gt => Cond::Le,
+            Cond::Le => Cond::Gt,
+            Cond::Mi => panic!("no `pl` here"),
+        }
+    }
+}
+
 fn r(x: Reg) -> u32 {
     debug_assert!(x <= 31, "no register x{x}");
     x

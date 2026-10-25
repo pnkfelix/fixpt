@@ -409,9 +409,11 @@ fn raw_tests_branch_on_the_flags() {
         let r = run_collecting(&defs, "raw-tests", &[1000], FUEL, gc_every);
         assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "collecting every {gc_every:?}: {:?} against {}", r.direct, r.rust);
     }
+    // The boolean, were one made: `cmov` on x86_64, `csel` on arm64.
+    let made = if cfg!(target_arch = "x86_64") { "cmov" } else { "csel" };
     for name in ["signed-tests", "unsigned-tests"] {
         let code = code_only(&defs, name);
-        assert!(!code.contains("cmov"), "{name}:\n{code}");
+        assert!(!code.contains(made), "{name}:\n{code}");
     }
 }
 

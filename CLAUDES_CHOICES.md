@@ -1779,3 +1779,9 @@ native compiler arm64 has (no FX-26 one, as `native-direct-x64*.fx` is).
   (`ldr` of a register offset). `native_reach.rs` now runs on arm64 too,
   with closures of 40 and 520 values (two procedures' values: a frame
   holds about 500).
+- **Raw comparisons branched on the flags, and the test dropped wherever
+  `RESULT` is dead on both ways out** (`reps::live_in`, `branch_on`, as
+  x86_64's): `op2`'s `int` tests too, which arm64 already fused under the
+  old, stricter test (the next instruction and the target each set
+  `RESULT` first). `Cond::not` added for `branchf`. Kayak's stage 0 on
+  the Mac, alternating builds: about 5.55 s to 5.4 s.
