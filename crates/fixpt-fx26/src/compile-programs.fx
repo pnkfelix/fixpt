@@ -345,6 +345,20 @@
 ;; native convention (`native_define`).
 (define compile-name-word! (->* ((listof symbol @k)) unit)
   (lambda (ns) (set c-word-name (c-strings-of (c-strings-of-rev ns nil) nil))))
+;; For the same driver: the next program's lambda whose word is named for
+;; `n` (`ns`, a list of it; none, nil) is definition `n`'s, and the driver
+;; writes `n`'s global once that program has run; as `c-define-lambda` and
+;; the `global!` after it say of a definition compiled whole, so that its
+;; register code calls itself in a loop, behind a guard that expects that
+;; write.
+(define compile-defining! (->* ((listof symbol @k)) unit)
+  (lambda (ns) (set c-defining-named ns)))
+;; The global the driver writes after the program (`compile-defining!`), in
+;; a list, if a lambda's word is still to be named for it.
+(define c-defined-writes (->* () (listof wglobal @k))
+  (lambda ()
+    (let ((n (get c-defining-named)))
+      (if (null? n) nil (compile-global-cell (car n))))))
 (define c-strings-of-rev (->* ((listof symbol @k) (listof string @k)) (listof string @k))
   (lambda (ns acc)
     (if (null? ns) acc (c-strings-of-rev (cdr ns) (cons (symbol->string (car ns)) acc)))))
@@ -486,7 +500,7 @@
               (c-tops (cdr ts) c #f)))
           (t-exp (x)
             (begin (if has-value (c-op c routine-drop) #u)
-                   (set c-form-writes nil)
+                   (set c-form-writes (c-defined-writes))
                    (set c-last-exp (the (listof exp @k) (cons x nil)))
                    (c-plan-top x)
                    (c-exp x (the cenv nil) 0 c #f)

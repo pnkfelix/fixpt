@@ -395,7 +395,7 @@
     (lambda (ps body e own0)
       (let* ((named (c-take-name))
              (bound (c-take c-bind-name (the (listof symbol @k) nil)))
-             (defining (c-take c-defining (the (listof symbol @k) nil)))
+             (defining (c-take-defining named))
              ;; What it captures, as the middle phase planned (`compile-plan.fx`);
              ;; found here only where it did not, in register code's lambdas.
              (planned (c-planned-fv ps body))
