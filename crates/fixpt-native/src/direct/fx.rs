@@ -459,7 +459,7 @@ impl Compiling<'_> {
             return Err(format!("`{name}`: a frame too large"));
         }
         let called = |j: usize| {
-            let at = starts.iter().position(|&s| s == j).expect("an instruction");
+            let at = starts.binary_search(&j).expect("an instruction");
             starts[at + 1..].iter().copied().find(|&c| op_at(c) != "pop").filter(|&c| matches!(op_at(c), "invoke" | "tailinvoke"))
         };
         // The callees, as `procedure_x64` finds them, before any code.
