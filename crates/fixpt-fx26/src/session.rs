@@ -556,6 +556,7 @@ impl Fx26Session {
             .eval_str("<fx26-runtime>", RUNTIME)
             .map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), format!("the FX-26 runtime failed to load: {e}")))?;
         scheme.engine.set_step_limit(Some(DEFAULT_STEP_LIMIT));
+        scheme.runtime_unrooted().type_at = Some(crate::typeat::type_at);
         Ok(Fx26Session {
             checker: Checker::new(),
             scheme,

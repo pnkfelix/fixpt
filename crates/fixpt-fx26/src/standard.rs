@@ -231,6 +231,10 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("args", "(poly ((r region)) (subr (maxeff (io args) (alloc r)) () (listof string r)))"),
     ("read-file", "(poly ((r region)) (subr (maxeff (io fs-read) (alloc r)) (string) (sumof (data (bytevectorof r)) (failed io-error))))"),
     ("list-dir", "(poly ((r region)) (subr (maxeff (io fs-read) (alloc r)) (string) (sumof (names (listof string r)) (failed io-error))))"),
+    // Heist's (`FIXPT-CHANGES.md` F3): the checker's type of the innermost
+    // expression of a program text at a character (`typeat.rs`). Reading the
+    // files it loads is its effect.
+    ("type-at", "(subr (io fs-read) (string int) string)"),
     ("write-file", "(poly ((r region)) (subr (maxeff (io fs-write) (read r)) (string (bytevectorof r)) (sumof (done unit) (failed io-error))))"),
     // Bytevectors (`TODO.md` §84): made, read and written at a region, as
     // arrays are; R7RS's names. `bytevector-copy` takes a start and an end,

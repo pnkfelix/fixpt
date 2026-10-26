@@ -431,6 +431,8 @@
                              (read-file (as-str (ev-arg xs 0))))
                  (data b (the val (o-sum 'data (o-bytes b))))
                  (failed e (ev-io-failed e)))))
+      (prim! 'type-at
+             (lambda (xs) (type-at (as-str (ev-arg xs 0)) (as-int (ev-arg xs 1)))))
       (prim! 'list-dir
              (lambda (xs)
                (tagcase (the (sumof (names (listof string @v)) (failed io-error))

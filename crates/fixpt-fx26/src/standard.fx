@@ -171,6 +171,7 @@
          (("f32-max") "%fx26-f32-max")
          (("f32-abs") "%fx26-f32-abs")
          (("f32-neg") "%fx26-f32-neg")
+         (("type-at") "%fx26-type-at")
          (("int->i8") "%fx26-int->i8")
          (("i8->int") "%fx26-i8->int")
          (("int->u8") "%fx26-int->u8")

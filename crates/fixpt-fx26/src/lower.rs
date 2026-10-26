@@ -220,6 +220,7 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("sleep-until", "%fx26-sleep-until", true),
     ("args", "%fx26-args", true),
     ("read-file", "%fx26-read-file", true),
+    ("type-at", "%fx26-type-at", true),
     ("list-dir", "%fx26-list-dir", true),
     ("write-file", "%fx26-write-file", true),
     ("make-bytevector", "make-bytevector", true),

@@ -59,6 +59,9 @@ pub struct Runtime {
     /// a procedure of the other convention that calls the one given.
     /// None: no procedure of the other convention can be made here.
     pub adapt: Option<Adapt>,
+    /// How `%fx26-type-at` checks a text (`fixpt-fx26` installs it): the
+    /// checker is above this crate. None: it says there is no checker.
+    pub type_at: Option<TypeAt>,
     /// How many steps (cells, or polls in machine code) a run of a word by
     /// `run_word` may take before it stops; unlimited unless set, as the
     /// FX-26 REPL sets it from its step limit for the run of a form.
@@ -90,6 +93,10 @@ pub type CallNative = fn(&mut Runtime, Value, &[Value]) -> Result<Value, NativeE
 /// convention if `native`, else to the cellular one: a procedure of that
 /// convention that calls `f`; or why none could be made.
 pub type Adapt = fn(&mut Runtime, Value, usize, bool) -> Result<Value, String>;
+/// How FX-26's `type-at` asks the checker (Heist's, `FIXPT-CHANGES.md` F3):
+/// of program text, the innermost expression at a character, and its type,
+/// as `%fx26-type-at` says it.
+pub type TypeAt = fn(&str, i64) -> String;
 
 /// How a call between machines left, if not with a value.
 #[derive(Debug)]
@@ -151,6 +158,7 @@ impl Runtime {
             native_code: None,
             call_native: None,
             adapt: None,
+            type_at: None,
             word_fuel: u64::MAX,
             run_nanos: 0,
             compile_nanos: 0,
@@ -239,6 +247,7 @@ impl Runtime {
             native_code: None,
             call_native: None,
             adapt: None,
+            type_at: None,
             word_fuel: u64::MAX,
             run_nanos: 0,
             compile_nanos: 0,

@@ -2736,6 +2736,19 @@ prims! {
         let args = a[3..].to_vec();
         crate::syscall::call(rt, &label, &host, &canonical, &args)
     });
+    // FX-26's `type-at` (Heist's, `FIXPT-CHANGES.md` F3): program text
+    // `a[0]` checked, and the innermost expression at character `a[1]`:
+    // "START END TYPE", or "error START END MESSAGE", in characters. The
+    // checker is above this crate; the session installs it (`type_at`).
+    "%fx26-type-at", 2, Some(2), simple!(|rt, a| {
+        let text = get_string(rt, a[0])?;
+        let pos = int(rt, a[1])?;
+        let out = match rt.type_at {
+            Some(f) => f(&text, pos),
+            None => "error 0 0 no checker here".to_string(),
+        };
+        Ok(rt.heap.make_string(&out))
+    });
 }
 
 /// Promise states. `[state, payload]`.

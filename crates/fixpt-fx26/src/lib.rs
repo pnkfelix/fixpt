@@ -873,6 +873,7 @@ pub mod syn;
 mod terminate;
 pub mod cellular;
 pub mod debts;
+pub mod typeat;
 pub mod standard;
 pub mod top;
 pub mod unparse;
