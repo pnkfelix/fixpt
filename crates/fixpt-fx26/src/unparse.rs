@@ -248,6 +248,12 @@ impl Checker {
     }
 
     fn abbreviation(&self, t: TyId) -> Option<&str> {
+        // Written out, but for data that keeps its name (`closed_named`): a
+        // recursive one would print with numbers by its depth (`mu %3`),
+        // which would not read the same in two places.
+        if self.print_expanded.get() && !self.closed_named.contains(&t) {
+            return None;
+        }
         let named = self.print_names.borrow().iter().rev().find(|(_, x)| self.arena.resolve(*x) == t).map(|(n, _)| *n);
         if let Some(n) = named {
             return Some(self.interner.name(n));
@@ -282,6 +288,12 @@ impl Checker {
         // A node met again on the way down is a cycle: named by its depth,
         // and written `(mu %d …)` where the cycle starts.
         if let Some(i) = path.iter().position(|x| *x == t) {
+            // Written out for `type-at`: by its distance up, so that a
+            // recursive type reads the same wherever it is printed.
+            if self.print_expanded.get() {
+                self.print_cycles.borrow_mut().insert(i);
+                return format!("%^{}", path.len() - i);
+            }
             return format!("%{}", i + 1);
         }
         path.push(t);
@@ -444,6 +456,9 @@ impl Checker {
             }
         };
         path.pop();
+        if self.print_expanded.get() {
+            return if self.print_cycles.borrow_mut().remove(&path.len()) { format!("(mu {out})") } else { out };
+        }
         if mentions_token(&out, &name) { format!("(mu {name} {out})") } else { out }
     }
 }

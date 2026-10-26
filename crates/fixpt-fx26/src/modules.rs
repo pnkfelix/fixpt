@@ -942,7 +942,7 @@ impl Checker {
 
     /// Module `m`'s effect `e`, as its type says, `m` bound here; or an
     /// error at `span`.
-    fn selected_effect(&mut self, m: Sym, e: Sym, span: Span) -> R<Effect> {
+    pub(crate) fn selected_effect(&mut self, m: Sym, e: Sym, span: Span) -> R<Effect> {
         let shown = |c: &Checker| format!("`(select {} {})`", c.interner.name(m), c.interner.name(e));
         // An effect name in a module with `include`s that nothing else
         // defines (`include_scope`): said of the name.

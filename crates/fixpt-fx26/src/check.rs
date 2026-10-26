@@ -374,6 +374,12 @@ pub struct Checker {
     /// While a `moduleof` is shown: its descriptions' names, each naming
     /// what it describes in the components after it (`unparse`).
     pub(crate) print_names: std::cell::RefCell<Vec<(Sym, TyId)>>,
+    /// Whether types print with no name at all, every one written out:
+    /// for `type-at`, which puts names back by what they print as
+    /// (Heist's, `FIXPT-CHANGES.md` F3).
+    pub(crate) print_expanded: std::cell::Cell<bool>,
+    /// While it prints so: the depths of the nodes a cycle came back to.
+    pub(crate) print_cycles: std::cell::RefCell<HashSet<usize>>,
     /// Whether two types are being shown apart ([`Checker::show_apart`]):
     /// each description variable printed as a mark, named after.
     pub(crate) show_marks: std::cell::Cell<bool>,
@@ -872,6 +878,8 @@ impl Checker {
             effect_selects: Vec::new(),
             with_effect_fallback: HashMap::new(),
             print_names: std::cell::RefCell::new(Vec::new()),
+            print_expanded: std::cell::Cell::new(false),
+            print_cycles: std::cell::RefCell::new(HashSet::new()),
             show_marks: std::cell::Cell::new(false),
             subst_keep: None,
             select_map: HashMap::new(),
