@@ -116,15 +116,16 @@
 (define k-io-kind-name (subr pure (int) string)
   (lambda (k)
     (case k ((0) "stdin") ((1) "stdout") ((2) "stderr") ((3) "fs-read") ((4) "fs-write")
-            ((5) "clock") ((6) "args") ((7) "exit") ((8) "terminal") (else "native"))))
+            ((5) "clock") ((6) "args") ((7) "exit") ((8) "terminal") ((9) "native") (else "sys"))))
 (define k-io-kind-code (subr pure (string) int)
   (lambda (n)
     (case n (("stdin") 0) (("stdout") 1) (("stderr") 2) (("fs-read") 3) (("fs-write") 4)
             (("clock") 5) (("args") 6) (("exit") 7) (("terminal") 8) (("native") 9)
+            (("sys") 10)
             (else -1))))
 (define k-io-kinds-shown string
   (string-append "`stdin`, `stdout`, `stderr`, `fs-read`, `fs-write`, `clock`, `args`, `exit`, "
-                 "`terminal`, `native`"))
+                 "`terminal`, `native`, `sys`"))
 (define k-has-id? (subr (maxeff (read @globals) (read @t)) (k-ids int) bool)
   (lambda (xs s) (cond ((null? xs) #f) ((= (car xs) s) #t) (else (k-has-id? (cdr xs) s)))))
 

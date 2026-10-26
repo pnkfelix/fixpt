@@ -1156,8 +1156,12 @@ fn native_session_adapters_aborts_and_stack_maps() {
     assert!(c1 / n1 > c0 / n0 + 80_000, "{seen:?}");
     // A frame of 70 slots, past what a header's mask holds: traced whole,
     // under those collections (`programs/native/wide-frame.fx`).
+    // The front end, lowered Scheme here, counts its own steps against the
+    // limit too, and checking `wide`'s 70 bindings takes nearly 20 million.
     let forms = s.checker.read_in(FileId(0), include_str!("programs/native/wide-frame.fx")).expect("reads");
+    s.set_step_limit(Some(40_000_000));
     assert_eq!(values_of(&mut s, &forms), ["2485", "37450000"], "wide frame");
+    s.set_step_limit(Some(fixpt_fx26::session::DEFAULT_STEP_LIMIT));
     // More values than registers, the rest a list in the last register, under
     // those collections too.
     let forms = s.checker.read_in(FileId(0), include_str!("programs/native/many-values.fx")).expect("reads");

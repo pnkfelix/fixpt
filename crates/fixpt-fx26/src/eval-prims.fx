@@ -336,6 +336,41 @@
   (lambda (ns) (if (null? ns) nil (cons (car ns) (ev-strings (cdr ns))))))
 
 ;; The program's I/O (`TODO.md` §84), done by the primitives themselves.
+;; Syscalls (`docs/research/syscalls.md`): this evaluator's own, a runtime
+;; of its own, has the three Fixpt's runtime has, as it has them
+;; (`fixpt_runtime::syscall`): each host name's type in canonical form, ""
+;; for one it has not.
+(define ev-sys-type (->* (string) string)
+  (lambda (h)
+    (cond ((string=? h "code:exec-view/1")
+           (string-append "(poly ((r1 region)) (subr (maxeff (io sys) (write r1)) "
+                          "((flatarrayof i64 r1) int int) int))"))
+          ((string=? h "code:page-words/1") "(subr (io sys) () int)")
+          ((string=? h "code:flush/1")
+           (string-append "(poly ((r1 region)) (subr (maxeff (io sys) (read r1)) "
+                          "((flatarrayof i64 r1) int int) unit))"))
+          (else ""))))
+(define ev-sys-has? (->* (string string) bool)
+  (lambda (h t) (let ((u (ev-sys-type h))) (and (not (string=? u "")) (string=? u t)))))
+;; A required one's check, `label` naming it: `syscall NAME ("HOST")`.
+(define ev-sys-require (->* (string string string) val)
+  (lambda (label h t)
+    (let ((u (ev-sys-type h)))
+      (cond ((string=? u "") (efail (string-append label ": this runtime has none")))
+            ((string=? u t) the-unit)
+            (else (efail (string-append label ": declared " t "; this runtime's is " u)))))))
+;; A call, its label, host name and type first: the page's words asked of
+;; the runtime this runs on; no view of an array, which moves (-1); nothing
+;; to flush.
+(define ev-syscall (->* (vals) val)
+  (lambda (xs)
+    (let ((label (as-str (ev-arg xs 0))) (h (as-str (ev-arg xs 1))) (t (as-str (ev-arg xs 2))))
+      (cond ((not (ev-sys-has? h t))
+             (efail (string-append label ": not available on this runtime")))
+            ((string=? h "code:page-words/1") (the int (%syscall0 label h t)))
+            ((string=? h "code:exec-view/1") -1)
+            (else the-unit)))))
+
 (define* ev-io-prims! (subr (maxeff stores spin) () unit)
   (lambda ()
     (begin
@@ -372,6 +407,15 @@
                  (failed e (ev-io-failed e)))))
       ;; Code a program makes (`TODO.md` §97): none here, so none runs.
       (prim! 'native-code? (lambda (xs) #f))
+      (prim! '%syscall-available?
+             (lambda (xs) (ev-sys-has? (as-str (ev-arg xs 0)) (as-str (ev-arg xs 1)))))
+      (prim! '%syscall-require
+             (lambda (xs)
+               (ev-sys-require (as-str (ev-arg xs 0)) (as-str (ev-arg xs 1))
+                               (as-str (ev-arg xs 2)))))
+      (prim! '%syscall0 ev-syscall) (prim! '%syscall1 ev-syscall) (prim! '%syscall2 ev-syscall)
+      (prim! '%syscall3 ev-syscall) (prim! '%syscall4 ev-syscall) (prim! '%syscall5 ev-syscall)
+      (prim! '%syscall6 ev-syscall)
       (prim! 'native-convention
              (lambda (xs) (ev-strings (the (listof string @v) (native-convention)))))
       (prim! 'seal-code (lambda (xs) (efail "seal-code: this machine runs no native code")))

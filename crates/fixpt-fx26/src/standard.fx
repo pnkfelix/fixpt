@@ -270,6 +270,13 @@
          (("wcell-nil") "%fx26-nil-cell")
          (("wcell-sum") "%fx26-sum-cell")
          (("wglobal=?") "eq?")
+         (("%syscall0") "%fx26-syscall")
+         (("%syscall1") "%fx26-syscall")
+         (("%syscall2") "%fx26-syscall")
+         (("%syscall3") "%fx26-syscall")
+         (("%syscall4") "%fx26-syscall")
+         (("%syscall5") "%fx26-syscall")
+         (("%syscall6") "%fx26-syscall")
          (else "")))
       ((10)
        (case n
@@ -412,6 +419,7 @@
          (("arithmetic-shift") "%fx26-arithmetic-shift")
          (("symbol-name-hash") "%symbol-hash")
          (("close-over-word!") "%fx26-close-over-word!")
+         (("%syscall-require") "%fx26-syscall-require")
          (else "")))
       ((17)
        (case n
@@ -430,6 +438,7 @@
       ((19)
        (case n
          (("%string-append-list") "%fx26-string-append-list")
+         (("%syscall-available?") "%fx26-syscall-available?")
          (else "")))
       ((22)
        (case n

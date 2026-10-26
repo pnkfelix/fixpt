@@ -70,6 +70,8 @@ top-form   ::= definition
              | "(" "define-generative" "(" name gen-param+ ")" type ")"
              | "(" "define-datatype" dt-head variant+ ")"
              | "(" "define-effect" name effect ")"
+             | "(" "define-syscall" name string type ")"            ; a runtime's own code only
+             | "(" "define-optional-syscall" name string type ")"   ; (`docs/fx26.md`, "Syscalls")
              | expression
 
 definition ::= "(" "define" name expression ")"
@@ -307,6 +309,7 @@ expression ::= integer | real | string | char | boolean | unit
              | "(" "tagcase" expression arm* [else-arm] ")"
              | "(" "acyclic" expression "(" name expression ")" expression ")"
              | "(" "confirm-nat" expression "(" name expression ")" expression ")"
+             | "(" "syscall-available?" name ")"    ; `name` a syscall declared
              | "(" "confirm-length" expression (natural-integer | name)
                    "(" name expression ")" expression ")"
              | "(" "prompt" expression expression expression ")"   ; tag body handler

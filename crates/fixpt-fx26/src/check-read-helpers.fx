@@ -73,7 +73,7 @@
         'sumof 'product 'extract 'sum 'tagcase 'module 'moduleof 'with 'select 'load-module
         'define-datatype 'make-bloblet 'bloblet-ref 'bloblet-set! 'bloblet-freeze 'bloblet-byte
         'bloblet-set-byte! 'bloblet-bytes 'rmake-bloblet 'dlambda '=> 'case
-        'define-convention))
+        'define-convention 'define-syscall 'define-optional-syscall 'syscall-available?))
 (define k-no-name symbol '||)
 ;; Whether effect `e` is variable `v` alone.
 (define k-eff-is-var? (->* (k-eff int) bool)

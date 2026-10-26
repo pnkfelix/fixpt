@@ -118,6 +118,7 @@ name = "fixpt-runtime"
 version = "0.1.0"
 dependencies = [
  "fixpt-heap",
+ "fixpt-memmgmt",
  "fixpt-read",
  "libc",
  "num-bigint",

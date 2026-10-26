@@ -33,6 +33,7 @@ pub mod prim;
 pub mod print;
 pub mod runtime;
 pub mod sched;
+pub mod syscall;
 pub mod tty;
 pub mod world;
 

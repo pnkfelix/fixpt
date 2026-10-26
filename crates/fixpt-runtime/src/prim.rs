@@ -2719,6 +2719,22 @@ prims! {
     // not hold from an input that a harness does not take.
     "%fx26-assert", 1, Some(1), simple!(|rt, a| if a[0].is_false() { rt.fail("assertion failed", &[]) } else { Ok(rt.heap.intern_static("#u")) });
     "%fx26-assume", 1, Some(1), simple!(|rt, a| if a[0].is_false() { rt.fail("assumption not met", &[]) } else { Ok(rt.heap.intern_static("#u")) });
+    // Syscalls (`docs/research/syscalls.md`): a required one's check as its
+    // declaration runs; whether one is there; a call of one. Each given its
+    // label for messages, its host name and its type in canonical form.
+    "%fx26-syscall-require", 3, Some(3), simple!(|rt, a| {
+        let (label, host, canonical) = (get_string(rt, a[0])?, get_string(rt, a[1])?, get_string(rt, a[2])?);
+        crate::syscall::require(rt, &label, &host, &canonical)
+    });
+    "%fx26-syscall-available?", 2, Some(2), simple!(|rt, a| {
+        let (host, canonical) = (get_string(rt, a[0])?, get_string(rt, a[1])?);
+        Ok(Value::boolean(crate::syscall::available(&host, &canonical)))
+    });
+    "%fx26-syscall", 3, Some(3 + crate::syscall::MAX_ARGS), simple!(|rt, a| {
+        let (label, host, canonical) = (get_string(rt, a[0])?, get_string(rt, a[1])?, get_string(rt, a[2])?);
+        let args = a[3..].to_vec();
+        crate::syscall::call(rt, &label, &host, &canonical, &args)
+    });
 }
 
 /// Promise states. `[state, payload]`.

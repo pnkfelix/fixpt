@@ -654,6 +654,65 @@ fn declared_conventions_alike() {
     refused(other.lines().map(String::from).collect(), "the `code` clause is not this implementation's");
 }
 
+/// Both checkers on a runtime's own program (`--syscalls`), which may
+/// declare syscalls (`docs/research/syscalls.md`).
+fn both_syscalls(program: &str) -> Result<Vec<String>, (String, u32, u32)> {
+    let ours = common::with_own(|s| {
+        s.checker.syscalls = true;
+        let r = fx26_check_in(s, program);
+        s.checker.syscalls = false;
+        r
+    });
+    let ours = canon(ours.unwrap_or_else(|| panic!("the FX-26 front end cannot parse:\n{program}")));
+    let mut c = Checker::new();
+    c.syscalls = true;
+    let rust = canon(rust_check_in(c, program));
+    assert_eq!(ours, rust, "the checkers disagree on:\n{program}");
+    ours
+}
+
+/// Syscalls' declarations (`docs/research/syscalls.md`), alike in both
+/// checkers: what they accept, and each refusal, at the same place.
+#[test]
+fn syscall_declarations_alike() {
+    let ok = "(define-optional-syscall pw \"code:page-words/1\" (subr (io sys) () int))\n(syscall-available? pw)";
+    let lines = both_syscalls(ok).expect("accepted");
+    assert_eq!(lines, ["define pw : (subr (io sys) () int) ! pure", "bool ! (read (globals %syscall-available:pw))"]);
+    // Only a runtime's own code declares them.
+    let e = both(ok).expect_err("refused");
+    assert_eq!(e.0, "syscalls are declared only by a runtime's own code");
+    let refused = |program: &str, says: &str| {
+        let r = both_syscalls(program);
+        assert!(r.as_ref().is_err_and(|(m, _, _)| m.contains(says)), "{says}: {program}: {r:?}");
+    };
+    let declared = |ty: &str| format!("(define-syscall f \"test:f/1\" {ty})");
+    refused("(define-syscall f \"test:f/1\")", "`(define-syscall name \"host-name\" type)`");
+    refused("(define-optional-syscall f)", "`(define-optional-syscall name \"host-name\" type)`");
+    refused("(define-syscall 5 \"test:f/1\" (subr (io sys) () int))", "expected a name");
+    for host in ["\"test\"", "\"Test:f/1\"", "\"test:f/01\"", "\"test:f/\"", "\"test::f/1\"", "5"] {
+        refused(&format!("(define-syscall f {host} (subr (io sys) () int))"), "a syscall's host name is a string");
+    }
+    let shape = "a syscall's type is a `subr`, or a `poly` over regions only of one";
+    refused(&declared("int"), shape);
+    refused(&declared("(poly ((t type)) (subr (io sys) (t) t))"), shape);
+    refused(&declared("(subr (conv native) (io sys) () int)"), shape);
+    let effects = "a syscall's effect holds `(io sys)`";
+    refused(&declared("(subr pure () int)"), effects);
+    refused(&declared("(subr (maxeff (io sys) (goto @k)) () int)"), effects);
+    let crossing = "a syscall takes and gives only";
+    refused(&declared("(subr (io sys) ((listof int @l)) int)"), crossing);
+    refused(&declared("(poly ((r region)) (subr (io sys) ((flatarrayof u64 r)) int))"), crossing);
+    refused(&declared("(subr (io sys) () f64)"), crossing);
+    refused(&declared("(subr (io sys) ((flatarrayof i64 @k)) int)"), "a syscall's regions are its `poly`'s");
+    refused(&declared("(subr (io sys) (int int int int int int int) int)"), "a syscall takes at most 6 arguments");
+    // Asked of a name declared, and only by a runtime's own code made.
+    let usage = "`syscall-available?` takes the name of a syscall declared";
+    refused("(define g 1)\n(syscall-available? g)", usage);
+    refused("(syscall-available? 5)", usage);
+    refused("(syscall-available?)", usage);
+    refused("(%syscall0 \"l\" \"code:page-words/1\" \"(subr (io sys) () int)\")", "unbound variable `%syscall0`");
+}
+
 /// `native-procedure` (`TODO.md` §97) makes a native closure: its stated
 /// type says so, `(conv native)` (or a name declared as it) or `fx`; the
 /// program's own convention, `cellular`, is refused, and so is no type.

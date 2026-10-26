@@ -21,7 +21,7 @@
 ;; since the program it runs may do any.
 (define-effect io-any
   (maxeff (io stdin) (io stdout) (io stderr) (io fs-read) (io fs-write) (io clock) (io args)
-          (io exit) (io terminal) (io native)))
+          (io exit) (io terminal) (io native) (io sys)))
 
 ;; And the scheduler's state, for the processes and `par` a program makes
 ;; (`fx26:processes.fx`, which the program loads and this runs).

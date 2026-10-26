@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 fixpt-heap = { path = "../fixpt-heap" }
+fixpt-memmgmt = { path = "../fixpt-memmgmt" }
 fixpt-read = { path = "../fixpt-read" }
 num-bigint = "0.4"
 num-integer = "0.1"

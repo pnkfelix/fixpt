@@ -113,6 +113,10 @@
   ;; `(define-convention name clause …)`: its name and the whole form, read
   ;; by the checker alone (`TODO.md` §97).
   (t-define-convention syn syn int int)
+  ;; `(define-syscall name "host" type)` (required) or
+  ;; `(define-optional-syscall …)`: whether required, and the whole form,
+  ;; read by the checker alone, which expands it (`docs/research/syscalls.md`).
+  (t-define-syscall bool syn int int)
   ;; `(define-generative head rep)`: read by the checker alone; its two
   ;; conversions follow it as definitions.
   (t-define-generative syn syn int int)

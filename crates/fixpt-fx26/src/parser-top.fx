@@ -15,7 +15,8 @@
 (import parser-module parse-tag syn-start syn-end pfail syn-symbol? syn-symbol syn-items len nth
         keep mk-list form-head form-of? datatype? mk-pure-subr mk-poly expand-datatype import?
         expand-import e-var e-lambda t-define t-define-rec t-define-type t-define-effect
-        t-define-convention t-define-generative t-exp p-ok shared-taken shared-reset!
+        t-define-convention t-define-syscall t-define-generative t-exp p-ok shared-taken
+        shared-reset!
         (type syns-a exp top param-list top-list presult) (effect parses))
 (import parser-exps-module parse-exp parse-rec-bindings)
 ;; `(define name type expression)` or `(define name expression)`; for a
@@ -59,6 +60,8 @@
                     (if (>= (len items) 2)
                         (t-define-convention (nth items 1) s (syn-start s) (syn-end s))
                         (pfail "`(define-convention name clause …)`" s))))
+                 ((define-syscall) (t-define-syscall #t s (syn-start s) (syn-end s)))
+                 ((define-optional-syscall) (t-define-syscall #f s (syn-start s) (syn-end s)))
                  (else (t-exp (parse-exp s)))))))
 
 (define append-tops (->* (top-list top-list) top-list)

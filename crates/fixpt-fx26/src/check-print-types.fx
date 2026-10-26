@@ -49,7 +49,9 @@
 ;; The types it names, from the files that define them.
 (define-type k-map (select check-types-types k-map))
 ;; The types it names, from the files that define them.
-(import check-types-types (type k-region k-terms))
+(import check-types-types (type k-region k-terms) (effect checks))
+(hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
+(define-type syn (select parser-types syn))
 (define-type check-print-sig
   (moduleof (val k-keep-atree!
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
@@ -62,4 +64,8 @@
                        (k-ids k-printing)
                        k-strings))
             (val k-type-is-var?
-                 (subr (maxeff (read @globals) (read @t) spin) (int int) bool))))
+                 (subr (maxeff (read @globals) (read @t) spin) (int int) bool))
+            (val k-syscall-canonical
+                 (subr (maxeff checks spin) (int int int int int) syn))
+            (val k-syn-text
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (syn) string))))

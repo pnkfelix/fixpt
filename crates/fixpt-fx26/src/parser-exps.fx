@@ -289,6 +289,17 @@
                 (e-let (parse-let-bindings (syn-items (nth items 1) "let bindings"))
                        (parse-body (drop items 2) a b) a b 0)))
         ((begin) (parse-body (cdr items) a b))
+        ;; A syscall declared: its hidden global, whether the runtime has it
+        ;; (`docs/research/syscalls.md`). Not of one name, the form, or what
+        ;; is no name, is the name `syscall-available?`, which the checker
+        ;; refuses as the Rust checker does the form.
+        ((syscall-available?)
+         (cond ((not (= (len items) 2)) (e-var 'syscall-available? a b 0))
+               ((not (syn-symbol? (nth items 1)))
+                (e-var 'syscall-available? (syn-start (nth items 1)) (syn-end (nth items 1)) 0))
+               (else (e-var (string->symbol (string-append "%syscall-available:"
+                                                           (syn-name (nth items 1))))
+                            a b 0))))
         ;; Processes and `par` (`parser-forms.fx`).
         ((spawn spawn-monitored send receive self par race pselect icell-get icell-put!)
          (parse-exp (process-form pfail-at items (parse-loaded processes #f #f a b) a b)))

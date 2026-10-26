@@ -27,7 +27,8 @@
 (import parser-types e-var e-int e-bool e-str e-char e-float e-sym e-unit e-lambda e-app e-plambda
         e-proj e-if e-letrec e-let e-begin e-prompt e-letregion e-rlambda e-the e-convention
         e-bloblet e-product e-extract e-sum e-tagcase e-module e-with t-define t-define-rec
-        t-define-type t-define-effect t-define-convention t-define-generative t-exp p-ok p-err
+        t-define-type t-define-effect t-define-convention t-define-syscall t-define-generative
+        t-exp p-ok p-err
         (type syns-a names exp top exp-list param-list letrec-list let-list arm-list top-list
               mod-item mod-items presult loaded-file loaded-files) (effect tree-builds parses))
 

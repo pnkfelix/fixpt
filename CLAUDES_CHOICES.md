@@ -2051,3 +2051,27 @@ After the user moved the baseline to kayak `d5840ee` and asked to go on;
   memory matters more.
 - The measurement scripts now report kernel cycles beside user cycles:
   this cost had been invisible in `cycles:u` alone.
+
+## Syscalls as two definitions (2026-10-26)
+
+Kayak's request (`docs/research/syscalls.md`), whose "Open questions" were
+Fixpt's to decide; the rest of what Fixpt chose is in that note's last
+section. In short:
+
+- **A declaration expands into ordinary definitions**, the host name and
+  canonical type as literals, rather than a new form for every machine to
+  compile: three runtime primitives serve all nine machines, and the check
+  at load is the declaration's own run. The cost: a check runs when the
+  declaration does, not before the program's first form.
+- **`syscall-available?` is a hidden global's name**, so that the FX-26
+  compiler, which compiles the parser's trees, needs nothing from the
+  checker at a use.
+- **`(io sys)` one atom; declarations per program; `syscall-available?`
+  of declared names only**: the open questions, each the simpler side.
+- **`code:exec-view/1` always -1** in Fixpt, rather than pinning arrays
+  for it: allowed by the request, and nothing in Fixpt needs a view.
+- **At most six arguments**, constant regions and specifications refused:
+  limits nothing asked for yet needs past, each easy to lift.
+- **The evaluator written in FX-26 gets a table of its own**, the same
+  three, so that every machine answers alike.
+

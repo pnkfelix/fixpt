@@ -97,17 +97,38 @@
 ;; file built in sees.
 (define check-built-in! (->* (bool) unit)
   (lambda (on) (set k-in-built-in (+ (get k-in-built-in) (if on 1 -1)))))
+;; Whether the program is a runtime's, whose driver was told so
+;; (`--syscalls`): it may declare syscalls, as a module file built in may
+;; (`docs/research/syscalls.md`, "Containment"). For a driver, to set.
+(define k-syscalls (ref bool @t) (new #f))
+(define check-syscalls! (->* (bool) unit) (lambda (on) (set k-syscalls on)))
+;; While a syscall's declaration expands (`k-define-syscall`), what it
+;; expands into names what a module file built in may: more than 0. Each
+;; check's entry point sets it to 0, so that a check that failed half way
+;; leaves nothing named so.
+(define k-syscall-expanding (ref int @t) (new 0))
+;; The standard names only a module file built in may name, in a table:
+;; every lookup of a name asks (`k-hidden-standard?`).
+(define k-built-in-only-table (table symbol bool @t) (make-table symbol-hash symbol=?))
+(define k-built-in-only-fill!
+  (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t)) ((listof symbol acyclic)) unit)
+  (lambda (ns)
+    (if (null? ns)
+        #u
+        (begin (table-set! k-built-in-only-table (car ns) #t) (k-built-in-only-fill! (cdr ns))))))
+(define k-built-in-only-filled unit
+  (k-built-in-only-fill!
+   (list '%sched '%processes:spawn-process '%processes:send '%processes:receive
+         '%processes:icell-get '%processes:icell-put! '%processes:par2 '%processes:cell-event
+         '%processes:mailbox-event '%processes:or-event '%processes:sync
+         '%processes:clock-event '%processes:stdin-event '%processes:race2 '%processes:self
+         '%processes:spawn-monitored
+         ;; What a syscall's declaration expands into
+         ;; (`docs/research/syscalls.md`).
+         '%syscall-require '%syscall0 '%syscall1 '%syscall2 '%syscall3 '%syscall4 '%syscall5
+         '%syscall6)))
 (define k-built-in-only? (->* (symbol) bool)
-  (lambda (s)
-    (or (symbol=? s '%sched) (symbol=? s '%processes:spawn-process)
-        (symbol=? s '%processes:send) (symbol=? s '%processes:receive)
-        (symbol=? s '%processes:icell-get) (symbol=? s '%processes:icell-put!)
-        (symbol=? s '%processes:par2) (symbol=? s '%processes:cell-event)
-        (symbol=? s '%processes:mailbox-event) (symbol=? s '%processes:or-event)
-        (symbol=? s '%processes:sync) (symbol=? s '%processes:clock-event)
-        (symbol=? s '%processes:stdin-event)
-        (symbol=? s '%processes:race2) (symbol=? s '%processes:self)
-        (symbol=? s '%processes:spawn-monitored))))
+  (lambda (s) (table-ref k-built-in-only-table s #f)))
 ;; Whether the innermost binding of `s` was made at depth `mark` or after.
 (define k-bound-since? (->* (symbol int) bool)
   (lambda (s mark)
@@ -150,7 +171,9 @@
 ;; Whether `s`, bound at `t`, is a standard name only the module files built
 ;; in may name, named elsewhere.
 (define k-hidden-standard? (->* (symbol int) bool)
-  (lambda (s t) (and (k-built-in-only? s) (= (get k-in-built-in) 0) (= t (k-std-type s)))))
+  (lambda (s t)
+    (and (k-built-in-only? s) (= (get k-in-built-in) 0) (= (get k-syscall-expanding) 0)
+         (= t (k-std-type s)))))
 (define k-lookup-seen (->* (symbol) int)
   (lambda (s)
     (let ((st (table-ref (get k-env) s nil)) (mark (get k-hide-mark)))
@@ -167,7 +190,11 @@
   (lambda (s)
     (let ((why (k-broken-why s)) (n (symbol->string s)))
       (if (null? why)
-          (k-cat3 "unbound variable `" n "`")
+          (if (or (string=? n "syscall-available?")
+                  (and (>= (string-length n) 19)
+                   (string=? (substring n 0 19) "%syscall-available:")))
+              "`syscall-available?` takes the name of a syscall declared"
+              (k-cat3 "unbound variable `" n "`"))
           (k-cat5 "`" n "` is broken, " (car why) ": define it again to use it")))))
 ;; Whether `at` is the identity `a`, `b`, `k`.
 (define k-at-is? (->* (k-at int int int) bool)

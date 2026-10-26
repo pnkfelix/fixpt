@@ -506,6 +506,12 @@
                    (c-exp x (the cenv nil) 0 c #f)
                    (c-form-twins)
                    (c-tops (cdr ts) c #t)))
+          ;; A syscall's declaration expands as the checker written in
+          ;; FX-26 prints its type (`compile-checked`), which these trees,
+          ;; checked by the Rust checker, have not.
+          (t-define-syscall (required s a b)
+            (c-fail (string-append "a syscall's declaration compiles only as the checker "
+                                   "written in FX-26 checks it")))
           (else y (c-tops (cdr ts) c has-value))))))
 
 ;; Each of `bs`' names' next definition keeps the global it has.

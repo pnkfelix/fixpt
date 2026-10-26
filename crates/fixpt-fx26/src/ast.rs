@@ -139,10 +139,13 @@ pub enum IoKind {
     Exit,
     Terminal,
     Native,
+    /// A capability the runtime provides by name (`define-syscall`,
+    /// `docs/research/syscalls.md`).
+    Sys,
 }
 
 impl IoKind {
-    pub const ALL: [IoKind; 10] = [
+    pub const ALL: [IoKind; 11] = [
         IoKind::Stdin,
         IoKind::Stdout,
         IoKind::Stderr,
@@ -153,6 +156,7 @@ impl IoKind {
         IoKind::Exit,
         IoKind::Terminal,
         IoKind::Native,
+        IoKind::Sys,
     ];
     /// Its name, as `(io k)` writes it.
     pub fn name(self) -> &'static str {
@@ -167,6 +171,7 @@ impl IoKind {
             IoKind::Exit => "exit",
             IoKind::Terminal => "terminal",
             IoKind::Native => "native",
+            IoKind::Sys => "sys",
         }
     }
     pub fn named(n: &str) -> Option<IoKind> {

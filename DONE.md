@@ -3282,3 +3282,31 @@ the front end's words (168,576 accesses joined), the native tests, and
 the four `f64` benchmarks (`nbody`, `spectralnorm2`, `matrix-multiply`,
 `mandelbrot`) on `fx-regs-rsjit-nativecc` and `fx-regs-fxjit-nativecc`.
 
+## 127. Syscalls (kayak's request, 2026-10-26)
+
+One extension, so that runtimes written in FX-26 gain capabilities without
+further changes to the language: `define-syscall`,
+`define-optional-syscall`, `syscall-available?` and the effect `(io sys)`,
+with a declared type compared with the runtime's as canonical text
+(`docs/fx26.md`, "Syscalls"). Kayak's request is
+`docs/research/syscalls.md`, Fixpt's copy, whose last section, "What
+Fixpt does", records what differs from it and the open questions decided.
+
+- **Both checkers**, each the other's twin (`syscall.rs`; `check-program.fx`
+  and `check-print.fx`), compared on what they accept and each refusal
+  (`tests/checker.rs`, `syscall_declarations_alike`). A declaration expands
+  into two ordinary definitions, so every machine runs it as it runs any:
+  `fixpt_runtime::syscall` holds the runtime's table and its three
+  primitives; the evaluator written in FX-26 has a table of its own.
+- **Fixpt's syscalls**: `code:exec-view/1` (always -1: a flat array moves
+  when collected), `code:page-words/1`, `code:flush/1` (nothing to flush).
+- **Containment**: `fixpt --syscalls`, or a module file built in.
+- **Tests**: `fixpt-cli/tests/syscalls.rs`, `programs/syscalls/` on every
+  machine, alike: the three called; an optional one absent (`#f`, a call's
+  failure); a required one missing, and one at another type (its message
+  shows the canonical form: aliases expanded, effects sorted and deduped,
+  regions renamed); an ordinary program's declaration refused.
+- **Not yet**: the FX-26 compiler's entry for trees the Rust checker
+  checked (`compile-program`, `fixpt compile`'s comparison) refuses a
+  declaration, having no canonical form to expand it with.
+

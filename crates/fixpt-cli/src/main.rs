@@ -87,6 +87,9 @@ options (before or after the command; after `--`, the program's):
   --step-limit N|none            how many evaluation steps a form may take before
                                  it is stopped, or no limit (default: 20000000
                                  for FX-87, FX-91 and FX-26; none for Scheme)
+  --syscalls                     FX-26: the program is a runtime's, which may
+                                 declare syscalls (`define-syscall`,
+                                 `docs/research/syscalls.md`)
   --emacs                        the FX-26 REPL as Emacs drives it over a pipe
                                  (`editors/emacs/fx26-mode.el`): no continuation
                                  prompt, and `,at FILE LINE COL` before a form to
@@ -272,6 +275,7 @@ fn run(args: &[String]) -> i32 {
         _ => None,
     });
     let _ = EMACS.set(flags.emacs);
+    let _ = SYSCALLS.set(flags.syscalls);
     let _ = NATIVE_BY_FX26.set(flags.calling_convention.as_deref() == Some("fx-native"));
     let _ = NATIVE_CONVENTION.set(match flags.calling_convention.as_deref() {
         None | Some("cellular") => false,
@@ -533,6 +537,7 @@ struct Flags {
     step_limit: Option<String>,
     speculation_step_limit: Option<String>,
     emacs: bool,
+    syscalls: bool,
 }
 
 /// The FX-26 machines by name (`--machine`, `TODO.md` §78): who
@@ -697,6 +702,9 @@ pub(crate) static NATIVE_CONVENTION: std::sync::OnceLock<bool> = std::sync::Once
 pub(crate) static NATIVE_BY_FX26: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 /// `--emacs`: the REPL as Emacs drives it (`editors/emacs/fx26-mode.el`).
 pub(crate) static EMACS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+/// `--syscalls`: the FX-26 program is a runtime's, which may declare
+/// syscalls (`docs/research/syscalls.md`, "Containment").
+pub(crate) static SYSCALLS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
 /// `--gc-every`, for every heap this process starts.
 pub(crate) static GC_EVERY: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
 
@@ -745,6 +753,7 @@ fn split_flags(args: &[String]) -> Result<(Flags, Vec<String>), String> {
         step_limit: None,
         speculation_step_limit: None,
         emacs: false,
+        syscalls: false,
     };
     let mut rest = Vec::new();
     let mut i = 0;
@@ -781,6 +790,11 @@ fn split_flags(args: &[String]) -> Result<(Flags, Vec<String>), String> {
             i += 1;
             continue;
         }
+        if args[i] == "--syscalls" {
+            flags.syscalls = true;
+            i += 1;
+            continue;
+        }
         for (name, set) in named {
             if args[i] == name {
                 let Some(v) = args.get(i + 1) else { return Err(format!("`{name}` needs a value")) };
@@ -800,7 +814,7 @@ fn split_flags(args: &[String]) -> Result<(Flags, Vec<String>), String> {
             return Err(format!("`{word}` is gone: a machine is chosen by its name, `--machine NAME` (`fixpt machines` lists them)"));
         }
         if word.starts_with("--") && !COMMAND_OPTIONS.contains(&word) {
-            let known = named.iter().map(|(n, _)| *n).chain(["--emacs"]).chain(COMMAND_OPTIONS);
+            let known = named.iter().map(|(n, _)| *n).chain(["--emacs", "--syscalls"]).chain(COMMAND_OPTIONS);
             return Err(format!("unknown option `{word}`{}", did_you_mean(word, known)));
         }
         rest.push(args[i].clone());

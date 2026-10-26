@@ -853,6 +853,7 @@ pub const TABLE: &str = include_str!("table.fx");
 pub mod check;
 pub mod compare;
 mod convention;
+pub(crate) mod syscall;
 pub mod ids;
 pub mod infer;
 mod kinds;

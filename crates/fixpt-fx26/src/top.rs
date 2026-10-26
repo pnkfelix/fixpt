@@ -254,7 +254,9 @@ impl Checker {
     pub fn defined_names(&self, form: &Syntax) -> Vec<Sym> {
         let Some(items) = form.as_proper_list() else { return Vec::new() };
         match items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h)) {
-            Some("define" | "define*") => items.get(1).and_then(|n| n.as_symbol()).into_iter().collect(),
+            Some("define" | "define*" | "define-syscall" | "define-optional-syscall") => {
+                items.get(1).and_then(|n| n.as_symbol()).into_iter().collect()
+            }
             Some("define-rec") => items[1..].iter().filter_map(|b| b.as_proper_list()?.first()?.as_symbol()).collect(),
             _ => Vec::new(),
         }
@@ -582,6 +584,7 @@ impl Checker {
                 }
                 Ok(top)
             }
+            Some("define-syscall" | "define-optional-syscall") => self.define_syscall(form, items, head == Some("define-syscall")),
             Some("define-effect") => {
                 let [_, name, def] = items else {
                     return Err(FxError::at(form.span, "`(define-effect name effect)`"));
@@ -1337,7 +1340,7 @@ pub const KEYWORDS: &[&str] = &[
     "lambda", "plambda", "proj", "if", "letrec", "let", "begin", "define", "define*", "define-type", "define-generative",
     "subr", "->", "->*", "poly", "ref", "pairof", "dletrec", "void", "pure", "maxeff", "read", "write",
     "alloc", "goto", "comefrom", "region", "effect", "type", "prompt", "prompt-tag",
-    "composable", "oneshot", "mark-key", "listof", "cond", "case", "else", "and", "or", "let*", "define-effect", "define-convention", "module-parameters", "the",
+    "composable", "oneshot", "mark-key", "listof", "cond", "case", "else", "and", "or", "let*", "define-effect", "define-convention", "define-syscall", "define-optional-syscall", "syscall-available?", "module-parameters", "the",
     "bloblet", "fields", "frozen", "arrayof", "icell", "await", "define-rec", "letrena", "letreap", "rlambda", "quote", "productof", "sumof", "product", "extract", "sum", "tagcase", "module", "moduleof", "with", "select", "load-module", "import",
     "define-datatype", "make-bloblet", "bloblet-ref", "bloblet-set!", "bloblet-freeze", "bloblet-byte",
     "bloblet-set-byte!", "bloblet-bytes", "rmake-bloblet", "dlambda", "=>",

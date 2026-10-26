@@ -38,7 +38,8 @@
 (import parser-module len drop label keep arity e-var e-int e-bool e-str e-char e-float e-sym e-unit
         e-lambda e-app e-plambda e-proj e-if e-letrec e-let e-begin e-prompt e-letregion e-rlambda
         e-the e-convention e-bloblet e-product e-extract e-sum e-tagcase e-module e-with t-define
-        t-define-rec t-define-type t-define-effect t-define-convention t-define-generative t-exp
-        p-ok p-err quoted loaded loaded-files! (type names exp top) (effect parses))
+        t-define-rec t-define-type t-define-effect t-define-convention t-define-syscall
+        t-define-generative t-exp p-ok p-err quoted loaded loaded-files! (type names exp top)
+        (effect parses))
 ;; From `parser-top.fx`.
 (define parse-program (with parser-top-module parse-program))

@@ -103,6 +103,7 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
     s.scheme.runtime_unrooted().place_code = crate::CELLULAR_PLACE_CODE.get().copied().flatten();
     s.register_code = crate::CELLULAR_MACHINE_NAME.get().is_some_and(|n| n.contains("register code"));
     s.redefine = Some(ask_redefine);
+    s.checker.syscalls = crate::SYSCALLS.get().copied().unwrap_or(false);
     if crate::NATIVE_CONVENTION.get().copied().unwrap_or(false) {
         s.set_native_convention(true);
         s.native_runner = Some(run_native);

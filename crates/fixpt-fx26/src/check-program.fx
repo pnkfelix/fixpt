@@ -841,13 +841,123 @@
            (ran (k-note-run form assigns)))
       (if (or (null? olds) assigns defer) lines (k-rerun users ns lines)))))
 
+;;; Syscalls (`docs/research/syscalls.md`; `syscall.rs`, word for word): a
+;;; declaration checked alone, then expanded into two definitions, each
+;;; checked as any is: `%syscall-available:NAME`, whether the runtime has
+;;; it, its line not shown, and `NAME`, which may name what a module file
+;;; built in may.
+(define k-sys-host-msg string "a syscall's host name is a string, `namespace:name/version`")
+(define k-sys-part-char? (->* (char) bool)
+  (lambda (c)
+    (or (and (char>=? c #\a) (char<=? c #\z)) (and (char>=? c #\0) (char<=? c #\9))
+        (char=? c #\-))))
+;; Whether `h` from `i` is the rest of a host name, in part `p` (0 the
+;; namespace, 1 the name, 2 the version) of which `n` characters are read.
+(define k-sys-host-from? (->* (string int int int) bool)
+  (lambda (h i p n)
+    (if (= i (string-length h))
+        (and (= p 2) (> n 0))
+        (let ((c (string-ref h i)))
+          (cond ((and (= p 0) (char=? c #\:)) (and (> n 0) (k-sys-host-from? h (+ i 1) 1 0)))
+                ((and (= p 1) (char=? c #\/)) (and (> n 0) (k-sys-host-from? h (+ i 1) 2 0)))
+                ((= p 2) (and (char>=? c #\0) (char<=? c #\9)
+                              (not (and (= n 0) (char=? c #\0)))
+                              (k-sys-host-from? h (+ i 1) 2 (+ n 1))))
+                (else (and (k-sys-part-char? c) (k-sys-host-from? h (+ i 1) p (+ n 1)))))))))
+(define k-sys-host-of (->* (syn) string)
+  (lambda (s)
+    (tagcase s
+      (atom (d a b)
+        (typecase d
+          (string h (if (k-sys-host-from? h 0 0 0) h (k-sfail k-sys-host-msg s)))
+          (else x (k-sfail k-sys-host-msg s))))
+      (else x (k-sfail k-sys-host-msg s)))))
+(define k-sys-str (->* (string int int int) exp) (lambda (v a b k) (e-str v a b k)))
+;; `x1` … `xi`, onto `acc`, the `i`th's identity `k`+`i`.
+(define k-sys-xs (->* (int int int int (listof exp acyclic)) (listof exp acyclic))
+  (lambda (i a b k acc)
+    (if (= i 0)
+        acc
+        (k-sys-xs (- i 1) a b k
+                  (cons (e-var (string->symbol (string-append "x" (int->string i))) a b (+ k i))
+                        acc)))))
+(define k-sys-params (->* (int (listof syn acyclic)) param-list)
+  (lambda (i ps)
+    (if (null? ps)
+        nil
+        (cons (product (1 (string->symbol (string-append "x" (int->string i))))
+                       (2 (the syns-a (list (car ps)))))
+              (k-sys-params (+ i 1) (cdr ps))))))
+(define k-sys-items (->* (syn) (listof syn acyclic))
+  (lambda (s) (tagcase s (lst (items d a b) items) (else x nil))))
+;; The two definitions declaration `name` at `a`..`b` is, its type
+;; `canonical`, `text` printed: whether the runtime has it, for a required
+;; one checked as it is made; and itself, each of its expressions an
+;; identity of its own. A `poly`'s binders are in scope in its definition,
+;; which is checked against its body.
+(define k-sys-defs (->* (symbol string syn string bool int int) (productof (1 top) (2 top)))
+  (lambda (name host canonical text required a b)
+    (let* ((label (string-append "syscall " (symbol->string name) " (\"" host "\")"))
+           (asks (lambda ((f symbol) (k int))
+                   (e-app (e-var f a b k)
+                          (list (k-sys-str label a b (+ k 1)) (k-sys-str host a b (+ k 2))
+                                (k-sys-str text a b (+ k 3)))
+                          a b (+ k 4))))
+           (cs (k-sys-items canonical))
+           (poly? (string=? (syn-name (car cs)) "poly"))
+           (subr (if poly? (car (cdr (cdr cs))) canonical))
+           (ss (k-sys-items subr))
+           (ps (k-sys-items (car (cdr (cdr ss)))))
+           (n (length ps))
+           (call (tagcase (asks (string->symbol (string-append "%syscall" (int->string n))) 1010)
+                   (e-app (f xs a2 b2 k2)
+                     (e-app f (append xs (k-sys-xs n a b 1020 nil)) a b k2))
+                   (else x x)))
+           (body (e-lambda (k-sys-params 1 ps) (e-the (car (cdr (cdr (cdr ss)))) call a b 1030)
+                           a b 1031))
+           (available
+            (if required
+                (e-begin (list (asks '%syscall-require 1040) (e-bool #t a b 1045)) a b 1046)
+                (e-app (e-var '%syscall-available? a b 1050)
+                       (list (k-sys-str host a b 1051) (k-sys-str text a b 1052)) a b 1053)))
+           (companion (string->symbol (string-append "%syscall-available:" (symbol->string name)))))
+      (product (1 (t-define companion (the syns-a (list (atom 'bool a b))) available a b))
+               (2 (t-define name (the syns-a (list canonical)) body a b))))))
+;; `(define-syscall name "host" type)` (`required`), or
+;; `(define-optional-syscall …)`, at `a`..`b`: its line, its definition's.
+(define k-define-syscall (->* (bool syn int int) k-out)
+  (lambda (required s a b)
+    (let* ((what (if required "define-syscall" "define-optional-syscall"))
+           (allowed (if (or (> (get k-in-built-in) 0) (get k-syscalls))
+                        #u
+                        (k-fail "syscalls are declared only by a runtime's own code" a b)))
+           (items (k-sys-items s))
+           (shape (if (= (length items) 4)
+                      #u
+                      (k-fail (string-append "`(" what " name \"host-name\" type)`") a b)))
+           (name (k-name-of (car (cdr items)) "expected a name"))
+           (host (k-sys-host-of (car (cdr (cdr items)))))
+           (ty (car (cdr (cdr (cdr items)))))
+           (t (k-parse-type ty))
+           (canonical (k-syscall-canonical t a b (syn-start ty) (syn-end ty)))
+           (defs (k-sys-defs name host canonical (k-syn-text canonical) required a b)))
+      (begin (set k-syscall-expanding (+ (get k-syscall-expanding) 1))
+             (k-defining (extract defs 1))
+             (let ((lines (k-defining (extract defs 2))))
+               (begin (set k-syscall-expanding (- (get k-syscall-expanding) 1)) lines))))))
+(define k-defining-form (->* (top) k-out)
+  (lambda (form)
+    (tagcase form
+      (t-define-syscall (required s a b) (k-define-syscall required s a b))
+      (else y (k-defining form)))))
+
 ;; The second pass: definitions and expressions, in order, each under
 ;; redefinition (`k-defining`).
 (define k-forms (->* (k-tops k-out) k-out)
   (lambda (forms out)
     (if (null? forms)
         (reverse out)
-        (k-forms (cdr forms) (k-push-lines (k-defining (car forms)) out)))))
+        (k-forms (cdr forms) (k-push-lines (k-defining-form (car forms)) out)))))
 
 ;; The entry point: check a program's trees, in the initial environment
 ;; written `standard`. What each definition and expression is, in order,
@@ -855,7 +965,8 @@
 (define check-program (->* (syns-a k-tops) k-result)
   (lambda (standard forms)
     (prompt k-tag
-      (begin (k-reset) (set k-broken-began (get k-broken)) (k-standard standard)
+      (begin (k-reset) (set k-broken-began (get k-broken)) (set k-syscall-expanding 0)
+             (k-standard standard)
              (set k-std-dscope (get k-dscope))
              (k-ahead forms)
              (k-ok (k-forms forms (k-types-again forms))))
@@ -869,6 +980,7 @@
   (lambda (forms)
     (prompt k-tag
       (begin (set k-extracts nil)
+             (set k-syscall-expanding 0)
              (set k-broken-began (get k-broken))
              (set k-effect-notes nil)
              (k-forget-withs)

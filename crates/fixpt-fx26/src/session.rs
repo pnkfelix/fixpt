@@ -843,9 +843,21 @@ impl Fx26Session {
                 Top::Define { name, .. } => self.checker.interner.name(*name).strip_prefix("%shared:").map(str::to_string),
                 _ => None,
             };
+            // A syscall's hidden global, whether the runtime has it: the
+            // front end written in FX-26 makes it itself, from the
+            // declaration (`syscall.rs`), as the Rust lowering does not.
+            let syscall = matches!(&top, Top::Define { name, .. }
+                if self.checker.interner.name(*name).starts_with(crate::syscall::AVAILABLE));
+            if syscall && self.strategy != Strategy::Lower {
+                continue;
+            }
             let mut o = self.run_checked(top, &f, false)?;
             if o.value.is_err() {
                 o.printed.insert_str(0, &first);
+                // A required syscall's check failed: said of the declaration.
+                if syscall {
+                    o.top = done.run[0].0.clone();
+                }
                 return Ok(o);
             }
             self.shared_made.extend(shared);
@@ -1179,10 +1191,12 @@ impl Fx26Session {
     /// subroutine type that names none has, the standard environment's
     /// included, in both checkers. Before any form is checked.
     pub fn set_native_convention(&mut self, on: bool) {
+        let syscalls = self.checker.syscalls;
         self.native_convention = on;
         self.checker = Checker::with_convention(if on { crate::ast::Conv::Native } else { crate::ast::Conv::Cellular });
         self.checker.globals_effects = self.globals_effects;
         self.checker.defer_reruns = self.defer_reruns;
+        self.checker.syscalls = syscalls;
     }
 
     /// Whether a redefinition that makes a new global leaves the
@@ -1230,16 +1244,17 @@ impl Fx26Session {
         let mut c = Checker::with_convention(if self.native_convention { crate::ast::Conv::Native } else { crate::ast::Conv::Cellular });
         c.globals_effects = self.globals_effects;
         c.base_dir = self.checker.base_dir.clone();
+        c.syscalls = self.checker.syscalls;
         c
     }
 
     /// The front end's entry points the Rust side calls by name
     /// (`READER_PREFIX`), each rebound by [`Self::front_end_as_register_code`].
-    pub const FRONT_ENTRIES: [&'static str; 34] = [
+    pub const FRONT_ENTRIES: [&'static str; 35] = [
         "read-text-at", "check-program", "check-more", "checked-tops", "checked-extracts", "checked-effects", "check-conv-native!", "checked-withs!", "checked-reshapes!",
         "check-globals-effects!", "check-defer-reruns!", "check-hold-breaks!", "check-lines!", "parse-program", "loaded-files!", "run-checked", "run-checked-more", "compile-program", "compile-checked", "compile-registers!", "compile-conv-native!",
         "compile-global-cell", "compile-new-global", "compile-name-word!", "compile-defining!", "compile-keep-global!", "compile-note-inline!", "compile-forget-globals!", "native-assemble",
-        "check-built-in!",
+        "check-built-in!", "check-syscalls!",
         "native-assemble-x64", "native-assemble-x64-regs", "native-adapter-x64", "native-compile-x64-proc",
     ];
 
@@ -1424,6 +1439,8 @@ impl Fx26Session {
             self.scheme.call_global(&format!("{READER_PREFIX}check-globals-effects!"), &[on]).map_err(|e| fail(e.to_string()))?;
             let on = self.scheme.make(|_| fixpt_heap::Value::boolean(self.defer_reruns));
             self.scheme.call_global(&format!("{READER_PREFIX}check-defer-reruns!"), &[on]).map_err(|e| fail(e.to_string()))?;
+            let on = self.scheme.make(|_| fixpt_heap::Value::boolean(self.checker.syscalls));
+            self.scheme.call_global(&format!("{READER_PREFIX}check-syscalls!"), &[on]).map_err(|e| fail(e.to_string()))?;
             Ok(())
         })();
         self.scheme.release_to(mark);

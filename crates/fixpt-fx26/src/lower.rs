@@ -464,6 +464,15 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("first-mark", "%fx26-first-mark", false),
     ("current-marks", "%fx26-current-marks", false),
     ("marks-of", "%fx26-marks-of", false),
+    ("%syscall-require", "%fx26-syscall-require", true),
+    ("%syscall-available?", "%fx26-syscall-available?", true),
+    ("%syscall0", "%fx26-syscall", true),
+    ("%syscall1", "%fx26-syscall", true),
+    ("%syscall2", "%fx26-syscall", true),
+    ("%syscall3", "%fx26-syscall", true),
+    ("%syscall4", "%fx26-syscall", true),
+    ("%syscall5", "%fx26-syscall", true),
+    ("%syscall6", "%fx26-syscall", true),
 ];
 
 /// The FX-26 copy of what [`STANDARD`] says the compiler written in FX-26
