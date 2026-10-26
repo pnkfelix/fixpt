@@ -388,3 +388,18 @@
           (fork-branch (lambda () ((proj (proj fill @par) a) ca (f))))
           (fork-branch (lambda () ((proj (proj fill @par) b) cb (g))))
           (product (1 ((proj (proj await @par) a) ca)) (2 ((proj (proj await @par) b) cb))))))))
+;; `f`'s value, `f` a task, a monitored group as a `race` branch is; should
+;; it fail, `(h message)` instead (`attempt`; Heist's, `FIXPT-CHANGES.md`
+;; F1). `f` is cancellable, so a failure half way leaves nothing another
+;; could see; `h` runs in the current task, after.
+(define attempt1 (poly ((a type)) (subr any ((subr any () a) (subr any (string) a)) a))
+  (plambda ((a type))
+    (lambda (f h)
+      (let* ((res (the (icell (outcome a) @par) (make-icell)))
+             (offer (lambda ((o (outcome a))) ((proj (proj offer-outcome @par) a) res o))))
+        (begin
+          (fork-race-branch (lambda () (offer (sum won (f))))
+                            (lambda ((m string)) (offer (sum lost m))))
+          (tagcase ((proj (proj await @par) (outcome a)) res)
+            (won v v)
+            (lost m (h m))))))))

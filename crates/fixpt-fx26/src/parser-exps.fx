@@ -301,7 +301,7 @@
                                                            (syn-name (nth items 1))))
                             a b 0))))
         ;; Processes and `par` (`parser-forms.fx`).
-        ((spawn spawn-monitored send receive self par race pselect icell-get icell-put!)
+        ((spawn spawn-monitored send receive self par race attempt pselect icell-get icell-put!)
          (parse-exp (process-form pfail-at items (parse-loaded processes #f #f a b) a b)))
         ((cond) (parse-cond (cdr items) a b))
         ((case) (parse-case (cdr items) a b))

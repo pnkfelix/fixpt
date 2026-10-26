@@ -264,6 +264,37 @@ fn a_spinning_process_is_preempted() {
     }
 }
 
+/// `attempt` (Heist's, `FIXPT-CHANGES.md` F1): a failure in a cancellable
+/// body is its on-failure's value, not the form's (`programs/attempt`),
+/// every way, and under schedules of many orders; a body that could be
+/// seen is refused by both checkers.
+#[test]
+fn an_attempts_failure_is_its_on_failures_value() {
+    let mut wrong = Vec::new();
+    for (name, text, says) in &programs_in("attempt") {
+        let ways = [
+            ("lowered", lowered(text, None)),
+            ("evaluated", printed(common::with_own_eval(|s| s.eval_with_own_evaluator(text)))),
+            ("compiled", printed(common::with_own(|s| s.compile_with_own_compiler(text)))),
+            ("native", native(text)),
+        ];
+        for (way, got) in ways {
+            if !as_said(says, &got) {
+                wrong.push(format!("{name}, {way}: says {says:?}, gives {got:?}"));
+            }
+        }
+        if says.is_ok() {
+            for seed in 1..=10 {
+                let got = lowered(text, Some(seed * 7919));
+                if !as_said(says, &got) {
+                    wrong.push(format!("{name}, seed {seed}: gives {got:?}"));
+                }
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
 /// Monitors (`docs/fx26.md`, "Monitors"; kayak's request, `TODO.md` §94):
 /// a monitored process's failure is a message to its watcher, not the
 /// form's (`programs/monitors`), every way, and under schedules of many

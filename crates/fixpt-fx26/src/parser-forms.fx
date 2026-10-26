@@ -57,6 +57,7 @@
         ((spawn-monitored) (spawn-monitored-form fail items call a b))
         ((pselect) (select-form fail items lib a b))
         ((race) (race-form fail items lib a b))
+        ((attempt) (attempt-form fail items call a b))
         (else (par-form fail items lib a b))))))
 
 ;; How `process-form` makes a call of the scheduler's procedure, by name.
@@ -191,6 +192,16 @@
                  (inner (race-tree (cdr es) lib a b))
                  (rest (if (null? (cdr (cdr es))) inner (thunk-syn inner a b))))
             (mk-list (the syns-a (list op (thunk-syn e sa sb) rest)) a b))))))
+;;; ----------------------------------------------------------- attempt
+
+;; `(attempt e h)`: `((with lib attempt1) (lambda () e) h)`, the thunk at
+;; its expression (the Rust parser's; Heist's, `FIXPT-CHANGES.md` F1).
+(define attempt-form (->* (fails syns-a calls int int) syn)
+  (lambda (fail items call a b)
+    (begin
+      (arity fail items 3 "`(attempt expression on-failure)`" a b)
+      (let ((e (nth items 1)))
+        (call "attempt1" (the syns-a (list (thunk-syn e (syn-start e) (syn-end e)) (nth items 2))))))))
 ;;; ----------------------------------------------------------- pselect
 
 ;; `(pselect (W0 x0 body0 …) … (Wn xn bodyn …))`, each `W` `(icell-get c)`,

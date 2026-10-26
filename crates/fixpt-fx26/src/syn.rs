@@ -891,7 +891,7 @@ fn load_modules_at(f: &Syntax, interner: &Interner, out: &mut Vec<Load>) {
         out.push((f.span.start, p.to_string(), input, Some(file.to_string())));
     }
     let head = items.first().and_then(|h| h.as_symbol()).map(|h| interner.name(h));
-    if matches!(head, Some("spawn" | "spawn-monitored" | "send" | "receive" | "self" | "par" | "race" | "pselect" | "icell-get" | "icell-put!")) {
+    if matches!(head, Some("spawn" | "spawn-monitored" | "send" | "receive" | "self" | "par" | "race" | "attempt" | "pselect" | "icell-get" | "icell-put!")) {
         out.push((f.span.start, crate::check::PROCESSES.to_string(), false, None));
     }
     let rest = items.get(1..).unwrap_or_default();

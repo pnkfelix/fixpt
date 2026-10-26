@@ -96,6 +96,16 @@ fn a_monitored_failure_is_a_message_on_each_machine() {
     }
 }
 
+/// `attempt` (Heist's, `FIXPT-CHANGES.md` F1) on each machine
+/// (`programs/attempt`): a failure the machine traps is its on-failure's
+/// value.
+#[test]
+fn an_attempts_failure_is_caught_on_each_machine() {
+    for name in ["trap.fx", "error.fx", "nested.fx", "own-region.fx", "in-process.fx", "handler-io.fx", "many.fx", "evaluator-after-failure.fx"] {
+        as_said_in("attempt", name, &machines(), None);
+    }
+}
+
 /// What a preempted process keeps, in registers or frames, is there, moved
 /// by the collections the other's work makes, when it goes on. Not the
 /// evaluator written in FX-26, whose own recursion is too deep for 100,000

@@ -286,7 +286,17 @@ pub fn run_op(rt: &mut Runtime, n: i64, a: Value, b: Value) -> Outcome<Value> {
                 return rt.type_error("a string", a);
             }
             let m = rt.heap.string_to_rust(a);
-            return Ok(task_failed(rt, &m, |_, _| true).unwrap_or(Value::FALSE));
+            // The evaluator's polls cannot see whether the scheduler's
+            // prompt is still on the stack (`PREEMPT_WANTED` assumes it
+            // is), so the failed task is made quiet from here: after the
+            // abort, until `TAKE_FAILURE` ends it, the scheduler's own code
+            // runs as that task, outside the prompt, and a poll there would
+            // `suspend` it with no prompt to capture to.
+            let tag = task_failed(rt, &m, |_, _| true);
+            if tag.is_some() {
+                rt.heap.quiet_enter();
+            }
+            return Ok(tag.unwrap_or(Value::FALSE));
         }
         // For the evaluator written in FX-26, which runs a program's
         // scheduler as its own values, and so calls its `preempt` itself:

@@ -79,6 +79,7 @@
                         ((and (string=? s "spawn-monitored") (= k 3)) "spawn-process")
                         ((and (string=? s "par2") (= k 2)) s)
                         ((and (string=? s "race2") (= k 2)) s)
+                        ((and (string=? s "attempt1") (= k 2)) s)
                         (else ""))))
               (else y ""))))
       (else y ""))))
@@ -297,7 +298,9 @@
 ;; `par2`'s or `race2`'s rule, as `lop` says (`k-library-op`), of `x`.
 (define k-branches-te (->* (string kx kx kxs k-synth-fn) k-te)
   (lambda (lop x op args synth)
-    (if (string=? lop "par2") (k-par-te x op args synth) (k-race-te x op args synth))))
+    (cond ((string=? lop "par2") (k-par-te x op args synth))
+          ((string=? lop "attempt1") (k-attempt-te x op args synth))
+          (else (k-race-te x op args synth)))))
 ;; `((with … race2) f g)`, operator `op`, `f` and `g` thunks, synthesized
 ;; by `synth`: a branch's value, both of one type, and every effect and
 ;; `nondet`, if each branch is cancellable and the two do not interfere
@@ -313,8 +316,8 @@
               (if (or (not (null? ps1)) (not (null? ps2)))
                   (k-fail usage a b)
                   (begin
-                    (k-race-cancellable (car args) e1)
-                    (k-race-cancellable (car (cdr args)) e2)
+                    (k-cancellable (car args) e1 k-race-unseen)
+                    (k-cancellable (car (cdr args)) e2 k-race-unseen)
                     (let ((clash (k-interference e1 e2)))
                       (if (null? clash)
                           (k-te (k-race-type r1 r2 a b)
@@ -329,20 +332,60 @@
                                   a b))))))
             (else y (k-fail usage a b))))
         (else y (k-fail usage a b))))))
-;; A `race` branch, of effect `e`, that does nothing another could see.
-(define k-race-cancellable (->* (kx k-eff) unit)
-  (lambda (branch e)
+;; A `race` branch or an `attempt`'s body, of effect `e`, that does nothing
+;; another could see; else refused, told `unseen` before its effect.
+(define k-cancellable (->* (kx k-eff string) unit)
+  (lambda (branch e unseen)
     (cond ((null? e) #u)
           ((tagcase (car e)
              (a-write (r) #t) (a-init (r) #t) (a-send (r) #t) (a-io (k) #t) (a-goto (r) #t)
              (a-comefrom (r) #t) (a-var (v) #t) (a-app (v ds) #t) (else y #f))
-           (k-fail (string-append k-race-unseen (k-show-effect (k-one (car e))))
+           (k-fail (string-append unseen (k-show-effect (k-one (car e))))
                    (k-start branch) (k-end branch)))
-          (else (k-race-cancellable branch (cdr e))))))
+          (else (k-cancellable branch (cdr e) unseen)))))
 ;; What a `race` branch that could be seen is told, before its effect.
 (define k-race-unseen string
   (string-append "a `race` branch may be stopped half way, so it must do nothing another "
                  "could see, and this one has "))
+;; The same, of an `attempt`'s body.
+(define k-attempt-unseen string
+  (string-append "an `attempt`'s body may be stopped half way, so it must do nothing another "
+                 "could see, and this one has "))
+;; `((with … attempt1) f h)`, operator `op`, `f` a thunk and `h` taking
+;; the failure's message (Heist's, `FIXPT-CHANGES.md` F1): the wider of
+;; their values, and every effect and `nondet`, if `f` is cancellable (the
+;; Rust checker's `synth_attempt`).
+(define k-attempt-te (->* (kx kx kxs k-synth-fn) k-te)
+  (lambda (x op args synth)
+    (let* ((noted (synth op)) (ft (synth (car args))) (ht (synth (car (cdr args))))
+           (usage "`(attempt expression on-failure)`") (a (k-start x)) (b (k-end x)))
+      (tagcase (k-get (extract ft 1))
+        (ty-subr (e1 ps1 r1 c1 spc)
+          (if (not (null? ps1))
+              (k-fail usage a b)
+              (tagcase (k-get (extract ht 1))
+                (ty-subr (e2 ps2 r2 c2 spc2)
+                  (if (and (not (null? ps2)) (null? (cdr ps2)) (k-subtype (k-string-type) (car ps2)))
+                      (begin
+                        (k-cancellable (car args) e1 k-attempt-unseen)
+                        (k-te (k-attempt-type r1 r2 a b)
+                              (k-union (k-union (k-union (extract ft 2) (extract ht 2)) (k-union e1 e2))
+                                       (k-one (a-nondet)))))
+                      (k-fail (string-append "`attempt`'s on-failure takes the failure's message, "
+                                             (string-append "a string, but is " (k-show-ty (extract ht 1))))
+                              (k-start (car (cdr args))) (k-end (car (cdr args))))))
+                (else y (k-fail (string-append "`attempt`'s on-failure takes the failure's message, "
+                                               (string-append "a string, but is " (k-show-ty (extract ht 1))))
+                                (k-start (car (cdr args))) (k-end (car (cdr args))))))))
+        (else y (k-fail usage a b))))))
+;; The one type of an `attempt`'s body, `ra`, and its on-failure, `rb`.
+(define k-attempt-type (->* (int int int int) int)
+  (lambda (ra rb a b)
+    (cond ((k-subtype rb ra) ra)
+          ((k-subtype ra rb) rb)
+          (else (k-fail (k-cat5 "`attempt`'s body gives " (k-show-ty ra)
+                                " and its on-failure " (k-show-ty rb) "")
+                        a b)))))
 ;; The one type of `race`'s branches, `ra` and `rb`: the wider.
 (define k-race-type (->* (int int int int) int)
   (lambda (ra rb a b)

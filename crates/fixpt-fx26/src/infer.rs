@@ -617,6 +617,7 @@ impl Checker {
             (Some("spawn-monitored"), [w, f, body]) => return self.synth_spawn_monitored(e, fun, *w, *f, *body, expected),
             (Some("par2"), _) => return self.synth_par(e, fun, args),
             (Some("race2"), _) => return self.synth_race(e, fun, args),
+            (Some("attempt1"), _) => return self.synth_attempt(e, fun, args),
             _ => {}
         }
         // `(certify-length v k)`: `v`'s value as a `(nlist T k)`, where

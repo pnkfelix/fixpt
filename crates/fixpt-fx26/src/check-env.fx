@@ -121,7 +121,8 @@
    (list '%sched '%processes:spawn-process '%processes:send '%processes:receive
          '%processes:icell-get '%processes:icell-put! '%processes:par2 '%processes:cell-event
          '%processes:mailbox-event '%processes:or-event '%processes:sync
-         '%processes:clock-event '%processes:stdin-event '%processes:race2 '%processes:self
+         '%processes:clock-event '%processes:stdin-event '%processes:race2 '%processes:attempt1
+         '%processes:self
          '%processes:spawn-monitored
          ;; What a syscall's declaration expands into
          ;; (`docs/research/syscalls.md`).

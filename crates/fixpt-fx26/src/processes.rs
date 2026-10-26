@@ -31,7 +31,8 @@ impl Checker {
     /// - `(par ((x1 e1) … (xn en)) body …)`: `par2` of the first branch and
     ///   the `par` of the rest, as thunks, its parts bound by `let`;
     /// - `(race e1 … en)`: `race2` of the first branch and the `race` of the
-    ///   rest, as thunks.
+    ///   rest, as thunks;
+    /// - `(attempt e h)`: `((with lib attempt1) (lambda () e) h)`.
     pub(crate) fn parse_process_form(&mut self, span: fixpt_read::Span, head: &str, items: &[Syntax]) -> R<ExpId> {
         let lib = self.parse_load(span, crate::check::PROCESSES, false)?;
         let Exp::Var(lib) = *self.arena.exp_at(lib) else { unreachable!("a load is its hidden global") };
@@ -88,6 +89,12 @@ impl Checker {
             ("par", _) => return Err(usage("(par ((name expression) …) body …)")),
             ("race", [_, branches @ ..]) if branches.len() >= 2 => self.race_expansion(span, lib, branches),
             ("race", _) => return Err(usage("(race expression expression …)")),
+            ("attempt", [_, body, on_failure]) => {
+                let lambda = Syntax::symbol(body.span, self.interner.intern("lambda"));
+                let thunk = Syntax::list(body.span, vec![lambda, Syntax::new(body.span, fixpt_read::Datum::Nil), body.clone()]);
+                call(self, "attempt1", &[thunk, on_failure.clone()])
+            }
+            ("attempt", _) => return Err(usage("(attempt expression on-failure)")),
             ("pselect", [_, arms @ ..]) if !arms.is_empty() => self.select_expansion(span, lib, arms)?,
             ("pselect", _) => {
                 return Err(usage(
@@ -582,18 +589,7 @@ impl Checker {
             return Err(FxError::at(span, usage));
         };
         for (branch, eff) in [(*f, &e1), (*g, &e2)] {
-            let uncancellable = |a: &Atom| {
-                matches!(a, Atom::Write(_) | Atom::Init(_) | Atom::Send(_) | Atom::Io(_) | Atom::Goto(_) | Atom::Comefrom(_) | Atom::Var(_) | Atom::App(_))
-            };
-            if let Some(a) = eff.0.iter().find(|a| uncancellable(a)) {
-                return Err(FxError::at(
-                    self.arena.span_of(branch),
-                    format!(
-                        "a `race` branch may be stopped half way, so it must do nothing another could see, and this one has {}",
-                        self.show_effect(&Effect::atom(*a))
-                    ),
-                ));
-            }
+            self.cancellable(branch, eff, "a `race` branch may be stopped half way")?;
         }
         if let Some((x, y)) = self.interference(&e1, &e2) {
             return Err(FxError::at(
@@ -620,6 +616,72 @@ impl Checker {
         }
         self.note_library_inst(e, vec![D::Type(t), D::Effect(e1.clone()), D::Effect(e2.clone())]);
         Ok((t, fe.union(&ge).union(&e1).union(&e2).union(&Effect::atom(Atom::Nondet))))
+    }
+
+    /// Refused unless `eff`, of the thunk `branch`, is cancellable: it may
+    /// read, allocate, await, receive and spin, but not write, fill an
+    /// I-cell, send, do I/O, or transfer control out of itself, nor have
+    /// an effect not known. `why` begins the refusal.
+    fn cancellable(&self, branch: ExpId, eff: &Effect, why: &str) -> R<()> {
+        let uncancellable = |a: &Atom| {
+            matches!(a, Atom::Write(_) | Atom::Init(_) | Atom::Send(_) | Atom::Io(_) | Atom::Goto(_) | Atom::Comefrom(_) | Atom::Var(_) | Atom::App(_))
+        };
+        match eff.0.iter().find(|a| uncancellable(a)) {
+            Some(a) => Err(FxError::at(
+                self.arena.span_of(branch),
+                format!("{why}, so it must do nothing another could see, and this one has {}", self.show_effect(&Effect::atom(*a))),
+            )),
+            None => Ok(()),
+        }
+    }
+
+    /// `((with … attempt1) (lambda () e) h)`, as `attempt` makes it
+    /// (Heist's, `FIXPT-CHANGES.md` F1): `e`'s value, or, should it fail
+    /// (`error`, a trap), `h` of the failure's message. `e` must be
+    /// cancellable, as a `race` branch must, so that a failure half way
+    /// leaves nothing another could see; `h` is a `(subr eh (string) b)`,
+    /// run after. Its value is the wider of `e`'s and `h`'s, and its effect
+    /// both theirs and `nondet`: what a failure says is the machine's.
+    pub(crate) fn synth_attempt(&mut self, e: ExpId, fun: ExpId, args: &[ExpId]) -> R<(TyId, Effect)> {
+        let span = self.arena.span_of(e);
+        let usage = "`(attempt expression on-failure)`";
+        let [f, h] = args else { return Err(FxError::at(span, usage)) };
+        let (ft, fe) = self.synth(*f)?;
+        let (ht, he) = self.synth(*h)?;
+        let Ty::Subr { effect: e1, params, result: a, .. } = self.arena.get(self.arena.resolve(ft)).clone() else {
+            return Err(FxError::at(span, usage));
+        };
+        if !params.is_empty() {
+            return Err(FxError::at(span, usage));
+        }
+        let string = self.base[&self.interner.intern("string")];
+        let (e2, b) = match self.arena.get(self.arena.resolve(ht)).clone() {
+            Ty::Subr { effect, params, result, .. } if params.len() == 1 && self.subtype(string, params[0]) => {
+                (effect, result)
+            }
+            _ => {
+                return Err(FxError::at(
+                    self.arena.span_of(*h),
+                    format!("`attempt`'s on-failure takes the failure's message, a string, but is {}", self.show_ty(ht)),
+                ));
+            }
+        };
+        self.cancellable(*f, &e1, "an `attempt`'s body may be stopped half way")?;
+        let t = if self.subtype(b, a) {
+            a
+        } else if self.subtype(a, b) {
+            b
+        } else {
+            return Err(FxError::at(
+                span,
+                format!("`attempt`'s body gives {} and its on-failure {}", self.show_ty(a), self.show_ty(b)),
+            ));
+        };
+        if let Exp::With { module, body } = *self.arena.exp_at(fun) {
+            self.with_as(fun, module, body, None)?;
+        }
+        self.note_library_inst(e, vec![D::Type(t), D::Effect(e1.clone()), D::Effect(e2.clone())]);
+        Ok((t, fe.union(&he).union(&e1).union(&e2).union(&Effect::atom(Atom::Nondet))))
     }
 
     /// The first pair of atoms, one of each effect, that interfere: on

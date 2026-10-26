@@ -599,6 +599,9 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // `race`'s (`docs/fx26.md`, "`race`"), whose branches the checkers
     // check as their own rule says (`synth_race`).
     ("%processes:race2", "(poly ((a type) (e1 effect) (e2 effect)) (subr (maxeff e1 e2 nondet) ((subr e1 () a) (subr e2 () a)) a))"),
+    // `attempt`'s (`synth_attempt`): its body cancellable, as a `race`
+    // branch is.
+    ("%processes:attempt1", "(poly ((a type) (e1 effect) (e2 effect)) (subr (maxeff e1 e2 nondet) ((subr e1 () a) (subr e2 (string) a)) a))"),
     // `pselect`'s (`docs/fx26.md`, "`pselect`"): which of its events is
     // ready, waiting for one, a choice when more than one is.
     ("%processes:cell-event", "(poly ((r region)) (poly ((t type)) (subr pure ((icell t r)) (event (await r)))))"),

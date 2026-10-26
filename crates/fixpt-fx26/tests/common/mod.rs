@@ -104,6 +104,12 @@ thread_local! {
     /// (`check-program` resets the checker; the compiler's globals only
     /// shadow), so one session serves every program a test gives them.
     static OWN: std::cell::RefCell<Option<fixpt_fx26::session::Fx26Session>> = const { std::cell::RefCell::new(None) };
+    /// A second, for the evaluator written in FX-26 alone (Heist's,
+    /// `FIXPT-CHANGES.md` F1): the scheduler's prompt tag is the runtime's,
+    /// made once (`%sched` 12, 13), and a tag compiled code made is not one
+    /// the evaluator can use, nor the other way round, so a program with
+    /// processes evaluated after one compiled in the same session fails.
+    static OWN_EVAL: std::cell::RefCell<Option<fixpt_fx26::session::Fx26Session>> = const { std::cell::RefCell::new(None) };
 }
 
 /// A session whose pieces written in FX-26 (checker, compilers, and what
@@ -141,3 +147,12 @@ pub fn with_own<R>(f: impl FnOnce(&mut fixpt_fx26::session::Fx26Session) -> R) -
     })
 }
 
+/// `f` with this thread's session for the evaluator written in FX-26 alone
+/// (`OWN_EVAL`), made on first use.
+pub fn with_own_eval<R>(f: impl FnOnce(&mut fixpt_fx26::session::Fx26Session) -> R) -> R {
+    OWN_EVAL.with(|s| {
+        let mut s = s.borrow_mut();
+        let s = s.get_or_insert_with(session);
+        f(s)
+    })
+}
