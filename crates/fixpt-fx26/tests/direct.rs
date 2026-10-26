@@ -838,12 +838,18 @@ fn run_native(rt: &mut fixpt_runtime::Runtime, closure: Value, fuel: u64) -> fix
 /// always declines) as cellular code: cellular code
 /// calling a native closure, native code a cellular one, and a whole
 /// continuation cellular code took thrown from native code
-/// (`programs/native/mixed.fx`); and the same collecting often.
+/// (`programs/native/mixed.fx`); and the same collecting often. On the
+/// Rust machine, and on the register machine, as the REPL runs it.
 #[test]
 fn native_and_cellular_code_call_each_other() {
     use fixpt_fx26::session::Strategy;
-    for gc_every in [500] {
+    let machines: &[Option<fixpt_runtime::RunWord>] =
+        if fixpt_native::CELLULAR_AVAILABLE { &[None, Some(fixpt_native::cellular::run_word_registers)] } else { &[None] };
+    for (gc_every, machine) in machines.iter().map(|m| (500, *m)) {
         let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+        if let Some(m) = machine {
+            s.scheme.runtime_unrooted().run_word = Some(m);
+        }
         s.set_native_convention(true);
         s.strategy = Strategy::Cellular;
         s.native_runner = Some(run_native);

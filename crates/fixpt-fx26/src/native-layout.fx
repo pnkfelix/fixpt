@@ -104,5 +104,8 @@
       ((40) #t)  ; ttailcall
       ((41) #t)  ; resume
       ((42) #t)  ; undefined
+      ((52) #t)  ; ncallcomp
+      ((53) #t)  ; ncallcc
       ((54) #t)  ; callone
+      ((55) #t)  ; ncallone
       (else #f))))
