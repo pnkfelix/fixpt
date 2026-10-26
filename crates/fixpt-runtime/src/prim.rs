@@ -2749,6 +2749,56 @@ prims! {
         };
         Ok(rt.heap.make_string(&out))
     });
+    // Programs run beside this one (Heist's, `FIXPT-CHANGES.md` F4): one
+    // started, by a list of its name and arguments and a directory; what it
+    // wrote since last asked, never waiting; whether it runs; its input
+    // written, and closed; a signal sent to its group.
+    "%fx26-process-start", 2, Some(2), simple!(|rt, a| {
+        let mut argv = Vec::new();
+        let mut x = a[0];
+        while x.is_pair() {
+            let s = rt.heap.car(x);
+            argv.push(get_string(rt, s)?);
+            x = rt.heap.cdr(x);
+        }
+        let dir = get_string(rt, a[1])?;
+        Ok(match rt.world.process_start(&argv, &dir) {
+            Ok(p) => fx26_sum(rt, "started", Value::fixnum(p)),
+            Err(e) => fx26_io_result(rt, Err(e)),
+        })
+    });
+    "%fx26-process-output", 1, Some(1), simple!(|rt, a| {
+        let p = int(rt, a[0])?;
+        let s = rt.world.process_output(p);
+        Ok(rt.heap.make_string(&s))
+    });
+    "%fx26-process-status", 1, Some(1), simple!(|rt, a| {
+        use crate::world::ProcessStatus as S;
+        let p = int(rt, a[0])?;
+        Ok(match rt.world.process_status(p) {
+            S::Running => fx26_sum(rt, "running", Value::UNIT),
+            S::Exited(c) => fx26_sum(rt, "exited", Value::fixnum(c as i64)),
+            S::Signalled(c) => fx26_sum(rt, "signalled", Value::fixnum(c as i64)),
+            S::Unknown => fx26_sum(rt, "unknown", Value::UNIT),
+        })
+    });
+    "%fx26-process-write", 2, Some(2), simple!(|rt, a| {
+        let p = int(rt, a[0])?;
+        let s = get_string(rt, a[1])?;
+        let r = rt.world.process_write(p, s.as_bytes());
+        Ok(fx26_io_result(rt, r))
+    });
+    "%fx26-process-close-input", 1, Some(1), simple!(|rt, a| {
+        let p = int(rt, a[0])?;
+        rt.world.process_close_input(p);
+        Ok(Value::UNIT)
+    });
+    "%fx26-process-signal", 2, Some(2), simple!(|rt, a| {
+        let p = int(rt, a[0])?;
+        let sig = int(rt, a[1])?;
+        rt.world.process_signal(p, sig as i32);
+        Ok(Value::UNIT)
+    });
 }
 
 /// Promise states. `[state, payload]`.

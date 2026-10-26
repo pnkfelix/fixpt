@@ -201,7 +201,8 @@
     (begin
       (arity fail items 3 "`(attempt expression on-failure)`" a b)
       (let ((e (nth items 1)))
-        (call "attempt1" (the syns-a (list (thunk-syn e (syn-start e) (syn-end e)) (nth items 2))))))))
+        (call "attempt1"
+              (the syns-a (list (thunk-syn e (syn-start e) (syn-end e)) (nth items 2))))))))
 ;;; ----------------------------------------------------------- pselect
 
 ;; `(pselect (W0 x0 body0 …) … (Wn xn bodyn …))`, each `W` `(icell-get c)`,

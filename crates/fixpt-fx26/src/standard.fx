@@ -376,6 +376,8 @@
          (("f32-infinite?") "%fx26-f32-infinite?")
          (("flatarray-ref") "%fx26-flatarray-ref")
          (("terminal-size") "%fx26-terminal-size")
+         (("process-start") "%fx26-process-start")
+         (("process-write") "%fx26-process-write")
          (("i32-remainder") "%fx26-i32-remainder")
          (("u32-remainder") "%fx26-u32-remainder")
          (("i64-remainder") "%fx26-i64-remainder")
@@ -391,6 +393,9 @@
        (case n
          (("make-flatarray") "%fx26-make-flatarray")
          (("flatarray-set!") "%fx26-flatarray-set!")
+         (("process-output") "%fx26-process-output")
+         (("process-status") "%fx26-process-status")
+         (("process-signal") "%fx26-process-signal")
          (("string-compare") "%fx26-string-compare")
          (("symbol-compare") "%fx26-symbol-compare")
          (("certify-length") "%fx26-first")
@@ -438,6 +443,7 @@
          (else "")))
       ((19)
        (case n
+         (("process-close-input") "%fx26-process-close-input")
          (("%string-append-list") "%fx26-string-append-list")
          (("%syscall-available?") "%fx26-syscall-available?")
          (else "")))

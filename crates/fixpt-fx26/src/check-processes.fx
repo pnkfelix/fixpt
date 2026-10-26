@@ -357,26 +357,29 @@
 ;; Rust checker's `synth_attempt`).
 (define k-attempt-te (->* (kx kx kxs k-synth-fn) k-te)
   (lambda (x op args synth)
-    (let* ((noted (synth op)) (ft (synth (car args))) (ht (synth (car (cdr args))))
-           (usage "`(attempt expression on-failure)`") (a (k-start x)) (b (k-end x)))
+    (let* ((noted (synth op)) (ft (synth (car args))) (h (car (cdr args))) (ht (synth h))
+           (usage "`(attempt expression on-failure)`") (a (k-start x)) (b (k-end x))
+           (not-string (lambda ()
+                         (k-fail (string-append "`attempt`'s on-failure takes the failure's "
+                                                "message, a string, but is "
+                                                (k-show-ty (extract ht 1)))
+                                 (k-start h) (k-end h)))))
       (tagcase (k-get (extract ft 1))
         (ty-subr (e1 ps1 r1 c1 spc)
           (if (not (null? ps1))
               (k-fail usage a b)
               (tagcase (k-get (extract ht 1))
                 (ty-subr (e2 ps2 r2 c2 spc2)
-                  (if (and (not (null? ps2)) (null? (cdr ps2)) (k-subtype (k-string-type) (car ps2)))
+                  (if (and (not (null? ps2)) (null? (cdr ps2))
+                           (k-subtype (k-string-type) (car ps2)))
                       (begin
                         (k-cancellable (car args) e1 k-attempt-unseen)
                         (k-te (k-attempt-type r1 r2 a b)
-                              (k-union (k-union (k-union (extract ft 2) (extract ht 2)) (k-union e1 e2))
+                              (k-union (k-union (k-union (extract ft 2) (extract ht 2))
+                                                (k-union e1 e2))
                                        (k-one (a-nondet)))))
-                      (k-fail (string-append "`attempt`'s on-failure takes the failure's message, "
-                                             (string-append "a string, but is " (k-show-ty (extract ht 1))))
-                              (k-start (car (cdr args))) (k-end (car (cdr args))))))
-                (else y (k-fail (string-append "`attempt`'s on-failure takes the failure's message, "
-                                               (string-append "a string, but is " (k-show-ty (extract ht 1))))
-                                (k-start (car (cdr args))) (k-end (car (cdr args))))))))
+                      (not-string)))
+                (else y (not-string)))))
         (else y (k-fail usage a b))))))
 ;; The one type of an `attempt`'s body, `ra`, and its on-failure, `rb`.
 (define k-attempt-type (->* (int int int int) int)

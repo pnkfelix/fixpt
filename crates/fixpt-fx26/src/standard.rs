@@ -235,6 +235,17 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // expression of a program text at a character (`typeat.rs`). Reading the
     // files it loads is its effect.
     ("type-at", "(subr (io fs-read) (string int) string)"),
+    // Heist's (`FIXPT-CHANGES.md` F4): programs run beside this one, by
+    // number. Started by name and arguments, in a directory (\"\": this
+    // one's), standard output and error one stream; what it wrote since last
+    // asked, never waiting; whether it runs, which it does until it has
+    // exited and all it wrote is read; its input; a signal to its group.
+    ("process-start", "(poly ((r region)) (subr (maxeff (io process) (read r)) ((listof string r) string) (sumof (started int) (failed io-error))))"),
+    ("process-output", "(subr (io process) (int) string)"),
+    ("process-status", "(subr (io process) (int) (sumof (running unit) (exited int) (signalled int) (unknown unit)))"),
+    ("process-write", "(subr (io process) (int string) (sumof (done unit) (failed io-error)))"),
+    ("process-close-input", "(subr (io process) (int) unit)"),
+    ("process-signal", "(subr (io process) (int int) unit)"),
     ("write-file", "(poly ((r region)) (subr (maxeff (io fs-write) (read r)) (string (bytevectorof r)) (sumof (done unit) (failed io-error))))"),
     // Bytevectors (`TODO.md` §84): made, read and written at a region, as
     // arrays are; R7RS's names. `bytevector-copy` takes a start and an end,

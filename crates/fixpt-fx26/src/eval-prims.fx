@@ -335,6 +335,11 @@
 (define ev-strings (->* ((listof string @v)) val)
   (lambda (ns) (if (null? ns) nil (cons (car ns) (ev-strings (cdr ns))))))
 
+;; The evaluator's list of strings `v`, as one of strings.
+(define ev-string-list (->* (val) (listof string @v))
+  (lambda (v)
+    (if (null? v) nil (cons (as-str (car (as-pair v))) (ev-string-list (cdr (as-pair v)))))))
+
 ;; The program's I/O (`TODO.md` §84), done by the primitives themselves.
 ;; Syscalls (`docs/research/syscalls.md`): this evaluator's own, a runtime
 ;; of its own, has the three Fixpt's runtime has, as it has them
@@ -441,7 +446,30 @@
                  (failed e (ev-io-failed e)))))
       (prim! 'write-file
              (lambda (xs)
-               (ev-io-result (write-file (as-str (ev-arg xs 0)) (as-bytes (ev-arg xs 1)))))))))
+               (ev-io-result (write-file (as-str (ev-arg xs 0)) (as-bytes (ev-arg xs 1))))))
+      ;; Heist's (`FIXPT-CHANGES.md` F4).
+      (prim! 'process-start
+             (lambda (xs)
+               (tagcase (the (sumof (started int) (failed io-error))
+                             (process-start (ev-string-list (ev-arg xs 0)) (as-str (ev-arg xs 1))))
+                 (started p (the val (o-sum 'started p)))
+                 (failed e (ev-io-failed e)))))
+      (prim! 'process-output (lambda (xs) (process-output (as-int (ev-arg xs 0)))))
+      (prim! 'process-status
+             (lambda (xs)
+               (tagcase (process-status (as-int (ev-arg xs 0)))
+                 (running u (the val (o-sum 'running the-unit)))
+                 (exited c (the val (o-sum 'exited c)))
+                 (signalled c (the val (o-sum 'signalled c)))
+                 (unknown u (the val (o-sum 'unknown the-unit))))))
+      (prim! 'process-write
+             (lambda (xs)
+               (ev-io-result (process-write (as-int (ev-arg xs 0)) (as-str (ev-arg xs 1))))))
+      (prim! 'process-close-input
+             (lambda (xs) (begin (process-close-input (as-int (ev-arg xs 0))) the-unit)))
+      (prim! 'process-signal
+             (lambda (xs)
+               (begin (process-signal (as-int (ev-arg xs 0)) (as-int (ev-arg xs 1))) the-unit))))))
 
 ;; `append`: the lists `xs`, all but the last copied, in front of it.
 (define ev-append (->* (vals) val)

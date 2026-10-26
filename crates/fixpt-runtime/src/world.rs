@@ -29,6 +29,8 @@ pub struct World {
     /// The status `exit` asked for, once it has: the run then stops, and
     /// whoever ran the program ends with it.
     pub exit: Option<i32>,
+    /// The programs it started (`process-start`), by number.
+    pub processes: Vec<Process>,
 }
 
 /// One of the standard streams a program writes.
@@ -243,4 +245,144 @@ pub fn sleep_until(t: i64) {
     if t > now {
         std::thread::sleep(std::time::Duration::from_nanos((t - now) as u64));
     }
+}
+
+/// A program started beside this one (Heist's, `FIXPT-CHANGES.md` F4): its
+/// standard output and error, one pipe, read by a thread of its own into
+/// `output`, so that asking never waits; and its input.
+pub struct Process {
+    child: std::process::Child,
+    input: Option<std::process::ChildStdin>,
+    output: std::sync::Arc<std::sync::Mutex<Output>>,
+    status: Option<std::process::ExitStatus>,
+}
+
+/// What a process's reader has read and not yet been taken, and whether
+/// the pipe has ended.
+#[derive(Default)]
+struct Output {
+    bytes: Vec<u8>,
+    ended: bool,
+}
+
+/// How a process is.
+pub enum ProcessStatus {
+    Running,
+    Exited(i32),
+    Signalled(i32),
+    Unknown,
+}
+
+impl World {
+    /// Program `argv[0]` started with arguments `argv[1..]`, in directory
+    /// `dir` (the working directory if empty), in a session of its own
+    /// (`tty::new_session`): no terminal of its own, so that it never takes
+    /// this program's, and a group a signal reaches what it starts through.
+    /// Its number.
+    pub fn process_start(&mut self, argv: &[String], dir: &str) -> std::io::Result<i64> {
+        let Some((program, args)) = argv.split_first() else {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "no program named"));
+        };
+        let (reader, writer) = std::io::pipe()?;
+        let mut command = std::process::Command::new(program);
+        command.args(args).stdin(std::process::Stdio::piped()).stdout(writer.try_clone()?).stderr(writer);
+        crate::tty::new_session(&mut command);
+        if !dir.is_empty() {
+            command.current_dir(dir);
+        }
+        let mut child = command.spawn()?;
+        // The writer's copies went with `command`: the pipe ends when the
+        // program's (and its children's) do.
+        drop(command);
+        let input = child.stdin.take();
+        let output = std::sync::Arc::new(std::sync::Mutex::new(Output::default()));
+        let out = output.clone();
+        std::thread::spawn(move || {
+            use std::io::Read as _;
+            let mut reader = reader;
+            let mut buf = [0u8; 8192];
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => out.lock().unwrap().bytes.extend_from_slice(&buf[..n]),
+                }
+            }
+            out.lock().unwrap().ended = true;
+        });
+        self.processes.push(Process { child, input, output, status: None });
+        Ok(self.processes.len() as i64 - 1)
+    }
+
+    fn process(&mut self, p: i64) -> Option<&mut Process> {
+        usize::try_from(p).ok().and_then(|p| self.processes.get_mut(p))
+    }
+
+    /// What process `p` has written since last asked, as text: a character
+    /// cut by the read waits for the rest, and bytes not UTF-8 are U+FFFD.
+    pub fn process_output(&mut self, p: i64) -> String {
+        let Some(proc) = self.process(p) else { return String::new() };
+        let mut out = proc.output.lock().unwrap();
+        let bytes = std::mem::take(&mut out.bytes);
+        let keep = if out.ended { 0 } else { incomplete_tail(&bytes) };
+        let (text, rest) = bytes.split_at(bytes.len() - keep);
+        out.bytes = rest.to_vec();
+        String::from_utf8_lossy(text).into_owned()
+    }
+
+    /// Whether process `p` runs: it has ended once it has exited and its
+    /// output has all been read, so that a last `process_output` after
+    /// gives the rest.
+    pub fn process_status(&mut self, p: i64) -> ProcessStatus {
+        use std::os::unix::process::ExitStatusExt as _;
+        let Some(proc) = self.process(p) else { return ProcessStatus::Unknown };
+        if proc.status.is_none() {
+            proc.status = proc.child.try_wait().ok().flatten();
+        }
+        match proc.status {
+            Some(s) if proc.output.lock().unwrap().ended => match (s.code(), s.signal()) {
+                (Some(c), _) => ProcessStatus::Exited(c),
+                (None, Some(sig)) => ProcessStatus::Signalled(sig),
+                (None, None) => ProcessStatus::Unknown,
+            },
+            _ => ProcessStatus::Running,
+        }
+    }
+
+    /// `bytes` written to process `p`'s input.
+    pub fn process_write(&mut self, p: i64, bytes: &[u8]) -> std::io::Result<()> {
+        use std::io::Write as _;
+        match self.process(p).and_then(|proc| proc.input.as_mut()) {
+            Some(input) => input.write_all(bytes).and_then(|()| input.flush()),
+            None => Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, "the process's input is closed")),
+        }
+    }
+
+    /// Process `p`'s input closed: it reads its end.
+    pub fn process_close_input(&mut self, p: i64) {
+        if let Some(proc) = self.process(p) {
+            proc.input = None;
+        }
+    }
+
+    /// Signal `sig` sent to process `p`'s group, unless it has ended.
+    pub fn process_signal(&mut self, p: i64, sig: i32) {
+        if let Some(proc) = self.process(p)
+            && proc.status.is_none()
+        {
+            crate::tty::signal_group(proc.child.id(), sig);
+        }
+    }
+}
+
+/// How many bytes at the end of `bytes` begin a UTF-8 character not yet
+/// whole.
+fn incomplete_tail(bytes: &[u8]) -> usize {
+    for back in 1..=bytes.len().min(3) {
+        let b = bytes[bytes.len() - back];
+        if b & 0xC0 != 0x80 {
+            let need = if b >= 0xF0 { 4 } else if b >= 0xE0 { 3 } else if b >= 0xC0 { 2 } else { 1 };
+            return if need > back { back } else { 0 };
+        }
+    }
+    0
 }

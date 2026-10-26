@@ -1,6 +1,7 @@
 //! The standard input as a file descriptor, and the terminal it may be
 //! (`TODO.md` §95): reads and waits that the scheduler can make without
-//! blocking the others, raw mode and back, and the terminal's size. The
+//! blocking the others, raw mode and back, and the terminal's size; and a
+//! signal to a process group (Heist's, `FIXPT-CHANGES.md` F4). The
 //! one place in this crate that calls the system directly.
 #![allow(unsafe_code)]
 
@@ -106,4 +107,21 @@ pub fn size() -> std::io::Result<(u16, u16)> {
         return Err(std::io::Error::last_os_error());
     }
     Ok((w.ws_row, w.ws_col))
+}
+
+/// `command` to start its program in a new session (`setsid`), whose
+/// leader it is, with no controlling terminal: a shell started so cannot
+/// take this program's terminal for its jobs (and be stopped for trying).
+pub fn new_session(command: &mut std::process::Command) {
+    use std::os::unix::process::CommandExt as _;
+    // `setsid` is async-signal-safe, as what runs between fork and exec
+    // must be.
+    unsafe {
+        command.pre_exec(|| if libc::setsid() < 0 { Err(std::io::Error::last_os_error()) } else { Ok(()) });
+    }
+}
+
+/// Signal `sig` sent to the process group led by process `pid`.
+pub fn signal_group(pid: u32, sig: i32) {
+    unsafe { libc::kill(-(pid as libc::pid_t), sig) };
 }
