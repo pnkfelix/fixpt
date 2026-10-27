@@ -101,6 +101,8 @@ pub struct FxEmitted {
     pub fields: Vec<i64>,
     pub callouts: Vec<i64>,
     pub err: String,
+    /// Where each instruction starts: each byte and its first cell, flat.
+    pub starts: Vec<i64>,
 }
 
 /// A field as FX-26 names it: `Myself` 0, `Code(q)` 1 + 8q, `Const` of
@@ -325,6 +327,10 @@ impl DirectMachine {
         proc_.fields = fields;
         proc_.code = out.code;
         proc_.len = out.len;
+        let mut starts: Vec<(u32, u32)> = out.starts.chunks(2).filter(|c| c.len() == 2).map(|c| (c[0] as u32, c[1] as u32)).collect();
+        starts.sort_unstable();
+        starts.dedup();
+        proc_.starts = starts;
         Ok(())
     }
 
@@ -599,7 +605,9 @@ impl DirectMachine {
 /// (`Code` and `Closure` by the procedure's index) and the values they
 /// hold (for the oracle to hold while a collection may move them, and
 /// show after); or why it failed.
-pub type Each = (String, Result<(Vec<u8>, usize, Vec<(String, Vec<Value>)>), String>);
+/// A procedure's name, and its code, length, fields and instruction
+/// starts (`Proc::starts`), or why it failed.
+pub type Each = (String, Result<(Vec<u8>, usize, Vec<(String, Vec<Value>)>, Vec<(u32, u32)>), String>);
 
 fn field_parts(f: &Field) -> (String, Vec<Value>) {
     match f {
@@ -620,7 +628,7 @@ fn each_of(procs: &[Proc], failures: &HashMap<usize, String>) -> Vec<Each> {
                 p.name.clone(),
                 match failures.get(&k) {
                     Some(why) => Err(why.clone()),
-                    None => Ok((p.code.clone(), p.len, p.fields.iter().map(field_parts).collect())),
+                    None => Ok((p.code.clone(), p.len, p.fields.iter().map(field_parts).collect(), p.starts.clone())),
                 },
             )
         })

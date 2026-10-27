@@ -887,6 +887,7 @@ pub mod unparse;
 pub mod verifying;
 pub mod smt;
 pub mod smt_theory;
+pub mod sources;
 
 pub use check::{Checker, Checked};
 pub use top::Top;

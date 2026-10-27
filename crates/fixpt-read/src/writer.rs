@@ -12,19 +12,40 @@ use std::fmt::Write as _;
 /// `write`-style: strings quoted, characters named, symbols escaped as needed.
 pub fn write_syntax(s: &Syntax, interner: &Interner) -> String {
     let mut out = String::new();
-    put(&mut out, s, interner, true);
+    put(&mut out, s, interner, true, &mut None);
     out
+}
+
+/// As [`write_syntax`], and where each datum went: its first and last
+/// byte in the text (half open), and its span where it was read; outermost
+/// first. For a debugger's lines, from code compiled from the text.
+pub fn write_syntax_mapped(s: &Syntax, interner: &Interner) -> (String, Vec<(usize, usize, crate::Span)>) {
+    let mut out = String::new();
+    let mut map = Some(Vec::new());
+    put(&mut out, s, interner, true, &mut map);
+    (out, map.unwrap_or_default())
 }
 
 /// `display`-style: strings, characters and symbols rendered as their
 /// contents, with no escaping.
 pub fn display_syntax(s: &Syntax, interner: &Interner) -> String {
     let mut out = String::new();
-    put(&mut out, s, interner, false);
+    put(&mut out, s, interner, false, &mut None);
     out
 }
 
-fn put(out: &mut String, s: &Syntax, interner: &Interner, write: bool) {
+fn put(out: &mut String, s: &Syntax, interner: &Interner, write: bool, map: &mut Option<Vec<(usize, usize, crate::Span)>>) {
+    let at = map.as_mut().map(|m| {
+        m.push((out.len(), out.len(), s.span));
+        m.len() - 1
+    });
+    put_datum(out, s, interner, write, map);
+    if let (Some(k), Some(m)) = (at, map.as_mut()) {
+        m[k].1 = out.len();
+    }
+}
+
+fn put_datum(out: &mut String, s: &Syntax, interner: &Interner, write: bool, map: &mut Option<Vec<(usize, usize, crate::Span)>>) {
     match &s.datum {
         Datum::Bool(true) => out.push_str("#t"),
         Datum::Bool(false) => out.push_str("#f"),
@@ -61,11 +82,11 @@ fn put(out: &mut String, s: &Syntax, interner: &Interner, write: bool) {
                 if i > 0 {
                     out.push(' ');
                 }
-                put(out, item, interner, write);
+                put(out, item, interner, write, map);
             }
             if let Some(t) = tail {
                 out.push_str(" . ");
-                put(out, t, interner, write);
+                put(out, t, interner, write, map);
             }
             out.push(')');
         }
@@ -75,7 +96,7 @@ fn put(out: &mut String, s: &Syntax, interner: &Interner, write: bool) {
                 if i > 0 {
                     out.push(' ');
                 }
-                put(out, item, interner, write);
+                put(out, item, interner, write, map);
             }
             out.push(')');
         }

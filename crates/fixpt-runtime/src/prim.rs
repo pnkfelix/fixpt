@@ -1909,7 +1909,7 @@ prims! {
                 o("lexical"), zero, o("pop"), zero, o("tailinvoke"), one,
                 Value::fixnum(fixpt_heap::layout::regcode::conv("fx") as i64),
             ];
-            match rt.heap.make_register_word(name, word, &regs) {
+            match rt.heap.make_register_word(name, word, &regs, &[]) {
                 Ok(rw) => rt.heap.set_bloblet_slot(word, WORD_TWIN, rw),
                 Err(e) => return rt.fail(&e, &[a[0]]),
             }
@@ -2698,11 +2698,21 @@ prims! {
         Ok(rt.heap.obj_ref(a[0], 1))
     });
     // Register code (PLAN.md 13h′) for cellular word `a[0]`, from its cells:
-    // made, checked, and set as the word's twin, as the Rust compiler does.
-    "%set-register-twin", 2, Some(2), simple!(|rt, a| {
+    // made, checked, and set as the word's twin, as the Rust compiler does;
+    // with `a[2]`, where its expressions start, each cell and place in turn
+    // (`Heap::register_places`).
+    "%set-register-twin", 2, Some(3), simple!(|rt, a| {
         let Some(cells) = rt.heap.list_to_vec(a[1]) else { return rt.type_error("a list of cells", a[1]) };
+        let flat = match a.get(2) {
+            Some(&p) => match rt.heap.list_to_vec(p) {
+                Some(v) if v.iter().all(|x| x.is_fixnum()) && v.len() % 2 == 0 => v,
+                _ => return rt.type_error("a list of cells and places", p),
+            },
+            None => Vec::new(),
+        };
+        let places: Vec<(usize, i64)> = flat.chunks(2).map(|c| (c[0].as_fixnum() as usize, c[1].as_fixnum())).collect();
         let name = rt.heap.bloblet_slot(a[0], fixpt_heap::layout::cellular::WORD_NAME);
-        match rt.heap.make_register_word(name, a[0], &cells) {
+        match rt.heap.make_register_word(name, a[0], &cells, &places) {
             Ok(rw) => {
                 rt.heap.set_bloblet_slot(a[0], fixpt_heap::layout::cellular::WORD_TWIN, rw);
                 Ok(rw)

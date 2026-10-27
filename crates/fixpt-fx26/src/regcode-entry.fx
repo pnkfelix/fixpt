@@ -108,9 +108,11 @@
 ;; registers taken, `labels` labels; for procedure `this` (one or none).
 (define r-new-gen (->* (bool int int rthis) rgen)
   (lambda (leaf nreg labels this)
-    (the rgen
-      (product (items (new (the ritems nil))) (leaf leaf) (nreg (new nreg)) (nslot (new 0))
-               (mslot (new 0)) (labels (new labels)) (this this) (start 0)))))
+    (begin
+      (set r-at -1)
+      (the rgen
+        (product (items (new (the ritems nil))) (leaf leaf) (nreg (new nreg)) (nslot (new 0))
+                 (mslot (new 0)) (labels (new labels)) (this this) (start 0))))))
 ;; The labels at a body's start, the frame made: the procedure's own (0),
 ;; for its loops, if it knows itself; one where a procedure specialized at
 ;; a lambda starts (`spec-at`), and where the parameter the lambda is; and
@@ -186,10 +188,25 @@
               (let ((gs (r-register-body-as ps body inner this own #t)))
                 (if (null? gs) (r-register-body-as ps body inner this own #f) gs))))))))
 ;; The body compiled once, as ever.
+;; Where each expression's code starts in the cells last made (`Gen::places`).
+(define r-places (ref rints @k) (new nil))
 (define r-plain-code (->* (exp-params exp cenv rthis rowner) wcells)
   (lambda (ps body inner this own)
     (let ((g (r-register-body ps body inner this own)))
-      (if (null? g) (the wcells nil) (r-assemble (car g))))))
+      (if (null? g)
+          (the wcells nil)
+          (let ((cells (r-assemble (car g)))) (begin (set r-places (get r-placed)) cells))))))
+;; Places `xs` (cell, place, …) of a body placed after others: those from
+;; cell 2 on moved by `by`; those before kept if `low`, else dropped.
+(define r-shift-places (->* (rints int bool) rints)
+  (lambda (xs by low)
+    (cond ((null? xs) xs)
+          ((< (car xs) 2)
+           (if low
+               (cons (car xs) (cons (car (cdr xs)) (r-shift-places (cdr (cdr xs)) by low)))
+               (r-shift-places (cdr (cdr xs)) by low)))
+          (else (cons (+ (car xs) by)
+                      (cons (car (cdr xs)) (r-shift-places (cdr (cdr xs)) by low)))))))
 ;; The two versions as one: `args n`, the guards, the fast body, the plain
 ;; one; both with the larger frame.
 (define r-versions (->* (rgen rgen r-assumptions) wcells)
@@ -199,9 +216,13 @@
       (begin
         (set (extract fast mslot) frame)
         (set (extract plain mslot) frame)
-        (let* ((fc (r-assemble fast)) (pc (r-assemble plain))
+        (let* ((fc (r-assemble fast)) (fp (get r-placed))
+               (pc (r-assemble plain)) (pp (get r-placed))
                (guards (* 4 (r-assumptions-length assumptions 0)))
                (plain-at (+ 2 (+ guards (- (r-cells-length fc 0) 2))))
+               (placed (set r-places
+                            (append (r-shift-places fp guards #t)
+                                    (r-shift-places pp (+ guards (- (r-cells-length fc 0) 2)) #f))))
                (bodies (r-rev-cells (r-rev-cells (cdr (cdr fc)) nil) (cdr (cdr pc)))))
           (cons (car fc) (cons (car (cdr fc)) (r-guard-cells assumptions 2 plain-at bodies))))))))
 ;; Register code for a standard operation as a value (`c-standard-value`),

@@ -37,7 +37,10 @@
   (r-frame)
   ;; `global-guard g w` to a label: unless global cell `g` holds a closure
   ;; made from word `w`.
-  (r-guard-to wcell wcell int))
+  (r-guard-to wcell wcell int)
+  ;; What follows is the code of the expression at this place (`exp-start`),
+  ;; for a debugger's lines; no cells.
+  (r-pos int))
 (define-type ritems (listof ritem @k))
 ;; Where a variable is, to register code.
 ;; A constant that needs no allocation when it runs, as register code may
@@ -201,6 +204,10 @@
                  (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k) spin)
                        (rgen)
                        wcells))
+            (val r-placed (ref rints @k))
+            (val r-at (ref int @k))
+            (val r-enter-place! (subr (maxeff (alloc @k) (read @k) (write @k)) (rgen exp) int))
+            (val r-leave-place! (subr (maxeff (alloc @k) (read @k) (write @k)) (rgen int) unit))
             (val r-where
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
                        (renv symbol)

@@ -39,10 +39,40 @@ beside the names (`crates/fixpt-native/src/jitdebug.rs`, `cfi.rs`):
   then interrupt). `FIXPT_JIT_DEBUG=frames` makes them from the start,
   `names` never, `0` registers nothing.
 
+- **Lines** (§2.3, done): both register compilers mark where each
+  expression's code starts (`RItem::Pos`, `r-pos`; a variable's or a
+  constant's not, its code its parent's), and a register word keeps, in its
+  suffix, at each cell where the place changes, the place (the character
+  the FX-26 compiler's `exp-start` says) and the source it is in
+  (`Heap::register_places`). Both native compilers say where each
+  instruction's code starts (`Proc::starts`, `dx-starts`); both agree on
+  both, and the tests compare them. Each text a session compiles is a
+  source (`fixpt_fx26::sources`): the text, the form it was written from
+  with where each datum went, the file run and the module files loaded,
+  from which a place's file and line are found, once a debugger asks for
+  frames, as `.debug_line`. `FIXPT_LINES=FILE` writes the rows there too.
+  Cost: stage 0 28.68G instructions against 28.38G (28.39G against
+  28.17G with `FIXPT_JIT_DEBUG=0`: the compilers' marks).
+
+- **Values** (§2.4, done as commands, not DWARF): the program writes a
+  word as the REPL would, called by the debugger
+  (`fixpt_debug_show(word)`, in `fixpt-native`'s `direct.rs`, the run's
+  state found per thread), refusing a word that is no value the heap holds
+  (`Heap::plausible`). `scripts/debuggers/fixpt_gdb.py` and `fixpt_lldb.py`
+  add `fx-print EXPR`, `fx-frame` (the selected frame's values, by its
+  stack map: its slots, its code, its closure; a leaf has none) and
+  `fx-regs` (RESULT and REG1-REG3). Slots have no names yet: the compilers
+  do not carry variables' names to frames.
+
 What it gives (verified, gdb 12.1 and lldb on this machine): `bt` from a
 loop in compiled code names every frame, `go`, five `deep`, the
 trampoline, then Rust to `main`; `b go` resolves; `x/3i $pc` shows
-`<go+110>`. Sampled at random in `deriv`, every backtrace reaches the
+`<go+110>`; with lines, `bt` shows `go () at lines.fx:5` and `deep () at
+lines.fx:12`, `list` the program around it, `info line *$pc` the range
+of the line; `lldb` the same (`go at lines.fx:5`). In gdb, `fx-frame` in a
+frame of `keep` shows `slot 2: 2` and `its code: #<bloblet …>`, and
+`fx-print $rdi` a loop's counter. `fixpt_lldb.py` is untried: this lldb's
+Python does not load. Sampled at random in `deriv`, every backtrace reaches the
 thread's start, in both.
 
 What it does not:
@@ -62,6 +92,12 @@ What it does not:
   both debuggers (gdb 12.1, this `lldb`): neither resolves one when an
   object is registered. Break once the code is there (attached, or after
   an interrupt).
+- **Lines of the front end itself**: its code is read back from the
+  cache with no instruction starts, and its places are in files it loads
+  as built-in modules: none yet.
+- **Lines are of the expression a native instruction came from**, not
+  statements: an inlined procedure's code is at the inlined body's lines,
+  and a call's return lands on the line of what uses its value.
 - **arm64**, Linux or macOS (Mach-O), is not done: names would be the
   same objects (`EM_AARCH64`), unchecked; frames need arm64's rules.
 

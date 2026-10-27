@@ -2267,6 +2267,7 @@ impl Compiling<'_> {
             a.imm(X9, code as u64);
             a.e(jmp_m(st(offset_of!(DState, trap_stub))));
         }
+        self.procs[p].starts = super::starts_of(&starts, |i| [labels_g[i], labels_f[i]].map(|l| a.labels[l.0]));
         self.procs[p].code = a.finish()?;
         self.procs[p].len = own;
         Ok(())

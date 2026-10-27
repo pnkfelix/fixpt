@@ -41,4 +41,5 @@
                                (write @k)
                                spin)
                        (exp-params exp cenv rthis)
-                       wcells))))
+                       wcells))
+            (val r-places (ref (listof int @k) @k))))

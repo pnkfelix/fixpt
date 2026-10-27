@@ -40,10 +40,11 @@
            (standard (select standard-types standard-sig))
            (compile-state (select compile-state-types compile-state-sig)))
     (module
-(import regcode-types r-cell r-label r-branch r-brancht r-frame r-guard-to rc-int rc-bool rc-char
-        rc-nil rc-data rc-sym rc-pair rl-reg rl-slot rl-free rl-global rl-loop rl-pending rl-const
-        rl-join rl-lifted rl-test a-e a-v a-thunk a-slot a-lexical a-name a-as-is s-op2 s-op1
-        s-op2imm s-field s-prim s-pure s-cellular s-identity s-set s-special s-apply s-list s-none
+(import regcode-types r-cell r-label r-branch r-brancht r-frame r-guard-to r-pos rc-int rc-bool
+        rc-char rc-nil rc-data rc-sym rc-pair rl-reg rl-slot rl-free rl-global rl-loop rl-pending
+        rl-const rl-join rl-lifted rl-test a-e a-v a-thunk a-slot a-lexical a-name a-as-is s-op2
+        s-op1 s-op2imm s-field s-prim s-pure s-cellular s-identity s-set s-special s-apply s-list
+        s-none
         (type bools wcells rints rthis ritem ritems rconst rconsts r-const-global r-const-list
               r-const-list-table r-member-const r-module-const r-members-at rloc rlocs renv rarg
               rargs rstd rgen rmove rmoves rlate rleaf rtest)
@@ -139,13 +140,29 @@
       (r-branch (f n) 2)
       (r-brancht (n) 2)
       (r-frame () 1)
-      (r-guard-to (c w n) 4))))
-(define r-place (->* (ritems (arrayof int @k) int) int)
-  (lambda (xs at pos)
+      (r-guard-to (c w n) 4)
+      (r-pos (p) 0))))
+;; Where each expression's code starts in the cells `r-assemble` last made,
+;; as `Gen::places`: at each cell where the place changes, its index and the
+;; place, flat.
+(define r-placed (ref rints @k) (new nil))
+(define r-rev-ints (->* (rints rints) rints)
+  (lambda (xs acc) (if (null? xs) acc (r-rev-ints (cdr xs) (cons (car xs) acc)))))
+;; Each label's cell placed, from the items oldest first, `pos` the cell
+;; reached; and the places (`r-placed`), `cur` the place there, `last` the
+;; one last noted (-2 for none), `acc` those noted, newest first. The end.
+(define r-place (->* (ritems (arrayof int @k) int int int rints) int)
+  (lambda (xs at pos cur last acc)
     (if (null? xs)
-        pos
-        (begin (tagcase (car xs) (r-label (n) (array-set! at n pos)) (else x #u))
-               (r-place (cdr xs) at (+ pos (r-size (car xs))))))))
+        (begin (set r-placed (r-rev-ints acc nil)) pos)
+        (let ((n (r-size (car xs))))
+          (tagcase (car xs)
+            (r-label (l) (begin (array-set! at l pos) (r-place (cdr xs) at pos cur last acc)))
+            (r-pos (p) (r-place (cdr xs) at pos p last acc))
+            (else x
+              (if (and (> n 0) (not (= cur last)))
+                  (r-place (cdr xs) at (+ pos n) cur cur (cons cur (cons pos acc)))
+                  (r-place (cdr xs) at (+ pos n) cur last acc))))))))
 ;; The offset to label `n`, placed at `at`, from the cell after an item of
 ;; `size` cells at `pos`, as a cell.
 (define r-offset (->* ((arrayof int @k) int int int) wcell)
@@ -157,6 +174,7 @@
     (tagcase i
       (r-cell (x) (cons x acc))
       (r-label (n) acc)
+      (r-pos (p) acc)
       (r-frame () (cons (wcell-int frame) acc))
       (r-branch (f n)
         (cons (wcell-int (if f rop-branchf rop-branch)) (cons (r-offset at n pos 2) acc)))
@@ -176,9 +194,36 @@
   (lambda (g)
     (let* ((items (get (extract g items)))
            (at (the (arrayof int @k) (make-array (+ 1 (get (extract g labels))) 0)))
-           (end (r-place (r-reverse items nil) at 0)))
+           (end (r-place (r-reverse items nil) at 0 -1 -2 nil)))
       (r-cells items at end (get (extract g mslot)) nil))))
 
+;; The place of the expression whose code is being made (`exp-start`), -1
+;; for none: marked among the items where it changes (`r-pos`), for a
+;; debugger's lines; as the Rust compiler's `Gen::at`.
+(define r-at (ref int @k) (new -1))
+;; Whether `x` is a variable or a constant, whose code is its parent's: its
+;; place not marked.
+(define r-leaf? (->* (exp) bool)
+  (lambda (x)
+    (tagcase x
+      (e-var (n a b abk) #t) (e-int (n a b abk) #t) (e-bool (v a b abk) #t)
+      (e-char (v a b abk) #t) (e-str (s a b abk) #t) (e-float (v a b abk) #t)
+      (e-sym (s a b abk) #t) (e-unit (a b abk) #t)
+      (else y #f))))
+;; `x`'s code to come: its place marked, unless it is the one already, or
+;; `x` a leaf; the place before, for `r-leave-place!`.
+(define r-enter-place! (->* (rgen exp) int)
+  (lambda (g x)
+    (let ((outer (get r-at)))
+      (if (r-leaf? x)
+          outer
+          (let ((here (exp-start x)))
+            (begin (if (= here outer) #u (begin (set r-at here) (r-emit g (r-pos here))))
+                   outer))))))
+;; `x`'s code made: the place before it marked again, if it changed.
+(define r-leave-place! (->* (rgen int) unit)
+  (lambda (g outer)
+    (if (= (get r-at) outer) #u (begin (set r-at outer) (r-emit g (r-pos outer))))))
 ;;; ------------------------------------------------------------- variables
 
 ;; Where global `n` is, in a list; none if it is no global.

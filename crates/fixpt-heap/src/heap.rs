@@ -2714,6 +2714,26 @@ impl Heap {
         Ok(())
     }
 
+    /// Whether `v` may be shown without reading outside what the heap
+    /// holds: an immediate or fixnum, or a reference into what it has
+    /// allocated (the old space, the nursery, a live region, the code
+    /// area). For a debugger, which shows words it does not know to be
+    /// values (`fixpt_native::direct::fixpt_debug_show`).
+    pub fn plausible(&self, v: Value) -> bool {
+        use crate::value::{TAG_FIXNUM, TAG_IMMEDIATE, TAG_PAIR, TAG_SUFFIX_REF};
+        match v.tag() {
+            TAG_FIXNUM | TAG_IMMEDIATE => return true,
+            TAG_PAIR | TAG_BLOBLET | TAG_SUFFIX_REF => {}
+            _ => return false,
+        }
+        let Some(i) = (if v.is_suffix_ref() { Some(v.owner()) } else { v.index().checked_sub(self.base) }) else { return false };
+        let within = |lo: usize, hi: usize| if v.is_bloblet() { i > lo && i <= hi } else { i >= lo && i < hi };
+        within(self.active, self.top)
+            || within(NURSERY_BASE, self.nursery_top)
+            || self.regions.ranges().into_iter().any(|(lo, hi)| within(lo, hi))
+            || self.code.parts.iter().any(|p| within(p.base, p.top))
+    }
+
     fn check_ref(&self, v: Value, at: usize) -> Result<(), String> {
         if v.is_forward() {
             return Err(format!(

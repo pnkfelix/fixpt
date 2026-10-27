@@ -131,6 +131,9 @@
            (= (extract (car fs) 1) (+ at 1))
            (= (extract (car fs) 2) l)))))
 ;; Label `l` here; a jump to it just before it goes.
+;; Where label `l` is in the code, or -1 if it was never placed.
+(define da-label-offset (subr da-reads (int) int)
+  (lambda (l) (array-ref (get da-labels) l)))
 (define da-bind (subr da-assembles (int) unit)
   (lambda (l)
     (begin

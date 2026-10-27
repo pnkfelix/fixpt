@@ -2221,3 +2221,23 @@ The user: "Yeah do 1, 2, and 3" (names, lines, values). Names first.
   the loop keeps the code short for every length.
 - **arm64 left** (TODO §136): untestable here, and a mistake there would
   corrupt the heap.
+
+## Lines for `gdb` and `lldb` (2026-10-27)
+
+- **Places in the register word's suffix**, which nothing used: no new
+  field for both compilers to agree on, and it moves with the word.
+- **A source per text compiled, mapped back through the form's written
+  text**: each form is written again before it is compiled, often inside
+  more; rather than carry spans through the writing, a place is found by
+  where the form's text is in the text compiled.
+- **No marks for variables and constants**: their code is their parent's,
+  and marking them doubled the cost (3.0% to 0.8% of stage 0).
+
+## Values for `gdb` and `lldb` (2026-10-27)
+
+- **The program writes its own values**, called by the debugger, rather
+  than DWARF types and formatters: a tagged word's meaning is the runtime's,
+  and its printer is already written; DWARF would need the compilers to
+  say each slot's type.
+- **Commands, not pretty-printers**: no slot or register has a DWARF type
+  for a printer to hang on.

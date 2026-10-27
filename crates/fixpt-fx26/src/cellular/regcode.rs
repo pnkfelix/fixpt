@@ -84,6 +84,9 @@ enum RItem {
     /// `global-guard g n` to a label: unless global cell `g` has been
     /// written `n` times (`Compiler::writes_expected`).
     Guard(Value, Value, usize),
+    /// What follows is the code of the expression at this place
+    /// (`Compiler::place_of`), for a debugger's lines; no cells.
+    Pos(i64),
 }
 
 /// A standard operation, as register code does it.
@@ -132,6 +135,8 @@ struct Gen {
     looped: bool,
     /// The join points: where each one's parameters are, and its label.
     joins: Vec<(Vec<RLoc>, usize)>,
+    /// The place of the expression whose code is being made, -1 for none.
+    at: i64,
 }
 
 type O<T> = Option<T>;
@@ -176,11 +181,34 @@ impl Gen {
         }
     }
 
+    /// Where each expression's code starts in the cells `assemble` makes:
+    /// at each cell where the place changes, the cell's index and the place.
+    fn places(&self) -> Vec<(usize, i64)> {
+        let (mut out, mut at, mut cur) = (Vec::new(), 0, -1);
+        for i in &self.items {
+            let n = match i {
+                RItem::Cell(_) | RItem::Frame => 1,
+                RItem::Label(_) => 0,
+                RItem::Pos(p) => {
+                    cur = *p;
+                    0
+                }
+                RItem::Branch(..) | RItem::BranchT(_) => 2,
+                RItem::Guard(..) => 4,
+            };
+            if n > 0 && out.last().is_none_or(|&(_, p)| p != cur) {
+                out.push((at, cur));
+            }
+            at += n;
+        }
+        out
+    }
+
     fn assemble(self) -> Vec<Value> {
         let frame = self.max_slot;
         let size = |i: &RItem| match i {
             RItem::Cell(_) | RItem::Frame => 1,
-            RItem::Label(_) => 0,
+            RItem::Label(_) | RItem::Pos(_) => 0,
             RItem::Branch(..) | RItem::BranchT(_) => 2,
             RItem::Guard(..) => 4,
         };
@@ -198,7 +226,7 @@ impl Gen {
             match i {
                 RItem::Cell(x) => cells.push(*x),
                 RItem::Frame => cells.push(Value::fixnum(frame as i64)),
-                RItem::Label(_) => {}
+                RItem::Label(_) | RItem::Pos(_) => {}
                 RItem::Branch(f, n) => {
                     cells.push(Value::fixnum(op(if *f { "branchf" } else { "branch" }) as i64));
                     cells.push(Value::fixnum(at[*n] - (pos + 2)));
@@ -237,7 +265,8 @@ impl Compiler<'_> {
     /// effect summary is less than 3 (it keeps no continuation for later,
     /// writes no global). Only where the body makes no closure, so that
     /// compiling it twice compiles nothing else twice.
-    pub(super) fn register_code(&mut self, params: &[Sym], body: ExpId, inner: &Env, this: Option<This>, own: Option<(Sym, Value)>) -> O<Vec<Value>> {
+    /// With it, where each expression's code starts (`Gen::places`).
+    pub(super) fn register_code(&mut self, params: &[Sym], body: ExpId, inner: &Env, this: Option<This>, own: Option<(Sym, Value)>) -> O<(Vec<Value>, Vec<(usize, i64)>)> {
         if self.summary_of(body) < 3 && self.room(body, i64::MAX / 2, true) >= 0 && self.r_fast_may_pay(params, body, inner, this, own) {
             // The constants it names folded, assumed first.
             let consts = self.r_consts_named(body, inner);
@@ -254,10 +283,14 @@ impl Compiler<'_> {
                 let mut plain = self.register_body(params, body, inner, this, own)?;
                 let frame = fast.max_slot.max(plain.max_slot);
                 (fast.max_slot, plain.max_slot) = (frame, frame);
+                let (fast_places, plain_places) = (fast.places(), plain.places());
                 let (fast, plain) = (fast.assemble(), plain.assemble());
                 // `args n`, the guards, the fast body, the plain one: each
                 // guard, that a global assumed has not been written since.
                 let plain_at = 2 + 4 * assumptions.len() as i64 + (fast.len() as i64 - 2);
+                let guards = 4 * assumptions.len();
+                let mut places: Vec<(usize, i64)> = fast_places.into_iter().map(|(k, p)| (if k < 2 { k } else { k + guards }, p)).collect();
+                places.extend(plain_places.into_iter().filter(|&(k, _)| k >= 2).map(|(k, p)| (k + guards + fast.len() - 2, p)));
                 let mut cells = fast[..2].to_vec();
                 for (k, cell) in assumptions.iter().enumerate() {
                     let at = 2 + 4 * k as i64;
@@ -265,10 +298,24 @@ impl Compiler<'_> {
                 }
                 cells.extend_from_slice(&fast[2..]);
                 cells.extend_from_slice(&plain[2..]);
-                return Some(cells);
+                return Some((cells, places));
             }
         }
-        Some(self.register_body(params, body, inner, this, own)?.assemble())
+        let g = self.register_body(params, body, inner, this, own)?;
+        let places = g.places();
+        Some((g.assemble(), places))
+    }
+
+    /// Where `x` is, as the compiler written in FX-26 has it (`exp-start`):
+    /// its first character in the program's text, or in a module's file
+    /// (`load-module`) past that file's base, a billion times its number.
+    fn place_of(&self, x: ExpId) -> i64 {
+        let span = self.c.arena.span_of(x);
+        if span.file.0 == 0 {
+            self.char_at.get(span.start as usize).map_or(-1, |&c| c as i64)
+        } else {
+            1_000_000_000 * (span.file.0 as i64 - 1000) + self.loaded_char_at(span) as i64
+        }
     }
 
     /// Whether a fast version may be worth compiling, asked before it is:
@@ -324,7 +371,7 @@ impl Compiler<'_> {
     }
 
     fn register_body_as(&mut self, params: &[Sym], body: ExpId, inner: &Env, this: Option<This>, own: Option<(Sym, Value)>, leaf: bool) -> O<Gen> {
-        let mut g = Gen { items: Vec::new(), leaf, next_reg: 0, next_slot: 0, max_slot: 0, labels: 0, this: None, spec: None, own: None, joins: Vec::new(), looped: false };
+        let mut g = Gen { items: Vec::new(), leaf, next_reg: 0, next_slot: 0, max_slot: 0, labels: 0, this: None, spec: None, own: None, joins: Vec::new(), looped: false, at: -1 };
         g.op("args", &[Gen::n(params.len())]);
         let mut env: Vec<(Sym, RLoc)> = Vec::new();
         for (n, l) in inner {
@@ -494,7 +541,7 @@ impl Compiler<'_> {
     pub(super) fn r_standard_word(&mut self, name: &str, n: usize) -> O<Vec<Value>> {
         let std = self.r_standard(name, n)?;
         let callout = matches!(std, Std::Prim(_) | Std::Cellular(_));
-        let mut g = Gen { items: Vec::new(), leaf: !callout, next_reg: n, next_slot: 0, max_slot: 0, labels: 0, this: None, spec: None, own: None, joins: Vec::new(), looped: false };
+        let mut g = Gen { items: Vec::new(), leaf: !callout, next_reg: n, next_slot: 0, max_slot: 0, labels: 0, this: None, spec: None, own: None, joins: Vec::new(), looped: false, at: -1 };
         g.op("args", &[Gen::n(n)]);
         if callout {
             g.cell(Value::fixnum(const { op("save") } as i64));
@@ -730,7 +777,29 @@ impl Compiler<'_> {
     }
 
     /// `x`'s value into `RESULT`; in tail position, returned.
+    /// `r_exp_at`'s code, its place marked before it, and its parent's
+    /// after (`RItem::Pos`), where they differ; but a variable's or a
+    /// constant's, whose code is its parent's, as the FX-26 compiler's
+    /// `r-leaf?`.
     fn r_exp(&mut self, g: &mut Gen, x: ExpId, env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
+        if matches!(self.exp_at(x), Exp::Var(_) | Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Unit) {
+            return self.r_exp_at(g, x, env, te, tail);
+        }
+        let outer = g.at;
+        let here = self.place_of(x);
+        if here != outer {
+            g.at = here;
+            g.items.push(RItem::Pos(here));
+        }
+        let made = self.r_exp_at(g, x, env, te, tail);
+        if g.at != outer {
+            g.at = outer;
+            g.items.push(RItem::Pos(outer));
+        }
+        made
+    }
+
+    fn r_exp_at(&mut self, g: &mut Gen, x: ExpId, env: &mut Vec<(Sym, RLoc)>, te: &mut Env, tail: bool) -> O<()> {
         // A procedure converted to a convention: made, then given to
         // `%fx26-convert` with what it is converted to.
         if let Some(k) = self.c.facts.conversion_code(x) {

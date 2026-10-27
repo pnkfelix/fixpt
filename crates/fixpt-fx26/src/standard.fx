@@ -447,6 +447,10 @@
          (("%string-append-list") "%fx26-string-append-list")
          (("%syscall-available?") "%fx26-syscall-available?")
          (else "")))
+      ((20)
+       (case n
+         (("set-register-twin-at") "%set-register-twin")
+         (else "")))
       ((22)
        (case n
          (("datum-list->bytevector") "%fx26-bytevector")

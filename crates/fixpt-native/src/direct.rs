@@ -982,6 +982,38 @@ struct Proc {
     global: bool,
     /// The parameters it takes raw (`reps::raw_params`), once known.
     params: Option<u8>,
+    /// Where each register-code instruction's code starts, in either
+    /// version: the byte, and the instruction's first cell; in order. For a
+    /// debugger's lines (`jitdebug`).
+    starts: Vec<(u32, u32)>,
+}
+
+/// Where `p`'s code came from: its register word's source, and at each
+/// byte where the place changes, the byte and the place
+/// (`Heap::register_places`), if it has them.
+fn lines_of(heap: &Heap, p: &Proc) -> Option<(u32, Vec<(u32, i64)>)> {
+    if !crate::jitdebug::enabled() || p.starts.is_empty() || !heap.is_register_word(p.rw) {
+        return None;
+    }
+    let (source, places) = heap.register_places(p.rw)?;
+    let mut rows: Vec<(u32, i64)> = Vec::new();
+    for &(off, cell) in &p.starts {
+        let k = places.partition_point(|&(c, _)| c <= cell as usize);
+        let place = if k == 0 { -1 } else { places[k - 1].1 };
+        if rows.last().is_none_or(|&(_, l)| l != place) {
+            rows.push((off, place));
+        }
+    }
+    Some((source, rows))
+}
+
+/// Where each instruction starts, from both versions' labels (`at` gives
+/// their bytes, if placed), in order: `Proc::starts`.
+fn starts_of(starts: &[usize], at: impl Fn(usize) -> [Option<usize>; 2]) -> Vec<(u32, u32)> {
+    let mut out: Vec<(u32, u32)> = starts.iter().flat_map(|&i| at(i).into_iter().flatten().map(move |b| (b as u32, i as u32))).collect();
+    out.sort_unstable();
+    out.dedup();
+    out
 }
 
 /// How many call-outs a machine numbers for itself (`DirectMachine::new`),
@@ -1194,7 +1226,7 @@ fn install(heap: &mut Heap, procs: &[Proc], first: usize, free: &[Value]) -> Res
         heap.set_bloblet_bytes(blob, 0, bytes).map_err(|e| format!("{e:?}"))?;
         heap.flush_code(blob);
         if crate::symbols::enabled() {
-            crate::symbols::note(heap.code_exec_address(blob), bytes.len(), &format!("native {}", p.name));
+            crate::symbols::note_lines(heap.code_exec_address(blob), bytes.len(), &format!("native {}", p.name), lines_of(heap, p));
         }
     }
     crate::jitdebug::flush();
@@ -1323,7 +1355,9 @@ fn run(r: &Runner, rt: &mut fixpt_runtime::Runtime, p: Compiled, args: &[Value],
     // native frames hold (`callout`).
     let entry: extern "C" fn(u64, u64, u64, u64) -> u64 = unsafe { std::mem::transmute(r.entry as usize) };
     let outer = RUNNING.replace(Some(*r));
+    let outer_state = SHOWN_IN.replace(&st as *const DState);
     let v = entry(&mut st as *mut DState as u64, target, 0, 0);
+    SHOWN_IN.set(outer_state);
     RUNNING.set(outer);
     STATS.with(|s| {
         let mut t = s.get();
@@ -1338,6 +1372,45 @@ fn run(r: &Runner, rt: &mut fixpt_runtime::Runtime, p: Compiled, args: &[Value],
         return Err(DirectTrap { what, pc: st.pc });
     }
     Ok(Value::from_raw(v))
+}
+
+thread_local! {
+    /// The state of the run native code is in now on this thread, for a
+    /// debugger to show values by (`fixpt_debug_show`); null if none.
+    static SHOWN_IN: std::cell::Cell<*const DState> = const { std::cell::Cell::new(std::ptr::null()) };
+}
+
+/// Word `v` as FX-26 writes the value it is, for a debugger stopped in
+/// native code on this thread to call (`tools/fixpt-gdb.py`,
+/// `tools/fixpt-lldb.py`): a C string, good until the next call. A word
+/// that is no value the heap holds (`Heap::plausible`) is said so, and its
+/// bits shown; one too long to show, cut short.
+#[unsafe(no_mangle)]
+pub extern "C" fn fixpt_debug_show(v: u64) -> *const std::ffi::c_char {
+    static SHOWN: std::sync::Mutex<Option<std::ffi::CString>> = std::sync::Mutex::new(None);
+    let st = SHOWN_IN.get();
+    let text = if st.is_null() {
+        "(no native code is running on this thread)".to_string()
+    } else {
+        // SAFETY: the state of the run on this thread, set while it runs,
+        // its runtime that run's; a debugger has the thread stopped.
+        let rt = unsafe { &*((*st).rt as *const fixpt_runtime::Runtime) };
+        let v = Value::from_raw(v);
+        if rt.heap.plausible(v) {
+            let mut w = fixpt_runtime::write_value(&rt.heap, v);
+            if w.len() > 4000 {
+                let cut = (0..=4000).rev().find(|&k| w.is_char_boundary(k)).unwrap_or(0);
+                w.truncate(cut);
+                w.push_str(" …");
+            }
+            w
+        } else {
+            format!("{:#x} (no value of the heap's)", v.raw())
+        }
+    };
+    let c = std::ffi::CString::new(text.replace('\0', "\\0")).unwrap_or_default();
+    let mut shown = SHOWN.lock().unwrap_or_else(|e| e.into_inner());
+    shown.insert(c).as_ptr()
 }
 
 /// From Rust, `entry(state, procedure)`: the callee-saved registers saved,
@@ -1734,7 +1807,7 @@ impl Compiling<'_> {
         }
         let code = continuation_bytes(REINSTATE);
         let q = self.procs.len();
-        self.procs.push(Proc { word: Value::FALSE, rw: Value::FALSE, name: "continuation".into(), arity: 1, fields: vec![Field::Myself, Field::Const(Value::FALSE)], len: code.len(), code, global: false, params: Some(0) });
+        self.procs.push(Proc { word: Value::FALSE, rw: Value::FALSE, name: "continuation".into(), arity: 1, fields: vec![Field::Myself, Field::Const(Value::FALSE)], len: code.len(), code, global: false, params: Some(0), starts: Vec::new() });
         self.resume = Some(q);
         q
     }
@@ -1753,7 +1826,7 @@ impl Compiling<'_> {
         let variadic = h.bloblet_slot(rw, WORD_CELL0).as_fixnum() as usize == const { fixpt_heap::layout::regcode::op("vargs") };
         let arity = if variadic { usize::MAX } else { h.bloblet_slot(rw, WORD_CELL0 + 1).as_fixnum() as usize };
         let p = self.procs.len();
-        self.procs.push(Proc { word, rw, name: self.name(word), arity, fields: vec![Field::Myself, Field::Const(word)], code: Vec::new(), len: 0, global: false, params: None });
+        self.procs.push(Proc { word, rw, name: self.name(word), arity, fields: vec![Field::Myself, Field::Const(word)], code: Vec::new(), len: 0, global: false, params: None, starts: Vec::new() });
         self.by_word.insert(word.raw(), p);
         self.queue.push(p);
         Ok(p)
@@ -3573,6 +3646,7 @@ impl Compiling<'_> {
             a.e(ldr(X16, ST, st_off(offset_of!(DState, trap_stub))));
             a.e(br(X16));
         }
+        self.procs[p].starts = starts_of(&starts, |i| [labels_g[i], labels_f[i]].map(|l| a.labels[l.0].map(|w| 4 * w)));
         self.procs[p].code = crate::arm64::bytes(&a.finish()?);
         self.procs[p].len = 4 * own;
         Ok(())

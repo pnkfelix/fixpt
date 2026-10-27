@@ -40,6 +40,11 @@ pub fn same_code(h: &Heap, a: Value, b: Value, pairs: &mut HashMap<u64, u64>, wh
         *why = format!("{} fields and {}", na, nb);
         return false;
     }
+    // A register word's places: where each expression's code starts.
+    if ka == Some(fixpt_heap::layout::kind("register-code")) && h.register_places(a) != h.register_places(b) {
+        *why = format!("{}'s places {:?} and {:?}", fixpt_runtime::write_value(h, h.bloblet_slot(a, fixpt_heap::layout::cellular::WORD_NAME)), h.register_places(a), h.register_places(b));
+        return false;
+    }
     // Field 1 is the trailer; the rest are values. A word's entry is
     // `docol`, or a native machine's number for its compiled code: the same
     // cells either way; a register word's, 0 or a machine's number. A word's

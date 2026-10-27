@@ -632,7 +632,10 @@ first two steps serve both.
 
 Since (2026-10-27): names and frames, on Linux x86_64, for `gdb` and
 `lldb` (`docs/research/debugging.md`, "Since"); the user asked for lines
-and values too. Left of the names: arm64 (Mach-O on macOS); a debugger
+and values too. Lines and values done since (DONE §142, §143). Left: arm64 (Mach-O on
+macOS); the front end's own lines; the names of the values in a frame (the
+compilers carrying variables' names to slots); `fixpt_lldb.py` tried on an
+lldb whose Python loads; a debugger
 come to a running program waits some seconds while every object is made
 again with frames (fewer, larger objects would help: merge them while no
 debugger is here); the underflow stub named where a return address is

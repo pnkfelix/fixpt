@@ -56,12 +56,17 @@ pub fn enabled() -> bool {
 
 /// `len` bytes of machine code at `start` are `name`'s, from now on.
 pub fn note(start: usize, len: usize, name: &str) {
+    note_lines(start, len, name, None);
+}
+
+/// The same, and where its code came from (`jitdebug::Piece::lines`).
+pub fn note_lines(start: usize, len: usize, name: &str, lines: Option<(u32, Vec<(u32, i64)>)>) {
     let name = name.replace('\n', " ");
     if crate::jitdebug::enabled() {
         // Code a call enters, the return address on the stack's top: its
         // frames can be known (`crate::cfi`).
         let called = name.starts_with("native ") && !name.ends_with("stack cache underflow") && !name.ends_with("a mark's return");
-        crate::jitdebug::register(&crate::jitdebug::Piece { start, len, name: &name, called });
+        crate::jitdebug::register(&crate::jitdebug::Piece { start, len, name: &name, called, lines });
     }
     for (f, hex) in files() {
         if let Ok(mut f) = f.lock() {

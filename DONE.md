@@ -3646,3 +3646,40 @@ Heist's request (`heist/docs/requests/fixpt-region-alloc-inline.md`).
 - **Not done**: arm64 (`direct.rs`), which cannot be run here.
 - **Test**: `programs/run/alloc-in-line.fx`, every length either side of
   16, in the heap and in a region.
+
+## 142. Source lines for compiled code, in `gdb` and `lldb` (2026-10-27)
+
+The second of the user's three (names, lines, values).
+
+- **Places in register code**: both register compilers mark where each
+  expression's code starts (`RItem::Pos` / `r-pos`, a leaf's not), and a
+  register word keeps where each place begins in its suffix, with the
+  source it is in (`Heap::register_places`, `set_source`); the FX-26
+  compiler gives them to `set-register-twin-at`. The tests comparing the
+  two compilers compare them (`same_code`).
+- **Instruction starts in native code**: both native compilers say where
+  each register instruction's code begins (`Proc::starts`, `dx-starts`),
+  compared by `tests/native_x64.rs`.
+- **Sources** (`fixpt_fx26::sources`): each text compiled, with the form
+  written into it (`fixpt_read::write_syntax_mapped`), the file run and the
+  module files loaded; a place's file and line found from them when lines
+  are made, with frames, as DWARF 3 `.debug_line`, one unit per procedure.
+- **Stage 0's fixed cost**: 28.68G instructions against 28.38G; 28.39G
+  against 28.17G with `FIXPT_JIT_DEBUG=0` (the compilers' marks alone).
+- **Tests**: `fixpt-cli/tests/jit_lines.rs` (`FIXPT_LINES`), by both native
+  compilers, of the program's file and a module file's.
+
+## 143. FX-26's values in `gdb` and `lldb` (2026-10-27)
+
+The third of the user's three.
+
+- **The program writes a value for the debugger**: `fixpt_debug_show`
+  (`direct.rs`), a C function a debugger calls with a word, the run's
+  state found per thread (`SHOWN_IN`), the word written as the REPL writes
+  it, or refused if it is no value the heap holds (`Heap::plausible`).
+- **Commands** (`scripts/debuggers/fixpt_gdb.py`, `fixpt_lldb.py`):
+  `fx-print EXPR`, `fx-frame` (a native frame's live slots by its stack
+  map, a fixnum: its count of fields and live bits), `fx-regs`.
+- **Test**: `fixpt-cli/tests/jit_lines.rs` attaches gdb, where there is one
+  and attaching is allowed, to a program in a loop under frames that keep
+  values.

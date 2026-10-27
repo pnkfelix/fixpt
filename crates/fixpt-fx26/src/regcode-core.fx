@@ -50,13 +50,13 @@
   ;; what it is converted to.
   (r-exp (->* (rgen exp renv cenv bool) unit)
     (lambda (g x env te tail)
-      (let ((k (c-conversion-at x)) (r (c-reshape-at x)))
-        (cond ((>= k 0)
-               (begin
-                 (r-prim g "%fx26-convert" (r-args-2 (a-as-is x) (a-v (wcell-int k))) env te)
-                 (r-done g tail)))
-              ((not (null? r)) (r-reshape g x (car r) env te tail))
-              (else (r-exp-as-is g x env te tail))))))
+      (let ((k (c-conversion-at x)) (r (c-reshape-at x)) (outer (r-enter-place! g x)))
+        (begin
+          (cond ((>= k 0)
+                 (begin (r-prim g "%fx26-convert" (r-args-2 (a-as-is x) (a-v (wcell-int k))) env te)
+                        (r-done g tail)))
+                ((not (null? r)) (r-reshape g x (car r) env te tail))
+                (else (r-exp-as-is g x env te tail))) (r-leave-place! g outer)))))
   ;; `x`'s value into RESULT; in tail position, returned.
   (r-exp-as-is (->* (rgen exp renv cenv bool) unit)
     (lambda (g x env te tail)

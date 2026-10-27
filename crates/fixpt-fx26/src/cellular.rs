@@ -2268,7 +2268,7 @@ impl<'a> Compiler<'a> {
             Twin::Standard { w, name, op, n } => {
                 if let Some(cells) = self.r_standard_word(&op, n) {
                     let sym = self.heap.intern(&name);
-                    let twin = self.heap.make_register_word(sym, w, &cells).map_err(|e| format!("register code for {name}: {e}"))?;
+                    let twin = self.heap.make_register_word(sym, w, &cells, &[]).map_err(|e| format!("register code for {name}: {e}"))?;
                     self.heap.set_bloblet_slot(w, WORD_TWIN, twin);
                 }
             }
@@ -2298,9 +2298,9 @@ impl<'a> Compiler<'a> {
                 self.r_in_plan = in_plan;
                 self.reuse = outer_reuse;
                 match cells {
-                    Some(cells) => {
+                    Some((cells, places)) => {
                         let sym = self.heap.intern(&name);
-                        let twin = self.heap.make_register_word(sym, w, &cells).map_err(|e| format!("register code for {name}: {e}"))?;
+                        let twin = self.heap.make_register_word(sym, w, &cells, &places).map_err(|e| format!("register code for {name}: {e}"))?;
                         self.heap.set_bloblet_slot(w, WORD_TWIN, twin);
                         self.register_report.push((name, None));
                     }

@@ -500,6 +500,9 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // A word's register code (PLAN.md 13h′) made from its cells, checked,
     // and set as the word's twin; it is given back.
     ("set-register-twin", "(poly ((r region)) (subr (read r) (tword (listof wcell r)) tword))"),
+    // With where each expression's code starts: each cell and place in
+    // turn (`Heap::register_places`).
+    ("set-register-twin-at", "(poly ((r region)) (subr (read r) (tword (listof wcell r) (listof int r)) tword))"),
     // A word's cells, looked at, for the compiler to machine code: how many
     // fields it has, and field k if it is an int.
     ("tword-fields", "(subr pure (tword) int)"),

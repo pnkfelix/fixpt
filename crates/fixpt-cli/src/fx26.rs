@@ -107,6 +107,12 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
     if crate::NATIVE_CONVENTION.get().copied().unwrap_or(false) {
         s.set_native_convention(true);
         s.native_runner = Some(run_native);
+        // Lines for a debugger (`fixpt_native::jitdebug`): from the sources
+        // the session keeps.
+        if fixpt_native::jitdebug::enabled() {
+            fixpt_fx26::sources::want();
+            fixpt_native::jitdebug::set_resolver(fixpt_fx26::sources::resolve);
+        }
         s.native_compiler = Some(fixpt_native::direct::compile_closure);
         // What cellular code makes, compiled natively where it can be, on
         // the machine `run_native` runs on: by the compiler written in Rust,
@@ -708,6 +714,8 @@ fn run_files_in(session: &mut Fx26Session, files: &[String], args: &[String]) ->
         // `fixpt eval`'s and `,load`'s are.
         let dir = std::path::Path::new(f).parent().map(|d| d.to_path_buf());
         let outer = std::mem::replace(&mut session.checker.base_dir, dir);
+        let path = std::fs::canonicalize(f).map_or_else(|_| f.to_string(), |p| p.display().to_string());
+        session.source_file = Some(std::rc::Rc::new((path, text.clone())));
         let ran = session.run_forms(&forms);
         session.checker.base_dir = outer;
         let outs = match ran {
@@ -2026,6 +2034,7 @@ fn compile_by_fx26_in(s: &mut fixpt_scheme::Session, closure: fixpt_scheme::Hand
                 fields: ints(4),
                 callouts: ints(5),
                 err: r.field(6).and_then(|e| e.string()).unwrap_or_default(),
+                starts: ints(7),
             }
         });
         let mut taken = Ok(());

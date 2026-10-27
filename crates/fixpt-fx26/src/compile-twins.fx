@@ -31,9 +31,10 @@
 (hide (include compile) (include compile-state) (include compile-plan) (include compile-lift)
       (include regcode-entry))
 
-;; `cells` as word `w`'s register twin, unless there are none.
+;; `cells` as word `w`'s register twin, unless there are none, with where
+;; each expression's code starts in them (`r-places`).
 (define c-twin! (->* (tword (listof wcell @k)) unit)
-  (lambda (w cells) (if (null? cells) #u (begin (set-register-twin w cells) #u))))
+  (lambda (w cells) (if (null? cells) #u (begin (set-register-twin-at w cells (get r-places)) #u))))
 ;; Register code for twin `t`, made with the words its stack code made; a
 ;; copy's in its context.
 (define c-make-twin (->* (c-twin) unit)

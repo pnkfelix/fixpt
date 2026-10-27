@@ -19,6 +19,12 @@
 //! `FIXPT_JIT_DEBUG`: `0` registers nothing; `names` never frames;
 //! `frames` makes them from the start.
 //!
+//! Lines are made with frames: where a register word's expressions start
+//! (`Heap::register_places`), each instruction's code (`Proc::starts`),
+//! and the file and line of each place, as the session's sources find
+//! them (`set_resolver`), as DWARF's `.debug_line`. `FIXPT_LINES=FILE`
+//! writes them there too.
+//!
 //! Code is collected and its room used again, and the cellular machine's
 //! code space is replaced by a copying collection: a piece placed where an
 //! older one was replaces it, and a code space unmapped forgets the pieces
@@ -89,6 +95,9 @@ struct Owned {
     name: String,
     called: bool,
     frame: Option<Vec<u8>>,
+    /// Where its code came from: its source, and at each byte where the
+    /// place changes, the byte and the place (`Piece::lines`).
+    lines: Option<(u32, Vec<(u32, i64)>)>,
 }
 
 impl Owned {
@@ -127,12 +136,20 @@ static PENDING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::n
 /// names and frames from the start; else frames once a debugger is here.
 fn mode() -> u8 {
     static MODE: std::sync::OnceLock<u8> = std::sync::OnceLock::new();
-    *MODE.get_or_init(|| match std::env::var("FIXPT_JIT_DEBUG").as_deref() {
+    *MODE.get_or_init(|| {
+        // What a debugger calls, kept in the program: nothing else names it.
+        std::hint::black_box(crate::direct::fixpt_debug_show as *const ());
+        mode_said()
+    })
+}
+
+fn mode_said() -> u8 {
+    match std::env::var("FIXPT_JIT_DEBUG").as_deref() {
         Ok("0") => 0,
         Ok("names") => 1,
         Ok("frames") => 3,
         _ => 2,
-    })
+    }
 }
 
 /// Whether code is registered.
@@ -173,6 +190,21 @@ pub struct Piece<'a> {
     /// Whether it is entered by a call, its return address on the stack's
     /// top, so that its frames can be known (`crate::cfi`).
     pub called: bool,
+    /// Where its code came from, if known: the source its places are in
+    /// (`fixpt_heap::regcode::set_source`), and at each byte where the
+    /// place changes, the byte and the place; for lines, with frames.
+    pub lines: Option<(u32, Vec<(u32, i64)>)>,
+}
+
+/// What finds the file and line of a place in a source (`set_resolver`).
+pub type Resolver = fn(u32, i64) -> Option<(String, u32)>;
+
+static RESOLVER: std::sync::OnceLock<Resolver> = std::sync::OnceLock::new();
+
+/// `r` finds the file and line of each place, for the lines made with
+/// frames: the session's sources (`fixpt_fx26::sources`).
+pub fn set_resolver(r: Resolver) {
+    let _ = RESOLVER.set(r);
 }
 
 /// `piece` to be registered at the next [`flush`], in place of every
@@ -181,7 +213,8 @@ pub fn register(piece: &Piece) {
     let mut r = lock();
     PENDING.store(true, std::sync::atomic::Ordering::Relaxed);
     let called = piece.called && mode() > 1;
-    r.pending.push(Owned { start: piece.start, len: piece.len.max(1), name: debugger_name(piece.name), called, frame: None });
+    let lines = piece.lines.clone().filter(|_| mode() > 1);
+    r.pending.push(Owned { start: piece.start, len: piece.len.max(1), name: debugger_name(piece.name), called, frame: None, lines });
     if r.pending.len() >= MOST_PENDING {
         r.flush();
     }
@@ -397,7 +430,147 @@ fn object(pieces: &[Owned]) -> Vec<u8> {
     if !framed.is_empty() {
         sections.push(Section { align: 8, ..section(".debug_frame", SHT_PROGBITS, crate::cfi::debug_frame(&framed)) });
     }
+    if frames()
+        && let Some(resolve) = RESOLVER.get()
+        && let Some((info, abbrev, line)) = dwarf_lines(pieces, *resolve)
+    {
+        sections.push(section(".debug_info", SHT_PROGBITS, info));
+        sections.push(section(".debug_abbrev", SHT_PROGBITS, abbrev));
+        sections.push(section(".debug_line", SHT_PROGBITS, line));
+    }
     elf(sections)
+}
+
+fn uleb(out: &mut Vec<u8>, mut v: u64) {
+    loop {
+        let b = (v & 0x7f) as u8;
+        v >>= 7;
+        if v == 0 {
+            out.push(b);
+            return;
+        }
+        out.push(b | 0x80);
+    }
+}
+
+fn sleb(out: &mut Vec<u8>, mut v: i64) {
+    loop {
+        let b = (v & 0x7f) as u8;
+        v >>= 7;
+        if (v == 0 && b & 0x40 == 0) || (v == -1 && b & 0x40 != 0) {
+            out.push(b);
+            return;
+        }
+        out.push(b | 0x80);
+    }
+}
+
+/// DWARF 3's `.debug_info`, `.debug_abbrev` and `.debug_line` for the
+/// pieces whose places `resolve` finds: for each, a compilation unit, named
+/// for its first file, of one subprogram, named for the piece, and a line
+/// program of its rows. None if no piece has a line.
+fn dwarf_lines(pieces: &[Owned], resolve: Resolver) -> Option<(Vec<u8>, Vec<u8>, Vec<u8>)> {
+    // The abbreviations: 1, a unit, with children: name, line program,
+    // first and last address; 2, a subprogram: name, first and last.
+    let abbrev = vec![
+        1, 0x11, 1, 0x03, 0x08, 0x10, 0x06, 0x11, 0x01, 0x12, 0x01, 0, 0, //
+        2, 0x2e, 0, 0x03, 0x08, 0x11, 0x01, 0x12, 0x01, 0, 0, //
+        0,
+    ];
+    let (mut info, mut line) = (Vec::new(), Vec::new());
+    for p in pieces {
+        let Some((source, places)) = &p.lines else { continue };
+        // Each row's file and line, those resolved, a row where either
+        // changes.
+        let mut files: Vec<String> = Vec::new();
+        let mut rows: Vec<(u32, usize, u32)> = Vec::new();
+        for &(off, place) in places {
+            let Some((file, ln)) = resolve(*source, place) else { continue };
+            let f = files.iter().position(|x| *x == file).unwrap_or_else(|| {
+                files.push(file);
+                files.len() - 1
+            });
+            if rows.last().is_none_or(|&(_, lf, ll)| (lf, ll) != (f, ln)) {
+                rows.push((off, f, ln));
+            }
+        }
+        if rows.is_empty() {
+            continue;
+        }
+        // With `FIXPT_LINES=FILE`, the rows written there too, a line each:
+        // `NAME +OFFSET FILE:LINE`, for tests and for looking.
+        if let Some(path) = std::env::var_os("FIXPT_LINES")
+            && let Ok(mut out) = std::fs::OpenOptions::new().create(true).append(true).open(path)
+        {
+            use std::io::Write;
+            for &(off, f, l) in &rows {
+                let _ = writeln!(out, "{} +{off} {}:{l}", p.name, files[f]);
+            }
+        }
+        let (lo, hi) = (p.start as u64, (p.start + p.len) as u64);
+        // The line program: its header, then its rows.
+        let mut hdr = Vec::new();
+        hdr.extend_from_slice(&[1, 1, (-5i8) as u8, 14, 13]); // instruction length, is_stmt, line base, range, opcode base
+        hdr.extend_from_slice(&[0, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1]); // standard opcodes' operands
+        hdr.push(0); // no directories
+        for f in &files {
+            hdr.extend_from_slice(f.as_bytes());
+            hdr.extend_from_slice(&[0, 0, 0, 0]); // name's end, directory, time, length
+        }
+        hdr.push(0);
+        let mut prog = vec![0, 9, 2]; // DW_LNE_set_address
+        prog.extend_from_slice(&lo.to_le_bytes());
+        let (mut at, mut file, mut ln) = (0u32, 0usize, 1u32);
+        for &(off, f, l) in &rows {
+            if f != file {
+                prog.push(4); // DW_LNS_set_file
+                uleb(&mut prog, f as u64 + 1);
+                file = f;
+            }
+            if l != ln {
+                prog.push(3); // DW_LNS_advance_line
+                sleb(&mut prog, l as i64 - ln as i64);
+                ln = l;
+            }
+            if off != at {
+                prog.push(2); // DW_LNS_advance_pc
+                uleb(&mut prog, (off - at) as u64);
+                at = off;
+            }
+            prog.push(1); // DW_LNS_copy
+        }
+        prog.push(2);
+        uleb(&mut prog, (hi - lo).saturating_sub(at as u64));
+        prog.extend_from_slice(&[0, 1, 1]); // DW_LNE_end_sequence
+        let stmt = line.len() as u32;
+        let mut unit = Vec::new();
+        unit.extend_from_slice(&3u16.to_le_bytes());
+        unit.extend_from_slice(&(hdr.len() as u32).to_le_bytes());
+        unit.extend_from_slice(&hdr);
+        unit.extend_from_slice(&prog);
+        line.extend_from_slice(&(unit.len() as u32).to_le_bytes());
+        line.extend_from_slice(&unit);
+        // The unit.
+        let mut cu = Vec::new();
+        cu.extend_from_slice(&3u16.to_le_bytes());
+        cu.extend_from_slice(&0u32.to_le_bytes()); // its abbreviations
+        cu.push(8);
+        cu.push(1);
+        cu.extend_from_slice(files[0].as_bytes());
+        cu.push(0);
+        cu.extend_from_slice(&stmt.to_le_bytes());
+        cu.extend_from_slice(&lo.to_le_bytes());
+        cu.extend_from_slice(&hi.to_le_bytes());
+        cu.push(2);
+        cu.extend_from_slice(p.name.as_bytes());
+        cu.push(0);
+        cu.extend_from_slice(&lo.to_le_bytes());
+        cu.extend_from_slice(&hi.to_le_bytes());
+        cu.push(0); // the unit's children end
+        info.extend_from_slice(&(cu.len() as u32).to_le_bytes());
+        info.extend_from_slice(&cu);
+    }
+    (!info.is_empty()).then_some((info, abbrev, line))
 }
 
 fn elf(mut sections: Vec<Section>) -> Vec<u8> {
@@ -458,7 +631,7 @@ mod tests {
     use super::*;
 
     fn piece(start: usize, len: usize, name: &str) -> Owned {
-        Owned { start, len, name: name.into(), called: false, frame: None }
+        Owned { start, len, name: name.into(), called: false, frame: None, lines: None }
     }
 
     /// An object of two pieces: an ELF header, a `.text.k` section for each
@@ -491,11 +664,11 @@ mod tests {
         };
         let base = 0x7000_0000_0000;
         for (k, name) in ["a", "b", "c"].iter().enumerate() {
-            register(&Piece { start: base + 64 * k, len: 64, name, called: false });
+            register(&Piece { start: base + 64 * k, len: 64, name, called: false, lines: None });
         }
         flush();
         assert!(["a", "b", "c"].iter().all(|n| listed().contains(&n.to_string())));
-        register(&Piece { start: base + 64, len: 64, name: "b2", called: false });
+        register(&Piece { start: base + 64, len: 64, name: "b2", called: false, lines: None });
         flush();
         let l = listed();
         assert!(l.contains(&"b2".into()) && !l.contains(&"b".into()) && l.contains(&"a".into()) && l.contains(&"c".into()));

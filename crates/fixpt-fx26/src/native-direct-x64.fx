@@ -359,12 +359,25 @@
                  (lambda (k) (if (= k n) #u (begin (array-set! a k (da-label)) (fill (+ k 1)))))))
         (begin (fill 0) a)))))
 
+;; Where each instruction starts in the code, both versions' (`Proc::starts`):
+;; each offset and the instruction's cell, flat, from instruction `si` down.
+(define dx-starts (subr da-assembles (int da-bytes) da-bytes)
+  (lambda (si acc)
+    (if (< si 0)
+        acc
+        (let* ((i (dp-start si))
+               (g (da-label-offset (array-ref (get dp-labels-g) i)))
+               (f (da-label-offset (array-ref (get dp-labels-f) i)))
+               (with-f (if (>= f 0) (the da-bytes (cons f (cons i acc))) acc)))
+          (dx-starts (- si 1) (if (>= g 0) (the da-bytes (cons g (cons i with-f))) with-f))))))
+
 ;; A procedure's code, as `procedure_x64` makes it, of what Rust gave of it
 ;; (`FxRequest`: its name, its lists in order, and the messages its
 ;; failures noted at instructions name): its bytes, how many are its own,
 ;; its code bloblet's fields (as `direct/fx.rs`'s `field_of` reads them),
-;; the call-outs it numbered, and why it cannot be compiled ("" if it
-;; can; the call-outs numbered until then are the Rust compiler's too).
+;; the call-outs it numbered, why it cannot be compiled ("" if it can;
+;; the call-outs numbered until then are the Rust compiler's too), and
+;; where each instruction starts (`dx-starts`).
 (define native-compile-x64-proc (subr da-assembles (string (listof da-bytes @k) da-strings) dx-made)
   (lambda (name lists errors)
     (begin
@@ -382,7 +395,8 @@
       (if (da-ok?)
           (let* ((own (dx-after)) (code (da-finish)))
             (product (1 code) (2 own) (3 (the da-bytes (reverse (get dp-fields))))
-                     (4 (da-callouts)) (5 (da-err))))
+                     (4 (da-callouts)) (5 (da-err))
+                     (6 (dx-starts (- (dp-ns) 1) (the da-bytes nil)))))
           (product (1 (the da-bytes nil)) (2 0) (3 (the da-bytes nil)) (4 (da-callouts))
-                   (5 (da-err)))))))
+                   (5 (da-err)) (6 (the da-bytes nil)))))))
 )))

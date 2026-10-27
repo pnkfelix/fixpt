@@ -16,7 +16,7 @@
 pub mod heap;
 pub mod image;
 pub mod layout;
-mod regcode;
+pub mod regcode;
 mod sro;
 mod cellular;
 

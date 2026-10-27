@@ -256,7 +256,7 @@ fn compare_one(sc: &mut fixpt_scheme::Session, clo: Handle, rust: &mut fixpt_nat
     });
     // The values Rust's fields hold, held while FX-26 runs.
     let held: Vec<Vec<Handle>> = match &want[0].1 {
-        Ok((_, _, fs)) => fs.iter().map(|(_, vs)| vs.iter().map(|&v| sc.make(|_| v)).collect()).collect(),
+        Ok((_, _, fs, _)) => fs.iter().map(|(_, vs)| vs.iter().map(|&v| sc.make(|_| v)).collect()).collect(),
         Err(_) => Vec::new(),
     };
     let mut begun = None;
@@ -308,6 +308,7 @@ fn compare_one(sc: &mut fixpt_scheme::Session, clo: Handle, rust: &mut fixpt_nat
                 fields: ints(4),
                 callouts: ints(5),
                 err: r.field(6).and_then(|e| e.string()).unwrap_or_default(),
+                starts: ints(7),
             }
         });
         sc.make(|m| {
@@ -320,7 +321,7 @@ fn compare_one(sc: &mut fixpt_scheme::Session, clo: Handle, rust: &mut fixpt_nat
     let mut want_fields = Vec::new();
     sc.make(|m| {
         got = fx.fx_each(m.heap(), c);
-        if let Ok((_, _, fs)) = &want[0].1 {
+        if let Ok((_, _, fs, _)) = &want[0].1 {
             want_fields = fs.iter().zip(&held).map(|((what, _), hs)| format!("{what} {}", shown(&hs.iter().map(|h| m.get(*h)).collect::<Vec<_>>()))).collect::<Vec<String>>();
         }
         Value::NULL
@@ -328,7 +329,11 @@ fn compare_one(sc: &mut fixpt_scheme::Session, clo: Handle, rust: &mut fixpt_nat
     let name = &want[0].0;
     match (&want[0].1, &got[0].1) {
         (Err(a), Err(b)) if a == b => Ok(None),
-        (Ok((wc, wl, _)), Ok((gc, gl, gf))) => {
+        (Ok((wc, wl, _, ws)), Ok((gc, gl, gf, gs))) if ws != gs => {
+            let _ = (wc, wl, gc, gl, gf);
+            Err(format!("`{name}`: instructions start Rust {ws:?}, FX-26 {gs:?}"))
+        }
+        (Ok((wc, wl, _, _)), Ok((gc, gl, gf, _))) => {
             let gs: Vec<String> = gf.iter().map(|(what, vs)| format!("{what} {}", shown(vs))).collect();
             if (wc, wl) != (gc, gl) {
                 let first = wc.iter().zip(gc).position(|(a, b)| a != b);
