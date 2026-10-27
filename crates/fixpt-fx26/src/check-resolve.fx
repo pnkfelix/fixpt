@@ -465,81 +465,166 @@
           (k-hazard-names-in (get k-hazard-mods) m)
           ns))))
 
+;; The names in `bound` (each by how many names are from it to the
+;; outermost) that a `let` binds to a module written there, with the values
+;; it gives: what a `with` of one binds in its body before it is checked
+;; (`free_into_in`).
+(define-type k-wlocals (listof (productof (1 int) (2 k-names)) acyclic))
+;; How many names are from `m`'s innermost binding in `bound` to the
+;; outermost, or 0.
+(define k-bound-at (->* (k-names symbol) int)
+  (lambda (bound m)
+    (cond ((null? bound) 0)
+          ((symbol=? (car bound) m) (k-length bound))
+          (else (k-bound-at (cdr bound) m)))))
+(define k-wlocal-vals (->* (k-wlocals int) k-names)
+  (lambda (ls at)
+    (cond ((or (null? ls) (= at 0)) nil)
+          ((= (extract (car ls) 1) at) (extract (car ls) 2))
+          (else (k-wlocal-vals (cdr ls) at)))))
+;; The `let`'s bindings `bs`, the `k`th from `n` names out, onto `ls`.
+(define k-wlocals-let (->* (k-let-bs int k-wlocals) k-wlocals)
+  (lambda (bs n ls)
+    (if (null? bs)
+        ls
+        (let ((vals (k-written-module-values (extract (car bs) 2))))
+          (k-wlocals-let (cdr bs) (+ n 1)
+                         (if (null? vals) ls (cons (product (1 n) (2 (car vals))) ls)))))))
+;; The values a module written as `x`, `(module item …)`, gives, as its type
+;; will say: its definitions not hidden; none known if it includes others.
+(define k-written-module-values (->* (kx) (listof k-names acyclic))
+  (lambda (x)
+    (tagcase x
+      (x-module (items a b abk)
+        (let ((hidden (k-hidden-values items nil)))
+          (if (k-items-include? items) nil (cons (k-shown-values items hidden nil) nil))))
+      (else y nil))))
+(define k-hidden-values (->* (k-items k-names) k-names)
+  (lambda (items out)
+    (if (null? items)
+        out
+        (let* ((it (car items)) (n (symbol->string (car (extract it 2)))))
+          (k-hidden-values (cdr items)
+                           (if (and (= (extract it 1) 1) (> (string-length n) 9)
+                                    (string=? (substring n 0 9) "%hiddenv:"))
+                               (cons (string->symbol (substring n 9 (string-length n))) out)
+                               out))))))
+;; Whether item `it` defines values: a `define` or a `define-rec`.
+(define k-value-item? (->* (k-item) bool)
+  (lambda (it) (or (= (extract it 1) 2) (= (extract it 1) 3))))
+(define k-items-include? (->* (k-items) bool)
+  (lambda (items)
+    (and (not (null? items))
+         (or (and (k-value-item? (car items)) (k-include-name? (extract (car items) 2)))
+             (k-items-include? (cdr items))))))
+(define k-include-name? (->* (k-names) bool)
+  (lambda (ns)
+    (and (not (null? ns))
+         (let ((n (symbol->string (car ns))))
+           (or (and (>= (string-length n) 8) (string=? (substring n 0 8) "%include"))
+               (k-include-name? (cdr ns)))))))
+(define k-shown-values (->* (k-items k-names k-names) k-names)
+  (lambda (items hidden out)
+    (if (null? items)
+        out
+        (k-shown-values (cdr items) hidden
+                        (if (k-value-item? (car items))
+                            (k-shown-onto (extract (car items) 2) hidden out)
+                            out)))))
+(define k-shown-onto (->* (k-names k-names k-names) k-names)
+  (lambda (ns hidden out)
+    (if (null? ns)
+        out
+        (k-shown-onto (cdr ns) hidden
+                      (if (or (k-has-name? hidden (car ns))
+                              (string=? (substring (symbol->string (car ns)) 0 1) "%"))
+                          out
+                          (cons (car ns) out))))))
+
 (define-rec
-  (k-free-list (->* (kxs k-names k-names) k-names)
-    (lambda (xs bound out)
-      (if (null? xs) out (k-free-list (cdr xs) bound (k-free-into (car xs) bound out)))))
-  (k-free-into (->* (kx k-names k-names) k-names)
-    (lambda (x bound out)
+  (k-free-list (->* (kxs k-names k-wlocals k-names) k-names)
+    (lambda (xs bound ls out)
+      (if (null? xs) out (k-free-list (cdr xs) bound ls (k-free-in (car xs) bound ls out)))))
+  (k-free-in (->* (kx k-names k-wlocals k-names) k-names)
+    (lambda (x bound ls out)
       (tagcase x
         (x-var (s a b abk) (k-note s bound out))
         (x-const (t v a b abk) out)
-        (x-lambda (ps body a b abk) (k-free-into body (k-param-names ps bound) out))
-        (x-app (f args a b abk) (k-free-list args bound (k-free-into f bound out)))
-        (x-plambda (bs body a b abk) (k-free-into body bound out))
-        (x-letregion (k r i body a b abk) (k-free-into body (cons (k-dvar-name r) bound) out))
-        (x-rlambda (r l a b abk) (k-free-into l bound (k-free-into r bound out)))
-        (x-proj (body ds a b abk) (k-free-into body bound out))
-        (x-if (p c d a b abk) (k-free-into d bound (k-free-into c bound (k-free-into p bound out))))
+        (x-lambda (ps body a b abk) (k-free-in body (k-param-names ps bound) ls out))
+        (x-app (f args a b abk) (k-free-list args bound ls (k-free-in f bound ls out)))
+        (x-plambda (bs body a b abk) (k-free-in body bound ls out))
+        (x-letregion (k r i body a b abk) (k-free-in body (cons (k-dvar-name r) bound) ls out))
+        (x-rlambda (r l a b abk) (k-free-in l bound ls (k-free-in r bound ls out)))
+        (x-proj (body ds a b abk) (k-free-in body bound ls out))
+        (x-if (p c d a b abk)
+          (k-free-in d bound ls (k-free-in c bound ls (k-free-in p bound ls out))))
         (x-letrec (bs body a b abk)
           (let ((inner (k-letrec-names bs bound)))
-            (k-free-into body inner (k-free-letrec bs inner out))))
+            (k-free-in body inner ls (k-free-letrec bs inner ls out))))
         (x-let (bs body a b abk)
-          (k-free-into body (k-let-names bs bound) (k-free-let bs bound out)))
-        (x-begin (xs a b abk) (k-free-list xs bound out))
+          (k-free-in body (k-let-names bs bound) (k-wlocals-let bs (+ (k-length bound) 1) ls)
+                     (k-free-let bs bound ls out)))
+        (x-begin (xs a b abk) (k-free-list xs bound ls out))
         (x-prompt (t body h a b abk)
-          (k-free-into h bound (k-free-into body bound (k-free-into t bound out))))
-        (x-the (t body a b abk) (k-free-into body bound out))
-        (x-convention (c body a b abk) (k-free-into body bound out))
-        (x-bloblet (o i xs a b abk) (k-free-list xs bound out))
+          (k-free-in h bound ls (k-free-in body bound ls (k-free-in t bound ls out))))
+        (x-the (t body a b abk) (k-free-in body bound ls out))
+        (x-convention (c body a b abk) (k-free-in body bound ls out))
+        (x-bloblet (o i xs a b abk) (k-free-list xs bound ls out))
         ;; A product's fields are as a `let`'s bindings.
-        (x-product (fs a b abk) (k-free-let fs bound out))
-        (x-extract (body l a b abk) (k-free-into body bound out))
-        (x-sum (l body a b abk) (k-free-into body bound out))
+        (x-product (fs a b abk) (k-free-let fs bound ls out))
+        (x-extract (body l a b abk) (k-free-in body bound ls out))
+        (x-sum (l body a b abk) (k-free-in body bound ls out))
         (x-tagcase (s arms els a b abk)
-          (let ((o (k-free-arms arms bound (k-free-into s bound out))))
-            (k-free-else els bound o)))
-        (x-module (items a b abk) (k-free-module items bound out))
+          (let ((o (k-free-arms arms bound ls (k-free-in s bound ls out))))
+            (k-free-else els bound ls o)))
+        (x-module (items a b abk) (k-free-module items bound ls out))
         ;; The module, and the body, which sees its values once checked (or, an
-        ;; earlier item's of a module being ordered, `k-with-bound`).
+        ;; earlier item's of a module being ordered, `k-with-bound`; or a
+        ;; module a `let` binds to one written there, `ls`'s).
         ;; `(with #%fx n)`, the standard `n`: nothing free.
         (x-with (m body a b abk)
           (if (k-fx-module? m)
               out
-              (k-free-into body (k-names-onto (k-with-bound m a b abk bound) bound)
-                           (k-note m bound out)))))))
+              (k-free-in body
+                         (k-names-onto (k-with-bound m a b abk bound)
+                                       (k-names-onto (k-wlocal-vals ls (k-bound-at bound m))
+                                                     bound))
+                         ls (k-note m bound out)))))))
   ;; A module's free variables, onto `out`: each item's, every item's names
   ;; bound, as a `letrec*`'s (`check-modorder.fx`).
-  (k-free-module (->* (k-items k-names k-names) k-names)
-    (lambda (items bound out) (k-free-items items (k-items-bound items bound) out)))
-  (k-free-items (->* (k-items k-names k-names) k-names)
-    (lambda (items bound out)
+  (k-free-module (->* (k-items k-names k-wlocals k-names) k-names)
+    (lambda (items bound ls out) (k-free-items items (k-items-bound items bound) ls out)))
+  (k-free-items (->* (k-items k-names k-wlocals k-names) k-names)
+    (lambda (items bound ls out)
       (if (null? items)
           out
-          (k-free-items (cdr items) bound (k-free-list (extract (car items) 5) bound out)))))
-  (k-free-letrec (->* (k-letrec-bs k-names k-names) k-names)
-    (lambda (bs bound out)
+          (k-free-items (cdr items) bound ls (k-free-list (extract (car items) 5) bound ls out)))))
+  (k-free-letrec (->* (k-letrec-bs k-names k-wlocals k-names) k-names)
+    (lambda (bs bound ls out)
       (if (null? bs)
           out
-          (k-free-letrec (cdr bs) bound (k-free-into (extract (car bs) 3) bound out)))))
-  (k-free-let (->* (k-let-bs k-names k-names) k-names)
-    (lambda (bs bound out)
+          (k-free-letrec (cdr bs) bound ls (k-free-in (extract (car bs) 3) bound ls out)))))
+  (k-free-let (->* (k-let-bs k-names k-wlocals k-names) k-names)
+    (lambda (bs bound ls out)
       (if (null? bs)
           out
-          (k-free-let (cdr bs) bound (k-free-into (extract (car bs) 2) bound out)))))
-  (k-free-arms (->* (k-arms k-names k-names) k-names)
-    (lambda (arms bound out)
+          (k-free-let (cdr bs) bound ls (k-free-in (extract (car bs) 2) bound ls out)))))
+  (k-free-arms (->* (k-arms k-names k-wlocals k-names) k-names)
+    (lambda (arms bound ls out)
       (if (null? arms)
           out
           (let ((arm (car arms)))
-            (k-free-arms (cdr arms) bound
-                         (k-free-into (extract arm 4) (k-names-onto (extract arm 3) bound) out))))))
+            (k-free-arms (cdr arms) bound ls
+                         (k-free-in (extract arm 4) (k-names-onto (extract arm 3) bound)
+                                    ls out))))))
   ;; A `tagcase`'s `else` arm, if any: its body's, its variable bound.
-  (k-free-else (->* (k-let-bs k-names k-names) k-names)
-    (lambda (els bound out)
+  (k-free-else (->* (k-let-bs k-names k-wlocals k-names) k-names)
+    (lambda (els bound ls out)
       (if (null? els)
           out
-          (k-free-into (extract (car els) 2) (cons (extract (car els) 1) bound) out)))))
+          (k-free-in (extract (car els) 2) (cons (extract (car els) 1) bound) ls out)))))
+(define k-free-into (->* (kx k-names k-names) k-names)
+  (lambda (x bound out) (k-free-in x bound nil out)))
 
 ;;; ------------------------------------------------------------ free variables
 

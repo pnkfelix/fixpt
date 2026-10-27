@@ -2418,6 +2418,14 @@ impl Checker {
     }
 
     pub(crate) fn free_into(&self, e: ExpId, bound: &mut Vec<Sym>, out: &mut Vec<Sym>) {
+        self.free_into_in(e, bound, &mut Vec::new(), out);
+    }
+
+    /// `free_into`, `locals` the names in `bound` (by where they are in
+    /// it) that a `let` binds to a module written there, with the values
+    /// it gives: what a `with` of one binds in its body before it is
+    /// checked.
+    fn free_into_in(&self, e: ExpId, bound: &mut Vec<Sym>, locals: &mut Vec<(usize, Vec<Sym>)>, out: &mut Vec<Sym>) {
         // The node by reference, not cloned (`TODO.md` §126: its clone
         // was a tenth of the checker's allocations loading kayak's compiler).
         match self.arena.exp_at(e) {
@@ -2430,37 +2438,37 @@ impl Checker {
             Exp::Lambda { params, body } => {
                 let depth = bound.len();
                 bound.extend(params.iter().map(|(n, _)| *n));
-                self.free_into(*body, bound, out);
+                self.free_into_in(*body, bound, locals, out);
                 bound.truncate(depth);
             }
             Exp::App { fun, args } => {
-                self.free_into(*fun, bound, out);
+                self.free_into_in(*fun, bound, locals, out);
                 for a in args {
-                    self.free_into(*a, bound, out);
+                    self.free_into_in(*a, bound, locals, out);
                 }
             }
-            Exp::PLambda { body, .. } | Exp::Proj { body, .. } => self.free_into(*body, bound, out),
+            Exp::PLambda { body, .. } | Exp::Proj { body, .. } => self.free_into_in(*body, bound, locals, out),
             Exp::RLambda { region, lambda } => {
-                self.free_into(*region, bound, out);
-                self.free_into(*lambda, bound, out);
+                self.free_into_in(*region, bound, locals, out);
+                self.free_into_in(*lambda, bound, locals, out);
             }
             &Exp::LetRegion { region, body, .. } => {
                 bound.push(self.arena.dvar_name(region));
-                self.free_into(body, bound, out);
+                self.free_into_in(body, bound, locals, out);
                 bound.pop();
             }
             Exp::If { test, then, els } => {
                 for x in [test, then, els] {
-                    self.free_into(*x, bound, out);
+                    self.free_into_in(*x, bound, locals, out);
                 }
             }
             Exp::Letrec { bindings, body } => {
                 let depth = bound.len();
                 bound.extend(bindings.iter().map(|(n, _, _)| *n));
                 for (_, _, init) in bindings.iter() {
-                    self.free_into(*init, bound, out);
+                    self.free_into_in(*init, bound, locals, out);
                 }
-                self.free_into(*body, bound, out);
+                self.free_into_in(*body, bound, locals, out);
                 bound.truncate(depth);
             }
             // Every item sees every name, as a `letrec*`'s (`crate::modorder`).
@@ -2476,10 +2484,10 @@ impl Checker {
                 }
                 for item in items.iter() {
                     match item {
-                        crate::ast::ModItem::Val { init, .. } => self.free_into(*init, bound, out),
+                        crate::ast::ModItem::Val { init, .. } => self.free_into_in(*init, bound, locals, out),
                         crate::ast::ModItem::Rec(group) => {
                             for (_, _, init) in group {
-                                self.free_into(*init, bound, out);
+                                self.free_into_in(*init, bound, locals, out);
                             }
                         }
                         _ => {}
@@ -2513,53 +2521,65 @@ impl Checker {
                             bound.extend(vals.iter().map(|(n, _)| *n));
                         }
                     }
-                    None => {}
+                    // A module a `let` binds to one written there: its values.
+                    None => {
+                        let at = bound.iter().rposition(|n| *n == module);
+                        if let Some((_, vals)) = locals.iter().rev().find(|(i, _)| Some(*i) == at) {
+                            bound.extend(vals.iter().copied());
+                        }
+                    }
                 }
-                self.free_into(body, bound, out);
+                self.free_into_in(body, bound, locals, out);
                 bound.truncate(depth);
             }
             Exp::Let { bindings, body } => {
                 for (_, init) in bindings.iter() {
-                    self.free_into(*init, bound, out);
+                    self.free_into_in(*init, bound, locals, out);
                 }
-                let depth = bound.len();
-                bound.extend(bindings.iter().map(|(n, _)| *n));
-                self.free_into(*body, bound, out);
+                let (depth, known) = (bound.len(), locals.len());
+                for (k, (n, init)) in bindings.iter().enumerate() {
+                    bound.push(*n);
+                    if let Some(vals) = self.written_module_values(*init) {
+                        locals.push((depth + k, vals));
+                    }
+                }
+                self.free_into_in(*body, bound, locals, out);
                 bound.truncate(depth);
+                locals.truncate(known);
             }
             Exp::Begin(items) => {
                 for i in items {
-                    self.free_into(*i, bound, out);
+                    self.free_into_in(*i, bound, locals, out);
                 }
             }
             Exp::Prompt { tag, body, handler } => {
                 for x in [tag, body, handler] {
-                    self.free_into(*x, bound, out);
+                    self.free_into_in(*x, bound, locals, out);
                 }
             }
-            Exp::The { exp, .. } | Exp::Convention { exp, .. } => self.free_into(*exp, bound, out),
+            Exp::The { exp, .. } | Exp::Convention { exp, .. } => self.free_into_in(*exp, bound, locals, out),
             Exp::Bloblet { args, .. } => {
                 for a in args {
-                    self.free_into(*a, bound, out);
+                    self.free_into_in(*a, bound, locals, out);
                 }
             }
             Exp::Product(fields) => {
                 for (_, x) in fields {
-                    self.free_into(*x, bound, out);
+                    self.free_into_in(*x, bound, locals, out);
                 }
             }
-            Exp::Extract(x, _) | Exp::Sum(_, x) => self.free_into(*x, bound, out),
+            Exp::Extract(x, _) | Exp::Sum(_, x) => self.free_into_in(*x, bound, locals, out),
             Exp::TagCase { scrutinee, arms, els } => {
-                self.free_into(*scrutinee, bound, out);
+                self.free_into_in(*scrutinee, bound, locals, out);
                 for arm in arms.iter() {
                     let depth = bound.len();
                     bound.extend(arm.names());
-                    self.free_into(arm.body, bound, out);
+                    self.free_into_in(arm.body, bound, locals, out);
                     bound.truncate(depth);
                 }
                 if let Some((y, body)) = els {
                     bound.push(*y);
-                    self.free_into(*body, bound, out);
+                    self.free_into_in(*body, bound, locals, out);
                     bound.pop();
                 }
             }
@@ -2567,6 +2587,39 @@ impl Checker {
     }
 
     /// Every region mentioned in type `t`, following recursive types once.
+    /// The values a module written as `e`, `(module item …)`, gives, as
+    /// its type will say: its definitions not hidden; none known if it
+    /// includes others, whose values it gives too.
+    fn written_module_values(&self, e: ExpId) -> Option<Vec<Sym>> {
+        use crate::ast::ModItem;
+        let Exp::Module(items) = self.arena.exp_at(e) else { return None };
+        let hidden: Vec<&str> = items
+            .iter()
+            .filter_map(|it| match it {
+                ModItem::Desc { name, .. } => self.interner.name(*name).strip_prefix("%hiddenv:"),
+                _ => None,
+            })
+            .collect();
+        let mut vals = Vec::new();
+        for it in items {
+            let names: Vec<Sym> = match it {
+                ModItem::Val { name, .. } => vec![*name],
+                ModItem::Rec(bs) => bs.iter().map(|(n, _, _)| *n).collect(),
+                _ => Vec::new(),
+            };
+            for n in names {
+                let shown = self.interner.name(n);
+                if shown.starts_with("%include") {
+                    return None;
+                }
+                if !shown.starts_with('%') && !hidden.contains(&shown) {
+                    vals.push(n);
+                }
+            }
+        }
+        Some(vals)
+    }
+
     pub fn regions_in(&self, t: TyId, out: &mut HashSet<Region>) {
         let t = self.arena.resolve(t);
         if let Some(rs) = self.regions_memo.borrow().get(&t) {

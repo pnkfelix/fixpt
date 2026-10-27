@@ -3473,3 +3473,18 @@ type and its place, module items too (`docs/fx26.md`, "Queries";
 - **Migrated**: Fixpt's FX-26 programs, tests, `assert` and `assume`, and
   the reference docs (`fx26.md`, `fx26-grammar.md`).
 - **Tests**: `modules/include-family-param.fx` (Heist's), `param-misnamed*.fx`.
+
+## 135. Heist's module problems B, D and E (2026-10-27)
+
+From Heist's report (`docs/research/derived-signatures.md`, "The problems
+Heist found"); A is §134.
+
+- **B: a `with` of a module a `let` binds to one written there** binds
+  that module's values in its body, for the check that an item names
+  nothing made after it: `(define f (lambda () (let ((m (module (define f
+  …)))) (with m (f)))))` named `m`'s `f`, but was refused as using itself.
+  The values are those the module's type will give: none hidden, and none
+  known if it has `include`s (then, as before, every name counts).
+  `free_into_in` and `k-free-in` carry them by where the `let` bound the
+  name, so a name bound again inside is not mistaken for it
+  (`modules/with-local-module*.fx`).
