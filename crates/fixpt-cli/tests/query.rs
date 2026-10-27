@@ -23,15 +23,16 @@ fn names(name: &str, query: &str) -> Vec<String> {
         .collect()
 }
 
-/// Your seven shapes, as the customer given each sees it: what makes a
-/// `t` from nothing, what needs one to give one, and what only takes them.
-/// A callback given a maker and a taker still makes one from nothing.
+/// Seven shapes, as the customer given each sees it: what makes a `t`
+/// from nothing, what needs one to give one, and what takes one for
+/// nothing back. A callback given a maker and a taker both makes one from
+/// nothing and takes one for nothing.
 #[test]
 fn makers_transformers_and_takers() {
     assert_eq!(names("shapes.fx", "constructs t"), ["make", "lend", "lend-both"]);
     assert_eq!(names("shapes.fx", "transforms t"), ["step", "lend-step"]);
     assert_eq!(names("shapes.fx", "returns t"), ["make", "step", "lend", "lend-step", "lend-both"]);
-    assert_eq!(names("shapes.fx", "consumes t"), ["take", "drain"]);
+    assert_eq!(names("shapes.fx", "consumes t"), ["take", "drain", "lend-both"]);
     assert_eq!(names("shapes.fx", "uses t"), ["make", "take", "step", "drain", "lend", "lend-step", "lend-both"]);
     assert_eq!(names("shapes.fx", "uses other"), ["unrelated"]);
 }

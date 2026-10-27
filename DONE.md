@@ -3421,8 +3421,7 @@ wrote since asked, never waiting), `process-status` (`running`, `exited`,
 At the REPL and from the command line, which definitions of a program
 have an effect (`effect (write @ed)`), mention a type (`uses T`), give one
 (`returns T`; without needing one, `constructs T`; only for one,
-`transforms T`), need one and give none
-(`consumes T`), or may write what one holds (`mutates T`): each with its
+`transforms T`), take one for nothing back (`consumes T`), or may write what one holds (`mutates T`): each with its
 type and its place, module items too (`docs/fx26.md`, "Queries";
 `fixpt_fx26::query`).
 
@@ -3431,10 +3430,10 @@ type and its place, module items too (`docs/fx26.md`, "Queries";
   defined, form by form and file by file, where each was.
 - **Giving and needing, as the customer given a value sees it**, by
   polarity, and a `T` given *tolled* when reaching it means calling a
-  procedure whose arguments oblige the customer to make one: so
-  `((() -> T) (T -> unit) -> unit) -> unit` constructs one and
-  `((T -> T) -> unit) -> unit` transforms one, though each mentions `T`
-  once each way.
+  procedure whose arguments oblige the customer to make one, and a `T`
+  taken a *trade* when the exchange gives one back: so `((() -> T) (T ->
+  unit) -> unit) -> unit` constructs and consumes, and `((T -> T) -> unit)
+  -> unit` only transforms, though each mentions `T` once each way.
 - **A type named at a program's end** has a module's effects and types
   selected before the module was known put in, as `type-at` prints them.
 - **Tests**: `fixpt-cli/tests/query.rs` on `programs/query/` (seven shapes

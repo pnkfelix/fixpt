@@ -45,7 +45,8 @@ pub enum Query {
     Constructs(String),
     /// `transforms T`: procedures that give a `T` only for one.
     Transforms(String),
-    /// `consumes T`: procedures that need a `T` and give none.
+    /// `consumes T`: procedures that take a `T` in no trade: the call it is
+    /// given to gives no `T` back.
     Consumes(String),
     /// `mutates T`: procedures that need a `T` and may write a region `T`
     /// is in: themselves, or a procedure they take or return.
@@ -59,7 +60,7 @@ pub const USAGE: &[(&str, &str)] = &[
     ("returns T", "procedures that give a T: as a result, or a callback's argument"),
     ("constructs T", "procedures that give a T without needing one"),
     ("transforms T", "procedures that give a T only for one"),
-    ("consumes T", "procedures that need a T and give none"),
+    ("consumes T", "procedures that take a T and give none back for it"),
     ("mutates T", "procedures that need a T and may write a region T is in, themselves or a procedure they take or return"),
 ];
 
@@ -293,8 +294,7 @@ impl Program {
                 Query::Consumes(t) => {
                     let want = want_of(c, t)?;
                     for d in &defs {
-                        let h = holds(c, d.ty, &want);
-                        if subr_parts(c, d.ty).is_some() && h.needs && !h.gives() {
+                        if subr_parts(c, d.ty).is_some() && holds(c, d.ty, &want).consumed {
                             hits.push((d, false));
                         }
                     }
@@ -426,7 +426,10 @@ fn as_checked(c: &mut Checker, t: TyId) -> TyId {
 ///   procedure whose arguments oblige the customer to make a `T`;
 /// - `tolled`: it gives a `T`, but only through such a call: it transforms
 ///   `T`s (`(subr (T) T)`, or `(subr ((subr ((subr (T) T)) unit)) unit)`);
-/// - `needs`: it may take a `T` from the customer.
+/// - `needs`: it may take a `T` from the customer;
+/// - `consumed`: it may take one that is no trade: the call it is given to
+///   gives no `T` back, or the callback that must return it was given none.
+///   `(subr (T) unit)` consumes; `(subr (T) T)` trades.
 ///
 /// A procedure the customer calls obliges it to make a `T` if `T` is in
 /// one of its parameters as data, or as what a callback the customer
@@ -437,6 +440,7 @@ struct Holds {
     free: bool,
     tolled: bool,
     needs: bool,
+    consumed: bool,
 }
 
 impl Holds {
@@ -464,25 +468,32 @@ fn is_wanted(c: &mut Checker, t: TyId, want: &Want) -> bool {
 fn holds(c: &mut Checker, t: TyId, want: &Want) -> Holds {
     let mut h = Holds::default();
     let mut seen = HashSet::new();
-    // Each type with whether the customer receives it (or gives it), and
-    // whether reaching it obliged the customer to make a `T`.
-    let mut todo = vec![(t, true, false)];
-    while let Some((t, positive, toll)) = todo.pop() {
+    // Each type with whether the customer receives it (or gives it);
+    // whether reaching it obliged the customer to make a `T`; and, of a `T`
+    // the customer gives there, whether the exchange it is given in gives
+    // one back.
+    let mut todo = vec![(t, true, false, false)];
+    while let Some((t, positive, toll, trade)) = todo.pop() {
         let t = c.arena.resolve(t);
-        if !seen.insert((t, positive, toll)) {
+        if !seen.insert((t, positive, toll, trade)) {
             continue;
         }
         if is_wanted(c, t, want) {
             match (positive, toll) {
                 (true, false) => h.free = true,
                 (true, true) => h.tolled = true,
-                (false, _) => h.needs = true,
+                (false, _) => {
+                    h.needs = true;
+                    h.consumed |= !trade;
+                }
             }
             continue;
         }
         let ty = c.arena.get(t).clone();
         // A procedure: one the customer calls (given it) tolls the way to
-        // all it gives, if its arguments oblige the customer to make a `T`.
+        // all it gives, if its arguments oblige the customer to make a `T`;
+        // a `T` given it is a trade if it gives one back. One the customer
+        // writes must return what it returns: a trade if it is given a `T`.
         let call = match &ty {
             Ty::Subr { params, result, .. } => Some((params.clone(), *result)),
             Ty::Composable { arg, answer, .. } => Some((vec![*arg], *answer)),
@@ -490,18 +501,51 @@ fn holds(c: &mut Checker, t: TyId, want: &Want) -> Holds {
         };
         if let Some((params, result)) = call {
             let toll = toll || (positive && params.iter().any(|p| obliges(c, *p, want)));
-            todo.extend(params.iter().map(|p| (*p, !positive, toll)));
-            todo.push((result, positive, toll));
+            let (in_trade, out_trade) = if positive {
+                (gives(c, result, want), false)
+            } else {
+                (false, params.iter().any(|p| gives(c, *p, want)))
+            };
+            todo.extend(params.iter().map(|p| (*p, !positive, toll, in_trade)));
+            todo.push((result, positive, toll, out_trade));
             continue;
         }
         for (k, side) in children(&ty) {
             match side {
-                Side::Same | Side::Flip => todo.push((k, positive, toll)),
-                Side::Both => todo.extend([(k, true, toll), (k, false, toll)]),
+                Side::Same | Side::Flip => todo.push((k, positive, toll, trade)),
+                Side::Both => todo.extend([(k, true, toll, false), (k, false, toll, false)]),
             }
         }
     }
     h
+}
+
+/// Whether a value of `t` gives what `want` names, to whoever has it, in
+/// any way (`Holds::gives`, by polarity alone).
+fn gives(c: &mut Checker, t: TyId, want: &Want) -> bool {
+    let mut seen = HashSet::new();
+    let mut todo = vec![(t, true)];
+    while let Some((t, positive)) = todo.pop() {
+        let t = c.arena.resolve(t);
+        if !seen.insert((t, positive)) {
+            continue;
+        }
+        if is_wanted(c, t, want) {
+            if positive {
+                return true;
+            }
+            continue;
+        }
+        let ty = c.arena.get(t).clone();
+        for (k, side) in children(&ty) {
+            match side {
+                Side::Same => todo.push((k, positive)),
+                Side::Flip => todo.push((k, !positive)),
+                Side::Both => todo.extend([(k, true), (k, false)]),
+            }
+        }
+    }
+    false
 }
 
 /// Whether giving a value of `t` obliges the giver to make what `want`
