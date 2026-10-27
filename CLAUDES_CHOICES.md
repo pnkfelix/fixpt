@@ -2102,3 +2102,18 @@ Fixpt's to decide; the note's last section has the rest. In short:
   before keeps making the code it made, which still runs.
 - **`foreign` takes a native closure too**, so that the older clause's
   code, wherever its test sends one, never fails.
+
+## Queries in the checker, asked by the REPL and the command line (2026-10-27)
+
+- **One engine, two doors**: `fixpt_fx26::query`, asked by `,query` and by
+  `fixpt query`, so a script or an editor gets the REPL's answers.
+- **The sources checked again** for each question rather than kept checked
+  with their facts: a question is rare, and a checked program kept whole
+  would be every session's cost. Heist's editor (15 files, 360 KB)
+  is answered in 1.2 s, built for release.
+- **`,query KIND ARG`**, one command, not a command for each kind: the
+  existing `,returns` (a subtype search of the environment) means
+  something else and stays.
+- **A `T` given through a callback counts as given**; the toll decides
+  `constructs` from `transforms`. The answers are what the types allow, not what
+  the code does.

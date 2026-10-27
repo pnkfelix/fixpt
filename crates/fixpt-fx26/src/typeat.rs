@@ -75,7 +75,7 @@ pub fn type_at(text: &str, pos: i64) -> String {
 /// names at all, and each named type's text in `t`'s is put back as its
 /// name, longest first, so that a name inside another's expansion goes
 /// back first. Names of a single word (an alias of `int`) are left.
-fn named(c: &mut Checker, t: crate::ast::TyId) -> String {
+pub(crate) fn named(c: &mut Checker, t: crate::ast::TyId) -> String {
     // Each named type as checking sees it: a module's types and effects
     // selected (`(select core turn-eff)` read before `core` was known)
     // replaced by what they are, as a copy made in checking has them.

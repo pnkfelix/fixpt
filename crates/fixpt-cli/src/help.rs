@@ -212,6 +212,7 @@ fn overview(h: &dyn Helpful) {
         rows.push((",load FILE", "run the file's forms here, as `fixpt eval` does, re-runs waiting (`,rerun-outdated`)"));
         rows.push((",native NAME [ARG…]", "NAME's procedure in the native convention: its machine code, and called on ARGs (not on rs-scheme-vm or fx-ast-eval)"));
         rows.push((",pending [clear]", "the entries of types waiting on types not defined yet, or drop them"));
+        rows.push((",query KIND ARG", "the definitions made here by type or effect: `,query` alone says the kinds"));
         rows.push((",rerun-outdated", "run the definitions out of date again, oldest first"));
         rows.push((",redefine b|r", "whether the next redefinition that would break definitions breaks them or is refused"));
         rows.push((",verify [NAME …]", "verify the words of what was defined here against their certificates, or NAME's: what fails or is left open"));

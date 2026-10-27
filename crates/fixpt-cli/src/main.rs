@@ -41,6 +41,13 @@ usage:
   fixpt check INPUT              FX-26: both checkers (Rust and FX-26) on a
                                  file, `-` or program text; each form's type
                                  and effect, and where the checkers disagree
+  fixpt query FILE QUERY…        FX-26: the program's definitions that answer
+  fixpt query FILE… -- QUERY…    QUERY, each with its type and place (the
+                                 files run in order, as `fixpt run` does):
+                                 `effect E`, `uses T`, `returns T`,
+                                 `constructs T`, `transforms T`,
+                                 `consumes T`, `mutates T`
+                                 (`,query` at the REPL)
   fixpt test INPUT [RUNS]        FX-26: run the program, then each procedure
                                  with a specification, and each harness (a
                                  procedure of `unit` result), on RUNS inputs
@@ -123,8 +130,8 @@ made with rather than being told.
 
 /// The commands, as the first word: a word that is none of them but names
 /// a file runs it (`fixpt FILE`).
-const COMMANDS: [&str; 19] = [
-    "repl", "fx26", "scheme", "run", "eval", "check", "test", "verify", "compile", "machines", "bench", "dump-heap", "build", "run-image", "image",
+const COMMANDS: [&str; 20] = [
+    "repl", "fx26", "scheme", "run", "eval", "check", "query", "test", "verify", "compile", "machines", "bench", "dump-heap", "build", "run-image", "image",
     "front-end-files", "help", "regcode-survey", "--help",
 ];
 
@@ -397,6 +404,22 @@ fn run(args: &[String]) -> i32 {
                     1
                 }
             }
+        }
+        Some("query") => {
+            if dialect != Dialect::Fx26 {
+                eprintln!("fixpt query: FX-26 only");
+                return 2;
+            }
+            // `FILE… -- QUERY…`, or one file and the query after it.
+            let (files, query) = match rest.iter().position(|a| a == "--") {
+                Some(i) => (&rest[1..i], &rest[i + 1..]),
+                None => (rest.get(1..2).unwrap_or(&[]), rest.get(2..).unwrap_or(&[])),
+            };
+            if files.is_empty() || query.is_empty() {
+                eprintln!("fixpt query: needs files and a query, as `fixpt query prog.fx constructs buffer` or `fixpt query a.fx b.fx -- uses buffer`");
+                return 2;
+            }
+            fx26::query_files(backend, files, &query.join(" "))
         }
         Some("test") => {
             if dialect != Dialect::Fx26 {

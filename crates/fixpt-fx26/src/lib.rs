@@ -874,6 +874,7 @@ mod terminate;
 pub mod cellular;
 pub mod debts;
 pub mod typeat;
+pub mod query;
 pub mod standard;
 pub mod top;
 pub mod unparse;

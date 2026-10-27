@@ -219,6 +219,9 @@ pub fn repl(backend: Backend) -> i32 {
     // The forms the checker took, as typed, and the files loaded: the
     // program `,verify` verifies.
     let mut program = String::new();
+    // The same, each form or file a source of its own, kept where it is in
+    // what it came from: the program `,query` asks about.
+    let mut sources: Vec<fixpt_fx26::query::Source> = Vec::new();
     loop {
         // Said when what is out of date changes.
         let outdated = session.outdated();
@@ -339,10 +342,29 @@ pub fn repl(backend: Backend) -> i32 {
                     if eval_program_in(&mut session, path, &t, false) == 0 {
                         program += &t;
                         program.push('\n');
+                        sources.push(fixpt_fx26::query::Source { name: path.to_string(), text: t, base: session.checker.base_dir.clone() });
                     }
                     session.checker.base_dir = outer;
                 }
                 Err(e) => println!("; cannot read `{path}`: {e}"),
+            }
+            continue;
+        }
+        // `,query KIND ARG`: the definitions made here that answer it
+        // (`fixpt_fx26::query`), each with its type and place.
+        if let Some(arg) = text.trim().strip_prefix(",query")
+            && (arg.is_empty() || arg.starts_with(char::is_whitespace))
+        {
+            if arg.trim().is_empty() {
+                println!("; `,query KIND ARG`: the definitions made here that answer it:");
+                for (u, what) in fixpt_fx26::query::USAGE {
+                    println!(";   {u:<28} {what}");
+                }
+                continue;
+            }
+            match answer_query(&session, &sources, arg) {
+                Ok(lines) => lines.iter().for_each(|l| println!("{l}")),
+                Err(e) => println!("; {e}"),
             }
             continue;
         }
@@ -505,8 +527,12 @@ pub fn repl(backend: Backend) -> i32 {
                 GcStats::end_form(&mut session, &b);
             }
             if ran.is_ok() {
-                program += &text[form.span.start as usize..form.span.end as usize];
+                let (start, end) = (form.span.start as usize, form.span.end as usize);
+                program += &text[start..end];
                 program.push('\n');
+                // What comes before it blank, so that its places are its own.
+                let before: String = text[..start].chars().map(|c| if c == '\n' { c } else { ' ' }).collect();
+                sources.push(fixpt_fx26::query::Source { name: name.clone(), text: before + &text[start..end], base: session.checker.base_dir.clone() });
             }
             match ran {
                 Ok(out) if disassembling => match &out.value {
@@ -723,6 +749,61 @@ fn run_files_in(session: &mut Fx26Session, files: &[String], args: &[String]) ->
             1
         }),
     }
+}
+
+/// `fixpt query FILE… -- QUERY`: the program in the files checked, in
+/// order, as `fixpt run` checks them, and the definitions that answer QUERY
+/// (`fixpt_fx26::query`); 1 if it cannot be asked.
+pub fn query_files(backend: Backend, paths: &[String], query: &str) -> i32 {
+    let mut sources = Vec::new();
+    for path in paths {
+        match std::fs::read_to_string(path) {
+            Ok(text) => {
+                let base = std::path::Path::new(path).parent().map(|d| d.to_path_buf());
+                sources.push(fixpt_fx26::query::Source { name: path.clone(), text, base });
+            }
+            Err(e) => {
+                eprintln!("fixpt: cannot read {path}: {e}");
+                return 1;
+            }
+        }
+    }
+    let session = match start(backend) {
+        Ok(s) => s,
+        Err(code) => return code,
+    };
+    match answer_query(&session, &sources, query) {
+        Ok(lines) => {
+            lines.iter().for_each(|l| println!("{l}"));
+            0
+        }
+        Err(e) => {
+            eprintln!("fixpt: {e}");
+            1
+        }
+    }
+}
+
+/// `query` asked of `sources`, checked again as `session`'s checker is
+/// set: a line for each answer, definite ones first, or a line saying
+/// there are none.
+fn answer_query(session: &Fx26Session, sources: &[fixpt_fx26::query::Source], query: &str) -> Result<Vec<String>, String> {
+    let q = fixpt_fx26::query::parse(query)?;
+    let mut p = fixpt_fx26::query::load(session.fresh_checker(), sources)?;
+    let hits = p.answer(&q)?;
+    if hits.is_empty() {
+        return Ok(vec![format!("; no definition answers `{}`", query.trim())]);
+    }
+    let mut out = Vec::new();
+    let mut said_may = false;
+    for h in hits {
+        if h.may && !said_may {
+            out.push("; and may, once instantiated:".to_string());
+            said_may = true;
+        }
+        out.push(format!("{} : {}  ; {}", h.name, h.ty, h.place));
+    }
+    Ok(out)
 }
 
 /// A command's INPUT, its arguments: a file, if there is one at the one

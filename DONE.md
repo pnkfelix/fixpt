@@ -3415,3 +3415,30 @@ wrote since asked, never waiting), `process-status` (`running`, `exited`,
   agreeing.
 - **Not yet**: a `pselect` arm (`TODO.md` §132); a pseudo-terminal;
   environment variables; output and error apart.
+
+## 133. Queries by type and effect: `,query` and `fixpt query` (2026-10-27)
+
+At the REPL and from the command line, which definitions of a program
+have an effect (`effect (write @ed)`), mention a type (`uses T`), give one
+(`returns T`; without needing one, `constructs T`; only for one,
+`transforms T`), need one and give none
+(`consumes T`), or may write what one holds (`mutates T`): each with its
+type and its place, module items too (`docs/fx26.md`, "Queries";
+`fixpt_fx26::query`).
+
+- **The program checked again**, its sources each a file of its own, so
+  that a place is a file's line and column: the REPL keeps what it
+  defined, form by form and file by file, where each was.
+- **Giving and needing, as the customer given a value sees it**, by
+  polarity, and a `T` given *tolled* when reaching it means calling a
+  procedure whose arguments oblige the customer to make one: so
+  `((() -> T) (T -> unit) -> unit) -> unit` constructs one and
+  `((T -> T) -> unit) -> unit` transforms one, though each mentions `T`
+  once each way.
+- **A type named at a program's end** has a module's effects and types
+  selected before the module was known put in, as `type-at` prints them.
+- **Tests**: `fixpt-cli/tests/query.rs` on `programs/query/` (seven shapes
+  of procedure; effects, definite and may; mutation through a procedure
+  returned), and at the REPL.
+- **Not yet**: the places a polymorphic definition is instantiated to
+  answer; the locals in scope at a place.
