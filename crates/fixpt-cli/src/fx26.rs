@@ -788,23 +788,27 @@ pub fn query_files(backend: Backend, paths: &[String], query: &str) -> i32 {
 /// set: a line for each answer, definite ones first, or a line saying
 /// there are none.
 fn answer_query(session: &Fx26Session, sources: &[fixpt_fx26::query::Source], query: &str) -> Result<Vec<String>, String> {
-    let q = fixpt_fx26::query::parse(query)?;
+    let (q, around) = fixpt_fx26::query::parse(query)?;
     let mut p = fixpt_fx26::query::load(session.fresh_checker(), sources)?;
-    let hits = p.answer(&q)?;
+    let hits = p.answer(&q, around.as_deref())?;
     if hits.is_empty() {
         return Ok(vec![format!("; no definition answers `{}`", query.trim())]);
     }
     let mut out = Vec::new();
-    let (mut said_may, mut said_site) = (false, false);
+    let (mut said_may, mut said_site, mut said_local) = (false, false, false);
     for h in hits {
-        if h.site && !said_site {
+        if h.local && !said_local {
+            out.push(format!("; and local names in scope around {}:", around.as_deref().unwrap_or("")));
+            said_local = true;
+        } else if h.site && !said_site {
             out.push("; and local names bound to one instantiated so:".to_string());
             said_site = true;
-        } else if h.may && !said_may && !h.site {
+        } else if h.may && !said_may && !h.site && !h.local {
             out.push("; and may, once instantiated:".to_string());
             said_may = true;
         }
-        out.push(format!("{} : {}  ; {}", h.name, h.ty, h.place));
+        let may = if h.may && h.local { " (may, once instantiated)" } else { "" };
+        out.push(format!("{} : {}  ; {}{may}", h.name, h.ty, h.place));
     }
     Ok(out)
 }

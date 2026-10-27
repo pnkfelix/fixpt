@@ -3446,4 +3446,8 @@ type and its place, module items too (`docs/fx26.md`, "Queries";
 - **Named types printed once a question**: `typeat::Namer`, the table of
   names made once, not for each type printed (16 s to 2.2 s for 280
   answers on the editor).
-- **Not yet**: the locals in scope at a place.
+- **`around CONTEXT`**: the local names in scope at a place
+  (`FILE:LINE:COL`), or bound in a definition, a module's item or a file,
+  that answer: a lambda's parameters, a `let`'s and `letrec`'s names.
+- **Not yet**: a `tagcase` arm's names and a `typecase`'s among the
+  locals; an entry the REPL holds (`,pending`) among the sources.

@@ -62,25 +62,33 @@ pub const USAGE: &[(&str, &str)] = &[
     ("transforms T", "procedures that give a T only for one"),
     ("consumes T", "procedures that take a T and give none back for it"),
     ("mutates T", "procedures that need a T and may write a region T is in, themselves or a procedure they take or return"),
+    ("… around CONTEXT", "and the local names in scope there: FILE:LINE:COL, a definition (or `m:x`), or a file"),
 ];
 
-/// `KIND ARG`, as `,query` is given it: the argument one datum.
-pub fn parse(text: &str) -> Result<Query, String> {
+/// `KIND ARG [around CONTEXT]`, as `,query` is given it: the argument one
+/// datum; the context, if any, where locals in scope are wanted too
+/// (`Program::answer`).
+pub fn parse(text: &str) -> Result<(Query, Option<String>), String> {
     let text = text.trim();
     let (kind, rest) = text.split_once(char::is_whitespace).unwrap_or((text, ""));
     let (arg, after) = datum(rest.trim())?;
     let after = after.trim();
-    let only = |q: Query| if after.is_empty() { Ok(q) } else { Err(format!("`{kind}` takes one argument; `{after}` is past it")) };
-    match kind {
-        "effect" => only(Query::Effect(arg)),
-        "uses" => only(Query::Uses(arg)),
-        "consumes" => only(Query::Consumes(arg)),
-        "mutates" => only(Query::Mutates(arg)),
-        "returns" => only(Query::Returns(arg)),
-        "constructs" => only(Query::Constructs(arg)),
-        "transforms" => only(Query::Transforms(arg)),
-        _ => Err(format!("no query `{kind}`: {}", USAGE.iter().map(|(u, _)| format!("`{u}`")).collect::<Vec<_>>().join(", "))),
-    }
+    let around = match after.strip_prefix("around") {
+        Some(ctx) if ctx.starts_with(char::is_whitespace) && !ctx.trim().is_empty() => Some(ctx.trim().to_string()),
+        _ if after.is_empty() => None,
+        _ => return Err(format!("`{kind}` takes one argument, then `around CONTEXT` if any; not `{after}`")),
+    };
+    let q = match kind {
+        "effect" => Query::Effect(arg),
+        "uses" => Query::Uses(arg),
+        "consumes" => Query::Consumes(arg),
+        "mutates" => Query::Mutates(arg),
+        "returns" => Query::Returns(arg),
+        "constructs" => Query::Constructs(arg),
+        "transforms" => Query::Transforms(arg),
+        _ => return Err(format!("no query `{kind}`: {}", USAGE.iter().map(|(u, _)| format!("`{u}`")).collect::<Vec<_>>().join(", "))),
+    };
+    Ok((q, around))
 }
 
 /// The first datum of `text`, as text, and what follows it.
@@ -136,6 +144,8 @@ pub struct Hit {
     /// A local name bound to a polymorphic definition instantiated, at its
     /// type there, not a definition.
     pub site: bool,
+    /// A local name in scope around the context asked about (`around`).
+    pub local: bool,
 }
 
 /// `sources` checked again, in order, with checker `c` (as the session's
@@ -328,7 +338,8 @@ impl Program {
     /// The answers to `q`: definitions that answer, then those that may
     /// once instantiated, then the local names bound to polymorphic ones
     /// instantiated so that they do; each in the program's order.
-    pub fn answer(&mut self, q: &Query) -> Result<Vec<Hit>, String> {
+    pub fn answer(&mut self, q: &Query, around: Option<&str>) -> Result<Vec<Hit>, String> {
+        let region = around.map(|a| self.context(a)).transpose()?;
         let c = &mut self.checker;
         let asked = Asked::of(c, q)?;
         let mut namer = crate::typeat::Namer::new(c);
@@ -337,10 +348,12 @@ impl Program {
             if let Some(may) = asked.verdict(c, d.ty) {
                 let ty = namer.show(c, d.ty);
                 let place = d.span.map_or_else(|| "?".into(), |s| place_of(c, &self.sources, s));
-                hits.push(Hit { name: d.name.clone(), ty, place, may, site: false });
+                hits.push(Hit { name: d.name.clone(), ty, place, may, site: false, local: false });
             }
         }
         hits.sort_by_key(|h| h.may);
+        // Those listed as instantiated, not listed again as in scope.
+        let mut listed: Vec<Span> = Vec::new();
         for s in sites(c) {
             // A local that answers where what it instantiates, as it is,
             // does not.
@@ -352,11 +365,114 @@ impl Program {
                     place = format!("{place}, in {}", d.name);
                 }
                 place = format!("{place}, instantiating {}", s.of);
-                hits.push(Hit { name: s.name, ty, place, may: false, site: true });
+                listed.push(s.span);
+                hits.push(Hit { name: s.name, ty, place, may: false, site: true, local: false });
+            }
+        }
+        // The local names in scope around the context: those whose scope
+        // holds a place, or bound anywhere in a definition or file.
+        if let Some(ctx) = region {
+            for l in locals(c) {
+                let inside = l.scope.file == ctx.file
+                    && match ctx.point {
+                        Some(at) => l.scope.start <= at && at <= l.scope.end,
+                        None => ctx.span.start <= l.at.start && l.at.end <= ctx.span.end,
+                    };
+                if !inside || listed.contains(&l.at) {
+                    continue;
+                }
+                let Some(may) = asked.verdict(c, l.ty) else { continue };
+                let ty = namer.show(c, l.ty);
+                let mut place = place_of(c, &self.sources, l.at);
+                let def = self.defs.iter().filter(|d| d.span.is_some_and(|ds| ds.file == l.at.file && ds.start <= l.at.start && l.at.end <= ds.end)).min_by_key(|d| d.span.map(|ds| ds.end - ds.start));
+                if let Some(d) = def {
+                    place = format!("{place}, in {}", d.name);
+                }
+                hits.push(Hit { name: l.name, ty, place, may, site: false, local: true });
             }
         }
         Ok(hits)
     }
+
+    /// Where `around` says: a place, `FILE:LINE:COL`; a definition or a
+    /// module's item, by name; or a file, a source's or one loaded.
+    fn context(&self, around: &str) -> Result<Context, String> {
+        let c = &self.checker;
+        // The files: each source, and each file loaded, with its text.
+        let mut files: Vec<(FileId, String, &str)> =
+            self.sources.iter().enumerate().map(|(i, s)| (FileId(SOURCE0 + i as u32), s.name.clone(), s.text.as_str())).collect();
+        files.extend(c.load_sites.iter().map(|(f, (_, p, t))| (*f, p.clone(), &**t)));
+        let file_named = |n: &str| files.iter().find(|(_, p, _)| p == n || p.ends_with(&format!("/{n}")) || n.ends_with(&format!("/{p}"))).map(|(f, p, t)| (*f, p.clone(), *t));
+        let mut parts = around.rsplitn(3, ':');
+        if let (Some(col), Some(line), Some(name)) = (parts.next(), parts.next(), parts.next())
+            && let (Ok(line), Ok(col)) = (line.parse::<usize>(), col.parse::<usize>())
+        {
+            let (file, _, text) = file_named(name).ok_or_else(|| format!("no file `{name}` in the program"))?;
+            let start = text.split_inclusive('\n').take(line.saturating_sub(1)).map(str::len).sum::<usize>();
+            let rest = &text[start.min(text.len())..];
+            let at = start + rest.chars().take(col.saturating_sub(1)).map(char::len_utf8).sum::<usize>();
+            return Ok(Context { file, span: Span::new(file, at as u32, at as u32), point: Some(at as u32) });
+        }
+        if let Some(d) = self.defs.iter().rev().find(|d| d.name == around)
+            && let Some(span) = d.span
+        {
+            return Ok(Context { file: span.file, span, point: None });
+        }
+        if let Some((file, _, text)) = file_named(around) {
+            return Ok(Context { file, span: Span::new(file, 0, text.len() as u32), point: None });
+        }
+        Err(format!("`around {around}`: no place `FILE:LINE:COL`, definition or file of that name in the program"))
+    }
+}
+
+/// Where locals are wanted: a place, or all of a definition or a file.
+struct Context {
+    file: FileId,
+    span: Span,
+    point: Option<u32>,
+}
+
+/// A local name: its type, where it is bound, and where it is in scope.
+struct Local {
+    name: String,
+    ty: TyId,
+    at: Span,
+    scope: Span,
+}
+
+/// Every local name the program binds, with its type as checked: each
+/// `let`'s, `letrec`'s and lambda's.
+fn locals(c: &Checker) -> Vec<Local> {
+    let mut out = Vec::new();
+    for i in 0..c.arena.exp_count() {
+        let e = ExpId(i as u32);
+        let span = c.arena.span_of(e);
+        let name = |x: Sym| c.interner.name(x).to_string();
+        match c.arena.exp_at(e) {
+            Exp::Let { bindings, body } => {
+                for (x, init) in bindings {
+                    if let Some(&ty) = c.facts.types.get(init) {
+                        out.push(Local { name: name(*x), ty, at: c.arena.span_of(*init), scope: c.arena.span_of(*body) });
+                    }
+                }
+            }
+            Exp::Letrec { bindings, .. } => {
+                for (x, ty, init) in bindings {
+                    out.push(Local { name: name(*x), ty: *ty, at: c.arena.span_of(*init), scope: span });
+                }
+            }
+            Exp::Lambda { body, .. } => {
+                if let Some(sig) = c.facts.lambdas.get(body) {
+                    for (x, ty) in &sig.params {
+                        out.push(Local { name: name(*x), ty: *ty, at: span, scope: c.arena.span_of(*body) });
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    out.sort_by_key(|l| (l.at.file.0, l.at.start));
+    out
 }
 
 /// Every local name the program binds to a polymorphic definition

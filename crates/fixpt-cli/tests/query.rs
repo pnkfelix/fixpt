@@ -23,7 +23,8 @@ fn names(name: &str, query: &str) -> Vec<String> {
         .lines()
         .map(|l| match l {
             _ if l.starts_with("; and may") => "may".to_string(),
-            _ if l.starts_with("; and local") => "local".to_string(),
+            _ if l.starts_with("; and local names bound") => "local".to_string(),
+            _ if l.starts_with("; and local names in scope") => "around".to_string(),
             _ => {
                 let name = l.split(" : ").next().unwrap_or(l);
                 match l.split_once(", in ") {
@@ -66,6 +67,22 @@ fn effects_and_mutation() {
 fn locals_instantiated_so() {
     assert_eq!(names("effects.fx", "effect (write @ed)"), ["bump!", "reset!", "zero!", "may", "clear!", "local", "wipe in reset!"]);
     assert_eq!(names("effects.fx", "transforms counter"), ["again", "local", "keep in again"]);
+}
+
+/// `around`: the local names in scope at a place, or bound anywhere in a
+/// definition, as well: `again`'s parameter `k`, in its body and its
+/// `let`'s, and not before it. `keep` is listed once, as instantiated.
+#[test]
+fn locals_around_a_context() {
+    assert_eq!(names("effects.fx", "transforms counter around again"), ["again", "local", "keep in again"]);
+    assert_eq!(names("effects.fx", "uses counter around again"), names("effects.fx", "uses counter").into_iter().chain(["around".into(), "k in again".into()]).collect::<Vec<String>>());
+    let at = |line_col: &str| format!("uses counter around {}:{line_col}", program("effects.fx"));
+    let plain = names("effects.fx", "uses counter");
+    let with_k: Vec<String> = plain.iter().cloned().chain(["around".into(), "k in again".into()]).collect();
+    assert_eq!(names("effects.fx", &at("28:30")), with_k);
+    assert_eq!(names("effects.fx", &at("28:51")), with_k);
+    assert_eq!(names("effects.fx", &at("27:1")), plain);
+    assert_eq!(names("effects.fx", "effect (write @ed) around zero!"), names("effects.fx", "effect (write @ed)"));
 }
 
 /// At the REPL: a file loaded and a form typed, each answer where it is.

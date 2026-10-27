@@ -46,8 +46,10 @@ usage:
                                  files run in order, as `fixpt run` does):
                                  `effect E`, `uses T`, `returns T`,
                                  `constructs T`, `transforms T`,
-                                 `consumes T`, `mutates T`
-                                 (`,query` at the REPL)
+                                 `consumes T`, `mutates T`; each may
+                                 end `around CONTEXT` (a FILE:LINE:COL, a
+                                 definition or a file) for the locals in
+                                 scope there too (`,query` at the REPL)
   fixpt test INPUT [RUNS]        FX-26: run the program, then each procedure
                                  with a specification, and each harness (a
                                  procedure of `unit` result), on RUNS inputs
