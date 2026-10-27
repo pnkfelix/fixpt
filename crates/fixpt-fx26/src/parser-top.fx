@@ -15,9 +15,11 @@
 (import parser-module parse-tag syn-start syn-end pfail syn-symbol? syn-symbol syn-items len nth
         keep mk-list form-head form-of? datatype? mk-pure-subr mk-poly expand-datatype import?
         expand-import e-var e-lambda t-define t-define-rec t-define-type t-define-effect
+        includes-given include-given-at mk-symbol syn-name loaded-error e-module
+        (type include-given)
         t-define-convention t-define-syscall t-define-generative t-exp p-ok shared-taken
         shared-reset!
-        (type syns-a exp top param-list top-list presult) (effect parses))
+        (type syns-a exp top param-list top-list presult names) (effect parses))
 (import parser-exps-module parse-exp parse-rec-bindings type-loaded)
 ;; `(define name type expression)` or `(define name expression)`; for a
 ;; `define*` (`star?`), the type's list holds the head too.
@@ -129,7 +131,55 @@
     (cond ((generative? x) (parse-generative x))
           ((datatype? x) (parse-each-top (expand-datatype x)))
           ((import? x) (parse-each-top (expand-import x)))
+          ((form-of? x 'include) (cons (included-mark x) (include-made x)))
           (else (the top-list (cons (parse-top x) nil))))))
+;; Where a top-level `include` is, `x`: the end of what is declared ahead,
+;; a type or effect defined after it read in order (`k-included?`), as the
+;; Rust checker makes the `include` there (`declare_each`).
+(define included-mark (->* (syn) top)
+  (lambda (x)
+    (let ((a (syn-start x)) (b (syn-end x)))
+      (t-define-effect (mk-symbol "%included" a b) (mk-symbol "pure" a b) a b))))
+;; What a top-level `include`, `x`, makes: the forms of the `import` the
+;; driver says it is (`include-import`); or, refused, a form refused where
+;; it is checked, so that what is before it is checked first, as the Rust
+;; checker checks it.
+(define include-made (->* (syn) top-list)
+  (lambda (x)
+    (let* ((given (include-given-at (get includes-given) (syn-start x)))
+           (why (if (null? given)
+                    (string-append "a top-level `include` is made an `import` by what runs "
+                                   "the program, which knows the module's names; none was here")
+                    (extract (car given) 5)))
+           (at (if (null? given) (syn-start x) (extract (car given) 6)))
+           (end (if (null? given) (syn-end x) (extract (car given) 7))))
+      (if (string=? why "")
+          (parse-each-top (expand-import (include-import x (car given))))
+          (the top-list (list (t-exp (e-module (loaded-error why) at end 0))))))))
+;; A top-level `(include m)`, `x`: the `(import m x … (type t …) (effect e
+;; …))` of what `m` gives, `g`, at `x`'s span (`Checker::include_forms`).
+(define include-import (->* (syn include-given) syn)
+  (lambda (x g)
+    (let* ((items (syn-items x "a top-level `include`")) (a (syn-start x)) (b (syn-end x)))
+      (cond ((not (= (len items) 2)) (pfail "a top-level `include` names a module" x))
+            (else
+             (begin
+               (mk-list (cons (mk-symbol "import" a b)
+                              (cons (mk-symbol (syn-name (nth items 1)) a b)
+                                    (append (names-at (extract g 2) a b)
+                                            (append (group-at "type" (extract g 3) a b)
+                                                    (group-at "effect" (extract g 4) a b)))))
+                        a b)))))))
+;; Names `ns` as symbols at `a`..`b`.
+(define names-at (->* (names int int) syns-a)
+  (lambda (ns a b)
+    (if (null? ns) nil (cons (mk-symbol (symbol->string (car ns)) a b) (names-at (cdr ns) a b)))))
+;; `(word n …)` at `a`..`b`, in a list of one; none if `ns` is.
+(define group-at (->* (string names int int) syns-a)
+  (lambda (word ns a b)
+    (if (null? ns)
+        nil
+        (the syns-a (cons (mk-list (cons (mk-symbol word a b) (names-at ns a b)) a b) nil)))))
 
 (define parse-tops (->* (syns-a) top-list)
   (lambda (xs)

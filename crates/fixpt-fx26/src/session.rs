@@ -770,16 +770,40 @@ impl Fx26Session {
         for (f, done) in forms.iter().zip(done) {
             if !done {
                 self.own_made = self.strategy != Strategy::Lower && ahead.contains(&f.span);
-                let out = self.run(f);
+                let out = self.run_each(f);
                 self.own_made = false;
-                let failed = out.is_err();
-                outs.push(out);
-                if failed {
-                    break;
+                // Only a form refused ends the run; one that failed as it
+                // ran does not.
+                match out {
+                    Ok(each) => outs.extend(each.into_iter().map(Ok)),
+                    Err(e) => {
+                        outs.push(Err(e));
+                        break;
+                    }
                 }
             }
         }
         Ok(outs)
+    }
+
+    /// `run`, each outcome: of a top-level `include`, the forms it is made
+    /// (`include_forms`), each run as one, so that each front end is given
+    /// them, until one fails; of any other form, its own.
+    pub fn run_each(&mut self, form: &Syntax) -> R<Vec<Outcome>> {
+        let Some(forms) = self.checker.include_forms(form)? else { return Ok(vec![self.run(form)?]) };
+        if forms.is_empty() {
+            return Err(FxError::at(form.span, "this module gives nothing to include"));
+        }
+        let mut out = Vec::new();
+        for f in &forms {
+            let o = self.run(f)?;
+            let failed = o.value.is_err();
+            out.push(o);
+            if failed {
+                break;
+            }
+        }
+        Ok(out)
     }
 
     /// Check one top-level form, and run it as `strategy` says: lowered to
@@ -788,6 +812,14 @@ impl Fx26Session {
     /// Checking comes first either way, so a form that does not check does
     /// not run.
     pub fn run(&mut self, form: &Syntax) -> R<Outcome> {
+        // A top-level `include`: its forms' outcomes, the last shown.
+        if self.checker.include_forms(form)?.is_some() {
+            let mut each = self.run_each(form)?;
+            let printed: String = each.iter().map(|o| o.printed.as_str()).collect();
+            let mut last = each.pop().expect("an `include` makes forms");
+            last.printed = printed;
+            return Ok(last);
+        }
         let out = self.run_defining(form);
         // A run that failed leaves no process to resume: a failure in any
         // ends the run (`docs/fx26.md`, "Processes").
@@ -1251,9 +1283,9 @@ impl Fx26Session {
 
     /// The front end's entry points the Rust side calls by name
     /// (`READER_PREFIX`), each rebound by [`Self::front_end_as_register_code`].
-    pub const FRONT_ENTRIES: [&'static str; 35] = [
+    pub const FRONT_ENTRIES: [&'static str; 36] = [
         "read-text-at", "check-program", "check-more", "checked-tops", "checked-extracts", "checked-effects", "check-conv-native!", "checked-withs!", "checked-reshapes!",
-        "check-globals-effects!", "check-defer-reruns!", "check-hold-breaks!", "check-lines!", "parse-program", "loaded-files!", "run-checked", "run-checked-more", "compile-program", "compile-checked", "compile-registers!", "compile-conv-native!",
+        "check-globals-effects!", "check-defer-reruns!", "check-hold-breaks!", "check-lines!", "parse-program", "loaded-files!", "includes-given!", "run-checked", "run-checked-more", "compile-program", "compile-checked", "compile-registers!", "compile-conv-native!",
         "compile-global-cell", "compile-new-global", "compile-name-word!", "compile-defining!", "compile-keep-global!", "compile-note-inline!", "compile-forget-globals!", "native-assemble",
         "check-built-in!", "check-syscalls!",
         "native-assemble-x64", "native-assemble-x64-regs", "native-adapter-x64", "native-compile-x64-proc",

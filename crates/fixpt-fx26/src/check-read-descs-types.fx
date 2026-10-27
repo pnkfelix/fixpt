@@ -10,8 +10,10 @@
 (hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type syn (select parser-types syn))
 (define-type top (select parser-types top))
+(define-type k-tops (listof top acyclic))
+(define-type k-out (listof string acyclic))
 ;; The types it names, from the files that define them.
-(import check-types-types (type k-binders k-descs k-parts))
+(import check-types-types (type k-binders k-descs k-parts k-names))
 ;; The types it names, from the files that define them.
 (define-type k-ids (select check-types-types k-ids))
 ;; The types it names, from the files that define them.
@@ -100,4 +102,17 @@
             (val k-read-in-order?
                  (subr (maxeff (read @globals) (read @s) (read @t) spin) (top) bool))
             (val k-names-a-file?
-                 (subr (maxeff (read @globals) (read @s) (read @t) spin) (syn) bool))))
+                 (subr (maxeff (read @globals) (read @s) (read @t) spin) (syn) bool))
+            (val k-ahead-names-of
+                 (subr (maxeff (alloc @t) (read @globals) (read @s) (read @t) spin)
+                       (k-tops k-names bool)
+                       k-names))
+            (val k-given-again
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (k-names k-names k-names)
+                       k-names))
+            (val k-again-lines (subr (maxeff (alloc @t) (read @globals) spin) (k-names) k-out))
+            (val k-ahead-stop (ref int @t))
+            (val k-included? (subr (maxeff (read @globals) (read @s) spin) (top) bool))
+            (val k-type-top-start (subr (read @globals) (top) int))
+            (val k-declared-later?
+                 (subr (maxeff (read @globals) (read @s) (read @t) spin) (top) bool))))

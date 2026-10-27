@@ -72,6 +72,9 @@ top-form   ::= definition
              | "(" "define-effect" name effect ")"
              | "(" "define-syscall" name string type ")"            ; a runtime's own code only
              | "(" "define-optional-syscall" name string type ")"   ; (`docs/fx26.md`, "Syscalls")
+             | "(" "include" variable ")"           { a module bound here: an `import` of every
+                                                      name it gives; a type defined after it
+                                                      is read in order }
              | expression
 
 definition ::= "(" "define" name expression ")"

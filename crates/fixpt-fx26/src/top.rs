@@ -167,11 +167,84 @@ impl Checker {
     /// hidden globals never made (`put_back`).
     pub fn top_defining(&mut self, form: &Syntax) -> R<Defining> {
         let kept = self.keep(false);
-        let r = self.top_defining_kept(form);
+        let r = match self.include_forms(form) {
+            Ok(Some(forms)) => self.top_defining_each(&forms),
+            Ok(None) => self.top_defining_kept(form),
+            Err(e) => Err(e),
+        };
         if r.is_err() {
             self.put_back(kept);
         }
         r
+    }
+
+    /// `top_defining` of each of `forms`, in order, as one.
+    fn top_defining_each(&mut self, forms: &[Syntax]) -> R<Defining> {
+        let mut all = Defining { run: Vec::new(), hoisted: Vec::new(), broken: Vec::new() };
+        for f in forms {
+            let d = self.top_defining_kept(f)?;
+            all.run.extend(d.run);
+            all.hoisted.extend(d.hoisted);
+            all.broken.extend(d.broken);
+        }
+        Ok(all)
+    }
+
+    /// A top-level `(include m)`, `m` a module bound here: what `m` gives,
+    /// defined here by name, as `(import m x … (type t …) (effect e …))` of
+    /// every name its type has would (the user's, 2026-10-27, Heist's
+    /// problem F). The module's names are known only from its type, so it is
+    /// made an `import` here, where that is known: for a program run, the
+    /// forms it is made are what the front end written in FX-26 is given
+    /// (`Fx26Session::run`). `None` if `form` is no `include`.
+    pub fn include_forms(&mut self, form: &Syntax) -> R<Option<Vec<Syntax>>> {
+        let Some((name, vals, types, effects)) = self.include_names(form)? else { return Ok(None) };
+        let span = form.span;
+        let sym = |s: Sym| Syntax::symbol(span, s);
+        let word = |c: &mut Self, w: &str| Syntax::symbol(span, c.interner.intern(w));
+        let mut import = vec![word(self, "import"), sym(name)];
+        import.extend(vals.into_iter().map(sym));
+        for (group, names) in [("type", types), ("effect", effects)] {
+            if !names.is_empty() {
+                let mut g = vec![word(self, group)];
+                g.extend(names.into_iter().map(sym));
+                import.push(Syntax::list(span, g));
+            }
+        }
+        let mut out = Vec::new();
+        self.expand_import(&Syntax::list(span, import), &mut out)?;
+        Ok(Some(out))
+    }
+
+    /// A top-level `(include m)`'s module, and the names of what it gives:
+    /// its values, types and effects, none hidden. `None` if `form` is no
+    /// `include`.
+    #[allow(clippy::type_complexity)]
+    pub fn include_names(&mut self, form: &Syntax) -> R<Option<(Sym, Vec<Sym>, Vec<Sym>, Vec<Sym>)>> {
+        let Some(items) = form.as_proper_list() else { return Ok(None) };
+        if !items.first().and_then(|h| h.as_symbol()).is_some_and(|h| self.interner.name(h) == "include") {
+            return Ok(None);
+        }
+        let usage = "a top-level `include` names a module bound here: `(include m)`";
+        let [_, m] = items else { return Err(FxError::at(form.span, usage)) };
+        let Some(name) = m.as_symbol() else { return Err(FxError::at(m.span, usage)) };
+        let Some(t) = self.lookup(name) else {
+            return Err(FxError::at(m.span, format!("unbound variable `{}`", self.interner.name(name))));
+        };
+        let crate::ast::Ty::Module { abs, descs, vals } = self.arena.get(self.arena.resolve(t)).clone() else {
+            return Err(FxError::at(m.span, format!("`include` includes a module, and `{}` is a {}", self.interner.name(name), self.show_ty(t))));
+        };
+        let shown = |c: &Self, n: &Sym| !c.interner.name(*n).starts_with('%');
+        let mut types: Vec<Sym> = abs.iter().map(|(n, _)| *n).filter(|n| shown(self, n)).collect();
+        let mut effects = Vec::new();
+        for (n, d) in &descs {
+            if !shown(self, n) {
+                continue;
+            }
+            if self.desc_effect(*d).is_some() { effects.push(*n) } else { types.push(*n) }
+        }
+        let vals = vals.iter().map(|(n, _)| *n).filter(|n| shown(self, n)).collect();
+        Ok(Some((name, vals, types, effects)))
     }
 
     fn top_defining_kept(&mut self, form: &Syntax) -> R<Defining> {
@@ -1094,7 +1167,7 @@ impl Checker {
     /// TYPE)`, by name, in order, each as often as defined.
     fn type_abbreviations(&self, forms: &[Syntax]) -> Vec<(Sym, Span)> {
         let mut out = Vec::new();
-        for f in forms {
+        for f in forms.iter().take_while(|f| !self.is_include(f)) {
             let items = f.as_proper_list().unwrap_or(&[]);
             // A description function, `(define-type f (dlambda …))`, is no
             // type to declare: it is read where it is defined.
@@ -1176,12 +1249,24 @@ impl Checker {
         }
     }
 
+    /// Whether `f` is a top-level `(include …)`.
+    fn is_include(&self, f: &Syntax) -> bool {
+        f.as_proper_list().and_then(|l| l.first()?.as_symbol()).is_some_and(|h| self.interner.name(h) == "include")
+    }
+
     fn declare_each(&mut self, forms: &[Syntax]) -> R<Vec<bool>> {
         let mut done = Vec::new();
+        // A top-level `include` ends what is declared ahead: the types it
+        // gives are known only once it is checked, in order, so a type or
+        // effect defined after it is read in order too (as the FX-26
+        // checker's `k-ahead-stop`).
+        let mut included = false;
         for f in forms {
+            included |= self.is_include(f);
             let items = f.as_proper_list().unwrap_or(&[]);
             let head = items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h).to_string());
             match (head.as_deref(), items) {
+                _ if included => done.push(false),
                 // A type that names a file (`load-moduleof`) is read in
                 // order, as a definition is, its file loaded first.
                 (Some("define-type"), [_, _, d]) if self.names_a_file(d) => done.push(false),

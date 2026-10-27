@@ -39,7 +39,8 @@
         e-lambda e-app e-plambda e-proj e-if e-letrec e-let e-begin e-prompt e-letregion e-rlambda
         e-the e-convention e-bloblet e-product e-extract e-sum e-tagcase e-module e-with t-define
         t-define-rec t-define-type t-define-effect t-define-convention t-define-syscall
-        t-define-generative t-exp p-ok p-err quoted loaded loaded-files! (type names exp top)
+        t-define-generative t-exp p-ok p-err quoted loaded loaded-files! includes-given!
+        (type names exp top)
         (effect parses))
 ;; From `parser-top.fx`.
 (define parse-program (with parser-top-module parse-program))

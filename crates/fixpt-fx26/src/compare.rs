@@ -87,14 +87,36 @@ pub fn both_checkers(s: &mut Fx26Session, text: &str) -> R<(Checked26, Checked26
     // With `FIXPT_TIME_PHASES` set, how long each checker took.
     let timing = std::env::var_os("FIXPT_TIME_PHASES").is_some();
     let started = std::time::Instant::now();
-    let fx26 = canonical_checked(s.check_with_own_checker(text)?);
-    let between = std::time::Instant::now();
     let mut c = s.fresh_checker();
     let rust = canonical_checked(check_with_rust_checker(&mut c, text));
+    // The Rust checker first, so that the FX-26 front end can be told what
+    // each top-level `include` gives, which only a checker knows.
+    crate::syn::set_includes(includes_given(&mut c, text));
+    let between = std::time::Instant::now();
+    let fx26 = canonical_checked(s.check_with_own_checker(text)?);
     if timing {
-        eprintln!("; the FX-26 checker {:.3} s, the Rust checker {:.3} s", (between - started).as_secs_f64(), between.elapsed().as_secs_f64());
+        eprintln!("; the Rust checker {:.3} s, the FX-26 checker {:.3} s", (between - started).as_secs_f64(), between.elapsed().as_secs_f64());
     }
     Ok((fx26, rust))
+}
+
+/// Each top-level `include` of `text`, checked by `c`: where it starts,
+/// and the names of what its module gives (`Checker::include_names`); or
+/// why it is refused, and where.
+pub fn includes_given(c: &mut Checker, text: &str) -> Vec<crate::syn::IncludeGiven> {
+    let Ok(forms) = c.read_in(FileId(0), text) else { return Vec::new() };
+    let mut out = Vec::new();
+    for f in &forms {
+        match c.include_names(f) {
+            Ok(Some((_, vals, types, effects))) => {
+                let names = |ns: Vec<fixpt_read::Sym>| ns.iter().map(|n| c.interner.name(*n).to_string()).collect();
+                out.push(crate::syn::IncludeGiven { at: f.span.start, names: [names(vals), names(types), names(effects)], why: String::new(), why_at: f.span.start, why_end: f.span.end });
+            }
+            Ok(None) => {}
+            Err(e) => out.push(crate::syn::IncludeGiven { at: f.span.start, names: Default::default(), why: e.message, why_at: e.span.start, why_end: e.span.end }),
+        }
+    }
+    out
 }
 
 /// Both compilers' code for `text`, disassembled, with register code: the

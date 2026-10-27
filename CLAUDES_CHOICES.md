@@ -2160,3 +2160,24 @@ The user decided to share them. How, mine:
 - **Named for the file's base name**, `x.fx..t`, not its whole key: two
   files of one name in two directories print alike, though their types
   stay apart.
+
+## A top-level `include` (2026-10-27)
+
+The user asked for it (Heist's problem F). How, mine:
+
+- **An `import` of every name, made where the module's type is known**,
+  rather than a form of its own through both front ends' parsers,
+  checkers and compilers: the FX-26 parser, compilers and evaluator work
+  from trees made before checking, and `import` already goes through all
+  of them.
+- **The driver tells the FX-26 parser what each gives**, by position, for
+  `fixpt check`, rather than giving it a text with the `import`s written
+  in: a text changed so moves every place after it.
+- **It ends what is declared ahead.** The Rust checker can make it an
+  `import` only once `m` is defined, after the types are declared ahead;
+  so both read a type after it in order. The FX-26 one could have
+  declared its types ahead too, the driver having told it; the two would
+  then disagree.
+- **A module's name only**, as `import` takes: `(include (load-module …))`
+  would need a hidden binding of its own.
+- **A REPL's lines for each definition** (`run_each`), not the last only.

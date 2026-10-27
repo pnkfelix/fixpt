@@ -400,6 +400,66 @@
 (define k-any-names-a-file? (->* (k-syns) bool)
   (lambda (xs)
     (and (not (null? xs)) (or (k-names-a-file? (car xs)) (k-any-names-a-file? (cdr xs))))))
+;; A program's forms, and lines said of them (`check-program-types.fx`'s).
+(define-type k-tops (listof top acyclic))
+(define-type k-out (listof string acyclic))
+;; The names simple `define-type`s give, in order, each as often as given;
+;; if `stop?`, those before a top-level `include` (`k-included?`).
+(define k-ahead-names-of (->* (k-tops k-names bool) k-names)
+  (lambda (forms acc stop?)
+    (if (or (null? forms) (and stop? (k-included? (car forms))))
+        (the k-names (reverse acc))
+        (k-ahead-names-of
+         (cdr forms)
+         (tagcase (car forms)
+           (t-define-type (name def a b)
+             (if (and (syn-symbol? name) (not (string=? (k-list-head def) "dlambda"))
+                      (not (k-names-a-file? def)))
+                 (cons (string->symbol (syn-name name)) acc)
+                 acc))
+           (else y acc))
+         stop?))))
+;; The names `ns` gives more than once, each once, in the order each is
+;; given a second time.
+(define k-given-again (->* (k-names k-names k-names) k-names)
+  (lambda (ns seen again)
+    (cond ((null? ns) (the k-names (reverse again)))
+          ((not (k-has-name? seen (car ns))) (k-given-again (cdr ns) (cons (car ns) seen) again))
+          ((k-has-name? again (car ns)) (k-given-again (cdr ns) seen again))
+          (else (k-given-again (cdr ns) seen (cons (car ns) again))))))
+;; A warning for each type a whole program defines more than once
+;; (`TODO.md` §34): not an error, but its values see only the last.
+(define k-again-lines (->* (k-names) k-out)
+  (lambda (ns)
+    (if (null? ns)
+        nil
+        (cons (k-cat3 "warning: `" (symbol->string (car ns))
+                      "` is defined as a type more than once; every value sees the last")
+              (k-again-lines (cdr ns))))))
+;; Where a top-level `include` ended what is declared ahead (`k-included?`),
+;; or -1: a type or effect defined after it is read in order.
+(define k-ahead-stop (ref int @t) (new -1))
+;; Whether `form` is where a top-level `include` was (`included-mark`).
+(define k-included? (->* (top) bool)
+  (lambda (form)
+    (tagcase form
+      (t-define-effect (name def a b)
+        (and (syn-symbol? name) (string=? (syn-name name) "%included")))
+      (else y #f))))
+;; Where a type's or an effect's definition starts; -1 for any other form.
+(define k-type-top-start (->* (top) int)
+  (lambda (form)
+    (tagcase form
+      (t-define-type (n d a b) a) (t-define-effect (n d a b) a) (t-define-generative (h r a b) a)
+      (t-define-convention (n f a b) a) (else y -1))))
+;; Whether `form`, a type's or an effect's definition, is declared where it
+;; is, not ahead: it names a file (`k-read-in-order?`), or is after a
+;; top-level `include` (`declare_each`).
+(define k-declared-later? (->* (top) bool)
+  (lambda (form)
+    (or (k-read-in-order? form)
+        (let ((a (k-type-top-start form)))
+          (and (>= a 0) (>= (get k-ahead-stop) 0) (>= a (get k-ahead-stop)))))))
 ;; A type written as a form, `(hd …)`, `hd` no family's name.
 (define k-parse-type-form (->* (syn k-syns symbol) int)
   (lambda (s items hd)

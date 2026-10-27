@@ -728,6 +728,23 @@
 ;; first.
 (define loaded-files! (->* (loaded-files) unit)
   (lambda (fs) (begin (set loaded fs) (set loaded-next (loaded-onto fs nil)))))
+;;; ------------------------------------------------------------ top-level includes
+
+;; For a driver: each top-level `(include m)` of the program, by where it
+;; starts, and the names of what `m` gives, its values, types and effects,
+;; which only a checker knows (`Checker::include_forms`); or why it is
+;; refused, and where.
+(define-type include-given
+  (productof (1 int) (2 names) (3 names) (4 names) (5 string) (6 int) (7 int)))
+(define-type includes (listof include-given acyclic))
+(define includes-given (ref includes rs) (new nil))
+(define includes-given! (->* (includes) unit) (lambda (is) (set includes-given is)))
+;; What was given of the `include` starting at `a`, in a list of one.
+(define include-given-at (->* (includes int) includes)
+  (lambda (is a)
+    (cond ((null? is) nil)
+          ((= (extract (car is) 1) a) (the includes (cons (car is) nil)))
+          (else (include-given-at (cdr is) a)))))
 ;; `xs` reversed onto `ys`.
 (define loaded-onto
   (->* (loaded-files loaded-files) loaded-files)

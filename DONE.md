@@ -3554,3 +3554,30 @@ keep theirs apart" for loads.
   unchanged (12.17-12.72G against 12.19-12.56G); the FX-26 checker asks
   whether a name is a load's only of a module's type with abstract types.
 - **Tests**: `modules/load-shared.fx`, `load-shared-named.fx`.
+
+## 138. A top-level `include` (2026-10-27)
+
+Heist's problem F; the user asked for it.
+
+- **`(include m)` at the top level** defines every name the module `m`
+  bound there gives: `(import m x … (type t …) (effect e …))` of all of
+  them, none hidden. Inside a `module` it is as it was (`TODO.md` §69).
+- **Made an `import` where `m`'s type is known**: the Rust checker makes it
+  so as the form is checked (`include_forms`), and what runs the program
+  gives each front end the `import`'s forms (`Fx26Session::run_each`), so
+  that the REPL and `fixpt eval` show each definition. For a whole text
+  given to the front end written in FX-26 (`fixpt check`), the driver
+  tells its parser what each `include` gives, by where it starts
+  (`includes-given!`, as `loaded-files!` tells it of files), or why the
+  Rust checker refused it, which its checker then refuses at the same
+  place (`compare::includes_given`).
+- **It ends what is declared ahead**: a type or effect defined after it is
+  read in order (`declare_each`; the FX-26 checker's `k-ahead-stop`, at a
+  mark its parser leaves, `%included`). Its own types are defined there.
+- **The FX-26 checker's first pass's helpers** (`k-ahead-names-of`,
+  `k-given-again`, `k-again-lines`) moved to `check-read-descs.fx`, for
+  room in `check-program.fx`.
+- **Stage 0's fixed cost**: 28.45G instructions against 28.40G, cycles
+  unchanged (12.20-12.25G against 12.21-12.27G).
+- **Tests**: `tests/top_include.rs` on `programs/top-include/`, run as a
+  session runs them, and both checkers agreeing as `fixpt check` has them.

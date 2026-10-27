@@ -518,7 +518,7 @@ pub fn repl(backend: Backend) -> i32 {
                 continue;
             }
             let before = timing.then(|| GcStats::start_form(&mut session));
-            let ran = session.run(form);
+            let ran = session.run_each(form);
             // A form that left the terminal raw, done or failed, leaves the
             // REPL's own as it was (`TODO.md` §95).
             let _ = fixpt_runtime::tty::restore();
@@ -535,11 +535,15 @@ pub fn repl(backend: Backend) -> i32 {
                 sources.push(fixpt_fx26::query::Source { name: name.clone(), text: before + &text[start..end], base: session.checker.base_dir.clone() });
             }
             match ran {
-                Ok(out) if disassembling => match &out.value {
-                    Ok(Some(v)) => print!("{}", unwrite_string(v).unwrap_or_else(|| format!("{v}\n"))),
-                    _ => show(&session, &out, show_code),
-                },
-                Ok(out) => show(&session, &out, show_code),
+                // A top-level `include`'s forms, each shown.
+                Ok(outs) => {
+                    for out in outs {
+                        match &out.value {
+                            Ok(Some(v)) if disassembling => print!("{}", unwrite_string(v).unwrap_or_else(|| format!("{v}\n"))),
+                            _ => show(&session, &out, show_code),
+                        }
+                    }
+                }
                 Err(e) => {
                     eprintln!("{}", located(&name, &text, &e));
                     if let Some(note) = pending_note(&mut session, &e.message) {
@@ -1255,11 +1259,13 @@ pub fn eval(backend: Backend, text: &str) -> i32 {
         }
     };
     for form in &forms {
-        match session.run(form) {
-            Ok(out) => {
-                show(&session, &out, false);
-                if out.value.is_err() {
-                    return 1;
+        match session.run_each(form) {
+            Ok(outs) => {
+                for out in &outs {
+                    show(&session, out, false);
+                    if out.value.is_err() {
+                        return 1;
+                    }
                 }
             }
             Err(e) => {

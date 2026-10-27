@@ -231,51 +231,23 @@
   (lambda (forms)
     (if (null? forms)
         #u
-        (begin (if (k-read-in-order? (car forms)) #u (k-declare (car forms)))
-               (k-declare-each (cdr forms))))))
-;; The names simple `define-type`s give, in order, each as often as given.
-(define k-ahead-names-of (->* (k-tops k-names) k-names)
-  (lambda (forms acc)
-    (if (null? forms)
-        (the k-names (reverse acc))
-        (k-ahead-names-of
-         (cdr forms)
-         (tagcase (car forms)
-           (t-define-type (name def a b)
-             (if (and (syn-symbol? name) (not (string=? (k-list-head def) "dlambda"))
-                      (not (k-names-a-file? def)))
-                 (cons (string->symbol (syn-name name)) acc)
-                 acc))
-           (else y acc))))))
-;; The names `ns` gives more than once, each once, in the order each is
-;; given a second time.
-(define k-given-again (->* (k-names k-names k-names) k-names)
-  (lambda (ns seen again)
-    (cond ((null? ns) (the k-names (reverse again)))
-          ((not (k-has-name? seen (car ns))) (k-given-again (cdr ns) (cons (car ns) seen) again))
-          ((k-has-name? again (car ns)) (k-given-again (cdr ns) seen again))
-          (else (k-given-again (cdr ns) seen (cons (car ns) again))))))
-;; A warning for each type a whole program defines more than once
-;; (`TODO.md` §34): not an error, but its values see only the last.
-(define k-again-lines (->* (k-names) k-out)
-  (lambda (ns)
-    (if (null? ns)
-        nil
-        (cons (k-cat3 "warning: `" (symbol->string (car ns))
-                      "` is defined as a type more than once; every value sees the last")
-              (k-again-lines (cdr ns))))))
+        (if (k-included? (car forms))
+            (set k-ahead-stop (k-type-top-start (car forms)))
+            (begin (if (k-read-in-order? (car forms)) #u (k-declare (car forms)))
+                   (k-declare-each (cdr forms)))))))
 ;; Those warnings, as `k-forms` keeps lines: the first last.
 (define k-types-again (->* (k-tops) k-out)
   (lambda (forms)
-    (k-push-lines (k-again-lines (k-given-again (k-ahead-names-of forms nil) nil nil)) nil)))
+    (k-push-lines (k-again-lines (k-given-again (k-ahead-names-of forms nil #f) nil nil)) nil)))
 ;; The first pass: abbreviations, so that types can refer to each other in
 ;; any order. Values cannot: a definition sees only those before it. Each
 ;; abbreviation defined once, by name, is in scope before any is read, and
 ;; checked grounded once all are.
 (define k-ahead (->* (k-tops) unit)
   (lambda (forms)
-    (let ((names (k-ahead-names-of forms nil)))
+    (let ((names (k-ahead-names-of forms nil #t)))
       (begin
+        (set k-ahead-stop -1)
         (set k-ahead-names nil)
         (set k-ahead-filled nil)
         (k-ahead-declare names names)
@@ -955,10 +927,8 @@
   (lambda (form)
     (tagcase form
       (t-define-syscall (required s a b) (k-define-syscall required s a b))
-      ;; A type naming a file, declared in order (`k-read-in-order?`).
-      (t-define-type (n d a b) (begin (if (k-read-in-order? form) (k-declare form) #u)
-                                      (k-defining form)))
-      (else y (k-defining form)))))
+      ;; A type naming a file, or after an `include`, declared in order.
+      (else y (begin (if (k-declared-later? form) (k-declare form) #u) (k-defining form))))))
 
 ;; The second pass: definitions and expressions, in order, each under
 ;; redefinition (`k-defining`).
