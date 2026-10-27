@@ -624,6 +624,20 @@
     (cond ((null? ps) -1)
           ((symbol=? (extract (car ps) 1) n) (extract (car ps) 2))
           (else (k-part-of (cdr ps) n)))))
+;; `n`, without the mark `restrict` gives an abstract type it keeps
+;; unnamed (`%hidden:t` is `t`: `bare_name`).
+(define k-bare-name (->* (symbol) symbol)
+  (lambda (n)
+    (let ((s (symbol->string n)))
+      (if (and (> (string-length s) 8) (string=? (substring s 0 8) "%hidden:"))
+          (string->symbol (substring s 8 (string-length s)))
+          n))))
+;; The part of `ps` named `n`, its mark left out (`k-bare-name`); or -1.
+(define k-bare-part-of (->* (k-parts symbol) int)
+  (lambda (ps n)
+    (cond ((null? ps) -1)
+          ((symbol=? (k-bare-name (extract (car ps) 1)) n) (extract (car ps) 2))
+          (else (k-bare-part-of (cdr ps) n)))))
 ;; Whether a name of `xs` is one of `ys`'s.
 (define k-comps-meet? (->* (k-parts k-parts) bool)
   (lambda (xs ys)
@@ -645,7 +659,7 @@
   (lambda (ab aa da a b i es labels)
     (if (null? ab)
         (the (listof k-benvs acyclic) (cons es nil))
-        (let* ((n (extract (car ab) 1)) (x (k-part-of aa n)))
+        (let* ((n (k-bare-name (extract (car ab) 1))) (x (k-bare-part-of aa n)))
           (cond
             ((and (>= x 0) (not (= (k-dvar-kind x) (k-dvar-kind (extract (car ab) 2))))) nil)
             ((>= x 0)
@@ -673,8 +687,8 @@
   (lambda (ab aa da m)
     (if (null? ab)
         nil
-        (let* ((n (extract (car ab) 1))
-               (d (if (>= (k-part-of aa n) 0) -1 (k-part-of da n)))
+        (let* ((n (k-bare-name (extract (car ab) 1)))
+               (d (if (>= (k-bare-part-of aa n) 0) -1 (k-part-of da n)))
                (rest (k-defined-map (cdr ab) aa da m)))
           (if (< d 0)
               rest

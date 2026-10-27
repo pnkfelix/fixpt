@@ -16,9 +16,19 @@
   (subr (maxeff (alloc @t) (goto @z) (read @globals) (read @s) (read @t) (write @t) spin)
         (syn)
         k-desc))
+;; How a type is read: `check-read-descs.fx`'s `k-parse-type`, given.
+(define-type k-type-reader
+  (subr (maxeff (alloc @t) (goto @z) (read @globals) (read @s) (read @t) (write @t) spin)
+        (syn)
+        int))
 (define-type check-read-made-sig
   (moduleof (val k-type-made-by
                  (subr (maxeff (alloc @t) (goto @z) (read @globals) (read @s) (read @t) (write @t)
                                spin)
                        (syn k-syns bool k-desc-reader)
+                       int))
+            (val k-restrict-by
+                 (subr (maxeff (alloc @t) (goto @z) (read @globals) (read @s) (read @t) (write @t)
+                               spin)
+                       (syn k-syns k-type-reader)
                        int))))

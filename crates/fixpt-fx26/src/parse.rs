@@ -65,7 +65,7 @@ const ARROW_STAR_ONLY: &str = "`(->* (param …) result)` is only the type a def
 
 const TYPE_FORMS: &[&str] = &[
     "arrayof", "narrayof", "bloblet", "composable", "dletrec", "icell", "listof", "mark-key", "moduleof", "mu", "nat", "nlist", "oneshot", "pairof", "place",
-    "poly", "productof", "prompt-tag", "proves", "ref", "select", "subr", "sumof", "bool", "union", "->", "->*",
+    "poly", "productof", "prompt-tag", "proves", "ref", "select", "subr", "sumof", "bool", "union", "->", "->*", "restrict",
 ];
 
 impl Checker {
@@ -916,6 +916,9 @@ impl Checker {
                 let made = if input { self.module_val(made, "input").expect("a `load-input` file's module gives `input`") } else { made };
                 self.type_made(made, &items[2..], s.span, &path)
             }
+            // `(restrict T name …)`: module type `T` with only the names
+            // given (`docs/research/derived-signatures.md`, narrowing).
+            "restrict" => self.restricted(s, &items),
             "mark-key" => {
                 let [_, t, r] = &items[..] else {
                     return Err(FxError::at(s.span, "`(mark-key type region)`"));
@@ -2679,6 +2682,44 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         let item = self.interner.intern("input");
         let body = self.arena.exp(span, Exp::Var(item));
         Ok(self.arena.exp(span, Exp::With { module: name, body }))
+    }
+
+    /// `(restrict T name …)`, `items`: module type `T` with only the values,
+    /// types and effects named. It drops names, not types: a description
+    /// not named is spelt out where a type kept uses it; an abstract type
+    /// not named that a type kept mentions stays, unnamed, `%hidden:t`,
+    /// so a module of `T` fits it (`bare_name`), and a client may pass its
+    /// values but not name its type. `T` must be known as a module's type
+    /// where it is read: a `define-type` of one is read in order.
+    fn restricted(&mut self, s: &Syntax, items: &[Syntax]) -> R<TyId> {
+        let [_, t, names @ ..] = items else {
+            return Err(FxError::at(s.span, "`(restrict module-type name …)`"));
+        };
+        let t = self.parse_type(t)?;
+        let Ty::Module { abs, descs, vals } = self.arena.get(self.arena.resolve(t)).clone() else {
+            return Err(FxError::at(s.span, format!("`restrict` restricts a module's type, and this is a {}", self.show_ty(t))));
+        };
+        let mut kept = Vec::new();
+        for n in names {
+            let Some(name) = n.as_symbol() else { return Err(FxError::at(n.span, "`restrict` keeps names")) };
+            let has = |ps: &[(Sym, TyId)]| ps.iter().any(|(m, _)| *m == name);
+            if !(abs.iter().any(|(m, _)| *m == name) || has(&descs) || has(&vals)) {
+                return Err(FxError::at(n.span, format!("the module gives no `{}`", self.name(name))));
+            }
+            kept.push(name);
+        }
+        let descs: Vec<(Sym, TyId)> = descs.into_iter().filter(|(n, _)| kept.contains(n)).collect();
+        let vals: Vec<(Sym, TyId)> = vals.into_iter().filter(|(n, _)| kept.contains(n)).collect();
+        let mut out = Vec::new();
+        for (n, v) in abs {
+            if kept.contains(&n) {
+                out.push((n, v));
+            } else if descs.iter().chain(&vals).any(|(_, t)| self.mentions_var(*t, v)) {
+                let hidden = format!("%hidden:{}", self.name(n));
+                out.push((self.interner.intern(&hidden), v));
+            }
+        }
+        Ok(self.arena.ty(Ty::Module { abs: out, descs, vals }))
     }
 
     /// The hidden global a load of `path` is (`parse_load`).

@@ -7,7 +7,8 @@ problems found along the way.
 Built since (2026-10-27): problems A, B, D and E (`DONE.md` §134, §135);
 `load-moduleof`, and for `load-input` files `load-input-moduleof`
 (`DONE.md` §136), as Q1 and Q2 below say; a file's abstract types shared
-by its loads (§137); a top-level `include` (§138). Not yet: narrowing.
+by its loads (§137); a top-level `include` (§138); narrowing, as
+`(restrict T name …)` (§139).
 
 ## The request, briefly
 

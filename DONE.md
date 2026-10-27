@@ -3581,3 +3581,23 @@ Heist's problem F; the user asked for it.
   unchanged (12.20-12.25G against 12.21-12.27G).
 - **Tests**: `tests/top_include.rs` on `programs/top-include/`, run as a
   session runs them, and both checkers agreeing as `fixpt check` has them.
+
+## 139. `(restrict T name …)`: a module type narrowed to what a client uses (2026-10-27)
+
+The research note's narrowing (`moduleof-only` there); the user named it.
+
+- **Module type `T` with only the values, types and effects named.** It
+  drops names, not types: a description not named is spelt out where a
+  kept type uses it; an abstract type not named that a kept type mentions
+  stays, unnamed, `(abs %hidden:t type)`, so a client may take and pass its
+  values but not name it; one nothing kept mentions is dropped.
+- **A module of `T` fits it**: module subtyping pairs an abstract type by
+  its name without the mark (`bare_name`, `k-bare-name`), and the values
+  fewer are reshaped as width subtyping does (M4).
+- **Read where it is written**: `T` must be known as a module's type
+  there, so a `define-type` of one is read in order, as `load-moduleof`'s.
+- **Not done**: `hide` still refuses a hidden abstract type in a type the
+  module shows (`modules/hide-escape.fx`, the user's of 2026-10-09);
+  `restrict`'s unnamed binder would let it keep one instead.
+- **Stage 0's fixed cost unchanged**: 28.46G instructions against 28.45G.
+- **Tests**: `modules/restrict*.fx`, with `module-files/made-tickets.fx`.

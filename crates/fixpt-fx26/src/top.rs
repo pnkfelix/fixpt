@@ -1238,13 +1238,14 @@ impl Checker {
         None
     }
 
-    /// Whether `s` names a file, `(load-moduleof "file" …)` or
-    /// `(load-input-moduleof "file" …)`.
+    /// Whether type `s` is read in order, not ahead: it names a file,
+    /// `(load-moduleof "file" …)` or `(load-input-moduleof "file" …)`, or
+    /// restricts a module type, `(restrict T …)`, which must be known first.
     fn names_a_file(&self, s: &Syntax) -> bool {
         let Some(items) = s.as_proper_list() else { return false };
         match items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h)) {
             Some("quote" | "quasiquote") => false,
-            Some("load-moduleof" | "load-input-moduleof") => true,
+            Some("load-moduleof" | "load-input-moduleof" | "restrict") => true,
             _ => items.iter().any(|x| self.names_a_file(x)),
         }
     }

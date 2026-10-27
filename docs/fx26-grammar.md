@@ -186,6 +186,9 @@ type       ::= base-type
              | "(" "load-input-moduleof" string made-arg* ")"
                                                        { of the module a `load-input` file's
                                                          value makes given the args }
+             | "(" "restrict" type name* ")"         { a module type with only the names
+                                                         given: an abstract type not named
+                                                         that one kept mentions, unnamed }
              | "(" function description+ ")"          { a function to a type, applied }
 
 base-type  ::= "int" | "bool" | "char" | "string" | "unit" | "symbol" | "datum"

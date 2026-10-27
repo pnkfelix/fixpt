@@ -2181,3 +2181,17 @@ The user asked for it (Heist's problem F). How, mine:
 - **A module's name only**, as `import` takes: `(include (load-module …))`
   would need a hidden binding of its own.
 - **A REPL's lines for each definition** (`run_each`), not the last only.
+
+## `restrict` (2026-10-27)
+
+The user named it; the semantics are the research note's. Mine:
+
+- **A type form**, `(restrict T name …)`, not one on a module value: where
+  it is wanted is a parameter's type or a `define-type`; a module is
+  restricted by `(the (restrict T …) m)`.
+- **The unnamed abstract type marked `%hidden:t`** in the binder's name,
+  and paired by its name without the mark, rather than a module type with
+  a place of its own for unnamed binders: no change to module types'
+  shape in either checker.
+- **`hide`'s refusal kept**: lifting it is the user's decision of
+  2026-10-09 to revisit, not part of this.

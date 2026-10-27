@@ -50,7 +50,7 @@
 (hide (include check-types) (include check-read-helpers) (include check-syntax)
       (include check-subst) (include check-env) (include check-print-parts) (include check-print)
       (include check-holds) (include check-proving) (include check-unions) (include parser))
-(import check-read-made k-type-made-by)
+(import check-read-made k-type-made-by k-restrict-by)
 (import check-read k-at-name? k-atom-head? k-ctor-params k-effect-desc k-effect-named
         k-effect-selected k-frozen-into k-head k-items k-items-or-nil k-name-of k-not-applied
         k-parse-binders k-parse-place k-parse-region k-region-constant k-sfail k-symbol-head)
@@ -395,7 +395,8 @@
         (let ((h (if (and (not (null? items)) (syn-symbol? (car items)))
                      (syn-name (car items))
                      "")))
-          (or (string=? h "%type-made") (string=? h "%input-made") (k-any-names-a-file? items))))
+          (or (string=? h "%type-made") (string=? h "%input-made") (string=? h "restrict")
+              (k-any-names-a-file? items))))
       (else y #f))))
 (define k-any-names-a-file? (->* (k-syns) bool)
   (lambda (xs)
@@ -470,6 +471,7 @@
         ((->*) (k-sfail k-arrow-star-only s))
         ((%type-made) (k-type-made-by s items #f k-parse-d))
         ((%input-made) (k-type-made-by s items #t k-parse-d))
+        ((restrict) (k-restrict-by s items k-parse-type))
         ((proves) (k-parse-proves-type s items))
         ((bool) (k-sfail "`(bool …)` is a procedure's result, and only that" s))
         ((poly)

@@ -3797,6 +3797,18 @@ impl Checker {
         }
     }
 
+    /// `n`, without the mark `restrict` gives an abstract type it keeps
+    /// unnamed (`%hidden:t` is `t`).
+    pub(crate) fn bare_name(&mut self, n: Sym) -> Sym {
+        match self.interner.name(n).strip_prefix("%hidden:") {
+            Some(m) => {
+                let m = m.to_string();
+                self.interner.intern(&m)
+            }
+            None => n,
+        }
+    }
+
     /// Module type `a` ≤ `b`: each abstract type of `b`'s an abstract type
     /// of `a`'s (paired as a `poly`'s binders are) or a transparent one
     /// (`b`'s abstract type is then what `a` says it is); each description
@@ -3808,6 +3820,10 @@ impl Checker {
         if aa.iter().any(|(n, _)| db.iter().any(|(m, _)| m == n)) || va.len() != vb.len() || va.iter().zip(vb).any(|((n, _), (m, _))| n != m) {
             return false;
         }
+        // An abstract type a type restricted to other names keeps unnamed,
+        // `%hidden:t` (`restrict`), is still `t`'s.
+        let bare = |c: &mut Self, ps: &[(Sym, DVar)]| -> Vec<(Sym, DVar)> { ps.iter().map(|(n, v)| (c.bare_name(*n), *v)).collect() };
+        let (aa, ab) = (&bare(self, aa), &bare(self, ab));
         let mut inner = env.clone();
         for (i, (n, y)) in ab.iter().enumerate() {
             match aa.iter().find(|(m, _)| m == n) {
