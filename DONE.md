@@ -3496,3 +3496,7 @@ Heist found"); A is §134.
   (`modules/include-in-file.fx`, `include-in-params-file.fx`). Found with
   it, not fixed: a file's item using an included *value* compiles to other
   words in the compiler written in FX-26 (`TODO.md` §133).
+- **E: `fixpt run`'s loads** are from each program file's directory, as
+  `fixpt eval`'s and `,load`'s are; it had used the current directory.
+  The docs said neither that nor that a loaded file's own loads are from
+  its directory, and now say both (`fixpt-cli/tests/run_loads.rs`).

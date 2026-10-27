@@ -700,7 +700,13 @@ fn run_files_in(session: &mut Fx26Session, files: &[String], args: &[String]) ->
         };
         // A file is a whole program: its definitions may come in any order.
         warn_types_again(&session, f, &text, &forms);
-        let outs = match session.run_forms(&forms) {
+        // A load's path is from the directory of the file it is in, as
+        // `fixpt eval`'s and `,load`'s are.
+        let dir = std::path::Path::new(f).parent().map(|d| d.to_path_buf());
+        let outer = std::mem::replace(&mut session.checker.base_dir, dir);
+        let ran = session.run_forms(&forms);
+        session.checker.base_dir = outer;
+        let outs = match ran {
             Ok(outs) => outs,
             Err(e) => {
                 eprintln!("fixpt: {}", located(f, &text, &e));
