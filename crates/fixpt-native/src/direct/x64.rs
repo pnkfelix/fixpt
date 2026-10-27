@@ -46,6 +46,9 @@ use fixpt_heap::Value;
 use std::mem::offset_of;
 
 pub(super) const RESULT: Reg = RAX;
+/// The most fields `make-array` and `rmake-array` make in line; a longer
+/// array is made by calling out.
+pub(super) const ARRAY_INLINE: usize = 16;
 /// The closure called, as the call enters it.
 pub(super) const CLO: Reg = RBX;
 pub(super) const ST: Reg = R15;
@@ -1734,8 +1737,10 @@ impl Compiling<'_> {
                         a.e(lea(X11, mi(X9, X14, 8, 0)));
                         a.e(store(m(X13, 0), X16));
                     };
-                    // `rcons`: in the region's current chunk, as `procedure`'s.
-                    if prim_is("%region-cons", 3) {
+                    // The region in `r1`'s slot in the heap's table (at
+                    // X13, its fill in X14), when it has one: else `slow`,
+                    // as for `#f`, the heap's.
+                    let region_slot = |a: &mut Asm| {
                         a.e(test_imm(r1, 7));
                         a.jcc(Cond::Ne, slow);
                         a.e(cmp_imm(r1, 8 * fixpt_heap::heap::REGION_SLOTS as i32));
@@ -1743,16 +1748,108 @@ impl Compiling<'_> {
                         a.e(load(X13, st(offset_of!(DState, region_table))));
                         a.e(lea(X13, mi(X13, r1, 2, 0)));
                         a.e(load(X14, m(X13, 0)));
-                        a.e(lea(X16, m(X14, 2)));
+                    };
+                    // Room in that region's current chunk to the fill in
+                    // X16: at X11, the fill bumped; else `slow` (a region
+                    // with no chunk has fill and end 0). Uses X9.
+                    let region_room = |a: &mut Asm| {
                         a.e(alu_rm(Alu::Cmp, X16, m(X13, 8)));
                         a.jcc(Cond::A, slow);
                         a.e(load(X9, st(offset_of!(DState, words))));
                         a.e(lea(X11, mi(X9, X14, 8, 0)));
+                        a.e(store(m(X13, 0), X16));
+                    };
+                    // `rcons`: in the region's current chunk, as `procedure`'s.
+                    if prim_is("%region-cons", 3) {
+                        region_slot(&mut a);
+                        a.e(lea(X16, m(X14, 2)));
+                        region_room(&mut a);
                         a.e(store(m(X11, 0), r2));
                         a.e(store(m(X11, 8), r3));
-                        a.e(store(m(X13, 0), X16));
                         a.e(lea(RESULT, m(X11, fixpt_heap::value::TAG_PAIR as i32)));
                         a.jmp(done);
+                    }
+                    // A box of `v` at X11, its room had: header, field,
+                    // trailer.
+                    let box_at = |a: &mut Asm, v: Reg| {
+                        a.imm(X15, fixpt_heap::value::make_header(fixpt_heap::ObjType::Box as u8, 2, 0));
+                        a.e(store(m(X11, 0), X15));
+                        a.e(store(m(X11, 8), v));
+                        a.imm(X15, fixpt_heap::layout::T_DISTANCE.put(fixpt_heap::value::TAG_TRAILER, 2));
+                        a.e(store(m(X11, 16), X15));
+                        a.e(lea(RESULT, m(X11, 24 + fixpt_heap::value::TAG_BLOBLET as i32)));
+                        a.jmp(done);
+                    };
+                    // An array of `8n` (in `r2`, at most `ARRAY_INLINE`
+                    // fields) at X11, its room had, each field `r3`: a
+                    // bloblet of `n + 1` fields, the trailer one of them,
+                    // whose header and trailer `8n` gives. Uses X9, X15, X17.
+                    let array_at = |a: &mut Asm| {
+                        a.e(mov(X15, r2));
+                        a.e(shift_imm(Shift::Shl, X15, (fixpt_heap::layout::H_FIELDS.lo - 3) as u8));
+                        a.imm(X17, fixpt_heap::value::make_header(const { fixpt_heap::layout::kind("bloblet") }, 1, 0));
+                        a.e(add(X15, X17));
+                        a.e(store(m(X11, 0), X15));
+                        a.e(lea(X15, m(r2, 8 + fixpt_heap::value::TAG_TRAILER as i32)));
+                        a.e(store(mi(X11, r2, 1, 8), X15));
+                        let (fill, filled) = (a.label(), a.label());
+                        a.e(mov(X9, r2));
+                        a.bind(fill);
+                        a.e(test(X9, X9));
+                        a.jcc(Cond::E, filled);
+                        a.e(store(mi(X11, X9, 1, 0), r3));
+                        a.e(sub_imm(X9, 8));
+                        a.jmp(fill);
+                        a.bind(filled);
+                        a.e(lea(RESULT, mi(X11, r2, 1, 16 + fixpt_heap::value::TAG_BLOBLET as i32)));
+                        a.jmp(done);
+                    };
+                    // `8n` in `r2` a length to make in line: else `slow`.
+                    let array_words = |a: &mut Asm| {
+                        a.e(test_imm(r2, 7));
+                        a.jcc(Cond::Ne, slow);
+                        a.e(cmp_imm(r2, 8 * ARRAY_INLINE as i32));
+                        a.jcc(Cond::A, slow);
+                    };
+                    // `new` (`%make-box`), in the heap.
+                    if prim_is("%make-box", 1) {
+                        bump(&mut a, 3);
+                        box_at(&mut a, r1);
+                    }
+                    // `make-array` (`%make-bloblet-filled`, no suffix), in the
+                    // heap: as `rmake-array`.
+                    if prim_is("%make-bloblet-filled", 3) {
+                        a.e(test(r1, r1));
+                        a.jcc(Cond::Ne, slow);
+                        array_words(&mut a);
+                        a.e(load(X13, st(offset_of!(DState, top))));
+                        a.e(load(X14, m(X13, 0)));
+                        a.e(mov(X15, r2));
+                        a.e(shift_imm(Shift::Shr, X15, 3));
+                        a.e(lea(X16, mi(X14, X15, 1, 2)));
+                        a.e(alu_rm(Alu::Cmp, X16, st(offset_of!(DState, alloc_limit))));
+                        a.jcc(Cond::A, slow);
+                        a.e(load(X9, st(offset_of!(DState, words))));
+                        a.e(lea(X11, mi(X9, X14, 8, 0)));
+                        a.e(store(m(X13, 0), X16));
+                        array_at(&mut a);
+                    }
+                    // `rnew`: a box in the region's chunk, as register code's.
+                    if prim_is("%region-new", 2) {
+                        region_slot(&mut a);
+                        a.e(lea(X16, m(X14, 3)));
+                        region_room(&mut a);
+                        box_at(&mut a, r2);
+                    }
+                    // `rmake-array` there.
+                    if prim_is("%region-make-array", 3) {
+                        array_words(&mut a);
+                        region_slot(&mut a);
+                        a.e(mov(X15, r2));
+                        a.e(shift_imm(Shift::Shr, X15, 3));
+                        a.e(lea(X16, mi(X14, X15, 1, 2)));
+                        region_room(&mut a);
+                        array_at(&mut a);
                     }
                     // A raw `f64` to store is boxed only if the call-out
                     // must do it.
@@ -3978,6 +4075,7 @@ fn fx26_direct_layout() -> (String, String) {
         ("d-global-writes", GLOBAL_WRITES as i64, "a global's field"),
         ("d-regs", fixpt_heap::layout::regcode::REGS as i64, "registers of register code"),
         ("d-region-slots", fixpt_heap::heap::REGION_SLOTS as i64, "regions with a slot in the heap's table"),
+        ("d-array-inline", ARRAY_INLINE as i64, "the most fields of an array made in line"),
         ("d-tag-pair", TAG_PAIR as i64, "a tag"),
         ("d-tag-suffix-ref", TAG_SUFFIX_REF as i64, "a tag"),
         ("d-tag-bloblet", TAG_BLOBLET as i64, "a tag"),

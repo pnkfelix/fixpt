@@ -233,7 +233,9 @@
             (val df-suffix-set (subr da-assembles (int int) unit))
             (val df-bytes-set (subr da-assembles (int int) unit))
             (val df-flat-set (subr da-assembles (int int bool) unit))
-            (val df-shape-fast (subr da-assembles (string int) bool))))
+            (val df-shape-fast (subr da-assembles (string int) bool))
+            (val df-bump (subr da-assembles (int int) unit))
+            (val df-alloc (subr da-assembles (string int int int) unit))))
 
 ;;; ------------------------------------------------------------ the procedure
 

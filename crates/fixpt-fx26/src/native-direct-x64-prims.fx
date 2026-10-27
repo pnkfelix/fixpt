@@ -596,19 +596,9 @@
                (lambda (l k) (if (= k 0) (car l) (nth (cdr l) (- k 1))))))
       (da-fail (nth (get dp-errors) (array-ref (get dp-a) i))))))
 
-;; Room for `n` words from the heap's free space, short of the
+;; Room for `n` words from the heap's free space (`df-bump`), short of the
 ;; collection's threshold: at X11, the free space bumped; else `slow`.
-(define dq-bump (subr da-assembles (int int) unit)
-  (lambda (n slow)
-    (begin
-      (da-ld d-x13 d-st d-st-top)
-      (da-ld d-x14 d-x13 0)
-      (da-e (x86-lea d-x16 d-x14 n))
-      (da-e (x86-alu-rm da-cmp d-x16 d-st d-st-alloc-limit))
-      (da-jcc da-c-a slow)
-      (da-ld d-x9 d-st d-st-words)
-      (da-e (x86-lea-ix d-x11 d-x9 d-x14 8 0))
-      (da-sto d-x13 0 d-x16))))
+(define dq-bump df-bump)
 ;; Fields REG2…REGn of the bloblet of `total` fields at X11 (uses X17).
 (define dq-fields-from (subr da-assembles (int int int) unit)
   (lambda (j n total)
@@ -679,8 +669,8 @@
   (lambda (c kind pname arity raw-store slow done)
     (let ((r1 dq-r1) (r2 dq-r2))
       (begin
-        ;; `rcons`: in the region's current chunk.
-        (if (dq-prim-is? c "%region-cons" 3) (dq-region-cons slow done) #u)
+        ;; `rcons`, `new`, `make-array`, `rnew` and `rmake-array`.
+        (df-alloc pname arity slow done)
         (if (dq-prim-is? c "%fx26-flatarray-set!" 3) (df-flat-set slow done raw-store) #u)
         (if (dq-prim-is? c "%fx26-bytevector-u8-set!" 3) (df-bytes-set slow done) #u)
         (if (dq-prim-is? c "%fx26-suffix-ref-set!" 3) (df-suffix-set slow done) #u)
@@ -856,28 +846,6 @@
         (da-bind no)
         (da-imm d-result d-false)
         (da-bind end)))))
-
-(define dq-region-cons (subr da-assembles (int int) unit)
-  (lambda (slow done)
-    (let ((r1 dq-r1))
-      (begin
-        (da-e (x86-test-imm r1 7))
-        (da-jcc da-c-ne slow)
-        (da-e (x86-alu-imm da-cmp r1 (* 8 d-region-slots)))
-        (da-jcc da-c-ae slow)
-        (da-ld d-x13 d-st d-st-region-table)
-        (da-e (x86-lea-ix d-x13 d-x13 r1 2 0))
-        (da-ld d-x14 d-x13 0)
-        (da-e (x86-lea d-x16 d-x14 2))
-        (da-e (x86-alu-rm da-cmp d-x16 d-x13 8))
-        (da-jcc da-c-a slow)
-        (da-ld d-x9 d-st d-st-words)
-        (da-e (x86-lea-ix d-x11 d-x9 d-x14 8 0))
-        (da-sto d-x11 0 dq-r2)
-        (da-sto d-x11 8 dq-r3)
-        (da-sto d-x13 0 d-x16)
-        (da-e (x86-lea d-result d-x11 d-tag-pair))
-        (da-jmp done)))))
 
 ;; `int`'s bit operations of fixnums.
 (define dq-bitwise (subr da-assembles (string int int int) unit)

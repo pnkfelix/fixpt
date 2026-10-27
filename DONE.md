@@ -3623,3 +3623,26 @@ and 3" of names, lines and values; this is the first.
   cycles 12.43-12.53G against 12.23-12.29G.
 - **Verified by hand** in gdb 12.1 and lldb: `bt` from compiled code to
   `main`, `b go`, `x/i`. What is not: `docs/research/debugging.md`.
+
+## 141. `new`, `make-array`, `rnew` and `rmake-array` in line in native code on x86_64 (2026-10-27)
+
+Heist's request (`heist/docs/requests/fixpt-region-alloc-inline.md`).
+
+- **Both x86_64 compilers**: `direct/x64.rs` (`box_at`, `array_at`,
+  `region_slot`, `region_room`) and `native-direct-x64-flat.fx` (`df-alloc`
+  and its helpers), byte for byte (`tests/native_x64.rs`); `rcons` now
+  shares the region's helpers.
+- **Arrays of at most 16 fields** (`ARRAY_INLINE`, `d-array-inline`) in
+  line, filled by a loop; longer ones, and any whose length is not a
+  fixnum, call out as before.
+- **What the request named and what was slow**: it named the region
+  primitives, but `new` and `make-array` at a region variable (s7st's
+  `@sc`) are the heap's, `%make-box` and `%make-bloblet-filled`; both are
+  done.
+- **Heist's benchmark**: `make-array 3` 440 → 52–62 ms, `new` 290–320 →
+  34–37 ms per 10 million.
+- **Stage 0's fixed cost**: 28.38G instructions against 28.68G; cycles
+  12.27-12.37G against 12.40G.
+- **Not done**: arm64 (`direct.rs`), which cannot be run here.
+- **Test**: `programs/run/alloc-in-line.fx`, every length either side of
+  16, in the heap and in a region.

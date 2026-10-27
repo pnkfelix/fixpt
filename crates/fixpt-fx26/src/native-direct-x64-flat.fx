@@ -709,4 +709,135 @@
         (else
          (let ((ks (df-shape-kinds name)))
            (if (null? ks) #f (begin (df-shape-kind name ks slow) #t))))))))
+;;; ------------------------------------------------------------ allocation
+;;; `procedure_x64`'s allocations in line: `rcons`, `new`, `make-array`,
+;;; `rnew` and `rmake-array`, as its `region_slot` to `array_at`.
+
+;; Room for `n` words from the heap's free space, short of the collection's
+;; threshold: at X11, the free space bumped; else `slow` (`bump`).
+(define df-bump (subr da-assembles (int int) unit)
+  (lambda (n slow)
+    (begin
+      (da-ld d-x13 d-st d-st-top)
+      (da-ld d-x14 d-x13 0)
+      (da-e (x86-lea d-x16 d-x14 n))
+      (da-e (x86-alu-rm da-cmp d-x16 d-st d-st-alloc-limit))
+      (da-jcc da-c-a slow)
+      (da-ld d-x9 d-st d-st-words)
+      (da-e (x86-lea-ix d-x11 d-x9 d-x14 8 0))
+      (da-sto d-x13 0 d-x16))))
+;; The region in REG1's slot in the heap's table, at X13, its fill in X14;
+;; else `slow`, as for `#f`, the heap's.
+(define df-region-slot (subr da-assembles (int) unit)
+  (lambda (slow)
+    (begin
+      (da-e (x86-test-imm d-rdi 7))
+      (da-jcc da-c-ne slow)
+      (df-cmp-imm d-rdi (* 8 d-region-slots))
+      (da-jcc da-c-ae slow)
+      (da-ld d-x13 d-st d-st-region-table)
+      (da-e (x86-lea-ix d-x13 d-x13 d-rdi 2 0))
+      (da-ld d-x14 d-x13 0))))
+;; Room in that region's chunk to the fill in X16: at X11, the fill bumped;
+;; else `slow`.
+(define df-region-room (subr da-assembles (int) unit)
+  (lambda (slow)
+    (begin
+      (da-e (x86-alu-rm da-cmp d-x16 d-x13 8))
+      (da-jcc da-c-a slow)
+      (da-ld d-x9 d-st d-st-words)
+      (da-e (x86-lea-ix d-x11 d-x9 d-x14 8 0))
+      (da-sto d-x13 0 d-x16))))
+;; A box of `v` at X11, its room had.
+(define df-box-at (subr da-assembles (int int) unit)
+  (lambda (v done)
+    (begin
+      (da-imm d-x15 (da-header d-kind-box 2 0))
+      (da-sto d-x11 0 d-x15)
+      (da-sto d-x11 8 v)
+      (da-imm d-x15 (da-trailer 2))
+      (da-sto d-x11 16 d-x15)
+      (da-e (x86-lea d-result d-x11 (+ 24 d-tag-bloblet)))
+      (da-jmp done))))
+;; An array of `8n` (REG2) at X11, its room had, each field REG3.
+(define df-array-at (subr da-assembles (int) unit)
+  (lambda (done)
+    (begin
+      (da-mov d-x15 d-rsi)
+      (df-shl d-x15 (- d-h-fields-lo 3))
+      (da-imm d-x17 (da-header d-kind-bloblet 1 0))
+      (df-add d-x15 d-x17)
+      (da-sto d-x11 0 d-x15)
+      (da-e (x86-lea d-x15 d-rsi (+ 8 d-tag-trailer)))
+      (da-e (x86-store-ix d-x11 d-rsi 1 8 d-x15))
+      (let* ((fill (da-label)) (filled (da-label)))
+        (begin
+          (da-mov d-x9 d-rsi)
+          (da-bind fill)
+          (da-e (x86-test d-x9 d-x9))
+          (da-jcc da-c-e filled)
+          (da-e (x86-store-ix d-x11 d-x9 1 0 d-r8))
+          (df-sub-imm d-x9 8)
+          (da-jmp fill)
+          (da-bind filled)))
+      (da-e (x86-lea-ix d-result d-x11 d-rsi 1 (+ 16 d-tag-bloblet)))
+      (da-jmp done))))
+;; `8n` in REG2 a length to make in line: else `slow`.
+(define df-array-words (subr da-assembles (int) unit)
+  (lambda (slow)
+    (begin
+      (da-e (x86-test-imm d-rsi 7))
+      (da-jcc da-c-ne slow)
+      (df-cmp-imm d-rsi (* 8 d-array-inline))
+      (da-jcc da-c-a slow))))
+;; The words of the array of `8n` in REG2, `n + 2`, past the fill in X14,
+;; in X16.
+(define df-array-end (subr da-assembles () unit)
+  (lambda ()
+    (begin
+      (da-mov d-x15 d-rsi)
+      (df-shr d-x15 3)
+      (da-e (x86-lea-ix d-x16 d-x14 d-x15 1 2)))))
+;; The primitive `pname` of `n` arguments made in line, if it is one of these.
+(define df-alloc (subr da-assembles (string int int int) unit)
+  (lambda (pname n slow done)
+    (cond ((and (string=? pname "%region-cons") (= n 3))
+           (begin
+             (df-region-slot slow)
+             (da-e (x86-lea d-x16 d-x14 2))
+             (df-region-room slow)
+             (da-sto d-x11 0 d-rsi)
+             (da-sto d-x11 8 d-r8)
+             (da-e (x86-lea d-result d-x11 d-tag-pair))
+             (da-jmp done)))
+          ((and (string=? pname "%make-box") (= n 1))
+           (begin (df-bump 3 slow) (df-box-at d-rdi done)))
+          ((and (string=? pname "%make-bloblet-filled") (= n 3))
+           (begin
+             (da-e (x86-test d-rdi d-rdi))
+             (da-jcc da-c-ne slow)
+             (df-array-words slow)
+             (da-ld d-x13 d-st d-st-top)
+             (da-ld d-x14 d-x13 0)
+             (df-array-end)
+             (da-e (x86-alu-rm da-cmp d-x16 d-st d-st-alloc-limit))
+             (da-jcc da-c-a slow)
+             (da-ld d-x9 d-st d-st-words)
+             (da-e (x86-lea-ix d-x11 d-x9 d-x14 8 0))
+             (da-sto d-x13 0 d-x16)
+             (df-array-at done)))
+          ((and (string=? pname "%region-new") (= n 2))
+           (begin
+             (df-region-slot slow)
+             (da-e (x86-lea d-x16 d-x14 3))
+             (df-region-room slow)
+             (df-box-at d-rsi done)))
+          ((and (string=? pname "%region-make-array") (= n 3))
+           (begin
+             (df-array-words slow)
+             (df-region-slot slow)
+             (df-array-end)
+             (df-region-room slow)
+             (df-array-at done)))
+          (else #u))))
 )))

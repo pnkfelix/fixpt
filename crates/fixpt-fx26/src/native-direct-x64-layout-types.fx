@@ -80,6 +80,7 @@
             (val d-global-writes int)
             (val d-regs int)
             (val d-region-slots int)
+            (val d-array-inline int)
             (val d-tag-pair int)
             (val d-tag-suffix-ref int)
             (val d-tag-bloblet int)

@@ -80,6 +80,7 @@
 (define d-global-writes int 4)  ; a global's field
 (define d-regs int 8)  ; registers of register code
 (define d-region-slots int 256)  ; regions with a slot in the heap's table
+(define d-array-inline int 16)  ; the most fields of an array made in line
 (define d-tag-pair int 1)  ; a tag
 (define d-tag-suffix-ref int 2)  ; a tag
 (define d-tag-bloblet int 4)  ; a tag

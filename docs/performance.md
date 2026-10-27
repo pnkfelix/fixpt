@@ -2975,3 +2975,31 @@ Left: the image of the kept front end read into a buffer and then copied
 into the heap (`image::load`), which a mapping of the file could do with
 neither; and the cellular machine's code space, collected by copying into
 pages first written then.
+
+## References and arrays made in line natively (2026-10-27)
+
+Heist's request (s7st, its R7RS interpreter, makes a frame of slots per
+call and two references per pair): the native convention on x86_64 called
+out to Rust for every `new` and `make-array`, some 30 and 45 ns each,
+against 2–4 ns for a sum made in line. Both compilers (`direct/x64.rs`,
+`native-direct-x64-flat.fx`'s `df-alloc`) now make them in line:
+
+- **`new`** (`%make-box`), from the heap's free space as `cons`;
+- **`make-array`** (`%make-bloblet-filled` of no suffix) of at most 16
+  fields (`ARRAY_INLINE`), its header and trailer from the length, its
+  fields stored by a loop; a longer one calls out;
+- **`rnew` and `rmake-array`** likewise in a region's current chunk, as
+  `rcons` already was, calling out when the chunk is full or the region
+  has no slot in the table.
+
+Heist's `region-alloc.fx`, 10 million of each (ms), on
+`fx-regs-rsjit-nativecc`:
+
+| per iteration        | before | after |
+| -------------------- | -----: | ----: |
+| `(make-array 3 …)`   |    440 |  52–62 |
+| `(new …)`            |    290–320 |  34–37 |
+
+The same on `fx-regs-fxjit-nativecc`. Its `@sc` is a region variable, not
+a place: what it measures is the heap's two, which is what s7st uses too.
+arm64's back end (`direct.rs`) is not done: nothing here runs arm64 code.

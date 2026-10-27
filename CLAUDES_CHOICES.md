@@ -2210,3 +2210,14 @@ The user: "Yeah do 1, 2, and 3" (names, lines, values). Names first.
   sees frames only once the program goes on to a time slice.
 - **On by default**, `FIXPT_JIT_DEBUG` to change it: a debugger is most
   wanted where nobody planned for it.
+
+## Allocation in line natively, for Heist (2026-10-27)
+
+- **The heap's too, not only the region's**: the benchmark and s7st make
+  references and arrays at a region variable, which allocates in the heap
+  (`%make-box`, `%make-bloblet-filled`); the region primitives the request
+  named would not have changed its numbers. Both are done.
+- **16 fields in line**, a loop storing them: s7st's frames are under 8;
+  the loop keeps the code short for every length.
+- **arm64 left** (TODO §136): untestable here, and a mistake there would
+  corrupt the heap.
