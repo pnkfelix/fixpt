@@ -22,3 +22,14 @@ fn fx_files_stay_within_their_limits() {
     let wrong = check(&files, &debt);
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
+
+/// A test program's first line, its expectation, may be any width; no other
+/// line may.
+#[test]
+fn an_expectation_line_may_be_wide() {
+    let wide = "x".repeat(120);
+    assert_eq!(Size::of(&format!(";; ! {wide}\n(f)\n")).long, 0);
+    assert_eq!(Size::of(&format!(";; => {wide}\n")).long, 0);
+    assert_eq!(Size::of(&format!("(f)\n;; ! {wide}\n")).long, 1);
+    assert_eq!(Size::of(&format!(";; {wide}\n")).long, 1);
+}

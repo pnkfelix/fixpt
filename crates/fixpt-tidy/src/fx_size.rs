@@ -11,6 +11,11 @@
 //! for good, each by a line `exempt PREFIX` there (the user's, 2026-09-29):
 //! benchmarks that are one file by design, and test inputs whose size is
 //! their point.
+//!
+//! A test program's first line, when it says what the program gives or
+//! how it is refused (`;; => …`, `;; ! …`), may be any width (the user's,
+//! 2026-10-27): it quotes a value or a message as said, which no factoring
+//! shortens.
 
 use std::path::{Path, PathBuf};
 
@@ -30,7 +35,9 @@ pub struct Size {
 impl Size {
     pub fn of(text: &str) -> Size {
         let lines: Vec<&str> = text.lines().collect();
-        Size { lines: lines.len(), long: lines.iter().filter(|l| l.chars().count() > MAX_COLUMNS).count() }
+        let expected = |i: usize, l: &str| i == 0 && (l.starts_with(";; => ") || l.starts_with(";; ! "));
+        let long = lines.iter().enumerate().filter(|(i, l)| !expected(*i, l) && l.chars().count() > MAX_COLUMNS).count();
+        Size { lines: lines.len(), long }
     }
 
     /// Within the limits.
