@@ -134,10 +134,12 @@ pub trait Helpful {
     fn describe(&mut self, name: &str) -> Vec<String>;
     fn apropos(&mut self, pattern: &str) -> Vec<String>;
     /// `None` when the dialect has no types to search.
-    fn fits(&mut self, _type_text: &str) -> Option<Vec<String>> {
+    /// `None` when the dialect cannot search; `Some(Err(why))` when it can,
+    /// but the type given is not one here.
+    fn fits(&mut self, _type_text: &str) -> Option<Result<Vec<String>, String>> {
         None
     }
-    fn returns(&mut self, _type_text: &str) -> Option<Vec<String>> {
+    fn returns(&mut self, _type_text: &str) -> Option<Result<Vec<String>, String>> {
         None
     }
 }
@@ -153,7 +155,8 @@ pub fn answer(h: &mut dyn Helpful, ask: &Ask) {
             show("", h.apropos(p), &format!("no name contains `{p}`"))
         }
         Ask::Fits(t) => match h.fits(t) {
-            Some(lines) => show(
+            Some(Err(why)) => println!("; {why}"),
+            Some(Ok(lines)) => show(
                 &format!("what accepts a value of type {t}:"),
                 lines,
                 "nothing in the environment accepts one",
@@ -165,7 +168,8 @@ pub fn answer(h: &mut dyn Helpful, ask: &Ask) {
             ),
         },
         Ask::Returns(t) => match h.returns(t) {
-            Some(lines) => show(
+            Some(Err(why)) => println!("; {why}"),
+            Some(Ok(lines)) => show(
                 &format!("what produces a value of type {t}:"),
                 lines,
                 "nothing in the environment produces one",

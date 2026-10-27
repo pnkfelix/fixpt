@@ -267,16 +267,20 @@ impl crate::help::Helpful for Fx87Session {
         out
     }
 
-    fn fits(&mut self, type_text: &str) -> Option<Vec<String>> {
-        let ty = read_type(self, type_text)?;
+    fn fits(&mut self, type_text: &str) -> Option<Result<Vec<String>, String>> {
+        let Some(ty) = read_type(self, type_text) else {
+            return Some(Err(format!("`{type_text}` is not a type here")));
+        };
         let found = self.checker.accepting(ty, 0);
-        Some(render(self, found))
+        Some(Ok(render(self, found)))
     }
 
-    fn returns(&mut self, type_text: &str) -> Option<Vec<String>> {
-        let ty = read_type(self, type_text)?;
+    fn returns(&mut self, type_text: &str) -> Option<Result<Vec<String>, String>> {
+        let Some(ty) = read_type(self, type_text) else {
+            return Some(Err(format!("`{type_text}` is not a type here")));
+        };
         let found = self.checker.returning(ty);
-        Some(render(self, found))
+        Some(Ok(render(self, found)))
     }
 }
 

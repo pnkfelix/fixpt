@@ -1337,14 +1337,20 @@ impl crate::help::Helpful for Checker {
         out
     }
 
-    fn fits(&mut self, type_text: &str) -> Option<Vec<String>> {
-        let want = self.type_of_str(type_text).ok()?;
-        Some(self.search(|c, params, _| params.first().is_some_and(|p| c.subtype(want, *p))))
+    fn fits(&mut self, type_text: &str) -> Option<Result<Vec<String>, String>> {
+        let want = match self.type_of_str(type_text) {
+            Ok(t) => t,
+            Err(e) => return Some(Err(e.message)),
+        };
+        Some(Ok(self.search(|c, params, _| params.first().is_some_and(|p| c.subtype(want, *p)))))
     }
 
-    fn returns(&mut self, type_text: &str) -> Option<Vec<String>> {
-        let want = self.type_of_str(type_text).ok()?;
-        Some(self.search(|c, _, result| c.subtype(result, want)))
+    fn returns(&mut self, type_text: &str) -> Option<Result<Vec<String>, String>> {
+        let want = match self.type_of_str(type_text) {
+            Ok(t) => t,
+            Err(e) => return Some(Err(e.message)),
+        };
+        Some(Ok(self.search(|c, _, result| c.subtype(result, want))))
     }
 }
 
@@ -1701,10 +1707,12 @@ mod commands {
     fn describe_and_search() {
         let mut c = Checker::new();
         assert_eq!(c.describe("+"), ["+ : (subr pure (int int) int)"]);
-        let returns = c.returns("bool").expect("typed");
+        let returns = c.returns("bool").expect("typed").expect("a type");
         assert!(returns.iter().any(|l| l.starts_with("= :")), "{returns:?}");
-        let fits = c.fits("int").expect("typed");
+        let fits = c.fits("int").expect("typed").expect("a type");
         assert!(fits.iter().any(|l| l.starts_with("+ :")), "{fits:?}");
+        let why = c.returns("no-such-type").expect("typed").expect_err("not a type");
+        assert!(why.contains("no-such-type"), "{why}");
     }
 
     #[test]
