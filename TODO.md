@@ -3262,3 +3262,17 @@ identity, `(start end k)`, or the `%include` item's place after the item
 that says the file). Repro: a file `(include (load-module "c.fx"))
 (define z (subr (alloc @heap) () (ref int @heap)) mk)`, `c.fx` defining
 `mk`; loaded by a program in `programs/modules`.
+
+## 134. `load-typeof` and `load-input-typeof`: a file's value's type (2026-10-27)
+
+Beside `load-moduleof` and `load-input-moduleof` (`DONE.md` §136), which
+give the signature of an *instance*, applying a file of parameters' maker
+and promising a module: the type of the file's *value*, given only the
+arguments written, nothing applied for them, any type. Wanted for a maker
+itself as a parameter, `(poly ((ed region) (world effect)) (subr (alloc
+ed) () (moduleof …)))`, so that a functor can make instances of its own
+(a scheduler per editor window, say); for a file whose value is one
+procedure; and for a file of data whose type is not named elsewhere. No
+client needs one yet (the user, 2026-10-27: noted for when one does). The
+same walk as `type_made` and `check-read-made.fx`'s, without the
+application of a procedure of no parameters and the check for a module.
