@@ -1,4 +1,4 @@
-//! Specifications in procedure types: `(subr E ((x int) …) Q (requires
+//! Specifications in procedure types: `(subr E ((x : int) …) Q (requires
 //! p) (ensures r q))` (`docs/research/typed-cellular-code.md`, §8). The
 //! checker reads them, sees that they speak of integers and booleans of
 //! the procedure's own, and carries them in its type; within another

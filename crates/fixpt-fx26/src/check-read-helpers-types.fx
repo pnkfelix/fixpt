@@ -267,6 +267,11 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @s) (read @t) spin)
                        (syn)
                        k-names))
+            (val k-misnamed-param
+                 (subr (maxeff (alloc @t) (goto @z) (read @globals) (read @s) (read @t) (write @t)
+                               spin)
+                       (syn k-syns)
+                       unit))
             (val k-param-selects
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (k-selects k-names)

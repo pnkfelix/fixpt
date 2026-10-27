@@ -53,7 +53,7 @@ the logic's functions are (question 4).
 ## 2. What there is now
 
 - **Specifications in procedure types** (`typed-cellular-code.md` §8,
-  `specs.rs`): `(subr E ((x int) …) T (requires p) (ensures r q))`,
+  `specs.rs`): `(subr E ((x : int) …) T (requires p) (ensures r q))`,
   over the procedure's own `int`s and `nat`s, its `bool`s, shapes,
   certifications, and the connectives. Both checkers read them and
   compare two by behavioural subtyping; neither proves anything of a
@@ -73,11 +73,11 @@ So, in `tests/programs/specs`, these two come out the same:
 
 ```
 ;; wrong-ensures.fx: false (abs returns x itself where x < 0)
-(define abs (subr pure ((x int)) int (ensures r (<= 0 r)))
+(define abs (subr pure ((x : int)) int (ensures r (<= 0 r)))
   (lambda (x) (if (< x 0) x (- 0 x))))
 
 ;; square.fx: true, but x·x is beyond Fourier–Motzkin
-(define square (subr pure ((x int)) int (ensures r (<= 0 r)))
+(define square (subr pure ((x : int)) int (ensures r (<= 0 r)))
   (lambda (x) (* x x)))
 ```
 
@@ -99,7 +99,7 @@ specification is true but too weak, the assumption lets the recursive
 call return values the real procedure never does:
 
 ```
-(define k (subr (maxeff (read (globals k)) spin) ((n int)) int
+(define k (subr (maxeff (read (globals k)) spin) ((n : int)) int
             (requires (<= 0 n))
             (ensures r (<= 0 r)))
   (lambda (n) (if (= n 0) 0 (+ (* 2 (k (- n 1))) (- 2 n)))))

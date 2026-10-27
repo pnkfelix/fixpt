@@ -23,7 +23,7 @@
         (lambda (g xs) (if (null? xs) nil (cons (g (car xs)) ((proj fmap a b) g (cdr xs))))))))))
 (define pair-up
   (subr (maxeff (read @heap) (alloc @heap) spin)
-        ((c container) ((select c f) int))
+        ((c : container) ((select c f) int))
         ((select c f) (productof (l int) (r int))))
   (lambda ((c container) (xs ((select c f) int)))
     (with c ((proj fmap int (productof (l int) (r int))) (lambda (x) (product (l x) (r x))) xs))))

@@ -9,6 +9,6 @@
     (define value (subr pure (t) int) (lambda (c) (down-t c)))))
 (define-type counters
   (moduleof (abs t type) (val zero t) (val inc (subr pure (t) t)) (val value (subr pure (t) int))))
-(define twice (subr pure ((c counters) (select c t)) (select c t))
+(define twice (subr pure ((c : counters) (select c t)) (select c t))
   (lambda (c x) (with c (inc (inc x)))))
 (with counter (value (twice counter zero)))

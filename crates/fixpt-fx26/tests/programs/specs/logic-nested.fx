@@ -8,7 +8,7 @@
   (letrec ((s (subr pure (intss) int)
              (lambda (xss) (if (null? xss) 0 (+ (if (null? (car xss)) 1 0) (s (cdr xss)))))))
     s))
-(define strip (subr (maxeff spin (read (globals strip))) ((xss intss)) intss
+(define strip (subr (maxeff spin (read (globals strip))) ((xss : intss)) intss
                 (ensures r (= (empties r) 0)))
   (lambda (xss)
     (if (null? xss)

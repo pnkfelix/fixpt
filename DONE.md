@@ -3451,3 +3451,25 @@ type and its place, module items too (`docs/fx26.md`, "Queries";
   that answer: a lambda's parameters, a `let`'s and `letrec`'s names.
 - **Not yet**: a `tagcase` arm's names and a `typecase`'s among the
   locals; an entry the REPL holds (`,pending`) among the sources.
+
+## 134. A procedure type's parameter is named `(x : T)` (the user's, 2026-10-27)
+
+- **`(x : T)`** names a parameter in a `subr`, `->` or `->*` type, for
+  later types to select from (`(subr pure ((c : sig) (select c t)) int)`)
+  and a specification's clauses to name (`(-> ((n : int)) int (requires (>
+  n 0)))`). `(h T)` is always `h` applied. Before, `(h T)` was a named
+  parameter whenever `h` was not a type name known where it was read, so
+  a family an `include` or a `with` gives, known only when the module is
+  typed, was taken for a name: `(box thing)` became a parameter `box` of
+  type `thing` (Heist's problem A). FX-91 has no such ambiguity, every
+  parameter of its `subr` being named; Typed Racket writes `[x : T]`.
+- **Errors that say what to write**, at the parameter: where what follows
+  names `h`, `` `(c …)` applies `c`, but `(select c t)` after it names `c`:
+  to name a parameter, write `(c : type)` ``; where nothing does and `h` is
+  no family, `` `n` is not a description function: … ``. In a module with
+  `include`s or a `with` body, `(h T)` that nothing after names is the
+  family applied.
+- **Printed** as written, `(x : T)`, in a type with a specification.
+- **Migrated**: Fixpt's FX-26 programs, tests, `assert` and `assume`, and
+  the reference docs (`fx26.md`, `fx26-grammar.md`).
+- **Tests**: `modules/include-family-param.fx` (Heist's), `param-misnamed*.fx`.

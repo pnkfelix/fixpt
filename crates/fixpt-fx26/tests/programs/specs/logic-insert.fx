@@ -14,7 +14,7 @@
     s))
 (define first (subr pure (ints) int) (lambda (xs) (if (null? xs) 0 (car xs))))
 (define nonempty? (subr pure (ints) bool) (lambda (xs) (pair? xs)))
-(define insert (subr (maxeff spin (read (globals insert))) ((e int) (xs ints)) ints
+(define insert (subr (maxeff spin (read (globals insert))) ((e : int) (xs : ints)) ints
                  (ensures r (and (implies (sorted? xs) (sorted? r))
                                  (or (= (first r) e)
                                      (and (nonempty? xs) (= (first r) (first xs)))))))

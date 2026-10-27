@@ -2,11 +2,11 @@
 ;;; A specified loop that uses a value from outside it, `k`: a
 ;;; specification speaks of its own procedure's parameters only, so the
 ;;; loop's says what holds whatever `k` is (each step adds 1 either way).
-(define count-past (subr spin ((k int) (n int)) int
+(define count-past (subr spin ((k : int) (n : int)) int
                      (requires (<= 0 n))
                      (ensures r (= r (+ n k))))
   (lambda (k n)
-    (letrec ((loop (subr spin ((i int) (acc int)) int
+    (letrec ((loop (subr spin ((i : int) (acc : int)) int
                      (requires (<= 0 i))
                      (ensures r (= r (+ acc i))))
                (lambda (i acc)

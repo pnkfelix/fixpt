@@ -336,18 +336,47 @@ impl Checker {
         Ok(r)
     }
 
+    /// `(subr effect (param …) result)`, or with a convention first,
+    /// `(subr (conv C) effect (param …) result)`; left out, it is the
+    /// program's (`docs/research/native-conventions.md`). Or `(-> (param …)
+    /// result)`: `(subr pure (param …) result)`. `clauses`, its
+    /// specification's, if it has one.
+    fn parse_subr_form(&mut self, s: &Syntax, items: &[Syntax], clauses: &[Syntax]) -> R<TyId> {
+        if self.head(items) == Some("->") {
+            let [_, params, result] = items else {
+                return Err(FxError::at(s.span, "`(-> (param …) result)`"));
+            };
+            return self.parse_subr_type(self.conv_default, Effect::pure(), params, result, clauses);
+        }
+        let (conv, rest) = match items {
+            [_, c, rest @ ..] if rest.len() == 3 && self.head(&self.items(c, "a convention").unwrap_or_default()) == Some("conv") => {
+                (self.parse_conv_form(c)?, rest)
+            }
+            [_, rest @ ..] => (self.conv_default, rest),
+            [] => unreachable!("a head"),
+        };
+        let [effect, params, result] = rest else {
+            return Err(FxError::at(s.span, "`(subr effect (param …) result)`"));
+        };
+        let effect = self.parse_effect(effect)?;
+        self.parse_subr_type(conv, effect, params, result, clauses)
+    }
+
     /// A procedure type's parameters and result, after its convention and
     /// effect: `(subr …)`'s and `(-> …)`'s.
-    fn parse_subr_type(&mut self, conv: Conv, effect: Effect, params: &Syntax, result: &Syntax) -> R<TyId> {
+    fn parse_subr_type(&mut self, conv: Conv, effect: Effect, params: &Syntax, result: &Syntax, clauses: &[Syntax]) -> R<TyId> {
         let ps = match &params.datum {
             Datum::Nil => Vec::new(),
             _ => self.items(params, "parameter types")?.to_vec(),
         };
-        // A parameter may be named, `(name type)`, for the types after
-        // it to select from: a dependent procedure (M5).
+        // A parameter may be named, `(name : type)`, for the types after
+        // it to select from (a dependent procedure, M5), and for a
+        // specification's clauses.
         let mut names: Vec<Option<Sym>> = Vec::new();
         let mut params = Vec::new();
-        for p in &ps {
+        for (i, p) in ps.iter().enumerate() {
+            let later: Vec<&Syntax> = ps[i + 1..].iter().chain([result]).chain(clauses).collect();
+            self.misnamed_param(p, &later)?;
             let (name, t) = match self.named_param(p) {
                 Some((n, t)) => (Some(n), t),
                 None => (None, p.clone()),
@@ -520,7 +549,7 @@ impl Checker {
     fn parse_arrow_star(&mut self, s: &Syntax) -> R<TyId> {
         let items = self.items(s, "a type")?.to_vec();
         match (self.head(&items), &items[..]) {
-            (Some("->*"), [_, params, result]) => self.parse_subr_type(self.conv_default, Effect::pure(), params, result),
+            (Some("->*"), [_, params, result]) => self.parse_subr_type(self.conv_default, Effect::pure(), params, result, &[]),
             (Some("->*"), _) => Err(FxError::at(s.span, "`(->* (param …) result)`")),
             (Some("poly"), _) => {
                 self.arrow_star = true;
@@ -642,32 +671,12 @@ impl Checker {
                 let (plain, clauses) = items.split_at(items.len() - n);
                 // (The parameters are second to last, in either form.)
                 let params = plain[plain.len() - 2].clone();
-                let plain = Syntax { datum: Datum::List { items: plain.to_vec(), tail: None }, span: s.span };
-                let t = self.parse_type_list(&plain)?;
+                let whole = Syntax { datum: Datum::List { items: plain.to_vec(), tail: None }, span: s.span };
+                let t = self.parse_subr_form(&whole, plain, clauses)?;
                 self.specified(t, &params, clauses)
             }
-            "subr" => {
-                let (conv, rest) = match &items[..] {
-                    [_, c, rest @ ..] if rest.len() == 3 && self.head(&self.items(c, "a convention").unwrap_or_default()) == Some("conv") => {
-                        (self.parse_conv_form(c)?, rest)
-                    }
-                    [_, rest @ ..] => (self.conv_default, rest),
-                    [] => unreachable!("a head"),
-                };
-                let [effect, params, result] = rest else {
-                    return Err(FxError::at(s.span, "`(subr effect (param …) result)`"));
-                };
-                let effect = self.parse_effect(effect)?;
-                self.parse_subr_type(conv, effect, params, result)
-            }
+            "subr" | "->" => self.parse_subr_form(s, &items, &[]),
             "->*" => Err(FxError::at(s.span, ARROW_STAR_ONLY)),
-            // `(-> (param …) result)`: `(subr pure (param …) result)`.
-            "->" => {
-                let [_, params, result] = &items[..] else {
-                    return Err(FxError::at(s.span, "`(-> (param …) result)`"));
-                };
-                self.parse_subr_type(self.conv_default, Effect::pure(), params, result)
-            }
             "bool" => Err(FxError::at(s.span, "`(bool …)` is a procedure's result, and only that")),
             // `(proves (<= A B))`, or `(proves (poly (binder …) (<= A B)
             // (<= X Y) …))`: the type of a proof that `A ≤ B` (given each
@@ -2410,11 +2419,44 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     /// A procedure type's parameter written `(name type)`: its name and
     /// type, where `name` names no type or type form.
     pub(crate) fn named_param(&self, p: &Syntax) -> Option<(Sym, Syntax)> {
-        let [n, t] = p.as_proper_list()? else { return None };
-        let n = n.as_symbol()?;
-        let name = self.name(n);
-        (!TYPE_FORMS.contains(&name) && !crate::top::KEYWORDS.contains(&name) && self.lookup_desc(n).is_none() && !self.base.contains_key(&n))
-            .then(|| (n, t.clone()))
+        let [n, colon, t] = p.as_proper_list()? else { return None };
+        (colon.as_symbol().map(|c| self.name(c)) == Some(":")).then_some(())?;
+        Some((n.as_symbol()?, t.clone()))
+    }
+
+    /// `(h t)`, parameter `p`, is `h` applied; refused, saying how to name
+    /// a parameter, where `h` is no description function: where `later`
+    /// (the parameters after it, the result, the specification's clauses)
+    /// names `h`, as `(select h x)` or a proposition does; or where `h` is
+    /// unknown and no module included or opened by `with` may give it.
+    fn misnamed_param(&self, p: &Syntax, later: &[&Syntax]) -> R<()> {
+        let Some([h, _]) = p.as_proper_list() else { return Ok(()) };
+        let Some(h) = h.as_symbol() else { return Ok(()) };
+        let name = self.name(h);
+        if TYPE_FORMS.contains(&name) || crate::top::KEYWORDS.contains(&name) || self.lookup_desc(h).is_some() || self.base.contains_key(&h) {
+            return Ok(());
+        }
+        let fix = format!("to name a parameter, write `({name} : type)`");
+        if let Some(used) = later.iter().find_map(|s| self.named_in(s, h)) {
+            let what = if used.is_empty() { "what follows".to_string() } else { format!("`{used}` after it") };
+            return Err(FxError::at(p.span, format!("`({name} …)` applies `{name}`, but {what} names `{name}`: {fix}")));
+        }
+        if self.include_scope == 0 && self.withs_over(h).is_empty() {
+            return Err(FxError::at(p.span, format!("`{name}` is not a description function: {fix}")));
+        }
+        Ok(())
+    }
+
+    /// Where `s` has `n` other than as a list's head: the list it is in,
+    /// shown if all of it is names, else "".
+    fn named_in(&self, s: &Syntax, n: Sym) -> Option<String> {
+        let items = s.as_proper_list()?;
+        let skip = usize::from(items.first().is_some_and(|x| x.as_symbol().is_some()));
+        if items[skip..].iter().any(|x| x.as_symbol() == Some(n)) {
+            let names: Option<Vec<&str>> = items.iter().map(|x| x.as_symbol().map(|y| self.name(y))).collect();
+            return Some(names.map_or(String::new(), |ns| format!("({})", ns.join(" "))));
+        }
+        items.iter().find_map(|x| self.named_in(x, n))
     }
 
     /// `t` with each `(select m x)` of a parameter named before it, the

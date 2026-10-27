@@ -13,7 +13,7 @@
                (or (null? xs)
                    (or (null? (cdr xs)) (and (<= (car xs) (car (cdr xs))) (s (cdr xs))))))))
     s))
-(define insert (subr (maxeff spin (read (globals insert))) ((e int) (xs ints)) ints
+(define insert (subr (maxeff spin (read (globals insert))) ((e : int) (xs : ints)) ints
                  (ensures r (implies (sorted? xs) (sorted? r))))
   (lambda (e xs)
     (if (null? xs)

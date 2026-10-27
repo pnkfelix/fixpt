@@ -38,7 +38,7 @@
       (lambda (s) (down-t s)))))
 
 (define use-three
-  (subr (maxeff (alloc @heap) (read @heap)) ((c counter-like) (select c t) int) int)
+  (subr (maxeff (alloc @heap) (read @heap)) ((c : counter-like) (select c t) int) int)
   (lambda (c s x) (with c (size (insert x s)))))
 
 (+ (use-three list-backed (with list-backed empty) 7)

@@ -5,6 +5,6 @@
 (define int-order
   (module (define-type t int)
           (define less (subr pure (t t) bool) (lambda (a b) (< a b)))))
-(define max-of (subr pure ((o ordered) (select o t) (select o t)) (select o t))
+(define max-of (subr pure ((o : ordered) (select o t) (select o t)) (select o t))
   (lambda ((o ordered) (a (select o t)) (b (select o t))) (with o (if (less a b) b a))))
 (max-of int-order 3 5)

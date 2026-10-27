@@ -5,6 +5,6 @@
 (define len (subr pure (ints) int)
   (letrec ((l (subr pure (ints) int) (lambda (xs) (if (null? xs) 0 (+ 1 (l (cdr xs)))))))
     l))
-(define twice-len (subr (read (globals len)) ((xs ints)) int (ensures r (= r (* 2 (len xs)))))
+(define twice-len (subr (read (globals len)) ((xs : ints)) int (ensures r (= r (* 2 (len xs)))))
   (lambda (xs) (+ (len xs) (len xs))))
 (twice-len (list 1 2 3))

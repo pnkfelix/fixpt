@@ -330,7 +330,7 @@ impl Checker {
                     if !clauses.is_empty() {
                         for (p, n) in ps.iter_mut().zip(&spec.params) {
                             if let Some(n) = n {
-                                *p = format!("({} {p})", self.interner.name(*n));
+                                *p = format!("({} : {p})", self.interner.name(*n));
                             }
                         }
                     }

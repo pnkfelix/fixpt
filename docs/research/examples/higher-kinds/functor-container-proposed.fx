@@ -46,6 +46,6 @@
 ;; application in a procedure's type, needing a kind-arrow `select`.
 (define double-all
   (poly ((a type))
-    (subr pure ((c container-sig) (subr pure (a) a) ((select c f) a)) ((select c f) a)))
+    (subr pure ((c : container-sig) (subr pure (a) a) ((select c f) a)) ((select c f) a)))
   (plambda ((a type))
     (lambda (c double xs) (with c (fmap double xs)))))

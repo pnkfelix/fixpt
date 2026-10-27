@@ -184,9 +184,10 @@ base-type  ::= "int" | "bool" | "char" | "string" | "unit" | "symbol" | "datum"
              | "tword" | "wcell" | "wglobal"            ; the compiler written in FX-26's
 
 subr-param ::= type
-             | "(" name type ")"     { name is no type, type form or keyword:
-                                       a named parameter, which later types may
-                                       `select` from (a dependent procedure) }
+             | "(" name ":" type ")" { a named parameter, which later types may
+                                       `select` from (a dependent procedure),
+                                       and a specification's clauses name;
+                                       `(name type)` is always `name` applied }
 
 conv-form  ::= "(" "conv" convention ")"
 

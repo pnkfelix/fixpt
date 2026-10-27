@@ -304,8 +304,8 @@ fn the_step_limit_can_be_set_or_lifted() {
 /// hold is not verified, its obligation said; one that does is.
 #[test]
 fn verify_says_which_words_verify() {
-    let bad = "(define bad (-> ((x int)) int (ensures r (<= 0 r))) (lambda (x) (if (< x 0) x (- 0 x))))";
-    let good = "(define good (-> ((x int)) int (ensures r (<= 0 r))) (lambda (x) (if (< x 0) (- 0 x) x)))";
+    let bad = "(define bad (-> ((x : int)) int (ensures r (<= 0 r))) (lambda (x) (if (< x 0) x (- 0 x))))";
+    let good = "(define good (-> ((x : int)) int (ensures r (<= 0 r))) (lambda (x) (if (< x 0) (- 0 x) x)))";
     let out = Command::new(FIXPT).args(["--dialect", "fx26", "verify", &format!("{bad} {good}")]).output().expect("runs");
     let said = String::from_utf8_lossy(&out.stdout);
     assert!(out.status.code() == Some(1), "{said}");

@@ -56,7 +56,7 @@ The proposal:
 
 A `module-parameters` file's type is `(poly ((ed region) (world effect))
 (subr pure () (moduleof …)))`. A `load-input` file that takes modules has
-type `(subr pure ((core SIG)) (moduleof … (select $1 actor) …))`, a
+type `(subr pure ((core : SIG)) (moduleof … (select $1 actor) …))`, a
 dependent subroutine (M5). Applying either at the type level is a walk
 down the type, taking arguments as it goes:
 
@@ -146,7 +146,7 @@ with `make` a `lambda` giving a module with a `define-generative t int`:
 (define-type sig (moduleof (abs t type) (val zero t) (val value (subr pure (t) int))))
 (define c1 (make))
 (define c2 (make))
-(define twice (subr pure ((c sig) (select c t)) int) …)
+(define twice (subr pure ((c : sig) (select c t)) int) …)
 (twice c1 (with c1 zero))   ; accepted: (select c t) is c1..t
 (twice c2 (with c2 zero))   ; accepted: c2..t
 (twice c1 (with c2 zero))   ; refused, both checkers:

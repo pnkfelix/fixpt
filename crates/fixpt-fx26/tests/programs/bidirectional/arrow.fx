@@ -7,6 +7,6 @@
 (define adder (-> (int) (-> (int) int)) (lambda (n) (lambda (x) (+ x n))))
 (define is-int (-> ((union int string)) (bool (then (shape 0 int)) (else))) int?)
 (define same (subr pure ((-> (int) int)) (subr pure (int) int)) (lambda (f) f))
-(define pick (-> ((v (union int string))) int)
+(define pick (-> ((v : (union int string))) int)
   (lambda (v) (if (int? v) v 0)))
 (+ (twice (same inc) 40) (+ (twice (adder 100) (pick 0)) (pick "no")))

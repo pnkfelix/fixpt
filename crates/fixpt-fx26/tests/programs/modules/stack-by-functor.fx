@@ -21,7 +21,7 @@
             (val push (subr (alloc @heap) (e stack) stack))
             (val top (subr (read @heap) (stack) e))
             (val pop (subr (read @heap) (stack) stack))))
-(define make-stack (subr pure ((elt elt-sig)) (stack-of (select elt t)))
+(define make-stack (subr pure ((elt : elt-sig)) (stack-of (select elt t)))
   (lambda ((elt elt-sig))
     (module
       (define-generative stack (listof (select elt t) @heap))

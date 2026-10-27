@@ -333,14 +333,67 @@
   (lambda (p)
     (tagcase p
       (lst (items d a b)
-        (if (and (= (k-length items) 2) (syn-symbol? (car items)))
-            (let ((n (syn-head (car items))))
-              (if (or (k-has-name? k-type-forms n) (k-has-name? k-keywords n)
-                      (not (null? (k-lookup-desc n))) (>= (k-find (get k-base) n) 0))
-                  nil
-                  (the k-names (cons n nil))))
+        (if (and (= (k-length items) 3) (syn-symbol? (car items)) (syn-symbol? (k-nth items 1))
+                 (symbol=? (syn-head (k-nth items 1)) ':))
+            (the k-names (cons (syn-head (car items)) nil))
             nil))
       (else x nil))))
+;; `(h t)`, parameter `p`, is `h` applied; refused, saying how to name a
+;; parameter, where `h` is no description function: where `later` (the
+;; parameters after it, the result, the specification's clauses) names `h`,
+;; as `(select h x)` or a proposition does; or where `h` is unknown and no
+;; module included or opened by `with` may give it (`misnamed_param`).
+(define k-misnamed-param (->* (syn k-syns) unit)
+  (lambda (p later)
+    (tagcase p
+      (lst (items d a b)
+        (if (and (= (k-length items) 2) (syn-symbol? (car items)))
+            (let* ((h (syn-head (car items))) (name (symbol->string h)))
+              (if (or (k-has-name? k-type-forms h) (k-has-name? k-keywords h)
+                      (not (null? (k-lookup-desc h))) (>= (k-find (get k-base) h) 0))
+                  #u
+                  (let ((fix (k-cat3 "to name a parameter, write `(" name " : type)`"))
+                        (used (k-named-in-each later h)))
+                    (cond ((not (string=? used "-"))
+                           (k-sfail
+                             (k-cat5 (k-cat3 "`(" name " …)` applies `") name "`, but "
+                                     (if (string=? used "")
+                                         "what follows"
+                                         (k-cat3 "`" used "` after it"))
+                                     (k-cat5 " names `" name "`: " fix ""))
+                             p))
+                          ((and (null? (k-lookup-desc '%include-scope)) (null? (k-withs-over h)))
+                           (k-sfail (k-cat5 "`" name "` is not a description function: " fix "") p))
+                          (else #u)))))
+            #u))
+      (else x #u))))
+;; Where `s` has `n` other than as a list's head: the list it is in, shown
+;; if all of it is names, else ""; or "-" if nowhere (`named_in`).
+(define k-named-in (->* (syn symbol) string)
+  (lambda (s n)
+    (tagcase s
+      (lst (items d a b)
+        (if (k-syns-name? (if (and (not (null? items)) (syn-symbol? (car items))) (cdr items) items)
+                          n)
+            (if (k-all-names? items) (k-cat3 "(" (k-names-shown items) ")") "")
+            (k-named-in-each items n)))
+      (else x "-"))))
+(define k-named-in-each (->* (k-syns symbol) string)
+  (lambda (xs n)
+    (if (null? xs)
+        "-"
+        (let ((u (k-named-in (car xs) n))) (if (string=? u "-") (k-named-in-each (cdr xs) n) u)))))
+(define k-syns-name? (->* (k-syns symbol) bool)
+  (lambda (xs n)
+    (and (not (null? xs))
+         (or (and (syn-symbol? (car xs)) (symbol=? (syn-head (car xs)) n))
+             (k-syns-name? (cdr xs) n)))))
+(define k-all-names? (->* (k-syns) bool)
+  (lambda (xs) (or (null? xs) (and (syn-symbol? (car xs)) (k-all-names? (cdr xs))))))
+(define k-names-shown (->* (k-syns) string)
+  (lambda (xs)
+    (let ((n (symbol->string (syn-head (car xs)))))
+      (if (null? (cdr xs)) n (k-cat3 n " " (k-names-shown (cdr xs)))))))
 ;; Where `m` last is among `names` (each a name, or `||` for none), from
 ;; `i`; or -1.
 (define k-name-last (->* (k-names symbol int) int)

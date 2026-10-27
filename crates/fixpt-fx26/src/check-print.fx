@@ -126,14 +126,14 @@
                                       (k-show-props "else" (extract l 2)) ")")
                               st)))))
         (k-put (string-append clauses ")") st))))
-  ;; Parameters `ps`, each `(name T)` where `names` names it, a space between
+  ;; Parameters `ps`, each `(name : T)` where `names` names it, a space between
   ;; each two.
   (k-show-named (->* (k-ids k-names k-printing k-shown) k-shown)
     (lambda (ps names p st)
       (if (null? ps)
           st
           (let* ((n (if (null? names) '|| (car names)))
-                 (st (if (symbol=? n '||) st (k-put (k-cat3 "(" (symbol->string n) " ") st)))
+                 (st (if (symbol=? n '||) st (k-put (k-cat3 "(" (symbol->string n) " : ") st)))
                  (st (k-show-on (car ps) p st))
                  (st (if (symbol=? n '||) st (k-put ")" st)))
                  (st (if (null? (cdr ps)) st (k-put " " st))))

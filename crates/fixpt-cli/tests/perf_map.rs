@@ -15,7 +15,7 @@ fn a_run_writes_a_perf_map() {
     let dir = std::env::temp_dir().join(format!("fixpt-perf-map-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let program = dir.join("count.fx");
-    let text = "(define count (subr (maxeff spin (read (globals count))) ((n int) (k int)) int) (lambda (n k) (if (= n 0) k (count (- n 1) (+ k 1)))))\n(count 1000 0)\n";
+    let text = "(define count (subr (maxeff spin (read (globals count))) ((n : int) (k : int)) int) (lambda (n k) (if (= n 0) k (count (- n 1) (+ k 1)))))\n(count 1000 0)\n";
     std::fs::write(&program, text).unwrap();
     let child = Command::new(FIXPT)
         .args(["--fx26-machine", "fx-regs-rsjit-nativecc", "run", program.to_str().unwrap()])

@@ -291,10 +291,10 @@
 ;; A procedure type's parameters and result, after its effect, with its
 ;; convention: `(subr …)`'s and `(-> …)`'s. A test's result, `(bool …)`, a
 ;; `bool` and what it proves, an `ensures` of it.
-(define k-subr-type (->* (k-eff syn syn k-conv) int)
-  (lambda (e params result cv)
+(define k-subr-type (->* (k-eff syn syn k-conv k-syns) int)
+  (lambda (e params result cv cs)
     (let* ((written (k-items-or-nil params "parameter types"))
-           (ts (k-read-params written result))
+           (ts (k-read-params written result cs))
            (spec (if (string=? (k-list-head result) "bool")
                      (the k-specs
                           (list (product (1 (k-spec-pnames written)) (2 k-no-name) (3 (sf-true))
@@ -303,14 +303,14 @@
       (k-ty-new (ty-subr e (k-ids-but-last ts) (k-ids-last ts) cv spec)))))
 ;; `(subr effect (param …) result)`, or with a convention first, `(subr
 ;; (conv C) effect (param …) result)`; left out, it is the program's.
-(define k-parse-subr (->* (syn k-syns) int)
-  (lambda (s items)
+(define k-parse-subr (->* (syn k-syns k-syns) int)
+  (lambda (s items cs)
     (let* ((conv? (and (= (k-length items) 5) (string=? (k-list-head (k-nth items 1)) "conv")))
            (cv (if conv? (k-parse-conv-form (k-nth items 1)) (get k-conv-default)))
            (items (if conv? (the k-syns (cons (car items) (cdr (cdr items)))) items)))
       (begin
         (k-shape (= (k-length items) 4) "`(subr effect (param …) result)`" s)
-        (k-subr-type (k-parse-effect (k-nth items 1)) (k-nth items 2) (k-nth items 3) cv)))))
+        (k-subr-type (k-parse-effect (k-nth items 1)) (k-nth items 2) (k-nth items 3) cv cs)))))
 ;; Whether `(subr …)` or `(-> …)`, `items`, ends in a specification.
 (define k-specified? (->* (k-syns) bool)
   (lambda (items)
@@ -334,10 +334,11 @@
     (let* ((k (- (k-length items) (k-clauses-ending items)))
            (plain (k-syns-take items k))
            (whole (tagcase s (lst (xs d a b) (lst plain d a b)) (else y s)))
+           (cs (k-syns-drop items k))
            (t (if (string=? (syn-name (car items)) "subr")
-                  (k-parse-subr whole plain)
-                  (k-parse-arrow whole plain))))
-      (k-specified t (k-nth plain (- k 2)) (k-syns-drop items k)))))
+                  (k-parse-subr whole plain cs)
+                  (k-parse-arrow whole plain cs))))
+      (k-specified t (k-nth plain (- k 2)) cs))))
 ;; Whether signature `s` is `(->* …)`, under any `poly`s.
 (define k-written-arrow-star? (->* (syn) bool)
   (lambda (s)
@@ -357,17 +358,17 @@
       (cond ((string=? head "->*")
              (begin
                (k-shape (= (k-length items) 3) "`(->* (param …) result)`" s)
-               (k-subr-type nil (k-nth items 1) (k-nth items 2) (get k-conv-default))))
+               (k-subr-type nil (k-nth items 1) (k-nth items 2) (get k-conv-default) nil)))
             ((string=? head "poly")
              (begin (set k-arrow-star #t)
                     (let ((t (k-parse-type-node s))) (begin (set k-arrow-star #f) t))))
             (else (k-parse-type-node s))))))
 ;; `(-> (param …) result)`: `(subr pure (param …) result)`.
-(define k-parse-arrow (->* (syn k-syns) int)
-  (lambda (s items)
+(define k-parse-arrow (->* (syn k-syns k-syns) int)
+  (lambda (s items cs)
     (begin
       (k-shape (= (k-length items) 3) "`(-> (param …) result)`" s)
-      (k-subr-type nil (k-nth items 1) (k-nth items 2) (get k-conv-default)))))
+      (k-subr-type nil (k-nth items 1) (k-nth items 2) (get k-conv-default) cs))))
 ;; `(proves prop)`.
 (define k-parse-proves-type (->* (syn k-syns) int)
   (lambda (s items)
@@ -382,8 +383,8 @@
   (lambda (s items hd)
     (let ((n (k-length items)))
       (case hd
-        ((subr) (if (k-specified? items) (k-parse-specified s items) (k-parse-subr s items)))
-        ((->) (if (k-specified? items) (k-parse-specified s items) (k-parse-arrow s items)))
+        ((subr) (if (k-specified? items) (k-parse-specified s items) (k-parse-subr s items nil)))
+        ((->) (if (k-specified? items) (k-parse-specified s items) (k-parse-arrow s items nil)))
         ((->*) (k-sfail k-arrow-star-only s))
         ((proves) (k-parse-proves-type s items))
         ((bool) (k-sfail "`(bool …)` is a procedure's result, and only that" s))
@@ -878,18 +879,19 @@
                    (let ((r (k-subst t nil))) (begin (set k-select-map outer) r))))))))
 ;; A `subr` type's parameters `ps` (from those named `names`) and its
 ;; result `r`, read: their types, the result last.
-(define k-read-params-from (->* (k-syns syn k-names) k-ids)
-  (lambda (ps r names)
+(define k-read-params-from (->* (k-syns syn k-names k-syns) k-ids)
+  (lambda (ps r names cs)
     (if (null? ps)
         ;; A test's result, `(bool …)`: here, and only here, a `bool`
         ;; (`k-subr-type` reads what it proves).
         (let ((t (if (string=? (k-list-head r) "bool") k-bool (k-parse-type r))))
           (cons (k-select-params t names) nil))
-        (let* ((named (k-param-name (car ps)))
-               (written (if (null? named) (car ps) (k-nth (k-items (car ps) "a parameter") 1)))
+        (let* ((checked (k-misnamed-param (car ps) (the k-syns (append (cdr ps) (cons r cs)))))
+               (named (k-param-name (car ps)))
+               (written (if (null? named) (car ps) (k-nth (k-items (car ps) "a parameter") 2)))
                (t (k-select-params (k-parse-type written) names))
                (name (if (null? named) k-no-name (car named)))
-               (rest (k-read-params-from (cdr ps) r (k-names-snoc names name))))
+               (rest (k-read-params-from (cdr ps) r (k-names-snoc names name) cs)))
           (cons t rest)))))
-(define k-read-params (->* (k-syns syn) k-ids)
-  (lambda (ps r) (k-read-params-from ps r nil))))))
+(define k-read-params (->* (k-syns syn k-syns) k-ids)
+  (lambda (ps r cs) (k-read-params-from ps r nil cs))))))

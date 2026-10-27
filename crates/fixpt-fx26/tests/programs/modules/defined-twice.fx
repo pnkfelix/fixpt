@@ -5,5 +5,5 @@
 ;; integer" lowered, one path using the first `x` and the other the last
 ;; (PLAN.md Q13, O16).
 (define m (module (define x int 1) (define x string "s")))
-(define f (subr pure ((n (moduleof (val x int)))) int) (lambda (n) (with n (+ x 41))))
+(define f (subr pure ((n : (moduleof (val x int)))) int) (lambda (n) (with n (+ x 41))))
 (f m)
