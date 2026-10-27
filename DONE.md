@@ -3488,3 +3488,11 @@ Heist found"); A is §134.
   `free_into_in` and `k-free-in` carry them by where the `let` bound the
   name, so a name bound again inside is not mistaken for it
   (`modules/with-local-module*.fx`).
+- **D: a module file's `include`s** give their types by name in its items,
+  in the FX-26 checker as in Rust's: the mark that says a module includes
+  others looked at the module's first item, which in a file is the one that
+  says the file, so every file with an `include` whose items named an
+  included type was refused there, with or without `module-parameters`
+  (`modules/include-in-file.fx`, `include-in-params-file.fx`). Found with
+  it, not fixed: a file's item using an included *value* compiles to other
+  words in the compiler written in FX-26 (`TODO.md` §133).

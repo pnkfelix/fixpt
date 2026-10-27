@@ -142,10 +142,10 @@
 (define k-scope-newest (->* (int k-scope k-scope) k-scope)
   (lambda (n s onto)
     (if (or (<= n 0) (null? s)) onto (cons (car s) (k-scope-newest (- n 1) (cdr s) onto)))))
-;; In a module with `include`s (its first item `%include`), a mark in the
-;; description scope, `%include-scope`, so that a type name nothing else
-;; defines is the modules included's (`k-type-unknown`, `TODO.md` §69); gone
-;; with the module's scope.
+;; In a module with `include`s (its first item `%include`; a file's, after
+;; the item that says the file), a mark in the description scope,
+;; `%include-scope`, so that a type name nothing else defines is the modules
+;; included's (`k-type-unknown`, `TODO.md` §69); gone with the module's scope.
 (define k-include-mark (->* (mod-items) unit)
   (lambda (items)
     (if (and (not (null? items)) (symbol=? (car (extract (car items) 2)) '%include))
@@ -398,7 +398,7 @@
            (let ((got (the (ref k-items @t) (new nil)))
                  (ps (k-syns-count (extract (car items) 3))))
              (begin (set k-dscope (k-scope-newest ps saved (get k-std-dscope)))
-                    (k-in-loaded (lambda () (begin (k-include-mark items)
+                    (k-in-loaded (lambda () (begin (k-include-mark (cdr items))
                                                    (set got (k-resolve-items-ahead items))))
                                  k a b)
                     (set k-dscope saved)

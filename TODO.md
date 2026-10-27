@@ -3246,3 +3246,19 @@ process's output or exit: Heist's editor polls every 50 ms while one
 runs. An arm, as for `(read-byte)`, needs a waker list per process in
 `sched.rs`, the reader threads waking `wait_stdin`'s `poll` (a pipe it
 polls too), and the arm in both parsers.
+
+## 133. A module file's item using an included value compiles apart (found 2026-10-27)
+
+Found while fixing Heist's problem D (`DONE.md` §135): in a module *file*
+with `(include m)`, an item whose value uses one of `m`'s values, `(define
+z (subr … ) mk)` or `(define z (lambda () (mk)))`, is compiled to different
+words by the compiler written in FX-26 than by the Rust one (`tests/
+rust_compiler.rs`: "99 fields and 98"), though it runs alike. The same
+module as an expression, `(module (include m) …)`, compiles the same, and
+so does a file item that only names an included type. Each item's value is
+`(with %include …)` there (`with_includes`, `in-includes`), so likely the
+FX-26 side keys its facts for that `with` differently in a file (its
+identity, `(start end k)`, or the `%include` item's place after the item
+that says the file). Repro: a file `(include (load-module "c.fx"))
+(define z (subr (alloc @heap) () (ref int @heap)) mk)`, `c.fx` defining
+`mk`; loaded by a program in `programs/modules`.
