@@ -11,7 +11,9 @@ fn program(name: &str) -> String {
 }
 
 /// `fixpt query` of `programs/query/name`: each answer's name, `may` before
-/// those that may.
+/// those that may, and `local` before local names bound to a polymorphic
+/// definition instantiated so that they answer, each with the definition
+/// it is in.
 fn names(name: &str, query: &str) -> Vec<String> {
     let mut args = vec!["query".to_string(), program(name)];
     args.extend(query.split(' ').map(String::from));
@@ -19,7 +21,17 @@ fn names(name: &str, query: &str) -> Vec<String> {
     assert!(out.status.success(), "{query}: {}", String::from_utf8_lossy(&out.stderr));
     String::from_utf8_lossy(&out.stdout)
         .lines()
-        .map(|l| if l.starts_with("; and may") { "may".to_string() } else { l.split(" : ").next().unwrap_or(l).to_string() })
+        .map(|l| match l {
+            _ if l.starts_with("; and may") => "may".to_string(),
+            _ if l.starts_with("; and local") => "local".to_string(),
+            _ => {
+                let name = l.split(" : ").next().unwrap_or(l);
+                match l.split_once(", in ") {
+                    Some((_, inside)) => format!("{name} in {}", inside.split(", ").next().unwrap_or(inside)),
+                    None => name.to_string(),
+                }
+            }
+        })
         .collect()
 }
 
@@ -42,10 +54,18 @@ fn makers_transformers_and_takers() {
 /// itself or through the procedure it returns.
 #[test]
 fn effects_and_mutation() {
-    assert_eq!(names("effects.fx", "effect (write @ed)"), ["bump!", "may", "clear!"]);
     assert_eq!(names("effects.fx", "effect (maxeff (read @ed) (write @ed))"), ["bump!"]);
     assert_eq!(names("effects.fx", "effect (write @elsewhere)"), ["poke!", "may", "clear!"]);
-    assert_eq!(names("effects.fx", "mutates counter"), ["bump!", "bumper"]);
+    assert_eq!(names("effects.fx", "mutates counter"), ["bump!", "bumper", "reset!", "zero!"]);
+}
+
+/// Local names bound to a polymorphic definition instantiated at a type or
+/// an effect that answers, where it, as it is, does not: `clear!` at `@ed`,
+/// any type's identity at `counter`. A call, unnamed, is not one.
+#[test]
+fn locals_instantiated_so() {
+    assert_eq!(names("effects.fx", "effect (write @ed)"), ["bump!", "reset!", "zero!", "may", "clear!", "local", "wipe in reset!"]);
+    assert_eq!(names("effects.fx", "transforms counter"), ["again", "local", "keep in again"]);
 }
 
 /// At the REPL: a file loaded and a form typed, each answer where it is.

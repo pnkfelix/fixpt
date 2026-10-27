@@ -795,9 +795,12 @@ fn answer_query(session: &Fx26Session, sources: &[fixpt_fx26::query::Source], qu
         return Ok(vec![format!("; no definition answers `{}`", query.trim())]);
     }
     let mut out = Vec::new();
-    let mut said_may = false;
+    let (mut said_may, mut said_site) = (false, false);
     for h in hits {
-        if h.may && !said_may {
+        if h.site && !said_site {
+            out.push("; and local names bound to one instantiated so:".to_string());
+            said_site = true;
+        } else if h.may && !said_may && !h.site {
             out.push("; and may, once instantiated:".to_string());
             said_may = true;
         }

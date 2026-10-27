@@ -895,6 +895,11 @@ impl Arena {
         self.exps[id.0 as usize].1 = e;
     }
 
+    /// How many expressions have been made: each `ExpId` below it is one.
+    pub fn exp_count(&self) -> usize {
+        self.exps.len()
+    }
+
     pub fn exp_at(&self, id: ExpId) -> &Exp {
         &self.exps[id.0 as usize].1
     }

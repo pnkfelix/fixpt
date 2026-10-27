@@ -17,3 +17,12 @@
 ;; Writes another region.
 (define other (ref int @elsewhere) (new 0))
 (define* poke! (subr (write @elsewhere) (counter) unit) (lambda (k) (set other 1)))
+
+;; `clear!` at `@ed`, bound to a local name; and only called, unnamed.
+(define* reset! (subr (write @ed) (counter) unit)
+  (lambda (k) (let ((wipe (proj clear! @ed))) (wipe (extract k count)))))
+(define* zero! (subr (write @ed) (counter) unit) (lambda (k) (clear! (extract k count))))
+;; Any type's identity, bound to a local name at `counter`.
+(define* same (poly ((a type)) (subr pure (a) a)) (plambda ((a type)) (lambda (x) x)))
+(define* again (subr pure (counter) counter)
+  (lambda (k) (let ((keep (proj same counter))) (keep k))))

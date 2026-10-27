@@ -3439,5 +3439,11 @@ type and its place, module items too (`docs/fx26.md`, "Queries";
 - **Tests**: `fixpt-cli/tests/query.rs` on `programs/query/` (seven shapes
   of procedure; effects, definite and may; mutation through a procedure
   returned), and at the REPL.
-- **Not yet**: the places a polymorphic definition is instantiated to
-  answer; the locals in scope at a place.
+- **Local names bound to a polymorphic definition instantiated** so that
+  it answers, where it does not as it is: `(let ((wipe (proj clear!
+  @ed))) …)`. Calls and other unnamed uses are left out: hundreds of `car`
+  at a list of ropes, on Heist's editor, said nothing.
+- **Named types printed once a question**: `typeat::Namer`, the table of
+  names made once, not for each type printed (16 s to 2.2 s for 280
+  answers on the editor).
+- **Not yet**: the locals in scope at a place.

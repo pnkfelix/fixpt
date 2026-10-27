@@ -133,6 +133,9 @@ pub struct Hit {
     /// Only once instantiated, or for an effect the definition does not
     /// name: one that may.
     pub may: bool,
+    /// A local name bound to a polymorphic definition instantiated, at its
+    /// type there, not a definition.
+    pub site: bool,
 }
 
 /// `sources` checked again, in order, with checker `c` (as the session's
@@ -248,96 +251,162 @@ enum Want {
     Gen(u32),
 }
 
-impl Program {
-    /// The answers to `q`, definite first, each in the program's order.
-    pub fn answer(&mut self, q: &Query) -> Result<Vec<Hit>, String> {
-        let c = &mut self.checker;
-        let mut hits = Vec::new();
-        let defs = std::mem::take(&mut self.defs);
-        let result = (|| {
-            match q {
-                Query::Effect(e) => {
-                    let want = c.effect_of_str(e).map_err(|e| e.message)?;
-                    for d in &defs {
-                        let Some((latent, _, _, _)) = subr_parts(c, d.ty) else { continue };
-                        match effect_match(&want, &latent) {
-                            Some(may) => hits.push((d, may)),
-                            None => {}
-                        }
-                    }
+/// A question made ready to ask of a type: its effect, or the type it is
+/// about as wanted, with what of it can be written.
+enum Asked {
+    Effect(Effect),
+    Uses(Want),
+    Returns(Want),
+    Constructs(Want),
+    Transforms(Want),
+    Consumes(Want),
+    Mutates(Want, HashSet<Region>),
+}
+
+impl Asked {
+    fn of(c: &mut Checker, q: &Query) -> Result<Asked, String> {
+        Ok(match q {
+            Query::Effect(e) => Asked::Effect(c.effect_of_str(e).map_err(|e| e.message)?),
+            Query::Uses(t) => Asked::Uses(want_of(c, t)?),
+            Query::Returns(t) => Asked::Returns(want_of(c, t)?),
+            Query::Constructs(t) => Asked::Constructs(want_of(c, t)?),
+            Query::Transforms(t) => Asked::Transforms(want_of(c, t)?),
+            Query::Consumes(t) => Asked::Consumes(want_of(c, t)?),
+            Query::Mutates(t) => {
+                let want = want_of(c, t)?;
+                let Want::Ty(tt) = want else { return Err(format!("`mutates` wants a type, not a family: `{t}` applied")) };
+                let regions = mutable_regions(c, tt);
+                if regions.is_empty() {
+                    return Err(format!("nothing in `{t}` can be written: no ref, array, cell, pair or bloblet it holds"));
                 }
-                Query::Uses(t) => {
-                    let want = want_of(c, t)?;
-                    for d in &defs {
-                        if holds(c, d.ty, &want).any() {
-                            hits.push((d, false));
-                        }
-                    }
+                Asked::Mutates(want, regions)
+            }
+        })
+    }
+
+    /// Whether a definition (or a use) of type `t` answers: `Some(false)`
+    /// if it does, `Some(true)` if it may once instantiated, `None` if not.
+    fn verdict(&self, c: &mut Checker, t: TyId) -> Option<bool> {
+        let procedure = subr_parts(c, t).is_some();
+        let yes = |b: bool| b.then_some(false);
+        match self {
+            Asked::Effect(want) => effect_match(want, &subr_parts(c, t)?.0),
+            Asked::Uses(w) => yes(holds(c, t, w).any()),
+            Asked::Returns(w) => yes(procedure && holds(c, t, w).gives()),
+            Asked::Constructs(w) => yes(procedure && holds(c, t, w).free),
+            Asked::Transforms(w) => yes(procedure && holds(c, t, w).tolled),
+            Asked::Consumes(w) => yes(procedure && holds(c, t, w).consumed),
+            Asked::Mutates(w, regions) => {
+                if !procedure || !holds(c, t, w).needs {
+                    return None;
                 }
-                Query::Returns(t) | Query::Constructs(t) | Query::Transforms(t) => {
-                    let want = want_of(c, t)?;
-                    for d in &defs {
-                        if subr_parts(c, d.ty).is_none() {
-                            continue;
-                        }
-                        let h = holds(c, d.ty, &want);
-                        let wanted = match q {
-                            Query::Constructs(_) => h.free,
-                            Query::Transforms(_) => h.tolled,
-                            _ => h.gives(),
-                        };
-                        if wanted {
-                            hits.push((d, false));
-                        }
-                    }
-                }
-                Query::Consumes(t) => {
-                    let want = want_of(c, t)?;
-                    for d in &defs {
-                        if subr_parts(c, d.ty).is_some() && holds(c, d.ty, &want).consumed {
-                            hits.push((d, false));
-                        }
-                    }
-                }
-                Query::Mutates(t) => {
-                    let want = want_of(c, t)?;
-                    let Want::Ty(tt) = want else { return Err(format!("`mutates` wants a type, not a family: `{t}` applied")) };
-                    let regions = mutable_regions(c, tt);
-                    if regions.is_empty() {
-                        return Err(format!("nothing in `{t}` can be written: no ref, array, cell, pair or bloblet it holds"));
-                    }
-                    for d in &defs {
-                        if subr_parts(c, d.ty).is_none() || !holds(c, d.ty, &want).needs {
-                            continue;
-                        }
-                        let mut effects = Vec::new();
-                        effects_in(c, d.ty, &mut effects, &mut HashSet::new());
-                        let writes = |e: &Effect, r: &Region| e.0.contains(&Atom::Write(*r)) || e.0.contains(&Atom::Init(*r));
-                        if effects.iter().any(|e| regions.iter().any(|r| writes(e, r))) {
-                            hits.push((d, false));
-                        } else if effects.iter().any(|e| e.0.iter().any(|a| matches!(a, Atom::Var(_) | Atom::App(_) | Atom::Write(Region::Var(_)) | Atom::Init(Region::Var(_))))) {
-                            hits.push((d, true));
-                        }
-                    }
+                let mut effects = Vec::new();
+                effects_in(c, t, &mut effects, &mut HashSet::new());
+                let writes = |e: &Effect, r: &Region| e.0.contains(&Atom::Write(*r)) || e.0.contains(&Atom::Init(*r));
+                if effects.iter().any(|e| regions.iter().any(|r| writes(e, r))) {
+                    Some(false)
+                } else {
+                    let unknown = |a: &Atom| matches!(a, Atom::Var(_) | Atom::App(_) | Atom::Write(Region::Var(_)) | Atom::Init(Region::Var(_)));
+                    effects.iter().any(|e| e.0.iter().any(unknown)).then_some(true)
                 }
             }
-            Ok(())
-        })();
-        let out = result.map(|()| {
-            let mut out: Vec<Hit> = hits
-                .iter()
-                .map(|(d, may)| Hit {
-                    name: d.name.clone(),
-                    ty: crate::typeat::named(c, d.ty),
-                    place: d.span.map_or_else(|| "?".into(), |s| place_of(c, &self.sources, s)),
-                    may: *may,
-                })
-                .collect();
-            out.sort_by_key(|h| h.may);
-            out
-        });
-        self.defs = defs;
-        out
+        }
+    }
+}
+
+/// A local name bound to a polymorphic definition instantiated: the name,
+/// what it instantiates, its type as defined and as bound, and where.
+struct Site {
+    name: String,
+    of: String,
+    poly: TyId,
+    ty: TyId,
+    span: Span,
+}
+
+impl Program {
+    /// The answers to `q`: definitions that answer, then those that may
+    /// once instantiated, then the local names bound to polymorphic ones
+    /// instantiated so that they do; each in the program's order.
+    pub fn answer(&mut self, q: &Query) -> Result<Vec<Hit>, String> {
+        let c = &mut self.checker;
+        let asked = Asked::of(c, q)?;
+        let mut namer = crate::typeat::Namer::new(c);
+        let mut hits = Vec::new();
+        for d in &self.defs {
+            if let Some(may) = asked.verdict(c, d.ty) {
+                let ty = namer.show(c, d.ty);
+                let place = d.span.map_or_else(|| "?".into(), |s| place_of(c, &self.sources, s));
+                hits.push(Hit { name: d.name.clone(), ty, place, may, site: false });
+            }
+        }
+        hits.sort_by_key(|h| h.may);
+        for s in sites(c) {
+            // A local that answers where what it instantiates, as it is,
+            // does not.
+            if asked.verdict(c, s.ty) == Some(false) && asked.verdict(c, s.poly) != Some(false) {
+                let inside = self.defs.iter().filter(|d| d.span.is_some_and(|ds| ds.file == s.span.file && ds.start <= s.span.start && s.span.end <= ds.end)).min_by_key(|d| d.span.map(|ds| ds.end - ds.start));
+                let ty = namer.show(c, s.ty);
+                let mut place = place_of(c, &self.sources, s.span);
+                if let Some(d) = inside {
+                    place = format!("{place}, in {}", d.name);
+                }
+                place = format!("{place}, instantiating {}", s.of);
+                hits.push(Hit { name: s.name, ty, place, may: false, site: true });
+            }
+        }
+        Ok(hits)
+    }
+}
+
+/// Every local name the program binds to a polymorphic definition
+/// instantiated (`(let ((g (proj clear! @ed))) …)`, or one used as a value
+/// where a type of no binders is wanted, `Checker::facts.value_insts`), at
+/// its type there. A global so bound is a definition, of that type, and
+/// unnamed uses (calls) are left out.
+fn sites(c: &mut Checker) -> Vec<Site> {
+    let mut out = Vec::new();
+    for i in 0..c.arena.exp_count() {
+        let Exp::Let { bindings, .. } = c.arena.exp_at(ExpId(i as u32)).clone() else { continue };
+        for (x, init) in bindings {
+            let Some((of, poly)) = operator(c, init) else { continue };
+            let ty = match (c.arena.exp_at(init).clone(), c.facts.value_insts.get(&init).cloned()) {
+                (_, Some(ds)) => {
+                    let (kinds, inner) = c.binders_of(poly);
+                    if kinds.len() != ds.len() {
+                        continue;
+                    }
+                    let map = kinds.iter().map(|(v, _)| *v).zip(ds).collect();
+                    c.subst(inner, &map)
+                }
+                (Exp::Proj { .. }, None) => match c.facts.types.get(&init) {
+                    Some(t) if !matches!(c.arena.get(c.arena.resolve(*t)), Ty::Poly { .. }) => *t,
+                    _ => continue,
+                },
+                _ => continue,
+            };
+            out.push(Site { name: c.interner.name(x).to_string(), of, poly, ty, span: c.arena.span_of(init) });
+        }
+    }
+    out.sort_by_key(|s| (s.span.file.0, s.span.start));
+    out
+}
+
+/// The polymorphic definition expression `e` names, and its type: a
+/// variable, an item of a module (`m:x`), or one projected.
+fn operator(c: &Checker, e: ExpId) -> Option<(String, TyId)> {
+    let poly = |c: &Checker, t: TyId| matches!(c.arena.get(c.arena.resolve(t)), Ty::Poly { .. });
+    match c.arena.exp_at(e).clone() {
+        Exp::Var(x) => {
+            let t = c.facts.types.get(&e).copied().filter(|t| poly(c, *t)).or_else(|| c.global_type(x).filter(|t| poly(c, *t)))?;
+            Some((c.interner.name(x).to_string(), t))
+        }
+        Exp::With { module, body } => {
+            let (x, t) = operator(c, body)?;
+            Some((format!("{}:{x}", c.interner.name(module)), t))
+        }
+        Exp::Proj { body, .. } => operator(c, body),
+        _ => None,
     }
 }
 
