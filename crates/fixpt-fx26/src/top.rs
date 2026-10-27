@@ -632,6 +632,8 @@ impl Checker {
 
     /// Check one top-level form, keeping what it defines.
     pub fn top(&mut self, form: &Syntax) -> R<Top> {
+        // The files its types name, loaded first (`type_loads`).
+        self.type_loads(form)?;
         let items = form.as_proper_list().unwrap_or(&[]);
         let head = items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h));
         match head {
@@ -1101,6 +1103,7 @@ impl Checker {
                 && h.as_symbol().is_some_and(|h| self.interner.name(h) == "define-type")
                 && let Some(n) = n.as_symbol()
                 && !dlambda(d)
+                && !self.names_a_file(d)
             {
                 out.push((n, f.span));
             }
@@ -1162,12 +1165,26 @@ impl Checker {
         None
     }
 
+    /// Whether `s` names a file, `(load-moduleof "file" …)` or
+    /// `(load-input-moduleof "file" …)`.
+    fn names_a_file(&self, s: &Syntax) -> bool {
+        let Some(items) = s.as_proper_list() else { return false };
+        match items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h)) {
+            Some("quote" | "quasiquote") => false,
+            Some("load-moduleof" | "load-input-moduleof") => true,
+            _ => items.iter().any(|x| self.names_a_file(x)),
+        }
+    }
+
     fn declare_each(&mut self, forms: &[Syntax]) -> R<Vec<bool>> {
         let mut done = Vec::new();
         for f in forms {
             let items = f.as_proper_list().unwrap_or(&[]);
             let head = items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h).to_string());
             match (head.as_deref(), items) {
+                // A type that names a file (`load-moduleof`) is read in
+                // order, as a definition is, its file loaded first.
+                (Some("define-type"), [_, _, d]) if self.names_a_file(d) => done.push(false),
                 (Some("define-type" | "define-generative" | "define-effect" | "define-convention"), _) => {
                     self.top(f)?;
                     done.push(true);

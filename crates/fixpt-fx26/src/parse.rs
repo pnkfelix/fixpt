@@ -896,6 +896,26 @@ impl Checker {
                 let r = self.parse_region(r)?;
                 Ok(self.arena.ty(Ty::Array(t, n, r)))
             }
+            // `(load-moduleof "file" arg …)`: the type of the module a
+            // `load-module` of the file makes, given `arg …`;
+            // `(load-input-moduleof "file" arg …)`, of the module a
+            // `load-input` file's value makes (`docs/research/
+            // derived-signatures.md`). The file is loaded as a load of it
+            // is (`type_loads`), and nothing is made of it here.
+            loader @ ("load-moduleof" | "load-input-moduleof") => {
+                let input = loader == "load-input-moduleof";
+                let usage = format!("`({loader} \"file\" argument …)`");
+                let Some(Datum::Str(path)) = items.get(1).map(|p| &p.datum) else {
+                    return Err(FxError::at(s.span, usage));
+                };
+                let path = path.clone();
+                let name = self.load_name(s.span, &path, input)?;
+                let Some(made) = self.lookup(name) else {
+                    return Err(FxError::at(s.span, format!("`{path}` is not loaded here")));
+                };
+                let made = if input { self.module_val(made, "input").expect("a `load-input` file's module gives `input`") } else { made };
+                self.type_made(made, &items[2..], s.span, &path)
+            }
             "mark-key" => {
                 let [_, t, r] = &items[..] else {
                     return Err(FxError::at(s.span, "`(mark-key type region)`"));
@@ -2661,6 +2681,96 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         Ok(self.arena.exp(span, Exp::With { module: name, body }))
     }
 
+    /// The hidden global a load of `path` is (`parse_load`).
+    fn load_name(&mut self, span: fixpt_read::Span, path: &str, input: bool) -> R<Sym> {
+        let e = self.parse_load(span, path, input)?;
+        match *self.arena.exp_at(e) {
+            Exp::Var(n) | Exp::With { module: n, .. } => Ok(n),
+            _ => unreachable!("a load is its hidden global"),
+        }
+    }
+
+    /// The type of value `name` of module type `t`, if it gives one.
+    fn module_val(&self, t: TyId, name: &str) -> Option<TyId> {
+        match self.arena.get(self.arena.resolve(t)) {
+            Ty::Module { vals, .. } => vals.iter().find(|(n, _)| self.name(*n) == name).map(|(_, t)| *t),
+            _ => None,
+        }
+    }
+
+    /// What a value of type `t`, the file `path` loaded, makes given
+    /// `args` (`load-moduleof`): a `poly` takes as many descriptions as it
+    /// binds, as `proj` does; a procedure of no parameters is applied; a
+    /// procedure's parameters take one argument each, a module's name
+    /// where the types after it select from it, as a call does (M5), its
+    /// types those of that module. Done when the arguments are, and no
+    /// procedure of no parameters is left: a module's type, or refused.
+    fn type_made(&mut self, mut t: TyId, mut args: &[Syntax], span: fixpt_read::Span, path: &str) -> R<TyId> {
+        loop {
+            match self.arena.get(self.arena.resolve(t)).clone() {
+                Ty::Poly { binders, body } if !args.is_empty() => {
+                    let Some((now, rest)) = args.split_at_checked(binders.len()) else {
+                        return Err(FxError::at(span, format!("`{path}` makes a `poly` of {} description(s), and {} are given", binders.len(), args.len())));
+                    };
+                    let mut map = std::collections::HashMap::new();
+                    for ((v, k), a) in binders.iter().zip(now) {
+                        let d = self.parse_d(a)?;
+                        if !self.d_fits(&d, *k) {
+                            let word = self.kind_word(*k);
+                            return Err(FxError::at(a.span, format!("`{}` is bound as a {word}, and the description given is not one", self.name(self.arena.dvar_name(*v)))));
+                        }
+                        map.insert(*v, d);
+                    }
+                    t = self.subst(body, &map);
+                    args = rest;
+                }
+                Ty::Subr { params, result, .. } if params.is_empty() => t = result,
+                Ty::Subr { params, result, .. } if !args.is_empty() => {
+                    let Some((now, rest)) = args.split_at_checked(params.len()) else {
+                        return Err(FxError::at(span, format!("`{path}` makes a procedure of {} parameter(s), and {} are given", params.len(), args.len())));
+                    };
+                    let mut found = Vec::new();
+                    self.param_sels(result, &mut std::collections::HashSet::new(), &mut found);
+                    let mut map = std::collections::HashMap::new();
+                    for (k, x) in found {
+                        let Some(m) = now[k].as_symbol() else {
+                            return Err(FxError::at(now[k].span, format!("argument {} is a module the types `{path}` makes depend on: give it by name", k + 1)));
+                        };
+                        map.insert((k, x), self.arena.ty(Ty::Select(m, x)));
+                    }
+                    t = self.instantiate_params(result, &map);
+                    args = rest;
+                }
+                Ty::Module { .. } if args.is_empty() => return Ok(t),
+                _ if args.is_empty() => {
+                    return Err(FxError::at(span, format!("what `{path}` makes, given these, is a {}, not a module", self.show_ty(t))));
+                }
+                _ => return Err(FxError::at(span, format!("what `{path}` makes is a {}, given no more", self.show_ty(t)))),
+            }
+        }
+    }
+
+    /// Each `(load-moduleof "file" …)` and `(load-input-moduleof "file" …)`
+    /// in form `s`, outside quotations, loaded as a load of the file is, in
+    /// order: before the loads of its expressions, as the FX-26 parser
+    /// takes them (`type-loaded`) and the driver reads them for it
+    /// (`syn::load_modules_in`).
+    pub(crate) fn type_loads(&mut self, s: &Syntax) -> R<()> {
+        let Some(items) = s.as_proper_list() else { return Ok(()) };
+        match items.first().and_then(|h| h.as_symbol()).map(|h| self.name(h)) {
+            Some("quote" | "quasiquote") => Ok(()),
+            Some(loader @ ("load-moduleof" | "load-input-moduleof")) => {
+                let input = loader == "load-input-moduleof";
+                if let Some(Datum::Str(path)) = items.get(1).map(|p| &p.datum) {
+                    let path = path.clone();
+                    self.parse_load(s.span, &path, input)?;
+                }
+                Ok(())
+            }
+            _ => items.iter().try_for_each(|x| self.type_loads(x)),
+        }
+    }
+
     /// `(%loaded "key" "path")`: the module of the file `key` names (the
     /// path resolved, `input:` before it for a file of one expression,
     /// whose module's one item is `input`), wherever it is read; `path` as
@@ -2926,6 +3036,8 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                 work.extend(inner.into_iter().rev().map(|item| (std::borrow::Cow::Owned(item), true)));
                 continue;
             }
+            // Its files named in types, loaded first (`type_loads`).
+            self.type_loads(f)?;
             let before = out.len();
             let name_of = |p: &Self, s: &Syntax| s.as_symbol().ok_or_else(|| FxError::at(s.span, "a name")).map(|n| (n, p.name(n).to_string()));
             match (self.head(&parts), &parts[..]) {

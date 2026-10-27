@@ -2,7 +2,12 @@
 
 Heist's request (2026-10-27, against `8793b0cb`): a design exploration
 of two type-level forms for linking multi-file programs, and six module
-problems found along the way. Nothing here is built yet.
+problems found along the way.
+
+Built since (2026-10-27): problems A, B, D and E (`DONE.md` §134, §135);
+`load-moduleof`, and for `load-input` files `load-input-moduleof`
+(`DONE.md` §136), as Q1 and Q2 below say. Not yet: narrowing, a file's
+abstract types shared by its loads, a top-level `include` (F).
 
 ## The request, briefly
 

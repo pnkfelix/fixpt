@@ -728,7 +728,8 @@
              (parse-module-items-in (append (expand-datatype (car fs)) (cdr fs)) inc? hid?))
             ((import? (car fs))
              (parse-module-items-in (append (expand-import (car fs)) (cdr fs)) inc? hid?))
-            (else (let* ((item (parse-module-item (car fs)))
+            ;; Its files named in types loaded first (`type-loaded`).
+            (else (let* ((item (parse-module-item (type-loaded (car fs))))
                          (item (if inc? (item-in-includes item (car fs)) item))
                          (rest (parse-module-items-in (cdr fs) inc? hid?)))
                     (if hid? (hidden-marks item (car fs) rest) (cons item rest)))))))
@@ -852,6 +853,57 @@
                     (e-module (loaded-error (in-loaded-as (get loaded) base path m x)) a a 0)
                     (pfail-at m x y)))
               (p-ok (ts) (tagcase (car ts) (t-exp (x) x) (else y (e-module nil a b 0))))))))))
+;; Form `s` with each `(load-moduleof "file" arg …)` and
+;; `(load-input-moduleof "file" arg …)` in it, outside quotations, loaded in
+;; order as a load of the file is, before the loads of its expressions: each
+;; made `(%type-made %shared:key "file" arg …)` (`%input-made`, a
+;; `load-input` file's), which the checker reads (`type_loads`,
+;; `load_modules_in`).
+;; Unchanged if it has none.
+(define type-loaded (->* (syn) syn)
+  (lambda (s)
+    (tagcase s
+      (lst (items d a b)
+        (let ((h (if (and (not (null? items)) (syn-symbol? (car items)))
+                     (syn-symbol (car items))
+                     '|()|)))
+          (cond ((or (symbol=? h 'quote) (symbol=? h 'quasiquote)) s)
+                ((and (or (symbol=? h 'load-moduleof) (symbol=? h 'load-input-moduleof))
+                      (>= (len items) 2) (syn-string? (nth items 1)))
+                 (let* ((input? (symbol=? h 'load-input-moduleof))
+                        (name (loaded-name (parse-loaded (syn-string (nth items 1)) input? #f a b)
+                                           a b)))
+                   (lst (cons (mk-symbol (if input? "%input-made" "%type-made") a b)
+                              (cons (mk-symbol (symbol->string name) a b) (cdr items)))
+                        d a b)))
+                ((type-loads? items) (lst (type-loaded-each items) d a b))
+                (else s))))
+      (else y s))))
+(define type-loaded-each (->* (syns-a) syns-a)
+  (lambda (xs) (if (null? xs) xs (cons (type-loaded (car xs)) (type-loaded-each (cdr xs))))))
+;; Whether any of `xs` has a load in a type, as `type-loaded` finds them.
+(define type-loads? (->* (syns-a) bool)
+  (lambda (xs)
+    (and (not (null? xs))
+         (or (tagcase (car xs)
+               (lst (items d a b)
+                 (let ((h (if (and (not (null? items)) (syn-symbol? (car items)))
+                              (syn-symbol (car items))
+                              '|()|)))
+                   (cond ((or (symbol=? h 'quote) (symbol=? h 'quasiquote)) #f)
+                         ((or (symbol=? h 'load-moduleof) (symbol=? h 'load-input-moduleof)) #t)
+                         (else (type-loads? items)))))
+               (else y #f))
+             (type-loads? (cdr xs))))))
+;; The hidden global a load is, `x` (`parse-loaded`); refused at `a`..`b` if
+;; its file was not read.
+(define loaded-name (->* (exp int int) symbol)
+  (lambda (x a b)
+    (tagcase x
+      (e-var (n xa xb k) n)
+      (e-with (m body xa xb k) m)
+      (e-module (items xa xb k) (pfail-at (symbol->string (car (extract (car items) 2))) a b))
+      (else y (pfail-at "a load is its hidden global" a b)))))
 ;; A `define-rec`'s bindings, as a `letrec`'s are.
 (define parse-rec-bindings (->* (syns-a) letrec-list)
   (lambda (bs)

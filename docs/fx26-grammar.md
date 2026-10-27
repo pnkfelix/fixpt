@@ -177,6 +177,12 @@ type       ::= base-type
              | "(" "moduleof" module-component* ")"
              | "(" "select" module-var name ")"        { module-var: a variable bound to a module;
                                                          name: its `abs` or `desc` component }
+             | "(" "load-moduleof" string made-arg* ")"
+                                                       { the type of the module the file's
+                                                         `load-module` makes given the args }
+             | "(" "load-input-moduleof" string made-arg* ")"
+                                                       { of the module a `load-input` file's
+                                                         value makes given the args }
              | "(" function description+ ")"          { a function to a type, applied }
 
 base-type  ::= "int" | "bool" | "char" | "string" | "unit" | "symbol" | "datum"
@@ -190,6 +196,9 @@ subr-param ::= type
                                        `(name type)` is always `name` applied }
 
 conv-form  ::= "(" "conv" convention ")"
+
+made-arg   ::= description | variable        { a description for a `poly`'s binder; a
+                                               module's name for a procedure's parameter }
 
 proposition ::= "(" "<=" type type ")"
               | "(" "poly" binders "(" "<=" type type ")" ("(" "<=" type type ")")* ")"

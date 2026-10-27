@@ -18,7 +18,7 @@
         t-define-convention t-define-syscall t-define-generative t-exp p-ok shared-taken
         shared-reset!
         (type syns-a exp top param-list top-list presult) (effect parses))
-(import parser-exps-module parse-exp parse-rec-bindings)
+(import parser-exps-module parse-exp parse-rec-bindings type-loaded)
 ;; `(define name type expression)` or `(define name expression)`; for a
 ;; `define*` (`star?`), the type's list holds the head too.
 (define parse-define (->* (syn bool) top)
@@ -136,8 +136,10 @@
     (if (null? xs)
         nil
         ;; Before each form, the hidden globals of the files it loads first
-        ;; (`parse-loaded`).
-        (let* ((made (parse-made (car xs))) (before (shared-taken)) (rest (parse-tops (cdr xs))))
+        ;; (`parse-loaded`), those its types name first (`type-loaded`).
+        (let* ((made (parse-made (type-loaded (car xs))))
+               (before (shared-taken))
+               (rest (parse-tops (cdr xs))))
           (append-tops before (append-tops made rest))))))
 
 ;; The entry point: a program's forms, as read, to trees, each expression

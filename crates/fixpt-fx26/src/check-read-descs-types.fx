@@ -9,6 +9,7 @@
 (define-type k-eff (select check-types-types k-eff))
 (hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
 (define-type syn (select parser-types syn))
+(define-type top (select parser-types top))
 ;; The types it names, from the files that define them.
 (import check-types-types (type k-binders k-descs k-parts))
 ;; The types it names, from the files that define them.
@@ -95,4 +96,8 @@
                                (write @t)
                                spin)
                        (syn)
-                       k-desc))))
+                       k-desc))
+            (val k-read-in-order?
+                 (subr (maxeff (read @globals) (read @s) (read @t) spin) (top) bool))
+            (val k-names-a-file?
+                 (subr (maxeff (read @globals) (read @s) (read @t) spin) (syn) bool))))

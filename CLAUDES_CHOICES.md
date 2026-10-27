@@ -2117,3 +2117,29 @@ Fixpt's to decide; the note's last section has the rest. In short:
 - **A `T` given through a callback counts as given**; the toll decides
   `constructs` from `transforms`. The answers are what the types allow, not what
   the code does.
+
+## A file's module type, `load-moduleof` (2026-10-27)
+
+The user chose the form and its names (`load-moduleof`,
+`load-input-moduleof`) and that abstract types are binders. Choices of
+mine, not asked:
+
+- **The arguments**: descriptions for a `poly`, and for a procedure's
+  parameters a module's *name* only, as a dependent call takes one (M5).
+  Not general expressions, nor a check that the module named fits the
+  parameter's type: a value of the type comes only from a real
+  application, which is checked there.
+- **What is left must be a module's type**, so neither name promises a
+  module that is not there (a `load-input` file of data, say).
+- **Type loads before the expressions' loads, in each form**, and in each
+  item of a module, so that the two parsers and the driver that reads files
+  for the FX-26 front end read files, and number them, alike.
+- **A `define-type` naming a file is not declared ahead**: its file's
+  hidden global must be defined before it, and declaring it ahead would
+  load the file outside any form, its definition never run. So it must
+  come before the types that use it.
+- **A file of its own for the FX-26 checker's part**, `check-read-made.fx`,
+  since `check-read-descs.fx` was full; it is given `k-parse-d` as an
+  argument rather than calling it, being before it.
+- **`check-program.fx` made room** by using `k-has-name?` and `reverse`
+  for its own copies of them, rather than a split.

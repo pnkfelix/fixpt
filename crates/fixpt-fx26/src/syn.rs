@@ -849,14 +849,32 @@ type Load = (u32, String, bool, Option<String>);
 /// after it moved.
 fn load_modules_in(forms: &[Syntax], interner: &Interner, out: &mut Vec<Load>) {
     for f in forms {
+        // The files its types name first, as the parsers load them
+        // (`Checker::type_loads`, `type-loaded`).
+        type_loads_at(f, interner, out);
         load_modules_at(f, interner, out);
+    }
+}
+
+/// Each `(load-moduleof "file" …)` and `(load-input-moduleof "file" …)` in
+/// `f`, outside quotations, in order.
+fn type_loads_at(f: &Syntax, interner: &Interner, out: &mut Vec<Load>) {
+    let Some(items) = f.as_proper_list() else { return };
+    match items.first().and_then(|h| h.as_symbol()).map(|h| interner.name(h)) {
+        Some("quote" | "quasiquote") => {}
+        Some(loader @ ("load-moduleof" | "load-input-moduleof")) => {
+            if let Some(Datum::Str(p)) = items.get(1).map(|p| &p.datum) {
+                out.push((f.span.start, p.to_string(), loader == "load-input-moduleof", None));
+            }
+        }
+        _ => items.iter().for_each(|x| type_loads_at(x, interner, out)),
     }
 }
 
 /// `load_modules_in` of one expression, or definition.
 fn load_modules_at(f: &Syntax, interner: &Interner, out: &mut Vec<Load>) {
     let Some(items) = f.as_proper_list() else { return };
-    let exps = |xs: &[Syntax], out: &mut Vec<Load>| load_modules_in(xs, interner, out);
+    let exps = |xs: &[Syntax], out: &mut Vec<Load>| xs.iter().for_each(|x| load_modules_at(x, interner, out));
     // The last item of each list in `xs`: a binding's expression.
     let inits = |xs: Option<&[Syntax]>, out: &mut Vec<Load>| {
         for b in xs.unwrap_or_default() {
@@ -869,7 +887,7 @@ fn load_modules_at(f: &Syntax, interner: &Interner, out: &mut Vec<Load>) {
     let arms = |xs: &[Syntax], k: usize, out: &mut Vec<Load>| {
         for c in xs {
             if let Some(parts) = c.as_proper_list() {
-                load_modules_in(parts.get(k..).unwrap_or_default(), interner, out);
+                parts.get(k..).unwrap_or_default().iter().for_each(|x| load_modules_at(x, interner, out));
             }
         }
     };

@@ -3500,3 +3500,33 @@ Heist found"); A is §134.
   `fixpt eval`'s and `,load`'s are; it had used the current directory.
   The docs said neither that nor that a loaded file's own loads are from
   its directory, and now say both (`fixpt-cli/tests/run_loads.rs`).
+
+## 136. A file's module type: `load-moduleof` and `load-input-moduleof` (2026-10-27)
+
+Heist's request (`docs/research/derived-signatures.md`), the user's names.
+
+- **`(load-moduleof "file" arg …)`** is the type of the module a
+  `load-module` of the file makes given `arg …`; **`(load-input-moduleof
+  "file" arg …)`**, of the module a `load-input` file's value makes. The
+  arguments take the value's type apart: a `poly`'s descriptions, a maker
+  of no parameters applied, a procedure's parameters each a module's name
+  where the types after select from it. What is left must be a module's
+  type. A file that is a function of the modules it uses types each by the
+  file that makes it, with no signature written out or kept in step.
+- **Abstract types are binders**, not shared and not fresh constants: a
+  parameter of the type stands for its argument's (the user's question,
+  the research note's Q2), so modules a maker makes twice stay apart.
+- **Loaded as loads are, in one order**: a form's type loads first, then
+  its expressions', in each parser (`type_loads`, `type-loaded`, which
+  makes them `(%type-made %shared:key "file" arg …)` for the FX-26 checker)
+  and in what the driver reads for the FX-26 front end (`syn.rs`), so the
+  hidden globals, and the files' places, are the same in both.
+- **A `define-type` of one is read in order**, not ahead with the other
+  types, since its file's hidden global is defined before it.
+- **The FX-26 checker's reading in a file of its own**,
+  `check-read-made.fx`, before the types' reader, which gives it its
+  description reader; `check-program.fx`'s own copies of `k-has-name?` and
+  `reverse` dropped for room.
+- **Stage 0's fixed cost unchanged**: 12.23-12.30G cycles against
+  12.18-12.29G; 28.37G instructions against 28.32G.
+- **Tests**: `modules/load-moduleof*.fx`, over `module-files/made-*.fx`.

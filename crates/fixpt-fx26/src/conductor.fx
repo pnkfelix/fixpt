@@ -70,13 +70,18 @@
           ((load-input "fx26:check-specs.fx")
            check-types check-env check-read check-syntax check-read-helpers
            parser-module))
+         ;; The types of the modules files make, read.
+         (check-read-made
+          ((load-input "fx26:check-read-made.fx")
+           check-types check-read-helpers check-read check-subst check-env check-print
+           check-holds check-print-parts parser-module))
          ;; Reading types, one knot.
          (check-read-descs
           ((load-input "fx26:check-read-descs.fx")
            check-types check-read-helpers check-syntax check-read
            check-subst check-env check-print check-holds
            check-proving check-effects check-unions parser-module check-print-parts
-           check-specs))
+           check-specs check-read-made))
          ;; Define-generative, read.
          (check-generative
           ((load-input "fx26:check-generative.fx")

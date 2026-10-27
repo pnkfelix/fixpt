@@ -22,7 +22,8 @@
        (check-effects-types (load-module "fx26:check-effects-types.fx"))
        (check-unions-types (load-module "fx26:check-unions-types.fx"))
        (reader-types (load-module "fx26:reader-types.fx"))
-       (check-specs-types (load-module "fx26:check-specs-types.fx")))
+       (check-specs-types (load-module "fx26:check-specs-types.fx"))
+       (check-read-made-types (load-module "fx26:check-read-made-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-types (select check-types-types check-types-sig))
            (check-read-helpers (select check-read-helpers-types check-read-helpers-sig))
@@ -37,7 +38,8 @@
            (check-unions (select check-unions-types check-unions-sig))
            (parser (select reader-types parser-sig))
            (check-print-parts (select check-print-parts-types check-print-parts-sig))
-           (check-specs (select check-specs-types check-specs-sig)))
+           (check-specs (select check-specs-types check-specs-sig))
+           (check-read-made (select check-read-made-types check-read-made-sig)))
     (module
 
 ;; The types it uses of the files before it.
@@ -48,6 +50,7 @@
 (hide (include check-types) (include check-read-helpers) (include check-syntax)
       (include check-subst) (include check-env) (include check-print-parts) (include check-print)
       (include check-holds) (include check-proving) (include check-unions) (include parser))
+(import check-read-made k-type-made-by)
 (import check-read k-at-name? k-atom-head? k-ctor-params k-effect-desc k-effect-named
         k-effect-selected k-frozen-into k-head k-items k-items-or-nil k-name-of k-not-applied
         k-parse-binders k-parse-place k-parse-region k-region-constant k-sfail k-symbol-head)
@@ -378,6 +381,25 @@
         (k-shape (= (k-length items) 2) usage s)
         (let* ((saved (get k-dscope)) (t (k-parse-proves (k-nth items 1) usage)))
           (begin (set k-dscope saved) t))))))
+;; Whether top-level `form` is a `define-type` that names a file, its type
+;; `(%type-made …)` or `(%input-made …)` (`load-moduleof`): read in order,
+;; not ahead, as its file's hidden global is defined before it
+;; (`declare_each`).
+(define k-read-in-order? (->* (top) bool)
+  (lambda (form)
+    (tagcase form (t-define-type (name def a b) (k-names-a-file? def)) (else y #f))))
+(define k-names-a-file? (->* (syn) bool)
+  (lambda (s)
+    (tagcase s
+      (lst (items d a b)
+        (let ((h (if (and (not (null? items)) (syn-symbol? (car items)))
+                     (syn-name (car items))
+                     "")))
+          (or (string=? h "%type-made") (string=? h "%input-made") (k-any-names-a-file? items))))
+      (else y #f))))
+(define k-any-names-a-file? (->* (k-syns) bool)
+  (lambda (xs)
+    (and (not (null? xs)) (or (k-names-a-file? (car xs)) (k-any-names-a-file? (cdr xs))))))
 ;; A type written as a form, `(hd …)`, `hd` no family's name.
 (define k-parse-type-form (->* (syn k-syns symbol) int)
   (lambda (s items hd)
@@ -386,6 +408,8 @@
         ((subr) (if (k-specified? items) (k-parse-specified s items) (k-parse-subr s items nil)))
         ((->) (if (k-specified? items) (k-parse-specified s items) (k-parse-arrow s items nil)))
         ((->*) (k-sfail k-arrow-star-only s))
+        ((%type-made) (k-type-made-by s items #f k-parse-d))
+        ((%input-made) (k-type-made-by s items #t k-parse-d))
         ((proves) (k-parse-proves-type s items))
         ((bool) (k-sfail "`(bool …)` is a procedure's result, and only that" s))
         ((poly)

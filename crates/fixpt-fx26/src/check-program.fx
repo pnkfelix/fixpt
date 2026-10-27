@@ -231,32 +231,29 @@
   (lambda (forms)
     (if (null? forms)
         #u
-        (begin (k-declare (car forms)) (k-declare-each (cdr forms))))))
-(define k-names-reversed (->* (k-names k-names) k-names)
-  (lambda (xs acc) (if (null? xs) acc (k-names-reversed (cdr xs) (cons (car xs) acc)))))
+        (begin (if (k-read-in-order? (car forms)) #u (k-declare (car forms)))
+               (k-declare-each (cdr forms))))))
 ;; The names simple `define-type`s give, in order, each as often as given.
 (define k-ahead-names-of (->* (k-tops k-names) k-names)
   (lambda (forms acc)
     (if (null? forms)
-        (k-names-reversed acc nil)
+        (the k-names (reverse acc))
         (k-ahead-names-of
          (cdr forms)
          (tagcase (car forms)
            (t-define-type (name def a b)
-             (if (and (syn-symbol? name) (not (string=? (k-list-head def) "dlambda")))
+             (if (and (syn-symbol? name) (not (string=? (k-list-head def) "dlambda"))
+                      (not (k-names-a-file? def)))
                  (cons (string->symbol (syn-name name)) acc)
                  acc))
            (else y acc))))))
-;; Whether `ns` has `n`.
-(define k-name-among? (->* (symbol k-names) bool)
-  (lambda (n ns) (and (not (null? ns)) (or (symbol=? n (car ns)) (k-name-among? n (cdr ns))))))
 ;; The names `ns` gives more than once, each once, in the order each is
 ;; given a second time.
 (define k-given-again (->* (k-names k-names k-names) k-names)
   (lambda (ns seen again)
-    (cond ((null? ns) (k-names-reversed again nil))
-          ((not (k-name-among? (car ns) seen)) (k-given-again (cdr ns) (cons (car ns) seen) again))
-          ((k-name-among? (car ns) again) (k-given-again (cdr ns) seen again))
+    (cond ((null? ns) (the k-names (reverse again)))
+          ((not (k-has-name? seen (car ns))) (k-given-again (cdr ns) (cons (car ns) seen) again))
+          ((k-has-name? again (car ns)) (k-given-again (cdr ns) seen again))
           (else (k-given-again (cdr ns) seen (cons (car ns) again))))))
 ;; A warning for each type a whole program defines more than once
 ;; (`TODO.md` §34): not an error, but its values see only the last.
@@ -958,6 +955,9 @@
   (lambda (form)
     (tagcase form
       (t-define-syscall (required s a b) (k-define-syscall required s a b))
+      ;; A type naming a file, declared in order (`k-read-in-order?`).
+      (t-define-type (n d a b) (begin (if (k-read-in-order? form) (k-declare form) #u)
+                                      (k-defining form)))
       (else y (k-defining form)))))
 
 ;; The second pass: definitions and expressions, in order, each under

@@ -250,6 +250,8 @@ pub const CHECK_LOGIC_TYPES: &str = include_str!("check-logic-types.fx");
 
 /// `check-specs-types.fx`: types and signatures, a module file of no state (`TODO.md` §68).
 pub const CHECK_SPECS_TYPES: &str = include_str!("check-specs-types.fx");
+/// `check-read-made-types.fx`: types and signatures, a module file of no state (`TODO.md` §68).
+pub const CHECK_READ_MADE_TYPES: &str = include_str!("check-read-made-types.fx");
 
 /// `check-module-rules.fx`: a `load-input` file, which the conductor applies (`TODO.md` §68).
 pub const CHECK_MODULE_RULES: &str = include_str!("check-module-rules.fx");
@@ -370,6 +372,8 @@ pub const CHECK_LOGIC: &str = include_str!("check-logic.fx");
 
 /// `check-specs.fx`: a `load-input` file, which the conductor applies (`TODO.md` §68).
 pub const CHECK_SPECS: &str = include_str!("check-specs.fx");
+/// `check-read-made.fx`: a `load-input` file, which the conductor applies (`TODO.md` §68).
+pub const CHECK_READ_MADE: &str = include_str!("check-read-made.fx");
 
 /// `check-subst.fx`: a `load-input` file, which the conductor applies (`TODO.md` §68).
 pub const CHECK_SUBST: &str = include_str!("check-subst.fx");
@@ -596,7 +600,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 169] = [
+pub const FRONT_END_MODULES: [(&str, &str); 171] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("eager-reader-states.fx", EAGER_READER_STATES),
     ("syn.fx", SYN),
@@ -711,6 +715,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 169] = [
     ("check-proving-types.fx", CHECK_PROVING_TYPES),
     ("check-logic-types.fx", CHECK_LOGIC_TYPES),
     ("check-specs-types.fx", CHECK_SPECS_TYPES),
+    ("check-read-made-types.fx", CHECK_READ_MADE_TYPES),
     ("check-mask-types.fx", CHECK_MASK_TYPES),
     ("check-data-types.fx", CHECK_DATA_TYPES),
     ("check-close-types.fx", CHECK_CLOSE_TYPES),
@@ -755,6 +760,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 169] = [
     ("check-proving.fx", CHECK_PROVING),
     ("check-logic.fx", CHECK_LOGIC),
     ("check-specs.fx", CHECK_SPECS),
+    ("check-read-made.fx", CHECK_READ_MADE),
     ("check-subst.fx", CHECK_SUBST),
     ("check-syntax.fx", CHECK_SYNTAX),
     ("check-read.fx", CHECK_READ),

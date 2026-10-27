@@ -1176,7 +1176,7 @@ impl Checker {
         r
     }
 
-    fn param_sels(&self, t: TyId, seen: &mut HashSet<TyId>, out: &mut Vec<(usize, Sym)>) {
+    pub(crate) fn param_sels(&self, t: TyId, seen: &mut HashSet<TyId>, out: &mut Vec<(usize, Sym)>) {
         let t = self.arena.resolve(t);
         if !seen.insert(t) {
             return;
