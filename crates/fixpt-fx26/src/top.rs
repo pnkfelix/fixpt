@@ -1204,9 +1204,14 @@ impl Checker {
     }
 
     /// Run `f`, then forget everything it added to the environment, the
-    /// description scope and the arena. The caller restores the interner.
+    /// description scope and the arena, and every file it loaded for the
+    /// first time (`parse_load`). The caller restores the interner, so a
+    /// load kept would name a hidden global by a symbol gone.
     pub fn scratch<T>(&mut self, f: impl FnOnce(&mut Checker) -> T) -> T {
         let (env, dscope, arena) = (self.env.len(), self.dscope.len(), self.arena.mark());
+        let shared = (self.shared_loads.clone(), self.shared_globals.clone());
+        let (defs, outdated) = (self.defs.clone(), self.outdated.clone());
+        let (hoisted, files_read) = (self.hoisted.len(), self.files_read);
         let out = f(self);
         self.truncate_env(env);
         self.dscope.truncate(dscope);
@@ -1215,6 +1220,12 @@ impl Checker {
         self.arrow_star_tys.retain(|t| arena.has_ty(*t));
         self.arena.reset(arena);
         self.regions_memo.borrow_mut().clear();
+        (self.shared_loads, self.shared_globals) = shared;
+        (self.defs, self.outdated) = (defs, outdated);
+        self.hoisted.truncate(hoisted);
+        self.files_read = files_read;
+        self.load_sites.retain(|f, _| f.0 <= files_read + 1000);
+        self.loaded.retain(|e, _| e.0 < arena.exps());
         out
     }
 

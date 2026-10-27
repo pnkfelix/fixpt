@@ -97,3 +97,18 @@ fn trying_an_arrow_star_leaves_nothing_behind() {
     let written = "(letrec ((g (subr pure (int) int) (the (subr pure (int) int) (lambda (x) x)))) (g 1))";
     assert_eq!(ty_of(&mut c, written), "int ! pure");
 }
+
+/// A file loaded in a form tried leaves no load behind: the driver forgets
+/// the symbols the try read (the REPL's notes as you type), so a load kept
+/// would name its hidden global by a symbol gone, and a second try panic.
+#[test]
+fn trying_a_load_leaves_nothing_behind() {
+    let mut c = Checker::new();
+    let tried = c.read_in(FileId(0), "(load-module \"fx26:conditions.fx\")").expect("reads");
+    for _ in 0..2 {
+        let mark = c.interner.len();
+        assert!(c.try_top(&tried[0], |_, r| r.is_ok()));
+        c.interner.truncate(mark);
+    }
+    assert!(ty_of(&mut c, "(load-module \"fx26:conditions.fx\")").starts_with("(moduleof"));
+}
