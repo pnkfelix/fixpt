@@ -112,3 +112,27 @@ fn trying_a_load_leaves_nothing_behind() {
     }
     assert!(ty_of(&mut c, "(load-module \"fx26:conditions.fx\")").starts_with("(moduleof"));
 }
+
+/// A form refused leaves no file it loaded behind: a module file refused
+/// for making state, after loading a pure one, is refused the same way
+/// again, not taken the second time as though the pure one were made.
+#[test]
+fn refused_loads_leave_nothing_behind() {
+    let mut c = Checker::new();
+    c.base_dir = Some(std::path::PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs/module-files")));
+    let form = c.read_in(FileId(0), "(load-module \"stateful-nested.fx\")").expect("reads");
+    let first = c.top_defining(&form[0]).expect_err("refused").message;
+    assert!(first.starts_with("a loaded file is one value for all its loads"), "{first}");
+    let again = c.top_defining(&form[0]).expect_err("refused again").message;
+    assert_eq!(again, first);
+    // Tried as it is typed first, its symbols forgotten after, as the REPL
+    // does: then refused the same way.
+    let mut d = Checker::new();
+    d.base_dir = c.base_dir.clone();
+    let form = d.read_in(FileId(0), "(load-module \"stateful-nested.fx\")").expect("reads");
+    let mark = d.interner.len();
+    let tried = d.try_top(&form[0], |_, r| r.err().map(|e| e.message));
+    d.interner.truncate(mark);
+    assert_eq!(tried.as_deref(), Some(first.as_str()));
+    assert_eq!(d.top_defining(&form[0]).expect_err("refused").message, first);
+}

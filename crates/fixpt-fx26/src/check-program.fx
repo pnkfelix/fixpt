@@ -607,13 +607,17 @@
                (a-read (r) (tagcase r (r-global (g) #t) (r-globals () #t) (else y #f)))
                (else y #f))
              (k-reads-globals-only? (cdr e))))))
-;; The error that making a loaded file has effect `e`.
+;; The error that making a loaded file has effect `e`, and what to do.
+(define k-shared-impure-why string
+  (string-append "a file whose definitions make state as it is made is a program's: run it "
+                 "with `,load FILE` or `fixpt run`; or, a module, give its state in a "
+                 "`lambda` it gives, which each caller applies"))
 (define k-shared-impure (->* (k-eff) string)
   (lambda (e)
     (k-cat3 (string-append "a loaded file is one value for all its loads, made once, "
                            "so making it must be pure, and this one has ")
             (k-show-effect e)
-            ": make its state in a `lambda` it gives, which each caller applies")))
+            (k-cat3 (char->string (integer->char 10)) "  " k-shared-impure-why))))
 ;; `(define name init)`, of no type written: its line. A loaded file's, made
 ;; once for all its loads, must be pure but for reading globals, and has
 ;; none; the definition is at `a`..`b`, the form that loads it.

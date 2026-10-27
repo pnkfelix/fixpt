@@ -1055,4 +1055,12 @@ impl ArenaMark {
     pub fn has_ty(&self, t: TyId) -> bool {
         (t.0 as usize) < self.tys
     }
+    /// Whether variable `v` was made before the mark.
+    pub fn has_dvar(&self, v: DVar) -> bool {
+        (v.0 as usize) < self.dvars
+    }
+    /// Whether expression `e` was made before the mark.
+    pub fn has_exp(&self, e: ExpId) -> bool {
+        (e.0 as usize) < self.exps
+    }
 }

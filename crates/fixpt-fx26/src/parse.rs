@@ -2596,7 +2596,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                         return Err(FxError::at(
                             span,
                             format!(
-                                "a loaded file is one value for all its loads, made once, so making it must be pure, and this one has {}: make its state in a `lambda` it gives, which each caller applies",
+                                "a loaded file is one value for all its loads, made once, so making it must be pure, and this one has {}\n  a file whose definitions make state as it is made is a program's: run it with `,load FILE` or `fixpt run`; or, a module, give its state in a `lambda` it gives, which each caller applies",
                                 self.show_effect(effect)
                             ),
                         ));

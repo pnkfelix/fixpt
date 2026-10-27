@@ -82,6 +82,58 @@ pub struct Defining {
     pub broken: Vec<(Vec<Sym>, String)>,
 }
 
+/// What [`Checker::keep`] saves.
+struct Kept {
+    env: usize,
+    dscope: usize,
+    shared: (std::collections::HashMap<String, Sym>, std::collections::HashSet<Sym>),
+    defs: Option<(Vec<Definition>, Vec<(Vec<Sym>, Vec<Sym>)>)>,
+    defs_len: (usize, usize),
+    hoisted: usize,
+    files_read: u32,
+    mark: crate::ast::ArenaMark,
+    lens: [usize; 24],
+    scoped: (u32, usize, usize, usize, usize),
+    hidden: Option<((usize, usize), (usize, usize))>,
+}
+
+/// Every field of the checker, placed: so that a field added does not
+/// compile until it is said whether a check thrown away or refused must
+/// put it back (`Checker::keep`), for a check that changes it and leaves
+/// it changed is seen by the next (`docs/research/speculation.md`).
+#[allow(dead_code)]
+fn every_field_placed(c: &Checker) {
+    let Checker {
+        // Put back by `keep` and `put_back`.
+        env: _, dscope: _, lifetimes: _, freezing: _, recursive: _, closed_named: _, expanding: _, knots: _, spin_why: _,
+        generatives: _, transparent: _, inside: _, conversions: _, lemmas: _, pending_lemma: _, certified: _,
+        certified_nats: _, certified_lengths: _, narrowed: _, path_narrowed: _, closure_depth: _, pending_unions: _,
+        checked_call: _, skolems: _, to_end_sizes: _, module_vars: _, abstract_funs: _, effect_selects: _,
+        with_effect_fallback: _, subst_keep: _, select_map: _, param_map: _, size_facts: _, operator_at: _,
+        hidden: _, shared_loads: _, loading: _, include_scope: _, with_depth: _, shared_globals: _, hoisted: _,
+        loaded: _, in_built_in: _, load_sites: _, files_read: _, ahead: _, ahead_filled: _, hazard_modules: _,
+        hazard_items: _, broken: _, defs: _, outdated: _, poly_chain: _, inst_for: _,
+        // Put back by `truncate_env`, with the environment.
+        known: _, global_slots: _, fixed_slots: _,
+        // The arena, reset by `scratch` (a refused check's ids are left
+        // unused); the interner, by `scratch`'s caller; the facts, forgotten
+        // by `scratch`; and what remembers them, cleared there.
+        arena: _, interner: _, facts: _, regions_memo: _, regions_open: _, arrow_star_tys: _,
+        // Printing's, set and cleared around each print.
+        print_names: _, print_expanded: _, print_cycles: _, show_marks: _,
+        // Set around a single unification or check, and put back there.
+        unify_exact: _, unify_upper: _, arrow_star: _, holes: _, hole_hint: _,
+        // A count of regions made, which only grows: a name made once is
+        // never made again, put back or not.
+        fresh_regions: _,
+        // The standard environment, and the session's settings: no check
+        // changes them.
+        base: _, void: _, int: _, bool_: _, string: _, unit: _, char_: _, f64_: _, symbol: _, conv_default: _,
+        standard_len: _, standard_dscope: _, base_dir: _, masking: _, defer_reruns: _, syscalls: _,
+        globals_effects: _, record_operands: _, record_types: _,
+    } = c;
+}
+
 /// The effect `->*` finds for `name`, from its body's `latent`: with `spin`
 /// if it reads `name` itself, as a procedure that may reach itself through
 /// a global must say (`no_reaching_itself`).
@@ -109,7 +161,20 @@ impl Checker {
     /// one that uses those) is checked again, in order: each that checks is
     /// defined again, by the same rule; each that does not is broken. To
     /// keep a value as it was, bind it: `(define d (let ((g g)) …))`.
+    ///
+    /// A form refused leaves nothing behind: not the files it loaded for
+    /// the first time, which another try would take as loaded, with their
+    /// hidden globals never made (`put_back`).
     pub fn top_defining(&mut self, form: &Syntax) -> R<Defining> {
+        let kept = self.keep(false);
+        let r = self.top_defining_kept(form);
+        if r.is_err() {
+            self.put_back(kept);
+        }
+        r
+    }
+
+    fn top_defining_kept(&mut self, form: &Syntax) -> R<Defining> {
         let names = self.defined_names(form);
         let olds: Vec<(Sym, TyId)> = names.iter().filter_map(|n| Some((*n, self.global_type(*n)?))).collect();
         let users = if olds.is_empty() || self.defer_reruns { Vec::new() } else { self.users_of(&names) };
@@ -1208,25 +1273,124 @@ impl Checker {
     /// first time (`parse_load`). The caller restores the interner, so a
     /// load kept would name a hidden global by a symbol gone.
     pub fn scratch<T>(&mut self, f: impl FnOnce(&mut Checker) -> T) -> T {
-        let (env, dscope, arena) = (self.env.len(), self.dscope.len(), self.arena.mark());
-        let shared = (self.shared_loads.clone(), self.shared_globals.clone());
-        let (defs, outdated) = (self.defs.clone(), self.outdated.clone());
-        let (hoisted, files_read) = (self.hoisted.len(), self.files_read);
+        let (kept, arena) = (self.keep(true), self.arena.mark());
         let out = f(self);
-        self.truncate_env(env);
-        self.dscope.truncate(dscope);
+        self.put_back(kept);
         self.facts.forget_from(arena.exps());
         // A type read from `->*` goes with the rest: its id may be another's.
         self.arrow_star_tys.retain(|t| arena.has_ty(*t));
         self.arena.reset(arena);
         self.regions_memo.borrow_mut().clear();
-        (self.shared_loads, self.shared_globals) = shared;
-        (self.defs, self.outdated) = (defs, outdated);
-        self.hoisted.truncate(hoisted);
-        self.files_read = files_read;
-        self.load_sites.retain(|f, _| f.0 <= files_read + 1000);
-        self.loaded.retain(|e, _| e.0 < arena.exps());
         out
+    }
+
+    /// What checking a form changes besides the arena, to put back
+    /// ([`put_back`](Self::put_back)) if it is thrown away or refused: the
+    /// environment and the description scope; the files loaded for the
+    /// first time (`parse_load`) and their hidden globals' definitions;
+    /// what the checker learns as it goes (generative types, effects
+    /// selected, conversions, lemmas, facts proved), which a check that
+    /// leaves nothing must not leave either; and the state set around what
+    /// it checks, which a refusal can leave set. Every field is placed in
+    /// `every_field_placed`. The definitions recorded are kept whole only
+    /// if `whole`: a check that succeeds (one thrown away) may redefine,
+    /// which replaces a definition; one refused only adds its loads'.
+    fn keep(&self, whole: bool) -> Kept {
+        Kept {
+            env: self.env.len(),
+            dscope: self.dscope.len(),
+            shared: (self.shared_loads.clone(), self.shared_globals.clone()),
+            defs: whole.then(|| (self.defs.clone(), self.outdated.clone())),
+            defs_len: (self.defs.len(), self.outdated.len()),
+            hoisted: self.hoisted.len(),
+            files_read: self.files_read,
+            mark: self.arena.mark(),
+            lens: [
+                self.lifetimes.len(),
+                self.freezing.len(),
+                self.recursive.len(),
+                self.knots.len(),
+                self.spin_why.len(),
+                self.generatives.len(),
+                self.transparent.len(),
+                self.inside.len(),
+                self.conversions.len(),
+                self.lemmas.len(),
+                self.certified.len(),
+                self.certified_nats.len(),
+                self.certified_lengths.len(),
+                self.narrowed.len(),
+                self.path_narrowed.len(),
+                self.pending_unions.len(),
+                self.skolems.len(),
+                self.effect_selects.len(),
+                self.size_facts.len(),
+                self.ahead.len(),
+                self.ahead_filled.len(),
+                self.hazard_modules.len(),
+                self.hazard_items.len(),
+                self.loading.len(),
+            ],
+            scoped: (self.expanding, self.closure_depth, self.include_scope, self.with_depth, self.in_built_in),
+            hidden: self.hidden,
+        }
+    }
+
+    fn put_back(&mut self, k: Kept) {
+        self.truncate_env(k.env);
+        self.dscope.truncate(k.dscope);
+        self.broken.retain(|_, (i, _)| *i < k.env);
+        (self.shared_loads, self.shared_globals) = k.shared;
+        match k.defs {
+            Some((defs, outdated)) => (self.defs, self.outdated) = (defs, outdated),
+            None => {
+                self.defs.truncate(k.defs_len.0);
+                self.outdated.truncate(k.defs_len.1);
+            }
+        }
+        self.hoisted.truncate(k.hoisted);
+        self.files_read = k.files_read;
+        self.load_sites.retain(|f, _| f.0 <= k.files_read + 1000);
+        let m = k.mark;
+        self.loaded.retain(|e, _| m.has_exp(*e));
+        let [lifetimes, freezing, recursive, knots, spin_why, generatives, transparent, inside, conversions, lemmas, certified, certified_nats, certified_lengths, narrowed, path_narrowed, pending_unions, skolems, effect_selects, size_facts, ahead, ahead_filled, hazard_modules, hazard_items, loading] = k.lens;
+        self.lifetimes.truncate(lifetimes);
+        self.freezing.truncate(freezing);
+        self.recursive.truncate(recursive);
+        self.knots.truncate(knots);
+        self.spin_why.truncate(spin_why);
+        self.generatives.truncate(generatives);
+        self.transparent.truncate(transparent);
+        self.inside.truncate(inside);
+        self.conversions.truncate(conversions);
+        self.lemmas.truncate(lemmas);
+        self.certified.truncate(certified);
+        self.certified_nats.truncate(certified_nats);
+        self.certified_lengths.truncate(certified_lengths);
+        self.narrowed.truncate(narrowed);
+        self.path_narrowed.truncate(path_narrowed);
+        self.pending_unions.truncate(pending_unions);
+        self.skolems.truncate(skolems);
+        self.effect_selects.truncate(effect_selects);
+        self.size_facts.truncate(size_facts);
+        self.ahead.truncate(ahead);
+        self.ahead_filled.truncate(ahead_filled);
+        self.hazard_modules.truncate(hazard_modules);
+        self.hazard_items.truncate(hazard_items);
+        self.loading.truncate(loading);
+        // What is keyed by, or holds, something made since.
+        self.closed_named.retain(|t| m.has_ty(*t));
+        self.to_end_sizes.retain(|v| m.has_dvar(*v));
+        self.module_vars.retain(|v| m.has_dvar(*v));
+        self.abstract_funs.retain(|v| m.has_dvar(*v));
+        self.with_effect_fallback.retain(|v, _| m.has_dvar(*v));
+        self.select_map.retain(|_, t| m.has_ty(*t));
+        self.param_map.retain(|_, t| m.has_ty(*t));
+        self.poly_chain.retain(|e, _| m.has_exp(*e));
+        (self.expanding, self.closure_depth, self.include_scope, self.with_depth, self.in_built_in) = k.scoped;
+        self.hidden = k.hidden;
+        self.pending_lemma = None;
+        (self.checked_call, self.operator_at, self.inst_for, self.subst_keep) = (None, None, None, None);
     }
 
     /// What the argument at `index` (from 1) of the application written
