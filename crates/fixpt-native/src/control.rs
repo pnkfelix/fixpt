@@ -15,7 +15,7 @@
 use fixpt_engine::cellular::{prompt_height, prompt_regions, prompt_word, reinstated_prompt, MARK_MARK, PROMPT_MARK, Trap};
 use fixpt_heap::layout::kind;
 use fixpt_heap::layout::cellular::{
-    CLOSURE_WORD, CONT_BASE, CONT_CLO, CONT_CUR, CONT_DS, CONT_FIELDS, CONT_FP, CONT_K, CONT_INNER, CONT_RS, CONT_REGIONS, CONT_RUN, CONT_SHOTS, CONT_WHOLE, WORD_CELL0,
+    CLOSURE_WORD, CONT_BASE, CONT_CLO, CONT_CUR, CONT_DS, CONT_FIELDS, CONT_STUB, CONT_FP, CONT_K, CONT_INNER, CONT_RS, CONT_REGIONS, CONT_RUN, CONT_SHOTS, CONT_WHOLE, WORD_CELL0,
 };
 use fixpt_heap::{Heap, Shots, Value};
 
@@ -205,8 +205,10 @@ fn capture(s: &Stacks, heap: &mut Heap, rs_from: usize, ds_from: usize, whole: b
         let entry = lead != PROMPT_MARK && lead != MARK_MARK;
         if i % 4 == 1 && entry && w.is_fixnum() && w.as_fixnum() < 0 { Value::fixnum(-w.as_fixnum()) } else { w }
     });
+    let stub = heap.foreign_stub();
     let k = heap.make_bloblet(CONTINUATION, CONT_FIELDS, 0, true);
     let fields = [
+        (CONT_STUB, stub),
         (CONT_DS, ds),
         (CONT_RS, rs),
         (CONT_CUR, Value::from_raw(s.st.cur)),

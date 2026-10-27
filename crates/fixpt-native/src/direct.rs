@@ -53,7 +53,7 @@ use std::mem::offset_of;
 
 mod reps;
 mod declare;
-pub use declare::{native_convention, native_convention_of};
+pub use declare::{closures_before_stubs, native_convention, native_convention_of};
 mod x64;
 mod fx;
 pub use fx::{describe, fx_abandon, Each, FxCompile, FxEmitted, FxRequest};
@@ -120,8 +120,9 @@ struct DState {
     /// arguments it is given.
     aux: u64,
     nargs: u64,
-    /// The closure the call starts in; `DELTA`; and where the code area
-    /// starts, below which a closure's code is not native code.
+    /// The closure the call starts in; `DELTA`; and where the code area's
+    /// native part starts, below which a closure's code is not native code
+    /// (a word, whose stub enters `foreign`).
     clo: u64,
     delta: u64,
     code_lo: u64,
@@ -769,6 +770,23 @@ fn forget_word(heap: &mut Heap, raw: u64) {
     }
 }
 
+/// The stub that enters `foreign` (`fixpt_heap::layout::stub`, `docs/
+/// research/code-stubs.md`), as this crate's assemblers make it for
+/// `target`, `arm64` or `x86_64`: for a test that the heap's bytes are
+/// these.
+pub fn foreign_stub_of(target: &str) -> Vec<u8> {
+    if target == "x86_64" {
+        return x64::foreign_stub();
+    }
+    let mut a = Asm::new();
+    a.e(ldr(X16, ST, st_off(offset_of!(DState, foreign))));
+    a.e(br(X16));
+    a.finish().expect("no labels").iter().flat_map(|w| w.to_le_bytes()).collect()
+}
+
+// The heap's stub reaches `foreign` where the state has it.
+const _: () = assert!(offset_of!(DState, foreign) == fixpt_heap::layout::stub::STATE_FOREIGN);
+
 /// The native adapter's code (`adapt`), the same for every adapter.
 fn adapter_code() -> Vec<u32> {
     let mut a = Asm::new();
@@ -1290,7 +1308,7 @@ fn run(r: &Runner, rt: &mut fixpt_runtime::Runtime, p: Compiled, args: &[Value],
     st.clo = p.closure.raw();
     let target = rt.heap.code_exec_address(p.code) as u64;
     st.delta = target.wrapping_sub(p.code.raw());
-    st.code_lo = rt.heap.code_area_address() as u64;
+    st.code_lo = rt.heap.native_code_address() as u64;
     (st.mark_ret, st.trap_stub, st.foreign, st.closure) = (r.mark_ret, r.trap_stub, r.foreign, r.closure);
     (st.poll, st.cons, st.bloblet) = (r.poll, r.cons, r.bloblet);
     // SAFETY: the trampoline follows the C convention, saves what it
@@ -2058,7 +2076,7 @@ impl Compiling<'_> {
         // Each call of a global bound when compiled whose cell holds
         // something else when the code runs: out of the way, the call
         // through the cell (with the call's stub, and where to come back).
-        let mut cell_slows: Vec<(Label, Label, Label, Vec<Reg>)> = Vec::new();
+        let mut cell_slows: Vec<(Label, Label, Vec<Reg>)> = Vec::new();
         // Where a call-out that does not return goes on (an abort), if one
         // does here.
         let (resume_at, mut uses_resume) = (a.label(), false);
@@ -2619,14 +2637,12 @@ impl Compiling<'_> {
                     }
                     let args = offset_of!(DState, args) as u32;
                     // A call of the closure in `CLO`, `n` arguments in
-                    // registers, back at `after`: native code, or not.
-                    let call_clo = |a: &mut Asm, foreign: &mut Vec<(Label, Label, usize, bool)>, n: usize, after: Label| {
-                        let stub = a.label();
+                    // registers, back at `after`: its code runs, native
+                    // code or a stub that enters `foreign` with the count
+                    // (`docs/research/code-stubs.md`).
+                    let call_clo = |a: &mut Asm, n: usize, after: Label| {
                         a.e(ldur(X16, CLO, field_off(CLOSURE_WORD)));
-                        a.e(ldr(X17, ST, st_off(offset_of!(DState, code_lo))));
-                        a.e(cmp(X16, X17));
-                        a.to(stub, Fix::If(Cond::Lo));
-                        foreign.push((stub, after, n, false));
+                        a.e(movz(X9, n as u32, 0));
                         a.e(add(X16, X16, DELTA));
                         a.e(blr(X16));
                         a.bind(after);
@@ -2677,14 +2693,14 @@ impl Compiling<'_> {
                             a.to(land, Fix::Adr(X9));
                             control_frame(&mut a, &mut stubs, X9, PROMPT_MARK, Some(st_off(offset_of!(DState, regions))));
                             a.e(mov(CLO, 3));
-                            call_clo(&mut a, &mut foreign, 0, after);
+                            call_clo(&mut a, 0, after);
                             pop_control(&mut a);
                             a.to(done, Fix::B);
                             a.bind(land);
                             a.e(mov(1, RESULT));
                             a.e(ldr(CLO, SP, 40));
                             pop_control(&mut a);
-                            call_clo(&mut a, &mut foreign, 1, handled);
+                            call_clo(&mut a, 1, handled);
                             a.bind(done);
                         }
                         // `x1` the key, `x2` the value, `x3` the thunk.
@@ -2692,7 +2708,7 @@ impl Compiling<'_> {
                             let after = a.label();
                             control_frame(&mut a, &mut stubs, XZR, MARK_MARK, None);
                             a.e(mov(CLO, 3));
-                            call_clo(&mut a, &mut foreign, 0, after);
+                            call_clo(&mut a, 0, after);
                             pop_control(&mut a);
                         }
                         // In tail position, this frame popped: `x1` the key,
@@ -2704,7 +2720,7 @@ impl Compiling<'_> {
                         // machine's `withmark-tail` does, so that a loop that
                         // marks each time runs in constant space.
                         "withmark-tail" => {
-                            let (push, call, stub, after) = (a.label(), a.label(), a.label(), a.label());
+                            let (push, call) = (a.label(), a.label());
                             a.e(ldr(X9, ST, st_off(offset_of!(DState, mark_ret))));
                             a.e(cmp(LINK, X9));
                             a.to(push, Fix::If(Cond::Ne));
@@ -2719,13 +2735,9 @@ impl Compiling<'_> {
                             a.bind(call);
                             a.e(mov(CLO, 3));
                             a.e(ldur(X16, CLO, field_off(CLOSURE_WORD)));
-                            a.e(ldr(X17, ST, st_off(offset_of!(DState, code_lo))));
-                            a.e(cmp(X16, X17));
-                            a.to(stub, Fix::If(Cond::Lo));
-                            foreign.push((stub, after, 0, true));
+                            a.e(movz(X9, 0, 0));
                             a.e(add(X16, X16, DELTA));
                             a.e(br(X16));
-                            a.bind(after);
                         }
                         "abort" => {
                             callout(&mut a, &mut stubs, self.callouts, Callout::Abort);
@@ -2746,7 +2758,7 @@ impl Compiling<'_> {
                             callout(&mut a, &mut stubs, self.callouts, Callout::Capture { whole: r.ends_with("callcc"), once: r.ends_with("callone") });
                             a.e(mov(1, RESULT));
                             a.e(ldr(CLO, ST, args));
-                            call_clo(&mut a, &mut foreign, 1, after);
+                            call_clo(&mut a, 1, after);
                         }
                         "firstmark" => callout(&mut a, &mut stubs, self.callouts, Callout::FirstMark),
                         "currentmarks" => callout(&mut a, &mut stubs, self.callouts, Callout::CurrentMarks),
@@ -3328,9 +3340,9 @@ impl Compiling<'_> {
                     let raws: Vec<Reg> = (1..=8).filter(|&r| reps::raw_param(callee, r)).map(|r| r as Reg).collect();
                     let (stub, after) = (a.label(), a.label());
                     // The callee's convention, by its type (`regcode::CONVS`):
-                    // native, its code called with no look; cellular, called
-                    // out (`common_foreign`) with none; fx, looked at, its
-                    // code in the code area or not (`code_lo`).
+                    // cellular, called out (`common_foreign`) with no look;
+                    // native or fx, its code run, native code or a stub that
+                    // enters `foreign` (`docs/research/code-stubs.md`).
                     use fixpt_heap::layout::regcode::conv;
                     let cv = k(o(1));
                     let not_native = |a: &mut Asm| {
@@ -3339,11 +3351,6 @@ impl Compiling<'_> {
                             return;
                         }
                         a.e(ldur(X16, CLO, field_off(CLOSURE_WORD)));
-                        if cv == conv("fx") {
-                            a.e(ldr(X17, ST, st_off(offset_of!(DState, code_lo))));
-                            a.e(cmp(X16, X17));
-                            a.to(stub, Fix::If(Cond::Lo));
-                        }
                     };
                     // A global bound as compiled: while its cell has not
                     // been written since, as bound; else, out of the way,
@@ -3382,8 +3389,7 @@ impl Compiling<'_> {
                             None => unreachable!("a global bound is called"),
                         }
                         a.bind(join);
-                        cell_slows.push((slow, join, stub, raws));
-                        foreign.push((stub, after, k(o(0)), tail));
+                        cell_slows.push((slow, join, raws));
                     } else {
                         match pending.take() {
                             Some(Field::Code(q)) => {
@@ -3400,7 +3406,7 @@ impl Compiling<'_> {
                                 ldr_field(&mut a, X9, f);
                                 a.e(ldur(CLO, X9, field_off(2)));
                                 not_native(&mut a);
-                                if cv != conv("native") {
+                                if cv == conv("cellular") {
                                     foreign.push((stub, after, k(o(0)), tail));
                                 }
                             }
@@ -3412,7 +3418,7 @@ impl Compiling<'_> {
                             None => {
                                 a.e(mov(CLO, RESULT));
                                 not_native(&mut a);
-                                if cv != conv("native") {
+                                if cv == conv("cellular") {
                                     foreign.push((stub, after, k(o(0)), tail));
                                 }
                             }
@@ -3502,16 +3508,14 @@ impl Compiling<'_> {
         // goes there to return from it to this procedure's caller.
         // Each call of what is not native code: to the machine's common
         // routine (`common_foreign`), with the arguments' count.
-        for (slow, join, stub, raws) in &cell_slows {
+        for (slow, join, raws) in &cell_slows {
             a.bind(*slow);
-            // Not the procedure known: what it holds takes values.
+            // Not the procedure known: what it holds takes values, and its
+            // code runs.
             for &r in raws {
                 box_f64(&mut a, self.callouts, r);
             }
             a.e(ldur(X16, CLO, field_off(CLOSURE_WORD)));
-            a.e(ldr(X17, ST, st_off(offset_of!(DState, code_lo))));
-            a.e(cmp(X16, X17));
-            a.to(*stub, Fix::If(Cond::Lo));
             a.to(*join, Fix::B);
         }
         for (stub, after, n, tail) in &foreign {

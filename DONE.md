@@ -3310,3 +3310,29 @@ Fixpt does", records what differs from it and the open questions decided.
   checked (`compile-program`, `fixpt compile`'s comparison) refuses a
   declaration, having no canonical form to expand it with.
 
+
+## 128. Every procedure's code runs (kayak's request, 2026-10-26)
+
+Native code calls any procedure as it calls native code, with no test of
+what it is: the convention's `closures` clause is `(code-always-runs)`
+(`docs/research/declared-conventions.md`). Kayak's request is
+`docs/research/code-stubs.md`, Fixpt's copy, whose last section, "What
+Fixpt does", records what differs from it and the open questions decided.
+
+- **The code area in two parts** (`fixpt-heap`'s `heap/code.rs`): below
+  `code-lo`, every cellular word, its suffix a stub that enters `foreign`,
+  and the stub the other kinds of procedure share at their field 2 (the
+  VM's closures, primitives and continuations, and cellular
+  continuations, whose layouts change by a field); from `code-lo`, native
+  code. Images carry the area (format version 8); graph copies keep code
+  code; process messages share it.
+- **The compilers** drop the test: the Rust ones on arm64 and x86_64, the
+  one written in FX-26 on x86_64, byte for byte the Rust one's still.
+- **Code written to the older clause** runs, unchanged: both checkers
+  accept it, a word is below `code-lo` as before, `foreign` takes a native
+  closure too, and the convention read as data keeps the older test's
+  field.
+- **Tests**: `made-code*/stubs.fx` on every machine (a primitive, a
+  continuation, a closure kept cellular, with no test; the VM's
+  continuation refused by `foreign`); the stub's bytes against both
+  assemblers; words and images in `code_area.rs`.

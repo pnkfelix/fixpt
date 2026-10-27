@@ -227,3 +227,34 @@ fn both_declarations_read_as_data() {
         assert!(text.lines().last().is_some_and(|l| l.starts_with(&format!("{target:?} :"))), "{target}: {text}{}", String::from_utf8_lossy(&out.stderr));
     }
 }
+
+/// Every procedure's code runs (`docs/research/code-stubs.md`,
+/// `programs/made-code/stubs.fx`): made code declared with
+/// `(code-always-runs)` calls what it is given with no test, its code at
+/// its field 2 plus the code distance, native code or a stub that enters
+/// `foreign`. Given a primitive, a continuation, and a closure kept
+/// cellular, a word's: on the bytecode VM, its own primitive, and its
+/// continuation, which `foreign` refuses as it always has. Then on two
+/// machines with time slices of 3 and a small nursery.
+#[test]
+fn every_procedures_code_runs() {
+    // The values, past a machine's note that the closure stays cellular.
+    let values = |m: &str, vars: &[(&str, &str)]| {
+        let got: Vec<String> = values_with(m, "stubs.fx", 4, vars).into_iter().filter(|l| !l.starts_with("; ")).collect();
+        got[got.len().saturating_sub(3)..].to_vec()
+    };
+    let runs: Vec<_> = machines().into_iter().map(|(m, _)| (m, std::thread::spawn(move || values(m, &[])))).collect();
+    for (m, t) in runs {
+        let got = t.join().expect("ran");
+        if m == "rs-scheme-vm" {
+            assert_eq!(got[0], "-42", "{m}: {got:?}");
+            assert!(got[2].contains("a call of what is not a procedure"), "{m}: {got:?}");
+            continue;
+        }
+        assert_eq!(got, ["-42", "42", "42"], "{m}");
+    }
+    let stress = [("FIXPT_SLICE", "3"), ("FIXPT_NURSERY", "4096"), ("FIXPT_NATIVE_STACK_CACHE", "1024")];
+    for m in ["fx-cells-rsinterp", "fx-regs-rsjit-nativecc"] {
+        assert_eq!(values(m, &stress), ["-42", "42", "42"], "{m}, stressed");
+    }
+}

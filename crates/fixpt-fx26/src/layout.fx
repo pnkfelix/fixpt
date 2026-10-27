@@ -72,8 +72,8 @@
 (define kind-extension int 255)
 
 ;;; A closure's fields, and an environment frame's, by negative offset.
-(define closure-code int 2)
-(define closure-extra0 int 3)
+(define closure-code int 3)
+(define closure-extra0 int 4)
 (define frame-parent int 2)
 (define frame-slot0 int 3)
 

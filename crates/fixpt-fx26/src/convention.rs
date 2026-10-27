@@ -2,7 +2,8 @@
 //! declared-conventions.md`): a declaration is accepted when its clauses,
 //! each printed canonically and sorted by role, are those of a convention
 //! this implementation supports, which today is fixpt's `native`
-//! (`fixpt_runtime::NATIVE_CONVENTION`). The checker written in FX-26 does
+//! (`fixpt_runtime::NATIVE_CONVENTION`), or it with an older clause in
+//! place of one (`NATIVE_CONVENTION_OLDER`, `docs/research/code-stubs.md`). The checker written in FX-26 does
 //! the same (`check-program.fx`, `k-check-convention`), word for word.
 
 use crate::error::{FxError, R};
@@ -56,7 +57,7 @@ pub fn check(span: Span, clauses: &[Syntax], name: &dyn Fn(Sym) -> String) -> R<
     while i < ours.len() || j < theirs.len() {
         match (ours.get(i), theirs.get(j)) {
             (Some(o), Some(t)) if o.0 == t.0 => {
-                if o.1 != t.1 {
+                if o.1 != t.1 && !fixpt_runtime::NATIVE_CONVENTION_OLDER.iter().any(|c| role_of(c) == o.0 && *c == o.1) {
                     return Err(FxError::at(o.2, format!("`define-convention`: the `{}` clause is not this implementation's: {}", o.0, t.1)));
                 }
                 i += 1;

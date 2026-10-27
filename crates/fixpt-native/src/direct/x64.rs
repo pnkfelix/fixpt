@@ -583,6 +583,15 @@ pub(super) fn mark_ret() -> Vec<u8> {
     a.finish().expect("no labels")
 }
 
+/// `super::foreign_stub_of`'s: a tail jump to `foreign`, then `int3`.
+pub(super) fn foreign_stub() -> Vec<u8> {
+    let mut a = Asm::new();
+    a.e(jmp_m(st(offset_of!(DState, foreign))));
+    let mut bytes = a.finish().expect("no labels");
+    bytes.push(0xcc);
+    bytes
+}
+
 /// `super::adapt`'s code: the closure called now `f`, its free value 0,
 /// called as what is not native code, in a tail call, the count as its
 /// caller passed it.
@@ -794,7 +803,7 @@ impl Compiling<'_> {
         // The polls' ways out at a time slice's end (`emit_poll`).
         let mut polls: Vec<NPoll> = Vec::new();
         let mut overflows: Vec<(Label, Label, Vec<usize>)> = Vec::new();
-        let mut cell_slows: Vec<(Label, Label, Label, Vec<usize>)> = Vec::new();
+        let mut cell_slows: Vec<(Label, Label, Vec<usize>)> = Vec::new();
         let (resume_at, mut uses_resume) = (a.label(), false);
         let trap = |a: &mut Asm, stubs: &mut Vec<(Label, u32)>, code: u32, c: Cond| {
             let l = a.label();
@@ -1285,13 +1294,12 @@ impl Compiling<'_> {
                     }
                     let args = offset_of!(DState, args);
                     // A call of the closure in `CLO`, `n` arguments in
-                    // registers, back at `after`: native code, or not.
-                    let call_clo = |a: &mut Asm, foreign: &mut Vec<(Label, Label, usize, bool)>, n: usize, after: Label| {
-                        let stub = a.label();
+                    // registers, back at `after`: its code runs, native
+                    // code or a stub that enters `foreign` with the count
+                    // (`docs/research/code-stubs.md`).
+                    let call_clo = |a: &mut Asm, n: usize, after: Label| {
                         a.e(load(X16, fld(CLO, CLOSURE_WORD)));
-                        a.e(alu_rm(Alu::Cmp, X16, st(offset_of!(DState, code_lo))));
-                        a.jcc(Cond::B, stub);
-                        foreign.push((stub, after, n, false));
+                        a.imm(X9, n as u64);
                         a.e(alu_rm(Alu::Add, X16, st(offset_of!(DState, delta))));
                         a.e(call_r(X16));
                         a.bind(after);
@@ -1346,21 +1354,21 @@ impl Compiling<'_> {
                             a.lea_l(X9, land);
                             control_frame(&mut a, &mut stubs, Some(X9), PROMPT_MARK, Some(offset_of!(DState, regions)));
                             a.e(mov(CLO, IN_REGS[3]));
-                            call_clo(&mut a, &mut foreign, 0, after);
+                            call_clo(&mut a, 0, after);
                             pop_control(&mut a);
                             a.jmp(done);
                             a.bind(land);
                             a.e(mov(IN_REGS[1], RESULT));
                             a.e(load(CLO, m(SP, 40)));
                             pop_control(&mut a);
-                            call_clo(&mut a, &mut foreign, 1, handled);
+                            call_clo(&mut a, 1, handled);
                             a.bind(done);
                         }
                         "withmark" => {
                             let after = a.label();
                             control_frame(&mut a, &mut stubs, None, MARK_MARK, None);
                             a.e(mov(CLO, IN_REGS[3]));
-                            call_clo(&mut a, &mut foreign, 0, after);
+                            call_clo(&mut a, 0, after);
                             pop_control(&mut a);
                         }
                         // In tail position, this frame popped (the return
@@ -1369,7 +1377,7 @@ impl Compiling<'_> {
                         // `mark_ret`; a mark's frame there already, for the
                         // same key, has its value replaced.
                         "withmark-tail" => {
-                            let (push_, call, stub, after) = (a.label(), a.label(), a.label(), a.label());
+                            let (push_, call) = (a.label(), a.label());
                             a.e(load(X9, st(offset_of!(DState, mark_ret))));
                             a.e(alu_rm(Alu::Cmp, X9, m(SP, 0)));
                             a.jcc(Cond::Ne, push_);
@@ -1385,12 +1393,9 @@ impl Compiling<'_> {
                             a.bind(call);
                             a.e(mov(CLO, IN_REGS[3]));
                             a.e(load(X16, fld(CLO, CLOSURE_WORD)));
-                            a.e(alu_rm(Alu::Cmp, X16, st(offset_of!(DState, code_lo))));
-                            a.jcc(Cond::B, stub);
-                            foreign.push((stub, after, 0, true));
+                            a.imm(X9, 0);
                             a.e(alu_rm(Alu::Add, X16, st(offset_of!(DState, delta))));
                             a.e(jmp_r(X16));
-                            a.bind(after);
                         }
                         "abort" => {
                             callout(&mut a, &mut stubs, self.callouts, Callout::Abort);
@@ -1409,7 +1414,7 @@ impl Compiling<'_> {
                             callout(&mut a, &mut stubs, self.callouts, Callout::Capture { whole: r.ends_with("callcc"), once: r.ends_with("callone") });
                             a.e(mov(IN_REGS[1], RESULT));
                             a.e(load(CLO, st(args)));
-                            call_clo(&mut a, &mut foreign, 1, after);
+                            call_clo(&mut a, 1, after);
                         }
                         "firstmark" => callout(&mut a, &mut stubs, self.callouts, Callout::FirstMark),
                         "currentmarks" => callout(&mut a, &mut stubs, self.callouts, Callout::CurrentMarks),
@@ -1962,8 +1967,9 @@ impl Compiling<'_> {
                     let skip = raw_entry_skip(callee);
                     let (stub, after) = (a.label(), a.label());
                     // The callee's convention, by its type, as `procedure`
-                    // reads it: native, no look; cellular, called out; fx,
-                    // looked at.
+                    // reads it: cellular, called out; native or fx, its
+                    // code run, native code or a stub that enters `foreign`
+                    // (`docs/research/code-stubs.md`).
                     use fixpt_heap::layout::regcode::conv;
                     let cv = k(o(1));
                     let not_native = |a: &mut Asm| {
@@ -1972,10 +1978,6 @@ impl Compiling<'_> {
                             return;
                         }
                         a.e(load(X16, fld(CLO, CLOSURE_WORD)));
-                        if cv == conv("fx") {
-                            a.e(alu_rm(Alu::Cmp, X16, st(offset_of!(DState, code_lo))));
-                            a.jcc(Cond::B, stub);
-                        }
                     };
                     let past_raw = |a: &mut Asm| {
                         if skip > 0 {
@@ -2011,8 +2013,7 @@ impl Compiling<'_> {
                             None => unreachable!("a global bound is called"),
                         }
                         a.bind(join);
-                        cell_slows.push((slow, join, stub, raws));
-                        foreign.push((stub, after, k(o(0)), tail));
+                        cell_slows.push((slow, join, raws));
                     } else {
                         match pending.take() {
                             Some(Field::Code(q)) => {
@@ -2025,7 +2026,7 @@ impl Compiling<'_> {
                                 a.field(X9, f);
                                 a.e(load(CLO, fld(X9, 2)));
                                 not_native(&mut a);
-                                if cv != conv("native") {
+                                if cv == conv("cellular") {
                                     foreign.push((stub, after, k(o(0)), tail));
                                 }
                             }
@@ -2037,7 +2038,7 @@ impl Compiling<'_> {
                             None => {
                                 a.e(mov(CLO, RESULT));
                                 not_native(&mut a);
-                                if cv != conv("native") {
+                                if cv == conv("cellular") {
                                     foreign.push((stub, after, k(o(0)), tail));
                                 }
                             }
@@ -2112,15 +2113,14 @@ impl Compiling<'_> {
             a.jmp(to);
         }
         let own = a.here();
-        for (slow, join, stub, raws) in &cell_slows {
+        for (slow, join, raws) in &cell_slows {
             a.bind(*slow);
-            // Not the procedure known: what it holds takes values.
+            // Not the procedure known: what it holds takes values, and its
+            // code runs.
             for &r in raws {
                 in_place(&mut a, r, |a, x| box_f64(a, self.callouts, x));
             }
             a.e(load(X16, fld(CLO, CLOSURE_WORD)));
-            a.e(alu_rm(Alu::Cmp, X16, st(offset_of!(DState, code_lo))));
-            a.jcc(Cond::B, *stub);
             a.jmp(*join);
         }
         for (stub, after, n, tail) in &foreign {

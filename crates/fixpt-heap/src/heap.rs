@@ -31,6 +31,7 @@ mod code;
 mod intern;
 mod regions;
 mod young;
+pub use code::CodePart;
 pub use regions::REGION_SLOTS;
 
 /// What a main header says, with a large header's extension read too.
@@ -563,7 +564,7 @@ impl Heap {
     /// budget and a nursery's promotion before its threshold, so that the
     /// threshold, a backstop, does not come first.
     fn budget_from(&mut self, old: usize) {
-        self.peak_live = self.peak_live.max(old + self.code.used + self.outside_code);
+        self.peak_live = self.peak_live.max(old + self.code.used() + self.outside_code);
         self.top_after_major = self.top;
         let nursery = if self.generational { self.nursery_words } else { 0 };
         let need = old + self.major_budget() + nursery;
@@ -1571,14 +1572,16 @@ impl Heap {
     /// they are, frozen flags too; an interned symbol is this heap's symbol
     /// of the same name. For carrying compiled code between heaps (a cache
     /// of it in an image of its own). Nothing collects meanwhile: allocation
-    /// never does. A code bloblet of `from`'s is copied as an ordinary one:
-    /// [`copy_graph_with`](Heap::copy_graph_with) makes code of it again.
+    /// never does. A code bloblet of `from`'s is copied into the same part
+    /// of this heap's code area, but for `from`'s shared stub, which is this
+    /// heap's (`foreign_stub`).
     pub fn copy_graph_from(&mut self, from: &Heap, root: Value) -> Value {
         self.copy_graph_with(from, root, |_| false, &HashMap::new()).0
     }
 
     /// The same, but each bloblet of `from`'s that `as_code` says made a
-    /// code bloblet here, its code flushed to run; and each object of
+    /// code bloblet here too, in the native part, its code flushed to run;
+    /// and each object of
     /// `from`'s that `given` maps (by its raw bits) this heap's object
     /// instead, not copied, nor what it reaches. With every object copied
     /// or given, by its raw bits in `from`. For native code kept in a cache
@@ -1611,14 +1614,20 @@ impl Heap {
                 slot.insert(self.intern(&name));
                 continue;
             }
+            if v == from.code.stub {
+                slot.insert(self.foreign_stub());
+                continue;
+            }
             let head = from.bloblet_head(v);
             let trailer = from.bloblet_has_trailer(v);
-            let copy = if as_code(v) {
-                let c = self.make_code_bloblet(head.kind, head.fields - trailer as usize, head.bytes, trailer);
-                code.push(c);
-                c
-            } else {
-                self.make_bloblet(head.kind, head.fields - trailer as usize, head.bytes, trailer)
+            let part = from.code_part(v).or_else(|| as_code(v).then_some(CodePart::Native));
+            let copy = match part {
+                Some(part) => {
+                    let c = self.make_code_bloblet_in(part, head.kind, head.fields - trailer as usize, head.bytes, trailer);
+                    code.push(c);
+                    c
+                }
+                None => self.make_bloblet(head.kind, head.fields - trailer as usize, head.bytes, trailer),
             };
             slot.insert(copy);
             order.push(v);
@@ -1665,8 +1674,10 @@ impl Heap {
     /// says to keep as it is (and what that reaches): pairs and bloblets,
     /// sharing and cycles kept, raw suffixes as they are, frozen flags too.
     /// For a message sent between FX-26's processes, which shares nothing
-    /// mutable with its sender (`fixpt_runtime::sched`). With the words
-    /// copied. Nothing collects meanwhile: allocation never does.
+    /// mutable with its sender (`fixpt_runtime::sched`). The code area's
+    /// bloblets are shared, as `share` keeps them: code, its fields frozen,
+    /// which never moves. Nothing collects meanwhile: allocation never
+    /// does.
     pub fn copy_within(&mut self, root: Value, share: impl Fn(&Heap, Value) -> bool) -> (Value, usize) {
         use std::collections::hash_map::Entry;
         let mut made: HashMap<u64, Value, std::hash::BuildHasherDefault<WordHasher>> = HashMap::default();
@@ -1682,7 +1693,7 @@ impl Heap {
                 todo.push(Value::bloblet(v.owner() + self.base));
                 continue;
             }
-            if share(self, v) {
+            if share(self, v) || self.is_code_bloblet(v) {
                 continue;
             }
             let Entry::Vacant(slot) = made.entry(v.raw()) else { continue };
@@ -1756,8 +1767,10 @@ impl Heap {
     /// A closure over `code`, with `extra` its environment or captured values.
     /// See `layout::closure` for why it is laid out back to front.
     pub fn make_closure(&mut self, code: Value, extra: &[Value]) -> Value {
-        use layout::closure::{CLOSURE_CODE, CLOSURE_EXTRA0};
-        let c = self.make_bloblet(ObjType::Closure as u8, 1 + extra.len(), 0, true);
+        use layout::closure::{CLOSURE_CODE, CLOSURE_EXTRA0, CLOSURE_STUB};
+        let stub = self.foreign_stub();
+        let c = self.make_bloblet(ObjType::Closure as u8, 2 + extra.len(), 0, true);
+        self.set_bloblet_slot(c, CLOSURE_STUB, stub);
         self.set_bloblet_slot(c, CLOSURE_CODE, code);
         for (i, x) in extra.iter().enumerate() {
             self.set_bloblet_slot(c, CLOSURE_EXTRA0 + i, *x);
@@ -2511,29 +2524,57 @@ impl Heap {
     /// left as they are.
     pub fn image_parts(&self) -> (Vec<u64>, Vec<Value>, Vec<Value>, Vec<Value>) {
         assert_eq!(self.all_live_regions(), 0, "an image is made with no region live");
-        assert_eq!(self.code.used, 0, "an image cannot yet carry the code area (docs/object-model.md, \"A collected code area\")");
-        // The old space, then the nursery after it, as one run of words.
-        let old = self.top - self.active;
-        let shift = ((self.base + self.active) as u64) << 3;
-        let young_shift = ((self.base + NURSERY_BASE) as u64 - old as u64) << 3;
-        // A suffix ref's owner counts from where the heap's memory starts,
-        // not an address: moved as the words are, by their index.
-        let rebase_owner = |r: Value| {
-            let o = r.owner();
-            let o = if young::is_young(o) { o - NURSERY_BASE + old } else { o - self.active };
-            Value::suffix_ref(o, r.offset()).expect("an image is smaller than the heap")
-        };
-        let rebase = |v: Value| match v.is_ref() {
-            true if v.is_suffix_ref() => rebase_owner(v),
-            true if young::is_young(v.index() - self.base) => Value(v.raw() - young_shift),
-            true => Value(v.raw() - shift),
-            false => v,
-        };
-        let mut words = self.mem.words()[self.active..self.top].to_vec();
+        let rebase = self.image_rebase();
+        let (old, young) = (self.top - self.active, self.nursery_top - NURSERY_BASE);
+        let mut words = Vec::with_capacity(old + young);
+        words.extend_from_slice(&self.mem.words()[self.active..self.top]);
         words.extend_from_slice(&self.mem.words()[NURSERY_BASE..self.nursery_top]);
-        map_refs(&mut words, rebase);
+        map_refs(&mut words, &rebase);
         let all = |vs: &[Value]| vs.iter().map(|v| rebase(*v)).collect::<Vec<_>>();
         (words, all(&self.globals), all(&self.symbols), all(&self.roots))
+    }
+
+    /// The code area as an image carries it: each part's words, rebased as
+    /// [`image_parts`](Heap::image_parts) rebases the rest, and its free
+    /// blocks, each from the part's start. It does not move: a reference
+    /// into it counts from where the heap's memory starts.
+    pub fn image_code(&self) -> [(Vec<u64>, Vec<(usize, usize)>); 2] {
+        let rebase = self.image_rebase();
+        self.code_image().map(|(mut words, free)| {
+            map_refs(&mut words, &rebase);
+            (words, free)
+        })
+    }
+
+    /// A reference, as an image has it: as though the active semispace
+    /// began at word 0, the nursery after it; into the code area, from
+    /// where the heap's memory starts.
+    fn image_rebase(&self) -> impl Fn(Value) -> Value {
+        // The old space, then the nursery after it, as one run of words.
+        let (active, base) = (self.active, self.base);
+        let old = self.top - active;
+        let shift = ((base + active) as u64) << 3;
+        let young_shift = ((base + NURSERY_BASE) as u64 - old as u64) << 3;
+        // A suffix ref's owner counts from where the heap's memory starts,
+        // not an address: moved as the words are, by their index.
+        let rebase_owner = move |r: Value| {
+            let o = r.owner();
+            let o = if code::in_code_area(o) {
+                o
+            } else if young::is_young(o) {
+                o - NURSERY_BASE + old
+            } else {
+                o - active
+            };
+            Value::suffix_ref(o, r.offset()).expect("an image is smaller than the heap")
+        };
+        move |v: Value| match v.is_ref() {
+            true if v.is_suffix_ref() => rebase_owner(v),
+            true if code::in_code_area(v.index() - base) => Value(v.raw() - ((base as u64) << 3)),
+            true if young::is_young(v.index() - base) => Value(v.raw() - young_shift),
+            true => Value(v.raw() - shift),
+            false => v,
+        }
     }
 
     /// The explicit roots, in order: part of an image, since a runtime
@@ -2560,9 +2601,23 @@ impl Heap {
         symbols: Vec<Value>,
         roots: Vec<Value>,
     ) -> Result<Heap, String> {
+        Self::from_image_with_code(words, Default::default(), globals, symbols, roots)
+    }
+
+    /// The same, with the code area an image carries (`image_code`).
+    pub fn from_image_with_code(
+        words: &[u64],
+        code: [(Vec<u64>, Vec<(usize, usize)>); 2],
+        globals: Vec<Value>,
+        symbols: Vec<Value>,
+        roots: Vec<Value>,
+    ) -> Result<Heap, String> {
         let mut semi = DEFAULT_SEMI_WORDS;
         while semi < words.len() {
             semi *= 2;
+        }
+        if code.iter().any(|(w, _)| w.len() > CODE_WORDS / 2) {
+            return Err("its code area is larger than a heap's".into());
         }
         let mut heap = Heap::with_semispace(semi);
         // An image's references count from word 0: here they are
@@ -2585,6 +2640,10 @@ impl Heap {
             let name = heap.symbol_name(heap.symbols[i]);
             heap.symbol_index.insert(name, i as u32);
         }
+        heap.code_from_image(code.map(|(mut w, free)| {
+            map_refs(&mut w, relocate);
+            (w, free)
+        }))?;
         Ok(heap)
     }
 
@@ -2597,8 +2656,8 @@ impl Heap {
         for (lo, hi) in self.regions.ranges() {
             self.verify_range(lo, hi).map_err(|e| format!("in a region: {e}"))?;
         }
-        if self.code.top > CODE_BASE {
-            self.verify_range(CODE_BASE, self.code.top).map_err(|e| format!("in the code area: {e}"))?;
+        for p in &self.code.parts {
+            self.verify_range(p.base, p.top).map_err(|e| format!("in the code area: {e}"))?;
         }
         for (i, g) in self.globals.iter().enumerate() {
             self.check_ref(*g, i)
@@ -2679,8 +2738,13 @@ impl Heap {
         if v.is_ref() && Self::in_region_area(self.ix(v)) {
             return Ok(());
         }
-        // The code area's objects are checked as it is walked.
+        // The code area's objects are checked as it is walked: a reference
+        // into it, only that it is within what is walkable.
         if v.is_bloblet() && code::in_code_area(self.ix(v)) {
+            let i = self.ix(v);
+            if !self.code.parts.iter().any(|p| (p.base..=p.top).contains(&i)) {
+                return Err(format!("dangling reference {v:?} into the code area at word {at}"));
+            }
             return Ok(());
         }
         if v.is_ref() {

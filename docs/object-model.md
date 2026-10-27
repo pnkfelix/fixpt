@@ -436,9 +436,9 @@ code alive, so they must never outlive the code bloblet they point into:
 the tables are cleared when the collector frees what they name, and `x30`
 only ever points into the code of a word some frame holds.
 
-**Not yet decided.** Heap images must carry the code area (with its code
-position-independent, or relocated on load); heap verification must walk
-it. Fragmentation in the free list is to be measured, not assumed; code
+**Images and verification.** Heap verification walks it. Heap images carry
+it, since 2026-10-26: each part's words where they were, references from
+the heap's start, and its free blocks. Fragmentation in the free list is to be measured, not assumed; code
 could move into the semispaces later, if it turns out to matter.
 
 **Steps** (`PLAN.md`, "A collected code area"): the area in `fixpt-heap`
@@ -447,6 +447,14 @@ test that runs a code bloblet reading its own field PC-relatively across a
 collection that moves the field's value; the native machines compiling
 into the area, so the test above passes; closures as code bloblets whose
 captured values are fields their code reads PC-relatively.
+
+**Two parts** (2026-10-26, `docs/research/code-stubs.md`): the area's
+first half holds what native code calls that is not native code, each
+bloblet's suffix a stub that enters the native convention's `foreign`
+routine: every cellular word, and the stub the other kinds of procedure
+share at their field 2. The second half, from the state's `code-lo`, holds
+native code. So every procedure's code runs, and one comparison still
+tells native code from the rest. Heap images carry both parts.
 
 **The cellular machines' code, collected by copying** (2026-10-05). The
 native and register code of cellular words still goes in a `CodeSpace`,

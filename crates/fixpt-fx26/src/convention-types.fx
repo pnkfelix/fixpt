@@ -45,10 +45,16 @@
              (bloblet-past-suffix int) (field-k-before-suffix int)
              (header cv-bits) (kinds cv-names)))
 
-;; `code-field` is the code bloblet's; its code is native code when at or
-;; past the state's field at `native-when-code-at-least`.
+;; `code-field` is the code bloblet's. With `code-always-runs` (the clause
+;; `(code-always-runs)`, `docs/research/code-stubs.md`), its code runs,
+;; native code or a stub that enters `foreign`. Else it is native code when
+;; at or past the state's field at `native-when-code-at-least`, and the
+;; callee is called through `foreign` when it is not: a test that holds
+;; still where the code always runs, so that field is the state's
+;; `code-lo` then, for a generator written before.
 (define-type cv-closures
-  (productof (kind int) (code-field int) (first-free-field int) (native-when-code-at-least int)))
+  (productof (kind int) (code-field int) (first-free-field int)
+             (native-when-code-at-least int) (code-always-runs bool)))
 
 ;; A code bloblet's code runs at its reference plus the code distance's
 ;; register; field `k` is `8k` + this before its first instruction.

@@ -238,7 +238,11 @@ pub const K_FRAMES: usize = 1;
 pub const K_MARK_VALS: usize = 2;
 pub const K_MARK_META: usize = 3;
 pub const K_FLAGS: usize = 4;
-pub const K_FIELDS: usize = 5;
+/// The heap's shared stub (`Heap::foreign_stub`), last, so that it is field
+/// 2: what native code runs to call the continuation (`docs/research/
+/// code-stubs.md`).
+pub const K_STUB: usize = 5;
+pub const K_FIELDS: usize = 6;
 
 /// A composable continuation is a segment, stored relative to its own bottom
 /// and reinstated *on top of* the current continuation. A full one replaces it.
@@ -251,7 +255,9 @@ pub fn make_continuation(
     marks: (Value, Value),
     composable: bool,
 ) -> Value {
+    let stub = heap.foreign_stub();
     let k = heap.alloc(ObjType::Continuation, K_FIELDS, Value::UNSPECIFIED);
+    heap.obj_set(k, K_STUB, stub);
     heap.obj_set(k, K_STACK, stack);
     heap.obj_set(k, K_FRAMES, frames);
     heap.obj_set(k, K_MARK_VALS, marks.0);

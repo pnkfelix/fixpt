@@ -465,8 +465,7 @@
                 (do-bound-callee pending skip)
                 (da-bind join)
                 (set dp-cell-slows
-                     (cons (product (1 slow) (2 join) (3 stub) (4 raws)) (get dp-cell-slows)))
-                (note)))
+                     (cons (product (1 slow) (2 join) (3 raws)) (get dp-cell-slows)))))
             (do-callee pending cv skip stub note))
         ;; The count, for a variadic callee (`vargs`).
         (da-imm d-x9 (dp-o i 0))
@@ -493,25 +492,20 @@
 (define do-callee (subr da-assembles (int int int int (subr da-assembles () unit)) unit)
   (lambda (pending cv skip stub note)
     (let ((tag (bitwise-and pending 7))
+          ;; Cellular, called out; native or fx, its code run, native code
+          ;; or a stub that enters `foreign` (`docs/research/code-stubs.md`).
           (not-native
            (lambda ()
-             (if (= cv rconv-cellular)
-                 (da-jmp stub)
-                 (begin
-                   (da-ld d-x16 d-clo (do-fld d-closure-word))
-                   (if (= cv rconv-fx)
-                       (begin (da-e (x86-alu-rm da-cmp d-x16 d-st d-st-code-lo))
-                              (da-jcc da-c-b stub))
-                       #u))))))
+             (if (= cv rconv-cellular) (da-jmp stub) (da-ld d-x16 d-clo (do-fld d-closure-word))))))
       (cond ((< pending 0)
-             (begin (da-mov d-clo d-result) (not-native) (if (= cv rconv-native) #u (note))))
+             (begin (da-mov d-clo d-result) (not-native) (if (= cv rconv-cellular) (note) #u)))
             ((= tag 1) (begin (da-field d-x16 (dp-field pending)) (do-past-raw skip)))
             ((= tag 3)
              (begin
                (da-field d-x9 (dp-field pending))
                (da-ld d-clo d-x9 (do-fld 2))
                (not-native)
-               (if (= cv rconv-native) #u (note))))
+               (if (= cv rconv-cellular) (note) #u)))
             (else (begin (da-field d-clo (dp-field pending))
                          (da-ld d-x16 d-clo (do-fld d-closure-word))))))))
 

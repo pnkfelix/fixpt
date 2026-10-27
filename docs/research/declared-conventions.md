@@ -126,9 +126,12 @@ table) and `crates/fixpt-heap/src/layout.rs`.
   kinds' numbers, as `layout.rs` has them.
 - **`closures`**: a native closure is a bloblet of kind `native-closure`,
   field 0 its code bloblet (`CLOSURE_WORD`), its captured values after
-  (`CLOSURE_FREE0`); its code is native code when that field is at or
-  past the code area's start (the state's `code-lo`), else the callee is
-  called through the `foreign` routine.
+  (`CLOSURE_FREE0`); whatever the callee, its code runs (`(code-always-runs)`,
+  2026-10-26, `code-stubs.md`): native code, or a stub that enters the
+  `foreign` routine. Before, the code was native code when that field was
+  at or past the code area's start (the state's `code-lo`), else the callee
+  was called through `foreign`; that clause is accepted still, and code
+  written to it runs as it did.
 - **`code`**: a code bloblet's code runs at its reference plus `x26`; field
   *k* is `8k + 4` bytes before its first instruction, read PC-relatively.
 - **`frames`**: the frame's region from `x29 − 8`: a header word's room,

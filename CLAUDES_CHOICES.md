@@ -2075,3 +2075,30 @@ section. In short:
 - **The evaluator written in FX-26 gets a table of its own**, the same
   three, so that every machine answers alike.
 
+
+## Every procedure's code runs (2026-10-26)
+
+Kayak's request (`docs/research/code-stubs.md`), whose open questions were
+Fixpt's to decide; the note's last section has the rest. In short:
+
+- **The code area in two parts**, words and the shared stub below native
+  code, `code-lo` the native part's start: so the older clause's test
+  keeps its meaning exactly, and the machines that tell native closures
+  from cellular ones by `code-lo` need no change. The request put
+  `code-lo` at the area's start instead, the word's stub then entering
+  `foreign`; same result, more change.
+- **One shared stub at field 2 for the other kinds**, the VM's closures,
+  primitives and continuations and cellular continuations, rather than
+  proving they never reach native code: their layouts change by a field,
+  which every reader of them takes by name.
+- **Words only run stay in the heap; words made again and again alike are
+  made once.** Putting every word made in the area would put one there for
+  every call from native code.
+- **Images carry the code area** (version 8) rather than copying code out
+  as ordinary bloblets and back: the bytecode VM's closures hold the stub,
+  so every image would need the special case.
+- **The convention read as data keeps `native-when-code-at-least`** at
+  `code-lo` under the new clause, with a new flag: a generator written
+  before keeps making the code it made, which still runs.
+- **`foreign` takes a native closure too**, so that the older clause's
+  code, wherever its test sends one, never fails.

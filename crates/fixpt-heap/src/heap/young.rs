@@ -10,7 +10,7 @@
 //! a store that puts a young reference into either marks the card of the
 //! word written (`Heap::set_slot`, and each machine's own stores).
 
-use super::{CODE_BASE, Copier, Heap, MAX_SEMI_WORDS, MEM_WORDS, NURSERY_BASE, NURSERY_MAX, read_head};
+use super::{Copier, Heap, MAX_SEMI_WORDS, MEM_WORDS, NURSERY_BASE, NURSERY_MAX, read_head};
 use crate::layout;
 use crate::value::{Value, is_extension, is_header};
 use std::collections::{HashMap, HashSet};
@@ -159,7 +159,9 @@ impl Heap {
                 at += Self::scan_one(mem, at, &mut c);
             }
         }
-        scan_code_cards(&mut self.cards, mem, &mut c, &self.code.starts);
+        for part in &self.code.parts {
+            scan_code_cards(&mut self.cards, mem, &mut c, part.base, &part.starts);
+        }
         // The old space's dirty cards, each cleaned as it is scanned; the
         // table read a word (eight cards) at a time, a clean word skipped
         // whole, so that a large old space with few dirty cards costs little.
@@ -247,8 +249,8 @@ impl Heap {
     /// dirty card: what the write barrier promises a minor collection. It
     /// walks both whole; for tests.
     pub fn verify_remembered(&self) -> Result<(), String> {
-        let code = (CODE_BASE, self.code.top.max(CODE_BASE));
-        for (lo, hi) in [(self.active, self.top), code] {
+        let code = self.code.parts.each_ref().map(|p| (p.base, p.top));
+        for (lo, hi) in [(self.active, self.top), code[0], code[1]] {
             self.verify_remembered_in(lo, hi)?;
         }
         Ok(())
@@ -277,13 +279,13 @@ impl Heap {
     }
 }
 
-/// In a minor collection: the code area's dirty cards, each cleaned, and
-/// the fields on it traced, of the objects `starts` (the area's, in address
-/// order) finds there. Only ordinary headers, and no weak pair: the area
+/// In a minor collection: a part of the code area's dirty cards, from
+/// `base`, each cleaned, and the fields on it traced, of the objects
+/// `starts` (the part's, in address order) finds there. Only ordinary headers, and no weak pair: the area
 /// holds only bloblets (`Heap::make_code_bloblet`).
-fn scan_code_cards(cards: &mut fixpt_memmgmt::Words, mem: &mut [u64], c: &mut Copier, starts: &[usize]) {
+fn scan_code_cards(cards: &mut fixpt_memmgmt::Words, mem: &mut [u64], c: &mut Copier, base: usize, starts: &[usize]) {
     let Some(&last) = starts.last() else { return };
-    let (first, end) = (CODE_BASE >> CARD_SHIFT, (last + read_head(mem, last).size()).div_ceil(CARD_WORDS));
+    let (first, end) = (base >> CARD_SHIFT, (last + read_head(mem, last).size()).div_ceil(CARD_WORDS));
     let mut card = first;
     while card < end {
         if card % 8 == 0 && card + 8 <= end && cards.words()[card >> 3] == 0 {

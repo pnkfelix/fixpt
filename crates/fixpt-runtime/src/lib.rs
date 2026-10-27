@@ -20,6 +20,13 @@ pub const NATIVE_CONVENTION: &str = NATIVE_CONVENTION_ARM64;
 /// Each machine's, whichever this is.
 pub const NATIVE_CONVENTION_ARM64: &str = include_str!("native-arm64.conv");
 pub const NATIVE_CONVENTION_X86_64: &str = include_str!("native-x86_64.conv");
+/// Clauses of the native convention as it was, which both checkers accept
+/// still in place of the current one of the same role, since code written
+/// to them still runs: the `closures` clause before every procedure's code
+/// ran (`docs/research/code-stubs.md`; `fixpt_native`'s
+/// `closures_before_stubs`, which a test says it is). The checker written
+/// in FX-26 has them too (`k-conv-older`).
+pub const NATIVE_CONVENTION_OLDER: &[&str] = &["(closures (kind 41) (code-field 2) (first-free-field 3) (native-when-code-at-least code-lo))"];
 
 pub mod crossing;
 pub mod disasm;

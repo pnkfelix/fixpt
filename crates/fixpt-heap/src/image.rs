@@ -27,6 +27,9 @@
 //!      -     -  symbol table   (little-endian u64)
 //!      -     -  explicit roots (little-endian u64; root 0 is the runtime's
 //!                               error-object record type)
+//!      -     -  the code area, each of its two parts: its word count, its
+//!               free blocks' count, its words (references as the heap
+//!               words'), its free blocks (start and length, each a u64)
 //!      -     4  CRC-32 of everything above
 //! ```
 
@@ -46,8 +49,10 @@ pub const MAGIC: &[u8; 8] = b"FIXPTHP\0";
 /// numbers' bits) with bloblet pointers, and gives code its nodes or
 /// constants as its own fields. Version 6 has every object a bloblet, pointed
 /// at its suffix (tag `010` retired); objects with fields have trailers, and
-/// closures and environment frames their own fixed layouts.
-pub const VERSION: u32 = 7;
+/// closures and environment frames their own fixed layouts. Version 8 carries
+/// the code area, where every word is (`docs/research/code-stubs.md`), its
+/// references counted from where the heap's memory starts.
+pub const VERSION: u32 = 8;
 const HEADER_BYTES: usize = 48;
 
 /// Trailer written after an image appended to an executable.
@@ -112,6 +117,17 @@ pub fn dump(heap: &Heap) -> Vec<u8> {
     for v in roots {
         out.extend_from_slice(&v.raw().to_le_bytes());
     }
+    for (words, free) in heap.image_code() {
+        out.extend_from_slice(&(words.len() as u64).to_le_bytes());
+        out.extend_from_slice(&(free.len() as u64).to_le_bytes());
+        for w in words {
+            out.extend_from_slice(&w.to_le_bytes());
+        }
+        for (s, n) in free {
+            out.extend_from_slice(&(s as u64).to_le_bytes());
+            out.extend_from_slice(&(n as u64).to_le_bytes());
+        }
+    }
     let crc = crc32(&out);
     out.extend_from_slice(&crc.to_le_bytes());
     out
@@ -136,7 +152,18 @@ pub fn load(bytes: &[u8]) -> Result<Heap, ImageError> {
     let n_symbols = u64::from_le_bytes(bytes[32..40].try_into().unwrap()) as usize;
     let n_roots = u64::from_le_bytes(bytes[40..48].try_into().unwrap()) as usize;
 
-    let body = HEADER_BYTES + (n_words + n_globals + n_symbols + n_roots) * 8;
+    // The code area's parts after the roots: each its counts, then its
+    // words and free blocks.
+    let read_at = |at: usize| u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap()) as usize;
+    let mut body = HEADER_BYTES + (n_words + n_globals + n_symbols + n_roots) * 8;
+    let mut code_counts = [(0, 0); 2];
+    for c in &mut code_counts {
+        if bytes.len() < body + 16 + 4 {
+            return Err(ImageError::Truncated { expected: body + 16 + 4, found: bytes.len() });
+        }
+        *c = (read_at(body), read_at(body + 8));
+        body = c.1.checked_mul(2).and_then(|f| f.checked_add(c.0)).and_then(|n| n.checked_mul(8)).and_then(|n| (body + 16).checked_add(n)).ok_or_else(|| ImageError::Malformed("a code area larger than memory".into()))?;
+    }
     let total = body + 4;
     if bytes.len() < total {
         return Err(ImageError::Truncated { expected: total, found: bytes.len() });
@@ -157,8 +184,26 @@ pub fn load(bytes: &[u8]) -> Result<Heap, ImageError> {
     let globals: Vec<Value> = (0..n_globals).map(|_| Value(read_u64(&mut at))).collect();
     let symbols: Vec<Value> = (0..n_symbols).map(|_| Value(read_u64(&mut at))).collect();
     let roots: Vec<Value> = (0..n_roots).map(|_| Value(read_u64(&mut at))).collect();
+    let code = code_counts.map(|(n, f)| {
+        at += 16;
+        let words: Vec<u64> = (0..n).map(|_| read_u64(&mut at)).collect();
+        let free: Vec<(usize, usize)> = (0..f).map(|_| (read_u64(&mut at) as usize, read_u64(&mut at) as usize)).collect();
+        (words, free)
+    });
+    // Free blocks in order, apart, within their part.
+    let apart = |w: &Vec<u64>, free: &Vec<(usize, usize)>| {
+        let mut end = 0;
+        free.iter().all(|&(s, n)| {
+            let ok = n > 0 && s >= end && s.checked_add(n).is_some_and(|e| e <= w.len());
+            end = s.saturating_add(n);
+            ok
+        })
+    };
+    if !code.iter().all(|(w, free)| apart(w, free)) {
+        return Err(ImageError::Malformed("the code area's free blocks out of order or outside it".into()));
+    }
 
-    let heap = Heap::from_image(&words, globals, symbols, roots).map_err(ImageError::Malformed)?;
+    let heap = Heap::from_image_with_code(&words, code, globals, symbols, roots).map_err(ImageError::Malformed)?;
     heap.verify().map_err(ImageError::Malformed)?;
     Ok(heap)
 }

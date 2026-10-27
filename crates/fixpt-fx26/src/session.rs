@@ -352,7 +352,7 @@ fn save_native_front_end(k: &NativeKeeping, heap: &fixpt_heap::Heap, pieces: fix
     let mut codes = Value::NULL;
     for (&k, &c) in &made {
         let v = Value::from_raw(k);
-        if heap.is_code_bloblet(v) && Some(v) != adapter {
+        if heap.code_part(v) == Some(fixpt_heap::CodePart::Native) && Some(v) != adapter {
             codes = alone.cons(c, codes);
         }
     }

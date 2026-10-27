@@ -24,7 +24,21 @@ impl Heap {
     /// * `call`, `tailcall`: a non-negative fixnum;
     /// * `prim`: two non-negative fixnums (the primitive is checked when it
     ///   is called, by the runtime, which knows them).
+    ///
+    /// Made in the code area's stubbed part, its suffix the stub that
+    /// enters `foreign` (`docs/research/code-stubs.md`): so that native code
+    /// calls a closure of it as it calls native code.
     pub fn make_cellular_word(&mut self, name: Value, cells: &[Value]) -> Result<Value, String> {
+        self.make_word(name, cells, true)
+    }
+
+    /// The same, made in the heap, with no stub: for a word that is only
+    /// run, never a closure's, made for one call (`call_value`).
+    pub fn make_transient_word(&mut self, name: Value, cells: &[Value]) -> Result<Value, String> {
+        self.make_word(name, cells, false)
+    }
+
+    fn make_word(&mut self, name: Value, cells: &[Value], stubbed: bool) -> Result<Value, String> {
         // Which cells begin an instruction: every branch must land on one.
         let mut starts = vec![false; cells.len() + 1];
         let mut branches = Vec::new();
@@ -88,7 +102,8 @@ impl Heap {
         if !matches!(last, "exit" | "halt" | "branch" | "tailcall" | "ttailcall" | "return" | "withmark-tail" | "resume" | "undefined") {
             return Err("a word must end with an instruction that does not fall through (`exit`, `return`, a tail call, …)".into());
         }
-        let w = self.make_bloblet(KIND, WORD_CELL0 - 2 + cells.len(), 0, true);
+        let fields = WORD_CELL0 - 2 + cells.len();
+        let w = if stubbed { self.make_stubbed_bloblet(KIND, fields, true) } else { self.make_bloblet(KIND, fields, 0, true) };
         self.set_bloblet_slot(w, WORD_ENTRY, Value::fixnum(ROUTINE_DOCOL as i64));
         self.set_bloblet_slot(w, WORD_NAME, name);
         self.set_bloblet_slot(w, WORD_TWIN, Value::FALSE);
@@ -99,6 +114,23 @@ impl Heap {
         }
         self.freeze_bloblet(w, true, false);
         Ok(w)
+    }
+
+    /// The word of `cells` named `name`, made once and kept in a global of
+    /// its own: for a word the runtime makes again and again alike (a
+    /// continuation's closure's, an adapter's), so that it is made once in
+    /// the code area, not at every use.
+    pub fn shared_word(&mut self, name: &str, cells: &[Value]) -> Value {
+        let key = self.intern(&format!("%fx26-word:{name}"));
+        let slot = self.symbol_global_slot(key);
+        let held = self.global(slot);
+        if self.is_cellular_word(held) {
+            return held;
+        }
+        let name = self.intern(name);
+        let w = self.make_cellular_word(name, cells).expect("a well-formed word");
+        self.set_global(slot, w);
+        w
     }
 
     /// A global's cell: a plain bloblet with its value in field 2.
@@ -113,8 +145,7 @@ impl Heap {
         use crate::layout::cellular::{routine, CLOSURE_FREE0, CLOSURE_WORD};
         let f = |n: u64| Value::fixnum(n as i64);
         let cells = [f(const { routine("slot") }), f(0), f(const { routine("free") }), f(0), f(const { routine("resume") })];
-        let name = self.intern("continuation");
-        let word = self.make_cellular_word(name, &cells).expect("a well-formed word");
+        let word = self.shared_word("continuation", &cells);
         let c = self.make_bloblet(crate::layout::kind("cellular-closure"), 2, 0, true);
         self.set_bloblet_slot(c, CLOSURE_WORD, word);
         self.set_bloblet_slot(c, CLOSURE_FREE0, k);
@@ -208,8 +239,7 @@ impl Heap {
     pub fn undefined_closure(&mut self) -> Value {
         use crate::layout::cellular::{routine, CLOSURE_WORD};
         let cells = [Value::fixnum(const { routine("undefined") } as i64)];
-        let name = self.intern("undefined");
-        let word = self.make_cellular_word(name, &cells).expect("a well-formed word");
+        let word = self.shared_word("undefined", &cells);
         let c = self.make_bloblet(crate::layout::kind("cellular-closure"), 1, 0, true);
         self.set_bloblet_slot(c, CLOSURE_WORD, word);
         c

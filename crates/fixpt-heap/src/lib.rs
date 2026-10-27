@@ -24,6 +24,6 @@ pub use cellular::{Shots, NATIVE_CONT_INNER, NATIVE_CONT_LEN, NATIVE_CONT_MARK, 
 pub use sro::{Referrer, Referrers, SroKind};
 pub mod value;
 
-pub use heap::{BlobletError, Head, Heap};
+pub use heap::{BlobletError, CodePart, Head, Heap};
 pub use image::ImageError;
 pub use value::{ObjType, Value};

@@ -201,7 +201,11 @@
     (product (kind (cx-int-at cl "kind")) (code-field (cx-int-at cl "code-field"))
              (first-free-field (cx-int-at cl "first-free-field"))
              (native-when-code-at-least
-              (cx-int-at st (cx-name-of (cx-nth (cx-get cl "native-when-code-at-least") 0)))))))
+              (if (cx-has? cl "code-always-runs")
+                  (cx-int-at st "code-lo")
+                  (cx-int-at st
+                             (cx-name-of (cx-nth (cx-get cl "native-when-code-at-least") 0)))))
+             (code-always-runs (cx-has? cl "code-always-runs")))))
 (define cv-frames-of (->* (cv-sxs) cv-frames)
   (lambda (fr)
     (let ((m (cx-get fr "map")))
@@ -487,8 +491,11 @@
                     (list (cv-kv "kind" (extract cl kind))
                           (cv-kv "code-field" (extract cl code-field))
                           (cv-kv "first-free-field" (extract cl first-free-field))
-                          (cv-par "native-when-code-at-least"
-                                  (list (cv-name-at sn (extract cl native-when-code-at-least))))))
+                          (if (extract cl code-always-runs)
+                              (cv-par "code-always-runs" nil)
+                              (cv-par "native-when-code-at-least"
+                                      (list (cv-name-at sn
+                                                        (extract cl native-when-code-at-least)))))))
             (cv-par "code"
                     (list (cv-par "runs-at"
                                   (list "reference" "plus" (cv-reg nm (extract rg code-distance))))

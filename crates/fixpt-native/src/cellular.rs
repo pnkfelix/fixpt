@@ -1668,7 +1668,7 @@ impl Stacks {
             alloc_limit: heap.inline_limit() as u64,
             regions: heap.region_table_address() as u64,
             cards: heap.card_table_address() as u64,
-            code_lo: heap.code_area_address() as u64,
+            code_lo: heap.native_code_address() as u64,
             leaf_link: 0,
             pure: pure_call as *const () as u64,
             reserve: 0,

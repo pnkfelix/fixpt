@@ -17,3 +17,18 @@ fn the_declarations_are_generated_from_the_machines() {
         assert_eq!(file, made, "{path} is out of date: FIXPT_BLESS=1 cargo test -p fixpt-native --test convention");
     }
 }
+
+/// The older `closures` clause both checkers still accept is what the
+/// machine's tables made of it (`docs/research/code-stubs.md`).
+#[test]
+fn the_older_closures_clause_is_the_tables() {
+    assert_eq!(fixpt_runtime::NATIVE_CONVENTION_OLDER, [fixpt_native::direct::closures_before_stubs()]);
+}
+
+/// The stub that enters `foreign`, every word's suffix, as the heap writes
+/// it (`fixpt_heap::layout::stub`), is what the assemblers make.
+#[test]
+fn the_heaps_stub_is_the_assemblers() {
+    assert_eq!(fixpt_heap::layout::stub::ARM64.to_vec(), fixpt_native::direct::foreign_stub_of("arm64"));
+    assert_eq!(fixpt_heap::layout::stub::X86_64.to_vec(), fixpt_native::direct::foreign_stub_of("x86_64"));
+}

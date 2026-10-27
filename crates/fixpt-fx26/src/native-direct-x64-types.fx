@@ -251,7 +251,7 @@
 (define-type dp-poll (productof (1 int) (2 int) (3 int) (4 int) (5 bool) (6 bool) (7 int)))
 (define-type dp-poll-list (listof dp-poll @k))
 (define-type dp-overflow-list (listof (productof (1 int) (2 int) (3 int)) @k))
-(define-type dp-cell-slow-list (listof (productof (1 int) (2 int) (3 int) (4 int)) @k))
+(define-type dp-cell-slow-list (listof (productof (1 int) (2 int) (3 int)) @k))
 (define-type dp-foreign-list (listof (productof (1 int) (2 int) (3 int) (4 bool)) @k))
 
 ;; The procedure being compiled, its analysis, its fields and the version

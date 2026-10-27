@@ -23,7 +23,7 @@
 
 use fixpt_heap::layout::kind;
 use fixpt_heap::layout::cellular::{
-    CLOSURE_FREE0, CLOSURE_WORD, CONT_BASE, CONT_CLO, CONT_CUR, CONT_DS, CONT_FIELDS, CONT_FP, CONT_INNER, CONT_K, CONT_RS, CONT_REGIONS, CONT_RUN, CONT_SHOTS, CONT_WHOLE,
+    CLOSURE_FREE0, CLOSURE_WORD, CONT_BASE, CONT_CLO, CONT_CUR, CONT_DS, CONT_FIELDS, CONT_STUB, CONT_FP, CONT_INNER, CONT_K, CONT_RS, CONT_REGIONS, CONT_RUN, CONT_SHOTS, CONT_WHOLE,
     KIND, PRIMITIVES, ROUTINE_DOCOL, ROUTINES, WORD_CELL0, WORD_ENTRY, WORD_NAME, routine,
 };
 use fixpt_heap::{Heap, Shots, Value};
@@ -266,7 +266,13 @@ impl WordBuilder {
     /// The word, or why these cells cannot be one.
     pub fn try_build(&self, heap: &mut Heap, name: &str) -> Result<Value, String> {
         let name = heap.intern(name);
-        let cells: Vec<Value> = self
+        let cells = self.resolved();
+        heap.make_cellular_word(name, &cells)
+    }
+
+    /// The cells, with their labels and recursion resolved.
+    fn resolved(&self) -> Vec<Value> {
+        self
             .cells
             .iter()
             .enumerate()
@@ -279,13 +285,19 @@ impl WordBuilder {
                     Value::fixnum(to as i64 - (i as i64 + 1))
                 }
             })
-            .collect();
-        heap.make_cellular_word(name, &cells)
+            .collect()
     }
 
     /// The word, published with its fields frozen.
     pub fn build(&self, heap: &mut Heap, name: &str) -> Value {
         self.try_build(heap, name).unwrap_or_else(|e| panic!("`{name}` is no word: {e}"))
+    }
+
+    /// The word, in the heap (`Heap::make_transient_word`): only to run.
+    pub fn build_transient(&self, heap: &mut Heap, name: &str) -> Value {
+        let name_sym = heap.intern(name);
+        let cells = self.resolved();
+        heap.make_transient_word(name_sym, &cells).unwrap_or_else(|e| panic!("`{name}` is no word: {e}"))
     }
 }
 
@@ -1509,8 +1521,10 @@ fn spend(heap: &mut Heap, k: Value) -> Result<(), Trap> {
 fn continuation(heap: &mut Heap, ds: &[Value], rs: &[Value], r: &Regs, base: usize, whole: bool, run: u64, inner: Value) -> Value {
     let ds = heap.vector_from(ds);
     let rs = heap.vector_from(rs);
+    let stub = heap.foreign_stub();
     let k = heap.make_bloblet(const { kind("cellular-continuation") }, CONT_FIELDS, 0, true);
     let fields = [
+        (CONT_STUB, stub),
         (CONT_DS, ds),
         (CONT_RS, rs),
         (CONT_CUR, r.cur),
@@ -1622,8 +1636,7 @@ fn held_piece(rt: &mut Runtime, h: &Held, all: &[Value], rs_from: usize, ds_from
     let (cur, clo) = (all[h.nd + h.nr], all[h.nd + h.nr + 1]);
     let r = if h.tail {
         let cells = [Value::fixnum(const { routine("return") } as i64)];
-        let name = heap.intern("return");
-        let word = heap.make_cellular_word(name, &cells).expect("a well-formed word");
+        let word = heap.shared_word("return", &cells);
         Regs { cur: word, k: WORD_CELL0, fp: h.fp, clo }
     } else {
         Regs { cur, k: h.k, fp: h.fp, clo }
@@ -1646,7 +1659,11 @@ enum Back {
 pub fn call_value(rt: &mut Runtime, f: Value, args: &[Value]) -> Result<Value, NativeExit> {
     let heap = &mut rt.heap;
     let is = |k: &str| f.is_bloblet() && heap.bloblet_kind(f) == kind(k);
-    if !(is("cellular-closure") || is("cellular-continuation")) {
+    // A native closure too, which the machine calls as it calls one
+    // (`as_cellular`): code written to the convention's older `closures`
+    // clause, given a word of the runtime's that it cannot tell from native
+    // code, may send either here (`docs/research/code-stubs.md`).
+    if !(is("cellular-closure") || is("cellular-continuation") || is("native-closure")) {
         // The bytecode VM's primitive, a standard operation as a value
         // there: a simple one runs as it is, needing no machine.
         if heap.obj_type(f) == Some(fixpt_heap::ObjType::Primitive) {
@@ -1670,7 +1687,8 @@ pub fn call_value(rt: &mut Runtime, f: Value, args: &[Value]) -> Result<Value, N
     for a in args.iter().chain([&f]) {
         w.lit(*a);
     }
-    let word = w.call_closure(args.len()).prim("exit").build(heap, "call-from-native");
+    // Only run, never a closure's: in the heap (`make_transient_word`).
+    let word = w.call_closure(args.len()).prim("exit").build_transient(heap, "call-from-native");
     let mut m = Machine::with_fuel(rt.word_fuel);
     m.nested = true;
     m.run = RUNS.with(|n| {
@@ -1696,7 +1714,9 @@ pub fn call_value(rt: &mut Runtime, f: Value, args: &[Value]) -> Result<Value, N
 /// convention (`%fx26-convert`). Its word calls `f`, its one free value,
 /// in a tail call, which calls native code as every call here does.
 pub fn cellular_adapter(heap: &mut Heap, f: Value, arity: usize) -> Value {
-    let word = WordBuilder::new().free(0).tailcall(arity).build(heap, "adapter");
+    let n = |n: u64| Value::fixnum(n as i64);
+    let cells = [n(const { routine("free") }), n(0), n(const { routine("tailcall") }), n(arity as u64)];
+    let word = heap.shared_word(&format!("adapter/{arity}"), &cells);
     let c = heap.make_bloblet(const { kind("cellular-closure") }, 2, 0, true);
     heap.set_bloblet_slot(c, CLOSURE_WORD, word);
     heap.set_bloblet_slot(c, CLOSURE_FREE0, f);

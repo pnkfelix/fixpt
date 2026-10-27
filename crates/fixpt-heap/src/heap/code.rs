@@ -5,33 +5,85 @@
 //! sweeps the rest into a free list after, so code no longer reachable is
 //! reclaimed.
 //!
-//! The area is always walkable from its start, header to header: a free
+//! Two parts (`docs/research/code-stubs.md`): the lower holds what native
+//! code calls that is not native code, each bloblet's suffix a stub that
+//! enters the `foreign` routine (cellular words, and the stub the other
+//! kinds of procedure share); the upper, from `code-lo`, holds native code.
+//! So every procedure's code runs, and one comparison with `code-lo` still
+//! tells native code from the rest.
+//!
+//! Each part is always walkable from its start, header to header: a free
 //! block is written as a raw bloblet whose suffix covers it. Allocation is
-//! first fit from the free list, else from the end of what has been walked.
+//! first fit from the part's free list, else from the end of what has been
+//! walked.
 
 use super::{CODE_BASE, CODE_WORDS, Heap, find_main, read_head};
 use crate::layout;
 use crate::value::{TAG_MASK, TAG_TRAILER, Value, is_extension, is_header, make_header};
 use std::collections::HashSet;
 
-#[derive(Default)]
-pub(super) struct CodeArea {
-    /// Where the walkable part ends: every word from `CODE_BASE` up to here
-    /// is part of an object or of a free block.
+/// The code area's parts: what native code calls through a stub, and
+/// native code.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum CodePart {
+    Stubbed = 0,
+    Native = 1,
+}
+
+/// Where the native part starts: half way.
+pub(super) const NATIVE_BASE: usize = CODE_BASE + CODE_WORDS / 2;
+
+/// One part of the area.
+pub(super) struct Part {
+    /// Where it starts.
+    pub(super) base: usize,
+    /// Where its walkable part ends: every word from `base` up to here is
+    /// part of an object or of a free block.
     pub(super) top: usize,
     /// Free blocks, `(start, words)`, in address order.
     pub(super) free: Vec<(usize, usize)>,
     /// Where each object starts, in address order: so that a minor
-    /// collection finds the objects on a dirty card without walking the
-    /// area.
+    /// collection finds the objects on a dirty card without walking it.
     pub(super) starts: Vec<usize>,
     /// Words in objects: all that is not free.
     pub(super) used: usize,
+}
+
+impl Part {
+    fn new(base: usize) -> Part {
+        Part { base, top: base, free: Vec::new(), starts: Vec::new(), used: 0 }
+    }
+
+    fn limit(&self) -> usize {
+        self.base + CODE_WORDS / 2
+    }
+}
+
+pub(super) struct CodeArea {
+    pub(super) parts: [Part; 2],
+    /// Whether anything was ever allocated: the execute view is made then.
+    pub(super) started: bool,
     /// Words allocated since the last collection, which counts toward the
     /// next as a semispace's allocation does.
     pub(super) taken: usize,
     /// Words allocated since the heap was made.
     pub(super) allocated: u64,
+    /// The stub every procedure that is no word shares, once made
+    /// (`Heap::foreign_stub`); `#f` before.
+    pub(super) stub: Value,
+}
+
+impl Default for CodeArea {
+    fn default() -> CodeArea {
+        CodeArea { parts: [Part::new(CODE_BASE), Part::new(NATIVE_BASE)], started: false, taken: 0, allocated: 0, stub: Value::FALSE }
+    }
+}
+
+impl CodeArea {
+    /// Words in objects, both parts.
+    pub(super) fn used(&self) -> usize {
+        self.parts.iter().map(|p| p.used).sum()
+    }
 }
 
 /// Whether word `i` of the heap's memory is in the code area.
@@ -46,16 +98,21 @@ fn put_free(mem: &mut [u64], at: usize, len: usize) {
 }
 
 impl Heap {
-    /// A bloblet in the code area, as [`make_bloblet`](Heap::make_bloblet)
-    /// makes one in the heap: fields zero, suffix zero. It never moves, and
-    /// lives while something the collector traces refers to it. Only
-    /// ordinary headers.
+    /// A bloblet in the code area's native part, as
+    /// [`make_bloblet`](Heap::make_bloblet) makes one in the heap: fields
+    /// zero, suffix zero. It never moves, and lives while something the
+    /// collector traces refers to it. Only ordinary headers.
     pub fn make_code_bloblet(&mut self, kind: u8, fields: usize, bytes: usize, trailer: bool) -> Value {
+        self.make_code_bloblet_in(CodePart::Native, kind, fields, bytes, trailer)
+    }
+
+    /// The same, in `part`.
+    pub fn make_code_bloblet_in(&mut self, part: CodePart, kind: u8, fields: usize, bytes: usize, trailer: bool) -> Value {
         let total = fields + trailer as usize;
         assert!(total as u64 <= layout::H_FIELDS.max(), "a code bloblet has an ordinary header");
         assert!(bytes as u64 <= layout::H_BYTES.max(), "a bloblet's suffix is limited to 4 GiB");
         let size = 1 + total + bytes.div_ceil(8);
-        let at = self.code_alloc(size);
+        let at = self.code_alloc(part, size);
         self.set_word(at, make_header(kind, total, bytes));
         for i in 1..size {
             self.set_word(at + i, 0);
@@ -64,6 +121,40 @@ impl Heap {
             self.set_word(at + total, Self::trailer_word(total));
         }
         self.blob_v(at + 1 + total)
+    }
+
+    /// A bloblet in the code area's stubbed part, whose suffix is the stub
+    /// that enters `foreign` (`layout::stub`), frozen and runnable: what
+    /// native code calls that is not native code. Fields zero.
+    pub fn make_stubbed_bloblet(&mut self, kind: u8, fields: usize, trailer: bool) -> Value {
+        let stub = layout::stub::BYTES;
+        let v = self.make_code_bloblet_in(CodePart::Stubbed, kind, fields, stub.len(), trailer);
+        for (i, w) in stub.chunks(8).enumerate() {
+            let mut b = [0u8; 8];
+            b[..w.len()].copy_from_slice(w);
+            self.set_word(self.ix(v) + i, u64::from_le_bytes(b));
+        }
+        self.freeze_bloblet(v, false, true);
+        if self.code_exec.is_ok() {
+            self.flush_code(v);
+        }
+        v
+    }
+
+    /// The stub the procedures that are not words share (`docs/research/
+    /// code-stubs.md`): a plain bloblet of no fields in the stubbed part,
+    /// made once, which a VM closure, primitive or continuation, and a
+    /// cellular continuation, holds as its field 2. It lives as the heap
+    /// does.
+    pub fn foreign_stub(&mut self) -> Value {
+        if self.code.stub == Value::FALSE {
+            let s = self.make_stubbed_bloblet(const { layout::kind("bloblet") }, 0, false);
+            let sym = self.intern("%fx26-foreign-stub");
+            let slot = self.symbol_global_slot(sym);
+            self.globals[slot] = s;
+            self.code.stub = s;
+        }
+        self.code.stub
     }
 
     /// A copy of bloblet `v` in the code area, sealed (`TODO.md` §97): its
@@ -89,33 +180,39 @@ impl Heap {
         c
     }
 
-    /// `n` words of the code area: first fit, else past what is walkable.
-    fn code_alloc(&mut self, n: usize) -> usize {
-        if self.code.top == 0 {
-            self.code.top = CODE_BASE;
-            // Before anything is written there: the view replaces the
-            // area's pages with shared ones, zero, as they were.
+    /// Before anything is written there: the view replaces the area's pages
+    /// with shared ones, zero, as they were.
+    pub(super) fn start_code_area(&mut self) {
+        if !self.code.started {
+            self.code.started = true;
             self.code_exec = self.mem.exec_view(CODE_BASE..CODE_BASE + CODE_WORDS).map_err(|e| e.to_string());
         }
-        self.code.used += n;
+    }
+
+    /// `n` words of the code area's `part`: first fit, else past what is
+    /// walkable.
+    fn code_alloc(&mut self, part: CodePart, n: usize) -> usize {
+        self.start_code_area();
         self.code.taken += n;
         self.code.allocated += n as u64;
-        if let Some(k) = self.code.free.iter().position(|&(_, len)| len >= n) {
-            let (start, len) = self.code.free[k];
+        let p = &mut self.code.parts[part as usize];
+        p.used += n;
+        if let Some(k) = p.free.iter().position(|&(_, len)| len >= n) {
+            let (start, len) = p.free[k];
             if len > n {
                 put_free(self.mem.words_mut(), start + n, len - n);
-                self.code.free[k] = (start + n, len - n);
+                p.free[k] = (start + n, len - n);
             } else {
-                self.code.free.remove(k);
+                p.free.remove(k);
             }
-            let k = self.code.starts.partition_point(|&s| s < start);
-            self.code.starts.insert(k, start);
+            let k = p.starts.partition_point(|&s| s < start);
+            p.starts.insert(k, start);
             return start;
         }
-        let at = self.code.top;
-        assert!(at + n <= CODE_BASE + CODE_WORDS, "the code area is full: {n} words more, past {} in use", self.code.used - n);
-        self.code.top = at + n;
-        self.code.starts.push(at);
+        let at = p.top;
+        assert!(at + n <= p.limit(), "the code area is full: {n} words more, past {} in use", p.used - n);
+        p.top = at + n;
+        p.starts.push(at);
         at
     }
 
@@ -138,11 +235,12 @@ impl Heap {
         view.flush(v.index() * 8, bytes.max(1));
     }
 
-    /// The address of the code area's first word: every reference into it
-    /// is at or above this, and every other reference below, so machine
-    /// code tells a code bloblet from other objects with one comparison.
-    pub fn code_area_address(&self) -> usize {
-        self.words_address() as usize + 8 * CODE_BASE
+    /// The address of the code area's native part: every reference to
+    /// native code is at or above this, and every other reference below
+    /// (a stubbed bloblet's too), so machine code tells native code from
+    /// the rest with one comparison (the state's `code-lo`).
+    pub fn native_code_address(&self) -> usize {
+        self.words_address() as usize + 8 * NATIVE_BASE
     }
 
     /// Whether `v` refers into the code area.
@@ -150,10 +248,21 @@ impl Heap {
         v.is_bloblet() && in_code_area(self.ix(v))
     }
 
-    /// Words in the code area's objects, and words its walkable part spans
-    /// (objects and free blocks): for reports and tests.
+    /// Which part of the code area `v` is in, if it is in it.
+    pub fn code_part(&self, v: Value) -> Option<CodePart> {
+        self.is_code_bloblet(v).then(|| if self.ix(v) >= NATIVE_BASE { CodePart::Native } else { CodePart::Stubbed })
+    }
+
+    /// Words in the objects of the code area's native part, and words its
+    /// walkable part spans (objects and free blocks): for reports and tests.
     pub fn code_words(&self) -> (usize, usize) {
-        (self.code.used, self.code.top.saturating_sub(CODE_BASE))
+        self.code_words_in(CodePart::Native)
+    }
+
+    /// The same, of `part`.
+    pub fn code_words_in(&self, part: CodePart) -> (usize, usize) {
+        let p = &self.code.parts[part as usize];
+        (p.used, p.top - p.base)
     }
 
     /// After a collection: every object not in `marks` (by main header) is
@@ -163,42 +272,96 @@ impl Heap {
     pub(super) fn sweep_code(&mut self, marks: &HashSet<usize>) {
         // Never used: nothing to sweep, and nothing to start (the first use
         // makes the area's execute view, before anything is in it).
-        if self.code.top == 0 {
+        if !self.code.started {
             return;
         }
-        let (mut at, top) = (CODE_BASE, self.code.top);
-        let mut free = Vec::new();
-        let mut starts = Vec::new();
-        let mut used = 0;
-        let mut run: Option<usize> = None;
-        while at < top {
-            let w = self.word(at);
-            debug_assert!(is_header(w), "the code area is walkable: no header at {at}");
-            let main = at + is_extension(w) as usize;
-            let size = read_head(self.mem.words(), main).size();
-            if marks.contains(&main) {
-                if let Some(start) = run.take() {
-                    free.push((start, at - start));
+        for part in 0..2 {
+            let (base, top) = (self.code.parts[part].base, self.code.parts[part].top);
+            let (mut at, mut free, mut starts, mut used, mut run) = (base, Vec::new(), Vec::new(), 0, None);
+            while at < top {
+                let w = self.word(at);
+                debug_assert!(is_header(w), "the code area is walkable: no header at {at}");
+                let main = at + is_extension(w) as usize;
+                let size = read_head(self.mem.words(), main).size();
+                if marks.contains(&main) {
+                    if let Some(start) = run.take() {
+                        free.push((start, at - start));
+                    }
+                    starts.push(at);
+                    used += size;
+                } else if run.is_none() {
+                    run = Some(at);
                 }
-                starts.push(at);
-                used += size;
-            } else if run.is_none() {
-                run = Some(at);
+                at += size;
             }
-            at += size;
+            for &(start, len) in &free {
+                put_free(self.mem.words_mut(), start, len);
+                self.mem.release(start + 1..start + len);
+            }
+            if let Some(start) = run {
+                self.mem.release(start..top);
+            }
+            let p = &mut self.code.parts[part];
+            p.top = run.unwrap_or(top);
+            (p.free, p.starts, p.used) = (free, starts, used);
         }
-        self.code.top = run.unwrap_or(top).max(CODE_BASE);
-        for &(start, len) in &free {
-            put_free(self.mem.words_mut(), start, len);
-            self.mem.release(start + 1..start + len);
-        }
-        if let Some(start) = run {
-            self.mem.release(start..top);
-        }
-        self.code.free = free;
-        self.code.starts = starts;
-        self.code.used = used;
         self.code.taken = 0;
+    }
+
+    /// Each part's words, from its start to its walkable end, and its free
+    /// blocks: what an image carries of the code area.
+    pub(super) fn code_image(&self) -> [(Vec<u64>, Vec<(usize, usize)>); 2] {
+        self.code.parts.each_ref().map(|p| (self.mem.words()[p.base..p.top].to_vec(), p.free.iter().map(|&(s, n)| (s - p.base, n)).collect()))
+    }
+
+    /// The code area as an image carries it (`code_image`), its references
+    /// relocated already, its free blocks in order and within it: put back,
+    /// the objects' starts found by walking it, and made runnable.
+    pub(super) fn code_from_image(&mut self, parts: [(Vec<u64>, Vec<(usize, usize)>); 2]) -> Result<(), String> {
+        if parts.iter().all(|(w, _)| w.is_empty()) {
+            return Ok(());
+        }
+        self.start_code_area();
+        for (k, (words, free)) in parts.into_iter().enumerate() {
+            let base = self.code.parts[k].base;
+            self.mem.words_mut()[base..base + words.len()].copy_from_slice(&words);
+            let free: Vec<(usize, usize)> = free.into_iter().map(|(s, n)| (base + s, n)).collect();
+            let (mut at, mut starts, mut f) = (base, Vec::new(), free.iter().peekable());
+            while at < base + words.len() {
+                if f.peek().is_some_and(|&&(s, _)| s == at) {
+                    at += f.next().expect("peeked").1;
+                    continue;
+                }
+                let end = base + words.len();
+                let w = self.word(at);
+                if !is_header(w) || (is_extension(w) && (at + 1 >= end || !is_header(self.word(at + 1)))) {
+                    return Err(format!("no header at word {} of the code area's part {k}", at - base));
+                }
+                let main = at + is_extension(w) as usize;
+                starts.push(at);
+                at += read_head(self.mem.words(), main).size();
+                if at > end || f.peek().is_some_and(|&&(s, _)| s < at) {
+                    return Err(format!("an object past its place in the code area's part {k}"));
+                }
+            }
+            let p = &mut self.code.parts[k];
+            p.used = words.len() - free.iter().map(|&(_, n)| n).sum::<usize>();
+            (p.top, p.free, p.starts) = (base + words.len(), free, starts);
+        }
+        if let Ok(view) = &self.code_exec {
+            for p in &self.code.parts {
+                if p.top > p.base {
+                    view.flush((self.base + p.base) * 8, (p.top - p.base) * 8);
+                }
+            }
+        }
+        // The shared stub, if the image has it, found again by its global.
+        let sym = self.intern("%fx26-foreign-stub");
+        let slot = self.symbol_global_slot(sym);
+        if self.is_code_bloblet(self.globals[slot]) {
+            self.code.stub = self.globals[slot];
+        }
+        Ok(())
     }
 }
 

@@ -154,6 +154,10 @@
         acc
         (let* ((t (car ts)) (role (substring t 1 (k-conv-role-end t 1))))
           (k-conv-theirs (cdr ts) form (k-conv-insert (product (1 role) (2 t) (3 form)) acc))))))
+;; The clause of the convention as it was, accepted still in place of the
+;; current one of its role (`fixpt_runtime::NATIVE_CONVENTION_OLDER`).
+(define k-conv-older string
+  "(closures (kind 41) (code-field 2) (first-free-field 3) (native-when-code-at-least code-lo))")
 ;; Two clauses of one role, the second.
 (define k-conv-twice (->* (k-clauses) unit)
   (lambda (cs)
@@ -175,7 +179,8 @@
       (cond ((null? ours) (if (null? theirs) #u (missing (car theirs))))
             ((null? theirs) (extra (car ours)))
             ((string=? (extract (car ours) 1) (extract (car theirs) 1))
-             (if (string=? (extract (car ours) 2) (extract (car theirs) 2))
+             (if (or (string=? (extract (car ours) 2) (extract (car theirs) 2))
+                     (string=? (extract (car ours) 2) k-conv-older))
                  (k-conv-compare (cdr ours) (cdr theirs) form)
                  (k-sfail (string-append "`define-convention`: the `" (extract (car ours) 1)
                                          "` clause is not this implementation's: "

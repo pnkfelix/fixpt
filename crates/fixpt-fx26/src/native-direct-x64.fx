@@ -273,7 +273,8 @@
           (da-place-stubs)
           own)))))
 
-;; Not the procedure known: what the cell holds takes values.
+;; Not the procedure known: what the cell holds takes values, and its
+;; code runs.
 (define dx-cell-slows (subr da-assembles (dp-cell-slow-list) unit)
   (lambda (l)
     (if (null? l)
@@ -281,10 +282,8 @@
         (let ((c (car l)))
           (begin
             (da-bind (extract c 1))
-            (dx-each-reg (extract c 4) (lambda (r) (da-in-place r dr-box-f64)))
+            (dx-each-reg (extract c 3) (lambda (r) (da-in-place r dr-box-f64)))
             (da-ld d-x16 d-clo (dx-fld d-closure-word))
-            (da-e (x86-alu-rm da-cmp d-x16 d-st d-st-code-lo))
-            (da-jcc da-c-b (extract c 3))
             (da-jmp (extract c 2))
             (dx-cell-slows (cdr l)))))))
 (define dx-foreign (subr da-assembles (dp-foreign-list) unit)

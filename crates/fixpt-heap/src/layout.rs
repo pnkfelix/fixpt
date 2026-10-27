@@ -245,16 +245,45 @@ pub const fn kind(name: &str) -> u8 {
     panic!("no such kind")
 }
 
+/// The stub that enters the native convention's `foreign` routine
+/// (`docs/research/code-stubs.md`): the suffix of every bloblet in the code
+/// area's stubbed part, so that native code calls any procedure as it calls
+/// native code, `CLO` the callee and the count in its register already. A
+/// tail jump through the state's field `foreign`, which `fixpt-native`'s
+/// state has at `STATE_FOREIGN` (asserted there).
+pub mod stub {
+    pub const STATE_FOREIGN: usize = 288;
+
+    /// x86_64: `jmp [r15 + foreign]`, then `int3`.
+    pub const X86_64: [u8; 8] = {
+        let d = (STATE_FOREIGN as u32).to_le_bytes();
+        [0x41, 0xff, 0xa7, d[0], d[1], d[2], d[3], 0xcc]
+    };
+
+    /// arm64: `ldr x16, [x24, #foreign]; br x16`.
+    pub const ARM64: [u8; 8] = {
+        let ldr = (0xf940_0000 | ((STATE_FOREIGN as u32 / 8) << 10) | (24 << 5) | 16).to_le_bytes();
+        let br = (0xd61f_0000u32 | (16 << 5)).to_le_bytes();
+        [ldr[0], ldr[1], ldr[2], ldr[3], br[0], br[1], br[2], br[3]]
+    };
+
+    /// This machine's.
+    pub const BYTES: [u8; 8] = if cfg!(target_arch = "aarch64") { ARM64 } else { X86_64 };
+}
+
 /// A closure (kind `closure`): its code and what it closed over. Laid out
-/// `[extra…][code][trailer]`, so that the code, read on every call, and
-/// extra value `i`, read on every free-variable reference, are each at a
-/// fixed offset from the suffix: one load, whatever the closure's size. The
-/// AST engine's one extra value is the environment chain; the bytecode
-/// engine's are the captured values.
+/// `[extra…][code][stub][trailer]`, so that the code, read on every call,
+/// and extra value `i`, read on every free-variable reference, are each at
+/// a fixed offset from the suffix: one load, whatever the closure's size.
+/// The AST engine's one extra value is the environment chain; the bytecode
+/// engine's are the captured values. Field 2 is the heap's shared stub
+/// (`Heap::foreign_stub`), what native code runs to call it, as it runs a
+/// native closure's code there (`docs/research/code-stubs.md`).
 pub mod closure {
-    pub const CLOSURE_CODE: usize = 2;
+    pub const CLOSURE_STUB: usize = 2;
+    pub const CLOSURE_CODE: usize = 3;
     /// Extra value `i` is at `CLOSURE_EXTRA0 + i`.
-    pub const CLOSURE_EXTRA0: usize = 3;
+    pub const CLOSURE_EXTRA0: usize = 4;
 }
 
 /// An AST-engine environment frame (kind `env-frame`), laid out like a
@@ -473,19 +502,22 @@ pub mod cellular {
     /// another machine's frames inside it, which it calls once its own are
     /// back, or `#f` (`fixpt_runtime::crossing`); and how many times it may
     /// be given a value (`Shots`, `TODO.md` §98).
-    pub const CONT_DS: usize = 2;
-    pub const CONT_RS: usize = 3;
-    pub const CONT_CUR: usize = 4;
-    pub const CONT_K: usize = 5;
-    pub const CONT_FP: usize = 6;
-    pub const CONT_CLO: usize = 7;
-    pub const CONT_BASE: usize = 8;
-    pub const CONT_WHOLE: usize = 9;
-    pub const CONT_REGIONS: usize = 10;
-    pub const CONT_RUN: usize = 11;
-    pub const CONT_INNER: usize = 12;
-    pub const CONT_SHOTS: usize = 13;
-    pub const CONT_FIELDS: usize = 12;
+    /// Field 2 is the heap's shared stub (`Heap::foreign_stub`), what native
+    /// code runs to call one (`docs/research/code-stubs.md`).
+    pub const CONT_STUB: usize = 2;
+    pub const CONT_DS: usize = 3;
+    pub const CONT_RS: usize = 4;
+    pub const CONT_CUR: usize = 5;
+    pub const CONT_K: usize = 6;
+    pub const CONT_FP: usize = 7;
+    pub const CONT_CLO: usize = 8;
+    pub const CONT_BASE: usize = 9;
+    pub const CONT_WHOLE: usize = 10;
+    pub const CONT_REGIONS: usize = 11;
+    pub const CONT_RUN: usize = 12;
+    pub const CONT_INNER: usize = 13;
+    pub const CONT_SHOTS: usize = 14;
+    pub const CONT_FIELDS: usize = 13;
 
     pub const fn routine(name: &str) -> u64 {
         let mut i = 0;

@@ -121,11 +121,29 @@ fn closures() -> D {
             c("kind", vec![i(layout::kind("native-closure"))]),
             c("code-field", vec![i(CLOSURE_WORD)]),
             c("first-free-field", vec![i(CLOSURE_FREE0)]),
-            // Native code when its code is at or past the code area's
-            // start (the state's `code-lo`), else called by `foreign`.
-            c("native-when-code-at-least", vec![s("code-lo")]),
+            // Whatever the callee, its code runs: native code, or a stub
+            // that enters `foreign` (`docs/research/code-stubs.md`).
+            c("code-always-runs", vec![]),
         ],
     )
+}
+
+/// The `closures` clause before every procedure's code ran
+/// (`docs/research/code-stubs.md`): native code when its code is at or past
+/// the state's `code-lo`, else called by `foreign`. Code written to it still
+/// runs, since a word's code is below `code-lo` and anything else's
+/// stub enters `foreign` too: so both checkers accept it still
+/// (`fixpt_runtime::NATIVE_CONVENTION_OLDER`; a test says it is this).
+pub fn closures_before_stubs() -> String {
+    text(&c(
+        "closures",
+        vec![
+            c("kind", vec![i(layout::kind("native-closure"))]),
+            c("code-field", vec![i(CLOSURE_WORD)]),
+            c("first-free-field", vec![i(CLOSURE_FREE0)]),
+            c("native-when-code-at-least", vec![s("code-lo")]),
+        ],
+    ))
 }
 
 /// The state's fields code reads or writes, by offset: the same for both

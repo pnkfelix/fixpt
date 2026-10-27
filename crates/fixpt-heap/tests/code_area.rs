@@ -155,3 +155,58 @@ fn a_weak_reference_to_code_dies_with_it() {
     collect(&mut heap);
     assert_eq!(heap.weak_get(wk), None);
 }
+
+/// A word is made in the code area's stubbed part, below native code, its
+/// suffix the stub that enters `foreign` (`docs/research/code-stubs.md`);
+/// a closure of the bytecode VM holds the stub every such procedure
+/// shares. A word nothing refers to is freed.
+#[test]
+fn words_are_made_below_native_code_with_their_stub() {
+    use fixpt_heap::CodePart;
+    let mut heap = Heap::new();
+    let name = heap.intern("w");
+    let exit = Value::fixnum(layout::cellular::routine("exit") as i64);
+    let word = heap.make_cellular_word(name, &[exit]).expect("a word");
+    assert_eq!(heap.code_part(word), Some(CodePart::Stubbed));
+    let native = code(&mut heap, 8);
+    assert_eq!(heap.code_part(native), Some(CodePart::Native));
+    assert!(8 * word.index() < heap.native_code_address(), "below `code-lo`");
+    assert_eq!(heap.bloblet_bytes(word), layout::stub::BYTES);
+    let c = heap.make_closure(Value::NULL, &[]);
+    let stub = heap.bloblet_slot(c, layout::closure::CLOSURE_STUB);
+    assert_eq!(stub, heap.foreign_stub());
+    assert_eq!(heap.code_part(stub), Some(CodePart::Stubbed));
+    let root = heap.push_root(c);
+    let (before, _) = heap.code_words_in(CodePart::Stubbed);
+    collect(&mut heap);
+    let (after, _) = heap.code_words_in(CodePart::Stubbed);
+    assert!(after < before, "the word nothing refers to freed: {after} of {before}");
+    assert_eq!(heap.bloblet_slot(heap.root_at(root), layout::closure::CLOSURE_STUB), stub, "the stub kept, by its global");
+    heap.pop_roots_to(root);
+}
+
+/// An image carries the code area: a word, kept by a global, is a word of
+/// the stubbed part again once loaded, its stub there, and the shared stub
+/// found again.
+#[test]
+fn an_image_carries_the_code_area() {
+    use fixpt_heap::CodePart;
+    let mut heap = Heap::new();
+    let name = heap.intern("w");
+    let exit = Value::fixnum(layout::cellular::routine("exit") as i64);
+    let word = heap.make_cellular_word(name, &[exit]).expect("a word");
+    let pair = heap.cons(word, Value::fixnum(3));
+    let c = heap.make_closure(pair, &[]);
+    let slot = heap.symbol_global_slot(name);
+    heap.set_global(slot, c);
+    heap.collect(&mut []);
+    let mut back = fixpt_heap::image::load(&fixpt_heap::image::dump(&heap)).expect("loads");
+    let name = back.intern("w");
+    let c = back.global(back.symbol_global_slot(name));
+    let word = back.car(back.closure_code(c));
+    assert_eq!(back.code_part(word), Some(CodePart::Stubbed));
+    assert!(back.is_cellular_word(word));
+    assert_eq!(back.bloblet_bytes(word), layout::stub::BYTES);
+    let stub = back.bloblet_slot(c, layout::closure::CLOSURE_STUB);
+    assert_eq!(back.foreign_stub(), stub, "the shared stub found again, not made anew");
+}

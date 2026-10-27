@@ -423,18 +423,16 @@
 ;;; ------------------------------------------------------------ control
 
 ;; A call of the closure in `CLO`, `n` arguments in registers, back at
-;; `after`: native code, or not (`call_clo`).
+;; `after`: its code runs, native code or a stub that enters `foreign`
+;; with the count (`call_clo`).
 (define dq-call-clo (subr da-assembles (int int) unit)
   (lambda (n after)
-    (let ((stub (da-label)))
-      (begin
-        (da-ld d-x16 d-clo (dq-fld d-closure-word))
-        (da-e (x86-alu-rm da-cmp d-x16 d-st d-st-code-lo))
-        (da-jcc da-c-b stub)
-        (set dp-foreign (cons (product (1 stub) (2 after) (3 n) (4 #f)) (get dp-foreign)))
-        (da-e (x86-alu-rm da-add d-x16 d-st d-st-delta))
-        (da-e (x86-call-r d-x16))
-        (da-bind after)))))
+    (begin
+      (da-ld d-x16 d-clo (dq-fld d-closure-word))
+      (da-imm d-x9 n)
+      (da-e (x86-alu-rm da-add d-x16 d-st d-st-delta))
+      (da-e (x86-call-r d-x16))
+      (da-bind after))))
 ;; Call-out `code` of `arity` arguments, from the registers, and its trap.
 (define dq-callout (subr da-assembles (int int) unit)
   (lambda (code arity)
@@ -519,7 +517,7 @@
 ;; value replaced.
 (define dq-withmark-tail (subr da-assembles () unit)
   (lambda ()
-    (let ((push- (da-label)) (call (da-label)) (stub (da-label)) (after (da-label)))
+    (let ((push- (da-label)) (call (da-label)))
       (begin
         (da-ld d-x9 d-st d-st-mark-ret)
         (da-e (x86-alu-rm da-cmp d-x9 d-sp 0))
@@ -536,12 +534,9 @@
         (da-bind call)
         (da-mov d-clo dq-r3)
         (da-ld d-x16 d-clo (dq-fld d-closure-word))
-        (da-e (x86-alu-rm da-cmp d-x16 d-st d-st-code-lo))
-        (da-jcc da-c-b stub)
-        (set dp-foreign (cons (product (1 stub) (2 after) (3 0) (4 #t)) (get dp-foreign)))
+        (da-imm d-x9 0)
         (da-e (x86-alu-rm da-add d-x16 d-st d-st-delta))
-        (da-e (x86-jmp-r d-x16))
-        (da-bind after)))))
+        (da-e (x86-jmp-r d-x16))))))
 
 ;; A continuation taken (native here, so `ncallcc`'s too): where it
 ;; resumes, the continuation procedure, the capture, and the receiver

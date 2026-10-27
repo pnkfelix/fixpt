@@ -492,7 +492,11 @@ impl Default for Session {
 pub fn install_primitives(rt: &mut Runtime) {
     for (i, def) in PRIMITIVES.iter().enumerate() {
         let name = rt.heap.intern(def.name);
-        let obj = rt.heap.alloc(ObjType::Primitive, 4, Value::FALSE);
+        // Its last field, field 2, the heap's shared stub
+        // (`Heap::foreign_stub`): what native code runs to call it.
+        let stub = rt.heap.foreign_stub();
+        let obj = rt.heap.alloc(ObjType::Primitive, 5, Value::FALSE);
+        rt.heap.obj_set(obj, 4, stub);
         rt.heap.obj_set(obj, 0, name);
         rt.heap.obj_set(obj, 1, Value::fixnum(i as i64));
         rt.heap.obj_set(obj, 2, Value::fixnum(def.min as i64));
