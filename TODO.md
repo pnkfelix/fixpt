@@ -3227,3 +3227,22 @@ alike to 0.1%. Take the runs after it.
   heap in huge pages"): stage 0 21.2G cycles (user and kernel) to 20.0G.
   **Left**: the kept front end's image read and copied (`image::load`,
   16% of the faults left); the cellular code space's copying collection.
+
+## 131. `type-at`: a primitive or a syscall (Heist's request, 2026-10-26)
+
+`type-at` landed as a primitive (`DONE.md` §131). Its type fits a
+syscall's (strings, an `int`, `io` effects), but only a runtime's own code
+may declare one (§127). The editor is not a runtime, and `--syscalls` on
+it would admit any syscall. A third way: a module built in, which may
+declare, whose `define-optional-syscall type-at "fx26:type-at/1"` a
+program imports. The editor would need no `--syscalls`, and a runtime
+without a checker (kayak's, until it has one) answers `syscall-available?`
+with `#f` instead of lacking a primitive. For the user to decide.
+
+## 132. A `pselect` arm for a process (Heist's request, 2026-10-26)
+
+`(io process)` landed (`DONE.md` §132), but a program cannot wait for a
+process's output or exit: Heist's editor polls every 50 ms while one
+runs. An arm, as for `(read-byte)`, needs a waker list per process in
+`sched.rs`, the reader threads waking `wait_stdin`'s `poll` (a pipe it
+polls too), and the arm in both parsers.

@@ -3336,3 +3336,82 @@ Fixpt does", records what differs from it and the open questions decided.
   continuation, a closure kept cellular, with no test; the VM's
   continuation refused by `foreign`); the stub's bytes against both
   assemblers; words and images in `code_area.rs`.
+
+
+## 129. `attempt`: a failure caught at a cancellable body (Heist's request, 2026-10-26)
+
+Heist, the editor on FX-26 (`~/Dev/LangPlay/heist`), needs a command that
+does `(car nil)` to end with a message and leave the editor running. It
+carried this in its subtree of Fixpt (`FIXPT-CHANGES.md` there, F1).
+`(attempt e on-failure)` is `race2` with one branch (`attempt1`,
+`processes.fx`): a failure in `e` gives its message to `on-failure`.
+
+- **`e` is held to `race`'s rule**, that nothing it does is left half
+  done (`cancellable`, `k-cancellable`, factored out of `race`). So its
+  body is a task's boundary, and §86/§89's "`error` is caught only at a
+  task's boundary, never in place" stands.
+- **On all twelve machines**, both checkers agreeing (`programs/attempt`,
+  `preempt.rs`). `attempt1` is in the `k-built-in-only` table.
+- **A hazard Heist's harness found**: the scheduler's prompt tag is kept
+  once in the runtime's state (`%sched` 12 and 13). A session that runs
+  the evaluator written in FX-26 after a compiler, or a compiler after
+  it, fails at `(race 1 2)` with "a prompt tag is expected".
+  `programs/attempt`'s evaluator way has a session of its own
+  (`common::with_own_eval`); a real run uses one way.
+- **Not yet**: a richer failure value than the message; heap exhaustion
+  caught; an `attempt` cancelled from outside (`C-g`, §106).
+
+
+## 130. The evaluator's failed task kept quiet (Heist's request, 2026-10-26: a bug)
+
+Heist's F2. On `fx-ast-eval` only, a monitored task that fails stays the
+current task until `run-task` takes its failure (op 37). If the
+evaluator's tick fell in that window, `preempt` suspended to a prompt that
+was just left: "no prompt for this tag". It is older than `attempt`:
+`race` branches and monitored processes fail the same way. Now
+`op::TASK_FAILED` (`sched.rs`) makes the failed task quiet when the tag is
+returned. The reproduction is `programs/attempt/evaluator-after-failure.fx`.
+
+
+## 131. `type-at`: the checker's type at a place in a program text (Heist's request, 2026-10-26)
+
+Heist's F3, for the editor's `C-c t`: `type-at : (subr (io fs-read)
+(string int) string)`. It checks the text with the session's checker
+(`record_types`, `typeat.rs`) up to the form the place is in, and gives
+`"START END TYPE"` or `"error START END MESSAGE"`, in characters.
+
+- **A primitive**, `%fx26-type-at` (509, after the syscall primitives),
+  through a hook the session installs (`Runtime::type_at`), since the
+  checker is above `fixpt-runtime`. The evaluator written in FX-26 calls
+  the host's. Whether it should be a syscall instead is open (`TODO.md`
+  §131).
+- **Named types printed by their names**: printed with no names
+  (`Checker::print_expanded`), then each named type's text put back,
+  longest first, families applied to named types too: `(subr pure
+  ((actor frame) command) (msg buffer))`, as written.
+- **On all twelve machines**, alike (`programs/typeat/basic.fx`). On
+  Heist's own program (220 KB): 69 ms near its start, 0.5 s near its end.
+- **Not yet**: text past an error; the instantiations and effects at a
+  place (R10's flow analysis).
+
+
+## 132. Programs run beside this one: `(io process)` (Heist's request, 2026-10-26)
+
+Heist's F4, for `M-x compile`, `grep`, `M-!` and `shell`. A twelfth I/O
+kind, `(io process)` (code 11, after `(io sys)`), and six primitives:
+`process-start` (a program, its arguments, a directory;
+`(sumof (started int) (failed io-error))`), `process-output` (what it
+wrote since asked, never waiting), `process-status` (`running`, `exited`,
+`signalled`, `unknown`), `process-write`, `process-close-input`, and
+`process-signal` (to its group).
+
+- **The runtime**: a table of processes in `World`. A thread per process
+  reads its output and error, as one pipe, decoding UTF-8. Each process
+  gets a session of its own (`setsid`, in `tty.rs`), so a shell cannot
+  take the editor's terminal.
+- **FX-26 proper, not a syscall**: the types (`listof string`, `sumof`)
+  cannot cross as a syscall's (§127).
+- **On all twelve machines** (`programs/process/basic.fx`), both checkers
+  agreeing.
+- **Not yet**: a `pselect` arm (`TODO.md` §132); a pseudo-terminal;
+  environment variables; output and error apart.
