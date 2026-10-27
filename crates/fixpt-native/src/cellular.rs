@@ -2235,6 +2235,7 @@ impl NativeMachine {
         args: &[Value],
         fuel: u64,
     ) -> Result<Vec<Value>, Trap> {
+        crate::jitdebug::flush();
         let rt_ptr = rt as *mut fixpt_runtime::Runtime as u64;
         let mut st = self.stacks.start(&mut rt.heap, word, args, fuel);
         st.rt = rt_ptr;

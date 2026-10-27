@@ -2195,3 +2195,18 @@ The user named it; the semantics are the research note's. Mine:
   shape in either checker.
 - **`hide`'s refusal kept**: lifting it is the user's decision of
   2026-10-09 to revisit, not part of this.
+
+## Names and frames for `gdb` and `lldb` (2026-10-27)
+
+The user: "Yeah do 1, 2, and 3" (names, lines, values). Names first.
+- **ELF objects, Linux x86_64 only**: the machine at hand; Mach-O for
+  macOS left (TODO §26).
+- **Frames read from the bytes, not told by the compilers**: one analysis
+  for the Rust compiler's code, the FX-26 compiler's (byte-for-byte the
+  same) and the hand-written stubs, with no change to either compiler.
+- **Frames lazily, on a debugger's breakpoint**: made eagerly they cost
+  7% of stage 0 even after a structured decoder took them from 50%; the
+  default costs 0.7%. The price: a debugger attached to a running loop
+  sees frames only once the program goes on to a time slice.
+- **On by default**, `FIXPT_JIT_DEBUG` to change it: a debugger is most
+  wanted where nobody planned for it.

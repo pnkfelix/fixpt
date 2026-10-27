@@ -20,6 +20,9 @@
 //! `/tmp/perf-PID.map` as Linux's `perf` reads them, LEN in hex too, so
 //! `perf report` names our code. Both may be set at once. Perf knows no
 //! time of a name, so where room was used again it gives one of the names.
+//!
+//! Every note also goes to `gdb` and `lldb`, through the GDB JIT interface
+//! (`crate::jitdebug`), unless `FIXPT_JIT_DEBUG` is `0`.
 
 use std::io::Write;
 use std::sync::{Mutex, OnceLock};
@@ -48,12 +51,18 @@ fn files() -> &'static [(Mutex<std::fs::File>, bool)] {
 
 /// Whether names are being written: to make a name only when they are.
 pub fn enabled() -> bool {
-    !files().is_empty()
+    crate::jitdebug::enabled() || !files().is_empty()
 }
 
 /// `len` bytes of machine code at `start` are `name`'s, from now on.
 pub fn note(start: usize, len: usize, name: &str) {
     let name = name.replace('\n', " ");
+    if crate::jitdebug::enabled() {
+        // Code a call enters, the return address on the stack's top: its
+        // frames can be known (`crate::cfi`).
+        let called = name.starts_with("native ") && !name.ends_with("stack cache underflow") && !name.ends_with("a mark's return");
+        crate::jitdebug::register(&crate::jitdebug::Piece { start, len, name: &name, called });
+    }
     for (f, hex) in files() {
         if let Ok(mut f) = f.lock() {
             let _ = if *hex { writeln!(f, "{start:x} {len:x} {name}") } else { writeln!(f, "{start:x} {len} {name}") };

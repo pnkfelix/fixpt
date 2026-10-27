@@ -630,6 +630,14 @@ the run (also `^C` for §25, and a sampling point for a profiler).
 Deferred because: the user is not yet sure which debugger they want; the
 first two steps serve both.
 
+Since (2026-10-27): names and frames, on Linux x86_64, for `gdb` and
+`lldb` (`docs/research/debugging.md`, "Since"); the user asked for lines
+and values too. Left of the names: arm64 (Mach-O on macOS); a debugger
+come to a running program waits some seconds while every object is made
+again with frames (fewer, larger objects would help: merge them while no
+debugger is here); the underflow stub named where a return address is
+one past it.
+
 ## 27. The collector's next spaces: static, large objects, and regions that reclaim everything (the user's, 2026-10-05; PLAN Q16)
 
 What the heap has today (`crates/fixpt-heap/src/heap.rs`): a nursery,

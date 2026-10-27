@@ -200,6 +200,7 @@ impl CodeSpace {
 
 impl Drop for CodeSpace {
     fn drop(&mut self) {
+        crate::jitdebug::forget(self.rx as usize, self.rx as usize + self.size);
         // SAFETY: both views were mapped by `new`, `size` long, and nothing
         // made by this space outlives it.
         unsafe {

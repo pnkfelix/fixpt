@@ -7,6 +7,64 @@ marked *verified* was tried on this machine, against that day's build
 (`lldb-2103.0.34.103`, Xcode's). What is marked *(from memory)* was not
 checked against a source while writing; this note was written offline.
 
+## Since: names and frames on Linux, x86_64 (2026-10-27)
+
+The user, asking how `gdb` and `lldb` see compiled code, chose to do
+§2.1, then §2.3 and §2.4. §2.1 is done for Linux on x86_64, with frames
+beside the names (`crates/fixpt-native/src/jitdebug.rs`, `cfi.rs`):
+
+- **Every piece of machine code `symbols::note` names is registered**
+  through the GDB JIT interface, as in-memory ELF objects (one `.text.k`
+  section per piece at its own address, no bytes; a function symbol),
+  batched: an object per compile or install, so that attaching reads few.
+  A piece placed where an older one was replaces it; a code space
+  unmapped forgets its pieces. Names: a native procedure by its own name
+  (`b go`), `regs:NAME` and `cells:NAME` for register and cellular words,
+  `fixpt:trampoline` and the like for the machines' own code.
+- **Frames**: a `.debug_frame` for code a call enters (native procedures,
+  the convention's stubs, the trampoline), its rules read from the code
+  itself, so the Rust and FX-26 compilers' code alike: where the frame's
+  base is from `rsp` (or `rbp`, or the `rsp` a call out to Rust keeps in
+  the machine's state, `[r15+136]`), where the return address and the
+  caller's `rbp` are, at each instruction. A structured decoder, checked
+  against the disassembler's text on every piece of stage 0's code
+  (`FIXPT_CFI_CHECK`), none differing.
+- **Frames only once a debugger is here**: they cost some 7% of loading
+  kayak's compiler; names cost 0.7% (28.68G instructions against
+  28.47G). A debugger keeps an `int3` at `__jit_debug_register_code`
+  while the program runs; each run, compile and time slice reads that
+  byte, and on the first sight every object is made again with frames.
+  Started under a debugger, frames are there from the start; attached to
+  a loop, once the program goes on to its next time slice (`continue`,
+  then interrupt). `FIXPT_JIT_DEBUG=frames` makes them from the start,
+  `names` never, `0` registers nothing.
+
+What it gives (verified, gdb 12.1 and lldb on this machine): `bt` from a
+loop in compiled code names every frame, `go`, five `deep`, the
+trampoline, then Rust to `main`; `b go` resolves; `x/3i $pc` shows
+`<go+110>`. Sampled at random in `deriv`, every backtrace reaches the
+thread's start, in both.
+
+What it does not:
+
+- **`gdb` stops at a call out to Rust**: Rust's stack is above the native
+  stack, so the native frame calling out has its base below its callee's,
+  which `gdb` takes for a corrupt stack ("previous frame inner to this
+  frame"), with no way to say otherwise. `lldb` goes on through.
+- **During a collection** the native stack's frames are being flushed and
+  moved, so either may lose the frames above it.
+- **Past the stack cache**: frames flushed to the heap are not on the
+  stack; a backtrace ends at the underflow stub, unnamed in `gdb`.
+- **Attaching to a running program** with frames not yet made: the
+  program must go on once (above), and the objects made again are some
+  thousands of changes, each a stop for the debugger, some seconds.
+- **A breakpoint by name before the code is compiled** stays pending in
+  both debuggers (gdb 12.1, this `lldb`): neither resolves one when an
+  object is registered. Break once the code is there (attached, or after
+  an interrupt).
+- **arm64**, Linux or macOS (Mach-O), is not done: names would be the
+  same objects (`EM_AARCH64`), unchecked; frames need arm64's rules.
+
 ## 0. The answer, up front
 
 - **`lldb` already walks through compiled code** (verified, §1). The

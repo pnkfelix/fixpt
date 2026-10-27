@@ -71,6 +71,13 @@ left in `/tmp`, as perf's convention is, one per process. Code collected
 has its room used again, and perf knows no time of a name, so an address
 reused shows one of its names.
 
+**`gdb` and `lldb`** (2026-10-27). Compiled code is named for them
+too, always, through the GDB JIT interface, and its frames are told once
+a debugger is here (`docs/research/debugging.md`, "Since"). Names cost
+0.7% of stage 0's instructions; frames, made from the start
+(`FIXPT_JIT_DEBUG=frames`), some 7%; `FIXPT_JIT_DEBUG=0` registers
+nothing.
+
 **Who allocates in Rust** (2026-10-24). The heap FX-26 programs run on
 never calls `malloc`: it allocates in memory it reserved, by bumping a
 pointer. What does call it is Fixpt's Rust (the compilers' and the

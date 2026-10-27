@@ -19,6 +19,8 @@ mod control;
 pub mod stencil;
 pub mod faults;
 pub mod symbols;
+pub mod jitdebug;
+mod cfi;
 pub mod cellular;
 pub mod direct;
 

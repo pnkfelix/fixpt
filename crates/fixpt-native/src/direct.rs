@@ -1197,6 +1197,7 @@ fn install(heap: &mut Heap, procs: &[Proc], first: usize, free: &[Value]) -> Res
             crate::symbols::note(heap.code_exec_address(blob), bytes.len(), &format!("native {}", p.name));
         }
     }
+    crate::jitdebug::flush();
     let entry = native_closure(heap, blobs[first], free);
     Ok(procs
         .iter()
@@ -1260,6 +1261,7 @@ impl DirectMachine {
 /// Run `p` with `args`, in at most about `fuel` steps, in `rt`, whose heap
 /// its call-outs allocate in, on `r`'s machine's stack from `top` down.
 fn run(r: &Runner, rt: &mut fixpt_runtime::Runtime, p: Compiled, args: &[Value], fuel: u64, top: u64) -> Result<Value, DirectTrap> {
+    crate::jitdebug::flush();
     assert!(p.arity == usize::MAX || args.len() == p.arity, "the procedure's arity");
     // The count, for a variadic procedure; past 8, the eighth a list of
     // the rest (Larceny's convention).
@@ -5244,6 +5246,7 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
             0
         }
         Callout::Poll => {
+            crate::jitdebug::flush();
             let take = st.reserve.min(fixpt_runtime::sched::slice());
             (st.fuel, st.reserve) = (take, st.reserve - take);
             let own = |h: &Heap, f: Value| DirectMachine::compiled_of(h, f).is_some();

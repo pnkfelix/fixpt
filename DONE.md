@@ -3601,3 +3601,25 @@ The research note's narrowing (`moduleof-only` there); the user named it.
   `restrict`'s unnamed binder would let it keep one instead.
 - **Stage 0's fixed cost unchanged**: 28.46G instructions against 28.45G.
 - **Tests**: `modules/restrict*.fx`, with `module-files/made-tickets.fx`.
+
+## 140. Compiled code named, and its frames told, to `gdb` and `lldb` (2026-10-27)
+
+The user, after asking how the debuggers see compiled code: "do 1, 2,
+and 3" of names, lines and values; this is the first.
+
+- **The GDB JIT interface**: `__jit_debug_descriptor` and
+  `__jit_debug_register_code` (`crates/fixpt-native/src/jitdebug.rs`);
+  every piece `symbols::note` names goes into an in-memory ELF object, one
+  per compile or install (`flush`), so that a debugger attaching reads
+  thousands rather than tens of thousands (gdb: 16 s to 2.4 s).
+- **Frames read from the code** (`cfi.rs`): a structured x86_64 decoder,
+  as `disasm::decode` case for case, and a walk of each procedure's
+  instructions keeping the frame's base, return address and caller's
+  `rbp`; `.debug_frame` rows where they change. Checked against the
+  disassembler's text on all of stage 0's code (`FIXPT_CFI_CHECK`).
+- **Frames made once a debugger is here** (`debugger_here`, the `int3` it
+  keeps), for their cost.
+- **Stage 0's fixed cost**: 28.68G instructions against 28.47G (names);
+  cycles 12.43-12.53G against 12.23-12.29G.
+- **Verified by hand** in gdb 12.1 and lldb: `bt` from compiled code to
+  `main`, `b go`, `x/i`. What is not: `docs/research/debugging.md`.
