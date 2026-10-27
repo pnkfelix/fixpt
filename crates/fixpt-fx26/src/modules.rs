@@ -707,17 +707,39 @@ impl Checker {
         }
     }
 
+    /// A load's module type, `t`, as a load gives it: each abstract type a
+    /// description of the hidden global's own, so that every binding of a
+    /// load of the file, wherever it is, has the same types. A key is one
+    /// value, made once (`TODO.md` §68), so what Sheldon's rule takes of
+    /// two textually equal `input`s is true of two loads of a file
+    /// (`docs/research/derived-signatures.md`, Q2). A maker's modules are
+    /// made by applying it, and keep types of their own.
+    pub(crate) fn strengthened(&mut self, t: TyId) -> TyId {
+        let Ty::Module { abs, descs, vals } = self.arena.get(self.arena.resolve(t)).clone() else { return t };
+        if abs.is_empty() {
+            return t;
+        }
+        let mut shown: Vec<(Sym, TyId)> = abs.iter().map(|(n, v)| (*n, self.arena.ty(Ty::Var(*v)))).collect();
+        shown.extend(descs);
+        self.arena.ty(Ty::Module { abs: Vec::new(), descs: shown, vals })
+    }
+
     /// A module's type, bound to `name`: its abstract types renamed for this
     /// binding, each `name..t`, kept until the binding's scope ends. Any
     /// other type as it is.
     pub(crate) fn name_module(&mut self, name: Sym, t: TyId) -> TyId {
         let Ty::Module { abs, descs, vals } = self.arena.get(self.arena.resolve(t)).clone() else { return t };
         // A hidden item's (`%extend-0`, …), the module's own making, keeps
-        // the names its module has (`TODO.md` §69).
-        if abs.is_empty() || self.interner.name(name).starts_with('%') {
+        // the names its module has (`TODO.md` §69); a load's hidden global
+        // names them for its file, `x.fx..t`, which every binding of a load
+        // of it shares (`strengthened`).
+        let n = match self.interner.name(name).strip_prefix("%shared:") {
+            Some(key) => key.rsplit('/').next().unwrap_or(key).trim_start_matches("input:").to_string(),
+            None => self.interner.name(name).to_string(),
+        };
+        if abs.is_empty() || n.starts_with('%') {
             return t;
         }
-        let n = self.interner.name(name).to_string();
         let mut map: HashMap<DVar, D> = HashMap::new();
         let mut fresh = Vec::new();
         for (a, v) in &abs {

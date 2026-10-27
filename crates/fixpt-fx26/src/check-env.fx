@@ -169,6 +169,30 @@
   (lambda (s)
     (let ((t (k-lookup-seen s)))
       (if (and (>= t 0) (k-hidden-standard? s t)) -1 t))))
+;; What `s` is where it is used as a value: as `k-lookup` says, a load's
+;; module type with each abstract type a description of the hidden global's
+;; own, so that every binding of a load of the file has the same types
+;; (`strengthened`); -1 if unbound.
+(define k-lookup-used (->* (symbol) int)
+  (lambda (s)
+    (let ((t (k-lookup s)))
+      (if (< t 0) t (k-strengthened s t)))))
+;; Only a module's type with abstract types, of a load, is: the name looked
+;; at last, as most are of no module.
+(define k-strengthened (->* (symbol int) int)
+  (lambda (s t)
+    (tagcase (k-get (k-resolve t))
+      (ty-module (abs ds vs)
+        (if (or (null? abs) (not (k-shared-name? s)))
+            t
+            (k-ty-new (ty-module nil (k-abs-shown abs ds) vs))))
+      (else y t))))
+(define k-abs-shown (->* (k-parts k-parts) k-parts)
+  (lambda (abs ds)
+    (if (null? abs)
+        ds
+        (cons (product (1 (extract (car abs) 1)) (2 (k-ty-new (ty-var (extract (car abs) 2)))))
+              (k-abs-shown (cdr abs) ds)))))
 ;; Whether `s`, bound at `t`, is a standard name only the module files built
 ;; in may name, named elsewhere.
 (define k-hidden-standard? (->* (symbol int) bool)

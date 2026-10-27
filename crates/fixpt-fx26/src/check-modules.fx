@@ -162,13 +162,33 @@
   (lambda (name t)
     (tagcase (k-get (k-resolve t))
       (ty-module (abs ds vs)
-        (if (or (null? abs) (string=? (substring (symbol->string name) 0 1) "%"))
+        (let ((n (k-binding-shown name)))
+          (if (or (null? abs) (string=? (substring n 0 1) "%"))
             t
-            (let* ((r (k-rename-abs (string-append (symbol->string name) "..") abs))
+            (let* ((r (k-rename-abs (string-append n "..") abs))
                    (ds2 (k-subst-each ds (extract r 2)))
                    (vs2 (k-subst-each vs (extract r 2))))
-              (k-ty-new (ty-module (extract r 1) ds2 vs2)))))
+              (k-ty-new (ty-module (extract r 1) ds2 vs2))))))
       (else y t))))
+;; What a binding's abstract types are named for: its name; a load's hidden
+;; global's, its file's, `x.fx`, which every binding of a load of it shares
+;; (`k-lookup-used`).
+(define k-binding-shown (->* (symbol) string)
+  (lambda (name)
+    (let ((n (symbol->string name)))
+      (if (and (> (string-length n) 8) (string=? (substring n 0 8) "%shared:"))
+          (k-unprefixed (k-after-slashes (substring n 8 (string-length n))))
+          n))))
+;; `key` after its last `/`, each found by `string-search`.
+(define k-after-slashes (->* (string) string)
+  (lambda (key)
+    (let ((i (string-search key "/" 0)))
+      (if (< i 0) key (k-after-slashes (substring key (+ i 1) (string-length key)))))))
+(define k-unprefixed (->* (string) string)
+  (lambda (k)
+    (if (and (>= (string-length k) 6) (string=? (substring k 0 6) "input:"))
+        (substring k 6 (string-length k))
+        k)))
 ;; Of the sizes and abstract types `vs`, named in a scope that `t` leaves:
 ;; the sizes, to be forgotten. A module's abstract type cannot be: nothing
 ;; may leave its binding's scope still mentioning it.

@@ -6,8 +6,8 @@ problems found along the way.
 
 Built since (2026-10-27): problems A, B, D and E (`DONE.md` §134, §135);
 `load-moduleof`, and for `load-input` files `load-input-moduleof`
-(`DONE.md` §136), as Q1 and Q2 below say. Not yet: narrowing, a file's
-abstract types shared by its loads, a top-level `include` (F).
+(`DONE.md` §136), as Q1 and Q2 below say; a file's abstract types shared
+by its loads (§137). Not yet: narrowing, a top-level `include` (F).
 
 ## The request, briefly
 

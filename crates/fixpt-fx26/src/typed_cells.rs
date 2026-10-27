@@ -1824,6 +1824,12 @@ impl Verifier<'_> {
                     self.effect = self.effect.union(&Effect::atom(crate::ast::Atom::Read(crate::ast::Region::Global(g))));
                 }
                 let ty = self.certs.globals.get(&ops[0].raw()).copied();
+                // A load's hidden global, read, has its abstract types as the
+                // checkers have them where a load is used: its own
+                // (`Checker::strengthened`); its definition writes it as it is.
+                let shared = self.heap.is_a(named, ObjType::Symbol)
+                    && self.c.interner.get(&self.heap.symbol_name(named)).is_some_and(|g| self.c.shared_globals.contains(&g));
+                let ty = if shared { ty.map(|t| self.c.strengthened(t)) } else { ty };
                 let term = Term::App("global", vec![Term::Lit(ops[0])]);
                 // A global known while compiling to hold a word's closure.
                 let ty = ty.or_else(|| {

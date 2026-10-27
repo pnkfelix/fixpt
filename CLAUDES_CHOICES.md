@@ -2143,3 +2143,20 @@ mine, not asked:
   argument rather than calling it, being before it.
 - **`check-program.fx` made room** by using `k-has-name?` and `reverse`
   for its own copies of them, rather than a split.
+
+## A file's abstract types shared by its loads (2026-10-27)
+
+The user decided to share them. How, mine:
+
+- **By strengthening where a load is used**, not by changing what a
+  binding does: a load's abstract types become descriptions of the hidden
+  global's own, so every binding of one is an alias, as OCaml's `module
+  type of struct include M end` is of `M`. A binding of any other module
+  is still opaque (Sheldon's `let` rule), and makers still make types of
+  their own.
+- **Only `load-module`'s modules.** A `load-input` file whose value is a
+  module with abstract types is not strengthened: none such is in use, and
+  its files are functions, whose modules are made by applying them.
+- **Named for the file's base name**, `x.fx..t`, not its whole key: two
+  files of one name in two directories print alike, though their types
+  stay apart.

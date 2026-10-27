@@ -1915,6 +1915,7 @@ impl Checker {
                 Err(self.named_only_to_call(span, s))
             }
             Exp::Var(s) => match self.lookup(s) {
+                Some(t) if self.shared_globals.contains(&s) => Ok((self.strengthened(t), self.naming_effect(s, t))),
                 Some(t) => Ok((t, self.naming_effect(s, t))),
                 None => match self.broken_why(s) {
                     Some(why) => Err(FxError::at(span, format!("`{}` is broken, {why}: define it again to use it", self.interner.name(s)))),

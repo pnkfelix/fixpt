@@ -117,7 +117,7 @@
         (x-var (s a b abk)
           (if (and (k-second-class? s) (k-std? s) (not (k-operator? s a b abk)))
               (k-fail (k-named-only s) a b)
-              (let ((t (k-lookup s)))
+              (let ((t (k-lookup-used s)))
                 (if (< t 0) (k-fail (k-unbound s) a b) (k-te t (k-naming-effect s t))))))
         (x-const (t v a b abk) (k-te t nil))
         (x-lambda (ps body a b abk) (k-synth-lambda-as x nil -1 nil))

@@ -3530,3 +3530,27 @@ Heist's request (`docs/research/derived-signatures.md`), the user's names.
 - **Stage 0's fixed cost unchanged**: 12.23-12.30G cycles against
   12.18-12.29G; 28.37G instructions against 28.32G.
 - **Tests**: `modules/load-moduleof*.fx`, over `module-files/made-*.fx`.
+
+## 137. A file's abstract types are the same for every load of it (2026-10-27)
+
+The user's decision, the research note's Q2 (`docs/research/
+derived-signatures.md`), reversing 2026-10-08's "two bindings of one file
+keep theirs apart" for loads.
+
+- **A load's module type is strengthened**: where a load is used, its
+  hidden global, each abstract type is a transparent description of the
+  global's own (`strengthened`, `k-lookup-used`), so a binding of it has
+  no abstract types of its own to be renamed. Every binding of a load of a
+  file, in any file, names the same types, and a file may offer operations
+  on another's abstract type to whoever loads that one too. Sound because a
+  key is one value, made once (`TODO.md` §68): Sheldon's rule for two equal
+  `input`s, true here by construction.
+- **Named for the file**, `x.fx..t`, as a binding's are for its variable.
+- **Makers unchanged**: a module made by applying a file's maker has types
+  of its own, so two schedulers' stay apart (`load-moduleof-apart.fx`).
+- **The verifier of cellular code likewise** types a read of a load's
+  hidden global strengthened; its definition writes it as it is.
+- **Stage 0's fixed cost**: 28.40G instructions against 28.37G, cycles
+  unchanged (12.17-12.72G against 12.19-12.56G); the FX-26 checker asks
+  whether a name is a load's only of a module's type with abstract types.
+- **Tests**: `modules/load-shared.fx`, `load-shared-named.fx`.

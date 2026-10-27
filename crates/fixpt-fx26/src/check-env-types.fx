@@ -125,6 +125,8 @@
    (val k-effect-notes (ref k-facts @t))
    (val k-forget-withs (subr (maxeff (alloc @t) (read @globals) (write @t)) () unit))
    (val k-lookup (subr (maxeff (read @globals) (read @t) spin) (symbol) int))
+   (val k-lookup-used
+        (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (symbol) int))
    (val k-bind
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
               (symbol int)
