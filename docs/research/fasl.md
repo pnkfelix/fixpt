@@ -257,9 +257,11 @@ the design above:
   source, 0.24 s from its `.fasl` (0.17 s is starting fixpt).
 - **A program's file keeps its procedures, and runs the rest**: its forms
   define globals, use the program's and do things, in order, so only what
-  making does nothing but make a procedure is kept: each `define` of one,
-  with its type, its value, and the types of the globals its code uses,
-  checked where it is loaded (part 3's import table). Every other form,
+  making does nothing but make a value from what is kept is kept: each
+  `define` of a procedure, a `define-rec`'s group, and a value whose making
+  only read what is kept (a module of procedures), with its type, its
+  value, and the types of the globals its code uses, checked where it is
+  loaded (part 3's import table). Every other form,
   types and loads among them, is read, checked and run from the source at
   its turn. Compiling runs nothing else either (`program_record`). The
   `.fasl` is the whole file's or none (its procedures compiled together,

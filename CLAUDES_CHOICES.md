@@ -2412,3 +2412,23 @@ program's file). What I chose:
   module file; `--program` (or `(compile-file "f" program)`) for a file
   that is both. A load ignores a program's `.fasl`, and a program's run a
   module file's, saying nothing.
+- **Measured on kayak's compiler** (kayak `d5840ee`, stage 0's
+  `loaded-select`), which made the next three choices:
+  - **`define-rec` groups kept**, declared as a `define-rec` of `lambda`s
+    whose bodies are `(the R %fasl-value)`: 185 groups there, none kept
+    at first.
+  - **Values made of what is kept, kept**: the big `(define m (module …))`
+    forms were 1.5 s of the 1.6 s still run from source. While compiling,
+    a definition that only reads globals already made runs; one that read
+    only kept definitions is kept, its declaration reading the same globals
+    (`(begin g … (the T %fasl-value))`) for the same effect.
+  - **No check of each declaration's type against the type written out**
+    at load: it cost more than checking the bodies saved. Instead every type
+    abbreviation a kept type names is compared when the `.fasl` is read;
+    one the file defines that does not read yet (it selects from a module a
+    later form loads) is compared when the first definition naming it is
+    declared, and if it differs that form runs from its source.
+  - Stage 0, 3.33 s from source, 2.60 s from the `.fasl` (888 definitions
+    kept). Left of loading: the FX-26 checker's check of each declaration
+    (0.5 s), the native compiles (0.14 s), and `compile-file` is slow, 11 s
+    (printing and reading back big module types).

@@ -3950,11 +3950,13 @@ standard error, and the source loaded. Every program of
 ## 154. `.fasl` files for programs' files (the user's, 2026-10-28)
 
 `compile-file --program FILE` (and `compile-file` of a file that is no
-module file) keeps a program's procedures: each definition's type, value,
-and the types of the globals its code uses. `fixpt run`, `fixpt eval` and
+module file) keeps a program's procedures (and `define-rec` groups, and
+values made only of what it keeps): each definition's type, value, and the
+types of the globals its code uses. `fixpt run`, `fixpt eval` and
 `,load` of the file, while its `.fasl` is fresh, declare each at its type
 (both checkers) and give it its value, and run every other form from the
 source in its turn. Compiling runs nothing of what the program does. Every
 program of `tests/programs` that compiles (but `syscalls` and `bench`'s,
 not run) gives the same from its `.fasl` as from its source, 342 of them
 reading it (`crates/fixpt-cli/tests/fasl.rs` runs eight directories).
+Kayak's compiler: stage 0 in 2.60 s from its `.fasl`, 3.33 s from source.

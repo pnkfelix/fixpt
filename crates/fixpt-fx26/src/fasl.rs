@@ -81,17 +81,19 @@ impl Kind {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Def {
     pub form: usize,
+    /// Whether it is a binding of a `define-rec`, whose bindings are its
+    /// form's `Def`s, in order.
+    pub rec: bool,
     pub name: String,
     pub ty: String,
-    /// Its type written out, no name for any part: what its declaration
-    /// must have where it is loaded.
-    pub full: String,
     /// The expression its declaration has the type by ([`fasl_value_at`]).
     pub init: String,
     pub uses: Vec<(String, String)>,
     /// What its definition said as it was made, a line each (that the
     /// native compiler declined it, say), said again where it is loaded.
     pub said: Vec<String>,
+    /// The type abbreviations its type names (`Header::aliases`).
+    pub types: Vec<String>,
 }
 
 /// A file a `.fasl`'s file loads: as its load wrote it, and the stamp it had.
@@ -173,12 +175,15 @@ impl Header {
             out.push_str(&format!("alias {n} {t}\n"));
         }
         for d in &self.defs {
-            out.push_str(&format!("def {} {} {}\nfull {}\ninit {}\n", d.form, d.name, d.ty, d.full, d.init));
+            out.push_str(&format!("{} {} {} {}\ninit {}\n", if d.rec { "rec" } else { "def" }, d.form, d.name, d.ty, d.init));
             for (n, t) in &d.uses {
                 out.push_str(&format!("use {n} {t}\n"));
             }
             for l in &d.said {
                 out.push_str(&format!("said {l}\n"));
+            }
+            if !d.types.is_empty() {
+                out.push_str(&format!("types {}\n", d.types.join(" ")));
             }
         }
         out.push_str(&format!("image {}\n", image.len()));
@@ -225,15 +230,16 @@ impl Header {
                     h.deps.push(Dep { path: path.to_string(), input: kind == "input", stamp: hex(st)? });
                 }
                 "type" => h.ty = value.to_string(),
-                "def" => {
+                "def" | "rec" => {
                     let mut parts = value.splitn(3, ' ');
                     let (Some(form), Some(name), Some(ty)) = (parts.next(), parts.next(), parts.next()) else {
                         return Err(format!("a header line `{l}`"));
                     };
                     let form = form.parse().map_err(|_| format!("a header line `{l}`"))?;
-                    h.defs.push(Def { form, name: name.to_string(), ty: ty.to_string(), full: String::new(), init: String::new(), uses: Vec::new(), said: Vec::new() });
+                    let rec = word == "rec";
+                    h.defs.push(Def { form, rec, name: name.to_string(), ty: ty.to_string(), init: String::new(), uses: Vec::new(), said: Vec::new(), types: Vec::new() });
                 }
-                "full" => h.defs.last_mut().ok_or_else(|| format!("a header line `{l}` before any `def`"))?.full = value.to_string(),
+                "types" => h.defs.last_mut().ok_or_else(|| format!("a header line `{l}` before any `def`"))?.types = value.split(' ').map(str::to_string).collect(),
                 "said" => h.defs.last_mut().ok_or_else(|| format!("a header line `{l}` before any `def`"))?.said.push(value.to_string()),
                 "init" => h.defs.last_mut().ok_or_else(|| format!("a header line `{l}` before any `def`"))?.init = value.to_string(),
                 "alias" => {
@@ -746,6 +752,34 @@ impl crate::check::Checker {
     }
 }
 
+/// The `lambda` a `define-rec`'s declaration of a procedure of type `ty`
+/// (printed) has it by: `(lambda (x …) (the R %fasl-value))`, its result
+/// `R`, its parameters named as `ty` names them where a type after selects
+/// from one (`(%p.1 : T)`), under a `plambda` of each `poly`'s binders.
+/// None if `ty` is no procedure's of a result alone (a specification's
+/// clauses after it, say).
+pub fn fasl_lambda_at(ty: &fixpt_read::Syntax, interner: &fixpt_read::Interner) -> Option<String> {
+    let w = |s: &fixpt_read::Syntax| fixpt_read::write_syntax(s, interner);
+    let items = ty.as_proper_list()?;
+    let head = interner.name(items.first()?.as_symbol()?);
+    match (head, items) {
+        ("poly", [_, binders, body]) => Some(format!("(plambda {} {})", w(binders), fasl_lambda_at(body, interner)?)),
+        ("subr", [_, _, params, result]) | ("subr", [_, _, _, params, result]) => {
+            let names: Vec<String> = params
+                .as_proper_list()?
+                .iter()
+                .enumerate()
+                .map(|(i, p)| match p.as_proper_list() {
+                    Some([n, colon, _]) if colon.as_symbol().is_some_and(|c| interner.name(c) == ":") => w(n),
+                    _ => format!("%a{}", i + 1),
+                })
+                .collect();
+            Some(format!("(lambda ({}) (the {} %fasl-value))", names.join(" "), w(result)))
+        }
+        _ => None,
+    }
+}
+
 /// The expression a declaration of a value of type `ty` (printed) is made
 /// to have it: `(the T %fasl-value)`, under a `plambda` of each `poly`'s
 /// binders, which `the` takes apart.
@@ -794,4 +828,16 @@ impl crate::check::Checker {
         *self.print_aliases.borrow_mut() = kept;
         shown
     }
+}
+
+/// The symbols of type `text`, as printed: its words between parentheses
+/// and spaces.
+pub fn symbols_in(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for w in text.split(['(', ')', ' ']).filter(|w| !w.is_empty()) {
+        if !out.iter().any(|o| o == w) {
+            out.push(w.to_string());
+        }
+    }
+    out
 }
