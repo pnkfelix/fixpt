@@ -326,6 +326,10 @@ pub struct Heap {
     /// The global slot holding the native adapters' shared code, once one
     /// is made (`set_adapter_code`).
     adapter_slot: Option<usize>,
+    /// The count of writes a global's cell made next starts at, by its
+    /// name (`plan_global_writes`): what a session plans for a definition,
+    /// so that its one write leaves its stamp.
+    planned_writes: HashMap<String, i64>,
 
     pub gc_count: u64,
     /// Collect at every `gc_every`th safepoint whatever the heap's fill, as
@@ -429,6 +433,7 @@ impl Heap {
             name_buf: String::new(),
             static_symbols: Vec::new(),
             adapter_slot: None,
+            planned_writes: HashMap::new(),
             gc_count: 0,
             gc_every: if cfg!(feature = "gc-stress") { 1 } else { 0 },
             safepoints: 0,
@@ -1919,6 +1924,22 @@ impl Heap {
     /// moves, held in a global of its own, so that it lives as the heap does.
     pub fn adapter_code(&self) -> Option<Value> {
         self.adapter_slot.map(|s| self.globals[s])
+    }
+    /// The next cell made for global `name` starts its count of writes at
+    /// `n` (`layout::cellular::GLOBAL_WRITES`), not 0: a session's plan for
+    /// a definition, so that the write that defines it leaves the
+    /// definition's stamp, which a guard compiled anywhere expects of it.
+    pub fn plan_global_writes(&mut self, name: &str, n: i64) {
+        self.planned_writes.insert(name.to_string(), n);
+    }
+    /// Where a cell made now for global `name` starts its count: as
+    /// planned (once), else 0.
+    pub fn first_global_writes(&mut self, name: &str) -> i64 {
+        self.planned_writes.remove(name).unwrap_or(0)
+    }
+    /// The plans not taken, let go.
+    pub fn forget_planned_writes(&mut self) {
+        self.planned_writes.clear();
     }
     pub fn set_adapter_code(&mut self, code: Value) {
         let sym = self.intern("%fx26-adapter-code");

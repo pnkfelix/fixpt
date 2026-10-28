@@ -3439,10 +3439,18 @@ the makers (`docs/research/fasl.md`). In order:
    (`fixpt_heap::CalloutMap`); its globals were fields already. Heist's
    editor through `eldoc.fx` 0.59 s to 0.52 s. A `.fasl` of words alone
    kept as an option (`compile-file --cellular`, the user's): 3.2 MB to
-   native's 6.0 MB, 0.58 s. Next: native code from a `.fasl` runs slower
-   where a global's guard tests the cell's count of writes against the
-   count compiled in (s7st's `vec5e5` 93 ms, against 77 ms from a cellular
-   `.fasl` and 71 ms from source).
+   native's 6.0 MB, 0.58 s.
+12. ~~**Guards test a definition's stamp, not a count of writes**~~ (done,
+   2026-10-28, the user's choice): a global's cell holds its definition's
+   stamp (`Fx26Session::definition_stamps`), the same in every session for
+   the same definition, so that code a `.fasl` keeps finds its guards hold
+   where they did, and fail where a definition changed at the same type
+   (which a count, 1 in both sessions, did not tell; the `.fasl`s of
+   programs had counted every earlier global on by 2^40 so that none
+   held). s7st's `vec5e5` from native `.fasl`s 93 ms to 77 ms. Not done:
+   a REPL's `,compile-file` after a `set!` keeps a guard of the count
+   after it, which another session could meet; `map2e5` from either
+   kind of `.fasl` 250 ms against 229 ms from source, not yet looked at.
 10. ~~**The module files built in given `.fasl`s**~~ (done, 2026-10-28):
    in the cache directory, written by the first run that loads one
    (`fasl::path_for_load`, `Fx26Session::cache_built_ins`). Heist's

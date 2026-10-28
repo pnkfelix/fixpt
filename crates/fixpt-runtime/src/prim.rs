@@ -2160,7 +2160,9 @@ prims! {
         let b = rt.heap.make_bloblet(PLAIN_BLOBLET, GLOBAL_FIELDS, 0, true);
         rt.heap.set_bloblet_slot(b, GLOBAL_VALUE, undefined);
         rt.heap.set_bloblet_slot(b, GLOBAL_NAME, a[0]);
-        rt.heap.set_bloblet_slot(b, GLOBAL_WRITES, Value::fixnum(0));
+        // As a session planned it, for its definition's stamp.
+        let first = if rt.heap.is_a(a[0], fixpt_heap::ObjType::Symbol) { rt.heap.first_global_writes(&rt.heap.symbol_name(a[0])) } else { 0 };
+        rt.heap.set_bloblet_slot(b, GLOBAL_WRITES, Value::fixnum(first));
         Ok(b)
     });
     "%fx26-global-writes", 1, Some(1), simple!(|rt, a| {

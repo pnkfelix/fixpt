@@ -336,6 +336,26 @@ fn load_lowered(scheme: &mut Session, text: &str) -> Result<(), String> {
 
 /// A failure of the lowered Scheme, said as the other machines say it
 /// (`DONE.md` §85): its message alone (`Session::bare_failures`), and a
+/// A digest as a global's stamp: a fixnum, not negative, of 60 bits.
+fn stamp_fixnum(digest: u64) -> i64 {
+    (digest >> 4) as i64
+}
+
+/// A stamp of this process's own, for a definition whose value its form
+/// does not decide (`definition_stamps`): no other session's code expects
+/// it.
+fn process_stamp() -> i64 {
+    use std::hash::{BuildHasher, Hasher};
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    thread_local! { static SEED: std::collections::hash_map::RandomState = std::collections::hash_map::RandomState::new(); }
+    let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    SEED.with(|s| {
+        let mut h = s.build_hasher();
+        h.write_u64(n);
+        stamp_fixnum(h.finish())
+    })
+}
+
 /// `car` or `cdr` of a non-pair, the one Scheme type check an FX-26
 /// program can fail, in their words.
 fn lowered_failure(m: String) -> String {
@@ -1035,13 +1055,110 @@ impl Fx26Session {
     /// but which the native convention's definitions and the lowering do
     /// here.
     fn run_checked(&mut self, top: Top, form: &Syntax, again: bool) -> R<Outcome> {
+        // Each global it defines left its definition's stamp by the write
+        // that defines it (`definition_stamps`).
+        let assigns = matches!(&top, Top::Define { assigns: true, .. } | Top::DefineRec { assigns: true, .. });
+        // The pieces written in FX-26, which compile the definition, loaded
+        // first, so that no definition goes unstamped for being early.
+        if self.strategy == Strategy::Cellular && matches!(&top, Top::Define { .. } | Top::DefineRec { .. }) {
+            self.own_pieces()?;
+        }
+        self.released(|s| {
+            let stamps = s.definition_stamps(&top, form);
+            s.plan_stamps(&stamps, assigns)
+        })?;
         let r = self.run_checked_in(top, form, again);
+        self.scheme.runtime_unrooted().heap.forget_planned_writes();
         // The breaks a native definition's check made, held while its value
         // was checked again (`native_define`), put back, on every path.
         let back = self.hold_breaks(false);
         let out = r?;
         back?;
         Ok(out)
+    }
+
+    /// The stamp each global `top` defines is left with
+    /// (`layout::cellular::GLOBAL_WRITES`), which the guards compiled code
+    /// keeps test: the same for the same definition in any session, from
+    /// its source or a `.fasl`, so that code a `.fasl` keeps finds its
+    /// assumptions hold where they do, and only there. A load's, its file's
+    /// stamp (`fasl::stamp`: its text and its loads'). Another's, a digest
+    /// of its form, its name, its type and the stamps of the globals it
+    /// reads, if that is all its making does (a `lambda`'s does nothing);
+    /// else one of this process's own, which no other session's code
+    /// expects. A write when the program runs counts on from it (`setglbl`),
+    /// so that a guard expecting the stamp fails after one.
+    fn definition_stamps(&mut self, top: &Top, form: &Syntax) -> Vec<(Sym, i64)> {
+        use std::hash::{Hash, Hasher};
+        // Only compiled code keeps guards, and only the compiler written in
+        // FX-26 finds its cells (`run_checked` loads it first).
+        if self.strategy != Strategy::Cellular || !self.scheme.is_bound(&format!("{READER_PREFIX}compile-global-cell")) {
+            return Vec::new();
+        }
+        let defined: Vec<(Sym, crate::ast::TyId, Option<crate::ast::Effect>)> = match top {
+            Top::Define { name, ty, effect, .. } => vec![(*name, *ty, Some(effect.clone()))],
+            Top::DefineRec { bindings, .. } => bindings.iter().map(|(n, t, _)| (*n, *t, None)).collect(),
+            _ => return Vec::new(),
+        };
+        let text = fixpt_read::write_syntax(form, &self.checker.interner);
+        let mut out = Vec::new();
+        for (name, ty, effect) in defined {
+            if let Some(f) = self.checker.shared_files.get(&name) {
+                out.push((name, stamp_fixnum(f.stamp)));
+                continue;
+            }
+            let reads: Option<Vec<Sym>> = match &effect {
+                None => Some(Vec::new()),
+                Some(e) => e.0.iter().map(|a| match a {
+                    crate::ast::Atom::Read(crate::ast::Region::Global(g)) => Some(g.clone()),
+                    _ => None,
+                }).collect(),
+            };
+            let Some(mut reads) = reads else {
+                out.push((name, process_stamp()));
+                continue;
+            };
+            reads.sort_by_key(|g| self.checker.interner.name(*g).to_string());
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            ("fixpt-stamp", self.checker.interner.name(name), &text, self.checker.show_ty(ty)).hash(&mut h);
+            for g in reads {
+                let n = self.checker.interner.name(g).to_string();
+                let w = self.global_cell(&n).ok().flatten().map(|c| {
+                    let mut k = 0;
+                    self.scheme.make(|m| {
+                        let c = m.get(c);
+                        k = m.heap().bloblet_slot(c, fixpt_heap::layout::cellular::GLOBAL_WRITES).as_fixnum();
+                        fixpt_heap::Value::FALSE
+                    });
+                    k
+                });
+                (n, w).hash(&mut h);
+            }
+            out.push((name, stamp_fixnum(h.finish())));
+        }
+        out
+    }
+
+    /// `stamps` planned: a global the form writes again (`assigns`) left one
+    /// short of its stamp now; one it makes a cell for, made so
+    /// (`Heap::plan_global_writes`). Its one write then leaves the stamp,
+    /// which code compiled for the form expects of it (`writes_expected`).
+    fn plan_stamps(&mut self, stamps: &[(Sym, i64)], assigns: bool) -> R<()> {
+        for &(name, stamp) in stamps {
+            let shown = self.checker.interner.name(name).to_string();
+            let cell = if assigns { self.global_cell(&shown)? } else { None };
+            self.scheme.make(|m| {
+                match cell {
+                    Some(c) => {
+                        let g = m.get(c);
+                        m.heap().set_bloblet_slot(g, fixpt_heap::layout::cellular::GLOBAL_WRITES, fixpt_heap::Value::fixnum(stamp - 1));
+                    }
+                    None => m.heap().plan_global_writes(&shown, stamp - 1),
+                }
+                fixpt_heap::Value::FALSE
+            });
+        }
+        Ok(())
     }
 
     /// Whether the FX-26 checker holds aside the breaks its last check made
@@ -1320,6 +1437,7 @@ impl Fx26Session {
             let h = if value { self.scheme.make(|m| { let c = m.get(cell); m.heap().bloblet_slot(c, 2) }) } else { cell };
             found.push((p, h));
         }
+        let stamp = self.checker.shared_files.get(&name).map_or(0, |f| stamp_fixnum(f.stamp));
         let sym = self.scheme.make(|m| m.heap().intern(&shown));
         let cell = self.scheme.call_global(&format!("{READER_PREFIX}compile-new-global"), &[sym]).map_err(|e| fail(e.to_string()))?;
         // Its native code as it was kept: nothing compiled here. Of cellular
@@ -1347,10 +1465,9 @@ impl Fx26Session {
                 _ => copy,
             };
             heap.set_bloblet_slot(g, 2, copy);
-            // A write, as `global!`'s, which the guards count.
-            let w = fixpt_heap::layout::cellular::GLOBAL_WRITES;
-            let n = heap.bloblet_slot(g, w).as_fixnum();
-            heap.set_bloblet_slot(g, w, fixpt_heap::Value::fixnum(n + 1));
+            // Its definition's stamp, as its load from source leaves it
+            // (`definition_stamps`), which the guards test.
+            heap.set_bloblet_slot(g, fixpt_heap::layout::cellular::GLOBAL_WRITES, fixpt_heap::Value::fixnum(stamp));
             fixpt_heap::Value::FALSE
         });
         if let Some(why) = why {
@@ -1673,6 +1790,11 @@ impl Fx26Session {
             self.checker.fasl_defined(name, std::rc::Rc::new(form.clone()), uses);
         }
         let top = done.run.into_iter().next().map(|(t, _)| t).ok_or_else(|| fail("a definition".into()))?;
+        // Each its definition's stamp, as its run from source leaves it.
+        let stamps: Vec<i64> = {
+            let all = self.definition_stamps(&top, form);
+            group.iter().map(|(d, _)| { let n = self.checker.interner.intern(&d.name); all.iter().find(|(m, _)| *m == n).map_or(0, |(_, s)| *s) }).collect()
+        };
         self.own_pieces()?;
         let standard = self.next_standard()?;
         let value = self.released(|s| -> R<String> {
@@ -1731,16 +1853,16 @@ impl Fx26Session {
                         }
                     }
                 }
-                for ((_, at), g) in group.iter().zip(gs) {
+                for (((_, at), g), stamp) in group.iter().zip(gs).zip(&stamps) {
                     let (copy, made) = heap.copy_graph_with(&p.heap, p.values[*at], |_| false, &given);
                     let copy = match compile {
                         Some(c) if !p.natives.is_empty() => crate::fasl::native_procedures(heap, copy, c, &p.natives.iter().filter_map(|n| made.get(&n.raw()).map(|v| v.raw())).collect()),
                         _ => copy,
                     };
+                    // What the group's definitions share, copied once.
+                    given.extend(made);
                     heap.set_bloblet_slot(g, 2, copy);
-                    let w = fixpt_heap::layout::cellular::GLOBAL_WRITES;
-                    let n = heap.bloblet_slot(g, w).as_fixnum();
-                    heap.set_bloblet_slot(g, w, fixpt_heap::Value::fixnum(n + 1));
+                    heap.set_bloblet_slot(g, fixpt_heap::layout::cellular::GLOBAL_WRITES, fixpt_heap::Value::fixnum(*stamp));
                 }
                 fixpt_heap::Value::FALSE
             });
@@ -1760,9 +1882,9 @@ impl Fx26Session {
     /// procedures (and of types, and loads) run, so that compiling runs
     /// nothing of what the program does; then each procedure's definition
     /// kept, with its type and those of the globals its code uses, and its
-    /// value. Each global here before it has its writes counted on, first,
-    /// so that no code compiled now keeps an assumption about what it holds
-    /// (a guard passes only at the count it saw).
+    /// value. What its code assumes of a global, its guards test by the
+    /// global's stamp (`definition_stamps`), the same where it is loaded
+    /// only if the global's definition is.
     pub fn compile_program_file(&mut self, path: &str) -> Result<std::path::PathBuf, String> {
         if self.strategy != Strategy::Cellular {
             return Err("only compiled code is kept in a `.fasl`: not on rs-scheme-vm or fx-ast-eval".into());
@@ -1773,21 +1895,6 @@ impl Fx26Session {
         };
         let text = std::fs::read_to_string(&at).map_err(|e| format!("cannot read `{path}`: {e}"))?;
         let forms = self.checker.read_in(FileId(0), &text).map_err(|e| format!("in `{path}`: {}", e.message))?;
-        let before: Vec<String> = self.checker.value_names().into_iter().filter(|n| self.checker.global_type(*n).is_some()).map(|n| self.checker.interner.name(n).to_string()).collect();
-        self.released(|s| {
-            for n in &before {
-                if let Ok(Some(cell)) = s.global_cell(n) {
-                    s.scheme.make(|m| {
-                        let g = m.get(cell);
-                        let heap = m.heap();
-                        let w = fixpt_heap::layout::cellular::GLOBAL_WRITES;
-                        let k = heap.bloblet_slot(g, w).as_fixnum();
-                        heap.set_bloblet_slot(g, w, fixpt_heap::Value::fixnum(k + (1 << 40)));
-                        fixpt_heap::Value::FALSE
-                    });
-                }
-            }
-        });
         let outer = std::mem::replace(&mut self.checker.base_dir, at.parent().map(|d| d.to_path_buf()));
         self.program_ran = self.checker.value_names().into_iter().filter(|n| self.checker.global_type(*n).is_some()).collect();
         self.program_record = Some(Vec::new());

@@ -2615,3 +2615,35 @@ of `TODO.md` §141, working on my own.
   same but `vec5e5`, 93 ms native, 77 ms cellular, 71 ms from source, and
   `map2e5`, 255 ms from either, 226 ms from source (not yet looked at).
 
+### Guards by stamps (the same day)
+
+- **The problem**: both kinds of guard (`global` in the native compiler,
+  `global-guard` in register code) test `cell.writes` against a number
+  compiled in. Across sessions the numbers mean nothing: a guard misses
+  for ever (slow: `vec5e5` 93 ms from native `.fasl`s), or matches by
+  coincidence (counts are small, 1 often) and runs an old procedure. The
+  `.fasl`s of programs had dodged that by counting every earlier global
+  on by 2^40, so that no guard ever held.
+- **Asked of the user**: identity of the value or a stamp. Identity
+  cannot cross sessions (a snapshot is a copy; linked by name, it would
+  pass for an edited definition). The user chose stamps.
+- **Chosen**: what the field holds, not how it is tested: no compiler
+  changed. A definition's stamp is a digest of its form, name, type and
+  the stamps of the globals it reads, if reading globals is all its
+  making does; else one of the process's own; a load's, its file's stamp.
+  The cell is left one short before the form is compiled (an existing
+  cell set, a new one planned: `Heap::plan_global_writes`), so that the
+  write that defines it leaves the stamp and the compilers' prediction
+  of their own write (`writes_expected`) still holds. `.fasl` loaders set
+  the stamp directly. A `set!` counts on from it.
+- **A regression measured and explained**: from source `vec5e5` 71 to
+  79 ms with stamps. Bisecting by definitions was not monotonic; the
+  instruction counts are the same (5.183e10 against 5.185e10), cycles
+  2-5% more: layout, a stamp's `mov` 10 bytes where a count's was 5.
+  Not a guard missing.
+- **Bugs found on the way**: definitions before the front end loaded went
+  unstamped (counts again, and the test of an edited definition saw the
+  old one): the pieces are loaded first. Handles taken for stamps were
+  never released (a test of redefinitions saw roots grow).
+- Result: `vec5e5` from native `.fasl`s 77 ms; the suite passes (858).
+

@@ -2719,7 +2719,9 @@ impl<'a> Compiler<'a> {
         let g = self.heap.make_bloblet(const { kind("bloblet") }, GLOBAL_FIELDS, 0, true);
         self.heap.set_bloblet_slot(g, GLOBAL_VALUE, undefined);
         self.heap.set_bloblet_slot(g, GLOBAL_NAME, name);
-        self.heap.set_bloblet_slot(g, GLOBAL_WRITES, Value::fixnum(0));
+        // As a session planned it, for its definition's stamp.
+        let first = self.heap.first_global_writes(self.c.interner.name(n));
+        self.heap.set_bloblet_slot(g, GLOBAL_WRITES, Value::fixnum(first));
         self.genv_index.entry(n).or_default().push((self.genv.len(), Loc::Global(g)));
         self.genv.push((n, Loc::Global(g)));
         if let Some(certs) = &mut self.certs

@@ -290,3 +290,26 @@ fn a_fasl_keeps_native_code_or_with_cellular_its_words_alone() {
         assert!(ok && err.contains("`m.fx` is read from `m.fasl`") && out.contains("16 : int"), "{out}{err}");
     }
 }
+
+#[test]
+fn a_definition_changed_at_the_same_type_is_seen_through_a_fasl() {
+    // `b.fx`'s `.fasl` is fresh after `a.fx`'s `scale` changes but keeps its
+    // type: what its code assumed of `scale` is guarded by the definition's
+    // stamp, which changed, so the new one is called (2 · 2 · 5 was 20).
+    let dir = scratch("stamps");
+    std::fs::write(dir.join("b.fx"), "(define twice (subr (read (globals scale)) (int) int) (lambda (x) (scale (scale x))))\n").expect("written");
+    std::fs::write(
+        dir.join("c.fx"),
+        "(define main (subr (maxeff (io stdout) (read (globals twice scale))) () unit) (lambda () (begin (write-out (int->string (twice 5))) #u)))\n",
+    )
+    .expect("written");
+    for flags in [&[][..], &["--cellular"][..]] {
+        std::fs::write(dir.join("a.fx"), "(define scale (subr pure (int) int) (lambda (x) (* 2 x)))\n").expect("written");
+        let args: Vec<&str> = ["compile-file", "--program"].iter().chain(flags).chain(&["a.fx", "b.fx"]).copied().collect();
+        let (ok, out, err) = fixpt(&dir, &args, &[]);
+        assert!(ok, "{out}{err}");
+        std::fs::write(dir.join("a.fx"), "(define scale (subr pure (int) int) (lambda (x) (* 3 x)))\n").expect("written");
+        let (ok, out, err) = fixpt(&dir, &["run", "a.fx", "b.fx", "c.fx"], &[("FIXPT_FASL_SAY", "1")]);
+        assert!(ok && err.contains("`b.fx` is read from `b.fasl`") && out == "45", "{flags:?}: {out}{err}");
+    }
+}
