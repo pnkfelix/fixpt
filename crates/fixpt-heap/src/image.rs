@@ -235,12 +235,14 @@ pub fn extract_embedded(exe_bytes: &[u8]) -> Option<&[u8]> {
     Some(&exe_bytes[start..tail])
 }
 
-/// CRC-32 (IEEE), a byte at a time from a table the compiler builds, so
-/// that no dependency is needed: a cached front end's image is 9.5 MB, which
-/// the bit-at-a-time form took 40 ms over.
+/// CRC-32 (IEEE), from tables the compiler builds, so that no dependency is
+/// needed: eight bytes a step, as a cached front end's image is 21 MB.
 pub fn crc32(data: &[u8]) -> u32 {
-    const TABLE: [u32; 256] = {
-        let mut t = [0u32; 256];
+    // "Slicing by 8": `TABLES[k][b]` is byte `b`'s CRC moved on `k` more
+    // bytes, so a word's eight lookups are one step. The same CRC as a byte
+    // at a time (`crc32_bytewise`): 42 ms that way over the front end's.
+    const TABLES: [[u32; 256]; 8] = {
+        let mut t = [[0u32; 256]; 8];
         let mut i = 0;
         while i < 256 {
             let mut c = i as u32;
@@ -249,14 +251,64 @@ pub fn crc32(data: &[u8]) -> u32 {
                 c = if c & 1 != 0 { (c >> 1) ^ 0xedb8_8320 } else { c >> 1 };
                 k += 1;
             }
-            t[i] = c;
+            t[0][i] = c;
             i += 1;
+        }
+        let mut k = 1;
+        while k < 8 {
+            let mut i = 0;
+            while i < 256 {
+                let prev = t[k - 1][i];
+                t[k][i] = (prev >> 8) ^ t[0][(prev & 0xff) as usize];
+                i += 1;
+            }
+            k += 1;
         }
         t
     };
     let mut crc: u32 = 0xffff_ffff;
-    for b in data {
-        crc = (crc >> 8) ^ TABLE[((crc ^ *b as u32) & 0xff) as usize];
+    let mut words = data.chunks_exact(8);
+    for w in &mut words {
+        let lo = u32::from_le_bytes([w[0], w[1], w[2], w[3]]) ^ crc;
+        let hi = u32::from_le_bytes([w[4], w[5], w[6], w[7]]);
+        crc = TABLES[7][(lo & 0xff) as usize]
+            ^ TABLES[6][((lo >> 8) & 0xff) as usize]
+            ^ TABLES[5][((lo >> 16) & 0xff) as usize]
+            ^ TABLES[4][(lo >> 24) as usize]
+            ^ TABLES[3][(hi & 0xff) as usize]
+            ^ TABLES[2][((hi >> 8) & 0xff) as usize]
+            ^ TABLES[1][((hi >> 16) & 0xff) as usize]
+            ^ TABLES[0][(hi >> 24) as usize];
+    }
+    for b in words.remainder() {
+        crc = (crc >> 8) ^ TABLES[0][((crc ^ *b as u32) & 0xff) as usize];
     }
     !crc
+}
+
+/// CRC-32 a byte at a time, as [`crc32`] was: what it is checked against.
+#[cfg(test)]
+fn crc32_bytewise(data: &[u8]) -> u32 {
+    let mut crc: u32 = 0xffff_ffff;
+    for b in data {
+        let mut c = (crc ^ *b as u32) & 0xff;
+        for _ in 0..8 {
+            c = if c & 1 != 0 { (c >> 1) ^ 0xedb8_8320 } else { c >> 1 };
+        }
+        crc = (crc >> 8) ^ c;
+    }
+    !crc
+}
+
+#[cfg(test)]
+mod crc_tests {
+    #[test]
+    fn eight_bytes_a_step_is_the_same_crc() {
+        // The standard check value, and lengths around a word's.
+        assert_eq!(super::crc32(b"123456789"), 0xcbf4_3926);
+        let data: Vec<u8> = (0..1000u32).map(|i| (i.wrapping_mul(2654435761) >> 13) as u8).collect();
+        for n in [0, 1, 7, 8, 9, 15, 16, 17, 100, 999, 1000] {
+            assert_eq!(super::crc32(&data[..n]), super::crc32_bytewise(&data[..n]), "{n} bytes");
+        }
+    }
 }
