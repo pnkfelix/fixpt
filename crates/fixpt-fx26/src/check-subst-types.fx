@@ -28,7 +28,7 @@
 ;; The types it names, from the files that define them.
 (define-type k-region (select check-types-types k-region))
 ;; The types it names, from the files that define them.
-(import check-types-types (type k-binders k-desc k-descs k-ids))
+(import check-types-types (type k-binders k-desc k-descs k-ids k-parts))
 (define-type check-subst-sig
   (moduleof (val k-note-closed-filled
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
@@ -38,6 +38,10 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (int k-map)
                        int))
+            (val k-subst-all
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (k-parts k-map)
+                       k-parts))
             (val k-subst-region
                  (subr (maxeff (read @globals) (read @t)) (k-region k-map) k-region))
             (val k-new-smemo

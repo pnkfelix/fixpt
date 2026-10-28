@@ -3419,7 +3419,12 @@ the makers (`docs/research/fasl.md`). In order:
    source), so what is left to factor is what no abbreviation names.
 6. **Substituting a call's arguments into a dependent maker's type**
    (`k-subst-memo`, about 10%): what is left after 2 and 4; whether the
-   memo can last across calls of the same maker.
+   memo can last across calls of the same maker. Partly done (2026-10-28):
+   a module type's parts are substituted in one substitution, one memo
+   and one interning walk (`k-subst-all`), not one each, so a recursive
+   type they share is copied once (Heist's start-up through `eldoc.fx`
+   1.25 s to 0.77 s from `.fasl`s, 3.95 s to 3.65 s from source; s7st
+   unchanged).
 7. **The interning tables** (`k-ty-new`, `bucket-find`, `rehash-*`, some
    15-20%): their hashing and growth, and whether the budget and reset
    churn them.

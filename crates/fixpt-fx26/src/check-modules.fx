@@ -148,12 +148,7 @@
           (product (1 (the k-parts (cons (product (1 a) (2 w)) (extract rest 1))))
                    (2 (the k-map (cons (cons (extract (car abs) 2) to) (extract rest 2)))))))))
 ;; Parts `ps`, each type with `m` for its binders.
-(define k-subst-each (->* (k-parts k-map) k-parts)
-  (lambda (ps m)
-    (if (null? ps)
-        nil
-        (let* ((t (k-subst (extract (car ps) 2) m)) (rest (k-subst-each (cdr ps) m)))
-          (cons (product (1 (extract (car ps) 1)) (2 t)) rest)))))
+(define k-subst-each (->* (k-parts k-map) k-parts) (lambda (ps m) (k-subst-all ps m)))
 ;; A module's type, bound to `name`: its abstract types renamed for this
 ;; binding, each `name..t`, kept until the binding's scope ends. Any other
 ;; type as it is; and a hidden item's (`%extend-0`, …), the module's own

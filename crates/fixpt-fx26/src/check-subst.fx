@@ -287,6 +287,25 @@
            (base (get k-ntys))
            (r (k-subst-memo t m (k-new-smemo))))
       (begin (set k-subst-keep keep) (k-intern-made base r)))))
+;; Parts `ps`, each type with `m` for its binders: one substitution, so
+;; that what the parts share is copied, and interned, once.
+(define k-subst-all (->* (k-parts k-map) k-parts)
+  (lambda (ps m)
+    (let* ((keep (get k-subst-keep))
+           (off (set k-subst-keep -1))
+           (base (get k-ntys))
+           (qs (k-subst-parts ps m (k-new-smemo))))
+      (begin (set k-subst-keep keep)
+             (k-intern-made-all base (k-part-tys qs))
+             (k-resolve-each qs)))))
+(define k-part-tys (->* (k-parts) k-ids)
+  (lambda (ps) (if (null? ps) nil (cons (extract (car ps) 2) (k-part-tys (cdr ps))))))
+(define k-resolve-each (->* (k-parts) k-parts)
+  (lambda (ps)
+    (if (null? ps)
+        nil
+        (cons (product (1 (extract (car ps) 1)) (2 (k-resolve (extract (car ps) 2))))
+              (k-resolve-each (cdr ps))))))
 ;; The description of kind `k` that names binder `v`.
 (define k-binder-desc (->* (int int) k-desc)
   (lambda (k v)

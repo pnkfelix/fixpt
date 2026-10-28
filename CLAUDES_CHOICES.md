@@ -2512,3 +2512,25 @@ of `TODO.md` §141, working on my own.
   and 3.95 s from source (was 4.53 s); s7st unchanged (1.08 s).
 - Not yet: a recursive type read from source (`define-type`, `mu`,
   `listof`) interned the same way; it would join copies written twice.
+
+### A module's parts substituted together (the same day)
+
+- **Profile at 1.25 s**: the new interning walk about 10% inclusive
+  (`k-cz-visit`; `k-cz-targets` 5%, a form and a lookup for each class of
+  a cycle), substitution about 9% (`k-subst-memo`), most of both under
+  `k-subst-each`; subtyping down to 1.4%; collection 175 ms of 1.21 s.
+- **A bigger nursery, measured and dropped**: 1, 2, 4 and 8 M words gave
+  1.21, 1.24, 1.25 and 1.33 s. What survives a minor collection is type
+  nodes that live on, so a bigger nursery only copies them later.
+- **What `k-subst-each` did**: a module type's parts, each its own
+  `k-subst`, so its own memo and its own interning walk. A recursive type
+  that several parts name (all of a module's values that take its buffer
+  type) was copied, and minimized, once for each part. Now one
+  substitution for all the parts (`k-subst-all`, in `check-subst.fx`):
+  one memo, and one walk over all the roots (`k-intern-made-all`).
+- Result: Heist's start-up through `eldoc.fx` 0.77 s from `.fasl`s (was
+  1.25 s), 3.65 s from source (was 3.95 s); s7st unchanged (1.08 s, 3.95 s
+  from source); the suite passes (854).
+- Kept for later, not done: a cycle found in `k-cyclic` from its first
+  class could give the other classes' nodes by walking both at once, not a
+  form and a lookup for each.

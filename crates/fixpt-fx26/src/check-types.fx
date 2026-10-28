@@ -722,10 +722,19 @@
                         (else #u))
                   #u)
               (k-cz-kids v (cdr ks))))))))
-;; The type `root` a substitution made, its nodes from `base` on: interned.
-(define k-intern-made (->* (int int) int)
-  (lambda (base root)
-    (let ((end (get k-ntys)) (r (k-resolve root)))
+;; Each of `rs` not yet met, walked.
+(define k-cz-visit-each (->* (k-ids) unit)
+  (lambda (rs)
+    (if (null? rs)
+        #u
+        (let ((r (k-resolve (car rs))))
+          (begin (if (and (k-cz-made? r) (< (k-cz-at k-cz-idx r) 0)) (k-cz-visit r) #u)
+                 (k-cz-visit-each (cdr rs)))))))
+;; The types `roots` a substitution made, its nodes from `base` on:
+;; interned, in one walk, so that what they share is interned once.
+(define k-intern-made-all (->* (int k-ids) unit)
+  (lambda (base roots)
+    (let ((end (get k-ntys)))
       (begin
         (set k-cz-base base)
         (set k-cz-end end)
@@ -734,8 +743,10 @@
         (set k-cz-scc (make-array (- end base) -1))
         (set k-cz-count 0)
         (set k-cz-stack nil)
-        (if (and (k-cz-made? r) (< (k-cz-at k-cz-idx r) 0)) (k-cz-visit r) #u)
-        (k-resolve root)))))
+        (k-cz-visit-each roots)))))
+;; The type `root` a substitution made, its nodes from `base` on: interned.
+(define k-intern-made (->* (int int) int)
+  (lambda (base root) (begin (k-intern-made-all base (list root)) (k-resolve root))))
 
 ;; Which types a walk has seen: a type is seen in walk `e` when its mark
 ;; is `e`, so each walk takes a new epoch and nothing is cleared.
