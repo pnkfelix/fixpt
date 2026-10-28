@@ -18,7 +18,7 @@
 ;; what this file uses of them.
 (define parser-module ((proj (load-module "fx26:parser.fx") rs re rm rc rp)))
 (define forms-module ((proj (load-module "fx26:parser-forms.fx") rs re rm rc rp)))
-(import forms-module process-form processes)
+(import forms-module process-form processes input-items item-form? run-item run-count)
 (define reader-types (with parser-module reader-types))
 (import reader-types atom lst dotted vec (type data syn))
 (define syn->datum (with parser-module syn->datum))
@@ -39,7 +39,7 @@
 ;; A `case`'s data by halving (`parser.fx`).
 (import parser-module case-tree-from case-sort-key case-sort case-entries-length case-exps-length
         case-key-at case-take case-drop case-mid shared-keys shared-pending input-key? shared-key?
-        load-cycle in-loaded-as loading-keys input-items (type case-entry case-entries))
+        load-cycle in-loaded-as loading-keys (type case-entry case-entries))
 ;;; ------------------------------------------------------------ expressions
 ;; Whether `s` mentions the name `n` anywhere, quoted or not.
 (define syn-mentions? (->* (symbol syn) bool)
@@ -713,7 +713,10 @@
   ;; A `module`'s items, in order.
   ;; A module's forms, its `define-datatype`s expanded.
   (parse-module-items (->* (syns-a) mod-items)
-    (lambda (fs) (with-includes (parse-module-items-in fs (any-include? fs) #f))))
+    (lambda (fs)
+      (let* ((outer (get run-count)) (reset (set run-count 0))
+             (items (with-includes (parse-module-items-in fs (any-include? fs) #f))))
+        (begin (set run-count outer) items))))
   ;; The same, each item's values in `(with %include …)` if `inc?`, each
   ;; hidden if `hid?` (`hidden-marks`).
   (parse-module-items-in (->* (syns-a bool bool) mod-items)
@@ -728,6 +731,9 @@
              (parse-module-items-in (append (expand-datatype (car fs)) (cdr fs)) inc? hid?))
             ((import? (car fs))
              (parse-module-items-in (append (expand-import (car fs)) (cdr fs)) inc? hid?))
+            ;; An expression: run as the module is made (`run-item`).
+            ((not (item-form? (car fs)))
+             (parse-module-items-in (cons (run-item (car fs)) (cdr fs)) inc? hid?))
             ;; Its files named in types loaded first (`type-loaded`).
             (else (let* ((item (parse-module-item (type-loaded (car fs))))
                          (item (if inc? (item-in-includes item (car fs)) item))
@@ -795,7 +801,11 @@
         (if (null? f)
             (e-module (loaded-error (string-append "cannot read `" path "`: it was not read"))
                       a b 0)
-            (let* ((key (string-append (if input? "input:" "") (extract (car f) 7)))
+            ;; A file of module parameters is read as a `load-input` file is
+            ;; (`modules-made`): its key so, as the driver gives it.
+            (let* ((raw (extract (car f) 7))
+                   (input? (or input? (input-key? raw)))
+                   (key (if (input-key? raw) raw (string-append (if input? "input:" "") raw)))
                    (name (string->symbol (string-append "%shared:" key)))
                    (cycle (load-cycle key path)))
               (if here?
@@ -836,7 +846,8 @@
                  (made (lambda ()
                          (if input?
                              (t-exp (e-module (cons (loaded-mark base path nil)
-                                                    (parse-module-items (input-items forms a b)))
+                                                    (parse-module-items
+                                                     (input-items pfail-at forms a b)))
                                               base end 0))
                              (let* ((ps (loaded-params forms))
                                     (items (parse-module-items (if (null? ps) forms (cdr forms))))
@@ -870,9 +881,15 @@
           (cond ((or (symbol=? h 'quote) (symbol=? h 'quasiquote)) s)
                 ((and (or (symbol=? h 'load-moduleof) (symbol=? h 'load-input-moduleof))
                       (>= (len items) 2) (syn-string? (nth items 1)))
-                 (let* ((input? (symbol=? h 'load-input-moduleof))
-                        (name (loaded-name (parse-loaded (syn-string (nth items 1)) input? #f a b)
-                                           a b)))
+                 (let* ((asked (symbol=? h 'load-input-moduleof))
+                        (name (loaded-name (parse-loaded (syn-string (nth items 1)) asked #f a b)
+                                           a b))
+                        ;; A file of module parameters is loaded as a
+                        ;; `load-input` file is, its global's key so.
+                        (shown (symbol->string name))
+                        (input? (or asked
+                                    (and (> (string-length shown) 14)
+                                         (string=? (substring shown 0 14) "%shared:input:")))))
                    (lst (cons (mk-symbol (if input? "%input-made" "%type-made") a b)
                               (cons (mk-symbol (symbol->string name) a b) (cdr items)))
                         d a b)))

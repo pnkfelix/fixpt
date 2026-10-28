@@ -2283,3 +2283,20 @@ The user: "Yeah do 1, 2, and 3" (names, lines, values). Names first.
 - **`substring` still gives a `string`**: its region would otherwise be a
   new binder nothing solves, and every `(define x (substring …))` would
   change its type.
+
+## `module-parameters` of modules (2026-10-28)
+
+- **Read as a `load-input` file**: a file of module parameters is the
+  `lambda` Heist wrote by hand, and is read as one, its key `input:`;
+  so the checkers' scoping, already proven by Heist's editor, is unchanged,
+  and no rule is new. A file is told by its first form, in both parsers
+  and the driver alike, before its key is chosen.
+- **Every module parameter included, hidden**: (2) as the default, with no
+  way to opt out yet; a file that wants a module's names only by `with`
+  can still be written as a `lambda`.
+- **A pure expression item refused**: found converting Heist's editor, where
+  a `load-input` file loaded by `load-module` became one pure expression
+  item, its module empty, silently.
+- **(3), a parameter typed by its file alone, not done**: Heist measured
+  the parameters' types as costing nothing to check, so it would save only
+  writing.

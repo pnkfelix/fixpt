@@ -3760,3 +3760,22 @@ cellular code: 39 µs a key typing in a burst, against 7 as globals.
 - **Tests**: `run/stringof.fx` on every machine (`fixpt-cli/tests/stringof.rs`),
   `regions/write-a-string.fx`, `regions/stringof-escapes.fx`. Docs:
   `docs/fx26.md`, "Strings at a region".
+
+## 147. `module-parameters` of modules, and expressions as module items (Heist's, 2026-10-28)
+
+- **Module parameters**: a `module-parameters` binder `(m T)`, `T` a type,
+  makes the file a function of its modules, read as a `load-input` file
+  of `(plambda (kinds) (lambda ((m T) …) (module (hide (include m) …) item
+  …)))`; its `load-module` gives the function, its `load-moduleof` the
+  module made. Both parsers, and the driver that gives the FX-26 parser
+  its files, tell such a file by its first form (`takes_modules`,
+  `takes-modules?`) and key it `input:`.
+- **Expressions as items**: an item whose head is none an item's is `(hide
+  (define %run-N form))`, run in order as the module is made; one that only
+  reads is refused, in both checkers (`run_item_does`, `k-run-does`).
+- **Heist's editor**, converted mechanically (14 files, 202 registrations
+  unwrapped), checks alike in both checkers and types as fast as before:
+  7 µs a key in a burst, 450 µs one at a time; start-up 6.1 s.
+- **Tests**: `modules/module-parameters-modules.fx` (57, on every machine),
+  `modules/expression-item-pure.fx`. Docs: `docs/fx26.md`, "Module
+  parameters", "An expression as a module's item".

@@ -488,6 +488,7 @@ impl Checker {
                         }
                         None => self.synth(init)?,
                     };
+                    self.run_item_does(name, &ie, init)?;
                     eff = eff.union(&ie);
                     let bound = self.name_nat(name, t);
                     self.env.push((name, bound));
@@ -1253,5 +1254,20 @@ impl Checker {
     /// Whether `v` was made for a module's abstract type as it was bound.
     pub(crate) fn is_module_var(&self, v: DVar) -> bool {
         self.module_vars.contains(&v)
+    }
+}
+
+impl Checker {
+    /// An expression among a module's items (`%run-N`, `parse_module_items`)
+    /// is run for what it does as the module is made: refused if its effect
+    /// `e` only reads, so that it does nothing (`k-run-does`).
+    fn run_item_does(&self, name: Sym, e: &Effect, init: ExpId) -> R<()> {
+        if self.interner.name(name).starts_with("%run-") && e.0.iter().all(|a| matches!(a, Atom::Read(_))) {
+            return Err(FxError::at(
+                self.arena.span_of(init),
+                "an expression among a module's items is run for what it does as the module is made, and this one only reads: name its value with `define`",
+            ));
+        }
+        Ok(())
     }
 }

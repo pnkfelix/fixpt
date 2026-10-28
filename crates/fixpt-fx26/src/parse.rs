@@ -913,6 +913,9 @@ impl Checker {
                 let Some(made) = self.lookup(name) else {
                     return Err(FxError::at(s.span, format!("`{path}` is not loaded here")));
                 };
+                // A file of module parameters is loaded as a `load-input`
+                // file is (`modules_made`), its global's key so.
+                let input = input || self.name(name).starts_with("%shared:input:");
                 let made = if input { self.module_val(made, "input").expect("a `load-input` file's module gives `input`") } else { made };
                 self.type_made(made, &items[2..], s.span, &path)
             }
@@ -2635,6 +2638,9 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
             Some(d) if std::path::Path::new(path).is_relative() && crate::built_in_module(path).is_none() => d.join(path),
             _ => std::path::PathBuf::from(path),
         };
+        // A file of module parameters is read as a `load-input` file is, its
+        // value the function of them it makes (`modules_made`).
+        let input = input || takes_modules_at(&at, path);
         let key = format!("{}{}", if input { "input:" } else { "" }, at.display());
         // A file loading one that is being read, itself or one that loads
         // it: a cycle, refused, the chain named (`TODO.md` §71). As the
@@ -2854,8 +2860,17 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         // Its own `load-module`s are from its directory.
         let outer_dir = std::mem::replace(&mut self.base_dir, at.parent().map(|d| d.to_path_buf()));
         let lives = self.lifetimes.len();
+        let made = if input { self.modules_made(&forms) } else { None };
         let r = if input {
             match &forms[..] {
+                _ if made.is_some() => {
+                    let one = made.expect("made");
+                    let item = Syntax::list(
+                        one.span,
+                        vec![Syntax::symbol(span, self.interner.intern("define")), Syntax::symbol(span, self.interner.intern("input")), one],
+                    );
+                    self.parse_module_in(&[item]).map(|items| (None, items))
+                }
                 [one] => {
                     let item = Syntax::list(
                         one.span,
@@ -2889,6 +2904,41 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                 let made = self.arena.exp(p, Exp::Lambda { params: Vec::new(), body: e });
                 self.arena.exp(p, Exp::PLambda { binders, body: made })
             }
+        })
+    }
+
+    /// A file of module parameters' one expression (Heist's, 2026-10-28):
+    /// `(module-parameters ((name kind) … (m T) …))` first, `m` a module of
+    /// type `T`, then the module's items, is
+    ///
+    /// ```text
+    /// (plambda ((name kind) …) (lambda ((m T) …) (module (hide (include m) …) item …)))
+    /// ```
+    ///
+    /// each module's values the items', hidden; no `plambda` with no kinds.
+    /// None if the file has no module parameters.
+    fn modules_made(&mut self, forms: &[Syntax]) -> Option<Syntax> {
+        let (first, rest) = forms.split_first()?;
+        let binders = module_parameters_of(first, &self.interner)?;
+        let (kinds, modules): (Vec<Syntax>, Vec<Syntax>) = binders.iter().cloned().partition(|b| binder_is_kind(b, &self.interner));
+        if modules.is_empty() {
+            return None;
+        }
+        let at = first.span;
+        let sym = |c: &mut Self, s: &str| Syntax::symbol(at, c.interner.intern(s));
+        let includes: Vec<Syntax> = modules
+            .iter()
+            .map(|b| {
+                let m = b.as_proper_list().expect("a binder")[0].clone();
+                Syntax::list(m.span, vec![sym(self, "include"), m])
+            })
+            .collect();
+        let hide = Syntax::list(at, std::iter::once(sym(self, "hide")).chain(includes).collect());
+        let module = Syntax::list(at, [sym(self, "module"), hide].into_iter().chain(rest.iter().cloned()).collect());
+        let lambda = Syntax::list(at, vec![sym(self, "lambda"), Syntax::list(at, modules), module]);
+        Some(match kinds.is_empty() {
+            true => lambda,
+            false => Syntax::list(at, vec![sym(self, "plambda"), Syntax::list(at, kinds), lambda]),
         })
     }
 
@@ -3018,6 +3068,13 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     }
 
     fn parse_module_items(&mut self, forms: &[Syntax]) -> R<Vec<ModItem>> {
+        let outer_runs = std::mem::replace(&mut self.run_items, 0);
+        let r = self.parse_module_items_counted(forms);
+        self.run_items = outer_runs;
+        r
+    }
+
+    fn parse_module_items_counted(&mut self, forms: &[Syntax]) -> R<Vec<ModItem>> {
         let mut out = Vec::new();
         // Each `(include m)`, and where each item's values are written (a
         // `define-rec`'s, each binding's), for `with_includes`.
@@ -3064,6 +3121,17 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
             // A string: a comment, read past (in a `hide` too, and among a
             // module file's forms).
             if f.as_str().is_some() {
+                continue;
+            }
+            // An expression: run for what it does as the module is made, in
+            // order, as a hidden definition of its value (Heist's,
+            // 2026-10-28; `parser.fx`'s `run-item`).
+            if !is_item_form(f, &self.interner) {
+                let n = self.run_items;
+                self.run_items += 1;
+                let sym = |c: &mut Self, s: &str| Syntax::symbol(f.span, c.interner.intern(s));
+                let define = Syntax::list(f.span, vec![sym(self, "define"), sym(self, &format!("%run-{n}")), f.clone()]);
+                work.push((std::borrow::Cow::Owned(Syntax::list(f.span, vec![sym(self, "hide"), define])), hidden));
                 continue;
             }
             let parts = self.items(f, "a module's definition")?;
@@ -3673,4 +3741,76 @@ const TYPECASE_SHAPES: &[(&str, &str)] = &[
 
 fn typecase_predicate(shape: &str) -> Option<&'static str> {
     TYPECASE_SHAPES.iter().find(|(s, _)| *s == shape).map(|(_, p)| *p)
+}
+
+/// The binders of `(module-parameters (binder …))`, if `f` is one.
+pub(crate) fn module_parameters_of(f: &Syntax, interner: &fixpt_read::Interner) -> Option<Vec<Syntax>> {
+    match f.as_proper_list()? {
+        [h, bs] if h.as_symbol().is_some_and(|h| interner.name(h) == "module-parameters") => Some(bs.as_proper_list()?.to_vec()),
+        _ => None,
+    }
+}
+
+/// Whether binder `b` of a `module-parameters` binds a description, `(name
+/// kind)` or `(r region p)`; else it is `(m T)`, a module parameter.
+pub(crate) fn binder_is_kind(b: &Syntax, interner: &fixpt_read::Interner) -> bool {
+    match b.as_proper_list() {
+        Some([_, k]) => is_kind_form(k, interner),
+        _ => true,
+    }
+}
+
+fn is_kind_form(k: &Syntax, interner: &fixpt_read::Interner) -> bool {
+    match k.as_proper_list() {
+        Some([h, ..]) => h.as_symbol().is_some_and(|h| interner.name(h) == "=>"),
+        _ => k.as_symbol().is_some_and(|k| {
+            matches!(interner.name(k), "region" | "place" | "effect" | "type" | "data" | "sendable" | "flat" | "size" | "conv")
+        }),
+    }
+}
+
+/// Whether forms `forms` are a file of module parameters: its first form a
+/// `module-parameters` with a module among its binders.
+pub(crate) fn takes_modules(forms: &[Syntax], interner: &fixpt_read::Interner) -> bool {
+    forms
+        .first()
+        .and_then(|f| module_parameters_of(f, interner))
+        .is_some_and(|bs| bs.iter().any(|b| !binder_is_kind(b, interner)))
+}
+
+/// Whether the file at `at`, `path` as written, is a file of module
+/// parameters, read apart (as the driver reads it, `syn::supply_loaded_in`).
+pub(crate) fn takes_modules_at(at: &std::path::Path, path: &str) -> bool {
+    let text = match crate::built_in_module(path) {
+        Some(t) => t.to_string(),
+        None => match std::fs::read_to_string(at) {
+            Ok(t) => t,
+            Err(_) => return false,
+        },
+    };
+    // Only a file that begins so: the rest is not read.
+    if !text.contains("module-parameters") {
+        return false;
+    }
+    let mut interner = fixpt_read::Interner::new();
+    match fixpt_read::Reader::new(&text, fixpt_read::FileId(0), fixpt_read::SyntaxProfile::FX26, &mut interner).read_all() {
+        Ok(forms) => takes_modules(&forms, &interner),
+        Err(_) => false,
+    }
+}
+
+/// Whether module item `f` is a form a module item may be, by its head
+/// (the parsers refuse it if it is not well made); else a list is an
+/// expression, run for what it does as the module is made. An atom is
+/// refused as it was.
+pub(crate) fn is_item_form(f: &Syntax, interner: &fixpt_read::Interner) -> bool {
+    match f.as_proper_list() {
+        Some([]) | None => true,
+        Some([h, ..]) => h.as_symbol().is_some_and(|h| {
+            matches!(
+                interner.name(h),
+                "define-generative" | "define-type" | "define-effect" | "define" | "define*" | "include" | "define-rec" | "hide" | "define-datatype" | "import"
+            )
+        }),
+    }
 }

@@ -29,7 +29,7 @@
 ;; `message`, said of `s`, through `fail`.
 (define fail-at-syn (->* (fails string syn) void)
   (lambda (fail message s) (fail message (syn-start s) (syn-end s))))
-(import parser-module mk-symbol mk-list mk-int)
+(import parser-module mk-symbol mk-list mk-int form-of?)
 
 ;; The scheduler's module file, which each form loads.
 (define processes string "fx26:processes.fx")
@@ -316,3 +316,110 @@
             (mk-list (the syns-a (list (mk-symbol "if" a b) test this
                                        (select-arms (cdr arms) (+ i 1) sel a b)))
                      a b))))))
+
+;;; ------------------------------------------------------------ module files
+;; Whether `k` is a kind: a name of one, or `(=> …)`.
+(define kind-form? (->* (syn) bool)
+  (lambda (k)
+    (tagcase k
+      (lst (xs d a b) (and (not (null? xs)) (symbol=? (syn-head (car xs)) '=>)))
+      (else y (case (syn-head k)
+                ((region place effect type data sendable flat size conv) #t)
+                (else #f))))))
+;; Whether binder `b` of a `module-parameters` binds a description, `(name
+;; kind)` or `(r region p)`; else it is `(m T)`, a module parameter
+;; (`binder_is_kind`).
+(define binder-kind? (->* (syn) bool)
+  (lambda (b)
+    (tagcase b
+      (lst (xs d a b2) (or (not (= (len xs) 2)) (kind-form? (nth xs 1))))
+      (else y #t))))
+;; The binders of form `f`, if it is `(module-parameters (binder …))`.
+(define module-binders (->* (syn) syns-a)
+  (lambda (f)
+    (if (form-of? f 'module-parameters)
+        (tagcase f
+          (lst (xs d a b)
+            (if (= (len xs) 2) (tagcase (nth xs 1) (lst (bs e c z) bs) (else y nil)) nil))
+          (else y nil))
+        nil)))
+(define any-module-binder? (->* (syns-a) bool)
+  (lambda (bs)
+    (and (not (null? bs)) (or (not (binder-kind? (car bs))) (any-module-binder? (cdr bs))))))
+;; Whether `forms` are a file of module parameters (`takes_modules`).
+(define takes-modules? (->* (syns-a) bool)
+  (lambda (forms) (and (not (null? forms)) (any-module-binder? (module-binders (car forms))))))
+(define kind-binders (->* (syns-a) syns-a)
+  (lambda (bs)
+    (cond ((null? bs) nil)
+          ((binder-kind? (car bs)) (cons (car bs) (kind-binders (cdr bs))))
+          (else (kind-binders (cdr bs))))))
+(define module-binders-only (->* (syns-a) syns-a)
+  (lambda (bs)
+    (cond ((null? bs) nil)
+          ((binder-kind? (car bs)) (module-binders-only (cdr bs)))
+          (else (cons (car bs) (module-binders-only (cdr bs)))))))
+;; `(include m)` of each module parameter `(m T)`.
+(define binder-includes (->* (syns-a int int) syns-a)
+  (lambda (bs a b)
+    (if (null? bs)
+        nil
+        (tagcase (car bs)
+          (lst (xs d c e)
+            (let ((m (car xs)))
+              (cons (mk-list (list (mk-symbol "include" a b) m) (syn-start m) (syn-end m))
+                    (binder-includes (cdr bs) a b))))
+          (else y (binder-includes (cdr bs) a b))))))
+;; A file of module parameters' one expression (`modules_made`):
+;; `(plambda (kinds) (lambda (modules) (module (hide (include m) …) item …)))`,
+;; no `plambda` with no kinds.
+(define modules-made (->* (syns-a) syn)
+  (lambda (forms)
+    (let* ((first (car forms)) (a (syn-start first)) (b (syn-end first))
+           (bs (module-binders first)) (kinds (kind-binders bs)) (ms (module-binders-only bs))
+           (hide (mk-list (cons (mk-symbol "hide" a b) (binder-includes ms a b)) a b))
+           (module (mk-list (cons (mk-symbol "module" a b) (cons hide (cdr forms))) a b))
+           (lambda-form (mk-list (list (mk-symbol "lambda" a b) (mk-list ms a b) module) a b)))
+      (if (null? kinds)
+          lambda-form
+          (mk-list (list (mk-symbol "plambda" a b) (mk-list kinds a b) lambda-form) a b)))))
+;; Whether module item `f` is a form an item may be, by its head; else a
+;; list is an expression, run for what it does as the module is made, and
+;; an atom is refused as it was (`is_item_form`).
+(define item-form? (->* (syn) bool)
+  (lambda (f)
+    (tagcase f
+      (lst (xs d a b)
+        (or (null? xs)
+            (case (syn-head (car xs))
+              ((define-generative define-type define-effect define define* include define-rec hide
+                define-datatype import)
+               #t)
+              (else #f))))
+      (else y #t))))
+;; How many expressions among the items of the module being read have been
+;; made hidden definitions.
+(define run-count (ref int rs) (new 0))
+;; Expression `f`, a module's item: `(hide (define %run-N f))`, run in
+;; order as the module is made (Heist's, 2026-10-28).
+(define run-item (->* (syn) syn)
+  (lambda (f)
+    (let ((n (get run-count)) (a (syn-start f)) (b (syn-end f)))
+      (begin
+        (set run-count (+ n 1))
+        (mk-list (list (mk-symbol "hide" a b)
+                       (mk-list (list (mk-symbol "define" a b)
+                                      (mk-symbol (string-append "%run-" (int->string n)) a b) f)
+                                a b))
+                 a b)))))
+;; A `load-input` file's forms, loaded at `a`..`b`: its one expression,
+;; as the module item `(define input expression)`; refused if not one. A
+;; file of module parameters' one is the function of them it makes.
+(define input-items (->* (fails syns-a int int) syns-a)
+  (lambda (fail forms0 a b)
+    (if (or (takes-modules? forms0) (and (not (null? forms0)) (null? (cdr forms0))))
+        (let* ((forms (if (takes-modules? forms0) (the syns-a (list (modules-made forms0))) forms0))
+               (one (car forms))
+               (item (the syns-a (list (mk-symbol "define" a b) (mk-symbol "input" a b) one))))
+          (the syns-a (cons (mk-list item (syn-start one) (syn-end one)) nil)))
+        (fail "a `load-input` file is one expression" a b))))

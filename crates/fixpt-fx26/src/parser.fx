@@ -947,15 +947,6 @@
 (define loaded-error (->* (string) mod-items)
   (lambda (m) (cons (mod-item-of -1 (string->symbol m) (the syns-a nil) nil) nil)))
 
-;; A `load-input` file's forms, loaded at `a`..`b`: its one expression,
-;; as the module item `(define input expression)`; refused if not one.
-(define input-items (->* (syns-a int int) syns-a)
-  (lambda (forms a b)
-    (if (and (not (null? forms)) (null? (cdr forms)))
-        (let* ((one (car forms))
-               (item (the syns-a (list (mk-symbol "define" a b) (mk-symbol "input" a b) one))))
-          (the syns-a (cons (mk-list item (syn-start one) (syn-end one)) nil)))
-        (pfail-at "a `load-input` file is one expression" a b))))
 ;; A module's file's parameters, if its first form is `(module-parameters
 ;; ((name kind) …))`, in a list of one; none if not.
 (define loaded-params (->* (syns-a) syns-a)

@@ -110,7 +110,7 @@ fn every_field_placed(c: &Checker) {
         certified_nats: _, certified_lengths: _, narrowed: _, path_narrowed: _, closure_depth: _, pending_unions: _,
         checked_call: _, skolems: _, to_end_sizes: _, module_vars: _, abstract_funs: _, effect_selects: _,
         with_effect_fallback: _, subst_keep: _, select_map: _, param_map: _, size_facts: _, operator_at: _,
-        hidden: _, shared_loads: _, loading: _, include_scope: _, with_depth: _, shared_globals: _, hoisted: _,
+        hidden: _, shared_loads: _, loading: _, include_scope: _, run_items: _, with_depth: _, shared_globals: _, hoisted: _,
         loaded: _, in_built_in: _, load_sites: _, files_read: _, ahead: _, ahead_filled: _, hazard_modules: _,
         hazard_items: _, broken: _, defs: _, outdated: _, poly_chain: _, inst_for: _,
         // Put back by `truncate_env`, with the environment.

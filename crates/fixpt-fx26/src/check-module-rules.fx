@@ -209,6 +209,24 @@
     (if (null? ns)
         out
         (let ((t (k-bs-type bs (car ns)))) (k-bs-parts (cdr ns) bs (k-part-onto (car ns) t out))))))
+;; An expression among a module's items (`%run-N`, the parsers' `run-item`)
+;; is run for what it does as the module is made: refused, at `init`, if
+;; effect `e` only reads, so that it does nothing (`Checker::run_item_does`).
+;; `e` again.
+(define k-run-does (->* (symbol k-eff kx) k-eff)
+  (lambda (n e init)
+    (let ((s (symbol->string n)))
+      (begin
+        (if (and (> (string-length s) 5) (string=? (substring s 0 5) "%run-") (k-only-reads? e))
+            (k-fail-at k-run-pure init)
+            #u)
+        e))))
+(define k-run-pure string
+  (string-append "an expression among a module's items is run for what it does as the module "
+                 "is made, and this one only reads: name its value with `define`"))
+(define k-only-reads? (->* (k-eff) bool)
+  (lambda (e)
+    (or (null? e) (and (tagcase (car e) (a-read (r) #t) (else y #f)) (k-only-reads? (cdr e))))))
 ;; The module's values, in written order, onto `out` (newest first): a
 ;; lambda's at its type in `bs`, another's as made, in `vs`.
 (define k-mod-vals (->* (k-items k-parts k-letrec-bs k-parts) k-parts)

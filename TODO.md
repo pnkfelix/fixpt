@@ -3327,3 +3327,17 @@ start-up is 6.0 s against 2.9 s. Wanted: a parameter's type
 `load-input-moduleof` gives kept by reference to the file's module type,
 not expanded where each later file names it; or the walk over it made
 once per file.
+
+## 139. A module's static part as a kind (the user's, 2026-10-28)
+
+A `moduleof` type is, by Harper, Mitchell and Moggi's phase distinction
+(POPL 1990), a record of kinds (its abstract types and descriptions) and a
+record of values typed over it. FX keeps modules first-class and makes
+types depend on one only through a name's `select` (Sheldon and Gifford's
+static dependent types), since a module chosen at run time has no static
+part to lift. Where a module is used second-class, as a `module-parameters`
+binder is (a name, fixed at load), its static part could be a kind binder
+instead: a functor a `plambda` over a signature's kinds, types naming its
+components directly, not `select`ing through a value. Worth weighing for
+what it would cost checking: Heist's start-up is mostly the checker's work
+on calls of included names (DONE §147).

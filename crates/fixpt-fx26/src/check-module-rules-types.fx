@@ -4,7 +4,7 @@
 
 ;; The types these use, from the files that define them.
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
-(import check-types-types (type k-at k-eff k-ids k-parts) (effect checks))
+(import check-types-types (type k-at k-eff k-ids k-parts kx) (effect checks))
 (hide (define check-resolve-types (load-module "fx26:check-resolve-types.fx")))
 (define-type k-letrec-bs (select check-resolve-types k-letrec-bs))
 ;; What an error's message `m` is made into.
@@ -122,6 +122,7 @@
                        k-ends))
             (val k-group-end (subr (read @globals) (k-ends k-letrec-bs) string))
             (val k-other-member (subr (read @globals) (k-letrec-bs symbol) k-letrec-bs))
+            (val k-run-does (subr (maxeff checks spin) (symbol k-eff kx) k-eff))
             (val k-mod-vals
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
                        (k-items k-parts k-letrec-bs k-parts)

@@ -434,6 +434,9 @@ pub struct Checker {
     /// one, a type name nothing else defines is the modules included's,
     /// `(select %include t)`, found when they are typed.
     pub(crate) include_scope: usize,
+    /// How many expressions among the items of the module being read have
+    /// been made hidden definitions (`%run-N`, `parse_module_items`).
+    pub(crate) run_items: usize,
     /// How many `with` bodies are being read (`Parser::with_types_of`):
     /// where none is, no type name is looked for among `with`s' modules.
     pub(crate) with_depth: usize,
@@ -901,6 +904,7 @@ impl Checker {
             shared_loads: HashMap::new(),
             loading: Vec::new(),
             include_scope: 0,
+            run_items: 0,
             with_depth: 0,
             shared_globals: HashSet::new(),
             hoisted: Vec::new(),

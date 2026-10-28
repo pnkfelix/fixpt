@@ -1062,8 +1062,13 @@ fn supply_loaded_in(
             _ => std::path::PathBuf::from(&path),
         };
         // Every load of a path is one (`TODO.md` §68): the file read once,
-        // as the Rust checker reads it, and named by `key` for the parser.
-        let key = at.display().to_string();
+        // as the Rust checker reads it, and named by `key` for the parser. A
+        // file of module parameters is read as a `load-input` file is
+        // (`Checker::modules_made`): its key `input:` for a `load-module`
+        // too, which the parser takes as it is.
+        let redirected = !input && crate::parse::takes_modules_at(&at, &path);
+        let input = input || redirected;
+        let key = if redirected { format!("input:{}", at.display()) } else { at.display().to_string() };
         let string = |sc: &mut Session, t: &str| sc.make(|m| m.heap().string_from_chars(&t.chars().collect::<Vec<_>>()));
         let entry = |sc: &mut Session, list: &mut fixpt_scheme::Handle, r: &Read| -> R<()> {
             let fields = [
@@ -1080,7 +1085,7 @@ fn supply_loaded_in(
             *list = sc.call_global("cons", &[one, *list]).map_err(|e| fail(e.to_string()))?;
             Ok(())
         };
-        let shared = if input { format!("input:{key}") } else { key.clone() };
+        let shared = if input && !redirected { format!("input:{key}") } else { key.clone() };
         if let Some(r) = seen.get(&shared) {
             entry(scheme, list, r)?;
             continue;
