@@ -154,8 +154,16 @@ impl Checker {
     pub(crate) fn apply_fun(&mut self, f: TyId, args: Vec<D>) -> D {
         match self.arena.get(f).clone() {
             Ty::Lam { params, body } if params.len() == args.len() => {
+                let key = args.iter().map(|d| self.app_arg(d)).collect::<Option<Vec<_>>>().map(|k| (f, k));
+                if let Some(d) = key.as_ref().and_then(|k| self.fun_apps.get(k)) {
+                    return d.clone();
+                }
                 let map: HashMap<DVar, D> = params.iter().map(|(v, _)| *v).zip(args).collect();
-                self.subst_d(&body, &map)
+                let d = self.subst_d(&body, &map);
+                if let Some(k) = key {
+                    self.fun_apps.insert(k, d.clone());
+                }
+                d
             }
             // Stuck: an effect, an atom of its own; a function; or a type.
             _ => match self.fun_kind(f).and_then(|k| self.arena.arrow_parts(k).map(|(_, r)| r)) {
@@ -170,6 +178,23 @@ impl Checker {
                 _ => D::Type(self.arena.ty(Ty::App { fun: f, args })),
             },
         }
+    }
+
+    /// What description `d` given a function is, for its application's
+    /// memo (`fun_apps`): a type by its node, or a `select` by its names,
+    /// which mean what they do where it is resolved, as a node of it made
+    /// again would; a region or an effect as it is. None for another, not
+    /// remembered.
+    fn app_arg(&self, d: &D) -> Option<AppArg> {
+        Some(match d {
+            D::Type(t) | D::Fun(t) => match self.arena.get(*t) {
+                Ty::Select(m, n) => AppArg::Select(*m, *n),
+                _ => AppArg::Node(*t),
+            },
+            D::Region(r) => AppArg::Region(*r),
+            D::Effect(e) => AppArg::Effect(e.clone()),
+            _ => return None,
+        })
     }
 
     /// A description substituted into: `map`'s descriptions for its
@@ -695,12 +720,12 @@ impl Checker {
             let ds = args.iter().map(|a| self.parse_d(a)).collect::<R<Vec<_>>>()?;
             return Ok(self.arena.ty(Ty::App { fun: f, args: ds }));
         };
-        let shown = self.show_fun(f);
+        // Shown only for a message: a family's whole body, else.
         if args.len() != params.len() {
-            return Err(FxError::at(s.span, format!("`{shown}` takes {} description(s), and has {}", params.len(), args.len())));
+            return Err(FxError::at(s.span, format!("`{}` takes {} description(s), and has {}", self.show_fun(f), params.len(), args.len())));
         }
         if !matches!(result, Kind::Type | Kind::Data) {
-            return Err(FxError::at(s.span, format!("`{shown}` gives a description of kind {}, not a type", self.show_kind(result))));
+            return Err(FxError::at(s.span, format!("`{}` gives a description of kind {}, not a type", self.show_fun(f), self.show_kind(result))));
         }
         let mut ds = Vec::new();
         for (a, k) in args.iter().zip(params) {
@@ -708,7 +733,7 @@ impl Checker {
         }
         match self.apply_fun(f, ds) {
             D::Type(t) => Ok(t),
-            _ => Err(FxError::at(s.span, format!("`{shown}` does not give a type"))),
+            _ => Err(FxError::at(s.span, format!("`{}` does not give a type", self.show_fun(f)))),
         }
     }
 
@@ -763,4 +788,14 @@ impl Checker {
     fn fun_sym(&self, sym: Sym) -> bool {
         matches!(self.lookup_desc(sym), Some(DScope::Var(_, Kind::Arrow(_)) | DScope::Fun(_)))
     }
+}
+
+/// A description given a function, as its application's memo keys it
+/// (`Checker::app_arg`).
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub(crate) enum AppArg {
+    Node(TyId),
+    Select(fixpt_read::Sym, fixpt_read::Sym),
+    Region(Region),
+    Effect(Effect),
 }

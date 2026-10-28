@@ -297,6 +297,11 @@ pub struct Checker {
     /// given to a file has a signature's worth of entries
     /// (`TODO.md` §68). Forgotten when the arena is reset.
     pub(crate) regions_memo: std::cell::RefCell<HashMap<TyId, std::rc::Rc<[Region]>>>,
+    /// Each description function applied, by the function and what it was
+    /// given (`kinds::app_key`): what it reduced to, made once and shared,
+    /// as the checker written in FX-26 shares it by interning (a `.fasl`'s
+    /// families, `fasl::factored`, are applied where each was written out).
+    pub(crate) fun_apps: HashMap<(TyId, Vec<crate::kinds::AppArg>), D>,
     /// Set by `regions_walk` on meeting an unsolved slot: what it found
     /// may change, so it is not kept.
     pub(crate) regions_open: std::cell::Cell<bool>,
@@ -900,6 +905,7 @@ impl Checker {
             hole_hint: None,
             spin_why: Vec::new(),
             regions_memo: std::cell::RefCell::new(HashMap::new()),
+            fun_apps: HashMap::new(),
             regions_open: std::cell::Cell::new(false),
             generatives: Vec::new(),
             transparent: Vec::new(),

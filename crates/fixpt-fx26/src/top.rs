@@ -118,7 +118,7 @@ fn every_field_placed(c: &Checker) {
         // The arena, reset by `scratch` (a refused check's ids are left
         // unused); the interner, by `scratch`'s caller; the facts, forgotten
         // by `scratch`; and what remembers them, cleared there.
-        arena: _, interner: _, facts: _, regions_memo: _, regions_open: _, arrow_star_tys: _,
+        arena: _, interner: _, facts: _, regions_memo: _, fun_apps: _, regions_open: _, arrow_star_tys: _,
         // Printing's, set and cleared around each print.
         print_names: _, print_expanded: _, print_cycles: _, print_for_fasl: _, print_canon: _, print_shallow: _, print_subrs: _, print_params: _, print_tys: _, print_aliases: _, show_marks: _,
         // Set around a single unification or check, and put back there.
@@ -1386,6 +1386,7 @@ impl Checker {
         self.arrow_star_tys.retain(|t| arena.has_ty(*t));
         self.arena.reset(arena);
         self.regions_memo.borrow_mut().clear();
+        self.fun_apps.clear();
         out
     }
 

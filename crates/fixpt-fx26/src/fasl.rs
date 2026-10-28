@@ -876,10 +876,7 @@ impl crate::check::Checker {
         // hidden abbreviation of the module read, so that it is one node
         // where it is read, as it was where it was made (the user's).
         let mut text = match factored(&made, "%fasl:", 40) {
-            Some((defs, made)) => {
-                let defs: Vec<String> = defs.iter().map(|(n, t)| format!("(define-type {n} {t})")).collect();
-                format!("(module (hide {}) (define input {made}))", defs.join(" "))
-            }
+            Some((defs, made)) => format!("(module (hide {}) (define input {made}))", defs.join(" ")),
             None => format!("(module (define input {made}))"),
         };
         for (i, (_, _, d)) in f.deps.iter().enumerate() {
@@ -1197,6 +1194,19 @@ impl Tree {
         s
     }
 
+    /// Each atom in it, to `f`.
+    fn each_atom(&self, f: &mut impl FnMut(&str)) {
+        match self {
+            Tree::Atom(a) => f(a),
+            Tree::List(l) => l.iter().for_each(|t| t.each_atom(f)),
+        }
+    }
+
+    /// Its head, if it is a form whose first item is an atom.
+    fn head_atom(&self) -> Option<&str> {
+        self.head()
+    }
+
     fn head(&self) -> Option<&str> {
         match self {
             Tree::List(l) => match l.first() {
@@ -1233,56 +1243,293 @@ impl Tree {
         }
         l.iter().for_each(|t| t.bound(out));
     }
+}
 
-    /// Whether it names none of `bound`.
-    fn closed(&self, bound: &std::collections::HashSet<String>) -> bool {
+/// The heads of the types a `define-type` may abbreviate where a `.fasl`'s
+/// type is factored, and `maxeff`, an effect: not expressions.
+const TYPE_HEADS: &[&str] = &["subr", "poly", "productof", "sumof", "union", "listof", "pairof", "ref", "arrayof", "narrayof", "mu", "bloblet", "icell", "nlist", "mark-key", "prompt-tag", "maxeff"];
+
+/// What a place in a type's text holds, by its form: where a name bound
+/// outside a subterm stands, the kind of the parameter it is made
+/// (`Skeleton`); elsewhere, not known, and the subterm is not factored.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
+enum Place {
+    Type,
+    Region,
+    Effect,
+    Unknown,
+}
+
+impl Place {
+    fn kind(self) -> Option<&'static str> {
         match self {
-            Tree::Atom(a) => !bound.contains(a) && !a.starts_with('$') && !a.starts_with("%p."),
-            Tree::List(l) => l.iter().all(|t| t.closed(bound)),
+            Place::Type => Some("type"),
+            Place::Region => Some("region"),
+            Place::Effect => Some("effect"),
+            Place::Unknown => None,
         }
     }
 }
 
-/// The heads of the types a `define-type` may abbreviate where a `.fasl`'s
-/// type is factored: types, not effects or expressions.
-const TYPE_HEADS: &[&str] = &["subr", "productof", "sumof", "union", "listof", "pairof", "ref", "arrayof", "narrayof", "mu", "bloblet", "icell", "nlist", "mark-key", "prompt-tag"];
-
-/// Text `text` (an expression or a type, as printed) with each closed type
-/// it has at least twice, of at least `least` characters, named once: the
-/// definitions, smallest first, each `(name type)`, its type naming those
-/// before it; and the text naming them. So a type written out many times
-/// is read once, one node where it is read, as it was where it was made.
-pub fn factored(text: &str, prefix: &str, least: usize) -> Option<(Vec<(String, String)>, String)> {
-    let tree = Tree::read(text)?;
-    let mut bound = std::collections::HashSet::new();
-    tree.bound(&mut bound);
-    let mut counts: HashMap<String, (usize, Tree)> = HashMap::new();
-    fn count(t: &Tree, bound: &std::collections::HashSet<String>, least: usize, counts: &mut HashMap<String, (usize, Tree)>) {
-        let Tree::List(l) = t else { return };
-        if t.head().is_some_and(|h| TYPE_HEADS.contains(&h)) {
-            let s = t.text();
-            if s.len() >= least && t.closed(bound) {
-                counts.entry(s).or_insert((0, t.clone())).0 += 1;
-            }
-        }
-        l.iter().for_each(|c| count(c, bound, least, counts));
+/// What child `i` of a form headed `head` is.
+fn place_of(head: Option<&str>, i: usize) -> Place {
+    match (head, i) {
+        (_, 0) => Place::Unknown,
+        (Some("subr"), 1) => Place::Effect,
+        (Some("subr"), 3) => Place::Type,
+        (Some("union"), _) => Place::Type,
+        (Some("listof" | "ref" | "arrayof" | "icell"), 1) | (Some("pairof"), 1 | 2) | (Some("mu" | "poly"), 2) => Place::Type,
+        (Some("listof" | "ref" | "arrayof" | "icell"), 2) | (Some("pairof"), 3) => Place::Region,
+        (Some("read" | "write" | "alloc" | "goto" | "comefrom" | "await"), 1) => Place::Region,
+        (Some("maxeff"), _) => Place::Effect,
+        _ => Place::Unknown,
     }
-    count(&tree, &bound, least, &mut counts);
-    let mut chosen: Vec<(String, Tree)> = counts.into_iter().filter(|(_, (n, _))| *n >= 2).map(|(s, (_, t))| (s, t)).collect();
+}
+
+/// A subterm with each name it uses that is bound outside it (`open`, and
+/// not bound in it), and each `select` of such a module, made a parameter,
+/// `%fasl-pN`, numbered as first met: the body of the family it is an
+/// application of (`factored`), each parameter's kind by its place. None if
+/// such a name stands where its kind is not known.
+struct Skeleton<'a> {
+    open: &'a std::collections::HashSet<String>,
+    /// Each parameter's argument and kind.
+    leaves: Vec<(Tree, Place)>,
+}
+
+impl Skeleton<'_> {
+    fn leaf(&mut self, t: &Tree, at: Place) -> Option<Tree> {
+        at.kind()?;
+        let text = t.text();
+        let i = match self.leaves.iter().position(|(l, _)| l.text() == text) {
+            Some(i) if self.leaves[i].1 == at => i,
+            Some(_) => return None,
+            None => {
+                self.leaves.push((t.clone(), at));
+                self.leaves.len() - 1
+            }
+        };
+        Some(Tree::Atom(format!("%fasl-p{}", i + 1)))
+    }
+
+    fn is_open(&self, a: &str, inner: &[String]) -> bool {
+        self.open.contains(a) && !inner.iter().any(|b| b == a)
+    }
+
+    fn walk(&mut self, t: &Tree, at: Place, inner: &mut Vec<String>) -> Option<Tree> {
+        let l = match t {
+            Tree::Atom(a) if a.starts_with('$') || a.starts_with("%p.") => return None,
+            Tree::Atom(a) if self.is_open(a, inner) => return self.leaf(t, at),
+            Tree::Atom(_) => return Some(t.clone()),
+            Tree::List(l) => l,
+        };
+        let head = t.head();
+        if let (Some("select"), [_, Tree::Atom(m), _]) = (head, &l[..])
+            && self.is_open(m, inner)
+        {
+            return self.leaf(t, at);
+        }
+        let mark = inner.len();
+        let out = self.children(head, l, inner);
+        inner.truncate(mark);
+        out.map(Tree::List)
+    }
+
+    /// A form's children, its binders bound for those after them.
+    fn children(&mut self, head: Option<&str>, l: &[Tree], inner: &mut Vec<String>) -> Option<Vec<Tree>> {
+        let name = |t: &Tree| match t {
+            Tree::Atom(a) => Some(a.clone()),
+            Tree::List(b) => match b.first() {
+                Some(Tree::Atom(a)) => Some(a.clone()),
+                _ => None,
+            },
+        };
+        let mut out = Vec::with_capacity(l.len());
+        for (i, c) in l.iter().enumerate() {
+            let kept = match (head, i, c) {
+                (_, 0, Tree::Atom(a)) if self.is_open(a, inner) => return None,
+                (_, 0, _) => c.clone(),
+                // A field's name, and its type.
+                (Some("productof" | "sumof"), _, Tree::List(f)) if f.len() == 2 => Tree::List(vec![f[0].clone(), self.walk(&f[1], Place::Type, inner)?]),
+                // A procedure's parameters: each a type, or `(x : T)`.
+                (Some("subr"), 2, Tree::List(ps)) => {
+                    let mut kept = Vec::with_capacity(ps.len());
+                    for p in ps {
+                        kept.push(match p {
+                            Tree::List(v) if v.len() == 3 && matches!(&v[1], Tree::Atom(c) if c == ":") => {
+                                inner.extend(name(&v[0]));
+                                Tree::List(vec![v[0].clone(), v[1].clone(), self.walk(&v[2], Place::Type, inner)?])
+                            }
+                            p => self.walk(p, Place::Type, inner)?,
+                        });
+                    }
+                    Tree::List(kept)
+                }
+                // Binders, bound in what follows.
+                (Some("poly" | "dlambda"), 1, Tree::List(bs)) => {
+                    inner.extend(bs.iter().filter_map(name));
+                    c.clone()
+                }
+                (Some("mu"), 1, Tree::Atom(n)) => {
+                    inner.push(n.clone());
+                    c.clone()
+                }
+                // A module's components: each name bound after it.
+                (Some("moduleof"), _, Tree::List(comp)) if comp.len() == 3 => {
+                    let at = if comp[0].head_atom() == Some("val") { Place::Type } else { Place::Unknown };
+                    let kept = match comp[0].head_atom() {
+                        Some("abs") => c.clone(),
+                        _ => Tree::List(vec![comp[0].clone(), comp[1].clone(), self.walk(&comp[2], at, inner)?]),
+                    };
+                    inner.extend(name(&comp[1]));
+                    kept
+                }
+                _ => self.walk(c, place_of(head, i), inner)?,
+            };
+            out.push(kept);
+        }
+        Some(out)
+    }
+}
+
+/// Text `text` (an expression or a type, as printed) with each type or
+/// effect it has at least twice, of at least `least` characters, named
+/// once: the definitions, smallest first, each naming those before it;
+/// and the text naming them. A name bound outside the subterm (a maker's
+/// parameter's `select`, a module's description, a `poly`'s variable) is
+/// a parameter of it, a family, `(dlambda ((%fasl-p1 type) …) T)`, applied
+/// to it where it stands (the user's), so that the subterms that differ in
+/// those alone are one. So a type written out many times is read once, one
+/// node where it is read, as it was where it was made.
+pub fn factored(text: &str, prefix: &str, least: usize) -> Option<(Vec<String>, String)> {
+    let tree = Tree::read(text)?;
+    let mut open = std::collections::HashSet::new();
+    tree.bound(&mut open);
+    // Each subterm's skeleton, by its text and its parameters' kinds.
+    type Key = (String, Vec<Place>);
+    fn skeleton(t: &Tree, open: &std::collections::HashSet<String>) -> Option<(Key, Tree, Vec<Tree>)> {
+        if !t.head().is_some_and(|h| TYPE_HEADS.contains(&h)) {
+            return None;
+        }
+        let mut s = Skeleton { open, leaves: Vec::new() };
+        let body = s.walk(t, Place::Unknown, &mut Vec::new())?;
+        let kinds = s.leaves.iter().map(|(_, k)| *k).collect();
+        Some(((body.text(), kinds), body, s.leaves.into_iter().map(|(l, _)| l).collect()))
+    }
+    let mut counts: HashMap<Key, (usize, Tree)> = HashMap::new();
+    fn count(t: &Tree, open: &std::collections::HashSet<String>, least: usize, counts: &mut HashMap<Key, (usize, Tree)>) {
+        let Tree::List(l) = t else { return };
+        if let Some((key, body, _)) = skeleton(t, open)
+            && key.0.len() >= least
+        {
+            counts.entry(key).or_insert((0, body)).0 += 1;
+        }
+        l.iter().for_each(|c| count(c, open, least, counts));
+    }
+    count(&tree, &open, least, &mut counts);
+    let mut chosen: Vec<(Key, Tree)> = counts.into_iter().filter(|(_, (n, _))| *n >= 2).map(|(k, (_, b))| (k, b)).collect();
     if chosen.is_empty() {
         return None;
     }
-    chosen.sort_by_key(|(s, _)| s.len());
-    let names: HashMap<String, String> = chosen.iter().enumerate().map(|(i, (s, _))| (s.clone(), format!("{prefix}{}", i + 1))).collect();
-    fn named(t: &Tree, names: &HashMap<String, String>, top: bool) -> Tree {
-        if let Tree::List(l) = t {
-            if !top && let Some(n) = names.get(&t.text()) {
-                return Tree::Atom(n.clone());
-            }
-            return Tree::List(l.iter().map(|c| named(c, names, false)).collect());
+    chosen.sort_by(|a, b| a.0.0.len().cmp(&b.0.0.len()).then_with(|| a.0.cmp(&b.0)));
+    let names: HashMap<Key, String> = chosen.iter().enumerate().map(|(i, (k, _))| (k.clone(), format!("{prefix}{}", i + 1))).collect();
+    // Each subterm chosen, its family applied to its arguments.
+    fn named(t: &Tree, open: &std::collections::HashSet<String>, names: &HashMap<Key, String>, top: bool) -> Tree {
+        let Tree::List(l) = t else { return t.clone() };
+        if !top
+            && let Some((key, _, args)) = skeleton(t, open)
+            && let Some(n) = names.get(&key)
+        {
+            return match args.is_empty() {
+                true => Tree::Atom(n.clone()),
+                false => Tree::List(std::iter::once(Tree::Atom(n.clone())).chain(args).collect()),
+            };
         }
-        t.clone()
+        Tree::List(l.iter().map(|c| named(c, open, names, false)).collect())
     }
-    let defs = chosen.iter().map(|(s, t)| (names[s].clone(), named(t, &names, true).text())).collect();
-    Some((defs, named(&tree, &names, false).text()))
+    let defs: Vec<(String, String)> = chosen
+        .iter()
+        .map(|(key, body)| {
+            let n = &names[key];
+            let mut inner = open.clone();
+            inner.extend((1..=key.1.len()).map(|i| format!("%fasl-p{i}")));
+            let body = named(body, &inner, &names, true).text();
+            let effect = body.starts_with("(maxeff");
+            let def = match (key.1.is_empty(), effect) {
+                (true, true) => format!("(define-effect {n} {body})"),
+                (true, false) => format!("(define-type {n} {body})"),
+                (false, _) => {
+                    let ps: Vec<String> = key.1.iter().enumerate().map(|(i, k)| format!("(%fasl-p{} {})", i + 1, k.kind().expect("a kind"))).collect();
+                    format!("(define-type {n} (dlambda ({}) {body}))", ps.join(" "))
+                }
+            };
+            (n.clone(), def)
+        })
+        .collect();
+    // Each after those it names: a family is known once it is defined, so a
+    // body that applies one comes after it, whatever their sizes (a `poly`'s
+    // own variable is shorter than the parameter it is in a part of it).
+    let at: HashMap<&str, usize> = defs.iter().enumerate().map(|(i, (n, _))| (n.as_str(), i)).collect();
+    let uses: Vec<Vec<usize>> = defs
+        .iter()
+        .map(|(n, d)| {
+            let mut found = Vec::new();
+            if let Some(t) = Tree::read(d) {
+                t.each_atom(&mut |a| {
+                    if a != n
+                        && let Some(&j) = at.get(a)
+                    {
+                        found.push(j);
+                    }
+                });
+            }
+            found
+        })
+        .collect();
+    let mut order = Vec::with_capacity(defs.len());
+    let mut placed = vec![false; defs.len()];
+    fn place(i: usize, uses: &[Vec<usize>], placed: &mut [bool], order: &mut Vec<usize>) {
+        if std::mem::replace(&mut placed[i], true) {
+            return;
+        }
+        for &j in &uses[i] {
+            place(j, uses, placed, order);
+        }
+        order.push(i);
+    }
+    for i in 0..defs.len() {
+        place(i, &uses, &mut placed, &mut order);
+    }
+    let defs = order.into_iter().map(|i| defs[i].1.clone()).collect();
+    Some((defs, named(&tree, &open, &names, false).text()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::factored;
+
+    /// A type that differs between its uses only in a name bound outside
+    /// it, a maker's parameter's `select` here, is one family applied to
+    /// each; a closed one, a plain abbreviation; an effect, by `define-effect`.
+    #[test]
+    fn open_subterms_are_families_applied() {
+        let text = include_str!("fasl-open-subterms.txt").trim();
+        let (defs, made) = factored(text, "%fasl:", 20).expect("factored");
+        let all = defs.join("\n");
+        assert!(all.contains("(dlambda ((%fasl-p1 type)) (listof %fasl-p1 acyclic))"), "{all}");
+        assert!(all.contains("(ref (%fasl:1 %fasl-p1) @ed)"), "{all}");
+        assert!(all.contains("(define-effect"), "{all}");
+        assert!(made.contains("(select m-a t)") && made.contains("(select m-b t)"), "{made}");
+        assert!(!made.contains("(ref (listof"), "{made}");
+    }
+
+    /// A name bound inside the subterm itself does not keep it from being
+    /// named: it is closed.
+    #[test]
+    fn a_subterm_binding_its_own_names_is_closed() {
+        let text = "(productof (a (poly ((v type)) (subr pure (v (listof v acyclic)) v))) \
+                               (b (poly ((v type)) (subr pure (v (listof v acyclic)) v))))";
+        let (defs, _) = factored(text, "%fasl:", 20).expect("factored");
+        assert!(defs.iter().any(|d| d.starts_with("(define-type %fasl:") && d.contains("(poly ((v type))") && !d.contains("dlambda")), "{defs:?}");
+    }
 }

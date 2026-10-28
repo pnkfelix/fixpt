@@ -3403,13 +3403,24 @@ the makers (`docs/research/fasl.md`). In order:
    in a table of cyclic types, so that equal recursive types are one node.
    Now each `mu` read is a node of its own (a link, not internable), and
    comparing two equal ones is coinductive (`k-strail-in?`).
-3. **Interning in the Rust checker**, which has none, only if its costs
-   show again: its exceptions those of the FX-26 checker's (`->*` marks,
-   standard bindings, recursive bindings).
-4. **The factoring's test of closedness scoped**: a subterm naming any name
-   bound anywhere in the interface (a `moduleof`'s description names) is
-   not factored, which leaves 38 KB in `base.fx`'s interface with only 7
-   abbreviations.
+3. **Interning in the Rust checker**, which has none: next (the user's,
+   2026-10-28: it had been put off too long). Its costs have shown twice,
+   in the substitution a `.fasl`'s families made the Rust checker do, which
+   a memo of applications only works around. As the FX-26 checker's: by
+   parts (`k-ty-new`), a substitution's cycles by their minimal form, the
+   same exceptions (`->*` marks, standard bindings, recursive bindings),
+   so that both print alike.
+4. ~~**The factoring's test of closedness scoped**~~ (done, 2026-10-28,
+   the user's design): a subterm that names what is bound outside it (a
+   maker's parameter's `select`, a module's description, a `poly`'s
+   variable) is a family, `(dlambda ((%fasl-p1 type) …) T)`, applied to
+   them, each parameter's kind by its place; effects too, by
+   `define-effect` or a family. Applications memoized by the function and
+   what it is given, in both checkers (`fun_apps`, `k-applied`), and the
+   Rust parser no longer prints a family's body at each application. The
+   interface text of `frame.fx` 38 KB to 13 KB, `base.fx` 39 KB to 25 KB,
+   `process.fx` 15 KB to 5.5 KB; Heist's start-up 0.52 s to 0.50 s.
+   Without the memos the families cost more than the text saved.
 5. **Factoring for plain module files' and programs' `.fasl`s**, not only
    makers'; a program's abbreviations top-level `%fasl:` types, which both
    printers must then skip. A program's `.fasl` now names types by the

@@ -2659,3 +2659,37 @@ of `TODO.md` §141, working on my own.
   timed runs, with a list of 200000 live. Over 20 runs: 220 ms from
   `.fasl`s, 215-227 ms from source. Nothing changed.
 
+### Interfaces factored into families (the same day)
+
+- **Where the load went, at 0.52 s**: the FX-26 checker 128 ms and the
+  Rust checker 58 ms reading `.fasl`s' interfaces; of the FX-26 one's,
+  about half reading the text. `frame.fx`'s was 38 KB, a 484-character
+  type in it 21 times: the factoring refused what names a name bound in
+  the interface (§141, item 4).
+- **The user's design**: factor such a subterm into a `dlambda` over what
+  it names from outside, applied where it stands. Done by skeletons: the
+  names bound outside it, and `select`s of such modules, made parameters,
+  numbered as met, each kind by its place (a `ref`'s second a region, a
+  `subr`'s first an effect, …); a place whose kind is not known, not
+  factored. Effects (`maxeff`) too. Definitions in the order they name
+  each other (by size they were not: inside a `poly`, its variable is a
+  parameter longer than itself).
+- **The user's warning, measured**: families alone made start-up slower,
+  0.52 to 0.55 s: reading 18 ms less, the FX-26 check 13 ms more, the Rust
+  checker 18 ms more. Most of the Rust checker's was printing the family
+  at each application for a message it might make; then a memo of
+  applications in both checkers, by the function and its arguments (in
+  the Rust one a `select` by its names, which is what it is resolved by).
+  Result: reading 37 ms (was 58), the FX-26 check 135 (was 141), the Rust
+  checker 46 (was 59); start-up 0.50 s.
+- **The user's point taken**: a smaller `.fasl` is worth having for
+  itself (`frame.fx`'s interface 13 KB, `base.fx`'s 25 KB); and Rust
+  interning, put off too long, is next (§141, item 3), which the memo
+  only works around.
+- **Asked, and answered in words**: a library of multi-hole contexts, so
+  that a checker reasons about a family applied without substituting.
+  Not yet: a targeted form would keep an application unreduced and let
+  subtyping compare the same family's arguments (congruence), unfolding
+  otherwise; every consumer must then know the form. Worth it if the
+  checking half stays the larger.
+

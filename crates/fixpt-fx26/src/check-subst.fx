@@ -306,6 +306,13 @@
         nil
         (cons (product (1 (extract (car ps) 1)) (2 (k-resolve (extract (car ps) 2))))
               (k-resolve-each (cdr ps))))))
+;; Descriptions `ds`, each type or function as it resolves: for a key.
+(define k-descs-resolved (->* (k-descs) k-descs)
+  (lambda (ds)
+    (if (null? ds)
+        nil
+        (cons (tagcase (car ds) (dt (t) (dt (k-resolve t))) (df (f) (df (k-resolve f))) (else d d))
+              (k-descs-resolved (cdr ds))))))
 ;; The description of kind `k` that names binder `v`.
 (define k-binder-desc (->* (int int) k-desc)
   (lambda (k v)
@@ -329,7 +336,11 @@
         (tagcase (k-get f)
           (ty-lam (bs body)
             (if (= (k-length bs) (k-length ds))
-                (k-subst-desc body (k-gen-map bs ds))
+                (let ((key (ty-app (k-resolve f) (k-descs-resolved ds))))
+                  (if (k-applied-has? key)
+                      (k-applied-get key)
+                      (let ((d (k-subst-desc body (k-gen-map bs ds))))
+                        (begin (k-applied-put! key d) d))))
                 (k-apply-stuck f ds)))
           (else y (k-apply-stuck f ds))))))
 ;; `f` applied to `ds`, which cannot be reduced: an effect, an atom of its
