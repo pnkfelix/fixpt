@@ -963,4 +963,7 @@
 ;; them, and each call makes one. `m`, if none.
 (define loaded-made (->* (syns-a exp int int) exp)
   (lambda (ps m a b)
-    (if (null? ps) m (e-plambda (car ps) (e-lambda (the param-list nil) m a b 0) a b 0))))
+    (cond ((null? ps) m)
+          ;; `(module-parameters ())`: a `lambda` of none, no `plambda` of none.
+          ((syn-nil? (car ps)) (e-lambda (the param-list nil) m a b 0))
+          (else (e-plambda (car ps) (e-lambda (the param-list nil) m a b 0) a b 0)))))

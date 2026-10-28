@@ -3861,3 +3861,12 @@ in a module of none.
 - **Heist's editor**, through `eldoc.fx`: 4.17 s as modules against 4.10 s
   as globals (4.87 s before). **Stage 0**: 28.76G instructions against
   29.42G (−2.2%), below where it was before interning (29.10G).
+
+## 152. `(module-parameters ())`, a maker of none (Heist's, 2026-10-28)
+
+A file of no parameters but state of its own was read as a `plambda` of
+no binders around its `lambda`, which `load-moduleof` refused ("is a
+`(poly () …)`, not a module"). It is now the `lambda` of none alone, in
+both parsers (`parse_load_file`, `loaded-made`): `((load-module "f"))`
+makes it, `(load-moduleof "f")` types it. Test:
+`modules/module-parameters-none.fx`.

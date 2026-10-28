@@ -2899,6 +2899,9 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         // the `module-parameters` form.
         Ok(match params {
             None => e,
+            // `(module-parameters ())`, a module of state made once by a
+            // `lambda` of none: no `plambda` of none around it (Heist's).
+            Some(binders) if binders.is_empty() => self.arena.exp(forms[0].span, Exp::Lambda { params: Vec::new(), body: e }),
             Some(binders) => {
                 let p = forms[0].span;
                 let made = self.arena.exp(p, Exp::Lambda { params: Vec::new(), body: e });
