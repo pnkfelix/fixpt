@@ -3322,3 +3322,42 @@ instead: a functor a `plambda` over a signature's kinds, types naming its
 components directly, not `select`ing through a value. Worth weighing for
 what it would cost checking: Heist's start-up is mostly the checker's work
 on calls of included names (DONE §147).
+
+## 140. FX-26 heap images: `dump-heap` with an entry procedure (the user's, 2026-10-28)
+
+`fixpt dump-heap` and `fixpt build` are Scheme-only (`fixpt-cli/src/main.rs`,
+"Scheme-only for now"). The image layer is not: the FX-26 front end's cache
+is an image already (`save_front_end`, `save_native_front_end` in
+`fixpt-fx26/src/session.rs`). Larceny's answers (`~/Dev/LangPlay/accomplice`):
+- **An entry procedure, not a continuation.** `(dump-heap file proc)`
+  (`src/Lib/Common/dump.sch`) roots the image at a closure that sets
+  `command-line-arguments`, runs `add-init-procedure!`'s procedures, then
+  calls `(proc argv)`; `reset-all-hashtables!` first. On load, every root
+  but `G_STARTUP` and `G_CALLOUTS` is cleared (`src/Rts/Sys/gc.c:130`) and a
+  fresh stack made: no frame survives, so the return addresses of
+  "Return addresses as addresses, for images" are not needed for this.
+- **Code a segment of its own** (`memmgr.c`, `dump_stopcopy_system`: the
+  code space as `TEXT_SEGMENT`), its call-outs a root.
+- **The generic dumper** (`lib/Experimental/scheme-dump-heap.sch`) walks
+  from the two roots alone, by `sro` and `peek-bytes`, allocating nothing.
+  Not for FX-26: `sro`'s vector of every object has no type, and reading
+  memory by address under a moving collector is not FX-26's to do. Its
+  idea, an image of what the entry reaches, is `Heap::copy_graph_from`,
+  which `save_front_end` uses; and fixpt knows which words are code
+  (`code_part`), where Larceny's guesses by address and pattern.
+
+Wanted: a primitive `(dump-heap path main)`, `main` taking the arguments'
+vector, done in Rust as `save_native_front_end` is with `main` its root;
+`run-image` calling it on the machine named in the image; `fixpt dump-heap`
+and `fixpt build` for FX-26 naming the entry global. To decide: a dump while
+a region is open (refuse only if `main` reaches into one); init procedures
+(reopening ports); which machines' code an image may carry.
+
+**Or `.fasl` files first?** (the user's question, 2026-10-28). PLAN §3 says a
+`.fasl` is an image whose root is a thunk, which holds for Scheme. An FX-26
+unit's is more: its interface (the checker's types, generative types keyed
+across files), its globals linked by name, not copied, and a stamp to know
+it stale (`docs/research/separate-compilation.md`, §2.2–2.7, stages 3–4).
+An image saves a finished program's checking and compiling at every start
+(Heist's editor: about 4 s, DONE §147); a `.fasl` saves it for each file
+unchanged, while the program still changes, and is the larger design.
