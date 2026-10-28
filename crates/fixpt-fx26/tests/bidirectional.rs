@@ -117,11 +117,10 @@ fn nil_is_of_the_type_nil_where_nothing_says_which_list() {
     assert_eq!(check(&format!("{xs} (if c xs nil)")), "(listof int @heap) ! (read (globals c xs))");
     assert_eq!(check(&format!("{xs} (if c nil nil)")), "nil ! (read (globals c))");
     assert_eq!(check(&format!("{xs} (cond ((= 1 2) nil) (else xs))")), "(listof int @heap) ! (read (globals xs))");
-    // Beside a pair, `nil` makes the pair one that may be `nil`.
-    assert_eq!(
-        check(&format!("{xs} (if c (cons 1 nil) nil)")),
-        "(union nil (pairof int (listof int @r.1) @r.1)) ! (maxeff (alloc @r.1) (read (globals c)))"
-    );
+    // Beside a pair, `nil` makes the pair one that may be `nil`: a pair
+    // whose tail is a list of the same, which is that list, and shows so
+    // (Heist's report, 2026-10-28).
+    assert_eq!(check(&format!("{xs} (if c (cons 1 nil) nil)")), "(listof int @r.1) ! (maxeff (alloc @r.1) (read (globals c)))");
 }
 
 /// A message names `datum`, not its union written out (substitution keeps

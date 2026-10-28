@@ -667,8 +667,11 @@ impl Checker {
             Ty::Place(r) => format!("(place {})", self.show_region(r)),
             Ty::Nat(crate::ast::Size::Finite) => "nat".to_string(),
             Ty::Nat(size) => format!("(nat {})", self.show_size(&size)),
-            // FX-87's `listof`: a pair whose tail is itself.
-            Ty::Pair(a, b, r, true) if self.canon(self.arena.resolve(b)) == t => {
+            // FX-87's `listof`: a pair whose tail is itself. Not in a
+            // label (`print_shallow`), which is the node's own part, so that a
+            // list and a pair whose tail is that list (`nil` beside a pair,
+            // in a join) are one class, and show alike.
+            Ty::Pair(a, b, r, true) if !self.print_shallow.get() && self.canon(self.arena.resolve(b)) == t => {
                 format!("(listof {} {})", self.show_ty_on(a, path), self.show_region(r))
             }
             Ty::PromptTag { answer, payload, effect, region } => format!(

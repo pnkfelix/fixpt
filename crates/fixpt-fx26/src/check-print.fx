@@ -301,8 +301,12 @@
                            (k-show-on a p (k-put "(narrayof " st))))))
         (ty-icell (a r) (k-show-in-region "(icell " a r p st))
         (ty-place (r) (k-put (k-cat3 "(place " (k-region-show r) ")") st))
+        ;; A list when its tail is itself; not in a label (`k-shallow`),
+        ;; which is the node's own part, not where its tail goes, so that a
+        ;; list and a pair whose tail is that list (`nil` beside a pair, in
+        ;; a join) are one class, and show alike.
         (ty-pair (a b r nl)
-          (if (and nl (= (k-canon-of (k-resolve b)) t))
+          (if (and nl (not (get k-shallow)) (= (k-canon-of (k-resolve b)) t))
               (k-show-in-region "(listof " a r p st)
               (let* ((st (k-put (if nl "(union nil (pairof " "(pairof ") st))
                      (st (k-show-on b p (k-put " " (k-show-on a p st))))
