@@ -2647,3 +2647,15 @@ of `TODO.md` §141, working on my own.
   never released (a test of redefinitions saw roots grow).
 - Result: `vec5e5` from native `.fasl`s 77 ms; the suite passes (858).
 
+### `map2e5` from `.fasl`s, looked at (the same day)
+
+- 250 ms from either kind of `.fasl` against 229 ms from source, timed
+  over 3 runs. Major collections from `.fasl`s copied 25 M words against
+  17 M, but the peak in use was the same (34.6 M), and so was what lived
+  after the last (13 M against 12 M): not data kept. Duplicates copied by
+  a program's `.fasl` were few (7923 objects copied, 6732 distinct).
+- What differs is when the majors fall: a load from `.fasl`s allocates
+  140 M words against 305 M, so the budget runs out later, inside the
+  timed runs, with a list of 200000 live. Over 20 runs: 220 ms from
+  `.fasl`s, 215-227 ms from source. Nothing changed.
+

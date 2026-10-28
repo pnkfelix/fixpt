@@ -3449,8 +3449,11 @@ the makers (`docs/research/fasl.md`). In order:
    programs had counted every earlier global on by 2^40 so that none
    held). s7st's `vec5e5` from native `.fasl`s 93 ms to 77 ms. Not done:
    a REPL's `,compile-file` after a `set!` keeps a guard of the count
-   after it, which another session could meet; `map2e5` from either
-   kind of `.fasl` 250 ms against 229 ms from source, not yet looked at.
+   after it, which another session could meet. (`map2e5` from either kind
+   of `.fasl`, 250 ms against 229 ms from source over 3 runs, is when the
+   major collections fall, not the code: a load from `.fasl`s makes far
+   less garbage, 140 M words against 305 M, so its budget runs out inside
+   the timed runs; over 20 runs 220 ms against 215-227 ms.)
 10. ~~**The module files built in given `.fasl`s**~~ (done, 2026-10-28):
    in the cache directory, written by the first run that loads one
    (`fasl::path_for_load`, `Fx26Session::cache_built_ins`). Heist's
