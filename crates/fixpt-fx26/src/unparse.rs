@@ -290,7 +290,7 @@ impl Checker {
 
     /// Whether a type has parts, so that a name abbreviates it: not a base
     /// type, a variable, `nil`, `false` or `void`, each a word already.
-    fn abbreviates(&self, t: TyId) -> bool {
+    pub(crate) fn abbreviates(&self, t: TyId) -> bool {
         !matches!(self.arena.get(self.arena.resolve(t)), Ty::Base(_) | Ty::Var(_) | Ty::Nil | Ty::False | Ty::Void)
     }
 
@@ -343,6 +343,9 @@ impl Checker {
 
     fn show_ty_on(&self, t: TyId, path: &mut Vec<TyId>) -> String {
         let t = self.arena.resolve(t);
+        if let Some(shown) = self.print_tys.borrow().get(&t) {
+            return shown.clone();
+        }
         if let Some(name) = self.abbreviation(t) {
             return name.to_string();
         }
@@ -489,7 +492,10 @@ impl Checker {
             // A call takes apart every one in the types its procedure's
             // type has, however deep (`dependent_args`): the outermost
             // procedure's parameter.
-            Ty::ParamSel(k, n) if self.print_for_fasl.borrow().is_some() => format!("(select %p.{} {})", k + 1, self.interner.name(n)),
+            Ty::ParamSel(k, n) if self.print_for_fasl.borrow().is_some() => match self.print_params.borrow().as_ref().and_then(|ps| ps.get(k).cloned()) {
+                Some(p) => format!("(select {p} {})", self.interner.name(n)),
+                None => format!("(select %p.{} {})", k + 1, self.interner.name(n)),
+            },
             Ty::ParamSel(k, n) => format!("(select ${} {})", k + 1, self.interner.name(n)),
             Ty::Product(parts) | Ty::Sum(parts) => {
                 let head = if matches!(self.arena.get(t), Ty::Product(_)) { "productof" } else { "sumof" };

@@ -3945,7 +3945,8 @@ executable, the architecture or the convention changed): said on the
 standard error, and the source loaded. Every program of
 `tests/programs/modules` gives the same with its module files compiled
 (`crates/fixpt-cli/tests/fasl.rs`); an 800-definition module loads in
-0.24 s against 0.57 s.
+0.24 s against 0.57 s; Heist's editor (a snapshot of its fourteen makers)
+starts in 2.39 s from `.fasl`s, 4.52 s from source.
 
 ## 154. `.fasl` files for programs' files (the user's, 2026-10-28)
 

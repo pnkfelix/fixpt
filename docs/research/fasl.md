@@ -231,6 +231,12 @@ and `fasl_define`, `Checker::fasl_load`; `docs/fx26.md`, "`.fasl` files";
 the choices, `CLAUDES_CHOICES.md`, "`.fasl` files". Where it departs from
 the design above:
 
+- **A maker's interface keeps its parameters as its source wrote them**
+  (`(load-input-moduleof "f.fx" m)`): written out, a maker of many
+  modules' type grows with all of theirs (Heist's `eldoc.fx`, 11 MB), and
+  read back loses the sharing the checkers had; so its load is checked as a
+  `lambda` of those parameters whose body is the result at the maker's
+  effect, a parameter's descriptions in it named by their selects.
 - **The interface is one type**, the type the load is checked at, printed
   for reading back where it is loaded: no name a program defines, an
   abstract type of a file loaded `(select %fasl-dep:i t)`, a dependent

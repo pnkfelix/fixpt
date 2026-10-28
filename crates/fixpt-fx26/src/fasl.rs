@@ -48,6 +48,9 @@ pub struct Header {
     /// The type a load of it is checked at, each file it loads that the
     /// type names `%fasl-dep:i`, `i` its place in `deps`: a module file's.
     pub ty: String,
+    /// Or, a maker's (a file of a `lambda` of the modules it is given), the
+    /// expression its load is checked as (`Checker::fasl_made`), so named.
+    pub made: String,
     /// A program's file's definitions kept, each a procedure's, the `i`th
     /// the image's value `i`.
     pub defs: Vec<Def>,
@@ -171,6 +174,9 @@ impl Header {
         if self.kind != Kind::Program {
             out.push_str(&format!("type {}\n", self.ty));
         }
+        if !self.made.is_empty() {
+            out.push_str(&format!("made {}\n", self.made));
+        }
         for (n, t) in &self.aliases {
             out.push_str(&format!("alias {n} {t}\n"));
         }
@@ -205,7 +211,7 @@ impl Header {
             return Err(format!("it does not begin `{MARK}`"));
         }
         let hex = |s: &str| u64::from_str_radix(s, 16).map_err(|_| format!("`{s}` is not a digest"));
-        let mut h = Header { build: 0, arch: String::new(), native: false, kind: Kind::Module, source: 0, stamp: 0, deps: Vec::new(), ty: String::new(), defs: Vec::new(), aliases: Vec::new() };
+        let mut h = Header { build: 0, arch: String::new(), native: false, kind: Kind::Module, source: 0, stamp: 0, deps: Vec::new(), ty: String::new(), made: String::new(), defs: Vec::new(), aliases: Vec::new() };
         loop {
             let l = line()?;
             let (word, value) = l.split_once(' ').ok_or_else(|| format!("a header line `{l}`"))?;
@@ -230,6 +236,7 @@ impl Header {
                     h.deps.push(Dep { path: path.to_string(), input: kind == "input", stamp: hex(st)? });
                 }
                 "type" => h.ty = value.to_string(),
+                "made" => h.made = value.to_string(),
                 "def" | "rec" => {
                     let mut parts = value.splitn(3, ' ');
                     let (Some(form), Some(name), Some(ty)) = (parts.next(), parts.next(), parts.next()) else {
@@ -593,7 +600,7 @@ impl crate::check::Checker {
                 return stale(self, &format!("`{}` changed", d.path));
             }
         }
-        let mut ty = header.ty.clone();
+        let mut ty = if header.made.is_empty() { format!("(the {} %fasl-value)", header.ty) } else { header.made.clone() };
         for (i, n) in names.iter().enumerate().rev() {
             let name = self.interner.name(*n).to_string();
             if !symbol_reads(&name) {
@@ -606,7 +613,7 @@ impl crate::check::Checker {
             .iter()
             .map(|d| format!("({} {}) ", if d.input { "load-input" } else { "load-module" }, string_literal(&d.path)))
             .collect();
-        let text = format!("(begin {loads}(the {ty} %fasl-value))");
+        let text = format!("(begin {loads}{ty})");
         // Read and parsed as the file's module would be: in the standard
         // environment, its loads from its directory.
         self.files_read += 1;
@@ -657,6 +664,82 @@ fn replace_symbol(s: &str, from: &str, to: &str) -> String {
 }
 
 impl crate::check::Checker {
+    /// For a maker's file (`maker`, its one expression: `(plambda (b …)
+    /// (lambda ((m T) …) body))`, or the `lambda` alone), the expression
+    /// its load `name` is checked as in its `.fasl`: `(module (define input
+    /// (plambda (b …) (lambda ((m T) …) ((the (subr E () R) %fasl-effects))))))`,
+    /// its parameters as the source wrote them, so that their types are
+    /// made from the files they name as they would be from the source (and
+    /// shared, not written out, which for a file of many such parameters is
+    /// most of its type), `E` and `R` the maker's effect and result. Named
+    /// as `fasl_type` names a file loaded. None if `maker` is not so.
+    pub fn fasl_made(&self, name: fixpt_read::Sym, maker: &fixpt_read::Syntax) -> Option<String> {
+        use crate::ast::Ty;
+        let f = self.shared_files.get(&name)?;
+        let Ty::Module { vals, .. } = self.arena.get(self.arena.resolve(f.ty?)).clone() else { return None };
+        let [(_, mut t)] = vals[..] else { return None };
+        let w = |s: &fixpt_read::Syntax| fixpt_read::write_syntax(s, &self.interner);
+        let is = |s: &fixpt_read::Syntax, h: &str| s.as_symbol().is_some_and(|x| self.interner.name(x) == h);
+        let mut syn = maker;
+        let mut binders = None;
+        if let Some([head, bs, body]) = syn.as_proper_list()
+            && is(head, "plambda")
+        {
+            let Ty::Poly { body: inner, .. } = self.arena.get(self.arena.resolve(t)).clone() else { return None };
+            binders = Some(w(bs));
+            (syn, t) = (body, inner);
+        }
+        let [head, params, _body] = syn.as_proper_list()? else { return None };
+        if !is(head, "lambda") {
+            return None;
+        }
+        let Ty::Subr { effect, params: ptys, result, spec: None, .. } = self.arena.get(self.arena.resolve(t)).clone() else { return None };
+        let names: Vec<String> = params.as_proper_list()?.iter().map(|p| Some(w(p.as_proper_list()?.first()?))).collect::<Option<_>>()?;
+        if names.len() != ptys.len() {
+            return None;
+        }
+        let mut vars = HashMap::new();
+        for (i, (_, _, d)) in f.deps.iter().enumerate() {
+            if let Some(g) = self.global_type(*d)
+                && let Ty::Module { abs, .. } = self.arena.get(self.arena.resolve(g))
+            {
+                for (n, v) in abs {
+                    vars.insert(*v, format!("(select {} {})", dep_name(i), self.interner.name(*n)));
+                }
+            }
+        }
+        // Each description of a parameter's module by its select, as the
+        // source names it, not written out at each of its uses.
+        let mut tys = HashMap::new();
+        for (p, n) in ptys.iter().zip(&names) {
+            if let Ty::Module { descs, .. } = self.arena.get(self.arena.resolve(*p)) {
+                for (d, x) in descs {
+                    let x = self.arena.resolve(*x);
+                    if self.abbreviates(x) {
+                        tys.entry(x).or_insert_with(|| format!("(select {n} {})", self.interner.name(*d)));
+                    }
+                }
+            }
+        }
+        *self.print_for_fasl.borrow_mut() = Some(vars);
+        *self.print_params.borrow_mut() = Some(names);
+        *self.print_tys.borrow_mut() = tys;
+        let shown = format!("(subr {} () {})", self.show_effect(&effect), self.show_ty(result));
+        self.print_tys.borrow_mut().clear();
+        *self.print_params.borrow_mut() = None;
+        *self.print_for_fasl.borrow_mut() = None;
+        let lambda = format!("(lambda {} ((the {shown} %fasl-effects)))", w(params));
+        let made = match binders {
+            Some(bs) => format!("(plambda {bs} {lambda})"),
+            None => lambda,
+        };
+        let mut text = format!("(module (define input {made}))");
+        for (i, (_, _, d)) in f.deps.iter().enumerate() {
+            text = replace_symbol(&text, self.interner.name(*d), &dep_name(i));
+        }
+        (!text.contains('\n')).then_some(text)
+    }
+
     /// The type file `name`'s load (its hidden global) is checked at, as a
     /// `.fasl` keeps it, to be read where it is loaded: no name in scope
     /// used for a type; each abstract type of a file it loads a `select` of

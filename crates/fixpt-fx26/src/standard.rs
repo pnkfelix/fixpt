@@ -73,6 +73,9 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // hidden global the value itself. Not a procedure, so that a type `T`
     // that is a dependent one's asks nothing of a call.
     ("%fasl-value", "(poly ((t type)) t)"),
+    // And a maker's result, made with its effect, in a `lambda` of the
+    // parameters as its source wrote them: `((the (subr E () R) %fasl-effects))`.
+    ("%fasl-effects", "(poly ((e effect) (t type)) (subr e () t))"),
     ("vector?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 vector)) (else (not (shape 0 vector))))))"),
     ("bytevector?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 bytevector)) (else (not (shape 0 bytevector))))))"),
     ("symbol?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 symbol)) (else (not (shape 0 symbol))))))"),

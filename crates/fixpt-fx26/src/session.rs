@@ -1393,7 +1393,18 @@ impl Fx26Session {
         let key = format!("{}{}", if input { "input:" } else { "" }, at.display());
         let name = *self.checker.shared_loads.get(&key).ok_or_else(|| format!("`{path}` was not loaded"))?;
         let file = self.checker.shared_files.get(&name).cloned().ok_or_else(|| format!("`{path}` was not loaded"))?;
-        let ty = self.checker.fasl_type(name).map_err(|e| format!("`{path}`'s type cannot be kept: {e}"))?;
+        // A maker's: its parameters as its source wrote them; else its type.
+        let made = match self.checker.read_in(FileId(0), &text) {
+            Ok(forms) if input => {
+                let maker = if one_exp { forms.first().cloned() } else { self.checker.modules_made(&forms) };
+                maker.and_then(|m| self.checker.fasl_made(name, &m)).unwrap_or_default()
+            }
+            _ => String::new(),
+        };
+        let ty = match made.is_empty() {
+            true => self.checker.fasl_type(name).map_err(|e| format!("`{path}`'s type cannot be kept: {e}"))?,
+            false => String::new(),
+        };
         let mut deps = Vec::new();
         let mut dep_values = Vec::new();
         for (written, input, d) in &file.deps {
@@ -1410,6 +1421,7 @@ impl Fx26Session {
             stamp: file.stamp,
             deps,
             ty,
+            made,
             defs: Vec::new(),
             aliases: Vec::new(),
         };
@@ -1796,6 +1808,7 @@ impl Fx26Session {
             stamp: 0,
             deps: Vec::new(),
             ty: String::new(),
+            made: String::new(),
             defs,
             aliases,
         };

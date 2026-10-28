@@ -2435,3 +2435,29 @@ program's file). What I chose:
   - Stage 0, 3.30 s from source, 1.15 s from the `.fasl` (888 definitions
     kept). `compile-file` of it is slow, 10 s (printing and reading back
     big module types).
+
+### A maker's `.fasl` keeps its parameters as written (the same night)
+
+Measured on Heist's editor (a snapshot of its fourteen `load-input`
+makers, each a `lambda` of the modules before it): from `.fasl`s it did
+not start in two minutes. A maker's type, printed, writes each parameter's
+module out in full, and each later file's again: `eldoc.fx`'s was 11 MB
+for 12 KB of source, and read back it is a tree where the checkers had a
+shared graph, so that comparing an argument's type with a parameter's took
+minutes (the user asked whether to check equality first, or to keep the
+graph in the file). What I chose, which keeps the graph by keeping the
+source's references to it:
+- **A maker's load is checked as `(module (define input (plambda (b …)
+  (lambda ((m T) …) ((the (subr E () R) %fasl-effects))))))`**, its
+  parameters `(m T)` as its source wrote them (`(load-input-moduleof
+  "buffer.fx" m-base)`), so that their types are made from the files they
+  name as from the source, shared; `%fasl-effects`, a standard `(poly ((e
+  effect) (t type)) (subr e () t))`, gives the `lambda` the maker's effect.
+- **In `R`, a description of a parameter's module is printed as its
+  select**, `(select m-frame frame)`, by its node: written out, it was
+  2 KB each, a hundred times in `calls.fx`'s.
+- Result: interfaces of 4 to 80 KB, and start-up through `eldoc.fx` in
+  2.39 s from the `.fasl`s against 4.52 s from source. Equality before
+  subtyping, and sharing in the file in general (`dletrec` of the closed
+  parts), not done: neither was needed for this, and the second cannot
+  name what depends on a `plambda`'s or a procedure's parameters.

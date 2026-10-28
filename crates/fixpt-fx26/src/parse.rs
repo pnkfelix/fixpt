@@ -2957,7 +2957,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     ///
     /// each module's values the items', hidden; no `plambda` with no kinds.
     /// None if the file has no module parameters.
-    fn modules_made(&mut self, forms: &[Syntax]) -> Option<Syntax> {
+    pub(crate) fn modules_made(&mut self, forms: &[Syntax]) -> Option<Syntax> {
         let (first, rest) = forms.split_first()?;
         let binders = module_parameters_of(first, &self.interner)?;
         let (kinds, modules): (Vec<Syntax>, Vec<Syntax>) = binders.iter().cloned().partition(|b| binder_is_kind(b, &self.interner));
