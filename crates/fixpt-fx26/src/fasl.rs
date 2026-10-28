@@ -741,7 +741,16 @@ impl crate::check::Checker {
             Some(bs) => format!("(plambda {bs} {lambda})"),
             None => lambda,
         };
-        let mut text = format!("(module (define input {made}))");
+        // Each closed type written out more than once named once, by a
+        // hidden abbreviation of the module read, so that it is one node
+        // where it is read, as it was where it was made (the user's).
+        let mut text = match factored(&made, "%fasl:", 40) {
+            Some((defs, made)) => {
+                let defs: Vec<String> = defs.iter().map(|(n, t)| format!("(define-type {n} {t})")).collect();
+                format!("(module (hide {}) (define input {made}))", defs.join(" "))
+            }
+            None => format!("(module (define input {made}))"),
+        };
         for (i, (_, _, d)) in f.deps.iter().enumerate() {
             text = replace_symbol(&text, self.interner.name(*d), &dep_name(i));
         }
@@ -944,4 +953,167 @@ pub fn symbols_in(text: &str) -> Vec<String> {
         }
     }
     out
+}
+
+/// A printed text as a tree, to find what repeats in it ([`factored`]).
+#[derive(Clone, PartialEq)]
+enum Tree {
+    Atom(String),
+    List(Vec<Tree>),
+}
+
+impl Tree {
+    fn read(text: &str) -> Option<Tree> {
+        let mut stack: Vec<Vec<Tree>> = vec![Vec::new()];
+        let mut chars = text.char_indices().peekable();
+        while let Some((i, c)) = chars.next() {
+            match c {
+                '(' => stack.push(Vec::new()),
+                ')' => {
+                    let l = stack.pop()?;
+                    stack.last_mut()?.push(Tree::List(l));
+                }
+                c if c.is_whitespace() => {}
+                '"' => {
+                    let mut end = i + 1;
+                    let mut escaped = false;
+                    for (j, d) in chars.by_ref() {
+                        end = j + d.len_utf8();
+                        if escaped {
+                            escaped = false;
+                        } else if d == '\\' {
+                            escaped = true;
+                        } else if d == '"' {
+                            break;
+                        }
+                    }
+                    stack.last_mut()?.push(Tree::Atom(text[i..end].to_string()));
+                }
+                _ => {
+                    let mut end = i + c.len_utf8();
+                    while let Some(&(j, d)) = chars.peek() {
+                        if d.is_whitespace() || d == '(' || d == ')' {
+                            break;
+                        }
+                        end = j + d.len_utf8();
+                        chars.next();
+                    }
+                    stack.last_mut()?.push(Tree::Atom(text[i..end].to_string()));
+                }
+            }
+        }
+        let mut top = stack.pop()?;
+        (stack.is_empty() && top.len() == 1).then(|| top.pop())?
+    }
+
+    fn write(&self, out: &mut String) {
+        match self {
+            Tree::Atom(a) => out.push_str(a),
+            Tree::List(l) => {
+                out.push('(');
+                for (i, t) in l.iter().enumerate() {
+                    if i > 0 {
+                        out.push(' ');
+                    }
+                    t.write(out);
+                }
+                out.push(')');
+            }
+        }
+    }
+
+    fn text(&self) -> String {
+        let mut s = String::new();
+        self.write(&mut s);
+        s
+    }
+
+    fn head(&self) -> Option<&str> {
+        match self {
+            Tree::List(l) => match l.first() {
+                Some(Tree::Atom(a)) => Some(a),
+                _ => None,
+            },
+            Tree::Atom(_) => None,
+        }
+    }
+
+    /// Each name a form of the text binds: a `poly`'s, `plambda`'s or
+    /// `dlambda`'s binders, a `lambda`'s parameters, a `mu`'s name, a
+    /// `moduleof`'s components, a named parameter `(x : T)`.
+    fn bound(&self, out: &mut std::collections::HashSet<String>) {
+        let Tree::List(l) = self else { return };
+        let first = |t: &Tree| match t {
+            Tree::List(b) => match b.first() {
+                Some(Tree::Atom(a)) => Some(a.clone()),
+                _ => None,
+            },
+            Tree::Atom(a) => Some(a.clone()),
+        };
+        match (self.head(), l.get(1)) {
+            (Some("poly" | "plambda" | "dlambda" | "lambda" | "dletrec"), Some(Tree::List(bs))) => out.extend(bs.iter().filter_map(first)),
+            (Some("mu" | "abs" | "desc" | "val"), Some(Tree::Atom(n))) => {
+                out.insert(n.clone());
+            }
+            _ => {}
+        }
+        if let [Tree::Atom(n), Tree::Atom(colon), _] = &l[..]
+            && colon == ":"
+        {
+            out.insert(n.clone());
+        }
+        l.iter().for_each(|t| t.bound(out));
+    }
+
+    /// Whether it names none of `bound`.
+    fn closed(&self, bound: &std::collections::HashSet<String>) -> bool {
+        match self {
+            Tree::Atom(a) => !bound.contains(a) && !a.starts_with('$') && !a.starts_with("%p."),
+            Tree::List(l) => l.iter().all(|t| t.closed(bound)),
+        }
+    }
+}
+
+/// The heads of the types a `define-type` may abbreviate where a `.fasl`'s
+/// type is factored: types, not effects or expressions.
+const TYPE_HEADS: &[&str] = &["subr", "productof", "sumof", "union", "listof", "pairof", "ref", "arrayof", "narrayof", "mu", "bloblet", "icell", "nlist", "mark-key", "prompt-tag"];
+
+/// Text `text` (an expression or a type, as printed) with each closed type
+/// it has at least twice, of at least `least` characters, named once: the
+/// definitions, smallest first, each `(name type)`, its type naming those
+/// before it; and the text naming them. So a type written out many times
+/// is read once, one node where it is read, as it was where it was made.
+pub fn factored(text: &str, prefix: &str, least: usize) -> Option<(Vec<(String, String)>, String)> {
+    let tree = Tree::read(text)?;
+    let mut bound = std::collections::HashSet::new();
+    tree.bound(&mut bound);
+    let mut counts: HashMap<String, (usize, Tree)> = HashMap::new();
+    fn count(t: &Tree, bound: &std::collections::HashSet<String>, least: usize, counts: &mut HashMap<String, (usize, Tree)>) {
+        let Tree::List(l) = t else { return };
+        if t.head().is_some_and(|h| TYPE_HEADS.contains(&h)) {
+            let s = t.text();
+            if s.len() >= least && t.closed(bound) {
+                counts.entry(s).or_insert((0, t.clone())).0 += 1;
+            }
+        }
+        l.iter().for_each(|c| count(c, bound, least, counts));
+    }
+    count(&tree, &bound, least, &mut counts);
+    let mut chosen: Vec<(String, Tree)> = counts.into_iter().filter(|(_, (n, _))| *n >= 2).map(|(s, (_, t))| (s, t)).collect();
+    if chosen.is_empty() {
+        return None;
+    }
+    chosen.sort_by_key(|(s, _)| s.len());
+    let names: HashMap<String, String> = chosen.iter().enumerate().map(|(i, (s, _))| (s.clone(), format!("{prefix}{}", i + 1))).collect();
+    fn named(t: &Tree, names: &HashMap<String, String>, top: bool) -> Tree {
+        if let Tree::List(l) = t {
+            if !top && let Some(n) = names.get(&t.text()) {
+                return Tree::Atom(n.clone());
+            }
+            return Tree::List(l.iter().map(|c| named(c, names, false)).collect());
+        }
+        t.clone()
+    }
+    let defs = chosen.iter().map(|(s, t)| (names[s].clone(), named(t, &names, true).text())).collect();
+    Some((defs, named(&tree, &names, false).text()))
 }
