@@ -71,8 +71,8 @@ trampoline, then Rust to `main`; `b go` resolves; `x/3i $pc` shows
 lines.fx:12`, `list` the program around it, `info line *$pc` the range
 of the line; `lldb` the same (`go at lines.fx:5`). In gdb, `fx-frame` in a
 frame of `keep` shows `slot 2: 2` and `its code: #<bloblet …>`, and
-`fx-print $rdi` a loop's counter. `fixpt_lldb.py` is untried: this lldb's
-Python does not load. Sampled at random in `deriv`, every backtrace reaches the
+`fx-print $rdi` a loop's counter. `fixpt_lldb.py` was untried on Linux:
+that lldb's Python did not load (on the Mac, below, it does). Sampled at random in `deriv`, every backtrace reaches the
 thread's start, in both.
 
 What it does not:
@@ -98,8 +98,33 @@ What it does not:
 - **Lines are of the expression a native instruction came from**, not
   statements: an inlined procedure's code is at the inlined body's lines,
   and a call's return lands on the line of what uses its value.
-- **arm64**, Linux or macOS (Mach-O), is not done: names would be the
-  same objects (`EM_AARCH64`), unchecked; frames need arm64's rules.
+- **arm64 has no `.debug_frame`**: `cfi.rs` decodes x86_64 only. `lldb`
+  on the Mac, given each piece's bounds by its name, reads the code's
+  prologue instead (below), a leaf's too; with no names it takes every
+  frame for one with a frame record, and a leaf's caller is lost. arm64 on
+  Linux, under `gdb`, is untried.
+
+## Since: names, lines and values on the Mac, arm64 (2026-10-28)
+
+The same objects serve `lldb` on macOS: it reads ELF objects through the
+JIT interface as it does on Linux (verified, `lldb-2103.0.34.103`), once
+`settings set plugin.jit-loader.gdb.enable on`, which `fixpt_lldb.py` now
+does when imported. A debugger is seen by its `brk` at
+`__jit_debug_register_code` (`lldb`'s is `brk #0xf000`), as `int3` is on
+x86_64, so lines are made once it is here. What it gives (verified):
+
+- `bt` from a call out to Rust names every compiled frame and its line,
+  `keep at keep.fx:11` four times, then `fixpt:trampoline`, then Rust to
+  the thread's start, unwound by the frame records the convention keeps.
+- `fx-frame` in a frame of `keep` shows `slot 2: 2` and its code;
+  `fx-regs` shows RESULT and REG1-REG3 (`x0` to `x3`), REG1 `(1 2 3 7)`.
+  This `lldb`'s Python loads now.
+- Attached to a loop (`fixpt-cli/tests/jit_lines.rs`,
+  `lldb_shows_the_frames_values`): `spin`, a leaf, then the three `keep`s
+  under it, each named; `fx-frame` shows `keep` 1's `slot 2: 2`, and says
+  `spin` has no frame of its own. Lines come once the program goes on, as
+  on Linux.
+- Lines come with `fixpt run`; `fixpt eval` keeps no sources for them.
 
 ## 0. The answer, up front
 

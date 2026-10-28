@@ -1,16 +1,22 @@
 """FX-26's values in lldb, for the code `fixpt` compiles to the native
-convention on x86_64, as `fixpt_gdb.py` does for gdb
+convention on x86_64 and arm64, as `fixpt_gdb.py` does for gdb
 (docs/research/debugging.md):
 
     (lldb) command script import scripts/debuggers/fixpt_lldb.py
     (lldb) fx-print $rdi        the word, as FX-26 writes the value it is
     (lldb) fx-frame             the values the selected frame keeps
-    (lldb) fx-regs              RESULT and REG1-REG3: rax, rdi, rsi, r8
+    (lldb) fx-regs              RESULT and REG1-REG3: rax, rdi, rsi, r8;
+                                on arm64, x0 to x3
+
+Importing it also turns on lldb's reading of the code `fixpt` registers
+(`plugin.jit-loader.gdb.enable`, off by default on macOS), so import it
+before `run`, or before attaching.
 
 Each value is written by the program itself (`fixpt_debug_show`); a word
 that is no value the heap holds is said so. A frame's values are those its
-stack map says are live (`[rbp + 16]`), its slots from `[rbp + 24]`; a leaf
-procedure has no frame of its own."""
+stack map says are live (`[rbp + 16]`, on arm64 `[x29 + 16]`), its slots
+from 24 bytes above the frame's base; a leaf procedure has no frame of its
+own."""
 
 import lldb
 
@@ -37,14 +43,21 @@ def register(frame, name):
     return frame.FindRegister(name).GetValueAsUnsigned() & MASK
 
 
+def arm64(frame):
+    """Whether the program is arm64's."""
+    triple = frame.GetThread().GetProcess().GetTarget().GetTriple() or ""
+    return triple.startswith(("arm64", "aarch64"))
+
+
 def frame_values(frame):
     """The frame's live values, as (what, word), or why none."""
-    rbp = register(frame, "rbp")
+    base = "fp" if arm64(frame) else "rbp"
+    rbp = register(frame, base)
     thread = frame.GetThread()
     older = thread.GetFrameAtIndex(frame.GetFrameID() + 1)
-    # A procedure with a frame of its own sets rbp to it, its caller's kept
-    # in it; a leaf leaves its caller's.
-    if not older.IsValid() or register(older, "rbp") == rbp:
+    # A procedure with a frame of its own sets its base (rbp, x29) to it,
+    # its caller's kept in it; a leaf leaves its caller's.
+    if not older.IsValid() or register(older, base) == rbp:
         return "no frame of its own here: a leaf procedure, or not native code"
     # The map, a fixnum: the live bits and above them the count of fields;
     # or, for a frame too wide for one, minus its count of fields.
@@ -83,12 +96,14 @@ def fx_frame(debugger, command, result, internal_dict):
 
 
 def fx_regs(debugger, command, result, internal_dict):
-    """fx-regs: RESULT and REG1-REG3 (rax, rdi, rsi, r8), as values."""
+    """fx-regs: RESULT and REG1-REG3 (rax, rdi, rsi, r8; x0 to x3), as values."""
     frame = debugger.GetSelectedTarget().GetProcess().GetSelectedThread().GetSelectedFrame()
-    for name, reg in (("RESULT", "rax"), ("REG1", "rdi"), ("REG2", "rsi"), ("REG3", "r8")):
+    regs = ("x0", "x1", "x2", "x3") if arm64(frame) else ("rax", "rdi", "rsi", "r8")
+    for name, reg in zip(("RESULT", "REG1", "REG2", "REG3"), regs):
         result.AppendMessage("  %s (%s): %s" % (name, reg, show(frame, register(frame, reg))))
 
 
 def __lldb_init_module(debugger, internal_dict):
+    debugger.HandleCommand("settings set plugin.jit-loader.gdb.enable on")
     for name, fn in (("fx-print", "fx_print"), ("fx-frame", "fx_frame"), ("fx-regs", "fx_regs")):
         debugger.HandleCommand("command script add -f %s.%s %s" % (__name__, fn, name))

@@ -4,9 +4,9 @@
 //! row a line: `NAME +OFFSET FILE:LINE`. A procedure of the program file is
 //! placed in that file, at the lines of its definition; one of a module
 //! file it loads (`load-module`), in that file. By either compiler to the
-//! native convention.
+//! native convention; on arm64, the one written in Rust.
 
-#![cfg(target_arch = "x86_64")]
+#![cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 
 use std::process::Command;
 
@@ -18,6 +18,7 @@ fn compiled_procedures_have_their_files_lines() {
 }
 
 /// The same where the compiler written in FX-26 makes each procedure's code.
+#[cfg(target_arch = "x86_64")]
 #[test]
 fn compiled_by_fx26_procedures_have_their_files_lines() {
     lines_on("fx-regs-fxjit-nativecc");
@@ -65,6 +66,7 @@ fn lines_on(machine: &str) {
 /// With gdb here, and leave to attach (`ptrace_scope` 0): attached to a
 /// program running native code, `scripts/debuggers/fixpt_gdb.py`'s
 /// commands show the frames' values, and the backtrace its lines.
+#[cfg(target_arch = "x86_64")]
 #[test]
 fn gdb_shows_the_frames_values() {
     use std::io::BufRead;
@@ -98,6 +100,54 @@ fn gdb_shows_the_frames_values() {
     assert_eq!(first, "ready\n");
     assert!(text.contains("in spin () at ") && text.contains("values.fx:4"), "no line for `spin`:\n{text}");
     assert!(text.contains("in keep () at ") && text.contains("values.fx:9"), "no line for `keep`:\n{text}");
+    // `keep` 1's frame keeps 2, the head of its list; `spin`, a leaf, none.
+    assert!(text.contains("slot 2: 2") && text.contains("its code: #<bloblet"), "no values for `keep`:\n{text}");
+    assert!(text.contains("no frame of its own here"), "`spin` taken for a frame:\n{text}");
+}
+
+/// With lldb here, on the Mac, and leave to attach: attached to a program
+/// running native code, its backtrace names each compiled frame, the leaf
+/// `spin` and the three `keep`s under it, and `scripts/debuggers/
+/// fixpt_lldb.py`'s commands show their values. Lines need the program to
+/// go on once after attaching (`docs/research/debugging.md`), which lldb's
+/// batch mode cannot do and stop again.
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+#[test]
+fn lldb_shows_the_frames_values() {
+    use std::io::BufRead;
+    if Command::new("lldb").arg("--version").output().is_err() {
+        eprintln!("no lldb: not tried");
+        return;
+    }
+    let dir = std::env::temp_dir().join(format!("fixpt-jit-values-lldb-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let program = dir.join("values.fx");
+    std::fs::write(&program, include_str!("programs/jit-lines/values.fx")).unwrap();
+    let mut child = Command::new(FIXPT)
+        .args(["--fx26-machine", "fx-regs-rsjit-nativecc", "--step-limit", "none", "run", program.to_str().unwrap()])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("fixpt runs");
+    let mut first = String::new();
+    std::io::BufReader::new(child.stdout.take().unwrap()).read_line(&mut first).unwrap();
+    let script = concat!(env!("CARGO_MANIFEST_DIR"), "/../../scripts/debuggers/fixpt_lldb.py");
+    let out = Command::new("lldb")
+        .args(["--batch", "--no-lldbinit", "-o", &format!("command script import {script}")])
+        .args(["-o", &format!("process attach --pid {}", child.id())])
+        .args(["-o", "thread select 2", "-o", "bt 5", "-o", "frame select 1", "-o", "fx-frame", "-o", "frame select 0", "-o", "fx-frame"])
+        .args(["-o", "process detach"])
+        .output()
+        .expect("lldb runs");
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = std::fs::remove_dir_all(&dir);
+    let text = String::from_utf8_lossy(&out.stdout);
+    if text.contains("attach failed") || String::from_utf8_lossy(&out.stderr).contains("attach failed") {
+        eprintln!("no leave to attach: not tried");
+        return;
+    }
+    assert_eq!(first, "ready\n");
+    assert!(text.contains("`spin + ") && text.matches("`keep + ").count() >= 3, "frames unnamed:\n{text}");
     // `keep` 1's frame keeps 2, the head of its list; `spin`, a leaf, none.
     assert!(text.contains("slot 2: 2") && text.contains("its code: #<bloblet"), "no values for `keep`:\n{text}");
     assert!(text.contains("no frame of its own here"), "`spin` taken for a frame:\n{text}");

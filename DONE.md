@@ -3906,3 +3906,26 @@ region's chunk (`direct.rs`, beside `rcons`: `region_slot`, `heap_slot`,
   `programs/run/alloc-in-line.fx` as the Rust machine gives it, collecting
   often too; on arm64, a box's header and field stored as a pair, an
   array's fields by its loop. It fails without the change.
+
+## 155. Compiled code's names, lines and values in `lldb` on the Mac (the user's, 2026-10-28)
+
+§140, §142 and §143 were done and verified on Linux, x86_64; on the Mac,
+arm64, the same ELF objects serve `lldb` (`docs/research/debugging.md`,
+"Since: names, lines and values on the Mac").
+
+- **A debugger seen on arm64**: by its `brk` at
+  `__jit_debug_register_code` (`lldb`'s is `brk #0xf000`), as `int3` is on
+  x86_64 (`jitdebug.rs`, `arm64_stop`), so lines are made once it is
+  here. Before, they were made only with `FIXPT_JIT_DEBUG=frames`.
+- **`fixpt_lldb.py`** on arm64: the frame's base `x29`, RESULT and
+  REG1-REG3 `x0` to `x3`; and importing it turns on lldb's reading of the
+  objects (`plugin.jit-loader.gdb.enable`, off by default on macOS).
+- **Verified**: `bt` from a call out to Rust gives `keep at keep.fx:11`
+  for each compiled frame, then the trampoline, then Rust; `fx-frame` and
+  `fx-regs` show the values.
+- **Tests**: `jit_lines.rs`, the Rust compiler's lines case now on arm64
+  too, and `lldb_shows_the_frames_values` on the Mac (attached; skipped
+  without lldb or leave to attach); `jitdebug`'s `arm64_breakpoints_seen`.
+- **Not done**: a `.debug_frame` for arm64 (`cfi.rs` decodes x86_64 only;
+  `lldb` reads the prologues itself, given the names); `gdb` on arm64
+  Linux, untried.

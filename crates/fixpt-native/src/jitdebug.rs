@@ -165,8 +165,20 @@ fn frames() -> bool {
 }
 
 /// Whether a debugger is here: a breakpoint at the start of
-/// `__jit_debug_register_code`, before its return.
+/// `__jit_debug_register_code`, before its return: x86_64's `int3`, or
+/// arm64's `brk` (`lldb`'s is `brk #0xf000`).
 fn debugger_here() -> bool {
+    if cfg!(target_arch = "aarch64") {
+        let f = __jit_debug_register_code as *const u32;
+        for k in 0..4 {
+            // SAFETY: the function's own code, a few instructions of it, up
+            // to its `ret`; code is readable.
+            if let Some(here) = arm64_stop(unsafe { f.add(k).read_volatile() }) {
+                return here;
+            }
+        }
+        return false;
+    }
     let f = __jit_debug_register_code as *const u8;
     for k in 0..8 {
         // SAFETY: the function's own code, a few bytes of it, up to its
@@ -178,6 +190,17 @@ fn debugger_here() -> bool {
         }
     }
     false
+}
+
+/// What an arm64 instruction says, read from the start of
+/// `__jit_debug_register_code`: a breakpoint (any `brk`), that a debugger
+/// is here; its `ret`, that none is; anything else, read on.
+fn arm64_stop(w: u32) -> Option<bool> {
+    match w {
+        w if w & 0xFFE0_001F == 0xD420_0000 => Some(true),
+        0xD65F_03C0 => Some(false),
+        _ => None,
+    }
 }
 
 /// A piece of code, as a debugger is told of it.
@@ -632,6 +655,16 @@ mod tests {
 
     fn piece(start: usize, len: usize, name: &str) -> Owned {
         Owned { start, len, name: name.into(), called: false, frame: None, lines: None }
+    }
+
+    /// `lldb`'s breakpoint on arm64 (`brk #0xf000`), and `gdb`'s
+    /// (`brk #0`), say a debugger is here; `ret` that none is.
+    #[test]
+    fn arm64_breakpoints_seen() {
+        assert_eq!(arm64_stop(0xD43E_0000), Some(true));
+        assert_eq!(arm64_stop(0xD420_0000), Some(true));
+        assert_eq!(arm64_stop(0xD65F_03C0), Some(false));
+        assert_eq!(arm64_stop(0xD503_201F), None, "a `nop`");
     }
 
     /// An object of two pieces: an ELF header, a `.text.k` section for each
