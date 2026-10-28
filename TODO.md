@@ -3312,10 +3312,8 @@ not expanded where each later file names it; or the walk over it made
 once per file.
 
 **Measured again 2026-10-28** (`f8bba29d`..`c29f1974`, the snapshot of
-Heist's 14 makers): `fixpt check` 3.2 s from source (the Rust checker
-1.23 s, the FX-26 one 1.90 s), 13 s before; but 6.2 s with the files'
-`.fasl`s, the 3 s more in printing (`string_append`, `fmt::write`), and
-it prints 11 MB, `m-process`'s line 4 MB: no type from another file is
+Heist's 14 makers): `fixpt check` 3.2 s (the Rust checker 1.23 s, the
+FX-26 one 1.90 s), 13 s before; it prints 11 MB, `m-process`'s line 4 MB: no type from another file is
 named by it (no `(select m-buffer …)` in `m-process`'s), so each is
 written out where each later file has it. Both printers naming a type
 the same as a global module's description by its `select` would make
@@ -3330,11 +3328,10 @@ earliest bound module first (`module_selects`, `k-selects-gather!`); not
 a description's own body in a `moduleof`, which of the module printed
 would name it by itself, nor the global whose line is printed. Heist's
 14 makers: 11 MB printed to 149 KB, `m-process`'s line 4 MB to 15 KB;
-`fixpt check` 3.21 s to 1.74 s from source. **Left**: with the files'
-`.fasl`s, `fixpt check` is 4.75 s, the checkers' phases 1.7 s of it and
-the profile in `k-mod-check-lambdas`, as if the files' bodies were
-checked again; and the checking itself, 1.7 s where the same files as
-globals check in under one.
+`fixpt check` 3.21 s to 1.74 s. (`fixpt check` reads no `.fasl`s; a
+first run after a build, which compiles the front end again for its
+cache, about 3 s, had looked like their cost.) **Left**: the checking
+itself, 1.7 s where the same files as globals check in under one.
 
 ## 139. A module's static part as a kind (the user's, 2026-10-28)
 
