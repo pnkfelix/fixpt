@@ -172,6 +172,14 @@ pub(crate) const PROCESS_INDEX: u32 = 12;
 /// waiting does `e`. Made only by the forms, and never sent: to safety's
 /// analyses a procedure doing `e`; at run time the scheduler's list.
 pub const EVENT: &str = "(event (e effect +)) (subr e () bool)";
+/// A string at a region (the user's, 2026-10-28), generative type 14: at
+/// run time the heap's string; to safety's analyses an array of `char` at
+/// `r`, which its writes and reads name. `string` is `(stringof const)`:
+/// frozen into the heap, so reading it is pure, and nothing writes it
+/// (`Arena::ty` makes the one as the other; `string_as_named` matches
+/// them where a `stringof`'s region is still to be found).
+pub const STRINGOF: &str = "(stringof (r region)) (arrayof char r)";
+pub(crate) const STRINGOF_INDEX: u32 = 14;
 /// The scheduler of processes and `par`, a module file built in, which the
 /// forms `spawn`, `send`, `receive`, `par`, `icell-get` and `icell-put!`
 /// call through the hidden global of its load (`Checker::library_type`).
@@ -924,7 +932,8 @@ impl Checker {
         // generative type, in both checkers, whose insides nothing sees
         // (no `up-` or `down-`: a `vsubr` is called with its arguments, not
         // their list). `vlambda` makes one; `apply` calls one on a list.
-        for decl in [VSUBR, FLATLAYOUT, FLATARRAYOF, IDENTITY, EQTABLE, BLOBREF, FLAT_ARRAYOF, FLAT_KEYED, BYTEVECTOROF, ESCAPE_TAG, ADDR, INBOX, PROCESS, EVENT] {
+        c.arena.string_sym = Some(c.interner.intern("string"));
+        for decl in [VSUBR, FLATLAYOUT, FLATARRAYOF, IDENTITY, EQTABLE, BLOBREF, FLAT_ARRAYOF, FLAT_KEYED, BYTEVECTOROF, ESCAPE_TAG, ADDR, INBOX, PROCESS, EVENT, STRINGOF] {
             let forms = c.read(decl).expect("reads");
             c.define_generative(&forms[0], &forms[1]).unwrap_or_else(|e| panic!("`{decl}` is wrong: {e}"));
         }
@@ -3528,6 +3537,17 @@ impl Checker {
         false
     }
 
+    /// `t`, `string`, as the `(stringof const)` it is, where `other` is a
+    /// `stringof`: so that the two are matched region by region.
+    pub(crate) fn string_as_named(&self, t: Ty, other: &Ty) -> Ty {
+        match (&t, other) {
+            (Ty::Base(s), Ty::Named { which: STRINGOF_INDEX, .. }) if Some(*s) == self.arena.string_sym => {
+                Ty::Named { which: STRINGOF_INDEX, args: vec![D::Region(Region::Frozen(None, false))] }
+            }
+            _ => t,
+        }
+    }
+
     /// `a ≤ b` by the rules alone: see [`sub`](Self::sub).
     fn sub_rules(&mut self, a: TyId, b: TyId, env: &BinderEnv, st: &mut SubState) -> bool {
         let (a, b) = (self.arena.resolve(a), self.arena.resolve(b));
@@ -3543,6 +3563,7 @@ impl Checker {
         let flip = env.flip();
         // Inside a generative type's own conversions, its name is its
         // representation; everywhere else it is only itself.
+        let (ta, tb) = (self.string_as_named(ta.clone(), &tb), self.string_as_named(tb, &ta));
         let same_named = matches!((&ta, &tb), (Ty::Named { which: g, .. }, Ty::Named { which: h, .. }) if g == h);
         if !same_named && !matches!(ta, Ty::Void) {
             if let Ty::Named { which, args } = &ta

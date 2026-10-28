@@ -37,6 +37,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("rcons", "(poly ((p place) (r region p)) (poly ((t1 type) (t2 type)) (subr (maxeff (alloc r) (alloc p)) ((place p) t1 t2) (pairof t1 t2 r))))"),
     ("rnew", "(poly ((p place) (r region p)) (poly ((t type)) (subr (maxeff (alloc r) (alloc p)) ((place p) t) (ref t r))))"),
     ("rmake-array", "(poly ((p place) (r region p)) (poly ((t type)) (subr (maxeff (alloc r) (alloc p)) ((place p) int t) (arrayof t r))))"),
+    ("rmake-string", "(poly ((p place) (r region p)) (subr (maxeff (alloc r) (alloc p)) ((place p) int char) (stringof r)))"),
     ("rmake-icell", "(poly ((p place) (r region p)) (poly ((t type)) (subr (maxeff (alloc r) (alloc p)) ((place p)) (icell t r))))"),
     ("car", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr (read r) ((union nil (pairof t1 t2 r))) t1)))"),
     ("cdr", "(poly ((r region)) (poly ((t1 type) (t2 type)) (subr (read r) ((union nil (pairof t1 t2 r))) t2)))"),
@@ -105,10 +106,19 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("char-in?", "(subr pure (char string) bool)"),
     ("string-append", "(vsubr pure string string)"),
     // Lengths never below 0: naturals.
-    ("string-length", "(subr pure (string) nat)"),
-    ("string-ref", "(subr pure (string int) char)"),
-    ("substring", "(subr pure (string int int) string)"),
-    ("string=?", "(subr pure (string string) bool)"),
+    // Each of a string at any region, `(stringof r)`; `string` is
+    // `(stringof const)`, at which a read is pure (the user's, 2026-10-28).
+    ("string-length", "(poly ((r region)) (subr pure ((stringof r)) nat))"),
+    ("string-ref", "(poly ((r region)) (subr (read r) ((stringof r) int) char))"),
+    ("substring", "(poly ((r region)) (subr (read r) ((stringof r) int int) string))"),
+    ("string=?", "(poly ((r1 region) (r2 region)) (subr (maxeff (read r1) (read r2)) ((stringof r1) (stringof r2)) bool))"),
+    // A string made, written and copied at a region, as a bytevector is:
+    // frozen (`letfreeze`), it is a `string`, nothing copied.
+    ("make-string", "(poly ((r region)) (subr (alloc r) (int char) (stringof r)))"),
+    ("string-set!", "(poly ((r region)) (subr (write r) ((stringof r) int char) unit))"),
+    ("string-fill!", "(poly ((r region)) (subr (write r) ((stringof r) char) unit))"),
+    ("string-copy", "(poly ((r1 region) (r2 region)) (subr (maxeff (read r1) (alloc r2)) ((stringof r1) int int) (stringof r2)))"),
+    ("string-copy!", "(poly ((r1 region) (r2 region)) (subr (maxeff (read r1) (write r2)) ((stringof r2) int (stringof r1) int int) unit))"),
     // `f64`, IEEE binary64 (`docs/fx26.md`, "Floats").
     ("f64+", "(subr pure (f64 f64) f64)"),
     ("f64-", "(subr pure (f64 f64) f64)"),
@@ -259,7 +269,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("bytevector=?", "(poly ((r1 region) (r2 region)) (subr (maxeff (read r1) (read r2)) ((bytevectorof r1) (bytevectorof r2)) bool))"),
     // A string's UTF-8, and back: bytes not UTF-8 give the offset of the
     // first bad one.
-    ("string->utf8", "(poly ((r region)) (subr (alloc r) (string) (bytevectorof r)))"),
+    ("string->utf8", "(poly ((r region) (s region)) (subr (maxeff (read s) (alloc r)) ((stringof s)) (bytevectorof r)))"),
     ("utf8->string", "(poly ((r region)) (subr (read r) ((bytevectorof r)) (sumof (text string) (bad int))))"),
     ("i8+", "(subr pure (i8 i8) i8)"),
     ("i8-", "(subr pure (i8 i8) i8)"),
@@ -382,7 +392,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("string-downcase", "(subr pure (string) string)"),
     ("char->string", "(subr pure (char) string)"),
     ("list->string", "(poly ((r region)) (subr (read r) ((listof char r)) string))"),
-    ("string->list", "(poly ((r region)) (subr (alloc r) (string) (listof char r)))"),
+    ("string->list", "(poly ((r region) (s region)) (subr (maxeff (read s) (alloc r)) ((stringof s)) (listof char r)))"),
     // What the benchmark ports wrote for themselves (PLAN.md Q11).
     ("remainder", "(subr pure (int int) int)"),
     // Bits of an `int`, two's complement, a bignum's too (SRFI 151's
@@ -671,7 +681,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
 
 /// The initial environment as text, for the checker written in FX-26:
 /// the standard generative types' declarations (`check::VSUBR`,
-/// `FLATLAYOUT`, `FLATARRAYOF`, `IDENTITY`, `EQTABLE`, `BLOBREF`, `FLAT_ARRAYOF`, `FLAT_KEYED`, `BYTEVECTOROF`, `ESCAPE_TAG`, `ADDR`, `INBOX`, `PROCESS`, `EVENT`: 0 to 13), `datum`'s
+/// `FLATLAYOUT`, `FLATARRAYOF`, `IDENTITY`, `EQTABLE`, `BLOBREF`, `FLAT_ARRAYOF`, `FLAT_KEYED`, `BYTEVECTOROF`, `ESCAPE_TAG`, `ADDR`, `INBOX`, `PROCESS`, `EVENT`, `STRINGOF`: 0 to 14), `datum`'s
 /// and `io-error`'s (`check::STANDARD_TYPES`), then `(name type)` for each
 /// binding.
 pub fn standard_text() -> String {
@@ -690,6 +700,7 @@ pub fn standard_text() -> String {
         crate::check::INBOX,
         crate::check::PROCESS,
         crate::check::EVENT,
+        crate::check::STRINGOF,
     ]
         .iter()
         .map(|d| format!("(define-generative {d})\n"))

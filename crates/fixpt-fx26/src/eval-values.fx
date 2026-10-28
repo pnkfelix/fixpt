@@ -71,8 +71,19 @@
 (define as-bool (->* (val) bool)
   (lambda (v) (if (bool? v) v (efail-expected "a bool"))))
 
+;; `v`, a string: one made at a region copied, to be read as a `string`.
 (define as-str (->* (val) string)
-  (lambda (v) (if (string? v) v (efail-expected "a string"))))
+  (lambda (v)
+    (if (string? v)
+        v
+        (tagcase (as-other v "a string")
+          (o-mstr (m) (list->string (string->list m)))
+          (else y (efail-expected "a string"))))))
+
+;; `v`, a string made at a region, to be written; or fails.
+(define as-mstr (->* (val) (stringof @v))
+  (lambda (v)
+    (tagcase (as-other v "a string") (o-mstr (m) m) (else y (efail-expected "a string")))))
 
 (define as-char (->* (val) char)
   (lambda (v) (if (char? v) v (efail-expected "a char"))))
@@ -179,6 +190,7 @@
       ;; Owner and offset, as the machines' one word.
       (o-bref (o i) (tagcase b (o-bref (p j) (and (= i j) (ev-same-blob? o p))) (else y #f)))
       (o-bytes (x) (tagcase b (o-bytes (y) (eq? x y)) (else y #f)))
+      (o-mstr (x) (tagcase b (o-mstr (y) (eq? x y)) (else y #f)))
       (else y #f))))
 
 ;; `eq?` of two values, as the machines have it: the same mutable object;
@@ -274,6 +286,7 @@
       (o-blob (fs bs) (show-bloblet (+ 1 (array-length fs)) (array-length bs)))
       (o-bref (o i) (k-cat3 "#<suffix-ref bloblet +" (int->string i) ">"))
       (o-bytes (b) (k-cat3 "#u8(" (show-bytes b (- (bytevector-length b) 1) "") ")"))
+      (o-mstr (m) (k-cat3 "\"" (list->string (string->list m)) "\""))
       (o-tag (t) "#<prompt-tag>")
       (o-cont (k) "#<continuation>")
       (o-once (k s) "#<continuation>")

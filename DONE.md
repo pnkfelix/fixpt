@@ -3730,3 +3730,33 @@ cellular code: 39 µs a key typing in a burst, against 7 as globals.
 - **Test**: `fixpt-cli/tests/module_makers.rs`, by both compilers: a maker
   of 600 items, and one of 12, each with a leaf making a closure over 14
   values.
+
+## 146. Strings at a region: `(stringof r)`, and `string` is `(stringof const)` (the user's, 2026-10-28)
+
+- **The type**: generative type 14, `(stringof (r region))`, an array of
+  `char` at `r` to the safety analyses; the heap's string at run time.
+  `string` is the same type at `const`: `(stringof const)` and `(stringof
+  acyclic)` are made as `string` (`Arena::ty`, `k-ty-new`), and a
+  `string` is matched as `(stringof const)` against a `stringof` whose
+  region is to be found, in unification, subtyping and the shape check of
+  a call's arguments (`string_as_named`, `k-string-as-named`,
+  `wrong_shape`, `k-wrong-shape?`), in both checkers. Every type printed
+  before prints as it did.
+- **Operations**: `string-length`, `string-ref`, `substring`, `string=?`,
+  `string->list`, `string->utf8` of a string at any region, pure at
+  `const`; new `make-string`, `rmake-string` (in a place), `string-set!`,
+  `string-fill!`, `string-copy`, `string-copy!`, with runtime primitives
+  of their own (`%fx26-make-string` and kin, `%region-make-string`). A
+  `letfreeze` of a string built at its region gives a `string`, nothing
+  copied.
+- **The evaluator written in FX-26**: a string at a region is
+  `(o-mstr (stringof @v))`, read as a `string` by a copy; and it has
+  `string->list` and `list->string` now, which it had not.
+- **The verifier** types a literal `string` by name, not by the checker's
+  one id for it.
+- **Cost**: stage 0's fixed cost 29.10G instructions against 28.68G
+  (+1.4%), 12.60G cycles against 12.31G: the string operations are
+  instantiated where they were not, at every call.
+- **Tests**: `run/stringof.fx` on every machine (`fixpt-cli/tests/stringof.rs`),
+  `regions/write-a-string.fx`, `regions/stringof-escapes.fx`. Docs:
+  `docs/fx26.md`, "Strings at a region".

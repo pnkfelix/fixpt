@@ -333,7 +333,8 @@
   ;; unless both are the same one or `a` is `void`.
   (k-sub-opened (->* (int int k-benv k-benv k-strail k-labels) bool)
     (lambda (a b ea eb trail labels)
-      (let* ((ta (k-get a)) (tb (k-get b))
+      (let* ((ta0 (k-get a)) (tb0 (k-get b))
+             (ta (k-string-as-named ta0 tb0)) (tb (k-string-as-named tb0 ta0))
              (closed (or (k-same-named? ta tb) (tagcase ta (ty-void () #t) (else z #f)))))
         (cond
           ((and (not closed) (k-open-named? ta))

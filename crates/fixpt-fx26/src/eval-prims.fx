@@ -23,7 +23,7 @@
 ;; What it uses of the modules it is given.
 (import values apply-val apply1 as-array as-bool as-bytes ev-preempt-set! as-char as-cont as-f32
         as-f64 as-int as-key as-other as-pair as-ref as-str as-sym as-tag efail efail-expected
-        ev-arg ev-eq? ev-intern list->val the-unit val->vals vals->val)
+        ev-arg as-mstr ev-eq? ev-intern list->val the-unit val->vals vals->val)
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include tables) (include check-types))
 
@@ -170,9 +170,8 @@
       (prim! 'integer->char (lambda (xs) (integer->char (as-int (ev-arg xs 0)))))
       (prim! 'char->string (lambda (xs) (char->string (as-char (ev-arg xs 0)))))
       (prim! 'string-append (lambda (xs) (ev-string-append xs)))
-      (prim! 'string-length (lambda (xs) (string-length (as-str (ev-arg xs 0)))))
-      (prim! 'string-ref
-             (lambda (xs) (string-ref (as-str (ev-arg xs 0)) (as-int (ev-arg xs 1)))))
+      (prim! 'string-length (lambda (xs) (ev-string-length (ev-arg xs 0))))
+      (prim! 'string-ref (lambda (xs) (ev-string-ref (ev-arg xs 0) (as-int (ev-arg xs 1)))))
       (prim! 'substring
              (lambda (xs)
                (substring (as-str (ev-arg xs 0)) (as-int (ev-arg xs 1)) (as-int (ev-arg xs 2)))))
@@ -223,7 +222,7 @@
       (prim! 'bool? (lambda (xs) (bool? (ev-arg xs 0))))
       (prim! 'null? (lambda (xs) (null? (ev-arg xs 0))))
       (prim! 'pair? (lambda (xs) (pair? (ev-arg xs 0))))
-      (prim! 'string? (lambda (xs) (string? (ev-arg xs 0))))
+      (prim! 'string? (lambda (xs) (ev-string? (ev-arg xs 0))))
       (prim! 'symbol? (lambda (xs) (ev-symbol? (ev-arg xs 0))))
       (prim! 'procedure? (lambda (xs) (ev-procedure? (ev-arg xs 0))))
       (prim! 'array? (lambda (xs) (ev-array? (ev-arg xs 0))))
@@ -272,6 +271,53 @@
 
 (define ev-make-array (->* (val val) val)
   (lambda (n x) (the (arrayof val @v) (make-array (as-int n) x))))
+
+;; Strings at a region (`(stringof r)`): made, read and written in place,
+;; a `string` read as it is.
+(define ev-make-string (->* (val val) val)
+  (lambda (n c) (the val (o-mstr (make-string (as-int n) (as-char c))))))
+(define ev-string? (->* (val) bool)
+  (lambda (v)
+    (or (string? v) (typecase v (sum o (tagcase o (o-mstr (m) #t) (else y #f))) (else #f)))))
+(define ev-string-length (->* (val) int)
+  (lambda (v) (if (string? v) (string-length v) (string-length (as-mstr v)))))
+(define ev-string-ref (->* (val int) char)
+  (lambda (v i) (if (string? v) (string-ref v i) (string-ref (as-mstr v) i))))
+;; The characters of string `v` before `i` and up to it, onto `acc`, as a
+;; list value; and a list value of characters, as a list.
+(define ev-chars (->* (val int val) val)
+  (lambda (v i acc) (if (< i 0) acc (ev-chars v (- i 1) (cons (ev-string-ref v i) acc)))))
+(define ev-char-list (->* (val) (listof char @v))
+  (lambda (v) (if (pair? v) (cons (as-char (car v)) (ev-char-list (cdr v))) nil)))
+(define* ev-mstring-prims! (subr (maxeff stores spin) () unit)
+  (lambda ()
+    (let ((n (lambda ((xs vals) (i int)) (as-int (ev-arg xs i))))
+          (m (lambda ((xs vals) (i int)) (as-mstr (ev-arg xs i)))))
+      (begin
+        (prim! 'make-string (lambda (xs) (ev-make-string (ev-arg xs 0) (ev-arg xs 1))))
+        (prim! 'string->list
+               (lambda (xs) (let ((v (ev-arg xs 0))) (ev-chars v (- (ev-string-length v) 1) nil))))
+        (prim! 'list->string (lambda (xs) (list->string (ev-char-list (ev-arg xs 0)))))
+        (prim! 'string-set!
+               (lambda (xs)
+                 (begin (string-set! (m xs 0) (n xs 1) (as-char (ev-arg xs 2))) the-unit)))
+        (prim! 'string-fill!
+               (lambda (xs) (begin (string-fill! (m xs 0) (as-char (ev-arg xs 1))) the-unit)))
+        ;; A copy from either kind.
+        (prim! 'string-copy
+               (lambda (xs)
+                 (let ((from (ev-arg xs 0)))
+                   (the val (o-mstr (if (string? from)
+                                        (string-copy from (n xs 1) (n xs 2))
+                                        (string-copy (as-mstr from) (n xs 1) (n xs 2))))))))
+        (prim! 'string-copy!
+               (lambda (xs)
+                 (let ((from (ev-arg xs 2)))
+                   (begin
+                     (if (string? from)
+                         (string-copy! (m xs 0) (n xs 1) from (n xs 3) (n xs 4))
+                         (string-copy! (m xs 0) (n xs 1) (as-mstr from) (n xs 3) (n xs 4)))
+                     the-unit))))))))
 
 ;; Bytevectors (`TODO.md` §84), the machines' own, with the operations
 ;; the program has: an `i8` or `u8` is the int it stands for.
@@ -515,6 +561,7 @@
       (prim! 'rcons (lambda (xs) (cons (ev-arg xs 1) (ev-arg xs 2))))
       (prim! 'rnew (lambda (xs) (the vcell (new (ev-arg xs 1)))))
       (prim! 'rmake-array (lambda (xs) (ev-make-array (ev-arg xs 1) (ev-arg xs 2))))
+      (prim! 'rmake-string (lambda (xs) (ev-make-string (ev-arg xs 1) (ev-arg xs 2))))
       (prim! 'rmake-icell (lambda (xs) (ev-make-icell)))
       ;; Flat arrays: here, arrays of their values; a layout, its number.
       (prim! 'make-flatarray (lambda (xs) (ev-make-array (ev-arg xs 1) (ev-arg xs 2))))
@@ -846,7 +893,7 @@
 
 (define ev-prims-made unit
   (begin (ev-int-prims!) (ev-text-prims!) (ev-shape-prims!) (ev-data-prims!) (ev-f64-prims!)
-         (ev-f32-prims!) (ev-control-prims!) (ev-bytes-prims!)
+         (ev-f32-prims!) (ev-control-prims!) (ev-bytes-prims!) (ev-mstring-prims!)
          (ev-io-prims!)
          (ev-width-prims! "i8" 8 #t) (ev-width-prims! "u8" 8 #f)
          (ev-width-prims! "i32" 32 #t) (ev-width-prims! "u32" 32 #f)

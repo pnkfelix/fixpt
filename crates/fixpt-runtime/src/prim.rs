@@ -832,6 +832,22 @@ fn bytevector_span(rt: &mut Runtime, v: Value, start: Value, end: Value) -> Outc
     Ok((s, e))
 }
 
+fn string_in(rt: &mut Runtime, v: Value) -> Outcome<usize> {
+    if !rt.heap.is_a(v, ObjType::String) {
+        return rt.type_error("a string", v);
+    }
+    Ok(rt.heap.string_len(v))
+}
+
+/// Characters `start` to `end` of string `v`, checked as a bytevector's
+/// span is.
+fn string_span(rt: &mut Runtime, v: Value, start: Value, end: Value) -> Outcome<(usize, usize)> {
+    let n = string_in(rt, v)?;
+    let e = index(rt, end, n + 1, "string")?;
+    let s = index(rt, start, e + 1, "string")?;
+    Ok((s, e))
+}
+
 fn get_string(rt: &mut Runtime, v: Value) -> Outcome<String> {
     if rt.heap.is_a(v, ObjType::String) {
         return Ok(rt.heap.string_to_rust(v));
@@ -1256,6 +1272,43 @@ prims! {
     "%fx26-bytevector=?", 2, Some(2), simple!(|rt, a| {
         let (n, m) = (bytevector_in(rt, a[0])?, bytevector_in(rt, a[1])?);
         Ok(Value::boolean(n == m && (0..n).all(|i| rt.heap.bytevector_ref(a[0], i) == rt.heap.bytevector_ref(a[1], i))))
+    });
+    // FX-26's strings at a region (`(stringof r)`, the user's,
+    // 2026-10-28): made, written (a write gives unit), filled and copied,
+    // each span checked; a copy is a string of its own.
+    "%fx26-make-string", 2, Some(2), simple!(|rt, a| {
+        let n = int(rt, a[0])?;
+        if !(0..1 << 40).contains(&n) { return rt.fail("string length must be non-negative", &[a[0]]); }
+        let c = get_char(rt, a[1])? as u32;
+        Ok(rt.heap.string_with(n as usize, |_, _| c))
+    });
+    "%fx26-string-set!", 3, Some(3), simple!(|rt, a| {
+        let n = string_in(rt, a[0])?;
+        let i = index(rt, a[1], n, "string")?;
+        let c = get_char(rt, a[2])?;
+        rt.heap.string_set(a[0], i, c);
+        Ok(Value::UNIT)
+    });
+    "%fx26-string-fill!", 2, Some(2), simple!(|rt, a| {
+        let n = string_in(rt, a[0])?;
+        let c = get_char(rt, a[1])?;
+        for i in 0..n { rt.heap.string_set(a[0], i, c); }
+        Ok(Value::UNIT)
+    });
+    "%fx26-string-copy", 3, Some(3), simple!(|rt, a| {
+        let (start, end) = string_span(rt, a[0], a[1], a[2])?;
+        let s = a[0];
+        Ok(rt.heap.string_with(end - start, |h, k| h.string_ref(s, start + k) as u32))
+    });
+    "%fx26-string-copy!", 5, Some(5), simple!(|rt, a| {
+        let (start, end) = string_span(rt, a[2], a[3], a[4])?;
+        let n = string_in(rt, a[0])?;
+        let at = index(rt, a[1], n + 1, "string")?;
+        if at + (end - start) > n { return rt.fail("string-copy!: the characters do not fit", &[a[1]]); }
+        // Read all first: the two may be one string, overlapping.
+        let chars: Vec<char> = (start..end).map(|i| rt.heap.string_ref(a[2], i)).collect();
+        for (k, c) in chars.into_iter().enumerate() { rt.heap.string_set(a[0], at + k, c); }
+        Ok(Value::UNIT)
     });
     "%fx26-string->utf8", 1, Some(1), simple!(|rt, a| {
         let s = get_string(rt, a[0])?;
@@ -2655,6 +2708,13 @@ prims! {
             }
             b
         }))
+    });
+    "%region-make-string", 3, Some(3), simple!(|rt, a| {
+        let h = region_handle(a[0]);
+        let n = int(rt, a[1])?;
+        if !(0..1 << 40).contains(&n) { return rt.fail("string length must be non-negative", &[a[1]]); }
+        let c = get_char(rt, a[2])? as u32;
+        Ok(rt.heap.in_region(h, |heap| heap.string_with(n as usize, |_, _| c)))
     });
     // An I-cell may be sent to a process that outlives the place: so in
     // the heap, wherever it was asked for (`sched::make_icell`).

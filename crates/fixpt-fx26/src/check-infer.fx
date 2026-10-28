@@ -152,7 +152,19 @@
             ((and (= p 18) (= a 6) (k-acyclic-pair? actual)) #f)
             ;; A `nat` is an `int`.
             ((and (= p 0) (= a 19)) #f)
+            ;; `string` is a `stringof`.
+            ((k-string-stringof? pattern actual) #f)
             (else (not (= p a)))))))
+;; Whether one of `x` and `y` is `string` and the other a `stringof`.
+(define k-string-stringof? (->* (int int) bool)
+  (lambda (x y)
+    (let ((tx (k-get x)) (ty (k-get y)))
+      (letrec ((named-from-base? (subr pure (k-ty k-ty) bool)
+                 (lambda (t other)
+                   (tagcase (k-string-as-named t other)
+                     (ty-named (g ds) (tagcase t (ty-base (s) #t) (else w #f)))
+                     (else w #f)))))
+        (or (named-from-base? tx ty) (named-from-base? ty tx))))))
 
 ;; Whether region `r` is `acyclic`'s, frozen data never written; and
 ;; whether `t` is a list there.
@@ -454,7 +466,8 @@
             #u
             (begin
               (set trail (cons (cons p a) (get trail)))
-              (let ((pt (k-get p)) (at (k-get a)))
+              (let* ((pt0 (k-get p)) (at0 (k-get a))
+                     (pt (k-string-as-named pt0 at0)) (at (k-string-as-named at0 pt0)))
                 (cond ((and (tagcase at (ty-void () #t) (else y #f))
                             (not (tagcase pt (ty-var (v) (k-open? kinds solved v)) (else y #f))))
                        #u)

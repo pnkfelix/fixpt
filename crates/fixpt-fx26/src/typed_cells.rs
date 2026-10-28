@@ -583,7 +583,8 @@ impl Verifier<'_> {
             Ty::Union(ms) => ms.iter().any(|m| self.inhabits(x, *m)),
             Ty::Pair(a, b, _, nil) => (nil && x.is_null()) || (x.is_pair() && self.inhabits(self.heap.car(x), a) && self.inhabits(self.heap.cdr(x), b)),
             _ if t == self.c.int => x.is_fixnum(),
-            _ if t == self.c.string => self.heap.is_a(x, ObjType::String),
+            // `string`, by name: `(stringof const)` is made as one too.
+            Ty::Base(b) if Some(b) == self.c.arena.string_sym => self.heap.is_a(x, ObjType::String),
             // A scalar by its name: `f64` the flat names is the base type.
             Ty::Base(b) if self.c.interner.name(b) == "f64" => self.heap.is_a(x, ObjType::Flonum),
             _ if t == self.c.bool_ => x.is_boolean(),

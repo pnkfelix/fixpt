@@ -848,6 +848,10 @@ pub struct Arena {
     /// Of those, each that is applied, `(f d …)`: the application, which
     /// is what falls back.
     pub with_applied: std::collections::HashMap<TyId, TyId>,
+    /// `string`'s name, once known: `(stringof const)` (or `acyclic`, its
+    /// finite subregion) is made as `string` itself, the one type
+    /// (`check::STRINGOF`).
+    pub string_sym: Option<Sym>,
 }
 
 /// The id of the last of `len` entries of a table of `what`: ids are 32
@@ -860,6 +864,10 @@ pub(crate) fn last_id(len: usize, what: &str) -> u32 {
 
 impl Arena {
     pub fn ty(&mut self, t: Ty) -> TyId {
+        let t = match (&t, self.string_sym) {
+            (Ty::Named { which: crate::check::STRINGOF_INDEX, args }, Some(s)) if matches!(args[..], [D::Region(Region::Frozen(None, _))]) => Ty::Base(s),
+            _ => t,
+        };
         self.tys.push(t);
         TyId(last_id(self.tys.len(), "types"))
     }

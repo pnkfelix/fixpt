@@ -2267,3 +2267,19 @@ The user: "Yeah do 1, 2, and 3" (names, lines, values). Names first.
 - **16 KiB**: a frame is pushed before the stack's limit is checked, and
   the limit leaves `STACK_SLACK` (64 KiB) below it; a quarter of it leaves
   room for the overflow's own frames.
+
+## Strings at a region (2026-10-28)
+
+- **`string` kept as the name, `(stringof const)` made as it**: the user
+  chose one type; making the frozen form *as* `string`, rather than
+  `string` as an abbreviation expanded everywhere, keeps every rule that
+  knows `string` (data, shapes, syscalls' crossing types, the printer) as
+  it was, and needs only the matching where a region is still unknown.
+  `acyclic` too, since a string holds no cycle.
+- **Only the reads that a mutable string needs are generalized**: `length`,
+  `ref`, `substring`, `=?`, `->list`, `->utf8`. The comparisons, the
+  searches and `string-append` still take `string`; a string at a region
+  is frozen or copied first. Generalizing more is a type each, later.
+- **`substring` still gives a `string`**: its region would otherwise be a
+  new binder nothing solves, and every `(define x (substring …))` would
+  change its type.

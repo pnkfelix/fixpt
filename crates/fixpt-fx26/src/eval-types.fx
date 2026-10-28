@@ -56,6 +56,9 @@
   (o-bref val int)
   ;; A bytevector (`TODO.md` §84), as the machines have one.
   (o-bytes (bytevectorof @v))
+  ;; A string made at a region (`(stringof r)`), which may be written; a
+  ;; `string` once frozen, as the machines have one object for both.
+  (o-mstr (stringof @v))
   (o-tag (prompt-tag val val (maxeff runs spin) @x))
   (o-cont (composable val val (maxeff runs spin) @x))
   ;; One taken one-shot, the machine's own (`TODO.md` §98), and whether
@@ -113,6 +116,7 @@
    (val as-key (subr (maxeff evals spin) (val) (mark-key val @x)))
    (val as-other (subr evals (val string) other))
    (val as-bytes (subr evals (val) (bytevectorof @v)))
+   (val as-mstr (subr evals (val) (stringof @v)))
    (val as-pair (subr evals (val) (pairof val val @v)))
    (val as-ref (subr evals (val) vcell))
    (val as-str (subr evals (val) string))

@@ -155,9 +155,35 @@
           #u
           (begin (array-set! to i (array-ref from i)) (k-copy-array from to (+ i 1)))))))
 
-(define k-ty-new (subr (maxeff kstate spin) (k-ty) int)
+;; `stringof`'s number among the generative types (`check::STRINGOF`).
+(define k-stringof int 14)
+;; Whether `ds` is `const` or `acyclic`, the heap's frozen data, alone.
+(define k-heap-frozen? (subr pure (k-descs) bool)
+  (lambda (ds)
+    (and (not (null? ds)) (null? (cdr ds))
+         (tagcase (car ds)
+           (dr (r) (tagcase r (r-frozen (p f) (= p -1)) (else y #f)))
+           (else y #f)))))
+;; `string` where `t` is `(stringof const)`: the one type (`Arena::ty`).
+(define k-string-norm (subr pure (k-ty) k-ty)
   (lambda (t)
-    (let ((n (get k-ntys)))
+    (tagcase t
+      (ty-named (g ds) (if (and (= g k-stringof) (k-heap-frozen? ds)) (ty-base 'string) t))
+      (else y t))))
+;; `t`, `string`, as the `(stringof const)` it is where `other` is a
+;; `stringof`, to match them region by region (`string_as_named`).
+(define k-string-as-named (subr pure (k-ty k-ty) k-ty)
+  (lambda (t other)
+    (tagcase t
+      (ty-base (s)
+        (if (and (symbol=? s 'string)
+                 (tagcase other (ty-named (g ds) (= g k-stringof)) (else y #f)))
+            (ty-named k-stringof (list (dr (r-frozen -1 #f))))
+            t))
+      (else y t))))
+(define k-ty-new (subr (maxeff kstate spin) (k-ty) int)
+  (lambda (t0)
+    (let ((n (get k-ntys)) (t (k-string-norm t0)))
       (begin
         (if (= n (array-length (get k-tys)))
             (let ((bigger (the (arrayof k-ty @t) (make-array (* 2 n) (ty-void)))))

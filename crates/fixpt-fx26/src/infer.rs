@@ -1604,6 +1604,7 @@ impl Checker {
 
     fn wrong_shape(&self, pattern: TyId, actual: TyId) -> bool {
         let (p, a) = (self.arena.get(pattern).clone(), self.arena.get(actual).clone());
+        let (p, a) = (self.string_as_named(p.clone(), &a), self.string_as_named(a, &p));
         match (&p, &a) {
             // An application may become anything its function gives.
             (Ty::Var(_) | Ty::App { .. }, _) | (_, Ty::Void) => false,
@@ -1824,6 +1825,7 @@ impl Checker {
             return;
         }
         let (pt, at) = (self.arena.get(p).clone(), self.arena.get(a).clone());
+        let (pt, at) = (self.string_as_named(pt.clone(), &at), self.string_as_named(at, &pt));
         if matches!(at, Ty::Void) && !matches!(pt, Ty::Var(v) if u.is_unknown(v) && !u.solved.contains_key(&v)) {
             // The bottom type fits anything, so it says nothing about what
             // fits — unless nothing else will: a binder only a `void` can
