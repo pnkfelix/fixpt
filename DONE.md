@@ -3948,7 +3948,7 @@ standard error, and the source loaded. Every program of
 0.24 s against 0.57 s; Heist's editor (a snapshot of its fourteen makers)
 starts in 2.39 s from `.fasl`s, 4.52 s from source.
 
-## 154. `.fasl` files for programs' files (the user's, 2026-10-28)
+## 157. `.fasl` files for programs' files (the user's, 2026-10-28)
 
 `compile-file --program FILE` (and `compile-file` of a file that is no
 module file) keeps a program's procedures (and `define-rec` groups, and

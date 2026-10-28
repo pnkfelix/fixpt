@@ -3366,7 +3366,7 @@ unchanged, while the program still changes, and is the larger design.
 
 Module files have them (DONE §156; `docs/research/fasl.md`,
 "Implemented"). Left:
-- ~~**Top-level files**~~ (DONE §154). Left: a definition that uses a
+- ~~**Top-level files**~~ (DONE §157). Left: a definition that uses a
   load's hidden global (as the processes library's forms do) kept too;
   the facts a declaration does not give either checker (a known lambda's,
   the compiler's for making a call in line), whose absence only slows;
