@@ -35,9 +35,9 @@ programming. It is three steps, each of which may be written alone
 
 ```
 (expand M text)                      ; => (sumof (ok expanded) (failed stage-failure))
-(certify M T e (c body) (why else))  ; e : expanded; c : (certificate M T)
-(install c m)                        ; => a value of T, m a module of type M
-(stage m T text (p body) (why else)) ; all three, m's type as M
+(certify M E R e (c body) (why else))  ; e : expanded; c : (certificate M E R)
+(install c m)                          ; => (subr E () R), m a module of type M
+(stage m E R text (p body) (why else)) ; all three, m's type as M
 ```
 
 | step      | does                                | needs of the module | fails by                  | effect          |
@@ -55,16 +55,23 @@ programming. It is three steps, each of which may be written alone
   else of the program is in scope.
 - **`expand`** reads `text` and expands its macros (below), giving
   `expanded`: kernel syntax with its spans, frozen, opaque to the program.
-- **`certify`** checks `e` as the body of a `(lambda () …)` of type `T`.
-  `T` is a procedure type of no parameters, `(subr E () R)`, written at
-  the form. Every static analysis that decides whether code is accepted
+- **`certify`** checks `e` as an expression of type `R` whose evaluation
+  has an effect within `E`, both written at the form (**decided**, the
+  user's, 2026-10-28: the result type and the effect, not a procedure
+  type of no parameters to be taken apart; any `E` and `R` mean
+  something, so no shape is refused, and when `R` is itself a procedure
+  type, `E` is plainly evaluation's effect and not the result's latent
+  one). `E` is always written: the least effect the checker finds is
+  known only at run time, so it cannot be a static type. Every static analysis that decides whether code is accepted
   is here: types and effects, size-change termination (whether `spin` is
   needed), and, as they come, `assert`'s and `fixpt verify`'s
   specifications. If the code is accepted, `body` runs with `c`, a
   certificate: the expanded code with what the checker found, which only
   `certify` makes.
 - **`install`** compiles a certificate's code for the machine the program
-  runs on, links it to `m`'s values, and gives the procedure, of type `T`.
+  runs on, links it to `m`'s values, and gives a procedure of no parameters,
+  `(subr E () R)`, that evaluates it: the thunk is how `install` hands
+  the code back, not something the user writes.
   The compilers' own analyses (register code, known calls) are here: they
   serve speed, not acceptance. It cannot be refused; it fails only as any
   allocation does, or, for a session's certificate, by being stale
@@ -79,22 +86,23 @@ programming. It is three steps, each of which may be written alone
   (module
     (define insert! (subr (maxeff (write @buf) (io terminal)) (string) unit) …)
     …))
-(define-type command (subr (maxeff (write @buf) (io terminal) spin) () unit))
-(stage editor-api command "(lambda () (insert! \"hi\"))"
+(define-effect edit (maxeff (write @buf) (io terminal) spin))
+(define-type command (subr edit () unit))
+(stage editor-api edit unit "(insert! \"hi\")"   ; c : (subr edit () unit), a command
   (c (add-command! "say-hi" c))
   (why (show-failure why)))
 ```
 
 ### Why forms, not procedures
 
-The static checker knows `M` and `T` at the form, so it can give the
+The static checker knows `M`, `E` and `R` at the form, so it can give the
 checker that runs later their descriptions as literals, as it gives
-`native-procedure` its `T`. Types need not exist as values at run time,
+`native-procedure` its type. Types need not exist as values at run time,
 and no `typeof` or reflection is added.
 
-### Variables `M` and `T` take from around the form
+### Variables `M`, `E` and `R` take from around the form
 
-A type, region or effect variable that `M` or `T` names from an
+A type, region or effect variable that `M`, `E` or `R` names from an
 enclosing `poly` or `plambda` is, to the checker that runs later, a rigid
 one: known to exist, its instance unknown. This is sound by parametricity:
 code that checks against an abstract `a` works for every `a`. So `stage`
@@ -111,12 +119,13 @@ an interface and then linking against an implementation
 type `M` may be given to `install`, not only one the certificate was made
 beside: the code was checked with `M`'s abstract types abstract.
 
-Its type is `(certificate M T)`. Where `T` names `M`'s types (a command
-taking the editor's abstract `buffer`, `(select m buffer)`), the
+Its type is `(certificate M E R)`. Where `E` or `R` names `M`'s types
+or effects (a command taking the editor's abstract `buffer`,
+`(select m buffer)`), the
 certificate is dependent on the module as Sheldon's dependent subroutines
 are (`docs/fx26.md`, "Modules", M5), and `install` is checked as a call
-of one: its module argument a module's name, put into `T` for the
-procedure's type. A certificate holds no values, only frozen syntax and
+of one: its module argument a module's name, put into `E` and `R` for
+the procedure's type. A certificate holds no values, only frozen syntax and
 what the checker found, so it is transmissible.
 
 What the split buys:
@@ -246,10 +255,10 @@ ICFP 2010); procedural macros as late as possible. FX-26 has no macros yet
 by the next, and redefined.
 
 ```
-(make-session m)                         ; (sessionof M R), allocated at R
-(session-certify s T e (c body) (why else))
+(make-session m)                         ; (sessionof M r), allocated at r
+(session-certify s E R e (c body) (why else))
 (session-install s c (p body) (why else))
-(session-stage s T text (p body) (why else))
+(session-stage s E R text (p body) (why else))
 (session-define s text (why else))       ; top-level forms: `define`, `define-syntax`, …
 ```
 
@@ -264,7 +273,7 @@ by the next, and redefined.
   defined at a static type; it reaches user code only through values of
   types it chose (`p`, or procedures user code stores in tables `m`
   gives it, §105: hooks and keymaps of one type).
-- `session-certify` reads the session (`(read R)`): it checks against `M`
+- `session-certify` reads the session (`(read r)`): it checks against `M`
   and the session's globals as they are, and its certificate is stamped
   with the generation of each global it used. Definitions are certified
   too: `session-define` is certify, then install, of top-level forms.
@@ -276,11 +285,11 @@ by the next, and redefined.
   branch. A redefinition at a type every use can take does not make it
   stale: that is an assignment, as in "Redefinition".
 - `session-install`, `session-stage` and `session-define` have `stage`,
-  and write the session (`(write R)`), once, at the end (above).
+  and write the session (`(write r)`), once, at the end (above).
 
 Heist's R4 "Done when" is then: `(session-define s "(define (f (x
-string)) (host-insert! x))")`, then `(session-stage s (subr … () unit)
-"(lambda () (f \"hi\"))" …)`, the host keeping `p`, and a refusal coming
+string)) (host-insert! x))")`, then `(session-stage s edit unit
+"(f \"hi\")" …)`, the host keeping `p`, and a refusal coming
 back as `why`. A fault is §106's.
 
 ### The program's own top level as `m`?
@@ -306,10 +315,10 @@ What exists:
 - Module types, `with`, and module parameters, in both checkers.
 
 What is wanted:
-1. The forms in both checkers: `M`'s and `T`'s types given to the
+1. The forms in both checkers: `M`, `E` and `R` given to the
    run-time checker as data, which `.fasl` files' interface encoding
    (`fasl.md`) may already serve; `certificate` as a type, dependent where
-   `T` selects from `M`; and the `stage` atom.
+   `E` or `R` selects from `M`; and the `stage` atom.
 2. **A checker that can be interrupted.** On the machines that run
    FX-26 code, the checker written in FX-26 is a program like any other,
    preempted at its polls and cancelled by `race`, so it is the one to run.
@@ -356,14 +365,14 @@ decides:
 
 FX-26 already draws such a line once: **transmissible types**
 (`docs/fx26.md`, "What a process may hold"), what may cross into a
-process. KFX would refuse a `stage` whose `T` or `m` it cannot carry
+process. KFX would refuse a `stage` whose `R` or `m` it cannot carry
 across, which keeps its rule that it may refuse an FX-26 program, never
 reinterpret it. **Decided: deferred** — whether that is the transmissible
 class, or a class of its own (a writable region a process may not hold,
 `stage` might hold by proxy), is answered when kayak builds it, by what
 its engine can share with Rust. Nothing in Fixpt's part depends on it:
 Fixpt has one representation and needs no class. Until then a program
-meant for both keeps `T` and `m` transmissible, which is safe under either
+meant for both keeps `R` and `m` transmissible, which is safe under either
 answer.
 
 Before any of it, two things Heist's R4 lists:

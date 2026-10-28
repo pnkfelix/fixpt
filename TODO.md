@@ -3430,7 +3430,8 @@ the makers (`docs/research/fasl.md`). In order:
 ## 158. `stage`: `eval` for programs (the user's, 2026-10-28)
 
 A program reading, checking and running code it is given, against a module
-it chooses, at a type and effect written at the form; refusals as values;
+it chooses, at a result type and an effect written at the form, giving a
+procedure of no parameters of that effect and result; refusals as values;
 sessions for definitions that last. Designed in `docs/research/eval.md`,
 which answers §105 with (b)'s meaning on (a)'s machinery, and replaces
 `PLAN.md`'s item 5 (`any`): the caller names the effect bound. Decided with
