@@ -143,6 +143,8 @@ struct ProgramFasl {
     /// The file's own abbreviations to check as they are named, each with
     /// what it was (`program_fasl`).
     later: std::cell::RefCell<std::collections::HashMap<String, String>>,
+    /// The names of all it keeps, what each is printed with to compare.
+    alias_names: Vec<Sym>,
 }
 
 /// The budget for one speculative run: enough for a REPL-sized
@@ -1410,12 +1412,7 @@ impl Fx26Session {
         };
         let used = self.checker.fasl_aliases_end();
         let ty = ty?;
-        let mut aliases = Vec::new();
-        for n in used {
-            if let Some(t) = self.checker.fasl_alias_expansion(n) {
-                aliases.push((self.checker.interner.name(n).to_string(), t));
-            }
-        }
+        let aliases = self.checker.fasl_alias_closure(used, &self.checker.fasl_standard_aliases());
         let mut deps = Vec::new();
         let mut dep_values = Vec::new();
         for (written, input, d) in &file.deps {
@@ -1517,9 +1514,10 @@ impl Fx26Session {
         // when a definition that names it is declared (`run_program_def`).
         let own: Vec<Sym> = self.checker.type_abbreviations(forms).into_iter().map(|(n, _)| n).collect();
         let mut later = std::collections::HashMap::new();
+        let names = self.checker.fasl_alias_names(&header.aliases);
         for (n, t) in &header.aliases {
             let a = self.checker.interner.intern(n);
-            if self.checker.fasl_alias_expansion(a).as_deref() == Some(t.as_str()) {
+            if self.checker.fasl_alias_expansion(a, &names).map(|(t, _)| t).as_deref() == Some(t.as_str()) {
                 continue;
             }
             if !own.contains(&a) {
@@ -1564,7 +1562,7 @@ impl Fx26Session {
             defs.entry(d.form).or_default().push((d, i));
         }
         let links = links.into_iter().map(|(p, l)| (p.raw(), l)).collect();
-        Some(ProgramFasl { defs, heap, values, links, natives, later: std::cell::RefCell::new(later) })
+        Some(ProgramFasl { defs, heap, values, links, natives, later: std::cell::RefCell::new(later), alias_names: names })
     }
 
     /// Why `defs`' code is not right here, if it is not: a global it uses,
@@ -1599,7 +1597,7 @@ impl Fx26Session {
         for t in group.iter().flat_map(|(d, _)| &d.types) {
             let Some(was) = p.later.borrow().get(t).cloned() else { continue };
             let a = self.checker.interner.intern(t);
-            if self.checker.fasl_alias_expansion(a).as_deref() != Some(was.as_str()) {
+            if self.checker.fasl_alias_expansion(a, &p.alias_names).map(|(t, _)| t).as_deref() != Some(was.as_str()) {
                 self.checker.fasl_notes.push(format!("the type `{t}` is not what it was: `{}` is run from its source", group[0].0.name));
                 return self.run_each(form).and_then(|mut v| v.pop().ok_or_else(|| fail("a definition".into())));
             }
@@ -1798,17 +1796,22 @@ impl Fx26Session {
         }
         // The abbreviations named, each with what it is, the file's own
         // (declared ahead) as the standard ones, to compare where it is read.
+        // Each definition notes those its type names, and those they name.
         let used = self.checker.fasl_aliases_end();
-        let used: Vec<String> = used.into_iter().map(|n| self.checker.interner.name(n).to_string()).collect();
+        let aliases = self.checker.fasl_alias_closure(used, &self.checker.fasl_allowed_aliases(&forms));
+        let kept: std::collections::HashMap<&str, &str> = aliases.iter().map(|(n, t)| (n.as_str(), t.as_str())).collect();
         for d in &mut defs {
-            d.types = crate::fasl::symbols_in(&d.ty).into_iter().filter(|w| used.contains(w)).collect();
-        }
-        let mut aliases = Vec::new();
-        for n in &used {
-            let a = self.checker.interner.intern(n);
-            if let Some(t) = self.checker.fasl_alias_expansion(a) {
-                aliases.push((n.clone(), t));
+            let mut types: Vec<String> = crate::fasl::symbols_in(&d.ty).into_iter().filter(|w| kept.contains_key(w.as_str())).collect();
+            let mut i = 0;
+            while i < types.len() {
+                for w in crate::fasl::symbols_in(kept[types[i].as_str()]) {
+                    if kept.contains_key(w.as_str()) && !types.contains(&w) {
+                        types.push(w);
+                    }
+                }
+                i += 1;
             }
+            d.types = types;
         }
         let header = crate::fasl::Header {
             build: crate::fasl::build(),

@@ -3387,7 +3387,8 @@ What is left of a `.fasl`'s load cost (the user's, 2026-10-28): Heist's
 start-up through `eldoc.fx` is 1.52 s from `.fasl`s, 4.50 s from source,
 most of it the checker written in FX-26 checking the program's calls of
 the makers (`docs/research/fasl.md`). In order:
-1. **Recursive types printed canonically in both checkers**: a type's
+1. ~~**Recursive types printed canonically in both checkers**~~ (done,
+   2026-10-28: minimized by partition refinement where printed). A type's
    cycle minimized when it is printed and numbered from its root, so that
    what is printed does not depend on how the type was written or built
    (the user's: a type is a semantic object, printed as one). What makes
@@ -3408,7 +3409,11 @@ the makers (`docs/research/fasl.md`). In order:
    abbreviations.
 5. **Factoring for plain module files' and programs' `.fasl`s**, not only
    makers'; a program's abbreviations top-level `%fasl:` types, which both
-   printers must then skip.
+   printers must then skip. A program's `.fasl` now names types by the
+   earlier files' abbreviations too, each kept one level deep (s7st's
+   `expand.fasl` 111 MB to 0.9 MB, its fourteen 4.1 MB, its start-up
+   1.07 s against 3.92 s from
+   source), so what is left to factor is what no abbreviation names.
 6. **Substituting a call's arguments into a dependent maker's type**
    (`k-subst-memo`, about 10%): what is left after 2 and 4; whether the
    memo can last across calls of the same maker.

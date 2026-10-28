@@ -590,9 +590,10 @@ impl crate::check::Checker {
         }
         // Each standard type it names here what it was (a program may have
         // defined one of their names again).
+        let names = self.fasl_alias_names(&header.aliases);
         for (n, t) in &header.aliases {
             let a = self.interner.intern(n);
-            if self.fasl_alias_expansion(a).as_deref() != Some(t.as_str()) {
+            if self.fasl_alias_expansion(a, &names).map(|(t, _)| t).as_deref() != Some(t.as_str()) {
                 return stale(self, &format!("the type `{n}` is not what it was"));
             }
         }
@@ -796,6 +797,12 @@ impl crate::check::Checker {
     /// global t)`. Also how the types of the globals its code uses are
     /// compared (`Fx26Session::program_fasl`).
     pub fn fasl_program_type(&self, t: crate::ast::TyId) -> Result<String, String> {
+        self.fasl_type_text(t, false)
+    }
+
+    /// [`fasl_program_type`](Self::fasl_program_type), or with `body` what
+    /// `t` is, not named by an abbreviation of all of it.
+    fn fasl_type_text(&self, t: crate::ast::TyId, body: bool) -> Result<String, String> {
         use crate::ast::Ty;
         let mut vars = HashMap::new();
         for n in self.value_names() {
@@ -808,7 +815,7 @@ impl crate::check::Checker {
             }
         }
         *self.print_for_fasl.borrow_mut() = Some(vars);
-        let shown = self.show_ty(t);
+        let shown = if body { self.show_definition(t) } else { self.show_ty(t) };
         *self.print_for_fasl.borrow_mut() = None;
         if shown.contains('\n') {
             return Err("its type prints on more than one line".into());
@@ -896,12 +903,15 @@ pub fn fasl_value_at(ty: &fixpt_read::Syntax, interner: &fixpt_read::Interner) -
 impl crate::check::Checker {
     /// The type abbreviations a program's `.fasl` may name a type by, for
     /// its file's `forms`: those the file defines once (declared ahead
-    /// where it is loaded, as here) and the standard ones.
+    /// where it is loaded, as here), the standard ones, and those an earlier
+    /// file of the program defined that this one does not (each compared
+    /// where the `.fasl` is read, after the files before it).
     pub fn fasl_allowed_aliases(&self, forms: &[fixpt_read::Syntax]) -> Vec<fixpt_read::Sym> {
         let again: Vec<fixpt_read::Sym> = self.types_defined_again(forms).into_iter().map(|(n, _)| n).collect();
         let mut out: Vec<fixpt_read::Sym> = self.type_abbreviations(forms).into_iter().map(|(n, _)| n).filter(|n| !again.contains(n)).collect();
-        for n in self.fasl_standard_aliases() {
-            if !out.contains(&n) {
+        let earlier = self.dscope.iter().filter(|(_, d)| matches!(d, crate::parse::DScope::Rec(_))).map(|(n, _)| *n);
+        for n in self.fasl_standard_aliases().into_iter().chain(earlier) {
+            if !out.contains(&n) && !again.contains(&n) {
                 out.push(n);
             }
         }
@@ -932,14 +942,43 @@ impl crate::check::Checker {
         self.print_aliases.borrow_mut().take().map(|(_, used)| used).unwrap_or_default()
     }
 
-    /// What abbreviation `n` is here, written out with no name for any
-    /// part: what a `.fasl` that names a type by it keeps, to compare.
-    pub fn fasl_alias_expansion(&self, n: fixpt_read::Sym) -> Option<String> {
+    /// What abbreviation `n` is here, its parts named by those of `allowed`
+    /// that fit them (and they noted): what a `.fasl` that names a type by
+    /// it keeps, to compare, one level deep. Each it names is kept too
+    /// ([`fasl_alias_closure`](Self::fasl_alias_closure)), and so the whole
+    /// of each is what it was where all of them are.
+    pub fn fasl_alias_expansion(&self, n: fixpt_read::Sym, allowed: &[fixpt_read::Sym]) -> Option<(String, Vec<fixpt_read::Sym>)> {
         let t = self.type_named(n)?;
-        let kept = self.print_aliases.borrow_mut().take();
-        let shown = self.fasl_program_type(t).ok();
-        *self.print_aliases.borrow_mut() = kept;
-        shown
+        let kept = self.print_aliases.borrow_mut().replace((allowed.to_vec(), Vec::new()));
+        let shown = self.fasl_type_text(t, true).ok();
+        let used = std::mem::replace(&mut *self.print_aliases.borrow_mut(), kept).map(|(_, u)| u).unwrap_or_default();
+        Some((shown?, used))
+    }
+
+    /// The abbreviations `used` and those their definitions name, of
+    /// `scope`, each as [`fasl_alias_expansion`](Self::fasl_alias_expansion)
+    /// writes it with all of them allowed: what a `.fasl` keeps of them.
+    pub fn fasl_alias_closure(&self, used: Vec<fixpt_read::Sym>, scope: &[fixpt_read::Sym]) -> Vec<(String, String)> {
+        let mut names = used;
+        let mut i = 0;
+        while i < names.len() {
+            if let Some((_, more)) = self.fasl_alias_expansion(names[i], scope) {
+                for m in more {
+                    if !names.contains(&m) {
+                        names.push(m);
+                    }
+                }
+            }
+            i += 1;
+        }
+        names.iter().filter_map(|n| self.fasl_alias_expansion(*n, &names).map(|(t, _)| (self.interner.name(*n).to_string(), t))).collect()
+    }
+
+    /// The names of the abbreviations a `.fasl` keeps (`aliases`, as
+    /// [`fasl_alias_closure`](Self::fasl_alias_closure) wrote them): what
+    /// each is printed with where the `.fasl` is read, to compare.
+    pub fn fasl_alias_names(&mut self, aliases: &[(String, String)]) -> Vec<fixpt_read::Sym> {
+        aliases.iter().map(|(n, _)| self.interner.intern(n)).collect()
     }
 }
 
