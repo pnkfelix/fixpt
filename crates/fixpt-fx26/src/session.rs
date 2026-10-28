@@ -1394,6 +1394,9 @@ impl Fx26Session {
         let name = *self.checker.shared_loads.get(&key).ok_or_else(|| format!("`{path}` was not loaded"))?;
         let file = self.checker.shared_files.get(&name).cloned().ok_or_else(|| format!("`{path}` was not loaded"))?;
         // A maker's: its parameters as its source wrote them; else its type.
+        // Either named by the standard type abbreviations it uses, as the
+        // file sees them.
+        self.checker.fasl_aliases_begin(self.checker.fasl_standard_aliases());
         let made = match self.checker.read_in(FileId(0), &text) {
             Ok(forms) if input => {
                 let maker = if one_exp { forms.first().cloned() } else { self.checker.modules_made(&forms) };
@@ -1402,9 +1405,17 @@ impl Fx26Session {
             _ => String::new(),
         };
         let ty = match made.is_empty() {
-            true => self.checker.fasl_type(name).map_err(|e| format!("`{path}`'s type cannot be kept: {e}"))?,
-            false => String::new(),
+            true => self.checker.fasl_type(name).map_err(|e| format!("`{path}`'s type cannot be kept: {e}")),
+            false => Ok(String::new()),
         };
+        let used = self.checker.fasl_aliases_end();
+        let ty = ty?;
+        let mut aliases = Vec::new();
+        for n in used {
+            if let Some(t) = self.checker.fasl_alias_expansion(n) {
+                aliases.push((self.checker.interner.name(n).to_string(), t));
+            }
+        }
         let mut deps = Vec::new();
         let mut dep_values = Vec::new();
         for (written, input, d) in &file.deps {
@@ -1423,7 +1434,7 @@ impl Fx26Session {
             ty,
             made,
             defs: Vec::new(),
-            aliases: Vec::new(),
+            aliases,
         };
         let image = self.released(|s| s.fasl_image(&name, &dep_values)).map_err(|e| format!("`{path}`'s value cannot be kept: {e}"))?;
         let fasl = crate::fasl::path_for(&at);

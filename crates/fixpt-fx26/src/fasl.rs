@@ -588,6 +588,14 @@ impl crate::check::Checker {
         if header.source != source {
             return stale(self, "its source changed");
         }
+        // Each standard type it names here what it was (a program may have
+        // defined one of their names again).
+        for (n, t) in &header.aliases {
+            let a = self.interner.intern(n);
+            if self.fasl_alias_expansion(a).as_deref() != Some(t.as_str()) {
+                return stale(self, &format!("the type `{n}` is not what it was"));
+            }
+        }
         // The files it loads, each loaded as the file loads it, from its
         // directory: from their own `.fasl`s, if fresh.
         let dir = at.parent().map(|d| d.to_path_buf());
@@ -883,6 +891,19 @@ impl crate::check::Checker {
     pub fn fasl_allowed_aliases(&self, forms: &[fixpt_read::Syntax]) -> Vec<fixpt_read::Sym> {
         let again: Vec<fixpt_read::Sym> = self.types_defined_again(forms).into_iter().map(|(n, _)| n).collect();
         let mut out: Vec<fixpt_read::Sym> = self.type_abbreviations(forms).into_iter().map(|(n, _)| n).filter(|n| !again.contains(n)).collect();
+        for n in self.fasl_standard_aliases() {
+            if !out.contains(&n) {
+                out.push(n);
+            }
+        }
+        out
+    }
+
+    /// The standard type abbreviations: what a module file's `.fasl` may
+    /// name a type by, as the file sees them alone. So `datum`, written out
+    /// at each use, is not a new recursive type each time where it is read.
+    pub fn fasl_standard_aliases(&self) -> Vec<fixpt_read::Sym> {
+        let mut out = Vec::new();
         for (n, d) in &self.dscope[..self.standard_dscope.min(self.dscope.len())] {
             if matches!(d, crate::parse::DScope::Rec(_)) && !out.contains(n) {
                 out.push(*n);
