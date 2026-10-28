@@ -388,6 +388,15 @@ pub struct Checker {
     pub(crate) print_expanded: std::cell::Cell<bool>,
     /// While it prints so: the depths of the nodes a cycle came back to.
     pub(crate) print_cycles: std::cell::RefCell<HashSet<usize>>,
+    /// While a `.fasl`'s type is printed (`crate::fasl`): each variable
+    /// printed as the text it maps to (an abstract type of a file loaded,
+    /// as a `select` of its load), and no name in scope used for a type,
+    /// which where the type is read back may not be.
+    pub(crate) print_for_fasl: std::cell::RefCell<Option<HashMap<DVar, String>>>,
+    /// While it prints so: how many procedure types the one printing is in;
+    /// the outermost names its parameters where a type in it selects from
+    /// one, `(%p.1 : T)`, as `(select $1 t)` would not read back.
+    pub(crate) print_subrs: std::cell::Cell<usize>,
     /// Whether two types are being shown apart ([`Checker::show_apart`]):
     /// each description variable printed as a mark, named after.
     pub(crate) show_marks: std::cell::Cell<bool>,
@@ -426,6 +435,18 @@ pub struct Checker {
     /// and the hidden global its one value is (`%shared:…`): every load of
     /// a path is that value (`TODO.md` §68), made once, purely.
     pub(crate) shared_loads: HashMap<String, Sym>,
+    /// Each file loaded, by its hidden global: what a `.fasl` of it keeps,
+    /// and the `.fasl` it was read from, if it was (`crate::fasl`).
+    pub shared_files: HashMap<Sym, crate::fasl::SharedFile>,
+    /// For each file being read now, the innermost last, the loads it
+    /// makes: a `.fasl`'s `dep`s.
+    pub(crate) reading_deps: Vec<Vec<(String, bool, Sym)>>,
+    /// Whether a load reads a fresh `.fasl` beside its file rather than the
+    /// file (a driver's setting: one that gives the hidden global its value).
+    pub fasls: bool,
+    /// Each `.fasl` a load found and did not use, and why: for a driver to
+    /// say, as Larceny's `require` does.
+    pub fasl_notes: Vec<String>,
     /// The files being read now, by key, each with its path as its load
     /// wrote it, the outermost first: a load of one of them is a cycle
     /// (`TODO.md` §71).
@@ -890,6 +911,8 @@ impl Checker {
             with_effect_fallback: HashMap::new(),
             print_names: std::cell::RefCell::new(Vec::new()),
             print_expanded: std::cell::Cell::new(false),
+            print_for_fasl: std::cell::RefCell::new(None),
+            print_subrs: std::cell::Cell::new(0),
             print_cycles: std::cell::RefCell::new(HashSet::new()),
             show_marks: std::cell::Cell::new(false),
             subst_keep: None,
@@ -902,6 +925,10 @@ impl Checker {
             standard_dscope: 0,
             hidden: None,
             shared_loads: HashMap::new(),
+            shared_files: HashMap::new(),
+            reading_deps: Vec::new(),
+            fasls: false,
+            fasl_notes: Vec::new(),
             loading: Vec::new(),
             include_scope: 0,
             run_items: 0,

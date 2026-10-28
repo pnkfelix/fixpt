@@ -10,3 +10,8 @@
 
 # macOS Finder metadata.
 .DS_Store
+
+# A module file's `.fasl` (`fixpt compile-file`), made beside it: derived,
+# and stale as soon as the file or a file it loads changes
+# (`docs/research/fasl.md`).
+*.fasl

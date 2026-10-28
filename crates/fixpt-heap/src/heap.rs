@@ -1587,6 +1587,23 @@ impl Heap {
     /// or given, by its raw bits in `from`. For native code kept in a cache
     /// (`TODO.md` §126).
     pub fn copy_graph_with(&mut self, from: &Heap, root: Value, as_code: impl Fn(Value) -> bool, given: &HashMap<u64, Value>) -> (Value, HashMap<u64, Value>) {
+        self.copy_graph_redirected(from, root, as_code, given, &HashMap::new())
+    }
+
+    /// [`copy_graph_with`](Self::copy_graph_with), but each object of
+    /// `from`'s that `redirect` maps (by its raw bits) to another of
+    /// `from`'s is copied as that one: wherever the first is reached, the
+    /// copy of the second is. For a `.fasl` file's value, its native
+    /// closures kept as the cellular ones they were made from
+    /// (`docs/research/fasl.md`).
+    pub fn copy_graph_redirected(
+        &mut self,
+        from: &Heap,
+        root: Value,
+        as_code: impl Fn(Value) -> bool,
+        given: &HashMap<u64, Value>,
+        redirect: &HashMap<u64, Value>,
+    ) -> (Value, HashMap<u64, Value>) {
         use std::collections::hash_map::Entry;
         // First every object is made, empty; then the fields are filled in.
         let mut made: HashMap<u64, Value> = given.clone();
@@ -1595,6 +1612,10 @@ impl Heap {
         let mut todo = vec![root];
         while let Some(v) = todo.pop() {
             if !v.is_ref() {
+                continue;
+            }
+            if let Some(&to) = redirect.get(&v.raw()) {
+                todo.push(to);
                 continue;
             }
             // A suffix ref is its owner's copy, at the same offset.
@@ -1638,7 +1659,7 @@ impl Heap {
         let (base, from_base) = (self.base, from.base);
         let map = |x: Value| match x {
             x if x.is_suffix_ref() => rebuilt(base, x, made[&Value::bloblet(x.owner() + from_base).raw()]),
-            x if x.is_ref() => made[&x.raw()],
+            x if x.is_ref() => made[&redirect.get(&x.raw()).unwrap_or(&x).raw()],
             x => x,
         };
         for v in order {

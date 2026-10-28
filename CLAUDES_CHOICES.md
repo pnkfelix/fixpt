@@ -2312,3 +2312,59 @@ The user: "Yeah do 1, 2, and 3" (names, lines, values). Names first.
   rebuilds a type would have to keep them, in both checkers.
 - **Stage 0's 3% kept for now** (the user's word): to be brought down, by a
   cheaper lookup or fewer nodes looked up.
+
+## `.fasl` files (2026-10-28, overnight)
+
+The user: "implement fasl files; I'm going to sleep, so work autonomously
+and record your choices" (in `CLAUDE_CHOICES.md`, which is this file). The
+design is `docs/research/fasl.md`, its "Decided" the user's; what follows
+is what I chose where it left room, or departed from it.
+
+- **Module files first.** A load's value is one value, made purely, so a
+  `.fasl` can keep the value; a top-level file's forms run, define globals
+  and use the program's, which needs more (below, and `TODO.md`).
+- **The interface is the type the load is checked at, printed and read
+  back**, not a format of its own: the load is checked, in both checkers,
+  as `(begin (load-module "dep") … (the T %fasl-value))`. Neither checker
+  gains a rule; each parser reads that expression in place of the file
+  (`fasl_load`; `parse-load-file`'s field 8). The loads written into it are
+  what makes both front ends load the files it loads as its source would.
+- **`%fasl-value` is a standard `(poly ((t type)) t)`, not a procedure**:
+  a call of `(the (subr pure (string) T) …)` made the checker take the
+  dependent procedure in `T` apart at the call (`dependent_args`).
+- **Printed for reading back**: no alias a program defines (no
+  `type_names` abbreviation; a `moduleof`'s own descriptions still name
+  what follows them); a file loaded by its place, `%fasl-dep:i`, which the
+  loader replaces with its own hidden global's name (the keys are paths as
+  the loading program resolves them); its abstract types `(select
+  %fasl-dep:i t)`; a restricted module's hidden abstract types by their
+  component, `%hidden:t`; a dependent procedure's parameters named, `(%p.1
+  : T)`, the outermost's, as a call takes apart every `$k` however deep. A
+  type that still does not read back makes the `.fasl` stale, not an error.
+- **Fresh by transitive source digests** (a file's stamp: its text's
+  digest and its loads' stamps), not by interfaces: the compiler's guards
+  count a global's writes, so a member folded from a file loaded would be
+  kept stale if only that file's body changed. The executable (its size and
+  time, as the front end's cache), the architecture and the convention are
+  in the header too.
+- **The value kept, not its making**; cellular words, not native code
+  (departing from decision 2's default): native code calls out by numbers
+  its machine assigns as it compiles, and calls other code by address. A
+  native closure is kept as the cellular closure it was compiled from, its
+  words' compiled entries let go, register twins kept; in the native
+  convention the loader compiles the closures again (`native_procedures`):
+  as fast to run as from the source, and loading the measured module 0.24 s
+  against 0.57 s. Keeping native code needs a relocation table from the
+  native compilers (`TODO.md`).
+- **Globals linked by name, the newest cell**: what the compiler finds
+  compiling the file now. A file loaded is linked to by its load; a value
+  of one reached directly, the same.
+- **`compile-file` tells a `load-input` file by its form**: one form that
+  is no module item. It compiles in the session it is in, from source or a
+  fresh `.fasl` alike (the value is the same).
+- **A stale `.fasl` is said on the standard error by the driver**
+  (`Checker::fasl_notes`, the CLI's `say_fasl_notes`), never on the
+  program's output; `FIXPT_FASL_SAY` says each one read, `FIXPT_NO_FASL`
+  reads none.
+- **Not on `rs-scheme-vm` or `fx-ast-eval`**, which run no compiled code,
+  and not by `fixpt check`, which keeps its fresh checker.

@@ -67,6 +67,12 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // object equal to it (`Heap::intern_datum`); which each compiler makes
     // once, as constant data, where it is all literals.
     ("%quote", "(poly ((t type)) (subr pure (t) t))"),
+    // A loaded file's value read from its `.fasl` (`docs/research/fasl.md`):
+    // what a load of it is checked as, at the type the `.fasl` says,
+    // `(the T %fasl-value)`. Never compiled: the driver gives the load's
+    // hidden global the value itself. Not a procedure, so that a type `T`
+    // that is a dependent one's asks nothing of a call.
+    ("%fasl-value", "(poly ((t type)) t)"),
     ("vector?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 vector)) (else (not (shape 0 vector))))))"),
     ("bytevector?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 bytevector)) (else (not (shape 0 bytevector))))))"),
     ("symbol?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 symbol)) (else (not (shape 0 symbol))))))"),

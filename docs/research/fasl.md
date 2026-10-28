@@ -1,10 +1,10 @@
 # `.fasl` files for FX-26
 
-A design note, 2026-10-28; nothing here is implemented. The user's
-direction: a `.fasl` is compiled for fast loading of a file's types,
-procedures and data, gives the same interface its `.fx` gave, and stays
-as decoupled from the files it loads as the `.fx` was; a `load-module`
-stays a load, not made eager. What a file depends on is recorded in its
+A design note, 2026-10-28; module files' `.fasl`s are implemented
+("Implemented", at the end). The user's direction: a `.fasl` is compiled
+for fast loading of a file's types, procedures and data, gives the same
+interface its `.fx` gave, and stays as decoupled from the files it loads
+as the `.fx` was; a `load-module` stays a load, not made eager. What a file depends on is recorded in its
 `.fasl`, by digest, so that a stale one is found. This note answers how
 a `.fasl` relates to the files it loads and to the globals of the program
 that loads it, after Larceny (`~/Dev/LangPlay/accomplice`) and
@@ -222,3 +222,40 @@ parameter's type, in `a`'s interface, not in a stamp.
    only when the compiler is asked. So `compile-file` always makes the
    twins, and a `.fasl`'s words serve every machine: the cellular ones run
    them, the register ones compile their twins natively.
+
+## Implemented (2026-10-28, overnight, autonomously)
+
+For module files (`load-module`, `load-input`, a module parameter's file):
+`crate::fasl` (`crates/fixpt-fx26/src/fasl.rs`), `Fx26Session::compile_file`
+and `fasl_define`, `Checker::fasl_load`; `docs/fx26.md`, "`.fasl` files";
+the choices, `CLAUDES_CHOICES.md`, "`.fasl` files". Where it departs from
+the design above:
+
+- **The interface is one type**, the type the load is checked at, printed
+  for reading back where it is loaded: no name a program defines, an
+  abstract type of a file loaded `(select %fasl-dep:i t)`, a dependent
+  procedure's parameters named, `(%p.1 : T)`. The load is checked as
+  `(begin (load-module "dep") … (the T %fasl-value))`, `%fasl-value` a
+  standard `(poly ((t type)) t)`; so neither checker has a rule more, and
+  each parser only reads that expression in place of the file. The facts
+  beyond the type (known lambdas, folding) are not kept; nothing found
+  needs them.
+- **Stamps are transitive digests of the sources**, not of interfaces: the
+  compiler's guards count a global's writes, so code that folded a member
+  of a file it loads would keep the old member if only that file's body
+  changed. A cutoff wants what was folded recorded (part 2).
+- **The value is kept, not its making**: a load's making is pure, so its
+  value is what any load makes.
+- **Cellular words kept, not native code**: native code calls out by the
+  numbers its machine gave its call-outs as it compiled, and calls other
+  code by address, which a `.fasl` would need relocated. A native closure
+  is kept as the cellular closure it was compiled from (its code's word,
+  over the same values), each word's compiled entry let go, its register
+  twin kept; in the native convention the loader compiles the closures
+  natively again (`native_procedures`), so the code runs as fast as the
+  source's. The 800-definition module of the measurements: 0.57 s from its
+  source, 0.24 s from its `.fasl` (0.17 s is starting fixpt).
+- **Not for top-level files yet**: `,load` of a program's file, whose
+  forms define globals and run, needs each form kept as code to run in
+  order and its globals declared, with the types of the program's globals
+  it uses checked at load (`TODO.md`).

@@ -3361,3 +3361,24 @@ it stale (`docs/research/separate-compilation.md`, §2.2–2.7, stages 3–4).
 An image saves a finished program's checking and compiling at every start
 (Heist's editor: about 4 s, DONE §147); a `.fasl` saves it for each file
 unchanged, while the program still changes, and is the larger design.
+
+## 141. `.fasl` files: what is left (the user's, 2026-10-28)
+
+Module files have them (DONE §156; `docs/research/fasl.md`,
+"Implemented"). Left:
+- **Top-level files** (`,load`, `fixpt run` of a program's file): each
+  form's compiled code kept and run in order, each definition's global
+  declared at its type in both checkers, and the types of the program's
+  globals it uses, checked against those it was compiled with (the
+  `fits_old` of a redefinition), its type definitions read again.
+- **Native code in the `.fasl`** (decision 2's default): a relocation
+  table from both native compilers for the call-outs (numbered by each
+  machine as it compiles) and the calls between code bloblets, so that
+  loading compiles nothing.
+- **A cutoff by interface**: a file whose loads changed only in their
+  bodies kept fresh, which needs what its code folded and inlined of them
+  recorded (the guards count writes, so would pass).
+- **`fixpt check` reading them**, and the evaluator and the lowering
+  (which keep no compiled code) at least checking from them.
+- **Size**: the 800-definition module's `.fasl` is 840 KB, most of it
+  words and their register twins; a twin could be made again at load.

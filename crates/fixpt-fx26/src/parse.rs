@@ -2640,6 +2640,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         };
         // A file of module parameters is read as a `load-input` file is, its
         // value the function of them it makes (`modules_made`).
+        let written_input = input;
         let input = input || takes_modules_at(&at, path);
         let key = format!("{}{}", if input { "input:" } else { "" }, at.display());
         // A file loading one that is being read, itself or one that loads
@@ -2673,6 +2674,12 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                         ));
                     }
                 }
+                // The type its load is checked at, for a `.fasl` of it.
+                if let Some((crate::top::Top::Define { ty, .. }, _)) = made.run.first()
+                    && let Some(f) = self.shared_files.get_mut(&name)
+                {
+                    f.ty = Some(*ty);
+                }
                 self.hoisted.extend(made.hoisted);
                 self.hoisted.extend(made.run);
                 self.shared_loads.insert(key, name);
@@ -2680,6 +2687,12 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                 name
             }
         };
+        // One of the loads of the file being read, if one is: a `.fasl`'s.
+        if let Some(deps) = self.reading_deps.last_mut()
+            && !deps.iter().any(|(_, _, n)| *n == name)
+        {
+            deps.push((path.to_string(), written_input, name));
+        }
         let var = self.arena.exp(span, Exp::Var(name));
         if !input {
             return Ok(var);
@@ -2729,7 +2742,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
     }
 
     /// The hidden global a load of `path` is (`parse_load`).
-    fn load_name(&mut self, span: fixpt_read::Span, path: &str, input: bool) -> R<Sym> {
+    pub(crate) fn load_name(&mut self, span: fixpt_read::Span, path: &str, input: bool) -> R<Sym> {
         let e = self.parse_load(span, path, input)?;
         match *self.arena.exp_at(e) {
             Exp::Var(n) | Exp::With { module: n, .. } => Ok(n),
@@ -2834,19 +2847,43 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
             return Err(FxError::at(span, format!("a load cycle: {}", chain.join(" loads "))));
         }
         self.loading.push((key.to_string(), path.to_string()));
-        let r = self.parse_load_file(span, path, std::path::Path::new(file), input);
+        let r = self.parse_load_kept(span, key, path, std::path::Path::new(file), input);
         self.loading.pop();
         r
     }
 
-    /// The file at `at`, `path` as written, read and parsed: its forms a
-    /// module's items; or, `input`, its one form an expression, the one
-    /// item, `input`, of the module made.
-    fn parse_load_file(&mut self, span: fixpt_read::Span, path: &str, at: &std::path::Path, input: bool) -> R<ExpId> {
+    /// The file at `at`, `path` as written, for its load (key `key`): read
+    /// from its `.fasl`, if a driver reads them and it is fresh
+    /// ([`fasl_load`](Self::fasl_load)); else read and parsed
+    /// ([`parse_load_file`](Self::parse_load_file)). Either way kept for a
+    /// `.fasl` of it (`shared_files`): its digest, stamp and loads.
+    fn parse_load_kept(&mut self, span: fixpt_read::Span, key: &str, path: &str, at: &std::path::Path, input: bool) -> R<ExpId> {
         let text = match crate::built_in_module(path) {
             Some(t) => t.to_string(),
-            None => std::fs::read_to_string(&at).map_err(|e| FxError::at(span, format!("cannot read `{path}`: {e}")))?,
+            None => std::fs::read_to_string(at).map_err(|e| FxError::at(span, format!("cannot read `{path}`: {e}")))?,
         };
+        let source = crate::fasl::digest(&text);
+        let name = self.interner.intern(&format!("%shared:{key}"));
+        if self.fasls
+            && crate::built_in_module(path).is_none()
+            && let Some(e) = self.fasl_load(span, key, path, at, input, source)?
+        {
+            return Ok(e);
+        }
+        self.reading_deps.push(Vec::new());
+        let r = self.parse_load_file(span, path, at, input, text);
+        let deps = self.reading_deps.pop().unwrap_or_default();
+        let stamps: Vec<u64> = deps.iter().map(|(_, _, n)| self.shared_files.get(n).map_or(0, |f| f.stamp)).collect();
+        let stamp = crate::fasl::stamp(source, &stamps);
+        let file = crate::fasl::SharedFile { key: key.to_string(), path: at.to_path_buf(), input, source, stamp, deps, ty: None, fasl: None };
+        self.shared_files.insert(name, file);
+        r
+    }
+
+    /// The file at `at`, `path` as written, its text `text`, parsed: its
+    /// forms a module's items; or, `input`, its one form an expression, the
+    /// one item, `input`, of the module made.
+    fn parse_load_file(&mut self, span: fixpt_read::Span, path: &str, at: &std::path::Path, input: bool, text: String) -> R<ExpId> {
         self.files_read += 1;
         let file = fixpt_read::FileId(self.files_read + 1000);
         self.load_sites.insert(file, (span, path.to_string(), text.as_str().into()));

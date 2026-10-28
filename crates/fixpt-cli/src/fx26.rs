@@ -356,6 +356,22 @@ pub fn repl(backend: Backend) -> i32 {
             }
             continue;
         }
+        // `,compile-file FILE`: the module file's `.fasl` made beside it
+        // (`docs/research/fasl.md`), as `fixpt compile-file` makes it.
+        if let Some(arg) = text.trim().strip_prefix(",compile-file")
+            && (arg.is_empty() || arg.starts_with(char::is_whitespace))
+        {
+            let path = arg.trim().trim_matches('"');
+            if path.is_empty() {
+                println!("; `,compile-file FILE`: make the module file's `.fasl` beside it, which a load of it reads while it is fresh");
+                continue;
+            }
+            match session.compile_file(path) {
+                Ok(made) => println!("; compiled `{path}` to `{}`", made.display()),
+                Err(e) => println!("; {e}"),
+            }
+            continue;
+        }
         // `,query KIND ARG`: the definitions made here that answer it
         // (`fixpt_fx26::query`), each with its type and place.
         if let Some(arg) = text.trim().strip_prefix(",query")
@@ -525,6 +541,7 @@ pub fn repl(backend: Backend) -> i32 {
             }
             let before = timing.then(|| GcStats::start_form(&mut session));
             let ran = session.run_each(form);
+            say_fasl_notes(&mut session);
             // A form that left the terminal raw, done or failed, leaves the
             // REPL's own as it was (`TODO.md` §95).
             let _ = fixpt_runtime::tty::restore();
@@ -685,6 +702,34 @@ pub fn run_files(backend: Backend, files: &[String]) -> i32 {
     code
 }
 
+/// What the loads just checked found of `.fasl`s and did not use, said
+/// (`Checker::fasl_notes`), as Larceny's `require` warns of a stale one.
+fn say_fasl_notes(session: &mut Fx26Session) {
+    for note in session.checker.fasl_notes.drain(..) {
+        eprintln!("fixpt: {note}");
+    }
+}
+
+/// `fixpt compile-file FILE…`: each module file's `.fasl` made beside it
+/// (`Fx26Session::compile_file`), in one session, in order.
+pub fn compile_files(backend: Backend, files: &[String]) -> i32 {
+    let mut session = match start(backend) {
+        Ok(s) => s,
+        Err(code) => return code,
+    };
+    for f in files {
+        match session.compile_file(f) {
+            Ok(made) => println!("; compiled `{f}` to `{}`", made.display()),
+            Err(e) => {
+                eprintln!("fixpt compile-file: {e}");
+                return 1;
+            }
+        }
+        say_fasl_notes(&mut session);
+    }
+    0
+}
+
 /// `run_files`, in `session`: the files, then `main`.
 fn run_files_in(session: &mut Fx26Session, files: &[String], args: &[String]) -> i32 {
     session.scheme.runtime_unrooted().world.args = args.to_vec();
@@ -717,6 +762,7 @@ fn run_files_in(session: &mut Fx26Session, files: &[String], args: &[String]) ->
         let path = std::fs::canonicalize(f).map_or_else(|_| f.to_string(), |p| p.display().to_string());
         session.source_file = Some(std::rc::Rc::new((path, text.clone())));
         let ran = session.run_forms(&forms);
+        say_fasl_notes(session);
         session.checker.base_dir = outer;
         let outs = match ran {
             Ok(outs) => outs,
@@ -1144,7 +1190,9 @@ fn eval_program_in(session: &mut Fx26Session, name: &str, text: &str, raw: bool)
         }
     };
     warn_types_again(session, name, text, &forms);
-    let outs = match session.run_forms(&forms) {
+    let ran = session.run_forms(&forms);
+    say_fasl_notes(session);
+    let outs = match ran {
         Ok(outs) => outs,
         Err(e) => {
             eprintln!("fixpt: {}", located(name, text, &e));
@@ -1267,7 +1315,9 @@ pub fn eval(backend: Backend, text: &str) -> i32 {
         }
     };
     for form in &forms {
-        match session.run_each(form) {
+        let ran = session.run_each(form);
+        say_fasl_notes(&mut session);
+        match ran {
             Ok(outs) => {
                 for out in &outs {
                     show(&session, out, false);

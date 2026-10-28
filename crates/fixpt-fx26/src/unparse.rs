@@ -10,6 +10,11 @@ impl Checker {
     /// not printed (a `moduleof`'s abstract type, shown by its component's
     /// name).
     fn dvar_text(&self, v: crate::ast::DVar, how: char) -> String {
+        if how == 'f'
+            && let Some(shown) = self.print_for_fasl.borrow().as_ref().and_then(|m| m.get(&v).cloned())
+        {
+            return shown;
+        }
         if self.show_marks.get() {
             format!("{MARK}{how}{}{MARK}", v.0)
         } else if how == 'h' {
@@ -266,7 +271,7 @@ impl Checker {
         if let Some(n) = named {
             return Some(self.interner.name(n));
         }
-        if !self.abbreviates(t) {
+        if !self.abbreviates(t) || self.print_for_fasl.borrow().is_some() {
             return None;
         }
         self.type_names().into_iter().rev().find(|n| self.type_named(*n).is_some_and(fits)).map(|n| self.interner.name(n))
@@ -371,6 +376,9 @@ impl Checker {
             Ty::Link(None) => "?".into(),
             Ty::Link(Some(_)) => unreachable!("resolved"),
             Ty::Subr { conv, effect, params, result, spec } => {
+                let fasl = self.print_for_fasl.borrow().is_some();
+                let depth = self.print_subrs.get() + 1;
+                self.print_subrs.set(depth);
                 let mut ps: Vec<String> = params.iter().map(|p| self.show_ty_on(*p, path)).collect();
                 // The convention only where it is not the program's.
                 let c = if conv == self.conv_default { String::new() } else { format!("(conv {}) ", self.show_conv(conv)) };
@@ -395,6 +403,15 @@ impl Checker {
                         }
                     }
                 }
+                self.print_subrs.set(depth - 1);
+                // For a `.fasl`: the outermost one's parameters named, where
+                // a type in it selects from one (`Ty::ParamSel`).
+                let mark = "%p.";
+                if fasl && depth == 1 && clauses.is_empty() && (ps.iter().any(|p| p.contains(mark)) || shown.contains(mark)) {
+                    for (i, p) in ps.iter_mut().enumerate() {
+                        *p = format!("({mark}{} : {p})", i + 1);
+                    }
+                }
                 format!("(subr {c}{} ({}) {shown}{clauses})", self.show_effect(&effect), ps.join(" "))
             }
             Ty::Poly { binders, body } => {
@@ -413,6 +430,12 @@ impl Checker {
             }
             Ty::Ref(a, r) => format!("(ref {} {})", self.show_ty_on(a, path), self.show_region(r)),
             Ty::Module { abs, descs, vals } => {
+                // For a `.fasl`, each abstract type named as its component,
+                // which a restricted one's is not (`%hidden:t`).
+                let renamed: Vec<_> = match self.print_for_fasl.borrow_mut().as_mut() {
+                    Some(m) => abs.iter().map(|(n, v)| (*v, m.insert(*v, self.interner.name(*n).to_string()))).collect(),
+                    None => Vec::new(),
+                };
                 let mut out = String::from("(moduleof");
                 for (n, v) in &abs {
                     // Bound here, as a `poly`'s binders are.
@@ -440,10 +463,22 @@ impl Checker {
                     out.push_str(&format!(" (val {} {})", self.interner.name(*n), self.show_ty_on(*x, path)));
                 }
                 self.print_names.borrow_mut().truncate(mark);
+                if let Some(m) = self.print_for_fasl.borrow_mut().as_mut() {
+                    for (v, was) in renamed {
+                        match was {
+                            Some(w) => m.insert(v, w),
+                            None => m.remove(&v),
+                        };
+                    }
+                }
                 out.push(')');
                 out
             }
             Ty::Select(m, n) => format!("(select {} {})", self.interner.name(m), self.interner.name(n)),
+            // A call takes apart every one in the types its procedure's
+            // type has, however deep (`dependent_args`): the outermost
+            // procedure's parameter.
+            Ty::ParamSel(k, n) if self.print_for_fasl.borrow().is_some() => format!("(select %p.{} {})", k + 1, self.interner.name(n)),
             Ty::ParamSel(k, n) => format!("(select ${} {})", k + 1, self.interner.name(n)),
             Ty::Product(parts) | Ty::Sum(parts) => {
                 let head = if matches!(self.arena.get(t), Ty::Product(_)) { "productof" } else { "sumof" };

@@ -113,6 +113,10 @@ pub struct Fx26Session {
     /// (Fx26Session::speculate)): small, so that a loop costs a keystroke
     /// nothing noticeable. No limit lets a loop being typed hang the editor.
     pub speculation_limit: Option<u64>,
+    /// Whether a load reads a fresh `.fasl` beside its file
+    /// (`docs/research/fasl.md`): under `Strategy::Cellular`, unless
+    /// `FIXPT_NO_FASL` says not.
+    pub fasls: bool,
 }
 
 /// The budget for one speculative run: enough for a REPL-sized
@@ -595,6 +599,7 @@ impl Fx26Session {
             step_limit: Some(DEFAULT_STEP_LIMIT),
             speculation_limit: Some(SPECULATION_STEP_LIMIT),
             pending: Vec::new(),
+            fasls: std::env::var_os("FIXPT_NO_FASL").is_none(),
         })
     }
 
@@ -751,6 +756,7 @@ impl Fx26Session {
     /// outcome per form still to run; the abbreviations are done in the
     /// first pass and have none. Redefinition is as at the REPL.
     pub fn run_forms(&mut self, forms: &[Syntax]) -> R<Vec<R<Outcome>>> {
+        self.checker.fasls = self.reads_fasls();
         let done = self.checker.declare_ahead(forms)?;
         // The type definitions, declared ahead, are the pieces written in
         // FX-26's too, first: all in one text, so that its checker declares
@@ -822,6 +828,16 @@ impl Fx26Session {
     /// Checking comes first either way, so a form that does not check does
     /// not run.
     pub fn run(&mut self, form: &Syntax) -> R<Outcome> {
+        self.checker.fasls = self.reads_fasls();
+        // `(compile-file "path")`: the file's `.fasl` made, as `fixpt
+        // compile-file` makes it (`compile_file`).
+        if let Some(path) = compile_file_form(form, &self.checker) {
+            let made = self.compile_file(&path).map_err(|e| FxError::at(form.span, e))?;
+            let printed = format!("; compiled `{path}` to `{}`\n", made.display());
+            let exp = self.checker.arena.exp(form.span, crate::ast::Exp::Unit);
+            let top = Top::Exp(crate::check::Checked { ty: self.checker.unit, effect: crate::ast::Effect::pure(), exp });
+            return Ok(Outcome { top, code: String::new(), printed, value: Ok(None) });
+        }
         // A top-level `include`: its forms' outcomes, the last shown.
         if self.checker.include_forms(form)?.is_some() {
             let mut each = self.run_each(form)?;
@@ -1019,6 +1035,15 @@ impl Fx26Session {
         debug_assert!(!self.native_convention || self.scheme.runtime_unrooted().adapt.is_some(), "no adapters in the native convention");
         let code = lower_top(&self.checker, &mut self.globals, &top);
         if self.strategy != Strategy::Lower {
+            // A load read from its `.fasl`: its hidden global given the
+            // value kept there, not made.
+            if let Top::Define { name, .. } = &top
+                && let Some((fasl, _)) = self.checker.shared_files.get(name).and_then(|f| f.fasl.clone())
+            {
+                let name = *name;
+                let value = self.fasl_define(name, form, &fasl)?;
+                return Ok(Outcome { top, code: String::new(), printed: String::new(), value });
+            }
             if self.own_made {
                 // What the native compiler declines runs as cellular code,
                 // which is slower: said, with why.
@@ -1175,6 +1200,172 @@ impl Fx26Session {
             (printed, value)
         });
         Ok(Outcome { top, code, printed, value })
+    }
+
+    /// Whether a load reads a fresh `.fasl` (`fasls`): only compiled code
+    /// is kept in one, so not where the lowering or the evaluator runs.
+    fn reads_fasls(&self) -> bool {
+        self.fasls && self.strategy == Strategy::Cellular
+    }
+
+    /// The hidden global `name` of a load read from `.fasl` file `fasl`
+    /// defined, as `form` (`(define %shared:key (%loaded …))`) says: checked
+    /// by the checker written in FX-26 as the next form, as the Rust
+    /// checker checked it, its global made by the compiler written in
+    /// FX-26, and given the value kept, linked to this session (`crate::fasl`):
+    /// each global its code names, this session's of that name (as the
+    /// compiler would find it, compiling the file now); each file the file
+    /// loads, its load here. Nothing of the file is compiled or run.
+    fn fasl_define(&mut self, name: Sym, form: &Syntax, fasl: &std::path::Path) -> R<Result<Option<String>, String>> {
+        self.own_pieces()?;
+        let standard = self.next_standard()?;
+        let text = format!("{}\n", fixpt_read::write_syntax(form, &self.checker.interner));
+        self.released(|s| s.fasl_define_in(standard, name, &text, fasl))
+    }
+
+    fn fasl_define_in(&mut self, standard: Option<fixpt_scheme::Handle>, name: Sym, text: &str, fasl: &std::path::Path) -> R<Result<Option<String>, String>> {
+        let shown = self.checker.interner.name(name).to_string();
+        if let Err(why) = crate::syn::check_only(&mut self.scheme, standard, FileId(0), text)? {
+            return Err(FxError::at(Span::new(FileId(0), 0, 0), format!("the checkers disagree: the Rust checker takes `{shown}`'s definition, and the one written in FX-26 refuses it: {why}")));
+        }
+        self.own_begun = true;
+        let fail = |e: String| FxError::at(Span::new(FileId(0), 0, 0), format!("`{}`: {e}", fasl.display()));
+        let bytes = std::fs::read(fasl).map_err(|e| fail(e.to_string()))?;
+        let (_, image) = crate::fasl::Header::read(&bytes).map_err(fail)?;
+        let (from, value, links) = crate::fasl::read_image(image).map_err(fail)?;
+        let deps: Vec<Sym> = self.checker.shared_files.get(&name).map(|f| f.deps.iter().map(|d| d.2).collect()).unwrap_or_default();
+        // What each link is here, held while the value is copied in.
+        let mut found = Vec::new();
+        for (p, link) in links {
+            let (global, value) = match link {
+                crate::fasl::Link::Global(n) => (n, false),
+                crate::fasl::Link::DepCell(i) | crate::fasl::Link::DepValue(i) => {
+                    let Some(d) = deps.get(i) else { return Ok(Err(fail(format!("it names its load {i}, which it has not")).message)) };
+                    (self.checker.interner.name(*d).to_string(), matches!(link, crate::fasl::Link::DepValue(_)))
+                }
+            };
+            let Some(cell) = self.global_cell(&global)? else { return Ok(Err(fail(format!("it names `{global}`, which is not defined here")).message)) };
+            let h = if value { self.scheme.make(|m| { let c = m.get(cell); m.heap().bloblet_slot(c, 2) }) } else { cell };
+            found.push((p, h));
+        }
+        let sym = self.scheme.make(|m| m.heap().intern(&shown));
+        let cell = self.scheme.call_global(&format!("{READER_PREFIX}compile-new-global"), &[sym]).map_err(|e| fail(e.to_string()))?;
+        // In the native convention, its procedures compiled natively, as
+        // they are made when the file is (`crate::fasl::native_procedures`).
+        let compile = self.native_compiler.filter(|_| self.native_convention);
+        self.scheme.make(|m| {
+            let given: std::collections::HashMap<u64, fixpt_heap::Value> = found.iter().map(|(p, h)| (p.raw(), m.get(*h))).collect();
+            let g = m.get(cell);
+            let heap = m.heap();
+            let (copy, _) = heap.copy_graph_with(&from, value, |_| false, &given);
+            let copy = match compile {
+                Some(c) => crate::fasl::native_procedures(heap, copy, c),
+                None => copy,
+            };
+            heap.set_bloblet_slot(g, 2, copy);
+            // A write, as `global!`'s, which the guards count.
+            let w = fixpt_heap::layout::cellular::GLOBAL_WRITES;
+            let n = heap.bloblet_slot(g, w).as_fixnum();
+            heap.set_bloblet_slot(g, w, fixpt_heap::Value::fixnum(n + 1));
+            fixpt_heap::Value::FALSE
+        });
+        Ok(Ok(None))
+    }
+
+    /// Global `name`'s cell, the newest, as the compiler written in FX-26
+    /// finds it (`compile-global-cell`); none if it has none.
+    fn global_cell(&mut self, name: &str) -> R<Option<fixpt_scheme::Handle>> {
+        let fail = |e: fixpt_scheme::SessionError| FxError::at(Span::new(FileId(0), 0, 0), e.to_string());
+        let sym = self.scheme.make(|m| m.heap().intern(name));
+        let cells = self.scheme.call_global(&format!("{READER_PREFIX}compile-global-cell"), &[sym]).map_err(fail)?;
+        let mut found = false;
+        let g = self.scheme.make(|m| {
+            let cells = m.get(cells);
+            found = cells.is_pair();
+            if found { m.heap().car(cells) } else { fixpt_heap::Value::FALSE }
+        });
+        Ok(found.then_some(g))
+    }
+
+    /// The module file at `path` (from the program's directory, as a
+    /// load's) compiled to a `.fasl` beside it (`docs/research/fasl.md`):
+    /// loaded, as `(load-module "path")` loads it, or `(load-input "path")`
+    /// a file of one expression; then the type its load was checked at,
+    /// the files it loads, and its value kept (`crate::fasl::image`). The
+    /// `.fasl` made, or why not. `fixpt compile-file`, the REPL's
+    /// `,compile-file` and a program's `(compile-file "path")`.
+    pub fn compile_file(&mut self, path: &str) -> Result<std::path::PathBuf, String> {
+        if self.strategy != Strategy::Cellular {
+            return Err("only compiled code is kept in a `.fasl`: not on rs-scheme-vm or fx-ast-eval".into());
+        }
+        let at = match &self.checker.base_dir {
+            Some(d) if std::path::Path::new(path).is_relative() => d.join(path),
+            _ => std::path::PathBuf::from(path),
+        };
+        if crate::built_in_module(path).is_some() {
+            return Err(format!("`{path}` is built in"));
+        }
+        let text = std::fs::read_to_string(&at).map_err(|e| format!("cannot read `{path}`: {e}"))?;
+        // A file of one expression, not an item, is a `load-input`'s.
+        let mut interner = fixpt_read::Interner::new();
+        let forms = fixpt_read::Reader::new(&text, FileId(0), fixpt_read::SyntaxProfile::FX26, &mut interner).read_all().map_err(|e| format!("in `{path}`: {}", e.message))?;
+        let one_exp = matches!(&forms[..], [one] if !crate::parse::is_item_form(one, &interner));
+        let loader = if one_exp { "load-input" } else { "load-module" };
+        let load = format!("({loader} {})", crate::fasl::string_literal(path));
+        let form = self.checker.read_in(FileId(0), &load).map_err(|e| e.message)?;
+        let out = self.run(&form[0]).map_err(|e| e.message)?;
+        out.value?;
+        let input = one_exp || crate::parse::takes_modules_at(&at, path);
+        let key = format!("{}{}", if input { "input:" } else { "" }, at.display());
+        let name = *self.checker.shared_loads.get(&key).ok_or_else(|| format!("`{path}` was not loaded"))?;
+        let file = self.checker.shared_files.get(&name).cloned().ok_or_else(|| format!("`{path}` was not loaded"))?;
+        let ty = self.checker.fasl_type(name).map_err(|e| format!("`{path}`'s type cannot be kept: {e}"))?;
+        let mut deps = Vec::new();
+        let mut dep_values = Vec::new();
+        for (written, input, d) in &file.deps {
+            let stamp = self.checker.shared_files.get(d).map_or(0, |f| f.stamp);
+            deps.push(crate::fasl::Dep { path: written.clone(), input: *input, stamp });
+            dep_values.push(self.checker.interner.name(*d).to_string());
+        }
+        let header = crate::fasl::Header {
+            build: crate::fasl::build(),
+            arch: std::env::consts::ARCH.to_string(),
+            native: self.native_convention,
+            input,
+            source: file.source,
+            stamp: file.stamp,
+            deps,
+            ty,
+        };
+        let image = self.released(|s| s.fasl_image(&name, &dep_values)).map_err(|e| format!("`{path}`'s value cannot be kept: {e}"))?;
+        let fasl = crate::fasl::path_for(&at);
+        let tmp = fasl.with_extension(format!("fasl-tmp{}", std::process::id()));
+        std::fs::write(&tmp, header.file(&image)).map_err(|e| format!("cannot write `{}`: {e}", tmp.display()))?;
+        std::fs::rename(&tmp, &fasl).map_err(|e| format!("cannot write `{}`: {e}", fasl.display()))?;
+        Ok(fasl)
+    }
+
+    /// The value of hidden global `name` as a `.fasl`'s image, each of
+    /// `deps` (the hidden globals of the files its file loads) linked by its
+    /// place (`crate::fasl::image`).
+    fn fasl_image(&mut self, name: &Sym, deps: &[String]) -> Result<Vec<u8>, String> {
+        let shown = self.checker.interner.name(*name).to_string();
+        let cell = self.global_cell(&shown).map_err(|e| e.message)?.ok_or_else(|| format!("`{shown}` has no global"))?;
+        let mut cells = Vec::new();
+        for d in deps {
+            cells.push(self.global_cell(d).map_err(|e| e.message)?.ok_or_else(|| format!("`{d}` has no global"))?);
+        }
+        let adapter = self.native_keeping.as_ref().map(|k| k.adapter_code);
+        let mut r = Err(String::new());
+        self.scheme.make(|m| {
+            let value = { let c = m.get(cell); m.heap().bloblet_slot(c, 2) };
+            let deps: Vec<(String, fixpt_heap::Value)> = deps.iter().zip(&cells).map(|(d, c)| { let c = m.get(*c); (d.clone(), m.heap().bloblet_slot(c, 2)) }).collect();
+            let heap = m.heap();
+            let adapter = adapter.and_then(|a| a(heap).ok());
+            r = crate::fasl::image(heap, value, &deps, adapter);
+            fixpt_heap::Value::FALSE
+        });
+        r
     }
 
     /// Read `text` with the reader written in FX-26, loading it into this
@@ -1483,6 +1674,8 @@ impl Fx26Session {
         // A `load-module`'s path is from where the Rust checker's is.
         crate::syn::set_load_base(self.checker.base_dir.clone());
         crate::syn::set_shared_made(self.shared_made.clone());
+        let fasls = self.checker.shared_files.values().filter_map(|f| Some((f.key.clone(), f.fasl.as_ref()?.1.clone()))).collect();
+        crate::syn::set_fasl_used(fasls);
         // The reader lowered is the eager reader's alone, loaded when it is
         // wanted (`load_own_reader`): the register code reads.
         if self.front_end_compiled {
@@ -1966,4 +2159,15 @@ fn definition_init<'f>(form: &'f Syntax, c: &Checker, name: Sym) -> Option<(Opti
         4 => Some((Some(&items[2]), &items[3])),
         _ => None,
     }
+}
+
+/// The path of `(compile-file "path")`, if `form` is one.
+fn compile_file_form(form: &Syntax, c: &Checker) -> Option<String> {
+    let fixpt_read::Datum::List { items, tail: None } = &form.datum else { return None };
+    let [head, path] = &items[..] else { return None };
+    if !head.as_symbol().is_some_and(|h| c.interner.name(h) == "compile-file") {
+        return None;
+    }
+    let fixpt_read::Datum::Str(path) = &path.datum else { return None };
+    Some(path.clone())
 }

@@ -92,7 +92,7 @@ struct Kept {
     hoisted: usize,
     files_read: u32,
     mark: crate::ast::ArenaMark,
-    lens: [usize; 24],
+    lens: [usize; 25],
     scoped: (u32, usize, usize, usize, usize),
     hidden: Option<((usize, usize), (usize, usize))>,
 }
@@ -110,7 +110,7 @@ fn every_field_placed(c: &Checker) {
         certified_nats: _, certified_lengths: _, narrowed: _, path_narrowed: _, closure_depth: _, pending_unions: _,
         checked_call: _, skolems: _, to_end_sizes: _, module_vars: _, abstract_funs: _, effect_selects: _,
         with_effect_fallback: _, subst_keep: _, select_map: _, param_map: _, size_facts: _, operator_at: _,
-        hidden: _, shared_loads: _, loading: _, include_scope: _, run_items: _, with_depth: _, shared_globals: _, hoisted: _,
+        hidden: _, shared_loads: _, shared_files: _, reading_deps: _, loading: _, include_scope: _, run_items: _, with_depth: _, shared_globals: _, hoisted: _,
         loaded: _, in_built_in: _, load_sites: _, files_read: _, ahead: _, ahead_filled: _, hazard_modules: _,
         hazard_items: _, broken: _, defs: _, outdated: _, poly_chain: _, inst_for: _,
         // Put back by `truncate_env`, with the environment.
@@ -120,7 +120,7 @@ fn every_field_placed(c: &Checker) {
         // by `scratch`; and what remembers them, cleared there.
         arena: _, interner: _, facts: _, regions_memo: _, regions_open: _, arrow_star_tys: _,
         // Printing's, set and cleared around each print.
-        print_names: _, print_expanded: _, print_cycles: _, show_marks: _,
+        print_names: _, print_expanded: _, print_cycles: _, print_for_fasl: _, print_subrs: _, show_marks: _,
         // Set around a single unification or check, and put back there.
         unify_exact: _, unify_upper: _, arrow_star: _, holes: _, hole_hint: _,
         // A count of regions made, which only grows: a name made once is
@@ -130,7 +130,9 @@ fn every_field_placed(c: &Checker) {
         // changes them.
         base: _, void: _, int: _, bool_: _, string: _, unit: _, char_: _, f64_: _, symbol: _, conv_default: _,
         standard_len: _, standard_dscope: _, base_dir: _, masking: _, defer_reruns: _, syscalls: _,
-        globals_effects: _, record_operands: _, record_types: _,
+        globals_effects: _, record_operands: _, record_types: _, fasls: _,
+        // Said by the driver, which takes them.
+        fasl_notes: _,
     } = c;
 }
 
@@ -1433,6 +1435,7 @@ impl Checker {
                 self.hazard_modules.len(),
                 self.hazard_items.len(),
                 self.loading.len(),
+                self.reading_deps.len(),
             ],
             scoped: (self.expanding, self.closure_depth, self.include_scope, self.with_depth, self.in_built_in),
             hidden: self.hidden,
@@ -1444,6 +1447,8 @@ impl Checker {
         self.dscope.truncate(k.dscope);
         self.broken.retain(|_, (i, _)| *i < k.env);
         (self.shared_loads, self.shared_globals) = k.shared;
+        let shared = &self.shared_globals;
+        self.shared_files.retain(|n, _| shared.contains(n));
         match k.defs {
             Some((defs, outdated)) => (self.defs, self.outdated) = (defs, outdated),
             None => {
@@ -1456,7 +1461,7 @@ impl Checker {
         self.load_sites.retain(|f, _| f.0 <= k.files_read + 1000);
         let m = k.mark;
         self.loaded.retain(|e, _| m.has_exp(*e));
-        let [lifetimes, freezing, recursive, knots, spin_why, generatives, transparent, inside, conversions, lemmas, certified, certified_nats, certified_lengths, narrowed, path_narrowed, pending_unions, skolems, effect_selects, size_facts, ahead, ahead_filled, hazard_modules, hazard_items, loading] = k.lens;
+        let [lifetimes, freezing, recursive, knots, spin_why, generatives, transparent, inside, conversions, lemmas, certified, certified_nats, certified_lengths, narrowed, path_narrowed, pending_unions, skolems, effect_selects, size_facts, ahead, ahead_filled, hazard_modules, hazard_items, loading, reading_deps] = k.lens;
         self.lifetimes.truncate(lifetimes);
         self.freezing.truncate(freezing);
         self.recursive.truncate(recursive);
@@ -1481,6 +1486,7 @@ impl Checker {
         self.hazard_modules.truncate(hazard_modules);
         self.hazard_items.truncate(hazard_items);
         self.loading.truncate(loading);
+        self.reading_deps.truncate(reading_deps);
         // What is keyed by, or holds, something made since.
         self.closed_named.retain(|t| m.has_ty(*t));
         self.to_end_sizes.retain(|v| m.has_dvar(*v));

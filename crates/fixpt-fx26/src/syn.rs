@@ -830,6 +830,19 @@ pub fn set_shared_made(made: std::collections::HashSet<String>) {
     SHARED_MADE.with(|m| *m.borrow_mut() = made);
 }
 
+thread_local! {
+    /// The loads the Rust checker read from their `.fasl`s, by key: each
+    /// the expression it was checked as (`Checker::fasl_load`), which the
+    /// parser written in FX-26 is given for it in place of the file's
+    /// forms.
+    static FASL_USED: std::cell::RefCell<HashMap<String, String>> = std::cell::RefCell::new(HashMap::new());
+}
+
+/// Set the loads read from `.fasl`s (`FASL_USED`).
+pub fn set_fasl_used(used: HashMap<String, String>) {
+    FASL_USED.with(|f| *f.borrow_mut() = used);
+}
+
 /// The positions of one module file and the next apart, in the parser
 /// written in FX-26 (`parser-exps.fx`'s `load-base`).
 const LOAD_BASE_STEP: i64 = 1_000_000_000;
@@ -1080,6 +1093,7 @@ fn supply_loaded_in(
                 r.syns,
                 string(sc, &r.text),
                 string(sc, &key),
+                sc.make(|_| Value::boolean(r.fasl)),
             ];
             let one = sc.call_global("%make-frozen", &fields).map_err(|e| fail(e.to_string()))?;
             *list = sc.call_global("cons", &[one, *list]).map_err(|e| fail(e.to_string()))?;
@@ -1094,13 +1108,15 @@ fn supply_loaded_in(
         // `%loaded` is its definition).
         if resolved.is_none() && SHARED_MADE.with(|m| m.borrow().contains(&shared)) {
             let nil = scheme.make(|_| Value::NULL);
-            entry(scheme, list, &Read { base: -1, why: String::new(), syns: nil, text: String::new() })?;
+            entry(scheme, list, &Read { base: -1, why: String::new(), syns: nil, text: String::new(), fasl: false })?;
             continue;
         }
-        // A module file built in (`fx26:…`) is its text, not a file's.
-        let contents = |at: &std::path::Path| match crate::built_in_module(&path) {
-            Some(t) => Ok(t.to_string()),
-            None => std::fs::read_to_string(at),
+        // A module file built in (`fx26:…`) is its text, not a file's; one
+        // the Rust checker read from its `.fasl`, the expression it read.
+        let fasl = FASL_USED.with(|f| f.borrow().get(&shared).cloned());
+        let contents = |at: &std::path::Path| match (fasl.as_deref(), crate::built_in_module(&path)) {
+            (Some(t), _) | (None, Some(t)) => Ok(t.to_string()),
+            (None, None) => std::fs::read_to_string(at),
         };
         let (file_base, why, syns, ftext) = match contents(&at) {
             Err(e) => (0, format!("cannot read `{path}`: {e}"), scheme.make(|_| Value::NULL), String::new()),
@@ -1117,7 +1133,7 @@ fn supply_loaded_in(
                 }
             },
         };
-        let r = Read { base: file_base, why, syns, text: ftext };
+        let r = Read { base: file_base, why, syns, text: ftext, fasl: fasl.is_some() };
         entry(scheme, list, &r)?;
         let ftext = r.text.clone();
         seen.insert(shared, r);
@@ -1136,6 +1152,8 @@ struct Read {
     why: String,
     syns: fixpt_scheme::Handle,
     text: String,
+    /// Whether `text` is a `.fasl`'s expression, not the file's.
+    fasl: bool,
 }
 
 /// The byte offset of each character, and of the end.
