@@ -308,7 +308,8 @@
     (begin
       (dp-scan)
       (dp-frames)
-      (if (and (>= (get dp-frame) 0) (> (+ 32 (* 8 (+ (get dp-frame) 2))) 4080))
+      ;; At most `MOST_FRAME`, 16 KiB: a quarter of the stack's slack.
+      (if (and (>= (get dp-frame) 0) (> (+ 32 (* 8 (+ (get dp-frame) 2))) 16384))
           (dp-decline "a frame too large")
           (let ((starts (get dp-starts)) (cells (get dp-cells)))
             (begin

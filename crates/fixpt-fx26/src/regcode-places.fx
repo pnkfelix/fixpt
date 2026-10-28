@@ -147,6 +147,8 @@
                   (product (1 (cons (a-v (wcell-bool #f)) (extract rest 1)))
                            (2 (cons (cons j s) (extract rest 2)))))
                 (rl-const (c) (r-arg-onto (a-v (r-const-cell c)) rest))
+                ;; A parameter in a register: kept before the others are made.
+                (rl-reg (r) (r-arg-onto (a-name (car fv)) rest))
                 (else y (begin (r-decline) rest))))))))
 
 ;; Each free value into REGj+1, as `lambda` wants them; a sibling not made

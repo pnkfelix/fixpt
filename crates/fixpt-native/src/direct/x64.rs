@@ -434,6 +434,12 @@ pub(super) fn common_trap() -> Vec<u8> {
 /// A frame of `size` bytes pushed below the stack's top, as
 /// `super::push_frame`: its link and `second` stored, `fp` at its link, its
 /// header word below.
+/// The most bytes a frame may take: any displacement reaches a slot (32
+/// bits, not arm64's 12), and the stack's limit leaves room below it for
+/// any one frame (`STACK_SLACK`). A module's maker keeps all its items in
+/// one (Heist's, 2026-10-28).
+pub(super) const MOST_FRAME: usize = STACK_SLACK as usize / 4;
+
 fn push_frame(a: &mut Asm, second: Reg, size: u64) {
     a.e(sub_imm(SP, size as i32));
     a.e(store(m(SP, 8), FRAME));
@@ -691,8 +697,8 @@ impl Compiling<'_> {
         };
         // The frame, as `procedure` lays it out: the header, the link and
         // the second word, the stack map, the values, this code bloblet and
-        // the closure, then the raw `f64` slots.
-        if frame.is_some_and(|m| 32 + 8 * (m + 2) > 4080) {
+        // the closure, then the raw `f64` slots. At most `MOST_FRAME`.
+        if frame.is_some_and(|m| 32 + 8 * (m + 2) > MOST_FRAME) {
             return decline("a frame too large".into());
         }
         let prim_name = |p: usize| fixpt_runtime::PRIMITIVES.get(p).map_or("?", |d| d.name);
@@ -1274,19 +1280,13 @@ impl Compiling<'_> {
                     }
                     a.bind(back);
                 }
-                // A displacement reaches any field `procedure` reaches.
+                // A displacement reaches any field: 32 bits.
                 "field" => {
                     let off = super::field_off(k(o(0)));
-                    if off < -4095 {
-                        return decline("a field too far".into());
-                    }
                     a.e(load(RESULT, m(RESULT, off as i32)));
                 }
                 "setfield" => {
                     let off = super::field_off(k(o(0)));
-                    if off < -4095 {
-                        return decline("a field too far".into());
-                    }
                     a.store_reg(m(RESULT, off as i32), k(o(1)), X11);
                     a.es(&card_mark(RESULT, off as i32, ST, offset_of!(DState, cards) as i32, X16, X17));
                 }

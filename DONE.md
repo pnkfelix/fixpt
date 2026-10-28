@@ -3705,3 +3705,28 @@ impure.
 - **Tests**: `checker.rs` (a pure one called from a pure procedure, alike
   in both); `fixpt-cli/tests/syscalls.rs` `a_pure_syscall`, on every
   machine: called, and declared `(io sys)` refused as it loads.
+
+## 145. A module's maker in native code, however many its items (Heist's, 2026-10-28)
+
+Heist's editor, each file a `load-input` maker (a `lambda` around a
+`module` including the modules before it), ran 9 of its 15 files as
+cellular code: 39 µs a key typing in a burst, against 7 as globals.
+
+- **A closure over more than eight values made in a leaf** has register
+  code: past `REGS` its free values are a call-out's operands, made in a
+  frame, so such a closure in tail position counts as collecting
+  (`r_collects`, `r-collects-as-is`); and a free value in a register is
+  such an operand by name (`Arg::Name`, `a-name`), kept before the others.
+- **Frames on x86_64 up to `MOST_FRAME`**, 16 KiB, a quarter of the
+  stack's slack, not arm64's 4080 bytes; and any field's displacement, in
+  32 bits (`x64.rs`, `native-direct-x64.fx`, `-proc.fx`). arm64 is
+  TODO §137.
+- **Heist's numbers**, against its globals on the same build: typing 7 µs
+  a key in a burst and 431 µs one at a time, as globals (7 and 433).
+  Start-up is 6.0 s against 2.9 s: making the modules is checking them,
+  in a profile the FX-26 checker's procedures first (`k-length`,
+  `k-resolve`, `k-on-path?`), then the Rust checker's and collection
+  (TODO §138).
+- **Test**: `fixpt-cli/tests/module_makers.rs`, by both compilers: a maker
+  of 600 items, and one of 12, each with a leaf making a closure over 14
+  values.

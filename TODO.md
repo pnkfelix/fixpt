@@ -3303,3 +3303,27 @@ x86_64's native convention makes them in line (DONE §141); arm64's
 (`direct.rs`'s `procedure`, beside its `rcons`) does not.
 
 Deferred because: arm64 code cannot be run on the machine it was done on.
+
+## 137. A module's maker on arm64: frames past 4080 bytes (Heist's, 2026-10-28)
+
+x86_64 takes frames up to `MOST_FRAME` (16 KiB) and fields at any
+distance (DONE §145); arm64's `procedure` still declines a frame past
+4080 bytes and a field past 4095 bytes: its `sub sp` and `ldr`/`str`
+immediates. A maker of many items (Heist's `frame.fx`, about 450 values
+with what it includes) then runs as cellular code there. Wanted: a frame
+pushed and slots reached past the immediates (a scratch register's
+offset), as the stack's slack allows.
+
+Deferred because: arm64 code cannot be run on the machine it was done on.
+
+## 138. Checking a program of module makers is slow (Heist's, 2026-10-28)
+
+Heist's editor as makers (`load-input` files, each a `lambda` around a
+`module`, each typed by `load-input-moduleof` of every file before it)
+checks in 13 s, where the same files as globals check in under one: each
+file's parameters' types hold every file before it, so the types grow as
+the square of the files (`fixpt check` prints 3.2 MB of them), and its
+start-up is 6.0 s against 2.9 s. Wanted: a parameter's type
+`load-input-moduleof` gives kept by reference to the file's module type,
+not expanded where each later file names it; or the walk over it made
+once per file.

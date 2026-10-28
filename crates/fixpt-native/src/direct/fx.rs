@@ -461,7 +461,7 @@ impl Compiling<'_> {
         // A frame too large, as `procedure_x64` declines it, before it asks
         // anything.
         let frame = starts.iter().filter(|&&j| op_at(j) == "save").map(|&j| cells[j + 1].as_fixnum() as usize).last();
-        if frame.is_some_and(|m| 32 + 8 * (m + 2) > 4080) {
+        if frame.is_some_and(|m| 32 + 8 * (m + 2) > super::x64::MOST_FRAME) {
             return Err(format!("`{name}`: a frame too large"));
         }
         let called = |j: usize| {

@@ -595,8 +595,10 @@
               #t))
         (e-sym (v a b abk) #f) (e-unit (a b abk) #f)
         ;; A closure made as the value: its call-out may collect, but nothing
-        ;; is used after it (`r-lambda`).
-        (e-lambda (ps body a b abk) (not tail))
+        ;; is used after it (`r-lambda`); past `register-regs` free values,
+        ;; though, they are a call-out's operands, made in a frame.
+        (e-lambda (ps body a b abk)
+          (or (not tail) (> (length (c-lambda-captured ps body e)) register-regs)))
         (e-if (t th el a b abk)
           (or (r-collects t e this #f) (r-collects th e this tail) (r-collects el e this tail)))
         (e-let (bs body a b abk)

@@ -69,10 +69,8 @@
         (= r routine-ncallcomp) (= r routine-callone) (= r routine-ncallone)
         (= r routine-firstmark) (= r routine-currentmarks) (= r routine-marksof))))
 
-;; A field's displacement, or why not.
-(define dx-field-off (subr da-assembles (int) int)
-  (lambda (k)
-    (let ((off (dx-fld k))) (begin (if (< off -4095) (dp-decline "a field too far") #u) off))))
+;; A field's displacement: any field's, in 32 bits.
+(define dx-field-off (subr da-assembles (int) int) (lambda (k) (dx-fld k)))
 
 ;; The instruction at cell `i`, `op`.
 (define dx-instruction (subr da-assembles (int int) unit)

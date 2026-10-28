@@ -659,8 +659,13 @@ impl Compiler<'_> {
             }
             Exp::Var(_) | Exp::Int(_) | Exp::Bool(_) | Exp::Str(_) | Exp::Char(_) | Exp::Float(_) | Exp::Symbol(_) | Exp::Unit => false,
             // A closure made as the value: its call-out may collect, but
-            // nothing is used after it (`r_lambda`).
-            Exp::Lambda { .. } if tail => false,
+            // nothing is used after it (`r_lambda`); past `REGS` free
+            // values, though, they are a call-out's operands, made in a
+            // frame.
+            Exp::Lambda { params, body } if tail => {
+                let ps: Vec<Sym> = params.iter().map(|(p, _)| *p).collect();
+                self.captured(&ps, body, e).len() > REGS
+            }
             Exp::If { test, then, els } => {
                 self.r_collects(test, e, this, false) || self.r_collects(then, e, this, tail) || self.r_collects(els, e, this, tail)
             }
@@ -2836,7 +2841,10 @@ impl Compiler<'_> {
                         Arg::V(Value::FALSE)
                     }
                     RLoc::Const(v) => Arg::V(v),
-                    _ => return self.decline("a free value in a register"),
+                    // A parameter in a register: kept before the others
+                    // are made (`r_keep_args`).
+                    RLoc::Reg(_) => Arg::Name(*n),
+                    _ => return self.decline("a free value of no place"),
                 });
             }
             if region.is_some() {

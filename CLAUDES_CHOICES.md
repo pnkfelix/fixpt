@@ -2255,3 +2255,15 @@ The user: "Yeah do 1, 2, and 3" (names, lines, values). Names first.
   gave it, so its compiler's declaration loads here too; the test's
   runtime that has a pure syscall. Fixpt's strings are not UTF-8, so it
   counts, still without the copy `string->utf8` makes.
+
+## A module's maker in native code (2026-10-28)
+
+- **The two limits lifted, not the items kept in a record** (Heist's
+  first choice): with both lifted, typing in the modules' editor is as
+  fast as with globals, measured. A record would spare each item's
+  closure copying what it captures, once, at start-up, which the
+  measurement does not show as what costs: the checker does (TODO §138).
+  It stays a choice to make if start-up apart from checking shows it.
+- **16 KiB**: a frame is pushed before the stack's limit is checked, and
+  the limit leaves `STACK_SLACK` (64 KiB) below it; a quarter of it leaves
+  room for the overflow's own frames.
