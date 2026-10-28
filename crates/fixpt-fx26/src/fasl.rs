@@ -849,7 +849,7 @@ impl crate::check::Checker {
         }
         // Each description of a parameter's module by its select, as the
         // source names it, not written out at each of its uses.
-        let mut tys = HashMap::new();
+        let mut tys = crate::ast::TyMap::default();
         for (p, n) in ptys.iter().zip(&names) {
             if let Ty::Module { descs, .. } = self.arena.get(self.arena.resolve(*p)) {
                 for (d, x) in descs {

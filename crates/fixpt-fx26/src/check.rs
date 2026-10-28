@@ -274,7 +274,7 @@ pub struct Checker {
     /// Each type a `define-type` (or `define-datatype`) named that mentions
     /// no variable (`closed_data`): substitution leaves it itself, so that it
     /// keeps its name in what is shown. `datum` is one.
-    pub(crate) closed_named: HashSet<TyId>,
+    pub(crate) closed_named: crate::ast::TySet,
     /// How deep in abbreviation expansions parsing is, to stop one that
     /// mentions itself.
     pub(crate) expanding: u32,
@@ -296,7 +296,7 @@ pub struct Checker {
     /// asks for those of every free variable at each node, and a module
     /// given to a file has a signature's worth of entries
     /// (`TODO.md` §68). Forgotten when the arena is reset.
-    pub(crate) regions_memo: std::cell::RefCell<HashMap<TyId, std::rc::Rc<[Region]>>>,
+    pub(crate) regions_memo: std::cell::RefCell<crate::ast::TyMap<std::rc::Rc<[Region]>>>,
     /// Each description function applied, by the function and what it was
     /// given (`kinds::app_key`): what it reduced to, made once and shared,
     /// as the checker written in FX-26 shares it by interning (a `.fasl`'s
@@ -326,7 +326,7 @@ pub struct Checker {
     pub(crate) arrow_star: bool,
     /// The types read from `->*`: a `letrec` or `define-rec` binding at one
     /// has its effect found (`arrow_star_group`).
-    pub(crate) arrow_star_tys: HashSet<TyId>,
+    pub(crate) arrow_star_tys: crate::ast::TySet,
     /// The variables `acyclic?` has just found acyclic, in the branch where
     /// it did: each by name and by which binding it is (its place in `env`).
     pub(crate) certified: Vec<(Sym, usize)>,
@@ -403,7 +403,7 @@ pub struct Checker {
     /// that a type prints as itself however it was written or made (the
     /// user's: a type is a semantic object). And while those classes are
     /// found, each node's own part printed alone, its types `·`.
-    pub(crate) print_canon: std::cell::RefCell<Option<HashMap<TyId, TyId>>>,
+    pub(crate) print_canon: std::cell::RefCell<Option<crate::ast::TyMap<TyId>>>,
     pub(crate) print_shallow: std::cell::Cell<bool>,
     /// While it prints so: how many procedure types the one printing is in;
     /// the outermost names its parameters where a type in it selects from
@@ -414,7 +414,7 @@ pub struct Checker {
     pub(crate) print_params: std::cell::RefCell<Option<Vec<String>>>,
     /// And each description of a parameter's module, as it selects it,
     /// `(select m t)`, by its node.
-    pub(crate) print_tys: std::cell::RefCell<HashMap<TyId, String>>,
+    pub(crate) print_tys: std::cell::RefCell<crate::ast::TyMap<String>>,
     /// While a program's `.fasl` prints so: the type abbreviations that may
     /// name a type (the file's own and the standard ones), and those that
     /// did, which the `.fasl` keeps with what each is.
@@ -432,7 +432,7 @@ pub struct Checker {
     /// While a type's `select`s are resolved: its nodes that lead to none,
     /// each kept as itself rather than rebuilt (`resolve_selects`), so that
     /// what the type shares with others, a named type, it still shares.
-    pub(crate) subst_keep: Option<HashSet<TyId>>,
+    pub(crate) subst_keep: Option<crate::ast::TySet>,
     /// While a type's `select`s are resolved (`Checker::resolve_selects`):
     /// what each is; empty otherwise.
     pub(crate) select_map: HashMap<(Sym, Sym), TyId>,
@@ -905,13 +905,13 @@ impl Checker {
             char_,
             f64_,
             symbol,
-            closed_named: HashSet::new(),
+            closed_named: Default::default(),
             expanding: 0,
             knots: Vec::new(),
             holes: None,
             hole_hint: None,
             spin_why: Vec::new(),
-            regions_memo: std::cell::RefCell::new(HashMap::new()),
+            regions_memo: std::cell::RefCell::new(Default::default()),
             fun_apps: HashMap::new(),
             regions_open: std::cell::Cell::new(false),
             generatives: Vec::new(),
@@ -921,7 +921,7 @@ impl Checker {
             lemmas: Vec::new(),
             pending_lemma: None,
             arrow_star: false,
-            arrow_star_tys: HashSet::new(),
+            arrow_star_tys: Default::default(),
             certified: Vec::new(),
             certified_nats: Vec::new(),
             certified_lengths: Vec::new(),
@@ -946,7 +946,7 @@ impl Checker {
             print_shallow: std::cell::Cell::new(false),
             print_subrs: std::cell::Cell::new(0),
             print_params: std::cell::RefCell::new(None),
-            print_tys: std::cell::RefCell::new(HashMap::new()),
+            print_tys: std::cell::RefCell::new(Default::default()),
             print_aliases: std::cell::RefCell::new(None),
             print_selects: std::cell::RefCell::new(None),
             print_self: std::cell::Cell::new(None),
@@ -2718,7 +2718,7 @@ impl Checker {
             out.extend(rs.iter().copied());
             return;
         }
-        let mut seen = HashSet::new();
+        let mut seen = crate::ast::TySet::default();
         let mut found = HashSet::new();
         let outer = self.regions_open.replace(false);
         self.regions_walk(t, &mut seen, &mut found);
@@ -2734,7 +2734,7 @@ impl Checker {
         out.extend(found);
     }
 
-    fn regions_walk(&self, t: TyId, seen: &mut HashSet<TyId>, out: &mut HashSet<Region>) {
+    fn regions_walk(&self, t: TyId, seen: &mut crate::ast::TySet, out: &mut HashSet<Region>) {
         let t = self.arena.resolve(t);
         if !seen.insert(t) {
             return;
@@ -2844,7 +2844,7 @@ impl Checker {
 
     /// The regions of everything in `t` that can be written: storage a
     /// generative type's representation may keep what it was given in.
-    fn storage_regions(&self, t: TyId, seen: &mut HashSet<TyId>, out: &mut Vec<Region>) {
+    fn storage_regions(&self, t: TyId, seen: &mut crate::ast::TySet, out: &mut Vec<Region>) {
         let t = self.arena.resolve(t);
         if !seen.insert(t) {
             return;
@@ -2894,14 +2894,14 @@ impl Checker {
     /// variables of kind `data`. No procedure, no storage that can be
     /// written, no generative type.
     pub(crate) fn is_data(&self, t: TyId) -> bool {
-        self.data_walk(t, &mut HashSet::new(), None)
+        self.data_walk(t, &mut Default::default(), None)
     }
 
     /// Whether `t` is data at `place` (a place variable, or `heap`): data
     /// whose frozen parts are in the heap or in `place`, so that reading it
     /// reads no other place (`(t data p)`, F13).
     pub(crate) fn is_data_at(&self, t: TyId, place: Region) -> bool {
-        self.data_walk(t, &mut HashSet::new(), Some(place))
+        self.data_walk(t, &mut Default::default(), Some(place))
     }
 
     /// Where data at region `r` is: the place it is frozen into, or the
@@ -2918,7 +2918,7 @@ impl Checker {
         self.arena.bound(v).unwrap_or(Region::Heap)
     }
 
-    fn data_walk(&self, t: TyId, seen: &mut HashSet<TyId>, place: Option<Region>) -> bool {
+    fn data_walk(&self, t: TyId, seen: &mut crate::ast::TySet, place: Option<Region>) -> bool {
         let t = self.arena.resolve(t);
         if !seen.insert(t) {
             return true;
@@ -2953,10 +2953,10 @@ impl Checker {
         if frozen {
             return self.is_data_at(t, Self::data_place(region));
         }
-        self.forget_walk(t, region, &mut HashSet::new())
+        self.forget_walk(t, region, &mut Default::default())
     }
 
-    fn forget_walk(&self, t: TyId, r: Region, seen: &mut HashSet<TyId>) -> bool {
+    fn forget_walk(&self, t: TyId, r: Region, seen: &mut crate::ast::TySet) -> bool {
         let t = self.arena.resolve(t);
         if !seen.insert(t) {
             return true;
@@ -2985,7 +2985,7 @@ impl Checker {
     }
 
     /// The places, other than the heap, that data `t`'s parts are in.
-    pub(crate) fn data_places(&self, t: TyId, seen: &mut HashSet<TyId>, out: &mut Vec<Region>) {
+    pub(crate) fn data_places(&self, t: TyId, seen: &mut crate::ast::TySet, out: &mut Vec<Region>) {
         let t = self.arena.resolve(t);
         if !seen.insert(t) {
             return;
@@ -3072,10 +3072,10 @@ impl Checker {
     /// `t` with its frozen regions made finite: what data `acyclic?` has
     /// found acyclic is.
     pub(crate) fn finitized(&mut self, t: TyId) -> TyId {
-        self.finitize_memo(t, &mut HashMap::new())
+        self.finitize_memo(t, &mut Default::default())
     }
 
-    fn finitize_memo(&mut self, t: TyId, memo: &mut HashMap<TyId, TyId>) -> TyId {
+    fn finitize_memo(&mut self, t: TyId, memo: &mut crate::ast::TyMap<TyId>) -> TyId {
         let t = self.arena.resolve(t);
         if let Some(x) = memo.get(&t) {
             return *x;
@@ -3289,15 +3289,15 @@ impl Checker {
     /// checkers (`k-spin-for-cyclic`).
     pub(crate) fn spin_for_cyclic(&mut self, inner: TyId, t: TyId, map: &HashMap<DVar, D>) -> TyId {
         let cyclic: Vec<DVar> = map.iter().filter(|(_, d)| self.d_types(d).into_iter().any(|x| self.cyclic(x))).map(|(v, _)| *v).collect();
-        if cyclic.is_empty() || !self.calls_through(inner, &cyclic, true, &mut HashSet::new()) {
+        if cyclic.is_empty() || !self.calls_through(inner, &cyclic, true, &mut Default::default()) {
             return t;
         }
-        self.spin_positive(t, &mut HashMap::new())
+        self.spin_positive(t, &mut Default::default())
     }
 
     /// Whether `t` has, below its top (`top`), a procedure type that
     /// mentions one of `vars`: what code of type `t` could call.
-    fn calls_through(&self, t: TyId, vars: &[DVar], top: bool, seen: &mut HashSet<TyId>) -> bool {
+    fn calls_through(&self, t: TyId, vars: &[DVar], top: bool, seen: &mut crate::ast::TySet) -> bool {
         let t = self.arena.resolve(t);
         if !seen.insert(t) {
             return false;
@@ -3334,7 +3334,7 @@ impl Checker {
     /// itself, what it returns, those in products and sums (not in what
     /// may be written, a pair's or a reference's). `done`: each node made
     /// so far, as a slot linked once made, so a cycle is made a cycle.
-    fn spin_positive(&mut self, t: TyId, done: &mut HashMap<TyId, TyId>) -> TyId {
+    fn spin_positive(&mut self, t: TyId, done: &mut crate::ast::TyMap<TyId>) -> TyId {
         let t = self.arena.resolve(t);
         if let Some(x) = done.get(&t) {
             return *x;
@@ -3435,7 +3435,7 @@ impl Checker {
                 let rep = self.generatives[which as usize].rep;
                 let mut k = kept.to_vec();
                 let mut storage = Vec::new();
-                self.storage_regions(rep, &mut HashSet::new(), &mut storage);
+                self.storage_regions(rep, &mut Default::default(), &mut storage);
                 for r in storage.into_iter().chain(args.iter().filter_map(|d| match d {
                     D::Region(r) => Some(*r),
                     _ => None,
@@ -4012,7 +4012,7 @@ impl Checker {
     /// at regions that are constants, as far as it goes (`seen`, a cycle
     /// met again). What substitution can change, it is not; anything else,
     /// a procedure say, counted not closed. As `k-closed-in?`.
-    pub(crate) fn closed_data(&self, t: TyId, seen: &mut HashSet<TyId>) -> bool {
+    pub(crate) fn closed_data(&self, t: TyId, seen: &mut crate::ast::TySet) -> bool {
         let t = self.arena.resolve(t);
         if !seen.insert(t) {
             return true;
@@ -4032,14 +4032,14 @@ impl Checker {
         // A substitution of its own (a `dlambda` reduced inside another)
         // keeps nothing of another's.
         let keep = self.subst_keep.take();
-        let r = self.subst_memo(t, map, &mut HashMap::new());
+        let r = self.subst_memo(t, map, &mut Default::default());
         self.subst_keep = keep;
         r
     }
 
     /// A description substituted into, sharing `memo` with the type it is
     /// part of.
-    pub(crate) fn subst_d_memo(&mut self, d: &D, map: &HashMap<DVar, D>, memo: &mut HashMap<TyId, TyId>) -> D {
+    pub(crate) fn subst_d_memo(&mut self, d: &D, map: &HashMap<DVar, D>, memo: &mut crate::ast::TyMap<TyId>) -> D {
         match d {
             D::Type(t) => D::Type(self.subst_memo(*t, map, memo)),
             D::Fun(f) => D::Fun(self.subst_memo(*f, map, memo)),
@@ -4056,7 +4056,7 @@ impl Checker {
         }
     }
 
-    pub(crate) fn subst_memo(&mut self, t: TyId, map: &HashMap<DVar, D>, memo: &mut HashMap<TyId, TyId>) -> TyId {
+    pub(crate) fn subst_memo(&mut self, t: TyId, map: &HashMap<DVar, D>, memo: &mut crate::ast::TyMap<TyId>) -> TyId {
         let t = self.arena.resolve(t);
         if self.subst_keep.as_ref().is_some_and(|k| k.contains(&t)) {
             return t;

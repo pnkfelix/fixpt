@@ -797,7 +797,7 @@ impl Checker {
     /// abstract type `n`, as `m` was bound, or its description `n`.
     pub(crate) fn resolve_selects(&mut self, t: TyId, span: Span) -> R<TyId> {
         let mut found = Vec::new();
-        self.selects_in(t, &mut HashSet::new(), &mut found);
+        self.selects_in(t, &mut Default::default(), &mut found);
         let effects = self.effect_selects_in(t);
         if found.is_empty() && effects.is_empty() {
             return Ok(t);
@@ -856,7 +856,7 @@ impl Checker {
         // Only what leads to a `select` is rebuilt; the rest stays itself.
         let keep = self.select_clean(t, &given);
         let outer_keep = self.subst_keep.replace(keep);
-        let r = self.subst_memo(t, &given, &mut HashMap::new());
+        let r = self.subst_memo(t, &given, &mut Default::default());
         self.subst_keep = outer_keep;
         self.select_map = outer;
         self.check_apps(r, span)?;
@@ -912,9 +912,9 @@ impl Checker {
     /// `(select $k t)`, nor an effect variable `given` replaces. Each node a
     /// child of the one above it as `ty_kids` says, the walk the
     /// substitution makes; so what it keeps holds nothing it would change.
-    fn select_clean(&self, t: TyId, given: &HashMap<DVar, D>) -> HashSet<TyId> {
+    fn select_clean(&self, t: TyId, given: &HashMap<DVar, D>) -> crate::ast::TySet {
         let mut nodes: Vec<TyId> = Vec::new();
-        let mut seen: HashSet<TyId> = HashSet::new();
+        let mut seen: crate::ast::TySet = Default::default();
         let mut stack = vec![self.arena.resolve(t)];
         while let Some(n) = stack.pop() {
             if !seen.insert(n) {
@@ -924,7 +924,7 @@ impl Checker {
             self.each_ty_kid(n, |k| stack.push(self.arena.resolve(k)));
         }
         let names_given = |e: &Effect| e.0.iter().any(|a| matches!(a, Atom::Var(v) if given.contains_key(v)));
-        let mut dirty: HashSet<TyId> = nodes
+        let mut dirty: crate::ast::TySet = nodes
             .iter()
             .copied()
             .filter(|n| match self.arena.get(*n) {
@@ -1111,7 +1111,7 @@ impl Checker {
     /// type, which waits for M5.
     pub(crate) fn resolve_selects_outside(&mut self, t: TyId, params: &[Sym], span: Span) -> R<TyId> {
         let mut found = Vec::new();
-        self.selects_in(t, &mut HashSet::new(), &mut found);
+        self.selects_in(t, &mut Default::default(), &mut found);
         if let Some((m, n, _)) = found.iter().find(|(m, _, _)| params.contains(m)) {
             return Err(FxError::at(
                 span,
@@ -1125,7 +1125,7 @@ impl Checker {
         self.resolve_selects(t, span)
     }
 
-    pub(crate) fn selects_in(&self, t: TyId, seen: &mut HashSet<TyId>, out: &mut Vec<(Sym, Sym, TyId)>) {
+    pub(crate) fn selects_in(&self, t: TyId, seen: &mut crate::ast::TySet, out: &mut Vec<(Sym, Sym, TyId)>) {
         let t = self.arena.resolve(t);
         if !seen.insert(t) {
             return;
@@ -1228,7 +1228,7 @@ impl Checker {
         r
     }
 
-    pub(crate) fn param_sels(&self, t: TyId, seen: &mut HashSet<TyId>, out: &mut Vec<(usize, Sym)>) {
+    pub(crate) fn param_sels(&self, t: TyId, seen: &mut crate::ast::TySet, out: &mut Vec<(usize, Sym)>) {
         let t = self.arena.resolve(t);
         if !seen.insert(t) {
             return;
@@ -1248,7 +1248,7 @@ impl Checker {
     /// its types their identity.
     pub(crate) fn dependent_args(&mut self, params: &[TyId], result: TyId, args: &[ExpId], span: Span) -> R<(Vec<TyId>, TyId)> {
         let mut found = Vec::new();
-        let mut seen = HashSet::new();
+        let mut seen = crate::ast::TySet::default();
         for t in params.iter().chain([&result]) {
             self.param_sels(*t, &mut seen, &mut found);
         }

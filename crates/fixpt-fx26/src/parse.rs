@@ -998,7 +998,7 @@ impl Checker {
         // gives may be what it was given, so a cycle through applications
         // alone may be no type at all once the function is known (Rémy's
         // condition: recursion only at the base kind; `crate::kinds`).
-        if self.through_apps(slot, slot, &mut std::collections::HashSet::new()) {
+        if self.through_apps(slot, slot, &mut Default::default()) {
             return Err(FxError::at(span, "a recursive type must be built from a constructor, not only from names"));
         }
         let mut seen = std::collections::HashSet::new();
@@ -1027,7 +1027,7 @@ impl Checker {
     /// Whether `start` is reached again from `id` through forwarding links,
     /// `poly`s and the descriptions given to functions applied: a cycle
     /// with no constructor on it.
-    fn through_apps(&self, id: TyId, start: TyId, seen: &mut std::collections::HashSet<TyId>) -> bool {
+    fn through_apps(&self, id: TyId, start: TyId, seen: &mut crate::ast::TySet) -> bool {
         if !seen.insert(id) {
             return false;
         }
@@ -1357,7 +1357,7 @@ impl Checker {
     /// mentions no variable: it keeps its name (`closed_named`). Once its
     /// knot is tied, or every slot declared ahead filled.
     pub(crate) fn note_closed(&mut self, slot: TyId) {
-        if self.closed_data(slot, &mut std::collections::HashSet::new()) {
+        if self.closed_data(slot, &mut Default::default()) {
             self.closed_named.insert(self.arena.resolve(slot));
         }
     }
@@ -2498,7 +2498,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
             return Ok(t);
         }
         let mut found = Vec::new();
-        self.selects_in(t, &mut std::collections::HashSet::new(), &mut found);
+        self.selects_in(t, &mut Default::default(), &mut found);
         let mut sel = std::collections::HashMap::new();
         for (m, x, _) in found {
             if let Some(k) = names.iter().rposition(|n| *n == Some(m)) {
@@ -2802,7 +2802,7 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
                         return Err(FxError::at(span, format!("`{path}` makes a procedure of {} parameter(s), and {} are given", params.len(), args.len())));
                     };
                     let mut found = Vec::new();
-                    self.param_sels(result, &mut std::collections::HashSet::new(), &mut found);
+                    self.param_sels(result, &mut Default::default(), &mut found);
                     let mut map = std::collections::HashMap::new();
                     for (k, x) in found {
                         let Some(m) = now[k].as_symbol() else {

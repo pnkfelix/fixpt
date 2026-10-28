@@ -1509,7 +1509,7 @@ impl Checker {
                 && let Some(D::Type(t)) = map.get(v)
             {
                 let mut places = Vec::new();
-                self.data_places(*t, &mut std::collections::HashSet::new(), &mut places);
+                self.data_places(*t, &mut Default::default(), &mut places);
                 match places[..] {
                     [] => {
                         map.insert(p, D::Region(Region::Heap));
@@ -1746,7 +1746,7 @@ impl Checker {
     /// anything else, checked so, is what it was checked against.
     fn bounded_argument(&mut self, a: ExpId, param: TyId, p: TyId, u: &mut Unknowns) -> R<(TyId, Effect)> {
         let open = self.unsettled(u);
-        let mut seen = HashSet::new();
+        let mut seen = crate::ast::TySet::default();
         if !self.walk_vars(param, &mut seen, &mut |v| open.contains(&v)) {
             let eff = self.check(a, p)?;
             return Ok((p, eff));
@@ -1781,11 +1781,11 @@ impl Checker {
     }
 
     fn mentions_unknown_type(&self, t: TyId, u: &Unknowns) -> bool {
-        let mut seen = HashSet::new();
+        let mut seen = crate::ast::TySet::default();
         self.walk_vars(t, &mut seen, &mut |v| u.is_unknown(v) && !u.solved.contains_key(&v))
     }
 
-    fn walk_vars(&self, t: TyId, seen: &mut HashSet<TyId>, hit: &mut dyn FnMut(DVar) -> bool) -> bool {
+    fn walk_vars(&self, t: TyId, seen: &mut crate::ast::TySet, hit: &mut dyn FnMut(DVar) -> bool) -> bool {
         let t = self.arena.resolve(t);
         if !seen.insert(t) {
             return false;

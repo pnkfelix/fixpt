@@ -338,9 +338,9 @@ impl Checker {
     /// (Moore's refinement: alike if their own parts print alike and their
     /// types are alike, in order), each node mapped to its class's first in
     /// a walk from `t`; none if `t` reaches no cycle, or no two are alike.
-    fn minimal_classes(&self, t: TyId) -> Option<HashMap<TyId, TyId>> {
+    fn minimal_classes(&self, t: TyId) -> Option<crate::ast::TyMap<TyId>> {
         let root = self.arena.resolve(t);
-        let (mut order, mut index): (Vec<TyId>, HashMap<TyId, usize>) = (Vec::new(), HashMap::new());
+        let (mut order, mut index): (Vec<TyId>, crate::ast::TyMap<usize>) = (Vec::new(), Default::default());
         let mut kids: Vec<Vec<TyId>> = Vec::new();
         let mut todo = vec![root];
         while let Some(n) = todo.pop() {

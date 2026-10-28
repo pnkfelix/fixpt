@@ -18,7 +18,6 @@ use crate::ast::{Atom, D, DVar, Effect, Exp, ExpId, Kind, Region, Ty, TyId};
 use crate::check::{Checker, ADDR_INDEX, INBOX_INDEX, PROCESS_INDEX};
 use crate::error::{FxError, R};
 use fixpt_read::Syntax;
-use std::collections::HashSet;
 
 impl Checker {
     /// The forms of processes and `par`, each a call of a procedure of the
@@ -299,10 +298,10 @@ impl Checker {
     /// continuation, a key, a place or a module; nor a type variable but of
     /// kind `data` in the heap.
     pub(crate) fn untransmissible(&self, t: TyId) -> Option<String> {
-        self.untransmissible_in(t, &mut HashSet::new(), &mut Vec::new())
+        self.untransmissible_in(t, &mut Default::default(), &mut Vec::new())
     }
 
-    fn untransmissible_in(&self, t: TyId, seen: &mut HashSet<TyId>, bound: &mut Vec<DVar>) -> Option<String> {
+    fn untransmissible_in(&self, t: TyId, seen: &mut crate::ast::TySet, bound: &mut Vec<DVar>) -> Option<String> {
         let t = self.arena.resolve(t);
         if !seen.insert(t) {
             return None;

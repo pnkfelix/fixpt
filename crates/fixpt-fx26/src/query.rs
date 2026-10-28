@@ -311,7 +311,7 @@ impl Asked {
                     return None;
                 }
                 let mut effects = Vec::new();
-                effects_in(c, t, &mut effects, &mut HashSet::new());
+                effects_in(c, t, &mut effects, &mut Default::default());
                 let writes = |e: &Effect, r: &Region| e.0.contains(&Atom::Write(*r)) || e.0.contains(&Atom::Init(*r));
                 if effects.iter().any(|e| regions.iter().any(|r| writes(e, r))) {
                     Some(false)
@@ -823,7 +823,7 @@ fn mutable_regions(c: &Checker, t: TyId) -> HashSet<Region> {
 
 /// Every effect in `t`: each procedure's latent effect, its own and those
 /// of the procedures it takes or returns, wherever they are.
-fn effects_in(c: &Checker, t: TyId, out: &mut Vec<Effect>, seen: &mut HashSet<TyId>) {
+fn effects_in(c: &Checker, t: TyId, out: &mut Vec<Effect>, seen: &mut crate::ast::TySet) {
     let t = c.arena.resolve(t);
     if !seen.insert(t) {
         return;

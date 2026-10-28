@@ -343,6 +343,39 @@ impl Effect {
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 pub struct TyId(pub u32);
 
+/// A hasher for the arena's ids, which it numbers densely: one multiply
+/// (Fibonacci hashing), as the heap's maps of values are hashed
+/// (`fixpt_heap`'s `WordHasher`). The standard hasher's SipHash, made to
+/// resist chosen keys, was some 6% of checking Heist's makers, in the sets
+/// of the nodes a walk has met.
+#[derive(Default, Clone, Copy)]
+pub struct IdHasher(u64);
+
+impl std::hash::Hasher for IdHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        for b in bytes {
+            self.write_u64(u64::from(*b));
+        }
+    }
+    fn write_u32(&mut self, n: u32) {
+        self.write_u64(u64::from(n));
+    }
+    fn write_u64(&mut self, n: u64) {
+        self.0 = (self.0.rotate_left(5) ^ n).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    }
+    fn write_usize(&mut self, n: usize) {
+        self.write_u64(n as u64);
+    }
+}
+
+/// A set of nodes, hashed by [`IdHasher`].
+pub type TySet = std::collections::HashSet<TyId, std::hash::BuildHasherDefault<IdHasher>>;
+/// A map by node, hashed by [`IdHasher`].
+pub type TyMap<V> = std::collections::HashMap<TyId, V, std::hash::BuildHasherDefault<IdHasher>>;
+
 /// A step of a path from a variable (`check::PathFact`): `car`, `cdr`, or
 /// a product's field.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -848,10 +881,10 @@ pub struct Arena {
     /// Each `select` node a type name in a `with` body was read as
     /// (`(with m …)`'s, shadowing): what the name meant outside, if
     /// anything, should `m` not give it.
-    pub with_fallback: std::collections::HashMap<TyId, Option<TyId>>,
+    pub with_fallback: crate::ast::TyMap<Option<TyId>>,
     /// Of those, each that is applied, `(f d …)`: the application, which
     /// is what falls back.
-    pub with_applied: std::collections::HashMap<TyId, TyId>,
+    pub with_applied: crate::ast::TyMap<TyId>,
     /// `string`'s name, once known: `(stringof const)` (or `acyclic`, its
     /// finite subregion) is made as `string` itself, the one type
     /// (`check::STRINGOF`).
