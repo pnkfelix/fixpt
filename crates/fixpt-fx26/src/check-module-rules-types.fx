@@ -123,6 +123,12 @@
             (val k-group-end (subr (read @globals) (k-ends k-letrec-bs) string))
             (val k-other-member (subr (read @globals) (k-letrec-bs symbol) k-letrec-bs))
             (val k-run-does (subr (maxeff checks spin) (symbol k-eff kx) k-eff))
+            (val k-stars-written
+                 (subr (maxeff checks spin)
+                       (k-items k-mlams k-mod-bound (subr (maxeff checks spin) () k-made))
+                       k-made))
+            (val k-valued-stars
+                 (subr (maxeff checks spin) (k-items k-mlams k-mod-checked k-ids) k-eff))
             (val k-mod-vals
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
                        (k-items k-parts k-letrec-bs k-parts)

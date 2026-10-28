@@ -2926,13 +2926,17 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         }
         let at = first.span;
         let sym = |c: &mut Self, s: &str| Syntax::symbol(at, c.interner.intern(s));
-        let includes: Vec<Syntax> = modules
-            .iter()
+        // Each included but those marked `qualified`; each a `lambda`'s
+        // parameter, `(m T)`.
+        let included: Vec<&Syntax> = modules.iter().filter(|b| !matches!(b.as_proper_list(), Some([_, _, q]) if is_qualified(q, &self.interner))).collect();
+        let includes: Vec<Syntax> = included
+            .into_iter()
             .map(|b| {
                 let m = b.as_proper_list().expect("a binder")[0].clone();
                 Syntax::list(m.span, vec![sym(self, "include"), m])
             })
             .collect();
+        let modules: Vec<Syntax> = modules.iter().map(|b| Syntax::list(b.span, b.as_proper_list().expect("a binder")[..2].to_vec())).collect();
         let hide = Syntax::list(at, std::iter::once(sym(self, "hide")).chain(includes).collect());
         let module = Syntax::list(at, [sym(self, "module"), hide].into_iter().chain(rest.iter().cloned()).collect());
         let lambda = Syntax::list(at, vec![sym(self, "lambda"), Syntax::list(at, modules), module]);
@@ -3752,12 +3756,20 @@ pub(crate) fn module_parameters_of(f: &Syntax, interner: &fixpt_read::Interner) 
 }
 
 /// Whether binder `b` of a `module-parameters` binds a description, `(name
-/// kind)` or `(r region p)`; else it is `(m T)`, a module parameter.
+/// kind)` or `(r region p)`; else it is `(m T)` or `(m T qualified)`, a
+/// module parameter.
 pub(crate) fn binder_is_kind(b: &Syntax, interner: &fixpt_read::Interner) -> bool {
     match b.as_proper_list() {
         Some([_, k]) => is_kind_form(k, interner),
+        Some([_, k, q]) => is_kind_form(k, interner) || !is_qualified(q, interner),
         _ => true,
     }
+}
+
+/// `qualified`, a module parameter's mark that it is not included: its
+/// names are reached by `with` or `import` (Heist's, 2026-10-28).
+fn is_qualified(q: &Syntax, interner: &fixpt_read::Interner) -> bool {
+    q.as_symbol().is_some_and(|q| interner.name(q) == "qualified")
 }
 
 fn is_kind_form(k: &Syntax, interner: &fixpt_read::Interner) -> bool {

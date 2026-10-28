@@ -958,11 +958,11 @@
              (bound-ds (k-mod-bindings ls a b))
              (bs (extract bound-ds 1))
              (bound (k-mod-bind bs ls))
-             (made (k-module-items items a b early))
+             (made (k-stars-written items ls bound-ds (lambda () (k-module-items items a b early))))
              (es (k-mod-edges ls ls))
              (g (k-mod-star-groups es bs k-synth-lambda-as))
              (checked (k-mod-check-lambdas (extract g 1) ls (extract g 2) nil (extract bound-ds 2)))
-             (le (extract checked 1))
+             (le (k-valued-stars items ls checked (extract bound-ds 2)))
              (unbound (k-unbind-to saved))
              (vs (k-parts-reversed (k-mod-vals items (extract made 3) (extract checked 2) nil) nil))
              ;; A component's module, bound inside, has abstract types no one

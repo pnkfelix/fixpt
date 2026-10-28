@@ -3779,3 +3779,18 @@ cellular code: 39 µs a key typing in a burst, against 7 as globals.
 - **Tests**: `modules/module-parameters-modules.fx` (57, on every machine),
   `modules/expression-item-pure.fx`. Docs: `docs/fx26.md`, "Module
   parameters", "An expression as a module's item".
+
+## 148. A module's `define*` as a value; `qualified` module parameters (Heist's, 2026-10-28)
+
+- **`define*` as a value**: a module's `define*` named by an item that is
+  not a typed lambda was bound, while that item was checked, at its type
+  reading any global (`(read @globals)`), so a hook list of `pure`
+  procedures refused it where `define` was accepted. It is now bound at
+  its type as written there, and refused once found only if its body reads
+  a global that type does not say; in both checkers (`valued_star`,
+  `k-stars-written`, `k-valued-stars`).
+- **`(m T qualified)`**: a module parameter not included; the file names
+  what it uses by `import` or `with`. Both parsers (`binder_is_kind`,
+  `binder-kind?`, `binder-params`).
+- **Tests**: `modules/define-star-as-value.fx`,
+  `modules/define-star-value-reads.fx`, `modules/module-parameters-qualified.fx`.

@@ -64,6 +64,85 @@
 (define k-items (with check-read k-items))
 (define k-one (with check-effects k-one))
 
+;; The `define*`s of `ls` an item of `items` that is not a typed lambda
+;; names: a value made as the module is, which it is used as at its type
+;; as written (Heist's, 2026-10-28; `valued`, in `Checker::module_type`).
+(define k-star-valued (->* (k-items k-mlams) k-names)
+  (lambda (items ls)
+    (let ((ps (k-mod-places items)))
+      (letrec ((named (subr (maxeff checks spin) (k-items k-names) k-names)
+                 (lambda (its acc)
+                   (cond ((null? its) acc)
+                         ((and (= (extract (car its) 1) 2) (not (k-lambda-item? (car its))))
+                          (let ((x (car (extract (car its) 5))))
+                            (named (cdr its) (k-names-onto (k-mod-names-in x ps) acc))))
+                         (else (named (cdr its) acc))))))
+        (k-stars-among ls (named items nil))))))
+(define k-stars-among (->* (k-mlams k-names) k-names)
+  (lambda (ls ns)
+    (cond ((null? ls) nil)
+          ((and (extract (car ls) 6) (k-has-name? ns (extract (car ls) 1)))
+           (cons (extract (car ls) 1) (k-stars-among (cdr ls) ns)))
+          (else (k-stars-among (cdr ls) ns)))))
+;; Each of `valued`, of `bs` (at the types the lambdas are checked at) and
+;; `ds` (as written), bound at its type as written if `written`, else at
+;; the other.
+(define k-stars-rebound (->* (k-letrec-bs k-ids k-names bool) unit)
+  (lambda (bs ds valued written)
+    (if (null? bs)
+        #u
+        (let ((n (extract (car bs) 1)))
+          (begin (if (k-has-name? valued n)
+                     (k-rebind-top n (if written (car ds) (extract (car bs) 2)))
+                     #u)
+                 (k-stars-rebound (cdr bs) (cdr ds) valued written))))))
+;; `made`, the items but the typed lambdas checked, with each `define*`
+;; they name bound at its type as written while they are.
+(define k-stars-written
+  (->* (k-items k-mlams k-mod-bound (subr (maxeff checks spin) () k-made)) k-made)
+  (lambda (items ls bound made)
+    (let* ((valued (k-star-valued items ls))
+           (before (k-stars-rebound (extract bound 1) (extract bound 2) valued #t))
+           (r (made)))
+      (begin (k-stars-rebound (extract bound 1) (extract bound 2) valued #f) r))))
+;; Each `define*` of `ls` an item used as a value at its type as written,
+;; `ds`, found, in `checked`, to read a global that type does not say:
+;; refused (`valued_star`). The lambdas' effect.
+(define k-valued-stars (->* (k-items k-mlams k-mod-checked k-ids) k-eff)
+  (lambda (items ls checked ds)
+    (let ((valued (k-star-valued items ls)))
+      (letrec ((each (subr (maxeff checks spin) (k-letrec-bs k-ids) unit)
+                 (lambda (bs ds)
+                   (if (null? bs)
+                       #u
+                       (let ((n (extract (car bs) 1)))
+                         (begin
+                           (if (k-has-name? valued n)
+                               (k-valued-star n (car ds) (extract (car bs) 2) (extract (car bs) 3))
+                               #u)
+                           (each (cdr bs) (cdr ds))))))))
+        (begin (each (extract checked 2) ds) (extract checked 1))))))
+;; A procedure type's latent effect.
+(define k-latent-1 (->* (int) k-eff)
+  (lambda (t) (let ((l (k-latent-of t))) (if (null? l) nil (car l)))))
+;; The atoms of `e` not within `w`.
+(define k-not-within (->* (k-eff k-eff) k-eff)
+  (lambda (e w)
+    (cond ((null? e) nil)
+          (((with check-effects k-within?) (cons (car e) nil) w) (k-not-within (cdr e) w))
+          (else (cons (car e) (k-not-within (cdr e) w))))))
+(define k-valued-star (->* (symbol int int kx) unit)
+  (lambda (n declared found init)
+    (let* ((said (k-latent-1 declared))
+           (more (k-not-within (k-latent-1 found) said)))
+      (if (null? more)
+          #u
+          (k-fail-at (k-cat5 "`define*` `" (symbol->string n)
+                             "` is a value another item uses as the module is made, at its type "
+                             "as written, and it reads "
+                             (string-append ((with check-print-parts k-show-effect) more)
+                                            ": write that in its type"))
+                     init)))))
 ;; `n`'s innermost binding, now of type `t`.
 (define k-rebind-top (->* (symbol int) unit)
   (lambda (n t) (table-set! (get k-env) n (cons t (cdr (table-ref (get k-env) n nil))))))

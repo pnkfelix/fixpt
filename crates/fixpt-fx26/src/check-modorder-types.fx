@@ -46,6 +46,10 @@
 (define-type check-modorder-sig
   (moduleof (val k-names-onto
                  (subr (maxeff (alloc @t) (read @globals)) (k-names k-names) k-names))
+            (val k-mod-places
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (k-items) k-places))
+            (val k-mod-names-in
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (kx k-places) k-names))
             (val k-lambda-item? (subr (read @globals) (k-item) bool))
             (val k-mod-lambdas (subr (maxeff (alloc @t) (read @globals)) (k-items) k-mlams))
             (val k-mod-recs-lambdas

@@ -430,6 +430,22 @@ impl Checker {
             self.env.push((*n, bound));
             self.known.insert((*n, base + k));
         }
+        // A `define*` named by an item that is not a typed lambda, checked
+        // now, as a value made as the module is: at its type as written,
+        // and refused below if found to read more (Heist's, 2026-10-28).
+        let mut valued = std::collections::HashSet::new();
+        for (i, item) in items.iter().enumerate() {
+            if let ModItem::Val { init, .. } = item
+                && !lambdas.iter().any(|l| l.3 == i)
+            {
+                valued.extend(self.free_vars(*init));
+            }
+        }
+        for (k, l) in lambdas.iter().enumerate() {
+            if star(l.3) && valued.contains(&l.0) {
+                self.env.set_ty(base + k, declared[k]);
+            }
+        }
         // The values each item has, at its type, in written order.
         for (i, item) in items.iter().enumerate() {
             if early.contains(&i) {
@@ -497,6 +513,12 @@ impl Checker {
                 ModItem::Rec(_) => {}
             }
         }
+        // Then, for the lambdas, reading any global until found.
+        for (k, l) in lambdas.iter().enumerate() {
+            if star(l.3) && valued.contains(&l.0) {
+                self.env.set_ty(base + k, l.1);
+            }
+        }
         let groups = self.module_groups(&lambdas);
         // With `->*`, every such lambda's effect found before any lambda is
         // checked, each recursive group with one noted as `define-rec`'s is
@@ -556,6 +578,13 @@ impl Checker {
             self.recursive.truncate(rdepth);
             eff = eff.union(&r?);
             typed.push((i, n, t));
+        }
+        // Each `define*` another item used as a value, at its type as
+        // written: refused if found to read more (`k-valued-stars`).
+        for (k, l) in lambdas.iter().enumerate() {
+            if star(l.3) && valued.contains(&l.0) {
+                self.valued_star(l.0, declared[k], l.1, l.2)?;
+            }
         }
         typed.sort_by_key(|(i, ..)| *i);
         let vals = typed.into_iter().map(|(_, n, t)| (n, t)).collect();
@@ -1269,5 +1298,30 @@ impl Checker {
             ));
         }
         Ok(())
+    }
+}
+
+impl Checker {
+    /// `define*` `n`, used as a value by another of its module's items at
+    /// its type as written, `declared`: refused if found, `found`, to read
+    /// a global that type does not say.
+    fn valued_star(&self, n: Sym, declared: TyId, found: TyId, init: ExpId) -> R<()> {
+        let latent = |t: TyId| match self.arena.get(self.arena.resolve(t)) {
+            Ty::Subr { effect, .. } => effect.clone(),
+            _ => Effect::pure(),
+        };
+        let said = latent(declared);
+        let more = Effect(latent(found).0.into_iter().filter(|a| !Effect::atom(*a).within(&said)).collect());
+        if more.is_pure() {
+            return Ok(());
+        }
+        Err(FxError::at(
+            self.arena.span_of(init),
+            format!(
+                "`define*` `{}` is a value another item uses as the module is made, at its type as written, and it reads {}: write that in its type",
+                self.interner.name(n),
+                self.show_effect(&more)
+            ),
+        ))
     }
 }

@@ -327,13 +327,20 @@
                 ((region place effect type data sendable flat size conv) #t)
                 (else #f))))))
 ;; Whether binder `b` of a `module-parameters` binds a description, `(name
-;; kind)` or `(r region p)`; else it is `(m T)`, a module parameter
-;; (`binder_is_kind`).
+;; kind)` or `(r region p)`; else it is `(m T)` or `(m T qualified)`, a
+;; module parameter (`binder_is_kind`).
 (define binder-kind? (->* (syn) bool)
   (lambda (b)
     (tagcase b
-      (lst (xs d a b2) (or (not (= (len xs) 2)) (kind-form? (nth xs 1))))
+      (lst (xs d a b2)
+        (cond ((= (len xs) 2) (kind-form? (nth xs 1)))
+              ((= (len xs) 3) (or (kind-form? (nth xs 1)) (not (qualified? (nth xs 2)))))
+              (else #t)))
       (else y #t))))
+;; Whether `q` is `qualified`: a module parameter not included, its names
+;; reached by `with` or `import` (Heist's, 2026-10-28).
+(define qualified? (->* (syn) bool)
+  (lambda (q) (tagcase q (atom (d a b) (symbol=? (syn-head q) 'qualified)) (else y #f))))
 ;; The binders of form `f`, if it is `(module-parameters (binder …))`.
 (define module-binders (->* (syn) syns-a)
   (lambda (f)
@@ -359,7 +366,7 @@
     (cond ((null? bs) nil)
           ((binder-kind? (car bs)) (module-binders-only (cdr bs)))
           (else (cons (car bs) (module-binders-only (cdr bs)))))))
-;; `(include m)` of each module parameter `(m T)`.
+;; `(include m)` of each module parameter `(m T)`, not `(m T qualified)`.
 (define binder-includes (->* (syns-a int int) syns-a)
   (lambda (bs a b)
     (if (null? bs)
@@ -367,9 +374,21 @@
         (tagcase (car bs)
           (lst (xs d c e)
             (let ((m (car xs)))
-              (cons (mk-list (list (mk-symbol "include" a b) m) (syn-start m) (syn-end m))
-                    (binder-includes (cdr bs) a b))))
+              (if (= (len xs) 3)
+                  (binder-includes (cdr bs) a b)
+                  (cons (mk-list (list (mk-symbol "include" a b) m) (syn-start m) (syn-end m))
+                        (binder-includes (cdr bs) a b)))))
           (else y (binder-includes (cdr bs) a b))))))
+;; Each module parameter as a `lambda`'s, `(m T)`.
+(define binder-params (->* (syns-a) syns-a)
+  (lambda (bs)
+    (if (null? bs)
+        nil
+        (cons (tagcase (car bs)
+                (lst (xs d c e)
+                  (if (= (len xs) 3) (mk-list (list (car xs) (nth xs 1)) c e) (car bs)))
+                (else y (car bs)))
+              (binder-params (cdr bs))))))
 ;; A file of module parameters' one expression (`modules_made`):
 ;; `(plambda (kinds) (lambda (modules) (module (hide (include m) …) item …)))`,
 ;; no `plambda` with no kinds.
@@ -379,7 +398,8 @@
            (bs (module-binders first)) (kinds (kind-binders bs)) (ms (module-binders-only bs))
            (hide (mk-list (cons (mk-symbol "hide" a b) (binder-includes ms a b)) a b))
            (module (mk-list (cons (mk-symbol "module" a b) (cons hide (cdr forms))) a b))
-           (lambda-form (mk-list (list (mk-symbol "lambda" a b) (mk-list ms a b) module) a b)))
+           (lambda-form
+            (mk-list (list (mk-symbol "lambda" a b) (mk-list (binder-params ms) a b) module) a b)))
       (if (null? kinds)
           lambda-form
           (mk-list (list (mk-symbol "plambda" a b) (mk-list kinds a b) lambda-form) a b)))))
