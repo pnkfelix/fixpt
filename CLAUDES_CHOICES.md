@@ -2534,3 +2534,34 @@ of `TODO.md` §141, working on my own.
 - Kept for later, not done: a cycle found in `k-cyclic` from its first
   class could give the other classes' nodes by walking both at once, not a
   form and a lookup for each.
+
+### The built-in modules' `.fasl`s (the same day)
+
+- **Profile at 0.77 s**: the checker small now (substitution under 1%).
+  Timing prefixes: 0.17 s for any run, then `base.fx` alone 0.25 s, then
+  about 0.035 s a file. `base.fx` is 3.6 KB; what it costs is
+  `fx26:eager-reader.fx` (0.11 s alone), checked from source on every
+  start, as `fx26:table.fx` is (0.03 s) for `flow.fx`: a module file built
+  in has no directory for `fixpt compile-file` to write a `.fasl` in.
+  (`core.fx`, `rope.fx`, `keys.fx` and `screen.fx` had none in my copy
+  either; compiled, as the user's own would be.)
+- **Chosen**: a built-in's `.fasl` in the cache directory, one directory
+  for each executable and convention, named as the front end's cache is;
+  written by the run that loaded it from source, after the form that
+  loaded it, once a session; staleness not said (a rebuilt executable
+  would say it at every first run), the file made again. Rather than
+  asking the user to compile built-ins: they cannot name where the file
+  goes, and the front end's cache already writes there unasked.
+  `FIXPT_NO_CACHE` keeps none; directories not written for a month are
+  removed with the front end's old images.
+- **A bug it showed, older than it**: a type with a module's description
+  function, printed for a `.fasl` while the module's file was itself
+  read from one, named the function by another description's name,
+  `(desc bucket bucket)`, which does not read back (a description
+  function's name does not stand bare). Both printers now write a
+  description function in a `moduleof` as its `dlambda`. A test
+  (`a_description_function_reads_back_from_a_fasl_read_from_one`) fails
+  without it.
+- Result: Heist's start-up through `eldoc.fx` 0.59 s (was 0.77 s); the
+  suite passes (856), run twice, the cache cold then warm.
+

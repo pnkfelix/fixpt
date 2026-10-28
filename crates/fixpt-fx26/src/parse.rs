@@ -2865,7 +2865,6 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         let source = crate::fasl::digest(&text);
         let name = self.interner.intern(&format!("%shared:{key}"));
         if self.fasls
-            && crate::built_in_module(path).is_none()
             && let Some(e) = self.fasl_load(span, key, path, at, input, source)?
         {
             return Ok(e);

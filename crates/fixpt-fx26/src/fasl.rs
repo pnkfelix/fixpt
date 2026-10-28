@@ -139,6 +139,35 @@ pub fn path_for(source: &Path) -> PathBuf {
     source.with_extension("fasl")
 }
 
+/// The user's cache directory for Fixpt, where the front end's compiled
+/// code is kept (`session::front_end_cache`), if there is one.
+pub fn cache_dir() -> Option<PathBuf> {
+    let home = std::env::var_os("HOME")?;
+    let dir = match std::env::var_os("XDG_CACHE_HOME") {
+        Some(d) => PathBuf::from(d),
+        None if cfg!(target_os = "macos") => Path::new(&home).join("Library/Caches"),
+        None => Path::new(&home).join(".cache"),
+    };
+    Some(dir.join("fixpt"))
+}
+
+/// The `.fasl` of the load of `path` (at `at`): beside the file; or, for a
+/// module file built in (`fx26:name`), which has no directory, in the
+/// cache directory, one directory for each executable and convention, as
+/// the front end's cache is. None for one built in if there is no cache
+/// (`FIXPT_NO_CACHE`).
+pub fn path_for_load(at: &Path, path: &str, native: bool) -> Option<PathBuf> {
+    let Some(name) = path.strip_prefix(crate::BUILT_IN_PREFIX).filter(|_| crate::built_in_module(path).is_some()) else {
+        return Some(path_for(at));
+    };
+    if std::env::var_os("FIXPT_NO_CACHE").is_some() {
+        return None;
+    }
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (std::env::current_exe().ok()?, native).hash(&mut h);
+    Some(path_for(&cache_dir()?.join(format!("built-in-{:016x}", h.finish())).join(name)))
+}
+
 /// A digest of `text`.
 pub fn digest(text: &str) -> u64 {
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -557,17 +586,22 @@ impl crate::check::Checker {
     /// Larceny's `require` warns ("loading source in favor of stale fasl
     /// file"). What the files it loads find wrong is said as their loads'.
     pub(crate) fn fasl_load(&mut self, span: fixpt_read::Span, key: &str, path: &str, at: &Path, input: bool, source: u64) -> crate::R<Option<crate::ast::ExpId>> {
-        let fasl = path_for(at);
+        let native = self.conv_default == crate::ast::Conv::Native;
+        let Some(fasl) = path_for_load(at, path, native) else { return Ok(None) };
         let Ok(bytes) = std::fs::read(&fasl) else { return Ok(None) };
+        // One built in is made again, quietly, by the run that reads its
+        // source (`Fx26Session::cache_built_ins`).
+        let built_in = crate::built_in_module(path).is_some();
         let stale = |c: &mut Self, why: &str| {
-            c.fasl_notes.push(format!("`{}` is stale ({why}): `{path}` is loaded from its source", fasl.display()));
+            if !built_in {
+                c.fasl_notes.push(format!("`{}` is stale ({why}): `{path}` is loaded from its source", fasl.display()));
+            }
             Ok(None)
         };
         let header = match Header::read(&bytes) {
             Ok((h, _)) => h,
             Err(e) => return stale(self, &e),
         };
-        let native = self.conv_default == crate::ast::Conv::Native;
         if header.build != build() {
             return stale(self, "another fixpt made it");
         }

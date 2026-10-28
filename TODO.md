@@ -3431,3 +3431,8 @@ the makers (`docs/research/fasl.md`). In order:
 8. **Collections** (about 10%): what these checks allocate.
 9. **Reading the images** (about 3%): a mapping of the file, not a read
    and a copy, as for the front end's cache.
+10. ~~**The module files built in given `.fasl`s**~~ (done, 2026-10-28):
+   in the cache directory, written by the first run that loads one
+   (`fasl::path_for_load`, `Fx26Session::cache_built_ins`). Heist's
+   editor loads `fx26:eager-reader.fx` and `fx26:table.fx`, checked from
+   source each start before: 0.77 s to 0.59 s.

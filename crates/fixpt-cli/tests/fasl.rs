@@ -232,3 +232,37 @@ fn a_maker_keeps_its_parameters_types_named() {
     let made = fasl.lines().find(|l| l.starts_with("made ")).expect("a maker's");
     assert!(made.contains("(subr pure ((listof int acyclic) (select m-a ints)) (select m-a ints))"), "{made}");
 }
+
+#[test]
+fn a_description_function_reads_back_from_a_fasl_read_from_one() {
+    // `u.fx` compiled with `t.fx` read from its `.fasl`: `tt`'s `bucket` in
+    // `u`'s type is the `dlambda` it is, not the name of `t`'s, which does
+    // not stand bare.
+    let dir = scratch("dlambda");
+    std::fs::write(dir.join("tt.fx"), "(define-type (bucket (k type)) (listof k acyclic))\n(define none (poly ((k type)) (bucket k)) nil)\n").expect("written");
+    std::fs::write(dir.join("t.fx"), "(define tt (load-module \"tt.fx\"))\n(import tt (type bucket))\n(define ints (bucket int) nil)\n").expect("written");
+    std::fs::write(dir.join("u.fx"), "(define t (load-module \"t.fx\"))\n(define n int 2)\n").expect("written");
+    std::fs::write(dir.join("p.fx"), "(define u (load-module \"u.fx\"))\n1\n").expect("written");
+    let (ok, out, err) = fixpt(&dir, &["compile-file", "tt.fx", "t.fx"], &[]);
+    assert!(ok, "{out}{err}");
+    let (ok, out, err) = fixpt(&dir, &["compile-file", "u.fx"], &[]);
+    assert!(ok, "{out}{err}");
+    let (ok, out, err) = fixpt(&dir, &["run", "p.fx"], &[("FIXPT_FASL_SAY", "1")]);
+    assert!(ok && err.contains("`u.fx` is read from `u.fasl`") && !err.contains("stale"), "{out}{err}");
+}
+
+#[test]
+fn a_built_in_module_is_kept_in_the_cache() {
+    // A built-in has no directory of its own: its `.fasl` is made in the
+    // cache directory by the run that loads it, quietly, and read by the
+    // next.
+    let dir = scratch("built-in");
+    let cache = dir.join("cache");
+    std::fs::write(dir.join("p.fx"), "(define t (load-module \"fx26:table.fx\"))\n1\n").expect("written");
+    let envs = [("XDG_CACHE_HOME", cache.to_str().expect("a path"))];
+    let (ok, out, err) = fixpt(&dir, &["run", "p.fx"], &envs);
+    assert!(ok && err.is_empty(), "{out}{err}");
+    let (ok, out, err) = fixpt(&dir, &["run", "p.fx"], &[envs[0], ("FIXPT_FASL_SAY", "1")]);
+    assert!(ok, "{out}{err}");
+    assert!(err.contains("`fx26:table.fx` is read from") && err.contains("table.fasl"), "{err}");
+}

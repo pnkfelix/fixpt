@@ -282,12 +282,13 @@
   ;; as the effect. A description shows what it is, not its own name `n` (a
   ;; value's, `||`, no name): a `define-type` alias of it, `(select m n)`, is
   ;; named `n` too.
-  ;; A family too (`(dlambda …)`), as the Rust checker shows one.
+  ;; A description function as its `(dlambda …)`, as the Rust checker
+  ;; shows one: a name of one does not stand bare.
   (k-show-comp (->* (int k-printing symbol k-shown) k-shown)
     (lambda (t p n st)
       (tagcase (k-get t)
         (ty-lam (bs body)
-          (if (null? bs) (k-show-desc body p st) (k-show-comp-named t p n st)))
+          (if (null? bs) (k-show-desc body p st) (k-show-body (k-resolve t) p st)))
         (else y (k-show-comp-named t p n st)))))
   (k-show-comp-named (->* (int k-printing symbol k-shown) k-shown)
     (lambda (t p n st)

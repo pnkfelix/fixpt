@@ -81,6 +81,9 @@ pub struct Fx26Session {
     /// key (`syn::set_shared_made`): forms compiled one by one make none of
     /// them again. Forgotten as a whole program begins.
     shared_made: std::collections::HashSet<String>,
+    /// The module files built in given a `.fasl` this session, or tried
+    /// (`cache_built_ins`).
+    built_ins_cached: std::collections::HashSet<String>,
     /// The file the forms run now are from, as a debugger's lines name it
     /// (`crate::sources`): set by a driver, as `fixpt run` does each file's.
     pub source_file: Option<crate::sources::File>,
@@ -351,20 +354,15 @@ fn front_end_cache(text: &str, native: bool) -> Option<(std::path::PathBuf, u64)
     (exe, native).hash(&mut name);
     let mut key = std::collections::hash_map::DefaultHasher::new();
     (text, meta.len(), meta.modified().ok()).hash(&mut key);
-    let home = std::env::var_os("HOME")?;
-    let dir = match std::env::var_os("XDG_CACHE_HOME") {
-        Some(d) => std::path::PathBuf::from(d),
-        None if cfg!(target_os = "macos") => std::path::Path::new(&home).join("Library/Caches"),
-        None => std::path::Path::new(&home).join(".cache"),
-    }
-    .join("fixpt");
+    let dir = crate::fasl::cache_dir()?;
     Some((dir.join(format!("front-end-{:016x}.img", name.finish())), key.finish()))
 }
 
 /// The front end's compiled word `w`, copied out of `heap` into a heap of
 /// its own and written to `path` as an image after `key`: by a temporary
 /// file renamed, so that a reader never sees half of one. Caches not used
-/// for a month (their executables gone, most likely) are removed. Any
+/// for a month (their executables gone, most likely) are removed, and so
+/// are the built-in modules' `.fasl`s not written for a month. Any
 /// failure only means no cache.
 fn save_front_end(heap: &fixpt_heap::Heap, w: fixpt_heap::Value, path: &std::path::Path, key: u64) {
     let mut alone = fixpt_heap::Heap::new();
@@ -456,8 +454,14 @@ fn save_image(alone: &fixpt_heap::Heap, path: &std::path::Path, key: u64) {
     let month = std::time::Duration::from_secs(30 * 24 * 3600);
     for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
         let age = e.metadata().and_then(|m| m.accessed().or(m.modified())).ok().and_then(|t| t.elapsed().ok());
-        if age.is_some_and(|a| a > month) && e.file_name().to_string_lossy().starts_with("front-end-") {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if age.is_some_and(|a| a > month) && name.starts_with("front-end-") {
             let _ = std::fs::remove_file(e.path());
+        }
+        // The `.fasl`s of the module files built in (`fasl::path_for_load`),
+        // made again by the next run that wants them.
+        if age.is_some_and(|a| a > month) && name.starts_with("built-in-") {
+            let _ = std::fs::remove_dir_all(e.path());
         }
     }
 }
@@ -615,6 +619,7 @@ impl Fx26Session {
             own_made: false,
             own_begun: false,
             shared_made: Default::default(),
+            built_ins_cached: Default::default(),
             source_file: None,
             source_form: None,
             source_loaded: std::collections::HashMap::new(),
@@ -895,6 +900,9 @@ impl Fx26Session {
         // A run that failed leaves no process to resume: a failure in any
         // ends the run (`docs/fx26.md`, "Processes").
         let failed = !matches!(&out, Ok(o) if o.value.is_ok());
+        if !failed {
+            self.cache_built_ins();
+        }
         // No body of a region runs once a form is done: any region still
         // live was left by an error, or an escape no prompt ended.
         self.scheme.scope(|s| {
@@ -1391,7 +1399,14 @@ impl Fx26Session {
         let form = self.checker.read_in(FileId(0), &load).map_err(|e| e.message)?;
         let out = self.run(&form[0]).map_err(|e| e.message)?;
         out.value?;
-        let input = one_exp || crate::parse::takes_modules_at(&at, path);
+        self.write_module_fasl(path, &at, &text, one_exp, &crate::fasl::path_for(&at))
+    }
+
+    /// The `.fasl` of the module file at `at` (`path` as written, its text
+    /// `text`, of one expression if `one_exp`), just loaded, written to
+    /// `fasl` (`compile_module_file`): the `.fasl` made, or why not.
+    fn write_module_fasl(&mut self, path: &str, at: &std::path::Path, text: &str, one_exp: bool, fasl: &std::path::Path) -> Result<std::path::PathBuf, String> {
+        let input = one_exp || crate::parse::takes_modules_at(at, path);
         let key = format!("{}{}", if input { "input:" } else { "" }, at.display());
         let name = *self.checker.shared_loads.get(&key).ok_or_else(|| format!("`{path}` was not loaded"))?;
         let file = self.checker.shared_files.get(&name).cloned().ok_or_else(|| format!("`{path}` was not loaded"))?;
@@ -1399,7 +1414,7 @@ impl Fx26Session {
         // Either named by the standard type abbreviations it uses, as the
         // file sees them.
         self.checker.fasl_aliases_begin(self.checker.fasl_standard_aliases());
-        let made = match self.checker.read_in(FileId(0), &text) {
+        let made = match self.checker.read_in(FileId(0), text) {
             Ok(forms) if input => {
                 let maker = if one_exp { forms.first().cloned() } else { self.checker.modules_made(&forms) };
                 maker.and_then(|m| self.checker.fasl_made(name, &m)).unwrap_or_default()
@@ -1434,11 +1449,36 @@ impl Fx26Session {
             aliases,
         };
         let image = self.released(|s| s.fasl_image(&name, &dep_values)).map_err(|e| format!("`{path}`'s value cannot be kept: {e}"))?;
-        let fasl = crate::fasl::path_for(&at);
         let tmp = fasl.with_extension(format!("fasl-tmp{}", std::process::id()));
         std::fs::write(&tmp, header.file(&image)).map_err(|e| format!("cannot write `{}`: {e}", tmp.display()))?;
-        std::fs::rename(&tmp, &fasl).map_err(|e| format!("cannot write `{}`: {e}", fasl.display()))?;
-        Ok(fasl)
+        std::fs::rename(&tmp, fasl).map_err(|e| format!("cannot write `{}`: {e}", fasl.display()))?;
+        Ok(fasl.to_path_buf())
+    }
+
+    /// Each module file built in (`fx26:…`) that a form just loaded from its
+    /// source, not a `.fasl`, given one in the cache directory
+    /// (`fasl::path_for_load`), which later runs read instead: a built-in
+    /// has no directory for `fixpt compile-file` to write one in. Once a
+    /// session each; any failure only means none.
+    fn cache_built_ins(&mut self) {
+        if !self.reads_fasls() {
+            return;
+        }
+        let loaded: Vec<(String, std::path::PathBuf)> = self
+            .checker
+            .shared_files
+            .values()
+            .filter(|f| f.fasl.is_none() && self.shared_made.contains(&f.key))
+            .map(|f| (f.key.strip_prefix("input:").unwrap_or(&f.key).to_string(), f.path.clone()))
+            .filter(|(p, _)| crate::built_in_module(p).is_some() && !self.built_ins_cached.contains(p))
+            .collect();
+        for (path, at) in loaded {
+            self.built_ins_cached.insert(path.clone());
+            let (Some(text), Some(fasl)) = (crate::built_in_module(&path), crate::fasl::path_for_load(&at, &path, self.native_convention)) else { continue };
+            if fasl.parent().is_some_and(|d| std::fs::create_dir_all(d).is_ok()) {
+                let _ = self.write_module_fasl(&path, &at, text, false, &fasl);
+            }
+        }
     }
 
     /// Whether `effect` reads globals alone, each one whose definition ran
