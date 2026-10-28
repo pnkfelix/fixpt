@@ -288,11 +288,13 @@
     (lambda (t p n st)
       (tagcase (k-get t)
         (ty-lam (bs body)
-          (if (null? bs) (k-show-desc body p st) (k-show-body (k-resolve t) p st)))
+          (if (null? bs) (k-show-desc body p st) (k-show-body (k-canon-of (k-resolve t)) p st)))
         (else y (k-show-comp-named t p n st)))))
+  ;; Its class's first node (`k-canon-of`), as `k-show-on` shows: a list's
+  ;; is the one whose tail is itself.
   (k-show-comp-named (->* (int k-printing symbol k-shown) k-shown)
     (lambda (t p n st)
-      (let* ((r (k-resolve t))
+      (let* ((r (k-canon-of (k-resolve t)))
              (named (k-part-named (extract p 2) r))
              (name (if (null? named) (k-abbrev-by (extract p 3) r) named)))
         (if (or (null? name) (string=? (car name) (symbol->string n)))

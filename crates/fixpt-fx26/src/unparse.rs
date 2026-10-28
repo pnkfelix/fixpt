@@ -551,11 +551,12 @@ impl Checker {
                         Ty::Lam { params, body: crate::ast::D::Effect(e) } if params.is_empty() => self.show_effect(e),
                         // A description function, as its `dlambda`: a name
                         // of one does not stand bare (`not_applied`).
-                        Ty::Lam { params, .. } if !params.is_empty() => self.show_ty_body(self.arena.resolve(*x), path),
+                        Ty::Lam { params, .. } if !params.is_empty() => self.show_ty_body(self.canon(self.arena.resolve(*x)), path),
                         // What it is, not its own name: a `define-type` alias
-                        // of it, `(select m n)`, named `n` too.
+                        // of it, `(select m n)`, named `n` too. Its class's
+                        // first node, as `show_ty_on` shows (`canon`).
                         _ if self.abbreviation(self.arena.resolve(*x)) == Some(self.interner.name(*n)) => {
-                            self.show_ty_body(self.arena.resolve(*x), path)
+                            self.show_ty_body(self.canon(self.arena.resolve(*x)), path)
                         }
                         _ => self.show_ty_on(*x, path),
                     };
