@@ -3890,3 +3890,19 @@ frame past 4080 bytes and a field past 4095, so a maker of many items
   the 600-item maker runs as cellular code ("a frame too large", "a
   field too far"). A 900-item maker gives the same value collecting every
   100 safepoints.
+
+## 154. `new`, `make-array`, `rnew` and `rmake-array` in line on arm64 (2026-10-28)
+
+`TODO.md` §136, as x86_64's (§141): boxes, and arrays of at most
+`ARRAY_INLINE` (16) fields, made in line in the heap's free space or a
+region's chunk (`direct.rs`, beside `rcons`: `region_slot`, `heap_slot`,
+`room`, `box_at`, `array_at`); anything else calls out as before.
+
+- **Measured** (10 million each, after the cache is warm): `make-array 3`
+  and `new` together 0.37 s to 0.14 s, start-up included. Kayak's stage 0
+  (kayak 4aece254): 90.6G instructions to 90.3G, wall time the same
+  (4.2 s); its output the same as `boot/src/kfx/`.
+- **Test**: `direct.rs`'s `references_and_arrays_made_in_line`:
+  `programs/run/alloc-in-line.fx` as the Rust machine gives it, collecting
+  often too; on arm64, a box's header and field stored as a pair, an
+  array's fields by its loop. It fails without the change.

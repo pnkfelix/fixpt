@@ -1512,3 +1512,29 @@ fn inlined_calls_see_a_redefinition() {
     }
 }
 
+
+/// References and arrays made in line (`DONE.md` §154,
+/// `programs/run/alloc-in-line.fx`): every length either side of the most
+/// made so, in the heap and in a region, as the Rust machine gives them,
+/// collecting often too. On arm64 each is made by storing its header and
+/// fields, not by calling out (x86_64's are compared byte for byte with
+/// the compiler written in FX-26's, `native_direct_x64_flat.rs`).
+#[test]
+fn references_and_arrays_made_in_line() {
+    let defs = program("run/alloc-in-line");
+    for gc_every in [None, Some(7)] {
+        for (name, args) in [("in-heap", &[20, 0, 0][..]), ("in-region", &[20][..])] {
+            let r = run_collecting(&defs, name, args, FUEL, gc_every);
+            assert!(r.direct.as_ref().is_ok_and(|d| *d == r.rust), "{name}, collecting every {gc_every:?}: {:?} against {}", r.direct, r.rust);
+        }
+    }
+    if cfg!(target_arch = "aarch64") {
+        let defs = "(define* box-of (subr (maxeff (alloc @h)) (int) (ref int @h)) (lambda (n) (new n)))\n\
+                    (define* array-of (subr (maxeff (alloc @h)) (int) (arrayof int @h)) (lambda (n) (make-array 3 n)))";
+        // A box's header and field stored as a pair; an array's fields by
+        // its loop, from `x3`.
+        let (b, xs) = (code_only(defs, "box-of"), code_only(defs, "array-of"));
+        assert!(b.contains("stp x15, x1, [x11, #0]"), "{b}");
+        assert!(xs.contains("str x3, [x17, #0]"), "{xs}");
+    }
+}

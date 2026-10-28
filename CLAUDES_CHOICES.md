@@ -2219,8 +2219,8 @@ The user: "Yeah do 1, 2, and 3" (names, lines, values). Names first.
   named would not have changed its numbers. Both are done.
 - **16 fields in line**, a loop storing them: s7st's frames are under 8;
   the loop keeps the code short for every length.
-- **arm64 left** (TODO §136): untestable here, and a mistake there would
-  corrupt the heap.
+- **arm64 left** (TODO §136, since done: `DONE.md` §154): untestable here,
+  and a mistake there would corrupt the heap.
 
 ## Lines for `gdb` and `lldb` (2026-10-27)
 

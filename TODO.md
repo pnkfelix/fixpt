@@ -3297,13 +3297,6 @@ naming through a parameter can reach what its type does not give. The
 type should be refused where it is read, as `(select m x)` of a module
 bound there is (`modules/restrict-unnamed.fx` shows the latter).
 
-## 136. `new`, `make-array`, `rnew` and `rmake-array` in line on arm64 (2026-10-27)
-
-x86_64's native convention makes them in line (DONE §141); arm64's
-(`direct.rs`'s `procedure`, beside its `rcons`) does not.
-
-Deferred because: arm64 code cannot be run on the machine it was done on.
-
 ## 138. Checking a program of module makers is slow (Heist's, 2026-10-28)
 
 Heist's editor as makers (`load-input` files, each a `lambda` around a
