@@ -120,7 +120,7 @@ fn every_field_placed(c: &Checker) {
         // by `scratch`; and what remembers them, cleared there.
         arena: _, interner: _, facts: _, regions_memo: _, regions_open: _, arrow_star_tys: _,
         // Printing's, set and cleared around each print.
-        print_names: _, print_expanded: _, print_cycles: _, print_for_fasl: _, print_subrs: _, print_params: _, print_tys: _, print_aliases: _, show_marks: _,
+        print_names: _, print_expanded: _, print_cycles: _, print_for_fasl: _, print_canon: _, print_shallow: _, print_subrs: _, print_params: _, print_tys: _, print_aliases: _, show_marks: _,
         // Set around a single unification or check, and put back there.
         unify_exact: _, unify_upper: _, arrow_star: _, holes: _, hole_hint: _,
         // A count of regions made, which only grows: a name made once is

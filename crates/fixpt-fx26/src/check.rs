@@ -393,6 +393,13 @@ pub struct Checker {
     /// as a `select` of its load), and no name in scope used for a type,
     /// which where the type is read back may not be.
     pub(crate) print_for_fasl: std::cell::RefCell<Option<HashMap<DVar, String>>>,
+    /// While a type with a cycle is printed: each node it reaches printed as
+    /// its class's first, the classes those of the type's minimal graph, so
+    /// that a type prints as itself however it was written or made (the
+    /// user's: a type is a semantic object). And while those classes are
+    /// found, each node's own part printed alone, its types `·`.
+    pub(crate) print_canon: std::cell::RefCell<Option<HashMap<TyId, TyId>>>,
+    pub(crate) print_shallow: std::cell::Cell<bool>,
     /// While it prints so: how many procedure types the one printing is in;
     /// the outermost names its parameters where a type in it selects from
     /// one, `(%p.1 : T)`, as `(select $1 t)` would not read back.
@@ -922,6 +929,8 @@ impl Checker {
             print_names: std::cell::RefCell::new(Vec::new()),
             print_expanded: std::cell::Cell::new(false),
             print_for_fasl: std::cell::RefCell::new(None),
+            print_canon: std::cell::RefCell::new(None),
+            print_shallow: std::cell::Cell::new(false),
             print_subrs: std::cell::Cell::new(0),
             print_params: std::cell::RefCell::new(None),
             print_tys: std::cell::RefCell::new(HashMap::new()),

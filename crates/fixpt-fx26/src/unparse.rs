@@ -2,6 +2,7 @@
 
 use crate::ast::{Atom, Effect, Region, Ty, TyId};
 use crate::check::Checker;
+use std::collections::HashMap;
 
 impl Checker {
     /// Variable `v`'s name, or, while two types are shown apart
@@ -243,13 +244,86 @@ impl Checker {
     /// recursive type prints as far as its first repetition, which is shown
     /// as `…` — enough to read, and it always terminates.
     pub fn show_ty(&self, t: TyId) -> String {
-        self.show_ty_on(t, &mut Vec::new())
+        self.canonically(t, |c| c.show_ty_on(t, &mut Vec::new()))
     }
 
     /// A type written out one level, even if it has a name: what a
     /// `define-type` defined the name as.
     pub fn show_definition(&self, t: TyId) -> String {
-        self.show_ty_body(self.arena.resolve(t), &mut Vec::new())
+        self.canonically(t, |c| c.show_ty_body(c.canon(c.arena.resolve(t)), &mut Vec::new()))
+    }
+
+    /// What `show` prints of `t`, each node it reaches printed as its class
+    /// in `t`'s minimal graph (`print_canon`), if `t` has a cycle and is
+    /// the outermost type being printed.
+    fn canonically(&self, t: TyId, show: impl FnOnce(&Self) -> String) -> String {
+        if self.print_canon.borrow().is_some() || self.print_shallow.get() {
+            return show(self);
+        }
+        let classes = self.minimal_classes(t);
+        let set = classes.is_some();
+        if set {
+            *self.print_canon.borrow_mut() = classes;
+        }
+        let out = show(self);
+        if set {
+            *self.print_canon.borrow_mut() = None;
+        }
+        out
+    }
+
+    /// Node `t` as its class's first, while a type is printed canonically.
+    fn canon(&self, t: TyId) -> TyId {
+        self.print_canon.borrow().as_ref().and_then(|m| m.get(&t).copied()).unwrap_or(t)
+    }
+
+    /// The classes of the nodes `t` reaches, those of its minimal graph
+    /// (Moore's refinement: alike if their own parts print alike and their
+    /// types are alike, in order), each node mapped to its class's first in
+    /// a walk from `t`; none if `t` reaches no cycle, or no two are alike.
+    fn minimal_classes(&self, t: TyId) -> Option<HashMap<TyId, TyId>> {
+        let root = self.arena.resolve(t);
+        let (mut order, mut index): (Vec<TyId>, HashMap<TyId, usize>) = (Vec::new(), HashMap::new());
+        let mut kids: Vec<Vec<TyId>> = Vec::new();
+        let mut todo = vec![root];
+        while let Some(n) = todo.pop() {
+            if index.contains_key(&n) {
+                continue;
+            }
+            index.insert(n, order.len());
+            order.push(n);
+            let mut ks = Vec::new();
+            self.each_ty_kid(n, |k| ks.push(self.arena.resolve(k)));
+            todo.extend(ks.iter().rev());
+            kids.push(ks);
+        }
+        let kids: Vec<Vec<usize>> = kids.iter().map(|ks| ks.iter().map(|k| index[k]).collect()).collect();
+        if !has_cycle(&kids) {
+            return None;
+        }
+        self.print_shallow.set(true);
+        let labels: Vec<String> = order.iter().map(|n| self.show_ty_body(*n, &mut Vec::new())).collect();
+        self.print_shallow.set(false);
+        let mut class: Vec<usize> = numbered(labels.iter());
+        let mut count = class.iter().max().map_or(0, |m| m + 1);
+        loop {
+            let keys: Vec<(usize, Vec<usize>)> = (0..order.len()).map(|i| (class[i], kids[i].iter().map(|k| class[*k]).collect())).collect();
+            let next = numbered(keys.iter());
+            let n = next.iter().max().map_or(0, |m| m + 1);
+            class = next;
+            if n == count {
+                break;
+            }
+            count = n;
+        }
+        if count == order.len() {
+            return None;
+        }
+        let mut first: HashMap<usize, TyId> = HashMap::new();
+        for (i, n) in order.iter().enumerate() {
+            first.entry(class[i]).or_insert(*n);
+        }
+        Some(order.iter().enumerate().map(|(i, n)| (*n, first[&class[i]])).collect())
     }
 
     fn abbreviation(&self, t: TyId) -> Option<&str> {
@@ -342,7 +416,10 @@ impl Checker {
     }
 
     fn show_ty_on(&self, t: TyId, path: &mut Vec<TyId>) -> String {
-        let t = self.arena.resolve(t);
+        if self.print_shallow.get() {
+            return "·".into();
+        }
+        let t = self.canon(self.arena.resolve(t));
         if let Some(shown) = self.print_tys.borrow().get(&t) {
             return shown.clone();
         }
@@ -510,7 +587,7 @@ impl Checker {
             Ty::Nat(crate::ast::Size::Finite) => "nat".to_string(),
             Ty::Nat(size) => format!("(nat {})", self.show_size(&size)),
             // FX-87's `listof`: a pair whose tail is itself.
-            Ty::Pair(a, b, r, true) if self.arena.resolve(b) == t => {
+            Ty::Pair(a, b, r, true) if self.canon(self.arena.resolve(b)) == t => {
                 format!("(listof {} {})", self.show_ty_on(a, path), self.show_region(r))
             }
             Ty::PromptTag { answer, payload, effect, region } => format!(
@@ -597,4 +674,44 @@ fn named_marks(s: &str, name: impl Fn(char, u32) -> String) -> String {
 /// Whether `name` occurs in `s` as a symbol of its own.
 fn mentions_token(s: &str, name: &str) -> bool {
     ["(", " "].iter().any(|b| [")", " "].iter().any(|a| s.contains(&format!("{b}{name}{a}"))))
+}
+
+/// Whether the graph of `kids` (each node's successors) has a cycle.
+fn has_cycle(kids: &[Vec<usize>]) -> bool {
+    // 0 unseen, 1 on the way down, 2 done.
+    let mut state = vec![0u8; kids.len()];
+    for start in 0..kids.len() {
+        if state[start] != 0 {
+            continue;
+        }
+        let mut stack = vec![(start, 0usize)];
+        state[start] = 1;
+        while let Some((n, i)) = stack.pop() {
+            if i < kids[n].len() {
+                stack.push((n, i + 1));
+                let k = kids[n][i];
+                match state[k] {
+                    1 => return true,
+                    0 => {
+                        state[k] = 1;
+                        stack.push((k, 0));
+                    }
+                    _ => {}
+                }
+            } else {
+                state[n] = 2;
+            }
+        }
+    }
+    false
+}
+
+/// Each of `xs` numbered by its first among them that is equal to it.
+fn numbered<'a, T: Eq + std::hash::Hash + 'a>(xs: impl Iterator<Item = &'a T>) -> Vec<usize> {
+    let mut seen: HashMap<&T, usize> = HashMap::new();
+    xs.map(|x| {
+        let n = seen.len();
+        *seen.entry(x).or_insert(n)
+    })
+    .collect()
 }

@@ -64,13 +64,41 @@
                        acc
                        (all (cdr xs) (chars (car xs) (- (string-length (car xs)) 1) acc))))))
         (list->string (all xs nil))))))
+;; While a type with a cycle is shown: each node it reaches shown as its
+;; class's first, the classes those of the type's minimal graph (Moore's
+;; refinement), so that a type shows as itself however it was written or
+;; made (the user's: a type is a semantic object), as the Rust checker's
+;; `minimal_classes` has it. And while those are found, each node's own
+;; part shown alone, its types `·`. Each node's place in the walk of the
+;; type shown (`k-cpos`), valid where `k-cwalk` is this walk's number.
+(define k-canon-on (ref bool @t) (new #f))
+(define k-shallow (ref bool @t) (new #f))
+(define k-cpos (ref (arrayof int @t) @t) (new (make-array 512 0)))
+(define k-cwalk (ref (arrayof int @t) @t) (new (make-array 512 0)))
+(define k-cepoch (ref int @t) (new 0))
+;; Each place's class's first node.
+(define k-cfirst (ref (arrayof int @t) @t) (new (make-array 1 0)))
+;; Node `t`'s place in this walk, or -1.
+(define k-cpos-of (->* (int) int)
+  (lambda (t)
+    (if (and (< t (array-length (get k-cwalk))) (= (array-ref (get k-cwalk) t) (get k-cepoch)))
+        (array-ref (get k-cpos) t)
+        -1)))
+;; Node `t` as its class's first, while a type is shown so.
+(define k-canon-of (->* (int) int)
+  (lambda (t)
+    (if (get k-canon-on)
+        (let ((i (k-cpos-of t))) (if (< i 0) t (array-ref (get k-cfirst) i)))
+        t)))
 (define-rec
   (k-show-on (->* (int k-printing k-shown) k-shown)
     (lambda (t path st)
-      (let* ((t (k-resolve t))
-             (named (k-part-named (extract path 2) t))
-             (name (if (null? named) (k-abbrev-by (extract path 3) t) named)))
-        (if (null? name) (k-show-body t path st) (k-put (car name) st)))))
+      (if (get k-shallow)
+          (k-put "·" st)
+          (let* ((t (k-canon-of (k-resolve t)))
+                 (named (k-part-named (extract path 2) t))
+                 (name (if (null? named) (k-abbrev-by (extract path 3) t) named)))
+            (if (null? name) (k-show-body t path st) (k-put (car name) st))))))
   ;; Each of `ts`, `sep` between each two.
   (k-show-seq (->* (k-ids k-printing string k-shown) k-shown)
     (lambda (ts path sep st)
@@ -199,7 +227,7 @@
         (ty-icell (a r) (k-show-in-region "(icell " a r p st))
         (ty-place (r) (k-put (k-cat3 "(place " (k-region-show r) ")") st))
         (ty-pair (a b r nl)
-          (if (and nl (= (k-resolve b) t))
+          (if (and nl (= (k-canon-of (k-resolve b)) t))
               (k-show-in-region "(listof " a r p st)
               (let* ((st (k-put (if nl "(union nil (pairof " "(pairof ") st))
                      (st (k-show-on b p (k-put " " (k-show-on a p st))))
@@ -461,10 +489,203 @@
                             (k-sys-subr bs body a b ta tb))
                       a b)))
       (else x (k-sys-subr nil t a b ta tb)))))
+;;; ------------------------------------------------------------ canonical cycles
+(define k-canon-onto (->* (k-ids k-ids) k-ids)
+  (lambda (xs ys) (if (null? xs) ys (cons (car xs) (k-canon-onto (cdr xs) ys)))))
+(define k-canon-resolved (->* (k-ids) k-ids)
+  (lambda (xs) (if (null? xs) nil (cons (k-resolve (car xs)) (k-canon-resolved (cdr xs))))))
+
+;; The types `t` is made of, one level down, each followed through its
+;; links: as `k-ty-kids` has them (`check-read-helpers.fx`).
+(define k-canon-kids (->* (int) k-ids)
+  (lambda (t)
+    (letrec ((ds (->* (k-descs) k-ids)
+                (lambda (xs)
+                  (if (null? xs)
+                      nil
+                      (tagcase (car xs)
+                        (dt (x) (cons x (ds (cdr xs)))) (df (x) (cons x (ds (cdr xs))))
+                        (else y (ds (cdr xs)))))))
+             (parts (->* (k-parts) k-ids)
+               (lambda (ps) (if (null? ps) nil (cons (extract (car ps) 2) (parts (cdr ps)))))))
+      (k-canon-resolved
+       (tagcase (k-get t)
+         (ty-subr (e ps r cv spc) (k-canon-onto ps (list r)))
+         (ty-poly (bs x) (list x)) (ty-ref (a r) (list a)) (ty-array (a nz r) (list a))
+         (ty-icell (a r) (list a)) (ty-markkey (a r) (list a)) (ty-pair (a d r nl) (list a d))
+         (ty-tag (a h e r) (list a h)) (ty-comp (x a e r once) (list x a))
+         (ty-product (ps) (parts ps)) (ty-sum (ps) (parts ps)) (ty-bloblet (fs z r) fs)
+         (ty-union (ms) ms) (ty-named (g xs) (ds xs)) (ty-app (f xs) (cons f (ds xs)))
+         (ty-lam (bs x) (ds (list x))) (ty-nlist (e z r) (list e))
+         (ty-module (abs xs vs) (k-canon-onto (parts xs) (parts vs)))
+         (else y nil))))))
+;; A new array of `n` from `xs`, the rest `fill`.
+(define k-cgrown (->* ((arrayof int @t) int int) (arrayof int @t))
+  (lambda (xs n fill)
+    (let ((ys (the (arrayof int @t) (make-array n fill))))
+      (letrec ((copy (->* (int) (arrayof int @t))
+                 (lambda (i)
+                   (if (>= i (array-length xs))
+                       ys
+                       (begin (array-set! ys i (array-ref xs i)) (copy (+ i 1)))))))
+        (copy 0)))))
+;; Node `t` put at place `i` of this walk.
+(define k-cpos-set! (->* (int int) unit)
+  (lambda (t i)
+    (begin
+      (if (< t (array-length (get k-cwalk)))
+          #u
+          (let ((n (+ t (array-length (get k-cwalk)))))
+            (begin (set k-cwalk (k-cgrown (get k-cwalk) n -1))
+                   (set k-cpos (k-cgrown (get k-cpos) n 0)))))
+      (array-set! (get k-cwalk) t (get k-cepoch))
+      (array-set! (get k-cpos) t i))))
+;; The nodes `todo` and what they reach, each once, the last met first, onto
+;; `acc`, each put at its place in this walk from `n` (`k-cpos-set!`).
+(define k-canon-walk (->* (k-ids k-ids int) k-ids)
+  (lambda (todo acc n)
+    (cond ((null? todo) acc)
+          ((>= (k-cpos-of (car todo)) 0) (k-canon-walk (cdr todo) acc n))
+          (else
+           (begin (k-cpos-set! (car todo) n)
+                  (k-canon-walk (k-canon-onto (k-canon-kids (car todo)) (cdr todo))
+                                (cons (car todo) acc) (+ n 1)))))))
+;; Whether a walk down from place `i` comes back to a place on its way
+;; (`color`: 1 on the way, 2 done).
+(define-rec
+  (k-canon-cyclic? (->* (int (arrayof int @t) (arrayof k-ids @t)) bool)
+    (lambda (i color kids)
+      (let ((c (array-ref color i)))
+        (cond ((= c 1) #t)
+              ((= c 2) #f)
+              (else (begin (array-set! color i 1)
+                           (let ((r (k-canon-any? (array-ref kids i) color kids)))
+                             (begin (array-set! color i 2) r))))))))
+  (k-canon-any? (->* (k-ids (arrayof int @t) (arrayof k-ids @t)) bool)
+    (lambda (ts color kids)
+      (and (not (null? ts))
+           (or (k-canon-cyclic? (k-cpos-of (car ts)) color kids)
+               (k-canon-any? (cdr ts) color kids))))))
+(define-type k-cbucket (listof (pairof string int @t) @t))
+;; Class `k`'s number for key `s` in `buckets`, if it is there; -1.
+(define k-cbucket-find (->* (k-cbucket string) int)
+  (lambda (b s)
+    (cond ((null? b) -1)
+          ((string=? (car (car b)) s) (cdr (car b)))
+          (else (k-cbucket-find (cdr b) s)))))
+;; Each of the `n` places numbered by the first whose key, `keys[i]`, is
+;; its own: each's class in `cls`, and how many.
+(define k-canon-number (->* ((arrayof string @t) (arrayof int @t)) int)
+  (lambda (keys cls)
+    (let* ((n (array-length keys)) (m (+ (* 2 n) 1))
+           (buckets (the (arrayof k-cbucket @t) (make-array m nil))))
+      (letrec ((each (->* (int int) int)
+                 (lambda (i k)
+                   (if (>= i n)
+                       k
+                       (let* ((s (array-ref keys i)) (h (modulo (string-hash s) m))
+                              (c (k-cbucket-find (array-ref buckets h) s)))
+                         (if (>= c 0)
+                             (begin (array-set! cls i c) (each (+ i 1) k))
+                             (begin (array-set! buckets h
+                                                (cons (cons s k) (array-ref buckets h)))
+                                    (array-set! cls i k)
+                                    (each (+ i 1) (+ k 1)))))))))
+        (each 0 0)))))
+;; Classes `xs` of places, in order, as a key: their numbers, `,` between.
+(define k-canon-key (->* ((arrayof int @t) k-ids) string)
+  (lambda (cls xs)
+    (if (null? xs)
+        ""
+        (string-append (int->string (array-ref cls (k-cpos-of (car xs)))) ","
+                       (k-canon-key cls (cdr xs))))))
+;; Classes `cls` (`k` of them) refined until their count is the same twice.
+(define k-canon-refine
+  (->* ((arrayof int @t) (arrayof k-ids @t) (arrayof int @t) int) (arrayof int @t))
+  (lambda (nodes kids cls k)
+    (let* ((n (array-length nodes))
+           (keys (the (arrayof string @t) (make-array n "")))
+           (next (the (arrayof int @t) (make-array n 0))))
+      (letrec ((fill (->* (int) unit)
+                 (lambda (i)
+                   (if (>= i n)
+                       #u
+                       (let ((own (int->string (array-ref cls i))))
+                         (begin (array-set! keys i
+                                            (string-append own ":"
+                                                           (k-canon-key cls (array-ref kids i))))
+                                (fill (+ i 1))))))))
+        (begin (fill 0)
+               (let ((k2 (k-canon-number keys next)))
+                 (if (= k2 k) next (k-canon-refine nodes kids next k2))))))))
+;; Whether `t` reaches a cycle: if so, each place's class's first in
+;; `k-cfirst`, and `k-canon-on` set. `p` the path a type is shown from.
+(define k-canon-set! (->* (int k-printing) bool)
+  (lambda (t p)
+    (let* ((t (k-resolve t))
+           (epoch (set k-cepoch (+ (get k-cepoch) 1)))
+           (order (k-ids-reversed (k-canon-walk (list t) nil 0) nil))
+           (n (k-length order))
+           (nodes (the (arrayof int @t) (make-array n 0)))
+           (kids (the (arrayof k-ids @t) (make-array n nil)))
+           (placed (k-canon-place order 0 nodes kids))
+           (color (the (arrayof int @t) (make-array n 0))))
+      (and (k-canon-cyclic? 0 color kids)
+           (let* ((labels (the (arrayof string @t) (make-array n "")))
+                  (shallow (set k-shallow #t))
+                  (labeled (k-canon-label nodes labels p 0))
+                  (unshallow (set k-shallow #f))
+                  (cls (the (arrayof int @t) (make-array n 0)))
+                  (k (k-canon-number labels cls))
+                  (cls (k-canon-refine nodes kids cls k))
+                  (first (the (arrayof int @t) (make-array n -1)))
+                  (canon (the (arrayof int @t) (make-array n 0))))
+             (begin (k-canon-firsts nodes cls first 0)
+                    (k-canon-fill nodes cls first canon 0)
+                    (set k-cfirst canon)
+                    (set k-canon-on #t)
+                    #t))))))
+;; Places `i`… of `order`: each's node, and its kids.
+(define k-canon-place (->* (k-ids int (arrayof int @t) (arrayof k-ids @t)) unit)
+  (lambda (order i nodes kids)
+    (if (null? order)
+        #u
+        (begin (array-set! nodes i (car order))
+               (array-set! kids i (k-canon-kids (car order)))
+               (k-canon-place (cdr order) (+ i 1) nodes kids)))))
+;; Each place's node's own part, shown alone (`k-shallow`).
+(define k-canon-label (->* ((arrayof int @t) (arrayof string @t) k-printing int) unit)
+  (lambda (nodes labels p i)
+    (if (>= i (array-length nodes))
+        #u
+        (let ((shown (k-show-body (array-ref nodes i) p k-shown-none)))
+          (begin (array-set! labels i (k-pieces-string (extract shown 1)))
+                 (k-canon-label nodes labels p (+ i 1)))))))
+;; Each class's first place, by the class, in `first`.
+(define k-canon-firsts (->* ((arrayof int @t) (arrayof int @t) (arrayof int @t) int) unit)
+  (lambda (nodes cls first i)
+    (if (>= i (array-length nodes))
+        #u
+        (let ((c (array-ref cls i)))
+          (begin (if (< (array-ref first c) 0) (array-set! first c i) #u)
+                 (k-canon-firsts nodes cls first (+ i 1)))))))
+;; Each place's class's first node, by the place, in `canon`.
+(define k-canon-fill
+  (->* ((arrayof int @t) (arrayof int @t) (arrayof int @t) (arrayof int @t) int) unit)
+  (lambda (nodes cls first canon i)
+    (if (>= i (array-length nodes))
+        #u
+        (begin (array-set! canon i (array-ref nodes (array-ref first (array-ref cls i))))
+               (k-canon-fill nodes cls first canon (+ i 1))))))
+(define k-ids-reversed (->* (k-ids k-ids) k-ids)
+  (lambda (xs acc) (if (null? xs) acc (k-ids-reversed (cdr xs) (cons (car xs) acc)))))
 ;; A type. One `define-type` named prints as its name; any other recursive
-;; type as `(mu %d …)`, `%d` naming the cycle.
+;; type as `(mu %d …)`, `%d` naming the cycle: its minimal one
+;; (`k-canon-set!`).
 (define k-show-ty (->* (int) string)
   (lambda (t)
     (let* ((trs (the k-atrees (list (k-atree-now))))
-           (p (product (1 (the k-ids nil)) (2 (the k-parts nil)) (3 trs))))
-      (k-pieces-string (extract (k-show-on t p k-shown-none) 1))))))))
+           (p (product (1 (the k-ids nil)) (2 (the k-parts nil)) (3 trs)))
+           (on (and (not (get k-canon-on)) (not (get k-shallow)) (k-canon-set! t p)))
+           (shown (k-pieces-string (extract (k-show-on t p k-shown-none) 1))))
+      (begin (if on (set k-canon-on #f) #u) shown)))))))

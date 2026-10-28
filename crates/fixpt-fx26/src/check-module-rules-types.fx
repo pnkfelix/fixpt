@@ -74,7 +74,7 @@
                        (k-thunk k-say)
                        k-te))
             (val k-star-mistake
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
+                 (subr (maxeff (write @t) (alloc @t) (read @globals) (read @t) spin)
                        (string symbol int string)
                        string))
             (val k-made-of (subr (alloc @t) (k-parts k-parts k-parts k-eff) k-made))

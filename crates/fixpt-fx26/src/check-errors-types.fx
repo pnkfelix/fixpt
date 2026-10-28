@@ -143,8 +143,10 @@
             (val k-prompt-body-error (subr (read @globals) (string string) string))
             (val k-with-not-module (subr (read @globals) (string string) string))
             (val k-handler-gives
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
+                 (subr (maxeff (write @t) (alloc @t) (read @globals) (read @t) spin)
                        (int int string)
                        string))
             (val k-handler-wants
-                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int int) string))))
+                 (subr (maxeff (write @t) (alloc @t) (read @globals) (read @t) spin)
+                       (int int)
+                       string))))
