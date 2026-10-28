@@ -2580,6 +2580,10 @@ Either way, the type user code is checked against: a command's effect
 fixed (an editor effect beside `(io terminal)`), so hooks and keymaps
 are lists and tables of procedures of one type.
 
+For user code in another address space (an IDE on a headset, its user's
+code compiled by WebKit), a design: `docs/research/closures-at-places.md`
+(2026-10-28): sessions as values, closures located at a place.
+
 ## 106. A failing command, and `C-g` (the user's editor, 2026-10-18)
 
 An editor goes on when a command fails, and stops a command on `C-g`.
