@@ -864,6 +864,12 @@ fn st_off(f: usize) -> u32 {
 /// The most a stack cache may be.
 const MOST_CACHE_WORDS: u64 = 1 << 22;
 const STACK_SLACK: u64 = 64 * 1024;
+/// The most bytes a frame may take: the stack's limit leaves room below it
+/// for any one frame. A slot is reached by `ldr`'s scaled offset (32 KiB)
+/// on arm64, by a displacement on x86_64; a frame past one `sub`'s 4095
+/// bytes is pushed by two (`push_frame`). A module's maker keeps all its
+/// items in one (Heist's, 2026-10-28; `DONE.md` §145, §153).
+const MOST_FRAME: usize = STACK_SLACK as usize / 4;
 
 /// The stack cache's size by default, in words: small, since every
 /// collection flushes all of it (Larceny's, `docs/research/
@@ -1638,10 +1644,17 @@ fn bloblet_sizes(bytes: Value, fields: Value) -> Option<(usize, usize)> {
 /// back to): a frame, the arguments into the state, call-out `n` (a
 /// `Callout::Foreign`), and back with its value; or, if it failed, the
 /// trap. One for the machine.
-/// A frame of `size` bytes pushed (a multiple of 16, at most 4095): its
-/// link and `second` stored, `x29` at its link, its header word below.
+/// A frame of `size` bytes pushed (a multiple of 16, at most
+/// `MOST_FRAME`): its link and `second` stored, `x29` at its link, its
+/// header word below. Past one `sub`'s reach, its 4 KB pages first.
 fn push_frame(a: &mut Asm, second: Reg, size: u64) {
-    a.e(sub_imm(SP, SP, size as u32));
+    let (pages, rest) = ((size >> 12) as u32, (size & 0xfff) as u32);
+    if pages > 0 {
+        a.e(sub_imm_pages(SP, SP, pages));
+    }
+    if rest > 0 || pages == 0 {
+        a.e(sub_imm(SP, SP, rest));
+    }
     a.e(stp(FRAME, second, SP, 8));
     a.e(add_imm(FRAME, SP, 8));
 }
@@ -1650,7 +1663,13 @@ fn push_frame(a: &mut Asm, second: Reg, size: u64) {
 /// back.
 fn pop_frame(a: &mut Asm, size: u64) {
     a.e(ldp(FRAME, LINK, SP, 8));
-    a.e(add_imm(SP, SP, size as u32));
+    let (pages, rest) = ((size >> 12) as u32, (size & 0xfff) as u32);
+    if pages > 0 {
+        a.e(add_imm_pages(SP, SP, pages));
+    }
+    if rest > 0 || pages == 0 {
+        a.e(add_imm(SP, SP, rest));
+    }
 }
 
 fn common_foreign(n: usize) -> Vec<u32> {
@@ -2017,7 +2036,7 @@ impl Compiling<'_> {
         // The frame: the link and return address, its stack map (a header,
         // the mask of the slots traced), register code's slots, then this
         // code bloblet and the closure running.
-        if frame.is_some_and(|m| 32 + 8 * (m + 2) > 4080) {
+        if frame.is_some_and(|m| 32 + 8 * (m + 2) > MOST_FRAME) {
             return decline("a frame too large".into());
         }
         // The slots only `f64` operations read hold the `f64` raw
@@ -2674,14 +2693,15 @@ impl Compiling<'_> {
                     a.bind(back);
                 }
                 // A field past `ldur`'s reach (a module of more than 31
-                // members, say) through its address, in X16, as far as one
-                // `sub` reaches.
+                // members, say) through its address, in X16: by one `sub`,
+                // or past its reach by the offset (any distance, as on
+                // x86_64).
                 "field" => {
                     let off = field_off(k(o(0)));
                     if off < -4095 {
-                        return decline("a field too far".into());
-                    }
-                    if off < -256 {
+                        a.es(&mov_imm64(X16, off as u64));
+                        a.e(ldr_reg(RESULT, RESULT, X16));
+                    } else if off < -256 {
                         a.e(sub_imm(X16, RESULT, off.unsigned_abs() as u32));
                         a.e(ldur(RESULT, X16, 0));
                     } else {
@@ -2690,16 +2710,21 @@ impl Compiling<'_> {
                 }
                 "setfield" => {
                     let off = field_off(k(o(0)));
+                    let cards = st_off(offset_of!(DState, cards));
                     if off < -4095 {
-                        return decline("a field too far".into());
-                    }
-                    if off < -256 {
-                        a.e(sub_imm(X16, RESULT, off.unsigned_abs() as u32));
+                        a.es(&mov_imm64(X16, off as u64));
+                        a.e(add(X16, RESULT, X16));
                         a.e(stur(reg(o(1)), X16, 0));
+                        a.es(&card_mark(X16, 0, ST, cards, X16, X17));
                     } else {
-                        a.e(stur(reg(o(1)), RESULT, off));
+                        if off < -256 {
+                            a.e(sub_imm(X16, RESULT, off.unsigned_abs() as u32));
+                            a.e(stur(reg(o(1)), X16, 0));
+                        } else {
+                            a.e(stur(reg(o(1)), RESULT, off));
+                        }
+                        a.es(&card_mark(RESULT, off, ST, cards, X16, X17));
                     }
-                    a.es(&card_mark(RESULT, off, ST, st_off(offset_of!(DState, cards)), X16, X17));
                 }
                 // Control, on the native stack (`docs/research/
                 // native-conventions.md`, step 5). A prompt, and a mark, is a

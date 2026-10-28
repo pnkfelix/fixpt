@@ -36,7 +36,7 @@
 
 use super::{
     overflow_info, Callout, Compiling, DState, Field, BLOBLET, CONS, CONTROL_FRAME, FAILED, MAP_BITS, MARK_MARK, NOT_A_PAIR, OUT_OF_FUEL, POLL, POLL_DONE,
-    PRIM_FAILED, PROMPT_MARK, STACK_OVERFLOW, STACK_SLACK, STUB_FRAME, TRAPS,
+    MOST_FRAME, PRIM_FAILED, PROMPT_MARK, STACK_OVERFLOW, STACK_SLACK, STUB_FRAME, TRAPS,
 };
 use super::reps::{self, Convert, Rep};
 use crate::x86_64::*;
@@ -434,12 +434,6 @@ pub(super) fn common_trap() -> Vec<u8> {
 /// A frame of `size` bytes pushed below the stack's top, as
 /// `super::push_frame`: its link and `second` stored, `fp` at its link, its
 /// header word below.
-/// The most bytes a frame may take: any displacement reaches a slot (32
-/// bits, not arm64's 12), and the stack's limit leaves room below it for
-/// any one frame (`STACK_SLACK`). A module's maker keeps all its items in
-/// one (Heist's, 2026-10-28).
-pub(super) const MOST_FRAME: usize = STACK_SLACK as usize / 4;
-
 fn push_frame(a: &mut Asm, second: Reg, size: u64) {
     a.e(sub_imm(SP, size as i32));
     a.e(store(m(SP, 8), FRAME));

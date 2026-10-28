@@ -3720,7 +3720,7 @@ cellular code: 39 µs a key typing in a burst, against 7 as globals.
 - **Frames on x86_64 up to `MOST_FRAME`**, 16 KiB, a quarter of the
   stack's slack, not arm64's 4080 bytes; and any field's displacement, in
   32 bits (`x64.rs`, `native-direct-x64.fx`, `-proc.fx`). arm64 is
-  TODO §137.
+  §153.
 - **Heist's numbers**, against its globals on the same build: typing 7 µs
   a key in a burst and 431 µs one at a time, as globals (7 and 433).
   Start-up is 6.0 s against 2.9 s: making the modules is checking them,
@@ -3870,3 +3870,23 @@ no binders around its `lambda`, which `load-moduleof` refused ("is a
 both parsers (`parse_load_file`, `loaded-made`): `((load-module "f"))`
 makes it, `(load-moduleof "f")` types it. Test:
 `modules/module-parameters-none.fx`.
+
+## 153. A module's maker on arm64: frames past 4080 bytes (Heist's, 2026-10-28)
+
+`TODO.md` §137, as x86_64's (§145). arm64's native convention declined a
+frame past 4080 bytes and a field past 4095, so a maker of many items
+(Heist's `frame.fx`, about 450 values) ran as cellular code on the Mac.
+
+- **Frames up to `MOST_FRAME`** (16 KiB, a quarter of the stack's slack),
+  now one constant for both back ends (`direct.rs`): a frame past one
+  `sub`'s 4095 bytes is pushed and popped by its 4 KB pages, then the rest
+  (`sub_imm_pages`). Its slots were already in reach: `ldr`'s scaled
+  offset goes to 32 KiB.
+- **Fields at any distance**: past one `sub`'s reach, by the offset in a
+  register (`ldr xR, [x0, x16]`), and a store's card marked at the
+  address so made.
+- **Tests**: `module_makers.rs`, the Rust compiler's two cases, now on
+  arm64 too (the FX-26 compiler makes only x86_64's); without the change
+  the 600-item maker runs as cellular code ("a frame too large", "a
+  field too far"). A 900-item maker gives the same value collecting every
+  100 safepoints.

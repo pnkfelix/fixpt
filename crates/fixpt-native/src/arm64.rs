@@ -206,6 +206,12 @@ pub fn sub_imm(d: Reg, n: Reg, imm: u32) -> u32 {
     assert!(imm < 4096);
     0xD100_0000 | imm << 10 | r(n) << 5 | r(d)
 }
+/// `sub xd, xn, #imm, lsl #12` (0..4096): `imm` 4 KB pages.
+#[track_caller]
+pub fn sub_imm_pages(d: Reg, n: Reg, imm: u32) -> u32 {
+    assert!(imm < 4096);
+    0xD140_0000 | imm << 10 | r(n) << 5 | r(d)
+}
 /// `add xd, xn, xm`.
 pub fn add(d: Reg, n: Reg, m: Reg) -> u32 {
     0x8B00_0000 | r(m) << 16 | r(n) << 5 | r(d)

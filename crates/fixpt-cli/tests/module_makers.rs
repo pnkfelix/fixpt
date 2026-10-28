@@ -3,9 +3,10 @@
 //! its maker's frame holds every item, more than 4080 bytes, and an item
 //! that is a procedure returns a closure over more than eight values,
 //! made in a leaf. By either compiler to the native convention; neither
-//! falls back to cellular code.
+//! falls back to cellular code. On arm64, the one written in Rust
+//! (`DONE.md` §153); the one written in FX-26 makes only x86_64's.
 
-#![cfg(target_arch = "x86_64")]
+#![cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 
 use std::process::Command;
 
@@ -21,6 +22,7 @@ fn a_large_module_maker_runs_natively() {
 }
 
 /// The same where the compiler written in FX-26 makes each procedure's code.
+#[cfg(target_arch = "x86_64")]
 #[test]
 fn a_large_module_maker_runs_natively_by_fx26() {
     on("fx-regs-fxjit-nativecc", MANY);
@@ -30,7 +32,9 @@ fn a_large_module_maker_runs_natively_by_fx26() {
 #[test]
 fn a_leaf_makes_a_closure_over_many_natively() {
     on("fx-regs-rsjit-nativecc", 12);
-    on("fx-regs-fxjit-nativecc", 12);
+    if cfg!(target_arch = "x86_64") {
+        on("fx-regs-fxjit-nativecc", 12);
+    }
 }
 
 /// `(+ x1 (+ x2 … xn))`.
