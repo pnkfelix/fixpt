@@ -272,6 +272,7 @@
                                spin)
                        (syn k-syns)
                        unit))
+            (val k-name-last (subr (read @globals) (k-names symbol int) int))
             (val k-param-selects
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (k-selects k-names)

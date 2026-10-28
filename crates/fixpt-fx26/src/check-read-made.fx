@@ -194,6 +194,21 @@
 (define k-made-has? (->* (k-parts symbol) bool)
   (lambda (ps n)
     (and (not (null? ps)) (or (symbol=? (extract (car ps) 1) n) (k-made-has? (cdr ps) n)))))
+;; Each of `found` from a parameter (of `names`, typed `tys`) whose module
+;; type gives no type `x`: refused at `s`, where it is read (`TODO.md` §135).
+(define k-param-selects-given (->* (k-selects k-names k-ids syn) unit)
+  (lambda (found names tys s)
+    (if (pair? found)
+        (let* ((m (extract (car found) 1)) (x (extract (car found) 2)) (k (k-name-last names m 0))
+               (mt (if (and (>= k 0) (< k (k-length tys))) (k-resolve (k-nth tys k)) -1)))
+          (begin (tagcase (if (< mt 0) (ty-void) (k-get mt))
+                   (ty-module (abs ds vs)
+                     (if (or (k-made-has? abs x) (k-made-has? ds x)) #u
+                         (k-sfail (k-cat5 "`" (symbol->string m) "` has no type `"
+                                          (symbol->string x) "`") s)))
+                   (else y #u))
+                 (k-param-selects-given (cdr found) names tys s)))
+        #u)))
 ;; Those of `ps` named among `names`.
 (define k-parts-named (->* (k-parts k-names) k-parts)
   (lambda (ps names)

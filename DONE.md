@@ -3501,6 +3501,20 @@ Heist found"); A is §134.
   The docs said neither that nor that a loaded file's own loads are from
   its directory, and now say both (`fixpt-cli/tests/run_loads.rs`).
 
+### A dependent parameter's `select`, checked where it is read (done 2026-10-28)
+
+(`TODO.md`'s §135, a number this section had already: the two are one
+number by a slip.) `(subr pure ((c : sig) (select c x)) int)` was taken
+though `sig` gives no `x`, and a call then put in the argument's own `x`,
+which a module given at a narrower type (`restrict`, an unnamed abstract
+type) may have: naming through a parameter reached what its type does not
+give. Now both checkers refuse it where the type is read, "`c` has no type
+`x`", as they refuse a `select` of a module bound there
+(`select_params` in `parse.rs`; `k-param-selects-given` in
+`check-read-made.fx`). A parameter whose type is not a module's is left to
+the call, as before (`modules/param-select-missing.fx`,
+`param-select-restricted.fx`).
+
 ## 136. A file's module type: `load-moduleof` and `load-input-moduleof` (2026-10-27)
 
 Heist's request (`docs/research/derived-signatures.md`), the user's names.

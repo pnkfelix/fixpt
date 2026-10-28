@@ -50,7 +50,7 @@
 (hide (include check-types) (include check-read-helpers) (include check-syntax)
       (include check-subst) (include check-env) (include check-print-parts) (include check-print)
       (include check-holds) (include check-proving) (include check-unions) (include parser))
-(import check-read-made k-type-made-by k-restrict-by)
+(import check-read-made k-type-made-by k-restrict-by k-param-selects-given)
 (import check-read k-at-name? k-atom-head? k-ctor-params k-effect-desc k-effect-named
         k-effect-selected k-frozen-into k-head k-items k-items-or-nil k-name-of k-not-applied
         k-parse-binders k-parse-place k-parse-region k-region-constant k-sfail k-symbol-head)
@@ -953,13 +953,15 @@
     (let ((out (the (ref k-selects @t) (new nil))))
       (begin (k-selects-from t (k-new-seen) out)
              (k-selects-reversed (get out) nil)))))
-;; `t` with each `(select m x)` of a parameter named before it, the `k`th,
-;; made `(select $k x)`.
-(define k-select-params (->* (int k-names) int)
-  (lambda (t names)
+;; `t` (read from `s`) with each `(select m x)` of a parameter named before
+;; it, the `k`th, made `(select $k x)`; the parameters typed `tys`.
+(define k-select-params (->* (int k-names k-ids syn) int)
+  (lambda (t names tys s)
     (let ((sel (if (k-all-unnamed? names)
                    (the k-selects nil)
-                   (k-param-selects (k-selects-in t) names))))
+                   (let ((found (k-selects-in t)))
+                     (begin (k-param-selects-given found names tys s)
+                            (k-param-selects found names))))))
       (if (null? sel)
           t
           (let ((outer (get k-select-map)))
@@ -967,19 +969,20 @@
                    (let ((r (k-subst t nil))) (begin (set k-select-map outer) r))))))))
 ;; A `subr` type's parameters `ps` (from those named `names`) and its
 ;; result `r`, read: their types, the result last.
-(define k-read-params-from (->* (k-syns syn k-names k-syns) k-ids)
-  (lambda (ps r names cs)
+(define k-read-params-from (->* (k-syns syn k-names k-ids k-syns) k-ids)
+  (lambda (ps r names tys cs)
     (if (null? ps)
         ;; A test's result, `(bool …)`: here, and only here, a `bool`
         ;; (`k-subr-type` reads what it proves).
         (let ((t (if (string=? (k-list-head r) "bool") k-bool (k-parse-type r))))
-          (cons (k-select-params t names) nil))
+          (cons (k-select-params t names tys r) nil))
         (let* ((checked (k-misnamed-param (car ps) (the k-syns (append (cdr ps) (cons r cs)))))
                (named (k-param-name (car ps)))
                (written (if (null? named) (car ps) (k-nth (k-items (car ps) "a parameter") 2)))
-               (t (k-select-params (k-parse-type written) names))
+               (t (k-select-params (k-parse-type written) names tys written))
                (name (if (null? named) k-no-name (car named)))
-               (rest (k-read-params-from (cdr ps) r (k-names-snoc names name) cs)))
+               (rest (k-read-params-from (cdr ps) r (k-names-snoc names name)
+                                         (the k-ids (append tys (cons t nil))) cs)))
           (cons t rest)))))
 (define k-read-params (->* (k-syns syn k-syns) k-ids)
-  (lambda (ps r cs) (k-read-params-from ps r nil cs))))))
+  (lambda (ps r cs) (k-read-params-from ps r nil nil cs))))))

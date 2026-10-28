@@ -381,10 +381,12 @@ impl Checker {
                 Some((n, t)) => (Some(n), t),
                 None => (None, p.clone()),
             };
-            let t = self.parse_type(&t)?;
-            params.push(self.select_params(t, &names));
+            let read = self.parse_type(&t)?;
+            let read = self.select_params(read, &names, &params, t.span)?;
+            params.push(read);
             names.push(name);
         }
+        let result_span = result.span;
         // A test's result, `(bool …)`: here, and only here, a `bool` and
         // what it proves, an `ensures` of it.
         let (result, spec) = match result.as_proper_list().and_then(|l| l.first()).and_then(|h| h.as_symbol()) {
@@ -395,7 +397,7 @@ impl Checker {
             }
             _ => (self.parse_type(result)?, None),
         };
-        let result = self.select_params(result, &names);
+        let result = self.select_params(result, &names, &params, result_span)?;
         Ok(self.arena.ty(Ty::Subr { conv, effect, params, result, spec }))
     }
 
@@ -2485,27 +2487,37 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         items.iter().find_map(|x| self.named_in(x, n))
     }
 
-    /// `t` with each `(select m x)` of a parameter named before it, the
-    /// `k`th, made `(select $k x)`.
-    fn select_params(&mut self, t: TyId, names: &[Option<Sym>]) -> TyId {
+    /// `t` (read at `span`) with each `(select m x)` of a parameter named
+    /// before it, the `k`th, made `(select $k x)`; the parameters' types
+    /// `tys`. One whose parameter's type is a module's that gives no type
+    /// `x` is refused here, where it is read, not at a call, which would put
+    /// in the argument's own `x` (`TODO.md` §135); of a type not a module's,
+    /// left to the call.
+    fn select_params(&mut self, t: TyId, names: &[Option<Sym>], tys: &[TyId], span: fixpt_read::Span) -> R<TyId> {
         if names.iter().all(|n| n.is_none()) {
-            return t;
+            return Ok(t);
         }
         let mut found = Vec::new();
         self.selects_in(t, &mut std::collections::HashSet::new(), &mut found);
         let mut sel = std::collections::HashMap::new();
         for (m, x, _) in found {
             if let Some(k) = names.iter().rposition(|n| *n == Some(m)) {
+                if let Some(&mt) = tys.get(k)
+                    && matches!(self.arena.get(self.arena.resolve(mt)), Ty::Module { .. })
+                    && !self.module_types(mt).iter().any(|(n, _)| *n == x)
+                {
+                    return Err(FxError::at(span, format!("`{}` has no type `{}`", self.name(m), self.name(x))));
+                }
                 sel.insert((m, x), self.arena.ty(Ty::ParamSel(k, x)));
             }
         }
         if sel.is_empty() {
-            return t;
+            return Ok(t);
         }
         let outer = std::mem::replace(&mut self.select_map, sel);
         let r = self.subst(t, &std::collections::HashMap::new());
         self.select_map = outer;
-        r
+        Ok(r)
     }
 
     /// A `moduleof`'s components (`docs/research/first-class-modules.md`):

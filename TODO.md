@@ -3288,15 +3288,6 @@ client needs one yet (the user, 2026-10-27: noted for when one does). The
 same walk as `type_made` and `check-read-made.fx`'s, without the
 application of a procedure of no parameters and the check for a module.
 
-## 135. A dependent parameter's `select` is checked only at a call (found 2026-10-27)
-
-`(subr pure ((c : sig) (select c x)) int)` is taken though `sig` gives no
-`x`; a call then puts in the argument's own `x`, which a module given at
-a narrower type (`restrict`, an unnamed abstract type) may have. So
-naming through a parameter can reach what its type does not give. The
-type should be refused where it is read, as `(select m x)` of a module
-bound there is (`modules/restrict-unnamed.fx` shows the latter).
-
 ## 138. Checking a program of module makers is slow (Heist's, 2026-10-28)
 
 Heist's editor as makers (`load-input` files, each a `lambda` around a
