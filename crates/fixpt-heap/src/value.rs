@@ -74,6 +74,12 @@ const IMM_UNBOUND: u64 = 7;
 const IMM_CHAR: u64 = 8;
 /// An IEEE binary32 (FX-26's `f32`), its bits in the word's upper half.
 const IMM_F32: u64 = 9;
+/// A call-out of native code (`fixpt-native`'s `Callout`): in a code
+/// bloblet's field, its number in the table of the machine that runs the
+/// code, which the code reads; in a `.fasl`'s image, the call-out itself,
+/// encoded, which a loader numbers in its own machine. Tagged so that either
+/// is known wherever it is, and nothing else is taken for one.
+const IMM_CALLOUT: u64 = 10;
 
 const IMM_SHIFT: u32 = 3;
 const IMM_MASK: u64 = 0b1_1111;
@@ -296,6 +302,25 @@ impl Value {
         f32::from_bits((self.0 >> 32) as u32)
     }
 
+    /// A call-out, `n` its number or its encoding ([`IMM_CALLOUT`]): read
+    /// by native code as the word shifted right by [`Value::CALLOUT_SHIFT`].
+    #[inline]
+    pub const fn callout(n: u64) -> Value {
+        Value::imm(IMM_CALLOUT, n)
+    }
+    #[inline]
+    pub const fn is_callout(self) -> bool {
+        self.is_imm(IMM_CALLOUT)
+    }
+    #[inline]
+    #[track_caller]
+    pub fn as_callout(self) -> u64 {
+        debug_assert!(self.is_callout(), "as_callout of {self:?}");
+        self.0 >> IMM_PAYLOAD_SHIFT
+    }
+    /// How far a call-out's word is shifted right for its number.
+    pub const CALLOUT_SHIFT: u32 = IMM_PAYLOAD_SHIFT;
+
     // --------------------------------------------------------- GC-private bits
     #[inline]
     pub(crate) const fn forward(index: usize) -> Value {
@@ -326,6 +351,7 @@ impl fmt::Debug for Value {
                 IMM_UNBOUND => f.write_str("#<unbound>"),
                 IMM_CHAR => write!(f, "#\\{}", self.as_char()),
                 IMM_F32 => write!(f, "{}f32", self.as_f32()),
+                IMM_CALLOUT => write!(f, "#<callout {}>", self.as_callout()),
                 s => write!(f, "#<immediate {s}>"),
             },
             TAG_FORWARD => write!(f, "#<forward @{}>", self.index()),

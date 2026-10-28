@@ -362,6 +362,7 @@
 (define dp-cell-of (subr pure (int) int) (lambda (id) (+ 3 (* 8 id))))
 (define dp-closure-of (subr pure (int int) int)
   (lambda (q free) (+ 4 (* 8 (+ q (* 1048576 free))))))
+(define dp-callout-of (subr pure (int) int) (lambda (n) (+ 5 (* 8 n))))
 
 ;;; ------------------------------------------------------------ the version made
 

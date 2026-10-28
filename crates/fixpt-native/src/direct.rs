@@ -527,6 +527,9 @@ enum Field {
     /// procedure, used as a value or called, as the global held it when
     /// compiled.
     Closure(usize, Vec<Value>),
+    /// Call-out `n` of this machine's table, which the code calls out to
+    /// by it (`call_out`), as a call-out (`Value::callout`).
+    Callout(usize),
 }
 
 thread_local! {
@@ -660,26 +663,27 @@ pub fn native_adapter_code(heap: &mut Heap) -> Result<Value, String> {
     Ok(blob)
 }
 
-/// The call-outs this thread's machine numbers past its own, encoded: for
-/// a cache of the native code that calls them by those numbers (`TODO.md`
-/// §126), with [`restore_callouts`].
-pub fn callouts_past_own() -> Result<Vec<u64>, String> {
-    with_machine(|m| m.callouts[OWN_CALLOUTS..].iter().map(|c| c.encode()).collect())
+/// Images carry native code's call-outs encoded, numbered in this
+/// thread's machine when read back (`fixpt_heap::CalloutMap`): so a
+/// `.fasl` keeps native code, and the front end's cache, wherever the
+/// call-outs are numbered otherwise. Set where the native convention is.
+pub fn install_callout_map() {
+    fixpt_heap::set_callout_map(fixpt_heap::CalloutMap { out: callout_out, into: callout_into });
 }
 
-/// This thread's machine given call-outs `codes` past its own, in order, so
-/// that code a cache kept calls them by the numbers it was compiled with:
-/// only where it has none past its own yet (nothing compiled on it); else,
-/// or if one is not a call-out, false, and the machine as it was.
-pub fn restore_callouts(codes: &[u64]) -> Result<bool, String> {
-    let Some(cs) = codes.iter().map(|&x| Callout::decode(x)).collect::<Option<Vec<_>>>() else { return Ok(false) };
-    with_machine(|m| {
-        if m.callouts.len() != OWN_CALLOUTS {
-            return false;
-        }
-        m.callouts.extend(cs);
-        true
-    })
+/// Call-out `n` of this thread's machine, encoded; one it has not, the
+/// failed call-out's, which traps when called.
+fn callout_out(n: u64) -> u64 {
+    let c = with_machine(|m| m.callouts.get(n as usize).copied()).ok().flatten();
+    debug_assert!(c.is_some(), "call-out {n} is not this machine's");
+    c.unwrap_or(Callout::Failed).encode()
+}
+
+/// The call-out encoded `code`, numbered in this thread's machine; none if
+/// it is not a call-out.
+fn callout_into(code: u64) -> Option<u64> {
+    let c = Callout::decode(code)?;
+    with_machine(|m| m.callout_number(c) as u64).ok()
 }
 
 /// Code bloblets a cache gave back, named as compiled code is for
@@ -912,11 +916,14 @@ struct Asm {
     /// A field loaded from further than `ldr`'s 19 bits reach: the code is
     /// refused (`finish`), and the procedure runs as cellular code.
     too_far: bool,
+    /// Each load of a call-out's number from its field (`call_out`): where
+    /// it is, and the call-out's number, its field not yet given.
+    callout_loads: Vec<(usize, usize)>,
 }
 
 impl Asm {
     fn new() -> Asm {
-        Asm { code: Vec::new(), labels: Vec::new(), fixups: Vec::new(), too_far: false }
+        Asm { code: Vec::new(), labels: Vec::new(), fixups: Vec::new(), too_far: false, callout_loads: Vec::new() }
     }
     fn e(&mut self, w: u32) {
         self.code.push(w);
@@ -940,7 +947,20 @@ impl Asm {
         self.fixups.push((self.code.len(), l, f));
         self.code.push(NOP);
     }
+    /// Each call-out's number loaded from its field, that field given it:
+    /// field `field(n)` of the code bloblet, for call-out `n`.
+    fn callout_fields(&mut self, mut field: impl FnMut(usize) -> usize) {
+        for (at, n) in std::mem::take(&mut self.callout_loads) {
+            let d = -2 * field(n) as i64 - at as i64;
+            if d < -(1 << 18) {
+                self.too_far = true;
+            } else {
+                self.code[at] = ldr_lit(1, d);
+            }
+        }
+    }
     fn finish(mut self) -> Result<Vec<u32>, String> {
+        debug_assert!(self.callout_loads.is_empty(), "a call-out's field not given");
         // Too long for what a branch or a load reaches (`b.cond`, `adr`
         // and `ldr` have ±2^18 instructions): refused, not a panic, so
         // that the procedure runs as cellular code, saying why (PLAN.md B1).
@@ -1054,6 +1074,10 @@ pub struct DirectMachine {
     max_words: u64,
     /// What each call-out any compiled code makes does, by number.
     callouts: Vec<Callout>,
+    /// The first number of each call-out, by its encoding, for those up to
+    /// `callouts_indexed` (`callout_number`).
+    callout_index: HashMap<u64, usize>,
+    callouts_indexed: usize,
     /// What each register word's slots come to (`slot_facts`), by its
     /// cells: once, not at every compile that calls it.
     slot_facts: SlotMemo,
@@ -1099,6 +1123,9 @@ impl DirectMachine {
         // continuation given a value (`REINSTATE`); 8: a pair made, for
         // code a program made (`common_cons`, `CONS`); 9: a bloblet made,
         // for it too (`common_bloblet`, `BLOBLET`).
+        // The code it compiles calls out by numbers in its table, which an
+        // image of that code carries encoded.
+        install_callout_map();
         let callouts: Vec<Callout> = vec![
             Callout::Foreign,
             Callout::ClosureAny,
@@ -1162,7 +1189,24 @@ impl DirectMachine {
             cache_words,
             max_words,
             callouts,
+            callout_index: HashMap::new(),
+            callouts_indexed: 0,
             slot_facts: HashMap::new(),
+        })
+    }
+
+    /// Call-out `c`'s number in this machine: the first it has, or a new
+    /// one (`callout_into`).
+    fn callout_number(&mut self, c: Callout) -> usize {
+        while self.callouts_indexed < self.callouts.len() {
+            let i = self.callouts_indexed;
+            self.callout_index.entry(self.callouts[i].encode()).or_insert(i);
+            self.callouts_indexed += 1;
+        }
+        *self.callout_index.entry(c.encode()).or_insert_with(|| {
+            self.callouts.push(c);
+            self.callouts_indexed += 1;
+            self.callouts.len() - 1
         })
     }
 
@@ -1225,6 +1269,7 @@ fn install(heap: &mut Heap, procs: &[Proc], first: usize, free: &[Value]) -> Res
                 Field::Code(q) => blobs[*q],
                 Field::Const(v) | Field::Cell(v) => *v,
                 Field::Closure(q, free) => native_closure(heap, blobs[*q], free),
+                Field::Callout(n) => Value::callout(*n as u64),
             };
             heap.set_bloblet_slot(blob, k + 1, v);
         }
@@ -3787,6 +3832,7 @@ impl Compiling<'_> {
             a.e(br(X16));
         }
         self.procs[p].starts = starts_of(&starts, |i| [labels_g[i], labels_f[i]].map(|l| a.labels[l.0].map(|w| 4 * w)));
+        a.callout_fields(|n| self.field(p, Field::Callout(n)));
         self.procs[p].code = crate::arm64::bytes(&a.finish()?);
         self.procs[p].len = 4 * own;
         Ok(())
@@ -5296,7 +5342,18 @@ fn call_out(a: &mut Asm, n: usize) {
     a.e(ldr(X9, ST, st_off(offset_of!(DState, rust_sp))));
     a.e(add_imm(SP, X9, 0));
     a.e(mov(0, ST));
-    a.es(&mov_imm64(1, n as u64));
+    // Its number: one of the machine's own, which every machine numbers
+    // alike, as a constant; another from its field, a call-out
+    // (`Value::callout`), given when the procedure is done
+    // (`Asm::callout_fields`), so that the code names nothing of the
+    // machine that compiled it (`x64::callout_number`).
+    if n < OWN_CALLOUTS {
+        a.es(&mov_imm64(1, n as u64));
+    } else {
+        a.callout_loads.push((a.code.len(), n));
+        a.e(0xD503_201F); // its load, placed by `callout_fields`
+        a.e(lsr_imm(1, 1, Value::CALLOUT_SHIFT));
+    }
     a.e(ldr(X16, ST, st_off(offset_of!(DState, callout))));
     a.e(blr(X16));
     // The stack and frame as the call-out left them: a collection flushes

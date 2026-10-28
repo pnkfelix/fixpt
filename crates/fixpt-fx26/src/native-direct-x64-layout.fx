@@ -75,6 +75,8 @@
 (define d-divided-by-zero int 5)  ; a trap's code
 (define d-poll int 4)  ; a call-out's number
 (define d-poll-done int 5)  ; a call-out's number
+(define d-own-callouts int 10)  ; call-outs every machine numbers alike
+(define d-callout-shift int 8)  ; a call-out's word shifted right for its number
 (define d-closure-word int 2)  ; a closure's field
 (define d-closure-free0 int 3)  ; a closure's field
 (define d-global-writes int 4)  ; a global's field

@@ -109,11 +109,14 @@ pub(super) struct Asm {
     fixups: Vec<(usize, usize)>,
     /// The last instruction, if it is a jump to a label: where it starts.
     last_jump: Option<usize>,
+    /// Each load of a call-out's number from its field (`callout_number`):
+    /// where it starts, and the call-out's number, its field not yet given.
+    callout_loads: Vec<(usize, usize)>,
 }
 
 impl Asm {
     fn new() -> Asm {
-        Asm { code: Vec::new(), labels: Vec::new(), fixups: Vec::new(), last_jump: None }
+        Asm { code: Vec::new(), labels: Vec::new(), fixups: Vec::new(), last_jump: None, callout_loads: Vec::new() }
     }
     fn here(&self) -> usize {
         self.code.len()
@@ -172,6 +175,15 @@ impl Asm {
         let i = load_rip(t, (-8 * k as i64 - end) as i32);
         debug_assert_eq!(i.len(), 7);
         self.e(i);
+    }
+    /// Each call-out's number loaded from its field, that field given it:
+    /// field `field(n)` of the code bloblet, for call-out `n`.
+    fn callout_fields(&mut self, mut field: impl FnMut(usize) -> usize) {
+        for (at, n) in std::mem::take(&mut self.callout_loads) {
+            let k = field(n);
+            let i = load_rip(RSI, (-8 * k as i64 - (at as i64 + 7)) as i32);
+            self.code[at..at + 7].copy_from_slice(&i);
+        }
     }
     /// `r` := the constant `v`.
     fn imm(&mut self, r: Reg, v: u64) {
@@ -235,6 +247,7 @@ impl Asm {
         }
     }
     fn finish(mut self) -> Result<Vec<u8>, String> {
+        debug_assert!(self.callout_loads.is_empty(), "a call-out's field not given");
         for (at, l) in std::mem::take(&mut self.fixups) {
             let to = self.labels[l].ok_or("a label never placed")?;
             // A jump to a `ret` is that `ret`: a fast path that joins the
@@ -325,12 +338,29 @@ fn call_out(a: &mut Asm, n: usize) {
     a.e(store(st(offset_of!(DState, native_sp)), SP));
     a.e(load(RSP_, st(offset_of!(DState, rust_sp))));
     a.e(mov(RDI, ST));
-    a.imm(RSI, n as u64);
+    callout_number(a, n);
     a.e(call_m(st(offset_of!(DState, callout))));
     // The stack and frame as the call-out left them: a collection flushes
     // the frames into the heap and restores the innermost elsewhere.
     a.e(load(SP, st(offset_of!(DState, native_sp))));
     a.e(load(FRAME, st(offset_of!(DState, fp))));
+}
+
+/// `RSI` := call-out `n`'s number. One of a machine's own
+/// (`OWN_CALLOUTS`), which every machine numbers alike, as a constant;
+/// another from a field of the code bloblet that holds it as a call-out
+/// (`Value::callout`), given when the procedure is done
+/// (`Asm::callout_fields`): the code then names nothing of the machine
+/// that compiled it, and a `.fasl` keeps it, a loader numbering the field's
+/// call-out in its own machine.
+fn callout_number(a: &mut Asm, n: usize) {
+    if n < super::OWN_CALLOUTS {
+        a.imm(RSI, n as u64);
+        return;
+    }
+    a.callout_loads.push((a.here(), n));
+    a.e(load_rip(RSI, 0));
+    a.e(shr_imm(RSI, Value::CALLOUT_SHIFT as u8));
 }
 
 /// The state's trap tested after a call-out: to `failed` if one was set.
@@ -2262,6 +2292,7 @@ impl Compiling<'_> {
             a.e(jmp_m(st(offset_of!(DState, trap_stub))));
         }
         self.procs[p].starts = super::starts_of(&starts, |i| [labels_g[i], labels_f[i]].map(|l| a.labels[l.0]));
+        a.callout_fields(|n| self.field(p, Field::Callout(n)));
         self.procs[p].code = a.finish()?;
         self.procs[p].len = own;
         Ok(())
@@ -4065,6 +4096,8 @@ fn fx26_direct_layout() -> (String, String) {
         ("d-divided-by-zero", super::DIVIDED_BY_ZERO as i64, "a trap's code"),
         ("d-poll", POLL as i64, "a call-out's number"),
         ("d-poll-done", POLL_DONE as i64, "a call-out's number"),
+        ("d-own-callouts", super::OWN_CALLOUTS as i64, "call-outs every machine numbers alike"),
+        ("d-callout-shift", Value::CALLOUT_SHIFT as i64, "a call-out's word shifted right for its number"),
         ("d-closure-word", CLOSURE_WORD as i64, "a closure's field"),
         ("d-closure-free0", CLOSURE_FREE0 as i64, "a closure's field"),
         ("d-global-writes", GLOBAL_WRITES as i64, "a global's field"),

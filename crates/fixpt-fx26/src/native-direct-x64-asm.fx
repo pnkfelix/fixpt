@@ -71,6 +71,9 @@
 (define da-nmade (ref int @k) (new 0))
 (define da-stubs (ref da-pairs @k) (new nil))
 (define da-why (ref string @k) (new ""))
+;; Each load of a call-out's number from its field (`da-call-out`), newest
+;; first: where it is, and the call-out's number, its field not yet given.
+(define da-callout-loads (ref da-pairs @k) (new nil))
 
 (define da-copy-ints (subr da-assembles (da-ints da-ints int) unit)
   (lambda (from to i)
@@ -90,6 +93,7 @@
       (set da-made nil)
       (set da-nmade 0)
       (set da-stubs nil)
+      (set da-callout-loads nil)
       (set da-why ""))))
 
 (define da-here (subr da-reads () int) (lambda () (get da-len)))
@@ -369,6 +373,22 @@
       (da-ld d-result d-st d-st-resume-x0)
       (da-e (x86-jmp-m d-st -1 1 d-st-resume-pc)))))
 
+;; `RSI` := call-out `n`'s number (`callout_number`): one of a machine's
+;; own as a constant; another from its field, a call-out, given when the
+;; procedure is done (`dx-callout-fields`).
+(define da-callout-number (subr da-assembles (int) unit)
+  (lambda (n)
+    (if (< n d-own-callouts)
+        (da-imm d-rsi n)
+        (begin (set da-callout-loads (cons (product (1 (get da-len)) (2 n)) (get da-callout-loads)))
+               (da-e (x86-load-rip d-rsi 0))
+               (da-e (x86-shift-imm da-shr d-rsi d-callout-shift))))))
+;; The loads of call-outs' numbers, oldest first.
+(define da-callout-loads-made (subr da-assembles () da-pairs)
+  (lambda () (the da-pairs (reverse (get da-callout-loads)))))
+;; The load at `at` given field `k`.
+(define da-callout-field (subr da-assembles (int int) unit)
+  (lambda (at k) (da-put4 (+ at 3) (modulo (- (- 0 (* 8 k)) (+ at 7)) 4294967296) 0)))
 ;; Call-out `n`, its arguments in the state already: on Rust's stack, with
 ;; where the native frames are for its collections to find.
 (define da-call-out (subr da-assembles (int) unit)
@@ -378,7 +398,7 @@
       (da-sto d-st d-st-native-sp d-sp)
       (da-ld d-sp d-st d-st-rust-sp)
       (da-mov d-rdi d-st)
-      (da-imm d-rsi n)
+      (da-callout-number n)
       (da-e (x86-call-m d-st d-st-callout))
       (da-ld d-sp d-st d-st-native-sp)
       (da-ld d-frame d-st d-st-fp))))

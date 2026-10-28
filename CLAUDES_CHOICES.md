@@ -2565,3 +2565,41 @@ of `TODO.md` §141, working on my own.
 - Result: Heist's start-up through `eldoc.fx` 0.59 s (was 0.77 s); the
   suite passes (856), run twice, the cache cold then warm.
 
+### Native code kept in a `.fasl` (the same day)
+
+- **What a load cost, at 0.59 s**, timed in place: of `fasl_define`'s
+  0.25 s, 148 ms the FX-26 checker checking each `.fasl`'s type again,
+  78 ms compiling its procedures natively again (`native_procedures`),
+  18 ms reading and linking. The first version had kept cellular words
+  only, though `docs/research/fasl.md` (item 2, the user's) decided native
+  code by default. Not said in a summary then; it should have been.
+- **What tied native code to its machine**: only its call-out numbers,
+  immediates in the instructions (`mov rsi, n`); globals, constants and
+  other code were already fields of its code bloblet, Larceny's constant
+  vector (the user's point). The user's: put the numbers in fields.
+- **Designs dropped on the way, at the user's word**: two fixed fields of
+  a procedure's base and count (fragile: contiguity, positions); a table
+  object of call-outs (an object more each, too expensive).
+- **Chosen**: a field per call-out, a tagged immediate (`IMM_CALLOUT`,
+  `Value::callout`), its number in the machine's table; code loads it and
+  shifts (`callout_number`). The machine's own ten stay constants, every
+  machine numbering them alike. Both compilers, Rust (x86_64, arm64) and
+  FX-26, emit a placeholder load and give the field when the procedure is
+  done, so their bytes stay the same (the oracle test passes).
+- **Images map them** (the user's): `image_parts` and
+  `from_image_with_code` make each call-out its encoding and back, in the
+  pass that rebases references (`fixpt_heap::CalloutMap`, installed by
+  the machine). So the front end's cache no longer needs a fresh machine
+  (`restore_callouts` gone), and a `.fasl` keeps native code: its native
+  closures and code as they are, the native adapter a link
+  (`Link::Adapter`), nothing compiled at load. A `.fasl` for the native
+  convention is stale where no machine installs the map; a call-out a
+  machine does not have fails the load.
+- **A crash found on the way**: a test process with no map wrote raw
+  numbers, which another read. The machine installs the map when made.
+- Result: 0.52 s (was 0.59 s); `.fasl`s 6.0 MB; the suite passes (856).
+- **Not yet measured**: a run of the loaded code. A procedure compiled
+  code captured from a global is guarded by the cell's count of writes,
+  which differs in the session that loads it: such calls take the guard's
+  slower way.
+

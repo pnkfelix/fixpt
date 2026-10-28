@@ -75,6 +75,8 @@
             (val d-divided-by-zero int)
             (val d-poll int)
             (val d-poll-done int)
+            (val d-own-callouts int)
+            (val d-callout-shift int)
             (val d-closure-word int)
             (val d-closure-free0 int)
             (val d-global-writes int)

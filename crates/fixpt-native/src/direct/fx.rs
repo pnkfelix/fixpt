@@ -107,7 +107,7 @@ pub struct FxEmitted {
 
 /// A field as FX-26 names it: `Myself` 0, `Code(q)` 1 + 8q, `Const` of
 /// value `v` 2 + 8v, `Cell` of value `v` 3 + 8v, `Closure(q, frees[f])`
-/// 4 + 8(q + 2^20 f).
+/// 4 + 8(q + 2^20 f), `Callout(n)` 5 + 8n.
 fn field_of(c: &FxCompile, code: i64) -> Result<Field, String> {
     let (tag, n) = (code & 7, (code >> 3) as usize);
     let value = |v: usize| c.values.get(v).copied().ok_or_else(|| format!("no value {v}"));
@@ -117,6 +117,7 @@ fn field_of(c: &FxCompile, code: i64) -> Result<Field, String> {
         2 => Field::Const(value(n)?),
         3 => Field::Cell(value(n)?),
         4 => Field::Closure(n % (1 << 20), c.frees.get(n >> 20).cloned().ok_or("no free values")?),
+        5 => Field::Callout(n),
         _ => return Err(format!("no field {code}")),
     })
 }
@@ -213,7 +214,7 @@ impl FxCompile {
                 match f {
                     Field::Const(v) | Field::Cell(v) => Box::new(std::iter::once(v)),
                     Field::Closure(_, free) => Box::new(free.iter_mut()),
-                    Field::Myself | Field::Code(_) => Box::new(std::iter::empty()),
+                    Field::Myself | Field::Code(_) | Field::Callout(_) => Box::new(std::iter::empty()),
                 }
             });
             [&mut p.word, &mut p.rw].into_iter().chain(fields)
@@ -528,7 +529,7 @@ impl Compiling<'_> {
                         Ok(Field::Code(q)) => (r.kind[i], r.a[i]) = (1, q as i64),
                         Ok(Field::Closure(q, free)) => (r.kind[i], r.a[i], r.b[i]) = (2, q as i64, free_id(free)),
                         Ok(Field::Const(v)) => (r.kind[i], r.a[i]) = (3, id(v)),
-                        Ok(Field::Myself) => unreachable!("a global's value"),
+                        Ok(Field::Myself | Field::Callout(_)) => unreachable!("a global's value"),
                         Err(e) => fail(&mut r, i, format!("`{name}` calls {e}")),
                     }
                 }
@@ -616,6 +617,7 @@ fn field_parts(f: &Field) -> (String, Vec<Value>) {
         Field::Const(v) => ("const".into(), vec![*v]),
         Field::Cell(v) => ("cell".into(), vec![*v]),
         Field::Closure(q, free) => (format!("closure of {q}"), free.clone()),
+        Field::Callout(n) => (format!("call-out {n}"), Vec::new()),
     }
 }
 

@@ -142,7 +142,6 @@ struct ProgramFasl {
     heap: fixpt_heap::Heap,
     values: Vec<fixpt_heap::Value>,
     links: std::collections::HashMap<u64, crate::fasl::Link>,
-    natives: Vec<fixpt_heap::Value>,
     /// The file's own abbreviations to check as they are named, each with
     /// what it was (`program_fasl`).
     later: std::cell::RefCell<std::collections::HashMap<String, String>>,
@@ -376,13 +375,12 @@ fn save_front_end(heap: &fixpt_heap::Heap, w: fixpt_heap::Value, path: &std::pat
 /// all they reach, copied out of `heap` and written to `path` as an image
 /// after `key`, as [`save_front_end`] writes its word. Its native code is
 /// kept too, as ordinary bloblets, named in a list: the image's root is
-/// `(pieces codes adapter . callouts)`, `adapter` the heap's native
-/// adapter's code if they reach it (shared, not copied, when read back),
-/// `callouts` the machine's call-outs that code calls by number, encoded
-/// (`NativeKeeping::callouts`).
-fn save_native_front_end(k: &NativeKeeping, heap: &fixpt_heap::Heap, pieces: fixpt_heap::Value, path: &std::path::Path, key: u64) {
+/// `(pieces codes adapter)`, `adapter` the heap's native adapter's code if
+/// they reach it (shared, not copied, when read back). The call-outs the
+/// code makes are in its fields, which the image carries encoded and the
+/// machine that reads it numbers (`fixpt_heap::CalloutMap`).
+fn save_native_front_end(heap: &fixpt_heap::Heap, pieces: fixpt_heap::Value, path: &std::path::Path, key: u64) {
     use fixpt_heap::Value;
-    let Ok(callouts) = (k.callouts)() else { return };
     let mut alone = fixpt_heap::Heap::new();
     let (copy, made) = alone.copy_graph_with(heap, pieces, |_| false, &Default::default());
     let adapter = heap.adapter_code().filter(|a| made.contains_key(&a.raw()));
@@ -393,12 +391,8 @@ fn save_native_front_end(k: &NativeKeeping, heap: &fixpt_heap::Heap, pieces: fix
             codes = alone.cons(c, codes);
         }
     }
-    let mut outs = Value::NULL;
-    for &c in callouts.iter().rev() {
-        outs = alone.cons(Value::fixnum(c as i64), outs);
-    }
     let adapter = adapter.map_or(Value::FALSE, |a| made[&a.raw()]);
-    let rest = alone.cons(adapter, outs);
+    let rest = alone.cons(adapter, Value::NULL);
     let rest = alone.cons(codes, rest);
     let root = alone.cons(copy, rest);
     alone.push_root(root);
@@ -406,9 +400,8 @@ fn save_native_front_end(k: &NativeKeeping, heap: &fixpt_heap::Heap, pieces: fix
 }
 
 /// What [`save_native_front_end`] kept, copied into `heap`, its code made
-/// code again and the machine given its call-outs: the pieces; none if
-/// the machine has numbered call-outs of its own already (or the image is
-/// not one), when the front end is compiled and run as ever.
+/// code again: the pieces; none if the image is not one, when the front
+/// end is compiled and run as ever.
 fn load_native_front_end(k: &NativeKeeping, heap: &mut fixpt_heap::Heap, from: &fixpt_heap::Heap) -> Option<fixpt_heap::Value> {
     use fixpt_heap::Value;
     let root = *from.roots_slice().first()?;
@@ -423,11 +416,7 @@ fn load_native_front_end(k: &NativeKeeping, heap: &mut fixpt_heap::Heap, from: &
     if !root.is_pair() || !from.cdr(root).is_pair() || !from.cdr(from.cdr(root)).is_pair() {
         return None;
     }
-    let (pieces, codes, adapter, outs) = (from.car(root), from.car(from.cdr(root)), from.car(from.cdr(from.cdr(root))), from.cdr(from.cdr(from.cdr(root))));
-    let callouts: Vec<u64> = list(outs).iter().map(|c| c.as_fixnum() as u64).collect();
-    if !(k.restore_callouts)(&callouts).ok()? {
-        return None;
-    }
+    let (pieces, codes, adapter) = (from.car(root), from.car(from.cdr(root)), from.car(from.cdr(from.cdr(root))));
     let mut given = std::collections::HashMap::new();
     if adapter != Value::FALSE {
         given.insert(adapter.raw(), (k.adapter_code)(heap).ok()?);
@@ -544,10 +533,6 @@ pub type NativeFx = fn(&mut fixpt_scheme::Session, fixpt_scheme::Handle) -> Resu
 /// (`TODO.md` §126). The CLI's are `fixpt_native::direct`'s.
 #[derive(Clone, Copy)]
 pub struct NativeKeeping {
-    /// The call-outs the machine numbers past its own, encoded.
-    pub callouts: fn() -> Result<Vec<u64>, String>,
-    /// The machine given them, if it has none of its own yet.
-    pub restore_callouts: fn(&[u64]) -> Result<bool, String>,
     /// The heap's native adapter's code, shared.
     pub adapter_code: fn(&mut fixpt_heap::Heap) -> Result<fixpt_heap::Value, String>,
     /// Code read back, named for `FIXPT_SYMBOLS` and perf.
@@ -1305,12 +1290,18 @@ impl Fx26Session {
         let fail = |e: String| FxError::at(Span::new(FileId(0), 0, 0), format!("`{}`: {e}", fasl.display()));
         let bytes = std::fs::read(fasl).map_err(|e| fail(e.to_string()))?;
         let (_, image) = crate::fasl::Header::read(&bytes).map_err(fail)?;
-        let (from, value, links, natives) = crate::fasl::read_image(image).map_err(fail)?;
+        let (from, value, links) = crate::fasl::read_image(image).map_err(fail)?;
         let deps: Vec<Sym> = self.checker.shared_files.get(&name).map(|f| f.deps.iter().map(|d| d.2).collect()).unwrap_or_default();
-        // What each link is here, held while the value is copied in.
+        // What each link is here, held while the value is copied in; the
+        // native adapter's, this heap's, found as it is copied.
         let mut found = Vec::new();
+        let mut adapters = Vec::new();
         for (p, link) in links {
             let (global, value) = match link {
+                crate::fasl::Link::Adapter => {
+                    adapters.push(p);
+                    continue;
+                }
                 crate::fasl::Link::Global(n) => (n, false),
                 crate::fasl::Link::DepCell(i) | crate::fasl::Link::DepValue(i) => {
                     let Some(d) = deps.get(i) else { return Ok(Err(fail(format!("it names its load {i}, which it has not")).message)) };
@@ -1323,18 +1314,23 @@ impl Fx26Session {
         }
         let sym = self.scheme.make(|m| m.heap().intern(&shown));
         let cell = self.scheme.call_global(&format!("{READER_PREFIX}compile-new-global"), &[sym]).map_err(|e| fail(e.to_string()))?;
-        // In the native convention, its procedures compiled natively, as
-        // they are made when the file is (`crate::fasl::native_procedures`).
-        let compile = self.native_compiler.filter(|_| self.native_convention);
+        // Its native code as it was kept: nothing compiled here.
+        let adapter = self.native_keeping.map(|k| k.adapter_code);
+        let mut why = None;
         self.scheme.make(|m| {
-            let given: std::collections::HashMap<u64, fixpt_heap::Value> = found.iter().map(|(p, h)| (p.raw(), m.get(*h))).collect();
+            let mut given: std::collections::HashMap<u64, fixpt_heap::Value> = found.iter().map(|(p, h)| (p.raw(), m.get(*h))).collect();
             let g = m.get(cell);
             let heap = m.heap();
-            let (copy, made) = heap.copy_graph_with(&from, value, |_| false, &given);
-            let copy = match compile {
-                Some(c) => crate::fasl::native_procedures(heap, copy, c, &natives.iter().filter_map(|n| made.get(&n.raw()).map(|v| v.raw())).collect()),
-                None => copy,
-            };
+            if !adapters.is_empty() {
+                match adapter.map(|a| a(heap)) {
+                    Some(Ok(a)) => given.extend(adapters.iter().map(|p| (p.raw(), a))),
+                    _ => {
+                        why = Some("it holds native code's adapter, and this session makes none");
+                        return fixpt_heap::Value::FALSE;
+                    }
+                }
+            }
+            let (copy, _) = heap.copy_graph_with(&from, value, |_| false, &given);
             heap.set_bloblet_slot(g, 2, copy);
             // A write, as `global!`'s, which the guards count.
             let w = fixpt_heap::layout::cellular::GLOBAL_WRITES;
@@ -1342,6 +1338,9 @@ impl Fx26Session {
             heap.set_bloblet_slot(g, w, fixpt_heap::Value::fixnum(n + 1));
             fixpt_heap::Value::FALSE
         });
+        if let Some(why) = why {
+            return Ok(Err(fail(why.into()).message));
+        }
         Ok(Ok(None))
     }
 
@@ -1541,6 +1540,9 @@ impl Fx26Session {
             Some(format!("it is for {}", header.arch))
         } else if header.native != self.native_convention {
             Some(if header.native { "it is for the native convention" } else { "it is for the cellular convention" }.to_string())
+        } else if header.native && !fixpt_heap::callout_map_set() {
+            // Its native code's call-outs numbered here (`fixpt_heap::CalloutMap`).
+            Some("no native machine here numbers its code's call-outs".to_string())
         } else if header.source != crate::fasl::digest(&text) {
             Some("its source changed".to_string())
         } else {
@@ -1581,7 +1583,7 @@ impl Fx26Session {
                 return stale(self, &format!("`{}` is defined here already", d.name));
             }
         }
-        let (heap, value, links, natives) = match crate::fasl::read_image(image) {
+        let (heap, value, links) = match crate::fasl::read_image(image) {
             Ok(r) => r,
             Err(e) => return stale(self, &e),
         };
@@ -1602,7 +1604,7 @@ impl Fx26Session {
             defs.entry(d.form).or_default().push((d, i));
         }
         let links = links.into_iter().map(|(p, l)| (p.raw(), l)).collect();
-        Some(ProgramFasl { defs, heap, values, links, natives, later: std::cell::RefCell::new(later), alias_names: names })
+        Some(ProgramFasl { defs, heap, values, links, later: std::cell::RefCell::new(later), alias_names: names })
     }
 
     /// Why `defs`' code is not right here, if it is not: a global it uses,
@@ -1671,6 +1673,7 @@ impl Fx26Session {
             // What their code links to, found here: the globals before them,
             // and themselves.
             let mut found = Vec::new();
+            let mut adapters = Vec::new();
             let mut todo: Vec<fixpt_heap::Value> = group.iter().map(|(_, at)| p.values[*at]).collect();
             let mut seen = std::collections::HashSet::new();
             while let Some(v) = todo.pop() {
@@ -1678,6 +1681,10 @@ impl Fx26Session {
                     continue;
                 }
                 if let Some(link) = p.links.get(&v.raw()) {
+                    if *link == crate::fasl::Link::Adapter {
+                        adapters.push(v);
+                        continue;
+                    }
                     let crate::fasl::Link::Global(n) = link else { return Err(fail("it links to a file's load".into())) };
                     let c = s.global_cell(n)?.ok_or_else(|| fail(format!("it names `{n}`, which is not defined here")))?;
                     found.push((v, c));
@@ -1690,17 +1697,24 @@ impl Fx26Session {
                     todo.extend(((1 + trailer)..=p.heap.bloblet_head(v).fields).map(|k| p.heap.bloblet_slot(v, k)));
                 }
             }
-            let compile = s.native_compiler.filter(|_| s.native_convention);
+            // Its native code as it was kept: nothing compiled here.
+            let adapter = s.native_keeping.map(|k| k.adapter_code);
+            let mut no_adapter = false;
             s.scheme.make(|m| {
-                let given: std::collections::HashMap<u64, fixpt_heap::Value> = found.iter().map(|(v, h)| (v.raw(), m.get(*h))).collect();
+                let mut given: std::collections::HashMap<u64, fixpt_heap::Value> = found.iter().map(|(v, h)| (v.raw(), m.get(*h))).collect();
                 let gs: Vec<fixpt_heap::Value> = cells.iter().map(|c| m.get(*c)).collect();
                 let heap = m.heap();
+                if !adapters.is_empty() {
+                    match adapter.map(|a| a(heap)) {
+                        Some(Ok(a)) => given.extend(adapters.iter().map(|v| (v.raw(), a))),
+                        _ => {
+                            no_adapter = true;
+                            return fixpt_heap::Value::FALSE;
+                        }
+                    }
+                }
                 for ((_, at), g) in group.iter().zip(gs) {
-                    let (copy, made) = heap.copy_graph_with(&p.heap, p.values[*at], |_| false, &given);
-                    let copy = match compile {
-                        Some(c) => crate::fasl::native_procedures(heap, copy, c, &p.natives.iter().filter_map(|n| made.get(&n.raw()).map(|v| v.raw())).collect()),
-                        None => copy,
-                    };
+                    let (copy, _) = heap.copy_graph_with(&p.heap, p.values[*at], |_| false, &given);
                     heap.set_bloblet_slot(g, 2, copy);
                     let w = fixpt_heap::layout::cellular::GLOBAL_WRITES;
                     let n = heap.bloblet_slot(g, w).as_fixnum();
@@ -1708,6 +1722,9 @@ impl Fx26Session {
                 }
                 fixpt_heap::Value::FALSE
             });
+            if no_adapter {
+                return Err(fail("it holds native code's adapter, and this session makes none".into()));
+            }
             // What the definition said where it was made, said again.
             Ok(group.iter().flat_map(|(d, _)| d.said.iter()).map(|l| format!("{l}\n")).collect())
         });
@@ -2229,8 +2246,8 @@ impl Fx26Session {
             sc.make(|m| {
                 let p = m.get(pieces);
                 set_entries(m.heap(), p, entries, native);
-                if let (Some((path, key)), Some(k)) = (&cache, &keeping) {
-                    save_native_front_end(k, m.heap(), p, path, *key);
+                if let (Some((path, key)), Some(_)) = (&cache, &keeping) {
+                    save_native_front_end(m.heap(), p, path, *key);
                 }
                 fixpt_heap::Value::NULL
             });

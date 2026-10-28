@@ -369,6 +369,14 @@
                (with-f (if (>= f 0) (the da-bytes (cons f (cons i acc))) acc)))
           (dx-starts (- si 1) (if (>= g 0) (the da-bytes (cons g (cons i with-f))) with-f))))))
 
+;; Each load of a call-out's number given its field (`Asm::callout_fields`).
+(define dx-callout-fields (subr da-assembles (da-pairs) unit)
+  (lambda (ls)
+    (if (null? ls)
+        #u
+        (let ((k (dp-field (dp-callout-of (extract (car ls) 2)))))
+          (begin (da-callout-field (extract (car ls) 1) k) (dx-callout-fields (cdr ls)))))))
+
 ;; A procedure's code, as `procedure_x64` makes it, of what Rust gave of it
 ;; (`FxRequest`: its name, its lists in order, and the messages its
 ;; failures noted at instructions name): its bytes, how many are its own,
@@ -391,7 +399,9 @@
             (if (da-ok?) (dx-version #f) #u))
           #u)
       (if (da-ok?)
-          (let* ((own (dx-after)) (code (da-finish)))
+          (let* ((own (dx-after))
+                 (placed (dx-callout-fields (da-callout-loads-made)))
+                 (code (da-finish)))
             (product (1 code) (2 own) (3 (the da-bytes (reverse (get dp-fields))))
                      (4 (da-callouts)) (5 (da-err))
                      (6 (dx-starts (- (dp-ns) 1) (the da-bytes nil)))))

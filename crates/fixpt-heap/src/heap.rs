@@ -2546,6 +2546,7 @@ impl Heap {
     pub fn image_parts(&self) -> (Vec<u64>, Vec<Value>, Vec<Value>, Vec<Value>) {
         assert_eq!(self.all_live_regions(), 0, "an image is made with no region live");
         let rebase = self.image_rebase();
+        let rebase = |v: Value| callout_out(rebase(v));
         let (old, young) = (self.top - self.active, self.nursery_top - NURSERY_BASE);
         let mut words = Vec::with_capacity(old + young);
         words.extend_from_slice(&self.mem.words()[self.active..self.top]);
@@ -2561,6 +2562,7 @@ impl Heap {
     /// into it counts from where the heap's memory starts.
     pub fn image_code(&self) -> [(Vec<u64>, Vec<(usize, usize)>); 2] {
         let rebase = self.image_rebase();
+        let rebase = |v: Value| callout_out(rebase(v));
         self.code_image().map(|(mut words, free)| {
             map_refs(&mut words, &rebase);
             (words, free)
@@ -2646,7 +2648,17 @@ impl Heap {
         let shift = (heap.base as u64) << 3;
         // A suffix ref's owner is an index already, of a heap loaded at word
         // 0: left as it is.
-        let relocate = |v: Value| if v.is_ref() && !v.is_suffix_ref() { Value(v.raw() + shift) } else { v };
+        // A call-out, numbered in this machine (`set_callout_map`); one it
+        // cannot number, noted.
+        let unknown = std::cell::Cell::new(None);
+        let relocate = |v: Value| match v.is_callout() {
+            true => callout_in(v).unwrap_or_else(|| {
+                unknown.set(Some(v.as_callout()));
+                v
+            }),
+            false if v.is_ref() && !v.is_suffix_ref() => Value(v.raw() + shift),
+            false => v,
+        };
         heap.mem.words_mut()[..words.len()].copy_from_slice(words);
         map_refs(&mut heap.mem.words_mut()[..words.len()], relocate);
         heap.top = words.len();
@@ -2665,6 +2677,9 @@ impl Heap {
             map_refs(&mut w, relocate);
             (w, free)
         }))?;
+        if let Some(c) = unknown.get() {
+            return Err(format!("it holds call-out {c:#x}, which this machine does not have"));
+        }
         Ok(heap)
     }
 
@@ -2873,6 +2888,48 @@ impl Copier<'_> {
         self.free += n;
         self.crossed(at, n);
         at
+    }
+}
+
+/// How an image carries native code's call-outs (`Value::callout`): `out`,
+/// a number in this machine's table made the call-out it is, encoded, as
+/// the image is made; `into`, an encoding read back numbered in this
+/// machine's table, or none if it is no call-out this machine has. So that
+/// native code is kept in an image (a `.fasl`, the front end's cache) and
+/// runs where the call-outs are numbered otherwise. Set once, by the native
+/// machine (`fixpt-native`); unset, a call-out is written as it is.
+pub struct CalloutMap {
+    pub out: fn(u64) -> u64,
+    pub into: fn(u64) -> Option<u64>,
+}
+
+static CALLOUT_MAP: std::sync::OnceLock<CalloutMap> = std::sync::OnceLock::new();
+
+/// Images made and read from now on carry call-outs by `map`.
+pub fn set_callout_map(map: CalloutMap) {
+    let _ = CALLOUT_MAP.set(map);
+}
+
+/// Whether images carry call-outs by a map: else one that holds native
+/// code cannot be read here.
+pub fn callout_map_set() -> bool {
+    CALLOUT_MAP.get().is_some()
+}
+
+/// `v`, as an image carries it: a call-out, encoded.
+fn callout_out(v: Value) -> Value {
+    match (v.is_callout(), CALLOUT_MAP.get()) {
+        (true, Some(m)) => Value::callout((m.out)(v.as_callout())),
+        _ => v,
+    }
+}
+
+/// A call-out `v` read from an image, numbered here; none if this machine
+/// has no such call-out.
+fn callout_in(v: Value) -> Option<Value> {
+    match CALLOUT_MAP.get() {
+        Some(m) => (m.into)(v.as_callout()).map(Value::callout),
+        None => Some(v),
     }
 }
 

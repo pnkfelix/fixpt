@@ -3431,6 +3431,14 @@ the makers (`docs/research/fasl.md`). In order:
 8. **Collections** (about 10%): what these checks allocate.
 9. **Reading the images** (about 3%): a mapping of the file, not a read
    and a copy, as for the front end's cache.
+11. ~~**Native code kept in a `.fasl`**~~ (done, 2026-10-28), as
+   `docs/research/fasl.md` decided (item 2), where the first version kept
+   cellular words only and compiled them natively at every load. Native
+   code's call-outs are fields now, a tagged immediate (`Value::callout`),
+   which every image carries encoded and a loader's machine numbers
+   (`fixpt_heap::CalloutMap`); its globals were fields already. Heist's
+   editor through `eldoc.fx` 0.59 s to 0.52 s. Next: a `.fasl` of words
+   alone kept as an option (`compile-file --cellular`, the user's).
 10. ~~**The module files built in given `.fasl`s**~~ (done, 2026-10-28):
    in the cache directory, written by the first run that loads one
    (`fasl::path_for_load`, `Fx26Session::cache_built_ins`). Heist's

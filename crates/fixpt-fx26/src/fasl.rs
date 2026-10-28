@@ -19,8 +19,8 @@
 //! change anywhere below makes it stale; and by the executable, the
 //! architecture and the program's convention.
 
-use fixpt_heap::layout::cellular::{CLOSURE_FREE0, CLOSURE_WORD, CODE_SOURCE, GLOBAL_FIELDS, GLOBAL_NAME, PRIMITIVES, ROUTINE_DOCOL, WORD_ENTRY};
-use fixpt_heap::{CodePart, Heap, ObjType, Value};
+use fixpt_heap::layout::cellular::{GLOBAL_FIELDS, GLOBAL_NAME, PRIMITIVES, ROUTINE_DOCOL, WORD_ENTRY};
+use fixpt_heap::{Heap, ObjType, Value};
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
@@ -301,12 +301,14 @@ impl Header {
 
 /// What a `.fasl`'s value links to in the session that loads it, not kept
 /// in it: a global's cell by its name (the standard environment's), or the
-/// cell of the hidden global of the file's `i`th load; or that load's value.
+/// cell of the hidden global of the file's `i`th load; or that load's value;
+/// or the heap's native adapter's code (`Heap::adapter_code`).
 #[derive(Clone, Debug, PartialEq)]
 pub enum Link {
     Global(String),
     DepCell(usize),
     DepValue(usize),
+    Adapter,
 }
 
 /// A global's cell (`layout::cellular::GLOBAL_*`, `%fx26-make-global`): its
@@ -323,47 +325,20 @@ fn global_name(heap: &Heap, v: Value) -> Option<String> {
     (n.is_bloblet() && heap.obj_type(n) == Some(ObjType::Symbol)).then(|| heap.symbol_name(n))
 }
 
-/// What `v` reaches, each object once, by `visit`, which says whether to go
-/// into it (a pair's car and cdr; a bloblet's fields).
-fn walk(heap: &Heap, root: Value, mut visit: impl FnMut(&Heap, Value) -> Result<bool, String>) -> Result<(), String> {
-    let mut seen = std::collections::HashSet::new();
-    let mut todo = vec![root];
-    while let Some(v) = todo.pop() {
-        if !v.is_ref() {
-            continue;
-        }
-        let v = if v.is_suffix_ref() { heap.suffix_ref_owner(v) } else { v };
-        if !seen.insert(v.raw()) || !visit(heap, v)? {
-            continue;
-        }
-        if v.is_pair() {
-            todo.extend([heap.car(v), heap.cdr(v)]);
-        } else if heap.obj_type(v) != Some(ObjType::Symbol) {
-            let trailer = heap.bloblet_has_trailer(v) as usize;
-            todo.extend(((1 + trailer)..=heap.bloblet_head(v).fields).map(|k| heap.bloblet_slot(v, k)));
-        }
-    }
-    Ok(())
-}
-
 /// Value `value`, a load's, in `heap`, as a `.fasl`'s image: copied into a
 /// heap of its own but for what it links to (`Link`): each global cell
 /// (`deps`' hidden globals' by their place, `deps[i].0` its name), each of
-/// `deps`' values (`deps[i].1`). A native closure is kept as the cellular
-/// one it was made from, which the code area runs in either convention
-/// (`docs/research/code-stubs.md`): an adapter (`adapter`'s code) as the
-/// closure it adapts; one compiled, as a cellular closure of its code's
-/// word over the same values. Each word's compiled entry (a machine's slot
-/// number, this process's) is let go, so that the loader's machine
-/// compiles it again. Any other native code is refused: it calls by
-/// numbers and addresses that are this process's.
+/// `deps`' values (`deps[i].1`), and the heap's native adapter's code
+/// (`adapter`), which every heap has one of. Native code is kept as it is,
+/// as the front end's cache keeps it: what it names of the session is in
+/// its code bloblets' fields (cells, constants, other code), linked or
+/// copied as any other object's; its call-outs are in fields too, which
+/// the image carries encoded and the loader's machine numbers
+/// (`fixpt_heap::CalloutMap`). Each word's compiled entry (a machine's
+/// slot number, this process's) is let go, so that the loader's machine
+/// compiles it again if it runs it.
 pub fn image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapter: Option<Value>) -> Result<Vec<u8>, String> {
-    let closure_kind = const { fixpt_heap::layout::kind("native-closure") };
     let mut links: Vec<(Value, Link)> = Vec::new();
-    // Each native closure, and what it is kept as: the closure an adapter
-    // adapts, or a cellular closure to make of a word over values.
-    let mut adapted: Vec<(Value, Value)> = Vec::new();
-    let mut compiled: Vec<(Value, Value, Vec<Value>)> = Vec::new();
     let mut seen = std::collections::HashSet::new();
     let mut todo = vec![value];
     while let Some(v) = todo.pop() {
@@ -372,6 +347,10 @@ pub fn image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapter: O
         }
         let v = if v.is_suffix_ref() { heap.suffix_ref_owner(v) } else { v };
         if !seen.insert(v.raw()) {
+            continue;
+        }
+        if Some(v) == adapter {
+            links.push((v, Link::Adapter));
             continue;
         }
         if let Some(name) = global_name(heap, v) {
@@ -393,41 +372,8 @@ pub fn image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapter: O
         if heap.obj_type(v) == Some(ObjType::Symbol) {
             continue;
         }
-        // Native code: not gone into, its words being what is kept. If it
-        // is reached but through a closure kept as a cellular one, the copy
-        // refuses it.
-        if heap.code_part(v) == Some(CodePart::Native) {
-            continue;
-        }
-        let fields = heap.bloblet_head(v).fields;
-        if heap.obj_type(v).is_none() && heap.bloblet_kind(v) == closure_kind {
-            let code = heap.bloblet_slot(v, CLOSURE_WORD);
-            let free: Vec<Value> = (CLOSURE_FREE0..=fields).map(|k| heap.bloblet_slot(v, k)).collect();
-            todo.extend(free.iter().copied());
-            if Some(code) == adapter {
-                adapted.push((v, free[0]));
-                continue;
-            }
-            let word = heap.bloblet_slot(code, CODE_SOURCE);
-            if !(word.is_bloblet() && heap.is_cellular_word(word)) {
-                return Err("it holds a native procedure compiled from no cellular word".into());
-            }
-            todo.push(word);
-            compiled.push((v, word, free));
-            continue;
-        }
         let trailer = heap.bloblet_has_trailer(v) as usize;
-        todo.extend(((1 + trailer)..=fields).map(|k| heap.bloblet_slot(v, k)));
-    }
-    let mut redirect: HashMap<u64, Value> = adapted.iter().map(|(c, f)| (c.raw(), *f)).collect();
-    let cellular_kind = const { fixpt_heap::layout::kind("cellular-closure") };
-    for (c, word, free) in &compiled {
-        let k = heap.make_bloblet(cellular_kind, free.len() + 1, 0, true);
-        heap.set_bloblet_slot(k, CLOSURE_WORD, *word);
-        for (i, x) in free.iter().enumerate() {
-            heap.set_bloblet_slot(k, CLOSURE_FREE0 + i, *x);
-        }
-        redirect.insert(c.raw(), k);
+        todo.extend(((1 + trailer)..=heap.bloblet_head(v).fields).map(|k| heap.bloblet_slot(v, k)));
     }
     let mut alone = Heap::new();
     let mut given = HashMap::new();
@@ -437,23 +383,13 @@ pub fn image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapter: O
             Link::Global(name) => (0, alone.make_string(name)),
             Link::DepCell(i) => (1, Value::fixnum(*i as i64)),
             Link::DepValue(i) => (2, Value::fixnum(*i as i64)),
+            Link::Adapter => (3, Value::NULL),
         };
         let p = alone.cons(Value::fixnum(kind), arg);
         given.insert(v.raw(), p);
         placeholders = alone.cons(p, placeholders);
     }
-    // Native code reached, but for the closures kept as cellular ones.
-    let mut native = false;
-    let (copy, made) = alone.copy_graph_redirected(heap, value, |_| false, &given, &redirect);
-    for (k, c) in &made {
-        if given.contains_key(k) {
-            continue;
-        }
-        native |= c.is_bloblet() && alone.code_part(*c) == Some(CodePart::Native);
-    }
-    if native {
-        return Err("it holds native code that is not a procedure's".into());
-    }
+    let (copy, made) = alone.copy_graph_with(heap, value, |_| false, &given);
     // Each word's compiled entry let go: a stack word runs its cells again;
     // a register word is compiled again.
     let words: Vec<Value> = made.values().copied().filter(|w| w.is_bloblet() && (alone.is_cellular_word(*w) || alone.is_register_word(*w))).collect();
@@ -465,73 +401,15 @@ pub fn image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapter: O
             alone.set_bloblet_slot(w, WORD_ENTRY, Value::fixnum(ROUTINE_DOCOL as i64));
         }
     }
-    // The closures that were native, now cellular: for the loader to make
-    // native again, and no other (one of `(conv cellular)` stays so).
-    let mut natives = Value::NULL;
-    for to in redirect.values() {
-        if let Some(c) = made.get(&to.raw()) {
-            natives = alone.cons(*c, natives);
-        }
-    }
-    let rest = alone.cons(placeholders, natives);
+    let rest = alone.cons(placeholders, Value::NULL);
     let root = alone.cons(copy, rest);
     alone.push_root(root);
     Ok(fixpt_heap::image::dump(&alone))
 }
 
-/// `value`, just copied in from a `.fasl` (so all of it new), with each of
-/// its closures that was native where it was made (`natives`, raw) made the
-/// native closure `compile` makes of it, wherever it is reached but in
-/// words (whose literals stay as they are): what the program's convention
-/// made of them. One `compile` declines stays cellular.
-pub fn native_procedures(heap: &mut Heap, value: Value, compile: crate::session::NativeCompiler, natives: &std::collections::HashSet<u64>) -> Value {
-    let inside = |h: &Heap, v: Value| !(v.is_bloblet() && (h.is_cellular_word(v) || h.is_register_word(v) || h.code_part(v).is_some()));
-    let mut made: HashMap<u64, Value> = HashMap::new();
-    for &c in natives {
-        if let Ok(n) = compile(heap, Value::from_raw(c)) {
-            made.insert(c, n);
-        }
-    }
-    if made.is_empty() {
-        return value;
-    }
-    // Every reference to one made its native closure, the native closures'
-    // own included (a group's calls of each other).
-    let mut objects = Vec::new();
-    let _ = walk(heap, value, |h, v| {
-        objects.push(v);
-        Ok(inside(h, v))
-    });
-    for n in made.values() {
-        let _ = walk(heap, *n, |h, v| {
-            objects.push(v);
-            Ok(inside(h, v))
-        });
-    }
-    for v in objects {
-        if v.is_pair() {
-            if let Some(n) = made.get(&heap.car(v).raw()) {
-                heap.set_car(v, *n);
-            }
-            if let Some(n) = made.get(&heap.cdr(v).raw()) {
-                heap.set_cdr(v, *n);
-            }
-        } else if inside(heap, v) && heap.obj_type(v) != Some(ObjType::Symbol) {
-            let trailer = heap.bloblet_has_trailer(v) as usize;
-            for k in (1 + trailer)..=heap.bloblet_head(v).fields {
-                if let Some(n) = made.get(&heap.bloblet_slot(v, k).raw()) {
-                    heap.set_bloblet_slot(v, k, *n);
-                }
-            }
-        }
-    }
-    made.get(&value.raw()).copied().unwrap_or(value)
-}
-
-/// A `.fasl`'s image read: its heap, its value, each object of it that
-/// stands for what it links to (`image`), with what, and the closures that
-/// were native.
-pub type Read = (Heap, Value, Vec<(Value, Link)>, Vec<Value>);
+/// A `.fasl`'s image read: its heap, its value, and each object of it that
+/// stands for what it links to (`image`), with what.
+pub type Read = (Heap, Value, Vec<(Value, Link)>);
 
 /// A `.fasl`'s image `bytes` read ([`Read`]).
 pub fn read_image(bytes: &[u8]) -> Result<Read, String> {
@@ -544,12 +422,7 @@ pub fn read_image(bytes: &[u8]) -> Result<Read, String> {
     if !rest.is_pair() {
         return Err("its image's root is not a list of three".into());
     }
-    let (mut l, mut n) = (heap.car(rest), heap.cdr(rest));
-    let mut natives = Vec::new();
-    while n.is_pair() {
-        natives.push(heap.car(n));
-        n = heap.cdr(n);
-    }
+    let mut l = heap.car(rest);
     let mut links = Vec::new();
     while l.is_pair() {
         let p = heap.car(l);
@@ -557,12 +430,13 @@ pub fn read_image(bytes: &[u8]) -> Result<Read, String> {
         let link = match kind.as_fixnum() {
             0 => Link::Global(heap.string_to_rust(arg)),
             1 => Link::DepCell(arg.as_fixnum() as usize),
-            _ => Link::DepValue(arg.as_fixnum() as usize),
+            2 => Link::DepValue(arg.as_fixnum() as usize),
+            _ => Link::Adapter,
         };
         links.push((p, link));
         l = heap.cdr(l);
     }
-    Ok((heap, value, links, natives))
+    Ok((heap, value, links))
 }
 
 /// `s` as an FX-26 string literal.
@@ -610,6 +484,10 @@ impl crate::check::Checker {
         }
         if header.native != native {
             return stale(self, if header.native { "it is for the native convention" } else { "it is for the cellular convention" });
+        }
+        // Its native code's call-outs numbered here (`fixpt_heap::CalloutMap`).
+        if native && !fixpt_heap::callout_map_set() {
+            return stale(self, "no native machine here numbers its code's call-outs");
         }
         let kind = if input { Kind::Input } else { Kind::Module };
         // A program's file's, for `,load`: nothing to say of it here.
