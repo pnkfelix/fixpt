@@ -3427,13 +3427,15 @@ the makers (`docs/research/fasl.md`). In order:
 9. **Reading the images** (about 3%): a mapping of the file, not a read
    and a copy, as for the front end's cache.
 
-## 158. `eval` for programs (the user's, 2026-10-28)
+## 158. `stage`: `eval` for programs (the user's, 2026-10-28)
 
 A program reading, checking and running code it is given, against a module
 it chooses, at a type and effect written at the form; refusals as values;
 sessions for definitions that last. Designed in `docs/research/eval.md`,
 which answers §105 with (b)'s meaning on (a)'s machinery, and replaces
-`PLAN.md`'s item 5 (`any`): the caller names the effect bound. Kayak's part
-is the boundary between its Rust and an embedded engine, by a class of
-types beside the transmissible ones. To decide with the user: the note's
-open questions, then whether to start with Fixpt's form alone.
+`PLAN.md`'s item 5 (`any`): the caller names the effect bound. Decided with
+the user: the name `stage`, as `expand` (may `spin`: macros) then `install`
+(checking assumed to end); a `stage` effect atom, to try how viral it is;
+checking interruptible and cancellable, so the checker written in FX-26 is
+the one to run; macros by `syntax-rules` with syntax classes. Kayak's
+boundary class is deferred until kayak builds it.
