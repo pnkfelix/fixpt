@@ -3841,3 +3841,23 @@ compared them structurally, deep into large records.
 - **Tests**: `regions/frozen-covariant.fx` and five refusals,
   `terminate/frozen-place-walk.fx` (`regions.rs`,
   `frozen_data_is_covariant_in_lifetimes`).
+
+## 151. The cyclic walk kept, by type, now that equal types are one (Heist's, 2026-10-28)
+
+What was left of Heist's include cost, found by comparing the two forms'
+profiles procedure by procedure (perf, the native code's map): the walk of
+a callee's type for a cycle (`k-may-spin?`), at every call of a name that
+is not known code, which an included name never is; and, new with §148,
+the names a module's items use, found for `define*`s used as values even
+in a module of none.
+
+- **`k-cyclic?` kept by type** (a direct-mapped cache, an entry good while
+  no older type is linked, `k-links`): interning makes an instantiation of
+  one type the same id each call, so the walk is done once. A walk that met
+  what may change (a link unfilled, a `select`, an application, a
+  parameter's `select`) is not kept. Its depth counted, not the path's
+  length taken at every step.
+- **`k-star-valued`** looks only in a module with a `define*`.
+- **Heist's editor**, through `eldoc.fx`: 4.17 s as modules against 4.10 s
+  as globals (4.87 s before). **Stage 0**: 28.76G instructions against
+  29.42G (−2.2%), below where it was before interning (29.10G).

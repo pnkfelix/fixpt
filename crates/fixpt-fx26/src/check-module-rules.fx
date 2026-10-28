@@ -69,6 +69,14 @@
 ;; as written (Heist's, 2026-10-28; `valued`, in `Checker::module_type`).
 (define k-star-valued (->* (k-items k-mlams) k-names)
   (lambda (items ls)
+    (if (null? (k-stars-among ls (map-names ls)))
+        nil
+        (k-star-valued-of items ls))))
+;; The module's typed lambdas' names.
+(define map-names (->* (k-mlams) k-names)
+  (lambda (ls) (if (null? ls) nil (cons (extract (car ls) 1) (map-names (cdr ls))))))
+(define k-star-valued-of (->* (k-items k-mlams) k-names)
+  (lambda (items ls)
     (let ((ps (k-mod-places items)))
       (letrec ((named (subr (maxeff checks spin) (k-items k-names) k-names)
                  (lambda (its acc)

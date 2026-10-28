@@ -40,49 +40,81 @@
 (define k-newer-param? (->* (k-cpath int) bool)
   (lambda (path t)
     (and (not (= (car (car path)) t)) (or (cdr (car path)) (k-newer-param? (cdr path) t)))))
+;; Whether a walk of `k-cyclic?` met a link not yet filled, or a node that
+;; may become one (a `select`, an application, a parameter's `select`):
+;; then what it found may change, and is not kept.
+(define k-cyclic-open (ref bool @t) (new #f))
 (define-rec
   (k-cyclic-from? (->* (int bool k-cpath) bool)
-    (lambda (t by path)
+    (lambda (t by path) (k-cyclic-at? t by path 0)))
+  ;; The same, the path `depth` long.
+  (k-cyclic-at? (->* (int bool k-cpath int) bool)
+    (lambda (t by path depth)
       (let ((t (k-resolve t)))
         (cond ((k-on-path? path t) (or by (k-newer-param? path t)))
               ;; Too deep to follow: it may loop, the cautious answer.
-              ((> (k-length path) 64) #t)
+              ((> depth 64) #t)
               (else
-               (let ((p (the k-cpath (cons (cons t by) path))))
+               (let ((p (the k-cpath (cons (cons t by) path))) (d (+ depth 1)))
                  (tagcase (k-get t)
-                   (ty-subr (e ps r cv spc) (or (k-cyclic-list? ps #t p) (k-cyclic-from? r #f p)))
-                   (ty-comp (x a e r once) (or (k-cyclic-from? x #t p) (k-cyclic-from? a #f p)))
-                   (ty-tag (a h e r) (or (k-cyclic-from? a #f p) (k-cyclic-from? h #f p)))
-                   (ty-poly (bs x) (k-cyclic-from? x #f p))
-                   (ty-ref (a r) (k-cyclic-from? a #f p))
-                   (ty-array (a nz r) (k-cyclic-from? a #f p))
-                   (ty-icell (a r) (k-cyclic-from? a #f p))
-                   (ty-markkey (a r) (k-cyclic-from? a #f p))
-                   (ty-pair (a b r nl) (or (k-cyclic-from? a #f p) (k-cyclic-from? b #f p)))
-                   (ty-bloblet (fs z r) (k-cyclic-list? fs #f p))
-                   (ty-product (ps) (k-cyclic-parts? ps p))
-                   (ty-sum (ps) (k-cyclic-parts? ps p))
-                   (ty-union (ms) (k-cyclic-list? ms #f p))
+                   (ty-subr (e ps r cv spc) (or (k-cyclic-list? ps #t p d) (k-cyclic-at? r #f p d)))
+                   (ty-comp (x a e r once) (or (k-cyclic-at? x #t p d) (k-cyclic-at? a #f p d)))
+                   (ty-tag (a h e r) (or (k-cyclic-at? a #f p d) (k-cyclic-at? h #f p d)))
+                   (ty-poly (bs x) (k-cyclic-at? x #f p d))
+                   (ty-ref (a r) (k-cyclic-at? a #f p d))
+                   (ty-array (a nz r) (k-cyclic-at? a #f p d))
+                   (ty-icell (a r) (k-cyclic-at? a #f p d))
+                   (ty-markkey (a r) (k-cyclic-at? a #f p d))
+                   (ty-pair (a b r nl) (or (k-cyclic-at? a #f p d) (k-cyclic-at? b #f p d)))
+                   (ty-bloblet (fs z r) (k-cyclic-list? fs #f p d))
+                   (ty-product (ps) (k-cyclic-parts? ps p d))
+                   (ty-sum (ps) (k-cyclic-parts? ps p d))
+                   (ty-union (ms) (k-cyclic-list? ms #f p d))
                    ;; Through its representation; what it was given,
                    ;; cautiously, as if taken as a parameter.
                    (ty-named (g ds)
-                     (or (k-cyclic-from? (extract (k-gen-of g) 4) #f p)
-                         (k-cyclic-list? (k-ds-types ds) #t p)))
+                     (or (k-cyclic-at? (extract (k-gen-of g) 4) #f p d)
+                         (k-cyclic-list? (k-ds-types ds) #t p d)))
                    ;; A description function applied, unseen: what it was
                    ;; given, cautiously, as if taken as a parameter.
-                   (ty-app (f ds) (k-cyclic-list? (k-ds-types ds) #t p))
-                   (ty-nlist (e z r) (k-cyclic-from? e #f p))
+                   (ty-app (f ds)
+                     (begin (set k-cyclic-open #t) (k-cyclic-list? (k-ds-types ds) #t p d)))
+                   (ty-nlist (e z r) (k-cyclic-at? e #f p d))
+                   (ty-link (x) (begin (set k-cyclic-open #t) #f))
+                   (ty-select (m n) (begin (set k-cyclic-open #t) #f))
+                   (ty-param (k n) (begin (set k-cyclic-open #t) #f))
                    (else x #f))))))))
-  (k-cyclic-list? (->* (k-ids bool k-cpath) bool)
-    (lambda (ts by path)
+  (k-cyclic-list? (->* (k-ids bool k-cpath int) bool)
+    (lambda (ts by path d)
       (and (not (null? ts))
-           (or (k-cyclic-from? (car ts) by path) (k-cyclic-list? (cdr ts) by path)))))
-  (k-cyclic-parts? (->* (k-parts k-cpath) bool)
-    (lambda (ps path)
+           (or (k-cyclic-at? (car ts) by path d) (k-cyclic-list? (cdr ts) by path d)))))
+  (k-cyclic-parts? (->* (k-parts k-cpath int) bool)
+    (lambda (ps path d)
       (and (not (null? ps))
-           (or (k-cyclic-from? (extract (car ps) 2) #f path) (k-cyclic-parts? (cdr ps) path))))))
+           (or (k-cyclic-at? (extract (car ps) 2) #f path d) (k-cyclic-parts? (cdr ps) path d))))))
+;; Each type's answer, of a walk that met nothing that may change: a cache,
+;; by id modulo its size, an entry good while no link is made from an older
+;; type (`k-links`, which the checker's reset counts too); another id at its
+;; slot takes it. Interning makes a type built twice one id, so it is met
+;; again (Heist's include cost, 2026-10-28).
+(define k-cyc-size int 8192)
+(define k-cyc-ids (ref (arrayof int @t) @t) (new (make-array k-cyc-size -1)))
+(define k-cyc-links (ref (arrayof int @t) @t) (new (make-array k-cyc-size -1)))
+(define k-cyc-said (ref (arrayof bool @t) @t) (new (make-array k-cyc-size #f)))
 (define k-cyclic? (->* (int) bool)
-  (lambda (t) (k-cyclic-from? t #f nil)))
+  (lambda (t0)
+    (let* ((t (k-resolve t0)) (s (modulo t k-cyc-size)) (now (get k-links)))
+      (if (and (= (array-ref (get k-cyc-ids) s) t) (= (array-ref (get k-cyc-links) s) now))
+          (array-ref (get k-cyc-said) s)
+          (begin
+            (set k-cyclic-open #f)
+            (let ((c (k-cyclic-from? t #f nil)))
+              (begin
+                (if (get k-cyclic-open)
+                    #u
+                    (begin (array-set! (get k-cyc-ids) s t) (array-set! (get k-cyc-links) s now)
+                           (array-set! (get k-cyc-said) s c)))
+                c)))))))
 ;; Whether `t` mentions any of `vs`.
 (define k-mentions-any? (->* (int k-ids) bool)
   (lambda (t vs)
