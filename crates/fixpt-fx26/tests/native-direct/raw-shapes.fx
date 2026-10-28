@@ -20,6 +20,6 @@
       (let* ((entry (da-label)) (o (if ov (da-label) -1)) (back (da-label))
              (b (if br (da-label) -1)))
         (begin
-          (dr-int-slow (product (1 entry) (2 o) (3 back) (4 x) (5 y) (6 imm) (7 into) (8 prim)
+          (dr-int-slow (tup (1 entry) (2 o) (3 back) (4 x) (5 y) (6 imm) (7 into) (8 prim)
                                 (9 sub) (10 b) (11 when)))
           (t-out nil (if br (cons back (cons b nil)) (cons back nil))))))))

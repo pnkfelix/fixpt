@@ -1,7 +1,7 @@
 ;;; `fixpt query`'s `effect` and `mutates` (`docs/fx26.md`, "Queries"): a
 ;;; counter at `@ed`, and procedures that write it, may, or do not.
-(define-type counter (productof (count (ref int @ed)) (name string)))
-(define c counter (product (count (new 0)) (name "keys")))
+(define-type counter (tupof (count (ref int @ed)) (name string)))
+(define c counter (tup (count (new 0)) (name "keys")))
 
 ;; Writes `@ed` itself.
 (define* bump! (subr (maxeff (read @ed) (write @ed)) (counter) unit)

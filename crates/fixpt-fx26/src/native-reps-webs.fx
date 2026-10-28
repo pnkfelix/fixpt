@@ -11,9 +11,9 @@
 
 ;; `webs`'s basic blocks (`nr-blocks`), and what it notes of them a slot at
 ;; a time (`nr-slot-webs`).
-(define-type nr-blocks (productof (1 da-ints) (2 (arrayof da-bytes @k)) (3 da-ints)))
+(define-type nr-blocks (tupof (1 da-ints) (2 (arrayof da-bytes @k)) (3 da-ints)))
 (define-type nr-marks
-  (productof (1 da-ints) (2 da-bools) (3 da-ints) (4 da-ints) (5 da-ints) (6 da-ints) (7 da-ints)))
+  (tupof (1 da-ints) (2 da-bools) (3 da-ints) (4 da-ints) (5 da-ints) (6 da-ints) (7 da-ints)))
 
 ;; The union-find's representative of `x`, the way there shortened.
 (define nr-find (subr da-assembles (da-ints int) int)
@@ -106,7 +106,7 @@
           (count 0)
           (let* ((nb (scan 0 #t (scan 0 #f 0)))
                  (bpreds (the (arrayof da-bytes @k) (make-array nb nil))))
-            (begin (blocks 0 nb bpreds) (turn 0) (product (1 block) (2 bpreds) (3 lasts)))))))))
+            (begin (blocks 0 nb bpreds) (turn 0) (tup (1 block) (2 bpreds) (3 lasts)))))))))
 
 ;; The webs of frame slot `s`, which instructions `touches` read or write,
 ;; block by block (`webs`'s loop over slots), not a search back from each

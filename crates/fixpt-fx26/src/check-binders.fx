@@ -48,7 +48,7 @@
   (lambda (t acc)
     (tagcase (k-get t)
       (ty-poly (bs body) (k-binders-from (k-resolve body) (k-append-binders acc bs)))
-      (else y (product (1 acc) (2 t))))))
+      (else y (tup (1 acc) (2 t))))))
 
 ;; The binders of `t` through every nested `poly`, and the type under them.
 (define k-binders-of (->* (int) k-bound-body)
@@ -165,7 +165,7 @@
           nil
           (let* ((x (k-finitize (extract (car ps) 2) memo))
                  (rest (k-finitize-parts (cdr ps) memo)))
-            (cons (product (1 (extract (car ps) 1)) (2 x)) rest)))))
+            (cons (tup (1 (extract (car ps) 1)) (2 x)) rest)))))
   (k-finitize-list (->* (k-ids k-smemo) k-ids)
     (lambda (ts memo)
       (if (null? ts)
@@ -378,20 +378,20 @@
             (+ here (k-size-walk-descs (cdr ds) v seen)))))))
 ;; Parameter `p`'s, as a whole.
 (define k-size-whole (->* (int int k-seen-pol) k-counts)
-  (lambda (p v seen) (product (1 (k-size-walk p -1 v seen)) (2 0))))
+  (lambda (p v seen) (tup (1 (k-size-walk p -1 v seen)) (2 0))))
 ;; Parameter `p`'s.
 (define k-size-param (->* (int int k-seen-pol) k-counts)
   (lambda (p v seen)
     (tagcase (k-get p)
-      (ty-nat (z) (if (k-size-alone? z v) (product (1 0) (2 1)) (k-size-whole p v seen)))
+      (ty-nat (z) (if (k-size-alone? z v) (tup (1 0) (2 1)) (k-size-whole p v seen)))
       (ty-nlist (e z r)
         (if (k-size-alone? z v)
-            (product (1 (k-size-walk e -1 v seen)) (2 1))
+            (tup (1 (k-size-walk e -1 v seen)) (2 1))
             (k-size-whole p v seen)))
       ;; An array's own length, likewise; its elements, mutable, both ways.
       (ty-array (e z r)
         (if (k-size-alone? z v)
-            (product (1 (k-size-walk e 0 v seen)) (2 1))
+            (tup (1 (k-size-walk e 0 v seen)) (2 1))
             (k-size-whole p v seen)))
       (else y (k-size-whole p v seen)))))
 ;; Each parameter's count of such occurrences, and how many parameters are
@@ -399,10 +399,10 @@
 (define k-size-params (->* (k-ids int k-seen-pol) k-counts)
   (lambda (ps v seen)
     (if (null? ps)
-        (product (1 0) (2 0))
+        (tup (1 0) (2 0))
         (let* ((here (k-size-param (k-resolve (car ps)) v seen))
                (rest (k-size-params (cdr ps) v seen)))
-          (product (1 (+ (extract here 1) (extract rest 1)))
+          (tup (1 (+ (extract here 1) (extract rest 1)))
                    (2 (+ (extract here 2) (extract rest 2))))))))
 (define k-finite-size-ok? (->* (int int) bool)
   (lambda (body v)

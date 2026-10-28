@@ -250,7 +250,7 @@ ti ::= ... | (di di1 ...din) | ...
 
 A `(->> k1 ... kn)` is the kind of an n-ary description-level function to a
 type (not curried — FX-91 flattens application and abstraction to lists, the
-same choice as its `maxeff` and `productof`); `dlambda` is the constructor,
+same choice as its `maxeff` and `tupof`); `dlambda` is the constructor,
 `(dx0 dx1 ... dxn)` the application. Both **static and inclusion** semantics
 are given (`fx91-report.txt:377-434`):
 
@@ -490,7 +490,7 @@ recursive type family parametrized by a higher-kinded variable `f` (`(define-
 type (wrap (f (=> type type))) (f (wrap f)))`, say) is exactly the case Rémy
 shows is undecidable in general and should be refused**, while an ordinary
 recursive type that merely *contains* a `Ty::App` at base kind (`(define-type
-t (sumof (leaf int) (node (f t))))` for a already-resolved `f`) is the "weak
+t (oneof (leaf int) (node (f t))))` for a already-resolved `f`) is the "weak
 equirecursive" case Cai et al. show decidable — which is already FX-26's
 existing equi-recursive machinery, untouched. §9's open question 4 is updated
 accordingly below.
@@ -945,7 +945,7 @@ The tagless-final limitation from `gadts.md:222` (§2), with Path 1's syntax:
 
 (define-type (closure-interp (a type)) (subr pure () a))   ; today's interpreter
 (define-generative (tree-interp (a type))                   ; a second interpretation,
-  (sumof (int-node int) (bool-node bool) (add-node (productof (l (exp tree-interp int)) (r (exp tree-interp int))))))
+  (oneof (int-node int) (bool-node bool) (add-node (tupof (l (exp tree-interp int)) (r (exp tree-interp int))))))
 ; both are now `(exp closure-interp a)` and `(exp tree-interp a)` of the SAME `exp` family;
 ; `eval`, `pretty-print` and `optimize` each take a `(poly ((f (=> type type)) (a type)) (subr ... ((exp f a)) ...))`
 ; written once, abstracting over which interpretation `f` is -- the capability `gadts.md:222`
@@ -1134,15 +1134,15 @@ restricted form" of exactly this):
             (val map (poly ((a type) (b type)) (subr pure ((subr pure (a) b) (f a)) (f b))))))
 
 (define pair-up                                           ; a functor: a dependent procedure
-  (subr pure ((c container) ((select c f) int)) ((select c f) (productof (l int) (r int))))
-  (lambda (c xs) (with c (map (lambda ((x int)) (product (l x) (r x))) xs))))
+  (subr pure ((c container) ((select c f) int)) ((select c f) (tupof (l int) (r int))))
+  (lambda (c xs) (with c (map (lambda ((x int)) (tup (l x) (r x))) xs))))
 ```
 
 Contrast with today's working, kind-`type`-only functor
 (`crates/fixpt-fx26/tests/programs/modules/functor-max.fx`, checked, both
 checkers agree): `max-of`'s module parameter `o`'s abstract `t` names *one*
 type, fixed for the whole call; `pair-up` above needs `f` to be re-applied
-at two *different* types (`int`, then `(productof (l int) (r int))`) within
+at two *different* types (`int`, then `(tupof (l int) (r int))`) within
 one call — the exact gap `functor-max.fx` cannot express today, and the
 reason `(select $k (f ...))`, not just `(select $k t)`, is the piece this
 path is missing.
@@ -1228,17 +1228,17 @@ the right representation, at zero extra cost, and is this note's strongest
 ### 8.2 A closed, tag-dispatched union: checked today, narrower
 
 `docs/research/examples/higher-kinds/closed-dictionary.fx`, checked and run
-(both checkers agree, result `#<sum as-pair>`, i.e. `(pair 2 3)`):
+(both checkers agree, result `#<one as-pair>`, i.e. `(pair 2 3)`):
 
 ```scheme
-(define-type (maybe (a type)) (sumof (none unit) (some a)))
-(define-type (pair (a type)) (productof (fst a) (snd a)))
-(define-type (box (a type)) (sumof (as-maybe (maybe a)) (as-pair (pair a))))
+(define-type (maybe (a type)) (oneof (none unit) (some a)))
+(define-type (pair (a type)) (tupof (fst a) (snd a)))
+(define-type (box (a type)) (oneof (as-maybe (maybe a)) (as-pair (pair a))))
 (define map-box
   (poly ((a type) (b type)) (subr pure ((subr pure (a) b) (box a)) (box b)))
   (lambda (f bx) (tagcase bx
-    (as-maybe m (sum as-maybe (tagcase m (none u (sum none u)) (some x (sum some (f x))))))
-    (as-pair p (sum as-pair (product (fst (f (extract p fst))) (snd (f (extract p snd)))))))))
+    (as-maybe m (one as-maybe (tagcase m (none u (one none u)) (some x (one some (f x))))))
+    (as-pair p (one as-pair (tup (fst (f (extract p fst))) (snd (f (extract p snd)))))))))
 ```
 
 `map-box` is written **once** and works on either shape — a genuine `map`
@@ -1278,7 +1278,7 @@ for every instantiation of the family, so there is nothing for a
 container-specific `inj-List`/`inj-Option` pair to attach *to* inside one
 shared `app`. The only FX-26-native ways to recover a shared carrier are:
 (a) a closed, tag-dispatched union (§8.2 — effectively "the brands are a
-finite `sumof`, known in advance"), which is open-world *within* the sum but
+finite `oneof`, known in advance"), which is open-world *within* the sum but
 not extensible beyond it, or (b) actually adding an arrow kind somewhere
 (Path 1 or Path 2), at which point the brand encoding is no longer needed at
 all — a real `(f a)` already says what `app`+brand was faking. **Verdict:

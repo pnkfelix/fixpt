@@ -140,7 +140,7 @@
                              (k-sfail "a convention's clause is `(role …)`" c)))
                        (else x (k-sfail "a convention's clause is `(role …)`" c)))))
           (k-conv-ours (cdr xs)
-                       (k-conv-insert (product (1 role) (2 (k-conv-text c)) (3 c)) acc))))))
+                       (k-conv-insert (tup (1 role) (2 (k-conv-text c)) (3 c)) acc))))))
 ;; Where a supported clause's role ends: at its first space or `)`.
 (define k-conv-role-end (->* (string int) int)
   (lambda (t i)
@@ -153,7 +153,7 @@
     (if (null? ts)
         acc
         (let* ((t (car ts)) (role (substring t 1 (k-conv-role-end t 1))))
-          (k-conv-theirs (cdr ts) form (k-conv-insert (product (1 role) (2 t) (3 form)) acc))))))
+          (k-conv-theirs (cdr ts) form (k-conv-insert (tup (1 role) (2 t) (3 form)) acc))))))
 ;; The clause of the convention as it was, accepted still in place of the
 ;; current one of its role (`fixpt_runtime::NATIVE_CONVENTION_OLDER`).
 (define k-conv-older string
@@ -297,7 +297,7 @@
                (x (k-resolve-exp (extract (car bs) 3)))
                (restored (set k-dscope saved))
                (checked (if (k-lambda? x) #u (k-fail-not-lambda name x))))
-          (cons (product (1 name) (2 t) (3 x)) (k-rec-lambdas (cdr bs) (cdr ts)))))))
+          (cons (tup (1 name) (2 t) (3 x)) (k-rec-lambdas (cdr bs) (cdr ts)))))))
 (define k-rec-check (->* (k-letrec-bs) k-out)
   (lambda (g)
     (if (null? g)
@@ -414,7 +414,7 @@
   (lambda (form ns)
     (if (null? ns)
         #u
-        (let ((def (product (1 ns) (2 form) (3 (k-names-without (get k-last-uses) ns)))))
+        (let ((def (tup (1 ns) (2 form) (3 (k-names-without (get k-last-uses) ns)))))
           (set k-defs (the k-def-list (cons def (k-defs-without (get k-defs) ns))))))))
 ;; The definitions that use `ns`, and those that use them, and so on,
 ;; oldest first.
@@ -442,7 +442,7 @@
   (lambda (ns why)
     (if (null? ns)
         #u
-        (let ((b (product (1 (car ns)) (2 (k-name-depth (car ns))) (3 why))))
+        (let ((b (tup (1 (car ns)) (2 (k-name-depth (car ns))) (3 why))))
           (begin (set k-broken (the (listof k-break acyclic) (cons b (get k-broken))))
                  (k-break-all (cdr ns) why))))))
 (define k-lines-append (->* (k-out k-out) k-out)
@@ -466,7 +466,7 @@
 ;; those of `rsaved`.
 (define k-note-alone (->* (symbol int kx k-named) unit)
   (lambda (name t x rsaved)
-    (let* ((g (the k-letrec-bs (cons (product (1 name) (2 t) (3 x)) nil)))
+    (let* ((g (the k-letrec-bs (cons (tup (1 name) (2 t) (3 x)) nil)))
            (why (k-termination g)))
       (if (string=? why "")
           #u
@@ -474,7 +474,7 @@
 ;; Lemma `l`, now of the names `named`.
 (define k-lemma-as (->* (k-lemma k-named) k-lemma)
   (lambda (l named)
-    (product (1 (extract l 1)) (2 (extract l 2)) (3 (extract l 3)) (4 (extract l 4)) (5 named))))
+    (tup (1 (extract l 1)) (2 (extract l 2)) (3 (extract l 3)) (4 (extract l 4)) (5 named))))
 ;; `name`, of type `t`, defined as `x`, noted as a proof of `l`, once `x`
 ;; proves it.
 (define k-note-lemma (->* (k-lemma symbol int kx) unit)
@@ -718,7 +718,7 @@
 ;; making them new.
 (define k-note-run (->* (top bool) unit)
   (lambda (form assigns)
-    (set k-runs (the k-run-list (cons (product (1 form) (2 assigns)) (get k-runs))))))
+    (set k-runs (the k-run-list (cons (tup (1 form) (2 assigns)) (get k-runs))))))
 ;; Each of `users` checked again after the redefinition of `ns`: defined
 ;; again if it checks, broken if not.
 (define k-rerun (->* (k-def-list k-names k-out) k-out)
@@ -862,7 +862,7 @@
   (lambda (i ps)
     (if (null? ps)
         nil
-        (cons (product (1 (string->symbol (string-append "x" (int->string i))))
+        (cons (tup (1 (string->symbol (string-append "x" (int->string i))))
                        (2 (the syns-a (list (car ps)))))
               (k-sys-params (+ i 1) (cdr ps))))))
 (define k-sys-items (->* (syn) (listof syn acyclic))
@@ -872,7 +872,7 @@
 ;; one checked as it is made; and itself, each of its expressions an
 ;; identity of its own. A `poly`'s binders are in scope in its definition,
 ;; which is checked against its body.
-(define k-sys-defs (->* (symbol string syn string bool int int) (productof (1 top) (2 top)))
+(define k-sys-defs (->* (symbol string syn string bool int int) (tupof (1 top) (2 top)))
   (lambda (name host canonical text required a b)
     (let* ((label (string-append "syscall " (symbol->string name) " (\"" host "\")"))
            (asks (lambda ((f symbol) (k int))
@@ -904,7 +904,7 @@
                 (e-app (e-var '%syscall-available? a b 1050)
                        (list (k-sys-str host a b 1051) (k-sys-str text a b 1052)) a b 1053)))
            (companion (string->symbol (string-append "%syscall-available:" (symbol->string name)))))
-      (product (1 (t-define companion (the syns-a (list (atom 'bool a b))) available a b))
+      (tup (1 (t-define companion (the syns-a (list (atom 'bool a b))) available a b))
                (2 (t-define name (the syns-a (list canonical)) body a b))))))
 ;; `(define-syscall name "host" type)` (`required`), or
 ;; `(define-optional-syscall …)`, at `a`..`b`: its line, its definition's.

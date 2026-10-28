@@ -13,7 +13,7 @@
            (c (string-search s " " (+ b 1))))
       (substring s 0 c))))
 (define named string
-  (string-append "(define-type pt (productof (x int) (y int)))\n"
+  (string-append "(define-type pt (tupof (x int) (y int)))\n"
                  "(define-type f (subr pure (pt) int))\n"
                  "(define* g f (lambda (p) (extract p x)))\ng"))
 (string-append (type-at prog 47) "; " (type-at prog 58) "; "

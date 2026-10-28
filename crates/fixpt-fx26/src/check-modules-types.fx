@@ -7,13 +7,13 @@
 (import check-types-types (type k-ids k-map k-parts kxs) (effect checks))
 ;; A `define-rec`'s types and expressions, each type read before its
 ;; expression, as the Rust parser reads them.
-(define-type k-rec-read (productof (1 k-ids) (2 kxs)))
+(define-type k-rec-read (tupof (1 k-ids) (2 kxs)))
 ;; Run `f`; an error it makes in the file read at `base` (`load-module`)
 ;; said at `a`..`b`, with where in the file, as the Rust checker says it.
 (define-type k-thunk-unit (subr (maxeff checks spin) () unit))
 ;; Abstract types `abs` renamed for a binding, each `prefix` and its name:
 ;; the new ones, and what each old one becomes.
-(define-type k-renamed (productof (1 k-parts) (2 k-map)))
+(define-type k-renamed (tupof (1 k-parts) (2 k-map)))
 
 ;;; ------------------------------------------------------------ signatures
 

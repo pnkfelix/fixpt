@@ -3975,3 +3975,21 @@ program of `tests/programs` that compiles (but `syscalls` and `bench`'s,
 not run) gives the same from its `.fasl` as from its source, 342 of them
 reading it (`crates/fixpt-cli/tests/fasl.rs` runs eight directories).
 Kayak's compiler: stage 0 in 1.15 s from its `.fasl`, 3.30 s from source.
+
+## 158. `one` and `tup`: `sum` and `product` are a program's (the user's, 2026-10-28)
+
+FX-91's injection `(sum tag e)` took the name `sum` from every program
+(`TODO.md` §58), and `product` likewise. They are renamed, with what is
+named after them: `(one tag e)` of type `(oneof (tag T) …)`, `(tup (l e)
+…)` of type `(tupof (l T) …)`; the predicates `one?` and `tup?`; the
+shapes `typecase` tests and propositions name, `(one x …)`, `(shape i
+tup)`; the printed values `#<one tag>` and `#<tup of n>`. Both parsers and
+both checkers, `define-datatype`'s expansion (Rust and FX-26), the REPL's
+hints, the keyword lists, the Emacs mode, the grammar, `fx26.md` and the
+notes. Every FX-26 program here is rewritten by where each word stands
+(`tagcase` tags, `case` data and `let` binders left as they were). The
+programs that called a procedure of their own named `one` call it another
+name (`check-processes.fx`'s `overlap?`, `check-read.fx`'s `param`,
+`convention.fx`'s `reg-par`, `modules/reorder.fx`, and
+`modules/with-shadows-applied.fx`'s description function `single`);
+`scheme-bench/sum.fx`'s accumulator is `sum` again, as Larceny's is.

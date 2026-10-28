@@ -47,9 +47,9 @@
 
 (define-type syms (listof symbol @heap))
 (define-type ints (listof int @heap))
-(define-type known-pair (productof (pos int) (x symbol)))
+(define-type known-pair (tupof (pos int) (x symbol)))
 (define-type knowns (listof known-pair @heap))
-(define-type attribute (productof (poss ints) (unknown syms) (known knowns)))
+(define-type attribute (tupof (poss ints) (unknown syms) (known knowns)))
 (define-type attr-ref (ref attribute @heap))
 
 (define-datatype pos-option (none) (some int))
@@ -92,7 +92,7 @@
               (else e (begin (set r old) (raise e))))))))))
 
 (define* init (subr (maxeff (alloc @heap) (read @globals)) (syms) attr-ref)
-  (lambda (unknown) (new (product (poss poss) (unknown unknown) (known (the knowns nil))))))
+  (lambda (unknown) (new (tup (poss poss) (unknown unknown) (known (the knowns nil))))))
 
 (define* find (subr (maxeff (read @heap) spin (read @globals)) (attr-ref symbol) pos-option)
   (lambda (r x)
@@ -111,7 +111,7 @@
 (define adjacent (subr pure (pos-option pos-option) bool) (make (lambda ((x int) (y int)) (or (= x (- y 1)) (= y (- x 1))))))
 (define left (subr pure (pos-option pos-option) bool) (make (lambda ((x int) (y int)) (= x (- y 1)))))
 
-(define-type each-done (productof (each (subr zeff (attribute) unit)) (finish (subr zeff () unit))))
+(define-type each-done (tupof (each (subr zeff (attribute) unit)) (finish (subr zeff () unit))))
 (define-datatype attrs (none-attr) (one-attr attribute) (many-attr))
 
 (define* search (subr zeff () int)
@@ -178,7 +178,7 @@
                                (begin
                                  (try-each-int poss
                                    (lambda ((p int) (poss ints))
-                                     (let ((attr (product (poss poss) (unknown unknown) (known (the knowns (cons (product (pos p) (x x)) known))))))
+                                     (let ((attr (tup (poss poss) (unknown unknown) (known (the knowns (cons (tup (pos p) (x x)) known))))))
                                        (fluid-let r attr
                                          (lambda () (if (is-consistent) ((extract ed each) attr) #u))))))
                                  ((extract ed finish))))))))))
@@ -192,7 +192,7 @@
                                 (try r
                                   (lambda ()
                                     (let ((attrs (the (ref attrs @heap) (new (none-attr)))))
-                                      (product
+                                      (tup
                                         (each (lambda ((a attribute))
                                                 (tagcase (get attrs)
                                                   (none-attr () (set attrs (one-attr a)))
@@ -207,7 +207,7 @@
                               (lambda (r)
                                 (try r
                                   (lambda ()
-                                    (product (each (lambda ((a attribute)) (loop)))
+                                    (tup (each (lambda ((a attribute)) (loop)))
                                              (finish (lambda () (raise (inconsistent))))))))))
                      (prompt zebra-tag
                        (begin

@@ -512,7 +512,7 @@ all. What would be new, if ever built:
 - **A `modof` type former**, closer to a dependent product type than
   anything FX-26 has (a labelled product whose later fields' types may
   mention earlier fields' *values*, not just their types) — genuinely new
-  in both checkers, since today's `(productof (l T) …)` has no such
+  in both checkers, since today's `(tupof (l T) …)` has no such
   dependency.
 - **A `select` expression form** carrying Sheldon's effect-purity
   restriction when it appears inside a type: exactly FX-26's own

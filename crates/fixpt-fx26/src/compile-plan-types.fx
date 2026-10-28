@@ -18,28 +18,28 @@
 ;; `r-specialize`). Its name, word, parameters, body and globals, as for
 ;; `c-inline`.
 (define-type c-special
-  (productof (1 symbol) (2 tword) (3 c-params) (4 exp) (5 int) (6 int) (7 int)))
+  (tupof (1 symbol) (2 tword) (3 c-params) (4 exp) (5 int) (6 int) (7 int)))
 (define-type c-specializables (listof c-special acyclic))
 ;; A call of a global, as planned (step 3): the small procedure it may be
 ;; inlined as, and the procedure it may be specialized as with the lambda
 ;; argument, each in a list of none or one; by where the call is.
-(define-type c-spec-call (productof (1 c-special) (2 exp)))
+(define-type c-spec-call (tupof (1 c-special) (2 exp)))
 (define-type c-spec-calls (listof c-spec-call @k))
-(define-type c-called (productof (1 (listof c-inline acyclic)) (2 c-spec-calls)))
+(define-type c-called (tupof (1 (listof c-inline acyclic)) (2 c-spec-calls)))
 ;; The plan's contexts (3b): the form's own, 0; and each body its calls
 ;; inline, numbered, planned as register code compiles it there. Each one's
 ;; calls, by where they are; and the bodies they inline, by name and arity:
 ;; what an inlined body decides depending on the callee and the path to it,
 ;; not on the call.
 (define-type c-calls-at (table k-at c-called @k))
-(define-type c-inlined-at (listof (productof (1 symbol) (2 int) (3 int)) @k))
+(define-type c-inlined-at (listof (tupof (1 symbol) (2 int) (3 int)) @k))
 ;; The copies made, by the procedure's name and the lambda's body: each one's
 ;; context.
-(define-type c-copied-at (listof (productof (1 symbol) (2 k-at) (3 int)) @k))
+(define-type c-copied-at (listof (tupof (1 symbol) (2 k-at) (3 int)) @k))
 ;; The form's copies, last first, each with what it is made for (step 4):
 ;; the procedure, the lambda, the procedure's global, the names the
 ;; lambda's closure captures, the globals it sees, and the copy's context.
-(define-type c-copy-at (productof (1 c-special) (2 exp) (3 wglobal) (4 syms) (5 int) (6 int)))
+(define-type c-copy-at (tupof (1 c-special) (2 exp) (3 wglobal) (4 syms) (5 int) (6 int)))
 
 ;;; ------------------------------------------------------------ signatures
 

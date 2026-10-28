@@ -240,7 +240,7 @@
         (e-lambda (ps body la lb lalbk)
           (if (and (= (c-count-params ps) (extract sp 7))
                    (>= (c-inline-room body c-inline-limit) 0))
-              (the c-spec-calls (cons (product (1 sp) (2 lam)) nil))
+              (the c-spec-calls (cons (tup (1 sp) (2 lam)) nil))
               nil))
         (else y nil)))))
 ;; Call `a`-`b` as planned, in a list, where call sites are the plan's: in
@@ -255,7 +255,7 @@
           (the (listof c-called @k)
                (cons (table-ref (table-ref (get c-plan-calls) c (get c-no-calls))
                                 (c-span-key a b abk)
-                                (the c-called (product (1 nil) (2 nil))))
+                                (the c-called (tup (1 nil) (2 nil))))
                      nil))))))
 
 ;; The names `ns` bound in slots, onto `e`: only their kind counts.
@@ -269,7 +269,7 @@
   (lambda (ps body fv)
     (let ((key (exp-at body)))
       (table-set! (get c-plan-procs) key
-                  (cons (product (1 (c-bind-params ps nil)) (2 fv))
+                  (cons (tup (1 (c-bind-params ps nil)) (2 fv))
                         (table-ref (get c-plan-procs) key (the c-planneds nil)))))))
 
 (define-rec
@@ -344,7 +344,7 @@
                                 (the (listof c-inline acyclic) nil)
                                 (p-inline-named (c-inlines-of n) n k (get c-genv)))))
                   (begin
-                    (p-note-call a b abk (product (1 inl) (2 spl)))
+                    (p-note-call a b abk (tup (1 inl) (2 spl)))
                     (if (or (null? inl) (>= (c-plan-child (get c-plan-now) n k) 0))
                         #u
                         (p-inlined (car inl) k))
@@ -376,11 +376,11 @@
             (begin
               (set c-plan-contexts (+ c 2))
               (table-set! (get c-plan-copies) outer
-                          (cons (product (1 (extract sp 1)) (2 (c-lambda-key lam)) (3 c))
+                          (cons (tup (1 (extract sp 1)) (2 (c-lambda-key lam)) (3 c))
                                 (table-ref (get c-plan-copies) outer (the c-copied-at nil))))
               (if (= outer 0)
                   (set c-plan-copy-order
-                       (cons (product (1 sp) (2 lam) (3 cell) (4 fv) (5 lam-genv) (6 c))
+                       (cons (tup (1 sp) (2 lam) (3 cell) (4 fv) (5 lam-genv) (6 c))
                              (get c-plan-copy-order)))
                   #u)
               (set c-plan-now c)
@@ -402,7 +402,7 @@
         (begin
           (set c-plan-contexts (+ c 1))
           (table-set! (get c-plan-inlined) outer
-                      (cons (product (1 (extract i 1)) (2 k) (3 c))
+                      (cons (tup (1 (extract i 1)) (2 k) (3 c))
                             (table-ref (get c-plan-inlined) outer (the c-inlined-at nil))))
           (set c-plan-now c)
           (set c-plan-inlining (cons (extract i 1) outer-inlining))
@@ -570,7 +570,7 @@
   (->* (c-copy-at c-special c-params exp k-at c-spec-copies) unit)
   (lambda (c sp lps lbody key cs)
     (let ((spec (the c-spec
-                  (product (1 (extract sp 1)) (2 (extract c 3)) (3 (extract sp 2))
+                  (tup (1 (extract sp 1)) (2 (extract c 3)) (3 (extract sp 2))
                            (4 (extract sp 6)) (5 (p-nth-param (extract sp 3) (extract sp 6)))
                            (6 (c-count-params (extract sp 3))) (7 (extract sp 7))
                            (8 lps) (9 lbody) (10 (extract c 4)) (11 (extract c 5)))))
@@ -596,7 +596,7 @@
                      (cons (c-copy-twin (car (get c-twins)) spec (extract c 6) (extract sp 5))
                            twins)))
             (table-set! (get c-spec-made) key
-                        (cons (product (1 (extract sp 2)) (2 (extract c 4)) (3 (extract c 5))
+                        (cons (tup (1 (extract sp 2)) (2 (extract c 4)) (3 (extract c 5))
                                        (4 (extract made 1)) (5 (extract made 2)))
                               cs))))))))
 ;; Each of `cs`, last first, made in order.

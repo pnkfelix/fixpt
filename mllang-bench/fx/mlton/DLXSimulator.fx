@@ -231,12 +231,12 @@
 
 ;; ---- Memory: its words, and counts of reads and writes.
 
-(define-type memory (productof (words words) (reads int) (writes int)))
-(define-type mem-word (productof (mem memory) (word u32)))
+(define-type memory (tupof (words words) (reads int) (writes int)))
+(define-type mem-word (tupof (mem memory) (word u32)))
 
 (define* mem-init (subr (maxeff (alloc @i) spin) () memory)
   (lambda ()
-    (product (words ((proj ia-tabulate u32) (u32->int 65536) (lambda (i) 0)))
+    (tup (words ((proj ia-tabulate u32) (u32->int 65536) (lambda (i) 0)))
              (reads 0) (writes 0))))
 
 (define* align-w-address (subr pure (u32) u32) (lambda (a) (shl (shr a 2) 2)))
@@ -247,7 +247,7 @@
   (lambda (m address)
     (let* ((aligned-address (align-w-address address))
            (use-address (shr aligned-address 2)))
-      (product (mem (product (words (extract m words)) (reads (+ (extract m reads) 1))
+      (tup (mem (tup (words (extract m words)) (reads (+ (extract m reads) 1))
                              (writes (extract m writes))))
                (word ((proj ia-nth u32) (extract m words) (u32->int use-address)))))))
 
@@ -255,7 +255,7 @@
   (lambda (m address data)
     (let* ((aligned-address (align-w-address address))
            (use-address (shr aligned-address 2)))
-      (product (words ((proj ia-update u32) (extract m words) (u32->int use-address) data))
+      (tup (words ((proj ia-update u32) (extract m words) (u32->int use-address) data))
                (reads (extract m reads)) (writes (+ (extract m writes) 1))))))
 
 (define* mem-load-word (subr (maxeff (read @i) (read @o) (write @o) spin) (memory u32) mem-word)
@@ -294,12 +294,12 @@
 
 ;; ---- CachedMemory (structure CS = L1CacheSpec1; structure MEM = Memory)
 
-(define-type cacheline (productof (valid bool) (dirty bool) (tag u32) (block words)))
+(define-type cacheline (tupof (valid bool) (dirty bool) (tag u32) (block words)))
 (define-type cacheset (listof cacheline @i))
 (define-type cache (listof cacheset @i))
 (define-type cmemory
-  (productof (cac cache) (rh int) (rm int) (wh int) (wm int) (mem memory)))
-(define-type cmem-word (productof (mem cmemory) (word u32)))
+  (tupof (cac cache) (rh int) (rm int) (wh int) (wm int) (mem memory)))
+(define-type cmem-word (tupof (mem cmemory) (word u32)))
 
 ;; Performs log[base2] on an integer.
 (define* exp2 (subr spin (int) int) (lambda (n) (if (= n 0) 1 (* 2 (exp2 (- n 1))))))
@@ -325,13 +325,13 @@
 
 (define* init-cache (subr (maxeff (alloc @i) spin) () cache)
   (lambda ()
-    (let* ((cacheline (product (valid #f) (dirty #f) (tag (int->u32 0)) (block (zero-block))))
+    (let* ((cacheline (tup (valid #f) (dirty #f) (tag (int->u32 0)) (block (zero-block))))
            (cacheset ((proj ia-tabulate cacheline) Associativity (lambda (i) cacheline))))
       ((proj ia-tabulate cacheset) IndexSize (lambda (i) cacheset)))))
 
 (define* c-init (subr (maxeff (alloc @i) spin) () cmemory)
   (lambda ()
-    (product (cac (init-cache)) (rh 0) (rm 0) (wh 0) (wm 0) (mem (mem-init)))))
+    (tup (cac (init-cache)) (rh 0) (rm 0) (wh 0) (wm 0) (mem (mem-init)))))
 
 (define* get-tag (subr pure (u32) u32)
   (lambda (address) (shr address (+ IndexBits BlockOffsetBits))))
@@ -380,7 +380,7 @@
 (define* c-write-entry (subr (maxeff (read @i) (alloc @i) spin) (cacheline u32 u32) cacheline)
   (lambda (entry address data)
     (let ((ndirty (tagcase WriteHit (Write_Through () #f) (Write_Back () #t))))
-      (product (valid #t) (dirty ndirty) (tag (extract entry tag))
+      (tup (valid #t) (dirty ndirty) (tag (extract entry tag))
                (block ((proj ia-update u32) (extract entry block)
                                             (u32->int (shr (get-block-offset address) 2))
                                             data))))))
@@ -403,7 +403,7 @@
   (lambda (address offset)
     (u32+ (shl (shr address BlockOffsetBits) BlockOffsetBits) (shl (int->u32 offset) 2))))
 
-(define-type block-mem (productof (block words) (mem memory)))
+(define-type block-mem (tupof (block words) (mem memory)))
 
 ;; LoadBlock: memory, and the block holding address loaded from it.
 (define* load-block (subr cb (memory u32) block-mem)
@@ -411,9 +411,9 @@
     ((proj ia-foldr int block-mem)
      (lambda (offset acc)
        (let* ((r (mem-load-word (extract acc mem) (block-address address offset))))
-         (product (block ((proj ia-update u32) (extract acc block) offset (extract r word)))
+         (tup (block ((proj ia-update u32) (extract acc block) offset (extract r word)))
                   (mem (extract r mem)))))
-     (product (block (zero-block)) (mem mem))
+     (tup (block (zero-block)) (mem mem))
      ((proj ia-tabulate int) BlockSize (lambda (i) i)))))
 
 ;; StoreBlock: memory with block stored into the block holding address.
@@ -425,9 +425,9 @@
      mem
      ((proj ia-tabulate int) BlockSize (lambda (i) i)))))
 
-(define-type line-mem (productof (line cacheline) (mem memory)))
-(define-type set-mem (productof (set cacheset) (mem memory)))
-(define-type cache-mem (productof (cac cache) (mem memory)))
+(define-type line-mem (tupof (line cacheline) (mem memory)))
+(define-type set-mem (tupof (set cacheset) (mem memory)))
+(define-type cache-mem (tupof (cac cache) (mem memory)))
 
 ;; LoadCache: the cache and memory, the block holding address loaded into
 ;; the cache, and dirty data written back to memory first.
@@ -439,7 +439,7 @@
                      (store-block (extract entry block) mem saddress)
                      mem))
            (r (load-block nmem address)))
-      (product (line (product (valid #t) (dirty #f) (tag (get-tag address))
+      (tup (line (tup (valid #t) (dirty #f) (tag (get-tag address))
                               (block (extract r block))))
                (mem (extract r mem))))))
 
@@ -448,17 +448,17 @@
     (let* ((entry (rand-entry))
            (r (c-load-entry ((proj ia-nth cacheline) set entry) mem address))
            (nset ((proj ia-update cacheline) set entry (extract r line))))
-      (product (set nset) (mem (extract r mem))))))
+      (tup (set nset) (mem (extract r mem))))))
 
 (define* c-load-cache (subr cb (cache memory u32) cache-mem)
   (lambda (cac mem address)
     (let* ((index (u32->int (get-index address)))
            (r (c-load-set ((proj ia-nth cacheset) cac index) mem address)))
-      (product (cac ((proj ia-update cacheset) cac index (extract r set))) (mem (extract r mem))))))
+      (tup (cac ((proj ia-update cacheset) cac index (extract r set))) (mem (extract r mem))))))
 
 ;; A cached memory of a cache, counts and memory.
 (define* cmem (subr pure (cache int int int int memory) cmemory)
-  (lambda (cac rh rm wh wm mem) (product (cac cac) (rh rh) (rm rm) (wh wh) (wm wm) (mem mem))))
+  (lambda (cac rh rm wh wm mem) (tup (cac cac) (rh rh) (rm rm) (wh wh) (wm wm) (mem mem))))
 
 ;; Load and Store: errorless access to the cached memory.
 (define* c-load (subr cb (cmemory u32) cmem-word)
@@ -467,10 +467,10 @@
           (cac (extract m cac)) (rh (extract m rh)) (rm (extract m rm))
           (wh (extract m wh)) (wm (extract m wm)) (mem (extract m mem)))
       (if (c-in-cache cac aligned-address)
-          (product (mem (cmem cac (+ rh 1) rm wh wm mem))
+          (tup (mem (cmem cac (+ rh 1) rm wh wm mem))
                    (word (c-read-cache cac aligned-address)))
           (let ((r (c-load-cache cac mem aligned-address)))
-            (product (mem (cmem (extract r cac) rh (+ rm 1) wh wm (extract r mem)))
+            (tup (mem (cmem (extract r cac) rh (+ rm 1) wh wm (extract r mem)))
                      (word (c-read-cache (extract r cac) aligned-address))))))))
 
 (define* c-store (subr cb (cmemory u32 u32) cmemory)
@@ -526,7 +526,7 @@
            (r (c-load m aligned-address))
            (l-word (extract r word))
            (a (u32->int aligned-address)))
-      (product (mem (extract r mem))
+      (tup (mem (extract r mem))
                (word (cond ((= a 0) (if signed (ashr (shl l-word 16) 16) (shr (shl l-word 16) 16)))
                            ((= a 16) (if signed (ashr (shl l-word 0) 16) (shr (shl l-word 0) 16)))
                            (else (begin (memory-error name "returning 0")
@@ -539,7 +539,7 @@
            (l-word (extract r word))
            (a (u32->int address))
            (byte (lambda ((s int)) (if signed (ashr (shl l-word s) 24) (shr (shl l-word s) 24)))))
-      (product (mem (extract r mem))
+      (tup (mem (extract r mem))
                (word (cond ((= a 0) (byte 24))
                            ((= a 8) (byte 16))
                            ((= a 16) (byte 8))
@@ -607,18 +607,18 @@
   (ILLEGAL))
 
 ;; The trap's state, the benchmark's: the inputs left, the outputs made.
-(define-type tstate (productof (inputs ints) (outputs ints)))
-(define-type input-state (productof (input int) (state tstate)))
+(define-type tstate (tupof (inputs ints) (outputs ints)))
+(define-type input-state (tupof (input int) (state tstate)))
 (define-type trap
-  (productof (input-fn (subr cb (tstate) input-state))
+  (tupof (input-fn (subr cb (tstate) input-state))
              (output-fn (subr cb (int tstate) tstate))
              (state tstate)))
 
 ;; (PC, rf, mem, trap)
-(define-type machine (productof (pc u32) (rf words) (mem cmemory) (trap trap)))
+(define-type machine (tupof (pc u32) (rf words) (mem cmemory) (trap trap)))
 
 (define* machine-of (subr pure (u32 words cmemory trap) machine)
-  (lambda (pc rf mem trap) (product (pc pc) (rf rf) (mem mem) (trap trap))))
+  (lambda (pc rf mem trap) (tup (pc pc) (rf rf) (mem mem) (trap trap))))
 
 ;; Bits `at` and up of instr, masked.
 (define* field (subr pure (u32 int int) u32)
@@ -796,7 +796,7 @@
     (let* ((pc (extract m pc)) (rf (extract m rf)) (mem (extract m mem))
            (trap (extract m trap)) (code (u32->int offset))
            (with-state (lambda ((state tstate))
-                         (product (input-fn (extract trap input-fn))
+                         (tup (input-fn (extract trap input-fn))
                                   (output-fn (extract trap output-fn))
                                   (state state)))))
       (cond ((= code 3)
@@ -838,7 +838,7 @@
       (else o #f))))
 
 (define-type statistics (subr cb () string))
-(define-type result (productof (statistics statistics) (state tstate)))
+(define-type result (tupof (statistics statistics) (state tstate)))
 
 ;; The clock cycle: load, decode and perform an instruction, until HALT.
 (define* cycle-loop (subr cb (machine) result)
@@ -848,7 +848,7 @@
            (instr (decode-instr (extract r word)))
            (npc (u32+ (extract m pc) 4)))
       (if (halt-or-illegal? instr)
-          (product (statistics (lambda () (c-statistics nmem)))
+          (tup (statistics (lambda () (c-statistics nmem)))
                    (state (extract (extract m trap) state)))
           (cycle-loop
            (perform-instr instr (machine-of npc (extract m rf) nmem (extract m trap))))))))
@@ -913,20 +913,20 @@
 ;; ---- structure Main
 
 (define* tstate-of (subr pure (ints ints) tstate)
-  (lambda (inputs outputs) (product (inputs inputs) (outputs outputs))))
+  (lambda (inputs outputs) (tup (inputs inputs) (outputs outputs))))
 
 (define* input-fn (subr (read @i) (tstate) input-state)
   (lambda (state)
     (let ((inputs (extract state inputs)) (outputs (extract state outputs)))
       (if (null? inputs)
-          (product (input 0) (state (tstate-of nil outputs)))
-          (product (input (car inputs)) (state (tstate-of (cdr inputs) outputs)))))))
+          (tup (input 0) (state (tstate-of nil outputs)))
+          (tup (input (car inputs)) (state (tstate-of (cdr inputs) outputs)))))))
 
 (define* output-fn (subr (alloc @i) (int tstate) tstate)
   (lambda (output state)
-    (product (inputs (extract state inputs)) (outputs (cons output (extract state outputs))))))
+    (tup (inputs (extract state inputs)) (outputs (cons output (extract state outputs))))))
 
-(define-type program (productof (instructions strings) (inputs ints)))
+(define-type program (tupof (instructions strings) (inputs ints)))
 
 (define* print-outputs (subr cb (ints) unit)
   (lambda (outputs)
@@ -937,8 +937,8 @@
 
 (define* doit-program (subr cb (bool program) unit)
   (lambda (last p)
-    (let* ((trap (product (input-fn input-fn) (output-fn output-fn)
-                          (state (product (inputs (extract p inputs)) (outputs (the ints nil))))))
+    (let* ((trap (tup (input-fn input-fn) (output-fn output-fn)
+                          (state (tup (inputs (extract p inputs)) (outputs (the ints nil))))))
            (r (run-prog (extract p instructions) trap)))
       (if last
           (begin (print-outputs (extract (extract r state) outputs))
@@ -956,11 +956,11 @@
         #u
         (begin
           (doit-programs (= n 1)
-                         (list (product (instructions Simple) (inputs (list)))
-                               (product (instructions Twos) (inputs (list 10)))
-                               (product (instructions Abs) (inputs (list -10)))
-                               (product (instructions Fact) (inputs (list 12)))
-                               (product (instructions GCD) (inputs (list 123456789 98765)))))
+                         (list (tup (instructions Simple) (inputs (list)))
+                               (tup (instructions Twos) (inputs (list 10)))
+                               (tup (instructions Abs) (inputs (list -10)))
+                               (tup (instructions Fact) (inputs (list 12)))
+                               (tup (instructions GCD) (inputs (list 123456789 98765)))))
           (doit-loop (- n 1))))))
 
 ;; Main.doit, giving the hash of what it printed.

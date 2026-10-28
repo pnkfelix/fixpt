@@ -37,7 +37,7 @@
 (define k-sym-unit symbol (string->symbol "#u"))
 ;; What a proposition may name: each name, what it names (`sx-param i`,
 ;; `sx-result`), and its type.
-(define-type k-snames (listof (productof (1 symbol) (2 k-sx) (3 int)) acyclic))
+(define-type k-snames (listof (tupof (1 symbol) (2 k-sx) (3 int)) acyclic))
 (define k-sprop-usage string
   (string-append "a proposition: `(< a b)`, `(<= a b)`, `(= a b)`, `(> a b)`, `(>= a b)`, "
                  "`(not p)`, `(and p …)`, `(or p …)`, `(implies p q)`, `#t`, `#f`, "
@@ -47,7 +47,7 @@
                  "or `(* a …)`"))
 ;; What the clauses say: the `requires` and the `ensures` (none or one each),
 ;; the result's name.
-(define-type k-spec-parts (productof (1 k-sfs) (2 k-sfs) (3 symbol)))
+(define-type k-spec-parts (tupof (1 k-sfs) (2 k-sfs) (3 symbol)))
 (define k-clauses-usage string
   (string-append "a specification is `(requires proposition)`, then "
                  "`(ensures name proposition)`, each at most once"))
@@ -260,19 +260,19 @@
   (lambda (ns ts i)
     (cond ((or (null? ns) (null? ts)) nil)
           ((symbol=? (car ns) k-no-name) (k-spec-snames (cdr ns) (cdr ts) (+ i 1)))
-          (else (cons (product (1 (car ns)) (2 (sx-param i)) (3 (car ts)))
+          (else (cons (tup (1 (car ns)) (2 (sx-param i)) (3 (car ts)))
                       (k-spec-snames (cdr ns) (cdr ts) (+ i 1)))))))
 (define k-snames-snoc (->* (k-snames symbol int) k-snames)
   (lambda (ns r t)
     (if (null? ns)
-        (cons (product (1 r) (2 (sx-result)) (3 t)) nil)
+        (cons (tup (1 r) (2 (sx-result)) (3 t)) nil)
         (cons (car ns) (k-snames-snoc (cdr ns) r t)))))
 ;; The clauses `cs` read, onto what is read so far: `req` and `ens` (none
 ;; or one each), the result's name `rn`.
 (define k-spec-clauses (->* (k-syns k-snames int k-sfs k-sfs symbol) k-spec-parts)
   (lambda (cs names result req ens rn)
     (if (null? cs)
-        (product (1 req) (2 ens) (3 rn))
+        (tup (1 req) (2 ens) (3 rn))
         (let* ((c (car cs)) (items (k-spec-items c k-clauses-usage)) (hd (k-spec-head items))
                (n (- (k-length items) 1)))
           (cond ((and (string=? hd "requires") (= n 1) (null? req) (null? ens))
@@ -300,7 +300,7 @@
                (ens (cond ((null? sp) (k-sf-one (extract got 2)))
                           ((null? (extract got 2)) (extract (car sp) 4))
                           (else (sf-and (list (extract (car sp) 4) (car (extract got 2)))))))
-               (spec (product (1 pnames) (2 (extract got 3)) (3 (k-sf-one (extract got 1)))
+               (spec (tup (1 pnames) (2 (extract got 3)) (3 (k-sf-one (extract got 1)))
                               (4 ens))))
           (k-ty-new (ty-subr e ps r cv (cons spec nil)))))
       (else y t))))

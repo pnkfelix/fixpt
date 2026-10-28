@@ -16,13 +16,13 @@
 (define* iota (subr (maxeff (alloc @l) spin) (int (listof int @l)) (listof int @l))
   (lambda (n acc) (if (= n 0) acc (iota (- n 1) (cons n acc)))))
 
-(define-type gc-delta (productof (minor int) (major int) (words int)))
+(define-type gc-delta (tupof (minor int) (major int) (words int)))
 
 (define* build-and-count (subr (maxeff (alloc @l) spin observes) (int) gc-delta)
   (lambda (n)
     (let* ((m0 (minor-collections)) (j0 (major-collections)) (w0 (words-allocated))
            (xs (iota n nil))
            (w1 (words-allocated)) (j1 (major-collections)) (m1 (minor-collections)))
-      (product (minor (- m1 m0)) (major (- j1 j0)) (words (- w1 w0))))))
+      (tup (minor (- m1 m0)) (major (- j1 j0)) (words (- w1 w0))))))
 
 (extract (build-and-count 100000) minor)   ; 0 with the stubs

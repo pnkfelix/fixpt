@@ -15,7 +15,7 @@
 ;; If `p` is a call of a procedure whose type's result is `(bool (then …)
 ;; (else …))`, what it proves where true and where false, and its arguments
 ;; (none or one): the Rust checker's `latent_props`.
-(define-type k-latent (listof (productof (1 k-props) (2 k-props) (3 kxs)) acyclic))
+(define-type k-latent (listof (tupof (1 k-props) (2 k-props) (3 kxs)) acyclic))
 (define-type k-cert-lens (listof k-cert-len acyclic))
 
 ;;; ------------------------------------------------------------ signatures

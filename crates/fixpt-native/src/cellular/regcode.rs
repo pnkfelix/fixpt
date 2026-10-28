@@ -403,8 +403,8 @@ impl Asm {
             "exact-integer?" => vec![const { kind("bignum") }],
             "%fx26-array?" => vec![const { kind("bloblet") }],
             "%fx26-box?" => vec![const { kind("box") }],
-            "%fx26-sum?" => vec![const { kind("sum") }],
-            "%fx26-product?" => vec![const { kind("product") }],
+            "%fx26-one?" => vec![const { kind("sum") }],
+            "%fx26-tup?" => vec![const { kind("product") }],
             "%fx26-procedure?" => ["closure", "primitive", "continuation", "cellular-closure", "native-closure", "cellular-continuation"]
                 .iter()
                 .map(|n| kind(n))
@@ -639,7 +639,7 @@ impl Asm {
             // The same of the shapes of FX-26's unions (`TODO.md` §56): an
             // exact integer, a fixnum or a bignum; a plain bloblet, an
             // array; a procedure, of any machine's.
-            "symbol?" | "string?" | "exact-integer?" | "array?" | "box?" | "sum?" | "product?" | "procedure?" => {
+            "symbol?" | "string?" | "exact-integer?" | "array?" | "box?" | "one?" | "tup?" | "procedure?" => {
                 use fixpt_heap::layout::kind;
                 let codes: Vec<u32> = match what {
                     "symbol?" => vec![const { kind("symbol") }],
@@ -647,8 +647,8 @@ impl Asm {
                     "exact-integer?" => vec![const { kind("bignum") }],
                     "array?" => vec![const { kind("bloblet") }],
                     "box?" => vec![const { kind("box") }],
-                    "sum?" => vec![const { kind("sum") }],
-                    "product?" => vec![const { kind("product") }],
+                    "one?" => vec![const { kind("sum") }],
+                    "tup?" => vec![const { kind("product") }],
                     _ => ["closure", "primitive", "continuation", "cellular-closure", "native-closure", "cellular-continuation"]
                         .iter()
                         .map(|n| kind(n))
@@ -1206,8 +1206,8 @@ fn assemble_register_word_as(heap: &Heap, rw: Value, far: [i64; 2], long: bool) 
                     ("prim", 1) if prim_named(k(o(0)), "%fx26-array?") => Some("array?"),
                     ("prim", 1) if prim_named(k(o(0)), "%fx26-f32?") => Some("f32?"),
                     ("prim", 1) if prim_named(k(o(0)), "%fx26-box?") => Some("box?"),
-                    ("prim", 1) if prim_named(k(o(0)), "%fx26-sum?") => Some("sum?"),
-                    ("prim", 1) if prim_named(k(o(0)), "%fx26-product?") => Some("product?"),
+                    ("prim", 1) if prim_named(k(o(0)), "%fx26-one?") => Some("one?"),
+                    ("prim", 1) if prim_named(k(o(0)), "%fx26-tup?") => Some("tup?"),
                     ("prim", 1) if prim_named(k(o(0)), "%fx26-procedure?") => Some("procedure?"),
                     ("prim", 2) if prim_named(k(o(0)), "%fx26-char-in?") => Some("char-in"),
                     ("prim", 2) if prim_named(k(o(0)), "string=?") => Some("string="),

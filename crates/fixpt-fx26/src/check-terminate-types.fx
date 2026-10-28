@@ -15,18 +15,18 @@
 (define-type k-guards (listof (pairof int int @t) acyclic))
 ;; A size-change graph: edges between slots (parameter × 3 + measure: 0
 ;; parts, 1 down, 2 up), strict or not, in order and each pair once.
-(define-type k-edge (productof (1 int) (2 int) (3 bool)))
+(define-type k-edge (tupof (1 int) (2 int) (3 bool)))
 (define-type k-graph (listof k-edge acyclic))
 ;; A call: its caller, its callee, and its graph.
-(define-type k-call (productof (1 int) (2 int) (3 k-graph)))
+(define-type k-call (tupof (1 int) (2 int) (3 k-graph)))
 (define-type k-calls (listof k-call acyclic))
 ;; For each call: caller, callee, and each argument as the caller's
 ;; parameter passed unchanged, or -1.
-(define-type k-passed (listof (productof (1 int) (2 int) (3 k-ids)) acyclic))
+(define-type k-passed (listof (tupof (1 int) (2 int) (3 k-ids)) acyclic))
 ;; Texts: a hint for each call, lines, names shown.
 (define-type k-texts (listof string acyclic))
 ;; Why each definition, by name and declared type, may not end.
-(define-type k-whys (listof (productof (1 symbol) (2 int) (3 string)) acyclic))
+(define-type k-whys (listof (tupof (1 symbol) (2 int) (3 string)) acyclic))
 ;; A computation of a type and an effect, which may fail.
 (define-type k-thunk (subr (maxeff checks spin) () k-te))
 

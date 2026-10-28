@@ -1247,7 +1247,7 @@ impl Tree {
 
 /// The heads of the types a `define-type` may abbreviate where a `.fasl`'s
 /// type is factored, and `maxeff`, an effect: not expressions.
-const TYPE_HEADS: &[&str] = &["subr", "poly", "productof", "sumof", "union", "listof", "pairof", "ref", "arrayof", "narrayof", "mu", "bloblet", "icell", "nlist", "mark-key", "prompt-tag", "maxeff"];
+const TYPE_HEADS: &[&str] = &["subr", "poly", "tupof", "oneof", "union", "listof", "pairof", "ref", "arrayof", "narrayof", "mu", "bloblet", "icell", "nlist", "mark-key", "prompt-tag", "maxeff"];
 
 /// What a place in a type's text holds, by its form: where a name bound
 /// outside a subterm stands, the kind of the parameter it is made
@@ -1350,7 +1350,7 @@ impl Skeleton<'_> {
                 (_, 0, Tree::Atom(a)) if self.is_open(a, inner) => return None,
                 (_, 0, _) => c.clone(),
                 // A field's name, and its type.
-                (Some("productof" | "sumof"), _, Tree::List(f)) if f.len() == 2 => Tree::List(vec![f[0].clone(), self.walk(&f[1], Place::Type, inner)?]),
+                (Some("tupof" | "oneof"), _, Tree::List(f)) if f.len() == 2 => Tree::List(vec![f[0].clone(), self.walk(&f[1], Place::Type, inner)?]),
                 // A procedure's parameters: each a type, or `(x : T)`.
                 (Some("subr"), 2, Tree::List(ps)) => {
                     let mut kept = Vec::with_capacity(ps.len());
@@ -1527,7 +1527,7 @@ mod tests {
     /// named: it is closed.
     #[test]
     fn a_subterm_binding_its_own_names_is_closed() {
-        let text = "(productof (a (poly ((v type)) (subr pure (v (listof v acyclic)) v))) \
+        let text = "(tupof (a (poly ((v type)) (subr pure (v (listof v acyclic)) v))) \
                                (b (poly ((v type)) (subr pure (v (listof v acyclic)) v))))";
         let (defs, _) = factored(text, "%fasl:", 20).expect("factored");
         assert!(defs.iter().any(|d| d.starts_with("(define-type %fasl:") && d.contains("(poly ((v type))") && !d.contains("dlambda")), "{defs:?}");

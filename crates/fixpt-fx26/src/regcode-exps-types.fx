@@ -16,10 +16,10 @@
 (hide (define table-types (load-module "fx26:table-types.fx")))
 (define-type table (select table-types table))
 ;; A specialized call: which of `c-specials`, its global, and the lambda.
-(define-type rspecial (productof (1 c-special) (2 wglobal) (3 exp)))
+(define-type rspecial (tupof (1 c-special) (2 wglobal) (3 exp)))
 ;; In a top-level definition's procedure: its name, its word, its arity, and
 ;; the label at the body's start (`r-self-guarded`), in a list.
-(define-type rown (productof (1 symbol) (2 tword) (3 int) (4 int)))
+(define-type rown (tupof (1 symbol) (2 tword) (3 int) (4 int)))
 ;; While a body's fast version is compiled (`r-register-code`): whether, and
 ;; the globals it assumes hold what they held (a procedure inlined,
 ;; specialized or called by itself; a constant folded; a module whose member
@@ -40,9 +40,9 @@
 (define-type rinline (pairof c-inline wglobal @k))
 ;; Where a body finds its names: in register code, and to the cellular
 ;; compiler.
-(define-type rscope (productof (1 renv) (2 cenv)))
+(define-type rscope (tupof (1 renv) (2 cenv)))
 ;; A call-out's operands, and the patches for the siblings among them.
-(define-type rarg-patches (productof (1 rargs) (2 patches)))
+(define-type rarg-patches (tupof (1 rargs) (2 patches)))
 ;; A join point's place: its parameters' places and its label.
 (define-type rplace (pairof rlocs int @k))
 ;; Each binding's place, in a list; none for one that is no join point.

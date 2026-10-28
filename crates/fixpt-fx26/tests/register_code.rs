@@ -341,7 +341,7 @@ fn a_constructor_of_constants_is_made_once() {
         let code = code.unwrap_or_else(|e| panic!("{who}: {e}"));
         let f = &code[code.find("its register code").expect("register code")..];
         let fast = &f[..f.find("global rgb").expect("the plain version")];
-        assert!(fast.contains("const #<sum rgb>") && !fast.contains("%make-frozen"), "{who}:\n{f}");
+        assert!(fast.contains("const #<one rgb>") && !fast.contains("%make-frozen"), "{who}:\n{f}");
     }
 }
 

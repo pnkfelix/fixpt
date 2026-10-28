@@ -30,12 +30,12 @@
 (define next-key (ref int @k) (new 0))
 
 (define add-peek (subr (maxeff (read @k) (write @k) (read (globals next-key))) ()
-                       (productof (add adder) (peek peeker)))
+                       (tupof (add adder) (peek peeker)))
   (lambda ()
     (let ((key (get next-key)))
       (begin
         (set next-key (+ key 1))
-        (product
+        (tup
           (add (lambda ((r plist) (x int)) (set r (cons (E key x) (get r)))))
           (peek (lambda ((r plist))
                   (letrec ((loop (subr (maxeff (read @h) spin (read (globals NONE SOME))) ((listof exn @h)) option)

@@ -55,7 +55,7 @@ FX-26 has more set-theoretic structure than its grammar shows:
 | Existing feature                                     | Logical reading                                                 | Where                                                          |
 | ---------------------------------------------------- | --------------------------------------------------------------- | -------------------------------------------------------------- |
 | `void`, a subtype of every type                      | the empty union, ⊥                                              | `docs/fx26.md`, "The kernel"                                   |
-| `(sumof (l T) …)` with width subtyping               | a union of tagged singletons: `(sum l e)` fits any sum with `l` | `check.rs:1686–1688`                                           |
+| `(oneof (l T) …)` with width subtyping               | a union of tagged singletons: `(one l e)` fits any sum with `l` | `check.rs:1686–1688`                                           |
 | `tagcase`'s `else` sees only the tags not named      | difference over tags: `S ∖ {l₁ … lₙ}`                           | `check.rs:1952–1967`; `check.fx:3840` (`k-variants-not-named`) |
 | effects as sets: `maxeff`, `within`, masking         | union, inclusion, difference (`φ ∖ r`)                          | `docs/research/soundness.md` §2.4                              |
 | convention `fx`, with `cellular ≤ fx`, `native ≤ fx` | the union of two closure kinds, split at run time by the kind   | `docs/research/native-conventions.md`, "Conventions in types"  |
@@ -382,7 +382,7 @@ Notes on the pitfalls:
   same incompleteness, and a lemma can state a missing case.
 - **Normal form**: a union node is kept flattened, `void` dropped,
   members sorted by shape; two sums merge into one sum (their tags'
-  union), which keeps `(union (sumof (a A)) (sumof (b B)))` a sum and
+  union), which keeps `(union (oneof (a A)) (oneof (b B)))` a sum and
   `tagcase` working on it.
 - **Both checkers**: a `Ty::Union` and a `Ty::Overload` node in
   `check.rs`'s arena, the same in `check.fx`'s index arena; a `shape`
@@ -403,7 +403,7 @@ Notes on the pitfalls:
   must cover the union, as `tagcase`'s must cover the sum.
 - **`if` on a predicate of a variable**: `(null? x)`, `(pair? x)`,
   `(int? x)`, `(bool? x)`, `(char? x)`, `(string? x)`, `(symbol? x)`,
-  `(procedure? x)`, and `(sum? x)` narrow `x` in both branches, by
+  `(procedure? x)`, and `(one? x)` narrow `x` in both branches, by
   binding not by name (as `certify-acyclic` already does, so shadowing
   cannot fool it). `and`, `or` and `not` of such tests combine as
   Typed Racket's propositions do, but only for this fixed set of
@@ -452,8 +452,8 @@ the test for each:
 | `unit`                     | immediate, subtag 3                        | one compare                         |
 | `char`                     | immediate, subtag 8                        | low 8 bits                          |
 | `string`, `symbol`         | bloblet, kinds 1 and 2                     | low bits, then the header's kind    |
-| `(sumof …)`                | bloblet, kind 36 (`runtime.scm:33`)        | kind; then the tag symbol           |
-| `(productof …)`            | bloblet, kind 37: every product alike      | kind                                |
+| `(oneof …)`                | bloblet, kind 36 (`runtime.scm:33`)        | kind; then the tag symbol           |
+| `(tupof …)`            | bloblet, kind 37: every product alike      | kind                                |
 | `(ref T r)`                | box, kind 10 (`runtime.scm:17`)            | kind                                |
 | arrays and `bloblet` types | generic bloblets (`runtime.scm:39`)        | kind; one shape for both today      |
 | `subr` of any convention   | closure kinds 8, 38, 41                    | kind; `fx` already dispatches on it |

@@ -1717,7 +1717,7 @@ mod speculative {
     /// of `x` and `y` and `v` one of them.
     fn next_after(text: &str) -> String {
         let mut s = session();
-        let defs = "(define-type t (sumof (x int) (y int))) (define v (the t (sum x 3)))";
+        let defs = "(define-type t (oneof (x int) (y int))) (define v (the t (one x 3)))";
         for f in s.checker.read_in(FileId(0), defs).expect("reads") {
             s.checker.top(&f).expect("checks");
         }
@@ -1734,8 +1734,8 @@ mod speculative {
             ("(tagcase v (x n n) (y m m) ", "nothing: every tag has an arm"),
             ("(lambda ((w t)) (tagcase w (y k k) ", "an arm `(tag name body …)` for `x` (int), or `(else name body …)`"),
             // The tags of the sum expected, then the payload's type.
-            ("(the t (sum ", "a tag, then its value: `x` (int), `y` (int)"),
-            ("(the t (sum x ", "an expression of type int"),
+            ("(the t (one ", "a tag, then its value: `x` (int), `y` (int)"),
+            ("(the t (one x ", "an expression of type int"),
             ("(the int (if #t 1 ", "an expression of type int"),
             ("(the int (tagcase v (x n n) (y m ", "an expression of type int"),
             // The shape of the form the hole is in, innermost first.

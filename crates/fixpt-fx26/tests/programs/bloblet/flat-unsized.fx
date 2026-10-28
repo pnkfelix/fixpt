@@ -5,7 +5,7 @@
 ;; procedures polymorphic in the length take them, the size solved from the
 ;; argument.
 (define-type blob (bloblet (fields) @heap))
-(define-type rec (productof (count u32) (pad u32) (data (arrayof f64 finite))))
+(define-type rec (tupof (count u32) (pad u32) (data (arrayof f64 finite))))
 (define* fill!
   (poly ((n size))
     (subr (maxeff (read @heap) (write @heap) spin) ((blobref blob (arrayof f64 n)) int int) unit))

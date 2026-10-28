@@ -43,7 +43,7 @@
 
 ;; What `webs` finds: by instruction, the frame slot it touches (-1 for
 ;; none) and its web; by web, whether an `f64`'s and whether read.
-(define-type nr-webs (productof (1 da-ints) (2 da-ints) (3 da-bools) (4 da-bools)))
+(define-type nr-webs (tupof (1 da-ints) (2 da-ints) (3 da-bools) (4 da-bools)))
 
 (define nr-undefined int 0)
 (define nr-value int 1)
@@ -135,20 +135,20 @@
 ;; one of `f64` the machine does exactly as the runtime does.
 (define nr-raw-op (subr da-assembles (string) nr-raw-op)
   (lambda (name)
-    (let ((none (product (1 0) (2 #f) (3 ""))))
+    (let ((none (tup (1 0) (2 #f) (3 ""))))
       (if (not (nr-prefix? "%fx26-" name))
           none
           (let* ((rest (nr-from name 6)) (n (string-length rest)))
-            (cond ((string=? rest "int->f64") (product (1 2) (2 #f) (3 "from-int")))
+            (cond ((string=? rest "int->f64") (tup (1 2) (2 #f) (3 "from-int")))
                   ((nr-prefix? "f64" rest)
                    (let ((what (nr-from rest 3)))
-                     (if (nr-native-f64? what) (product (1 2) (2 #f) (3 what)) none)))
+                     (if (nr-native-f64? what) (tup (1 2) (2 #f) (3 what)) none)))
                   (else
                    (let* ((from? (nr-prefix? "int->" rest))
                           (t (cond (from? (nr-from rest 5)) ((>= n 3) (nr-first3 rest)) (else "")))
                           (what (cond (from? "from") ((>= n 3) (nr-from rest 3)) (else ""))))
-                     (cond ((string=? t "i64") (product (1 1) (2 #t) (3 what)))
-                           ((string=? t "u64") (product (1 1) (2 #f) (3 what)))
+                     (cond ((string=? t "i64") (tup (1 1) (2 #t) (3 what)))
+                           ((string=? t "u64") (tup (1 1) (2 #f) (3 what)))
                            (else none))))))))))
 
 ;; What a raw operation takes and gives (`raw_shape`): its first operand,
@@ -361,7 +361,7 @@
 (define nr-changed (ref bool @k) (new #f))
 (define nr-demands
   (subr da-assembles (nr-cells da-ints da-bools)
-        (productof (1 da-ints) (2 (arrayof da-bytes @k))))
+        (tupof (1 da-ints) (2 (arrayof da-bytes @k))))
   (lambda (c starts raw)
     (let* ((ns (array-length starts))
            (succ (nr-successors c starts))
@@ -385,7 +385,7 @@
                    (begin (set nr-changed #f)
                           (pass (- ns 1))
                           (if (get nr-changed) (fix) #u)))))
-        (begin (fix) (product (1 before) (2 succ)))))))
+        (begin (fix) (tup (1 before) (2 succ)))))))
 
 ;; Register `r`'s demands joined over the successors `ts`.
 (define nr-demand-after (subr da-reads (da-ints da-bytes int) int)
@@ -602,7 +602,7 @@
           ((or (= op rop-branch) (= op rop-global-guard) (= op rop-save) (= op rop-pop)) #u)
           ;; Any other: every register a value, to be safe.
           (else (begin (nr-need 0 nr-value) (nr-need-regs 8 -1 (lambda (r) nr-value)))))
-        (product (1 (the da-bytes (reverse (get nr-first)))) (2 (get nr-cur)))))))
+        (tup (1 (the da-bytes (reverse (get nr-first)))) (2 (get nr-cur)))))))
 
 ;; Each instruction's registers where it starts, and where it ends, from
 ;; the fixpoint of `nr-step` and `nr-join` (`reps_of`). `callees`: by
@@ -651,20 +651,20 @@
           (if (> ns 0) (array-set! ins 0 0) #u)
           (fix)
           (defined 0)
-          (product (1 ins) (2 outs)))))))
+          (tup (1 ins) (2 outs)))))))
 
 ;;; ------------------------------------------------------------ slots
 
 ;; Instruction `si`'s frame slot access (`webs`'s `access`): the slot (-1
 ;; for none), whether a read, and its register.
-(define nr-access (subr da-reads (nr-cells da-ints int) (productof (1 int) (2 bool) (3 int)))
+(define nr-access (subr da-reads (nr-cells da-ints int) (tupof (1 int) (2 bool) (3 int)))
   (lambda (c starts si)
     (let* ((i (array-ref starts si)) (op (nr-cell c i)) (k0 (nr-k c i 0)))
-      (cond ((= op rop-stack) (product (1 k0) (2 #t) (3 0)))
-            ((= op rop-load) (product (1 (nr-k c i 1)) (2 #t) (3 k0)))
-            ((= op rop-setstk) (product (1 k0) (2 #f) (3 0)))
-            ((= op rop-store) (product (1 (nr-k c i 1)) (2 #f) (3 k0)))
-            (else (product (1 -1) (2 #f) (3 0)))))))
+      (cond ((= op rop-stack) (tup (1 k0) (2 #t) (3 0)))
+            ((= op rop-load) (tup (1 (nr-k c i 1)) (2 #t) (3 k0)))
+            ((= op rop-setstk) (tup (1 k0) (2 #f) (3 0)))
+            ((= op rop-store) (tup (1 (nr-k c i 1)) (2 #f) (3 k0)))
+            (else (tup (1 -1) (2 #f) (3 0)))))))
 
 ;; The webs of the procedure's `slots` frame slots (`webs`): register code
 ;; may use a slot for one variable, then another, so a slot is taken apart
@@ -677,7 +677,7 @@
 (define nr-new-webs (subr da-assembles (int) nr-webs)
   (lambda (ns)
     (let ((slot (the da-ints (make-array ns -1))) (web (the da-ints (make-array ns 0))))
-      (product (1 slot) (2 web)
+      (tup (1 slot) (2 web)
                (3 (the da-bools (make-array ns #f))) (4 (the da-bools (make-array ns #f)))))))
 (define nr-webs (subr da-assembles (nr-cells da-ints int) nr-webs)
   (lambda (c starts slots)
@@ -708,7 +708,7 @@
         (let* ((by (the (arrayof da-bytes @k) (make-array (+ (each 0 -1) 1) nil)))
                (bl (nr-blocks succ sl by))
                (nb (array-length (extract bl 2)))
-               (marks (product (1 (the da-ints (make-array nb -1)))
+               (marks (tup (1 (the da-ints (make-array nb -1)))
                                (2 (the da-bools (make-array nb #f)))
                                (3 (the da-ints (make-array nb -1)))
                                (4 (the da-ints (make-array nb -1)))
@@ -729,7 +729,7 @@
 ;; What instruction `si` shows of its web, and its web and slot named.
 (define nr-show
   (subr da-assembles
-        (nr-cells da-ints (productof (1 da-ints) (2 (arrayof da-bytes @k))) da-ints da-ints
+        (nr-cells da-ints (tupof (1 da-ints) (2 (arrayof da-bytes @k))) da-ints da-ints
                   nr-webs int)
         unit)
   (lambda (c starts ds ins parent w si)
@@ -877,7 +877,7 @@
                    (if (= si ns)
                        #u
                        (begin (nr-move c starts w moved next out si) (go (+ si 1)))))))
-        (begin (copy 0) (go 0) (product (1 out) (2 (extract c 2))))))))
+        (begin (copy 0) (go 0) (tup (1 out) (2 (extract c 2))))))))
 (define nr-move (subr da-assembles (nr-cells da-ints nr-webs da-ints int da-ints int) unit)
   (lambda (c starts w moved next out si)
     (let* ((i (array-ref starts si)) (op (nr-cell c i))

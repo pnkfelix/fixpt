@@ -650,30 +650,30 @@ impl Checker {
             used = Syntax::list(span, u);
         }
         let mut sym = |s: &str| Syntax::symbol(span, self.interner.intern(s));
-        let (define_type, define, sumof, productof, subr, pure, lambda, sum, product, poly) = (
+        let (define_type, define, oneof, tupof, subr, pure, lambda, sum, product, poly) = (
             sym("define-type"),
             sym("define"),
-            sym("sumof"),
-            sym("productof"),
+            sym("oneof"),
+            sym("tupof"),
             sym("subr"),
             sym("pure"),
             sym("lambda"),
-            sym("sum"),
-            sym("product"),
+            sym("one"),
+            sym("tup"),
             sym("poly"),
         );
         let int = |n: usize| Syntax::new(span, fixpt_read::Datum::Number(fixpt_read::Num::Int(n as i64)));
         let list = |items: Vec<Syntax>| {
             if items.is_empty() { Syntax::new(span, fixpt_read::Datum::Nil) } else { Syntax::list(span, items) }
         };
-        let mut arms = vec![sumof];
+        let mut arms = vec![oneof];
         let mut ctors = Vec::new();
         for v in variants {
             let parts = v.as_proper_list().unwrap_or(&[]).to_vec();
             let Some((tag, members)) = parts.split_first().filter(|(t, _)| t.as_symbol().is_some()) else {
                 return Err(FxError::at(v.span, "a variant is `(tag type …)`"));
             };
-            let mut prod = vec![productof.clone()];
+            let mut prod = vec![tupof.clone()];
             let mut params = Vec::new();
             let mut fields = vec![product.clone()];
             for (i, m) in members.iter().enumerate() {
@@ -1534,7 +1534,7 @@ pub(crate) struct Holes {
     pub arm: Sym,
     /// What that `else` arm binds: the tags no arm has taken.
     pub arm_var: Sym,
-    /// The tag of `(sum ⟨hole⟩)`.
+    /// The tag of `(one ⟨hole⟩)`.
     pub tag: Sym,
 }
 
@@ -1556,7 +1556,7 @@ fn mark_hole(s: &mut Syntax, interner: &fixpt_read::Interner, hole: Sym) -> Opti
 impl Checker {
     /// What goes where the `,help` hole in `form` is, as the grammar and the
     /// types around it say: the type an expression there must have, the tags
-    /// an arm or a `sum` there may take, or the shape the form around it
+    /// an arm or a `one` there may take, or the shape the form around it
     /// must have. `None` if nothing is known. Nothing is kept.
     ///
     /// `forms` are the same form written more than one way (with fillers
@@ -1626,7 +1626,7 @@ pub const KEYWORDS: &[&str] = &[
     "subr", "->", "->*", "poly", "ref", "pairof", "dletrec", "void", "pure", "maxeff", "read", "write",
     "alloc", "goto", "comefrom", "region", "effect", "type", "prompt", "prompt-tag",
     "composable", "oneshot", "mark-key", "listof", "cond", "case", "else", "and", "or", "let*", "define-effect", "define-convention", "define-syscall", "define-optional-syscall", "syscall-available?", "module-parameters", "the",
-    "bloblet", "fields", "frozen", "arrayof", "icell", "await", "define-rec", "letrena", "letreap", "rlambda", "quote", "productof", "sumof", "product", "extract", "sum", "tagcase", "module", "moduleof", "with", "select", "load-module", "import",
+    "bloblet", "fields", "frozen", "arrayof", "icell", "await", "define-rec", "letrena", "letreap", "rlambda", "quote", "tupof", "oneof", "tup", "extract", "one", "tagcase", "module", "moduleof", "with", "select", "load-module", "import",
     "define-datatype", "make-bloblet", "bloblet-ref", "bloblet-set!", "bloblet-freeze", "bloblet-byte",
     "bloblet-set-byte!", "bloblet-bytes", "rmake-bloblet", "dlambda", "=>",
     "blobref-at", "blobref+", "blobref-owner", "blobref-offset", "blobref-get", "blobref-set!", "blobref-index", "blobref-length", "blobref-variant!",

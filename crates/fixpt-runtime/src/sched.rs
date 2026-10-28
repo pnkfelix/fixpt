@@ -630,7 +630,7 @@ pub fn run_op(rt: &mut Runtime, n: i64, a: Value, b: Value) -> Outcome<Value> {
         // between a test and a fill, finishes too.
         op::ICELL_OFFER if heap.bloblet_slot(a, ICELL_FULL) != Value::FALSE => unit,
         op::ICELL_OFFER => return icell_put(rt, a, b),
-        // `(sum some tag)`, the scheduler's prompt tag, or `(sum none #u)`
+        // `(one some tag)`, the scheduler's prompt tag, or `(one none #u)`
         // before the scheduler has made one.
         op::TAG => {
             let s = state(heap);

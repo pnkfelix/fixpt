@@ -20,8 +20,8 @@ pub const SHAPES: [&str; 14] = [
     "string?",
     "%fx26-array?",
     "%fx26-box?",
-    "%fx26-sum?",
-    "%fx26-product?",
+    "%fx26-one?",
+    "%fx26-tup?",
     "%fx26-procedure?",
     "%fx26-nothing-in-line?",
 ];

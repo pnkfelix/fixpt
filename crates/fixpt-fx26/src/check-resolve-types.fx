@@ -10,29 +10,29 @@
 ;; The parts of a resolved tree, as `kx`'s constructors hold them: a
 ;; `lambda`'s parameters, a `letrec`'s and a `let`'s bindings (a product's
 ;; fields are as a `let`'s), and a `tagcase`'s arms.
-(define-type k-typed-params (listof (productof (1 symbol) (2 k-ids)) acyclic))
-(define-type k-letrec-bs (listof (productof (1 symbol) (2 int) (3 kx)) acyclic))
-(define-type k-let-bs (listof (productof (1 symbol) (2 kx)) acyclic))
-(define-type k-arms (listof (productof (1 symbol) (2 bool) (3 k-names) (4 kx)) acyclic))
-(define-type exp-letrec-bs (listof (productof (1 symbol) (2 syn) (3 exp)) acyclic))
-(define-type exp-let-bs (listof (productof (1 symbol) (2 exp)) acyclic))
-(define-type exp-arms (listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) acyclic))
+(define-type k-typed-params (listof (tupof (1 symbol) (2 k-ids)) acyclic))
+(define-type k-letrec-bs (listof (tupof (1 symbol) (2 int) (3 kx)) acyclic))
+(define-type k-let-bs (listof (tupof (1 symbol) (2 kx)) acyclic))
+(define-type k-arms (listof (tupof (1 symbol) (2 bool) (3 k-names) (4 kx)) acyclic))
+(define-type exp-letrec-bs (listof (tupof (1 symbol) (2 syn) (3 exp)) acyclic))
+(define-type exp-let-bs (listof (tupof (1 symbol) (2 exp)) acyclic))
+(define-type exp-arms (listof (tupof (1 symbol) (2 bool) (3 names) (4 exp)) acyclic))
 ;;; ------------------------------------------------------------ callables
 
 ;; What calling a value of type `t` does: its latent effect, parameters and
 ;; result, as none or one. A composable continuation runs the rest of its
 ;; prompt's body, with control effects on the tag's region.
-(define-type k-callable (productof (1 k-eff) (2 k-ids) (3 int)))
+(define-type k-callable (tupof (1 k-eff) (2 k-ids) (3 int)))
 ;; Every region mentioned in type `t`, following recursive types once.
 ;; Kept once found, by type: a type does not change once built.
 (define-type k-region-lists (arrayof (listof k-regions acyclic) @t))
 ;; A definition checked, as a redefinition finds it: the names it defines,
 ;; its tree, and the globals it uses (its expressions' free variables).
-(define-type k-def (productof (1 k-names) (2 top) (3 k-names)))
+(define-type k-def (tupof (1 k-names) (2 top) (3 k-names)))
 ;; What the program runs, newest first: each top-level form, and the
 ;; definitions run again for a redefinition, each with whether it assigns
 ;; its names' globals rather than making new ones.
-(define-type k-run (productof (1 top) (2 bool)))
+(define-type k-run (tupof (1 top) (2 bool)))
 
 ;;; ------------------------------------------------------------ signatures
 

@@ -1,17 +1,17 @@
 ;;; Type classes by hand: a dictionary is a product of operations. The
 ;;; instance for a datatype would be its derived functions, as
-;;; (product (eq tree=?) (show tree->datum)) from derived-copy.fx; the
+;;; (tup (eq tree=?) (show tree->datum)) from derived-copy.fx; the
 ;;; instance for a type constructor is a function from dictionaries to a
 ;;; dictionary (Haskell's `instance Eq a => Eq [a]`); consumers
 ;;; such as `member` are written once and take the dictionary.
 (define-type (eqd (t type) (e effect))
-  (productof (eq (subr e (t t) bool)) (show (subr e (t) datum))))
+  (tupof (eq (subr e (t t) bool)) (show (subr e (t) datum))))
 (define int-d (eqd int pure)
-  (product (eq (lambda (x y) (= x y))) (show (lambda (x) x))))
+  (tup (eq (lambda (x y) (= x y))) (show (lambda (x) x))))
 (define list-d
   (poly ((t type) (e effect)) (subr pure ((eqd t e)) (eqd (listof t acyclic) e)))
   (lambda (d)
-    (product
+    (tup
      (eq (lambda (xs ys)
            (letrec ((go (subr e ((listof t acyclic) (listof t acyclic)) bool)
                       (lambda (xs ys)

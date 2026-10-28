@@ -45,8 +45,8 @@
       (begin
         (set c-own-now
              (if (null? defining)
-                 (the (listof (productof (1 symbol) (2 tword)) @k) nil)
-                 (cons (product (1 (car defining)) (2 w)) nil)))
+                 (the (listof (tupof (1 symbol) (2 tword)) @k) nil)
+                 (cons (tup (1 (car defining)) (2 w)) nil)))
         (if (null? copy)
             #u
             (begin (set c-spec-now (the (listof c-spec @k) (cons (extract (car copy) 1) nil)))

@@ -513,7 +513,7 @@ impl Checker {
     /// `((with … par2) (lambda () e1) (lambda () e2))`, as `par` makes it:
     /// both run, perhaps at once, so neither may write what the other
     /// reads or writes, by the table of `interference`, nor transfer
-    /// control out of its branch; its value is both theirs, `(productof (1
+    /// control out of its branch; its value is both theirs, `(tupof (1
     /// T1) (2 T2))`, and its effect both theirs. Its answer is the same
     /// however the two are interleaved.
     pub(crate) fn synth_par(&mut self, e: ExpId, fun: ExpId, args: &[ExpId]) -> R<(TyId, Effect)> {

@@ -29,7 +29,7 @@
 ;; ---- structure Matrix
 
 (define-type entries (arrayof int @m))
-(define-type matrix (productof (height int) (width int) (mat entries)))
+(define-type matrix (tupof (height int) (width int) (mat entries)))
 (define-type getter (subr (read @m) (int) int))
 (define-type setter (subr (write @m) (int int) unit))
 (define-type binop (subr pure (int int) int))
@@ -46,7 +46,7 @@
                        (begin (array-set! a z (generator (quotient z width) (modulo z width)))
                               (fill (+ z 1)))
                        #u))))
-        (begin (fill 0) (product (height height) (width width) (mat a)))))))
+        (begin (fill 0) (tup (height height) (width width) (mat a)))))))
 
 (define* fetch (subr (read @m) (matrix int int) int)
   (lambda (m row col) (array-ref (extract m mat) (+ col (* (extract m width) row)))))
@@ -123,7 +123,7 @@
                    (if (< i (array-length from))
                        (begin (array-set! a i (f (array-ref from i))) (fill (+ i 1)))
                        #u))))
-        (begin (fill 0) (product (height (extract m height)) (width (extract m width)) (mat a)))))))
+        (begin (fill 0) (tup (height (extract m height)) (width (extract m width)) (mat a)))))))
 
 (define* copy (subr mx (matrix) matrix) (lambda (m) (mmap m (lambda (x) x))))
 

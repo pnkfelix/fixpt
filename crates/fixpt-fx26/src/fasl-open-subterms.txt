@@ -1,1 +1,1 @@
-(lambda ((m-a T) (m-b T)) (the (subr pure () (productof (x (ref (listof (select m-a t) acyclic) @ed)) (y (ref (listof (select m-b t) acyclic) @ed)) (z (subr (maxeff (read @ed) (write @ed) spin) (int) int)) (w (subr (maxeff (read @ed) (write @ed) spin) (int) int)))) %fasl-effects))
+(lambda ((m-a T) (m-b T)) (the (subr pure () (tupof (x (ref (listof (select m-a t) acyclic) @ed)) (y (ref (listof (select m-b t) acyclic) @ed)) (z (subr (maxeff (read @ed) (write @ed) spin) (int) int)) (w (subr (maxeff (read @ed) (write @ed) spin) (int) int)))) %fasl-effects))

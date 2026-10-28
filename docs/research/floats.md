@@ -409,8 +409,8 @@ GHC and SML/NJ, each in part:
   checkers are untouched. It is decided from the declared type alone, so
   both register-code compilers can agree on it mechanically.
 - **In products and sums, later.** A structural type such as
-  `(productof (x float))` must have a single layout, because
-  `(productof (x t))` with `t := float` is the same type and polymorphic
+  `(tupof (x float))` must have a single layout, because
+  `(tupof (x t))` with `t := float` is the same type and polymorphic
   code reads it uniformly. Leroy's coercions (POPL 1992) would copy at
   each instantiation. That is sound for FX-26's immutable products, but
   it is deep: a list of such products would have to be copied as well.

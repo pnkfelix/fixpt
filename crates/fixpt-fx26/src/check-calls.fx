@@ -179,7 +179,7 @@
           nil
           (let* ((x (k-spin-positive (extract (car ps) 2) done))
                  (rest (k-spin-parts (cdr ps) done)))
-            (cons (product (1 (extract (car ps) 1)) (2 x)) rest))))))
+            (cons (tup (1 (extract (car ps) 1)) (2 x)) rest))))))
 ;; What `t` is made into, in `done`, or -1.
 (define k-spun-of (->* (k-spun int) int)
   (lambda (done t)
@@ -216,7 +216,7 @@
 (define k-tag-parts (->* (int) k-tag-parts)
   (lambda (tt)
     (tagcase (k-get tt)
-      (ty-tag (a h e r) (the k-tag-parts (cons (product (1 a) (2 h) (3 e) (4 r) (5 #t)) nil)))
+      (ty-tag (a h e r) (the k-tag-parts (cons (tup (1 a) (2 h) (3 e) (4 r) (5 #t)) nil)))
       (ty-named (g ds)
         (if (and (= g 9) (= (k-length ds) 3))
             (tagcase (car ds)
@@ -225,7 +225,7 @@
                   (dt (h)
                     (tagcase (car (cdr (cdr ds)))
                       (dr (r)
-                        (the k-tag-parts (cons (product (1 a) (2 h) (3 nil) (4 r) (5 #f)) nil)))
+                        (the k-tag-parts (cons (tup (1 a) (2 h) (3 nil) (4 r) (5 #f)) nil)))
                       (else z nil)))
                   (else z nil)))
               (else z nil))

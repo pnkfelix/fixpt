@@ -5,18 +5,18 @@
 ;;; subtyping and equi-recursion, and each evaluator returns its value with
 ;;; no tag to check; an ill-typed expression cannot be built at `int-exp`.
 (define-type int-exp
-  (sumof (int-e int)
-         (add (productof (l int-exp) (r int-exp)))
-         (if-e (productof (c bool-exp) (t int-exp) (f int-exp)))))
+  (oneof (int-e int)
+         (add (tupof (l int-exp) (r int-exp)))
+         (if-e (tupof (c bool-exp) (t int-exp) (f int-exp)))))
 (define-type bool-exp
-  (sumof (bool-e bool)
+  (oneof (bool-e bool)
          (is-zero int-exp)
-         (if-e (productof (c bool-exp) (t bool-exp) (f bool-exp)))))
+         (if-e (tupof (c bool-exp) (t bool-exp) (f bool-exp)))))
 (define-type any-exp
-  (sumof (int-e int) (bool-e bool)
-         (add (productof (l any-exp) (r any-exp)))
+  (oneof (int-e int) (bool-e bool)
+         (add (tupof (l any-exp) (r any-exp)))
          (is-zero any-exp)
-         (if-e (productof (c any-exp) (t any-exp) (f any-exp)))))
+         (if-e (tupof (c any-exp) (t any-exp) (f any-exp)))))
 (define eval-int (subr pure (int-exp) int)
   (letrec ((eval-int (subr pure (int-exp) int)
              (lambda (e)
@@ -31,10 +31,10 @@
                  (is-zero x (= (eval-int x) 0))
                  (if-e (c t f) (if (eval-bool c) (eval-bool t) (eval-bool f)))))))
     eval-int))
-(define one int-exp (sum int-e 1))
+(define one int-exp (one int-e 1))
 (define prog int-exp
-  (sum if-e (product (c (sum is-zero (sum add (product (l one) (r (sum int-e -1))))))
-                     (t (sum int-e 42))
+  (one if-e (tup (c (one is-zero (one add (tup (l one) (r (one int-e -1))))))
+                     (t (one int-e 42))
                      (f one))))
 (define untyped any-exp prog)   ; the same value, forgetting its type
 (eval-int prog)

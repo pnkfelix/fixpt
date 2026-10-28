@@ -2,8 +2,8 @@
 ;;; nothing. `(counted z)` and `(counted o)` are both just a list, so a list
 ;;; "counted from zero" passes for one "counted from one", as the
 ;;; prototype found structurally. Compare `phantom-generative-refused.fx`.
-(define-type zero (sumof (zero unit)))
-(define-type one (sumof (one unit)))
+(define-type zero (oneof (zero unit)))
+(define-type one (oneof (one unit)))
 (define-type (counted (i type)) (listof int acyclic))
 (define from-zero (counted zero) (list 0 1))
 (define from-one (counted one) from-zero)

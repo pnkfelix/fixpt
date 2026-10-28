@@ -136,7 +136,7 @@
 (define k-rename-abs (->* (string k-parts) k-renamed)
   (lambda (prefix abs)
     (if (null? abs)
-        (product (1 (the k-parts nil)) (2 (the k-map nil)))
+        (tup (1 (the k-parts nil)) (2 (the k-map nil)))
         (let* ((a (extract (car abs) 1))
                (k (k-dvar-kind (extract (car abs) 2)))
                (w (k-new-dvar-of (string->symbol (string-append prefix (symbol->string a))) k))
@@ -145,7 +145,7 @@
                              (if (= k 2) #u (set k-abstract-funs (cons w (get k-abstract-funs))))))
                (to (if (= k 2) (dt (k-ty-new (ty-var w))) (df (k-ty-new (ty-var w)))))
                (rest (k-rename-abs prefix (cdr abs))))
-          (product (1 (the k-parts (cons (product (1 a) (2 w)) (extract rest 1))))
+          (tup (1 (the k-parts (cons (tup (1 a) (2 w)) (extract rest 1))))
                    (2 (the k-map (cons (cons (extract (car abs) 2) to) (extract rest 2)))))))))
 ;; Parts `ps`, each type with `m` for its binders.
 (define k-subst-each (->* (k-parts k-map) k-parts) (lambda (ps m) (k-subst-all ps m)))
@@ -325,7 +325,7 @@
                                          a b)))))
                (linked (if (= to -3) #u (k-link-global-select m (extract (car found) 3) to)))
                (rest (k-selection (cdr found) a b)))
-          (if (= to -3) rest (cons (product (1 m) (2 n) (3 to)) rest))))))
+          (if (= to -3) rest (cons (tup (1 m) (2 n) (3 to)) rest))))))
 ;;; ------------------------------------------------------------ effects selected
 
 ;; The entry of `ss` for variable `v`, or none.
@@ -578,7 +578,7 @@
                (t (k-arrow-star-as (extract x 2)
                                    (k-ty-fresh (k-resolve-selects (extract x 2) a b))))
                (rest (k-letrec-selected (cdr bs) a b)))
-          (cons (product (1 (extract x 1)) (2 t) (3 (extract x 3))) rest)))))
+          (cons (tup (1 (extract x 1)) (2 t) (3 (extract x 3))) rest)))))
 ;; The first `select` of `found` from one of `params`, or none.
 (define k-select-from (->* (k-selects k-names) k-selects)
   (lambda (found params)

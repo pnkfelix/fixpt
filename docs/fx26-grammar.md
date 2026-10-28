@@ -95,7 +95,7 @@ variant    ::= "(" name type* ")"
 - `define-generative` also defines `up-name` and `down-name`, the
   conversions between the new type and its representation.
 - `define-datatype` is sugar, expanded as it is read: a `define-type` of a
-  `sumof` of `productof`s, whose members are labelled `1`, `2`, …, and one
+  `oneof` of `tupof`s, whose members are labelled `1`, `2`, …, and one
   constructor `define` per variant, `(tag e …)`.
 - In `define name type expression`, the `poly` binders at the top of
   `type` are in scope in `expression`.
@@ -173,8 +173,8 @@ type       ::= base-type
              | "(" "prompt-tag" type type effect region ")"     ; answer payload effect region
              | "(" "composable" type type effect region ")"     ; argument answer effect region
              | "(" "bloblet" "(" ("fields" | "frozen") type* ")" region ")"
-             | "(" "productof" ("(" label type ")")* ")"
-             | "(" "sumof" ("(" label type ")")* ")"
+             | "(" "tupof" ("(" label type ")")* ")"
+             | "(" "oneof" ("(" label type ")")* ")"
              | "(" "dletrec" "(" ("(" name type ")")* ")" type ")"
              | "(" "mu" name type ")"
              | "(" "moduleof" module-component* ")"
@@ -319,9 +319,9 @@ expression ::= integer | real | string | char | boolean | unit
              | "(" "letrec" "(" ("(" name type expression ")")* ")" body ")"
              | "(" region-form name body ")"
              | "(" "letfreeze" "(" name place ")" body ")"
-             | "(" "product" ("(" label expression ")")* ")"
+             | "(" "tup" ("(" label expression ")")* ")"
              | "(" "extract" expression label ")"
-             | "(" "sum" label expression ")"
+             | "(" "one" label expression ")"
              | "(" "tagcase" expression arm* [else-arm] ")"
              | "(" "acyclic" expression "(" name expression ")" expression ")"
              | "(" "confirm-nat" expression "(" name expression ")" expression ")"

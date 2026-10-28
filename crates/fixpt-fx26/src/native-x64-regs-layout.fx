@@ -103,8 +103,8 @@
       ((399) "%fx26-array?")
       ((400) "%fx26-f32?")
       ((401) "%fx26-box?")
-      ((402) "%fx26-sum?")
-      ((403) "%fx26-product?")
+      ((402) "%fx26-one?")
+      ((403) "%fx26-tup?")
       ((433) "%make-frozen")
       ((446) "%bloblet-fields")
       ((449) "%bloblet-set!")
@@ -142,8 +142,8 @@
       (("%fx26-array?") 399)
       (("%fx26-f32?") 400)
       (("%fx26-box?") 401)
-      (("%fx26-sum?") 402)
-      (("%fx26-product?") 403)
+      (("%fx26-one?") 402)
+      (("%fx26-tup?") 403)
       (("%fx26-procedure?") 398)
       (("%fx26-char-in?") 166)
       (("string=?") 78)
@@ -374,8 +374,8 @@
       ((399) #t)  ; %fx26-array?
       ((400) #t)  ; %fx26-f32?
       ((401) #t)  ; %fx26-box?
-      ((402) #t)  ; %fx26-sum?
-      ((403) #t)  ; %fx26-product?
+      ((402) #t)  ; %fx26-one?
+      ((403) #t)  ; %fx26-tup?
       ((408) #t)  ; %fx26-adapted
       ((432) #t)  ; %string-hash
       ((446) #t)  ; %bloblet-fields
@@ -403,7 +403,7 @@
       (("exact-integer?") (case i ((0) 6) (else -1)))
       (("%fx26-array?") (case i ((0) 32) (else -1)))
       (("%fx26-box?") (case i ((0) 10) (else -1)))
-      (("%fx26-sum?") (case i ((0) 36) (else -1)))
-      (("%fx26-product?") (case i ((0) 37) (else -1)))
+      (("%fx26-one?") (case i ((0) 36) (else -1)))
+      (("%fx26-tup?") (case i ((0) 37) (else -1)))
       (("%fx26-procedure?") (case i ((0) 8) ((1) 19) ((2) 14) ((3) 38) ((4) 41) ((5) 39) (else -1)))
       (else -1))))

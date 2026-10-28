@@ -415,7 +415,7 @@
       (begin (set c-module-members nil)
              (if (null? ms)
                  #u
-                 (let ((entry (product (1 m) (2 (car ms)))))
+                 (let ((entry (tup (1 m) (2 (car ms)))))
                    (set c-modules (the c-module-list (cons entry (get c-modules))))))))))
 ;; The members `m`, a top-level module, has noted, or none.
 (define c-members-of (->* (c-module-list symbol) c-inlinables)
@@ -433,7 +433,7 @@
              (if (and (not (c-mentions? body 'stay-cellular))
                       (>= (c-inline-room body c-inline-limit) 0)
                       (not (c-mentions? body f)))
-                 (let ((alias (product (1 n) (2 (extract it 2)) (3 (extract it 3)) (4 body)
+                 (let ((alias (tup (1 n) (2 (extract it 2)) (3 (extract it 3)) (4 body)
                                        (5 (extract it 5)))))
                    (c-note-inline! alias))
                  #u)))

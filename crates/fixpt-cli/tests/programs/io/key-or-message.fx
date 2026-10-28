@@ -2,7 +2,7 @@
 ; (TODO.md §95): the first task, waiting for its answer, waits for the
 ; standard input with it. The status is the byte, 255 (-1) at the input's
 ; end, 1 if the deadline (a second) came first.
-(define-type byte-result (sumof (byte u8) (eof unit) (failed io-error)))
+(define-type byte-result (oneof (byte u8) (eof unit) (failed io-error)))
 (define* code (subr pure (byte-result) int)
   (lambda (b) (tagcase b (byte k (u8->int k)) (eof u -1) (failed e -2))))
 (define-effect waits (maxeff (alloc @p) (init @c) (await @c) (io stdin) (io clock) nondet))

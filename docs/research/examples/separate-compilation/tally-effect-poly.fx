@@ -2,7 +2,7 @@
 ;;; the effect of the operations it is given (option d of section 2.3).
 
 ;;; ---- tally.fx ----
-(define-type (tally-ops (e effect)) (productof (tick (subr e () int))))
+(define-type (tally-ops (e effect)) (tupof (tick (subr e () int))))
 (private-regions @tally)
 (define count (ref int @tally) (new 0))
 (define* tick (subr (maxeff (read @tally) (write @tally)) () int)
@@ -13,4 +13,4 @@
   (plambda ((e effect)) (lambda (m) (begin ((extract m tick)) ((extract m tick))))))
 
 ;;; ---- main.fx : links the two by application ----
-(tick-twice (product (tick tick)))        ; 2
+(tick-twice (tup (tick tick)))        ; 2

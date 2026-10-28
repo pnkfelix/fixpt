@@ -2,7 +2,7 @@
 ;; A procedure inlined where it is called keeps what the checker found in
 ;; it: a blobref's field (`%suffix-ref+`, not a field of the blobref), a
 ;; scalar's layout, a flat sum's. `area` is inlined in `total`.
-(define-type shape (sumof u8 (0 f64) (1 (productof (w f64) (h f64)))))
+(define-type shape (oneof u8 (0 f64) (1 (tupof (w f64) (h f64)))))
 (define-type o (bloblet (fields) @heap))
 (define-type arr (blobref o (arrayof shape 10)))
 (define* fill (subr (maxeff (read @heap) (write @heap) spin) (arr int) unit)

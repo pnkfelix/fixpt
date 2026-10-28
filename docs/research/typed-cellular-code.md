@@ -91,7 +91,7 @@ propositions can prove an index in bounds, or a size exact, from it.
 
 **Narrowing is the `0branch` rule.** After `slot 2; field 2; lit 'some;
 eq; 0branch L`, the fall-through knows `(not (eq (eq (field 2 (slot 2))
-'some) #f))`, so `(eq (tag (slot 2)) 'some)`, so, with `(: (slot 2) (sumof
+'some) #f))`, so `(eq (tag (slot 2)) 'some)`, so, with `(: (slot 2) (oneof
 (some T) (none unit)))`, `(: (field 3 (slot 2)) T)`. That is the checkers'
 narrowing (`props_narrow`, `test_facts`), asked of cells, and stated as
 what it is: a consequence of a branch condition.

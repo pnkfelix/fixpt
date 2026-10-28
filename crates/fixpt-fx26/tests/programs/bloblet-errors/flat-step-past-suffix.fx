@@ -4,4 +4,4 @@
 (define-type o (bloblet (fields) @b))
 (define b o (make-bloblet 16))
 (define at (blobref o u32) (blobref-at b 0))
-(define pair (blobref o (productof (x f64) (y f64))) (blobref+ at 8))
+(define pair (blobref o (tupof (x f64) (y f64))) (blobref+ at 8))

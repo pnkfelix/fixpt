@@ -5,16 +5,15 @@
 ;;; Answer: 50005000.
 ;;;
 ;;; Larceny's procedure `run` is `sum-to` here, since the driver below is
-;;; `run`; its named-let accumulator `sum` is `acc`, since `sum` is an
-;;; FX-26 form.
+;;; `run`.
 
 (define* sum-to (subr spin (int) int)
   (lambda (n)
     (letrec ((loop (subr spin (int int) int)
-               (lambda (i acc)
+               (lambda (i sum)
                  (if (< i 0)
-                     acc
-                     (loop (- i 1) (+ i acc))))))
+                     sum
+                     (loop (- i 1) (+ i sum))))))
       (loop n 0))))
 
 ;; The inputs, where no compiler can fold them (Larceny's `hide`): globals,

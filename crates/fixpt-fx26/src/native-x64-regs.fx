@@ -161,7 +161,7 @@
         (x-e (x86-alu-mi x-sub n-st n-st-fuel 1))
         (x-jcc x-c-e refill)
         (x-bind back)
-        (set rg-refills (cons (product (1 refill) (2 back)) (get rg-refills)))))))
+        (set rg-refills (cons (tup (1 refill) (2 back)) (get rg-refills)))))))
 ;; The next slices' stubs: out of fuel if the reserve is spent.
 (define rg-place-refills (subr (maxeff x-assembles spin) (x-fix-list) unit)
   (lambda (rs)
@@ -194,8 +194,8 @@
         (x-e (x86-alu-mi x-sub n-st n-st-fuel 1))
         (x-jcc x-c-e out)
         (x-bind back)
-        (set rg-resume-at (cons (product (1 f) (2 again)) (get rg-resume-at)))
-        (set rg-polls (cons (product (1 out) (2 back) (3 again) (4 live) (5 f)
+        (set rg-resume-at (cons (tup (1 f) (2 again)) (get rg-resume-at)))
+        (set rg-polls (cons (tup (1 out) (2 back) (3 again) (4 live) (5 f)
                                      (6 (if (get rg-pushed) 1 0)))
                             (get rg-polls)))))))
 (define rg-live? (subr pure (int int) bool)
@@ -777,7 +777,7 @@
             (set rg-falls #t)
             (rg-cells rw 0 n entry)))
         (if (not (string=? (get rg-err) ""))
-            (product (1 (the x-out nil)) (2 (the x-out nil)) (3 (get rg-err)))
+            (tup (1 (the x-out nil)) (2 (the x-out nil)) (3 (get rg-err)))
             (begin
               (x-bind (array-ref (get rg-labels) n))
               ;; Out of the way of the code that runs: the polls' ways out and
@@ -793,7 +793,7 @@
               (let ((code (x-finish)))
                 (begin
                   (rg-place-resume-at (get rg-resume-at))
-                  (product (1 code) (2 (rg-array-list (get rg-resume) (- n 1) nil)) (3 ""))))))))))
+                  (tup (1 code) (2 (rg-array-list (get rg-resume) (- n 1) nil)) (3 ""))))))))))
 
 ;; The `n` arguments from a stack-code caller's frame into registers.
 (define rg-adapter-args (subr (maxeff x-assembles spin) (int int) unit)

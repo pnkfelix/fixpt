@@ -62,7 +62,7 @@
   ;; The scheduler's prompt tag, made the first time.
   (define the-tag (subr sched () tag)
     (lambda ()
-      (tagcase ((proj %sched unit unit (sumof (some tag) (none unit))) 12 #u #u)
+      (tagcase ((proj %sched unit unit (oneof (some tag) (none unit))) 12 #u #u)
         (some t t)
         (none u (let ((t (the tag (make-continuation-prompt-tag))))
                   (begin ((proj %sched tag unit unit) 13 t #u) t))))))
@@ -339,7 +339,7 @@
       (go))))
 ;; How a `race` came out: a branch's value, or, every branch failed, the
 ;; last failure's message.
-(define-type (outcome (a type)) (sumof (won a) (lost string)))
+(define-type (outcome (a type)) (oneof (won a) (lost string)))
 ;; Cell `c` given `o`, if it has no value yet, in one step (34).
 (define-type (outcomes (a type) (r region)) (icell (outcome a) r))
 (define offer-outcome
@@ -361,13 +361,13 @@
              (lost (the (ref int @sched) (new 0)))
              (offer (lambda ((o (outcome a))) ((proj (proj offer-outcome @par) a) res o)))
              (branch (lambda ((h (subr any () a)) (done (ref bool @sched)))
-                       (lambda () (let ((v (h))) (begin (set done #t) (offer (sum won v)))))))
+                       (lambda () (let ((v (h))) (begin (set done #t) (offer (one won v)))))))
              (loser (lambda ((done (ref bool @sched)))
                       (lambda ((m string))
                         (begin
                           (set done #t)
                           (set lost (+ (get lost) 1))
-                          (if (= (get lost) 2) (offer (sum lost m)) #u)))))
+                          (if (= (get lost) 2) (offer (one lost m)) #u)))))
              (d1 (the (ref bool @sched) (new #f)))
              (d2 (the (ref bool @sched) (new #f)))
              (t1 (fork-race-branch (branch f d1) (loser d1)))
@@ -380,14 +380,14 @@
 ;; `f` and `g`, each a task, and both their values.
 (define par2
   (poly ((a type) (b type))
-    (subr any ((subr any () a) (subr any () b)) (productof (1 a) (2 b))))
+    (subr any ((subr any () a) (subr any () b)) (tupof (1 a) (2 b))))
   (plambda ((a type) (b type))
     (lambda (f g)
       (let ((ca (the (icell a @par) (make-icell))) (cb (the (icell b @par) (make-icell))))
         (begin
           (fork-branch (lambda () ((proj (proj fill @par) a) ca (f))))
           (fork-branch (lambda () ((proj (proj fill @par) b) cb (g))))
-          (product (1 ((proj (proj await @par) a) ca)) (2 ((proj (proj await @par) b) cb))))))))
+          (tup (1 ((proj (proj await @par) a) ca)) (2 ((proj (proj await @par) b) cb))))))))
 ;; `f`'s value, `f` a task, a monitored group as a `race` branch is; should
 ;; it fail, `(h message)` instead (`attempt`; Heist's, `FIXPT-CHANGES.md`
 ;; F1). `f` is cancellable, so a failure half way leaves nothing another
@@ -398,8 +398,8 @@
       (let* ((res (the (icell (outcome a) @par) (make-icell)))
              (offer (lambda ((o (outcome a))) ((proj (proj offer-outcome @par) a) res o))))
         (begin
-          (fork-race-branch (lambda () (offer (sum won (f))))
-                            (lambda ((m string)) (offer (sum lost m))))
+          (fork-race-branch (lambda () (offer (one won (f))))
+                            (lambda ((m string)) (offer (one lost m))))
           (tagcase ((proj (proj await @par) (outcome a)) res)
             (won v v)
             (lost m (h m))))))))

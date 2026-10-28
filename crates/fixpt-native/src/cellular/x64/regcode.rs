@@ -387,8 +387,8 @@ impl Asm {
             "exact-integer?" => vec![const { kind("bignum") }],
             "%fx26-array?" => vec![const { kind("bloblet") }],
             "%fx26-box?" => vec![const { kind("box") }],
-            "%fx26-sum?" => vec![const { kind("sum") }],
-            "%fx26-product?" => vec![const { kind("product") }],
+            "%fx26-one?" => vec![const { kind("sum") }],
+            "%fx26-tup?" => vec![const { kind("product") }],
             "%fx26-procedure?" => ["closure", "primitive", "continuation", "cellular-closure", "native-closure", "cellular-continuation"]
                 .iter()
                 .map(|n| kind(n))
@@ -666,10 +666,10 @@ impl Asm {
                 self.e(sub_imm(RESULT, 8));
             }
             // Type tests: `shape_test`'s, of `REG1`.
-            "char?" | "f32?" | "boolean?" | "pair?" | "symbol?" | "string?" | "exact-integer?" | "array?" | "box?" | "sum?" | "product?"
+            "char?" | "f32?" | "boolean?" | "pair?" | "symbol?" | "string?" | "exact-integer?" | "array?" | "box?" | "one?" | "tup?"
             | "procedure?" => {
                 let name = match what {
-                    "f32?" | "array?" | "box?" | "sum?" | "product?" | "procedure?" => format!("%fx26-{what}"),
+                    "f32?" | "array?" | "box?" | "one?" | "tup?" | "procedure?" => format!("%fx26-{what}"),
                     _ => what.to_string(),
                 };
                 let done = self.shape_test(r1, &name, slow);
@@ -1111,8 +1111,8 @@ pub fn assemble_register_word(heap: &Heap, rw: Value) -> Result<(Vec<u8>, Vec<i6
                     ("prim", 1) if prim_named(k(o(0)), "%fx26-array?") => Some("array?"),
                     ("prim", 1) if prim_named(k(o(0)), "%fx26-f32?") => Some("f32?"),
                     ("prim", 1) if prim_named(k(o(0)), "%fx26-box?") => Some("box?"),
-                    ("prim", 1) if prim_named(k(o(0)), "%fx26-sum?") => Some("sum?"),
-                    ("prim", 1) if prim_named(k(o(0)), "%fx26-product?") => Some("product?"),
+                    ("prim", 1) if prim_named(k(o(0)), "%fx26-one?") => Some("one?"),
+                    ("prim", 1) if prim_named(k(o(0)), "%fx26-tup?") => Some("tup?"),
                     ("prim", 1) if prim_named(k(o(0)), "%fx26-procedure?") => Some("procedure?"),
                     ("prim", 2) if prim_named(k(o(0)), "%fx26-char-in?") => Some("char-in"),
                     ("prim", 2) if prim_named(k(o(0)), "string=?") => Some("string="),
@@ -1382,7 +1382,7 @@ const NAMED_PRIMITIVES: &[&str] = &[
     "string-length", "string-ref", "%region-cons", "%bloblet-fields", "%bloblet-set!", "char-whitespace?", "char-numeric?",
     "%symbol-hash", "%fx26-fixnum?", "char?", "boolean?", "symbol?", "string?", "pair?", "null?", "%fx26-bitwise-and",
     "%fx26-bitwise-ior", "%fx26-bitwise-xor", "%fx26-bitwise-not", "exact-integer?", "%fx26-array?", "%fx26-f32?",
-    "%fx26-box?", "%fx26-sum?", "%fx26-product?", "%fx26-procedure?", "%fx26-char-in?", "string=?", "modulo",
+    "%fx26-box?", "%fx26-one?", "%fx26-tup?", "%fx26-procedure?", "%fx26-char-in?", "string=?", "modulo",
     "%make-box", "%region-new", "%region-closure", "%make-frozen", "%make-bloblet",
     "%fx26-quotient", "%fx26-mul", "%fx26-arithmetic-shift", "%fx26-add", "%fx26-sub", "%fx26-int-less", "%fx26-int-eq",
 ];
@@ -1458,7 +1458,7 @@ pub fn fx26_regs_module() -> String {
     out.push_str("(define r-shape-kind (subr pure (string int) int)\n  (lambda (name i)\n    (case name\n");
     let shapes: [(&str, &[&str]); 8] = [
         ("symbol?", &["symbol"]), ("string?", &["string"]), ("exact-integer?", &["bignum"]), ("%fx26-array?", &["bloblet"]),
-        ("%fx26-box?", &["box"]), ("%fx26-sum?", &["sum"]), ("%fx26-product?", &["product"]),
+        ("%fx26-box?", &["box"]), ("%fx26-one?", &["sum"]), ("%fx26-tup?", &["product"]),
         ("%fx26-procedure?", &["closure", "primitive", "continuation", "cellular-closure", "native-closure", "cellular-continuation"]),
     ];
     for (name, kinds) in shapes {

@@ -46,7 +46,7 @@
     ;; A task of a monitored process: the failure its watcher's, the task
     ;; left by an abort to the scheduler's prompt (`TASK_FAILED`).
     (typecase ((proj %sched string unit val) 38 message #u)
-      (sum o
+      (one o
         (tagcase o
           (o-tag (g) (abort-current-continuation g the-unit))
           (else y (abort-current-continuation eval-tag (ev-err message)))))
@@ -63,7 +63,7 @@
 
 ;; `v`, an `other`; or fails, `what` being expected.
 (define as-other (->* (val string) other)
-  (lambda (v what) (typecase v (sum o o) (else (efail-expected what)))))
+  (lambda (v what) (typecase v (one o o) (else (efail-expected what)))))
 
 (define as-int (->* (val) int)
   (lambda (v) (if (int? v) v (efail-expected "an int"))))
@@ -152,7 +152,7 @@
   (lambda (f xs)
     (typecase f
       (procedure p (p xs))
-      (sum o
+      (one o
         (tagcase o
           (o-cont (k) (k (ev-arg xs 0)))
           (o-once (k spent)
@@ -170,9 +170,9 @@
 (define ev-same-blob? (->* (val val) bool)
   (lambda (o p)
     (typecase o
-      (sum x
+      (one x
         (typecase p
-          (sum y
+          (one y
             (tagcase x
               (o-blob (fs bs) (tagcase y (o-blob (gs cs) (eq? fs gs)) (else z #f)))
               (else z #f)))
@@ -199,7 +199,7 @@
   (lambda (a b)
     (typecase a
       (procedure f #f) (f64 x #f) (f32 x #f)
-      (sum o (typecase b (sum p (ev-other-eq? o p)) (else #f)))
+      (one o (typecase b (one p (ev-other-eq? o p)) (else #f)))
       (else (eq? a b)))))
 
 ;; The program's scheduler's `preempt` (`fx26:processes.fx`), one of the
@@ -280,8 +280,8 @@
   (lambda (o)
     (tagcase o
       (o-unit () "#u")
-      (o-product (fs) (k-cat3 "#<product of " (int->string (ev-count fs)) ">"))
-      (o-sum (t x) (k-cat3 "#<sum " (symbol->string t) ">"))
+      (o-product (fs) (k-cat3 "#<tup of " (int->string (ev-count fs)) ">"))
+      (o-sum (t x) (k-cat3 "#<one " (symbol->string t) ">"))
       (o-icell (c) "#<icell 4 fields 0 bytes>")
       (o-blob (fs bs) (show-bloblet (+ 1 (array-length fs)) (array-length bs)))
       (o-bref (o i) (k-cat3 "#<suffix-ref bloblet +" (int->string i) ">"))
@@ -314,7 +314,7 @@
         (f64 x (f64->string x))
         (f32 x (f32->string x))
         (box r "#<box>")
-        (sum o (show-other o))
+        (one o (show-other o))
         (else "?"))))
   ;; A list's elements, space-separated, and a dotted tail.
   (show-items (->* ((pairof val val @v) int) string)

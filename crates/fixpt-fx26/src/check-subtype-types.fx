@@ -18,9 +18,9 @@
 ;; What one subtype question remembers: the pairs assumed (FX-87's trail),
 ;; each with the environments it was asked under; and the names given to
 ;; pairs of `poly` binders, by the pair of nodes and the position.
-(define-type k-assumed (listof (productof (1 int) (2 int) (3 k-benv) (4 k-benv)) acyclic))
+(define-type k-assumed (listof (tupof (1 int) (2 int) (3 k-benv) (4 k-benv)) acyclic))
 (define-type k-strail (ref k-assumed @t))
-(define-type k-label-entry (productof (1 int) (2 int) (3 int) (4 int)))
+(define-type k-label-entry (tupof (1 int) (2 int) (3 int) (4 int)))
 (define-type k-label-list (listof k-label-entry acyclic))
 (define-type k-labels (ref k-label-list @t))
 ;; Each lemma that fits a pair of types: its hypotheses, instantiated.

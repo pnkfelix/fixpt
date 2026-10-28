@@ -13,28 +13,28 @@
 ;;; dictionary's author keeps that promise, not the checker.
 
 (define-type (mapper (a type) (b type) (fa type) (fb type) (e effect))
-  (productof (fmap (subr e ((subr e (a) b) fa) fb))))
+  (tupof (fmap (subr e ((subr e (a) b) fa) fb))))
 
 ;; A container's own builder: lists.
 (define list-mapper
   (poly ((a type) (b type) (e effect))
     (mapper a b (listof a acyclic) (listof b acyclic) e))
   (plambda ((a type) (b type) (e effect))
-    (product
+    (tup
      (fmap (lambda (f xs)
              (letrec ((go (subr e ((listof a acyclic)) (listof b acyclic))
                         (lambda (xs) (if (null? xs) nil (cons (f (car xs)) (go (cdr xs)))))))
                (go xs)))))))
 
 ;; A second, unrelated container: an option built from today's sums.
-(define-type (option (t type)) (sumof (none unit) (some t)))
+(define-type (option (t type)) (oneof (none unit) (some t)))
 (define option-mapper
   (poly ((a type) (b type) (e effect))
     (mapper a b (option a) (option b) e))
   (plambda ((a type) (b type) (e effect))
-    (product
+    (tup
      (fmap (lambda (f ox)
-             (tagcase ox (none u (sum none u)) (some x (sum some (f x)))))))))
+             (tagcase ox (none u (one none u)) (some x (one some (f x)))))))))
 
 ;; The consumer: written once, works for whichever dictionary it is given.
 (define apply-mapper
@@ -43,6 +43,6 @@
   (lambda (d f xs) ((extract d fmap) f xs)))
 
 (define xs (listof int acyclic) (list 1 2 3))
-(define ox (option int) (sum some 5))
+(define ox (option int) (one some 5))
 (apply-mapper (proj list-mapper int int pure) (lambda (n) (+ n 1)) xs)
 (apply-mapper (proj option-mapper int int pure) (lambda (n) (+ n 1)) ox)

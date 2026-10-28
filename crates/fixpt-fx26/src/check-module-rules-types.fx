@@ -11,25 +11,25 @@
 (define-type k-say (subr (maxeff checks spin) (string) string))
 ;; What a module's items make, its abstract types, descriptions and values
 ;; (each newest first), and the effect of making them.
-(define-type k-made (productof (1 k-parts) (2 k-parts) (3 k-parts) (4 k-eff)))
+(define-type k-made (tupof (1 k-parts) (2 k-parts) (3 k-parts) (4 k-eff)))
 ;; The bindings of lambdas `ls`, and the types written, resolved.
-(define-type k-mod-bound (productof (1 k-letrec-bs) (2 k-ids)))
+(define-type k-mod-bound (tupof (1 k-letrec-bs) (2 k-ids)))
 ;; Why each group found so far may not end ("" if it ends), by its first
 ;; member's name.
-(define-type k-ends (listof (productof (1 symbol) (2 string)) acyclic))
+(define-type k-ends (listof (tupof (1 symbol) (2 string)) acyclic))
 ;; An effect, and a type.
-(define-type k-eff-ty (productof (1 k-eff) (2 int)))
+(define-type k-eff-ty (tupof (1 k-eff) (2 int)))
 ;; The effect of checking each lambda of `bs` against its type, in the
 ;; scope of every item, with its recursive group (of `gs`, `k-mod-groups`)
 ;; checked to end, as a `define-rec`'s members are; `ws` why the groups so
 ;; far may not, `ds` the types written; and the bindings, a `define*`'s at
 ;; the type found.
-(define-type k-mod-checked (productof (1 k-eff) (2 k-letrec-bs)))
+(define-type k-mod-checked (tupof (1 k-eff) (2 k-letrec-bs)))
 ;; A module's lambdas, those typed `->*` at the types found, and their
 ;; recursive groups (`k-mod-groups`) at those types.
 (hide (define check-modorder-types0 (load-module "fx26:check-modorder-types.fx")))
 (define-type k-mod-found
-  (productof (1 k-letrec-bs) (2 (select check-modorder-types0 k-groups))))
+  (tupof (1 k-letrec-bs) (2 (select check-modorder-types0 k-groups))))
 (hide (define check-letrec-types (load-module "fx26:check-letrec-types.fx")))
 (define-type k-lambda-synth (select check-letrec-types k-lambda-synth))
 

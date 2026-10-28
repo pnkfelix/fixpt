@@ -106,7 +106,7 @@
 (define fold-over-bag-perms
   (poly ((a type) (p type) (s type))
     (subr cg ((listof (listof a @heap) @heap)
-              (subr cg (a p s (prompt-tag s s cgd @z)) (productof (pst p) (st s)))
+              (subr cg (a p s (prompt-tag s s cgd @z)) (tupof (pst p) (st s)))
               p
               (subr cg (p s) s)
               s)
@@ -163,7 +163,7 @@
 (define fold-over-subsets
   (poly ((a type) (e type) (s type))
     (subr cg ((listof a @heap)
-              (subr cg (a bool e s (prompt-tag s s cgd @z)) (productof (pst e) (st s)))
+              (subr cg (a bool e s (prompt-tag s s cgd @z)) (tupof (pst e) (st s)))
               e
               (subr cg (e s) s)
               s)
@@ -196,8 +196,8 @@
 ;; The vertex size is equivalent to a vertex x in [0, size) iff
 ;;      connected (size, y) = connected (x, if y = x then size else y)
 ;; for all y in [0, size).
-(define-type merge-state (productof (merged bool) (classes intss)))
-(define-type split-state (productof (yes ints) (no ints)))
+(define-type merge-state (tupof (merged bool) (classes intss)))
+(define-type split-state (tupof (yes ints) (no ints)))
 
 (define* refine (subr cg (int intss (subr cg (int int) bool)) intss)
   (lambda (size classes connected)
@@ -214,29 +214,29 @@
                (lambda (class state)
                  (let ((classes (extract state classes)))
                    (if (extract state merged)
-                       (product (merged #t) (classes (the intss (cons (the ints (reverse class)) classes))))
+                       (tup (merged #t) (classes (the intss (cons (the ints (reverse class)) classes))))
                        (let ((first (car class)))
                          (if (size-match first)
-                             (product (merged #t)
+                             (tup (merged #t)
                                       (classes (the intss (cons (fold class (lambda ((x int) (l ints)) (the ints (cons x l))) (the ints (cons size nil)))
                                                                 classes))))
-                             (product (merged #f) (classes (the intss (cons (the ints (reverse class)) classes))))))))))
+                             (tup (merged #f) (classes (the intss (cons (the ints (reverse class)) classes))))))))))
              (split (subr cg (int split-state) split-state)
                (lambda (elem state)
                  (if (connected elem size)
-                     (product (yes (the ints (cons elem (extract state yes)))) (no (extract state no)))
-                     (product (yes (extract state yes)) (no (the ints (cons elem (extract state no))))))))
+                     (tup (yes (the ints (cons elem (extract state yes)))) (no (extract state no)))
+                     (tup (yes (extract state yes)) (no (the ints (cons elem (extract state no))))))))
              (subdivide (subr cg (ints merge-state) merge-state)
                (lambda (class state)
                  (if (and (not (null? class)) (null? (cdr class)))
                      (merge class state)
-                     (let* ((r (fold class split (product (yes (the ints nil)) (no (the ints nil)))))
+                     (let* ((r (fold class split (tup (yes (the ints nil)) (no (the ints nil)))))
                             (yes (extract r yes))
                             (no (extract r no)))
                        (cond ((null? yes) (merge no state))
                              ((null? no) (merge yes state))
                              (else (merge no (merge yes state)))))))))
-      (let ((r (fold classes subdivide (product (merged #f) (classes (the intss nil))))))
+      (let ((r (fold classes subdivide (tup (merged #f) (classes (the intss nil))))))
         (if (extract r merged)
             (the intss (reverse (extract r classes)))
             (fold (extract r classes)
@@ -264,13 +264,13 @@
   (lambda (nverts classes connected)
     (let ((perm (the (arrayof int @heap) (make-array nverts -1)))
           (fini (the (prompt-tag int-option unit cgd @z) (make-continuation-prompt-tag))))
-      (letrec ((pfolder (subr cg (int int int (prompt-tag int int cgd @z)) (productof (pst int) (st int)))
+      (letrec ((pfolder (subr cg (int int int (prompt-tag int int cgd @z)) (tupof (pst int) (st int)))
                  (lambda (new old state accross)
-                   (letrec ((loop (subr cg (int) (productof (pst int) (st int)))
+                   (letrec ((loop (subr cg (int) (tupof (pst int) (st int)))
                               (lambda (v)
                                 (if (= v old)
                                     (begin (array-set! perm old new)
-                                           (product (pst (+ old 1)) (st state)))
+                                           (tup (pst (+ old 1)) (st state)))
                                     (let* ((a (connected old v))
                                            (b (connected new (array-ref perm v))))
                                       (cond ((and a (not b)) (abort-current-continuation accross state))
@@ -325,7 +325,7 @@
 
 (define fold-over-graphs
   (poly ((a type) (b type))
-    (subr cg ((subr cg (int int bool a b (prompt-tag b b cgd @z)) (productof (pst a) (st b)))
+    (subr cg ((subr cg (int int bool a b (prompt-tag b b cgd @z)) (tupof (pst a) (st b)))
               a
               (subr cg (int a b (prompt-tag b b cgd @z)) b)
               b)
@@ -350,7 +350,7 @@
                  (g (subr cg (int b) b)
                    (lambda (size state)
                      (let ((indices (find-verts (- size 1))))
-                       (letrec ((se-folder (subr cg (int bool a b (prompt-tag b b cgd @z)) (productof (pst a) (st b)))
+                       (letrec ((se-folder (subr cg (int bool a b (prompt-tag b b cgd @z)) (tupof (pst a) (st b)))
                                   (lambda (to isinc estate state accross)
                                     (efolder (- size 1) to isinc estate state accross)))
                                 (sf (subr cg (a b) b)
@@ -365,17 +365,17 @@
 (define* short (subr (read @heap) (ints) bool)
   (lambda (lst) (or (null? lst) (null? (cdr lst)))))
 
-(define-type ok-state (productof (ac int) (picked ints)))
+(define-type ok-state (tupof (ac int) (picked ints)))
 
 (define* ok-so-far (subr cg (int ints (subr cg (int int) bool)) bool)
   (lambda (size verts connected)
     (let ((fini (the (prompt-tag bool unit cgd @z) (make-continuation-prompt-tag))))
-      (letrec ((efolder (subr cg (int bool ok-state unit (prompt-tag unit unit cgd @z)) (productof (pst ok-state) (st unit)))
+      (letrec ((efolder (subr cg (int bool ok-state unit (prompt-tag unit unit cgd @z)) (tupof (pst ok-state) (st unit)))
                  (lambda (elem isinc estate u accross)
-                   (product
+                   (tup
                      (pst (if isinc
                               (let ((picked (extract estate picked)))
-                                (product (ac (fold picked
+                                (tup (ac (fold picked
                                                    (lambda ((p int) (ac int)) (if (connected elem p) (- ac 2) ac))
                                                    (+ (extract estate ac) 3)))
                                          (picked (the ints (cons elem picked)))))
@@ -387,7 +387,7 @@
                        state
                        (abort-current-continuation fini #u)))))
         (prompt fini
-          (begin (fold-over-subsets verts efolder (product (ac -4) (picked (the ints nil))) folder #u)
+          (begin (fold-over-subsets verts efolder (tup (ac -4) (picked (the ints nil))) folder #u)
                  #t)
           (lambda (u) #f))))))
 
@@ -414,12 +414,12 @@
                (triangle (subr cg (int int) bool)
                  (lambda (vnum e)
                    (natural-any e (lambda ((f int)) (and (connected vnum f) (connected e f))))))
-               (efolder (subr cg (int int bool unit int (prompt-tag int int cgd @z)) (productof (pst unit) (st int)))
+               (efolder (subr cg (int int bool unit int (prompt-tag int int cgd @z)) (tupof (pst unit) (st int)))
                  (lambda (from to isinc u state accross)
                    (if (and isinc (triangle from to))
                        (abort-current-continuation accross state)
                        (begin (update from to isinc)
-                              (product (pst #u) (st state))))))
+                              (tup (pst #u) (st state))))))
                (gfolder (subr cg (int unit int (prompt-tag int int cgd @z)) int)
                  (lambda (size u state accross)
                    (begin

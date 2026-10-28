@@ -7,7 +7,7 @@
   (module
     (define-type cmd (subr pure () unit))
     (define-type cmds (listof cmd acyclic))
-    (define-type (reply (s type)) (productof (state s) (cmds cmds)))
+    (define-type (reply (s type)) (tupof (state s) (cmds cmds)))
     (define-type (msg (s type)) (subr pure (s) (reply s)))))
 (define n (module (import m (type msg cmds))))
 0

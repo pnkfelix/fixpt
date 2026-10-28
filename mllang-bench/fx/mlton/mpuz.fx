@@ -35,10 +35,10 @@
                (lambda (l) (if (null? l) #f (if (p (car l)) #t (loop (cdr l)))))))
       (loop l))))
 
-(define list-map (subr (maxeff (read @h) (write @h) (alloc @h) spin (read @globals)) ((listof int @h) (subr (maxeff (read @h) (write @h) (alloc @h) spin (read @globals)) (int) (productof (v int) (r (ref bool @h)))))
-                       (listof (productof (v int) (r (ref bool @h))) @h))
+(define list-map (subr (maxeff (read @h) (write @h) (alloc @h) spin (read @globals)) ((listof int @h) (subr (maxeff (read @h) (write @h) (alloc @h) spin (read @globals)) (int) (tupof (v int) (r (ref bool @h)))))
+                       (listof (tupof (v int) (r (ref bool @h))) @h))
   (lambda (l f)
-    (letrec ((loop (subr (maxeff (read @h) (write @h) (alloc @h) spin (read @globals)) ((listof int @h)) (listof (productof (v int) (r (ref bool @h))) @h))
+    (letrec ((loop (subr (maxeff (read @h) (write @h) (alloc @h) spin (read @globals)) ((listof int @h)) (listof (tupof (v int) (r (ref bool @h))) @h))
                (lambda (l) (if (null? l) nil (cons (f (car l)) (loop (cdr l)))))))
       (loop l))))
 
@@ -102,14 +102,14 @@
                             (print-result)
                             #u))))
            (values (list-map (list 0 1 2 3 4 5 6 7 8 9)
-                             (lambda (v) (product (v v) (r (the (ref bool @h) (new #f))))))))
+                             (lambda (v) (tup (v v) (r (the (ref bool @h) (new #f))))))))
       ;; Try all assignments of values to letters.
       (letrec ((loop (subr (maxeff (read @h) (write @h) (alloc @h) spin (read @globals)) (chars) unit)
                  (lambda (letters)
                    (if (null? letters)
                        (test-ok)
                        (let ((c (car letters)) (letters (cdr letters)))
-                         ((proj list-foreach (productof (v int) (r (ref bool @h))))
+                         ((proj list-foreach (tupof (v int) (r (ref bool @h))))
                           values
                           (lambda (p)
                             (let ((v (extract p v)) (r (extract p r)))

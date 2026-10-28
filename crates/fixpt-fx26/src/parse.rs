@@ -65,7 +65,7 @@ const ARROW_STAR_ONLY: &str = "`(->* (param …) result)` is only the type a def
 
 const TYPE_FORMS: &[&str] = &[
     "arrayof", "narrayof", "bloblet", "composable", "dletrec", "icell", "listof", "mark-key", "moduleof", "mu", "nat", "nlist", "oneshot", "pairof", "place",
-    "poly", "productof", "prompt-tag", "proves", "ref", "select", "subr", "sumof", "bool", "union", "->", "->*", "restrict",
+    "poly", "tupof", "prompt-tag", "proves", "ref", "select", "subr", "oneof", "bool", "union", "->", "->*", "restrict",
 ];
 
 impl Checker {
@@ -845,8 +845,8 @@ impl Checker {
             }
             // A flat sum with a key (`TODO.md` §77), so `define-type` may
             // name one.
-            "sumof" if items.get(1).is_some_and(|k| k.as_symbol().is_some()) => self.parse_flat(s),
-            "productof" | "sumof" => {
+            "oneof" if items.get(1).is_some_and(|k| k.as_symbol().is_some()) => self.parse_flat(s),
+            "tupof" | "oneof" => {
                 let mut parts = Vec::new();
                 for p in &items[1..] {
                     let pair = self.items(p, "`(label type)`")?.to_vec();
@@ -859,7 +859,7 @@ impl Checker {
                     }
                     parts.push((label, self.parse_type(t)?));
                 }
-                let product = self.head(&items) == Some("productof");
+                let product = self.head(&items) == Some("tupof");
                 Ok(self.arena.ty(if product { Ty::Product(parts) } else { Ty::Sum(parts) }))
             }
             // `(moduleof (abs t type) … (desc d T) … (val x T) …)`: each
@@ -1850,12 +1850,12 @@ impl Checker {
                 let body = self.with_types_of(module, |p| p.parse_body(span, body))?;
                 Ok(self.arena.exp(span, Exp::With { module, body }))
             }
-            "product" => {
+            "tup" => {
                 let mut fields = Vec::new();
                 for p in &items[1..] {
                     let pair = self.items(p, "`(label expression)`")?.to_vec();
                     let [label, e] = &pair[..] else {
-                        return Err(FxError::at(p.span, "`(product (label expression) …)`"));
+                        return Err(FxError::at(p.span, "`(tup (label expression) …)`"));
                     };
                     let label = self.label(label)?;
                     if fields.iter().any(|(l, _)| *l == label) {
@@ -1873,8 +1873,8 @@ impl Checker {
                 let e = self.parse_exp(e)?;
                 Ok(self.arena.exp(span, Exp::Extract(e, label)))
             }
-            "sum" => {
-                // `(sum ⟨hole⟩)`: the hole is a tag; the payload, nothing yet.
+            "one" => {
+                // `(one ⟨hole⟩)`: the hole is a tag; the payload, nothing yet.
                 if let (Some(h), [_, tag]) = (self.holes, &items[..])
                     && tag.as_symbol() == Some(h.exp)
                 {
@@ -1882,7 +1882,7 @@ impl Checker {
                     return Ok(self.arena.exp(span, Exp::Sum(h.tag, unit)));
                 }
                 let [_, tag, e] = &items[..] else {
-                    return Err(FxError::at(span, "`(sum tag expression)`"));
+                    return Err(FxError::at(span, "`(one tag expression)`"));
                 };
                 let tag = self.label(tag)?;
                 let e = self.parse_exp(e)?;
@@ -3788,8 +3788,8 @@ const TYPECASE_SHAPES: &[(&str, &str)] = &[
     ("f64", "f64?"),
     ("f32", "f32?"),
     ("box", "ref?"),
-    ("sum", "sum?"),
-    ("product", "product?"),
+    ("one", "one?"),
+    ("tup", "tup?"),
     ("vector", "vector?"),
     ("bytevector", "bytevector?"),
 ];

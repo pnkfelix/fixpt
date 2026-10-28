@@ -250,12 +250,12 @@ value, and it shows what the checker already enforces.
 ```
 ;;; ---- stack.fx : the interface (a type) and one implementation ----
 (define-type (stack-ops (s type))
-  (productof (empty s)
+  (tupof (empty s)
              (push (subr pure (int s) s))
              (top  (subr pure (s) int))))
 
 (define list-stack (stack-ops (listof int acyclic))
-  (product (empty nil)
+  (tup (empty nil)
            (push (lambda (x s) (cons x s)))
            (top  (lambda (s) (if (null? s) 0 (car s))))))
 
@@ -389,9 +389,9 @@ procedure from one to the other:
 
 ```
 ;;; ---- set.fx ----
-(define-type (eq-ops (t type)) (productof (eq (subr pure (t t) bool))))
+(define-type (eq-ops (t type)) (tupof (eq (subr pure (t t) bool))))
 (define-type (set-ops (t type))
-  (productof (empty  (listof t acyclic))
+  (tupof (empty  (listof t acyclic))
              (insert (subr pure (t (listof t acyclic)) (listof t acyclic)))
              (member (subr pure (t (listof t acyclic)) bool))))
 
@@ -408,7 +408,7 @@ procedure from one to the other:
                   mem))))))
 
 ;;; ---- client.fx : applies the functor, then uses the result ----
-(define int-set (set-ops int) (make-set (product (eq (lambda (a b) (= a b))))))
+(define int-set (set-ops int) (make-set (tup (eq (lambda (a b) (= a b))))))
 (define* has-two (subr pure () bool)
   (lambda ()
     ((extract int-set member) 2
@@ -671,17 +671,17 @@ checked; runs to `2`):
 
 ```
 ;;; ---- tally.fx : as above, and the interface as a type ----
-(define-type (tally-ops (e effect)) (productof (tick (subr e () int))))
+(define-type (tally-ops (e effect)) (tupof (tick (subr e () int))))
 
 ;;; ---- client.fx : never names @tally ----
 (define tick-twice (poly ((e effect)) (subr e ((tally-ops e)) int))
   (plambda ((e effect)) (lambda (m) (begin ((extract m tick)) ((extract m tick))))))
 
 ;;; ---- main.fx : links the two by application ----
-(tick-twice (product (tick tick)))        ; 2
+(tick-twice (tup (tick tick)))        ; 2
 ```
 
-`tick-twice`'s type is now `(poly ((e effect)) (subr e ((productof (tick
+`tick-twice`'s type is now `(poly ((e effect)) (subr e ((tupof (tick
 (subr e () int)))) int))`; `@tally` appears only at the application. Option
 (c) is the same hiding with the unit's name in place of the `poly`
 (proposed):
@@ -1096,7 +1096,7 @@ Writing the toys in today's FX-26 turned up these, each small:
   of the procedure that has it; the caller adds `(read (globals tick))`
   (Example 7).
 - **Printed types expand parametrized `define-type`s.** `use-stack` prints
-  with `stack-ops` written out as its `productof` (`fixpt check` on
+  with `stack-ops` written out as its `tupof` (`fixpt check` on
   Example 1). An interface printed so is correct but long, and loses the
   name; the `.fxi` should keep type abbreviations as entries and use them.
 

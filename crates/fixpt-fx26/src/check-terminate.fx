@@ -124,7 +124,7 @@
             ((not (= (extract (car calls) 1) g)) (k-sc-extend f g a (cdr calls) todo all n seen))
             (else
              (let* ((rest (cdr calls)) (cg (k-sc-compose a (extract (car calls) 3) nil))
-                    (h (extract (car calls) 2)) (new (product (1 f) (2 h) (3 cg))))
+                    (h (extract (car calls) 2)) (new (tup (1 f) (2 h) (3 cg))))
                (cond ((k-sc-seen? seen new) (k-sc-extend f g a rest todo all n seen))
                      ((>= n k-sc-most) (begin (set k-sc-too-many #t) #f))
                      (else
@@ -304,7 +304,7 @@
   (lambda (g why)
     (if (null? g)
         #u
-        (let ((w (product (1 (extract (car g) 1)) (2 (extract (car g) 2)) (3 why))))
+        (let ((w (tup (1 (extract (car g) 1)) (2 (extract (car g) 2)) (3 why))))
           (begin (set k-spin-why (cons w (get k-spin-why)))
                  (k-note-why (cdr g) why))))))
 (define k-why-of (->* (k-whys symbol int) string)

@@ -28,7 +28,7 @@
 ;;;   they are at that type. `iter_interval`'s tuple (start, stop) is two
 ;;;   arguments.
 
-(define-type num (productof (lo int) (mid int) (hi int)))
+(define-type num (tupof (lo int) (mid int) (hi int)))
 
 (define digit int 1000000000000)
 
@@ -36,7 +36,7 @@
   (lambda (n p)
     (let* ((l (* n (extract p lo)))
            (m (+ (* n (extract p mid)) (quotient l digit))))
-      (product (lo (modulo l digit))
+      (tup (lo (modulo l digit))
                (mid (modulo m digit))
                (hi (+ (* n (extract p hi)) (quotient m digit)))))))
 
@@ -54,7 +54,7 @@
 (define* x3 (subr pure (num) num) (lambda (p) (mul 3 p)))
 (define* x5 (subr pure (num) num) (lambda (p) (mul 5 p)))
 
-(define nn1 num (product (lo 1) (mid 0) (hi 0)))
+(define nn1 num (tup (lo 1) (mid 0) (hi 0)))
 
 ;; This is where the interesting stuff begins.
 
@@ -62,10 +62,10 @@
 ;; (A datatype may not name a type defined after it, so `lcons` is
 ;; written out in `lstate`.)
 (define-datatype lstate
-  (delayed (subr lazy-eff () (productof (hd num) (tl (ref lstate @heap)))))
-  (forced (productof (hd num) (tl (ref lstate @heap)))))
+  (delayed (subr lazy-eff () (tupof (hd num) (tl (ref lstate @heap)))))
+  (forced (tupof (hd num) (tl (ref lstate @heap)))))
 (define-type llist (ref lstate @heap))
-(define-type lcons (productof (hd num) (tl llist)))
+(define-type lcons (tupof (hd num) (tl llist)))
 
 (define* lazy (subr (alloc @heap) ((subr lazy-eff () lcons)) llist)
   (lambda (thunk) (new (delayed thunk))))
@@ -80,7 +80,7 @@
   (lambda (f l)
     (lazy (lambda ()
             (let ((c (force l)))
-              (product (hd (f (extract c hd))) (tl (map f (extract c tl)))))))))
+              (tup (hd (f (extract c hd))) (tl (map f (extract c tl)))))))))
 
 (define* merge (subr lazy-eff ((subr pure (num num) int) llist llist) llist)
   (lambda (cmp l1 l2)
@@ -89,9 +89,9 @@
                    (x1 (extract c1 hd)) (ll1 (extract c1 tl))
                    (x2 (extract c2 hd)) (ll2 (extract c2 tl))
                    (c (cmp x1 x2)))
-              (cond ((= c 0) (product (hd x1) (tl (merge cmp ll1 ll2))))
-                    ((< c 0) (product (hd x1) (tl (merge cmp ll1 l2))))
-                    (else (product (hd x2) (tl (merge cmp l1 ll2))))))))))
+              (cond ((= c 0) (tup (hd x1) (tl (merge cmp ll1 ll2))))
+                    ((< c 0) (tup (hd x1) (tl (merge cmp ll1 l2))))
+                    (else (tup (hd x2) (tl (merge cmp l1 ll2))))))))))
 
 (define* iter-interval (subr lazy-eff ((subr (maxeff (read @heap) (write @heap)) (num) unit) llist int int) unit)
   (lambda (f l start stop)
@@ -115,7 +115,7 @@
              (ham5 (lazy (lambda () (force (map x5 hamming))))))
         (begin
           (set hamming (delayed (lambda ()
-                                  (product (hd nn1)
+                                  (tup (hd nn1)
                                            (tl (merge cmp ham2 (merge cmp ham3 ham5)))))))
           hamming)))))
 

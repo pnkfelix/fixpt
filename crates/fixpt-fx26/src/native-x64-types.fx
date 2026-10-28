@@ -11,16 +11,16 @@
 (define-type x-ints (arrayof int @k))
 (define-type x-bools (arrayof bool @k))
 (define-type x-out (listof int @k))
-(define-type x-assembled (productof (1 x-out) (2 x-out)))
+(define-type x-assembled (tupof (1 x-out) (2 x-out)))
 ;; A 32-bit displacement to patch: where it is, and its label; newest first.
-(define-type x-fix-list (listof (productof (1 int) (2 int)) @k))
+(define-type x-fix-list (listof (tupof (1 int) (2 int)) @k))
 ;; Traps raised in the code being emitted, placed after it: label, code,
 ;; detail; newest first.
-(define-type x-stub-list (listof (productof (1 int) (2 int) (3 int)) @k))
+(define-type x-stub-list (listof (tupof (1 int) (2 int) (3 int)) @k))
 ;; Register code's polls that may leave the machine (`native-x64-regs.fx`):
 ;; each one's way out, where it goes on, its code back, the registers it
 ;; keeps, its resume point's field, and whether it keeps a leaf's link (1).
-(define-type x-poll-list (listof (productof (1 int) (2 int) (3 int) (4 int) (5 int) (6 int)) @k))
+(define-type x-poll-list (listof (tupof (1 int) (2 int) (3 int) (4 int) (5 int) (6 int)) @k))
 
 ;;; ------------------------------------------------------------ signatures
 
@@ -151,7 +151,7 @@
 ;; A register word's machine code (`native-x64-regs.fx`): its bytes, where
 ;; each cell's resume point is (-1 for none), and why it cannot be
 ;; compiled ("" if it can).
-(define-type x-regs-assembled (productof (1 x-out) (2 x-out) (3 string)))
+(define-type x-regs-assembled (tupof (1 x-out) (2 x-out) (3 string)))
 
 ;; What `native-x64-regs.fx` is given of the x86_64 machine's register code
 ;; (`native-x64-regs-layout.fx`, generated).

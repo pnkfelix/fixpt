@@ -191,7 +191,7 @@
   (lambda (abs ds)
     (if (null? abs)
         ds
-        (cons (product (1 (extract (car abs) 1)) (2 (k-ty-new (ty-var (extract (car abs) 2)))))
+        (cons (tup (1 (extract (car abs) 1)) (2 (k-ty-new (ty-var (extract (car abs) 2)))))
               (k-abs-shown (cdr abs) ds)))))
 ;; Whether `s`, bound at `t`, is a standard name only the module files built
 ;; in may name, named elsewhere.
@@ -224,7 +224,7 @@
 ;; Whether `at` is the identity `a`, `b`, `k`.
 (define k-at-is? (->* (k-at int int int) bool)
   (lambda (at a b k) (and (= (extract at 1) a) (= (extract at 2) b) (= (extract at 3) k))))
-(define k-no-operator k-op-mark (product (1 '||) (2 (product (1 -1) (2 -1) (3 -1)))))
+(define k-no-operator k-op-mark (tup (1 '||) (2 (tup (1 -1) (2 -1) (3 -1)))))
 (define k-operator (ref k-op-mark @t) (new k-no-operator))
 ;; The standard operations a rule checks at each call, by their name there:
 ;; named only as a call's operator, so that no other name, and no procedure
@@ -255,14 +255,14 @@
 (define k-operator-mark (->* (kx) k-op-mark)
   (lambda (f)
     (tagcase f
-      (x-var (s a b abk) (product (1 s) (2 (product (1 a) (2 b) (3 abk)))))
+      (x-var (s a b abk) (tup (1 s) (2 (tup (1 a) (2 b) (3 abk)))))
       (x-proj (body ds a b abk) (k-operator-mark body))
       (x-the (t e a b abk) (k-operator-mark e))
       ;; `(with #%fx n)`: `n`, as the `with`.
       (x-with (m body a b abk)
         (tagcase body
           (x-var (n c d cdk)
-            (if (k-fx-module? m) (product (1 n) (2 (product (1 a) (2 b) (3 abk)))) k-no-operator))
+            (if (k-fx-module? m) (tup (1 n) (2 (tup (1 a) (2 b) (3 abk)))) k-no-operator))
           (else y k-no-operator)))
       (else y k-no-operator))))
 ;; A flag, off, for a new innermost binding of `s`.
@@ -387,7 +387,7 @@
         outer
         (let* ((t (k-with-selected (cdr withs) sym outer))
                (node (k-ty-new (ty-select (car withs) sym))))
-          (begin (set k-with-fallbacks (cons (product (1 node) (2 t)) (get k-with-fallbacks)))
+          (begin (set k-with-fallbacks (cons (tup (1 node) (2 t)) (get k-with-fallbacks)))
                  node)))))
 ;; Of those, each applied, `(f d …)`: its `select` node and the application,
 ;; which is what falls back (`k-with-applied`).

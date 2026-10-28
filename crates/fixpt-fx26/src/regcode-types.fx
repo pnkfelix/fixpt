@@ -132,7 +132,7 @@
 ;; register and frame slot, and the most slots used; the labels; and, for a
 ;; procedure that knows itself, what it knows and its start's label.
 (define-type rgen
-  (productof (items (ref ritems @k)) (leaf bool) (nreg (ref int @k)) (nslot (ref int @k))
+  (tupof (items (ref ritems @k)) (leaf bool) (nreg (ref int @k)) (nslot (ref int @k))
              (mslot (ref int @k)) (labels (ref int @k)) (this rthis) (start int)))
 ;;; Register moves: (source, destination), source 0 being RESULT.
 (define-type rmove (pairof int int @k))
@@ -141,7 +141,7 @@
 ;; of those in registers, or made into one, to REG1…REGn; and the simple
 ;; ones, each with its register, made after the moves.
 (define-type rlate (listof (pairof int exp @k) @k))
-(define-type rleaf (productof (moves rmoves) (late rlate)))
+(define-type rleaf (tupof (moves rmoves) (late rlate)))
 ;; A test's description: its comparison's name, and its operands.
 (define-type rtest (pairof string rlocs @k))
 

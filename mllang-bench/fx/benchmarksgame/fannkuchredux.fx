@@ -29,8 +29,8 @@
 ;;; - `x land 1` is `x modulo 2`, and `lsl 1` is `* 2`.
 
 (define-type ints (arrayof int @heap))
-(define-type perm (productof (p ints) (pp ints) (c ints)))
-(define-type result (productof (checksum int) (maxflips int)))
+(define-type perm (tupof (p ints) (pp ints) (c ints)))
+(define-type result (tupof (checksum int) (maxflips int)))
 (define-effect fk (maxeff (read @heap) (write @heap) (alloc @heap) spin))
 
 (define workers int 32)
@@ -55,7 +55,7 @@
 ;; Setting up the permutation based on the given index
 (define* setup (subr fk (int int) perm)
   (lambda (n idx0)
-    (let ((res (product (p (let ((a (the ints (make-array n 0))))
+    (let ((res (tup (p (let ((a (the ints (make-array n 0))))
                              (letrec ((init (subr fk (int) ints)
                                         (lambda (i) (if (< i n) (begin (array-set! a i i) (init (+ i 1))) a))))
                                (init 0))))
@@ -188,7 +188,7 @@
                        #u))))
         (begin
           (for lo)
-          (product (checksum (get c)) (maxflips (get m))))))))
+          (tup (checksum (get c)) (maxflips (get m))))))))
 
 ;; The input, where no compiler can fold it: a global.
 (define input int 9)
@@ -199,7 +199,7 @@
            (chunk-size (quotient (array-ref facts n) workers))
            (rem (modulo (array-ref facts n) workers))
            (w (the (ref (arrayof result @heap) @heap)
-                   (new (make-array workers (product (checksum 0) (maxflips 0)))))))
+                   (new (make-array workers (tup (checksum 0) (maxflips 0)))))))
       (letrec ((for (subr (maxeff fk (read (globals blit count facts fr next setup workers))) (int) unit)
                  (lambda (i)
                    (if (<= i (- workers 1))

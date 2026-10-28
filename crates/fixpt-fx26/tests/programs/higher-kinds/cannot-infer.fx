@@ -3,4 +3,4 @@
 ;; and Jones's), so `proj` must say what `f` is.
 (define id (poly ((f (=> (type) type)) (a type)) (subr pure ((f a)) (f a)))
   (plambda ((f (=> (type) type)) (a type)) (lambda (x) x)))
-(id (product (v 3)))
+(id (tup (v 3)))

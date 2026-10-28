@@ -5013,8 +5013,8 @@ fn shape_fast(a: &mut Asm, name: &str, slow: Label) -> bool {
         "string?" => &[const { kind("string") }],
         "%fx26-array?" => &[const { kind("bloblet") }],
         "%fx26-box?" => &[const { kind("box") }],
-        "%fx26-sum?" => &[const { kind("sum") }],
-        "%fx26-product?" => &[const { kind("product") }],
+        "%fx26-one?" => &[const { kind("sum") }],
+        "%fx26-tup?" => &[const { kind("product") }],
         "%fx26-procedure?" => &[
             const { kind("closure") },
             const { kind("primitive") },

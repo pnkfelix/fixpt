@@ -682,7 +682,7 @@
           (tp-lp -1 -1 -1 (- ncols 1)))))))
 
 ;;; The top-level
-(define-type maze (productof (cells harr) (entrance int) (exit int)))
+(define-type maze (tupof (cells harr) (entrance int) (exit int)))
 
 (define* make-maze (subr (maxeff (read @heap) (write @heap) (alloc @heap) spin) (int int) maze)
   (lambda (nrows ncols)
@@ -699,7 +699,7 @@
                 (reroot-maze (href/rc cells (- nrows 1) entrance))
                 (mark-path exit-cell)
                 (set-cell:walls exit-cell (bitwise-and walls (bitwise-not south)))
-                (product (cells cells) (entrance entrance) (exit exit))))))))))
+                (tup (cells cells) (entrance entrance) (exit exit))))))))))
 
 ;------------------------------------------------------------------------------
 ; Was file "hexprint.scm".

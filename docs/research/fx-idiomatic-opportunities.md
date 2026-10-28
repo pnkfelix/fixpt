@@ -68,7 +68,7 @@ means only the internals change.
 | 2    | Q2  | Loops bounded by `>=` or by `nat`, not by `=`                        | `check.fx:173-191,565`; `arm64.fx:18`                         | yes (tested)     | XS   | no                                  |
 | 3    | Q3  | Effects declared tighter than they need to be                        | `parser.fx:111-125`; `check.fx:800`                           | yes (tested)     | XS   | no                                  |
 | 4    | Q4  | Products, not pairs at `@t`, for immutable tuples                    | 57 × `(pairof … @t)` in `check.fx`                            | yes (tested)     | S    | no                                  |
-| 5    | Q5  | Named labels, not `(1 …) (2 …)`                                      | 85 × `(productof (1` in `check.fx`                            | yes              | S    | no                                  |
+| 5    | Q5  | Named labels, not `(1 …) (2 …)`                                      | 85 × `(tupof (1` in `check.fx`                            | yes              | S    | no                                  |
 | 6    | Q6  | Sums for integer codes: kinds, variance, `letregion` forms, measures | `check.fx:47,316,1450,1753,3540-3543`; `parser.fx:48`         | yes (tested)     | S    | no                                  |
 | 7    | Q7  | An `opt` type in place of `-1` and of "none or one" lists            | about 40 places                                               | yes (tested)     | S-M  | no                                  |
 | 8    | Q8  | The compiler's lists `finite` inside their refs                      | `compile.fx:45-47`; `regcode.fx:35,41`                        | yes (tested)     | S    | no                                  |
@@ -187,7 +187,7 @@ reading any of them is `(read @t)`. That is why `k-find` (`:391`),
 `k-named-has?` (`:356`), `k-benv-var` (`:2292`) and about a hundred
 signatures say `(read @t)`.
 
-**Change.** Use `(productof (name symbol) (ty ty-id))`, or a pair frozen at
+**Change.** Use `(tupof (name symbol) (ty ty-id))`, or a pair frozen at
 `finite`.
 
 **Today.** Yes (tested): a lookup over a finite list of products is `pure`.
@@ -198,15 +198,15 @@ divergence.
 
 ### Q5. Named labels, not positions
 
-**Now.** 85 product types are positional: `(productof (1 int) (2 int))` for
+**Now.** 85 product types are positional: `(tupof (1 int) (2 int))` for
 binders, `(extract l 4)` for a lemma's hypotheses, `(extract gen 4)` for a
 generative type's representation. Nothing but comments says what each
 position means (`check.fx:46,316,330`). `regcode.fx:64` already does
-better, with `(productof (items …) (leaf bool) (nreg …) …)`.
+better, with `(tupof (items …) (leaf bool) (nreg …) …)`.
 
 **Change.** Use labels:
-- `(productof (var dvar-id) (kind kind))`;
-- `(productof (name symbol) (params k-binders) (variance …) (rep ty-id))`.
+- `(tupof (var dvar-id) (kind kind))`;
+- `(tupof (name symbol) (params k-binders) (variance …) (rep ty-id))`.
 
 **Today.** Yes. There is no cost at run time: fields are laid out in
 label order.
@@ -242,19 +242,19 @@ Two of these hide real hazards:
 
 **Change.** Use datatypes:
 - `(define-datatype kind (k-region) (k-effect) (k-type) (k-place) (k-data) (k-size))`;
-- `(sumof (co) (contra) (inv))`;
-- `(sumof (letregion) (letrena) (letreap) (letfreeze place))`, whose
+- `(oneof (co) (contra) (inv))`;
+- `(oneof (letregion) (letrena) (letreap) (letfreeze place))`, whose
   `letfreeze` carries its place, which today is a symbol that means nothing
   for the other three (`parser.fx:52`);
-- a size-change slot as `(productof (param nat) (measure measure))`;
+- a size-change slot as `(tupof (param nat) (measure measure))`;
 - predicates written as `tagcase`, not rank ranges;
 - base types found by name, or held in a product built by `k-reset`, not
   fixed integers.
 
 **Today.** Yes (tested: a `kind` datatype, and a narrower sum
-`(sumof (k-region …) (k-place …))` that widens to `kind`). One limit: a
+`(oneof (k-region …) (k-place …))` that widens to `kind`). One limit: a
 constructor of `define-datatype` returns the whole datatype, so `(k-place)`
-does not fit the narrower sum. You must write `(sum k-place (product))`
+does not fit the narrower sum. You must write `(one k-place (tup))`
 (see the language gaps).
 
 **Benefit.** `tagcase` without an `else` must cover every tag, so adding a
@@ -301,7 +301,7 @@ A sentinel can be used as a value by mistake. `(array-ref marks -1)`, or a
 **Change.** Use `(define-datatype (opt (t type)) (none) (some t))`. The
 arm64 encoders get `(opt int)`, or better, fields that are shown to fit
 (L5). Checking against an expected type becomes
-`(sumof (synth) (check ty-id))`, or two entry points.
+`(oneof (synth) (check ty-id))`, or two entry points.
 
 **Today.** Yes (tested: `find` returning `(opt int)`, matched by
 `tagcase`). This needs one parametric datatype in a shared prelude.
@@ -429,7 +429,7 @@ arm that should not happen:
 and `k-proj-map` (`:2789`) checks at run time that a description fits its
 binder's kind.
 
-**Change.** Make it `(productof (regions …) (effects …) (types …) (sizes …))`,
+**Change.** Make it `(tupof (regions …) (effects …) (types …) (sizes …))`,
 each with its own payload type. The dvar id can carry its kind as a phantom
 parameter, `(define-generative (dvar (k type)) int)` instantiated at empty
 marker types, so that a region variable's id is a different type from an
@@ -449,8 +449,8 @@ tagcases with one arm per variant, only to fetch those two fields:
 `k-start`, `k-end`, `exp-start` and `exp-end` (`check.fx:1643-1691`).
 Adding a form means adding four arms.
 
-**Change.** Use `(define-type span (productof (start nat) (end nat)))`, and
-make a node a `(productof (node exp-node) (span span))`. With N5c the span
+**Change.** Use `(define-type span (tupof (start nat) (end nat)))`, and
+make a node a `(tupof (node exp-node) (span span))`. With N5c the span
 could also state `start ≤ end`.
 
 **Today.** Yes, apart from `start ≤ end`. `syn` (`eager-reader.fx:53`) is
@@ -619,8 +619,8 @@ per zip site. There is no divergence.
 A `cursor` is four nested pairs, with a lookahead and a `pending`, each a
 list of none or one (`:84,138-143`).
 
-**Change.** Use `(sumof (waiting (productof (k cont) (pos nat) (done syns)))
-(stopped (productof (pos nat) (done syns) (message string))))`, and a
+**Change.** Use `(oneof (waiting (tupof (k cont) (pos nat) (done syns)))
+(stopped (tupof (pos nat) (done syns) (message string))))`, and a
 cursor product with `(opt char)` and `(opt cursor)`.
 
 **Today.** Yes. The Rust drives the reader through its procedures
@@ -845,14 +845,14 @@ names the opportunity that runs into it.
 3. **You cannot name "a datatype without one variant", and a constructor
    returns the whole datatype.** `k-ty` minus `ty-link` has to be written
    out in full (M2), and `(k-place)` does not fit
-   `(sumof (k-region …) (k-place …))`. You must write
-   `(sum k-place (product))` (tested). Two things would help:
+   `(oneof (k-region …) (k-place …))`. You must write
+   `(one k-place (tup))` (tested). Two things would help:
    - an operator such as `(sum-without T tag …)`;
    - constructors whose result type is the variant's own singleton sum,
      which widens to the datatype.
 4. **No option type in the prelude, and families print expanded.**
-   `(opt region-kind)` prints as `(sumof (none (productof)) (some
-   (productof (1 region-kind))))` (tested). Printing an application of a
+   `(opt region-kind)` prints as `(oneof (none (tupof)) (some
+   (tupof (1 region-kind))))` (tested). Printing an application of a
    family by name, as `define-type` names print, would make messages about
    idiomatic code readable (Q7).
 5. **`length` on a `(listof T finite)` is not inferred** (it needs a

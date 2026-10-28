@@ -214,7 +214,7 @@ data Tree = Leaf Int | Node Tree Tree             -- Haskell
 (define-datatype tree (leaf int) (node tree tree))  ; FX-26
 ```
 
-In FX-26, `tree` is `(sumof (leaf (productof (1 int))) (node (productof
+In FX-26, `tree` is `(oneof (leaf (tupof (1 int))) (node (tupof
 (1 tree) (2 tree))))`: `define-datatype` numbers a variant's fields from 1
 (`top.rs`, `expand_datatype`).
 
@@ -300,7 +300,7 @@ FX-26 today (`dict-of-derived.fx`). The dictionary is a product, and
 
 ```
 (define-type (eqd (t type) (e effect))
-  (productof (eq (subr e (t t) bool)) (show (subr e (t) datum))))
+  (tupof (eq (subr e (t t) bool)) (show (subr e (t) datum))))
 (define list-d
   (poly ((t type) (e effect)) (subr pure ((eqd t e)) (eqd (listof t acyclic) e)))
   …)                                         ; eq and show, each a local loop
@@ -313,7 +313,7 @@ FX-26 today (`dict-of-derived.fx`). The dictionary is a product, and
 
 Everything here is `pure` at `int`, and polymorphic in `e`. A datatype's
 instance would be its derived functions,
-`(product (eq tree=?) (show tree->datum))`. That combines the two: code
+`(tup (eq tree=?) (show tree->datum))`. That combines the two: code
 per *declaration*, and dictionaries passed at every *use*. The
 dictionary is the one value FX-91's modules made first-class (§6.6).
 
@@ -351,9 +351,9 @@ product and every sum:
 
 ```
 (define-type (rep (t type))
-  (productof (eq (subr walk (t t) bool)) (show (subr walk (t) datum)) (size (subr walk (t) int))))
+  (tupof (eq (subr walk (t t) bool)) (show (subr walk (t) datum)) (size (subr walk (t) int))))
 (define rep-sum
-  (poly ((a type) (b type)) (subr pure ((rep a) (rep b)) (rep (sumof (inl a) (inr b)))))
+  (poly ((a type) (b type)) (subr pure ((rep a) (rep b)) (rep (oneof (inl a) (inr b)))))
   (lambda (ra rb)
     (product
      (eq (lambda (x y)
@@ -369,9 +369,9 @@ recursion (MLton's `Y`):
 
 ```
 (define tree-view
-  (subr pure (tree) (sumof (inl int) (inr (productof (1 tree) (2 tree)))))
-  (lambda (t) (tagcase t (leaf (n) (sum inl n))
-                         (node (l r) (sum inr (product (1 l) (2 r)))))))
+  (subr pure (tree) (oneof (inl int) (inr (tupof (1 tree) (2 tree)))))
+  (lambda (t) (tagcase t (leaf (n) (one inl n))
+                         (node (l r) (one inr (tup (1 l) (2 r)))))))
 (define rep-tree (subr walk () (rep tree))
   (lambda ()
     (rep-iso tree-view
@@ -380,7 +380,7 @@ recursion (MLton's `Y`):
 ((extract (rep-tree) show) t1)       ; (node ((leaf 1) (node ((leaf 2) (leaf 3)))))
 ((extract (rep-tree) size) t1)       ; 3
 ((extract (rep-pair rep-int (rep-sum rep-int rep-int)) show)
- (product (1 7) (2 (sum inr 8))))    ; (7 8): a type with no declaration at all
+ (tup (1 7) (2 (one inr 8))))    ; (7 8): a type with no declaration at all
 ```
 
 What it shows, and what it costs:
@@ -505,10 +505,10 @@ dictionary, a product with one function per constructor
 
 ```
 (define-type (tree-alg (b type) (e effect))
-  (productof (leaf (subr e (int) b)) (node (subr e (b b) b))))
+  (tupof (leaf (subr e (int) b)) (node (subr e (b b) b))))
 (define tree-cata (poly ((b type) (e effect)) (subr e ((tree-alg b e) tree) b)) …)
 (define depth-alg (tree-alg int pure)
-  (product (leaf (lambda (n) 0)) (node (lambda (x y) (+ 1 (if (< x y) y x))))))
+  (tup (leaf (lambda (n) 0)) (node (lambda (x y) (+ 1 (if (< x y) y x))))))
 (tree-cata depth-alg t1)                                      ; 2
 ```
 
@@ -561,7 +561,7 @@ refinement in `tagcase`). None of this syntax exists:
 ```
 (define-datatype (rep (t type))                          ; proposed
   (r-int                       : (rep int))
-  (r-pair (rep a) (rep b)      : (rep (productof (1 a) (2 b)))))   ; a, b existential
+  (r-pair (rep a) (rep b)      : (rep (tupof (1 a) (2 b)))))   ; a, b existential
 (define geq (poly ((t type)) (subr spin ((rep t) t t) bool))   ; proposed
   (lambda (r x y)
     (tagcase r
@@ -587,7 +587,7 @@ member t ts                                  -- Eq Tree found by instance resolu
 ```
 
 ```
-(member (product (eq tree=?) (show tree->datum)) t ts)    ; today: written out
+(member (tup (eq tree=?) (show tree->datum)) t ts)    ; today: written out
 (member (derived eqd tree) t ts)                          ; proposed: the checker builds it
 ```
 
@@ -608,8 +608,8 @@ recursing through the former is a descent that size-change accepts
 | -------------------------------------------------------- | -------------------------------------- | -------------------------------- | ---------------------------------------- | ---------------------------------------------------------- |
 | `int`, `nat`, `char`, `bool`, `string`, `symbol`, `unit` | a base operation (§6.5 lists the gaps) | itself (a datum's member)        | none                                     | n/a                                                        |
 | `datum`                                                  | `datum=?` (missing)                    | itself                           | none                                     | `car`/`cdr` are parts                                      |
-| `(productof (l T) …)`                                    | field by field, in label order         | a list of `(l v)` (Q4)           | none (immutable)                         | yes: `extract`                                             |
-| `(sumof (tag T) …)`                                      | tags first, then the value             | `(tag v …)`                      | none (immutable)                         | yes: `tagcase`                                             |
+| `(tupof (l T) …)`                                    | field by field, in label order         | a list of `(l v)` (Q4)           | none (immutable)                         | yes: `extract`                                             |
+| `(oneof (tag T) …)`                                      | tags first, then the value             | `(tag v …)`                      | none (immutable)                         | yes: `tagcase`                                             |
 | `(listof T acyclic)`, `(nlist T s)`                      | element-wise                           | a list                           | none                                     | yes                                                        |
 | `(listof T (acyclic p))`, `(const p)`                    | element-wise                           | a list                           | `(read (acyclic p))`, `(read (const p))` | acyclic yes, const no                                      |
 | `(listof T r)`, `r` writable                             | element-wise                           | a list                           | `(read r)`                               | no: may be cyclic, `spin`                                  |
@@ -722,7 +722,7 @@ written is no smaller: it may be cyclic".
 
 | program (in `/tmp`, not in the repo)                            | result                                                                                                                                                                                              |
 | --------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `rose=?` over `(sumof (leaf int) (node (listof rose acyclic)))` | `(subr pure (rose rose) bool)`: the flat group ends where `rose-tree.fx`'s nested loop could not be shown to                                                                                        |
+| `rose=?` over `(oneof (leaf int) (node (listof rose acyclic)))` | `(subr pure (rose rose) bool)`: the flat group ends where `rose-tree.fx`'s nested loop could not be shown to                                                                                        |
 | `term=?` over `kb.fx`'s `term`, lists at `@heap`                | accepted as `(subr (maxeff (read @heap) spin) …)`, which is `kb.fx`'s hand-written effect; declared without `spin`, refused: "a part of a list that may be written is no smaller: it may be cyclic" |
 | `prose=?` for `(prose t (acyclic p))`, over any place `p`       | `(poly ((t type) (p place) (e effect)) (subr (maxeff (read (acyclic p)) e) ((subr e (t t) bool) …) bool))`; runs, `#f` as expected                                                                  |
 
@@ -782,7 +782,7 @@ fits best, read this way:
   argument. A family's derived function takes each `type` parameter's
   operation as an argument (§3.3, §2.5 A and G). That is dictionary
   passing, and it keeps §4's termination proofs.
-- Instances can be passed as dictionaries, `(product (eq tree=?) (show
+- Instances can be passed as dictionaries, `(tup (eq tree=?) (show
   tree->datum))`, to consumers written once (§2.5 B). This needs nothing
   new, and it is `pure` where the operations are.
 - (b) in its dictionary form needs no new feature (§2.5 C), unlike the
@@ -893,7 +893,7 @@ incremental REPL session only the checker has them.
   the language.
 - **`define-datatype` was FX-91's deriver** (§2.4.11, pp. 29–30). From a
   sum of products it generates, per datatype, a `define-abstraction`, an
-  `id-rep` description, a constructor per variant (`up` of a `sum`), and
+  `id-rep` description, a constructor per variant (`up` of a `one`), and
   a matcher `id′~` per variant, with success and failure continuations.
   So per-type definitions generated from the type's declaration are
   already in the lineage. FX-26 kept the constructors and dropped the
@@ -951,7 +951,7 @@ minutes is spent only on small programs.
    subtyping and across programs) or by declaration order (what a reader
    of the datatype expects of `compare`)?
 4. **`->datum`'s shape.** A variant as `(tag v …)`; a product as `((l v)
-   …)` or `(product (l v) …)`, which reads back as an FX-26 expression; a
+   …)` or `(tup (l v) …)`, which reads back as an FX-26 expression; a
    list as a list. And should `unit` have a datum?
 5. **Where the deriver lives.** The checker, with resolved types
    (recommended, §6.5), or the read-time expander, syntactically as ppx

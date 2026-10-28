@@ -82,19 +82,19 @@
                        (else (rows i (+ j 1) (string-append acc (print-peg (array-ref (array-ref b i) j)))))))))
       (rows 0 0 ""))))
 
-(define-type direction (productof (dx int) (dy int)))
+(define-type direction (tupof (dx int) (dy int)))
 
 (define dir (arrayof direction @heap)
-  (let ((d (the (arrayof direction @heap) (make-array 4 (product (dx 0) (dy 1))))))
+  (let ((d (the (arrayof direction @heap) (make-array 4 (tup (dx 0) (dy 1))))))
     (begin
-      (array-set! d 1 (product (dx 1) (dy 0)))
-      (array-set! d 2 (product (dx 0) (dy -1)))
-      (array-set! d 3 (product (dx -1) (dy 0)))
+      (array-set! d 1 (tup (dx 1) (dy 0)))
+      (array-set! d 2 (tup (dx 0) (dy -1)))
+      (array-set! d 3 (tup (dx -1) (dy 0)))
       d)))
 
-(define-type move (productof (x1 int) (y1 int) (x2 int) (y2 int)))
+(define-type move (tupof (x1 int) (y1 int) (x2 int) (y2 int)))
 
-(define moves (arrayof move @heap) (make-array 31 (product (x1 0) (y1 0) (x2 0) (y2 0))))
+(define moves (arrayof move @heap) (make-array 31 (tup (x1 0) (y1 0) (x2 0) (y2 0))))
 
 (define counter (ref int @heap) (new 0))
 
@@ -128,7 +128,7 @@
                                          (array-set! (array-ref board i2) j2 the-peg)
                                          (if (solve (+ m 1))
                                              (begin
-                                               (array-set! moves m (product (x1 i) (y1 j) (x2 i2) (y2 j2)))
+                                               (array-set! moves m (tup (x1 i) (y1 j) (x2 i2) (y2 j2)))
                                                (abort-current-continuation found #u))
                                              #u)
                                          (array-set! (array-ref board i) j the-peg)

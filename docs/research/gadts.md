@@ -167,7 +167,7 @@ be built, and each equation knows what `a` is.
   (bool-e bool                                          => (expr bool))
   (add    (expr int) (expr int)                         => (expr int))
   (if-e   ((b type)) (expr bool) (expr b) (expr b)      => (expr b))
-  (pair   ((b type) (c type)) (expr b) (expr c)         => (expr (productof (l b) (r c)))))
+  (pair   ((b type) (c type)) (expr b) (expr c)         => (expr (tupof (l b) (r c)))))
 
 (define* eval (poly ((a type)) (subr spin ((expr a)) a))           ; proposed
   (lambda (e)
@@ -176,7 +176,7 @@ be built, and each equation knows what `a` is.
       (bool-e (b) b)                                  ; a = bool
       (add (x y) (+ (eval x) (eval y)))               ; a = int; eval at int
       (if-e (c t f) (if (eval c) (eval t) (eval f)))  ; a = b, b fresh
-      (pair (x y) (product (l (eval x)) (r (eval y)))))))  ; a = (productof (l b) (r c))
+      (pair (x y) (tup (l (eval x)) (r (eval y)))))))  ; a = (tupof (l b) (r c))
 ```
 
 `eval` calls itself at `int`, `bool` and `b`: polymorphic recursion, which a
@@ -260,9 +260,9 @@ Leibniz equality (`forall f. f a -> f b`) would be a proof, but needs a
 kind `type → type`.
 
 ```
-(define-type (eq (a type) (b type)) (productof (to (subr pure (a) b)) (from (subr pure (b) a))))
+(define-type (eq (a type) (b type)) (tupof (to (subr pure (a) b)) (from (subr pure (b) a))))
 (define refl (poly ((a type)) (eq a a))
-  (plambda ((a type)) (product (to (lambda ((x a)) x)) (from (lambda ((x a)) x)))))
+  (plambda ((a type)) (tup (to (lambda ((x a)) x)) (from (lambda ((x a)) x)))))
 (define cast (poly ((a type) (b type)) (subr pure ((eq a b) a) b))
   (lambda (w x) ((extract w to) x)))
 ```
@@ -294,7 +294,7 @@ show (RPair b c) (x, y) = "(" ++ show b x ++ " . " ++ show c y ++ ")"
 (define-datatype (rep (a type))                                        ; proposed
   (r-int                                => (rep int))
   (r-bool                               => (rep bool))
-  (r-pair ((b type) (c type)) (rep b) (rep c) => (rep (productof (l b) (r c)))))
+  (r-pair ((b type) (c type)) (rep b) (rep c) => (rep (tupof (l b) (r c)))))
 
 (define* show (poly ((a type)) (subr spin ((rep a) a) string))         ; proposed
   (lambda (r x)
@@ -311,11 +311,11 @@ cannot be compared: there is no `rep a → rep b → (maybe (eq a b))`, which
 is what dynamic typing with GADTs rests on. `polytypic.md` weighs the two.
 
 ```
-(define-type (rep (a type)) (productof (show (subr pure (a) string))))
-(define r-int (rep int) (product (show (lambda ((n int)) (int->string n)))))
+(define-type (rep (a type)) (tupof (show (subr pure (a) string))))
+(define r-int (rep int) (tup (show (lambda ((n int)) (int->string n)))))
 (define r-pair
-  (poly ((a type) (b type)) (subr pure ((rep a) (rep b)) (rep (productof (l a) (r b)))))
-  (lambda (ra rb) (product (show (lambda ((p (productof (l a) (r b)))) … ((extract ra show) (extract p l)) …)))))
+  (poly ((a type) (b type)) (subr pure ((rep a) (rep b)) (rep (tupof (l a) (r b)))))
+  (lambda (ra rb) (tup (show (lambda ((p (tupof (l a) (r b)))) … ((extract ra show) (extract p l)) …)))))
 ```
 
 ### E4. Existential packing
@@ -344,10 +344,10 @@ applied to the hidden state ahead of time, and closures keep the state. Two
 counters, one over an `int`, one over a `string`, share a type:
 
 ```
-(define-type counter (productof (next (subr spin () counter)) (get (subr pure () int))))
+(define-type counter (tupof (next (subr spin () counter)) (get (subr pure () int))))
 (define by-int (subr pure (int) counter)
   (letrec ((mk (subr pure (int) counter)
-             (lambda (n) (product (next (lambda () (mk (+ n 1)))) (get (lambda () n))))))
+             (lambda (n) (tup (next (lambda () (mk (+ n 1)))) (get (lambda () n))))))
     mk))
 ```
 
@@ -419,12 +419,12 @@ count f (More x t) = f x + count (\(y, z) -> f y + f z) t
 
 **Today** (`nest-polyrec.fx`): `nest` must be generative, since its
 structure never closes into a cycle (N1); `count` calls itself at `(pair a)`,
-that is `(productof (l a) (r a))`, which its declared `poly` allows.
+that is `(tupof (l a) (r a))`, which its declared `poly` allows.
 
 ```
-(define-type (pair (a type)) (productof (l a) (r a)))
+(define-type (pair (a type)) (tupof (l a) (r a)))
 (define-generative (nest (a type))
-  (sumof (none unit) (more (productof (hd a) (tl (nest (pair a)))))))
+  (oneof (none unit) (more (tupof (hd a) (tl (nest (pair a)))))))
 (define* count (poly ((a type)) (subr spin ((subr pure (a) int) (nest a)) int))
   (lambda (f n)
     (tagcase (down-nest n)
@@ -478,13 +478,13 @@ transfers exactly:
 
 ```
 (define-datatype (bad (a type +))                          ; proposed, and refused
-  (k (sumof (m int)) => (bad (sumof (m int)))))
-;; (bad (sumof (m int))) ≤ (bad (sumof (m int) (n bool))) by the +, then
-;; matching k teaches a = (sumof (m int)): an (n #t) passes as a sum with
+  (k (oneof (m int)) => (bad (oneof (m int)))))
+;; (bad (oneof (m int))) ≤ (bad (oneof (m int) (n bool))) by the +, then
+;; matching k teaches a = (oneof (m int)): an (n #t) passes as a sum with
 ;; only m, and a tagcase with only an m arm falls off the end.
 ```
 
-So `(sumof …)` is not upward-closed, nor is any type with region or effect
+So `(oneof …)` is not upward-closed, nor is any type with region or effect
 subsumption in it; hence decision 2's "few FX-26 types qualify". Their
 paper's justification of a sound `+` is itself a coercion written by case
 analysis (`let coerce : α exp → α′ exp = function …`), which is decision

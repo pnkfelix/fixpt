@@ -2311,7 +2311,7 @@ impl Fx26Session {
         read_error: fn(FxError) -> FxError,
     ) -> Result<(), String> {
         let fields: Vec<String> = entries.iter().enumerate().map(|(i, n)| format!("({} {n})", i + 1)).collect();
-        let text = format!("{text}\n(product {})\n", fields.join(" "));
+        let text = format!("{text}\n(tup {})\n", fields.join(" "));
         // The front end's own: from no source of the program's.
         fixpt_heap::regcode::set_source(0);
         // The front end in the native convention where its closures are

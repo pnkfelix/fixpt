@@ -20,20 +20,20 @@
 ;; The measurement: its type must say `observes`, since its result is not
 ;; a function of its argument. But `(fib n)` is pure, so a compiler may
 ;; still compute it before t0 or after t1: nothing pins it in the window.
-(define* time-fib (subr observes (int) (productof (value int) (ns int)))
+(define* time-fib (subr observes (int) (tupof (value int) (ns int)))
   (lambda (n)
     (let* ((t0 (real-time-ns))
            (v  (fib n))
            (t1 (real-time-ns)))
-      (product (value v) (ns (- t1 t0))))))
+      (tup (value v) (ns (- t1 t0))))))
 
 ;; Pinned: `(black-box n)` is ordered after t0, `(black-box (fib …))`
 ;; before t1, and fib's call depends on the one and feeds the other.
-(define* time-fib-pinned (subr observes (int) (productof (value int) (ns int)))
+(define* time-fib-pinned (subr observes (int) (tupof (value int) (ns int)))
   (lambda (n)
     (let* ((t0 (real-time-ns))
            (v  (black-box (fib (black-box n))))
            (t1 (real-time-ns)))
-      (product (value v) (ns (- t1 t0))))))
+      (tup (value v) (ns (- t1 t0))))))
 
 (+ (extract (time-fib 25) value) (extract (time-fib-pinned 25) ns))   ; 75025 + 1000

@@ -934,10 +934,10 @@ fn speculation_reads_compiled_globals() {
     use fixpt_fx26::session::Speculation;
     for native in [false, true] {
         let mut s = session(native);
-        let defs = "(define-type t (sumof (x int) (y int)))\n(define x (sum x 3))";
+        let defs = "(define-type t (oneof (x int) (y int)))\n(define x (one x 3))";
         let forms = s.checker.read_in(FileId(0), defs).expect("reads");
         values_of(&mut s, &forms);
-        let e = "((lambda ((f (subr (read (globals x)) (t) t))) (f (sum y 4))) (lambda ((y t)) x))";
+        let e = "((lambda ((f (subr (read (globals x)) (t) t))) (f (one y 4))) (lambda ((y t)) x))";
         let form = s.checker.read_in(FileId(0), e).expect("reads").remove(0);
         let early = s.speculate(&form);
         assert!(matches!(&early, Speculation::Value(_)), "native {native}: {early:?}");
@@ -953,7 +953,7 @@ fn types_naming_each_other_run_compiled() {
     let mut s = session(true);
     let forms = s.checker.read_in(FileId(0), include_str!("programs/recursive/types-in-any-order.fx")).expect("reads");
     let out = values_of(&mut s, &forms);
-    assert!(out.last().is_some_and(|v| v.starts_with("(#<sum some>)")), "{out:?}");
+    assert!(out.last().is_some_and(|v| v.starts_with("(#<one some>)")), "{out:?}");
 }
 
 /// At the REPL, a datatype naming one not defined yet waits for it, and runs
@@ -981,7 +981,7 @@ fn an_entry_waits_for_the_types_it_names() {
         }
         assert!(s.pending.is_empty());
         let use_it = entry(&mut s, "(node (fcons (leaf 1) (fnil)))");
-        assert_eq!(values_of(&mut s, &use_it), ["#<sum node>"], "native {native:?}");
+        assert_eq!(values_of(&mut s, &use_it), ["#<one node>"], "native {native:?}");
     }
 }
 

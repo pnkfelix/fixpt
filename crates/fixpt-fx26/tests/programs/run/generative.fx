@@ -1,11 +1,11 @@
 ;;; Generative types at run time: the conversions are the identity, and a
 ;;; tree walked through `down-tree` gives its sum.
 (define-generative ty-id int)
-(define-generative (tree (a type)) (sumof (leaf a) (node (productof (l (tree a)) (r (tree a))))))
+(define-generative (tree (a type)) (oneof (leaf a) (node (tupof (l (tree a)) (r (tree a))))))
 (define total (subr (read (globals down-tree)) ((tree int)) int)
   (letrec ((total (subr (read (globals down-tree)) ((tree int)) int)
              (lambda (t) (tagcase (down-tree t) (leaf n n) (node (l r) (+ (total l) (total r)))))))
     total))
-(define* leaf (subr pure (int) (tree int)) (lambda (n) (up-tree (sum leaf n))))
+(define* leaf (subr pure (int) (tree int)) (lambda (n) (up-tree (one leaf n))))
 (+ (down-ty-id (up-ty-id 40))
-   (total (up-tree (sum node (product (l (leaf 1)) (r (leaf 1)))))))
+   (total (up-tree (one node (tup (l (leaf 1)) (r (leaf 1)))))))

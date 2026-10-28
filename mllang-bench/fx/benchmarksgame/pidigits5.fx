@@ -22,9 +22,9 @@
 ;;; - Printing is hashing, the hash passed along `digit`'s loop; `%*s` of
 ;;;   "" is that many spaces, and `%i` is `int->string`.
 
-(define-type state (productof (num int) (den int) (acc int)))
+(define-type state (tupof (num int) (den int) (acc int)))
 
-(define init state (product (num 1) (den 1) (acc 0)))
+(define init state (tup (num 1) (den 1) (acc 0)))
 
 (define* extract-digit (subr pure (state int) int)
   (lambda (z nth) (quotient (+ (* nth (extract z num)) (extract z acc)) (extract z den))))
@@ -35,14 +35,14 @@
 
 (define* prod (subr pure (state int) state)
   (lambda (z d)
-    (product (num (* 10 (extract z num)))
+    (tup (num (* 10 (extract z num)))
              (den (extract z den))
              (acc (* 10 (- (extract z acc) (* (extract z den) d)))))))
 
 (define* cons-lft (subr pure (state int) state)
   (lambda (z k)
     (let ((k2 (+ (* k 2) 1)) (num (extract z num)))
-      (product (num (* k num))
+      (tup (num (* k num))
                (den (* k2 (extract z den)))
                (acc (* k2 (+ (+ (extract z acc) num) num)))))))
 

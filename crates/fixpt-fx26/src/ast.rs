@@ -440,12 +440,12 @@ pub enum Ty {
     /// `(mark-key T R)`: a continuation-mark key in region `R` for marks of
     /// type `T`.
     MarkKey(TyId, Region),
-    /// FX-91's `(productof (label T) …)`: an immutable record. Immutable, so
-    /// in no region, and making one is pure; at run time a frozen bloblet
-    /// with a field per label, in order.
+    /// `(tupof (label T) …)`, FX-91's `productof`: an immutable record.
+    /// Immutable, so in no region, and making one is pure; at run time a
+    /// frozen bloblet with a field per label, in order.
     Product(Vec<(Sym, TyId)>),
-    /// FX-91's `(sumof (tag T) …)`: an immutable tagged union; at run time
-    /// a frozen bloblet of the tag, as a symbol, and the value.
+    /// `(oneof (tag T) …)`, FX-91's `sumof`: an immutable tagged union;
+    /// at run time a frozen bloblet of the tag, as a symbol, and the value.
     Sum(Vec<(Sym, TyId)>),
     /// `(narrayof T N R)`: a bloblet in region `R` with `N` fields, all of
     /// type `T`, read and written by index; `(arrayof T R)` is one of
@@ -707,11 +707,11 @@ pub enum Exp {
     /// The bloblet forms, which are syntax because a field's index must be
     /// known to know its type.
     Bloblet { op: BlobletOp, args: Vec<ExpId> },
-    /// `(product (label e) …)`.
+    /// `(tup (label e) …)`.
     Product(Vec<(Sym, ExpId)>),
     /// `(extract e label)`.
     Extract(ExpId, Sym),
-    /// `(sum tag e)`.
+    /// `(one tag e)`.
     Sum(Sym, ExpId),
     /// `(tagcase e (tag x body) … [(else y body)])`: each arm sees the
     /// value its tag carries; `else` sees the sum of the tags not named.

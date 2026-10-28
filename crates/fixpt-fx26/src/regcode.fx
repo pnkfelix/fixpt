@@ -403,7 +403,7 @@
 
 ;; A leaf's tail call's arguments, sorted.
 (define r-rleaf (->* (rmoves rlate) rleaf)
-  (lambda (ms late) (product (moves ms) (late late))))
+  (lambda (ms late) (tup (moves ms) (late late))))
 ;; `rest` with the move of `s` to REGk first, or the simple argument `a`.
 (define r-leaf-move (->* (rleaf int int) rleaf)
   (lambda (rest s k)
@@ -462,7 +462,7 @@
         "%fx26-string<?" "%fx26-string<=?" "%fx26-string>?" "%fx26-string>=?"
         "%fx26-char<?" "%fx26-char<=?" "%fx26-char>?" "%fx26-char>=?"
         "null?" "pair?" "exact-integer?" "char?" "boolean?" "string?" "symbol?" "%fx26-procedure?"
-        "%fx26-array?" "%fx26-f32?" "%fx26-box?" "%fx26-sum?" "%fx26-product?"
+        "%fx26-array?" "%fx26-f32?" "%fx26-box?" "%fx26-one?" "%fx26-tup?"
         "%fx26-suffix-ref-get" "%suffix-ref-owner" "%suffix-ref-offset" "%suffix-ref+"
         "%suffix-ref" "%fx26-flat-tag" "%fx26-flat-no-arm" "bytevector-length" "bytevector-u8-ref"
         "%fx26-suffix-ref-length" "%fx26-suffix-fits")

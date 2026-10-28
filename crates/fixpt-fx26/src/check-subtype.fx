@@ -716,7 +716,7 @@
                  (bd (k-subst-each db by))
                  (bv (k-subst-each vb by))
                  (t (k-ty-new (ty-module nil bd bv))))
-            (begin (set labels (cons (product (1 a) (2 b) (3 -1) (4 t)) (get labels))) t))))))
+            (begin (set labels (cons (tup (1 a) (2 b) (3 -1) (4 t)) (get labels))) t))))))
 ;; Each description of `bd` one of `da`'s, the same.
 (define k-descs-same?
   (->* (k-parts k-parts k-benv k-benv k-strail k-labels) bool)
@@ -805,8 +805,8 @@
   (->* (kx k-ids k-reshape-list) k-reshape-list)
   (lambda (x at rs)
     (if (and (not (null? rs)) (k-at-is? (extract (car rs) 1) (k-start x) (k-end x) (k-kth x)))
-        (cons (product (1 (k-at-of x)) (2 (k-vals-picked (extract (car rs) 2) at))) (cdr rs))
-        (cons (product (1 (k-at-of x)) (2 (k-picks-of at))) rs))))
+        (cons (tup (1 (k-at-of x)) (2 (k-vals-picked (extract (car rs) 2) at))) (cdr rs))
+        (cons (tup (1 (k-at-of x)) (2 (k-picks-of at))) rs))))
 ;; Positions `at` of the values `inner` takes.
 (define k-vals-picked (->* (k-picks k-ids) k-picks)
   (lambda (inner at)

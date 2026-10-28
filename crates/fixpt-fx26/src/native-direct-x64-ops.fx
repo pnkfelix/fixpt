@@ -211,7 +211,7 @@
           (da-e (x86-alu-rm da-cmp d-sp d-st d-st-stack-limit))
           (da-jcc da-c-b over)
           (da-bind back)
-          (set dp-overflows (cons (product (1 over) (2 back) (3 (raws 1 0))) (get dp-overflows)))
+          (set dp-overflows (cons (tup (1 over) (2 back) (3 (raws 1 0))) (get dp-overflows)))
           (set dp-map-stored? #f)
           (if (get dp-unmapped)
               (zero-all 24)
@@ -395,7 +395,7 @@
   (lambda (i x imm? small other r fast-int add-sub d dst prim entry back)
     (let ((cond (if (= r routine-int-less) da-c-l da-c-e))
           (slow (lambda ((ov int) (into int) (bl int) (bt bool))
-                  (product (1 entry) (2 ov) (3 back) (4 x) (5 (if imm? -1 other)) (6 small)
+                  (tup (1 entry) (2 ov) (3 back) (4 x) (5 (if imm? -1 other)) (6 small)
                            (7 into) (8 prim) (9 (= r routine-int-sub)) (10 bl) (11 bt)))))
       (letrec ((note (subr da-assembles (dr-int-slow) unit)
                  (lambda (s) (if (>= prim 0) (set dp-int-slows (cons s (get dp-int-slows))) #u))))
@@ -448,7 +448,7 @@
            (pending (get dp-pending))
            (note (lambda ()
                    (set dp-foreign
-                        (cons (product (1 stub) (2 after) (3 (dp-o i 0)) (4 tail))
+                        (cons (tup (1 stub) (2 after) (3 (dp-o i 0)) (4 tail))
                               (get dp-foreign))))))
       (begin
         (set dp-pending -1)
@@ -465,7 +465,7 @@
                 (do-bound-callee pending skip)
                 (da-bind join)
                 (set dp-cell-slows
-                     (cons (product (1 slow) (2 join) (3 raws)) (get dp-cell-slows)))))
+                     (cons (tup (1 slow) (2 join) (3 raws)) (get dp-cell-slows)))))
             (do-callee pending cv skip stub note))
         ;; The count, for a variadic callee (`vargs`).
         (da-imm d-x9 (dp-o i 0))
@@ -541,10 +541,10 @@
            (live (array-ref (get dp-live) t))
            (out (da-label))
            (back (da-label)))
-      (letrec ((masks (subr da-reads (int int int) (productof (1 int) (2 int)))
+      (letrec ((masks (subr da-reads (int int int) (tupof (1 int) (2 int)))
                  (lambda (r vals raws)
                    (if (> r 8)
-                       (product (1 vals) (2 raws))
+                       (tup (1 vals) (2 raws))
                        (let ((kept (and (dp-bit? live r) (not (= (nr-rep rep r) nr-undefined))))
                              (raw? (nr-raw? (nr-rep rep r)))
                              (bit (arithmetic-shift 1 r)))
@@ -558,7 +558,7 @@
             (da-jcc da-c-b out)
             (da-bind back)
             (set dp-polls
-                 (cons (product (1 out) (2 back) (3 (extract m 1)) (4 (extract m 2))
+                 (cons (tup (1 out) (2 back) (3 (extract m 1)) (4 (extract m 2))
                                 (5 (and (get dp-captures) (not (array-ref (get dp-framed) i))))
                                 (6 mapped)
                                 (7 (if mapped (dp-map-word (do-live-out)) 0)))

@@ -73,7 +73,7 @@
     (if (or (null? bs) (null? ts))
         nil
         (let ((b (car bs)))
-          (the k-letrec-bs (cons (product (1 (extract b 1)) (2 (car ts)) (3 (extract b 3)))
+          (the k-letrec-bs (cons (tup (1 (extract b 1)) (2 (car ts)) (3 (extract b 3)))
                                  (k-retyped (cdr bs) (cdr ts))))))))
 (define k-types-of (->* (k-letrec-bs) k-ids)
   (lambda (bs) (if (null? bs) nil (the k-ids (cons (extract (car bs) 2) (k-types-of (cdr bs)))))))
@@ -184,7 +184,7 @@
 (define k-components (->* (k-idss) k-idss)
   (lambda (refs)
     (let* ((n (k-length refs))
-           (w (product (1 (the (arrayof int @t) (make-array n -1)))
+           (w (tup (1 (the (arrayof int @t) (make-array n -1)))
                        (2 (the (arrayof int @t) (make-array n 0)))
                        (3 (the (arrayof bool @t) (make-array n #f)))
                        (4 (the (ref k-ids @t) (new nil)))
@@ -256,7 +256,7 @@
   (lambda (ws n old new acc)
     (cond ((null? ws) acc)
           ((and (symbol=? (extract (car ws) 1) n) (= (extract (car ws) 2) old))
-           (let ((w (product (1 n) (2 new) (3 (extract (car ws) 3)))))
+           (let ((w (tup (1 n) (2 new) (3 (extract (car ws) 3)))))
              (k-whys-retyped (cdr ws) n old new (the k-whys (cons w acc)))))
           (else (k-whys-retyped (cdr ws) n old new (the k-whys (cons (car ws) acc)))))))
 (define k-named-reversed (->* (k-named k-named) k-named)
@@ -327,7 +327,7 @@
 (define k-arrow-star-settle (->* (int kx) unit)
   (lambda (t x)
     (set k-arrow-star-settled
-         (cons (product (1 t) (2 (k-start x)) (3 (k-end x))) (get k-arrow-star-settled)))))
+         (cons (tup (1 t) (2 (k-start x)) (3 (k-end x))) (get k-arrow-star-settled)))))
 (define k-settled-has? (->* (k-settleds int int int) bool)
   (lambda (ss t a b)
     (and (not (null? ss))
@@ -383,7 +383,7 @@
     (if (null? bs)
         nil
         (let ((b (car bs)))
-          (the k-letrec-bs (cons (product (1 (extract b 1)) (2 (array-ref ts i)) (3 (extract b 3)))
+          (the k-letrec-bs (cons (tup (1 (extract b 1)) (2 (array-ref ts i)) (3 (extract b 3)))
                                  (k-bs-at (cdr bs) ts (+ i 1))))))))
 ;; Group `bs`, with members typed `->*`, bound and its termination noted,
 ;; at the types found, as the Rust checker's `arrow_star_group`: its

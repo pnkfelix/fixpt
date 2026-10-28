@@ -88,11 +88,11 @@
 
 ;; ---- structure MD5
 
-(define-type word64 (productof (hi u32) (lo u32)))
-(define-type word128 (productof (A u32) (B u32) (C u32) (D u32)))
-(define-type md5state (productof (digest word128) (mlen word64) (buf bytes)))
+(define-type word64 (tupof (hi u32) (lo u32)))
+(define-type word128 (tupof (A u32) (B u32) (C u32) (D u32)))
+(define-type md5state (tupof (digest word128) (mlen word64) (buf bytes)))
 
-(define w64-zero word64 (product (hi 0) (lo 0)))
+(define w64-zero word64 (tup (hi 0) (lo 0)))
 
 (define* mul8add (subr pure (word64 int) word64)
   (lambda (w n)
@@ -101,7 +101,7 @@
            (lo (u32+ (extract w lo) mul8lo))
            (cout (int->u32 (if (u32< lo mul8lo) 1 0)))
            (hi (u32+ mul8hi (u32+ (extract w hi) cout))))
-      (product (hi hi) (lo lo)))))
+      (tup (hi hi) (lo lo)))))
 
 ;; Word8.fromLarge (W32.toLarge w): w's low byte.
 (define* low-byte (subr pure (u32) int) (lambda (w) (u32->int (u32-and w 255))))
@@ -168,7 +168,7 @@
 
 (define empty-buf bytes (w8v-tabulate 0 (lambda (x) 0)))
 (define init md5state
-  (product (digest (product (A 1732584193) (B 4023233417)
+  (tup (digest (tup (A 1732584193) (B 4023233417)
                             (C 2562383102) (D 271733878)))
            (mlen w64-zero)
            (buf empty-buf)))
@@ -201,7 +201,7 @@
            (c (FF c d a b (array-ref xs 14) S13 2792965006)) ; 15
            (b (FF b c d a (array-ref xs 15) S14 1236535329)) ; 16
            )
-      (product (A a) (B b) (C c) (D d)))))
+      (tup (A a) (B b) (C c) (D d)))))
 
 ;; Round 2
 (define* round2 (subr (read @v) (word128 xwords) word128)
@@ -224,7 +224,7 @@
            (c (GG c d a b (array-ref xs 7) S23 1735328473)) ; 31
            (b (GG b c d a (array-ref xs 12) S24 2368359562)) ; 32
            )
-      (product (A a) (B b) (C c) (D d)))))
+      (tup (A a) (B b) (C c) (D d)))))
 
 ;; Round 3
 (define* round3 (subr (read @v) (word128 xwords) word128)
@@ -247,7 +247,7 @@
            (c (HH c d a b (array-ref xs 15) S33 530742520)) ; 47
            (b (HH b c d a (array-ref xs 2) S34 3299628645)) ; 48
            )
-      (product (A a) (B b) (C c) (D d)))))
+      (tup (A a) (B b) (C c) (D d)))))
 
 ;; Round 4
 (define* round4 (subr (read @v) (word128 xwords) word128)
@@ -270,7 +270,7 @@
            (c (II c d a b (array-ref xs 2) S43 718787259)) ; 63
            (b (II b c d a (array-ref xs 9) S44 3951481745)) ; 64
            )
-      (product (A a) (B b) (C c) (D d)))))
+      (tup (A a) (B b) (C c) (D d)))))
 
 ;; What transforming a block does, and reads.
 (define-effect tf
@@ -290,12 +290,12 @@
                                    #u))))
                     (fetch 0)))
            (r (round4 (round3 (round2 (round1 dg xs) xs) xs) xs)))
-      (product (A (u32+ (extract dg A) (extract r A)))
+      (tup (A (u32+ (extract dg A) (extract r A)))
                (B (u32+ (extract dg B) (extract r B)))
                (C (u32+ (extract dg C) (extract r C)))
                (D (u32+ (extract dg D) (extract r D)))))))
 
-(define-type progress (productof (i int) (digest word128)))
+(define-type progress (tupof (i int) (digest word128)))
 
 (define* update (subr bv (md5state bytes) md5state)
   (lambda (st input)
@@ -308,17 +308,17 @@
                  (lambda (i digest)
                    (if (< (+ i 63) input-len)
                        (loop (+ i 64) (transform digest i input))
-                       (product (i i) (digest digest))))))
+                       (tup (i i) (digest digest))))))
         (let* ((r (if (>= input-len need-bytes)
                       (let* ((buf (w8v-concat2 buf (w8v-extract input 0 need-bytes)))
                              (digest (transform digest 0 buf)))
-                        (product (buf empty-buf) (id (loop need-bytes digest))))
-                      (product (buf buf) (id (product (i 0) (digest digest))))))
+                        (tup (buf empty-buf) (id (loop need-bytes digest))))
+                      (tup (buf buf) (id (tup (i 0) (digest digest))))))
                (i (extract (extract r id) i))
                (digest (extract (extract r id) digest))
                (buf (w8v-concat2 (extract r buf) (w8v-extract input i (- input-len i))))
                (mlen (mul8add mlen input-len)))
-          (product (digest digest) (mlen mlen) (buf buf)))))))
+          (tup (digest digest) (mlen mlen) (buf buf)))))))
 
 (define* final (subr (maxeff bv (read @l) (alloc @l)) (md5state) bytes)
   (lambda (state)

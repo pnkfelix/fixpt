@@ -26,12 +26,12 @@
 ;; seen yet), whether it is on the stack, the stack, the next index, and
 ;; the components found, newest first.
 (define-type k-walk
-  (productof (1 (arrayof int @t)) (2 (arrayof int @t)) (3 (arrayof bool @t)) (4 (ref k-ids @t))
+  (tupof (1 (arrayof int @t)) (2 (arrayof int @t)) (3 (arrayof bool @t)) (4 (ref k-ids @t))
              (5 (ref int @t)) (6 (ref k-idss @t))))
 ;; What the walk does.
 (define-effect k-walks (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin))
 ;; Why each group noted may not end (`k-spin-why`).
-(define-type k-whys (listof (productof (1 symbol) (2 int) (3 string)) acyclic))
+(define-type k-whys (listof (tupof (1 symbol) (2 int) (3 string)) acyclic))
 
 ;;; ------------------------------------------------------------ signatures
 

@@ -101,7 +101,7 @@ counterpart in registers and frames.
 2. **Where one may be written.** A `subr`'s parameter and result types;
    a `lambda`'s, `let`'s and `define`'s binder type; `the`. Not as a
    type argument, a field of `pairof`, `listof`, `ref`, `arrayof`,
-   `productof` or `sumof`, a member of a `union`, a module's value, or a
+   `tupof` or `oneof`, a member of a `union`, a module's value, or a
    global (a global's cell holds a value): those are type positions, so
    rule 1 already refuses them. A flat array or a blobref is where a raw
    is kept in data.

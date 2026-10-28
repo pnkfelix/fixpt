@@ -31,7 +31,7 @@
   (Nil)
   (Cons a (subr st () (u a))))
 
-(define-type lft (productof (q int) (r int) (s int) (t int)))
+(define-type lft (tupof (q int) (r int) (s int) (t int)))
 
 (define-datatype (option (a type))
   (NONE)
@@ -50,7 +50,7 @@
 
 (define unfold
   (poly ((a type) (b type))
-    (subr pure ((subr st (b) (option (productof (1 a) (2 b)))))
+    (subr pure ((subr st (b) (option (tupof (1 a) (2 b)))))
           (subr pure (b) (subr st () (u a)))))
   (plambda ((a type) (b type))
     (lambda (f)
@@ -72,7 +72,7 @@
        (lambda ((s (subr st () (u a))))
          (tagcase (s)
            (Nil () (NONE))
-           (Cons (x xs) (SOME (product (1 (f x)) (2 xs))))))))))
+           (Cons (x xs) (SOME (tup (1 (f x)) (2 xs))))))))))
 
 ;; ---- structure PiDigits
 
@@ -93,13 +93,13 @@
                              (Cons (x xs) ((loop (cons z x) xs))))))))))
         loop))))
 
-(define unit lft (product (q 1) (r 0) (s 0) (t 1)))
+(define unit lft (tup (q 1) (r 0) (s 0) (t 1)))
 
 (define* comp (subr pure (lft lft) lft)
   (lambda (a b)
     (let ((q (extract a q)) (r (extract a r)) (s (extract a s)) (t (extract a t))
           (u (extract b q)) (v (extract b r)) (w (extract b s)) (x (extract b t)))
-      (product (q (+ (* q u) (* r w))) (r (+ (* q v) (* r x)))
+      (tup (q (+ (* q u) (* r w))) (r (+ (* q v) (* r x)))
                (s (+ (* s u) (* t w))) (t (+ (* s v) (* t x)))))))
 
 (define* floor-extr (subr pure (lft int) int)
@@ -110,15 +110,15 @@
 (define* lfts (subr (read (globals smap unfold)) () (subr st () (u lft)))
   (lambda ()
     (((proj smap int lft)
-      (lambda (k) (product (q k) (r (+ (* 4 k) 2)) (s 0) (t (+ (* 2 k) 1)))))
-     (((proj unfold int int) (lambda (i) (SOME (product (1 i) (2 (+ i 1)))))) 1))))
+      (lambda (k) (tup (q k) (r (+ (* 4 k) 2)) (s 0) (t (+ (* 2 k) 1)))))
+     (((proj unfold int int) (lambda (i) (SOME (tup (1 i) (2 (+ i 1)))))) 1))))
 
 (define* pi (subr pure () (subr st () (u int)))
   (lambda ()
     (((proj stream lft lft int)
       (lambda (z) (floor-extr z 3))
       (lambda (z n) (= n (floor-extr z 4)))
-      (lambda (z n) (comp (product (q 10) (r (* -10 n)) (s 0) (t 1)) z))
+      (lambda (z n) (comp (tup (q 10) (r (* -10 n)) (s 0) (t 1)) z))
       (lambda (z z2) (comp z z2)))
      unit (lfts))))
 

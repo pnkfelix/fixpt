@@ -2,7 +2,7 @@
 ; of them replaced; the directory's names, sorted; one read back; one that
 ; is not there, `not-found`: status 5.
 (define-type strs (listof string @l))
-(define-type read-result (sumof (data (bytevectorof @b)) (failed io-error)))
+(define-type read-result (oneof (data (bytevectorof @b)) (failed io-error)))
 (define* show-names (subr (maxeff (io stdout) (read @l) spin) (strs) unit)
   (lambda (ns)
     (if (null? ns)
@@ -26,7 +26,7 @@
       (put "b.txt" "bee")
       (put "a.txt" "ay")
       (put "b.txt" "bee, again")
-      (tagcase (the (sumof (names strs) (failed io-error)) (list-dir "."))
+      (tagcase (the (oneof (names strs) (failed io-error)) (list-dir "."))
         (names ns (show-names ns))
         (failed e #u))
       (write-out (string-append (text-of (read-file "b.txt")) "\n"))

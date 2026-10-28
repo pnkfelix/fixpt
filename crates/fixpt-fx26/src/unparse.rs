@@ -588,7 +588,7 @@ impl Checker {
             },
             Ty::ParamSel(k, n) => format!("(select ${} {})", k + 1, self.interner.name(n)),
             Ty::Product(parts) | Ty::Sum(parts) => {
-                let head = if matches!(self.arena.get(t), Ty::Product(_)) { "productof" } else { "sumof" };
+                let head = if matches!(self.arena.get(t), Ty::Product(_)) { "tupof" } else { "oneof" };
                 let ps: Vec<String> =
                     parts.iter().map(|(l, x)| format!(" ({} {})", self.interner.name(*l), self.show_ty_on(*x, path))).collect();
                 format!("({head}{})", ps.concat())

@@ -184,13 +184,13 @@
   (lambda (es bs synth)
     (let ((gs (k-mod-groups es bs bs)))
       (if (not (k-any-arrow-star? bs))
-          (product (1 bs) (2 gs))
+          (tup (1 bs) (2 gs))
           (let* ((rsaved (get k-recursive))
                  (noted (k-note-star-groups gs nil))
                  (found (k-arrow-star-found synth bs))
                  (back (set k-recursive rsaved))
                  (rebound (k-rebind-all found)))
-            (product (1 found) (2 (k-mod-groups es found found))))))))
+            (tup (1 found) (2 (k-mod-groups es found found))))))))
 ;; `f`'s value, or, if it fails, the error `say` makes of its message.
 (define k-saying (->* (k-thunk k-say) k-te)
   (lambda (f say)
@@ -208,7 +208,7 @@
             ": " m)))
 
 (define k-made-of (->* (k-parts k-parts k-parts k-eff) k-made)
-  (lambda (abs ds vs e) (product (1 abs) (2 ds) (3 vs) (4 e))))
+  (lambda (abs ds vs e) (tup (1 abs) (2 ds) (3 vs) (4 e))))
 ;; Each of `items` that `early` names (`k-early-modules`), made by `f`, in
 ;; order, onto `made`: checked before the typed lambdas are bound.
 (define k-mod-early
@@ -228,7 +228,7 @@
         (let ((rest (k-parts-modules (cdr ps))))
           (tagcase (k-get (k-resolve (extract (car ps) 2)))
             (ty-module (abs ds vs)
-              (the k-hazard-list (cons (product (1 (extract (car ps) 1)) (2 (k-comp-names vs)))
+              (the k-hazard-list (cons (tup (1 (extract (car ps) 1)) (2 (k-comp-names vs)))
                                        rest)))
             (else y rest))))))
 ;; Lambda `l`'s type `t`, resolved: a `define*`'s the type it is checked at
@@ -247,12 +247,12 @@
 (define k-mod-bindings (->* (k-mlams int int) k-mod-bound)
   (lambda (ls a b)
     (if (null? ls)
-        (product (1 (the k-letrec-bs nil)) (2 (the k-ids nil)))
+        (tup (1 (the k-letrec-bs nil)) (2 (the k-ids nil)))
         (let* ((t (k-arrow-star-as (extract (car ls) 2)
                                    (k-ty-fresh (k-resolve-selects (extract (car ls) 2) a b))))
                (w (k-mod-first-type (car ls) t))
                (rest (k-mod-bindings (cdr ls) a b)))
-          (product (1 (the k-letrec-bs (cons (product (1 (extract (car ls) 1)) (2 w)
+          (tup (1 (the k-letrec-bs (cons (tup (1 (extract (car ls) 1)) (2 w)
                                                        (3 (extract (car ls) 3)))
                                               (extract rest 1))))
                    (2 (the k-ids (cons t (extract rest 2)))))))))
@@ -276,7 +276,7 @@
   (lambda (ws group)
     (if (or (null? group) (not (null? (k-ends-of ws (extract (car group) 1)))))
         ws
-        (the k-ends (cons (product (1 (extract (car group) 1)) (2 (k-termination group))) ws)))))
+        (the k-ends (cons (tup (1 (extract (car group) 1)) (2 (k-termination group))) ws)))))
 ;; Why `group`, found in `ws`, may not end.
 (define k-group-end (->* (k-ends k-letrec-bs) string)
   (lambda (ws group) (extract (car (k-ends-of ws (extract (car group) 1))) 2)))
@@ -423,7 +423,7 @@
                      (ds (append (k-ext-firsts d0 d1) (k-ext-rest d1 d0)))
                      (out (append (k-ext-firsts v0 v1) (k-ext-rest v1 v0)))
                      (gone (k-parts-not-in a0 (append a1 d1) #t)))
-                (begin (set k-reshapes (cons (product (1 (product (1 a) (2 b) (3 which))) (2 at))
+                (begin (set k-reshapes (cons (tup (1 (tup (1 a) (2 b) (3 which))) (2 at))
                                              (get k-reshapes)))
                        (k-replaced-check (append out ds) gone a b)
                        (k-ty-new (ty-module (append (k-parts-not-in a0 (append a1 d1) #f) a1)
@@ -463,10 +463,10 @@
 ;; What a module's includes give (`TODO.md` §69), newest first: types,
 ;; values, and where each value is, by path; the abstract types that are the
 ;; module's own (`k-abs-own`), and the map to them.
-(define-type k-incs (productof (1 k-parts) (2 k-parts) (3 k-picks) (4 k-parts) (5 k-map)))
+(define-type k-incs (tupof (1 k-parts) (2 k-parts) (3 k-picks) (4 k-parts) (5 k-map)))
 ;; `acc` with types `d`, values `v` and paths `p`.
 (define k-incs-of (->* (k-parts k-parts k-picks k-incs) k-incs)
-  (lambda (d v p acc) (product (1 d) (2 v) (3 p) (4 (extract acc 4)) (5 (extract acc 5)))))
+  (lambda (d v p acc) (tup (1 d) (2 v) (3 p) (4 (extract acc 4)) (5 (extract acc 5)))))
 ;; Whether a module is an `include`s' bucket, as the parser makes one: of
 ;; values `%include-0`, … only.
 (define k-bucket-items? (->* (k-items) bool)
@@ -492,7 +492,7 @@
     (cond ((null? abs) nil)
           ((k-module-var? (extract (car abs) 2))
            (let ((t (k-ty-new (ty-var (extract (car abs) 2)))))
-             (cons (product (1 (extract (car abs) 1)) (2 t)) (k-abs-aliases (cdr abs)))))
+             (cons (tup (1 (extract (car abs) 1)) (2 t)) (k-abs-aliases (cdr abs)))))
           (else (k-abs-aliases (cdr abs))))))
 ;; Of abstract types `abs`, those not a bound module's, of a module made
 ;; where it is taken in (`include`, `extend`): the new module's own, each a
@@ -501,7 +501,7 @@
 ;; their types are not one another's. As Rust's `Checker::abs_taken`.
 (define k-abs-own (->* (k-parts) k-renamed)
   (lambda (abs)
-    (cond ((null? abs) (product (1 (the k-parts nil)) (2 (the k-map nil))))
+    (cond ((null? abs) (tup (1 (the k-parts nil)) (2 (the k-map nil))))
           ((k-module-var? (extract (car abs) 2)) (k-abs-own (cdr abs)))
           (else
            (let* ((a (extract (car abs) 1))
@@ -510,7 +510,7 @@
                   (noted (if (= k 2) #u (set k-abstract-funs (cons w (get k-abstract-funs)))))
                   (to (if (= k 2) (dt (k-ty-new (ty-var w))) (df (k-ty-new (ty-var w)))))
                   (rest (k-abs-own (cdr abs))))
-             (product (1 (the k-parts (cons (product (1 a) (2 w)) (extract rest 1))))
+             (tup (1 (the k-parts (cons (tup (1 a) (2 w)) (extract rest 1))))
                       (2 (the k-map (cons (cons (extract (car abs) 2) to) (extract rest 2))))))))))
 (define k-twice (->* (symbol int int) void)
   (lambda (n a b) (k-fail (k-cat3 "`" (symbol->string n) "` is defined twice in this module") a b)))
@@ -530,7 +530,7 @@
           ((k-named-in? (extract (car ns) 1) (extract acc 4) own-abs (extract acc 1) own-ds)
            (k-twice (extract (car ns) 1) a b))
           (else (k-inc-abs (cdr ns)
-                           (product (1 (extract acc 1)) (2 (extract acc 2)) (3 (extract acc 3))
+                           (tup (1 (extract acc 1)) (2 (extract acc 2)) (3 (extract acc 3))
                                     (4 (cons (car ns) (extract acc 4))) (5 (extract acc 5)))
                            own-abs own-ds a b)))))
 ;; Whether one of `p`, `q`, `r` and `s` names `n`.
@@ -598,7 +598,7 @@
           (ty-module (ab ds vs)
             (let* ((o (k-abs-own ab))
                    (acc (k-inc-abs (extract o 1)
-                                   (product (1 (extract acc 1)) (2 (extract acc 2))
+                                   (tup (1 (extract acc 1)) (2 (extract acc 2))
                                             (3 (extract acc 3)) (4 (extract acc 4))
                                             (5 (append (extract acc 5) (extract o 2))))
                                    own-abs own-ds a b))
@@ -628,7 +628,7 @@
         (let ((n (k-hidden-name prefix (extract (car ps) 1))))
           (begin (k-see seen n k-unit)
                  (k-hidden-marks prefix (cdr ps) seen
-                                 (cons (product (1 n) (2 k-unit)) acc)))))))
+                                 (cons (tup (1 n) (2 k-unit)) acc)))))))
 (define k-hidden-name (->* (string symbol) symbol)
   (lambda (prefix n) (string->symbol (string-append prefix (symbol->string n)))))
 ;; The positions of a module's own values `own`, past `%include`'s, at `k`.
@@ -653,11 +653,11 @@
   (lambda (from abs ds own at a b which)
     (let* ((dseen (k-see-all (make-table symbol-hash symbol=?) ds))
            (vseen (k-see-all (make-table symbol-hash symbol=?) own))
-           (r (k-inc-all from 0 at (product (1 nil) (2 nil) (3 nil) (4 nil) (5 nil)) abs ds dseen
+           (r (k-inc-all from 0 at (tup (1 nil) (2 nil) (3 nil) (4 nil) (5 nil)) abs ds dseen
                          vseen a b))
            (m (extract r 5)))
       (begin
-        (set k-reshapes (cons (product (1 (product (1 a) (2 b) (3 which)))
+        (set k-reshapes (cons (tup (1 (tup (1 a) (2 b) (3 which)))
                                        (2 (append (reverse (extract r 3)) (k-own-at own at 0))))
                               (get k-reshapes)))
         ;; The included modules' own abstract types, then the module's.
@@ -765,7 +765,7 @@
                 (begin
                   (if (k-identity? path 0 (k-length vs))
                       #u
-                      (set k-reshapes (cons (product (1 (product (1 a) (2 b) (3 which))) (2 path))
+                      (set k-reshapes (cons (tup (1 (tup (1 a) (2 b) (3 which))) (2 path))
                                             (if mine (cdr rs) rs))))
                   (k-ty-new (ty-module (k-abs-split abs hs #f) shown out)))))))
       (else z t))))

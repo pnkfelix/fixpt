@@ -1789,11 +1789,11 @@ closures are what gain.
 ## Constant data made once, while compiling (2026-09-28)
 
 A constructor is a global procedure whose body is a sum of a product,
-`(sum rgb (product (1 r) (2 g) (3 b)))`: two `%make-frozen` calls each time
+`(one rgb (tup (1 r) (2 g) (3 b)))`: two `%make-frozen` calls each time
 it runs, even `(red)`, which has no fields. Inlined in a fast version
 (behind the body's `global-guard`s) and given constants, both register
 compilers now make the data while compiling, once, and the code loads it:
-`(red)` is `const #<sum red>`, a leaf. A sum or a product is a known
+`(red)` is `const #<one red>`, a leaf. A sum or a product is a known
 constant when its parts are, so it folds through `let`s and inlined calls
 as integers do. Sums and products are frozen, and FX-26 has no `eq?`, so
 no run can tell a shared one from one of its own. The FX-26 compiler makes
@@ -2796,7 +2796,7 @@ were linked as a global module's are, and the names came back (`DONE.md`
 
 ## Flat sums and blobrefs in line (2026-10-11)
 
-A loop over a million flat-sum shapes (`(sumof u8 (0 f64) (1 (productof
+A loop over a million flat-sum shapes (`(oneof u8 (0 f64) (1 (tupof
 (w f64) (h f64))))`, an array of them in a bloblet's suffix), filled by
 `blobref-variant!` and `blobref-set!`, then summed by a `tagcase` in an
 inlined `area` (`TODO.md` §77). Each step, in milliseconds and the

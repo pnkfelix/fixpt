@@ -37,7 +37,7 @@ From the report (`GiffordHistory/papers/fx91-report.pdf`, §§2.2.6, 2.2.9,
   applicative style of generativity: the path decides.
 - **`define-datatype`** rewrites to a `define-abstraction` whose
   representation is the sum of products; a transparent `id-rep`
-  description; constructors that are `up` applied to a `sum`; and
+  description; constructors that are `up` applied to a `one`; and
   matchers `id′~` that `down`, `tagcase`, and call a success or a failure
   continuation. It introduces these "in the current module binding".
 - **Recursion.** FX-91 has no `mu` and no `dletrec`: a recursive datatype
@@ -148,7 +148,7 @@ precedent here, but the rule follows from what masking needs.
 `define-datatype` stays transparent, as it is now. A generative variant,
 say `(define-datatype (name …) #:generative (tag type …) …)`, would
 expand as FX-91's does: `define-generative` of the sum of products, and
-constructors that `up` a `sum`. Matching is `tagcase` over
+constructors that `up` a `one`. Matching is `tagcase` over
 `(down-name x)`. Sugar that lets `tagcase` accept `x` directly can come
 later, once hiding exists, since it must respect who may `down`.
 

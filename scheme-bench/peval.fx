@@ -39,7 +39,7 @@
 ;;;   numbers in the renamed variables, not the answer).
 
 (define-type sx
-  (sumof (sy symbol) (nm int) (bl bool) (nl unit) (pr (pairof sx sx @heap)) (nc unit) (probe unit)))
+  (oneof (sy symbol) (nm int) (bl bool) (nl unit) (pr (pairof sx sx @heap)) (nc unit) (probe unit)))
 (define-type sxpair (pairof sx sx @heap))
 (define-effect sxe (maxeff (read @heap) (write @heap) (alloc @heap) spin))
 
@@ -47,22 +47,22 @@
 
 ; Scheme's data, as `sx'.
 
-(define snil sx (sum nl #u))
-(define strue sx (sum bl #t))
-(define sfalse sx (sum bl #f))
-(define not-constant sx (sum nc #u)) ; special value indicating non-constant parms.
-(define the-probe sx (sum probe #u))
-(define s-quote sx (sum sy 'quote))
-(define s-lambda sx (sum sy 'lambda))
-(define s-let sx (sum sy 'let))
-(define s-list sx (sum sy 'list))
-(define s-plus sx (sum sy '+))
-(define s-times sx (sum sy '*))
+(define snil sx (one nl #u))
+(define strue sx (one bl #t))
+(define sfalse sx (one bl #f))
+(define not-constant sx (one nc #u)) ; special value indicating non-constant parms.
+(define the-probe sx (one probe #u))
+(define s-quote sx (one sy 'quote))
+(define s-lambda sx (one sy 'lambda))
+(define s-let sx (one sy 'let))
+(define s-list sx (one sy 'list))
+(define s-plus sx (one sy '+))
+(define s-times sx (one sy '*))
 
 ;; `car' of what is not a pair: an error, as in Scheme.
 (define* not-a-pair (subr (read @heap) () sx) (lambda () (car (the (union nil sxpair) no-pair))))
 
-(define* scons (subr (alloc @heap) (sx sx) sx) (lambda (a d) (sum pr (cons a d))))
+(define* scons (subr (alloc @heap) (sx sx) sx) (lambda (a d) (one pr (cons a d))))
 (define* scar (subr (read @heap) (sx) sx) (lambda (x) (tagcase x (pr p (car p)) (else y (not-a-pair)))))
 (define* scdr (subr (read @heap) (sx) sx) (lambda (x) (tagcase x (pr p (cdr p)) (else y (not-a-pair)))))
 (define* sset-car! (subr (maxeff (read @heap) (write @heap)) (sx sx) unit)
@@ -218,7 +218,7 @@
   (lambda (name)
     (begin
       (set current-num (+ (get current-num) 1))
-      (sum sy (string->symbol
+      (one sy (string->symbol
                (string-append (symbol->string (sym-of name))
                               (string-append "_" (int->string (get current-num)))))))))
 
@@ -303,7 +303,7 @@
 ;
 ; The expression simplifier's helpers.
 
-(define-type counts (productof (total int) (oper int) (always bool)))
+(define-type counts (tupof (total int) (oper int) (always bool)))
 
 (define* ref-count (subr sxe (sx sx) counts)
   (lambda (exp var) ; compute how many references to variable 'var'
@@ -339,7 +339,7 @@
                                 #u)))))))
         (begin
           (rc exp #t)
-          (product (total (get total)) (oper (get oper)) (always (get always-evaled))))))))
+          (tup (total (get total)) (oper (get oper)) (always (get always-evaled))))))))
 
 (define* binding-frame (subr sxe (sx sx) sx)
   (lambda (var env)
@@ -418,16 +418,16 @@
                          sfalse)))
         (cons '+ (lambda (args)
                    (if (every? snumber? args)
-                       (quot (sum nm (ssum args 0)))
+                       (quot (one nm (ssum args 0)))
                        sfalse)))
         (cons '* (lambda (args)
                    (if (every? snumber? args)
-                       (quot (sum nm (sproduct args 1)))
+                       (quot (one nm (sproduct args 1)))
                        sfalse)))
         (cons '- (lambda (args)
                    (if (and (> (slength args) 0)
                             (every? snumber? args))
-                       (quot (sum nm (if (snull? (scdr args))
+                       (quot (one nm (if (snull? (scdr args))
                                          (- 0 (num-of (scar args)))
                                          (- (num-of (scar args)) (ssum (scdr args) 0)))))
                        sfalse)))
@@ -787,8 +787,8 @@
                    (begin
                      (set pos j)
                      (cond ((char=? c #\#) (sbool (char=? (string-ref s (+ i 1)) #\t)))
-                           ((char-numeric? c) (sum nm (digits s i j 0)))
-                           (else (sum sy (string->symbol (substring s i j)))))))))))))
+                           ((char-numeric? c) (one nm (digits s i j 0)))
+                           (else (one sy (string->symbol (substring s i j)))))))))))))
   (read-tail (subr (maxeff sxe reader) (string (ref int @heap)) sx)
     (lambda (s pos)
       (begin
@@ -912,13 +912,13 @@
   (lambda (input1 input2)
     (begin
       (set current-num 0)
-      (let* ((r1 (try-peval example1 (slist3 list-10-11 not-constant (sum nm 1))))
-             (r2 (try-peval example2 (slist2 not-constant (sum nm 1))))
-             (r3 (try-peval example3 (slist2 not-constant (sum nm 1))))
+      (let* ((r1 (try-peval example1 (slist3 list-10-11 not-constant (one nm 1))))
+             (r2 (try-peval example2 (slist2 not-constant (one nm 1))))
+             (r3 (try-peval example3 (slist2 not-constant (one nm 1))))
              (r4 (try-peval example3 (slist2 list-1-2-3 not-constant)))
              (r5 (try-peval example4 (slist2 sym-x not-constant)))
              (r6 (try-peval example4 (slist2 list-f-1-2-3 not-constant)))
-             (r7 (try-peval example5 (slist2 (sum nm 5) not-constant)))
+             (r7 (try-peval example5 (slist2 (one nm 5) not-constant)))
              (r8 (try-peval example6 snil))
              (r9 (try-peval example7 (slist1 list-a-z)))
              (r10 (try-peval input1 input2)))

@@ -176,7 +176,7 @@
 (define k-strail-push (->* (k-strail int int k-benv k-benv) unit)
   (lambda (trail a b ea eb)
     (begin (k-strail-bump a b 1)
-           (set trail (cons (product (1 a) (2 b) (3 ea) (4 eb)) (get trail))))))
+           (set trail (cons (tup (1 a) (2 b) (3 ea) (4 eb)) (get trail))))))
 ;; The entries of `ps` newer than `st` no longer counted.
 (define k-strail-drop (->* (k-assumed k-assumed) unit)
   (lambda (ps st)
@@ -214,7 +214,7 @@
         (if (< found 0)
             found
             (let ((l (- -1000 (k-length (get labels)))))
-              (begin (set labels (cons (product (1 a) (2 b) (3 i) (4 l)) (get labels))) l)))))))
+              (begin (set labels (cons (tup (1 a) (2 b) (3 i) (4 l)) (get labels))) l)))))))
 
 ;; Whether `r` is frozen data's region.
 (define k-frozen-region? (->* (k-region) bool)

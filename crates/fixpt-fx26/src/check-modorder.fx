@@ -48,7 +48,7 @@
     (if (null? ns)
         out
         (k-mlams-of-group (cdr ns) (cdr ts) (cdr xs) i
-                          (the k-mlams (cons (product (1 (car ns)) (2 (car ts)) (3 (car xs))
+                          (the k-mlams (cons (tup (1 (car ns)) (2 (car ts)) (3 (car xs))
                                                       (4 i) (5 #t) (6 #f))
                                              out))))))
 ;; The typed lambdas of `items`, from item `i`, onto `out` (newest first).
@@ -59,7 +59,7 @@
         (let* ((it (car items))
                (k (extract it 1))
                (more (cond ((k-lambda-item? it)
-                            (the k-mlams (cons (product (1 (car (extract it 2)))
+                            (the k-mlams (cons (tup (1 (car (extract it 2)))
                                                         (2 (car (extract it 4)))
                                                         (3 (car (extract it 5))) (4 i) (5 #f)
                                                         (6 (= (extract it 3) -2)))
@@ -118,7 +118,7 @@
   (lambda (ns i out)
     (if (null? ns)
         out
-        (k-places-onto (cdr ns) i (the k-places (cons (product (1 (car ns)) (2 i)) out))))))
+        (k-places-onto (cdr ns) i (the k-places (cons (tup (1 (car ns)) (2 i)) out))))))
 (define k-places-from (->* (k-items int k-places) k-places)
   (lambda (items i out)
     (if (null? items)
@@ -215,7 +215,7 @@
     (cond ((null? ns) rs)
           ((k-reached-has? rs (car ns)) (k-reach-new (cdr ns) from has rs))
           (else (k-reach-new (cdr ns) from has
-                             (the k-reached (cons (product (1 (car ns)) (2 from) (3 has)) rs)))))))
+                             (the k-reached (cons (tup (1 (car ns)) (2 from) (3 has)) rs)))))))
 ;; The chain to `n`, from the value's first name it was reached through.
 (define k-chain-to (->* (k-reached symbol k-names) k-names)
   (lambda (rs n out)
@@ -333,7 +333,7 @@
                        (names (k-mod-names-in init ps))
                        (early (k-arrow-star-named x init names ls)))
                   (k-hazard-walk names (k-reach-new names x #f nil)
-                                 (product (1 ps) (2 ls) (3 i) (4 x) (5 init))))
+                                 (tup (1 ps) (2 ls) (3 i) (4 x) (5 init))))
                 #u)
             (k-hazards-from (cdr items) (+ i 1) ps ls))))))
 ;; The names of parts `ps`, in order.
@@ -363,7 +363,7 @@
                        nil
                        (tagcase (k-get (k-resolve t)) (ty-module (a d v) v) (else y nil)))))
           (k-outer-mods (cdr ns) ps
-                        (if (null? vs) acc (cons (product (1 n) (2 (k-part-names vs))) acc)))))))
+                        (if (null? vs) acc (cons (tup (1 n) (2 (k-part-names vs))) acc)))))))
 ;; Each module checked first, of `known`, binds its values' names in a
 ;; `with` of it not checked yet (`k-with-bound`), so that `(define x (with m
 ;; x))` re-exports `m`'s `x`; and so does each module in scope the items name
@@ -390,7 +390,7 @@
   (lambda (ls all)
     (if (null? ls)
         nil
-        (the k-edges (cons (product (1 (extract (car ls) 1))
+        (the k-edges (cons (tup (1 (extract (car ls) 1))
                                     (2 (k-mlam-names-among all (k-free-vars (extract (car ls) 3)))))
                            (k-mod-edges (cdr ls) all))))))
 (define k-scc-edges (ref (table symbol k-names @t) @t) (new (make-table symbol-hash symbol=?)))

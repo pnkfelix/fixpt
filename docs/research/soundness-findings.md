@@ -262,20 +262,20 @@ deeper than 64 constructors is reported non-cyclic, and a looping
 self-application through it is typed without `spin`.
 
 **Probe.** `deep.fx` builds `T = (subr pure (P) int)` where `P` nests 70
-`productof` wrappers around `T`, and writes `omega` that unwraps its
+`tupof` wrappers around `T`, and writes `omega` that unwraps its
 argument 70 times and self-applies:
 
 ```
-(define-type T (subr pure ((productof (a (productof (a … T …)))) int))
+(define-type T (subr pure ((tupof (a (tupof (a … T …)))) int))
 (define omega (subr pure () int)
-  (lambda () (let ((w (the T (lambda (p) (let ((f (extract … (extract p a) … a))) (f (product (a …(a f)…))))))))
-               (w (product (a …(a w)…))))))
+  (lambda () (let ((w (the T (lambda (p) (let ((f (extract … (extract p a) … a))) (f (tup (a …(a f)…))))))))
+               (w (tup (a …(a w)…))))))
 (omega)
 ```
 
 Accepted (`exit 0`), and `omega` exceeds the step limit. The same shape at
 depth 3 (`shallow.fx`) is rejected: `omega` is reported
-`(subr spin ((productof (a (productof (a (productof (a T)))))) int)` and
+`(subr spin ((tupof (a (tupof (a (tupof (a T)))))) int)` and
 the `pure` signature refused. So the only difference is the nesting depth
 crossing the cutoff.
 

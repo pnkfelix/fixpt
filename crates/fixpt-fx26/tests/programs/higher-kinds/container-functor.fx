@@ -24,8 +24,8 @@
 (define pair-up
   (subr (maxeff (read @heap) (alloc @heap) spin)
         ((c : container) ((select c f) int))
-        ((select c f) (productof (l int) (r int))))
+        ((select c f) (tupof (l int) (r int))))
   (lambda ((c container) (xs ((select c f) int)))
-    (with c ((proj fmap int (productof (l int) (r int))) (lambda (x) (product (l x) (r x))) xs))))
+    (with c ((proj fmap int (tupof (l int) (r int))) (lambda (x) (tup (l x) (r x))) xs))))
 (let ((c lists))
-  (with c ((proj size (productof (l int) (r int))) (pair-up c ((proj wrap int) 3)))))
+  (with c ((proj size (tupof (l int) (r int))) (pair-up c ((proj wrap int) 3)))))

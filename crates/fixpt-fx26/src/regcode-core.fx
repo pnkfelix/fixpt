@@ -414,10 +414,10 @@
   ;; them, as the body's cellular scope has them, and as the call's
   ;; arguments.
   (r-inline-args
-    (->* (rgen exp-params exps renv cenv) (productof (1 renv) (2 cenv) (3 rargs)))
+    (->* (rgen exp-params exps renv cenv) (tupof (1 renv) (2 cenv) (3 rargs)))
     (lambda (g ps args env te)
       (if (or (null? ps) (null? args))
-          (product (1 (the renv nil)) (2 (the cenv nil)) (3 (the rargs nil)))
+          (tup (1 (the renv nil)) (2 (the cenv nil)) (3 (the rargs nil)))
           (let* ((p (extract (car ps) 1)) (a (car args))
                  (k (r-known-arg env a))
                  (l (if (null? k) (r-var-loc env a) (the rlocs (cons (rl-const (car k)) nil))))
@@ -438,7 +438,7 @@
                             ((null? kept) (tagcase here (rl-slot (s) (a-slot s)) (else y (a-e a))))
                             (else (a-e a))))
                  (rest (r-inline-args g (cdr ps) (cdr args) env te)))
-            (product (1 (r-bind p here (extract rest 1)))
+            (tup (1 (r-bind p here (extract rest 1)))
                      (2 (r-local (extract rest 2) p))
                      (3 (the rargs (cons arg (extract rest 3)))))))))
   ;; A call of a global procedure with a lambda at a parameter it only
@@ -509,11 +509,11 @@
   (r-spec-args (->* (rgen exp-params exps renv cenv bools) rscope)
     (lambda (g ps args env te flags)
       (if (or (null? ps) (null? args))
-          (product (1 (the renv nil)) (2 (the cenv nil)))
+          (tup (1 (the renv nil)) (2 (the cenv nil)))
           (let* ((p (extract (car ps) 1))
                  (l (r-value-loc g (car args) env te (car flags)))
                  (rest (r-spec-args g (cdr ps) (cdr args) env te (cdr flags))))
-            (product (1 (r-bind p l (extract rest 1))) (2 (r-local (extract rest 2) p)))))))
+            (tup (1 (r-bind p l (extract rest 1))) (2 (r-local (extract rest 2) p)))))))
   ;; A procedure calling itself through its global `cell` (a top-level
   ;; definition's, or, in a copy specialized at a lambda, with the parameter
   ;; passed as itself): the arguments made; then, if the global has not
@@ -781,7 +781,7 @@
                 (begin (r-decline) (the patches nil))
                 (r-lambda-made g (car m) env te region))))))
   ;; The closure of word and free values `made`.
-  (r-lambda-made (->* (rgen (productof (1 tword) (2 syms)) renv cenv maybe-exp) patches)
+  (r-lambda-made (->* (rgen (tupof (1 tword) (2 syms)) renv cenv maybe-exp) patches)
     (lambda (g made env te region)
       (let* ((w (extract made 1))
              (fv (extract made 2))

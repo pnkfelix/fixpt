@@ -1,7 +1,7 @@
 ; Rejected, though it ends: a limit of the analysis. `each` walks `kids`,
 ; but `ks` is its own parameter, so nothing says `(car ks)` is a part of
 ; `t`; `total` must say `spin`, and so must `each`, which calls it.
-(define-type rose (sumof (leaf int) (node (listof rose acyclic))))
+(define-type rose (oneof (leaf int) (node (listof rose acyclic))))
 (define total (subr pure (rose) int)
   (lambda (t)
     (tagcase t

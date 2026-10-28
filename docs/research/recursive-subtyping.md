@@ -98,7 +98,7 @@ Assumptions that failed stay on the trail. This is harmless today, because
 
 - every rule is a conjunction, so the first `false` short-circuits all the
   way to the top;
-- a `sumof` label is found by `find`, which makes no choice;
+- a `oneof` label is found by `find`, which makes no choice;
 - the `composable`-as-`subr` case returns directly;
 - `(or frozen …)` in `k-sub-fields` is a test of a flag, not a choice
   between subgoals.
@@ -119,8 +119,8 @@ The standard remedy:
 | Feature                                      | Rule in `sub`                            | Status                                                                                     |
 | -------------------------------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------ |
 | Different unfoldings (μt.T vs T[μt.T/t])     | graph simulation                         | complete (probe `unfold`)                                                                  |
-| `sumof` width + depth, recursive             | label lookup, covariant                  | complete (REPL: `w ≤ n`, and `n ≰ w` refused)                                              |
-| `productof`                                  | same labels, same order, covariant       | no width subtyping; deliberate (the layout is positional)                                  |
+| `oneof` width + depth, recursive             | label lookup, covariant                  | complete (REPL: `w ≤ n`, and `n ≰ w` refused)                                              |
+| `tupof`                                  | same labels, same order, covariant       | no width subtyping; deliberate (the layout is positional)                                  |
 | `pairof`/`listof`, `ref`, `arrayof`, `icell` | invariant, same region                   | sound; **incomplete at `const`** (probe `constcov`)                                        |
 | frozen bloblet                               | covariant fields                         | complete, recursive too (probe `frozenblob`)                                               |
 | unfrozen ≤ frozen                            | never                                    | correct: freezing is a change of type (comment in `sub`)                                   |
@@ -141,8 +141,8 @@ The programs were moved out of string literals, because `checker.rs`
 | Probe        | Program (abridged)                                                      | Rust at `9651bea`      | FX-26 checker  | Rust prototype              |
 | ------------ | ----------------------------------------------------------------------- | ---------------------- | -------------- | --------------------------- |
 | `unfold`     | `s1 = () → {hd, tl: s1}` vs the same unrolled twice, as `s2`            | ok                     | ok             | ok                          |
-| `polycycle`  | `p1 = (poly ((a type)) (subr pure (a) p1))` in a `productof`, same name | ok (`a == b` shortcut) | ok             | ok                          |
-| `polycycle2` | `p1` against an α-equivalent `p2`, inside `productof`                   | **stack overflow**     | **step limit** | ok                          |
+| `polycycle`  | `p1 = (poly ((a type)) (subr pure (a) p1))` in a `tupof`, same name | ok (`a == b` shortcut) | ok             | ok                          |
+| `polycycle2` | `p1` against an α-equivalent `p2`, inside `tupof`                   | **stack overflow**     | **step limit** | ok                          |
 | `polyvar`    | `(f x)` with `f : (subr pure (p1) int)` and `x : p1`: the *same* type   | **stack overflow**     | **step limit** | ok                          |
 | `polyonly`   | `(define-type t (poly ((a type)) t))`, then `(f x)`                     | **stack overflow**     | **step limit** | still overflows (see below) |
 | `constcov`   | `(listof n1 const) ≤ (listof n2 const)`, where `n1 ≤ n2`                | refused                | refused        | ok                          |
@@ -264,7 +264,7 @@ module-expression section). That is iso-recursive and nominal.
 **Recommendation: stay equi-recursive.**
 
 - `define-datatype` already expands to a structural `define-type` of
-  `sumof`/`productof` (`top.rs` `expand_datatype`).
+  `oneof`/`tupof` (`top.rs` `expand_datatype`).
 - `unify` already handles cyclic matching.
 - Iso-recursive subtyping needs the Amber rule, "μa.S ≤ μb.T if a ≤ b ⊢
   S ≤ T". It is incomplete with respect to the equi-recursive reading and
@@ -294,7 +294,7 @@ form is the minimized automaton with a canonical numbering.
 2. Make an initial partition by shallow label:
    - the constructor and its arity;
    - base names;
-   - `sumof` labels *sorted by name*, and `productof` labels in order;
+   - `oneof` labels *sorted by name*, and `tupof` labels in order;
    - region constants and effect atoms, *sorted by name*. The two checkers
      already order atoms differently, which is why `checker.rs` has
      `canonical()`.
@@ -349,7 +349,7 @@ cases to `sub`:
 | --------- | ------------- | ---------------------------------------------------------------- | ------------ |
 | `!`       | contravariant | —                                                                | covariant    |
 | `?`       | covariant     | —                                                                | covariant    |
-| `offer`   | —             | covariant in the label set, as receiving a `sumof`: fewer ≤ more | covariant    |
+| `offer`   | —             | covariant in the label set, as receiving a `oneof`: fewer ≤ more | covariant    |
 | `choose`  | —             | the reverse                                                      | covariant    |
 
 **Caveats:**
@@ -394,8 +394,8 @@ bloblet. That gives `(listof n1 const) ≤ (listof n2 const)` whenever
 `n1 ≤ n2`: `constcov` passes, and `tests/regions.rs` and `tests/run.rs`
 still pass.
 
-- This matters for messages. A frozen `(listof (sumof (ok …)))` fits a
-  mailbox for `(listof (sumof (ok …) (err …)) const)`.
+- This matters for messages. A frozen `(listof (oneof (ok …)))` fits a
+  mailbox for `(listof (oneof (ok …) (err …)) const)`.
 - Once places-and-regions.md step 2 lands, the rule could also be
   `(const p) ≤ (const q)` when `p` outlives `q`. That is the first genuine
   region subtyping, and it fits naturally into `sub`'s region comparison.
@@ -419,7 +419,7 @@ whichever branch type is the larger, or fail.
 - A real join of recursive sums is a memoized product construction over
   node pairs, as in the `sub` walk.
 - Invariance makes the join partial: `ref` contents must be equal.
-- For example, branches of `(sumof (a int) (b w))` and `(sumof (c unit))`
+- For example, branches of `(oneof (a int) (b w))` and `(oneof (c unit))`
   would join to their union.
 
 **Effect polymorphism.** It needs nothing new. Effects are compared as

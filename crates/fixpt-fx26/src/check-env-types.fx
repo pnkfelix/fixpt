@@ -27,11 +27,11 @@
 ;; Globals broken by a redefinition (`k-defining`): the name, how many
 ;; bindings it had then (so which one is broken), and why. A use of a broken
 ;; binding is an error saying why, until the name is defined again.
-(define-type k-break (productof (1 symbol) (2 int) (3 string)))
+(define-type k-break (tupof (1 symbol) (2 int) (3 string)))
 ;; The operator of the application being checked, past any `proj` or
 ;; `the`, by name and place: where a second-class standard operation may be
 ;; named (F15, F16).
-(define-type k-op-mark (productof (1 symbol) (2 k-at)))
+(define-type k-op-mark (tupof (1 symbol) (2 k-at)))
 ;; Description names in scope, innermost first.
 (define-type k-scope (listof (pairof symbol k-ds @t) acyclic))
 ;; What checking found of an expression that running needs, for the
@@ -54,17 +54,17 @@
   ;; A call: its callee's convention, which it is compiled in.
   (n-call k-conv))
 ;; Each keyed by the expression (its identity, `k-at`).
-(define-type k-fact (productof (1 k-at) (2 k-noted)))
+(define-type k-fact (tupof (1 k-at) (2 k-noted)))
 (define-type k-facts (listof k-fact acyclic))
 ;; Each `with` checked, its identity, and its module's values its body names,
 ;; with their positions in the module, newest first: a `with`'s body sees
 ;; them, once checking has found them; a re-export, of one value, binds one.
-(define-type k-with-noted (productof (1 k-at) (2 k-names) (3 k-ids)))
+(define-type k-with-noted (tupof (1 k-at) (2 k-names) (3 k-ids)))
 (define-type k-with-list (listof k-with-noted acyclic))
 ;; While a module's order is checked (`check-modorder.fx`): each earlier
 ;; item whose value is a module as written, and its values' names, which a
 ;; `with` of it not checked yet binds.
-(define-type k-hazard-list (listof (productof (1 symbol) (2 k-names)) acyclic))
+(define-type k-hazard-list (listof (tupof (1 symbol) (2 k-names)) acyclic))
 ;; Each module given where a type of fewer values, or the same in another
 ;; order, is wanted (`k-reshape-at`): which, and for each value that type
 ;; has, its position in the module given. Made into a module of that layout.
@@ -73,17 +73,17 @@
 ;; Rust's `Pick`).
 (define-datatype k-pick (pick-value int) (pick-path int int))
 (define-type k-picks (listof k-pick acyclic))
-(define-type k-reshaped (productof (1 k-at) (2 k-picks)))
+(define-type k-reshaped (tupof (1 k-at) (2 k-picks)))
 (define-type k-reshape-list (listof k-reshaped acyclic))
 ;; `with`'s `select` nodes and what each falls back to (`k-with-fallbacks`).
-(define-type k-fallbacks (listof (productof (1 int) (2 int)) acyclic))
+(define-type k-fallbacks (listof (tupof (1 int) (2 int)) acyclic))
 ;; While a type's `select`s are resolved (`k-resolve-selects`): what each
 ;; is, `(m t)` and the type; none otherwise.
-(define-type k-selected (productof (1 symbol) (2 symbol) (3 int)))
+(define-type k-selected (tupof (1 symbol) (2 symbol) (3 int)))
 (define-type k-selects (listof k-selected acyclic))
 ;; While a dependent procedure's parameters are given (`k-instantiate-params`):
 ;; what each `(select $k n)` is, `(k n)` and the type; none otherwise.
-(define-type k-param-given (productof (1 int) (2 symbol) (3 int)))
+(define-type k-param-given (tupof (1 int) (2 symbol) (3 int)))
 (define-type k-params-given (listof k-param-given acyclic))
 
 ;;; ------------------------------------------------------------ signatures

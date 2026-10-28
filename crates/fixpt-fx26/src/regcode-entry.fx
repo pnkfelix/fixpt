@@ -111,7 +111,7 @@
     (begin
       (set r-at -1)
       (the rgen
-        (product (items (new (the ritems nil))) (leaf leaf) (nreg (new nreg)) (nslot (new 0))
+        (tup (items (new (the ritems nil))) (leaf leaf) (nreg (new nreg)) (nslot (new 0))
                  (mslot (new 0)) (labels (new labels)) (this this) (start 0))))))
 ;; The labels at a body's start, the frame made: the procedure's own (0),
 ;; for its loops, if it knows itself; one where a procedure specialized at
@@ -133,7 +133,7 @@
       (if (null? own)
           #u
           (let* ((o (car own))
-                 (me (product (1 (extract o 1)) (2 (extract o 2)) (3 n) (4 own-at))))
+                 (me (tup (1 (extract o 1)) (2 (extract o 2)) (3 n) (4 own-at))))
             (begin (set r-own-now (cons me nil)) (r-emit g (r-label own-at))))))))
 ;; What a body's register code starts from, made afresh for each try.
 (define r-body-reset! (->* (rowner int) unit)

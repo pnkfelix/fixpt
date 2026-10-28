@@ -206,7 +206,7 @@ The real limitation is elsewhere, and older than this proposal. Here
 Both checkers refuse it: `` `x..t` is a module's abstract type, not known
 outside the scope where the module is named ``. The same `x..t` can't
 leave the file even though every load of `x.fx` is the one value
-`%shared:x.fx`. (Datatypes are transparent, a `sumof`, so the front end's
+`%shared:x.fx`. (Datatypes are transparent, a `oneof`, so the front end's
 `*-types.fx` share theirs; only `define-generative` types stay apart.
 Heist has 8.) So `y.fx` can't offer an operation on `x.fx`'s type to a
 client who loaded `x.fx` too.
@@ -342,10 +342,10 @@ Each one reproduced on `00c190c5` (the repros are below each).
 files:
 
 ```scheme
-(define before (module (define-type (box (s type)) (productof (state (ref s @ed)) (name string)))))
-(define m (module (include before) (define-type thing (productof (n int)))
+(define before (module (define-type (box (s type)) (tupof (state (ref s @ed)) (name string)))))
+(define m (module (include before) (define-type thing (tupof (n int)))
   (define take (subr pure ((box thing)) string) (lambda (b) (extract b name)))))
-;; a (productof (n int)) has no `name`
+;; a (tupof (n int)) has no `name`
 ```
 
 `(import before (type box))` works. So the names an `include` gives to

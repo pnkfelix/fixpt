@@ -37,7 +37,7 @@ def candidates(s):
         if '@' in T: continue
         if not body.startswith('('): continue
         head=re.match(r'\(\s*([^\s()]+)',body)
-        if not head or head.group(1) in ('lambda','new','make-array','cons','list','product','sum','make-bloblet','letrec','let','let*','begin','if','cond','case','tagcase','typecase','plambda','vlambda','rlambda','prompt','the'): continue
+        if not head or head.group(1) in ('lambda','new','make-array','cons','list','tup','one','make-bloblet','letrec','let','let*','begin','if','cond','case','tagcase','typecase','plambda','vlambda','rlambda','prompt','the'): continue
         out.append((i,e,T,body))
     return out
 if __name__=='__main__':

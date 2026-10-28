@@ -6,4 +6,4 @@
 (set tally (+ (get tally) (twice 5)))
 (set tally (+ (get tally) 1))
 (define* seen (subr (read @c) () int) (lambda () (get tally)))
-(define* origin (subr pure () pt) (lambda () (product (x 0) (y (twice 2)))))
+(define* origin (subr pure () pt) (lambda () (tup (x 0) (y (twice 2)))))

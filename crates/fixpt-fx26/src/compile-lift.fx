@@ -46,7 +46,7 @@
 ;; Lifted procedure `k`, from `c-lifts`.
 (define c-lift-of (->* (int) c-lift)
   (lambda (k)
-    (table-ref (get c-lifts) k (the c-lift (product (1 (wcell-nil)) (2 (the syms nil)))))))
+    (table-ref (get c-lifts) k (the c-lift (tup (1 (wcell-nil)) (2 (the syms nil)))))))
 
 ;; A lifted procedure's added names.
 (define c-lift-added (->* (int) syms)
@@ -300,7 +300,7 @@
   (lambda (added ps)
     (if (null? added)
         ps
-        (cons (product (1 (car added)) (2 (the syns-a nil))) (c-added-params (cdr added) ps)))))
+        (cons (tup (1 (car added)) (2 (the syns-a nil))) (c-added-params (cdr added) ps)))))
 
 ;; A closure over nothing for each member, from the `i`th, its word to
 ;; come, in `c-lifts` with what it takes: their indices.
@@ -309,7 +309,7 @@
     (if (null? bs)
         nil
         (let* ((k (get c-lift-count))
-               (lift (the c-lift (product (1 (wcell-closure)) (2 (array-ref added i))))))
+               (lift (the c-lift (tup (1 (wcell-closure)) (2 (array-ref added i))))))
           (begin
             (table-set! (get c-lifts) k lift)
             (set c-lift-count (+ k 1))
@@ -463,7 +463,7 @@
   (lambda (w op n)
     (begin
       (if (get c-registers)
-          (set c-standard-twins (cons (product (1 w) (2 op) (3 n)) (get c-standard-twins)))
+          (set c-standard-twins (cons (tup (1 w) (2 op) (3 n)) (get c-standard-twins)))
           #u)
       w)))
 
@@ -517,7 +517,7 @@
     (let ((found (c-standard-word-of name)))
       (if (null? found)
           (let ((w (c-standard-word-made name)))
-            (begin (set c-standard-words (cons (product (1 name) (2 w)) (get c-standard-words)))
+            (begin (set c-standard-words (cons (tup (1 name) (2 w)) (get c-standard-words)))
                    w))
           (car found)))))
 ;; A standard operation as a value: a closure of its word (`c-standard-word`),

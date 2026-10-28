@@ -13,20 +13,20 @@
 (define-effect kallocs (maxeff (read @globals) (alloc @t)))
 ;; A module's typed lambda: its name, written type, value, the item it is
 ;; written in, whether that is a `define-rec`, and whether a `define*`.
-(define-type k-mlam (productof (1 symbol) (2 int) (3 kx) (4 int) (5 bool) (6 bool)))
+(define-type k-mlam (tupof (1 symbol) (2 int) (3 kx) (4 int) (5 bool) (6 bool)))
 (define-type k-mlams (listof k-mlam acyclic))
 ;; A name a module defines, and the item defining it.
-(define-type k-places (listof (productof (1 symbol) (2 int)) acyclic))
+(define-type k-places (listof (tupof (1 symbol) (2 int)) acyclic))
 ;;; ------------------------------------------------------------ hazards
 
 ;; What has been reached: each name, the one it was reached from, and
 ;; whether it was.
-(define-type k-reached (listof (productof (1 symbol) (2 symbol) (3 bool)) acyclic))
+(define-type k-reached (listof (tupof (1 symbol) (2 symbol) (3 bool)) acyclic))
 ;; The module (its places and typed lambdas) and the item being checked:
 ;; its position, name and value.
-(define-type k-hz (productof (1 k-places) (2 k-mlams) (3 int) (4 symbol) (5 kx)))
+(define-type k-hz (tupof (1 k-places) (2 k-mlams) (3 int) (4 symbol) (5 kx)))
 ;; Each lambda's name, and the lambdas its value names.
-(define-type k-edges (listof (productof (1 symbol) (2 k-names)) acyclic))
+(define-type k-edges (listof (tupof (1 symbol) (2 k-names)) acyclic))
 ;; The lambdas' strongly connected components (Tarjan's): each lambda's
 ;; place in the walk, its low link, and its component, by name; the walk's
 ;; stack, and the counts of places and of components. A lambda walked and

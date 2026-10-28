@@ -371,6 +371,6 @@
                                                "then what it proves of"))
                         a b)
                 (let ((given (the k-pos (cons (extract (k-nth ps n) 1) nil)))
-                      (pv (product (1 name) (2 (k-param-names-first ps n)) (3 want))))
+                      (pv (tup (1 name) (2 (k-param-names-first ps n)) (3 want))))
                   (k-rebuild body given (extract l 2) #f pv)))))
         (else y (k-fail-at (k-cat3 "a proof of " want " is a lambda") e)))))))))

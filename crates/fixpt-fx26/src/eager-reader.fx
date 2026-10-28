@@ -546,7 +546,7 @@
     (marking (entry m-atom start)
       (lambda ()
         (let* ((text (get ahead-text)) (origin (get ahead-origin))
-               (in (product (start start) (data (cur-data cur)) (text text) (origin origin)))
+               (in (tup (start start) (data (cur-data cur)) (text text) (origin origin)))
                (given (chars-back prefix 0 (string-length prefix))))
           (if (and (string=? prefix "") (in-text? (- start origin) text))
               (atom-loop in (cur-char cur) (cur-pos cur) nil 0)

@@ -220,7 +220,7 @@
                       (let ((t (k-and-props then)) (e (k-and-props els)))
                         (if (and (k-sf-result? r) (k-sf-not-result? nr)
                                  (not (null? t)) (not (null? e)))
-                            (list (product (1 (car t)) (2 (car e)) (3 rest)))
+                            (list (tup (1 (car t)) (2 (car e)) (3 rest)))
                             nil)))
                     (else z nil)))
                 (else z nil))
@@ -334,14 +334,14 @@
 
 ;; A case: its equalities, inequalities, disequalities, and booleans (each
 ;; flag's number and whether it holds).
-(define-type k-flags (listof (productof (1 int) (2 bool)) acyclic))
-(define-type k-case (productof (1 k-lins) (2 k-lins) (3 k-lins) (4 k-flags)))
+(define-type k-flags (listof (tupof (1 int) (2 bool)) acyclic))
+(define-type k-case (tupof (1 k-lins) (2 k-lins) (3 k-lins) (4 k-flags)))
 ;; What is left to take apart: each formula, and whether it is to hold.
-(define-type k-todo (listof (productof (1 k-sf) (2 bool)) acyclic))
+(define-type k-todo (listof (tupof (1 k-sf) (2 bool)) acyclic))
 (define k-todo-snoc (->* (k-todo k-sf bool) k-todo)
   (lambda (xs f yes)
     (if (null? xs)
-        (cons (product (1 f) (2 yes)) nil)
+        (cons (tup (1 f) (2 yes)) nil)
         (cons (car xs) (k-todo-snoc (cdr xs) f yes)))))
 (define k-todo-onto (->* (k-todo k-sfs bool) k-todo)
   (lambda (xs ps yes) (if (null? ps) xs (k-todo-onto (k-todo-snoc xs (car ps) yes) (cdr ps) yes))))
@@ -364,7 +364,7 @@
 (define k-flags-snoc (->* (k-flags int bool) k-flags)
   (lambda (fs k yes)
     (if (null? fs)
-        (cons (product (1 k) (2 yes)) nil)
+        (cons (tup (1 k) (2 yes)) nil)
         (cons (car fs) (k-flags-snoc (cdr fs) k yes)))))
 ;; `c` with a relation, `r` (0 `<`, 1 `<=`, 2 `=`, 3 not `=`) of `x` and
 ;; `y`, holding or not: of `d = y - x`.
@@ -378,12 +378,12 @@
             ((= r 0) (k-case-ge c neg))
             ((and (= r 1) yes) (k-case-ge c d))
             ((= r 1) (k-case-ge c (k-size-plus neg -1)))
-            (eq (product (1 (k-lins-snoc eqs d)) (2 ges) (3 nes) (4 fs)))
-            (else (product (1 eqs) (2 ges) (3 (k-lins-snoc nes d)) (4 fs)))))))
+            (eq (tup (1 (k-lins-snoc eqs d)) (2 ges) (3 nes) (4 fs)))
+            (else (tup (1 eqs) (2 ges) (3 (k-lins-snoc nes d)) (4 fs)))))))
 ;; `c` with `g ≥ 0`, its disequalities `nes`.
 (define k-case-ge-of (->* (k-case k-size k-lins) k-case)
   (lambda (c g nes)
-    (product (1 (extract c 1)) (2 (k-lins-snoc (extract c 2) g)) (3 nes) (4 (extract c 4)))))
+    (tup (1 (extract c 1)) (2 (k-lins-snoc (extract c 2) g)) (3 nes) (4 (extract c 4)))))
 (define k-case-ge (->* (k-case k-size) k-case)
   (lambda (c g) (k-case-ge-of c g (extract c 3))))
 ;; Whether no case of `c` with `todo` is possible (`Prover::refute`).
@@ -410,7 +410,7 @@
               (sf-holds (a)
                 (let ((k (k-logic-number k-logic-flags a)))
                   (or (k-flag-in? k (not yes) (extract c 4))
-                      (k-refute-plain (product (1 (extract c 1)) (2 (extract c 2)) (3 (extract c 3))
+                      (k-refute-plain (tup (1 (extract c 1)) (2 (extract c 2)) (3 (extract c 3))
                                                (4 (k-flags-snoc (extract c 4) k yes)))
                                       rest))))
               (sf-rel (r x y) (k-refute-plain (k-case-rel c r x y yes) rest))))))))
@@ -447,7 +447,7 @@
           (set k-logic-atoms nil)
           (set k-logic-flags nil)
           (set k-logic-cases 0)
-          (k-refute (product (1 nil) (2 nil) (3 nil) (4 nil))
+          (k-refute (tup (1 nil) (2 nil) (3 nil) (4 nil))
                     (k-todo-snoc (k-todo-onto nil hyps #t) goal #f))))))
 (define k-spec-requires (->* (k-specs) k-sf)
   (lambda (s) (if (null? s) (sf-true) (extract (car s) 3))))

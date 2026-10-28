@@ -28,15 +28,15 @@
 (import check-logic k-show-spec k-latent-split)
 
 ;; What a type is shown as so far (`check-print-types.fx`).
-(define k-shown-none k-shown (product (1 (the k-strings nil)) (2 (the k-ids nil)) (3 0)))
+(define k-shown-none k-shown (tup (1 (the k-strings nil)) (2 (the k-ids nil)) (3 0)))
 ;; `st`, then `s`.
 (define k-put (->* (string k-shown) k-shown)
   (lambda (s st)
-    (product (1 (the k-strings (cons s (extract st 1)))) (2 (extract st 2))
+    (tup (1 (the k-strings (cons s (extract st 1)))) (2 (extract st 2))
              (3 (+ (extract st 3) 1)))))
 ;; `st`, its depths `ds`.
 (define k-shown-depths (->* (k-shown k-ids) k-shown)
-  (lambda (st ds) (product (1 (extract st 1)) (2 ds) (3 (extract st 3)))))
+  (lambda (st ds) (tup (1 (extract st 1)) (2 ds) (3 (extract st 3)))))
 ;; `ds` without `d`.
 (define k-ids-without (->* (k-ids int) k-ids)
   (lambda (ds d)
@@ -140,7 +140,7 @@
               (cond ((null? sp) "")
                     ((null? split) (k-show-spec (car sp)))
                     (else (let ((s (car sp)))
-                            (k-show-spec (product (1 (extract s 1)) (2 (extract s 2))
+                            (k-show-spec (tup (1 (extract s 1)) (2 (extract s 2))
                                                   (3 (extract s 3))
                                                   (4 (extract (car split) 3))))))))
              (st (k-put (k-cat5 "(subr " (k-conv-prefix cv) (k-show-effect e) " (" "") st))
@@ -188,14 +188,14 @@
                      (if (k-has-id? (extract st 2) d)
                          st
                          (k-shown-depths st (the k-ids (cons d (extract st 2)))))))
-            (let* ((p (product (1 (the k-ids (cons t ids))) (2 (extract path 2))
+            (let* ((p (tup (1 (the k-ids (cons t ids))) (2 (extract path 2))
                                (3 (extract path 3))))
                    (d (k-length (extract p 1)))
                    (out (k-show-node t p st)))
               (if (k-has-id? (extract out 2) d)
                   (let ((mu (k-cat3 "(mu %" (int->string d) " "))
                         (n (- (extract out 3) (extract st 3))))
-                    (product (1 (the k-strings
+                    (tup (1 (the k-strings
                                   (cons ")" (k-pieces-before (extract out 1) n mu))))
                              (2 (k-ids-without (extract out 2) d))
                              (3 (+ (extract out 3) 2))))
@@ -217,8 +217,8 @@
           (let ((binders (k-join (k-show-binders bs) " ")))
             (k-put ")" (k-show-on body p (k-put (k-cat3 "(poly (" binders ") ") st)))))
         (ty-ref (a r) (k-show-in-region "(ref " a r p st))
-        (ty-product (ps) (k-put ")" (k-show-parts ps p (k-put "(productof" st))))
-        (ty-sum (ps) (k-put ")" (k-show-parts ps p (k-put "(sumof" st))))
+        (ty-product (ps) (k-put ")" (k-show-parts ps p (k-put "(tupof" st))))
+        (ty-sum (ps) (k-put ")" (k-show-parts ps p (k-put "(oneof" st))))
         (ty-array (a nz r)
           (tagcase nz
             (sz-finite () (k-show-in-region "(arrayof " a r p st))
@@ -331,7 +331,7 @@
         (let ((ds (get k-dscope)))
           (begin (set k-links-below (get k-ntys))
                  (set k-atree-kept
-                      (list (product (1 ds) (2 (get k-links))
+                      (list (tup (1 ds) (2 (get k-links))
                                      (3 (k-atree-of ds 0 (a-leaf)))))))))))
 ;; The tree of the scope now: the one kept, if it is of it.
 (define k-atree-now (->* () k-atree)
@@ -435,9 +435,9 @@
         (a-spin () (k-sys-sym "spin" a b))
         (a-nondet () (k-sys-sym "nondet" a b))
         (else y (k-fail k-sys-effects ta tb))))))
-(define-type k-sys-texts (listof (productof (1 string) (2 syn)) acyclic))
+(define-type k-sys-texts (listof (tupof (1 string) (2 syn)) acyclic))
 ;; `x` among `xs`, sorted by text, each text once.
-(define k-sys-insert (->* ((productof (1 string) (2 syn)) k-sys-texts) k-sys-texts)
+(define k-sys-insert (->* ((tupof (1 string) (2 syn)) k-sys-texts) k-sys-texts)
   (lambda (x xs)
     (cond ((null? xs) (the k-sys-texts (list x)))
           ((string=? (extract x 1) (extract (car xs) 1)) xs)
@@ -449,7 +449,7 @@
         acc
         (let ((x (k-sys-atom bs (car e) a b ta tb)))
           (k-sys-sorted bs (cdr e) a b ta tb
-                        (k-sys-insert (product (1 (k-syn-text x)) (2 x)) acc))))))
+                        (k-sys-insert (tup (1 (k-syn-text x)) (2 x)) acc))))))
 (define k-sys-syns (->* (k-sys-texts) (listof syn acyclic))
   (lambda (xs) (if (null? xs) nil (cons (extract (car xs) 2) (k-sys-syns (cdr xs))))))
 ;; None `pure`, one alone, else in a `maxeff`.
@@ -688,7 +688,7 @@
 (define k-show-ty (->* (int) string)
   (lambda (t)
     (let* ((trs (the k-atrees (list (k-atree-now))))
-           (p (product (1 (the k-ids nil)) (2 (the k-parts nil)) (3 trs)))
+           (p (tup (1 (the k-ids nil)) (2 (the k-parts nil)) (3 trs)))
            (on (and (not (get k-canon-on)) (not (get k-shallow)) (k-canon-set! t p)))
            (shown (k-pieces-string (extract (k-show-on t p k-shown-none) 1))))
       (begin (if on (set k-canon-on #f) #u) shown)))))))

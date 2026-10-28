@@ -4,7 +4,7 @@
 //!
 //! [`print`](crate::print)'s `write` is for people: it cuts nothing, but it
 //! writes a float in decimal, a symbol bare, and an FX-26 product as
-//! `#<product of 2>`. Here every value is written so that its bits come
+//! `#<tup of 2>`. Here every value is written so that its bits come
 //! back: a float by its bits, a symbol between bars, any bloblet by its
 //! kind, its fields and its suffix's bytes. And an object reached more than
 //! once anywhere in the listing (sharing, or a cycle) is labelled where it

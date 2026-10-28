@@ -38,16 +38,16 @@
 (define-type terms (listof term @heap))
 (define-type ints (listof int @heap))
 (define-type strings (listof string @heap))
-(define-type binding (productof (1 int) (2 term)))
+(define-type binding (tupof (1 int) (2 term)))
 (define-type subst (listof binding @heap))
-(define-type tpair (productof (1 term) (2 term)))
+(define-type tpair (tupof (1 term) (2 term)))
 (define-type tpairs (listof tpair @heap))
-(define-type numbered-pair (productof (1 int) (2 tpair)))
-(define-type rule (productof (1 int) (2 numbered-pair)))
+(define-type numbered-pair (tupof (1 int) (2 tpair)))
+(define-type rule (tupof (1 int) (2 numbered-pair)))
 (define-type rules (listof rule @heap))
-(define-type super-pair (productof (1 ints) (2 subst)))
+(define-type super-pair (tupof (1 ints) (2 subst)))
 (define-type supers (listof super-pair @heap))
-(define-type diff (productof (1 terms) (2 terms)))
+(define-type diff (tupof (1 terms) (2 terms)))
 
 ;; What completion does; Failure aborts to @z.
 (define-effect kb-body (maxeff (read @heap) (alloc @heap) spin (read @globals)))
@@ -56,12 +56,12 @@
 ;; What a `handle` delivers: its body's value, by type, or the message of
 ;; the Failure raised.
 (define-type caught
-  (sumof (failure string) (a-term term) (a-bool bool) (a-terms terms)
+  (oneof (failure string) (a-term term) (a-bool bool) (a-terms terms)
          (a-diff diff) (a-supers supers) (a-rules rules)))
 (define kb-tag (prompt-tag caught string kb-body @z) (make-continuation-prompt-tag))
 (define* failwith (subr (goto @z) (string) void)
   (lambda (s) (abort-current-continuation kb-tag s)))
-(define caught-failure (subr pure (string) caught) (lambda (s) (sum failure s)))
+(define caught-failure (subr pure (string) caught) (lambda (s) (one failure s)))
 
 ;;; ------------------------------------------------------- list procedures
 
@@ -138,22 +138,22 @@
                  (lambda (l)
                    (if (null? l)
                        (failwith "try_find")
-                       (tagcase (prompt kb-tag (sum a-term (f (car l))) caught-failure)
+                       (tagcase (prompt kb-tag (one a-term (f (car l))) caught-failure)
                          (a-term t t)
                          (else o (try-find-rec (cdr l))))))))
         (try-find-rec l)))))
 
-(define partition (poly ((a type)) (subr kb ((subr kb (a) bool) (listof a @heap)) (productof (1 (listof a @heap)) (2 (listof a @heap)))))
+(define partition (poly ((a type)) (subr kb ((subr kb (a) bool) (listof a @heap)) (tupof (1 (listof a @heap)) (2 (listof a @heap)))))
   (plambda ((a type))
     (lambda ((p (subr kb (a) bool)) (l (listof a @heap)))
-      (letrec ((part-rec (subr kb ((listof a @heap)) (productof (1 (listof a @heap)) (2 (listof a @heap))))
+      (letrec ((part-rec (subr kb ((listof a @heap)) (tupof (1 (listof a @heap)) (2 (listof a @heap))))
                  (lambda (l)
                    (if (null? l)
-                       (product (1 (the (listof a @heap) nil)) (2 (the (listof a @heap) nil)))
+                       (tup (1 (the (listof a @heap) nil)) (2 (the (listof a @heap) nil)))
                        (let* ((pn (part-rec (cdr l))) (pos (extract pn 1)) (neg (extract pn 2)))
                          (if (p (car l))
-                             (product (1 (the (listof a @heap) (cons (car l) pos))) (2 neg))
-                             (product (1 pos) (2 (the (listof a @heap) (cons (car l) neg))))))))))
+                             (tup (1 (the (listof a @heap) (cons (car l) pos))) (2 neg))
+                             (tup (1 pos) (2 (the (listof a @heap) (cons (car l) neg))))))))))
         (part-rec l)))))
 
 ;;; 3- Les ensembles et les listes d'association
@@ -170,17 +170,17 @@
                (lambda (l) (if (null? l) #f (or (string=? a (car l)) (mem-rec (cdr l)))))))
       (mem-rec l))))
 
-(define mem-assoc (poly ((b type)) (subr kb (int (listof (productof (1 int) (2 b)) @heap)) bool))
+(define mem-assoc (poly ((b type)) (subr kb (int (listof (tupof (1 int) (2 b)) @heap)) bool))
   (plambda ((b type))
-    (lambda ((a int) (l (listof (productof (1 int) (2 b)) @heap)))
-      (letrec ((mem-rec (subr kb ((listof (productof (1 int) (2 b)) @heap)) bool)
+    (lambda ((a int) (l (listof (tupof (1 int) (2 b)) @heap)))
+      (letrec ((mem-rec (subr kb ((listof (tupof (1 int) (2 b)) @heap)) bool)
                  (lambda (l) (if (null? l) #f (or (= a (extract (car l) 1)) (mem-rec (cdr l)))))))
         (mem-rec l)))))
 
-(define assoc (poly ((b type)) (subr kb (int (listof (productof (1 int) (2 b)) @heap)) b))
+(define assoc (poly ((b type)) (subr kb (int (listof (tupof (1 int) (2 b)) @heap)) b))
   (plambda ((b type))
-    (lambda ((a int) (l (listof (productof (1 int) (2 b)) @heap)))
-      (letrec ((assoc-rec (subr kb ((listof (productof (1 int) (2 b)) @heap)) b)
+    (lambda ((a int) (l (listof (tupof (1 int) (2 b)) @heap)))
+      (letrec ((assoc-rec (subr kb ((listof (tupof (1 int) (2 b)) @heap)) b)
                  (lambda (l)
                    (if (null? l)
                        (failwith "find")
@@ -233,7 +233,7 @@
                  (tagcase t
                    (Term (oper sons) (Term oper (map subst-rec sons)))
                    (Var (n)
-                     (tagcase (prompt kb-tag (sum a-term (assoc n subst)) caught-failure)
+                     (tagcase (prompt kb-tag (one a-term (assoc n subst)) caught-failure)
                        (a-term x x)
                        (else o t)))))))
       (subst-rec t))))
@@ -270,7 +270,7 @@
                    (Var (v)
                      (if (mem-assoc v subst)
                          (if (term=? M (assoc v subst)) subst (failwith "matching"))
-                         (the subst (cons (product (1 v) (2 M)) subst))))
+                         (the subst (cons (tup (1 v) (2 M)) subst))))
                    (Term (op1 sons1)
                      (tagcase M
                        (Term (op2 sons2)
@@ -282,7 +282,7 @@
 
 (define* compsubst (subr kb (subst subst) subst)
   (lambda (subst1 subst2)
-    (append (map (lambda ((b binding)) (product (1 (extract b 1)) (2 (substitute subst1 (extract b 2))))) subst2)
+    (append (map (lambda ((b binding)) (tup (1 (extract b 1)) (2 (substitute subst1 (extract b 2))))) subst2)
             subst1)))
 
 (define* occurs (subr kb (int term) bool)
@@ -297,10 +297,10 @@
       (Var (n1)
         (if (term=? term1 term2)
             nil
-            (if (occurs n1 term2) (failwith "unify") (cons (product (1 n1) (2 term2)) nil))))
+            (if (occurs n1 term2) (failwith "unify") (cons (tup (1 n1) (2 term2)) nil))))
       (Term (op1 sons1)
         (tagcase term2
-          (Var (n2) (if (occurs n2 term1) (failwith "unify") (cons (product (1 n2) (2 term1)) nil)))
+          (Var (n2) (if (occurs n2 term1) (failwith "unify") (cons (tup (1 n2) (2 term1)) nil)))
           (Term (op2 sons2)
             (if (string=? op1 op2)
                 (it-list2 (lambda ((s subst) (t1 term) (t2 term))
@@ -347,14 +347,14 @@
 (define* mk-rule (subr kb (term term) numbered-pair)
   (lambda (M N)
     (let* ((all-vars (union (vars M) (vars N)))
-           (ks (it-list (lambda ((acc (productof (1 int) (2 subst))) (v int))
+           (ks (it-list (lambda ((acc (tupof (1 int) (2 subst))) (v int))
                           (let ((i (extract acc 1)))
-                            (product (1 (+ i 1)) (2 (the subst (cons (product (1 v) (2 (Var i))) (extract acc 2)))))))
-                        (product (1 1) (2 (the subst nil)))
+                            (tup (1 (+ i 1)) (2 (the subst (cons (tup (1 v) (2 (Var i))) (extract acc 2)))))))
+                        (tup (1 1) (2 (the subst nil)))
                         all-vars))
            (k (extract ks 1))
            (subst (extract ks 2)))
-      (product (1 (- k 1)) (2 (product (1 (substitute subst M)) (2 (substitute subst N))))))))
+      (tup (1 (- k 1)) (2 (tup (1 (substitute subst M)) (2 (substitute subst N))))))))
 
 ;; checks that rules are numbered in sequence and returns their number
 (define* check-rules (subr kb (rules) int)
@@ -385,7 +385,7 @@
   (lambda (L M)
     (letrec ((redrec (subr kb (term) bool)
                (lambda (M)
-                 (tagcase (prompt kb-tag (begin (matching L M) (sum a-bool #t)) caught-failure)
+                 (tagcase (prompt kb-tag (begin (matching L M) (one a-bool #t)) caught-failure)
                    (a-bool b b)
                    (else o (tagcase M (Term (f sons) (exists redrec sons)) (else o #f)))))))
       (redrec M))))
@@ -403,14 +403,14 @@
   (lambda (rules M)
     (letrec ((rewrec (subr kb (term) term)
                (lambda (M)
-                 (tagcase (prompt kb-tag (sum a-term (mreduce rules M)) caught-failure)
+                 (tagcase (prompt kb-tag (one a-term (mreduce rules M)) caught-failure)
                    (a-term t t)
                    (else o
                      (letrec ((tryrec (subr kb (terms) terms)
                                 (lambda (l)
                                   (if (null? l)
                                       (failwith "mrewrite1")
-                                      (tagcase (prompt kb-tag (sum a-terms (the terms (cons (rewrec (car l)) (cdr l)))) caught-failure)
+                                      (tagcase (prompt kb-tag (one a-terms (the terms (cons (rewrec (car l)) (cdr l)))) caught-failure)
                                         (a-terms ts ts)
                                         (else o (cons (car l) (tryrec (cdr l)))))))))
                        (tagcase M
@@ -423,7 +423,7 @@
   (lambda (rules M)
     (letrec ((rew-loop (subr kb (term) term)
                (lambda (M)
-                 (tagcase (prompt kb-tag (sum a-term (rew-loop (mrewrite1 rules M))) caught-failure)
+                 (tagcase (prompt kb-tag (one a-term (rew-loop (mrewrite1 rules M))) caught-failure)
                    (a-term t t)
                    (else o M)))))
       (rew-loop M))))
@@ -453,12 +453,12 @@
     (letrec ((diffrec (subr kb (terms terms) diff)
                (lambda (a b)
                  (if (null? a)
-                     (product (1 a) (2 b))
-                     (tagcase (prompt kb-tag (sum a-diff (diffrec (cdr a) (rem-eq equiv (car a) b))) caught-failure)
+                     (tup (1 a) (2 b))
+                     (tagcase (prompt kb-tag (one a-diff (diffrec (cdr a) (rem-eq equiv (car a) b))) caught-failure)
                        (a-diff d d)
                        (else o
                          (let ((d (diffrec (cdr a) b)))
-                           (product (1 (the terms (cons (car a) (extract d 1)))) (2 (extract d 2))))))))))
+                           (tup (1 (the terms (cons (car a) (extract d 1)))) (2 (extract d 2))))))))))
       (if (> (len x) (len y)) (diffrec y x) (diffrec x y)))))
 
 ;; multiset extension of order
@@ -531,14 +531,14 @@
                (lambda (N)
                  (tagcase N
                    (Term (f sons)
-                     (let* ((collate (lambda ((acc (productof (1 supers) (2 int))) (son term))
+                     (let* ((collate (lambda ((acc (tupof (1 supers) (2 int))) (son term))
                                        (let ((n (extract acc 2)))
-                                         (product (1 (append (extract acc 1)
-                                                             (map (lambda ((us super-pair)) (product (1 (the ints (cons n (extract us 1)))) (2 (extract us 2))))
+                                         (tup (1 (append (extract acc 1)
+                                                             (map (lambda ((us super-pair)) (tup (1 (the ints (cons n (extract us 1)))) (2 (extract us 2))))
                                                                   (suprec son))))
                                                   (2 (+ n 1))))))
-                            (insides (extract (it-list collate (product (1 (the supers nil)) (2 1)) sons) 1)))
-                       (tagcase (prompt kb-tag (sum a-supers (the supers (cons (product (1 (the ints nil)) (2 (unify M N))) insides))) caught-failure)
+                            (insides (extract (it-list collate (tup (1 (the supers nil)) (2 1)) sons) 1)))
+                       (tagcase (prompt kb-tag (one a-supers (the supers (cons (tup (1 (the ints nil)) (2 (unify M N))) insides))) caught-failure)
                          (a-supers l l)
                          (else o insides))))
                    (else o (the supers nil))))))
@@ -549,13 +549,13 @@
   (lambda (M N)
     (tagcase N
       (Term (f sons)
-        (let ((collate (lambda ((acc (productof (1 supers) (2 int))) (son term))
+        (let ((collate (lambda ((acc (tupof (1 supers) (2 int))) (son term))
                          (let ((n (extract acc 2)))
-                           (product (1 (append (extract acc 1)
-                                               (map (lambda ((us super-pair)) (product (1 (the ints (cons n (extract us 1)))) (2 (extract us 2))))
+                           (tup (1 (append (extract acc 1)
+                                               (map (lambda ((us super-pair)) (tup (1 (the ints (cons n (extract us 1)))) (2 (extract us 2))))
                                                     (super M son))))
                                     (2 (+ n 1)))))))
-          (extract (it-list collate (product (1 (the supers nil)) (2 1)) sons) 1)))
+          (extract (it-list collate (tup (1 (the supers nil)) (2 1)) sons) 1)))
       (else o (the supers nil)))))
 
 ;; Critical pairs of L1=R1 with L2=R2
@@ -563,7 +563,7 @@
   (lambda (e1 e2)
     (let ((L1 (extract e1 1)) (R1 (extract e1 2)) (L2 (extract e2 1)) (R2 (extract e2 2)))
       (map (lambda ((us super-pair))
-             (product (1 (substitute (extract us 2) (replace L2 (extract us 1) R1)))
+             (tup (1 (substitute (extract us 2) (replace L2 (extract us 1) R1)))
                       (2 (substitute (extract us 2) R2))))
            (super L1 L2)))))
 
@@ -572,7 +572,7 @@
   (lambda (e1 e2)
     (let ((L1 (extract e1 1)) (R1 (extract e1 2)) (L2 (extract e2 1)) (R2 (extract e2 2)))
       (map (lambda ((us super-pair))
-             (product (1 (substitute (extract us 2) (replace L2 (extract us 1) R1)))
+             (tup (1 (substitute (extract us 2) (replace L2 (extract us 1) R1)))
                       (2 (substitute (extract us 2) R2))))
            (super-strict L1 L2)))))
 
@@ -585,7 +585,7 @@
   (lambda (n p)
     (letrec ((ren-rec (subr kb (term) term)
                (lambda (t) (tagcase t (Var (k) (Var (+ k n))) (Term (oper sons) (Term oper (map ren-rec sons)))))))
-      (product (1 (ren-rec (extract p 1))) (2 (ren-rec (extract p 2)))))))
+      (tup (1 (ren-rec (extract p 1))) (2 (ren-rec (extract p 2)))))))
 
 ;;; -------------------------------------------------------- Completion
 
@@ -619,7 +619,7 @@
                             (eqs (cdr eqs))
                             (enter-rule
                               (lambda ((left term) (right term))
-                                (let ((new-rule (product (1 (+ n 1)) (2 (mk-rule left right)))))
+                                (let ((new-rule (tup (1 (+ n 1)) (2 (mk-rule left right)))))
                                   (begin
                                     (pretty-rule new-rule)
                                     (let* ((left-reducible (lambda ((r rule)) (reducible left (extract (extract (extract r 2) 2) 1))))
@@ -631,7 +631,7 @@
                                         (let* ((right-reduce
                                                  (lambda ((r rule))
                                                    (let ((p (extract (extract r 2) 2)))
-                                                     (product (1 (extract r 1))
+                                                     (tup (1 (extract r 1))
                                                               (2 (mk-rule (extract p 1) (mrewrite-all (the rules (cons new-rule rules)) (extract p 2))))))))
                                                (irreds (map right-reduce irredl))
                                                (eqs2 (map (lambda ((r rule)) (extract (extract r 2) 2)) redl)))
@@ -643,18 +643,18 @@
                                (enter-rule M2 N2)
                                (if (greater N2 M2)
                                    (enter-rule N2 M2)
-                                   (processkl (the tpairs (cons (product (1 M2) (2 N2)) failures)) k l eqs))))))))
+                                   (processkl (the tpairs (cons (tup (1 M2) (2 N2)) failures)) k l eqs))))))))
              (next-criticals (subr kb (tpairs int int) rules)
                (lambda (failures k l)
                  (tagcase
                    (prompt kb-tag
-                     (sum a-rules
+                     (one a-rules
                        (let* ((vel (get-rule l)) (v (extract vel 1)) (el (extract vel 2)))
                          (if (= k l)
                              (processkl failures k l (strict-critical-pairs el (rename v el)))
                              (tagcase
                                (prompt kb-tag
-                                 (sum a-rules
+                                 (one a-rules
                                    (let ((ek (extract (get-rule k) 2)))
                                      (processkl failures k l (mutual-critical-pairs el (rename v ek)))))
                                  caught-failure)
@@ -680,7 +680,7 @@
         completed-rules))))
 
 (define* r (subr (alloc @heap) (int int term term) rule)
-  (lambda (k v M N) (product (1 k) (2 (product (1 v) (2 (product (1 M) (2 N))))))))
+  (lambda (k v M N) (tup (1 k) (2 (tup (1 v) (2 (tup (1 M) (2 N))))))))
 (define* t0 (subr (alloc @heap) (string) term) (lambda (f) (Term f nil)))
 (define* t1 (subr (alloc @heap) (string term) term) (lambda (f a) (Term f (cons a nil))))
 (define* t2 (subr (alloc @heap) (string term term) term) (lambda (f a b) (Term f (list a b))))

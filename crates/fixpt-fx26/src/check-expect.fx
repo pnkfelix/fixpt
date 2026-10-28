@@ -96,7 +96,7 @@
 ;; Conversion `code` at `x`, among the facts `checked-extracts` gives.
 (define k-note-conversion (->* (kx int) unit)
   (lambda (x code)
-    (let ((fact (product (1 (k-at-of x)) (2 (n-conversion code)))))
+    (let ((fact (tup (1 (k-at-of x)) (2 (n-conversion code)))))
       (set k-extracts (cons fact (get k-extracts))))))
 ;; A conversion of `x`'s procedure, of type `t`, to `to`. To `fx` or to a
 ;; convention binder it does nothing at run time; to `cellular` or `native`

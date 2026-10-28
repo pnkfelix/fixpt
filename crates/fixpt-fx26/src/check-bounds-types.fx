@@ -6,7 +6,7 @@
 (hide (define check-types-types (load-module "fx26:check-types-types.fx")))
 (import check-types-types (type k-map) (effect kstate))
 ;; At least `1`, at most `2`, exactly `3`: types, -1 where nothing has said.
-(define-type k-bound (productof (1 int) (2 int) (3 int)))
+(define-type k-bound (tupof (1 int) (2 int) (3 int)))
 (define-type k-bound-map (ref (listof (pairof int k-bound @t) @t) @t))
 ;; Each instantiation's solution so far, and its binders' bounds, innermost
 ;; first. An instantiation that fails leaves its entry, found by no one.

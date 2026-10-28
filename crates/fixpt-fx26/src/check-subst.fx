@@ -170,7 +170,7 @@
         (and (k-closed-in? (extract (car ps) 2) seen) (k-parts-closed? (cdr ps) seen)))))
 ;; Each slot of `fs`, declared ahead and filled, noted if it is closed.
 (define k-note-closed-filled
-  (->* ((listof (productof (1 int) (2 int) (3 int)) acyclic)) unit)
+  (->* ((listof (tupof (1 int) (2 int) (3 int)) acyclic)) unit)
   (lambda (fs)
     (if (null? fs)
         #u
@@ -275,7 +275,7 @@
         nil
         (let* ((x (k-subst-memo (extract (car ps) 2) m memo))
                (rest (k-subst-parts (cdr ps) m memo)))
-          (cons (product (1 (extract (car ps) 1)) (2 x)) rest)))))
+          (cons (tup (1 (extract (car ps) 1)) (2 x)) rest)))))
 ;; `t` with each binder in `m` replaced. Recursive types are copied as
 ;; cycles: each node gets its slot before its children are built.
 ;; A substitution of its own (a `dlambda` reduced inside another) keeps
@@ -304,7 +304,7 @@
   (lambda (ps)
     (if (null? ps)
         nil
-        (cons (product (1 (extract (car ps) 1)) (2 (k-resolve (extract (car ps) 2))))
+        (cons (tup (1 (extract (car ps) 1)) (2 (k-resolve (extract (car ps) 2))))
               (k-resolve-each (cdr ps))))))
 ;; Descriptions `ds`, each type or function as it resolves: for a key.
 (define k-descs-resolved (->* (k-descs) k-descs)

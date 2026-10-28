@@ -24,10 +24,10 @@ fn small_programs() {
     assert_eq!(both("(define* f (subr spin (int) int) (lambda (n) (if (= n 0) 1 (* n (f (- n 1)))))) (f 10)"), "3628800");
     assert_eq!(both("(the (listof int @l) (cons 1 (cons 2 nil)))"), "(1 2)");
     assert_eq!(both("(let ((r (the (ref int @r) (new 1)))) (begin (set r (+ (get r) 41)) (get r)))"), "42");
-    assert_eq!(both("(extract (product (a 1) (b \"two\")) b)"), "\"two\"");
+    assert_eq!(both("(extract (tup (a 1) (b \"two\")) b)"), "\"two\"");
     assert_eq!(both("(letrec ((even (subr spin (int) bool) (lambda (n) (if (= n 0) #t (odd (- n 1))))) (odd (subr spin (int) bool) (lambda (n) (if (= n 0) #f (even (- n 1)))))) (even 10))"), "#t");
     assert_eq!(both("(string-append \"ab\" (symbol->string 'cd))"), "\"abcd\"");
-    assert_eq!(both("(sum a 1)"), "#<sum a>");
+    assert_eq!(both("(one a 1)"), "#<one a>");
     // What the ports wrote themselves (PLAN.md Q11).
     assert_eq!(both("(list (remainder -7 2) (max 3 (min 9 4)) (if (zero? 0) 1 0))"), "(-1 4 1)");
     assert_eq!(both("(if (and (bool=? #t #t) (char<? #\\a #\\b) (string>=? \"b\" \"a\")) 1 0)"), "1");

@@ -12,7 +12,7 @@
 ;; Pairs of integers.
 (define-type k-pairs (listof (pairof int int @t) acyclic))
 ;; The same, of the parser's trees.
-(define-type exp-params (listof (productof (1 symbol) (2 syns-a)) acyclic))
+(define-type exp-params (listof (tupof (1 symbol) (2 syns-a)) acyclic))
 ;; Looking at the checker's tables (`kreads`), and building more in their
 ;; region.
 (define-effect kmakes (maxeff kreads (alloc @t)))
@@ -32,7 +32,7 @@
 (define-type check-subst-sig
   (moduleof (val k-note-closed-filled
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
-                       ((listof (productof (1 int) (2 int) (3 int)) acyclic))
+                       ((listof (tupof (1 int) (2 int) (3 int)) acyclic))
                        unit))
             (val k-subst
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)

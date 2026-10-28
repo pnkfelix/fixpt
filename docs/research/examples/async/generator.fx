@@ -3,13 +3,13 @@
 ;;; aborts to the handler with the value and that continuation; the handler
 ;;; (`sum-all`) adds the value and resumes the producer under a new prompt.
 (define-effect D (maxeff spin (read (globals g yield-int count-up))))
-(define-type step (productof (v int) (k (composable unit int D @p))))
+(define-type step (tupof (v int) (k (composable unit int D @p))))
 (define g (prompt-tag int step D @p) (make-continuation-prompt-tag))
 
 (define* yield-int (subr (maxeff (goto @p) (comefrom @p)) (int) unit)
   (lambda (x)
     (call-with-composable-continuation
-      (lambda (k) (abort-current-continuation g (product (v x) (k k))))
+      (lambda (k) (abort-current-continuation g (tup (v x) (k k))))
       g)))
 
 (define* count-up (subr (maxeff (goto @p) (comefrom @p) spin) (int int) unit)

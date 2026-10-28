@@ -457,7 +457,7 @@ Until then, selective receive is a library with a documented O(n) cost.
   (fuel, memory, a second `icell-put!`), so the atom would be everywhere
   and say nothing: Erlang's premise.
 - Failure *is* visible where it can be acted on:
-  - a `call` returns `(sumof (ok T) (down reason) (timeout))`;
+  - a `call` returns `(oneof (ok T) (down reason) (timeout))`;
   - a broken I-cell aborts on `await` to a tag whose region is in the
     type.
 - Links, monitors and supervisors are a library over those primitives,

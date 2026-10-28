@@ -93,7 +93,7 @@
 
 ;; Those of the `with` from `a` to `b`, in a list of one; none if the checker
 ;; did not see it (a program run unchecked, `run-program`).
-(define-type ev-with-at (listof (productof (1 k-names) (2 k-ids)) @v))
+(define-type ev-with-at (listof (tupof (1 k-names) (2 k-ids)) @v))
 
 ;; The cells of a `define-rec`'s names, and its values put in them.
 (define-type vcells (listof vcell @v))

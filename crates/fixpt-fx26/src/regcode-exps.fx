@@ -112,7 +112,7 @@
       (tagcase lam
         (e-lambda (ps body la lb lalbk)
           (if (and (= (c-count-params ps) (extract sp 7)) (r-inlinable? body))
-              (the (listof rspecial @k) (cons (product (1 sp) (2 cell) (3 lam)) nil))
+              (the (listof rspecial @k) (cons (tup (1 sp) (2 cell) (3 lam)) nil))
               nil))
         (else y nil)))))
 ;; Which of `c-specials`, its global, and the lambda argument, when `f`
@@ -227,7 +227,7 @@
 ;; `flags` remembered for the `letrec` of `names` whose body is `body`.
 (define r-join-remember (->* (exp syms bools) unit)
   (lambda (body names flags)
-    (table-set! (get c-join-memo) (exp-at body) (the c-join-answer (product (1 names) (2 flags))))))
+    (table-set! (get c-join-memo) (exp-at body) (the c-join-answer (tup (1 names) (2 flags))))))
 ;; Each binding of `bs`: whether it is a join point (in tail position).
 ;; Remembered per `letrec` (`c-join-memo`), where it is in tail position.
 (define r-join-flags (->* (exp-letrec-bs exp bool) bools)
@@ -238,7 +238,7 @@
                (at (exp-at body))
                (known (table-ref (get c-join-memo) at
                                  (the c-join-answer
-                                   (product (1 (the syms nil)) (2 (the bools nil)))))))
+                                   (tup (1 (the syms nil)) (2 (the bools nil)))))))
           (if (and (table-has? (get c-join-memo) at) (r-same-syms? (extract known 1) names))
               (extract known 2)
               (let ((flags (r-join-flags-from bs bs body tail 0)))
@@ -514,7 +514,7 @@
             (if (or (null? s) (null? g))
                 nil
                 (the (listof rspecial @k)
-                     (cons (product (1 (extract (car s) 1)) (2 (car g)) (3 (extract (car s) 2)))
+                     (cons (tup (1 (extract (car s) 1)) (2 (car g)) (3 (extract (car s) 2)))
                            nil))))))))
 ;; Whether `f`, applied to `args`, is the procedure itself: its own name, or
 ;; a loop's.

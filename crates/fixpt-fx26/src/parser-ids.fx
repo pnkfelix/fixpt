@@ -19,7 +19,7 @@
         (type exp top exp-list let-list letrec-list arm-list mod-items top-list))
 
 ;; For each end, how many expressions from one start were walked.
-(define-type seen-ends (listof (productof (1 int) (2 int)) acyclic))
+(define-type seen-ends (listof (tupof (1 int) (2 int)) acyclic))
 ;; By where they start.
 (define-type seen (table int seen-ends rs))
 (define-effect counts (maxeff (read @globals) (read rs) (write rs) (alloc rs)))
@@ -40,7 +40,7 @@
 (define next-kth (->* (seen int int) int)
   (lambda (t a b)
     (let* ((es (table-ref t a nil)) (n (seen-count es b)))
-      (begin (table-set! t a (the seen-ends (cons (product (1 b) (2 (+ n 1))) (seen-without es b))))
+      (begin (table-set! t a (the seen-ends (cons (tup (1 b) (2 (+ n 1))) (seen-without es b))))
              n))))
 
 ;; Each `number-` gives what it was given, not a copy, where nothing in it
@@ -139,7 +139,7 @@
           (let* ((x (number-exp t (extract (car bs) 2))) (rest (number-lets t (cdr bs))))
             (if (and (eq? x (extract (car bs) 2)) (eq? rest (cdr bs)))
                 bs
-                (cons (product (1 (extract (car bs) 1)) (2 x)) rest))))))
+                (cons (tup (1 (extract (car bs) 1)) (2 x)) rest))))))
   (number-recs (->* (seen letrec-list) letrec-list)
     (lambda (t bs)
       (if (null? bs)
@@ -147,7 +147,7 @@
           (let* ((x (number-exp t (extract (car bs) 3))) (rest (number-recs t (cdr bs))))
             (if (and (eq? x (extract (car bs) 3)) (eq? rest (cdr bs)))
                 bs
-                (cons (product (1 (extract (car bs) 1)) (2 (extract (car bs) 2)) (3 x)) rest))))))
+                (cons (tup (1 (extract (car bs) 1)) (2 (extract (car bs) 2)) (3 x)) rest))))))
   (number-arms (->* (seen arm-list) arm-list)
     (lambda (t arms)
       (if (null? arms)
@@ -156,7 +156,7 @@
                  (rest (number-arms t (cdr arms))))
             (if (and (eq? x (extract arm 4)) (eq? rest (cdr arms)))
                 arms
-                (cons (product (1 (extract arm 1)) (2 (extract arm 2)) (3 (extract arm 3)) (4 x))
+                (cons (tup (1 (extract arm 1)) (2 (extract arm 2)) (3 (extract arm 3)) (4 x))
                       rest))))))
   (number-items (->* (seen mod-items) mod-items)
     (lambda (t items)
@@ -166,7 +166,7 @@
                  (rest (number-items t (cdr items))))
             (if (and (eq? xs (extract it 4)) (eq? rest (cdr items)))
                 items
-                (cons (product (1 (extract it 1)) (2 (extract it 2)) (3 (extract it 3)) (4 xs))
+                (cons (tup (1 (extract it 1)) (2 (extract it 2)) (3 (extract it 3)) (4 xs))
                       rest)))))))
 
 ;; Form `x`, its expressions numbered.

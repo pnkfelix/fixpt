@@ -53,7 +53,7 @@
 ;; What it uses of the modules it is given.
 (import tables make-table symbol-hash table-ref table-set! table-has? table-count)
 
-(define k-te (subr pure (int k-eff) k-te) (lambda (t e) (product (1 t) (2 e))))
+(define k-te (subr pure (int k-eff) k-te) (lambda (t e) (tup (1 t) (2 e))))
 
 (define k-tag (prompt-tag k-result k-result (maxeff spin (read @s) kstate) @z)
   (make-continuation-prompt-tag))
@@ -416,7 +416,7 @@
                (lambda (ps)
                  (if (null? ps)
                      nil
-                     (cons (product (1 (extract (car ps) 1)) (2 (k-resolve (extract (car ps) 2))))
+                     (cons (tup (1 (extract (car ps) 1)) (2 (k-resolve (extract (car ps) 2))))
                            (parts (cdr ps)))))))
       (tagcase n
         (ty-subr (e ps r cv spc) (ty-subr e (ids ps) (k-resolve r) cv spc))
@@ -512,7 +512,7 @@
                (lambda (ps)
                  (if (null? ps)
                      nil
-                     (cons (product (1 (extract (car ps) 1)) (2 (f (extract (car ps) 2))))
+                     (cons (tup (1 (extract (car ps) 1)) (2 (f (extract (car ps) 2))))
                            (parts (cdr ps))))))
              (descs (->* (k-descs) k-descs)
                (lambda (ds)
@@ -966,7 +966,7 @@
 (define k-gen-region? (subr kreads (k-region) bool)
   (lambda (r) (let ((v (k-region-var r))) (and (>= v 0) (k-gen-param? v)))))
 ;; Why each member of a recursive group that may not end may not.
-(define k-spin-why (ref (listof (productof (1 symbol) (2 int) (3 string)) acyclic) @t) (new nil))
+(define k-spin-why (ref (listof (tupof (1 symbol) (2 int) (3 string)) acyclic) @t) (new nil))
 (define k-named-has? (subr kreads (k-named symbol int) bool)
   (lambda (ns n t)
     (and (not (null? ns))

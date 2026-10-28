@@ -34,7 +34,7 @@
 ;;; - `(map rlist->list (rlist->list …))`: the two fused, one pass.
 
 (define-type (tree (t type))
-  (sumof (leaf t) (node (productof (val t) (left (tree t)) (right (tree t))))))
+  (oneof (leaf t) (node (tupof (val t) (left (tree t)) (right (tree t))))))
 (define-type (kons (t type)) (pairof int (tree t) acyclic))
 (define-type (rl (t type)) (listof (kons t) acyclic))
 (define-type (car+cdr (t type)) (pairof t (rl t) acyclic))
@@ -53,8 +53,8 @@
       (tagcase t
         (node (v l r)
           (let* ((v2 (f v)) (l2 (tree-map f l)) (r2 (tree-map f r)))
-            (sum node (product (val v2) (left l2) (right r2)))))
-        (leaf x (sum leaf (f x)))))))
+            (one node (tup (val v2) (left l2) (right r2)))))
+        (leaf x (one leaf (f x)))))))
 
 (define* tree-for-each
   (poly ((a type) (e effect)) (subr (maxeff e spin) ((subr e (a) unit) (tree a)) unit))
@@ -95,12 +95,12 @@
             (if (and (not (null? (cdr ls)))
                      (= (car (car (cdr ls))) s))
                 (cons (cons (+ 1 (+ s s))
-                               (sum node (product (val x)
+                               (one node (tup (val x)
                                                         (left (cdr (car ls)))
                                                         (right (cdr (car (cdr ls)))))))
                       (cdr (cdr ls)))
-                (cons (cons 1 (sum leaf x)) ls)))
-          (cons (cons 1 (sum leaf x)) ls)))))
+                (cons (cons 1 (one leaf x)) ls)))
+          (cons (cons 1 (one leaf x)) ls)))))
 
 (define* ra:car+cdr
   (poly ((t type)) (subr pure ((rl t)) (car+cdr t)))

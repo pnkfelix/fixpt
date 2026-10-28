@@ -87,7 +87,7 @@
 (define r-spec-free (->* (rgen rloc syms int renv cenv bools) rscope)
   (lambda (g at fv j env te flags)
     (if (null? fv)
-        (product (1 env) (2 te))
+        (tup (1 env) (2 te))
         (begin
           (tagcase at
             (rl-reg (k) (r-opn g rop-reg k))
@@ -117,7 +117,7 @@
   (->* (exp-letrec-bs (listof int @k) int int exp int renv cenv) rscope)
   (lambda (bs at i k lbody n env te)
     (if (null? bs)
-        (product (1 env) (2 te))
+        (tup (1 env) (2 te))
         (let* ((sib (extract (car bs) 1))
                (loops (and (= k i) (c-loops-only lbody sib n #t)))
                (s (r-nth-int at k)))
@@ -130,13 +130,13 @@
 
 ;; `rest`, operand `x` first.
 (define r-arg-onto (->* (rarg rarg-patches) rarg-patches)
-  (lambda (x rest) (product (1 (the rargs (cons x (extract rest 1)))) (2 (extract rest 2)))))
+  (lambda (x rest) (tup (1 (the rargs (cons x (extract rest 1)))) (2 (extract rest 2)))))
 
 ;; The same, as a call-out's operands.
 (define r-free-args (->* (syms renv int) rarg-patches)
   (lambda (fv env j)
     (if (null? fv)
-        (product (1 (the rargs nil)) (2 (the patches nil)))
+        (tup (1 (the rargs nil)) (2 (the patches nil)))
         (let* ((rest (r-free-args (cdr fv) env (+ j 1))) (l (r-where env (car fv))))
           (if (null? l)
               (begin (r-decline) rest)
@@ -144,7 +144,7 @@
                 (rl-slot (s) (r-arg-onto (a-slot s) rest))
                 (rl-free (i) (r-arg-onto (a-lexical i) rest))
                 (rl-pending (s)
-                  (product (1 (cons (a-v (wcell-bool #f)) (extract rest 1)))
+                  (tup (1 (cons (a-v (wcell-bool #f)) (extract rest 1)))
                            (2 (cons (cons j s) (extract rest 2)))))
                 (rl-const (c) (r-arg-onto (a-v (r-const-cell c)) rest))
                 ;; A parameter in a register: kept before the others are made.

@@ -41,16 +41,16 @@
 
 (define-datatype term
   (var int)
-  (prop (productof (name string)
-                   (props (ref (listof (productof (lhs term) (rhs term)) @heap) @heap)))
+  (prop (tupof (name string)
+                   (props (ref (listof (tupof (lhs term) (rhs term)) @heap) @heap)))
         (listof term @heap)))
 (define-type terms (listof term @heap))
-(define-type lemma (productof (lhs term) (rhs term)))
-(define-type head (productof (name string) (props (ref (listof lemma @heap) @heap))))
-(define-type binding (productof (v int) (t term)))
+(define-type lemma (tupof (lhs term) (rhs term)))
+(define-type head (tupof (name string) (props (ref (listof lemma @heap) @heap))))
+(define-type binding (tupof (v int) (t term)))
 (define-type subst (listof binding @heap))
 
-(define-datatype outcome (ok-term term) (ok-subst (listof (productof (v int) (t term)) @heap)) (failed))
+(define-datatype outcome (ok-term term) (ok-subst (listof (tupof (v int) (t term)) @heap)) (failed))
 
 ;; exception Failure, and exception Unify
 (define failure (prompt-tag outcome unit bo-body @x) (make-continuation-prompt-tag))
@@ -91,7 +91,7 @@
     (letrec ((get-rec (subr bo ((listof head @heap)) head)
                (lambda (l)
                  (if (null? l)
-                     (let ((entry (the head (product (name name) (props (new nil))))))
+                     (let ((entry (the head (tup (name name) (props (new nil))))))
                        (begin (set lemmas (cons entry (get lemmas))) entry))
                      (let ((hd1 (car l)))
                        (if (string=? (extract hd1 name) name) hd1 (get-rec (cdr l))))))))
@@ -106,7 +106,7 @@
               (tagcase left
                 (prop (headl a)
                   (set (extract headl props)
-                       (cons (product (lhs left) (rhs right)) (get (extract headl props)))))
+                       (cons (tup (lhs left) (rhs right)) (get (extract headl props)))))
                 (else x (failwith "assert false"))))
             (failwith "assert false")))
       (else x (failwith "assert false")))))
@@ -147,7 +147,7 @@
                                    (abort-current-continuation unify-exn #u)))
                      (lambda (u) (failed)))
             (ok-subst (s) s)
-            (else x (cons (product (v v) (t term1)) unify-subst))))
+            (else x (cons (tup (v v) (t term1)) unify-subst))))
         (prop (head2 argl2)
           (tagcase term1
             (var (v) (abort-current-continuation unify-exn #u))
@@ -360,15 +360,15 @@
 
 (define* the-subst (subr bo () subst)
   (lambda ()
-    (let* ((b23 (product (v 23) (t (cterm-to-term
+    (let* ((b23 (tup (v 23) (t (cterm-to-term
                                     (c1 "f" (c2 "plus" (c2 "plus" (cv 0) (cv 1)) (c2 "plus" (cv 2) (c0 "zero"))))))))
-           (b24 (product (v 24) (t (cterm-to-term
+           (b24 (tup (v 24) (t (cterm-to-term
                                     (c1 "f" (c2 "times" (c2 "times" (cv 0) (cv 1)) (c2 "plus" (cv 2) (cv 3))))))))
-           (b25 (product (v 25) (t (cterm-to-term
+           (b25 (tup (v 25) (t (cterm-to-term
                                     (c1 "f" (c1 "reverse" (c2 "append" (c2 "append" (cv 0) (cv 1)) (c0 "nil"))))))))
-           (b20 (product (v 20) (t (cterm-to-term
+           (b20 (tup (v 20) (t (cterm-to-term
                                     (c2 "equal" (c2 "plus" (cv 0) (cv 1)) (c2 "difference" (cv 23) (cv 24)))))))
-           (b22 (product (v 22) (t (cterm-to-term
+           (b22 (tup (v 22) (t (cterm-to-term
                                     (c2 "lt" (c2 "remainder" (cv 0) (cv 1))
                                         (c2 "member" (cv 0) (c1 "length" (cv 1)))))))))
       (list b23 b24 b25 b20 b22))))

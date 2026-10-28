@@ -58,8 +58,8 @@
 ;; parameter's name.
 (define k-type-forms k-names
   (list 'arrayof 'narrayof 'bloblet 'composable 'dletrec 'icell 'listof 'mark-key 'moduleof 'mu
-        'nat 'nlist 'oneshot 'pairof 'place 'poly 'productof 'prompt-tag 'proves 'ref 'select 'subr
-        'sumof 'bool 'union '-> '->* 'restrict))
+        'nat 'nlist 'oneshot 'pairof 'place 'poly 'tupof 'prompt-tag 'proves 'ref 'select 'subr
+        'oneof 'bool 'union '-> '->* 'restrict))
 ;; Whether `hd` heads a type form: not a name a `with` shadows.
 (define k-type-form? (->* (symbol) bool)
   (lambda (hd) (k-has-name? k-type-forms hd)))
@@ -69,8 +69,8 @@
         'alloc 'goto 'comefrom 'region 'effect 'type 'prompt 'prompt-tag 'composable 'mark-key
         'oneshot '->*
         'listof 'cond 'else 'and 'or 'let* 'define-effect 'module-parameters 'the 'bloblet 'fields
-        'frozen 'arrayof 'icell 'await 'define-rec 'letrena 'letreap 'rlambda 'quote 'productof
-        'sumof 'product 'extract 'sum 'tagcase 'module 'moduleof 'with 'select 'load-module
+        'frozen 'arrayof 'icell 'await 'define-rec 'letrena 'letreap 'rlambda 'quote 'tupof
+        'oneof 'tup 'extract 'one 'tagcase 'module 'moduleof 'with 'select 'load-module
         'define-datatype 'make-bloblet 'bloblet-ref 'bloblet-set! 'bloblet-freeze 'bloblet-byte
         'bloblet-set-byte! 'bloblet-bytes 'rmake-bloblet 'dlambda '=> 'case
         'define-convention 'define-syscall 'define-optional-syscall 'syscall-available?))
@@ -135,7 +135,7 @@
     (if (null? ns)
         nil
         (let* ((v (k-new-dvar-of (car ns) (car ks))) (rest (k-fresh-named (cdr ns) (cdr ks))))
-          (the k-binders (cons (product (1 v) (2 (car ks))) rest))))))
+          (the k-binders (cons (tup (1 v) (2 (car ks))) rest))))))
 ;; Each binder, as a type family's parameter is bound to what it is given.
 (define k-binders-as-scope (->* (k-binders) k-scope)
   (lambda (bs)
@@ -175,7 +175,7 @@
       (and (not (null? d))
            (tagcase (car d) (ds-var (v k) (k-arrow-kind? k)) (ds-fun (f) #t) (else y #f))))))
 ;; Binder `b`'s name.
-(define k-binder-name (->* ((productof (1 int) (2 int))) symbol)
+(define k-binder-name (->* ((tupof (1 int) (2 int))) symbol)
   (lambda (b) (k-dvar-name (extract b 1))))
 (define k-binder-names (->* (k-binders) k-names)
   (lambda (bs) (if (null? bs) nil (cons (k-binder-name (car bs)) (k-binder-names (cdr bs))))))
@@ -271,10 +271,10 @@
         (let* ((n (car names)) (v (k-new-dvar-of n k)))
           (begin (if (= k 2) #u (set k-abstract-funs (cons v (get k-abstract-funs))))
                  (k-push-desc n (ds-var v k))
-                 (k-abs-bound (cdr names) k (cons (product (1 n) (2 v)) abs)))))))
+                 (k-abs-bound (cdr names) k (cons (tup (1 n) (2 v)) abs)))))))
 ;; `(name type)` onto `ps`.
 (define k-part-onto (->* (symbol int k-parts) k-parts)
-  (lambda (n t ps) (cons (product (1 n) (2 t)) ps)))
+  (lambda (n t ps) (cons (tup (1 n) (2 t)) ps)))
 ;; Whether `s` is written as an effect: `pure`, `spin`, a name bound to one,
 ;; or one of `k-parse-effect`'s atoms or `maxeff`.
 (define k-effect-shaped? (->* (syn) bool)
@@ -413,7 +413,7 @@
                (rest (k-param-selects (cdr found) names)))
           (if (< k 0)
               rest
-              (the k-selects (cons (product (1 m) (2 x) (3 (k-ty-new (ty-param k x)))) rest)))))))
+              (the k-selects (cons (tup (1 m) (2 x) (3 (k-ty-new (ty-param k x)))) rest)))))))
 (define k-all-unnamed? (->* (k-names) bool)
   (lambda (ns) (or (null? ns) (and (symbol=? (car ns) k-no-name) (k-all-unnamed? (cdr ns))))))
 
@@ -425,7 +425,7 @@
         (symbol=? s 'i64) (symbol=? s 'u64))))
 (define k-flat-usage string
   (string-append "a flat is `f64`, `f32`, `i32`, `u32`, `i64`, `u64`, "
-                 (k-cat3 "`(productof (label flat) …)`, `(sumof [key] (label flat) …)`, "
+                 (k-cat3 "`(tupof (label flat) …)`, `(oneof [key] (label flat) …)`, "
                          "`(arrayof flat n)`, " "or a variable of kind `flat`")))
 ;; What a flat named `n` where a type is wanted is told.
 (define k-flat-not-type (->* (string) string)
@@ -458,8 +458,8 @@
               (if (k-flat-scalar? sym) (k-ty-new (ty-base sym)) (k-sfail k-flat-usage s))
               (tagcase (car d)
                 (ds-var (v k) (if (= k 7) (k-ty-new (ty-var v)) (k-sfail k-flat-usage s)))
-                ;; A type named, read as a flat: its parts as `productof` and
-                ;; `sumof` would have them (`TODO.md` §77).
+                ;; A type named, read as a flat: its parts as `tupof` and
+                ;; `oneof` would have them (`TODO.md` §77).
                 (ds-rec (t)
                   (if (k-is-flat? t)
                       (let ((why (k-flat-parts-wrong t))) (if (string=? why "") t (k-sfail why s)))
@@ -469,12 +469,12 @@
 ;; A list's items, or none for what is no list (or an empty one).
 (define k-list-items (->* (syn) k-syns)
   (lambda (s) (tagcase s (lst (items d a b) items) (else x nil))))
-;; `(productof (label flat) …)`, its fields laid out in the order written;
+;; `(tupof (label flat) …)`, its fields laid out in the order written;
 ;; or `(arrayof flat n)`, `n` a literal length (`Checker::parse_flat_list`).
 (define k-parse-flat-list (->* (syn k-syns) int)
   (lambda (s items)
     (let ((hd (if (syn-symbol? (car items)) (syn-name (car items)) "")))
-      (cond ((string=? hd "productof")
+      (cond ((string=? hd "tupof")
              (let* ((parts (k-parse-flat-parts (cdr items) nil 0))
                     (bad (k-unsized-before-last parts (cdr items) nil)))
                (if (null? bad)
@@ -482,7 +482,7 @@
                    (k-sfail (string-append "only a flat product's last part may be of a length not "
                                            "known: it runs to the end of the suffix")
                             (car bad)))))
-            ((string=? hd "sumof") (k-parse-flat-sum (cdr items)))
+            ((string=? hd "oneof") (k-parse-flat-sum (cdr items)))
             ;; A length a literal; or a size, which runs to the end of the
             ;; suffix (`TODO.md` §77).
             ((and (string=? hd "arrayof") (= (k-length items) 3))
@@ -510,9 +510,9 @@
                                 (car pair)))
                       (else
                        (let ((f (k-parse-flat (k-nth pair 1))))
-                         (k-parse-flat-parts (cdr ps) (cons (product (1 l) (2 f)) done) w)))))
+                         (k-parse-flat-parts (cdr ps) (cons (tup (1 l) (2 f)) done) w)))))
               (k-sfail "`(label flat)`" (car ps)))))))
-;; `(sumof [key] (label flat) …)`: a key first, a width, if the labels are numbers stored as they
+;; `(oneof [key] (label flat) …)`: a key first, a width, if the labels are numbers stored as they
 ;; are; else the tag indexes the owner's fields, which hold the labels (`TODO.md` §77).
 (define k-parse-flat-sum (->* (k-syns) int)
   (lambda (ps)
@@ -669,7 +669,7 @@
             nil))
       (ty-product (ps) (if (null? ps) nil (k-unsized-length (extract (k-last-part ps) 2))))
       (else y nil))))
-(define k-last-part (->* (k-parts) (productof (1 symbol) (2 int)))
+(define k-last-part (->* (k-parts) (tupof (1 symbol) (2 int)))
   (lambda (ps) (if (null? (cdr ps)) (car ps) (k-last-part (cdr ps)))))
 (define k-flat-sized? (->* (int) bool)
   (lambda (t) (null? (k-unsized-length t))))
@@ -688,7 +688,7 @@
   (lambda (ps z)
     (if (null? (cdr ps))
         (the k-parts
-             (list (product (1 (extract (car ps) 1))
+             (list (tup (1 (extract (car ps) 1))
                             (2 (k-with-unsized-length (extract (car ps) 2) z)))))
         (cons (car ps) (k-with-last-part (cdr ps) z)))))
 ;; Flat array `t`'s element and length, 268435455 (`FLAT_TO_THE_END`) for
@@ -709,12 +709,12 @@
       (else y (cons -1 -1)))))
 ;; A flat sum's variants, its key's width in bytes (-1 if `t` is no flat
 ;; sum), and whether its labels are numbers (`Checker::flat_sum_parts`).
-(define-type k-sum-parts (productof (1 k-parts) (2 int) (3 bool)))
-(define k-no-sum k-sum-parts (product (1 (the k-parts nil)) (2 -1) (3 #f)))
+(define-type k-sum-parts (tupof (1 k-parts) (2 int) (3 bool)))
+(define k-no-sum k-sum-parts (tup (1 (the k-parts nil)) (2 -1) (3 #f)))
 (define k-flat-sum-parts (->* (int) k-sum-parts)
   (lambda (t)
     (tagcase (k-get (k-resolve t))
-      (ty-sum (ps) (if (k-flat-parts? ps) (product (1 ps) (2 1) (3 #f)) k-no-sum))
+      (ty-sum (ps) (if (k-flat-parts? ps) (tup (1 ps) (2 1) (3 #f)) k-no-sum))
       (ty-named (g ds)
         (if (and (= g k-flat-keyed-gen) (= (k-length ds) 2))
             (tagcase (car ds)
@@ -723,7 +723,7 @@
                   (sz-lin (k ts)
                     (tagcase (car (cdr ds))
                       (dt (s) (tagcase (k-get (k-resolve s))
-                                (ty-sum (ps) (product (1 ps) (2 k) (3 #t)))
+                                (ty-sum (ps) (tup (1 ps) (2 k) (3 #t)))
                                 (else y k-no-sum)))
                       (else y k-no-sum)))
                   (else y k-no-sum)))
@@ -734,8 +734,8 @@
 ;; (`Checker::flat_sum_layout`): the tag, `w` bytes, then the variant at the
 ;; widest one's alignment, at `p`; the code `w + 8 * numeric + 256 * p`, or
 ;; -1 if `t` is no flat sum or its layout is not known.
-(define-type k-sum-layout (productof (1 int) (2 int) (3 int) (4 k-parts)))
-(define k-no-layout k-sum-layout (product (1 -1) (2 -1) (3 -1) (4 (the k-parts nil))))
+(define-type k-sum-layout (tupof (1 int) (2 int) (3 int) (4 k-parts)))
+(define k-no-layout k-sum-layout (tup (1 -1) (2 -1) (3 -1) (4 (the k-parts nil))))
 (define k-flat-sum-layout (->* (int) k-sum-layout)
   (lambda (t)
     (let ((p (k-flat-sum-parts t)))
@@ -747,7 +747,7 @@
   (lambda (ps w numeric all size align)
     (if (null? ps)
         (let ((p (k-round-up w align)) (al (if (> w align) w align)))
-          (product (1 (+ (+ w (if numeric 8 0)) (* 256 p))) (2 (k-round-up (+ p size) al)) (3 al)
+          (tup (1 (+ (+ w (if numeric 8 0)) (* 256 p))) (2 (k-round-up (+ p size) al)) (3 al)
                    (4 all)))
         (let ((l (k-flat-layout (extract (car ps) 2))))
           (if (< (car l) 0)
@@ -771,7 +771,7 @@
           (let* ((b (car (car p))) (r (k-owner-region (extract at 1) (extract at 2) st b)))
             (begin
               (set k-extracts
-                   (cons (product (1 at) (2 (n-datum (datum-layout (extract l 1)))))
+                   (cons (tup (1 at) (2 (n-datum (datum-layout (extract l 1)))))
                          (get k-extracts)))
               (k-te (k-ty-new (ty-sum (k-blobref-variants b (extract l 4))))
                     (k-insert (a-read r) (extract rs 2)))))))))
@@ -779,7 +779,7 @@
   (lambda (b ps)
     (if (null? ps)
         nil
-        (let* ((v (product (1 (extract (car ps) 1)) (2 (k-blobref-of b (extract (car ps) 2)))))
+        (let* ((v (tup (1 (extract (car ps) 1)) (2 (k-blobref-of b (extract (car ps) 2)))))
                (rest (k-blobref-variants b (cdr ps))))
           (the k-parts (cons v rest))))))
 ;; What a `tagcase`'s `else` binds, its scrutinee of type `st`, the variants
@@ -854,7 +854,7 @@
                 (let ((r (k-owner-region a z xt b)))
                   (begin
                     (set k-extracts
-                         (cons (product (1 (product (1 a) (2 z) (3 k)))
+                         (cons (tup (1 (tup (1 a) (2 z) (3 k)))
                                         (2 (n-datum (datum-layout code))))
                                (get k-extracts)))
                     (k-te (k-blobref-of b g) (k-insert (a-write r) (k-insert (a-read r) e)))))))))))

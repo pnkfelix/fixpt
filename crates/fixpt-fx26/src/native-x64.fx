@@ -144,7 +144,7 @@
   (lambda (l bs)
     (begin
       (x-e bs)
-      (set x-fixups (cons (product (1 (- (x-here) 4)) (2 l)) (get x-fixups))))))
+      (set x-fixups (cons (tup (1 (- (x-here) 4)) (2 l)) (get x-fixups))))))
 (define x-jmp (subr (maxeff x-assembles spin) (int) unit)
   (lambda (l)
     (let ((at (x-here)))
@@ -168,7 +168,7 @@
   (lambda (c code detail)
     (let ((l (x-label)))
       (begin (x-jcc c l)
-             (set x-stubs (cons (product (1 l) (2 code) (3 detail)) (get x-stubs)))))))
+             (set x-stubs (cons (tup (1 l) (2 code) (3 detail)) (get x-stubs)))))))
 (define x-place-stubs (subr (maxeff x-assembles spin) (x-stub-list) unit)
   (lambda (ss)
     (if (null? ss)
@@ -869,4 +869,4 @@
           (x-bind (get x-exit-common))
           (x-e (x86-jmp-m n-st -1 1 n-st-exit))
           (let ((at (x-starts-at (- cells 1) starts labels nil)))
-            (product (1 (x-finish)) (2 at)))))))))))
+            (tup (1 (x-finish)) (2 at)))))))))))

@@ -51,7 +51,7 @@
         (case k
           ((0) "null?") ((1) "pair?") ((2) "char?") ((3) "%fx26-f32?") ((4) "boolean?")
           ((5) "exact-integer?") ((6) "symbol?") ((7) "string?") ((8) "%fx26-array?")
-          ((9) "%fx26-box?") ((10) "%fx26-sum?") ((11) "%fx26-product?")
+          ((9) "%fx26-box?") ((10) "%fx26-one?") ((11) "%fx26-tup?")
           ((12) "%fx26-procedure?") (else "%fx26-nothing-in-line?"))))
     ;; The bytes, then 1 if the shape was known, else 0.
     (define t-shape-fast (subr da-assembles (int) da-bytes)

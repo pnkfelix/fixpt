@@ -21,4 +21,4 @@
 (define-type c-members (listof r-member-const @k))
 ;; Each top-level module's members noted (`c-module-members`), by its
 ;; global, as the Rust compiler's `modules` (`TODO.md` §38).
-(define-type c-module-list (listof (productof (1 symbol) (2 c-inlinables)) acyclic))
+(define-type c-module-list (listof (tupof (1 symbol) (2 c-inlinables)) acyclic))

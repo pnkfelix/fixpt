@@ -240,9 +240,9 @@ ones (identity, integers, floats, unions) are items of their own.
   booleans become `list` calls or `cons` chains, or an in-file reader.
   Quoted literals typed `(listof T acyclic)` would do (and §17). Waiting on
   the user.
-- **Names.** `sum` is reserved; defining `get`, `null?` or `pair?`
-  silently shadows the standard one for the rest of the program. Waiting on
-  the user.
+- **Names.** `sum` was reserved (it is `one` now, §58); defining `get`,
+  `null?` or `pair?` silently shadows the standard one for the rest of the
+  program. Waiting on the user.
 
 What is built: `DONE.md` §12.
 
@@ -1621,19 +1621,19 @@ program that needs its own predicate to narrow (the user's, 2026-10-08).
 Since 2026-10-23 the form is an `ensures` (§116); the rule against a
 `lambda` claiming it covers an `ensures`'s `(implies r …)` conjuncts too.
 
-## 58. `sum` cannot be a keyword (the user's, 2026-10-08)
+## 58. Form names a program would want (the user's, 2026-10-08)
 
-`(sum tag expression)`, the injection into an anonymous sum, takes the
-name `sum` from every program: writing the `datum` union's test program, a
-`(define* sum …)` was read as a malformed injection (`(sum tag
-expression)`), in both parsers (`parse.rs`, `parser-exps.fx`). A program's
-own definition should win, as a local binding does for an ordinary name.
-Likely through modules (§34, §37): the core forms as a module's names,
-imported by default and shadowed or qualified (`(with #%fx sum)`, as
-standard references already are, §46). The same holds for the other
-forms written as names a program would want (`product`, `extract`,
-`new`, `get`, `set`, …): a survey of which are keywords, which are
-standard bindings, and which could move from the first to the second.
+`sum`, `sumof`, `product` and `productof` are `one`, `oneof`, `tup` and
+`tupof` (`DONE.md` §158): `sum` and `product` are a program's again. The
+rest stands: a form's name is still taken from every program, which
+cannot bind it and call it (`(define* one …)` then `(one x)` is read as an
+injection). A program's own definition should win, as a local binding
+does for an ordinary name. Likely through modules (§34, §37): the core
+forms as a module's names, imported by default and shadowed or qualified
+(`(with #%fx one)`, as standard references already are, §46). The same
+holds for the other forms written as names a program would want
+(`extract`, `new`, `get`, `set`, …): a survey of which are keywords, which
+are standard bindings, and which could move from the first to the second.
 
 ## 59. Weak tables: ephemerons, and an eqtable that holds keys weakly (the user's, 2026-10-08)
 

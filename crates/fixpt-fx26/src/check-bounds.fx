@@ -26,7 +26,7 @@
 ;; Whether `k-unify` bounds from above: matching what is expected of a call's
 ;; result, flipped inside a subroutine's parameters (Rust `unify_upper`).
 (define k-unify-upper (ref bool @t) (new #f))
-(define k-no-bound k-bound (product (1 -1) (2 -1) (3 -1)))
+(define k-no-bound k-bound (tup (1 -1) (2 -1) (3 -1)))
 
 ;; A new solution, with bounds kept for it.
 (define k-new-bounded-solved (->* () (ref k-map @t))
@@ -101,14 +101,14 @@
     (let ((lo (extract b 1)) (up (extract b 2)) (ex (extract b 3)))
       (cond ((get k-unify-exact)
              ;; What it meets there, where two are said.
-             (product (1 lo) (2 up)
+             (tup (1 lo) (2 up)
                       (3 (if (and (>= ex 0) (or (= ex a) (not (k-related? a ex)))) ex a))))
             ;; At most both: the smaller.
             ((get k-unify-upper)
-             (product (1 lo) (2 (if (and (>= up 0) (not (k-subtype a up))) up a)) (3 ex)))
+             (tup (1 lo) (2 (if (and (>= up 0) (not (k-subtype a up))) up a)) (3 ex)))
             ;; At least both: the larger.
             (else
-             (product (1 (if (and (>= lo 0) (or (k-subtype a lo) (not (k-subtype lo a)))) lo a))
+             (tup (1 (if (and (>= lo 0) (or (k-subtype a lo) (not (k-subtype lo a)))) lo a))
                       (2 up) (3 ex)))))))
 (define k-bound-set! (->* (k-bound-map int k-bound) unit)
   (lambda (m v b) (set m (cons (cons v b) (get m)))))

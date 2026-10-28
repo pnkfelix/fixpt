@@ -11,7 +11,7 @@
 (define sched (prompt-tag unit task D @p) (make-continuation-prompt-tag))
 (define queue (ref (listof task @q) @q) (new nil))
 (define log (ref (listof int @q) @q) (new nil))
-(define-type outcome (sumof (done int) (cancelled unit)))
+(define-type outcome (oneof (done int) (cancelled unit)))
 (define scope (prompt-tag outcome unit (maxeff D (goto @p) (comefrom @p)) @c)
   (make-continuation-prompt-tag))
 (define stop? (ref bool @q) (new #f))
@@ -51,7 +51,7 @@
   (lambda (i) (begin (set log (cons i (get log))) (checkpoint!) (ticker (+ i 1)))))
 
 (spawn! (lambda ()
-          (tagcase (prompt scope (sum done (ticker 0)) (lambda (u) (sum cancelled u)))
+          (tagcase (prompt scope (one done (ticker 0)) (lambda (u) (one cancelled u)))
             (done n (set log (cons n (get log))))
             (cancelled u (set log (cons -1 (get log)))))))
 (spawn! (lambda () (begin (yield!) (yield!) (set stop? #t))))

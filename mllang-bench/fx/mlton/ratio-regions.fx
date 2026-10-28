@@ -46,7 +46,7 @@
 
 (define-type ints (listof int @heap))
 (define-type (matrix (t type)) (arrayof (arrayof t @heap) @heap))
-(define-type point (productof (x int) (y int)))
+(define-type point (tupof (x int) (y int)))
 (define-type points (listof point @heap))
 
 ;; An uncaught exception: an abort to a tag no prompt is for.
@@ -247,7 +247,7 @@
       (if (not (matrix-ref (rr-marked s) y x))
           (begin
             (array-set! q (matrix-ref h y x)
-                        (the points (cons (product (x x) (y y)) (array-ref q (matrix-ref h y x)))))
+                        (the points (cons (tup (x x) (y y)) (array-ref q (matrix-ref h y x)))))
             (matrix-set (rr-marked s) y x #t))
           #u))))
 (define* cf-t (subr rreff (rr int int int) int)
@@ -390,10 +390,10 @@
                                (matrix-set marked y x #t)
                                (tagcase (get tail)
                                  (qnil ()
-                                   (begin (set tail (qcons (product (x x) (y y)) (new (qnil))))
+                                   (begin (set tail (qcons (tup (x x) (y y)) (new (qnil))))
                                           (set q (get tail))))
                                  (qcons (p cdr)
-                                   (begin (set cdr (qcons (product (x x) (y y)) (new (qnil))))
+                                   (begin (set cdr (qcons (tup (x x) (y y)) (new (qnil))))
                                           (set tail (get cdr))))))
                              #u))
                        #u)))

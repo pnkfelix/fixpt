@@ -428,15 +428,15 @@ impl Checker {
     /// `i32`, `u32`, `i64` or `u64`, as the type its bytes are read as; or a
     /// variable of kind `flat`, or a family's flat parameter.
     pub(crate) fn parse_flat(&mut self, s: &Syntax) -> R<TyId> {
-        let usage = "a flat is `f64`, `f32`, `i32`, `u32`, `i64`, `u64`, `(productof (label flat) …)`, `(sumof [key] (label flat) …)`, `(arrayof flat n)`, or a variable of kind `flat`";
+        let usage = "a flat is `f64`, `f32`, `i32`, `u32`, `i64`, `u64`, `(tupof (label flat) …)`, `(oneof [key] (label flat) …)`, `(arrayof flat n)`, or a variable of kind `flat`";
         if let Some(items) = s.as_proper_list() {
             return self.parse_flat_list(s, items, usage);
         }
         let Some(sym) = s.as_symbol() else { return Err(FxError::at(s.span, usage)) };
         match self.lookup_desc(sym) {
             Some(DScope::Var(v, Kind::Flat)) => return Ok(self.arena.ty(Ty::Var(v))),
-            // A type named, read as a flat: its parts as `productof` and
-            // `sumof` would have them (`TODO.md` §77).
+            // A type named, read as a flat: its parts as `tupof` and
+            // `oneof` would have them (`TODO.md` §77).
             Some(DScope::Rec(t)) if self.is_flat(t) => {
                 return match self.flat_parts_wrong(t) {
                     Some(why) => Err(FxError::at(s.span, why)),
@@ -452,13 +452,13 @@ impl Checker {
         Err(FxError::at(s.span, usage))
     }
 
-    /// `(productof (label flat) …)`, its fields laid out in the order
-    /// written; `(sumof [key] (label flat) …)`, a tag then the widest
+    /// `(tupof (label flat) …)`, its fields laid out in the order
+    /// written; `(oneof [key] (label flat) …)`, a tag then the widest
     /// variant; or `(arrayof flat n)`, `n` a literal length.
     fn parse_flat_list(&mut self, s: &Syntax, items: &[Syntax], usage: &str) -> R<TyId> {
         let head = items.first().and_then(|h| h.as_symbol()).map(|h| self.interner.name(h).to_string());
         match (head.as_deref(), items) {
-            (Some("productof"), [_, ps @ ..]) => {
+            (Some("tupof"), [_, ps @ ..]) => {
                 let parts = self.parse_flat_parts(ps, None)?;
                 // Of a length not known, only the last part (`TODO.md` §77):
                 // it runs to the end of the suffix.
@@ -471,7 +471,7 @@ impl Checker {
             // A key first, a width, if the labels are numbers stored as
             // they are; else the tag is an index into the owner's fields,
             // which hold the labels (`TODO.md` §77).
-            (Some("sumof"), [_, ps @ ..]) => {
+            (Some("oneof"), [_, ps @ ..]) => {
                 let key = match ps.first().and_then(|k| k.as_symbol()) {
                     Some(k) => match self.interner.name(k) {
                         "u8" => Some(1),
@@ -639,8 +639,8 @@ impl Checker {
         }
     }
 
-    /// What is wrong with flat `t`'s parts, if anything, as `productof` and
-    /// `sumof` would say it of flats written there: a part of a length not
+    /// What is wrong with flat `t`'s parts, if anything, as `tupof` and
+    /// `oneof` would say it of flats written there: a part of a length not
     /// known before a product's last, or as a sum's variant.
     pub(crate) fn flat_parts_wrong(&self, t: TyId) -> Option<&'static str> {
         match self.arena.get(self.arena.resolve(t)) {

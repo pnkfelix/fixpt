@@ -348,7 +348,7 @@
       (else y nil))))
 
 ;; An edge from slot `f` to slot `t`, strict if `s`.
-(define k-sc-edge (->* (int int bool) k-edge) (lambda (f t s) (product (1 f) (2 t) (3 s))))
+(define k-sc-edge (->* (int int bool) k-edge) (lambda (f t s) (tup (1 f) (2 t) (3 s))))
 ;; `g` with the edge from slot `f` to slot `t`, strict if `s`.
 (define k-sc-add (->* (k-graph int int bool) k-graph)
   (lambda (g f t s)
@@ -453,9 +453,9 @@
     (let ((from (get k-sc-current)) (passing (k-sc-passing args sc)))
       (begin
         (set k-sc-hints (cons (k-sc-hint args sc gs) (get k-sc-hints)))
-        (set k-sc-passed (cons (product (1 from) (2 to) (3 passing)) (get k-sc-passed)))
+        (set k-sc-passed (cons (tup (1 from) (2 to) (3 passing)) (get k-sc-passed)))
         (let ((g (k-sc-arg-edges args 0 sc gs nil)))
-          (set k-sc-calls (cons (product (1 from) (2 to) (3 g)) (get k-sc-calls))))))))
+          (set k-sc-calls (cons (tup (1 from) (2 to) (3 g)) (get k-sc-calls))))))))
 
 ;; `sc` with `s` bound, known as what `ks` says.
 (define k-sc-bind (->* (symbol k-trs k-tscope) k-tscope)

@@ -68,7 +68,7 @@
     (case s
       ((int) 'int?) ((char) 'char?) ((bool) 'bool?) ((nil) 'null?) ((pair) 'pair?)
       ((string) 'string?) ((symbol) 'symbol?) ((procedure) 'procedure?) ((bloblet) 'array?)
-      ((f64) 'f64?) ((f32) 'f32?) ((box) 'ref?) ((sum) 'sum?) ((product) 'product?)
+      ((f64) 'f64?) ((f32) 'f32?) ((box) 'ref?) ((one) 'one?) ((tup) 'tup?)
       ((vector) 'vector?) ((bytevector) 'bytevector?)
       (else '||))))
 (define typecase-usage string "`(typecase expression (shape name body) … (else name body))`")
@@ -78,7 +78,7 @@
 (define typecase-shapes string
   (string-append "a shape `typecase` tests is one of "
                  "int, char, bool, nil, pair, string, symbol, procedure, bloblet, "
-                 "f64, f32, box, sum, product, vector, bytevector"))
+                 "f64, f32, box, one, tup, vector, bytevector"))
 ;; A `case` datum's kind (`TODO.md` §46): 0 an integer, 1 a character, 2
 ;; a string, 3 a symbol, 4 a boolean, and -1 none of these.
 (define case-kind (->* (syn) int)
@@ -338,13 +338,13 @@
         ((convention)
          (begin (arity items 3 "`(convention C expression)`" a b)
                 (e-convention (nth items 1) (parse-exp (nth items 2)) a b 0)))
-        ((product) (e-product (parse-fields (cdr items)) a b 0))
+        ((tup) (e-product (parse-fields (cdr items)) a b 0))
         ((extract)
          (begin (arity items 3 "`(extract expression label)`" a b)
                 (let ((l (label (nth items 2))))
                   (e-extract (parse-exp (nth items 1)) l nil a b 0))))
-        ((sum)
-         (begin (arity items 3 "`(sum tag expression)`" a b)
+        ((one)
+         (begin (arity items 3 "`(one tag expression)`" a b)
                 (let ((t (label (nth items 1)))) (e-sum t (parse-exp (nth items 2)) a b 0))))
         ((tagcase)
          (begin (at-least items 2 "`(tagcase expression (tag name body …) …)`" a b)
@@ -448,7 +448,7 @@
                 (let* ((name (syn-symbol (car parts)))
                        (init (parse-exp (nth parts 2)))
                        (rest (parse-typed-bindings (cdr bs) what usage)))
-                  (cons (product (1 name) (2 (nth parts 1)) (3 init)) rest))
+                  (cons (tup (1 name) (2 (nth parts 1)) (3 init)) rest))
                 (pfail usage (car bs)))))))
   ;; `(let ((name expression) …) …)`; `()` is no bindings.
   (parse-let-bindings (->* (syns-a) let-list)
@@ -458,7 +458,7 @@
           (let ((parts (syn-items (car bs) "a let binding")))
             (if (= (len parts) 2)
                 (let* ((name (syn-symbol (car parts))) (init (parse-exp (nth parts 1))))
-                  (cons (product (1 name) (2 init)) (parse-let-bindings (cdr bs))))
+                  (cons (tup (1 name) (2 init)) (parse-let-bindings (cdr bs))))
                 (pfail "a let binding is `(name expression)`" (car bs)))))))
   ;; `let*`: nested one-binding `let`s, each spanning its binding.
   (parse-let* (->* (syns-a exp) exp)
@@ -596,7 +596,7 @@
           rest
           (let ((d (car data)))
             (the case-entries
-              (cons (product (1 (case-test kv d)) (2 (case-sort-key k d)) (3 c))
+              (cons (tup (1 (case-test kv d)) (2 (case-sort-key k d)) (3 c))
                     (case-entries-of kv k (cdr data) c rest)))))))
   ;; The clause's index by halving the sorted data, then its body by halving
   ;; the indices (`case_tree` in the Rust parser).
@@ -673,8 +673,8 @@
           (let ((pair (syn-items (car ps) "`(label expression)`")))
             (if (= (len pair) 2)
                 (let* ((l (label (car pair))) (e (parse-exp (nth pair 1))))
-                  (cons (product (1 l) (2 e)) (parse-fields (cdr ps))))
-                (pfail "`(product (label expression) …)`" (car ps)))))))
+                  (cons (tup (1 l) (2 e)) (parse-fields (cdr ps))))
+                (pfail "`(tup (label expression) …)`" (car ps)))))))
   ;; The arms of a `tagcase` other than `else`.
   (parse-arms (->* (syns-a) arm-list)
     (lambda (cs)
@@ -693,7 +693,7 @@
                           (ns (arm-names fields bind))
                           (body (parse-arm-body parts c))
                           (rest (parse-arms (cdr cs))))
-                     (cons (product (1 tag) (2 fields) (3 ns) (4 body)) rest))))))))
+                     (cons (tup (1 tag) (2 fields) (3 ns) (4 body)) rest))))))))
   ;; An arm's body, `c`'s items after its first two.
   (parse-arm-body (->* (syns-a syn) exp)
     (lambda (parts c) (parse-body (drop parts 2) (syn-start c) (syn-end c))))
@@ -707,7 +707,7 @@
                    (pfail "a tagcase arm needs a body" c)
                    (if (syn-symbol? (nth parts 1))
                        (let* ((y (syn-symbol (nth parts 1))) (body (parse-arm-body parts c)))
-                         (cons (product (1 y) (2 body)) nil))
+                         (cons (tup (1 y) (2 body)) nil))
                        (pfail "`else` binds one name" (nth parts 1))))))
             (else (parse-else (cdr cs))))))
   ;; A `module`'s items, in order.
@@ -787,7 +787,7 @@
               ((symbol=? head 'define-rec)
                (let ((bs (parse-typed-bindings (cdr parts) "`(name type expression)`"
                                                "`(define-rec (name type expression) …)`")))
-                 (product (1 3) (2 (rec-names bs)) (3 (rec-types bs)) (4 (rec-inits bs)))))
+                 (tup (1 3) (2 (rec-names bs)) (3 (rec-types bs)) (4 (rec-inits bs)))))
               (else (pfail module-usage f))))))
   ;; `(load-module "path")` or, `input?`, `(load-input "path")`, at `a`..`b`:
   ;; the hidden global every load of its path is (`TODO.md` §68), the

@@ -83,8 +83,8 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("array?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 bloblet)) (else (not (shape 0 bloblet))))))"),
     ("f32?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 f32)) (else (not (shape 0 f32))))))"),
     ("ref?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 box)) (else (not (shape 0 box))))))"),
-    ("sum?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 sum)) (else (not (shape 0 sum))))))"),
-    ("product?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 product)) (else (not (shape 0 product))))))"),
+    ("one?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 one)) (else (not (shape 0 one))))))"),
+    ("tup?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 tup)) (else (not (shape 0 tup))))))"),
     ("+", "(subr pure (int int) int)"),
     ("-", "(subr pure (int int) int)"),
     // A finite list's length, as a natural of its size.
@@ -212,26 +212,26 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // The fixed-width integers (PLAN.md, Q2 b): wrapping arithmetic.
     // I/O (`TODO.md` §84): each with an effect of the fixed family; a
     // failure a value the program sees.
-    ("write-out", "(subr (io stdout) (string) (sumof (done unit) (failed io-error)))"),
-    ("write-err", "(subr (io stderr) (string) (sumof (done unit) (failed io-error)))"),
+    ("write-out", "(subr (io stdout) (string) (oneof (done unit) (failed io-error)))"),
+    ("write-err", "(subr (io stderr) (string) (oneof (done unit) (failed io-error)))"),
     ("exit", "(subr (io exit) (int) void)"),
     // Files: a path as the working directory resolves it; what is read made
     // at a region; a file replaced whole, atomically.
     // A line of the standard input, its ending left off; or its end.
-    ("read-line", "(subr (io stdin) () (sumof (line string) (eof unit) (failed io-error)))"),
+    ("read-line", "(subr (io stdin) () (oneof (line string) (eof unit) (failed io-error)))"),
     // The standard input by bytes, and the terminal (`TODO.md` §95).
-    ("read-byte", "(subr (io stdin) () (sumof (byte u8) (eof unit) (failed io-error)))"),
+    ("read-byte", "(subr (io stdin) () (oneof (byte u8) (eof unit) (failed io-error)))"),
     (
         "read-bytes",
         "(poly ((r region)) (subr (maxeff (io stdin) (write r)) ((bytevectorof r) int int)
-           (sumof (count int) (eof unit) (failed io-error))))",
+           (oneof (count int) (eof unit) (failed io-error))))",
     ),
     ("stdin-ready?", "(subr (io stdin) () bool)"),
-    ("terminal-raw", "(subr (io terminal) () (sumof (done unit) (not-a-terminal unit) (failed io-error)))"),
-    ("terminal-restore", "(subr (io terminal) () (sumof (done unit) (not-a-terminal unit) (failed io-error)))"),
+    ("terminal-raw", "(subr (io terminal) () (oneof (done unit) (not-a-terminal unit) (failed io-error)))"),
+    ("terminal-restore", "(subr (io terminal) () (oneof (done unit) (not-a-terminal unit) (failed io-error)))"),
     (
         "terminal-size",
-        "(subr (io terminal) () (sumof (size (productof (rows int) (columns int))) (not-a-terminal unit) (failed io-error)))",
+        "(subr (io terminal) () (oneof (size (tupof (rows int) (columns int))) (not-a-terminal unit) (failed io-error)))",
     ),
     // Code a program makes (`TODO.md` §97, `docs/research/
     // declared-conventions.md`): a bloblet's copy in the code area, its
@@ -248,8 +248,8 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("clock", "(subr (io clock) () i64)"),
     ("sleep-until", "(subr (io clock) (i64) unit)"),
     ("args", "(poly ((r region)) (subr (maxeff (io args) (alloc r)) () (listof string r)))"),
-    ("read-file", "(poly ((r region)) (subr (maxeff (io fs-read) (alloc r)) (string) (sumof (data (bytevectorof r)) (failed io-error))))"),
-    ("list-dir", "(poly ((r region)) (subr (maxeff (io fs-read) (alloc r)) (string) (sumof (names (listof string r)) (failed io-error))))"),
+    ("read-file", "(poly ((r region)) (subr (maxeff (io fs-read) (alloc r)) (string) (oneof (data (bytevectorof r)) (failed io-error))))"),
+    ("list-dir", "(poly ((r region)) (subr (maxeff (io fs-read) (alloc r)) (string) (oneof (names (listof string r)) (failed io-error))))"),
     // Heist's (`FIXPT-CHANGES.md` F3): the checker's type of the innermost
     // expression of a program text at a character (`typeat.rs`). Reading the
     // files it loads is its effect.
@@ -259,13 +259,13 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // one's), standard output and error one stream; what it wrote since last
     // asked, never waiting; whether it runs, which it does until it has
     // exited and all it wrote is read; its input; a signal to its group.
-    ("process-start", "(poly ((r region)) (subr (maxeff (io process) (read r)) ((listof string r) string) (sumof (started int) (failed io-error))))"),
+    ("process-start", "(poly ((r region)) (subr (maxeff (io process) (read r)) ((listof string r) string) (oneof (started int) (failed io-error))))"),
     ("process-output", "(subr (io process) (int) string)"),
-    ("process-status", "(subr (io process) (int) (sumof (running unit) (exited int) (signalled int) (unknown unit)))"),
-    ("process-write", "(subr (io process) (int string) (sumof (done unit) (failed io-error)))"),
+    ("process-status", "(subr (io process) (int) (oneof (running unit) (exited int) (signalled int) (unknown unit)))"),
+    ("process-write", "(subr (io process) (int string) (oneof (done unit) (failed io-error)))"),
     ("process-close-input", "(subr (io process) (int) unit)"),
     ("process-signal", "(subr (io process) (int int) unit)"),
-    ("write-file", "(poly ((r region)) (subr (maxeff (io fs-write) (read r)) (string (bytevectorof r)) (sumof (done unit) (failed io-error))))"),
+    ("write-file", "(poly ((r region)) (subr (maxeff (io fs-write) (read r)) (string (bytevectorof r)) (oneof (done unit) (failed io-error))))"),
     // Bytevectors (`TODO.md` §84): made, read and written at a region, as
     // arrays are; R7RS's names. `bytevector-copy` takes a start and an end,
     // `bytevector-copy!` R7RS's `to at from start end`.
@@ -279,7 +279,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // A string's UTF-8, and back: bytes not UTF-8 give the offset of the
     // first bad one.
     ("string->utf8", "(poly ((r region) (s region)) (subr (maxeff (read s) (alloc r)) ((stringof s)) (bytevectorof r)))"),
-    ("utf8->string", "(poly ((r region)) (subr (read r) ((bytevectorof r)) (sumof (text string) (bad int))))"),
+    ("utf8->string", "(poly ((r region)) (subr (read r) ((bytevectorof r)) (oneof (text string) (bad int))))"),
     ("i8+", "(subr pure (i8 i8) i8)"),
     ("i8-", "(subr pure (i8 i8) i8)"),
     ("i8*", "(subr pure (i8 i8) i8)"),
@@ -631,7 +631,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     (
         "%processes:par2",
         "(poly ((a type) (b type) (e1 effect) (e2 effect))
-           (subr (maxeff e1 e2) ((subr e1 () a) (subr e2 () b)) (productof (1 a) (2 b))))",
+           (subr (maxeff e1 e2) ((subr e1 () a) (subr e2 () b)) (tupof (1 a) (2 b))))",
     ),
     // `race`'s (`docs/fx26.md`, "`race`"), whose branches the checkers
     // check as their own rule says (`synth_race`).

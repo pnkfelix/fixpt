@@ -78,7 +78,7 @@
           (let* ((own (if (c-member? (get c-inlining) n)
                           (the r-wglobals nil)
                           (the r-wglobals (cons cell nil))))
-                 (h (product (1 f) (2 (extract ks 1)) (3 (r-wglobals-append own (extract ks 2)))))
+                 (h (tup (1 f) (2 (extract ks 1)) (3 (r-wglobals-append own (extract ks 2)))))
                  (rest (get r-unroll-hooks))
                  (same (and (not (null? rest)) (r-same-exp? (extract (car rest) 1) f)))
                  (under (if same (cdr rest) rest)))
@@ -91,7 +91,7 @@
 (define r-unroll-knowns (->* (renv exps) r-unroll-found)
   (lambda (env args)
     (if (null? args)
-        (product (1 (the r-unroll-known nil)) (2 (the r-wglobals nil)) (3 #f))
+        (tup (1 (the r-unroll-known nil)) (2 (the r-wglobals nil)) (3 #f))
         (let* ((a (car args)) (rest (r-unroll-knowns env (cdr args)))
                (k (r-known env a))
                (g (if (null? k) (r-unroll-global env a) (the r-unroll-globals nil)))
@@ -99,8 +99,8 @@
                         ((null? g) (the rconsts nil))
                         (else (the rconsts (cons (cdr (car g)) nil))))))
           (cond ((or (null? c) (not (r-const-list? (car c)))) rest)
-                ((null? g) (product (1 (extract rest 1)) (2 (extract rest 2)) (3 #t)))
-                (else (product (1 (the r-unroll-known (cons (cons a (car c)) (extract rest 1))))
+                ((null? g) (tup (1 (extract rest 1)) (2 (extract rest 2)) (3 #t)))
+                (else (tup (1 (the r-unroll-known (cons (cons a (car c)) (extract rest 1))))
                                (2 (the r-wglobals (cons (car (car g)) (extract rest 2))))
                                (3 #t))))))))
 (define r-unroll-global (->* (renv exp) r-unroll-globals)
@@ -191,11 +191,11 @@
       (let* ((c (r-known env x))
              (small (if (null? c) (the (listof int @k) nil) (r-const-small (car c)))))
         (if (not (null? small))
-            (product (1 (the (listof exp @k) nil)) (2 (car small)))
+            (tup (1 (the (listof exp @k) nil)) (2 (car small)))
             (let ((s (tagcase x
                        (e-app (f args a b abk) (r-split-app env (r-standard-name env f) args))
                        (else y (the rsplits nil)))))
-              (if (null? s) (product (1 (the (listof exp @k) (cons x nil))) (2 0)) (car s)))))))
+              (if (null? s) (tup (1 (the (listof exp @k) (cons x nil))) (2 0)) (car s)))))))
   ;; The same for standard operation `name` applied to `args`, if it is
   ;; such a chain.
   (r-split-app (->* (renv string exps) rsplits)
@@ -209,7 +209,7 @@
             (cond ((and plus (and (not (null? pa)) (not (null? pb)))) nil)
                   ((and (not plus) (not (null? pb))) nil)
                   ((not (r-small? k)) nil)
-                  (else (the rsplits (cons (product (1 (if (null? pa) pb pa)) (2 k)) nil)))))))))
+                  (else (the rsplits (cons (tup (1 (if (null? pa) pb pa)) (2 k)) nil)))))))))
 ;; A call's inlining: unrolled, if `r-unrolled` says so; else as planned.
 (define r-inline-or-unroll
   (->* (int int int renv exp exps int) (listof rinline @k))
@@ -296,14 +296,14 @@
 ;; The closure of lifted procedure `k` (`c-lifts`), a constant.
 (define r-lifted-closure (->* (int) wcell)
   (lambda (k)
-    (let ((none (the c-lift (product (1 (wcell-nil)) (2 (the syms nil))))))
+    (let ((none (the c-lift (tup (1 (wcell-nil)) (2 (the syms nil))))))
       (extract (table-ref (get c-lifts) k none) 1))))
 
 ;; What `g` makes, for a body where the procedure running is not known.
 (define r-unknowing (->* (rgen) rgen)
   (lambda (g)
     (the rgen
-      (product (items (extract g items)) (leaf (extract g leaf)) (nreg (extract g nreg))
+      (tup (items (extract g items)) (leaf (extract g leaf)) (nreg (extract g nreg))
                (nslot (extract g nslot)) (mslot (extract g mslot)) (labels (extract g labels))
                (this (the rthis nil)) (start (extract g start))))))
 
@@ -312,7 +312,7 @@
 (define r-spec-of (->* (c-special wglobal exp-params exp cenv) c-spec)
   (lambda (sp cell lps lbody te)
     (the c-spec
-      (product (1 (extract sp 1)) (2 cell) (3 (extract sp 2)) (4 (extract sp 6))
+      (tup (1 (extract sp 1)) (2 cell) (3 (extract sp 2)) (4 (extract sp 6))
                (5 (r-nth-param (extract sp 3) (extract sp 6)))
                (6 (c-count-params (extract sp 3)))
                (7 (extract sp 7)) (8 lps) (9 lbody)
@@ -350,9 +350,9 @@
                (begin (set c-genv outer-genv) c)))))))
 
 (define r-imm-operand (->* (wcells) roperands)
-  (lambda (v) (product (1 v) (2 (the (listof int @k) nil)))))
+  (lambda (v) (tup (1 v) (2 (the (listof int @k) nil)))))
 (define r-reg-operand (->* (int) roperands)
-  (lambda (k) (product (1 (the wcells nil)) (2 (the (listof int @k) (cons k nil))))))
+  (lambda (k) (tup (1 (the wcells nil)) (2 (the (listof int @k) (cons k nil))))))
 ;; `x`'s cell, in a list, if it is a constant (`r-known`).
 (define r-known-cell (->* (renv exp) wcells)
   (lambda (env x)

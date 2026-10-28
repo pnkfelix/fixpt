@@ -100,13 +100,13 @@ fn the_parsers_agree_on_small_programs() {
         "(let* ((a 1) (b (+ a 1))) (and (= a b) (or #f #t) (and)))",
         "(cond ((= 1 2) 'no) (else 'yes))",
         "(the (subr pure (int bool) unit) (lambda ((x int) y) x #u))",
-        "(product (a 1) (2 #\\c)) (sum t \"s\") (extract (product (a 1)) a)",
-        "(tagcase (the (sumof (a int) (b (productof (1 int) (2 int)))) (sum a 1)) (a n n) (b (x y) (+ x y)))",
-        "(tagcase (the (sumof (a int) (b int)) (sum a 1)) (a n n) (else r 0))",
+        "(tup (a 1) (2 #\\c)) (one t \"s\") (extract (tup (a 1)) a)",
+        "(tagcase (the (oneof (a int) (b (tupof (1 int) (2 int)))) (one a 1)) (a n n) (b (x y) (+ x y)))",
+        "(tagcase (the (oneof (a int) (b int)) (one a 1)) (a n n) (else r 0))",
         "(bloblet-ref (make-bloblet 0 1 2) 1)",
         "(letrec ((f (subr pure (int) int) (lambda (n) n))) (f 1))",
         "(proj (plambda ((r region)) (lambda () 1)) @q)",
-        "(define-generative (box (t type +)) (productof (v t))) (down-box (up-box (product (v 1))))",
+        "(define-generative (box (t type +)) (tupof (v t))) (down-box (up-box (tup (v 1))))",
         "(define f (subr pure ((listof int const)) int) (lambda (xs) (acyclic xs (ok 1) 0)))",
     ] {
         same_trees(&mut s, text);

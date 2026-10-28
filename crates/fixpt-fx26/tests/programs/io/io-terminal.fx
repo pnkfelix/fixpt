@@ -1,7 +1,7 @@
 ; Accepted: the terminal (TODO.md §95), `(io terminal)`: raw mode and the
 ; modes before it, each done, `not-a-terminal` or a failure; the size, in
 ; rows and columns.
-(define-type term-result (sumof (done unit) (not-a-terminal unit) (failed io-error)))
+(define-type term-result (oneof (done unit) (not-a-terminal unit) (failed io-error)))
 (define* raw? (subr (io terminal) () bool)
   (lambda () (tagcase (the term-result (terminal-raw)) (done u #t) (else r #f))))
 (define* restored (subr (io terminal) () unit)

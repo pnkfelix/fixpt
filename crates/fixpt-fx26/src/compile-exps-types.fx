@@ -11,24 +11,24 @@
 ;; (`regcode.fx`'s `r-inline`): its name, word, parameters and body, and
 ;; the globals as its body saw them.
 (define-type c-inline
-  (productof (1 symbol) (2 tword) (3 c-params) (4 exp) (5 int)))
+  (tupof (1 symbol) (2 tword) (3 c-params) (4 exp) (5 int)))
 (define-type c-inlinables (listof c-inline acyclic))
 ;; A value a module's item makes: its name, its expression, the item's kind
 ;; (0 an abstract type's conversion, 2 a definition, 3 a `define-rec`'s
 ;; member), and whether it is a typed lambda.
-(define-type c-mval (productof (1 symbol) (2 exp) (3 int) (4 bool)))
+(define-type c-mval (tupof (1 symbol) (2 exp) (3 int) (4 bool)))
 (define-type c-mvals (listof c-mval @k))
 ;; Each value's name, and its slot, from `d`.
 (define-type c-mslots (listof (pairof symbol int @k) @k))
 ;; Closures to finish: the closure's slot, its free value, and the slot it
 ;; waits for.
-(define-type c-waits (listof (productof (1 int) (2 int) (3 int)) @k))
+(define-type c-waits (listof (tupof (1 int) (2 int) (3 int)) @k))
 ;; A lambda's word, made by the stack code of the body it is in: its body
 ;; (its identity), its parameters, its own name, the word, and the names it
 ;; captures.
-(define-type c-made (productof (1 k-at) (2 syms) (3 syms) (4 tword) (5 syms)))
+(define-type c-made (tupof (1 k-at) (2 syms) (3 syms) (4 tword) (5 syms)))
 ;; A lambda's word, and the names its closure captures, in order.
-(define-type c-closing (productof (1 tword) (2 syms)))
+(define-type c-closing (tupof (1 tword) (2 syms)))
 ;; An `rlambda`'s region, in a list; none for a plain lambda.
 (define-type c-region (listof exp @k))
 ;; A procedure being specialized at a lambda: its global's name, cell and
@@ -36,17 +36,17 @@
 ;; arity, parameters and body, the names its closure captures in order, and
 ;; the globals it sees.
 (define-type c-spec
-  (productof (1 symbol) (2 wglobal) (3 tword) (4 int) (5 symbol) (6 int) (7 int)
+  (tupof (1 symbol) (2 wglobal) (3 tword) (4 int) (5 symbol) (6 int) (7 int)
              (8 c-params) (9 exp) (10 syms) (11 int)))
 ;; A specialized copy's twin's context: what it is specialized at, its
 ;; plan's context, and the globals its procedure saw.
-(define-type c-copy-twin (productof (1 c-spec) (2 int) (3 int)))
+(define-type c-copy-twin (tupof (1 c-spec) (2 int) (3 int)))
 ;; A lambda's word whose register code, its twin, is made once its form's
 ;; words all are (step 4), with what its stack code knew and made: the
 ;; word, parameters, body, scope, the procedure it is, the definition it
 ;; is (if one), the words of the lambdas in it, and, a copy's, its context.
 (define-type c-twin
-  (productof (1 tword) (2 c-params) (3 exp) (4 cenv) (5 (listof c-this @k))
+  (tupof (1 tword) (2 c-params) (3 exp) (4 cenv) (5 (listof c-this @k))
              (6 (listof symbol @k)) (7 (listof c-made @k)) (8 (listof c-copy-twin @k))))
 
 ;;; ------------------------------------------------------------ signatures

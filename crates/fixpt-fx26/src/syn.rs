@@ -950,7 +950,7 @@ fn load_modules_at(f: &Syntax, interner: &Interner, out: &mut Vec<Load>) {
             arms(from(2), 2, out);
         }
         Some("cond") => arms(rest, 0, out),
-        Some("sum") => exps(from(2), out),
+        Some("one") => exps(from(2), out),
         // `(spawn (box M r) body …)`; `spawn-monitored`'s watcher and
         // `on-failure` first.
         Some("spawn") => exps(from(2), out),
@@ -1258,11 +1258,11 @@ mod tests {
             "(let ((self 1) (send 2)) (+ self send))",
             "(let* ((par 1)) par)",
             "(lambda ((self int) (race int)) self)",
-            "(define-type m (sumof (send int) (receive int)))",
+            "(define-type m (oneof (send int) (receive int)))",
             "(define f (subr (maxeff (send @w)) (int) int) (lambda ((x int)) x))",
             "(tagcase v (send x x) (receive y y))",
             "(cond (self 1) (else 2))",
-            "(the (sumof (self int)) (sum self 1))",
+            "(the (oneof (self int)) (one self 1))",
         ];
         for text in names {
             assert_eq!(scheduler_loads(text), Vec::<u32>::new(), "{text}");

@@ -84,7 +84,7 @@
 
 ;; The register a routine takes `role` in; -1 if it takes none.
 (define* role-reg (subr (maxeff (read @globals) spin)
-                       ((listof (productof (name string) (registers (listof int acyclic))) acyclic)
+                       ((listof (tupof (name string) (registers (listof int acyclic))) acyclic)
                         string)
                        int)
   (lambda (in role)
@@ -93,7 +93,7 @@
           (else (role-reg (cdr in) role)))))
 ;; The number `name` has in `ns`; -1 if none.
 (define* number-of (subr (maxeff (read @globals) spin)
-                        ((listof (productof (name string) (number int)) acyclic) string) int)
+                        ((listof (tupof (name string) (number int)) acyclic) string) int)
   (lambda (ns name)
     (cond ((null? ns) -1)
           ((string=? (extract (car ns) name) name) (extract (car ns) number))

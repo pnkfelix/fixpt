@@ -115,7 +115,7 @@
                  (conv (lambda ((from syn) (to syn))
                          (let ((t (mk-pure-subr (the syns-a (cons from nil)) to a b)))
                            (if family? (mk-poly binders t a b) t))))
-                 (x (product (1 'x) (2 (the syns-a nil))))
+                 (x (tup (1 'x) (2 (the syns-a nil))))
                  (identity (e-lambda (the param-list (cons x nil)) (e-var 'x a b 0) a b 0))
                  (up (gen-conversion "up-" n (conv rep used) identity a b))
                  (down (gen-conversion "down-" n (conv used rep) identity a b)))

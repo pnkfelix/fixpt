@@ -103,12 +103,12 @@ The simplest use: read a clock, run the work, read it again. From
              (lambda (n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))))
     fib))
 
-(define* time-fib (subr observes (int) (productof (value int) (ns int)))
+(define* time-fib (subr observes (int) (tupof (value int) (ns int)))
   (lambda (n)
     (let* ((t0 (real-time-ns))
            (v  (fib n))
            (t1 (real-time-ns)))
-      (product (value v) (ns (- t1 t0))))))
+      (tup (value v) (ns (- t1 t0))))))
 ```
 
 Python (run here) and Node (run here) are the same shape, with no effect
@@ -143,7 +143,7 @@ What it shows:
   (read @telemetry) (write @telemetry))`.
 - `fib` checks as `(subr pure (int) int)`. `time-fib` must say
   `observes`, and `fixpt check` prints its type as `(subr (maxeff (read
-  @telemetry) (write @telemetry)) (int) (productof (value int) (ns
+  @telemetry) (write @telemetry)) (int) (tupof (value int) (ns
   int)))`. Every caller of `time-fib` gets the effect too.
 - Because `(fib n)` is pure, the semantics lets a compiler compute it
   before `t0` or after `t1` ("Pure code stays pure", under "Typing"). The
@@ -208,7 +208,7 @@ Cumulative counters, read before and after, and differenced. From
     (let* ((m0 (minor-collections)) (j0 (major-collections)) (w0 (words-allocated))
            (xs (iota n nil))
            (w1 (words-allocated)) (j1 (major-collections)) (m1 (minor-collections)))
-      (product (minor (- m1 m0)) (major (- j1 j0)) (words (- w1 w0))))))
+      (tup (minor (- m1 m0)) (major (- j1 j0)) (words (- w1 w0))))))
 ```
 
 Python (run here: `[46, 4, 0]` collections per generation, and
@@ -347,16 +347,16 @@ type are as in "The first set"):
 ```
 (define* run-with-stats
   (poly ((t type) (e effect))
-    (subr (maxeff e observes) ((subr e () t)) (productof (value t) (stats run-stats))))
+    (subr (maxeff e observes) ((subr e () t)) (tupof (value t) (stats run-stats))))
   (plambda ((t type) (e effect))
     (lambda ((thunk (subr e () t)))
       (let* ((k (telemetry-begin)) (v (thunk)) (s (telemetry-end k)))
-        (product (value v) (stats s))))))
+        (tup (value v) (stats s))))))
 
-(define* time-fib (subr observes () (productof (value int) (stats run-stats)))
+(define* time-fib (subr observes () (tupof (value int) (stats run-stats)))
   (lambda () (run-with-stats (lambda () (fib 25)))))
 (define* time-list (subr (maxeff (alloc @l) (read @l) spin observes) ()
-                         (productof (value int) (stats run-stats)))
+                         (tupof (value int) (stats run-stats)))
   (lambda () (run-with-stats (lambda () (add-up (iota 100000 nil) 0)))))
 ```
 
@@ -505,7 +505,7 @@ data is a `gc-info` prefab; reference 9.3):
 
 ```
 ; PROPOSED: the pull-style event buffer (see "Collection event hooks")
-(define-type gc-event (productof (kind symbol) (pause-ns nat) (promoted nat) (live-after nat)))
+(define-type gc-event (tupof (kind symbol) (pause-ns nat) (promoted nat) (live-after nat)))
 collection-events-since : (poly ((r region)) (subr (maxeff observes (alloc r)) (nat) (listof gc-event r)))
 ```
 
@@ -1272,7 +1272,7 @@ strategy:
 - **A buffer instead.** Racket's log receiver, OCaml's `Runtime_events`
   and GHC's eventlog all take the typed-friendly shape: the collector
   appends a record to a ring buffer and the program *pulls*. Stage 3 gives
-  `(collection-events-since k)`, which returns a list of `(productof (kind
+  `(collection-events-since k)`, which returns a list of `(tupof (kind
   symbol) (pause-ns nat) (promoted nat) (live-after nat))`, at `observes`
   plus `(alloc r)`. Erlang's `system_monitor` threshold message has the
   same shape: a pull, filtered by the runtime.
@@ -1433,7 +1433,7 @@ Larceny and OCaml count them. All counts are since the heap was made.
 | `telemetry-begin`        | `(subr observes () nat)`                                                                                          | Starts a measured run; a token                                        |
 | `telemetry-end`          | `(subr observes (nat) run-stats)`                                                                                 | Ends the run the token names, and any newer; its differences          |
 | `black-box`              | `(poly ((t type)) (subr observes (t) t))`                                                                         | The identity, which no compiler sees through or drops                 |
-| `run-with-stats`         | `(poly ((t type) (e effect)) (subr (maxeff e observes) ((subr e () t)) (productof (value t) (stats run-stats))))` | Runs the thunk between `telemetry-begin` and `telemetry-end`          |
+| `run-with-stats`         | `(poly ((t type) (e effect)) (subr (maxeff e observes) ((subr e () t)) (tupof (value t) (stats run-stats))))` | Runs the thunk between `telemetry-begin` and `telemetry-end`          |
 
 `(time e)` is a derived form, `(run-with-stats (lambda () e))`, as in
 Larceny's `macros.sch`. The statistics type is a product, so it is
@@ -1441,7 +1441,7 @@ immutable, pure to take apart with `extract`, and printed with its labels:
 
 ```
 (define-type run-stats
-  (productof (real-ns nat) (cpu-ns nat) (gc-ns nat) (max-pause-ns nat)
+  (tupof (real-ns nat) (cpu-ns nat) (gc-ns nat) (max-pause-ns nat)
              (words nat) (region-words nat) (copied nat)
              (minor nat) (major nat) (peak-words nat)))
 ```

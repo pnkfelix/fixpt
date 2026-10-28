@@ -111,7 +111,7 @@ Types:
     | (bloblet (fields τ…) ρ) | (bloblet (frozen τ…) ρ)
     | (place π)
     | (prompt-tag τ τ φ ρ) | (composable τ τ φ ρ) | (mark-key τ ρ)
-    | (productof (l τ)…) | (sumof (l τ)…)
+    | (tupof (l τ)…) | (oneof (l τ)…)
     | (nlist τ s ρ) | (nlist τ ∃ ρ)
     | N[d…]                                        a generative type
     | μα.τ                                         contractive (§4.7)
@@ -186,8 +186,8 @@ compared coinductively: Amadio–Cardelli; `check.rs:1366–1552`):
 | mutable `pairof`, bloblet  | same region, contents invariant                                       |
 | frozen `pairof`, bloblet   | `(finite π) ≤ (const π)`; contents covariant                          |
 | `nlist`                    | frozen region order, `Φ ⊢ s = s′` or target `∃`, elements covariant   |
-| `productof`                | same labels in order, fields covariant                                |
-| `sumof`                    | each tag of the left is on the right, covariant (width)               |
+| `tupof`                | same labels in order, fields covariant                                |
+| `oneof`                    | each tag of the left is on the right, covariant (width)               |
 | `prompt-tag`, `mark-key`   | invariant                                                             |
 | `composable`               | as a `subr` of effect `φ ∪ goto ρ ∪ comefrom ρ`; also `≤` that `subr` |
 | `N[d…] ≤ N[d′…]`           | argument by argument, by declared variance; regions invariant         |

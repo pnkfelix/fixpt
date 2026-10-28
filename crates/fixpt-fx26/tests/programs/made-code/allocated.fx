@@ -73,7 +73,7 @@
 
 ;; The register `role` is in, of a routine's inputs; -1 if none.
 (define* role-reg (subr (maxeff (read @globals) spin)
-                       ((listof (productof (name string) (registers (listof int acyclic))) acyclic)
+                       ((listof (tupof (name string) (registers (listof int acyclic))) acyclic)
                         string)
                        int)
   (lambda (in role)

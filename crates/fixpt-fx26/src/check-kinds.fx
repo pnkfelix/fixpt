@@ -53,7 +53,7 @@
         (let* ((v (extract (car ps) 1)) (k (extract (car ps) 2))
                (w (k-new-dvar-of (k-dvar-name v) k))
                (rest (k-fresh-binders (cdr ps))))
-          (the k-binders (cons (product (1 w) (2 k)) rest))))))
+          (the k-binders (cons (tup (1 w) (2 k)) rest))))))
 ;; The `g`th generative type as a description function of kind `want`,
 ;; `(dlambda ((p k) …) (name p …))`; -1 if it is not of that kind.
 (define k-generative-fun (->* (int int) int)

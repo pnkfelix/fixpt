@@ -278,7 +278,7 @@
       ((391) "%fx26-parse-number") ((392) "%fx26-parse-nat") ((393) "%fx26-bytevector")
       ((394) "%fx26-byte?") ((395) "%fx26-fixnum?") ((396) "%fx26-nat?") ((397) "%fx26-unit-cell")
       ((398) "%fx26-procedure?") ((399) "%fx26-array?") ((400) "%fx26-f32?") ((401) "%fx26-box?")
-      ((402) "%fx26-sum?") ((403) "%fx26-product?") ((404) "%fx26-nil-cell")
+      ((402) "%fx26-one?") ((403) "%fx26-tup?") ((404) "%fx26-nil-cell")
       ((405) "%fx26-closure-cell") ((406) "%fx26-close-over-word!") ((407) "%fx26-convert")
       ((408) "%fx26-adapted") ((409) "%fx26-sum-cell") ((410) "%fx26-pair-cell")
       ((411) "%fx26-product-cell") ((412) "%fx26-make-global") ((413) "%fx26-global-writes")

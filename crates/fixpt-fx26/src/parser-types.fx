@@ -61,13 +61,13 @@
   (e-float f64 int int int)
   (e-sym symbol int int int)
   (e-unit int int int)
-  (e-lambda (listof (productof (1 symbol) (2 syns-a)) acyclic) exp int int int)
+  (e-lambda (listof (tupof (1 symbol) (2 syns-a)) acyclic) exp int int int)
   (e-app exp (listof exp acyclic) int int int)
   (e-plambda syn exp int int int)
   (e-proj exp syns-a int int int)
   (e-if exp exp exp int int int)
-  (e-letrec (listof (productof (1 symbol) (2 syn) (3 exp)) acyclic) exp int int int)
-  (e-let (listof (productof (1 symbol) (2 exp)) acyclic) exp int int int)
+  (e-letrec (listof (tupof (1 symbol) (2 syn) (3 exp)) acyclic) exp int int int)
+  (e-let (listof (tupof (1 symbol) (2 exp)) acyclic) exp int int int)
   (e-begin (listof exp acyclic) int int int)
   (e-prompt exp exp exp int int int)
   ;; `(letregion name body …)`, `(letrena name body …)` or `(letreap name
@@ -84,20 +84,20 @@
   (e-convention syn exp int int int)
   ;; A bloblet form, by name, with its field index, or -1, and its datum.
   (e-bloblet symbol int (listof exp acyclic) k-datums int int int)
-  (e-product (listof (productof (1 symbol) (2 exp)) acyclic) int int int)
+  (e-product (listof (tupof (1 symbol) (2 exp)) acyclic) int int int)
   ;; `(extract e label)`, and its datum.
   (e-extract exp symbol k-datums int int int)
   (e-sum symbol exp int int int)
   ;; Arms: the tag, whether it takes a product apart, the names, the body.
   ;; Then, as `e-extract`'s, its datum (a flat sum's layout).
-  (e-tagcase exp (listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) acyclic)
-             (listof (productof (1 symbol) (2 exp)) acyclic) k-datums int int int)
+  (e-tagcase exp (listof (tupof (1 symbol) (2 bool) (3 names) (4 exp)) acyclic)
+             (listof (tupof (1 symbol) (2 exp)) acyclic) k-datums int int int)
   ;; `(module item …)` (`docs/research/first-class-modules.md`): each item
   ;; what it is (0 `define-generative`, 1 `define-type`, 2 `define`, 3
   ;; `define-rec`), the names it defines, their types (a `define`'s, none or
   ;; one), and its expressions: the values, or an abstract type's two
   ;; conversions, each `(lambda (x) x)` spanning the item.
-  (e-module (listof (productof (1 int) (2 names) (3 syns-a) (4 (listof exp acyclic))) acyclic)
+  (e-module (listof (tupof (1 int) (2 names) (3 syns-a) (4 (listof exp acyclic))) acyclic)
             int int int)
   ;; `(with module body …)`: the body, with the module's values in scope.
   (e-with symbol exp int int int))
@@ -107,7 +107,7 @@
 (define-datatype top
   (t-define symbol syns-a exp int int)
   ;; `(define-rec (name type lambda) …)`: a top-level `letrec`.
-  (t-define-rec (listof (productof (1 symbol) (2 syn) (3 exp)) acyclic) int int)
+  (t-define-rec (listof (tupof (1 symbol) (2 syn) (3 exp)) acyclic) int int)
   (t-define-type syn syn int int)
   (t-define-effect syn syn int int)
   ;; `(define-convention name clause …)`: its name and the whole form, read
@@ -125,12 +125,12 @@
 ;; The trees' lists: of expressions, a `lambda`'s parameters, a `letrec`'s
 ;; and a `let`'s bindings, a `tagcase`'s arms, and top-level forms.
 (define-type exp-list (listof exp acyclic))
-(define-type param-list (listof (productof (1 symbol) (2 syns-a)) acyclic))
-(define-type letrec-list (listof (productof (1 symbol) (2 syn) (3 exp)) acyclic))
-(define-type let-list (listof (productof (1 symbol) (2 exp)) acyclic))
-(define-type arm-list (listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) acyclic))
+(define-type param-list (listof (tupof (1 symbol) (2 syns-a)) acyclic))
+(define-type letrec-list (listof (tupof (1 symbol) (2 syn) (3 exp)) acyclic))
+(define-type let-list (listof (tupof (1 symbol) (2 exp)) acyclic))
+(define-type arm-list (listof (tupof (1 symbol) (2 bool) (3 names) (4 exp)) acyclic))
 (define-type top-list (listof top acyclic))
-(define-type mod-item (productof (1 int) (2 names) (3 syns-a) (4 exp-list)))
+(define-type mod-item (tupof (1 int) (2 names) (3 syns-a) (4 exp-list)))
 (define-type mod-items (listof mod-item acyclic))
 
 (define-datatype presult (p-ok (listof top acyclic)) (p-err string int int))
@@ -143,5 +143,5 @@
 ;; not the file's but the one expression its `.fasl` is read as
 ;; (`docs/research/fasl.md`).
 (define-type loaded-file
-  (productof (1 int) (2 int) (3 string) (4 string) (5 syns-a) (6 string) (7 string) (8 bool)))
+  (tupof (1 int) (2 int) (3 string) (4 string) (5 syns-a) (6 string) (7 string) (8 bool)))
 (define-type loaded-files (listof loaded-file acyclic))

@@ -10,38 +10,38 @@
 (define-type k-datum (select check-env-types k-datum))
 (import check-types-types (type k-eff k-ids k-named k-narrows k-regions k-steps k-ty))
 ;; Types, and the effect of all.
-(define-type k-types-eff (productof (1 k-ids) (2 k-eff)))
+(define-type k-types-eff (tupof (1 k-ids) (2 k-eff)))
 ;; What a call's arguments were found to be before they are checked: types (or -1), effects.
-(define-type k-done (productof (1 (arrayof int @t)) (2 (arrayof k-eff @t))))
+(define-type k-done (tupof (1 (arrayof int @t)) (2 (arrayof k-eff @t))))
 ;; What is certified so far: variables acyclic, of lengths, and natural.
-(define-type k-certs (productof (1 k-named) (2 k-cert-lens) (3 k-named)))
+(define-type k-certs (tupof (1 k-named) (2 k-cert-lens) (3 k-named)))
 ;; What `p` narrows where it holds (`car`) and where not (`cdr`): the Rust
 ;; checker's `narrowings`. Each narrowing (`check.rs`'s `Narrowed`): a
 ;; variable, its binding's depth, the steps of a path from it (none for the
 ;; variable), the regions they read through, and the type there. Through
 ;; `not`, and through `and` and `or` (`(if a b #f)`, `(if a #t b)`) as
 ;; `k-test-facts` goes.
-(define-type k-nar (productof (1 symbol) (2 int) (3 k-steps) (4 k-regions) (5 int)))
+(define-type k-nar (tupof (1 symbol) (2 int) (3 k-steps) (4 k-regions) (5 int)))
 (define-type k-nars (listof k-nar acyclic))
 (define-type k-narrowing (pairof k-nars k-nars acyclic))
 ;; `x` as a path from a variable: the variable, its binding's depth, and
 ;; the steps, `car`s, `cdr`s and products' fields (none or one).
-(define-type k-path (productof (1 symbol) (2 int) (3 k-steps)))
+(define-type k-path (tupof (1 symbol) (2 int) (3 k-steps)))
 (define-type k-paths (listof k-path acyclic))
 ;; A type and the regions read to reach it (none or one).
-(define-type k-reached (listof (productof (1 int) (2 k-regions)) acyclic))
+(define-type k-reached (listof (tupof (1 int) (2 k-regions)) acyclic))
 ;; What checking an `if`'s branches puts back as it goes: what was certified, the size
 ;; facts, and what was narrowed, before; what its test shows when it holds, and when not;
 ;; what it narrows so; and how many paths' facts there were.
 (define-type k-tested
-  (productof (1 k-certs) (2 k-fact-list) (3 k-branch-facts) (4 k-narrows) (5 k-narrowing)
+  (tupof (1 k-certs) (2 k-fact-list) (3 k-branch-facts) (4 k-narrows) (5 k-narrowing)
              (6 int)))
 ;;; Bounds (`TODO.md` §66): an argument a type binder bounded only from
 ;;; above (`check-bounds.fx`) is checked against says what it is.
 ;; The last call checked against a type: which it is, and its own type there
 ;; (the Rust checker's `checked_call`).
 (define-type k-at (select check-types-types k-at))
-(define-type k-call-checked (productof (1 k-at) (2 int)))
+(define-type k-call-checked (tupof (1 k-at) (2 int)))
 ;; A type, or none: none or one.
 (define-type k-maybe-ty (listof k-ty acyclic))
 
@@ -311,7 +311,7 @@
             (val k-with-used
                  (subr (maxeff (alloc @t) (read @globals) (read @t))
                        (k-parts k-names int)
-                       (productof (1 k-parts) (2 k-ids))))
+                       (tupof (1 k-parts) (2 k-ids))))
             (val k-widen-nil-tail
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (int k-binders k-solved)

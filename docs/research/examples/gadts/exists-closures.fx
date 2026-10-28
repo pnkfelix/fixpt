@@ -5,15 +5,15 @@
 ;;;   data Counter where MkCounter :: a -> (a -> a) -> (a -> Int) -> Counter
 ;;; becomes a counter that knows its own next state. Two counters with
 ;;; different hidden states (an int, a string) share one type.
-(define-type counter (productof (next (subr spin () counter)) (get (subr pure () int))))
+(define-type counter (tupof (next (subr spin () counter)) (get (subr pure () int))))
 (define by-int (subr pure (int) counter)
   (letrec ((mk (subr pure (int) counter)
-             (lambda (n) (product (next (lambda () (mk (+ n 1)))) (get (lambda () n))))))
+             (lambda (n) (tup (next (lambda () (mk (+ n 1)))) (get (lambda () n))))))
     mk))
 (define by-string (subr pure (string) counter)
   (letrec ((mk (subr pure (string) counter)
              (lambda (s)
-               (product (next (lambda () (mk (string-append s "x"))))
+               (tup (next (lambda () (mk (string-append s "x"))))
                         (get (lambda () (string-length s)))))))
     mk))
 (define step (subr spin (counter) counter) (lambda (c) ((extract c next))))

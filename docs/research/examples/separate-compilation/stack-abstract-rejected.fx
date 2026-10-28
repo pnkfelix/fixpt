@@ -3,7 +3,7 @@
 
 ;;; ---- stack.fx ----
 (define-type (stack-ops (s type))
-  (productof (empty s)
+  (tupof (empty s)
              (push (subr pure (int s) s))
              (top  (subr pure (s) int))))
 

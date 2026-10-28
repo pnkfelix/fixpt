@@ -8,5 +8,5 @@
     (define value (subr pure (t) int) (lambda (c) (down-t c)))))
 (define-type reordered
   (moduleof (abs t type) (val value (subr pure (t) int)) (val inc (subr pure (t) t)) (val zero t)))
-(define one (subr pure (reordered) int) (lambda (m) (with m (value (inc zero)))))
-(one counter)
+(define use (subr pure (reordered) int) (lambda (m) (with m (value (inc zero)))))
+(use counter)

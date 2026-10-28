@@ -182,14 +182,14 @@
           bs
           (let ((x (c-plain-fx (extract (car bs) 2))))
             (the c-binds
-              (cons (product (1 (extract (car bs) 1)) (2 x)) (c-plain-named (cdr bs))))))))
+              (cons (tup (1 (extract (car bs) 1)) (2 x)) (c-plain-named (cdr bs))))))))
   (c-plain-recs (->* (c-recs) c-recs)
     (lambda (bs)
       (if (null? bs)
           bs
           (let ((b (car bs)))
             (the c-recs
-              (cons (product (1 (extract b 1)) (2 (extract b 2)) (3 (c-plain-fx (extract b 3))))
+              (cons (tup (1 (extract b 1)) (2 (extract b 2)) (3 (c-plain-fx (extract b 3))))
                     (c-plain-recs (cdr bs))))))))
   (c-plain-items (->* (mod-items) mod-items)
     (lambda (items)
@@ -197,7 +197,7 @@
           items
           (let ((it (car items)))
             (the mod-items
-              (cons (product (1 (extract it 1)) (2 (extract it 2)) (3 (extract it 3))
+              (cons (tup (1 (extract it 1)) (2 (extract it 2)) (3 (extract it 3))
                              (4 (c-plain-all (extract it 4))))
                     (c-plain-items (cdr items))))))))
   (c-plain-arms (->* (c-cases) c-cases)
@@ -206,7 +206,7 @@
           arms
           (let ((arm (car arms)))
             (the c-cases
-              (cons (product (1 (extract arm 1)) (2 (extract arm 2)) (3 (extract arm 3))
+              (cons (tup (1 (extract arm 1)) (2 (extract arm 2)) (3 (extract arm 3))
                              (4 (c-plain-fx (extract arm 4))))
                     (c-plain-arms (cdr arms)))))))))
 
@@ -273,14 +273,14 @@
           bs
           (let ((x (c-resolve-extracts (extract (car bs) 2))))
             (the c-binds
-              (cons (product (1 (extract (car bs) 1)) (2 x)) (c-resolve-named (cdr bs))))))))
+              (cons (tup (1 (extract (car bs) 1)) (2 x)) (c-resolve-named (cdr bs))))))))
   (c-resolve-letrec (->* (c-recs) c-recs)
     (lambda (bs)
       (if (null? bs)
           bs
           (let ((x (c-resolve-extracts (extract (car bs) 3))))
             (the c-recs
-              (cons (product (1 (extract (car bs) 1)) (2 (extract (car bs) 2)) (3 x))
+              (cons (tup (1 (extract (car bs) 1)) (2 (extract (car bs) 2)) (3 x))
                     (c-resolve-letrec (cdr bs))))))))
   (c-resolve-arms (->* (c-cases) c-cases)
     (lambda (arms)
@@ -288,19 +288,19 @@
           arms
           (let ((arm (car arms)) (x (c-resolve-extracts (extract (car arms) 4))))
             (the c-cases
-              (cons (product (1 (extract arm 1)) (2 (extract arm 2)) (3 (extract arm 3)) (4 x))
+              (cons (tup (1 (extract arm 1)) (2 (extract arm 2)) (3 (extract arm 3)) (4 x))
                     (c-resolve-arms (cdr arms)))))))))
 
 ;; `n`'s definition, of `ps` and `body`, the word compiled last: to be
 ;; inlined, as it sees the globals seen now.
 (define c-inline-of (->* (symbol c-params exp) c-inline)
-  (lambda (n ps body) (product (1 n) (2 (car (get c-last-word))) (3 ps) (4 body) (5 (c-genv-now)))))
+  (lambda (n ps body) (tup (1 n) (2 (car (get c-last-word))) (3 ps) (4 body) (5 (c-genv-now)))))
 
 ;; The same, to be specialized: `found` is the place of the parameter it
 ;; only calls, and its arity.
 (define c-special-of (->* (symbol c-params exp (pairof int int @k)) c-special)
   (lambda (n ps body found)
-    (product (1 n) (2 (car (get c-last-word))) (3 ps) (4 body) (5 (c-genv-now))
+    (tup (1 n) (2 (car (get c-last-word))) (3 ps) (4 body) (5 (c-genv-now))
              (6 (car found)) (7 (cdr found)))))
 
 ;; A definition of `n` as a lambda just compiled: inlined where it is

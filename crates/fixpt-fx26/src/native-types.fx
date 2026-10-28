@@ -11,7 +11,7 @@
 (define-type n-ints (arrayof int @k))
 (define-type n-bools (arrayof bool @k))
 (define-type n-instrs (listof int @k))
-(define-type n-assembled (productof (1 n-instrs) (2 n-instrs)))
+(define-type n-assembled (tupof (1 n-instrs) (2 n-instrs)))
 ;; A branch to patch: where it is, its label, and for a conditional one
 ;; its condition or register.
 (define-datatype n-fix
@@ -21,7 +21,7 @@
   (fix-cbnz int int int))
 ;; Traps raised in the code being emitted, placed after it: label, code,
 ;; detail; newest first.
-(define-type n-stub-list (listof (productof (1 int) (2 int) (3 int)) @k))
+(define-type n-stub-list (listof (tupof (1 int) (2 int) (3 int)) @k))
 
 ;;; ------------------------------------------------------------ signatures
 

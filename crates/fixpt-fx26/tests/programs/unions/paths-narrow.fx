@@ -13,6 +13,6 @@
   (lambda (x b) (if (int? (car x)) (begin (set b 1) (+ (car x) 1)) 0)))
 (define* through-heap (subr (write @heap) (frozen (ref int @heap)) int)
   (lambda (x b) (if (int? (car x)) (begin (set b 1) (+ (car x) 1)) 0)))
-(define* field (subr pure ((productof (a v))) int)
+(define* field (subr pure ((tupof (a v))) int)
   (lambda (p) (if (int? (extract p a)) (+ (extract p a) 1) 0)))
-(field (product (a 41)))
+(field (tup (a 41)))

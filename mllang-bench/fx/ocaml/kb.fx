@@ -115,25 +115,25 @@
 (define-datatype term (t-var int) (t-term string (listof term @heap)))
 (define-type terms (listof term @heap))
 (define-type ints (listof int @heap))
-(define-type binding (productof (v int) (t term)))
+(define-type binding (tupof (v int) (t term)))
 (define-type subst (listof binding @heap))
-(define-type tpair (productof (fst term) (snd term)))
+(define-type tpair (tupof (fst term) (snd term)))
 (define-type tpairs (listof tpair @heap))
-(define-type super-item (productof (u ints) (s subst)))
+(define-type super-item (tupof (u ints) (s subst)))
 (define-type supers (listof super-item @heap))
-(define-type rule (productof (number int) (numvars int) (lhs term) (rhs term)))
+(define-type rule (tupof (number int) (numvars int) (lhs term) (rhs term)))
 (define-type rules (listof rule @heap))
-(define-type tpairs-pair (productof (fst tpairs) (snd tpairs)))
-(define-type terms-pair (productof (fst terms) (snd terms)))
+(define-type tpairs-pair (tupof (fst tpairs) (snd tpairs)))
+(define-type terms-pair (tupof (fst terms) (snd terms)))
 
 (define-datatype outcome
   (ok-term term)
   (ok-terms (listof term @heap))
   (ok-bool bool)
-  (ok-subst (listof (productof (v int) (t term)) @heap))
-  (ok-supers (listof (productof (u (listof int @heap)) (s (listof (productof (v int) (t term)) @heap))) @heap))
-  (ok-terms-pair (productof (fst (listof term @heap)) (snd (listof term @heap))))
-  (ok-rules (listof (productof (number int) (numvars int) (lhs term) (rhs term)) @heap))
+  (ok-subst (listof (tupof (v int) (t term)) @heap))
+  (ok-supers (listof (tupof (u (listof int @heap)) (s (listof (tupof (v int) (t term)) @heap))) @heap))
+  (ok-terms-pair (tupof (fst (listof term @heap)) (snd (listof term @heap))))
+  (ok-rules (listof (tupof (number int) (numvars int) (lhs term) (rhs term)) @heap))
   (failed))
 
 ;; exception Failure, and exception Not_found
@@ -224,7 +224,7 @@
                    (t-var (v)
                      (if (list-mem-assoc v subst)
                          (if (term=? t2 (list-assoc v subst)) subst (failwith "matching"))
-                         (cons (product (v v) (t t2)) subst)))
+                         (cons (tup (v v) (t t2)) subst)))
                    (t-term (op1 sons1)
                      (tagcase t2
                        (t-term (op2 sons2)
@@ -238,7 +238,7 @@
 
 (define* compsubst (subr kb (subst subst) subst)
   (lambda (subst1 subst2)
-    (list-append (list-map (lambda ((b binding)) (product (v (extract b v)) (t (substitute subst1 (extract b t)))))
+    (list-append (list-map (lambda ((b binding)) (tup (v (extract b v)) (t (substitute subst1 (extract b t)))))
                            subst2)
                  subst1)))
 
@@ -254,13 +254,13 @@
       (t-var (n1)
         (cond ((term=? term1 term2) nil)
               ((occurs n1 term2) (failwith "unify"))
-              (else (cons (product (v n1) (t term2)) nil))))
+              (else (cons (tup (v n1) (t term2)) nil))))
       (t-term (op1 sons1)
         (tagcase term2
           (t-var (n2)
             (if (occurs n2 term1)
                 (failwith "unify")
-                (cons (product (v n2) (t term1)) nil)))
+                (cons (tup (v n2) (t term1)) nil)))
           (t-term (op2 sons2)
             (if (string=? op1 op2)
                 (list-fold-left2 (lambda ((s subst) (t1 term) (t2 term))
@@ -310,9 +310,9 @@
            (counter (the (ref int @heap) (new 0)))
            (subst (list-map (lambda ((v int))
                               (begin (set counter (+ (get counter) 1))
-                                     (product (v v) (t (t-var (get counter))))))
+                                     (tup (v v) (t (t-var (get counter))))))
                             (list-rev all-vars))))
-      (product (number num)
+      (tup (number num)
                (numvars (get counter))
                (lhs (substitute subst m))
                (rhs (substitute subst n))))))
@@ -420,21 +420,21 @@
     (if (null? l)
         (failwith "rem_eq")
         (let ((y (car l)))
-          (if (equiv (product (fst x) (snd y))) (cdr l) (cons y (rem-eq equiv x (cdr l))))))))
+          (if (equiv (tup (fst x) (snd y))) (cdr l) (cons y (rem-eq equiv x (cdr l))))))))
 
 (define* diff-eq (subr kb ((subr kb (tpair) bool) terms terms) terms-pair)
   (lambda (equiv x y)
     (letrec ((diffrec (subr kb (terms terms) terms-pair)
                (lambda (a b)
                  (if (null? a)
-                     (product (fst a) (snd b))
+                     (tup (fst a) (snd b))
                      (let ((h (car a)) (t (cdr a)))
                        (tagcase (prompt failure (ok-terms-pair (diffrec t (rem-eq equiv h b)))
                                   (lambda (u) (failed)))
                          (ok-terms-pair (p) p)
                          (else z
                            (let ((p (diffrec t b)))
-                             (product (fst (cons h (extract p fst))) (snd (extract p snd)))))))))))
+                             (tup (fst (cons h (extract p fst))) (snd (extract p snd)))))))))))
       (if (> (length-of x) (length-of y)) (diffrec y x) (diffrec x y)))))
 
 ;; Multiset extension of order
@@ -451,7 +451,7 @@
                   equal-v
                   (if (list-for-all
                        (lambda ((n term))
-                         (list-exists (lambda ((m term)) (gt-ord order (product (fst m) (snd n)))) l1))
+                         (list-exists (lambda ((m term)) (gt-ord order (tup (fst m) (snd n)))) l1))
                        l2)
                       greater-v
                       notge-v))))
@@ -473,15 +473,15 @@
                                  ((null? l2) greater-v)
                                  (else
                                   (let ((x1 (car l1)) (x2 (car l2)))
-                                    (tagcase (order (product (fst x1) (snd x2)))
+                                    (tagcase (order (tup (fst x1) (snd x2)))
                                       (o-greater ()
-                                        (if (list-for-all (lambda ((n2 term)) (gt-ord order (product (fst m) (snd n2))))
+                                        (if (list-for-all (lambda ((n2 term)) (gt-ord order (tup (fst m) (snd n2))))
                                                           (cdr l2))
                                             greater-v
                                             notge-v))
                                       (o-equal () (lexrec (cdr l1) (cdr l2)))
                                       (o-notge ()
-                                        (if (list-exists (lambda ((m2 term)) (ge-ord order (product (fst m2) (snd n))))
+                                        (if (list-exists (lambda ((m2 term)) (ge-ord order (tup (fst m2) (snd n))))
                                                          (cdr l1))
                                             greater-v
                                             notge-v)))))))))
@@ -505,12 +505,12 @@
                              (t-term (op2 sons2)
                                (tagcase (op-order op1 op2)
                                  (o-greater ()
-                                   (if (list-for-all (lambda ((n2 term)) (gt-ord rporec (product (fst m) (snd n2)))) sons2)
+                                   (if (list-for-all (lambda ((n2 term)) (gt-ord rporec (tup (fst m) (snd n2)))) sons2)
                                        greater-v
                                        notge-v))
                                  (o-equal () (ext rporec pair))
                                  (o-notge ()
-                                   (if (list-exists (lambda ((m2 term)) (ge-ord rporec (product (fst m2) (snd n)))) sons1)
+                                   (if (list-exists (lambda ((m2 term)) (ge-ord rporec (tup (fst m2) (snd n)))) sons1)
                                        greater-v
                                        notge-v))))))))))))
       rporec)))
@@ -528,11 +528,11 @@
                      (if (null? l)
                          nil
                          (list-append
-                          (list-map (lambda ((it super-item)) (the super-item (product (u (cons n (extract it u))) (s (extract it s)))))
+                          (list-map (lambda ((it super-item)) (the super-item (tup (u (cons n (extract it u))) (s (extract it s)))))
                                     (super m (car l)))
                           (collate (+ n 1) (cdr l)))))))
           (let ((insides (collate 1 sons)))
-            (tagcase (prompt failure (ok-supers (cons (product (u nil) (s (unify m n))) insides))
+            (tagcase (prompt failure (ok-supers (cons (tup (u nil) (s (unify m n))) insides))
                        (lambda (u) (failed)))
               (ok-supers (l) l)
               (else x insides)))))
@@ -548,7 +548,7 @@
                      (if (null? l)
                          nil
                          (list-append
-                          (list-map (lambda ((it super-item)) (the super-item (product (u (cons n (extract it u))) (s (extract it s)))))
+                          (list-map (lambda ((it super-item)) (the super-item (tup (u (cons n (extract it u))) (s (extract it s)))))
                                     (super m (car l)))
                           (collate (+ n 1) (cdr l)))))))
           (collate 1 sons)))
@@ -560,7 +560,7 @@
     (let ((l1 (extract e1 fst)) (r1 (extract e1 snd)) (l2 (extract e2 fst)) (r2 (extract e2 snd)))
       (list-map (lambda ((it super-item))
                   (let ((subst (extract it s)))
-                    (product (fst (substitute subst (replace l2 (extract it u) r1)))
+                    (tup (fst (substitute subst (replace l2 (extract it u) r1)))
                              (snd (substitute subst r2)))))
                 (super l1 l2)))))
 
@@ -570,7 +570,7 @@
     (let ((l1 (extract e1 fst)) (r1 (extract e1 snd)) (l2 (extract e2 fst)) (r2 (extract e2 snd)))
       (list-map (lambda ((it super-item))
                   (let ((subst (extract it s)))
-                    (product (fst (substitute subst (replace l2 (extract it u) r1)))
+                    (tup (fst (substitute subst (replace l2 (extract it u) r1)))
                              (snd (substitute subst r2)))))
                 (super-strict l1 l2)))))
 
@@ -587,7 +587,7 @@
                  (tagcase t
                    (t-var (k) (t-var (+ k n)))
                    (t-term (op sons) (t-term op (list-map ren-rec sons)))))))
-      (product (fst (ren-rec (extract p fst))) (snd (ren-rec (extract p snd)))))))
+      (tup (fst (ren-rec (extract p fst))) (snd (ren-rec (extract p snd)))))))
 
 ;;;; Completion
 
@@ -603,15 +603,15 @@
            (print-newline))))
 
 (define* partition (poly ((a type)) (subr kb ((subr kb (a) bool) (listof a @heap))
-                                          (productof (yes (listof a @heap)) (no (listof a @heap)))))
+                                          (tupof (yes (listof a @heap)) (no (listof a @heap)))))
   (lambda (p l)
     (if (null? l)
-        (product (yes nil) (no nil))
+        (tup (yes nil) (no nil))
         (let* ((x (car l))
                (r (partition p (cdr l)))
                (l1 (extract r yes))
                (l2 (extract r no)))
-          (if (p x) (product (yes (cons x l1)) (no l2)) (product (yes l1) (no (cons x l2))))))))
+          (if (p x) (tup (yes (cons x l1)) (no l2)) (tup (yes l1) (no (cons x l2))))))))
 
 (define* get-rule (subr kb (int rules) rule)
   (lambda (n l)
@@ -643,9 +643,9 @@
                                  (m2 (mrewrite-all rules m))
                                  (n2 (mrewrite-all rules n)))
                             (cond ((term=? m2 n2) (process failures k l eqs))
-                                  ((greater (product (fst m2) (snd n2))) (enter-rule m2 n2 failures k l eqs))
-                                  ((greater (product (fst n2) (snd m2))) (enter-rule n2 m2 failures k l eqs))
-                                  (else (process (cons (product (fst m2) (snd n2)) failures) k l eqs)))))))
+                                  ((greater (tup (fst m2) (snd n2))) (enter-rule m2 n2 failures k l eqs))
+                                  ((greater (tup (fst n2) (snd m2))) (enter-rule n2 m2 failures k l eqs))
+                                  (else (process (cons (tup (fst m2) (snd n2)) failures) k l eqs)))))))
                   (enter-rule (subr kb (term term tpairs int int tpairs) rules)
                     (lambda (left right failures k l eqs)
                       (let ((new-rule (mk-rule (+ j 1) left right)))
@@ -662,7 +662,7 @@
                                         (mk-rule (extract rule number) (extract rule lhs)
                                                  (mrewrite-all (cons new-rule rules) (extract rule rhs)))))
                                      (irreds (list-map right-reduce irredl))
-                                     (eqs2 (list-map (lambda ((rule rule)) (product (fst (extract rule lhs)) (snd (extract rule rhs))))
+                                     (eqs2 (list-map (lambda ((rule rule)) (tup (fst (extract rule lhs)) (snd (extract rule rhs))))
                                                      redl)))
                                 (kbrec (+ j 1) (cons new-rule irreds) nil k l
                                        (list-append eqs (list-append eqs2 failures))))))))))
@@ -672,7 +672,7 @@
                           (prompt not-found
                             (ok-rules
                              (let* ((rl (get-rule l rules))
-                                    (el (product (fst (extract rl lhs)) (snd (extract rl rhs)))))
+                                    (el (tup (fst (extract rl lhs)) (snd (extract rl rhs)))))
                                (if (= k l)
                                    (process failures k l
                                             (strict-critical-pairs el (rename (extract rl numvars) el)))
@@ -680,7 +680,7 @@
                                        (prompt not-found
                                          (ok-rules
                                           (let* ((rk (get-rule k rules))
-                                                 (ek (product (fst (extract rk lhs)) (snd (extract rk rhs)))))
+                                                 (ek (tup (fst (extract rk lhs)) (snd (extract rk rhs)))))
                                             (process failures k l
                                                      (mutual-critical-pairs el (rename (extract rl numvars) ek)))))
                                          (lambda (u) (failed)))
@@ -697,7 +697,7 @@
 (define* kb-complete (subr kb ((subr kb (tpair) bool) rules rules) unit)
   (lambda (greater complete-rules rules)
     (let* ((n (check-rules complete-rules))
-           (eqs (list-map (lambda ((rule rule)) (product (fst (extract rule lhs)) (snd (extract rule rhs)))) rules))
+           (eqs (list-map (lambda ((rule rule)) (tup (fst (extract rule lhs)) (snd (extract rule rhs)))) rules))
            (completed-rules (kb-completion greater n complete-rules nil n n eqs)))
       (begin
         (print-string "Canonical set found :") (print-newline)
@@ -712,25 +712,25 @@
 (define* geom-rules (subr (alloc @heap) () rules)
   (lambda ()
     (let ((v1 (t-var 1)) (v2 (t-var 2)) (v3 (t-var 3)))
-      (list (product (number 1) (numvars 1)
+      (list (tup (number 1) (numvars 1)
                      (lhs (app2 "*" (leaf "U") v1))
                      (rhs v1))
-            (product (number 2) (numvars 1)
+            (tup (number 2) (numvars 1)
                      (lhs (app2 "*" (app1 "I" v1) v1))
                      (rhs (leaf "U")))
-            (product (number 3) (numvars 3)
+            (tup (number 3) (numvars 3)
                      (lhs (app2 "*" (app2 "*" v1 v2) v3))
                      (rhs (app2 "*" v1 (app2 "*" v2 v3))))
-            (product (number 4) (numvars 0)
+            (tup (number 4) (numvars 0)
                      (lhs (app2 "*" (leaf "A") (leaf "B")))
                      (rhs (app2 "*" (leaf "B") (leaf "A"))))
-            (product (number 5) (numvars 0)
+            (tup (number 5) (numvars 0)
                      (lhs (app2 "*" (leaf "C") (leaf "C")))
                      (rhs (leaf "U")))
-            (product (number 6) (numvars 0)
+            (tup (number 6) (numvars 0)
                      (lhs (app2 "*" (leaf "C") (app2 "*" (leaf "A") (app1 "I" (leaf "C")))))
                      (rhs (app1 "I" (leaf "A"))))
-            (product (number 7) (numvars 0)
+            (tup (number 7) (numvars 0)
                      (lhs (app2 "*" (leaf "C") (app2 "*" (leaf "B") (app1 "I" (leaf "C")))))
                      (rhs (leaf "B")))))))
 

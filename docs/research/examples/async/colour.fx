@@ -3,13 +3,13 @@
 ;;; `generator.fx`) and with one that writes a ref. Python needs `for` and
 ;;; `async for`, and a second copy of any higher-order helper.
 (define-effect D (maxeff spin (read @l) (read (globals g yield-int for-each xs))))
-(define-type step (productof (v int) (k (composable unit int D @p))))
+(define-type step (tupof (v int) (k (composable unit int D @p))))
 (define g (prompt-tag int step D @p) (make-continuation-prompt-tag))
 
 (define* yield-int (subr (maxeff (goto @p) (comefrom @p)) (int) unit)
   (lambda (x)
     (call-with-composable-continuation
-      (lambda (k) (abort-current-continuation g (product (v x) (k k))))
+      (lambda (k) (abort-current-continuation g (tup (v x) (k k))))
       g)))
 
 (define for-each

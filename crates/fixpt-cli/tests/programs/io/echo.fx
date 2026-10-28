@@ -1,7 +1,7 @@
 ; The standard input, a line at a time (TODO.md §84): each line written back
 ; numbered, its ending left off; a line not UTF-8 a failure the program
 ; sees, `invalid-data`; at the end, the count of lines, which is the status.
-(define-type line-result (sumof (line string) (eof unit) (failed io-error)))
+(define-type line-result (oneof (line string) (eof unit) (failed io-error)))
 (define said (subr (io stdout) (int string) unit)
   (lambda (n s)
     (tagcase (write-out (string-append (int->string n) (string-append ": " (string-append s "\n"))))

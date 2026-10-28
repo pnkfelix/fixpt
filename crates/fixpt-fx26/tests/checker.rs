@@ -75,7 +75,7 @@ fn small_programs() {
     let _ = both("(the (listof int @l) (cons 1 (cons 2 nil)))");
     let _ = both("(car (cons 1 #t))");
     let _ = both("(let ((r (the (ref int @r) (new 1)))) (begin (set r (+ (get r) 41)) (get r)))");
-    let _ = both("(extract (product (a 1) (b \"two\")) b)");
+    let _ = both("(extract (tup (a 1) (b \"two\")) b)");
     let _ = both("(if 1 2 3)");
     let _ = both("(+ 1 #t)");
     let _ = both("(lambda (x) x)");

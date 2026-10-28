@@ -39,10 +39,10 @@
 ;;; ------------------------------------------------------------ terms
 
 (define-datatype (head-of (t type))
-  (mk-head string (ref (listof (productof (left t) (right t)) @heap) @heap)))
+  (mk-head string (ref (listof (tupof (left t) (right t)) @heap) @heap)))
 (define-datatype term (var int) (prop (head-of term) (listof term @heap)))
 (define-type head (head-of term))
-(define-type lemma (productof (left term) (right term)))
+(define-type lemma (tupof (left term) (right term)))
 (define-type lemma-list (listof lemma @heap))
 (define-type terms (listof term @heap))
 (define-datatype binding (bind int term))
@@ -72,7 +72,7 @@
       (prop (h args)
         (let ((left (car args)) (right (car (cdr args))))
           (tagcase left
-            (prop (lh largs) (tagcase lh (mk-head (n r) (set r (cons (product (left left) (right right)) (get r))))))
+            (prop (lh largs) (tagcase lh (mk-head (n r) (set r (cons (tup (left left) (right right)) (get r))))))
             (var (v) #u))))
       (var (v) #u))))
 

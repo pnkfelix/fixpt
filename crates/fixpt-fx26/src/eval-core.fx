@@ -140,7 +140,7 @@
   (lambda (ws a b k)
     (cond ((null? ws) nil)
           ((ev-at-is? (extract (car ws) 1) a b k)
-           (the ev-with-at (cons (product (1 (extract (car ws) 2)) (2 (extract (car ws) 3))) nil)))
+           (the ev-with-at (cons (tup (1 (extract (car ws) 2)) (2 (extract (car ws) 3))) nil)))
           (else (ev-with-in (cdr ws) a b k)))))
 
 ;; The fields of `fs` at positions `ks`, in order.

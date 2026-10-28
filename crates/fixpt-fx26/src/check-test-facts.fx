@@ -38,9 +38,9 @@
   (lambda (yes no) (the k-branch-facts (cons yes no))))
 ;; The fact `lin ≥ 0`, or `lin = 0`, alone.
 (define k-ge-fact (->* (k-size) k-fact-list)
-  (lambda (lin) (the k-fact-list (cons (product (1 lin) (2 #f)) nil))))
+  (lambda (lin) (the k-fact-list (cons (tup (1 lin) (2 #f)) nil))))
 (define k-eq-fact (->* (k-size) k-fact-list)
-  (lambda (lin) (the k-fact-list (cons (product (1 lin) (2 #t)) nil))))
+  (lambda (lin) (the k-fact-list (cons (tup (1 lin) (2 #t)) nil))))
 ;; `x < y`, as `y - x - 1 ≥ 0`; `x ≤ y`, as `y - x ≥ 0`.
 (define k-lt-fact (->* (k-size k-size) k-fact-list)
   (lambda (x y) (k-ge-fact (k-size-plus (k-size-add-scaled y x -1) -1))))
@@ -181,7 +181,7 @@
                              (th (k-ensures-latent ens #t)) (el (k-ensures-latent ens #f)))
                         (if (and (null? th) (null? el))
                             nil
-                            (the k-latent (cons (product (1 th) (2 el) (3 args)) nil))))))
+                            (the k-latent (cons (tup (1 th) (2 el) (3 args)) nil))))))
                 (else y nil)))))
       (else y nil))))
 ;; Argument `i` of `args` (none or one).
@@ -284,7 +284,7 @@
             (let ((z (k-nat-size n)))
               (if (null? z)
                   nil
-                  (the k-cert-lens (cons (product (1 v) (2 (k-binding-depth v)) (3 (car z))) nil))))
+                  (the k-cert-lens (cons (tup (1 v) (2 (k-binding-depth v)) (3 (car z))) nil))))
             nil))
       (else y nil))))
 ;; Whether `c` and `d` confirm the same.

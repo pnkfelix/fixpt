@@ -8,7 +8,7 @@
 (define-effect ops (read (globals suspend! enqueue! yield! await! resolve! enqueue-all! note!)))
 (define-effect D (maxeff spin Q ops (read (globals sched queue log fut))))
 (define-type task (composable unit unit D @p))
-(define-type promise (ref (sumof (pending (listof task @q)) (resolved int)) @q))
+(define-type promise (ref (oneof (pending (listof task @q)) (resolved int)) @q))
 (define sched (prompt-tag unit (subr Q () unit) D @p) (make-continuation-prompt-tag))
 (define queue (ref (listof task @q) @q) (new nil))
 (define log (ref (listof int @q) @q) (new nil))
@@ -31,7 +31,7 @@
   (lambda (pr)
     (tagcase (get pr)
       (resolved v v)
-      (pending ws (begin (suspend! (lambda (k) (set pr (sum pending (cons k ws)))))
+      (pending ws (begin (suspend! (lambda (k) (set pr (one pending (cons k ws)))))
                          (await! pr))))))
 
 (define* enqueue-all! (subr (maxeff Q spin) ((listof task @q)) unit)
@@ -42,7 +42,7 @@
   (lambda (pr v)
     (tagcase (get pr)
       (resolved u #u)                     ; already resolved: ignored here
-      (pending ws (begin (set pr (sum resolved v))
+      (pending ws (begin (set pr (one resolved v))
                          (enqueue-all! (reverse ws)))))))
 
 (define* run! (subr (maxeff D (goto @p) (comefrom @p)) () unit)
@@ -58,7 +58,7 @@
                       ((subr (maxeff D (goto @p) (comefrom @p)) () unit)) unit)
   (lambda (thunk) (prompt sched (begin (yield!) (thunk)) (lambda (file) (file)))))
 
-(define fut promise (new (sum pending nil)))
+(define fut promise (new (one pending nil)))
 (define* note! (subr Q (int) unit) (lambda (x) (set log (cons x (get log)))))
 
 (spawn! (lambda () (begin (note! 1) (note! (await! fut)))))

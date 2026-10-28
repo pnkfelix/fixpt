@@ -193,24 +193,24 @@
       (prim! '%quote (lambda (xs) (ev-intern (ev-arg xs 0)))))))
 
 (define ev-symbol? (->* (val) bool)
-  (lambda (v) (typecase v (symbol s #t) (sum o (tagcase o (o-unit () #t) (else y #f))) (else #f))))
+  (lambda (v) (typecase v (symbol s #t) (one o (tagcase o (o-unit () #t) (else y #f))) (else #f))))
 
 (define ev-procedure? (->* (val) bool)
   (lambda (v)
     (typecase v
       (procedure p #t)
-      (sum o (tagcase o (o-cont (k) #t) (o-once (k s) #t) (o-esc (k) #t) (else y #f)))
+      (one o (tagcase o (o-cont (k) #t) (o-once (k s) #t) (o-esc (k) #t) (else y #f)))
       (else #f))))
 
 (define ev-array? (->* (val) bool)
   (lambda (v)
-    (typecase v (bloblet a #t) (sum o (tagcase o (o-blob (fs bs) #t) (else y #f))) (else #f))))
+    (typecase v (bloblet a #t) (one o (tagcase o (o-blob (fs bs) #t) (else y #f))) (else #f))))
 
 (define ev-sum? (->* (val) bool)
-  (lambda (v) (typecase v (sum o (tagcase o (o-sum (t x) #t) (else y #f))) (else #f))))
+  (lambda (v) (typecase v (one o (tagcase o (o-sum (t x) #t) (else y #f))) (else #f))))
 
 (define ev-product? (->* (val) bool)
-  (lambda (v) (typecase v (sum o (tagcase o (o-product (fs) #t) (else y #f))) (else #f))))
+  (lambda (v) (typecase v (one o (tagcase o (o-product (fs) #t) (else y #f))) (else #f))))
 
 (define* ev-shape-prims! (subr (maxeff stores spin) () unit)
   (lambda ()
@@ -227,8 +227,8 @@
       (prim! 'procedure? (lambda (xs) (ev-procedure? (ev-arg xs 0))))
       (prim! 'array? (lambda (xs) (ev-array? (ev-arg xs 0))))
       (prim! 'ref? (lambda (xs) (ref? (ev-arg xs 0))))
-      (prim! 'sum? (lambda (xs) (ev-sum? (ev-arg xs 0))))
-      (prim! 'product? (lambda (xs) (ev-product? (ev-arg xs 0)))))))
+      (prim! 'one? (lambda (xs) (ev-sum? (ev-arg xs 0))))
+      (prim! 'tup? (lambda (xs) (ev-product? (ev-arg xs 0)))))))
 
 ;; An i-cell, the machines' own.
 (define as-icell (->* (val) (icell val @v))
@@ -254,7 +254,7 @@
              ((proj %sched (icell val @v) val val) n (as-icell a) b))
             ((= n 26) (begin (ev-preempt-set! a) the-unit))
             ((= n 12)
-             (tagcase ((proj %sched val val (sumof (some val) (none unit))) n a b)
+             (tagcase ((proj %sched val val (oneof (some val) (none unit))) n a b)
                (some t (o-sum 'some t))
                (none u (o-sum 'none the-unit))))
             (else ((proj %sched val val val) n a b))))))
@@ -278,7 +278,7 @@
   (lambda (n c) (the val (o-mstr (make-string (as-int n) (as-char c))))))
 (define ev-string? (->* (val) bool)
   (lambda (v)
-    (or (string? v) (typecase v (sum o (tagcase o (o-mstr (m) #t) (else y #f))) (else #f)))))
+    (or (string? v) (typecase v (one o (tagcase o (o-mstr (m) #t) (else y #f))) (else #f)))))
 (define ev-string-length (->* (val) int)
   (lambda (v) (if (string? v) (string-length v) (string-length (as-mstr v)))))
 (define ev-string-ref (->* (val int) char)
@@ -347,7 +347,7 @@
                    (text s (the val (o-sum 'text s)))
                    (bad k (the val (o-sum 'bad k))))))))))
 
-;; `(sum failed e)`, `e` an `io-error`, as the evaluator's value: a
+;; `(one failed e)`, `e` an `io-error`, as the evaluator's value: a
 ;; product of its kind and detail.
 (define ev-io-failed (->* (io-error) val)
   (lambda (e)
@@ -360,19 +360,19 @@
         (o-sum 'failed
                (o-product (list (cons 'kind (the val (o-sum kind the-unit)))
                                 (cons 'detail (the val (extract e detail))))))))))
-;; What an I/O primitive gave, as the evaluator's value: `(sum done #u)`,
+;; What an I/O primitive gave, as the evaluator's value: `(one done #u)`,
 ;; or a failure.
-(define ev-io-result (->* ((sumof (done unit) (failed io-error))) val)
+(define ev-io-result (->* ((oneof (done unit) (failed io-error))) val)
   (lambda (r) (tagcase r (done u (the val (o-sum 'done the-unit))) (failed e (ev-io-failed e)))))
 ;; What a terminal's primitive gave, as the evaluator's value.
 (define ev-terminal-result
-  (->* ((sumof (done unit) (not-a-terminal unit) (failed io-error))) val)
+  (->* ((oneof (done unit) (not-a-terminal unit) (failed io-error))) val)
   (lambda (r)
     (tagcase r
       (done u (the val (o-sum 'done the-unit)))
       (not-a-terminal u (the val (o-sum 'not-a-terminal the-unit)))
       (failed e (ev-io-failed e)))))
-;; A terminal's size, `(productof (rows int) (columns int))`, as the
+;; A terminal's size, `(tupof (rows int) (columns int))`, as the
 ;; evaluator's value.
 (define ev-size (->* (int int) val)
   (lambda (rows columns)
@@ -482,7 +482,7 @@
       (prim! 'args (lambda (xs) (ev-strings (the (listof string @v) (args)))))
       (prim! 'read-file
              (lambda (xs)
-               (tagcase (the (sumof (data (bytevectorof @v)) (failed io-error))
+               (tagcase (the (oneof (data (bytevectorof @v)) (failed io-error))
                              (read-file (as-str (ev-arg xs 0))))
                  (data b (the val (o-sum 'data (o-bytes b))))
                  (failed e (ev-io-failed e)))))
@@ -490,7 +490,7 @@
              (lambda (xs) (type-at (as-str (ev-arg xs 0)) (as-int (ev-arg xs 1)))))
       (prim! 'list-dir
              (lambda (xs)
-               (tagcase (the (sumof (names (listof string @v)) (failed io-error))
+               (tagcase (the (oneof (names (listof string @v)) (failed io-error))
                              (list-dir (as-str (ev-arg xs 0))))
                  (names ns (the val (o-sum 'names (ev-strings ns))))
                  (failed e (ev-io-failed e)))))
@@ -500,7 +500,7 @@
       ;; Heist's (`FIXPT-CHANGES.md` F4).
       (prim! 'process-start
              (lambda (xs)
-               (tagcase (the (sumof (started int) (failed io-error))
+               (tagcase (the (oneof (started int) (failed io-error))
                              (process-start (ev-string-list (ev-arg xs 0)) (as-str (ev-arg xs 1))))
                  (started p (the val (o-sum 'started p)))
                  (failed e (ev-io-failed e)))))

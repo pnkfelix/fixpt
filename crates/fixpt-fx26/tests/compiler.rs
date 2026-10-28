@@ -29,9 +29,9 @@ fn small_programs() {
     assert_eq!(three("(let ((r (the (ref int @r) (new 1)))) (begin (set r (+ (get r) 41)) (get r)))"), "42");
     assert_eq!(three("(letrec ((even (subr spin (int) bool) (lambda (n) (if (= n 0) #t (odd (- n 1))))) (odd (subr spin (int) bool) (lambda (n) (if (= n 0) #f (even (- n 1)))))) (even 10))"), "#t");
     assert_eq!(three("(string-append \"ab\" (symbol->string 'cd))"), "\"abcd\"");
-    assert_eq!(three("(sum a 1)"), "#<sum a>");
+    assert_eq!(three("(one a 1)"), "#<one a>");
     assert_eq!(three("((lambda ((x int)) ((lambda ((y int)) (+ x y)) 2)) 40)"), "42");
-    assert_eq!(three("(tagcase (the (sumof (a int) (b (productof (1 int) (2 int)))) (sum b (product (1 3) (2 4)))) (a n n) (b (x y) (+ x y)))"), "7");
+    assert_eq!(three("(tagcase (the (oneof (a int) (b (tupof (1 int) (2 int)))) (one b (tup (1 3) (2 4)))) (a n n) (b (x y) (+ x y)))"), "7");
 }
 
 #[test]
@@ -56,10 +56,10 @@ fn test_programs() {
 #[test]
 fn extract_and_errors() {
     let mut s = common::session();
-    let out = s.compile_with_own_compiler("(extract (product (a 1) (b \"two\") (c #t)) b)").expect("parses");
+    let out = s.compile_with_own_compiler("(extract (tup (a 1) (b \"two\") (c #t)) b)").expect("parses");
     assert_eq!(out, "\"two\"");
-    let out = s.compile_with_own_compiler("(extract (product (a 1)) b)").expect("parses");
-    assert!(out.starts_with("!! check: a (productof (a int)) has no `b`"), "{out}");
+    let out = s.compile_with_own_compiler("(extract (tup (a 1)) b)").expect("parses");
+    assert!(out.starts_with("!! check: a (tupof (a int)) has no `b`"), "{out}");
     let out = s.compile_with_own_compiler("(car (the (listof int @l) nil))").expect("parses");
     assert!(out.starts_with("!! "), "a run-time error is reported: {out}");
 }

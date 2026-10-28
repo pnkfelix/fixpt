@@ -2693,3 +2693,25 @@ of `TODO.md` §141, working on my own.
   otherwise; every consumer must then know the form. Worth it if the
   checking half stays the larger.
 
+
+## `one`, `oneof`, `tup`, `tupof` (2026-10-28)
+
+The user chose the four names and that predicates, shapes and printing
+follow them (`DONE.md` §158). Chosen here:
+1. **The heap's kinds keep their names**, `sum` and `product`
+   (`fixpt-heap`'s `layout.rs`, the `.conv` files, `kind("sum")` in the
+   collectors and compilers): a layout's names, which no program sees and
+   Kayak shares. The primitives `%fx26-sum?` and `%fx26-product?` are
+   `%fx26-one?` and `%fx26-tup?`, since the compilers make their names
+   from the predicates'.
+2. **Rust and FX-26 identifiers inside the implementation keep theirs**
+   (`Ty::Sum`, `Exp::Product`, `e-sum`, `ty-product`, …), and so do the
+   words "a sum" and "a product" in messages and prose: they name the
+   types, which are still sums and products.
+3. **History is not rewritten**: the entries of `TODO.md`, `DONE.md`,
+   `PLAN.md` and this file before today say `sum` as they did. What
+   describes FX-91 or FX-87 (their crates, conformance tests,
+   `divergences.md`) says what those languages have.
+4. **A procedure of a program's own named `one`** is renamed where it is
+   called, since a call would now be read as an injection; a type or a
+   variable named `one` that is never called stays.

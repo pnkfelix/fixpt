@@ -2,9 +2,9 @@
 ; two bytes, then as many as have come, into a bytevector, then the end;
 ; and the terminal's operations, which say the input is no terminal, as a
 ; pipe is not.
-(define-type byte-result (sumof (byte u8) (eof unit) (failed io-error)))
-(define-type count-result (sumof (count int) (eof unit) (failed io-error)))
-(define-type term-result (sumof (done unit) (not-a-terminal unit) (failed io-error)))
+(define-type byte-result (oneof (byte u8) (eof unit) (failed io-error)))
+(define-type count-result (oneof (count int) (eof unit) (failed io-error)))
+(define-type term-result (oneof (done unit) (not-a-terminal unit) (failed io-error)))
 (define said (subr (io stdout) (string) unit)
   (lambda (s) (tagcase (write-out (string-append s "\n")) (done u #u) (failed e #u))))
 (define* bytes (subr (maxeff (io stdin) (io stdout) (read (globals said)) spin) (int) unit)

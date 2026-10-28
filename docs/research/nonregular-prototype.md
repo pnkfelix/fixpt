@@ -55,29 +55,29 @@ afresh, so a table keyed by node identity never recognized a repeat.)
 **Proved, with a lemma** (`nest-same.fx`, `FX26_LEMMAS=1`):
 
 ```
-note: (sumof (none unit) (more (productof (hd int) (tl (nest (productof (l int) (r int))))))) ≤ (sumof (none unit) (more (productof (hd int) (tl (nest2 (productof (l int) (r int))))))): proved with the lemma ∀x1. (nest (productof (l x1) (r x1))) ≤ (nest2 (productof (l x1) (r x1)))
+note: (oneof (none unit) (more (tupof (hd int) (tl (nest (tupof (l int) (r int))))))) ≤ (oneof (none unit) (more (tupof (hd int) (tl (nest2 (tupof (l int) (r int))))))): proved with the lemma ∀x1. (nest (tupof (l x1) (r x1))) ≤ (nest2 (tupof (l x1) (r x1)))
 ```
 
 **Refuted, with a witness** (`nest-other.fx`):
 
 ```
-a (sumof (none unit) (more (productof (hd int) (tl (nest3 (productof (l int) (r bool))))))) is expected here, and this is a (sumof (none unit) (more (productof (hd int) (tl (nest (productof (l int) (r int))))))) — they differ: at tag `more` → field `tl` → tag `more` → field `hd` → field `r`, a int against a bool
+a (oneof (none unit) (more (tupof (hd int) (tl (nest3 (tupof (l int) (r bool))))))) is expected here, and this is a (oneof (none unit) (more (tupof (hd int) (tl (nest (tupof (l int) (r int))))))) — they differ: at tag `more` → field `tl` → tag `more` → field `hd` → field `r`, a int against a bool
 ```
 
 **Unknown** (`three-lemmas.fx`, the types elided):
 
 ```
 — undecided, not refuted: 201 unfoldings without an answer. The pairs of applications on the way down grew:
-    (p1 (productof (l int) (r int))) ≤ (p2 (productof (l int) (r int)))
-      then 200 more, each step X ↦ (productof (l X) (r X)) ≤ X ↦ (productof (l X) (r X))
-  Generalized, they gave the lemma ∀x1. (p1 (productof (l x1) (r x1))) ≤ (p2 (productof (l x1) (r x1))) and the lemma ∀x1. (q1 (productof (l x1) (r x1))) ≤ (q2 (productof (l x1) (r x1))); with 2 lemmas, the budget still ran out, on the way down to:
-      (r1 (productof (l int) (r int))) ≤ (r2 (productof (l int) (r int)))
-        then 200 more, each step X ↦ (productof (l X) (r X)) ≤ X ↦ (productof (l X) (r X)).
+    (p1 (tupof (l int) (r int))) ≤ (p2 (tupof (l int) (r int)))
+      then 200 more, each step X ↦ (tupof (l X) (r X)) ≤ X ↦ (tupof (l X) (r X))
+  Generalized, they gave the lemma ∀x1. (p1 (tupof (l x1) (r x1))) ≤ (p2 (tupof (l x1) (r x1))) and the lemma ∀x1. (q1 (tupof (l x1) (r x1))) ≤ (q2 (tupof (l x1) (r x1))); with 2 lemmas, the budget still ran out, on the way down to:
+      (r1 (tupof (l int) (r int))) ≤ (r2 (tupof (l int) (r int)))
+        then 200 more, each step X ↦ (tupof (l X) (r X)) ≤ X ↦ (tupof (l X) (r X)).
   State a lemma, or name the family where the two meet.
 ```
 
 The first version printed 200 truncated pairs; showing the growth
-instead, `X ↦ (productof (l X) (r X))`, is what made it readable: it names
+instead, `X ↦ (tupof (l X) (r X))`, is what made it readable: it names
 the family and exactly how its index grows.
 
 ## What could not be expressed

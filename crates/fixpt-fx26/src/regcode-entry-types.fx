@@ -6,7 +6,7 @@
 (hide (define regcode-types (load-module "fx26:regcode-types.fx")))
 (define-type rgen (select regcode-types rgen))
 ;; A top-level definition's name and word, in a list (`c-own-now`).
-(define-type rowner (listof (productof (1 symbol) (2 tword)) @k))
+(define-type rowner (listof (tupof (1 symbol) (2 tword)) @k))
 ;; What was made, in a list; none if declined.
 (define-type rgens (listof rgen @k))
 

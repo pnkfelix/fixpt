@@ -15,10 +15,10 @@
 ;; the type, its name, and where in the scope it is; the innermost of each.
 (define-datatype k-atree (a-leaf) (a-node int int symbol int k-atree k-atree))
 (define-type k-atrees (listof k-atree acyclic))
-(define-type k-named-at (listof (productof (1 symbol) (2 int)) acyclic))
+(define-type k-named-at (listof (tupof (1 symbol) (2 int)) acyclic))
 ;; What the branches being checked have learned about sizes: `lin = 0`
 ;; (`#t`) or `lin ≥ 0`, newest first.
-(define-type k-size-fact (productof (1 k-size) (2 bool)))
+(define-type k-size-fact (tupof (1 k-size) (2 bool)))
 ;; Fourier–Motzkin, as the Rust checker's `refuted_below` (`src/sizes.rs`),
 ;; step for step: whether the inequalities in scope, with every size a
 ;; natural, leave no room for `a ≤ -1`.
@@ -27,7 +27,7 @@
 ;; to name cycles by; the names a `moduleof`'s descriptions give what they
 ;; describe, in the components after them, newest first; and the scope's
 ;; `define-type`s by type, in a list of one (`k-abbrev-by`), or none.
-(define-type k-printing (productof (1 k-ids) (2 k-parts) (3 k-atrees)))
+(define-type k-printing (tupof (1 k-ids) (2 k-parts) (3 k-atrees)))
 ;; `(which P …)`, each `(shape i shape)` or `(not (shape i shape))`.
 (define-effect kshows (maxeff (read @globals) (read @t) (alloc @t) spin))
 
@@ -36,8 +36,8 @@
 ;; once, not again at each node above it, as appending did; the depths of
 ;; the nodes met again below (`%d`), each to be written `(mu %d …)`; and how
 ;; many pieces there are.
-(define-type k-shown (productof (1 k-strings) (2 k-ids) (3 int)))
-(define-type k-atree-of-scope (productof (1 k-scope) (2 int) (3 k-atree)))
+(define-type k-shown (tupof (1 k-strings) (2 k-ids) (3 int)))
+(define-type k-atree-of-scope (tupof (1 k-scope) (2 int) (3 k-atree)))
 
 ;;; ------------------------------------------------------------ signatures
 

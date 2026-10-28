@@ -204,10 +204,10 @@
   ;; names, made after the first: the next slot, and the values' slots.
   (c-module-make
     (->* (c-mvals cenv int c-mslots c-waits (listof int @k) c-included code)
-         (productof (1 int) (2 (listof int @k))))
+         (tupof (1 int) (2 (listof int @k))))
     (lambda (vs e d later ws vals inc c)
       (if (null? vs)
-          (product (1 d) (2 vals))
+          (tup (1 d) (2 vals))
           (let* ((v (car vs)) (n (extract v 1)) (x (extract v 2)) (k (extract v 3))
                  (ps (if (and (extract v 4) (c-names-any? x later))
                          (c-module-closure n x e later d c)
@@ -221,7 +221,7 @@
                                        (c-extend n (at-slot d) e) (+ d 1) 0 c)))
             (c-module-make (cdr vs) inner (+ (+ d 1) np) (cdr later) waits
                            (if (= k 0) vals (cons d vals))
-                           (the c-included (product (1 nil) (2 nil) (3 nil))) c)))))
+                           (the c-included (tup (1 nil) (2 nil) (3 nil))) c)))))
   ;; Item `n`'s lambda `x`, made in slot `d` in `e`, naming items of `later`
   ;; not made yet, itself among them: those captured as a `letrec`'s
   ;; siblings are, to be given once made. What it gives: as `c-lambda`'s.
@@ -384,7 +384,7 @@
     (lambda (ps body e own0)
       (let* ((outer (c-take c-made-now (the (listof c-made @k) nil)))
              (made (c-lambda-word-in ps body e own0)))
-        (let ((m (product (1 (exp-at body)) (2 (c-bind-params ps nil)) (3 (c-own-of ps own0))
+        (let ((m (tup (1 (exp-at body)) (2 (c-bind-params ps nil)) (3 (c-own-of ps own0))
                           (4 (extract made 1)) (5 (extract made 2)))))
           (begin
             (set c-made-now (cons m outer))
@@ -423,7 +423,7 @@
             (begin
               (c-register-twin! w ps body inner this defining)
               (set c-scope-name outer-scope)
-              (product (1 w) (2 fv))))))))
+              (tup (1 w) (2 fv))))))))
   ;;; ------------------------------------------------------------ applications
   (c-app (->* (exp exp exps cenv int code bool) unit)
     (lambda (x f args e depth c tail)

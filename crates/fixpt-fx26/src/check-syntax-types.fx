@@ -11,7 +11,7 @@
 ;; The type families being expanded, each with the descriptions given it
 ;; and the slot its type will fill: a use inside with the same descriptions
 ;; is that slot, a knot (regular recursion).
-(define-type k-family-knot (productof (1 symbol) (2 k-scope) (3 int)))
+(define-type k-family-knot (tupof (1 symbol) (2 k-scope) (3 int)))
 ;; `(define-type name type)`: `name` stands for the type from here on, and
 ;; may appear in its own definition.
 ;; While a program's types are declared ahead (`k-ahead`): each
@@ -19,7 +19,7 @@
 ;; other in any order; and those filled, with where, to check grounded once
 ;; all are.
 (define-type k-ahead-slots (listof (pairof symbol int @t) acyclic))
-(define-type k-filled (listof (productof (1 int) (2 int) (3 int)) acyclic))
+(define-type k-filled (listof (tupof (1 int) (2 int) (3 int)) acyclic))
 
 ;;; ------------------------------------------------------------ signatures
 

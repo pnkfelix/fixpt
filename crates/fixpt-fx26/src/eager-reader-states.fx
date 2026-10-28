@@ -38,4 +38,4 @@
 ;; the atom is all in that text (the origin unchanged, as any feed changes
 ;; it), its text is taken from there at the end, with no list of its
 ;; characters.
-(define-type atom-in (productof (start int) (data syns) (text string) (origin int)))
+(define-type atom-in (tupof (start int) (data syns) (text string) (origin int)))

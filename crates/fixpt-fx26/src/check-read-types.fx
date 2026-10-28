@@ -12,16 +12,16 @@
 ;; The parameters' names and kinds of a type form that is also a description
 ;; function written alone, `listof`; none for any other name.
 ;; A type family's parameters: each one's name and kind.
-(define-type k-params (listof (productof (1 symbol) (2 int)) acyclic))
+(define-type k-params (listof (tupof (1 symbol) (2 int)) acyclic))
 ;;; ------------------------------------------------------------ effects selected
 
 ;; Each `(select m e)` read as an effect: a variable of kind effect, one for
 ;; each, which `k-resolve-selects` replaces by module `m`'s effect `e`
 ;; (`check-modules.fx`), as the Rust checker's `effect_selects`.
-(define-type k-effect-sels (listof (productof (1 symbol) (2 symbol) (3 int)) acyclic))
+(define-type k-effect-sels (listof (tupof (1 symbol) (2 symbol) (3 int)) acyclic))
 ;; `with`'s effect variables, whether each falls back, and to what
 ;; (`k-with-effect-falls`).
-(define-type k-effect-falls (listof (productof (1 int) (2 bool) (3 k-eff)) acyclic))
+(define-type k-effect-falls (listof (tupof (1 int) (2 bool) (3 k-eff)) acyclic))
 
 ;;; ------------------------------------------------------------ signatures
 

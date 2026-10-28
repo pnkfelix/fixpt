@@ -112,13 +112,13 @@
 (define mk-list (->* (syns-a int int) syn)
   (lambda (items a b) (lst items (syn-datums items) a b)))
 ;; A parameter: `name`, or `(name type)`.
-(define parse-param (->* (syn) (productof (1 symbol) (2 syns-a)))
+(define parse-param (->* (syn) (tupof (1 symbol) (2 syns-a)))
   (lambda (p)
     (if (syn-symbol? p)
-        (product (1 (syn-symbol p)) (2 (the syns-a nil)))
+        (tup (1 (syn-symbol p)) (2 (the syns-a nil)))
         (let ((pair (syn-items p "a parameter")))
           (if (= (len pair) 2)
-              (product (1 (syn-symbol (car pair))) (2 (the syns-a (cons (nth pair 1) nil))))
+              (tup (1 (syn-symbol (car pair))) (2 (the syns-a (cons (nth pair 1) nil))))
               (pfail "a parameter is `name` or `(name type)`" p))))))
 (define parse-params (->* (syn) param-list)
   (lambda (ps)
@@ -164,14 +164,14 @@
 (define vlambda-usage string "`(vlambda name body …)` or `(vlambda (name type) body …)`")
 ;; A `vlambda`'s parameter: `xs`, or `(xs T)`, whose type is then
 ;; `(listof T acyclic)`.
-(define parse-vparam (->* (syn int int) (productof (1 symbol) (2 syns-a)))
+(define parse-vparam (->* (syn int int) (tupof (1 symbol) (2 syns-a)))
   (lambda (given a b)
     (if (syn-symbol? given)
-        (product (1 (syn-symbol given)) (2 (the syns-a nil)))
+        (tup (1 (syn-symbol given)) (2 (the syns-a nil)))
         (let ((pair (syn-items given "a parameter")))
           (if (= (len pair) 2)
               (let ((ty (mk-listof-acyclic (nth pair 1) a b)))
-                (product (1 (syn-symbol (car pair))) (2 (the syns-a (cons ty nil)))))
+                (tup (1 (syn-symbol (car pair))) (2 (the syns-a (cons ty nil)))))
               (pfail vlambda-usage given))))))
 
 ;; Whether `head` is a region form's, and what that makes besides the
@@ -202,7 +202,7 @@
   (lambda (f tmp more a b)
     (e-app (standard-ref f a b) (the exp-list (cons (e-var tmp a b 0) more)) a b 0)))
 (define one-let (->* (symbol exp) let-list)
-  (lambda (name e) (the let-list (cons (product (1 name) (2 e)) nil))))
+  (lambda (name e) (the let-list (cons (tup (1 name) (2 e)) nil))))
 
 ;; Whether `head` is a bloblet form's; and whether `op` with `n` arguments
 ;; is one that takes no field index, with the right number.
@@ -286,7 +286,7 @@
 (define one-syn (->* (syn) syns-a) (lambda (t) (cons t nil)))
 ;; A module's item, of one name.
 (define mod-item-of (->* (int symbol syns-a exp-list) mod-item)
-  (lambda (k name ts xs) (product (1 k) (2 (the names (cons name nil))) (3 ts) (4 xs))))
+  (lambda (k name ts xs) (tup (1 k) (2 (the names (cons name nil))) (3 ts) (4 xs))))
 ;; Whether a `define-type`'s head is `(d (p k) …)`: a name with parameters.
 (define param-head? (->* (syn) bool)
   (lambda (head)
@@ -344,7 +344,7 @@
   (lambda (it f rest)
     (let* ((k (extract it 1)) (ns (extract it 2)) (a (syn-start f)) (b (syn-end f)))
       (cond ((= k 9)
-             (cons (product (1 9) (2 (the names (list '%hinclude))) (3 (extract it 3))
+             (cons (tup (1 9) (2 (the names (list '%hinclude))) (3 (extract it 3))
                             (4 (extract it 4)))
                    rest))
             ((= k 0)
@@ -387,7 +387,7 @@
 (define item-in-includes (->* (mod-item syn) mod-item)
   (lambda (it f)
     (let ((k (extract it 1)) (xs (extract it 4)))
-      (product (1 k) (2 (extract it 2)) (3 (extract it 3))
+      (tup (1 k) (2 (extract it 2)) (3 (extract it 3))
                (4 (cond ((= k 2) (inits-in-includes xs (one-syn f)))
                         ((= k 3) (tagcase f (lst (bs d a b) (inits-in-includes xs (cdr bs)))
                                    (else y xs)))
@@ -431,7 +431,7 @@
 ;; `(lambda (x) x)`, spanning `a`..`b`: an abstract type's conversion.
 (define identity-at (->* (int int) exp)
   (lambda (a b)
-    (let ((x (product (1 'x) (2 (the syns-a nil)))))
+    (let ((x (tup (1 'x) (2 (the syns-a nil)))))
       (e-lambda (the param-list (cons x nil)) (e-var 'x a b 0) a b 0))))
 (define module-usage string
   (string-append "a module holds `(define-generative t T)`, `(define-type d T)`, "
@@ -450,9 +450,9 @@
 ;;; FX-91's `(define-datatype name (tag type …) …)`, expanded as the Rust
 ;;; reader expands it (`top.rs`'s `expand_datatype`), as syntax, into the
 ;;; forms it stands for: a sum of products, each variant's members labelled
-;;; from 1, `(define-type name (sumof (tag (productof (1 T) …)) …))`, and a
+;;; from 1, `(define-type name (oneof (tag (tupof (1 T) …)) …))`, and a
 ;;; constructor per tag, `(define tag (subr pure (T …) name) (lambda (%x1 …)
-;;; (sum tag (product (1 %x1) …))))`. Where the form is: a program's, a
+;;; (one tag (tup (1 %x1) …))))`. Where the form is: a program's, a
 ;;; module's, or a module file's, each parsing what it is made into.
 
 (define datatype? (->* (syn) bool)
@@ -485,7 +485,7 @@
         (let* ((pair (mk-list (list (mk-int i a b) (car ms)) a b))
                (rest (dt-labelled (cdr ms) (+ i 1) a b)))
           (cons pair rest)))))
-;; Each variant's arm of the sum, `(tag (productof (1 T) …))`.
+;; Each variant's arm of the sum, `(tag (tupof (1 T) …))`.
 (define dt-arms (->* (syns-a int int) syns-a)
   (lambda (vs a b)
     (if (null? vs)
@@ -493,7 +493,7 @@
         (let* ((v (car vs)) (parts (syn-items v "a variant")))
           (if (or (null? parts) (not (syn-symbol? (car parts))))
               (pfail "a variant is `(tag type …)`" v)
-              (let* ((prod (mk-form "productof" (dt-labelled (cdr parts) 1 a b) a b))
+              (let* ((prod (mk-form "tupof" (dt-labelled (cdr parts) 1 a b) a b))
                      (arm (mk-list (list (car parts) prod) a b))
                      (rest (dt-arms (cdr vs) a b)))
                 (cons arm rest)))))))
@@ -510,9 +510,9 @@
                (mono (mk-pure-subr members used a b))
                (ty (if family? (mk-poly params mono a b) mono))
                (xs (dt-vars members 1 a b))
-               (fields (mk-form "product" (dt-labelled xs 1 a b) a b))
+               (fields (mk-form "tup" (dt-labelled xs 1 a b) a b))
                ;; At its variant: no two constructors' bodies at one place.
-               (body (mk-form "sum" (list tag fields) (syn-start (car vs)) (syn-end (car vs))))
+               (body (mk-form "one" (list tag fields) (syn-start (car vs)) (syn-end (car vs))))
                (make (mk-form "lambda" (list (mk-list xs a b) body) a b))
                (ctor (mk-form "define" (list tag ty make) a b))
                (rest (dt-constructors used family? params (cdr vs) a b)))
@@ -543,7 +543,7 @@
                              (else (pfail usage s))))
                  (params (if family? (cdr hs) (the syns-a nil)))
                  (used (if family? (mk-list (cons name (dt-param-names params)) a b) name))
-                 (sum (mk-form "sumof" (dt-arms (drop items 2) a b) a b))
+                 (sum (mk-form "oneof" (dt-arms (drop items 2) a b) a b))
                  (ctors (dt-constructors used family? params (drop items 2) a b)))
             (cons (mk-form "define-type" (list head sum) a b) ctors))))))
 
@@ -735,7 +735,7 @@
 ;; which only a checker knows (`Checker::include_forms`); or why it is
 ;; refused, and where.
 (define-type include-given
-  (productof (1 int) (2 names) (3 names) (4 names) (5 string) (6 int) (7 int)))
+  (tupof (1 int) (2 names) (3 names) (4 names) (5 string) (6 int) (7 int)))
 (define-type includes (listof include-given acyclic))
 (define includes-given (ref includes rs) (new nil))
 (define includes-given! (->* (includes) unit) (lambda (is) (set includes-given is)))
@@ -764,7 +764,7 @@
 (define loading-keys (ref (listof (pairof string string rs) acyclic) rs) (new nil))
 ;; A `case`'s data by halving (`TODO.md` §46): each datum's test, the
 ;; value it sorts by, and its clause.
-(define-type case-entry (productof (1 exp) (2 int) (3 int)))
+(define-type case-entry (tupof (1 exp) (2 int) (3 int)))
 (define-type case-entries (listof case-entry acyclic))
 ;; The fewest data a `case` searches by halving, by kind (the Rust parser's
 ;; `CASE_TREE_*`, measured): integers, strings, symbols; never characters.
@@ -897,11 +897,11 @@
 ;; before it, so this ends, a load cycle too); and where it is then. As
 ;; Rust's `Checker::in_loaded`.
 (define loaded-placed
-  (->* (loaded-files string int) (productof (1 string) (2 int)))
+  (->* (loaded-files string int) (tupof (1 string) (2 int)))
   (lambda (fs m at)
     (let ((f (if (< at load-base) nil (loaded-first fs (* load-base (quotient at load-base)) nil))))
       (if (null? f)
-          (product (1 m) (2 at))
+          (tup (1 m) (2 at))
           (let* ((base (extract (car f) 2))
                  (where (text-place (extract (car f) 6) (- at base))))
             (loaded-placed

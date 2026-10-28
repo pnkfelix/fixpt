@@ -415,7 +415,7 @@
         (a-node (h2 t2 n2 i2 l r)
           (cond ((or (< h h2) (and (= h h2) (< t t2))) (k-atree-get l h t))
                 ((or (> h h2) (and (= h h2) (> t t2))) (k-atree-get r h t))
-                (else (the k-named-at (list (product (1 n2) (2 i2)))))))))))
+                (else (the k-named-at (list (tup (1 n2) (2 i2)))))))))))
 ;; Every `define-type` of scope `ds`, from binding `i` on, into `tr`.
 (define k-atree-of (->* (k-scope int k-atree) k-atree)
   (lambda (ds i tr)
@@ -778,11 +778,11 @@
                        (k-show-abs (cdr ps))))))
 
 (define k-printing-none k-printing
-  (product (1 (the k-ids nil)) (2 (the k-parts nil)) (3 (the k-atrees nil))))
+  (tup (1 (the k-ids nil)) (2 (the k-parts nil)) (3 (the k-atrees nil))))
 ;; `p` with the names of descriptions `ds` too.
 (define k-printing-named (->* (k-printing k-parts) k-printing)
   (lambda (p ds)
-    (product (1 (extract p 1)) (2 (k-parts-onto-front ds (extract p 2))) (3 (extract p 3)))))
+    (tup (1 (extract p 1)) (2 (k-parts-onto-front ds (extract p 2))) (3 (extract p 3)))))
 (define k-parts-onto-front (->* (k-parts k-parts) k-parts)
   (lambda (ps acc)
     (if (null? ps) acc (k-parts-onto-front (cdr ps) (the k-parts (cons (car ps) acc))))))
@@ -800,7 +800,7 @@
     (case k
       ((0) "int") ((1) "f64") ((2) "f32") ((3) "char") ((4) "bool") ((5) "nil") ((6) "pair")
       ((7) "string") ((8) "symbol") ((9) "procedure") ((10) "bloblet") ((11) "box")
-      ((12) "sum") (else "product"))))
+      ((12) "one") (else "tup"))))
 ;; A proposition, and a size in one, as written.
 (define k-show-term (->* (k-term) string)
   (lambda (t)

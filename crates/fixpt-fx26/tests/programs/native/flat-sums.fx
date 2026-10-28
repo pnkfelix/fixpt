@@ -3,7 +3,7 @@
 ;;; owner's fields, then read back by `tagcase`; a numeric key too; and
 ;;; loops that allocate as they go, so that a collection moves the owner
 ;;; under the refs they hold.
-(define-type shape (sumof (circle f64) (square (productof (w i32) (h i32)))))
+(define-type shape (oneof (circle f64) (square (tupof (w i32) (h i32)))))
 (define-type o (bloblet (fields symbol symbol) @heap))
 (define-type shapes (blobref o (arrayof shape 8)))
 (define* fill (subr (maxeff (alloc @heap) (read @heap) (write @heap) spin) (shapes int) int)
@@ -29,7 +29,7 @@
         acc
         (let ((junk (list i i i)))
           (total arr (+ i 1) (+ (* acc 10) (area (blobref-index arr i))))))))
-(define-type k (sumof u16 (0 f64) (7 i32)))
+(define-type k (oneof u16 (0 f64) (7 i32)))
 (define* keyed (subr (maxeff (read @heap)) ((blobref o k)) int)
   (lambda (r) (tagcase r (0 x -1) (else y (blobref-offset y)))))
 (define-type ints (listof int @heap))

@@ -1,4 +1,4 @@
-; Writes to the standard output and error, each `(sum done #u)` (TODO.md §84).
+; Writes to the standard output and error, each `(one done #u)` (TODO.md §84).
 (define say (subr (maxeff (io stdout) (io stderr)) (string) int)
   (lambda (s)
     (begin

@@ -131,15 +131,15 @@
             ": it is applied, " (k-quote (k-cat3 "(" n " …)")))))
 (define k-ctor-params (->* (string) (listof k-params acyclic))
   (lambda (n)
-    (letrec ((one (subr (read @globals) (symbol int) k-params)
-                  (lambda (x k) (the k-params (cons (product (1 x) (2 k)) nil)))))
+    (letrec ((param (subr (read @globals) (symbol int) k-params)
+                  (lambda (x k) (the k-params (cons (tup (1 x) (2 k)) nil)))))
       ;; Type `x` and region `r`.
-      (let ((typed (lambda ((x symbol)) (the k-params (cons (product (1 x) (2 2)) (one 'r 0))))))
+      (let ((typed (lambda ((x symbol)) (the k-params (cons (tup (1 x) (2 2)) (param 'r 0))))))
         (case n (("ref" "icell" "listof" "arrayof" "mark-key")
                  (the (listof k-params acyclic) (cons (typed 't) nil)))
                 (("pairof")
                  (the (listof k-params acyclic)
-                      (cons (the k-params (cons (product (1 'a) (2 2)) (typed 'b))) nil)))
+                      (cons (the k-params (cons (tup (1 'a) (2 2)) (typed 'b))) nil)))
                 (else nil))))))
 ;; `@globals`, or `(globals g …)` as the regions of each `g`, in a list of
 ;; one; none if `s` is neither.
@@ -260,7 +260,7 @@
                      (bounded (begin (k-note-bound v bound) (if distinct (k-set-distinct v) #u)))
                      (pushed (k-push-desc name (ds-var v kind)))
                      (rest (k-binders-each (cdr bs))))
-                (cons (product (1 v) (2 kind)) rest))
+                (cons (tup (1 v) (2 kind)) rest))
               (k-sfail k-binder-shapes (car bs)))))))
 
 ;; Whether binder `items`, of three or more, ends with `distinct`.
@@ -339,9 +339,9 @@
                                                          (symbol->string sym) ")"))
                                  1)))
           (begin
-            (set k-effect-selects (cons (product (1 m) (2 sym) (3 v)) (get k-effect-selects)))
+            (set k-effect-selects (cons (tup (1 m) (2 sym) (3 v)) (get k-effect-selects)))
             (set k-with-effect-falls
-                 (cons (product (1 v) (2 falls) (3 inner)) (get k-with-effect-falls)))
+                 (cons (tup (1 v) (2 falls) (3 inner)) (get k-with-effect-falls)))
             (k-one (a-var v)))))))
 ;; Whether `h` heads an atom of effect on a region: `(read r)` and so on.
 (define k-atom-head? (->* (string) bool)
@@ -379,7 +379,7 @@
       (if (null? found)
           (let* ((shown (k-cat5 "(select " (symbol->string m) " " (symbol->string e) ")"))
                  (v (k-new-dvar-of (string->symbol shown) 1)))
-            (begin (set k-effect-selects (cons (product (1 m) (2 e) (3 v)) (get k-effect-selects)))
+            (begin (set k-effect-selects (cons (tup (1 m) (2 e) (3 v)) (get k-effect-selects)))
                    v))
           (extract (car found) 3)))))
 ;; A module's description of an effect, `(define-effect e E)`'s: a

@@ -148,7 +148,7 @@
             (ty-param (k n)
               (let ((m (k-nth args k)))
                 (if (syn-symbol? m)
-                    (set out (cons (product (1 k) (2 n) (3 (k-ty-new (ty-select (syn-head m) n))))
+                    (set out (cons (tup (1 k) (2 n) (3 (k-ty-new (ty-select (syn-head m) n))))
                                    (get out)))
                     (k-sfail (k-cat5 "argument " (int->string (+ k 1))
                                      " is a module the types `" path
@@ -226,7 +226,7 @@
                (rest (k-abs-kept (cdr abs) names kept)))
           (cond ((k-has-name? names n) (cons (car abs) rest))
                 ((k-parts-mention? kept v)
-                 (cons (product (1 (string->symbol (string-append "%hidden:" (symbol->string n))))
+                 (cons (tup (1 (string->symbol (string-append "%hidden:" (symbol->string n))))
                                 (2 v))
                        rest))
                 (else rest))))))

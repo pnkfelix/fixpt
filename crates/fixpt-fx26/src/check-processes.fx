@@ -91,7 +91,7 @@
       (ty-module (abs ds vs)
         (let ((used (k-with-used vs (k-free-vars body) 0)))
           (begin
-            (k-note-with (product (1 (k-at-of x)) (2 (k-comp-names (extract used 1)))
+            (k-note-with (tup (1 (k-at-of x)) (2 (k-comp-names (extract used 1)))
                                   (3 (extract used 2))))
             (k-te lt nil))))
       (else y (k-te lt nil)))))
@@ -141,14 +141,14 @@
 (define k-watcher-usage string "a watcher is a process's address, `(addr M R)`, and this is a ")
 ;; An address type's message type and region, in a list of one; none if
 ;; `t` is not one.
-(define-type k-addr-list (listof (productof (1 int) (2 k-region)) acyclic))
+(define-type k-addr-list (listof (tupof (1 int) (2 k-region)) acyclic))
 (define k-addr-parts (->* (int) k-addr-list)
   (lambda (t)
     (tagcase (k-get (k-resolve t))
       (ty-named (w ds)
         (if (and (= w k-addr-index) (= (k-length ds) 2))
             (tagcase (car ds)
-              (dt (m) (tagcase (car (cdr ds)) (dr (r) (list (product (1 m) (2 r)))) (else y nil)))
+              (dt (m) (tagcase (car (cdr ds)) (dr (r) (list (tup (1 m) (2 r)))) (else y nil)))
               (else y nil))
             nil))
       (else y nil))))
@@ -187,7 +187,7 @@
             "and a " (k-show-ty msg) " is not: " why)))
 ;; The place binder, the latent effect and the message type of a process's
 ;; body of type `pt`, in a list of one; none if it is not one.
-(define k-spawn-parts (->* (kx k-te) (listof (productof (1 int) (2 k-eff) (3 int)) acyclic))
+(define k-spawn-parts (->* (kx k-te) (listof (tupof (1 int) (2 k-eff) (3 int)) acyclic))
   (lambda (body pt)
     (tagcase body
       (x-plambda (bs lam a b abk)
@@ -205,7 +205,7 @@
                                      (dr (q) (k-region=? q (r-var r)))
                                      (else y #f)))
                               (tagcase (car ds)
-                                (dt (m) (list (product (1 r) (2 e) (3 m))))
+                                (dt (m) (list (tup (1 r) (2 e) (3 m))))
                                 (else y nil))
                               nil))
                         (else y nil)))
@@ -267,7 +267,7 @@
       (if (null? given) (k-fresh-region "@process") (car given)))))
 
 ;; `((with … par2) f g)`, operator `op`, `f` and `g` thunks, synthesized by
-;; `synth`: both their values, `(productof (1 A) (2 B))`, and every effect,
+;; `synth`: both their values, `(tupof (1 A) (2 B))`, and every effect,
 ;; if neither transfers control out of its branch and the two do not
 ;; interfere (the Rust checker's `synth_par`).
 (define k-par-te (->* (kx kx kxs k-synth-fn) k-te)
@@ -397,11 +397,11 @@
           (else (k-fail (k-cat5 "`race`'s branches give values of two types, " (k-show-ty ra)
                                 " and " (k-show-ty rb) "")
                         a b)))))
-;; `(productof (1 a) (2 b))`.
+;; `(tupof (1 a) (2 b))`.
 (define k-pair-type (->* (int int) int)
   (lambda (a b)
-    (let ((one (product (1 (string->symbol "1")) (2 a)))
-          (two (product (1 (string->symbol "2")) (2 b))))
+    (let ((one (tup (1 (string->symbol "1")) (2 a)))
+          (two (tup (1 (string->symbol "2")) (2 b))))
       (k-ty-new (ty-product (list one two))))))
 ;; A branch, of effect `e`, that transfers no control out of itself.
 (define k-par-ends (->* (kx k-eff) unit)
@@ -415,14 +415,14 @@
 
 ;; The first pair of atoms, one of each effect, that interfere, in a list of
 ;; one; none if none (the Rust checker's `interference`).
-(define k-interference (->* (k-eff k-eff) (listof (productof (1 k-atom) (2 k-atom)) acyclic))
+(define k-interference (->* (k-eff k-eff) (listof (tupof (1 k-atom) (2 k-atom)) acyclic))
   (lambda (x y)
     (if (null? x)
         nil
         (let ((hit (k-interferes-any (car x) y)))
           (if (null? hit)
               (k-interference (cdr x) y)
-              (list (product (1 (car x)) (2 (car hit)))))))))
+              (list (tup (1 (car x)) (2 (car hit)))))))))
 (define k-interferes-any (->* (k-atom k-eff) k-eff)
   (lambda (a y)
     (cond ((null? y) nil)
@@ -435,18 +435,19 @@
 ;; allocation, `spin` and `nondet`.
 (define k-interferes? (->* (k-atom k-atom) bool)
   (lambda (a b)
-    (let ((one (lambda ((p k-region) (q k-region)) (not (k-regions-distinct? p q))))
+    (let ((overlap? (lambda ((p k-region) (q k-region)) (not (k-regions-distinct? p q))))
           (rb (k-atom-region b)))
       (tagcase a
         (a-var (v) (not (k-harmless? b)))
         (a-app (v ds) (not (k-harmless? b)))
         (a-write (p)
           (tagcase b
-            (a-read (q) (one p q)) (a-write (q) (one p q)) (a-init (q) (one p q))
-            (a-await (q) (one p q)) (else y #f)))
-        (a-init (p) (tagcase b (a-write (q) (one p q)) (else y #f)))
-        (a-send (p) (tagcase b (a-send (q) (one p q)) (else y #f)))
-        (a-receive (p) (tagcase b (a-send (q) (one p q)) (a-receive (q) (one p q)) (else y #f)))
+            (a-read (q) (overlap? p q)) (a-write (q) (overlap? p q)) (a-init (q) (overlap? p q))
+            (a-await (q) (overlap? p q)) (else y #f)))
+        (a-init (p) (tagcase b (a-write (q) (overlap? p q)) (else y #f)))
+        (a-send (p) (tagcase b (a-send (q) (overlap? p q)) (else y #f)))
+        (a-receive (p)
+          (tagcase b (a-send (q) (overlap? p q)) (a-receive (q) (overlap? p q)) (else y #f)))
         (a-io (k) (tagcase b (a-io (j) #t) (else y #f)))
         (else y #f)))))
 (define k-harmless? (->* (k-atom) bool)
@@ -503,4 +504,4 @@
   (lambda (body at)
     (if (string=? (k-std-op body) "")
         #u
-        (set k-extracts (cons (product (1 at) (2 (n-plain-fx))) (get k-extracts)))))))))
+        (set k-extracts (cons (tup (1 at) (2 (n-plain-fx))) (get k-extracts)))))))))

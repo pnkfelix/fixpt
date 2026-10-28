@@ -3,24 +3,24 @@
 ;;; one rep-pair serves every product, one rep-sum every sum.
 (define-effect walk (maxeff spin (read @globals)))
 (define-type (rep (t type))
-  (productof (eq (subr walk (t t) bool)) (show (subr walk (t) datum)) (size (subr walk (t) int))))
+  (tupof (eq (subr walk (t t) bool)) (show (subr walk (t) datum)) (size (subr walk (t) int))))
 (define rep-int (rep int)
-  (product (eq (lambda (x y) (= x y))) (show (lambda (x) x)) (size (lambda (x) 1))))
+  (tup (eq (lambda (x y) (= x y))) (show (lambda (x) x)) (size (lambda (x) 1))))
 ;; (a b) as a datum list.
 (define d2 (subr pure (datum datum) datum)
   (lambda (a b) (cons a (cons b nil))))
 (define rep-pair
-  (poly ((a type) (b type)) (subr pure ((rep a) (rep b)) (rep (productof (1 a) (2 b)))))
+  (poly ((a type) (b type)) (subr pure ((rep a) (rep b)) (rep (tupof (1 a) (2 b)))))
   (lambda (ra rb)
-    (product
+    (tup
      (eq (lambda (x y) (and ((extract ra eq) (extract x 1) (extract y 1))
                             ((extract rb eq) (extract x 2) (extract y 2)))))
      (show (lambda (x) (d2 ((extract ra show) (extract x 1)) ((extract rb show) (extract x 2)))))
      (size (lambda (x) (+ ((extract ra size) (extract x 1)) ((extract rb size) (extract x 2))))))))
 (define rep-sum
-  (poly ((a type) (b type)) (subr pure ((rep a) (rep b)) (rep (sumof (inl a) (inr b)))))
+  (poly ((a type) (b type)) (subr pure ((rep a) (rep b)) (rep (oneof (inl a) (inr b)))))
   (lambda (ra rb)
-    (product
+    (tup
      (eq (lambda (x y)
            (tagcase x
              (inl u (tagcase y (inl v ((extract ra eq) u v)) (inr v #f)))
@@ -31,7 +31,7 @@
 (define rep-con
   (poly ((a type)) (subr pure (symbol (rep a)) (rep a)))
   (lambda (name ra)
-    (product (eq (extract ra eq))
+    (tup (eq (extract ra eq))
              (show (lambda (x) (d2 (string->symbol (symbol->string name)) ((extract ra show) x))))
              (size (extract ra size)))))
 ;; A user type enters through a conversion into the generic view: the
@@ -39,22 +39,22 @@
 (define rep-iso
   (poly ((a type) (b type)) (subr pure ((subr pure (a) b) (rep b)) (rep a)))
   (lambda (from rb)
-    (product (eq (lambda (x y) ((extract rb eq) (from x) (from y))))
+    (tup (eq (lambda (x y) ((extract rb eq) (from x) (from y))))
              (show (lambda (x) ((extract rb show) (from x))))
              (size (lambda (x) ((extract rb size) (from x)))))))
 ;; Recursion (MLton's Y): a rep that asks for itself only when used.
 (define rep-delay
   (poly ((a type)) (subr pure ((subr walk () (rep a))) (rep a)))
   (lambda (get)
-    (product (eq (lambda (x y) ((extract (get) eq) x y)))
+    (tup (eq (lambda (x y) ((extract (get) eq) x y)))
              (show (lambda (x) ((extract (get) show) x)))
              (size (lambda (x) ((extract (get) size) x))))))
 
 (define-datatype tree (leaf int) (node tree tree))
 (define tree-view
-  (subr pure (tree) (sumof (inl int) (inr (productof (1 tree) (2 tree)))))
-  (lambda (t) (tagcase t (leaf (n) (sum inl n))
-                         (node (l r) (sum inr (product (1 l) (2 r)))))))
+  (subr pure (tree) (oneof (inl int) (inr (tupof (1 tree) (2 tree)))))
+  (lambda (t) (tagcase t (leaf (n) (one inl n))
+                         (node (l r) (one inr (tup (1 l) (2 r)))))))
 (define rep-tree (subr walk () (rep tree))
   (lambda ()
     (rep-iso tree-view
@@ -68,4 +68,4 @@
 ((extract (rep-tree) size) t1)
 ;; The same combinators, at a type with no declaration at all.
 ((extract (rep-pair rep-int (rep-sum rep-int rep-int)) show)
- (product (1 7) (2 (sum inr 8))))
+ (tup (1 7) (2 (one inr 8))))

@@ -397,7 +397,7 @@
            (load-input "fx26:x86_64.fx") native-direct-layout layout native-direct-asm native-reps
            native-direct-raw native-direct-proc native-direct-ops native-direct-prims)))
     ;; What Rust and `bootstrap.fx` call of them (`syn.rs`, `session.rs`).
-    (product (run-checked (with eval-core run-checked))
+    (tup (run-checked (with eval-core run-checked))
              (run-checked-more (with eval-core run-checked-more))
              (run-program (with eval-core run-program))
              (native-assemble (with native native-assemble))

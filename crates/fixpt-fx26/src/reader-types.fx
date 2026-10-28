@@ -24,7 +24,7 @@
             (val loaded-placed
                  (subr (maxeff (read @globals) (read @s) spin)
                        (loaded-files string int)
-                       (productof (1 string) (2 int))))
+                       (tupof (1 string) (2 int))))
             (val syn-head (subr pure (syn) symbol))
             (val syn-int (subr pure (syn) int))
             (val keep (subr (maxeff (read @globals) (read @s)) (syns-a) syns-a))))

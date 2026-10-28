@@ -90,7 +90,7 @@
     (if (tagcase (k-get t)
           (ty-pair (a d r nl) (tagcase r (r-frozen (p finite) #t) (else y #f)))
           (else y #f))
-        (set k-extracts (cons (product (1 (k-at-of x)) (2 (n-frozen-define))) (get k-extracts)))
+        (set k-extracts (cons (tup (1 (k-at-of x)) (2 (n-frozen-define))) (get k-extracts)))
         #u)))
 ;; Note, for the compilers, call `x` of `f`, of type `ft` (on parameters
 ;; `params`): its callee's convention, which the call is compiled in, noted
@@ -100,7 +100,7 @@
   (lambda (x f ft params)
     (begin (tagcase (k-get (k-resolve ft))
              (ty-subr (e ps r cv spc)
-               (set k-extracts (cons (product (1 (k-at-of f)) (2 (n-call cv))) (get k-extracts))))
+               (set k-extracts (cons (tup (1 (k-at-of f)) (2 (n-call cv))) (get k-extracts))))
              (else y #u))
            (k-note-apply-shares x f params))))
 ;; Note, for the compilers, that the call `x` of `f` (on parameters
@@ -112,7 +112,7 @@
   (lambda (x f params)
     (let ((apply? (string=? (k-std-op f) "apply")))
       (if (and apply? (and (= (k-length params) 2) (k-acyclic-list? (car (cdr params)))))
-          (set k-extracts (cons (product (1 (k-at-of x)) (2 (n-apply-shares))) (get k-extracts)))
+          (set k-extracts (cons (tup (1 (k-at-of x)) (2 (n-apply-shares))) (get k-extracts)))
           #u))))
 ;; `car` or `cdr` of a union with a pair member (a `datum`, say) takes that
 ;; member apart: every machine's `car` checks its argument is a pair, and
@@ -145,7 +145,7 @@
 (define k-te-onto (->* (k-te k-types-eff) k-types-eff)
   (lambda (r rest)
     (let ((ts (the k-ids (cons (extract r 1) (extract rest 1)))))
-      (product (1 ts) (2 (k-union (extract r 2) (extract rest 2)))))))
+      (tup (1 ts) (2 (k-union (extract r 2) (extract rest 2)))))))
 ;; The effect `r` says `x` has, once the type it says is found one `expected` takes.
 (define k-as-expected (->* (kx k-te int) k-eff)
   (lambda (x r expected) (begin (k-expect x (extract r 1) expected) (extract r 2))))
@@ -174,7 +174,7 @@
 ;; Note, for the compiler, what the `extract` `at` takes, `d`; or its field,
 ;; `i`, by position.
 (define k-note-extract (->* (k-at k-datum) unit)
-  (lambda (at d) (set k-extracts (cons (product (1 at) (2 (n-datum d))) (get k-extracts)))))
+  (lambda (at d) (set k-extracts (cons (tup (1 at) (2 (n-datum d))) (get k-extracts)))))
 (define k-note-field (->* (k-at int) unit)
   (lambda (at i) (k-note-extract at (datum-field i))))
 ;; `inner`, under binders `bs`, with `m` for them, each within its bound and finite if need be.
@@ -232,7 +232,7 @@
   (lambda (p) (k-latent-cert p 1)))
 (define k-certs-now (->* () k-certs)
   (lambda ()
-    (product (1 (get k-certified)) (2 (get k-certified-lengths)) (3 (get k-certified-nats)))))
+    (tup (1 (get k-certified)) (2 (get k-certified-lengths)) (3 (get k-certified-nats)))))
 ;; Note what test `p` certifies, if anything: a variable acyclic, of a length, or natural.
 (define k-push-certified (->* (kx) unit)
   (lambda (p)
@@ -265,11 +265,11 @@
     (if (null? ps)
         (the k-paths nil)
         (let* ((p (car ps)) (steps (k-steps-snoc (extract p 3) s)))
-          (the k-paths (cons (product (1 (extract p 1)) (2 (extract p 2)) (3 steps)) nil))))))
+          (the k-paths (cons (tup (1 (extract p 1)) (2 (extract p 2)) (3 steps)) nil))))))
 (define k-path-of (->* (kx) k-paths)
   (lambda (x)
     (tagcase x
-      (x-var (v a b abk) (the k-paths (cons (product (1 v) (2 (k-binding-depth v)) (3 nil)) nil)))
+      (x-var (v a b abk) (the k-paths (cons (tup (1 v) (2 (k-binding-depth v)) (3 nil)) nil)))
       (x-app (f args a b abk)
         (let ((op (k-std-op f)))
           (if (and (k-sc-one-arg? args) (or (string=? op "car") (string=? op "cdr")))
@@ -290,7 +290,7 @@
 (define k-path-fact-ty (->* (symbol int k-steps) int)
   (lambda (v d steps) (k-path-fact-in (get k-path-narrowed) v d steps (get k-closure-depth))))
 (define k-reached-of (->* (int k-regions) k-reached)
-  (lambda (t rs) (the k-reached (cons (product (1 t) (2 rs)) nil))))
+  (lambda (t rs) (the k-reached (cons (tup (1 t) (2 rs)) nil))))
 ;; The path from `v` at `d`, `done` taken and `rest` to go, at type `t`
 ;; having read through `rs`: as the types say and the facts in force
 ;; narrow it (`check.rs`'s `path_type`).
@@ -349,7 +349,7 @@
 (define k-nars-put
   (->* (k-nars symbol int k-steps k-regions int) k-nars)
   (lambda (out v d steps rs t)
-    (let ((one (product (1 v) (2 d) (3 steps) (4 rs) (5 t))))
+    (let ((one (tup (1 v) (2 d) (3 steps) (4 rs) (5 t))))
       (cond ((null? out) (the k-nars (cons one nil)))
             ((let ((n (car out)))
                (and (symbol=? (extract n 1) v) (= (extract n 2) d) (k-steps=? (extract n 3) steps)))
@@ -410,7 +410,7 @@
           ((null? (extract (car ns) 3))
            (let ((n (car ns)))
              (the k-narrows
-                  (cons (product (1 (extract n 1)) (2 (extract n 2)) (3 (extract n 5)))
+                  (cons (tup (1 (extract n 1)) (2 (extract n 2)) (3 (extract n 5)))
                         (k-var-narrows (cdr ns))))))
           (else (k-var-narrows (cdr ns))))))
 ;; The paths' narrowings among `ns` put in force, in turn.
@@ -423,7 +423,7 @@
             (if (null? (extract n 3))
                 #u
                 (set k-path-narrowed
-                     (cons (product (1 (extract n 1)) (2 (extract n 2)) (3 (extract n 3))
+                     (cons (tup (1 (extract n 1)) (2 (extract n 2)) (3 (extract n 3))
                                     (4 (extract n 4)) (5 (extract n 5))
                                     (6 (get k-closure-depth)) (7 #f))
                            (get k-path-narrowed))))
@@ -484,7 +484,7 @@
                (ends (and (not (extract f 7)) (= (extract f 6) depth) (not (null? open))
                           (k-kills? e open)))
                (g (if ends
-                      (product (1 (extract f 1)) (2 (extract f 2)) (3 (extract f 3))
+                      (tup (1 (extract f 1)) (2 (extract f 2)) (3 (extract f 3))
                                (4 (extract f 4)) (5 (extract f 5)) (6 (extract f 6)) (7 #t))
                       f)))
           (the k-path-facts (cons g (k-kill-each (cdr fs) e depth)))))))
@@ -506,7 +506,7 @@
            (psaved (k-length (get k-path-narrowed)))
            (fyes (set k-size-facts (k-with-facts (car facts) fsaved)))
            (nyes (k-put-narrowing (car narrowing) nsaved)))
-      (product (1 certs) (2 fsaved) (3 facts) (4 nsaved) (5 narrowing) (6 psaved)))))
+      (tup (1 certs) (2 fsaved) (3 facts) (4 nsaved) (5 narrowing) (6 psaved)))))
 ;; After it, before the branch where `p` does not: nothing certified, and what `p` shows so.
 (define k-enter-else (->* (k-tested) unit)
   (lambda (tested)
@@ -550,7 +550,7 @@
   (lambda (p kinds solved done i r)
     (begin (k-unify p (extract r 1) kinds solved (k-new-trail))
            (k-arg-found done i (extract r 1) (extract r 2)))))
-(define k-no-call k-call-checked (product (1 (product (1 -1) (2 -1) (3 -1))) (2 -1)))
+(define k-no-call k-call-checked (tup (1 (tup (1 -1) (2 -1) (3 -1))) (2 -1)))
 (define k-checked-call (ref k-call-checked @t) (new k-no-call))
 ;; Call `x`, found `r`, as `expected`: its effect, and its type noted.
 (define k-as-expected-call (->* (kx k-te int) k-eff)
@@ -558,7 +558,7 @@
     (let ((e (if (k-fixed-literal? x expected (k-start x) (k-end x))
                  (extract r 2)
                  (k-as-expected x r expected))))
-      (begin (set k-checked-call (product (1 (k-at-of x)) (2 (extract r 1)))) e))))
+      (begin (set k-checked-call (tup (1 (k-at-of x)) (2 (extract r 1)))) e))))
 ;; `k-unify` of a call's `result` against what is `expected` of it: bounds
 ;; from above.
 (define k-unify-above (->* (int int k-binders k-solved) unit)
@@ -649,13 +649,13 @@
       (else y (k-fail-not-known arg i p)))))
 ;; The parts of `ps`, from position `i`, that `free` names, and their
 ;; positions: what a `with` binds.
-(define k-with-used (->* (k-parts k-names int) (productof (1 k-parts) (2 k-ids)))
+(define k-with-used (->* (k-parts k-names int) (tupof (1 k-parts) (2 k-ids)))
   (lambda (ps free i)
     (if (null? ps)
-        (product (1 (the k-parts nil)) (2 (the k-ids nil)))
+        (tup (1 (the k-parts nil)) (2 (the k-ids nil)))
         (let ((rest (k-with-used (cdr ps) free (+ i 1))))
           (if (k-has-name? free (extract (car ps) 1))
-              (product (1 (the k-parts (cons (car ps) (extract rest 1))))
+              (tup (1 (the k-parts (cons (car ps) (extract rest 1))))
                        (2 (the k-ids (cons i (extract rest 2)))))
               rest)))))
 ;; A result `(pairof A v R)`, `v` solved to `nil` and nothing expected of

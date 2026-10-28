@@ -45,7 +45,7 @@
       (if (ev n) 1 0))))
 
 ;; A loop through a `tagcase`'s arms, with the arms' names on the frame.
-(define-type shape (sumof (sq int) (rect (productof (1 int) (2 int)))))
+(define-type shape (oneof (sq int) (rect (tupof (1 int) (2 int)))))
 (define areas (subr spin (int) int)
   (lambda (n)
     (letrec ((go (subr spin (int int) int)
@@ -53,8 +53,8 @@
                  (if (= i n)
                      acc
                      (tagcase (the shape (if (= (modulo i 2) 0)
-                                             (sum sq i)
-                                             (sum rect (product (1 i) (2 3)))))
+                                             (one sq i)
+                                             (one rect (tup (1 i) (2 3)))))
                        (sq s (go (+ i 1) (+ acc (* s s))))
                        (rect (w h) (go (+ i 1) (+ acc (* w h)))))))))
       (go 0 0))))

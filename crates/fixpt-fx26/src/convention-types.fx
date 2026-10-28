@@ -15,28 +15,28 @@
 ;; What reading does: read the module's procedures, and count down.
 (define-effect cvr (maxeff (read @globals) spin))
 ;; A text read from a place in a string, and the place after it.
-(define-type cv-at (productof (x cv-sx) (at int)))
-(define-type cv-sxs-at (productof (xs cv-sxs) (at int)))
+(define-type cv-at (tupof (x cv-sx) (at int)))
+(define-type cv-sxs-at (tupof (xs cv-sxs) (at int)))
 
 ;; Names and their numbers, in the declaration's order: tags, immediates,
 ;; kinds, a trap's kinds.
-(define-type cv-names (listof (productof (name string) (number int)) acyclic))
+(define-type cv-names (listof (tupof (name string) (number int)) acyclic))
 (define-type cv-ints (listof int acyclic))
 (define-type cv-strs (listof string acyclic))
 ;; Roles and their places: a routine's inputs.
-(define-type cv-regs (listof (productof (name string) (registers cv-ints)) acyclic))
+(define-type cv-regs (listof (tupof (name string) (registers cv-ints)) acyclic))
 
 (define-type cv-registers
-  (productof (arguments cv-ints) (rest-in int) (count int) (result int) (closure int)
+  (tupof (arguments cv-ints) (rest-in int) (count int) (result int) (closure int)
              (link int) (frame int)
              ;; Pinned (or in the state, x86_64's but `state`): never
              ;; changed by code, but fuel as `cv-fuel` says.
              (state int) (fuel int) (stack-limit int) (code-distance int)))
 
 ;; A header's field: its first bit and its width.
-(define-type cv-bits (listof (productof (name string) (at int) (width int)) acyclic))
+(define-type cv-bits (listof (tupof (name string) (at int) (width int)) acyclic))
 (define-type cv-values
-  (productof (tags cv-names) (fixnum-shift int) (fixnum-bits int) (immediates cv-names)
+  (tupof (tags cv-names) (fixnum-shift int) (fixnum-bits int) (immediates cv-names)
              (char-subtag int) (char-payload-shift int)
              ;; A pair's fields, from its reference.
              (car int) (cdr int)
@@ -53,26 +53,26 @@
 ;; still where the code always runs, so that field is the state's
 ;; `code-lo` then, for a generator written before.
 (define-type cv-closures
-  (productof (kind int) (code-field int) (first-free-field int)
+  (tupof (kind int) (code-field int) (first-free-field int)
              (native-when-code-at-least int) (code-always-runs bool)))
 
 ;; A code bloblet's code runs at its reference plus the code distance's
 ;; register; field `k` is `8k` + this before its first instruction.
-(define-type cv-code (productof (field-k-before-code int)))
+(define-type cv-code (tupof (field-k-before-code int)))
 
 ;; A frame, from its register: its header, link, return, stack map and
 ;; first value slot. A map's bit `k` below `live-below` is value slot `k`
 ;; live; above `fields-above`, the count of the frame's fields; negative,
 ;; every value live. `stub` is a stub's frame's size.
 (define-type cv-frames
-  (productof (align int) (header int) (link int) (return int) (map int) (values-from int)
+  (tupof (align int) (header int) (link int) (return int) (map int) (values-from int)
              (live-below int) (fields-above int) (stub int)))
 
 ;; The state's fields that code reads or writes, by offset; `reg4` is
 ;; x86_64's REG4, REG5 … REG8 the four words after it, 0 where a machine
 ;; has none (arm64, whose are registers).
 (define-type cv-state
-  (productof (fuel int) (reserve int) (trap int) (pc int) (args int) (nargs int) (aux int)
+  (tupof (fuel int) (reserve int) (trap int) (pc int) (args int) (nargs int) (aux int)
              (callout int) (rust-sp int) (native-sp int) (fp int) (top int) (words int)
              (alloc-limit int) (code int) (clo int) (delta int) (code-lo int) (trap-stub int)
              (foreign int) (closure int) (cards int) (stack-limit int) (overflow int) (poll int)
@@ -82,7 +82,7 @@
 ;; on x86_64); its inputs, each a role and its places; its output's place,
 ;; -1 for none; whether it may collect.
 (define-type cv-routine
-  (productof (entry int) (in cv-regs) (out int) (may-collect bool)))
+  (tupof (entry int) (in cv-regs) (out int) (may-collect bool)))
 ;; `overflow`, when `sp` is below the stack's limit once a frame is made:
 ;; its entry called with the return in `x30` (pushed, on x86_64), the code
 ;; bloblet in
@@ -90,29 +90,29 @@
 ;; whether the closure was read and whether the procedure is variadic (bits
 ;; `closure-read`, `variadic`). It keeps the registers in `keeps`.
 (define-type cv-overflow
-  (productof (entry int) (code int) (info int) (held-at int) (held-width int)
+  (tupof (entry int) (code int) (info int) (held-at int) (held-width int)
              (closure-read int) (variadic int) (keeps cv-ints)))
 ;; `trap`: its kind in `kind`, each kind's number and name.
-(define-type cv-trap (productof (entry int) (kind int) (kinds cv-names)))
+(define-type cv-trap (tupof (entry int) (kind int) (kinds cv-names)))
 (define-type cv-routines
-  (productof (foreign cv-routine) (overflow cv-overflow) (poll cv-routine) (cons cv-routine)
+  (tupof (foreign cv-routine) (overflow cv-overflow) (poll cv-routine) (cons cv-routine)
              (bloblet cv-routine) (trap cv-trap)))
 
 ;; Fuel: in the place `register`, less `subtract` on entry and on a back
 ;; edge; below zero, a call of `poll`.
-(define-type cv-fuel (productof (register int) (subtract int)))
+(define-type cv-fuel (tupof (register int) (subtract int)))
 ;; A store of a value marks `mark` at the card table (at `cards` in the
 ;; state) plus the address shifted right by `card-shift`.
-(define-type cv-barrier (productof (cards int) (card-shift int) (mark int)))
+(define-type cv-barrier (tupof (cards int) (card-shift int) (mark int)))
 
 (define-type convention
-  (productof (target string) (registers cv-registers) (values cv-values)
+  (tupof (target string) (registers cv-registers) (values cv-values)
              (closures cv-closures) (code cv-code) (frames cv-frames) (state cv-state)
              (routines cv-routines) (fuel cv-fuel) (barrier cv-barrier)))
 
 ;; How a convention names its places, as printed: x86_64's or arm64's
 ;; registers, and the state's fields, each its name and offset.
-(define-type cv-nm (productof (x86 bool) (sn cv-names)))
+(define-type cv-nm (tupof (x86 bool) (sn cv-names)))
 
 ;; A declaration read: the convention, or why not.
-(define-type cv-read (sumof (ok convention) (refused string)))
+(define-type cv-read (oneof (ok convention) (refused string)))

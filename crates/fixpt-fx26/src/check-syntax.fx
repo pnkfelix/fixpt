@@ -213,7 +213,7 @@
               (let* ((n (k-name-of (car pair) "a parameter's name"))
                      (k (k-parse-kind (k-nth pair 1)))
                      (rest (k-family-params (cdr ps))))
-                (cons (product (1 n) (2 k)) rest))
+                (cons (tup (1 n) (2 k)) rest))
               (k-sfail "a parameter is `(name kind)`" (car ps)))))))
 
 ;; `(define-type (name (param kind) …) type)`: nothing is read until it is
@@ -306,7 +306,7 @@
 ;; definition proving it yet.
 (define k-stated-lemma (->* (k-binders (pairof int int @t) k-hyps) k-lemma)
   (lambda (bs conc hyps)
-    (product (1 bs) (2 (car conc)) (3 (cdr conc)) (4 hyps) (5 (the k-named nil)))))
+    (tup (1 bs) (2 (car conc)) (3 (cdr conc)) (4 hyps) (5 (the k-named nil)))))
 ;; The type of the coercion a hypothesis `a <= b` stands for: a procedure
 ;; from `a` to `b`, of effect `spin`.
 (define k-coercion (->* ((pairof int int @t) k-eff) int)

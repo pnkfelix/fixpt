@@ -3,10 +3,10 @@
 ;;; `f64`s read only for `f64` operations (raw, no box), and
 ;;; `blobref-index` in line, each element of an array of them; with loops
 ;;; that allocate as they go, so that a collection moves the owner.
-(define-type pt (productof (x f64) (y f64)))
-(define-type s1 (sumof u8 (0 f64) (1 pt)))
-(define-type s2 (sumof u16 (300 f64) (2 pt)))
-(define-type s4 (sumof u32 (70000 f64) (4 pt)))
+(define-type pt (tupof (x f64) (y f64)))
+(define-type s1 (oneof u8 (0 f64) (1 pt)))
+(define-type s2 (oneof u16 (300 f64) (2 pt)))
+(define-type s4 (oneof u32 (70000 f64) (4 pt)))
 (define-type o (bloblet (fields) @heap))
 (define-effect makes (maxeff (alloc @heap) (read @heap) (write @heap) spin))
 (define-type a1 (blobref o (arrayof s1 6)))

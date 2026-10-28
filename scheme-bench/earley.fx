@@ -186,7 +186,7 @@
 
 (define-type lexer (subr ear (symbols) (listof symbols @heap)))
 (define-type parse
-  (productof (nts ntv) (starters classes) (enders classes) (predictors classes)
+  (tupof (nts ntv) (starters classes) (enders classes) (predictors classes)
              (steps iarr) (names names) (toks toks) (states states)
              (parsed? (subr ear (symbol int int ntv classes states) bool))
              (deriv-trees* (subr ear (symbol int int ntv classes iarr names toks states) trees))
@@ -828,7 +828,7 @@
 
         ; Build the parser description
 
-        (let ((parser-descr (product (lexer lexer)
+        (let ((parser-descr (tup (lexer lexer)
                                      (nts nts)
                                      (starters starters)
                                      (enders enders)
@@ -845,7 +845,7 @@
                    (names      (extract parser-descr names))
                    (toks       (input->tokens input lexer nts)))
 
-              (product (nts nts)
+              (tup (nts nts)
                        (starters starters)
                        (enders enders)
                        (predictors predictors)

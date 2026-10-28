@@ -3,9 +3,9 @@
 ;;; checker wants an `a` and sees a `bool`. Guards (the note's proposal)
 ;;; would let the arm know `a = bool`.
 (define-type (expr (a type))
-  (sumof (lit a)
+  (oneof (lit a)
          (is-zero (expr int))
-         (if-e (productof (c (expr bool)) (t (expr a)) (f (expr a))))))
+         (if-e (tupof (c (expr bool)) (t (expr a)) (f (expr a))))))
 (define* ev (poly ((a type)) (subr spin ((expr a)) a))
   (lambda (e)
     (tagcase e

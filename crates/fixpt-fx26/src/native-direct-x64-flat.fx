@@ -625,8 +625,8 @@
       (("string?") (cons d-kind-string nil))
       (("%fx26-array?") (cons d-kind-bloblet nil))
       (("%fx26-box?") (cons d-kind-box nil))
-      (("%fx26-sum?") (cons d-kind-sum nil))
-      (("%fx26-product?") (cons d-kind-product nil))
+      (("%fx26-one?") (cons d-kind-sum nil))
+      (("%fx26-tup?") (cons d-kind-product nil))
       (("%fx26-procedure?")
        ;; cons-chain: in `@k`, the assembler's region, which `list` would not be
        (cons d-kind-closure

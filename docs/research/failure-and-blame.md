@@ -81,7 +81,7 @@ was a contract broken?**
 
 - *Part of the contract*: the user's "exceptional situations". A missing
   file, a closed pipe, bytes that are not UTF-8 are anticipated outcomes
-  of the domain. They belong in values: `io-error`, `(sumof (data …)
+  of the domain. They belong in values: `io-error`, `(oneof (data …)
   (failed …))`, `utf8->string`'s `(bad k)`.
 - *A contract broken*: an obligation someone was to establish was not.
   `car`'s precondition is "not `nil`"; `quotient`'s is "not zero".
@@ -98,7 +98,7 @@ it becomes a broken contract only if it leaks inward unvalidated.
 | kind                  | about       | contract               | belongs                                   |
 | --------------------- | ----------- | ---------------------- | ----------------------------------------- |
 | resource exhaustion   | the machine | none                   | ambient, never in types                   |
-| exceptional situation | the program | anticipated            | values (`sumof … (failed …)`)             |
+| exceptional situation | the program | anticipated            | values (`oneof … (failed …)`)             |
 | misuse (by a caller)  | the program | broken: caller's blame | the layer's API, as preconditions         |
 | invariant violation   | the program | broken: own blame      | inside the layer, its own debt to vouch   |
 

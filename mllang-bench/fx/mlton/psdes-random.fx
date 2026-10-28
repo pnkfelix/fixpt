@@ -21,7 +21,7 @@
 ;;; `once`'s loop does not check the sum (the original raises Fail "bug"
 ;;; if it differs); it returns it.
 
-(define-type words (productof (l u32) (r u32)))
+(define-type words (tupof (l u32) (r u32)))
 (define-type ints (listof int acyclic))
 (define-type lookup (subr (read @h) (int) u32))
 
@@ -57,7 +57,7 @@
            (reverse (lambda ((w u32)) (u32-or (u32-shr w half) (u32-shl w half))))
            (mask (int->u32 65535))
            (psdes (lambda ((lword u32) (irword u32))
-                    (nat-fold 0 niter (product (l lword) (r irword))
+                    (nat-fold 0 niter (tup (l lword) (r irword))
                       (lambda (i p)
                         (let* ((lword (extract p l))
                                (irword (extract p r))
@@ -65,7 +65,7 @@
                                (itmpl (u32-and ia mask))
                                (itmph (u32-shr ia half))
                                (ib (u32+ (u32* itmpl itmpl) (u32-not (u32* itmph itmph)))))
-                          (product (l irword)
+                          (tup (l irword)
                                    (r (u32-xor lword
                                                (u32+ (u32* itmpl itmph)
                                                      (u32-xor (c2 i) (reverse ib)))))))))))

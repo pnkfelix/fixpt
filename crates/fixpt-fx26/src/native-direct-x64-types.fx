@@ -13,9 +13,9 @@
 (define-type da-strings (listof string @k))
 ;; Pairs of ints: a displacement to patch and its label; a trap's label
 ;; and code.
-(define-type da-pairs (listof (productof (1 int) (2 int)) @k))
+(define-type da-pairs (listof (tupof (1 int) (2 int)) @k))
 ;; Where the assembler is (`da-mark`).
-(define-type da-mark (productof (1 int) (2 int) (3 da-pairs) (4 int)))
+(define-type da-mark (tupof (1 int) (2 int) (3 da-pairs) (4 int)))
 ;; Something to do with a register, in place (`in_place`).
 (define-type da-on-reg (subr da-assembles (int) unit))
 
@@ -122,16 +122,16 @@
 
 ;; A procedure's cells as the analysis reads them (`reps.rs`): each one's
 ;; value as a fixnum (0 for one that is not), and whether it is one.
-(define-type nr-cells (productof (1 da-ints) (2 da-bools)))
+(define-type nr-cells (tupof (1 da-ints) (2 da-bools)))
 ;; What `reps_of` gives: by instruction, its registers' representations
 ;; where it starts and where it ends (`nr-reps`, packed).
-(define-type nr-in-out (productof (1 da-ints) (2 da-ints)))
+(define-type nr-in-out (tupof (1 da-ints) (2 da-ints)))
 ;; What `step` gives: the conversions before an instruction (`nr-convert`),
 ;; and the representations after it.
-(define-type nr-stepped (productof (1 da-bytes) (2 int)))
+(define-type nr-stepped (tupof (1 da-bytes) (2 int)))
 ;; A raw operation (`RawOp`): its kind (0 none, 1 an integer's, 2 an
 ;; `f64`'s), whether signed, and the name after the type (`what`).
-(define-type nr-raw-op (productof (1 int) (2 bool) (3 string)))
+(define-type nr-raw-op (tupof (1 int) (2 bool) (3 string)))
 
 ;; Where native code keeps `i64`, `u64` and `f64` values
 ;; (`native-reps.fx`): `direct/reps.rs`, step for step. A register's
@@ -181,7 +181,7 @@
 ;; whether a difference; and the branch a comparison makes, if it makes
 ;; one (-1 for none), and whether taken when true.
 (define-type dr-int-slow
-  (productof (1 int) (2 int) (3 int) (4 int) (5 int) (6 int) (7 int) (8 int) (9 bool)
+  (tupof (1 int) (2 int) (3 int) (4 int) (5 int) (6 int) (7 int) (8 int) (9 bool)
              (10 int) (11 bool)))
 
 ;; Raw values and the operations native code does on them
@@ -251,14 +251,14 @@
 ;; (over, back, the raw registers); a call through a cell whose global was
 ;; written (slow, join, stub, the raw registers); and a call of what is
 ;; not native code (stub, after, the count, whether a tail call).
-(define-type dp-edge (productof (1 int) (2 da-bytes) (3 da-bytes) (4 int) (5 int)))
+(define-type dp-edge (tupof (1 int) (2 da-bytes) (3 da-bytes) (4 int) (5 int)))
 (define-type dp-edge-list (listof dp-edge @k))
 (define-type dp-int-slow-list (listof dr-int-slow @k))
-(define-type dp-poll (productof (1 int) (2 int) (3 int) (4 int) (5 bool) (6 bool) (7 int)))
+(define-type dp-poll (tupof (1 int) (2 int) (3 int) (4 int) (5 bool) (6 bool) (7 int)))
 (define-type dp-poll-list (listof dp-poll @k))
-(define-type dp-overflow-list (listof (productof (1 int) (2 int) (3 int)) @k))
-(define-type dp-cell-slow-list (listof (productof (1 int) (2 int) (3 int)) @k))
-(define-type dp-foreign-list (listof (productof (1 int) (2 int) (3 int) (4 bool)) @k))
+(define-type dp-overflow-list (listof (tupof (1 int) (2 int) (3 int)) @k))
+(define-type dp-cell-slow-list (listof (tupof (1 int) (2 int) (3 int)) @k))
+(define-type dp-foreign-list (listof (tupof (1 int) (2 int) (3 int) (4 bool)) @k))
 
 ;; The procedure being compiled, its analysis, its fields and the version
 ;; being made (`native-direct-x64-proc.fx`), as its other files use it.
@@ -387,7 +387,7 @@
 ;; its own, its code bloblet's fields, the call-outs it numbered, and why
 ;; it cannot be compiled ("" if it can).
 (define-type dx-made
-  (productof (1 da-bytes) (2 int) (3 da-bytes) (4 da-bytes) (5 string) (6 da-bytes)))
+  (tupof (1 da-bytes) (2 int) (3 da-bytes) (4 da-bytes) (5 string) (6 da-bytes)))
 
 ;; What the conductor names of the compiler, for Rust.
 (define-type native-direct-x64-sig

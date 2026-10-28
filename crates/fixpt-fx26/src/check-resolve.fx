@@ -80,7 +80,7 @@
       (x-rlambda (r l a b abk) abk) (x-module (items a b abk) abk) (x-with (m e a b abk) abk))))
 ;; `x`'s identity.
 (define k-at-of (->* (kx) k-at)
-  (lambda (x) (product (1 (k-start x)) (2 (k-end x)) (3 (k-kth x)))))
+  (lambda (x) (tup (1 (k-start x)) (2 (k-end x)) (3 (k-kth x)))))
 (define k-same-span? (->* (kx int int) bool)
   (lambda (x a b) (and (= (k-start x) a) (= (k-end x) b))))
 
@@ -91,7 +91,7 @@
         (let* ((ty (extract (car ps) 2))
                (t (if (null? ty) (the k-ids nil) (the k-ids (cons (k-parse-type (car ty)) nil))))
                (rest (k-resolve-params (cdr ps))))
-          (cons (product (1 (extract (car ps) 1)) (2 t)) rest)))))
+          (cons (tup (1 (extract (car ps) 1)) (2 t)) rest)))))
 (define k-resolve-descs (->* (syns-a) k-descs)
   (lambda (ds)
     (if (null? ds)
@@ -142,7 +142,7 @@
       (e-rlambda (r l a b abk) abk) (e-module (items a b abk) abk) (e-with (m x a b abk) abk))))
 ;; `x`'s identity.
 (define exp-at (->* (exp) k-at)
-  (lambda (x) (product (1 (exp-start x)) (2 (exp-end x)) (3 (exp-kth x)))))
+  (lambda (x) (tup (1 (exp-start x)) (2 (exp-end x)) (3 (exp-kth x)))))
 
 ;; A `plambda`'s region and place binders: each won't outlive what is bound
 ;; around it (`lives`), and each is around what its body binds.
@@ -183,15 +183,15 @@
 (define k-as-subr (->* (int) (listof k-callable acyclic))
   (lambda (t)
     (tagcase (k-get t)
-      (ty-subr (e ps r cv spc) (cons (product (1 e) (2 ps) (3 r)) nil))
+      (ty-subr (e ps r cv spc) (cons (tup (1 e) (2 ps) (3 r)) nil))
       (ty-comp (arg answer e r once)
         (let ((control (k-insert (a-goto r) (k-insert (a-comefrom r) e))))
-          (cons (product (1 control) (2 (the k-ids (cons arg nil))) (3 answer)) nil)))
+          (cons (tup (1 control) (2 (the k-ids (cons arg nil))) (3 answer)) nil)))
       (else x nil))))
 ;; No `vsubr`; one, of latent effect `e`, arguments of type `a`, result `r`.
 (define k-vsub-none k-vsub nil)
 (define k-vsub-one (->* (k-eff int int) k-vsub)
-  (lambda (e a r) (cons (product (1 e) (2 a) (3 r)) nil)))
+  (lambda (e a r) (cons (tup (1 e) (2 a) (3 r)) nil)))
 ;; `vsubr`'s three descriptions, an effect and two types, as `k-vsubr-parts`
 ;; gives them.
 (define k-vsubr-descs (->* (k-desc k-desc k-desc) k-vsub)
@@ -224,7 +224,7 @@
       (if (null? v)
           (k-as-subr t)
           (let* ((p (car v)) (ps (k-repeat-id (extract p 2) n (the k-ids nil))))
-            (cons (product (1 (extract p 1)) (2 ps) (3 (extract p 3))) nil))))))
+            (cons (tup (1 (extract p 1)) (2 ps) (3 (extract p 3))) nil))))))
 
 ;;; ------------------------------------------------------------ regions of types
 
@@ -470,7 +470,7 @@
 ;; outermost) that a `let` binds to a module written there, with the values
 ;; it gives: what a `with` of one binds in its body before it is checked
 ;; (`free_into_in`).
-(define-type k-wlocals (listof (productof (1 int) (2 k-names)) acyclic))
+(define-type k-wlocals (listof (tupof (1 int) (2 k-names)) acyclic))
 ;; How many names are from `m`'s innermost binding in `bound` to the
 ;; outermost, or 0.
 (define k-bound-at (->* (k-names symbol) int)
@@ -490,7 +490,7 @@
         ls
         (let ((vals (k-written-module-values (extract (car bs) 2))))
           (k-wlocals-let (cdr bs) (+ n 1)
-                         (if (null? vals) ls (cons (product (1 n) (2 (car vals))) ls)))))))
+                         (if (null? vals) ls (cons (tup (1 n) (2 (car vals))) ls)))))))
 ;; The values a module written as `x`, `(module item …)`, gives, as its type
 ;; will say: its definitions not hidden; none known if it includes others.
 (define k-written-module-values (->* (kx) (listof k-names acyclic))

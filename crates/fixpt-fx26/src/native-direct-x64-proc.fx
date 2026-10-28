@@ -48,7 +48,7 @@
 ;; and something else split), how many, and where each instruction starts
 ;; (by index, as `starts`), with each cell's instruction's index (-1 for an
 ;; operand's).
-(define dp-cells (ref nr-cells @k) (new (product (1 (make-array 1 0)) (2 (make-array 1 #f)))))
+(define dp-cells (ref nr-cells @k) (new (tup (1 (make-array 1 0)) (2 (make-array 1 #f)))))
 (define dp-n (ref int @k) (new 0))
 (define dp-starts (ref da-ints @k) (new (make-array 1 0)))
 (define dp-si-at (ref da-ints @k) (new (make-array 1 0)))
@@ -440,7 +440,7 @@
             (dp-label to)
             (let ((l (da-label)))
               (begin
-                (set dp-edges (cons (product (1 l) (2 unbox) (3 check) (4 (dp-label to))
+                (set dp-edges (cons (tup (1 l) (2 unbox) (3 check) (4 (dp-label to))
                                              (5 (dp-label-g to)))
                                     (get dp-edges)))
                 l)))))))
@@ -516,7 +516,7 @@
           (set dp-a (dp-array (dp-nth lists 5) n))
           (set dp-b (dp-array (dp-nth lists 6) n))
           (set dp-n n)
-          (set dp-cells (nr-split-slots (product (1 fix) (2 fix?))))
+          (set dp-cells (nr-split-slots (tup (1 fix) (2 fix?))))
           ;; cons-chain: in `@k`, which `list` would not be
           (set dp-fields (cons (dp-const-of (dp-nth-int head 4)) (cons dp-myself nil)))
           (set dp-nfields-made 2)

@@ -56,7 +56,7 @@ pub const DATUM: &str = "(union int f64 char bool string symbol nil (pairof datu
 /// What an I/O primitive gives when it fails (`TODO.md` §84): its kind, one
 /// of a fixed few as `tagcase` can check, and the system's description. A
 /// value the program sees, not a failure of the run.
-pub const IO_ERROR: &str = "(productof (kind (sumof (not-found unit) (permission-denied unit) (already-exists unit) (not-a-directory unit) (is-a-directory unit) (broken-pipe unit) (invalid-data unit) (other unit))) (detail string))";
+pub const IO_ERROR: &str = "(tupof (kind (oneof (not-found unit) (permission-denied unit) (already-exists unit) (not-a-directory unit) (is-a-directory unit) (broken-pipe unit) (invalid-data unit) (other unit))) (detail string))";
 /// The types the initial environment names, before its bindings, whose
 /// types name them: `datum`, what a reader reads (`docs/fx26.md`,
 /// "Datums"), and `io-error`. In both checkers (`standard_text`).
@@ -105,8 +105,8 @@ pub const SHAPES: &[(&str, &str)] = &[
     ("procedure", "procedure?"),
     ("bloblet", "array?"),
     ("box", "ref?"),
-    ("sum", "sum?"),
-    ("product", "product?"),
+    ("one", "one?"),
+    ("tup", "tup?"),
     ("vector", "vector?"),
     ("bytevector", "bytevector?"),
 ];
@@ -1179,8 +1179,8 @@ impl Checker {
             // An array is a bloblet as `(bloblet …)` is, of the same kind.
             Ty::Array(..) | Ty::Bloblet { .. } => bit("bloblet"),
             Ty::Ref(..) => bit("box"),
-            Ty::Sum(_) => bit("sum"),
-            Ty::Product(_) => bit("product"),
+            Ty::Sum(_) => bit("one"),
+            Ty::Product(_) => bit("tup"),
             Ty::Union(ms) => {
                 if seen.contains(&t) {
                     return None;

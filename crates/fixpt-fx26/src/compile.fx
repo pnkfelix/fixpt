@@ -70,7 +70,7 @@
 ;; a `letrec`; those asked of every expression are by where it starts
 ;; (`c-by-at`), so that asking makes nothing.
 (define c-span-key (->* (int int int) k-at)
-  (lambda (a b k) (product (1 a) (2 b) (3 k))))
+  (lambda (a b k) (tup (1 a) (2 b) (3 k))))
 (define c-at-hash (subr pure (k-at) int) (lambda (x) (extract x 1)))
 (define c-at-is? (->* (k-at int int int) bool) (lambda (x a b k) (k-at-is? x a b k)))
 (define c-at=? (subr pure (k-at k-at) bool)
@@ -96,7 +96,7 @@
   (lambda (t at n)
     (let ((a (extract at 1)))
       (table-set! t a (the (listof c-noted acyclic)
-                        (cons (product (1 at) (2 n)) (table-ref t a nil)))))))
+                        (cons (tup (1 at) (2 n)) (table-ref t a nil)))))))
 (define c-new-by-at (subr (alloc @k) () c-by-at) (lambda () (make-table c-int-hash c-int=?)))
 
 (define c-fact-table (ref c-datums-at @k) (new (make-table c-int-hash c-int=?)))
@@ -498,7 +498,7 @@
                 (let ((a (extract at 1)))
                   (table-set! (get c-fact-table) a
                               (the (listof c-datum-noted acyclic)
-                                (cons (product (1 at) (2 d))
+                                (cons (tup (1 at) (2 d))
                                       (table-ref (get c-fact-table) a nil))))))
               (n-apply-shares () (c-note! (get c-shares-table) at 0))
               (n-frozen-define () (c-note! (get c-frozen-table) at 0))
@@ -508,7 +508,7 @@
                 (let ((a (extract at 1)))
                   (table-set! (get c-call-table) a
                               (the (listof c-conv-noted acyclic)
-                                (cons (product (1 at) (2 cv))
+                                (cons (tup (1 at) (2 cv))
                                       (table-ref (get c-call-table) a nil))))))
               ;; The greatest summary, per expression.
               (n-summary (s)
@@ -615,9 +615,9 @@
 ;; Names `ns` at positions `ps` onto `names` and `places`, newest first,
 ;; each not `seen` yet (by position: a name has one).
 (define c-included-add
-  (->* (syms k-ids syms k-ids (table int bool @k)) (productof (1 syms) (2 k-ids)))
+  (->* (syms k-ids syms k-ids (table int bool @k)) (tupof (1 syms) (2 k-ids)))
   (lambda (ns ps names places seen)
-    (cond ((or (null? ns) (null? ps)) (product (1 names) (2 places)))
+    (cond ((or (null? ns) (null? ps)) (tup (1 names) (2 places)))
           ((table-ref seen (car ps) #f) (c-included-add (cdr ns) (cdr ps) names places seen))
           (else (begin (table-set! seen (car ps) #t)
                        (c-included-add (cdr ns) (cdr ps) (the syms (cons (car ns) names))
@@ -636,7 +636,7 @@
                    (let ((more (c-included-add (car (c-with-at a b abk))
                                                (car (c-with-places-at a b abk))
                                                (extract acc 1) (extract acc 2) seen)))
-                     (product (1 (extract more 1)) (2 (extract more 2))
+                     (tup (1 (extract more 1)) (2 (extract more 2))
                               (3 (the exps (cons (car w) (extract acc 3)))))))
                  (else y acc)))
            seen)))))
@@ -652,10 +652,10 @@
                             seen)))))
 ;; Names `ns` and positions `ps`, newest first, onto `os` and `qs`, the
 ;; oldest first.
-(define c-included-oldest (->* (syms k-ids syms k-ids) (productof (1 syms) (2 k-ids)))
+(define c-included-oldest (->* (syms k-ids syms k-ids) (tupof (1 syms) (2 k-ids)))
   (lambda (ns ps os qs)
     (if (or (null? ns) (null? ps))
-        (product (1 os) (2 qs))
+        (tup (1 os) (2 qs))
         (c-included-oldest (cdr ns) (cdr ps) (the syms (cons (car ns) os))
                            (the k-ids (cons (car ps) qs))))))
 ;; A module's included values (`TODO.md` §69): the names its items'
@@ -666,14 +666,14 @@
 ;; from `%include` at every call. As the Rust compiler's `included_names`.
 (define c-included-names (->* (mod-items) c-included)
   (lambda (items)
-    (let ((none (the c-included (product (1 nil) (2 nil) (3 nil)))))
+    (let ((none (the c-included (tup (1 nil) (2 nil) (3 nil)))))
       (if (or (null? items)
               (not (= (extract (car items) 1) 2))
               (not (string=? (symbol->string (car (extract (car items) 2))) "%include")))
           none
           (let* ((inc (c-included-items (cdr items) none (make-table c-int-hash c-int=?)))
                  (old (c-included-oldest (extract inc 1) (extract inc 2) nil nil)))
-            (product (1 (extract old 1)) (2 (extract old 2)) (3 (extract inc 3))))))))
+            (tup (1 (extract old 1)) (2 (extract old 2)) (3 (extract inc 3))))))))
 (define c-note-withs! (->* (exps) unit)
   (lambda (ws)
     (if (null? ws)
@@ -829,14 +829,14 @@
   (lambda (ps args)
     (if (null? ps)
         nil
-        (cons (product (1 (extract (car ps) 1)) (2 (car args)))
+        (cons (tup (1 (extract (car ps) 1)) (2 (car args)))
               (c-param-bindings (cdr ps) (cdr args))))))
 
 ;; A plain lambda (under forms that compile to nothing) applied at once to
 ;; as many arguments as it has parameters, as the Rust compiler's
 ;; `applied_lambda` finds it: the `let` it is, its bindings and body, in a
 ;; list of one; none if `f` is no such lambda.
-(define c-applied-let (->* (exp exps) (listof (productof (1 c-binds) (2 exp)) @k))
+(define c-applied-let (->* (exp exps) (listof (tupof (1 c-binds) (2 exp)) @k))
   (lambda (f args)
     (let ((lam (c-lambda-of f)))
       (if (null? lam)
@@ -844,8 +844,8 @@
           (tagcase (car lam)
             (e-lambda (ps body a b abk)
               (if (= (c-count-params ps) (c-count-exps args))
-                  (the (listof (productof (1 c-binds) (2 exp)) @k)
-                    (cons (product (1 (c-param-bindings ps args)) (2 body)) nil))
+                  (the (listof (tupof (1 c-binds) (2 exp)) @k)
+                    (cons (tup (1 (c-param-bindings ps args)) (2 body)) nil))
                   nil))
             (else y nil))))))
 
@@ -958,7 +958,7 @@
   (lambda (xs) (if (null? xs) 0 (+ 1 (c-length (cdr xs))))))
 
 (define c-nth-binding
-  (->* (c-recs int) (productof (1 symbol) (2 syn) (3 exp)))
+  (->* (c-recs int) (tupof (1 symbol) (2 syn) (3 exp)))
   (lambda (bs i) (if (= i 0) (car bs) (c-nth-binding (cdr bs) (- i 1)))))
 
 ;; Whether no binding of `bs` but the `i`th mentions `name`; `k` counts.

@@ -46,10 +46,10 @@
   (a-app int (listof k-desc acyclic)))
 (define-type k-eff (listof k-atom acyclic))
 ;; A `vsubr`'s effect, element and result, in a list: one or none.
-(define-type k-vsub (listof (productof (1 k-eff) (2 int) (3 int)) acyclic))
+(define-type k-vsub (listof (tupof (1 k-eff) (2 int) (3 int)) acyclic))
 (define-type k-ids (listof int acyclic))
 ;; `lambda`s settled at the types `->*` found: each type, and where it is.
-(define-type k-settleds (listof (productof (1 int) (2 int) (3 int)) acyclic))
+(define-type k-settleds (listof (tupof (1 int) (2 int) (3 int)) acyclic))
 ;; Propositions about a procedure's arguments, what a test proves of them
 ;; (`(bool (then P …) (else Q …))`, an `ensures`), each by its parameter's
 ;; number from 0: of a shape (`check-unions.fx`'s), or, the
@@ -82,15 +82,15 @@
 (define-type k-sfs (listof k-sf acyclic))
 ;; A procedure's specification (`ast::Spec`): its parameters' names (`||`
 ;; for one not named), its result's, its `requires`, its `ensures`.
-(define-type k-spec (productof (1 (listof symbol acyclic)) (2 symbol) (3 k-sf) (4 k-sf)))
+(define-type k-spec (tupof (1 (listof symbol acyclic)) (2 symbol) (3 k-sf) (4 k-sf)))
 ;; None or one.
 (define-type k-specs (listof k-spec acyclic))
 ;; What an `ensures` says a test proves where true and where false, and the
 ;; rest of it (`specs::latent_split`): none or one.
-(define-type k-latents (listof (productof (1 k-props) (2 k-props) (3 k-sf)) acyclic))
+(define-type k-latents (listof (tupof (1 k-props) (2 k-props) (3 k-sf)) acyclic))
 ;; A binder: a description variable and its kind, 0 region, 1 effect, 2 type.
-(define-type k-binders (listof (productof (1 int) (2 int)) acyclic))
-(define-type k-parts (listof (productof (1 symbol) (2 int)) acyclic))
+(define-type k-binders (listof (tupof (1 int) (2 int)) acyclic))
+(define-type k-parts (listof (tupof (1 symbol) (2 int)) acyclic))
 (define-type k-names (listof symbol acyclic))
 (define-type k-strings (listof string acyclic))
 ;; A description in argument position, what `proj` supplies.
@@ -174,7 +174,7 @@
   (ds-size k-size)
   (ds-var int int)
   (ds-rec int)
-  (ds-abbrev (listof (productof (1 symbol) (2 int)) acyclic) syn)
+  (ds-abbrev (listof (tupof (1 symbol) (2 int)) acyclic) syn)
   (ds-region k-region)
   (ds-eff k-eff)
   ;; A convention given for an abbreviation's convention parameter.
@@ -189,14 +189,14 @@
 
 ;; An expression's identity, as what is found of it is kept: where it
 ;; starts and ends, and which of the expressions there it is.
-(define-type k-at (productof (1 int) (2 int) (3 int)))
+(define-type k-at (tupof (1 int) (2 int) (3 int)))
 
 (define-datatype kx
   (x-var symbol int int int)
   ;; A literal: its type, and its value if an integer (a boolean's is 1
   ;; or 0), which the termination check reads.
   (x-const int int int int int)
-  (x-lambda (listof (productof (1 symbol) (2 k-ids)) acyclic) kx int int int)
+  (x-lambda (listof (tupof (1 symbol) (2 k-ids)) acyclic) kx int int int)
   (x-app kx (listof kx acyclic) int int int)
   (x-plambda k-binders kx int int int)
   ;; `letregion`, `letrena`, `letreap` or `letfreeze`: what it makes besides
@@ -208,30 +208,30 @@
   (x-rlambda kx kx int int int)
   (x-proj kx (listof k-desc acyclic) int int int)
   (x-if kx kx kx int int int)
-  (x-letrec (listof (productof (1 symbol) (2 int) (3 kx)) acyclic) kx int int int)
-  (x-let (listof (productof (1 symbol) (2 kx)) acyclic) kx int int int)
+  (x-letrec (listof (tupof (1 symbol) (2 int) (3 kx)) acyclic) kx int int int)
+  (x-let (listof (tupof (1 symbol) (2 kx)) acyclic) kx int int int)
   (x-begin (listof kx acyclic) int int int)
   (x-prompt kx kx kx int int int)
   (x-the int kx int int int)
   ;; `(convention C e)`: the procedure converted to `C`.
   (x-convention k-conv kx int int int)
   (x-bloblet symbol int (listof kx acyclic) int int int)
-  (x-product (listof (productof (1 symbol) (2 kx)) acyclic) int int int)
+  (x-product (listof (tupof (1 symbol) (2 kx)) acyclic) int int int)
   (x-extract kx symbol int int int)
   (x-sum symbol kx int int int)
-  (x-tagcase kx (listof (productof (1 symbol) (2 bool) (3 k-names) (4 kx)) acyclic)
-             (listof (productof (1 symbol) (2 kx)) acyclic) int int int)
+  (x-tagcase kx (listof (tupof (1 symbol) (2 bool) (3 k-names) (4 kx)) acyclic)
+             (listof (tupof (1 symbol) (2 kx)) acyclic) int int int)
   ;; `module`: each item what it is (as `e-module`'s), its names, an
   ;; abstract type's variable (else -1), its types, and its expressions.
-  (x-module (listof (productof (1 int) (2 k-names) (3 int) (4 k-ids) (5 (listof kx acyclic)))
+  (x-module (listof (tupof (1 int) (2 k-names) (3 int) (4 k-ids) (5 (listof kx acyclic)))
                     acyclic)
             int int int)
   (x-with symbol kx int int int))
 (define-type kxs (listof kx acyclic))
-(define-type k-item (productof (1 int) (2 k-names) (3 int) (4 k-ids) (5 kxs)))
+(define-type k-item (tupof (1 int) (2 k-names) (3 int) (4 k-ids) (5 kxs)))
 (define-type k-items (listof k-item acyclic))
 ;; A type and an effect.
-(define-type k-te (productof (1 int) (2 k-eff)))
+(define-type k-te (tupof (1 int) (2 k-eff)))
 ;; What checking a program found, or the first error; and, inside, what a
 ;; computation whose errors are being rewritten produced.
 (define-datatype k-result
@@ -240,12 +240,12 @@
   (k-done k-te))
 ;; The variables a test has narrowed, in the branch where it did: each by
 ;; name and binding, and its type there (the Rust checker's `narrowed`).
-(define-type k-narrows (listof (productof (1 symbol) (2 int) (3 int)) acyclic))
+(define-type k-narrows (listof (tupof (1 symbol) (2 int) (3 int)) acyclic))
 ;; Unions read with a member not yet known, a recursive type's own name, and
 ;; where: checked once it is (`k-union-of`).
-(define-type k-pendings (listof (productof (1 int) (2 int) (3 int)) acyclic))
+(define-type k-pendings (listof (tupof (1 int) (2 int) (3 int)) acyclic))
 ;; What `length-is?` has just confirmed: a variable, its binding, the length.
-(define-type k-cert-len (productof (1 symbol) (2 int) (3 k-size)))
+(define-type k-cert-len (tupof (1 symbol) (2 int) (3 k-size)))
 ;; The arrow kinds made so far, newest first: each its parameters' kinds and
 ;; its result's. Kind 100 + n is the nth; kinds below are the
 ;; base kinds (0 region, 1 effect, 2 type, 3 place, 4 data, 5 size, 6 conv).
@@ -262,12 +262,12 @@
 (define-type k-named (listof (pairof symbol int @t) acyclic))
 ;; Every `define-generative`, newest first: its name, parameters, their
 ;; variance (0 covariant, 1 contravariant, 2 invariant), and representation.
-(define-type k-gen (productof (1 symbol) (2 k-binders) (3 k-ids) (4 int)))
+(define-type k-gen (tupof (1 symbol) (2 k-binders) (3 k-ids) (4 int)))
 ;; The lemmas proved so far (`src/lemma.rs`), oldest last: binders, the
 ;; two sides, the hypotheses, and the definition that proves it (none or
 ;; one); and the one a `proves` type being read states.
 (define-type k-hyps (listof (pairof int int @t) acyclic))
-(define-type k-lemma (productof (1 k-binders) (2 int) (3 int) (4 k-hyps) (5 k-named)))
+(define-type k-lemma (tupof (1 k-binders) (2 int) (3 int) (4 k-hyps) (5 k-named)))
 (define-type k-regions (listof k-region acyclic))
 ;; A step of a path from a variable: `car`, `cdr`, a product's field.
 (define-datatype k-step (st-car) (st-cdr) (st-field symbol))
@@ -277,7 +277,7 @@
 ;; steps, the regions they read through, the type, the closure depth it
 ;; was found at, and whether an effect since has ended it.
 (define-type k-path-fact
-  (productof (1 symbol) (2 int) (3 k-steps) (4 k-regions) (5 int) (6 int) (7 bool)))
+  (tupof (1 symbol) (2 int) (3 k-steps) (4 k-regions) (5 int) (6 int) (7 bool)))
 (define-type k-path-facts (listof k-path-fact acyclic))
 
 ;;; ------------------------------------------------------------ signatures
@@ -364,7 +364,7 @@
    (val k-binder-has? (subr (maxeff (read @globals) (read @t)) (k-binders int) bool))
    (val k-path-narrowed (ref k-path-facts @t))
    (val k-dvar-name (subr (maxeff (read @globals) (read @t)) (int) symbol))
-   (val k-spin-why (ref (listof (productof (1 symbol) (2 int) (3 string)) acyclic) @t))
+   (val k-spin-why (ref (listof (tupof (1 symbol) (2 int) (3 string)) acyclic) @t))
    (val k-new-epoch (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t)) () int))
    (val k-visit?
         (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin) (int int) bool))

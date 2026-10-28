@@ -13,7 +13,7 @@
 ;;; a prompt around the sum, per element, as SML's `handle` is.
 ;;; SML's vector of pairs is an array of products.
 
-(define-type pair (productof (a int) (b int)))
+(define-type pair (tupof (a int) (b int)))
 
 ;; SML's Overflow, raised by Int32's +; its handler answers an int.
 (define-type overflow-tag (prompt-tag int unit (read (globals add32 overflow)) @x))
@@ -30,7 +30,7 @@
 
 (define* tabulate (subr (maxeff (alloc @v) (write @v) spin) (int (subr pure (int) pair)) (arrayof pair @v))
   (lambda (n f)
-    (let ((v (the (arrayof pair @v) (make-array n (product (a 0) (b 0))))))
+    (let ((v (the (arrayof pair @v) (make-array n (tup (a 0) (b 0))))))
       (letrec ((fill (subr (maxeff (write @v) spin) (int) unit)
                  (lambda (i) (if (< i n) (begin (array-set! v i (f i)) (fill (+ i 1))) #u))))
         (begin (fill 0) v)))))
@@ -49,7 +49,7 @@
 
 (define* doit (subr (maxeff (read @v) (alloc @v) (write @v) spin) (int) int)
   (lambda (n)
-    (let ((v (tabulate size (lambda (i) (product (a i) (b (+ i 1)))))))
+    (let ((v (tabulate size (lambda (i) (tup (a i) (b (+ i 1)))))))
       (letrec ((loop (subr (maxeff (read @v) spin (read (globals add32 foldl overflow))) (int int) int)
                  (lambda (n result)
                    (if (= 0 n)

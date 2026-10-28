@@ -124,7 +124,7 @@
                 (if (k-has-label? done l)
                     (k-sfail (k-twice (symbol->string l)) (car ps))
                     (let ((t (k-parse-type (k-nth pair 1))))
-                      (k-parse-parts (cdr ps) (cons (product (1 l) (2 t)) done)))))
+                      (k-parse-parts (cdr ps) (cons (tup (1 l) (2 t)) done)))))
               (k-sfail "`(label type)`" (car ps)))))))
 ;; Storage written: a procedure kept there may not reach itself unsaid
 ;; (`spin`).
@@ -290,8 +290,8 @@
         (let* ((t (k-with-applied (cdr withs) f args outer))
                (fun (k-ty-new (ty-select (car withs) f)))
                (app (k-ty-new (ty-app fun (k-parse-ds args)))))
-          (begin (set k-with-fallbacks (cons (product (1 fun) (2 t)) (get k-with-fallbacks)))
-                 (set k-with-apps (cons (product (1 fun) (2 app)) (get k-with-apps)))
+          (begin (set k-with-fallbacks (cons (tup (1 fun) (2 t)) (get k-with-fallbacks)))
+                 (set k-with-apps (cons (tup (1 fun) (2 app)) (get k-with-apps)))
                  app)))))
 ;; A procedure type's parameters and result, after its effect, with its
 ;; convention: `(subr …)`'s and `(-> …)`'s. A test's result, `(bool …)`, a
@@ -302,7 +302,7 @@
            (ts (k-read-params written result cs))
            (spec (if (string=? (k-list-head result) "bool")
                      (the k-specs
-                          (list (product (1 (k-spec-pnames written)) (2 k-no-name) (3 (sf-true))
+                          (list (tup (1 (k-spec-pnames written)) (2 k-no-name) (3 (sf-true))
                                          (4 (k-parse-proving result (k-length written))))))
                      nil)))
       (k-ty-new (ty-subr e (k-ids-but-last ts) (k-ids-last ts) cv spec)))))
@@ -542,9 +542,9 @@
                  (let* ((fs (k-parse-types (cdr parts))) (r (k-parse-region (k-nth items 2))))
                    (k-ty-new (ty-bloblet fs (string=? which "frozen") r)))
                  (k-sfail "`(fields type …)` or `(frozen type …)`" fields)))))
-        ((productof) (k-ty-new (ty-product (k-parse-parts (cdr items) nil))))
+        ((tupof) (k-ty-new (ty-product (k-parse-parts (cdr items) nil))))
         ;; With a key, a flat sum (`TODO.md` §77).
-        ((sumof) (if (and (> n 1) (syn-symbol? (k-nth items 1)))
+        ((oneof) (if (and (> n 1) (syn-symbol? (k-nth items 1)))
                      (k-parse-flat s)
                      (k-ty-new (ty-sum (k-parse-parts (cdr items) nil)))))
         ((arrayof)
@@ -645,7 +645,7 @@
           knot
           (let* ((saved (get k-dscope)) (slot (k-slot)) (kept (get k-knots)))
             (begin
-              (set k-knots (cons (product (1 name) (2 bound) (3 slot)) kept))
+              (set k-knots (cons (tup (1 name) (2 bound) (3 slot)) kept))
               (k-push-all bound)
               (set k-expanding (+ (get k-expanding) 1))
               (let ((t (k-parse-type body)))
@@ -678,7 +678,7 @@
           ;; it grounded once every slot is filled.
           (let ((t (k-parse-type def)))
             (begin (k-set-link ahead t)
-                   (set k-ahead-filled (cons (product (1 ahead) (2 a) (3 b)) (get k-ahead-filled)))
+                   (set k-ahead-filled (cons (tup (1 ahead) (2 a) (3 b)) (get k-ahead-filled)))
                    ahead))
           (let ((slot (k-slot)))
             (begin
@@ -940,7 +940,7 @@
           #u
           (begin
             (tagcase (k-get t)
-              (ty-select (m n) (set out (cons (product (1 m) (2 n) (3 t)) (get out))))
+              (ty-select (m n) (set out (cons (tup (1 m) (2 n) (3 t)) (get out))))
               (else y (k-selects-each (k-ty-kids t) seen out))))))))
 (define k-selects-each (->* (k-ids k-seen (ref k-selects @t)) unit)
   (lambda (ts seen out)

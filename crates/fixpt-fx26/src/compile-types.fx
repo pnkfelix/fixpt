@@ -19,27 +19,27 @@
 ;; The parser's lists: a lambda's parameters, a `let`'s bindings (and a
 ;; product's fields, and a `tagcase`'s else), a `letrec`'s, a `tagcase`'s
 ;; arms, and expressions.
-(define-type c-params (listof (productof (1 symbol) (2 syns-a)) acyclic))
-(define-type c-binds (listof (productof (1 symbol) (2 exp)) acyclic))
-(define-type c-recs (listof (productof (1 symbol) (2 syn) (3 exp)) acyclic))
-(define-type c-cases (listof (productof (1 symbol) (2 bool) (3 names) (4 exp)) acyclic))
+(define-type c-params (listof (tupof (1 symbol) (2 syns-a)) acyclic))
+(define-type c-binds (listof (tupof (1 symbol) (2 exp)) acyclic))
+(define-type c-recs (listof (tupof (1 symbol) (2 syn) (3 exp)) acyclic))
+(define-type c-cases (listof (tupof (1 symbol) (2 bool) (3 names) (4 exp)) acyclic))
 (define-type exps (listof exp acyclic))
 ;; What is noted of each expression, by its identity (`k-at`): by where it
 ;; starts, so that a lookup makes nothing, then the rest of it.
 (define-type k-at (select check-env-types k-at))
-(define-type c-noted (productof (1 k-at) (2 int)))
+(define-type c-noted (tupof (1 k-at) (2 int)))
 (define-type c-by-at (table int (listof c-noted acyclic) @k))
 ;; And each call's callee's convention (`n-call`), likewise.
 (define-type k-conv (select check-env-types k-conv))
-(define-type c-conv-noted (productof (1 k-at) (2 k-conv)))
+(define-type c-conv-noted (tupof (1 k-at) (2 k-conv)))
 (define-type c-convs-at (table int (listof c-conv-noted acyclic) @k))
 ;; And what each operation takes (`k-datum`), likewise.
-(define-type c-datum-noted (productof (1 k-at) (2 k-datum)))
+(define-type c-datum-noted (tupof (1 k-at) (2 k-datum)))
 (define-type c-datums-at (table int (listof c-datum-noted acyclic) @k))
 ;; A `letrec`-bound procedure lambda-lifted, as Twobit's pass 2 lifts
 ;; (`pass2p2.sch`): its closure, over nothing, made while compiling; the
 ;; names it would have captured, each passed as an argument before its own.
-(define-type c-lift (productof (1 wcell) (2 (listof symbol acyclic))))
+(define-type c-lift (tupof (1 wcell) (2 (listof symbol acyclic))))
 ;; Whether a `letrec` is lifted: its members' indices in `c-lifts`, in a
 ;; list of one; none if not.
 (define-type c-lifting (listof (listof int @k) @k))
@@ -84,7 +84,7 @@
 (define-type c-found (listof loc @k))
 ;; What register code knows of the procedure being compiled, when it is one
 ;; that knows itself: its name, where the name is, and its arity.
-(define-type c-this (productof (1 symbol) (2 loc) (3 int) (4 int)))
+(define-type c-this (tupof (1 symbol) (2 loc) (3 int) (4 int)))
 ;; The global environment as compiling has reached it: by name, a table of
 ;; each name's globals, newest first, each with its place in the order they
 ;; were made (`c-genv-count` so far). A body compiled where it was written
@@ -101,14 +101,14 @@
 ;; ends, the names bound, and the answer. Asked of the same `letrec` many
 ;; times over (each time what encloses it is asked whether it calls), and
 ;; the answer is the same each time.
-(define-type c-join-answer (productof (1 syms) (2 (listof bool acyclic))))
+(define-type c-join-answer (tupof (1 syms) (2 (listof bool acyclic))))
 ;; Each standard operation's word as a value, made once (step 4): the
 ;; stack code's, which register code uses too.
-(define-type c-standard-word (productof (1 string) (2 tword)))
+(define-type c-standard-word (tupof (1 string) (2 tword)))
 ;; The specialized copies made (`c-make-copy`), by the lambda's span
 ;; (`c-span-key`): each the procedure's word, what the lambda captures, the
 ;; globals it sees, and the copy's word and what that captures.
-(define-type c-spec-copy (productof (1 tword) (2 syms) (3 int) (4 tword) (5 syms)))
+(define-type c-spec-copy (tupof (1 tword) (2 syms) (3 int) (4 tword) (5 syms)))
 (define-type c-spec-copies (listof c-spec-copy @k))
 ;; `letrec`: every binding is a lambda (the checker says so). Each closure
 ;; is made in its slot, with a placeholder for a sibling not made yet; then
@@ -127,7 +127,7 @@
 (define-type k-ids (select check-types-types k-ids))
 ;; A module's included names, their positions, and the `with`s that bind
 ;; them (`c-included-names`).
-(define-type c-included (productof (1 syms) (2 k-ids) (3 exps)))
+(define-type c-included (tupof (1 syms) (2 k-ids) (3 exps)))
 (define-type compile-sig
   (moduleof (val c-frozen-define-at
                  (subr (maxeff (read @globals) (read @k)) (int int int) bool))
@@ -224,7 +224,7 @@
             (val c-applied-let
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)
                        (exp exps)
-                       (listof (productof (1 c-binds) (2 exp)) @k)))
+                       (listof (tupof (1 c-binds) (2 exp)) @k)))
             (val c-length (subr (maxeff (read @globals) (read @k) spin) (syms) int))
             (val c-loops-only
                  (subr (maxeff (alloc @k) (read @globals) (read @k) spin)

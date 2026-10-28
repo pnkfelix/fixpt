@@ -170,7 +170,7 @@
   (lambda (l bs)
     (begin
       (da-e bs)
-      (set da-fixups (cons (product (1 (- (get da-len) 4)) (2 l)) (get da-fixups))))))
+      (set da-fixups (cons (tup (1 (- (get da-len) 4)) (2 l)) (get da-fixups))))))
 (define da-jmp (subr da-assembles (int) unit)
   (lambda (l)
     (let ((at (get da-len)))
@@ -281,7 +281,7 @@
 ;; in an assembler of its own. Its length, labels, fixups and last jump.
 (define da-mark (subr da-reads () da-mark)
   (lambda ()
-    (product (1 (get da-len)) (2 (get da-nlabels)) (3 (get da-fixups)) (4 (get da-last-jump)))))
+    (tup (1 (get da-len)) (2 (get da-nlabels)) (3 (get da-fixups)) (4 (get da-last-jump)))))
 (define da-rewind (subr da-assembles (da-mark) unit)
   (lambda (m)
     (begin
@@ -311,7 +311,7 @@
 
 ;; A trap of `code` at label `l`, placed after the code (`stubs`).
 (define da-stub (subr da-assembles (int int) unit)
-  (lambda (l code) (set da-stubs (cons (product (1 l) (2 code)) (get da-stubs)))))
+  (lambda (l code) (set da-stubs (cons (tup (1 l) (2 code)) (get da-stubs)))))
 ;; To a trap of `code` where `c` holds (`procedure`'s `trap`).
 (define da-trap (subr da-assembles (int int) unit)
   (lambda (code c) (let ((l (da-label))) (begin (da-stub l code) (da-jcc c l)))))
@@ -380,7 +380,7 @@
   (lambda (n)
     (if (< n d-own-callouts)
         (da-imm d-rsi n)
-        (begin (set da-callout-loads (cons (product (1 (get da-len)) (2 n)) (get da-callout-loads)))
+        (begin (set da-callout-loads (cons (tup (1 (get da-len)) (2 n)) (get da-callout-loads)))
                (da-e (x86-load-rip d-rsi 0))
                (da-e (x86-shift-imm da-shr d-rsi d-callout-shift))))))
 ;; The loads of call-outs' numbers, oldest first.

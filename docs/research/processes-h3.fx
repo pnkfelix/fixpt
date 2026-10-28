@@ -4,7 +4,7 @@
 (define-type msg (listof int acyclic))
 (define* build (subr spin (int msg) msg)
   (lambda (n acc) (if (= n 0) acc (build (- n 1) (cons n acc)))))
-(define-type req (sumof (data msg) (stop (icell int @d))))
+(define-type req (oneof (data msg) (stop (icell int @d))))
 (define sink (addr req @p)
   (spawn (box req r)
     (letrec ((go (subr (maxeff (receive r) (init @d) nondet spin) (int) unit)
@@ -18,11 +18,11 @@
   (lambda (n k)
     (let ((m (build n nil)) (t0 (clock)))
       (letrec ((loop (subr (maxeff (send @p) spin) (int) unit)
-                 (lambda (i) (if (= i 0) #u (begin (send sink (sum data m)) (loop (- i 1)))))))
+                 (lambda (i) (if (= i 0) #u (begin (send sink (one data m)) (loop (- i 1)))))))
         (begin
           (loop k)
           (let ((c (the (icell int @d) (make-icell))))
-            (begin (send sink (sum stop c)) (icell-get c)
+            (begin (send sink (one stop c)) (icell-get c)
                    (i64->int (i64-quotient (i64- (clock) t0) (int->i64 k))))))))))
 ;; ns to build a list of `n`, `k` times: what sharing would leave.
 (define* per-build (subr (maxeff (io clock) spin) (int int) int)

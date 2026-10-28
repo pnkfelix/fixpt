@@ -11,10 +11,10 @@
 (define-type k-map (select check-types-types k-map))
 ;; A module-typed binding's abstract types, from parameter `j`: each as named
 ;; for the binding, onto `given`; and as `(select $j t)`, onto `back`.
-(define-type k-given-back (productof (1 k-params-given) (2 k-map)))
+(define-type k-given-back (tupof (1 k-params-given) (2 k-map)))
 ;; What a `lambda`'s parameters were bound to: their types for the
 ;; procedure's type; and what each earlier one gives its `(select $k t)`s.
-(define-type k-dependent (productof (1 k-bindings) (2 k-params-given) (3 k-map)))
+(define-type k-dependent (tupof (1 k-bindings) (2 k-params-given) (3 k-map)))
 ;; A dependent procedure's callee, `c` (none or one), for a call with `args`
 ;; at `a`..`b`: its types given the modules its arguments name.
 (define-type k-callables (listof k-callable acyclic))

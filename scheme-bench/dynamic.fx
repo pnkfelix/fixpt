@@ -227,10 +227,10 @@
 
 ;;; `read`, from a string: a port is the text and a position in it.
 
-(define-type port (productof (text string) (pos (ref int @heap))))
+(define-type port (tupof (text string) (pos (ref int @heap))))
 
 (define* open-input-string (subr (alloc @heap) (string) port)
-  (lambda (s) (product (text s) (pos (new 0)))))
+  (lambda (s) (tup (text s) (pos (new 0)))))
 
 (define* read-datum (subr hs (port) val)
   (lambda (port)

@@ -143,7 +143,7 @@ fn selects_of_a_module_made_inside_keep_names() {
     let m = c.interner.intern("m");
     let t = c.type_of_name(m).expect("defined");
     let shown = c.show_ty(t);
-    for part in ["(desc t (sumof (td (productof (1 e)))", "(val ev (subr pure (s) e))", "(val td (subr pure (e) t))"] {
+    for part in ["(desc t (oneof (td (tupof (1 e)))", "(val ev (subr pure (s) e))", "(val td (subr pure (e) t))"] {
         assert!(shown.contains(part), "{part} in {shown}");
     }
 }

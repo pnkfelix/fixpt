@@ -18,7 +18,7 @@ and run with `fixpt eval`; syntax marked `; PROPOSED` exists nowhere.
 
 - **Plain ADTs: yes, and FX-26 already has them.** Sums and products are
   structural, a one-tag sum is a constructor's singleton type (`(sum
-  circle 3)` synthesizes `(sumof (circle int))`), a multi-tag sum is the
+  circle 3)` synthesizes `(oneof (circle int))`), a multi-tag sum is the
   union of its tags' singletons, and `define-type` ties the knot through
   μ. What makes two datatypes distinct is their tags, not a name.
   Freeman and Pfenning's datasort refinements need nothing new: `even`
@@ -93,8 +93,8 @@ and run with `fixpt eval`; syntax marked `; PROPOSED` exists nowhere.
 
 | FX-26 today                                        | Structural reading                                            | Shown by                        |
 | -------------------------------------------------- | ------------------------------------------------------------- | ------------------------------- |
-| `(sum tag e) : (sumof (tag T))`                    | a constructor applied: its singleton-tag type                 | `constructor-widens-refused.fx` |
-| `(sumof (t₁ T₁) … (tₙ Tₙ))`                        | the union of `n` singleton-tag types                          | `docs/fx26.md`, immutable data  |
+| `(one tag e) : (oneof (tag T))`                    | a constructor applied: its singleton-tag type                 | `constructor-widens-refused.fx` |
+| `(oneof (t₁ T₁) … (tₙ Tₙ))`                        | the union of `n` singleton-tag types                          | `docs/fx26.md`, immutable data  |
 | width subtyping on sums                            | inclusion of those unions                                     | `even-odd.fx`                   |
 | `define-type` with a cycle; `(mu t T)`             | μ, equi-recursive, a cycle through a constructor              | `docs/fx26.md`, recursive types |
 | `tagcase`'s `else` sees the tags not named         | difference, the only negation needed                          | `logical-types.md` §1           |
@@ -106,7 +106,7 @@ and run with `fixpt eval`; syntax marked `; PROPOSED` exists nowhere.
 
 The one thing on this list that works against the structural reading is
 the last-but-two: `(circle 3)` has type `shape`, so it cannot be used at
-`(sumof (circle int))`, though the `sum` form it expands to can
+`(oneof (circle int))`, though the `one` form it expands to can
 (`constructor-widens-refused.fx`, refused: "a just-circle is expected
 here, and this is a shape").
 
@@ -119,9 +119,9 @@ FX-26 the refinement and the datatype are the same kind of thing, a
 sum, and the refinement relation is ordinary subtyping:
 
 ```
-(define-type lst  (sumof (nil unit) (cons (productof (hd int) (tl lst)))))
-(define-type even (sumof (nil unit) (cons (productof (hd int) (tl odd)))))
-(define-type odd  (sumof (cons (productof (hd int) (tl even)))))
+(define-type lst  (oneof (nil unit) (cons (tupof (hd int) (tl lst)))))
+(define-type even (oneof (nil unit) (cons (tupof (hd int) (tl odd)))))
+(define-type odd  (oneof (cons (tupof (hd int) (tl even)))))
 (define head-odd (subr pure (odd) int)
   (lambda (l) (tagcase l (cons (hd tl) hd))))      ; no nil arm: an odd has none
 ```
@@ -131,7 +131,7 @@ o1)` is refused (`even-odd-refused.fx`). Freeman and Pfenning needed
 intersection types for this, because their constructors are functions of
 one ML type and so must carry every refinement at once: `cons : (α ∗ α
 ?nil → α singleton) ∧ (α ∗ α singleton → α list) ∧ …` (§1). In FX-26 the
-constructor is the `sum` form, which synthesizes the exact singleton of
+constructor is the `one` form, which synthesizes the exact singleton of
 its payload, and subsumption does the rest. **Intersections are not
 needed for constructors.** They are needed for *functions* over several
 refinements, which is Q7's `overload` (`logical-types.md` §8.1).
@@ -151,13 +151,13 @@ structural type per index value:
 
 ```
 (define-type int-exp
-  (sumof (int-e int)
-         (add (productof (l int-exp) (r int-exp)))
-         (if-e (productof (c bool-exp) (t int-exp) (f int-exp)))))
+  (oneof (int-e int)
+         (add (tupof (l int-exp) (r int-exp)))
+         (if-e (tupof (c bool-exp) (t int-exp) (f int-exp)))))
 (define-type bool-exp
-  (sumof (bool-e bool)
+  (oneof (bool-e bool)
          (is-zero int-exp)
-         (if-e (productof (c bool-exp) (t bool-exp) (f bool-exp)))))
+         (if-e (tupof (c bool-exp) (t bool-exp) (f bool-exp)))))
 (define-type any-exp …)            ; all of them, untyped: both are subtypes of it
 (define eval-int (subr pure (int-exp) int)
   (letrec ((eval-int (subr pure (int-exp) int) (lambda (e) (tagcase e …)))
@@ -168,7 +168,7 @@ structural type per index value:
 It checks as `pure` (size-change descends the `tagcase` parts), runs to
 `42`, and `1 + #t` cannot be built at `int-exp`
 (`eval-datasorts-refused.fx`: "a int-exp is expected here, and this is a
-(sumof (bool-e bool))"). `typecheck.fx` goes from `any-exp` to `(sumof (i
+(oneof (bool-e bool))"). `typecheck.fx` goes from `any-exp` to `(oneof (i
 int-exp) (b bool-exp) (wrong unit))`; no conversion is needed to go back,
 since the typed types are subtypes of the untyped one. With nominal
 GADTs, `Term Int` and an untyped AST are unrelated types.
@@ -200,9 +200,9 @@ Everything in this section is proposed.
 One addition to sum variants, and one to what a family may say:
 
 ```
-(sumof (tag T) …)                                              ; today
-(sumof (tag (when P …) T) …)                                   ; PROPOSED: a guarded variant
-(sumof (tag (exists ((b kind) …) (when P …)) T) …)             ; PROPOSED: with existentials
+(oneof (tag T) …)                                              ; today
+(oneof (tag (when P …) T) …)                                   ; PROPOSED: a guarded variant
+(oneof (tag (exists ((b kind) …) (when P …)) T) …)             ; PROPOSED: with existentials
 
 P ::= (= T T)          a type equation
     | (= s s) | (<= s s)   a size fact, as N5's
@@ -211,7 +211,7 @@ P ::= (= T T)          a type equation
 - **A guard** holds or not for given descriptions. For ground ones it is
   decided at once, and a variant whose guard fails is simply absent: the
   sum has that tag or it does not. A sum left with no variants is empty;
-  `(sumof)` is accepted today, and a `tagcase` on it needs no arms (a
+  `(oneof)` is accepted today, and a `tagcase` on it needs no arms (a
   scratch probe).
 - **Existentials** are binders like a `poly`'s (an `exists` with no
   `when` hides a type without constraining it), compared under a binder
@@ -222,7 +222,7 @@ P ::= (= T T)          a type equation
   mention itself at other descriptions only non-expansively: at
   descriptions built from the family's own parameters used whole, from
   the variant's existentials, and from closed types. `(expr bool)` and
-  `(expr b)` inside `(expr a)` are fine; `(grow (productof (l a) (r a)))`
+  `(expr b)` inside `(expr a)` are fine; `(grow (tupof (l a) (r a)))`
   inside `(grow a)` is not, as today. This is the "non-expansive"
   condition of Kennedy and Pierce *(from memory, via
   `nonregular-subtyping-survey.md` §2)*, and it is what keeps the
@@ -240,32 +240,32 @@ family to sugar for guards:
   (add     (expr int) (expr int)                       => (expr int))
   (is-zero (expr int)                                  => (expr bool))
   (if-e    (expr bool) (expr a) (expr a))
-  (pair    ((b type) (c type)) (expr b) (expr c)       => (expr (productof (l b) (r c)))))
+  (pair    ((b type) (c type)) (expr b) (expr c)       => (expr (tupof (l b) (r c)))))
 ```
 
 reads as
 
 ```
 (define-type (expr (a type))                                              ; PROPOSED
-  (sumof (int-e   (when (= a int)) int)
+  (oneof (int-e   (when (= a int)) int)
          (bool-e  (when (= a bool)) bool)
-         (add     (when (= a int)) (productof (l (expr int)) (r (expr int))))
+         (add     (when (= a int)) (tupof (l (expr int)) (r (expr int))))
          (is-zero (when (= a bool)) (expr int))
-         (if-e    (productof (c (expr bool)) (t (expr a)) (f (expr a))))
-         (pair    (exists ((b type) (c type)) (when (= a (productof (l b) (r c)))))
-                  (productof (l (expr b)) (r (expr c))))))
+         (if-e    (tupof (c (expr bool)) (t (expr a)) (f (expr a))))
+         (pair    (exists ((b type) (c type)) (when (= a (tupof (l b) (r c)))))
+                  (tupof (l (expr b)) (r (expr c))))))
 ```
 
 A variant `(k fields … => (F D …))` becomes `(k (exists (its binders)
-(when (= param D) …)) (productof fields …))`; a variant with no `=>` has
+(when (= param D) …)) (tupof fields …))`; a variant with no `=>` has
 no guard. This is Xi, Chen and Chen's translation (§2.2), with FX-26's sums
 for their `+`.
 
-**Constructors become forms**, not globals: `(pair x y)` is `(sum pair
-(product (l x) (r y)))`, and synthesizes its singleton, `(sumof (pair
-(productof (l (expr B)) (r (expr C)))))`. The singleton says nothing
+**Constructors become forms**, not globals: `(pair x y)` is `(one pair
+(tup (l x) (r y)))`, and synthesizes its singleton, `(oneof (pair
+(tupof (l (expr B)) (r (expr C)))))`. The singleton says nothing
 about `a`; checked against `(expr A)`, subsumption asks for `A =
-(productof (l b) (r c))` for some `b`, `c`, found by unification (`b :=
+(tupof (l b) (r c))` for some `b`, `c`, found by unification (`b :=
 B`, `c := C`). So `(int-e 1)` fits `(expr int)`, fails `(expr bool)`
 (guard `bool = int` refuted), and fails `(expr a)` for a rigid `a` unless
 the facts say `a = int`. Making constructors forms also removes today's
@@ -276,11 +276,11 @@ read of a global per constructor call (a scratch probe of `(define c1
 
 With `a := int`, the guards decide: `int-e`, `add` and `if-e` stay;
 `bool-e` and `is-zero` go (`bool = int` is false); `pair` goes (`int =
-(productof …)` has no solution). What is left is
+(tupof …)` has no solution). What is left is
 
 ```
-(sumof (int-e int) (add (productof (l (expr int)) (r (expr int))))
-       (if-e (productof (c (expr bool)) (t (expr int)) (f (expr int)))))
+(oneof (int-e int) (add (tupof (l (expr int)) (r (expr int))))
+       (if-e (tupof (c (expr bool)) (t (expr int)) (f (expr int)))))
 ```
 
 which is `int-exp` of `eval-datasorts.fx`, and `(expr bool)` is its
@@ -303,7 +303,7 @@ and its existentials bound fresh and rigid:
       (add (x y) (+ (ev x) (ev y)))                     ; a = int; ev at int
       (is-zero x (= (ev x) 0))                          ; a = bool; ev at int
       (if-e (c t f) (if (ev c) (ev t) (ev f)))          ; no guard: ev at bool, at a
-      (pair (x y) (product (l (ev x)) (r (ev y)))))))   ; b, c fresh; a = (productof (l b) (r c))
+      (pair (x y) (tup (l (ev x)) (r (ev y)))))))   ; b, c fresh; a = (tupof (l b) (r c))
 ```
 
 `ev` calls itself at `int`, `bool`, `a`, `b` and `c`: polymorphic
@@ -326,9 +326,9 @@ recursion, which a declared `poly` already allows (`gadts.md` E6).
   Simonet and Pottier show that *inferring* such constraints is
   intractable (nonelementary, after Vorobyov; TOPLAS 2007, p. 37); checking
   against a declared signature needs only unification.
-- **An equation whose solution is recursive** (`a = (productof (l a) (r
+- **An equation whose solution is recursive** (`a = (tupof (l a) (r
   int))`) is not a clash here, as it is in ML: under equi-recursion it
-  has the solution `(mu x (productof (l x) (r int)))`, which the arm
+  has the solution `(mu x (tupof (l x) (r int)))`, which the arm
   should take as `a`'s value. Equality over infinite trees is decidable
   (Maher 1988, cited by Simonet and Pottier, p. 37). *I have not worked
   through whether any real program needs this; refusing it (an occurs
@@ -340,7 +340,7 @@ recursion, which a declared `poly` already allows (`gadts.md` E6).
   `gadts.md` N4 planned ("N4 will put type equalities in the same
   context", `sizes.md`).
 - **The scrutinee itself** is narrowed where it is a variable: in the
-  `int-e` arm, `e : (sumof (int-e int))`. Today an arm binds only the
+  `int-e` arm, `e : (oneof (int-e int))`. Today an arm binds only the
   payload, so `typecheck.fx` rebuilds each node; narrowing the variable
   is Q7's occurrence typing (`logical-types.md` §6.2), by binding, not by
   name.
@@ -360,14 +360,14 @@ as "the type 1 ∧ (s = t), which can be constructed as a unit value only
 under the constraint that s equals t" (POPL 2019, fn. 2). Structurally:
 
 ```
-(define-type (eq (a type) (b type)) (sumof (refl (when (= a b)) unit)))    ; PROPOSED
+(define-type (eq (a type) (b type)) (oneof (refl (when (= a b)) unit)))    ; PROPOSED
 (define cast (poly ((a type) (b type)) (subr pure ((eq a b) a) b))
   (lambda (w x) (tagcase w (refl u x))))           ; in the arm, a = b
-(define ok (eq int int) (sum refl #u))             ; the guard holds
-(define no (eq int bool) (sum refl #u))            ; refused: int = bool is refuted
+(define ok (eq int int) (one refl #u))             ; the guard holds
+(define no (eq int bool) (one refl #u))            ; refused: int = bool is refuted
 ```
 
-Anyone may write `(sum refl #u)`, but it fits `(eq A B)` only where the
+Anyone may write `(one refl #u)`, but it fits `(eq A B)` only where the
 checker can show `A = B`. So the witness is unforgeable in the way that
 matters, with no generativity, which is what `gadts.md` E2 found missing
 today ("anyone may build an `(eq int bool)` from two functions").
@@ -376,9 +376,9 @@ today ("anyone may build an `(eq int bool)` from two functions").
 
 ```
 (define-type (vec (t type) (n size))                                      ; PROPOSED
-  (sumof (vnil  (when (= n 0)) unit)
+  (oneof (vnil  (when (= n 0)) unit)
          (vcons (exists ((m size)) (when (= n (+ m 1))))
-                (productof (hd t) (tl (vec t m))))))
+                (tupof (hd t) (tl (vec t m))))))
 (define vhead (poly ((t type) (n size)) (subr pure ((vec t (+ n 1))) t))
   (lambda (v) (tagcase v (vcons (hd tl) hd))))     ; vnil's guard, n + 1 = 0, is refuted
 ```
@@ -394,8 +394,8 @@ checker knows; `vec` shows the same facts serving a user's sum. A native
 
 ```
 (define-type (fmt (a type))                                               ; PROPOSED
-  (sumof (done  (when (= a string)) unit)
-         (text  (productof (s string) (k (fmt a))))
+  (oneof (done  (when (= a string)) unit)
+         (text  (tupof (s string) (k (fmt a))))
          (int-f (exists ((r type)) (when (= a (subr pure (int) r)))) (fmt r))
          (str-f (exists ((r type)) (when (= a (subr pure (string) r)))) (fmt r))))
 (define format (poly ((a type)) (subr pure ((fmt a)) a))
@@ -407,7 +407,7 @@ checker knows; `vec` shows the same facts serving a user's sum. A native
                  (int-f k (lambda ((n int)) (go k (string-append acc (int->string n)))))
                  (str-f k (lambda ((s string)) (go k (string-append acc s))))))))
     (lambda (f) (go f ""))))
-;; (format (sum int-f (sum text (product (s " apples") (k (sum done #u))))))
+;; (format (one int-f (one text (tup (s " apples") (k (one done #u))))))
 ;;   : (subr pure (int) string)
 ```
 
@@ -422,14 +422,14 @@ binding a `poly` may need a form FX-26 does not have yet.
 
 ```
 (define-type (black-rb (n size))                                          ; PROPOSED
-  (sumof (leaf  (when (= n 0)) unit)
+  (oneof (leaf  (when (= n 0)) unit)
          (black (exists ((m size)) (when (= n (+ m 1))))
-                (productof (v int) (l (rb m)) (r (rb m))))))
+                (tupof (v int) (l (rb m)) (r (rb m))))))
 (define-type (rb (n size))
-  (sumof (leaf  (when (= n 0)) unit)
+  (oneof (leaf  (when (= n 0)) unit)
          (black (exists ((m size)) (when (= n (+ m 1))))
-                (productof (v int) (l (rb m)) (r (rb m))))
-         (red   (productof (v int) (l (black-rb n)) (r (black-rb n))))))
+                (tupof (v int) (l (rb m)) (r (rb m))))
+         (red   (tupof (v int) (l (black-rb n)) (r (black-rb n))))))
 ```
 
 All four invariants, structurally and non-expansively (`(rb m)` with `m`
@@ -695,45 +695,45 @@ at the growing argument `(pair a)` with a coercion for pairs built from
 the one it was given.
 
 ```
-(define-type (pair (a type)) (productof (l a) (r a)))
+(define-type (pair (a type)) (tupof (l a) (r a)))
 (define-generative (seq (a type))
-  (sumof (nil unit) (cons (productof (hd a) (tl (seq (pair a)))))))
+  (oneof (nil unit) (cons (tupof (hd a) (tl (seq (pair a)))))))
 (define* seq-up (proves (poly ((a type) (b type)) (<= (seq a) (seq b)) (<= a b)))
   (lambda (f s)
     (up-seq (tagcase (down-seq s)
-              (nil u (sum nil u))
+              (nil u (one nil u))
               (cons (hd tl)
-                (sum cons (product (hd (f hd))
+                (one cons (tup (hd (f hd))
                                    (tl (seq-up (lambda ((p (pair a)))
-                                                 (product (l (f (extract p l)))
+                                                 (tup (l (f (extract p l)))
                                                           (r (f (extract p r)))))
                                                tl)))))))))
 ;; seq-twin, the same body with up-seq2: (seq a) <= (seq2 b) given a <= b
-(define small (seq (sumof (x int))) …)
-(define wide (seq (sumof (x int) (y bool))) small)        ; by seq-up
-(define other (seq2 (sumof (x int) (y bool))) small)      ; by seq-twin
+(define small (seq (oneof (x int))) …)
+(define wide (seq (oneof (x int) (y bool))) small)        ; by seq-up
+(define other (seq2 (oneof (x int) (y bool))) small)      ; by seq-twin
 ```
 
 Structurally, `seq-up` is not needed (derived variance) and `seq-twin`
 is what the checker's generalization finds (the prototype found this
-very lemma, "`∀x1. (nest (productof (l x1) (r x1))) ≤ (nest2 …)`", for
+very lemma, "`∀x1. (nest (tupof (l x1) (r x1))) ≤ (nest2 …)`", for
 `nest-same.fx`). The one a programmer must write relates the sequence
 to a type of another shape: a `(seq int)` is a list of perfect trees
 of ints.
 
 ```
 (define-type (seq (a type))                                               ; PROPOSED
-  (sumof (nil unit) (cons (productof (hd a) (tl (seq (pair a)))))))       ; accepted
+  (oneof (nil unit) (cons (tupof (hd a) (tl (seq (pair a)))))))       ; accepted
 (define-type tree (mu t (union int (pair t))))                            ; Q7's unions
-(define-type (lst (e type)) (sumof (nil unit) (cons (productof (hd e) (tl (lst e))))))
+(define-type (lst (e type)) (oneof (nil unit) (cons (tupof (hd e) (tl (lst e))))))
 (define* seq-flat (proves (poly ((x type)) (<= (seq x) (lst tree)) (<= x tree)))
   (lambda (f s)
     (tagcase s
-      (nil u (sum nil u))
+      (nil u (one nil u))
       (cons (hd tl)
-        (sum cons (product (hd (f hd))
+        (one cons (tup (hd (f hd))
                            (tl (seq-flat (lambda ((p (pair x)))
-                                           (product (l (f (extract p l)))
+                                           (tup (l (f (extract p l)))
                                                     (r (f (extract p r)))))
                                          tl))))))))
 (define flat (lst tree) (the (seq int) …))    ; by seq-flat: int <= tree
@@ -760,22 +760,22 @@ coercion that turns `some x` into `none` is refused as no identity
 (`term-lemma-refused.fx`: "each arm rebuilds its own tag").
 
 ```
-(define-type (maybe (v type)) (sumof (none unit) (some v)))
+(define-type (maybe (v type)) (oneof (none unit) (some v)))
 (define-generative (term (v type))
-  (sumof (var v) (app (productof (f (term v)) (x (term v)))) (lam (term (maybe v)))))
+  (oneof (var v) (app (tupof (f (term v)) (x (term v)))) (lam (term (maybe v)))))
 (define* term-up (proves (poly ((a type) (b type)) (<= (term a) (term b)) (<= a b)))
   (lambda (f t)
     (up-term (tagcase (down-term t)
-               (var x (sum var (f x)))
-               (app (g x) (sum app (product (f (term-up f g)) (x (term-up f x)))))
+               (var x (one var (f x)))
+               (app (g x) (one app (tup (f (term-up f g)) (x (term-up f x)))))
                (lam body
-                 (sum lam (term-up (lambda ((m (maybe a)))
+                 (one lam (term-up (lambda ((m (maybe a)))
                                      (the (maybe b)
                                        (tagcase m
-                                         (none u (sum none u))
-                                         (some x (sum some (f x))))))
+                                         (none u (one none u))
+                                         (some x (one some (f x))))))
                                    body)))))))
-(define id-term (term void) (up-term (sum lam (up-term (sum var (sum none #u))))))
+(define id-term (term void) (up-term (one lam (up-term (one var (one none #u))))))
 (define in-context (term int) id-term)                     ; by term-up
 ```
 
@@ -789,22 +789,22 @@ de Bruijn index, is not (its recursion is at an existential).
 
 ```
 (define-type (idx (g type) (t type))                                      ; PROPOSED
-  (sumof (here  (exists ((g2 type)) (when (= g (productof (hd t) (tl g2))))) unit)
-         (there (exists ((s type) (g2 type)) (when (= g (productof (hd s) (tl g2)))))
+  (oneof (here  (exists ((g2 type)) (when (= g (tupof (hd t) (tl g2))))) unit)
+         (there (exists ((s type) (g2 type)) (when (= g (tupof (hd s) (tl g2)))))
                 (idx g2 t))))
 (define-type (tm (g type) (t type))
-  (sumof (var (idx g t))
-         (app (exists ((s type))) (productof (f (tm g (subr pure (s) t))) (x (tm g s))))
+  (oneof (var (idx g t))
+         (app (exists ((s type))) (tupof (f (tm g (subr pure (s) t))) (x (tm g s))))
          (lam (exists ((s type) (u type)) (when (= t (subr pure (s) u))))
-              (tm (productof (hd s) (tl g)) u))))
-(define-type nat-ix (sumof (here unit) (there nat-ix)))
-(define-type uterm (sumof (var nat-ix) (app (productof (f uterm) (x uterm))) (lam uterm)))
+              (tm (tupof (hd s) (tl g)) u))))
+(define-type nat-ix (oneof (here unit) (there nat-ix)))
+(define-type uterm (oneof (var nat-ix) (app (tupof (f uterm) (x uterm))) (lam uterm)))
 (define* tm-erase (proves (poly ((g type) (t type)) (<= (tm g t) uterm)))
   (lambda (e)
     (tagcase e
-      (var i (sum var i))                         ; (idx g t) <= nat-ix: by the rules
-      (app (f x) (sum app (product (f (tm-erase f)) (x (tm-erase x)))))  ; s fresh
-      (lam b (sum lam (tm-erase b))))))           ; s, u fresh; t = (subr pure (s) u)
+      (var i (one var i))                         ; (idx g t) <= nat-ix: by the rules
+      (app (f x) (one app (tup (f (tm-erase f)) (x (tm-erase x)))))  ; s fresh
+      (lam b (one lam (tm-erase b))))))           ; s, u fresh; t = (subr pure (s) u)
 ```
 
 A typed term is an untyped term, the same value: whatever prints,
@@ -1040,7 +1040,7 @@ What the budget costs is predictability:
 - **No change of representation.** A guarded sum is a sum: a frozen
   bloblet with a tag symbol and a value (`docs/fx26.md`, immutable data).
   Guards and existentials are erased. `define-datatype` constructors
-  become `sum`/`product` forms, which they already expand to.
+  become `one`/`tup` forms, which they already expand to.
 - **What structural tags cost.** A tag is an interned symbol, and
   `tagcase` compiles to a chain of `eq` tests, one per arm
   (`crates/fixpt-fx26/src/cellular.rs`, "tagcase"); a constructor with
@@ -1080,7 +1080,7 @@ to them.
 ### 4.5 Messages
 
 Structural types print as structure. Today `(expr int)` prints as `(mu
-%1 (sumof (lit int) (if-e (productof (c (mu %3 …)) …))))`
+%1 (oneof (lit int) (if-e (tupof (c (mu %3 …)) …))))`
 (`family-nonexpansive.fx`'s output), and a lemma's parametric `tree`
 prints as `(mu %3 …)`; plain `define-type` names do survive (`a int-exp
 is expected here`). Guarded families would make this worse unless a
@@ -1110,7 +1110,7 @@ What generativity buys, against what FX-26 gets structurally:
 | Concern                        | Structural, with guards                       | Generative                                        | So                            |
 | ------------------------------ | --------------------------------------------- | ------------------------------------------------- | ----------------------------- |
 | distinct datatypes             | by tags                                       | by name                                           | structural suffices           |
-| unforgeable values, invariants | no: anyone may write `(sum circle 3)`         | yes, if `up-` is hidden (G4)                      | generative, where needed      |
+| unforgeable values, invariants | no: anyone may write `(one circle 3)`         | yes, if `up-` is hidden (G4)                      | generative, where needed      |
 | phantom indices                | meaningless (`gadts.md` E7)                   | meaningful, invariant                             | generative                    |
 | GADT refinement                | guards                                        | N4 on a nominal family                            | either; structural is smaller |
 | index variance                 | computed by comparison                        | declared, checked by Scherer and Rémy's criterion | structural is simpler         |
@@ -1184,7 +1184,7 @@ subtyping for what the front end writes; good messages.
    than (a) (no family node, no declared variance), keeps GADT values
    `data`, and costs nothing at run time.
 2. **Constructors as forms returning their singleton?** Today `(circle
-   3) : shape`. Options: keep; make them forms giving `(sumof (circle
+   3) : shape`. Options: keep; make them forms giving `(oneof (circle
    int))`; give the singleton only in checking mode. Recommendation:
    forms with the singleton. It is what refinements need (§1.1), and it
    drops a global read per construction. The cost: an unannotated
@@ -1218,7 +1218,7 @@ subtyping for what the front end writes; good messages.
    OCaml's and Roc's are; MLstruct and Typed Racket make each tag (or
    struct) generative. Recommendation: global, as now; a type that must
    not be forged is `define-generative`, not a private tag.
-9. **Recursive solutions of guards** (`a = (productof (l a) (r int))`,
+9. **Recursive solutions of guards** (`a = (tupof (l a) (r int))`,
    §2.4): refuse with an occurs check at first, or take the μ?
    Recommendation: refuse, until an example needs it.
 

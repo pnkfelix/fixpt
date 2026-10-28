@@ -16,11 +16,11 @@
 ;;; compiler's `cellular/procs.rs`; the stack code reads them here.
 
 ;; A lambda as planned: its parameters' names, and the names it captures.
-(define-type c-planned (productof (1 syms) (2 syms)))
+(define-type c-planned (tupof (1 syms) (2 syms)))
 (define-type c-planneds (listof c-planned @k))
 ;; The standard operations' words of the form being compiled whose twins
 ;; are to be made, last first (step 4): each word, operation and arity.
-(define-type c-standard-twin (productof (1 tword) (2 string) (3 int)))
+(define-type c-standard-twin (tupof (1 tword) (2 string) (3 int)))
 
 ;;; ------------------------------------------------------------ signatures
 

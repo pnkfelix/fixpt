@@ -7,9 +7,9 @@
 (import check-types-types (type k-binders k-map))
 (define-type k-solved (ref k-map @t))
 ;; Binders, and the type under them.
-(define-type k-bound-body (productof (1 k-binders) (2 int)))
+(define-type k-bound-body (tupof (1 k-binders) (2 int)))
 ;; A count of such occurrences, and of parameters sized by `v` alone.
-(define-type k-counts (productof (1 int) (2 int)))
+(define-type k-counts (tupof (1 int) (2 int)))
 
 ;;; ------------------------------------------------------------ signatures
 

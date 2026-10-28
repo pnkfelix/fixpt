@@ -13,21 +13,21 @@
 (define-type k-pos (pairof symbol (listof symbol acyclic) @t))
 ;; What checking a proof relies on: its own name, the names of its
 ;; hypotheses, and what it proves, in words.
-(define-type k-proving (productof (1 symbol) (2 k-names) (3 string)))
+(define-type k-proving (tupof (1 symbol) (2 k-names) (3 string)))
 ;; An arm of a `tagcase`: its tag, whether it takes the fields apart, the
 ;; names it binds, and its body.
-(define-type k-case-arm (productof (1 symbol) (2 bool) (3 k-names) (4 kx)))
+(define-type k-case-arm (tupof (1 symbol) (2 bool) (3 k-names) (4 kx)))
 ;; The top-level forms of a program.
 (define-type k-tops (listof top acyclic))
 ;; A `define-rec`'s bindings: names, written types, and lambdas.
-(define-type k-rec-forms (listof (productof (1 symbol) (2 syn) (3 exp)) acyclic))
+(define-type k-rec-forms (listof (tupof (1 symbol) (2 syn) (3 exp)) acyclic))
 (define-type k-run-list (listof k-run acyclic))
 (define-type k-def-list (listof k-def acyclic))
 ;; The names of `ns` that are globals already, with their types.
 (define-type k-olds (listof (pairof symbol int acyclic) acyclic))
 ;; A convention's clause (`TODO.md` §97): its role, its canonical text, and
 ;; where it is.
-(define-type k-clause (productof (1 string) (2 string) (3 syn)))
+(define-type k-clause (tupof (1 string) (2 string) (3 syn)))
 (define-type k-clauses (listof k-clause acyclic))
 
 ;;; ------------------------------------------------------------ signatures

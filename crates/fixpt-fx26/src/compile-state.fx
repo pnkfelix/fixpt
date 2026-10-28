@@ -93,7 +93,7 @@
           (begin (set c-defining-named (the (listof symbol @k) nil)) n)
           d))))
 
-(define c-own-now (ref (listof (productof (1 symbol) (2 tword)) @k) @k) (new nil))
+(define c-own-now (ref (listof (tupof (1 symbol) (2 tword)) @k) @k) (new nil))
 
 ;; The names the next lambdas' words get, one each, in order, if not where
 ;; their bodies start: one, as a rule (the Rust compiler's `word_name`).
@@ -138,7 +138,7 @@
             (e-lambda (ps body a b abk)
               (if (null? (c-lambda-captured ps body e))
                   (let* ((word (car (get c-last-word)))
-                         (it (product (1 n) (2 word) (3 ps) (4 body) (5 (c-genv-now)))))
+                         (it (tup (1 n) (2 word) (3 ps) (4 body) (5 (c-genv-now)))))
                     (set c-collecting (the (listof c-inlinables @k)
                                         (list (the c-inlinables (cons it (car ms)))))))
                   #u))
@@ -161,7 +161,7 @@
       (e-the (d body a b abk) (c-checked-lambda? body))
       (else y #f))))
 (define c-mv-onto (->* (symbol exp int bool c-mvals) c-mvals)
-  (lambda (n x k l rest) (cons (product (1 n) (2 x) (3 k) (4 l)) rest)))
+  (lambda (n x k l rest) (cons (tup (1 n) (2 x) (3 k) (4 l)) rest)))
 (define c-mvals-group (->* (names exps c-mvals) c-mvals)
   (lambda (ns xs rest)
     (if (null? ns) rest (c-mv-onto (car ns) (car xs) 3 #t (c-mvals-group (cdr ns) (cdr xs) rest)))))
@@ -213,7 +213,7 @@
   (lambda (ws d ps)
     (if (null? ps)
         ws
-        (c-waits-onto (append ws (the c-waits (list (product (1 d) (2 (car (car ps)))
+        (c-waits-onto (append ws (the c-waits (list (tup (1 d) (2 (car (car ps)))
                                                              (3 (cdr (car ps)))))))
                       d (cdr ps)))))
 ;; Each closure of `ws` waiting for slot `d`, given it.
@@ -271,7 +271,7 @@
                        (let ((older (find (cdr ms))))
                          (cond ((not (null? older)) older)
                                ((c-made-for? (car ms) body params own fv)
-                                (cons (product (1 (extract (car ms) 4)) (2 fv)) nil))
+                                (cons (tup (1 (extract (car ms) 4)) (2 fv)) nil))
                                (else nil)))))))
         ;; This body's own, first; then any the form's stack code made (a
         ;; join point's body, compiled in its `letrec`'s procedure's
@@ -306,12 +306,12 @@
     (if (null? own)
         nil
         (let ((l (car (c-find inner (car own)))))
-          (cons (the c-this (product (1 (car own)) (2 l) (3 n) (4 added))) nil)))))
+          (cons (the c-this (tup (1 (car own)) (2 l) (3 n) (4 added))) nil)))))
 
 ;; The procedure being compiled, as `c-this-name` and the others say.
 (define c-this-saved (->* () c-this)
   (lambda ()
-    (product (1 (get c-this-name)) (2 (get c-this-loc))
+    (tup (1 (get c-this-name)) (2 (get c-this-loc))
              (3 (get c-this-params)) (4 (get c-this-added)))))
 
 ;; The procedure `me` made the one being compiled, its word starting at
@@ -356,9 +356,9 @@
 ;; globals `genv`.
 (define c-copy-twin (->* (c-twin c-spec int int) c-twin)
   (lambda (t spec ctx genv)
-    (product (1 (extract t 1)) (2 (extract t 2)) (3 (extract t 3)) (4 (extract t 4))
+    (tup (1 (extract t 1)) (2 (extract t 2)) (3 (extract t 3)) (4 (extract t 4))
              (5 (extract t 5)) (6 (extract t 6)) (7 (extract t 7))
-             (8 (the (listof c-copy-twin @k) (cons (product (1 spec) (2 ctx) (3 genv)) nil))))))
+             (8 (the (listof c-copy-twin @k) (cons (tup (1 spec) (2 ctx) (3 genv)) nil))))))
 ;; Register code for the lambda of `ps` and `body` as word `w`'s twin, when
 ;; this compiler makes it (`c-registers`): made after its form's words.
 (define c-register-twin!
@@ -366,7 +366,7 @@
   (lambda (w ps body inner this defining)
     (if (get c-registers)
         (set c-twins
-             (cons (product (1 w) (2 ps) (3 body) (4 inner) (5 this) (6 defining)
+             (cons (tup (1 w) (2 ps) (3 body) (4 inner) (5 this) (6 defining)
                             (7 (get c-made-now)) (8 (the (listof c-copy-twin @k) nil)))
                    (get c-twins)))
         #u)))

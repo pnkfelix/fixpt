@@ -86,14 +86,14 @@ Keep \"--emacs\".  Another machine is \"--fx26-machine\" NAME before
 
 (defconst fx26--special-forms
   '("lambda" "plambda" "vlambda" "rlambda" "dlambda" "proj" "if" "cond" "case" "else"
-    "and" "or" "let" "let*" "letrec" "begin" "the" "quote" "tagcase" "product"
-    "extract" "sum" "prompt" "module" "with" "load-module" "import" "private-regions"
+    "and" "or" "let" "let*" "letrec" "begin" "the" "quote" "tagcase" "tup"
+    "extract" "one" "prompt" "module" "with" "load-module" "import" "private-regions"
     "letregion" "letfreeze" "letrena" "letreap" "convention")
   "Syntax that is not a definition.")
 
 (defconst fx26--type-forms
   '("subr" "vsubr" "poly" "ref" "icell" "pairof" "listof" "arrayof" "mark-key"
-    "prompt-tag" "composable" "bloblet" "fields" "frozen" "productof" "sumof"
+    "prompt-tag" "composable" "bloblet" "fields" "frozen" "tupof" "oneof"
     "dletrec" "mu" "nat" "nlist" "place" "moduleof" "abs" "desc" "val" "select"
     "proves" "conv" "flatarrayof" "eqtable" "=>" "->" "->*")
   "Heads of types, and their parts.")

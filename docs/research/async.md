@@ -421,13 +421,13 @@ resumes the producer under a new prompt of the same tag, which is what a
 deep handler does.
 
 ```scheme
-(define-type step (productof (v int) (k (composable unit int D @p))))
+(define-type step (tupof (v int) (k (composable unit int D @p))))
 (define g (prompt-tag int step D @p) (make-continuation-prompt-tag))
 
 (define* yield-int (subr (maxeff (goto @p) (comefrom @p)) (int) unit)
   (lambda (x)
     (call-with-composable-continuation
-      (lambda (k) (abort-current-continuation g (product (v x) (k k))))
+      (lambda (k) (abort-current-continuation g (tup (v x) (k k))))
       g)))
 
 (define* count-up (subr (maxeff (goto @p) (comefrom @p) spin) (int int) unit)
@@ -473,7 +473,7 @@ promise's waiters; every suspension resumes with unit, and `await!` reads
 the value from the promise when it wakes.
 
 ```scheme
-(define-type promise (ref (sumof (pending (listof task @q)) (resolved int)) @q))
+(define-type promise (ref (oneof (pending (listof task @q)) (resolved int)) @q))
 (define sched (prompt-tag unit (subr Q () unit) D @p) (make-continuation-prompt-tag))
 
 (define* suspend! (subr (maxeff (goto @p) (comefrom @p)) ((subr Q (task) unit)) unit)
@@ -489,7 +489,7 @@ the value from the promise when it wakes.
   (lambda (pr)
     (tagcase (get pr)
       (resolved v v)
-      (pending ws (begin (suspend! (lambda (k) (set pr (sum pending (cons k ws)))))
+      (pending ws (begin (suspend! (lambda (k) (set pr (one pending (cons k ws)))))
                          (await! pr))))))
 
 (spawn! (lambda () (begin (note! 1) (note! (await! fut)))))
@@ -726,7 +726,7 @@ abort finds it after any number of suspensions. A second task sets the
 flag; `ticker` would count for ever.
 
 ```scheme
-(define-type outcome (sumof (done int) (cancelled unit)))
+(define-type outcome (oneof (done int) (cancelled unit)))
 (define scope (prompt-tag outcome unit (maxeff D (goto @p) (comefrom @p)) @c)
   (make-continuation-prompt-tag))
 (define stop? (ref bool @q) (new #f))
@@ -740,7 +740,7 @@ flag; `ticker` would count for ever.
   (lambda (i) (begin (set log (cons i (get log))) (checkpoint!) (ticker (+ i 1)))))
 
 (spawn! (lambda ()
-          (tagcase (prompt scope (sum done (ticker 0)) (lambda (u) (sum cancelled u)))
+          (tagcase (prompt scope (one done (ticker 0)) (lambda (u) (one cancelled u)))
             (done n (set log (cons n (get log))))
             (cancelled u (set log (cons -1 (get log)))))))
 (spawn! (lambda () (begin (yield!) (yield!) (set stop? #t))))
@@ -1072,15 +1072,15 @@ abbreviation. `(loop c D)`, `(nursery n c D)`, `(task T n)`, `(waker c)`,
 | `(with-loop (lp c D) body)`       | form; body `T ! (maxeff D (suspends c))`, result `T` not mentioning `c`, effect `D∖c`                        | a region `c`, a loop, `body` as the first task; returns when it has ended                            | `asyncio.run`, `trio.run`, `Eio_main.run`       |
 | `(with-nursery lp (n) body)`      | form; result not mentioning `n`                                                                              | a nursery; waits for every child; a child's trap cancels the rest and propagates                     | `TaskGroup`, `open_nursery`, `Switch.run`       |
 | `spawn`                           | `(subr (maxeff D (write c)) ((nursery n c D) (subr (maxeff D (suspends c)) () T)) (task T n))`               | enqueue a task; its effect charged here                                                              | `start_soon`, `tg.create_task`, `Fiber.fork`    |
-| `join`                            | `(subr (suspends c) ((task T n)) (sumof (done T) (cancelled unit)))`                                         | wait for a task's end                                                                                | `await task`                                    |
+| `join`                            | `(subr (suspends c) ((task T n)) (oneof (done T) (cancelled unit)))`                                         | wait for a task's end                                                                                | `await task`                                    |
 | `suspend`                         | `(subr (suspends c) ((loop c D) (subr (write c) ((waker c)) unit)) unit)`                                    | capture to the task's prompt; hand a one-shot waker to the registration procedure; resume when woken | Guile `suspend-current-task`, Rust `Waker`      |
 | `wake!`                           | `(subr (write c) ((waker c)) unit)`                                                                          | enqueue the task; later wakes of the same waker do nothing, so a timer and a channel may race        | `Waker::wake`                                   |
 | `yield`                           | `(subr (suspends c) ((loop c D)) unit)`                                                                      | go to the back of the run queue                                                                      | `asyncio.sleep(0)`                              |
 | `sleep`                           | `(subr (suspends c) ((loop c D) int) unit)`                                                                  | milliseconds, on the loop's clock (virtual first)                                                    | `asyncio.sleep`, `trio.sleep`                   |
-| `(with-cancel-scope lp (s) body)` | form; result `(sumof (done T) (cancelled unit))`                                                             | `(cancel! s)` makes every suspension inside abort to here, until the body ends                       | `trio.CancelScope`                              |
-| `move-on-after`                   | `(subr (suspends c) ((loop c D) int (subr (maxeff D (suspends c)) () T)) (sumof (done T) (cancelled unit)))` | a cancel scope with a deadline                                                                       | `trio.move_on_after`, `asyncio.timeout`         |
+| `(with-cancel-scope lp (s) body)` | form; result `(oneof (done T) (cancelled unit))`                                                             | `(cancel! s)` makes every suspension inside abort to here, until the body ends                       | `trio.CancelScope`                              |
+| `move-on-after`                   | `(subr (suspends c) ((loop c D) int (subr (maxeff D (suspends c)) () T)) (oneof (done T) (cancelled unit)))` | a cancel scope with a deadline                                                                       | `trio.move_on_after`, `asyncio.timeout`         |
 | `make-channel`                    | `(subr (maxeff (alloc c) (write c)) ((loop c D) int) (channel T c))`                                         | a bounded channel; capacity 0 is a rendezvous                                                        | `open_memory_channel`, `Queue(maxsize)`, `chan` |
-| `channel-send`, `channel-receive` | `(suspends c)`; receive gives `(sumof (value T) (closed unit))`                                              | suspend while full or empty: backpressure                                                            | `send`, `receive`                               |
+| `channel-send`, `channel-receive` | `(suspends c)`; receive gives `(oneof (value T) (closed unit))`                                              | suspend while full or empty: backpressure                                                            | `send`, `receive`                               |
 | `channel-close!`                  | `(subr (write c) ((channel T c)) unit)`                                                                      | wakes receivers with `closed`                                                                        | `aclose`                                        |
 
 Stage 3 adds `wait-readable`, `wait-writable`, `read-some` and
@@ -1090,8 +1090,8 @@ outside world. Stage 6 adds CML's `(event T c)` with `choose`, `wrap`,
 
 ```scheme
 ;;; PROPOSED — sketch only; `receive-evt` and `timeout-evt` are made up here.
-(sync (choose (wrap (receive-evt ch) (lambda (v) (sum value v)))
-              (wrap (timeout-evt lp 50) (lambda (u) (sum timed-out u)))))
+(sync (choose (wrap (receive-evt ch) (lambda (v) (one value v)))
+              (wrap (timeout-evt lp 50) (lambda (u) (one timed-out u)))))
 ```
 
 ```go
@@ -1167,7 +1167,7 @@ takes its caller's place:
           (value v ((proj consume c) lp ch (+ acc v)))
           (closed u acc))))))
 
-(define sum-before (subr spin (int int) (sumof (done int) (cancelled unit)))
+(define sum-before (subr spin (int int) (oneof (done int) (cancelled unit)))
   (lambda (k ms)
     (with-loop (lp c spin)
       (move-on-after lp ms

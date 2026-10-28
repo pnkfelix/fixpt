@@ -32,30 +32,30 @@ fn run(program: &str) -> String {
 
 #[test]
 fn products_are_immutable_so_pure() {
-    assert_eq!(check("(product (x 1) (y #t))"), "(productof (x int) (y bool)) ! pure");
-    assert_eq!(check("(extract (product (x 1) (y #t)) y)"), "bool ! pure");
-    let err = rejects("(extract (product (x 1)) z)");
+    assert_eq!(check("(tup (x 1) (y #t))"), "(tupof (x int) (y bool)) ! pure");
+    assert_eq!(check("(extract (tup (x 1) (y #t)) y)"), "bool ! pure");
+    let err = rejects("(extract (tup (x 1)) z)");
     assert!(err.contains("has no `z`"), "{err}");
-    assert_eq!(run("(extract (product (x 1) (y \"two\")) y)"), "\"two\"");
+    assert_eq!(run("(extract (tup (x 1) (y \"two\")) y)"), "\"two\"");
 }
 
 #[test]
 fn a_sum_with_fewer_tags_fits_one_with_more() {
-    assert_eq!(check("(sum a 1)"), "(sumof (a int)) ! pure");
-    assert_eq!(check("(the (sumof (a int) (b bool)) (sum b #f))"), "(sumof (a int) (b bool)) ! pure");
-    let err = rejects("(the (sumof (a int)) (sum b #f))");
+    assert_eq!(check("(one a 1)"), "(oneof (a int)) ! pure");
+    assert_eq!(check("(the (oneof (a int) (b bool)) (one b #f))"), "(oneof (a int) (b bool)) ! pure");
+    let err = rejects("(the (oneof (a int)) (one b #f))");
     assert!(err.contains("is expected here"), "{err}");
 }
 
 #[test]
 fn tagcase_covers_every_tag_or_has_an_else() {
-    let t = "(define-type ab (sumof (a int) (b bool)))";
-    assert_eq!(check(&format!("{t} (tagcase (the ab (sum a 1)) (a n n) (b x 0))")), "int ! pure");
-    let err = rejects(&format!("{t} (tagcase (the ab (sum a 1)) (a n n))"));
+    let t = "(define-type ab (oneof (a int) (b bool)))";
+    assert_eq!(check(&format!("{t} (tagcase (the ab (one a 1)) (a n n) (b x 0))")), "int ! pure");
+    let err = rejects(&format!("{t} (tagcase (the ab (one a 1)) (a n n))"));
     assert!(err.contains("no arm for b"), "{err}");
-    let err = rejects(&format!("{t} (tagcase (the ab (sum a 1)) (c n n) (else r 0))"));
+    let err = rejects(&format!("{t} (tagcase (the ab (one a 1)) (c n n) (else r 0))"));
     assert!(err.contains("has no tag `c`"), "{err}");
-    let err = rejects(&format!("{t} (tagcase (the ab (sum a 1)) (a (x y) x) (b x 0))"));
+    let err = rejects(&format!("{t} (tagcase (the ab (one a 1)) (a (x y) x) (b x 0))"));
     assert!(err.contains("cannot be taken apart"), "{err}");
     assert_eq!(run(include_str!("programs/bloblet/else-narrows.fx")), "42");
 }
@@ -64,8 +64,8 @@ fn tagcase_covers_every_tag_or_has_an_else() {
 fn define_datatype_makes_constructors_for_tagcase() {
     assert_eq!(run(include_str!("programs/bloblet/expr.fx")), "42");
     // A value is a frozen bloblet of kind `sum`: the tag, then the product.
-    assert_eq!(run("(define-datatype t (leaf int)) (leaf 1)"), "#<sum leaf>");
-    assert_eq!(run("(product (a 1) (b 2))"), "#<product of 2>");
+    assert_eq!(run("(define-datatype t (leaf int)) (leaf 1)"), "#<one leaf>");
+    assert_eq!(run("(tup (a 1) (b 2))"), "#<tup of 2>");
 }
 
 #[test]
