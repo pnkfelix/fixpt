@@ -64,6 +64,11 @@
                  (subr (maxeff (read @globals) (read @t) spin)
                        (k-scope int k-atree)
                        k-atree))
+            (val k-abbreviates?
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int) bool))
+            (val k-fits? (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int int) bool))
+            (val k-shape-hash
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) spin) (int int) int))
             (val k-abbrev-by
                  (subr (maxeff (alloc @t) (read @globals) (read @t) spin)
                        (k-atrees int)

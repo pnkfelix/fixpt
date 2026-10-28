@@ -23,12 +23,17 @@ pub fn check_with_rust_checker(c: &mut Checker, text: &str) -> Checked26 {
         // which the program does not name.
         for (top, _) in c.top_defining(f)?.run {
             match top {
+                // Not named by its own module's descriptions (`print_self`).
                 Top::Define { name, ty, effect, .. } => {
-                    out.push(format!("define {} : {} ! {}", c.interner.name(name), c.show_ty(ty), c.show_effect(&effect)))
+                    c.print_self.set(Some(name));
+                    out.push(format!("define {} : {} ! {}", c.interner.name(name), c.show_ty(ty), c.show_effect(&effect)));
+                    c.print_self.set(None);
                 }
                 Top::DefineRec { bindings, .. } => {
                     for (name, ty, _) in bindings {
-                        out.push(format!("define {} : {} ! pure", c.interner.name(name), c.show_ty(ty)))
+                        c.print_self.set(Some(name));
+                        out.push(format!("define {} : {} ! pure", c.interner.name(name), c.show_ty(ty)));
+                        c.print_self.set(None);
                     }
                 }
                 Top::Exp(k) => out.push(format!("{} ! {}", c.show_ty(k.ty), c.show_effect(&k.effect))),

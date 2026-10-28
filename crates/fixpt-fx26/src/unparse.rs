@@ -257,6 +257,13 @@ impl Checker {
     /// in `t`'s minimal graph (`print_canon`), if `t` has a cycle and is
     /// the outermost type being printed.
     fn canonically(&self, t: TyId, show: impl FnOnce(&Self) -> String) -> String {
+        // The modules' descriptions in scope, gathered once for the type.
+        if self.print_selects.borrow().is_none() && self.print_for_fasl.borrow().is_none() {
+            *self.print_selects.borrow_mut() = Some(self.module_selects());
+            let out = self.canonically(t, show);
+            *self.print_selects.borrow_mut() = None;
+            return out;
+        }
         if self.print_canon.borrow().is_some() || self.print_shallow.get() {
             return show(self);
         }
@@ -270,6 +277,56 @@ impl Checker {
             *self.print_canon.borrow_mut() = None;
         }
         out
+    }
+
+    /// The descriptions of the modules bound in scope, each by its `select`
+    /// (`(select m-buffer buffer)`), by shape (`shape_key`), the modules in
+    /// the order they were bound, each's descriptions in order: so that a
+    /// type of the structure of one is printed by it, not written out
+    /// wherever each later module has it (`TODO.md` §138). The innermost
+    /// binding of each name, not a standard one nor a hidden one (`%…`),
+    /// nor the global whose line is printed (`print_self`); a description
+    /// function, applied where it is used, not.
+    fn module_selects(&self) -> HashMap<u64, Vec<(String, TyId)>> {
+        let mut seen = std::collections::HashSet::new();
+        let mut bound = Vec::new();
+        for i in (self.standard_len..self.env.len()).rev() {
+            let (n, t) = self.env[i];
+            if seen.insert(n) {
+                bound.push((n, t));
+            }
+        }
+        let mut out: HashMap<u64, Vec<(String, TyId)>> = HashMap::new();
+        for (n, t) in bound.into_iter().rev() {
+            let name = self.interner.name(n);
+            if name.starts_with('%') || Some(n) == self.print_self.get() {
+                continue;
+            }
+            let Ty::Module { descs, .. } = self.arena.get(self.arena.resolve(t)) else { continue };
+            for (d, x) in descs.iter() {
+                let x = self.arena.resolve(*x);
+                if self.abbreviates(x) && !matches!(self.arena.get(x), Ty::Lam { .. }) {
+                    out.entry(self.shape_key(x)).or_default().push((format!("(select {name} {})", self.interner.name(*d)), x));
+                }
+            }
+        }
+        out
+    }
+
+    /// A key of `t`'s own part, the same for two types `same_ty` finds one:
+    /// its kind, and its fields' or components' labels.
+    fn shape_key(&self, t: TyId) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        let ty = self.arena.get(self.arena.resolve(t));
+        std::mem::discriminant(ty).hash(&mut h);
+        match ty {
+            Ty::Product(ps) | Ty::Sum(ps) => ps.iter().for_each(|(l, _)| l.hash(&mut h)),
+            Ty::Module { descs, vals, .. } => descs.iter().chain(vals.iter()).for_each(|(l, _)| l.hash(&mut h)),
+            Ty::Subr { params, .. } => params.len().hash(&mut h),
+            _ => {}
+        }
+        h.finish()
     }
 
     /// Node `t` as its class's first, while a type is printed canonically.
@@ -328,7 +385,7 @@ impl Checker {
         Some(order.iter().enumerate().map(|(i, n)| (*n, first[&class[i]])).collect())
     }
 
-    fn abbreviation(&self, t: TyId) -> Option<&str> {
+    fn abbreviation(&self, t: TyId) -> Option<std::borrow::Cow<'_, str>> {
         // Written out, but for data that keeps its name (`closed_named`): a
         // recursive one would print with numbers by its depth (`mu %3`),
         // which would not read the same in two places.
@@ -345,7 +402,7 @@ impl Checker {
         };
         let named = self.print_names.borrow().iter().rev().find(|(_, x)| fits(*x)).map(|(n, _)| *n);
         if let Some(n) = named {
-            return Some(self.interner.name(n));
+            return Some(self.interner.name(n).into());
         }
         if !self.abbreviates(t) {
             return None;
@@ -359,9 +416,15 @@ impl Checker {
             if !used.contains(&n) {
                 used.push(n);
             }
-            return Some(self.interner.name(n));
+            return Some(self.interner.name(n).into());
         }
-        self.type_names().into_iter().rev().find(|n| self.type_named(*n).is_some_and(fits)).map(|n| self.interner.name(n))
+        if let Some(n) = self.type_names().into_iter().rev().find(|n| self.type_named(*n).is_some_and(fits)) {
+            return Some(self.interner.name(n).into());
+        }
+        // A module's description in scope, by its `select` (`module_selects`).
+        let selects = self.print_selects.borrow();
+        let found = selects.as_ref()?.get(&self.shape_key(t))?.iter().find(|(_, x)| self.same_ty(*x, t, &mut Vec::new()));
+        found.map(|(s, _)| s.clone().into())
     }
 
     /// Whether a type has parts, so that a name abbreviates it: not a base
@@ -553,9 +616,14 @@ impl Checker {
                         // of one does not stand bare (`not_applied`).
                         Ty::Lam { params, .. } if !params.is_empty() => self.show_ty_body(self.canon(self.arena.resolve(*x)), path),
                         // What it is, not its own name: a `define-type` alias
-                        // of it, `(select m n)`, named `n` too. Its class's
-                        // first node, as `show_ty_on` shows (`canon`).
-                        _ if self.abbreviation(self.arena.resolve(*x)) == Some(self.interner.name(*n)) => {
+                        // of it, `(select m n)`, named `n` too; nor a module's
+                        // `select` (`module_selects`), which, of the module
+                        // printed, would name it by itself. Its class's first
+                        // node, as `show_ty_on` shows (`canon`).
+                        _ if self
+                            .abbreviation(self.arena.resolve(*x))
+                            .is_some_and(|a| a == self.interner.name(*n) || a.starts_with("(select ")) =>
+                        {
                             self.show_ty_body(self.canon(self.arena.resolve(*x)), path)
                         }
                         _ => self.show_ty_on(*x, path),

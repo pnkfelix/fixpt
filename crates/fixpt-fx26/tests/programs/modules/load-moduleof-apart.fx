@@ -1,4 +1,4 @@
-;; ! argument 2 is a (moduleof (desc buffer (productof (owner (productof (state (ref int @heap)))) (t c1..ticket)))
+;; ! argument 2 is a (moduleof (desc buffer (productof (owner (select c1 counter)) (t c1..ticket)))
 ;; Two schedulers' types are apart: buffers made over one are not what the
 ;; client given the other takes.
 (let* ((c1 ((proj (load-module "../module-files/made-core.fx") @heap pure)))

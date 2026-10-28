@@ -3322,6 +3322,20 @@ the same as a global module's description by its `select` would make
 the lines short; the Rust checker's interning (§141, item 3) the
 checking.
 
+**Printing done 2026-10-28** (the user's: "printing expensive types by
+their select when possible"): both printers name a type of the structure
+of a description of a module bound in scope by its `select`, after the
+names they had (the printed type's own, then `define-type`'s), the
+earliest bound module first (`module_selects`, `k-selects-gather!`); not
+a description's own body in a `moduleof`, which of the module printed
+would name it by itself, nor the global whose line is printed. Heist's
+14 makers: 11 MB printed to 149 KB, `m-process`'s line 4 MB to 15 KB;
+`fixpt check` 3.21 s to 1.74 s from source. **Left**: with the files'
+`.fasl`s, `fixpt check` is 4.75 s, the checkers' phases 1.7 s of it and
+the profile in `k-mod-check-lambdas`, as if the files' bodies were
+checked again; and the checking itself, 1.7 s where the same files as
+globals check in under one.
+
 ## 139. A module's static part as a kind (the user's, 2026-10-28)
 
 A `moduleof` type is, by Harper, Mitchell and Moggi's phase distinction

@@ -268,7 +268,11 @@
 ;; The line for a definition of `name`, of type `t` and effect `e`.
 (define k-define-line (->* (symbol int k-eff) string)
   (lambda (name t e)
-    (if (get k-show-lines) (k-cat4 "define " (symbol->string name) " : " (k-line t e)) "")))
+    (if (get k-show-lines)
+        ;; Not named by its own module's descriptions (`k-print-self`).
+        (let* ((self (k-print-self! name)) (line (k-line t e)) (none (k-print-self! '||)))
+          (k-cat4 "define " (symbol->string name) " : " line))
+        "")))
 (define k-push-lines (->* (k-out k-out) k-out)
   (lambda (lines out) (if (null? lines) out (k-push-lines (cdr lines) (cons (car lines) out)))))
 ;; Bind `n`, at top level, to a value of type `t`: a global, a module's

@@ -419,6 +419,13 @@ pub struct Checker {
     /// name a type (the file's own and the standard ones), and those that
     /// did, which the `.fasl` keeps with what each is.
     pub(crate) print_aliases: std::cell::RefCell<Option<(Vec<Sym>, Vec<Sym>)>>,
+    /// While a type is printed: the descriptions of the modules bound in
+    /// scope, each by its `select`, for a type of their structure to be
+    /// named so (`Checker::module_selects`), by a shape key (`shape_key`).
+    pub(crate) print_selects: std::cell::RefCell<Option<HashMap<u64, Vec<(String, TyId)>>>>,
+    /// The global whose definition's line is printed: its own module's
+    /// descriptions are not named by its `select`.
+    pub(crate) print_self: std::cell::Cell<Option<Sym>>,
     /// Whether two types are being shown apart ([`Checker::show_apart`]):
     /// each description variable printed as a mark, named after.
     pub(crate) show_marks: std::cell::Cell<bool>,
@@ -941,6 +948,8 @@ impl Checker {
             print_params: std::cell::RefCell::new(None),
             print_tys: std::cell::RefCell::new(HashMap::new()),
             print_aliases: std::cell::RefCell::new(None),
+            print_selects: std::cell::RefCell::new(None),
+            print_self: std::cell::Cell::new(None),
             print_cycles: std::cell::RefCell::new(HashSet::new()),
             show_marks: std::cell::Cell::new(false),
             subst_keep: None,

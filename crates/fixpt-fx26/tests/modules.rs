@@ -147,3 +147,19 @@ fn selects_of_a_module_made_inside_keep_names() {
         assert!(shown.contains(part), "{part} in {shown}");
     }
 }
+
+/// A type of the structure of a description of a module bound in scope is
+/// printed by its `select`, by both checkers, not written out wherever a
+/// later module has it (`TODO.md` §138); a module's own description is not
+/// named so, which would name it by itself.
+#[test]
+fn a_modules_description_names_a_type_by_its_select() {
+    let text = include_str!("programs/modules/select-names.fx");
+    let mut s = common::session();
+    let (fx26, rust) = fixpt_fx26::compare::both_checkers(&mut s, text).expect("read");
+    let (fx26, rust) = (fx26.expect("checks"), rust.expect("checks"));
+    assert_eq!(fx26, rust);
+    assert!(fx26.iter().any(|l| l == "define f : (subr pure ((select m pt)) int) ! pure"), "{fx26:?}");
+    assert!(fx26.iter().any(|l| l.starts_with("define m : (moduleof (desc pt (productof (x int) (y int)))")), "{fx26:?}");
+    assert!(fx26.iter().any(|l| l.starts_with("define n : (moduleof (desc pt (productof (x int) (y int)))")), "{fx26:?}");
+}
