@@ -117,6 +117,26 @@ pub struct Fx26Session {
     /// (`docs/research/fasl.md`): under `Strategy::Cellular`, unless
     /// `FIXPT_NO_FASL` says not.
     pub fasls: bool,
+    /// The program's file the forms run now are, for its `.fasl` (set by a
+    /// driver: `fixpt run`, `fixpt eval`, `,load`), which `run_forms` reads.
+    pub program_file: Option<std::path::PathBuf>,
+    /// While a program's file is compiled to a `.fasl` (`compile_file`):
+    /// what each of its forms checked as, by its place among them; and its
+    /// forms are checked and made globals but not run, but for the
+    /// definitions of procedures, whose making does nothing else.
+    program_record: Option<Vec<(usize, Top, String)>>,
+}
+
+/// A program's `.fasl` read for its forms (`Fx26Session::program_fasl`):
+/// each definition kept, by its form's place, with its value's; the image
+/// they are copied from, its values, and what stands in it for what it
+/// links to.
+struct ProgramFasl {
+    defs: std::collections::HashMap<usize, (crate::fasl::Def, usize)>,
+    heap: fixpt_heap::Heap,
+    values: Vec<fixpt_heap::Value>,
+    links: std::collections::HashMap<u64, crate::fasl::Link>,
+    natives: Vec<fixpt_heap::Value>,
 }
 
 /// The budget for one speculative run: enough for a REPL-sized
@@ -600,6 +620,8 @@ impl Fx26Session {
             speculation_limit: Some(SPECULATION_STEP_LIMIT),
             pending: Vec::new(),
             fasls: std::env::var_os("FIXPT_NO_FASL").is_none(),
+            program_file: None,
+            program_record: None,
         })
     }
 
@@ -782,11 +804,25 @@ impl Fx26Session {
             f.as_proper_list().and_then(|l| l.first()?.as_symbol()).is_some_and(|h| self.checker.interner.name(h) == "define-generative")
         };
         let ahead: Vec<Span> = forms.iter().zip(&done).filter(|(f, d)| **d && generative(f)).map(|(f, _)| f.span).collect();
+        // The program's `.fasl`, if it has a fresh one: its procedures'
+        // definitions read from it, the rest of its forms run here.
+        let fasl = match self.program_file.clone() {
+            Some(p) if self.reads_fasls() && self.program_record.is_none() => self.program_fasl(&p, forms),
+            _ => None,
+        };
         let mut outs = Vec::new();
-        for (f, done) in forms.iter().zip(done) {
+        for (i, (f, done)) in forms.iter().zip(done).enumerate() {
             if !done {
                 self.own_made = self.strategy != Strategy::Lower && ahead.contains(&f.span);
-                let out = self.run_each(f);
+                let out = match fasl.as_ref().and_then(|p| Some((p, p.defs.get(&i)?))) {
+                    Some((p, (def, at))) => self.run_program_def(f, def, *at, p).map(|o| vec![o]),
+                    None => self.run_each(f),
+                };
+                // What the pieces written in FX-26 made themselves (a
+                // generative's conversions) is not the program's to keep.
+                if let (Some(r), Ok(each), false) = (self.program_record.as_mut(), &out, self.own_made) {
+                    r.extend(each.iter().map(|o| (i, o.top.clone(), o.printed.clone())));
+                }
                 self.own_made = false;
                 // Only a form refused ends the run; one that failed as it
                 // ran does not.
@@ -831,8 +867,8 @@ impl Fx26Session {
         self.checker.fasls = self.reads_fasls();
         // `(compile-file "path")`: the file's `.fasl` made, as `fixpt
         // compile-file` makes it (`compile_file`).
-        if let Some(path) = compile_file_form(form, &self.checker) {
-            let made = self.compile_file(&path).map_err(|e| FxError::at(form.span, e))?;
+        if let Some((path, program)) = compile_file_form(form, &self.checker) {
+            let made = self.compile_file(&path, program).map_err(|e| FxError::at(form.span, e))?;
             let printed = format!("; compiled `{path}` to `{}`\n", made.display());
             let exp = self.checker.arena.exp(form.span, crate::ast::Exp::Unit);
             let top = Top::Exp(crate::check::Checked { ty: self.checker.unit, effect: crate::ast::Effect::pure(), exp });
@@ -1035,6 +1071,20 @@ impl Fx26Session {
         debug_assert!(!self.native_convention || self.scheme.runtime_unrooted().adapt.is_some(), "no adapters in the native convention");
         let code = lower_top(&self.checker, &mut self.globals, &top);
         if self.strategy != Strategy::Lower {
+            // A program's file being compiled to a `.fasl`: only a
+            // procedure's definition, a type's and a load run; another
+            // definition is checked and given its global, an expression
+            // checked, neither run (`compile_program_file`).
+            if self.program_record.is_some() && !again {
+                match &top {
+                    Top::Exp(_) => return Ok(Outcome { top, code: String::new(), printed: String::new(), value: Ok(None) }),
+                    Top::Define { name, exp, .. } if !Self::names_its_word(&self.checker, *exp) && !self.checker.interner.name(*name).starts_with('%') => {
+                        self.declare_only(form)?;
+                        return Ok(Outcome { top, code: String::new(), printed: String::new(), value: Ok(None) });
+                    }
+                    _ => {}
+                }
+            }
             // A load read from its `.fasl`: its hidden global given the
             // value kept there, not made.
             if let Top::Define { name, .. } = &top
@@ -1232,7 +1282,7 @@ impl Fx26Session {
         let fail = |e: String| FxError::at(Span::new(FileId(0), 0, 0), format!("`{}`: {e}", fasl.display()));
         let bytes = std::fs::read(fasl).map_err(|e| fail(e.to_string()))?;
         let (_, image) = crate::fasl::Header::read(&bytes).map_err(fail)?;
-        let (from, value, links) = crate::fasl::read_image(image).map_err(fail)?;
+        let (from, value, links, natives) = crate::fasl::read_image(image).map_err(fail)?;
         let deps: Vec<Sym> = self.checker.shared_files.get(&name).map(|f| f.deps.iter().map(|d| d.2).collect()).unwrap_or_default();
         // What each link is here, held while the value is copied in.
         let mut found = Vec::new();
@@ -1257,9 +1307,9 @@ impl Fx26Session {
             let given: std::collections::HashMap<u64, fixpt_heap::Value> = found.iter().map(|(p, h)| (p.raw(), m.get(*h))).collect();
             let g = m.get(cell);
             let heap = m.heap();
-            let (copy, _) = heap.copy_graph_with(&from, value, |_| false, &given);
+            let (copy, made) = heap.copy_graph_with(&from, value, |_| false, &given);
             let copy = match compile {
-                Some(c) => crate::fasl::native_procedures(heap, copy, c),
+                Some(c) => crate::fasl::native_procedures(heap, copy, c, &natives.iter().filter_map(|n| made.get(&n.raw()).map(|v| v.raw())).collect()),
                 None => copy,
             };
             heap.set_bloblet_slot(g, 2, copy);
@@ -1287,14 +1337,25 @@ impl Fx26Session {
         Ok(found.then_some(g))
     }
 
+    /// The file at `path` (from the program's directory, as a load's)
+    /// compiled to a `.fasl` beside it (`docs/research/fasl.md`): as a
+    /// program's file if `program`; else as a module file, or, if it is none
+    /// (its making is not pure, say), a program's. `fixpt compile-file`, the
+    /// REPL's `,compile-file` and a program's `(compile-file "path")`.
+    pub fn compile_file(&mut self, path: &str, program: bool) -> Result<std::path::PathBuf, String> {
+        if program {
+            return self.compile_program_file(path);
+        }
+        self.compile_module_file(path).or_else(|module| self.compile_program_file(path).map_err(|p| format!("{module}\n  and as a program's file: {p}")))
+    }
+
     /// The module file at `path` (from the program's directory, as a
     /// load's) compiled to a `.fasl` beside it (`docs/research/fasl.md`):
     /// loaded, as `(load-module "path")` loads it, or `(load-input "path")`
     /// a file of one expression; then the type its load was checked at,
     /// the files it loads, and its value kept (`crate::fasl::image`). The
-    /// `.fasl` made, or why not. `fixpt compile-file`, the REPL's
-    /// `,compile-file` and a program's `(compile-file "path")`.
-    pub fn compile_file(&mut self, path: &str) -> Result<std::path::PathBuf, String> {
+    /// `.fasl` made, or why not.
+    pub fn compile_module_file(&mut self, path: &str) -> Result<std::path::PathBuf, String> {
         if self.strategy != Strategy::Cellular {
             return Err("only compiled code is kept in a `.fasl`: not on rs-scheme-vm or fx-ast-eval".into());
         }
@@ -1331,11 +1392,13 @@ impl Fx26Session {
             build: crate::fasl::build(),
             arch: std::env::consts::ARCH.to_string(),
             native: self.native_convention,
-            input,
+            kind: if input { crate::fasl::Kind::Input } else { crate::fasl::Kind::Module },
             source: file.source,
             stamp: file.stamp,
             deps,
             ty,
+            defs: Vec::new(),
+            aliases: Vec::new(),
         };
         let image = self.released(|s| s.fasl_image(&name, &dep_values)).map_err(|e| format!("`{path}`'s value cannot be kept: {e}"))?;
         let fasl = crate::fasl::path_for(&at);
@@ -1343,6 +1406,373 @@ impl Fx26Session {
         std::fs::write(&tmp, header.file(&image)).map_err(|e| format!("cannot write `{}`: {e}", tmp.display()))?;
         std::fs::rename(&tmp, &fasl).map_err(|e| format!("cannot write `{}`: {e}", fasl.display()))?;
         Ok(fasl)
+    }
+
+    /// Definition `form`, checked by the checker written in FX-26 as the
+    /// next form and its globals made, but not run: a program's file being
+    /// compiled (`program_record`).
+    fn declare_only(&mut self, form: &Syntax) -> R<()> {
+        self.own_pieces()?;
+        let standard = self.next_standard()?;
+        let text = format!("{}\n", fixpt_read::write_syntax(form, &self.checker.interner));
+        let names = self.checker.defined_names(form);
+        self.released(|s| {
+            let fail = |e: fixpt_scheme::SessionError| FxError::at(form.span, e.to_string());
+            if let Err(why) = crate::syn::check_only(&mut s.scheme, standard, FileId(0), &text)? {
+                return Err(FxError::at(form.span, format!("the checkers disagree: the Rust checker takes this definition, and the one written in FX-26 refuses it: {why}")));
+            }
+            s.own_begun = true;
+            for n in names {
+                let shown = s.checker.interner.name(n).to_string();
+                let sym = s.scheme.make(|m| m.heap().intern(&shown));
+                s.scheme.call_global(&format!("{READER_PREFIX}compile-new-global"), &[sym]).map_err(fail)?;
+            }
+            Ok(())
+        })
+    }
+
+    /// Program file `path`'s `.fasl`, if it is fresh for `forms`, the file's:
+    /// made from this text, by this executable, for this architecture and
+    /// convention; none of the names it defines from it defined here yet;
+    /// and each global its definitions' code uses that the file does not
+    /// define, here at the type it had (`fasl_program_type`), so that the
+    /// code is right for it. Whole or not at all: its procedures were
+    /// compiled together, a call of one maybe made in line in another's
+    /// code. A stale one said (`fasl_notes`).
+    fn program_fasl(&mut self, path: &std::path::Path, forms: &[Syntax]) -> Option<ProgramFasl> {
+        let fasl = crate::fasl::path_for(path);
+        let bytes = std::fs::read(&fasl).ok()?;
+        let stale = |s: &mut Self, why: &str| {
+            s.checker.fasl_notes.push(format!("`{}` is stale ({why}): `{}` is run from its source", fasl.display(), path.display()));
+            None
+        };
+        let (header, image) = match crate::fasl::Header::read(&bytes) {
+            Ok(h) => h,
+            Err(e) => return stale(self, &e),
+        };
+        if header.kind != crate::fasl::Kind::Program {
+            // A module file's, for its loads: nothing to say here.
+            return None;
+        }
+        let text = std::fs::read_to_string(path).ok()?;
+        let why = if header.build != crate::fasl::build() {
+            Some("another fixpt made it".to_string())
+        } else if header.arch != std::env::consts::ARCH {
+            Some(format!("it is for {}", header.arch))
+        } else if header.native != self.native_convention {
+            Some(if header.native { "it is for the native convention" } else { "it is for the cellular convention" }.to_string())
+        } else if header.source != crate::fasl::digest(&text) {
+            Some("its source changed".to_string())
+        } else {
+            None
+        };
+        if let Some(why) = why {
+            return stale(self, &why);
+        }
+        for (n, t) in &header.aliases {
+            let a = self.checker.interner.intern(n);
+            if self.checker.fasl_alias_expansion(a).as_deref() != Some(t.as_str()) {
+                return stale(self, &format!("the type `{n}` is not what it was"));
+            }
+        }
+        let defined: std::collections::HashSet<String> = forms.iter().flat_map(|f| self.checker.defined_names(f)).map(|n| self.checker.interner.name(n).to_string()).collect();
+        self.checker.fasl_aliases_begin(self.checker.fasl_allowed_aliases(forms));
+        let stale_use = self.stale_use(&header.defs, &defined);
+        self.checker.fasl_aliases_end();
+        if let Some(why) = stale_use {
+            return stale(self, &why);
+        }
+        for d in &header.defs {
+            let n = self.checker.interner.intern(&d.name);
+            if d.form >= forms.len() || !self.checker.defined_names(&forms[d.form]).contains(&n) {
+                return stale(self, &format!("its definition of `{}` is not its form's", d.name));
+            }
+            if self.checker.global_type(n).is_some() {
+                return stale(self, &format!("`{}` is defined here already", d.name));
+            }
+        }
+        let (heap, value, links, natives) = match crate::fasl::read_image(image) {
+            Ok(r) => r,
+            Err(e) => return stale(self, &e),
+        };
+        let mut values = Vec::new();
+        let mut l = value;
+        while l.is_pair() {
+            values.push(heap.car(l));
+            l = heap.cdr(l);
+        }
+        if values.len() != header.defs.len() {
+            return stale(self, "its image is not its definitions'");
+        }
+        if std::env::var_os("FIXPT_FASL_SAY").is_some() {
+            self.checker.fasl_notes.push(format!("`{}` is read from `{}`", path.display(), fasl.display()));
+        }
+        let defs = header.defs.into_iter().enumerate().map(|(i, d)| (d.form, (d, i))).collect();
+        let links = links.into_iter().map(|(p, l)| (p.raw(), l)).collect();
+        Some(ProgramFasl { defs, heap, values, links, natives })
+    }
+
+    /// Why `defs`' code is not right here, if it is not: a global it uses,
+    /// not one the file defines (`defined`), not here, or not at the type
+    /// it had (printed as `fasl_program_type` prints it).
+    fn stale_use(&mut self, defs: &[crate::fasl::Def], defined: &std::collections::HashSet<String>) -> Option<String> {
+        for d in defs {
+            for (u, t) in &d.uses {
+                if defined.contains(u) {
+                    continue;
+                }
+                let un = self.checker.interner.intern(u);
+                let now = self.checker.global_type(un).map(|g| self.checker.fasl_program_type(g));
+                if now.as_ref().is_none_or(|n| n.as_deref() != Ok(t.as_str())) {
+                    return Some(format!("`{}` uses `{u}`, which is not here at the type it was", d.name));
+                }
+            }
+        }
+        None
+    }
+
+    /// `form`, a program's definition of a procedure, read from its `.fasl`
+    /// (`program_fasl`): checked, by both checkers, as `(define name T (the
+    /// T %fasl-value))`, then made what `form` would have made of it for a
+    /// redefinition (`Checker::fasl_defined`); its global given the value
+    /// kept, linked to the globals here by name, its procedures compiled
+    /// natively in the native convention.
+    fn run_program_def(&mut self, form: &Syntax, def: &crate::fasl::Def, at: usize, p: &ProgramFasl) -> R<Outcome> {
+        let fail = |m: String| FxError::at(form.span, m);
+        let text = format!("(define {} {} {})", def.name, def.ty, def.init);
+        let decl = self.checker.read_in(form.span.file, &text)?.pop().ok_or_else(|| fail("a definition".into()))?;
+        // Its type the type written out it was, or the form is run from its
+        // source (a type the file defines, made of what is here, changed).
+        let declared = self.checker.try_defining(&decl).ok().and_then(|d| match d.run.first() {
+            Some((Top::Define { ty, .. }, _)) => Some(*ty),
+            _ => None,
+        });
+        let full = self.checker.fasl_parse_type(&def.full);
+        let same = match (declared, full) {
+            (Some(a), Some(b)) => self.checker.subtype(a, b) && self.checker.subtype(b, a),
+            _ => false,
+        };
+        if !same {
+            self.checker.fasl_notes.push(format!("`{}` is not of the type its `.fasl` says: it is run from its source", def.name));
+            return self.run_each(form).and_then(|mut v| v.pop().ok_or_else(|| fail("a definition".into())));
+        }
+        let done = self.checker.top_defining(&decl)?;
+        let name = self.checker.interner.intern(&def.name);
+        let uses = def.uses.iter().map(|(u, _)| self.checker.interner.intern(u)).collect();
+        self.checker.fasl_defined(name, std::rc::Rc::new(form.clone()), uses);
+        let top = done.run.into_iter().next().map(|(t, _)| t).ok_or_else(|| fail("a definition".into()))?;
+        self.own_pieces()?;
+        let standard = self.next_standard()?;
+        let value = self.released(|s| -> R<String> {
+            let sfail = |e: fixpt_scheme::SessionError| FxError::at(form.span, e.to_string());
+            if let Err(why) = crate::syn::check_only(&mut s.scheme, standard, FileId(0), &format!("{text}\n"))? {
+                return Err(fail(format!("the checkers disagree: the Rust checker takes `{}`'s definition, and the one written in FX-26 refuses it: {why}", def.name)));
+            }
+            s.own_begun = true;
+            let sym = s.scheme.make(|m| m.heap().intern(&def.name));
+            let cell = s.scheme.call_global(&format!("{READER_PREFIX}compile-new-global"), &[sym]).map_err(sfail)?;
+            // What its code links to, found here: the globals before it, and
+            // itself.
+            let mut found = Vec::new();
+            let mut todo = vec![p.values[at]];
+            let mut seen = std::collections::HashSet::new();
+            while let Some(v) = todo.pop() {
+                if !v.is_ref() || v.is_suffix_ref() || !seen.insert(v.raw()) {
+                    continue;
+                }
+                if let Some(link) = p.links.get(&v.raw()) {
+                    let crate::fasl::Link::Global(n) = link else { return Err(fail("it links to a file's load".into())) };
+                    let c = s.global_cell(n)?.ok_or_else(|| fail(format!("it names `{n}`, which is not defined here")))?;
+                    found.push((v, c));
+                    continue;
+                }
+                if v.is_pair() {
+                    todo.extend([p.heap.car(v), p.heap.cdr(v)]);
+                } else if p.heap.obj_type(v) != Some(fixpt_heap::ObjType::Symbol) {
+                    let trailer = p.heap.bloblet_has_trailer(v) as usize;
+                    todo.extend(((1 + trailer)..=p.heap.bloblet_head(v).fields).map(|k| p.heap.bloblet_slot(v, k)));
+                }
+            }
+            let compile = s.native_compiler.filter(|_| s.native_convention);
+            s.scheme.make(|m| {
+                let given: std::collections::HashMap<u64, fixpt_heap::Value> = found.iter().map(|(v, h)| (v.raw(), m.get(*h))).collect();
+                let g = m.get(cell);
+                let heap = m.heap();
+                let (copy, made) = heap.copy_graph_with(&p.heap, p.values[at], |_| false, &given);
+                let copy = match compile {
+                    Some(c) => crate::fasl::native_procedures(heap, copy, c, &p.natives.iter().filter_map(|n| made.get(&n.raw()).map(|v| v.raw())).collect()),
+                    None => copy,
+                };
+                heap.set_bloblet_slot(g, 2, copy);
+                let w = fixpt_heap::layout::cellular::GLOBAL_WRITES;
+                let n = heap.bloblet_slot(g, w).as_fixnum();
+                heap.set_bloblet_slot(g, w, fixpt_heap::Value::fixnum(n + 1));
+                fixpt_heap::Value::FALSE
+            });
+            // What the definition said where it was made, said again.
+            Ok(def.said.iter().map(|l| format!("{l}\n")).collect())
+        });
+        let printed = value?;
+        Ok(Outcome { top, code: String::new(), printed, value: Ok(None) })
+    }
+
+    /// Program file `path` (from the program's directory) compiled to a
+    /// `.fasl` beside it: its forms checked in order, as `,load` checks them,
+    /// in this session, each definition given its global, but only those of
+    /// procedures (and of types, and loads) run, so that compiling runs
+    /// nothing of what the program does; then each procedure's definition
+    /// kept, with its type and those of the globals its code uses, and its
+    /// value. Each global here before it has its writes counted on, first,
+    /// so that no code compiled now keeps an assumption about what it holds
+    /// (a guard passes only at the count it saw).
+    pub fn compile_program_file(&mut self, path: &str) -> Result<std::path::PathBuf, String> {
+        if self.strategy != Strategy::Cellular {
+            return Err("only compiled code is kept in a `.fasl`: not on rs-scheme-vm or fx-ast-eval".into());
+        }
+        let at = match &self.checker.base_dir {
+            Some(d) if std::path::Path::new(path).is_relative() => d.join(path),
+            _ => std::path::PathBuf::from(path),
+        };
+        let text = std::fs::read_to_string(&at).map_err(|e| format!("cannot read `{path}`: {e}"))?;
+        let forms = self.checker.read_in(FileId(0), &text).map_err(|e| format!("in `{path}`: {}", e.message))?;
+        let before: Vec<String> = self.checker.value_names().into_iter().filter(|n| self.checker.global_type(*n).is_some()).map(|n| self.checker.interner.name(n).to_string()).collect();
+        self.released(|s| {
+            for n in &before {
+                if let Ok(Some(cell)) = s.global_cell(n) {
+                    s.scheme.make(|m| {
+                        let g = m.get(cell);
+                        let heap = m.heap();
+                        let w = fixpt_heap::layout::cellular::GLOBAL_WRITES;
+                        let k = heap.bloblet_slot(g, w).as_fixnum();
+                        heap.set_bloblet_slot(g, w, fixpt_heap::Value::fixnum(k + (1 << 40)));
+                        fixpt_heap::Value::FALSE
+                    });
+                }
+            }
+        });
+        let outer = std::mem::replace(&mut self.checker.base_dir, at.parent().map(|d| d.to_path_buf()));
+        self.program_record = Some(Vec::new());
+        let ran = self.run_forms(&forms);
+        let record = self.program_record.take().unwrap_or_default();
+        self.checker.base_dir = outer;
+        for o in ran.map_err(|e| format!("in `{path}`: {}", e.message))? {
+            o.map_err(|e| format!("in `{path}`: {}", e.message))?;
+        }
+        // Each definition of a procedure the file makes once, of a name it
+        // defines once, in a form that loads nothing.
+        let mut counts: std::collections::HashMap<Sym, usize> = std::collections::HashMap::new();
+        for f in &forms {
+            for n in self.checker.defined_names(f) {
+                *counts.entry(n).or_default() += 1;
+            }
+        }
+        let loads = |f: &Syntax, c: &Checker| {
+            let written = fixpt_read::write_syntax(f, &c.interner);
+            ["load-module", "load-input", "include", "compile-file"].iter().any(|w| written.contains(w))
+        };
+        // A form after a top-level `include` sees what it gives, and the
+        // type abbreviations after it are not declared ahead: the form's.
+        let included = forms.iter().position(|f| self.checker.include_forms(f).is_ok_and(|i| i.is_some())).unwrap_or(forms.len());
+        let mut defs = Vec::new();
+        let mut names = Vec::new();
+        self.checker.fasl_aliases_begin(self.checker.fasl_allowed_aliases(&forms));
+        for (i, top, printed) in &record {
+            let Top::Define { name, ty: tid, exp, .. } = top else { continue };
+            // Of a procedure, defined once, loading nothing, before an
+            // `include`, and proving no lemma (which a declaration would not).
+            let written = definition_init(&forms[*i], &self.checker, *name);
+            let proves = written.and_then(|(t, _)| t?.as_proper_list()?.first()?.as_symbol()).is_some_and(|h| self.checker.interner.name(h) == "proves");
+            if counts.get(name) != Some(&1) || !Self::names_its_word(&self.checker, *exp) || written.is_none() || proves || *i > included || loads(&forms[*i], &self.checker) {
+                continue;
+            }
+            let shown = self.checker.interner.name(*name).to_string();
+            // A type kept that does not read back as itself is the form's
+            // to check again where it is loaded.
+            let Ok(ty) = self.checker.fasl_program_type(*tid) else { continue };
+            if self.checker.fasl_reads_back(&ty).as_deref() != Some(ty.as_str()) {
+                continue;
+            }
+            // One that uses a load's hidden global, which the forms that
+            // load it make as they are checked, is the form's.
+            let used = self.checker.uses_of(*name);
+            if used.iter().any(|u| self.checker.interner.name(*u).starts_with("%shared:")) {
+                continue;
+            }
+            let mut uses = Vec::new();
+            for u in used {
+                if let Some(t) = self.checker.global_type(u)
+                    && let Ok(ut) = self.checker.fasl_program_type(t)
+                {
+                    uses.push((self.checker.interner.name(u).to_string(), ut));
+                }
+            }
+            // Its declaration, which must check, as the form did, at its
+            // type: the type's `poly`s are taken apart as written out.
+            let kept = self.checker.print_aliases.borrow_mut().take();
+            let expanded = self.checker.fasl_program_type(*tid);
+            *self.checker.print_aliases.borrow_mut() = kept;
+            let Ok(expanded) = expanded else { continue };
+            let Some(syn) = self.checker.read_in(FileId(0), &expanded).ok().and_then(|mut v| v.pop()) else { continue };
+            let init = crate::fasl::fasl_value_at(&syn, &self.checker.interner);
+            let decl = format!("(define {shown} {ty} {init})");
+            let checks = match self.checker.read_in(FileId(0), &decl).ok().and_then(|mut v| v.pop()) {
+                Some(d) => matches!(self.checker.try_defining(&d), Ok(done) if matches!(done.run.first(), Some((Top::Define { ty: t, .. }, _)) if self.checker.fasl_program_type(*t).as_deref() == Ok(ty.as_str()))),
+                None => false,
+            };
+            if !checks {
+                continue;
+            }
+            let said = printed.lines().map(str::to_string).collect();
+            defs.push(crate::fasl::Def { form: *i, name: shown.clone(), ty, full: expanded, init, uses, said });
+            names.push(shown);
+        }
+        // The standard abbreviations named, each with what it is; the file's
+        // own are what its text makes them, each definition's type checked
+        // written out as it is declared (`run_program_def`).
+        let used = self.checker.fasl_aliases_end();
+        let own: Vec<Sym> = self.checker.type_abbreviations(&forms).into_iter().map(|(n, _)| n).collect();
+        let aliases = used.into_iter().filter(|n| !own.contains(n)).filter_map(|n| Some((self.checker.interner.name(n).to_string(), self.checker.fasl_alias_expansion(n)?))).collect();
+        let header = crate::fasl::Header {
+            build: crate::fasl::build(),
+            arch: std::env::consts::ARCH.to_string(),
+            native: self.native_convention,
+            kind: crate::fasl::Kind::Program,
+            source: crate::fasl::digest(&text),
+            stamp: 0,
+            deps: Vec::new(),
+            ty: String::new(),
+            defs,
+            aliases,
+        };
+        let image = self.released(|s| s.program_image(&names)).map_err(|e| format!("`{path}`'s definitions cannot be kept: {e}"))?;
+        let fasl = crate::fasl::path_for(&at);
+        let tmp = fasl.with_extension(format!("fasl-tmp{}", std::process::id()));
+        std::fs::write(&tmp, header.file(&image)).map_err(|e| format!("cannot write `{}`: {e}", tmp.display()))?;
+        std::fs::rename(&tmp, &fasl).map_err(|e| format!("cannot write `{}`: {e}", fasl.display()))?;
+        Ok(fasl)
+    }
+
+    /// The values of globals `names`, in a list, as a `.fasl`'s image
+    /// (`crate::fasl::image`).
+    fn program_image(&mut self, names: &[String]) -> Result<Vec<u8>, String> {
+        let mut cells = Vec::new();
+        for n in names {
+            cells.push(self.global_cell(n).map_err(|e| e.message)?.ok_or_else(|| format!("`{n}` has no global"))?);
+        }
+        let adapter = self.native_keeping.as_ref().map(|k| k.adapter_code);
+        let mut r = Err(String::new());
+        self.scheme.make(|m| {
+            let values: Vec<fixpt_heap::Value> = cells.iter().map(|c| { let c = m.get(*c); m.heap().bloblet_slot(c, 2) }).collect();
+            let heap = m.heap();
+            let mut list = fixpt_heap::Value::NULL;
+            for v in values.iter().rev() {
+                list = heap.cons(*v, list);
+            }
+            let adapter = adapter.and_then(|a| a(heap).ok());
+            r = crate::fasl::image(heap, list, &[], adapter);
+            fixpt_heap::Value::FALSE
+        });
+        r
     }
 
     /// The value of hidden global `name` as a `.fasl`'s image, each of
@@ -2161,13 +2591,18 @@ fn definition_init<'f>(form: &'f Syntax, c: &Checker, name: Sym) -> Option<(Opti
     }
 }
 
-/// The path of `(compile-file "path")`, if `form` is one.
-fn compile_file_form(form: &Syntax, c: &Checker) -> Option<String> {
+/// The path of `(compile-file "path")`, if `form` is one, and whether it
+/// is `(compile-file "path" program)`, a program's file.
+fn compile_file_form(form: &Syntax, c: &Checker) -> Option<(String, bool)> {
     let fixpt_read::Datum::List { items, tail: None } = &form.datum else { return None };
-    let [head, path] = &items[..] else { return None };
+    let (head, path, program) = match &items[..] {
+        [head, path] => (head, path, false),
+        [head, path, kind] if kind.as_symbol().is_some_and(|k| c.interner.name(k) == "program") => (head, path, true),
+        _ => return None,
+    };
     if !head.as_symbol().is_some_and(|h| c.interner.name(h) == "compile-file") {
         return None;
     }
     let fixpt_read::Datum::Str(path) = &path.datum else { return None };
-    Some(path.clone())
+    Some((path.clone(), program))
 }

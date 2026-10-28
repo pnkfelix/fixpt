@@ -2368,3 +2368,47 @@ is what I chose where it left room, or departed from it.
   reads none.
 - **Not on `rs-scheme-vm` or `fx-ast-eval`**, which run no compiled code,
   and not by `fixpt check`, which keeps its fresh checker.
+
+### Program files' `.fasl`s (the same night)
+
+The user: "I want the .fasl format to work for any file" (`,load` of a
+program's file). What I chose:
+- **Only the definitions of procedures are kept; every other form runs
+  from the source**: a program's forms do things in order and read the
+  program's globals, so a value made by running one could be wrong where
+  the program is loaded; a procedure's making does nothing else, and its
+  code reads globals through their cells as it runs. Types and loads are
+  cheap to read again.
+- **Compiling a program's file runs nothing of what it does**: its forms
+  are checked and given their globals, and only procedures' definitions
+  (and types', and loads) run. Running the program at compile time, as
+  `,load` would, would do what it does.
+- **Imports checked by the types of the globals used**: each kept
+  definition's uses, printed as the `.fasl` prints types, compared where
+  it is loaded; and every global of the session compiling it has its
+  writes counted on by 2^40 first, so that no code compiled then keeps an
+  assumption about what it holds (a guard passes only at the count it
+  saw), as a global of the same type but another value where it is loaded
+  would otherwise pass it.
+- **Whole or nothing at load**: its procedures were compiled together, so
+  a call of one may be made in line in another; a definition left to its
+  source at compile time (a type that does not read back, a lemma's proof,
+  a form after a top-level `include`, one that loads a file or uses a
+  load's hidden global, one whose declaration does not check at its type)
+  is safe, being compiled from the same text as before.
+- **A declaration made what its form would make for a redefinition**:
+  the `defs` entry gets the original form and the uses, so that redefining
+  a global it uses checks the form again from source, as without the
+  `.fasl`.
+- **Type names kept**, the standard ones (each checked to mean the same
+  where it is loaded) and the file's own (declared ahead from the same
+  text; each definition's type is checked, where it is declared, against
+  the type written out), so that `,load` shows types as it does from the
+  source.
+- **Which closures were native is kept**: a `(conv cellular)` procedure
+  must stay cellular, and a closure the native compiler declined says so
+  again (the notes a definition printed are kept with it).
+- **`compile-file` falls back to a program's `.fasl`** when the file is no
+  module file; `--program` (or `(compile-file "f" program)`) for a file
+  that is both. A load ignores a program's `.fasl`, and a program's run a
+  module file's, saying nothing.

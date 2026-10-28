@@ -397,6 +397,10 @@ pub struct Checker {
     /// the outermost names its parameters where a type in it selects from
     /// one, `(%p.1 : T)`, as `(select $1 t)` would not read back.
     pub(crate) print_subrs: std::cell::Cell<usize>,
+    /// While a program's `.fasl` prints so: the type abbreviations that may
+    /// name a type (the file's own and the standard ones), and those that
+    /// did, which the `.fasl` keeps with what each is.
+    pub(crate) print_aliases: std::cell::RefCell<Option<(Vec<Sym>, Vec<Sym>)>>,
     /// Whether two types are being shown apart ([`Checker::show_apart`]):
     /// each description variable printed as a mark, named after.
     pub(crate) show_marks: std::cell::Cell<bool>,
@@ -913,6 +917,7 @@ impl Checker {
             print_expanded: std::cell::Cell::new(false),
             print_for_fasl: std::cell::RefCell::new(None),
             print_subrs: std::cell::Cell::new(0),
+            print_aliases: std::cell::RefCell::new(None),
             print_cycles: std::cell::RefCell::new(HashSet::new()),
             show_marks: std::cell::Cell::new(false),
             subst_keep: None,

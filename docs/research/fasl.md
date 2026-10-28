@@ -1,7 +1,7 @@
 # `.fasl` files for FX-26
 
-A design note, 2026-10-28; module files' `.fasl`s are implemented
-("Implemented", at the end). The user's direction: a `.fasl` is compiled
+A design note, 2026-10-28; `.fasl`s of module files and of programs'
+files are implemented ("Implemented", at the end). The user's direction: a `.fasl` is compiled
 for fast loading of a file's types, procedures and data, gives the same
 interface its `.fx` gave, and stays as decoupled from the files it loads
 as the `.fx` was; a `load-module` stays a load, not made eager. What a file depends on is recorded in its
@@ -255,7 +255,21 @@ the design above:
   natively again (`native_procedures`), so the code runs as fast as the
   source's. The 800-definition module of the measurements: 0.57 s from its
   source, 0.24 s from its `.fasl` (0.17 s is starting fixpt).
-- **Not for top-level files yet**: `,load` of a program's file, whose
-  forms define globals and run, needs each form kept as code to run in
-  order and its globals declared, with the types of the program's globals
-  it uses checked at load (`TODO.md`).
+- **A program's file keeps its procedures, and runs the rest**: its forms
+  define globals, use the program's and do things, in order, so only what
+  making does nothing but make a procedure is kept: each `define` of one,
+  with its type, its value, and the types of the globals its code uses,
+  checked where it is loaded (part 3's import table). Every other form,
+  types and loads among them, is read, checked and run from the source at
+  its turn. Compiling runs nothing else either (`program_record`). The
+  `.fasl` is the whole file's or none (its procedures compiled together,
+  one maybe made in line in another), and its definitions are declared,
+  each checked against its type written out, and made what its form would
+  have made of it for a redefinition (`Checker::fasl_defined`): its form,
+  checked again if a global it uses is redefined, and its uses.
+- **`compile-file` is a module file's, else a program's**: a file of only
+  definitions is both, and a module file unless `--program` says.
+- **What stays cellular stays so**: the `.fasl` lists the closures that
+  were native where it was made, and only those are made native at load;
+  what a definition said as it was made (that the native compiler declined
+  it) is kept and said again.

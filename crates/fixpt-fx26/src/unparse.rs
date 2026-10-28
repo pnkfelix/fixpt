@@ -271,8 +271,19 @@ impl Checker {
         if let Some(n) = named {
             return Some(self.interner.name(n));
         }
-        if !self.abbreviates(t) || self.print_for_fasl.borrow().is_some() {
+        if !self.abbreviates(t) {
             return None;
+        }
+        // For a `.fasl`, only a name that means the same where it is read,
+        // noted.
+        if self.print_for_fasl.borrow().is_some() {
+            let mut aliases = self.print_aliases.borrow_mut();
+            let (allowed, used) = aliases.as_mut()?;
+            let n = self.type_names().into_iter().rev().find(|n| allowed.contains(n) && self.type_named(*n).is_some_and(fits))?;
+            if !used.contains(&n) {
+                used.push(n);
+            }
+            return Some(self.interner.name(n));
         }
         self.type_names().into_iter().rev().find(|n| self.type_named(*n).is_some_and(fits)).map(|n| self.interner.name(n))
     }

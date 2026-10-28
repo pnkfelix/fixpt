@@ -361,12 +361,15 @@ pub fn repl(backend: Backend) -> i32 {
         if let Some(arg) = text.trim().strip_prefix(",compile-file")
             && (arg.is_empty() || arg.starts_with(char::is_whitespace))
         {
-            let path = arg.trim().trim_matches('"');
+            let (program, path) = match arg.trim().strip_prefix("--program") {
+                Some(p) => (true, p.trim().trim_matches('"')),
+                None => (false, arg.trim().trim_matches('"')),
+            };
             if path.is_empty() {
-                println!("; `,compile-file FILE`: make the module file's `.fasl` beside it, which a load of it reads while it is fresh");
+                println!("; `,compile-file [--program] FILE`: make the file's `.fasl` beside it, which a load of it (or, a program's, `,load`) reads while it is fresh");
                 continue;
             }
-            match session.compile_file(path) {
+            match session.compile_file(path, program) {
                 Ok(made) => println!("; compiled `{path}` to `{}`", made.display()),
                 Err(e) => println!("; {e}"),
             }
@@ -717,8 +720,9 @@ pub fn compile_files(backend: Backend, files: &[String]) -> i32 {
         Ok(s) => s,
         Err(code) => return code,
     };
-    for f in files {
-        match session.compile_file(f) {
+    let program = files.first().is_some_and(|f| f == "--program");
+    for f in &files[program as usize..] {
+        match session.compile_file(f, program) {
             Ok(made) => println!("; compiled `{f}` to `{}`", made.display()),
             Err(e) => {
                 eprintln!("fixpt compile-file: {e}");
@@ -761,7 +765,9 @@ fn run_files_in(session: &mut Fx26Session, files: &[String], args: &[String]) ->
         let outer = std::mem::replace(&mut session.checker.base_dir, dir);
         let path = std::fs::canonicalize(f).map_or_else(|_| f.to_string(), |p| p.display().to_string());
         session.source_file = Some(std::rc::Rc::new((path, text.clone())));
+        session.program_file = Some(std::path::PathBuf::from(f));
         let ran = session.run_forms(&forms);
+        session.program_file = None;
         say_fasl_notes(session);
         session.checker.base_dir = outer;
         let outs = match ran {
@@ -1190,7 +1196,9 @@ fn eval_program_in(session: &mut Fx26Session, name: &str, text: &str, raw: bool)
         }
     };
     warn_types_again(session, name, text, &forms);
+    session.program_file = Some(std::path::PathBuf::from(name));
     let ran = session.run_forms(&forms);
+    session.program_file = None;
     say_fasl_notes(session);
     let outs = match ran {
         Ok(outs) => outs,

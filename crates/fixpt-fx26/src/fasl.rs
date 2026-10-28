@@ -37,8 +37,8 @@ pub struct Header {
     pub arch: String,
     /// Whether it was compiled in the native convention.
     pub native: bool,
-    /// Whether the file is a `load-input`'s (its key `input:`).
-    pub input: bool,
+    /// What the file is to what reads it.
+    pub kind: Kind,
     /// The file's text's digest ([`digest`]).
     pub source: u64,
     /// Its stamp ([`stamp`]).
@@ -46,8 +46,52 @@ pub struct Header {
     /// The files it loads, in the order it first loads them.
     pub deps: Vec<Dep>,
     /// The type a load of it is checked at, each file it loads that the
-    /// type names `%fasl-dep:i`, `i` its place in `deps`.
+    /// type names `%fasl-dep:i`, `i` its place in `deps`: a module file's.
     pub ty: String,
+    /// A program's file's definitions kept, each a procedure's, the `i`th
+    /// the image's value `i`.
+    pub defs: Vec<Def>,
+    /// The type abbreviations its types name, each with what it is.
+    pub aliases: Vec<(String, String)>,
+}
+
+/// What a `.fasl`'s file is: a module file, a `load-input` file (its key
+/// `input:`), or a program's, whose forms run where it is loaded (`,load`,
+/// `fixpt run`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Kind {
+    Module,
+    Input,
+    Program,
+}
+
+impl Kind {
+    fn word(self) -> &'static str {
+        match self {
+            Kind::Module => "module",
+            Kind::Input => "input",
+            Kind::Program => "program",
+        }
+    }
+}
+
+/// A program's definition of a procedure kept in its `.fasl`: which of the
+/// file's forms it is, the name it defines, its type, and each global its
+/// code uses with the type it had (`Fx26Session::program_fasl_fresh`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Def {
+    pub form: usize,
+    pub name: String,
+    pub ty: String,
+    /// Its type written out, no name for any part: what its declaration
+    /// must have where it is loaded.
+    pub full: String,
+    /// The expression its declaration has the type by ([`fasl_value_at`]).
+    pub init: String,
+    pub uses: Vec<(String, String)>,
+    /// What its definition said as it was made, a line each (that the
+    /// native compiler declined it, say), said again where it is loaded.
+    pub said: Vec<String>,
 }
 
 /// A file a `.fasl`'s file loads: as its load wrote it, and the stamp it had.
@@ -118,11 +162,26 @@ impl Header {
     /// The file: this header, then `image`.
     pub fn file(&self, image: &[u8]) -> Vec<u8> {
         let mut out = format!("{MARK}\nbuild {:016x}\narch {}\nconv {}\nkind {}\nsource {:016x}\nstamp {:016x}\n",
-            self.build, self.arch, if self.native { "native" } else { "cellular" }, if self.input { "input" } else { "module" }, self.source, self.stamp);
+            self.build, self.arch, if self.native { "native" } else { "cellular" }, self.kind.word(), self.source, self.stamp);
         for d in &self.deps {
             out.push_str(&format!("dep {} {:016x} {}\n", if d.input { "input" } else { "module" }, d.stamp, d.path));
         }
-        out.push_str(&format!("type {}\nimage {}\n", self.ty, image.len()));
+        if self.kind != Kind::Program {
+            out.push_str(&format!("type {}\n", self.ty));
+        }
+        for (n, t) in &self.aliases {
+            out.push_str(&format!("alias {n} {t}\n"));
+        }
+        for d in &self.defs {
+            out.push_str(&format!("def {} {} {}\nfull {}\ninit {}\n", d.form, d.name, d.ty, d.full, d.init));
+            for (n, t) in &d.uses {
+                out.push_str(&format!("use {n} {t}\n"));
+            }
+            for l in &d.said {
+                out.push_str(&format!("said {l}\n"));
+            }
+        }
+        out.push_str(&format!("image {}\n", image.len()));
         let mut bytes = out.into_bytes();
         bytes.extend_from_slice(image);
         bytes
@@ -141,7 +200,7 @@ impl Header {
             return Err(format!("it does not begin `{MARK}`"));
         }
         let hex = |s: &str| u64::from_str_radix(s, 16).map_err(|_| format!("`{s}` is not a digest"));
-        let mut h = Header { build: 0, arch: String::new(), native: false, input: false, source: 0, stamp: 0, deps: Vec::new(), ty: String::new() };
+        let mut h = Header { build: 0, arch: String::new(), native: false, kind: Kind::Module, source: 0, stamp: 0, deps: Vec::new(), ty: String::new(), defs: Vec::new(), aliases: Vec::new() };
         loop {
             let l = line()?;
             let (word, value) = l.split_once(' ').ok_or_else(|| format!("a header line `{l}`"))?;
@@ -149,7 +208,13 @@ impl Header {
                 "build" => h.build = hex(value)?,
                 "arch" => h.arch = value.to_string(),
                 "conv" => h.native = value == "native",
-                "kind" => h.input = value == "input",
+                "kind" => {
+                    h.kind = match value {
+                        "input" => Kind::Input,
+                        "program" => Kind::Program,
+                        _ => Kind::Module,
+                    }
+                }
                 "source" => h.source = hex(value)?,
                 "stamp" => h.stamp = hex(value)?,
                 "dep" => {
@@ -160,6 +225,25 @@ impl Header {
                     h.deps.push(Dep { path: path.to_string(), input: kind == "input", stamp: hex(st)? });
                 }
                 "type" => h.ty = value.to_string(),
+                "def" => {
+                    let mut parts = value.splitn(3, ' ');
+                    let (Some(form), Some(name), Some(ty)) = (parts.next(), parts.next(), parts.next()) else {
+                        return Err(format!("a header line `{l}`"));
+                    };
+                    let form = form.parse().map_err(|_| format!("a header line `{l}`"))?;
+                    h.defs.push(Def { form, name: name.to_string(), ty: ty.to_string(), full: String::new(), init: String::new(), uses: Vec::new(), said: Vec::new() });
+                }
+                "full" => h.defs.last_mut().ok_or_else(|| format!("a header line `{l}` before any `def`"))?.full = value.to_string(),
+                "said" => h.defs.last_mut().ok_or_else(|| format!("a header line `{l}` before any `def`"))?.said.push(value.to_string()),
+                "init" => h.defs.last_mut().ok_or_else(|| format!("a header line `{l}` before any `def`"))?.init = value.to_string(),
+                "alias" => {
+                    let (name, ty) = value.split_once(' ').ok_or_else(|| format!("a header line `{l}`"))?;
+                    h.aliases.push((name.to_string(), ty.to_string()));
+                }
+                "use" => {
+                    let (name, ty) = value.split_once(' ').ok_or_else(|| format!("a header line `{l}`"))?;
+                    h.defs.last_mut().ok_or_else(|| format!("a header line `{l}` before any `def`"))?.uses.push((name.to_string(), ty.to_string()));
+                }
                 "image" => {
                     let n: usize = value.parse().map_err(|_| format!("a header line `{l}`"))?;
                     if rest.len() != n {
@@ -339,30 +423,31 @@ pub fn image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapter: O
             alone.set_bloblet_slot(w, WORD_ENTRY, Value::fixnum(ROUTINE_DOCOL as i64));
         }
     }
-    let root = alone.cons(copy, placeholders);
+    // The closures that were native, now cellular: for the loader to make
+    // native again, and no other (one of `(conv cellular)` stays so).
+    let mut natives = Value::NULL;
+    for to in redirect.values() {
+        if let Some(c) = made.get(&to.raw()) {
+            natives = alone.cons(*c, natives);
+        }
+    }
+    let rest = alone.cons(placeholders, natives);
+    let root = alone.cons(copy, rest);
     alone.push_root(root);
     Ok(fixpt_heap::image::dump(&alone))
 }
 
-/// `value`, just copied in from a `.fasl` (so all of it new), with each
-/// cellular closure it reaches made the native closure `compile` makes of
-/// it, wherever it is reached but in words (whose literals stay as they
-/// are): what the program's convention makes of the procedures a file
-/// makes when it is loaded from its source. One `compile` declines stays.
-pub fn native_procedures(heap: &mut Heap, value: Value, compile: crate::session::NativeCompiler) -> Value {
-    let cellular = const { fixpt_heap::layout::kind("cellular-closure") };
+/// `value`, just copied in from a `.fasl` (so all of it new), with each of
+/// its closures that was native where it was made (`natives`, raw) made the
+/// native closure `compile` makes of it, wherever it is reached but in
+/// words (whose literals stay as they are): what the program's convention
+/// made of them. One `compile` declines stays cellular.
+pub fn native_procedures(heap: &mut Heap, value: Value, compile: crate::session::NativeCompiler, natives: &std::collections::HashSet<u64>) -> Value {
     let inside = |h: &Heap, v: Value| !(v.is_bloblet() && (h.is_cellular_word(v) || h.is_register_word(v) || h.code_part(v).is_some()));
-    let mut closures = Vec::new();
-    let _ = walk(heap, value, |h, v| {
-        if v.is_bloblet() && h.obj_type(v).is_none() && h.bloblet_kind(v) == cellular {
-            closures.push(v);
-        }
-        Ok(inside(h, v))
-    });
     let mut made: HashMap<u64, Value> = HashMap::new();
-    for c in closures {
-        if let Ok(n) = compile(heap, c) {
-            made.insert(c.raw(), n);
+    for &c in natives {
+        if let Ok(n) = compile(heap, Value::from_raw(c)) {
+            made.insert(c, n);
         }
     }
     if made.is_empty() {
@@ -401,9 +486,10 @@ pub fn native_procedures(heap: &mut Heap, value: Value, compile: crate::session:
     made.get(&value.raw()).copied().unwrap_or(value)
 }
 
-/// A `.fasl`'s image read: its heap, its value, and each object of it that
-/// stands for what it links to (`image`), with what.
-pub type Read = (Heap, Value, Vec<(Value, Link)>);
+/// A `.fasl`'s image read: its heap, its value, each object of it that
+/// stands for what it links to (`image`), with what, and the closures that
+/// were native.
+pub type Read = (Heap, Value, Vec<(Value, Link)>, Vec<Value>);
 
 /// A `.fasl`'s image `bytes` read ([`Read`]).
 pub fn read_image(bytes: &[u8]) -> Result<Read, String> {
@@ -412,7 +498,16 @@ pub fn read_image(bytes: &[u8]) -> Result<Read, String> {
     if !root.is_pair() {
         return Err("its image's root is not a pair".into());
     }
-    let (value, mut l) = (heap.car(root), heap.cdr(root));
+    let (value, rest) = (heap.car(root), heap.cdr(root));
+    if !rest.is_pair() {
+        return Err("its image's root is not a list of three".into());
+    }
+    let (mut l, mut n) = (heap.car(rest), heap.cdr(rest));
+    let mut natives = Vec::new();
+    while n.is_pair() {
+        natives.push(heap.car(n));
+        n = heap.cdr(n);
+    }
     let mut links = Vec::new();
     while l.is_pair() {
         let p = heap.car(l);
@@ -425,7 +520,7 @@ pub fn read_image(bytes: &[u8]) -> Result<Read, String> {
         links.push((p, link));
         l = heap.cdr(l);
     }
-    Ok((heap, value, links))
+    Ok((heap, value, links, natives))
 }
 
 /// `s` as an FX-26 string literal.
@@ -469,8 +564,13 @@ impl crate::check::Checker {
         if header.native != native {
             return stale(self, if header.native { "it is for the native convention" } else { "it is for the cellular convention" });
         }
-        if header.input != input {
-            return stale(self, if header.input { "it is a `load-input` file's" } else { "it is a `load-module` file's" });
+        let kind = if input { Kind::Input } else { Kind::Module };
+        // A program's file's, for `,load`: nothing to say of it here.
+        if header.kind == Kind::Program {
+            return Ok(None);
+        }
+        if header.kind != kind {
+            return stale(self, &format!("it is a {} file's", header.kind.word()));
         }
         if header.source != source {
             return stale(self, "its source changed");
@@ -580,5 +680,118 @@ impl crate::check::Checker {
             return Err("its type prints on more than one line".into());
         }
         Ok(shown)
+    }
+}
+
+impl crate::check::Checker {
+    /// Type `t` as a program's `.fasl` keeps it, to be read back where the
+    /// program is loaded: no name a program defines used for a type but a
+    /// module's, each abstract type of a module a global holds `(select
+    /// global t)`. Also how the types of the globals its code uses are
+    /// compared (`Fx26Session::program_fasl`).
+    pub fn fasl_program_type(&self, t: crate::ast::TyId) -> Result<String, String> {
+        use crate::ast::Ty;
+        let mut vars = HashMap::new();
+        for n in self.value_names() {
+            if let Some(g) = self.global_type(n)
+                && let Ty::Module { abs, .. } = self.arena.get(self.arena.resolve(g))
+            {
+                for (a, v) in abs {
+                    vars.entry(*v).or_insert_with(|| format!("(select {} {})", self.interner.name(n), self.interner.name(*a)));
+                }
+            }
+        }
+        *self.print_for_fasl.borrow_mut() = Some(vars);
+        let shown = self.show_ty(t);
+        *self.print_for_fasl.borrow_mut() = None;
+        if shown.contains('\n') {
+            return Err("its type prints on more than one line".into());
+        }
+        Ok(shown)
+    }
+
+    /// The globals `name`'s latest definition uses (`defs`): its code's.
+    pub fn uses_of(&self, name: fixpt_read::Sym) -> Vec<fixpt_read::Sym> {
+        self.defs.iter().rev().find(|d| d.names.contains(&name)).map(|d| d.uses.clone()).unwrap_or_default()
+    }
+
+    /// `name`, just defined from a program's `.fasl` as a declaration, made
+    /// what its definition `form` would have made of it for a redefinition
+    /// (`defs`): that form, which is checked again if a global it uses is
+    /// redefined, and the globals it uses.
+    pub fn fasl_defined(&mut self, name: fixpt_read::Sym, form: std::rc::Rc<fixpt_read::Syntax>, uses: Vec<fixpt_read::Sym>) {
+        if let Some(d) = self.defs.iter_mut().rev().find(|d| d.names.contains(&name)) {
+            d.form = form;
+            d.uses = uses;
+        }
+    }
+}
+
+impl crate::check::Checker {
+    /// Type `text`, read and printed back as a program's `.fasl` prints
+    /// one (`fasl_program_type`): what it reads as here, or none if it does
+    /// not read. A type kept must read back as itself.
+    pub fn fasl_reads_back(&mut self, text: &str) -> Option<String> {
+        let t = self.fasl_parse_type(text)?;
+        self.fasl_program_type(t).ok()
+    }
+
+    /// Type `text` read here, if it reads.
+    pub fn fasl_parse_type(&mut self, text: &str) -> Option<crate::ast::TyId> {
+        let forms = self.read_module_file(fixpt_read::FileId(0), text).ok()?;
+        let depth = self.dscope.len();
+        let t = self.parse_type(forms.first()?);
+        self.dscope.truncate(depth);
+        t.ok()
+    }
+}
+
+/// The expression a declaration of a value of type `ty` (printed) is made
+/// to have it: `(the T %fasl-value)`, under a `plambda` of each `poly`'s
+/// binders, which `the` takes apart.
+pub fn fasl_value_at(ty: &fixpt_read::Syntax, interner: &fixpt_read::Interner) -> String {
+    let written = fixpt_read::write_syntax(ty, interner);
+    match ty.as_proper_list() {
+        Some([head, binders, body]) if head.as_symbol().is_some_and(|h| interner.name(h) == "poly") => {
+            format!("(plambda {} {})", fixpt_read::write_syntax(binders, interner), fasl_value_at(body, interner))
+        }
+        _ => format!("(the {written} %fasl-value)"),
+    }
+}
+
+impl crate::check::Checker {
+    /// The type abbreviations a program's `.fasl` may name a type by, for
+    /// its file's `forms`: those the file defines once (declared ahead
+    /// where it is loaded, as here) and the standard ones.
+    pub fn fasl_allowed_aliases(&self, forms: &[fixpt_read::Syntax]) -> Vec<fixpt_read::Sym> {
+        let again: Vec<fixpt_read::Sym> = self.types_defined_again(forms).into_iter().map(|(n, _)| n).collect();
+        let mut out: Vec<fixpt_read::Sym> = self.type_abbreviations(forms).into_iter().map(|(n, _)| n).filter(|n| !again.contains(n)).collect();
+        for (n, d) in &self.dscope[..self.standard_dscope.min(self.dscope.len())] {
+            if matches!(d, crate::parse::DScope::Rec(_)) && !out.contains(n) {
+                out.push(*n);
+            }
+        }
+        out
+    }
+
+    /// While types are printed for a program's `.fasl`: `allowed` may name
+    /// them ([`fasl_allowed_aliases`](Self::fasl_allowed_aliases)).
+    pub fn fasl_aliases_begin(&self, allowed: Vec<fixpt_read::Sym>) {
+        *self.print_aliases.borrow_mut() = Some((allowed, Vec::new()));
+    }
+
+    /// Printing so done: the abbreviations that named a type.
+    pub fn fasl_aliases_end(&self) -> Vec<fixpt_read::Sym> {
+        self.print_aliases.borrow_mut().take().map(|(_, used)| used).unwrap_or_default()
+    }
+
+    /// What abbreviation `n` is here, written out with no name for any
+    /// part: what a `.fasl` that names a type by it keeps, to compare.
+    pub fn fasl_alias_expansion(&self, n: fixpt_read::Sym) -> Option<String> {
+        let t = self.type_named(n)?;
+        let kept = self.print_aliases.borrow_mut().take();
+        let shown = self.fasl_program_type(t).ok();
+        *self.print_aliases.borrow_mut() = kept;
+        shown
     }
 }

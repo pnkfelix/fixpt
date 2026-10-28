@@ -1,9 +1,10 @@
 //! `.fasl` files (`docs/research/fasl.md`; the user's, 2026-10-28): a
-//! module file compiled by `fixpt compile-file`, whose loads read the
-//! `.fasl` beside it while it is fresh. Each program of
-//! `tests/programs/modules` gives the same with its module files compiled
-//! as without, a stale `.fasl` is said and its source loaded, and a
-//! program's `(compile-file "path")` makes one.
+//! file compiled by `fixpt compile-file`, whose loads (or, a program's
+//! file's, `fixpt eval` and `,load`) read the `.fasl` beside it while it is
+//! fresh. Each program of `tests/programs/modules` gives the same with its
+//! module files compiled as without, and programs of other directories the
+//! same compiled as programs; a stale `.fasl` is said and its source
+//! loaded, and a program's `(compile-file "path")` makes one.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -40,7 +41,12 @@ fn fx_files(dir: &Path) -> Vec<PathBuf> {
 
 /// `tests/programs/modules` and `module-files` copied into `dir`.
 fn copy_suite(dir: &Path) {
-    for sub in ["modules", "module-files"] {
+    copy_dirs(dir, &["modules", "module-files"]);
+}
+
+/// The directories `subs` of `tests/programs` copied into `dir`.
+fn copy_dirs(dir: &Path, subs: &[&str]) {
+    for sub in subs {
         std::fs::create_dir_all(dir.join(sub)).expect("made");
         for f in fx_files(&Path::new(PROGRAMS).join(sub)) {
             std::fs::copy(&f, dir.join(sub).join(f.file_name().expect("a name"))).expect("copied");
@@ -92,6 +98,67 @@ fn every_module_program_gives_the_same_from_fasls() {
     }
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
     assert!(read >= 45, "only {read} loads read a `.fasl`");
+}
+
+/// Program files of `tests/programs`, each compiled as a program's
+/// (`compile-file --program`): each that compiles gives the same with its
+/// `.fasl` as without, and most read it.
+#[test]
+fn programs_give_the_same_from_fasls() {
+    let dir = scratch("programs");
+    let subs = ["run", "control", "higher-kinds", "recursive", "bloblet", "native", "lemmas", "regions"];
+    copy_dirs(&dir, &[&subs[..], &["module-files"]].concat());
+    let programs: Vec<PathBuf> = subs.iter().flat_map(|s| fx_files(&dir.join(s)).into_iter().map(move |f| Path::new(s).join(f.file_name().expect("a name")))).collect();
+    let threads = std::thread::available_parallelism().map_or(4, |n| n.get()).min(8);
+    let chunks: Vec<Vec<PathBuf>> = (0..threads).map(|i| programs.iter().skip(i).step_by(threads).cloned().collect()).collect();
+    let runs: Vec<_> = chunks
+        .into_iter()
+        .map(|chunk| {
+            let dir = dir.clone();
+            std::thread::spawn(move || {
+                let (mut wrong, mut read) = (Vec::new(), 0);
+                for p in chunk {
+                    let name = p.display().to_string();
+                    if !fixpt(&dir, &["compile-file", "--program", &name], &[]).0 {
+                        continue;
+                    }
+                    let (_, out, err) = fixpt(&dir, &["eval", &name], &[("FIXPT_NO_FASL", "1")]);
+                    let (_, fout, ferr) = fixpt(&dir, &["eval", &name], &[("FIXPT_FASL_SAY", "1")]);
+                    read += ferr.lines().filter(|l| l.contains("is read from")).count();
+                    let ferr: String = ferr.lines().filter(|l| !l.contains("is read from")).map(|l| format!("{l}\n")).collect();
+                    if (out.as_str(), err.as_str()) != (fout.as_str(), ferr.as_str()) {
+                        wrong.push(format!("{name}:\n  from sources: {out}{err}\n  from fasls:   {fout}{ferr}"));
+                    }
+                }
+                (wrong, read)
+            })
+        })
+        .collect();
+    let (mut wrong, mut read) = (Vec::new(), 0);
+    for r in runs {
+        let (w, n) = r.join().expect("ran");
+        wrong.extend(w);
+        read += n;
+    }
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+    assert!(read >= 150, "only {read} programs read their `.fasl`");
+}
+
+#[test]
+fn a_program_fasl_is_stale_when_what_it_uses_changed() {
+    let dir = scratch("program");
+    std::fs::write(dir.join("base.fx"), "(define scale (subr pure (int) int) (lambda (n) (* n 10)))\n").expect("written");
+    std::fs::write(dir.join("prog.fx"), "(define* twice (subr pure (int) int) (lambda (n) (scale (scale n))))\n(write-out \"ran\\n\")\n(twice 3)\n").expect("written");
+    std::fs::write(dir.join("other.fx"), "(define scale (subr pure (int) bool) (lambda (n) #t))\n").expect("written");
+    // Compiled after `base.fx`, by a program that runs nothing of it.
+    std::fs::write(dir.join("make.fx"), "(compile-file \"prog.fx\" program)\n").expect("written");
+    let (ok, out, err) = fixpt(&dir, &["run", "base.fx", "make.fx"], &[]);
+    assert!(ok && out.contains("; compiled `prog.fx` to `") && !out.contains("ran"), "{out}{err}");
+    let (ok, out, err) = fixpt(&dir, &["run", "base.fx", "prog.fx"], &[("FIXPT_FASL_SAY", "1")]);
+    assert!(ok && out == "ran\n" && err.contains("`prog.fx` is read from `prog.fasl`"), "{out}{err}");
+    // `scale` of another type: the code of `twice` is not right for it.
+    let (_, out, err) = fixpt(&dir, &["run", "other.fx", "prog.fx"], &[]);
+    assert!(err.contains("`prog.fasl` is stale (`twice` uses `scale`, which is not here at the type it was)"), "{out}{err}");
 }
 
 /// A small library: `a.fx`, and `b.fx`, which loads it, and a program of
