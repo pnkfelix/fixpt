@@ -3382,3 +3382,39 @@ Module files have them (DONE §156; `docs/research/fasl.md`,
   (which keep no compiled code) at least checking from them.
 - **Size**: the 800-definition module's `.fasl` is 840 KB, most of it
   words and their register twins; a twin could be made again at load.
+
+What is left of a `.fasl`'s load cost (the user's, 2026-10-28): Heist's
+start-up through `eldoc.fx` is 1.52 s from `.fasl`s, 4.50 s from source,
+most of it the checker written in FX-26 checking the program's calls of
+the makers (`docs/research/fasl.md`). In order:
+1. **Recursive types printed canonically in both checkers**: a type's
+   cycle minimized when it is printed and numbered from its root, so that
+   what is printed does not depend on how the type was written or built
+   (the user's: a type is a semantic object, printed as one). What makes
+   item 2 safe for the tests comparing the two checkers' prints; outputs
+   showing a type unrolled (`recursive/unfold.fx`'s `s2`) change.
+2. **Recursive types interned by minimization** in the checker written in
+   FX-26: when a `mu` or recursive binding's cycle closes, the cycle
+   minimized (partition refinement), given a canonical form, and looked up
+   in a table of cyclic types, so that equal recursive types are one node.
+   Now each `mu` read is a node of its own (a link, not internable), and
+   comparing two equal ones is coinductive (`k-strail-in?`).
+3. **Interning in the Rust checker**, which has none, only if its costs
+   show again: its exceptions those of the FX-26 checker's (`->*` marks,
+   standard bindings, recursive bindings).
+4. **The factoring's test of closedness scoped**: a subterm naming any name
+   bound anywhere in the interface (a `moduleof`'s description names) is
+   not factored, which leaves 38 KB in `base.fx`'s interface with only 7
+   abbreviations.
+5. **Factoring for plain module files' and programs' `.fasl`s**, not only
+   makers'; a program's abbreviations top-level `%fasl:` types, which both
+   printers must then skip.
+6. **Substituting a call's arguments into a dependent maker's type**
+   (`k-subst-memo`, about 10%): what is left after 2 and 4; whether the
+   memo can last across calls of the same maker.
+7. **The interning tables** (`k-ty-new`, `bucket-find`, `rehash-*`, some
+   15-20%): their hashing and growth, and whether the budget and reset
+   churn them.
+8. **Collections** (about 10%): what these checks allocate.
+9. **Reading the images** (about 3%): a mapping of the file, not a read
+   and a copy, as for the front end's cache.
