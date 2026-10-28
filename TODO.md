@@ -3434,8 +3434,11 @@ it chooses, at a type and effect written at the form; refusals as values;
 sessions for definitions that last. Designed in `docs/research/eval.md`,
 which answers §105 with (b)'s meaning on (a)'s machinery, and replaces
 `PLAN.md`'s item 5 (`any`): the caller names the effect bound. Decided with
-the user: the name `stage`, as `expand` (may `spin`: macros) then `install`
-(checking assumed to end); a `stage` effect atom, to try how viral it is;
+the user: the name `stage`, as `expand` (may `spin`: macros), `certify`
+(every analysis that accepts; checked against a module's type, giving a
+transmissible certificate) and `install` (compiling and linking against a
+module's value); checking assumed to end; a `stage` effect atom on
+`install` alone, to try how viral it is;
 checking interruptible and cancellable, so the checker written in FX-26 is
 the one to run; macros by `syntax-rules` with syntax classes. Kayak's
 boundary class is deferred until kayak builds it.
