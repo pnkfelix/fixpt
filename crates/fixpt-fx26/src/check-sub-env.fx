@@ -161,40 +161,54 @@
                       (else y (car ds))))
                  (rest (k-benv-eargs env (cdr ds))))
             (the k-descs (cons d rest)))))))
-;; How many entries of the trails of the questions open name each pair of
-;; nodes (by `k-strail-key`, which two pairs may share): a pair named by
-;; none is not assumed, known at once, where looking along the trail grew
-;; with every pair a question compared (a module against its signature).
-(define k-strail-count (ref (table int int @t) @t)
+;; The entries of the trails of the questions open, by the pair of nodes each
+;; names (`k-strail-key`, which two pairs may share), newest first: each
+;; with the depth of its question (`k-question`), its pair and its
+;; environments. Questions nest, and each drops what it pushed, newest
+;; first, before the one around it goes on, so the newest entry of a key is
+;; the next one dropped; and whether a pair is assumed in the question
+;; asking is a look at its key's own entries, those of its depth, not along
+;; its trail, which grew with every pair the question compared (a module
+;; against its signature).
+(define-type k-strail-entry (productof (1 int) (2 int) (3 int) (4 k-benv) (5 k-benv)))
+(define k-strail-index (ref (table int (listof k-strail-entry @t) @t) @t)
   (new (make-table (lambda ((n int)) n) (lambda ((m int) (n int)) (= m n)))))
 (define k-strail-key (->* (int int) int) (lambda (a b) (+ (* a 65599) b)))
-(define k-strail-bump (->* (int int int) unit)
-  (lambda (a b d)
-    (let ((k (k-strail-key a b)))
-      (table-set! (get k-strail-count) k (+ d (table-ref (get k-strail-count) k 0))))))
+;; How deep the questions open are: the one asking is the deepest.
+(define k-question (ref int @t) (new 0))
+(define k-question-begin! (->* () unit) (lambda () (set k-question (+ (get k-question) 1))))
+(define k-question-end! (->* () unit) (lambda () (set k-question (- (get k-question) 1))))
 ;; `a ≤ b` assumed, in `ea` and `eb`.
 (define k-strail-push (->* (k-strail int int k-benv k-benv) unit)
   (lambda (trail a b ea eb)
-    (begin (k-strail-bump a b 1)
-           (set trail (cons (product (1 a) (2 b) (3 ea) (4 eb)) (get trail))))))
-;; The entries of `ps` newer than `st` no longer counted.
+    (let ((k (k-strail-key a b)))
+      (begin
+        (table-set! (get k-strail-index) k
+                    (cons (product (1 (get k-question)) (2 a) (3 b) (4 ea) (5 eb))
+                          (table-ref (get k-strail-index) k nil)))
+        (set trail (cons (product (1 a) (2 b) (3 ea) (4 eb)) (get trail)))))))
+;; The entries of `ps` newer than `st` dropped from the index: each the
+;; newest of its key's.
 (define k-strail-drop (->* (k-assumed k-assumed) unit)
   (lambda (ps st)
     (if (or (null? ps) (eq? ps st))
         #u
-        (begin (k-strail-bump (extract (car ps) 1) (extract (car ps) 2) -1)
-               (k-strail-drop (cdr ps) st)))))
-(define k-strail-in? (->* (k-assumed int int k-benv k-benv) bool)
-  (lambda (ps a b ea eb)
-    (and (not (null? ps))
-         (or (let ((p (car ps)))
-               (and (= (extract p 1) a) (= (extract p 2) b)
-                    (k-benv=? (extract p 3) ea) (k-benv=? (extract p 4) eb)))
-             (k-strail-in? (cdr ps) a b ea eb)))))
+        (let ((k (k-strail-key (extract (car ps) 1) (extract (car ps) 2))))
+          (begin (table-set! (get k-strail-index) k (cdr (table-ref (get k-strail-index) k nil)))
+                 (k-strail-drop (cdr ps) st))))))
+;; Whether `a ≤ b` is assumed in `ea` and `eb` by the question asking, whose
+;; trail is `ps`: among its key's entries, those of its depth, the first.
 (define k-strail-has? (->* (k-assumed int int k-benv k-benv) bool)
   (lambda (ps a b ea eb)
-    (and (> (table-ref (get k-strail-count) (k-strail-key a b) 0) 0)
-         (k-strail-in? ps a b ea eb))))
+    (letrec ((in? (->* ((listof k-strail-entry @t)) bool)
+                   (lambda (es)
+                     (and (pair? es)
+                          (= (extract (car es) 1) (get k-question))
+                          (or (let ((e (car es)))
+                                (and (= (extract e 2) a) (= (extract e 3) b)
+                                     (k-benv=? (extract e 4) ea) (k-benv=? (extract e 5) eb)))
+                              (in? (cdr es)))))))
+      (in? (table-ref (get k-strail-index) (k-strail-key a b) nil)))))
 ;; Put a subtype question's memory back as it was: trail `st`, labels `sl`.
 (define k-restore (->* (k-strail k-labels k-assumed k-label-list) unit)
   (lambda (trail labels st sl)

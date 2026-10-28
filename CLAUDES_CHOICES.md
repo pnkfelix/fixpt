@@ -2693,3 +2693,25 @@ of `TODO.md` §141, working on my own.
   otherwise; every consumer must then know the form. Worth it if the
   checking half stays the larger.
 
+### Subtyping's trail indexed by pair (2026-10-28)
+
+- **What it is**: FX-87's trail, the pairs `a ≤ b` a subtype question has
+  assumed, each with its two binder environments; a pair met again under
+  the same environments holds (coinduction over recursive types). Every
+  pair compared is pushed and kept until the question ends, but those of a
+  failed union arm or lemma, so a module against its signature leaves a
+  long trail. What is matched is identity, the two nodes and equal
+  environments (`k-benv=?`), not a subtype comparison.
+- **What it cost**: a count by pair said at once that a pair was not
+  assumed, but one that was meant walking the whole trail from its newest
+  (`k-strail-in?`): 2.9% of Heist's start-up from `.fasl`s, the largest
+  single function of the FX-26 checker's 136 ms there.
+- **Chosen**: the count made a list of each pair's entries, newest first,
+  each with its question's depth (`k-question`, one more for each question
+  `k-subtype` opens). Questions nest and drop what they pushed, newest
+  first, before the one around them goes on, so the newest entry of a key
+  is the next dropped; a look reads only its key's entries of the asking
+  question's depth. The same answers; the trail's length no longer counts.
+- Result: start-up 0.45 s to 0.43-0.44 s; `fixpt check` of the makers,
+  the FX-26 checker 1.07 s to 1.05 s; the suite passes (862).
+

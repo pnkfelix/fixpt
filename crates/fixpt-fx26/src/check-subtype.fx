@@ -185,13 +185,14 @@
       (or (null? hs)
           (and (k-sub (car (car hs)) (cdr (car hs)) ea eb trail labels)
                (k-sub-hyps (cdr hs) ea eb trail labels)))))
-  ;; `a ≤ b`, a question of its own.
-  ;; Its trail's entries no longer counted once it is answered.
+  ;; `a ≤ b`, a question of its own, one deeper than any open
+  ;; (`k-question`). Its trail's entries dropped once it is answered.
   (k-subtype (->* (int int) bool)
     (lambda (a b)
       (let* ((trail (the k-strail (new nil)))
+             (begun (k-question-begin!))
              (r (k-sub a b (the k-benv nil) (the k-benv nil) trail (the k-labels (new nil)))))
-        (begin (k-strail-drop (get trail) nil) r))))
+        (begin (k-strail-drop (get trail) nil) (k-question-end!) r))))
   (k-same-ty? (->* (int int) bool)
     (lambda (x y) (and (k-subtype x y) (k-subtype y x))))
   ;; Each lemma of `ls` that fits `a` and `b`: its hypotheses, instantiated.
