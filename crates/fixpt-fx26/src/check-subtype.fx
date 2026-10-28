@@ -543,7 +543,8 @@
                                        ((1) (k-sub y x eb ea trail labels))
                                        (else (k-inv x y ea eb trail labels))))
                        (else z #f)))
-                   (dr (r) (tagcase (car ys) (dr (q) (k-benv-region=? r q ea eb)) (else z #f)))
+                   ;; Frozen data at a region that outlives the one expected.
+                   (dr (r) (tagcase (car ys) (dr (q) (k-benv-frozen-le? r q ea eb)) (else z #f)))
                    (de (d)
                      (tagcase (car ys)
                        (de (e)

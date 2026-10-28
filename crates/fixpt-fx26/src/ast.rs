@@ -319,7 +319,8 @@ impl Effect {
     }
     /// Subeffecting: every atom of `self` is in `other`, or, if it reads or
     /// writes one global, `other` does so to `@globals`; an I-cell's fill,
-    /// `(init r)`, is within `(write r)`.
+    /// `(init r)`, is within `(write r)`; making data at `(acyclic p)` or
+    /// `(const p)` is within `(alloc p)`.
     pub fn within(&self, other: &Effect) -> bool {
         self.0.iter().all(|a| {
             other.0.contains(a)
@@ -327,6 +328,9 @@ impl Effect {
                     Atom::Read(Region::Global(_)) => other.0.contains(&Atom::Read(Region::Globals)),
                     Atom::Write(Region::Global(_)) => other.0.contains(&Atom::Write(Region::Globals)),
                     Atom::Init(r) => other.0.contains(&Atom::Write(*r)),
+                    // Data frozen into a place as it is made is the
+                    // place's allocation (Kayak's, 2026-10-28).
+                    Atom::Alloc(Region::Frozen(Some(p), _)) => other.0.contains(&Atom::Alloc(Region::Var(*p))),
                     _ => false,
                 }
         })

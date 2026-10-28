@@ -89,13 +89,20 @@
 (define k-benv=? (->* (k-benv k-benv) bool)
   (lambda (x y) (and (= (k-length x) (k-length y)) (k-benv-within? x y))))
 ;; `a ≤ b` for frozen data: the same, or finite data seen as possibly
-;; cyclic, in one place.
+;; cyclic; and covariant in the order of lifetimes (Kayak's, 2026-10-28),
+;; at a place that outlives the one expected, the heap every place, as
+;; nothing writes frozen data (`Checker::frozen_le`).
 (define k-frozen-le? (->* (k-region k-region) bool)
   (lambda (a b)
     (or (k-region=? a b)
         (tagcase a
-          (r-frozen (p f) (and f (tagcase b (r-frozen (q g) (and (= p q) (not g))) (else y #f))))
+          (r-frozen (p f)
+            (tagcase b (r-frozen (q g) (and (or f (not g)) (k-place-outlives? p q))) (else y #f)))
           (else y #f)))))
+;; Whether place `p` outlives place `q` (-1 the heap): the same, the heap,
+;; or one bound around `q`'s binder, which `q` won't outlive.
+(define k-place-outlives? (->* (int int) bool)
+  (lambda (p q) (or (= p -1) (= p q) (and (>= q 0) (k-has-id? (k-outer-of q) p)))))
 (define k-benv-region (->* (k-benv k-region) k-region)
   (lambda (env r)
     (if (null? env)

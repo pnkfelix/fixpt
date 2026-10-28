@@ -190,3 +190,23 @@ fn distinct_region_binders() {
         assert!(err.contains(want), "{err}");
     }
 }
+
+/// Frozen data is covariant in the order of lifetimes (Kayak's,
+/// 2026-10-28; `Checker::frozen_le`): accepted where it lives longer than
+/// expected, the heap than a place, an outer place than an inner one;
+/// refused where it is writable, leaves its place, or lives shorter.
+#[test]
+fn frozen_data_is_covariant_in_lifetimes() {
+    assert!(check(include_str!("programs/regions/frozen-covariant.fx")).is_ok());
+    assert!(check(include_str!("programs/terminate/frozen-place-walk.fx")).is_ok());
+    for (program, says) in [
+        (include_str!("programs/regions/frozen-covariant-writable.fx"), "a (listof int r) is expected here, and this is a (listof int acyclic)"),
+        (include_str!("programs/regions/frozen-covariant-escapes.fx"), "would outlive its region"),
+        (include_str!("programs/regions/frozen-covariant-write.fx"), "this writes frozen data"),
+        (include_str!("programs/regions/frozen-covariant-backwards.fx"), "a (listof int acyclic) is expected here, and this is a (listof int (acyclic p))"),
+        (include_str!("programs/regions/frozen-covariant-inner.fx"), "a (listof int (acyclic p)) is expected here, and this is a (listof int (acyclic q))"),
+    ] {
+        let e = check(program).expect_err("refused");
+        assert!(e.contains(says), "{says}: {e}");
+    }
+}

@@ -3541,6 +3541,30 @@ impl Checker {
         false
     }
 
+    /// `a ≤ b` for frozen data (`Region::frozen_le`), and covariant in the
+    /// order of lifetimes (Kayak's, 2026-10-28): `(const a)` where `(const
+    /// b)` is expected, `(acyclic a)` where `(acyclic b)` or `(const b)` is,
+    /// if `a` outlives `b`, the heap every place. Sound as nothing writes
+    /// frozen data: a pointer into data that lives longer can never be made
+    /// to point into data that does not (Rust's `&'static T` as `&'a T`).
+    pub(crate) fn frozen_le(&self, a: Region, b: Region) -> bool {
+        Region::frozen_le(a, b)
+            || match (a, b) {
+                (Region::Frozen(p, fa), Region::Frozen(q, fb)) => (fa || !fb) && self.outlives(p, q),
+                _ => false,
+            }
+    }
+
+    /// Whether place `p` outlives place `q` (`None` the heap): the same, the
+    /// heap, or one bound around `q`'s binder, which `q` won't outlive.
+    fn outlives(&self, p: Option<DVar>, q: Option<DVar>) -> bool {
+        match (p, q) {
+            (None, _) => true,
+            (Some(_), None) => false,
+            (Some(p), Some(q)) => p == q || self.arena.outer(q).contains(&p),
+        }
+    }
+
     /// `t`, `string`, as the `(stringof const)` it is, where `other` is a
     /// `stringof`: so that the two are matched region by region.
     pub(crate) fn string_as_named(&self, t: Ty, other: &Ty) -> Ty {
@@ -3674,7 +3698,7 @@ impl Checker {
             // Frozen pairs cannot be written, so, as a frozen bloblet's
             // fields, their contents are covariant.
             // A pair that may be `nil` fits only a pair that may be too.
-            (Ty::Pair(x1, x2, r, n), Ty::Pair(y1, y2, s, m)) if r.is_frozen() && Region::frozen_le(ra(r), rb(s)) => {
+            (Ty::Pair(x1, x2, r, n), Ty::Pair(y1, y2, s, m)) if r.is_frozen() && self.frozen_le(ra(r), rb(s)) => {
                 (!n || m) && self.sub(x1, y1, env, st) && self.sub(x2, y2, env, st)
             }
             (Ty::Pair(x1, x2, r, n), Ty::Pair(y1, y2, s, m)) => {
@@ -3717,7 +3741,7 @@ impl Checker {
                 Ty::Bloblet { fields: fa, frozen: za, region: r },
                 Ty::Bloblet { fields: fb, frozen: zb, region: s },
             ) => {
-                (ra(r) == rb(s) || (za && Region::frozen_le(ra(r), rb(s))))
+                (ra(r) == rb(s) || (za && self.frozen_le(ra(r), rb(s))))
                     && za == zb
                     && fa.len() >= fb.len()
                     && fa.iter().zip(&fb).all(|(x, y)| self.sub(*x, *y, env, st) && (za || self.sub(*y, *x, &flip, st)))
@@ -3736,7 +3760,7 @@ impl Checker {
             // A `nlist` is frozen, so covariant in its elements; its size must
             // be the same, or forgotten as `finite`.
             (Ty::NList { elem: x, size: m, region: r }, Ty::NList { elem: y, size: n, region: s }) => {
-                Region::frozen_le(ra(r), rb(s)) && self.size_le(&m, &n) && self.sub(x, y, env, st)
+                self.frozen_le(ra(r), rb(s)) && self.size_le(&m, &n) && self.sub(x, y, env, st)
             }
             // Any `nlist` is a finite list; a finite list is a `nlist` of some
             // length.
@@ -3752,10 +3776,10 @@ impl Checker {
                     _ if size.as_lit() == Some(0) => None,
                     _ => Some(self.arena.ty(Ty::NList { elem: x, size: self.tail_size(&size), region: r })),
                 };
-                Region::frozen_le(ra(r), rb(s)) && self.sub(x, y, env, st) && rest.is_none_or(|rest| self.sub(rest, tail, env, st))
+                self.frozen_le(ra(r), rb(s)) && self.sub(x, y, env, st) && rest.is_none_or(|rest| self.sub(rest, tail, env, st))
             }
             (Ty::Pair(x, tail, r, _), Ty::NList { elem: y, size: Size::Finite, region: s }) if matches!(r, Region::Frozen(_, true)) => {
-                Region::frozen_le(ra(r), rb(s)) && self.sub(x, y, env, st) && self.sub(tail, b, env, st)
+                self.frozen_le(ra(r), rb(s)) && self.sub(x, y, env, st) && self.sub(tail, b, env, st)
             }
             // A generative type is related only to itself, argument by
             // argument, as its variance says.
@@ -3777,7 +3801,9 @@ impl Checker {
                         Variance::Contra => self.sub(*y, *x, &flip, st),
                         Variance::Inv => self.sub(*x, *y, env, st) && self.sub(*y, *x, &flip, st),
                     },
-                    (D::Region(r), D::Region(s)) => ra(*r) == rb(*s),
+                    // Frozen data is never written: at a region that
+                    // outlives the one expected, as a pair's (Kayak's).
+                    (D::Region(r), D::Region(s)) => ra(*r) == rb(*s) || (ra(*r).is_frozen() && self.frozen_le(ra(*r), rb(*s))),
                     (D::Size(m), D::Size(n)) => self.size_eq(m, n),
                     (D::Conv(Conv::Var(x)), D::Conv(Conv::Var(y))) => env.var(&env.a, *x) == env.var(&env.b, *y),
                     (D::Conv(c), D::Conv(d)) => c == d,

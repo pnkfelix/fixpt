@@ -244,7 +244,21 @@
           (a-write (r) (tagcase r (r-global (g) (k-contains? e (a-write (r-globals)))) (else y #f)))
           ;; An I-cell's fill is within writing its region.
           (a-init (r) (k-contains? e (a-write r)))
+          ;; Data frozen into a place as it is made, the place's allocation.
+          (a-alloc (r)
+            (tagcase r
+              (r-frozen (p f) (and (>= p 0) (k-contains? e (a-alloc (r-var p)))))
+              (else y #f)))
           (else y #f)))))
+;; Whether `e` makes data frozen into a place: what only `k-covered?` sees
+;; within the place's allocation.
+(define k-frozen-alloc? (->* (k-eff) bool)
+  (lambda (e)
+    (and (not (null? e))
+         (or (tagcase (car e)
+               (a-alloc (r) (tagcase r (r-frozen (p f) (>= p 0)) (else y #f)))
+               (else y #f))
+             (k-frozen-alloc? (cdr e))))))
 (define k-within-each? (->* (k-eff k-eff) bool)
   (lambda (x y) (or (null? x) (and (k-covered? y (car x)) (k-within-each? (cdr x) y)))))
 ;; `k-within?` of sorted effects, `rg` and `wg` whether `y` reads and writes
@@ -267,7 +281,7 @@
 ;; as effects made here are, by one walk of the two; else atom by atom.
 (define k-within? (->* (k-eff k-eff) bool)
   (lambda (x y)
-    (if (and (k-sorted? x) (k-sorted? y) (not (k-has-init? x)))
+    (if (and (k-sorted? x) (k-sorted? y) (not (k-has-init? x)) (not (k-frozen-alloc? x)))
         (let ((rg (k-contains? y (a-read (r-globals)))) (wg (k-contains? y (a-write (r-globals)))))
           (k-within-sorted? x y rg wg))
         (k-within-each? x y))))

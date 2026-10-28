@@ -3823,3 +3823,21 @@ compared them structurally, deep into large records.
 - **`cargo nextest`** (installed 2026-10-28): the suite in 100 s, its
   binaries' tests in one pool; `.config/nextest.toml` runs the test that
   times itself by the wall clock alone.
+
+## 150. Frozen regions covariant in the order of lifetimes (Kayak's, 2026-10-28)
+
+- **`(const a)` as `(const b)`, `(acyclic a)` as `(acyclic b)` or `(const
+  b)`**, where `a` outlives `b` (the heap every place, an outer place an
+  inner one), through every rule that compared frozen regions (pairs,
+  lists, `nlist`, frozen bloblets) and a generative type's region
+  arguments; in both checkers (`Checker::frozen_le`, `outlives`;
+  `k-frozen-le?`, `k-place-outlives?`). Writable regions stay invariant.
+- **Making data at `(acyclic p)` or `(const p)` is within `(alloc p)`**
+  (`Effect::within`, `k-covered?`), so a procedure over a place conses
+  straight into its frozen region onto the heap's list.
+- **Kayak's third form**, a `letfreeze (r p)` around `rcons`, stays refused:
+  inside it the place's region is writable until it ends; allocating at
+  `(acyclic p)` directly is the form that shares.
+- **Tests**: `regions/frozen-covariant.fx` and five refusals,
+  `terminate/frozen-place-walk.fx` (`regions.rs`,
+  `frozen_data_is_covariant_in_lifetimes`).
