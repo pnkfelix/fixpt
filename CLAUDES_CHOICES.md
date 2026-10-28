@@ -2603,3 +2603,15 @@ of `TODO.md` §141, working on my own.
   which differs in the session that loads it: such calls take the guard's
   slower way.
 
+### Cellular `.fasl`s kept too (the same day)
+
+- The user's: keep native code in `.fasl`s, and keep cellular code as an
+  option. `compile-file --cellular` (and the REPL's) writes the earlier
+  image, words alone (`cellular_image`); the header says `code cellular`;
+  a loader in the native convention compiles its closures at load
+  (`native_procedures`), as before.
+- Measured, Heist through `eldoc.fx`: cellular 3.2 MB, 0.58 s; native
+  6.0 MB, 0.52 s. s7st's benchmarks, its interpreter from `.fasl`s: the
+  same but `vec5e5`, 93 ms native, 77 ms cellular, 71 ms from source, and
+  `map2e5`, 255 ms from either, 226 ms from source (not yet looked at).
+

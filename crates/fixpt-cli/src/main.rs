@@ -70,10 +70,12 @@ usage:
   fixpt compile --full-literals INPUT
                                  the same, every literal in full, in a form
                                  read back exactly (docs/fx26.md)
-  fixpt compile-file [--program] FILE...
+  fixpt compile-file [--program] [--cellular] FILE...
                                  each FX-26 file's `.fasl` made beside it, which a
                                  load of the file (a program's: `fixpt run`,
-                                 `,load`) reads while it is fresh
+                                 `,load`) reads while it is fresh; its native
+                                 code kept, or with --cellular its cellular
+                                 words alone, compiled natively at load
   fixpt machines                 the machines FX-26 runs on, and which run here
   fixpt bench [FILE...]          time FX-26 programs on each machine (`fixpt bench --help`)
   fixpt repl                     the REPL of the language (`fixpt fx26` too)
@@ -774,7 +776,7 @@ pub(crate) fn apply_gc_policy(session: &mut Session) {
 }
 
 /// The options a command takes after it, left for it to read.
-const COMMAND_OPTIONS: [&str; 8] = ["--raw", "--full-literals", "--program", "--eval", "--check", "--compile", "--help", "-h"];
+const COMMAND_OPTIONS: [&str; 9] = ["--raw", "--full-literals", "--program", "--cellular", "--eval", "--check", "--compile", "--help", "-h"];
 
 /// The options, read from anywhere before a `--`; the rest of the words,
 /// in order, with the `--` and all after it. Or why not: an unknown option.

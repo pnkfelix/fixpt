@@ -266,3 +266,27 @@ fn a_built_in_module_is_kept_in_the_cache() {
     assert!(ok, "{out}{err}");
     assert!(err.contains("`fx26:table.fx` is read from") && err.contains("table.fasl"), "{err}");
 }
+
+#[test]
+fn a_fasl_keeps_native_code_or_with_cellular_its_words_alone() {
+    // Either way the module runs as from its source: its native code kept,
+    // or (`--cellular`) its cellular words, compiled natively at load.
+    let dir = scratch("cellular");
+    std::fs::write(
+        dir.join("m.fx"),
+        "(define twice (subr pure ((subr pure (int) int) int) int) (lambda (f x) (f (f x))))\n\
+         (define add3 (subr pure (int) int) (lambda (x) (+ x 3)))\n\
+         (define go (subr pure (int) int) (lambda (n) (twice add3 n)))\n",
+    )
+    .expect("written");
+    std::fs::write(dir.join("p.fx"), "(define m (load-module \"m.fx\"))\n(with m (go 10))\n").expect("written");
+    for (flags, code) in [(&[][..], "code native"), (&["--cellular"][..], "code cellular")] {
+        let args: Vec<&str> = ["compile-file"].iter().chain(flags).chain(&["m.fx"]).copied().collect();
+        let (ok, out, err) = fixpt(&dir, &args, &[]);
+        assert!(ok, "{out}{err}");
+        let fasl = String::from_utf8_lossy(&std::fs::read(dir.join("m.fasl")).expect("read")).to_string();
+        assert!(fasl.lines().any(|l| l == code), "{code}");
+        let (ok, out, err) = fixpt(&dir, &["eval", "p.fx"], &[("FIXPT_FASL_SAY", "1")]);
+        assert!(ok && err.contains("`m.fx` is read from `m.fasl`") && out.contains("16 : int"), "{out}{err}");
+    }
+}

@@ -361,18 +361,27 @@ pub fn repl(backend: Backend) -> i32 {
         if let Some(arg) = text.trim().strip_prefix(",compile-file")
             && (arg.is_empty() || arg.starts_with(char::is_whitespace))
         {
-            let (program, path) = match arg.trim().strip_prefix("--program") {
-                Some(p) => (true, p.trim().trim_matches('"')),
-                None => (false, arg.trim().trim_matches('"')),
-            };
+            let (mut program, mut cellular, mut path) = (false, false, arg.trim());
+            loop {
+                if let Some(p) = path.strip_prefix("--program") {
+                    (program, path) = (true, p.trim());
+                } else if let Some(p) = path.strip_prefix("--cellular") {
+                    (cellular, path) = (true, p.trim());
+                } else {
+                    break;
+                }
+            }
+            let path = path.trim_matches('"');
             if path.is_empty() {
-                println!("; `,compile-file [--program] FILE`: make the file's `.fasl` beside it, which a load of it (or, a program's, `,load`) reads while it is fresh");
+                println!("; `,compile-file [--program] [--cellular] FILE`: make the file's `.fasl` beside it, which a load of it (or, a program's, `,load`) reads while it is fresh; its native code kept, or its cellular words alone");
                 continue;
             }
+            let was = std::mem::replace(&mut session.fasl_cellular, cellular);
             match session.compile_file(path, program) {
                 Ok(made) => println!("; compiled `{path}` to `{}`", made.display()),
                 Err(e) => println!("; {e}"),
             }
+            session.fasl_cellular = was;
             continue;
         }
         // `,query KIND ARG`: the definitions made here that answer it
@@ -720,8 +729,11 @@ pub fn compile_files(backend: Backend, files: &[String]) -> i32 {
         Ok(s) => s,
         Err(code) => return code,
     };
-    let program = files.first().is_some_and(|f| f == "--program");
-    for f in &files[program as usize..] {
+    // `--program` and `--cellular`, in either order, before the files.
+    let flags = files.iter().take_while(|f| *f == "--program" || *f == "--cellular").count();
+    let program = files[..flags].iter().any(|f| f == "--program");
+    session.fasl_cellular = files[..flags].iter().any(|f| f == "--cellular");
+    for f in &files[flags..] {
         match session.compile_file(f, program) {
             Ok(made) => println!("; compiled `{f}` to `{}`", made.display()),
             Err(e) => {

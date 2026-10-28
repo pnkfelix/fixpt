@@ -120,6 +120,10 @@ pub struct Fx26Session {
     /// (`docs/research/fasl.md`): under `Strategy::Cellular`, unless
     /// `FIXPT_NO_FASL` says not.
     pub fasls: bool,
+    /// Whether a `.fasl` made keeps its procedures as cellular words alone
+    /// (`compile-file --cellular`), which a loader compiles natively, rather
+    /// than as the native code they are (`crate::fasl::image`).
+    pub fasl_cellular: bool,
     /// The program's file the forms run now are, for its `.fasl` (set by a
     /// driver: `fixpt run`, `fixpt eval`, `,load`), which `run_forms` reads.
     pub program_file: Option<std::path::PathBuf>,
@@ -142,6 +146,9 @@ struct ProgramFasl {
     heap: fixpt_heap::Heap,
     values: Vec<fixpt_heap::Value>,
     links: std::collections::HashMap<u64, crate::fasl::Link>,
+    /// The closures that were native, of cellular words alone (`compile-file
+    /// --cellular`): compiled natively where they are defined.
+    natives: Vec<fixpt_heap::Value>,
     /// The file's own abbreviations to check as they are named, each with
     /// what it was (`program_fasl`).
     later: std::cell::RefCell<std::collections::HashMap<String, String>>,
@@ -618,6 +625,7 @@ impl Fx26Session {
             speculation_limit: Some(SPECULATION_STEP_LIMIT),
             pending: Vec::new(),
             fasls: std::env::var_os("FIXPT_NO_FASL").is_none(),
+            fasl_cellular: false,
             program_file: None,
             program_record: None,
             program_ran: Default::default(),
@@ -1290,7 +1298,7 @@ impl Fx26Session {
         let fail = |e: String| FxError::at(Span::new(FileId(0), 0, 0), format!("`{}`: {e}", fasl.display()));
         let bytes = std::fs::read(fasl).map_err(|e| fail(e.to_string()))?;
         let (_, image) = crate::fasl::Header::read(&bytes).map_err(fail)?;
-        let (from, value, links) = crate::fasl::read_image(image).map_err(fail)?;
+        let (from, value, links, natives) = crate::fasl::read_image(image).map_err(fail)?;
         let deps: Vec<Sym> = self.checker.shared_files.get(&name).map(|f| f.deps.iter().map(|d| d.2).collect()).unwrap_or_default();
         // What each link is here, held while the value is copied in; the
         // native adapter's, this heap's, found as it is copied.
@@ -1314,8 +1322,11 @@ impl Fx26Session {
         }
         let sym = self.scheme.make(|m| m.heap().intern(&shown));
         let cell = self.scheme.call_global(&format!("{READER_PREFIX}compile-new-global"), &[sym]).map_err(|e| fail(e.to_string()))?;
-        // Its native code as it was kept: nothing compiled here.
+        // Its native code as it was kept: nothing compiled here. Of cellular
+        // words alone, the closures that were native compiled natively, as
+        // they are made when the file is (`crate::fasl::native_procedures`).
         let adapter = self.native_keeping.map(|k| k.adapter_code);
+        let compile = self.native_compiler.filter(|_| self.native_convention);
         let mut why = None;
         self.scheme.make(|m| {
             let mut given: std::collections::HashMap<u64, fixpt_heap::Value> = found.iter().map(|(p, h)| (p.raw(), m.get(*h))).collect();
@@ -1330,7 +1341,11 @@ impl Fx26Session {
                     }
                 }
             }
-            let (copy, _) = heap.copy_graph_with(&from, value, |_| false, &given);
+            let (copy, made) = heap.copy_graph_with(&from, value, |_| false, &given);
+            let copy = match compile {
+                Some(c) if !natives.is_empty() => crate::fasl::native_procedures(heap, copy, c, &natives.iter().filter_map(|n| made.get(&n.raw()).map(|v| v.raw())).collect()),
+                _ => copy,
+            };
             heap.set_bloblet_slot(g, 2, copy);
             // A write, as `global!`'s, which the guards count.
             let w = fixpt_heap::layout::cellular::GLOBAL_WRITES;
@@ -1438,6 +1453,7 @@ impl Fx26Session {
             build: crate::fasl::build(),
             arch: std::env::consts::ARCH.to_string(),
             native: self.native_convention,
+            cellular: self.fasl_cellular,
             kind: if input { crate::fasl::Kind::Input } else { crate::fasl::Kind::Module },
             source: file.source,
             stamp: file.stamp,
@@ -1583,7 +1599,7 @@ impl Fx26Session {
                 return stale(self, &format!("`{}` is defined here already", d.name));
             }
         }
-        let (heap, value, links) = match crate::fasl::read_image(image) {
+        let (heap, value, links, natives) = match crate::fasl::read_image(image) {
             Ok(r) => r,
             Err(e) => return stale(self, &e),
         };
@@ -1604,7 +1620,7 @@ impl Fx26Session {
             defs.entry(d.form).or_default().push((d, i));
         }
         let links = links.into_iter().map(|(p, l)| (p.raw(), l)).collect();
-        Some(ProgramFasl { defs, heap, values, links, later: std::cell::RefCell::new(later), alias_names: names })
+        Some(ProgramFasl { defs, heap, values, links, natives, later: std::cell::RefCell::new(later), alias_names: names })
     }
 
     /// Why `defs`' code is not right here, if it is not: a global it uses,
@@ -1697,8 +1713,10 @@ impl Fx26Session {
                     todo.extend(((1 + trailer)..=p.heap.bloblet_head(v).fields).map(|k| p.heap.bloblet_slot(v, k)));
                 }
             }
-            // Its native code as it was kept: nothing compiled here.
+            // Its native code as it was kept: nothing compiled here; of
+            // cellular words alone, compiled natively (`native_procedures`).
             let adapter = s.native_keeping.map(|k| k.adapter_code);
+            let compile = s.native_compiler.filter(|_| s.native_convention);
             let mut no_adapter = false;
             s.scheme.make(|m| {
                 let mut given: std::collections::HashMap<u64, fixpt_heap::Value> = found.iter().map(|(v, h)| (v.raw(), m.get(*h))).collect();
@@ -1714,7 +1732,11 @@ impl Fx26Session {
                     }
                 }
                 for ((_, at), g) in group.iter().zip(gs) {
-                    let (copy, _) = heap.copy_graph_with(&p.heap, p.values[*at], |_| false, &given);
+                    let (copy, made) = heap.copy_graph_with(&p.heap, p.values[*at], |_| false, &given);
+                    let copy = match compile {
+                        Some(c) if !p.natives.is_empty() => crate::fasl::native_procedures(heap, copy, c, &p.natives.iter().filter_map(|n| made.get(&n.raw()).map(|v| v.raw())).collect()),
+                        _ => copy,
+                    };
                     heap.set_bloblet_slot(g, 2, copy);
                     let w = fixpt_heap::layout::cellular::GLOBAL_WRITES;
                     let n = heap.bloblet_slot(g, w).as_fixnum();
@@ -1874,6 +1896,7 @@ impl Fx26Session {
             build: crate::fasl::build(),
             arch: std::env::consts::ARCH.to_string(),
             native: self.native_convention,
+            cellular: self.fasl_cellular,
             kind: crate::fasl::Kind::Program,
             source: crate::fasl::digest(&text),
             stamp: 0,
@@ -1954,6 +1977,7 @@ impl Fx26Session {
         }
         let adapter = self.native_keeping.as_ref().map(|k| k.adapter_code);
         let mut r = Err(String::new());
+        let cellular = self.fasl_cellular;
         self.scheme.make(|m| {
             let values: Vec<fixpt_heap::Value> = cells.iter().map(|c| { let c = m.get(*c); m.heap().bloblet_slot(c, 2) }).collect();
             let heap = m.heap();
@@ -1962,7 +1986,7 @@ impl Fx26Session {
                 list = heap.cons(*v, list);
             }
             let adapter = adapter.and_then(|a| a(heap).ok());
-            r = crate::fasl::image(heap, list, &[], adapter);
+            r = crate::fasl::image(heap, list, &[], adapter, cellular);
             fixpt_heap::Value::FALSE
         });
         r
@@ -1980,12 +2004,13 @@ impl Fx26Session {
         }
         let adapter = self.native_keeping.as_ref().map(|k| k.adapter_code);
         let mut r = Err(String::new());
+        let cellular = self.fasl_cellular;
         self.scheme.make(|m| {
             let value = { let c = m.get(cell); m.heap().bloblet_slot(c, 2) };
             let deps: Vec<(String, fixpt_heap::Value)> = deps.iter().zip(&cells).map(|(d, c)| { let c = m.get(*c); (d.clone(), m.heap().bloblet_slot(c, 2)) }).collect();
             let heap = m.heap();
             let adapter = adapter.and_then(|a| a(heap).ok());
-            r = crate::fasl::image(heap, value, &deps, adapter);
+            r = crate::fasl::image(heap, value, &deps, adapter, cellular);
             fixpt_heap::Value::FALSE
         });
         r

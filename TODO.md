@@ -3437,8 +3437,12 @@ the makers (`docs/research/fasl.md`). In order:
    code's call-outs are fields now, a tagged immediate (`Value::callout`),
    which every image carries encoded and a loader's machine numbers
    (`fixpt_heap::CalloutMap`); its globals were fields already. Heist's
-   editor through `eldoc.fx` 0.59 s to 0.52 s. Next: a `.fasl` of words
-   alone kept as an option (`compile-file --cellular`, the user's).
+   editor through `eldoc.fx` 0.59 s to 0.52 s. A `.fasl` of words alone
+   kept as an option (`compile-file --cellular`, the user's): 3.2 MB to
+   native's 6.0 MB, 0.58 s. Next: native code from a `.fasl` runs slower
+   where a global's guard tests the cell's count of writes against the
+   count compiled in (s7st's `vec5e5` 93 ms, against 77 ms from a cellular
+   `.fasl` and 71 ms from source).
 10. ~~**The module files built in given `.fasl`s**~~ (done, 2026-10-28):
    in the cache directory, written by the first run that loads one
    (`fasl::path_for_load`, `Fx26Session::cache_built_ins`). Heist's
