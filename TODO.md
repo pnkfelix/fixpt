@@ -3087,6 +3087,17 @@ whose hot code is larger than the instruction cache.
 
 ## 126. Stage 0's fixed cost: Fixpt loading kayak's compiler (2026-10-24)
 
+**2026-10-28**: an image's CRC-32 was taken a byte at a time, 42 ms of
+the front end's 78 ms load at every start; eight bytes a step now
+(`c29f1974`), the floor of a run 0.18 s to 0.14-0.15 s, Heist's start-up
+from `.fasl`s 0.50 s to 0.45 s. Left of the front end's load: its words
+read into a vector (13 ms), the heap built from them (16 ms), verified
+(6 ms), then copied again into the session's heap (41 ms,
+`load_native_front_end`): loaded into the session's heap at once, or
+mapped, would leave one copy. Stage 0 itself (kayak `d5840ee`) is 5.15 s
+now, the same output; its profile is flat, kayak's own procedures first
+(`string-member?`, `mangled-length-from`), checking `kfx.fx` 9%.
+
 With kayak's facts indexed (§123), loading is most of stage 0, where it
 was about 1% at 610 s: `tests/kfx/loaded-select.kfx` in place of
 `kfx/kfx.unit OUT_DIR` (`docs/kayak-stage0-workload.md`) takes 20.7G of
@@ -3299,6 +3310,17 @@ start-up is 6.0 s against 2.9 s. Wanted: a parameter's type
 `load-input-moduleof` gives kept by reference to the file's module type,
 not expanded where each later file names it; or the walk over it made
 once per file.
+
+**Measured again 2026-10-28** (`f8bba29d`..`c29f1974`, the snapshot of
+Heist's 14 makers): `fixpt check` 3.2 s from source (the Rust checker
+1.23 s, the FX-26 one 1.90 s), 13 s before; but 6.2 s with the files'
+`.fasl`s, the 3 s more in printing (`string_append`, `fmt::write`), and
+it prints 11 MB, `m-process`'s line 4 MB: no type from another file is
+named by it (no `(select m-buffer …)` in `m-process`'s), so each is
+written out where each later file has it. Both printers naming a type
+the same as a global module's description by its `select` would make
+the lines short; the Rust checker's interning (§141, item 3) the
+checking.
 
 ## 139. A module's static part as a kind (the user's, 2026-10-28)
 
