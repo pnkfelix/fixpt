@@ -203,6 +203,7 @@
         (ty-named (g ds) (k-mix 17 g))
         (ty-nlist (x z r) (region (k-mix 18 x) r))
         (ty-union (ms) (ids 26 ms))
+        (ty-module (abs ds vs) (parts (parts (parts 27 abs) ds) vs))
         (else y 0)))))
 ;; Whether two nodes are made of the same parts, each id the same.
 (define k-ty-same? (subr pure (k-ty k-ty) bool)
@@ -317,6 +318,10 @@
         (ty-nlist (x m r)
           (tagcase b (ty-nlist (y n s) (and (= x y) (size m n) (region r s))) (else z #f)))
         (ty-union (ms) (tagcase b (ty-union (ns) (ids ms ns)) (else z #f)))
+        (ty-module (abs ds vs)
+          (tagcase b
+            (ty-module (abs2 ds2 vs2) (and (parts abs abs2) (parts ds ds2) (parts vs vs2)))
+            (else z #f)))
         (else z #f)))))
 ;; Whether node `t` is one interning keeps: those `k-ty-same?` compares.
 (define k-internable? (subr pure (k-ty) bool)
@@ -325,12 +330,28 @@
       (ty-base (s) #t) (ty-var (v) #t) (ty-subr (e ps r cv spc) (null? spc)) (ty-poly (bs x) #t)
       (ty-ref (x r) #t) (ty-pair (x y r nl) #t) (ty-product (ps) #t) (ty-sum (ps) #t)
       (ty-array (x m r) #t) (ty-named (g ds) #t) (ty-nlist (x m r) #t) (ty-union (ms) #t)
+      (ty-module (abs ds vs) #t)
       (else y #f))))
+;; A cycle's canonical form (`k-cz-cyclic`): its nodes from one, in the order
+;; first met, a part in the cycle written as `k-cyc-at` plus its number.
+(define-type k-cyc-key (listof k-ty acyclic))
+(define k-cyc-at int 1099511627776)
+(define k-cyc-hash (subr pure (k-cyc-key) int)
+  (lambda (ks) (if (null? ks) 7 (k-mix (k-ty-hash (car ks)) (k-cyc-hash (cdr ks))))))
+(define k-cyc-same? (subr pure (k-cyc-key k-cyc-key) bool)
+  (lambda (a b)
+    (cond ((null? a) (null? b))
+          ((null? b) #f)
+          (else (and (k-ty-same? (car a) (car b)) (k-cyc-same? (cdr a) (cdr b)))))))
+;; Each cycle interned, by its canonical form from each of its nodes.
+(define k-cyclic (ref (table k-cyc-key int @t) @t) (new (make-table k-cyc-hash k-cyc-same?)))
 (define k-interned (ref (table k-ty int @t) @t) (new (make-table k-ty-hash k-ty-same?)))
 ;; Entries past which the table is let go and begun again.
 (define k-intern-budget int 400000)
 (define k-intern-reset (subr kstate () unit)
-  (lambda () (set k-interned (make-table k-ty-hash k-ty-same?))))
+  (lambda ()
+    (begin (set k-interned (make-table k-ty-hash k-ty-same?))
+           (set k-cyclic (make-table k-cyc-hash k-cyc-same?)))))
 ;; `stringof`'s number among the generative types (`check::STRINGOF`).
 (define k-stringof int 14)
 ;; Whether `ds` is `const` or `acyclic`, the heap's frozen data, alone.
@@ -393,6 +414,7 @@
         (ty-array (x m r) (ty-array (k-resolve x) m r))
         (ty-nlist (x m r) (ty-nlist (k-resolve x) m r))
         (ty-union (ms) (ty-union (ids ms)))
+        (ty-module (abs ds vs) (ty-module abs (parts ds) (parts vs)))
         (else y n)))))
 ;; Type `t`'s node again, as one of its own, which interning never gives:
 ;; for a type whose id is marked (`k-arrow-star-tys`).
@@ -429,6 +451,291 @@
     (begin (if (< slot (get k-links-below)) (set k-links (+ (get k-links) 1)) #u)
            (array-set! (get k-tys) slot (ty-link (cons to nil))))))
 (define k-slot (subr (maxeff kstate spin) () int) (lambda () (k-ty-new (ty-link nil))))
+
+;;; ------------------------------------------- cycles interned by structure
+;;; A substitution copies a recursive type as a cycle of nodes of its own,
+;;; which interning by parts cannot share (`TODO.md` §141, item 2). After
+;;; one, the nodes it made are taken group by strongly connected group,
+;;; those below first (Tarjan): a group of no cycle interned by its parts,
+;;; now theirs; a cycle minimized (Moore's refinement) and looked up by its
+;;; canonical form from each node, so that equal recursive types are one
+;;; node, and so are the types made of them. A node made again is linked to
+;;; the one it is the same as. Older nodes are left as they are.
+
+;; A node's type parts, of a kind interning keeps.
+(define k-ty-kids (->* (k-ty) k-ids)
+  (lambda (n)
+    (letrec ((parts (->* (k-parts k-ids) k-ids)
+               (lambda (ps acc)
+                 (if (null? ps) acc (cons (extract (car ps) 2) (parts (cdr ps) acc)))))
+             (descs (->* (k-descs) k-ids)
+               (lambda (ds)
+                 (if (null? ds)
+                     nil
+                     (tagcase (car ds)
+                       (dt (x) (cons x (descs (cdr ds))))
+                       (df (x) (cons x (descs (cdr ds))))
+                       (else y (descs (cdr ds))))))))
+      (tagcase n
+        (ty-subr (e ps r cv spc) (cons r ps))
+        (ty-poly (bs x) (list x))
+        (ty-ref (x r) (list x))
+        (ty-pair (x y r nl) (list x y))
+        (ty-product (ps) (parts ps nil))
+        (ty-sum (ps) (parts ps nil))
+        (ty-array (x m r) (list x))
+        (ty-named (g ds) (descs ds))
+        (ty-nlist (x m r) (list x))
+        (ty-union (ms) ms)
+        (ty-module (abs ds vs) (parts ds (parts vs nil)))
+        (else y nil)))))
+;; Node `n`, each of those parts `x` as `(f x)`.
+(define k-ty-map-kids (->* (k-ty (subr (maxeff kstate spin) (int) int)) k-ty)
+  (lambda (n f)
+    (letrec ((ids (->* (k-ids) k-ids)
+               (lambda (xs) (if (null? xs) nil (cons (f (car xs)) (ids (cdr xs))))))
+             (parts (->* (k-parts) k-parts)
+               (lambda (ps)
+                 (if (null? ps)
+                     nil
+                     (cons (product (1 (extract (car ps) 1)) (2 (f (extract (car ps) 2))))
+                           (parts (cdr ps))))))
+             (descs (->* (k-descs) k-descs)
+               (lambda (ds)
+                 (if (null? ds)
+                     nil
+                     (cons (tagcase (car ds) (dt (x) (dt (f x))) (df (x) (df (f x))) (else d d))
+                           (descs (cdr ds)))))))
+      (tagcase n
+        (ty-subr (e ps r cv spc) (ty-subr e (ids ps) (f r) cv spc))
+        (ty-poly (bs x) (ty-poly bs (f x)))
+        (ty-ref (x r) (ty-ref (f x) r))
+        (ty-pair (x y r nl) (ty-pair (f x) (f y) r nl))
+        (ty-product (ps) (ty-product (parts ps)))
+        (ty-sum (ps) (ty-sum (parts ps)))
+        (ty-array (x m r) (ty-array (f x) m r))
+        (ty-named (g ds) (ty-named g (descs ds)))
+        (ty-nlist (x m r) (ty-nlist (f x) m r))
+        (ty-union (ms) (ty-union (ids ms)))
+        (ty-module (abs ds vs) (ty-module abs (parts ds) (parts vs)))
+        (else y n)))))
+
+;; The walk's state: the nodes from `k-cz-base` up to `k-cz-end` are those
+;; made; by node, its number in the walk, the least number it reaches (each
+;; -1 not yet), and its group (-1 while on the stack).
+(define k-cz-base (ref int @t) (new 0))
+(define k-cz-end (ref int @t) (new 0))
+(define k-cz-idx (ref (arrayof int @t) @t) (new (make-array 0 0)))
+(define k-cz-low (ref (arrayof int @t) @t) (new (make-array 0 0)))
+(define k-cz-scc (ref (arrayof int @t) @t) (new (make-array 0 0)))
+(define k-cz-count (ref int @t) (new 0))
+(define k-cz-groups (ref int @t) (new 0))
+(define k-cz-stack (ref k-ids @t) (new nil))
+(define k-cz-made? (->* (int) bool)
+  (lambda (x) (and (>= x (get k-cz-base)) (< x (get k-cz-end)))))
+(define k-cz-at (->* ((ref (arrayof int @t) @t) int) int)
+  (lambda (a x) (array-ref (get a) (- x (get k-cz-base)))))
+(define k-cz-set! (->* ((ref (arrayof int @t) @t) int int) unit)
+  (lambda (a x v) (array-set! (get a) (- x (get k-cz-base)) v)))
+;; Whether `x` is a node of group `g`.
+(define k-cz-in? (->* (int int) bool)
+  (lambda (x g) (and (k-cz-made? x) (= (k-cz-at k-cz-scc x) g))))
+;; The stack's nodes down to `v`, a group: each given its number.
+(define k-cz-pop (->* (int int k-ids) k-ids)
+  (lambda (v g acc)
+    (let ((x (car (get k-cz-stack))))
+      (begin
+        (set k-cz-stack (cdr (get k-cz-stack)))
+        (k-cz-set! k-cz-scc x g)
+        (if (= x v) (cons x acc) (k-cz-pop v g (cons x acc)))))))
+(define k-cz-all-internable? (->* (k-ids) bool)
+  (lambda (ms)
+    (or (null? ms) (and (k-internable? (k-raw (car ms))) (k-cz-all-internable? (cdr ms))))))
+(define k-cz-any-in? (->* (k-ids int) bool)
+  (lambda (ks g)
+    (and (not (null? ks)) (or (k-cz-in? (k-resolve (car ks)) g) (k-cz-any-in? (cdr ks) g)))))
+;; Each node of group `g` (in `nodes`) numbered by its parts, those in the
+;; group by their classes in `cls` (all one, the first time), into `next`:
+;; how many numbers.
+(define k-cz-number
+  (->* ((arrayof int @t) (arrayof int @t) (arrayof int @t) int bool) int)
+  (lambda (nodes cls next g first)
+    (let ((seen (the (table k-ty int @t) (make-table k-ty-hash k-ty-same?)))
+          (f (lambda ((x0 int))
+               (let ((x (k-resolve x0)))
+                 (cond ((not (k-cz-in? x g)) x)
+                       (first k-cyc-at)
+                       (else (+ k-cyc-at (array-ref cls (k-cz-at k-cz-idx x)))))))))
+      (letrec ((each (->* (int int) int)
+                 (lambda (i n)
+                   (if (>= i (array-length nodes))
+                       n
+                       (let* ((key (k-ty-map-kids (k-raw (array-ref nodes i)) f))
+                              (had (table-ref seen key -1)))
+                         (if (>= had 0)
+                             (begin (array-set! next i had) (each (+ i 1) n))
+                             (begin (table-set! seen key n)
+                                    (array-set! next i n)
+                                    (each (+ i 1) (+ n 1)))))))))
+        (each 0 0)))))
+;; Classes refined until they are as many as before, `n`: how many.
+(define k-cz-refine (->* ((arrayof int @t) (arrayof int @t) int int) int)
+  (lambda (nodes cls g n)
+    (let* ((next (the (arrayof int @t) (make-array (array-length nodes) 0)))
+           (m (k-cz-number nodes cls next g #f)))
+      (begin (k-copy-array next cls 0)
+             (if (= m n) n (k-cz-refine nodes cls g m))))))
+;; The classes from class `d` in the order first met, onto `order` (last
+;; first), each numbered in `num` (its last slot the count).
+(define-rec
+  (k-cz-dfs
+    (->* ((arrayof int @t) (arrayof int @t) (arrayof int @t) (arrayof int @t) (ref k-ids @t) int
+          int)
+         unit)
+    (lambda (nodes cls rep num order d g)
+      (let ((c (- (array-length num) 1)))
+        (begin
+          (array-set! num d (array-ref num c))
+          (array-set! num c (+ (array-ref num c) 1))
+          (set order (cons d (get order)))
+          (k-cz-dfs-kids nodes cls rep num order
+                         (k-ty-kids (k-raw (array-ref nodes (array-ref rep d)))) g)))))
+  (k-cz-dfs-kids
+    (->* ((arrayof int @t) (arrayof int @t) (arrayof int @t) (arrayof int @t) (ref k-ids @t)
+          k-ids int)
+         unit)
+    (lambda (nodes cls rep num order ks g)
+      (if (null? ks)
+          #u
+          (let ((x (k-resolve (car ks))))
+            (begin
+              (if (k-cz-in? x g)
+                  (let ((e (array-ref cls (k-cz-at k-cz-idx x))))
+                    (if (< (array-ref num e) 0) (k-cz-dfs nodes cls rep num order e g) #u))
+                  #u)
+              (k-cz-dfs-kids nodes cls rep num order (cdr ks) g)))))))
+;; The canonical form of classes `ds` (last first) onto `acc`: each its
+;; first node, its parts in the group by number.
+(define k-cz-emit
+  (->* ((arrayof int @t) (arrayof int @t) (arrayof int @t) (arrayof int @t) k-ids int k-cyc-key)
+       k-cyc-key)
+  (lambda (nodes cls rep num ds g acc)
+    (if (null? ds)
+        acc
+        (let ((f (lambda ((x0 int))
+                   (let ((x (k-resolve x0)))
+                     (if (k-cz-in? x g)
+                         (+ k-cyc-at (array-ref num (array-ref cls (k-cz-at k-cz-idx x))))
+                         x)))))
+          (k-cz-emit nodes cls rep num (cdr ds) g
+                     (cons (k-ty-map-kids (k-raw (array-ref nodes (array-ref rep (car ds)))) f)
+                           acc))))))
+(define k-cz-place (->* (k-ids int (arrayof int @t)) unit)
+  (lambda (ms i nodes)
+    (if (null? ms)
+        #u
+        (begin (array-set! nodes i (car ms))
+               (k-cz-set! k-cz-idx (car ms) i)
+               (k-cz-place (cdr ms) (+ i 1) nodes)))))
+(define k-cz-firsts (->* ((arrayof int @t) (arrayof int @t) int) unit)
+  (lambda (cls rep i)
+    (if (>= i (array-length cls))
+        #u
+        (begin (if (< (array-ref rep (array-ref cls i)) 0) (array-set! rep (array-ref cls i) i) #u)
+               (k-cz-firsts cls rep (+ i 1))))))
+;; Each class from `d` on: the node it is, found by its form, or its first
+;; node, noted by it.
+(define k-cz-targets
+  (->* ((arrayof int @t) (arrayof int @t) (arrayof int @t) (arrayof int @t) int int) unit)
+  (lambda (nodes cls rep target d g)
+    (if (>= d (array-length rep))
+        #u
+        (let* ((num (the (arrayof int @t) (make-array (+ (array-length rep) 1) -1)))
+               (order (the (ref k-ids @t) (new nil))))
+          (begin
+            (array-set! num (array-length rep) 0)
+            (k-cz-dfs nodes cls rep num order d g)
+            (let* ((key (k-cz-emit nodes cls rep num (get order) g nil))
+                   (found (table-ref (get k-cyclic) key -1))
+                   (first (array-ref nodes (array-ref rep d))))
+              (if (>= found 0)
+                  (array-set! target d found)
+                  (begin (table-set! (get k-cyclic) key first) (array-set! target d first))))
+            (k-cz-targets nodes cls rep target (+ d 1) g))))))
+(define k-cz-link (->* ((arrayof int @t) (arrayof int @t) (arrayof int @t) int) unit)
+  (lambda (nodes cls target i)
+    (if (>= i (array-length nodes))
+        #u
+        (let ((to (array-ref target (array-ref cls i))) (x (array-ref nodes i)))
+          (begin (if (= to x) #u (k-set-link x to))
+                 (k-cz-link nodes cls target (+ i 1)))))))
+;; Cycle `ms`, group `g`: minimized, each class the node its form names.
+(define k-cz-cyclic (->* (k-ids int) unit)
+  (lambda (ms g)
+    (let* ((s (k-length ms))
+           (nodes (the (arrayof int @t) (make-array s 0)))
+           (cls (the (arrayof int @t) (make-array s 0))))
+      (begin
+        (k-cz-place ms 0 nodes)
+        (let* ((c (k-cz-refine nodes cls g (k-cz-number nodes cls cls g #t)))
+               (rep (the (arrayof int @t) (make-array c -1)))
+               (target (the (arrayof int @t) (make-array c -1))))
+          (begin (k-cz-firsts cls rep 0)
+                 (k-cz-targets nodes cls rep target 0 g)
+                 (k-cz-link nodes cls target 0)))))))
+;; A group done: of one node and no cycle, interned by its parts; a cycle,
+;; by its form; else left.
+(define k-cz-group (->* (int) unit)
+  (lambda (v)
+    (let* ((g (get k-cz-groups))
+           (ms (begin (set k-cz-groups (+ g 1)) (k-cz-pop v g nil))))
+      (cond ((not (k-cz-all-internable? ms)) #u)
+            ((and (null? (cdr ms)) (not (k-cz-any-in? (k-ty-kids (k-raw v)) g)))
+             (let ((id (k-ty-new (k-raw v)))) (if (= id v) #u (k-set-link v id))))
+            (else (k-cz-cyclic ms g))))))
+(define-rec
+  (k-cz-visit (->* (int) unit)
+    (lambda (v)
+      (let ((n (get k-cz-count)))
+        (begin
+          (k-cz-set! k-cz-idx v n)
+          (k-cz-set! k-cz-low v n)
+          (set k-cz-count (+ n 1))
+          (set k-cz-stack (cons v (get k-cz-stack)))
+          (k-cz-kids v (k-ty-kids (k-raw v)))
+          (if (= (k-cz-at k-cz-low v) n) (k-cz-group v) #u)))))
+  (k-cz-kids (->* (int k-ids) unit)
+    (lambda (v ks)
+      (if (null? ks)
+          #u
+          (let ((w (k-resolve (car ks))))
+            (begin
+              (if (k-cz-made? w)
+                  (cond ((< (k-cz-at k-cz-idx w) 0)
+                         (begin (k-cz-visit w)
+                                (if (< (k-cz-at k-cz-low w) (k-cz-at k-cz-low v))
+                                    (k-cz-set! k-cz-low v (k-cz-at k-cz-low w))
+                                    #u)))
+                        ((and (< (k-cz-at k-cz-scc w) 0)
+                              (< (k-cz-at k-cz-idx w) (k-cz-at k-cz-low v)))
+                         (k-cz-set! k-cz-low v (k-cz-at k-cz-idx w)))
+                        (else #u))
+                  #u)
+              (k-cz-kids v (cdr ks))))))))
+;; The type `root` a substitution made, its nodes from `base` on: interned.
+(define k-intern-made (->* (int int) int)
+  (lambda (base root)
+    (let ((end (get k-ntys)) (r (k-resolve root)))
+      (begin
+        (set k-cz-base base)
+        (set k-cz-end end)
+        (set k-cz-idx (make-array (- end base) -1))
+        (set k-cz-low (make-array (- end base) -1))
+        (set k-cz-scc (make-array (- end base) -1))
+        (set k-cz-count 0)
+        (set k-cz-stack nil)
+        (if (and (k-cz-made? r) (< (k-cz-at k-cz-idx r) 0)) (k-cz-visit r) #u)
+        (k-resolve root)))))
 
 ;; Which types a walk has seen: a type is seen in walk `e` when its mark
 ;; is `e`, so each walk takes a new epoch and nothing is cleared.

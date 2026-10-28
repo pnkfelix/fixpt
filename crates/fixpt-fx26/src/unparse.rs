@@ -373,7 +373,7 @@ impl Checker {
     /// Whether `a` and `b` are one type by structure, following links: the
     /// same kind of node, the same regions, effects and sizes, and parts
     /// the same in order; a node of a kind not compared so (a `select`, a
-    /// module, a procedure with a specification, …) only itself. A pair met
+    /// procedure with a specification, …) only itself. A pair met
     /// again is the same (`trail`). As `k-same-shape?`.
     pub(crate) fn same_ty(&self, a: TyId, b: TyId, trail: &mut Vec<(TyId, TyId)>) -> bool {
         let (a, b) = (self.arena.resolve(a), self.arena.resolve(b));
@@ -413,6 +413,9 @@ impl Checker {
                     })
             }
             (Ty::Union(ms), Ty::Union(ns)) => all(&ms, &ns, trail),
+            // The same abstract types (binders), descriptions and values, as
+            // the FX-26 checker interns a module's type (`k-ty-same?`).
+            (Ty::Module { abs: aa, descs: ad, vals: av }, Ty::Module { abs: ba, descs: bd, vals: bv }) => aa == ba && parts(&ad, &bd, trail) && parts(&av, &bv, trail),
             _ => false,
         }
     }

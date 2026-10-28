@@ -2461,3 +2461,54 @@ source's references to it:
   subtyping, and sharing in the file in general (`dletrec` of the closed
   parts), not done: neither was needed for this, and the second cannot
   name what depends on a `plambda`'s or a procedure's parameters.
+
+## What is left of a `.fasl`'s load cost, measured again (2026-10-28)
+
+The user asked me to profile Heist's start-up again before the next item
+of `TODO.md` §141, working on my own.
+- **First, a regression, fixed** (93b4758e): with types printed through
+  their minimal graphs (§141, item 1), a maker's parameter's type lost its
+  name (`(select m-frame buffer-infos)`) where a type written out the same
+  came first, so start-up through `eldoc.fx` went from 1.51 s to 2.21 s.
+  Found by timing `ef7011df`'s binary against each commit since (each with
+  its own `.fasl`s: a `.fasl` names the executable that made it). A test
+  now keeps the name (`a_maker_keeps_its_parameters_types_named`).
+- **Profile at 1.51 s** (`perf`, `FIXPT_PERF_MAP`): interning and its
+  tables about 30% of the samples (`table.fx`'s lookups, `k-ty-hash`,
+  `k-resolve`), collection 13%, the kernel 13%, subtyping 12% inclusive
+  (`k-strail-in?` 5.5%), substitution 10% inclusive, reading images 5%.
+  The stacks stop at native frames, so they do not say who asks.
+- **Two guesses tried and dropped, each measured**: the interning table
+  begun at 65536 buckets (1.51 to 1.50 s: what rehashes is other tables,
+  made new each call, as `k-new-smemo`'s); and subtyping's shortcut for
+  the same node taken under binders too, where both sides' binders stand
+  for the same (`k-benv=?`), sound but no faster: what is compared there
+  is not the same node. Neither kept.
+- So, before item 2, counts rather than guesses: the cell profile, on the
+  machine written in Rust, which counts each word's cells exactly.
+- **What the counts were instead**: timing each prefix of the editor's
+  fourteen loads, and the last one's load and call apart, put most of a
+  late file's cost in checking its maker's call (0.125 s of `eldoc.fx`'s
+  0.17 s): each argument's module type compared with its parameter's, the
+  two made by different substitutions, so not one node, whatever their
+  parts. A memo of substitutions across calls would not join them (one is
+  the maker's type substituted twice, the other once), so item 2, as
+  planned: interning by structure.
+- **Item 2, where a substitution ends** (`k-intern-made`, in
+  `check-types.fx`): the nodes it made, group by strongly connected group
+  (Tarjan), those below first; a group of no cycle interned by its parts
+  (`k-ty-new`), a cycle minimized and looked up in `k-cyclic` by its
+  canonical form from each node (the nodes in the order first met, a part
+  in the cycle as `k-cyc-at` plus its number). A node made again is linked
+  to the one it is the same as; nodes older than the substitution, and
+  groups with a kind interning does not keep, are left. `k-cyclic` is
+  emptied with `k-interned` (`k-intern-reset`), as the arena is.
+- **Module types interned too** (the user's: concise output is worth it
+  even where it is no faster, and it was not, measured). The Rust printer
+  so names a module type by an abbreviation of the same structure, its
+  abstract types the same binders, as the FX-26 one now does by its node:
+  `modules/desc-match.fx` shows `define m : nums` in both.
+- Result: start-up through `eldoc.fx` 1.25 s from `.fasl`s (was 1.51 s)
+  and 3.95 s from source (was 4.53 s); s7st unchanged (1.08 s).
+- Not yet: a recursive type read from source (`define-type`, `mu`,
+  `listof`) interned the same way; it would join copies written twice.

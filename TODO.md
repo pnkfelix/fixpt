@@ -3394,7 +3394,10 @@ the makers (`docs/research/fasl.md`). In order:
    (the user's: a type is a semantic object, printed as one). What makes
    item 2 safe for the tests comparing the two checkers' prints; outputs
    showing a type unrolled (`recursive/unfold.fx`'s `s2`) change.
-2. **Recursive types interned by minimization** in the checker written in
+2. ~~**Recursive types interned by minimization**~~ (done, 2026-10-28,
+   for what a substitution makes, and module types too: Heist's start-up
+   through `eldoc.fx` 1.51 s to 1.25 s from `.fasl`s, 4.53 s to 3.95 s
+   from source; a recursive type read from source is not yet) in the checker written in
    FX-26: when a `mu` or recursive binding's cycle closes, the cycle
    minimized (partition refinement), given a canonical form, and looked up
    in a table of cyclic types, so that equal recursive types are one node.

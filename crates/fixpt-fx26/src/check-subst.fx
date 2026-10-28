@@ -284,8 +284,9 @@
   (lambda (t m)
     (let* ((keep (get k-subst-keep))
            (off (set k-subst-keep -1))
+           (base (get k-ntys))
            (r (k-subst-memo t m (k-new-smemo))))
-      (begin (set k-subst-keep keep) r))))
+      (begin (set k-subst-keep keep) (k-intern-made base r)))))
 ;; The description of kind `k` that names binder `v`.
 (define k-binder-desc (->* (int int) k-desc)
   (lambda (k v)

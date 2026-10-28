@@ -320,6 +320,8 @@
         (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin) (int int) int))
    (val k-ty-fresh (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin) (int) int))
    (val k-intern-reset (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t)) () unit))
+   (val k-intern-made
+        (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin) (int int) int))
    (val k-nth (poly ((t type)) (subr (read @globals) ((listof t acyclic) int) t)))
    (val k-std (ref k-named @t))
    (val k-std-table
