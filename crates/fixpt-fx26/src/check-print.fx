@@ -321,8 +321,8 @@
   (string-append "a syscall takes and gives only `int`, `i64`, `u64`, `bool`, `char`, `unit`, "
                  "`string`, `(flatarrayof i64 r)` and `(bytevectorof r)`"))
 (define k-sys-effects string
-  (string-append "a syscall's effect holds `(io sys)`, and only reads, writes and allocations "
-                 "of its regions, other I/O, `spin` and `nondet`"))
+  (string-append "a syscall's effect holds only reads, writes and allocations "
+                 "of its regions, I/O, `spin` and `nondet`"))
 (define k-sys-regions string "a syscall's regions are its `poly`'s")
 (define k-sys-sym (->* (string int int) syn) (lambda (n a b) (atom (string->symbol n) a b)))
 ;; A list of `xs`; its datum, which nothing reads of a type, empty.
@@ -421,18 +421,13 @@
                         (k-sys-insert (product (1 (k-syn-text x)) (2 x)) acc))))))
 (define k-sys-syns (->* (k-sys-texts) (listof syn acyclic))
   (lambda (xs) (if (null? xs) nil (cons (extract (car xs) 2) (k-sys-syns (cdr xs))))))
-(define k-sys-has-io-sys? (->* (k-eff) bool)
-  (lambda (e)
-    (and (not (null? e))
-         (or (tagcase (car e) (a-io (k) (= k 10)) (else x #f)) (k-sys-has-io-sys? (cdr e))))))
+;; None `pure`, one alone, else in a `maxeff`.
 (define k-sys-effect (->* (k-binders k-eff int int int int) syn)
   (lambda (bs e a b ta tb)
-    (if (k-sys-has-io-sys? e)
-        (let ((xs (k-sys-syns (k-sys-sorted bs e a b ta tb nil))))
-          (if (null? (cdr xs))
-              (car xs)
-              (k-sys-list (cons (k-sys-sym "maxeff" a b) xs) a b)))
-        (k-fail k-sys-effects ta tb))))
+    (let ((xs (k-sys-syns (k-sys-sorted bs e a b ta tb nil))))
+      (cond ((null? xs) (k-sys-sym "pure" a b))
+            ((null? (cdr xs)) (car xs))
+            (else (k-sys-list (cons (k-sys-sym "maxeff" a b) xs) a b))))))
 ;; Its `subr`, its binders `bs`.
 (define k-sys-subr (->* (k-binders int int int int int) syn)
   (lambda (bs t a b ta tb)

@@ -283,7 +283,7 @@
   ;;; ------------------------------------------------------------ application
   (k-synth-app (->* (kx kx kxs int) k-te)
     (lambda (x f args expected)
-      (let ((op (begin (k-note-fx-plain-op (k-under f)) (k-std-op f))) (lop (k-library-op f args)))
+      (let ((op (begin (k-note-fx-plain-op f) (k-std-op f))) (lop (k-library-op f args)))
         (cond
           ((string=? lop "spawn-process") (k-spawn-te x f args expected k-synth))
           ((not (string=? lop "")) (k-branches-te lop x f args k-synth))

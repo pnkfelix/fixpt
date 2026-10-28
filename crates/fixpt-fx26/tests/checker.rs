@@ -678,6 +678,12 @@ fn syscall_declarations_alike() {
     let ok = "(define-optional-syscall pw \"code:page-words/1\" (subr (io sys) () int))\n(syscall-available? pw)";
     let lines = both_syscalls(ok).expect("accepted");
     assert_eq!(lines, ["define pw : (subr (io sys) () int) ! pure", "bool ! (read (globals %syscall-available:pw))"]);
+    // A pure one, called from a pure procedure, which stays so; its call's
+    // operator noted as the plain `%syscall1` in both.
+    let pure = "(define-syscall n \"test:n/1\" (subr pure (string) int))\n\
+                (define* twice (subr pure (string) int) (lambda (s) (+ (n s) (n s))))";
+    let lines = both_syscalls(pure).expect("accepted");
+    assert_eq!(lines, ["define n : (subr pure (string) int) ! pure", "define twice : (subr (read (globals n)) (string) int) ! pure"]);
     // Only a runtime's own code declares them.
     let e = both(ok).expect_err("refused");
     assert_eq!(e.0, "syscalls are declared only by a runtime's own code");
@@ -696,9 +702,9 @@ fn syscall_declarations_alike() {
     refused(&declared("int"), shape);
     refused(&declared("(poly ((t type)) (subr (io sys) (t) t))"), shape);
     refused(&declared("(subr (conv native) (io sys) () int)"), shape);
-    let effects = "a syscall's effect holds `(io sys)`";
-    refused(&declared("(subr pure () int)"), effects);
+    let effects = "a syscall's effect holds only reads, writes and allocations of its regions";
     refused(&declared("(subr (maxeff (io sys) (goto @k)) () int)"), effects);
+    refused(&declared("(subr (goto @k) () int)"), effects);
     let crossing = "a syscall takes and gives only";
     refused(&declared("(subr (io sys) ((listof int @l)) int)"), crossing);
     refused(&declared("(poly ((r region)) (subr (io sys) ((flatarrayof u64 r)) int))"), crossing);

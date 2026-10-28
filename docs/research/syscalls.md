@@ -50,6 +50,8 @@ building runtimes.** Ordinary programs cannot declare them (see
   binders (no `(t type)`) for now.
 - `E` must include the syscall effect, `(io sys)` (a new `io` atom), so
   that every use of a syscall shows in the types of what uses it.
+  (Dropped, 2026-10-27, at Kayak's request: `E` is what the declaration
+  says, `pure` among them; `docs/fx26.md`, "No `(io sys)` required".)
 - Each `T` and `R` must be a type that crosses (below).
 - `(syscall-available? name)`, `name` a syscall the program declared,
   is a `bool`: whether the runtime gave it at load (always `#t` for a
@@ -134,7 +136,8 @@ A `define-syscall` or `define-optional-syscall` is accepted only:
 
 Anywhere else: refused, `syscalls are declared only by a runtime's own
 code`. The `(io sys)` effect then makes every procedure that reaches a
-syscall say so in its type.
+syscall say so in its type. (No longer: each is found by its
+declaration, 2026-10-27.)
 
 ## The first syscalls: an executable view, and flushing it
 

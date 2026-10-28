@@ -660,13 +660,13 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // call's. And whether one is there, which `syscall-available?` asks.
     ("%syscall-require", "(subr (io sys) (string string string) unit)"),
     ("%syscall-available?", "(subr pure (string string) bool)"),
-    ("%syscall0", "(poly ((t type)) (subr (io sys) (string string string) t))"),
-    ("%syscall1", "(poly ((a1 type) (t type)) (subr (io sys) (string string string a1) t))"),
-    ("%syscall2", "(poly ((a1 type) (a2 type) (t type)) (subr (io sys) (string string string a1 a2) t))"),
-    ("%syscall3", "(poly ((a1 type) (a2 type) (a3 type) (t type)) (subr (io sys) (string string string a1 a2 a3) t))"),
-    ("%syscall4", "(poly ((a1 type) (a2 type) (a3 type) (a4 type) (t type)) (subr (io sys) (string string string a1 a2 a3 a4) t))"),
-    ("%syscall5", "(poly ((a1 type) (a2 type) (a3 type) (a4 type) (a5 type) (t type)) (subr (io sys) (string string string a1 a2 a3 a4 a5) t))"),
-    ("%syscall6", "(poly ((a1 type) (a2 type) (a3 type) (a4 type) (a5 type) (a6 type) (t type)) (subr (io sys) (string string string a1 a2 a3 a4 a5 a6) t))"),
+    ("%syscall0", "(poly ((e effect) (t type)) (subr e (string string string) t))"),
+    ("%syscall1", "(poly ((e effect) (a1 type) (t type)) (subr e (string string string a1) t))"),
+    ("%syscall2", "(poly ((e effect) (a1 type) (a2 type) (t type)) (subr e (string string string a1 a2) t))"),
+    ("%syscall3", "(poly ((e effect) (a1 type) (a2 type) (a3 type) (t type)) (subr e (string string string a1 a2 a3) t))"),
+    ("%syscall4", "(poly ((e effect) (a1 type) (a2 type) (a3 type) (a4 type) (t type)) (subr e (string string string a1 a2 a3 a4) t))"),
+    ("%syscall5", "(poly ((e effect) (a1 type) (a2 type) (a3 type) (a4 type) (a5 type) (t type)) (subr e (string string string a1 a2 a3 a4 a5) t))"),
+    ("%syscall6", "(poly ((e effect) (a1 type) (a2 type) (a3 type) (a4 type) (a5 type) (a6 type) (t type)) (subr e (string string string a1 a2 a3 a4 a5 a6) t))"),
 ];
 
 /// The initial environment as text, for the checker written in FX-26:

@@ -136,7 +136,8 @@
               (c-first-call-only (cdr ps) body f (+ k 1) n))))))
 
 ;; `x`, each `(with #%fx n)` in it that the checker found the plain `n`
-;; (`n-plain-fx`) made that `n`, at the `with`'s place: what the Rust
+;; (`n-plain-fx`) made that `n`, at the `with`'s place, and each syscall's
+;; operator `(the T %syscallN)` so (`k-note-sys-plain`): what the Rust
 ;; checker gives its compilers (`Arena::replace`, `TODO.md` §46). Only the
 ;; forms of a program that has such a fact are walked.
 (define-rec
@@ -160,7 +161,10 @@
           (e-prompt (c-plain-fx t) (c-plain-fx body) (c-plain-fx h) a b abk))
         (e-letregion (k r p body a b abk) (e-letregion k r p (c-plain-fx body) a b abk))
         (e-rlambda (r l a b abk) (e-rlambda (c-plain-fx r) (c-plain-fx l) a b abk))
-        (e-the (t body a b abk) (e-the t (c-plain-fx body) a b abk))
+        (e-the (t body a b abk)
+          (tagcase body
+            (e-var (n c d cdk) (if (c-plain-fx-at a b abk) (e-var n a b abk) x))
+            (else y (e-the t (c-plain-fx body) a b abk))))
         (e-convention (cv body a b abk) (e-convention cv (c-plain-fx body) a b abk))
         (e-bloblet (op i args got a b abk) (e-bloblet op i (c-plain-all args) got a b abk))
         (e-product (fs a b abk) (e-product (c-plain-named fs) a b abk))

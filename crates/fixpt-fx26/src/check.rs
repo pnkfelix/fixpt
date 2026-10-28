@@ -1884,6 +1884,20 @@ impl Checker {
         }
     }
 
+    /// Notes `e`, a syscall's call's operator `(the T %syscallN)`, which
+    /// gives it its declared effect (`syscall.rs`), as the plain
+    /// `%syscallN` it is, as `plain_fx` notes a `with`, as
+    /// `k-note-sys-plain` does.
+    pub(crate) fn plain_syscall(&mut self, e: ExpId) {
+        if let Exp::The { exp, .. } = *self.arena.exp_at(e)
+            && let Exp::Var(n) = *self.arena.exp_at(exp)
+            && self.interner.name(n).starts_with("%syscall")
+            && self.is_standard(n)
+        {
+            self.facts.fx_plain.insert(e, exp);
+        }
+    }
+
     /// The standard type of `(with module body)`, if `module` is `#%fx` and
     /// `body` a standard name whose type is polymorphic.
     pub(crate) fn fx_poly(&self, module: Sym, body: ExpId) -> Option<TyId> {

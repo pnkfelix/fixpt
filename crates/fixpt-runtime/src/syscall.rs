@@ -39,6 +39,21 @@ pub const SYSCALLS: &[Syscall] = &[
         canonical: "(poly ((r1 region)) (subr (maxeff (io sys) (read r1)) ((flatarrayof i64 r1) int int) unit))",
         run: |_rt, _a| Ok(Value::UNIT),
     },
+    // A string's length in UTF-8 bytes, which `string->utf8` gives only by
+    // copying (Kayak's, for joining strings in one buffer). Pure: a call
+    // may be moved, shared or dropped. A string here is a character a
+    // half-word, so it is counted, but nothing is made.
+    Syscall {
+        host: "kayak:string-utf8-length/1",
+        canonical: "(subr pure (string) int)",
+        run: |rt, a| {
+            let s = a[0];
+            if !rt.heap.is_a(s, fixpt_heap::ObjType::String) {
+                return rt.type_error("a string", s);
+            }
+            Ok(Value::fixnum((0..rt.heap.string_len(s)).map(|i| rt.heap.string_ref(s, i).len_utf8() as i64).sum()))
+        },
+    },
 ];
 
 /// The words in one page of this machine.

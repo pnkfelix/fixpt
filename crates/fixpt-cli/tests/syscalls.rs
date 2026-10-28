@@ -58,11 +58,22 @@ fn on_every_machine(name: &'static str, n: usize) -> Vec<String> {
     first.expect("a machine")
 }
 
-/// The three this runtime has, each there and called: a page's words;
+/// The three of code this runtime has, each there and called: a page's words;
 /// no view of a flat array, which moves when collected; nothing to flush.
 #[test]
 fn the_runtimes_own_syscalls() {
     assert_eq!(on_every_machine("present.fx", 4), ["#t", "#t", "-1", "#u"]);
+}
+
+/// A pure one (Kayak's, a string's length in UTF-8): called from a pure
+/// procedure; declared `(io sys)`, a type other than the runtime's, so its
+/// declaration fails as it loads.
+#[test]
+fn a_pure_syscall() {
+    assert_eq!(on_every_machine("pure.fx", 3), ["joined-length", "#t", "11"]);
+    let says = "! evaluation failed: syscall utf8-length (\"kayak:string-utf8-length/1\"): \
+                declared (subr (io sys) (string) int); this runtime's is (subr pure (string) int)";
+    assert_eq!(on_every_machine("pure-declared-io.fx", 1), [says]);
 }
 
 /// An optional one the runtime has not: the program loads, and says so;

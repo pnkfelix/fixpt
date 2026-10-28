@@ -29,7 +29,7 @@ const SHAPE: &str = "a syscall's type is a `subr`, or a `poly` over regions only
 const CROSSING: &str =
     "a syscall takes and gives only `int`, `i64`, `u64`, `bool`, `char`, `unit`, `string`, `(flatarrayof i64 r)` and `(bytevectorof r)`";
 const EFFECTS: &str =
-    "a syscall's effect holds `(io sys)`, and only reads, writes and allocations of its regions, other I/O, `spin` and `nondet`";
+    "a syscall's effect holds only reads, writes and allocations of its regions, I/O, `spin` and `nondet`";
 const HOST: &str = "a syscall's host name is a string, `namespace:name/version`";
 
 /// Whether `s` is a host name: a namespace, a colon, a name, a slash and a
@@ -62,7 +62,7 @@ pub fn text(s: &Syntax, name: &dyn Fn(fixpt_read::Sym) -> String) -> String {
 /// The names a canonical type and a declaration's expansion are made of.
 const NAMES: &[&str] = &[
     "poly", "region", "subr", "maxeff", "read", "write", "alloc", "io", "spin", "nondet", "flatarrayof", "bytevectorof", "i64",
-    "lambda", "the", "begin", "define", "bool", "%syscall-require", "%syscall-available?",
+    "lambda", "the", "begin", "define", "bool", "string", "pure", "%syscall-require", "%syscall-available?",
 ];
 
 impl Checker {
@@ -166,7 +166,12 @@ impl Checker {
         let [_, _, params, result] = &parts(&subr)[..] else { unreachable!("a canonical `subr`") };
         let params = parts(params);
         let xs: Vec<Syntax> = (1..=params.len()).map(|i| sym(&format!("x{i}"))).collect();
-        let call = [sym(&format!("%syscall{}", params.len())), string(&label), string(host), string(text)];
+        // The call at the declared effect: `%syscallN`'s, a binder, so given.
+        let [_, effect, ..] = &parts(&subr)[..] else { unreachable!("a canonical `subr`") };
+        let strings = [sym("string"), sym("string"), sym("string")].into_iter().chain(params.iter().cloned());
+        let at = list(vec![sym("subr"), effect.clone(), list(strings.collect()), result.clone()]);
+        let op = list(vec![sym("the"), at, sym(&format!("%syscall{}", params.len()))]);
+        let call = [op, string(&label), string(host), string(text)];
         let call = list(call.into_iter().chain(xs.iter().cloned()).collect());
         let typed = params.iter().zip(&xs).map(|(p, x)| list(vec![x.clone(), p.clone()])).collect();
         let value = list(vec![sym("lambda"), list(typed), list(vec![sym("the"), result.clone(), call])]);
@@ -251,7 +256,7 @@ impl Checker {
     }
 
     /// A syscall's effect, canonical: its atoms' texts sorted, each once;
-    /// one alone, else in a `maxeff`. It must hold `(io sys)`.
+    /// none `pure`, one alone, else in a `maxeff`.
     fn canonical_effect(
         &self,
         effect: &Effect,
@@ -260,9 +265,6 @@ impl Checker {
         list: &dyn Fn(Vec<Syntax>) -> Syntax,
         fail: &dyn Fn(&str) -> FxError,
     ) -> R<Syntax> {
-        if !effect.contains(Atom::Io(IoKind::Sys)) {
-            return Err(fail(EFFECTS));
-        }
         let mut atoms = Vec::new();
         for a in effect.0.iter() {
             atoms.push(match *a {
@@ -281,6 +283,7 @@ impl Checker {
         texts.dedup_by(|a, b| a.0 == b.0);
         let mut atoms: Vec<Syntax> = texts.into_iter().map(|(_, a)| a).collect();
         Ok(match atoms.len() {
+            0 => sym("pure"),
             1 => atoms.pop().expect("one"),
             _ => list(std::iter::once(sym("maxeff")).chain(atoms).collect()),
         })

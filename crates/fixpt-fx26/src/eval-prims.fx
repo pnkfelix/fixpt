@@ -342,7 +342,7 @@
 
 ;; The program's I/O (`TODO.md` §84), done by the primitives themselves.
 ;; Syscalls (`docs/research/syscalls.md`): this evaluator's own, a runtime
-;; of its own, has the three Fixpt's runtime has, as it has them
+;; of its own, has the four Fixpt's runtime has, as it has them
 ;; (`fixpt_runtime::syscall`): each host name's type in canonical form, ""
 ;; for one it has not.
 (define ev-sys-type (->* (string) string)
@@ -354,6 +354,7 @@
           ((string=? h "code:flush/1")
            (string-append "(poly ((r1 region)) (subr (maxeff (io sys) (read r1)) "
                           "((flatarrayof i64 r1) int int) unit))"))
+          ((string=? h "kayak:string-utf8-length/1") "(subr pure (string) int)")
           (else ""))))
 (define ev-sys-has? (->* (string string) bool)
   (lambda (h t) (let ((u (ev-sys-type h))) (and (not (string=? u "")) (string=? u t)))))
@@ -364,15 +365,18 @@
       (cond ((string=? u "") (efail (string-append label ": this runtime has none")))
             ((string=? u t) the-unit)
             (else (efail (string-append label ": declared " t "; this runtime's is " u)))))))
-;; A call, its label, host name and type first: the page's words asked of
-;; the runtime this runs on; no view of an array, which moves (-1); nothing
-;; to flush.
+;; A call, its label, host name and type first: the page's words, and a
+;; string's length in UTF-8, asked of the runtime this runs on; no view of
+;; an array, which moves (-1); nothing to flush.
 (define ev-syscall (->* (vals) val)
   (lambda (xs)
     (let ((label (as-str (ev-arg xs 0))) (h (as-str (ev-arg xs 1))) (t (as-str (ev-arg xs 2))))
       (cond ((not (ev-sys-has? h t))
              (efail (string-append label ": not available on this runtime")))
             ((string=? h "code:page-words/1") (the int (%syscall0 label h t)))
+            ((string=? h "kayak:string-utf8-length/1")
+             ((the (subr pure (string string string string) int) %syscall1)
+              label h t (as-str (ev-arg xs 3))))
             ((string=? h "code:exec-view/1") -1)
             (else the-unit)))))
 

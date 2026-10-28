@@ -2241,3 +2241,17 @@ The user: "Yeah do 1, 2, and 3" (names, lines, values). Names first.
   say each slot's type.
 - **Commands, not pretty-printers**: no slot or register has a DWARF type
   for a printer to hang on.
+
+## A pure syscall (2026-10-27)
+
+- **The call's effect given by a `the` on its operator**, `%syscallN`
+  polymorphic in it: the inner call then has exactly the declared effect,
+  so a compiler acting on purity (`lower.rs`'s pure calls) sees the truth.
+  Typing `%syscallN` `pure` would have checked too, but a call writing a
+  region would then look pure inside the procedure. The `the` is noted
+  plain as `(with #%fx n)` is, so no compiler builds a value of
+  `%syscallN`, which has no fixed arity.
+- **`kayak:string-utf8-length/1` in Fixpt's runtime**, under the name Kayak
+  gave it, so its compiler's declaration loads here too; the test's
+  runtime that has a pure syscall. Fixpt's strings are not UTF-8, so it
+  counts, still without the copy `string->utf8` makes.

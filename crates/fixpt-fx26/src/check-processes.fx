@@ -472,11 +472,30 @@
                             #u
                             (k-note-fx-plain body (k-at-of x)))
                         (k-te t nil))))))))
-;; The operator `(with #%fx n)`, noted as `k-note-fx-plain` notes it, once.
+;; The operator `f`, under any `the` or projection `(with #%fx n)`, noted as
+;; `k-note-fx-plain` notes it, once; or a syscall's (`k-note-sys-plain`).
 (define k-note-fx-plain-op (->* (kx) unit)
   (lambda (f)
+    (begin
+      (k-note-sys-plain f)
+      (let ((g (k-under f)))
+        (tagcase g
+          (x-with (m body a b abk) (if (k-fx-module? m) (k-note-fx-plain body (k-at-of g)) #u))
+          (else y #u))))))
+;; A syscall's call's operator `(the T %syscallN)`, which gives it its
+;; declared effect (`k-sys-defs`), noted as the plain `%syscallN` it is.
+(define k-note-sys-plain (->* (kx) unit)
+  (lambda (f)
     (tagcase f
-      (x-with (m body a b abk) (if (k-fx-module? m) (k-note-fx-plain body (k-at-of f)) #u))
+      (x-the (t body a b abk)
+        (tagcase body
+          (x-var (n c d cdk)
+            (if (let ((s (symbol->string n)))
+                  (and (> (string-length s) 8) (string=? (substring s 0 8) "%syscall")
+                       (not (string=? (k-std-op body) ""))))
+                (k-note-fx-plain body (k-at-of f))
+                #u))
+          (else y #u)))
       (else y #u))))
 ;; Where nothing shadows `n`, `(with #%fx n)` is the plain `n`: noted for
 ;; the compiler (`n-plain-fx`, the Rust checker's `fx_plain`).

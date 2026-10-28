@@ -611,6 +611,7 @@ impl Checker {
             op = *body;
         }
         self.plain_fx(op);
+        self.plain_syscall(fun);
         // The forms of processes and `par` (`processes.rs`).
         match (self.library_op(fun).map(str::to_string).as_deref(), args) {
             (Some("spawn-process"), [body]) => return self.synth_spawn(e, fun, *body, expected),

@@ -3683,3 +3683,25 @@ The third of the user's three.
 - **Test**: `fixpt-cli/tests/jit_lines.rs` attaches gdb, where there is one
   and attaching is allowed, to a program in a loop under frames that keep
   values.
+
+## 144. A syscall's effect is what it says: no `(io sys)` required (2026-10-27)
+
+Kayak's request: a pure host function, such as a string's length in UTF-8
+bytes, had to be `(io sys)`, and so made every procedure reaching it
+impure.
+
+- **Both checkers** check a declaration's effect for its atoms only: reads,
+  writes and allocations of its regions, `io` effects, `spin`, `nondet`;
+  none is `pure`, printed so canonically (`syscall.rs`, `check-print.fx`).
+- **The call has the declared effect**: `%syscall0` to `%syscall6` are
+  polymorphic in it, and a declaration's call names its operator
+  `(the (subr E (string string string P …) R) %syscallN)`. Both checkers
+  note that `the` as the plain `%syscallN` (`plain_syscall`,
+  `k-note-sys-plain`), as they note `(with #%fx n)`, so every compiler
+  calls the primitive directly (`Compiler::exp_at`, `c-plain-fx`).
+- **`kayak:string-utf8-length/1`**, `(subr pure (string) int)`, in Fixpt's
+  runtime and the evaluator's: counted, since a string here is a character
+  a half-word, but nothing made.
+- **Tests**: `checker.rs` (a pure one called from a pure procedure, alike
+  in both); `fixpt-cli/tests/syscalls.rs` `a_pure_syscall`, on every
+  machine: called, and declared `(io sys)` refused as it loads.
