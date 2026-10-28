@@ -317,7 +317,9 @@
    (val k-arrow-star-settled (ref k-settleds @t))
    (val k-arrow-star-ty? (subr (maxeff (read @globals) (read @t)) (int) bool))
    (val k-arrow-star-as
-        (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t)) (int int) unit))
+        (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin) (int int) int))
+   (val k-ty-fresh (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin) (int) int))
+   (val k-intern-reset (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t)) () unit))
    (val k-nth (poly ((t type)) (subr (read @globals) ((listof t acyclic) int) t)))
    (val k-std (ref k-named @t))
    (val k-std-table

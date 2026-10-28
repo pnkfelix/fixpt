@@ -58,11 +58,14 @@
       (include check-infer) (include check-sc-graphs) (include check-print) (include tables)
       (include parser))
 
-;; `n`, of type `t`, bound as a standard binding.
+;; `n`, of type `t`, bound as a standard binding: at a node of its own,
+;; since a binding is the standard one by its type's id (`k-std-binding?`),
+;; which interning would give a local of the same type.
 (define k-bind-std (->* (symbol int) unit)
-  (lambda (n t)
-    (begin (k-bind n t) (set k-std (cons (cons n t) (get k-std)))
-           (table-set! (get k-std-table) n t))))
+  (lambda (n t0)
+    (let ((t (k-ty-fresh t0)))
+      (begin (k-bind n t) (set k-std (cons (cons n t) (get k-std)))
+             (table-set! (get k-std-table) n t)))))
 ;; A standard binding, `(name type)`, or `datum`'s `(define-type name type)`
 ;; (`check::DATUM`).
 (define k-standard-binding (->* (syns-a) unit)

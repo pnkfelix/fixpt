@@ -132,7 +132,9 @@
   (lambda (s)
     (let* ((star (get k-arrow-star))
            (taken (set k-arrow-star #f))
-           (t (if star (k-parse-arrow-star s) (k-parse-type-node s)))
+           (t0 (if star (k-parse-arrow-star s) (k-parse-type-node s)))
+           ;; Its own node: the mark is on its id (`k-arrow-star-as`).
+           (t (if star (k-ty-fresh t0) t0))
            (marked (if star (set k-arrow-star-tys (cons t (get k-arrow-star-tys))) #u)))
       (begin
         (if (and (not (syn-symbol? s)) (k-storage-head? (k-head (k-items s "a type"))))

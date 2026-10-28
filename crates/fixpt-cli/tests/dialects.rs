@@ -738,6 +738,7 @@ fn a_type_defined_twice_is_warned_of() {
     std::io::Write::write_all(&mut child.stdin.take().expect("piped"), program.as_bytes()).expect("can write");
     let out = child.wait_with_output().expect("fixpt finishes");
     let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
-    assert!(out.status.success() && stdout.contains("#t : t"), "{stdout}\n{stderr}");
+    // `t` is `bool`'s alias, which abbreviates nothing: `bool` is shown.
+    assert!(out.status.success() && stdout.contains("#t : bool"), "{stdout}\n{stderr}");
     assert_eq!(stderr, format!("fixpt: <stdin>:2:1: {warning}\n"));
 }

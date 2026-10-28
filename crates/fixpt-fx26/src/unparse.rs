@@ -254,15 +254,75 @@ impl Checker {
         if self.print_expanded.get() && !self.closed_named.contains(&t) {
             return None;
         }
-        let named = self.print_names.borrow().iter().rev().find(|(_, x)| self.arena.resolve(*x) == t).map(|(n, _)| *n);
+        // A name in scope abbreviates `t` if `t` is its type and has parts
+        // to abbreviate (the user's, 2026-10-28): by structure, not by
+        // which node was written with it, so that a checker that shares
+        // equal nodes (`k-ty-new`) names alike (`k-alias-of`).
+        let fits = |d: TyId| {
+            let d = self.arena.resolve(d);
+            self.abbreviates(d) && self.same_ty(d, t, &mut Vec::new())
+        };
+        let named = self.print_names.borrow().iter().rev().find(|(_, x)| fits(*x)).map(|(n, _)| *n);
         if let Some(n) = named {
             return Some(self.interner.name(n));
         }
-        self.type_names()
-            .into_iter()
-            .rev()
-            .find(|n| self.type_named(*n).is_some_and(|d| self.arena.resolve(d) == t))
-            .map(|n| self.interner.name(n))
+        if !self.abbreviates(t) {
+            return None;
+        }
+        self.type_names().into_iter().rev().find(|n| self.type_named(*n).is_some_and(fits)).map(|n| self.interner.name(n))
+    }
+
+    /// Whether a type has parts, so that a name abbreviates it: not a base
+    /// type, a variable, `nil`, `false` or `void`, each a word already.
+    fn abbreviates(&self, t: TyId) -> bool {
+        !matches!(self.arena.get(self.arena.resolve(t)), Ty::Base(_) | Ty::Var(_) | Ty::Nil | Ty::False | Ty::Void)
+    }
+
+    /// Whether `a` and `b` are one type by structure, following links: the
+    /// same kind of node, the same regions, effects and sizes, and parts
+    /// the same in order; a node of a kind not compared so (a `select`, a
+    /// module, a procedure with a specification, …) only itself. A pair met
+    /// again is the same (`trail`). As `k-same-shape?`.
+    pub(crate) fn same_ty(&self, a: TyId, b: TyId, trail: &mut Vec<(TyId, TyId)>) -> bool {
+        let (a, b) = (self.arena.resolve(a), self.arena.resolve(b));
+        if a == b || trail.contains(&(a, b)) {
+            return true;
+        }
+        trail.push((a, b));
+        let all = |xs: &[TyId], ys: &[TyId], trail: &mut Vec<(TyId, TyId)>| xs.len() == ys.len() && xs.iter().zip(ys).all(|(x, y)| self.same_ty(*x, *y, trail));
+        let parts = |ps: &[(fixpt_read::Sym, TyId)], qs: &[(fixpt_read::Sym, TyId)], trail: &mut Vec<(TyId, TyId)>| {
+            ps.len() == qs.len() && ps.iter().zip(qs).all(|((l, x), (m, y))| l == m && self.same_ty(*x, *y, trail))
+        };
+        match (self.arena.get(a).clone(), self.arena.get(b).clone()) {
+            (Ty::Base(s), Ty::Base(u)) => s == u,
+            (Ty::Var(v), Ty::Var(w)) => v == w,
+            (Ty::Nil, Ty::Nil) | (Ty::False, Ty::False) | (Ty::Void, Ty::Void) => true,
+            (Ty::Nat(m), Ty::Nat(n)) => m == n,
+            (Ty::Subr { conv: c, effect: e, params: ps, result: r, spec: None }, Ty::Subr { conv: d, effect: f, params: qs, result: q, spec: None }) => {
+                c == d && e == f && all(&ps, &qs, trail) && self.same_ty(r, q, trail)
+            }
+            (Ty::Poly { binders: bs, body: x }, Ty::Poly { binders: cs, body: y }) => bs == cs && self.same_ty(x, y, trail),
+            (Ty::Ref(x, r), Ty::Ref(y, s)) => r == s && self.same_ty(x, y, trail),
+            (Ty::Pair(x, xt, r, n), Ty::Pair(y, yt, s, m)) => r == s && n == m && self.same_ty(x, y, trail) && self.same_ty(xt, yt, trail),
+            (Ty::Product(ps), Ty::Product(qs)) | (Ty::Sum(ps), Ty::Sum(qs)) => parts(&ps, &qs, trail),
+            (Ty::Array(x, m, r), Ty::Array(y, n, s)) | (Ty::NList { elem: x, size: m, region: r }, Ty::NList { elem: y, size: n, region: s }) => {
+                m == n && r == s && self.same_ty(x, y, trail)
+            }
+            (Ty::Named { which: g, args: xs }, Ty::Named { which: h, args: ys }) => {
+                g == h
+                    && xs.len() == ys.len()
+                    && xs.iter().zip(&ys).all(|(x, y)| match (x, y) {
+                        (crate::ast::D::Type(x), crate::ast::D::Type(y)) | (crate::ast::D::Fun(x), crate::ast::D::Fun(y)) => self.same_ty(*x, *y, trail),
+                        (crate::ast::D::Region(r), crate::ast::D::Region(s)) => r == s,
+                        (crate::ast::D::Effect(e), crate::ast::D::Effect(f)) => e == f,
+                        (crate::ast::D::Size(m), crate::ast::D::Size(n)) => m == n,
+                        (crate::ast::D::Conv(c), crate::ast::D::Conv(d)) => c == d,
+                        _ => false,
+                    })
+            }
+            (Ty::Union(ms), Ty::Union(ns)) => all(&ms, &ns, trail),
+            _ => false,
+        }
     }
 
     fn show_ty_on(&self, t: TyId, path: &mut Vec<TyId>) -> String {

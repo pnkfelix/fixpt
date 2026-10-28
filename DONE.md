@@ -3794,3 +3794,32 @@ cellular code: 39 µs a key typing in a burst, against 7 as globals.
   `binder-kind?`, `binder-params`).
 - **Tests**: `modules/define-star-as-value.fx`,
   `modules/define-star-value-reads.fx`, `modules/module-parameters-qualified.fx`.
+
+## 149. Types interned in the checker written in FX-26; names printed by structure (Heist's, the user's, 2026-10-28)
+
+Heist's editor as module-parameter files started in 6.2 s against 4.5 s
+as globals, nearly all in the FX-26 checker's subtyping: each file's module
+types are instantiated from the files before it, so one type, `buffer`,
+reached a file as several nodes, and every call of an included procedure
+compared them structurally, deep into large records.
+
+- **Interning** (`k-ty-new`): every node but a link and those whose meaning
+  is not their parts is looked up by its parts, each followed through its
+  links, and the node of the same parts given again; a cache, let go past
+  400 000 entries and at the checker's reset.
+- **Names printed by structure** (the user's design), in both checkers: a
+  type is shown by the innermost abbreviation in scope whose type it is,
+  where it has parts (`Checker::abbreviation`, `same_ty`; `k-fits?`,
+  `k-same-shape?`, the abbreviation tree keyed by a shape's hash). An
+  alias of a base type names nothing: the one expected output changed
+  (`dialects.rs`, `t` an alias of `bool`).
+- **What a type's id meant, kept on nodes of their own** (`k-ty-fresh`):
+  `->*`'s mark; a standard binding (`k-bind-std`; a local `+` of `+`'s type
+  was taken for it, and `run/standard-refs.fx` ran wrong); a recursive
+  group's names (`k-recursive`; two loops named `go` of one type were one).
+- **Heist's editor starts in 5.0 s** (4.1 s as globals on the same run),
+  types as before. **Stage 0** costs 29.36G instructions against 29.10G
+  (+0.9%), 13.05G cycles against 12.6G (+3%): a lookup at every node made.
+- **`cargo nextest`** (installed 2026-10-28): the suite in 100 s, its
+  binaries' tests in one pool; `.config/nextest.toml` runs the test that
+  times itself by the wall clock alone.

@@ -281,8 +281,7 @@
         nil
         (let* ((star (set k-arrow-star (k-written-arrow-star? (extract (car bs) 2))))
                (t0 (k-parse-type (extract (car bs) 2)))
-               (t (k-select-syn t0 (extract (car bs) 2)))
-               (marked (k-arrow-star-as t0 t))
+               (t (k-arrow-star-as t0 (k-ty-fresh (k-select-syn t0 (extract (car bs) 2)))))
                (bound (k-bind-named-global (extract (car bs) 1) t))
                (noted (k-note-known (extract (car bs) 1) 0)))
           (cons t (k-rec-types (cdr bs)))))))

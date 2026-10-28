@@ -2300,3 +2300,15 @@ The user: "Yeah do 1, 2, and 3" (names, lines, values). Names first.
 - **(3), a parameter typed by its file alone, not done**: Heist measured
   the parameters' types as costing nothing to check, so it would save only
   writing.
+
+## Interning, and names by structure (2026-10-28)
+
+- **The printer, not interning, changed**: the checkers named a type by its
+  node's id, which interning shares; naming by structure (the user's table
+  of aliases) leaves interning free. Of the rules for which aliases name,
+  "where it abbreviates" (a type with parts) is the user's, as a printing
+  rule rather than one about types.
+- **Alias nodes, which keep provenance, not done**: every function that
+  rebuilds a type would have to keep them, in both checkers.
+- **Stage 0's 3% kept for now** (the user's word): to be brought down, by a
+  cheaper lookup or fewer nodes looked up.

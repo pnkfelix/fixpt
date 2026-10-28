@@ -1,0 +1,7 @@
+# `cargo nextest run`: every test of every binary in one pool.
+
+# Tests that time themselves by the wall clock run alone, every slot theirs:
+# under the whole suite's load they would measure the load.
+[[profile.default.overrides]]
+filter = 'test(=a_deadline_passed_over_is_not_waited_for)'
+threads-required = 'num-test-threads'
