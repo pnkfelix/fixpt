@@ -301,8 +301,10 @@ impl Checker {
         if !has_cycle(&kids) {
             return None;
         }
+        // A node printed by a name of its own (`print_tys`) is labelled by
+        // it, so that it is not merged with one that is not.
         self.print_shallow.set(true);
-        let labels: Vec<String> = order.iter().map(|n| self.show_ty_body(*n, &mut Vec::new())).collect();
+        let labels: Vec<String> = order.iter().map(|n| self.print_tys.borrow().get(n).cloned().unwrap_or_else(|| self.show_ty_body(*n, &mut Vec::new()))).collect();
         self.print_shallow.set(false);
         let mut class: Vec<usize> = numbered(labels.iter());
         let mut count = class.iter().max().map_or(0, |m| m + 1);
@@ -419,7 +421,11 @@ impl Checker {
         if self.print_shallow.get() {
             return "·".into();
         }
-        let t = self.canon(self.arena.resolve(t));
+        let t = self.arena.resolve(t);
+        if let Some(shown) = self.print_tys.borrow().get(&t) {
+            return shown.clone();
+        }
+        let t = self.canon(t);
         if let Some(shown) = self.print_tys.borrow().get(&t) {
             return shown.clone();
         }

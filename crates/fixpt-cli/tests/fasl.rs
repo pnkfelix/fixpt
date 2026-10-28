@@ -213,3 +213,22 @@ fn a_program_compiles_a_file_and_another_machine_reads_its_own() {
     assert!(ok && out.contains("41 : int"), "{out}{err}");
     assert_eq!(err.lines().filter(|l| l.contains("is read from")).count(), 2, "{err}");
 }
+
+/// A maker's interface names its parameters' types as its source did,
+/// though a type written out the same comes first: its recursive types
+/// minimized where they are printed, a name of one's own is not merged.
+#[test]
+fn a_maker_keeps_its_parameters_types_named() {
+    let dir = scratch("named");
+    std::fs::write(dir.join("a.fx"), "(module-parameters ())\n(define-type ints (listof int acyclic))\n(define none ints nil)\n").expect("written");
+    std::fs::write(
+        dir.join("b.fx"),
+        "(module-parameters ((m-a (load-moduleof \"a.fx\"))))\n(define both (subr pure ((listof int acyclic) (select m-a ints)) (select m-a ints)) (lambda (x y) y))\n",
+    )
+    .expect("written");
+    let (ok, out, err) = fixpt(&dir, &["compile-file", "a.fx", "b.fx"], &[]);
+    assert!(ok, "{out}{err}");
+    let fasl = String::from_utf8_lossy(&std::fs::read(dir.join("b.fasl")).expect("read")).to_string();
+    let made = fasl.lines().find(|l| l.starts_with("made ")).expect("a maker's");
+    assert!(made.contains("(subr pure ((listof int acyclic) (select m-a ints)) (select m-a ints))"), "{made}");
+}
