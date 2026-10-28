@@ -2715,3 +2715,26 @@ of `TODO.md` §141, working on my own.
 - Result: start-up 0.45 s to 0.43-0.44 s; `fixpt check` of the makers,
   the FX-26 checker 1.07 s to 1.05 s; the suite passes (862).
 
+### Proven module subtyping kept (2026-10-28)
+
+- **Why**: file `k`'s maker is given every file's module before it, so
+  Heist's 14 makers ask some 90 argument checks, of only about 13
+  distinct pairs: each later maker's first parameter is
+  `(load-input-moduleof "base.fx")`, one interned node, and each call
+  passes the same global `m-base`; the deeper parameters, instantiated,
+  name the call site's globals too.
+- **Chosen** (the user's: just `moduleof` pairs to begin with): a whole
+  subtype question (`k-subtype`) between two module types, shown where no
+  lemma is in force, no generative type is open and no size runs to the
+  end, is noted (`k-proven`) and answered at once when asked again.
+  Only what was shown, not what failed. A reset of the arena, which
+  numbers nodes again, lets it go (`k-arena-gen`).
+- **Measured**, alternating two binaries, the machine busy: Heist's
+  start-up from `.fasl`s 0.43 s to 0.39 s; `fixpt check` of the makers,
+  the FX-26 checker 1.10 to 1.08 s.
+- **Widened, as an experiment** (the user's: a miss may mean widen it):
+  every pair, under the same conditions: `fixpt check` no faster
+  (1.07 against 1.06 s). What is left there is not whole questions asked
+  again. Kept to module types, which need no argument about types whose
+  slots are filled later.
+

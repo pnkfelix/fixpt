@@ -209,6 +209,33 @@
                                      (k-benv=? (extract e 4) ea) (k-benv=? (extract e 5) eb)))
                               (in? (cdr es)))))))
       (in? (table-ref (get k-strail-index) (k-strail-key a b) nil)))))
+;; Each pair of module types `a ≤ b` a whole subtype question has shown
+;; (`k-subtype`), by the pair (`k-strail-key`): asked again, as each call of
+;; a maker asks of the modules given it, known at once. Of the arena as it
+;; is (`k-arena-gen`), whose nodes a reset numbers again.
+(define-type k-pairs-at (listof (pairof int int @t) @t))
+(define k-proven (ref (table int k-pairs-at @t) @t)
+  (new (make-table (lambda ((n int)) n) (lambda ((m int) (n int)) (= m n)))))
+(define k-proven-gen (ref int @t) (new 0))
+(define k-proven-now (->* () (table int k-pairs-at @t))
+  (lambda ()
+    (begin
+      (if (= (get k-proven-gen) (get k-arena-gen))
+          #u
+          (begin (set k-proven (make-table (lambda ((n int)) n) (lambda ((m int) (n int)) (= m n))))
+                 (set k-proven-gen (get k-arena-gen))))
+      (get k-proven))))
+(define k-proven? (->* (int int) bool)
+  (lambda (a b)
+    (letrec ((in? (->* (k-pairs-at) bool)
+                   (lambda (ps)
+                     (and (pair? ps)
+                          (or (and (= (car (car ps)) a) (= (cdr (car ps)) b)) (in? (cdr ps)))))))
+      (in? (table-ref (k-proven-now) (k-strail-key a b) nil)))))
+(define k-prove! (->* (int int) unit)
+  (lambda (a b)
+    (let ((t (k-proven-now)) (k (k-strail-key a b)))
+      (table-set! t k (cons (cons a b) (table-ref t k nil))))))
 ;; Put a subtype question's memory back as it was: trail `st`, labels `sl`.
 (define k-restore (->* (k-strail k-labels k-assumed k-label-list) unit)
   (lambda (trail labels st sl)

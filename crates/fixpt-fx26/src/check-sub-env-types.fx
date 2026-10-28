@@ -77,6 +77,14 @@
                  (subr (maxeff (read @globals) (read @t) spin)
                        (k-assumed int int k-benv k-benv)
                        bool))
+            (val k-proven?
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (int int)
+                       bool))
+            (val k-prove!
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (int int)
+                       unit))
             (val k-question-begin!
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t)) () unit))
             (val k-question-end!

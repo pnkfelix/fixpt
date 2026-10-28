@@ -320,6 +320,7 @@
         (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin) (int int) int))
    (val k-ty-fresh (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t) spin) (int) int))
    (val k-intern-reset (subr (maxeff (read @globals) (read @t) (write @t) (alloc @t)) () unit))
+   (val k-arena-gen (ref int @t))
    (val k-applied-has? (subr (maxeff (read @globals) (read @t)) (k-ty) bool))
    (val k-applied-get (subr (maxeff (read @globals) (read @t)) (k-ty) k-desc))
    (val k-applied-put!

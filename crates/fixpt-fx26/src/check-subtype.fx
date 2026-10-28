@@ -187,12 +187,25 @@
                (k-sub-hyps (cdr hs) ea eb trail labels)))))
   ;; `a ≤ b`, a question of its own, one deeper than any open
   ;; (`k-question`). Its trail's entries dropped once it is answered.
+  ;; Two module types shown so where nothing else is assumed (no lemma, no
+  ;; generative type open, no size to the end), known so after (`k-proven`):
+  ;; each call of a maker compares the modules it is given with the same
+  ;; parameters again.
   (k-subtype (->* (int int) bool)
     (lambda (a b)
-      (let* ((trail (the k-strail (new nil)))
-             (begun (k-question-begin!))
-             (r (k-sub a b (the k-benv nil) (the k-benv nil) trail (the k-labels (new nil)))))
-        (begin (k-strail-drop (get trail) nil) (k-question-end!) r))))
+      (let* ((ra (k-resolve a)) (rb (k-resolve b))
+             (kept (and (null? (get k-lemmas)) (null? (get k-transparent))
+                        (null? (get k-to-end-sizes)) (k-module-ty? ra) (k-module-ty? rb))))
+        (if (and kept (k-proven? ra rb))
+            #t
+            (let* ((trail (the k-strail (new nil)))
+                   (begun (k-question-begin!))
+                   (r (k-sub a b (the k-benv nil) (the k-benv nil) trail (the k-labels (new nil)))))
+              (begin (k-strail-drop (get trail) nil) (k-question-end!)
+                     (if (and r kept) (k-prove! ra rb) #u)
+                     r))))))
+  (k-module-ty? (->* (int) bool)
+    (lambda (t) (tagcase (k-get t) (ty-module (abs ds vs) #t) (else y #f))))
   (k-same-ty? (->* (int int) bool)
     (lambda (x y) (and (k-subtype x y) (k-subtype y x))))
   ;; Each lemma of `ls` that fits `a` and `b`: its hypotheses, instantiated.

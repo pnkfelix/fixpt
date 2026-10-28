@@ -348,6 +348,9 @@
 ;; Each cycle interned, by its canonical form from each of its nodes.
 (define k-cyclic (ref (table k-cyc-key int @t) @t) (new (make-table k-cyc-hash k-cyc-same?)))
 (define k-interned (ref (table k-ty int @t) @t) (new (make-table k-ty-hash k-ty-same?)))
+;; How many times the arena was begun again (`k-intern-reset`): what a memo of
+;; nodes kept elsewhere is let go at (`k-proven`).
+(define k-arena-gen (ref int @t) (new 0))
 ;; Each description function applied, by `(ty-app f ds)`, its parts as they
 ;; resolve: what it reduced to, made once (`k-apply-fun`; a `.fasl`'s
 ;; families are applied where each was written out).
@@ -358,7 +361,8 @@
   (lambda ()
     (begin (set k-interned (make-table k-ty-hash k-ty-same?))
            (set k-cyclic (make-table k-cyc-hash k-cyc-same?))
-           (set k-applied (make-table k-ty-hash k-ty-same?)))))
+           (set k-applied (make-table k-ty-hash k-ty-same?))
+           (set k-arena-gen (+ (get k-arena-gen) 1)))))
 (define k-applied-has? (subr (maxeff (read @globals) (read @t)) (k-ty) bool)
   (lambda (key) (table-has? (get k-applied) key)))
 (define k-applied-get (subr (maxeff (read @globals) (read @t)) (k-ty) k-desc)
