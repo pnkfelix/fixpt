@@ -3370,9 +3370,7 @@ Module files have them (DONE §156; `docs/research/fasl.md`,
   load's hidden global (as the processes library's forms do) kept too;
   the facts a declaration does not give either checker (a known lambda's,
   the compiler's for making a call in line), whose absence only slows;
-  the FX-26 checker's check of each declaration, 0.5 s of stage 0's load,
-  made cheaper (most of it reading the types); and `compile-file` of
-  kayak's compiler, 11 s, faster.
+  and `compile-file` of kayak's compiler, 10 s, faster.
 - **Native code in the `.fasl`** (decision 2's default): a relocation
   table from both native compilers for the call-outs (numbered by each
   machine as it compiles) and the calls between code bloblets, so that

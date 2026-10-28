@@ -2428,7 +2428,10 @@ program's file). What I chose:
     one the file defines that does not read yet (it selects from a module a
     later form loads) is compared when the first definition naming it is
     declared, and if it differs that form runs from its source.
-  - Stage 0, 3.33 s from source, 2.60 s from the `.fasl` (888 definitions
-    kept). Left of loading: the FX-26 checker's check of each declaration
-    (0.5 s), the native compiles (0.14 s), and `compile-file` is slow, 11 s
-    (printing and reading back big module types).
+  - **A declaration is of the type as printed, names and all**, not written
+    out (but to see a `poly`, or a procedure's parameters, an abbreviation
+    hides): written out, kayak's types were 2.4 MB against 90 KB, and
+    checking the declarations was most of loading.
+  - Stage 0, 3.30 s from source, 1.15 s from the `.fasl` (888 definitions
+    kept). `compile-file` of it is slow, 10 s (printing and reading back
+    big module types).

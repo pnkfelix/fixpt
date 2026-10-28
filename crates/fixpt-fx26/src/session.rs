@@ -1830,11 +1830,23 @@ impl Fx26Session {
             return None;
         }
         let uses = used.into_iter().filter_map(|u| Some((self.checker.interner.name(u).to_string(), self.checker.fasl_program_type(self.checker.global_type(u)?).ok()?))).collect();
-        // The type written out, its `poly`s and procedures taken apart.
-        let kept = self.checker.print_aliases.borrow_mut().take();
-        let expanded = self.checker.fasl_program_type(tid);
-        *self.checker.print_aliases.borrow_mut() = kept;
-        let syn = self.checker.read_in(FileId(0), &expanded.ok()?).ok()?.pop()?;
+        // The type, its `poly`s and procedures taken apart: as printed, if
+        // that shows them, else written out (an abbreviation of a `poly`,
+        // say), which can be much longer.
+        let shaped = |t: &str| t.starts_with("(poly ") || (rec && t.starts_with("(subr "));
+        let text = match shaped(&ty) || (!rec && ty.starts_with('(')) {
+            true => ty.clone(),
+            false => {
+                let kept = self.checker.print_aliases.borrow_mut().take();
+                let expanded = self.checker.fasl_program_type(tid);
+                *self.checker.print_aliases.borrow_mut() = kept;
+                match expanded.ok()? {
+                    e if shaped(&e) => e,
+                    _ => ty.clone(),
+                }
+            }
+        };
+        let syn = self.checker.read_in(FileId(0), &text).ok()?.pop()?;
         let init = match rec {
             false => crate::fasl::fasl_value_at(&syn, &self.checker.interner),
             true => crate::fasl::fasl_lambda_at(&syn, &self.checker.interner)?,

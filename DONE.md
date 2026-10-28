@@ -3959,4 +3959,4 @@ source in its turn. Compiling runs nothing of what the program does. Every
 program of `tests/programs` that compiles (but `syscalls` and `bench`'s,
 not run) gives the same from its `.fasl` as from its source, 342 of them
 reading it (`crates/fixpt-cli/tests/fasl.rs` runs eight directories).
-Kayak's compiler: stage 0 in 2.60 s from its `.fasl`, 3.33 s from source.
+Kayak's compiler: stage 0 in 1.15 s from its `.fasl`, 3.30 s from source.
