@@ -11,8 +11,10 @@
 
 pub mod alloc_profile;
 pub mod exec;
+pub mod mapped;
 pub mod reserve;
 pub mod words;
 
 pub use exec::ExecView;
+pub use mapped::Mapped;
 pub use words::Words;

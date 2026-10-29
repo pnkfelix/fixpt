@@ -165,7 +165,6 @@ fn make_executable(_path: &str) -> Result<(), String> {
 /// whole command line.
 pub fn embedded_in_self() -> Option<Heap> {
     let exe = std::env::current_exe().ok()?;
-    let bytes = std::fs::read(exe).ok()?;
-    let img = image::extract_embedded(&bytes)?;
-    image::load(img).ok()
+    let img = image::read_embedded(&exe).ok()??;
+    image::load_trusted(&img).ok()
 }

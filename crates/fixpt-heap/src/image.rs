@@ -137,6 +137,57 @@ pub fn dump(heap: &Heap) -> Vec<u8> {
 /// own structural invariants — a corrupt image should fail here rather than
 /// somewhere deep inside the collector later on.
 pub fn load(bytes: &[u8]) -> Result<Heap, ImageError> {
+    load_checking(bytes, true)
+}
+
+/// [`load`] for an image this executable wrote, by a rename, and keyed by
+/// it (its own embedded image, the front end's cache, a `.fasl`): neither
+/// its checksum nor the heap's invariants checked, each a read of every
+/// page (`TODO.md` §159). Neither is security: an image holds native code.
+pub fn load_trusted(bytes: &[u8]) -> Result<Heap, ImageError> {
+    load_checking(bytes, false)
+}
+
+/// An image's parts, read but not yet made a heap: its live region's words
+/// as the file has them (little-endian), its roots, globals and symbols,
+/// and each part of its code area, its words (the same) and free blocks.
+/// For [`load`], and for [`Heap::splice_image`], which puts them in a heap
+/// that holds something already.
+pub struct Parts<'a> {
+    pub words: &'a [u8],
+    pub globals: Vec<Value>,
+    pub symbols: Vec<Value>,
+    pub roots: Vec<Value>,
+    pub code: [(&'a [u8], Vec<(usize, usize)>); 2],
+}
+
+impl Parts<'_> {
+    pub fn n_words(&self) -> usize {
+        self.words.len() / 8
+    }
+
+    /// Word `i` of the live region.
+    pub fn word(&self, i: usize) -> u64 {
+        u64::from_le_bytes(self.words[i * 8..i * 8 + 8].try_into().unwrap())
+    }
+
+    /// A pair's car and cdr, in the image's own terms (from word 0).
+    pub fn car(&self, p: Value) -> Value {
+        Value(self.word(p.index()))
+    }
+
+    pub fn cdr(&self, p: Value) -> Value {
+        Value(self.word(p.index() + 1))
+    }
+}
+
+/// Little-endian words, as a `Vec`.
+pub(crate) fn words_of(b: &[u8]) -> Vec<u64> {
+    b.chunks_exact(8).map(|w| u64::from_le_bytes(w.try_into().unwrap())).collect()
+}
+
+/// An image's [`Parts`], its checksum checked if `check`.
+pub fn parts(bytes: &[u8], check: bool) -> Result<Parts<'_>, ImageError> {
     if bytes.len() < HEADER_BYTES + 4 {
         return Err(ImageError::Truncated { expected: HEADER_BYTES + 4, found: bytes.len() });
     }
@@ -169,7 +220,7 @@ pub fn load(bytes: &[u8]) -> Result<Heap, ImageError> {
         return Err(ImageError::Truncated { expected: total, found: bytes.len() });
     }
     let expected = u32::from_le_bytes(bytes[body..body + 4].try_into().unwrap());
-    let found = crc32(&bytes[..body]);
+    let found = if check { crc32(&bytes[..body]) } else { expected };
     if expected != found {
         return Err(ImageError::BadChecksum { expected, found });
     }
@@ -180,21 +231,23 @@ pub fn load(bytes: &[u8]) -> Result<Heap, ImageError> {
         *at += 8;
         w
     };
-    let words: Vec<u64> = (0..n_words).map(|_| read_u64(&mut at)).collect();
+    let words = &bytes[at..at + n_words * 8];
+    at += n_words * 8;
     let globals: Vec<Value> = (0..n_globals).map(|_| Value(read_u64(&mut at))).collect();
     let symbols: Vec<Value> = (0..n_symbols).map(|_| Value(read_u64(&mut at))).collect();
     let roots: Vec<Value> = (0..n_roots).map(|_| Value(read_u64(&mut at))).collect();
     let code = code_counts.map(|(n, f)| {
         at += 16;
-        let words: Vec<u64> = (0..n).map(|_| read_u64(&mut at)).collect();
+        let words = &bytes[at..at + n * 8];
+        at += n * 8;
         let free: Vec<(usize, usize)> = (0..f).map(|_| (read_u64(&mut at) as usize, read_u64(&mut at) as usize)).collect();
         (words, free)
     });
     // Free blocks in order, apart, within their part.
-    let apart = |w: &Vec<u64>, free: &Vec<(usize, usize)>| {
+    let apart = |w: &[u8], free: &Vec<(usize, usize)>| {
         let mut end = 0;
         free.iter().all(|&(s, n)| {
-            let ok = n > 0 && s >= end && s.checked_add(n).is_some_and(|e| e <= w.len());
+            let ok = n > 0 && s >= end && s.checked_add(n).is_some_and(|e| e <= w.len() / 8);
             end = s.saturating_add(n);
             ok
         })
@@ -203,8 +256,20 @@ pub fn load(bytes: &[u8]) -> Result<Heap, ImageError> {
         return Err(ImageError::Malformed("the code area's free blocks out of order or outside it".into()));
     }
 
-    let heap = Heap::from_image_with_code(&words, code, globals, symbols, roots).map_err(ImageError::Malformed)?;
-    heap.verify().map_err(ImageError::Malformed)?;
+    Ok(Parts { words, globals, symbols, roots, code })
+}
+
+fn load_checking(bytes: &[u8], check: bool) -> Result<Heap, ImageError> {
+    let Parts { words, globals, symbols, roots, code } = parts(bytes, check)?;
+    let code = code.map(|(w, free)| (words_of(w), free));
+    let heap = Heap::from_image_with_code(words.len() / 8, |w| {
+        for (w, b) in w.iter_mut().zip(words.chunks_exact(8)) {
+            *w = u64::from_le_bytes(b.try_into().unwrap());
+        }
+    }, code, globals, symbols, roots).map_err(ImageError::Malformed)?;
+    if check {
+        heap.verify().map_err(ImageError::Malformed)?;
+    }
     Ok(heap)
 }
 
@@ -233,6 +298,32 @@ pub fn extract_embedded(exe_bytes: &[u8]) -> Option<&[u8]> {
     let len = u64::from_le_bytes(exe_bytes[tail..tail + 8].try_into().ok()?) as usize;
     let start = tail.checked_sub(len)?;
     Some(&exe_bytes[start..tail])
+}
+
+/// The image appended to the file at `path`, read without reading the rest:
+/// the trailer first, and the image only if [`EMBED_MAGIC`] is there. A plain
+/// runtime binary costs one seek and one 16-byte read.
+pub fn read_embedded(path: &std::path::Path) -> std::io::Result<Option<Vec<u8>>> {
+    use std::io::{Read as _, Seek as _, SeekFrom};
+    let mut f = std::fs::File::open(path)?;
+    let len = f.metadata()?.len();
+    if len < TRAILER_BYTES as u64 {
+        return Ok(None);
+    }
+    let mut trailer = [0u8; TRAILER_BYTES];
+    f.seek(SeekFrom::Start(len - TRAILER_BYTES as u64))?;
+    f.read_exact(&mut trailer)?;
+    if &trailer[8..] != EMBED_MAGIC {
+        return Ok(None);
+    }
+    let n = u64::from_le_bytes(trailer[..8].try_into().unwrap());
+    let Some(start) = (len - TRAILER_BYTES as u64).checked_sub(n) else {
+        return Ok(None);
+    };
+    let mut img = vec![0u8; n as usize];
+    f.seek(SeekFrom::Start(start))?;
+    f.read_exact(&mut img)?;
+    Ok(Some(img))
 }
 
 /// CRC-32 (IEEE), from tables the compiler builds, so that no dependency is

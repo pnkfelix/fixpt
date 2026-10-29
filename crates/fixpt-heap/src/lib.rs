@@ -26,4 +26,5 @@ pub mod value;
 
 pub use heap::{callout_map_set, set_callout_map, BlobletError, CalloutMap, CodePart, Head, Heap};
 pub use image::ImageError;
+pub use fixpt_memmgmt::Mapped;
 pub use value::{ObjType, Value};

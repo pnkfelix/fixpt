@@ -429,30 +429,46 @@ fn save_native_front_end(heap: &fixpt_heap::Heap, pieces: fixpt_heap::Value, pat
 /// What [`save_native_front_end`] kept, copied into `heap`, its code made
 /// code again: the pieces; none if the image is not one, when the front
 /// end is compiled and run as ever.
-fn load_native_front_end(k: &NativeKeeping, heap: &mut fixpt_heap::Heap, from: &fixpt_heap::Heap) -> Option<fixpt_heap::Value> {
+fn load_native_front_end(k: &NativeKeeping, heap: &mut fixpt_heap::Heap, bytes: &[u8]) -> Option<fixpt_heap::Value> {
     use fixpt_heap::Value;
-    let root = *from.roots_slice().first()?;
-    let list = |mut l: Value| {
-        let mut out = Vec::new();
-        while l.is_pair() {
-            out.push(from.car(l));
-            l = from.cdr(l);
-        }
-        out
-    };
-    if !root.is_pair() || !from.cdr(root).is_pair() || !from.cdr(from.cdr(root)).is_pair() {
+    let img = fixpt_heap::image::parts(bytes, false).ok()?;
+    let root = *img.roots.first()?;
+    if !root.is_pair() || !img.cdr(root).is_pair() || !img.cdr(img.cdr(root)).is_pair() {
         return None;
     }
-    let (pieces, codes, adapter) = (from.car(root), from.car(from.cdr(root)), from.car(from.cdr(from.cdr(root))));
-    let mut given = std::collections::HashMap::new();
-    if adapter != Value::FALSE {
-        given.insert(adapter.raw(), (k.adapter_code)(heap).ok()?);
-    }
-    let code: std::collections::HashSet<u64> = list(codes).iter().map(|c| c.raw()).collect();
-    let (copy, made) = heap.copy_graph_with(from, pieces, |v| code.contains(&v.raw()), &given);
-    let made_code: Vec<Value> = code.iter().filter_map(|k| made.get(k).copied()).collect();
+    let adapter = img.car(img.cdr(img.cdr(root)));
+    let adapter = match adapter == Value::FALSE {
+        true => None,
+        false => Some((adapter, (k.adapter_code)(heap).ok()?)),
+    };
+    // Spliced in, unless `FIXPT_IMAGE_COPY` asks for the copy of a graph
+    // that the splice replaced (`TODO.md` §160): for debugging.
+    let (pieces, made_code) = if std::env::var_os("FIXPT_IMAGE_COPY").is_some() {
+        let from = fixpt_heap::image::load_trusted(bytes).ok()?;
+        let root = *from.roots_slice().first()?;
+        let code: std::collections::HashSet<u64> = list(&from, from.car(from.cdr(root))).iter().map(|c| c.raw()).collect();
+        let mut given = std::collections::HashMap::new();
+        if let Some((_, to)) = adapter {
+            given.insert(from.car(from.cdr(from.cdr(root))).raw(), to);
+        }
+        let (copy, made) = heap.copy_graph_with(&from, from.car(root), |v| code.contains(&v.raw()), &given);
+        (copy, code.iter().filter_map(|k| made.get(k).copied()).collect())
+    } else {
+        let root = *heap.splice_image(&img, adapter.as_slice()).ok()?.first()?;
+        (heap.car(root), list(heap, heap.car(heap.cdr(root))))
+    };
     (k.note_code)(heap, &made_code);
-    Some(copy)
+    Some(pieces)
+}
+
+/// The elements of list `l` of `heap`'s.
+fn list(heap: &fixpt_heap::Heap, mut l: fixpt_heap::Value) -> Vec<fixpt_heap::Value> {
+    let mut out = Vec::new();
+    while l.is_pair() {
+        out.push(heap.car(l));
+        l = heap.cdr(l);
+    }
+    out
 }
 
 /// `heap`, all of it, written to `path` as an image after `key`.
@@ -1413,7 +1429,7 @@ impl Fx26Session {
         }
         self.own_begun = true;
         let fail = |e: String| FxError::at(Span::new(FileId(0), 0, 0), format!("`{}`: {e}", fasl.display()));
-        let bytes = std::fs::read(fasl).map_err(|e| fail(e.to_string()))?;
+        let bytes = fixpt_heap::Mapped::open(fasl).map_err(|e| fail(e.to_string()))?;
         let (_, image) = crate::fasl::Header::read(&bytes).map_err(fail)?;
         let (from, value, links, natives) = crate::fasl::read_image(image).map_err(fail)?;
         let deps: Vec<Sym> = self.checker.shared_files.get(&name).map(|f| f.deps.iter().map(|d| d.2).collect()).unwrap_or_default();
@@ -1653,7 +1669,7 @@ impl Fx26Session {
     /// code. A stale one said (`fasl_notes`).
     fn program_fasl(&mut self, path: &std::path::Path, forms: &[Syntax]) -> Option<ProgramFasl> {
         let fasl = crate::fasl::path_for(path);
-        let bytes = std::fs::read(&fasl).ok()?;
+        let bytes = fixpt_heap::Mapped::open(&fasl).ok()?;
         let stale = |s: &mut Self, why: &str| {
             s.checker.fasl_notes.push(format!("`{}` is stale ({why}): `{}` is run from its source", fasl.display(), path.display()));
             None
@@ -2319,19 +2335,22 @@ impl Fx26Session {
         let as_native = keep && self.front_end_native;
         let cache = if keep { front_end_cache(&text, as_native) } else { None };
         let image = cache.as_ref().and_then(|(p, key)| {
-            let b = std::fs::read(p).ok()?;
-            (b.get(..8)? == key.to_le_bytes()).then(|| fixpt_heap::image::load(&b[8..]).ok())?
+            let b = fixpt_heap::Mapped::open(p).ok()?;
+            (b.get(..8)? == key.to_le_bytes()).then_some(b)
         });
         // Native, the cache keeps the front end as its first run left it,
         // native code and all (`TODO.md` §126): neither checked, compiled
         // nor run again, where it can be read back.
         let keeping = self.native_keeping.filter(|_| as_native);
-        let (cached, kept) = if keeping.is_some() { (None, image) } else { (image, None) };
+        let (cached, kept) = match keeping {
+            Some(_) => (None, image),
+            None => (image.and_then(|b| fixpt_heap::image::load_trusted(&b[8..]).ok()), None),
+        };
         if let (Some(from), Some(k)) = (&kept, &keeping) {
             let mut loaded = false;
             self.scheme.scope(|sc| {
                 sc.make(|m| {
-                    if let Some(p) = load_native_front_end(k, m.heap(), from) {
+                    if let Some(p) = load_native_front_end(k, m.heap(), &from[8..]) {
                         set_entries(m.heap(), p, entries, native);
                         loaded = true;
                     }

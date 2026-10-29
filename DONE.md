@@ -3975,3 +3975,21 @@ program of `tests/programs` that compiles (but `syscalls` and `bench`'s,
 not run) gives the same from its `.fasl` as from its source, 342 of them
 reading it (`crates/fixpt-cli/tests/fasl.rs` runs eight directories).
 Kayak's compiler: stage 0 in 1.15 s from its `.fasl`, 3.30 s from source.
+
+## 158. An executable's image found by its trailer alone (the user's, 2026-10-28)
+
+`image_run::embedded_in_self` read the whole executable (18 MB) on every
+run to look at its last 16 bytes (Heist's
+`docs/requests/fixpt-load-time.md`, item 2). Now `image::read_embedded`
+reads the trailer, and the image only if `EMBED_MAGIC` is there: an empty
+FX-26 program 148 ms to 138 ms.
+
+## 159. No checksum for an image this executable wrote (the user's, 2026-10-28)
+
+`image::load_trusted`, for an image whose writer is known (the
+executable's own embedded image, the front end's cache and `.fasl`s, each
+keyed by this executable and written by a rename), checks neither its
+CRC-32 nor `Heap::verify`, each a read of every page and neither a
+security measure (an image holds native code). `--heap` files and
+`fixpt image verify` still check both. An empty FX-26 program 137 ms to
+123 ms.

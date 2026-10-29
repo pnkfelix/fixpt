@@ -2738,3 +2738,33 @@ of `TODO.md` §141, working on my own.
   again. Kept to module types, which need no argument about types whose
   slots are filled later.
 
+
+### Images: trusted, mapped, and spliced (2026-10-28)
+
+- **Why** (the user's, from Heist's `docs/requests/fixpt-load-time.md`):
+  every run read the whole executable for its trailer, checked a CRC-32 of
+  the front end's 21 MB image, read it into a buffer, loaded it into a
+  heap of its own and copied it as a graph into the session's.
+- **Trusted images**: the CRC and `verify` skipped only for images this
+  executable wrote and keys (its embedded image, the front end's cache,
+  `.fasl`s), each written by a rename; kept for `--heap` and
+  `fixpt image verify`. Neither is security: an image holds native code.
+- **Mapped, not read** (`fixpt_memmgmt::Mapped`): the cache and `.fasl`s,
+  private and read-only; they are replaced by a rename, never written in
+  place. The words written into the heap straight from the bytes.
+- **Spliced, not copied** (`Heap::splice_image`): chosen over going
+  straight to a fixed base (§160 item 1) as the step that pays now, the
+  user agreeing to the order. The walk that moves references stays as the
+  fallback for a heap that cannot have its address, and under a flag for
+  tests (the user's). A splice that fails undoes what it added (symbols,
+  global slots, the top), so that the copy can follow it.
+- **Measured**: an empty program 145 ms to 54 ms; Heist through `eldoc.fx`
+  0.40 s to 0.33 s (copy against splice, one binary); 67 programs of
+  `tests/programs/run` print the same both ways, and under
+  `FIXPT_VERIFY_BARRIER=1` none misses a card.
+- **The static area's design** (the user's, `TODO.md` §161): static
+  objects never move nor are copied; static refers only to static, but
+  through mutable static objects; code's fields are written only as it is
+  made and as what they refer to moves, so an image's code, fields and
+  all, is immutable; a remembered set for the mutable static section, and
+  later its pruning.

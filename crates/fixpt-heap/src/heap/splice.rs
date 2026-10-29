@@ -1,0 +1,209 @@
+//! An image put into a heap that holds something already, beside it: its
+//! live region past the old space's top, each part of its code area past
+//! that part's, and every reference in them moved by one walk over them
+//! (`TODO.md` §160, the step before an image is put where it was made).
+//! What [`Heap::copy_graph_with`] does from a heap loaded from the image,
+//! without the heap, the graph's table or the copy.
+//!
+//! As that copy does, an interned symbol of the image is this heap's of the
+//! same name, where there is one, and the image's shared stub is this
+//! heap's; each object `given` names is this heap's object instead. The
+//! image's objects otherwise all come in, reached or not: an image is made
+//! of one graph (`save_native_front_end`).
+
+use super::code::in_code_area;
+use super::young::is_young;
+use super::{Heap, callout_in, read_head};
+use crate::image::Parts;
+use crate::layout;
+use crate::value::{Value, is_extension, is_header, make_header};
+use std::collections::HashMap;
+
+/// A symbol's name and global slot: fields 0 and 2 of 3, before its
+/// trailer and the (empty) suffix it is pointed at (`Heap::alloc`).
+const SYMBOL_NAME: usize = 4;
+const SYMBOL_SLOT: usize = 2;
+
+/// Where the image's words go: each of its regions (the live region, the
+/// code area's two parts), from where in the image to where in this heap,
+/// and how many words.
+struct Moves {
+    regions: [(usize, usize, usize); 3],
+}
+
+impl Moves {
+    /// Where image word `i` goes; none if it is in no region.
+    #[inline]
+    fn index(&self, i: usize) -> Option<usize> {
+        self.regions.iter().find(|&&(from, _, n)| (from..from + n).contains(&i)).map(|&(from, to, _)| i - from + to)
+    }
+}
+
+impl Heap {
+    /// The image whose parts are `img` put into this heap ([the module's
+    /// doc](self)); its roots, as this heap's. Each pair of `given` is an
+    /// object of the image's (by its value there) and this heap's object
+    /// that stands for it. Nothing collects meanwhile.
+    pub fn splice_image(&mut self, img: &Parts, given: &[(Value, Value)]) -> Result<Vec<Value>, String> {
+        let stub = self.foreign_stub();
+        let n = img.n_words();
+        // From a card's start, so that the crossing map of the cards before
+        // stays as it is.
+        let card = 1 << super::young::CARD_SHIFT;
+        if !self.top.is_multiple_of(card) {
+            let gap = card - self.top % card;
+            self.mem.words_mut()[self.top] = make_header(const { layout::kind("bloblet") }, 0, (gap - 1) * 8);
+            self.top += gap;
+        }
+        let at = self.top;
+        if at + n > self.active + self.semi {
+            self.grow(at + n - self.active);
+        }
+        let mut regions = [(0, at, n); 3];
+        for (k, (words, _)) in img.code.iter().enumerate() {
+            let p = &self.code.parts[k];
+            let len = words.len() / 8;
+            if p.top + len > p.limit() {
+                return Err(format!("the code area's part {k} has no room for {len} words"));
+            }
+            regions[k + 1] = (p.base, p.top, len);
+        }
+        if img.code.iter().any(|(w, _)| !w.is_empty()) {
+            self.start_code_area();
+        }
+        let moves = Moves { regions };
+        let sources = [img.words, img.code[0].0, img.code[1].0];
+        for (&(_, to, len), from) in moves.regions.iter().zip(sources) {
+            let mem = &mut self.mem.words_mut()[to..to + len];
+            for (w, b) in mem.iter_mut().zip(from.chunks_exact(8)) {
+                *w = u64::from_le_bytes(b.try_into().unwrap());
+            }
+        }
+        let base = self.base;
+        // An image reference moved, given nothing for it.
+        let moved = |v: Value| -> Option<Value> {
+            if v.is_suffix_ref() {
+                return Value::suffix_ref(moves.index(v.owner())?, v.offset());
+            }
+            let i = moves.index(v.index())?;
+            Some(Value(v.raw() - ((v.index() as u64) << 3) + (((base + i) as u64) << 3)))
+        };
+
+        // What stands for objects of the image's, by where they are in it.
+        let (symbols, globals, mut added) = (self.symbols.len(), self.globals.len(), Vec::new());
+        let mut instead: HashMap<usize, Value> = given.iter().map(|&(v, to)| (v.index(), to)).collect();
+        for &s in &img.symbols {
+            let at_s = moves.index(s.index()).ok_or("a symbol outside the image")?;
+            let name = moved(Value(self.mem.words()[at_s - SYMBOL_NAME])).ok_or("a symbol's name outside the image")?;
+            let name = self.string_to_rust(name);
+            if name == "%fx26-foreign-stub" {
+                let slot = Value(img.word(s.index() - SYMBOL_SLOT)).as_fixnum() as usize;
+                if let Some(old) = img.globals.get(slot).filter(|w| w.is_ref() && in_code_area(w.index())) {
+                    instead.insert(old.index(), stub);
+                }
+            }
+            if let Some(&i) = self.symbol_index.get(&name) {
+                instead.insert(s.index(), self.symbols[i as usize]);
+                continue;
+            }
+            // The image's symbol is this heap's, at a global slot of its own.
+            let slot = self.globals.len();
+            self.globals.push(Value::UNBOUND);
+            self.mem.words_mut()[at_s - SYMBOL_SLOT] = Value::fixnum(slot as i64).raw();
+            self.symbol_index.insert(name.clone(), self.symbols.len() as u32);
+            added.push(name);
+            self.symbols.push(moved(s).expect("moved above"));
+        }
+
+        let unknown = std::cell::Cell::new(None);
+        let map = |v: Value| -> Value {
+            if v.is_callout() {
+                return callout_in(v).unwrap_or_else(|| {
+                    unknown.set(Some(format!("it holds call-out {:#x}, which this machine does not have", v.as_callout())));
+                    v
+                });
+            }
+            if !v.is_ref() {
+                return v;
+            }
+            if v.is_suffix_ref() {
+                if let Some(&to) = instead.get(&v.owner()) {
+                    return Value::suffix_ref(to.index() - base, v.offset()).expect("an owner within the heap");
+                }
+            } else if let Some(&to) = instead.get(&v.index()) {
+                return to;
+            }
+            moved(v).unwrap_or_else(|| {
+                unknown.set(Some(format!("a reference {v:?} outside it")));
+                v
+            })
+        };
+        // Each field, mapped; its card marked if it is young now.
+        let mut young = Vec::new();
+        for &(_, to, len) in &moves.regions {
+            let mem = self.mem.words_mut();
+            let mut scan = to;
+            while scan < to + len {
+                let w = mem[scan];
+                let (first, count, size) = if is_header(w) {
+                    let main = scan + is_extension(w) as usize;
+                    let head = read_head(mem, main);
+                    (main + 1, head.fields, head.size())
+                } else {
+                    (scan, 2, 2)
+                };
+                for f in first..first + count {
+                    let v = map(Value(mem[f]));
+                    mem[f] = v.raw();
+                    let i = if v.is_suffix_ref() { v.owner() } else if v.is_ref() { v.index() - base } else { continue };
+                    if is_young(i) {
+                        young.push(f);
+                    }
+                }
+                scan += size;
+            }
+        }
+        if let Some(why) = unknown.take() {
+            // Undone: nothing refers to the words past the top.
+            for name in added {
+                self.symbol_index.remove(&name);
+            }
+            self.symbols.truncate(symbols);
+            self.globals.truncate(globals);
+            self.top = at;
+            return Err(why);
+        }
+        for f in young {
+            self.mark_card(f);
+        }
+
+        self.cross_all(at, at + n);
+        self.top = at + n;
+        self.budget_from(self.top - self.active);
+        for (k, (words, free)) in img.code.iter().enumerate() {
+            let (len, to) = (words.len() / 8, moves.regions[k + 1].1);
+            let free: Vec<(usize, usize)> = free.iter().map(|&(s, n)| (to + s, n)).collect();
+            let (mut at, mut starts, mut f) = (to, Vec::new(), free.iter().peekable());
+            while at < to + len {
+                if f.peek().is_some_and(|&&(s, _)| s == at) {
+                    at += f.next().expect("peeked").1;
+                    continue;
+                }
+                let w = self.word(at);
+                starts.push(at);
+                at += read_head(self.mem.words(), at + is_extension(w) as usize).size();
+            }
+            let p = &mut self.code.parts[k];
+            p.used += len - free.iter().map(|&(_, n)| n).sum::<usize>();
+            p.top = to + len;
+            p.free.extend(free);
+            p.starts.extend(starts);
+            if len > 0
+                && let Ok(view) = &self.code_exec
+            {
+                view.flush((self.base + to) * 8, len * 8);
+            }
+        }
+        Ok(img.roots.iter().map(|&r| map(r)).collect())
+    }
+}

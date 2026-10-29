@@ -349,4 +349,14 @@ fn embedded_image_is_found_after_an_executable() {
 
     // A plain runtime with no appended image must simply report none.
     assert!(image::extract_embedded(&fake_exe).is_none());
+
+    // Read from a file by its trailer alone, the same.
+    let dir = std::env::temp_dir().join(format!("fixpt-embed-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let (with, without) = (dir.join("with"), dir.join("without"));
+    std::fs::write(&with, &combined).unwrap();
+    std::fs::write(&without, &fake_exe).unwrap();
+    assert_eq!(image::read_embedded(&with).unwrap().as_deref(), Some(&img[..]));
+    assert_eq!(image::read_embedded(&without).unwrap(), None);
+    std::fs::remove_dir_all(&dir).unwrap();
 }

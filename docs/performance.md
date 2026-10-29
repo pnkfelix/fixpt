@@ -2377,6 +2377,29 @@ load, verification included, is 22 ms.
 The first run of a new executable pays 0.28 s more, to write the image.
 The ports give the same answers with the cache and without.
 
+### The cache read in place, and spliced (2026-10-28)
+
+Now 21 MB (8.5 MB of heap words, 12.6 MB of code), the native front end's
+image was read into a buffer, checked, loaded into a heap of its own,
+copied as a graph into the session's heap, and the heap of its own
+unmapped: about half of an empty program's run. Each step gone
+(`TODO.md` §158-§160), an empty FX-26 program, the median of 30 runs:
+
+| change                                                     |    run |
+| ---------------------------------------------------------- | -----: |
+| before                                                     | 145 ms |
+| the executable's trailer read alone (§158)                 | 137 ms |
+| no CRC-32 or `verify` for an image this executable wrote (§159) | 123 ms |
+| the cache and `.fasl`s mapped; heap words from the bytes   | 104 ms |
+| the image spliced into the session's heap, not copied      |  54 ms |
+
+The splice (`Heap::splice_image`) puts the image's words past the old
+space's top and each code part's past that part's, and moves every
+reference in one walk by objects; it has no table of what was copied, and
+makes nothing in the nursery for a minor collection to promote. Heist's
+editor started through `eldoc.fx` from `.fasl`s in 0.40 s by the copy
+(`FIXPT_IMAGE_COPY=1`), 0.33 s spliced.
+
 ## Tail calls in leaves (2026-10-01)
 
 A procedure whose only calls are plain calls in tail position, their

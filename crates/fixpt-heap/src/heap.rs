@@ -30,6 +30,7 @@ use std::collections::{HashMap, HashSet};
 mod code;
 mod intern;
 mod regions;
+mod splice;
 mod young;
 pub use code::CodePart;
 pub use regions::REGION_SLOTS;
@@ -2645,19 +2646,22 @@ impl Heap {
         symbols: Vec<Value>,
         roots: Vec<Value>,
     ) -> Result<Heap, String> {
-        Self::from_image_with_code(words, Default::default(), globals, symbols, roots)
+        Self::from_image_with_code(words.len(), |w| w.copy_from_slice(words), Default::default(), globals, symbols, roots)
     }
 
-    /// The same, with the code area an image carries (`image_code`).
+    /// The same, with the code area an image carries (`image_code`), and
+    /// the live region's `n_words` written in place by `fill`: an image's
+    /// bytes go straight to where they are kept, not by a `Vec` of them.
     pub fn from_image_with_code(
-        words: &[u64],
+        n_words: usize,
+        fill: impl FnOnce(&mut [u64]),
         code: [(Vec<u64>, Vec<(usize, usize)>); 2],
         globals: Vec<Value>,
         symbols: Vec<Value>,
         roots: Vec<Value>,
     ) -> Result<Heap, String> {
         let mut semi = DEFAULT_SEMI_WORDS;
-        while semi < words.len() {
+        while semi < n_words {
             semi *= 2;
         }
         if code.iter().any(|(w, _)| w.len() > CODE_WORDS / 2) {
@@ -2680,12 +2684,12 @@ impl Heap {
             false if v.is_ref() && !v.is_suffix_ref() => Value(v.raw() + shift),
             false => v,
         };
-        heap.mem.words_mut()[..words.len()].copy_from_slice(words);
-        map_refs(&mut heap.mem.words_mut()[..words.len()], relocate);
-        heap.top = words.len();
+        fill(&mut heap.mem.words_mut()[..n_words]);
+        map_refs(&mut heap.mem.words_mut()[..n_words], relocate);
+        heap.top = n_words;
         // What the image holds counts as live, not as allocated.
-        heap.budget_from(words.len());
-        heap.cross_all(0, words.len());
+        heap.budget_from(n_words);
+        heap.cross_all(0, n_words);
         heap.globals = globals.into_iter().map(relocate).collect();
         heap.symbols = symbols.into_iter().map(relocate).collect();
         heap.roots = roots.into_iter().map(relocate).collect();

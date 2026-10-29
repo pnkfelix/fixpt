@@ -54,7 +54,7 @@ impl Part {
         Part { base, top: base, free: Vec::new(), starts: Vec::new(), used: 0 }
     }
 
-    fn limit(&self) -> usize {
+    pub(super) fn limit(&self) -> usize {
         self.base + CODE_WORDS / 2
     }
 }

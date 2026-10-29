@@ -3494,3 +3494,70 @@ the makers (`docs/research/fasl.md`). In order:
    (`fasl::path_for_load`, `Fx26Session::cache_built_ins`). Heist's
    editor loads `fx26:eager-reader.fx` and `fx26:table.fx`, checked from
    source each start before: 0.77 s to 0.59 s.
+
+## 160. Images mapped, not read (the user's, 2026-10-28)
+
+Where an image's load goes now (an empty FX-26 program 145 ms to 54 ms,
+DONE §158, §159 and the first step below): the front end's cache and a
+`.fasl` mapped (`fixpt_heap::Mapped`), not read; the heap's words written
+straight from the image's bytes; and the native front end spliced into
+the session's heap (`Heap::splice_image`: its words past the old space's
+top, each code part's past that part's, every reference moved by one walk
+by objects, its interned symbols the session's), not loaded into a heap of
+its own and copied as a graph. `FIXPT_IMAGE_COPY=1` copies as before.
+Left, in order:
+1. **The heap at a fixed address** (`MAP_FIXED_NOREPLACE`), recorded in
+   the image, and a static region at a fixed place in it, so that an
+   image's references are addresses already and the walk that moves them
+   goes: the image's symbols the session's (the image read before anything
+   else is interned), and what it names outside it (the session's adapter)
+   by a short list of the places to write. The walk kept: where the address
+   is taken, and under `FIXPT_IMAGE_RELOCATE=1` even where it is not, so
+   that tests keep it working (the user's).
+2. **A section table and page-aligned sections** (`dump`, `embed_into`):
+   code, immutable data, mutable static data (§161), at first all but
+   code mutable.
+3. **The sections mapped**: the code's twice from the file, privately,
+   read+execute where it runs and read-only where the heap reads it (the
+   two never written, so they agree); the immutable data read-only; the
+   mutable data copied on write. Then the call-out pass goes too, where
+   the image's call-out map is this machine's (a hash of it in the
+   header), and `cross_all` and the symbol index are kept or made lazily.
+4. **`.fasl`s** as segments of the same kind (§141 item 9), and
+   `fixpt build`'s executables.
+`FIXPT_IMAGE_VERIFY=1` (to add) to check an image this executable wrote
+as `--heap` files are (§159).
+
+## 161. A static area for mapped images (the user's, 2026-10-28)
+
+What the collector does with what §160 maps, the user's design:
+- **Static objects never move**, nor are copied: a forwarding pointer
+  cannot be written over a read-only header, and the static objects that
+  refer to one could not be made to refer to its copy. The copier's test
+  for an address in the static region, as for the code area.
+- **What is static refers only to what is static**, but through mutable
+  static objects (a global's cell), which may refer to anything. So a
+  code bloblet of an image refers only to what never moves, and is never
+  written: code's fields are written only as it is made and when what they
+  refer to moves (`direct.rs`'s `Field`), and the code area's marks are
+  kept apart (`mark_code`). The dumper checks this, and refuses an image
+  that breaks it.
+- **The immutable sections are not traced**, and a mutable object of them
+  is the dumper's mistake, to fix there: such an object can never be
+  copied out to be written.
+- **The mutable static section is a root**: its dirty cards for a minor
+  collection (the write barrier to cover its range); for a major one, a
+  remembered set of its objects that refer to what moves, kept by the
+  barrier (the user's). Static objects are immortal, garbage and all, and
+  a weak reference to one is never cleared; a new image is what reclaims.
+- **Later** (the user's): the remembered set pruned of static objects
+  that are no longer reached, by a trace through the static area now and
+  then (side marks), since what nothing reaches is reached never again;
+  so that static garbage does not keep the heap's alive.
+- **Copies between heaps share static objects** (`copy_graph_with`,
+  `copy_within`), as they share the code area's.
+- **Which objects are immutable**: by the dumper, conservatively, mutable
+  where it cannot tell; FX-26's types and effects know more than the
+  objects' kinds (a `(stringof const)`, a closure whose captured variables
+  no `set!` names), and a closure compiled to native code at its first
+  call writes itself.
