@@ -3574,8 +3574,14 @@ Left, in order:
    looked up when first asked for (`intern`, `interned`), compared in
    place (`string_is`); and the immutable half given no crossing map,
    which only a dirty card's scan reads. An empty program 36.0 ms to
-   33.5 ms, release; 8% fewer instructions. Left: the code parts' starts,
-   walked at the load (0.5 ms), which the image could carry.
+   33.5 ms, release; 8% fewer instructions. And no fixup visited where
+   nothing of the heap's stands for the image's (each is then where it was
+   made for): 32.5 ms. The splice is 3 ms now, of 13 when this item began.
+   Left: the code parts' starts, walked at the load (0.6 ms, every code
+   page's headers), which the image could carry, or a sweep and a minor
+   collection find lazily in the part's fixed start; but jitdebug's
+   registration of each cached code object (`note_cached_code`, 7 ms of
+   the start, the user's to decide) touches those pages anyway.
 5. **`.fasl`s** as segments of the same kind (§141 item 9), and
    `fixpt build`'s executables.
 `FIXPT_IMAGE_VERIFY=1` (to add) to check an image this executable wrote

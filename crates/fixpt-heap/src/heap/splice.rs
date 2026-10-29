@@ -263,9 +263,15 @@ impl Heap {
             }
         };
         if in_place {
-            let mem = self.mem.words_mut();
-            for &f in &img.fixups {
-                field(mem, f);
+            // Where nothing of this heap's stands for the image's (none of
+            // its symbols here yet, nor its stub or adapter), every fixup is
+            // where it was made for, and none is young: none is written,
+            // nor its page read (`TODO.md` §160 item 4).
+            if !instead.is_empty() {
+                let mem = self.mem.words_mut();
+                for &f in &img.fixups {
+                    field(mem, f);
+                }
             }
         } else {
             for &(_, to, len) in &moves.regions {
@@ -342,7 +348,11 @@ impl Heap {
             }
             p.used += len - free.iter().map(|&(_, n)| n).sum::<usize>();
             p.top = to + len;
-            p.free.extend(free);
+            // A hole in code mapped from the file is not offered to the
+            // allocator: its pages are read-only where the heap writes.
+            if !mapped[k + 3] {
+                p.free.extend(free);
+            }
             p.starts.extend(starts);
             if len > 0
                 && let Ok(view) = &self.code_exec
