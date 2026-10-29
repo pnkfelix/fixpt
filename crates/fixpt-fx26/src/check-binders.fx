@@ -107,8 +107,8 @@
                   (else y (k-solve solved v (dr (car bd)))))
                 #u)
             (k-default-bounded all (cdr kinds) solved))))))
-(define k-default-free (->* (k-binders k-binders k-solved) unit)
-  (lambda (all kinds solved)
+(define k-default-free (->* (k-binders k-binders k-solved k-ids) unit)
+  (lambda (all kinds solved keep)
     (if (null? kinds)
         #u
         (let* ((v (extract (car kinds) 1)) (bd (k-bound-of v))
@@ -116,13 +116,96 @@
                            (tagcase (car bd) (r-var (w) (k-unknown? all w)) (else y #f)))))
           (begin
             (if (and (k-unsolved-region? (extract (car kinds) 2) v solved) (not waits))
-                (k-solve solved v (dr (k-fresh-region-for v)))
+                ;; Where the `poly` only makes data there, `acyclic`
+                ;; (`k-default-regions`); else a region of its own.
+                (k-solve solved v
+                         (dr (if (k-ids-has? keep v) (k-fresh-region-for v) (r-frozen -1 #t))))
                 #u)
-            (k-default-free all (cdr kinds) solved))))))
+            (k-default-free all (cdr kinds) solved keep))))))
 
-(define k-default-regions (->* (k-binders k-solved) unit)
-  (lambda (kinds solved)
-    (begin (k-default-bounded kinds kinds solved) (k-default-free kinds kinds solved))))
+;; A region binder nothing solves is `acyclic` where the `poly` only makes
+;; data there (pairs, read and allocated): what it makes is built and never
+;; written, so a caller may give it to what takes `(listof a (acyclic p))`
+;; with nothing said (Heist's request, `TODO.md` §174). One in `keep`
+;; (`k-not-only-data`) is a region of its own. As `infer.rs`'s
+;; `default_regions`.
+(define k-default-regions (->* (k-binders k-solved k-ids) unit)
+  (lambda (kinds solved keep)
+    (begin (k-default-bounded kinds kinds solved) (k-default-free kinds kinds solved keep))))
+(define k-ids-has? (->* (k-ids int) bool)
+  (lambda (l v) (cond ((null? l) #f) ((= (car l) v) #t) (else (k-ids-has? (cdr l) v)))))
+;; The region variables `t` uses other than as a pair's region, or in an
+;; effect other than `alloc` and `read`: a `ref`'s, an array's, a bloblet's,
+;; a continuation's, one written. As `infer.rs`'s `not_only_data_regions`.
+(define k-nd-reg (->* (k-region (ref k-ids @t)) unit)
+  (lambda (r out) (tagcase r (r-var (v) (set out (cons v (get out)))) (else y #u))))
+(define k-nd-eff (->* (k-eff (ref k-ids @t)) unit)
+  (lambda (e out)
+    (if (null? e)
+        #u
+        (begin
+          (tagcase (car e)
+            (a-write (r) (k-nd-reg r out)) (a-goto (r) (k-nd-reg r out))
+            (a-comefrom (r) (k-nd-reg r out)) (a-await (r) (k-nd-reg r out))
+            (a-init (r) (k-nd-reg r out)) (a-send (r) (k-nd-reg r out))
+            (a-receive (r) (k-nd-reg r out))
+            (else y #u))
+          (k-nd-eff (cdr e) out)))))
+(define-rec
+  (k-nd-walk (->* (int (ref k-ids @t) (ref k-ids @t)) unit)
+    (lambda (t0 seen out)
+      (let ((t (k-resolve t0)))
+        (if (k-ids-has? (get seen) t)
+            #u
+            (begin
+              (set seen (cons t (get seen)))
+              (tagcase (k-get t)
+                (ty-subr (e ps r cv spc)
+                  (begin (k-nd-eff e out) (k-nd-list ps seen out) (k-nd-walk r seen out)))
+                (ty-poly (bs body) (k-nd-walk body seen out))
+                (ty-ref (x r) (begin (k-nd-reg r out) (k-nd-walk x seen out)))
+                (ty-markkey (x r) (begin (k-nd-reg r out) (k-nd-walk x seen out)))
+                (ty-array (x z r) (begin (k-nd-reg r out) (k-nd-walk x seen out)))
+                (ty-icell (x r) (begin (k-nd-reg r out) (k-nd-walk x seen out)))
+                (ty-bloblet (fs z r) (begin (k-nd-reg r out) (k-nd-list fs seen out)))
+                (ty-pair (x y r nl) (begin (k-nd-walk x seen out) (k-nd-walk y seen out)))
+                (ty-tag (x y e r)
+                  (begin (k-nd-eff e out) (k-nd-reg r out)
+                         (k-nd-walk x seen out) (k-nd-walk y seen out)))
+                (ty-comp (x y e r once)
+                  (begin (k-nd-eff e out) (k-nd-reg r out)
+                         (k-nd-walk x seen out) (k-nd-walk y seen out)))
+                (ty-product (ps) (k-nd-parts ps seen out))
+                (ty-sum (ps) (k-nd-parts ps seen out))
+                (ty-union (ms) (k-nd-list ms seen out))
+                (ty-module (abs ds vs) (begin (k-nd-parts ds seen out) (k-nd-parts vs seen out)))
+                (ty-named (g ds) (k-nd-descs ds seen out))
+                (ty-app (f ds) (begin (k-nd-walk f seen out) (k-nd-descs ds seen out)))
+                (ty-lam (bs d) (k-nd-descs (cons d nil) seen out))
+                (ty-nlist (x z r) (k-nd-walk x seen out))
+                (else y #u)))))))
+  (k-nd-list (->* (k-ids (ref k-ids @t) (ref k-ids @t)) unit)
+    (lambda (ts seen out)
+      (if (null? ts) #u (begin (k-nd-walk (car ts) seen out) (k-nd-list (cdr ts) seen out)))))
+  (k-nd-parts (->* (k-parts (ref k-ids @t) (ref k-ids @t)) unit)
+    (lambda (ps seen out)
+      (if (null? ps)
+          #u
+          (begin (k-nd-walk (extract (car ps) 2) seen out) (k-nd-parts (cdr ps) seen out)))))
+  (k-nd-descs (->* (k-descs (ref k-ids @t) (ref k-ids @t)) unit)
+    (lambda (ds seen out)
+      (if (null? ds)
+          #u
+          (begin
+            (tagcase (car ds)
+              (dr (r) (k-nd-reg r out)) (de (e) (k-nd-eff e out))
+              (dt (x) (k-nd-walk x seen out)) (df (x) (k-nd-walk x seen out))
+              (else y #u))
+            (k-nd-descs (cdr ds) seen out))))))
+(define k-not-only-data (->* (int) k-ids)
+  (lambda (t)
+    (let ((seen (the (ref k-ids @t) (new nil))) (out (the (ref k-ids @t) (new nil))))
+      (begin (k-nd-walk t seen out) (get out)))))
 
 ;; `t` with its frozen regions made acyclic: what data `acyclic?` has found
 ;; acyclic is.

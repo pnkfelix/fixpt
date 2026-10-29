@@ -49,11 +49,15 @@ struct Unknowns {
     kinds: Vec<(DVar, Kind)>,
     solved: HashMap<DVar, D>,
     bounds: HashMap<DVar, Bounds>,
+    /// The region binders that are more than a pair's region written by no
+    /// one (`not_only_data_regions`): not made `acyclic` if nothing solves
+    /// them, but fresh (`default_regions`).
+    keep_fresh: HashSet<DVar>,
 }
 
 impl Unknowns {
     fn new(kinds: Vec<(DVar, Kind)>) -> Unknowns {
-        Unknowns { kinds, solved: HashMap::new(), bounds: HashMap::new() }
+        Unknowns { kinds, solved: HashMap::new(), bounds: HashMap::new(), keep_fresh: HashSet::new() }
     }
 
     fn is_unknown(&self, v: DVar) -> bool {
@@ -1060,6 +1064,7 @@ impl Checker {
             return Err(FxError::at(span, format!("expected {} argument(s), got {}", params.len(), args.len())));
         }
         let mut u = Unknowns::new(kinds);
+        u.keep_fresh = self.not_only_data_regions(inner);
         let mut done: Vec<Synthesised> = vec![None; args.len()];
         // What the whole is expected to be, first: it often fixes enough that
         // an argument can be told its type rather than asked — which is what
@@ -1242,6 +1247,7 @@ impl Checker {
         }
         let (kinds, inner) = self.binders_of(t);
         let mut u = Unknowns::new(kinds);
+        u.keep_fresh = self.not_only_data_regions(inner);
         let outer = std::mem::replace(&mut self.unify_upper, true);
         self.unify(inner, expected, &mut u, &mut HashSet::new());
         self.unify_upper = outer;
@@ -1357,7 +1363,12 @@ impl Checker {
             // A bounded binder waits for its bound to be solved.
             let waits = matches!(self.arena.bound(v), Some(Region::Var(w)) if u.is_unknown(w));
             if k == Kind::Region && !u.solved.contains_key(&v) && !waits {
-                let r = self.fresh_region(v);
+                // Where the `poly` only makes data there (pairs, read and
+                // allocated), `acyclic`: what it makes is built and never
+                // written, so a caller may give it to what takes
+                // `(listof a (acyclic p))` with nothing said (Heist's
+                // request, `TODO.md` §174). Else a region of its own.
+                let r = if u.keep_fresh.contains(&v) { self.fresh_region(v) } else { Region::Frozen(None, true) };
                 u.solved.insert(v, D::Region(r));
             }
         }
@@ -1778,6 +1789,94 @@ impl Checker {
         };
         self.unify(param, t, u, &mut HashSet::new());
         Ok((t, eff))
+    }
+
+    /// The region variables `t` uses other than as a pair's region, or in an
+    /// effect other than `alloc` and `read`: a `ref`'s, an array's, a
+    /// bloblet's, a continuation's, one written. Those stay fresh where
+    /// nothing solves them (`default_regions`); a continuation's must, to be
+    /// masked, and a `ref`'s, for what the compilers know of it (`no-escape`).
+    fn not_only_data_regions(&self, t: TyId) -> HashSet<DVar> {
+        fn eff(e: &Effect, out: &mut HashSet<DVar>) {
+            for a in &e.0 {
+                match a {
+                    Atom::Alloc(_) | Atom::Read(_) => {}
+                    Atom::Write(Region::Var(v)) | Atom::Goto(Region::Var(v)) | Atom::Comefrom(Region::Var(v))
+                    | Atom::Await(Region::Var(v)) | Atom::Init(Region::Var(v)) | Atom::Send(Region::Var(v))
+                    | Atom::Receive(Region::Var(v)) => {
+                        out.insert(*v);
+                    }
+                    _ => {}
+                }
+            }
+        }
+        fn reg(r: Region, out: &mut HashSet<DVar>) {
+            if let Region::Var(v) = r {
+                out.insert(v);
+            }
+        }
+        fn ds(c: &Checker, args: &[D], seen: &mut crate::ast::TySet, out: &mut HashSet<DVar>) {
+            for d in args {
+                match d {
+                    D::Type(x) | D::Fun(x) => walk(c, *x, seen, out),
+                    D::Effect(e) => eff(e, out),
+                    D::Region(r) => reg(*r, out),
+                    _ => {}
+                }
+            }
+        }
+        fn walk(c: &Checker, t: TyId, seen: &mut crate::ast::TySet, out: &mut HashSet<DVar>) {
+            let t = c.arena.resolve(t);
+            if !seen.insert(t) {
+                return;
+            }
+            match c.arena.get(t).clone() {
+                Ty::Subr { effect, params, result, .. } => {
+                    eff(&effect, out);
+                    params.iter().for_each(|p| walk(c, *p, seen, out));
+                    walk(c, result, seen, out)
+                }
+                Ty::Poly { body, .. } => walk(c, body, seen, out),
+                Ty::Ref(a, r) | Ty::MarkKey(a, r) | Ty::Array(a, _, r) | Ty::ICell(a, r) => {
+                    reg(r, out);
+                    walk(c, a, seen, out)
+                }
+                Ty::Bloblet { fields, region, .. } => {
+                    reg(region, out);
+                    fields.iter().for_each(|f| walk(c, *f, seen, out))
+                }
+                Ty::Product(parts) | Ty::Sum(parts) => parts.iter().for_each(|(_, t)| walk(c, *t, seen, out)),
+                Ty::Union(ms) => ms.iter().for_each(|t| walk(c, *t, seen, out)),
+                Ty::Pair(a, b, _, _) => {
+                    walk(c, a, seen, out);
+                    walk(c, b, seen, out)
+                }
+                Ty::PromptTag { answer, payload, effect, region } => {
+                    eff(&effect, out);
+                    reg(region, out);
+                    walk(c, answer, seen, out);
+                    walk(c, payload, seen, out)
+                }
+                Ty::Composable { arg, answer, effect, region, .. } => {
+                    eff(&effect, out);
+                    reg(region, out);
+                    walk(c, arg, seen, out);
+                    walk(c, answer, seen, out)
+                }
+                Ty::Module { descs, vals, .. } => descs.iter().chain(&vals).for_each(|(_, t)| walk(c, *t, seen, out)),
+                Ty::Named { args, .. } => ds(c, &args, seen, out),
+                Ty::App { fun, args } => {
+                    walk(c, fun, seen, out);
+                    ds(c, &args, seen, out)
+                }
+                Ty::Lam { body, .. } => ds(c, std::slice::from_ref(&body), seen, out),
+                Ty::NList { elem, .. } => walk(c, elem, seen, out),
+                _ => {}
+            }
+        }
+        let mut out = HashSet::new();
+        walk(self, t, &mut Default::default(), &mut out);
+        out
     }
 
     fn mentions_unknown_type(&self, t: TyId, u: &Unknowns) -> bool {

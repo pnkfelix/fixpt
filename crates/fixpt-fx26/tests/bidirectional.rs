@@ -73,14 +73,13 @@ fn a_polymorphic_definition_must_be_pure() {
 
 // ----------------------------------------------------- inferred projections
 
-/// Types from the arguments; the region, which no argument names, fresh —
-/// so the pair is private and its allocation and read are masked.
+/// Types from the arguments; the region, which no argument names, `acyclic`,
+/// `cons` only making data there (Heist's request, 2026-10-29, `TODO.md`
+/// §174): built, never written, and its allocation pure.
 #[test]
 fn a_projection_is_inferred_from_the_arguments() {
     assert_eq!(check("(car (cons 1 #t))"), "int ! pure");
-    let pair = check("(cons 1 #t)");
-    assert!(pair.starts_with("(pairof int bool @r."), "{pair}");
-    assert!(pair.contains("! (alloc @r."), "{pair}");
+    assert_eq!(check("(cons 1 #t)"), "(pairof int bool acyclic) ! pure");
 }
 
 /// A binder the arguments do not fix comes from the expected type.
@@ -105,13 +104,15 @@ fn nil_is_of_the_type_nil_where_nothing_says_which_list() {
     assert_eq!(check("(null? nil)"), "bool ! pure");
     assert_eq!(check("(let ((xs nil)) (null? xs))"), "bool ! pure");
     // A new pair's tail, `nil`, is widened to a list: `(cons 1 nil)` is a
-    // list, which may be written as one.
-    assert_eq!(check("(cons 1 nil)"), "(pairof int (listof int @r.1) @r.1) ! (alloc @r.1)");
-    // Its read kept, the region being the result's (Heist's report,
-    // 2026-10-29: masking keeps `read` and `write` there).
-    assert_eq!(check("(cdr (cons 1 nil))"), "(listof int @r.1) ! (maxeff (read @r.1) (alloc @r.1))");
+    // list; at `acyclic`, nothing saying where (Heist's request, `TODO.md`
+    // §174).
+    assert_eq!(check("(cons 1 nil)"), "(pairof int (listof int acyclic) acyclic) ! pure");
+    assert_eq!(check("(cdr (cons 1 nil))"), "(listof int acyclic) ! pure");
+    // Written, it is refused there: a list to write says its region.
     let written = "(let ((p (cons 1 nil))) (begin (set-cdr! p (cons 2 nil)) p))";
-    assert_eq!(check(written), "(pairof int (listof int @r.1) @r.1) ! (maxeff (write @r.1) (alloc @r.1))");
+    assert!(rejects(written).contains("this writes frozen data"), "{}", rejects(written));
+    let placed = "(let ((p (the (pairof int (listof int @heap) @heap) (cons 1 nil)))) (begin (set-cdr! p (cons 2 nil)) p))";
+    assert_eq!(check(placed), "(pairof int (listof int @heap) @heap) ! (maxeff (write @heap) (alloc @heap))");
     // Where a pair's tail is expected to be `nil`, it stays `nil`.
     assert_eq!(check("(define p (pairof int nil @heap) (cons 1 nil)) (cdr p)"), "nil ! (maxeff (read @heap) (read (globals p)))");
     let xs = "(define xs (listof int @heap) (list 1 2)) (define c bool #t)";
@@ -122,7 +123,7 @@ fn nil_is_of_the_type_nil_where_nothing_says_which_list() {
     // Beside a pair, `nil` makes the pair one that may be `nil`: a pair
     // whose tail is a list of the same, which is that list, and shows so
     // (Heist's report, 2026-10-28).
-    assert_eq!(check(&format!("{xs} (if c (cons 1 nil) nil)")), "(listof int @r.1) ! (maxeff (alloc @r.1) (read (globals c)))");
+    assert_eq!(check(&format!("{xs} (if c (cons 1 nil) nil)")), "(listof int acyclic) ! (read (globals c))");
 }
 
 /// A message names `datum`, not its union written out (substitution keeps
@@ -198,7 +199,10 @@ fn fixed_widths_are_ints_and_have_literals() {
 #[test]
 fn length_of_an_acyclic_list() {
     assert_eq!(check(include_str!("programs/sizes/length-of-a-list.fx")), "nat ! (read (globals l))");
-    let err = rejects("(length (list 1 2))");
+    // A list nothing places is `acyclic` (`TODO.md` §174), so its length
+    // is known; one at a region, which may be written, is no `nlist`.
+    assert_eq!(check("(length (list 1 2))"), "nat ! pure");
+    let err = rejects("(length (the (listof int @heap) (list 1 2)))");
     let hint = "where a (nlist ? n) is expected; a `listof` is no `nlist`, whose length is in its type: `list-length` measures a list";
     assert!(err.contains(hint), "{err}");
     assert_eq!(check("(list-length (list 1 2))"), "nat ! pure");
@@ -212,7 +216,7 @@ fn literals_check_against_any_fixed_width() {
     assert_eq!(check("(i64+ 1 2)"), "i64 ! pure");
     assert_eq!(check("(define x i64 5) x"), "i64 ! (read (globals x))");
     let p = include_str!("programs/sizes/fixed-width-64-literals.fx");
-    assert_eq!(check(p), "(listof int @r.1) ! (maxeff (alloc @r.1) (read (globals add big neg x)))");
+    assert_eq!(check(p), "(listof int acyclic) ! (read (globals add big neg x))");
     for (p, want) in [
         ("(define y u32 -1)", "-1 is not a u32: its range is 0 to 4294967295"),
         ("(define y i32 2147483648)", "2147483648 is not a i32: its range is -2147483648 to 2147483647"),

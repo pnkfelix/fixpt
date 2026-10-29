@@ -4030,3 +4030,29 @@ alone (29 s in the suite); its value the same on three machines. Left in
 it: the atoms' strings, which are wanted, and the test's `why` reading the
 clauses afresh at each of its four calls. §173 asks for `(nstring N)` and
 a lint for the pattern.
+
+## 174. A list nothing places is `acyclic` (the user's and Heist's, 2026-10-29; done 2026-10-29)
+
+Heist's request (`heist/docs/requests/fixpt-region-default-acyclic.md`)
+and its prototype (`bench/region-default-acyclic.diff`), taken as it was
+(the user's): a `poly`'s region binder a call leaves unsolved is
+`(acyclic heap)` where the `poly` uses it only as a pair's region, its
+effects there only `alloc` and `read` (`infer.rs` `default_regions`,
+`not_only_data_regions`; `check-binders.fx` `k-default-free`,
+`k-not-only-data`); a binder at a `ref`'s, an array's, a bloblet's, an
+I-cell's, a tag's, a mark key's or a continuation's region, or that the
+`poly` writes, a region of its own as before. So a list a call makes is
+`acyclic` where nothing says otherwise: let-bound, given to another
+`poly`, a primitive's (`list`, this item's own literals), with no `(the
+(listof T acyclic) …)` (Heist's ratfink: 101 of them).
+A list written after it is made says its region; else the write is
+refused as a write to frozen data. None of the 892 test programs, Heist's
+programs or Kayak writes one so; 27 programs show `acyclic` where they
+showed `@r.N`, `modules/list-joined-with-nil.fx` runs. Kayak's stage 0 the
+same (0.2% more instructions; allocation the same).
+`modules/unplaced-lists-are-acyclic.fx`, Heist's repros; `docs/fx26.md`.
+Considered and not done (the user's): the place left open, `(acyclic
+?p)`, unified as the form is checked. Neither checker has region
+variables past a call; and `(acyclic heap)` is accepted wherever
+`(acyclic p)` is, the heap outliving every place, so it would change only
+where the data is allocated.

@@ -22,8 +22,12 @@
                        k-bound-body))
             (val k-default-regions
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t))
-                       (k-binders k-solved)
+                       (k-binders k-solved k-ids)
                        unit))
+            (val k-not-only-data
+                 (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
+                       (int)
+                       k-ids))
             (val k-fin-region (subr (read @globals) (k-region) k-region))
             (val k-finitized
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)

@@ -646,7 +646,7 @@
            (solved (k-new-bounded-solved)))
       (begin
         (k-from-above (lambda () (k-unify inner expected kinds solved (the k-trail (new nil)))))
-        (k-default-regions kinds solved)
+        (k-default-regions kinds solved (k-not-only-data inner))
         (let ((m (k-finish kinds solved a b t)))
           (begin (k-check-bounds kinds m a b)
                  (k-check-distinct kinds m inner a b)

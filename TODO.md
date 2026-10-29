@@ -3906,58 +3906,6 @@ read, check and keep in the binary at each use.
    front end, Kayak, Heist's) for `substring` of length one and
    `string=?` with a one-character literal would say, before building it.
 
-## 174. Bare list literals `acyclic` by default (the user's, 2026-10-29)
-
-Joined by Heist's request (`heist/docs/requests/fixpt-region-default-acyclic.md`,
-its prototype `bench/region-default-acyclic.diff`): a `poly`'s region
-binder that nothing at a call solves is made a fresh region (`@r.1`,
-`infer.rs` `default_regions`, `check-binders.fx` `k-default-free`), whose
-lists are not `acyclic`; `kit`'s callers write `(the (listof T acyclic)
-…)` wherever a result is let-bound, returned by a lambda given to another
-`poly`, or given straight to another (101 in ratfink, at 366 calls).
-Heist asks it be `(acyclic heap)` where the `poly` uses the binder only
-as a pair's region, its effects only `alloc` and `read` there.
-
-The design the user and Claude reached (2026-10-29), to look into before
-it is built:
-- At such a call, the binder `(acyclic ?p)`: built and never written, in a
-  place `?p` still to be found, unified as the form is checked: with the
-  heap where a plain `acyclic` is wanted, with `p` where `(acyclic p)` is
-  (another open place unified with it: `(len (map inc (map inc xs)))`),
-  with a `letrena`'s or `letreap`'s place where the data is used there,
-  whose scope then keeps it in (`would outlive its region`). Unsolved at
-  the form's end, the heap. (Not "fresh region solved to `acyclic` if
-  never written": that needs a region's writes tracked across the form;
-  and `acyclic` is not "forever", the heap being collected: the user's
-  correction.)
-- Pairs and lists only (Heist's narrowing, the user's: fine): a binder at
-  a bloblet's, a `ref`'s, an array's, an I-cell's, a tag's, a mark key's
-  or a continuation's region, or that the `poly` writes, stays fresh.
-  Frozen bloblets perhaps later.
-- As Heist's: a caller that writes such a result (`(set-car! (map f l)
-  …)`) is refused unless it says the region; the call's `(alloc @r.N)`
-  goes (allocating at frozen data is pure), and what masking and the
-  compilers' facts (`no-escape`) made of the fresh region with it: to
-  measure (Kayak's code, the facts, allocation).
-- To find first: whether both checkers can keep a place variable open
-  across a form (environment entries' types holding one), and that a
-  form is checked whole before it is compiled, so that the place is
-  settled before the call allocates in it.
-The literals of this item are the same case: `(list 1 2 3)` given to a
-`poly` is Heist's last repro.
-
-Explore giving a bare list literal the region `acyclic` rather than
-leaving it open to region inference (a fresh `@r.1`, as `(cons 1 nil)`
-gets now: `bidirectional::nil_is_of_the_type_nil_where_nothing_says_which_list`).
-To settle first: which forms are "bare literals" (`(list …)` of values,
-a quoted datum, a chain of `cons` ending in `nil`); what becomes of one
-that is later written (refused, as writing frozen data is, or inferred
-writable where a write is seen); whether its type then meets `nlist`
-(`docs/fx26.md`, "Sizes": an `acyclic` list's length is known, and a walk
-of one needs no `spin`), which may be most of the gain; and how many of
-the test programs, the front end's sources, Kayak's and Heist's, change
-in what they check or show (a sweep as §160's masking measurement made).
-
 ## 175. `jit_lines::gdb_shows_the_frames_values` is sometimes early (found 2026-10-29)
 
 Run beside other tests, it once found the program in Rust code (a hash

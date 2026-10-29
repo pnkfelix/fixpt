@@ -469,9 +469,9 @@
                     ;; binder is found unsolved (`DONE.md` §20).
                     (k-result-shape expected result kinds solved a b)
                     (k-inst-shapes args params 0 kinds solved (extract done 1))
-                    (k-inst-told args params 0 kinds solved done)
+                    (k-inst-told args params 0 kinds solved done (k-not-only-data inner))
                     (k-inst-shapes args params 0 kinds solved (extract done 1))
-                    (k-default-regions kinds solved)
+                    (k-default-regions kinds solved (k-not-only-data inner))
                     (if (< expected 0) (k-widen-nil-tail result kinds solved) #u)
                     (k-solved-instance kinds solved a b ft inner))))))))
   ;; What the arguments are, except the ones that need to be told.
@@ -492,15 +492,15 @@
             (k-inst-asked (cdr args) (cdr params) (+ i 1) kinds solved done)))))
   ;; The arguments that needed telling: each is checked against its parameter
   ;; as solved so far, and what it turns out to be solves more.
-  (k-inst-told (->* (kxs k-ids int k-binders k-solved k-done) unit)
-    (lambda (args params i kinds solved done)
+  (k-inst-told (->* (kxs k-ids int k-binders k-solved k-done k-ids) unit)
+    (lambda (args params i kinds solved done keep)
       (if (null? args)
           #u
           (begin
             (if (>= (array-ref (extract done 1) i) 0)
                 #u
                 (let* ((arg (car args))
-                       (defaulted (k-default-regions kinds solved))
+                       (defaulted (k-default-regions kinds solved keep))
                        (p (k-subst (car params) (get solved))))
                   (cond
                     ;; A thunk has no parameters to be told: told nothing, it
@@ -526,7 +526,7 @@
                        (if (null? pv)
                            (k-arg-found done i p (k-check arg p))
                            (k-arg-unified (car params) kinds solved done i (car pv))))))))
-            (k-inst-told (cdr args) (cdr params) (+ i 1) kinds solved done)))))
+            (k-inst-told (cdr args) (cdr params) (+ i 1) kinds solved done keep)))))
   ;;; ------------------------------------------------------------ check mode
   (k-check (->* (kx int) k-eff)
     (lambda (x expected)
