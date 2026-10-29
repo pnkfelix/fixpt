@@ -4016,10 +4016,27 @@ again for every dependent:
    (`lib-80`, 3.0 ms a dependent). Identical signatures are shared
    already, not one module's type across its dependents. Heist suggests
    the type `(load-moduleof "a.fx" z)` stands for made and checked once a
-   file key and arguments. To find first: what of a checked module type
-   may be shared between forms (its regions, effects and binders, fresh
-   at each use or not), in `check-more` and `check-modules`; Heist hides
-   such libraries meanwhile.
+   file key and arguments; Heist hides such libraries meanwhile.
+   Measured (2026-10-29; counters on branch `measure-item2`,
+   `FIXPT_REGION_STATS=1`), 20 dependents against none:
+   - Of the added time, about half is the front end's FX-26 code (`perf`
+     with `FIXPT_PERF_MAP` and `FIXPT_IMAGE_NO_MAP`, §179).
+   - `k-type-made-by` (`check-read-made.fx`), making the type of a
+     `(load-moduleof …)`, runs twice a dependent, and each run makes
+     `a`'s module type afresh: `lib-80`, 402 types a call, 90% of all
+     the types the dependents add (16,080 of 17,800); `mono-80` 93%;
+     `same-80`, its signatures interned alike, 6 a call.
+   - The region walks (`k-regions-in`, for masking) miss the memo 3 times
+     a dependent in every case alike; what each costs is the fresh copy
+     it walks (`lib-80`: 1,135 nodes a dependent; `same-80`, 27). The walk
+     consults the memo only at its top, not for a type's parts, and adds
+     regions to a list by a linear search (quadratic in a type's regions).
+   So Heist's suggestion addresses the cause: the type a
+   `(load-moduleof "a.fx" args)` stands for made once a file key and
+   arguments, its type id reused, which the regions' memo then finds.
+   To settle first: whether a made type may be shared at all (what
+   `k-made-walk` makes fresh, binders or variables a use must not share),
+   and what the key is (the file, and the arguments as types or names).
 
 ## 179. `perf` names the front end's code again, mapped from the cache (the user's, 2026-10-29)
 
