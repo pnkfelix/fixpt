@@ -63,13 +63,16 @@ impl Heap {
     /// object of the image's (by its value there) and this heap's object
     /// that stands for it. Nothing collects meanwhile.
     pub fn splice_image(&mut self, img: &Parts, given: &[(Value, Value)]) -> Result<Vec<Value>, String> {
-        self.splice_image_from(img, given, None)
+        self.splice_image_from(img, given, None, false)
     }
 
     /// [`splice_image`](Heap::splice_image) of an image whose bytes are
     /// `file`'s: its static area mapped from it where the splice is in
-    /// place (the module's doc).
-    pub fn splice_image_from(&mut self, img: &Parts, given: &[(Value, Value)], file: Option<&crate::Mapped>) -> Result<Vec<Value>, String> {
+    /// place (the module's doc), and its code too if `map_code`. Not for a
+    /// profiler that names code by a map of its own (`FIXPT_PERF_MAP`):
+    /// `perf` reads that only for code in memory of no file, and names
+    /// none of a file's that is no ELF (`TODO.md` §179).
+    pub fn splice_image_from(&mut self, img: &Parts, given: &[(Value, Value)], file: Option<&crate::Mapped>, map_code: bool) -> Result<Vec<Value>, String> {
         let (n, ib) = (img.n_words(), img.base);
         // In place where nothing is in the old space, and each code part
         // holds nothing or what the image's starts with alike (the shared
@@ -144,7 +147,7 @@ impl Heap {
             let page = fixpt_memmgmt::reserve::probe::page();
             for k in [3, 4] {
                 let (_, to, len) = moves.regions[k];
-                let whole = len > 0 && (len * 8).is_multiple_of(page) && f.can_map(sources[k]);
+                let whole = map_code && len > 0 && (len * 8).is_multiple_of(page) && f.can_map(sources[k]);
                 // Where it runs first, then where the heap reads it: a view
                 // mapped once can be the file's in the other too.
                 if whole && let Ok(view) = &self.code_exec && view.map_from((self.base + to) * 8, f, sources[k]) {

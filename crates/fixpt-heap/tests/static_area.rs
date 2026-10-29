@@ -206,7 +206,7 @@ fn a_static_area_mapped_from_its_file() {
     std::fs::remove_file(&path).unwrap();
     let img = image::parts(&m[image::PAGE..], true).unwrap();
     assert!((img.immutable.len()).is_multiple_of(image::PAGE), "the immutable half ends on a page");
-    let roots = into.splice_image_from(&img, &[], Some(&m)).expect("splices");
+    let roots = into.splice_image_from(&img, &[], Some(&m), true).expect("splices");
     drop(m);
     let r = into.push_root(roots[0]);
     // Mapped, not copied: the sum's page is the file's, read-only.

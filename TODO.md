@@ -4073,9 +4073,11 @@ for symbols in the file, which is no ELF. The map has the names
 (`FIXPT_PERF_MAP`, 5,197 of them); perf does not ask it. Found profiling
 Heist's §178; `FIXPT_IMAGE_NO_MAP=1` gives the names back, the code
 copied. Ways, to choose:
-1. Under `FIXPT_PERF_MAP`, copy the code rather than map it (anonymous,
-   so the map is read): trivial; a profile then measures some 12 ms more
-   of the start.
+1. Done (2026-10-29): under `FIXPT_PERF_MAP` the front end's code is
+   copied rather than mapped (`Heap::splice_image_from`'s `map_code`), its
+   static area mapped still: `perf report` names it again (`[JIT]`,
+   `native lambda/…`). A profile then measures a start whose code is
+   copied, some 9 ms of a release build's; 2 or 3 would keep it mapped.
 2. perf's jitdump (`/tmp/jit-PID.dump`, `perf inject --jit`), each code
    load with its address, name and bytes, made an ELF object a function:
    to try whether it takes addresses within a file's mapping.

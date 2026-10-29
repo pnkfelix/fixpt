@@ -467,7 +467,11 @@ fn load_native_front_end(k: &NativeKeeping, heap: &mut fixpt_heap::Heap, file: &
         // (`TODO.md` §160 item 4), unless `FIXPT_IMAGE_NO_MAP` asks for it
         // copied.
         let map = std::env::var_os("FIXPT_IMAGE_NO_MAP").is_none().then_some(file);
-        let spliced = heap.splice_image_from(&img, &given, map).inspect_err(|e| eprintln!("fixpt: the front end's cache could not be read ({e}); it is made again"));
+        // Its code copied, not mapped, where `perf` is to name it by the
+        // perf map (`FIXPT_PERF_MAP`): it names none of a file's
+        // (`TODO.md` §179).
+        let map_code = std::env::var_os("FIXPT_PERF_MAP").is_none();
+        let spliced = heap.splice_image_from(&img, &given, map, map_code).inspect_err(|e| eprintln!("fixpt: the front end's cache could not be read ({e}); it is made again"));
         let root = *spliced.ok()?.first()?;
         let theirs = heap.car(heap.cdr(heap.cdr(root)));
         if mine.is_none() && theirs != Value::FALSE {
