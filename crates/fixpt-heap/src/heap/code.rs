@@ -86,6 +86,15 @@ impl CodeArea {
     }
 }
 
+/// Where each part starts.
+pub(crate) const PART_BASES: [usize; 2] = [CODE_BASE, NATIVE_BASE];
+
+/// Word `i` of the heap's memory as a part of the code area and a place in
+/// it; none if it is not in the code area.
+pub(crate) fn part_of(i: usize) -> Option<(usize, usize)> {
+    in_code_area(i).then(|| if i >= NATIVE_BASE { (1, i - NATIVE_BASE) } else { (0, i - CODE_BASE) })
+}
+
 /// Whether word `i` of the heap's memory is in the code area.
 #[inline(always)]
 pub(super) fn in_code_area(i: usize) -> bool {

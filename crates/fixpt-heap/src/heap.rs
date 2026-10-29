@@ -203,6 +203,14 @@ impl std::fmt::Display for BlobletError {
     }
 }
 
+/// The address the first heap a process makes is put at, if the system
+/// lets it be (`TODO.md` §160): an image made of a heap here, loaded into
+/// another here, has its references right as they are. 16 TiB, past
+/// where the system puts what it is not told where to put, on the 47- and
+/// 48-bit address spaces of x86_64 and arm64. One heap at a time has it.
+const FIXED_BASE: usize = 1 << 44;
+static FIXED_TAKEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Words in each semispace at startup: enough that the old space holds the
 /// first major collection's budget ([`MIN_MAJOR_BUDGET`]) and a nursery's
 /// promotion short of `COLLECT_THRESHOLD`, so that the threshold, a backstop,
@@ -275,6 +283,8 @@ pub struct Heap {
     /// Where `mem` starts, in words: a Value is an address, and names word
     /// `(address / 8) - base` of `mem`. Fixed for the heap's life.
     base: usize,
+    /// Whether `mem` is at `FIXED_BASE`: given back when the heap goes.
+    at_fixed: bool,
     /// The live regions, and their chunks.
     regions: regions::Regions,
     /// The code area's allocation and free blocks.
@@ -401,7 +411,14 @@ impl Heap {
 
     pub fn with_semispace(semi: usize) -> Heap {
         let semi = semi.max(1024);
-        let mut mem = fixpt_memmgmt::Words::new(MEM_WORDS).expect("address space for the heap");
+        // The first heap at once at `FIXED_BASE`, if it can be there.
+        let fixed = !FIXED_TAKEN.swap(true, std::sync::atomic::Ordering::SeqCst);
+        let mem = fixed.then(|| fixpt_memmgmt::Words::new_at(MEM_WORDS, FIXED_BASE)).flatten();
+        let at_fixed = mem.is_some();
+        if fixed && !at_fixed {
+            FIXED_TAKEN.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
+        let mut mem = mem.or_else(|| fixpt_memmgmt::Words::new(MEM_WORDS)).expect("address space for the heap");
         // Each page of the semispaces is written as a collection first
         // copies there: in 4 KiB pages, a tenth of the front end's loading
         // was the system's faults (`docs/performance.md`).
@@ -413,6 +430,7 @@ impl Heap {
         Heap {
             mem,
             base,
+            at_fixed,
             regions: regions::Regions::new(),
             code: code::CodeArea::default(),
             code_exec: Err("the code area is not used yet".into()),
@@ -2566,8 +2584,16 @@ impl Heap {
     /// contents, which `from_image` loads at word 0. Raw suffix words are
     /// left as they are.
     pub fn image_parts(&self) -> (Vec<u64>, Vec<Value>, Vec<Value>, Vec<Value>) {
+        self.image_parts_at(0)
+    }
+
+    /// [`image_parts`](Heap::image_parts), its references addresses of a
+    /// heap whose memory starts at word `to` (`0`, or
+    /// [`image_base_word`](Heap::image_base_word)), its active semispace the
+    /// first.
+    pub fn image_parts_at(&self, to: usize) -> (Vec<u64>, Vec<Value>, Vec<Value>, Vec<Value>) {
         assert_eq!(self.all_live_regions(), 0, "an image is made with no region live");
-        let rebase = self.image_rebase();
+        let rebase = self.image_rebase(to);
         let rebase = |v: Value| callout_out(rebase(v));
         let (old, young) = (self.top - self.active, self.nursery_top - NURSERY_BASE);
         let mut words = Vec::with_capacity(old + young);
@@ -2582,8 +2608,8 @@ impl Heap {
     /// [`image_parts`](Heap::image_parts) rebases the rest, and its free
     /// blocks, each from the part's start. It does not move: a reference
     /// into it counts from where the heap's memory starts.
-    pub fn image_code(&self) -> [(Vec<u64>, Vec<(usize, usize)>); 2] {
-        let rebase = self.image_rebase();
+    pub fn image_code(&self, to: usize) -> [(Vec<u64>, Vec<(usize, usize)>); 2] {
+        let rebase = self.image_rebase(to);
         let rebase = |v: Value| callout_out(rebase(v));
         self.code_image().map(|(mut words, free)| {
             map_refs(&mut words, &rebase);
@@ -2594,12 +2620,14 @@ impl Heap {
     /// A reference, as an image has it: as though the active semispace
     /// began at word 0, the nursery after it; into the code area, from
     /// where the heap's memory starts.
-    fn image_rebase(&self) -> impl Fn(Value) -> Value {
+    fn image_rebase(&self, to: usize) -> impl Fn(Value) -> Value {
         // The old space, then the nursery after it, as one run of words.
         let (active, base) = (self.active, self.base);
         let old = self.top - active;
-        let shift = ((base + active) as u64) << 3;
-        let young_shift = ((base + NURSERY_BASE) as u64 - old as u64) << 3;
+        // `to` may be past `base`: each by wrapping, as a difference.
+        let shift = ((base + active) as u64).wrapping_sub(to as u64) << 3;
+        let young_shift = ((base + NURSERY_BASE) as u64).wrapping_sub(to as u64 + old as u64) << 3;
+        let code_shift = (base as u64).wrapping_sub(to as u64) << 3;
         // A suffix ref's owner counts from where the heap's memory starts,
         // not an address: moved as the words are, by their index.
         let rebase_owner = move |r: Value| {
@@ -2615,9 +2643,9 @@ impl Heap {
         };
         move |v: Value| match v.is_ref() {
             true if v.is_suffix_ref() => rebase_owner(v),
-            true if code::in_code_area(v.index() - base) => Value(v.raw() - ((base as u64) << 3)),
-            true if young::is_young(v.index() - base) => Value(v.raw() - young_shift),
-            true => Value(v.raw() - shift),
+            true if code::in_code_area(v.index() - base) => Value(v.raw().wrapping_sub(code_shift)),
+            true if young::is_young(v.index() - base) => Value(v.raw().wrapping_sub(young_shift)),
+            true => Value(v.raw().wrapping_sub(shift)),
             false => v,
         }
     }
@@ -2634,6 +2662,18 @@ impl Heap {
     pub fn globals_slice(&self) -> &[Value] {
         &self.globals
     }
+    /// Where the heap's memory starts, in words.
+    pub fn base_word(&self) -> usize {
+        self.base
+    }
+
+    /// Where an image's references are made for, in words, whatever heap
+    /// it is made of: the fixed base, where a process's first heap is, so
+    /// that one loaded there moves nothing (`TODO.md` §160).
+    pub fn image_base_word() -> usize {
+        FIXED_BASE / 8
+    }
+
     pub fn symbols_slice(&self) -> &[Value] {
         &self.symbols
     }
@@ -2646,7 +2686,7 @@ impl Heap {
         symbols: Vec<Value>,
         roots: Vec<Value>,
     ) -> Result<Heap, String> {
-        Self::from_image_with_code(words.len(), |w| w.copy_from_slice(words), Default::default(), globals, symbols, roots)
+        Self::from_image_with_code(words.len(), |w| w.copy_from_slice(words), Default::default(), globals, symbols, roots, 0, &[])
     }
 
     /// The same, with the code area an image carries (`image_code`), and
@@ -2659,6 +2699,8 @@ impl Heap {
         globals: Vec<Value>,
         symbols: Vec<Value>,
         roots: Vec<Value>,
+        image_base: usize,
+        fixups: &[usize],
     ) -> Result<Heap, String> {
         let mut semi = DEFAULT_SEMI_WORDS;
         while semi < n_words {
@@ -2668,9 +2710,12 @@ impl Heap {
             return Err("its code area is larger than a heap's".into());
         }
         let mut heap = Heap::with_semispace(semi);
-        // An image's references count from word 0: here they are
-        // addresses, of where it is loaded.
-        let shift = (heap.base as u64) << 3;
+        // An image's references are addresses of a heap at `image_base`:
+        // here, of where it is loaded. At the same base, only the words
+        // `fixups` names are touched (`TODO.md` §160), but where
+        // `FIXPT_IMAGE_RELOCATE` asks for the walk.
+        let shift = (heap.base as u64).wrapping_sub(image_base as u64) << 3;
+        let walk = shift != 0 || relocating();
         // A suffix ref's owner is an index already, of a heap loaded at word
         // 0: left as it is.
         // A call-out, numbered in this machine (`set_callout_map`); one it
@@ -2681,11 +2726,25 @@ impl Heap {
                 unknown.set(Some(v.as_callout()));
                 v
             }),
-            false if v.is_ref() && !v.is_suffix_ref() => Value(v.raw() + shift),
+            false if v.is_ref() && !v.is_suffix_ref() => Value(v.raw().wrapping_add(shift)),
             false => v,
         };
         fill(&mut heap.mem.words_mut()[..n_words]);
-        map_refs(&mut heap.mem.words_mut()[..n_words], relocate);
+        let mut code = code;
+        if walk {
+            map_refs(&mut heap.mem.words_mut()[..n_words], relocate);
+            for (w, _) in &mut code {
+                map_refs(w, relocate);
+            }
+        } else {
+            for &p in fixups {
+                let w = match code::part_of(p) {
+                    Some((k, i)) => &mut code[k].0[i],
+                    None => &mut heap.mem.words_mut()[p],
+                };
+                *w = relocate(Value(*w)).raw();
+            }
+        }
         heap.top = n_words;
         // What the image holds counts as live, not as allocated.
         heap.budget_from(n_words);
@@ -2698,10 +2757,7 @@ impl Heap {
             let name = heap.symbol_name(heap.symbols[i]);
             heap.symbol_index.insert(name, i as u32);
         }
-        heap.code_from_image(code.map(|(mut w, free)| {
-            map_refs(&mut w, relocate);
-            (w, free)
-        }))?;
+        heap.code_from_image(code)?;
         if let Some(c) = unknown.get() {
             return Err(format!("it holds call-out {c:#x}, which this machine does not have"));
         }
@@ -2958,6 +3014,60 @@ fn callout_in(v: Value) -> Option<Value> {
     }
 }
 
+/// Word `i` of a heap's memory as a part of the code area and a place in
+/// it, for an image's fixups.
+pub(crate) fn code_part_of(i: usize) -> Option<(usize, usize)> {
+    code::part_of(i)
+}
+
+/// Whether an image is to be walked and moved even where it is loaded at
+/// the base it was made at (`FIXPT_IMAGE_RELOCATE=1`): so that tests keep
+/// the walk working that a heap elsewhere needs.
+pub(crate) fn relocating() -> bool {
+    static R: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *R.get_or_init(|| std::env::var("FIXPT_IMAGE_RELOCATE").is_ok_and(|v| v == "1"))
+}
+
+/// Each field of `words`, a sequence of objects and pairs as a semispace
+/// is: `f` of where it is (`at` plus its place in them) and what it holds.
+pub(crate) fn each_field(words: &[u64], at: usize, mut f: impl FnMut(usize, Value)) {
+    let mut scan = 0;
+    while scan < words.len() {
+        let w = words[scan];
+        let (first, count, size) = if is_header(w) {
+            let main = scan + is_extension(w) as usize;
+            let head = read_head(words, main);
+            (main + 1, head.fields, head.size())
+        } else {
+            (scan, 2, 2)
+        };
+        for i in first..first + count {
+            f(at + i, Value(words[i]));
+        }
+        scan += size;
+    }
+}
+
+/// Where an image's words hold what a load at the base it was made at must
+/// still write (`TODO.md` §160): each call-out, numbered by the machine
+/// that reads it, and each reference to one of its interned `symbols`,
+/// which may be the reader's own. Where in it: the live region's words from
+/// 0, the code area's at their place in the heap's memory.
+pub(crate) fn image_fixups(words: &[u64], code: &[(Vec<u64>, Vec<(usize, usize)>); 2], symbols: &[Value]) -> Vec<usize> {
+    let symbols: HashSet<u64> = symbols.iter().map(|s| s.raw()).collect();
+    let mut out = Vec::new();
+    let mut note = |at: usize, v: Value| {
+        if v.is_callout() || (v.is_ref() && !v.is_suffix_ref() && symbols.contains(&v.raw())) {
+            out.push(at);
+        }
+    };
+    each_field(words, 0, &mut note);
+    for (k, (w, _)) in code.iter().enumerate() {
+        each_field(w, code::PART_BASES[k], &mut note);
+    }
+    out
+}
+
 /// Every reference in `words`, a sequence of objects and pairs as a
 /// semispace is, replaced by `f` of it.
 fn map_refs(words: &mut [u64], f: impl Fn(Value) -> Value) {
@@ -3037,6 +3147,9 @@ impl std::hash::Hasher for WordHasher {
 
 impl Drop for Heap {
     fn drop(&mut self) {
+        if self.at_fixed {
+            FIXED_TAKEN.store(false, std::sync::atomic::Ordering::SeqCst);
+        }
         if let Ok(mut live) = LIVE_SERIALS.lock() {
             live.retain(|s| *s != self.serial);
         }

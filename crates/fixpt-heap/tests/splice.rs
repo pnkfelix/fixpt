@@ -35,9 +35,22 @@ fn collect(h: &mut Heap) {
 
 #[test]
 fn a_spliced_image_is_its_graph_in_this_heap() {
+    spliced_and_checked(Heap::new());
+}
+
+/// Elsewhere than the base the image was made for (a heap that has it
+/// held): moved by the walk.
+#[test]
+fn a_spliced_image_is_its_graph_in_a_heap_elsewhere() {
+    let holder = Heap::new();
+    let h = Heap::new();
+    assert!(!(holder.base_word() == Heap::image_base_word() && h.base_word() == Heap::image_base_word()), "one heap at a time at the fixed base");
+    spliced_and_checked(h);
+}
+
+fn spliced_and_checked(mut h: Heap) {
     let bytes = an_image();
     let img = image::parts(&bytes, true).unwrap();
-    let mut h = Heap::new();
     // Something here first, a symbol the image has too among it.
     let before = h.cons(Value::fixnum(7), Value::NULL);
     let mine = h.intern("shared");

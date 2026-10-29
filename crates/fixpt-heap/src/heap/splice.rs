@@ -1,19 +1,23 @@
 //! An image put into a heap that holds something already, beside it: its
 //! live region past the old space's top, each part of its code area past
-//! that part's, and every reference in them moved by one walk over them
-//! (`TODO.md` §160, the step before an image is put where it was made).
+//! that part's, and every reference in them moved by one walk over them.
 //! What [`Heap::copy_graph_with`] does from a heap loaded from the image,
 //! without the heap, the graph's table or the copy.
 //!
+//! In place (`TODO.md` §160), where this heap is where the image's was and
+//! holds nothing yet in its old space or its code area: the image's words
+//! go where they were, and only the words its fixups name are written.
+//!
 //! As that copy does, an interned symbol of the image is this heap's of the
 //! same name, where there is one, and the image's shared stub is this
-//! heap's; each object `given` names is this heap's object instead. The
-//! image's objects otherwise all come in, reached or not: an image is made
-//! of one graph (`save_native_front_end`).
+//! heap's, where it has one (else the image's is); each object `given`
+//! names is this heap's object instead. The image's objects otherwise all
+//! come in, reached or not: an image is made of one graph
+//! (`save_native_front_end`).
 
-use super::code::in_code_area;
+use super::code::{PART_BASES, in_code_area};
 use super::young::is_young;
-use super::{Heap, callout_in, read_head};
+use super::{Heap, callout_in, read_head, relocating};
 use crate::image::Parts;
 use crate::layout;
 use crate::value::{Value, is_extension, is_header, make_header};
@@ -45,8 +49,17 @@ impl Heap {
     /// object of the image's (by its value there) and this heap's object
     /// that stands for it. Nothing collects meanwhile.
     pub fn splice_image(&mut self, img: &Parts, given: &[(Value, Value)]) -> Result<Vec<Value>, String> {
-        let stub = self.foreign_stub();
-        let n = img.n_words();
+        let (n, ib) = (img.n_words(), img.base);
+        // In place where nothing is in the old space, and each code part
+        // holds nothing or what the image's starts with alike (the shared
+        // stub, made first in both).
+        let as_image = |k: usize| {
+            let (p, w) = (&self.code.parts[k], img.code[k].0);
+            let used = p.top - p.base;
+            w.len() >= used * 8 && (0..used).all(|i| self.mem.words()[p.base + i] == u64::from_le_bytes(w[i * 8..i * 8 + 8].try_into().unwrap()))
+        };
+        let same_code = as_image(0) && as_image(1);
+        let in_place = self.base == ib && !relocating() && self.top == 0 && self.active == 0 && same_code;
         // From a card's start, so that the crossing map of the cards before
         // stays as it is.
         let card = 1 << super::young::CARD_SHIFT;
@@ -63,10 +76,10 @@ impl Heap {
         for (k, (words, _)) in img.code.iter().enumerate() {
             let p = &self.code.parts[k];
             let len = words.len() / 8;
-            if p.top + len > p.limit() {
+            if !in_place && p.top + len > p.limit() {
                 return Err(format!("the code area's part {k} has no room for {len} words"));
             }
-            regions[k + 1] = (p.base, p.top, len);
+            regions[k + 1] = (PART_BASES[k], if in_place { p.base } else { p.top }, len);
         }
         if img.code.iter().any(|(w, _)| !w.is_empty()) {
             self.start_code_area();
@@ -80,30 +93,39 @@ impl Heap {
             }
         }
         let base = self.base;
-        // An image reference moved, given nothing for it.
+        // An image reference moved, given nothing for it. A suffix ref's
+        // owner is a place in the heap's memory already.
         let moved = |v: Value| -> Option<Value> {
             if v.is_suffix_ref() {
                 return Value::suffix_ref(moves.index(v.owner())?, v.offset());
             }
-            let i = moves.index(v.index())?;
+            let i = moves.index(v.index().checked_sub(ib)?)?;
             Some(Value(v.raw() - ((v.index() as u64) << 3) + (((base + i) as u64) << 3)))
         };
 
         // What stands for objects of the image's, by where they are in it.
         let (symbols, globals, mut added) = (self.symbols.len(), self.globals.len(), Vec::new());
-        let mut instead: HashMap<usize, Value> = given.iter().map(|&(v, to)| (v.index(), to)).collect();
+        let mut instead: HashMap<usize, Value> = given.iter().map(|&(v, to)| (v.index() - ib, to)).collect();
+        let mut stub = None;
         for &s in &img.symbols {
-            let at_s = moves.index(s.index()).ok_or("a symbol outside the image")?;
+            let at_s = moves.index(s.index() - ib).ok_or("a symbol outside the image")?;
             let name = moved(Value(self.mem.words()[at_s - SYMBOL_NAME])).ok_or("a symbol's name outside the image")?;
             let name = self.string_to_rust(name);
             if name == "%fx26-foreign-stub" {
-                let slot = Value(img.word(s.index() - SYMBOL_SLOT)).as_fixnum() as usize;
-                if let Some(old) = img.globals.get(slot).filter(|w| w.is_ref() && in_code_area(w.index())) {
-                    instead.insert(old.index(), stub);
+                let slot = Value(img.word(s.index() - ib - SYMBOL_SLOT)).as_fixnum() as usize;
+                if let Some(old) = img.globals.get(slot).filter(|w| w.is_ref() && in_code_area(w.index() - ib)) {
+                    // This heap's stub stands for the image's; else the
+                    // image's is this heap's.
+                    match self.code.stub {
+                        Value::FALSE => stub = Some(*old),
+                        mine => {
+                            instead.insert(old.index() - ib, mine);
+                        }
+                    }
                 }
             }
             if let Some(&i) = self.symbol_index.get(&name) {
-                instead.insert(s.index(), self.symbols[i as usize]);
+                instead.insert(s.index() - ib, self.symbols[i as usize]);
                 continue;
             }
             // The image's symbol is this heap's, at a global slot of its own.
@@ -130,7 +152,7 @@ impl Heap {
                 if let Some(&to) = instead.get(&v.owner()) {
                     return Value::suffix_ref(to.index() - base, v.offset()).expect("an owner within the heap");
                 }
-            } else if let Some(&to) = instead.get(&v.index()) {
+            } else if let Some(&to) = v.index().checked_sub(ib).and_then(|i| instead.get(&i)) {
                 return to;
             }
             moved(v).unwrap_or_else(|| {
@@ -138,29 +160,40 @@ impl Heap {
                 v
             })
         };
-        // Each field, mapped; its card marked if it is young now.
+        // Each field mapped (in place, each its fixups name); its card
+        // marked if it is young now.
         let mut young = Vec::new();
-        for &(_, to, len) in &moves.regions {
+        let mut field = |mem: &mut [u64], f: usize| {
+            let v = map(Value(mem[f]));
+            mem[f] = v.raw();
+            let i = if v.is_suffix_ref() { v.owner() } else if v.is_ref() { v.index() - base } else { return };
+            if is_young(i) {
+                young.push(f);
+            }
+        };
+        if in_place {
             let mem = self.mem.words_mut();
-            let mut scan = to;
-            while scan < to + len {
-                let w = mem[scan];
-                let (first, count, size) = if is_header(w) {
-                    let main = scan + is_extension(w) as usize;
-                    let head = read_head(mem, main);
-                    (main + 1, head.fields, head.size())
-                } else {
-                    (scan, 2, 2)
-                };
-                for f in first..first + count {
-                    let v = map(Value(mem[f]));
-                    mem[f] = v.raw();
-                    let i = if v.is_suffix_ref() { v.owner() } else if v.is_ref() { v.index() - base } else { continue };
-                    if is_young(i) {
-                        young.push(f);
+            for &f in &img.fixups {
+                field(mem, f);
+            }
+        } else {
+            for &(_, to, len) in &moves.regions {
+                let mem = self.mem.words_mut();
+                let mut scan = to;
+                while scan < to + len {
+                    let w = mem[scan];
+                    let (first, count, size) = if is_header(w) {
+                        let main = scan + is_extension(w) as usize;
+                        let head = read_head(mem, main);
+                        (main + 1, head.fields, head.size())
+                    } else {
+                        (scan, 2, 2)
+                    };
+                    for f in first..first + count {
+                        field(mem, f);
                     }
+                    scan += size;
                 }
-                scan += size;
             }
         }
         if let Some(why) = unknown.take() {
@@ -175,6 +208,12 @@ impl Heap {
         }
         for f in young {
             self.mark_card(f);
+        }
+        if let Some(old) = stub.and_then(moved) {
+            let sym = self.intern("%fx26-foreign-stub");
+            let slot = self.symbol_global_slot(sym);
+            self.globals[slot] = old;
+            self.code.stub = old;
         }
 
         self.cross_all(at, at + n);
@@ -194,6 +233,10 @@ impl Heap {
                 at += read_head(self.mem.words(), at + is_extension(w) as usize).size();
             }
             let p = &mut self.code.parts[k];
+            // In place, what the part held is the image's start, walked again.
+            if in_place {
+                (p.used, p.free, p.starts) = (0, Vec::new(), Vec::new());
+            }
             p.used += len - free.iter().map(|&(_, n)| n).sum::<usize>();
             p.top = to + len;
             p.free.extend(free);

@@ -3505,25 +3505,48 @@ the session's heap (`Heap::splice_image`: its words past the old space's
 top, each code part's past that part's, every reference moved by one walk
 by objects, its interned symbols the session's), not loaded into a heap of
 its own and copied as a graph. `FIXPT_IMAGE_COPY=1` copies as before.
+Then item 1 below, done (2026-10-28): the first heap a process makes is at
+a fixed address (`FIXED_BASE`, 16 TiB; `MAP_FIXED_NOREPLACE`, a hint on
+macOS), and every image (format 9) is made for it, whatever heap it is made
+of: its references addresses there, with the words a load there must still
+write (`image::Parts::fixups`: each call-out, which a machine numbers in
+the order it meets them, and each reference to an interned symbol, which
+may be the session's). The front end's splice is in place when the
+session's heap is there with nothing in its old space and its code parts
+holding at most what the image's start with (the shared stub, made first
+in both): the words copied and only the fixups written (42,516 of 2.6 M),
+the image's adapter the session's. Elsewhere, and under
+`FIXPT_IMAGE_RELOCATE=1`, the walk. An empty program 55 ms to 50.5 ms.
 Left, in order:
-1. **The heap at a fixed address** (`MAP_FIXED_NOREPLACE`), recorded in
-   the image, and a static region at a fixed place in it, so that an
-   image's references are addresses already and the walk that moves them
-   goes: the image's symbols the session's (the image read before anything
-   else is interned), and what it names outside it (the session's adapter)
-   by a short list of the places to write. The walk kept: where the address
-   is taken, and under `FIXPT_IMAGE_RELOCATE=1` even where it is not, so
-   that tests keep it working (the user's).
+1. ~~**The heap at a fixed address**~~ (above). A static region of its own
+   (§161) is not needed while the session's old space is empty when the
+   front end is read.
 2. **A section table and page-aligned sections** (`dump`, `embed_into`):
    code, immutable data, mutable static data (§161), at first all but
    code mutable.
-3. **The sections mapped**: the code's twice from the file, privately,
+3. **No writes in place first** (measured 2026-10-28: the front end's
+   fixups write 2,918 of its 5,164 pages, which a mapping would copy):
+   - **Call-outs** (15,342, on 1,623 pages, all code, which a write
+     through the heap's view would not even show through the executable
+     one): numbered alike by making them so. The image keeps its numbers
+     and its table of them, in order; the loader asks the machine for each
+     in that order, and where every number comes out the image's (none
+     numbered otherwise yet, as when the front end is read), writes
+     nothing.
+   - **References to the session's symbols** (5,279 of 27,174 symbol
+     references, on 1,962 pages): turned the other way, the session's own
+     made the image's. The session's 758 symbols are in the nursery when
+     the front end is read: each made to forward to the image's of its
+     name (its global slot given to that one), and the nursery collected,
+     which the forwarding moves every reference to; the symbol table's
+     entries the image's.
+4. **The sections mapped**: the code's twice from the file, privately,
    read+execute where it runs and read-only where the heap reads it (the
    two never written, so they agree); the immutable data read-only; the
    mutable data copied on write. Then the call-out pass goes too, where
    the image's call-out map is this machine's (a hash of it in the
    header), and `cross_all` and the symbol index are kept or made lazily.
-4. **`.fasl`s** as segments of the same kind (§141 item 9), and
+5. **`.fasl`s** as segments of the same kind (§141 item 9), and
    `fixpt build`'s executables.
 `FIXPT_IMAGE_VERIFY=1` (to add) to check an image this executable wrote
 as `--heap` files are (§159).
@@ -3574,3 +3597,11 @@ for compiled code, 2026-10-27), bisected; not `FIXPT_JIT_DEBUG`. Likely
 what that commit added to register code (`RItem::Pos`, `r-pos`) moving
 what a frame's stack map says is live. The abort also ended `cargo test
 --workspace` before the binaries after `direct` ran.
+
+## 163. A deadline passed over is sometimes waited for, native (found 2026-10-28)
+
+`processes.rs`'s `a_deadline_passed_over_is_not_waited_for` fails now and
+then (1 run in 4 at 5b0d032a, alone; more under load): native, the
+program sleeps out the 30 s deadline a `pselect` passed over before it
+deadlocks, about 25 s, where lowered it does not. A waker left on the
+deadline's event some of the time.

@@ -2768,3 +2768,31 @@ of `TODO.md` §141, working on my own.
   made and as what they refer to moves, so an image's code, fields and
   all, is immutable; a remembered set for the mutable static section, and
   later its pruning.
+
+### Images made for a fixed base, and spliced in place (2026-10-28)
+
+- **Why** (TODO §160 item 1): the splice's walk moved every reference of
+  the front end's 2.6 M words; and a walk that writes every page is what a
+  mapped image (item 3) cannot afford.
+- **Chosen**: one fixed base (16 TiB), the first heap of a process's
+  (in a run, the runtime's), given back when that heap goes; every image
+  made for that base, whatever heap it is made of (an image's references
+  are only numbers: `image_rebase` makes them for any base). Not "the
+  dumping heap's own base": the front end's image is made of a heap of its
+  own, which cannot be at the base while the session's is.
+- **What a load in place still writes**: the image's fixups, found as it
+  is made: call-outs (numbered per process in the order met, so never
+  the same from run to run) and references to interned symbols (the
+  session's are made first, by the prelude). The symbols' own global
+  slots. 42,516 words for the front end.
+- **In place when**: the same base, the old space empty, each code part
+  empty or holding what the image's starts with alike: the shared stub,
+  which a native session makes before the front end is read, and which
+  the image's heap now makes first too. The adapter is the image's when
+  the session has none yet, so the native part is the image's alone.
+- **Rejected for now**: a static region of the reservation of its own
+  (§161), which the collector would have to scan: unneeded while the old
+  space is empty when the front end is read.
+- **Measured**: an empty program 55 ms to 50.5 ms (relocating against in
+  place, one binary); 67 programs of `tests/programs/run` give the same in
+  place, copied and relocated, and miss no card.

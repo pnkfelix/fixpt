@@ -409,6 +409,9 @@ fn save_front_end(heap: &fixpt_heap::Heap, w: fixpt_heap::Value, path: &std::pat
 fn save_native_front_end(heap: &fixpt_heap::Heap, pieces: fixpt_heap::Value, path: &std::path::Path, key: u64) {
     use fixpt_heap::Value;
     let mut alone = fixpt_heap::Heap::new();
+    // The shared stub first, where a session's heap has it when the image
+    // is read, so that the image can go where it was made (`TODO.md` §160).
+    alone.foreign_stub();
     let (copy, made) = alone.copy_graph_with(heap, pieces, |_| false, &Default::default());
     let adapter = heap.adapter_code().filter(|a| made.contains_key(&a.raw()));
     let mut codes = Value::NULL;
@@ -437,10 +440,6 @@ fn load_native_front_end(k: &NativeKeeping, heap: &mut fixpt_heap::Heap, bytes: 
         return None;
     }
     let adapter = img.car(img.cdr(img.cdr(root)));
-    let adapter = match adapter == Value::FALSE {
-        true => None,
-        false => Some((adapter, (k.adapter_code)(heap).ok()?)),
-    };
     // Spliced in, unless `FIXPT_IMAGE_COPY` asks for the copy of a graph
     // that the splice replaced (`TODO.md` §160): for debugging.
     let (pieces, made_code) = if std::env::var_os("FIXPT_IMAGE_COPY").is_some() {
@@ -448,13 +447,21 @@ fn load_native_front_end(k: &NativeKeeping, heap: &mut fixpt_heap::Heap, bytes: 
         let root = *from.roots_slice().first()?;
         let code: std::collections::HashSet<u64> = list(&from, from.car(from.cdr(root))).iter().map(|c| c.raw()).collect();
         let mut given = std::collections::HashMap::new();
-        if let Some((_, to)) = adapter {
-            given.insert(from.car(from.cdr(from.cdr(root))).raw(), to);
+        if adapter != Value::FALSE {
+            given.insert(from.car(from.cdr(from.cdr(root))).raw(), (k.adapter_code)(heap).ok()?);
         }
         let (copy, made) = heap.copy_graph_with(&from, from.car(root), |v| code.contains(&v.raw()), &given);
         (copy, code.iter().filter_map(|k| made.get(k).copied()).collect())
     } else {
-        let root = *heap.splice_image(&img, adapter.as_slice()).ok()?.first()?;
+        // This heap's adapter stands for the image's; if it has none yet,
+        // the image's is its own, so that the image goes where it was made.
+        let mine = heap.adapter_code().filter(|_| adapter != Value::FALSE);
+        let given: Vec<(Value, Value)> = mine.map(|m| (adapter, m)).into_iter().collect();
+        let root = *heap.splice_image(&img, &given).ok()?.first()?;
+        let theirs = heap.car(heap.cdr(heap.cdr(root)));
+        if mine.is_none() && theirs != Value::FALSE {
+            heap.set_adapter_code(theirs);
+        }
         (heap.car(root), list(heap, heap.car(heap.cdr(root))))
     };
     (k.note_code)(heap, &made_code);

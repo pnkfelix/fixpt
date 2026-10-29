@@ -2392,6 +2392,7 @@ unmapped: about half of an empty program's run. Each step gone
 | no CRC-32 or `verify` for an image this executable wrote (§159) | 123 ms |
 | the cache and `.fasl`s mapped; heap words from the bytes   | 104 ms |
 | the image spliced into the session's heap, not copied      |  54 ms |
+| spliced in place, at the base it was made for (§160)      |  50.5 ms |
 
 The splice (`Heap::splice_image`) puts the image's words past the old
 space's top and each code part's past that part's, and moves every

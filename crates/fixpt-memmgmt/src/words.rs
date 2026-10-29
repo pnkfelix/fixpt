@@ -25,6 +25,27 @@ impl Words {
         (p != libc::MAP_FAILED).then_some(Words { base: p as *mut u64, len })
     }
 
+    /// The same, at address `at` exactly; or none, if the system will not
+    /// put them there (something is there already, or the address is past
+    /// what the process may map). Nothing there is replaced.
+    pub fn new_at(len: usize, at: usize) -> Option<Words> {
+        let bytes = len.checked_mul(8)?.max(8);
+        #[cfg(target_os = "linux")]
+        let flags = libc::MAP_PRIVATE | libc::MAP_ANON | libc::MAP_FIXED_NOREPLACE;
+        // Elsewhere the address is a hint, taken or not.
+        #[cfg(not(target_os = "linux"))]
+        let flags = libc::MAP_PRIVATE | libc::MAP_ANON;
+        // SAFETY: an anonymous mapping, used only through this value; with
+        // no `MAP_FIXED`, nothing already mapped is replaced.
+        let p = unsafe { libc::mmap(at as *mut libc::c_void, bytes, libc::PROT_READ | libc::PROT_WRITE, flags, -1, 0) };
+        if p == libc::MAP_FAILED {
+            return None;
+        }
+        let w = Words { base: p as *mut u64, len };
+        // A kernel that knows no `MAP_FIXED_NOREPLACE` takes it as a hint.
+        (p as usize == at).then_some(w)
+    }
+
     /// Ask the system to commit these words in huge pages (2 MiB on
     /// x86_64) where it can: a page first written costs one fault for 512
     /// of the usual size, and its translation one TLB entry. On Linux, where
