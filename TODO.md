@@ -3714,3 +3714,32 @@ makes both caches; a setup script in `.config/nextest.toml` should run it
 that: the test binaries' own caches, which `prewarm` cannot reach (each
 binary is an executable of its own), and a lock so that one process makes
 a missing cache while the others wait for it.
+
+## 167. The suite's cycle time (the user's, 2026-10-29)
+
+The suite took 10 minutes and 239 CPU-minutes. Most sessions a test made
+directly (`Fx26Session::with_backend`, not `common::session`) loaded the
+front end lowered, on the bytecode VM, in a debug build: one `icells` test,
+a three-line program run three ways, took 97 s alone. (The user: not
+optimized test builds, which slow the build.)
+
+1. Done: a session's front end is register code by default
+   (`front_end_compiled`), on the hand register machine, read back from the
+   test binary's cache (`fixpt-native` a dependency of `fixpt-fx26` now, not
+   only a test's). The `icells` test: 8 s. Lowered where a test says so
+   (`the_front_end_compiled_checks_alike`).
+2. Done: the cache keyed by the sources and the build, not by the
+   executable (`FIXPT_BUILD_HASH`, from `fixpt-fx26`'s `build.rs`: the
+   sources of the eight crates that make or run the front end's image,
+   `Cargo.lock`, the profile, target and features), so that every test
+   binary and the CLI share one, which `fixpt prewarm` makes for all of
+   them. Each test binary made its own the first time it ran before, about
+   25 s, several of its tests at once.
+
+The suite after both: 9 min 2 s (10 min 16 s), 172 CPU-minutes (239), the
+tests' times summed 8,816 s (13,100), 36 tests over a minute (80); 865 of
+865. Left: the long tail, which the wall time now waits on (`preempt`'s
+each-machine tests, 290 s and 195 s; `process_programs_do_as_they_say_every_way`,
+250 s; `register_code_runs_as_lowered_while_collecting`, 230 s;
+`every_program_on_every_machine`, 205 s), each of which might be split by
+machine so that nextest runs the parts at once.

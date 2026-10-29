@@ -365,21 +365,24 @@ fn lowered_failure(m: String) -> String {
 /// Where the front end's register code is cached, if anywhere (native, the
 /// front end after its first run: `save_native_front_end`), and the key
 /// its file must start with: a heap image in the user's cache directory, one
-/// file for each executable, named by a hash of its path, and the key a hash
-/// of the front end's text and of the executable's size and time, so that a
-/// rebuilt compiler never reads what an older one made, but replaces it.
+/// file for each build of the sources (`FIXPT_BUILD_HASH`, `build.rs`),
+/// shared by every executable built from them, and the key a hash of the
+/// front end's text and of the build, so that a rebuilt compiler never
+/// reads what an older one made. (Each executable had a cache of its own
+/// before, which each test binary made at its first run: `TODO.md` §167.)
 /// `FIXPT_NO_CACHE` turns it off.
 fn front_end_cache(text: &str, native: bool) -> Option<(std::path::PathBuf, u64)> {
     use std::hash::{Hash, Hasher};
     if std::env::var_os("FIXPT_NO_CACHE").is_some() {
         return None;
     }
-    let exe = std::env::current_exe().ok()?;
-    let meta = std::fs::metadata(&exe).ok()?;
+    // By the sources and the build (`build.rs`), not the executable: every
+    // one built from them shares the cache, the CLI and each test binary.
+    let build = env!("FIXPT_BUILD_HASH");
     let mut name = std::collections::hash_map::DefaultHasher::new();
-    (exe, native).hash(&mut name);
+    (build, native).hash(&mut name);
     let mut key = std::collections::hash_map::DefaultHasher::new();
-    (text, meta.len(), meta.modified().ok()).hash(&mut key);
+    (text, build).hash(&mut key);
     let dir = crate::fasl::cache_dir()?;
     Some((dir.join(format!("front-end-{:016x}.img", name.finish())), key.finish()))
 }
@@ -387,7 +390,7 @@ fn front_end_cache(text: &str, native: bool) -> Option<(std::path::PathBuf, u64)
 /// The front end's compiled word `w`, copied out of `heap` into a heap of
 /// its own and written to `path` as an image after `key`: by a temporary
 /// file renamed, so that a reader never sees half of one. Caches not used
-/// for a month (their executables gone, most likely) are removed, and so
+/// for a month (their sources since changed, most likely) are removed, and so
 /// are the built-in modules' `.fasl`s not written for a month. Any
 /// failure only means no cache.
 fn save_front_end(heap: &fixpt_heap::Heap, w: fixpt_heap::Value, path: &std::path::Path, key: u64) {
@@ -676,13 +679,24 @@ impl Fx26Session {
             .map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), format!("the FX-26 runtime failed to load: {e}")))?;
         scheme.engine.set_step_limit(Some(DEFAULT_STEP_LIMIT));
         scheme.runtime_unrooted().type_at = Some(crate::typeat::type_at);
+        // The front end run as register code (`front_end_compiled`), read
+        // back from its cache, on the hand register machine (where no
+        // machine code runs, the cellular machine written in Rust): lowered,
+        // on the bytecode VM, it is some 30 times as slow, and loading it
+        // took most of a session's start, a test's (`TODO.md` §167). A
+        // caller that wants it lowered says so.
+        scheme.runtime_unrooted().front_end_run_word.get_or_insert(if fixpt_native::CELLULAR_AVAILABLE {
+            fixpt_native::cellular::run_word_registers
+        } else {
+            fixpt_engine::cellular::run_word
+        });
         Ok(Fx26Session {
             checker: Checker::new(),
             scheme,
             globals: Globals::default(),
             strategy: Strategy::Lower,
             register_code: false,
-            front_end_compiled: false,
+            front_end_compiled: true,
             front_end_native: false,
             native_keeping: None,
             native_convention: false,

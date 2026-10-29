@@ -239,6 +239,7 @@ fn the_front_end_compiled_checks_alike() {
     let mut s = common::session();
     // Lowered, as every session was before `common::session`.
     let mut low = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+    low.front_end_compiled = false;
     for p in programs {
         let text = std::fs::read_to_string(format!("{dir}/{p}")).unwrap();
         let compiled = canon(fx26_check_in(&mut s, &text).expect("parses"));

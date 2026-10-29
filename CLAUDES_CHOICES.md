@@ -2877,3 +2877,25 @@ of `TODO.md` §141, working on my own.
   place first, since most stores are into young objects (0.63 G more
   instructions with a range check of my own, 0.36 G with the table both
   bytes first, 0.18 G the place's first); cycles the same.
+
+### The suite's cycle time (2026-10-29, TODO §167)
+
+- **Not optimized test builds**: the user's experience is that they slow
+  the build too much. Instead the work a test does that it did not mean to:
+  a session made directly (`Fx26Session::with_backend`) loaded the front
+  end lowered and ran it on the bytecode VM, in a debug build.
+- **The register-code front end by default** (`front_end_compiled`), on
+  `fixpt_native::cellular::run_word_registers` where machine code runs.
+  So `fixpt-native` is an ordinary dependency of `fixpt-fx26` now, not only
+  its tests': the library names the faster machine instead of every caller
+  installing it. Lowered only where a test says so
+  (`the_front_end_compiled_checks_alike`). One `icells` test: 97 s to 8 s.
+- **One cache for every executable built from the same sources**: the key
+  was the executable's path, size and time, so each test binary made its
+  own, about 25 s, often several of its tests at once. Now a hash
+  `build.rs` takes of the sources of the crates that make or run the
+  image, `Cargo.lock`, and the profile, target and features
+  (`FIXPT_BUILD_HASH`). Nothing in the image is the executable's own: ASLR
+  already moved its functions at each run, and call-outs are encoded. When
+  the native code comes to name the generation table's address (§161 step
+  5), that will have to be a fixup or a register, not a constant.
