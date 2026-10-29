@@ -1304,10 +1304,18 @@ impl Heap {
 
     /// String `o`'s characters, after what `out` holds.
     pub fn string_into(&self, o: Value, out: &mut String) {
-        let n = self.string_len(o);
+        // Its body found once, not at every code point (`string_points_into`).
+        let base = self.payload_base(o);
+        let n = self.word(base) as usize;
         out.reserve(n);
         for i in 0..n {
-            out.push(char::from_u32(self.string_point(o, i)).expect("string holds valid code points"));
+            let w = self.word(base + 1 + i / 2);
+            let c = if i.is_multiple_of(2) { w as u32 } else { (w >> 32) as u32 };
+            if c < 0x80 {
+                out.push(c as u8 as char);
+            } else {
+                out.push(char::from_u32(c).expect("string holds valid code points"));
+            }
         }
     }
 
