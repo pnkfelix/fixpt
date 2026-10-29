@@ -5586,6 +5586,10 @@ fn call_foreign(rt: &mut fixpt_runtime::Runtime, st: &mut DState, f: Value, args
     let kept = rt.heap.vector_from(&held);
     let at = rt.heap.push_root(kept);
     rt.heap.push_root(Value::from_raw(st.cont));
+    // The caller's own code too: one with no frame is kept by nothing else,
+    // and a collection in the callee would free it while it is to go on
+    // (`TODO.md` §162). It never moves, so it need not be put back.
+    rt.heap.push_root(Value::from_raw(st.code));
     // A native call from the cellular code runs below these frames.
     let runner = RUNNING.get().expect("native code is running");
     let outer = CALLED_OUT.replace(Some((runner, st.native_sp)));

@@ -3993,3 +3993,26 @@ CRC-32 nor `Heap::verify`, each a read of every page and neither a
 security measure (an image holds native code). `--heap` files and
 `fixpt image verify` still check both. An empty FX-26 program 137 ms to
 123 ms.
+
+## 162. A collection under a foreign call freed its caller's code (found 2026-10-28)
+
+`direct.rs`'s `a_tag_moved_at_a_capture_across_machines_finds_its_prompt`
+aborted since 29809141 (bisected): a major collection copied as an object
+words that were none (a header of no kind, 316 "fields" of what had been
+native frames), and the panic of a later subtraction could not unwind
+through native frames. Found by prints and gdb watchpoints (`rr` will not
+record on this Zen CPU without root): a native procedure with no frame of
+its own, calling out to cellular code (`call_foreign`), was kept alive by
+nothing while the callee ran but `st.code`, which only the call-out's own
+collections rooted. A collection inside the callee left its code bloblet
+unmarked: swept (the end of the code area given back, its words left as
+they were), its fields not followed, so what they referred to moved on and
+was copied over; when the bloblet was reached again by `st.code`, its stale
+field led to garbage. `call_foreign` now roots `st.code` too. 29809141 only
+changed when collections fall (its register words larger).
+
+A check that every object the copier forwards is one (a pair of two values,
+a bloblet of a known kind and value fields) was tried and set aside: on
+every copy, it made the suite's programs that collect constantly time out
+(the user's: off by default); it is in the commit's history to take up as
+an opt-in.

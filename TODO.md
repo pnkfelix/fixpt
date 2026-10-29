@@ -3604,19 +3604,6 @@ What the collector does with what §160 maps, the user's design:
   no `set!` names), and a closure compiled to native code at its first
   call writes itself.
 
-## 162. A collection from native code meets a word below the heap (found 2026-10-28)
-
-`direct.rs`'s `a_tag_moved_at_a_capture_across_machines_finds_its_prompt`
-(`programs/native/capture-across-collecting.fx`, collecting at every
-safepoint) aborts, "failed to initiate panic": a major collection called
-from native code (`direct::callout`, `collect_due`) copies a word whose
-index is below the heap's base (`copy_out_object`'s subtraction), and the
-panic cannot unwind through native frames. Since 29809141 (source lines
-for compiled code, 2026-10-27), bisected; not `FIXPT_JIT_DEBUG`. Likely
-what that commit added to register code (`RItem::Pos`, `r-pos`) moving
-what a frame's stack map says is live. The abort also ended `cargo test
---workspace` before the binaries after `direct` ran.
-
 ## 163. A deadline passed over is sometimes waited for, native (found 2026-10-28)
 
 `processes.rs`'s `a_deadline_passed_over_is_not_waited_for` fails now and
