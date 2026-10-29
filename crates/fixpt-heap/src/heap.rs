@@ -2604,7 +2604,13 @@ impl Heap {
             for i in first..head.fields {
                 let v = Value(mem[main + 1 + i]);
                 if v.is_ref() {
-                    mem[main + 1 + i] = Self::copy_out(mem, c, v).raw();
+                    // Written only if moved: a page of what never moves (the
+                    // code area, the image's, mapped from its file) is not
+                    // written by a collection that finds nothing in it moved.
+                    let to = Self::copy_out(mem, c, v).raw();
+                    if to != v.raw() {
+                        mem[main + 1 + i] = to;
+                    }
                 }
             }
             head.size()
@@ -2612,7 +2618,10 @@ impl Heap {
             for i in 0..2 {
                 let v = Value(mem[at + i]);
                 if v.is_ref() {
-                    mem[at + i] = Self::copy_out(mem, c, v).raw();
+                    let to = Self::copy_out(mem, c, v).raw();
+                    if to != v.raw() {
+                        mem[at + i] = to;
+                    }
                 }
             }
             2

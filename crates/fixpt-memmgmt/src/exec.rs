@@ -187,6 +187,22 @@ impl ExecView {
         rw - self.rw + self.rx
     }
 
+    /// The read+execute view of the bytes from `rw` (a heap address, on a
+    /// page) made `file`'s bytes `part`, mapped privately from the file, as
+    /// [`Words::map_from`] maps the heap's own view: for code that is never
+    /// written afterwards, so that the two views, each the file's, agree.
+    /// The heap's view must be mapped so too, read-only. Linux only: false
+    /// elsewhere, and wherever it cannot be, nothing changed.
+    pub fn map_from(&self, rw: usize, file: &crate::Mapped, part: &[u8]) -> bool {
+        let bytes = part.len().div_ceil(crate::reserve::probe::page()) * crate::reserve::probe::page();
+        if !cfg!(target_os = "linux") || rw < self.rw || rw.checked_add(bytes).is_none_or(|e| e > self.rw + self.bytes) {
+            return false;
+        }
+        // SAFETY: whole pages of this view, which is mapped while it lives;
+        // what runs there is replaced by the same bytes (the caller's).
+        unsafe { file.map_over(part, self.exec_address(rw) as *mut u8, libc::PROT_READ | libc::PROT_EXEC) }
+    }
+
     /// After instructions are written at `rw..rw + len` (heap addresses):
     /// make the instruction cache see them at their executable address.
     /// Fields are data, and need none of this.

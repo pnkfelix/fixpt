@@ -3556,7 +3556,19 @@ Left, in order:
    program 48.0 ms to 47.6 ms, release: the copy was little of it, and the
    pages are read anyway as the crossing map and the symbol index are made.
    The splice's 13 ms now: the code copied, 12.6 MB, 9 ms; the symbol
-   index, 3 ms; the crossing map, 0.6 ms. Left: the code's twice from the file, privately,
+   index, 3 ms; the crossing map, 0.6 ms. The code's done too
+   (2026-10-29, Linux): each of the code area's two views mapped from the
+   file, privately, read+execute where it runs and read-only where the
+   heap reads it (`ExecView::map_from`), each code part padded to a page's
+   end; a collection writes a field only if what it refers to moved, so
+   nothing writes the image's code (none of what it refers to moves), and
+   the views agree. An empty program 48.4 ms to 36.2 ms, release; page
+   faults 5,045 to 2,282, kernel instructions 48.6 M to 16.7 M. Kayak's
+   stage 0 the same (cycles; 0.15% more instructions, the collector's
+   compare). macOS copies the code still: an executable mapping of a file
+   may want it signed there; to try on the Mac, and the static area's
+   mapping with it, which nothing has run there yet. Left of the original
+   item: the code's twice from the file, privately,
    read+execute where it runs and read-only where the heap reads it (the
    two never written, so they agree); the immutable data read-only; the
    mutable data copied on write. Then the call-out pass goes too, where

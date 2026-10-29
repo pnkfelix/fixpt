@@ -46,30 +46,37 @@ impl Mapped {
     /// process's own copy, page by page, and the file is not written. The
     /// whole pages that hold it, `part` from a page's start, `to` on one;
     /// what the last page holds past `part` is the file's too (zeros, where
-    /// the file is laid out for it). Writable or read-only as `writable`
-    /// says (`Words::set_writable` changes it after). False, and nothing
-    /// changed, where it cannot be. For [`Words::map_from`](crate::Words::map_from).
+    /// the file is laid out for it). Protected as `prot` says. False, and
+    /// nothing changed, where it cannot be ([`can_map`](Mapped::can_map)).
+    /// For [`Words::map_from`](crate::Words::map_from) and
+    /// [`ExecView::map_from`](crate::ExecView::map_from).
     ///
     /// # Safety
     ///
     /// The memory at `to`, the pages `part` spans, must be this process's,
     /// mapped already (a reservation's), and nothing may hold a reference
     /// into it while it is replaced.
-    pub(crate) unsafe fn map_over(&self, part: &[u8], to: *mut u8, writable: bool) -> bool {
+    pub(crate) unsafe fn map_over(&self, part: &[u8], to: *mut u8, prot: libc::c_int) -> bool {
         use std::os::fd::AsRawFd as _;
-        let page = crate::reserve::probe::page();
         let Some(f) = &self.file else { return false };
-        let offset = (part.as_ptr() as usize).wrapping_sub(self.base as usize);
-        let inside = offset <= self.len && part.len() <= self.len - offset;
-        if !inside || part.is_empty() || !offset.is_multiple_of(page) || !(to as usize).is_multiple_of(page) {
+        if !self.can_map(part) || !(to as usize).is_multiple_of(crate::reserve::probe::page()) {
             return false;
         }
-        let len = part.len().div_ceil(page) * page;
-        let prot = if writable { libc::PROT_READ | libc::PROT_WRITE } else { libc::PROT_READ };
+        let offset = part.as_ptr() as usize - self.base as usize;
+        let len = part.len().div_ceil(crate::reserve::probe::page()) * crate::reserve::probe::page();
         // SAFETY: the caller's: `to` is this process's mapped memory, which
         // a fixed mapping replaces; the file is open, `offset` a page's.
         let p = unsafe { libc::mmap(to as *mut libc::c_void, len, prot, libc::MAP_PRIVATE | libc::MAP_FIXED, f.as_raw_fd(), offset as libc::off_t) };
         p == to as *mut libc::c_void
+    }
+
+    /// Whether `part`, a slice of these bytes, may be mapped elsewhere
+    /// ([`map_over`](Mapped::map_over)): not empty, from a page's start in
+    /// the file.
+    pub fn can_map(&self, part: &[u8]) -> bool {
+        let offset = (part.as_ptr() as usize).wrapping_sub(self.base as usize);
+        let inside = offset <= self.len && part.len() <= self.len - offset;
+        self.file.is_some() && inside && !part.is_empty() && offset.is_multiple_of(crate::reserve::probe::page())
     }
 }
 

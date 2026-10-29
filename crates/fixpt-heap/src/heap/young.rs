@@ -218,8 +218,12 @@ impl Heap {
                 };
                 for f in fields.start.max(clo)..fields.end.min(chi) {
                     let v = Value(mem[f]);
+                    // Written only if moved (`scan_one`).
                     if v.is_ref() {
-                        mem[f] = Self::copy_out(mem, &mut c, v).raw();
+                        let to = Self::copy_out(mem, &mut c, v).raw();
+                        if to != v.raw() {
+                            mem[f] = to;
+                        }
                     }
                 }
                 at += n;
@@ -317,7 +321,10 @@ fn scan_code_cards(cards: &mut fixpt_memmgmt::Words, mem: &mut [u64], c: &mut Co
             for f in fields.start.max(clo)..fields.end.min(chi) {
                 let v = Value(mem[f]);
                 if v.is_ref() {
-                    mem[f] = Heap::copy_out(mem, c, v).raw();
+                    let to = Heap::copy_out(mem, c, v).raw();
+                    if to != v.raw() {
+                        mem[f] = to;
+                    }
                 }
             }
             k += 1;

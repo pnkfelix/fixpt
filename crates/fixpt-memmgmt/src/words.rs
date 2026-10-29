@@ -105,7 +105,8 @@ impl Words {
         // SAFETY: whole pages inside this mapping (checked above), which
         // `&mut self` holds no reference into while they are replaced; they
         // stay mapped and readable, so the slice over them stays valid.
-        unsafe { file.map_over(part, self.base.add(at) as *mut u8, writable) }
+        let prot = if writable { libc::PROT_READ | libc::PROT_WRITE } else { libc::PROT_READ };
+        unsafe { file.map_over(part, self.base.add(at) as *mut u8, prot) }
     }
 
     /// The pages wholly within `range` made read-only, or writable again.

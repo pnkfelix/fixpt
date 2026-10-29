@@ -11,7 +11,12 @@
 //! area is mapped from it there rather than copied (`TODO.md` §160 item 4):
 //! privately, so that what a collection writes into its mutable half is
 //! the process's own copy of that page; its immutable half read-only, once
-//! the splice is done, where it ends on a page (`image::dump_static`).
+//! the splice is done, where it ends on a page (`image::dump_static`). Its
+//! code too, where its parts end on pages (Linux): each of the code area's
+//! two views mapped from the file, the heap's read-only, so that they
+//! agree, the image's code never written (a collection writes a field only
+//! if what it refers to moved, and nothing the image's code refers to
+//! does).
 //!
 //! As that copy does, an interned symbol of the image is this heap's of the
 //! same name, where there is one, and the image's shared stub is this
@@ -134,6 +139,19 @@ impl Heap {
             for k in [1, 2] {
                 let (_, to, len) = moves.regions[k];
                 mapped[k] = len > 0 && self.mem.map_from(to, f, sources[k], true);
+            }
+            let page = fixpt_memmgmt::reserve::probe::page();
+            for k in [3, 4] {
+                let (_, to, len) = moves.regions[k];
+                let whole = len > 0 && (len * 8).is_multiple_of(page) && f.can_map(sources[k]);
+                // Where it runs first, then where the heap reads it: a view
+                // mapped once can be the file's in the other too.
+                if whole && let Ok(view) = &self.code_exec && view.map_from((self.base + to) * 8, f, sources[k]) {
+                    if !self.mem.map_from(to, f, sources[k], false) {
+                        return Err(format!("the code area's part {} mapped to run but not to read", k - 3));
+                    }
+                    mapped[k] = true;
+                }
             }
         }
         for (k, (&(_, to, len), from)) in moves.regions.iter().zip(sources).enumerate() {

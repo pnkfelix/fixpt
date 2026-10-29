@@ -184,14 +184,18 @@ fn dump_with(heap: &Heap, aligned: bool, old_static: bool) -> Vec<u8> {
     // each object in the static area's half it belongs in: an image loads
     // there.
     let (words, [immutable, statics], globals, symbols, roots, code) = if old_static {
-        let (mut halves, globals, symbols, roots, code) = heap.image_split_static(base);
-        // The immutable half to a page's end, by an empty bloblet as long as
-        // the rest: mapped read-only, it ends where the heap writes next.
-        let (page, used) = (PAGE / 8, halves[0].len() % (PAGE / 8));
-        if used > 0 {
-            let gap = page - used;
-            halves[0].push(crate::value::make_header(crate::layout::kind("bloblet"), 0, (gap - 1) * 8));
-            halves[0].resize(halves[0].len() + gap - 1, 0);
+        let (mut halves, globals, symbols, roots, mut code) = heap.image_split_static(base);
+        // The immutable half and each part of the code to a page's end, by
+        // an empty bloblet as long as the rest: mapped read-only, each ends
+        // where the heap writes next.
+        let [stubbed, native] = &mut code;
+        for ws in [&mut halves[0], &mut stubbed.0, &mut native.0] {
+            let (page, used) = (PAGE / 8, ws.len() % (PAGE / 8));
+            if used > 0 {
+                let gap = page - used;
+                ws.push(crate::value::make_header(crate::layout::kind("bloblet"), 0, (gap - 1) * 8));
+                ws.resize(ws.len() + gap - 1, 0);
+            }
         }
         (Vec::new(), halves, globals, symbols, roots, code)
     } else {
