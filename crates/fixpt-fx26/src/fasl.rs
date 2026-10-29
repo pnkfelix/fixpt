@@ -12,8 +12,11 @@
 //! (`src/Asm/Shared/makefasl.sch`), and each value of a file it loads by
 //! that load.
 //!
-//! The file: a line `#fasl(fixpt-fasl 1)`, a header of lines `word value`,
-//! then `image N` and the image's `N` bytes (`fixpt_heap::image`). Fresh is
+//! The file: a line `#fasl(fixpt-fasl 2)`, a header of lines `word value`,
+//! then `image N` and the image's `N` bytes (`fixpt_heap::image`). The
+//! globals its value links to are named in the header (`global`), so that
+//! the image can be spliced into the loader's heap with its links known
+//! before (`Heap::splice_image`), none of it read first. Fresh is
 //! by digest, not by date: the file's text and the stamps of the files it
 //! loads, each the digest of its text and of its loads' stamps, so that a
 //! change anywhere below makes it stale; and by the executable, the
@@ -26,7 +29,7 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 /// A `.fasl`'s first line.
-pub const MARK: &str = "#fasl(fixpt-fasl 1)";
+pub const MARK: &str = "#fasl(fixpt-fasl 2)";
 
 /// What a `.fasl` says of itself before its image.
 #[derive(Clone, Debug, PartialEq)]
@@ -60,6 +63,9 @@ pub struct Header {
     pub defs: Vec<Def>,
     /// The type abbreviations its types name, each with what it is.
     pub aliases: Vec<(String, String)>,
+    /// The globals its image's value links to by name ([`Link::Global`]),
+    /// the `i`th named by the image's placeholder `(0 . i)`.
+    pub globals: Vec<String>,
 }
 
 /// What a `.fasl`'s file is: a module file, a `load-input` file (its key
@@ -213,6 +219,9 @@ impl Header {
         for (n, t) in &self.aliases {
             out.push_str(&format!("alias {n} {t}\n"));
         }
+        for g in &self.globals {
+            out.push_str(&format!("global {g}\n"));
+        }
         for d in &self.defs {
             out.push_str(&format!("{} {} {} {}\ninit {}\n", if d.rec { "rec" } else { "def" }, d.form, d.name, d.ty, d.init));
             for (n, t) in &d.uses {
@@ -244,7 +253,7 @@ impl Header {
             return Err(format!("it does not begin `{MARK}`"));
         }
         let hex = |s: &str| u64::from_str_radix(s, 16).map_err(|_| format!("`{s}` is not a digest"));
-        let mut h = Header { build: 0, arch: String::new(), native: false, cellular: false, kind: Kind::Module, source: 0, stamp: 0, deps: Vec::new(), ty: String::new(), made: String::new(), defs: Vec::new(), aliases: Vec::new() };
+        let mut h = Header { build: 0, arch: String::new(), native: false, cellular: false, kind: Kind::Module, source: 0, stamp: 0, deps: Vec::new(), ty: String::new(), made: String::new(), defs: Vec::new(), aliases: Vec::new(), globals: Vec::new() };
         loop {
             let l = line()?;
             let (word, value) = l.split_once(' ').ok_or_else(|| format!("a header line `{l}`"))?;
@@ -287,6 +296,7 @@ impl Header {
                     let (name, ty) = value.split_once(' ').ok_or_else(|| format!("a header line `{l}`"))?;
                     h.aliases.push((name.to_string(), ty.to_string()));
                 }
+                "global" => h.globals.push(value.to_string()),
                 "use" => {
                     let (name, ty) = value.split_once(' ').ok_or_else(|| format!("a header line `{l}`"))?;
                     h.defs.last_mut().ok_or_else(|| format!("a header line `{l}` before any `def`"))?.uses.push((name.to_string(), ty.to_string()));
@@ -342,7 +352,7 @@ fn global_name(heap: &Heap, v: Value) -> Option<String> {
 /// slot number, this process's) is let go, so that the loader's machine
 /// compiles it again if it runs it. Or, `cellular`, cellular words alone
 /// ([`cellular_image`]).
-pub fn image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapter: Option<Value>, cellular: bool) -> Result<Vec<u8>, String> {
+pub fn image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapter: Option<Value>, cellular: bool) -> Result<Image, String> {
     if cellular {
         return cellular_image(heap, value, deps, adapter);
     }
@@ -384,19 +394,7 @@ pub fn image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapter: O
         todo.extend(((1 + trailer)..=heap.bloblet_head(v).fields).map(|k| heap.bloblet_slot(v, k)));
     }
     let mut alone = Heap::new();
-    let mut given = HashMap::new();
-    let mut placeholders = Value::NULL;
-    for (v, link) in links.iter().rev() {
-        let (kind, arg) = match link {
-            Link::Global(name) => (0, alone.make_string(name)),
-            Link::DepCell(i) => (1, Value::fixnum(*i as i64)),
-            Link::DepValue(i) => (2, Value::fixnum(*i as i64)),
-            Link::Adapter => (3, Value::NULL),
-        };
-        let p = alone.cons(Value::fixnum(kind), arg);
-        given.insert(v.raw(), p);
-        placeholders = alone.cons(p, placeholders);
-    }
+    let (given, placeholders, globals) = placeholders(&mut alone, &links);
     let (copy, made) = alone.copy_graph_with(heap, value, |_| false, &given);
     // Each word's compiled entry let go: a stack word runs its cells again;
     // a register word is compiled again.
@@ -412,7 +410,58 @@ pub fn image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapter: O
     let rest = alone.cons(placeholders, Value::NULL);
     let root = alone.cons(copy, rest);
     alone.push_root(root);
-    Ok(fixpt_heap::image::dump_packed(&alone))
+    Ok((fixpt_heap::image::dump_packed(&alone), globals))
+}
+
+/// A `.fasl`'s image, and the globals it names ([`Header::globals`]).
+pub type Image = (Vec<u8>, Vec<String>);
+
+/// In `alone`, a placeholder for each of `links` (`(kind . arg)`, [`read_links`]):
+/// each by what it stands for, raw; their list; and the globals named,
+/// each placeholder `(0 . i)` naming the `i`th.
+fn placeholders(alone: &mut Heap, links: &[(Value, Link)]) -> (HashMap<u64, Value>, Value, Vec<String>) {
+    let mut given = HashMap::new();
+    let mut list = Value::NULL;
+    let mut globals = Vec::new();
+    for (v, link) in links.iter().rev() {
+        let (kind, arg) = match link {
+            Link::Global(name) => {
+                globals.push(name.clone());
+                (0, Value::fixnum(globals.len() as i64 - 1))
+            }
+            Link::DepCell(i) => (1, Value::fixnum(*i as i64)),
+            Link::DepValue(i) => (2, Value::fixnum(*i as i64)),
+            Link::Adapter => (3, Value::NULL),
+        };
+        let p = alone.cons(Value::fixnum(kind), arg);
+        given.insert(v.raw(), p);
+        list = alone.cons(p, list);
+    }
+    (given, list, globals)
+}
+
+/// What each placeholder of list `l` stands for ([`placeholders`]), by
+/// `car` and `cdr` of the heap or the image it is in, its globals named
+/// by `globals`.
+pub fn read_links(l: Value, car: impl Fn(Value) -> Value, cdr: impl Fn(Value) -> Value, globals: &[String]) -> Result<Vec<(Value, Link)>, String> {
+    let mut links = Vec::new();
+    let mut l = l;
+    while l.is_pair() {
+        let p = car(l);
+        if !p.is_pair() {
+            return Err("its image's links are not pairs".into());
+        }
+        let (kind, arg) = (car(p), cdr(p));
+        let link = match kind.as_fixnum() {
+            0 => Link::Global(globals.get(arg.as_fixnum() as usize).ok_or("its image names a global its header does not")?.clone()),
+            1 => Link::DepCell(arg.as_fixnum() as usize),
+            2 => Link::DepValue(arg.as_fixnum() as usize),
+            _ => Link::Adapter,
+        };
+        links.push((p, link));
+        l = cdr(l);
+    }
+    Ok(links)
 }
 
 /// [`image`], of cellular words alone (`compile-file --cellular`): a
@@ -423,7 +472,7 @@ pub fn image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapter: O
 /// number, this process's) is let go, so that the loader's machine
 /// compiles it again. Any other native code is refused: it calls by
 /// numbers and addresses that are this process's.
-fn cellular_image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapter: Option<Value>) -> Result<Vec<u8>, String> {
+fn cellular_image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapter: Option<Value>) -> Result<Image, String> {
     let closure_kind = const { fixpt_heap::layout::kind("native-closure") };
     let mut links: Vec<(Value, Link)> = Vec::new();
     // Each native closure, and what it is kept as: the closure an adapter
@@ -496,19 +545,7 @@ fn cellular_image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapt
         redirect.insert(c.raw(), k);
     }
     let mut alone = Heap::new();
-    let mut given = HashMap::new();
-    let mut placeholders = Value::NULL;
-    for (v, link) in links.iter().rev() {
-        let (kind, arg) = match link {
-            Link::Global(name) => (0, alone.make_string(name)),
-            Link::DepCell(i) => (1, Value::fixnum(*i as i64)),
-            Link::DepValue(i) => (2, Value::fixnum(*i as i64)),
-            Link::Adapter => (3, Value::NULL),
-        };
-        let p = alone.cons(Value::fixnum(kind), arg);
-        given.insert(v.raw(), p);
-        placeholders = alone.cons(p, placeholders);
-    }
+    let (given, placeholders, globals) = placeholders(&mut alone, &links);
     // Native code reached, but for the closures kept as cellular ones.
     let mut native = false;
     let (copy, made) = alone.copy_graph_redirected(heap, value, |_| false, &given, &redirect);
@@ -543,7 +580,7 @@ fn cellular_image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapt
     let rest = alone.cons(placeholders, natives);
     let root = alone.cons(copy, rest);
     alone.push_root(root);
-    Ok(fixpt_heap::image::dump_packed(&alone))
+    Ok((fixpt_heap::image::dump_packed(&alone), globals))
 }
 
 /// `value`, just copied in from a `.fasl` (so all of it new), with each of
@@ -623,8 +660,9 @@ fn walk(heap: &Heap, root: Value, mut visit: impl FnMut(&Heap, Value) -> Result<
 /// were native, of cellular words alone (`cellular_image`).
 pub type Read = (Heap, Value, Vec<(Value, Link)>, Vec<Value>);
 
-/// A `.fasl`'s image `bytes` read ([`Read`]).
-pub fn read_image(bytes: &[u8]) -> Result<Read, String> {
+/// A `.fasl`'s image `bytes` read ([`Read`]), the globals it links to
+/// named by `globals` ([`Header::globals`]).
+pub fn read_image(bytes: &[u8], globals: &[String]) -> Result<Read, String> {
     let heap = fixpt_heap::image::load_trusted(bytes).map_err(|e| format!("its image: {e:?}"))?;
     let root = *heap.roots_slice().first().ok_or("its image has no root")?;
     if !root.is_pair() {
@@ -634,25 +672,13 @@ pub fn read_image(bytes: &[u8]) -> Result<Read, String> {
     if !rest.is_pair() {
         return Err("its image's root is not a list of three".into());
     }
-    let (mut l, mut n) = (heap.car(rest), heap.cdr(rest));
+    let (l, mut n) = (heap.car(rest), heap.cdr(rest));
     let mut natives = Vec::new();
     while n.is_pair() {
         natives.push(heap.car(n));
         n = heap.cdr(n);
     }
-    let mut links = Vec::new();
-    while l.is_pair() {
-        let p = heap.car(l);
-        let (kind, arg) = (heap.car(p), heap.cdr(p));
-        let link = match kind.as_fixnum() {
-            0 => Link::Global(heap.string_to_rust(arg)),
-            1 => Link::DepCell(arg.as_fixnum() as usize),
-            2 => Link::DepValue(arg.as_fixnum() as usize),
-            _ => Link::Adapter,
-        };
-        links.push((p, link));
-        l = heap.cdr(l);
-    }
+    let links = read_links(l, |v| heap.car(v), |v| heap.cdr(v), globals)?;
     Ok((heap, value, links, natives))
 }
 

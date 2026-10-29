@@ -3591,7 +3591,26 @@ Left, in order:
    the image carrying its sorted table of symbols by hash, so that the
    splice reads none of the symbols at the load.
 5. **`.fasl`s** as segments of the same kind (§141 item 9), and
-   `fixpt build`'s executables.
+   `fixpt build`'s executables. A module's (and a `load-input` file's)
+   done (2026-10-29): spliced into the session's heap
+   (`Heap::splice_image`), not read into a heap of its own and copied in
+   as a graph; `FIXPT_IMAGE_COPY=1` copies as before. Its links known
+   before the splice: the globals it names are in its header now
+   (`global NAME`, the image's placeholder `(0 . i)` the `i`th), not
+   strings in its image, which the splice could not read first (format
+   `fixpt-fasl 2`). Not mapped: a session's heap holds something by
+   then, so the image is copied and walked, not put where it was made
+   for. Heist's combo (19 `.fasl`s, 6.7 MB of images, which took 8.8 ms
+   to read and 7.6 ms to copy), release: 121.5 ms to 107 ms. It found a
+   bug of the splice's: what stands for an image's object was found by
+   its address alone, and a symbol of no suffix is pointed at one past its
+   fields, where the next object is; a pair just after a symbol this heap
+   had was taken for it (`a_pair_just_after_a_symbol_stays_a_pair`). The
+   front end's cache, its symbols laid out first, never met it. Left: a
+   program's `.fasl` (`program_fasl`, `run_program_def`), read whole and
+   copied a group of definitions at a time, each linked to the globals
+   made before it as it runs; and making `.fasl`s mappable, which wants
+   them made for where they will go.
 `FIXPT_IMAGE_VERIFY=1` (to add) to check an image this executable wrote
 as `--heap` files are (§159).
 

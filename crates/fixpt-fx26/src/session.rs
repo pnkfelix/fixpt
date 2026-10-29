@@ -1567,8 +1567,29 @@ impl Fx26Session {
         self.own_begun = true;
         let fail = |e: String| FxError::at(Span::new(FileId(0), 0, 0), format!("`{}`: {e}", fasl.display()));
         let bytes = fixpt_heap::Mapped::open(fasl).map_err(|e| fail(e.to_string()))?;
-        let (_, image) = crate::fasl::Header::read(&bytes).map_err(fail)?;
-        let (from, value, links, natives) = crate::fasl::read_image(image).map_err(fail)?;
+        let (header, image) = crate::fasl::Header::read(&bytes).map_err(fail)?;
+        // Spliced into the heap (`TODO.md` §160 item 5), unless
+        // `FIXPT_IMAGE_COPY` asks for it read into a heap of its own and
+        // copied in as a graph, as before: for debugging.
+        let read = match std::env::var_os("FIXPT_IMAGE_COPY") {
+            Some(_) => Some(crate::fasl::read_image(image, &header.globals).map_err(fail)?),
+            None => None,
+        };
+        let img = match read {
+            Some(_) => None,
+            None => Some(fixpt_heap::image::parts(image, false).map_err(|e| fail(format!("its image: {e:?}")))?),
+        };
+        let links = match (&read, &img) {
+            (Some((_, _, links, _)), _) => links.clone(),
+            (None, Some(img)) => {
+                let root = *img.roots.first().ok_or_else(|| fail("its image has no root".into()))?;
+                if !root.is_pair() || !img.cdr(root).is_pair() {
+                    return Err(fail("its image's root is not a list of three".into()));
+                }
+                crate::fasl::read_links(img.car(img.cdr(root)), |v| img.car(v), |v| img.cdr(v), &header.globals).map_err(fail)?
+            }
+            (None, None) => unreachable!("read or spliced"),
+        };
         let deps: Vec<Sym> = self.checker.shared_files.get(&name).map(|f| f.deps.iter().map(|d| d.2).collect()).unwrap_or_default();
         // What each link is here, held while the value is copied in; the
         // native adapter's, this heap's, found as it is copied.
@@ -1607,14 +1628,32 @@ impl Fx26Session {
                 match adapter.map(|a| a(heap)) {
                     Some(Ok(a)) => given.extend(adapters.iter().map(|p| (p.raw(), a))),
                     _ => {
-                        why = Some("it holds native code's adapter, and this session makes none");
+                        why = Some("it holds native code's adapter, and this session makes none".to_string());
                         return fixpt_heap::Value::FALSE;
                     }
                 }
             }
-            let (copy, made) = heap.copy_graph_with(&from, value, |_| false, &given);
+            // Its value, and the closures that were native, as this heap's.
+            let (copy, natives): (fixpt_heap::Value, std::collections::HashSet<u64>) = match (&read, &img) {
+                (Some((from, value, _, natives)), _) => {
+                    let (copy, made) = heap.copy_graph_with(from, *value, |_| false, &given);
+                    (copy, natives.iter().filter_map(|n| made.get(&n.raw()).map(|v| v.raw())).collect())
+                }
+                (None, Some(img)) => {
+                    let given: Vec<(fixpt_heap::Value, fixpt_heap::Value)> = given.iter().map(|(&k, &v)| (fixpt_heap::Value::from_raw(k), v)).collect();
+                    let root = match heap.splice_image(img, &given) {
+                        Ok(roots) => roots[0],
+                        Err(e) => {
+                            why = Some(format!("its image cannot be put in: {e}"));
+                            return fixpt_heap::Value::FALSE;
+                        }
+                    };
+                    (heap.car(root), list(heap, heap.cdr(heap.cdr(root))).iter().map(|v| v.raw()).collect())
+                }
+                (None, None) => unreachable!("read or spliced"),
+            };
             let copy = match compile {
-                Some(c) if !natives.is_empty() => crate::fasl::native_procedures(heap, copy, c, &natives.iter().filter_map(|n| made.get(&n.raw()).map(|v| v.raw())).collect()),
+                Some(c) if !natives.is_empty() => crate::fasl::native_procedures(heap, copy, c, &natives),
                 _ => copy,
             };
             heap.set_bloblet_slot(g, 2, copy);
@@ -1624,7 +1663,7 @@ impl Fx26Session {
             fixpt_heap::Value::FALSE
         });
         if let Some(why) = why {
-            return Ok(Err(fail(why.into()).message));
+            return Ok(Err(fail(why).message));
         }
         Ok(Ok(None))
     }
@@ -1719,7 +1758,7 @@ impl Fx26Session {
             deps.push(crate::fasl::Dep { path: written.clone(), input: *input, stamp });
             dep_values.push(self.checker.interner.name(*d).to_string());
         }
-        let header = crate::fasl::Header {
+        let mut header = crate::fasl::Header {
             build: crate::fasl::build(),
             arch: std::env::consts::ARCH.to_string(),
             native: self.native_convention,
@@ -1732,8 +1771,10 @@ impl Fx26Session {
             made,
             defs: Vec::new(),
             aliases,
+            globals: Vec::new(),
         };
-        let image = self.released(|s| s.fasl_image(&name, &dep_values)).map_err(|e| format!("`{path}`'s value cannot be kept: {e}"))?;
+        let (image, globals) = self.released(|s| s.fasl_image(&name, &dep_values)).map_err(|e| format!("`{path}`'s value cannot be kept: {e}"))?;
+        header.globals = globals;
         let tmp = fasl.with_extension(format!("fasl-tmp{}", std::process::id()));
         std::fs::write(&tmp, header.file(&image)).map_err(|e| format!("cannot write `{}`: {e}", tmp.display()))?;
         std::fs::rename(&tmp, fasl).map_err(|e| format!("cannot write `{}`: {e}", fasl.display()))?;
@@ -1866,7 +1907,7 @@ impl Fx26Session {
                 return stale(self, &format!("`{}` is defined here already", d.name));
             }
         }
-        let (heap, value, links, natives) = match crate::fasl::read_image(image) {
+        let (heap, value, links, natives) = match crate::fasl::read_image(image, &header.globals) {
             Ok(r) => r,
             Err(e) => return stale(self, &e),
         };
@@ -2149,7 +2190,7 @@ impl Fx26Session {
             }
             d.types = types;
         }
-        let header = crate::fasl::Header {
+        let mut header = crate::fasl::Header {
             build: crate::fasl::build(),
             arch: std::env::consts::ARCH.to_string(),
             native: self.native_convention,
@@ -2162,8 +2203,10 @@ impl Fx26Session {
             made: String::new(),
             defs,
             aliases,
+            globals: Vec::new(),
         };
-        let image = self.released(|s| s.program_image(&names)).map_err(|e| format!("`{path}`'s definitions cannot be kept: {e}"))?;
+        let (image, globals) = self.released(|s| s.program_image(&names)).map_err(|e| format!("`{path}`'s definitions cannot be kept: {e}"))?;
+        header.globals = globals;
         let fasl = crate::fasl::path_for(&at);
         let tmp = fasl.with_extension(format!("fasl-tmp{}", std::process::id()));
         std::fs::write(&tmp, header.file(&image)).map_err(|e| format!("cannot write `{}`: {e}", tmp.display()))?;
@@ -2227,7 +2270,7 @@ impl Fx26Session {
 
     /// The values of globals `names`, in a list, as a `.fasl`'s image
     /// (`crate::fasl::image`).
-    fn program_image(&mut self, names: &[String]) -> Result<Vec<u8>, String> {
+    fn program_image(&mut self, names: &[String]) -> Result<crate::fasl::Image, String> {
         let mut cells = Vec::new();
         for n in names {
             cells.push(self.global_cell(n).map_err(|e| e.message)?.ok_or_else(|| format!("`{n}` has no global"))?);
@@ -2252,7 +2295,7 @@ impl Fx26Session {
     /// The value of hidden global `name` as a `.fasl`'s image, each of
     /// `deps` (the hidden globals of the files its file loads) linked by its
     /// place (`crate::fasl::image`).
-    fn fasl_image(&mut self, name: &Sym, deps: &[String]) -> Result<Vec<u8>, String> {
+    fn fasl_image(&mut self, name: &Sym, deps: &[String]) -> Result<crate::fasl::Image, String> {
         let shown = self.checker.interner.name(*name).to_string();
         let cell = self.global_cell(&shown).map_err(|e| e.message)?.ok_or_else(|| format!("`{shown}` has no global"))?;
         let mut cells = Vec::new();
