@@ -4020,3 +4020,23 @@ again for every dependent:
    may be shared between forms (its regions, effects and binders, fresh
    at each use or not), in `check-more` and `check-modules`; Heist hides
    such libraries meanwhile.
+
+## 179. `perf` names the front end's code again, mapped from the cache (the user's, 2026-10-29)
+
+Since the front end's code is mapped from the cache's file (§160 item 4,
+`ce9454f5`), `perf report` charges its samples to the file
+(`front-end-….img`) and names none of them: perf reads `/tmp/perf-PID.map`
+only for anonymous executable memory, and for a file-backed mapping looks
+for symbols in the file, which is no ELF. The map has the names
+(`FIXPT_PERF_MAP`, 5,197 of them); perf does not ask it. Found profiling
+Heist's §178; `FIXPT_IMAGE_NO_MAP=1` gives the names back, the code
+copied. Ways, to choose:
+1. Under `FIXPT_PERF_MAP`, copy the code rather than map it (anonymous,
+   so the map is read): trivial; a profile then measures some 12 ms more
+   of the start.
+2. perf's jitdump (`/tmp/jit-PID.dump`, `perf inject --jit`), each code
+   load with its address, name and bytes, made an ELF object a function:
+   to try whether it takes addresses within a file's mapping.
+3. The cache's code made findable by perf as a file of symbols: an ELF
+   object of the names at those addresses, where perf looks for that
+   mapping's file.
