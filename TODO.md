@@ -3975,7 +3975,7 @@ kept), two runs within 0.5 ms of each other:
 | the FX-26 runtime | 0.5 | |
 | the rest of the CLI's `start()` | 3.5 | split (2026-10-29): the Rust checker made twice, cellular and then native, 1.8 ms each; now made once, of the convention asked (`with_backend_preloaded_in`): 28.7 to 27.4 ms |
 | the front end's entries defined | 0.7 | |
-| the front end told the program's conventions (`check-conv-native!` and the like) | 1.5 | |
+| the front end told the program's conventions (`check-conv-native!` and the like) | 1.5 | split (2026-10-29): the first call into the front end made the hand register machine (1.06 ms) to run one `call` of a native closure; `%run-front-end` calls a native closure as native code now: 28.0 to 26.7 ms |
 | **the standard environment read by the FX-26 reader** (`standard26`, `read_standard`) | **7.6** | its syntax made once, with the front end's cache, kept there as a root |
 | the standard environment checked, with the form | 2.1 | the checker's state after it, kept: harder |
 | `0` parsed, compiled and run | 0.3 | |

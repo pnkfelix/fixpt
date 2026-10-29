@@ -153,6 +153,28 @@ fn fx26_int(rt: &mut Runtime, a: &[Value], op: &str) -> Outcome<Value> {
 pub const CALL_CLOSURE: &str = "call-closure";
 
 /// `%run-word`'s work, by the machine `run`.
+/// `%run-front-end`: an entry of the front end called. A native closure
+/// (the front end native, `TODO.md` §126) called as native code at once
+/// (`call_native`), not by a word a cellular machine runs, which made that
+/// machine for nothing at a session's first call: some 1 ms of a start
+/// (`TODO.md` §177). The front end's entries catch what they raise (each
+/// in a prompt of its own), so a continuation thrown or a prompt aborted to
+/// past one is a failure, as no prompt above would take it. Else as
+/// `%run-word`, on the front end's machine.
+fn run_front_end(rt: &mut Runtime, a: &[Value]) -> Outcome<Value> {
+    let native = a[0].is_bloblet() && rt.heap.bloblet_kind(a[0]) == const { fixpt_heap::layout::kind("native-closure") };
+    if let (true, Some(call)) = (native, rt.call_native) {
+        let Some(args) = rt.heap.list_to_vec(a[1]) else { return rt.type_error("a list of arguments", a[1]) };
+        return match call(rt, a[0], &args) {
+            Ok(v) => Ok(v),
+            Err(crate::NativeExit::Failed(m)) => rt.fail(&format!("cellular word: {m}"), &[]),
+            Err(_) => rt.fail("cellular word: the front end escaped its entry", &[]),
+        };
+    }
+    let run = rt.front_end_run_word.or(rt.run_word);
+    run_word_by(rt, a, run)
+}
+
 fn run_word_by(rt: &mut Runtime, a: &[Value], run: Option<crate::RunWord>) -> Outcome<Value> {
     let Some(args) = rt.heap.list_to_vec(a[1]) else { return rt.type_error("a list of arguments", a[1]) };
     // A closure is called by a word of its own, run with no arguments:
@@ -2387,7 +2409,7 @@ prims! {
     // leaves on top.
     "%run-word", 2, Some(2), simple!(|rt, a| { let run = rt.run_word; run_word_by(rt, a, run) });
     // `%run-word` on the machine for the front end (`front_end_run_word`).
-    "%run-front-end", 2, Some(2), simple!(|rt, a| { let run = rt.front_end_run_word.or(rt.run_word); run_word_by(rt, a, run) });
+    "%run-front-end", 2, Some(2), simple!(|rt, a| run_front_end(rt, a));
 
     "%bloblet?", 1, Some(1), simple!(|_rt, a| Ok(Value::boolean(a[0].is_bloblet())));
     "%bloblet-kind", 1, Some(1), simple!(|rt, a| {
