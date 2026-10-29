@@ -43,6 +43,12 @@ fn set_byte(t: &mut fixpt_memmgmt::Words, i: usize, b: u8) {
     *w = (*w & !(0xff << shift)) | ((b as u64) << shift);
 }
 
+/// Whether word `rel`'s card is dirty: for tests.
+#[cfg(test)]
+pub(super) fn card_marked(h: &Heap, rel: usize) -> bool {
+    byte(&h.cards, rel >> CARD_SHIFT) != 0
+}
+
 impl Heap {
     /// The card of word `rel` marked: a young reference may be there.
     #[inline(always)]
@@ -165,7 +171,7 @@ impl Heap {
         // it is scanned; the table read a word (eight cards) at a time, a
         // clean word skipped whole, so that a large space with few dirty
         // cards costs little.
-        for (lo, old_top) in [(lo, old_top), (super::STATIC_BASE, self.static_top)] {
+        for (lo, old_top) in [(lo, old_top), (super::STATIC_MUTABLE_BASE, self.static_top)] {
         let (first, end) = (lo >> CARD_SHIFT, old_top.div_ceil(CARD_WORDS));
         let mut card = first;
         while card < end {
@@ -252,10 +258,12 @@ impl Heap {
     /// walks both whole; for tests.
     pub fn verify_remembered(&self) -> Result<(), String> {
         let code = self.code.parts.each_ref().map(|p| (p.base, p.top));
-        for (lo, hi) in [(self.active, self.top), (super::STATIC_BASE, self.static_top), code[0], code[1]] {
+        for (lo, hi) in [(self.active, self.top), (super::STATIC_MUTABLE_BASE, self.static_top), code[0], code[1]] {
             self.verify_remembered_in(lo, hi)?;
         }
-        Ok(())
+        // And what native code stored, marking cards only, in the static
+        // area's immutable half: nothing that may move.
+        self.verify_immutable()
     }
 
     fn verify_remembered_in(&self, lo: usize, hi: usize) -> Result<(), String> {

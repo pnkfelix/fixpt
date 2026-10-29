@@ -29,17 +29,20 @@ const SYMBOL_NAME: usize = 4;
 const SYMBOL_SLOT: usize = 2;
 
 /// Where the image's words go: each of its regions (the live region, the
-/// static area's, the code area's two parts), from where in the image to
-/// where in this heap, and how many words.
+/// static area's two halves, the code area's two parts), from where in the
+/// image to where in this heap, and how many words.
 struct Moves {
-    regions: [(usize, usize, usize); 4],
+    regions: [(usize, usize, usize); 5],
 }
 
 impl Moves {
-    /// Where image word `i` goes; none if it is in no region.
+    /// Where image word `i` goes; none if it is in no region. A region's
+    /// end too: a bloblet of no suffix is pointed at one past its fields,
+    /// which for its region's last object is the region's end. Regions are
+    /// far apart, so no end is another's start.
     #[inline]
     fn index(&self, i: usize) -> Option<usize> {
-        self.regions.iter().find(|&&(from, _, n)| (from..from + n).contains(&i)).map(|&(from, to, _)| i - from + to)
+        self.regions.iter().find(|&&(from, _, n)| n > 0 && (from..=from + n).contains(&i)).map(|&(from, to, _)| i - from + to)
     }
 }
 
@@ -59,40 +62,49 @@ impl Heap {
             w.len() >= used * 8 && (0..used).all(|i| self.mem.words()[p.base + i] == u64::from_le_bytes(w[i * 8..i * 8 + 8].try_into().unwrap()))
         };
         let same_code = as_image(0) && as_image(1);
-        let (static_at, static_words) = super::static_area();
-        let in_place = self.base == ib && !relocating() && self.top == 0 && self.active == 0 && self.static_top == static_at && same_code;
+        let [(immutable_at, half), (static_at, _)] = super::static_area();
+        let empty = self.immutable_top == immutable_at && self.static_top == static_at;
+        let in_place = self.base == ib && !relocating() && self.top == 0 && self.active == 0 && empty && same_code;
+        // The image's immutable half where its symbols are this heap's (no
+        // symbol here may move: none here yet, as when the image is read
+        // before anything else); else its mutable half, scanned, since this
+        // heap's symbols, which move, may stand for the image's.
+        let immutable_ok = !self.symbols.iter().any(|&s| self.moves(s));
         // Each from a card's start, so that the crossing map of the cards
         // before stays as it is.
         let card = 1 << super::young::CARD_SHIFT;
-        let (old_top, old_static_top) = (self.top, self.static_top);
-        for top in [&mut self.top, &mut self.static_top] {
+        let (old_top, old_immutable_top, old_static_top) = (self.top, self.immutable_top, self.static_top);
+        for top in [&mut self.top, &mut self.immutable_top, &mut self.static_top] {
             if !top.is_multiple_of(card) {
                 let gap = card - *top % card;
                 self.mem.words_mut()[*top] = make_header(const { layout::kind("bloblet") }, 0, (gap - 1) * 8);
                 *top += gap;
             }
         }
-        let (at, sat, ns) = (self.top, self.static_top, img.statics.len() / 8);
+        let (ni, ns) = (img.immutable.len() / 8, img.statics.len() / 8);
+        let at = self.top;
+        let (iat, sat) = if immutable_ok { (self.immutable_top, self.static_top) } else { (self.static_top, self.static_top + ni) };
         if at + n > self.active + self.semi {
             self.grow(at + n - self.active);
         }
-        if sat + ns > static_at + static_words {
-            return Err(format!("the static area has no room for {ns} words"));
+        let room = if immutable_ok { iat + ni <= immutable_at + half && sat + ns <= static_at + half } else { sat + ns <= static_at + half };
+        if !room {
+            return Err(format!("the static area has no room for {} words", ni + ns));
         }
-        let mut regions = [(0, at, n), (static_at, sat, ns), (0, 0, 0), (0, 0, 0)];
+        let mut regions = [(0, at, n), (immutable_at, iat, ni), (static_at, sat, ns), (0, 0, 0), (0, 0, 0)];
         for (k, (words, _)) in img.code.iter().enumerate() {
             let p = &self.code.parts[k];
             let len = words.len() / 8;
             if !in_place && p.top + len > p.limit() {
                 return Err(format!("the code area's part {k} has no room for {len} words"));
             }
-            regions[k + 2] = (PART_BASES[k], if in_place { p.base } else { p.top }, len);
+            regions[k + 3] = (PART_BASES[k], if in_place { p.base } else { p.top }, len);
         }
         if img.code.iter().any(|(w, _)| !w.is_empty()) {
             self.start_code_area();
         }
         let moves = Moves { regions };
-        let sources = [img.words, img.statics, img.code[0].0, img.code[1].0];
+        let sources = [img.words, img.immutable, img.statics, img.code[0].0, img.code[1].0];
         for (&(_, to, len), from) in moves.regions.iter().zip(sources) {
             let mem = &mut self.mem.words_mut()[to..to + len];
             for (w, b) in mem.iter_mut().zip(from.chunks_exact(8)) {
@@ -212,7 +224,7 @@ impl Heap {
             }
             self.symbols.truncate(symbols);
             self.globals.truncate(globals);
-            (self.top, self.static_top) = (old_top, old_static_top);
+            (self.top, self.immutable_top, self.static_top) = (old_top, old_immutable_top, old_static_top);
             return Err(why);
         }
         for f in young {
@@ -226,12 +238,16 @@ impl Heap {
         }
 
         self.cross_all(at, at + n);
+        self.cross_all(iat, iat + ni);
         self.cross_all(sat, sat + ns);
         self.top = at + n;
+        if immutable_ok {
+            self.immutable_top = iat + ni;
+        }
         self.static_top = sat + ns;
         self.budget_from(self.top - self.active);
         for (k, (words, free)) in img.code.iter().enumerate() {
-            let (len, to) = (words.len() / 8, moves.regions[k + 2].1);
+            let (len, to) = (words.len() / 8, moves.regions[k + 3].1);
             let free: Vec<(usize, usize)> = free.iter().map(|&(s, n)| (to + s, n)).collect();
             let (mut at, mut starts, mut f) = (to, Vec::new(), free.iter().peekable());
             while at < to + len {
@@ -257,6 +273,11 @@ impl Heap {
             {
                 view.flush((self.base + to) * 8, len * 8);
             }
+        }
+        // What the image's immutable half refers to of its code is never
+        // swept: no collection scans that half to find it.
+        if immutable_ok && ni > 0 {
+            self.fix_code();
         }
         Ok(img.roots.iter().map(|&r| map(r)).collect())
     }

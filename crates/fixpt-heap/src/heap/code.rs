@@ -47,11 +47,15 @@ pub(super) struct Part {
     pub(super) starts: Vec<usize>,
     /// Words in objects: all that is not free.
     pub(super) used: usize,
+    /// Where, from `base`, what an image brought ends: never swept, since
+    /// the static area's immutable half, which no collection scans, may be
+    /// all that refers to it (`TODO.md` §161).
+    pub(super) fixed: usize,
 }
 
 impl Part {
     fn new(base: usize) -> Part {
-        Part { base, top: base, free: Vec::new(), starts: Vec::new(), used: 0 }
+        Part { base, top: base, free: Vec::new(), starts: Vec::new(), used: 0, fixed: base }
     }
 
     pub(super) fn limit(&self) -> usize {
@@ -189,6 +193,15 @@ impl Heap {
         c
     }
 
+    /// What the code area holds now never swept (`Part::fixed`): what an
+    /// image brought, which its static area's immutable half may be all
+    /// that refers to.
+    pub(super) fn fix_code(&mut self) {
+        for p in &mut self.code.parts {
+            p.fixed = p.top;
+        }
+    }
+
     /// Before anything is written there: the view replaces the area's pages
     /// with shared ones, zero, as they were.
     pub(super) fn start_code_area(&mut self) {
@@ -292,7 +305,7 @@ impl Heap {
                 debug_assert!(is_header(w), "the code area is walkable: no header at {at}");
                 let main = at + is_extension(w) as usize;
                 let size = read_head(self.mem.words(), main).size();
-                if marks.contains(&main) {
+                if marks.contains(&main) || at < self.code.parts[part].fixed {
                     if let Some(start) = run.take() {
                         free.push((start, at - start));
                     }

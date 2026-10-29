@@ -2,7 +2,7 @@
 //! nor is copied; its objects are roots, so what they refer to lives and
 //! follows when it moves, by their dirty cards in a minor collection.
 
-use fixpt_heap::{Heap, Value, image};
+use fixpt_heap::{Heap, Value, image, layout};
 
 /// A heap of its own holding `(7 "text" (1 . 2))`, dumped with its old
 /// space as the image's static area.
@@ -81,4 +81,58 @@ fn a_heap_with_a_static_area_is_dumped_with_it() {
         assert!(!back.is_static(o) && back.is_static(back.cdr(o)), "each where it was");
         assert_eq!(back.string_to_rust(back.car(back.cdr(back.cdr(o)))), "text");
     }
+}
+
+/// An image made static sorts its objects into the static area's halves:
+/// what no field of may come to refer to what moves (a string, a symbol, a
+/// sum) into the immutable, what may (a pair, a vector, a bloblet of no
+/// declared kind) into the mutable; every reference to each followed, a
+/// bloblet of no suffix's (pointed at where the next object starts) too.
+#[test]
+fn an_image_made_static_is_sorted_into_its_halves() {
+    let mut h = Heap::new();
+    let text = h.make_string("text");
+    let sym = h.intern("a-symbol");
+    let sum = h.make_frozen(layout::kind("sum"), &[sym, text]);
+    // A bloblet of fields and no suffix, then a string right after it.
+    let empty = h.make_bloblet(layout::kind("bloblet"), 1, 0, true);
+    let after = h.make_string("after");
+    h.set_bloblet_slot(empty, 2, after);
+    let v = h.make_vector(2, Value::fixnum(0));
+    h.obj_set(v, 0, empty);
+    h.obj_set(v, 1, sum);
+    let l = h.cons(v, Value::NULL);
+    h.push_root(l);
+    let bytes = image::dump_static(&h);
+    let back = image::load(&bytes).unwrap();
+    assert!(back.immutable_words() > 0 && back.static_words() > back.immutable_words(), "both halves");
+    let l = back.root_at(0);
+    assert!(back.is_static(l));
+    let v = back.car(l);
+    let empty = back.obj_ref(v, 0);
+    assert_eq!(back.string_to_rust(back.bloblet_slot(empty, 2)), "after", "the no-suffix bloblet's own field");
+    let sum = back.obj_ref(v, 1);
+    assert_eq!(back.symbol_name(back.bloblet_slot(sum, 2)), "a-symbol");
+    assert_eq!(back.string_to_rust(back.bloblet_slot(sum, 3)), "text");
+    back.verify().unwrap();
+}
+
+/// An image whose immutable half ends with a bloblet of no suffix (a
+/// symbol, pointed at one past its fields: at the half's end) splices, and
+/// the symbol is this heap's.
+#[test]
+fn a_splice_finds_an_object_at_its_halfs_end() {
+    let mut h = Heap::new();
+    let l = h.cons(Value::fixnum(1), Value::NULL);
+    let sym = h.intern("last");
+    let l = h.cons(sym, l);
+    h.push_root(l);
+    let bytes = image::dump_static(&h);
+    let img = image::parts(&bytes, true).unwrap();
+    let mut into = Heap::new();
+    let roots = into.splice_image(&img, &[]).expect("splices");
+    let l = roots[0];
+    assert_eq!(into.symbol_name(into.car(l)), "last");
+    assert_eq!(into.intern_existing("last"), Some(into.car(l)));
+    into.verify().unwrap();
 }

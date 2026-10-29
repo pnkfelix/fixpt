@@ -109,66 +109,74 @@ pub struct Kind {
     /// How the older, header-pointed objects of this kind split their payload:
     /// all traced fields, or all raw suffix.
     pub traced: bool,
+    /// Whether a field of one may come to refer to what moves once it is
+    /// made (`TODO.md` §161): what its type says, a pair's or a `ref`'s, say.
+    /// One whose kind says not, or whose fields are frozen, may go to an
+    /// image's immutable static area, which no collection scans. A write
+    /// there of an immediate (a register word's entry, a symbol's slot), or
+    /// of a reference to what never moves (a cellular closure's word, in
+    /// the code area, set once compiled), is no matter to a collector.
+    pub settable: bool,
 }
 
 /// Every kind. Codes 1–19 are the object types the system has always had;
 /// `ObjType` in `value.rs` names the same codes. 255 marks a large header's
 /// extension word, never an object.
 pub const KINDS: &[Kind] = &[
-    Kind { name: "string", code: 1, traced: false },
-    Kind { name: "symbol", code: 2, traced: true },
-    Kind { name: "vector", code: 3, traced: true },
-    Kind { name: "bytevector", code: 4, traced: false },
-    Kind { name: "flonum", code: 5, traced: false },
-    Kind { name: "bignum", code: 6, traced: false },
-    Kind { name: "ratnum", code: 7, traced: true },
-    Kind { name: "closure", code: 8, traced: true },
-    Kind { name: "code", code: 9, traced: true },
-    Kind { name: "box", code: 10, traced: true },
-    Kind { name: "record", code: 11, traced: true },
-    Kind { name: "record-type", code: 12, traced: true },
-    Kind { name: "port", code: 13, traced: true },
-    Kind { name: "continuation", code: 14, traced: true },
-    Kind { name: "values", code: 15, traced: true },
-    Kind { name: "promise", code: 16, traced: true },
-    Kind { name: "hash-table", code: 17, traced: true },
-    Kind { name: "environment", code: 18, traced: true },
-    Kind { name: "primitive", code: 19, traced: true },
+    Kind { name: "string", code: 1, traced: false, settable: false },
+    Kind { name: "symbol", code: 2, traced: true, settable: false },
+    Kind { name: "vector", code: 3, traced: true, settable: true },
+    Kind { name: "bytevector", code: 4, traced: false, settable: false },
+    Kind { name: "flonum", code: 5, traced: false, settable: false },
+    Kind { name: "bignum", code: 6, traced: false, settable: false },
+    Kind { name: "ratnum", code: 7, traced: true, settable: false },
+    Kind { name: "closure", code: 8, traced: true, settable: true },
+    Kind { name: "code", code: 9, traced: true, settable: true },
+    Kind { name: "box", code: 10, traced: true, settable: true },
+    Kind { name: "record", code: 11, traced: true, settable: true },
+    Kind { name: "record-type", code: 12, traced: true, settable: true },
+    Kind { name: "port", code: 13, traced: true, settable: true },
+    Kind { name: "continuation", code: 14, traced: true, settable: true },
+    Kind { name: "values", code: 15, traced: true, settable: true },
+    Kind { name: "promise", code: 16, traced: true, settable: true },
+    Kind { name: "hash-table", code: 17, traced: true, settable: true },
+    Kind { name: "environment", code: 18, traced: true, settable: true },
+    Kind { name: "primitive", code: 19, traced: true, settable: true },
     // Bloblets proper, pointed at their suffix.
-    Kind { name: "bloblet", code: 32, traced: true },
-    Kind { name: "cellular-code", code: 33, traced: true },
-    Kind { name: "compiled-code", code: 34, traced: true },
+    Kind { name: "bloblet", code: 32, traced: true, settable: true },
+    Kind { name: "cellular-code", code: 33, traced: true, settable: true },
+    Kind { name: "compiled-code", code: 34, traced: true, settable: true },
     // The AST engine's environment frames: `layout::frame`.
-    Kind { name: "env-frame", code: 35, traced: true },
+    Kind { name: "env-frame", code: 35, traced: true, settable: true },
     // FX-26's immutable data, frozen once made: a sum's tag (a symbol) and
     // its value; a product's fields, in order.
-    Kind { name: "sum", code: 36, traced: true },
-    Kind { name: "product", code: 37, traced: true },
+    Kind { name: "sum", code: 36, traced: true, settable: false },
+    Kind { name: "product", code: 37, traced: true, settable: false },
     // A closure made by cellular code: `layout::cellular::CLOSURE_WORD` and
     // `CLOSURE_FRAME`. Its own kind, so no engine takes it for one of its.
-    Kind { name: "cellular-closure", code: 38, traced: true },
+    Kind { name: "cellular-closure", code: 38, traced: true, settable: false },
     // A continuation captured by cellular code: `layout::cellular::CONT_*`.
-    Kind { name: "cellular-continuation", code: 39, traced: true },
+    Kind { name: "cellular-continuation", code: 39, traced: true, settable: true },
     // Register code (PLAN.md 13h′): `layout::regcode`.
-    Kind { name: "register-code", code: 40, traced: true },
+    Kind { name: "register-code", code: 40, traced: true, settable: false },
     // A closure of code in the native convention
     // (`docs/research/native-conventions.md`): `[free…][code][trailer]`, its
     // code bloblet (in the code area) at `CLOSURE_WORD`, where a cellular
     // closure has its word, and free value `i` at `CLOSURE_FREE0 + i`, as
     // there.
-    Kind { name: "native-closure", code: 41, traced: true },
+    Kind { name: "native-closure", code: 41, traced: true, settable: false },
     // A flat array (`flatarrayof`): its element's layout (`FLAT_*`) in field
     // 2, a fixnum; the elements raw in the suffix, 4 or 8 bytes each, which
     // no collection scans and no store marks.
-    Kind { name: "flat-array", code: 42, traced: true },
+    Kind { name: "flat-array", code: 42, traced: true, settable: true },
     // A table keyed by identity (`eqtable`, `fixpt_runtime::eqtable`): its
     // stamp, count and buckets in fields 1 to 3.
-    Kind { name: "eqtable", code: 43, traced: true },
+    Kind { name: "eqtable", code: 43, traced: true, settable: true },
     // A weak pair (`Heap::make_weak_pair`): field 2, its car, is not traced,
     // and a collection that finds its referent dead clears it to
     // `heap::WEAK_DEAD`; field 1, its cdr, is an ordinary field. The car is
     // the first field a scan meets (`main + 1`).
-    Kind { name: "weak-pair", code: 44, traced: true },
+    Kind { name: "weak-pair", code: 44, traced: true, settable: true },
     // A frame of code in the native convention, flushed from its stack into
     // the heap (`fixpt-native`'s stack cache, `TODO.md` §91): laid out on
     // the stack as it is here, its header word below its link. Its fields:
@@ -177,17 +185,17 @@ pub const KINDS: &[Kind] = &[
     // values, the words its map leaves out 0; a trailer where it was copied
     // into the heap (none where it was flushed in place, on the stack); and
     // its raw words (`f64`s), its suffix.
-    Kind { name: "native-frame", code: 45, traced: true },
+    Kind { name: "native-frame", code: 45, traced: true, settable: true },
     // An I-cell (`(icell T R)`): field 2 whether it is full, field 3 its
     // value, field 4 the tasks waiting for it, a list of thunks (FX-26's
     // processes, `fixpt_runtime::sched`). Its own kind, so that a message
     // copied between processes shares it, as a capability, rather than
     // copying it.
-    Kind { name: "icell", code: 46, traced: true },
+    Kind { name: "icell", code: 46, traced: true, settable: true },
     // A process's mailbox (`(addr M R)`, `fixpt_runtime::sched`): fields 2
     // and 3 its messages, the oldest first then the newest first; field 4
     // the task waiting for one, a thunk, or `#f`.
-    Kind { name: "mailbox", code: 47, traced: true },
+    Kind { name: "mailbox", code: 47, traced: true, settable: true },
 ];
 
 /// A flat array's element layouts: what `(flatlayout T)` is at run time.
@@ -232,6 +240,23 @@ pub const fn flat_size(code: i64) -> usize {
 }
 
 pub const KIND_EXTENSION: u8 = 255;
+
+/// Whether an object of kind `code` may have a field written with a
+/// reference once it is made ([`Kind::settable`]); a kind there is not,
+/// conservatively, may.
+pub const fn settable(code: u8) -> bool {
+    KIND_SETTABLE[code as usize]
+}
+
+const KIND_SETTABLE: [bool; 256] = {
+    let mut t = [true; 256];
+    let mut i = 0;
+    while i < KINDS.len() {
+        t[KINDS[i].code as usize] = KINDS[i].settable;
+        i += 1;
+    }
+    t
+};
 
 /// A kind's code, by name.
 pub const fn kind(name: &str) -> u8 {

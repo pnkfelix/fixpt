@@ -3576,19 +3576,24 @@ spliced into the session's: a major collection no longer copies it (stage
    symbols are the image's, and the splice in place writes nothing of the
    image (27,174 fixups, none written; each symbol's slot the same). An
    empty program 50.6 ms to 49.1 ms.
-4. What has no mutable fields in an immutable section of its own, never
-   scanned, by kind (the user's: mutability is the type's, so the kind's,
-   declared in `KINDS`): pairs, refs, arrays, the generic bloblet in the
-   mutable section; strings and what has no fields, register code,
-   symbols, closures, products and sums in the immutable one. A field
-   written only with immediates (a register word's entry, a symbol's slot)
-   is not mutable to the collector. Immutable static objects point only at
-   what never moves: the static areas and the code area; the Rust barrier
-   refuses a movable reference stored there, and barrier verification
-   checks native code's stores. (Frozen bits, the first idea, mark under
-   0.1% of the front end.)
+4. ~~What has no mutable fields in a half of its own, never scanned~~
+   (done, 2026-10-29, the user's): by kind (`Kind::settable`, from the
+   type: whether a field may come to refer to what moves), or by an
+   object's frozen fields. Immutable: strings and what has no fields,
+   symbols, sums, products, register code, cellular and native closures.
+   The front end: 7.9 MB of its 8.5 MB in the immutable half. Its code is
+   never swept (`Part::fixed`): that half, unscanned, may be all that
+   refers to it. The write barrier is now by generation (the user's,
+   Larceny's `gen_no`): a byte for each 2^27-word chunk (`GEN`; 0 the
+   nursery, 1 the old space, 127 what never moves, a flag for the
+   immutable half), the place's tested first; an immutable place refusing
+   what may move, in every build. Stage 0: majors 125 ms to 119 ms,
+   instructions 0.4% more, cycles the same.
 5. The remembered set for the mutable part, seeded by the image (below),
-   in place of scanning it whole.
+   in place of scanning it whole: what the barrier's "something of the
+   old space into what never moves" case is for (`older_to_younger`); and
+   native code's barrier by the table too (`gen_table_address`, biased as
+   the card table's), which marks every store's card meanwhile.
 6. Global cells in the static area.
 
 What the collector does with what §160 maps, the user's design:

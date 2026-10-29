@@ -27,7 +27,7 @@ fn a_mappable_image_has_its_spaces_on_pages_and_a_packed_one_not() {
         let table = image::sections(bytes).unwrap();
         assert_eq!(table.iter().filter(|t| t.kind == image::META).count(), 1);
         let spaces: Vec<u32> = table.iter().filter(|t| t.kind == image::WORDS).map(|t| t.space).collect();
-        assert_eq!(spaces, [image::OLD, image::STATIC_MUTABLE, image::CODE_STUBBED, image::CODE_NATIVE]);
+        assert_eq!(spaces, [image::OLD, image::STATIC, image::STATIC_MUTABLE, image::CODE_STUBBED, image::CODE_NATIVE]);
         for t in table.iter().filter(|t| t.kind == image::WORDS) {
             assert!(t.bytes / 8 <= t.extent, "{t:?}");
             assert_eq!(t.offset.is_multiple_of(image::PAGE), on_pages, "{t:?}");

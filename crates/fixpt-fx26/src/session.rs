@@ -457,7 +457,11 @@ fn load_native_front_end(k: &NativeKeeping, heap: &mut fixpt_heap::Heap, bytes: 
         // the image's is its own, so that the image goes where it was made.
         let mine = heap.adapter_code().filter(|_| adapter != Value::FALSE);
         let given: Vec<(Value, Value)> = mine.map(|m| (adapter, m)).into_iter().collect();
-        let root = *heap.splice_image(&img, &given).ok()?.first()?;
+        // A cache of this executable's that cannot be put in is said: the
+        // front end is then made again at every run, as fast as from no
+        // cache at all, and nothing else would show it.
+        let spliced = heap.splice_image(&img, &given).inspect_err(|e| eprintln!("fixpt: the front end's cache could not be read ({e}); it is made again"));
+        let root = *spliced.ok()?.first()?;
         let theirs = heap.car(heap.cdr(heap.cdr(root)));
         if mine.is_none() && theirs != Value::FALSE {
             heap.set_adapter_code(theirs);
