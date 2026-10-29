@@ -2899,3 +2899,24 @@ of `TODO.md` §141, working on my own.
   already moved its functions at each run, and call-outs are encoded. When
   the native code comes to name the generation table's address (§161 step
   5), that will have to be a fixup or a register, not a constant.
+
+### Masking keeps reads and writes on the result's regions (2026-10-29)
+
+- **Heist's request** (`heist/docs/requests/fixpt-mask-hides-acyclic-writes.md`):
+  masking dropped `read` and `write` on a region only the result's type
+  mentioned, so a procedure polymorphic in `r` that tied what it made into
+  a cycle could declare `(alloc r)` and be instantiated at `acyclic`; a
+  `pure`, terminating walk of it ran for ever. Both checkers agreed.
+- **The user's choice: Heist's proposal**, Lucassen and Gifford's rule,
+  `read` kept as well as `write` (`Checker::mask_keeps`,
+  `k-result-keeps?`). Keeping `write` alone was the narrower fix, since a
+  read cannot make data cyclic; the user chose not to measure it.
+- **Measured before adopting it**: the front end still checks; of the 887
+  test programs' `fixpt check`, 885 the same and 2 still checking with
+  `read` and `write` in their effects; the suite 957 of 958 (an
+  expectation of an effect shown, updated); Kayak's stage 0 the same.
+  Of Heist's programs, `ratfink`, `combo` and `editor` the same; `s7st`
+  and `cfa` (which loads it) refused, `s7-parse-number` reading its fresh
+  result's region `@sc` without saying `(read @sc)`: Heist's to add.
+- Heist's two cases are `tests/programs/regions/result-write-is-kept.fx`
+  and `result-write-at-acyclic.fx` (`regions::masking_keeps_writes_to_the_results_regions`).

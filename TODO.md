@@ -3785,6 +3785,11 @@ machine so that nextest runs the parts at once.
    `fasl` and `every_program_on_*` tests (70 to 80 s);
    `modules/convention-read.fx` collecting at every allocation 63 s, all
    but 1 s its run.
+4. Left: the bootstrap program's shared compile (`common::bootstrap_compiled`)
+   is made by the first test that wants it after each change to the
+   sources, and the five tests of the native compilers wait on it: 107 to
+   110 s each then, 6 to 11 s warm. Made before the tests start (`fixpt
+   prewarm`, or the setup script of §166), it would leave the long tail.
 
 ## 168. The front end native on every machine that runs native code (the user's, 2026-10-29)
 

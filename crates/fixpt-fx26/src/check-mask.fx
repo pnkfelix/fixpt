@@ -54,13 +54,15 @@
     (if (k-place-frozen-atom? a)
         (tagcase (k-atom-region a) (r-frozen (p f) (r-var p)) (else y (k-atom-region a)))
         (k-atom-region a))))
-;; Whether an atom stays because the result mentions its region: `alloc`,
-;; `goto` and `comefrom` (ranks 2 to 4); only `alloc`, for a place-frozen
-;; one.
+;; Whether an atom stays because the result mentions its region: `read`,
+;; `write`, `alloc`, `goto` and `comefrom` (ranks 0 to 4), as Lucassen and
+;; Gifford's rule keeps them (Heist's report, 2026-10-29: a write dropped
+;; there could make `acyclic` data cyclic); only `alloc`, for a
+;; place-frozen one.
 (define k-result-keeps? (->* (k-atom) bool)
   (lambda (a)
     (let ((rank (k-atom-rank a)))
-      (if (k-place-frozen-atom? a) (= rank 2) (and (> rank 1) (< rank 5))))))
+      (if (k-place-frozen-atom? a) (= rank 2) (and (> rank -1) (< rank 5))))))
 ;; Whether an atom stays because the result, whose regions are
 ;; `in-result`, mentions its region.
 (define k-stays-for-result? (->* (k-atom k-regions) bool)

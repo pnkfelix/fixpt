@@ -2454,8 +2454,12 @@ impl Checker {
 
     /// Whether masking keeps atom `a` of an expression's effect: its region
     /// is seen from outside, `visible` (in the types of what the expression
-    /// is given), or, for allocation and control alone, in its result's
-    /// type, `in_result` (`mask`; the cells' verifier's too).
+    /// is given), or, for memory and control, in its result's type,
+    /// `in_result` (`mask`; the cells' verifier's too). Reads and writes
+    /// there are kept too, as Lucassen and Gifford's rule keeps them (Heist's
+    /// report, 2026-10-29): dropped, a procedure that writes what it makes
+    /// and returns could say only `alloc`, and be instantiated at `acyclic`,
+    /// whose data was never written (`regions/result-write-is-kept.fx`).
     pub(crate) fn mask_keeps(a: Atom, visible: &HashSet<Region>, in_result: &HashSet<Region>) -> bool {
         match a.region() {
             None => true,
@@ -2472,7 +2476,9 @@ impl Checker {
             // Globals' bindings are seen everywhere: never masked.
             Some(Region::Global(_) | Region::Globals) => true,
             Some(r) if visible.contains(&r) => true,
-            Some(r) if in_result.contains(&r) => matches!(a, Atom::Alloc(_) | Atom::Goto(_) | Atom::Comefrom(_)),
+            Some(r) if in_result.contains(&r) => {
+                matches!(a, Atom::Read(_) | Atom::Write(_) | Atom::Alloc(_) | Atom::Goto(_) | Atom::Comefrom(_))
+            }
             Some(_) => false,
         }
     }

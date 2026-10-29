@@ -210,3 +210,25 @@ fn frozen_data_is_covariant_in_lifetimes() {
         assert!(e.contains(says), "{says}: {e}");
     }
 }
+
+/// Masking keeps `read` and `write` on a region the result's type mentions
+/// (Heist's report, 2026-10-29; `Checker::mask_keeps`): a procedure that
+/// writes what it allocated in its region parameter and returns says so, and
+/// so cannot be instantiated at `acyclic`, where the write would make a
+/// cycle `acyclic` promises is not there. Saying so, it is used as before
+/// at a region that is written.
+#[test]
+fn masking_keeps_writes_to_the_results_regions() {
+    for (program, says) in [
+        (include_str!("programs/regions/result-write-is-kept.fx"), "beyond what is expected, it has (write r)"),
+        (include_str!("programs/regions/result-write-at-acyclic.fx"), "this writes frozen data"),
+    ] {
+        let e = check(program).expect_err("refused");
+        assert!(e.contains(says), "{says}: {e}");
+    }
+    let said = "(define f (poly ((r region)) (subr (maxeff (alloc r) (write r)) (int) (listof int r)))
+                  (plambda ((r region))
+                    (lambda (x) (let ((l (the (listof int r) (cons x nil)))) (begin (set-cdr! l (cons 2 nil)) l)))))
+                (car (f 1))";
+    assert!(check(said).is_ok(), "{:?}", check(said));
+}

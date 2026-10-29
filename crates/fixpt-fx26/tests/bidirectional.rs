@@ -107,9 +107,11 @@ fn nil_is_of_the_type_nil_where_nothing_says_which_list() {
     // A new pair's tail, `nil`, is widened to a list: `(cons 1 nil)` is a
     // list, which may be written as one.
     assert_eq!(check("(cons 1 nil)"), "(pairof int (listof int @r.1) @r.1) ! (alloc @r.1)");
-    assert_eq!(check("(cdr (cons 1 nil))"), "(listof int @r.1) ! (alloc @r.1)");
+    // Its read kept, the region being the result's (Heist's report,
+    // 2026-10-29: masking keeps `read` and `write` there).
+    assert_eq!(check("(cdr (cons 1 nil))"), "(listof int @r.1) ! (maxeff (read @r.1) (alloc @r.1))");
     let written = "(let ((p (cons 1 nil))) (begin (set-cdr! p (cons 2 nil)) p))";
-    assert_eq!(check(written), "(pairof int (listof int @r.1) @r.1) ! (alloc @r.1)");
+    assert_eq!(check(written), "(pairof int (listof int @r.1) @r.1) ! (maxeff (write @r.1) (alloc @r.1))");
     // Where a pair's tail is expected to be `nil`, it stays `nil`.
     assert_eq!(check("(define p (pairof int nil @heap) (cons 1 nil)) (cdr p)"), "nil ! (maxeff (read @heap) (read (globals p)))");
     let xs = "(define xs (listof int @heap) (list 1 2)) (define c bool #t)";
