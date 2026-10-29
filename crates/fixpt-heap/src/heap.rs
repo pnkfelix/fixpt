@@ -2851,9 +2851,8 @@ impl Heap {
         assert_eq!(self.all_live_regions(), 0, "an image is made with no region live");
         assert!(self.immutable_top == STATIC_BASE && self.static_top == STATIC_MUTABLE_BASE, "an old space made static where there is a static area already");
         let mem = self.mem.words();
-        // Each object, where it is and where it goes, in address order.
-        let mut moved: Vec<(usize, usize)> = Vec::new();
-        let mut halves = [Vec::new(), Vec::new()];
+        // Each object: where it is, how long, and which half it goes in.
+        let mut objects: Vec<(usize, usize, usize)> = Vec::new();
         for (lo, hi) in [(self.active, self.top), (NURSERY_BASE, self.nursery_top)] {
             let mut at = lo;
             while at < hi {
@@ -2865,13 +2864,37 @@ impl Heap {
                 } else {
                     (2, false)
                 };
-                let k = if immutable { 0 } else { 1 };
-                let goes = [STATIC_BASE, STATIC_MUTABLE_BASE][k] + halves[k].len();
-                moved.push((at, goes));
-                halves[k].extend_from_slice(&mem[at..at + n]);
+                objects.push((at, n, if immutable { 0 } else { 1 }));
                 at += n;
             }
         }
+        // The interned symbols and their names first in the immutable half,
+        // together: what a load reads of every symbol (its hash, `splice`)
+        // and of many names (jitdebug's) is then on a few pages, not on
+        // most of the half (the front end's: 153 pages, not 1,604). An
+        // object by a reference to it, as `goes` finds it below.
+        let mut first = vec![false; objects.len()];
+        let object_of = |i: usize| objects.partition_point(|&(at, _, _)| at < i).checked_sub(1);
+        for &sym in &self.symbols {
+            for v in [sym, self.obj_ref(sym, 0)] {
+                let i = v.index() - self.base;
+                if let Some(k) = object_of(i).filter(|&k| objects[k].2 == 0 && i <= objects[k].0 + objects[k].1) {
+                    first[k] = true;
+                }
+            }
+        }
+        // Each object, where it is and where it goes, by where it is.
+        let mut moved: Vec<(usize, usize)> = Vec::with_capacity(objects.len());
+        let mut halves = [Vec::new(), Vec::new()];
+        for pass in [true, false] {
+            for (k, &(at, n, half)) in objects.iter().enumerate() {
+                if first[k] == pass {
+                    moved.push((at, [STATIC_BASE, STATIC_MUTABLE_BASE][half] + halves[half].len()));
+                    halves[half].extend_from_slice(&mem[at..at + n]);
+                }
+            }
+        }
+        moved.sort_unstable();
         // Where word `i` of an object of the old space or the nursery goes:
         // a pair's reference is to its first word, a bloblet's past its
         // header (to its suffix, which for one with none is where the next

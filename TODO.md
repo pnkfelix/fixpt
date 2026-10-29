@@ -3582,6 +3582,14 @@ Left, in order:
    collection find lazily in the part's fixed start; but jitdebug's
    registration of each cached code object (`note_cached_code`, 7 ms of
    the start, the user's to decide) touches those pages anyway.
+   The interned symbols and their names laid out first in the immutable
+   half (`image_split_static`, the user's, 2026-10-29): the front end's
+   6,011 were on 1,604 of its 1,924 pages, and are on about 153. Measured,
+   51 page faults fewer and about 0.2 ms, not the 1,400 hoped: Linux maps
+   a file's pages around a fault (up to 16), so the scattered ones cost
+   some hundred faults, not one each. Not done yet (the user's: not yet):
+   the image carrying its sorted table of symbols by hash, so that the
+   splice reads none of the symbols at the load.
 5. **`.fasl`s** as segments of the same kind (§141 item 9), and
    `fixpt build`'s executables.
 `FIXPT_IMAGE_VERIFY=1` (to add) to check an image this executable wrote

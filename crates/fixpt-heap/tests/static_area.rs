@@ -272,3 +272,47 @@ fn an_images_symbols_are_found_by_name_when_asked_for() {
     assert_eq!(into.symbol_name(gamma), "gamma");
     into.verify().unwrap();
 }
+
+/// An image made static has its interned symbols and their names first in
+/// its immutable half, together, whatever order the heap made them in:
+/// what a load reads of each symbol is on a few pages, not spread over the
+/// half (`TODO.md` §160 item 4). The rest follows, its references still
+/// right.
+#[test]
+fn an_images_symbols_are_first_and_together() {
+    let mut h = Heap::new();
+    let early = h.make_string("made before any symbol");
+    let sum = h.make_frozen(layout::kind("sum"), &[Value::fixnum(1), early]);
+    let mut l = h.cons(sum, Value::NULL);
+    for k in 0..50 {
+        let filler = h.make_string(&format!("{k} not a name, and long enough to take some room"));
+        let sym = h.intern(&format!("symbol-{k}"));
+        let pair = h.cons(sym, filler);
+        l = h.cons(pair, l);
+    }
+    h.push_root(l);
+    let mut back = image::load(&image::dump_static(&h)).unwrap();
+    let l = back.root_at(0);
+    let mut last = Value::NULL;
+    let mut syms = Vec::new();
+    let mut walk = l;
+    while walk.is_pair() {
+        let x = back.car(walk);
+        if x.is_pair() {
+            syms.push(back.car(x));
+            assert!(back.string_to_rust(back.cdr(x)).ends_with("some room"));
+        } else {
+            last = x;
+        }
+        walk = back.cdr(walk);
+    }
+    assert_eq!(syms.len(), 50);
+    let sum_at = last.index();
+    for s in &syms {
+        let name = back.symbol_name_string(*s);
+        assert!(s.index() < sum_at && name.index() < sum_at, "{} after the first other object", back.symbol_name(*s));
+    }
+    assert_eq!(back.string_to_rust(back.bloblet_slot(last, 3)), "made before any symbol");
+    assert_eq!(back.intern("symbol-7"), syms[42]);
+    back.verify().unwrap();
+}
