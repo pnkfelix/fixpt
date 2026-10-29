@@ -3592,6 +3592,13 @@ What the collector does with what §160 maps, the user's design:
   remembered set of its objects that refer to what moves, kept by the
   barrier (the user's). Static objects are immortal, garbage and all, and
   a weak reference to one is never cleared; a new image is what reclaims.
+- **The remembered set at a load** (2026-10-29): it is the collector's,
+  in memory, never in an image. What an image carries is a list to seed
+  it with (in its metadata, as the fixups are): the places of its mutable
+  static objects that refer to what moves, found as it is made, so that a
+  load adds them without touching their pages, as a scan of the mutable
+  static section would. The dumper keeps them few where it can, by putting
+  what they refer to in a static space too.
 - **Later** (the user's): the remembered set pruned of static objects
   that are no longer reached, by a trace through the static area now and
   then (side marks), since what nothing reaches is reached never again;
@@ -3655,7 +3662,8 @@ padding. `fixpt image info` lists the sections. Left:
 - a `.fasl` read section by section into the heap it is loaded in, its
   code into the code area and its words into the heap, without a heap of
   its own and a copy of its graph;
-- the static spaces' sections, once §161 makes them;
+- the static spaces' sections written and read, once §161 gives the
+  runtime heap those spaces (the format names them already);
 - the padding written as holes, not zeros, where the file system has them.
 
 ## 166. nextest runs `fixpt prewarm` before the tests (the user's, 2026-10-29)
