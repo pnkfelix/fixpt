@@ -3567,13 +3567,15 @@ Left, in order:
    stage 0 the same (cycles; 0.15% more instructions, the collector's
    compare). macOS copies the code still: an executable mapping of a file
    may want it signed there; to try on the Mac, and the static area's
-   mapping with it, which nothing has run there yet. Left of the original
-   item: the code's twice from the file, privately,
-   read+execute where it runs and read-only where the heap reads it (the
-   two never written, so they agree); the immutable data read-only; the
-   mutable data copied on write. Then the call-out pass goes too, where
-   the image's call-out map is this machine's (a hash of it in the
-   header), and `cross_all` and the symbol index are kept or made lazily.
+   mapping with it, which nothing has run there yet. The symbol index
+   made lazily too (2026-10-29): an image spliced into a heap of no
+   symbols has its symbols' names neither read nor hashed at the load,
+   but kept by their hashes (`image_symbols`, the symbol's own field) and
+   looked up when first asked for (`intern`, `interned`), compared in
+   place (`string_is`); and the immutable half given no crossing map,
+   which only a dirty card's scan reads. An empty program 36.0 ms to
+   33.5 ms, release; 8% fewer instructions. Left: the code parts' starts,
+   walked at the load (0.5 ms), which the image could carry.
 5. **`.fasl`s** as segments of the same kind (§141 item 9), and
    `fixpt build`'s executables.
 `FIXPT_IMAGE_VERIFY=1` (to add) to check an image this executable wrote

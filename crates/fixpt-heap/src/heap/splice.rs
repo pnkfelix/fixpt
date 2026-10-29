@@ -36,6 +36,7 @@ use std::collections::HashMap;
 /// A symbol's name and global slot: fields 0 and 2 of 3, before its
 /// trailer and the (empty) suffix it is pointed at (`Heap::alloc`).
 const SYMBOL_NAME: usize = 4;
+const SYMBOL_HASH: usize = 3;
 const SYMBOL_SLOT: usize = 2;
 
 /// Where the image's words go: each of its regions (the live region, the
@@ -175,14 +176,24 @@ impl Heap {
         };
 
         // What stands for objects of the image's, by where they are in it.
-        let (symbols, globals, mut added) = (self.symbols.len(), self.globals.len(), Vec::new());
+        let (symbols, globals, image_symbols, mut added) = (self.symbols.len(), self.globals.len(), self.image_symbols.len(), Vec::new());
         let mut instead: HashMap<usize, Value> = given.iter().map(|&(v, to)| (v.index() - ib, to)).collect();
         let mut stub = None;
+        // Into a heap of no symbols yet, none of the image's can be one of
+        // this heap's: their names are not read, but looked up by their
+        // hashes when first asked for (`image_symbols`).
+        let fresh = self.symbols.is_empty() && self.image_symbols.is_empty();
+        let stub_hash = super::symbol_hash_of("%fx26-foreign-stub");
         for &s in &img.symbols {
             let at_s = moves.index(s.index() - ib).ok_or("a symbol outside the image")?;
-            let name = moved(Value(self.mem.words()[at_s - SYMBOL_NAME])).ok_or("a symbol's name outside the image")?;
-            let name = self.string_to_rust(name);
-            if name == "%fx26-foreign-stub" {
+            let hash = Value(self.mem.words()[at_s - SYMBOL_HASH]).as_fixnum();
+            let name = if fresh && hash != stub_hash {
+                None
+            } else {
+                let name = moved(Value(self.mem.words()[at_s - SYMBOL_NAME])).ok_or("a symbol's name outside the image")?;
+                Some(self.string_to_rust(name))
+            };
+            if name.as_deref() == Some("%fx26-foreign-stub") {
                 let slot = Value(img.word(s.index() - ib - SYMBOL_SLOT)).as_fixnum() as usize;
                 if let Some(old) = img.globals.get(slot).filter(|w| w.is_ref() && in_code_area(w.index() - ib)) {
                     // This heap's stub stands for the image's; else the
@@ -195,7 +206,7 @@ impl Heap {
                     }
                 }
             }
-            if let Some(&i) = self.symbol_index.get(&name) {
+            if let Some(i) = name.as_deref().and_then(|n| self.symbol_number(n)) {
                 instead.insert(s.index() - ib, self.symbols[i as usize]);
                 continue;
             }
@@ -208,10 +219,17 @@ impl Heap {
             if self.mem.words()[at_s - SYMBOL_SLOT] != w {
                 self.mem.words_mut()[at_s - SYMBOL_SLOT] = w;
             }
-            self.symbol_index.insert(name.clone(), self.symbols.len() as u32);
-            added.push(name);
+            let i = self.symbols.len() as u32;
+            match name {
+                Some(name) if !fresh => {
+                    self.symbol_index.insert(name.clone(), i);
+                    added.push(name);
+                }
+                _ => self.image_symbols.push((hash, i)),
+            }
             self.symbols.push(moved(s).expect("moved above"));
         }
+        self.image_symbols.sort_unstable();
 
         let unknown = std::cell::Cell::new(None);
         let map = |v: Value| -> Value {
@@ -274,6 +292,7 @@ impl Heap {
             for name in added {
                 self.symbol_index.remove(&name);
             }
+            self.image_symbols.truncate(image_symbols);
             self.symbols.truncate(symbols);
             self.globals.truncate(globals);
             (self.top, self.immutable_top, self.static_top) = (old_top, old_immutable_top, old_static_top);
@@ -290,7 +309,12 @@ impl Heap {
         }
 
         self.cross_all(at, at + n);
-        self.cross_all(iat, iat + ni);
+        // The immutable half's objects need no crossing map: only a dirty
+        // card is scanned by it, and nothing writes there. Moved aside into
+        // the mutable half, they are scanned so.
+        if !immutable_ok {
+            self.cross_all(iat, iat + ni);
+        }
         self.cross_all(sat, sat + ns);
         self.top = at + n;
         if immutable_ok {

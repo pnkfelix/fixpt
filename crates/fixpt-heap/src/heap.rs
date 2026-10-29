@@ -402,6 +402,12 @@ pub struct Heap {
     name_buf: String,
     /// `intern_static`'s: each name's address, and its symbol's index.
     static_symbols: Vec<(usize, u32)>,
+    /// The symbols an image spliced into an empty heap brought, by their
+    /// names' hashes (`symbol_hash_of`, the symbol's own field), sorted:
+    /// each name looked up there when first asked for and then kept in
+    /// `symbol_index`, rather than every name made a `String` and hashed at
+    /// the load (`TODO.md` §160 item 4; `splice_image`).
+    image_symbols: Vec<(i64, u32)>,
     /// The global slot holding the native adapters' shared code, once one
     /// is made (`set_adapter_code`).
     adapter_slot: Option<usize>,
@@ -521,6 +527,7 @@ impl Heap {
             symbol_index: HashMap::default(),
             name_buf: String::new(),
             static_symbols: Vec::new(),
+            image_symbols: Vec::new(),
             adapter_slot: None,
             planned_writes: HashMap::new(),
             gc_count: 0,
@@ -1794,7 +1801,7 @@ impl Heap {
                 todo.extend([from.car(v), from.cdr(v)]);
                 continue;
             }
-            if from.is_a(v, ObjType::Symbol) && from.symbol_index.contains_key(&from.symbol_name(v)) {
+            if from.is_a(v, ObjType::Symbol) && from.interned(&from.symbol_name(v)).is_some() {
                 let name = from.symbol_name(v);
                 slot.insert(self.intern(&name));
                 continue;
@@ -1984,7 +1991,42 @@ impl Heap {
     // ----------------------------------------------------------------- symbols
     /// The symbol `name`, if it has been interned; making none.
     pub fn interned(&self, name: &str) -> Option<Value> {
-        self.symbol_index.get(name).map(|&i| self.symbols[i as usize])
+        self.symbol_number(name).map(|i| self.symbols[i as usize])
+    }
+
+    /// Where `name`'s symbol is in `symbols`, if it is interned: in
+    /// `symbol_index`, or among an image's not yet asked for
+    /// (`image_symbols`).
+    fn symbol_number(&self, name: &str) -> Option<u32> {
+        self.symbol_index.get(name).copied().or_else(|| self.image_symbol(name))
+    }
+
+    /// `name`'s symbol among those an image brought (`image_symbols`): by
+    /// its hash, then its name compared, nothing made.
+    fn image_symbol(&self, name: &str) -> Option<u32> {
+        if self.image_symbols.is_empty() {
+            return None;
+        }
+        let h = symbol_hash_of(name);
+        let from = self.image_symbols.partition_point(|&(k, _)| k < h);
+        self.image_symbols[from..]
+            .iter()
+            .take_while(|&&(k, _)| k == h)
+            .map(|&(_, i)| i)
+            .find(|&i| self.string_is(self.obj_ref(self.symbols[i as usize], 0), name))
+    }
+
+    /// Whether string `o` holds `text`, compared in place.
+    pub fn string_is(&self, o: Value, text: &str) -> bool {
+        let n = self.string_len(o);
+        let mut i = 0;
+        for c in text.chars() {
+            if i >= n || self.string_point(o, i) != c as u32 {
+                return false;
+            }
+            i += 1;
+        }
+        i == n
     }
 
     /// `intern(name)`, for a name the runtime asks for at every turn (the
@@ -1996,7 +2038,7 @@ impl Heap {
             return self.symbols[i as usize];
         }
         let v = self.intern(name);
-        let i = self.symbol_index[name];
+        let i = self.symbol_number(name).expect("interned just now");
         self.static_symbols.push((key, i));
         v
     }
@@ -2016,6 +2058,11 @@ impl Heap {
 
     pub fn intern(&mut self, name: &str) -> Value {
         if let Some(&i) = self.symbol_index.get(name) {
+            return self.symbols[i as usize];
+        }
+        // An image's, asked for the first time: kept where it is found next.
+        if let Some(i) = self.image_symbol(name) {
+            self.symbol_index.insert(name.to_string(), i);
             return self.symbols[i as usize];
         }
         let s = self.make_string(name);
@@ -2051,9 +2098,7 @@ impl Heap {
     /// Look up an already-interned symbol without allocating. Useful when a
     /// `&Heap` is all that is available, e.g. after loading an image.
     pub fn intern_existing(&self, name: &str) -> Option<Value> {
-        self.symbol_index
-            .get(name)
-            .map(|&i| self.symbols[i as usize])
+        self.interned(name)
     }
 
     /// Two symbols' names compared, as `string_cmp`, with nothing copied.

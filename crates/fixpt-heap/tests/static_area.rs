@@ -239,3 +239,36 @@ fn a_static_area_mapped_from_its_file() {
         into.collect(&mut []);
     }
 }
+
+/// The symbols an image brings into a heap with none yet are not each made
+/// a name of Rust's at the load (`TODO.md` §160 item 4), but found by their
+/// names' hashes when first asked for: interned again, a name is the
+/// image's symbol, and one not in the image is made new, as before.
+#[test]
+fn an_images_symbols_are_found_by_name_when_asked_for() {
+    let bytes = {
+        let mut h = Heap::new();
+        let syms: Vec<Value> = ["alpha", "beta", "gamma", "%fx26-foreign-stub"].iter().map(|n| h.intern(n)).collect();
+        let mut l = Value::NULL;
+        for s in syms.into_iter().rev() {
+            l = h.cons(s, l);
+        }
+        h.push_root(l);
+        image::dump_static(&h)
+    };
+    let mut into = Heap::new();
+    let img = image::parts(&bytes, true).unwrap();
+    let roots = into.splice_image(&img, &[]).expect("splices");
+    let l = roots[0];
+    let beta = into.car(into.cdr(l));
+    assert_eq!(into.interned("beta"), Some(beta), "found before it is asked for again");
+    assert_eq!(into.intern("beta"), beta, "the image's, interned again");
+    assert_eq!(into.intern_existing("alpha"), Some(into.car(l)));
+    assert_eq!(into.interned("delta"), None);
+    let delta = into.intern("delta");
+    assert_ne!(delta, beta);
+    assert_eq!(into.intern("delta"), delta);
+    let gamma = into.intern("gamma");
+    assert_eq!(into.symbol_name(gamma), "gamma");
+    into.verify().unwrap();
+}
