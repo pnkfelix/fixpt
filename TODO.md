@@ -3911,3 +3911,12 @@ writable where a write is seen); whether its type then meets `nlist`
 of one needs no `spin`), which may be most of the gain; and how many of
 the test programs, the front end's sources, Kayak's and Heist's, change
 in what they check or show (a sweep as §160's masking measurement made).
+
+## 175. `jit_lines::gdb_shows_the_frames_values` is sometimes early (found 2026-10-29)
+
+Run beside other tests, it once found the program in Rust code (a hash
+table's lookup, at the start) rather than in its native `spin`, and so
+"no line for `spin`"; alone it passed six times of six, with the change
+then made and without it. It attaches gdb after a fixed wait: waiting for
+the program to say it is spinning (a line it prints first), or retrying
+the attach until the native frame is there, would end it.

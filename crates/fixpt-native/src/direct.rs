@@ -678,15 +678,16 @@ pub fn note_cached_code(heap: &Heap, codes: &[Value]) {
     if !crate::symbols::enabled() {
         return;
     }
-    for &c in codes {
+    let named = codes.iter().map(|&c| {
         let source = heap.bloblet_slot(c, CODE_SOURCE);
         let name = if source.is_bloblet() && heap.is_cellular_word(source) {
             heap.symbol_name(heap.bloblet_slot(source, fixpt_heap::layout::cellular::WORD_NAME))
         } else {
             "?".into()
         };
-        crate::symbols::note(heap.code_exec_address(c), heap.bloblet_head(c).bytes, &format!("native {name}"));
-    }
+        (heap.code_exec_address(c), heap.bloblet_head(c).bytes, name)
+    });
+    crate::symbols::note_native_all(named);
 }
 
 thread_local! {

@@ -243,6 +243,25 @@ pub fn register(piece: &Piece) {
     }
 }
 
+/// Many native procedures, each `(start, len, name)` with its name as a
+/// debugger is to show it, registered under one lock
+/// (`symbols::note_native_all`). Each is entered by a call, so its frames
+/// can be known.
+pub fn register_all(pieces: impl Iterator<Item = (usize, usize, String)>) {
+    let mut r = lock();
+    let called = mode() > 1;
+    // Flushed as they come, as `register` does, so that no more than a
+    // flush's are held at once (all of them held, a thousand page faults
+    // at the start).
+    for (start, len, name) in pieces {
+        r.pending.push(Owned { start, len: len.max(1), name, called, frame: None, lines: None });
+        if r.pending.len() >= MOST_PENDING {
+            r.flush();
+        }
+    }
+    r.flush();
+}
+
 /// The pieces noted since the last flush, told to a debugger, as one
 /// object: called once code is placed and before it runs.
 pub fn flush() {
@@ -288,8 +307,13 @@ impl Registry {
             }
         }
         let kept: Vec<Owned> = kept.into_values().collect();
-        for p in &kept {
-            self.drop_overlapping(p.start, p.start + p.len);
+        // Those registered that these overlap, gone; none to look for
+        // where nothing registered is within their span.
+        let span = (kept[0].start, kept.last().map_or(0, |p| p.start + p.len));
+        if self.pieces.range(..span.1).next_back().is_some_and(|(_, &(end, _))| end > span.0) {
+            for p in &kept {
+                self.drop_overlapping(p.start, p.start + p.len);
+            }
         }
         self.add(kept);
     }

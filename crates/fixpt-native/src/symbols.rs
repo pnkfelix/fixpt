@@ -59,6 +59,32 @@ pub fn note(start: usize, len: usize, name: &str) {
     note_lines(start, len, name, None);
 }
 
+/// Many native procedures at once, each `(start, len, name)` noted as
+/// `note(start, len, "native NAME")` would note it, each name made once,
+/// and registered under one lock (the front end's cached code,
+/// `direct::note_cached_code`: five thousand at the start).
+pub fn note_native_all(pieces: impl Iterator<Item = (usize, usize, String)>) {
+    let files = files();
+    let named = pieces.map(|(start, len, name)| {
+        for (f, hex) in files {
+            if let Ok(mut f) = f.lock() {
+                let name = name.replace('\n', " ");
+                let _ = if *hex { writeln!(f, "{start:x} {len:x} native {name}") } else { writeln!(f, "{start:x} {len} native {name}") };
+            }
+        }
+        // As `debugger_name` names a `native ` piece: its own name, a
+        // newline and a space each a `-` (`note_lines` makes the first a
+        // space).
+        let name = if name.contains([' ', '\n']) { name.replace([' ', '\n'], "-") } else { name };
+        (start, len, name)
+    });
+    if crate::jitdebug::enabled() {
+        crate::jitdebug::register_all(named);
+    } else {
+        named.for_each(drop);
+    }
+}
+
 /// The same, and where its code came from (`jitdebug::Piece::lines`).
 pub fn note_lines(start: usize, len: usize, name: &str, lines: Option<(u32, Vec<(u32, i64)>)>) {
     let name = name.replace('\n', " ");
