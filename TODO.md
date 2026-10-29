@@ -3560,6 +3560,26 @@ as `--heap` files are (§159).
 
 ## 161. A static area for mapped images (the user's, 2026-10-28)
 
+Steps 1 and 2 done (2026-10-29): the heap has a static area (`STATIC_BASE`,
+past the nursery, before the code area: a closure whose code field is at
+or past the code area's native part is taken for native code), whose
+objects the copier leaves where they are; a major collection scans it whole
+as roots, a minor one its dirty cards (the crossing map knows it; the Rust
+barrier covers it, native code marks every store's card already); `verify`
+and images know it (a `STATIC_MUTABLE` section). The front end's cache is
+dumped with its old space as the image's static area (`dump_static`), and
+spliced into the session's: a major collection no longer copies it (stage
+0: majors copy 16.3 M words, not 17.8 M; slower for now, 125 ms against
+113, since all of it is scanned). Next, in order:
+3. The front end's image read into the heap before the runtime and the
+   prelude intern anything (the user's), so that their symbols are the
+   image's and no symbol fixup is written.
+4. What is immutable in it (frozen fields and suffix) in a section of its
+   own, never scanned.
+5. The remembered set for the mutable part, seeded by the image (below),
+   in place of scanning it whole.
+6. Global cells in the static area.
+
 What the collector does with what §160 maps, the user's design:
 - **Before §160 item 4** (2026-10-28): code mapped privately from a file
   must refer only to what never moves, or the collector's rewrites of its

@@ -230,10 +230,18 @@ const REAP_WORDS: usize = 1 << 31;
 /// allocates everything first.
 const NURSERY_BASE: usize = REAP_BASE + REAP_WORDS;
 const NURSERY_MAX: usize = 1 << 30;
+/// Past the nursery, the static area (`TODO.md` §161): what an image put
+/// there never moves, nor is copied, and lives as long as the heap. Its
+/// objects are roots, scanned whole by a major collection and by their
+/// dirty cards by a minor one, until its immutable part is known. Before
+/// the code area, not past it: a closure whose code field is at or past the
+/// code area's native part is taken for native code.
+const STATIC_BASE: usize = NURSERY_BASE + NURSERY_MAX;
+const STATIC_WORDS: usize = 1 << 30;
 /// Last, the code area (`code`): bloblets that never move, collected by
 /// marking and sweeping. Last, since native code takes a callee whose code
 /// is at or past the code area's start to be native code.
-const CODE_BASE: usize = NURSERY_BASE + NURSERY_MAX;
+const CODE_BASE: usize = STATIC_BASE + STATIC_WORDS;
 /// The nursery's range ends with the native convention's stack
 /// (`fixpt-native`'s stack cache, `docs/research/deep-recursion.md`), which
 /// the nursery never allocates into: so that frames flushed where they are
@@ -301,6 +309,8 @@ pub struct Heap {
     semi: usize,
     /// Next free word, from the start of `mem`: `top - active` is in use.
     top: usize,
+    /// Where the static area's objects end (from `STATIC_BASE`).
+    static_top: usize,
 
     /// Explicit roots held by native code across a safepoint.
     roots: Vec<Value>,
@@ -437,6 +447,7 @@ impl Heap {
             active: 0,
             semi,
             top: 0,
+            static_top: STATIC_BASE,
             roots: Vec::new(),
             weak: Vec::new(),
             weak_free: Vec::new(),
@@ -468,7 +479,7 @@ impl Heap {
             nursery_top: NURSERY_BASE,
             nursery_words: nursery_words.max(1024),
             cards: fixpt_memmgmt::Words::new(young::CARDS / 8).expect("address space for the card table"),
-            crossing: fixpt_memmgmt::Words::new(young::SEMI_CARDS / 8).expect("address space for the crossing map"),
+            crossing: fixpt_memmgmt::Words::new(young::CARDS / 8).expect("address space for the crossing map"),
             minor_count: 0,
             minor_words_copied: 0,
             minor_nanos: 0,
@@ -487,6 +498,18 @@ impl Heap {
     #[inline]
     pub fn used(&self) -> usize {
         self.top - self.active + (self.nursery_top - NURSERY_BASE)
+    }
+
+    /// Whether `v` refers to an object in the static area (`TODO.md` §161),
+    /// which never moves.
+    pub fn is_static(&self, v: Value) -> bool {
+        v.is_ref() && in_static(if v.is_suffix_ref() { v.owner() } else { v.index() - self.base })
+    }
+
+    /// Words in the static area: live as long as the heap, and never
+    /// copied, so counted apart from [`used`](Heap::used).
+    pub fn static_words(&self) -> usize {
+        self.static_top - STATIC_BASE
     }
     #[inline]
     pub fn capacity(&self) -> usize {
@@ -523,7 +546,7 @@ impl Heap {
         if self.generational
             && v.is_ref()
             && young::is_young(self.ref_ix(v))
-            && (rel < 2 * MAX_SEMI_WORDS || code::in_code_area(rel))
+            && (rel < 2 * MAX_SEMI_WORDS || code::in_code_area(rel) || in_static(rel))
         {
             self.mark_card(rel);
         }
@@ -2262,8 +2285,9 @@ impl Heap {
                 *v = fwd!(*v);
             }
         }
-        // What the arenas hold is live, and stays where it is.
-        for (lo, hi) in arenas {
+        // What the arenas and the static area hold is live, and stays where
+        // it is.
+        for (lo, hi) in arenas.into_iter().chain([(STATIC_BASE, self.static_top)]) {
             let mut at = lo;
             while at < hi {
                 at += Self::scan_one(mem, at, &mut c);
@@ -2363,6 +2387,7 @@ impl Heap {
         // The nursery emptied into the old space; no card of it dirty.
         self.nursery_top = NURSERY_BASE;
         self.clear_cards(to, to + free);
+        self.clear_cards(STATIC_BASE, self.static_top);
 
         // The next major collection after `major_budget` is allocated, in
         // proportion to the most found live across the spaces it reclaims
@@ -2505,6 +2530,9 @@ impl Heap {
         }
         let reap = if young || (c.from..c.from + MAX_SEMI_WORDS).contains(&i) {
             None
+        } else if in_static(i) {
+            // It never moves, and is scanned whole as a root.
+            return v;
         } else if code::in_code_area(i) {
             // It never moves: marked, and scanned once.
             debug_assert!(v.tag() == TAG_BLOBLET, "only bloblets are in the code area");
@@ -2584,16 +2612,19 @@ impl Heap {
     /// contents, which `from_image` loads at word 0. Raw suffix words are
     /// left as they are.
     pub fn image_parts(&self) -> (Vec<u64>, Vec<Value>, Vec<Value>, Vec<Value>) {
-        self.image_parts_at(0)
+        self.image_parts_at(0, 0)
     }
 
     /// [`image_parts`](Heap::image_parts), its references addresses of a
     /// heap whose memory starts at word `to` (`0`, or
-    /// [`image_base_word`](Heap::image_base_word)), its active semispace the
-    /// first.
-    pub fn image_parts_at(&self, to: usize) -> (Vec<u64>, Vec<Value>, Vec<Value>, Vec<Value>) {
+    /// [`image_base_word`](Heap::image_base_word)), the old space's words
+    /// (and the nursery's after them) at word `old_at` of it: the start of
+    /// its active semispace, or of its static area, for an image whose old
+    /// space is to be static where it is read (`TODO.md` §161).
+    pub fn image_parts_at(&self, to: usize, old_at: usize) -> (Vec<u64>, Vec<Value>, Vec<Value>, Vec<Value>) {
         assert_eq!(self.all_live_regions(), 0, "an image is made with no region live");
-        let rebase = self.image_rebase(to);
+        assert!(old_at == 0 || self.static_top == STATIC_BASE, "an old space made static where there is a static area already");
+        let rebase = self.image_rebase(to, old_at);
         let (old, young) = (self.top - self.active, self.nursery_top - NURSERY_BASE);
         let mut words = Vec::with_capacity(old + young);
         words.extend_from_slice(&self.mem.words()[self.active..self.top]);
@@ -2607,41 +2638,51 @@ impl Heap {
     /// [`image_parts`](Heap::image_parts) rebases the rest, and its free
     /// blocks, each from the part's start. It does not move: a reference
     /// into it counts from where the heap's memory starts.
-    pub fn image_code(&self, to: usize) -> [(Vec<u64>, Vec<(usize, usize)>); 2] {
-        let rebase = self.image_rebase(to);
+    pub fn image_code(&self, to: usize, old_at: usize) -> [(Vec<u64>, Vec<(usize, usize)>); 2] {
+        let rebase = self.image_rebase(to, old_at);
         self.code_image().map(|(mut words, free)| {
             map_refs(&mut words, &rebase);
             (words, free)
         })
     }
 
+    /// The static area as an image carries it: its words, rebased as
+    /// [`image_parts_at`](Heap::image_parts_at) rebases the rest. It does
+    /// not move: a reference into it counts from where the heap's memory
+    /// starts.
+    pub fn image_static(&self, to: usize, old_at: usize) -> Vec<u64> {
+        let mut words = self.mem.words()[STATIC_BASE..self.static_top].to_vec();
+        map_refs(&mut words, self.image_rebase(to, old_at));
+        words
+    }
+
     /// A reference, as an image has it: as though the active semispace
-    /// began at word 0, the nursery after it; into the code area, from
-    /// where the heap's memory starts.
-    fn image_rebase(&self, to: usize) -> impl Fn(Value) -> Value {
+    /// began at word `old_at`, the nursery after it; into the code area or
+    /// the static area, from where the heap's memory starts.
+    fn image_rebase(&self, to: usize, old_at: usize) -> impl Fn(Value) -> Value {
         // The old space, then the nursery after it, as one run of words.
         let (active, base) = (self.active, self.base);
         let old = self.top - active;
         // `to` may be past `base`: each by wrapping, as a difference.
-        let shift = ((base + active) as u64).wrapping_sub(to as u64) << 3;
-        let young_shift = ((base + NURSERY_BASE) as u64).wrapping_sub(to as u64 + old as u64) << 3;
+        let shift = ((base + active) as u64).wrapping_sub(to as u64 + old_at as u64) << 3;
+        let young_shift = ((base + NURSERY_BASE) as u64).wrapping_sub(to as u64 + old_at as u64 + old as u64) << 3;
         let code_shift = (base as u64).wrapping_sub(to as u64) << 3;
         // A suffix ref's owner counts from where the heap's memory starts,
         // not an address: moved as the words are, by their index.
         let rebase_owner = move |r: Value| {
             let o = r.owner();
-            let o = if code::in_code_area(o) {
+            let o = if code::in_code_area(o) || in_static(o) {
                 o
             } else if young::is_young(o) {
-                o - NURSERY_BASE + old
+                o - NURSERY_BASE + old + old_at
             } else {
-                o - active
+                o - active + old_at
             };
             Value::suffix_ref(o, r.offset()).expect("an image is smaller than the heap")
         };
         move |v: Value| match v.is_ref() {
             true if v.is_suffix_ref() => rebase_owner(v),
-            true if code::in_code_area(v.index() - base) => Value(v.raw().wrapping_sub(code_shift)),
+            true if code::in_code_area(v.index() - base) || in_static(v.index() - base) => Value(v.raw().wrapping_sub(code_shift)),
             true if young::is_young(v.index() - base) => Value(v.raw().wrapping_sub(young_shift)),
             true => Value(v.raw().wrapping_sub(shift)),
             false => v,
@@ -2684,7 +2725,7 @@ impl Heap {
         symbols: Vec<Value>,
         roots: Vec<Value>,
     ) -> Result<Heap, String> {
-        Self::from_image_with_code(words.len(), |w| w.copy_from_slice(words), Default::default(), globals, symbols, roots, 0, &[])
+        Self::from_image_with_code(words.len(), |w| w.copy_from_slice(words), &[], Default::default(), globals, symbols, roots, 0, &[])
     }
 
     /// The same, with the code area an image carries (`image_code`), and
@@ -2693,6 +2734,7 @@ impl Heap {
     pub fn from_image_with_code(
         n_words: usize,
         fill: impl FnOnce(&mut [u64]),
+        statics: &[u64],
         code: [(Vec<u64>, Vec<(usize, usize)>); 2],
         globals: Vec<Value>,
         symbols: Vec<Value>,
@@ -2722,9 +2764,15 @@ impl Heap {
             false => v,
         };
         fill(&mut heap.mem.words_mut()[..n_words]);
+        if statics.len() > STATIC_WORDS {
+            return Err("its static area is larger than a heap's".into());
+        }
+        heap.mem.words_mut()[STATIC_BASE..STATIC_BASE + statics.len()].copy_from_slice(statics);
+        heap.static_top = STATIC_BASE + statics.len();
         let mut code = code;
         if walk {
             map_refs(&mut heap.mem.words_mut()[..n_words], relocate);
+            map_refs(&mut heap.mem.words_mut()[STATIC_BASE..heap.static_top], relocate);
             for (w, _) in &mut code {
                 map_refs(w, relocate);
             }
@@ -2741,6 +2789,7 @@ impl Heap {
         // What the image holds counts as live, not as allocated.
         heap.budget_from(n_words);
         heap.cross_all(0, n_words);
+        heap.cross_all(STATIC_BASE, heap.static_top);
         heap.globals = globals.into_iter().map(relocate).collect();
         heap.symbols = symbols.into_iter().map(relocate).collect();
         heap.roots = roots.into_iter().map(relocate).collect();
@@ -2758,6 +2807,7 @@ impl Heap {
     /// tests — it is the cheapest way to catch a scan that desynchronised.
     pub fn verify(&self) -> Result<(), String> {
         self.verify_range(self.active, self.top)?;
+        self.verify_range(STATIC_BASE, self.static_top).map_err(|e| format!("in the static area: {e}"))?;
         self.verify_range(NURSERY_BASE, self.nursery_top).map_err(|e| format!("in the nursery: {e}"))?;
         for (lo, hi) in self.regions.ranges() {
             self.verify_range(lo, hi).map_err(|e| format!("in a region: {e}"))?;
@@ -2876,7 +2926,13 @@ impl Heap {
         if v.is_ref() {
             // A bloblet with no suffix is pointed at one past its last field,
             // which for the last object in the heap is the top itself.
-            let (lo, hi) = if young::is_young(self.ix(v)) { (NURSERY_BASE, self.nursery_top) } else { (self.active, self.top) };
+            let (lo, hi) = if young::is_young(self.ix(v)) {
+                (NURSERY_BASE, self.nursery_top)
+            } else if in_static(self.ix(v)) {
+                (STATIC_BASE, self.static_top)
+            } else {
+                (self.active, self.top)
+            };
             let beyond = if v.is_bloblet() { self.ix(v) > hi || self.ix(v) <= lo } else { self.ix(v) >= hi || self.ix(v) < lo };
             if beyond {
                 return Err(format!("dangling reference {v:?} at word {at}"));
@@ -2961,6 +3017,17 @@ impl Copier<'_> {
     }
 }
 
+/// Whether word `i` of the heap's memory is in the static area.
+#[inline(always)]
+pub(crate) fn in_static(i: usize) -> bool {
+    (STATIC_BASE..STATIC_BASE + STATIC_WORDS).contains(&i)
+}
+
+/// Where the static area starts, and how many words it spans.
+pub(crate) fn static_area() -> (usize, usize) {
+    (STATIC_BASE, STATIC_WORDS)
+}
+
 /// Where the code area's two parts start in a heap's memory, in words: where
 /// an image's code sections go.
 pub(crate) fn code_part_bases() -> [usize; 2] {
@@ -3010,7 +3077,7 @@ pub(crate) fn each_field(words: &[u64], at: usize, mut f: impl FnMut(usize, Valu
 /// still write (`TODO.md` §160): each reference to one of its interned
 /// `symbols`, which may be the reader's own. Where in it: the live region's words from
 /// 0, the code area's at their place in the heap's memory.
-pub(crate) fn image_fixups(words: &[u64], code: &[(Vec<u64>, Vec<(usize, usize)>); 2], symbols: &[Value]) -> Vec<usize> {
+pub(crate) fn image_fixups(spaces: &[(usize, &[u64])], symbols: &[Value]) -> Vec<usize> {
     let symbols: HashSet<u64> = symbols.iter().map(|s| s.raw()).collect();
     let mut out = Vec::new();
     let mut note = |at: usize, v: Value| {
@@ -3018,9 +3085,8 @@ pub(crate) fn image_fixups(words: &[u64], code: &[(Vec<u64>, Vec<(usize, usize)>
             out.push(at);
         }
     };
-    each_field(words, 0, &mut note);
-    for (k, (w, _)) in code.iter().enumerate() {
-        each_field(w, code::PART_BASES[k], &mut note);
+    for &(place, words) in spaces {
+        each_field(words, place, &mut note);
     }
     out
 }

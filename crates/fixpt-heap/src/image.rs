@@ -158,7 +158,7 @@ impl std::error::Error for ImageError {}
 /// a copy of a contiguous region plus the two root arrays. Packed: for an
 /// image that is read, as a `.fasl`'s is.
 pub fn dump_packed(heap: &Heap) -> Vec<u8> {
-    dump_with(heap, false)
+    dump_with(heap, false, false)
 }
 
 /// [`dump_packed`], each word section page-aligned ([`PAGE`]) from its
@@ -166,15 +166,27 @@ pub fn dump_packed(heap: &Heap) -> Vec<u8> {
 /// cache, a heap a program dumped, an executable's own). Where it is kept, it
 /// must start on a page too (`embed_into`, the cache's file).
 pub fn dump_mappable(heap: &Heap) -> Vec<u8> {
-    dump_with(heap, true)
+    dump_with(heap, true, false)
 }
 
-fn dump_with(heap: &Heap, aligned: bool) -> Vec<u8> {
-    // Its active semispace the first, whichever it is: an image loads there.
+/// [`dump_mappable`], the old space's words the image's static area
+/// (`TODO.md` §161): where it is read, nothing of it moves or is copied. For
+/// a heap of its own made to be an image, the front end's, with no static
+/// area of its own.
+pub fn dump_static(heap: &Heap) -> Vec<u8> {
+    dump_with(heap, true, true)
+}
+
+fn dump_with(heap: &Heap, aligned: bool, old_static: bool) -> Vec<u8> {
     let base = Heap::image_base_word();
-    let (words, globals, symbols, roots) = heap.image_parts_at(base);
-    let code = heap.image_code(base);
-    let fixups = crate::heap::image_fixups(&words, &code, &symbols);
+    let (static_at, static_words) = crate::heap::static_area();
+    // Its active semispace the first, whichever it is, or the static area:
+    // an image loads there.
+    let old_at = if old_static { static_at } else { 0 };
+    let (words, globals, symbols, roots) = heap.image_parts_at(base, old_at);
+    let code = heap.image_code(base, old_at);
+    let (words, statics) = if old_static { (Vec::new(), words) } else { (words, heap.image_static(base, 0)) };
+    let fixups = crate::heap::image_fixups(&[(0, &words), (static_at, &statics), (crate::heap::code_part_bases()[0], &code[0].0), (crate::heap::code_part_bases()[1], &code[1].0)], &symbols);
     let le = |out: &mut Vec<u8>, ws: &mut dyn Iterator<Item = u64>| {
         for w in ws {
             out.extend_from_slice(&w.to_le_bytes());
@@ -184,8 +196,9 @@ fn dump_with(heap: &Heap, aligned: bool) -> Vec<u8> {
     // space spans, and its free blocks (each from its part's start in the
     // heap, made places in the heap's memory).
     let (code_at, code_words) = (crate::heap::code_part_bases(), crate::heap::code_part_words());
-    let spaces: [(u32, u32, usize, usize, &[u64], Vec<(usize, usize)>); 3] = [
+    let spaces: [(u32, u32, usize, usize, &[u64], Vec<(usize, usize)>); 4] = [
         (OLD, MOVES | WRITTEN, 0, words.len(), &words, Vec::new()),
+        (STATIC_MUTABLE, WRITTEN, static_at, static_words, &statics, Vec::new()),
         (CODE_STUBBED, WRITTEN | RUNS, code_at[0], code_words, &code[0].0, code[0].1.iter().map(|&(s, n)| (code_at[0] + s, n)).collect()),
         (CODE_NATIVE, WRITTEN | RUNS, code_at[1], code_words, &code[1].0, code[1].1.iter().map(|&(s, n)| (code_at[1] + s, n)).collect()),
     ];
@@ -299,6 +312,8 @@ pub fn load_trusted(bytes: &[u8]) -> Result<Heap, ImageError> {
 /// that holds something already.
 pub struct Parts<'a> {
     pub words: &'a [u8],
+    /// The static area's words, as the file has them.
+    pub statics: &'a [u8],
     pub globals: Vec<Value>,
     pub symbols: Vec<Value>,
     pub roots: Vec<Value>,
@@ -315,9 +330,16 @@ impl Parts<'_> {
         self.words.len() / 8
     }
 
-    /// Word `i` of the live region.
+    /// The word the image puts at place `i` of the heap's memory: of its
+    /// old space, its static area, or a part of its code area.
     pub fn word(&self, i: usize) -> u64 {
-        u64::from_le_bytes(self.words[i * 8..i * 8 + 8].try_into().unwrap())
+        let static_at = crate::heap::static_area().0;
+        let (bytes, at) = match crate::heap::code_part_of(i) {
+            Some((k, at)) => (self.code[k].0, at),
+            None if i >= static_at => (self.statics, i - static_at),
+            None => (self.words, i),
+        };
+        u64::from_le_bytes(bytes[at * 8..at * 8 + 8].try_into().unwrap())
     }
 
     /// A pair's car and cdr, in the image's own terms.
@@ -336,8 +358,9 @@ pub(crate) fn words_of(b: &[u8]) -> Vec<u64> {
 }
 
 /// An image's [`Parts`], its checksum checked if `check`. Of a heap of the
-/// spaces this one has: the old space's words, and the code area's two
-/// parts; a section of another space is refused.
+/// spaces this one has: the old space's words, the static area's (mutable,
+/// all of it so far), and the code area's two parts; a section of another
+/// space is refused.
 pub fn parts(bytes: &[u8], check: bool) -> Result<Parts<'_>, ImageError> {
     let table = sections(bytes)?;
     let body = bytes.len() - 4;
@@ -348,13 +371,15 @@ pub fn parts(bytes: &[u8], check: bool) -> Result<Parts<'_>, ImageError> {
     }
     let base = u64::from_le_bytes(bytes[16..24].try_into().unwrap()) as usize;
     let code_at = crate::heap::code_part_bases();
+    let static_at = crate::heap::static_area().0;
     let words_of_space: Vec<&Section> = table.iter().filter(|t| t.kind == WORDS).collect();
-    let mut by_space: [Option<&[u8]>; 3] = [None; 3];
+    let mut by_space: [Option<&[u8]>; 4] = [None; 4];
     for t in &words_of_space {
         let (k, place) = match t.space {
             OLD => (0, 0),
             CODE_STUBBED => (1, code_at[0]),
             CODE_NATIVE => (2, code_at[1]),
+            STATIC_MUTABLE => (3, static_at),
             s => return Err(ImageError::Malformed(format!("a section of space {s}, which this heap has not"))),
         };
         if t.place != place || by_space[k].is_some() {
@@ -379,23 +404,25 @@ pub fn parts(bytes: &[u8], check: bool) -> Result<Parts<'_>, ImageError> {
     let fixups: Vec<usize> = read(counts[3])?.into_iter().map(|f| f as usize).collect();
     // Each word section's free blocks, by its place in the table; made
     // places in its part again.
-    let mut free: [Vec<(usize, usize)>; 3] = Default::default();
+    let mut free: [Vec<(usize, usize)>; 4] = Default::default();
     for t in &words_of_space {
         let n = read(1)?[0] as usize;
         let blocks = read(n.checked_mul(2).ok_or_else(|| ImageError::Malformed("free blocks past memory".into()))?)?;
         let k = match t.space {
             OLD => 0,
             CODE_STUBBED => 1,
-            _ => 2,
+            CODE_NATIVE => 2,
+            _ => 3,
         };
         free[k] = blocks.chunks_exact(2).map(|p| ((p[0] as usize).wrapping_sub(t.place), p[1] as usize)).collect();
     }
-    if !free[0].is_empty() {
-        return Err(ImageError::Malformed("free blocks in the old space".into()));
+    if !free[0].is_empty() || !free[3].is_empty() {
+        return Err(ImageError::Malformed("free blocks in the old space or the static area".into()));
     }
     let empty: &[u8] = &[];
     let words = by_space[0].unwrap_or(empty);
-    let [_, free0, free1] = free;
+    let statics = by_space[3].unwrap_or(empty);
+    let [_, free0, free1, _] = free;
     let code = [(by_space[1].unwrap_or(empty), free0), (by_space[2].unwrap_or(empty), free1)];
     // Free blocks in order, apart, within their part.
     let apart = |w: &[u8], free: &Vec<(usize, usize)>| {
@@ -409,21 +436,22 @@ pub fn parts(bytes: &[u8], check: bool) -> Result<Parts<'_>, ImageError> {
     if !code.iter().all(|(w, free)| apart(w, free)) {
         return Err(ImageError::Malformed("the code area's free blocks out of order or outside it".into()));
     }
-    let n_words = words.len() / 8;
-    if fixups.iter().any(|&f| f >= n_words && crate::heap::code_part_of(f).is_none_or(|(k, i)| i >= code[k].0.len() / 8)) {
+    let (n_words, n_statics) = (words.len() / 8, statics.len() / 8);
+    let inside = |f: usize| f < n_words || (static_at..static_at + n_statics).contains(&f) || crate::heap::code_part_of(f).is_some_and(|(k, i)| i < code[k].0.len() / 8);
+    if !fixups.iter().all(|&f| inside(f)) {
         return Err(ImageError::Malformed("a fixup outside the image".into()));
     }
-    Ok(Parts { words, globals, symbols, roots, code, base, fixups })
+    Ok(Parts { words, statics, globals, symbols, roots, code, base, fixups })
 }
 
 fn load_checking(bytes: &[u8], check: bool) -> Result<Heap, ImageError> {
-    let Parts { words, globals, symbols, roots, code, base, fixups } = parts(bytes, check)?;
+    let Parts { words, statics, globals, symbols, roots, code, base, fixups } = parts(bytes, check)?;
     let code = code.map(|(w, free)| (words_of(w), free));
     let heap = Heap::from_image_with_code(words.len() / 8, |w| {
         for (w, b) in w.iter_mut().zip(words.chunks_exact(8)) {
             *w = u64::from_le_bytes(b.try_into().unwrap());
         }
-    }, code, globals, symbols, roots, base, &fixups).map_err(ImageError::Malformed)?;
+    }, &words_of(statics), code, globals, symbols, roots, base, &fixups).map_err(ImageError::Malformed)?;
     if check {
         heap.verify().map_err(ImageError::Malformed)?;
     }

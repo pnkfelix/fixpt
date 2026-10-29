@@ -485,10 +485,12 @@ const CACHE_IMAGE_AT: usize = fixpt_heap::image::PAGE;
 /// `heap`, all of it, written to `path` as an image after `key`.
 fn save_image(alone: &fixpt_heap::Heap, path: &std::path::Path, key: u64) {
     // The key, then the image on the file's next page (`CACHE_IMAGE_AT`),
-    // so that it may be mapped from the file (`TODO.md` §165).
+    // so that it may be mapped from the file (`TODO.md` §165); its words the
+    // static area's, so that where it is read nothing of it is copied by a
+    // collection (`TODO.md` §161).
     let mut bytes = key.to_le_bytes().to_vec();
     bytes.resize(CACHE_IMAGE_AT, 0);
-    bytes.extend(fixpt_heap::image::dump_mappable(alone));
+    bytes.extend(fixpt_heap::image::dump_static(alone));
     let Some(dir) = path.parent() else { return };
     if std::fs::create_dir_all(dir).is_err() {
         return;
