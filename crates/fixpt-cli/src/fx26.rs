@@ -124,8 +124,6 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
         // makes its code: about 3% of loading kayak's compiler (`TODO.md`
         // §126); not where its own compiler makes each procedure's.
         s.front_end_native = !by_fx26;
-        // Images carry call-outs encoded, numbered here when read back.
-        fixpt_native::direct::install_callout_map();
         // Its native code kept in the cache after its first run, and read
         // back (`TODO.md` §126).
         s.native_keeping = Some(fixpt_fx26::session::NativeKeeping {

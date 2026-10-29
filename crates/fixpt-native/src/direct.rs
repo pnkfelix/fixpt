@@ -663,27 +663,12 @@ pub fn native_adapter_code(heap: &mut Heap) -> Result<Value, String> {
     Ok(blob)
 }
 
-/// Images carry native code's call-outs encoded, numbered in this
-/// thread's machine when read back (`fixpt_heap::CalloutMap`): so a
-/// `.fasl` keeps native code, and the front end's cache, wherever the
-/// call-outs are numbered otherwise. Set where the native convention is.
-pub fn install_callout_map() {
-    fixpt_heap::set_callout_map(fixpt_heap::CalloutMap { out: callout_out, into: callout_into });
-}
-
-/// Call-out `n` of this thread's machine, encoded; one it has not, the
-/// failed call-out's, which traps when called.
-fn callout_out(n: u64) -> u64 {
-    let c = with_machine(|m| m.callouts.get(n as usize).copied()).ok().flatten();
-    debug_assert!(c.is_some(), "call-out {n} is not this machine's");
-    c.unwrap_or(Callout::Failed).encode()
-}
-
-/// The call-out encoded `code`, numbered in this thread's machine; none if
-/// it is not a call-out.
-fn callout_into(code: u64) -> Option<u64> {
-    let c = Callout::decode(code)?;
-    with_machine(|m| m.callout_number(c) as u64).ok()
+/// The field of a site that calls `c` out (one not the machine's own): `c`
+/// itself, encoded, past the own call-outs' numbers, which the code calls
+/// out by as it is (`callout`). The same in every machine, so that an image
+/// of the code needs nothing of the machine that made it.
+fn callout_field(c: Callout) -> Value {
+    Value::callout(OWN_CALLOUTS as u64 + c.encode())
 }
 
 /// Code bloblets a cache gave back, named as compiled code is for
@@ -1072,12 +1057,12 @@ pub struct DirectMachine {
     bloblet: Offset,
     cache_words: u64,
     max_words: u64,
-    /// What each call-out any compiled code makes does, by number.
+    /// The machine's own call-outs (`OWN_CALLOUTS`), which its code calls
+    /// by number, then, while a compile goes on, the others its code makes
+    /// by place: each site its own number, as both compilers number them,
+    /// written into the site's field as the call-out itself, encoded, when
+    /// the code is installed, and let go (`install`).
     callouts: Vec<Callout>,
-    /// The first number of each call-out, by its encoding, for those up to
-    /// `callouts_indexed` (`callout_number`).
-    callout_index: HashMap<u64, usize>,
-    callouts_indexed: usize,
     /// What each register word's slots come to (`slot_facts`), by its
     /// cells: once, not at every compile that calls it.
     slot_facts: SlotMemo,
@@ -1123,9 +1108,6 @@ impl DirectMachine {
         // continuation given a value (`REINSTATE`); 8: a pair made, for
         // code a program made (`common_cons`, `CONS`); 9: a bloblet made,
         // for it too (`common_bloblet`, `BLOBLET`).
-        // The code it compiles calls out by numbers in its table, which an
-        // image of that code carries encoded.
-        install_callout_map();
         let callouts: Vec<Callout> = vec![
             Callout::Foreign,
             Callout::ClosureAny,
@@ -1189,24 +1171,7 @@ impl DirectMachine {
             cache_words,
             max_words,
             callouts,
-            callout_index: HashMap::new(),
-            callouts_indexed: 0,
             slot_facts: HashMap::new(),
-        })
-    }
-
-    /// Call-out `c`'s number in this machine: the first it has, or a new
-    /// one (`callout_into`).
-    fn callout_number(&mut self, c: Callout) -> usize {
-        while self.callouts_indexed < self.callouts.len() {
-            let i = self.callouts_indexed;
-            self.callout_index.entry(self.callouts[i].encode()).or_insert(i);
-            self.callouts_indexed += 1;
-        }
-        *self.callout_index.entry(c.encode()).or_insert_with(|| {
-            self.callouts.push(c);
-            self.callouts_indexed += 1;
-            self.callouts.len() - 1
         })
     }
 
@@ -1251,13 +1216,15 @@ impl DirectMachine {
                 }
             }
         };
-        install(heap, &procs, first, &free)
+        let done = install(heap, &procs, first, &free, &self.callouts);
+        self.callouts.truncate(OWN_CALLOUTS);
+        done
     }
 }
 
 /// `procs`, compiled, each in a code bloblet of its own: what they are,
 /// the first (`first`) as a native closure over `free`.
-fn install(heap: &mut Heap, procs: &[Proc], first: usize, free: &[Value]) -> Result<Vec<(String, Compiled)>, String> {
+fn install(heap: &mut Heap, procs: &[Proc], first: usize, free: &[Value], callouts: &[Callout]) -> Result<Vec<(String, Compiled)>, String> {
     // Every bloblet first, then their fields, which refer to each other.
     // Nothing here collects, so the values held do not move.
     let blobs: Vec<Value> =
@@ -1269,7 +1236,7 @@ fn install(heap: &mut Heap, procs: &[Proc], first: usize, free: &[Value]) -> Res
                 Field::Code(q) => blobs[*q],
                 Field::Const(v) | Field::Cell(v) => *v,
                 Field::Closure(q, free) => native_closure(heap, blobs[*q], free),
-                Field::Callout(n) => Value::callout(*n as u64),
+                Field::Callout(n) => callout_field(callouts[*n]),
             };
             heap.set_bloblet_slot(blob, k + 1, v);
         }
@@ -5392,7 +5359,11 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
     // `table`, the machine's call-outs, which do not change while it runs.
     let st = unsafe { &mut *st };
     let rt = unsafe { &mut *(st.rt as *mut fixpt_runtime::Runtime) };
-    let c = unsafe { *(st.table as *const Callout).add(which as usize) };
+    let c = match which < OWN_CALLOUTS as u64 {
+        // SAFETY: the machine's own call-outs, which never change.
+        true => unsafe { *(st.table as *const Callout).add(which as usize) },
+        false => Callout::decode(which - OWN_CALLOUTS as u64).unwrap_or(Callout::Failed),
+    };
     let n = if let Callout::Foreign | Callout::ClosureAny | Callout::Rest = c { st.nargs as usize } else { c.arity() };
     // The arguments, and a foreign call's callee after them: on the stack
     // for eight or fewer, no vector at all (`TODO.md` §126: 18M call-outs

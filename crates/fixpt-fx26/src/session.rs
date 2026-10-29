@@ -404,8 +404,8 @@ fn save_front_end(heap: &fixpt_heap::Heap, w: fixpt_heap::Value, path: &std::pat
 /// kept too, as ordinary bloblets, named in a list: the image's root is
 /// `(pieces codes adapter)`, `adapter` the heap's native adapter's code if
 /// they reach it (shared, not copied, when read back). The call-outs the
-/// code makes are in its fields, which the image carries encoded and the
-/// machine that reads it numbers (`fixpt_heap::CalloutMap`).
+/// code makes are in its fields, each the call-out itself, encoded, the
+/// same in every machine.
 fn save_native_front_end(heap: &fixpt_heap::Heap, pieces: fixpt_heap::Value, path: &std::path::Path, key: u64) {
     use fixpt_heap::Value;
     let mut alone = fixpt_heap::Heap::new();
@@ -1696,9 +1696,6 @@ impl Fx26Session {
             Some(format!("it is for {}", header.arch))
         } else if header.native != self.native_convention {
             Some(if header.native { "it is for the native convention" } else { "it is for the cellular convention" }.to_string())
-        } else if header.native && !fixpt_heap::callout_map_set() {
-            // Its native code's call-outs numbered here (`fixpt_heap::CalloutMap`).
-            Some("no native machine here numbers its code's call-outs".to_string())
         } else if header.source != crate::fasl::digest(&text) {
             Some("its source changed".to_string())
         } else {

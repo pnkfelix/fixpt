@@ -2792,7 +2792,37 @@ of `TODO.md` §141, working on my own.
   the session has none yet, so the native part is the image's alone.
 - **Rejected for now**: a static region of the reservation of its own
   (§161), which the collector would have to scan: unneeded while the old
-  space is empty when the front end is read.
+  space is empty when the front end is read. **Wrong for what comes
+  next** (the user's misgiving, the same day): in semispace 0 the image is
+  from-space at the next major collection, whose rewrites of code fields
+  would not reach code mapped privately from the file (§160 item 4). The
+  static area comes first.
 - **Measured**: an empty program 55 ms to 50.5 ms (relocating against in
   place, one binary); 67 programs of `tests/programs/run` give the same in
   place, copied and relocated, and miss no card.
+
+### A call-out's field is the call-out, not a number (2026-10-28)
+
+- **Why**: every call-out site, at every compile, added an entry to its
+  machine's table (`n = callouts.len(); callouts.push(c)`, since the
+  first call-outs, b7a52b65): 63,412 entries after the front end, for
+  369 distinct call-outs, never let go; and an image's call-outs had to be
+  encoded as it was made and numbered again as it was read, 15,342 words
+  of the front end written at each load.
+- **Tried first**: numbering each call-out once. The Rust compiler then
+  shares one field among a procedure's equal call-outs where FX-26's code
+  has a field for each site, its offsets in its bytes: the two compilers'
+  code differs. Then taking an image's whole table on, duplicates and all,
+  where the machine had numbered none of its own yet: no words written,
+  but the growth kept.
+- **Chosen** (the user's: keep the code vectors, not the sites): each
+  site's field holds the call-out itself, encoded (`Callout::encode`, past
+  the machine's own ten numbers, which code calls as constants), and the
+  call-out routine decodes what is not one of those. The table holds the
+  own ten, and a compile's sites only until it is installed: sites are
+  still numbered by place, so both compilers' code is unchanged. Images
+  carry call-outs as they are; `CalloutMap`, its numbering at loads, and
+  the staleness of a native `.fasl` where there is no map, gone.
+- **Measured**: stage 0 (kayak `d5840ee`) 46.07-46.11 G instructions to
+  46.17-46.19 G (the decoding), cycles within noise, output the same; an
+  empty program unchanged.

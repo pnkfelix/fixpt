@@ -350,9 +350,9 @@ fn call_out(a: &mut Asm, n: usize) {
 /// (`OWN_CALLOUTS`), which every machine numbers alike, as a constant;
 /// another from a field of the code bloblet that holds it as a call-out
 /// (`Value::callout`), given when the procedure is done
-/// (`Asm::callout_fields`): the code then names nothing of the machine
-/// that compiled it, and a `.fasl` keeps it, a loader numbering the field's
-/// call-out in its own machine.
+/// (`Asm::callout_fields`): the call-out itself, encoded, when the code is
+/// installed (`callout_field`), so that the code names nothing of the
+/// machine that compiled it, and a `.fasl` keeps it as it is.
 fn callout_number(a: &mut Asm, n: usize) {
     if n < super::OWN_CALLOUTS {
         a.imm(RSI, n as u64);

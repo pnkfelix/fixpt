@@ -36,7 +36,7 @@
 //!               free blocks' count, its words (references as the heap
 //!               words'), its free blocks (start and length, each a u64)
 //!      -     -  fixups: where a word is that a load at the base still
-//!               writes (a call-out, a reference to an interned symbol), by
+//!               writes (a reference to an interned symbol), by
 //!               its place in the heap's memory (little-endian u64)
 //!      -     4  CRC-32 of everything above
 //! ```
@@ -62,7 +62,9 @@ pub const MAGIC: &[u8; 8] = b"FIXPTHP\0";
 /// references counted from where the heap's memory starts. Version 9 has
 /// references as addresses of the heap it was made of, its base and the
 /// fixups (`TODO.md` §160): loaded at the same base, nothing else moves.
-pub const VERSION: u32 = 9;
+/// Version 10 has a call-out as the call-out itself, encoded, the same in
+/// every machine, not a number in the table of the machine that made it.
+pub const VERSION: u32 = 10;
 const HEADER_BYTES: usize = 64;
 
 /// Trailer written after an image appended to an executable.

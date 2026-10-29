@@ -385,7 +385,8 @@ impl DirectMachine {
     /// The compile made, its code bloblets placed, and collection allowed
     /// again: what `compile` gives.
     pub fn fx_finish(&mut self, heap: &mut Heap, c: FxCompile) -> Result<Vec<(String, Compiled)>, String> {
-        let r = super::install(heap, &c.procs, c.first, &c.free);
+        let r = super::install(heap, &c.procs, c.first, &c.free, &self.callouts);
+        self.callouts.truncate(super::OWN_CALLOUTS);
         heap.allow_collection();
         r
     }

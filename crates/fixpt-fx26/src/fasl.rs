@@ -337,9 +337,8 @@ fn global_name(heap: &Heap, v: Value) -> Option<String> {
 /// (`adapter`), which every heap has one of. Native code is kept as it is,
 /// as the front end's cache keeps it: what it names of the session is in
 /// its code bloblets' fields (cells, constants, other code), linked or
-/// copied as any other object's; its call-outs are in fields too, which
-/// the image carries encoded and the loader's machine numbers
-/// (`fixpt_heap::CalloutMap`). Each word's compiled entry (a machine's
+/// copied as any other object's; its call-outs are in fields too, each the
+/// call-out itself, encoded, the same in every machine. Each word's compiled entry (a machine's
 /// slot number, this process's) is let go, so that the loader's machine
 /// compiles it again if it runs it. Or, `cellular`, cellular words alone
 /// ([`cellular_image`]).
@@ -702,10 +701,6 @@ impl crate::check::Checker {
         }
         if header.native != native {
             return stale(self, if header.native { "it is for the native convention" } else { "it is for the cellular convention" });
-        }
-        // Its native code's call-outs numbered here (`fixpt_heap::CalloutMap`).
-        if native && !header.cellular && !fixpt_heap::callout_map_set() {
-            return stale(self, "no native machine here numbers its code's call-outs");
         }
         let kind = if input { Kind::Input } else { Kind::Module };
         // A program's file's, for `,load`: nothing to say of it here.

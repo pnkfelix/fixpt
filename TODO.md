@@ -3518,21 +3518,28 @@ in both): the words copied and only the fixups written (42,516 of 2.6 M),
 the image's adapter the session's. Elsewhere, and under
 `FIXPT_IMAGE_RELOCATE=1`, the walk. An empty program 55 ms to 50.5 ms.
 Left, in order:
-1. ~~**The heap at a fixed address**~~ (above). A static region of its own
-   (§161) is not needed while the session's old space is empty when the
-   front end is read.
+1. ~~**The heap at a fixed address**~~ (above). Not enough for item 4:
+   the image's words are in semispace 0, from-space at the next major
+   collection, which copies them all and rewrites every code field that
+   refers to them (cells, constants, closures). Through the code area's
+   shared mapping that is harmless; through item 4's two private mappings
+   of the file, the collector's writes would reach only the heap's view,
+   and the code would run on with the old addresses (the user's
+   misgiving, 2026-10-28). So §161's static area, cells and all, comes
+   before item 4, not after.
 2. **A section table and page-aligned sections** (`dump`, `embed_into`):
    code, immutable data, mutable static data (§161), at first all but
    code mutable.
 3. **No writes in place first** (measured 2026-10-28: the front end's
    fixups write 2,918 of its 5,164 pages, which a mapping would copy):
-   - **Call-outs** (15,342, on 1,623 pages, all code, which a write
-     through the heap's view would not even show through the executable
-     one): numbered alike by making them so. The image keeps its numbers
-     and its table of them, in order; the loader asks the machine for each
-     in that order, and where every number comes out the image's (none
-     numbered otherwise yet, as when the front end is read), writes
-     nothing.
+   - ~~**Call-outs**~~ (done, 2026-10-28, the user's: 15,342 writes, on
+     1,623 pages, all code): a call-out's field is the call-out itself,
+     encoded, the same in every machine (`callout_field`), which the
+     call-out routine decodes; the machine's table holds its own ten, and
+     a compile's sites only while it goes on. So nothing is renumbered at
+     a load, and the table no longer grows by every call-out site ever
+     compiled (63,412 entries after the front end, for 369 call-outs;
+     `CalloutMap` gone). Stage 0: 0.2% more instructions, the same cycles.
    - **References to the session's symbols** (5,279 of 27,174 symbol
      references, on 1,962 pages): turned the other way, the session's own
      made the image's. The session's 758 symbols are in the nursery when
@@ -3540,7 +3547,7 @@ Left, in order:
      name (its global slot given to that one), and the nursery collected,
      which the forwarding moves every reference to; the symbol table's
      entries the image's.
-4. **The sections mapped**: the code's twice from the file, privately,
+4. **The sections mapped**, after §161 (above): the code's twice from the file, privately,
    read+execute where it runs and read-only where the heap reads it (the
    two never written, so they agree); the immutable data read-only; the
    mutable data copied on write. Then the call-out pass goes too, where
@@ -3554,6 +3561,18 @@ as `--heap` files are (§159).
 ## 161. A static area for mapped images (the user's, 2026-10-28)
 
 What the collector does with what §160 maps, the user's design:
+- **Before §160 item 4** (2026-10-28): code mapped privately from a file
+  must refer only to what never moves, or the collector's rewrites of its
+  fields never reach the view it runs from.
+- **Global cells** too: a code field (`Field::Cell`) points at a global's
+  cell, which today is an ordinary bloblet (`push_global`, the runtime's
+  `%fx26` globals), moved at promotion and at every major collection, its
+  referrers rewritten each time. Static (an image's) or in a space of
+  their own that never moves (a session's), a code field linked to one is
+  written once, when a `.fasl` is linked: then fine on code pages if both
+  views get it before the code runs, at the cost of copying those pages,
+  or on pages of their own (a constant vector, a link table) to keep the
+  code's clean.
 - **Static objects never move**, nor are copied: a forwarding pointer
   cannot be written over a read-only header, and the static objects that
   refer to one could not be made to refer to its copy. The copier's test
@@ -3605,3 +3624,27 @@ then (1 run in 4 at 5b0d032a, alone; more under load): native, the
 program sleeps out the 30 s deadline a `pselect` passed over before it
 deadlocks, about 25 s, where lowered it does not. A waker left on the
 deadline's event some of the time.
+
+## 164. A call-out's encoding in the instruction, not a field (the user's, 2026-10-28)
+
+Since a call-out's field holds the call-out itself, encoded, the same in
+every machine (`callout_field`), nothing rewrites it, so the field is an
+indirection with no purpose left: the encoding could be the instruction's
+immediate (x64 `mov rsi, imm64`, 10 bytes against the load and shift's
+11; arm64 a `movz`/`movk` sequence), one load fewer at each call-out, no
+field per site (some 15,000 in the front end), no compile's table of
+sites or `callout_fields`. Both compilers in each instruction set at once,
+their oracles comparing. With it, perhaps an encoding the call-out routine
+tells apart in one comparison for its common cases (the decoding is 0.2%
+of stage 0's instructions).
+
+## 165. Images and `.fasl`s split into what moves and what never does (the user's, 2026-10-29)
+
+Soon, not yet: both formats (heap images and `.fasl` files) revised so that
+what is mutable and may move (heap objects, a global's cell until §161
+gives cells a place of their own) is apart from what is immutable and
+never moves (code, its fields once linked, immutable static data), each
+part page-aligned in the file: so that they can be mapped deliberately to
+pages of their own (§160 items 2 and 4, §161's sections), and perhaps
+address-space tricks played with them later (the user is less sure of
+those). One revision for both formats, not one each.

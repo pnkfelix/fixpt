@@ -17,7 +17,7 @@
 
 use super::code::{PART_BASES, in_code_area};
 use super::young::is_young;
-use super::{Heap, callout_in, read_head, relocating};
+use super::{Heap, read_head, relocating};
 use crate::image::Parts;
 use crate::layout;
 use crate::value::{Value, is_extension, is_header, make_header};
@@ -139,12 +139,6 @@ impl Heap {
 
         let unknown = std::cell::Cell::new(None);
         let map = |v: Value| -> Value {
-            if v.is_callout() {
-                return callout_in(v).unwrap_or_else(|| {
-                    unknown.set(Some(format!("it holds call-out {:#x}, which this machine does not have", v.as_callout())));
-                    v
-                });
-            }
             if !v.is_ref() {
                 return v;
             }
@@ -165,7 +159,10 @@ impl Heap {
         let mut young = Vec::new();
         let mut field = |mem: &mut [u64], f: usize| {
             let v = map(Value(mem[f]));
-            mem[f] = v.raw();
+            // Written only if changed, so that a page none changes is not.
+            if mem[f] != v.raw() {
+                mem[f] = v.raw();
+            }
             let i = if v.is_suffix_ref() { v.owner() } else if v.is_ref() { v.index() - base } else { return };
             if is_young(i) {
                 young.push(f);
