@@ -217,7 +217,7 @@ fn bloblets_travel_in_heap_images() {
     let slot = h.symbol_global_slot(sym);
     h.set_global(slot, b);
     h.collect(&mut []);
-    let bytes = image::dump(&h);
+    let bytes = image::dump_packed(&h);
     let loaded = image::load(&bytes).expect("loads");
     loaded.verify().expect("sound");
     let b = loaded.global(loaded.symbol_global_slot(loaded.intern_existing("the-bloblet").unwrap()));

@@ -93,7 +93,7 @@ fn a_resumed_heap_can_be_dumped_again() {
 
     let first = session.image();
     let mut rt = Runtime::from_heap(image::load(&first).expect("loads"));
-    let second = image::dump(&rt.heap);
+    let second = image::dump_packed(&rt.heap);
     let mut rt2 = Runtime::from_heap(image::load(&second).expect("reloads"));
 
     let mut interp = Interp::new();

@@ -412,7 +412,7 @@ pub fn image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapter: O
     let rest = alone.cons(placeholders, Value::NULL);
     let root = alone.cons(copy, rest);
     alone.push_root(root);
-    Ok(fixpt_heap::image::dump(&alone))
+    Ok(fixpt_heap::image::dump_packed(&alone))
 }
 
 /// [`image`], of cellular words alone (`compile-file --cellular`): a
@@ -543,7 +543,7 @@ fn cellular_image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapt
     let rest = alone.cons(placeholders, natives);
     let root = alone.cons(copy, rest);
     alone.push_root(root);
-    Ok(fixpt_heap::image::dump(&alone))
+    Ok(fixpt_heap::image::dump_packed(&alone))
 }
 
 /// `value`, just copied in from a `.fasl` (so all of it new), with each of

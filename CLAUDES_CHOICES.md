@@ -2828,3 +2828,27 @@ of `TODO.md` §141, working on my own.
 - **Measured**: stage 0 (kayak `d5840ee`) 46.07-46.11 G instructions to
   46.17-46.19 G (the decoding), cycles within noise, output the same; an
   empty program unchanged.
+
+### Images as a table of sections, mapped or packed (2026-10-29)
+
+- **Why** (the user's, `TODO.md` §165): what moves and may be written
+  apart from what never moves, each part where it may go to pages of its
+  own; and (the user's) planned for a heap of many parts.
+- **Chosen**: a table of sections, each of a kind (metadata, words) and a
+  space (old space, the code area's two parts; static and mutable static
+  named for §161), with what it is (moves, written, runs), its alignment,
+  its offset and length, where in the heap's memory it goes and how much
+  its space spans there. A heap of more spaces is more sections; a space
+  a reader has not is refused. Every place in an image is a place in the
+  heap's memory, so a fixup or a free block needs no section to be read.
+- **Mapped or packed** (the user's question, then the choice): only heap
+  images are made to be mapped (`dump_mappable`, 16 KiB pages, macOS on
+  arm64's and a whole number of 4 KiB ones): one a process, large, placed
+  where it was made. A `.fasl` is placed where it was never made for,
+  relocated and linked, so a mapping would be copied on write throughout,
+  and a small file is read as cheaply as it is mapped: packed
+  (`dump_packed`), its sections still apart for a loader that puts each
+  where it goes. A large program's mapping is a heap dumped after its
+  `.fasl`s load, as Larceny's are.
+- **Measured**: the native front end's image 21.5 MB, 27 KB of padding;
+  the suite passes (857 of 858, the one the intermittent §163).

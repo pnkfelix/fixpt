@@ -17,28 +17,41 @@
 //! offset  size  field
 //!      0     8  magic "FIXPTHP\0"
 //!      8     4  format version
-//!     12     4  flags
-//!     16     8  heap word count
-//!     24     8  global slot count
-//!     32     8  interned symbol count
-//!     40     8  explicit root count
-//!     48     8  the base its references are made for, in words: the fixed
+//!     12     4  flags (0)
+//!     16     8  the base its references are made for, in words: the fixed
 //!               base a process's first heap is at
-//!     56     8  fixup count
-//!     64     -  heap words     (little-endian u64, references addresses
-//!                               of a heap at the base, the image's words
-//!                               at its start)
-//!      -     -  global slots   (little-endian u64)
-//!      -     -  symbol table   (little-endian u64)
-//!      -     -  explicit roots (little-endian u64; root 0 is the runtime's
-//!                               error-object record type)
-//!      -     -  the code area, each of its two parts: its word count, its
-//!               free blocks' count, its words (references as the heap
-//!               words'), its free blocks (start and length, each a u64)
-//!      -     -  fixups: where a word is that a load at the base still
-//!               writes (a reference to an interned symbol), by
-//!               its place in the heap's memory (little-endian u64)
+//!     24     4  section count
+//!     28     4  0
+//!     32     -  the section table, 48 bytes a section ([`Section`]): its
+//!               kind, its space, what it is ([`MOVES`], [`WRITTEN`],
+//!               [`RUNS`]), its alignment in the file (log2 bytes, 0 for
+//!               none; u32 each); its offset from the image's start and its
+//!               length (bytes), where in the heap's memory it goes and how
+//!               much of it its space spans there (words; u64 each)
+//!      -     -  the sections, in the table's order
 //!      -     4  CRC-32 of everything above
+//! ```
+//!
+//! The sections (`TODO.md` §165): one of metadata, read and never mapped;
+//! one of words for each space of the heap the image fills, each where in
+//! the heap's memory that space is, so that what moves and may be written
+//! (the old space's words) is apart from what never moves (the code area's
+//! two parts), and each may go to pages of its own. A heap of more spaces
+//! than these (static areas, regions, more generations) is more sections,
+//! each of its space. Code is written still (its fields, as what they
+//! refer to moves) until the static area (§161) makes what it refers to
+//! stay. A word section's words are as the heap has them, its references
+//! addresses of a heap at the base; every place, of a fixup or a free
+//! block, is a place in the heap's memory, whatever section it is in.
+//!
+//! ```text
+//! the metadata: four counts (u64): global slots, interned symbols,
+//! explicit roots, fixups; the global slots, the symbol table and the
+//! explicit roots (each a u64 value; root 0 is the runtime's error-object
+//! record type); the fixups: where a word is that a load at the base still
+//! writes (a reference to an interned symbol); then, for each word section
+//! in the table's order, its free blocks' count and its free blocks (start
+//! and length, u64 each): room in a space that holds no object.
 //! ```
 
 use crate::heap::Heap;
@@ -64,8 +77,49 @@ pub const MAGIC: &[u8; 8] = b"FIXPTHP\0";
 /// fixups (`TODO.md` §160): loaded at the same base, nothing else moves.
 /// Version 10 has a call-out as the call-out itself, encoded, the same in
 /// every machine, not a number in the table of the machine that made it.
-pub const VERSION: u32 = 10;
-const HEADER_BYTES: usize = 64;
+/// Version 11 is a table of sections (`TODO.md` §165).
+pub const VERSION: u32 = 11;
+const HEADER_BYTES: usize = 32;
+const SECTION_BYTES: usize = 48;
+
+/// The page an image is aligned to for mapping: 16 KiB, macOS on arm64's,
+/// and so a whole number of x86_64's and Linux on arm64's.
+pub const PAGE: usize = 16 * 1024;
+/// What a section is: what may move, what may be written, what runs.
+pub const MOVES: u32 = 1;
+pub const WRITTEN: u32 = 2;
+pub const RUNS: u32 = 4;
+
+/// The kinds of section: the metadata, or a space's words.
+pub const META: u32 = 1;
+pub const WORDS: u32 = 2;
+
+/// The spaces of a heap a word section may be of. A space a reader does not
+/// know is refused, not ignored: its words would be lost.
+pub const OLD: u32 = 1;
+pub const CODE_STUBBED: u32 = 2;
+pub const CODE_NATIVE: u32 = 3;
+/// Static data, immutable and mutable (`TODO.md` §161): no image has them
+/// yet.
+pub const STATIC: u32 = 4;
+pub const STATIC_MUTABLE: u32 = 5;
+
+/// A section, as the table has it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Section {
+    pub kind: u32,
+    /// Its space (a word section's), 0 for the metadata.
+    pub space: u32,
+    pub what: u32,
+    /// Its offset's alignment, log2 bytes, 0 for none.
+    pub align: u32,
+    pub offset: usize,
+    pub bytes: usize,
+    /// Where in the heap's memory its words go, and how many words its
+    /// space spans there (at least its own).
+    pub place: usize,
+    pub extent: usize,
+}
 
 /// Trailer written after an image appended to an executable.
 pub const EMBED_MAGIC: &[u8; 8] = b"FIXPTEMB";
@@ -101,56 +155,126 @@ impl std::fmt::Display for ImageError {
 impl std::error::Error for ImageError {}
 
 /// Serialise the live heap. The collector has already compacted it, so this is
-/// a copy of a contiguous region plus the two root arrays.
-pub fn dump(heap: &Heap) -> Vec<u8> {
+/// a copy of a contiguous region plus the two root arrays. Packed: for an
+/// image that is read, as a `.fasl`'s is.
+pub fn dump_packed(heap: &Heap) -> Vec<u8> {
+    dump_with(heap, false)
+}
+
+/// [`dump_packed`], each word section page-aligned ([`PAGE`]) from its
+/// start, for an image that may be mapped (one per process: the front end's
+/// cache, a heap a program dumped, an executable's own). Where it is kept, it
+/// must start on a page too (`embed_into`, the cache's file).
+pub fn dump_mappable(heap: &Heap) -> Vec<u8> {
+    dump_with(heap, true)
+}
+
+fn dump_with(heap: &Heap, aligned: bool) -> Vec<u8> {
     // Its active semispace the first, whichever it is: an image loads there.
     let base = Heap::image_base_word();
     let (words, globals, symbols, roots) = heap.image_parts_at(base);
     let code = heap.image_code(base);
     let fixups = crate::heap::image_fixups(&words, &code, &symbols);
-    let (words, globals, symbols, roots) = (&words[..], &globals[..], &symbols[..], &roots[..]);
-
-    let mut out = Vec::with_capacity(
-        HEADER_BYTES + (words.len() + globals.len() + symbols.len() + roots.len()) * 8 + 4,
-    );
-    out.extend_from_slice(MAGIC);
-    out.extend_from_slice(&VERSION.to_le_bytes());
-    out.extend_from_slice(&0u32.to_le_bytes()); // flags
-    out.extend_from_slice(&(words.len() as u64).to_le_bytes());
-    out.extend_from_slice(&(globals.len() as u64).to_le_bytes());
-    out.extend_from_slice(&(symbols.len() as u64).to_le_bytes());
-    out.extend_from_slice(&(roots.len() as u64).to_le_bytes());
-    out.extend_from_slice(&(base as u64).to_le_bytes());
-    out.extend_from_slice(&(fixups.len() as u64).to_le_bytes());
-    for w in words {
-        out.extend_from_slice(&w.to_le_bytes());
-    }
-    for v in globals {
-        out.extend_from_slice(&v.raw().to_le_bytes());
-    }
-    for v in symbols {
-        out.extend_from_slice(&v.raw().to_le_bytes());
-    }
-    for v in roots {
-        out.extend_from_slice(&v.raw().to_le_bytes());
-    }
-    for (words, free) in code {
-        out.extend_from_slice(&(words.len() as u64).to_le_bytes());
-        out.extend_from_slice(&(free.len() as u64).to_le_bytes());
-        for w in words {
+    let le = |out: &mut Vec<u8>, ws: &mut dyn Iterator<Item = u64>| {
+        for w in ws {
             out.extend_from_slice(&w.to_le_bytes());
         }
-        for (s, n) in free {
-            out.extend_from_slice(&(s as u64).to_le_bytes());
-            out.extend_from_slice(&(n as u64).to_le_bytes());
+    };
+    // Each space's words: where they go, how much of the heap's memory the
+    // space spans, and its free blocks (each from its part's start in the
+    // heap, made places in the heap's memory).
+    let (code_at, code_words) = (crate::heap::code_part_bases(), crate::heap::code_part_words());
+    let spaces: [(u32, u32, usize, usize, &[u64], Vec<(usize, usize)>); 3] = [
+        (OLD, MOVES | WRITTEN, 0, words.len(), &words, Vec::new()),
+        (CODE_STUBBED, WRITTEN | RUNS, code_at[0], code_words, &code[0].0, code[0].1.iter().map(|&(s, n)| (code_at[0] + s, n)).collect()),
+        (CODE_NATIVE, WRITTEN | RUNS, code_at[1], code_words, &code[1].0, code[1].1.iter().map(|&(s, n)| (code_at[1] + s, n)).collect()),
+    ];
+    let mut meta = Vec::new();
+    le(&mut meta, &mut [globals.len(), symbols.len(), roots.len(), fixups.len()].into_iter().map(|n| n as u64));
+    le(&mut meta, &mut globals.iter().chain(&symbols).chain(&roots).map(|v| v.raw()));
+    le(&mut meta, &mut fixups.iter().map(|&f| f as u64));
+    for (.., free) in &spaces {
+        le(&mut meta, &mut std::iter::once(free.len() as u64).chain(free.iter().flat_map(|&(s, n)| [s as u64, n as u64])));
+    }
+    let n = 1 + spaces.len();
+    let mut at = HEADER_BYTES + n * SECTION_BYTES;
+    let mut table = vec![Section { kind: META, space: 0, what: 0, align: 0, offset: at, bytes: meta.len(), place: 0, extent: 0 }];
+    at += meta.len();
+    let align = if aligned { PAGE.trailing_zeros() } else { 0 };
+    for &(space, what, place, extent, ws, _) in &spaces {
+        at = at.div_ceil(1 << align) << align;
+        table.push(Section { kind: WORDS, space, what, align, offset: at, bytes: ws.len() * 8, place, extent });
+        at += ws.len() * 8;
+    }
+    let mut out = Vec::with_capacity(at + 4);
+    out.extend_from_slice(MAGIC);
+    out.extend_from_slice(&VERSION.to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    out.extend_from_slice(&(base as u64).to_le_bytes());
+    out.extend_from_slice(&(n as u32).to_le_bytes());
+    out.extend_from_slice(&0u32.to_le_bytes());
+    for t in &table {
+        for v in [t.kind, t.space, t.what, t.align] {
+            out.extend_from_slice(&v.to_le_bytes());
+        }
+        for v in [t.offset, t.bytes, t.place, t.extent] {
+            out.extend_from_slice(&(v as u64).to_le_bytes());
         }
     }
-    for f in fixups {
-        out.extend_from_slice(&(f as u64).to_le_bytes());
+    out.extend_from_slice(&meta);
+    for (t, (.., ws, _)) in table[1..].iter().zip(&spaces) {
+        out.resize(t.offset, 0);
+        le(&mut out, &mut ws.iter().copied());
     }
     let crc = crc32(&out);
     out.extend_from_slice(&crc.to_le_bytes());
     out
+}
+
+/// An image's section table, read: each section, within the image, its
+/// header and table whole, an offset as aligned as it says.
+pub fn sections(bytes: &[u8]) -> Result<Vec<Section>, ImageError> {
+    if bytes.len() < HEADER_BYTES + 4 {
+        return Err(ImageError::Truncated { expected: HEADER_BYTES + 4, found: bytes.len() });
+    }
+    if &bytes[0..8] != MAGIC {
+        return Err(ImageError::BadMagic);
+    }
+    let version = u32::from_le_bytes(bytes[8..12].try_into().unwrap());
+    if version != VERSION {
+        return Err(ImageError::BadVersion(version));
+    }
+    let u32_at = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
+    let u64_at = |at: usize| u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap()) as usize;
+    let n = u32_at(24) as usize;
+    let Some(table_end) = n.checked_mul(SECTION_BYTES).and_then(|t| t.checked_add(HEADER_BYTES)).filter(|&e| e + 4 <= bytes.len()) else {
+        return Err(ImageError::Truncated { expected: HEADER_BYTES + n.saturating_mul(SECTION_BYTES) + 4, found: bytes.len() });
+    };
+    let table: Vec<Section> = (0..n)
+        .map(|i| {
+            let at = HEADER_BYTES + i * SECTION_BYTES;
+            Section {
+                kind: u32_at(at),
+                space: u32_at(at + 4),
+                what: u32_at(at + 8),
+                align: u32_at(at + 12),
+                offset: u64_at(at + 16),
+                bytes: u64_at(at + 24),
+                place: u64_at(at + 32),
+                extent: u64_at(at + 40),
+            }
+        })
+        .collect();
+    let body = bytes.len() - 4;
+    for t in &table {
+        let inside = t.offset >= table_end && t.offset.checked_add(t.bytes).is_some_and(|e| e <= body);
+        let aligned = t.align < 32 && t.offset.is_multiple_of(1 << t.align);
+        let words = t.kind != WORDS || (t.bytes.is_multiple_of(8) && t.bytes / 8 <= t.extent);
+        if !inside || !aligned || !words {
+            return Err(ImageError::Malformed(format!("section {} (space {}) outside the image, or not as it says", t.kind, t.space)));
+        }
+    }
+    Ok(table)
 }
 
 /// Parse an image and rebuild the heap. Verifies the checksum, then the heap's
@@ -211,67 +335,68 @@ pub(crate) fn words_of(b: &[u8]) -> Vec<u64> {
     b.chunks_exact(8).map(|w| u64::from_le_bytes(w.try_into().unwrap())).collect()
 }
 
-/// An image's [`Parts`], its checksum checked if `check`.
+/// An image's [`Parts`], its checksum checked if `check`. Of a heap of the
+/// spaces this one has: the old space's words, and the code area's two
+/// parts; a section of another space is refused.
 pub fn parts(bytes: &[u8], check: bool) -> Result<Parts<'_>, ImageError> {
-    if bytes.len() < HEADER_BYTES + 4 {
-        return Err(ImageError::Truncated { expected: HEADER_BYTES + 4, found: bytes.len() });
-    }
-    if &bytes[0..8] != MAGIC {
-        return Err(ImageError::BadMagic);
-    }
-    let version = u32::from_le_bytes(bytes[8..12].try_into().unwrap());
-    if version != VERSION {
-        return Err(ImageError::BadVersion(version));
-    }
-    let n_words = u64::from_le_bytes(bytes[16..24].try_into().unwrap()) as usize;
-    let n_globals = u64::from_le_bytes(bytes[24..32].try_into().unwrap()) as usize;
-    let n_symbols = u64::from_le_bytes(bytes[32..40].try_into().unwrap()) as usize;
-    let n_roots = u64::from_le_bytes(bytes[40..48].try_into().unwrap()) as usize;
-    let base = u64::from_le_bytes(bytes[48..56].try_into().unwrap()) as usize;
-    let n_fixups = u64::from_le_bytes(bytes[56..64].try_into().unwrap()) as usize;
-
-    // The code area's parts after the roots: each its counts, then its
-    // words and free blocks.
-    let read_at = |at: usize| u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap()) as usize;
-    let mut body = HEADER_BYTES + (n_words + n_globals + n_symbols + n_roots) * 8;
-    let mut code_counts = [(0, 0); 2];
-    for c in &mut code_counts {
-        if bytes.len() < body + 16 + 4 {
-            return Err(ImageError::Truncated { expected: body + 16 + 4, found: bytes.len() });
-        }
-        *c = (read_at(body), read_at(body + 8));
-        body = c.1.checked_mul(2).and_then(|f| f.checked_add(c.0)).and_then(|n| n.checked_mul(8)).and_then(|n| (body + 16).checked_add(n)).ok_or_else(|| ImageError::Malformed("a code area larger than memory".into()))?;
-    }
-    let fixups_at = body;
-    body = n_fixups.checked_mul(8).and_then(|n| body.checked_add(n)).ok_or_else(|| ImageError::Malformed("fixups larger than memory".into()))?;
-    let total = body + 4;
-    if bytes.len() < total {
-        return Err(ImageError::Truncated { expected: total, found: bytes.len() });
-    }
-    let expected = u32::from_le_bytes(bytes[body..body + 4].try_into().unwrap());
+    let table = sections(bytes)?;
+    let body = bytes.len() - 4;
+    let expected = u32::from_le_bytes(bytes[body..].try_into().unwrap());
     let found = if check { crc32(&bytes[..body]) } else { expected };
     if expected != found {
         return Err(ImageError::BadChecksum { expected, found });
     }
-
-    let mut at = HEADER_BYTES;
-    let read_u64 = |at: &mut usize| {
-        let w = u64::from_le_bytes(bytes[*at..*at + 8].try_into().unwrap());
-        *at += 8;
-        w
+    let base = u64::from_le_bytes(bytes[16..24].try_into().unwrap()) as usize;
+    let code_at = crate::heap::code_part_bases();
+    let words_of_space: Vec<&Section> = table.iter().filter(|t| t.kind == WORDS).collect();
+    let mut by_space: [Option<&[u8]>; 3] = [None; 3];
+    for t in &words_of_space {
+        let (k, place) = match t.space {
+            OLD => (0, 0),
+            CODE_STUBBED => (1, code_at[0]),
+            CODE_NATIVE => (2, code_at[1]),
+            s => return Err(ImageError::Malformed(format!("a section of space {s}, which this heap has not"))),
+        };
+        if t.place != place || by_space[k].is_some() {
+            return Err(ImageError::Malformed(format!("space {}'s section elsewhere than this heap has it, or twice", t.space)));
+        }
+        by_space[k] = Some(&bytes[t.offset..t.offset + t.bytes]);
+    }
+    let meta = table.iter().find(|t| t.kind == META).ok_or_else(|| ImageError::Malformed("no metadata".into()))?;
+    let meta = &bytes[meta.offset..meta.offset + meta.bytes];
+    let mut at = 0;
+    let mut read = |n: usize| -> Result<Vec<u64>, ImageError> {
+        let end = n.checked_mul(8).and_then(|b| b.checked_add(at)).filter(|&e| e <= meta.len()).ok_or_else(|| ImageError::Malformed("the metadata ends early".into()))?;
+        let ws = words_of(&meta[at..end]);
+        at = end;
+        Ok(ws)
     };
-    let words = &bytes[at..at + n_words * 8];
-    at += n_words * 8;
-    let globals: Vec<Value> = (0..n_globals).map(|_| Value(read_u64(&mut at))).collect();
-    let symbols: Vec<Value> = (0..n_symbols).map(|_| Value(read_u64(&mut at))).collect();
-    let roots: Vec<Value> = (0..n_roots).map(|_| Value(read_u64(&mut at))).collect();
-    let code = code_counts.map(|(n, f)| {
-        at += 16;
-        let words = &bytes[at..at + n * 8];
-        at += n * 8;
-        let free: Vec<(usize, usize)> = (0..f).map(|_| (read_u64(&mut at) as usize, read_u64(&mut at) as usize)).collect();
-        (words, free)
-    });
+    let counts: Vec<usize> = read(4)?.into_iter().map(|n| n as usize).collect();
+    let values = |ws: Vec<u64>| ws.into_iter().map(Value).collect::<Vec<Value>>();
+    let globals = values(read(counts[0])?);
+    let symbols = values(read(counts[1])?);
+    let roots = values(read(counts[2])?);
+    let fixups: Vec<usize> = read(counts[3])?.into_iter().map(|f| f as usize).collect();
+    // Each word section's free blocks, by its place in the table; made
+    // places in its part again.
+    let mut free: [Vec<(usize, usize)>; 3] = Default::default();
+    for t in &words_of_space {
+        let n = read(1)?[0] as usize;
+        let blocks = read(n.checked_mul(2).ok_or_else(|| ImageError::Malformed("free blocks past memory".into()))?)?;
+        let k = match t.space {
+            OLD => 0,
+            CODE_STUBBED => 1,
+            _ => 2,
+        };
+        free[k] = blocks.chunks_exact(2).map(|p| ((p[0] as usize).wrapping_sub(t.place), p[1] as usize)).collect();
+    }
+    if !free[0].is_empty() {
+        return Err(ImageError::Malformed("free blocks in the old space".into()));
+    }
+    let empty: &[u8] = &[];
+    let words = by_space[0].unwrap_or(empty);
+    let [_, free0, free1] = free;
+    let code = [(by_space[1].unwrap_or(empty), free0), (by_space[2].unwrap_or(empty), free1)];
     // Free blocks in order, apart, within their part.
     let apart = |w: &[u8], free: &Vec<(usize, usize)>| {
         let mut end = 0;
@@ -284,8 +409,7 @@ pub fn parts(bytes: &[u8], check: bool) -> Result<Parts<'_>, ImageError> {
     if !code.iter().all(|(w, free)| apart(w, free)) {
         return Err(ImageError::Malformed("the code area's free blocks out of order or outside it".into()));
     }
-
-    let fixups: Vec<usize> = bytes[fixups_at..fixups_at + n_fixups * 8].chunks_exact(8).map(|b| u64::from_le_bytes(b.try_into().unwrap()) as usize).collect();
+    let n_words = words.len() / 8;
     if fixups.iter().any(|&f| f >= n_words && crate::heap::code_part_of(f).is_none_or(|(k, i)| i >= code[k].0.len() / 8)) {
         return Err(ImageError::Malformed("a fixup outside the image".into()));
     }
@@ -309,8 +433,11 @@ fn load_checking(bytes: &[u8], check: bool) -> Result<Heap, ImageError> {
 /// Append `image` plus a locating trailer to `exe_bytes`, producing a runtime
 /// that carries its own heap. This is the "one shippable binary" mode.
 pub fn embed_into(exe_bytes: &[u8], image: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(exe_bytes.len() + image.len() + TRAILER_BYTES);
+    // The image on a page of the file, so that it may be mapped from it.
+    let at = exe_bytes.len().div_ceil(PAGE) * PAGE;
+    let mut out = Vec::with_capacity(at + image.len() + TRAILER_BYTES);
     out.extend_from_slice(exe_bytes);
+    out.resize(at, 0);
     out.extend_from_slice(image);
     out.extend_from_slice(&(image.len() as u64).to_le_bytes());
     out.extend_from_slice(EMBED_MAGIC);

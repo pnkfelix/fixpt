@@ -200,7 +200,7 @@ fn an_image_carries_the_code_area() {
     let slot = heap.symbol_global_slot(name);
     heap.set_global(slot, c);
     heap.collect(&mut []);
-    let mut back = fixpt_heap::image::load(&fixpt_heap::image::dump(&heap)).expect("loads");
+    let mut back = fixpt_heap::image::load(&fixpt_heap::image::dump_packed(&heap)).expect("loads");
     let name = back.intern("w");
     let c = back.global(back.symbol_global_slot(name));
     let word = back.car(back.closure_code(c));

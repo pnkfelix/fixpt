@@ -1348,6 +1348,29 @@ fn image_command(args: &[String]) -> i32 {
                             bytes.len() - img.len()
                         );
                     }
+                    // Each section, and whether it may be mapped: on a page
+                    // of the image, and the image on a page of the file.
+                    let start = img.as_ptr() as usize - bytes.as_ptr() as usize;
+                    for t in image::sections(img).unwrap_or_default() {
+                        let space = match (t.kind, t.space) {
+                            (image::META, _) => "metadata",
+                            (_, image::OLD) => "old space",
+                            (_, image::CODE_STUBBED) => "code, stubbed",
+                            (_, image::CODE_NATIVE) => "code, native",
+                            (_, image::STATIC) => "static",
+                            (_, image::STATIC_MUTABLE) => "static, mutable",
+                            _ => "?",
+                        };
+                        let what: Vec<&str> = [(image::MOVES, "moves"), (image::WRITTEN, "written"), (image::RUNS, "runs")].iter().filter(|(b, _)| t.what & b != 0).map(|(_, n)| *n).collect();
+                        let mappable = t.kind == image::WORDS && (start + t.offset).is_multiple_of(image::PAGE);
+                        println!(
+                            "  section:     {space:<16} {:>10} bytes at {:>9}{}{}",
+                            t.bytes,
+                            t.offset,
+                            if what.is_empty() { String::new() } else { format!(", {}", what.join(" ")) },
+                            if mappable { ", on a page" } else { "" }
+                        );
+                    }
                     match heap.verify() {
                         Ok(()) => {
                             println!("  structure:   ok");

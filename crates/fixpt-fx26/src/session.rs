@@ -478,10 +478,17 @@ fn list(heap: &fixpt_heap::Heap, mut l: fixpt_heap::Value) -> Vec<fixpt_heap::Va
     out
 }
 
+/// Where in the front end's cache file its image starts: the page after its
+/// key.
+const CACHE_IMAGE_AT: usize = fixpt_heap::image::PAGE;
+
 /// `heap`, all of it, written to `path` as an image after `key`.
 fn save_image(alone: &fixpt_heap::Heap, path: &std::path::Path, key: u64) {
+    // The key, then the image on the file's next page (`CACHE_IMAGE_AT`),
+    // so that it may be mapped from the file (`TODO.md` §165).
     let mut bytes = key.to_le_bytes().to_vec();
-    bytes.extend(fixpt_heap::image::dump(alone));
+    bytes.resize(CACHE_IMAGE_AT, 0);
+    bytes.extend(fixpt_heap::image::dump_mappable(alone));
     let Some(dir) = path.parent() else { return };
     if std::fs::create_dir_all(dir).is_err() {
         return;
@@ -2348,13 +2355,13 @@ impl Fx26Session {
         let keeping = self.native_keeping.filter(|_| as_native);
         let (cached, kept) = match keeping {
             Some(_) => (None, image),
-            None => (image.and_then(|b| fixpt_heap::image::load_trusted(&b[8..]).ok()), None),
+            None => (image.and_then(|b| fixpt_heap::image::load_trusted(b.get(CACHE_IMAGE_AT..)?).ok()), None),
         };
         if let (Some(from), Some(k)) = (&kept, &keeping) {
             let mut loaded = false;
             self.scheme.scope(|sc| {
                 sc.make(|m| {
-                    if let Some(p) = load_native_front_end(k, m.heap(), &from[8..]) {
+                    if let Some(p) = load_native_front_end(k, m.heap(), from.get(CACHE_IMAGE_AT..).unwrap_or_default()) {
                         set_entries(m.heap(), p, entries, native);
                         loaded = true;
                     }

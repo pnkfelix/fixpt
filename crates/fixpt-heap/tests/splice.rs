@@ -25,7 +25,7 @@ fn an_image() -> Vec<u8> {
     let l = h.cons(shared, l);
     let l = h.cons(code, l);
     h.push_root(l);
-    image::dump(&h)
+    image::dump_packed(&h)
 }
 
 fn collect(h: &mut Heap) {

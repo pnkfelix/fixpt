@@ -2961,6 +2961,17 @@ impl Copier<'_> {
     }
 }
 
+/// Where the code area's two parts start in a heap's memory, in words: where
+/// an image's code sections go.
+pub(crate) fn code_part_bases() -> [usize; 2] {
+    code::PART_BASES
+}
+
+/// How many words each part of the code area spans.
+pub(crate) fn code_part_words() -> usize {
+    CODE_WORDS / 2
+}
+
 /// Word `i` of a heap's memory as a part of the code area and a place in
 /// it, for an image's fixups.
 pub(crate) fn code_part_of(i: usize) -> Option<(usize, usize)> {

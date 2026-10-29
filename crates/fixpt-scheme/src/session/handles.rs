@@ -144,7 +144,7 @@ impl Session {
     }
     /// The heap as an image (`fixpt_heap::image`); collect first to compact it.
     pub fn image(&self) -> Vec<u8> {
-        fixpt_heap::image::dump(&self.rt.heap)
+        fixpt_heap::image::dump_mappable(&self.rt.heap)
     }
     /// Words in use in the heap.
     pub fn heap_used(&self) -> usize {

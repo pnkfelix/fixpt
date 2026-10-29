@@ -299,7 +299,7 @@ fn image_roundtrip_preserves_the_whole_heap() {
     gc(&mut heap, &mut roots);
     let before = snapshot(&heap, roots[0], 16);
 
-    let bytes = image::dump(&heap);
+    let bytes = image::dump_packed(&heap);
     let restored = image::load(&bytes).expect("image loads");
     restored.verify().unwrap();
 
@@ -312,7 +312,7 @@ fn image_roundtrip_preserves_the_whole_heap() {
 fn image_detects_corruption() {
     let mut heap = Heap::new();
     heap.intern("x");
-    let bytes = image::dump(&heap);
+    let bytes = image::dump_packed(&heap);
 
     assert!(matches!(image::load(&bytes[..10]), Err(image::ImageError::Truncated { .. })));
 
@@ -337,7 +337,7 @@ fn embedded_image_is_found_after_an_executable() {
     let greeting = heap.intern("greeting");
     let slot = heap.symbol_global_slot(greeting);
     heap.set_global(slot, s);
-    let img = image::dump(&heap);
+    let img = image::dump_packed(&heap);
 
     let fake_exe = b"\x7fELF this is pretending to be a runtime binary".to_vec();
     let combined = image::embed_into(&fake_exe, &img);

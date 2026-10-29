@@ -3636,6 +3636,28 @@ pages of their own (§160 items 2 and 4, §161's sections), and perhaps
 address-space tricks played with them later (the user is less sure of
 those). One revision for both formats, not one each.
 
+Step 1 done (2026-10-29), image format 11: a table of sections, each of a
+kind (metadata, or a space's words) and a space (the old space, the code
+area's two parts; static and mutable static named, not yet made), with
+what it is (moves, written, runs), its alignment, its offset and length,
+where in the heap's memory it goes and how much its space spans there,
+so that a heap of more spaces (static areas, regions, more generations;
+the user's: plan for a heap in many parts) is more sections. Every place
+in it (a fixup, a free block) is a place in the heap's memory, whatever
+section. Heap images (`dump_mappable`: the front end's cache, a session's
+image) have their word sections on 16 KiB pages, and start on one in
+their file (the cache's key, then the next page; `embed_into` pads the
+executable); `.fasl`s are packed (`dump_packed`), since one is placed
+where it was never made for, relocated and linked, so a mapping would be
+copied on write throughout, and a small file reads as cheaply as it maps
+(the user's: map heap images only). The front end's: 21.5 MB, 27 KB of
+padding. `fixpt image info` lists the sections. Left:
+- a `.fasl` read section by section into the heap it is loaded in, its
+  code into the code area and its words into the heap, without a heap of
+  its own and a copy of its graph;
+- the static spaces' sections, once §161 makes them;
+- the padding written as holes, not zeros, where the file system has them.
+
 ## 166. nextest runs `fixpt prewarm` before the tests (the user's, 2026-10-29)
 
 After a build, every process the suite starts finds the debug `fixpt`'s
