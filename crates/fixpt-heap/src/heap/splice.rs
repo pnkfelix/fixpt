@@ -64,19 +64,28 @@ impl Heap {
         let same_code = as_image(0) && as_image(1);
         let [(immutable_at, half), (static_at, _)] = super::static_area();
         let empty = self.immutable_top == immutable_at && self.static_top == static_at;
-        let in_place = self.base == ib && !relocating() && self.top == 0 && self.active == 0 && empty && same_code;
         // The image's immutable half where its symbols are this heap's (no
         // symbol here may move: none here yet, as when the image is read
         // before anything else); else its mutable half, scanned, since this
         // heap's symbols, which move, may stand for the image's.
         let immutable_ok = !self.symbols.iter().any(|&s| self.moves(s));
+        // In place only where every part lands where it was made for: not
+        // where the immutable half goes to the mutable half, whose words
+        // the fixups alone would not reach (a front end read after the
+        // runtime's symbols are made, the old space still empty).
+        let in_place = self.base == ib && !relocating() && self.top == 0 && self.active == 0 && empty && same_code && immutable_ok;
         // Each from a card's start, so that the crossing map of the cards
         // before stays as it is.
         let card = 1 << super::young::CARD_SHIFT;
         let (old_top, old_immutable_top, old_static_top) = (self.top, self.immutable_top, self.static_top);
+        // Under `FIXPT_IMAGE_RELOCATE`, a card more before each, so that
+        // the image's words do not land where they were made for, and every
+        // reference to them is moved (a heap read into first would not
+        // move them otherwise: its static area empty, at the image's base).
+        let shift = if relocating() { card } else { 0 };
         for top in [&mut self.top, &mut self.immutable_top, &mut self.static_top] {
-            if !top.is_multiple_of(card) {
-                let gap = card - *top % card;
+            let gap = (card - *top % card) % card + shift;
+            if gap > 0 {
                 self.mem.words_mut()[*top] = make_header(const { layout::kind("bloblet") }, 0, (gap - 1) * 8);
                 *top += gap;
             }

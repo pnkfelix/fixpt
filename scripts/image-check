@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+# The checks of the heap's images and of how the front end's is read in
+# (TODO.md §160, §161): quicker than the suite, for each step on the way to
+# images mapped, and fit for `git bisect run` (its status 0 if all agree,
+# 1 if not, 125 if the build fails, which bisect skips).
+#
+#  1. The heap crate's tests (the static area, the splice, the image
+#     format, the collector), and the CLI's tests of the caches.
+#  2. Each program of tests/programs/run evaluated on one machine in each
+#     convention that runs native code (fx-regs-rsjit-nativecc,
+#     fx-cells-rsjit-cellcc), the front end's image read in place, moved
+#     (FIXPT_IMAGE_RELOCATE: a card past where it was made for) and copied
+#     (FIXPT_IMAGE_COPY), each the same as with the cellular front end
+#     (FIXPT_FRONT_END_CELLULAR), which reads no image into the static
+#     area; and `fixpt check` of each lowered (rs-scheme-vm), whose FX-26
+#     checker reads the image after the runtime's symbols are made, so not
+#     in place. No program's `.fasl` (FIXPT_NO_FASL), which would stand for
+#     the front end's run.
+#
+# The debug build; `-j N` runs N at once (the CPUs by default).
+
+set -u
+cd "$(dirname "$0")/.."
+jobs=$(nproc)
+if [ "${1:-}" = "-j" ]; then jobs=$2; fi
+
+cargo build -q -p fixpt-cli || exit 125
+heap=0
+quiet=(--no-fail-fast --cargo-quiet --status-level fail --final-status-level fail)
+cargo nextest run "${quiet[@]}" -p fixpt-heap 2>&1 | grep -E "Summary|FAIL|error" >&2
+[ "${PIPESTATUS[0]}" = 0 ] || heap=1
+cargo nextest run "${quiet[@]}" -p fixpt-cli --test front_end_cache --test fasl 2>&1 | grep -E "Summary|FAIL|error" >&2
+[ "${PIPESTATUS[0]}" = 0 ] || heap=1
+if ! ./target/debug/fixpt prewarm >/dev/null; then
+    echo "image-check: FAILED (fixpt prewarm: the front end cannot be cached)"
+    exit 1
+fi
+
+# IMAGE_CHECK_KEEP=1 keeps the runs' outputs, and says where.
+out=$(mktemp -d)
+if [ -n "${IMAGE_CHECK_KEEP:-}" ]; then echo "image-check: the runs in $out" >&2; else trap 'rm -rf "$out"' EXIT; fi
+
+# One run: `name mode args...` to $out/name.mode, stdout and stderr.
+one() {
+    local name=$1 mode=$2
+    shift 2
+    local env=()
+    case $mode in
+        base) env=(FIXPT_FRONT_END_CELLULAR=1) ;;
+        relocate) env=(FIXPT_IMAGE_RELOCATE=1) ;;
+        copy) env=(FIXPT_IMAGE_COPY=1) ;;
+    esac
+    env+=(FIXPT_NO_FASL=1)
+    env "${env[@]}" timeout 120 ./target/debug/fixpt "$@" >"$out/$name.$mode" 2>&1
+    echo "status $?" >>"$out/$name.$mode"
+}
+export -f one
+export out
+
+for f in crates/fixpt-fx26/tests/programs/run/*.fx; do
+    p=$(basename "$f" .fx)
+    for m in fx-regs-rsjit-nativecc fx-cells-rsjit-cellcc; do
+        for mode in base place relocate copy; do
+            echo "$p@$m $mode --fx26-machine $m eval $f"
+        done
+    done
+    for mode in base place relocate; do
+        echo "$p@check $mode --fx26-machine rs-scheme-vm check $f"
+    done
+done | xargs -P "$jobs" -L 1 bash -c 'one "$@"' _
+
+bad=0
+for b in "$out"/*.base; do
+    run=${b%.base}
+    for mode in place relocate copy; do
+        [ -e "$run.$mode" ] || continue
+        if ! cmp -s "$b" "$run.$mode"; then
+            echo "== $(basename "$run") $mode differs from the cellular front end's:"
+            diff "$b" "$run.$mode" | head -8
+            bad=1
+        fi
+    done
+done
+if grep -l "could not be read\|immutable half\|panicked" "$out"/* >/dev/null 2>&1; then
+    echo "== said:"
+    grep -h "could not be read\|immutable half\|panicked" "$out"/* | sort | uniq -c | head
+    bad=1
+fi
+n=$(ls "$out" | wc -l)
+if [ "$heap" != 0 ] || [ "$bad" != 0 ]; then
+    echo "image-check: FAILED (tests $heap, runs $n)"
+    exit 1
+fi
+echo "image-check: all agree (runs $n)"

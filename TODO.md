@@ -3775,3 +3775,29 @@ whatever writes a front-end cache (`sweep_cache`): a process of the CLI, a
 test's session, `fixpt prewarm`, so when a build is new. A month had kept
 229 front-end caches, 4.4 GB, each test binary's of each build; 173 MB
 after.
+
+## 170. `scripts/image-check`, the checks of images for each step (the user's, 2026-10-29)
+
+For each step to images mapped (§160 item 4 on), in place of the suite,
+which waits for the series' end (then `git bisect run
+scripts/image-check` if it fails): the heap crate's tests, the caches'
+tests, and each program of `tests/programs/run` evaluated on
+`fx-regs-rsjit-nativecc` and `fx-cells-rsjit-cellcc` with the front end's
+image in place, moved and copied, and checked lowered (`rs-scheme-vm
+check`, the image read after the runtime's symbols), each against the
+cellular front end's run. 1.5 minutes warm. Writing it found:
+- `FIXPT_IMAGE_RELOCATE=1` moved nothing: the front end's image is its
+  static area's, which a fresh heap's empty static area takes where it was
+  made for, so the walk mapped every reference to itself. It puts each part
+  a card further now.
+- `fixpt run` of a program whose `.fasl` is cached runs no front end; the
+  script turns `.fasl`s off.
+- A bug since §161's step 4, met since §168 (`rs-scheme-vm check`
+  panicked): a splice was in place, its fixups alone written, where the
+  immutable half went aside into the mutable half (the heap's own symbols
+  made already, its old space empty), so the words moved kept the image's
+  references. In place now only where every part lands where it was made
+  for (`static_area::an_immutable_half_moved_aside_is_walked`).
+Checked to fail on a walk that skips fields, and on references misdirected
+in the immutable half; not on a few non-reference words flipped there,
+which no program reads (raw bytes, mostly).
