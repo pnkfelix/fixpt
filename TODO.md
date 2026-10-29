@@ -3972,3 +3972,51 @@ analysis, with allocation as the resource.)
    which are steady, not times, which are not), so that a change that
    multiplies them fails where it is made; and the same for the per-step
    checks (`scripts/image-check`).
+
+## 177. An empty program's start, by phase: to discuss with the user (2026-10-29)
+
+The user's: to talk over, as a whole, after Heist's requests (§178). An
+empty program (`fixpt --fx26-machine fx-regs-rsjit-nativecc eval FILE`
+of `0`), release, 29 ms; marks put at each phase's end (temporary, not
+kept), two runs within 0.5 ms of each other:
+
+| phase | ms | what might take it away |
+| --- | ---: | --- |
+| exec, the process's start and exit | ~1.5 | nothing |
+| the front end's image spliced | 2.7 | mapped already (§160); what is left walks it |
+| jitdebug, the cached code's names | 4.0 | option B: the debugger's objects in the cache, the execute view at a fixed address |
+| the Scheme prelude, evaluated | 3.0 | an image of it, as the front end's |
+| the FX-26 runtime | 0.5 | |
+| the rest of the CLI's `start()` | 3.5 | not yet split |
+| the front end's entries defined | 0.7 | |
+| the front end told the program's conventions (`check-conv-native!` and the like) | 1.5 | |
+| **the standard environment read by the FX-26 reader** (`standard26`, `read_standard`) | **7.6** | its syntax made once, with the front end's cache, kept there as a root |
+| the standard environment checked, with the form | 2.1 | the checker's state after it, kept: harder |
+| `0` parsed, compiled and run | 0.3 | |
+| the session dropped | 0.5 | |
+
+Page faults are no longer the lever (§160 item 4: Linux maps a file's
+pages around a fault, so the image costs some hundred, laid out as it
+is). What is left is work, most of it the same at every start.
+
+## 178. What each maker given a module pays to load (Heist's request, 2026-10-29)
+
+`heist/docs/requests/fixpt-module-type-per-dependent.md`. A maker given
+another, `(a (load-moduleof "a.fx" z))`, paid two costs at each load,
+again for every dependent:
+1. Done (2026-10-29): `parse::takes_modules_at` read a file whole to see
+   its first form (Heist's `fixpt-load-time.md`, item 1): it reads the
+   first form now. Heist's `bench/module-dependents.sh`, release: `src-80`
+   (a maker of 80 procedures) 6.47 ms a dependent to 3.00, the other cases
+   the same; Heist measured its combo 282 ms to 163 ms
+   (`parse::takes_modules_tests`).
+2. Open: the checker written in FX-26 (`check-more`) checks `a`'s module
+   type again for each dependent, on its `(%loaded …)` definition and at
+   each use: some 26 µs a distinct `poly` signature in it, a dependent
+   (`lib-80`, 3.0 ms a dependent). Identical signatures are shared
+   already, not one module's type across its dependents. Heist suggests
+   the type `(load-moduleof "a.fx" z)` stands for made and checked once a
+   file key and arguments. To find first: what of a checked module type
+   may be shared between forms (its regions, effects and binders, fresh
+   at each use or not), in `check-more` and `check-modules`; Heist hides
+   such libraries meanwhile.

@@ -3851,14 +3851,16 @@ pub(crate) fn takes_modules_at(at: &std::path::Path, path: &str) -> bool {
             Err(_) => return false,
         },
     };
-    // Only a file that begins so: the rest is not read.
+    // Only a file that begins so: the rest is not read (it was, every
+    // file loaded read whole for its first form: Heist's request,
+    // 2026-10-29, combo's start 282 ms to 163 ms).
     if !text.contains("module-parameters") {
         return false;
     }
     let mut interner = fixpt_read::Interner::new();
-    match fixpt_read::Reader::new(&text, fixpt_read::FileId(0), fixpt_read::SyntaxProfile::FX26, &mut interner).read_all() {
-        Ok(forms) => takes_modules(&forms, &interner),
-        Err(_) => false,
+    match fixpt_read::Reader::new(&text, fixpt_read::FileId(0), fixpt_read::SyntaxProfile::FX26, &mut interner).read() {
+        Ok(Some(first)) => takes_modules(std::slice::from_ref(&first), &interner),
+        _ => false,
     }
 }
 
@@ -3875,5 +3877,30 @@ pub(crate) fn is_item_form(f: &Syntax, interner: &fixpt_read::Interner) -> bool 
                 "define-generative" | "define-type" | "define-effect" | "define" | "define*" | "include" | "define-rec" | "hide" | "define-datatype" | "import"
             )
         }),
+    }
+}
+
+#[cfg(test)]
+mod takes_modules_tests {
+    /// A maker is known by its first form, the rest not read (Heist's
+    /// request, 2026-10-29): what follows it may be anything, even what does
+    /// not read; a file that does not begin so is no maker, whatever it
+    /// says later.
+    #[test]
+    fn a_maker_is_known_by_its_first_form_alone() {
+        let dir = std::env::temp_dir().join(format!("fixpt-takes-modules-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cases = [
+            ("maker.fx", "(module-parameters ((z (load-moduleof \"z.fx\"))))\n(define v int 1)\n", true),
+            ("maker-unread-after.fx", "(module-parameters ((z (load-moduleof \"z.fx\"))))\n(define v int (+ 1\n", true),
+            ("kinds-only.fx", "(module-parameters ((r region)))\n(define v int 1)\n", false),
+            ("later.fx", "(define v int 1)\n(module-parameters ((z (load-moduleof \"z.fx\"))))\n", false),
+        ];
+        for (name, text, maker) in cases {
+            let at = dir.join(name);
+            std::fs::write(&at, text).unwrap();
+            assert_eq!(super::takes_modules_at(&at, name), maker, "{name}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
