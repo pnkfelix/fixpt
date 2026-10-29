@@ -4037,6 +4037,28 @@ again for every dependent:
    To settle first: whether a made type may be shared at all (what
    `k-made-walk` makes fresh, binders or variables a use must not share),
    and what the key is (the file, and the arguments as types or names).
+   Found (2026-10-29): nothing in `k-made-walk` must be fresh; it
+   substitutes the descriptions given for `poly` binders and the modules
+   named for parameters (`k-made-params`, `k-subst`). The copies are
+   substitution's: `k-subst-memo` (and the Rust checker's `subst_memo`)
+   copies every compound node it meets, a slot and a node each, keeping
+   only variables not in the map, selects and parameters not remapped, and
+   closed named data (`k-closed-named`, for names shown). `a`'s signatures
+   mention nothing given, and are copied whole. A prototype (branch
+   `subst-share`) keeping a node whose substituted parts are its own
+   shared 3,520 nodes and still copied 7,102: every list type is a cycle
+   (`ty-pair`), which comparison after the copy cannot see unchanged, and
+   the procedures, `poly`s and module around them change with it. No
+   faster. The user's suggestion is the way: each type's free
+   substitutables (variables by binder, and whether it holds a parameter,
+   a select or an application), kept by type id, and a substitution
+   returning a type at once whose free ones its map and parameter map do
+   not touch, cycle or not, unwalked. To settle: the summary kept only of
+   a type with no unbound unification variable (a bound one is a link,
+   so a summary may only shrink: "may change" is safe, "nothing free" of
+   an unbound variable is not); both checkers alike, though sharing
+   changes nothing either shows; and the region walk's linear-search set
+   (quadratic) while there.
 
 ## 179. `perf` names the front end's code again, mapped from the cache (the user's, 2026-10-29)
 
