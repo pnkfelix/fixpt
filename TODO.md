@@ -3862,3 +3862,17 @@ read, check and keep in the binary at each use.
   with it) was 0.1 s of the 63 s it takes collecting at every allocation,
   60.3 s the run; where reading and checking the embedded sources is the
   cost is the front end's own build and `fasl`-less loads.
+
+## 172. URGENT: `convention.fx` compares characters, not one-character strings (the user's, 2026-10-29)
+
+`cv-ch` (`src/convention.fx:27`) is `(substring t i (+ i 1))`: each test
+of a character allocates a string of it to compare with `" "`, `"("` or
+`")"` by `string=?`, several to a character (`cv-atom-end` up to three,
+`cv-read-items` two, `cv-read-at` more). Reading a convention's clauses is
+all allocation, and `modules/convention-read.fx`, collecting at every
+allocation, takes 60 s of its 63 s in that run. To do: `cv-ch` a
+character, `(string-ref t i)`, and its callers `char=?` against `#\space`,
+`#\(` and `#\)`, as the rest of the front end does (`char=?` 38 times in
+`src/*.fx`). `convention.fx` is a module of the front end's: its caches are
+made again once. Then measure that test again; and `why` in the test reads
+the clauses afresh at each of its four calls, which may want a look too.
