@@ -104,3 +104,37 @@ fn a_splice_with_a_young_symbol_marks_its_card() {
     assert_eq!(h.symbol_name(sym), "shared", "the reference followed the symbol out of the nursery");
     assert_eq!(h.bloblet_slot(h.car(l), 2), sym);
 }
+
+/// A symbol of the image's that is this heap's, and a pair just after it
+/// in the image, where the symbol (of no suffix) points: the pair stays
+/// the image's, not taken for the symbol.
+#[test]
+fn a_pair_just_after_a_symbol_stays_a_pair() {
+    let mut h = Heap::new();
+    let mut list = Value::NULL;
+    for i in 0..8 {
+        let s = h.intern(&format!("shared-{i}"));
+        let p = h.cons(Value::fixnum(i), Value::NULL);
+        list = h.cons(p, list);
+        list = h.cons(s, list);
+    }
+    h.push_root(list);
+    let bytes = image::dump_packed(&h);
+    let img = image::parts(&bytes, true).unwrap();
+    let mut h = Heap::new();
+    for i in 0..8 {
+        h.intern(&format!("shared-{i}"));
+    }
+    let roots = h.splice_image(&img, &[]).unwrap();
+    h.verify().unwrap();
+    let mut l = roots[0];
+    for i in (0..8).rev() {
+        assert_eq!(h.car(l), h.intern(&format!("shared-{i}")), "the symbol is this heap's");
+        l = h.cdr(l);
+        let p = h.car(l);
+        assert!(p.is_pair(), "the pair after `shared-{i}` is a pair");
+        assert_eq!(h.car(p), Value::fixnum(i));
+        l = h.cdr(l);
+    }
+    assert_eq!(l, Value::NULL);
+}

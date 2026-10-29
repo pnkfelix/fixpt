@@ -178,9 +178,11 @@ impl Heap {
             Some(Value(v.raw() - ((v.index() as u64) << 3) + (((base + i) as u64) << 3)))
         };
 
-        // What stands for objects of the image's, by where they are in it.
+        // What stands for objects of the image's, by their values there: not
+        // by where they are alone, since a bloblet of no suffix is pointed
+        // at one past its fields, where the next object, a pair say, is.
         let (symbols, globals, image_symbols, mut added) = (self.symbols.len(), self.globals.len(), self.image_symbols.len(), Vec::new());
-        let mut instead: HashMap<usize, Value> = given.iter().map(|&(v, to)| (v.index() - ib, to)).collect();
+        let mut instead: HashMap<u64, Value> = given.iter().map(|&(v, to)| (v.raw(), to)).collect();
         let mut stub = None;
         // Into a heap of no symbols yet, none of the image's can be one of
         // this heap's: their names are not read, but looked up by their
@@ -204,13 +206,13 @@ impl Heap {
                     match self.code.stub {
                         Value::FALSE => stub = Some(*old),
                         mine => {
-                            instead.insert(old.index() - ib, mine);
+                            instead.insert(old.raw(), mine);
                         }
                     }
                 }
             }
             if let Some(i) = name.as_deref().and_then(|n| self.symbol_number(n)) {
-                instead.insert(s.index() - ib, self.symbols[i as usize]);
+                instead.insert(s.raw(), self.symbols[i as usize]);
                 continue;
             }
             // The image's symbol is this heap's, at a global slot of its own.
@@ -234,16 +236,22 @@ impl Heap {
         }
         self.image_symbols.sort_unstable();
 
+        // A suffix ref's owner, a bloblet, is by where it is in the image:
+        // made when one is first met.
+        let owners = std::cell::OnceCell::new();
+        let owners = || -> &HashMap<usize, Value> {
+            owners.get_or_init(|| instead.iter().map(|(&k, &to)| (Value::from_raw(k), to)).filter(|(v, _)| v.is_bloblet()).map(|(v, to)| (v.index() - ib, to)).collect())
+        };
         let unknown = std::cell::Cell::new(None);
         let map = |v: Value| -> Value {
             if !v.is_ref() {
                 return v;
             }
             if v.is_suffix_ref() {
-                if let Some(&to) = instead.get(&v.owner()) {
+                if let Some(&to) = owners().get(&v.owner()) {
                     return Value::suffix_ref(to.index() - base, v.offset()).expect("an owner within the heap");
                 }
-            } else if let Some(&to) = v.index().checked_sub(ib).and_then(|i| instead.get(&i)) {
+            } else if let Some(&to) = instead.get(&v.raw()) {
                 return to;
             }
             moved(v).unwrap_or_else(|| {
