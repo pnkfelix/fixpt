@@ -4016,3 +4016,17 @@ a bloblet of a known kind and value fields) was tried and set aside: on
 every copy, it made the suite's programs that collect constantly time out
 (the user's: off by default); it is in the commit's history to take up as
 an opt-in.
+
+## 172. `convention.fx` compares characters, not one-character strings (the user's, 2026-10-29; done 2026-10-29)
+
+`cv-ch` (`src/convention.fx`) was `(substring t i (+ i 1))`: each test of
+a character allocated a string of it to compare with `" "`, `"("` or `")"`
+by `string=?`, several to a character, so reading a convention's clauses
+was all allocation. Now `cv-ch` is `(string-ref t i)`, a character, and
+its callers compare by `char=?` with `#\space`, `#\(` and `#\)`; the
+`-` of a negative atom and the `x` of a register's name likewise.
+`modules/convention-read.fx` collecting at every allocation: 68 s to 24 s
+alone (29 s in the suite); its value the same on three machines. Left in
+it: the atoms' strings, which are wanted, and the test's `why` reading the
+clauses afresh at each of its four calls. §173 asks for `(nstring N)` and
+a lint for the pattern.

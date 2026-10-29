@@ -3868,16 +3868,24 @@ read, check and keep in the binary at each use.
   60.3 s the run; where reading and checking the embedded sources is the
   cost is the front end's own build and `fasl`-less loads.
 
-## 172. URGENT: `convention.fx` compares characters, not one-character strings (the user's, 2026-10-29)
+## 173. `(nstring N)`, and a lint for a one-character string where a character would do (the user's, 2026-10-29)
 
-`cv-ch` (`src/convention.fx:27`) is `(substring t i (+ i 1))`: each test
-of a character allocates a string of it to compare with `" "`, `"("` or
-`")"` by `string=?`, several to a character (`cv-atom-end` up to three,
-`cv-read-items` two, `cv-read-at` more). Reading a convention's clauses is
-all allocation, and `modules/convention-read.fx`, collecting at every
-allocation, takes 60 s of its 63 s in that run. To do: `cv-ch` a
-character, `(string-ref t i)`, and its callers `char=?` against `#\space`,
-`#\(` and `#\)`, as the rest of the front end does (`char=?` 38 times in
-`src/*.fx`). `convention.fx` is a module of the front end's: its caches are
-made again once. Then measure that test again; and `why` in the test reads
-the clauses afresh at each of its four calls, which may want a look too.
+1. `(nstring N)`: a string whose length is known, as `(nlist T size)` is
+   a list's (`docs/fx26.md`, "Sizes"; the user wrote it `(nlistof T R
+   N)`): a natural or `finite`, a subtype of `string` that forgets its
+   size, `(string-length s)` of one its size, `substring` with sizes known
+   giving one, and `string-ref` of a `(nstring 1)` at 0 needing no check.
+   To settle: how it sits beside the strings at a region (`stringof`,
+   `regions/stringof-escapes.fx`, `regions/write-a-string.fx`), as
+   `nlist` is only of frozen lists.
+2. Explore, briefly, a lint for the anti-pattern §172 fixed: a string of
+   one character made only to be compared or tested (`(substring t i (+ i
+   1))` given to `string=?` against a one-character literal), where
+   `string-ref` and `char=?` would allocate nothing. With 1., the lint
+   would see `(nstring 1)` where it is made and where it is consumed.
+   Perhaps a fool's errand: it is worth it only where the making and the
+   consuming are near each other, within a module, as in `convention.fx`
+   (a module-local helper, `cv-ch`, and its callers), and how often that
+   is so in practice is not known; a survey of the FX-26 sources (the
+   front end, Kayak, Heist's) for `substring` of length one and
+   `string=?` with a one-character literal would say, before building it.

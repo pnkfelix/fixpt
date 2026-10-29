@@ -23,13 +23,14 @@
 
 ;;; ------------------------------------------------------------ reading
 
-;; The character at `i` of `t`, as a string.
-(define cv-ch (->* (string int) string) (lambda (t i) (substring t i (+ i 1))))
+;; The character at `i` of `t`: a character, not a string of it, which each
+;; test would allocate (`TODO.md` §172).
+(define cv-ch (->* (string int) char) (lambda (t i) (string-ref t i)))
 ;; Where the atom from `i` of `t` ends: at a space, a parenthesis or the end.
 (define cv-atom-end (->* (string int) int)
   (lambda (t i)
-    (if (or (>= i (string-length t)) (string=? (cv-ch t i) " ") (string=? (cv-ch t i) "(")
-            (string=? (cv-ch t i) ")"))
+    (if (or (>= i (string-length t)) (char=? (cv-ch t i) #\space) (char=? (cv-ch t i) #\()
+            (char=? (cv-ch t i) #\)))
         i
         (cv-atom-end t (+ i 1)))))
 ;; The decimal digits of `s` from `i`, after `acc`; -1 if one is no digit.
@@ -42,7 +43,7 @@
 ;; An atom: an integer, in decimal, perhaps negative; else a name.
 (define cv-atom (->* (string) cv-sx)
   (lambda (a)
-    (let* ((neg (and (> (string-length a) 1) (string=? (substring a 0 1) "-")))
+    (let* ((neg (and (> (string-length a) 1) (char=? (string-ref a 0) #\-)))
            (n (if (= (string-length a) 0) -1 (cv-digits a (if neg 1 0) 0))))
       (cond ((< n 0) (cx-name a))
             (neg (cx-int (- 0 n)))
@@ -52,7 +53,7 @@
   (cv-read-at (->* (string int) cv-at)
     (lambda (t i)
       (cond ((>= i (string-length t)) (product (x (cx-list nil)) (at i)))
-            ((string=? (cv-ch t i) "(")
+            ((char=? (cv-ch t i) #\()
              (let ((r (cv-read-items t (+ i 1))))
                (product (x (cx-list (extract r xs))) (at (extract r at)))))
             (else (let ((e (cv-atom-end t i)))
@@ -61,8 +62,8 @@
   (cv-read-items (->* (string int) cv-sxs-at)
     (lambda (t i)
       (cond ((>= i (string-length t)) (product (xs nil) (at i)))
-            ((string=? (cv-ch t i) ")") (product (xs nil) (at (+ i 1))))
-            ((string=? (cv-ch t i) " ") (cv-read-items t (+ i 1)))
+            ((char=? (cv-ch t i) #\)) (product (xs nil) (at (+ i 1))))
+            ((char=? (cv-ch t i) #\space) (cv-read-items t (+ i 1)))
             (else (let* ((r (cv-read-at t i)) (rest (cv-read-items t (extract r at))))
                     (product (xs (the cv-sxs (cons (extract r x) (extract rest xs))))
                              (at (extract rest at)))))))))
@@ -121,7 +122,7 @@
              (+ cv-in-state (cx-int-at st (cx-name-of (cx-nth (cx-items x) 1)))))
             ((string=? n "sp") 31)
             ((string=? n "pushed") -2)
-            ((and (> (string-length n) 1) (string=? (substring n 0 1) "x")) (cv-digits n 1 0))
+            ((and (> (string-length n) 1) (char=? (string-ref n 0) #\x)) (cv-digits n 1 0))
             (else (cv-index (cv-x86-regs) n 0))))))
 (define cx-reg-at (->* (cv-sxs cv-sxs string) int)
   (lambda (st xs role) (cx-reg st (cx-nth (cx-get xs role) 0))))
