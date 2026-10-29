@@ -408,7 +408,7 @@ fn save_front_end(heap: &fixpt_heap::Heap, w: fixpt_heap::Value, path: &std::pat
 /// they reach it (shared, not copied, when read back). The call-outs the
 /// code makes are in its fields, each the call-out itself, encoded, the
 /// same in every machine.
-fn save_native_front_end(heap: &fixpt_heap::Heap, pieces: fixpt_heap::Value, path: &std::path::Path, key: u64) {
+fn save_native_front_end(heap: &fixpt_heap::Heap, pieces: fixpt_heap::Value, standard: fixpt_heap::Value, path: &std::path::Path, key: u64) {
     use fixpt_heap::Value;
     let mut alone = fixpt_heap::Heap::new();
     // The shared stub first, where a session's heap has it when the image
@@ -424,7 +424,11 @@ fn save_native_front_end(heap: &fixpt_heap::Heap, pieces: fixpt_heap::Value, pat
         }
     }
     let adapter = adapter.map_or(Value::FALSE, |a| made[&a.raw()]);
-    let rest = alone.cons(adapter, Value::NULL);
+    // The standard environment as the reader written in FX-26 reads it
+    // (`standard26`): the same at every start, read once (`TODO.md` §177).
+    let standard = alone.copy_graph_from(heap, standard);
+    let rest = alone.cons(standard, Value::NULL);
+    let rest = alone.cons(adapter, rest);
     let rest = alone.cons(codes, rest);
     let root = alone.cons(copy, rest);
     alone.push_root(root);
@@ -445,7 +449,13 @@ fn load_native_front_end(k: &NativeKeeping, heap: &mut fixpt_heap::Heap, file: &
     let adapter = img.car(img.cdr(img.cdr(root)));
     // Spliced in, unless `FIXPT_IMAGE_COPY` asks for the copy of a graph
     // that the splice replaced (`TODO.md` §160): for debugging.
-    let (pieces, made_code) = if std::env::var_os("FIXPT_IMAGE_COPY").is_some() {
+    // The standard environment read, kept with it, if it is (an older
+    // cache has none).
+    let standard_of = |h: &fixpt_heap::Heap, root: Value| {
+        let rest = h.cdr(h.cdr(h.cdr(root)));
+        if rest.is_pair() { h.car(rest) } else { Value::FALSE }
+    };
+    let (pieces, standard, made_code) = if std::env::var_os("FIXPT_IMAGE_COPY").is_some() {
         let from = fixpt_heap::image::load_trusted(bytes).ok()?;
         let root = *from.roots_slice().first()?;
         let code: std::collections::HashSet<u64> = list(&from, from.car(from.cdr(root))).iter().map(|c| c.raw()).collect();
@@ -454,7 +464,9 @@ fn load_native_front_end(k: &NativeKeeping, heap: &mut fixpt_heap::Heap, file: &
             given.insert(from.car(from.cdr(from.cdr(root))).raw(), (k.adapter_code)(heap).ok()?);
         }
         let (copy, made) = heap.copy_graph_with(&from, from.car(root), |v| code.contains(&v.raw()), &given);
-        (copy, code.iter().filter_map(|k| made.get(k).copied()).collect())
+        let standard = standard_of(&from, root);
+        let standard = if standard == Value::FALSE { standard } else { heap.copy_graph_from(&from, standard) };
+        (copy, standard, code.iter().filter_map(|k| made.get(k).copied()).collect())
     } else {
         // This heap's adapter stands for the image's; if it has none yet,
         // the image's is its own, so that the image goes where it was made.
@@ -477,9 +489,10 @@ fn load_native_front_end(k: &NativeKeeping, heap: &mut fixpt_heap::Heap, file: &
         if mine.is_none() && theirs != Value::FALSE {
             heap.set_adapter_code(theirs);
         }
-        (heap.car(root), list(heap, heap.car(heap.cdr(root))))
+        (heap.car(root), standard_of(heap, root), list(heap, heap.car(heap.cdr(root))))
     };
     (k.note_code)(heap, &made_code);
+    let pieces = heap.cons(pieces, standard);
     Some(pieces)
 }
 
@@ -2453,13 +2466,13 @@ impl Fx26Session {
         if keeping.is_some()
             && let Some(r) = self.scheme.runtime_unrooted().preloaded.take()
         {
-            self.scheme.scope(|sc| {
-                sc.make(|m| {
-                    let pieces = m.heap().root_at(r);
-                    set_entries(m.heap(), pieces, entries, native);
-                    fixpt_heap::Value::NULL
-                })
+            let standard = self.scheme.make(|m| {
+                let both = m.heap().root_at(r);
+                let (pieces, st) = (m.heap().car(both), m.heap().cdr(both));
+                set_entries(m.heap(), pieces, entries, native);
+                st
             });
+            self.keep_standard(standard);
             return self.define_entries(entries, native, prefix);
         }
         let (cached, kept) = match keeping {
@@ -2468,16 +2481,18 @@ impl Fx26Session {
         };
         if let (Some(from), Some(k)) = (&kept, &keeping) {
             let mut loaded = false;
+            let standard = self.scheme.make(|_| fixpt_heap::Value::FALSE);
             self.scheme.scope(|sc| {
-                sc.make(|m| {
-                    if let Some(p) = load_native_front_end(k, m.heap(), from) {
-                        set_entries(m.heap(), p, entries, native);
-                        loaded = true;
-                    }
-                    fixpt_heap::Value::NULL
+                sc.replace(standard, |m| {
+                    let Some(both) = load_native_front_end(k, m.heap(), from) else { return fixpt_heap::Value::FALSE };
+                    let (pieces, st) = (m.heap().car(both), m.heap().cdr(both));
+                    set_entries(m.heap(), pieces, entries, native);
+                    loaded = true;
+                    st
                 })
             });
             if loaded {
+                self.keep_standard(standard);
                 return self.define_entries(entries, native, prefix);
             }
         }
@@ -2496,6 +2511,9 @@ impl Fx26Session {
         }
         let limit = self.step_limit();
         self.scheme.engine.set_step_limit(None);
+        // The pieces the front end's run made, kept past the scope: the
+        // cache is saved once the entries can read the standard environment.
+        let made = self.scheme.make(|_| fixpt_heap::Value::FALSE);
         let pieces: Result<(), String> = self.scheme.scope(|sc| {
             let mut compiled = Err(String::new());
             let word = sc.make(|m| {
@@ -2514,19 +2532,34 @@ impl Fx26Session {
             compiled.map_err(|e| format!("{what} as register code: {e}"))?;
             let none = sc.make(|_| fixpt_heap::Value::NULL);
             let pieces = sc.call_global("%run-front-end", &[word, none]).map_err(|e| e.to_string())?;
-            sc.make(|m| {
+            sc.replace(made, |m| {
                 let p = m.get(pieces);
                 set_entries(m.heap(), p, entries, native);
-                if let (Some((path, key)), Some(_)) = (&cache, &keeping) {
-                    save_native_front_end(m.heap(), p, path, *key);
-                }
-                fixpt_heap::Value::NULL
+                p
             });
             Ok(())
         });
         self.scheme.engine.set_step_limit(limit);
         pieces?;
-        self.define_entries(entries, native, prefix)
+        self.define_entries(entries, native, prefix)?;
+        if let (Some((path, key)), Some(_)) = (&cache, &keeping) {
+            let standard = self.standard26().map_err(|e| e.message)?;
+            self.scheme.make(|m| {
+                let (p, st) = (m.get(made), m.get(standard));
+                save_native_front_end(m.heap(), p, st, path, *key);
+                fixpt_heap::Value::NULL
+            });
+        }
+        self.scheme.replace(made, |_| fixpt_heap::Value::NULL);
+        Ok(())
+    }
+
+    /// Take `standard`, read back with the front end, as the standard
+    /// environment read (`standard26`), if the cache kept one.
+    fn keep_standard(&mut self, standard: fixpt_scheme::Handle) {
+        if self.standard26.is_none() && self.scheme.view(|v| !v.get(standard).is_false()) {
+            self.standard26 = Some(standard);
+        }
     }
 
     /// The names the Rust side calls, `{prefix}{name}`, made to call each
