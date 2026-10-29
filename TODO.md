@@ -3571,11 +3571,22 @@ dumped with its old space as the image's static area (`dump_static`), and
 spliced into the session's: a major collection no longer copies it (stage
 0: majors copy 16.3 M words, not 17.8 M; slower for now, 125 ms against
 113, since all of it is scanned). Next, in order:
-3. The front end's image read into the heap before the runtime and the
-   prelude intern anything (the user's), so that their symbols are the
-   image's and no symbol fixup is written.
-4. What is immutable in it (frozen fields and suffix) in a section of its
-   own, never scanned.
+3. ~~The front end's image read into the heap before the runtime and the
+   prelude intern anything~~ (done, 2026-10-29, the user's): their
+   symbols are the image's, and the splice in place writes nothing of the
+   image (27,174 fixups, none written; each symbol's slot the same). An
+   empty program 50.6 ms to 49.1 ms.
+4. What has no mutable fields in an immutable section of its own, never
+   scanned, by kind (the user's: mutability is the type's, so the kind's,
+   declared in `KINDS`): pairs, refs, arrays, the generic bloblet in the
+   mutable section; strings and what has no fields, register code,
+   symbols, closures, products and sums in the immutable one. A field
+   written only with immediates (a register word's entry, a symbol's slot)
+   is not mutable to the collector. Immutable static objects point only at
+   what never moves: the static areas and the code area; the Rust barrier
+   refuses a movable reference stored there, and barrier verification
+   checks native code's stores. (Frozen bits, the first idea, mark under
+   0.1% of the front end.)
 5. The remembered set for the mutable part, seeded by the image (below),
    in place of scanning it whole.
 6. Global cells in the static area.

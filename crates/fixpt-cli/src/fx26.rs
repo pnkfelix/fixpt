@@ -91,7 +91,12 @@ fn show(session: &Fx26Session, out: &Outcome, show_code: bool) {
 }
 
 fn start(backend: Backend) -> Result<Fx26Session, i32> {
-    let mut s = Fx26Session::with_backend(backend).map_err(|e| {
+    // The front end native where the compiler written in Rust makes its
+    // code (below): its cache read into the heap first, before the runtime
+    // and the prelude intern anything (`TODO.md` §161).
+    let native_front_end = crate::NATIVE_CONVENTION.get().copied().unwrap_or(false) && !crate::NATIVE_BY_FX26.get().copied().unwrap_or(false);
+    let keeping = native_front_end.then_some(NATIVE_KEEPING);
+    let mut s = Fx26Session::with_backend_preloaded(backend, keeping).map_err(|e| {
         eprintln!("fixpt: {e}");
         1
     })?;
@@ -126,10 +131,7 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
         s.front_end_native = !by_fx26;
         // Its native code kept in the cache after its first run, and read
         // back (`TODO.md` §126).
-        s.native_keeping = Some(fixpt_fx26::session::NativeKeeping {
-            adapter_code: fixpt_native::direct::native_adapter_code,
-            note_code: fixpt_native::direct::note_cached_code,
-        });
+        s.native_keeping = Some(NATIVE_KEEPING);
         // Each procedure's code made by the compiler written in FX-26.
         if by_fx26 {
             s.native_fx = Some(compile_by_fx26);
@@ -159,6 +161,10 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
     }
     Ok(s)
 }
+
+/// How the native front end's cache is read back (`TODO.md` §126).
+const NATIVE_KEEPING: fixpt_fx26::session::NativeKeeping =
+    fixpt_fx26::session::NativeKeeping { adapter_code: fixpt_native::direct::native_adapter_code, note_code: fixpt_native::direct::note_cached_code };
 
 pub fn repl(backend: Backend) -> i32 {
     let mut session = match start(backend) {

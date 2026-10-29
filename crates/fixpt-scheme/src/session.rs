@@ -127,7 +127,13 @@ impl Session {
 
     /// A bare session for a chosen engine.
     pub fn bare_with(backend: Backend) -> Session {
-        let mut rt = Runtime::new();
+        Session::bare_preloaded(backend, |_| None)
+    }
+
+    /// A bare session whose heap `preload` fills first
+    /// (`Runtime::new_preloaded`).
+    pub fn bare_preloaded(backend: Backend, preload: impl FnOnce(&mut fixpt_heap::Heap) -> Option<Value>) -> Session {
+        let mut rt = Runtime::new_preloaded(preload);
         install_primitives(&mut rt);
         rt.run_word = Some(fixpt_engine::cellular::run_word);
         let empty = Builder::new();
@@ -169,7 +175,14 @@ impl Session {
     }
 
     pub fn with_backend(backend: Backend) -> Session {
-        let mut s = Session::bare_with(backend);
+        Session::with_backend_preloaded(backend, |_| None)
+    }
+
+    /// [`with_backend`](Session::with_backend), its heap filled by `preload`
+    /// before anything else is in it, the prelude's symbols among them
+    /// (`Runtime::new_preloaded`).
+    pub fn with_backend_preloaded(backend: Backend, preload: impl FnOnce(&mut fixpt_heap::Heap) -> Option<Value>) -> Session {
+        let mut s = Session::bare_preloaded(backend, preload);
         s.eval_str_raw("<prelude>", PRELUDE)
             .expect("the prelude must load");
         s

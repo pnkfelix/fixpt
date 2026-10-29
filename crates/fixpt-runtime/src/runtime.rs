@@ -73,6 +73,9 @@ pub struct Runtime {
     /// Nanoseconds spent compiling them: by the compiler written in FX-26,
     /// and to machine code.
     pub compile_nanos: u64,
+    /// The root of what a preload put in the heap before anything else
+    /// (`new_preloaded`), if it put anything.
+    pub preloaded: Option<usize>,
 }
 
 /// Run cellular word `word` with `args` on its data stack; its value, or
@@ -127,7 +130,17 @@ pub const ERROR_RTD_ROOT: usize = 0;
 
 impl Runtime {
     pub fn new() -> Runtime {
+        Runtime::new_preloaded(|_| None)
+    }
+
+    /// A runtime whose heap `preload` fills first, before anything is in it
+    /// or is interned there, so that what it puts in may be put where it
+    /// was made and the runtime's symbols are its (an image's: the front
+    /// end's, `TODO.md` §161). What it gives is a root, the one after the
+    /// error-object record type's (`preloaded`). Nothing collects between.
+    pub fn new_preloaded(preload: impl FnOnce(&mut Heap) -> Option<Value>) -> Runtime {
         let mut heap = Heap::new();
+        let given = preload(&mut heap);
         let mut interner = Interner::new();
         interner.intern("error-object");
 
@@ -141,6 +154,7 @@ impl Runtime {
         heap.obj_set(rtd, 1, fields);
         let error_rtd_root = heap.push_root(rtd);
         debug_assert_eq!(error_rtd_root, ERROR_RTD_ROOT, "root order is part of the image format");
+        let preloaded = given.map(|v| heap.push_root(v));
 
         Runtime {
             heap,
@@ -162,6 +176,7 @@ impl Runtime {
             word_fuel: u64::MAX,
             run_nanos: 0,
             compile_nanos: 0,
+            preloaded,
         }
     }
 
@@ -251,6 +266,7 @@ impl Runtime {
             word_fuel: u64::MAX,
             run_nanos: 0,
             compile_nanos: 0,
+            preloaded: None,
         }
     }
 }

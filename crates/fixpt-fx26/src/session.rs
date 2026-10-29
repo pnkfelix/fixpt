@@ -482,6 +482,13 @@ fn list(heap: &fixpt_heap::Heap, mut l: fixpt_heap::Value) -> Vec<fixpt_heap::Va
 /// key.
 const CACHE_IMAGE_AT: usize = fixpt_heap::image::PAGE;
 
+/// The text a program's register code is made of: `text`, then a product of
+/// its `entries`, what the cache of it is keyed by (`front_end_cache`).
+fn register_text(text: &str, entries: &[&str]) -> String {
+    let fields: Vec<String> = entries.iter().enumerate().map(|(i, n)| format!("({} {n})", i + 1)).collect();
+    format!("{text}\n(product {})\n", fields.join(" "))
+}
+
 /// `heap`, all of it, written to `path` as an image after `key`.
 fn save_image(alone: &fixpt_heap::Heap, path: &std::path::Path, key: u64) {
     // The key, then the image on the file's next page (`CACHE_IMAGE_AT`),
@@ -638,7 +645,28 @@ pub enum Strategy {
 
 impl Fx26Session {
     pub fn with_backend(backend: fixpt_engine::Backend) -> R<Fx26Session> {
-        let mut scheme = Session::with_backend(backend);
+        Fx26Session::with_backend_preloaded(backend, None)
+    }
+
+    /// [`with_backend`](Fx26Session::with_backend), and where `keeping`
+    /// says the front end is native, its cache read into the heap before
+    /// the runtime and the prelude put anything there (`TODO.md` §161), so
+    /// that their symbols are the image's, and nothing of it is written to
+    /// make them one. The session then uses it as its front end
+    /// (`as_register_code`), with `front_end_native` and `native_keeping`
+    /// set as the cache was made.
+    pub fn with_backend_preloaded(backend: fixpt_engine::Backend, keeping: Option<NativeKeeping>) -> R<Fx26Session> {
+        let preload = |heap: &mut fixpt_heap::Heap| -> Option<fixpt_heap::Value> {
+            let k = keeping?;
+            let text = register_text(&crate::front_end(), &Self::FRONT_ENTRIES);
+            let (path, key) = front_end_cache(&text, true)?;
+            let b = fixpt_heap::Mapped::open(&path).ok()?;
+            if b.get(..8)? != key.to_le_bytes() {
+                return None;
+            }
+            load_native_front_end(&k, heap, b.get(CACHE_IMAGE_AT..)?)
+        };
+        let mut scheme = Session::with_backend_preloaded(backend, preload);
         scheme
             .eval_str("<fx26-runtime>", RUNTIME)
             .map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), format!("the FX-26 runtime failed to load: {e}")))?;
@@ -2339,8 +2367,7 @@ impl Fx26Session {
         keep: bool,
         read_error: fn(FxError) -> FxError,
     ) -> Result<(), String> {
-        let fields: Vec<String> = entries.iter().enumerate().map(|(i, n)| format!("({} {n})", i + 1)).collect();
-        let text = format!("{text}\n(product {})\n", fields.join(" "));
+        let text = register_text(text, entries);
         // The front end's own: from no source of the program's.
         fixpt_heap::regcode::set_source(0);
         // The front end in the native convention where its closures are
@@ -2355,6 +2382,19 @@ impl Fx26Session {
         // native code and all (`TODO.md` §126): neither checked, compiled
         // nor run again, where it can be read back.
         let keeping = self.native_keeping.filter(|_| as_native);
+        // Read in already, before the runtime was (`with_backend_preloaded`).
+        if keeping.is_some()
+            && let Some(r) = self.scheme.runtime_unrooted().preloaded.take()
+        {
+            self.scheme.scope(|sc| {
+                sc.make(|m| {
+                    let pieces = m.heap().root_at(r);
+                    set_entries(m.heap(), pieces, entries, native);
+                    fixpt_heap::Value::NULL
+                })
+            });
+            return self.define_entries(entries, native, prefix);
+        }
         let (cached, kept) = match keeping {
             Some(_) => (None, image),
             None => (image.and_then(|b| fixpt_heap::image::load_trusted(b.get(CACHE_IMAGE_AT..)?).ok()), None),

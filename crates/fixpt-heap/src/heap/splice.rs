@@ -138,7 +138,12 @@ impl Heap {
             // The image's symbol is this heap's, at a global slot of its own.
             let slot = self.globals.len();
             self.globals.push(Value::UNBOUND);
-            self.mem.words_mut()[at_s - SYMBOL_SLOT] = Value::fixnum(slot as i64).raw();
+            // Written only if it is another slot than the image's: in a heap
+            // that holds no symbol yet, it is the same.
+            let w = Value::fixnum(slot as i64).raw();
+            if self.mem.words()[at_s - SYMBOL_SLOT] != w {
+                self.mem.words_mut()[at_s - SYMBOL_SLOT] = w;
+            }
             self.symbol_index.insert(name.clone(), self.symbols.len() as u32);
             added.push(name);
             self.symbols.push(moved(s).expect("moved above"));
