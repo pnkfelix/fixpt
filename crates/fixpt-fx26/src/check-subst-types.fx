@@ -29,8 +29,14 @@
 (define-type k-region (select check-types-types k-region))
 ;; The types it names, from the files that define them.
 (import check-types-types (type k-binders k-desc k-descs k-ids k-parts))
+;; What a substitution can change of a type (`k-fv-of`): the description
+;; variables in it, sorted; what else it holds that a substitution acts on
+;; (`k-fv-select` and the others, or'd); and, while it is walked, the
+;; depth of the shallowest type still being walked that it met again.
+(define-type k-fv (productof (1 k-ids) (2 int) (3 int)))
 (define-type check-subst-sig
-  (moduleof (val k-note-closed-filled
+  (moduleof (val k-fv-forget (subr (maxeff (alloc @t) (read @globals) (write @t)) () unit))
+            (val k-note-closed-filled
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        ((listof (productof (1 int) (2 int) (3 int)) acyclic))
                        unit))

@@ -275,6 +275,11 @@ pub struct Checker {
     /// no variable (`closed_data`): substitution leaves it itself, so that it
     /// keeps its name in what is shown. `datum` is one.
     pub(crate) closed_named: crate::ast::TySet,
+    /// What a substitution can change of each type, by its id, once known
+    /// (`subst_leaves`, `TODO.md` §178): the description variables in it,
+    /// sorted. Only of a type with none of [`FV_SELECT`] and the others in
+    /// it, which may come to hold more.
+    pub(crate) fv_memo: Vec<Option<std::rc::Rc<[DVar]>>>,
     /// How deep in abbreviation expansions parsing is, to stop one that
     /// mentions itself.
     pub(crate) expanding: u32,
@@ -906,6 +911,7 @@ impl Checker {
             f64_,
             symbol,
             closed_named: Default::default(),
+            fv_memo: Vec::new(),
             expanding: 0,
             knots: Vec::new(),
             holes: None,
@@ -4073,6 +4079,10 @@ impl Checker {
         if self.closed_named.contains(&t) {
             return t;
         }
+        // What it leaves, itself (`subst_leaves`).
+        if self.subst_leaves(t, map) {
+            return t;
+        }
         let ty = self.arena.get(t).clone();
         match ty {
             Ty::Base(_) | Ty::Void | Ty::Link(None) => return t,
@@ -4161,6 +4171,191 @@ impl Checker {
         let id = self.arena.ty(new);
         self.arena.set_link(slot, id);
         slot
+    }
+}
+
+/// What a type holds that a substitution acts on other than by its map
+/// (`Checker::fv_walk`): a `select` (by the selects given), a parameter's
+/// `select` (by the parameters given), an application (which may reduce),
+/// an unbound link (which may come to hold anything).
+const FV_SELECT: u8 = 1;
+const FV_PARAM: u8 = 2;
+const FV_APP: u8 = 4;
+const FV_UNBOUND: u8 = 8;
+
+impl Checker {
+    /// Whether substituting `map` (and the selects and parameters given now)
+    /// leaves `t` as it is: none of the variables in it is `map`'s, and it
+    /// holds nothing else a substitution acts on now. Then it is itself,
+    /// unwalked, cycle or not; it was copied whole (a module's type at each
+    /// use of the file that makes it: Heist's request, `TODO.md` §178). As
+    /// the checker written in FX-26's `k-subst-leaves?`.
+    fn subst_leaves(&mut self, t: TyId, map: &HashMap<DVar, D>) -> bool {
+        let (vars, flags, _) = self.fv_walk(t, 1, &mut HashMap::new());
+        flags & FV_APP == 0
+            && (flags & FV_SELECT == 0 || self.select_map.is_empty())
+            && (flags & FV_PARAM == 0 || self.param_map.is_empty())
+            && vars.iter().all(|v| !map.contains_key(v))
+    }
+
+    /// Type `t`'s free substitutables, walked at depth `d` (from 1): the
+    /// description variables in it, bound in it or not (a substitution acts
+    /// on those too: binders are not renamed), as substitution meets them;
+    /// what else in it a substitution acts on ([`FV_SELECT`] and the
+    /// others); and the depth of the shallowest type still being walked
+    /// (`on`) it met again. Kept by type when complete (it met none above
+    /// it) and of nothing flagged: a `select`, a parameter's or an
+    /// application is made a link to what it resolves to, which may hold
+    /// variables (`modules.rs`), and an unbound link may be filled; any other
+    /// type is only made a link to one of the same parts.
+    fn fv_walk(&mut self, t0: TyId, d: u32, on: &mut HashMap<TyId, u32>) -> (std::collections::BTreeSet<DVar>, u8, u32) {
+        use std::collections::BTreeSet;
+        let t = self.arena.resolve(t0);
+        if let Some(Some(vs)) = self.fv_memo.get(t.0 as usize) {
+            return (vs.iter().copied().collect(), 0, u32::MAX);
+        }
+        if let Some(&at) = on.get(&t) {
+            return (BTreeSet::new(), 0, at);
+        }
+        on.insert(t, d);
+        let (mut vs, mut flags, mut low) = (BTreeSet::new(), 0u8, u32::MAX);
+        let mut tys: Vec<TyId> = Vec::new();
+        let mut ds: Vec<D> = Vec::new();
+        let region = |r: &Region, vs: &mut BTreeSet<DVar>| match *r {
+            Region::Var(v) | Region::Frozen(Some(v), _) => {
+                vs.insert(v);
+            }
+            _ => {}
+        };
+        let conv = |c: &Conv, vs: &mut BTreeSet<DVar>| {
+            if let Conv::Var(v) = c {
+                vs.insert(*v);
+            }
+        };
+        let size = |z: &Size, vs: &mut BTreeSet<DVar>| {
+            if let Size::Lin { terms, .. } = z {
+                vs.extend(terms.iter().map(|(v, _)| *v));
+            }
+        };
+        match self.arena.get(t).clone() {
+            Ty::Var(v) => {
+                vs.insert(v);
+            }
+            Ty::Link(_) => flags |= FV_UNBOUND,
+            Ty::Select(..) => flags |= FV_SELECT,
+            Ty::ParamSel(..) => flags |= FV_PARAM,
+            Ty::App { fun, args } => {
+                flags |= FV_APP;
+                tys.push(fun);
+                ds = args;
+            }
+            Ty::Subr { conv: c, effect, params, result, .. } => {
+                conv(&c, &mut vs);
+                self.effect_vars(&effect, &mut vs);
+                tys.extend(params);
+                tys.push(result);
+            }
+            Ty::Poly { body, .. } => tys.push(body),
+            Ty::Ref(a, r) | Ty::ICell(a, r) | Ty::MarkKey(a, r) => {
+                tys.push(a);
+                region(&r, &mut vs);
+            }
+            Ty::Array(a, n, r) => {
+                tys.push(a);
+                size(&n, &mut vs);
+                region(&r, &mut vs);
+            }
+            Ty::Place(r) => region(&r, &mut vs),
+            Ty::Pair(a, b, r, _) => {
+                tys.extend([a, b]);
+                region(&r, &mut vs);
+            }
+            Ty::PromptTag { answer, payload, effect, region: r } => {
+                tys.extend([answer, payload]);
+                self.effect_vars(&effect, &mut vs);
+                region(&r, &mut vs);
+            }
+            Ty::Composable { arg, answer, effect, region: r, .. } => {
+                tys.extend([arg, answer]);
+                self.effect_vars(&effect, &mut vs);
+                region(&r, &mut vs);
+            }
+            Ty::Product(ps) | Ty::Sum(ps) => tys.extend(ps.iter().map(|(_, t)| *t)),
+            Ty::Union(ms) => tys.extend(ms),
+            Ty::Module { descs, vals, .. } => tys.extend(descs.iter().chain(&vals).map(|(_, t)| *t)),
+            Ty::Bloblet { fields, region: r, .. } => {
+                tys.extend(fields);
+                region(&r, &mut vs);
+            }
+            Ty::NList { elem, size: z, region: r } => {
+                tys.push(elem);
+                size(&z, &mut vs);
+                region(&r, &mut vs);
+            }
+            Ty::Nat(z) => size(&z, &mut vs),
+            Ty::Named { args, .. } => ds = args,
+            Ty::Lam { body, .. } => ds = vec![body],
+            Ty::Base(_) | Ty::Void | Ty::Nil | Ty::False => {}
+        }
+        for d0 in &ds {
+            match d0 {
+                D::Type(x) | D::Fun(x) => tys.push(*x),
+                D::Region(r) => region(r, &mut vs),
+                D::Effect(e) => self.effect_vars(e, &mut vs),
+                D::Size(z) => size(z, &mut vs),
+                D::Conv(c) => conv(c, &mut vs),
+            }
+        }
+        for x in tys {
+            let (v, f, l) = self.fv_walk(x, d + 1, on);
+            vs.extend(v);
+            flags |= f;
+            low = low.min(l);
+        }
+        on.remove(&t);
+        if low >= d && flags == 0 {
+            let i = t.0 as usize;
+            if self.fv_memo.len() <= i {
+                self.fv_memo.resize(i + 1, None);
+            }
+            self.fv_memo[i] = Some(vs.iter().copied().collect());
+        }
+        (vs, flags, low)
+    }
+
+    /// The description variables of effect `e`, as `subst_effect` meets
+    /// them: an application's head, and what it is given but types.
+    fn effect_vars(&self, e: &Effect, vs: &mut std::collections::BTreeSet<DVar>) {
+        for a in &e.0 {
+            match *a {
+                Atom::Var(v) => {
+                    vs.insert(v);
+                }
+                Atom::App(n) => {
+                    let (head, args) = self.arena.effect_apps.parts(n);
+                    vs.insert(head);
+                    for x in &args {
+                        match x {
+                            EArg::Region(Region::Var(v) | Region::Frozen(Some(v), _)) => {
+                                vs.insert(*v);
+                            }
+                            EArg::Effect(e) => self.effect_vars(e, vs),
+                            EArg::Size(Size::Lin { terms, .. }) => vs.extend(terms.iter().map(|(v, _)| *v)),
+                            EArg::Conv(Conv::Var(v)) => {
+                                vs.insert(*v);
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                Atom::Read(r) | Atom::Write(r) | Atom::Alloc(r) | Atom::Goto(r) | Atom::Comefrom(r) | Atom::Await(r) | Atom::Init(r) | Atom::Send(r) | Atom::Receive(r) => {
+                    if let Region::Var(v) | Region::Frozen(Some(v), _) = r {
+                        vs.insert(v);
+                    }
+                }
+                Atom::Spin | Atom::Io(_) | Atom::Nondet => {}
+            }
+        }
     }
 }
 

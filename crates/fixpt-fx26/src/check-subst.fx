@@ -183,12 +183,207 @@
           (table-set! (get k-closed-named) (k-resolve slot) 1)
           #u)
       slot)))
+
+;;; ------------------------------------------- what a substitution can change
+;;; Each type's free substitutables (the user's, `TODO.md` §178): the
+;;; description variables in it, by binder, bound inside it or not (a
+;;; substitution acts on those too: binders are not renamed), and whether
+;;; it holds a `select`, a parameter's `select` or an application, which
+;;; it acts on otherwise. A type of none its map names it gives back
+;;; itself, unwalked, a cycle or not; it was copied whole (a module's type
+;;; at each use of the file that makes it: Heist's request). Kept by type,
+;;; once known, only of a type that holds none of the four flagged: an
+;;; unbound link may come to hold more, and a `select`, a parameter's or an
+;;; application is made, where it is resolved, a link to what it is
+;;; (`check-modules.fx`), which may hold variables; every other type is
+;;; only ever made a link to a type of the same parts (interning). Of one
+;;; in a cycle, kept at the cycle's entry.
+(define k-fv-select int 1)
+(define k-fv-param int 2)
+(define k-fv-app int 4)
+(define k-fv-unbound int 8)
+;; Deeper than any walk goes: a type met that is kept already.
+(define k-fv-deep int 1000000000)
+(define k-fv-flags (ref (arrayof int @t) @t) (new (make-array 512 -1)))
+(define k-fv-vars (ref (arrayof k-ids @t) @t) (new (make-array 512 nil)))
+(define k-fv-depth (ref (arrayof int @t) @t) (new (make-array 512 0)))
+(define k-fv-copy-ints (->* ((arrayof int @t) (arrayof int @t) int) unit)
+  (lambda (from to i)
+    (if (= i (array-length from))
+        #u
+        (begin (array-set! to i (array-ref from i)) (k-fv-copy-ints from to (+ i 1))))))
+(define k-fv-copy-ids (->* ((arrayof k-ids @t) (arrayof k-ids @t) int) unit)
+  (lambda (from to i)
+    (if (= i (array-length from))
+        #u
+        (begin (array-set! to i (array-ref from i)) (k-fv-copy-ids from to (+ i 1))))))
+;; Room in the tables for type `t`.
+(define k-fv-room (->* (int) unit)
+  (lambda (t)
+    (if (< t (array-length (get k-fv-flags)))
+        #u
+        (let* ((n (* 2 (if (> t (array-length (get k-tys))) t (array-length (get k-tys)))))
+               (flags (the (arrayof int @t) (make-array n -1)))
+               (vars (the (arrayof k-ids @t) (make-array n nil)))
+               (depth (the (arrayof int @t) (make-array n 0))))
+          (begin (k-fv-copy-ints (get k-fv-flags) flags 0) (set k-fv-flags flags)
+                 (k-fv-copy-ids (get k-fv-vars) vars 0) (set k-fv-vars vars)
+                 (k-fv-copy-ints (get k-fv-depth) depth 0) (set k-fv-depth depth))))))
+;; None forgotten for a new program's types (`k-reset`), as the regions'
+;; memo is.
+(define k-fv-forget (->* () unit)
+  (lambda ()
+    (begin (set k-fv-flags (make-array 512 -1)) (set k-fv-vars (make-array 512 nil))
+           (set k-fv-depth (make-array 512 0)))))
+;; Two sorted lists of variables, as one.
+(define k-ids-union (->* (k-ids k-ids) k-ids)
+  (lambda (a b)
+    (cond ((null? a) b)
+          ((null? b) a)
+          ((< (car a) (car b)) (the k-ids (cons (car a) (k-ids-union (cdr a) b))))
+          ((> (car a) (car b)) (the k-ids (cons (car b) (k-ids-union a (cdr b)))))
+          (else (the k-ids (cons (car a) (k-ids-union (cdr a) (cdr b))))))))
+(define k-ids-one (->* (int) k-ids) (lambda (v) (the k-ids (cons v nil))))
+(define k-fv-region (->* (k-region) k-ids)
+  (lambda (r)
+    (tagcase r
+      (r-var (v) (k-ids-one v))
+      (r-frozen (p f) (if (< p 0) (the k-ids nil) (k-ids-one p)))
+      (else y (the k-ids nil)))))
+(define k-fv-conv (->* (k-conv) k-ids)
+  (lambda (c) (tagcase c (cv-var (v) (k-ids-one v)) (else y (the k-ids nil)))))
+(define k-fv-terms (->* (k-terms) k-ids)
+  (lambda (ts) (if (null? ts) nil (k-ids-union (k-ids-one (car (car ts))) (k-fv-terms (cdr ts))))))
+(define k-fv-size (->* (k-size) k-ids)
+  (lambda (z) (tagcase z (sz-lin (k ts) (k-fv-terms ts)) (else y (the k-ids nil)))))
+;; An effect's: as `k-subst-effect` substitutes it, an application's
+;; arguments as `k-subst-eargs` does (a type given is not).
+(define-rec
+  (k-fv-eff (->* (k-eff) k-ids)
+    (lambda (e) (if (null? e) nil (k-ids-union (k-fv-atom (car e)) (k-fv-eff (cdr e))))))
+  (k-fv-atom (->* (k-atom) k-ids)
+    (lambda (a)
+      (tagcase a
+        (a-var (v) (k-ids-one v))
+        (a-app (v ds) (k-ids-union (k-ids-one v) (k-fv-eargs ds)))
+        (else y (k-fv-region (k-atom-region a))))))
+  (k-fv-eargs (->* (k-descs) k-ids)
+    (lambda (ds)
+      (if (null? ds)
+          nil
+          (k-ids-union (tagcase (car ds)
+                         (dr (r) (k-fv-region r)) (de (e) (k-fv-eff e)) (dz (z) (k-fv-size z))
+                         (dc (c) (k-fv-conv c)) (else y (the k-ids nil)))
+                       (k-fv-eargs (cdr ds)))))))
+;; Two walks' results, as one.
+(define k-fv-join (->* (k-fv k-fv) k-fv)
+  (lambda (a b)
+    (product (1 (k-ids-union (extract a 1) (extract b 1)))
+             (2 (bitwise-ior (extract a 2) (extract b 2)))
+             (3 (if (< (extract a 3) (extract b 3)) (extract a 3) (extract b 3))))))
+(define k-fv-leaf (->* (k-ids int) k-fv)
+  (lambda (vs flags) (product (1 vs) (2 flags) (3 k-fv-deep))))
+(define-rec
+  ;; Type `t`'s, walked at depth `d` (from 1).
+  (k-fv-walk (->* (int int) k-fv)
+    (lambda (t0 d)
+      (let ((t (k-resolve t0)))
+        (begin
+          (k-fv-room t)
+          (cond ((>= (array-ref (get k-fv-flags) t) 0)
+                 (k-fv-leaf (array-ref (get k-fv-vars) t) (array-ref (get k-fv-flags) t)))
+                ((> (array-ref (get k-fv-depth) t) 0)
+                 (product (1 (the k-ids nil)) (2 0) (3 (array-ref (get k-fv-depth) t))))
+                (else
+                 (begin
+                   (array-set! (get k-fv-depth) t d)
+                   (let ((r (k-fv-node t d)))
+                     (begin
+                       (array-set! (get k-fv-depth) t 0)
+                       ;; Complete if nothing it met is still being walked
+                       ;; above it; kept only if nothing flagged is in it.
+                       (if (and (>= (extract r 3) d) (= 0 (extract r 2)))
+                           (begin (array-set! (get k-fv-flags) t (extract r 2))
+                                  (array-set! (get k-fv-vars) t (extract r 1)))
+                           #u)
+                       r)))))))))
+  (k-fv-node (->* (int int) k-fv)
+    (lambda (t d)
+      (letrec ((ty (subr (maxeff kstate spin) (int) k-fv) (lambda (x) (k-fv-walk x (+ d 1))))
+               (tys (subr (maxeff kstate spin) (k-ids) k-fv) (lambda (xs) (k-fv-walks xs (+ d 1))))
+               (leaf (subr kreads (k-ids) k-fv) (lambda (vs) (k-fv-leaf vs 0)))
+               (reg (subr kreads (k-region) k-fv) (lambda (r) (k-fv-leaf (k-fv-region r) 0)))
+               (eff (subr kreads (k-eff) k-fv) (lambda (e) (k-fv-leaf (k-fv-eff e) 0))))
+        (tagcase (k-get t)
+          (ty-var (v) (leaf (k-ids-one v)))
+          (ty-link (x) (k-fv-leaf nil k-fv-unbound))
+          (ty-select (m n) (k-fv-leaf nil k-fv-select))
+          (ty-param (k n) (k-fv-leaf nil k-fv-param))
+          (ty-app (g ds)
+            (k-fv-join (k-fv-leaf nil k-fv-app) (k-fv-join (ty g) (k-fv-descs ds (+ d 1)))))
+          (ty-subr (e ps r cv spc)
+            (k-fv-join (eff e) (k-fv-join (tys ps) (k-fv-join (ty r) (leaf (k-fv-conv cv))))))
+          (ty-poly (bs body) (ty body))
+          (ty-ref (a r) (k-fv-join (ty a) (reg r)))
+          (ty-array (a nz r) (k-fv-join (ty a) (k-fv-join (leaf (k-fv-size nz)) (reg r))))
+          (ty-icell (a r) (k-fv-join (ty a) (reg r)))
+          (ty-place (r) (reg r))
+          (ty-pair (a b r nl) (k-fv-join (ty a) (k-fv-join (ty b) (reg r))))
+          (ty-tag (a h e r) (k-fv-join (ty a) (k-fv-join (ty h) (k-fv-join (eff e) (reg r)))))
+          (ty-comp (b a e r once) (k-fv-join (ty b) (k-fv-join (ty a) (k-fv-join (eff e) (reg r)))))
+          (ty-markkey (a r) (k-fv-join (ty a) (reg r)))
+          (ty-product (ps) (k-fv-parts ps (+ d 1)))
+          (ty-sum (ps) (k-fv-parts ps (+ d 1)))
+          (ty-bloblet (fs z r) (k-fv-join (tys fs) (reg r)))
+          (ty-union (ms) (tys ms))
+          (ty-named (g ds) (k-fv-descs ds (+ d 1)))
+          (ty-lam (bs body) (k-fv-descs (the k-descs (cons body nil)) (+ d 1)))
+          (ty-nlist (e z r) (k-fv-join (ty e) (k-fv-join (leaf (k-fv-size z)) (reg r))))
+          (ty-nat (z) (leaf (k-fv-size z)))
+          (ty-module (abs ds vs)
+            (k-fv-join (k-fv-parts abs (+ d 1))
+                       (k-fv-join (k-fv-parts ds (+ d 1)) (k-fv-parts vs (+ d 1)))))
+          (else y (leaf nil))))))
+  (k-fv-walks (->* (k-ids int) k-fv)
+    (lambda (ts d)
+      (if (null? ts)
+          (k-fv-leaf nil 0)
+          (k-fv-join (k-fv-walk (car ts) d) (k-fv-walks (cdr ts) d)))))
+  (k-fv-parts (->* (k-parts int) k-fv)
+    (lambda (ps d)
+      (if (null? ps)
+          (k-fv-leaf nil 0)
+          (k-fv-join (k-fv-walk (extract (car ps) 2) d) (k-fv-parts (cdr ps) d)))))
+  (k-fv-descs (->* (k-descs int) k-fv)
+    (lambda (ds d)
+      (if (null? ds)
+          (k-fv-leaf nil 0)
+          (k-fv-join (tagcase (car ds)
+                       (dt (x) (k-fv-walk x d)) (df (x) (k-fv-walk x d))
+                       (dr (r) (k-fv-leaf (k-fv-region r) 0)) (de (e) (k-fv-leaf (k-fv-eff e) 0))
+                       (dz (z) (k-fv-leaf (k-fv-size z) 0)) (dc (c) (k-fv-leaf (k-fv-conv c) 0)))
+                     (k-fv-descs (cdr ds) d))))))
+;; Whether a substitution by `m` (and the selects and parameters given now)
+;; leaves `t` as it is.
+(define k-subst-leaves? (->* (int k-map) bool)
+  (lambda (t m)
+    (let* ((f (k-fv-walk t 1)) (flags (extract f 2)))
+      (and (= 0 (bitwise-and flags k-fv-app))
+           (or (= 0 (bitwise-and flags k-fv-select)) (null? (get k-select-map)))
+           (or (= 0 (bitwise-and flags k-fv-param)) (null? (get k-param-map)))
+           (k-fv-untouched? (extract f 1) m)))))
+(define k-fv-untouched? (->* (k-ids k-map) bool)
+  (lambda (vs m)
+    (or (null? vs) (and (null? (k-map-find m (car vs))) (k-fv-untouched? (cdr vs) m)))))
 (define k-subst-memo (->* (int k-map k-smemo) int)
   (lambda (t m memo)
     (let* ((t (k-resolve t))
            (kept (or (and (>= (get k-subst-keep) 0) (= (k-keep-at t) (get k-subst-keep)))
                      (>= (table-ref (get k-closed-named) t -1) 0)))
-           (done (if kept t (table-ref memo t -1))))
+           (done (cond (kept t)
+                       ;; What it leaves, itself (`k-subst-leaves?`).
+                       ((k-subst-leaves? t m) t)
+                       (else (table-ref memo t -1)))))
       (if (>= done 0)
           done
           (tagcase (k-get t)

@@ -4059,6 +4059,23 @@ again for every dependent:
    an unbound variable is not); both checkers alike, though sharing
    changes nothing either shows; and the region walk's linear-search set
    (quadratic) while there.
+   Done (2026-10-29), in both checkers: a substitution gives back a type
+   none of whose free substitutables its maps touch, unwalked
+   (`k-subst-leaves?`, `Checker::subst_leaves`; the summaries `k-fv-walk`,
+   `Checker::fv_walk`, kept by type id only when nothing in them is
+   flagged: a select, a parameter's, an application or an unbound link,
+   which are made links in place to what they resolve to; forgotten with
+   the arena, at `k-reset` and `scratch`); the FX-26 region walk finds a
+   part's regions in the memo, and its set in a table. Types a dependent
+   makes, `lib-80`: 890 to 6. Heist's benchmark, a dependent: `lib-80`
+   3.03 ms to 1.91, `src-80` 3.00 to 1.96, `mono-80` 1.62 to 1.23
+   (`hidden-80`, the floor, 0.89). Kayak's stage 0 the same, 0.9% fewer
+   instructions. A type now shown by the name in scope it is, where the
+   copy was not (`bloblet/width-variable.fx`: "a one is expected here",
+   by the rule of `docs/fx26.md`'s abbreviations). Left: about 1 ms a
+   dependent over the floor, in the front end's anonymous procedures;
+   to attribute (§179 for names, and a map from a profile's source
+   numbers to files).
 
 ## 179. `perf` names the front end's code again, mapped from the cache (the user's, 2026-10-29)
 

@@ -235,6 +235,49 @@
           (else (k-has-region-in? (cdr rs) r)))))
 (define k-add-region (->* (k-regions k-region) k-regions)
   (lambda (rs r) (if (k-has-region-in? rs r) rs (cons r rs))))
+;; A walk's regions (`k-regions-walk`), each added once, found in a table
+;; rather than by a search of those added (a module's type has hundreds:
+;; Heist's request, `TODO.md` §178); added in the order a list's search
+;; would add them.
+(define k-new-region-table (subr (alloc @t) () (table k-region int @t))
+  (lambda ()
+    (make-table
+     (lambda (r)
+       (tagcase r
+         (r-const (n) (symbol-hash n)) (r-fresh (i n) (+ 7 (* 31 i))) (r-var (v) (+ 11 (* 31 v)))
+         (r-frozen (p f) (+ 13 (* 31 p))) (r-heap () 17) (r-global (g) (+ 19 (symbol-hash g)))
+         (r-globals () 23)))
+     ;; As `k-region=?`.
+     (lambda (r s)
+       (tagcase r
+         (r-const (n) (tagcase s (r-const (m) (symbol=? n m)) (else y #f)))
+         (r-fresh (i n) (tagcase s (r-fresh (j m) (= i j)) (else y #f)))
+         (r-var (v) (tagcase s (r-var (w) (= v w)) (else y #f)))
+         (r-frozen (p f) (tagcase s (r-frozen (q g) (and (= p q) (bool=? f g))) (else y #f)))
+         (r-heap () (tagcase s (r-heap () #t) (else y #f)))
+         (r-global (g) (tagcase s (r-global (h) (symbol=? g h)) (else y #f)))
+         (r-globals () (tagcase s (r-globals () #t) (else y #f))))))))
+(define k-walk-seen (ref (table k-region int @t) @t) (new (k-new-region-table)))
+(define k-walk-add (->* ((ref k-regions @t) k-region) unit)
+  (lambda (out r)
+    (if (>= (table-ref (get k-walk-seen) r -1) 0)
+        #u
+        (begin (table-set! (get k-walk-seen) r 1) (set out (cons r (get out)))))))
+(define k-walk-add-all (->* ((ref k-regions @t) k-regions) unit)
+  (lambda (out rs)
+    (if (null? rs) #u (begin (k-walk-add out (car rs)) (k-walk-add-all out (cdr rs))))))
+(define k-walk-add-eff (->* ((ref k-regions @t) k-eff) unit)
+  (lambda (out e)
+    (cond ((null? e) #u)
+          ((k-has-region? (car e))
+           (begin (k-walk-add out (k-atom-region (car e))) (k-walk-add-eff out (cdr e))))
+          (else (k-walk-add-eff out (cdr e))))))
+;; Those of `rs` not a generative type's parameter.
+(define k-non-gen (->* (k-regions) k-regions)
+  (lambda (rs)
+    (cond ((null? rs) nil)
+          ((k-gen-region? (car rs)) (k-non-gen (cdr rs)))
+          (else (the k-regions (cons (car rs) (k-non-gen (cdr rs))))))))
 ;; `out` and each of `rs` that is not a generative type's parameter.
 (define k-add-non-gen (->* (k-regions k-regions) k-regions)
   (lambda (out rs)
@@ -292,7 +335,7 @@
       (set k-ntys 0) (k-intern-reset)
       (set k-links (+ (get k-links) 1)) (k-reset-regions) (k-reset-names)
       (set k-arrow-star-tys nil) (set k-arrow-star-settled nil)
-      (set k-regions-memo (make-array 512 nil)) (set k-dscope nil)
+      (set k-regions-memo (make-array 512 nil)) (k-fv-forget) (set k-dscope nil)
       (set k-with-depth 0) (set k-with-fallbacks nil) (set k-with-apps nil)
       (set k-fresh 0) (set k-base nil) (set k-expanding 0) (set k-knots nil) (set k-spin-why nil)
       (k-forget-closed-named)
@@ -334,27 +377,33 @@
 (define-rec
   (k-regions-walk (->* (int int (ref k-regions @t)) unit)
     (lambda (t seen out)
-      (let ((t (k-resolve t)))
-        (if (k-visit? t seen)
+      (let* ((t (k-resolve t)) (memo (get k-regions-memo)))
+        ;; A part whose regions are known already, those (`k-regions-in`'s,
+        ;; frozen data's places with them, which the whole's are too): a
+        ;; module's type within each type of the forms that use it, walked
+        ;; whole at each before (Heist's request, `TODO.md` §178).
+        (if (or (and (< t (array-length memo)) (not (null? (array-ref memo t)))
+                     (begin (k-walk-add-all out (car (array-ref memo t))) #t))
+                (k-visit? t seen))
             #u
             (letrec ((add (subr (maxeff kstate spin) (k-region) unit)
-                          (lambda (r) (set out (k-add-region (get out) r))))
+                          (lambda (r) (k-walk-add out r)))
                      (walk (subr (maxeff kstate spin) (int) unit)
                            (lambda (x) (k-regions-walk x seen out)))
                      (walks (subr (maxeff kstate spin) (k-ids) unit)
                             (lambda (xs) (k-regions-walks xs seen out))))
               (begin
                 (tagcase (k-get t)
-                  (ty-subr (e ps r cv spc) (begin (k-note-eff-regions out e) (walks ps) (walk r)))
+                  (ty-subr (e ps r cv spc) (begin (k-walk-add-eff out e) (walks ps) (walk r)))
                   (ty-poly (bs body) (walk body))
                   (ty-ref (a r) (begin (add r) (walk a)))
                   (ty-array (a nz r) (begin (add r) (walk a)))
                   (ty-icell (a r) (begin (add r) (walk a)))
                   (ty-place (r) (add r))
                   (ty-pair (a b r nl) (begin (add r) (walk a) (walk b)))
-                  (ty-tag (a h e r) (begin (add r) (k-note-eff-regions out e) (walk a) (walk h)))
+                  (ty-tag (a h e r) (begin (add r) (k-walk-add-eff out e) (walk a) (walk h)))
                   (ty-comp (b a e r once)
-                    (begin (add r) (k-note-eff-regions out e) (walk a) (walk b)))
+                    (begin (add r) (k-walk-add-eff out e) (walk a) (walk b)))
                   (ty-markkey (a r) (begin (add r) (walk a)))
                   (ty-bloblet (fs z r) (begin (add r) (walks fs)))
                   (ty-product (ps) (k-regions-parts ps seen out))
@@ -366,9 +415,11 @@
                   ;; Transparent to safety: what its representation holds,
                   ;; its parameters' regions standing for what it was given.
                   (ty-named (g ds)
-                    (let ((inner (the (ref k-regions @t) (new nil))))
-                      (begin (k-regions-walk (extract (k-gen-of g) 4) seen inner)
-                             (set out (k-add-non-gen (get out) (get inner)))
+                    (let ((inner (the (ref k-regions @t) (new nil))) (outer (get k-walk-seen)))
+                      (begin (set k-walk-seen (k-new-region-table))
+                             (k-regions-walk (extract (k-gen-of g) 4) seen inner)
+                             (set k-walk-seen outer)
+                             (k-walk-add-all out (reverse (k-non-gen (get inner))))
                              (k-regions-descs ds seen out))))
                   ;; A description function applied, which cannot be looked
                   ;; into: what it was given; a function, its body.
@@ -381,8 +432,8 @@
           #u
           (begin (tagcase (car ds)
                    (dt (x) (k-regions-walk x seen out))
-                   (dr (r) (set out (k-add-region (get out) r)))
-                   (de (e) (k-note-eff-regions out e))
+                   (dr (r) (k-walk-add out r))
+                   (de (e) (k-walk-add-eff out e))
                    (dz (z) #u)
                    (dc (c) #u)
                    (df (f)
@@ -416,6 +467,7 @@
           (car (array-ref memo t))
           (let ((out (the (ref k-regions @t) (new nil))))
             (begin
+              (set k-walk-seen (k-new-region-table))
               (k-regions-walk t (k-new-epoch) out)
               ;; Frozen data mentions the place it is in.
               (set out (k-frozen-places (get out) (get out)))
