@@ -698,6 +698,15 @@ impl Fx26Session {
     /// (`as_register_code`), with `front_end_native` and `native_keeping`
     /// set as the cache was made.
     pub fn with_backend_preloaded(backend: fixpt_engine::Backend, keeping: Option<NativeKeeping>) -> R<Fx26Session> {
+        Fx26Session::with_backend_preloaded_in(backend, keeping, false)
+    }
+
+    /// [`with_backend_preloaded`](Fx26Session::with_backend_preloaded), its
+    /// checker of the native convention if `native`, made so at once: not
+    /// made cellular and then again native
+    /// ([`set_native_convention`](Fx26Session::set_native_convention)), each
+    /// some 2 ms of a start (`TODO.md` §177).
+    pub fn with_backend_preloaded_in(backend: fixpt_engine::Backend, keeping: Option<NativeKeeping>, native: bool) -> R<Fx26Session> {
         let preload = |heap: &mut fixpt_heap::Heap| -> Option<fixpt_heap::Value> {
             let k = keeping?;
             let text = register_text(&crate::front_end(), &Self::FRONT_ENTRIES);
@@ -726,7 +735,7 @@ impl Fx26Session {
             fixpt_engine::cellular::run_word
         });
         Ok(Fx26Session {
-            checker: Checker::new(),
+            checker: if native { Checker::with_convention(crate::ast::Conv::Native) } else { Checker::new() },
             scheme,
             globals: Globals::default(),
             strategy: Strategy::Lower,
@@ -2311,7 +2320,12 @@ impl Fx26Session {
     pub fn set_native_convention(&mut self, on: bool) {
         let syscalls = self.checker.syscalls;
         self.native_convention = on;
-        self.checker = Checker::with_convention(if on { crate::ast::Conv::Native } else { crate::ast::Conv::Cellular });
+        // A checker of that convention already, as one is made for it
+        // (`with_backend_preloaded_in`), kept: nothing is checked yet.
+        let conv = if on { crate::ast::Conv::Native } else { crate::ast::Conv::Cellular };
+        if self.checker.conv_default != conv {
+            self.checker = Checker::with_convention(conv);
+        }
         self.checker.globals_effects = self.globals_effects;
         self.checker.defer_reruns = self.defer_reruns;
         self.checker.syscalls = syscalls;

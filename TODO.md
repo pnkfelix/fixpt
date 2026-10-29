@@ -3973,7 +3973,7 @@ kept), two runs within 0.5 ms of each other:
 | jitdebug, the cached code's names | 4.0 | option B: the debugger's objects in the cache, the execute view at a fixed address |
 | the Scheme prelude, evaluated | 3.0 | an image of it, as the front end's |
 | the FX-26 runtime | 0.5 | |
-| the rest of the CLI's `start()` | 3.5 | not yet split |
+| the rest of the CLI's `start()` | 3.5 | split (2026-10-29): the Rust checker made twice, cellular and then native, 1.8 ms each; now made once, of the convention asked (`with_backend_preloaded_in`): 28.7 to 27.4 ms |
 | the front end's entries defined | 0.7 | |
 | the front end told the program's conventions (`check-conv-native!` and the like) | 1.5 | |
 | **the standard environment read by the FX-26 reader** (`standard26`, `read_standard`) | **7.6** | its syntax made once, with the front end's cache, kept there as a root |
