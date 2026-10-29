@@ -3766,3 +3766,12 @@ lowered (`rs-scheme-vm`, 0.1 s, which may never load the front end).
 Trivial programs, debug: 4.0–4.6 s to 0.65–1.15 s on the cellular machines.
 Left: library sessions (`Fx26Session::with_backend`, the tests') still
 take the cellular front end (§167).
+
+## 169. The caches' life a day, not a month (the user's, 2026-10-29)
+
+Done: caches unused for a day are removed (`CACHE_LIFE`), and the
+front-end caches past the eight most recently used (`CACHE_MOST`), by
+whatever writes a front-end cache (`sweep_cache`): a process of the CLI, a
+test's session, `fixpt prewarm`, so when a build is new. A month had kept
+229 front-end caches, 4.4 GB, each test binary's of each build; 173 MB
+after.

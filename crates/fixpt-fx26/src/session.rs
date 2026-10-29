@@ -389,10 +389,9 @@ fn front_end_cache(text: &str, native: bool) -> Option<(std::path::PathBuf, u64)
 
 /// The front end's compiled word `w`, copied out of `heap` into a heap of
 /// its own and written to `path` as an image after `key`: by a temporary
-/// file renamed, so that a reader never sees half of one. Caches not used
-/// for a month (their sources since changed, most likely) are removed, and so
-/// are the built-in modules' `.fasl`s not written for a month. Any
-/// failure only means no cache.
+/// file renamed, so that a reader never sees half of one; then the caches
+/// no longer wanted are removed (`sweep_cache`). Any failure only means no
+/// cache.
 fn save_front_end(heap: &fixpt_heap::Heap, w: fixpt_heap::Value, path: &std::path::Path, key: u64) {
     let mut alone = fixpt_heap::Heap::new();
     let copy = alone.copy_graph_from(heap, w);
@@ -513,18 +512,45 @@ fn save_image(alone: &fixpt_heap::Heap, path: &std::path::Path, key: u64) {
     if std::fs::write(&tmp, &bytes).is_ok() && std::fs::rename(&tmp, path).is_err() {
         let _ = std::fs::remove_file(&tmp);
     }
-    let month = std::time::Duration::from_secs(30 * 24 * 3600);
+    sweep_cache(dir);
+}
+
+/// How long a cache unused is kept (`sweep_cache`): a day. Each build of the
+/// sources has caches of its own (`FIXPT_BUILD_HASH`), 20 MB each, so an
+/// edit makes new ones and leaves the old to no one; a day keeps those of
+/// another branch or profile still in use.
+const CACHE_LIFE: std::time::Duration = std::time::Duration::from_secs(24 * 3600);
+/// And at most this many front-end caches, the most recently used: two
+/// kinds for each of a few builds (debug, release, a second tree).
+const CACHE_MOST: usize = 8;
+
+/// The caches in `dir` let go: front-end caches and the `.fasl`s of the
+/// module files built in (`fasl::path_for_load`, made again by the next run
+/// that wants them) unused for `CACHE_LIFE`, and the front-end caches past
+/// the `CACHE_MOST` most recent. Done by whatever writes a front-end cache
+/// (a process of the CLI, a test's session, `fixpt prewarm`): that is when
+/// a build is new. Used is read or written, by the file's times (access
+/// times may lag by a day where the file system keeps them `relatime`).
+fn sweep_cache(dir: &std::path::Path) {
+    let mut front_ends = Vec::new();
     for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
-        let age = e.metadata().and_then(|m| m.accessed().or(m.modified())).ok().and_then(|t| t.elapsed().ok());
+        let Ok(m) = e.metadata() else { continue };
+        let used = [m.accessed().ok(), m.modified().ok()].into_iter().flatten().max();
+        let old = used.and_then(|t| t.elapsed().ok()).is_some_and(|a| a > CACHE_LIFE);
         let name = e.file_name().to_string_lossy().into_owned();
-        if age.is_some_and(|a| a > month) && name.starts_with("front-end-") {
-            let _ = std::fs::remove_file(e.path());
-        }
-        // The `.fasl`s of the module files built in (`fasl::path_for_load`),
-        // made again by the next run that wants them.
-        if age.is_some_and(|a| a > month) && name.starts_with("built-in-") {
+        if name.starts_with("front-end-") {
+            if old {
+                let _ = std::fs::remove_file(e.path());
+            } else {
+                front_ends.push((used, e.path()));
+            }
+        } else if old && name.starts_with("built-in-") {
             let _ = std::fs::remove_dir_all(e.path());
         }
+    }
+    front_ends.sort_by(|a, b| b.0.cmp(&a.0));
+    for (_, p) in front_ends.into_iter().skip(CACHE_MOST) {
+        let _ = std::fs::remove_file(p);
     }
 }
 
