@@ -32,6 +32,9 @@ pub struct Fx26Session {
     pub globals: Globals,
     /// How checked forms run.
     pub strategy: Strategy,
+    /// Whether the prelude's data is still to be read
+    /// (`with_backend_preloaded_in`, `whole_prelude`).
+    prelude_data_pending: bool,
     /// Under `Strategy::Cellular`: whether the compiler written in FX-26
     /// makes each lambda's register code too, for a machine that runs it.
     pub register_code: bool,
@@ -711,15 +714,23 @@ impl Fx26Session {
     /// (`as_register_code`), with `front_end_native` and `native_keeping`
     /// set as the cache was made.
     pub fn with_backend_preloaded(backend: fixpt_engine::Backend, keeping: Option<NativeKeeping>) -> R<Fx26Session> {
-        Fx26Session::with_backend_preloaded_in(backend, keeping, false)
+        Fx26Session::with_backend_preloaded_in(backend, keeping, false, Strategy::Lower)
     }
 
     /// [`with_backend_preloaded`](Fx26Session::with_backend_preloaded), its
     /// checker of the native convention if `native`, made so at once: not
     /// made cellular and then again native
     /// ([`set_native_convention`](Fx26Session::set_native_convention)), each
-    /// some 2 ms of a start (`TODO.md` §177).
-    pub fn with_backend_preloaded_in(backend: fixpt_engine::Backend, keeping: Option<NativeKeeping>, native: bool) -> R<Fx26Session> {
+    /// some 2 ms of a start (`TODO.md` §177); and its strategy `strategy`.
+    /// Its forms not lowered, the prelude's data (`PRELUDE_DATA`) is left
+    /// out, some 2 ms more, until the session lowers one
+    /// (`whole_prelude`).
+    pub fn with_backend_preloaded_in(
+        backend: fixpt_engine::Backend,
+        keeping: Option<NativeKeeping>,
+        native: bool,
+        strategy: Strategy,
+    ) -> R<Fx26Session> {
         let preload = |heap: &mut fixpt_heap::Heap| -> Option<fixpt_heap::Value> {
             let k = keeping?;
             let text = register_text(&crate::front_end(), &Self::FRONT_ENTRIES);
@@ -730,7 +741,9 @@ impl Fx26Session {
             }
             load_native_front_end(&k, heap, &b)
         };
-        let mut scheme = Session::with_backend_preloaded(backend, preload);
+        let lowered = strategy == Strategy::Lower;
+        let prelude = if lowered { fixpt_scheme::PRELUDE } else { fixpt_scheme::PRELUDE_CONTROL };
+        let mut scheme = Session::with_prelude_preloaded(backend, prelude, preload);
         scheme
             .eval_str("<fx26-runtime>", RUNTIME)
             .map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), format!("the FX-26 runtime failed to load: {e}")))?;
@@ -751,7 +764,8 @@ impl Fx26Session {
             checker: if native { Checker::with_convention(crate::ast::Conv::Native) } else { Checker::new() },
             scheme,
             globals: Globals::default(),
-            strategy: Strategy::Lower,
+            strategy,
+            prelude_data_pending: !lowered,
             register_code: false,
             front_end_compiled: true,
             front_end_native: false,
@@ -827,6 +841,7 @@ impl Fx26Session {
         if self.strategy != Strategy::Lower {
             return self.speculate_own(&fixpt_read::write_syntax(form, &self.checker.interner));
         }
+        self.whole_prelude();
         self.scheme.engine.set_step_limit(self.speculation_limit);
         let result = self.scheme.scope(|s| {
             let (_, result) = s.eval_capturing("<fx26-speculative>", &code);
@@ -1326,6 +1341,9 @@ impl Fx26Session {
     }
 
     fn run_checked_in(&mut self, top: Top, form: &Syntax, again: bool) -> R<Outcome> {
+        if self.strategy == Strategy::Lower {
+            self.whole_prelude();
+        }
         // What runs natively is typed so: a call typed `cellular` is made
         // with no look at its callee (`TODO.md` §97).
         debug_assert!(self.native_runner.is_none() || self.native_convention, "native code in the cellular convention");
@@ -2314,6 +2332,14 @@ impl Fx26Session {
         self.scheme.engine.set_step_limit(self.step_limit);
         self.own_begun |= !matches!(&r, Ok(out) if out.starts_with("!! check:"));
         r
+    }
+
+    /// The prelude whole, for lowered code to call: what a session begun
+    /// not lowering left out (`with_backend_preloaded_in`).
+    pub fn whole_prelude(&mut self) {
+        if std::mem::take(&mut self.prelude_data_pending) {
+            self.scheme.eval_str("<prelude>", fixpt_scheme::PRELUDE_DATA).expect("the prelude must load");
+        }
     }
 
     /// The initial environment as the FX-26 reader reads it, read once.

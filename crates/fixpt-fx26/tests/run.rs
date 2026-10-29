@@ -81,6 +81,19 @@ fn case_dispatches_on_atoms() {
     assert_eq!(run(include_str!("programs/run/case.fx")), "12312342223");
 }
 
+/// A session begun to compile its forms reads only the prelude's control
+/// (`PRELUDE_CONTROL`); lowered, it reads the rest first, which `case`'s
+/// `char=?` calls.
+#[test]
+fn a_session_begun_not_lowering_lowers_with_the_whole_prelude() {
+    use fixpt_fx26::session::Strategy;
+    let mut s = Fx26Session::with_backend_preloaded_in(Backend::Ast, None, false, Strategy::Cellular).expect("starts");
+    assert!(!s.scheme.is_bound("char=?"), "the prelude's data is left out");
+    s.strategy = Strategy::Lower;
+    let v = s.run_program(include_str!("programs/run/case.fx")).expect("checks");
+    assert_eq!(v.expect("runs"), "12312342223");
+}
+
 /// An expansion's own variable captures nothing
 /// (`programs/sizes/fresh-temporaries.fx`): 3 + 3 + 4 + 5.
 #[test]

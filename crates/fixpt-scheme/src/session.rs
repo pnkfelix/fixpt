@@ -15,7 +15,14 @@ use fixpt_read::{Interner, Reader, SyntaxProfile};
 use fixpt_runtime::prim::{self, PRIMITIVES};
 use fixpt_runtime::{Runtime, display_value, write_value};
 
-pub const PRELUDE: &str = include_str!("prelude.scm");
+pub const PRELUDE: &str = concat!(include_str!("prelude.scm"), include_str!("prelude-data.scm"), include_str!("prelude-control.scm"));
+/// The prelude's control alone, with the `c[ad]r` family it uses: what
+/// every session needs, FX-26's runtime among them. What code compiled to
+/// words runs calls nothing else in the prelude; lowered code and Scheme
+/// programs do (`PRELUDE_DATA`).
+pub const PRELUDE_CONTROL: &str = concat!(include_str!("prelude.scm"), include_str!("prelude-control.scm"));
+/// The rest of the prelude, for a session begun with [`PRELUDE_CONTROL`].
+pub const PRELUDE_DATA: &str = include_str!("prelude-data.scm");
 
 #[derive(Debug)]
 pub enum SessionError {
@@ -182,8 +189,18 @@ impl Session {
     /// before anything else is in it, the prelude's symbols among them
     /// (`Runtime::new_preloaded`).
     pub fn with_backend_preloaded(backend: Backend, preload: impl FnOnce(&mut fixpt_heap::Heap) -> Option<Value>) -> Session {
+        Session::with_prelude_preloaded(backend, PRELUDE, preload)
+    }
+
+    /// [`with_backend_preloaded`](Session::with_backend_preloaded), the
+    /// prelude `prelude` ([`PRELUDE`] or [`PRELUDE_CONTROL`]).
+    pub fn with_prelude_preloaded(
+        backend: Backend,
+        prelude: &str,
+        preload: impl FnOnce(&mut fixpt_heap::Heap) -> Option<Value>,
+    ) -> Session {
         let mut s = Session::bare_preloaded(backend, preload);
-        s.eval_str_raw("<prelude>", PRELUDE)
+        s.eval_str_raw("<prelude>", prelude)
             .expect("the prelude must load");
         s
     }

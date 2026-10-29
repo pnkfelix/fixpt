@@ -10,4 +10,4 @@ pub mod special;
 
 pub use env::{Binding, Env, Special};
 pub use expand::{ExpandError, Expander, ExpanderParts};
-pub use session::{Handle, Local, Maker, Session, SessionError, View, PRELUDE};
+pub use session::{Handle, Local, Maker, Session, SessionError, View, PRELUDE, PRELUDE_CONTROL, PRELUDE_DATA};

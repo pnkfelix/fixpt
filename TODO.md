@@ -3971,7 +3971,7 @@ kept), two runs within 0.5 ms of each other:
 | exec, the process's start and exit | ~1.5 | nothing |
 | the front end's image spliced | 2.7 | mapped already (§160); what is left walks it |
 | jitdebug, the cached code's names | 4.0 | option B: the debugger's objects in the cache, the execute view at a fixed address |
-| the Scheme prelude, evaluated | 3.0 | an image of it, as the front end's |
+| the Scheme prelude, evaluated | 3.0 | done in part (2026-10-29): a session not lowering reads only its control (`PRELUDE_CONTROL`, `prelude-control.scm` and the `c[ad]r` family), which FX-26's runtime calls; the rest (`prelude-data.scm`) once it lowers a form (`whole_prelude`): 19.2 to 17.4 ms, instructions 99M to 86M. What is left could be an image of it, as the front end's |
 | the FX-26 runtime | 0.5 | |
 | the rest of the CLI's `start()` | 3.5 | split (2026-10-29): the Rust checker made twice, cellular and then native, 1.8 ms each; now made once, of the convention asked (`with_backend_preloaded_in`): 28.7 to 27.4 ms |
 | the front end's entries defined | 0.7 | |
