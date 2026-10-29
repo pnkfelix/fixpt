@@ -3897,3 +3897,17 @@ read, check and keep in the binary at each use.
    is so in practice is not known; a survey of the FX-26 sources (the
    front end, Kayak, Heist's) for `substring` of length one and
    `string=?` with a one-character literal would say, before building it.
+
+## 174. Bare list literals `acyclic` by default (the user's, 2026-10-29)
+
+Explore giving a bare list literal the region `acyclic` rather than
+leaving it open to region inference (a fresh `@r.1`, as `(cons 1 nil)`
+gets now: `bidirectional::nil_is_of_the_type_nil_where_nothing_says_which_list`).
+To settle first: which forms are "bare literals" (`(list …)` of values,
+a quoted datum, a chain of `cons` ending in `nil`); what becomes of one
+that is later written (refused, as writing frozen data is, or inferred
+writable where a write is seen); whether its type then meets `nlist`
+(`docs/fx26.md`, "Sizes": an `acyclic` list's length is known, and a walk
+of one needs no `spin`), which may be most of the gain; and how many of
+the test programs, the front end's sources, Kayak's and Heist's, change
+in what they check or show (a sweep as §160's masking measurement made).

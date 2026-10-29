@@ -276,14 +276,18 @@ impl Registry {
         if new.is_empty() {
             return;
         }
-        // A later piece where an earlier one was replaces it.
-        let mut kept: Vec<Owned> = Vec::new();
+        // A later piece where an earlier one was replaces it: each, latest
+        // first, kept if it overlaps none kept. Those kept are disjoint, so
+        // the one that starts last before its end is the only one it may
+        // overlap (by start, then its end).
+        let mut kept: BTreeMap<usize, Owned> = BTreeMap::new();
         for p in new.drain(..).rev() {
-            if kept.iter().all(|q| q.start + q.len <= p.start || q.start >= p.start + p.len) {
-                kept.push(p);
+            let end = p.start + p.len;
+            if kept.range(..end).next_back().is_none_or(|(_, q)| q.start + q.len <= p.start) {
+                kept.insert(p.start, p);
             }
         }
-        kept.sort_by_key(|p| p.start);
+        let kept: Vec<Owned> = kept.into_values().collect();
         for p in &kept {
             self.drop_overlapping(p.start, p.start + p.len);
         }
@@ -708,5 +712,17 @@ mod tests {
         forget(base, base + 192);
         let l = listed();
         assert!(!l.iter().any(|n| ["a", "b2", "c"].contains(&n.as_str())));
+        // In one flush, a later piece where an earlier one was replaces it,
+        // whichever starts first; pieces beside each other all stay.
+        let base = 0x7100_0000_0000;
+        for (start, len, name) in [(0, 64, "p"), (32, 64, "q"), (128, 64, "r"), (100, 40, "s"), (192, 8, "t")] {
+            register(&Piece { start: base + start, len, name, called: false, lines: None });
+        }
+        flush();
+        let l = listed();
+        for (name, kept) in [("p", false), ("q", true), ("r", false), ("s", true), ("t", true)] {
+            assert_eq!(l.contains(&name.to_string()), kept, "{name}: {l:?}");
+        }
+        forget(base, base + 256);
     }
 }
