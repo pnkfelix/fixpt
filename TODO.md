@@ -3920,3 +3920,47 @@ table's lookup, at the start) rather than in its native `spin`, and so
 then made and without it. It attaches gdb after a fixed wait: waiting for
 the program to say it is spinning (a line it prints first), or retrying
 the attach until the native frame is there, would end it.
+
+## 176. Allocation as a cost the tools say, before it is slow (the user's, 2026-10-29)
+
+Many of the costs found lately were bad allocation patterns, each found
+only by measuring after the fact:
+- FX-26: `convention.fx` making a one-character string at each test of a
+  character (§172); `why` reading the clauses afresh at each call.
+- Rust: jitdebug comparing each piece with every other (n squared), and,
+  fixed, holding all 5,186 pieces at once and copying the rest of a list
+  off at each chunk (a thousand page faults); the splice making every
+  image symbol's name a `String` to hash it (§160 item 4); the collector
+  writing every field it scanned, moved or not.
+The root causes differ, but each is an allocation, or a write, out of
+proportion to the work. Wanted: feedback on that before it shows as time.
+
+(The user asked if "cyclomatic complexity" is the term. It counts paths
+through the control flow; what is meant here is a cost or resource-bound
+analysis, with allocation as the resource.)
+
+1. **FX-26: allocation as a parametric effect**, as Gifford's group
+   modelled time: Dornic, Jouvelot and Gifford, "Polymorphic time systems
+   for estimating program complexity" (LOPLAS 1992), time as an effect
+   with polymorphic time variables; Reistad and Gifford, "Static dependent
+   costs for estimating execution time" (LFP 1994), costs that depend on
+   the sizes of the arguments. FX-26 has the pieces: `(alloc r)` effects
+   per region already, and sizes (`nlist`'s, `(nat size)`, `confirm-length`;
+   `docs/research/sizes.md`). An effect that carries a count, in calls or
+   words (`(alloc r n)`, `n` a size expression such as `(length xs)` or
+   `(* 3 (length t))`), would say of `cv-read-items` that it allocates in
+   proportion to its text times the characters' tests, and of a
+   character test that it allocates at all. To find: what a size
+   expression over a recursion is (a sum, a bound), where it must be
+   given and where it can be inferred, and whether a coarse form (O(1),
+   O(n), more) is what helps, shown by `fixpt check` or the REPL.
+2. **FX-26, without types: a lint** for the shapes seen (a fresh
+   allocation consumed at once and dropped, inside a loop; `substring`
+   of one character compared; §173's `nstring`).
+3. **Rust: proactive feedback** in the tests rather than profiles after:
+   the allocator already counts (`fixpt_memmgmt::alloc_profile`,
+   `FIXPT_ALLOC_PROFILE=N` samples stacks); a test of the start of an
+   empty program could bound its allocations and page faults (as counts,
+   which are steady, not times, which are not), so that a change that
+   multiplies them fails where it is made; and the same for the per-step
+   checks (`scripts/image-check`).
