@@ -3547,7 +3547,16 @@ Left, in order:
      name (its global slot given to that one), and the nursery collected,
      which the forwarding moves every reference to; the symbol table's
      entries the image's.
-4. **The sections mapped**, after §161 (above): the code's twice from the file, privately,
+4. **The sections mapped**, after §161 (above). The static area's two
+   halves done (2026-10-29): spliced in place, from the cache's file
+   (`Heap::splice_image_from`, `Words::map_from`), privately, the mutable
+   half writable (a page a collection writes is the process's own), the
+   immutable half read-only once the splice is done, `dump_static` padding
+   it to a page's end. `FIXPT_IMAGE_NO_MAP=1` copies as before. An empty
+   program 48.0 ms to 47.6 ms, release: the copy was little of it, and the
+   pages are read anyway as the crossing map and the symbol index are made.
+   The splice's 13 ms now: the code copied, 12.6 MB, 9 ms; the symbol
+   index, 3 ms; the crossing map, 0.6 ms. Left: the code's twice from the file, privately,
    read+execute where it runs and read-only where the heap reads it (the
    two never written, so they agree); the immutable data read-only; the
    mutable data copied on write. Then the call-out pass goes too, where

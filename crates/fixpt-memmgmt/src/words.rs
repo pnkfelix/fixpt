@@ -87,6 +87,44 @@ impl Words {
         unsafe { std::slice::from_raw_parts_mut(self.base, self.len) }
     }
 
+    /// The words from `at` on, as many as `part` holds, made `file`'s
+    /// bytes `part` (a slice of them), mapped privately from the file rather
+    /// than copied: a page written afterwards is this process's own copy.
+    /// Whole pages: `part` must start on one in the file and `at` in these
+    /// words, and what the last page holds past `part` is the file's too.
+    /// Writable or read-only as `writable` says ([`set_writable`]
+    /// (Words::set_writable)). False, and nothing changed, where it cannot
+    /// be: copy then.
+    pub fn map_from(&mut self, at: usize, file: &crate::Mapped, part: &[u8], writable: bool) -> bool {
+        let page = crate::reserve::probe::page();
+        let words = part.len().div_ceil(8);
+        let bytes = part.len().div_ceil(page) * page;
+        if at > self.len || words > self.len - at || (at * 8).checked_add(bytes).is_none_or(|e| e > self.len * 8) {
+            return false;
+        }
+        // SAFETY: whole pages inside this mapping (checked above), which
+        // `&mut self` holds no reference into while they are replaced; they
+        // stay mapped and readable, so the slice over them stays valid.
+        unsafe { file.map_over(part, self.base.add(at) as *mut u8, writable) }
+    }
+
+    /// The pages wholly within `range` made read-only, or writable again.
+    /// Words read-only are read as before; writing one faults, which ends
+    /// the process: for what nothing may write (the static area's immutable
+    /// half). False where it cannot be.
+    pub fn set_writable(&mut self, range: std::ops::Range<usize>, writable: bool) -> bool {
+        assert!(range.start <= range.end && range.end <= self.len, "within the words");
+        let page = crate::reserve::probe::page();
+        let (first, last) = ((range.start * 8).div_ceil(page) * page, range.end * 8 / page * page);
+        if first >= last {
+            return true;
+        }
+        let prot = if writable { libc::PROT_READ | libc::PROT_WRITE } else { libc::PROT_READ };
+        // SAFETY: whole pages inside this mapping; they stay mapped and
+        // readable, so the slices over them stay valid.
+        unsafe { libc::mprotect((self.base as *mut u8).add(first) as *mut libc::c_void, last - first, prot) == 0 }
+    }
+
     /// Tell the system that the words in `range` hold nothing wanted: it may
     /// take their pages back, and they read as zero, or as they were, until
     /// written. For space a collection has emptied. Whole pages only; the

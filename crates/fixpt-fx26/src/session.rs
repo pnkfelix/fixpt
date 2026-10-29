@@ -434,7 +434,8 @@ fn save_native_front_end(heap: &fixpt_heap::Heap, pieces: fixpt_heap::Value, pat
 /// What [`save_native_front_end`] kept, copied into `heap`, its code made
 /// code again: the pieces; none if the image is not one, when the front
 /// end is compiled and run as ever.
-fn load_native_front_end(k: &NativeKeeping, heap: &mut fixpt_heap::Heap, bytes: &[u8]) -> Option<fixpt_heap::Value> {
+fn load_native_front_end(k: &NativeKeeping, heap: &mut fixpt_heap::Heap, file: &fixpt_heap::Mapped) -> Option<fixpt_heap::Value> {
+    let bytes = file.get(CACHE_IMAGE_AT..)?;
     use fixpt_heap::Value;
     let img = fixpt_heap::image::parts(bytes, false).ok()?;
     let root = *img.roots.first()?;
@@ -462,7 +463,11 @@ fn load_native_front_end(k: &NativeKeeping, heap: &mut fixpt_heap::Heap, bytes: 
         // A cache of this executable's that cannot be put in is said: the
         // front end is then made again at every run, as fast as from no
         // cache at all, and nothing else would show it.
-        let spliced = heap.splice_image(&img, &given).inspect_err(|e| eprintln!("fixpt: the front end's cache could not be read ({e}); it is made again"));
+        // Its static area mapped from the file where the splice is in place
+        // (`TODO.md` §160 item 4), unless `FIXPT_IMAGE_NO_MAP` asks for it
+        // copied.
+        let map = std::env::var_os("FIXPT_IMAGE_NO_MAP").is_none().then_some(file);
+        let spliced = heap.splice_image_from(&img, &given, map).inspect_err(|e| eprintln!("fixpt: the front end's cache could not be read ({e}); it is made again"));
         let root = *spliced.ok()?.first()?;
         let theirs = heap.car(heap.cdr(heap.cdr(root)));
         if mine.is_none() && theirs != Value::FALSE {
@@ -697,7 +702,7 @@ impl Fx26Session {
             if b.get(..8)? != key.to_le_bytes() {
                 return None;
             }
-            load_native_front_end(&k, heap, b.get(CACHE_IMAGE_AT..)?)
+            load_native_front_end(&k, heap, &b)
         };
         let mut scheme = Session::with_backend_preloaded(backend, preload);
         scheme
@@ -2447,7 +2452,7 @@ impl Fx26Session {
             let mut loaded = false;
             self.scheme.scope(|sc| {
                 sc.make(|m| {
-                    if let Some(p) = load_native_front_end(k, m.heap(), from.get(CACHE_IMAGE_AT..).unwrap_or_default()) {
+                    if let Some(p) = load_native_front_end(k, m.heap(), from) {
                         set_entries(m.heap(), p, entries, native);
                         loaded = true;
                     }

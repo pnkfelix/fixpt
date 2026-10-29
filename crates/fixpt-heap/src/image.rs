@@ -184,7 +184,15 @@ fn dump_with(heap: &Heap, aligned: bool, old_static: bool) -> Vec<u8> {
     // each object in the static area's half it belongs in: an image loads
     // there.
     let (words, [immutable, statics], globals, symbols, roots, code) = if old_static {
-        let (halves, globals, symbols, roots, code) = heap.image_split_static(base);
+        let (mut halves, globals, symbols, roots, code) = heap.image_split_static(base);
+        // The immutable half to a page's end, by an empty bloblet as long as
+        // the rest: mapped read-only, it ends where the heap writes next.
+        let (page, used) = (PAGE / 8, halves[0].len() % (PAGE / 8));
+        if used > 0 {
+            let gap = page - used;
+            halves[0].push(crate::value::make_header(crate::layout::kind("bloblet"), 0, (gap - 1) * 8));
+            halves[0].resize(halves[0].len() + gap - 1, 0);
+        }
         (Vec::new(), halves, globals, symbols, roots, code)
     } else {
         let (words, globals, symbols, roots) = heap.image_parts_at(base, 0);
