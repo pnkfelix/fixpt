@@ -664,6 +664,21 @@ fn fx26_machines_by_name() {
     assert!(out.status.code() == Some(2) && err.contains("did you mean `--fx26-machine`?"), "{err}");
 }
 
+/// `fixpt prewarm` makes both of the executable's caches of the front end,
+/// each said; and with no cache, says it keeps none.
+#[test]
+fn prewarm_makes_both_caches_of_the_front_end() {
+    let out = Command::new(FIXPT).arg("prewarm").output().expect("runs");
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{said}{}", String::from_utf8_lossy(&out.stderr));
+    assert!(said.contains("the front end's register code"), "{said}");
+    if fixpt_native::NATIVE_CONVENTION_AVAILABLE {
+        assert!(said.contains("the front end's native code cached"), "{said}");
+    }
+    let out = Command::new(FIXPT).arg("prewarm").env("FIXPT_NO_CACHE", "1").output().expect("runs");
+    assert!(!out.status.success() && String::from_utf8_lossy(&out.stderr).contains("keeps no cache"));
+}
+
 /// `fixpt FILE ARG...` runs FILE as `fixpt run FILE -- ARG...` does; a
 /// `.fx` file is FX-26, a `.scm` file Scheme, with no `--dialect`.
 #[test]

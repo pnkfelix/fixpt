@@ -77,6 +77,8 @@ usage:
                                  code kept, or with --cellular its cellular
                                  words alone, compiled natively at load
   fixpt machines                 the machines FX-26 runs on, and which run here
+  fixpt prewarm                  make this executable's caches of the FX-26
+                                 front end, both kinds, before they are wanted
   fixpt bench [FILE...]          time FX-26 programs on each machine (`fixpt bench --help`)
   fixpt repl                     the REPL of the language (`fixpt fx26` too)
   fixpt scheme                   the Scheme REPL: `fixpt --dialect scheme repl`
@@ -138,8 +140,8 @@ made with rather than being told.
 
 /// The commands, as the first word: a word that is none of them but names
 /// a file runs it (`fixpt FILE`).
-const COMMANDS: [&str; 21] = [
-    "repl", "fx26", "scheme", "run", "eval", "check", "query", "test", "verify", "compile", "compile-file", "machines", "bench", "dump-heap", "build", "run-image", "image",
+const COMMANDS: [&str; 22] = [
+    "repl", "fx26", "scheme", "run", "eval", "check", "query", "test", "verify", "compile", "compile-file", "machines", "prewarm", "bench", "dump-heap", "build", "run-image", "image",
     "front-end-files", "help", "regcode-survey", "--help",
 ];
 
@@ -348,6 +350,7 @@ fn run(args: &[String]) -> i32 {
             print!("{}", machines_listing());
             0
         }
+        Some("prewarm") => prewarm(),
         // The FX-26 front end's files, in order, as `wc -l` prints them:
         // what this build of fixpt was made of, for scripts.
         Some("front-end-files") => {
@@ -627,6 +630,47 @@ pub(crate) const FX26_MACHINES: [(&str, &str, Option<&str>, Option<&str>, &str);
         "register code, compiled to machine code by Rust's direct.rs, native calls",
     ),
 ];
+
+/// `fixpt prewarm`: this executable's two caches of the FX-26 front end
+/// made now (`front_end_cache`): the one for its register code, which every
+/// machine but one native in its convention by Rust's compiler reads, and the
+/// one for its native code, which those read. Each made by a run of this
+/// executable on a machine of that kind, since a process runs one machine.
+/// So that processes started together after a build (a test suite's) find
+/// them, rather than each making them at once.
+fn prewarm() -> i32 {
+    if std::env::var_os("FIXPT_NO_CACHE").is_some() {
+        eprintln!("fixpt: prewarm: `FIXPT_NO_CACHE` keeps no cache");
+        return 1;
+    }
+    let Ok(exe) = std::env::current_exe() else {
+        eprintln!("fixpt: prewarm: this executable cannot be found");
+        return 1;
+    };
+    let first = |native: bool| {
+        FX26_MACHINES.iter().find(|(_, run, m, c, _)| *run == "cellular" && (*c == Some("native")) == native && (native || c.is_none()) && unavailable(*m, *c).is_none()).map(|(n, ..)| *n)
+    };
+    let mut status = 0;
+    for (what, native) in [("register code", false), ("native code", true)] {
+        let Some(machine) = first(native) else {
+            println!("; the front end's {what}: no machine here runs it");
+            continue;
+        };
+        let started = std::time::Instant::now();
+        match std::process::Command::new(&exe).args(["--fx26-machine", machine, "eval", "0"]).output() {
+            Ok(out) if out.status.success() => println!("; the front end's {what} cached ({machine}), {:.1} s", started.elapsed().as_secs_f64()),
+            Ok(out) => {
+                eprintln!("fixpt: prewarm: {machine} failed: {}", String::from_utf8_lossy(&out.stderr).trim());
+                status = 1;
+            }
+            Err(e) => {
+                eprintln!("fixpt: prewarm: cannot run {}: {e}", exe.display());
+                status = 1;
+            }
+        }
+    }
+    status
+}
 
 /// Why a machine of these parts cannot run here, or `None`.
 fn unavailable(machine: Option<&str>, convention: Option<&str>) -> Option<String> {

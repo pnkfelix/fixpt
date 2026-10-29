@@ -3635,3 +3635,16 @@ part page-aligned in the file: so that they can be mapped deliberately to
 pages of their own (§160 items 2 and 4, §161's sections), and perhaps
 address-space tricks played with them later (the user is less sure of
 those). One revision for both formats, not one each.
+
+## 166. nextest runs `fixpt prewarm` before the tests (the user's, 2026-10-29)
+
+After a build, every process the suite starts finds the debug `fixpt`'s
+front-end caches cold, and those that start together each make them (23 s
+each alone, in a debug build): three runs of the suite in a row failed the
+`preempt` tests, whose programs have a minute each, at 558 CPU-minutes,
+where the same code passed at 212 with the caches warm. `fixpt prewarm`
+makes both caches; a setup script in `.config/nextest.toml` should run it
+(the debug `fixpt`'s, after the build) before any test starts. Left beyond
+that: the test binaries' own caches, which `prewarm` cannot reach (each
+binary is an executable of its own), and a lock so that one process makes
+a missing cache while the others wait for it.

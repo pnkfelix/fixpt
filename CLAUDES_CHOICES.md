@@ -1765,7 +1765,9 @@ end's register words were 37% of loading kayak's compiler).
   compiler: 17.9G cycles to 17.05G; stage 0 27.0G to 26.35G. Keeping
   the native code between runs would save the rest: images carry no
   code area yet, and code numbers its call-outs into its machine's
-  table, which would have to be kept with it.
+  table, which would have to be kept with it. (Since kept: images carry
+  the code area, and a call-out's field is the call-out itself; the
+  native front end's cache holds its code, spliced in at load.)
 
 ## Kayak's x86_64 gains, ported to arm64 (2026-10-24)
 
