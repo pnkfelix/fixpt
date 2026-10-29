@@ -77,8 +77,8 @@ usage:
                                  code kept, or with --cellular its cellular
                                  words alone, compiled natively at load
   fixpt machines                 the machines FX-26 runs on, and which run here
-  fixpt prewarm                  make this executable's caches of the FX-26
-                                 front end, both kinds, before they are wanted
+  fixpt prewarm                  make the caches of the FX-26 front end, both
+                                 kinds, before they are wanted
   fixpt bench [FILE...]          time FX-26 programs on each machine (`fixpt bench --help`)
   fixpt repl                     the REPL of the language (`fixpt fx26` too)
   fixpt scheme                   the Scheme REPL: `fixpt --dialect scheme repl`
@@ -631,11 +631,13 @@ pub(crate) const FX26_MACHINES: [(&str, &str, Option<&str>, Option<&str>, &str);
     ),
 ];
 
-/// `fixpt prewarm`: this executable's two caches of the FX-26 front end
-/// made now (`front_end_cache`): the one for its register code, which every
-/// machine but one native in its convention by Rust's compiler reads, and the
-/// one for its native code, which those read. Each made by a run of this
-/// executable on a machine of that kind, since a process runs one machine.
+/// `fixpt prewarm`: the two caches of the FX-26 front end made now
+/// (`front_end_cache`), shared by every executable built from the same
+/// sources: the one for its register code, which library sessions (the
+/// tests') and `fx-regs-fxjit-nativecc` read, and the one for its native
+/// code, which the CLI reads wherever native code runs (`TODO.md` §168).
+/// Each made by a run of this executable on a cellular machine, the first
+/// told to take the cellular front end (`FIXPT_FRONT_END_CELLULAR`).
 /// So that processes started together after a build (a test suite's) find
 /// them, rather than each making them at once.
 fn prewarm() -> i32 {
@@ -657,7 +659,11 @@ fn prewarm() -> i32 {
             continue;
         };
         let started = std::time::Instant::now();
-        match std::process::Command::new(&exe).args(["--fx26-machine", machine, "eval", "0"]).output() {
+        let mut run = std::process::Command::new(&exe);
+        if !native {
+            run.env("FIXPT_FRONT_END_CELLULAR", "1");
+        }
+        match run.args(["--fx26-machine", machine, "eval", "0"]).output() {
             Ok(out) if out.status.success() => println!("; the front end's {what} cached ({machine}), {:.1} s", started.elapsed().as_secs_f64()),
             Ok(out) => {
                 eprintln!("fixpt: prewarm: {machine} failed: {}", String::from_utf8_lossy(&out.stderr).trim());

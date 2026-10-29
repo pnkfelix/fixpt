@@ -91,11 +91,21 @@ fn show(session: &Fx26Session, out: &Outcome, show_code: bool) {
 }
 
 fn start(backend: Backend) -> Result<Fx26Session, i32> {
-    // The front end native where the compiler written in Rust makes its
-    // code (below): its cache read into the heap first, before the runtime
-    // and the prelude intern anything (`TODO.md` §161).
-    let native_front_end = crate::NATIVE_CONVENTION.get().copied().unwrap_or(false) && !crate::NATIVE_BY_FX26.get().copied().unwrap_or(false);
-    let keeping = native_front_end.then_some(NATIVE_KEEPING);
+    // The front end native wherever native code runs, whatever the
+    // program's convention, but where the compiler written in FX-26 makes
+    // each procedure's code (below): its cache, the front end as its first
+    // run left it, read into the heap first, before the runtime and the
+    // prelude intern anything (`TODO.md` §161). The cellular front end's
+    // cache is of it before its run, which every process then makes again,
+    // its register words assembled again (`TODO.md` §168): some 4 s of a
+    // debug build's start, 0.6 s natively.
+    let by_fx26 = crate::NATIVE_BY_FX26.get().copied().unwrap_or(false);
+    let native_front_end = fixpt_native::NATIVE_CONVENTION_AVAILABLE && !by_fx26 && std::env::var_os("FIXPT_FRONT_END_CELLULAR").is_none();
+    // Read in first only where the program will run on it: lowered, the
+    // Rust checker checks, and a session may not load the front end at
+    // all (read in when it does).
+    let lowered = crate::FX26_RUN.get().copied().unwrap_or_default() == fixpt_fx26::session::Strategy::Lower;
+    let keeping = (native_front_end && !lowered).then_some(NATIVE_KEEPING);
     let mut s = Fx26Session::with_backend_preloaded(backend, keeping).map_err(|e| {
         eprintln!("fixpt: {e}");
         1
@@ -112,26 +122,13 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
     if crate::NATIVE_CONVENTION.get().copied().unwrap_or(false) {
         s.set_native_convention(true);
         s.native_runner = Some(run_native);
+        s.native_compiler = Some(fixpt_native::direct::compile_closure);
         // Lines for a debugger (`fixpt_native::jitdebug`): from the sources
         // the session keeps.
         if fixpt_native::jitdebug::enabled() {
             fixpt_fx26::sources::want();
             fixpt_native::jitdebug::set_resolver(fixpt_fx26::sources::resolve);
         }
-        s.native_compiler = Some(fixpt_native::direct::compile_closure);
-        // What cellular code makes, compiled natively where it can be, on
-        // the machine `run_native` runs on: by the compiler written in Rust,
-        // so not where the one written in FX-26 makes each procedure's code
-        // (`TODO.md` §121).
-        let by_fx26 = crate::NATIVE_BY_FX26.get().copied().unwrap_or(false);
-        fixpt_native::direct::compile_when_adapting(!by_fx26);
-        // The front end native too, where the compiler written in Rust
-        // makes its code: about 3% of loading kayak's compiler (`TODO.md`
-        // §126); not where its own compiler makes each procedure's.
-        s.front_end_native = !by_fx26;
-        // Its native code kept in the cache after its first run, and read
-        // back (`TODO.md` §126).
-        s.native_keeping = Some(NATIVE_KEEPING);
         // Each procedure's code made by the compiler written in FX-26.
         if by_fx26 {
             s.native_fx = Some(compile_by_fx26);
@@ -146,6 +143,18 @@ fn start(backend: Backend) -> Result<Fx26Session, i32> {
     if fixpt_native::NATIVE_CONVENTION_AVAILABLE {
         s.scheme.runtime_unrooted().call_native = Some(fixpt_native::direct::call_native);
         s.scheme.runtime_unrooted().adapt = Some(fixpt_native::direct::adapt);
+    }
+    if native_front_end {
+        // What cellular code makes, compiled natively where it can be, on
+        // the machine `run_native` runs on: by the compiler written in
+        // Rust, so not where the one written in FX-26 makes each
+        // procedure's code (`TODO.md` §121).
+        fixpt_native::direct::compile_when_adapting(true);
+        // The front end native: about 3% of loading kayak's compiler
+        // (`TODO.md` §126), its native code kept in the cache after its
+        // first run, and read back.
+        s.front_end_native = true;
+        s.native_keeping = Some(NATIVE_KEEPING);
     }
     crate::apply_gc_policy(&mut s.scheme);
     if let Some(l) = crate::STEP_LIMIT.get() {

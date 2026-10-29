@@ -3743,3 +3743,26 @@ each-machine tests, 290 s and 195 s; `process_programs_do_as_they_say_every_way`
 250 s; `register_code_runs_as_lowered_while_collecting`, 230 s;
 `every_program_on_every_machine`, 205 s), each of which might be split by
 machine so that nextest runs the parts at once.
+
+## 168. The front end native on every machine that runs native code (the user's, 2026-10-29)
+
+A cellular-convention machine's process took some 4 s to start in a debug
+build, for a program that runs in a fraction of one: the cellular front
+end's cache is of the front end before its run, so each process copied
+it as a graph, ran the front end's top level again, and the hand register
+machine assembled its register words to machine code again (in its own
+code space, outside the heap, where no image reaches). The `preempt` and
+`attempt` tests run each of their programs as a process on each machine:
+72 of them in one test. Now the CLI's front end is native wherever native
+code runs (`NATIVE_CONVENTION_AVAILABLE`), whatever the program's
+convention: its cache, as its first run left it, preloaded (§161). The
+program's own code is compiled natively only in the native convention
+(`native_compiler`, which, set for a cellular-convention program,
+crashed `fx-regs-rsjit-cellcc`: worth knowing why, some day). Not where
+the compiler written in FX-26 makes each procedure's code
+(`fx-regs-fxjit-nativecc`, still 4 s), nor preloaded where the program is
+lowered (`rs-scheme-vm`, 0.1 s, which may never load the front end).
+`FIXPT_FRONT_END_CELLULAR=1` for the cellular front end, as before.
+Trivial programs, debug: 4.0–4.6 s to 0.65–1.15 s on the cellular machines.
+Left: library sessions (`Fx26Session::with_backend`, the tests') still
+take the cellular front end (§167).
