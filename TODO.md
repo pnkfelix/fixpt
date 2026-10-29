@@ -3765,6 +3765,27 @@ each-machine tests, 290 s and 195 s; `process_programs_do_as_they_say_every_way`
 `every_program_on_every_machine`, 205 s), each of which might be split by
 machine so that nextest runs the parts at once.
 
+3. Done (2026-10-29): the long tests split, so that nextest runs their
+   parts at once: `preempt`'s by machine (a module for each); the
+   compiler's every program by machine; the process programs by way, the
+   native way, `attempt`'s and the monitors' by shards of their programs
+   (`common::sharded!`, `common::shard`, 8, dealt round-robin); register
+   code collecting at every allocation by directory, `run` and `modules`
+   by shards, `run/tail-marks.fx` 3,000 rounds there, not 300,000
+   (`SHORTER_WHILE_COLLECTING`: what collecting so checks a short run
+   checks too; the constant space the long run is for the other tests
+   check). The five tests of the native compilers share one compile of the
+   bootstrap program for each kind (`common::bootstrap_compiled`: an image
+   in the build's temporary directory, keyed by the sources, made by one
+   test while the others wait on its lock): 98 s cold, 11 s warm, where
+   each was 95 s. The suite: 3 min 0 s (7 min 18 s), 117 CPU-minutes, 958
+   of 958. Longest now: `bootstrap::the_compiler_compiles_the_front_end`
+   (103 s, the compile it tests), `direct`'s `control_on_native_frames`
+   (97 s) and `deep_recursion_through_the_stack_cache` (85 s), the
+   `fasl` and `every_program_on_*` tests (70 to 80 s);
+   `modules/convention-read.fx` collecting at every allocation 63 s, all
+   but 1 s its run.
+
 ## 168. The front end native on every machine that runs native code (the user's, 2026-10-29)
 
 A cellular-convention machine's process took some 4 s to start in a debug
@@ -3822,3 +3843,22 @@ cellular front end's run. 1.5 minutes warm. Writing it found:
 Checked to fail on a walk that skips fields, and on references misdirected
 in the immutable half; not on a few non-reference words flipped there,
 which no program reads (raw bytes, mostly).
+
+## 171. The embedded FX-26 sources minified at build time (the user's, 2026-10-29)
+
+A procedural macro (an `include_str!` that minifies) for the FX-26 sources
+built into the executable (`FRONT_END_MODULES`, `STANDARD_MODULES`,
+`FRONT_END_FILES`, `BOOTSTRAP`, `convention.fx`'s 559 lines, ...): less to
+read, check and keep in the binary at each use.
+- Drop comments first.
+- Then look for other things to drop: top-level expressions that are pure
+  and define nothing (their values unused), and whatever else the reader
+  and checker do work for that the result does not need.
+- Keep what errors are placed by: an error in the front end is said at its
+  file and line (`bootstrap::an_error_in_the_front_end_is_placed_in_its_files`),
+  so a comment replaced by as many newlines, or a map of lines kept.
+- Not for a `load-input` file's one expression, which is the value.
+- Measure first: for `modules/convention-read.fx`, checking (the module
+  with it) was 0.1 s of the 63 s it takes collecting at every allocation,
+  60.3 s the run; where reading and checking the embedded sources is the
+  cost is the front end's own build and `fasl`-less loads.

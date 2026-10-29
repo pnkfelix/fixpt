@@ -11,7 +11,6 @@ use fixpt_fx26::session::READER_PREFIX;
 use fixpt_heap::layout::kind;
 use fixpt_heap::layout::cellular::{CLOSURE_WORD, WORD_CELL0};
 use fixpt_heap::{Heap, Value};
-use fixpt_read::FileId;
 use fixpt_scheme::Handle;
 
 /// Every word `word` reaches through its cells and operands.
@@ -39,11 +38,10 @@ fn reachable(heap: &Heap, word: Value) -> Vec<Value> {
 /// end compiled: `limit` words, or all of them.
 fn compare(limit: usize) {
     let mut s = common::front_end_session();
-    let text = fixpt_fx26::bootstrap_program();
     let (mut wrong, mut compared, mut bytes) = (Vec::new(), 0, 0);
     s.scheme.scope(|sc| {
-        let facts = fixpt_fx26::syn::rust_facts(sc, FileId(0), &text).expect("checks");
-        let stage1 = fixpt_fx26::syn::compile_to_word(sc, FileId(0), &text, facts).expect("parses").expect("compiles");
+        // Compiled once for all these tests (`common::bootstrap_compiled`).
+        let stage1 = common::bootstrap_compiled(sc, false);
         // Rooted, since running the FX-26 compiler may collect.
         // Walked where nothing can collect: in `make`, which cannot run the
         // engine.
@@ -111,11 +109,10 @@ fn every_word_of_the_front_end_as_the_rust_compiler_compiles_it() {
 fn compare_registers(limit: usize) {
     use fixpt_heap::layout::cellular::WORD_TWIN;
     let mut s = common::front_end_session();
-    let text = fixpt_fx26::bootstrap_program();
     let (mut wrong, mut compared, mut refused, mut bytes) = (Vec::new(), 0, 0, 0);
     s.scheme.scope(|sc| {
-        let facts = fixpt_fx26::syn::rust_facts(sc, FileId(0), &text).expect("checks");
-        let stage1 = fixpt_fx26::syn::compile_to_word_with_registers(sc, FileId(0), &text, facts).expect("parses").expect("compiles");
+        // Compiled once for all these tests (`common::bootstrap_compiled`).
+        let stage1 = common::bootstrap_compiled(sc, true);
         let mut twins = Vec::new();
         sc.make(|m| {
             let w = m.get(stage1);
@@ -204,11 +201,10 @@ fn compare_direct(limit: usize) {
     use fixpt_heap::layout::cellular::{CLOSURE_WORD, WORD_TWIN};
     use fixpt_native::direct::DirectMachine;
     let mut s = common::front_end_session();
-    let text = fixpt_fx26::bootstrap_program();
     let (mut wrong, mut compared, mut refused, mut bytes) = (Vec::new(), 0, 0, 0);
     s.scheme.scope(|sc| {
-        let facts = fixpt_fx26::syn::rust_facts(sc, FileId(0), &text).expect("checks");
-        let stage1 = fixpt_fx26::syn::compile_to_word_with_registers(sc, FileId(0), &text, facts).expect("parses").expect("compiles");
+        // Compiled once for all these tests (`common::bootstrap_compiled`).
+        let stage1 = common::bootstrap_compiled(sc, true);
         let mut words = Vec::new();
         sc.make(|m| {
             let w = m.get(stage1);

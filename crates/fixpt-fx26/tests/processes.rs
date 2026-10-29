@@ -108,23 +108,48 @@ fn native(text: &str) -> Result<String, String> {
     last
 }
 
-/// Every program, every way it runs: as it says.
-#[test]
-fn process_programs_do_as_they_say_every_way() {
-    let mut wrong = Vec::new();
+/// Every program, every way it runs: as it says. A test for each way, so
+/// that they run at once (`TODO.md` §167).
+macro_rules! process_programs_do_as_they_say {
+    ($($test:ident: $way:expr;)*) => {$(
+        #[test]
+        fn $test() {
+            process_programs_do_as_they_say($way);
+        }
+    )*};
+}
+
+process_programs_do_as_they_say! {
+    process_programs_do_as_they_say_lowered: "lowered";
+    process_programs_do_as_they_say_evaluated: "evaluated";
+    process_programs_do_as_they_say_compiled: "compiled";
+}
+
+// Native, the longest by far, a test for each shard of the programs.
+common::sharded!(process_programs_do_as_they_say_native, process_programs_native);
+
+fn process_programs_native(k: usize) {
+    process_programs_in("native", common::shard(programs(), k));
+}
+
+fn process_programs_do_as_they_say(way: &str) {
     let all = programs();
     assert!(all.len() >= 12, "only {} programs", all.len());
-    for (name, text, says) in &all {
-        let ways = [
-            ("lowered", lowered(text, None)),
-            ("evaluated", printed(common::with_own(|s| s.eval_with_own_evaluator(text)))),
-            ("compiled", printed(common::with_own(|s| s.compile_with_own_compiler(text)))),
-            ("native", native(text)),
-        ];
-        for (way, got) in ways {
-            if !as_said(says, &got) {
-                wrong.push(format!("{name}, {way}: says {says:?}, gives {got:?}"));
-            }
+    process_programs_in(way, all);
+}
+
+fn process_programs_in(way: &str, these: Vec<(String, String, Result<String, String>)>) {
+    let mut wrong = Vec::new();
+    for (name, text, says) in &these {
+        let got = match way {
+            "lowered" => lowered(text, None),
+            "evaluated" => printed(common::with_own(|s| s.eval_with_own_evaluator(text))),
+            "compiled" => printed(common::with_own(|s| s.compile_with_own_compiler(text))),
+            "native" => native(text),
+            _ => unreachable!("a way of the list"),
+        };
+        if !as_said(says, &got) {
+            wrong.push(format!("{name}, {way}: says {says:?}, gives {got:?}"));
         }
     }
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
@@ -264,14 +289,16 @@ fn a_spinning_process_is_preempted() {
     }
 }
 
-/// `attempt` (Heist's, `FIXPT-CHANGES.md` F1): a failure in a cancellable
-/// body is its on-failure's value, not the form's (`programs/attempt`),
-/// every way, and under schedules of many orders; a body that could be
-/// seen is refused by both checkers.
-#[test]
-fn an_attempts_failure_is_its_on_failures_value() {
+// `attempt` (Heist's, `FIXPT-CHANGES.md` F1): a failure in a cancellable
+// body is its on-failure's value, not the form's (`programs/attempt`),
+// every way, and under schedules of many orders; a body that could be
+// seen is refused by both checkers. A test for each shard of the
+// programs (`common::sharded`).
+common::sharded!(an_attempts_failure_is_its_on_failures_value, attempts_failure);
+
+fn attempts_failure(k: usize) {
     let mut wrong = Vec::new();
-    for (name, text, says) in &programs_in("attempt") {
+    for (name, text, says) in &common::shard(programs_in("attempt"), k) {
         let ways = [
             ("lowered", lowered(text, None)),
             ("evaluated", printed(common::with_own_eval(|s| s.eval_with_own_evaluator(text)))),
@@ -295,14 +322,15 @@ fn an_attempts_failure_is_its_on_failures_value() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// Monitors (`docs/fx26.md`, "Monitors"; kayak's request, `TODO.md` §94):
-/// a monitored process's failure is a message to its watcher, not the
-/// form's (`programs/monitors`), every way, and under schedules of many
-/// orders.
-#[test]
-fn a_monitored_process_failure_is_a_message() {
+// Monitors (`docs/fx26.md`, "Monitors"; kayak's request, `TODO.md` §94):
+// a monitored process's failure is a message to its watcher, not the
+// form's (`programs/monitors`), every way, and under schedules of many
+// orders. A test for each shard of the programs (`common::sharded`).
+common::sharded!(a_monitored_process_failure_is_a_message, monitored_failure);
+
+fn monitored_failure(k: usize) {
     let mut wrong = Vec::new();
-    for (name, text, says) in &programs_in("monitors") {
+    for (name, text, says) in &common::shard(programs_in("monitors"), k) {
         let ways = [
             ("lowered", lowered(text, None)),
             ("evaluated", printed(common::with_own(|s| s.eval_with_own_evaluator(text)))),

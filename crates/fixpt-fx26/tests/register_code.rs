@@ -4,6 +4,8 @@
 
 use fixpt_engine::Backend;
 use fixpt_fx26::session::Fx26Session;
+
+mod common;
 use fixpt_fx26::Checker;
 use fixpt_read::FileId;
 
@@ -89,29 +91,84 @@ fn every_test_program_has_well_formed_register_code() {
 /// lowering gives.
 #[test]
 fn register_code_runs_as_lowered() {
-    runs_as_lowered(None);
+    let ran = runs_as_lowered(&SUBS, None, None);
+    assert!(ran >= 15, "only {ran}");
 }
+
+/// The directories of `tests/programs` whose programs
+/// [`runs_as_lowered`] runs.
+const SUBS: [&str; 8] = ["bidirectional", "bloblet", "control", "run", "pldi89", "bench", "datum", "modules"];
 
 /// The same, collecting at every allocation, so that every object moves
 /// under every call-out: what register code keeps in registers across one
-/// would be stale.
-#[test]
-fn register_code_runs_as_lowered_while_collecting() {
-    runs_as_lowered(Some(1));
+/// would be stale. A test for each directory, so that they run at once
+/// (`TODO.md` §167): together, the suite's longest but one.
+macro_rules! runs_as_lowered_while_collecting {
+    ($($test:ident: $sub:expr;)*) => {$(
+        #[test]
+        fn $test() {
+            let ran = runs_as_lowered(&[$sub], Some(1), None);
+            assert!(ran >= 1, "none ran");
+        }
+    )*};
 }
 
-fn runs_as_lowered(gc_every: Option<u64>) {
+runs_as_lowered_while_collecting! {
+    register_code_runs_as_lowered_while_collecting_bidirectional: "bidirectional";
+    register_code_runs_as_lowered_while_collecting_bloblet: "bloblet";
+    register_code_runs_as_lowered_while_collecting_control: "control";
+    register_code_runs_as_lowered_while_collecting_pldi89: "pldi89";
+    register_code_runs_as_lowered_while_collecting_bench: "bench";
+    register_code_runs_as_lowered_while_collecting_datum: "datum";
+}
+
+// `run` and `modules`, the longest by far, a test for each shard of their
+// programs.
+common::sharded!(register_code_runs_as_lowered_while_collecting_run, while_collecting_run);
+common::sharded!(register_code_runs_as_lowered_while_collecting_modules, while_collecting_modules);
+
+fn while_collecting_run(k: usize) {
+    runs_as_lowered(&["run"], Some(1), Some(k));
+}
+
+fn while_collecting_modules(k: usize) {
+    runs_as_lowered(&["modules"], Some(1), Some(k));
+}
+
+/// Programs run shorter when collecting at every allocation: each one's
+/// path in `tests/programs`, and the text replaced in it. What collecting
+/// so checks (that what register code holds survives being moved) a short
+/// run checks as well, and a long one is minutes of collections; what the
+/// long run is for, the other tests check (`run/tail-marks.fx`'s 300,000
+/// rounds, that a mark in tail position keeps the loop in constant space:
+/// natively in `direct.rs`, on every machine in `compiler.rs`).
+const SHORTER_WHILE_COLLECTING: [(&str, &str, &str); 1] = [("run/tail-marks.fx", "(loop 300000)", "(loop 3000)")];
+
+/// Each program of `subs` that checks and runs, as above, or of shard
+/// `shard` of them (`common::shard`): how many ran.
+fn runs_as_lowered(subs: &[&str], gc_every: Option<u64>, shard: Option<usize>) -> usize {
     use fixpt_heap::Value;
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
     let (mut report, mut ran) = (Vec::new(), 0);
-    for sub in ["bidirectional", "bloblet", "control", "run", "pldi89", "bench", "datum", "modules"] {
+    for &sub in subs {
         let mut paths: Vec<_> = std::fs::read_dir(format!("{dir}/{sub}")).unwrap().map(|p| p.unwrap().path()).collect();
         paths.sort();
+        if let Some(k) = shard {
+            paths = common::shard(paths, k);
+        }
         for path in paths {
             if sub == "bench" && !path.to_string_lossy().contains("tak") {
                 continue; // the others are long; the benchmark runs them
             }
-            let text = std::fs::read_to_string(&path).unwrap();
+            let mut text = std::fs::read_to_string(&path).unwrap();
+            if gc_every.is_some() {
+                for (program, from, to) in SHORTER_WHILE_COLLECTING {
+                    if path.ends_with(program) {
+                        assert!(text.contains(from), "{program} has no `{from}` to shorten");
+                        text = text.replace(from, to);
+                    }
+                }
+            }
             let mut c = Checker::new();
             let Ok(forms) = c.read_in(FileId(0), &text) else { continue };
             let Ok(done) = c.declare_ahead(&forms) else { continue };
@@ -144,7 +201,7 @@ fn runs_as_lowered(gc_every: Option<u64>) {
         }
     }
     assert!(report.is_empty(), "{}", report.join("\n"));
-    assert!(ran >= 15, "only {ran}");
+    ran
 }
 
 /// `program` in `tests/programs/run`, compiled with register code and run

@@ -102,10 +102,30 @@ fn every_program_compiled() {
 /// Control, and everything else a native machine has no code for, runs
 /// there through the Rust machine (the round trip). The stencils only where
 /// the build made them (a nightly compiler, arm64 or x86_64 Linux); and on
-/// x86_64, register code compiled by `native-x64-regs.fx`.
-#[test]
-#[cfg_attr(not(any(target_arch = "aarch64", target_arch = "x86_64")), ignore = "runs machine code")]
-fn every_program_on_every_machine() {
+/// x86_64, register code compiled by `native-x64-regs.fx`. A test for each
+/// machine, so that they run at once (`TODO.md` §167).
+macro_rules! every_program_on {
+    ($($test:ident: $machine:expr;)*) => {$(
+        #[test]
+        #[cfg_attr(not(any(target_arch = "aarch64", target_arch = "x86_64")), ignore = "runs machine code")]
+        fn $test() {
+            every_program_on($machine);
+        }
+    )*};
+}
+
+every_program_on! {
+    every_program_on_native: "native";
+    every_program_on_native_words_compiled: "native, words compiled";
+    every_program_on_native_words_compiled_by_native_fx: "native, words compiled by native.fx";
+    every_program_on_register_code: "register code";
+    every_program_on_stencils: "stencils";
+    every_program_on_register_code_by_native_x64_regs_fx: "register code compiled by native-x64-regs.fx";
+}
+
+/// [`every_program_on`]'s machine `machine`, by its name; nothing where
+/// this build has not that machine.
+fn every_program_on(machine: &str) {
     type Run = fn(&mut fixpt_runtime::Runtime, fixpt_heap::Value, &[fixpt_heap::Value]) -> Result<fixpt_heap::Value, String>;
     // Each: its name, its machine, whether the compiler makes register
     // code for it, and how code `native.fx` makes is placed, if it makes it.
@@ -118,42 +138,33 @@ fn every_program_on_every_machine() {
         ("stencils", fixpt_native::stencil::run_word, false, None),
         ("register code compiled by native-x64-regs.fx", fixpt_native::cellular::run_word_as_is, true, Some(fixpt_native::cellular::place_word)),
     ];
+    let (name, run, registers, place) = machines.into_iter().find(|(n, ..)| *n == machine).expect("a machine of the list");
     // The stencils where the build made them; FX-26's register code for
     // x86_64 only.
-    let machines: Vec<_> = machines
-        .into_iter()
-        .filter(|(name, ..)| *name != "stencils" || !fixpt_native::stencil::opt_levels().is_empty())
-        .filter(|(name, ..)| !name.contains("native-x64-regs") || cfg!(target_arch = "x86_64"))
-        .collect();
+    if (name == "stencils" && fixpt_native::stencil::opt_levels().is_empty()) || (name.contains("native-x64-regs") && !cfg!(target_arch = "x86_64")) {
+        return;
+    }
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/programs");
     let mut report = Vec::new();
-    // A session for each machine, for every program.
-    let mut sessions: Vec<Fx26Session> = machines
-        .iter()
-        .map(|(_, run, registers, place)| {
-            let mut s = common::session();
-            s.scheme.runtime_unrooted().run_word = Some(*run);
-            s.scheme.runtime_unrooted().place_code = *place;
-            s.register_code = *registers;
-            s
-        })
-        .collect();
+    // A session for the machine, for every program.
+    let mut s = common::session();
+    s.scheme.runtime_unrooted().run_word = Some(run);
+    s.scheme.runtime_unrooted().place_code = place;
+    s.register_code = registers;
     for sub in ["bidirectional", "control", "run", "pldi89", "bloblet", "datum", "modules", "higher-kinds", "processes"] {
         let mut names: Vec<_> = std::fs::read_dir(format!("{dir}/{sub}")).unwrap().map(|e| e.unwrap().path()).collect();
         names.sort();
         for path in names {
             let program = std::fs::read_to_string(&path).unwrap();
-            let mut s = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
-            let lowered = match s.run_program(&program) {
+            let mut low = Fx26Session::with_backend(Backend::Bytecode).expect("starts");
+            let lowered = match low.run_program(&program) {
                 Ok(v) => v.unwrap_or_else(|e| format!("!! {e}")),
                 Err(_) => continue,
             };
-            for ((name, ..), s) in machines.iter().zip(&mut sessions) {
-                let compiled = s.compile_with_own_compiler(&program).map_err(|e| e.to_string());
-                if compiled.as_deref() != Ok(lowered.as_str()) {
-                    let file = path.file_name().unwrap().to_string_lossy().to_string();
-                    report.push(format!("{name} {sub}/{file}: {compiled:?}, lowered {lowered:?}"));
-                }
+            let compiled = s.compile_with_own_compiler(&program).map_err(|e| e.to_string());
+            if compiled.as_deref() != Ok(lowered.as_str()) {
+                let file = path.file_name().unwrap().to_string_lossy().to_string();
+                report.push(format!("{name} {sub}/{file}: {compiled:?}, lowered {lowered:?}"));
             }
         }
     }

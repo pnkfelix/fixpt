@@ -15,7 +15,6 @@ use fixpt_heap::layout::cellular::{CLOSURE_WORD, WORD_CELL0, WORD_TWIN};
 use fixpt_heap::layout::kind;
 use fixpt_heap::{Heap, Value};
 use fixpt_native::direct::reps_oracle as oracle;
-use fixpt_read::FileId;
 use fixpt_scheme::Handle;
 
 /// The pass's modules, and what the test calls of them: each step on a
@@ -72,11 +71,10 @@ fn compare(limit: usize) {
     let mut s = common::front_end_session();
     // The pass as register code too: lowered, some words took minutes.
     s.program_as_register_code(PROGRAM, &["t-all"], "fx").unwrap_or_else(|e| panic!("compiles: {e}"));
-    let text = fixpt_fx26::bootstrap_program();
     let (mut wrong, mut compared, mut instructions, mut split) = (Vec::new(), 0, 0, 0);
     s.scheme.scope(|sc| {
-        let facts = fixpt_fx26::syn::rust_facts(sc, FileId(0), &text).expect("checks");
-        let stage1 = fixpt_fx26::syn::compile_to_word_with_registers(sc, FileId(0), &text, facts).expect("parses").expect("compiles");
+        // Compiled once for all these tests (`common::bootstrap_compiled`).
+        let stage1 = common::bootstrap_compiled(sc, true);
         let mut found = Vec::new();
         sc.make(|m| {
             let w = m.get(stage1);

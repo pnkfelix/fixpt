@@ -10,7 +10,6 @@ use fixpt_fx26::session::READER_PREFIX;
 use fixpt_heap::layout::kind;
 use fixpt_heap::layout::cellular::{CLOSURE_WORD, WORD_CELL0};
 use fixpt_heap::{Heap, Value};
-use fixpt_read::FileId;
 use fixpt_scheme::Handle;
 
 /// Every word `word` reaches through its cells and operands.
@@ -38,12 +37,11 @@ fn reachable(heap: &Heap, word: Value) -> Vec<Value> {
 /// end compiled: `limit` words, or all of them.
 fn compare(limit: usize) {
     let mut s = common::front_end_session();
-    let text = fixpt_fx26::bootstrap_program();
     let far = [-5000i64, -6000];
     let (mut wrong, mut compared, mut instructions) = (Vec::new(), 0, 0);
     s.scheme.scope(|sc| {
-        let facts = fixpt_fx26::syn::rust_facts(sc, FileId(0), &text).expect("checks");
-        let stage1 = fixpt_fx26::syn::compile_to_word(sc, FileId(0), &text, facts).expect("parses").expect("compiles");
+        // Compiled once for all these tests (`common::bootstrap_compiled`).
+        let stage1 = common::bootstrap_compiled(sc, false);
         // Rooted, since running the FX-26 compiler may collect.
         // Walked where nothing can collect: in `make`, which cannot run the
         // engine.

@@ -79,30 +79,97 @@ fn as_said_in(dir: &str, name: &str, machines: &[&str], slice: Option<u64>) {
     assert!(wrong.is_empty(), "{name}, slice {slice:?}:\n{}", wrong.join("\n"));
 }
 
+/// Each test below on each machine, a test of its own for each, so that
+/// they run at once (`TODO.md` §167): together, run machine after
+/// machine, they were the suite's longest. A machine this build has not
+/// (`machines`) runs nothing.
+macro_rules! on_each_machine {
+    ($($module:ident: $machine:expr;)*) => {$(
+        mod $module {
+            fn ms() -> Vec<&'static str> {
+                super::machines().into_iter().filter(|m| *m == $machine).collect()
+            }
+
+            #[test]
+            fn a_spinning_process_is_preempted() {
+                super::a_spinning_process_is_preempted(&ms());
+            }
+
+            #[test]
+            fn a_monitored_failure_is_a_message() {
+                super::a_monitored_failure_is_a_message(&ms());
+            }
+
+            #[test]
+            fn an_attempts_failure_is_caught() {
+                super::an_attempts_failure_is_caught(&ms());
+            }
+
+            #[test]
+            fn preempted_processes_keep_what_they_hold() {
+                super::preempted_processes_keep_what_they_hold(&ms());
+            }
+
+            #[test]
+            fn preempted_at_nearly_every_poll() {
+                super::preempted_at_nearly_every_poll(&ms());
+            }
+        }
+    )*};
+}
+
+on_each_machine! {
+    rs_scheme_vm: "rs-scheme-vm";
+    fx_ast_eval: "fx-ast-eval";
+    fx_cells_rsinterp: "fx-cells-rsinterp";
+    fx_cells_asminterp: "fx-cells-asminterp";
+    fx_cells_rsjit_cellcc: "fx-cells-rsjit-cellcc";
+    fx_cells_fxjit_cellcc: "fx-cells-fxjit-cellcc";
+    fx_cells_stencils_cellcc: "fx-cells-stencils-cellcc";
+    fx_regs_rsjit_cellcc: "fx-regs-rsjit-cellcc";
+    fx_regs_rsjit_nativecc: "fx-regs-rsjit-nativecc";
+}
+
+/// Every machine of `machines` is one of `on_each_machine`'s.
 #[test]
-fn a_spinning_process_is_preempted_on_each_machine() {
-    as_said("spinner.fx", &machines(), None);
+fn each_machine_has_its_tests() {
+    let listed = [
+        "rs-scheme-vm",
+        "fx-ast-eval",
+        "fx-cells-rsinterp",
+        "fx-cells-asminterp",
+        "fx-cells-rsjit-cellcc",
+        "fx-cells-fxjit-cellcc",
+        "fx-cells-stencils-cellcc",
+        "fx-regs-rsjit-cellcc",
+        "fx-regs-rsjit-nativecc",
+    ];
+    for m in machines() {
+        assert!(listed.contains(&m), "{m} has no tests of its own");
+    }
+}
+
+fn a_spinning_process_is_preempted(ms: &[&str]) {
+    as_said("spinner.fx", ms, None);
     // Spinning in cellular code native code called (`TODO.md` §93).
-    as_said("spinner-cellular.fx", &machines(), None);
+    as_said("spinner-cellular.fx", ms, None);
 }
 
 /// A monitored process's failure is a message to its watcher, on each
 /// machine (`programs/monitors`, `TODO.md` §94): a failure the machine traps
 /// is caught as the runtime's primitives' are.
-#[test]
-fn a_monitored_failure_is_a_message_on_each_machine() {
+fn a_monitored_failure_is_a_message(ms: &[&str]) {
     for name in ["worker-fails.fx", "trap.fx", "par-branch.fx", "one-message.fx", "race-lost.fx"] {
-        as_said_in("monitors", name, &machines(), None);
+        as_said_in("monitors", name, ms, None);
     }
 }
 
 /// `attempt` (Heist's, `FIXPT-CHANGES.md` F1) on each machine
 /// (`programs/attempt`): a failure the machine traps is its on-failure's
 /// value.
-#[test]
-fn an_attempts_failure_is_caught_on_each_machine() {
+fn an_attempts_failure_is_caught(ms: &[&str]) {
     for name in ["trap.fx", "error.fx", "nested.fx", "own-region.fx", "in-process.fx", "handler-io.fx", "many.fx", "evaluator-after-failure.fx"] {
-        as_said_in("attempt", name, &machines(), None);
+        as_said_in("attempt", name, ms, None);
     }
 }
 
@@ -110,17 +177,15 @@ fn an_attempts_failure_is_caught_on_each_machine() {
 /// by the collections the other's work makes, when it goes on. Not the
 /// evaluator written in FX-26, whose own recursion is too deep for 100,000
 /// calls; it runs the short one.
-#[test]
-fn preempted_processes_keep_what_they_hold() {
-    let ms: Vec<&str> = machines().into_iter().filter(|m| *m != "fx-ast-eval").collect();
+fn preempted_processes_keep_what_they_hold(ms: &[&str]) {
+    let ms: Vec<&str> = ms.iter().copied().filter(|m| *m != "fx-ast-eval").collect();
     as_said("allocating.fx", &ms, None);
 }
 
 /// The same, a shorter run, preempted at nearly every poll: every 7th.
-#[test]
-fn preempted_at_nearly_every_poll() {
-    as_said("allocating-short.fx", &machines(), Some(7));
+fn preempted_at_nearly_every_poll(ms: &[&str]) {
+    as_said("allocating-short.fx", ms, Some(7));
     // One loop in cellular code native code called, which calls native
     // code each time round: continuations that cross the machines.
-    as_said("allocating-cellular.fx", &machines(), Some(7));
+    as_said("allocating-cellular.fx", ms, Some(7));
 }
