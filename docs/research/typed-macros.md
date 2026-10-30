@@ -263,6 +263,52 @@ dispatch. But the core forms keep their keywords, and such sugar stays a
 library's: a bare-name sugar for every common form would hide the tags
 again, which is what keywords are for.
 
+**A hypothetical extension: a keyword as a sum's constructor** (the
+user's, 2026-10-30; not decided). `(#:tag e …)` in operator position
+constructs a sum, as Haskell's capitalized constructors are told from
+variables by how they are written; a `tagcase` arm then looks like the
+construction it takes apart, `(tagcase r (#:sorted (xs) …) …)`. Keyword
+*arguments*, which the user does not want now, would be in argument
+positions, `(f #:x 1)`, so this would not stand in their way.
+- **Today `define-datatype` makes tags variables**: each tag gets a
+  constructor, a global procedure named by it (`expand_datatype`,
+  `top.rs`), so `(sorted x y)` calls a procedure `sorted`. Keyword
+  constructors would make those procedures unneeded.
+- **What the arguments become, by arity**: none, `unit` (`(#:eof)`);
+  one, the value itself, as `(sum #:ok v)` carries it and the standard
+  sums do (`(sumof (done unit) (failed io-error))`); two or more, a
+  product labelled from 1, as a datatype's variant is. Datatypes would
+  then carry a one-member variant's member itself, not a product of one
+  field (a bloblet less a value; `tagcase`'s `(tag (x) body)` binding the
+  whole payload); code that `extract`s field `1` of one would change.
+- **`#:eof` is a keyword, `(#:eof)` a sum.** A bare keyword where a sum
+  is expected is a type error, which can say "did you mean `(#:eof)`?",
+  rather than the expected type making a sum of it.
+- **It wants flat products**: in `(product (#:n n) (#:reply c))` each
+  field reads as a sum's construction, the reading by position again; so
+  `(product #:n n #:reply c)`, and the types flat to match.
+- **Typing as `sum`'s**: `(#:tag e)` is checked as `(sum #:tag e)` is, a
+  sum of one tag that fits any wider sum with it. A core form, told by
+  how it is written; `sum` stays the explicit form, and what macros
+  expand to.
+- **The snag** (the user's): with keywords first-class values,
+  `(let ((k #:variant)) (k fooie))` is not `(#:variant fooie)`. It is a
+  type error, not another answer (`k` is a `keyword`, which is not
+  applied), and its message can name the right form; it is where every
+  special form is, though `if` is never a value.
+- **A further step that removes the snag**: singleton keyword types. The
+  literal `#:variant` of type `(keyword variant)`, below `keyword`, as
+  `false` is below `bool` and `(nat 3)` below `nat`; a keyword of a
+  singleton type applied constructs the sum, checked as the form is. Then
+  `k` above keeps the singleton type and the two spellings agree, and
+  constructors are first-class, `(map #:ok xs)`, which is what dropping
+  the datatypes' constructor procedures costs. A keyword of plain type
+  `keyword` (from `symbol->keyword`) is still not applied: its tag is not
+  known. A compatible extension: what the first step accepts, the second
+  means the same by, and it only accepts more. To settle then: that a
+  `let` with no expected type keeps a literal's singleton type rather
+  than widening it, as FX-26 decides `#f`'s by what is expected.
+
 **The transition.** Every product, sum and `tagcase` in this repository,
 in Kayak, in Heist and in the user's editor writes its tags bare. Both
 spellings are accepted for a while, a lint offering the rewrite; a sum's

@@ -4191,4 +4191,7 @@ type `keyword`, interned and self-quoting; product and sum labels,
 through a transition, with a lint offering the rewrite. Design in
 `docs/research/typed-macros.md`, "Keywords: names that are not
 variables"; open there: a sum's run-time tag a keyword or a symbol, and
-flat products.
+flat products. Recorded there as a hypothetical extension, not decided:
+a keyword as a sum's constructor, `(#:tag e …)` (arguments by arity, a
+datatype's one-member variant carrying its member, flat products), and
+after it singleton keyword types, so that a keyword applied constructs.
