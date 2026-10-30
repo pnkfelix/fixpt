@@ -57,7 +57,7 @@ impl Unit {
 const FAIL_FREE: &[&str] = &[
     "new", "get", "set", "make-icell", "write-out", "write-err", "read-line", "read-byte", "stdin-ready?", "terminal-raw",
     "terminal-restore", "terminal-size", "read-file", "type-at", "process-start", "process-output", "process-status", "process-write",
-    "process-close-input", "process-signal", "list-dir", "write-file", "clock", "args",
+    "process-close-input", "process-signal", "process-exit", "process-news", "file-info", "read-symlink", "list-dir", "write-file", "clock", "args",
     "sleep-until", "exit", "list", "length", "array-length", "bytevector-length", "flatarray-length", "string->list", "int->string",
     "acyclic?", "length-is?", "nat?", "certify-acyclic", "certify-nat", "certify-length", "cwcc", "make-continuation-prompt-tag",
     "make-continuation-mark-key", "with-mark", "current-marks", "first-mark", "marks-of", "%quote", "string->utf8", "utf8->string",

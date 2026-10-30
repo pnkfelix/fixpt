@@ -291,6 +291,30 @@
                            (lambda (w)
                              (begin ((proj %sched i64 thunk unit) 18 t w)
                                     (lambda () ((proj %sched thunk unit unit) 20 w #u)))))))))
+;; Heist's F6: ready once process `p` has output to take (46-48); once it
+;; has ended and its output is all taken (49-51), so that an arm for its
+;; output sees all of it before one for its end.
+(define process-output-event (subr sched (int) event)
+  (lambda (p)
+    (the event (list (cons (lambda () ((proj %sched int unit bool) 46 p #u))
+                           (lambda (w)
+                             (begin ((proj %sched int thunk unit) 47 p w)
+                                    (lambda () ((proj %sched thunk unit unit) 48 w #u)))))))))
+(define process-exit-event (subr sched (int) event)
+  (lambda (p)
+    (the event (list (cons (lambda () ((proj %sched int unit bool) 49 p #u))
+                           (lambda (w)
+                             (begin ((proj %sched int thunk unit) 50 p w)
+                                    (lambda () ((proj %sched thunk unit unit) 51 w #u)))))))))
+;; Ready once any process has news: output to take, or an end the program
+;; has not seen (52-54). Its operand is unit, as `((process-news) p …)`
+;; has none.
+(define process-news-event (subr sched (unit) event)
+  (lambda (u)
+    (the event (list (cons (lambda () ((proj %sched unit unit bool) 52 #u #u))
+                           (lambda (w)
+                             (begin ((proj %sched thunk unit unit) 53 w #u)
+                                    (lambda () ((proj %sched thunk unit unit) 54 w #u)))))))))
 ;; Ready once a read of the standard input would not wait: a byte has
 ;; come, or it is at its end (43-45; `TODO.md` §95). Its operand is unit,
 ;; as a `pselect` arm `((read-byte) b body …)` has none.

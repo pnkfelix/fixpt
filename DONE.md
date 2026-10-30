@@ -3413,8 +3413,39 @@ wrote since asked, never waiting), `process-status` (`running`, `exited`,
   cannot cross as a syscall's (§127).
 - **On all twelve machines** (`programs/process/basic.fx`), both checkers
   agreeing.
-- **Not yet**: a `pselect` arm (`TODO.md` §132); a pseudo-terminal;
-  environment variables; output and error apart.
+- **Not yet**: a pseudo-terminal; environment variables; output and
+  error apart.
+
+**A task waits for a process** (Heist's F6, 2026-10-30; taken from Heist's
+copy, `TODO.md` §132 as it was): three `pselect` arms,
+`((process-output p) text …)`, ready once `p` has output to take;
+`((process-exit p) how …)`, ready once it has ended and its output is all
+taken, so an arm for the output sees all of it first; and `((process-news)
+p …)`, ready once any process has output or an end not yet seen, for
+processes known only as the program runs. And two primitives:
+`process-exit`, how a process ended, waiting until it has (as `read-byte`
+waits) and until all it wrote has been read, so that `process-output` just
+after has the rest (here: Heist's returned at the exit alone, and a
+`process-output` after missed what its reader had not yet read, found under
+load); `process-news`, the first process with news, -1 if none. The
+editor's main loop waits on a key or a process's news, where it polled
+every 50 ms.
+- **The scheduler** (`sched.rs`): events 46–54, a list of wakers for each
+  kind, and `timers_wait` sleeping on the processes too.
+- **The runtime** (`world.rs`, `tty.rs`): a wake pipe, made with the first
+  process, neither end blocking; each reader thread writes a byte to it
+  after each read and at the end, and a thread per process waits for its
+  exit without reaping it (`waitid`, `WNOWAIT`) and writes one too. The
+  scheduler `poll`s the pipe beside the standard input, then asks the
+  processes who is ready.
+- **Both parsers** (`processes.rs`, `parser-forms.fx`), the events' types
+  (`(event (io process))`), and the library's `process-output-event`,
+  `process-exit-event`, `process-news-event` (`processes.fx`).
+- **Tests**: `fixpt-cli/tests/io.rs`, `process-wait.fx`,
+  `process-tasks.fx` (a task waits while another ticks) and
+  `process-news.fx`, on each kind of machine, both checkers agreeing.
+- Primitives 527 (`process-news`) and 528 (`process-exit`) here, after
+  the keywords' (Heist's copy had them at 524 and 525).
 
 ## 133. Queries by type and effect: `,query` and `fixpt query` (2026-10-27)
 
@@ -4056,3 +4087,21 @@ Considered and not done (the user's): the place left open, `(acyclic
 variables past a call; and `(acyclic heap)` is accepted wherever
 `(acyclic p)` is, the heap outliving every place, so it would change only
 where the data is allocated.
+
+## 185. What a path is: `file-info` and `read-symlink` (Heist's request, 2026-10-30)
+
+Heist's F5, taken from Heist's copy: for the editor's directory listings,
+which told a directory from a file by trying to list each name, and
+s7st's `file-exists?`, which read the whole file. Two primitives, as SRFI
+170 names them: `file-info`, what the path itself is (`lstat`, a link not
+followed), `(sumof (info (productof (kind (sumof (file unit) (directory
+unit) (symlink unit) (other unit))) (size int) (modified int) (mode int)))
+(failed io-error))`, its size in bytes, when last modified (seconds since
+the epoch), and its permission bits; and `read-symlink`, a link's target.
+Changing files is left to programs (`rm`, `mv`, `cp`, `mkdir`), which a
+`pselect` arm waits for (§132): Heist first had five primitives for it,
+and cut them. Not a syscall: a syscall's types are plain, with no sum for
+the answer or the `io-error`. Primitives 525 and 526, `world.rs`'s
+`file_info` and `read_symlink`. Test: `fixpt-cli/tests/io.rs`'s
+`files_inspected` (`programs/io/fs.fx`: a file, a directory, a link and
+its target, a missing path), on each kind of machine.

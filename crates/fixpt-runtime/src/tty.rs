@@ -1,8 +1,10 @@
 //! The standard input as a file descriptor, and the terminal it may be
 //! (`TODO.md` §95): reads and waits that the scheduler can make without
 //! blocking the others, raw mode and back, and the terminal's size; and a
-//! signal to a process group (Heist's, `FIXPT-CHANGES.md` F4). The
-//! one place in this crate that calls the system directly.
+//! signal to a process group (Heist's, `FIXPT-CHANGES.md` F4); waiting
+//! for the standard input and the processes' wake pipe together, and for a
+//! process's exit without reaping it (F6). The one place in this crate that
+//! calls the system directly.
 #![allow(unsafe_code)]
 
 use std::sync::Mutex;
@@ -124,4 +126,48 @@ pub fn new_session(command: &mut std::process::Command) {
 /// Signal `sig` sent to the process group led by process `pid`.
 pub fn signal_group(pid: u32, sig: i32) {
     unsafe { libc::kill(-(pid as libc::pid_t), sig) };
+}
+
+/// Waits until one of `fds` can be read without blocking (it has a byte,
+/// is at its end, or failed), at most `ms` milliseconds, or for ever if
+/// negative; whether one can.
+pub fn ready_any(fds: &[libc::c_int], ms: i32) -> bool {
+    let mut ps: Vec<libc::pollfd> = fds.iter().map(|&fd| libc::pollfd { fd, events: libc::POLLIN, revents: 0 }).collect();
+    loop {
+        // SAFETY: `ps` holds `ps.len()` `pollfd`s, valid for the call.
+        let n = unsafe { libc::poll(ps.as_mut_ptr(), ps.len() as libc::nfds_t, ms) };
+        if n >= 0 {
+            return n > 0;
+        }
+        if std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted {
+            return true;
+        }
+    }
+}
+
+/// File descriptor `fd` made non-blocking: a read or write that would wait
+/// fails at once instead.
+pub fn set_nonblocking(fd: libc::c_int) {
+    // SAFETY: `fcntl` on a descriptor the caller owns; no memory is passed.
+    unsafe {
+        let flags = libc::fcntl(fd, libc::F_GETFL);
+        if flags >= 0 {
+            libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+        }
+    }
+}
+
+/// Waits until process `pid` (a child of this one) has ended, leaving it to
+/// be reaped (`WNOWAIT`), so that `Child::try_wait` still sees how. Returns
+/// at once if it has been reaped already, or is no child.
+pub fn wait_ended(pid: u32) {
+    loop {
+        // SAFETY: a zeroed `siginfo_t` for `waitid` to fill.
+        let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+        // SAFETY: `info` is valid for the call to write.
+        let r = unsafe { libc::waitid(libc::P_PID, pid as libc::id_t, &mut info, libc::WEXITED | libc::WNOWAIT) };
+        if r == 0 || std::io::Error::last_os_error().kind() != std::io::ErrorKind::Interrupted {
+            return;
+        }
+    }
 }

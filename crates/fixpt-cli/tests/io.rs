@@ -89,6 +89,57 @@ fn files_written_listed_and_read() {
     }
 }
 
+/// Files (Heist's `FIXPT-CHANGES.md` F5), in a directory of each
+/// machine's own: what each path is, a link not followed, and a link's
+/// target.
+#[test]
+fn files_inspected() {
+    let path = format!("{}/tests/programs/io/fs.fx", env!("CARGO_MANIFEST_DIR"));
+    let want = "a.txt file 5\n. directory\nl symlink\nl -> a.txt\nnope not-found\na.txt no link\n";
+    for m in MACHINES {
+        let dir = std::env::temp_dir().join(format!("fixpt-io-fs-{m}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a directory");
+        std::os::unix::fs::symlink("a.txt", dir.join("l")).expect("a link");
+        let out = output(Command::new(FIXPT).args(["--fx26-machine", m, "run", &path]).current_dir(&dir).stdin(Stdio::null()));
+        let (stdout, stderr) = (String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert_eq!((out.status.code(), stdout.as_ref()), (Some(0), want), "{m}: {stderr}");
+        std::fs::remove_dir_all(&dir).expect("removed");
+    }
+}
+
+/// A process waited for (Heist's `FIXPT-CHANGES.md` F6): a `pselect` with
+/// arms for its output and its end, which comes after all its output; and
+/// `process-exit` alone, the output taken after.
+#[test]
+fn a_process_waited_for() {
+    for (m, (status, out, err)) in on_every_machine("process-wait.fx") {
+        assert_eq!((status, out.as_str()), (Some(0), "one|two|exited 3; exited 4, then late|\n"), "{m}: {err}");
+    }
+}
+
+/// A task waits for a process while another ticks on the clock: neither
+/// keeps the other from running.
+#[test]
+fn a_task_waits_for_a_process_while_another_runs() {
+    for (m, (status, out, err)) in on_every_machine("process-tasks.fx") {
+        assert_eq!((status, out.as_str()), (Some(0), "out\nend 5\n"), "{m}: {err}");
+    }
+}
+
+/// News of whichever process has some (F6), one arm for any number: each's
+/// output, and each end once.
+#[test]
+fn news_of_any_process() {
+    for (m, (status, out, err)) in on_every_machine("process-news.fx") {
+        assert_eq!(
+            (status, out.as_str()),
+            (Some(0), "[A\n][B1\nB2\n] ended, last first: 0 1 ; no news left\n"),
+            "{m}: {err}"
+        );
+    }
+}
+
 /// The program's own arguments after `--`, an empty one too; and a sleep
 /// on the clock, which the clock then shows has passed.
 #[test]

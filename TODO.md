@@ -3261,14 +3261,6 @@ program imports. The editor would need no `--syscalls`, and a runtime
 without a checker (kayak's, until it has one) answers `syscall-available?`
 with `#f` instead of lacking a primitive. For the user to decide.
 
-## 132. A `pselect` arm for a process (Heist's request, 2026-10-26)
-
-`(io process)` landed (`DONE.md` §132), but a program cannot wait for a
-process's output or exit: Heist's editor polls every 50 ms while one
-runs. An arm, as for `(read-byte)`, needs a waker list per process in
-`sched.rs`, the reader threads waking `wait_stdin`'s `poll` (a pipe it
-polls too), and the arm in both parsers.
-
 ## 133. A module file's item using an included value compiles apart (found 2026-10-27)
 
 Found while fixing Heist's problem D (`DONE.md` §135): in a module *file*

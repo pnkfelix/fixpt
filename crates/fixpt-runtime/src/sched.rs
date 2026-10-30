@@ -57,6 +57,12 @@ const FAILURE: usize = 13;
 const PARENTS: usize = 14;
 const WAITING: usize = 15;
 const STDIN_WAITERS: usize = 16;
+/// Heist's F6: the wakers waiting for a process's output, and for its end,
+/// each `(p . waker)`.
+const OUTPUT_WAITERS: usize = 17;
+const EXIT_WAITERS: usize = 18;
+/// The wakers waiting for any process's news.
+const NEWS_WAITERS: usize = 19;
 
 /// The polls between two decisions whether to preempt (`preempt_due`): a
 /// task's time slice, in each machine's polls (a bytecode machine's
@@ -131,6 +137,15 @@ pub mod op {
     pub const STDIN_READY: i64 = 43;
     pub const STDIN_WAIT: i64 = 44;
     pub const STDIN_UNWAIT: i64 = 45;
+    pub const OUTPUT_READY: i64 = 46;
+    pub const OUTPUT_WAIT: i64 = 47;
+    pub const OUTPUT_UNWAIT: i64 = 48;
+    pub const EXIT_READY: i64 = 49;
+    pub const EXIT_WAIT: i64 = 50;
+    pub const EXIT_UNWAIT: i64 = 51;
+    pub const NEWS_READY: i64 = 52;
+    pub const NEWS_WAIT: i64 = 53;
+    pub const NEWS_UNWAIT: i64 = 54;
 }
 
 /// The state's vector, made if there is none yet.
@@ -142,7 +157,7 @@ fn state(heap: &mut Heap) -> Value {
         return s;
     }
     let seed = std::env::var("FIXPT_SCHED_SEED").ok().and_then(|s| s.parse::<i64>().ok());
-    let s = heap.vector_from(&[Value::NULL, Value::NULL, Value::FALSE, seed.map_or(Value::FALSE, Value::fixnum), Value::fixnum(0), Value::NULL, Value::NULL, Value::FALSE, Value::NULL, Value::fixnum(0), Value::FALSE, Value::NULL, Value::NULL, Value::FALSE, Value::NULL, Value::NULL, Value::NULL]);
+    let s = heap.vector_from(&[Value::NULL, Value::NULL, Value::FALSE, seed.map_or(Value::FALSE, Value::fixnum), Value::fixnum(0), Value::NULL, Value::NULL, Value::FALSE, Value::NULL, Value::fixnum(0), Value::FALSE, Value::NULL, Value::NULL, Value::FALSE, Value::NULL, Value::NULL, Value::NULL, Value::NULL, Value::NULL, Value::NULL]);
     heap.set_global(slot, s);
     s
 }
@@ -448,6 +463,44 @@ pub fn run_op(rt: &mut Runtime, n: i64, a: Value, b: Value) -> Outcome<Value> {
             heap.obj_set(s, STDIN_WAITERS, ws);
             unit
         }
+        // Heist's F6: whether process `a` has output to take; whether it
+        // has ended, its output all taken; waker `b` run once it has (or
+        // is), and taken back (`a` the waker).
+        op::OUTPUT_READY => Value::boolean(rt.world.process_output_ready(a.as_fixnum())),
+        op::EXIT_READY => Value::boolean(rt.world.process_ended(a.as_fixnum())),
+        // Whether any process has news; waker `a` run once one has.
+        op::NEWS_READY => Value::boolean(rt.world.process_news() >= 0),
+        op::NEWS_WAIT => {
+            let s = state(heap);
+            let ws = heap.obj_ref(s, NEWS_WAITERS);
+            let ws = heap.cons(a, ws);
+            heap.obj_set(s, NEWS_WAITERS, ws);
+            unit
+        }
+        op::NEWS_UNWAIT => {
+            let s = state(heap);
+            let ws = heap.obj_ref(s, NEWS_WAITERS);
+            let ws = without(heap, ws, |_, w| w == a);
+            heap.obj_set(s, NEWS_WAITERS, ws);
+            unit
+        }
+        op::OUTPUT_WAIT | op::EXIT_WAIT => {
+            let slot = if n == op::OUTPUT_WAIT { OUTPUT_WAITERS } else { EXIT_WAITERS };
+            let s = state(heap);
+            let e = heap.cons(a, b);
+            let ws = heap.obj_ref(s, slot);
+            let ws = heap.cons(e, ws);
+            heap.obj_set(s, slot, ws);
+            unit
+        }
+        op::OUTPUT_UNWAIT | op::EXIT_UNWAIT => {
+            let slot = if n == op::OUTPUT_UNWAIT { OUTPUT_WAITERS } else { EXIT_WAITERS };
+            let s = state(heap);
+            let ws = heap.obj_ref(s, slot);
+            let ws = without(heap, ws, |heap, e| heap.cdr(e) == a);
+            heap.obj_set(s, slot, ws);
+            unit
+        }
         // Task `a` waits, and `b` stops it waiting: its waker taken back.
         op::WAITING => {
             let s = state(heap);
@@ -691,15 +744,18 @@ fn timer_add(rt: &mut Runtime, t: i64, w: Value) -> Value {
 }
 
 /// When no task can run and the first waits: `#f` if no timer is set and
-/// no waker waits for the standard input; else, having slept until the
-/// earliest timer or until the input is ready, whichever is first (if
-/// `sleep`), the input's wakers run if it is ready, and each timer due
-/// taken, its waker run (in the order of their times), and `#t`.
+/// no waker waits for the standard input or a process (Heist's F6); else,
+/// having slept until the earliest timer, or until the input is ready or a
+/// process has news, whichever is first (if `sleep`), the wakers of what is
+/// ready run, and each timer due taken, its waker run (in the order of
+/// their times), and `#t`.
 fn timers_wait(rt: &mut Runtime, sleep: bool) -> Value {
     let s = state(&mut rt.heap);
     let ts = rt.heap.obj_ref(s, TIMERS);
     let input = rt.heap.obj_ref(s, STDIN_WAITERS).is_pair();
-    if !ts.is_pair() && !input {
+    let news = rt.heap.obj_ref(s, NEWS_WAITERS).is_pair();
+    let processes = rt.heap.obj_ref(s, OUTPUT_WAITERS).is_pair() || rt.heap.obj_ref(s, EXIT_WAITERS).is_pair() || news;
+    if !ts.is_pair() && !input && !processes {
         return Value::FALSE;
     }
     let heap = &rt.heap;
@@ -711,12 +767,13 @@ fn timers_wait(rt: &mut Runtime, sleep: bool) -> Value {
         x = heap.cdr(x);
     }
     if sleep {
-        match (input, earliest) {
-            (true, until) => {
+        match (input, processes, earliest) {
+            (_, true, until) => rt.world.wait_processes(until, input),
+            (true, false, until) => {
                 rt.world.wait_stdin(until);
             }
-            (false, Some(t)) => crate::world::sleep_until(t),
-            (false, None) => {}
+            (false, false, Some(t)) => crate::world::sleep_until(t),
+            (false, false, None) => {}
         }
     }
     if input && rt.world.stdin_ready() {
@@ -729,7 +786,40 @@ fn timers_wait(rt: &mut Runtime, sleep: bool) -> Value {
             ws = heap.cdr(ws);
         }
         for w in order.into_iter().rev() {
-            push(heap, w);
+            push(&mut rt.heap, w);
+        }
+    }
+    if news && rt.world.process_news() >= 0 {
+        let mut ws = rt.heap.obj_ref(s, NEWS_WAITERS);
+        rt.heap.obj_set(s, NEWS_WAITERS, Value::NULL);
+        let mut order = Vec::new();
+        while ws.is_pair() {
+            order.push(rt.heap.car(ws));
+            ws = rt.heap.cdr(ws);
+        }
+        for w in order.into_iter().rev() {
+            push(&mut rt.heap, w);
+        }
+    }
+    if processes {
+        for (slot, ready) in [(OUTPUT_WAITERS, true), (EXIT_WAITERS, false)] {
+            let mut ws = rt.heap.obj_ref(s, slot);
+            let mut waiting = Vec::new();
+            let mut woken = Vec::new();
+            while ws.is_pair() {
+                let e = rt.heap.car(ws);
+                let p = rt.heap.car(e).as_fixnum();
+                let now = if ready { rt.world.process_output_ready(p) } else { rt.world.process_ended(p) };
+                if now { woken.push(rt.heap.cdr(e)) } else { waiting.push(e) }
+                ws = rt.heap.cdr(ws);
+            }
+            if !woken.is_empty() {
+                let rest = rt.heap.list_from(&waiting);
+                rt.heap.obj_set(s, slot, rest);
+                for w in woken.into_iter().rev() {
+                    push(&mut rt.heap, w);
+                }
+            }
         }
     }
     let heap = &mut rt.heap;

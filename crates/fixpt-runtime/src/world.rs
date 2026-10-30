@@ -31,6 +31,10 @@ pub struct World {
     pub exit: Option<i32>,
     /// The programs it started (`process-start`), by number.
     pub processes: Vec<Process>,
+    /// What the processes' threads write a byte to when one has output or
+    /// has ended (Heist's F6), so that a scheduler waiting for one can
+    /// `poll` it with the standard input: made with the first process.
+    wake: Option<(std::io::PipeReader, std::io::PipeWriter)>,
 }
 
 /// One of the standard streams a program writes.
@@ -207,6 +211,43 @@ pub fn list_dir(path: &str) -> std::io::Result<Vec<String>> {
     Ok(names)
 }
 
+/// What `file-info` says of `path` (Heist's `FIXPT-CHANGES.md` F5): of the
+/// path itself, a symbolic link not followed. Its kind (`file`,
+/// `directory`, `symlink`, `other`), its size in bytes, when it was last
+/// modified (seconds since the epoch), and its mode's permission bits.
+pub struct FileInfo {
+    pub kind: &'static str,
+    pub size: i64,
+    pub modified: i64,
+    pub mode: i64,
+}
+
+pub fn file_info(path: &str) -> std::io::Result<FileInfo> {
+    use std::os::unix::fs::MetadataExt;
+    let m = std::fs::symlink_metadata(path)?;
+    let t = m.file_type();
+    let kind = if t.is_symlink() {
+        "symlink"
+    } else if t.is_dir() {
+        "directory"
+    } else if t.is_file() {
+        "file"
+    } else {
+        "other"
+    };
+    Ok(FileInfo { kind, size: m.len() as i64, modified: m.mtime(), mode: (m.mode() & 0o7777) as i64 })
+}
+
+/// The target symbolic link `path` names, as it is written; one that is not
+/// UTF-8 is an error of kind `invalid-data`.
+pub fn read_symlink(path: &str) -> std::io::Result<String> {
+    let target = std::fs::read_link(path)?;
+    target
+        .into_os_string()
+        .into_string()
+        .map_err(|t| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("a target that is not UTF-8: {t:?}")))
+}
+
 /// File `path` replaced by `bytes` whole, atomically: written to a file
 /// beside it, flushed to the disk, and renamed over it, so that a reader
 /// sees the old contents or the new, never part of either.
@@ -255,6 +296,9 @@ pub struct Process {
     input: Option<std::process::ChildStdin>,
     output: std::sync::Arc<std::sync::Mutex<Output>>,
     status: Option<std::process::ExitStatus>,
+    /// Whether the program has seen it end (`process-status` said so, or
+    /// `process-exit` returned): its end is then no news (F6).
+    seen_end: bool,
 }
 
 /// What a process's reader has read and not yet been taken, and whether
@@ -283,6 +327,15 @@ impl World {
         let Some((program, args)) = argv.split_first() else {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "no program named"));
         };
+        if self.wake.is_none() {
+            use std::os::fd::AsRawFd as _;
+            let (r, w) = std::io::pipe()?;
+            // Neither end waits: a full pipe already says there is news.
+            crate::tty::set_nonblocking(r.as_raw_fd());
+            crate::tty::set_nonblocking(w.as_raw_fd());
+            self.wake = Some((r, w));
+        }
+        let wake = self.wake.as_ref().expect("made").1.try_clone()?;
         let (reader, writer) = std::io::pipe()?;
         let mut command = std::process::Command::new(program);
         command.args(args).stdin(std::process::Stdio::piped()).stdout(writer.try_clone()?).stderr(writer);
@@ -297,6 +350,11 @@ impl World {
         let input = child.stdin.take();
         let output = std::sync::Arc::new(std::sync::Mutex::new(Output::default()));
         let out = output.clone();
+        let poke = |w: &std::io::PipeWriter| {
+            use std::io::Write as _;
+            let _ = (&*w).write(&[1]);
+        };
+        let wake_out = wake.try_clone()?;
         std::thread::spawn(move || {
             use std::io::Read as _;
             let mut reader = reader;
@@ -306,10 +364,19 @@ impl World {
                     Ok(0) | Err(_) => break,
                     Ok(n) => out.lock().unwrap().bytes.extend_from_slice(&buf[..n]),
                 }
+                poke(&wake_out);
             }
             out.lock().unwrap().ended = true;
+            poke(&wake_out);
         });
-        self.processes.push(Process { child, input, output, status: None });
+        // Its end, said too: it may end after its output does, or before
+        // (a child of its own holding the pipe).
+        let pid = child.id();
+        std::thread::spawn(move || {
+            crate::tty::wait_ended(pid);
+            poke(&wake);
+        });
+        self.processes.push(Process { child, input, output, status: None, seen_end: false });
         Ok(self.processes.len() as i64 - 1)
     }
 
@@ -339,13 +406,107 @@ impl World {
             proc.status = proc.child.try_wait().ok().flatten();
         }
         match proc.status {
-            Some(s) if proc.output.lock().unwrap().ended => match (s.code(), s.signal()) {
-                (Some(c), _) => ProcessStatus::Exited(c),
-                (None, Some(sig)) => ProcessStatus::Signalled(sig),
-                (None, None) => ProcessStatus::Unknown,
-            },
+            Some(s) if proc.output.lock().unwrap().ended => {
+                proc.seen_end = true;
+                match (s.code(), s.signal()) {
+                    (Some(c), _) => ProcessStatus::Exited(c),
+                    (None, Some(sig)) => ProcessStatus::Signalled(sig),
+                    (None, None) => ProcessStatus::Unknown,
+                }
+            }
             _ => ProcessStatus::Running,
         }
+    }
+
+    /// Whether process `p` has output to take, text `process_output` gives
+    /// (not only part of a character); or is no process.
+    pub fn process_output_ready(&mut self, p: i64) -> bool {
+        let Some(proc) = self.process(p) else { return true };
+        let out = proc.output.lock().unwrap();
+        let n = out.bytes.len();
+        n > 0 && (out.ended || n > incomplete_tail(&out.bytes))
+    }
+
+    /// Whether process `p` has ended, its output all read, as
+    /// `process_status` says; or is no process.
+    pub fn process_ended(&mut self, p: i64) -> bool {
+        !matches!(self.process_status(p), ProcessStatus::Running)
+    }
+
+    /// The first process with news (F6): output to take, or an end the
+    /// program has not seen (its output all taken); -1 if none has.
+    pub fn process_news(&mut self) -> i64 {
+        for p in 0..self.processes.len() as i64 {
+            if self.process_output_ready(p) {
+                return p;
+            }
+            let proc = &mut self.processes[p as usize];
+            if !proc.seen_end {
+                if proc.status.is_none() {
+                    proc.status = proc.child.try_wait().ok().flatten();
+                }
+                if proc.status.is_some() && proc.output.lock().unwrap().ended {
+                    return p;
+                }
+            }
+        }
+        -1
+    }
+
+    /// How process `p` ended, waiting until it has, no task running
+    /// meanwhile (as `read-byte` waits), and until its reader has read all
+    /// it wrote: so that what is left of its output is there to take,
+    /// though it need not have been taken. Not at its exit alone: its
+    /// reader may still be behind, and a `process-output` just after would
+    /// miss the rest (found under load).
+    pub fn process_exit(&mut self, p: i64) -> ProcessStatus {
+        use std::os::unix::process::ExitStatusExt as _;
+        loop {
+            let Some(proc) = self.process(p) else { return ProcessStatus::Unknown };
+            if proc.status.is_none() {
+                proc.status = proc.child.try_wait().ok().flatten();
+            }
+            match proc.status {
+                Some(s) if proc.output.lock().unwrap().ended => {
+                    proc.seen_end = true;
+                    return match (s.code(), s.signal()) {
+                        (Some(c), _) => ProcessStatus::Exited(c),
+                        (None, Some(sig)) => ProcessStatus::Signalled(sig),
+                        (None, None) => ProcessStatus::Unknown,
+                    };
+                }
+                _ => self.wait_processes(None, false),
+            }
+        }
+    }
+
+    /// Waits until a process's thread says there is news (output, or an
+    /// end), or the standard input is ready if `stdin`, or the clock
+    /// reaches `until`; the news taken from the wake pipe.
+    pub fn wait_processes(&mut self, until: Option<i64>, stdin: bool) {
+        use std::os::fd::AsRawFd as _;
+        if self.wake.is_none() {
+            if stdin {
+                self.wait_stdin(until);
+            } else if let Some(t) = until {
+                sleep_until(t);
+            }
+            return;
+        }
+        if stdin && self.stdin_ready() {
+            return;
+        }
+        let r = &self.wake.as_ref().expect("made").0;
+        let mut fds = vec![r.as_raw_fd()];
+        if stdin {
+            fds.push(0);
+        }
+        let ms = until.map_or(-1, |t| ((t - clock_ns()).max(0) as u64).div_ceil(1_000_000).min(i32::MAX as u64) as i32);
+        crate::tty::ready_any(&fds, ms);
+        // The news taken: the pipe emptied (it never waits).
+        use std::io::Read as _;
+        let mut buf = [0u8; 256];
+        while matches!((&*r).read(&mut buf), Ok(n) if n > 0) {}
     }
 
     /// `bytes` written to process `p`'s input.

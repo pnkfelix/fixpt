@@ -2907,6 +2907,49 @@ prims! {
         Ok(rt.heap.keyword_symbol(a[0]))
     });
     "%fx26-keyword?", 1, Some(1), simple!(|rt, a| Ok(Value::boolean(rt.heap.is_keyword(a[0]))));
+    // Files (Heist's, `FIXPT-CHANGES.md` F5), as SRFI 170 names them: what
+    // a path is (a link not followed), and a link's target. A path as the
+    // working directory resolves it; a failure an `io-error`. Changing
+    // files is a program's to do (`rm`, `mv`, `cp`, `mkdir`), which a
+    // `pselect` arm for a process waits for (F6).
+    "%fx26-file-info", 1, Some(1), simple!(|rt, a| {
+        let path = get_string(rt, a[0])?;
+        Ok(match crate::world::file_info(&path) {
+            Ok(i) => {
+                let kind = fx26_sum(rt, i.kind, Value::UNIT);
+                let info = rt.heap.make_frozen(
+                    PRODUCT_KIND,
+                    &[kind, Value::fixnum(i.size), Value::fixnum(i.modified), Value::fixnum(i.mode)],
+                );
+                fx26_sum(rt, "info", info)
+            }
+            Err(e) => fx26_io_result(rt, Err(e)),
+        })
+    });
+    "%fx26-read-symlink", 1, Some(1), simple!(|rt, a| {
+        let path = get_string(rt, a[0])?;
+        Ok(match crate::world::read_symlink(&path) {
+            Ok(t) => {
+                let t = rt.heap.make_string(&t);
+                fx26_sum(rt, "target", t)
+            }
+            Err(e) => fx26_io_result(rt, Err(e)),
+        })
+    });
+    // The first process with news (Heist's F6): output to take, or an
+    // end the program has not seen; -1 if none. In an arm `((process-news) p …)`.
+    "%fx26-process-news", 0, Some(0), simple!(|rt, _a| Ok(Value::fixnum(rt.world.process_news())));
+    // How a process ended (Heist's F6), waiting until it has, as `read-byte`
+    // waits: in a `pselect`'s arm `((process-exit p) how …)`, at once.
+    "%fx26-process-exit", 1, Some(1), simple!(|rt, a| {
+        use crate::world::ProcessStatus as S;
+        let p = int(rt, a[0])?;
+        Ok(match rt.world.process_exit(p) {
+            S::Exited(c) => fx26_sum(rt, "exited", Value::fixnum(c as i64)),
+            S::Signalled(c) => fx26_sum(rt, "signalled", Value::fixnum(c as i64)),
+            S::Running | S::Unknown => fx26_sum(rt, "unknown", Value::UNIT),
+        })
+    });
 }
 
 /// Promise states. `[state, payload]`.
