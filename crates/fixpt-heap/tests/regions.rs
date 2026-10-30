@@ -88,27 +88,92 @@ fn ending_a_region_ends_the_newer() {
     assert_eq!(h.car(p).as_fixnum(), 1);
 }
 
-/// What does not fit a chunk goes to the heap; smaller things fill chunk
-/// after chunk.
+/// What does not fit a chunk is a large object of the region's, in a run
+/// of chunks of its own: none of it in the heap, it keeps what it points
+/// to alive and does not move; smaller things fill chunk after chunk. Its
+/// run, given back when the region ends, holds the next large object it
+/// fits.
 #[test]
-fn large_objects_go_to_the_heap() {
+fn a_large_object_is_its_regions() {
     let mut h = Heap::new();
     let r = h.region_enter();
     let used = h.used();
     let big = h.in_region(r, |h| h.make_vector(10_000, Value::fixnum(7)));
-    assert!(h.used() > used + 10_000);
-    let used = h.used();
+    let s = h.make_string("held");
+    h.obj_set(big, 0, s);
+    let used = (h.used() - used, h.used());
+    assert!(used.0 < 10, "in the heap: {} words", used.0);
+    assert_eq!(h.region_in_use(r), 10_002);
     let mut xs = Value::NULL;
     for i in 0..20_000 {
         xs = h.in_region(r, |h| h.cons(Value::fixnum(i), xs));
     }
-    assert_eq!(h.used(), used, "no pair in the heap");
-    assert_eq!(h.region_words(), 40_000);
-    let mut roots = [big, xs];
+    assert_eq!(h.used(), used.1, "no pair in the heap");
+    assert_eq!(h.region_words(), 10_002 + 40_000);
+    let mut roots = [xs];
     gc(&mut h, &mut roots);
-    assert_eq!(list_sum(&h, roots[1]), (0..20_000).sum::<i64>());
-    assert_eq!(h.obj_ref(roots[0], 9_999).as_fixnum(), 7);
+    assert_eq!(list_sum(&h, roots[0]), (0..20_000).sum::<i64>());
+    assert_eq!(h.obj_ref(big, 9_999).as_fixnum(), 7);
+    assert_eq!(h.string_to_rust(h.obj_ref(big, 0)), "held", "what it points to lives");
     h.region_exit(r);
+    let r = h.region_enter();
+    let again = h.in_region(r, |h| h.make_vector(9_000, Value::fixnum(1)));
+    assert_eq!(again.index() >> 13, big.index() >> 13, "its run reused");
+    h.region_exit(r);
+}
+
+/// A reap's large object is not copied: reached, it stays where it is, its
+/// references into the reap and the heap followed; not reached, its run is
+/// given back, for the next.
+#[test]
+fn a_reaps_large_object_is_marked_not_copied() {
+    let mut h = Heap::new();
+    let r = h.reap_enter();
+    let big = h.in_region(r, |h| h.make_vector(20_000, Value::NULL));
+    let small = h.in_region(r, |h| h.cons(Value::fixnum(5), Value::NULL));
+    let s = h.make_string("held");
+    h.obj_set(big, 1, small);
+    h.obj_set(big, 19_999, s);
+    let dropped = h.in_region(r, |h| h.make_vector(30_000, Value::fixnum(0)));
+    for i in 0..5_000 {
+        let _ = h.in_region(r, |h| h.cons(Value::fixnum(i), Value::NULL));
+    }
+    let boxed = h.make_box(big);
+    let mut roots = [boxed];
+    gc(&mut h, &mut roots);
+    let kept = h.unbox(roots[0]);
+    assert_eq!(kept, big, "not moved");
+    assert_eq!(h.car(h.obj_ref(big, 1)).as_fixnum(), 5, "what it points to in the reap, followed");
+    assert_eq!(h.string_to_rust(h.obj_ref(big, 19_999)), "held");
+    assert_eq!(h.region_in_use(r), 20_002 + 2, "the one not reached given back");
+    let next = h.in_region(r, |h| h.make_vector(25_000, Value::NULL));
+    assert_eq!(next.index() >> 13, dropped.index() >> 13, "its run reused");
+    let mut roots = [h.make_box(big)];
+    gc(&mut h, &mut roots);
+    assert_eq!(h.car(h.obj_ref(h.unbox(roots[0]), 1)).as_fixnum(), 5);
+    h.region_exit(r);
+}
+
+/// A region nested past the slots machine code reads is allocated in, as
+/// one with a slot is: none of it in the heap.
+#[test]
+fn a_region_past_the_tables_slots_is_still_a_region() {
+    let mut h = Heap::new();
+    let handles: Vec<usize> = (0..fixpt_heap::heap::REGION_SLOTS + 10).map(|_| h.region_enter()).collect();
+    let deep = *handles.last().expect("entered");
+    assert!(deep >= fixpt_heap::heap::REGION_SLOTS);
+    let used = h.used();
+    let mut xs = Value::NULL;
+    for i in 0..10_000 {
+        xs = h.in_region(deep, |h| h.cons(Value::fixnum(i), xs));
+    }
+    assert_eq!(h.used(), used, "no pair in the heap");
+    assert_eq!(h.region_in_use(deep), 20_000);
+    let mut roots = [xs];
+    gc(&mut h, &mut roots);
+    assert_eq!(list_sum(&h, roots[0]), (0..10_000).sum::<i64>());
+    h.region_exit(handles[0]);
+    assert_eq!(h.live_regions(), 0);
 }
 
 /// A reap is collected with the heap: what is reachable in it is copied

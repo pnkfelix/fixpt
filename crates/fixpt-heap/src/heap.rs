@@ -2397,6 +2397,8 @@ impl Heap {
             owner,
             new: vec![Vec::new(); reaps],
             marked: HashSet::new(),
+            large_marks: HashSet::new(),
+            large_gray: Vec::new(),
             code_marks: HashSet::new(),
             code_gray: Vec::new(),
             weak_pairs: Vec::new(),
@@ -2473,9 +2475,14 @@ impl Heap {
                 scan += Self::scan_one(mem, to + scan, &mut c);
                 more = true;
             }
-            // The code area's bloblets found live, scanned in place.
+            // The code area's bloblets found live, scanned in place; and
+            // the reaps' large objects, each from its run's start.
             while let Some(main) = c.code_gray.pop() {
                 Self::scan_one(mem, main, &mut c);
+                more = true;
+            }
+            while let Some(start) = c.large_gray.pop() {
+                Self::scan_one(mem, start, &mut c);
                 more = true;
             }
             for (h, rs) in reap_scan.iter_mut().enumerate() {
@@ -2509,18 +2516,11 @@ impl Heap {
                 *w = WEAK_DEAD;
             }
         }
-        let Copier { free, new, marked, code_marks, .. } = c;
+        let Copier { free, new, marked, large_marks, code_marks, .. } = c;
         self.sweep_code(&code_marks);
         // Ended reaps' chunks no reference was found into may be reused;
         // the rest wait for a collection that finds none.
-        let quarantine = std::mem::take(&mut self.regions.quarantine);
-        for q in quarantine {
-            if marked.contains(&q) {
-                self.regions.quarantine.insert(q);
-            } else {
-                self.regions.reap_free.push(q);
-            }
-        }
+        self.regions.quarantine_ends(&marked);
 
         // Each reap's old chunks given back, its new ones in their place:
         // the last is its current chunk, which machine code allocates in.
@@ -2528,6 +2528,17 @@ impl Heap {
             if !self.regions.reap[h] {
                 continue;
             }
+            // Its large objects not reached given back; the rest stay.
+            let (kept, dead): (Vec<(usize, usize)>, Vec<(usize, usize)>) = std::mem::take(&mut self.regions.large[h]).into_iter().partition(|(start, _)| large_marks.contains(start));
+            for (start, end) in dead {
+                let k = (end - start).div_ceil(regions::CHUNK_WORDS);
+                self.mem.release(start..start + k * regions::CHUNK_WORDS);
+                for i in 0..k {
+                    self.regions.large_of.remove(&(start + i * regions::CHUNK_WORDS));
+                }
+                self.regions.reap_run_free(start, k);
+            }
+            self.regions.large[h] = kept;
             let old: Vec<(usize, usize)> = self.regions.chunks_of(h).collect();
             let old_current = self.regions.current(h).map_or(0, |(start, fill)| fill - start);
             // Every reference into them has been moved on: they may be
@@ -2538,7 +2549,7 @@ impl Heap {
             }
             let current = chunks.pop();
             let r = &mut self.regions;
-            r.table[h] = current.map_or([0, 0], |(start, fill)| [fill, start + regions::CHUNK_WORDS]);
+            r.set_slot(h, current.map_or([0, 0], |(start, fill)| [fill, start + regions::CHUNK_WORDS]));
             let new_current = current.map_or(0, |(start, fill)| fill - start);
             // Allocated before, as `region_words` counts: what was current,
             // though copied. What is current now is not counted yet.
@@ -2723,13 +2734,21 @@ impl Heap {
             // which may be the next chunk; its last field is not.
             let within = if v.is_pair() { i } else { i - 1 };
             let chunk = within & !(regions::CHUNK_WORDS - 1);
+            // A live reap's large object: not copied, but marked where it
+            // is, and scanned there once.
+            if let Some(&start) = c.regions.large_of.get(&chunk) {
+                if c.large_marks.insert(start) {
+                    c.large_gray.push(start);
+                }
+                return v;
+            }
             match c.owner.get(&chunk) {
                 Some(&h) => Some(h),
                 None => {
                     // A reference an ended reap left: not followed, but
-                    // its chunk not reused while it is there.
-                    if c.regions.quarantine.contains(&chunk) {
-                        c.marked.insert(chunk);
+                    // its run not reused while it is there.
+                    if let Some(&start) = c.regions.quarantine.get(&chunk) {
+                        c.marked.insert(start);
                     }
                     return v;
                 }
@@ -3262,8 +3281,13 @@ struct Copier<'r> {
     /// Each region's new chunks, by handle, and how far each is filled
     /// (none for an arena).
     new: Vec<Vec<(usize, usize)>>,
-    /// The quarantined chunks a reference was found into.
+    /// The quarantined runs a reference was found into, by where they
+    /// start.
     marked: HashSet<usize>,
+    /// The live reaps' large objects found live, by where their runs
+    /// start, and those not yet scanned.
+    large_marks: HashSet<usize>,
+    large_gray: Vec<usize>,
     /// The code area's bloblets found live, by main header, and those not
     /// yet scanned.
     code_marks: HashSet<usize>,

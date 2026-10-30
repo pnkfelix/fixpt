@@ -35,9 +35,16 @@
 //! from an area of their own.
 //!
 //! Allocation goes to a region only while a primitive asks for it
-//! (`Heap::in_region`); anything too big for a chunk, or once its area is
-//! full, goes to the heap as it would have. Either is sound: the heap is
-//! only slower to reclaim.
+//! (`Heap::in_region`), and then always there. An object of more words than
+//! a chunk is a large object, in a run of chunks of its own, on its
+//! region's list of them (`Regions::large`): an arena's never move, as its
+//! chunks do not; a reap's are not copied either, but marked where they
+//! are when a collection reaches them and scanned there, and those not
+//! reached given back. A run given back is kept, whole, for the next large
+//! object it fits; a chunk too. A region at a handle with no slot in the
+//! table machine code reads (`REGION_SLOTS`) has its current chunk kept
+//! where only the Rust side sees it, and machine code calls in for it.
+//! An area used up is the heap being full: an error, not a fallback.
 
 use super::{Heap, ARENA_BASE, ARENA_WORDS, REAP_BASE, REAP_WORDS};
 use std::collections::{HashMap, HashSet};
@@ -47,13 +54,16 @@ pub(super) const CHUNK_WORDS: usize = 1 << 13;
 
 /// The regions whose current chunk machine code can allocate in: those at
 /// handles below this. A region at a handle above it (regions nested
-/// deeper) allocates in the heap.
+/// deeper) is allocated in by calling in (`Regions::spill`).
 pub const REGION_SLOTS: usize = 256;
 
 pub(super) struct Regions {
     /// The regions, by handle: each has the chunks it has filled, and how
     /// far; none, if the slot is free.
     pub(super) live: Vec<Vec<(usize, usize)>>,
+    /// Each region's large objects, by handle: each of more words than a
+    /// chunk, in a run of chunks of its own, as `(start, end)`.
+    pub(super) large: Vec<Vec<(usize, usize)>>,
     /// Whether each region is a reap; whether its slot is in use.
     pub(super) reap: Vec<bool>,
     pub(super) alive: Vec<bool>,
@@ -73,18 +83,30 @@ pub(super) struct Regions {
     /// address that never changes, for machine code, which bumps the fill
     /// itself (`Heap::region_table_address`).
     pub(super) table: Box<[[usize; 2]; REGION_SLOTS]>,
-    /// Arenas' chunks given back, to be reused; and the start of the
-    /// arenas' area not yet used at all.
+    /// The same for each handle from `REGION_SLOTS` on, which machine code
+    /// does not see.
+    spill: Vec<[usize; 2]>,
+    /// Arenas' chunks given back, to be reused, and runs of chunks a large
+    /// object held, `(start, chunks)`; and the start of the arenas' area
+    /// not yet used at all.
     free: Vec<usize>,
+    large_free: Vec<(usize, usize)>,
     fresh: usize,
     /// The start of the reaps' area not yet used, and each live reap's
     /// chunks, by where they start, with the reap's handle.
     pub(super) reap_fresh: usize,
     pub(super) owner: HashMap<usize, usize>,
-    /// Reaps' chunks free to reuse; and those of reaps ended since, not to
-    /// be reused until a collection finds no reference into them.
+    /// Each chunk of a live reap's large objects, with where its run
+    /// starts.
+    pub(super) large_of: HashMap<usize, usize>,
+    /// Reaps' chunks free to reuse, and runs of them a large object held;
+    /// and those of reaps ended since, not to be reused until a collection
+    /// finds no reference into them: each chunk with where its run starts
+    /// (itself, for a chunk alone), and each run's length in chunks.
     pub(super) reap_free: Vec<usize>,
-    pub(super) quarantine: HashSet<usize>,
+    reap_large_free: Vec<(usize, usize)>,
+    pub(super) quarantine: HashMap<usize, usize>,
+    quarantine_runs: HashMap<usize, usize>,
     /// Words of chunks reaps have taken since the last collection: enough
     /// of them, and a safepoint collects.
     pub(super) reap_taken: usize,
@@ -98,97 +120,187 @@ impl Regions {
     pub(super) fn new() -> Regions {
         Regions {
             live: Vec::new(),
+            large: Vec::new(),
             reap: Vec::new(),
             alive: Vec::new(),
             stacks: vec![Some(Vec::new())],
             quiet: vec![0],
             task: 0,
             table: Box::new([[0; 2]; REGION_SLOTS]),
+            spill: Vec::new(),
             free: Vec::new(),
+            large_free: Vec::new(),
             fresh: ARENA_BASE,
             reap_fresh: REAP_BASE,
             owner: HashMap::new(),
+            large_of: HashMap::new(),
             reap_free: Vec::new(),
-            quarantine: HashSet::new(),
+            reap_large_free: Vec::new(),
+            quarantine: HashMap::new(),
+            quarantine_runs: HashMap::new(),
             reap_taken: 0,
             target: None,
             words: 0,
         }
     }
 
-    /// A chunk for region `h`, or none if its area is used up.
-    fn chunk(&mut self, h: usize) -> Option<usize> {
-        if self.reap[h] {
-            let c = self.reap_chunk()?;
-            self.owner.insert(c, h);
-            return Some(c);
-        }
-        match self.free.pop() {
-            Some(c) => Some(c),
-            None if self.fresh + CHUNK_WORDS <= ARENA_BASE + ARENA_WORDS => {
-                self.fresh += CHUNK_WORDS;
-                Some(self.fresh - CHUNK_WORDS)
-            }
-            None => None,
+    /// Region `h`'s current chunk, how far it is filled and where it ends:
+    /// in the table machine code reads, or past it.
+    pub(super) fn slot(&self, h: usize) -> [usize; 2] {
+        match h.checked_sub(REGION_SLOTS) {
+            None => self.table[h],
+            Some(k) => self.spill.get(k).copied().unwrap_or([0, 0]),
         }
     }
 
-    /// A reap's chunk: one free to reuse, or one never used.
+    pub(super) fn set_slot(&mut self, h: usize, s: [usize; 2]) {
+        match h.checked_sub(REGION_SLOTS) {
+            None => self.table[h] = s,
+            Some(k) => {
+                if self.spill.len() <= k {
+                    self.spill.resize(k + 1, [0, 0]);
+                }
+                self.spill[k] = s;
+            }
+        }
+    }
+
+    /// A chunk for region `h`.
+    fn chunk(&mut self, h: usize) -> usize {
+        if self.reap[h] {
+            let c = self.reap_chunk().unwrap_or_else(|| panic!("the reaps' area is full: {REAP_WORDS} words"));
+            self.owner.insert(c, h);
+            return c;
+        }
+        match self.free.pop() {
+            Some(c) => c,
+            None => Self::run_in(&mut self.large_free, &mut self.fresh, ARENA_BASE + ARENA_WORDS, 1)
+                .unwrap_or_else(|| panic!("the arenas' area is full: {ARENA_WORDS} words")),
+        }
+    }
+
+    /// A reap's chunk: one free to reuse, or one never used; none if its
+    /// area is used up.
     pub(super) fn reap_chunk(&mut self) -> Option<usize> {
         self.reap_taken += CHUNK_WORDS;
         if let Some(c) = self.reap_free.pop() {
             return Some(c);
         }
-        if self.reap_fresh + CHUNK_WORDS > REAP_BASE + REAP_WORDS {
-            return None;
-        }
-        self.reap_fresh += CHUNK_WORDS;
-        Some(self.reap_fresh - CHUNK_WORDS)
+        Self::run_in(&mut self.reap_large_free, &mut self.reap_fresh, REAP_BASE + REAP_WORDS, 1)
     }
 
-    /// `n` words in region `h`, or none, if it has no slot, they do not
-    /// fit a chunk, or its area is used up.
-    pub(super) fn bump(&mut self, h: usize, n: usize) -> Option<usize> {
-        if h >= self.live.len() || h >= REGION_SLOTS || !self.alive[h] {
+    /// A run of `k` chunks: the first of `runs` it fits, the rest of that
+    /// left there, or from `fresh`, short of `limit`.
+    fn run_in(runs: &mut Vec<(usize, usize)>, fresh: &mut usize, limit: usize, k: usize) -> Option<usize> {
+        if let Some(i) = runs.iter().position(|&(_, n)| n >= k) {
+            let (start, n) = runs[i];
+            if n == k {
+                runs.swap_remove(i);
+            } else {
+                runs[i] = (start + k * CHUNK_WORDS, n - k);
+            }
+            return Some(start);
+        }
+        if *fresh + k * CHUNK_WORDS > limit {
             return None;
         }
-        let [fill, end] = self.table[h];
-        if fill + n <= end {
-            self.table[h][0] = fill + n;
-            return Some(fill);
+        *fresh += k * CHUNK_WORDS;
+        Some(*fresh - k * CHUNK_WORDS)
+    }
+
+    /// `n` words in region `h`; none if it is not live (the heap's, then).
+    pub(super) fn bump(&mut self, h: usize, n: usize) -> Option<usize> {
+        if h >= self.live.len() || !self.alive[h] {
+            return None;
         }
         if n > CHUNK_WORDS {
-            return None;
+            return Some(self.large_object(h, n));
         }
-        let chunk = self.chunk(h)?;
+        let [fill, end] = self.slot(h);
+        if fill + n <= end {
+            self.set_slot(h, [fill + n, end]);
+            return Some(fill);
+        }
+        let chunk = self.chunk(h);
         if end != 0 {
             self.live[h].push((end - CHUNK_WORDS, fill));
             self.words += (fill - (end - CHUNK_WORDS)) as u64;
         }
-        self.table[h] = [chunk + n, chunk + CHUNK_WORDS];
+        self.set_slot(h, [chunk + n, chunk + CHUNK_WORDS]);
         Some(chunk)
+    }
+
+    /// A large object of `n` words in region `h`: a run of chunks of its
+    /// own, on the region's list.
+    fn large_object(&mut self, h: usize, n: usize) -> usize {
+        let k = n.div_ceil(CHUNK_WORDS);
+        let start = if self.reap[h] {
+            let start = Self::run_in(&mut self.reap_large_free, &mut self.reap_fresh, REAP_BASE + REAP_WORDS, k)
+                .unwrap_or_else(|| panic!("the reaps' area is full: {REAP_WORDS} words"));
+            self.reap_taken += k * CHUNK_WORDS;
+            for i in 0..k {
+                self.large_of.insert(start + i * CHUNK_WORDS, start);
+            }
+            start
+        } else {
+            Self::run_in(&mut self.large_free, &mut self.fresh, ARENA_BASE + ARENA_WORDS, k)
+                .unwrap_or_else(|| panic!("the arenas' area is full: {ARENA_WORDS} words"))
+        };
+        self.large[h].push((start, start + n));
+        self.words += n as u64;
+        start
+    }
+
+    /// Run `start`, of `k` chunks, a reap's, given back: free to reuse.
+    pub(super) fn reap_run_free(&mut self, start: usize, k: usize) {
+        if k == 1 {
+            self.reap_free.push(start);
+        } else {
+            self.reap_large_free.push((start, k));
+        }
+    }
+
+    /// The ended reaps' runs a collection found a reference into
+    /// (`marked`, by where they start) kept from reuse; the rest free.
+    pub(super) fn quarantine_ends(&mut self, marked: &HashSet<usize>) {
+        let runs = std::mem::take(&mut self.quarantine_runs);
+        for (start, k) in runs {
+            if marked.contains(&start) {
+                self.quarantine_runs.insert(start, k);
+            } else {
+                for i in 0..k {
+                    self.quarantine.remove(&(start + i * CHUNK_WORDS));
+                }
+                self.reap_run_free(start, k);
+            }
+        }
     }
 
     /// Region `h`'s current chunk, as a range in use, if it has one.
     pub(super) fn current(&self, h: usize) -> Option<(usize, usize)> {
-        let [fill, end] = *self.table.get(h)?;
+        let [fill, end] = self.slot(h);
         (end != 0).then(|| (end - CHUNK_WORDS, fill))
     }
 
-    /// Region `h`'s words in use, chunk by chunk.
+    /// Region `h`'s words in use, chunk by chunk; its large objects not.
     pub(super) fn chunks_of(&self, h: usize) -> impl Iterator<Item = (usize, usize)> + '_ {
         self.live[h].iter().copied().chain(self.current(h))
+    }
+
+    /// Region `h`'s words in use: its chunks, and its large objects.
+    fn held(&self, h: usize) -> impl Iterator<Item = (usize, usize)> + '_ {
+        self.chunks_of(h).chain(self.large[h].iter().copied())
     }
 
     /// The words in use in every live region, as ranges of the heap's
     /// memory: each a sequence of objects and pairs, as a semispace is.
     pub(super) fn ranges(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
-        (0..self.live.len()).filter(|h| self.alive[*h]).flat_map(|h| self.chunks_of(h))
+        (0..self.live.len()).filter(|h| self.alive[*h]).flat_map(|h| self.held(h))
     }
 
     /// The same, for the arenas alone: what the collector traces as roots.
     pub(super) fn arena_ranges(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
-        (0..self.live.len()).filter(|h| self.alive[*h] && !self.reap[*h]).flat_map(|h| self.chunks_of(h))
+        (0..self.live.len()).filter(|h| self.alive[*h] && !self.reap[*h]).flat_map(|h| self.held(h))
     }
 
     /// A slot for a new region, the lowest free, as a reap or not; on the
@@ -198,6 +310,7 @@ impl Regions {
             Some(h) => h,
             None => {
                 self.live.push(Vec::new());
+                self.large.push(Vec::new());
                 self.reap.push(false);
                 self.alive.push(false);
                 self.live.len() - 1
@@ -246,24 +359,41 @@ impl Heap {
         }
     }
 
-    /// Region `h`'s slot given back, and its chunks.
+    /// Region `h`'s slot given back, and its chunks, and its large
+    /// objects' runs.
     fn region_end(&mut self, h: usize) {
         let r = &mut self.regions;
         let mut chunks: Vec<usize> = std::mem::take(&mut r.live[h]).into_iter().map(|(start, _)| start).collect();
         if let Some((start, fill)) = r.current(h) {
             r.words += (fill - start) as u64;
             chunks.push(start);
-            r.table[h] = [0, 0];
+            r.set_slot(h, [0, 0]);
         }
+        let runs: Vec<(usize, usize)> = std::mem::take(&mut r.large[h]).into_iter().map(|(start, end)| (start, (end - start).div_ceil(CHUNK_WORDS))).collect();
         r.alive[h] = false;
-        if std::mem::replace(&mut r.reap[h], false) {
+        let reap = std::mem::replace(&mut r.reap[h], false);
+        // A run's pages go back to the system: there may be many.
+        for &(start, k) in &runs {
+            self.mem.release(start..start + k * CHUNK_WORDS);
+        }
+        let r = &mut self.regions;
+        if reap {
             for c in chunks {
-                self.regions.owner.remove(&c);
-                self.regions.quarantine.insert(c);
+                r.owner.remove(&c);
+                r.quarantine.insert(c, c);
+                r.quarantine_runs.insert(c, 1);
                 self.mem.release(c..c + CHUNK_WORDS);
+            }
+            for (start, k) in runs {
+                for i in 0..k {
+                    r.large_of.remove(&(start + i * CHUNK_WORDS));
+                    r.quarantine.insert(start + i * CHUNK_WORDS, start);
+                }
+                r.quarantine_runs.insert(start, k);
             }
         } else {
             r.free.extend(chunks);
+            r.large_free.extend(runs);
         }
     }
 
@@ -379,10 +509,10 @@ impl Heap {
         self.regions.alive.iter().filter(|a| **a).count()
     }
 
-    /// Words region `h` holds now: after a reap is collected, only what
-    /// was reachable.
+    /// Words region `h` holds now, its large objects too: after a reap is
+    /// collected, only what was reachable.
     pub fn region_in_use(&self, h: usize) -> usize {
-        self.regions.chunks_of(h).map(|(start, fill)| fill - start).sum()
+        self.regions.held(h).map(|(start, fill)| fill - start).sum()
     }
 
     /// Words allocated in regions since the heap was made.

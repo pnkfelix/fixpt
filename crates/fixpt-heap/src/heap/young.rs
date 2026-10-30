@@ -134,6 +134,8 @@ impl Heap {
             owner: HashMap::new(),
             new: Vec::new(),
             marked: HashSet::new(),
+            large_marks: HashSet::new(),
+            large_gray: Vec::new(),
             code_marks: HashSet::new(),
             code_gray: Vec::new(),
             weak_pairs: Vec::new(),
