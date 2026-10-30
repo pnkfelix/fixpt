@@ -1976,10 +1976,12 @@ impl Fx26Session {
         };
         let decl = self.checker.read_in(form.span.file, &text)?.pop().ok_or_else(|| fail("a definition".into()))?;
         let done = self.checker.top_defining(&decl)?;
+        // The form, copied once for the group, as its run from source keeps it.
+        let kept = std::rc::Rc::new(form.clone());
         for (d, _) in group {
             let name = self.checker.interner.intern(&d.name);
             let uses = d.uses.iter().map(|(u, _)| self.checker.interner.intern(u)).collect();
-            self.checker.fasl_defined(name, std::rc::Rc::new(form.clone()), uses);
+            self.checker.fasl_defined(name, kept.clone(), uses);
         }
         let top = done.run.into_iter().next().map(|(t, _)| t).ok_or_else(|| fail("a definition".into()))?;
         // Each its definition's stamp, as its run from source leaves it.
