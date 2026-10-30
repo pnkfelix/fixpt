@@ -3611,6 +3611,19 @@ Left, in order:
    copied a group of definitions at a time, each linked to the globals
    made before it as it runs; and making `.fasl`s mappable, which wants
    them made for where they will go.
+   A program's `.fasl` measured (2026-10-29), Kayak's compiler (`kfx.fx`,
+   888 definitions, 19 MB), release, on a one-file unit: 3.27 s from
+   source, 0.58 s from the `.fasl`, of which its definitions 350 ms:
+   stamps 107 (printing each type, `show_ty`), the FX-26 checker 134 (60
+   reading the definition's text, 75 checking), the Rust checker 29,
+   `fasl_defined` 19 (a linear search a definition), linking and copying
+   55, and reading the image 18 before. Done: the stamp digests the type
+   by structure (`Checker::ty_digest`), 582 to 496 ms; a definition
+   checked as `(define name T %fasl-value)`, `T` once, 496 to 461 ms.
+   Left: `fasl_defined`'s search; the splice (some 50 ms); and the checks
+   themselves, which a `.fasl` of types already resolved, or bindings
+   taken without checking (its build, source and uses' types verified
+   already), would leave: the user's to decide.
 `FIXPT_IMAGE_VERIFY=1` (to add) to check an image this executable wrote
 as `--heap` files are (§159).
 
