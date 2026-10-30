@@ -4169,3 +4169,12 @@ code area is (the collector's view and the read+execute one), and
 flushed; and freed code unregistered from what refers to it untyped (the
 code area's `starts`, gdb's and perf's JIT registrations, inlining
 notes).
+
+## 182. Typed hygienic macros (the user's, 2026-10-30)
+Design: `docs/research/typed-macros.md` (Herman's binding signature types,
+as a kind `syntax`; Bawden's macro types for modules, later). Next: the
+prototype of its "The prototype" section, in the Rust front end; the
+note's table "What FX-26's type system would need" says what the type
+system needs, and when. Waiting on the user's answers to its questions
+(the signatures' concrete syntax; what a template's reference to a
+redefined global means; ellipsis in the prototype or not).
