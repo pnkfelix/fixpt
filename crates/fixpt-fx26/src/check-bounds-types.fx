@@ -38,6 +38,8 @@
                                spin)
                        ((ref k-map @t) k-map bool)
                        k-map))
+            (val k-lower-only
+                 (subr (maxeff (alloc @t) (read @t) spin) ((ref k-map @t) int) int))
             (val k-from-above
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (k-unifying)

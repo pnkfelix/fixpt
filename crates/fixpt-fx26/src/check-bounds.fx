@@ -65,6 +65,17 @@
                     (and (>= lo 0) (>= up 0) (k-subtype up lo)))
                 nil
                 (the k-maybe-bound (cons b nil))))))))
+;; Type binder `v` of `solved`'s lower bound, where it is bounded only from
+;; below; -1 otherwise.
+(define k-lower-only (->* ((ref k-map @t) int) int)
+  (lambda (solved v)
+    (let ((m (k-bounds-of solved)))
+      (if (null? m)
+          -1
+          (let ((b (k-bound-get (car m) v)))
+            (if (and (>= (extract b 1) 0) (< (extract b 2) 0) (< (extract b 3) 0))
+                (extract b 1)
+                -1))))))
 ;; `solved`'s solutions, but none of binders whose bounds have not met; or,
 ;; if `uppers`, those of them that have an upper bound at it.
 (define k-map-unsettled (->* ((ref k-map @t) k-map bool) k-map)

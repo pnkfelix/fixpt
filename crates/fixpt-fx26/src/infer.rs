@@ -1762,6 +1762,17 @@ impl Checker {
             let eff = self.check(a, p)?;
             return Ok((p, eff));
         }
+        // A binder at least a sum, and bounded no other way: what the
+        // argument is raises it to the two's join (`branch_join`), as an
+        // `if`'s branches join, so that `(list (sum #:a 1) (sum #:b "x"))`
+        // is a list of the one sum. With no join, it stays, and the
+        // argument is refused at the end, as before.
+        if let Some(lower) = self.sum_lower_only(param, u) {
+            let (t, eff) = self.synth(a)?;
+            let raised = self.branch_join(lower, t, 0).unwrap_or(t);
+            self.unify(param, raised, u, &mut HashSet::new());
+            return Ok((t, eff));
+        }
         // A variable's type is its own; a call, told what it is, is told
         // its regions too (`(cons 1 2)` where a key at `@heap` is wanted).
         let by_itself = match *self.arena.exp_at(a) {
@@ -1789,6 +1800,15 @@ impl Checker {
         };
         self.unify(param, t, u, &mut HashSet::new());
         Ok((t, eff))
+    }
+
+    /// Where `param` is a type binder bounded only from below, by a sum:
+    /// that sum (`check-synth.fx`'s `k-sum-lower-only`).
+    fn sum_lower_only(&self, param: TyId, u: &Unknowns) -> Option<TyId> {
+        let Ty::Var(v) = *self.arena.get(self.arena.resolve(param)) else { return None };
+        let b = u.bounds.get(&v)?;
+        let lower = b.lower.filter(|_| b.upper.is_none() && b.exact.is_none())?;
+        matches!(self.arena.get(self.arena.resolve(lower)), Ty::Sum(_)).then_some(lower)
     }
 
     /// The region variables `t` uses other than as a pair's region, or in an

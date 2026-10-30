@@ -4218,8 +4218,9 @@ arguments not joined); `(new (circle 1))` then set to a `rect` (a
 reference is invariant); a `tagcase` over a value bound to `(circle 1)`
 with an arm for `rect` (an arm for a tag the type has not is an error, and
 taking it as dead would hide a misspelt tag). Precision stays to be had
-from `sum`. Left, worth doing for `sum` alone: arguments instantiating one
-polymorphic parameter joined, as branches are. The findings before:
+from `sum`. Arguments instantiating one polymorphic parameter now join
+too, as branches do (2026-10-30): `(list (sum #:a 1) (sum #:b "x"))`.
+The findings before:
 Today `(define-datatype shape (circle int) (rect int int))` makes a
 structural `define-type` of a sum whose variants are products labelled
 from 1 (a one-member variant too: `(productof (1 int))`), and a

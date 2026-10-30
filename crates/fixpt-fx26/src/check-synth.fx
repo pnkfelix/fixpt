@@ -623,6 +623,15 @@
 ;; where it has one.
 (define k-at-most (->* (int k-solved) int)
   (lambda (param solved) (k-subst param (k-map-unsettled solved (get solved) #t))))
+;; Where `param` is a type binder bounded only from below, by a sum: that
+;; sum; else -1 (`infer.rs`'s `sum_lower_only`).
+(define k-sum-lower-only (->* (int k-solved) int)
+  (lambda (param solved)
+    (tagcase (k-get (k-resolve param))
+      (ty-var (v)
+        (let ((lo (k-lower-only solved v)))
+          (if (and (>= lo 0) (tagcase (k-get (k-resolve lo)) (ty-sum (ps) #t) (else y #f))) lo -1)))
+      (else y -1))))
 ;; Whether `x` is a variable of a type not polymorphic.
 (define k-mono-var? (->* (kx) bool)
   (lambda (x)
@@ -646,6 +655,15 @@
   (lambda (arg param p kinds solved done i check synth)
     (cond ((not (k-mentions-unsettled? param kinds solved))
            (k-arg-found done i p (check arg p)))
+          ;; A binder at least a sum, and bounded no other way: what the
+          ;; argument is raises it to the two's join (`k-branch-join`), as an
+          ;; `if`'s branches join; with no join, it stays, and the argument
+          ;; is refused at the end, as before.
+          ((>= (k-sum-lower-only param solved) 0)
+           (let* ((r (synth arg))
+                  (j (k-branch-join (k-sum-lower-only param solved) (extract r 1) 0)))
+             (begin (k-unify param (if (>= j 0) j (extract r 1)) kinds solved (k-new-trail))
+                    (k-arg-found done i (extract r 1) (extract r 2)))))
           ;; A variable's type is its own; a call, told what it is, is told
           ;; its regions too.
           ((k-mono-var? arg) (k-arg-unified param kinds solved done i (synth arg)))
