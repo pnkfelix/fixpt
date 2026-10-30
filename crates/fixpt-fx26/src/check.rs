@@ -2156,13 +2156,7 @@ impl Checker {
                 // one (`TODO.md` §48); beside `nil`, the type `nil`; beside
                 // a pair, the pair that may be `nil`.
                 let [a, b] = self.join_with_nil(&[a, b])[..] else { unreachable!() };
-                let t = if self.subtype(a, b) {
-                    b
-                } else if self.subtype(b, a) {
-                    a
-                } else if let Some(t) = self.nat_join(a, b) {
-                    t
-                } else {
+                let Some(t) = self.branch_join(a, b, 0) else {
                     return Err(FxError::at(span, format!("the branches are a {} and a {}", self.show_ty(a), self.show_ty(b))));
                 };
                 let eff = self.mask(e, &te.union(&ae).union(&be), t);
@@ -4556,7 +4550,10 @@ impl Checker {
             None => {
                 // `nil` is what the other arms are, as in an `if`.
                 let types = self.join_with_nil(&types);
-                let Some(t) = types.iter().copied().find(|t| types.clone().iter().all(|u| self.subtype(*u, *t))) else {
+                // One the others are within; else, of sums, their join.
+                let found = types.iter().copied().find(|t| types.clone().iter().all(|u| self.subtype(*u, *t)));
+                let found = found.or_else(|| types[1..].iter().try_fold(types[0], |t, u| self.branch_join(t, *u, 0)));
+                let Some(t) = found else {
                     let shown: Vec<String> = types.iter().map(|t| self.show_ty(*t)).collect();
                     return Err(FxError::at(span, format!("the arms are {}", shown.join(", "))));
                 };
@@ -4565,6 +4562,38 @@ impl Checker {
         };
         let eff = self.mask(e, &eff, t);
         Ok((t, eff))
+    }
+
+    /// The least type above two branches' `a` and `b`, if there is one: the
+    /// wider, if one is within the other; a `nat`, of two naturals; or, of
+    /// two sums, the sum of each's variants, a tag both have carrying its
+    /// payloads' join: `a`'s variants in order, then `b`'s that `a` has not
+    /// (as `check-synth.fx`'s `k-branch-join`). `depth` bounds the descent
+    /// through recursive sums.
+    pub(crate) fn branch_join(&mut self, a: TyId, b: TyId, depth: usize) -> Option<TyId> {
+        if self.subtype(a, b) {
+            return Some(b);
+        }
+        if self.subtype(b, a) {
+            return Some(a);
+        }
+        if let Some(t) = self.nat_join(a, b) {
+            return Some(t);
+        }
+        if depth > 32 {
+            return None;
+        }
+        let (Ty::Sum(xs), Ty::Sum(ys)) = (self.arena.get(self.arena.resolve(a)).clone(), self.arena.get(self.arena.resolve(b)).clone()) else {
+            return None;
+        };
+        let mut parts = xs;
+        for (l, u) in ys {
+            match parts.iter().position(|(m, _)| *m == l) {
+                Some(i) => parts[i].1 = self.branch_join(parts[i].1, u, depth + 1)?,
+                None => parts.push((l, u)),
+            }
+        }
+        Some(self.arena.ty(Ty::Sum(parts)))
     }
 
     /// `env` cut back to `n` bindings, and the known procedures among those

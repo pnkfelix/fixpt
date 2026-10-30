@@ -208,15 +208,59 @@
 (define k-join-with-nil (->* (k-ids) k-ids)
   (lambda (ts0)
     (let ((ts (k-nils-if-any ts0))) (if (k-any-nil? ts) (k-nil-pairs ts) ts))))
-;; An `if`'s type, its branches a `tc` and a `td`: the greater; an error if neither is.
+;; The least type above two branches' `t` and `u`, or -1: the wider, if one
+;; is within the other; a `nat`, of two naturals of sizes not shown equal;
+;; of two sums, the sum of each's variants, a tag both have carrying its
+;; payloads' join: `t`'s variants in order, then `u`'s that `t` has not (as
+;; `check.rs`'s `branch_join`). `depth` bounds the descent through
+;; recursive sums.
+(define-rec
+  (k-branch-join (->* (int int int) int)
+    (lambda (t u depth)
+      (cond ((k-subtype t u) u)
+            ((k-subtype u t) t)
+            ((and (k-nat-ty? t) (k-nat-ty? u)) (k-ty-new (ty-nat (sz-finite))))
+            ((> depth 32) -1)
+            (else
+             (tagcase (k-get (k-resolve t))
+               (ty-sum (ps)
+                 (tagcase (k-get (k-resolve u))
+                   (ty-sum (qs)
+                     (let ((joined (k-join-parts ps qs depth)))
+                       (if (k-parts-known? joined) (k-ty-new (ty-sum joined)) -1)))
+                   (else y -1)))
+               (else y -1))))))
+  ;; `ps` with each of `qs` added: a tag `ps` has, its payload joined (-1 if
+  ;; none), else at the end.
+  (k-join-parts (->* (k-parts k-parts int) k-parts)
+    (lambda (ps qs depth)
+      (if (null? qs)
+          ps
+          (k-join-parts (k-join-part ps (extract (car qs) 1) (extract (car qs) 2) depth)
+                        (cdr qs) depth))))
+  (k-join-part (->* (k-parts symbol int int) k-parts)
+    (lambda (ps l t depth)
+      (cond ((null? ps) (the k-parts (cons (product (1 l) (2 t)) nil)))
+            ((symbol=? (extract (car ps) 1) l)
+             (let ((j (k-branch-join (extract (car ps) 2) t (+ depth 1))))
+               (the k-parts (cons (product (1 l) (2 j)) (cdr ps)))))
+            (else (the k-parts (cons (car ps) (k-join-part (cdr ps) l t depth))))))))
+;; Whether every part's type is known (≥ 0).
+(define k-parts-known? (->* (k-parts) bool)
+  (lambda (ps) (or (null? ps) (and (>= (extract (car ps) 2) 0) (k-parts-known? (cdr ps))))))
+;; Of `ts`, their join, one pair at a time from the first; -1 if none.
+(define k-fold-join (->* (int k-ids) int)
+  (lambda (t ts)
+    (cond ((< t 0) -1)
+          ((null? ts) t)
+          (else (k-fold-join (k-branch-join t (car ts) 0) (cdr ts))))))
+;; An `if`'s type, its branches a `tc` and a `td`: their join; an error if they have none.
 (define k-join-known (->* (int int int int) int)
   (lambda (tc td a b)
-    (cond ((k-subtype tc td) td)
-          ((k-subtype td tc) tc)
-          ;; Naturals of sizes not shown equal: a `nat`.
-          ((and (k-nat-ty? tc) (k-nat-ty? td)) (k-ty-new (ty-nat (sz-finite))))
-          (else
-           (k-fail (k-cat4 "the branches are a " (k-show-ty tc) " and a " (k-show-ty td)) a b)))))
+    (let ((t (k-branch-join tc td 0)))
+      (if (< t 0)
+          (k-fail (k-cat4 "the branches are a " (k-show-ty tc) " and a " (k-show-ty td)) a b)
+          t))))
 ;; The same, `nil`, beside another branch, what that is if `nil` is one
 ;; (`TODO.md` §48); beside `nil`, the type `nil`; beside a pair, the pair
 ;; that may be `nil`.
@@ -715,7 +759,10 @@
   (lambda (x types expected)
     (if (>= expected 0)
         expected
-        (let* ((ts (k-join-with-nil types)) (found (k-upper-bound ts ts)))
+        (let* ((ts (k-join-with-nil types))
+               (bound (k-upper-bound ts ts))
+               ;; One the others are within; else, of sums, their join.
+               (found (if (or (>= bound 0) (null? ts)) bound (k-fold-join (car ts) (cdr ts)))))
           (if (< found 0)
               (let ((shown (k-join (k-show-list types k-printing-none) ", ")))
                 (k-fail-at (string-append "the arms are " shown) x))

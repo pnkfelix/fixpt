@@ -4205,3 +4205,33 @@ flat products. Recorded there as a hypothetical extension, not decided:
 a keyword as a sum's constructor, `(#:tag e …)` (arguments by arity, a
 datatype's one-member variant carrying its member, flat products), and
 after it singleton keyword types, so that a keyword applied constructs.
+
+## 184. `define-datatype` with keyword tags: to finish deciding (the user's, 2026-10-30)
+Today `(define-datatype shape (circle int) (rect int int))` makes a
+structural `define-type` of a sum whose variants are products labelled
+from 1 (a one-member variant too: `(productof (1 int))`), and a
+constructor procedure per tag, named by it, returning `shape`. Found so
+far:
+- **Keep it uniform** (the user's): every variant a product of its
+  members, the unused `mu` harmless. Adding a member to a variant then
+  never changes its payload from a value to a product, which would break
+  every `tagcase` arm on it. The cost, a bloblet a one-member value, is
+  today's.
+- **Tags keywords, constructors first-class procedures named bare**: the
+  type `(sumof (#:circle (productof (1 int))) …)`, `circle` a procedure.
+  Every bare name is then a variable and every tag looks like one; `(map
+  circle xs)` works; keyword constructors (`docs/research/typed-macros.md`)
+  become a convenience for anonymous sums, not needed here.
+- **Open: what a constructor returns.** `shape` (today's; easy to infer),
+  or the one-variant sum `(sumof (#:circle …))` (precise, fits any sum with
+  that variant). The second needs a join of sums at conditionals: without
+  an expected type, `(if c (sum #:a 1) (sum #:b "x"))` is refused today
+  ("the branches are a (sumof (a int)) and a (sumof (b string))"). Done
+  (2026-10-30): the join of sums, at `if` and among `tagcase` arms, in both
+  checkers, only where neither branch is the other's (so no type inferred
+  before changed); the suite, all of it, the same. So the one-variant
+  return type is open to choose.
+- Constructor names are globals, so two datatypes' `none`s clash, as
+  today; module scoping is the answer, not keywords.
+- `match` (nested patterns, literals, guards) later, as a typed macro: its
+  patterns are binders, Herman's binding signatures' case.
