@@ -4132,3 +4132,34 @@ copied. Ways, to choose:
 3. The cache's code made findable by perf as a file of symbols: an ELF
    object of the names at those addresses, where perf looks for that
    mapping's file.
+
+## 180. A place's limit, set (the user's, 2026-10-30; to think about)
+Arenas and reaps no longer fall back to the heap (`9372bbce`): a large
+object is the region's, and an area used up is an error, as a full heap
+is. The limit is the area's today, for all arenas together (and all reaps
+together): `ARENA_WORDS` and `REAP_WORDS`, 2^31 words each, fixed in the
+address layout. The user wants a way to set it, and is not sure of the
+interface; not imperatively on a place `p`, they think, but maybe that is
+right for now. What to settle:
+- **Whose limit**: the session's, for every place (as `FIXPT_NURSERY`
+  sets the nursery: a flag, or an environment variable); or each
+  place's, given where it is bound (`(letrena (r (words n)) body …)`);
+  or set on a place after (`(place-limit! r n)`), which an effect would
+  have to say (`(write r)`?).
+- **What going past it is**: fatal, as the heap's full is now; or a
+  condition the program can handle, which every allocation into a place
+  would then have in its effect (or a `spin`-like atom of its own).
+- **What it counts**: words in use (a reap's after a collection), or
+  words taken from the area, chunks and runs whole.
+- Nested places: does an inner one's use count against the outer's?
+
+## 181. Code in a place (the user's, 2026-10-30; not yet)
+Code made while a place's body runs, given back with it: not yet. What it
+would take (the conversation of 2026-10-30): the code area's
+native/stubbed test is one comparison with the native half's start, so
+each place's code would need sub-parts of both kinds laid out to keep it
+(or a different test at every call); each sub-part mapped twice, as the
+code area is (the collector's view and the read+execute one), and
+flushed; and freed code unregistered from what refers to it untyped (the
+code area's `starts`, gdb's and perf's JIT registrations, inlining
+notes).
