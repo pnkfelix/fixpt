@@ -53,12 +53,18 @@
                (k-atoms-on (string=? head "read") (car gs)))
               (else (k-sfail (k-cat3 "globals are only read and written, not `" head "`") x)))))))
 
-;; A label or tag: a name, or a natural number, which is its digits.
+;; A label or tag: a keyword, `#:name`, or the name bare, the same label;
+;; or a natural number, which is its digits.
 (define k-syn-label (->* (syn) symbol)
   (lambda (s)
     (cond ((syn-symbol? s) (syn-head s))
           ((>= (syn-int s) 0) (string->symbol (int->string (syn-int s))))
-          (else (k-sfail "a label is a name or a natural number" s)))))
+          (else
+           (tagcase s
+             (atom (d a b)
+               (if (keyword? d) (keyword->symbol d) (k-sfail k-label-usage s)))
+             (else x (k-sfail k-label-usage s)))))))
+(define k-label-usage string "a label is a keyword, a name or a natural number")
 (define k-has-label? (->* (k-parts symbol) bool)
   (lambda (ps l)
     (cond ((null? ps) #f) ((symbol=? (extract (car ps) 1) l) #t) (else (k-has-label? (cdr ps) l)))))

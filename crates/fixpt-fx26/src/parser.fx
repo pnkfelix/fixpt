@@ -89,12 +89,18 @@
 (define drop (->* (syns-a int) syns-a)
   (lambda (xs i) (if (= i 0) xs (drop (cdr xs) (- i 1)))))
 
-;; A label or tag: a name, or a natural number, which is its digits.
+;; A label or tag: a keyword, `#:name`, or the name bare, the same label;
+;; or a natural number, which is its digits (as `parse.rs`'s `label`).
 (define label (->* (syn) symbol)
   (lambda (s)
     (cond ((syn-symbol? s) (syn-head s))
           ((>= (syn-int s) 0) (string->symbol (int->string (syn-int s))))
-          (else (pfail "a label is a name or a natural number" s)))))
+          (else
+           (tagcase s
+             (atom (d a b)
+               (if (keyword? d) (keyword->symbol d) (pfail label-usage s)))
+             (else x (pfail label-usage s)))))))
+(define label-usage string "a label is a keyword, a name or a natural number")
 
 (define keep (->* (syns-a) syns-a)
   (lambda (xs) (if (null? xs) nil (cons (car xs) (keep (cdr xs))))))

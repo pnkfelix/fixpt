@@ -2450,8 +2450,6 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         Ok((kind, eq, self.parse_exp(d)?, text))
     }
 
-    /// A label or tag: a symbol, or a positive integer, as FX-91's
-    /// `define-datatype` numbers a variant's members.
     /// A procedure type's parameter written `(name type)`: its name and
     /// type, where `name` names no type or type form.
     pub(crate) fn named_param(&self, p: &Syntax) -> Option<(Sym, Syntax)> {
@@ -3419,13 +3417,19 @@ const CASE_TREE_SYMBOLS_INDEXED: usize = 64;
         }
     }
 
+    /// A label or tag: a keyword, `#:name` (`docs/fx26.md`, "Keywords"), or
+    /// the name bare, the same label; or a natural number, as a
+    /// `define-datatype` numbers a variant's members.
     pub(crate) fn label(&mut self, s: &Syntax) -> R<Sym> {
+        if let Datum::Keyword(x) = s.datum {
+            return Ok(x);
+        }
         if let Some(x) = s.as_symbol() {
             return Ok(x);
         }
         match self.literal_int(s) {
             Some(n) if n >= 0 => Ok(self.interner.intern(&n.to_string())),
-            _ => Err(FxError::at(s.span, "a label is a name or a natural number")),
+            _ => Err(FxError::at(s.span, "a label is a keyword, a name or a natural number")),
         }
     }
 
