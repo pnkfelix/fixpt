@@ -128,6 +128,7 @@ types data already:
 | `data` | `datum`, what `quote` builds |
 | `bvar` | an identifier in a binding position: a generative type of its own, not `symbol`, so that a binder is not a quoted symbol |
 | `expr` | an expression, opaque: a generative type that programs are given no operation on, neither to look inside nor to make one but by a template |
+| (none) | `label`: an identifier in the source, the keyword it names once parsed (below, "Keywords") |
 
 So a syntax type is a type, of kind `data`, of the syntax objects a
 macro's use is parsed into, and what FX-26 has for types is had for
@@ -204,6 +205,70 @@ the same as the type it elaborates to:
 The pattern's names are the macro's pattern variables, so one form says
 the grammar, the binding structure and what the template may refer to.
 More than one clause is a union (`let` and named `let`).
+
+### Keywords: names that are not variables
+
+**Why** (the user, 2026-10-30): reading code that uses sums heavily, it
+took too long to see that the occurrences of `sorted` were not a variable
+but a variant's name. In FX-26 a tag is a bare symbol, `(sum sorted v)`,
+`(extract q reply)`, `(sumof (sorted T) …)`, a `tagcase` arm, written
+exactly as a variable reference is, and only its position says it is not
+one. So are `tagcase`'s `else`, `module`'s `extend`, the `:` of a
+parameter `(x : T)`, and this note's own `in`, `exports`, `rib` and
+`cage`. The parser copes because it never asks what a name is bound to,
+which is also why form names are reserved.
+
+**Keywords**, `#:sorted` (Racket's spelling, the user's choice): a reader
+token and a `datum` atom of their own type, `keyword`, interned, and
+self-quoting as a number is. Never bound, never looked up, never renamed
+by hygiene, never captured or shadowed. Then:
+- **Tags and labels are keywords**: `(sum #:sorted v)`, `(extract q
+  #:reply)`, `(product (#:n n) (#:reply c))`, `(sumof (#:sorted T) …)`,
+  `tagcase` arms by keyword. Whether a flat form, `(product #:n n
+  #:reply c)`, comes with them is a separate decision.
+- **Herman's open problem of syntactic literals** (`else`, `=>`;
+  dissertation §7.3.1) goes away rather than being solved: a literal in a
+  pattern is a keyword, `#:else`, which nothing can bind, so it has no
+  binding structure to get wrong.
+- **In templates**, a tag is just placed: no binding analysis, no
+  renaming.
+- **`symbol->keyword` and `keyword->symbol`**: ordinary data operations,
+  `(subr pure (symbol) keyword)` and back, as Clojure has (`(keyword
+  'foo)`, `(symbol :foo)`); Racket, as far as I recall, goes through
+  strings. They do not make tags dynamic: `extract`, `sum` and `tagcase`
+  need their tag where they are checked, since the type `(sumof (#:ok T)
+  …)` is about that tag, and a keyword computed at run time is a
+  `keyword`, not `#:ok`. Only a singleton keyword type, `(keyword ok)`,
+  as `false` and `(nat 3)` are singletons, would make a tag a value a
+  procedure could be given: a later, larger step (row polymorphism's
+  territory), which keywords leave open.
+
+**A syntax type `label`.** Sugar that writes a field as a bare name, as
+OCaml's `r.foo`, SML's `#foo r`, Racket's `point-x` and Clojure's
+`(:foo m)` do, is a macro whose argument is a `label`: an identifier in
+the source, which parsing makes the keyword, and which the template only
+places:
+
+```scheme
+(define-syntax ext
+  (syntax ((v expr) (f label)))
+  ((ext v f) (extract v f)))        ; (ext q reply) is (extract q #:reply)
+```
+
+The signature says `f` is neither a binder nor a reference, so hygiene
+has nothing to do, the REPL does not resolve `reply`, and "no field
+`reply`" is said at the use. The rule "a bare name here is not a
+variable" is then declared in a macro's type, not implicit in a parser's
+dispatch. But the core forms keep their keywords, and such sugar stays a
+library's: a bare-name sugar for every common form would hide the tags
+again, which is what keywords are for.
+
+**The transition.** Every product, sum and `tagcase` in this repository,
+in Kayak, in Heist and in the user's editor writes its tags bare. Both
+spellings are accepted for a while, a lint offering the rewrite; a sum's
+tag at run time a keyword, so that a printed sum shows what the source
+wrote (today it is a symbol). Keywords come before the macro prototype's
+literals need them, and are worth having without macros at all.
 
 ### Where it runs: parsing knows what is bound
 
@@ -286,6 +351,7 @@ would be met:
 
 | # | What | Why | When |
 | --- | --- | --- | --- |
+| K | Keywords, `#:tag`: a reader token, a `datum` atom of type `keyword`, interned and self-quoting; tags, labels and syntactic literals written with them; `symbol->keyword`, `keyword->symbol`; bare-symbol tags accepted through a transition | names that are not variables, seen as such; Herman's literals; tags in templates | before the prototype's literals; worth it alone |
 | 1 | Syntax objects as data: generative types `expr` (opaque) and `bvar`; a syntax type is a `data` type over them, with `nil`, pairs, unions and recursion as FX-26 has them. Besides, Herman's check of a union's members for disjoint *source* shapes (`expr` overlapping everything) | Herman's syntax types, with no kind of their own | prototype |
 | 2 | Binding signatures as annotations the value checker erases: `(named x σ)`, `(in σ x …)`, `(exports σ (rib …))` and `(cage …)`; compared with them by the macro checker, pushed through unions and recursion | what is new in Herman, and new to FX-26: nothing it has is an attribute | prototype |
 | 3 | A parser with an environment of macros, and of the binders that shadow them | parsing by signature; macro names that may be shadowed | prototype |
@@ -338,3 +404,6 @@ itself.
   is where the macro is used (FX-26's redefinition re-runs definitions)?
 - Ellipsis (`...`) in the prototype, or recursion through syntax types
   first, as Herman does?
+- Keywords (decided: `#:tag`): a sum's tag at run time a keyword, as
+  proposed, or still a symbol with keywords only in the source? And flat
+  products, `(product #:n n #:reply c)`, or keep the pairs?

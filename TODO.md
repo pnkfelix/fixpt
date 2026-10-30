@@ -4180,3 +4180,15 @@ note's table "What FX-26's type system would need" says what the type
 system needs, and when. Waiting on the user's answers to its questions
 (the signatures' concrete syntax; what a template's reference to a
 redefined global means; ellipsis in the prototype or not).
+
+## 183. Keywords, `#:tag`, for tags and labels (the user's, 2026-10-30)
+Reading code heavy with sums, the user took too long to see that `sorted`
+was a variant's name, not a variable: FX-26 writes tags bare, as variable
+references are written. Keywords: a reader token and a `datum` atom of
+type `keyword`, interned and self-quoting; product and sum labels,
+`tagcase` arms and macros' syntactic literals written with them;
+`symbol->keyword` and `keyword->symbol`. Bare-symbol tags accepted
+through a transition, with a lint offering the rewrite. Design in
+`docs/research/typed-macros.md`, "Keywords: names that are not
+variables"; open there: a sum's run-time tag a keyword or a symbol, and
+flat products.
