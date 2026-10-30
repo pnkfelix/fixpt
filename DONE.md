@@ -4144,3 +4144,32 @@ Test: `fixpt-cli/tests/stage.rs` (`programs/stage/stage.fx`: accepted, a
 type refused, a name unbound, an effect beyond `E`, a definition, I/O
 within `E`, a procedure made, and thirty made while values wait on the
 stack, so that collections come as the checker runs), on every machine.
+
+## 187. The front end ran the program's tasks (found 2026-10-30, fixed the same day)
+
+Found making `stage` (§186): with the conductor's `let*` made by a
+procedure, `(define front-end-entries (make-front-end))`,
+`programs/preempt/allocating-short.fx` on `fx-regs-rsjit-cellcc` at
+`FIXPT_SLICE` 13 or less failed, `cellular word: no routine is numbered
+-87`, when a form came after one that left a process preempted.
+- **Why**: the program and the front end share a runtime, and so the
+  scheduler's state. Compiling the next form, the front end (native code,
+  `direct.rs`) polled; the program's task waited, the front end's run was
+  taken for the first task, and the scheduler's `preempt` was a procedure
+  that machine could call (`own`). So it switched to the program's task
+  inside the front end's run: native code calling a closure whose word is
+  register code, which `call_value` runs on the Rust cellular machine,
+  which reads register cells as cellular ones. With the `let*` at top
+  level, `preempt` was not one native code calls, by chance.
+- **The fix**: a call of the front end is quiet (`Heap::quiet_enter`), in
+  `%run-front-end` and `prim::call_front_end`: no poll in it preempts, for
+  any scheduler's task. The front end is not the program.
+- **The conductor's `let*` stays at top level** all the same, with
+  `make-front-end` made of its text (`lib.rs`'s `conductor`): modules bound
+  at top level are known to the compiler; made in a procedure, `fixpt
+  check` of a large program took 3.58 s for 3.30 s.
+
+Test: `fixpt-cli/tests/stage.rs`'s `a_process_stages_while_another_runs`
+(`programs/stage/in-a-process.fx`: one process stages five times while
+another loops, slices of 7 polls), on every machine that stages; without
+the fix, the native one fails, `no such task`.

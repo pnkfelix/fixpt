@@ -1,0 +1,25 @@
+;; `stage` in a process while another runs, at tiny time slices
+;; (`FIXPT_SLICE`): the checker, which is not the program, is never
+;; preempted for the program's tasks (`TODO.md` §187), and both answer.
+(define a (icell int @c) (make-icell))
+(define b (icell int @c) (make-icell))
+(define staging (addr int @p)
+  (spawn (box int r)
+    (let ((api (module (define x 41) (define bump (lambda ((n int)) (+ n 1))))))
+      (letrec ((go (subr (maxeff stage spin) (int int) int)
+                 (lambda (n acc)
+                   (if (= n 0)
+                       acc
+                       (stage api pure int '(bump x)
+                         (p (go (- n 1) (+ acc (p))))
+                         (why -1))))))
+        (icell-put! a (go (receive box) 0))))))
+(define looping (addr int @p)
+  (spawn (box int r)
+    (letrec ((go (subr (maxeff (alloc r) spin) (int int (listof int r)) int)
+               (lambda (i s acc)
+                 (if (= i 0) (+ s (if (null? acc) 0 7)) (go (- i 1) (+ s i) (rcons r i acc))))))
+      (icell-put! b (go (receive box) 0 nil)))))
+(send staging 5)
+(send looping 3000)
+(write-out (string-append (int->string (icell-get a)) " " (int->string (icell-get b)) "\n"))

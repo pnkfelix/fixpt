@@ -24,8 +24,17 @@ const STAGING: &[&str] = &[
 
 /// `program` run on `machine`: its status, standard output and error.
 fn run(machine: &'static str, program: &str) -> (Option<i32>, String, String) {
+    run_sliced(machine, program, None)
+}
+
+/// The same, at time slices of `slice` polls, if given (`FIXPT_SLICE`).
+fn run_sliced(machine: &'static str, program: &str, slice: Option<u32>) -> (Option<i32>, String, String) {
     let path = format!("{}/tests/programs/stage/{program}", env!("CARGO_MANIFEST_DIR"));
-    let out = Command::new(FIXPT).args(["--fx26-machine", machine, "run", &path]).stdin(Stdio::null()).output().expect("runs");
+    let mut cmd = Command::new(FIXPT);
+    if let Some(n) = slice {
+        cmd.env("FIXPT_SLICE", n.to_string());
+    }
+    let out = cmd.args(["--fx26-machine", machine, "run", &path]).stdin(Stdio::null()).output().expect("runs");
     (out.status.code(), String::from_utf8_lossy(&out.stdout).into_owned(), String::from_utf8_lossy(&out.stderr).into_owned())
 }
 
@@ -56,6 +65,20 @@ fn code_is_staged_or_refused() {
     for (m, t) in runs {
         let (status, out, err) = t.join().expect("ran");
         assert_eq!((status, out.as_str()), (Some(0), STAGED), "{m}: {err}");
+    }
+}
+
+/// A process stages code while another runs, at tiny time slices: the
+/// checker is not the program, and no poll in it switches to the program's
+/// tasks (`TODO.md` §187: on native code, it ran them on a machine that
+/// could not).
+#[test]
+fn a_process_stages_while_another_runs() {
+    let runs: Vec<_> =
+        STAGING.iter().filter(|m| runs_here(m)).map(|m| (*m, std::thread::spawn(move || run_sliced(m, "in-a-process.fx", Some(7))))).collect();
+    for (m, t) in runs {
+        let (status, out, err) = t.join().expect("ran");
+        assert_eq!((status, out.as_str()), (Some(0), "210 4501507\n"), "{m}: {err}");
     }
 }
 

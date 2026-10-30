@@ -2974,6 +2974,9 @@ of `TODO.md` §141, working on my own.
 - **The code is wrapped as text**, after reading it alone as one datum,
   rather than built as syntax: the parser's trees carry their datums, and
   one read alone cannot close the parentheses around it.
+- **The front end runs quiet** (§187): a poll in it never preempts, for
+  the program's scheduler or any. Not "the front end's own scheduler":
+  it has no tasks.
 - **A second front end, not the program's**: `check-program` resets the
   checker, which would lose the program's own state.
 - **`rs-scheme-vm` and `fx-ast-eval` refuse**, as `native-procedure` fails

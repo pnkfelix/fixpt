@@ -162,6 +162,14 @@ pub const CALL_CLOSURE: &str = "call-closure";
 /// past one is a failure, as no prompt above would take it. Else as
 /// `%run-word`, on the front end's machine.
 fn run_front_end(rt: &mut Runtime, a: &[Value]) -> Outcome<Value> {
+    // Never preempted for the program's tasks (`quiet_front_end`).
+    rt.heap.quiet_enter();
+    let out = run_front_end_quietly(rt, a);
+    rt.heap.quiet_leave();
+    out
+}
+
+fn run_front_end_quietly(rt: &mut Runtime, a: &[Value]) -> Outcome<Value> {
     let native = a[0].is_bloblet() && rt.heap.bloblet_kind(a[0]) == const { fixpt_heap::layout::kind("native-closure") };
     if let (true, Some(call)) = (native, rt.call_native) {
         let Some(args) = rt.heap.list_to_vec(a[1]) else { return rt.type_error("a list of arguments", a[1]) };
@@ -260,9 +268,18 @@ pub fn call_closure(rt: &mut Runtime, f: Value, args: &[Value]) -> Result<Value,
 
 /// [`call_closure_by`] on the front end's machine, as `%run-front-end`
 /// calls an entry of it.
+///
+/// The front end runs quiet: it is not the program's, and shares only the
+/// runtime with it, so a poll in it never hands the program's scheduler a
+/// task to switch to. That would run the program's tasks on the front
+/// end's machine, which may not run their code (register code, under
+/// native code that calls it as cellular: `TODO.md` §187).
 pub fn call_front_end(rt: &mut Runtime, f: Value, args: &[Value]) -> Result<Value, String> {
     let run = rt.front_end_run_word.or(rt.run_word);
-    call_closure_by(rt, f, args, run)
+    rt.heap.quiet_enter();
+    let out = call_closure_by(rt, f, args, run);
+    rt.heap.quiet_leave();
+    out
 }
 
 /// A fixed-width integer type: its bits, and whether it is signed.

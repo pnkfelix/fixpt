@@ -600,8 +600,9 @@ const CONDUCTOR_LET_END: &str = ";;; The end of `front-end-entries`";
 /// The conductor as the front end has it: after `front-end-entries`,
 /// `make-front-end`, a procedure that makes the front end's modules again
 /// (for `stage`, `stage.rs`), of the same `let*`, so that it is written
-/// once. Not `front-end-entries` a call of it: the front end so made ran
-/// preempted processes wrong on register code (`TODO.md` §187).
+/// once. Not `front-end-entries` a call of it: modules bound at top level
+/// are known to the compiler, and their procedures' calls direct; made in
+/// a procedure, checking took 8% longer (`TODO.md` §187).
 pub fn conductor() -> String {
     let (_, b, body) = conductor_let();
     format!("{}(define make-front-end (lambda ()\n{body}))\n{}", &CONDUCTOR[..b], &CONDUCTOR[b..])

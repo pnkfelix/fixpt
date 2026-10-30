@@ -4272,23 +4272,3 @@ FX-26; `code` a datum. Left, in order:
    `E` said of the code, not of the wrapping `(subr E () R)`.
 4. `rs-scheme-vm` and `fx-ast-eval`, which refuse every `stage` now.
 5. Sessions (`docs/research/eval.md`, "Sessions").
-
-
-## 187. A front end made by a procedure call runs preempted register code wrong (found 2026-10-30)
-
-Found making `stage` (§186): with the conductor's `let*` inside a procedure,
-`(define front-end-entries (make-front-end))`, and nothing else changed,
-`programs/preempt/allocating-short.fx` on `fx-regs-rsjit-cellcc` (and
-`fx-regs-fxjit-cellcc`) at `FIXPT_SLICE` 13 or less fails, `cellular word: no
-routine is numbered -87`, as its second `send` is compiled while the first
-process waits preempted. Not with the front end cellular
-(`FIXPT_FRONT_END_CELLULAR`), not on `fx-cells-*` or `*-nativecc`, not with
-the `let*` at top level, even under `--gc-every 1000`; no code collection
-runs. So the conductor keeps the `let*` at top level, and `lib.rs`'s
-`conductor()` makes `make-front-end` of its text. Likely what differs is how
-the front end's register code calls its modules' procedures (known globals
-at top level, closures' free values in a procedure), and some such call is
-wrong across a preemption. To find, then `make-front-end` written plainly.
-Also: `make-front-end`'s word, the whole `let*` in one procedure, some
-320,000 fields, is longer than `native_reps.rs`'s run of the pass written
-in FX-26 recurses for (a cellular stack overflow); that test leaves it out.
