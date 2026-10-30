@@ -57,6 +57,28 @@ fn a_type_abbreviation_may_mention_itself() {
 }
 
 #[test]
+fn a_types_digest_is_of_its_structure() {
+    // A definition's stamp digests its type (`Checker::ty_digest`): alike
+    // however the type is written, named, shared or wound, so that a
+    // definition read from a `.fasl` has the stamp it had from source.
+    let mut c = Checker::new();
+    top(&mut c, "(define-type K (subr (goto @k) (K) void))").expect("defines");
+    let digest = |c: &mut Checker, t: &str| {
+        let t = c.type_of_str(t).expect("a type");
+        c.ty_digest(t)
+    };
+    let named = digest(&mut c, "K");
+    assert_eq!(named, digest(&mut c, "(dletrec ((k (subr (goto @k) (k) void))) k)"));
+    assert_eq!(named, digest(&mut c, "(subr (goto @k) (K) void)"), "unfolded once");
+    assert_ne!(named, digest(&mut c, "(subr (goto @k) (int) void)"));
+    assert_ne!(named, digest(&mut c, "(subr (goto @j) (K) void)"));
+    let list = digest(&mut c, "(listof int acyclic)");
+    assert_eq!(list, digest(&mut c, "(listof int acyclic)"));
+    assert_ne!(list, digest(&mut c, "(listof bool acyclic)"));
+    assert_ne!(digest(&mut c, "(productof (a int) (b bool))"), digest(&mut c, "(productof (a bool) (b int))"));
+}
+
+#[test]
 fn a_type_abbreviation_that_is_only_a_name_is_rejected() {
     let mut c = Checker::new();
     let err = top(&mut c, "(define-type L L)").expect_err("ungrounded");

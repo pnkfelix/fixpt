@@ -253,6 +253,151 @@ impl Checker {
         self.canonically(t, |c| c.show_ty_body(c.canon(c.arena.resolve(t)), &mut Vec::new()))
     }
 
+    /// A digest of type `t`'s structure, for a definition's stamp
+    /// (`Fx26Session::definition_stamps`): the same for a type inferred and
+    /// for it read back from a `.fasl`, however each shares its parts or
+    /// winds its cycles, since it is of the tree `t` unfolds to. Of its
+    /// nodes' own parts (`ty_label`), their names as text, not as this
+    /// process's numbers. Nothing printed, no name in scope looked for,
+    /// which is what `show_ty` spends its time on.
+    pub fn ty_digest(&self, t: TyId) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let root = self.arena.resolve(t);
+        let (mut order, mut index): (Vec<TyId>, crate::ast::TyMap<usize>) = (Vec::new(), Default::default());
+        let mut kids: Vec<Vec<TyId>> = Vec::new();
+        let mut todo = vec![root];
+        while let Some(n) = todo.pop() {
+            if index.contains_key(&n) {
+                continue;
+            }
+            index.insert(n, order.len());
+            order.push(n);
+            let mut ks = Vec::new();
+            self.each_ty_kid(n, |k| ks.push(self.arena.resolve(k)));
+            todo.extend(ks.iter().rev());
+            kids.push(ks);
+        }
+        let kids: Vec<Vec<usize>> = kids.iter().map(|ks| ks.iter().map(|k| index[k]).collect()).collect();
+        let labels: Vec<u64> = order.iter().map(|n| self.ty_label(*n)).collect();
+        if !has_cycle(&kids) {
+            // A tree, maybe shared: each node's digest of its label and its
+            // kids', each node once.
+            fn merkle(i: usize, kids: &[Vec<usize>], labels: &[u64], memo: &mut [Option<u64>]) -> u64 {
+                if let Some(d) = memo[i] {
+                    return d;
+                }
+                let mut h = std::collections::hash_map::DefaultHasher::new();
+                labels[i].hash(&mut h);
+                for &k in &kids[i] {
+                    merkle(k, kids, labels, memo).hash(&mut h);
+                }
+                let d = h.finish();
+                memo[i] = Some(d);
+                d
+            }
+            return merkle(0, &kids, &labels, &mut vec![None; order.len()]);
+        }
+        // A cycle: the minimal graph (as `minimal_classes`), its classes
+        // numbered as a walk from the root first meets them, each class's
+        // label and its kids' numbers.
+        let mut class: Vec<usize> = numbered(labels.iter());
+        let mut count = class.iter().max().map_or(0, |m| m + 1);
+        loop {
+            let keys: Vec<(usize, Vec<usize>)> = (0..order.len()).map(|i| (class[i], kids[i].iter().map(|k| class[*k]).collect())).collect();
+            let next = numbered(keys.iter());
+            let n = next.iter().max().map_or(0, |m| m + 1);
+            class = next;
+            if n == count {
+                break;
+            }
+            count = n;
+        }
+        let mut first: HashMap<usize, usize> = HashMap::new();
+        for (i, c) in class.iter().enumerate() {
+            first.entry(*c).or_insert(i);
+        }
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        let mut number: HashMap<usize, usize> = HashMap::from([(class[0], 0)]);
+        let mut queue = std::collections::VecDeque::from([class[0]]);
+        while let Some(c) = queue.pop_front() {
+            let i = first[&c];
+            labels[i].hash(&mut h);
+            for &k in &kids[i] {
+                let n = number.len();
+                let k = *number.entry(class[k]).or_insert_with(|| {
+                    queue.push_back(class[k]);
+                    n
+                });
+                k.hash(&mut h);
+            }
+        }
+        h.finish()
+    }
+
+    /// A digest of node `t`'s own part, its kids aside (`ty_digest`).
+    fn ty_label(&self, t: TyId) -> u64 {
+        use crate::ast::D;
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        let name = |s: fixpt_read::Sym| self.interner.name(s);
+        let var = |v: crate::ast::DVar| self.interner.name(self.arena.dvar_name(v));
+        let d = |x: &D, h: &mut std::collections::hash_map::DefaultHasher| match x {
+            D::Type(_) => 0.hash(h),
+            D::Fun(_) => 1.hash(h),
+            D::Region(r) => (2, self.show_region(*r)).hash(h),
+            D::Effect(e) => (3, self.show_effect(e)).hash(h),
+            D::Size(z) => (4, self.show_size(z)).hash(h),
+            D::Conv(c) => (5, self.show_conv(*c)).hash(h),
+        };
+        let ty = self.arena.get(t);
+        std::mem::discriminant(ty).hash(&mut h);
+        match ty {
+            Ty::Base(s) => name(*s).hash(&mut h),
+            Ty::Void | Ty::Nil | Ty::False | Ty::Link(_) => {}
+            Ty::Union(ms) => ms.len().hash(&mut h),
+            Ty::Var(v) => var(*v).hash(&mut h),
+            Ty::Subr { conv, effect, params, spec, .. } => {
+                (self.show_conv(*conv), self.show_effect(effect), params.len()).hash(&mut h);
+                if let Some(spec) = spec {
+                    (self.show_spec(spec), spec.params.iter().map(|p| p.map(name)).collect::<Vec<_>>(), spec.result.map(name)).hash(&mut h);
+                }
+            }
+            Ty::Poly { binders, .. } => {
+                for (v, k) in binders {
+                    (var(*v), self.show_kind(*k), self.arena.is_distinct(*v), self.arena.bound(*v).map(|b| self.show_region(b))).hash(&mut h);
+                }
+            }
+            Ty::Ref(_, r) | Ty::ICell(_, r) | Ty::MarkKey(_, r) | Ty::Pair(_, _, r, false) | Ty::Place(r) => self.show_region(*r).hash(&mut h),
+            Ty::Pair(_, _, r, true) => (self.show_region(*r), true).hash(&mut h),
+            Ty::Array(_, z, r) => (self.show_size(z), self.show_region(*r)).hash(&mut h),
+            Ty::Nat(z) => self.show_size(z).hash(&mut h),
+            Ty::NList { size, region, .. } => (self.show_size(size), self.show_region(*region)).hash(&mut h),
+            Ty::Bloblet { fields, frozen, region } => (fields.len(), frozen, self.show_region(*region)).hash(&mut h),
+            Ty::PromptTag { effect, region, .. } => (self.show_effect(effect), self.show_region(*region)).hash(&mut h),
+            Ty::Composable { effect, region, once, .. } => (self.show_effect(effect), self.show_region(*region), once).hash(&mut h),
+            Ty::Product(ps) | Ty::Sum(ps) => ps.iter().for_each(|(l, _)| name(*l).hash(&mut h)),
+            Ty::Named { which, args } => {
+                name(self.generatives[*which as usize].name).hash(&mut h);
+                args.iter().for_each(|x| d(x, &mut h));
+            }
+            Ty::App { args, .. } => args.iter().for_each(|x| d(x, &mut h)),
+            Ty::Lam { params, body } => {
+                params.iter().for_each(|(v, k)| (var(*v), self.show_kind(*k)).hash(&mut h));
+                d(body, &mut h);
+            }
+            Ty::Module { abs, descs, vals } => {
+                for (n, v) in abs {
+                    (name(*n), self.arena.dvar_kind_known(*v).map(|k| self.show_kind(k))).hash(&mut h);
+                }
+                descs.iter().chain(vals).for_each(|(l, _)| name(*l).hash(&mut h));
+                descs.len().hash(&mut h);
+            }
+            Ty::Select(m, n) => (name(*m), name(*n)).hash(&mut h),
+            Ty::ParamSel(k, n) => (k, name(*n)).hash(&mut h),
+        }
+        h.finish()
+    }
+
     /// What `show` prints of `t`, each node it reaches printed as its class
     /// in `t`'s minimal graph (`print_canon`), if `t` has a cycle and is
     /// the outermost type being printed.

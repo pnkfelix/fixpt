@@ -1233,7 +1233,8 @@ impl Fx26Session {
     /// its source or a `.fasl`, so that code a `.fasl` keeps finds its
     /// assumptions hold where they do, and only there. A load's, its file's
     /// stamp (`fasl::stamp`: its text and its loads'). Another's, a digest
-    /// of its form, its name, its type and the stamps of the globals it
+    /// of its form, its name, its type (by structure, `Checker::ty_digest`,
+    /// not printed) and the stamps of the globals it
     /// reads, if that is all its making does (a `lambda`'s does nothing);
     /// else one of this process's own, which no other session's code
     /// expects. A write when the program runs counts on from it (`setglbl`),
@@ -1270,7 +1271,7 @@ impl Fx26Session {
             };
             reads.sort_by_key(|g| self.checker.interner.name(*g).to_string());
             let mut h = std::collections::hash_map::DefaultHasher::new();
-            ("fixpt-stamp", self.checker.interner.name(name), &text, self.checker.show_ty(ty)).hash(&mut h);
+            ("fixpt-stamp", self.checker.interner.name(name), &text, self.checker.ty_digest(ty)).hash(&mut h);
             for g in reads {
                 let n = self.checker.interner.name(g).to_string();
                 let w = self.global_cell(&n).ok().flatten().map(|c| {
