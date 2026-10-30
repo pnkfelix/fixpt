@@ -42,12 +42,68 @@
       (include check-resolve) (include tables) (include regcode-helpers) (include layout))
 
 (define c-reuse (ref c-kept-globals @k) (new nil))
+
+;; Globals made ahead, each for its name's next definition to take: a
+;; program's `.fasl`'s, its code linked to them before they are defined
+;; (`compile-adopt-globals!`).
+(define c-adopted (ref (table symbol (listof wglobal @k) @k) @k)
+  (new (make-table symbol-hash symbol=?)))
+;; The names whose globals such code was linked to: given then, or made
+;; ahead and taken since. A global made for one after is not the one the
+;; code links to, which `c-adopt-broken` says.
+(define c-adopt-watched (ref (table symbol bool @k) @k) (new (make-table symbol-hash symbol=?)))
+(define c-adopt-broken (ref bool @k) (new #f))
+(define c-adopt-none! (->* () unit)
+  (lambda ()
+    (begin (set c-adopted (make-table symbol-hash symbol=?))
+           (set c-adopt-watched (make-table symbol-hash symbol=?))
+           (set c-adopt-broken #f))))
+(define c-adopt-watch! (->* ((listof symbol acyclic)) unit)
+  (lambda (ns)
+    (if (null? ns)
+        #u
+        (begin (table-set! (get c-adopt-watched) (car ns) #t) (c-adopt-watch! (cdr ns))))))
+(define c-adopt-each! (->* ((listof symbol acyclic)) (listof wglobal acyclic))
+  (lambda (ns)
+    (if (null? ns)
+        nil
+        (let ((g (make-global (car ns))))
+          (begin (table-set! (get c-adopted) (car ns) (the (listof wglobal @k) (cons g nil)))
+                 (the (listof wglobal acyclic) (cons g (c-adopt-each! (cdr ns)))))))))
+
+;; For a driver that links a program's code to globals before they are
+;; defined (its `.fasl`'s): a global made for each of `ns`, which its
+;; name's next definition takes, in order; and `watch`'s globals, those
+;; given the code, watched too. With neither, what was made and not taken
+;; let go.
+(define compile-adopt-globals!
+  (->* ((listof symbol acyclic) (listof symbol acyclic)) (listof wglobal acyclic))
+  (lambda (ns watch)
+    (begin (c-adopt-none!) (c-adopt-watch! watch) (c-adopt-each! ns))))
+
+;; For that driver: whether a global was made for a name of those since,
+;; not the one its code was linked to.
+(define compile-adopt-broken? (->* () bool)
+  (lambda () (get c-adopt-broken)))
+
 ;; For a driver: a whole program from here, which sees none of the globals
 ;; made before it, as its checker begins again.
 (define compile-forget-globals!
   (->* () unit)
   (lambda ()
-    (begin (set c-genv-index (make-table symbol-hash symbol=?)) (set c-reuse nil))))
+    (begin (set c-genv-index (make-table symbol-hash symbol=?)) (set c-reuse nil) (c-adopt-none!))))
+
+;; `n`'s global for a definition of it, new: the one made ahead for it, if
+;; one was.
+(define c-new-global (->* (symbol) wglobal)
+  (lambda (n)
+    (let ((a (table-ref (get c-adopted) n nil)))
+      (if (null? a)
+          (begin (if (table-ref (get c-adopt-watched) n #f) (set c-adopt-broken #t) #u)
+                 (make-global n))
+          (begin (table-set! (get c-adopted) n nil)
+                 (table-set! (get c-adopt-watched) n #t)
+                 (car a))))))
 
 ;; The global kept for `n`, if any.
 (define c-kept (->* (c-kept-globals symbol) (listof wglobal acyclic))
@@ -106,12 +162,16 @@
                        (set c-specials (c-drop-special (get c-specials) n))
                        (c-kept (get c-reuse) n))))
       (if (null? kept)
-          (let ((g (make-global n)) (i (get c-genv-count)))
+          (let ((g (c-new-global n)) (i (get c-genv-count)))
             (begin (c-genv-prune! n i)
                    (c-genv-push! n i g)
                    (set c-genv-count (+ i 1))
                    g))
-          (begin (set c-reuse (c-unkeep (get c-reuse) n)) (car kept))))))
+          (begin (set c-reuse (c-unkeep (get c-reuse) n))
+                 ;; Not the one made ahead. (One watched is the one given,
+                 ;; or a global was made since, which said so.)
+                 (if (null? (table-ref (get c-adopted) n nil)) #u (set c-adopt-broken #t))
+                 (car kept))))))
 
 ;; For a driver: `n`'s next definition keeps the global `n` has now, so
 ;; that every use of `n`, before it and after, sees the new value.

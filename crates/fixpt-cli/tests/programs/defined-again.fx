@@ -1,0 +1,5 @@
+(define x int 1)
+(define get1 (->* () int) (lambda () x))
+(define x bool #t)
+(define get2 (->* () bool) (lambda () x))
+(if (get2) 7 8)

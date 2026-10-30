@@ -161,6 +161,24 @@ fn a_program_fasl_is_stale_when_what_it_uses_changed() {
     assert!(err.contains("`prog.fasl` is stale (`twice` uses `scale`, which is not here at the type it was)"), "{out}{err}");
 }
 
+/// A program's `.fasl`'s image is linked before its definitions run, each
+/// global its code names made ahead (`Fx26Session::splice_program`): one
+/// defined again since, so not the one code after was linked to, has those
+/// definitions run from their source, which give what they give without.
+#[test]
+fn a_program_fasl_linked_to_a_global_defined_again_runs_its_source() {
+    let dir = scratch("again");
+    // `x` at another type: at a new global, which `get2`'s code is linked to.
+    std::fs::write(dir.join("p.fx"), include_str!("programs/defined-again.fx")).expect("written");
+    let (ok, out, err) = fixpt(&dir, &["compile-file", "--program", "p.fx"], &[]);
+    assert!(ok, "{out}{err}");
+    let (_, out, err) = fixpt(&dir, &["eval", "p.fx"], &[("FIXPT_NO_FASL", "1")]);
+    let (_, fout, ferr) = fixpt(&dir, &["eval", "p.fx"], &[("FIXPT_FASL_SAY", "1")]);
+    assert!(ferr.contains("`p.fx` is read from `p.fasl`") && ferr.contains("is defined again: `get2` and the definitions after are run from their source"), "{fout}{ferr}");
+    assert!(out.contains("7 : int"), "{out}{err}");
+    assert_eq!(out, fout, "{err}{ferr}");
+}
+
 /// A small library: `a.fx`, and `b.fx`, which loads it, and a program of
 /// both.
 fn library(dir: &Path) {

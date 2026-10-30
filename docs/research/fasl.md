@@ -274,7 +274,18 @@ the design above:
   one maybe made in line in another), and its definitions are declared,
   each checked against its type written out, and made what its form would
   have made of it for a redefinition (`Checker::fasl_defined`): its form,
-  checked again if a global it uses is redefined, and its uses.
+  checked again if a global it uses is redefined, and its uses. Its image
+  is spliced into the heap once, before the program runs, linked already
+  (`splice_program`, 2026-10-30): each global its code names that is
+  defined already, that one; each the file defines, made ahead, and taken
+  by the definition of its name that makes a global next, read from the
+  `.fasl` or run from the source (`compile-adopt-globals!`, in
+  `c-push-global`). A global made after for one of those names is not the
+  one the code is linked to: the compiler says so
+  (`compile-adopt-broken?`), and the definitions from there run from their
+  source. A global named that is neither, an `include`'s say, has the
+  image read and copied in a group at a time instead, each linked as it
+  runs, as `FIXPT_IMAGE_COPY=1` has it.
 - **`compile-file` is a module file's, else a program's**: a file of only
   definitions is both, and a module file unless `--program` says.
 - **What stays cellular stays so**: the `.fasl` lists the closures that

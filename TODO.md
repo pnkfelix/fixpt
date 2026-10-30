@@ -3620,10 +3620,26 @@ Left, in order:
    55, and reading the image 18 before. Done: the stamp digests the type
    by structure (`Checker::ty_digest`), 582 to 496 ms; a definition
    checked as `(define name T %fasl-value)`, `T` once, 496 to 461 ms.
-   Left: `fasl_defined`'s search; the splice (some 50 ms); and the checks
-   themselves, which a `.fasl` of types already resolved, or bindings
-   taken without checking (its build, source and uses' types verified
-   already), would leave: the user's to decide.
+   `fasl_defined` (2026-10-30): no search (the definition just recorded
+   is the last), but its form copied for each name of a group; copied
+   once, 19 ms to 9, the copy its run from source makes too (to share
+   the program's forms, `run_forms` would hold them in `Rc`s). The splice
+   (2026-10-30): the image spliced once, before the program runs, linked
+   already (`splice_program`): each global named that is here, that one;
+   each the file defines, made ahead by the compiler written in FX-26
+   (`compile-adopt-globals!`), and taken by the next global made for its
+   name (`c-push-global`), whichever definition makes it, so that a
+   definition run from its source fills it too. A global made after for
+   one of those names (defined again at another type) is said
+   (`compile-adopt-broken?`, asked after a form from the source ran), and
+   the definitions from there run from their source. A definition in
+   the native convention the native compiler declines keeps the global it
+   made for its cellular code now, not a second (`native_define`): one
+   global a definition. 460 ms to 370 ms, release; 759 majors, one
+   before each group, give the same. Left: the checks themselves, which
+   a `.fasl` of types already resolved, or bindings taken without
+   checking (its build, source and uses' types verified already), would
+   leave: the user's to decide.
 `FIXPT_IMAGE_VERIFY=1` (to add) to check an image this executable wrote
 as `--heap` files are (§159).
 
