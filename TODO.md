@@ -4186,10 +4186,10 @@ Keywords as values done (2026-10-30, `docs/fx26.md`, "Keywords"): `#:name`
 self-quoting, type and shape `keyword`, interned, `symbol->keyword` and
 `keyword->symbol`, kept by name through a `.fasl`. Tags and labels may be
 written with them (2026-10-30): the same label as the name bare, both
-taken. Left: types printed with keywords, and a sum's run-time tag a
-keyword (both change what every checker and test prints); the lint that
-offers the rewrite; bare tags no longer taken; `define-datatype`'s tags,
-which are also its constructors' names. Not done either: `#:name` folded to a constant
+taken; types print them as keywords (a number bare), and a
+`define-datatype` variant may be `(#:circle int)`, its constructor still
+`circle`. Left: a sum's run-time tag a keyword; the lint that offers the
+rewrite; bare tags no longer taken. Not done either: `#:name` folded to a constant
 by the compilers (it is a call of `symbol->keyword` each time), and
 `keyword?` made in line by the native compilers, as `symbol?` is.
 Reading code heavy with sums, the user took too long to see that `sorted`

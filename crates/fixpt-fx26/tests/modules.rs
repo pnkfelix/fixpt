@@ -143,7 +143,7 @@ fn selects_of_a_module_made_inside_keep_names() {
     let m = c.interner.intern("m");
     let t = c.type_of_name(m).expect("defined");
     let shown = c.show_ty(t);
-    for part in ["(desc t (sumof (td (productof (1 e)))", "(val ev (subr pure (s) e))", "(val td (subr pure (e) t))"] {
+    for part in ["(desc t (sumof (#:td (productof (1 e)))", "(val ev (subr pure (s) e))", "(val td (subr pure (e) t))"] {
         assert!(shown.contains(part), "{part} in {shown}");
     }
 }
@@ -160,6 +160,6 @@ fn a_modules_description_names_a_type_by_its_select() {
     let (fx26, rust) = (fx26.expect("checks"), rust.expect("checks"));
     assert_eq!(fx26, rust);
     assert!(fx26.iter().any(|l| l == "define f : (subr pure ((select m pt)) int) ! pure"), "{fx26:?}");
-    assert!(fx26.iter().any(|l| l.starts_with("define m : (moduleof (desc pt (productof (x int) (y int)))")), "{fx26:?}");
-    assert!(fx26.iter().any(|l| l.starts_with("define n : (moduleof (desc pt (productof (x int) (y int)))")), "{fx26:?}");
+    assert!(fx26.iter().any(|l| l.starts_with("define m : (moduleof (desc pt (productof (#:x int) (#:y int)))")), "{fx26:?}");
+    assert!(fx26.iter().any(|l| l.starts_with("define n : (moduleof (desc pt (productof (#:x int) (#:y int)))")), "{fx26:?}");
 }

@@ -5,6 +5,14 @@ use crate::check::Checker;
 use std::collections::HashMap;
 
 impl Checker {
+    /// A product's or sum's label as a type shows it: a keyword, `#:name`
+    /// (`docs/fx26.md`, "Keywords"); a number, which no keyword is, bare
+    /// (as `check-print.fx`'s `k-label-shown`).
+    pub(crate) fn show_label(&self, l: fixpt_read::Sym) -> String {
+        let n = self.interner.name(l);
+        if !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()) { n.to_string() } else { format!("#:{n}") }
+    }
+
     /// Variable `v`'s name, or, while two types are shown apart
     /// ([`show_apart`](Self::show_apart)), a mark for it, named after: `f`
     /// where it is free, `b` where it is bound, `h` where it is bound and
@@ -802,8 +810,7 @@ impl Checker {
             Ty::ParamSel(k, n) => format!("(select ${} {})", k + 1, self.interner.name(n)),
             Ty::Product(parts) | Ty::Sum(parts) => {
                 let head = if matches!(self.arena.get(t), Ty::Product(_)) { "productof" } else { "sumof" };
-                let ps: Vec<String> =
-                    parts.iter().map(|(l, x)| format!(" ({} {})", self.interner.name(*l), self.show_ty_on(*x, path))).collect();
+                let ps: Vec<String> = parts.iter().map(|(l, x)| format!(" ({} {})", self.show_label(*l), self.show_ty_on(*x, path))).collect();
                 format!("({head}{})", ps.concat())
             }
             Ty::Array(a, crate::ast::Size::Finite, r) => format!("(arrayof {} {})", self.show_ty_on(a, path), self.show_region(r)),

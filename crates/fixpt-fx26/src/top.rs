@@ -669,9 +669,14 @@ impl Checker {
         let mut arms = vec![sumof];
         let mut ctors = Vec::new();
         for v in variants {
-            let parts = v.as_proper_list().unwrap_or(&[]).to_vec();
+            let mut parts = v.as_proper_list().unwrap_or(&[]).to_vec();
+            // A tag written as a keyword, `(#:circle int)`, is its name: the
+            // same label, and the constructor `circle`.
+            if let Some(fixpt_read::Datum::Keyword(k)) = parts.first().map(|t| &t.datum) {
+                parts[0] = Syntax::symbol(parts[0].span, *k);
+            }
             let Some((tag, members)) = parts.split_first().filter(|(t, _)| t.as_symbol().is_some()) else {
-                return Err(FxError::at(v.span, "a variant is `(tag type …)`"));
+                return Err(FxError::at(v.span, "a variant is `(tag type …)` or `(#:tag type …)`"));
             };
             let mut prod = vec![productof.clone()];
             let mut params = Vec::new();

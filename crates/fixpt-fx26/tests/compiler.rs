@@ -59,7 +59,7 @@ fn extract_and_errors() {
     let out = s.compile_with_own_compiler("(extract (product (a 1) (b \"two\") (c #t)) b)").expect("parses");
     assert_eq!(out, "\"two\"");
     let out = s.compile_with_own_compiler("(extract (product (a 1)) b)").expect("parses");
-    assert!(out.starts_with("!! check: a (productof (a int)) has no `b`"), "{out}");
+    assert!(out.starts_with("!! check: a (productof (#:a int)) has no `b`"), "{out}");
     let out = s.compile_with_own_compiler("(car (the (listof int @l) nil))").expect("parses");
     assert!(out.starts_with("!! "), "a run-time error is reported: {out}");
 }

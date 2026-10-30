@@ -32,7 +32,7 @@ fn run(program: &str) -> String {
 
 #[test]
 fn products_are_immutable_so_pure() {
-    assert_eq!(check("(product (x 1) (y #t))"), "(productof (x int) (y bool)) ! pure");
+    assert_eq!(check("(product (x 1) (y #t))"), "(productof (#:x int) (#:y bool)) ! pure");
     assert_eq!(check("(extract (product (x 1) (y #t)) y)"), "bool ! pure");
     let err = rejects("(extract (product (x 1)) z)");
     assert!(err.contains("has no `z`"), "{err}");
@@ -41,8 +41,8 @@ fn products_are_immutable_so_pure() {
 
 #[test]
 fn a_sum_with_fewer_tags_fits_one_with_more() {
-    assert_eq!(check("(sum a 1)"), "(sumof (a int)) ! pure");
-    assert_eq!(check("(the (sumof (a int) (b bool)) (sum b #f))"), "(sumof (a int) (b bool)) ! pure");
+    assert_eq!(check("(sum a 1)"), "(sumof (#:a int)) ! pure");
+    assert_eq!(check("(the (sumof (#:a int) (#:b bool)) (sum b #f))"), "(sumof (#:a int) (#:b bool)) ! pure");
     let err = rejects("(the (sumof (a int)) (sum b #f))");
     assert!(err.contains("is expected here"), "{err}");
 }

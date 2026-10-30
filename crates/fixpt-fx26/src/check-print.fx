@@ -165,6 +165,17 @@
 ;; The name `define-type` gave `t`; else a module's description's `select`.
 (define k-abbrev-or-select (->* (k-atrees int) k-strings)
   (lambda (trs t) (let ((a (k-abbrev-by trs t))) (if (null? a) (k-select-by t) a))))
+;; A product's or sum's label as a type shows it: a keyword, `#:name`
+;; (`docs/fx26.md`, "Keywords"); a number, which no keyword is, bare (as
+;; `unparse.rs`'s `show_label`).
+(define k-digits-only? (->* (string int) bool)
+  (lambda (s i)
+    (or (= i (string-length s))
+        (and (char-numeric? (string-ref s i)) (k-digits-only? s (+ i 1))))))
+(define k-label-shown (->* (symbol) string)
+  (lambda (l)
+    (let ((n (symbol->string l)))
+      (if (and (> (string-length n) 0) (k-digits-only? n 0)) n (string-append "#:" n)))))
 (define-rec
   (k-show-on (->* (int k-printing k-shown) k-shown)
     (lambda (t path st)
@@ -185,7 +196,7 @@
     (lambda (ps path st)
       (if (null? ps)
           st
-          (let* ((st (k-put (k-cat3 " (" (symbol->string (extract (car ps) 1)) " ") st))
+          (let* ((st (k-put (k-cat3 " (" (k-label-shown (extract (car ps) 1)) " ") st))
                  (st (k-put ")" (k-show-on (extract (car ps) 2) path st))))
             (k-show-parts (cdr ps) path st)))))
   (k-show-desc (->* (k-desc k-printing k-shown) k-shown)

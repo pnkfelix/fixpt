@@ -1,4 +1,4 @@
-;; ! a (sumof (a (blobref o f64)) (b (blobref o i32))) has no tag `c`
+;; ! a (sumof (#:a (blobref o f64)) (#:b (blobref o i32))) has no tag `c`
 ;; An arm on a flat sum names one of its variants; it sees each as a
 ;; blobref to it.
 (define-type o (bloblet (fields symbol) @b))
