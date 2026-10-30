@@ -76,6 +76,11 @@ fn put_datum(out: &mut String, s: &Syntax, interner: &Interner, write: bool, map
                 out.push_str(interner.name(*sym))
             }
         }
+        // A keyword is written as it reads, by `write` and `display` alike.
+        Datum::Keyword(sym) => {
+            out.push_str("#:");
+            put_symbol(out, interner.name(*sym))
+        }
         Datum::List { items, tail } => {
             out.push('(');
             for (i, item) in items.iter().enumerate() {

@@ -64,7 +64,8 @@ pub struct Header {
     /// The type abbreviations its types name, each with what it is.
     pub aliases: Vec<(String, String)>,
     /// The globals its image's value links to by name ([`Link::Global`]),
-    /// the `i`th named by the image's placeholder `(0 . i)`.
+    /// the `i`th named by the image's placeholder `(0 . i)`; and the names
+    /// of the keywords it holds ([`Link::Keyword`]), placeholders `(4 . i)`.
     pub globals: Vec<String>,
 }
 
@@ -324,6 +325,9 @@ pub enum Link {
     DepCell(usize),
     DepValue(usize),
     Adapter,
+    /// A keyword, by its name: this heap's of that name, interned, so that
+    /// one made where the file was compiled is the loader's (`#:name`).
+    Keyword(String),
 }
 
 /// A global's cell (`layout::cellular::GLOBAL_*`, `%fx26-make-global`): its
@@ -369,6 +373,10 @@ pub fn image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapter: O
         }
         if Some(v) == adapter {
             links.push((v, Link::Adapter));
+            continue;
+        }
+        if heap.is_keyword(v) {
+            links.push((v, Link::Keyword(heap.symbol_name(heap.keyword_symbol(v)))));
             continue;
         }
         if let Some(name) = global_name(heap, v) {
@@ -432,6 +440,11 @@ fn placeholders(alone: &mut Heap, links: &[(Value, Link)]) -> (HashMap<u64, Valu
             Link::DepCell(i) => (1, Value::fixnum(*i as i64)),
             Link::DepValue(i) => (2, Value::fixnum(*i as i64)),
             Link::Adapter => (3, Value::NULL),
+            // Named among the globals' names, which the header carries.
+            Link::Keyword(name) => {
+                globals.push(name.clone());
+                (4, Value::fixnum(globals.len() as i64 - 1))
+            }
         };
         let p = alone.cons(Value::fixnum(kind), arg);
         given.insert(v.raw(), p);
@@ -456,6 +469,7 @@ pub fn read_links(l: Value, car: impl Fn(Value) -> Value, cdr: impl Fn(Value) ->
             0 => Link::Global(globals.get(arg.as_fixnum() as usize).ok_or("its image names a global its header does not")?.clone()),
             1 => Link::DepCell(arg.as_fixnum() as usize),
             2 => Link::DepValue(arg.as_fixnum() as usize),
+            4 => Link::Keyword(globals.get(arg.as_fixnum() as usize).ok_or("its image names a keyword its header does not")?.clone()),
             _ => Link::Adapter,
         };
         links.push((p, link));
@@ -487,6 +501,10 @@ fn cellular_image(heap: &mut Heap, value: Value, deps: &[(String, Value)], adapt
         }
         let v = if v.is_suffix_ref() { heap.suffix_ref_owner(v) } else { v };
         if !seen.insert(v.raw()) {
+            continue;
+        }
+        if heap.is_keyword(v) {
+            links.push((v, Link::Keyword(heap.symbol_name(heap.keyword_symbol(v)))));
             continue;
         }
         if let Some(name) = global_name(heap, v) {

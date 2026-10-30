@@ -543,3 +543,18 @@ mod fx26_profile {
         assert_eq!(show(P, "Foo #t #f #| c |# #;(x) y"), "Foo #t #f y");
     }
 }
+
+/// FX-26's keywords (`#:name`): a name read as a symbol's is, `|…|` and
+/// all, written back as it reads; nothing, or a number, is no name; and no
+/// other profile reads one.
+#[test]
+fn fx26_reads_keywords() {
+    let (forms, interner) = read(SyntaxProfile::FX26, "#:sorted #:|a b| (#:x y)");
+    assert!(matches!(forms[0].datum, Datum::Keyword(s) if interner.name(s) == "sorted"));
+    assert!(matches!(forms[1].datum, Datum::Keyword(s) if interner.name(s) == "a b"));
+    assert_eq!(show(SyntaxProfile::FX26, "#:sorted #:|a b| (#:x y)"), "#:sorted #:|a b| (#:x y)");
+    assert!(err(SyntaxProfile::FX26, "#:").contains("names nothing"));
+    assert!(err(SyntaxProfile::FX26, "#: x").contains("names nothing"));
+    assert!(err(SyntaxProfile::FX26, "#:12").contains("a keyword's name is a symbol's"));
+    assert!(err(SyntaxProfile::SCHEME, "#:a").contains("unknown `#` syntax"));
+}

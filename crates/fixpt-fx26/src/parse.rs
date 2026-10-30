@@ -1506,6 +1506,14 @@ impl Checker {
             Datum::Bool(b) => return Ok(self.arena.exp(span, Exp::Bool(*b))),
             Datum::Char(c) => return Ok(self.arena.exp(span, Exp::Char(*c))),
             Datum::Number(fixpt_read::Num::Real(x)) => return Ok(self.arena.exp(span, Exp::Float(*x))),
+            // `#:name`, a keyword, evaluates to itself: the standard
+            // `symbol->keyword` of the name, interned, so one object each
+            // time (as the parser written in FX-26 rewrites it).
+            Datum::Keyword(sym) => {
+                let fun = self.standard_ref_at(span, "symbol->keyword");
+                let name = self.arena.exp(span, Exp::Symbol(*sym));
+                return Ok(self.arena.exp(span, Exp::App { fun, args: vec![name] }));
+            }
             Datum::Symbol(sym) => {
                 // `#u` reads as a symbol; `#t` and `#f` did too in FX-87's
                 // profile, which FX-26 used to be read with.
@@ -3721,7 +3729,7 @@ impl Checker {
                 }
             },
             Datum::Nil => self.named(span, "nil"),
-            Datum::Bool(_) | Datum::Number(_) | Datum::Char(_) | Datum::Str(_) => x.clone(),
+            Datum::Bool(_) | Datum::Number(_) | Datum::Char(_) | Datum::Str(_) | Datum::Keyword(_) => x.clone(),
             Datum::List { items, tail } => {
                 let inner = self.quasi_inner(items, depth);
                 // Under a quasiquote, the items after the last that an
@@ -3792,6 +3800,7 @@ const TYPECASE_SHAPES: &[(&str, &str)] = &[
     ("product", "product?"),
     ("vector", "vector?"),
     ("bytevector", "bytevector?"),
+    ("keyword", "keyword?"),
 ];
 
 fn typecase_predicate(shape: &str) -> Option<&'static str> {

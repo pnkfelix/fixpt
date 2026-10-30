@@ -46,10 +46,10 @@ pub(crate) fn total_operation(name: &str) -> bool {
     const TOTAL: &[&str] = &[
         "+", "-", "*", "<", ">", "=", "<=", ">=", "not", "eq?", "bool=?", "cons", "max", "min", "zero?", "null?",
         "pair?", "int?", "f64?", "f32?", "char?", "bool?", "string?", "symbol?", "procedure?", "array?", "ref?",
-        "sum?", "product?", "vector?", "bytevector?", "bitwise-and", "bitwise-ior", "bitwise-xor", "bitwise-not",
+        "sum?", "product?", "vector?", "bytevector?", "keyword?", "bitwise-and", "bitwise-ior", "bitwise-xor", "bitwise-not",
         "string-append", "string-length", "string=?", "string<?", "string<=?", "string>?", "string>=?", "char=?",
         "char<?", "char<=?", "char>?", "char>=?", "char->integer", "char-upcase", "char-downcase", "symbol->string",
-        "string->symbol", "symbol=?", "int->f64", "int->f32", "f64->string", "f32->string", "f32->f64", "f64->f32",
+        "string->symbol", "symbol=?", "symbol->keyword", "keyword->symbol", "int->f64", "int->f32", "f64->string", "f32->string", "f32->f64", "f64->f32",
         "string-hash", "char-in?", "wcell-nil", "wcell-unit", "wglobal=?",
     ];
     // What is lowered to the identity (`wcell-int` and its kin) does nothing.
@@ -98,6 +98,7 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("ref?", "%fx26-box?", false),
     ("sum?", "%fx26-sum?", false),
     ("product?", "%fx26-product?", false),
+    ("keyword?", "%fx26-keyword?", false),
     ("nil", "'()", false),
     ("no-pair", "'()", false),
     ("set-car!", "%fx26-set-car!", false),
@@ -413,6 +414,8 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("string->symbol", "string->symbol", true),
     ("symbol->string", "symbol->string", true),
     ("symbol=?", "eq?", false),
+    ("symbol->keyword", "%fx26-symbol->keyword", false),
+    ("keyword->symbol", "%fx26-keyword->symbol", false),
     ("pair-identity", "%fx26-address-identity", false),
     ("ref-identity", "%fx26-address-identity", false),
     ("array-identity", "%fx26-address-identity", false),

@@ -240,6 +240,10 @@ fn put(
             // A continuation, or the closure that stands for one.
             if heap.continuation_of(v).is_some() || heap.native_continuation_of(v).is_some() {
                 out.push_str("#<continuation>");
+            } else if heap.is_keyword(v) {
+                // `#:` and its name, written as a symbol is.
+                out.push_str("#:");
+                put(heap, heap.keyword_symbol(v), write, labels, out);
             } else if kind == "sum" {
                 let tag = heap.bloblet_slot(v, 2);
                 out.push_str(&format!("#<sum {}>", write_value(heap, tag)));

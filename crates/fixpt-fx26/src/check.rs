@@ -52,7 +52,7 @@ pub(crate) fn fixed_range(name: &str) -> Option<(i128, i128)> {
 /// A datum, what a reader reads: an atom, or a pair of datums, frozen and
 /// acyclic, or a vector or bytevector (TODO §51). The same text defines it
 /// in the checker written in FX-26 (`standard::standard_text`).
-pub const DATUM: &str = "(union int f64 char bool string symbol nil (pairof datum datum acyclic) vector bytevector)";
+pub const DATUM: &str = "(union int f64 char bool string symbol keyword nil (pairof datum datum acyclic) vector bytevector)";
 /// What an I/O primitive gives when it fails (`TODO.md` §84): its kind, one
 /// of a fixed few as `tagcase` can check, and the system's description. A
 /// value the program sees, not a failure of the run.
@@ -109,6 +109,9 @@ pub const SHAPES: &[(&str, &str)] = &[
     ("product", "product?"),
     ("vector", "vector?"),
     ("bytevector", "bytevector?"),
+    // A keyword, `#:name` (`docs/fx26.md`, "Keywords"): last, so that no
+    // shape's number before it moved.
+    ("keyword", "keyword?"),
 ];
 /// A kind of key that has identity (Q5), generative type 3: `k`, a mutable
 /// object at `r`, which only the standard dictionaries (`pair-identity` and
@@ -892,6 +895,10 @@ impl Checker {
             let sym = interner.intern(name);
             base.insert(sym, arena.ty(Ty::Base(sym)));
         }
+        // A keyword, `#:name`: interned, compared by identity, immutable.
+        // Last, so no type made before it moved.
+        let sym = interner.intern("keyword");
+        base.insert(sym, arena.ty(Ty::Base(sym)));
         let mut c = Checker {
             arena,
             interner,
@@ -1183,6 +1190,7 @@ impl Checker {
                 "symbol" | "unit" => bit("symbol"),
                 "vector" => bit("vector"),
                 "bytevector" => bit("bytevector"),
+                "keyword" => bit("keyword"),
                 _ => None,
             },
             Ty::Nat(_) => bit("int"),

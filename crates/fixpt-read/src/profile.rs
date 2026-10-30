@@ -83,6 +83,8 @@ pub struct SyntaxProfile {
     /// `#%fx`, FX-26's module of the standard bindings, as a symbol. No
     /// other `#%` spelling reads.
     pub fx_module: bool,
+    /// `#:name`, a keyword (`Datum::Keyword`).
+    pub keywords: bool,
 }
 
 impl SyntaxProfile {
@@ -99,6 +101,7 @@ impl SyntaxProfile {
         datum_labels: true,
         quote_sugar: true,
         fx_module: false,
+        keywords: false,
     };
 
     pub const FX87: SyntaxProfile = SyntaxProfile {
@@ -113,6 +116,7 @@ impl SyntaxProfile {
         datum_labels: false,
         quote_sugar: true,
         fx_module: false,
+        keywords: false,
     };
 
     pub const FX91: SyntaxProfile = SyntaxProfile {
@@ -128,6 +132,7 @@ impl SyntaxProfile {
         datum_labels: false,
         quote_sugar: true,
         fx_module: false,
+        keywords: false,
     };
 
     /// FX-26: Scheme's lexical syntax, with `#u` as unit beside `#u8(`, and
@@ -145,6 +150,7 @@ impl SyntaxProfile {
         datum_labels: false,
         quote_sugar: true,
         fx_module: true,
+        keywords: true,
     };
 
     pub fn by_name(name: &str) -> Option<SyntaxProfile> {

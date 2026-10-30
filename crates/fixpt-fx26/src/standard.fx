@@ -203,6 +203,7 @@
       ((8)
        (case n
          (("product?") "%fx26-product?")
+         (("keyword?") "%fx26-keyword?")
          (("quotient") "%fx26-quotient")
          (("char-in?") "%fx26-char-in?")
          (("string=?") "string=?")
@@ -418,6 +419,8 @@
          (("bytevector-copy") "%fx26-bytevector-copy")
          (("string-downcase") "%fx26-string-downcase")
          (("certify-acyclic") "%fx26-identity")
+         (("symbol->keyword") "%fx26-symbol->keyword")
+         (("keyword->symbol") "%fx26-keyword->symbol")
          (("eqtable-delete!") "%fx26-eqtable-delete!")
          (else "")))
       ((16)

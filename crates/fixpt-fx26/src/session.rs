@@ -1631,10 +1631,15 @@ impl Fx26Session {
         // native adapter's, this heap's, found as it is copied.
         let mut found = Vec::new();
         let mut adapters = Vec::new();
+        let mut keywords = Vec::new();
         for (p, link) in links {
             let (global, value) = match link {
                 crate::fasl::Link::Adapter => {
                     adapters.push(p);
+                    continue;
+                }
+                crate::fasl::Link::Keyword(n) => {
+                    keywords.push((p, n));
                     continue;
                 }
                 crate::fasl::Link::Global(n) => (n, false),
@@ -1660,6 +1665,11 @@ impl Fx26Session {
             let mut given: std::collections::HashMap<u64, fixpt_heap::Value> = found.iter().map(|(p, h)| (p.raw(), m.get(*h))).collect();
             let g = m.get(cell);
             let heap = m.heap();
+            // Each keyword this heap's of its name.
+            for (p, n) in &keywords {
+                let sym = heap.intern(n);
+                given.insert(p.raw(), heap.make_keyword(sym));
+            }
             if !adapters.is_empty() {
                 match adapter.map(|a| a(heap)) {
                     Some(Ok(a)) => given.extend(adapters.iter().map(|p| (p.raw(), a))),
@@ -2075,6 +2085,10 @@ impl Fx26Session {
             for (p, link) in links {
                 let v = match link {
                     crate::fasl::Link::Global(n) => cells[n.as_str()],
+                    crate::fasl::Link::Keyword(n) => {
+                        let sym = heap.intern(n);
+                        heap.make_keyword(sym)
+                    }
                     crate::fasl::Link::Adapter => match adapter.map(|a| a(heap)) {
                         Some(Ok(a)) => a,
                         _ => {
@@ -2217,6 +2231,7 @@ impl Fx26Session {
             // and themselves.
             let mut found = Vec::new();
             let mut adapters = Vec::new();
+            let mut keywords = Vec::new();
             let mut todo: Vec<fixpt_heap::Value> = group.iter().map(|(_, at)| values[*at]).collect();
             let mut seen = std::collections::HashSet::new();
             while let Some(v) = todo.pop() {
@@ -2226,6 +2241,10 @@ impl Fx26Session {
                 if let Some(link) = links.get(&v.raw()) {
                     if *link == crate::fasl::Link::Adapter {
                         adapters.push(v);
+                        continue;
+                    }
+                    if let crate::fasl::Link::Keyword(n) = link {
+                        keywords.push((v, n.clone()));
                         continue;
                     }
                     let crate::fasl::Link::Global(n) = link else { return Err(fail("it links to a file's load".into())) };
@@ -2249,6 +2268,11 @@ impl Fx26Session {
                 let mut given: std::collections::HashMap<u64, fixpt_heap::Value> = found.iter().map(|(v, h)| (v.raw(), m.get(*h))).collect();
                 let gs: Vec<fixpt_heap::Value> = cells.iter().map(|c| m.get(*c)).collect();
                 let heap = m.heap();
+                // Each keyword this heap's of its name.
+                for (v, n) in &keywords {
+                    let sym = heap.intern(n);
+                    given.insert(v.raw(), heap.make_keyword(sym));
+                }
                 if !adapters.is_empty() {
                     match adapter.map(|a| a(heap)) {
                         Some(Ok(a)) => given.extend(adapters.iter().map(|v| (v.raw(), a))),

@@ -129,6 +129,11 @@ pub fn syntax_to_value(rt: &mut Runtime, s: &Syntax) -> Value {
             let name = rt.interner.name(*sym).to_string();
             rt.heap.intern(&name)
         }
+        Datum::Keyword(sym) => {
+            let name = rt.interner.name(*sym).to_string();
+            let s = rt.heap.intern(&name);
+            rt.heap.make_keyword(s)
+        }
         Datum::List { items, tail } => {
             let mut acc = match tail {
                 Some(t) => syntax_to_value(rt, t),

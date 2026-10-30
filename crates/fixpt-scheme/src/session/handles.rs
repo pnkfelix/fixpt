@@ -244,6 +244,11 @@ impl<'v> Local<'v> {
     pub fn symbol_name(self) -> Option<String> {
         (self.obj_type() == Some(ObjType::Symbol)).then(|| self.heap().symbol_name(self.v))
     }
+    /// A keyword's name (FX-26's `#:name`).
+    pub fn keyword_name(self) -> Option<String> {
+        let h = self.heap();
+        h.is_keyword(self.v).then(|| h.symbol_name(h.keyword_symbol(self.v)))
+    }
     pub fn string(self) -> Option<String> {
         (self.obj_type() == Some(ObjType::String)).then(|| self.heap().string_to_rust(self.v))
     }

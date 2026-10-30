@@ -495,7 +495,7 @@ impl<'a> Expander<'a> {
                 let v = self.rt.heap.make_string(text);
                 self.constant(s.span, v)
             }
-            Datum::Vector(_) | Datum::Bytevector(_) => {
+            Datum::Vector(_) | Datum::Bytevector(_) | Datum::Keyword(_) => {
                 let v = self.datum_to_value(s);
                 self.constant(s.span, v)
             }
@@ -741,6 +741,11 @@ impl<'a> Expander<'a> {
             Datum::Symbol(sym) => {
                 let name = self.rt.interner.name(*sym).to_string();
                 self.rt.heap.intern(&name)
+            }
+            Datum::Keyword(sym) => {
+                let name = self.rt.interner.name(*sym).to_string();
+                let s = self.rt.heap.intern(&name);
+                self.rt.heap.make_keyword(s)
             }
             Datum::List { items, tail } => {
                 let mut acc = match tail {

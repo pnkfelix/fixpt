@@ -31,6 +31,9 @@ pub enum Datum {
     Char(char),
     Str(String),
     Symbol(Sym),
+    /// `#:name`, a keyword (FX-26's profile): a name that is not a
+    /// variable, which evaluates to itself.
+    Keyword(Sym),
     /// `()`
     Nil,
     /// A possibly-improper list. `tail` is `Some` only for `(a . b)`.

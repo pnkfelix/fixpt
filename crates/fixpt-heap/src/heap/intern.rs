@@ -5,7 +5,8 @@
 //!
 //! Hash-consing, bottom up: a pair is found by its car and cdr once those
 //! are interned, a string, float or vector by its contents (a vector's
-//! elements interned). Symbols and immediates are canonical already.
+//! elements interned), a keyword by its name. Symbols and immediates are
+//! canonical already.
 //!
 //! The table is in the heap, so that an image keeps it (`dump-heap`): the
 //! global of a symbol of its own, a vector `[stamp, count, buckets]`;
@@ -29,6 +30,10 @@ const BUCKETS: usize = 2;
 /// The global the table is in.
 const TABLE: &str = "%fx26-interned-data";
 
+/// A keyword's kind, and its name's field (`layout`'s `keyword`).
+const KEYWORD: u8 = crate::layout::kind("keyword");
+const KEYWORD_NAME: usize = 2;
+
 fn mix(h: u64, x: u64) -> u64 {
     // SplitMix64's finalizer, over the running hash and the next word.
     let mut z = h ^ x.wrapping_add(0x9e37_79b9_7f4a_7c15);
@@ -38,12 +43,32 @@ fn mix(h: u64, x: u64) -> u64 {
 }
 
 impl Heap {
+    /// The keyword of name `sym`, a symbol: `#:name`, the one object of it,
+    /// interned.
+    pub fn make_keyword(&mut self, sym: Value) -> Value {
+        let k = self.make_frozen(KEYWORD, &[sym]);
+        self.intern_datum(k)
+    }
+
+    /// Whether `v` is a keyword.
+    pub fn is_keyword(&self, v: Value) -> bool {
+        v.is_bloblet() && !v.is_suffix_ref() && self.bloblet_kind(v) == KEYWORD
+    }
+
+    /// Keyword `k`'s name, a symbol.
+    pub fn keyword_symbol(&self, k: Value) -> Value {
+        debug_assert!(self.is_keyword(k), "{k:?} is not a keyword");
+        self.bloblet_slot(k, KEYWORD_NAME)
+    }
+
     /// `v`, data nothing will write and no cycle runs through, made the one
     /// object equal to it: the interned one if there is one, else `v`
     /// itself (or, of a pair or vector whose parts were not interned, a
     /// copy over the interned parts), interned from now on.
     pub fn intern_datum(&mut self, v: Value) -> Value {
-        let candidate = if v.is_pair() {
+        let candidate = if self.is_keyword(v) {
+            v
+        } else if v.is_pair() {
             let (a, d) = (self.car(v), self.cdr(v));
             let (ia, id) = (self.intern_datum(a), self.intern_datum(d));
             if ia == a && id == d { v } else { self.cons(ia, id) }
@@ -145,6 +170,7 @@ impl Heap {
             Some(ObjType::String) => mix(2, crate::heap::string_hash_of(&self.string_to_rust(o)) as u64),
             Some(ObjType::Flonum) => mix(3, self.flonum_value(o).to_bits()),
             Some(ObjType::Vector) => (0..self.obj_len(o)).fold(4, |h, i| mix(h, self.obj_ref(o, i).raw())),
+            _ if self.is_keyword(o) => mix(5, self.keyword_symbol(o).raw()),
             _ => 0,
         }
     }
@@ -152,6 +178,9 @@ impl Heap {
     /// Whether interned `o` and candidate `c` are equal: the same parts (by
     /// identity, both interned), characters or bits.
     fn datum_same(&self, o: Value, c: Value) -> bool {
+        if self.is_keyword(o) || self.is_keyword(c) {
+            return self.is_keyword(o) && self.is_keyword(c) && self.keyword_symbol(o) == self.keyword_symbol(c);
+        }
         if o.is_pair() || c.is_pair() {
             return o.is_pair() && c.is_pair() && self.car(o) == self.car(c) && self.cdr(o) == self.cdr(c);
         }

@@ -463,6 +463,7 @@
         "%fx26-char<?" "%fx26-char<=?" "%fx26-char>?" "%fx26-char>=?"
         "null?" "pair?" "exact-integer?" "char?" "boolean?" "string?" "symbol?" "%fx26-procedure?"
         "%fx26-array?" "%fx26-f32?" "%fx26-box?" "%fx26-sum?" "%fx26-product?"
+        "%fx26-keyword?" "%fx26-keyword->symbol"
         "%fx26-suffix-ref-get" "%suffix-ref-owner" "%suffix-ref-offset" "%suffix-ref+"
         "%suffix-ref" "%fx26-flat-tag" "%fx26-flat-no-arm" "bytevector-length" "bytevector-u8-ref"
         "%fx26-suffix-ref-length" "%fx26-suffix-fits")

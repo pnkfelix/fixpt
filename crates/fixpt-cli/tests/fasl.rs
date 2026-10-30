@@ -179,6 +179,22 @@ fn a_program_fasl_linked_to_a_global_defined_again_runs_its_source() {
     assert_eq!(out, fout, "{err}{ferr}");
 }
 
+/// A keyword a module's `.fasl` holds is the loader's keyword of that
+/// name (`fasl::Link::Keyword`), spliced or copied in: one object for each
+/// name, as from source.
+#[test]
+fn a_fasls_keywords_are_the_loaders() {
+    let dir = scratch("keywords");
+    std::fs::write(dir.join("k.fx"), "(define k #:shared)\n").expect("written");
+    std::fs::write(dir.join("main.fx"), "(define m (load-module \"k.fx\"))\n(eq? (with m k) #:shared)\n").expect("written");
+    let (ok, out, err) = fixpt(&dir, &["compile-file", "k.fx"], &[]);
+    assert!(ok, "{out}{err}");
+    for envs in [&[("FIXPT_FASL_SAY", "1")][..], &[("FIXPT_FASL_SAY", "1"), ("FIXPT_IMAGE_COPY", "1")][..]] {
+        let (ok, out, err) = fixpt(&dir, &["eval", "main.fx"], envs);
+        assert!(ok && err.contains("`k.fx` is read from `k.fasl`") && out.contains("#t : bool"), "{envs:?}: {out}{err}");
+    }
+}
+
 /// A small library: `a.fx`, and `b.fx`, which loads it, and a program of
 /// both.
 fn library(dir: &Path) {

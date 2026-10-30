@@ -600,6 +600,19 @@
       (if (string=? word "%fx")
           (atom-at (string->symbol "#%fx") start (cdr w))
           (unknown-hash (cdr w) start word)))))
+;; FX-26's `#:name`, a keyword, `cur` at the name: a symbol's, read as one
+;; is, and nothing else.
+(define read-keyword (->* (cursor int) result)
+  (lambda (cur start)
+    (if (delimiter? (cur-char cur))
+        (fail-at cur start "`#:` names nothing: a keyword is `#:name`")
+        (let ((r (read-atom-from cur (cur-pos cur) "")))
+          (tagcase (car r)
+            (atom (d a b)
+              (if (symbol? d)
+                  (cons (atom (symbol->keyword d) start b) (cdr r))
+                  (fail-at (cdr r) start "a keyword's name is a symbol's: `#:name`")))
+            (else x (fail-at (cdr r) start "a keyword's name is a symbol's: `#:name`")))))))
 ;; `#t`, `#true`, `#f` or `#false`, `cur` at the letter.
 (define read-bool (->* (cursor int) result)
   (lambda (cur start)
@@ -722,6 +735,7 @@
               ((#\b #\B #\o #\O #\d #\D #\x #\X #\e #\E #\i #\I) (read-atom-from cur start "#"))
               (else
                (cond ((and (char=? c #\%) (fx26?)) (read-fx-module cur start))
+                     ((and (char=? c #\:) (fx26?)) (read-keyword (advance cur) start))
                      ((char-numeric? c)
                       (fail-at cur start "datum labels are not supported by the eager reader"))
                      (else (unknown-hash cur start (char-string c)))))))))))

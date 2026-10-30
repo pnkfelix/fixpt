@@ -24,9 +24,10 @@
 
 ;; The shapes, by number in `check.rs`'s `SHAPES` order: 0 int, 1 f64,
 ;; 2 f32, 3 char, 4 bool, 5 nil, 6 pair, 7 string, 8 symbol, 9 procedure,
-;; 10 bloblet, 11 box, 12 sum, 13 product, 14 vector, 15 bytevector. A
-;; type's shapes are a mask, bit `k` shape `k`'s, or -1 if they are not known.
-(define k-shape-count int 16)
+;; 10 bloblet, 11 box, 12 sum, 13 product, 14 vector, 15 bytevector, 16
+;; keyword. A type's shapes are a mask, bit `k` shape `k`'s, or -1 if they
+;; are not known.
+(define k-shape-count int 17)
 (define k-shape-nil int 5)
 (define k-shape-pair int 6)
 ;; The standard predicate that tests for shape `k`.
@@ -35,7 +36,8 @@
     (case k
       ((0) "int?") ((1) "f64?") ((2) "f32?") ((3) "char?") ((4) "bool?") ((5) "null?")
       ((6) "pair?") ((7) "string?") ((8) "symbol?") ((9) "procedure?") ((10) "array?")
-      ((11) "ref?") ((12) "sum?") ((13) "product?") ((14) "vector?") (else "bytevector?"))))
+      ((11) "ref?") ((12) "sum?") ((13) "product?") ((14) "vector?") ((15) "bytevector?")
+      (else "keyword?"))))
 (define k-base-shape (->* (symbol) int)
   (lambda (s)
     (case (symbol->string s)
@@ -44,7 +46,7 @@
       (("string") 7)
       ;; `unit` is the symbol `#u` at run time.
       (("symbol" "unit") 8)
-      (("vector") 14) (("bytevector") 15)
+      (("vector") 14) (("bytevector") 15) (("keyword") 16)
       (else -1))))
 ;; Shape `k`'s bit, or -1 for none known.
 (define k-shape-bit (->* (int) int)

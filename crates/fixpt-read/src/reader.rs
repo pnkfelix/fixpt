@@ -460,6 +460,17 @@ impl<'a> Reader<'a> {
                 self.read_atom()
             }
             '0'..='9' if self.profile.datum_labels => self.read_label(start),
+            ':' if self.profile.keywords => {
+                self.bump(); // ':'
+                if self.peek().is_none_or(|c| self.is_delimiter(c)) {
+                    return Err(ReadError::at(self.span_from(start), "`#:` names nothing: a keyword is `#:name`"));
+                }
+                let name = self.read_atom()?;
+                let Datum::Symbol(sym) = name.datum else {
+                    return Err(ReadError::at(self.span_from(start), "a keyword's name is a symbol's: `#:name`"));
+                };
+                Ok(Syntax::new(self.span_from(start), Datum::Keyword(sym)))
+            }
             '%' if self.profile.fx_module => {
                 let word = self.take_while(|c, r| !r.is_delimiter(c));
                 if word != "%fx" {

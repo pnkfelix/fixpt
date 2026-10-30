@@ -94,6 +94,9 @@
 (define as-sym (->* (val) symbol)
   (lambda (v) (if (symbol? v) v (efail-expected "a symbol"))))
 
+(define as-keyword (->* (val) keyword)
+  (lambda (v) (if (keyword? v) v (efail-expected "a keyword"))))
+
 ;; `v`, a pair; or fails, as the machines say a `car` or `cdr` of a
 ;; non-pair does (`DONE.md` §85).
 (define as-pair (->* (val) (pairof val val @v))
@@ -307,6 +310,7 @@
         (string s (k-cat3 "\"" s "\""))
         (char c (string-append "#\\" (char->string c)))
         (symbol s (symbol->string s))
+        (keyword k (string-append "#:" (symbol->string (keyword->symbol k))))
         (nil z "()")
         (pair p (if (<= fuel 0) "…" (k-cat3 "(" (show-items p fuel) ")")))
         (procedure f "#<procedure>")

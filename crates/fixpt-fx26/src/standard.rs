@@ -79,6 +79,7 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("vector?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 vector)) (else (not (shape 0 vector))))))"),
     ("bytevector?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 bytevector)) (else (not (shape 0 bytevector))))))"),
     ("symbol?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 symbol)) (else (not (shape 0 symbol))))))"),
+    ("keyword?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 keyword)) (else (not (shape 0 keyword))))))"),
     ("procedure?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 procedure)) (else (not (shape 0 procedure))))))"),
     ("array?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 bloblet)) (else (not (shape 0 bloblet))))))"),
     ("f32?", "(poly ((t type)) (subr pure (t) (bool (then (shape 0 f32)) (else (not (shape 0 f32))))))"),
@@ -471,6 +472,10 @@ pub const ENTRIES: &[(&str, &str)] = &[
     ("string->symbol", "(subr pure (string) symbol)"),
     ("symbol->string", "(subr pure (symbol) string)"),
     ("symbol=?", "(subr pure (symbol symbol) bool)"),
+    // Keywords, `#:name` (`docs/fx26.md`, "Keywords"): the keyword of a
+    // symbol's name, which `#:name` is of `'name`; a keyword's name.
+    ("symbol->keyword", "(subr pure (symbol) keyword)"),
+    ("keyword->symbol", "(subr pure (keyword) symbol)"),
     // A hash of a string's characters: the same string, the same hash.
     ("string-hash", "(subr pure (string) int)"),
     // A symbol's hash, kept with it when it was interned.

@@ -522,7 +522,10 @@ pub fn never_collects(name: &str) -> bool {
                 | "%fx26-box?"
                 | "%fx26-sum?"
                 | "%fx26-product?"
+                | "%fx26-keyword?"
         )
+        // A keyword's name: a field read.
+        || name == "%fx26-keyword->symbol"
         || ["%fx26-i8", "%fx26-u8", "%fx26-i32", "%fx26-u32", "%fx26-i64", "%fx26-u64", "%fx26-f64", "%fx26-f32", "%fx26-int->"].iter().any(|p| name.starts_with(p))
 }
 
@@ -2893,6 +2896,17 @@ prims! {
         rt.world.process_signal(p, sig as i32);
         Ok(Value::UNIT)
     });
+    // FX-26's keywords (`#:name`, `Heap::make_keyword`): the keyword of a
+    // symbol's name, interned; a keyword's name; whether a value is one.
+    "%fx26-symbol->keyword", 1, Some(1), simple!(|rt, a| {
+        if !rt.heap.is_a(a[0], ObjType::Symbol) { return rt.type_error("a symbol", a[0]); }
+        Ok(rt.heap.make_keyword(a[0]))
+    });
+    "%fx26-keyword->symbol", 1, Some(1), simple!(|rt, a| {
+        if !rt.heap.is_keyword(a[0]) { return rt.type_error("a keyword", a[0]); }
+        Ok(rt.heap.keyword_symbol(a[0]))
+    });
+    "%fx26-keyword?", 1, Some(1), simple!(|rt, a| Ok(Value::boolean(rt.heap.is_keyword(a[0]))));
 }
 
 /// Promise states. `[state, payload]`.

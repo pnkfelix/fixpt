@@ -356,6 +356,8 @@
       (k-basic "vector") (k-basic "bytevector")
       ;; 19 and 20, last, so no type made before them moved (`TODO.md` §84).
       (k-basic "i8") (k-basic "u8")
+      ;; 21, a keyword (`#:name`), after them, as `check.rs` makes it.
+      (k-basic "keyword")
       #u)))
 (define n-copy-memo (->* (k-region-lists k-region-lists int) unit)
   (lambda (from to i)

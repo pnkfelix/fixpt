@@ -69,7 +69,7 @@
       ((int) 'int?) ((char) 'char?) ((bool) 'bool?) ((nil) 'null?) ((pair) 'pair?)
       ((string) 'string?) ((symbol) 'symbol?) ((procedure) 'procedure?) ((bloblet) 'array?)
       ((f64) 'f64?) ((f32) 'f32?) ((box) 'ref?) ((sum) 'sum?) ((product) 'product?)
-      ((vector) 'vector?) ((bytevector) 'bytevector?)
+      ((vector) 'vector?) ((bytevector) 'bytevector?) ((keyword) 'keyword?)
       (else '||))))
 (define typecase-usage string "`(typecase expression (shape name body) … (else name body))`")
 (define typecase-needs-else string "a `typecase` needs at least an `else` clause")
@@ -78,7 +78,7 @@
 (define typecase-shapes string
   (string-append "a shape `typecase` tests is one of "
                  "int, char, bool, nil, pair, string, symbol, procedure, bloblet, "
-                 "f64, f32, box, sum, product, vector, bytevector"))
+                 "f64, f32, box, sum, product, vector, bytevector, keyword"))
 ;; A `case` datum's kind (`TODO.md` §46): 0 an integer, 1 a character, 2
 ;; a string, 3 a symbol, 4 a boolean, and -1 none of these.
 (define case-kind (->* (syn) int)
@@ -239,6 +239,13 @@
                 ((bool? d) (e-bool d a b 0))
                 ((char? d) (e-char d a b 0))
                 ((f64? d) (e-float d a b 0))
+                ;; `#:name`, a keyword, evaluates to itself: the standard
+                ;; `symbol->keyword` of the name, interned (as `parse.rs`
+                ;; rewrites it).
+                ((keyword? d)
+                 (e-app (standard-ref 'symbol->keyword a b)
+                        (list (e-sym (keyword->symbol d) a b 0))
+                        a b 0))
                 ((symbol? d)
                  (let ((n d))
                    (cond ((symbol=? n sym-true) (e-bool #t a b 0))

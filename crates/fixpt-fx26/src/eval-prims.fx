@@ -22,7 +22,8 @@
 (import parser-types k-array-length k-array-size)
 ;; What it uses of the modules it is given.
 (import values apply-val apply1 as-array as-bool as-bytes ev-preempt-set! as-char as-cont as-f32
-        as-f64 as-int as-key as-other as-pair as-ref as-str as-sym as-tag efail efail-expected
+        as-f64 as-int as-key as-keyword as-other as-pair as-ref as-str as-sym as-tag efail
+        efail-expected
         ev-arg as-mstr ev-eq? ev-intern list->val the-unit val->vals vals->val)
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include tables) (include check-types))
@@ -184,6 +185,8 @@
       (prim! 'string->symbol (lambda (xs) (string->symbol (as-str (ev-arg xs 0)))))
       (prim! 'symbol->string (lambda (xs) (symbol->string (as-sym (ev-arg xs 0)))))
       (prim! 'symbol=? (lambda (xs) (symbol=? (as-sym (ev-arg xs 0)) (as-sym (ev-arg xs 1)))))
+      (prim! 'symbol->keyword (lambda (xs) (symbol->keyword (as-sym (ev-arg xs 0)))))
+      (prim! 'keyword->symbol (lambda (xs) (keyword->symbol (as-keyword (ev-arg xs 0)))))
       (prim! 'symbol-name-hash (lambda (xs) (symbol-name-hash (as-sym (ev-arg xs 0)))))
       (prim! 'eq? (lambda (xs) (ev-eq? (ev-arg xs 0) (ev-arg xs 1))))
       (prim! 'error (lambda (xs) (efail (as-str (ev-arg xs 0)))))
@@ -224,6 +227,7 @@
       (prim! 'pair? (lambda (xs) (pair? (ev-arg xs 0))))
       (prim! 'string? (lambda (xs) (ev-string? (ev-arg xs 0))))
       (prim! 'symbol? (lambda (xs) (ev-symbol? (ev-arg xs 0))))
+      (prim! 'keyword? (lambda (xs) (keyword? (ev-arg xs 0))))
       (prim! 'procedure? (lambda (xs) (ev-procedure? (ev-arg xs 0))))
       (prim! 'array? (lambda (xs) (ev-array? (ev-arg xs 0))))
       (prim! 'ref? (lambda (xs) (ref? (ev-arg xs 0))))

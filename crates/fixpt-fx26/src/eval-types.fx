@@ -34,7 +34,7 @@
 
 ;; A value: as itself, or an `other`, the one sum among them.
 (define-type val
-  (union int f64 f32 char bool string symbol nil
+  (union int f64 f32 char bool string symbol keyword nil
          (pairof val val @v) (arrayof val @v)
          (subr (maxeff evals spin) ((listof val @v)) val)
          (ref val @v)
@@ -121,6 +121,7 @@
    (val as-ref (subr evals (val) vcell))
    (val as-str (subr evals (val) string))
    (val as-sym (subr evals (val) symbol))
+   (val as-keyword (subr evals (val) keyword))
    (val as-tag (subr (maxeff evals spin) (val) vtag))
    (val efail (subr evals (string) void))
    (val efail-expected (subr evals (string) void))

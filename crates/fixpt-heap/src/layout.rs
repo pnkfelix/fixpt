@@ -196,6 +196,9 @@ pub const KINDS: &[Kind] = &[
     // and 3 its messages, the oldest first then the newest first; field 4
     // the task waiting for one, a thunk, or `#f`.
     Kind { name: "mailbox", code: 47, traced: true, settable: true },
+    // A keyword (FX-26's `#:name`): frozen, field 2 its name, a symbol;
+    // interned (`Heap::make_keyword`), so one object for each name.
+    Kind { name: "keyword", code: 48, traced: true, settable: false },
 ];
 
 /// A flat array's element layouts: what `(flatlayout T)` is at run time.

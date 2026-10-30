@@ -325,6 +325,11 @@ impl Expander<'_> {
             Datum::Number(n) => fixpt_runtime::num_from_literal(self.rt, n),
             Datum::Str(text) => self.rt.heap.make_string(text),
             Datum::Bytevector(b) => self.rt.heap.make_bytevector(b),
+            Datum::Keyword(sym) => {
+                let name = self.rt.interner.name(*sym).to_string();
+                let s = self.rt.heap.intern(&name);
+                self.rt.heap.make_keyword(s)
+            }
             Datum::Symbol(sym) => {
                 // Under IR every input identifier is marked; under ER only
                 // those whose identity is more than their name.

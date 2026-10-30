@@ -4182,6 +4182,12 @@ system needs, and when. Waiting on the user's answers to its questions
 redefined global means; ellipsis in the prototype or not).
 
 ## 183. Keywords, `#:tag`, for tags and labels (the user's, 2026-10-30)
+Keywords as values done (2026-10-30, `docs/fx26.md`, "Keywords"): `#:name`
+self-quoting, type and shape `keyword`, interned, `symbol->keyword` and
+`keyword->symbol`, kept by name through a `.fasl`. Left: tags and labels
+written with them, below. Not done either: `#:name` folded to a constant
+by the compilers (it is a call of `symbol->keyword` each time), and
+`keyword?` made in line by the native compilers, as `symbol?` is.
 Reading code heavy with sums, the user took too long to see that `sorted`
 was a variant's name, not a variable: FX-26 writes tags bare, as variable
 references are written. Keywords: a reader token and a `datum` atom of

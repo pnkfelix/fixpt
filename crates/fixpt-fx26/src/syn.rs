@@ -1227,6 +1227,9 @@ fn atom(interner: &mut Interner, v: Local<'_>) -> Option<Datum> {
     if let Some(n) = v.symbol_name() {
         return Some(Datum::Symbol(interner.intern(&n)));
     }
+    if let Some(n) = v.keyword_name() {
+        return Some(Datum::Keyword(interner.intern(&n)));
+    }
     if let Some(s) = v.string() {
         return Some(Datum::Str(s));
     }

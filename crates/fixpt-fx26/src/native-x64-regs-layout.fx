@@ -392,6 +392,8 @@
       ((470) #t)  ; %fx26-flat-variant!
       ((471) #t)  ; %fx26-flat-no-arm
       ((507) #t)  ; %symbol-hash
+      ((523) #t)  ; %fx26-keyword->symbol
+      ((524) #t)  ; %fx26-keyword?
       (else #f))))
 
 ;; The `i`th kind shape test `name` takes a bloblet of (`shape_test`), or -1.

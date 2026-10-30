@@ -435,6 +435,9 @@ impl Checker {
             Datum::Bytevector(_) => {
                 return Err(FxError::fatal(span, "a bytevector is not an FX-91 datum"));
             }
+            Datum::Keyword(_) => {
+                return Err(FxError::fatal(span, "a keyword is not an FX-91 datum"));
+            }
         })
     }
 }
