@@ -4171,8 +4171,10 @@ code area's `starts`, gdb's and perf's JIT registrations, inlining
 notes).
 
 ## 182. Typed hygienic macros (the user's, 2026-10-30)
-Design: `docs/research/typed-macros.md` (Herman's binding signature types,
-as a kind `syntax`; Bawden's macro types for modules, later). Next: the
+Design: `docs/research/typed-macros.md` (Herman's syntax types as FX-26
+`data` types over generative `expr` and `bvar`, his binding signatures as
+annotations the value checker erases; Bawden's macro types for modules,
+later). Next: the
 prototype of its "The prototype" section, in the Rust front end; the
 note's table "What FX-26's type system would need" says what the type
 system needs, and when. Waiting on the user's answers to its questions

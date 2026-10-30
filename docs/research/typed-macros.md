@@ -112,62 +112,98 @@ the duplication of run-time effects".
 
 ## The adaptation
 
-### A kind of its own, `syntax`
+### Syntax types are FX-26 types (no kind of their own)
 
-Herman's syntax types become descriptions of a new kind, `syntax`, beside
-`type`, `region`, `place`, `effect`, `size` and the rest (`ast::Kind`).
-Not `shape`: FX-26 already says *shape* for what a union's members are
-told apart by at run time (`Checker::shape`), and for
-`docs/research/shapes.md`.
+A first draft of this note gave Herman's syntax types a kind of their own,
+`syntax`. The user asked why (2026-10-30), and it does not need one. A
+kind says where a description may stand; what Herman's grammar describes,
+less its imports and exports, is the data a macro is given, and FX-26
+types data already:
 
-What FX-26 has that this reuses:
-- **Recursive descriptions** (`dletrec`, `Ty::Link`), contractiveness
-  (an abbreviation that is only a name is refused already), and the
-  coinductive subtyping of `docs/research/recursive-subtyping.md`, with
-  `ty_digest`'s minimal graphs to compare and key them.
-- **Unions of disjoint members**: FX-26's `union` requires members of
-  disjoint run-time shapes; Herman's requires members of disjoint
-  syntactic shapes. The same discipline, over another universe.
-- **Named, parameterized descriptions** (`define-type`, description
-  functions of arrow kind, `docs/research/higher-kinds.md`): a syntax
-  type like `formals` or `(clauses-of σ)` is an abbreviation of kind
-  `syntax`, or a function to one.
+| Herman | FX-26 |
+| --- | --- |
+| `()`, `(σ . σ)` | `nil`, `(pairof σ σ acyclic)`: a use's syntax is immutable and finite |
+| `μA.σ` | a recursive type (`dletrec`; a `define-type` naming itself) |
+| `∪{σᵢ}` | `(union σ …)` |
+| `data` | `datum`, what `quote` builds |
+| `bvar` | an identifier in a binding position: a generative type of its own, not `symbol`, so that a binder is not a quoted symbol |
+| `expr` | an expression, opaque: a generative type that programs are given no operation on, neither to look inside nor to make one but by a template |
 
-### Labels, not tree addresses
+So a syntax type is a type, of kind `data`, of the syntax objects a
+macro's use is parsed into, and what FX-26 has for types is had for
+these: recursion and its coinductive subtyping
+(`docs/research/recursive-subtyping.md`), contractiveness (an abbreviation
+that is only a name is refused already), `define-type` abbreviations,
+`poly` and description functions (`(clauses-of σ)`, a macro polymorphic in
+a syntax type, which Herman leaves to future work), and `ty_digest` to
+compare and key them. Not `shape` for any of it: FX-26 says *shape* for
+what a union's members are told apart by at run time
+(`Checker::shape`), and for `docs/research/shapes.md`.
 
-Herman addresses binders by tree address because a canonical form needs
-no α-equivalence on types. FX-26's products are canonical the same way,
-with labels: a field's label is part of the type and never renamed. So a
-signature names its parts, and scopes refer to the names. A sketch, to be
-settled by the prototype:
+**Two disjointness rules, not one.** FX-26's `union` wants members of
+disjoint run-time shapes; of the parsed syntax objects that holds by
+construction, `expr` and `bvar` being generative. But a use is parsed
+*before* its parts are known: in the source an `expr` may be a symbol or
+a list, so `(union (pairof expr nil acyclic) (pairof bvar … ))` overlaps
+there though its parsed objects do not. The macro checker keeps Herman's
+own rule besides (dissertation §5.2.3, "Shapes", Figure 5.9): a syntax
+type's source shape, with `expr` overlapping everything, and a union's
+members of disjoint source shapes.
+
+### Binding signatures: annotations the value checker erases
+
+What Herman adds, and nothing in FX-26 has, is binding structure: which
+binders scope over which parts. It becomes three annotations on these
+types, read by the macro checker and erased by everything else (to the
+checker of values, `(in σ x …)` is `σ`):
+- `(named x σ)`: the part's name, `x`, by which scopes refer to it.
+  Herman addresses parts by tree address so that types need no
+  α-equivalence; a name in a type is never renamed either, as a product's
+  label is not.
+- `(in σ x …)`: `σ` in the scope of the bindings that the parts named
+  `x …` offer, outermost first (Herman's import `σ↓β`).
+- `(exports σ (rib x …))`, `(exports σ (cage x …))`: what `σ` offers to
+  whatever brings it into scope: one level, or levels in order (Herman's
+  export `σ↑β`, a rib or a ribcage).
+
+The macro checker compares types with their annotations, so two syntax
+types alike but for their binding structure are different signatures;
+the value checker, having erased them, sees one type. The annotations
+cross unions and recursion as Herman's do, pushed inward to the members
+(his import normalization, §3.6.2); where they meet FX-26's own
+normalization of unions is for the prototype to settle.
+
+A sketch; the surface syntax is for the prototype to settle:
+
+```scheme
+;; formals: a rib of binders.
+(define-type formals
+  (union nil
+         (exports (pairof (named x bvar) (named xs formals) acyclic) (rib x xs))))
+
+;; let*'s clauses: each clause's expression in the scope of those before;
+;; the whole a ribcage, innermost last.
+(define-type let*-clauses
+  (union nil
+         (exports (pairof (pairof (named x bvar) (pairof (named e expr) nil acyclic) acyclic)
+                          (named cs (in let*-clauses x))
+                          acyclic)
+                  (cage x cs))))
+```
+
+and, for a single-clause macro, a pattern annotated in place, which says
+the same as the type it elaborates to:
 
 ```scheme
 ;; (for (x l) body): x bound in body alone.
 (define-syntax for
-  (syntax ((x bvar) (l expr)) (body (expr (in x))))
+  (syntax ((x bvar) (l expr)) (body (in expr x)))
   ((for (x l) body) (for-each (lambda (x) body) l)))
-
-;; A rib: the formals' binders, at one level.
-(define-syntax-type formals
-  (alt ()
-       ((x bvar) . (xs formals)))
-  (exports (rib x xs)))
-
-;; let*'s clauses: each clause's expression in the scope of those before;
-;; the whole exports a ribcage, innermost last.
-(define-syntax-type let*-clauses
-  (alt ()
-       (((x bvar) (e expr)) . (cs (let*-clauses (in x)))))
-  (exports (cage x cs)))
 ```
 
-In a pattern, `(name σ)` gives a part's name and syntax type; `(in a …)`
-is Herman's import of the bindings `a …` offer, outermost first;
-`(exports …)` is an export, `rib` one level, `cage` levels in order. A
-signature's names are the macro's pattern variables, so one form says
-both the grammar and the binding structure, and a single-clause macro
-needs no separate type. More than one clause is a union, its members
-disjoint (`let` and named `let`).
+The pattern's names are the macro's pattern variables, so one form says
+the grammar, the binding structure and what the template may refer to.
+More than one clause is a union (`let` and named `let`).
 
 ### Where it runs: parsing knows what is bound
 
@@ -209,8 +245,10 @@ This is where FX-26 can go past Herman's untyped base language.
    discards its argument: a warning, unless it is `pure`. The effect is
    checked at each use against the argument's own effect, after the use
    is checked.
-2. **Form types indexed by type and effect**: `(expr T E)`, an expression
-   of type at most `T` and effect at most `E`; `(expr)` any. With them the
+2. **Expressions indexed by type and effect**: `(expr T E)`, an
+   expression of type at most `T` and effect at most `E`; `expr` any.
+   Since `expr` is a generative type, this is a generative applied to
+   descriptions, as `Ty::Named` already is, covariant in both. With them the
    template can be checked **once, at its definition**, each pattern
    variable a hole of its declared type and effect (hole mode's
    machinery), its binders variables of their declared types; a use then
@@ -218,19 +256,23 @@ This is where FX-26 can go past Herman's untyped base language.
    base language in which well-typed input expands to well-typed output"
    Herman leaves open, and the end of type errors reported inside an
    expansion. `T` and `E` may be the macro's own `poly` binders:
-   `(for (x bvar t) (l (expr (listof t r) e1)) (body (expr unit e2 (in x))))`.
+   `(for ((x (bvar t)) (l (expr (listof t r) e1))) (body (in (expr unit e2) x)))`,
+   where `(bvar t)` is a binder whose variable has type `t`.
 3. **Binders of every sort**: `bvar` binds a value variable; FX-26 binds
    type variables (`poly`), regions, places, effects, sizes and
-   conventions too, each in its own namespace. A binder's syntax type says
-   its sort, `(bvar type)`, `(bvar region)`, and so does a scope.
-4. **Procedural macros, later, by opacity.** A transformer written in
-   FX-26 may inspect only the structure and the `data` of its input, never
-   an `expr`, and may place `expr`s and binders only through templates
-   checked against its signature, on every path. Choosing among templates
-   is then typed code like any other; its effect must allow it to run while
-   the program is checked (pure, or allocating in its own place, and only
-   stateless module files). Whether hygiene survives that is the open
-   question to work through, not a claim.
+   conventions too, each in its own namespace. A generative type for each
+   sort (`tvar`, `rvar`, `pvar`, `evar`, `svar`, names to settle), and a
+   scope brings each binder into its own namespace.
+4. **Procedural macros, later, by opacity.** Since syntax types are
+   types, a transformer is an FX-26 procedure from its argument's syntax
+   type to `expr`, checked by the checker as any procedure is. It may take
+   apart pairs, lists and `datum`s of its input, never an `expr` (no
+   operation on one is given); and it makes an `expr` only by a template,
+   checked against its signature with the template's binders and scopes,
+   on every path. Its effect must allow it to run while the program is
+   checked (pure, or allocating in its own place, and only stateless module
+   files). Whether hygiene survives that is the open question to work
+   through, not a claim.
 5. **Macros in module types** (Bawden), later: a module type's member
    whose type is a macro's, generative, its expander in the type and its
    free references selects from the module value. Abstract (the signature
@@ -244,17 +286,17 @@ would be met:
 
 | # | What | Why | When |
 | --- | --- | --- | --- |
-| 1 | A kind `syntax`, its descriptions (`bvar`, `data`, `()`, pairs, `expr`, `alt`, recursion) and their subtyping | Herman's syntax types | prototype |
-| 2 | Binding signatures: imports `(in …)` and exports `(exports …)`, ribs and ribcages | what is new in Herman, and new to FX-26: nothing it has is an attribute | prototype |
+| 1 | Syntax objects as data: generative types `expr` (opaque) and `bvar`; a syntax type is a `data` type over them, with `nil`, pairs, unions and recursion as FX-26 has them. Besides, Herman's check of a union's members for disjoint *source* shapes (`expr` overlapping everything) | Herman's syntax types, with no kind of their own | prototype |
+| 2 | Binding signatures as annotations the value checker erases: `(named x σ)`, `(in σ x …)`, `(exports σ (rib …))` and `(cage …)`; compared with them by the macro checker, pushed through unions and recursion | what is new in Herman, and new to FX-26: nothing it has is an attribute | prototype |
 | 3 | A parser with an environment of macros, and of the binders that shadow them | parsing by signature; macro names that may be shadowed | prototype |
 | 4 | **Places unique to an expansion.** The checker written in FX-26 keeps its facts by place (`docs/fx26.md` on `with`: "one `with`'s fact read as another's"); a template, or an argument used twice, gives two expressions one place. A `Span` with an expansion's mark, and a source map from the printed expansion back to the source for errors | correctness of the checkers' facts; errors where the programmer wrote | prototype |
 | 5 | An unshadowable reference to a binding where a macro is defined, as `#%fx` is to the standard ones; what a later redefinition of it means (`docs/fx26.md`, "Redefinition") | free references of templates to the program's own globals | prototype, if templates name globals; else soon after |
 | 6 | The macro environment in the checker's marks and rollback (`try_top`, `rollback`) | the REPL tries forms and leaves nothing behind | prototype |
-| 7 | Form types indexed by type and effect, `(expr T E)`, and templates checked with typed holes | well-typed in, well-typed out; duplication by effect | second step |
-| 8 | Binders of each sort, and scopes in each namespace | macros that bind type variables, regions, places | second step |
+| 7 | `expr` applied to a type and an effect, `(expr T E)`, `(bvar T)`, and templates checked with typed holes | well-typed in, well-typed out; duplication by effect | second step |
+| 8 | A binder type for each sort, and scopes in each namespace | macros that bind type variables, regions, places | second step |
 | 9 | A form type for definitions, `defn`, exporting to the top level or a module | `define-command`; most macros a program wants | third step |
 | 10 | Macro types as module members, generative, in `.fasl`s and `ty_digest` | Bawden's macros in modules | later |
-| 11 | Transformers written in FX-26: opaque input, typed templates, the effect rule for running at check time | procedural macros | later |
+| 11 | Transformers written in FX-26, ordinary procedures over syntax types: `expr` made only by templates, the effect rule for running at check time | procedural macros | later |
 
 Item 4 matters most: it is not about macros' types at all, but every
 macro breaks it.
@@ -289,8 +331,8 @@ itself.
 
 ## Questions for the user
 
-- The concrete syntax of signatures: labels as sketched, or Herman's
-  addresses, or patterns and types apart as Herman writes them?
+- The concrete syntax of signatures: names in the types as sketched, or
+  Herman's addresses, or patterns and types apart as Herman writes them?
 - Item 5: what a template's reference to a global means after the global
   is redefined: the global as it was where the macro was defined, or as it
   is where the macro is used (FX-26's redefinition re-runs definitions)?
