@@ -1952,11 +1952,11 @@ impl Fx26Session {
     }
 
     /// `form`, a program's definition of a procedure, read from its `.fasl`
-    /// (`program_fasl`): checked, by both checkers, as `(define name T (the
-    /// T %fasl-value))`, then made what `form` would have made of it for a
-    /// redefinition (`Checker::fasl_defined`); its global given the value
-    /// kept, linked to the globals here by name, its procedures compiled
-    /// natively in the native convention.
+    /// (`program_fasl`): checked, by both checkers, as `(define name T
+    /// %fasl-value)` (`fasl_value_at`), then made what `form` would have
+    /// made of it for a redefinition (`Checker::fasl_defined`); its global
+    /// given the value kept, linked to the globals here by name, its
+    /// procedures compiled natively in the native convention.
     fn run_program_def(&mut self, form: &Syntax, group: &[(crate::fasl::Def, usize)], p: &ProgramFasl) -> R<Outcome> {
         let fail = |m: String| FxError::at(form.span, m);
         // The file's own abbreviations it names that were not yet when the

@@ -1008,18 +1008,18 @@ impl crate::check::Checker {
 }
 
 /// The `lambda` a `define-rec`'s declaration of a procedure of type `ty`
-/// (printed) has it by: `(lambda (x …) (the R %fasl-value))`, its result
-/// `R`, its parameters named as `ty` names them where a type after selects
-/// from one (`(%p.1 : T)`), under a `plambda` of each `poly`'s binders.
-/// None if `ty` is no procedure's of a result alone (a specification's
-/// clauses after it, say).
+/// (printed) has it by: `(lambda (x …) %fasl-value)`, its body given its
+/// type by the declaration's, its parameters named as `ty` names them where
+/// a type after selects from one (`(%p.1 : T)`), under a `plambda` of each
+/// `poly`'s binders. None if `ty` is no procedure's of a result alone (a
+/// specification's clauses after it, say).
 pub fn fasl_lambda_at(ty: &fixpt_read::Syntax, interner: &fixpt_read::Interner) -> Option<String> {
     let w = |s: &fixpt_read::Syntax| fixpt_read::write_syntax(s, interner);
     let items = ty.as_proper_list()?;
     let head = interner.name(items.first()?.as_symbol()?);
     match (head, items) {
         ("poly", [_, binders, body]) => Some(format!("(plambda {} {})", w(binders), fasl_lambda_at(body, interner)?)),
-        ("subr", [_, _, params, result]) | ("subr", [_, _, _, params, result]) => {
+        ("subr", [_, _, params, _]) | ("subr", [_, _, _, params, _]) => {
             let names: Vec<String> = params
                 .as_proper_list()?
                 .iter()
@@ -1029,22 +1029,23 @@ pub fn fasl_lambda_at(ty: &fixpt_read::Syntax, interner: &fixpt_read::Interner) 
                     _ => format!("%a{}", i + 1),
                 })
                 .collect();
-            Some(format!("(lambda ({}) (the {} %fasl-value))", names.join(" "), w(result)))
+            Some(format!("(lambda ({}) %fasl-value)", names.join(" ")))
         }
         _ => None,
     }
 }
 
 /// The expression a declaration of a value of type `ty` (printed) is made
-/// to have it: `(the T %fasl-value)`, under a `plambda` of each `poly`'s
-/// binders, which `the` takes apart.
+/// to have it: `%fasl-value`, of the type the declaration says, under a
+/// `plambda` of each `poly`'s binders (a `poly`'s binder is no `poly`).
+/// Not `(the T %fasl-value)`, which would have both checkers read and
+/// resolve `T` again.
 pub fn fasl_value_at(ty: &fixpt_read::Syntax, interner: &fixpt_read::Interner) -> String {
-    let written = fixpt_read::write_syntax(ty, interner);
     match ty.as_proper_list() {
         Some([head, binders, body]) if head.as_symbol().is_some_and(|h| interner.name(h) == "poly") => {
             format!("(plambda {} {})", fixpt_read::write_syntax(binders, interner), fasl_value_at(body, interner))
         }
-        _ => format!("(the {written} %fasl-value)"),
+        _ => "%fasl-value".to_string(),
     }
 }
 
