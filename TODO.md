@@ -4206,7 +4206,20 @@ a keyword as a sum's constructor, `(#:tag e …)` (arguments by arity, a
 datatype's one-member variant carrying its member, flat products), and
 after it singleton keyword types, so that a keyword applied constructs.
 
-## 184. `define-datatype` with keyword tags: to finish deciding (the user's, 2026-10-30)
+## 184. `define-datatype` with keyword tags (the user's, 2026-10-30)
+**Decided** (2026-10-30): uniform variants (each a product of its
+members), constructors first-class procedures named bare, returning the
+datatype's type; tags in its type the same labels written as keywords or
+bare. That is what `define-datatype` already made, so nothing changed in
+it. Why not one-variant returns, though the sums' join made `if` and
+`tagcase` take them: elsewhere a one-variant sum still refuses ordinary
+code. `(list (circle 1) (rect 2 3))` (a polymorphic parameter, its
+arguments not joined); `(new (circle 1))` then set to a `rect` (a
+reference is invariant); a `tagcase` over a value bound to `(circle 1)`
+with an arm for `rect` (an arm for a tag the type has not is an error, and
+taking it as dead would hide a misspelt tag). Precision stays to be had
+from `sum`. Left, worth doing for `sum` alone: arguments instantiating one
+polymorphic parameter joined, as branches are. The findings before:
 Today `(define-datatype shape (circle int) (rect int int))` makes a
 structural `define-type` of a sum whose variants are products labelled
 from 1 (a one-member variant too: `(productof (1 int))`), and a
