@@ -4152,6 +4152,12 @@ right for now. What to settle:
 - **What it counts**: words in use (a reap's after a collection), or
   words taken from the area, chunks and runs whole.
 - Nested places: does an inner one's use count against the outer's?
+- **The heap's too**: its semispaces have the same kind of limit, fixed
+  in the layout (`MAX_SEMI_WORDS`, 2^31 words, "the heap is full"), and
+  no way to set it either; so do the nursery, the static area and the
+  code area (2^27). A setting may be the heap's and the places' together;
+  the heap's counts what is live after a collection (a copying one, so
+  up to twice that in memory), a place's what it took.
 
 ## 181. Code in a place (the user's, 2026-10-30; not yet)
 Code made while a place's body runs, given back with it: not yet. What it
