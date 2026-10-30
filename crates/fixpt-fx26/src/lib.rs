@@ -589,7 +589,45 @@ pub const CHECKER_FILES: [(&str, &str); 0] = [
 /// compiler written in FX-26, with the layout they share, as one program:
 /// each needs the types of the ones before.
 pub fn front_end() -> String {
-    FRONT_END_FILES.iter().map(|(_, t)| *t).collect::<Vec<_>>().join("\n")
+    FRONT_END_FILES.iter().map(|(n, t)| if *n == "conductor.fx" { conductor() } else { t.to_string() }).collect::<Vec<_>>().join("\n")
+}
+
+/// Where `conductor.fx`'s `let*` of the front end's modules is, and where
+/// the conductor ends it, by a line that begins so.
+const CONDUCTOR_LET: &str = "(define front-end-entries\n";
+const CONDUCTOR_LET_END: &str = ";;; The end of `front-end-entries`";
+
+/// The conductor as the front end has it: after `front-end-entries`,
+/// `make-front-end`, a procedure that makes the front end's modules again
+/// (for `stage`, `stage.rs`), of the same `let*`, so that it is written
+/// once. Not `front-end-entries` a call of it: the front end so made ran
+/// preempted processes wrong on register code (`TODO.md` §187).
+pub fn conductor() -> String {
+    let (_, b, body) = conductor_let();
+    format!("{}(define make-front-end (lambda ()\n{body}))\n{}", &CONDUCTOR[..b], &CONDUCTOR[b..])
+}
+
+/// Where the `let*` starts and where the conductor ends it, and it.
+fn conductor_let() -> (usize, usize, &'static str) {
+    let a = CONDUCTOR.find(CONDUCTOR_LET).expect("the conductor defines `front-end-entries`") + CONDUCTOR_LET.len();
+    let b = CONDUCTOR.find(CONDUCTOR_LET_END).expect("the conductor ends `front-end-entries`");
+    let body = CONDUCTOR[a..b].trim_end().strip_suffix(')').expect("the `define`'s parenthesis");
+    (a, b, body)
+}
+
+/// Where byte `at` of [`conductor`] is in `conductor.fx`: in what was put
+/// in, where it was taken from.
+fn conductor_offset(at: usize) -> usize {
+    let (a, b, body) = conductor_let();
+    let head = "(define make-front-end (lambda ()\n".len();
+    let put = head + body.len() + "))\n".len();
+    if at < b {
+        at
+    } else if at < b + put {
+        a + at.saturating_sub(b + head).min(body.len())
+    } else {
+        at - put
+    }
 }
 
 /// The reader and the parser made at the front end's regions, and what
@@ -805,8 +843,11 @@ pub const FRONT_END_FILES: [(&str, &str); 2] = [
 /// read as one text.
 pub fn front_end_location(at: usize) -> String {
     let mut start = 0;
-    for (name, text) in FRONT_END_FILES.iter().copied().chain([("bootstrap.fx", BOOTSTRAP)]) {
+    let conductor = conductor();
+    let texts = FRONT_END_FILES.iter().map(|(n, t)| (*n, if *n == "conductor.fx" { conductor.as_str() } else { *t }));
+    for (name, text) in texts.chain([("bootstrap.fx", BOOTSTRAP)]) {
         if at <= start + text.len() {
+            let (text, at, start) = if name == "conductor.fx" { (CONDUCTOR, start + conductor_offset(at - start), start) } else { (text, at, start) };
             let before = &text[..at - start];
             let line = before.matches('\n').count() + 1;
             let col = before.rsplit('\n').next().map_or(0, |l| l.chars().count()) + 1;
@@ -880,6 +921,7 @@ mod terminate;
 pub mod cellular;
 pub mod debts;
 pub mod fasl;
+pub mod stage;
 pub mod typeat;
 pub mod query;
 pub mod standard;

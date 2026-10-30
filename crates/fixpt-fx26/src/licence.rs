@@ -51,7 +51,7 @@ pub fn unlicensed(effect: &Effect, owned: &[Region]) -> Option<Atom> {
         Atom::Read(r) if r.is_globals() => false,
         Atom::Read(r) | Atom::Write(r) | Atom::Goto(r) | Atom::Comefrom(r) | Atom::Await(r) | Atom::Init(r) => !owned.contains(&r),
         // Never speculate on processes: one made early would run.
-        Atom::Send(_) | Atom::Receive(_) | Atom::Nondet => true,
+        Atom::Send(_) | Atom::Receive(_) | Atom::Nondet | Atom::Stage => true,
         Atom::Var(_) | Atom::App(_) => true,
         // A speculative run has a step budget of its own.
         Atom::Spin => false,

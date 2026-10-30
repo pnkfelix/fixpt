@@ -39,6 +39,8 @@
   (a-io int)
   ;; What may differ from run to run (`docs/fx26.md`, "Processes").
   (a-nondet)
+  ;; What makes code the program can run (`stage`, `docs/research/eval.md`).
+  (a-stage)
   (a-var int)
   ;; `(e d …)`: a description function to an effect, a variable, applied
   ;; to descriptions, none a type (`check-kinds.fx`): an unknown effect, as

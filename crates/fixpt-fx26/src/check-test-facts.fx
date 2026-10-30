@@ -15,7 +15,8 @@
        (check-print-types (load-module "fx26:check-print-types.fx"))
        (check-print-parts-types (load-module "fx26:check-print-parts-types.fx"))
        (check-calls-types (load-module "fx26:check-calls-types.fx"))
-       (check-logic-types (load-module "fx26:check-logic-types.fx")))
+       (check-logic-types (load-module "fx26:check-logic-types.fx"))
+       (check-resolve-types (load-module "fx26:check-resolve-types.fx")))
   ;; What it is given: the modules of the files before it that it uses.
   (lambda ((check-infer (select check-infer-types check-infer-sig))
            (check-types (select check-types-types check-types-sig))
@@ -26,13 +27,16 @@
            (check-sc-graphs (select check-sc-graphs-types check-sc-graphs-sig))
            (check-binders (select check-binders-types check-binders-sig))
            (check-print-parts (select check-print-parts-types check-print-parts-sig))
-           (check-logic (select check-logic-types check-logic-sig)))
+           (check-logic (select check-logic-types check-logic-sig))
+           (check-resolve (select check-resolve-types check-resolve-sig)))
     (module
 (hide (include check-test-facts-types) (include check-types-types) (include check-subst-types))
 ;; The types it uses of the files before it.
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include check-binders) (include check-types) (include check-env) (include check-sc-graphs)
       (include check-print-parts) (include check-calls) (include check-logic))
+(import check-resolve k-at-of k-start k-end)
+(import check-env-types n-staged)
 
 (define k-branch-facts-of (->* (k-fact-list k-fact-list) k-branch-facts)
   (lambda (yes no) (the k-branch-facts (cons yes no))))
@@ -109,14 +113,59 @@
 ;; `x`, of type and effect `te`, as arrays' lengths say, if a call; of a
 ;; call, and of `(the t x)`, which keeps a `make-array`'s length. And a
 ;; call of `native-procedure` (`TODO.md` §97), which makes a native
-;; closure: the type stated is of the native convention, or `fx`.
+;; closure: the type stated is of the native convention, or `fx`. And
+;; `stage`'s (`k-staged`).
 (define k-sized (->* (kx k-te) k-te)
   (lambda (x te)
     (tagcase x
       (x-app (f args a b abk)
         (let ((op (k-std-op f)))
-          (if (string=? op "native-procedure") (k-made-native te a b) (k-array-sized op args te))))
+          (cond ((string=? op "native-procedure") (k-made-native te a b))
+                ((k-stage-op? f) (k-staged args te))
+                (else (k-array-sized op args te)))))
       (else y te))))
+;; Whether `f` is `stage`'s operator, `(proj %stage E R)`.
+(define k-stage-op? (->* (kx) bool)
+  (lambda (f)
+    (tagcase f
+      (x-proj (body ds a b abk) (string=? (k-std-op body) "%stage"))
+      (else y (string=? (k-std-op f) "%stage")))))
+;; `stage` (`docs/research/eval.md`): `((proj %stage E R) m code)`, `m` a
+;; module's name, its call's type `te`, `(sumof (ok (subr E () R)) …)`.
+;; `m`'s type, `E` and `R` noted at the code, printed with no `define-type`
+;; named, for the compilers to give the checker that runs then
+;; (`n-staged`).
+(define k-staged (->* (kxs k-te) k-te)
+  (lambda (args te)
+    (let ((m (car args)) (code (car (cdr args))))
+      (tagcase m
+        (x-var (n a b abk)
+          (let ((mt (k-resolve (k-lookup n))))
+            (tagcase (k-get mt)
+              (ty-module (abs ds vs)
+                (begin (k-note-staged (k-at-of code) mt (extract te 1)) te))
+              (else y (k-fail (string-append "`stage` takes a module, not a "
+                                             ((with check-print k-show-ty) mt))
+                              a b)))))
+        (else y (k-fail "`stage` takes a module by its name" (k-start m) (k-end m)))))))
+(define k-note-staged (->* (k-at int int) unit)
+  (lambda (at mt t)
+    (tagcase (k-get (k-resolve t))
+      (ty-sum (parts)
+        (let ((ok (k-get (k-resolve (k-staged-ok parts)))))
+          (tagcase ok
+            (ty-subr (e ps r cv spc)
+              (let* ((show (with check-print k-show-ty-whole))
+                     (n (n-staged (show mt) (k-show-effect e) (show r))))
+                (set k-extracts (cons (product (1 at) (2 n)) (get k-extracts)))))
+            (else y #u))))
+      (else y #u))))
+;; The type of the `ok` of `stage`'s sum.
+(define k-staged-ok (->* (k-parts) int)
+  (lambda (ps)
+    (cond ((null? ps) -1)
+          ((symbol=? (extract (car ps) 1) 'ok) (extract (car ps) 2))
+          (else (k-staged-ok (cdr ps))))))
 (define k-made-native (->* (k-te int int) k-te)
   (lambda (te a b)
     (tagcase (k-get (extract te 1))

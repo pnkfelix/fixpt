@@ -31,21 +31,20 @@
   (lambda ((tables (select table-types tables-sig)))
     (module
 (import check-types-types r-const r-fresh r-var r-frozen r-heap r-global r-globals a-read a-write
-        a-alloc a-goto a-comefrom a-await a-spin a-io a-init a-send a-receive a-nondet a-var a-app
-        tm-param tm-length tm-lit pr-shape pr-acyclic pr-nat pr-length pr-rel cv-cellular cv-native
-        cv-fx cv-var sz-finite sz-lin dr de dt dz dc df ty-base ty-void ty-var ty-subr ty-poly
-        ty-ref ty-pair ty-tag ty-comp ty-markkey ty-product ty-sum ty-array ty-icell ty-place
-        ty-bloblet ty-link ty-named ty-nlist ty-nat ty-module ty-select ty-param ty-lam ty-app
-        ty-nil ty-union ty-false ds-gen ds-size ds-var ds-rec ds-abbrev ds-region ds-eff
+        a-alloc a-goto a-comefrom a-await a-spin a-io a-init a-send a-receive a-nondet a-stage a-var
+        a-app tm-param tm-length tm-lit pr-shape pr-acyclic pr-nat pr-length pr-rel cv-cellular
+        cv-native cv-fx cv-var sz-finite sz-lin dr de dt dz dc df ty-base ty-void ty-var ty-subr
+        ty-poly ty-ref ty-pair ty-tag ty-comp ty-markkey ty-product ty-sum ty-array ty-icell
+        ty-place ty-bloblet ty-link ty-named ty-nlist ty-nat ty-module ty-select ty-param ty-lam
+        ty-app ty-nil ty-union ty-false ds-gen ds-size ds-var ds-rec ds-abbrev ds-region ds-eff
         ds-conv ds-fun x-var x-const x-lambda x-app x-plambda x-letregion x-rlambda x-proj x-if
         x-letrec x-let x-begin x-prompt x-the x-convention x-bloblet x-product x-extract x-sum
-        x-tagcase x-module x-with k-ok k-err k-done st-car st-cdr st-field
-        (type k-region k-atom k-eff k-vsub k-ids k-term k-prop k-props k-binders k-parts k-names
-              k-strings k-conv k-terms k-size k-desc k-descs k-ty k-map k-ds kx kxs k-item k-items
-              k-te k-result k-narrows k-pendings k-cert-len k-arrow-kind k-bounded k-nesting k-named
-              k-settleds
-              k-gen k-hyps k-lemma k-regions k-step k-steps k-path-fact k-path-facts)
-        (effect kstate checks kreads kbuilds))
+        x-tagcase x-module x-with k-ok k-err k-done st-car st-cdr st-field (type k-region k-atom
+        k-eff k-vsub k-ids k-term k-prop k-props k-binders k-parts k-names k-strings k-conv k-terms
+        k-size k-desc k-descs k-ty k-map k-ds kx kxs k-item k-items k-te k-result k-narrows
+        k-pendings k-cert-len k-arrow-kind k-bounded k-nesting k-named k-settleds k-gen k-hyps
+        k-lemma k-regions k-step k-steps k-path-fact k-path-facts) (effect kstate checks kreads
+        kbuilds))
 ;; The types it uses of the files before it.
 (define-type chars (select eager-reader-types chars))
 (define-type table (select table-types table))
@@ -280,6 +279,7 @@
                    (a-spin () (tagcase y (a-spin () #t) (else z #f)))
                    (a-io (k) (tagcase y (a-io (j) (= k j)) (else z #f)))
                    (a-nondet () (tagcase y (a-nondet () #t) (else z #f)))
+                   (a-stage () (tagcase y (a-stage () #t) (else z #f)))
                    (a-var (v) (tagcase y (a-var (w) (= v w)) (else z #f)))
                    (a-app (f ds)
                      (tagcase y (a-app (g es) (and (= f g) (descs ds es))) (else z #f))))))

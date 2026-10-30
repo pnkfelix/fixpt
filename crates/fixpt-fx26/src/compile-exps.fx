@@ -58,10 +58,17 @@
   ;; to `%fx26-convert` with what it is converted to.
   (c-exp (->* (exp cenv int code bool) unit)
     (lambda (x e depth c tail)
-      (let ((k (c-conversion-at x)) (r (c-reshape-at x)))
+      (let ((k (c-conversion-at x)) (r (c-reshape-at x)) (st (c-staged-at x)))
         (cond ((>= k 0)
                (begin (c-exp-as-is x e depth c #f) (c-int c k)
                       (c-prim c "%fx26-convert" 2) (c-done c tail)))
+              ;; A `stage`'s text, given with what it is checked against.
+              ((not (null? st))
+               (begin (c-int c 37) (c-lit c (wcell-string (extract (car st) 2)))
+                      (c-lit c (wcell-string (extract (car st) 3)))
+                      (c-lit c (wcell-string (extract (car st) 4)))
+                      (c-exp-as-is x e (+ depth 4) c #f)
+                      (c-prim c "%make-frozen" 5) (c-done c tail)))
               ((not (null? r)) (c-reshape x (car r) e depth c tail))
               (else (c-exp-as-is x e depth c tail))))))
   ;; A module reshaped (`k-reshape-at`): made, then a product of the values

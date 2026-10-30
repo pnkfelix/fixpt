@@ -281,7 +281,7 @@
   (lambda (s)
     (if (syn-symbol? s)
         (let ((n (syn-name s)))
-          (or (string=? n "pure") (string=? n "spin") (string=? n "nondet")
+          (or (string=? n "pure") (string=? n "spin") (string=? n "nondet") (string=? n "stage")
               (let ((d (k-lookup-desc (string->symbol n))))
                 (and (not (null? d))
                      (tagcase (car d) (ds-eff (e) #t) (ds-var (v k) (= k 1)) (else x #f))))))

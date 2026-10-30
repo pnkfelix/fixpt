@@ -2630,7 +2630,21 @@ impl Fx26Session {
         // Outside any scope, so it lasts as the session does.
         let h = crate::syn::read_standard(&mut self.scheme)?;
         self.standard26 = Some(h);
+        self.stage_settings();
         Ok(h)
+    }
+
+    /// What `stage` checks and compiles with, as this program's forms are
+    /// (`stage.rs`), once the standard environment is read: where the
+    /// front end is compiled.
+    fn stage_settings(&mut self) {
+        let (Some(standard), true) = (self.standard26, self.front_end_compiled) else { return };
+        let mut value = fixpt_heap::Value::NULL;
+        self.scheme.make(|m| {
+            value = m.get(standard);
+            value
+        });
+        crate::stage::settings(self.scheme.runtime_unrooted(), value, self.native_convention, self.register_code);
     }
 
     /// Make the program's convention native, or cellular: what every
@@ -2701,11 +2715,11 @@ impl Fx26Session {
 
     /// The front end's entry points the Rust side calls by name
     /// (`READER_PREFIX`), each rebound by [`Self::front_end_as_register_code`].
-    pub const FRONT_ENTRIES: [&'static str; 38] = [
+    pub const FRONT_ENTRIES: [&'static str; 39] = [
         "read-text-at", "check-program", "check-more", "checked-tops", "checked-extracts", "checked-effects", "check-conv-native!", "checked-withs!", "checked-reshapes!",
         "check-globals-effects!", "check-defer-reruns!", "check-hold-breaks!", "check-lines!", "parse-program", "loaded-files!", "includes-given!", "run-checked", "run-checked-more", "compile-program", "compile-checked", "compile-registers!", "compile-conv-native!",
         "compile-global-cell", "compile-new-global", "compile-adopt-globals!", "compile-adopt-broken?", "compile-name-word!", "compile-defining!", "compile-keep-global!", "compile-note-inline!", "compile-forget-globals!", "native-assemble",
-        "check-built-in!", "check-syscalls!",
+        "check-built-in!", "check-syscalls!", "make-stage-check",
         "native-assemble-x64", "native-assemble-x64-regs", "native-adapter-x64", "native-compile-x64-proc",
     ];
 
@@ -2931,6 +2945,7 @@ impl Fx26Session {
             self.scheme.call_global(&format!("{READER_PREFIX}check-defer-reruns!"), &[on]).map_err(|e| fail(e.to_string()))?;
             let on = self.scheme.make(|_| fixpt_heap::Value::boolean(self.checker.syscalls));
             self.scheme.call_global(&format!("{READER_PREFIX}check-syscalls!"), &[on]).map_err(|e| fail(e.to_string()))?;
+            self.stage_settings();
             Ok(())
         })();
         self.scheme.release_to(mark);

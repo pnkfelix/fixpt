@@ -274,6 +274,7 @@ impl Checker {
                 Atom::Io(k) => list(vec![sym("io"), sym(k.name())]),
                 Atom::Spin => sym("spin"),
                 Atom::Nondet => sym("nondet"),
+                Atom::Stage => sym("stage"),
                 _ => return Err(fail(EFFECTS)),
             });
         }

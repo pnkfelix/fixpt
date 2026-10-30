@@ -62,6 +62,10 @@ pub struct Runtime {
     /// How `%fx26-type-at` checks a text (`fixpt-fx26` installs it): the
     /// checker is above this crate. None: it says there is no checker.
     pub type_at: Option<TypeAt>,
+    /// How `%fx26-stage` checks and compiles code a program gives
+    /// (`stage`, `docs/research/eval.md`; `fixpt-fx26` installs it): the
+    /// front end is above this crate. None: it says it cannot.
+    pub stage: Option<Stage>,
     /// How many steps (cells, or polls in machine code) a run of a word by
     /// `run_word` may take before it stops; unlimited unless set, as the
     /// FX-26 REPL sets it from its step limit for the run of a form.
@@ -100,6 +104,10 @@ pub type Adapt = fn(&mut Runtime, Value, usize, bool) -> Result<Value, String>;
 /// of program text, the innermost expression at a character, and its type,
 /// as `%fx26-type-at` says it.
 pub type TypeAt = fn(&str, i64) -> String;
+/// How FX-26's `stage` makes code (`docs/research/eval.md`): of module `m`
+/// and what the compilers made of the form's text, the sum the form takes
+/// apart; or why it could not try, which the program sees as a refusal.
+pub type Stage = fn(&mut Runtime, Value, Value) -> Result<Value, String>;
 
 /// How a call between machines left, if not with a value.
 #[derive(Debug)]
@@ -173,6 +181,7 @@ impl Runtime {
             call_native: None,
             adapt: None,
             type_at: None,
+            stage: None,
             word_fuel: u64::MAX,
             run_nanos: 0,
             compile_nanos: 0,
@@ -263,6 +272,7 @@ impl Runtime {
             call_native: None,
             adapt: None,
             type_at: None,
+            stage: None,
             word_fuel: u64::MAX,
             run_nanos: 0,
             compile_nanos: 0,

@@ -235,7 +235,7 @@
   (lambda (s)
     (let ((n (symbol->string s)))
       (or (string=? n "cwcc") (string=? n "certify-length") (string=? n "certify-acyclic")
-          (string=? n "certify-nat") (string=? n "native-procedure")))))
+          (string=? n "certify-nat") (string=? n "native-procedure") (string=? n "%stage")))))
 (define k-operator? (->* (symbol int int int) bool)
   (lambda (s a b k)
     (let ((o (get k-operator)))

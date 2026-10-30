@@ -131,6 +131,7 @@
          (("%quote") "%fx26-intern-datum")
          (("array?") "%fx26-array?")
          (("modulo") "modulo")
+         (("%stage") "%fx26-stage")
          (("i8-and") "%fx26-i8-and")
          (("i8-xor") "%fx26-i8-xor")
          (("i8-shl") "%fx26-i8-shl")

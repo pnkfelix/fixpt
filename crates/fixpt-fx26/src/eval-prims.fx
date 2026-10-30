@@ -392,6 +392,13 @@
                                 (cons 'size (the val (extract i size)))
                                 (cons 'modified (the val (extract i modified)))
                                 (cons 'mode (the val (extract i mode)))))))))
+;; A `stage-failure` refusing, with `message`, as the evaluator's value.
+(define ev-stage-refused (->* (string) val)
+  (lambda (message)
+    (the val (o-product (list (cons 'kind (the val (o-sum 'refused the-unit)))
+                              (cons 'message (the val message))
+                              (cons 'start (the val 0))
+                              (cons 'end (the val 0)))))))
 ;; Strings `ns`, as the evaluator's list of them.
 (define ev-strings (->* ((listof string @v)) val)
   (lambda (ns) (if (null? ns) nil (cons (car ns) (ev-strings (cdr ns))))))
@@ -491,6 +498,11 @@
       (prim! 'seal-code (lambda (xs) (efail "seal-code: this machine runs no native code")))
       (prim! 'native-procedure
              (lambda (xs) (efail "native-procedure: this machine runs no native code")))
+      ;; `stage` (`docs/research/eval.md`): not yet here, a refusal.
+      (prim! '%stage
+             (lambda (xs)
+               (the val (o-sum 'failed
+                               (ev-stage-refused "this machine cannot stage code yet")))))
       (prim! 'clock (lambda (xs) (clock)))
       (prim! 'sleep-until
              (lambda (xs) (begin (sleep-until (int->i64 (as-int (ev-arg xs 0)))) the-unit)))

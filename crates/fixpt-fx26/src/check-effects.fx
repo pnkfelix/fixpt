@@ -61,7 +61,7 @@
       (a-read (r) 0) (a-write (r) 1) (a-alloc (r) 2)
       (a-goto (r) 3) (a-comefrom (r) 4) (a-await (r) 5)
       (a-init (r) 6) (a-send (r) 7) (a-receive (r) 8)
-      (a-spin () 9) (a-io (k) 9) (a-nondet () 9) (a-var (v) 10) (a-app (v ds) 11))))
+      (a-spin () 9) (a-io (k) 9) (a-nondet () 9) (a-stage () 9) (a-var (v) 10) (a-app (v ds) 11))))
 ;; The atom's region; a variable's is none, shown as a binder -1.
 (define k-atom-region (->* (k-atom) k-region)
   (lambda (a)
@@ -69,7 +69,8 @@
       (a-read (r) r) (a-write (r) r) (a-alloc (r) r)
       (a-goto (r) r) (a-comefrom (r) r) (a-await (r) r)
       (a-init (r) r) (a-send (r) r) (a-receive (r) r)
-      (a-spin () (r-var -1)) (a-io (k) (r-var -1)) (a-nondet () (r-var -1)) (a-var (v) (r-var -1))
+      (a-spin () (r-var -1)) (a-io (k) (r-var -1)) (a-nondet () (r-var -1)) (a-stage () (r-var -1))
+      (a-var (v) (r-var -1))
       (a-app (v ds) (r-var -1)))))
 (define k-has-region? (->* (k-atom) bool) (lambda (a) (< (k-atom-rank a) 9)))
 ;; The effect variable an atom is, or -1.
@@ -138,10 +139,11 @@
       (a-send (r) (+ 504403158265495552 (k-region-ord r)))
       (a-receive (r) (+ 576460752303423488 (k-region-ord r)))
       (a-spin () 648518346341351424)
-      ;; After `spin`, by kind, then `nondet`, as the Rust checker's `Atom`
-      ;; orders them.
+      ;; After `spin`, by kind, then `nondet`, then `stage`, as the Rust
+      ;; checker's `Atom` orders them.
       (a-io (k) (+ 648518346341351425 k))
       (a-nondet () 648518346341351440)
+      (a-stage () 648518346341351441)
       (a-var (v) (+ 720575940379279360 (+ v 1099511627776)))
       (a-app (v ds) (+ 792633534417207296 (+ v 1099511627776))))))
 ;; Two names by their stored hashes; by their text only if those are equal.
@@ -201,7 +203,7 @@
       (a-read (x) (a-read r)) (a-write (x) (a-write r)) (a-alloc (x) (a-alloc r))
       (a-goto (x) (a-goto r)) (a-comefrom (x) (a-comefrom r)) (a-await (x) (a-await r))
       (a-init (x) (a-init r)) (a-send (x) (a-send r)) (a-receive (x) (a-receive r))
-      (a-spin () a) (a-io (k) a) (a-nondet () a) (a-var (v) a) (a-app (v ds) a))))
+      (a-spin () a) (a-io (k) a) (a-nondet () a) (a-stage () a) (a-var (v) a) (a-app (v ds) a))))
 ;; Whether `a` comes before `b`, and whether they are one atom.
 (define k-atom<? (->* (k-atom k-atom) bool)
   (lambda (a b) (< (k-atom-cmp a b) 0)))

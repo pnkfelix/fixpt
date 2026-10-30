@@ -219,6 +219,7 @@
   (lambda (a)
     (tagcase a
       (a-send (r) #t) (a-init (r) #t) (a-await (r) #t) (a-io (k) #t) (a-spin () #t) (a-nondet () #t)
+      (a-stage () #t)
       (a-read (r)
         (tagcase r (r-global (g) #t) (r-globals () #t) (r-frozen (p f) (< p 0)) (else y #f)))
       (a-alloc (r) (tagcase r (r-const (n) #t) (r-fresh (i n) #t) (r-heap () #t) (else y #f)))

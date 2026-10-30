@@ -779,8 +779,14 @@
 ;; type as `(mu %d …)`, `%d` naming the cycle: its minimal one
 ;; (`k-canon-set!`).
 (define k-show-ty (->* (int) string)
-  (lambda (t)
-    (let* ((trs (the k-atrees (list (k-atree-now))))
+  (lambda (t) (k-show-ty-named t #t)))
+;; The same with no `define-type` named, for a checker of another program:
+;; what `stage` gives the one that runs with its text.
+(define k-show-ty-whole (->* (int) string)
+  (lambda (t) (k-show-ty-named t #f)))
+(define k-show-ty-named (->* (int bool) string)
+  (lambda (t named)
+    (let* ((trs (if named (the k-atrees (list (k-atree-now))) (the k-atrees nil)))
            (p (product (1 (the k-ids nil)) (2 (the k-parts nil)) (3 trs)))
            (sel (and (not (get k-selects-on)) (begin (k-selects-gather!) #t)))
            (on (and (not (get k-canon-on)) (not (get k-shallow)) (k-canon-set! t p)))

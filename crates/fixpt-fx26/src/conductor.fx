@@ -189,7 +189,7 @@
           ((load-input "fx26:check-test-facts.fx")
            check-infer check-types check-env check-terminate
            check-print check-calls check-sc-graphs check-binders check-print-parts
-           check-logic))
+           check-logic check-resolve))
          ;; The checker, letrec: a group's types found and checked.
          (check-letrec
           ((load-input "fx26:check-letrec.fx")
@@ -380,7 +380,8 @@
            (load-input "fx26:x86_64.fx") native-direct-layout native-direct-asm))
          (native-direct-flat
           ((load-input "fx26:native-direct-x64-flat.fx")
-           (load-input "fx26:x86_64.fx") native-direct-layout native-direct-asm native-direct-raw))
+           (load-input "fx26:x86_64.fx") native-direct-layout native-direct-asm
+           native-direct-raw))
          (native-direct-proc
           ((load-input "fx26:native-direct-x64-proc.fx")
            native-direct-layout layout native-direct-asm native-reps))
@@ -395,7 +396,63 @@
          (native-direct
           ((load-input "fx26:native-direct-x64.fx")
            (load-input "fx26:x86_64.fx") native-direct-layout layout native-direct-asm native-reps
-           native-direct-raw native-direct-proc native-direct-ops native-direct-prims)))
+           native-direct-raw native-direct-proc native-direct-ops native-direct-prims))
+         ;; `stage` (`docs/research/eval.md`): code a running program gives,
+         ;; checked by this instance, as `(with m text)` of type `r` whose
+         ;; evaluation's effect is within `e`, for `m` of module type `mt`, in
+         ;; the standard environment alone; and compiled, to the word that
+         ;; makes `(lambda ((m mt)) (lambda () (with m text)))`. Or why not,
+         ;; as `stage-failure` says it, placed in `text`. Each type as the
+         ;; checker that checked the form printed it.
+         (stage-check
+          (let* ((fail
+                  (lambda ((k (sumof (unread unit) (malformed unit) (refused unit) (stale unit)))
+                           (m string) (a int) (b int))
+                    (sum failed (product (kind k) (message m) (start a) (end b)))))
+                 ;; Place `n` of the text checked, in `text`, which starts at `k`.
+                 (clamp (lambda ((n int) (k int) (len int))
+                          (let ((at (- n k))) (cond ((< at 0) 0) ((> at len) len) (else at)))))
+                 ;; The text checked, `prefix` then `text`, its trees `tops`.
+                 (checked
+                  (lambda ((standard (listof syn acyclic)) (tops (listof top acyclic))
+                           (k int) (len int) (native bool) (registers bool))
+                    (begin
+                      ((with check-program check-lines!) #f)
+                      ((with check-print-parts check-conv-native!) native)
+                      ((with compile compile-conv-native!) native)
+                      ((with regcode-entry compile-registers!) registers)
+                      (tagcase ((with check-program check-program) standard tops)
+                        (k-err (m a b) (fail (sum refused #u) m (clamp a k len) (clamp b k len)))
+                        (k-done (t) (fail (sum refused #u) "not an expression" 0 len))
+                        (k-ok (ls)
+                          (tagcase ((with compile-programs compile-checked)
+                                    ((with check-program checked-tops))
+                                    ((with check-env checked-extracts)))
+                            (c-ok (w) (sum made w))
+                            (c-err (m) (fail (sum refused #u) m 0 len)))))))))
+            (lambda ((standard (listof syn acyclic)) (mt string) (e string) (r string)
+                     (text string) (native bool) (registers bool))
+              (let* ((len (string-length text))
+                     (alone (read-text-at text 0))
+                     (prefix (string-append "(the (subr pure (" mt ") (subr " e " () " r "))\n"
+                                            "(lambda ((stage-module " mt "))\n"
+                                            "(lambda () (with stage-module\n"))
+                     (k (string-length prefix))
+                     (whole (read-text-at (string-append prefix text "\n))))\n") 0))
+                     (unread "the text is not one whole expression"))
+                ;; One datum, read alone, cannot reach past the parentheses
+                ;; around it.
+                (cond ((or (null? alone) (null? (car alone)) (not (null? (cdr (car alone))))
+                           (null? whole))
+                       (fail (sum unread #u) unread 0 len))
+                      (else
+                       (begin
+                         (loaded-files! nil)
+                         (includes-given! nil)
+                         (tagcase (parse-program (car whole))
+                           (p-err (m a b)
+                             (fail (sum malformed #u) m (clamp a k len) (clamp b k len)))
+                           (p-ok (tops) (checked standard tops k len native registers)))))))))))
     ;; What Rust and `bootstrap.fx` call of them (`syn.rs`, `session.rs`).
     (product (run-checked (with eval-core run-checked))
              (run-checked-more (with eval-core run-checked-more))
@@ -434,7 +491,14 @@
              (checked-withs! (with check-env checked-withs!))
              (k-ok (with check-types k-ok))
              (k-err (with check-types k-err))
-             (k-done (with check-types k-done)))))
+             (k-done (with check-types k-done))
+             (stage-check stage-check))))
+;;; The end of `front-end-entries`: `make-front-end`, made of its `let*`
+;;; again, follows it in the front end (`lib.rs`'s `front_end`).
+
+;; A front end of its own for `stage`, whose checking leaves the
+;; program's alone: made when a program first stages code (`stage.rs`).
+(define make-stage-check (lambda () (extract (make-front-end) stage-check)))
 
 (define run-checked (extract front-end-entries run-checked))
 (define run-checked-more (extract front-end-entries run-checked-more))

@@ -251,7 +251,7 @@ fn testable(session: &Fx26Session, t: TyId) -> Option<(Vec<Draw>, Option<Spec>)>
     // specifications as it runs.
     let c = &session.checker;
     let Ty::Subr { effect, params, result, spec, .. } = c.arena.get(c.arena.resolve(t)).clone() else { return None };
-    let seen = |a: &Atom| matches!(a, Atom::Write(_) | Atom::Init(_) | Atom::Send(_) | Atom::Receive(_) | Atom::Await(_) | Atom::Io(_) | Atom::Goto(_) | Atom::Comefrom(_) | Atom::Nondet | Atom::Var(_) | Atom::App(_));
+    let seen = |a: &Atom| matches!(a, Atom::Write(_) | Atom::Init(_) | Atom::Send(_) | Atom::Receive(_) | Atom::Await(_) | Atom::Io(_) | Atom::Goto(_) | Atom::Comefrom(_) | Atom::Nondet | Atom::Stage | Atom::Var(_) | Atom::App(_));
     if effect.0.iter().any(seen) {
         return None;
     }

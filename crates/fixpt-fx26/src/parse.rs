@@ -413,6 +413,9 @@ impl Checker {
             if self.name(sym) == "nondet" {
                 return Ok(Effect::atom(Atom::Nondet));
             }
+            if self.name(sym) == "stage" {
+                return Ok(Effect::atom(Atom::Stage));
+            }
             let withs = self.withs_over(sym);
             if !withs.is_empty() {
                 let outer = if self.lookup_desc(sym).is_some() || self.include_scope > 0 { Some(self.effect_name_read(s, sym)?) } else { None };
@@ -1366,7 +1369,7 @@ impl Checker {
     /// to one, or one of `parse_effect`'s atoms or `maxeff`.
     pub(crate) fn effect_shaped(&self, s: &Syntax) -> bool {
         if let Some(sym) = s.as_symbol() {
-            return matches!(self.name(sym), "pure" | "spin" | "nondet") || matches!(self.lookup_desc(sym), Some(DScope::Eff(_) | DScope::Var(_, Kind::Effect)));
+            return matches!(self.name(sym), "pure" | "spin" | "nondet" | "stage") || matches!(self.lookup_desc(sym), Some(DScope::Eff(_) | DScope::Var(_, Kind::Effect)));
         }
         matches!(
             self.head(self.items(s, "").unwrap_or(&[])),
@@ -1396,6 +1399,9 @@ impl Checker {
             }
             if name == "nondet" {
                 return Ok(D::Effect(Effect::atom(Atom::Nondet)));
+            }
+            if name == "stage" {
+                return Ok(D::Effect(Effect::atom(Atom::Stage)));
             }
             if name == "const" {
                 return Ok(D::Region(Region::Frozen(None, false)));
@@ -1557,6 +1563,32 @@ impl Checker {
                 lambda.extend(body.iter().cloned());
                 let call = Syntax::list(span, vec![sym(self, "%vlambda"), Syntax::list(span, lambda)]);
                 self.parse_exp(&call)
+            }
+            // Code a running program gives (`docs/research/eval.md`):
+            // `(stage m E R text (p body …) (why else …))` is `(tagcase
+            // ((proj %stage E R) m text) (ok p body …) (failed why else
+            // …))`, `%stage` checked at its call as `m`'s type says.
+            "stage" => {
+                let usage = "`(stage module effect type code (procedure body …) (failure else …))`";
+                let [_, m, e, r, text, ok, failed] = &items[..] else {
+                    return Err(FxError::at(span, usage));
+                };
+                let sym = |p: &mut Self, s: &str| Syntax::symbol(span, p.interner.intern(s));
+                let arm = |p: &mut Self, tag: &str, a: &Syntax| -> R<Syntax> {
+                    match a.as_proper_list() {
+                        Some([name, body @ ..]) if name.as_symbol().is_some() && !body.is_empty() => {
+                            let mut parts = vec![sym(p, tag), name.clone()];
+                            parts.extend(body.iter().cloned());
+                            Ok(Syntax::list(a.span, parts))
+                        }
+                        _ => Err(FxError::at(a.span, usage)),
+                    }
+                };
+                let (ok, failed) = (arm(self, "ok", ok)?, arm(self, "failed", failed)?);
+                let op = Syntax::list(span, vec![sym(self, "proj"), sym(self, "%stage"), e.clone(), r.clone()]);
+                let call = Syntax::list(span, vec![op, m.clone(), text.clone()]);
+                let form = Syntax::list(span, vec![sym(self, "tagcase"), call, ok, failed]);
+                self.parse_exp(&form)
             }
             "rlambda" => {
                 let [_, region, params, body @ ..] = &items[..] else {

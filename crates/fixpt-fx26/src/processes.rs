@@ -392,7 +392,7 @@ impl Checker {
 
     pub(crate) fn crossing_atom(&self, a: Atom) -> bool {
         match a {
-            Atom::Send(_) | Atom::Init(_) | Atom::Await(_) | Atom::Io(_) | Atom::Spin | Atom::Nondet => true,
+            Atom::Send(_) | Atom::Init(_) | Atom::Await(_) | Atom::Io(_) | Atom::Spin | Atom::Nondet | Atom::Stage => true,
             Atom::Read(r) => r.is_globals() || matches!(r, Region::Frozen(None, _)),
             Atom::Alloc(r) => matches!(r, Region::Const(_) | Region::Heap),
             _ => false,

@@ -221,6 +221,18 @@
 (define r-args-2 (->* (rarg rarg) rargs)
   ;; cons-chain: in `@k`, which goes when the compile does
   (lambda (a b) (the rargs (cons a (cons b nil)))))
+;; What `x`'s value is given to as it is changed (`r-exp`): converted, at
+;; `k`, `%fx26-convert`'s operands; else a `stage`'s code, `%make-frozen`'s,
+;; a product of it and what it is checked against.
+(define r-changed-args (->* (exp int) rargs)
+  (lambda (x k)
+    (if (>= k 0)
+        (r-args-2 (a-as-is x) (a-v (wcell-int k)))
+        (let ((s (car (c-staged-at x))) (str (lambda ((s string)) (a-v (wcell-string s)))))
+          (the rargs
+            (cons (a-v (wcell-int 37))
+                  (cons (str (extract s 2))
+                        (r-args-3 (str (extract s 3)) (str (extract s 4)) (a-as-is x)))))))))
 (define r-args-3 (->* (rarg rarg rarg) rargs)
   ;; cons-chain: in `@k`, as `r-args-2`'s
   (lambda (a b c) (the rargs (cons a (cons b (cons c nil))))))

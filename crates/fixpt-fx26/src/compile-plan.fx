@@ -279,7 +279,8 @@
   ;; in tail position.
   (p-exp (->* (exp cenv bool) unit)
     (lambda (x e tail0)
-      (let ((tail (and tail0 (< (c-conversion-at x) 0) (null? (c-reshape-at x)))))
+      (let ((tail (and tail0 (< (c-conversion-at x) 0) (null? (c-reshape-at x))
+                        (null? (c-staged-at x)))))
         (tagcase x
           (e-lambda (ps body a b abk) (p-lambda ps body e (the syms nil)))
           (e-rlambda (r l a b abk)

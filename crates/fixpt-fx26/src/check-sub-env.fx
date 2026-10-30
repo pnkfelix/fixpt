@@ -145,6 +145,7 @@
                     (a-receive (r) (a-receive (k-benv-region env r)))
                     (a-spin () x)
                     (a-nondet () x)
+                    (a-stage () x)
                     (a-io (k) x)
                     (a-var (v) (a-var (k-benv-var env v)))
                     ;; Its variable, and what it was given, as named here.

@@ -47,14 +47,14 @@
 (define-rec
   ;; `x`'s value into RESULT; in tail position, returned. A procedure
   ;; converted to a convention is made, then given to `%fx26-convert` with
-  ;; what it is converted to.
+  ;; what it is converted to; a `stage`'s code, with what it is checked at.
   (r-exp (->* (rgen exp renv cenv bool) unit)
     (lambda (g x env te tail)
       (let ((k (c-conversion-at x)) (r (c-reshape-at x)) (outer (r-enter-place! g x)))
         (begin
-          (cond ((>= k 0)
-                 (begin (r-prim g "%fx26-convert" (r-args-2 (a-as-is x) (a-v (wcell-int k))) env te)
-                        (r-done g tail)))
+          (cond ((or (>= k 0) (not (null? (c-staged-at x))))
+                 (let ((p (if (>= k 0) "%fx26-convert" "%make-frozen")))
+                   (begin (r-prim g p (r-changed-args x k) env te) (r-done g tail))))
                 ((not (null? r)) (r-reshape g x (car r) env te tail))
                 (else (r-exp-as-is g x env te tail))) (r-leave-place! g outer)))))
   ;; `x`'s value into RESULT; in tail position, returned.

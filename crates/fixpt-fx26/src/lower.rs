@@ -223,6 +223,7 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("args", "%fx26-args", true),
     ("read-file", "%fx26-read-file", true),
     ("type-at", "%fx26-type-at", true),
+    ("%stage", "%fx26-stage", false),
     ("process-start", "%fx26-process-start", true),
     ("process-output", "%fx26-process-output", true),
     ("process-status", "%fx26-process-status", true),

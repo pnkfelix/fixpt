@@ -5,7 +5,9 @@ and kayak would have to change for a running program to read, check and
 run code it is given, as Scheme's `eval` does. Wanted by Heist's editor
 (`TODO.md` §105, §186; Heist's `docs/fx26-for-yank.md`, R4): the init file,
 `M-:`, `C-x C-e`, and commands, keymaps and hooks defined by user code at
-run time. Nothing here is implemented. "Decided" below marks the user's
+run time. Step 1, `stage` alone on the machines that compile with the
+compilers written in FX-26, is implemented (`docs/fx26.md`, "Staging code";
+`TODO.md` §186 lists what is left). "Decided" below marks the user's
 answers (2026-10-28) to the first draft's open questions.
 
 ## The claim

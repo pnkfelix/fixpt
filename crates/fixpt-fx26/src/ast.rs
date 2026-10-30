@@ -219,6 +219,10 @@ pub enum Atom {
     /// one order or another (Clinger's arrival order), or as processes'
     /// I/O interleaves. No region, so nothing masks it, as `spin`.
     Nondet,
+    /// Makes code the program can run (`stage`, `docs/research/eval.md`):
+    /// what it may run is not what it was. No region, so nothing masks it,
+    /// as `spin`; to the compilers, "anything else", as I/O.
+    Stage,
     /// An effect variable.
     Var(DVar),
     /// `(e d …)`: a description function to an effect, a variable, applied
@@ -295,7 +299,7 @@ impl Atom {
             | Atom::Init(r)
             | Atom::Send(r)
             | Atom::Receive(r) => Some(r),
-            Atom::Var(_) | Atom::Spin | Atom::Io(_) | Atom::Nondet | Atom::App(_) => None,
+            Atom::Var(_) | Atom::Spin | Atom::Io(_) | Atom::Nondet | Atom::Stage | Atom::App(_) => None,
         }
     }
 }

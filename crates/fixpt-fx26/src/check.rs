@@ -57,10 +57,15 @@ pub const DATUM: &str = "(union int f64 char bool string symbol keyword nil (pai
 /// of a fixed few as `tagcase` can check, and the system's description. A
 /// value the program sees, not a failure of the run.
 pub const IO_ERROR: &str = "(productof (kind (sumof (not-found unit) (permission-denied unit) (already-exists unit) (not-a-directory unit) (is-a-directory unit) (broken-pipe unit) (invalid-data unit) (other unit))) (detail string))";
+/// Why `stage` made no code (`docs/research/eval.md`): its text did not
+/// read as one expression, was not well formed, was refused, or (a
+/// session's) is stale; why, and where in the text, in characters.
+pub const STAGE_FAILURE: &str = "(productof (kind (sumof (unread unit) (malformed unit) (refused unit) (stale unit))) (message string) (start int) (end int))";
 /// The types the initial environment names, before its bindings, whose
 /// types name them: `datum`, what a reader reads (`docs/fx26.md`,
-/// "Datums"), and `io-error`. In both checkers (`standard_text`).
-pub const STANDARD_TYPES: [(&str, &str); 2] = [("datum", DATUM), ("io-error", IO_ERROR)];
+/// "Datums"), `io-error` and `stage-failure`.
+/// In both checkers (`standard_text`).
+pub const STANDARD_TYPES: [(&str, &str); 3] = [("datum", DATUM), ("io-error", IO_ERROR), ("stage-failure", STAGE_FAILURE)];
 pub const FLATLAYOUT: &str = "(flatlayout (t type)) int";
 /// A flat array (`flatarrayof`, Q6), generative type 2: an array to
 /// safety's analyses (its regions), opaque to anything else; its elements
@@ -1941,7 +1946,7 @@ impl Checker {
     /// there: named only as a call's operator, so that no other name, and
     /// no procedure given one, can call them unchecked (F15, F16).
     pub(crate) fn second_class(&self, s: Sym) -> bool {
-        matches!(self.interner.name(s), "cwcc" | "certify-length" | "certify-acyclic" | "certify-nat" | "native-procedure")
+        matches!(self.interner.name(s), "cwcc" | "certify-length" | "certify-acyclic" | "certify-nat" | "native-procedure" | "%stage")
     }
 
     pub(crate) fn named_only_to_call(&self, span: fixpt_read::Span, s: Sym) -> FxError {
@@ -4355,7 +4360,7 @@ impl Checker {
                         vs.insert(v);
                     }
                 }
-                Atom::Spin | Atom::Io(_) | Atom::Nondet => {}
+                Atom::Spin | Atom::Io(_) | Atom::Nondet | Atom::Stage => {}
             }
         }
     }
@@ -4432,6 +4437,7 @@ pub(crate) fn subst_effect(e: &Effect, map: &HashMap<DVar, D>, arena: &crate::as
             Atom::Spin => Effect::atom(Atom::Spin),
             Atom::Io(k) => Effect::atom(Atom::Io(k)),
             Atom::Nondet => Effect::atom(Atom::Nondet),
+            Atom::Stage => Effect::atom(Atom::Stage),
             // An effect function applied: given what it is substituted by,
             // reduced if that is a `dlambda`.
             Atom::App(n) => {
@@ -5110,6 +5116,7 @@ impl BinderEnv {
                     Atom::Send(x) => Atom::Send(r(x)),
                     Atom::Receive(x) => Atom::Receive(r(x)),
                     Atom::Nondet => Atom::Nondet,
+                    Atom::Stage => Atom::Stage,
                     Atom::Spin => Atom::Spin,
                     Atom::Io(k) => Atom::Io(k),
                     // Its variable, and what it was given, as named here.

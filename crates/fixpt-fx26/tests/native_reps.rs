@@ -31,7 +31,12 @@ fn twins(heap: &Heap, word: Value) -> Vec<Value> {
             continue;
         }
         let t = heap.bloblet_slot(w, WORD_TWIN);
-        if heap.is_register_word(t) {
+        // Not `make-front-end`'s (`lib.rs`'s `conductor`), all the front
+        // end's modules made in one word of some 320,000 fields (the next
+        // longest has 18,000), longer than the pass as this test runs it
+        // recurses for (`TODO.md` §187).
+        let long = heap.is_register_word(t) && heap.bloblet_head(t).fields > 100_000;
+        if heap.is_register_word(t) && !long {
             out.push(t);
         }
         for k in WORD_CELL0..=heap.bloblet_head(w).fields {

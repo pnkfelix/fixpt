@@ -124,6 +124,16 @@
 (define c-conversion-at (->* (exp) int)
   (lambda (x) (c-noted-of (get c-convert-table) x -1)))
 
+;; Each `stage`'s code, few (`n-staged`); what `x` is checked against, if
+;; it is one: a list of one.
+(define c-staged-texts (ref c-staged-list @k) (new nil))
+(define c-staged-at (->* (exp) c-staged-list)
+  (lambda (x) (c-staged-find (get c-staged-texts) (exp-start x) (exp-end x) (exp-kth x))))
+(define c-staged-find (->* (c-staged-list int int int) c-staged-list)
+  (lambda (l a b k)
+    (cond ((null? l) nil)
+          ((c-at-is? (extract (car l) 1) a b k) (the c-staged-list (cons (car l) nil)))
+          (else (c-staged-find (cdr l) a b k)))))
 ;; Each `apply` whose list the checker found at `acyclic` (`n-apply-shares`,
 ;; `k-note-apply-shares`). Every other `apply` copies its list.
 (define c-shares-table (ref c-by-at @k) (new (c-new-by-at)))
@@ -250,7 +260,7 @@
 ;; convention, or a module reshaped.
 (define c-changed? (->* (exp) bool)
   (lambda (x)
-    (or (>= (c-conversion-at x) 0) (c-reshaped-at? x))))
+    (or (>= (c-conversion-at x) 0) (c-reshaped-at? x) (not (null? (c-staged-at x))))))
 ;; Where an expression starting at `at` is, as a word's name says it: the
 ;; position; or, in a module's file (`load-module`, M7), `file:position`,
 ;; the file numbered as the Rust checker numbers them.
@@ -504,6 +514,8 @@
               (n-frozen-define () (c-note! (get c-frozen-table) at 0))
               (n-plain-fx () (c-note! (get c-plain-table) at 0))
               (n-conversion (code) (c-note! (get c-convert-table) at code))
+              (n-staged (m e r)
+                (set c-staged-texts (cons (product (1 at) (2 m) (3 e) (4 r)) (get c-staged-texts))))
               (n-call (cv)
                 (let ((a (extract at 1)))
                   (table-set! (get c-call-table) a
@@ -530,6 +542,7 @@
       (set c-fact-table (make-table c-int-hash c-int=?))
       (set c-call-table (make-table c-int-hash c-int=?))
       (set c-convert-table (c-new-by-at))
+      (set c-staged-texts nil)
       (set c-shares-table (c-new-by-at))
       (set c-frozen-table (c-new-by-at))
       (set c-plain-table (c-new-by-at))

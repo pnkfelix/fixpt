@@ -2958,3 +2958,23 @@ of `TODO.md` §141, working on my own.
   `poly` writes (the masking rule of the same day).
 - **Asked, not done yet**: the refusal of a write to such a list could
   say why the list is frozen, and how to name its region.
+
+### `stage`, step 1 (2026-10-30, TODO §186)
+
+- **One form first, `stage`**, the design's three steps in one: what
+  `certify` and `install` need apart (the certificate's type, a dependent
+  `install`) is the next step, and `stage` alone was enough to find the
+  machinery's problems (rooting across a primitive that runs code).
+- **`code` is a datum**, as the user expected; a program with text reads
+  it first. Written out for the checker to read, so a refusal's place is
+  in the datum as written.
+- **`m` is a module's name**: the checker takes `M` from its type, and a
+  variable is looked up twice at no cost; any other expression would be
+  checked twice.
+- **The code is wrapped as text**, after reading it alone as one datum,
+  rather than built as syntax: the parser's trees carry their datums, and
+  one read alone cannot close the parentheses around it.
+- **A second front end, not the program's**: `check-program` resets the
+  checker, which would lose the program's own state.
+- **`rs-scheme-vm` and `fx-ast-eval` refuse**, as `native-procedure` fails
+  where it cannot run: the value says so, the program goes on.

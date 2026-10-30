@@ -5543,6 +5543,13 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
             Some(marks) => rt.heap.list_from(&marks).raw(),
             None => failed(st, "marks-of: not a continuation".into()),
         },
+        Callout::Prim { p, .. } | Callout::Pure { p, .. } if fixpt_runtime::prim::reenters(fixpt_runtime::PRIMITIVES[p].name) => {
+            let fixpt_runtime::PrimKind::Simple(f) = fixpt_runtime::PRIMITIVES[p].kind else { unreachable!("checked when compiled") };
+            let mut args = args.to_vec();
+            call_foreign_with(rt, st, None, |rt| {
+                f(rt, &mut args).map_err(|t| fixpt_runtime::NativeExit::Failed(fixpt_engine::cellular::describe(rt, t.obj)))
+            })
+        }
         Callout::Prim { p, .. } | Callout::Pure { p, .. } => {
             let def = &fixpt_runtime::PRIMITIVES[p];
             let fixpt_runtime::PrimKind::Simple(f) = def.kind else { unreachable!("checked when compiled") };
@@ -5578,6 +5585,20 @@ extern "C" fn callout(st: *mut DState, which: u64) -> u64 {
 /// where they resume with the value; or, `resume` given, the frames are a
 /// continuation's just put back (`reinstate`), resuming there.
 fn call_foreign(rt: &mut fixpt_runtime::Runtime, st: &mut DState, f: Value, args: &[Value], resume: Option<u64>) -> u64 {
+    call_foreign_with(rt, st, resume, |rt| fixpt_engine::cellular::call_value(rt, f, args))
+}
+
+/// [`call_foreign`]'s work, the call `call`: what is not native code, or a
+/// primitive that runs code that is not (`reenters`), which may collect.
+/// A primitive's call-out is not `common_foreign`'s, so a continuation
+/// captured across it would be wrong; none is (the front end's prompts are
+/// its own).
+fn call_foreign_with(
+    rt: &mut fixpt_runtime::Runtime,
+    st: &mut DState,
+    resume: Option<u64>,
+    call: impl FnOnce(&mut fixpt_runtime::Runtime) -> Result<Value, fixpt_runtime::NativeExit>,
+) -> u64 {
     if !fixpt_runtime::crossing::room() {
         LAST_MESSAGE.with(|c| *c.borrow_mut() = Some(fixpt_engine::cellular::Trap::StackOverflow.to_string()));
         st.trap = PRIM_FAILED as u64;
@@ -5595,7 +5616,7 @@ fn call_foreign(rt: &mut fixpt_runtime::Runtime, st: &mut DState, f: Value, args
     let runner = RUNNING.get().expect("native code is running");
     let outer = CALLED_OUT.replace(Some((runner, st.native_sp)));
     let boundary = std::rc::Rc::new(Foreign { st: st as *mut DState, at, resume });
-    let r = fixpt_runtime::crossing::across(boundary, || fixpt_engine::cellular::call_value(rt, f, args));
+    let r = fixpt_runtime::crossing::across(boundary, || call(rt));
     CALLED_OUT.set(outer);
     put_back(rt, st, at);
     rt.heap.pop_roots_to(at);

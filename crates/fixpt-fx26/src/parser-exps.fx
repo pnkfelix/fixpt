@@ -28,12 +28,12 @@
         import? expand-import e-var e-int e-bool e-str e-char e-float e-sym e-unit e-lambda e-app
         e-plambda e-proj e-if e-letrec e-let e-begin e-prompt e-letregion e-rlambda e-the
         e-convention e-bloblet e-product e-extract e-sum e-tagcase e-module e-with t-define t-exp
-        p-ok p-err sym-true sym-false sym-unit at-least vlambda-usage parse-vparam region-form?
-        confirm-length-k bloblet-form? syn-string? syn-string parse-params freeze-pair region-kind
-        region-name-error one-let call-tmp standard-ref field-index bloblet-untagged? arm-else?
-        arm-names identity-at one-syn param-head? param-desc-item mk-symbol quoted rec-names
-        rec-types rec-inits module-usage loaded loaded-next-at in-loaded loaded-mark loaded-error
-        loaded-params loaded-made
+        p-ok p-err sym-true sym-false sym-unit at-least vlambda-usage stage-usage parse-vparam
+        region-form? confirm-length-k bloblet-form? syn-string? syn-string parse-params freeze-pair
+        region-kind region-name-error one-let call-tmp standard-ref field-index bloblet-untagged?
+        arm-else? arm-names identity-at one-syn param-head? param-desc-item mk-symbol quoted
+        rec-names rec-types rec-inits module-usage loaded loaded-next-at in-loaded loaded-mark
+        loaded-error loaded-params loaded-made
         (type syns-a exp top exp-list mod-item mod-items letrec-list let-list arm-list loaded-file)
         (effect parses))
 ;; A `case`'s data by halving (`parser.fx`).
@@ -271,6 +271,16 @@
                          (cons (e-lambda (cons param nil) (parse-body (drop items 2) a b) a b 0)
                                nil)
                          a b 0))))
+        ;; Code a running program gives (`docs/research/eval.md`): `(stage m
+        ;; E R text (p body …) (why else …))` is `(tagcase ((proj %stage E R)
+        ;; m text) (ok p body …) (failed why else …))`, as `parse.rs`.
+        ((stage)
+         (begin (arity items 7 stage-usage a b)
+                (e-tagcase (e-app (e-proj (e-var '%stage a b 0)
+                                          (keep (list (nth items 2) (nth items 3))) a b 0)
+                                  (list (parse-nth items 1) (parse-nth items 4)) a b 0)
+                           (list (stage-arm 'ok (nth items 5)) (stage-arm 'failed (nth items 6)))
+                           nil nil a b 0)))
         ((rlambda)
          (begin (at-least items 3 "`(rlambda region ((name type) …) body …)`" a b)
                 (let ((r (parse-exp (nth items 1))))
@@ -701,6 +711,14 @@
                           (body (parse-arm-body parts c))
                           (rest (parse-arms (cdr cs))))
                      (cons (product (1 tag) (2 fields) (3 ns) (4 body)) rest))))))))
+  ;; An arm of `stage`, `(name body …)`, as `tagcase`'s `(tag name body …)`.
+  (stage-arm (->* (symbol syn) (productof (1 symbol) (2 bool) (3 (listof symbol acyclic)) (4 exp)))
+    (lambda (tag c)
+      (let ((parts (syn-items c stage-usage)))
+        (if (or (< (len parts) 2) (not (syn-symbol? (car parts))))
+            (pfail stage-usage c)
+            (product (1 tag) (2 #f) (3 (arm-names #f (car parts)))
+                     (4 (parse-body (drop parts 1) (syn-start c) (syn-end c))))))))
   ;; An arm's body, `c`'s items after its first two.
   (parse-arm-body (->* (syns-a syn) exp)
     (lambda (parts c) (parse-body (drop parts 2) (syn-start c) (syn-end c))))

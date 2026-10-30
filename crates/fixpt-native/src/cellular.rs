@@ -1471,12 +1471,39 @@ fn prim(st: &mut State) -> Result<(), Trap> {
         many.extend((0..count).rev().map(|i| word(st.dsp + 8 * i as u64)));
         &mut many[..]
     };
-    let v = f(rt, args).map_err(|t| Trap::Prim(fixpt_engine::cellular::describe(rt, t.obj)))?;
+    let v = if fixpt_runtime::prim::reenters(def.name) {
+        reentering(st, rt, |rt| f(rt, args))
+    } else {
+        f(rt, args)
+    };
+    let v = v.map_err(|t| Trap::Prim(fixpt_engine::cellular::describe(rt, t.obj)))?;
     st.dsp = st.dsp + 8 * count as u64 - 8;
     // SAFETY: the slot the arguments had, or one checked above.
     unsafe { *(st.dsp as *mut u64) = v.raw() };
     st.d += 16;
     Ok(())
+}
+
+/// `call` of a primitive that runs code itself (`reenters`), which may
+/// collect: the stacks, the word running and the closure kept where the
+/// collector finds them meanwhile, and put back as it left them.
+fn reentering<T>(st: &mut State, rt: &mut fixpt_runtime::Runtime, call: impl FnOnce(&mut fixpt_runtime::Runtime) -> T) -> T {
+    let (nds, nrs) = ((st.ds_base - st.dsp) as usize / 8, (st.rs_base - st.rsp) as usize / 8);
+    // SAFETY: as in `safepoint`.
+    let ds = unsafe { std::slice::from_raw_parts_mut(st.dsp as *mut Value, nds) };
+    let rs = unsafe { std::slice::from_raw_parts_mut(st.rsp as *mut Value, nrs) };
+    let mut held: Vec<Value> = ds.iter().chain(rs.iter()).copied().collect();
+    held.extend([Value::from_raw(st.cur), Value::from_raw(st.clo)]);
+    let kept = rt.heap.vector_from(&held);
+    let at = rt.heap.push_root(kept);
+    let out = call(rt);
+    let kept = rt.heap.root_at(at);
+    rt.heap.pop_roots_to(at);
+    let back: Vec<Value> = (0..held.len()).map(|i| rt.heap.obj_ref(kept, i)).collect();
+    ds.copy_from_slice(&back[..nds]);
+    rs.copy_from_slice(&back[nds..nds + nrs]);
+    (st.cur, st.clo) = (back[nds + nrs].raw(), back[nds + nrs + 1].raw());
+    out
 }
 
 /// A safepoint, as in the Rust machine: the stacks are roots as they lie,

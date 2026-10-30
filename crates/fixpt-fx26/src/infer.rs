@@ -583,6 +583,21 @@ impl Checker {
             Some(op) if self.interner.name(op) == "native-procedure" => self.made_native(e, t)?,
             _ => t,
         };
+        // `stage` (`docs/research/eval.md`): its module given by its name,
+        // the checker that runs then taking `M` from its type, as the one
+        // written in FX-26 does (`k-staged`).
+        if let Exp::Proj { body, .. } = self.arena.exp_at(fun).clone()
+            && self.standard_ref(body).is_some_and(|op| self.interner.name(op) == "%stage")
+            && let Some(&m) = args.first()
+        {
+            let span = self.arena.span_of(m);
+            let Exp::Var(_) = self.arena.exp_at(m) else { return Err(FxError::at(span, "`stage` takes a module by its name")) };
+            let (mt, _) = self.synth(m)?;
+            let mt = self.arena.resolve(mt);
+            if !matches!(self.arena.get(mt), Ty::Module { .. }) {
+                return Err(FxError::at(span, format!("`stage` takes a module, not a {}", self.show_ty(mt))));
+            }
+        }
         // A path a fact in force narrows (`(car x)` …), its type there.
         let t = self.path_typed(e, t);
         Ok((t, eff))

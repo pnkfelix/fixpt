@@ -1277,7 +1277,27 @@ impl Machine {
                 rt.heap.maybe_collect(&mut [&mut self.ds, &mut self.rs, &mut regs]);
                 (r.cur, r.clo) = (regs[0], regs[1]);
                 let mut args = self.ds.split_off(self.ds.len() - count);
-                match f(rt, &mut args) {
+                // One that runs code itself may collect as it runs: the
+                // stacks and registers kept where the collector finds them,
+                // and put back.
+                let out = if fixpt_runtime::prim::reenters(def.name) {
+                    let mut held: Vec<Value> = self.ds.iter().chain(self.rs.iter()).copied().collect();
+                    held.extend([r.cur, r.clo]);
+                    let kept = rt.heap.vector_from(&held);
+                    let at = rt.heap.push_root(kept);
+                    let out = f(rt, &mut args);
+                    let kept = rt.heap.root_at(at);
+                    rt.heap.pop_roots_to(at);
+                    let (nds, nrs) = (self.ds.len(), self.rs.len());
+                    for (i, v) in self.ds.iter_mut().chain(self.rs.iter_mut()).enumerate() {
+                        *v = rt.heap.obj_ref(kept, i);
+                    }
+                    (r.cur, r.clo) = (rt.heap.obj_ref(kept, nds + nrs), rt.heap.obj_ref(kept, nds + nrs + 1));
+                    out
+                } else {
+                    f(rt, &mut args)
+                };
+                match out {
                     Ok(v) => self.ds.push(v),
                     Err(t) => return Err(Trap::Prim(describe(rt, t.obj))),
                 }

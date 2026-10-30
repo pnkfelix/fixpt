@@ -104,6 +104,8 @@
             (val r-just-exp (subr (alloc @k) (exp) maybe-exp))
             (val r-args-2 (subr (alloc @k) (rarg rarg) rargs))
             (val r-args-3 (subr (alloc @k) (rarg rarg rarg) rargs))
+            (val r-changed-args
+                 (subr (maxeff (alloc @k) (read @globals) (read @k)) (exp int) rargs))
             (val r-make-array-ops (subr (maxeff (alloc @k) (read @globals)) (exps) rargs))
             (val r-const-value
                  (subr (maxeff (alloc @k) (read @globals) (read @k) (write @k))

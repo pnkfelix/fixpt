@@ -177,22 +177,8 @@ fn run_front_end(rt: &mut Runtime, a: &[Value]) -> Outcome<Value> {
 
 fn run_word_by(rt: &mut Runtime, a: &[Value], run: Option<crate::RunWord>) -> Outcome<Value> {
     let Some(args) = rt.heap.list_to_vec(a[1]) else { return rt.type_error("a list of arguments", a[1]) };
-    // A closure is called by a word of its own, run with no arguments:
-    // `lit a1 … lit an lit closure call n exit`. A word's frame starts
-    // above what it is run on, so the arguments are the word's to push.
-    // Allocation does not collect here.
-    let closure = [const { fixpt_heap::layout::kind("cellular-closure") }, const { fixpt_heap::layout::kind("native-closure") }];
-    let (word, args) = if a[0].is_bloblet() && closure.contains(&rt.heap.bloblet_kind(a[0])) {
-        use fixpt_heap::layout::cellular::routine;
-        let f = |n: u64| Value::fixnum(n as i64);
-        let mut cells = Vec::with_capacity(2 * args.len() + 5);
-        for x in &args {
-            cells.extend([f(const { routine("lit") }), *x]);
-        }
-        cells.extend([f(const { routine("lit") }), a[0], f(const { routine("call") }), f(args.len() as u64), f(const { routine("exit") })]);
-        let name = rt.heap.intern(CALL_CLOSURE);
-        // Only run, never a closure's: in the heap.
-        match rt.heap.make_transient_word(name, &cells) {
+    let (word, args) = if is_closure(rt, a[0]) {
+        match closure_word(rt, a[0], &args) {
             Ok(w) => (w, Vec::new()),
             Err(e) => return rt.fail(&e, &[a[0]]),
         }
@@ -215,6 +201,68 @@ fn run_word_by(rt: &mut Runtime, a: &[Value], run: Option<crate::RunWord>) -> Ou
         Ok(v) => Ok(v),
         Err(e) => rt.fail(&format!("cellular word: {e}"), &[]),
     }
+}
+
+/// Whether primitive `name` runs code itself, which may collect: native
+/// code calls it as it calls what is not native code, its frames' values
+/// kept where a collection finds them (`call_foreign`).
+pub fn reenters(name: &str) -> bool {
+    name == "%fx26-stage"
+}
+
+fn is_closure(rt: &Runtime, f: Value) -> bool {
+    let closure = [const { fixpt_heap::layout::kind("cellular-closure") }, const { fixpt_heap::layout::kind("native-closure") }];
+    f.is_bloblet() && closure.contains(&rt.heap.bloblet_kind(f))
+}
+
+/// The word that calls closure `f` with `args`, run with no arguments:
+/// `lit a1 … lit an lit closure call n exit`. A word's frame starts above
+/// what it is run on, so the arguments are the word's to push. Allocation
+/// does not collect here.
+fn closure_word(rt: &mut Runtime, f: Value, args: &[Value]) -> Result<Value, String> {
+    use fixpt_heap::layout::cellular::routine;
+    let n = |n: u64| Value::fixnum(n as i64);
+    let mut cells = Vec::with_capacity(2 * args.len() + 5);
+    for x in args {
+        cells.extend([n(const { routine("lit") }), *x]);
+    }
+    cells.extend([n(const { routine("lit") }), f, n(const { routine("call") }), n(args.len() as u64), n(const { routine("exit") })]);
+    let name = rt.heap.intern(CALL_CLOSURE);
+    // Only run, never a closure's: in the heap.
+    rt.heap.make_transient_word(name, &cells)
+}
+
+/// Closure `f`, of either convention, called with `args` by `run` (a
+/// cellular one), or as native code (a native one): its value, or why it
+/// stopped. Every value the caller holds must be rooted.
+fn call_closure_by(rt: &mut Runtime, f: Value, args: &[Value], run: Option<crate::RunWord>) -> Result<Value, String> {
+    let native = f.is_bloblet() && rt.heap.bloblet_kind(f) == const { fixpt_heap::layout::kind("native-closure") };
+    if let (true, Some(call)) = (native, rt.call_native) {
+        return call(rt, f, args).map_err(|e| match e {
+            crate::NativeExit::Failed(m) => m,
+            _ => "a call escaped its caller".to_string(),
+        });
+    }
+    if !is_closure(rt, f) {
+        return Err("not a procedure".to_string());
+    }
+    let word = closure_word(rt, f, args)?;
+    let run = run.ok_or("no cellular machine is installed")?;
+    run(rt, word, &[])
+}
+
+/// [`call_closure_by`] on the machine that runs the program: for code a
+/// program made as it ran (`stage`).
+pub fn call_closure(rt: &mut Runtime, f: Value, args: &[Value]) -> Result<Value, String> {
+    let run = rt.run_word;
+    call_closure_by(rt, f, args, run)
+}
+
+/// [`call_closure_by`] on the front end's machine, as `%run-front-end`
+/// calls an entry of it.
+pub fn call_front_end(rt: &mut Runtime, f: Value, args: &[Value]) -> Result<Value, String> {
+    let run = rt.front_end_run_word.or(rt.run_word);
+    call_closure_by(rt, f, args, run)
 }
 
 /// A fixed-width integer type: its bits, and whether it is signed.
@@ -2948,6 +2996,28 @@ prims! {
             S::Exited(c) => fx26_sum(rt, "exited", Value::fixnum(c as i64)),
             S::Signalled(c) => fx26_sum(rt, "signalled", Value::fixnum(c as i64)),
             S::Running | S::Unknown => fx26_sum(rt, "unknown", Value::UNIT),
+        })
+    });
+    // `stage` (`docs/research/eval.md`): module `a[0]`, and what the
+    // compilers made of the form's text, `a[1]`, a product of the module's
+    // type, the effect and the type it is checked at, and the text. A
+    // `(sumof (ok (subr E () R)) (failed stage-failure))`. The checker is
+    // above this crate; the session installs it (`stage`). Where none is,
+    // or the text came as it was written (a machine that does not compile
+    // with the compilers written in FX-26), a refusal.
+    "%fx26-stage", 2, Some(2), simple!(|rt, a| {
+        let made = match rt.stage {
+            Some(stage) => stage(rt, a[0], a[1]),
+            None => Err("this machine cannot stage code".to_string()),
+        };
+        Ok(match made {
+            Ok(v) => v,
+            Err(why) => {
+                let kind = fx26_sum(rt, "refused", Value::UNIT);
+                let message = rt.heap.make_string(&why);
+                let failure = rt.heap.make_frozen(PRODUCT_KIND, &[kind, message, Value::fixnum(0), Value::fixnum(0)]);
+                fx26_sum(rt, "failed", failure)
+            }
         })
     });
 }

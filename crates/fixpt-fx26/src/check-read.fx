@@ -30,8 +30,8 @@
 (hide (include check-read-types) (include eager-reader-types) (include parser-types))
 ;; The types it uses of the files before it.
 (import check-types-types a-alloc a-await a-comefrom a-goto a-read a-spin a-io a-init a-send
-        a-receive a-nondet a-var a-write de ds-eff ds-region ds-var r-const r-frozen r-global
-        r-globals r-heap r-var ty-lam
+        a-receive a-nondet a-stage a-var a-write de ds-eff ds-region ds-var r-const r-frozen
+        r-global r-globals r-heap r-var ty-lam
         (type k-atom k-binders k-eff k-names k-ids k-region k-regions k-items)
         (effect checks kbuilds kreads kstate))
 ;; What it uses of the modules it is given: all of each, hidden.
@@ -292,6 +292,7 @@
       (case n (("pure") nil)
               (("spin") (k-one (a-spin)))
               (("nondet") (k-one (a-nondet)))
+              (("stage") (k-one (a-stage)))
               (else
                (let ((withs (k-withs-over sym)))
                  (if (null? withs)

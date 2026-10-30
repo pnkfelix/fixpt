@@ -255,6 +255,12 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // expression of a program text at a character (`typeat.rs`). Reading the
     // files it loads is its effect.
     ("type-at", "(subr (io fs-read) (string int) string)"),
+    // `stage` (`docs/research/eval.md`), the form: `(tagcase ((proj %stage
+    // E R) m code) …)`, `code` a datum, as a quote makes or a program
+    // builds. Checked at each call, where `m`'s type is a module's
+    // (`made_staged`): each checker gives the compilers `m`'s type, `E` and
+    // `R`, printed, to give the checker that runs with `text`.
+    ("%stage", "(poly ((e effect) (r type)) (poly ((m type)) (subr (maxeff stage spin) (m datum) (sumof (ok (subr e () r)) (failed stage-failure)))))"),
     // Heist's (`FIXPT-CHANGES.md` F4): programs run beside this one, by
     // number. Started by name and arguments, in a directory (\"\": this
     // one's), standard output and error one stream; what it wrote since last
