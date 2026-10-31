@@ -64,7 +64,6 @@
       (include check-expect) (include check-subst))
 (define k-spin-for-cyclic (with check-calls k-spin-for-cyclic))
 (define k-data-places-solved (with check-data k-data-places-solved))
-(define k-part-find (with check-sub-env k-part-find))
 
 ;; Size binder `v` would be `z`, not known to be no less than 0: an error.
 (define k-size-below-zero (->* (int k-size int int) void)

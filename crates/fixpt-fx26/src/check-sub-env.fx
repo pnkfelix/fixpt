@@ -43,11 +43,6 @@
                (else #f))))))
 
 (define k-bool=? (->* (bool bool) bool) (lambda (x y) (if x y (not y))))
-(define k-part-find (->* (k-parts symbol) int)
-  (lambda (ps l)
-    (cond ((null? ps) -1)
-          ((symbol=? (extract (car ps) 1) l) (extract (car ps) 2))
-          (else (k-part-find (cdr ps) l)))))
 
 (define k-benv-var (->* (k-benv int) int)
   (lambda (env v)

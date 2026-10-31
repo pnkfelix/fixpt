@@ -225,12 +225,6 @@
 ;; `(select m n)`, as an error shows it.
 (define k-select-shown (->* (symbol symbol) string)
   (lambda (m n) (k-cat5 "`(select " (symbol->string m) " " (symbol->string n) ")`")))
-;; The type component `n` of parts `ps`, or -1.
-(define k-comp-find (->* (k-parts symbol) int)
-  (lambda (ps n)
-    (cond ((null? ps) -1)
-          ((symbol=? (extract (car ps) 1) n) (extract (car ps) 2))
-          (else (k-comp-find (cdr ps) n)))))
 ;; What `(select m n)` is, `m` a module bound to a type of abstract types
 ;; `abs` and descriptions `ds`: its abstract type `n`, or its description;
 ;; an error at `a`..`b` if it has neither. -3 if it is a `with`'s applied,
@@ -239,7 +233,7 @@
 (define k-select-component
   (->* (symbol symbol k-parts k-parts int int int) int)
   (lambda (m n abs ds node a b)
-    (let ((v (k-comp-find abs n)) (d (k-comp-find ds n)) (outer (k-with-fallback node))
+    (let ((v (k-part-find abs n)) (d (k-part-find ds n)) (outer (k-with-fallback node))
           (app (k-with-app-of node)))
       (cond ((>= v 0) (k-ty-new (ty-var v)))
             ((>= d 0) d)
@@ -284,7 +278,7 @@
           #u
           (tagcase (k-get mt)
             (ty-module (abs ds vs)
-              (let ((v (k-comp-find abs n)) (d (k-comp-find ds n)))
+              (let ((v (k-part-find abs n)) (d (k-part-find ds n)))
                 (cond ((>= v 0) (k-link-global-select m node (k-ty-new (ty-var v))))
                       ((>= d 0) (k-link-global-select m node d))
                       (else #u))))
@@ -409,7 +403,7 @@
                  (the k-eff nil))
           (tagcase (k-get mt)
             (ty-module (abs ds vs)
-              (let* ((d (k-comp-find ds e))
+              (let* ((d (k-part-find ds e))
                      (x (if (< d 0) (the (listof k-eff acyclic) nil) (k-desc-effect d))))
                 (if (null? x)
                     (let ((msg (if (symbol=? m '%include)
@@ -435,7 +429,7 @@
                             (the (listof k-eff acyclic) nil)
                             (tagcase (k-get mt)
                               (ty-module (abs ds vs)
-                                (let ((d (k-comp-find ds e)))
+                                (let ((d (k-part-find ds e)))
                                   (if (< d 0) (the (listof k-eff acyclic) nil) (k-desc-effect d))))
                               (else y (the (listof k-eff acyclic) nil))))))
             (cond ((not (null? given)) (car given))

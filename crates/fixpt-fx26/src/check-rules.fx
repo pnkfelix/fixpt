@@ -104,7 +104,6 @@
 (import check-effects k-insert k-one k-union)
 (define k-is-data? (with check-data k-is-data?))
 (define k-items (with check-read k-items))
-(define k-part-find (with check-sub-env k-part-find))
 
 (define-rec
   (k-synth (->* (kx) k-te)
@@ -206,7 +205,7 @@
                 (let ((t (k-part-find fs l)))
                   (if (< t 0)
                       (k-fail-no-part pt " has no " l a b)
-                      (begin (k-note-field (k-at-of x) (k-part-index fs l 0))
+                      (begin (k-note-field (k-at-of x) (k-part-position fs l 0))
                              (k-te-masked x t (extract r 2))))))
               (else y (k-extract-blobref x pt e l r)))))
         (x-sum (l e a b abk)
@@ -934,7 +933,7 @@
                                        (extract made 3) (extract made 4))))
                          ;; Typed lambdas are checked after the rest; early ones before.
                          ((k-lambda-item? it) made)
-                         ((>= (k-part-of (extract made 3) (car (extract it 2))) 0) made)
+                         ((>= (k-part-find (extract made 3) (car (extract it 2))) 0) made)
                          ((= k 2) (k-module-val it a b made))
                          (else made))))
             (k-module-items (cdr items) a b next)))))

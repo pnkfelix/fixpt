@@ -322,7 +322,7 @@
         out
         (let* ((it (car items)) (k (extract it 1)) (ns (extract it 2))
                (more (cond ((k-lambda-item? it) (k-bs-parts ns bs out))
-                           ((= k 2) (k-part-onto (car ns) (k-part-of vs (car ns)) out))
+                           ((= k 2) (k-part-onto (car ns) (k-part-find vs (car ns)) out))
                            ((= k 3) (k-bs-parts ns bs out))
                            (else out))))
           (k-mod-vals (cdr items) vs bs more)))))
@@ -368,23 +368,17 @@
       (else z (k-fail (k-cat5 "`extend` extends a module by a module, and its " which " is a "
                               (k-show-ty t) "")
                       a b)))))
-;; Where the part named `n` is in `ps`, from `i`; -1 if none is.
-(define k-ext-index (->* (k-parts symbol int) int)
-  (lambda (ps n i)
-    (cond ((null? ps) -1)
-          ((symbol=? (extract (car ps) 1) n) i)
-          (else (k-ext-index (cdr ps) n (+ i 1))))))
 ;; Each of `p0`, or `p1`'s of its name if `p1` has one; then `p1`'s others.
 (define k-ext-firsts (->* (k-parts k-parts) k-parts)
   (lambda (p0 p1)
     (if (null? p0)
         nil
-        (let ((k (k-ext-index p1 (extract (car p0) 1) 0)))
+        (let ((k (k-part-position p1 (extract (car p0) 1) 0)))
           (the k-parts (cons (if (< k 0) (car p0) (k-nth p1 k)) (k-ext-firsts (cdr p0) p1)))))))
 (define k-ext-rest (->* (k-parts k-parts) k-parts)
   (lambda (p1 p0)
     (cond ((null? p1) nil)
-          ((>= (k-ext-index p0 (extract (car p1) 1) 0) 0) (k-ext-rest (cdr p1) p0))
+          ((>= (k-part-position p0 (extract (car p1) 1) 0) 0) (k-ext-rest (cdr p1) p0))
           (else (the k-parts (cons (car p1) (k-ext-rest (cdr p1) p0)))))))
 ;; The same, as paths: `p0`'s from value 0, `p1`'s from value 1; `j`, `k`
 ;; where each is.
@@ -392,13 +386,13 @@
   (lambda (p0 p1 j)
     (if (null? p0)
         nil
-        (let ((k (k-ext-index p1 (extract (car p0) 1) 0)))
+        (let ((k (k-part-position p1 (extract (car p0) 1) 0)))
           (cons (if (< k 0) (pick-path 0 j) (pick-path 1 k))
                 (k-ext-firsts-at (cdr p0) p1 (+ j 1)))))))
 (define k-ext-rest-at (->* (k-parts k-parts int) k-picks)
   (lambda (p1 p0 k)
     (cond ((null? p1) nil)
-          ((>= (k-ext-index p0 (extract (car p1) 1) 0) 0) (k-ext-rest-at (cdr p1) p0 (+ k 1)))
+          ((>= (k-part-position p0 (extract (car p1) 1) 0) 0) (k-ext-rest-at (cdr p1) p0 (+ k 1)))
           (else (cons (pick-path 1 k) (k-ext-rest-at (cdr p1) p0 (+ k 1)))))))
 ;; `(extend e0 e1)` at `a`..`b`, the `which`th there, its values `vs` the
 ;; two modules: one of the
@@ -434,7 +428,8 @@
 (define k-parts-not-in (->* (k-parts k-parts bool) k-parts)
   (lambda (ps qs in?)
     (cond ((null? ps) nil)
-          ((let ((found (>= (k-ext-index qs (extract (car ps) 1) 0) 0))) (if in? found (not found)))
+          ((let ((found (>= (k-part-position qs (extract (car ps) 1) 0) 0)))
+             (if in? found (not found)))
            (the k-parts (cons (car ps) (k-parts-not-in (cdr ps) qs in?))))
           (else (k-parts-not-in (cdr ps) qs in?)))))
 ;; An error at `a`..`b` if one of `ps` mentions one of abstract types `gone`,
@@ -536,8 +531,8 @@
 ;; Whether one of `p`, `q`, `r` and `s` names `n`.
 (define k-named-in? (->* (symbol k-parts k-parts k-parts k-parts) bool)
   (lambda (n p q r s)
-    (or (>= (k-ext-index p n 0) 0) (>= (k-ext-index q n 0) 0)
-        (>= (k-ext-index r n 0) 0) (>= (k-ext-index s n 0) 0))))
+    (or (>= (k-part-position p n 0) 0) (>= (k-part-position q n 0) 0)
+        (>= (k-part-position r n 0) 0) (>= (k-part-position s n 0) 0))))
 ;; `ds` onto `acc`'s types, none named there or in `own` but as the same
 ;; type (a types file's re-export: one name), nor an abstract type of
 ;; `own-abs`, the module's own, or of `acc`'s.
@@ -777,7 +772,7 @@
 ;; those and its own. As Rust's `Checker::module_type`.
 (define k-module-type (->* (k-items k-parts k-parts k-parts k-at) int)
   (lambda (items abs ds vs at)
-    (let ((k (k-ext-index vs '%include 0)) (a (extract at 1)) (b (extract at 2))
+    (let ((k (k-part-position vs '%include 0)) (a (extract at 1)) (b (extract at 2))
           (which (extract at 3)))
       (cond ((k-extend-items? items) (k-extended vs a b which))
             ((k-bucket-items? items) (k-included vs nil nil nil -1 a b which))

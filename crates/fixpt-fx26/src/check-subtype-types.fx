@@ -48,10 +48,6 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (int int)
                        bool))
-            (val k-part-index
-                 (subr (maxeff (read @globals) (read @t)) (k-parts symbol int) int))
-            (val k-part-of
-                 (subr (maxeff (read @globals) (read @t) spin) (k-parts symbol) int))
             (val k-nlist-tail
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (int k-size k-region)

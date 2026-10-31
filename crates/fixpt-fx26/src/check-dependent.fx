@@ -125,11 +125,6 @@
 (define k-by-name string
   (string-append " is a module the procedure's types depend on: "
                  "give it by name (bind it with `let` first)"))
-(define k-part-of-types (->* (k-parts symbol) int)
-  (lambda (ps n)
-    (cond ((null? ps) -1)
-          ((symbol=? (extract (car ps) 1) n) (extract (car ps) 2))
-          (else (k-part-of-types (cdr ps) n)))))
 ;; What each `(select $k x)` of `found` is for a call with `args`, at
 ;; `a`..`b`: the type `x` of the module the `k`th argument names, by name.
 (define k-args-given (->* (k-params-given kxs int int) k-params-given)
@@ -142,7 +137,7 @@
                (mt (if (symbol=? v '||) -1 (k-lookup v)))
                (to (if (< mt 0)
                        (k-fail (k-cat3 "argument " (int->string (+ k 1)) k-by-name) a b)
-                       (let ((t (k-part-of-types (k-module-types mt) x)))
+                       (let ((t (k-part-find (k-module-types mt) x)))
                          (if (< t 0)
                              (k-fail (k-cat5 "`" (symbol->string v) "` has no type `"
                                              (symbol->string x) "`")

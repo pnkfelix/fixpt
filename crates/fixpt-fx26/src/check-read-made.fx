@@ -61,13 +61,8 @@
 (define k-module-val (->* (int symbol) int)
   (lambda (t n)
     (tagcase (k-get (k-resolve t))
-      (ty-module (abs ds vs) (k-made-part vs n))
+      (ty-module (abs ds vs) (k-part-find vs n))
       (else y -1))))
-(define k-made-part (->* (k-parts symbol) int)
-  (lambda (ps n)
-    (cond ((null? ps) -1)
-          ((symbol=? (extract (car ps) 1) n) (extract (car ps) 2))
-          (else (k-made-part (cdr ps) n)))))
 ;; What a value of type `t`, of the file `path`, makes given `args`: a
 ;; `poly` takes as many descriptions as it binds, as `proj` does; a
 ;; procedure of no parameters is applied; a procedure's parameters take one

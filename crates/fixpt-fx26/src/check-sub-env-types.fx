@@ -32,7 +32,6 @@
                  (subr (maxeff (alloc @t) (read @globals) (read @t) (write @t) spin)
                        (int k-region bool)
                        bool))
-            (val k-part-find (subr (maxeff (read @globals) (read @t)) (k-parts symbol) int))
             (val k-base-below? (subr (read @globals) (symbol symbol) bool))
             (val k-bool=? (subr pure (bool bool) bool))
             (val k-benv-var=?

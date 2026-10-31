@@ -4326,6 +4326,20 @@ runs that need nothing of their file and nothing of it them, to confirm:
   `k-declared-later?`);
 - `check-synth.fx` 714-774 (61: `k-with-used` .. `k-may-be-empty?`).
 
+**Progress (2026-10-31).** Split out, each a module the file it left makes
+of what it is given and gives on by `import` (no signature, its users
+unchanged; `CLAUDES_CHOICES.md`, "Splitting front-end files"), or one the
+conductor makes (`check-flat.fx`): `eval-bloblets.fx`, `parser-loads.fx`,
+`check-flat.fx`, `compile-facts.fx`, `check-program-defs.fx`,
+`check-types-arena.fx`, `check-sizes.fx`, `check-synth-parts.fx`,
+`native-direct-x64-strings.fx`, `check-read-ahead.fx`. Over 900 lines
+still: `regcode-core.fx` and `check-rules.fx` (one recursive group each),
+`check-read-descs.fx` 921 (the rest one recursive group), and
+`parser-exps.fx` 995, whose runs use the `pfail` of its own `parser.fx`
+(its prompt's), so a part moved out must be given the failure, as
+`parser-forms.fx` is. Left of the plan below, for files under the limit
+now:
+
 Then the larger runs that need a few names of their file, the module
 moved to importing them: `check-read-helpers.fx` 294-892 (599 lines, 4
 names), `check-synth.fx` 218-787 (570, 5), `check-print-parts.fx`
@@ -4340,11 +4354,9 @@ script: each top-level definition of the front end with its own name and
 its parameters' renamed, the rest compared as text. 38 groups are the same
 definition twice or more, under different names; the most:
 
-- a part of a `k-parts` by its label, eight times (`k-variant-find`,
-  `k-part-find`, `k-made-part`, `k-staged-find`, `k-part-of`,
-  `k-part-of-types`, `k-comp-find`, `k-sc-part-ty`), and its position,
-  three (`k-ext-index`, `k-val-position`, `k-part-index`): all of one type,
-  so one each, in a module every checker file is given;
+- a part of a `k-parts` by its label, eight times, and its position,
+  three: one each now, `k-part-find` and `k-part-position`
+  (`check-types.fx`; `DONE.md` §188);
 - the native layouts' tables of what never collects and of operands, each
   twice (`native-x64-regs-layout.fx`, `native-direct-x64-layout.fx`), as
   generated: one table, generated once;

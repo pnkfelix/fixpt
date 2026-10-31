@@ -626,20 +626,9 @@
                            (k-d-same? ba bb (car named) (cdr named) trail labels))))
                   (else z #f)))
               (else z #f)))))))
-(define k-part-index (->* (k-parts symbol int) int)
-  (lambda (ps l i)
-    (cond ((null? ps) -1)
-          ((symbol=? (extract (car ps) 1) l) i)
-          (else (k-part-index (cdr ps) l (+ i 1))))))
 
 ;;; ------------------------------------------------- modules compared
 ;;; (`check-module-rules.fx` has the rest of their rules.)
-;; The type part `n` of `ps` is, or -1.
-(define k-part-of (->* (k-parts symbol) int)
-  (lambda (ps n)
-    (cond ((null? ps) -1)
-          ((symbol=? (extract (car ps) 1) n) (extract (car ps) 2))
-          (else (k-part-of (cdr ps) n)))))
 ;; `n`, without the mark `restrict` gives an abstract type it keeps
 ;; unnamed (`%hidden:t` is `t`: `bare_name`).
 (define k-bare-name (->* (symbol) symbol)
@@ -658,7 +647,7 @@
 (define k-comps-meet? (->* (k-parts k-parts) bool)
   (lambda (xs ys)
     (and (not (null? xs))
-         (or (>= (k-part-of ys (extract (car xs) 1)) 0) (k-comps-meet? (cdr xs) ys)))))
+         (or (>= (k-part-find ys (extract (car xs) 1)) 0) (k-comps-meet? (cdr xs) ys)))))
 ;; Whether `xs` and `ys` are values of the same names, in order.
 (define k-same-names? (->* (k-parts k-parts) bool)
   (lambda (xs ys)
@@ -683,7 +672,7 @@
                     (ea (k-benv-set (car es) x l))
                     (eb (k-benv-set (cdr es) (extract (car ab) 2) l)))
                (k-pair-abs (cdr ab) aa da a b (+ i 1) (the k-benvs (cons ea eb)) labels)))
-            ((>= (k-part-of da n) 0) (k-pair-abs (cdr ab) aa da a b (+ i 1) es labels))
+            ((>= (k-part-find da n) 0) (k-pair-abs (cdr ab) aa da a b (+ i 1) es labels))
             (else nil))))))
 ;; Type `t` as the description that stands for variable `v`: a function, if
 ;; `v` is of an arrow kind.
@@ -704,7 +693,7 @@
     (if (null? ab)
         nil
         (let* ((n (k-bare-name (extract (car ab) 1)))
-               (d (if (>= (k-bare-part-of aa n) 0) -1 (k-part-of da n)))
+               (d (if (>= (k-bare-part-of aa n) 0) -1 (k-part-find da n)))
                (rest (k-defined-map (cdr ab) aa da m)))
           (if (< d 0)
               rest
@@ -736,7 +725,7 @@
   (->* (k-parts k-parts k-benv k-benv k-strail k-labels) bool)
   (lambda (bd da ea eb trail labels)
     (or (null? bd)
-        (let ((x (k-part-of da (extract (car bd) 1))))
+        (let ((x (k-part-find da (extract (car bd) 1))))
           (and (>= x 0) (k-inv x (extract (car bd) 2) ea eb trail labels)
                (k-descs-same? (cdr bd) da ea eb trail labels))))))
 ;; Each value of `va` a subtype of `bv`'s, pairwise.
@@ -774,18 +763,12 @@
                             (else z #f)))))))
           (else z #f)))
       (else z #f))))
-;; Where in `vs` the value named `n` first is, from `i`; or -1.
-(define k-val-position (->* (k-parts symbol int) int)
-  (lambda (vs n i)
-    (cond ((null? vs) -1)
-          ((symbol=? (extract (car vs) 1) n) i)
-          (else (k-val-position (cdr vs) n (+ i 1))))))
 ;; Each of `wanted`'s values' position in `vs`; none if one is not there.
 (define k-positions (->* (k-parts k-parts) (listof k-ids acyclic))
   (lambda (wanted vs)
     (if (null? wanted)
         (the (listof k-ids acyclic) (cons (the k-ids nil) nil))
-        (let ((k (k-val-position vs (extract (car wanted) 1) 0))
+        (let ((k (k-part-position vs (extract (car wanted) 1) 0))
               (rest (k-positions (cdr wanted) vs)))
           (if (or (< k 0) (null? rest))
               nil

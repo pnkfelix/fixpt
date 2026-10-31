@@ -4358,3 +4358,10 @@ into `native-direct-x64-strings.fx`, 943 lines to 834; and
 `check-read-ahead.fx`, 989 lines to 921 (the rest one recursive group,
 nothing more of it apart).
 
+Repeated code, the first of it: a part of a `k-parts` by its label,
+written eight times under eight names, and its position, three, are one
+each, `k-part-find` and `k-part-position`, in `check-types.fx`, which
+every file of the checker is given (`check-types-sig`); the copies, their
+signatures' entries (`check-sub-env-sig`, `check-subtype-sig`) and two
+aliases of them gone. `check-rules.fx`'s debt 1014 to 1013.
+

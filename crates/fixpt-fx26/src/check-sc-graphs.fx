@@ -86,11 +86,6 @@
 (define k-sc-two? (->* (kxs) bool)
   (lambda (xs) (and (not (null? xs)) (k-sc-one? (cdr xs)))))
 
-(define k-sc-part-ty (->* (k-parts symbol) int)
-  (lambda (ps l)
-    (cond ((null? ps) -1)
-          ((symbol=? (extract (car ps) 1) l) (extract (car ps) 2))
-          (else (k-sc-part-ty (cdr ps) l)))))
 (define k-sc-nth-ty (->* (k-parts int) int)
   (lambda (ps i)
     (cond ((null? ps) -1) ((= i 0) (extract (car ps) 2)) (else (k-sc-nth-ty (cdr ps) (- i 1))))))
@@ -117,7 +112,7 @@
   (lambda (p t rest) (the k-trs (cons (tr-part p #t t) rest))))
 ;; The type of field `l` of a part of type `t`, where known; -1 where not.
 (define k-sc-field-ty (->* (int symbol) int)
-  (lambda (t l) (tagcase (k-ty-known t) (ty-product (ps) (k-sc-part-ty ps l)) (else y -1))))
+  (lambda (t l) (tagcase (k-ty-known t) (ty-product (ps) (k-part-find ps l)) (else y -1))))
 ;; Field `l` of what `ks` knows of products.
 ;; An `extract` proves a product, and so a part, known here or not.
 (define k-sc-fields (->* (k-trs symbol) k-trs)
@@ -133,7 +128,7 @@
   (lambda (t tag i)
     (tagcase (k-ty-known t)
       (ty-sum (vs)
-        (let ((v (k-sc-part-ty vs tag)))
+        (let ((v (k-part-find vs tag)))
           (cond ((< v 0) -1)
                 ((< i 0) v)
                 (else (tagcase (k-get v) (ty-product (ps) (k-sc-nth-ty ps i)) (else y -1))))))

@@ -343,6 +343,9 @@
    (val k-named-has? (subr (maxeff (read @globals) (read @t)) (k-named symbol int) bool))
    (val k-te (subr pure (int k-eff) k-te))
    (val k-has-id? (subr (maxeff (read @globals) (read @t)) (k-ids int) bool))
+   (val k-part-find (subr (maxeff (read @globals) (read @t) spin) (k-parts symbol) int))
+   (val k-part-position
+        (subr (maxeff (read @globals) (read @t) spin) (k-parts symbol int) int))
    (val k-io-kind-name (subr pure (int) string))
    (val k-io-kind-code (subr pure (string) int))
    (val k-io-kinds-shown string)

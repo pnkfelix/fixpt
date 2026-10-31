@@ -469,7 +469,7 @@
           (k-fail (string-append "a variant is named by a literal: `'label`, or a number where "
                                  "the sum has a key")
                   la lz)
-          (let ((g (k-variant-find (extract l 4) (car label))))
+          (let ((g (k-part-find (extract l 4) (car label))))
             (if (< g 0)
                 (k-fail (k-cat5 "a " (k-show-ty f) " has no variant `" (symbol->string (car label))
                                 "`")
@@ -494,11 +494,6 @@
               ((or (= t k-int) (not (= n -1))) nil)
               (else (tagcase (k-get t) (ty-base (s) (list s)) (else y nil)))))
       (else y nil))))
-(define k-variant-find (->* (k-parts symbol) int)
-  (lambda (ps l)
-    (cond ((null? ps) -1)
-          ((symbol=? (extract (car ps) 1) l) (extract (car ps) 2))
-          (else (k-variant-find (cdr ps) l)))))
 ;; `(blobref b f)`'s owner and flat, if `t` is one.
 (define-type k-owner-flat (listof (pairof int int @t) acyclic))
 (define k-blobref-parts (->* (int) k-owner-flat)

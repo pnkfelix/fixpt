@@ -131,6 +131,20 @@
 (define k-io-kinds-shown string
   (string-append "`stdin`, `stdout`, `stderr`, `fs-read`, `fs-write`, `clock`, `args`, `exit`, "
                  "`terminal`, `native`, `sys`, `process`"))
+;; The part of `ps` labelled `l`: its type (or what else it holds), or -1;
+;; and where it is, from `i`, or -1. Once here, for every file of the
+;; checker (`TODO.md` §188: eight of the one and three of the other were
+;; written apart).
+(define k-part-find (subr (maxeff (read @globals) (read @t) spin) (k-parts symbol) int)
+  (lambda (ps l)
+    (cond ((null? ps) -1)
+          ((symbol=? (extract (car ps) 1) l) (extract (car ps) 2))
+          (else (k-part-find (cdr ps) l)))))
+(define k-part-position (subr (maxeff (read @globals) (read @t) spin) (k-parts symbol int) int)
+  (lambda (ps l i)
+    (cond ((null? ps) -1)
+          ((symbol=? (extract (car ps) 1) l) i)
+          (else (k-part-position (cdr ps) l (+ i 1))))))
 (define k-has-id? (subr (maxeff (read @globals) (read @t)) (k-ids int) bool)
   (lambda (xs s) (cond ((null? xs) #f) ((= (car xs) s) #t) (else (k-has-id? (cdr xs) s)))))
 
