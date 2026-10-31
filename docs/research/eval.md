@@ -383,6 +383,63 @@ mentions, which the compilers written in FX-26 would not capture in
 closures; given explicitly, it is ordinary expressions every machine
 compiles, and the staging operators take it as one more argument.
 
+### Evidence as an interval? (the user's question, 2026-10-31; not built)
+
+Could a bound alone do, exact evidence dropped? No: what each kind says
+of the variable is what the check needs. The code checked against `e′`,
+what the evidence says, is used as if checked against `e`, what the
+variable was instantiated as, so `T[e′] ≤ T[e]` must hold, `T` being
+`(subr pure (M) (subr E () R))`. Each place the variable stands asks:
+
+| Where it stands | Safe if the evidence is | Which |
+|---|---|---|
+| given (`E`; a frozen list in `R`) | at most `e`, `e′ ⊆ e` | a bound |
+| taken (a parameter's type in `R`) | at least `e`, `e′ ⊇ e` | none yet |
+| both (a reference; a list at a region variable) | `e` exactly | exact |
+
+A bound says "at most"; where the variable is taken, polarity turns what
+is asked into "at least", of which a bound says nothing. Once a caller
+has passed `(effectbound pure)` where `(effectbound (io stdout))` was
+wanted, nothing says whether the evidence was exact: exact evidence keeps
+that only as its type is invariant, which subsumption cannot widen. With
+bounds alone, every use where the variable is taken, or compared exactly,
+is refused.
+
+One type could hold all three: evidence of an interval, "at least `L`, at
+most `U`", `(effectev L U)`, `L` covariant and `U` contravariant:
+
+- exact evidence is `L = U`, what `reify-effect` makes;
+- a bound, "at most", is `L` known, `U` the most there is;
+- its opposite, "at least", which there is none of now, is `U` known, `L`
+  the least (`pure`, `void`);
+- a `plambda` asks for `(effectev e e)` for exact evidence, `(effectev e
+  top)` for a bound, and subsumption widens an interval as it should.
+
+The staged check would then substitute `L` where the variable is given
+and `U` where it is taken, and ask `L = U` where it stands both ways. Its
+costs:
+
+- two texts at run time for each variable, not one;
+- the checker that prints `M`, `E` and `R` naming each variable's places
+  apart by polarity (a variable printed `e⁺` where it is given and `e⁻`
+  where it is taken), so that the substitution as the program runs puts
+  each text in its place; or the check that runs then finding polarity
+  itself, as subtyping does now;
+- where it stands both ways, `L = U` checked as the program runs, by the
+  checker that runs then (each a subtype of the other), not by text;
+- a most effect and a most type, for a bound's `U`: FX-26 has neither
+  (an effect is a set of atoms, with regions; there is no type of every
+  value), so a mark for "no upper limit" instead, the check refusing
+  where one is taken.
+
+Most uses are where the variable is the code's effect, `E`, given: a
+bound serves, and exact evidence only where it is also taken or stands
+under what may be written. So the two types stay as they are until a
+program wants "at least `e`"; the interval is how they would be made one
+then, and both of today's would be read as intervals of it (`effectrep`
+`(effectev e e)`, `effectbound` `(effectev e top)`), so nothing written
+now would change meaning.
+
 ### The program's own top level as `m`?
 
 `TODO.md` §105 offered two ways: (a) the editor is the session, as Emacs

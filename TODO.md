@@ -4271,7 +4271,9 @@ FX-26; `code` a datum. Left, in order:
    `(select m t)`; the refusal of an effect beyond `E` said of the code,
    not of the wrapping `(subr E () R)`. Variables, and `letregion`'s
    regions, done: evidence (`DONE.md` §186, "Evidence"). Left of it:
-   evidence of a description function, a size or a convention; and, in
+   evidence of a description function, a size or a convention; evidence
+   of "at least `e`", by making evidence an interval, if a program wants
+   it (`docs/research/eval.md`, "Evidence as an interval?"); and, in
    the checker written in FX-26, a `letregion`'s region named at `stage`
    with no evidence refused as the program is checked (it is refused as
    it runs, now).
