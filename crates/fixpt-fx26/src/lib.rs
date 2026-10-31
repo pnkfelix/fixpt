@@ -447,10 +447,11 @@ pub const PARSER_EXPS: &str = include_str!("parser-exps.fx");
 /// The evaluator written in FX-26, which runs the parser's trees: a
 /// metacircular evaluator (rewritten 2026-10-08). Its values, a union of the
 /// program's own where FX-26 has their shape;
-/// its primitives, in a table by symbol; and the evaluator proper, with its
-/// entry points.
+/// its primitives, in a table by symbol; its bloblets and blobrefs; and the
+/// evaluator proper, with its entry points.
 pub const EVAL_VALUES: &str = include_str!("eval-values.fx");
 pub const EVAL_PRIMS: &str = include_str!("eval-prims.fx");
+pub const EVAL_BLOBLETS: &str = include_str!("eval-bloblets.fx");
 pub const EVAL_CORE: &str = include_str!("eval-core.fx");
 
 /// The evaluator's types and the signatures of its modules: a module file of
@@ -639,7 +640,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 171] = [
+pub const FRONT_END_MODULES: [(&str, &str); 172] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("eager-reader-states.fx", EAGER_READER_STATES),
     ("syn.fx", SYN),
@@ -695,6 +696,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 171] = [
     ("eval-types.fx", EVAL_TYPES),
     ("eval-values.fx", EVAL_VALUES),
     ("eval-prims.fx", EVAL_PRIMS),
+    ("eval-bloblets.fx", EVAL_BLOBLETS),
     ("eval-core.fx", EVAL_CORE),
     ("native-layout.fx", NATIVE_LAYOUT),
     ("arm64.fx", ARM64),

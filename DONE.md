@@ -4312,3 +4312,14 @@ interned there) and given to `Session::eval_forms_capturing`. It is
 written out only when shown: `Outcome::code` is a `Made`, the `Code` or
 the words, which `,code` writes as the text was. `Globals` keeps names unescaped,
 escaped only when written. FX-87's and FX-91's lowerings still make text.
+
+## 188. Files over 900 lines: refactoring candidates (the user's, 2026-10-31)
+
+Started: a survey by script of the `.fx` files over 900 lines for runs of
+definitions that could move out (`TODO.md` §188 lists them). The first
+moved: `eval-prims.fx`'s bloblets and blobrefs (`ev-bloblet`, `ev-bref`,
+`ev-blobref`, `ev-flat-tag`, `ev-label-is?` and what they use), which
+nothing else in it used and which used nothing else of it, are
+`eval-bloblets.fx`, a module of their own the conductor gives
+`eval-core.fx` (`eval-bloblets-sig`); `eval-prims.fx` 964 lines to 770.
+

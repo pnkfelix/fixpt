@@ -1,5 +1,5 @@
 ;;; The FX-26 evaluator proper: the parser's trees, run. After
-;;; `eval-values.fx` and `eval-prims.fx`.
+;;; `eval-values.fx`, `eval-prims.fx` and `eval-bloblets.fx`.
 ;;;
 ;;; An environment is a list of each name and the cell that holds its value,
 ;;; newest first; a closure is a procedure of the host's, closing over the
@@ -25,6 +25,7 @@
   ;; And the reader's and the parser's entries, for `stage` (`ev-stage`).
   (lambda ((values (select eval-types eval-values-sig))
            (prims (select eval-types eval-prims-sig))
+           (bloblets (select eval-types eval-bloblets-sig))
            (env (select check-env-types check-env-sig))
            (resolve (select check-resolve-types check-resolve-sig))
            (read-text (subr (select eval-types evals) (string int)
@@ -37,7 +38,8 @@
 ;; What it uses of the modules it is given.
 (import values apply-val apply1 ev-poll as-bool as-fields as-other as-str as-tag efail
         efail-expected ev-eq? eval-tag show-val the-unit)
-(import prims ev-bloblet ev-bref ev-blobref ev-flat-tag ev-label-is? prim! standard)
+(import prims prim! standard)
+(import bloblets ev-bloblet ev-bref ev-blobref ev-flat-tag ev-label-is?)
 ;; What it uses of the modules it is given: all of each, hidden.
 (hide (include env) (include resolve))
 

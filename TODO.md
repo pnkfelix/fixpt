@@ -4306,4 +4306,40 @@ had no room for a line in `c-free`. On 2026-10-31, the `.fx` files:
 - `check-print-parts.fx`, 947
 - `native-direct-x64-prims.fx`, 943
 
-and 36 `.rs` files, which have no limit, the largest `fixpt-native/src/direct.rs`, at 6635 lines.
+and 36 `.rs` files, which have no limit, the largest
+`fixpt-native/src/direct.rs`, at 6635 lines.
+
+**Started (2026-10-31).** A survey by script (top-level definitions, which
+the rest of each file names, which name the rest): a run of consecutive
+definitions nothing else in its file names can move to a module after
+it; one that names nothing else in its file, to a module before it. By
+token, so each is confirmed by hand before it moves. Done:
+`eval-prims.fx`'s bloblets and blobrefs, which nothing else there used,
+into `eval-bloblets.fx` (`DONE.md` §188), 964 lines to 770. Next, the
+runs that need nothing of their file and nothing of it them, to confirm:
+
+- `parser.fx` 739-953 (215 lines: `loaded` .. `module-items-of`);
+- `check-read-helpers.fx` 79-214 (136: `k-eff-is-var?` ..
+  `k-parts-reversed`) and 941-1001 (61: `k-in-fixed-range?` ..
+  `k-literal-op`);
+- `check-read-descs.fx` 390-465 (76: `k-read-in-order?` ..
+  `k-declared-later?`);
+- `check-synth.fx` 714-774 (61: `k-with-used` .. `k-may-be-empty?`).
+
+Then the larger runs that need a few names of their file, the module
+moved to importing them: `check-read-helpers.fx` 294-892 (599 lines, 4
+names), `check-synth.fx` 218-787 (570, 5), `check-print-parts.fx`
+805-952 (148, 1), and `compile.fx` 45-638 (594, the first half, which
+names nothing of the rest; 15 of its names used there). Each split costs
+a signature: every name of the module moved that another uses, typed. Not
+`regcode-core.fx` and `check-rules.fx`, one recursive group each by
+choice (§41, §68).
+
+## 189. Heap dumps for FX-26, for faster testing (the user's, 2026-10-31; urgent)
+
+Add heap dumping to FX-26: a running program's heap written to a file
+and loaded back, so that a test suite such as Heist's starts from the
+state its setup leaves (its libraries loaded, its prelude run), not by
+running that setup again for each test. For speeding up *testing*; first
+measure what each Heist test spends before its own code runs (front end,
+loading, the suite's setup), against the pinned snapshot only.

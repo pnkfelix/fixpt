@@ -1,4 +1,5 @@
-;;; The evaluator's types (`eval-values.fx`, `eval-prims.fx`, `eval-core.fx`):
+;;; The evaluator's types (`eval-values.fx`, `eval-prims.fx`, `eval-bloblets.fx`,
+;;; `eval-core.fx`):
 ;;; a module file of no state, which each of them loads (`TODO.md` §68). Its
 ;;; values and their effects, and the signatures of the evaluator's own
 ;;; modules as the others use them.
@@ -150,13 +151,16 @@
    (val the-unit val)
    (val val->vals (subr (maxeff (read @globals) (read @v) (alloc @v) spin) (val) vals))
    (val vals->val (subr (maxeff (read @globals) (read @v) (alloc @v) spin) (vals) val))))
-;; The primitives' module as `eval-core.fx` uses it.
-(define-type eval-prims-sig
+;; The bloblets' module as `eval-core.fx` uses it (`eval-bloblets.fx`).
+(define-type eval-bloblets-sig
   (moduleof
    (val ev-bloblet (subr (maxeff evals spin) (symbol int vals) val))
    (val ev-bref (subr (maxeff evals spin) (val int) val))
    (val ev-blobref (subr (maxeff evals spin) (symbol int vals) val))
    (val ev-flat-tag (subr (maxeff evals spin) (val int) val))
-   (val ev-label-is? (subr (read @globals) (val symbol int) bool))
+   (val ev-label-is? (subr (read @globals) (val symbol int) bool))))
+;; The primitives' module as `eval-core.fx` uses it.
+(define-type eval-prims-sig
+  (moduleof
    (val prim! (subr (maxeff stores spin) (symbol vproc) unit))
    (val standard (subr (maxeff evals spin) (symbol) val))))

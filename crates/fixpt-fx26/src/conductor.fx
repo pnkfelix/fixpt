@@ -339,9 +339,11 @@
          ;; The evaluator.
          (eval-values ((load-input "fx26:eval-values.fx") check-types))
          (eval-prims ((load-input "fx26:eval-prims.fx") eval-values tables check-types))
+         (eval-bloblets ((load-input "fx26:eval-bloblets.fx") eval-values))
          (eval-core
           ((load-input "fx26:eval-core.fx")
-           eval-values eval-prims check-env check-resolve read-text-at parse-program))
+           eval-values eval-prims eval-bloblets check-env check-resolve read-text-at
+           parse-program))
          ;; The compiler's loop over a program's forms.
          (compile-programs
           ((load-input "fx26:compile-programs.fx")
