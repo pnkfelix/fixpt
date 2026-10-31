@@ -3117,6 +3117,9 @@ prims! {
     "%fx26-reify-region", 1, Some(1), simple!(|rt, a| Ok(crate::evidence::reified(rt, a[0], 1)));
     "%fx26-reify-type", 1, Some(1), simple!(|rt, a| Ok(crate::evidence::reified(rt, a[0], 2)));
     "%fx26-reify-text", 4, Some(4), simple!(|rt, a| Ok(crate::evidence::reified_text(rt, a[0], a[1], a[2], a[3])));
+    // A bound made of exact evidence (`effect-bound`, `type-bound`): the
+    // same text.
+    "%fx26-evidence-bound", 1, Some(1), simple!(|_rt, a| Ok(a[0]));
 }
 
 /// Promise states. `[state, payload]`.

@@ -230,6 +230,8 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("%reify-region", "%fx26-reify-region", false),
     ("%reify-type", "%fx26-reify-type", false),
     ("%reify-text", "%fx26-reify-text", false),
+    ("effect-bound", "%fx26-evidence-bound", false),
+    ("type-bound", "%fx26-evidence-bound", false),
     ("%session-eval-check", "%fx26-session-eval-check", false),
     ("%session-eval-ready", "%fx26-session-eval-ready", false),
     ("%session-eval-redefines", "%fx26-session-redefines", false),

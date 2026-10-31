@@ -214,14 +214,23 @@ pub const PENDING: &str = "(pending (e effect +) (r region)) (subr (maxeff e (re
 /// (`docs/research/eval.md`, "Evidence"), generative types 17, 18 and 19:
 /// what `reify-effect`, `reify-region` and `reify-type` make of the one
 /// each is given, for `stage` and `session-check` to check code against
-/// where a variable names it. At run time its text; invariant, as only the
-/// one it was made of is what it says.
+/// where a variable names it. At run time its text. Invariant: each says
+/// exactly what it is of (a bound, below, may say less).
 pub const EFFECTREP: &str = "(effectrep (e effect)) string";
 pub(crate) const EFFECTREP_INDEX: u32 = 17;
 pub const REGIONREP: &str = "(regionrep (r region)) string";
 pub(crate) const REGIONREP_INDEX: u32 = 18;
 pub const TYPEREP: &str = "(typerep (t type)) string";
 pub(crate) const TYPEREP_INDEX: u32 = 19;
+/// A bound on an effect and a type, generative types 20 and 21: evidence
+/// of at most what it is of, covariant, made of the exact evidence
+/// (`effect-bound`, `type-bound`), so that evidence of less may stand for
+/// more. A variable given a bound may stand only where less is safe
+/// (`Checker::evidence`).
+pub const EFFECTBOUND: &str = "(effectbound (e effect +)) string";
+pub(crate) const EFFECTBOUND_INDEX: u32 = 20;
+pub const TYPEBOUND: &str = "(typebound (t type +)) string";
+pub(crate) const TYPEBOUND_INDEX: u32 = 21;
 /// The scheduler of processes and `par`, a module file built in, which the
 /// forms `spawn`, `send`, `receive`, `par`, `icell-get` and `icell-put!`
 /// call through the hidden global of its load (`Checker::library_type`).
@@ -1059,7 +1068,7 @@ impl Checker {
         // (no `up-` or `down-`: a `vsubr` is called with its arguments, not
         // their list). `vlambda` makes one; `apply` calls one on a list.
         c.arena.string_sym = Some(c.interner.intern("string"));
-        for decl in [VSUBR, FLATLAYOUT, FLATARRAYOF, IDENTITY, EQTABLE, BLOBREF, FLAT_ARRAYOF, FLAT_KEYED, BYTEVECTOROF, ESCAPE_TAG, ADDR, INBOX, PROCESS, EVENT, STRINGOF, SESSIONOF, PENDING, EFFECTREP, REGIONREP, TYPEREP] {
+        for decl in [VSUBR, FLATLAYOUT, FLATARRAYOF, IDENTITY, EQTABLE, BLOBREF, FLAT_ARRAYOF, FLAT_KEYED, BYTEVECTOROF, ESCAPE_TAG, ADDR, INBOX, PROCESS, EVENT, STRINGOF, SESSIONOF, PENDING, EFFECTREP, REGIONREP, TYPEREP, EFFECTBOUND, TYPEBOUND] {
             let forms = c.read(decl).expect("reads");
             c.define_generative(&forms[0], &forms[1]).unwrap_or_else(|e| panic!("`{decl}` is wrong: {e}"));
         }

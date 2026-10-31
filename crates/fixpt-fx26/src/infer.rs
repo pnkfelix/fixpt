@@ -639,7 +639,12 @@ impl Checker {
         let Some(Ty::Subr { effect, result, .. }) = ok.map(|ok| self.arena.get(self.arena.resolve(ok)).clone()) else { return Ok(()) };
         if let Some(code) = code {
             let free = self.free_in_shown(|c| vec![c.show_ty(mt), c.show_effect(&effect), c.show_ty(result)]);
-            let evidence = self.evidence(&free, given, true, op.trim_start_matches('%'), span)?;
+            // As the code is checked, `(subr pure (M) (subr E () R))`.
+            let mut stands = Vec::new();
+            self.stands_in(mt, Stand::Neg, &mut stands);
+            self.stands_in_effect(&effect, Stand::Pos, &mut stands);
+            self.stands_in(result, Stand::Pos, &mut stands);
+            let evidence = self.evidence(&free, &stands, given, true, op.trim_start_matches('%'), span)?;
             let staged = crate::check::Staged { m: self.staged_text(mt), e: self.staged_effect_text(&effect), r: self.staged_text(result), evidence };
             self.facts.staged.insert(code, staged);
         }
@@ -655,13 +660,16 @@ impl Checker {
         let span = self.arena.span_of(arg);
         let Ty::Named { args, .. } = self.arena.get(self.arena.resolve(t)).clone() else { return Ok(()) };
         let mut staged = crate::check::Staged::default();
+        let mut stands = Vec::new();
         let free = match (op, args.first()) {
             ("%reify-effect", Some(D::Effect(e))) => {
                 staged.e = self.staged_effect_text(e);
+                self.stands_in_effect(e, Stand::Pos, &mut stands);
                 self.free_in_shown(|c| vec![c.show_effect(e)])
             }
             ("%reify-type", Some(D::Type(x))) => {
                 staged.r = self.staged_text(*x);
+                self.stands_in(*x, Stand::Pos, &mut stands);
                 self.free_in_shown(|c| vec![c.show_ty(*x)])
             }
             ("%reify-region", Some(D::Region(r))) => {
@@ -672,7 +680,7 @@ impl Checker {
             }
             _ => return Ok(()),
         };
-        staged.evidence = self.evidence(&free, Some(arg), op != "%reify-region", op.trim_start_matches('%'), span)?;
+        staged.evidence = self.evidence(&free, &stands, Some(arg), op != "%reify-region", op.trim_start_matches('%'), span)?;
         // A region a variable names, of no evidence: one of its own.
         if op == "%reify-region" && !free.is_empty() && staged.evidence.is_empty() {
             staged.m = "fresh".to_string();
@@ -686,8 +694,12 @@ impl Checker {
     /// `(effectrep v)`, `(regionrep v)` or `(typerep v)`, `v` a variable.
     /// Each of variables `free` must be one, if `needed`: else the `form`
     /// at `span` is refused, saying what to give it. Two of one name are
-    /// refused, as the staged check could not tell them apart.
-    fn evidence(&mut self, free: &[DVar], given: Option<ExpId>, needed: bool, form: &str, span: fixpt_read::Span) -> R<Vec<String>> {
+    /// refused, as the staged check could not tell them apart. A bound,
+    /// `(effectbound v)` or `(typebound v)`, may be of less than `v` (its
+    /// type is covariant), so a variable given one must stand only where
+    /// less is more cautious, as `stands` says where each stands: where
+    /// what is checked is given, not taken.
+    fn evidence(&mut self, free: &[DVar], stands: &[(DVar, Stand)], given: Option<ExpId>, needed: bool, form: &str, span: fixpt_read::Span) -> R<Vec<String>> {
         let fields = match given {
             Some(g) => {
                 let (t, _) = self.synth(g)?;
@@ -701,28 +713,42 @@ impl Checker {
         let at = given.map_or(span, |g| self.arena.span_of(g));
         let mut names: Vec<String> = Vec::new();
         let mut of: Vec<DVar> = Vec::new();
+        use crate::check::{EFFECTBOUND_INDEX, EFFECTREP_INDEX, REGIONREP_INDEX, TYPEBOUND_INDEX, TYPEREP_INDEX};
         for t in fields {
-            let v = match self.arena.get(self.arena.resolve(t)).clone() {
-                Ty::Named { which, args } if [crate::check::EFFECTREP_INDEX, crate::check::REGIONREP_INDEX, crate::check::TYPEREP_INDEX].contains(&which) => match args.first() {
-                    Some(D::Effect(e)) if e.0.len() == 1 => match e.0.iter().next() {
-                        Some(Atom::Var(v)) => Some(*v),
+            let (v, bounded) = match self.arena.get(self.arena.resolve(t)).clone() {
+                Ty::Named { which, args } if [EFFECTREP_INDEX, REGIONREP_INDEX, TYPEREP_INDEX, EFFECTBOUND_INDEX, TYPEBOUND_INDEX].contains(&which) => {
+                    let v = match args.first() {
+                        Some(D::Effect(e)) if e.0.len() == 1 => match e.0.iter().next() {
+                            Some(Atom::Var(v)) => Some(*v),
+                            _ => None,
+                        },
+                        Some(D::Region(Region::Var(v))) => Some(*v),
+                        Some(D::Type(x)) => match self.arena.get(self.arena.resolve(*x)) {
+                            Ty::Var(v) => Some(*v),
+                            _ => None,
+                        },
                         _ => None,
-                    },
-                    Some(D::Region(Region::Var(v))) => Some(*v),
-                    Some(D::Type(x)) => match self.arena.get(self.arena.resolve(*x)) {
-                        Ty::Var(v) => Some(*v),
-                        _ => None,
-                    },
-                    _ => None,
-                },
-                _ => None,
+                    };
+                    (v, [EFFECTBOUND_INDEX, TYPEBOUND_INDEX].contains(&which))
+                }
+                _ => (None, false),
             };
             let Some(v) = v else {
-                return Err(FxError::at(at, format!("`{form}` is given evidence of a variable, an `(effectrep e)`, a `(regionrep r)` or a `(typerep t)`, and this is a {}", self.show_ty(t))));
+                return Err(FxError::at(at, format!("`{form}` is given evidence of a variable, an `(effectrep e)`, a `(regionrep r)`, a `(typerep t)`, an `(effectbound e)` or a `(typebound t)`, and this is a {}", self.show_ty(t))));
             };
             let name = self.interner.name(self.arena.dvar_name(v)).to_string();
             if names.contains(&name) && !of.contains(&v) {
                 return Err(FxError::at(at, format!("`{form}` is given evidence of two variables `{name}`: rename one, so that the code can be checked against each")));
+            }
+            // Exact evidence made of a bound would say more than is known.
+            if bounded && form.starts_with("reify-") {
+                return Err(FxError::at(at, format!("`{form}` makes exact evidence, so it is given exact evidence, and this is a bound of `{name}`")));
+            }
+            if bounded && stands.iter().any(|&(w, s)| w == v && s != Stand::Pos) {
+                return Err(FxError::at(
+                    span,
+                    format!("`{form}` is given a bound of `{name}`, which may be of less than `{name}` is: `{name}` may stand only where less is safe, in the effect, and in what is given, not taken; or give its exact evidence"),
+                ));
             }
             names.push(name);
             of.push(v);
@@ -742,6 +768,42 @@ impl Checker {
             }
         }
         Ok(names)
+    }
+
+    /// Where each variable stands in `t`, which stands at `at`: given
+    /// (`Pos`), taken (`Neg`), or both (`Inv`, in what is changed or
+    /// compared exactly). A procedure takes its parameters, gives its
+    /// result and its effect; a product, a sum or a union gives its parts,
+    /// a module its values. Anything else, as `Inv`.
+    fn stands_in(&self, t: TyId, at: Stand, out: &mut Vec<(DVar, Stand)>) {
+        match self.arena.get(self.arena.resolve(t)).clone() {
+            Ty::Var(v) => out.push((v, at)),
+            Ty::Base(_) | Ty::Void | Ty::Nil | Ty::False | Ty::Nat(_) => {}
+            Ty::Subr { effect, params, result, .. } => {
+                self.stands_in_effect(&effect, at, out);
+                for p in params {
+                    self.stands_in(p, at.flipped(), out);
+                }
+                self.stands_in(result, at, out);
+            }
+            Ty::Union(ms) => ms.into_iter().for_each(|m| self.stands_in(m, at, out)),
+            Ty::Product(fs) | Ty::Sum(fs) => fs.into_iter().for_each(|(_, f)| self.stands_in(f, at, out)),
+            Ty::Poly { body, .. } => self.stands_in(body, at, out),
+            Ty::Module { abs, descs, vals } if abs.is_empty() && descs.is_empty() => vals.into_iter().for_each(|(_, v)| self.stands_in(v, at, out)),
+            _ => out.extend(self.free_in_shown(|c| vec![c.show_ty(t)]).into_iter().map(|v| (v, Stand::Inv))),
+        }
+    }
+
+    /// The same of effect `e`: a variable stands where `e` does; an
+    /// effect function's, as `Inv`.
+    fn stands_in_effect(&self, e: &Effect, at: Stand, out: &mut Vec<(DVar, Stand)>) {
+        for a in &e.0 {
+            match *a {
+                Atom::Var(v) => out.push((v, at)),
+                Atom::App(_) => out.extend(self.free_in_shown(|c| vec![c.show_atom(*a)]).into_iter().map(|v| (v, Stand::Inv))),
+                _ => {}
+            }
+        }
     }
 
     fn made_native(&mut self, e: ExpId, t: TyId) -> R<TyId> {
@@ -2382,6 +2444,24 @@ impl Checker {
                     }
                 }
             }
+        }
+    }
+}
+
+/// Where a variable stands in a type (`Checker::stands_in`).
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub(crate) enum Stand {
+    Pos,
+    Neg,
+    Inv,
+}
+
+impl Stand {
+    fn flipped(self) -> Stand {
+        match self {
+            Stand::Pos => Stand::Neg,
+            Stand::Neg => Stand::Pos,
+            Stand::Inv => Stand::Inv,
         }
     }
 }

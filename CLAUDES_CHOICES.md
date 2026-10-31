@@ -3092,3 +3092,15 @@ of `TODO.md` §141, working on my own.
 - **Evaluator**: `reify-…` intercepted at the form, as `stage` is, and
   substituted by the runtime (`%reify-text`), so that every machine names
   fresh regions alike.
+- **Bounds beside exact evidence** (the user's, the same day): one
+  covariant evidence type would let a caller pass less than the
+  instantiation, which the staging form, unable to see its callers, could
+  then allow only where less is safe: exact evidence would lose its use
+  where the variable is taken. Two types keep both, the `plambda`'s
+  signature saying which it asks for. Polarity is walked structurally,
+  conservatively: a procedure's parameters flip it; products, sums,
+  unions, a module's values (one with no abstract types) keep it;
+  anything else, references, arrays, pairs and generative types included,
+  counts as both.
+- **No bound in a `reify-…`**: its result is exact evidence, which a
+  bound cannot make; composing bounds would want a `reify-…-bound`, left.

@@ -273,6 +273,10 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // The same on the evaluator written in FX-26, which keeps evidence as
     // the text it is: what is noted (`fresh` or not, and what it is of),
     // given the names and their evidence.
+    // A bound made of exact evidence: the same text, of at most what it is
+    // of, covariant.
+    ("effect-bound", "(poly ((e effect)) (subr pure ((effectrep e)) (effectbound e)))"),
+    ("type-bound", "(poly ((t type)) (subr pure ((typerep t)) (typebound t)))"),
     ("%reify-text", "(subr pure (string string string (listof string acyclic)) string)"),
     ("%stage-check", "(subr (maxeff spin (io fs-read)) (string string string string string (listof string acyclic)) (sumof (checked string) (failed stage-failure)))"),
     // Sessions on the evaluator written in FX-26 (`fx-ast-eval`), which
@@ -782,6 +786,8 @@ pub fn standard_text() -> String {
         crate::check::EFFECTREP,
         crate::check::REGIONREP,
         crate::check::TYPEREP,
+        crate::check::EFFECTBOUND,
+        crate::check::TYPEBOUND,
     ]
         .iter()
         .map(|d| format!("(define-generative {d})\n"))

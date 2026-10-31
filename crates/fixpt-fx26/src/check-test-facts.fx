@@ -187,7 +187,9 @@
                      (on (set k-show-marks #t))
                      (free (k-free-shown (list (show mt) (k-show-effect e) (show r))))
                      (off (set k-show-marks #f))
-                     (names (k-given-names given free #t form))
+                     ;; As the code is checked, `(subr pure (M) (subr E () R))`.
+                     (stands (k-stands-in r 1 (k-stands-in-effect e 1 (k-stands-in mt -1 nil))))
+                     (names (k-given-names given free stands #t form))
                      (n (n-staged (show mt) (k-show-effect e) (show r) names)))
                 (set k-extracts (cons (product (1 at) (2 n)) (get k-extracts)))))
             (else y #u))))))
@@ -209,7 +211,7 @@
                    (off (set k-show-marks #f))
                    (region (string=? op "%reify-region"))
                    (form (substring op 1 (string-length op)))
-                   (names (k-given-names given free (not region) form))
+                   (names (k-given-names given free nil (not region) form))
                    (fresh (if (and region (string=? names "")
                                    (or (not (null? free))
                                        (tagcase d
@@ -226,16 +228,98 @@
       (else y te))))
 ;; The names, as printed, of the variables of which `given`, `(product (1
 ;; g) …)`, each `g` a variable, is the evidence, in order, apart by spaces;
-;; each of `free` one of them, if `needed`, or `form` refused.
-(define k-given-names (->* (kx k-ids bool string) string)
-  (lambda (given free needed form)
+;; each of `free` one of them, if `needed`, or `form` refused. A bound may
+;; be of less than its variable, which then stands only where `stands` says
+;; it is given, not taken; and a `reify-…`, which makes exact evidence, is
+;; given none (`Checker::evidence`).
+(define k-given-names (->* (kx k-ids k-stands bool string) string)
+  (lambda (given free stands needed form)
     (let ((of (tagcase given
                 (x-product (fs a b abk) (k-given-vars fs form))
                 (else y (the k-given nil)))))
-      (begin (if needed (k-given-all free of form given) #u) (k-given-text of "")))))
-;; What each piece of evidence is of: a variable and its name; or a region
-;; a `letregion` makes (-1) and its.
-(define-type k-given (listof (productof (1 int) (2 string)) acyclic))
+      (begin (if needed (k-given-all free of form given) #u)
+             (k-given-bounds of stands form given)
+             (k-given-text of "")))))
+;; What each piece of evidence is of: a variable, its name, and whether it
+;; is a bound; or a region a `letregion` makes (-1) and its.
+(define-type k-given (listof (productof (1 int) (2 string) (3 bool)) acyclic))
+;; Each bound of `of` where it may stand, as `stands` says, in a form that
+;; takes one; else `form` refused, at `given`.
+(define k-given-bounds (->* (k-given k-stands string kx) unit)
+  (lambda (of stands form given)
+    (if (null? of)
+        #u
+        (let ((v (extract (car of) 1)) (n (extract (car of) 2)))
+          (cond ((not (extract (car of) 3)) (k-given-bounds (cdr of) stands form given))
+                ((and (>= (string-length form) 6) (string=? (substring form 0 6) "reify-"))
+                 (k-fail (string-append "`" form "` makes exact evidence, so it is given exact "
+                                        "evidence, and this is a bound of `" n "`")
+                         (k-start given) (k-end given)))
+                ((k-stands-only-given? v stands) (k-given-bounds (cdr of) stands form given))
+                (else
+                 (k-fail (string-append "`" form "` is given a bound of `" n "`, which may be of "
+                                        "less than `" n "` is: `" n "` may stand only where less "
+                                        "is safe, in the effect, and in what is given, not taken; "
+                                        "or give its exact evidence")
+                         (k-start given) (k-end given))))))))
+;; Whether `v` stands only where it is given among `ss`.
+(define k-stands-only-given? (->* (int k-stands) bool)
+  (lambda (v ss)
+    (or (null? ss)
+        (and (or (not (= (extract (car ss) 1) v)) (= (extract (car ss) 2) 1))
+             (k-stands-only-given? v (cdr ss))))))
+;; Where each variable stands in a type: given (1), taken (-1), or both (0,
+;; in what is changed or compared exactly), as `Checker::stands_in`.
+(define-type k-stands (listof (productof (1 int) (2 int)) acyclic))
+;; Where each variable stands in type `t`, standing at `at`, before `acc`.
+(define k-stands-in (->* (int int k-stands) k-stands)
+  (lambda (t at acc)
+    (tagcase (k-get (k-resolve t))
+      (ty-var (v) (cons (product (1 v) (2 at)) acc))
+      (ty-base (n) acc) (ty-void () acc) (ty-nat (z) acc) (ty-nil () acc) (ty-false () acc)
+      (ty-subr (e ps r cv spc)
+        (k-stands-in r at (k-stands-in-all ps (- 0 at) (k-stands-in-effect e at acc))))
+      (ty-product (fs) (k-stands-in-parts fs at acc))
+      (ty-sum (fs) (k-stands-in-parts fs at acc))
+      (ty-union (ms) (k-stands-in-all ms at acc))
+      (ty-poly (bs body) (k-stands-in body at acc))
+      (ty-module (abs ds vs)
+        (if (and (null? abs) (null? ds)) (k-stands-in-parts vs at acc) (k-stands-both t acc)))
+      (else y (k-stands-both t acc)))))
+(define k-stands-in-all (->* (k-ids int k-stands) k-stands)
+  (lambda (ts at acc)
+    (if (null? ts) acc (k-stands-in-all (cdr ts) at (k-stands-in (car ts) at acc)))))
+(define k-stands-in-parts (->* (k-parts int k-stands) k-stands)
+  (lambda (ps at acc)
+    (if (null? ps) acc (k-stands-in-parts (cdr ps) at (k-stands-in (extract (car ps) 2) at acc)))))
+;; The same of effect `e`: a variable stands where `e` does; an effect
+;; function's, both.
+(define k-stands-in-effect (->* (k-eff int k-stands) k-stands)
+  (lambda (e at acc)
+    (if (null? e)
+        acc
+        (k-stands-in-effect
+         (cdr e) at
+         (tagcase (car e)
+           (a-var (v) (cons (product (1 v) (2 at)) acc))
+           (a-app (f ds) (k-stands-each (k-marked-effect (list (car e))) acc))
+           (else y acc))))))
+;; Each variable free in `t`, standing both ways.
+(define k-stands-both (->* (int k-stands) k-stands)
+  (lambda (t acc) (k-stands-each (k-marked-type t) acc)))
+;; The variables free in type `t`, and in effect `e`, as printed.
+(define k-marked-type (->* (int) k-ids)
+  (lambda (t)
+    (let* ((on (set k-show-marks #t)) (s ((with check-print k-show-ty-whole) t))
+           (off (set k-show-marks #f)))
+      (k-free-shown (list s)))))
+(define k-marked-effect (->* (k-eff) k-ids)
+  (lambda (e)
+    (let* ((on (set k-show-marks #t)) (s (k-show-effect e)) (off (set k-show-marks #f)))
+      (k-free-shown (list s)))))
+(define k-stands-each (->* (k-ids k-stands) k-stands)
+  (lambda (vs acc)
+    (if (null? vs) acc (k-stands-each (cdr vs) (cons (product (1 (car vs)) (2 0)) acc)))))
 ;; The variable of which each of fields `fs` is the evidence.
 (define k-given-vars (->* ((listof (productof (1 symbol) (2 kx)) acyclic) string) k-given)
   (lambda (fs form)
@@ -247,17 +331,20 @@
                     (else y nil))))
           (if (null? v)
               (k-fail (string-append "`" form "` is given evidence of a variable, an `(effectrep "
-                                     "e)`, a `(regionrep r)` or a `(typerep t)`")
+                                     "e)`, a `(regionrep r)`, a `(typerep t)`, an `(effectbound "
+                                     "e)` or a `(typebound t)`")
                       (k-start x) (k-end x))
               (cons (car v) (k-given-vars (cdr fs) form)))))))
-;; The variable type `t` is the evidence of, and its name, in a list of one;
-;; none if none.
+;; The variable type `t` is the evidence of, its name, and whether it is a
+;; bound (generative types 20 and 21), in a list of one; none if none.
 (define k-rep-var (->* (int) k-given)
   (lambda (t)
-    (let ((var (lambda ((v int)) (list (product (1 v) (2 (symbol->string (k-dvar-name v))))))))
+    (let* ((g (tagcase (k-get (k-resolve t)) (ty-named (g ds) g) (else y -1)))
+           (var (lambda ((v int))
+                  (list (product (1 v) (2 (symbol->string (k-dvar-name v))) (3 (>= g 20)))))))
       (tagcase (k-get (k-resolve t))
         (ty-named (g ds)
-          (if (or (null? ds) (< g 17) (> g 19))
+          (if (or (null? ds) (< g 17) (> g 21))
               nil
               (tagcase (car ds)
                 (dt (x) (tagcase (k-get (k-resolve x)) (ty-var (v) (var v)) (else y nil)))
@@ -265,7 +352,7 @@
                             nil))
                 (dr (r) (tagcase r
                           (r-var (v) (var v))
-                          (r-fresh (i n) (list (product (1 -1) (2 n))))
+                          (r-fresh (i n) (list (product (1 -1) (2 n) (3 #f))))
                           (else y nil)))
                 (else y nil))))
         (else y nil)))))

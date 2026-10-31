@@ -504,6 +504,10 @@
       (prim! '%stage
              (lambda (xs)
                (the val (o-sum 'failed (ev-stage-refused "`%stage` is called only as `stage`")))))
+      ;; A bound made of exact evidence (`docs/fx26.md`, "Evidence"): the
+      ;; same text.
+      (prim! 'effect-bound (lambda (xs) (ev-arg xs 0)))
+      (prim! 'type-bound (lambda (xs) (ev-arg xs 0)))
       ;; Sessions: `eval-core.fx`'s, but `%session-check`, named only as
       ;; `session-check`'s operator (`ev-session-check`).
       (prim! '%session-check

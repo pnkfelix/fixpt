@@ -132,11 +132,12 @@ refused: `g` is broken, since `a` was redefined (a int is expected here, and thi
 
 /// Evidence (`docs/research/eval.md`, "Evidence"): `stage` within a
 /// `plambda`, checked against its effect, type and region parameters as
-/// they were instantiated, given their evidence; a session's steps too.
+/// they were instantiated, given their evidence; a session's steps too; a
+/// bound standing for a larger effect.
 /// Alike on every machine.
 #[test]
 fn staged_code_is_checked_against_what_a_variable_was_given() {
-    for (program, want) in [("evidence.fx", EVIDENCE), ("evidence-region.fx", EVIDENCE_REGION), ("evidence-session.fx", EVIDENCE_SESSION)] {
+    for (program, want) in [("evidence.fx", EVIDENCE), ("evidence-region.fx", EVIDENCE_REGION), ("evidence-session.fx", EVIDENCE_SESSION), ("evidence-bound.fx", EVIDENCE_BOUND)] {
         let runs: Vec<_> = STAGING.iter().filter(|m| runs_here(m)).map(|m| (*m, std::thread::spawn(move || run(m, program)))).collect();
         for (m, t) in runs {
             let (status, out, err) = t.join().expect("ran");
@@ -145,13 +146,22 @@ fn staged_code_is_checked_against_what_a_variable_was_given() {
     }
 }
 
-/// Evidence missing: refused as the program is checked, by either checker.
+/// Evidence missing, a bound where its variable is taken, and exact
+/// evidence made of a bound: each refused as the program is checked, by
+/// either checker.
 #[test]
 fn staging_without_evidence_is_refused() {
-    for m in ["rs-scheme-vm", "fx-cells-rsinterp"] {
-        let (status, _, err) = run(m, "evidence-missing.fx");
-        assert_ne!(status, Some(0), "{m}");
-        assert!(err.contains("a variable: give it its evidence, a `(effectrep e)`"), "{m}: {err}");
+    let refusals = [
+        ("evidence-missing.fx", "a variable: give it its evidence, a `(effectrep e)`"),
+        ("evidence-bound-taken.fx", "may stand only where less is safe"),
+        ("evidence-bound-reify.fx", "makes exact evidence, so it is given exact evidence"),
+    ];
+    for (program, said) in refusals {
+        for m in ["rs-scheme-vm", "fx-cells-rsinterp"] {
+            let (status, _, err) = run(m, program);
+            assert_ne!(status, Some(0), "{program} on {m}");
+            assert!(err.contains(said), "{program} on {m}: {err}");
+        }
     }
 }
 
@@ -173,6 +183,15 @@ refused: a (subr (read %region-1) () int) is expected here, and this is a (subr 
 7
 refused: a (subr (read @a) () int) is expected here, and this is a (subr (maxeff (read @a) (write @a)) () int)
   beyond what is expected, it has (write @a)
+";
+
+const EVIDENCE_BOUND: &str = "42
+refused: a (subr pure () int) is expected here, and this is a (subr (io stdout) () int)
+  beyond what is expected, it has (io stdout)
+out
+41
+called
+41
 ";
 
 const EVIDENCE_SESSION: &str = "defined a

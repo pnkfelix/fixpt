@@ -357,6 +357,17 @@ can make evidence of `pure`, but it is evidence of `e` only where `e` is
 instantiated `pure`. A variable `M`, `E` or `R` names with none given is
 refused as the program is checked.
 
+Exact evidence rules out a caller passing `pure` where `e` is larger,
+which is safe where `e` is only the code's effect (the user's, the same
+day). So a second kind: a bound, `(effectbound e)` or `(typebound t)`,
+covariant, made of exact evidence (`effect-bound`, `type-bound`), which a
+`plambda` asks for to say "anything at most `e`, and I use it only where
+less is safe". Where a variable given a bound stands is checked at the
+staging form: only where what is checked is given, not taken, as the code
+is checked as `(subr pure (M) (subr E () R))` (`Checker::stands_in`,
+`k-stands-in`). Exact evidence stands anywhere. Which a form is given is
+known as the program is checked; at run time both are the text.
+
 Regions have no text of their own: a region's evidence is a name. `@a`
 is itself; a region a variable names, given no evidence of it, is named
 afresh, and the staged check binds the name as a region it knows nothing
