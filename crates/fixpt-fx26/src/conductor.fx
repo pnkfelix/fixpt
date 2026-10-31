@@ -341,7 +341,7 @@
          (eval-prims ((load-input "fx26:eval-prims.fx") eval-values tables check-types))
          (eval-core
           ((load-input "fx26:eval-core.fx")
-           eval-values eval-prims check-env check-resolve))
+           eval-values eval-prims check-env check-resolve read-text-at parse-program))
          ;; The compiler's loop over a program's forms.
          (compile-programs
           ((load-input "fx26:compile-programs.fx")

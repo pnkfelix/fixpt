@@ -260,6 +260,10 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // builds. Checked at each call, where `m`'s type is a module's
     // (`made_staged`): each checker gives the compilers `m`'s type, `E` and
     // `R`, printed, to give the checker that runs with `text`.
+    // On the evaluator written in FX-26, which runs what it is given:
+    // `stage`'s code checked by the checker written in Rust, the text as
+    // checked or why not (`stage.rs`'s `check_staged`).
+    ("%stage-check", "(subr (maxeff spin (io fs-read)) (string string string string) (sumof (checked string) (failed stage-failure)))"),
     ("%stage", "(poly ((e effect) (r type)) (poly ((m type)) (subr (maxeff stage spin) (m datum) (sumof (ok (subr e () r)) (failed stage-failure)))))"),
     // Heist's (`FIXPT-CHANGES.md` F4): programs run beside this one, by
     // number. Started by name and arguments, in a directory (\"\": this

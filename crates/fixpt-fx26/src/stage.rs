@@ -121,3 +121,91 @@ fn stage_rooted(rt: &mut Runtime, base: usize) -> Result<Value, String> {
     let tag = rt.heap.intern("ok");
     Ok(rt.heap.make_frozen(SUM, &[tag, thunk]))
 }
+
+/// `stage` lowered (`rs-scheme-vm`), what `%fx26-stage-lower` does with the
+/// product of the module's type, the effect, the result type and the code
+/// that the lowering makes (`facts.staged`): the code checked ([`checked`])
+/// and lowered: the datum that makes the procedure of the module, in a list
+/// of one, which the runtime gives `eval`; or the refusal.
+pub fn lower_staged(rt: &mut Runtime, staged: Value) -> Result<Value, String> {
+    let is_product = staged.is_bloblet() && rt.heap.bloblet_kind(staged) == PRODUCT && rt.heap.bloblet_head(staged).fields == 5;
+    if !is_product {
+        return Err("this machine cannot stage code".to_string());
+    }
+    let field = |rt: &Runtime, i: usize| rt.heap.bloblet_slot(staged, i + 1);
+    let [mt, e, r] = [1, 2, 3].map(|i| rt.heap.string_to_rust(field(rt, i)));
+    let text = fixpt_runtime::print::write_value(&rt.heap, field(rt, 4));
+    let (c, top, _) = match checked(rt, &mt, &e, &r, &text) {
+        Ok(done) => done,
+        Err(refused) => return Ok(refused),
+    };
+    let code = crate::session::lower_top(&c, &mut crate::lower::Globals::default(), &top);
+    let [sx] = &code.0[..] else { return Err("the staged code lowered to more than one form".to_string()) };
+    let datum = sx_value(rt, sx);
+    Ok(rt.heap.cons(datum, Value::NULL))
+}
+
+/// `stage` on the evaluator written in FX-26 (`fx-ast-eval`), what
+/// `%fx26-stage-check` does with the module's type, the effect, the result
+/// type and the code, written out: the code checked ([`checked`]), and the
+/// text that was, for the evaluator to parse and run, `(sum checked
+/// text)`; or the refusal.
+pub fn check_staged(rt: &mut Runtime, mt: &str, e: &str, r: &str, text: &str) -> Value {
+    match checked(rt, mt, e, r, text) {
+        Ok((_, _, whole)) => {
+            let tag = rt.heap.intern("checked");
+            let whole = rt.heap.make_string(&whole);
+            rt.heap.make_frozen(SUM, &[tag, whole])
+        }
+        Err(refused) => refused,
+    }
+}
+
+/// Code `text` wrapped as on every machine, `(the (subr pure (M) (subr E ()
+/// R)) (lambda ((stage-module M)) (lambda () (with stage-module text))))`,
+/// and checked by a checker written in Rust of the standard environment
+/// alone: the checker, the form, and the text; or the refusal, `(sum failed
+/// why)`, placed in `text`.
+fn checked(rt: &mut Runtime, mt: &str, e: &str, r: &str, text: &str) -> Result<(crate::check::Checker, crate::top::Top, String), Value> {
+    let prefix = format!("(the (subr pure ({mt}) (subr {e} () {r}))\n(lambda ((stage-module {mt}))\n(lambda () (with stage-module\n");
+    let whole = format!("{prefix}{text}\n))))\n");
+    // Where byte `b` of the whole is, in characters of the code.
+    let (skip, len) = (prefix.chars().count() as i64, text.chars().count() as i64);
+    let place = |b: u32| (whole[..(b as usize).min(whole.len())].chars().count() as i64 - skip).clamp(0, len);
+    let failed = fixpt_runtime::prim::stage_failed;
+    let mut c = crate::check::Checker::new();
+    let forms = match c.read_in(fixpt_read::FileId(0), &whole) {
+        Ok(f) if f.len() == 1 => f,
+        Ok(_) => return Err(failed(rt, "unread", "the code is not one whole expression", 0, len)),
+        Err(e) => return Err(failed(rt, "unread", &e.message, place(e.span.start), place(e.span.end))),
+    };
+    match c.top(&forms[0]) {
+        Ok(top) => Ok((c, top, whole)),
+        Err(e) => Err(failed(rt, "refused", &e.message, place(e.span.start), place(e.span.end))),
+    }
+}
+
+/// `x` as a Scheme datum. Allocation does not collect here.
+fn sx_value(rt: &mut Runtime, x: &crate::sx::Sx) -> Value {
+    use crate::sx::Sx;
+    match x {
+        Sx::Sym(s) => rt.heap.intern(s),
+        Sx::Int(n) => fixpt_runtime::prim::integer_value(rt, *n),
+        Sx::Float(f) => rt.heap.make_flonum(*f),
+        Sx::Str(s) => rt.heap.make_string(s),
+        Sx::Char(c) => Value::char(*c),
+        Sx::Bool(b) => Value::boolean(*b),
+        Sx::List(items) => {
+            let vs: Vec<Value> = items.iter().map(|i| sx_value(rt, i)).collect();
+            rt.heap.list_from(&vs)
+        }
+        Sx::Dotted(items, tail) => {
+            let mut out = sx_value(rt, tail);
+            for i in items.iter().rev() {
+                let v = sx_value(rt, i);
+                out = rt.heap.cons(v, out);
+            }
+            out
+        }
+    }
+}

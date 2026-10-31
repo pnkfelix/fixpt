@@ -28,7 +28,18 @@
 ;; (`fx26:processes.fx`, which the program loads and this runs).
 (define-effect scheduling (maxeff (read @sched) (write @sched) (alloc @sched)))
 
-(define-effect runs (maxeff stores (read @x) (write @x) (alloc @x) io-any scheduling))
+
+;; And reading and parsing the code `stage` is given, which this runs
+;; itself (`eval-core.fx`'s `ev-stage`), at the front end's regions, and
+;; the lists the reader hands back.
+(hide (define parser-types ((proj (load-module "fx26:parser-types.fx") @s @e @m @c @p))))
+(import parser-types (effect parses))
+(hide (define eager-reader-types ((proj (load-module "fx26:eager-reader-types.fx") @s @e @m @c))))
+(import eager-reader-types (effect reading))
+
+(define-effect runs
+  (maxeff stores (read @x) (write @x) (alloc @x) io-any scheduling parses reading (read @c)
+          (alloc @c)))
 
 (define-effect evals (maxeff runs (goto @x) (comefrom @x) spin))
 

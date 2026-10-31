@@ -597,6 +597,16 @@ impl Checker {
             if !matches!(self.arena.get(mt), Ty::Module { .. }) {
                 return Err(FxError::at(span, format!("`stage` takes a module, not a {}", self.show_ty(mt))));
             }
+            // `(sumof (ok (subr E () R)) …)`: `M`, `E` and `R` noted at the
+            // code, for the lowering.
+            if let Ty::Sum(parts) = self.arena.get(self.arena.resolve(t)).clone()
+                && let Some((_, ok)) = parts.iter().find(|(l, _)| self.interner.name(*l) == "ok")
+                && let Ty::Subr { effect, result, .. } = self.arena.get(self.arena.resolve(*ok)).clone()
+                && let Some(&code) = args.get(1)
+            {
+                let staged = (self.staged_text(mt), self.staged_effect_text(&effect), self.staged_text(result));
+                self.facts.staged.insert(code, staged);
+            }
         }
         // A path a fact in force narrows (`(car x)` …), its type there.
         let t = self.path_typed(e, t);

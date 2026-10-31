@@ -878,6 +878,19 @@ fn string_cmp(rt: &mut Runtime, a: Value, b: Value) -> Outcome<std::cmp::Orderin
 }
 
 /// `(sum tag v)`, as FX-26 makes one.
+/// `stage`'s refusal, `(sum failed why)`, a `stage-failure` of kind `kind`
+/// placed at characters `start` to `end` of the code.
+pub fn stage_failed(rt: &mut Runtime, kind: &str, why: &str, start: i64, end: i64) -> Value {
+    let kind = fx26_sum(rt, kind, Value::UNIT);
+    let message = rt.heap.make_string(why);
+    let failure = rt.heap.make_frozen(PRODUCT_KIND, &[kind, message, Value::fixnum(start), Value::fixnum(end)]);
+    fx26_sum(rt, "failed", failure)
+}
+
+fn stage_refused(rt: &mut Runtime, why: &str) -> Value {
+    stage_failed(rt, "refused", why, 0, 0)
+}
+
 fn fx26_sum(rt: &mut Runtime, tag: &str, v: Value) -> Value {
     let tag = rt.heap.intern(tag);
     rt.heap.make_frozen(SUM_KIND, &[tag, v])
@@ -3029,12 +3042,35 @@ prims! {
         };
         Ok(match made {
             Ok(v) => v,
-            Err(why) => {
-                let kind = fx26_sum(rt, "refused", Value::UNIT);
-                let message = rt.heap.make_string(&why);
-                let failure = rt.heap.make_frozen(PRODUCT_KIND, &[kind, message, Value::fixnum(0), Value::fixnum(0)]);
-                fx26_sum(rt, "failed", failure)
-            }
+            Err(why) => stage_refused(rt, &why),
+        })
+    });
+    // `stage` lowered (`rs-scheme-vm`): what the lowering made of the
+    // form's code, checked and lowered again by the checker written in
+    // Rust (the session installs it, `stage_lower`): a list of the datum
+    // that makes the procedure of the module, which the runtime's
+    // `%fx26-stage-lowered` gives `eval`; or the sum `(failed why)`.
+    "%fx26-stage-lower", 1, Some(1), simple!(|rt, a| {
+        let made = match rt.stage_lower {
+            Some(lower) => lower(rt, a[0]),
+            None => Err("this machine cannot stage code".to_string()),
+        };
+        Ok(match made {
+            Ok(v) => v,
+            Err(why) => stage_refused(rt, &why),
+        })
+    });
+    // `stage` on the evaluator written in FX-26 (`fx-ast-eval`): the
+    // module's type, the effect, the result type and the code, as text,
+    // checked by the checker written in Rust (the session installs it,
+    // `stage_check`): `(sum checked text)`, the code as checked, for the
+    // evaluator to parse and run; or `(sum failed why)`.
+    "%fx26-stage-check", 4, Some(4), simple!(|rt, a| {
+        let [mt, e, r, text] = [a[0], a[1], a[2], a[3]].map(|x| get_string(rt, x));
+        let (mt, e, r, text) = (mt?, e?, r?, text?);
+        Ok(match rt.stage_check {
+            Some(check) => check(rt, &mt, &e, &r, &text),
+            None => stage_refused(rt, "this machine cannot stage code"),
         })
     });
 }

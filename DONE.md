@@ -4140,6 +4140,24 @@ is `(maxeff stage spin)`, `stage` a new effect atom, in both checkers.
   checking is not interruptible; `certify`, `install` and sessions (§186's
   list).
 
+**Step 2 (2026-10-30): `rs-scheme-vm` and `fx-ast-eval`.** Both check the
+code with the checker written in Rust, of the standard environment alone
+(`stage.rs`'s `checked`), the wrapper as on every machine; the Rust checker
+notes `M`, `E` and `R` printed whole at the call (`facts.staged`,
+`Checker::staged_text`), as the one written in FX-26 does.
+- **`rs-scheme-vm`**: the lowering gives the code to the runtime's
+  `%fx26-stage-lowered`, which has it checked and lowered
+  (`%fx26-stage-lower`), the lowering a datum (`sx::Sx` made heap data), and
+  gives that Scheme's `eval` (§188): the procedure of the module.
+- **`fx-ast-eval`**: the evaluator runs `stage` itself (`eval-core.fx`'s
+  `ev-stage`): the datum written out, checked (`%stage-check`, the text as
+  checked), read and parsed by the front end's own reader and parser, at
+  positions past any of a program's, and run in no environment but the
+  standard one. So its `evals` holds reading and parsing.
+- Either way the code runs on the program's own machine, so it calls `m`'s
+  procedures, and reaches what they and `m` hold, as the program does:
+  `programs/stage/state.fx`, on every machine.
+
 Test: `fixpt-cli/tests/stage.rs` (`programs/stage/stage.fx`: accepted, a
 type refused, a name unbound, an effect beyond `E`, a definition, I/O
 within `E`, a procedure made, and thirty made while values wait on the

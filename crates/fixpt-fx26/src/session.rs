@@ -805,6 +805,8 @@ impl Fx26Session {
             .map_err(|e| FxError::at(Span::new(FileId(0), 0, 0), format!("the FX-26 runtime failed to load: {e}")))?;
         scheme.engine.set_step_limit(Some(DEFAULT_STEP_LIMIT));
         scheme.runtime_unrooted().type_at = Some(crate::typeat::type_at);
+        scheme.runtime_unrooted().stage_lower = Some(crate::stage::lower_staged);
+        scheme.runtime_unrooted().stage_check = Some(crate::stage::check_staged);
         // The front end run as register code (`front_end_compiled`), read
         // back from its cache, on the hand register machine (where no
         // machine code runs, the cellular machine written in Rust): lowered,

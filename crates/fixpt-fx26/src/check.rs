@@ -715,6 +715,10 @@ pub struct NodeFacts {
     /// position in the module, in order: what lowering and the compilers
     /// bind.
     pub with_vals: HashMap<ExpId, Vec<(Sym, usize)>>,
+    /// Each `stage`'s code: the module's type, the effect and the type it
+    /// is checked at, printed whole (`Checker::staged_text`), which the
+    /// lowering gives `%fx26-stage-lowered` with it.
+    pub staged: HashMap<ExpId, (String, String, String)>,
     /// Modules given where a type with fewer values, or the same in
     /// another order, is wanted: for each value the wanted type has, its
     /// position in the module given. Made into a module of that layout.
@@ -789,6 +793,7 @@ impl NodeFacts {
         self.no_escape.retain(|e| e.0 < first);
         self.datum.retain(|e, _| e.0 < first);
         self.with_vals.retain(|e, _| e.0 < first);
+        self.staged.retain(|e, _| e.0 < first);
         self.reshaped.retain(|e, _| e.0 < first);
         self.converted.retain(|e, _| e.0 < first);
         self.masked.retain(|e| e.0 < first);

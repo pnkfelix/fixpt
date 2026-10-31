@@ -1,16 +1,20 @@
 //! `stage` (`docs/research/eval.md`), as `fixpt run` performs it: code a
 //! program gives as a datum, checked against a module's type, an effect
 //! and a type as the program runs, and made a procedure, or refused with a
-//! value saying why and where (`programs/stage/`). On every machine that
-//! compiles with the compilers written in FX-26; the lowering's and the
-//! evaluator's refuse all code, saying they cannot stage it.
+//! value saying why and where (`programs/stage/`), on every machine: those
+//! that compile with the compilers written in FX-26, the lowering's
+//! (`rs-scheme-vm`, the code checked and lowered by the Rust front end, and
+//! given Scheme's `eval`), and the evaluator's (`fx-ast-eval`, the code
+//! checked by the checker written in Rust and run by the evaluator).
 use std::process::{Command, Stdio};
 
 const FIXPT: &str = env!("CARGO_BIN_EXE_fixpt");
 
-/// The machines that stage code: cellular words, interpreted and compiled,
-/// register code, and native code where it runs.
+/// The machines: the lowering's, the evaluator's, cellular words,
+/// interpreted and compiled, register code, and native code where it runs.
 const STAGING: &[&str] = &[
+    "rs-scheme-vm",
+    "fx-ast-eval",
     "fx-cells-rsinterp",
     "fx-cells-asminterp",
     "fx-cells-rsjit-cellcc",
@@ -82,14 +86,14 @@ fn a_process_stages_while_another_runs() {
     }
 }
 
-/// Where code is not compiled by the compilers written in FX-26, every
-/// `stage` is refused, as a value the program sees.
+/// Staged code changes the program's state through `m`: a reference it
+/// holds, and a global one of its procedures names; the program sees both.
 #[test]
-fn a_machine_that_cannot_stage_says_so() {
-    for m in ["rs-scheme-vm", "fx-ast-eval"] {
-        let (status, out, err) = run(m, "stage.fx");
-        assert_eq!(status, Some(0), "{m}: {err}");
-        assert!(out.lines().filter(|l| l.contains("cannot stage code")).count() == 9, "{m}: {out}");
+fn staged_code_changes_what_the_module_reaches() {
+    let runs: Vec<_> = STAGING.iter().filter(|m| runs_here(m)).map(|m| (*m, std::thread::spawn(move || run(m, "state.fx")))).collect();
+    for (m, t) in runs {
+        let (status, out, err) = t.join().expect("ran");
+        assert_eq!((status, out.as_str()), (Some(0), "made\n2 15\n"), "{m}: {err}");
     }
 }
 

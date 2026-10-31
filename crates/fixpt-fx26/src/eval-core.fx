@@ -22,10 +22,15 @@
        (check-subst-types (load-module "fx26:check-subst-types.fx")))
   ;; What it is given: the evaluator's values and primitives, and the
   ;; checker's environment (`check-env.fx`) and resolution (`check-resolve.fx`).
+  ;; And the reader's and the parser's entries, for `stage` (`ev-stage`).
   (lambda ((values (select eval-types eval-values-sig))
            (prims (select eval-types eval-prims-sig))
            (env (select check-env-types check-env-sig))
-           (resolve (select check-resolve-types check-resolve-sig)))
+           (resolve (select check-resolve-types check-resolve-sig))
+           (read-text (subr (select eval-types evals) (string int)
+                            (listof (listof (select parser-types syn) acyclic) acyclic)))
+           (parse (subr (select eval-types evals) ((listof (select parser-types syn) acyclic))
+                        (select parser-types presult))))
     (module
 (hide (include eval-types) (include parser-types) (include check-env-types)
       (include check-resolve-types) (include check-types-types) (include check-subst-types))
@@ -40,6 +45,109 @@
 (define genv (ref env @v) (new nil))
 
 (define cell (->* (val) vcell) (lambda (v) (new v)))
+
+;;; ------------------------------------------------------------------- stage
+;; `stage` (`docs/research/eval.md`), which this runs itself: the code, a
+;; datum the program made, written out and checked by the checker written
+;; in Rust (`%stage-check`) against what the checker noted at it
+;; (`n-staged`); then read, parsed and run here, in no environment but the
+;; standard one, and the procedure it makes given the module (`ev-stage`).
+
+;; What the checker noted at the code at `a` `b` `k`: the module's type,
+;; the effect and the result type, in a list of one; none if nothing.
+(define ev-staged-in
+  (->* (k-facts int int int) (listof (productof (1 string) (2 string) (3 string)) acyclic))
+  (lambda (fs a b k)
+    (cond ((null? fs) nil)
+          ((ev-at-is? (extract (car fs) 1) a b k)
+           (tagcase (extract (car fs) 2)
+             (n-staged (m eff r) (cons (product (1 m) (2 eff) (3 r)) nil))
+             (else y (ev-staged-in (cdr fs) a b k))))
+          (else (ev-staged-in (cdr fs) a b k)))))
+
+;; Datum `v` written as the reader reads it, pieces in reverse onto `acc`;
+;; or not, if it is not code (a procedure, say).
+(define-type ev-code (sumof (text (listof string acyclic)) (not-code unit)))
+(define ev-code-pieces (->* (val (listof string acyclic)) ev-code)
+  (lambda (v acc)
+    (typecase v
+      (int n (sum text (cons (int->string n) acc)))
+      (bool b (sum text (cons (if b "#t" "#f") acc)))
+      (string s (sum text (cons (ev-string-text s) acc)))
+      (char c (sum text (cons (string-append "#\\x" (ev-hex (char->integer c))) acc)))
+      (symbol s (sum text (cons (symbol->string s) acc)))
+      (keyword k (sum text (cons (string-append "#:" (symbol->string (keyword->symbol k))) acc)))
+      (nil z (sum text (cons "()" acc)))
+      (f64 x (sum text (cons (f64->string x) acc)))
+      (pair p (ev-code-list p (cons "(" acc)))
+      (else y (sum not-code #u)))))
+(define ev-code-list (->* ((pairof val val @v) (listof string acyclic)) ev-code)
+  (lambda (p acc)
+    (tagcase (ev-code-pieces (car p) acc)
+      (text acc
+        (let ((tail (cdr p)))
+          (typecase tail
+            (nil z (sum text (cons ")" acc)))
+            (pair q (ev-code-list q (cons " " acc)))
+            (else y (tagcase (ev-code-pieces tail (cons " . " acc))
+                      (text acc (sum text (cons ")" acc)))
+                      (not-code u (sum not-code #u)))))))
+      (not-code u (sum not-code #u)))))
+(define ev-string-text (->* (string) string)
+  (lambda (s)
+    (letrec ((go (subr spin (int (listof string acyclic)) (listof string acyclic))
+               (lambda (i acc)
+                 (if (= i (string-length s))
+                     acc
+                     (let ((c (string-ref s i)))
+                       (go (+ i 1)
+                           (cons (cond ((char=? c #\") "\\\"")
+                                       ((char=? c #\\) "\\\\")
+                                       ((char=? c (integer->char 10)) "\\n")
+                                       (else (char->string c)))
+                                 acc)))))))
+      (string-append "\"" (ev-joined (go 0 nil) "") "\""))))
+(define ev-joined (->* ((listof string acyclic) string) string)
+  (lambda (rev acc) (if (null? rev) acc (ev-joined (cdr rev) (string-append (car rev) acc)))))
+(define ev-hex (->* (int) string)
+  (lambda (n)
+    (let ((d (char->string (string-ref "0123456789abcdef" (remainder n 16)))))
+      (if (< n 16) d (string-append (ev-hex (quotient n 16)) d)))))
+
+;; A `stage-failure` as the program sees it, a product of its kind, its
+;; message and its place.
+(define ev-stage-failure
+  (->* ((productof (kind (sumof (unread unit) (malformed unit) (refused unit) (stale unit)))
+                   (message string) (start int) (end int)))
+       val)
+  (lambda (f)
+    (let ((kind (tagcase (extract f kind)
+                  (unread u 'unread) (malformed u 'malformed) (refused u 'refused)
+                  (stale u 'stale))))
+      (the val (o-sum 'failed
+                      (the val (o-product (list (cons 'kind (the val (o-sum kind the-unit)))
+                                                (cons 'message (the val (extract f message)))
+                                                (cons 'start (the val (extract f start)))
+                                                (cons 'end (the val (extract f end)))))))))))
+(define ev-stage-refused (->* (string) val)
+  (lambda (m)
+    (ev-stage-failure (product (kind (sum refused #u)) (message m) (start 0) (end 0)))))
+;; Where the code `stage` runs is read from: past any place of a program's,
+;; so that no fact of the program's is taken for one of it.
+(define ev-stage-base int 1000000000000)
+;; Whether `n` is bound in `e`, not the standard one.
+(define ev-bound? (->* (env symbol) bool)
+  (lambda (e n) (and (not (null? e)) (or (symbol=? (car (car e)) n) (ev-bound? (cdr e) n)))))
+;; Whether `f`, in `e`, is `stage`'s operator: `(proj %stage E R)`, the
+;; standard `%stage`.
+(define ev-stage-op? (->* (exp env) bool)
+  (lambda (f e)
+    (tagcase f
+      (e-proj (body ds a b abk)
+        (tagcase body
+          (e-var (n c d cdk) (and (symbol=? n '%stage) (not (ev-bound? e n))))
+          (else y #f)))
+      (else y #f))))
 
 ;; `e` with `n` bound to a new cell holding `v`.
 (define bind1 (->* (symbol val env) env)
@@ -261,7 +369,9 @@
         ;; A closure: the host's procedure of its arguments.
         (e-lambda (ps body a b abk) (lambda ((xs vals)) (eval body (bind ps xs e))))
         (e-app (f args a b abk)
-          (let* ((fv (eval f e)) (xs (eval-all args e))) (begin (ev-poll) (apply-val fv xs))))
+          (if (ev-stage-op? f e)
+              (ev-stage args e)
+              (let* ((fv (eval f e)) (xs (eval-all args e))) (begin (ev-poll) (apply-val fv xs)))))
         (e-plambda (d body a b abk) (eval body e))
         ;; Regions and places are erased: a `letrena`'s or `letreap`'s
         ;; allocation is the heap's, and its name, the place as a value, is
@@ -303,6 +413,39 @@
                                           e)))))))))
   ;; A module's items, as a `letrec*`'s (`DONE.md` §37): every name first,
   ;; holding #u; then each item's values, in order, in the scope of all.
+  ;; `stage`'s call, `((proj %stage E R) m code)` (`ev-staged-in`).
+  (ev-stage (->* ((listof exp acyclic) env) val)
+    (lambda (args e)
+      (let* ((m (eval (car args) e))
+             (code (car (cdr args)))
+             (noted (ev-staged-in (get ev-facts) (exp-start code) (exp-end code) (exp-kth code)))
+             (v (eval code e)))
+        (if (null? noted)
+            (ev-stage-refused
+             "this machine cannot stage code: what it is checked against is not known")
+            (tagcase (ev-code-pieces v nil)
+              (not-code u (ev-stage-refused "the code is not a datum"))
+              (text rev
+                (let ((n (car noted)))
+                  (tagcase (%stage-check (extract n 1) (extract n 2) (extract n 3)
+                                         (ev-joined rev ""))
+                    (failed f (ev-stage-failure f))
+                    (checked w (ev-stage-run w m))))))))))
+  ;; The code as checked, `w`, read, parsed and run in no environment but
+  ;; the standard one: the procedure of the module it makes, given `m`.
+  (ev-stage-run (->* (string val) val)
+    (lambda (w m)
+      (let ((read (read-text w ev-stage-base)))
+        (if (null? read)
+            (ev-stage-refused "the code as checked does not read")
+            (tagcase (parse (car read))
+              (p-err (msg a b) (ev-stage-refused msg))
+              (p-ok (tops)
+                (if (null? tops)
+                    (ev-stage-refused "the code as checked is no form")
+                    (tagcase (car tops)
+                      (t-exp (x) (the val (o-sum 'ok (apply1 (eval x (the env nil)) m))))
+                      (else y (ev-stage-refused "the code as checked is not an expression"))))))))))
   (eval-module (->* (mod-items env) val)
     (lambda (items e)
       (let ((inner (open-names (module-names items) e)))

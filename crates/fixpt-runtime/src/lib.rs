@@ -48,7 +48,7 @@ pub use error::{Outcome, Thrown};
 pub use num::N;
 pub use prim::{integer_value, low_64_bits, never_collects, EngineOp, PrimDef, PrimKind, PRIMITIVES};
 pub use print::{display_value, write_value};
-pub use runtime::{CallNative, MachineCode, NativeExit, PlaceCode, RunWord, Runtime, Sink, Stage};
+pub use runtime::{CallNative, MachineCode, NativeExit, PlaceCode, RunWord, Runtime, Sink, Stage, StageCheck, StageLower};
 
 use fixpt_heap::Value;
 

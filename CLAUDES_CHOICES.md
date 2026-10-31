@@ -2981,3 +2981,18 @@ of `TODO.md` §141, working on my own.
   checker, which would lose the program's own state.
 - **`rs-scheme-vm` and `fx-ast-eval` refuse**, as `native-procedure` fails
   where it cannot run: the value says so, the program goes on.
+
+### `stage` on `rs-scheme-vm` and `fx-ast-eval` (2026-10-30, TODO §186)
+
+- **The Rust checker checks there**, not a second front end written in
+  FX-26: on these machines nothing else of the front end runs the
+  program's code, and the evaluator could not call a second front end's
+  checker without its effect, `evals`, holding everything the checker
+  does. The checkers agree by design; interruptible checking (§186's 2.)
+  is where the FX-26 one would be wanted.
+- **The evaluator reads and parses the code itself**, rather than being
+  given trees: so `evals` (its `runs`) holds the reader's and parser's
+  effects, at the front end's regions.
+- **Staged code runs where the program's does**: lowered Scheme by `eval`,
+  the evaluator's trees by the evaluator, so values cross nothing.
+

@@ -31,6 +31,15 @@
 ;;; kind `product` (37) and `sum` (36), so that what one is can be told.
 (define (%fx26-product . fields) (apply %make-frozen 37 fields))
 (define (%fx26-sum tag v) (%make-frozen 36 tag v))
+;; `stage` lowered (`docs/research/eval.md`): the code, with what it is
+;; checked against, checked and lowered by the checker written in Rust
+;; (`%fx26-stage-lower`), the datum that makes the procedure of the module
+;; given `eval`, and the procedure the module: the thunk. Or the refusal.
+(define (%fx26-stage-lowered m staged)
+  (let ((made (%fx26-stage-lower staged)))
+    (if (pair? made)
+        (%fx26-sum 'ok ((eval (car made)) m))
+        made)))
 ;; A `vsubr` (`vlambda`): Scheme's own variadic procedure, giving `f` the
 ;; list of its arguments; `apply`, Scheme's. (The cellular machines have
 ;; runtime primitives of these names, which this Scheme shadows.)

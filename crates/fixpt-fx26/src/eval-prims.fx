@@ -498,11 +498,12 @@
       (prim! 'seal-code (lambda (xs) (efail "seal-code: this machine runs no native code")))
       (prim! 'native-procedure
              (lambda (xs) (efail "native-procedure: this machine runs no native code")))
-      ;; `stage` (`docs/research/eval.md`): not yet here, a refusal.
+      ;; `stage` (`docs/research/eval.md`) is run by the evaluator itself, at
+      ;; the form (`eval-core.fx`'s `ev-stage`); `%stage` is named only as
+      ;; its operator, so this is never reached.
       (prim! '%stage
              (lambda (xs)
-               (the val (o-sum 'failed
-                               (ev-stage-refused "this machine cannot stage code yet")))))
+               (the val (o-sum 'failed (ev-stage-refused "`%stage` is called only as `stage`")))))
       (prim! 'clock (lambda (xs) (clock)))
       (prim! 'sleep-until
              (lambda (xs) (begin (sleep-until (int->i64 (as-int (ev-arg xs 0)))) the-unit)))

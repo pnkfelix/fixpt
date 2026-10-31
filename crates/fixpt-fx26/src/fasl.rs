@@ -957,6 +957,24 @@ impl crate::check::Checker {
 }
 
 impl crate::check::Checker {
+    /// Type `t` printed whole, no name in scope used for it, for a checker
+    /// of no program but the standard environment to read: `stage`'s, at
+    /// run time (`facts.staged`). A recursive type is a `mu`.
+    pub fn staged_text(&self, t: crate::ast::TyId) -> String {
+        *self.print_for_fasl.borrow_mut() = Some(HashMap::new());
+        let shown = self.show_ty(t);
+        *self.print_for_fasl.borrow_mut() = None;
+        shown
+    }
+
+    /// The same of effect `e`.
+    pub fn staged_effect_text(&self, e: &crate::ast::Effect) -> String {
+        *self.print_for_fasl.borrow_mut() = Some(HashMap::new());
+        let shown = self.show_effect(e);
+        *self.print_for_fasl.borrow_mut() = None;
+        shown
+    }
+
     /// Type `t` as a program's `.fasl` keeps it, to be read back where the
     /// program is loaded: no name a program defines used for a type but a
     /// module's, each abstract type of a module a global holds `(select

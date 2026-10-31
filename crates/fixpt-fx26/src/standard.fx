@@ -345,6 +345,7 @@
          (("stdin-ready?") "%fx26-stdin-ready?")
          (("terminal-raw") "%fx26-terminal-raw")
          (("native-code?") "%fx26-native-code?")
+         (("%stage-check") "%fx26-stage-check")
          (("process-exit") "%fx26-process-exit")
          (("process-news") "%fx26-process-news")
          (("read-symlink") "%fx26-read-symlink")

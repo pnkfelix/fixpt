@@ -66,6 +66,13 @@ pub struct Runtime {
     /// (`stage`, `docs/research/eval.md`; `fixpt-fx26` installs it): the
     /// front end is above this crate. None: it says it cannot.
     pub stage: Option<Stage>,
+    /// How `%fx26-stage-lower` checks and lowers code a program gives
+    /// (`stage` lowered: `fixpt-fx26` installs it): a datum, or the
+    /// refusal. None: it says it cannot.
+    pub stage_lower: Option<StageLower>,
+    /// How `%fx26-stage-check` checks code a program gives, for the
+    /// evaluator written in FX-26 to run (`fixpt-fx26` installs it).
+    pub stage_check: Option<StageCheck>,
     /// How many steps (cells, or polls in machine code) a run of a word by
     /// `run_word` may take before it stops; unlimited unless set, as the
     /// FX-26 REPL sets it from its step limit for the run of a form.
@@ -108,6 +115,14 @@ pub type TypeAt = fn(&str, i64) -> String;
 /// and what the compilers made of the form's text, the sum the form takes
 /// apart; or why it could not try, which the program sees as a refusal.
 pub type Stage = fn(&mut Runtime, Value, Value) -> Result<Value, String>;
+/// How `stage` lowered makes code: of what the lowering made of the form's
+/// code (the product `Stage` is given), a list of the Scheme datum that
+/// makes the procedure of the module, or the sum `(failed why)`.
+pub type StageLower = fn(&mut Runtime, Value) -> Result<Value, String>;
+/// How `stage` on the evaluator written in FX-26 checks code: of the
+/// module's type, the effect, the result type and the code, as text, the
+/// sum `(checked text)`, the code as checked, or `(failed why)`.
+pub type StageCheck = fn(&mut Runtime, &str, &str, &str, &str) -> Value;
 
 /// How a call between machines left, if not with a value.
 #[derive(Debug)]
@@ -182,6 +197,8 @@ impl Runtime {
             adapt: None,
             type_at: None,
             stage: None,
+            stage_lower: None,
+            stage_check: None,
             word_fuel: u64::MAX,
             run_nanos: 0,
             compile_nanos: 0,
@@ -273,6 +290,8 @@ impl Runtime {
             adapt: None,
             type_at: None,
             stage: None,
+            stage_lower: None,
+            stage_check: None,
             word_fuel: u64::MAX,
             run_nanos: 0,
             compile_nanos: 0,

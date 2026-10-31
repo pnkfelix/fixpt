@@ -225,6 +225,7 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("read-file", "%fx26-read-file", true),
     ("type-at", "%fx26-type-at", true),
     ("%stage", "%fx26-stage", false),
+    ("%stage-check", "%fx26-stage-check", false),
     ("process-start", "%fx26-process-start", true),
     ("process-output", "%fx26-process-output", true),
     ("process-status", "%fx26-process-status", true),
@@ -626,6 +627,8 @@ impl Lowerer<'_> {
         match STANDARD.iter().find(|(n, _, _)| *n == name) {
             // The empty list is the one that is not a name.
             Some((_, "'()", _)) => Sx::quote(Sx::List(Vec::new())),
+            // `stage` lowered checks and lowers its code itself (`stage.rs`).
+            Some(("%stage", _, _)) => Sx::sym("%fx26-stage-lowered"),
             Some((_, scheme, _)) => Sx::sym(*scheme),
             // Checked code names nothing else; keep it visible if it does.
             None => Sx::sym(format!("{}{name}", self.globals.prefix)),
@@ -938,6 +941,12 @@ impl Lowerer<'_> {
         // neither convention, so it gives the procedure back.
         let code = match self.c.facts.conversion_code(e) {
             Some(k) => Sx::call("%fx26-convert", [code, Sx::int(k as i64)]),
+            None => code,
+        };
+        // A `stage`'s code, with what it is checked against, as the
+        // compilers written in FX-26 give it (`n-staged`).
+        let code = match self.c.facts.staged.get(&e) {
+            Some((m, eff, r)) => Sx::call("%fx26-product", [Sx::Str(m.clone()), Sx::Str(eff.clone()), Sx::Str(r.clone()), code]),
             None => code,
         };
         // A module reshaped: a product of the values the type wanted has.
