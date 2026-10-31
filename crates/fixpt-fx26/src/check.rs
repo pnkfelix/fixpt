@@ -65,7 +65,21 @@ pub const STAGE_FAILURE: &str = "(productof (kind (sumof (unread unit) (malforme
 /// types name them: `datum`, what a reader reads (`docs/fx26.md`,
 /// "Datums"), `io-error` and `stage-failure`.
 /// In both checkers (`standard_text`).
-pub const STANDARD_TYPES: [(&str, &str); 3] = [("datum", DATUM), ("io-error", IO_ERROR), ("stage-failure", STAGE_FAILURE)];
+/// A definition a session would make again (`session-redefines`): the name,
+/// its type and the new one, printed, and the session's definitions that
+/// name it.
+pub const SESSION_REDEFINITION: &str = "(productof (name string) (old string) (new string) (users (listof string acyclic)))";
+/// What a redefinition does (`session-commit!`): code staged before keeps
+/// what it saw, code after sees the new; nothing is defined; or (not yet)
+/// the definitions that name it checked and run again.
+pub const SESSION_DECISION: &str = "(sumof (shadow unit) (refuse unit) (rerun unit))";
+pub const STANDARD_TYPES: [(&str, &str); 5] = [
+    ("datum", DATUM),
+    ("io-error", IO_ERROR),
+    ("stage-failure", STAGE_FAILURE),
+    ("session-redefinition", SESSION_REDEFINITION),
+    ("session-decision", SESSION_DECISION),
+];
 pub const FLATLAYOUT: &str = "(flatlayout (t type)) int";
 /// A flat array (`flatarrayof`, Q6), generative type 2: an array to
 /// safety's analyses (its regions), opaque to anything else; its elements
@@ -188,6 +202,15 @@ pub const EVENT: &str = "(event (e effect +)) (subr e () bool)";
 /// them where a `stringof`'s region is still to be found).
 pub const STRINGOF: &str = "(stringof (r region)) (arrayof char r)";
 pub(crate) const STRINGOF_INDEX: u32 = 14;
+/// A session (`docs/research/eval.md`, "Sessions"), generative type 15:
+/// definitions that last between pieces of code staged against a module of
+/// type `m`, the session's state at `r`, which defining in it writes.
+pub const SESSIONOF: &str = "(sessionof (m type) (r region)) (ref m r)";
+pub(crate) const SESSIONOF_INDEX: u32 = 15;
+/// A definition checked against a session at `r`, not yet made, generative
+/// type 16: its initializer does `e` when it is (`session-commit!`).
+pub const PENDING: &str = "(pending (e effect +) (r region)) (subr (maxeff e (read r)) () unit)";
+pub(crate) const PENDING_INDEX: u32 = 16;
 /// The scheduler of processes and `par`, a module file built in, which the
 /// forms `spawn`, `send`, `receive`, `par`, `icell-get` and `icell-put!`
 /// call through the hidden global of its load (`Checker::library_type`).
@@ -1024,7 +1047,7 @@ impl Checker {
         // (no `up-` or `down-`: a `vsubr` is called with its arguments, not
         // their list). `vlambda` makes one; `apply` calls one on a list.
         c.arena.string_sym = Some(c.interner.intern("string"));
-        for decl in [VSUBR, FLATLAYOUT, FLATARRAYOF, IDENTITY, EQTABLE, BLOBREF, FLAT_ARRAYOF, FLAT_KEYED, BYTEVECTOROF, ESCAPE_TAG, ADDR, INBOX, PROCESS, EVENT, STRINGOF] {
+        for decl in [VSUBR, FLATLAYOUT, FLATARRAYOF, IDENTITY, EQTABLE, BLOBREF, FLAT_ARRAYOF, FLAT_KEYED, BYTEVECTOROF, ESCAPE_TAG, ADDR, INBOX, PROCESS, EVENT, STRINGOF, SESSIONOF, PENDING] {
             let forms = c.read(decl).expect("reads");
             c.define_generative(&forms[0], &forms[1]).unwrap_or_else(|e| panic!("`{decl}` is wrong: {e}"));
         }

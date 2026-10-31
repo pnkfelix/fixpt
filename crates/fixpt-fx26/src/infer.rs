@@ -585,32 +585,57 @@ impl Checker {
         };
         // `stage` (`docs/research/eval.md`): its module given by its name,
         // the checker that runs then taking `M` from its type, as the one
-        // written in FX-26 does (`k-staged`).
+        // written in FX-26 does (`k-staged`); and a session's, its session
+        // by its name, `M` from the session's type.
         if let Exp::Proj { body, .. } = self.arena.exp_at(fun).clone()
-            && self.standard_ref(body).is_some_and(|op| self.interner.name(op) == "%stage")
-            && let Some(&m) = args.first()
+            && let Some(op) = self.standard_ref(body).map(|op| self.interner.name(op).to_string())
+            && matches!(op.as_str(), "%stage" | "%session-stage" | "%session-define")
+            && let Some(&target) = args.first()
         {
-            let span = self.arena.span_of(m);
-            let Exp::Var(_) = self.arena.exp_at(m) else { return Err(FxError::at(span, "`stage` takes a module by its name")) };
-            let (mt, _) = self.synth(m)?;
-            let mt = self.arena.resolve(mt);
-            if !matches!(self.arena.get(mt), Ty::Module { .. }) {
-                return Err(FxError::at(span, format!("`stage` takes a module, not a {}", self.show_ty(mt))));
-            }
-            // `(sumof (ok (subr E () R)) …)`: `M`, `E` and `R` noted at the
-            // code, for the lowering.
-            if let Ty::Sum(parts) = self.arena.get(self.arena.resolve(t)).clone()
-                && let Some((_, ok)) = parts.iter().find(|(l, _)| self.interner.name(*l) == "ok")
-                && let Ty::Subr { effect, result, .. } = self.arena.get(self.arena.resolve(*ok)).clone()
-                && let Some(&code) = args.get(1)
-            {
-                let staged = (self.staged_text(mt), self.staged_effect_text(&effect), self.staged_text(result));
-                self.facts.staged.insert(code, staged);
-            }
+            self.note_staged(&op, target, args.get(1).copied(), t)?;
         }
         // A path a fact in force narrows (`(car x)` …), its type there.
         let t = self.path_typed(e, t);
         Ok((t, eff))
+    }
+
+    /// `stage`'s call, or a session's (`op`), of module or session
+    /// `target` and code `code`, of type `t`: `M`, `E` and `R` noted at the
+    /// code, printed whole, for the lowering (`facts.staged`; `R` empty for
+    /// a definition, whose type is found as it is checked).
+    fn note_staged(&mut self, op: &str, target: ExpId, code: Option<ExpId>, t: TyId) -> R<()> {
+        let span = self.arena.span_of(target);
+        let what = if op == "%stage" { "a module" } else { "a session" };
+        let Exp::Var(_) = self.arena.exp_at(target) else {
+            return Err(FxError::at(span, format!("`{}` takes {what} by its name", op.trim_start_matches('%'))));
+        };
+        let (tt, _) = self.synth(target)?;
+        let tt = self.arena.resolve(tt);
+        let mt = match (op, self.arena.get(tt).clone()) {
+            ("%stage", Ty::Module { .. }) => tt,
+            (_, Ty::Named { which: crate::check::SESSIONOF_INDEX, args }) if op != "%stage" => match args.first() {
+                Some(D::Type(m)) => *m,
+                _ => return Err(FxError::at(span, "a session's module type")),
+            },
+            _ => return Err(FxError::at(span, format!("`{}` takes {what}, not a {}", op.trim_start_matches('%'), self.show_ty(tt)))),
+        };
+        // `(sumof (ok X) …)`: `X` `(subr E () R)`, or a definition's
+        // `(pending E r)`.
+        let Ty::Sum(parts) = self.arena.get(self.arena.resolve(t)).clone() else { return Ok(()) };
+        let Some(&(_, ok)) = parts.iter().find(|(l, _)| self.interner.name(*l) == "ok") else { return Ok(()) };
+        let (effect, result) = match self.arena.get(self.arena.resolve(ok)).clone() {
+            Ty::Subr { effect, result, .. } => (effect, Some(result)),
+            Ty::Named { which: crate::check::PENDING_INDEX, args } => match args.first() {
+                Some(D::Effect(e)) => (e.clone(), None),
+                _ => return Ok(()),
+            },
+            _ => return Ok(()),
+        };
+        if let Some(code) = code {
+            let staged = (self.staged_text(mt), self.staged_effect_text(&effect), result.map(|r| self.staged_text(r)).unwrap_or_default());
+            self.facts.staged.insert(code, staged);
+        }
+        Ok(())
     }
 
     fn made_native(&mut self, e: ExpId, t: TyId) -> R<TyId> {

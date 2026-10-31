@@ -922,6 +922,7 @@ mod terminate;
 pub mod cellular;
 pub mod debts;
 pub mod fasl;
+pub mod sessions;
 pub mod stage;
 pub mod sx;
 pub mod typeat;

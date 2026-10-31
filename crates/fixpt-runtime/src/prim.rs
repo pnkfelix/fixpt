@@ -215,7 +215,7 @@ fn run_word_by(rt: &mut Runtime, a: &[Value], run: Option<crate::RunWord>) -> Ou
 /// code calls it as it calls what is not native code, its frames' values
 /// kept where a collection finds them (`call_foreign`).
 pub fn reenters(name: &str) -> bool {
-    name == "%fx26-stage"
+    matches!(name, "%fx26-stage" | "%fx26-session-stage" | "%fx26-session-define" | "%fx26-session-ready")
 }
 
 fn is_closure(rt: &Runtime, f: Value) -> bool {
@@ -885,6 +885,19 @@ pub fn stage_failed(rt: &mut Runtime, kind: &str, why: &str, start: i64, end: i6
     let message = rt.heap.make_string(why);
     let failure = rt.heap.make_frozen(PRODUCT_KIND, &[kind, message, Value::fixnum(start), Value::fixnum(end)]);
     fx26_sum(rt, "failed", failure)
+}
+
+/// Session operation `op` on `a`, by the checker's side (`sessions`): its
+/// value, or a refusal saying why it could not.
+fn session_op(rt: &mut Runtime, op: &str, a: &[Value]) -> Outcome<Value> {
+    let made = match rt.sessions {
+        Some(f) => f(rt, op, a),
+        None => Err("this machine cannot keep sessions yet".to_string()),
+    };
+    Ok(match made {
+        Ok(v) => v,
+        Err(why) => stage_refused(rt, &why),
+    })
 }
 
 fn stage_refused(rt: &mut Runtime, why: &str) -> Value {
@@ -3065,6 +3078,21 @@ prims! {
     // checked by the checker written in Rust (the session installs it,
     // `stage_check`): `(sum checked text)`, the code as checked, for the
     // evaluator to parse and run; or `(sum failed why)`.
+    // Sessions (`docs/research/eval.md`, "Sessions"): one made, of module
+    // `a[0]`, a vector of it and the number of its state, kept by the
+    // checker's side (`fixpt-fx26`'s `sessions.rs`), none yet. The rest
+    // ask that side (`sessions`), by name: code staged in one, a definition
+    // checked against it (`(sum ok pending)`), whether a pending one
+    // redefines, readied given the decision, recorded; and, lowered
+    // (`rs-scheme-vm`), the Scheme each makes, for `eval`.
+    "%fx26-make-session", 1, Some(1), simple!(|rt, a| Ok(rt.heap.vector_from(&[a[0], Value::fixnum(-1)])));
+    "%fx26-session-stage", 2, Some(2), simple!(|rt, a| session_op(rt, "stage", a));
+    "%fx26-session-define", 2, Some(2), simple!(|rt, a| session_op(rt, "define", a));
+    "%fx26-session-redefines", 2, Some(2), simple!(|rt, a| session_op(rt, "redefines", a));
+    "%fx26-session-ready", 3, Some(3), simple!(|rt, a| session_op(rt, "ready", a));
+    "%fx26-session-committed!", 2, Some(2), simple!(|rt, a| session_op(rt, "committed", a));
+    "%fx26-session-lower", 3, Some(3), simple!(|rt, a| session_op(rt, "lower", a));
+    "%fx26-session-commit-lower", 3, Some(3), simple!(|rt, a| session_op(rt, "commit-lower", a));
     "%fx26-stage-check", 4, Some(4), simple!(|rt, a| {
         let [mt, e, r, text] = [a[0], a[1], a[2], a[3]].map(|x| get_string(rt, x));
         let (mt, e, r, text) = (mt?, e?, r?, text?);

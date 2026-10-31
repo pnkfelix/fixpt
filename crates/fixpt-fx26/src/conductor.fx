@@ -398,21 +398,19 @@
            (load-input "fx26:x86_64.fx") native-direct-layout layout native-direct-asm native-reps
            native-direct-raw native-direct-proc native-direct-ops native-direct-prims))
          ;; `stage` (`docs/research/eval.md`): code a running program gives,
-         ;; checked by this instance, as `(with m text)` of type `r` whose
-         ;; evaluation's effect is within `e`, for `m` of module type `mt`, in
-         ;; the standard environment alone; and compiled, to the word that
-         ;; makes `(lambda ((m mt)) (lambda () (with m text)))`. Or why not,
-         ;; as `stage-failure` says it, placed in `text`. Each type as the
-         ;; checker that checked the form printed it.
+         ;; wrapped as `stage.rs` wraps it, checked by this instance in the
+         ;; standard environment alone, and compiled to the word that makes
+         ;; the procedure the wrapping is. Or why not, as `stage-failure`
+         ;; says it, placed in the code.
          (stage-check
           (let* ((fail
                   (lambda ((k (sumof (unread unit) (malformed unit) (refused unit) (stale unit)))
                            (m string) (a int) (b int))
                     (sum failed (product (kind k) (message m) (start a) (end b)))))
-                 ;; Place `n` of the text checked, in `text`, which starts at `k`.
+                 ;; Place `n` of the text checked, in the code, which starts at `k`.
                  (clamp (lambda ((n int) (k int) (len int))
                           (let ((at (- n k))) (cond ((< at 0) 0) ((> at len) len) (else at)))))
-                 ;; The text checked, `prefix` then `text`, its trees `tops`.
+                 ;; The text checked, its trees `tops`.
                  (checked
                   (lambda ((standard (listof syn acyclic)) (tops (listof top acyclic))
                            (k int) (len int) (native bool) (registers bool))
@@ -430,29 +428,20 @@
                                     ((with check-env checked-extracts)))
                             (c-ok (w) (sum made w))
                             (c-err (m) (fail (sum refused #u) m 0 len)))))))))
-            (lambda ((standard (listof syn acyclic)) (mt string) (e string) (r string)
-                     (text string) (native bool) (registers bool))
-              (let* ((len (string-length text))
-                     (alone (read-text-at text 0))
-                     (prefix (string-append "(the (subr pure (" mt ") (subr " e " () " r "))\n"
-                                            "(lambda ((stage-module " mt "))\n"
-                                            "(lambda () (with stage-module\n"))
-                     (k (string-length prefix))
-                     (whole (read-text-at (string-append prefix text "\n))))\n") 0))
-                     (unread "the text is not one whole expression"))
-                ;; One datum, read alone, cannot reach past the parentheses
-                ;; around it.
-                (cond ((or (null? alone) (null? (car alone)) (not (null? (cdr (car alone))))
-                           (null? whole))
-                       (fail (sum unread #u) unread 0 len))
-                      (else
-                       (begin
-                         (loaded-files! nil)
-                         (includes-given! nil)
-                         (tagcase (parse-program (car whole))
-                           (p-err (m a b)
-                             (fail (sum malformed #u) m (clamp a k len) (clamp b k len)))
-                           (p-ok (tops) (checked standard tops k len native registers)))))))))))
+            ;; The code wrapped (`stage.rs`'s `wrapped`), `whole`, the code
+            ;; `len` characters at `k` of it.
+            (lambda ((standard (listof syn acyclic)) (whole string) (k int) (len int)
+                     (native bool) (registers bool))
+              (let ((read (read-text-at whole 0)))
+                (if (null? read)
+                    (fail (sum unread #u) "the code is not one whole expression" 0 len)
+                    (begin
+                      (loaded-files! nil)
+                      (includes-given! nil)
+                      (tagcase (parse-program (car read))
+                        (p-err (m a b)
+                          (fail (sum malformed #u) m (clamp a k len) (clamp b k len)))
+                        (p-ok (tops) (checked standard tops k len native registers))))))))))
     ;; What Rust and `bootstrap.fx` call of them (`syn.rs`, `session.rs`).
     (product (run-checked (with eval-core run-checked))
              (run-checked-more (with eval-core run-checked-more))

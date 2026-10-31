@@ -35,6 +35,21 @@
 ;; checked against, checked and lowered by the checker written in Rust
 ;; (`%fx26-stage-lower`), the datum that makes the procedure of the module
 ;; given `eval`, and the procedure the module: the thunk. Or the refusal.
+;; A session's steps lowered (`sessions.rs`): code staged in it, the datum
+;; that makes the thunk, given `eval`; a definition checked, the pending one
+;; given back as it is; one committed, the datum that defines it given
+;; `eval` when the program runs the initializer (`session-commit!`), and
+;; nothing more to record after.
+(define (%fx26-session-stage-lowered s staged)
+  (let ((made (%fx26-session-lower s staged #f)))
+    (if (pair? made) (%fx26-sum 'ok (eval (car made))) made)))
+(define (%fx26-session-define-lowered s staged) (%fx26-session-lower s staged #t))
+(define (%fx26-session-ready-lowered s d decision)
+  (let ((made (%fx26-session-commit-lower s d decision)))
+    (if (pair? made)
+        (%fx26-sum 'go (lambda () (eval (car made)) %fx26-unit))
+        made)))
+(define (%fx26-session-committed-lowered s d) (%fx26-sum 'defined %fx26-unit))
 (define (%fx26-stage-lowered m staged)
   (let ((made (%fx26-stage-lower staged)))
     (if (pair? made)

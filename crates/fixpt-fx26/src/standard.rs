@@ -264,6 +264,17 @@ pub const ENTRIES: &[(&str, &str)] = &[
     // `stage`'s code checked by the checker written in Rust, the text as
     // checked or why not (`stage.rs`'s `check_staged`).
     ("%stage-check", "(subr (maxeff spin (io fs-read)) (string string string string) (sumof (checked string) (failed stage-failure)))"),
+    // Sessions (`docs/research/eval.md`, "Sessions"): a module's code's
+    // definitions, which last. `session-stage` and `session-define` are
+    // forms over `%session-stage` and `%session-define`, checked at each
+    // call as `stage` is; `session-commit!` one over `%session-ready`, the
+    // initializer the program runs, then `%session-committed!`.
+    ("make-session", "(poly ((r region)) (poly ((m type)) (subr (alloc r) (m) (sessionof m r))))"),
+    ("%session-stage", "(poly ((e effect) (t type)) (poly ((m type) (r region)) (subr (maxeff stage spin (read r)) ((sessionof m r) datum) (sumof (ok (subr e () t)) (failed stage-failure)))))"),
+    ("%session-define", "(poly ((e effect)) (poly ((m type) (r region)) (subr (maxeff stage spin (read r)) ((sessionof m r) datum) (sumof (ok (pending e r)) (failed stage-failure)))))"),
+    ("session-redefines", "(poly ((m type) (r region) (e effect)) (subr (read r) ((sessionof m r) (pending e r)) (sumof (fresh unit) (redefines session-redefinition))))"),
+    ("%session-ready", "(poly ((m type) (r region) (e effect)) (subr (read r) ((sessionof m r) (pending e r) session-decision) (sumof (go (subr (maxeff e (write r)) () unit)) (failed stage-failure))))"),
+    ("%session-committed!", "(poly ((m type) (r region) (e effect)) (subr (maxeff (read r) (write r)) ((sessionof m r) (pending e r)) (sumof (defined unit) (failed stage-failure))))"),
     ("%stage", "(poly ((e effect) (r type)) (poly ((m type)) (subr (maxeff stage spin) (m datum) (sumof (ok (subr e () r)) (failed stage-failure)))))"),
     // Heist's (`FIXPT-CHANGES.md` F4): programs run beside this one, by
     // number. Started by name and arguments, in a directory (\"\": this
@@ -743,6 +754,8 @@ pub fn standard_text() -> String {
         crate::check::PROCESS,
         crate::check::EVENT,
         crate::check::STRINGOF,
+        crate::check::SESSIONOF,
+        crate::check::PENDING,
     ]
         .iter()
         .map(|d| format!("(define-generative {d})\n"))

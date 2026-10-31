@@ -226,6 +226,12 @@ pub const STANDARD: &[(&str, &str, bool)] = &[
     ("type-at", "%fx26-type-at", true),
     ("%stage", "%fx26-stage", false),
     ("%stage-check", "%fx26-stage-check", false),
+    ("make-session", "%fx26-make-session", false),
+    ("%session-stage", "%fx26-session-stage", false),
+    ("%session-define", "%fx26-session-define", false),
+    ("session-redefines", "%fx26-session-redefines", false),
+    ("%session-ready", "%fx26-session-ready", false),
+    ("%session-committed!", "%fx26-session-committed!", false),
     ("process-start", "%fx26-process-start", true),
     ("process-output", "%fx26-process-output", true),
     ("process-status", "%fx26-process-status", true),
@@ -627,8 +633,13 @@ impl Lowerer<'_> {
         match STANDARD.iter().find(|(n, _, _)| *n == name) {
             // The empty list is the one that is not a name.
             Some((_, "'()", _)) => Sx::quote(Sx::List(Vec::new())),
-            // `stage` lowered checks and lowers its code itself (`stage.rs`).
+            // `stage` lowered checks and lowers its code itself (`stage.rs`),
+            // and a session's steps (`sessions.rs`).
             Some(("%stage", _, _)) => Sx::sym("%fx26-stage-lowered"),
+            Some(("%session-stage", _, _)) => Sx::sym("%fx26-session-stage-lowered"),
+            Some(("%session-define", _, _)) => Sx::sym("%fx26-session-define-lowered"),
+            Some(("%session-ready", _, _)) => Sx::sym("%fx26-session-ready-lowered"),
+            Some(("%session-committed!", _, _)) => Sx::sym("%fx26-session-committed-lowered"),
             Some((_, scheme, _)) => Sx::sym(*scheme),
             // Checked code names nothing else; keep it visible if it does.
             None => Sx::sym(format!("{}{name}", self.globals.prefix)),

@@ -4140,6 +4140,22 @@ is `(maxeff stage spin)`, `stage` a new effect atom, in both checkers.
   checking is not interruptible; `certify`, `install` and sessions (§186's
   list).
 
+**Sessions, step 1 (2026-10-31): on `rs-scheme-vm`.** `make-session`,
+`session-stage`, `session-define` (a pending definition), `session-redefines`
+and `session-commit!` (`docs/fx26.md`, "Sessions"; decided with the user:
+two steps, `E` written, types found, the decision the program's, anywhere,
+so a continuation may be captured before it). A session's state is a
+checker written in Rust, the REPL's own top level made one per session
+(`sessions.rs`): a pending definition is `try_top`, a commit
+`top_defining`, re-runs waiting for `shadow` and not for `rerun`, and the
+users a redefinition reports the checker's. `m`'s values are its first
+definitions (`(define n (with stage-module n))`, `stage-module` the global
+`m` is given). Lowered, each session's globals are named by a prefix of its
+own, and each step's Scheme given to `eval`. `(sessionof M r)` and
+`(pending E r)` are generative types 15 and 16; `session-commit!` a form,
+so that the program, not a primitive, runs the initializer. Test:
+`stage.rs`'s `a_session_keeps_definitions` (`programs/stage/session.fx`).
+
 **Step 2 (2026-10-30): `rs-scheme-vm` and `fx-ast-eval`.** Both check the
 code with the checker written in Rust, of the standard environment alone
 (`stage.rs`'s `checked`), the wrapper as on every machine; the Rust checker

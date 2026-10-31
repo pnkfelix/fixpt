@@ -346,6 +346,7 @@
          (("terminal-raw") "%fx26-terminal-raw")
          (("native-code?") "%fx26-native-code?")
          (("%stage-check") "%fx26-stage-check")
+         (("make-session") "%fx26-make-session")
          (("process-exit") "%fx26-process-exit")
          (("process-news") "%fx26-process-news")
          (("read-symlink") "%fx26-read-symlink")
@@ -406,6 +407,8 @@
        (case n
          (("make-flatarray") "%fx26-make-flatarray")
          (("flatarray-set!") "%fx26-flatarray-set!")
+         (("%session-stage") "%fx26-session-stage")
+         (("%session-ready") "%fx26-session-ready")
          (("process-output") "%fx26-process-output")
          (("process-status") "%fx26-process-status")
          (("process-signal") "%fx26-process-signal")
@@ -421,6 +424,7 @@
          (else "")))
       ((15)
        (case n
+         (("%session-define") "%fx26-session-define")
          (("make-bytevector") "make-bytevector")
          (("bytevector-copy") "%fx26-bytevector-copy")
          (("string-downcase") "%fx26-string-downcase")
@@ -445,6 +449,7 @@
       ((17)
        (case n
          (("native-convention") "%fx26-native-convention")
+         (("session-redefines") "%fx26-session-redefines")
          (("bytevector-length") "bytevector-length")
          (("bytevector-u8-ref") "bytevector-u8-ref")
          (("set-register-twin") "%set-register-twin")
@@ -458,6 +463,7 @@
          (else "")))
       ((19)
        (case n
+         (("%session-committed!") "%fx26-session-committed!")
          (("process-close-input") "%fx26-process-close-input")
          (("%string-append-list") "%fx26-string-append-list")
          (("%syscall-available?") "%fx26-syscall-available?")

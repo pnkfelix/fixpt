@@ -807,6 +807,7 @@ impl Fx26Session {
         scheme.runtime_unrooted().type_at = Some(crate::typeat::type_at);
         scheme.runtime_unrooted().stage_lower = Some(crate::stage::lower_staged);
         scheme.runtime_unrooted().stage_check = Some(crate::stage::check_staged);
+        scheme.runtime_unrooted().sessions = Some(crate::sessions::op);
         // The front end run as register code (`front_end_compiled`), read
         // back from its cache, on the hand register machine (where no
         // machine code runs, the cellular machine written in Rust): lowered,

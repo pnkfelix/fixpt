@@ -1565,13 +1565,22 @@ impl Checker {
                 self.parse_exp(&call)
             }
             // Code a running program gives (`docs/research/eval.md`):
-            // `(stage m E R text (p body …) (why else …))` is `(tagcase
-            // ((proj %stage E R) m text) (ok p body …) (failed why else
-            // …))`, `%stage` checked at its call as `m`'s type says.
-            "stage" => {
-                let usage = "`(stage module effect type code (procedure body …) (failure else …))`";
-                let [_, m, e, r, text, ok, failed] = &items[..] else {
-                    return Err(FxError::at(span, usage));
+            // `(stage m E R code (p body …) (why else …))` is `(tagcase
+            // ((proj %stage E R) m code) (ok p body …) (failed why else
+            // …))`, `%stage` checked at its call as `m`'s type says; so are
+            // a session's, `(session-stage s E R code (p …) (why …))` over
+            // `%session-stage`, and `(session-define s E code (d …) (why
+            // …))` over `%session-define`, `d` a pending definition.
+            head @ ("stage" | "session-stage" | "session-define") => {
+                let (op, usage) = match head {
+                    "stage" => ("%stage", "`(stage module effect type code (procedure body …) (failure else …))`"),
+                    "session-stage" => ("%session-stage", "`(session-stage session effect type code (procedure body …) (failure else …))`"),
+                    _ => ("%session-define", "`(session-define session effect code (pending body …) (failure else …))`"),
+                };
+                let (target, descs, code, ok, failed) = match (&items[..], op) {
+                    ([_, t, e, code, ok, failed], "%session-define") => (t, vec![e.clone()], code, ok, failed),
+                    ([_, t, e, r, code, ok, failed], o) if o != "%session-define" => (t, vec![e.clone(), r.clone()], code, ok, failed),
+                    _ => return Err(FxError::at(span, usage)),
                 };
                 let sym = |p: &mut Self, s: &str| Syntax::symbol(span, p.interner.intern(s));
                 let arm = |p: &mut Self, tag: &str, a: &Syntax| -> R<Syntax> {
@@ -1585,9 +1594,31 @@ impl Checker {
                     }
                 };
                 let (ok, failed) = (arm(self, "ok", ok)?, arm(self, "failed", failed)?);
-                let op = Syntax::list(span, vec![sym(self, "proj"), sym(self, "%stage"), e.clone(), r.clone()]);
-                let call = Syntax::list(span, vec![op, m.clone(), text.clone()]);
+                let mut proj = vec![sym(self, "proj"), sym(self, op)];
+                proj.extend(descs);
+                let call = Syntax::list(span, vec![Syntax::list(span, proj), target.clone(), code.clone()]);
                 let form = Syntax::list(span, vec![sym(self, "tagcase"), call, ok, failed]);
+                self.parse_exp(&form)
+            }
+            // `(session-commit! s d decision)`: the initializer, which the
+            // program runs, then what it made recorded, or why not (`(let
+            // ((%session s) (%pending d) (%decision decision)) (tagcase
+            // (%session-ready %session %pending %decision) (go %run (begin
+            // (%run) (%session-committed! %session %pending))) (failed %why
+            // (sum failed %why))))`).
+            "session-commit!" => {
+                let [_, sess, pending, decision] = &items[..] else {
+                    return Err(FxError::at(span, "`(session-commit! session pending decision)`"));
+                };
+                let sym = |p: &mut Self, s: &str| Syntax::symbol(span, p.interner.intern(s));
+                let list = |xs: Vec<Syntax>| Syntax::list(span, xs);
+                let bind = |p: &mut Self, n: &str, x: &Syntax| list(vec![sym(p, n), x.clone()]);
+                let bs = list(vec![bind(self, "%session", sess), bind(self, "%pending", pending), bind(self, "%decision", decision)]);
+                let ready = list(vec![sym(self, "%session-ready"), sym(self, "%session"), sym(self, "%pending"), sym(self, "%decision")]);
+                let committed = list(vec![sym(self, "%session-committed!"), sym(self, "%session"), sym(self, "%pending")]);
+                let go = list(vec![sym(self, "go"), sym(self, "%run"), list(vec![sym(self, "begin"), list(vec![sym(self, "%run")]), committed])]);
+                let failed = list(vec![sym(self, "failed"), sym(self, "%why"), list(vec![sym(self, "sum"), sym(self, "failed"), sym(self, "%why")])]);
+                let form = list(vec![sym(self, "let"), bs, list(vec![sym(self, "tagcase"), ready, go, failed])]);
                 self.parse_exp(&form)
             }
             "rlambda" => {

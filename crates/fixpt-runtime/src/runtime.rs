@@ -73,6 +73,9 @@ pub struct Runtime {
     /// How `%fx26-stage-check` checks code a program gives, for the
     /// evaluator written in FX-26 to run (`fixpt-fx26` installs it).
     pub stage_check: Option<StageCheck>,
+    /// How sessions' primitives (`%fx26-session-…`) do what needs a
+    /// checker (`fixpt-fx26` installs it): by the operation's name.
+    pub sessions: Option<Sessions>,
     /// How many steps (cells, or polls in machine code) a run of a word by
     /// `run_word` may take before it stops; unlimited unless set, as the
     /// FX-26 REPL sets it from its step limit for the run of a form.
@@ -123,6 +126,9 @@ pub type StageLower = fn(&mut Runtime, Value) -> Result<Value, String>;
 /// module's type, the effect, the result type and the code, as text, the
 /// sum `(checked text)`, the code as checked, or `(failed why)`.
 pub type StageCheck = fn(&mut Runtime, &str, &str, &str, &str) -> Value;
+/// A session's operation, by name, on its arguments: what the primitive
+/// gives, or why it could not try, which the program sees as a refusal.
+pub type Sessions = fn(&mut Runtime, &str, &[Value]) -> Result<Value, String>;
 
 /// How a call between machines left, if not with a value.
 #[derive(Debug)]
@@ -199,6 +205,7 @@ impl Runtime {
             stage: None,
             stage_lower: None,
             stage_check: None,
+            sessions: None,
             word_fuel: u64::MAX,
             run_nanos: 0,
             compile_nanos: 0,
@@ -292,6 +299,7 @@ impl Runtime {
             stage: None,
             stage_lower: None,
             stage_check: None,
+            sessions: None,
             word_fuel: u64::MAX,
             run_nanos: 0,
             compile_nanos: 0,

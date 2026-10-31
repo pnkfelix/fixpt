@@ -274,13 +274,36 @@
         ;; Code a running program gives (`docs/research/eval.md`): `(stage m
         ;; E R text (p body …) (why else …))` is `(tagcase ((proj %stage E R)
         ;; m text) (ok p body …) (failed why else …))`, as `parse.rs`.
-        ((stage)
+        ;; So are a session's: `(session-stage s E R code …)` over
+        ;; `%session-stage`, `(session-define s E code (d …) (why …))` over
+        ;; `%session-define`.
+        ((stage session-stage)
          (begin (arity items 7 stage-usage a b)
-                (e-tagcase (e-app (e-proj (e-var '%stage a b 0)
-                                          (keep (list (nth items 2) (nth items 3))) a b 0)
-                                  (list (parse-nth items 1) (parse-nth items 4)) a b 0)
-                           (list (stage-arm 'ok (nth items 5)) (stage-arm 'failed (nth items 6)))
-                           nil nil a b 0)))
+                (stage-form (if (symbol=? head 'stage) '%stage '%session-stage)
+                            (keep (list (nth items 2) (nth items 3))) items 4 a b)))
+        ((session-define)
+         (begin (arity items 6 stage-usage a b)
+                (stage-form '%session-define (keep (list (nth items 2))) items 3 a b)))
+        ;; `(session-commit! s d decision)`: the initializer, which the
+        ;; program runs, then what it made recorded, or why not, as
+        ;; `parse.rs`.
+        ((session-commit!)
+         (begin (arity items 4 "`(session-commit! session pending decision)`" a b)
+                (let* ((v (lambda ((n symbol)) (e-var n a b 0)))
+                       (call (lambda ((f symbol) (xs (listof exp acyclic))) (e-app (v f) xs a b 0)))
+                       (ready (call '%session-ready
+                                    (list (v '%session) (v '%pending) (v '%decision))))
+                       (done (call '%session-committed! (list (v '%session) (v '%pending)))))
+                  (e-let (list (product (1 '%session) (2 (parse-nth items 1)))
+                               (product (1 '%pending) (2 (parse-nth items 2)))
+                               (product (1 '%decision) (2 (parse-nth items 3))))
+                         (e-tagcase ready
+                                    (list (product (1 'go) (2 #f) (3 (list '%run))
+                                                   (4 (e-begin (list (call '%run nil) done) a b 0)))
+                                          (product (1 'failed) (2 #f) (3 (list '%why))
+                                                   (4 (e-sum 'failed (v '%why) a b 0))))
+                                    nil nil a b 0)
+                         a b 0))))
         ((rlambda)
          (begin (at-least items 3 "`(rlambda region ((name type) …) body …)`" a b)
                 (let ((r (parse-exp (nth items 1))))
@@ -711,6 +734,15 @@
                           (body (parse-arm-body parts c))
                           (rest (parse-arms (cdr cs))))
                      (cons (product (1 tag) (2 fields) (3 ns) (4 body)) rest))))))))
+  ;; `stage`'s form, or a session's, `items`: `(tagcase ((proj op descs …)
+  ;; target code) (ok p …) (failed why …))`, the code at `k`, the arms
+  ;; after it.
+  (stage-form (->* (symbol syns-a syns-a int int int) exp)
+    (lambda (op descs items k a b)
+      (e-tagcase (e-app (e-proj (e-var op a b 0) descs a b 0)
+                        (list (parse-nth items 1) (parse-nth items k)) a b 0)
+                 (list (stage-arm 'ok (nth items (+ k 1))) (stage-arm 'failed (nth items (+ k 2))))
+                 nil nil a b 0)))
   ;; An arm of `stage`, `(name body …)`, as `tagcase`'s `(tag name body …)`.
   (stage-arm (->* (symbol syn) (productof (1 symbol) (2 bool) (3 (listof symbol acyclic)) (4 exp)))
     (lambda (tag c)

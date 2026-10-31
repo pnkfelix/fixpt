@@ -108,3 +108,44 @@ fn a_module_is_named() {
         assert!(out.contains(why) && out.contains("both checkers agree"), "{program}: {out}");
     }
 }
+
+/// The output of `programs/stage/session.fx` where a session is kept.
+const SESSION: &str = "defined
+33
+defined
+120
+defined
+a: int to string, used by g
+fresh
+not defined: `a` is defined already, and the redefinition was refused
+12
+defined
+101
+defined
+3
+not defined: the session changed since this definition was checked: check it again
+refused: a int is expected here, and this is a string
+refused: argument 1 is a int, where a (union nil (pairof ? ? r)) is expected
+defined
+refused: `g` is broken, since `a` was redefined (a int is expected here, and this is a string): define it again to use it
+";
+
+/// A session (`docs/research/eval.md`, "Sessions"): definitions that last,
+/// each checked, then committed as the program decides; redefinitions
+/// reported, refused, assigned, shadowing a host's name, and one whose
+/// users run again, one broken; a pending one gone stale. Kept on `rs-scheme-vm`; every other machine refuses each step, as
+/// a value, for now.
+#[test]
+fn a_session_keeps_definitions() {
+    let runs: Vec<_> = STAGING.iter().filter(|m| runs_here(m)).map(|m| (*m, std::thread::spawn(move || run(m, "session.fx")))).collect();
+    for (m, t) in runs {
+        let (status, out, err) = t.join().expect("ran");
+        if m == "rs-scheme-vm" {
+            assert_eq!((status, out.as_str()), (Some(0), SESSION), "{m}: {err}");
+        } else {
+            assert_eq!(status, Some(0), "{m}: {err}");
+            assert!(out.lines().all(|l| l.ends_with("cannot keep sessions yet")), "{m}: {out}");
+        }
+    }
+}
+

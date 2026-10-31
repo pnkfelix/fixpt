@@ -294,6 +294,44 @@ string)) (host-insert! x))")`, then `(session-stage s edit unit
 "(f \"hi\")" …)`, the host keeping `p`, and a refusal coming
 back as `why`. A fault is §106's.
 
+### Decided (the user's, 2026-10-30): definitions are pending, then committed
+
+What a redefinition does is the program's to decide, and it may want
+control to decide it: ask the user, and wait for an answer while the
+editor goes on. A policy called from inside the session's machinery
+could not capture a continuation there (the checking runs inside a
+primitive, below Rust's frames on most machines). So a definition is
+made in two steps, as `certify` and `install` are, and the program
+decides between them, anywhere it likes:
+
+```
+(session-define s E code (d body) (why else))  ; d : (pending E r); checks, changes nothing
+(session-redefines s d)    ; (sumof (fresh unit) (redefines session-redefinition))
+(session-commit! s d decision)   ; runs the initializer within E, defines;
+                                 ; (sumof (defined unit) (failed stage-failure))
+```
+
+- **`E` is written**, as at `stage`: the initializer's effect, known only
+  at run time, is checked within it, and `session-commit!`'s effect has
+  it (`(pending E r)` carries it).
+- **The type is inferred**: `(define name init)`, the initializer checked
+  once for its type and once within `E`. `(define name T init)` writes it,
+  and the initializer, a `lambda`, may then call itself.
+- **The decision**: `session-redefinition` is `(productof (name string)
+  (old string) (new string) (users (listof string acyclic)))`, the old
+  and new types printed and the definitions that name it;
+  `session-decision` is `(sumof (shadow unit) (refuse unit) (rerun
+  unit))`. `shadow`: code staged before keeps what it saw, code staged
+  after sees the new. `refuse`: nothing is defined. `rerun`, later: the
+  users checked and run again, or broken, as the REPL's "Redefinition".
+- **A pending definition is used once, and only while the session is as
+  it was**: committed after another commit to the session, or a second
+  time, it is refused as stale. A run-time check now; an affine type's,
+  perhaps, later.
+- **The condition-raising style** (the policy a handler, `raise`d at a
+  redefinition, which may answer, escape, or capture) is a library
+  procedure over these forms, not a form of its own.
+
 ### The program's own top level as `m`?
 
 `TODO.md` §105 offered two ways: (a) the editor is the session, as Emacs
