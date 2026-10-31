@@ -4449,3 +4449,11 @@ Add `(and e1 e2 …)` that gives false or the last expression's value.
 
 Make `(listof T)` short for `(listof T acyclic)`, as that is almost always
 what is wanted.
+
+## 199. Frame pointers in the code generators (the user's, 2026-10-31)
+
+Look into keeping frame pointers in the code each code generator emits
+(the JITs', the native convention's, register code's), so that `perf`
+and other profilers can walk the stack through generated code. Found
+profiling Heist's start-up (§189): without them a profile gives no
+callers for time in generated code, nor through it.
