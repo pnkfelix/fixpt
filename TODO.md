@@ -4457,3 +4457,21 @@ Look into keeping frame pointers in the code each code generator emits
 and other profilers can walk the stack through generated code. Found
 profiling Heist's start-up (§189): without them a profile gives no
 callers for time in generated code, nor through it.
+
+## 200. A faster encoding of types in `.fasl` files (the user's, 2026-10-31)
+
+Investigate an encoding of a `.fasl`'s types that is cheaper to check a
+program against as it loads. Now each type a `.fasl` names is text,
+compared with the text the Rust checker prints of the type there now
+(`Checker::fasl_type_text`, `stale_use`): that printing was the largest
+part of a warm start of Heist's s7st (§189: 14% in `fasl_type_text`
+alone, more in the hashing, allocation and formatting under it). Ideas:
+
+- build in the checker's hashing of types and keep each type's hash in
+  the `.fasl` beside (or instead of) its text, so that a type is compared
+  by its hash first, printed only if the hashes differ, or never;
+- a serialized binary form of a type, not text, read without parsing and
+  compared structurally;
+
+and measure whether either wins, on s7st's warm start against a copy of
+Heist's files (not Heist's tree).
