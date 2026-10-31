@@ -446,13 +446,14 @@
          (stage-env-types (load-module "fx26:check-env-types.fx"))
          ;; A session's code (`sessions.rs`), checked by the checker written
          ;; in Rust, which gives what it found: compiled by this instance,
-         ;; whose globals are the session's, to the word that runs it; or
+         ;; whose globals are the session's, to the word that runs it, or,
+         ;; `deferred`, that makes the procedure that does (a commit's); or
          ;; why not.
          (session-compile
           (lambda ((text string) (facts (select stage-env-types k-facts))
                    (withs (select stage-env-types k-with-list))
                    (reshapes (select stage-env-types k-reshape-list))
-                   (native bool) (registers bool))
+                   (native bool) (registers bool) (deferred bool))
             (let ((read (read-text-at text 0)))
               (if (null? read)
                   (sum failed "the code does not read")
@@ -467,7 +468,9 @@
                           ((with check-env checked-reshapes!) reshapes)
                           ((with compile compile-conv-native!) native)
                           ((with regcode-entry compile-registers!) registers)
-                          (tagcase ((with compile-programs compile-program) tops facts)
+                          (tagcase (if deferred
+                                       ((with compile-programs compile-deferred) tops facts)
+                                       ((with compile-programs compile-program) tops facts))
                             (c-ok (w) (sum made w))
                             (c-err (m) (sum failed m))))))))))))
     ;; What Rust and `bootstrap.fx` call of them (`syn.rs`, `session.rs`).

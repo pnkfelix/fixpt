@@ -130,6 +130,17 @@ defined a
 refused: `g` is broken, since `a` was redefined (a int is expected here, and this is a string): define it again to use it
 ";
 
+/// A commit's initializer runs as the program calls `go`, the procedure
+/// readying it gives, not as it is readied: alike on every machine.
+#[test]
+fn a_commit_runs_as_the_program_calls_it() {
+    let runs: Vec<_> = STAGING.iter().filter(|m| runs_here(m)).map(|m| (*m, std::thread::spawn(move || run(m, "commit.fx")))).collect();
+    for (m, t) in runs {
+        let (status, out, err) = t.join().expect("ran");
+        assert_eq!((status, out.as_str()), (Some(0), "readied\ninitializer\ndefined k\n"), "{m}: {err}");
+    }
+}
+
 /// A session (`docs/research/eval.md`, "Sessions"): forms checked in it, an
 /// expression's procedure called, a definition committed as the program
 /// decides; redefinitions

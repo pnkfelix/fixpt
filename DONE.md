@@ -4183,6 +4183,19 @@ procedures given the globals they define in), `stage-module` bound to
 pending definition are the runtime's, an `o-host` to the evaluator, never
 looked in. `a_session_keeps_definitions` passes on every machine.
 
+**A commit runs as the program calls it, on the cellular machines
+(2026-10-31).** `%session-ready` no longer runs the commit's forms: the
+session's compiler compiles them, the definition's and those run again, as
+one text (each form's facts shifted to its place, `FormFacts::and_after`)
+into the body of a procedure of no arguments (`compile-deferred`), which
+the word makes; that is `go`. Each global is made as its form is compiled,
+in the scope `c-tops` gives it, and holds the undefined value until `go`
+fills it. So an initializer is the program's code, which may be preempted,
+capture a continuation or fail where the program sees it. The session's
+procedure of nothing is gone. Test: `stage.rs`'s
+`a_commit_runs_as_the_program_calls_it` (`programs/stage/commit.fx`), alike
+on every machine.
+
 **Step 2 (2026-10-30): `rs-scheme-vm` and `fx-ast-eval`.** Both check the
 code with the checker written in Rust, of the standard environment alone
 (`stage.rs`'s `checked`), the wrapper as on every machine; the Rust checker

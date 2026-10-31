@@ -9,7 +9,7 @@
 //! program's: so a redefinition is the REPL's (`Checker::top_defining`),
 //! re-runs waiting or not as the decision says, and a pending definition is
 //! a check that leaves the checker as it was (`try_top`). The session, a
-//! vector `#(m index compiler nothing)`, names its state by its index here,
+//! vector `#(m index compiler)`, names its state by its index here,
 //! made at its first use, when the module's type is known (`seeded`): a
 //! global holding `m`, and one for each of `m`'s values, which the
 //! session's own may shadow. Each text it reads is a file of its own, kept,
@@ -24,9 +24,9 @@
 //! - **compiled** (the machines of the compilers written in FX-26): by a
 //!   compiler of the session's own (the conductor's `make-session-compiler`,
 //!   kept in the session's third field), whose globals are the session's,
-//!   given what the checker found (`rust_facts`); a commit compiles and
-//!   runs the definition, and what runs again, as it is readied, and the
-//!   program then runs nothing (the session's fourth field, kept);
+//!   given what the checker found (`rust_facts`); a commit compiles the
+//!   definition, and what runs again, as it is readied, into the procedure
+//!   the program then calls to run them;
 //! - **evaluated** (`fx-ast-eval`): each step's forms given back as text,
 //!   for the evaluator to run in the session's environment, which it keeps
 //!   (`eval-core.fx`'s `ev-session-…`), `m`'s as `stage-module`.
@@ -76,7 +76,6 @@ thread_local! {
 const S_MODULE: usize = 0;
 const S_INDEX: usize = 1;
 const S_COMPILER: usize = 2;
-const S_NOTHING: usize = 3;
 const P_SESSION: usize = 0;
 const P_GENERATION: usize = 1;
 const P_NAME: usize = 2;
@@ -113,7 +112,7 @@ pub fn op(rt: &mut Runtime, op: &str, a: &[Value]) -> Result<Value, String> {
 }
 
 fn is_session(rt: &Runtime, s: Value) -> bool {
-    rt.heap.is_a(s, fixpt_heap::ObjType::Vector) && rt.heap.obj_len(s) == 4
+    rt.heap.is_a(s, fixpt_heap::ObjType::Vector) && rt.heap.obj_len(s) == 3
 }
 
 fn sum(rt: &mut Runtime, tag: &str, v: Value) -> Value {
@@ -183,7 +182,7 @@ fn seeded<T>(rt: &mut Runtime, base: usize, mt: &str, mode: Mode, f: impl FnOnce
             }
         }
         for (text, facts) in made {
-            compile_run(rt, base, &text, &facts)?.map_err(|why| format!("a session's module's values: {why}"))?;
+            compile_run(rt, base, &text, &facts, false)?.map_err(|why| format!("a session's module's values: {why}"))?;
         }
         SESSIONS.with(|ss| ss.borrow_mut().push(state));
         rt.heap.obj_set(rt.heap.root_at(base), S_INDEX, Value::fixnum(i as i64));
@@ -276,7 +275,7 @@ fn check(rt: &mut Runtime, base: usize, staged: Value) -> Result<Value, String> 
         Ok(facts) => facts,
         Err(refused) => return Ok(refused),
     };
-    match compile_run(rt, base, &w.whole, &facts)? {
+    match compile_run(rt, base, &w.whole, &facts, false)? {
         Ok(p) => {
             let p = sum(rt, "expression", p);
             Ok(sum(rt, "ok", p))
@@ -476,10 +475,11 @@ fn commit_lower(rt: &mut Runtime, base: usize, d: Value, decision: Value) -> Res
     }
 }
 
-/// Compiled, `%session-ready`: `d` committed, each form that runs compiled
-/// and run now, by the session's compiler, a definition every use can take
-/// keeping its global; then `(sum go p)`, `p` doing nothing, for the
-/// program to run; or the refusal.
+/// Compiled, `%session-ready`: `d` committed, and the forms that run, the
+/// definition's and those run again, compiled by the session's compiler as
+/// one text, into the procedure that runs them (`compile-deferred`), a
+/// definition every use can take keeping its global; then `(sum go p)`,
+/// for the program to call; or the refusal.
 fn ready(rt: &mut Runtime, base: usize, d: Value, decision: Value) -> Result<Value, String> {
     let decision = decided(rt, decision);
     let made = committed(rt, base, d, &decision, |c, _, text, file, top| (text.to_string(), FormFacts::of(c, &[top], file, text, true), keeps(c, top)));
@@ -487,18 +487,21 @@ fn ready(rt: &mut Runtime, base: usize, d: Value, decision: Value) -> Result<Val
         Ok((made, _, _)) => made,
         Err((kind, why)) => return Ok(failed(rt, kind, &why)),
     };
+    let (mut whole, mut all) = (String::new(), FormFacts::none());
     for (text, facts, keeps) in made {
         for k in keeps {
             let compiler = compiler(rt, base)?;
             let k = rt.heap.intern(&k);
             call(rt, compiler, 3, &[k])?;
         }
-        if let Err(why) = compile_run(rt, base, &text, &facts)? {
-            return Ok(failed(rt, "refused", &why));
-        }
+        all = all.and_after(facts, whole.chars().count() as i64);
+        whole.push_str(&text);
+        whole.push('\n');
     }
-    let p = nothing(rt, base)?;
-    Ok(sum(rt, "go", p))
+    match compile_run(rt, base, &whole, &all, true)? {
+        Ok(p) => Ok(sum(rt, "go", p)),
+        Err(why) => Ok(failed(rt, "refused", &why)),
+    }
 }
 
 /// A `session-decision`'s tag, as text; none if it is not one.
@@ -586,24 +589,6 @@ fn eval_ready(rt: &mut Runtime, base: usize, d: Value, decision: Value) -> Resul
     Ok(sum(rt, "run", list))
 }
 
-/// The procedure of no arguments that does nothing, made once for the
-/// session at `base` (its fourth field).
-fn nothing(rt: &mut Runtime, base: usize) -> Result<Value, String> {
-    let s = rt.heap.root_at(base);
-    let p = rt.heap.obj_ref(s, S_NOTHING);
-    if p != Value::FALSE {
-        return Ok(p);
-    }
-    let w = Wrapped::of(String::new(), "(lambda () #u)", "\n", "", 0);
-    let index = rt.heap.obj_ref(s, S_INDEX).as_fixnum() as usize;
-    let found = SESSIONS.with(|ss| tried(rt, &mut ss.borrow_mut()[index], &w, |c, _, top, file| FormFacts::of(c, &[&top], file, &w.whole, true)));
-    let facts = found.map_err(|_| "a session's procedure of nothing does not check".to_string())?;
-    let p = compile_run(rt, base, &w.whole, &facts)?.map_err(|why| format!("a session's procedure of nothing: {why}"))?;
-    let s = rt.heap.root_at(base);
-    rt.heap.obj_set(s, S_NOTHING, p);
-    Ok(p)
-}
-
 /// The session at `base`'s compiler, made at its first use (its third
 /// field): the product the conductor's `make-session-compiler` makes.
 fn compiler(rt: &mut Runtime, base: usize) -> Result<Value, String> {
@@ -630,9 +615,10 @@ fn call(rt: &mut Runtime, compiler: Value, i: usize, args: &[Value]) -> Result<V
 }
 
 /// `text`, a session's form, compiled by the session at `base`'s compiler,
-/// given what the checker found of it, and its word run: the value; or
+/// given what the checker found of it, and its word run: the value (or,
+/// `deferred`, the procedure that runs the forms, `compile-deferred`); or
 /// why the compiler would not.
-fn compile_run(rt: &mut Runtime, base: usize, text: &str, facts: &FormFacts) -> Result<Result<Value, String>, String> {
+fn compile_run(rt: &mut Runtime, base: usize, text: &str, facts: &FormFacts, deferred: bool) -> Result<Result<Value, String>, String> {
     let (native, registers) = crate::stage::flags(rt).ok_or("this machine cannot keep sessions")?;
     let compiler = compiler(rt, base)?;
     let mark = rt.heap.push_root(compiler);
@@ -645,7 +631,7 @@ fn compile_run(rt: &mut Runtime, base: usize, text: &str, facts: &FormFacts) -> 
     let r = facts.reshapes(&mut rt.heap);
     let [compiler, t, f, w] = [0, 1, 2, 3].map(|i| rt.heap.root_at(mark + i));
     rt.heap.pop_roots_to(mark);
-    let made = call(rt, compiler, 1, &[t, f, w, r, Value::boolean(native), Value::boolean(registers)])?;
+    let made = call(rt, compiler, 1, &[t, f, w, r, Value::boolean(native), Value::boolean(registers), Value::boolean(deferred)])?;
     let tag = rt.heap.bloblet_slot(made, 2);
     let payload = rt.heap.bloblet_slot(made, 3);
     if tag != rt.heap.intern("made") {

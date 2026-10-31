@@ -124,6 +124,21 @@ impl FormFacts {
         FormFacts { facts, withs, reshapes }
     }
 
+    /// These, and `more`'s, of a text `by` characters past the start of
+    /// theirs: so that the forms of several texts compile as one.
+    pub fn and_after(mut self, more: FormFacts, by: i64) -> FormFacts {
+        let shift = |(a, b, k): At| if a < LOAD_BASE_STEP { (a + by, b + by, k) } else { (a, b, k) };
+        self.facts.extend(more.facts.into_iter().map(|(at, n, v)| (shift(at), n, v)));
+        self.withs.extend(more.withs.into_iter().map(|(at, ns, is)| (shift(at), ns, is)));
+        self.reshapes.extend(more.reshapes.into_iter().map(|(at, ps)| (shift(at), ps)));
+        self
+    }
+
+    /// None.
+    pub fn none() -> FormFacts {
+        FormFacts { facts: Vec::new(), withs: Vec::new(), reshapes: Vec::new() }
+    }
+
     /// The facts, a `k-facts`, the last found first, as `syn::rust_facts`
     /// always made them. Nothing collects as they are made.
     pub fn facts(&self, heap: &mut Heap) -> Value {

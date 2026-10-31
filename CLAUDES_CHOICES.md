@@ -3004,10 +3004,10 @@ of `TODO.md` §141, working on my own.
   in FX-26 made per session, the way `syn::rust_facts` fed it when a whole
   program was checked in Rust. One compiler per session holds the session's
   globals across steps, as the checker holds its types.
-- **Initializers run inside `%session-ready`**: the compiled initializer is
-  run by the primitive that readies the commit, and the `go` thunk given
-  back does nothing. Running it from `go` wants the compiled word held as a
-  procedure until then; left for later (`TODO.md` §186, 4.).
+- **Initializers run inside `%session-ready`**, at first: the compiled
+  initializer was run by the primitive that readies the commit, and the
+  `go` given back did nothing. Since made the program's (below,
+  "A commit compiled as a procedure").
 - **`k-naming!`**: the FX-26 printer was naming types by the standard
   environment's names (`api-type`), which the session's source cannot read
   back; a switch turns naming off while a session's types are printed.
@@ -3028,3 +3028,20 @@ of `TODO.md` §141, working on my own.
   evaluator cannot make or read one as an array. They cross as a new
   `other`, passed back to the runtime's primitives, never looked in.
 - **`go` runs the commit here**, the program's code, as on `rs-scheme-vm`.
+
+## A commit compiled as a procedure (2026-10-31)
+
+- **`c-tops` into a lambda's body**: rather than a new store into a global
+  from code, or a rewriting of the source, a commit's forms are compiled as
+  a top-level program is, but onto the code of a procedure of no arguments,
+  which the word makes and gives (`compile-deferred`). Globals are the
+  compiler's at compile time, so each is made in its scope as at the top
+  level (a non-`lambda` initializer sees the old one, a `lambda` the new);
+  the body only computes and stores.
+- **One text per commit**: the definition and what runs again are one
+  program, read from their texts joined, each form's facts shifted by
+  where its text begins, so `go` is one procedure, made by running one
+  word that runs nothing of the program's.
+- **Between ready and `go`** a new global holds the undefined value; code
+  that reads it then sees that, as a top-level forward use does. Calling
+  `go` twice runs the initializers twice; affine types may later forbid it.

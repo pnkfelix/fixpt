@@ -637,4 +637,24 @@
 ;; The entry point: a checked program's trees, and what checking found.
 (define compile-program
   (->* ((listof top acyclic) k-facts) cresult)
-  (lambda (tops facts) (c-program (lambda (c) (c-tops tops c #f)) facts))))))
+  (lambda (tops facts) (c-program (lambda (c) (c-tops tops c #f)) facts)))
+
+;; A session's commit (`sessions.rs`): its forms compiled not into the word,
+;; which runs them, but into a procedure of no arguments, which the word
+;; makes, for the program to call (`session-commit!`'s `go`). Each global a
+;; definition makes is made as it is compiled, in its scope as `c-tops`',
+;; and filled as the procedure runs; until then, undefined.
+(define compile-deferred
+  (->* ((listof top acyclic) k-facts) cresult)
+  (lambda (tops facts)
+    (c-program
+     (lambda (c)
+       (let ((body (the code (new nil))))
+         (begin (if (c-tops tops body #f) (c-op body routine-drop) #u)
+                (c-lit body (wcell-unit))
+                (c-op body routine-return)
+                (c-op1 c (c-closure-routine)
+                       (wcell-word (c-assemble body (string->symbol "session-commit"))))
+                (c-emit c (i-cell (wcell-int 0)))
+                #t)))
+     facts))))))
