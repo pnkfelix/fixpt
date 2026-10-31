@@ -4382,6 +4382,37 @@ running that setup again for each test. For speeding up *testing*; first
 measure what each Heist test spends before its own code runs (front end,
 loading, the suite's setup), against the pinned snapshot only.
 
+**Measured (2026-10-31)**, on a copy of Heist's files (not its tree), with
+Fixpt as of this date: a test of s7st's takes 0.72 s warm (its `.fasl`s
+made), of which a program that does nothing takes 0.02 s; of the rest,
+in a profile, 64% Fixpt's Rust code and 18% libc, most of it checking
+each of s7st's 13 `.fasl`s against the Rust checker again
+(`fasl_type_text`, `stale_use`) and checking and compiling again every
+form not a procedure, 14% the FX-26 front end (each file's type
+definitions declared ahead, compiled again), and some 4% s7st's own code
+(its `s7-init!` too). So what a dump should skip is Fixpt's warm start,
+not s7st's setup.
+
+**The plan (the user's, 2026-10-31).** Whole-heap dumps atop the front end
+written in FX-26, whose checker's and compiler's state is in the heap
+(not the Rust checker's, which is not): `(dump-heap! path start)`, the
+heap written and `start` the procedure a resumed one calls, and the CLI's
+`fixpt dump IMAGE FILE…` (the files run, then `(dump-heap! IMAGE main)`)
+and `fixpt resume IMAGE -- ARGS`, its namespace still extensible. In
+order: (1) whether the FX-26 checker can be a program's only checker; (2)
+sessions on the FX-26 checker, when it is loaded; (3) the dumps.
+
+**(1) done.** Both checkers agree on the whole of s7st (joined), the
+editor, combo and ratfink. Checked and compiled by the front end written
+in FX-26 alone (an experiment, the files joined into one program, `main`
+called; not kept), s7st's tests (13), the editor's (9), combo's (31) and
+kit's (4) give what the usual path gives; cfa (two directories), ratfink's
+tests, the editor's ui and the conformance suites not tried. Cold, s7st so
+takes 1.5 s, against 3.6 s on the usual path with no `.fasl`s. Left for a
+run on it alone: a program of files in more than one directory, a
+top-level `include` (what it gives only the Rust checker says to the FX-26
+front end now), and `.fasl`s.
+
 ## 190. Q: why is `(define-datatype var (union symbol pat))` accepted? (the user's, 2026-10-31)
 
 Find out why this checks as a datatype definition, and whether it
