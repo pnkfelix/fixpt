@@ -4413,6 +4413,16 @@ run on it alone: a program of files in more than one directory, a
 top-level `include` (what it gives only the Rust checker says to the FX-26
 front end now), and `.fasl`s.
 
+**(2) on the cellular and register machines (2026-10-31).** A session's
+checker is its own front end's (`sessions26.rs`): the conductor's
+`session-step` (checked first, kept and compiled, or tried), the FX-26
+checker's `check-try` (a trial, undone: the trail unbound to its mark, its
+lists put back) and `check-redefines`, and `compile-checked-deferred` for
+a commit's `go`. Left: `fx-ast-eval`'s sessions, on the Rust checker
+still; and a session's region of its own (evidence), which the FX-26
+checker cannot bind at a session's top level yet, so that such a session
+keeps the Rust checker.
+
 ## 190. Q: why is `(define-datatype var (union symbol pat))` accepted? (the user's, 2026-10-31)
 
 Find out why this checks as a datatype definition, and whether it

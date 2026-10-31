@@ -418,4 +418,45 @@
              (set k-runs nil)
              (k-ahead forms)
              (k-ok (k-forms forms nil)))
-      (lambda (r) r))))))))
+      (lambda (r) r))))
+
+;; For a driver (a session's pending definition, `sessions26.rs`): `forms`
+;; checked as `check-more` checks them, and the type global `n` then has,
+;; printed whole (no `define-type` named; "" if none); then the checker
+;; left as it was: the bindings they made undone, and the definitions and
+;; breaks they noted let go, as the Rust checker's `try_top`. Re-runs wait
+;; meanwhile, so that nothing but their own names is bound.
+(define check-try (->* (k-tops symbol) (productof (1 k-result) (2 string)))
+  (lambda (forms n)
+    (let* ((mark (k-mark)) (defs (get k-defs)) (broken (get k-broken)) (runs (get k-runs))
+           (uses (get k-last-uses)) (deferring (get k-defer-reruns))
+           (r (begin (set k-defer-reruns #t) (check-more forms)))
+           (t (tagcase r (k-ok (ls) (let ((t (k-lookup n))) (if (< t 0) "" (k-show-ty-whole t))))
+                (else y ""))))
+      (begin (k-unbind-to mark) (set k-defs defs) (set k-broken broken) (set k-runs runs)
+             (set k-last-uses uses) (set k-defer-reruns deferring)
+             (product (1 r) (2 t))))))
+
+;; For a driver (`session-redefines`): global `n`'s type now, printed whole
+;; (no `define-type` named), and the definitions that use it, their names;
+;; none if `n` is no global.
+(define check-redefines
+  (->* (symbol) (listof (productof (1 string) (2 (listof string acyclic))) acyclic))
+  (lambda (n)
+    (let ((t (k-lookup n)))
+      (if (or (< t 0) (not (k-global? n)))
+          nil
+          (list (product (1 (k-show-ty-whole t)) (2 (k-direct-users n (get k-defs)))))))))
+;; The names of the definitions of `ds` that use `n` and do not define it:
+;; its users themselves, not theirs (`k-users-of`).
+(define k-direct-users (->* (symbol (listof k-def acyclic)) (listof string acyclic))
+  (lambda (n ds)
+    (cond ((null? ds) nil)
+          ((and (k-name-in? n (extract (car ds) 3)) (not (k-name-in? n (extract (car ds) 1))))
+           (k-names-strings (extract (car ds) 1) (k-direct-users n (cdr ds))))
+          (else (k-direct-users n (cdr ds))))))
+(define k-name-in? (->* (symbol k-names) bool)
+  (lambda (n ns) (and (not (null? ns)) (or (symbol=? (car ns) n) (k-name-in? n (cdr ns))))))
+(define k-names-strings (->* (k-names (listof string acyclic)) (listof string acyclic))
+  (lambda (ns rest)
+    (if (null? ns) rest (cons (symbol->string (car ns)) (k-names-strings (cdr ns) rest)))))))))

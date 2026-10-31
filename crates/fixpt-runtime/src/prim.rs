@@ -215,7 +215,7 @@ fn run_word_by(rt: &mut Runtime, a: &[Value], run: Option<crate::RunWord>) -> Ou
 /// code calls it as it calls what is not native code, its frames' values
 /// kept where a collection finds them (`call_foreign`).
 pub fn reenters(name: &str) -> bool {
-    matches!(name, "%fx26-stage" | "%fx26-session-check" | "%fx26-session-ready")
+    matches!(name, "%fx26-stage" | "%fx26-session-check" | "%fx26-session-ready" | "%fx26-session-redefines")
 }
 
 fn is_closure(rt: &Runtime, f: Value) -> bool {

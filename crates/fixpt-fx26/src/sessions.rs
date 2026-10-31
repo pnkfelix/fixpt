@@ -76,12 +76,12 @@ thread_local! {
 const S_MODULE: usize = 0;
 const S_INDEX: usize = 1;
 const S_COMPILER: usize = 2;
-const P_SESSION: usize = 0;
-const P_GENERATION: usize = 1;
-const P_NAME: usize = 2;
-const P_TYPE: usize = 3;
-const P_FORM: usize = 4;
-const P_USED: usize = 5;
+pub(crate) const P_SESSION: usize = 0;
+pub(crate) const P_GENERATION: usize = 1;
+pub(crate) const P_NAME: usize = 2;
+pub(crate) const P_TYPE: usize = 3;
+pub(crate) const P_FORM: usize = 4;
+pub(crate) const P_USED: usize = 5;
 
 /// The conductor's entry that makes a session's compiler.
 const MAKE_COMPILER: &str = "fx26-native:make-session-compiler";
@@ -93,13 +93,24 @@ pub fn op(rt: &mut Runtime, op: &str, a: &[Value]) -> Result<Value, String> {
         return Err("not a session".to_string());
     }
     let base = rt.heap.push_root(a[0]);
+    // On the machines of the compilers written in FX-26, a session is the
+    // checker written in FX-26's (`sessions26.rs`), unless its first step
+    // names a region of its own, which that checker cannot bind for a
+    // session's top level yet: then the Rust checker's, as before.
+    let on26 = |rt: &mut Runtime| {
+        let parts = staged_parts(rt, a[1], a[2]).map(|(p, _)| p);
+        crate::sessions26::takes(rt, a[0], parts.as_ref())
+    };
     let out = match op {
         "lower" => lower(rt, base, a[1], a[2]),
         "commit-lower" => commit_lower(rt, base, a[1], a[2]),
+        "check" if on26(rt) => crate::sessions26::check(rt, base, a[1], a[2]),
         "check" => check(rt, base, a[1], a[2]),
         "eval-check" => eval_check(rt, base, &a[1..]),
         "eval-ready" => eval_ready(rt, base, a[1], a[2]),
+        "ready" if crate::sessions26::takes(rt, a[0], None) && rt.heap.obj_ref(a[0], S_INDEX).as_fixnum() <= -2 => crate::sessions26::ready(rt, base, a[1], a[2]),
         "ready" => ready(rt, base, a[1], a[2]),
+        "redefines" if rt.heap.obj_ref(a[0], S_INDEX).as_fixnum() <= -2 => crate::sessions26::redefines(rt, base, a[1]),
         "committed" => {
             let name = if is_pending(rt, a[1]) { rt.heap.obj_ref(a[1], P_NAME) } else { rt.heap.make_string("") };
             Ok(sum(rt, "defined", name))
@@ -115,7 +126,7 @@ fn is_session(rt: &Runtime, s: Value) -> bool {
     rt.heap.is_a(s, fixpt_heap::ObjType::Vector) && rt.heap.obj_len(s) == 3
 }
 
-fn sum(rt: &mut Runtime, tag: &str, v: Value) -> Value {
+pub(crate) fn sum(rt: &mut Runtime, tag: &str, v: Value) -> Value {
     let base = rt.heap.push_root(v);
     let tag = rt.heap.intern(tag);
     let v = rt.heap.root_at(base);
@@ -123,7 +134,7 @@ fn sum(rt: &mut Runtime, tag: &str, v: Value) -> Value {
     rt.heap.make_frozen(SUM, &[tag, v])
 }
 
-fn failed(rt: &mut Runtime, kind: &str, why: &str) -> Value {
+pub(crate) fn failed(rt: &mut Runtime, kind: &str, why: &str) -> Value {
     fixpt_runtime::prim::stage_failed(rt, kind, why, 0, 0)
 }
 
@@ -243,13 +254,13 @@ fn tried<T>(rt: &mut Runtime, state: &mut State, w: &Wrapped, then: impl FnOnce(
 }
 
 /// Whether `code` is a definition, `(define …)`.
-fn is_definition(rt: &Runtime, code: Value) -> bool {
+pub(crate) fn is_definition(rt: &Runtime, code: Value) -> bool {
     let head = if code.is_pair() { rt.heap.car(code) } else { Value::NULL };
     rt.heap.is_a(head, fixpt_heap::ObjType::Symbol) && rt.heap.symbol_name(head) == "define"
 }
 
 /// An expression, `text`, as it is checked: within `E`, of type `R`.
-fn expression(e: &str, r: &str, text: &str) -> Wrapped {
+pub(crate) fn expression(e: &str, r: &str, text: &str) -> Wrapped {
     Wrapped::of(format!("(the (subr {e} () {r})\n(lambda ()\n"), text, "\n))\n", text, 0)
 }
 
@@ -363,18 +374,31 @@ fn check_define(rt: &mut Runtime, base: usize, against: &Parts, code: Value, tex
         Ok(f) => f,
         Err(refused) => return Ok(refused),
     };
-    let [name, ty, form] = [&name, &ty, &form].map(|t| rt.heap.make_string(t));
-    let s = rt.heap.root_at(base);
-    let d = rt.heap.vector_from(&[s, Value::fixnum(generation), name, ty, form, Value::FALSE]);
+    let d = pending(rt, base, generation, &name, &ty, &form);
     let d = sum(rt, "definition", d);
     Ok(sum(rt, "ok", d))
 }
 
-fn is_pending(rt: &Runtime, d: Value) -> bool {
+/// A pending definition of the session at `base`, checked at `generation`:
+/// `#(session generation name type form used)`, its strings made rooted.
+pub(crate) fn pending(rt: &mut Runtime, base: usize, generation: i64, name: &str, ty: &str, form: &str) -> Value {
+    let mark = rt.heap.push_root(Value::FALSE);
+    for t in [name, ty, form] {
+        let v = rt.heap.make_string(t);
+        rt.heap.push_root(v);
+    }
+    let [name, ty, form] = [1, 2, 3].map(|i| rt.heap.root_at(mark + i));
+    let s = rt.heap.root_at(base);
+    let d = rt.heap.vector_from(&[s, Value::fixnum(generation), name, ty, form, Value::FALSE]);
+    rt.heap.pop_roots_to(mark);
+    d
+}
+
+pub(crate) fn is_pending(rt: &Runtime, d: Value) -> bool {
     rt.heap.is_a(d, fixpt_heap::ObjType::Vector) && rt.heap.obj_len(d) == 6
 }
 
-fn text(rt: &Runtime, v: Value) -> String {
+pub(crate) fn text(rt: &Runtime, v: Value) -> String {
     rt.heap.string_to_rust(v)
 }
 
@@ -524,7 +548,7 @@ fn ready(rt: &mut Runtime, base: usize, d: Value, decision: Value) -> Result<Val
 }
 
 /// A `session-decision`'s tag, as text; none if it is not one.
-fn decided(rt: &Runtime, decision: Value) -> String {
+pub(crate) fn decided(rt: &Runtime, decision: Value) -> String {
     let tag = if decision.is_bloblet() { rt.heap.bloblet_slot(decision, 2) } else { Value::FALSE };
     if tag.is_false() { String::new() } else { rt.heap.symbol_name(tag) }
 }

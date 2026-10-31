@@ -41,6 +41,13 @@ pub fn settings(rt: &mut Runtime, standard: Value, native: bool, registers: bool
     rt.stage = Some(stage);
 }
 
+/// The standard environment as the front end read it, as the session set
+/// it (`settings`); none where it did not.
+pub(crate) fn standard(rt: &mut Runtime) -> Option<Value> {
+    let settings = global(rt, SETTINGS)?;
+    Some(rt.heap.bloblet_slot(settings, 2))
+}
+
 /// Whether the program's convention is native and its words have register
 /// code, as the session set them (`settings`); none where it did not.
 pub(crate) fn flags(rt: &mut Runtime) -> Option<(bool, bool)> {

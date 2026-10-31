@@ -4365,3 +4365,16 @@ every file of the checker is given (`check-types-sig`); the copies, their
 signatures' entries (`check-sub-env-sig`, `check-subtype-sig`) and two
 aliases of them gone. `check-rules.fx`'s debt 1014 to 1013.
 
+## 189. Heap dumps for FX-26 (the user's, 2026-10-31; started)
+
+Measured (`TODO.md` §189): a warm s7st test is Fixpt's warm start, not
+s7st's setup; the FX-26 checker alone checks and runs Heist's programs as
+the usual path does. Then sessions on the checker written in FX-26 on the
+machines of the compilers written in FX-26 (`sessions26.rs`): each
+session's own front end checks (`session-step`; a pending definition by
+`check-try`, a trial the checker undoes; a redefinition's report by
+`check-redefines`) and compiles (a commit by `compile-checked-deferred`),
+its generation in the session's own vector, so that nothing of a session
+is outside the heap. `%fx26-session-redefines` now runs code
+(`prim::reenters`). The stage tests pass on every machine, unchanged.
+

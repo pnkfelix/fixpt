@@ -3124,3 +3124,23 @@ of `TODO.md` §141, working on my own.
   than one file uses.
 - **State stays one**: a part with state made once by the file it left is
   made once for each of that file's instances, as it was.
+
+## Sessions on the checker written in FX-26 (`TODO.md` §189, 2026-10-31)
+
+- **A front end each, all in the heap**: the session's instance of the
+  front end (`make-session-compiler`) was its compiler; now its checker
+  too, whose environment holds the session's definitions. Its generation
+  is kept in the session's vector (`S_INDEX`, -2 less it), so that a
+  session needs no Rust state and a whole-heap dump keeps it.
+- **A trial undone, not a copy checked**: `check-try` marks the trail,
+  checks with re-runs waiting (so nothing but the form's own names is
+  bound), unbinds back to the mark and puts back the lists of definitions,
+  breaks and runs; as the Rust checker's `try_top`.
+- **The orchestration in FX-26**: `session-step` reads, parses, checks
+  (first, more or tried) and compiles in one call, placing a refusal as
+  `stage-check` does; Rust only wraps the text, gives the evidence and
+  keeps the generation.
+- **A region of its own keeps the Rust checker**: binding a fresh region
+  at the top level of a session's checker, as `sessions.rs` does in the
+  Rust checker's description scope, is not yet in the FX-26 checker; a
+  session whose first step names one stays on the Rust checker.

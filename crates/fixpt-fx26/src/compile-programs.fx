@@ -646,11 +646,20 @@
 ;; and filled as the procedure runs; until then, undefined.
 (define compile-deferred
   (->* ((listof top acyclic) k-facts) cresult)
-  (lambda (tops facts)
+  (lambda (tops facts) (c-deferred (lambda (body) (c-tops tops body #f)) facts)))
+;; The same of what a checked program runs (`checked-tops`, under
+;; redefinition, a definition and those run again), as `compile-checked`.
+(define compile-checked-deferred
+  (->* ((listof k-run acyclic) k-facts) cresult)
+  (lambda (runs facts) (c-deferred (lambda (body) (c-runs runs body #f)) facts)))
+;; The procedure of no arguments whose body is what `forms` compiles.
+(define c-deferred
+  (->* ((subr (maxeff compiles spin) (code) bool) k-facts) cresult)
+  (lambda (forms facts)
     (c-program
      (lambda (c)
        (let ((body (the code (new nil))))
-         (begin (if (c-tops tops body #f) (c-op body routine-drop) #u)
+         (begin (if (forms body) (c-op body routine-drop) #u)
                 (c-lit body (wcell-unit))
                 (c-op body routine-return)
                 (c-op1 c (c-closure-routine)
