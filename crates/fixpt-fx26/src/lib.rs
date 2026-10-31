@@ -475,6 +475,10 @@ pub const CONDUCTOR: &str = include_str!("conductor.fx");
 /// The compiler from FX-26 to cellular words, written in FX-26.
 pub const COMPILER: &str = include_str!("compile.fx");
 
+/// What the checker found of the program being compiled, by expression:
+/// made by [`COMPILER`] of the modules it is given (`TODO.md` §188).
+pub const COMPILE_FACTS: &str = include_str!("compile-facts.fx");
+
 /// Its other parts, in order: lambda lifting and the standard operations;
 /// expressions; the middle phase's plan of a form. Then the register
 /// compiler ([`REGCODE`]), and after it [`COMPILER_DRIVER`].
@@ -650,7 +654,7 @@ pub const READER: &str = include_str!("reader.fx");
 /// The module files built in, each loaded by the one after
 /// (`(load-module "fx26:name")`, [`built_in_module`]), the last by
 /// [`READER`]: the reader and the parser, of the reader's regions.
-pub const FRONT_END_MODULES: [(&str, &str); 175] = [
+pub const FRONT_END_MODULES: [(&str, &str); 176] = [
     ("eager-reader-types.fx", EAGER_READER_TYPES),
     ("eager-reader-states.fx", EAGER_READER_STATES),
     ("syn.fx", SYN),
@@ -753,6 +757,7 @@ pub const FRONT_END_MODULES: [(&str, &str); 175] = [
     ("compile-state.fx", COMPILE_STATE),
     ("compile-lift.fx", COMPILE_LIFT),
     ("compile.fx", COMPILER),
+    ("compile-facts.fx", COMPILE_FACTS),
     ("standard.fx", STANDARD_OPS),
     ("layout.fx", LAYOUT),
     ("check-proofs-types.fx", CHECK_PROOFS_TYPES),

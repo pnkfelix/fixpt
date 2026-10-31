@@ -3108,3 +3108,19 @@ of `TODO.md` §141, working on my own.
   included, and none it has not.
 - **No bound in a `reify-…`**: its result is exact evidence, which a
   bound cannot make; composing bounds would want a `reify-…-bound`, left.
+
+## Splitting front-end files (`TODO.md` §188, 2026-10-31)
+
+- **Users unchanged**: a part moved out is given on by the file it left,
+  by `import` (which defines, so gives on), so the conductor's wiring of
+  its users and their signatures stay.
+- **A module made where it is used, no signature**: a file made of the
+  modules it is given (`load-input`) can be applied by the file it left,
+  to modules that file is given, bound by a `let` around its `module` (a
+  binding inside the module would be one of the names its `import`
+  defines), its type found as the file is checked. So a split needs no
+  signature written (`compile-facts.fx`); one the conductor makes and
+  gives does (`check-flat.fx`, `check-flat-sig`), and is for a part more
+  than one file uses.
+- **State stays one**: a part with state made once by the file it left is
+  made once for each of that file's instances, as it was.

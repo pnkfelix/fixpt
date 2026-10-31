@@ -4332,3 +4332,10 @@ and `check-read-helpers.fx`'s flat data (flat types, layouts, views,
 blobrefs) into `check-flat.fx`, given to it by the conductor and given on
 (`check-flat-sig`, its 18 names its clients use), 1000 lines to 535.
 
+Then `compile.fx`'s tables of what the checker found, by expression (facts,
+conversions, reshapes, `with`s, `stage`s, calls' conventions and
+summaries), into `compile-facts.fx`, which `compile.fx` makes itself, by
+`load-input`, of the modules it is given, bound by a `let` around its
+`module` and given on by `import`: no signature of its own, the module's
+type found; 1000 lines to 808.
+
