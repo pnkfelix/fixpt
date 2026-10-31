@@ -760,11 +760,14 @@ impl crate::check::Checker {
         // Each standard type it names here what it was (a program may have
         // defined one of their names again).
         let names = self.fasl_alias_names(&header.aliases);
-        for (n, t) in &header.aliases {
-            let a = self.interner.intern(n);
-            if self.fasl_alias_expansion(a, &names).map(|(t, _)| t).as_deref() != Some(t.as_str()) {
-                return stale(self, &format!("the type `{n}` is not what it was"));
-            }
+        let changed = self.with_fasl_selects(|c| {
+            header.aliases.iter().find(|(n, t)| {
+                let a = c.interner.intern(n);
+                c.fasl_alias_expansion(a, &names).map(|(t, _)| t).as_deref() != Some(t.as_str())
+            })
+        });
+        if let Some((n, _)) = changed {
+            return stale(self, &format!("the type `{n}` is not what it was"));
         }
         // The files it loads, each loaded as the file loads it, from its
         // directory: from their own `.fasl`s, if fresh.
@@ -975,6 +978,34 @@ impl crate::check::Checker {
         shown
     }
 
+    /// Each abstract type of a module a global holds, as a `.fasl` names
+    /// it: `(select global t)`, the innermost global's.
+    fn select_names(&self) -> HashMap<crate::ast::DVar, String> {
+        use crate::ast::Ty;
+        let mut vars = HashMap::new();
+        for n in self.value_names() {
+            if let Some(g) = self.global_type(n)
+                && let Ty::Module { abs, .. } = self.arena.get(self.arena.resolve(g))
+            {
+                for (a, v) in abs {
+                    vars.entry(*v).or_insert_with(|| format!("(select {} {})", self.interner.name(n), self.interner.name(*a)));
+                }
+            }
+        }
+        vars
+    }
+
+    /// `f` given this checker, its `.fasl` types printed with the names of
+    /// modules' abstract types made once ([`select_names`](Self::select_names)),
+    /// not at each type: for many printed where nothing is bound between.
+    pub fn with_fasl_selects<T>(&mut self, f: impl FnOnce(&mut Self) -> T) -> T {
+        let names = self.select_names();
+        let outer = self.fasl_selects.replace(Some(names));
+        let r = f(self);
+        *self.fasl_selects.borrow_mut() = outer;
+        r
+    }
+
     /// Type `t` as a program's `.fasl` keeps it, to be read back where the
     /// program is loaded: no name a program defines used for a type but a
     /// module's, each abstract type of a module a global holds `(select
@@ -987,17 +1018,7 @@ impl crate::check::Checker {
     /// [`fasl_program_type`](Self::fasl_program_type), or with `body` what
     /// `t` is, not named by an abbreviation of all of it.
     fn fasl_type_text(&self, t: crate::ast::TyId, body: bool) -> Result<String, String> {
-        use crate::ast::Ty;
-        let mut vars = HashMap::new();
-        for n in self.value_names() {
-            if let Some(g) = self.global_type(n)
-                && let Ty::Module { abs, .. } = self.arena.get(self.arena.resolve(g))
-            {
-                for (a, v) in abs {
-                    vars.entry(*v).or_insert_with(|| format!("(select {} {})", self.interner.name(n), self.interner.name(*a)));
-                }
-            }
-        }
+        let vars = self.fasl_selects.borrow().clone().unwrap_or_else(|| self.select_names());
         *self.print_for_fasl.borrow_mut() = Some(vars);
         let shown = if body { self.show_definition(t) } else { self.show_ty(t) };
         *self.print_for_fasl.borrow_mut() = None;

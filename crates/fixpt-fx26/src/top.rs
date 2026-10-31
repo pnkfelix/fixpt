@@ -120,7 +120,7 @@ fn every_field_placed(c: &Checker) {
         // by `scratch`; and what remembers them, cleared there.
         arena: _, interner: _, facts: _, regions_memo: _, fv_memo: _, fun_apps: _, regions_open: _, arrow_star_tys: _,
         // Printing's, set and cleared around each print.
-        print_names: _, print_expanded: _, print_cycles: _, print_for_fasl: _, print_canon: _, print_shallow: _, print_subrs: _, print_params: _, print_tys: _, print_aliases: _, print_selects: _, print_self: _, show_marks: _,
+        print_names: _, print_expanded: _, print_cycles: _, print_for_fasl: _, fasl_selects: _, print_canon: _, print_shallow: _, print_subrs: _, print_params: _, print_tys: _, print_aliases: _, print_selects: _, print_self: _, show_marks: _,
         // Set around a single unification or check, and put back there.
         unify_exact: _, unify_upper: _, arrow_star: _, holes: _, hole_hint: _,
         // A count of regions made, which only grows: a name made once is
@@ -1291,13 +1291,7 @@ impl Checker {
     /// The names a program may use: every value and every type abbreviation
     /// in scope, innermost last, with shadowed ones left out.
     pub fn value_names(&self) -> Vec<Sym> {
-        let mut out: Vec<Sym> = Vec::new();
-        for (n, _) in self.env.iter().rev() {
-            if !out.contains(n) {
-                out.push(*n);
-            }
-        }
-        out
+        self.env.names()
     }
 
     /// The type a name is bound to, if it is a value.

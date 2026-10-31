@@ -2147,15 +2147,21 @@ impl Fx26Session {
         let own: Vec<Sym> = self.checker.type_abbreviations(forms).into_iter().map(|(n, _)| n).collect();
         let mut later = std::collections::HashMap::new();
         let names = self.checker.fasl_alias_names(&header.aliases);
-        for (n, t) in &header.aliases {
-            let a = self.checker.interner.intern(n);
-            if self.checker.fasl_alias_expansion(a, &names).map(|(t, _)| t).as_deref() == Some(t.as_str()) {
-                continue;
+        let changed = self.checker.with_fasl_selects(|c| {
+            for (n, t) in &header.aliases {
+                let a = c.interner.intern(n);
+                if c.fasl_alias_expansion(a, &names).map(|(t, _)| t).as_deref() == Some(t.as_str()) {
+                    continue;
+                }
+                if !own.contains(&a) {
+                    return Some(n.clone());
+                }
+                later.insert(n.clone(), t.clone());
             }
-            if !own.contains(&a) {
-                return stale(self, &format!("the type `{n}` is not what it was"));
-            }
-            later.insert(n.clone(), t.clone());
+            None
+        });
+        if let Some(n) = changed {
+            return stale(self, &format!("the type `{n}` is not what it was"));
         }
         let defined: std::collections::HashSet<String> = forms.iter().flat_map(|f| self.checker.defined_names(f)).map(|n| self.checker.interner.name(n).to_string()).collect();
         self.checker.fasl_aliases_begin(self.checker.fasl_allowed_aliases(forms));
@@ -2348,13 +2354,17 @@ impl Fx26Session {
     /// not one the file defines (`defined`), not here, or not at the type
     /// it had (printed as `fasl_program_type` prints it).
     fn stale_use(&mut self, defs: &[crate::fasl::Def], defined: &std::collections::HashSet<String>) -> Option<String> {
+        self.checker.with_fasl_selects(|c| Self::stale_use_in(c, defs, defined))
+    }
+
+    fn stale_use_in(checker: &mut Checker, defs: &[crate::fasl::Def], defined: &std::collections::HashSet<String>) -> Option<String> {
         for d in defs {
             for (u, t) in &d.uses {
                 if defined.contains(u) {
                     continue;
                 }
-                let un = self.checker.interner.intern(u);
-                let now = self.checker.global_type(un).map(|g| self.checker.fasl_program_type(g));
+                let un = checker.interner.intern(u);
+                let now = checker.global_type(un).map(|g| checker.fasl_program_type(g));
                 if now.as_ref().is_none_or(|n| n.as_deref() != Ok(t.as_str())) {
                     return Some(format!("`{}` uses `{u}`, which is not here at the type it was", d.name));
                 }

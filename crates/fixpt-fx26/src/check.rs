@@ -454,6 +454,10 @@ pub struct Checker {
     /// as a `select` of its load), and no name in scope used for a type,
     /// which where the type is read back may not be.
     pub(crate) print_for_fasl: std::cell::RefCell<Option<HashMap<DVar, String>>>,
+    /// While the types of a `.fasl`'s uses are compared (`fasl_selects`):
+    /// what `print_for_fasl` starts from, each abstract type of a module a
+    /// global holds named, made once rather than at each type printed.
+    pub(crate) fasl_selects: std::cell::RefCell<Option<HashMap<DVar, String>>>,
     /// While a type with a cycle is printed: each node it reaches printed as
     /// its class's first, the classes those of the type's minimal graph, so
     /// that a type prints as itself however it was written or made (the
@@ -1009,6 +1013,7 @@ impl Checker {
             print_names: std::cell::RefCell::new(Vec::new()),
             print_expanded: std::cell::Cell::new(false),
             print_for_fasl: std::cell::RefCell::new(None),
+            fasl_selects: std::cell::RefCell::new(None),
             print_canon: std::cell::RefCell::new(None),
             print_shallow: std::cell::Cell::new(false),
             print_subrs: std::cell::Cell::new(0),
@@ -5248,6 +5253,13 @@ impl Bindings {
     /// Where `s`'s innermost binding is.
     pub fn rpos(&self, s: Sym) -> Option<usize> {
         self.at.get(&s).and_then(|v| v.last().copied())
+    }
+    /// Each name bound, once, by where its innermost binding is,
+    /// innermost first.
+    pub fn names(&self) -> Vec<Sym> {
+        let mut at: Vec<(usize, Sym)> = self.at.iter().filter_map(|(s, v)| Some((*v.last()?, *s))).collect();
+        at.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+        at.into_iter().map(|(_, s)| s).collect()
     }
 }
 

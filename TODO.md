@@ -4536,3 +4536,40 @@ alone, more in the hashing, allocation and formatting under it). Ideas:
 
 and measure whether either wins, on s7st's warm start against a copy of
 Heist's files (not Heist's tree).
+
+**The plan (the user's, 2026-10-31).** The re-checks guard against
+staleness (the environment a `.fasl` was compiled against changed), not
+a hostile file: its machine code is trusted already. In order, measuring
+s7st's warm start (0.77 s, 13 `.fasl`s) after each:
+
+1. `Checker::value_names` dedupes with `Vec::contains`, quadratic in the
+   environment; and `fasl_type_text` walks every global, for each use, to
+   name modules' abstract types (`(select m t)`): (uses × env²) a load.
+   A set for the first; the second's table kept as globals are bound (an
+   index of the module globals with abstract types), or made once a load.
+2. Uses compared by a structural hash of each global's type (bound
+   variables renamed, effects in order, abstract types named as the
+   printer names them), memoised until the global is defined again: one
+   walk a global a load, no text.
+3. Trusting the stamps: where the build's and sources' stamps match, each
+   definition's name and type entered in the environments, not checked
+   again as `(define name T %fasl-value)` (`run_program_def`);
+   `FIXPT_FASL_VERIFY=1` checks them as now. The types it must enter then
+   in a binary form (the second idea above), not printed and read.
+
+**1 done (2026-10-31).** `value_names` from `Bindings`' index of each
+name's positions (`Bindings::names`), sorted; and the `select` table made
+once for each comparison of a `.fasl`'s uses and of its abbreviations
+(`Checker::with_fasl_selects`). s7st's warm start 0.77 s to 0.67 s,
+`fasl_type_text` (13.8% alone) gone from the profile; what is left of the
+load is printing types (`core::fmt`, `String`), std's SipHash and
+allocation: 2 and 3.
+
+Walks of a whole environment found besides (2026-10-31), for later:
+`uses_of`, `users_of` and `direct_users_of` walk the definitions (an
+index by the names each defines and uses; `k-users-of`,
+`k-direct-users` in the FX-26 checker too); `k-find-desc` walks
+`k-dscope`, a list, at every type name the FX-26 checker looks up (a
+table of stacks a name, as `Bindings` is). Indexes kept as names are
+bound, not a namespace partitioned: a module global and a value shadow
+each other by name.
