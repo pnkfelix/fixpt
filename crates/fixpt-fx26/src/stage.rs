@@ -41,7 +41,15 @@ pub fn settings(rt: &mut Runtime, standard: Value, native: bool, registers: bool
     rt.stage = Some(stage);
 }
 
-fn global(rt: &mut Runtime, name: &str) -> Option<Value> {
+/// Whether the program's convention is native and its words have register
+/// code, as the session set them (`settings`); none where it did not.
+pub(crate) fn flags(rt: &mut Runtime) -> Option<(bool, bool)> {
+    let settings = global(rt, SETTINGS)?;
+    let field = |i: usize| rt.heap.bloblet_slot(settings, i + 1) != Value::FALSE;
+    Some((field(2), field(3)))
+}
+
+pub(crate) fn global(rt: &mut Runtime, name: &str) -> Option<Value> {
     let sym = rt.heap.intern(name);
     let v = rt.heap.global(rt.heap.symbol_global_slot(sym));
     (!v.is_unbound()).then_some(v)

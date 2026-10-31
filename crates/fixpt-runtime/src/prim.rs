@@ -3079,13 +3079,14 @@ prims! {
     // `stage_check`): `(sum checked text)`, the code as checked, for the
     // evaluator to parse and run; or `(sum failed why)`.
     // Sessions (`docs/research/eval.md`, "Sessions"): one made, of module
-    // `a[0]`, a vector of it and the number of its state, kept by the
-    // checker's side (`fixpt-fx26`'s `sessions.rs`), none yet. The rest
+    // `a[0]`, a vector of it, the number of its state, kept by the checker's
+    // side (`fixpt-fx26`'s `sessions.rs`), none yet, and two of that side's
+    // own (its compiler, and a procedure of nothing). The rest
     // ask that side (`sessions`), by name: a form checked in one, an
     // expression or a definition; whether a pending one redefines, readied
     // given the decision, recorded; and, lowered (`rs-scheme-vm`), the
     // Scheme each makes, for `eval`.
-    "%fx26-make-session", 1, Some(1), simple!(|rt, a| Ok(rt.heap.vector_from(&[a[0], Value::fixnum(-1)])));
+    "%fx26-make-session", 1, Some(1), simple!(|rt, a| Ok(rt.heap.vector_from(&[a[0], Value::fixnum(-1), Value::FALSE, Value::FALSE])));
     "%fx26-session-check", 2, Some(2), simple!(|rt, a| session_op(rt, "check", a));
     "%fx26-session-redefines", 2, Some(2), simple!(|rt, a| session_op(rt, "redefines", a));
     "%fx26-session-ready", 3, Some(3), simple!(|rt, a| session_op(rt, "ready", a));

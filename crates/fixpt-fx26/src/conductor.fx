@@ -441,7 +441,35 @@
                       (tagcase (parse-program (car read))
                         (p-err (m a b)
                           (fail (sum malformed #u) m (clamp a k len) (clamp b k len)))
-                        (p-ok (tops) (checked standard tops k len native registers))))))))))
+                        (p-ok (tops) (checked standard tops k len native registers)))))))))
+         ;; The types of what the checker tells the compiler.
+         (stage-env-types (load-module "fx26:check-env-types.fx"))
+         ;; A session's code (`sessions.rs`), checked by the checker written
+         ;; in Rust, which gives what it found: compiled by this instance,
+         ;; whose globals are the session's, to the word that runs it; or
+         ;; why not.
+         (session-compile
+          (lambda ((text string) (facts (select stage-env-types k-facts))
+                   (withs (select stage-env-types k-with-list))
+                   (reshapes (select stage-env-types k-reshape-list))
+                   (native bool) (registers bool))
+            (let ((read (read-text-at text 0)))
+              (if (null? read)
+                  (sum failed "the code does not read")
+                  (begin
+                    (loaded-files! nil)
+                    (includes-given! nil)
+                    (tagcase (parse-program (car read))
+                      (p-err (m a b) (sum failed m))
+                      (p-ok (tops)
+                        (begin
+                          ((with check-env checked-withs!) withs)
+                          ((with check-env checked-reshapes!) reshapes)
+                          ((with compile compile-conv-native!) native)
+                          ((with regcode-entry compile-registers!) registers)
+                          (tagcase ((with compile-programs compile-program) tops facts)
+                            (c-ok (w) (sum made w))
+                            (c-err (m) (sum failed m))))))))))))
     ;; What Rust and `bootstrap.fx` call of them (`syn.rs`, `session.rs`).
     (product (run-checked (with eval-core run-checked))
              (run-checked-more (with eval-core run-checked-more))
@@ -481,13 +509,23 @@
              (k-ok (with check-types k-ok))
              (k-err (with check-types k-err))
              (k-done (with check-types k-done))
-             (stage-check stage-check))))
+             (stage-check stage-check)
+             (session-compile session-compile))))
 ;;; The end of `front-end-entries`: `make-front-end`, made of its `let*`
 ;;; again, follows it in the front end (`lib.rs`'s `front_end`).
 
 ;; A front end of its own for `stage`, whose checking leaves the
 ;; program's alone: made when a program first stages code (`stage.rs`).
 (define make-stage-check (lambda () (extract (make-front-end) stage-check)))
+;; And one for each session on a machine that runs the compilers written in
+;; FX-26 (`sessions.rs`): its compiler, whose globals are the session's; how
+;; a global is made in it for the driver to fill (the session's module); and
+;; how a name's next definition keeps its global (one every use can take).
+(define make-session-compiler
+  (lambda ()
+    (let ((fe (make-front-end)))
+      (product (compile (extract fe session-compile)) (global (extract fe compile-new-global))
+               (keep (extract fe compile-keep-global!))))))
 
 (define run-checked (extract front-end-entries run-checked))
 (define run-checked-more (extract front-end-entries run-checked-more))

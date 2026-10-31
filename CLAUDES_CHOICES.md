@@ -2996,3 +2996,18 @@ of `TODO.md` §141, working on my own.
 - **Staged code runs where the program's does**: lowered Scheme by `eval`,
   the evaluator's trees by the evaluator, so values cross nothing.
 
+
+## Sessions on the cellular machines (2026-10-31)
+
+- **The Rust checker, the FX-26 compiler**: a session keeps the checker
+  written in Rust (option 1, the user's); its facts reach a compiler written
+  in FX-26 made per session, the way `syn::rust_facts` fed it when a whole
+  program was checked in Rust. One compiler per session holds the session's
+  globals across steps, as the checker holds its types.
+- **Initializers run inside `%session-ready`**: the compiled initializer is
+  run by the primitive that readies the commit, and the `go` thunk given
+  back does nothing. Running it from `go` wants the compiled word held as a
+  procedure until then; left for later (`TODO.md` §186, 4.).
+- **`k-naming!`**: the FX-26 printer was naming types by the standard
+  environment's names (`api-type`), which the session's source cannot read
+  back; a switch turns naming off while a session's types are printed.

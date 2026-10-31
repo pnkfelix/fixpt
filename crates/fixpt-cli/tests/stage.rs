@@ -134,14 +134,15 @@ refused: `g` is broken, since `a` was redefined (a int is expected here, and thi
 /// expression's procedure called, a definition committed as the program
 /// decides; redefinitions
 /// reported, refused, assigned, shadowing a host's name, and one whose
-/// users run again, one broken; a pending one gone stale. Kept on `rs-scheme-vm`; every other machine refuses each step, as
-/// a value, for now.
+/// users run again, one broken; a pending one gone stale. Kept on every
+/// machine but the evaluator's, which refuses each step, as a value, for
+/// now.
 #[test]
 fn a_session_keeps_definitions() {
     let runs: Vec<_> = STAGING.iter().filter(|m| runs_here(m)).map(|m| (*m, std::thread::spawn(move || run(m, "session.fx")))).collect();
     for (m, t) in runs {
         let (status, out, err) = t.join().expect("ran");
-        if m == "rs-scheme-vm" {
+        if m != "fx-ast-eval" {
             assert_eq!((status, out.as_str()), (Some(0), SESSION), "{m}: {err}");
         } else {
             assert_eq!(status, Some(0), "{m}: {err}");

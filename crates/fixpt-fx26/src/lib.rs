@@ -922,6 +922,7 @@ mod terminate;
 pub mod cellular;
 pub mod debts;
 pub mod fasl;
+pub mod rust_facts;
 pub mod sessions;
 pub mod stage;
 pub mod sx;

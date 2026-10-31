@@ -435,9 +435,15 @@
   (lambda (ds i) (if (or (<= i 0) (null? ds)) ds (k-scope-from (cdr ds) (- i 1)))))
 ;; The name `define-type` gave `t`, as `k-abbrev-in` finds it, by tree `trs`
 ;; if there is one.
+;; Whether a type shown may be named: not while one is shown for a checker
+;; of another program (`k-show-ty-whole`).
+(define k-naming (ref bool @t) (new #t))
+(define k-naming! (->* (bool) unit) (lambda (on) (set k-naming on)))
 (define k-abbrev-by (->* (k-atrees int) k-strings)
   (lambda (trs t)
     (let ((all (get k-dscope)))
+      (if (not (get k-naming))
+          nil
       (if (null? trs)
           (k-abbrev-in all all 0 t)
           ;; Of those of its shape's hash, the innermost that fits, not
@@ -447,7 +453,7 @@
               (let ((best (k-atree-best (car trs) (k-shape-hash t 2) t all -1 '|()|)))
                 (if (< (car best) 0)
                     nil
-                    (the k-strings (list (symbol->string (cdr best)))))))))))
+                    (the k-strings (list (symbol->string (cdr best))))))))))))
 ;; A binding's number and name, the best found.
 (define-type k-best (pairof int symbol acyclic))
 ;; Of the entries of `tr` of hash `h`, the innermost (least binding number)

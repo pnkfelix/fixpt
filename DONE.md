@@ -4158,6 +4158,19 @@ own, and each step's Scheme given to `eval`. `(sessionof M r)` and
 so that the program, not a primitive, runs the initializer. Test:
 `stage.rs`'s `a_session_keeps_definitions` (`programs/stage/session.fx`).
 
+**Sessions on the cellular machines (2026-10-31).** The session's checker
+is still the one written in Rust; what it found of a step is given the
+compiler written in FX-26 (`rust_facts.rs`'s `FormFacts`, what
+`syn::rust_facts` made, now made of the runtime alone, and of a step's own
+expressions, `Kth::walked`). Each session has a compiler of its own
+(`make-session-compiler`, the conductor's: compile, a new global, keep
+one), so its globals persist between steps; `m` is the global
+`stage-module`. An expression is compiled and run to its procedure; a
+commit's initializers run as `%session-ready` readies it, the `go` it
+gives doing nothing. The FX-26 printer names no types when told not to
+(`k-naming!`), as a session's types are written back as its source.
+`a_session_keeps_definitions` passes on every machine but `fx-ast-eval`.
+
 **Step 2 (2026-10-30): `rs-scheme-vm` and `fx-ast-eval`.** Both check the
 code with the checker written in Rust, of the standard environment alone
 (`stage.rs`'s `checked`), the wrapper as on every machine; the Rust checker

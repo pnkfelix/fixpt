@@ -40,6 +40,11 @@ impl Kth {
         }
     }
 
+    /// Whether `e` was walked: one of the forms' given.
+    pub fn walked(&self, e: ExpId) -> bool {
+        self.of.contains_key(&e)
+    }
+
     /// Which of the expressions at its span `e` is: 0 if it was not walked.
     pub fn of(&self, e: ExpId) -> u32 {
         self.of.get(&e).copied().unwrap_or(0)
